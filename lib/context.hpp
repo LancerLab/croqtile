@@ -452,21 +452,13 @@ public:
     return cl_macros;
   }
 
-  const std::vector<std::string>& GetIncPaths() const {
-    return include_paths;
-  }
+  const std::vector<std::string>& GetIncPaths() const { return include_paths; }
 
-  std::vector<std::string>& GetIncPaths() {
-    return include_paths;
-  }
+  std::vector<std::string>& GetIncPaths() { return include_paths; }
 
-  const std::vector<std::string>& GetLibPaths() const {
-    return library_paths;
-  }
+  const std::vector<std::string>& GetLibPaths() const { return library_paths; }
 
-  std::vector<std::string>& GetLibPaths() {
-    return library_paths;
-  }
+  std::vector<std::string>& GetLibPaths() { return library_paths; }
 
   void SetShowSourceLocation(bool s) { show_source_loc = s; }
   bool ShowSourceLocation() const { return show_source_loc; }

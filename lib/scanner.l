@@ -536,6 +536,7 @@ comments    \/\*([^*]|\*+[^*/])*\*+\/
   ","        return Choreo::Parser::make_COMMA  (loc);
   ";"        return Choreo::Parser::make_SEMCOL (loc);
   ":"        return Choreo::Parser::make_COL    (loc);
+  "::"       return Choreo::Parser::make_SCOPE  (loc);
   "."        return Choreo::Parser::make_DOT    (loc);
   "#"        return Choreo::Parser::make_UBOUND (loc);
   "&"        return Choreo::Parser::make_AMP    (loc);

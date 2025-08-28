@@ -10,7 +10,7 @@ __co__ auto subspan(s32 [32, 18, 9] a) {
       foreach index {
         f = dma.copy a.subspan(2, 2, 1).at(x, p, y) => local;
         g = dma.copy b.subspan(4, 9, 3).at(p, p, x) => local;
-        h = dma.copy f.subspan(1, 2, 1).at(_,_,_) => shared;
+        h = dma.copy f.subspan(_, 2, _).at(0, 0, 0) => shared;
         i = dma.copy a.subspan(bshape, 9).at(index, p) => shared;
         j = dma.copy b.subspan(cshape).at(x, y, p) => shared;
         k = dma.copy b.chunk(cshape).at(index, p) => shared;
@@ -23,10 +23,13 @@ __co__ auto subspan(s32 [32, 18, 9] a) {
 
 // CHECK: Parameter: ::subspan::a, Type: s32 mdspan<3> [32, 18, 9]
 // CHECK: Symbol:    ::subspan::b, Type: global f32 mdspan<3> [32, 18, 9]
+// CHECK: Bounded:   ::subspan::paraby_0::anon_pb_0, Type: {int}->[1](pv)
+// CHECK: Bounded:   ::subspan::paraby_0::anon_pb_0__elem__x, Type: {int}->[1](pi:x)
 // CHECK: Bounded:   ::subspan::paraby_0::paraby_1::p, Type: {int}->[3](pv)
 // CHECK: Bounded:   ::subspan::paraby_0::paraby_1::p__elem__x, Type: {int}->[3](pi:x)
 // CHECK: Symbol:    ::subspan::paraby_0::paraby_1::bshape, Type: ituple<2>
 // CHECK: Symbol:    ::subspan::paraby_0::paraby_1::cshape, Type: ituple<3>
+// CHECK: Symbol:    ::subspan::paraby_0::paraby_1::dshape, Type: ituple<2>
 // CHECK: Bounded:   ::subspan::paraby_0::paraby_1::within_0::index, Type: {int,int}->[4, 4]
 // CHECK: Bounded:   ::subspan::paraby_0::paraby_1::within_0::x, Type: {int}->[4]
 // CHECK: Bounded:   ::subspan::paraby_0::paraby_1::within_0::y, Type: {int}->[4]

@@ -7,7 +7,7 @@ __co__ void foo(global f32 [??, 16, M] a) {
   parallel p by 1 {
     dma.copy a.chunkat(p,_,_) => local;
     dma.copy a.chunkat(_,p,_) => local;
-    dma.copy a.subspan(1, 8, 7).at(_,p,_) => local;
+    dma.copy a.subspan(1, 8, 7).at(0,p,0) => local;
     foreach i in b;
   }
   // TODO: fix normalize

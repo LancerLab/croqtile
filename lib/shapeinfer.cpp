@@ -1159,23 +1159,32 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
           // block.span = subspan
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
           auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-          if (sbe::clt(lvi, rvi)) {
+          if (STR(rvi) == "::__choreo_no_tiling__") {
+            res_vns.push_back(cur_vns[index]);
+            continue;
+          }
+          if (sbe::clt(lvi, rvi))
             Error1(op->TFSSAt(index)->LOC(),
                    "the subspan dimension (dim: " + std::to_string(index) +
                        ") is larger than original (" + STR(rvi) + " > " +
                        STR(lvi) + ").");
-          }
           res_vns.push_back(tfs_vns[index]);
         } else if (op->OpCode() == AST::SpannedOperation::MODSPAN) {
           // block.span = data.span % tiling_factor
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
           auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-          if (sbe::clt(lvi, rvi)) {
+          if (STR(rvi) == "::__choreo_no_tiling__") {
+            // special case: x.modspan(_, n).at(...)
+            // the result shape should be [x.span(0), x.span(1)%n]
+            mod_vns.push_back(cur_vns[index]);
+            res_vns.push_back(cur_vns[index]);
+            continue;
+          }
+          if (sbe::clt(lvi, rvi))
             Error1(op->TFSSAt(index)->LOC(),
                    "the subspan dimension (dim: " + std::to_string(index) +
                        ") is larger than the data (" + STR(rvi) + " > " +
                        PSTR(lvi) + ").");
-          }
           auto mod_sig = vn.Simplify(o_sn("%", cur_vns[index], tfs_vns[index]));
           mod_vns.push_back(GetOrGenValNum(mod_sig));
           res_vns.push_back(tfs_vns[index]);
@@ -1183,24 +1192,26 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
           // block.span = data.span / tiling_factor
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
           auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-          if (sbe::clt(lvi, rvi)) {
+          if (STR(rvi) == "::__choreo_no_tiling__") {
+            res_vns.push_back(cur_vns[index]);
+            continue;
+          }
+          if (sbe::clt(lvi, rvi))
             Error1(op->TFSSAt(index)->LOC(),
                    "the tiling factor (dim: " + std::to_string(index) +
                        ") is larger than the data dimension (" + STR(rvi) +
                        " > " + PSTR(lvi) + ").");
-          }
           auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], tfs_vns[index]));
           res_vns.push_back(GetOrGenValNum(res_sig));
         } else if (op->OpCode() == AST::SpannedOperation::TILING) {
           // block.span = data.span / #pos
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
           auto rvi = vn.GenValueItemFromValueNumber(pos_vns[index]);
-          if (sbe::clt(lvi, rvi)) {
+          if (sbe::clt(lvi, rvi))
             Error1(op->LOC(),
                    "the tiling factor (dim: " + std::to_string(index) +
                        ") is larger than the data dimension (" + STR(rvi) +
                        " > " + STR(lvi) + ").");
-          }
           auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], pos_vns[index]));
           res_vns.push_back(GetOrGenValNum(res_sig));
         } else

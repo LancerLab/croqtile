@@ -1,0 +1,66 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
+
+#include <iostream>
+
+__device__ extern "C" void addone(choreo::s32* data, int num) {
+  for (int i = 0; i < num; ++i) { data[i] += 1; }
+}
+
+// clang-format off
+__co__ auto modspan2d(s32 [M, N] input, int MT) {
+  global s32 [M, N] output{0};
+
+  if (M > MT) {
+    parallel p by 1 {
+      with x in [M / MT] foreach x(:1:) {
+        if (((x + 1) * MT > M) && (x * MT < M)) {
+          l1data = dma.copy input.modspan(MT, _).at(x, 0) => local;
+          call addone(l1data.data, |l1data.span|);
+          dma.copy l1data => output.modspan(MT, _).at(x, 0);
+        }
+      }
+    }
+  }
+
+  return output;
+}
+// clang-format on
+
+int main() {
+  size_t M = 200;
+  size_t N = 32;
+  size_t MT = 64;
+  auto input = choreo::make_spandata<choreo::s32, 2>({M, N});
+  input.fill(0);
+  auto res = modspan2d(input.view(), MT);
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      if (m < 192) {
+        choreo::choreo_assert(res[m][n] == 0,
+                              ("output[" + std::to_string(m) + "][" +
+                               std::to_string(n) + "] is not zero")
+                                  .c_str());
+      } else {
+        choreo::choreo_assert(res[m][n] == 1,
+                              ("output[" + std::to_string(m) + "][" +
+                               std::to_string(n) + "] is not one")
+                                  .c_str());
+      }
+    }
+  }
+  std::cout << "Test pass" << std::endl;
+
+  return 0;
+}
+
+// CHECK: tops::mdspan __mds2_input(tops::Global, (int*)input, M, N);
+// CHECK: tops::mdspan __mds3_l1data__buf__(tops::Private, (int*)l1data__buf__, (M % MT), N);
+// CHECK: int __slice_offset0__input_2_l1data__buf__[] = {(int)(__iv_x__elem__0 * MT), (int)(0 * N)};
+// CHECK: tops::slice(*l1data.get_ctx(), __mds3_l1data__buf__, __mds2_input, __slice_offset0__input_2_l1data__buf__);
+
+// CHECK: addone((__private__ int*)l1data.data(), (M % MT * N));
+
+// CHECK: tops::mdspan __mds6_l1data(tops::Private, (int*)l1data.data(), (M % MT), N);
+// CHECK: tops::mdspan __mds7_output(tops::Global, (int*)output, M, N);
+// CHECK: int __deslice_offset0__output_2_l1data[] = {(int)(__iv_x__elem__0 * MT), (int)(0 * N)};
+// CHECK: tops::deslice(*__choreo_anon_fut__0.get_ctx(), __mds7_output, __mds6_l1data, __deslice_offset0__output_2_l1data);

@@ -25,8 +25,8 @@ __co__ void pc_pattern(f32 [76, 128] lhs, f32 [76, 128] rhs, f32 [76, 128] res) 
       }
       inthreads.async (p < #p - 1) {  // consumer
         wait pe;
-        lf = dma.copy.async lhs_sbuffer.chunk(#p - 1, 1).at(p, _) => local;
-        rf = dma.copy.async rhs_sbuffer.chunk(#p - 1, 1).at(p, _) => local;
+        lf = dma.copy.async lhs_sbuffer.chunk(#p - 1, _).at(p, 0) => local;
+        rf = dma.copy.async rhs_sbuffer.chunk(#p - 1, _).at(p, 0) => local;
         wait lf, rf;
         local f32 [lf.span] out_lbuffer;
         call add_kernel(lf.data, rf.data, out_lbuffer, |lf.span|);

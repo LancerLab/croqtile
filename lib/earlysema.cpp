@@ -1664,28 +1664,28 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
 
   for (auto tsi : n.AllOperations()) {
-    if (tsi->OpCode() != AST::SpannedOperation::TILEAT) continue;
+    if (tsi->OpCode() == AST::SpannedOperation::RESHAPE) continue;
+    if (tsi->OpCode() == AST::SpannedOperation::TILING) continue;
 
-    // if notile has upper-bound rather than 1
+    // if notile has subscription rather than 0
     std::vector<size_t> notile_indices;
     size_t i = 0;
-    for (auto& v : tsi->GetIndices()) {
-      if (auto expr = cast<AST::Expr>(v); expr->IsReference())
-        if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
-          if (id->name == "__choreo_no_tiling__") {
-            notile_indices.push_back(i);
-            break;
-          }
+    for (auto& v : tsi->GetTFSSNodes()) {
+      if (auto id = AST::GetIdentifier(v))
+        if (id->name == "__choreo_no_tiling__") {
+          notile_indices.push_back(i);
+          break;
+        }
       ++i;
     }
 
-    // the upper bound of notile must be 1
+    // the position index of notile must be 0
     for (auto& i : notile_indices) {
-      auto il = GetIntLiteral(*tsi->GetTilingFactors()->ValueAt(i));
-      if ((il == nullptr) || (il->Val() != 1))
-        Error1(tsi->LOC(), "upper bound of bounded variable '_' is " +
-                               PSTR(tsi->GetTilingFactors()->ValueAt(i)) +
-                               " (1 is expected).");
+      auto il = GetIntLiteral(*tsi->PosAt(i));
+      if ((il == nullptr) || (il->Val() != 0))
+        Error1(tsi->PosAt(i)->LOC(), "subscription of '_' is " +
+                                         PSTR(tsi->PosAt(i)) +
+                                         " (0 is expected).");
     }
   }
 

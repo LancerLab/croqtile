@@ -14,7 +14,7 @@ __co__ auto foo(s32[N,8] input2) {
   parallel by 1 {
     foreach idx in [N] {
       i1 = dma.copy input2.chunkat(idx, _) => local;
-      dma.copy i1.data => t.subspan(1, 8).at(idx, _);
+      dma.copy i1.data => t.subspan(1, 8).at(idx, 0);
     }
   }
 
@@ -83,7 +83,7 @@ __co__ auto ccc_sss(s32[4, 8, 16] input) {
   parallel p by 4 {
     foreach {x, y} in [8, 2] {
       i1 = dma.copy input.chunkat(p, _, _).chunkat(_, x, _).chunkat(_, _, y) => local;
-      dma.copy i1.data => t.subspan(1, 8, 16).at(p, _, _).subspan(1, 1, 16).at(_, x, _).subspan(1, 1, 8).at(_, _, y);
+      dma.copy i1.data => t.subspan(1, _, _).at(p, 0, 0).subspan(1, 1, _).at(0, x, 0).subspan(1, 1, 8).at(0, 0, y);
     }
   }
 
@@ -94,7 +94,7 @@ __co__ auto ccc_sss(s32[4, 8, 16] input) {
 // CODEGEN-OPT: tops::mdspan __mds13_i1__buf__(tops::Private, (int*)i1__buf__, 1, 1, 8);
 // CODEGEN-OPT: tops::memcpy(*i1.get_ctx(), __mds13_i1__buf__, __mds12_input);
 // CODEGEN-OPT: tops::mdspan __mds14_i1(tops::Private, (int*)i1.data(), 1, 1, 8);
-// CODEGEN-OPT: tops::mdspan __mds15_t(tops::Global, (int*)t + (0 * 16 + (0 * 16 + (0 * 16 + (0 * 128 + (0 * 16 + (0 * 128 + __tops_tid_x() * 128)) + __iv_x * 16))) + __iv_y * 8), 1, 1, 8);
+// CODEGEN-OPT: tops::mdspan __mds15_t(tops::Global, (int*)t + (__tops_tid_x() * 128 + __iv_x * 16 + __iv_y * 8), 1, 1, 8);
 // CODEGEN-OPT: tops::memcpy(*__choreo_anon_fut__4.get_ctx(), __mds15_t, __mds14_i1);
 
 // CODEGEN:     tops::mdspan __mds12_input(tops::Global, (int*)input, 4, 8, 16);
@@ -103,7 +103,7 @@ __co__ auto ccc_sss(s32[4, 8, 16] input) {
 // CODEGEN:     tops::slice(*i1.get_ctx(), __mds13_i1__buf__, __mds12_input, __slice_offset2__input_2_i1__buf__);
 // CODEGEN:     tops::mdspan __mds14_i1(tops::Private, (int*)i1.data(), 1, 1, 8);
 // CODEGEN:     tops::mdspan __mds15_t(tops::Global, (int*)t, 4, 8, 16);
-// CODEGEN:     int __deslice_offset2__t_2_i1[] = {(int)(__tops_tid_x() * 1) + 0 + 0, 0 + (int)(__iv_x * 1) + 0, 0 + 0 + (int)(__iv_y * 8)};
+// CODEGEN:     int __deslice_offset2__t_2_i1[] = {(int)(__tops_tid_x() * 1) + (int)(0 * 1) + (int)(0 * 1), (int)(0 * 8) + (int)(__iv_x * 1) + (int)(0 * 1), (int)(0 * 16) + (int)(0 * 16) + (int)(__iv_y * 8)};
 // CODEGEN:     tops::deslice(*__choreo_anon_fut__4.get_ctx(), __mds15_t, __mds14_i1, __deslice_offset2__t_2_i1);
 
 __co__ auto rcrs_rsrc(s32[4*8*16] input) {
@@ -113,7 +113,7 @@ __co__ auto rcrs_rsrc(s32[4*8*16] input) {
     si = dma.copy input => shared;
     foreach {z, x, y} in [4, 4, 2] {
       dma.copy si.data.span_as(4, 8, 16).chunkat(z, _, _).span_as(4, 32).subspan(1, 16).at(x, y) =>
-        t.span_as(4, 8, 16).subspan(1, 8, 16).at(z, _, _).span_as(4, 32).chunkat(x, y);
+        t.span_as(4, 8, 16).subspan(1, _, _).at(z, 0, 0).span_as(4, 32).chunkat(x, y);
     }
   }
 
@@ -121,11 +121,11 @@ __co__ auto rcrs_rsrc(s32[4*8*16] input) {
 }
 
 // CODEGEN-OPT: tops::mdspan __mds18_si(tops::Shared, (int*)si.data() + (__iv_y * 16 + (__iv_x * 32 + (0 * 16 + (0 * 128 + __iv_z * 128)))), 1, 16);
-// CODEGEN-OPT: tops::mdspan __mds19_t(tops::Global, (int*)t + (__iv_y * 16 + (__iv_x * 32 + (0 * 16 + (0 * 128 + __iv_z * 128)))), 1, 16);
+// CODEGEN-OPT: tops::mdspan __mds19_t(tops::Global, (int*)t + (__iv_y * 16 + (__iv_x * 32 + __iv_z * 128)), 1, 16);
 // CODEGEN-OPT: tops::memcpy(*__choreo_anon_fut__5.get_ctx(), __mds19_t, __mds18_si);
 
 // CODEGEN:     tops::mdspan __mds18_si(tops::Shared, (int*)si.data() + (0 * 16 + (0 * 128 + __iv_z * 128)), 4, 32);
-// CODEGEN:     tops::mdspan __mds19_t(tops::Global, (int*)t + (0 * 16 + (0 * 128 + __iv_z * 128)), 4, 32);
+// CODEGEN:     tops::mdspan __mds19_t(tops::Global, (int*)t + (__iv_z * 128), 4, 32);
 // CODEGEN:     int __slice_offset0__si_2_t[] = {(int)(__iv_x * 1), (int)(__iv_y * 16)};
 // CODEGEN:     int __deslice_offset0__t_2_si[] = {(int)(__iv_x * 1), (int)(__iv_y * 16)};
 // CODEGEN:     unsigned int __slice_shape1__si_2_t[] = {1, 16};

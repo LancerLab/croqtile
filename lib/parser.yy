@@ -197,7 +197,7 @@ void choreo_info(const char *message) {
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK CONTINUE
 
 // non-terminals
-%nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func
+%nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func id_with_namespace
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> bool_value sync_type pass_by_ref
 %nterm <int> integer_value index_or_none const_sizeof
@@ -1956,17 +1956,21 @@ cstrings /* concatenate strings */
     | STRING { $$ = $1; }
     ;
 
+id_with_namespace
+    : id_with_namespace SCOPE IDENTIFIER { $$ = $1 + "::" + $3; }
+    | IDENTIFIER { $$ = $1; }
+
 inlcpp_stmt
     : INLCPP LPAREN cstrings RPAREN {
         $$ = AST::Make<AST::CppSourceCode>(@3, $3, AST::CppSourceCode::Inline);
       }
 
 call_stmt
-    : CALL IDENTIFIER LPAREN device_passables RPAREN {
+    : CALL id_with_namespace LPAREN device_passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $4);
       }
-    | CALL IDENTIFIER template_params LPAREN device_passables RPAREN {
+    | CALL id_with_namespace template_params LPAREN device_passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $5, $3);
       }
@@ -2031,14 +2035,24 @@ inline ptr<AST::SpannedOperation> OptSpannedOperation(const ptr<AST::SpannedOper
   if (tsi == nullptr) return nullptr;
 
   bool not_tiled = true;
-  for (auto pos : tsi->GetIndices()) {
-    if (auto bpv = AST::GetIdentifier(*pos))
-      if (bpv->name == "_") {
-        bpv->name = "__choreo_no_tiling__";
-        continue;
-      }
 
-    not_tiled = false;
+  auto no_tiling_norm = [&](ptr<AST::MultiValues> mv) -> void {
+    for (auto v : mv->AllValues()) {
+      if (auto id = AST::GetIdentifier(*v))
+        if (id->name == "_") {
+          id->name = "__choreo_no_tiling__";
+          continue;
+        }
+      not_tiled = false;
+    }
+  };
+
+  switch (tsi->OpCode()) {
+  case AST::SpannedOperation::Kind::TILING: no_tiling_norm(tsi->Positions()); break;
+  case AST::SpannedOperation::Kind::TILEAT: [[fallthrough]];
+  case AST::SpannedOperation::Kind::SUBSPAN: [[fallthrough]];
+  case AST::SpannedOperation::Kind::MODSPAN: no_tiling_norm(tsi->TFSS()); break;
+  default: choreo_unreachable("Unexpect SpannedOperation Kind");
   }
 
   if (not_tiled) return nullptr;

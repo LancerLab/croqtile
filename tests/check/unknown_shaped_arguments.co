@@ -11,11 +11,11 @@ __co__ void fill_default_emb_vec_direct(u32[LEN] missing_index, global f32[??, E
       local f32[1, EMB_VEC_SIZE] local_emb_vec;
       local u32[1] index;
       dma.copy missing_index.subspan(1).at(p#idx) => index;
-      dma.copy output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _) => local_emb_vec;
+      dma.copy output_emb_vec.subspan(1, _).at(index.at(0), 0) => local_emb_vec;
       foreach {j} in [EMB_VEC_SIZE] {
         local_emb_vec.at(0, j) = 0.5f;
       }
-      dma.copy local_emb_vec => output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _);
+      dma.copy local_emb_vec => output_emb_vec.subspan(1, _).at(index.at(0), 0);
     }
   }
 }

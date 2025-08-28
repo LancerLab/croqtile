@@ -11,8 +11,6 @@
 // EmbeddingCacheReplaceChoreo_kernel: main choreo operator, two-level parallel simulates block/thread division
 // Supports block transfer, batch processing, parallel search and replacement, all data transfer uses dma+subspan/at
 
-using namespace flashtensor::embedding_cache_util;
-
 #define PART_SIZE 1024
 #define WARP_SIZE 32
 #define SET_ASSOCIATIVITY 2
@@ -49,8 +47,8 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
         k_len = k_end - k_start;
 
         // Block transfer key/counter to local buffer
-        dma.copy.async keys.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_key.subspan(k_len, set_associativity, warp_size);
-        dma.copy.async slot_counter.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_counter.subspan(k_len, set_associativity, warp_size);
+        dma.copy keys.subspan(k_total_len0, _,_).at(threadIdx, 0,0).subspan(k_len0, _,_).at(k_loop_idx, 0,0).subspan(k_len, _,_) => buffer_key.subspan(k_len, _,_);
+        dma.copy slot_counter.subspan(k_total_len0, _,_).at(threadIdx, 0,0).subspan(k_len0, _,_).at(k_loop_idx, 0,0).subspan(k_len, _,_) => buffer_counter.subspan(k_len, _,_);
 
         m_loop_num = cdiv(len, TILE_SIZE);
         m_len0 = cdiv(len, m_loop_num);
@@ -64,7 +62,7 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
           dma.copy d_keys.subspan(m_len0).at(m_loop_idx).subspan(m_len) => buffer_query.subspan(m_len);
 
           // Hash bucket, get src_set for each query
-          call MurmurHash3_32(buffer_query, buffer_src_set, capacity_in_set, m_len);
+          call flashtensor::embedding_cache_util::MurmurHash3_32(buffer_query, buffer_src_set, capacity_in_set, m_len);
 
 
           // Traverse all queries in this batch, search/replace/write back
@@ -81,7 +79,7 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
             mutable src_slot = 0;
             // Search for key or empty slot in set
             foreach {cnt} in [set_associativity] {
-              src_slot = call index<s64, WARP_SIZE>(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, _), query);
+              src_slot = call flashtensor::embedding_cache_util::index<s64, WARP_SIZE>(buffer_key.subspan(1,1,_).at(set_offset, src_slab, 0), query);
               if (src_slot >= 0) {
                 flag_need_replace = 0;
                 break;
@@ -89,30 +87,30 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
               key_a = buffer_key.at(set_offset, src_slab, warp_size-1);
               // Check empty slot
               if (key_a == 0x7FFFFFFFFFFFFFFF) {
-                src_slot = call index<s64, WARP_SIZE>(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, _), 0x7FFFFFFFFFFFFFFF);
+                src_slot = call flashtensor::embedding_cache_util::index<s64, WARP_SIZE>(buffer_key.subspan(1,1,_).at(set_offset, src_slab, 0), 0x7FFFFFFFFFFFFFFF);
                 break;
               }
               src_slab = (src_slab + 1) % set_associativity;
             }
             // If none, find LRU slot
             if (src_slot == -1) {
-              s32 idx = call argmin<u64, SET_ASSOCIATIVITY * WARP_SIZE>(buffer_counter.subspan(1,set_associativity,warp_size).at(set_offset, _, _), warp_size, src_slab);
+              s32 idx = call flashtensor::embedding_cache_util::argmin<u64, SET_ASSOCIATIVITY * WARP_SIZE>(buffer_counter.subspan(1,_,_).at(set_offset,0,0), warp_size, src_slab);
               src_slab = idx / warp_size;
               src_slot = idx % warp_size;
             }
             // Replace key/value/counter
             if (flag_need_replace == 1) {
               buffer_key.at(set_offset, src_slab, src_slot) = query;
-              dma.copy d_values.subspan(1, embedding_vec_size).at(m_loop_idx * m_len0 + query_idx, _).span_as(1, 1, 1, embedding_vec_size)
-                => vals.subspan(1, 1, 1, embedding_vec_size).at(src_set, src_slab, src_slot, _);
+              dma.copy d_values.subspan(1, _).at(m_loop_idx * m_len0 + query_idx, 0).span_as(1, 1, 1, embedding_vec_size)
+                => vals.subspan(1, 1, 1, embedding_vec_size).at(src_set, src_slab, src_slot, 0);
             }
             buffer_counter.at(set_offset, src_slab, src_slot) = global_counter;
           }
         }
         // Block write back global key/counter
 
-        dma.copy buffer_key.subspan(k_len, set_associativity, warp_size) => keys.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size);
-        dma.copy buffer_counter.subspan(k_len, set_associativity, warp_size) => slot_counter.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size);
+        dma.copy buffer_key.subspan(k_len, _,_) => keys.subspan(k_total_len0, _,_).at(threadIdx, 0,0).subspan(k_len0, _,_).at(k_loop_idx, 0,0).subspan(k_len, _,_);
+        dma.copy buffer_counter.subspan(k_len, _,_) => slot_counter.subspan(k_total_len0, _,_).at(threadIdx, 0,0).subspan(k_len0, _,_).at(k_loop_idx, 0,0).subspan(k_len, _,_);
       }
     }
   }

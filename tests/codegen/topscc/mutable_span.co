@@ -3,7 +3,7 @@
 __co__ void foo(int M, f32 [3, 2, 12] data) {
   parallel p by 2 {
     local f32 [3, 2, 1] buffer;
-    dma.copy data.subspan(M, 2, 1).at(p,_,_) => buffer;
+    dma.copy data.subspan(M, 2, 1).at(p,0,0) => buffer;
   }
 }
 

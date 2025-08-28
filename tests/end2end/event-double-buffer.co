@@ -38,7 +38,7 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
 
         inthreads.async (q < #q - 1) {
           wait ep[c_idx][q];
-          f = dma.copy l2_input[c_idx].chunk(#q - 1, 1).at(q, _) => local;
+          f = dma.copy l2_input[c_idx].chunk(#q - 1, _).at(q, 0) => local;
           call relu_kernel(f.data, l1_out, f.span(0), f.span(1));
           dma.copy l1_out => output.chunk(#q - 1, #n_tile).at(q, n_tile);
           trigger ef[c_idx][q];
