@@ -255,66 +255,85 @@ public:
       if (n.operation == ".pad" && IsLinearCopy()) {
         RankLE5("dma.pad");
         auto pc = cast<PadConfig>(n.config);
-        assert(f_rank == pc->pad_low.size());
+        assert(f_rank == pc->pad_low->Count());
 
-        for (auto v : pc->pad_low)
-          if (v > (1 << 11))
-            Error1(n.LOC(), "On GCU300, the value of padding_low in "
-                            "dma.pad must be in range [0, 2^11].");
-
-        for (auto v : pc->pad_high)
-          if (v > (1 << 11))
-            Error1(n.LOC(),
-                   "On " + cur_arch +
-                       ", the value of padding_high in dma.pad must be "
-                       "in range [0, 2^11].");
+        for (const auto& mv : {pc->pad_low, pc->pad_high}) {
+          for (auto v : mv->AllValues()) {
+            auto e = cast<AST::Expr>(v);
+            if (!e->Opts().HasVal()) continue;
+            auto val = e->Opts().GetVal();
+            if (VIIsInt(val)) {
+              if (sbe::clt(val, sbe::nu(0)) || sbe::cgt(val, sbe::nu(1 << 11)))
+                Error1(e->LOC(), "On GCU300, the config in "
+                                 "dma.pad must be in range [0, 2^11].");
+            } else {
+              auto msg = "On GCU300, the config in "
+                         "dma.pad must be in range [0, 2^11]";
+              auto asrt = sbe::cmp(">=", val, sbe::nu(0));
+              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+              asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
+              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+            }
+          }
+        }
         // padding_mid
         for (size_t idx = 0; idx < f_rank; ++idx) {
-          size_t v = pc->pad_mid[idx];
-          if (idx == f_rank - 1 && v != 0)
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", the value of padding_mid[rank-1] in dma.pad "
-                                "must be 0 (mid padding of dim[rank-1] is not "
-                                "supported by "
-                                "the hardware).");
-          else if (v > (1 << 10))
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", the value of padding_mid in "
-                                "dma.pad must be in range [0, 2^10].");
+          auto e = cast<AST::Expr>(pc->pad_mid->ValueAt(idx));
+          if (!e->Opts().HasVal()) continue;
+          auto val = e->Opts().GetVal();
+          if (VIIsInt(val)) {
+            if (idx == f_rank - 1 && sbe::cne(val, sbe::nu(0)))
+              Error1(e->LOC(),
+                     "On " + cur_arch +
+                         ", the value of padding_mid[rank-1] in dma.pad must "
+                         "be 0 (mid padding of dim[rank-1] is not supported by "
+                         "the hardware).");
+            else if (sbe::cgt(val, sbe::nu(1 << 10)))
+              Error1(e->LOC(), "On " + cur_arch +
+                                   ", the value of padding_mid in dma.pad must "
+                                   "be in range [0, 2^10].");
+          } else {
+            if (idx == f_rank - 1) {
+              auto asrt = sbe::cmp("==", val, sbe::nu(0));
+              FCtx(cur_fname).InsertAssertion(
+                  asrt, e->LOC(),
+                  "On " + cur_arch +
+                      ", the value of padding_mid[rank-1] in dma.pad must be 0 "
+                      "(mid padding of dim[rank-1] is not supported by the "
+                      "hardware)");
+            } else {
+              auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
+              FCtx(cur_fname).InsertAssertion(
+                  asrt, e->LOC(),
+                  "On " + cur_arch +
+                      ", the value of padding_mid in dma.pad must be in range "
+                      "[0, 2^10]");
+            }
+          }
         }
         if (f_rank == 5) {
-          if (pc->pad_low[0] != 0)
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", dma.pad does not support 5-dimensional "
-                                "array (if dim is 5, pad_low[0] must be 0).");
-          if (pc->pad_high[0] != 0)
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", dma.pad does not support 5-dimensional "
-                                "array (if dim is 5, pad_high[0] must be 0).");
-          if (pc->pad_mid[0] != 0)
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", dma.pad does not support 5-dimensional "
-                                "array (if dim is 5, pad_mid[0] must be 0).");
+          for (const auto& mv : {pc->pad_low, pc->pad_high, pc->pad_mid}) {
+            auto v = mv->ValueAt(0);
+            auto e = cast<AST::Expr>(v);
+            if (!e->Opts().HasVal()) continue;
+            auto val = e->Opts().GetVal();
+            if (VIIsInt(val)) {
+              if (sbe::cne(val, sbe::nu(0)))
+                Error1(e->LOC(),
+                       "On " + cur_arch +
+                           ", dma.pad does not support 5-dimensional "
+                           "array (if dim is 5, pad_config[0] must be 0).");
+            } else {
+              auto asrt = sbe::cmp("==", val, sbe::nu(0));
+              FCtx(cur_fname).InsertAssertion(
+                  asrt, e->LOC(),
+                  "On " + cur_arch +
+                      ", dma.pad does not support 5-dimensional array (if dim "
+                      "is 5, pad_config[0] must be 0)");
+            }
+          }
         }
-
-        if (std::holds_alternative<int>(pc->value)) {
-          if (!IsIntegerBaseType(f_sty->e_type))
-            Error1(n.from->LOC(),
-                   "On " + cur_arch +
-                       ", data type of pad value is "
-                       "incompatible with that of data in dma: int" +
-                       " vs. " + STR(f_sty->e_type) + ".");
-        } else if (std::holds_alternative<float>(pc->value)) {
-          if (!IsFloatPointBaseType(f_sty->e_type))
-            Error1(n.from->LOC(),
-                   "On " + cur_arch +
-                       ", data type of pad value is "
-                       "incompatible with that of data in dma: float" +
-                       " vs. " + STR(f_sty->e_type) + ".");
-        } else
-          choreo_unreachable("unexpected pad value type in dma.pad");
       }
-
       // slice
       if (n.operation == ".copy" && IsSlice()) {
         RankLE5("dma.copy(slice)");
@@ -473,71 +492,88 @@ public:
 
         // shape of n.to is the same as n.from's
         // so the check of n.to is omitted
-
         auto pc = cast<PadConfig>(n.config);
-        assert(f_rank == pc->pad_low.size());
+        assert(f_rank == pc->pad_low->Count());
 
-        for (auto v : pc->pad_low)
-          if (v > (1 << 11))
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", the value of padding_low in "
-                                "dma.pad must be in range [0, 2^11].");
-
-        for (auto v : pc->pad_high)
-          if (v > (1 << 11))
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", the value of padding_high in "
-                                "dma.pad must be in range [0, 2^11].");
+        for (const auto& mv : {pc->pad_low, pc->pad_high}) {
+          for (auto v : mv->AllValues()) {
+            auto e = cast<AST::Expr>(v);
+            if (!e->Opts().HasVal()) continue;
+            auto val = e->Opts().GetVal();
+            if (VIIsInt(val)) {
+              if (sbe::clt(val, sbe::nu(0)) || sbe::cgt(val, sbe::nu(1 << 11)))
+                Error1(
+                    e->LOC(),
+                    "On " + cur_arch +
+                        ", the config in dma.pad must be in range [0, 2^11].");
+            } else {
+              auto msg = "On " + cur_arch +
+                         ", the config in dma.pad must be in range [0, 2^11]";
+              auto asrt = sbe::cmp(">=", val, sbe::nu(0));
+              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+              asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
+              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+            }
+          }
+        }
 
         // padding_mid
         for (size_t idx = 0; idx < f_rank; ++idx) {
-          size_t v = pc->pad_mid[idx];
-          if (idx == f_rank - 1) {
-            if (v != 0)
-              Error1(n.LOC(),
+          auto e = cast<AST::Expr>(pc->pad_mid->ValueAt(idx));
+          if (!e->Opts().HasVal()) continue;
+          auto val = e->Opts().GetVal();
+          if (VIIsInt(val)) {
+            if (idx == f_rank - 1 && sbe::cne(val, sbe::nu(0)))
+              Error1(e->LOC(),
                      "On " + cur_arch +
-                         ", the value of padding_mid[rank-1] in dma.pad "
-                         "must be 0 (mid padding of dim[rank-1] is not "
-                         "supported by "
+                         ", the value of padding_mid[rank-1] in dma.pad must "
+                         "be 0 (mid padding of dim[rank-1] is not supported by "
                          "the hardware).");
-          } else if (v > (1 << 10)) {
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", the value of padding_mid in "
-                                "dma.pad must be in range [0, 2^10].");
+            else if (sbe::cgt(val, sbe::nu(1 << 10)))
+              Error1(e->LOC(), "On " + cur_arch +
+                                   ", the value of padding_mid in dma.pad must "
+                                   "be in range [0, 2^10].");
+          } else {
+            if (idx == f_rank - 1) {
+              auto asrt = sbe::cmp("==", val, sbe::nu(0));
+              FCtx(cur_fname).InsertAssertion(
+                  asrt, e->LOC(),
+                  "On " + cur_arch +
+                      ", the value of padding_mid[rank-1] in dma.pad must be 0 "
+                      "(mid padding of dim[rank-1] is not supported by the "
+                      "hardware)");
+            } else {
+              auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
+              FCtx(cur_fname).InsertAssertion(
+                  asrt, e->LOC(),
+                  "On " + cur_arch +
+                      ", the value of padding_mid in dma.pad must be in range "
+                      "[0, 2^10]");
+            }
           }
         }
         if (f_rank == 5) {
-          if (pc->pad_low[0] != 0)
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", dma.pad does not support 5-dimensional "
-                                "array (if dim is 5, pad_low[0] must be 0).");
-          if (pc->pad_high[0] != 0)
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", dma.pad does not support 5-dimensional "
-                                "array (if dim is 5, pad_high[0] must be 0).");
-          if (pc->pad_mid[0] != 0)
-            Error1(n.LOC(), "On " + cur_arch +
-                                ", dma.pad does not support 5-dimensional "
-                                "array (if dim is 5, pad_mid[0] must be 0).");
+          for (const auto& mv : {pc->pad_low, pc->pad_high, pc->pad_mid}) {
+            auto v = mv->ValueAt(0);
+            auto e = cast<AST::Expr>(v);
+            if (!e->Opts().HasVal()) continue;
+            auto val = e->Opts().GetVal();
+            if (VIIsInt(val)) {
+              if (sbe::cne(val, sbe::nu(0)))
+                Error1(e->LOC(),
+                       "On " + cur_arch +
+                           ", dma.pad does not support 5-dimensional "
+                           "array (if dim is 5, pad_config[0] must be 0).");
+            } else {
+              auto asrt = sbe::cmp("==", val, sbe::nu(0));
+              FCtx(cur_fname).InsertAssertion(
+                  asrt, e->LOC(),
+                  "On " + cur_arch +
+                      ", dma.pad does not support 5-dimensional array (if dim "
+                      "is 5, pad_config[0] must be 0)");
+            }
+          }
         }
-
-        if (std::holds_alternative<int>(pc->value)) {
-          if (!IsIntegerBaseType(f_sty->e_type))
-            Error1(n.from->LOC(),
-                   "On " + cur_arch +
-                       ", data type of pad value is "
-                       "incompatible with that of data in dma: int" +
-                       " vs. " + STR(f_sty->e_type) + ".");
-        } else if (std::holds_alternative<float>(pc->value)) {
-          // pad value is a float point number.
-          if (!IsFloatPointBaseType(f_sty->e_type))
-            Error1(n.from->LOC(),
-                   "On " + cur_arch +
-                       ", data type of pad value is "
-                       "incompatible with that of data in span: float" +
-                       " vs. " + STR(f_sty->e_type) + ".");
-        } else
-          choreo_unreachable("unexpected pad value type in dma.pad");
       }
 
       // slice

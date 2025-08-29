@@ -1613,26 +1613,15 @@ dma_operation
     ;
 
 dma_config
-    : LT LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA integer_value GT {
+    : LT LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA simple_val GT {
         auto pc = AST::Make<PadConfig>();
-        for (auto low : $3->values)
-          pc->pad_low.push_back(cast<AST::IntLiteral>(low)->Val());
-        for (auto high : $7->values)
-          pc->pad_high.push_back(cast<AST::IntLiteral>(high)->Val());
-        for (auto mid : $11->values)
-          pc->pad_mid.push_back(cast<AST::IntLiteral>(mid)->Val());
-        pc->SetPadValue<int>($14);
-        $$ = pc;
-      }
-    | LT LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA FPVAL GT {
-        auto pc = AST::Make<PadConfig>();
-        for (auto low : $3->values)
-          pc->pad_low.push_back(cast<AST::IntLiteral>(low)->Val());
-        for (auto high : $7->values)
-          pc->pad_high.push_back(cast<AST::IntLiteral>(high)->Val());
-        for (auto mid : $11->values)
-          pc->pad_mid.push_back(cast<AST::IntLiteral>(mid)->Val());
-        pc->SetPadValue<float>($14);
+        $3->SetDelimiter(", ");
+        pc->pad_low = $3;
+        $7->SetDelimiter(", ");
+        pc->pad_high = $7;
+        $11->SetDelimiter(", ");
+        pc->pad_mid = $11;
+        pc->SetPadValue(AST::Make<AST::Expr>($14->LOC(), $14));
         $$ = pc;
       }
     | LT iv_list GT {

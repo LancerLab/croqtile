@@ -25,56 +25,28 @@ struct SliceConfig final : public DMAConfig,
   __UDT_TYPE_INFO__(DMAConfig, SliceConfig)
 };
 
+namespace AST {
+struct MultiValues;
+struct Expr;
+} // namespace AST
+
 struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
-  std::vector<size_t> pad_low;
-  std::vector<size_t> pad_high;
-  std::vector<size_t> pad_mid;
+  ptr<AST::MultiValues> pad_low;
+  ptr<AST::MultiValues> pad_high;
+  ptr<AST::MultiValues> pad_mid;
 
-  // may have different types of padding value
-  using ValueType = std::variant<int, float>;
-  ValueType value = 0;
+  // padding value
+  ptr<AST::Expr> value;
 
-  template <typename T>
-  void SetPadValue(T val) {
-    value = val;
-  }
-
-  template <typename T>
-  T GetPadValue() const {
-    assert(std::holds_alternative<T>(value));
-    return std::get<T>(value);
-  }
-
-#if 0
-#define DefineSetPadValue(type, ft)                                            \
-  void SetPadValue(type val) {                                                 \
-    value = {*(reinterpret_cast<uint32_t*>(&val)), ft};                        \
-  }
-
-  DefineSetPadValue(uint32_t, FundamentalType::U32);
-  DefineSetPadValue(int32_t, FundamentalType::S32);
-  DefineSetPadValue(uint16_t, FundamentalType::U16);
-  DefineSetPadValue(int16_t, FundamentalType::S16);
-  DefineSetPadValue(uint8_t, FundamentalType::U8);
-  DefineSetPadValue(int8_t, FundamentalType::S8);
-  DefineSetPadValue(float, FundamentalType::F32);
-
-  DefineSetPadValue(f16, FundamentalType::F16);
-  DefineSetPadValue(bf16, FundamentalType::BF16);
-#endif
+  void SetPadValue(ptr<AST::Expr> val) { value = val; }
+  ptr<AST::Expr> GetPadValue() const { return value; }
 
   const std::string Name() const override { return "pad"; }
+
   void Print(std::ostream& os) const override {
-    os << "padding: low{" << DelimitedString(pad_low) << "}, high{"
-       << DelimitedString(pad_high) << "}, mid{" << DelimitedString(pad_mid)
-       << "}, value: ";
-    if (std::holds_alternative<int>(value)) {
-      os << std::get<int>(value);
-    } else if (std::holds_alternative<float>(value)) {
-      os << std::get<float>(value);
-    } else {
-      os << "unknown type";
-    }
+    os << "padding: low{" << PSTR(pad_low) << "}, high{" << PSTR(pad_high)
+       << "}, mid{" << PSTR(pad_mid) << "}, value: ";
+    os << PSTR(value);
   }
 
   __UDT_TYPE_INFO__(DMAConfig, PadConfig)

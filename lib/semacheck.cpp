@@ -370,15 +370,29 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                           ").");
     } else {
       size_t dim_count = f_shape.DimCount();
-      auto clampLongToInt = [](long value) {
-        return static_cast<int>(std::clamp(
-            value, static_cast<long>(std::numeric_limits<int>::min()),
-            static_cast<long>(std::numeric_limits<int>::max())));
-      };
       for (size_t i = 0; i < dim_count; ++i) {
-        size_t pad_length = pc->pad_high[i] + pc->pad_low[i] + pc->pad_mid[i];
-        if (!IsValueItemEqual(f_shape.ValueAt(i) +
-                                  sbe::nu(clampLongToInt(pad_length)),
+        auto h_i = cast<AST::Expr>(pc->pad_high->ValueAt(i));
+        auto l_i = cast<AST::Expr>(pc->pad_low->ValueAt(i));
+        auto m_i = cast<AST::Expr>(pc->pad_mid->ValueAt(i));
+        if (!h_i->Opts().HasVal()) {
+          VST_DEBUG(dbgs() << "Expression: " << PSTR(pc->pad_high->ValueAt(i))
+                           << " does not have a value!\n");
+          return false;
+        }
+        if (!l_i->Opts().HasVal()) {
+          VST_DEBUG(dbgs() << "Expression: " << PSTR(pc->pad_low->ValueAt(i))
+                           << " does not have a value!\n");
+          return false;
+        }
+        if (!m_i->Opts().HasVal()) {
+          VST_DEBUG(dbgs() << "Expression: " << PSTR(pc->pad_mid->ValueAt(i))
+                           << " does not have a value!\n");
+          return false;
+        }
+
+        auto pad_length =
+            h_i->Opts().GetVal() + l_i->Opts().GetVal() + m_i->Opts().GetVal();
+        if (!IsValueItemEqual(f_shape.ValueAt(i) + pad_length,
                               t_shape.ValueAt(i))) {
           Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                               ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +

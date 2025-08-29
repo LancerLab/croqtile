@@ -229,6 +229,12 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
     return values[idx];
   }
 
+  void SetValueAt(const size_t idx, ptr<Node> v) {
+    assert(idx < this->Count() &&
+           "Out-of-bound error when querying MultiValues\n");
+    values[idx] = v;
+  }
+
   ptr<Node> operator[](const size_t idx) const { return ValueAt(idx); }
 
   const std::vector<ptr<Node>>& AllValues() const { return values; }

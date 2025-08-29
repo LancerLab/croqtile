@@ -701,6 +701,36 @@ public:
   bool Visit(AST::DMA& n) override {
     if (n.operation == ".any") return true;
 
+    if (n.operation == ".pad") {
+      auto pc = cast<PadConfig>(n.GetConfig());
+      auto span_bty = GetUnderlyingType(n.from->GetType());
+      auto pv_bty = GetUnderlyingType(pc->GetPadValue()->GetType());
+      if (span_bty != pv_bty) {
+        auto casted = GenCastExprNode(span_bty, pv_bty, pc->GetPadValue());
+        VST_DEBUG({
+          dbgs() << "Cast '" << PSTR(pc->GetPadValue()) << "' at "
+                 << pc->GetPadValue()->LOC() << "\n\t'" << STR(pv_bty)
+                 << "' => '" << STR(span_bty) << "'\n";
+        });
+        pc->SetPadValue(casted);
+      }
+      for (auto& mv : {pc->pad_high, pc->pad_low, pc->pad_mid}) {
+        int idx = 0;
+        for (auto& v : mv->AllValues()) {
+          auto pv_bty = GetUnderlyingType(v->GetType());
+          if (pv_bty != BaseType::U32 && !AST::IsLiteral(*AST::Ref(v))) {
+            auto casted = GenCastExprNode(BaseType::U32, pv_bty, v);
+            VST_DEBUG({
+              dbgs() << "Cast '" << PSTR(v) << "' at " << v->LOC() << "\n\t'"
+                     << STR(pv_bty) << "' => '" << STR(BaseType::U32) << "'\n";
+            });
+            mv->SetValueAt(idx, casted);
+          }
+          ++idx;
+        }
+      }
+    }
+
     if (!isa<AST::Select>(n.to)) return true;
 
     auto anon_sym = SymbolTable::GetAnonName();

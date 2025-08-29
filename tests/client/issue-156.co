@@ -1,0 +1,50 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result | FileCheck %s --match-full-lines && rm -f %s.result
+// RUN: choreo -es -t topscc %s -o - | FileCheck --check-prefix=CODEGEN --match-full-lines %s
+
+#include <iostream>
+
+// clang-format off
+__co__ auto foo(s32 [M, N] input, int x, u32 y) {
+  global s32 [M+x, N+x] output{0};
+
+  parallel p by 1 {
+    dma.pad<{0, 0}, {x, x}, {0, 0}, y> input => output;
+  }
+  return output;
+}
+// clang-format on
+
+int main() {
+  size_t M = 4;
+  size_t N = 2;
+  size_t MT = 64;
+  auto input = choreo::make_spandata<choreo::s32, 2>({M, N});
+  input.fill(0);
+  int x = 3;
+  unsigned int y = 4;
+  auto res = foo(input.view(), x, y);
+  for (int i=0; i<M+x; i++) {
+    for (int j=0; j<N+x; j++) {
+      std::cout << res[i][j] << " ";
+    }
+    std::cout << "\n";
+  }
+  
+  return 0;
+}
+
+// CHECK: 0 0 4 4 4 
+// CHECK: 0 0 4 4 4 
+// CHECK: 0 0 4 4 4 
+// CHECK: 0 0 4 4 4 
+// CHECK: 4 4 4 4 4 
+// CHECK: 4 4 4 4 4 
+// CHECK: 4 4 4 4 4
+
+// CODEGEN:   tops::mdspan __mds0_input(tops::Global, (int*)input, M, N);
+// CODEGEN:   tops::mdspan __mds1_output(tops::Global, (int*)output, (M + x), (N + x));
+// CODEGEN:   unsigned int __pad_low_input[] = {0, 0};
+// CODEGEN:   unsigned int __pad_high_input[] = {static_cast<unsigned int>(x), static_cast<unsigned int>(x)};
+// CODEGEN:   unsigned int __pad_mid_input[] = {0, 0};
+// CODEGEN:   tops::pad(*__choreo_anon_fut__0.get_ctx(), __mds1_output, __mds0_input, __pad_low_input, __pad_high_input, __pad_mid_input, static_cast<int>(y));

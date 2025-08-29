@@ -349,7 +349,8 @@ bool ShapeInference::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
 
   if (cannot_proceed) return true;
-  cur_vn.Invalidate();
+  if (HasValNo(*n.GetR()))
+    ast_vn.Update(&n, GetValNo(*n.GetR()), VNKind::VNK_VALUE);
   return true;
 }
 
@@ -1013,15 +1014,19 @@ bool ShapeInference::Visit(AST::DMA& n) {
          "unexpected current value number for shape inference of dma.");
 
   if (auto pcfg = dyn_cast<PadConfig>(n.config)) {
-    size_t size = pcfg->pad_high.size();
-    std::vector<size_t> all_pads(size);
-    std::fill_n(all_pads.begin(), size, 0);
-    for (size_t i = 0; i < size; ++i)
-      all_pads[i] += pcfg->pad_high[i] + pcfg->pad_low[i] + pcfg->pad_mid[i];
-    // now generate signature for original signature plus padding values
+    size_t size = pcfg->pad_high->Count();
+
     auto mss = m_sn();
-    for (size_t i = 0; i < size; ++i)
-      mss->Append(GetOrGenValNum(c_sn((int64_t)all_pads[i])));
+    for (size_t i = 0; i < size; ++i) {
+      auto h_l_sig =
+          vn.Simplify(o_sn("+", GetValNo(*pcfg->pad_high->ValueAt(i)),
+                           GetValNo(*pcfg->pad_low->ValueAt(i))));
+      auto h_l = GetOrGenValNum(h_l_sig);
+      auto h_l_m_sig =
+          vn.Simplify(o_sn("+", h_l, GetValNo(*pcfg->pad_mid->ValueAt(i))));
+      // now generate signature for original signature plus padding values
+      mss->Append(GetOrGenValNum(h_l_m_sig));
+    }
     // update the cur_vn
     cur_vn =
         GetOrGenValNum(vn.Simplify(o_sn("+", cur_vn, GetOrGenValNum(mss))));

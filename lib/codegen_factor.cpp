@@ -847,15 +847,9 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   if (auto pcfg = dyn_cast<PadConfig>(d.config)) {
     std::vector<size_t> layout(sty->Dims());
     std::iota(layout.begin(), layout.end(), 0); // no transpose
-    fs << ", {" << DelimitedString(layout) << "}, {"
-       << DelimitedString(pcfg->pad_low) << "}, {"
-       << DelimitedString(pcfg->pad_high) << "}, {"
-       << DelimitedString(pcfg->pad_mid) << "}, ";
-    if (std::holds_alternative<int>(pcfg->value))
-      fs << pcfg->GetPadValue<int>();
-    else
-      choreo_unreachable(
-          "Factor backend only support integer as pad value type for now.");
+    fs << ", {" << DelimitedString(layout) << "}, {" << PSTR(pcfg->pad_low)
+       << "}, {" << PSTR(pcfg->pad_high) << "}, {" << PSTR(pcfg->pad_mid)
+       << "}, " << ExprSTR(pcfg->GetPadValue());
     // TODO: support more pad value types.
   } else if (auto tcfg = dyn_cast<TransposeConfig>(d.config)) {
     auto& layout = tcfg->dim_values;

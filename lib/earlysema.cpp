@@ -1613,16 +1613,25 @@ bool EarlySemantics::Visit(AST::DMA& n) {
       Error1(n.LOC(), "The DMA PAD config is incorrect. The correct form: "
                       "dma.pad(.async)<{pad_highs}, {pad_lows}, {pad_mids}, "
                       "padding value>.");
-    } else if (!((pcfg->pad_high.size() == pcfg->pad_low.size()) &&
-                 (pcfg->pad_low.size() == pcfg->pad_mid.size()))) {
+    } else if (!((pcfg->pad_high->Count() == pcfg->pad_low->Count()) &&
+                 (pcfg->pad_low->Count() == pcfg->pad_mid->Count()))) {
       Error1(n.LOC(),
              "The DMA statement contains a rank mismatch: the paddings have "
              "inconsistent ranks.");
-    } else if (NodeType(*n.from)->Dims() != pcfg->pad_high.size()) {
+    } else if (NodeType(*n.from)->Dims() != pcfg->pad_high->Count()) {
       Error1(n.LOC(),
              "The rank of the data to transfer is inconsistent with the DMA "
              "padding settings.");
     }
+
+    if (!isa<ScalarType>(NodeType(*pcfg->GetPadValue())))
+      Error1(pcfg->GetPadValue()->LOC(),
+             "The padding value should be of scalar type.");
+    for (const auto& mv : {pcfg->pad_high, pcfg->pad_low, pcfg->pad_mid})
+      for (const auto& v : mv->AllValues())
+        if (!isa<ScalarIntegerType>(NodeType(*v)))
+          Error1(v->LOC(),
+                 "The padding config should be of scalar integer type.");
   }
 
   // dma.transp specific check

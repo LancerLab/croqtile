@@ -198,10 +198,20 @@ void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void DMA::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
+
+  if (operation == ".pad") {
+    auto pc = cast<PadConfig>(config);
+    pc->pad_high->accept(v);
+    pc->pad_low->accept(v);
+    pc->pad_mid->accept(v);
+    pc->GetPadValue()->accept(v);
+  }
+
   if (operation != ".any") {
     from->accept(v);
     to->accept(v);
   }
+
   v.Visit(*this);
   v.AfterVisit(*this);
 }

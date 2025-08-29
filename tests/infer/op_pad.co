@@ -1,7 +1,7 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
 
 __co__ auto pad_func(f32 [4, 4] input) {
-  f32 [(input.span / 2 + 2) * 2] output;
+  f32 [(input.span / 2 + 2 + 2) * 2] output;
   in_shape_c : input.span / 2;
   ot_shape_c : output.span / 2;
 
@@ -19,14 +19,14 @@ __co__ auto pad_func(f32 [4, 4] input) {
 }
 
 // CHECK: Parameter: ::pad_func::input, Type: f32 mdspan<2> [4, 4]
-// CHECK: Symbol:    ::pad_func::output, Type: global f32 mdspan<2> [8, 8]
+// CHECK: Symbol:    ::pad_func::output, Type: global f32 mdspan<2> [12, 12]
 // CHECK: Partial:   ::pad_func::in_shape_c, Type: mdspan<2> [2, 2]
-// CHECK: Partial:   ::pad_func::ot_shape_c, Type: mdspan<2> [4, 4]
+// CHECK: Partial:   ::pad_func::ot_shape_c, Type: mdspan<2> [6, 6]
 // CHECK: Bounded:   ::pad_func::paraby_0::paraby_1::p, Type: {int}->[1](pv)
 // CHECK: Bounded:   ::pad_func::paraby_0::paraby_1::within_0::tile_in_c, Type: {int,int}->[2, 2]
 // CHECK: Bounded:   ::pad_func::paraby_0::paraby_1::within_0::tile_ot_c, Type: {int,int}->[2, 2]
 // CHECK: Future:    ::pad_func::paraby_0::paraby_1::within_0::cdt_input, Type: sync=>shared f32 mdspan<2> [2, 2]
 // CHECK: Future:    ::pad_func::paraby_0::paraby_1::within_0::sdt_input, Type: sync=>local f32 mdspan<2> [4, 4]
 // CHECK: Future:    ::pad_func::paraby_0::paraby_1::within_0::sdt_out, Type: sync=>shared f32 mdspan<2> [6, 6]
-// CHECK: Future:    ::pad_func::paraby_0::paraby_1::within_0::(anon), Type: sync=>global f32 mdspan<2> [4, 4]
-// CHECK: Function:  ::pad_func, Type: f32 mdspan<2> [8, 8] (*)(f32 mdspan<2> [4, 4])
+// CHECK: Future:    ::pad_func::paraby_0::paraby_1::within_0::(anon), Type: sync=>global f32 mdspan<2> [6, 6]
+// CHECK: Function:  ::pad_func, Type: f32 mdspan<2> [12, 12] (*)(f32 mdspan<2> [4, 4])

@@ -1735,21 +1735,21 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         choreo_unreachable("unexpected situation.");
       }
     } else if (n.operation == ".pad") {
+      auto pcmvSTR = [&](ptr<AST::MultiValues> mv) -> std::string {
+        std::string res;
+        for (const auto& v : mv->AllValues()) {
+          if (!res.empty()) res += ", ";
+          res += ExprSTR(v, IsHost());
+        }
+        return res;
+      };
       auto pad_config = cast<PadConfig>(n.GetConfig());
       ds << d_indent << "unsigned int __pad_low_" << f_buf_name << "[] = {"
-         << DelimitedString(pad_config->pad_low) << "};\n";
+         << pcmvSTR(pad_config->pad_low) << "};\n";
       ds << d_indent << "unsigned int __pad_high_" << f_buf_name << "[] = {"
-         << DelimitedString(pad_config->pad_high) << "};\n";
+         << pcmvSTR(pad_config->pad_high) << "};\n";
       ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
-         << DelimitedString(pad_config->pad_mid) << "};\n";
-
-      // Make a dummy node to show location
-      std::string pad_value_str = ExprCastSTR(
-          AST::Make<AST::DMA>(n.LOC(), ""), pad_config->value,
-          GetBaseType(*f_sty),
-          (std::holds_alternative<int>(pad_config->value) ? BaseType::S32
-                                                          : BaseType::F32),
-          IsHost());
+         << pcmvSTR(pad_config->pad_mid) << "};\n";
 
       auto Pad = [&]() -> void {
         ds << d_indent;
@@ -1757,7 +1757,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
            << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
            << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
-           << ", __pad_mid_" << f_buf_name << ", " << pad_value_str << ");\n";
+           << ", __pad_mid_" << f_buf_name << ", "
+           << ExprSTR(pad_config->value, IsHost()) << ");\n";
         // set the device future
         if (!event_name.empty())
           ds << d_indent << future_name << ".set_event(" << event_name
@@ -1782,7 +1783,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
            << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
            << ", " << off_name << ", " << slice_shape_name << ", __pad_low_"
            << f_buf_name << ", __pad_high_" << f_buf_name << ", __pad_mid_"
-           << f_buf_name << ", " << pad_value_str << ");\n";
+           << f_buf_name << ", " << ExprSTR(pad_config->value, IsHost())
+           << ");\n";
         // set the device future
         if (!event_name.empty())
           ds << d_indent << future_name << ".set_event(" << event_name
@@ -3378,7 +3380,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   } else if (isa<AST::DataType>(e)) {
     return NameBaseType(e->GetType()->GetBaseType());
   } else
-    choreo_unreachable("unsupported expression op: '" + expr->GetOp() + "'.");
+    choreo_unreachable("unsupported node type: " + e->TypeNameString() + ".");
 
   return oss.str();
 }
