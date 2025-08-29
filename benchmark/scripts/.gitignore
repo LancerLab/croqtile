@@ -1,0 +1,4 @@
+# Benchmark results and logs
+*.log
+results/
+temp/
