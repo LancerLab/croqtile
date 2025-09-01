@@ -8,7 +8,7 @@ __co__ void foo() {
   __cpp__(R"(printf("time spend: %lld\n", start - end);)");
 }
 
-// CHECK: println("K: ", K);
-// CHECK: println("\"K\": ", K);
-// CHECK: println(R"(T)", T);
+// CHECK: println("K: ", 14);
+// CHECK: println("\"K\": ", 14);
+// CHECK: println(R"(T)", 14);
 // CHECK: __cpp__(R"(printf("time spend: %lld\n", start - end);)");

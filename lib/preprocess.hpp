@@ -517,7 +517,7 @@ private:
     } else if (isDirective(bline, "#define")) {
       if (cur_cond && !cur_skip) {
         std::regex defineRegex(
-            R"(#define\s+(\w+)(?:\s+([^/]*?))?(?=\s*(//|/\*|$)))");
+            R"(^\s*#define\s+(\w+)(?:\s+([^/]*?))?\s*(?://.*|/\*.*\*/)?\s*$)");
         std::smatch match;
         if (std::regex_match(bline, match, defineRegex))
           globalDefines[match[1]] = match[2].matched ? match[2].str() : "1";
@@ -803,7 +803,7 @@ private:
     } else if (isDirective(bline, "#define", false)) {
       if (cur_cond && !cur_skip) {
         std::regex defineRegex(
-            R"(#define\s+(\w+)(?:\s+([^/]*?))?(?=\s*(//|/\*|$)))");
+            R"(^\s*#define\s+(\w+)(?:\s+([^/]*?))?\s*(?://.*|/\*.*\*/)?\s*$)");
         std::smatch match;
         if (std::regex_match(bline, match, defineRegex)) {
           localDefines[match[1]] = match[2].matched ? match[2].str() : "1";
