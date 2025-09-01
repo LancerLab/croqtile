@@ -199,10 +199,12 @@ private:
 
       // raw string ends
       if (in_raw_string && paren_count > 0) {
-        if (c == ')') {
+        if (c == ')' && i + 1 < line.length() && line[i + 1] == '"') {
           paren_count--;
           if (paren_count == 0) in_raw_string = false;
           result += c;
+          result += '"';
+          i++;
           continue;
         } else {
           // append char in raw string

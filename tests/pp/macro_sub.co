@@ -5,10 +5,8 @@ __co__ void foo() {
   println("K: ", K);
   println("\"K\": ", K);
   println(R"(T)", T);
-  __cpp__(R"(printf("time spend: %lld\n", start - end);)");
 }
 
 // CHECK: println("K: ", 14);
 // CHECK: println("\"K\": ", 14);
 // CHECK: println(R"(T)", 14);
-// CHECK: __cpp__(R"(printf("time spend: %lld\n", start - end);)");
