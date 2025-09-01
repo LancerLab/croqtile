@@ -1,0 +1,2 @@
+category,workload,samples,measures,comp_delta,comp_pct,exec_delta,exec_pct,exec_std,total_delta,total_pct
+batch_norm,10_dynamic_16x512xHxW_512_512_16x512xHxW,3,9,15,.5,-1160445,0,3411425,-1160430,0
