@@ -1237,7 +1237,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
 
   Shape block_shape;
   // generate signature for multi-valnos
-  auto b_sign = m_sn(res_vns);   // signature of the sub-block
+  auto b_sign = m_sn(cur_vns);   // signature of the sub-block
   if (is_modspan) {              // remainder value as the current shape value
     auto m_sign = m_sn(mod_vns); // specific for modspan operation
     cur_vn = GetOrGenValNum(m_sign);
