@@ -163,6 +163,8 @@ bool CommandLine::Parse(int argc, char** argv) {
       CCtx().GetIncPaths().push_back(arg.substr(2));
     } else if (arg.substr(0, 2) == "-L") { // library path
       CCtx().GetLibPaths().push_back(arg.substr(2));
+    } else if (arg.substr(0, 2) == "-l") { // library path
+      CCtx().GetLibs().push_back(arg.substr(2));
     } else if (arg.substr(0, 2) == "-O") { // optimization level
       int level = arg[2] - '0';
       if (arg.size() != 3 || level > 3 || level < 0) {

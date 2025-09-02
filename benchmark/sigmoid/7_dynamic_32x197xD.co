@@ -6,7 +6,11 @@
 // TODO: make it 12
 #define NUM_THREAD 8 
 
-__co__ auto sigmoid(f32 [I, J, ?] lhs) {
+#ifdef __STATIC_SHAPE__
+#define N K
+#endif
+
+__co__ auto sigmoid(f32 [I, J, N] lhs) {
   f32 [lhs.span] out;
   parallel p by NUM_BLOCK, q by NUM_THREAD {
     foreach r in [1, 2] {
@@ -25,7 +29,10 @@ int main() {
   auto a = choreo::make_spandata<choreo::f32>(I, J, K);
   a.fill_random(-1.0, 1.0);
 
+  auto start = std::chrono::high_resolution_clock::now();
   auto res = sigmoid(a.view());
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
@@ -39,4 +46,5 @@ int main() {
       }
 
   std::cout << "Passed.\n";
+  std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
 }

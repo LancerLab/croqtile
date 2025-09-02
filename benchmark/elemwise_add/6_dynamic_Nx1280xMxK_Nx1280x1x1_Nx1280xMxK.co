@@ -7,6 +7,12 @@
 // TODO: make it 12
 #define NUM_THREAD 8 
 
+#ifdef __STATIC_SHAPE__
+#define N0 I
+#define N1 K
+#define N2 L
+#endif
+
 __co__ auto ele_add(f32 [N0, J, N1, N2] lhs, f32 [N0, J] rhs) {
   f32 [lhs.span] out;
   parallel p by NUM_BLOCK {
@@ -35,7 +41,11 @@ int main() {
   a.fill_random(-1.0, 1.0);
   b.fill_random(-1.0, 1.0);
 
+  auto start = std::chrono::high_resolution_clock::now();
   auto res = ele_add(a.view(), b.view());
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
 
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
@@ -51,4 +61,5 @@ int main() {
       }
 
   std::cout << "Passed.\n";
+  std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
 }

@@ -21,14 +21,16 @@ __co__ auto ele_add(f32 [I, J, K, L] lhs, f32 [I, J, K, L] rhs) {
   return out;
 }
 
-
 int main() {
   auto a = choreo::make_spandata<choreo::f32>(I, J, K, L);
   auto b = choreo::make_spandata<choreo::f32>(I, J, K, L);
   a.fill_random(-1.0, 1.0);
   b.fill_random(-1.0, 1.0);
 
+  auto start = std::chrono::high_resolution_clock::now();
   auto res = ele_add(a.view(), b.view());
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
@@ -44,4 +46,5 @@ int main() {
       }
 
   std::cout << "Passed.\n";
+  std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
 }
