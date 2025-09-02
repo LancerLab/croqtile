@@ -1,0 +1,123 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-DOCKER: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.result
+
+// extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
+
+#define M 128
+#define N 256
+#define K 576
+
+__cok__ {
+
+__co_device__ inline int v_dot(int *lhs, int *rhs, int elem_count) {
+  // Use TCLE leaptr for vectorized memory access (int4 = 4*4=16 bytes)
+  auto lhs_ptr = tcle::leaptr<__vector int, 1>(lhs, sizeof(__vector int));
+  auto rhs_ptr = tcle::leaptr<__vector int, 1>(rhs, sizeof(__vector int));
+
+  int vector_length = sizeof(__vector int) / sizeof(int);
+  int vector_count = elem_count / vector_length;
+
+  __vector int vresult = (__vector int)0;
+  for (int i = 0; i < vector_count; ++i) {
+    __vector int lhs_vec = lhs_ptr.load<0>();
+    __vector int rhs_vec = rhs_ptr.load<0>();
+    vresult += lhs_vec * rhs_vec;
+  }
+
+  int result = 0;
+  if (vector_count > 0)
+    for (int i = 0; i < vector_length; ++i)
+      result += vresult[i];
+
+  // Handle remaining elements
+#ifndef NO_OOB_ACCESS
+  // tolerate the oob access
+  if ((elem_count % vector_length) != 0) {
+    __vector int lhs_vec = lhs_ptr.load<0>();
+    __vector int rhs_vec = rhs_ptr.load<0>();
+    __vector int vres = lhs_vec * rhs_vec;
+    for (int i = 0; i < elem_count % vector_length; ++i)
+      result += vres[i];
+  }
+
+#else
+  int offset = vector_count * vector_length;
+  for (int i = 0; i < elem_count % vector_length; ++i)
+     result += lhs[offset + i] + rhs[offset + i];
+
+#endif
+
+  return result;
+}
+
+__co_device__ extern "C" void k_matmul(int * lhs, int * rhs, int * out, int m, int n, int k) {
+  for (int i = 0; i < m; ++i)
+    for (int j = 0; j < n; ++j) {
+      int res = 0;
+#ifndef NO_VRED
+      res = v_dot(&lhs[i*k], &rhs[j*k], k);
+#else
+      for (int z = 0; z < k; ++z)
+        res += lhs[i*k+z]*rhs[j*k+z];
+#endif
+      out[i*n + j] += res;
+   }
+}
+} /// end of kernel decl
+
+__co__ auto matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
+  s32[lhs.span(0), rhs.span(1)] output;
+
+  parallel p by 1 {
+    with index = {m_tile, k_tile, n_tile} in [32, 2, 4] {  // decl your tiled spans
+      foreach m_tile, n_tile {
+        local s32 [lhs.span(0)/#m_tile, rhs.span(1)/#n_tile] l1_out {0};
+        foreach k_tile {
+          lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+          rhs_load = dma.transp<1,0> rhs.chunkat(k_tile, n_tile) => local;
+
+          assert(lhs_load.span(0) == l1_out.span(0), "unexpected.");
+          assert(rhs_load.span(0) == l1_out.span(1), "unexpected.");
+          assert(lhs_load.span(1) == rhs_load.span(1), "unexpected.");
+
+          call k_matmul(lhs_load.data, rhs_load.data, l1_out, lhs_load.span(0), rhs_load.span(0), lhs_load.span(1));
+        }
+        dma.copy l1_out => output.chunkat(m_tile, n_tile);
+      }
+    }
+  } // can use python styling
+  return output;
+}
+
+int main() { /// host program
+  choreo::s32 a[M][K] = {0};
+  choreo::s32 b[K][N] = {0};
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {M, K});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {K, N});
+  lhs_data.fill_random(-10, 10);
+  rhs_data.fill_random(-10, 10);
+
+  auto res = matmul(lhs_data, rhs_data);
+
+  std::cout << "result: [" << res.shape()[0] << ", " << res.shape()[1] << "]" << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+      for (size_t k = 0; k < lhs_data.shape()[1]; ++k)
+        ref += a[i][k]*b[k][j];
+
+      if (ref != res[i][j]) {
+        std::cout << "i: " << i << ", j: " << j << "\n";
+        std::cout << "res: " << res[i][j] << "\n";
+        std::cout << "ref: " << ref << std::endl;
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
+      }
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

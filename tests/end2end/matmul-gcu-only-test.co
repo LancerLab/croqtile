@@ -7,7 +7,7 @@
 __cok__ { /// kernel program
 __co_device__ extern "C" void kernel(int * lhs, int * rhs, int * out) {
   int m = 4;
-  int k = 256;
+  int k = 128;
   int n = 64;
   for (int i = 0; i < m; ++i)
     for (int j = 0; j < n; ++j)
@@ -20,7 +20,7 @@ __co__ s32 [128, 256] ele_add(s32 [128, 256] lhs, s32 [256, 256] rhs) {
   s32[lhs.span(0), rhs.span(1)] output;
 
   parallel p by 1 {
-    with index = {m_tile, k_tile, n_tile} in [32, 1, 4] {  // decl your tiled spans
+    with index = {m_tile, k_tile, n_tile} in [32, 2, 4] {  // decl your tiled spans
       foreach m_tile, n_tile {
         local s32[4, 64] l1_out {0};
         foreach k_tile {
@@ -28,8 +28,8 @@ __co__ s32 [128, 256] ele_add(s32 [128, 256] lhs, s32 [256, 256] rhs) {
           rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
 
           call kernel(lhs_load.data, rhs_load.data, l1_out);
-          dma.copy l1_out => output.chunkat(m_tile, n_tile);
         }
+        dma.copy l1_out => output.chunkat(m_tile, n_tile);
       }
     }
   } // can use python styling
