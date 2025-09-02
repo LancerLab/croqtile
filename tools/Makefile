@@ -159,12 +159,39 @@ install-gcu-sim:
 	fi;
 
 #-----------------------------------------------------------#
+ACORE_PATH=9dca97c
+ACORE_NAME=topsacore_3.3.20250822-9dca97c.tar.gz
+ACORE_URL=http://artifact.enflame.cn/artifactory/module_package/acore/
+ACORE_PKG=$(TOOLCHAIN_DIR)/$(ACORE_NAME)
+ACORE_PKG_MD5=06b0bb09ae0670ba8caf99f146a9b00c
+CUR_ACORE_PKG_MD5:=$(shell md5sum $(ACORE_PKG) 2>/dev/null| cut -d ' ' -f 1)
+
+check-acore:
+	@if [ "$(ACORE_PKG_MD5)" != "$(CUR_ACORE_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the acore package..."; \
+		$(MAKE) download-acore; \
+	else \
+		echo "$(ACORE_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-acore:
+	wget -P $(TOOLCHAIN_DIR) $(ACORE_URL)/$(ACORE_PATH)/$(ACORE_NAME)
+
+install-acore:
+	tar -zvxf $(TOOLCHAIN_DIR)/$(ACORE_NAME) $(TOOLCHAIN_DIR)/
+
+setup-acore: check-acore
+	@if [ "$(CUR_ACORE_PKG_MD5)" != "$(ACORE_PKG_MD5)"  ]; then \
+	    $(MAKE) install-acore; \
+	fi
+
 
 gcu2-kmd: check-gcu-platform-kit
 	sudo $(GCU_PLATFORM_PKG) -y -C enflame
 
+# --force-asic is applied for some specific environment
 gcu3-kmd: check-gcu3-platform-kit
-	sudo $(GCU3_PLATFORM_PKG) -y -C enflame
+	sudo $(GCU3_PLATFORM_PKG) -y -C enflame --force-asic
 
 gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit setup-gcu-factor-kit
 gcu3-kit: setup-gcu3-platform-kit setup-gcu3-factor-kit

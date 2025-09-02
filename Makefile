@@ -342,6 +342,9 @@ gcu2-kmd:
 gcu3-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
 
+setup-gcu-acore:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore
+
 CLN_MD5=fb9dc1a6552dda517ce32d35a6af9105
 CLN_PACKAGE_NAME=cln-1.3.7.tar.bz2
 GINAC_MD5=857fb04d82d40308377afa1bd24c2990
