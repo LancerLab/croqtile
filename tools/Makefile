@@ -178,7 +178,7 @@ download-acore:
 	wget -P $(TOOLCHAIN_DIR) $(ACORE_URL)/$(ACORE_PATH)/$(ACORE_NAME)
 
 install-acore:
-	tar -zvxf $(TOOLCHAIN_DIR)/$(ACORE_NAME) $(TOOLCHAIN_DIR)/
+	tar -zvxf $(TOOLCHAIN_DIR)/$(ACORE_NAME) -C $(TOOLCHAIN_DIR)/
 
 setup-acore: check-acore
 	@if [ "$(CUR_ACORE_PKG_MD5)" != "$(ACORE_PKG_MD5)"  ]; then \

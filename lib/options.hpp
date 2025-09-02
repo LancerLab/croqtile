@@ -319,6 +319,10 @@ inline bool Option<T>::Parse(int argc, char** argv, int& currentArg) {
     value = default_value;
   }
 
+  // support ';' seperated options
+  if constexpr (std::is_same_v<T, std::string>)
+    std::replace(value.begin(), value.end(), ';', ' ');
+
   return true;
 }
 
