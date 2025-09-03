@@ -59,7 +59,7 @@ static bool accumulate_expr_buffer = false;
 
 %}
 
-%x CO_FUNC DEVICE_FUNC KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE
+%x CO_FUNC DEVICE_FUNC KERNEL REAL_KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
@@ -71,6 +71,7 @@ blank       [ \t\r]
 attr_id     (__{id}__|\[\[{blank}*{id}{blank}*(?:\({blank}*{cstr}{blank}*\){blank}*)?\]\])
 val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
 comments    \/\*([^*]|\*+[^*/])*\*+\/
+device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
 
 
 %%
@@ -96,6 +97,11 @@ comments    \/\*([^*]|\*+[^*/])*\*+\/
     BEGIN(CO_FUNC);
     Choreo::Scanner::Debug("Entering Choreo Function");
     return Choreo::Parser::make_ATTR_CO(yytext, loc);
+  }
+  "__real_cok__" {
+    BEGIN(REAL_KERNEL);
+    if (scope != 0)
+      Error(loc, "unexpected kernel code (mustn't be inside of existing scope).");
   }
   "__cok__" {
     BEGIN(KERNEL);
@@ -124,37 +130,6 @@ comments    \/\*([^*]|\*+[^*/])*\*+\/
              } else
                kernel_buffer += yytext;
            }
-  "//".*   { if (scope > 0) kernel_buffer += yytext; }
-  {comments} { if (scope > 0) kernel_buffer += yytext; }
-  "__device__"    { if (analyze_device_functions) {
-                      BEGIN(DEVICE_FUNC);
-                      device_expr_buffer = "";
-                    }
-                    if (scope > 0) kernel_buffer += yytext;
-                    if (!device_template_buffer.empty()) {
-                      return Choreo::Parser::make_DEVICE_TEMPLATE(device_template_buffer, loc);
-                    }
-                  }
-  "__co_device__" { if (analyze_device_functions){
-                      BEGIN(DEVICE_FUNC);
-                      device_expr_buffer = "";
-                    }
-                    if (scope > 0) kernel_buffer += yytext;
-                    if (!device_template_buffer.empty()) {
-                      return Choreo::Parser::make_DEVICE_TEMPLATE(device_template_buffer, loc);
-                    }
-                  }
-  "template" {  device_template_buffer = "";
-                device_template_scope = 0;
-                if (scope > 0) kernel_buffer += yytext;
-                if (analyze_device_functions) {
-                  BEGIN(TEMPLATE);
-                  device_template_buffer += yytext;
-                }
-             }
-  {cstr}     { if (scope > 0) kernel_buffer += yytext; }
-  R\"\(      { if (scope > 0) kernel_buffer += yytext; }
-  R\"{id}\(  { if (scope > 0) kernel_buffer += yytext; }
   .        { if (scope > 0) kernel_buffer += yytext; }
   \n+      { if (scope > 0) kernel_buffer += yytext; }
   <<EOF>>  { if (scope > 0)
@@ -164,38 +139,64 @@ comments    \/\*([^*]|\*+[^*/])*\*+\/
              kernel_buffer = "";  // reset the buffer
              return res;
            }
+} // state <KERNEL>
 
+<REAL_KERNEL>{
+  "{"         { scope++; }
+  "}"         { if (--scope == 0) BEGIN(INITIAL); }
+  {device_attr} { if (analyze_device_functions) {
+                    BEGIN(DEVICE_FUNC);
+                    device_expr_buffer = "";
+                  }
+                  if (!device_template_buffer.empty()) {
+                    return Choreo::Parser::make_DEVICE_TEMPLATE(device_template_buffer, loc);
+                  }
+                }
+  "template"  { device_template_buffer = "";
+                device_template_scope = 0;
+                if (analyze_device_functions) {
+                  BEGIN(TEMPLATE);
+                  device_template_buffer += yytext;
+                }
+              }
+  <<EOF>>     { if (scope > 0)
+                 Choreo::Scanner::Error(loc, "missing '}' for the kernel code.");
+                Choreo::Scanner::Debug("token (char): " + std::string(yytext));
+              }
+  "//".*      {}
+  {comments}  {}
+  {cstr}      {}
+  R\"\(       {}
+  R\"{id}\(   {}
+  .           {}
+  \n+         {}
 } // state <KERNEL>
 
 <TEMPLATE>{
-  {blank}+    { if (scope > 0) kernel_buffer += yytext; device_template_buffer += " "; }
-  \n+         { if (scope > 0) kernel_buffer += yytext; }
-  "//".*      { if (scope > 0) kernel_buffer += yytext; }
-  {comments}  { if (scope > 0) kernel_buffer += yytext; }
+  {blank}+    { device_template_buffer += " "; }
+  \n+         {}
+  "//".*      {}
+  {comments}  {}
   "<"         { if (device_template_scope < 0)
                   Choreo::Scanner::Error(loc, "unmatched '<' in device template declaration.");
                 device_template_scope++;
                 device_template_buffer += yytext;
-                if (scope > 0) kernel_buffer += yytext;
               }
   ">"         { if (device_template_scope <= 0)
                   Choreo::Scanner::Error(loc, "unmatched '>' in device template declaration.");
                 device_template_scope--;
                 device_template_buffer += yytext;
                 if (device_template_scope == 0)
-                  BEGIN(KERNEL);
-                if (scope > 0) kernel_buffer += yytext;
-
+                  BEGIN(REAL_KERNEL);
               }
-  .           { if (scope > 0) kernel_buffer += yytext;
-                if (device_template_scope > 0) device_template_buffer += yytext; }
+  .           { if (device_template_scope > 0) device_template_buffer += yytext; }
 }
 
 <DEVICE_FUNC>{
-  {blank}+    { if (scope > 0) kernel_buffer += yytext; }
-  \n+         { if (scope > 0) kernel_buffer += yytext; }
-  "//".*      { if (scope > 0) kernel_buffer += yytext; }
-  {comments}  { if (scope > 0) kernel_buffer += yytext; }
+  {blank}+    {}
+  \n+         {}
+  "//".*      {}
+  {comments}  {}
   "<"         { if (accumulate_buffer(yytext, token_type::LT_STR)) return make_device_symbol(); }
   ">"         { if (accumulate_buffer(yytext, token_type::GT_STR)) return make_device_symbol(); }
   "("         { device_param_paren_scope++;
@@ -211,10 +212,11 @@ comments    \/\*([^*]|\*+[^*/])*\*+\/
                   if (device_param_paren_scope == 0) {
                     if (device_param_brace_scope != 1)
                       Choreo::Scanner::Error(loc, "unmatched '{' in device function declaration.");
-                    BEGIN(KERNEL);
+                    BEGIN(REAL_KERNEL);
                     device_param_brace_scope = 0;
                     device_param_paren_scope = 0;
                     device_token_id = token_type::END;
+                    device_template_buffer = "";
                   }
                   return make_device_symbol();
                 }
@@ -229,10 +231,11 @@ comments    \/\*([^*]|\*+[^*/])*\*+\/
                   Choreo::Scanner::Error(loc, "unmatched '}' in device function declaration.");
               }
   ";"         { if (accumulate_buffer(yytext, token_type::END)) {
-                  BEGIN(KERNEL);
+                  BEGIN(REAL_KERNEL);
                   device_param_brace_scope = 0;
                   device_param_paren_scope = 0;
                   device_token_id = token_type::END;
+                  device_template_buffer = "";
                   return make_device_symbol();
                 }
               }
@@ -536,7 +539,6 @@ comments    \/\*([^*]|\*+[^*/])*\*+\/
   ","        return Choreo::Parser::make_COMMA  (loc);
   ";"        return Choreo::Parser::make_SEMCOL (loc);
   ":"        return Choreo::Parser::make_COL    (loc);
-  "::"       return Choreo::Parser::make_SCOPE  (loc);
   "."        return Choreo::Parser::make_DOT    (loc);
   "#"        return Choreo::Parser::make_UBOUND (loc);
   "&"        return Choreo::Parser::make_AMP    (loc);
@@ -591,6 +593,8 @@ void handle_line_directive(const char* text) {
 }
 
 void update_location(const char *text) {
+  if (!Choreo::Scanner::LocationUpdate())
+    return;
   if (no_line_update) {
     no_line_update = false;
     return;
@@ -608,9 +612,6 @@ void update_location(const char *text) {
 }
 
 bool accumulate_buffer(const char* text, token_type current_token_id) {
-  if (scope > 0)
-    kernel_buffer += text;
-
   if (device_expr_buffer == "")
     device_expr_buffer = text;
 
@@ -659,5 +660,6 @@ int yywrap() {
 
 bool Choreo::Scanner::debug = false;
 bool Choreo::Scanner::keep_comments = true;
+bool Choreo::Scanner::loc_update = true;
 void Choreo::Scanner::Debug(std::string s) { if (debug) dbgs() << "[scanner] " << s << std::endl; }
 

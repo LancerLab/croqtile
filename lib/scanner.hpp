@@ -74,6 +74,8 @@ public:
   static void SetDebug(bool d = true) { debug = d; }
   static void SetRemoveComments() { keep_comments = false; };
   static bool KeepComments() { return keep_comments; };
+  static void SetLocationUpdate(bool u = true) { loc_update = u; };
+  static bool LocationUpdate() { return loc_update; };
 
   void Error(const location& loc, const std::string& error_message) {
     errs() << loc << ": ";
@@ -86,6 +88,7 @@ public:
 private:
   static bool debug;
   static bool keep_comments;
+  static bool loc_update;
 
   const char* color_red = "\033[31m";
   const char* color_reset = "\033[0m";

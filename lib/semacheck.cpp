@@ -666,9 +666,10 @@ bool SemaChecker::VisitNode(AST::Call& n) {
         if (auto spanned_ty = dyn_cast<SpannedType>(arg_ty)) {
           auto m_ty = spanned_ty->GetStorage();
           if (m_ty == Storage::LOCAL || m_ty == Storage::SHARED) {
-            if ((attr.find("__private__") == std::string::npos &&
+            if ((attr.find("__attribute__((address_space(5)))") ==
+                     std::string::npos &&
                  m_ty == Storage::LOCAL) ||
-                (attr.find("__shared__") == std::string::npos &&
+                (attr.find("__attribute__((shared))") == std::string::npos &&
                  m_ty == Storage::SHARED))
               arg_match = false;
 

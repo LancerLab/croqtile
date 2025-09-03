@@ -2467,7 +2467,8 @@ bool EarlySemantics::Visit(AST::DeviceFunctionDecl& n) {
         initized = true;
       else if (param_idx > 0 && initized) {
         Error1(n.LOC(), "Missing default argument on " +
-                            std::to_string(param_idx + 1) + "th parameter");
+                            std::to_string(param_idx + 1) + "th parameter of " +
+                            "device function: " + STR(n));
         return false;
       }
 

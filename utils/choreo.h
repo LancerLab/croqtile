@@ -25,6 +25,7 @@
 #define __co_host__
 #define __co_any__
 #endif // __TOPSCC__
+#define __cok__ namespace choreo
 
 namespace choreo {
 

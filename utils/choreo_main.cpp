@@ -50,6 +50,7 @@ int main(int argc, char* argv[]) {
 
   // Apply the preprocessing
   std::stringstream pps;
+  std::stringstream cok_ss;
   if (!CCtx().NoPreProcess()) {
     if (CCtx().PrintPassNames()) dbgs() << "|- preprocess the choreo program\n";
     if (CCtx().GetOutputKind() == OutputKind::PreProcessedCode) {
@@ -59,15 +60,16 @@ int main(int argc, char* argv[]) {
     } else {
       SimplePreprocessor spp(pps);
       if (!spp.Process(r.GetInputStream())) return 1;
+      if (!spp.ExtractDeviceKernel(cok_ss)) return 1;
     }
   }
 
   if (CCtx().GetOutputKind() == OutputKind::PreProcessedCode) return 0;
 
   Scanner s;
-  s.yyrestart((CCtx().NoPreProcess()) ? r.GetInputStream() : pps);
   PContext pctx;
   Parser p(pctx, s);
+  Parser cok_p(pctx, s);
 
   if (CCtx().DebugAll()) {
     dbgs() << "Choreo: Debug of parsing is switched on." << std::endl;
@@ -78,6 +80,16 @@ int main(int argc, char* argv[]) {
   if (CCtx().DropComments()) Scanner::SetRemoveComments();
 
   if (CCtx().PrintPassNames()) dbgs() << "|- parse program into AST.\n";
+
+  Scanner::SetLocationUpdate(false);
+  s.yyrestart(cok_ss);
+  if (cok_p.parse() != 0 || pctx.HasError()) {
+    errs() << "Parsing failed due to syntax errors." << std::endl;
+    return 1;
+  }
+
+  Scanner::SetLocationUpdate(true);
+  s.yyrestart((CCtx().NoPreProcess()) ? r.GetInputStream() : pps);
   if (p.parse() != 0 || pctx.HasError()) {
     errs() << "Parsing failed due to syntax errors." << std::endl;
     return 1;

@@ -1,0 +1,14 @@
+// RUN: choreo -e %s | FileCheck %s
+#include "choreo.h"
+#include "devices.h"
+
+__cok__ {
+  __device__ void device_func();
+}
+
+// CHECK: DeviceFunction: abc -> void (unknown)
+// CHECK: DeviceFunction: def -> unknown * (unknown, f32 *)
+// CHECK: DeviceFunction: foo -> s32 (s32, s8 *, f32, unknown *)
+// CHECK: DeviceFunction: index -> s32 ()
+// CHECK: DeviceFunction: dynamic_scaled_int8_quant_kernel -> template <typename T> void (unknown *, f32 *, unknown *, unknown)
+// CHECK: DeviceFunction: device_func -> void ()

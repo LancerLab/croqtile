@@ -410,7 +410,7 @@ device_param
     : device_type { $$ = $1; }
     | device_type IDENTIFIER { $$ = $1; }
     | device_type IDENTIFIER ASSIGN_STR DEVICE_EXPR { $$ = $1; $$->init_expr = $4; }
-    | ATTR_ID device_param { $$ = $2; $$->attr = $1; }
+    | device_attr device_param { $$ = $2; $$->attr = $1; }
     ;
 
 device_attr_lists
@@ -420,9 +420,13 @@ device_attr_lists
     | IDENTIFIER COMMA_STR device_attr_lists {
         $$ = $1 + ", " + $3;
       }
+    | IDENTIFIER LPAREN_STR device_attr_lists RPAREN_STR {
+        $$ = $1 + "(" + $3 + ")";
+      }
     | IDENTIFIER {
         $$ = $1;
       }
+    | VAL { $$ = $1; }
     ;
 
 device_attr
