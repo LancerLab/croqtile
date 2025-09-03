@@ -578,19 +578,19 @@ done
 cleantmplocks
 
 # Check for required commands
-if [ -n "$save_log" ] && command -v date >/dev/null 2>&1 && command -v tee >/dev/null 2>&1; then
+if [ -n "${save_log}" ] && command -v date >/dev/null 2>&1 && command -v tee >/dev/null 2>&1; then
   # Prepare output directory and file
   LOG_DIR="/tmp/choreo_log/$(whoami)"
-  mkdir -p "$LOG_DIR"
+  mkdir -p ${LOG_DIR}
 
   TIMESTAMP=$(date "+%Y%m%d_%H%M%S")
-  LOG_FILE="${LOG_DIR}/log_${TIMESTAMP}.txt"
+  LOG_FILE=${LOG_DIR}/log_${TIMESTAMP}.txt
 
   # Run showresult, tee output to log file
-  showresult | tee "$LOG_FILE"
+  showresult | tee ${LOG_FILE}
   RET_CODE=${PIPESTATUS[0]}  # Get exit code of showresult
   echo "Find the test result: ${LOG_FILE}"
-  exit "$RET_CODE"
+  exit "${RET_CODE}"
 else
   # Fallback: run showresult only
   showresult

@@ -121,7 +121,7 @@ int main() { /// host program
 // CHECK-TOPSCC:             out_load_s.set_event(out_load_s__event__);
 // CHECK-TOPSCC:             input_load_s.wait();
 // CHECK-TOPSCC:             out_load_s.wait();
-// CHECK-TOPSCC:             relu_kernel((__private__ int*)input_load_s.data(), (__private__ int*)out_load_s.data());
+// CHECK-TOPSCC:             relu_kernel((int*)input_load_s.data(), (int*)out_load_s.data());
 // CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx3;
 // CHECK-TOPSCC:             tops::mdspan __mds6_out_load_s(tops::Private, (int*)out_load_s.data(), 128, 256);
 // CHECK-TOPSCC:             tops::mdspan __mds7_l2_out(tops::Shared, (int*)l2_out, 256, 1024);

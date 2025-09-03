@@ -62,6 +62,8 @@ public:
 
   virtual const NoteMapType& Note() const { return note; }
   virtual NoteMapType& Note() { return note; }
+  virtual void AddNote(const std::string& s) { note.emplace(s, ""); }
+  virtual bool HasNote(const std::string& s) { return note.count(s) != 0; }
 
   virtual bool IsBlock() const { return false; }
   virtual Storage GetLevel() const { return level; }
@@ -2987,7 +2989,8 @@ inline size_t GetSubScriptLevel(const Expr& n) {
 }
 
 inline ptr<Node> Ref(const ptr<Node>& n) {
-  if (auto expr = dyn_cast<Expr>(n)) return expr->GetReference();
+  if (auto expr = dyn_cast<Expr>(n))
+    if (auto r = expr->GetReference()) return r;
   return n;
 }
 

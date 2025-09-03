@@ -659,26 +659,34 @@ bool SemaChecker::VisitNode(AST::Call& n) {
       bool arg_match = true;
       for (size_t param_index = 0; param_index < n.arguments->Count();
            param_index++) {
-        auto arg_ty = NodeType(*n.arguments->ValueAt(param_index));
+        auto pnode = n.arguments->ValueAt(param_index);
+        auto arg_ty = NodeType(*pnode);
         auto param_ty = device_function->param_types[param_index];
 
         std::string attr = param_ty->attr;
         if (auto spanned_ty = dyn_cast<SpannedType>(arg_ty)) {
           auto m_ty = spanned_ty->GetStorage();
-          if (m_ty == Storage::LOCAL || m_ty == Storage::SHARED) {
-            if ((attr.find("__attribute__((address_space(5)))") ==
-                     std::string::npos &&
-                 m_ty == Storage::LOCAL) ||
-                (attr.find("__attribute__((shared))") == std::string::npos &&
-                 m_ty == Storage::SHARED))
+          if ((attr.find("__private__") != std::string::npos) ||
+              (attr.find("__attribute__((address_space(5)))") !=
+               std::string::npos)) {
+            if (m_ty != Storage::LOCAL)
               arg_match = false;
+            else
+              pnode->AddNote("annotate_as"); // annotate the addrspace
+          } else if ((attr.find("__shared__") != std::string::npos) ||
+                     (attr.find("__attribute__((shared))") !=
+                      std::string::npos)) {
+            if (m_ty != Storage::SHARED)
+              arg_match = false;
+            else
+              pnode->AddNote("annotate_as");
+          }
 
-            if (!arg_match) {
-              mismatch_msg = "the type of " + std::to_string(param_index + 1) +
-                             "th argument '" + PSTR(arg_ty) + "' is not " +
-                             STR(m_ty) + ".";
-              break;
-            }
+          if (!arg_match) {
+            mismatch_msg = "the type of " + std::to_string(param_index + 1) +
+                           "th argument '" + PSTR(arg_ty) + "' is not " +
+                           STR(m_ty) + ".";
+            break;
           }
         }
 

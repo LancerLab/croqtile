@@ -44,9 +44,9 @@ __co__ void func() {
 }
 
 // CHECK: type_test0(v0, v1, v2, v3, v4, v5, v6, v7);
-// CHECK: type_test1((__private__ char*)arr0, (__private__ unsigned char*)arr1, (__private__ short*)arr2, (__private__ unsigned short*)arr3, (__private__ int*)arr4, (__private__ unsigned int*)arr5, (__private__ long long*)arr6, (__private__ unsigned long long*)arr7);
-// CHECK: type_test2(v0, (__private__ char*)arr0);
-// CHECK: type_test3((__private__ char*)arr0, (__private__ unsigned char*)arr1, (__private__ short*)arr2, (__private__ unsigned short*)arr3);
+// CHECK: type_test1((char*)arr0, (unsigned char*)arr1, (short*)arr2, (unsigned short*)arr3, (int*)arr4, (unsigned int*)arr5, (long long*)arr6, (unsigned long long*)arr7);
+// CHECK: type_test2(v0, (char*)arr0);
+// CHECK: type_test3((char*)arr0, (unsigned char*)arr1, (short*)arr2, (unsigned short*)arr3);
 // CHECK: int a = getInt();
 // CHECK: float b = static_cast<float>(getInt());
 // CHECK: int c = getInt();

@@ -120,6 +120,17 @@ __co__ void func() {
 // CHECK: Find instantiated device function 'argmin' -> s32 (s32 *, s32, s32)
 // CHECK: Find instantiated device function 'indexAllVecL3' -> s32 (s32 *, s32 *, s32 *, u32 *, s32, s32 *, s8 *, s8 *, u32)
 // CHECK: Find instantiated device function 'argminAllVecL3' -> s32 (s32 *, s32 *, u32 *, s32, s8 *, s8 *, u32)
-// CHECK: warning: unable to find a device function 'load_and_store_func_L3', because the type of 1th argument 'local f32 mdspan<1> [100]' is not local.
 // CHECK: Find instantiated device function 'MurmurHash3_32' -> void (s32 *, u32 *, s32, s32)
 // CHECK: Find instantiated device function 'get_at' -> s32 (s32 *, s32)
+
+// CHECK:   print_buffer<int>((__private__ int*)buffer_key, 100);
+// CHECK:   print_vector<int>(k_total_end, 100);
+// CHECK:   get_i64_part<int, 128>((__private__ int*)buffer_key);
+// CHECK:   contain<int, 128>((__private__ int*)buffer_key, 42);
+// CHECK:   index<int, 128>((__private__ int*)buffer_key, 42);
+// CHECK:   argmin<int, 128>((__private__ int*)buffer_key, 10, 0);
+// CHECK:   indexAllVecL3<int, int, 0, 1, 0>((__private__ int*)out_slot_idx, (__private__ int*)out_empty_slot_idx, (__private__ int*)buffer_key, (__private__ unsigned int*)buffer_key_indices, k_total_end, (__private__ int*)buffer_query, (char*)ld_tmp_addr, (char*)st_tmp_addr, q_len);
+// CHECK:   argminAllVecL3<int, int, 128, 1>((__private__ int*)out_slot_idx, (__private__ int*)buffer_key, (__private__ unsigned int*)buffer_key_indices, k_total_end, (char*)ld_tmp_addr, (char*)st_tmp_addr, q_len);
+// CHECK:   load_and_store_func_L3<1>((float*)fp32_input, (unsigned int*)buffer_key_indices, (int*)out_slot_idx, (int*)out_empty_slot_idx, (int*)out_slot_idx, 0, (float*)fp32_input, (char*)ld_tmp_addr, (char*)st_tmp_addr, 1, 1, 1, 1, 1);
+// CHECK:   MurmurHash3_32<int, 0>((__private__ int*)buffer_key, (__private__ unsigned int*)buffer_key_indices, k_total_end, 100);
+// CHECK:   int at = get_at<int>((__private__ int*)buffer_key, 1);
