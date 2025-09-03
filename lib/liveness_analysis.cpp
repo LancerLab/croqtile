@@ -1107,7 +1107,7 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   assert(n.sa == nullptr && "after norm, there should be no span_as.");
 
   AddUse(current_stmt, n.RefSymbol());
-  
+
   for (auto tsi : n.AllOperations())
     for (const auto& pos : tsi->GetIndices()) {
       VST_DEBUG(dbgs() << "chunkat position: " << PSTR(pos) << ".\n");

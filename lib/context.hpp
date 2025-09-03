@@ -309,7 +309,6 @@ private:
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate debug information
-  bool dma_linear_opt = false;    // optimize dma to linear copy
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table

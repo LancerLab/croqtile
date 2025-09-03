@@ -1,0 +1,25 @@
+// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines %s
+
+__co__ auto matmul1(f32 [32, 512, 768] lhs, f32 [768, 768] rhs) {
+  f32 [lhs.span(0), lhs.span(1), rhs.span(1)] output;
+  parallel p by 4, q by 8 {
+    with index = {m_tile, n_tile, k_tile} in [4, 4, 4] {
+      foreach m_tile, n_tile {
+        local f32[output.span(0)/#p/#q, output.span(1)/#m_tile, output.span(2)/#n_tile] l1_out {0.0f};
+        foreach k_tile {
+          l1_a = dma.copy lhs.chunkat(p#q, m_tile, k_tile) => local;
+          l1_b = dma.transp<1,0> rhs.chunkat(k_tile, n_tile) => local;
+          foreach {i} in [l1_out.span(0)] {
+            call k_matmul(l1_a.chunkat(i,_,_), l1_b.data, l1_out, l1_a.span(1), l1_b.span(0), l1_a.span(2));
+          }
+        }
+        dma.copy l1_out => output.chunkat(p#q, m_tile, n_tile);
+      }
+    }
+  }
+  return output;
+}
+
+// CHECK: float* l1_out = (float*)(anon_2 + 245760);
+// CHECK: float* l1_a__buf__ = (float*)(anon_2 + 147456);
+// CHECK: float* l1_b__buf__ = (float*)(anon_2 + 0);

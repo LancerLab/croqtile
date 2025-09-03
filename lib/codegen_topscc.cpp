@@ -1430,7 +1430,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
              << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)"
              << buf_expr;
     if (offset == "")
-      mds_decl << ", " << ShapeSTR(sty->GetShape());
+      mds_decl << ", "
+               << ShapeSTR(new_shape.IsValid() ? new_shape : sty->GetShape());
     else {
       mds_decl << " + ";
       if (split_to_char)
@@ -1567,6 +1568,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     const auto& f_buf_expr = f_buf.second;
     const auto& t_buf_name = t_buf.first;
     const auto& t_buf_expr = t_buf.second;
+    if (auto idx = f_ca->IndexOfLastSpanAs()) {
+      f_mds_offset = TileBaseOffset(f_ca);
+      f_shape = f_ca->OpAt(*idx)->GetBlockShape();
+    }
+    if (auto idx = t_ca->IndexOfLastSpanAs()) {
+      t_mds_offset = TileBaseOffset(t_ca);
+      t_shape = t_ca->OpAt(*idx)->GetBlockShape();
+    }
     if (!no_linear_opt && opt_to_linear_copy != DMA_OP::none) {
       if (TileToSymbol()) {
         assert(opt_to_linear_copy == DMA_OP::src);
@@ -1585,15 +1594,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           t_mds_offset = GenOffset(t_ca);
           t_shape = t_ca->GetBlockShape();
         }
-      }
-    } else {
-      if (auto idx = f_ca->IndexOfLastSpanAs()) {
-        f_mds_offset = TileBaseOffset(f_ca);
-        f_shape = f_ca->OpAt(*idx)->GetBlockShape();
-      }
-      if (auto idx = t_ca->IndexOfLastSpanAs()) {
-        t_mds_offset = TileBaseOffset(t_ca);
-        t_shape = t_ca->OpAt(*idx)->GetBlockShape();
       }
     }
     const auto f_mds =

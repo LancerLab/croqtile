@@ -1,39 +1,53 @@
 #include "choreo.h"
 #include "common.h"
 
-#define _padding 1
 __co__ auto CONV2D(f32 [32, 128, 112, 112] i, f32 [256, 128, 3, 3] w, int stride, int padding, int dilation) {
-  batch_size = i.span(0);
-  channel_in = i.span(1);
-  in_h = i.span(2);
-  in_w = i.span(3);
-  channel_out = w.span(0);
-  out_h = (in_h + 2 * padding - dilation * (w.span(2) - 1) - 1) / stride + 1;
-  out_w = (in_w + 2 * padding - dilation * (w.span(3) - 1) - 1) / stride + 1;
+  N = i.span(0);
+  Cin = i.span(1);
+  H = i.span(2);
+  W = i.span(3);
+  Cout = w.span(0);
+  Kh = w.span(2);
+  Kw = w.span(3);
+  Ho = (H + 2 * padding - dilation * (Kh - 1) - 1) / stride + 1;
+  Wo = (W + 2 * padding - dilation * (Kw - 1) - 1) / stride + 1;
+  Hpad = H + 2 * padding;
+  Wpad = W + 2 * padding;
 
-  f32 [batch_size, channel_out, out_h, out_w] o;
-  
-  assert(_padding == padding, "expect the padding values to be equal.");
+  f32 [N, Cout, Ho, Wo] o;
+
+  M = Ho * Wo;
+  K = Cin * Kh * Kw;
 
   parallel p by 2 : shared {
-    parallel q by 4 : local {
-      foreach {co, n} in [channel_out, batch_size / #p / #q] {
-        local f32 [out_h, out_w] Y{0.0f};
-        foreach ci in [channel_in] {
-          il = dma.pad<{0, 0, _padding, _padding}, {0, 0, _padding, _padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p#q#n, ci, _, _) => local;
-          ws = dma.copy w.chunkat(co, ci, _, _) => local;
-          foreach {ho, wo} in [out_h, out_w] {
-            f32 sum = 0.0f;
-            foreach {hw, ww} in [w.span(2), w.span(3)] {
-              hi = ho * stride + hw * dilation;
-              wi = wo * stride + ww * dilation;
-              sum += il.data.at(0, 0, hi, wi) * ws.data.at(0, 0, hw, ww);
-            }
-            Y.at(ho, wo) += sum;
+    shared f32 [M, K] A;
+    B = dma.copy w.span_as(Cout, K) => shared;
+    shared f32 [Ho*Wo, Cout] Y;
+
+    foreach n in [N / #p] {
+      // 1. im2col
+      i_s_padded = dma.pad<{0, 0, padding, padding}, {0, 0, padding, padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p#n, _, _, _) => shared;
+      with {i, j} in [Hpad/2, Wpad/2] {
+        foreach i, j {
+          if (i >= Ho) break;
+          if (j >= Wo) break;
+          dma.copy i_s_padded.chunkat(_, _, i, j).subspan(_, _, Kh, Kw) => A.subspan(1, _).at(i*Wo + j, 0).span_as(1, Cin, Kh, Kw);
+        }
+      }
+      // 2. GEMM: C = A x B, result shape: M x Cout
+      parallel q by 8 : local {
+        foreach {_q} in [8] {
+          l1_A = dma.copy A.chunkat(q#_q, _) => local;
+          foreach {qq} in [32] {
+            local f32 [A.span(0)/#q/#_q, B.span(0)/#qq] l1_Y{0.0f};
+            l1_B = dma.copy B.chunkat(qq, _) => local;
+            call k_matmul(l1_A.data, l1_B.data, l1_Y, M/#q/#_q, Cout/#qq, K);
+            dma.copy l1_Y => Y.chunkat(q#_q, qq);
           }
         }
-        dma.copy Y.span_as(1, 1, out_h, out_w) => o.chunkat(p#q#n, co, _, _);
       }
+      
+      dma.transp<0, 3, 1, 2> Y.span_as(1, Ho, Wo, Cout) => o.chunkat(p#n, _, _, _);
     }
   }
   return o;

@@ -156,7 +156,7 @@ int main(int argc, char* argv[]) {
   if (!ma.RunOnProgram(root)) return ma.Status();
   if (CCtx().GetTarget() == CompileTarget::Topscc) {
     MemReuse mr(la, ma);
-    if (!mr.RunOnProgram(root)) return mr.Status();
+    if (CCtx().MemReuse() && !mr.RunOnProgram(root)) return mr.Status();
   }
   if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
 

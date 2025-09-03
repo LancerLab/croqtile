@@ -15,7 +15,5 @@ __co__ auto foo(s32[2, 16, 128] input2) {
   return t;
 }
 
-// CHECK: error: Reshape operation inside DMA expression can not be executed on a noncontiguous tiling result.
-// CHECK: error: Only the last tiling can be executed in noncontiguous manner.
-// CHECK-NOT: error:
-// CHECK: Totally 2 errors have been detected.
+// CHECK: warning: The reshape operation inside DMA expression is executed on a noncontiguous tiling result.
+// CHECK: warning: There are more than one tiling executed in noncontiguous manner.

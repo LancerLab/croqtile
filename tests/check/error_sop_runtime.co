@@ -1,4 +1,4 @@
-// RUN: choreo -es %s -o - | FileCheck %s
+// RUN: choreo -es %s 2>&1 | FileCheck %s
 
 __co__ void foo(s32[N, M, K] input2) {
   parallel p by 2, q by 4
@@ -9,5 +9,5 @@ __co__ void foo(s32[N, M, K] input2) {
     }
 }
 
-// CHECK: choreo::runtime_check((static_cast<long long>(K) / 16LL + (static_cast<long long>(K) * (static_cast<long long>(M) / 4LL - 1) - 1 + static_cast<long long>(K) * static_cast<long long>(M) * (static_cast<long long>(N) / 2LL - 1)) + 1LL == static_cast<long long>(K) / 16LL * (static_cast<long long>(M) / 4LL * (static_cast<long long>(N) / 2LL))), "Reshape operation inside DMA expression can not be executed on a noncontiguous tiling result
-// CHECK: choreo::runtime_check((static_cast<long long>(K) / 4LL + (static_cast<long long>(K) * (static_cast<long long>(M) / 2LL - 1) - 1 + static_cast<long long>(K) * static_cast<long long>(M) * (static_cast<long long>(N) - 1)) + 1LL == static_cast<long long>(K) / 4LL * (static_cast<long long>(M) / 2LL * static_cast<long long>(N))), "Only the last tiling can be executed in noncontiguous manner
+// CHECK: warning: The reshape operation inside DMA expression is executed on a noncontiguous tiling result.
+// CHECK: warning: There are more than one tiling executed in noncontiguous manner.

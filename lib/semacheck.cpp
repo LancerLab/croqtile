@@ -460,24 +460,19 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       if (auto val = std::get_if<bool>(&is_contiguous); val && *val == false) {
         has_noncontiguous = true;
         if (i != last_tiling)
-          Error1(
-              sop->LOC(),
-              "Only the last tiling can be executed in noncontiguous manner.");
+          Warning(sop->LOC(), "There are more than one tiling executed in "
+                              "noncontiguous manner.");
       } else if (!val) {
         if (i != last_tiling)
-          EmitAssertion(
-              std::get<ValueItem>(is_contiguous),
-              "Only the last tiling can be executed in noncontiguous manner",
-              sop->LOC(), sop->TFSS());
+          Warning(sop->LOC(), "There are more than one tiling executed in "
+                              "noncontiguous manner.");
         if (has_reshape)
-          EmitAssertion(std::get<ValueItem>(is_contiguous),
-                        "Reshape operation inside DMA expression can not be "
-                        "executed on a noncontiguous tiling result",
-                        sop->LOC(), sop->TFSS());
+          Warning(sop->LOC(), "The reshape operation inside DMA expression is "
+                              "executed on a noncontiguous tiling result.");
       }
       if (has_noncontiguous && sop->SpecifyReshape())
-        Error1(sop->LOC(), "Reshape operation inside DMA expression can not be "
-                           "executed on a noncontiguous tiling result.");
+        Warning(sop->LOC(), "The reshape operation inside DMA expression is "
+                            "executed on a noncontiguous tiling result.");
       original_shape = sop->GetBlockShape();
     }
   }

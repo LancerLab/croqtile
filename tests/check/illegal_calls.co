@@ -22,7 +22,7 @@ __co__ auto illegal_call1(f32 [36, 27, 128] input) {
     }
   }
 }
-// CHECK: error: (1th) argument of type 'sync=>local f32 mdspan<3> []` can not be passed to the kernel function.
+// CHECK: error: (1st) argument of type 'sync=>local f32 mdspan<3> []` can not be passed to the kernel function.
 
 __co__ auto illegal_call2(f32 [36, 27, 128] input) {
   parallel p by 6 {
@@ -34,7 +34,7 @@ __co__ auto illegal_call2(f32 [36, 27, 128] input) {
     }
   }
 }
-// CHECK: error: (2th) argument of type 'mdspan<3> []` can not be passed to the kernel function.
+// CHECK: error: (2nd) argument of type 'mdspan<3> []` can not be passed to the kernel function.
 
 __co__ auto illegal_call3(f32 [36, 27, 128] input) {
   parallel p by 6 {
@@ -51,9 +51,9 @@ __co__ auto illegal_call3(f32 [36, 27, 128] input) {
 }
 // CHECK: error: symbol `f' is used before declaration.
 // CHECK: error: in operation "dataof": expect a future type but got `invalid'.
-// CHECK: error: (1th) argument of type 'invalid` can not be passed to the kernel function.
-// CHECK: error: (3th) argument of type 'ituple<2>` can not be passed to the kernel function.
-// CHECK: error: (1th) argument of type 'mdspan<2> []` can not be passed to the kernel function.
+// CHECK: error: (1st) argument of type 'invalid` can not be passed to the kernel function.
+// CHECK: error: (3rd) argument of type 'ituple<2>` can not be passed to the kernel function.
+// CHECK: error: (1st) argument of type 'mdspan<2> []` can not be passed to the kernel function.
 
 __co__ auto illegal_call4() {
   parallel by 1 {
