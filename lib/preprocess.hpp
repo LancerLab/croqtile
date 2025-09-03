@@ -1329,7 +1329,8 @@ public:
     EmitScript(temp_script_file);
     temp_script_file.close();
 
-    std::string cmd = "bash " + std::string(temp_script_file_name) + " 2>/dev/null";
+    std::string cmd =
+        "bash " + std::string(temp_script_file_name) + " 2>/dev/null";
     int ret = system(cmd.c_str());
     if (ret != 0) {
       if (debug) dbgs() << "Command failed: " << cmd << "\n";
