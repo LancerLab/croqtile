@@ -130,7 +130,10 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
              } else
                kernel_buffer += yytext;
            }
-  .        { if (scope > 0) kernel_buffer += yytext; }
+  {blank}+ { if (scope > 0) kernel_buffer += yytext; }
+  .        { if (scope > 0) kernel_buffer += yytext;
+             else Error(loc, "unexpected character outside of kernel code.");
+           }
   \n+      { if (scope > 0) kernel_buffer += yytext; }
   <<EOF>>  { if (scope > 0)
                 Choreo::Scanner::Error(loc, "missing '}' for the kernel code.");
