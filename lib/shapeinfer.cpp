@@ -1966,20 +1966,29 @@ const NumTy ShapeInference::GenValNo(const AST::Node& n) {
         assert(!ast_vn.Hit(e, VNKind::VNK_VALUE));
 
         SignTy msign = GetSign(*e->GetL(), VNKind::VNK_MDSPAN);
-        assert(((size_t)index < msign->Count()) && "out of bound in 'dimof'.");
+
+        if ((size_t)index >= msign->Count())
+          Error1(n.LOC(), "out of bound in 'dimof'.");
+
         NumTy valno = vn.ToMSign(msign)->NumAt(index);
         ast_vn.Update(e, valno, VNKind::VNK_VALUE);
         return valno;
       } else if (ast_vn.Hit(e->GetL().get(), VNKind::VNK_VALUE)) {
         assert(!ast_vn.Hit(e, VNKind::VNK_VALUE));
         SignTy msign = GetSign(*e->GetL(), VNKind::VNK_VALUE);
-        assert(((size_t)index < msign->Count()) && "out of bound in 'dimof'.");
+
+        if ((size_t)index >= msign->Count())
+          Error1(n.LOC(), "out of bound in 'dimof'.");
+
         NumTy valno = vn.ToMSign(msign)->NumAt(index);
         ast_vn.Update(e, valno, VNKind::VNK_VALUE);
         return valno;
       } else if (ast_vn.Hit(e->GetL().get(), VNKind::VNK_UBOUND)) {
         SignTy msign = GetSign(*e->GetL(), VNKind::VNK_VALUE);
-        assert(((size_t)index < msign->Count()) && "out of bound in 'dimof'.");
+
+        if ((size_t)index >= msign->Count())
+          Error1(n.LOC(), "out of bound in 'dimof'.");
+
         NumTy valno = vn.ToMSign(msign)->NumAt(index);
         ast_vn.Update(e, valno, VNKind::VNK_VALUE);
 
