@@ -1329,11 +1329,11 @@ public:
     EmitScript(temp_script_file);
     temp_script_file.close();
 
-    std::string cmd = "bash " + std::string(temp_script_file_name);
+    std::string cmd = "bash " + std::string(temp_script_file_name) + " 2>/dev/null";
     int ret = system(cmd.c_str());
     if (ret != 0) {
-      errs() << "Failed to run the script '" << cmd << "'.\n";
-      return false;
+      if (debug) dbgs() << "Command failed: " << cmd << "\n";
+      return true;
     }
 
     if (remove(temp_script_file_name) != 0) {

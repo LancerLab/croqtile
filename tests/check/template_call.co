@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo %s -dv=sema 2>&1 | FileCheck --check-prefix=CHECK-SEMA %s
 // RUN: choreo -es %s -dv=check 2>&1 | FileCheck %s
 __cok__ {

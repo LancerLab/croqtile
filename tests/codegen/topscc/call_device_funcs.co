@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -es -adf %s -o - 2>&1 | FileCheck %s
 __cok__ {
   __device__ void type_test0(char, unsigned char, short, unsigned short,

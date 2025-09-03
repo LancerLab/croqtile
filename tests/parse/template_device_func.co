@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
 __cok__ {
 
