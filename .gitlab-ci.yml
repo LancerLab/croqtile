@@ -44,7 +44,6 @@ gcu2_test:
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   script:
-    - whoami
     - echo "Running tests with GCU2..."
     - make setup-gcu2
     - make build
