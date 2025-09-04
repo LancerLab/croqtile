@@ -1,15 +1,7 @@
 stages:
-  - debug
   - check-in-tests
   - pre-release-tests
   - docgen
-
-debug:
-  stage: debug
-  script:
-    - whoami
-    - id
-    - ls -l /opt/gitlab-runner/ssh/config
 
 # TODO: make package release work
 #  - artifacts
@@ -52,6 +44,7 @@ gcu2_test:
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   script:
+    - whoami
     - echo "Running tests with GCU2..."
     - make setup-gcu2
     - make build
