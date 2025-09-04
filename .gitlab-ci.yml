@@ -39,6 +39,9 @@ gpu_test:
 
 # GCU2 Testing
 gcu2_test:
+  variables:
+   GIT_SUBMODULE_STRATEGY: recursive
+   GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   script:
     - whoami
