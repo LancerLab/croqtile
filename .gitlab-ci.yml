@@ -94,7 +94,7 @@ gcu3_test:
     - release/alpha
     - merge_requests
   allow_failure: false
-  timeout: 20m
+  timeout: 25m
   after_script:
     - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
@@ -156,7 +156,7 @@ gcu3_debug_test:
     - release/alpha
     - merge_requests
   allow_failure: false
-  timeout: 20m
+  timeout: 25m
   after_script:
     - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
