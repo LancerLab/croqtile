@@ -1092,9 +1092,6 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     else
       AddDef(current_stmt, n.future, true);
 
-    AddUse(current_stmt, n.FromSymbol());
-    AddUse(current_stmt, n.ToSymbol());
-
     AddIsBinding(current_stmt, n.future);
     if (n.async) AddBinding(n.future, n.FromSymbol());
     AddBinding(n.future, n.ToSymbol());
@@ -1108,7 +1105,9 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
 bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
   assert(n.sa == nullptr && "after norm, there should be no span_as.");
-  // `n.data` is already handled in Visit(AST::DMA& n)
+
+  AddUse(current_stmt, n.RefSymbol());
+  
   for (auto tsi : n.AllOperations())
     for (const auto& pos : tsi->GetIndices()) {
       VST_DEBUG(dbgs() << "chunkat position: " << PSTR(pos) << ".\n");
