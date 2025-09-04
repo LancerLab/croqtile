@@ -27,11 +27,138 @@
 #ifndef BN_EPS
   #define BN_EPS 1e-5f
 #endif
+#define USE_VEC_BN
+#define NO_OOB_ACCESS
 
 /* ============================================================
  *                        Device kernels
  * ============================================================ */
 __cok__ {
+#ifdef USE_VEC_BN
+// ---- Vector helpers (use typedef to satisfy the DSL parser) ----
+
+__co_device__ float bn_hsum(vfloat v) {
+  float s = 0.f;
+  int VL = (int)(sizeof(vfloat)/sizeof(float));
+  for (int i = 0; i < VL; ++i) s += v[i];
+  return s;
+}
+
+// Vectorized reduce over the last dimension (cols)
+__co_device__ void reduce_lastdim_mean_var(float* in, float* mean, float* var,
+                                           int rows, int cols) {
+  int VL = (int)(sizeof(vfloat)/sizeof(float));
+  int VC = cols / VL;
+  int R  = cols % VL;
+
+  for (int r = 0; r < rows; ++r) {
+    float* row = in + r * cols;
+
+    auto vptr  = tcle::leaptr<vfloat, 1>(row, sizeof(vfloat));
+    vfloat vsum   = {0.0};
+    vfloat vsumsq = {0.0f};
+{
+  int VL = (int)(sizeof(vfloat)/sizeof(float));
+  for (int i = 0; i < VL; ++i) {
+    vsum[i]   = 0.0f;
+    vsumsq[i] = 0.0f;
+  }
+}
+    // main vector loop
+    for (int i = 0; i < VC; ++i) {
+      vfloat x = vptr.load<0>();
+      vsum   += x;
+      vsumsq += x * x;
+    }
+
+    float s  = bn_hsum(vsum);
+    float sq = bn_hsum(vsumsq);
+
+#ifndef NO_OOB_ACCESS
+    // tolerant tail: one extra vector load, use first R lanes
+    if (R) {
+      vfloat x  = vptr.load<0>();
+      vfloat xx = x * x;
+      for (int i = 0; i < R; ++i) {
+        s  += x[i];
+        sq += xx[i];
+      }
+    }
+#else
+    // strict tail: scalar remainder
+    int off = VC * VL;
+    for (int i = 0; i < R; ++i) {
+      float v = row[off + i];
+      s  += v;
+      sq += v * v;
+    }
+#endif
+
+    float m  = s  / cols;
+    float vv = sq / cols - m * m;
+    mean[r]  = m;
+    var[r]   = vv;
+  }
+}
+
+// Vectorized BN apply over the last dimension (cols)
+__co_device__ void apply_bn_lastdim_gptr(float* in, float* out,
+                                    const float* mean, const float* var,
+                                    const float* gamma, const float* beta,
+                                    int rows, int cols) {
+  int VL = (int)(sizeof(vfloat)/sizeof(float));
+  int VC = cols / VL;
+  int R  = cols % VL;
+
+  for (int r = 0; r < rows; ++r) {
+    float  m  = mean[r];
+    float  rs = 1.0f / sqrtf(var[r] + BN_EPS);
+    float  g  = gamma[0];
+    float  b  = beta[0];
+
+    float* in_row  = in  + r * cols;
+    float* out_row = out + r * cols;
+
+    auto iptr = tcle::leaptr<vfloat, 1>(in_row , sizeof(vfloat));
+    auto optr = tcle::leaptr<vfloat, 1>(out_row, sizeof(vfloat));
+
+    vfloat vg = {g};
+    vfloat vb = {b};
+    vfloat vm = {m};
+    vfloat vrs= {rs};
+{
+  int VL = (int)(sizeof(vfloat)/sizeof(float));
+  for (int i = 0; i < VL; ++i) {
+    vg[i]  = g;
+    vb[i]  = b;
+    vm[i]  = m;
+    vrs[i] = rs;
+  }
+}
+    for (int i = 0; i < VC; ++i) {
+      vfloat x = iptr.load<0>();
+      vfloat y = ((x - vm) * vrs) * vg + vb;
+      optr.store<0>(y);
+    }
+
+#ifndef NO_OOB_ACCESS
+    if (R) {
+      vfloat x = iptr.load<0>();
+      vfloat y = ((x - vm) * vrs) * vg + vb;
+      int off = VC * VL;
+      for (int i = 0; i < R; ++i) out_row[off + i] = y[i];
+    }
+#else
+    int off = VC * VL;
+    for (int i = 0; i < R; ++i) {
+      float x = in_row[off + i];
+      out_row[off + i] = ((x - m) * rs) * g + b;
+    }
+#endif
+  }
+}
+#else
+
   // Reduce mean/var over the LAST dimension:
   // in:  [rows, cols] (cols reduced)
   // mean/var: [rows]
@@ -71,6 +198,7 @@ __cok__ {
       }
     }
   }
+#endif
 } // __cok__
 
 /* ============================================================

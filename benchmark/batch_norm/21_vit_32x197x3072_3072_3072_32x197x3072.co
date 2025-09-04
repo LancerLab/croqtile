@@ -28,6 +28,8 @@
 #ifndef BN_EPS
   #define BN_EPS 1e-5f
 #endif
+#define USE_VEC_BN
+#define NO_OOB_ACCESS
 
 /* ============================================================
  *                        Device kernels
