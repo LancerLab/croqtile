@@ -181,7 +181,7 @@ void choreo_info(const char *message) {
 %token <float> FPVAL
 %token <double> DFPVAL
 %token <std::string> TRUE FALSE
-%token <std::string> LT_STR GT_STR LPAREN_STR RPAREN_STR LBRACE_STR RBRACE_STR STAR_STR ASSIGN_STR AMP_STR AND_STR COMMA_STR
+%token <std::string> LT_STR GT_STR LPAREN_STR RPAREN_STR LBRACE_STR RBRACE_STR SCOPE_STR STAR_STR ASSIGN_STR AMP_STR AND_STR COMMA_STR
 %token <std::string> STRING VAL
 %token <std::string> HOST_CODE DEVICE_CODE
 %token <std::string> IDENTIFIER ATTR_CO DEVICE_EXPR
@@ -346,7 +346,7 @@ device_nested_type_list
     ;
 
 device_complex_type
-    :  device_complex_type DCOLS device_nested_type  {
+    :  device_complex_type SCOPE_STR device_nested_type  {
         auto type_str = $1->GetTypeStr() + "::" + $3->GetTypeStr();
         $1->SetTypeStr(type_str);
         $1->SetDataType(BaseType::UNKNOWN);
