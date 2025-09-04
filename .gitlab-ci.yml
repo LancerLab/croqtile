@@ -1,7 +1,15 @@
 stages:
+  - debug
   - check-in-tests
   - pre-release-tests
   - docgen
+
+debug:
+  stage: debug
+  script:
+    - whoami
+    - id
+    - ls -l /opt/gitlab-runner/ssh/config
 
 # TODO: make package release work
 #  - artifacts
@@ -39,11 +47,6 @@ gpu_test:
 
 # GCU2 Testing
 gcu2_test:
-  stage: .pre
-  script:
-    - whoami
-    - id
-    - ls -l /opt/gitlab-runner/ssh/config
   variables:
    GIT_SUBMODULE_STRATEGY: recursive
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
