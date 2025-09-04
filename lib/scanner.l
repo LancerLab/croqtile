@@ -242,7 +242,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                   return make_device_symbol();
                 }
               }
-  "::"        { if (accumulate_buffer(yytext, token_type::SCOPE_STR)) return make_device_symbol(); }
+  "::"        { if (accumulate_buffer(yytext, token_type::DCOLS)) return make_device_symbol(); }
   "*"         { if (accumulate_buffer(yytext, token_type::STAR_STR)) return make_device_symbol(); }
   "="         { if (accumulate_buffer(yytext, token_type::ASSIGN_STR)) {
                   if (device_param_paren_scope == 1 && device_param_brace_scope == 0)
@@ -541,6 +541,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "??"       return Choreo::Parser::make_DQES   (loc);
   ","        return Choreo::Parser::make_COMMA  (loc);
   ";"        return Choreo::Parser::make_SEMCOL (loc);
+  "::"       return Choreo::Parser::make_DCOLS  (loc);
   ":"        return Choreo::Parser::make_COL    (loc);
   "."        return Choreo::Parser::make_DOT    (loc);
   "#"        return Choreo::Parser::make_UBOUND (loc);
