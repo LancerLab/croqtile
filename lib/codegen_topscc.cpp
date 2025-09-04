@@ -2705,6 +2705,19 @@ fi
 
 TOPSCC=${TOPSCC_INSTALL}/bin/topscc
 TOPSCC_LIB=${TOPSCC_INSTALL}/lib
+
+)script";
+#ifdef __CHOREO_GCU_ACORE_DIR__
+  os << R"(if [[ -z "${ACORE_INSTALL}" ]]; then)" << "\n";
+  os << "  ACORE_INSTALL=" << STRINGIZE(__CHOREO_GCU_ACORE_DIR__) << "\n";
+  os << "fi\n";
+#endif
+  os << R"script(
+if [[ ! -z "${ACORE_INSTALL}" ]]; then
+  GCU_ACORE_INCLUDE=${ACORE_INSTALL}/include
+  GCU_ACORE_LIB_PATH=${ACORE_INSTALL}/lib
+  GCU_ACORE_LIB=libacoreop.bc
+fi
 )script";
 
   auto build_path = CreateUniquePath();
@@ -2774,6 +2787,7 @@ show_usage() {
   echo "  Environment Variables:"
   echo "   EXTRA_TARGET_CFLAGS: Extra target compilation flags"
   echo "   TOPSCC_INSTALL:      Topscc compiler installation path"
+  echo "   ACORE_INSTALL:       GCU Acore library installation path"
   exit 1
 }
 
@@ -2800,6 +2814,12 @@ option_detect() {
     os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";
   if (verbose) os << " -v"; // if it requires to be verbose
+#ifdef __CHOREO_GCU_ACORE_DIR__
+  os << R"( --tops-device-lib-path=${GCU_ACORE_LIB_PATH})";
+  os << R"( --tops-device-lib=${GCU_ACORE_LIB})";
+  os << R"( -I${GCU_ACORE_INCLUDE})";
+  os << R"( -D__ACORE_OP__ -fPIC)";
+#endif
   // always enclose
   os << " ${EXTRA_TARGET_CFLAGS}";
   std::filesystem::path cwd = std::filesystem::current_path();
@@ -2809,6 +2829,10 @@ option_detect() {
   for (auto inc_path : CCtx().GetIncPaths()) os << " -I" << inc_path;
   for (auto lib_path : CCtx().GetLibPaths()) os << " -L" << lib_path;
   for (auto lib : CCtx().GetLibs()) os << " -l" << lib;
+  for (auto macro : CCtx().GetCLMacros())
+    os << " -D" << macro.first
+       << (macro.second.empty() ? "" : ("=" + macro.second));
+
   os << "\"";
   os << "\noption_detect";
   if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
@@ -3421,7 +3445,8 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
       std::string bts{NameBaseType(sty->ElementType(), IsHost())};
       auto m_ty = sty->GetStorage();
       auto mem_attr = TopsParamStorage(m_ty);
-      if (!mem_attr.empty()) bts = mem_attr + " " + bts;
+      if (a->HasNote("annotate_as") && !mem_attr.empty())
+        bts = mem_attr + " " + bts;
       if (!no_decay_spanview || IsHost())
         oss << "(" << bts << "*)" << OpExprSTR(a, "", true, IsHost());
       else

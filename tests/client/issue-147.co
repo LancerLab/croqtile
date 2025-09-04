@@ -2,8 +2,8 @@
 
 #include <iostream>
 
-__device__ void vecAdd(__private__ int* lhs, __private__ int* rhs,
-                       __private__ int* out, int N) {
+__device__ void vecAdd(int* lhs, int* rhs,
+                       int* out, int N) {
   using tcle::simple_leaptr, tcle::altivector_step;
   auto input0_ptr = simple_leaptr<__vector int>(lhs);
   auto input1_ptr = simple_leaptr<__vector int>(rhs);
@@ -144,4 +144,4 @@ int main() {
   std::cout << "Test Passed\n" << std::endl;
 }
 
-// CHECK: vecAdd((__private__ int*)lfl.data(), (__private__ int*)rfl.data(), (__private__ int*)l1_out, (M % 1566720 % (512 > (M % 1566720 / 12 + 1535) / 1536 * 1536 ? 512 : (M % 1566720 / 12 + 1535) / 1536 * 1536)));
+// CHECK: vecAdd((int*)lfl.data(), (int*)rfl.data(), (int*)l1_out, (M % 1566720 % (512 > (M % 1566720 / 12 + 1535) / 1536 * 1536 ? 512 : (M % 1566720 / 12 + 1535) / 1536 * 1536)));

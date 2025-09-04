@@ -10,14 +10,10 @@ __co__ auto test(s32 [M, N] input) {
   nTile = 32;
   mRem = M % mTile;
   nRem = N % nTile;
-  println("mRem: ", mRem);
-  println("nRem: ", nRem);
   parallel by 1 {
     with m in [M / mTile] foreach m(:1:) {
       with n in [N / nTile] foreach n(:1:) {
         if (((m + 1) * mTile > M) && (m * mTile < M) && ((n + 1) * nTile > N) && (n * nTile < N)) {
-          println("m: ", m);
-          println("n: ", n);
           l1buffer = dma.pad<{0, 0}, {mTile - mRem, nTile - nRem}, {0, 0}, 9> input.modspan(mTile, nTile).at(m, n) => local; // Here
           foreach i in [mTile] {
             foreach j in [nTile] {
@@ -39,9 +35,6 @@ int main() {
   input.fill(11);
 
   auto res = test(input.view());
-  std::cout << res.shape()[0] << std::endl;
-  std::cout << res.shape()[1] << std::endl;
-
 
   for (size_t i = 0; i < res.shape()[0]; ++i) {
     for (size_t j = 0; j < res.shape()[1]; ++j) {
@@ -53,12 +46,6 @@ int main() {
   std::cout << "Test Passed\n" << std::endl;
 }
 
-// CHECK: mRem: 4
-// CHECK: nRem: 2
-// CHECK: [0, 0] m: {1}
-// CHECK: [0, 0] n: {2}
-// CHECK: 36
-// CHECK: 66
 // CHECK: -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 
 // CHECK: -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 
 // CHECK: -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 

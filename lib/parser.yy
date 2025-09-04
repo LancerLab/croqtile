@@ -134,7 +134,6 @@ void choreo_info(const char *message) {
   COMMA   ","
   SEMCOL  ";"
   COL     ":"
-  SCOPE   "::"
   DOT     "."
   LT      "<"
   GT      ">"
@@ -1950,7 +1949,7 @@ cstrings /* concatenate strings */
     ;
 
 id_with_namespace
-    : id_with_namespace SCOPE IDENTIFIER { $$ = $1 + "::" + $3; }
+    : id_with_namespace COL COL IDENTIFIER { $$ = $1 + "::" + $4; }
     | IDENTIFIER { $$ = $1; }
 
 inlcpp_stmt

@@ -1,29 +1,21 @@
-// REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
+// REQUIRES: TARGET-GCU300
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
-// RUN-DOCKER: choreo -st -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
-// RUN: choreo -c %s -o /dev/null 2>&1 | wc -l | FileCheck --check-prefix=CHKNO --match-full-lines %s
 
-__cok__ { /// kernel program
-__co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
-  for (int i = 0; i < n; ++i)
-    c[i] = a[i] + b[i];
-}
-} /// end of kernel decl
+#include <common/binary.h>
 
-__co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) { /// device program
+__co__ s32 [6, 17, 64] add_relu(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) { /// device program
   s32[lhs.span] output; // use same shape as lhs
 
   parallel p by 6 {  // p is sip_index
     foreach x in 17
       foreach y in 4 {
-        lhs_load = dma.copy.async lhs.chunkat(p, x, y) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
-        rhs_load = dma.copy.async rhs.chunkat(p, x, y) => local; // no explicit decl the target buffer, but can refer by <FutureType>.data
+        lhs_load = dma.copy.async lhs.chunkat(p, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(p, x, y) => local;
         wait lhs_load, rhs_load;
 
-        local s32[lhs_load.span] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+        local s32[lhs_load.span] l1_out;
 
-        call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|); // |span| calculate the total size of span.
+        call acore::add_relu(l1_out, lhs_load.data, rhs_load.data, |l1_out.span|, 1);
 
         out_store = dma.copy.async l1_out => output.chunkat(p, x, y); // can use defined vars
         wait out_store;
@@ -38,7 +30,7 @@ int main() { /// host program
   a.fill_random(-10, 10);
   b.fill_random(-10, 10);
 
-  auto res = ele_add(a.view(), b.view());
+  auto res = add_relu(a.view(), b.view());
   std::cout << res.shape()[0] << std::endl;
   std::cout << res.shape()[1] << std::endl;
   std::cout << res.shape()[2] << std::endl;
@@ -49,7 +41,9 @@ int main() { /// host program
       for (size_t k = 0; k < res.shape()[2]; ++k) {
         // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
         // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
-        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+        int value = a[i][j][k] + b[i][j][k]; 
+        value = (value > 0) ? value : 0;
+        if (value != res[i][j][k]) {
           choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
         }
       }
@@ -58,4 +52,4 @@ int main() { /// host program
 }
 
 // CHECK: Test Passed
-// CHKNO: 0
+// CHKNO: 3

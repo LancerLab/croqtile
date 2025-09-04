@@ -60,7 +60,8 @@ int main(int argc, char* argv[]) {
     } else {
       SimplePreprocessor spp(pps);
       if (!spp.Process(r.GetInputStream())) return 1;
-      if (!spp.ExtractDeviceKernel(cok_ss)) return 1;
+      if (CCtx().GetTarget() == CompileTarget::Topscc)
+        if (!spp.ExtractDeviceKernel(cok_ss)) return 1;
     }
   }
 
@@ -80,12 +81,13 @@ int main(int argc, char* argv[]) {
   if (CCtx().DropComments()) Scanner::SetRemoveComments();
 
   if (CCtx().PrintPassNames()) dbgs() << "|- parse program into AST.\n";
-
-  Scanner::SetLocationUpdate(false);
-  s.yyrestart(cok_ss);
-  if (cok_p.parse() != 0 || pctx.HasError()) {
-    errs() << "Parsing failed due to syntax errors." << std::endl;
-    return 1;
+  if (CCtx().GetTarget() == CompileTarget::Topscc) {
+    Scanner::SetLocationUpdate(false);
+    s.yyrestart(cok_ss);
+    if (cok_p.parse() != 0 || pctx.HasError()) {
+      errs() << "Parsing failed due to syntax errors." << std::endl;
+      return 1;
+    }
   }
 
   Scanner::SetLocationUpdate(true);

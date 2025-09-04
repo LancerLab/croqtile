@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -e %s | FileCheck %s
 #include "choreo.h"
 #include "devices.h"

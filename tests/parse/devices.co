@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -e -adf %s | FileCheck %s
 __cok__ {
   struct st {};

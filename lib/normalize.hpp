@@ -718,14 +718,16 @@ public:
         int idx = 0;
         for (auto& v : mv->AllValues()) {
           auto pv_bty = GetUnderlyingType(v->GetType());
-          if (pv_bty != BaseType::U32 && !AST::IsLiteral(*AST::Ref(v))) {
-            auto casted = GenCastExprNode(BaseType::U32, pv_bty, v);
-            VST_DEBUG({
-              dbgs() << "Cast '" << PSTR(v) << "' at " << v->LOC() << "\n\t'"
-                     << STR(pv_bty) << "' => '" << STR(BaseType::U32) << "'\n";
-            });
-            mv->SetValueAt(idx, casted);
-          }
+          if (pv_bty != BaseType::U32)
+            if (auto r = AST::Ref(v); r && !AST::IsLiteral(*r)) {
+              auto casted = GenCastExprNode(BaseType::U32, pv_bty, v);
+              VST_DEBUG({
+                dbgs() << "Cast '" << PSTR(v) << "' at " << v->LOC() << "\n\t'"
+                       << STR(pv_bty) << "' => '" << STR(BaseType::U32)
+                       << "'\n";
+              });
+              mv->SetValueAt(idx, casted);
+            }
           ++idx;
         }
       }
