@@ -49,9 +49,53 @@
 #ifndef NUM_THREAD
   #define NUM_THREAD 8   /* TODO: make it 12 */
 #endif
+#define USE_VEC_RELU
+#define NO_OOB_ACCESS
 
 /* ---------------- C-style device kernel ----------------*/
 __cok__ {
+
+#ifdef USE_VEC_RELU
+  __co_device__ void relu_kernel_2d(float* in, float* out, int rows, int cols) {
+    int VL = (int)(sizeof(vfloat)/sizeof(float));
+    int VC = cols / VL;
+    int R  = cols % VL;
+
+    for (int r = 0; r < rows; ++r) {
+      float* in_row  = in  + r * cols;
+      float* out_row = out + r * cols;
+
+      auto iptr = tcle::leaptr<vfloat, 1>(in_row , sizeof(vfloat));
+      auto optr = tcle::leaptr<vfloat, 1>(out_row, sizeof(vfloat));
+
+      for (int i = 0; i < VC; ++i) {
+        vfloat x = iptr.load<0>();
+        vfloat y = {0.0f};
+        {
+          int VL = (int)(sizeof(vfloat)/sizeof(float));
+          for (int t = 0; t < VL; ++t) y[t] = (x[t] > 0.0f) ? x[t] : 0.0f;
+        }
+        optr.store<0>(y);
+      }
+
+    #ifndef NO_OOB_ACCESS
+      if (R) {
+        vfloat x = iptr.load<0>();
+        int off = VC * VL;
+        for (int i = 0; i < R; ++i)
+          out_row[off + i] = (x[i] > 0.0f) ? x[i] : 0.0f;
+      }
+    #else
+      int off = VC * VL;
+      for (int i = 0; i < R; ++i) {
+        float v = in_row[off + i];
+        out_row[off + i] = (v > 0.0f) ? v : 0.0f;
+      }
+    #endif
+    }
+  }
+#else
+
   __co_device__ void relu_kernel_2d(float* in, float* out, int m, int n) {
     for (int i = 0; i < m; ++i) {
       int base = i * n;
@@ -61,6 +105,7 @@ __cok__ {
       }
     }
   }
+#endif
 }
 /* ------------------------------------------------------ */
 
