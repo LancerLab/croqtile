@@ -1368,7 +1368,8 @@ struct DeviceDataType final : public Type,
              IsValuePreservingCast(ty.GetBaseType(), data_type);
     }
     // spanned type with the same element type
-    if (SpannedType* spanned_ty = dyn_cast<SpannedType>(&ty); is_pointer) {
+    if (SpannedType* spanned_ty = dyn_cast<SpannedType>(&ty);
+        spanned_ty && is_pointer) {
       if (spanned_ty->ElementType() == BaseType::UNKNOWN) return false;
       if (data_type == BaseType::VOID ||
           IsValuePreservingCast(spanned_ty->ElementType(), data_type))

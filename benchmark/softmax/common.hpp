@@ -49,22 +49,35 @@ extern "C" inline void cpu_softmax2(float* input, float* output, int N, int C,
   }
 }
 
+#ifdef __CHECK__
+#define check true
+#else
+#define check false
+#endif
+
 #define TEST1(func, H, W, C)                                                   \
   auto input_##func = choreo::make_spandata<float>(H, W, C);                   \
   input_##func.fill_random(-10.0f, 10.0f);                                     \
   auto start_##func = std::chrono::high_resolution_clock::now();               \
   auto output_##func = func(input_##func.view());                              \
   auto end_##func = std::chrono::high_resolution_clock::now();                 \
-  float* cpu_res_##func = (float*)malloc(H * W * C * sizeof(float));           \
-  cpu_softmax1(input_##func.data(), cpu_res_##func, H, W, C);                  \
-  for (int i = 0; i < H * W * C; ++i) {                                        \
-    assert(fabs(output_##func.data[i] - cpu_res_##func[i]) < 1e-3);            \
+  if (check) {                                                                 \
+    float* cpu_res_##func = (float*)malloc(H * W * C * sizeof(float));         \
+    cpu_softmax1(input_##func.data(), cpu_res_##func, H, W, C);                \
+    for (int h = 0; h < H; ++h)                                                \
+      for (int w = 0; w < W; ++w)                                              \
+        for (int c = 0; c < C; ++c)                                            \
+          if (fabs(output_##func[h][w][c] -                                    \
+                   cpu_res_##func[h * W * C + w * C + c]) > 1e-3) {            \
+            choreo::choreo_assert(false, "Test Failed");                       \
+          }                                                                    \
+    printf("Test %s passed!\n", #func);                                        \
   }                                                                            \
-  printf("Test %s passed!\n", #func);                                          \
   auto duration_##func =                                                       \
       std::chrono::duration_cast<std::chrono::microseconds>(end_##func -       \
                                                             start_##func);     \
-  std::cout << "Execution time: " << duration_##func.count()                   \
+  std::cout << "Case " << #func                                                \
+            << " Execution time: " << duration_##func.count()                  \
             << " microseconds" << std::endl;
 
 #define TEST2(func, N, C, H, W)                                                \
@@ -73,14 +86,23 @@ extern "C" inline void cpu_softmax2(float* input, float* output, int N, int C,
   auto start_##func = std::chrono::high_resolution_clock::now();               \
   auto output_##func = func(input_##func.view());                              \
   auto end_##func = std::chrono::high_resolution_clock::now();                 \
-  float* cpu_res_##func = (float*)malloc(N * C * H * W * sizeof(float));       \
-  cpu_softmax2(input_##func.data(), cpu_res_##func, N, C, H, W);               \
-  for (int i = 0; i < N * C * H * W; ++i) {                                    \
-    assert(fabs(output_##func.data[i] - cpu_res_##func[i]) < 1e-3);            \
+  if (check) {                                                                 \
+    float* cpu_res_##func = (float*)malloc(N * C * H * W * sizeof(float));     \
+    cpu_softmax2(input_##func.data(), cpu_res_##func, N, C, H, W);             \
+    for (int n = 0; n < N; ++n)                                                \
+      for (int h = 0; h < H; ++h)                                              \
+        for (int w = 0; w < W; ++w)                                            \
+          for (int c = 0; c < C; ++c)                                          \
+            if (fabs(output_##func[n][c][h][w] -                               \
+                     cpu_res_##func[n * C * H * W + c * H * W + h * W + w]) >  \
+                1e-3) {                                                        \
+              choreo::choreo_assert(false, "Test Failed");                     \
+            }                                                                  \
+    printf("Test %s passed!\n", #func);                                        \
   }                                                                            \
-  printf("Test %s passed!\n", #func);                                          \
   auto duration_##func =                                                       \
       std::chrono::duration_cast<std::chrono::microseconds>(end_##func -       \
                                                             start_##func);     \
-  std::cout << "Execution time: " << duration_##func.count()                   \
+  std::cout << "Case " << #func                                                \
+            << " Execution time: " << duration_##func.count()                  \
             << " microseconds" << std::endl;

@@ -17,9 +17,9 @@ __co__ auto max_pool2d4(f32 [64, channels, height, width] input) {
       foreach {i, j} in [l1_out.span(0), l1_out.span(1)] {
         foreach {h, w} in [l1_out.span(2), l1_out.span(3)] {
           f32 max_val = l1_input.data.at(i, j, h * 2, w * 2);
-          foreach {dh, dw} in [2, 32] {
-            max_val = max_(max_val, l1_input.data.at(i, j, h * 2 + dh, w * 2 + dw));
-          }
+          max_val = max_(max_val, l1_input.data.at(i, j, h * 2 + 1, w * 2));
+          max_val = max_(max_val, l1_input.data.at(i, j, h * 2, w * 2 + 1));
+          max_val = max_(max_val, l1_input.data.at(i, j, h * 2 + 1, w * 2 + 1));
           l1_out.at(i, j, h, w) = max_val;
         }
       }

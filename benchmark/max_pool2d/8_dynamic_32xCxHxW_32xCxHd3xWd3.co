@@ -28,6 +28,6 @@ __co__ auto max_pool2d8(f32 [32, channels, height, width] input) {
   return output;
 }
 int main() {
-  TESTP(max_pool2d8, 32, 16, 36, 36);
+  TESTP2(max_pool2d8, 32, 16, 36, 36, 3, 3);
   return 0;
 }

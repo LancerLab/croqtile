@@ -29,6 +29,6 @@ __co__ auto max_pool2d13(f32 [batch_size, channels, 128, 128] input) {
 
 
 int main() {
-  TESTP(max_pool2d13, 16, 16, 128, 128);
+  TESTP2(max_pool2d13, 16, 16, 128, 128, 4, 4);
   return 0;
 }

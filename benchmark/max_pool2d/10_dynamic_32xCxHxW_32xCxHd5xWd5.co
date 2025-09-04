@@ -29,6 +29,6 @@ __co__ auto max_pool2d10(f32 [32, channels, height, width] input) {
 }
 
 int main() {
-  TESTP(max_pool2d10, 32, 16, 35, 35);
+  TESTP2(max_pool2d10, 32, 16, 35, 35, 5, 5);
   return 0;
 }

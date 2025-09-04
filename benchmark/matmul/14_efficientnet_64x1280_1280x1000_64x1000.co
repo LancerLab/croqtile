@@ -8,10 +8,8 @@ __co__ auto matmul14(f32 [64, 1280] lhs, f32 [1280, 1000] rhs) {
       local f32[lhs.span(0)/#m_tile/#p, rhs.span(1)/#n_tile/#q] l1_out {0.0f};
       foreach {k_tile} in [16] {
         l1_a = dma.copy lhs.chunkat(p#m_tile, k_tile) => local;
-        l1_b = dma.copy rhs.chunkat(k_tile, q#n_tile) => local;
-        foreach {i, j, k} in [l1_a.span(0), l1_b.span(1), l1_a.span(1)] {
-          l1_out.at(i, j) += l1_a.data.at(i, k) * l1_b.data.at(k, j);
-        }
+        l1_b = dma.transp<1,0> rhs.chunkat(k_tile, q#n_tile) => local;
+        call k_matmul(l1_a.data, l1_b.data, l1_out, l1_a.span(0), l1_b.span(0), l1_a.span(1));
       }
       dma.copy l1_out => output.chunkat(p#m_tile, q#n_tile);
     }

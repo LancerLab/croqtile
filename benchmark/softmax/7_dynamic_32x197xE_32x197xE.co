@@ -35,6 +35,6 @@ __co__ auto softmax7(f32 [32, 197, embed_dim] input) {
 }
 
 int main() {
-  TEST(softmax7, 32, 197, 768);
+  TEST1(softmax7, 32, 197, 768);
   return 0;
 }

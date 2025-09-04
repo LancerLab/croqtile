@@ -10,7 +10,7 @@ __co__ auto softmax5(f32 [batch_size, 1280, height, width] input) {
   f32 [input.span] output;
   parallel p by 4 {
     foreach batch_idx in [input.span(0)/#p] {
-      foreach {h_tile, w_tile} in [10, 10] {
+      foreach {h_tile, w_tile} in [2, 2] {
         l1_input = dma.copy input.chunkat(batch_idx#p, _, h_tile, w_tile) => local;
         local f32[l1_input.span] l1_out;
         foreach {i, j} in [l1_input.span(2), l1_input.span(3)] {
