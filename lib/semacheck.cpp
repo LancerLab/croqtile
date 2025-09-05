@@ -351,13 +351,13 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     } else {
       auto& dim_values = tc->dim_values;
       for (size_t i = 0; i < dim_values.size(); ++i) {
-        if (!IsValueItemEqual(f_shape.ValueAt(dim_values[i]),
-                              t_shape.ValueAt(i))) {
-          Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
-                              ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
-                              ").");
-          break;
-        }
+        auto eq =
+            sbe::oc_eq(f_shape.ValueAt(dim_values[i]), t_shape.ValueAt(i));
+        assert(IsValidValueItem(eq));
+        auto message = "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                       ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
+                       ") at the " + Ordinal(i + 1) + " dim.";
+        EmitAssertion(eq, message, n.from->LOC(), n.from);
       }
     }
   } else if (n.operation == ".pad") {
@@ -464,11 +464,12 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                               "noncontiguous manner.");
       } else if (!val) {
         if (i != last_tiling)
-          Warning(sop->LOC(), "There are more than one tiling executed in "
+          Warning(sop->LOC(), "There may have more than one tiling executed in "
                               "noncontiguous manner.");
         if (has_reshape)
-          Warning(sop->LOC(), "The reshape operation inside DMA expression is "
-                              "executed on a noncontiguous tiling result.");
+          Warning(sop->LOC(),
+                  "The reshape operation inside DMA expression maybe is "
+                  "executed on a noncontiguous tiling result.");
       }
       if (has_noncontiguous && sop->SpecifyReshape())
         Warning(sop->LOC(), "The reshape operation inside DMA expression is "

@@ -506,8 +506,8 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
 
   if ((isa<ScalarIntegerType>(nty) || isa<ScalarFloatType>(nty)) &&
       cur_vn.IsValid()) {
-    // mutables do not have constant values
-    if (IsMutable(*nty)) {
+    // mutables or vars of float type do not have constant values
+    if (IsMutable(*nty) || isa<ScalarFloatType>(nty)) {
       auto vi = sbe::sym(InScopeName(name));
       VST_DEBUG(dbgs() << " |-<symval> " << InScopeName(name) << ": " << STR(vi)
                        << "\n");

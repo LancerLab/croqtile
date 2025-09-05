@@ -485,6 +485,7 @@ bool TypeInference::Visit(AST::Expr& n) {
           assert(isa<MDSpanType>(pty) && "incorrect type annotated.");
         }
         SetNodeType(n, pty);
+        cur_type = n.GetType();
         return true;
       } else {
         Warning(n.LOC(),
@@ -502,6 +503,7 @@ bool TypeInference::Visit(AST::Expr& n) {
     }
 
     SetNodeType(n, ref->GetType());
+    cur_type = n.GetType();
     return true;
   }
 
@@ -516,43 +518,42 @@ bool TypeInference::Visit(AST::Expr& n) {
       else
         choreo_unreachable("ubound type '" + AST::TYPE_STR(n.GetR()) +
                            "' is unexpected.");
-      return true;
     } else if (n.op == "sizeof") {
       SetNodeType(n, MakeIntegerType());
-      cur_type = n.GetType();
-      return true;
     } else if (n.op == "dataof") {
       auto ref = cast<AST::Expr>(n.GetR())->GetReference();
       auto id = cast<AST::Identifier>(ref);
       SetNodeType(n, GetSymbolType(id->LOC(), id->name + ".data"));
-      return true;
     } else if (n.op == "addrof") {
       // earlysema has set it already
       assert(isa<AddrType>(NodeType(n)));
       return true;
     } else if (n.op == "!") {
       SetNodeType(n, MakeBooleanType());
-      return true;
     } else if (n.op == "++" || n.op == "--") {
       SetNodeType(n, NodeType(*n.GetR()));
-      return true;
     } else if (n.op == "~") {
       assert(CanYieldAnInteger(NodeType(*n.GetR())));
       SetNodeType(n, MakeIntegerType(true));
     } else if (n.op == "cast") {
       auto cexpr = cast<AST::CastExpr>(&n);
       SetNodeType(n, MakeScalarType(cexpr->ToType(), true));
-    } else
+    } else {
       choreo_unreachable("type inference is yet to implement for '" + n.op +
                          "'.");
-  }
+    }
+    cur_type = n.GetType();
+    return true;
+  } // AST::Expr::Unary
 
   if (n.GetForm() == AST::Expr::Binary) {
     if (n.op == "dimof") {
       SetNodeType(n, MakeIntegerType());
+      cur_type = n.GetType();
       return true;
     } else if (n.op == "elemof") {
       assert(isa<EventType>(NodeType(n)) && "only support elemof event array.");
+      cur_type = n.GetType();
       return true;
     }
 
@@ -564,6 +565,7 @@ bool TypeInference::Visit(AST::Expr& n) {
           (IsActualBoundedIntegerType(pty_rhs) && ConvertibleToInt(pty_lhs)) ||
           (CanYieldAnInteger(pty_lhs) && CanYieldAnInteger(pty_rhs))) {
         SetNodeType(n, MakeBooleanType());
+        cur_type = n.GetType();
         return true;
       } else {
         Error1(n.LOC(), "The operands of the expression cannot undergo '" +
@@ -576,6 +578,7 @@ bool TypeInference::Visit(AST::Expr& n) {
     if (n.IsLogical()) {
       if (isa<BooleanType>(pty_lhs) && isa<BooleanType>(pty_rhs)) {
         SetNodeType(n, MakeBooleanType());
+        cur_type = n.GetType();
         return true;
       } else {
         Error1(n.LOC(), "The operands of the expression cannot undergo '" +
@@ -588,6 +591,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
       if (n.op == "concat") {
         SetNodeType(n, MakeMDSpanType(n.s));
+        cur_type = n.GetType();
         return true;
       }
       if (pty_lhs->Dims() == pty_rhs->Dims()) {
@@ -614,6 +618,7 @@ bool TypeInference::Visit(AST::Expr& n) {
     } else if (isa<MDSpanType>(pty_lhs) && isa<MDSpanType>(pty_rhs)) {
       if (n.op == "concat") {
         SetNodeType(n, MakeMDSpanType(n.s));
+        cur_type = n.GetType();
         return true;
       }
       if (!((n.op == "/") || (n.op == "%") || (n.op == "cdiv"))) {
@@ -638,6 +643,7 @@ bool TypeInference::Visit(AST::Expr& n) {
             !cast<ITupleType>(pty_lhs)->IsDimValid())
           SetNodeType(n, MakeUninitITupleType());
         SetNodeType(n, MakeITupleType(pty_rhs->Dims() + pty_lhs->Dims()));
+        cur_type = n.GetType();
         return true;
       }
       if (pty_lhs->Dims() == pty_rhs->Dims()) {
@@ -652,14 +658,11 @@ bool TypeInference::Visit(AST::Expr& n) {
       }
     } else if (isa<ITupleType>(pty_rhs) && isa<ScalarIntegerType>(pty_lhs)) {
       SetNodeType(n, pty_rhs);
-      cur_type = n.GetType();
     } else if (isa<ITupleType>(pty_lhs) && isa<ScalarIntegerType>(pty_rhs)) {
       SetNodeType(n, pty_lhs);
-      cur_type = n.GetType();
     } else if ((isa<MDSpanType>(pty_rhs) && isa<ScalarIntegerType>(pty_lhs)) ||
                (isa<MDSpanType>(pty_lhs) && isa<ScalarIntegerType>(pty_rhs))) {
       SetNodeType(n, MakeMDSpanType(n.s));
-      cur_type = n.GetType();
     } else if (isa<BoundedITupleType>(pty_lhs) &&
                isa<ScalarIntegerType>(pty_rhs)) {
       if (n.op == "#-" || n.op == "#+")
@@ -672,8 +675,6 @@ bool TypeInference::Visit(AST::Expr& n) {
         SetNodeType(n, MakeIntegerType(true));
       } else
         SetNodeType(n, pty_lhs);
-
-      cur_type = n.GetType();
     } else if (isa<BoundedITupleType>(pty_lhs) &&
                isa<BoundedITupleType>(pty_rhs)) {
       // to support `chunkat(x, y#z)`
@@ -689,7 +690,6 @@ bool TypeInference::Visit(AST::Expr& n) {
         SetNodeType(n, MakeBoundedITupleType(Shape(1, ub)));
       }
       // else the type is decayed. use the type of earlysema's
-      cur_type = n.GetType();
     } else if (n.IsArith() && !n.IsUBArith() && CanYieldAnInteger(pty_lhs) &&
                CanYieldAnInteger(pty_rhs)) {
       // use the type inferred by early sema
@@ -702,9 +702,9 @@ bool TypeInference::Visit(AST::Expr& n) {
       Error1(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                           "' binary operation.");
       return false;
-    } else
+    } else {
       SetNodeType(n, n.GetR()->GetType());
-
+    }
     cur_type = n.GetType();
     return true;
   } // AST::Expr::Binary
@@ -738,6 +738,7 @@ bool TypeInference::Visit(AST::Expr& n) {
           "inference of the current ternary operation is not implemented.");
     }
   } // AST::Expr::Ternary
+
   return true;
 }
 
