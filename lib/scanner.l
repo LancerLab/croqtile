@@ -200,18 +200,18 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   \n+         {}
   "//".*      {}
   {comments}  {}
-  "<"         { if (accumulate_buffer(yytext, token_type::LT_STR)) return make_device_symbol(); }
-  ">"         { if (accumulate_buffer(yytext, token_type::GT_STR)) return make_device_symbol(); }
+  "<"         { if (accumulate_buffer(yytext, token_type::LT)) return make_device_symbol(); }
+  ">"         { if (accumulate_buffer(yytext, token_type::GT)) return make_device_symbol(); }
   "("         { device_param_paren_scope++;
-                if (accumulate_buffer(yytext, token_type::LPAREN_STR)) return make_device_symbol(); }
-  ")"         { if (accumulate_buffer(yytext, token_type::RPAREN_STR)) {
+                if (accumulate_buffer(yytext, token_type::LPAREN)) return make_device_symbol(); }
+  ")"         { if (accumulate_buffer(yytext, token_type::RPAREN)) {
                   device_param_paren_scope--;
                   return make_device_symbol();
                 } else
                   device_param_paren_scope--;
               }
   "{"         { scope++; device_param_brace_scope++;
-                if (accumulate_buffer(yytext, token_type::LBRACE_STR)) {
+                if (accumulate_buffer(yytext, token_type::LBRACE)) {
                   if (device_param_paren_scope == 0) {
                     if (device_param_brace_scope != 1)
                       Choreo::Scanner::Error(loc, "unmatched '{' in device function declaration.");
@@ -225,7 +225,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                 }
               }
   "}"         { scope--;
-                if (accumulate_buffer(yytext, token_type::RBRACE_STR)) {
+                if (accumulate_buffer(yytext, token_type::RBRACE)) {
                   device_param_brace_scope--;
                   return make_device_symbol();
                 } else
@@ -242,28 +242,28 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                   return make_device_symbol();
                 }
               }
-  "::"        { if (accumulate_buffer(yytext, token_type::SCOPE_STR)) return make_device_symbol(); }
-  "*"         { if (accumulate_buffer(yytext, token_type::STAR_STR)) return make_device_symbol(); }
-  "="         { if (accumulate_buffer(yytext, token_type::ASSIGN_STR)) {
+  "::"        { if (accumulate_buffer(yytext, token_type::DCOLS)) return make_device_symbol(); }
+  "*"         { if (accumulate_buffer(yytext, token_type::STAR)) return make_device_symbol(); }
+  "="         { if (accumulate_buffer(yytext, token_type::ASSIGN)) {
                   if (device_param_paren_scope == 1 && device_param_brace_scope == 0)
                     accumulate_expr_buffer = true;
                   return make_device_symbol();
                 }
               }
-  "&"         { if (accumulate_buffer(yytext, token_type::AMP_STR)) return make_device_symbol(); }
-  "&&"        { if (accumulate_buffer(yytext, token_type::AND_STR)) return make_device_symbol(); }
-  ","         { if (accumulate_buffer(yytext, token_type::COMMA_STR)) return make_device_symbol(); }
+  "&"         { if (accumulate_buffer(yytext, token_type::AMP)) return make_device_symbol(); }
+  "&&"        { if (accumulate_buffer(yytext, token_type::AND)) return make_device_symbol(); }
+  ","         { if (accumulate_buffer(yytext, token_type::COMMA)) return make_device_symbol(); }
   "signed"    { if (accumulate_buffer(yytext, token_type::SIGNED)) return make_device_symbol(); }
   "unsigned"  { if (accumulate_buffer(yytext, token_type::UNSIGNED)) return make_device_symbol(); }
   "auto"      { if (accumulate_buffer(yytext, token_type::AUTO)) return make_device_symbol(); }
-  "void"      { if (accumulate_buffer(yytext, token_type::VOID_STR)) return make_device_symbol(); }
-  "bool"      { if (accumulate_buffer(yytext, token_type::BOOL_STR)) return make_device_symbol(); }
-  "char"      { if (accumulate_buffer(yytext, token_type::CHAR_STR)) return make_device_symbol(); }
-  "short"     { if (accumulate_buffer(yytext, token_type::SHORT_STR)) return make_device_symbol(); }
-  "int"       { if (accumulate_buffer(yytext, token_type::INT_STR)) return make_device_symbol(); }
-  "long long" { if (accumulate_buffer(yytext, token_type::LONG_STR)) return make_device_symbol(); }
-  "float"     { if (accumulate_buffer(yytext, token_type::FLOAT_STR)) return make_device_symbol(); }
-  "double"    { if (accumulate_buffer(yytext, token_type::DOUBLE_STR)) return make_device_symbol(); }
+  "void"      { if (accumulate_buffer(yytext, token_type::VOID)) return make_device_symbol(); }
+  "bool"      { if (accumulate_buffer(yytext, token_type::BOOL)) return make_device_symbol(); }
+  "char"      { if (accumulate_buffer(yytext, token_type::S8)) return make_device_symbol(); }
+  "short"     { if (accumulate_buffer(yytext, token_type::S16)) return make_device_symbol(); }
+  "int"       { if (accumulate_buffer(yytext, token_type::INT)) return make_device_symbol(); }
+  "long long" { if (accumulate_buffer(yytext, token_type::S64)) return make_device_symbol(); }
+  "float"     { if (accumulate_buffer(yytext, token_type::F32)) return make_device_symbol(); }
+  "double"    { if (accumulate_buffer(yytext, token_type::F64)) return make_device_symbol(); }
   "const"     { if (accumulate_buffer(yytext, token_type::CONST)) return make_device_symbol(); }
   "constexpr" { if (accumulate_buffer(yytext, token_type::CONST)) return make_device_symbol(); }
   "constval"  { if (accumulate_buffer(yytext, token_type::CONST)) return make_device_symbol(); }
@@ -645,7 +645,7 @@ bool accumulate_buffer(const char* text, token_type current_token_id) {
     if (text[0] != '=')
       device_expr_buffer += text;
 
-    if (token_id == token_type::ASSIGN_STR) {
+    if (token_id == token_type::ASSIGN) {
       return true;
     }
     return false; // continue accumulating
@@ -654,7 +654,25 @@ bool accumulate_buffer(const char* text, token_type current_token_id) {
   return true;
 }
 
+typename Choreo::BaseType STR2BT(std::string s) {
+  if (s == "void") return Choreo::BaseType::VOID;
+  if (s == "float") return Choreo::BaseType::F32;
+  if (s == "double") return Choreo::BaseType::F64;
+  if (s == "long long") return Choreo::BaseType::S64;
+  if (s == "int") return Choreo::BaseType::S32;
+  if (s == "short") return Choreo::BaseType::S16;
+  if (s == "char") return Choreo::BaseType::S8;
+  if (s == "bool") return Choreo::BaseType::BOOL;
+
+  return Choreo::BaseType::UNKNOWN; // default to void
+}
+
 Choreo::Parser::symbol_type make_device_symbol() {
+  if (token_id >= token_type::ASSIGN && token_id <= token_type::INLCPP) {
+    return Choreo::Parser::symbol_type (token_id, std::move(loc));
+  } else if (token_id >= token_type::F64 && token_id <= token_type::INT) {
+    return Choreo::Parser::symbol_type (token_id, STR2BT(device_token_buffer), std::move(loc));
+  }
   return Choreo::Parser::symbol_type (token_id, std::move(device_token_buffer), std::move(loc));
 }
 

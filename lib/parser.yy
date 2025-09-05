@@ -181,11 +181,10 @@ void choreo_info(const char *message) {
 %token <float> FPVAL
 %token <double> DFPVAL
 %token <std::string> TRUE FALSE
-%token <std::string> LT_STR GT_STR LPAREN_STR RPAREN_STR LBRACE_STR RBRACE_STR SCOPE_STR STAR_STR ASSIGN_STR AMP_STR AND_STR COMMA_STR
 %token <std::string> STRING VAL
 %token <std::string> HOST_CODE DEVICE_CODE
 %token <std::string> IDENTIFIER ATTR_CO DEVICE_EXPR
-%token <std::string> VOID_STR BOOL_STR CHAR_STR SHORT_STR INT_STR LONG_STR FLOAT_STR DOUBLE_STR CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED TYPENAME DEVICE_TEMPLATE
+%token <std::string> CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED TYPENAME DEVICE_TEMPLATE
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
 %token <Choreo::Storage> SUBLOCAL LOCAL SHARED GLOBAL
@@ -301,29 +300,29 @@ host_code
     ;
 
 device_base_type
-    : BOOL_STR { $$ = MakeDeviceDataType($1, BaseType::BOOL); }
-    | CHAR_STR { $$ = MakeDeviceDataType($1, BaseType::S8); }
-    | SHORT_STR { $$ = MakeDeviceDataType($1, BaseType::S16); }
-    | INT_STR { $$ = MakeDeviceDataType($1, BaseType::S32); }
-    | LONG_STR { $$ = MakeDeviceDataType($1, BaseType::S64); }
-    | SIGNED CHAR_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::S8); }
-    | SIGNED SHORT_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::S16); }
-    | SIGNED INT_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::S32); }
-    | SIGNED LONG_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::S64); }
-    | UNSIGNED CHAR_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::U8); }
-    | UNSIGNED SHORT_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::U16); }
-    | UNSIGNED INT_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::U32); }
-    | UNSIGNED LONG_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::U64); }
-    | FLOAT_STR { $$ = MakeDeviceDataType($1, BaseType::F32); }
-    | DOUBLE_STR { $$ = MakeDeviceDataType($1, BaseType::F64); }
-    | VOID_STR { $$ = MakeDeviceDataType($1, BaseType::VOID); }
+    : BOOL { $$ = MakeDeviceDataType("bool",$1); }
+    | S8 { $$ = MakeDeviceDataType("char", $1); }
+    | S16 { $$ = MakeDeviceDataType("short", $1); }
+    | INT { $$ = MakeDeviceDataType("int", $1); }
+    | S64 { $$ = MakeDeviceDataType("long long", $1); }
+    | SIGNED S8 { $$ = MakeDeviceDataType($1 + " char", BaseType::S8); }
+    | SIGNED S16 { $$ = MakeDeviceDataType($1 + " short", BaseType::S16); }
+    | SIGNED INT { $$ = MakeDeviceDataType($1 + " int", BaseType::S32); }
+    | SIGNED S64 { $$ = MakeDeviceDataType($1 + " long long", BaseType::S64); }
+    | UNSIGNED S8 { $$ = MakeDeviceDataType($1 + " char", BaseType::U8); }
+    | UNSIGNED S16 { $$ = MakeDeviceDataType($1 + " short", BaseType::U16); }
+    | UNSIGNED INT { $$ = MakeDeviceDataType($1 + " int", BaseType::U32); }
+    | UNSIGNED S64 { $$ = MakeDeviceDataType($1 + " long long", BaseType::U64); }
+    | F32 { $$ = MakeDeviceDataType("float", $1); }
+    | F64 { $$ = MakeDeviceDataType("double", $1); }
+    | VOID { $$ = MakeDeviceDataType("void", $1); }
     | IDENTIFIER { $$ = MakeDeviceDataType($1, BaseType::UNKNOWN); }
     | SIGNED IDENTIFIER { $$ = MakeDeviceDataType($1, BaseType::UNKNOWN); }
     | UNSIGNED IDENTIFIER { $$ = MakeDeviceDataType($1, BaseType::UNKNOWN); }
     ;
 
 device_nested_type
-    : IDENTIFIER LT_STR device_nested_type_list GT_STR {
+    : IDENTIFIER LT device_nested_type_list GT {
         auto type_str = $1 + "<" + $3->GetTypeStr() + ">";
         $3->SetTypeStr(type_str);
         $3->SetDataType(BaseType::UNKNOWN);
@@ -336,7 +335,7 @@ device_nested_type
 
 device_nested_type_list
     : /* Empty */ { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
-    | device_nested_type_list COMMA_STR device_complex_type {
+    | device_nested_type_list COMMA device_complex_type {
         auto type_str = $3->GetTypeStr() + ", " + $3->GetTypeStr();
         $3->SetTypeStr(type_str);
         $3->SetDataType(BaseType::UNKNOWN);
@@ -346,7 +345,7 @@ device_nested_type_list
     ;
 
 device_complex_type
-    :  device_complex_type SCOPE_STR device_nested_type  {
+    :  device_complex_type DCOLS device_nested_type  {
         auto type_str = $1->GetTypeStr() + "::" + $3->GetTypeStr();
         $1->SetTypeStr(type_str);
         $1->SetDataType(BaseType::UNKNOWN);
@@ -359,7 +358,7 @@ device_complex_type
 
 device_type
     : device_complex_type { $$ = $1; }
-    | device_type STAR_STR {
+    | device_type STAR {
         auto type_str = $1->GetTypeStr() + " *";
         $1->SetTypeStr(type_str);
         if (!$1->IsNaiveType() || $1->IsPointerType()) {
@@ -369,17 +368,17 @@ device_type
         $1->SetPointerType(true);
         $$ = $1;
       }
-    | device_type AMP_STR {
+    | device_type AMP {
         auto type_str = $1->GetTypeStr() + " &";
         $1->SetTypeStr(type_str);
         $$ = $1;
       }
-    | device_type AND_STR {
+    | device_type AND {
         auto type_str = $1->GetTypeStr() + " &&";
         $1->SetTypeStr(type_str);
         $$ = $1;
       }
-    | device_type CONST STAR_STR {
+    | device_type CONST STAR {
         auto type_str =$1->GetTypeStr() + " const *";
         $1->SetTypeStr(type_str);
         if (!$1->IsNaiveType() || $1->IsPointerType()) {
@@ -403,24 +402,24 @@ device_type
 device_params
     : /* Empty */  { $$ = std::vector<AST::ptr<Choreo::DeviceDataType>>(); }
     | device_param { $$ = std::vector<AST::ptr<Choreo::DeviceDataType>>({$1}); }
-    | device_params COMMA_STR device_param { $1.push_back($3); $$ = $1; }
+    | device_params COMMA device_param { $1.push_back($3); $$ = $1; }
     ;
 
 device_param
     : device_type { $$ = $1; }
     | device_type IDENTIFIER { $$ = $1; }
-    | device_type IDENTIFIER ASSIGN_STR DEVICE_EXPR { $$ = $1; $$->init_expr = $4; }
+    | device_type IDENTIFIER ASSIGN DEVICE_EXPR { $$ = $1; $$->init_expr = $4; }
     | device_attr device_param { $$ = $2; $$->attr = $1; }
     ;
 
 device_attr_lists
-    : LPAREN_STR device_attr_lists RPAREN_STR {
+    : LPAREN device_attr_lists RPAREN {
         $$ = "(" + $2 + ")";
       }
-    | IDENTIFIER COMMA_STR device_attr_lists {
+    | IDENTIFIER COMMA device_attr_lists {
         $$ = $1 + ", " + $3;
       }
-    | IDENTIFIER LPAREN_STR device_attr_lists RPAREN_STR {
+    | IDENTIFIER LPAREN device_attr_lists RPAREN {
         $$ = $1 + "(" + $3 + ")";
       }
     | IDENTIFIER {
@@ -441,13 +440,13 @@ device_attr
     ;
 
 device_function_decl
-    : device_type IDENTIFIER LPAREN_STR device_params RPAREN_STR {
+    : device_type IDENTIFIER LPAREN device_params RPAREN {
         $$ = AST::Make<AST::DeviceFunctionDecl>(@2);
         $$->name = $2;
         $$->ret_type = $1;
         $$->param_types = $4;
       }
-    | device_type device_attr IDENTIFIER LPAREN_STR device_params RPAREN_STR {
+    | device_type device_attr IDENTIFIER LPAREN device_params RPAREN {
         $$ = AST::Make<AST::DeviceFunctionDecl>(@2);
         $$->name = $3;
         $$->ret_type = $1;
