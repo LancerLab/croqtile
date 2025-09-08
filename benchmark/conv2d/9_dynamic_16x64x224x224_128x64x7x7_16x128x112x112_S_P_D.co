@@ -1,7 +1,6 @@
 #include "choreo.h"
 #include "common.h"
 
-#define _padding 3
 __co__ auto CONV2D(f32 [16, 64, 224, 224] i, f32 [128, 64, 7, 7] w, int stride, int padding, int dilation) {
   batch_size = i.span(0);
   channel_in = i.span(1);
@@ -13,14 +12,12 @@ __co__ auto CONV2D(f32 [16, 64, 224, 224] i, f32 [128, 64, 7, 7] w, int stride, 
 
   f32 [batch_size, channel_out, out_h, out_w] o;
   
-  assert(_padding == padding, "expect the padding values to be equal.");
-
   parallel p by 2 : shared {
     parallel q by 4 : local {
       foreach {co, n} in [channel_out, batch_size / #p / #q] {
         local f32 [out_h, out_w] Y{0.0f};
         foreach ci in [channel_in] {
-          il = dma.pad<{0, 0, _padding, _padding}, {0, 0, _padding, _padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p#q#n, ci, _, _) => local;
+          il = dma.pad<{0, 0, padding, padding}, {0, 0, padding, padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p#q#n, ci, _, _) => local;
           ws = dma.copy w.chunkat(co, ci, _, _) => local;
           foreach {ho, wo} in [out_h, out_w] {
             f32 sum = 0.0f;
@@ -40,5 +37,5 @@ __co__ auto CONV2D(f32 [16, 64, 224, 224] i, f32 [128, 64, 7, 7] w, int stride, 
 }
 
 int main() {
-  test("CONV2D", CONV2D, {16, 64, 224, 224}, {128, 64, 7, 7}, 2, 3, 1);
+  test_dynamic("CONV2D", CONV2D, {16, 64, 224, 224}, {128, 64, 7, 7}, 2, 3, 1);
 }

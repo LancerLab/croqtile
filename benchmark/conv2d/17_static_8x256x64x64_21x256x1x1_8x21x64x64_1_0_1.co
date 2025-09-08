@@ -1,8 +1,11 @@
 #include "choreo.h"
 #include "common.h"
 
-#define _padding 0
-__co__ auto CONV2D(f32 [8, 256, 64, 64] i, f32 [21, 256, 1, 1] w, int stride, int padding, int dilation) {
+#define stride 1
+#define padding 0
+#define dilation 1
+
+__co__ auto CONV2D(f32 [8, 256, 64, 64] i, f32 [21, 256, 1, 1] w) {
   N = i.span(0);
   Cin = i.span(1);
   H = i.span(2);
@@ -27,12 +30,7 @@ __co__ auto CONV2D(f32 [8, 256, 64, 64] i, f32 [21, 256, 1, 1] w, int stride, in
 
     foreach n in [N / #p] {
       // 1. im2col
-      i_s_padded = dma.pad<{0, 0, padding, padding}, {0, 0, padding, padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p#n, _, _, _) => shared;
-      with {i, j} in [Hpad, Wpad] {
-        foreach i, j {
-          dma.copy i_s_padded.chunkat(_, _, i, j).subspan(_, _, Kh, Kw) => A.subspan(1, _).at(i*Wo + j, 0).span_as(1, Cin, Kh, Kw);
-        }
-      }
+      dma.transp<2, 3, 1, 0> i.chunkat(p#n, _, _, _) => A.span_as(Ho, Wo, Cin, 1);
       // 2. GEMM: C = A x B, result shape: M x Cout
       parallel q by 8 : local {
         l1_A = dma.copy A.chunkat(q, _) => local;

@@ -119,7 +119,7 @@ __co_device__ extern "C" void k_matmul(float * lhs, float * rhs, float * out, in
 }
 
 
-void test(std::string name, std::function<spanned_data<float, 4>(spanned_view<float, 4UL>, spanned_view<float, 4UL>, int, int, int)> f, std::vector<int> ids, std::vector<int> kds, int stride, int padding, int dilation) {
+void test_dynamic(std::string name, std::function<spanned_data<float, 4>(spanned_view<float, 4UL>, spanned_view<float, 4UL>, int, int, int)> f, std::vector<int> ids, std::vector<int> kds, int stride, int padding, int dilation) {
   auto input = choreo::make_spandata<choreo::f32>(ids[0], ids[1], ids[2], ids[3]);
   // input.fill(1.0f);
   input.fill_random(-1.0f, 1.0f);
@@ -130,6 +130,50 @@ void test(std::string name, std::function<spanned_data<float, 4>(spanned_view<fl
 
   auto start = std::chrono::high_resolution_clock::now();
   auto res = f(input.view(), kernel.view(), stride, padding, dilation);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+#ifdef __CHECK__
+  auto res_cpu = conv2d_cpu(input.data(), kernel.data(), ids[0], ids[1], ids[2], ids[3], kds[0], kds[2], kds[3], stride, padding, dilation);
+
+  auto nearlyEqual = [](float a, float b,
+                 float absEps = 1e-2f, float relEps = 1e-1f) {
+    float diff = std::fabs(a - b);
+    if (diff <= absEps) return true;
+    return diff <= relEps * std::max(std::fabs(a), std::fabs(b));
+  };
+
+  size_t idx = 0;
+  for (int i = 0; i < res.shape()[0]; ++i)
+    for (int j = 0; j < res.shape()[1]; ++j)
+      for (int k = 0; k < res.shape()[2]; ++k)
+        for (int m = 0; m < res.shape()[3]; ++m, ++idx) {
+          auto expect = res_cpu[idx];
+          auto actual = res[i][j][k][m];
+          if (!nearlyEqual(actual, expect)) {
+            std::cerr << "[" << i << "," << j << "," << k << "," << m << "]:\n";
+            std::cerr << "\t" << "expect: " << expect << "\n";
+            std::cerr << "\t" << "actual: " << actual << "\n";
+            choreo::choreo_assert(false, "error");
+          }
+        }
+  delete[] res_cpu;
+  std::cout << name << " is PASS.\n";
+#endif
+  std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
+}
+
+void test(std::string name, std::function<spanned_data<float, 4>(spanned_view<float, 4UL>, spanned_view<float, 4UL>)> f, std::vector<int> ids, std::vector<int> kds, int stride, int padding, int dilation) {
+  auto input = choreo::make_spandata<choreo::f32>(ids[0], ids[1], ids[2], ids[3]);
+  // input.fill(1.0f);
+  input.fill_random(-1.0f, 1.0f);
+  
+  auto kernel = choreo::make_spandata<choreo::f32>(kds[0], kds[1], kds[2], kds[3]);
+  // kernel.fill(1.0f);
+  kernel.fill_random(-1.0f, 1.0f);
+
+  auto start = std::chrono::high_resolution_clock::now();
+  auto res = f(input.view(), kernel.view());
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 

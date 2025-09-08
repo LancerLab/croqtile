@@ -2,11 +2,10 @@
 #include "common.h"
 
 #ifdef __STATIC_SHAPE__
-#define pyramid_h 56
-#define pyramid_w 56
+#define batch_size 32
 #endif
 
-__co__ auto CONV2D(f32 [16, 256, pyramid_h, pyramid_w] i, f32 [256, 256, 3, 3] w, int stride, int padding, int dilation) {
+__co__ auto CONV2D(f32 [batch_size, 64, 56, 56] i, f32 [128, 64, 3, 3] w, int stride, int padding, int dilation) {
   N = i.span(0);
   Cin = i.span(1);
   H = i.span(2);
@@ -19,7 +18,7 @@ __co__ auto CONV2D(f32 [16, 256, pyramid_h, pyramid_w] i, f32 [256, 256, 3, 3] w
   Hpad = H + 2 * padding;
   Wpad = W + 2 * padding;
 
-  f32 [N, Cout, Ho, Wo] o;
+  f32 [N, Cout, Ho, Wo] o{-1.0f};
 
   M = Ho * Wo;
   K = Cin * Kh * Kw;
@@ -27,7 +26,7 @@ __co__ auto CONV2D(f32 [16, 256, pyramid_h, pyramid_w] i, f32 [256, 256, 3, 3] w
   parallel p by 2 : shared {
     shared f32 [M, K] A;
     B = dma.copy w.span_as(Cout, K) => shared;
-    shared f32 [Ho*Wo, Cout] Y;
+    shared f32 [Ho*Wo, Cout] Y{-2.0f};
 
     foreach n in [N / #p] {
       // 1. im2col
@@ -37,10 +36,11 @@ __co__ auto CONV2D(f32 [16, 256, pyramid_h, pyramid_w] i, f32 [256, 256, 3, 3] w
           dma.copy i_s_padded.chunkat(_, _, i, j).subspan(_, _, Kh, Kw) => A.subspan(1, _).at(i*Wo + j, 0).span_as(1, Cin, Kh, Kw);
         }
       }
+
       // 2. GEMM: C = A x B, result shape: M x Cout
       parallel q by 8 : local {
         l1_A = dma.copy A.chunkat(q, _) => local;
-        foreach {qq} in [128] {
+        foreach {qq} in [#q] {
           local f32 [A.span(0)/#q, B.span(0)/#qq] l1_Y{0.0f};
           l1_B = dma.copy B.chunkat(qq, _) => local;
           call k_matmul(l1_A.data, l1_B.data, l1_Y, M/#q, Cout/#qq, K);
@@ -55,5 +55,5 @@ __co__ auto CONV2D(f32 [16, 256, pyramid_h, pyramid_w] i, f32 [256, 256, 3, 3] w
 }
 
 int main() {
-  test("CONV2D", CONV2D, {16, 256, 32, 32}, {256, 256, 3, 3}, 1, 1, 1);
+  test_dynamic("CONV2D", CONV2D, {32, 64, 56, 56}, {128, 64, 3, 3}, 1, 1, 1);
 }
