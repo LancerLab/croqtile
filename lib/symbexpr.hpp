@@ -565,13 +565,16 @@ public:
       : op(o), left(l), right(r) {
     // always turn subtract to add to enable association
     if (op == OpCode::SUBTRACT && right->IsNumeric()) {
-      op = OpCode::ADD;
-      right = nu(-cast<NumericValue>(r)->Value());
+      // simplify single value
+      if (auto rn = dyn_cast<NumericValue>(r)) {
+        op = OpCode::ADD;
+        right = nu(-rn->Value());
+      }
     }
   }
 
   const std::string ToString(const std::string& suffix = "") const override {
-    if (op == OpCode::ADD && right->IsNumeric()) {
+    if (op == OpCode::ADD && IsSimpleNumeric(right)) {
       int64_t v = cast<NumericValue>(right)->Value();
       if (v < 0)
         return "(" + left->ToString(suffix) + " - " + std::to_string(-v) + ")";
@@ -583,6 +586,9 @@ public:
 
   bool IsNumeric() const override {
     return left->IsNumeric() && right->IsNumeric();
+  }
+  bool IsSimpleNumeric(const Operand & oprd) const {
+    return isa<NumericValue>(oprd);
   }
   bool IsBoolean() const override { return false; }
   bool IsSymbolic() const override {
@@ -867,7 +873,7 @@ public:
       auto b = lbop->GetRight();
       auto c = r;
       if (lbop->op == OpCode::MULTIPLY && op == OpCode::DIVIDE &&
-          !a->IsNumeric() && b->IsNumeric() && c->IsNumeric()) {
+          !IsSimpleNumeric(a) && IsSimpleNumeric(b) && IsSimpleNumeric(c)) {
         // simplify (a * b) / c
         auto bv = cast<NumericValue>(b)->Value();
         auto cv = cast<NumericValue>(c)->Value();
@@ -875,7 +881,7 @@ public:
         if (gcd_val != 1)
           return (a * (b / nu(gcd_val))->Fold()) / (c / nu(gcd_val)->Fold());
       } else if (lbop->op == OpCode::DIVIDE && op == OpCode::DIVIDE &&
-                 !a->IsNumeric() && b->IsNumeric() && c->IsNumeric()) {
+                 !IsSimpleNumeric(a) && IsSimpleNumeric(b) && IsSimpleNumeric(c)) {
         // simplify a / b / c. It is proved equals a / (b * c) when b * c does
         // not overflow
         auto bv = cast<NumericValue>(b)->Value();
@@ -1069,7 +1075,7 @@ inline int Compare(const SymbolicExpression& lhs,
       return 0;
     else if (isa<BooleanValue>(r))
       return 0;
-  } else if (auto ls = dyn_cast<SymbolicValue>(&lhs)) {
+  } else if (auto ls = dyn_cast<SymbolicValue>(l)) {
     if (isa<InvalidValue>(r)) { return 0; }
     if (isa<NumericValue>(r))
       return 1;
@@ -1082,6 +1088,8 @@ inline int Compare(const SymbolicExpression& lhs,
       auto hrs = GetHighRankString(*rt);
       return -ls->Value().compare(hrs);
     }
+  } else if (auto lb = dyn_cast<UnaryOperation>(l)) {
+    return Compare(*lb->GetOperand(), rhs);
   } else if (auto lb = dyn_cast<BinaryOperation>(l)) {
     auto hrs = GetHighRankString(*lb);
     if (isa<InvalidValue>(r))
