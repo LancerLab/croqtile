@@ -1,4 +1,6 @@
-// RUN: choreo %s -dv=loop --masking | FileCheck %s
+// RUN: choreo %s --vectorize | FileCheck %s
+#define H 128
+#define W 512
 __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
 {
   parallel q by 1 {
@@ -31,7 +33,6 @@ __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
 // CHECK:   ::vecadd::paraby_0::paraby_1::l1_b.data : uniform
 // CHECK:   ::vecadd::paraby_0::paraby_1::l1_a.data : uniform
 // CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::index : stride(1)
-// CHECK:   ::vecadd::W : uniform
 // CHECK:   ::vecadd::paraby_0::paraby_1::within_0::i : uniform
 // CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::j : stride(1)
 
@@ -41,7 +42,7 @@ __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
 
 // CHECK: [mask] start geneating masks.
 // CHECK: [mask] Inserted loop condition(exec): 
-// CHECK: `- Var Decl (bool): exec =  (j <=  (ubound j) )  at the beginning of loop: j
+// CHECK: `- Var Decl (bool): exec =  true at the beginning of loop: j
 // CHECK: [mask] Inserted scoped mask: 
 // CHECK: `- Var Decl (bool): mask0 =  exec at the beginning of loop: j
 // CHECK: [mask] Inserted scoped mask: 

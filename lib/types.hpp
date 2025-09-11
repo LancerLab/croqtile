@@ -861,7 +861,8 @@ struct VectorType final : public Type, public TypeIDProvider<VectorType> {
     assert(w > 0 && "vector width must be positive.");
   }
 
-  size_t VectorWidth() const { return ec; }
+  size_t ElemCount() const { return ec; }
+  BaseType ElemType() const { return e_type; }
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return true; }
@@ -2042,6 +2043,10 @@ inline size_t SizeOf(const Type& ty) {
     return 4;
   else if (auto t = dyn_cast<SpannedType>(&ty))
     return t->ByteSize();
+  else if (auto vt = dyn_cast<VectorType>(&ty)) {
+    return vt->ElemCount() * SizeOf(vt->ElemType());
+  }
+
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
   return 0;
 }

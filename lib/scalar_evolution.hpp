@@ -23,6 +23,7 @@ struct SCEVVal : public SCEV {
     if (!loop) return true;
     return loop->HasLoop(l->lname);
   }
+  ValueItem GetValue() const override { return value; }
   __UDT_TYPE_INFO__(SCEV, SCEVVal)
 };
 
@@ -44,6 +45,7 @@ struct SCEVAddRecExpr : public SCEV {
     assert(l && loop && "loop cannot be null.");
     return loop->HasLoop(l->lname);
   }
+  ValueItem GetValue() const override { return UncomputableValueItem(); }
   __UDT_TYPE_INFO__(SCEV, SCEVAddRecExpr)
 };
 
@@ -174,6 +176,8 @@ public:
         ssetab(AST::Make<ScopedSCEVTable>()) {
     assert(s_tab != nullptr);
   }
+
+  ptr<ScopedSCEVTable> GetScevTab() { return ssetab; }
 
 public:
   bool Visit(AST::Expr& n) override;

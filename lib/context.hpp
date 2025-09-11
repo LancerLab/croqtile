@@ -228,6 +228,7 @@ struct SCEV {
   virtual ~SCEV() = default;
   virtual std::string ToString() const = 0;
   virtual bool IsLoopInVariant(ptr<Loop>) const = 0;
+  virtual ValueItem GetValue() const = 0;
   __UDT_TYPE_INFO_BASE__(SCEV)
 };
 
@@ -409,7 +410,7 @@ private:
   bool visualize = false;           // visualize the DMAs
   bool cross_compile = false;       // TODO: figure out
   bool trace_vn = false;            // trace the value numbering
-  bool trace_vectorize = false;       // trace the masking
+  bool trace_vectorize = false;     // trace the masking
   bool show_source_loc = true;    // show source code location when error, etc.
   bool liveness = false;          // analyze the liveness of the program
   bool mem_reuse = false;         // reuse the memory of the program
@@ -533,7 +534,7 @@ public:
   size_t GetSingleVectorByteSize() {
     switch (GetArch()) {
     case TargetArch::GCU3: return 128;
-    case TargetArch::GCU4: return 1024;
+    case TargetArch::GCU4: return 512;
     default: choreo_unreachable("Unsupported target arch.");
     }
   }

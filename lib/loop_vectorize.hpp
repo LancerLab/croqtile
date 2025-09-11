@@ -3,6 +3,7 @@
 #include "ast.hpp"
 #include "context.hpp"
 #include "diversity_analysis.hpp" // Ensure this header defines DiversityAnalysis
+#include "gcucheck.hpp"
 #include "io.hpp"
 #include "loop_utils.hpp"
 #include "scalar_evolution.hpp"
@@ -12,6 +13,8 @@ namespace Choreo {
 struct LoopVectorizeLegalityChecker final : public LoopVisitor {
 private:
   ptr<LoopInfo> li;
+  ptr<ScopedSCEVTable> scev_table;
+  bool legal = true;
 
   bool NeedCheck() {
     auto loop = li->GetLoop(lname);
@@ -20,9 +23,57 @@ private:
     return false;
   }
 
+  bool CheckDataAccessAlignment(AST::DataAccess& n) {
+    if (!n.AccessElement()) return true;
+    auto span_ty = dyn_cast<SpannedType>(n.data->GetType());
+    assert(span_ty && "data access should be on spanned type.");
+    auto e_ty = span_ty->ElementType();
+    auto n_ty = n.GetType();
+    if (!isa<VectorType>(n_ty)) return true;
+    auto alignment = GCUVLdStAlignment(dyn_cast<VectorType>(n_ty));
+
+    auto dim = span_ty->GetShape().DimCount();
+    auto accmulate_size = sbe::nu(1);
+    for (int i = dim - 1; i >= 0; --i) {
+      auto indice = n.GetIndices()[i];
+      auto indice_expr = dyn_cast<AST::Expr>(indice);
+      assert(indice_expr && "index should be an expression.");
+      auto iscev = dyn_cast<SCEVAddRecExpr>(indice_expr->GetSCEV());
+      // step is 1 if we cannot determine the step
+      auto step = sbe::nu(1);
+      if (iscev)
+        step = iscev->step->GetValue();
+      else if (auto ival = dyn_cast<SCEVVal>(indice_expr->GetSCEV())) {
+        if (ival->GetValue()->IsNumeric()) step = ival->GetValue();
+      }
+
+      if (i < int(dim - 1))
+        accmulate_size = accmulate_size * span_ty->GetShape().ValueAt(i + 1);
+      auto stride = step * accmulate_size * sbe::nu(SizeOf(e_ty));
+
+      bool IsAligned = false;
+      if (auto num_stride = dyn_cast<sbe::NumericValue>(stride)) {
+        if (num_stride->Value() % alignment == 0) { IsAligned = true; }
+      }
+
+      if (!IsAligned) {
+        if (debug_visit)
+          dbgs() << "[legality] unaligned data access: " << STR(n)
+                 << ", stride at the " << i + 1 << "th indice: " << STR(stride)
+                 << "{" << alignment << "}.\n";
+        legal = false;
+        return false;
+      }
+    }
+
+    return true;
+  }
+
 public:
-  LoopVectorizeLegalityChecker(ptr<LoopInfo> l)
+  LoopVectorizeLegalityChecker(ptr<LoopInfo> l, ptr<ScopedSCEVTable> s)
       : LoopVisitor(nullptr, "loop_vectorize_legality"), li(l) {}
+
+  bool IsLegal() const { return legal; }
 
   bool Visit(AST::ForeachBlock& n) override {
     TraceEachVisit(n);
@@ -124,6 +175,14 @@ public:
     }
     return true;
   }
+
+  bool Visit(AST::DataAccess& n) override {
+    TraceEachVisit(n);
+    if (CCtx().GetArch() != TargetArch::GCU4) {
+      if (!CheckDataAccessAlignment(n)) return false;
+    }
+    return true;
+  }
 };
 
 struct BranchSimplicition final : public LoopVisitor {
@@ -163,7 +222,7 @@ private:
   ptr<LoopInfo> li;
   ptr<DiversityInfo> di;
 
-  bool NeedTransform() {
+  bool NeedLinearize() {
     auto loop = li->GetLoop(lname);
     if (!loop) return false;
     if (AST::NeedVectorize(*loop->loop)) return true;
@@ -177,7 +236,7 @@ public:
 
   bool Visit(AST::MultiNodes& n) override {
     TraceEachVisit(n);
-    if (!NeedTransform()) return true;
+    if (!NeedLinearize()) return true;
 
     for (size_t stmt_index = 0; stmt_index < n.Count(); ++stmt_index) {
       if (auto if_block = dyn_cast<AST::IfElseBlock>(n.SubAt(stmt_index))) {
@@ -214,6 +273,7 @@ public:
   }
 };
 
+// todo: break/continue statement
 struct MaskGen final : public LoopVisitor {
 private:
   ptr<LoopInfo> li;
@@ -232,6 +292,22 @@ private:
     auto loop = li->GetLoop(lname);
     if (!loop) return false;
     if (AST::NeedVectorize(*loop->loop)) return true;
+    return false;
+  }
+
+  bool HasDivergentBranch(AST::MultiNodes& n) {
+    for (size_t stmt_index = 0; stmt_index < n.Count(); ++stmt_index) {
+      if (auto if_block = dyn_cast<AST::IfElseBlock>(n.SubAt(stmt_index))) {
+        auto pred_ds = if_block->GetPred()->GetDiversityShape();
+        if (pred_ds.Divergent()) return true;
+        auto then_true = HasDivergentBranch(*if_block->if_stmts);
+        if (then_true) return true;
+        if (if_block->else_stmts) {
+          auto else_true = HasDivergentBranch(*if_block->else_stmts);
+          if (else_true) return true;
+        }
+      }
+    }
     return false;
   }
 
@@ -281,6 +357,12 @@ public:
     data_type->SetType(vbool_ty);
     if (auto ub_nu = dyn_cast<sbe::NumericValue>(upper_bound);
         ub_nu && ub_nu->Value() % vector_width == 0) {
+      if (!HasDivergentBranch(*n.stmts)) {
+        if (debug_visit)
+          dbgs() << "[mask] No divergent branch inside vectorized loop: "
+                 << n.GetIV()->name << ", skip mask generation.\n";
+        return true;
+      }
       auto bool_literal = AST::Make<AST::BoolLiteral>(loc, true);
       bool_literal->SetType(vbool_ty);
       auto mask_expr = AST::Make<AST::Expr>(n.LOC(), bool_literal);
@@ -401,6 +483,11 @@ struct LoopHandler final : public VisitorWithSymTab {
       Error(root.LOC(), "Not running a choreo program.");
       return false;
     }
+    if (CCtx().GetTarget() != CompileTarget::Topscc) {
+      Error(root.LOC(),
+            "Loop vectorization transformations are only for topscc target.");
+      return true;
+    }
     if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
 
     debug_visit |= CCtx().TraceVectorize();
@@ -425,13 +512,6 @@ struct LoopHandler final : public VisitorWithSymTab {
     if (HasError() || abend_after) return false;
     if (prt_visitor) dbgs() << " |- " << la.GetName() << NewL;
 
-    LoopVectorizeLegalityChecker lvlc(li);
-    lvlc.SetDebugVisit(debug_visit);
-    lvlc.SetTraceVisit(trace_visit);
-    root.accept(lvlc);
-    if (HasError() || abend_after) return false;
-    if (prt_visitor) dbgs() << " |- " << lvlc.GetName() << NewL;
-
     if (lc.HasVectorization()) {
       if (debug_visit) dbgs() << "\n[diversity] start diversity analysis.\n";
       DiversityAnalysisHandler da(SymTab(), li);
@@ -448,8 +528,22 @@ struct LoopHandler final : public VisitorWithSymTab {
       root.accept(sba);
       if (prt_visitor) dbgs() << " |- " << sba.GetName() << NewL;
       if (HasError() || abend_after) return false;
+      auto scev_tab = sba.GetScevTab();
 
+      LoopVectorizeLegalityChecker lvlc(li, scev_tab);
+      lvlc.SetDebugVisit(debug_visit);
+      lvlc.SetTraceVisit(trace_visit);
+      root.accept(lvlc);
+      if (!lvlc.IsLegal()) {
+        if (debug_visit)
+          dbgs() << "[loop vectorization] legality check failed. Skip "
+                    "vectorization.\n";
+        return true;
+      }
+      if (HasError() || abend_after) return false;
+      if (prt_visitor) dbgs() << " |- " << lvlc.GetName() << NewL;
       if (debug_visit) dbgs() << "\n[linearize] start linearization.\n";
+
       Linearizer ln(SymTab(), li, di);
       ln.SetDebugVisit(debug_visit);
       ln.SetTraceVisit(trace_visit);

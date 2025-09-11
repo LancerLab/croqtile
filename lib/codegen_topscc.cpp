@@ -162,6 +162,7 @@ inline const std::string VectorTypeSTR(const ptr<VectorType>& vt) {
   auto elem_ty = vt->e_type;
   auto ec = vt->ec;
   auto elem_size = SizeOf(elem_ty);
+  // if (elem_size == 1) elem_size = 4;
   auto vector_size = elem_size * ec;
   std::string vty_str;
   if (vector_size == CCtx().GetSingleVectorByteSize())

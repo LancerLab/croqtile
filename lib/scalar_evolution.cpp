@@ -122,7 +122,6 @@ bool ScalarEvolutionAnalysis::Visit(AST::Expr& n) {
         n.SetSCEV(scev_val);
       } else {
         auto scev = GetSCEVOfSym(iv_sym);
-        assert(scev && "scev should not be null.");
         n.SetSCEV(scev);
       }
     } else if (auto da = dyn_cast<AST::DataAccess>(n.GetReference())) {
@@ -187,6 +186,7 @@ bool ScalarEvolutionAnalysis::Visit(AST::Identifier& n) {
 bool ScalarEvolutionAnalysis::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
   if (!NeedAnalyze(n.GetType())) return true;
+  if (n.da->AccessElement()) return true;
   auto name = n.GetName();
   auto sym_name = SymName(name);
   if (!IsAssignedSym(sym_name)) {

@@ -143,7 +143,7 @@ Option<bool> branch_norm(OptionKind::Hidden, "--branch-norm", "-bn", false,
 Option<bool> loop_norm(OptionKind::Hidden, "--loop-norm", "-ln", false,
                        "Normalize the loops in the choreo code.");
 Option<bool> vectorize(OptionKind::Hidden, "--vectorize", "-m", false,
-                     "Apply masking to the vectorized foreach loop.");
+                       "Apply masking to the vectorized foreach loop.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
