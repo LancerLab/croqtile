@@ -1,7 +1,7 @@
 #define I 16
 #define J 512
-#define K 4
-#define L 3
+#define K 128
+#define L 27
 
 #define NUM_BLOCK 2
 // TODO: make it 12
@@ -15,7 +15,7 @@
 __co__ auto layer_norm(f32 [I, J, N1, N2] lhs, f32 [N1, N2] scale, f32 [N1, N2] bias) {
   f32 [lhs.span] out;
   parallel p by NUM_BLOCK, q by NUM_THREAD {
-    tilings : [4, 2, 1];
+    tilings : [4, 4, 1];
     n = p # q;
     bnum = lhs.span(0) / (#p * #q);
     assert(bnum > 0, "unexpected batch count.");

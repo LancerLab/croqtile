@@ -5,19 +5,16 @@
 
 #define N 64
 #define C 128
+#define HEIGHT 224
+#define WIDTH  224
 
 /* ---------------- Variable macros ----------------
    If __STATIC_SHAPE__ is defined, freeze HEIGHT/WIDTH.
    Otherwise they are provided externally.
 -------------------------------------------------- */
-#define __STATIC_SHAPE__
 #ifdef __STATIC_SHAPE__
-  #define HEIGHT 224
-  #define WIDTH  224
-#else
-  extern const size_t height, width;
-  #define HEIGHT height
-  #define WIDTH  width
+  #define H HEIGHT
+  #define W WIDTH
 #endif
 /* ------------------------------------------------- */
 
@@ -41,7 +38,7 @@ __cok__ {
 }
 
 // Reduce over H and W: [N, C, HEIGHT, WIDTH] -> [N, C]
-__co__ f32 [N, C] ele_reduce_mean(f32 [N, C, HEIGHT, WIDTH] inp) {
+__co__ f32 [N, C] ele_reduce_mean(f32 [N, C, H, W] inp) {
   f32 [N, C] out;
 
   // Split N by blocks; foreach over C; split N again by threads.
@@ -82,12 +79,6 @@ __co__ f32 [N, C] ele_reduce_mean(f32 [N, C, HEIGHT, WIDTH] inp) {
 
 // --------------------------- Host / main ---------------------------
 int main() {
-#ifndef __STATIC_SHAPE__
-  // Provide runtime H, W when using dynamic shapes
-  const size_t height = 224;
-  const size_t width  = 224;
-#endif
-
   auto a = choreo::make_spandata<choreo::f32>(N, C, HEIGHT, WIDTH);
   a.fill_random(-1.0, 1.0);
 

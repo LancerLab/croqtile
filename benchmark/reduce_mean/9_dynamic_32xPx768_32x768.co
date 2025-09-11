@@ -5,6 +5,7 @@
 
 #define N 32
 #define H 768
+#define NUM_PATCHES 196
 
 /* ---------------- Variable macros ----------------
    If __STATIC_SHAPE__ is defined, freeze NUM_PATCHES (e.g. 196).
@@ -12,11 +13,7 @@
 -------------------------------------------------- */
 // #define __STATIC_SHAPE__
 #ifdef __STATIC_SHAPE__
-  #define NUM_PATCHES 196
   #define P NUM_PATCHES
-#else
-  extern const size_t num_patches;
-  #define P num_patches
 #endif
 /* ------------------------------------------------- */
 
@@ -85,12 +82,7 @@ __co__ f32 [N, H] ele_reduce_mean(f32 [N, P, H] inp) {
 
 // --------------------------- Host / main ---------------------------
 int main() {
-#ifndef __STATIC_SHAPE__
-  // Provide runtime value for P when using dynamic shapes
-  const size_t num_patches = 196;
-#endif
-
-  auto a = choreo::make_spandata<choreo::f32>(N, P, H);
+  auto a = choreo::make_spandata<choreo::f32>(N, NUM_PATCHES, H);
   a.fill_random(-1.0, 1.0);
 
   auto t0 = std::chrono::high_resolution_clock::now();
@@ -102,8 +94,8 @@ int main() {
   for (size_t n = 0; n < N; ++n) {
     for (size_t h = 0; h < H; ++h) {
       double acc = 0.0;
-      for (size_t p = 0; p < P; ++p) acc += a[n][p][h];
-      float ref = static_cast<float>(acc / P);
+      for (size_t p = 0; p < NUM_PATCHES; ++p) acc += a[n][p][h];
+      float ref = static_cast<float>(acc / NUM_PATCHES);
       if (std::fabs(ref - r[n][h]) > 1e-5f) {
         std::cout << "Mismatch at (n=" << n << ", h=" << h
                   << ") ref=" << ref << " got=" << r[n][h] << "\n";

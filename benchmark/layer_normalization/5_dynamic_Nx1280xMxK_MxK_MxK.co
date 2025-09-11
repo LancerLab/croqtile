@@ -1,11 +1,10 @@
-#define I 16
+#define I 24
 #define J 1280
-#define K 3
-#define L 3
+#define K 27
+#define L 9
 
 #define NUM_BLOCK 2
-// TODO: make it 12
-#define NUM_THREAD 8 
+#define NUM_THREAD 12
 
 #ifdef __STATIC_SHAPE__
 #define N0 I

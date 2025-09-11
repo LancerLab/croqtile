@@ -1,5 +1,5 @@
 #define I 32
-#define J 2
+#define J 32
 #define K 512
 #define L 64
 

@@ -5,6 +5,7 @@
 
 #define N 32
 #define H 768
+#define SEQ_LEN 2048
 
 /* ---------------- Variable macros ----------------
    If __STATIC_SHAPE__ is defined, freeze SEQ_LEN=512.
@@ -12,11 +13,7 @@
 -------------------------------------------------- */
 // #define __STATIC_SHAPE__
 #ifdef __STATIC_SHAPE__
-  #define SEQ_LEN 512
   #define S SEQ_LEN
-#else
-  extern const size_t seq_len;
-  #define S seq_len
 #endif
 /* ------------------------------------------------- */
 
@@ -83,12 +80,7 @@ __co__ f32 [N, H] ele_reduce_mean(f32 [N, S, H] inp) {
 
 // --------------------------- Host / main ---------------------------
 int main() {
-#ifndef __STATIC_SHAPE__
-  // Provide runtime value for S when using dynamic shapes
-  const size_t seq_len = 512;
-#endif
-
-  auto a = choreo::make_spandata<choreo::f32>(N, S, H);
+  auto a = choreo::make_spandata<choreo::f32>(N, SEQ_LEN, H);
   a.fill_random(-1.0, 1.0);
 
   auto t0 = std::chrono::high_resolution_clock::now();
@@ -100,8 +92,8 @@ int main() {
   for (size_t n = 0; n < N; ++n) {
     for (size_t h = 0; h < H; ++h) {
       double acc = 0.0;
-      for (size_t s = 0; s < S; ++s) acc += a[n][s][h];
-      float ref = static_cast<float>(acc / S);
+      for (size_t s = 0; s < SEQ_LEN; ++s) acc += a[n][s][h];
+      float ref = static_cast<float>(acc / SEQ_LEN);
       if (std::fabs(ref - r[n][h]) > 1e-5f) {
         std::cout << "Mismatch at (n=" << n << ", h=" << h
                   << ") ref=" << ref << " got=" << r[n][h] << "\n";

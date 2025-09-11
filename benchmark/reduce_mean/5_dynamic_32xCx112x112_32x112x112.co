@@ -2,16 +2,16 @@
 #include <chrono>
 #include <iostream>
 #include <cmath>
-size_t c = 8;
-#define __STATIC_SHAPE__
-#ifdef __STATIC_SHAPE__
-#define C 8    
-#else
-#define C c
-#endif
+
+#define C 4
 #define H 112
 #define W 112
 #define N 32
+
+#ifdef __STATIC_SHAPE__
+#define C0 C
+#endif
+
 #ifndef NUM_BLOCK
   #define NUM_BLOCK 2
 #endif
@@ -32,7 +32,7 @@ __cok__ {
 }
 
 // Reduce over C: [N, C, H, W] -> [N, H, W]
-__co__ f32 [N, H, W] ele_reduce_mean(f32 [N, C, H, W] inp) {
+__co__ f32 [N, H, W] ele_reduce_mean(f32 [N, C0, H, W] inp) {
   f32 [N, H, W] out;
 
   // First split N by blocks; we will further split by threads inside.

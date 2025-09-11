@@ -6,7 +6,8 @@
 #define C 256
 #define H 56
 #define W 56
-size_t n =32;
+#define N 32
+
 #ifndef NUM_BLOCK
   #define NUM_BLOCK 2
 #endif
@@ -14,9 +15,7 @@ size_t n =32;
   #define NUM_THREAD 8
 #endif
 #ifdef __STATIC_SHAPE__
-#define N 32
-#else
-#define N n
+#define N0 N
 #endif
 __cok__ {
   // Generic 2D reduce-mean kernel:
@@ -35,8 +34,8 @@ __cok__ {
 
 // Reduce over the last two dims (H, W):
 // [N, C, H, W] -> [N, C]
-__co__ f32 [N, C] ele_reduce_mean(f32 [N, C, H, W] inp) {
-  f32 [N, C] out;
+__co__ auto ele_reduce_mean(f32 [N0, C, H, W] inp) {
+  f32 [inp.span(0), C] out;
 
   // Split the first dim (N) twice: by NUM_BLOCK then by NUM_THREAD.
   // Split the second dim (C) via foreach tiles.

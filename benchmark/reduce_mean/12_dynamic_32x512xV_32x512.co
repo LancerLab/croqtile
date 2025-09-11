@@ -5,6 +5,7 @@
 
 #define N 32
 #define S 512
+#define V 30522
 
 /* ---------------- Variable macros ----------------
    If __STATIC_SHAPE__ is defined, freeze VOCAB_SIZE=30522.
@@ -12,11 +13,7 @@
 -------------------------------------------------- */
 // #define __STATIC_SHAPE__
 #ifdef __STATIC_SHAPE__
-  #define VOCAB_SIZE 30522
-  #define V VOCAB_SIZE
-#else
-  extern const size_t vocab_size;
-  #define V vocab_size
+  #define V0 V
 #endif
 /* ------------------------------------------------- */
 
@@ -42,7 +39,7 @@ __cok__ {
 }
 
 // Reduce over the last dim V: [N, S, V] -> [N, S]
-__co__ f32 [N, S] ele_reduce_mean(f32 [N, S, V] inp) {
+__co__ f32 [N, S] ele_reduce_mean(f32 [N, S, V0] inp) {
   f32 [N, S] out;
 
   // Split N by NUM_BLOCK; foreach over S; split N again by NUM_THREAD.
@@ -83,11 +80,6 @@ __co__ f32 [N, S] ele_reduce_mean(f32 [N, S, V] inp) {
 
 // --------------------------- Host / main ---------------------------
 int main() {
-#ifndef __STATIC_SHAPE__
-  // Provide runtime value for V when using dynamic shapes
-  const size_t vocab_size = 30522;
-#endif
-
   auto a = choreo::make_spandata<choreo::f32>(N, S, V);
   a.fill_random(-1.0, 1.0);
 

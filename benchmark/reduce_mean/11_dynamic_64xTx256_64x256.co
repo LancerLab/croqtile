@@ -1,10 +1,10 @@
-#include "choreo.h"
 #include <chrono>
 #include <iostream>
 #include <cmath>
 
 #define N 64
 #define D 256
+#define T 400
 
 /* ---------------- Variable macros ----------------
    If __STATIC_SHAPE__ is defined, freeze TIME_STEPS=100.
@@ -12,11 +12,7 @@
 -------------------------------------------------- */
 // #define __STATIC_SHAPE__
 #ifdef __STATIC_SHAPE__
-  #define TIME_STEPS 100
-  #define T TIME_STEPS
-#else
-  extern const size_t time_steps;
-  #define T time_steps
+  #define N0 T
 #endif
 /* ------------------------------------------------- */
 
@@ -42,7 +38,7 @@ __cok__ {
 // Reduce over T (time_steps):
 // Input  [N, T, D]
 // Output [N, D]
-__co__ f32 [N, D] ele_reduce_mean(f32 [N, T, D] inp) {
+__co__ f32 [N, D] ele_reduce_mean(f32 [N, N0, D] inp) {
   f32 [N, D] out;
 
   // Split N by NUM_BLOCK; foreach over D; split N again by NUM_THREAD.
@@ -83,11 +79,6 @@ __co__ f32 [N, D] ele_reduce_mean(f32 [N, T, D] inp) {
 
 // --------------------------- Host / main ---------------------------
 int main() {
-#ifndef __STATIC_SHAPE__
-  // Provide runtime value for T when using dynamic shapes
-  const size_t time_steps = 100;
-#endif
-
   auto a = choreo::make_spandata<choreo::f32>(N, T, D);
   a.fill_random(-1.0, 1.0);
 

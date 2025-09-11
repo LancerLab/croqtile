@@ -5,17 +5,14 @@
 
 #define N 16
 #define S 512
+#define E 768
 
 /* ---------------- Variable macros ----------------
    If __STATIC_SHAPE__ is defined, freeze E=768.
    Otherwise, E is provided externally (default=768).
 -------------------------------------------------- */
-#define __STATIC_SHAPE__
 #ifdef __STATIC_SHAPE__
-  #define E 768
-#else
-  size_t embed_dim;
-  #define E embed_dim
+  #define E0 E
 #endif
 /* ------------------------------------------------- */
 
@@ -39,7 +36,7 @@ __cok__ {
 }
 
 // Reduce last dim E: [N, S, E] -> [N, S]
-__co__ f32 [N, S] ele_reduce_mean(f32 [N, S, E] inp) {
+__co__ f32 [N, S] ele_reduce_mean(f32 [N, S, E0] inp) {
   f32 [N, S] out;
 
   parallel p by NUM_BLOCK {
@@ -75,11 +72,6 @@ __co__ f32 [N, S] ele_reduce_mean(f32 [N, S, E] inp) {
 
 /* ---------------- Host test ---------------- */
 int main() {
-#ifndef __STATIC_SHAPE__
-  // provide runtime value for E
-  embed_dim = 768;
-#endif
-
   auto a = choreo::make_spandata<choreo::f32>(N, S, E);
   a.fill_random(-1.0, 1.0);
 

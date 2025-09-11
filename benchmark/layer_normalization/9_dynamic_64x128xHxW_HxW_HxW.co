@@ -1,7 +1,7 @@
 #define I 64
 #define J 128
-#define K 3
-#define L 3
+#define K 9
+#define L 9
 
 #define NUM_BLOCK 2
 // TODO: make it 12
