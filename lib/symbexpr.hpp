@@ -587,7 +587,7 @@ public:
   bool IsNumeric() const override {
     return left->IsNumeric() && right->IsNumeric();
   }
-  bool IsSimpleNumeric(const Operand & oprd) const {
+  bool IsSimpleNumeric(const Operand& oprd) const {
     return isa<NumericValue>(oprd);
   }
   bool IsBoolean() const override { return false; }
@@ -881,7 +881,8 @@ public:
         if (gcd_val != 1)
           return (a * (b / nu(gcd_val))->Fold()) / (c / nu(gcd_val)->Fold());
       } else if (lbop->op == OpCode::DIVIDE && op == OpCode::DIVIDE &&
-                 !IsSimpleNumeric(a) && IsSimpleNumeric(b) && IsSimpleNumeric(c)) {
+                 !IsSimpleNumeric(a) && IsSimpleNumeric(b) &&
+                 IsSimpleNumeric(c)) {
         // simplify a / b / c. It is proved equals a / (b * c) when b * c does
         // not overflow
         auto bv = cast<NumericValue>(b)->Value();

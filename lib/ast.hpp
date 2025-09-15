@@ -203,6 +203,12 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
   explicit MultiValues(const location& l, std::string d = "")
       : Node(l), delimiter(d) {}
 
+  explicit MultiValues(const location& l, size_t len, const ptr<Node>& v,
+                       std::string d = "")
+      : Node(l), delimiter(d) {
+    for (size_t i = 0; i < len; ++i) Append(v->Clone());
+  }
+
   template <typename... T>
   explicit MultiValues(const location& l, std::string d, T... args)
       : Node(l), delimiter(d) {
@@ -1900,6 +1906,7 @@ private:
   using RSInfo = ptr<MultiValues>; // reshape Infomation
 
   std::variant<TSInfo, RSInfo> info;
+  const ptr<MultiValues> strides = nullptr;
 
   Shape block_shape; // block shape after applying the operation
 
@@ -1908,7 +1915,7 @@ private:
 public:
   SpannedOperation(const location& l, const ptr<MultiValues>& p,
                    const ptr<MultiValues>& b, Kind ok = Kind::TILEAT)
-      : loc(l), tag(ok), info(TSInfo{p, b}) {
+      : loc(l), tag(ok), info(TSInfo{p, b}), strides(nullptr) {
     assert(ok == Kind::TILEAT || ok == Kind::SUBSPAN || ok == Kind::MODSPAN);
     Verify();
   }
@@ -1918,11 +1925,19 @@ public:
       : loc(l), tag(ok),
         info((ok == Kind::TILING)
                  ? std::variant<TSInfo, RSInfo>(TSInfo{p, nullptr})
-                 : std::variant<TSInfo, RSInfo>(RSInfo{p})) {
+                 : std::variant<TSInfo, RSInfo>(RSInfo{p})),
+        strides(nullptr) {
     assert(ok == Kind::RESHAPE || ok == Kind::TILING);
     Verify();
   }
 
+  SpannedOperation(const location& l, const ptr<MultiValues>& p,
+                   const ptr<MultiValues>& b, const ptr<MultiValues>& s,
+                   Kind ok = Kind::TILEAT)
+      : loc(l), tag(ok), info(TSInfo{p, b}), strides(s) {
+    assert(ok == Kind::TILEAT || ok == Kind::SUBSPAN || ok == Kind::MODSPAN);
+    Verify();
+  }
   Kind OpCode() const { return tag; }
 
   const location& LOC() const { return loc; }
@@ -1993,6 +2008,15 @@ public:
     return TFSS();
   }
 
+  const ptr<MultiValues> GetStrides() const {
+    if (!strides) return strides;
+    if (tag == Kind::SUBSPAN || tag == Kind::MODSPAN)
+      return Make<MultiValues>(loc, Positions()->Count(),
+                               Make<IntLiteral>(loc, 1), ", ");
+    else
+      choreo_unreachable("unsupported stride kind.");
+  }
+
   void SetBlockShape(const Shape shape) {
     if (!shape.IsValid()) choreo_unreachable("invalid shape is specified.");
     block_shape = shape;
@@ -2028,10 +2052,14 @@ public:
       os << ".Chunk(" << STR(TFSS()) << ").At(" << STR(Positions()) << ")";
       break;
     case Kind::SUBSPAN:
-      os << ".SubSpan(" << STR(TFSS()) << ").At(" << STR(Positions()) << ")";
+      os << ".SubSpan(" << STR(TFSS()) << ")";
+      if (strides) os << ".Stride(" << STR(GetStrides()) << ")";
+      os << ".At(" << STR(Positions()) << ")";
       break;
     case Kind::MODSPAN:
-      os << ".ModSpan(" << STR(TFSS()) << ").At(" << STR(Positions()) << ")";
+      os << ".ModSpan(" << STR(TFSS()) << ")";
+      if (strides) os << ".Stride(" << STR(GetStrides()) << ")";
+      os << ".At(" << STR(Positions()) << ")";
       break;
     case Kind::RESHAPE: os << ".SpanAs(" << STR(RShape()) << ")"; break;
     default: choreo_unreachable("unsupported SpannedOperation kind.");

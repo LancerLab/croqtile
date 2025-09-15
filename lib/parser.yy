@@ -190,7 +190,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> SUBLOCAL LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F64 F32 F16 BF16 F8 U16 S16 U8 S8 U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK CONTINUE
@@ -1698,6 +1698,16 @@ spanned_op
         $3->SetDelimiter(", ");
         $7->SetDelimiter(", ");
         $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $7, $3, AST::SpannedOperation::MODSPAN));
+      }
+    | SUBSPAN LPAREN value_list RPAREN STRIDE LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $7->SetDelimiter(", ");
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $11, $7, $3, AST::SpannedOperation::SUBSPAN));
+      }
+    | MODSPAN LPAREN value_list RPAREN STRIDE LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $7->SetDelimiter(", ");
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $11, $7, $3, AST::SpannedOperation::MODSPAN));
       }
     | FNSPANAS LPAREN g_value_list RPAREN {
         $3->SetDelimiter(", ");
