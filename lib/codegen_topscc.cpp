@@ -1735,6 +1735,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         choreo_unreachable("unexpected situation.");
       }
     } else if (n.operation == ".pad") {
+      static int p_cnt = 0;
+      p_cnt++;
       auto pcmvSTR = [&](ptr<AST::MultiValues> mv) -> std::string {
         std::string res;
         for (const auto& v : mv->AllValues()) {
@@ -1744,11 +1746,15 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         return res;
       };
       auto pad_config = cast<PadConfig>(n.GetConfig());
-      ds << d_indent << "unsigned int __pad_low_" << f_buf_name << "[] = {"
+      auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
+      std::string pad_low = "__pad_low_" + f_buf_name + std::to_string(p_cnt);
+      std::string pad_high = "__pad_high_" + f_buf_name + std::to_string(p_cnt);
+      std::string pad_mid = "__pad_mid_" + f_buf_name + std::to_string(p_cnt);
+      ds << d_indent << "unsigned int " << pad_low << "[] = {"
          << pcmvSTR(pad_config->pad_low) << "};\n";
-      ds << d_indent << "unsigned int __pad_high_" << f_buf_name << "[] = {"
+      ds << d_indent << "unsigned int " << pad_high << "[] = {"
          << pcmvSTR(pad_config->pad_high) << "};\n";
-      ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
+      ds << d_indent << "unsigned int " << pad_mid << "[] = {"
          << pcmvSTR(pad_config->pad_mid) << "};\n";
 
       auto Pad = [&]() -> void {
@@ -1756,8 +1762,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
         ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
            << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
-           << ", __pad_mid_" << f_buf_name << ", "
+           << ", " << pad_low << ", " << pad_high << ", " << pad_mid << ", "
            << ExprSTR(pad_config->value, IsHost()) << ");\n";
         // set the device future
         if (!event_name.empty())
@@ -1781,10 +1786,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
         ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
            << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ", " << slice_shape_name << ", __pad_low_"
-           << f_buf_name << ", __pad_high_" << f_buf_name << ", __pad_mid_"
-           << f_buf_name << ", " << ExprSTR(pad_config->value, IsHost())
-           << ");\n";
+           << ", " << off_name << ", " << slice_shape_name << ", " << pad_low
+           << ", " << pad_high << ", " << pad_mid << ", "
+           << ExprSTR(pad_config->value, IsHost()) << ");\n";
         // set the device future
         if (!event_name.empty())
           ds << d_indent << future_name << ".set_event(" << event_name

@@ -44,7 +44,7 @@ int main() {
 
 // CODEGEN:   tops::mdspan __mds0_input(tops::Global, (int*)input, M, N);
 // CODEGEN:   tops::mdspan __mds1_output(tops::Global, (int*)output, (M + x), (N + x));
-// CODEGEN:   unsigned int __pad_low_input[] = {0, 0};
-// CODEGEN:   unsigned int __pad_high_input[] = {static_cast<unsigned int>(x), static_cast<unsigned int>(x)};
-// CODEGEN:   unsigned int __pad_mid_input[] = {0, 0};
-// CODEGEN:   tops::pad(*__choreo_anon_fut__0.get_ctx(), __mds1_output, __mds0_input, __pad_low_input, __pad_high_input, __pad_mid_input, static_cast<int>(y));
+// CODEGEN:   unsigned int __pad_low_input1[] = {0, 0};
+// CODEGEN:   unsigned int __pad_high_input1[] = {static_cast<unsigned int>(x), static_cast<unsigned int>(x)};
+// CODEGEN:   unsigned int __pad_mid_input1[] = {0, 0};
+// CODEGEN:   tops::pad(*__choreo_anon_fut__0.get_ctx(), __mds1_output, __mds0_input, __pad_low_input1, __pad_high_input1, __pad_mid_input1, static_cast<int>(y));

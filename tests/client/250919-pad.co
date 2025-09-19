@@ -1,0 +1,96 @@
+
+// RUN: choreo -es -fopt-dma=false %s | FileCheck --match-full-lines %s
+
+__co__ auto matmul(f16[M, K] lhs, f16[K, N] rhs) {
+  f16[M, N] output;
+
+  // The tile size of l1
+  // lhs -> (mLLen, kLLen)
+  // rhs -> (kLLen, nLLen)
+  // acc -> (mLLen, nLLen)
+  mLLen = 256;
+  nLLen = 1024;
+  kLLen = 384;
+  mLCnt = 16; // 16 = 4 * mq(4)
+  nLCnt = 3; // 6 = 1 * p(2) * nq(3)
+  kLCnt = 12;
+
+  // The tile size of l2
+  // lhs -> (mSLen, kSLen)
+  // rhs -> (kSLen, nSLen)
+  // acc -> (mSLen, nSLen)
+  mSLen = mLLen * mLCnt;
+  nSLen = nLLen * nLCnt;
+  kSLen = kLLen * kLCnt;
+
+  mSRem = M % mSLen;
+  nSRem = N % nSLen;
+  kSRem = K % kSLen;
+  mLRem = M % mLLen;
+  nLRem = N % nLLen;
+  kLRem = K % kLLen;
+  mLPad = mLLen - mLRem;
+  nLPad = nLLen - nLRem;
+  kLPad = kLLen - kLRem;
+
+  parallel p by 2, {mq, nq} by [4, 3] {
+    with ms in [M / mSLen] foreach ms(:1:) {
+      with ns in [N / (nSLen * #p)] foreach ns(:1:) {
+        with ml in [mSLen / (mLLen * #mq)] foreach ml {
+          with nl in [nSLen / (nLLen * #nq)] foreach nl {
+            local f16[mLLen, nLLen] acc{0};
+            with ks in [K / kSLen] foreach ks(:1:) {
+              lhsS = dma.copy.async lhs.subspan(mSLen, K).at(ms, 0).modspan(_, kSLen).at(0, ks) => shared;
+              rhsS = dma.copy.async rhs.subspan(K, nSLen).at(0, ns # p).modspan(kSLen, _).at(ks, 0) => shared;
+              wait lhsS, rhsS;
+              with kl in [kSRem / kLLen] foreach kl(:1:) {
+                lhsL = dma.pad.async<{0, 0}, {0, kLPad}, {0, 0}, 0> lhsS.chunkat(ml # mq, _).modspan(_, kLLen).at(0, kl) => local;
+                lhsL2 = dma.pad<{0, 0}, {0, kLPad}, {0, 0}, 0> lhsS.chunkat(ml # mq, _).modspan(_, kLLen).at(0, kl) => local;
+                rhsL = dma.pad.async<{0, 0}, {kLPad, 0}, {0, 0}, 0> rhsS.data.chunkat(_, nl # nq).modspan(kLLen, _).at(kl, 0) => local;
+                wait lhsL, rhsL;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// CHECK: auto anon_6 = __iv_ml__elem__0 * 4 + __tops_tid_x();
+// CHECK: choreo::half* lhsL__buf__ = (choreo::half*)(anon_10 + mr_offset_matmul_paraby_0_paraby_1_within_0_foreach_0_within_1_foreach_1_within_2_foreach_2_within_3_foreach_3_within_4_foreach_4_within_5_foreach_5_lhsL__buf__);
+// CHECK: tops_dte_ctx_t choreo_topscc_ctx2;
+// CHECK: tops::mdspan __mds4_lhsS(tops::Shared, (choreo::half*)lhsS.data(), 4096, (K % 4608));
+// CHECK: tops::mdspan __mds5_lhsL__buf__(tops::Private, (choreo::half*)lhsL__buf__, 256, (K % 4608 % 384 + (384 - K % 384)));
+// CHECK: unsigned int __pad_low_lhsS1[] = {0, 0};
+// CHECK: unsigned int __pad_high_lhsS1[] = {0, static_cast<unsigned int>((384 - K % 384))};
+// CHECK: unsigned int __pad_mid_lhsS1[] = {0, 0};
+// CHECK: int __slice_offset0__lhsS_2_lhsL__buf__[] = {(int)(anon_6 * 256) + (int)(0 * 256), 0 + (int)(__iv_kl__elem__0 * 384)};
+// CHECK: unsigned int __slice_shape1__lhsS_2_lhsL__buf__[] = {256, static_cast<unsigned int>((K % 4608 % 384))};
+// CHECK: tops::event lhsL__event__ = tops::slice_pad_async(*lhsL.get_ctx(), __mds5_lhsL__buf__, __mds4_lhsS, __slice_offset0__lhsS_2_lhsL__buf__, __slice_shape1__lhsS_2_lhsL__buf__, __pad_low_lhsS1, __pad_high_lhsS1, __pad_mid_lhsS1, f32_to_f16(static_cast<float>(0)));
+// CHECK: lhsL.set_event(lhsL__event__);
+// CHECK: auto anon_7 = __iv_ml__elem__0 * 4 + __tops_tid_x();
+// CHECK: choreo::half* lhsL2__buf__ = (choreo::half*)(anon_10 + mr_offset_matmul_paraby_0_paraby_1_within_0_foreach_0_within_1_foreach_1_within_2_foreach_2_within_3_foreach_3_within_4_foreach_4_within_5_foreach_5_lhsL2__buf__);
+// CHECK: tops_dte_ctx_t choreo_topscc_ctx3;
+// CHECK: tops::mdspan __mds6_lhsS(tops::Shared, (choreo::half*)lhsS.data(), 4096, (K % 4608));
+// CHECK: tops::mdspan __mds7_lhsL2__buf__(tops::Private, (choreo::half*)lhsL2__buf__, 256, (K % 4608 % 384 + (384 - K % 384)));
+// CHECK: unsigned int __pad_low_lhsS2[] = {0, 0};
+// CHECK: unsigned int __pad_high_lhsS2[] = {0, static_cast<unsigned int>((384 - K % 384))};
+// CHECK: unsigned int __pad_mid_lhsS2[] = {0, 0};
+// CHECK: int __slice_offset1__lhsS_2_lhsL2__buf__[] = {(int)(anon_7 * 256) + (int)(0 * 256), 0 + (int)(__iv_kl__elem__0 * 384)};
+// CHECK: unsigned int __slice_shape2__lhsS_2_lhsL2__buf__[] = {256, static_cast<unsigned int>((K % 4608 % 384))};
+// CHECK: tops::slice_pad(*lhsL2.get_ctx(), __mds7_lhsL2__buf__, __mds6_lhsS, __slice_offset1__lhsS_2_lhsL2__buf__, __slice_shape2__lhsS_2_lhsL2__buf__, __pad_low_lhsS2, __pad_high_lhsS2, __pad_mid_lhsS2, f32_to_f16(static_cast<float>(0)));
+// CHECK: auto anon_8 = __iv_nl__elem__0 * 3 + __tops_tid_y();
+// CHECK: choreo::half* rhsL__buf__ = (choreo::half*)(anon_10 + mr_offset_matmul_paraby_0_paraby_1_within_0_foreach_0_within_1_foreach_1_within_2_foreach_2_within_3_foreach_3_within_4_foreach_4_within_5_foreach_5_rhsL__buf__);
+// CHECK: tops_dte_ctx_t choreo_topscc_ctx4;
+// CHECK: tops::mdspan __mds8_rhsS(tops::Shared, (choreo::half*)rhsS.data(), (K % 4608), 3072);
+// CHECK: tops::mdspan __mds9_rhsL__buf__(tops::Private, (choreo::half*)rhsL__buf__, (K % 4608 % 384 + (384 - K % 384)), 1024);
+// CHECK: unsigned int __pad_low_rhsS3[] = {0, 0};
+// CHECK: unsigned int __pad_high_rhsS3[] = {static_cast<unsigned int>((384 - K % 384)), 0};
+// CHECK: unsigned int __pad_mid_rhsS3[] = {0, 0};
+// CHECK: int __slice_offset2__rhsS_2_rhsL__buf__[] = {0 + (int)(__iv_kl__elem__0 * 384), (int)(anon_8 * 1024) + (int)(0 * 1024)};
+// CHECK: unsigned int __slice_shape3__rhsS_2_rhsL__buf__[] = {static_cast<unsigned int>((K % 4608 % 384)), 1024};
+// CHECK: tops::event rhsL__event__ = tops::slice_pad_async(*rhsL.get_ctx(), __mds9_rhsL__buf__, __mds8_rhsS, __slice_offset2__rhsS_2_rhsL__buf__, __slice_shape3__rhsS_2_rhsL__buf__, __pad_low_rhsS3, __pad_high_rhsS3, __pad_mid_rhsS3, f32_to_f16(static_cast<float>(0)));
+// CHECK: rhsL.set_event(rhsL__event__);
+// CHECK: lhsL.wait();
+// CHECK: rhsL.wait();
