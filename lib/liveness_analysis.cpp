@@ -937,6 +937,10 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
   }
   if (isa<ScalarType>(ty)) {
     AddDef(current_stmt, n.name_str);
+    if (n.init_expr) {
+      VarSet operands = GetAllSymbolicOperands(n.init_expr.get());
+      AddUse(current_stmt, operands);
+    }
   } else if (isa<StringType>(ty)) {
     // TODO: handle the case of string type
     assert(false && "not implemented yet.");

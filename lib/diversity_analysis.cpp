@@ -14,7 +14,8 @@ DiversityAnalysis::DiversityAnalysis(const ptr<SymbolTable> s_tab,
   assert(s_tab != nullptr);
 }
 
-bool DiversityAnalysis::NeedAnalyze() {
+bool DiversityAnalysis::InVectorizedLoop() {
+  if (InAnno) return false; // do not analyze diversity in annotation
   auto loop = li->GetLoop(lname);
   if (!loop) return false;
   if (AST::NeedVectorize(*loop->loop)) return true;
@@ -24,8 +25,7 @@ bool DiversityAnalysis::NeedAnalyze() {
 bool DiversityAnalysis::Visit(AST::Expr& n) {
   TraceEachVisit(n);
 
-  if (!NeedAnalyze()) return true;
-
+  if (!InVectorizedLoop()) return true;
   DiversityShape shape;
   auto expr_val = GetExprVal(n);
 
@@ -49,10 +49,10 @@ bool DiversityAnalysis::Visit(AST::Expr& n) {
     shape = ExprDShape(AST::Make<AST::Expr>(n), di);
   }
 
-  assert(shape.shape != DiversityShapeKind::UNKNOWN);
+  if (shape.Unknown()) shape = DiversityShape(DiversityShapeKind::DIVERGENT);
   if (!n.GetDiversityShape().ApprxEqual(shape)) {
     if (debug_visit)
-      dbgs() << "[diversity] [expr] `" << STR(n) << "` "
+      dbgs() << "expr: `" << STR(n) << "` "
              << STR(n.GetDiversityShape()) << " -> " << STR(shape) << "\n";
     n.SetDiversityShape(shape);
     changed = true;
@@ -62,30 +62,51 @@ bool DiversityAnalysis::Visit(AST::Expr& n) {
 
 bool DiversityAnalysis::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
-  if (!NeedAnalyze()) return true;
+  if (!InVectorizedLoop()) {
+    auto sym = InScopeName(n.name_str);
+    di->AssignSymbolShape(sym, DiversityShape(UNIFORM));
+    di->AddDefiniteUniformSymbol(sym);
+    return true;
+  }
   if (n.IsArray()) {
     Error1(n.LOC(),
            "array variable declaration in diversity analysis: " + STR(n) + ".");
     assert(false);
   }
-  DiversityShape shape = dyn_cast<AST::Expr>(n.init_expr)->GetDiversityShape();
+  DiversityShape shape = n.GetDiversityShape();
+  DiversityShape init_shape =
+      n.init_expr ? n.init_expr->GetDiversityShape() : DiversityShape(UNIFORM);
 
-  auto scope_shape = scope_shapes.top();
-  shape = ComputeDiversityShape(scope_shape, shape);
+  auto name = n.name_str;
+  auto sym_shape = di->GetSymbolShape(InScopeName(name));
+  if (!sym_shape.Unknown()) {
+    shape = sym_shape;
+  } else {
+    auto scope_shape = scope_shapes.top();
+    shape = ComputeDiversityShape(scope_shape, init_shape);
+  }
+  if (!n.GetDiversityShape().ApprxEqual(shape)) {
+    if (debug_visit)
+      dbgs() << "decl: `" << n.name_str << " = "
+             << STR(n.init_expr) << "` " << STR(n.GetDiversityShape()) << " -> "
+             << STR(shape) << "\n";
+    changed = true;
+    n.SetDiversityShape(shape);
+  }
+  // assign the shape to symbol table
   if (di->AssignSymbolShape(InScopeName(n.name_str), shape)) changed = true;
   return true;
 }
 
 bool DiversityAnalysis::Visit(AST::Identifier& n) {
   TraceEachVisit(n);
-  if (!NeedAnalyze()) return true;
+  if (!InVectorizedLoop()) return true;
 
   auto sym_name = InScopeName(n.name);
   if (di->IsDefinedSymbol(sym_name)) {
     auto shape = di->GetSymbolShape(sym_name);
     n.SetDiversityShape(shape);
   } else {
-    // if not defined
     n.SetDiversityShape(DiversityShape(UNIFORM));
     if (di->AssignSymbolShape(sym_name, n.GetDiversityShape())) changed = true;
   }
@@ -94,7 +115,7 @@ bool DiversityAnalysis::Visit(AST::Identifier& n) {
 
 bool DiversityAnalysis::Visit(AST::DataAccess& n) {
   TraceEachVisit(n);
-  if (!NeedAnalyze()) return true;
+  if (!InVectorizedLoop()) return true;
 
   if (n.AccessElement()) {
     auto indices = n.GetIndices();
@@ -118,7 +139,14 @@ bool DiversityAnalysis::Visit(AST::DataAccess& n) {
 
 bool DiversityAnalysis::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
-  if (!NeedAnalyze()) return true;
+  if (!InVectorizedLoop()) {
+    if (n.IsDecl() && !n.AssignToDataElement()) {
+      auto sym = InScopeName(n.da->GetDataName());
+      di->AssignSymbolShape(sym, DiversityShape(UNIFORM));
+      di->AddDefiniteUniformSymbol(sym);
+    }
+    return true;
+  }
   auto da = n.da;
   // divergent control flow denpendence
   auto scope_shape = scope_shapes.top();
@@ -130,11 +158,28 @@ bool DiversityAnalysis::Visit(AST::Assignment& n) {
   if (!da->AccessElement()) {
     // example: a = b.at[j];
     auto iv_name = da->GetDataName();
+    if (di->IsDefinedSymbol(InScopeName(iv_name))) {
+      if (di->AssignSymbolShape(InScopeName(iv_name), val_shape)) {
+        if (debug_visit)
+          dbgs() << "asgn: `" << PSTR(n.da) << " = "
+                 << PSTR(n.value) << "`, diversity: " << STR(val_shape) << "\n";
+        changed = true;
+      }
 
-    if (di->AssignSymbolShape(InScopeName(iv_name), val_shape)) changed = true;
-    da->SetDiversityShape(val_shape);
+      da->SetDiversityShape(val_shape);
+      n.SetDiversityShape(val_shape);
+    } else {
+      Error1(n.LOC(),
+             "The symbol `" + iv_name +
+                 "' has not been defined before assignment: " + STR(n) + ".");
+      assert(false);
+    }
   } else {
-    // example: a.at[i] = b.at[j];
+    // example: a.at[0] = varying_value;
+    auto da_shape = da->GetDiversityShape();
+    auto val_shape = n.value->GetDiversityShape();
+    auto asgn_shape = ComputeDiversityShape(da_shape, val_shape);
+    n.SetDiversityShape(asgn_shape);
   }
 
   return true;
@@ -142,7 +187,7 @@ bool DiversityAnalysis::Visit(AST::Assignment& n) {
 
 bool DiversityAnalysis::Visit(AST::Call& n) {
   TraceEachVisit(n);
-  if (!NeedAnalyze()) return true;
+  if (!InVectorizedLoop()) return true;
 
   auto args = n.GetArguments();
   bool all_uniform = true;
@@ -162,7 +207,7 @@ bool DiversityAnalysis::Visit(AST::Call& n) {
 
 bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
-  if (!NeedAnalyze()) return true;
+  if (!InVectorizedLoop()) return true;
   auto loop = li->GetLoop(lname);
   auto iv_ty = loop->GetIVType();
   auto iv_name = loop->IVName();
@@ -181,7 +226,7 @@ bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
 
 bool DiversityAnalysis::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
-  if (!NeedAnalyze()) return true;
+  if (!InVectorizedLoop()) return true;
   auto pred = n.GetPred();
   auto pred_shape = pred->GetDiversityShape();
   auto scope_shape = scope_shapes.top();
@@ -191,7 +236,7 @@ bool DiversityAnalysis::Visit(AST::IfElseBlock& n) {
 }
 
 bool DiversityAnalysis::BeforeAfterVisitImpl(AST::Node& n) {
-  if (NeedAnalyze()) {
+  if (InVectorizedLoop()) {
     if (isa<AST::IfElseBlock>(&n)) {
       assert(!scope_shapes.empty());
       scope_shapes.pop();

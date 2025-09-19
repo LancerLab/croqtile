@@ -140,12 +140,14 @@ int main(int argc, char* argv[]) {
   if (!ln.RunOnProgram(root)) return ln.Status();
   if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
 
-  LoopHandler lh(ti.SymTab());
+  CCtx().SetGlobalSymbolTable(ln.SymTab());
+
+  LoopHandler lh;
   if (!lh.RunOnProgram(root)) return lh.Status();
   if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
   if (CCtx().TraceVectorize()) return 0;
 
-  CCtx().SetGlobalSymbolTable(ln.SymTab());
+  CCtx().SetGlobalSymbolTable(lh.SymTab());
 
   // debug: dump the symbol table
   if (std::getenv("DUMP_SYMTAB") || CCtx().DumpSymtab())

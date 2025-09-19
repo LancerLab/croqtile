@@ -124,12 +124,11 @@ private:
   ptr<LoopInfo> li;
   ptr<ScopedSCEVTable> ssetab;
 
-  bool InAnno = false;
-
 private:
   bool InLoop();
   bool InVectorizedLoop();
   bool NeedAnalyze(ptr<Type> ty) {
+    if (InAnno) return false; // do not analyze scalar evolution in annotation
     return IsActualBoundedIntegerType(ty) || isa<ScalarIntegerType>(ty);
   }
 
@@ -188,10 +187,6 @@ public:
   bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::ParallelBy& n) override;
   bool Visit(AST::Parameter& n) override;
-
-  bool BeforeAfterVisitImpl(AST::Node& n) override;
-  bool AfterBeforeVisitImpl(AST::Node& n) override;
-
 }; // end class ScalarEvolution
 
 } // end namespace Choreo

@@ -59,7 +59,7 @@ public:
   virtual const location& LOC() const { return loc; }
   virtual void SetLOC(const location& l) { loc = l; }
   virtual void SetDiversityShape(const DiversityShape ds) { dshape = ds; }
-  virtual DiversityShape GetDiversityShape() { return dshape; }
+  virtual DiversityShape GetDiversityShape() const { return dshape; }
   virtual ~Node() = default;
 
   virtual const NoteMapType& Note() const { return note; }
@@ -74,6 +74,7 @@ public:
     auto n = CloneImpl();
     n->SetType(GetType());
     n->SetLevel(GetLevel());
+    n->SetDiversityShape(GetDiversityShape());
     if (!Note().empty()) n->Note() = Note();
     return n;
   }
@@ -3097,6 +3098,7 @@ inline IntLiteral* GetIntLiteral(const Node& n) {
   else
     return nullptr;
 }
+
 inline ptr<IntLiteral> GetIntLiteral(const ptr<Node>& n) {
   if (auto il = dyn_cast<IntLiteral>(n))
     return il;

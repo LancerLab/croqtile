@@ -162,7 +162,7 @@ inline const std::string VectorTypeSTR(const ptr<VectorType>& vt) {
   auto elem_ty = vt->e_type;
   auto ec = vt->ec;
   auto elem_size = SizeOf(elem_ty);
-  // if (elem_size == 1) elem_size = 4;
+  if (elem_size == 1) elem_size = 4;
   auto vector_size = elem_size * ec;
   std::string vty_str;
   if (vector_size == CCtx().GetSingleVectorByteSize())
@@ -275,29 +275,6 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
           ssm.MapHostSymbol(sname, "__iv_" + iv->name);
           return true;
         }
-      }
-    }
-  } else if (auto da = dyn_cast<AST::DataAccess>(&n)) {
-    if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
-      if (auto da_ty = dyn_cast<VectorType>(da->GetType())) {
-        // if the data access is a vector, we need to generate simple leaptr for
-        // this data access
-        auto elem_ty = da_ty->e_type;
-        std::string vty_str = VectorTypeSTR(da_ty);
-
-        auto data_name = da->GetDataName();
-        auto leaptr_name = data_name.substr(0, data_name.find_last_of('.')) +
-                           "_ptr" + da->Id();
-
-        ssm.MapDeviceSymbol(InScopeName(data_name) + da->Id(), leaptr_name);
-
-        ds << d_indent << "auto " << leaptr_name << " = tcle::simple_leaptr<"
-           << vty_str << ">(";
-        ds << "(" << NameBaseType(elem_ty) << "*)"
-           << ssm.DeviceName(InScopeName(data_name));
-
-        auto shape = sty->GetShape();
-        ds << AddressSTR(shape, *da, false) << ";\n";
       }
     }
   }
@@ -3598,13 +3575,35 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
   std::ostringstream oss;
   if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
     auto da_ty = da->GetType();
+    auto elem_ty = sty->ElementType();
     if (isa<VectorType>(da_ty)) {
       auto data_name = da->GetDataName();
-      auto leaptr_name = ssm.DeviceName(InScopeName(data_name) + da->Id());
       if (is_load) {
-        oss << leaptr_name << ".load()";
+        oss << "tcle::load<" << VectorTypeSTR(dyn_cast<VectorType>(da_ty))
+            << ">(";
+        if (CCtx().GetArch() == TargetArch::GCU3)
+          oss << "(__TCLE_AS__ char *)(";
+        else if (CCtx().GetArch() == TargetArch::GCU4)
+          oss << "(char *)(";
+        else
+          choreo_unreachable("unsupported target arch.");
+        auto shape = sty->GetShape();
+
+        oss << "(" << NameBaseType(elem_ty) << "*)"
+            << ssm.DeviceName(InScopeName(data_name))
+            << AddressSTR(shape, *da, false) << ")";
       } else {
-        oss << leaptr_name << ".store(" << val_str << ")";
+        oss << "tcle::store(" << val_str << ", ";
+        if (CCtx().GetArch() == TargetArch::GCU3)
+          oss << "(__TCLE_AS__ char *)(";
+        else if (CCtx().GetArch() == TargetArch::GCU4)
+          oss << "(char *)(";
+        else
+          choreo_unreachable("unsupported target arch.");
+        auto shape = sty->GetShape();
+        oss << "(" << NameBaseType(elem_ty) << "*)"
+            << ssm.DeviceName(InScopeName(data_name))
+            << AddressSTR(shape, *da, false) << ")";
       }
     } else {
       oss << ExprSTR(da, false) << " = " << val_str;

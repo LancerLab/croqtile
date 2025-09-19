@@ -2130,6 +2130,12 @@ inline int GetSingleWidth(const ptr<Type>& ty) {
   return cast<BoundedType>(ty)->GetWidth();
 }
 
+inline bool IsActualVectorType(const ptr<Type>& ty) {
+  if (isa<VectorType>(ty)) return true;
+  if (auto bty = dyn_cast<BoundedType>(ty)) return bty->GetWidth() > 1;
+  return false;
+}
+
 // utility functions to generate types
 // Note: should always use utility functions
 inline Shape GenUninitShape() { return Shape(); }

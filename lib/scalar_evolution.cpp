@@ -108,7 +108,6 @@ ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
 bool ScalarEvolutionAnalysis::Visit(AST::Expr& n) {
   TraceEachVisit(n);
   if (!NeedAnalyze(n.GetType())) return true;
-  if (InAnno) return true;
   auto valno = n.Opts().HasVal() ? n.Opts().GetVal() : sbe::sym(STR(n));
   auto scev_val = MakeSCEVVal(valno);
   auto loop_name = InLoop() ? lname : NoLoopName();
@@ -124,22 +123,12 @@ bool ScalarEvolutionAnalysis::Visit(AST::Expr& n) {
         auto scev = GetSCEVOfSym(iv_sym);
         n.SetSCEV(scev);
       }
-    } else if (auto da = dyn_cast<AST::DataAccess>(n.GetReference())) {
-      // todo: handle data access
-    } else if (auto call = AST::GetCall(n.GetReference())) {
-      // todo: handle call
-    } else if (auto intlit = AST::GetIntLiteral(n.GetReference())) {
-      auto se_val = MakeSCEVVal(valno);
-      n.SetSCEV(se_val);
     } else {
-      Error1(n.LOC(),
-             "unsupported reference expr in scalar evolution: " + STR(n) + ".");
-      return false;
+      // for other reference types, we just make it a sym
+      n.SetSCEV(scev_val);
     }
-    return true;
   } else if (op == "dimof") {
     n.SetSCEV(scev_val);
-    return true;
   } else if (n.IsBinary()) {
     auto lhs = cast<AST::Expr>(n.GetL());
     auto rhs = cast<AST::Expr>(n.GetR());
@@ -150,15 +139,14 @@ bool ScalarEvolutionAnalysis::Visit(AST::Expr& n) {
     if (!isa<SCEVAddRecExpr>(lhs_scev) && !isa<SCEVAddRecExpr>(rhs_scev)) {
       // both sides are not AddRec, we just make it a sym
       n.SetSCEV(scev_val);
-      return true;
     } else {
       auto bin_scev = ComputeARSCEV(lhs_scev, rhs_scev, n.op);
       n.SetSCEV(bin_scev ? bin_scev : scev_val);
-      return true;
     }
   } else {
     choreo_unreachable("unsupported expr in scalar evolution: " + STR(n) + ".");
   }
+
   return true;
 }
 
@@ -172,7 +160,7 @@ bool ScalarEvolutionAnalysis::Visit(AST::NamedVariableDecl& n) {
   auto iv_name = n.name_str;
   auto init_scev = init_expr->GetSCEV();
   if (debug_visit)
-    dbgs() << "[scev][decl]: " << iv_name << " -> " << STR(init_scev) << "\n";
+    dbgs() << "decl:  `" << iv_name << "` -> " << STR(init_scev) << "\n";
   AssignSCEVToSym(SymName(iv_name), init_scev, lname);
 
   return true;
@@ -196,14 +184,14 @@ bool ScalarEvolutionAnalysis::Visit(AST::Assignment& n) {
     assert(expr && "Only Expr can be rhs of Assignment.");
     auto expr_scev = expr->GetSCEV();
     if (debug_visit)
-      dbgs() << "[scev][assign]: " << name << " -> " << STR(expr_scev) << "\n";
+      dbgs() << "asgn:  `" << name << "` -> " << STR(expr_scev) << "\n";
     AssignSCEVToSym(sym_name, expr_scev, lname);
   } else {
     // else, we will invalidate the scev of the symbol this assignment assigns
     // to, since we cannot track the scev for re-assignment variables.
     if (debug_visit)
-      dbgs() << "[scev][assign]: " << name
-             << " is re-assigned, invalidate its scev.\n";
+      dbgs() << "asgn:  `" << name
+             << "` is re-assigned, invalidate its scev.\n";
     AssignSCEVToSym(sym_name, nullptr, lname);
   }
   return true;
@@ -211,12 +199,19 @@ bool ScalarEvolutionAnalysis::Visit(AST::Assignment& n) {
 
 bool ScalarEvolutionAnalysis::Visit(AST::Call& n) {
   TraceEachVisit(n);
-  if (n.IsAnno()) InAnno = true;
   return true;
 }
 
 bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
+  int vector_width = 1;
+  if (n.suffixs)
+    for (auto& suffix : n.suffixs->values)
+      if (auto suffix_call = AST::GetCall(suffix);
+          suffix_call->IsAnno() && suffix_call->function->name == "vectorize")
+        vector_width =
+            AST::GetIntLiteral(suffix_call->GetArguments()[1])->ValS32();
+
   // we register iv's scev of all loops, instead of only vectorized loops
   auto loop = li->GetLoop(lname);
   auto iv_ty = loop->GetIVType();
@@ -224,12 +219,11 @@ bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
   auto iv_sym = SymName(iv_name);
   auto upper_bound = GetSingleUpperBound(iv_ty);
   auto stride = GetSingleStride(iv_ty);
-  auto width = GetSingleWidth(iv_ty);
-  auto step = sbe::nu(stride * width);
+  auto step = sbe::nu(stride * vector_width);
   auto ar_expr = MakeSCEVAddRecExpr(sbe::nu(0), step, loop);
 
   if (debug_visit)
-    dbgs() << "[scev][iv]: " << iv_name << " -> " << STR(ar_expr) << "\n";
+    dbgs() << "iv:    `" << iv_name << "` -> " << STR(ar_expr) << "\n";
   AssignSCEVToSym(SymName(iv_name), ar_expr, lname);
   return true;
 }
@@ -242,7 +236,7 @@ bool ScalarEvolutionAnalysis::Visit(AST::ParallelBy& n) {
     auto pb_id = AST::GetIdentifier(pb);
     auto se_val = MakeSCEVVal(sbe::sym(SymName(pb_id->name)), loop);
     if (debug_visit)
-      dbgs() << "[scev][pid]: " << pb_id->name << " -> " << STR(se_val) << "\n";
+      dbgs() << "pi:    `" << pb_id->name << "` -> " << STR(se_val) << "\n";
     AssignSCEVToSym(SymName(pb_id->name), se_val, loop_name);
   }
   return true;
@@ -256,31 +250,16 @@ bool ScalarEvolutionAnalysis::Visit(AST::Parameter& n) {
       auto se_val = MakeSCEVVal(s);
       if (IsAssignedSym(s->ToString())) continue;
       if (debug_visit)
-        dbgs() << "[scev][param]: " << s << " -> " << STR(se_val) << "\n";
+        dbgs() << "param: `" << s << "` -> " << STR(se_val) << "\n";
       AssignSCEVToSym(s->ToString(), se_val, NoLoopName());
     }
   } else if (NeedAnalyze(n.GetType())) {
     auto se_val = MakeSCEVVal(sbe::sym(n.sym->name));
     if (debug_visit)
-      dbgs() << "[scev][param]: " << n.sym->name << " -> " << STR(se_val)
-             << "\n";
+      dbgs() << "param: `" << n.sym->name << "` -> " << STR(se_val) << "\n";
     AssignSCEVToSym(SymName(n.sym->name), se_val, NoLoopName());
   }
 
-  return true;
-}
-
-bool ScalarEvolutionAnalysis::BeforeAfterVisitImpl(AST::Node& n) {
-  if (auto f = dyn_cast<AST::Call>(&n)) {
-    if (f->IsAnno()) InAnno = false;
-  }
-  return true;
-}
-
-bool ScalarEvolutionAnalysis::AfterBeforeVisitImpl(AST::Node& n) {
-  if (auto f = dyn_cast<AST::Call>(&n)) {
-    if (f->IsAnno()) InAnno = true;
-  }
   return true;
 }
 } // namespace Choreo

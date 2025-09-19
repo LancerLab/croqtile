@@ -72,6 +72,7 @@ set(CORE_SOURCES
   valno.cpp
   visitor.cpp
   liveness_analysis.cpp
+  loop_vectorize.cpp
   mem_reuse.cpp
   diversity_analysis.cpp
   scalar_evolution.cpp

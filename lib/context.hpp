@@ -181,8 +181,6 @@ struct DiversityShape {
     if (shape == Kind::UNIFORM) {
       if (!value->Computable()) value = UncomputableValueItem();
     }
-    assert(shape != Kind::UNKNOWN &&
-           "DiversityShape should not be UNKNOWN at construction.");
   }
   DiversityShape(const DiversityShape& other)
       : shape(other.shape), stride(other.stride), value(other.value) {}
@@ -194,6 +192,10 @@ struct DiversityShape {
   bool Divergent() const { return shape == Kind::DIVERGENT; }
 
   bool Unknown() const { return shape == Kind::UNKNOWN; }
+
+  bool Varying() const {
+    return shape == Kind::STRIDE || shape == Kind::DIVERGENT;
+  }
 
   bool ApprxEqual(const DiversityShape& other) const {
     if (shape != other.shape) return false;

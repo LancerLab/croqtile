@@ -21,23 +21,24 @@ ___co__ void vecadd(s32 [N, C, H, W] a, s32 [N,C,H, W] b)
 }
 }
 
-// CHECK: [scev][param]: ::vecadd::C -> ::vecadd::C
-// CHECK: [scev][param]: ::vecadd::W -> ::vecadd::W
-// CHECK: [scev][param]: ::vecadd::H -> ::vecadd::H
-// CHECK: [scev][param]: ::vecadd::N -> ::vecadd::N
-// CHECK: [scev][pid]: anon_pb_0__elem__x -> ::vecadd::paraby_0::anon_pb_0__elem__x
-// CHECK: [scev][pid]: q__elem__x -> ::vecadd::paraby_0::paraby_1::q__elem__x
-// CHECK: [scev][iv]: n -> {0, +, 1} <::loop_n0>
-// CHECK: [scev][iv]: c -> {0, +, 1} <::loop_n0::loop_c1>
-// CHECK: [scev][iv]: h -> {0, +, 1} <::loop_n0::loop_c1::loop_h2>
-// CHECK: [scev][iv]: w -> {0, +, 128} <::loop_n0::loop_c1::loop_h2::loop_w3>
-// CHECK{LITERAL}: [scev][decl]: index_0 -> {{0, +, ::vecadd::W} <::loop_n0::loop_c1::loop_h2>, +, 128} <::loop_n0::loop_c1::loop_h2::loop_w3>
-// CHECK: [scev][decl]: index_1 -> {1, +, 1} <::loop_n0::loop_c1::loop_h2>
-// CHECK: [scev][decl]: index_2 -> {0, +, 3} <::loop_n0::loop_c1::loop_h2>
-// CHECK: [scev][decl]: index_3 -> (::vecadd::paraby_0::paraby_1::within_0::h % ::vecadd::W)
-// CHECK: [scev][decl]: index_4 -> {0, +, (1 / ::vecadd::W)} <::loop_n0::loop_c1::loop_h2>
-// CHECK: [scev][decl]: index_5 -> {1, +, 4} <::loop_n0::loop_c1::loop_h2>
-// CHECK: [scev][decl]: index_6 -> {(::vecadd::N + 2), +, 2} <::loop_n0::loop_c1::loop_h2>
-// CHECK: [scev][decl]: val -> UNKNOWN
-// CHECK: [scev][assign]: val is re-assigned, invalidate its scev.
-// CHECK: [scev][assign]: index_0 is re-assigned, invalidate its scev.
+// CHECK: [scev] start scalar evolution analysis.
+// CHECK: param: `::vecadd::C` -> ::vecadd::C
+// CHECK: param: `::vecadd::W` -> ::vecadd::W
+// CHECK: param: `::vecadd::H` -> ::vecadd::H
+// CHECK: param: `::vecadd::N` -> ::vecadd::N
+// CHECK: pi:    `anon_pb_0__elem__x` -> ::vecadd::paraby_0::anon_pb_0__elem__x
+// CHECK: pi:    `q__elem__x` -> ::vecadd::paraby_0::paraby_1::q__elem__x
+// CHECK: iv:    `n` -> {0, +, 1} <::loop_n0>
+// CHECK: iv:    `c` -> {0, +, 1} <::loop_n0::loop_c1>
+// CHECK: iv:    `h` -> {0, +, 1} <::loop_n0::loop_c1::loop_h2>
+// CHECK: iv:    `w` -> {0, +, 128} <::loop_n0::loop_c1::loop_h2::loop_w3>
+// CHECK{LITERAL}: decl:  `index_0` -> {{0, +, ::vecadd::W} <::loop_n0::loop_c1::loop_h2>, +, 128} <::loop_n0::loop_c1::loop_h2::loop_w3>
+// CHECK: decl:  `index_1` -> {1, +, 1} <::loop_n0::loop_c1::loop_h2>
+// CHECK: decl:  `index_2` -> {0, +, 3} <::loop_n0::loop_c1::loop_h2>
+// CHECK: decl:  `index_3` -> (::vecadd::paraby_0::paraby_1::within_0::h % ::vecadd::W)
+// CHECK: decl:  `index_4` -> {0, +, (1 / ::vecadd::W)} <::loop_n0::loop_c1::loop_h2>
+// CHECK: decl:  `index_5` -> {1, +, 4} <::loop_n0::loop_c1::loop_h2>
+// CHECK: decl:  `index_6` -> {(::vecadd::N + 2), +, 2} <::loop_n0::loop_c1::loop_h2>
+// CHECK: decl:  `val` -> l1_a.data[n, c, h, w]
+// CHECK: asgn:  `val` is re-assigned, invalidate its scev.
+// CHECK: asgn:  `index_0` is re-assigned, invalidate its scev.

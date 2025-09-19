@@ -102,12 +102,21 @@ inline DiversityShape ComputeDiversityShape(const DiversityShape& lhs,
 
 struct DiversityInfo {
   std::unordered_map<std::string, DiversityShape>
-      shapes; // k: scoped symbol name, v: shape
+      shapes;                        // k: scoped symbol name, v: shape
+  std::vector<std::string> uni_syms; // symbols that are uniform
 
   void Dump(std::ostream& os) const;
 
   bool IsDefinedSymbol(const std::string& name) const {
     return shapes.count(name) > 0;
+  }
+
+  bool IsDefiniteUniform(const std::string& name) const {
+    return std::find(uni_syms.begin(), uni_syms.end(), name) != uni_syms.end();
+  }
+
+  void AddDefiniteUniformSymbol(const std::string& name) {
+    if (!IsDefiniteUniform(name)) uni_syms.push_back(name);
   }
 
   DiversityShape GetSymbolShape(const std::string& name) const {
@@ -196,7 +205,7 @@ private:
   ptr<DiversityInfo> di;
   std::stack<DiversityShape> scope_shapes;
 
-  bool NeedAnalyze();
+  bool InVectorizedLoop();
 
 public:
   bool changed = false;

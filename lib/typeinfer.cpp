@@ -61,10 +61,6 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
     for (auto& rn : fb->GetRanges()) {
       auto range = cast<AST::LoopRange>(rn);
       auto sym_ty = GetSymbolType(n.LOC(), range->IVName());
-      // if (auto bty = cast<BoundedITupleType>(sym_ty)) {
-      //   assert(bty->Dims() == 1 &&
-      //          "expected one-dimensional bounded ituple for loop range.");
-      // }
       SetNodeType(*range->iv, sym_ty);
     }
   }
@@ -136,13 +132,6 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
         assert(!BetterQuality(nty, cur_type) &&
                "the inference type should be better qualified.");
         if (!(cur_type->LogicalEqual(*nty))) {
-          if (auto vcur_type = dyn_cast<VectorType>(cur_type)) {
-            // if the current type is a vector type, we can update it to the new
-            // type
-            SetNodeType(nd, ShadowTypeStorage(vcur_type));
-            cur_type = nty;
-            return true;
-          }
           Error1(nd.LOC(), "can not infer the type of `" + n + "'.");
           return false;
         }
@@ -349,33 +338,6 @@ bool TypeInference::Visit(AST::DataAccess& n) {
   if (!n.AccessElement()) return true;
   auto dty = GetSymbolType(n.LOC(), n.GetDataName());
   SetNodeType(*n.data, dty);
-  auto ety = MakeElemScalarType(cast<SpannedType>(dty)->ElementType());
-  for (auto item : n.GetIndices()) {
-    auto ity = NodeType(*item);
-    if (auto bty = dyn_cast<BoundedITupleType>(ity)) {
-      SetNodeType(*item, bty);
-      if (auto id = AST::GetIdentifier(item)) SetNodeType(*id, bty);
-
-      auto width = bty->GetWidth(0);
-      if (bty->Dims() == 1 && width != 1) {
-        assert(isa<ScalarType>(ety) &&
-               "expected scalar type for element in vector access.");
-        auto vty = MakeVectorType(ety->GetBaseType(), width);
-        SetNodeType(n, vty);
-        cur_type = vty;
-
-        if (CCtx().ShowInferredTypes()) {
-          dbgs() << "DataAcess: " << InScopeName(n.GetDataName());
-          for (auto& idx : n.GetIndices()) dbgs() << "[" << PSTR(idx) << "]";
-          dbgs() << ", Type: " << PSTR(vty) << "\n";
-        }
-      }
-    } else if (isa<UnknownType>(ity)) {
-      Error(n.LOC(), "unable to deduce the type of `" + n.GetDataName() + "'.");
-      error_count++;
-      return false;
-    }
-  }
   return true;
 }
 
@@ -383,31 +345,12 @@ bool TypeInference::Visit(AST::DataAccess& n) {
 bool TypeInference::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
+  // should be assigned already by DataAccess
+  assert(isa<ScalarType>(NodeType(*n.da)));
+
   if (n.AssignToDataElement()) {
     auto dty = GetSymbolType(n.LOC(), n.GetDataArrayName());
     auto ety = MakeElemScalarType(cast<SpannedType>(dty)->ElementType());
-    // data array access
-    for (auto item : n.da->GetIndices()) {
-      auto ity = NodeType(*item);
-      if (auto bty = dyn_cast<BoundedITupleType>(ity)) {
-        auto width = bty->GetWidth(0);
-        if (bty->Dims() == 1 && width != 1) {
-          assert(isa<ScalarType>(ety) &&
-                 "expected scalar type for element in vector assignment.");
-          auto vty = MakeVectorType(ety->GetBaseType(), width);
-          SetNodeType(n, vty);
-          return true;
-        }
-      } else if (isa<UnknownType>(ity)) {
-        Error(n.LOC(),
-              "unable to deduce the type of `" + n.da->GetDataName() + "'.");
-        error_count++;
-        return false;
-      }
-    }
-    // should be assigned already by DataAccess
-    assert(isa<ScalarType>(NodeType(*n.da)) ||
-           isa<VectorType>(NodeType(*n.da)));
     SetNodeType(*n.da, ety);
     SetNodeType(n, ety);
     return true;
@@ -1001,12 +944,6 @@ bool TypeInference::Visit(AST::Trigger& n) {
 
 bool TypeInference::Visit(AST::Call& n) {
   TraceEachVisit(n);
-  // todo
-  if (n.IsAnno() && n.function->name == "vectorize") {
-    auto width = AST::GetIntLiteral(n.GetArguments()[1]);
-    n.SetType(MakeVectorType(BaseType::U32, width->ValS32()));
-  }
-
   cur_type = n.GetType(); // use early-sema's type
   assert(cur_type);
 
@@ -1126,39 +1063,6 @@ bool TypeInference::Visit(AST::LoopRange& n) {
 
 bool TypeInference::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
-  if (n.suffixs) {
-    for (auto& suffix : n.suffixs->values) {
-      if (auto suffix_call = AST::GetCall(suffix);
-          suffix_call->IsAnno() && suffix_call->function->name == "vectorize") {
-
-        auto iv = AST::GetIdentifier(suffix_call->GetArguments()[0]);
-        auto width = AST::GetIntLiteral(suffix_call->GetArguments()[1]);
-        auto iv_ty = NodeType(*iv);
-
-        // vectorize width is the second argument
-        int width_val = width->ValS32();
-
-        auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
-        auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
-        auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetStrides();
-        IntegerList widths(iv_ty->Dims(), width_val);
-        auto new_ty = MakeBoundedITupleType(lb, ub, s, widths);
-
-        SetNodeType(*iv, new_ty);
-
-        if (auto id = AST::GetIdentifier(*iv))
-          AssignSymbolWithType(n.LOC(), id->name, new_ty);
-
-        if (CCtx().ShowInferredTypes()) {
-          dbgs() << "VBouned:   " << InScopeName(iv->name)
-                 << ", Type: " << AST::TYPE_STR(*iv) << "\n";
-        }
-
-        return true;
-      }
-    }
-  }
-
   cur_type.reset(); // no current type to annotate the stmts inside
   return true;
 }

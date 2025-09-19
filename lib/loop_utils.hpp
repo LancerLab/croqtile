@@ -42,6 +42,7 @@ struct LoopChecker final : public VisitorWithScope {
 struct LoopVisitor : public VisitorWithSymTab {
 protected:
   std::string lname;
+  bool InAnno = false;
   int loop_count = 0;
 
   void TraceEachVisit(const AST::Node& n) {
@@ -50,13 +51,9 @@ protected:
 
   void EnterLoopScope(const std::string& loop_name) {
     lname = lname + "::loop_" + loop_name + std::to_string(loop_count++);
-    // if (debug_visit && !lname.empty()) dbgs() << "Entering : " << lname <<
-    // "\n";
   }
 
   void LeaveLoopScope() {
-    // if (debug_visit && !lname.empty()) dbgs() << "Leaving :  " << lname <<
-    // "\n";
     size_t pos = lname.rfind("::loop_");
     if (pos != std::string::npos) {
       lname = lname.substr(0, pos);
@@ -64,6 +61,7 @@ protected:
       lname.clear();
     }
   }
+
   virtual bool AfterBeforeVisitImpl(AST::Node&) { return true; }
   virtual bool BeforeAfterVisitImpl(AST::Node&) { return true; }
 
@@ -73,7 +71,9 @@ protected:
       assert(loop->IsNorm() && "Loop should be normalized before LoopVisitor.");
       auto iv_name = loop->GetIV()->name;
       EnterLoopScope(iv_name);
-    }
+    } else if (auto f = dyn_cast<AST::Call>(&n))
+      if (f->IsAnno()) InAnno = true;
+
     AfterBeforeVisitImpl(n);
     return true;
   }
@@ -84,7 +84,9 @@ protected:
     if (auto loop = dyn_cast<AST::ForeachBlock>(&n)) {
       assert(loop->IsNorm() && "Loop should be normalized before LoopVisitor.");
       LeaveLoopScope();
-    }
+    } else if (auto f = dyn_cast<AST::Call>(&n))
+      if (f->IsAnno()) InAnno = false;
+
     return true;
   }
 
