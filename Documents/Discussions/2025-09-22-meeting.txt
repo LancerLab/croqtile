@@ -1,0 +1,26 @@
+Cute Tensor with layout:
+  layout a (shape(_, _, Kh, Kw), stride(x,y,z,k)
+  ta = make_tensor(i_s_padded, a);
+  // ...
+  matmul(ta, tb);
+
+Choreo IR (choice 1 - bind shape only to tensor):
+  shaped_tensor a(shape);
+  //...
+  matmul(a, b, stride_a, stride_b);
+
+Choreo Language: sub-spanned // TODO
+
+  lhs = i_s_padded.subspan(_, _, Kh, Kw).stride(x, y, z, k).at(m,n,i,j);
+  rhs = A.subspan(1, _).at(i*Wo + j, 0).span_as(1, Cin, Kh, Kw);
+
+  dma.copy lhs=>rhs;
+
+or simpler form:
+  lhs = l_s_padded.sub([_,_,Kh,Kw] /*shape*/, {x, y, z, k} /*stride*/).at(m,n,i,j);
+
+
+TODOs:
+  - subspanned
+  - full memory oob check?
+  - systematic check? check->emit code? check-> symval/assertion expression?
