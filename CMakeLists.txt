@@ -33,7 +33,7 @@ endif()
 # Specify the build directory (this is automatically handled by CMake)
 set(BUILD_DIR ${CMAKE_BINARY_DIR}/build)
 
-set(TOOLCHAIN_DIR "${CMAKE_SOURCE_DIR}/tools")
+set(TOOLCHAIN_DIR "${CMAKE_SOURCE_DIR}/extern")
 
 set(SYMBOLIC_DIR "${CMAKE_SOURCE_DIR}/extern/ginac")
 set(CLN_DIR "${SYMBOLIC_DIR}/cln-1.3.7/install")
@@ -59,44 +59,52 @@ endif()
 # Include generated files
 include_directories(${CMAKE_BINARY_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/lib)
-include_directories(${CMAKE_SOURCE_DIR}/utils)
+include_directories(${CMAKE_SOURCE_DIR}/runtime)
 include_directories(${CLN_DIR}/include ${GINAC_DIR}/include)
 
 # add code sources and rules
 add_subdirectory(lib)
 
-# preprocessor
-add_executable(copp
-  utils/choreo_preprocess.cpp
-)
+# preprocessor executable
+add_executable(copp tools/copp/choreo_preprocess.cpp)
+# choreo compiler executable
+add_executable(choreo tools/choreo/choreo_main.cpp)
 
-# Add the main executable
-add_executable(choreo
-  utils/choreo_main.cpp
-)
-target_include_directories(choreo PRIVATE ${CMAKE_SOURCE_DIR})
-
-# Link the library to the executable
-target_link_libraries(choreo PRIVATE
-  parser_obj
-  scanner_obj
-  cl_obj
-  codegen
+set(EXTERN_LIBS
   ${GINAC_DIR}/lib/libginac.a
   ${CLN_DIR}/lib/libcln.a
   gmp
   stdc++fs
 )
 
-target_link_libraries(copp PRIVATE
-  parser_obj
-  scanner_obj
+# Link the library to the executable
+target_link_libraries(choreo PRIVATE
+  parse
+  core
   codegen
-  cl_obj
-  ${GINAC_DIR}/lib/libginac.a
-  ${CLN_DIR}/lib/libcln.a
-  gmp
+  support
+  ${EXTERN_LIBS}
 )
+
+target_link_libraries(copp PRIVATE
+  parse
+  core
+  codegen
+  support
+  ${EXTERN_LIBS}
+)
+
+# choreo sdk library
+add_library(choreo-dev STATIC
+  $<TARGET_OBJECTS:parse>
+  $<TARGET_OBJECTS:core>
+  $<TARGET_OBJECTS:codegen>
+  $<TARGET_OBJECTS:support>
+  tools/sdk/public_api.cpp
+)
+
+# Exclude from default build
+set_target_properties(choreo-dev PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 # message(STATUS "CHOREO_PACKAGE_VERSION is set to: ${CHOREO_PACKAGE_VERSION}")
 
@@ -105,110 +113,76 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/VERSION.txt")
   message(FATAL_ERROR "VERSION.txt not found!")
 endif()
 
+
+# Set the install prefix
+install(FILES ${CMAKE_SOURCE_DIR}/runtime/choreo.h
+  DESTINATION include
+  COMPONENT rt_headers
+)
+
+install(TARGETS choreo copp
+  RUNTIME DESTINATION bin
+  COMPONENT executables
+)
+
+# SDK headers installation - only if SDK exists
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/lib/
+  DESTINATION include/choreo
+  COMPONENT sdk_headers
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+
+install(TARGETS choreo-dev ARCHIVE
+  DESTINATION lib
+  COMPONENT libraries
+)
+
+# --- CPack setup ---
+#set(CPACK_COMPONENTS_ALL sdk_headers libraries rt_headers executables)
+
 # Read the version from VERSION.txt
 file(READ "${CMAKE_SOURCE_DIR}/VERSION.txt" CPACK_PACKAGE_VERSION)
 # Strip any leading/trailing whitespace or newlines
 string(STRIP "${CPACK_PACKAGE_VERSION}" CPACK_PACKAGE_VERSION)
 
-# Minimum required glibc version
-set(MIN_GLIBC_VERSION "2.27")
-
-# Create the DEBIAN/preinst script
-#file(WRITE ${CMAKE_BINARY_DIR}/preinst
-#"#!/bin/bash
-#
-## Minimum required glibc version
-#MIN_GLIBC_VERSION=\"${MIN_GLIBC_VERSION}\"
-#
-## Check if 'topscc' is installed
-#if ! dpkg -s topscc > /dev/null 2>&1; then
-#    echo \"Error: The 'topscc' package is not installed. Please install it first.\"
-#    exit 1
-#fi
-#
-#exit 0
-#")
-#
-#set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_BINARY_DIR}/preinst")
-#install(PROGRAMS ${CMAKE_BINARY_DIR}/preinst DESTINATION DEBIAN)
-
-# Set package information
+# Common metadata
 set(CPACK_PACKAGE_NAME "choreo")
-#set(CPACK_PACKAGE_VERSION "1.0.3.pre-beta")
-set(CPACK_PACKAGE_DESCRIPTION "Installed package for choreo")
 set(CPACK_PACKAGE_VENDOR "ERA Developers")
-
-# Set the packaging generator (DEB, TGZ, ZIP, RPM)
-set(CPACK_GENERATOR "DEB;TGZ;ZIP")
-
-# Set the maintainer and contact info
 set(CPACK_PACKAGE_CONTACT "heng.shi@enflame-tech.com")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "heng.shi@enflame-tech.com")
-
-set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Installed package for choreo")
-set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.27), libgmp10 (>= 6.1.2), topscc (>= 1.3.20241227)")
 
-# Set the install prefix
-set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}")
+# Where final artifacts go
+set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/package")
+
+# Install prefix inside packages
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
-set(CPACK_PACKAGE_DIRECTORY "${CMAKE_SOURCE_DIR}/package")
 
-# Install rules for core version
-# install(DIRECTORY ${GINAC_DIR}/include/ginac DESTINATION include USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-# install(DIRECTORY ${CLN_DIR}/include/cln DESTINATION include USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-#install(DIRECTORY ${GINAC_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libginac.a")
-#install(DIRECTORY ${CLN_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libcln.a")
-install(FILES ${CMAKE_SOURCE_DIR}/utils/choreo.h DESTINATION include)
-install(TARGETS choreo copp
-  RUNTIME DESTINATION bin
-  # mute for core version
-  # LIBRARY DESTINATION lib
-  # ARCHIVE DESTINATION lib
-)
-# install(FILES ${CMAKE_BINARY_DIR}/choreo_header.inc DESTINATION include)
-# install(FILES ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc DESTINATION include)
+# Use your install() rules as the source; component-aware packaging
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 
-# # Handle different package versions
-# if(CHOREO_PACKAGE_VERSION STREQUAL "standalone")
-#     message(STATUS "Building Standalone Version")
-#     # install(DIRECTORY ${GINAC_DIR}/include DESTINATION include)
-#     # install(DIRECTORY ${GINAC_DIR}/lib DESTINATION lib)
-#     # install(DIRECTORY ${CLN_DIR}/include DESTINATION include)
-#     # install(DIRECTORY ${CLN_DIR}/lib DESTINATION lib)
-#     # install(DIRECTORY ${BISON_PATH}/include DESTINATION include)
-#     # install(DIRECTORY ${BISON_PATH}/lib DESTINATION lib)
-#     # Install the executable and library
-#     install(TARGETS choreo copp codegen
-#       RUNTIME DESTINATION bin
-#       LIBRARY DESTINATION lib
-#       ARCHIVE DESTINATION lib
-#     )
-#     # Install generated headers
-#     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
-#
-# elseif(CHOREO_PACKAGE_VERSION STREQUAL "core")
-#     message(STATUS "Building Core Version")
-#     install(TARGETS choreo copp codegen
-#       RUNTIME DESTINATION bin
-#       LIBRARY DESTINATION lib
-#       ARCHIVE DESTINATION lib
-#     )
-#     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
-#
-# else()
-#     message(FATAL_ERROR "Invalid package version selected. Please choose 'standalone' or 'core'.")
-# endif()
+# You can leave CPACK_GENERATOR empty here and pass -G on the command,
+# or pick defaults now:
+set(CPACK_GENERATOR "DEB;TGZ;ZIP")
+
+# Generate the standard CPackConfig.cmake now
+include(CPack)
+
+configure_file(${CMAKE_SOURCE_DIR}/cmake/CPackCompiler.cmake.in
+               ${CMAKE_BINARY_DIR}/CPackCompiler.cmake @ONLY)
+
+configure_file(${CMAKE_SOURCE_DIR}/cmake/CPackSDK.cmake.in
+               ${CMAKE_BINARY_DIR}/CPackSDK.cmake @ONLY)
 
 # Set standalone packaging mode if CMake variable STANDALONE=ON
-option(STANDALONE "Build standalone package (contains tools and ginac/cln)" OFF)
+option(STANDALONE "Build standalone package (contains extern and ginac/cln)" OFF)
 if(STANDALONE)
   set(CHOREO_STANDALONE_PACKAGE ON)
-  message(STATUS "Building STANDALONE package: tools/bin, tools/include, tools/lib, tools/shared, and ginac/cln are all contained.")
+  message(STATUS "Building STANDALONE package: extern/bin, extern/include, extern/lib, extern/shared, and ginac/cln are all contained.")
 else()
   set(CHOREO_STANDALONE_PACKAGE OFF)
-  message(STATUS "Building CORE package: Only contains the main program and header files, excluding tools and ginac/cln.")
+  message(STATUS "Building CORE package: Only contains the main program and header files, excluding extern and ginac/cln.")
 endif()
 
 if(CHOREO_STANDALONE_PACKAGE)
@@ -217,10 +191,28 @@ if(CHOREO_STANDALONE_PACKAGE)
   install(DIRECTORY ${CLN_DIR}/include/ DESTINATION include USE_SOURCE_PERMISSIONS)
   install(DIRECTORY ${GINAC_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libginac.a")
   install(DIRECTORY ${CLN_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libcln.a")
-  install(DIRECTORY ${CMAKE_SOURCE_DIR}/tools/bin/ DESTINATION tools/bin USE_SOURCE_PERMISSIONS)
-  install(DIRECTORY ${CMAKE_SOURCE_DIR}/tools/include/ DESTINATION tools/include USE_SOURCE_PERMISSIONS)
-  install(DIRECTORY ${CMAKE_SOURCE_DIR}/tools/lib/ DESTINATION tools/lib USE_SOURCE_PERMISSIONS)
-  install(DIRECTORY ${CMAKE_SOURCE_DIR}/tools/shared/ DESTINATION tools/shared USE_SOURCE_PERMISSIONS)
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/extern/bin/ DESTINATION extern/bin USE_SOURCE_PERMISSIONS)
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/extern/include/ DESTINATION extern/include USE_SOURCE_PERMISSIONS)
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/extern/lib/ DESTINATION extern/lib USE_SOURCE_PERMISSIONS)
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/extern/shared/ DESTINATION extern/shared USE_SOURCE_PERMISSIONS)
 endif()
 
-include(CPack)
+# Choreo Compiler Package: runtime headers + binaries
+add_custom_target(package-compiler
+  COMMAND ${CMAKE_CPACK_COMMAND}
+    -D CPACK_PROJECT_CONFIG_FILE=${CMAKE_BINARY_DIR}/CPackCompiler.cmake
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  COMMENT "Building standalone compiler package"
+)
+
+add_dependencies(package-compiler choreo copp)
+
+# SDK Package: headers + static lib
+add_custom_target(package-sdk
+  COMMAND ${CMAKE_CPACK_COMMAND}
+    -D CPACK_PROJECT_CONFIG_FILE=${CMAKE_BINARY_DIR}/CPackSDK.cmake
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  COMMENT "Building SDK package (headers + static lib)"
+)
+
+add_dependencies(package-sdk choreo-dev)

@@ -8,7 +8,7 @@ NV_FLAGS = -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas $(CUDA_SYS_INC
 ROOT=../../
 GTEST_DIR = $(ROOT)/extern/gtest/
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
-HEADER_FILES :=  $(shell find $(ROOT)/lib -name '*.hpp') $(ROOT)/utils/choreo.h
+HEADER_FILES :=  $(shell find $(ROOT)/lib -name '*.hpp') $(ROOT)/runtime/choreo.h
 CHOREO_HEADERS :=  $(shell find $(ROOT)/lib -name '*.hpp')
 
 # Your application's files

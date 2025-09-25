@@ -136,7 +136,7 @@ bool CUDACodeGen::AfterVisitImpl(AST::Node& n) {
     outs() << "target=" << target_fn << "\n";
     outs() << "build_path=" << build_path << "\n";
     outs() << "cuda_script=" << build_path << "/cuda_script.sh\n";
-    outs() << "cp -r utils/catz/ " << build_path << "\n";
+    outs() << "cp -r runtime/catz/ " << build_path << "\n";
     outs() << R"(
 if command -v nvim &> /dev/null
 then

@@ -12,8 +12,8 @@ add_custom_command(
   COMMENT "Generating parser.tab.cc and parser.tab.hh with bison"
 )
 
-file(READ ${CMAKE_SOURCE_DIR}/utils/choreo.h CHOREO_HEADER_CONTENT)
-file(READ ${CMAKE_SOURCE_DIR}/utils/choreo_cuda.h CHOREO_CUDA_HEADER_CONTENT)
+file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo.h CHOREO_HEADER_CONTENT)
+file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo_cuda.h CHOREO_CUDA_HEADER_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/scripts/factor_script.sh FACTOR_SCRIPT_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/scripts/cuda_script.sh CUDA_SCRIPT_CONTENT)
 
@@ -39,26 +39,29 @@ configure_file(
 )
 
 add_custom_target(
-  generate_sources ALL
+  parser_deps ALL
   DEPENDS
   ${CMAKE_BINARY_DIR}/scanner.yy.cc
   ${CMAKE_BINARY_DIR}/parser.tab.cc
   ${CMAKE_BINARY_DIR}/parser.tab.hh
+)
+
+add_custom_target(
+  codegen_deps ALL
+  DEPENDS
   ${CMAKE_BINARY_DIR}/cuda_script.inc
   ${CMAKE_BINARY_DIR}/factor_script.inc
   ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc
   ${CMAKE_BINARY_DIR}/choreo_header.inc
 )
 
-# Define the source files for your codegen library
-set(CODEGEN_SOURCES
+set(PARSER_SOURCES
+  ${CMAKE_BINARY_DIR}/parser.tab.cc
+  ${CMAKE_BINARY_DIR}/scanner.yy.cc
+)
+
+set(CORE_SOURCES
   ast.cpp
-  codegen.cpp
-  codegen_cuda.cpp
-  codegen_cuda_types.cpp
-  codegen_factor.cpp
-  codegen_factor_types.cpp
-  codegen_topscc.cpp
   earlysema.cpp
   semacheck.cpp
   shapeinfer.cpp
@@ -72,32 +75,38 @@ set(CODEGEN_SOURCES
   mem_reuse.cpp
 )
 
-add_library(parser_obj OBJECT ${CMAKE_BINARY_DIR}/parser.tab.cc)
-target_include_directories(parser_obj PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_dependencies(parser_obj generate_sources)
-
-add_library(scanner_obj OBJECT ${CMAKE_BINARY_DIR}/scanner.yy.cc)
-target_include_directories(scanner_obj PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_dependencies(scanner_obj generate_sources)
-
-add_library(cl_obj OBJECT ${CMAKE_SOURCE_DIR}/lib/command_line.cpp)
-target_include_directories(cl_obj PRIVATE ${CMAKE_SOURCE_DIR}/lib)
-
-# Add the codegen library
-add_library(codegen STATIC
-  ${CODEGEN_SOURCES}
+# Define the source files for your codegen library
+set(CODEGEN_SOURCES
+  codegen.cpp
+  codegen_cuda.cpp
+  codegen_cuda_types.cpp
+  codegen_factor.cpp
+  codegen_factor_types.cpp
+  codegen_topscc.cpp
 )
 
+set(CL_SOURCES
+  command_line.cpp
+)
+
+# Add the libraries
+add_library(parse OBJECT ${PARSER_SOURCES})
+add_library(core OBJECT ${CORE_SOURCES})
+add_library(codegen OBJECT ${CODEGEN_SOURCES})
+add_library(support OBJECT ${CL_SOURCES})
+
+add_dependencies(parse parser_deps)
+add_dependencies(codegen codegen_deps)
+
+target_include_directories(parse PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
+target_include_directories(core PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(codegen PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
-target_link_libraries(codegen PRIVATE
-  ${GINAC_DIR}/lib/libginac.a
-  ${CLN_DIR}/lib/libcln.a
-)
+target_include_directories(support PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 
 target_compile_definitions(codegen PRIVATE
-    __CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}"
-    __CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}"
-    __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
+  __CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}"
+  __CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}"
+  __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
 )
 
 if(EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")

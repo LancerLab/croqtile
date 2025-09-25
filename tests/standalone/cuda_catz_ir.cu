@@ -9,12 +9,12 @@
 #include <fstream>
 #include <iostream>
 
-#include "utils/catz/coord.h"
-#include "utils/catz/index.h"
-#include "utils/catz/macro.h"
-#include "utils/catz/matrix.h"
-#include "utils/catz/trait.h"
-#include "utils/testing.h"
+#include "runtime/catz/coord.h"
+#include "runtime/catz/index.h"
+#include "runtime/catz/macro.h"
+#include "runtime/catz/matrix.h"
+#include "runtime/catz/trait.h"
+#include "runtime/testing.h"
 
 using namespace catz;
 

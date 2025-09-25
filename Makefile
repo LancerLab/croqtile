@@ -1,7 +1,9 @@
 SHELL:=/bin/bash
 
 WORK_DIR:=$(PWD)
-TOOLCHAIN_DIR=$(WORK_DIR)/tools
+TOOLCHAIN_DIR=$(WORK_DIR)/extern
+TOOLS_DIR=$(WORK_DIR)/tools
+RT_DIR=$(WORK_DIR)/runtime
 
 FTP_SERVER:=172.16.11.18
 
@@ -77,11 +79,14 @@ release-full: build-with-cmake-ninja
 
 package: PUBLIC_PACKAGE=ON
 package: release
-	@cmake --build $(REL_BUILD_DIR) --target package
+	@cmake --build $(REL_BUILD_DIR) --target package-compiler
 
 package-full: PUBLIC_PACKAGE=ON
 package-full: release-full
-	@cmake --build $(REL_BUILD_DIR) --target package
+	@cmake --build $(REL_BUILD_DIR) --target package-compiler
+
+sdk-package: release
+	@cmake --build $(REL_BUILD_DIR) --target package-sdk
 
 debug: CMAKE_BUILD_TYPE=Debug
 debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
@@ -142,7 +147,7 @@ BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(CHOREO_BIN): utils/choreo_main.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
+$(CHOREO_BIN): $(TOOLS_DIR)/choreo/choreo_main.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
 	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
 
 scanner.yy.cc: $(LEX_SRC)
@@ -157,10 +162,10 @@ $(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh | $(BUILD_DIR)
 $(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) | $(BUILD_DIR)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
-$(COPP_BIN): utils/choreo_preprocess.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
+$(COPP_BIN): $(TOOLS_DIR)/copp/choreo_preprocess.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
 	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
 
-choreo_header.inc : utils/choreo.h
+choreo_header.inc : $(RT_DIR)/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
 	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
 	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@
@@ -168,7 +173,7 @@ choreo_header.inc : utils/choreo.h
 	echo ")\";" >> $@
 	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
 
-choreo_cuda_header.inc : utils/choreo_cuda.h
+choreo_cuda_header.inc : $(RT_DIR)/choreo_cuda.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
 	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
 	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@
@@ -264,11 +269,11 @@ sample-test-operator:
 	exit $$ret
 
 lines:
-	@echo "source code:"; wc -l lib/*.cpp lib/*.yy lib/*.l lib/*.hpp Makefile utils/*.h | grep total;
+	@echo "source code:"; wc -l lib/*.cpp lib/*.yy lib/*.l lib/*.hpp Makefile $(RT_DIR)/*.h | grep total;
 	@echo "test code"; wc -l $$(find tests/ -type f |grep -v "\.test"|grep -v "\.result") | grep total;
 
 format:
-	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp utils/*.h utils/*.cpp tests/standalone/*.cu tests/standalone/*.cpp
+	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp $(RT_DIR)/*.h $(RT_DIR)/*.cpp tests/standalone/*.cu tests/standalone/*.cpp
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test

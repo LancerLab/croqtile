@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 timestamp=$(date +%Y%m%d%H%M%S)
 
 # Add the script's parent directory to PATH
-export PATH="$script_dir:${script_dir}/../:${script_dir}/../tools/bin:$PATH"
+export PATH="$script_dir:${script_dir}/../:${script_dir}/../extern/bin:$PATH"
 
 # Check if FileCheck exists in the PATH
 if ! which FileCheck &>/dev/null; then
@@ -118,8 +118,8 @@ check_device_features() {
   fi
 
   # is the simulators exist?
-  if [ -f "${script_dir}/../tools/lib/libgcusim.so" ]; then
-    gcu_sim_lib=${script_dir}/../tools/lib/
+  if [ -f "${script_dir}/../extern/lib/libgcusim.so" ]; then
+    gcu_sim_lib=${script_dir}/../extern/lib/
     gcu_sim_arch=gcusim400
     is_gcu_available=1
   fi

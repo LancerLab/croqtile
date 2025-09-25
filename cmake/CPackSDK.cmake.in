@@ -1,0 +1,10 @@
+# Pick only the components for the SDK package
+set(CPACK_COMPONENTS_ALL sdk_headers;libraries)
+set(CPACK_DEB_COMPONENTS_GROUPING "ALL_COMPONENTS_IN_ONE")
+set(CPACK_COMPONENTS_GROUPING "ALL_COMPONENTS_IN_ONE")
+
+# Per-package metadata overrides
+set(CPACK_PACKAGE_FILE_NAME "choreo-dev-@CPACK_PACKAGE_VERSION@-@CMAKE_SYSTEM_NAME@")
+set(CPACK_DEBIAN_PACKAGE_SECTION "libdevel")
+set(CPACK_PACKAGE_DESCRIPTION "Choreo SDK: headers and static library for embedding the compiler")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.27), libgmp10 (>= 6.1.2)")

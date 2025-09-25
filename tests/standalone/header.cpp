@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <fstream>
 
-#include "utils/choreo.h"
+#include "runtime/choreo.h"
 
 // Test the compilation
 void foo(choreo::f32* a, choreo::f16* b) {

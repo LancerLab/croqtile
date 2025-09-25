@@ -6,7 +6,7 @@
 *.out
 **gcusim.**
 tests/*co.test
-tools/*
+extern/*
 choreo
 copp
 build/
@@ -27,4 +27,4 @@ tests/*.sh
 
 extern/clang-format*
 
-!tools/Makefile
+!extern/Makefile
