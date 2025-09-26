@@ -4,73 +4,15 @@
 #include "ast.hpp"
 #include "context.hpp"
 #include "loop_utils.hpp"
-#include "symvals.hpp"
 #include "types.hpp"
-#include <sstream>
+#include "visitor.hpp"
 #include <string>
 #include <unordered_map>
 
 namespace Choreo {
 
-struct SCEVVal : public SCEV {
-  ValueItem value;
-  ptr<Loop> loop = nullptr;
-  SCEVVal(ValueItem v, ptr<Loop> l = nullptr) : value(v), loop(l) {}
-  SCEVType GetType() const override { return Val; }
-  std::string ToString() const override { return STR(value); }
-  bool IsLoopInVariant(ptr<Loop> l) const override {
-    assert(l && "loop cannot be null.");
-    if (!loop) return true;
-    return loop->HasLoop(l->lname);
-  }
-  ValueItem GetValue() const override { return value; }
-  __UDT_TYPE_INFO__(SCEV, SCEVVal)
-};
-
-struct SCEVAddRecExpr : public SCEV {
-  ptr<SCEV> base;
-  ptr<SCEV> step;
-  ptr<Loop> loop;
-  ValueItem times = UncomputableValueItem(); // optional, for step * n
-  SCEVAddRecExpr(ptr<SCEV> b, ptr<SCEV> s, ptr<Loop> l)
-      : base(b), step(s), loop(l) {}
-  SCEVType GetType() const override { return AddRecExpr; }
-  std::string ToString() const override {
-    std::ostringstream ss;
-    ss << "{" << base->ToString() << ", +, " << step->ToString() << "} <"
-       << loop->lname << ">";
-    return ss.str();
-  }
-  bool IsLoopInVariant(ptr<Loop> l) const override {
-    assert(l && loop && "loop cannot be null.");
-    return loop->HasLoop(l->lname);
-  }
-  ValueItem GetValue() const override { return UncomputableValueItem(); }
-  __UDT_TYPE_INFO__(SCEV, SCEVAddRecExpr)
-};
-
-inline ptr<SCEVAddRecExpr> MakeSCEVAddRecExpr(ptr<SCEV> base, ptr<SCEV> step,
-                                              ptr<Loop> loop) {
-  return std::make_shared<SCEVAddRecExpr>(base, step, loop);
-}
-inline ptr<SCEVVal> MakeSCEVVal(ValueItem v, ptr<Loop> loop = nullptr) {
-  return std::make_shared<SCEVVal>(v, loop);
-}
-inline ptr<SCEVAddRecExpr> MakeSCEVAddRecExpr(ValueItem base, ValueItem step,
-                                              ptr<Loop> loop) {
-  return std::make_shared<SCEVAddRecExpr>(MakeSCEVVal(base), MakeSCEVVal(step),
-                                          loop);
-}
-inline ptr<SCEVAddRecExpr> MakeSCEVAddRecExpr(ptr<SCEV> base, ValueItem step,
-                                              ptr<Loop> loop) {
-  return std::make_shared<SCEVAddRecExpr>(base, MakeSCEVVal(step), loop);
-}
-
-inline std::string STR(const ptr<SCEV>& scev) {
-  if (!scev) return "UNKNOWN";
-  return scev->ToString();
-}
-
+// scev(scalar evolution) is a way to represent how a variable changes over
+// iterations in a loop. The design of scev refers to scalar evolution in LLVM.
 struct ScopedSCEVTable {
   ptr<LoopInfo> li;
   std::unordered_map<std::string, std::unordered_map<std::string, ptr<SCEV>>>
@@ -128,7 +70,6 @@ private:
   bool InLoop();
   bool InVectorizedLoop();
   bool NeedAnalyze(ptr<Type> ty) {
-    if (InAnno) return false; // do not analyze scalar evolution in annotation
     return IsActualBoundedIntegerType(ty) || isa<ScalarIntegerType>(ty);
   }
 

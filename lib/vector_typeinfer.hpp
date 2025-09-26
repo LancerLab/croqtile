@@ -1,5 +1,6 @@
 #ifndef __VECTOR_TYPEINFER_HPP__
 #define __VECTOR_TYPEINFER_HPP__
+
 #include "ast.hpp"
 #include "aux.hpp"
 #include "context.hpp"
@@ -16,13 +17,11 @@ struct VectorTypeInfer final : LoopVisitor {
 private:
   ptr<LoopInfo> li;
   ptr<DiversityInfo> di;
-  int vector_width = 0;
 
   bool Skip(ptr<Type> ty, DiversityShape shape) {
-    if (InAnno) return true;
     auto loop = li->GetLoop(lname);
     if (!loop) return true;
-    if (!AST::NeedVectorize(*loop->loop)) return true;
+    if (!loop->NeedVectorize()) return true;
     if (shape.Uniform()) return true;
     if (IsActualVectorType(ty)) return true;
 
@@ -66,33 +65,25 @@ public:
 
   bool Visit(AST::ForeachBlock& n) {
     TraceEachVisit(n);
-    if (n.suffixs) {
-      for (auto& suffix : n.suffixs->values) {
-        if (auto suffix_call = AST::GetCall(suffix);
-            suffix_call->IsAnno() &&
-            suffix_call->function->name == "vectorize") {
+    ptr<AST::Call> c = nullptr;
 
-          auto iv = AST::GetIdentifier(suffix_call->GetArguments()[0]);
-          auto width = AST::GetIntLiteral(suffix_call->GetArguments()[1]);
-          auto iv_ty = NodeType(*iv);
+    cur_loop = n.loop;
+    if (cur_loop->CanVectorize()) {
+      auto iv_ty = cur_loop->GetIVType();
 
-          // vectorize width is the second argument
-          int width_val = width->ValS32();
+      auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
+      auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
+      auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetStrides();
+      IntegerList widths(iv_ty->Dims(), cur_loop->GetVectorWidth());
+      auto vty = MakeBoundedITupleType(lb, ub, s, widths);
+      cur_loop->SetIVType(vty);
 
-          auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
-          auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
-          auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetStrides();
-          IntegerList widths(iv_ty->Dims(), width_val);
-          auto new_ty = MakeBoundedITupleType(lb, ub, s, widths);
-          iv->SetType(new_ty);
-
-          if (debug_visit)
-            dbgs() << "IV:   " << InScopeName(iv->name)
-                   << ", Type: " << PSTR(new_ty) << "\n";
-          AssignSymVType(n.LOC(), InScopeName(iv->name), new_ty);
-        }
-      }
+      if (debug_visit)
+        dbgs() << "IV:   " << InScopeName(cur_loop->IVName())
+               << ", Type: " << PSTR(vty) << "\n";
+      AssignSymVType(n.LOC(), InScopeName(cur_loop->IVName()), vty);
     }
+
     return true;
   }
 
@@ -135,6 +126,14 @@ public:
             for (auto& idx : n.GetIndices()) dbgs() << "[" << PSTR(idx) << "]";
             dbgs() << ", Type: " << PSTR(da_vty) << "\n";
           }
+        }
+        auto indice_ds = indice->GetDiversityShape();
+        if (indice_ds.Stride(1)) {
+          n.AddNote("VLDST"); // load/store
+        } else if (indice_ds.Divergent() || indice_ds.Stride()) {
+          n.AddNote("VGZST"); // getter/scatter
+          choreo_unreachable(
+              "choreo currently do not support gather or scatter.");
         }
       }
     }
@@ -225,10 +224,20 @@ public:
       }
       // uniform -> varying
       // e.g., a.at[i] = 0;
-      if (from_ds.Uniform() && to_ds.Varying()) {
-        from->Note().emplace("broadcast", std::to_string(vector_width));
+      else if (from_ds.Uniform() && to_ds.Varying()) {
+        from->Note().emplace("broadcast",
+                             std::to_string(cur_loop->GetVectorWidth()));
         n.SetType(to_ty);
+      } else {
+        // varying -> varying
+        // e.g., a.at[i] = b.at[i]
+        if (!VTypeEq(from_ty, to_ty)) {
+          Error1(n.LOC(), "type mismatch in assignment: " + STR(n) + ".");
+          return false;
+        }
+        n.SetType(from_ty);
       }
+
     } else {
       // e.g., val = a.at[i]
       // TODO: if val is masked as varying,
@@ -248,12 +257,13 @@ public:
         // 2. if to is a vector type and from is a scalar type, there exist a
         // broadcast operation
         if (IsActualVectorType(to_ty) && !IsActualVectorType(from_ty)) {
-          from->Note().emplace("broadcast", std::to_string(vector_width));
+          from->Note().emplace("broadcast",
+                               std::to_string(cur_loop->GetVectorWidth()));
           if (debug_visit)
             dbgs() << "[vinfer][asgn]: broadcast `" << STR(from)
                    << "`, type: " << PSTR(to_ty) << "\n";
-          n.SetType(to_ty);
         }
+        n.SetType(to_ty);
       }
     }
 
@@ -270,8 +280,9 @@ public:
 
     ptr<Type> vty = nullptr;
     if (!IsActualVectorType(init_ty)) {
-      init_expr->Note().emplace("broadcast", std::to_string(vector_width));
-      vty = MakeVectorType(init_ty->GetBaseType(), vector_width);
+      init_expr->Note().emplace("broadcast",
+                                std::to_string(cur_loop->GetVectorWidth()));
+      vty = MakeVectorType(init_ty->GetBaseType(), cur_loop->GetVectorWidth());
       if (debug_visit)
         dbgs() << "Expr: " << "broadcast `" << PSTR(init_expr)
                << "`, type: " << PSTR(vty) << "\n";
@@ -290,9 +301,6 @@ public:
     TraceEachVisit(n);
     auto nty = n.GetType();
     auto nds = n.GetDiversityShape();
-
-    if (n.IsAnno() && n.function->name == "vectorize")
-      vector_width = AST::GetIntLiteral(n.GetArguments()[1])->ValS32();
     if (Skip(nty, nds)) return true;
     bool need_widen = false;
     for (auto arg : n.GetArguments()) {
@@ -305,9 +313,9 @@ public:
 
     auto vty = nty;
     if (IsScalarBaseType(nty->GetBaseType())) {
-      vty = MakeVectorType(nty->GetBaseType(), vector_width);
+      vty = MakeVectorType(nty->GetBaseType(), cur_loop->GetVectorWidth());
       n.SetType(vty);
-      n.Note().emplace("widen", std::to_string(vector_width));
+      n.Note().emplace("widen", std::to_string(cur_loop->GetVectorWidth()));
     }
     if (debug_visit) {
       dbgs() << "call:  widen `" << n.function->name << "(";

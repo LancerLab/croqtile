@@ -1,25 +1,8 @@
 #include "scalar_evolution.hpp"
-#include "ast.hpp"
-#include "aux.hpp"
-#include "io.hpp"
-#include "symbexpr.hpp"
-#include "types.hpp"
-#include "utils.hpp"
 
 namespace Choreo {
 
-bool ScalarEvolutionAnalysis::InVectorizedLoop() {
-  auto loop = li->GetLoop(lname);
-  if (!loop) return false;
-  if (AST::NeedVectorize(*loop->loop)) return true;
-  return false;
-}
-
-bool ScalarEvolutionAnalysis::InLoop() {
-  auto loop = li->GetLoop(lname);
-  if (!loop) return false;
-  return true;
-}
+bool ScalarEvolutionAnalysis::InLoop() { return cur_loop != nullptr; }
 
 // op is one of "+", "-", "*", "/"
 ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
@@ -65,15 +48,15 @@ ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
         auto new_step = ComputeARSCEV(lhs_ar->step, rhs_ar->step, op);
         return MakeSCEVAddRecExpr(new_base, new_step, lhs_ar->loop);
       }
-      if (lhs_ar->loop->HasLoop(rhs_ar->loop->lname)) {
+      if (lhs_ar->loop->HasLoop(rhs_ar->loop->loop_name)) {
         // {a, +, b} <L1> op {c, +, d} <L2> , L2 is nested in L1
-        // 1. we treat {c, +, d} <L2> as invariant in L1, we get {{a, +, b} <L1>
+        // we treat {c, +, d} <L2> as invariant in L1, we get {{a, +, b} <L1>
         // op c, +, b} <L2>
         auto new_base = ComputeARSCEV(lhs_ar, rhs_ar->base, op);
         return MakeSCEVAddRecExpr(new_base, rhs_ar->step, rhs_ar->loop);
-      } else if (rhs_ar->loop->HasLoop(lhs_ar->loop->lname)) {
+      } else if (rhs_ar->loop->HasLoop(lhs_ar->loop->loop_name)) {
         // {a, +, b} <L1> op {c, +, d} <L2> , L1 is nested in L2
-        // 1. we treat {a, +, b} <L1> as invariant in L2, we get {{c, +, d} <L2>
+        // we treat {a, +, b} <L1> as invariant in L2, we get {{c, +, d} <L2>
         // op a, +, d} <L1>
         auto new_base = ComputeARSCEV(lhs_ar->base, rhs_ar, op);
         return MakeSCEVAddRecExpr(new_base, lhs_ar->step, lhs_ar->loop);
@@ -204,23 +187,18 @@ bool ScalarEvolutionAnalysis::Visit(AST::Call& n) {
 
 bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
+  cur_loop = n.loop;
   int vector_width = 1;
-  if (n.suffixs)
-    for (auto& suffix : n.suffixs->values)
-      if (auto suffix_call = AST::GetCall(suffix);
-          suffix_call->IsAnno() && suffix_call->function->name == "vectorize")
-        vector_width =
-            AST::GetIntLiteral(suffix_call->GetArguments()[1])->ValS32();
+  if (cur_loop->NeedVectorize()) { vector_width = cur_loop->vector_width; }
 
   // we register iv's scev of all loops, instead of only vectorized loops
-  auto loop = li->GetLoop(lname);
-  auto iv_ty = loop->GetIVType();
-  auto iv_name = loop->IVName();
+  auto iv_ty = cur_loop->GetIVType();
+  auto iv_name = cur_loop->IVName();
   auto iv_sym = SymName(iv_name);
   auto upper_bound = GetSingleUpperBound(iv_ty);
   auto stride = GetSingleStride(iv_ty);
   auto step = sbe::nu(stride * vector_width);
-  auto ar_expr = MakeSCEVAddRecExpr(sbe::nu(0), step, loop);
+  auto ar_expr = MakeSCEVAddRecExpr(sbe::nu(0), step, cur_loop);
 
   if (debug_visit)
     dbgs() << "iv:    `" << iv_name << "` -> " << STR(ar_expr) << "\n";
@@ -231,10 +209,9 @@ bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
 bool ScalarEvolutionAnalysis::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   auto loop_name = InLoop() ? lname : NoLoopName();
-  auto loop = li->GetLoop(lname);
   for (auto pb : n.AllSubPVs()) {
     auto pb_id = AST::GetIdentifier(pb);
-    auto se_val = MakeSCEVVal(sbe::sym(SymName(pb_id->name)), loop);
+    auto se_val = MakeSCEVVal(sbe::sym(SymName(pb_id->name)), cur_loop);
     if (debug_visit)
       dbgs() << "pi:    `" << pb_id->name << "` -> " << STR(se_val) << "\n";
     AssignSCEVToSym(SymName(pb_id->name), se_val, loop_name);

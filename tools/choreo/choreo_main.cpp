@@ -142,13 +142,6 @@ int main(int argc, char* argv[]) {
 
   CCtx().SetGlobalSymbolTable(ln.SymTab());
 
-  LoopHandler lh;
-  if (!lh.RunOnProgram(root)) return lh.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-  if (CCtx().TraceVectorize()) return 0;
-
-  CCtx().SetGlobalSymbolTable(lh.SymTab());
-
   // debug: dump the symbol table
   if (std::getenv("DUMP_SYMTAB") || CCtx().DumpSymtab())
     CCtx().GetGlobalSymbolTable()->Print(dbgs());
@@ -158,6 +151,13 @@ int main(int argc, char* argv[]) {
     if (!vl.RunOnProgram(root)) return vl.Status();
     return 0;
   }
+
+  LoopVectorizer lv;
+  if (!lv.RunOnProgram(root)) return lv.Status();
+  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
+  if (CCtx().TraceVectorize()) return 0;
+
+  CCtx().SetGlobalSymbolTable(lv.SymTab());
 
   LivenessAnalyzer la;
   if (!la.RunOnProgram(root)) return la.Status();

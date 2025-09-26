@@ -6,6 +6,7 @@
 
 #include <tuple>
 
+#include "loop_vectorize.hpp"
 #include "symtab.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
@@ -157,7 +158,6 @@ private:
   std::stack<AST::MultiNodes*> multi_nodes;
   int cur_node_index = -1;
   std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
-  ptr<AST::ForeachBlock> cur_loop = nullptr;
 
   void InsertNode(int index, const ptr<AST::Node>& n, const std::string& name) {
     assert(index >= 0);
@@ -1058,7 +1058,6 @@ public:
   }
   bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock& n) override {
-    cur_loop = dyn_cast<AST::ForeachBlock>(n.CloneImpl());
     auto handle_bounds = [this, &n](auto get_bound, auto set_bound) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
       int i = -1;

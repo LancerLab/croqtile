@@ -1,4 +1,6 @@
-
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -es %s | FileCheck %s --check-prefix=CODEGEN
+// XFAIL: *
 __co__ s32 [128, 256] ele_add(s32 [128, 256] lhs, s32 [256, 256] rhs) {
   s32[lhs.span(0), rhs.span(1)] output;
 
@@ -9,7 +11,7 @@ __co__ s32 [128, 256] ele_add(s32 [128, 256] lhs, s32 [256, 256] rhs) {
         foreach k_tile {
           lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
           rhs_load = dma.transp<1,0> rhs.chunkat(k_tile, n_tile) => local;
-          foreach {m, n, k} in [lhs_load.span(0), rhs_load.span(0), lhs_load.span(1)]: vectorize(k, 16) {
+          foreach {m, n, k} in [lhs_load.span(0), rhs_load.span(0), lhs_load.span(1)]: vectorize(k, 32) {
             l1_out.at(m, n) += lhs_load.data.at(m, k) * rhs_load.data.at(n, k);
           }
         }

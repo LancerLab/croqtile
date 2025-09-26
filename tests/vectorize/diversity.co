@@ -1,4 +1,4 @@
-// RUN: choreo %s -dv=loop -es | FileCheck %s
+// RUN: choreo %s --vectorize | FileCheck %s
 __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
 {
   parallel q by 1 {
@@ -7,7 +7,7 @@ __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
     with {i, j} in [a.span] {
       foreach i, j: vectorize(j, 128) {
         index = i * W + j;
-        val = 0; // uni
+        s32 val = 0; // varying
         if (i==0) { //uni
           call abc(val);
         } else {
@@ -22,12 +22,12 @@ __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
   }
 }
 
-// CHECK: Diversity Shapes:
-// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::cond_if_1::cond_if_2::val : divergent
-// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::val : uniform
-// CHECK:   ::vecadd::paraby_0::paraby_1::l1_b.data : uniform
-// CHECK:   ::vecadd::paraby_0::paraby_1::l1_a.data : uniform
-// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::index : stride(1)
-// CHECK:   ::vecadd::W : uniform
-// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::i : uniform
-// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::j : stride(1)
+// CHECK: ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::val : divergent
+// CHECK: ::vecadd::paraby_0::paraby_1::l1_b.data : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::l1_a.data : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::index : stride(1)
+// CHECK: ::vecadd::W : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::within_0::i : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::within_0::j : stride(1)
+// CHECK: ::vecadd::paraby_0::paraby_1::l1_b__buf__ : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::l1_a__buf__ : uniform

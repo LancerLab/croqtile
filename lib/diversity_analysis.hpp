@@ -7,27 +7,34 @@
 #include "symbexpr.hpp"
 #include "symvals.hpp"
 #include "utils.hpp"
+#include "visitor.hpp"
 #include <ostream>
 #include <stack>
 #include <string>
 #include <unordered_map>
 namespace Choreo {
 
-// Forward declarations
+// Refering from "Divergence Analysis
+// and Optimizations," doi: 10.1109/PACT.2011.63, a variable v is divergent if,
+// and only if, one of these conditions holds:
+// 1) v = tid
+// 2) v is defined atomically, e.g.: atominc(v, vx).
+// 3) v is data dependent on some divergent variable.
+// 4) v is sync dependent on some divergent variable.
 class DiversityShape;
 
 // Utility functions
 inline std::string STR(const DiversityShape& ds) {
   switch (ds.shape) {
-  case DiversityShapeKind::UNIFORM:
+  case UNIFORM:
     assert(ds.value);
     if (ds.value->Computable() && ds.value->IsNumeric())
       return "uniform(" + STR(ds.value) + ")";
     else
       return "uniform";
-  case DiversityShapeKind::STRIDE: return "stride(" + STR(ds.stride) + ")";
-  case DiversityShapeKind::DIVERGENT: return "divergent";
-  case DiversityShapeKind::UNKNOWN: return "unknown";
+  case STRIDE: return "stride(" + STR(ds.stride) + ")";
+  case DIVERGENT: return "divergent";
+  case UNKNOWN: return "unknown";
   default: choreo_unreachable("unknown diversity shape kind.");
   }
 }
@@ -37,6 +44,8 @@ inline ValueItem GetExprVal(const AST::Expr& expr) {
   return UncomputableValueItem();
 }
 
+// Compute the diversity shape of two shapes with an operator
+// if the op is empty, it means lhs && rhs.
 inline DiversityShape ComputeDiversityShape(const DiversityShape& lhs,
                                             const DiversityShape& rhs,
                                             std::string op = "") {
@@ -50,9 +59,11 @@ inline DiversityShape ComputeDiversityShape(const DiversityShape& lhs,
     return DiversityShape(Kind::DIVERGENT);
 
   if (lhs.Stride() && rhs.Uniform()) {
+    // e.g., 0,2,4,6 + 1, then it is still stride = 2
     if (op == "+" || op == "-")
       return DiversityShape(lhs);
     else if (op == "*") {
+      // e.g., 0,2,4,6 * 2, then it is still stride = 4
       if (IsValidValueItem(lhs.stride) && IsValidValueItem(rhs.value)) {
         auto stride = lhs.stride * rhs.value;
         return DiversityShape(Kind::STRIDE, stride);
@@ -88,6 +99,7 @@ inline DiversityShape ComputeDiversityShape(const DiversityShape& lhs,
     } else
       return DiversityShape(Kind::DIVERGENT);
   } else if (lhs.Stride() && rhs.Stride()) {
+    // e.g., 0,2,4,6 + 1,3,5,7 = 1,5,9,13, which is still stride = 2 + 2 = 4
     if (IsValidValueItem(lhs.stride) && IsValidValueItem(rhs.stride)) {
       if (op == "+")
         return DiversityShape(Kind::STRIDE, lhs.stride + rhs.stride);
@@ -121,7 +133,7 @@ struct DiversityInfo {
 
   DiversityShape GetSymbolShape(const std::string& name) const {
     if (shapes.count(name)) { return shapes.at(name); }
-    return DiversityShape(DiversityShapeKind::UNKNOWN);
+    return DiversityShape(UNKNOWN);
   }
 
   void DefineSymbolShape(const std::string& name, const DiversityShape& shape) {
@@ -146,59 +158,12 @@ struct DiversityInfo {
   }
 };
 
-inline DiversityShape ExprDShape(const ptr<AST::Expr> e, ptr<DiversityInfo>) {
-  if (!e) return DiversityShape(DiversityShapeKind::UNKNOWN);
-
-  auto expr_val = GetExprVal(*e);
-  DiversityShape shape;
-
-  if (e->IsReference()) {
-    if (AST::GetIdentifier(*e)) {
-      // For identifier references, we need the symbol table context
-      // This is a simplified version - in practice would need symbol lookup
-      shape = DiversityShape(DiversityShapeKind::UNIFORM, sbe::nu(0), expr_val);
-    } else if (auto call = AST::GetCall(e->GetReference())) {
-      shape = call->GetDiversityShape();
-      shape.value = UncomputableValueItem();
-    } else {
-      auto ref = e->GetReference();
-      auto ref_shape = ref->GetDiversityShape();
-      if (ref_shape.Unknown()) {
-        shape =
-            DiversityShape(DiversityShapeKind::UNIFORM, sbe::nu(0), expr_val);
-      } else {
-        shape = ref_shape;
-        if (shape.Uniform()) shape.value = expr_val;
-      }
-    }
-  } else if (e->IsUnary()) {
-    shape = e->GetR()->GetDiversityShape();
-    if (shape.Uniform()) shape.value = expr_val;
-  } else if (e->IsBinary()) {
-    if (e->op == "dimof") {
-      shape = DiversityShape(DiversityShapeKind::UNIFORM, sbe::nu(0), expr_val);
-      return shape;
-    }
-    auto lhs_shape = e->GetL()->GetDiversityShape();
-    auto rhs_shape = e->GetR()->GetDiversityShape();
-    shape = ComputeDiversityShape(lhs_shape, rhs_shape, e->op);
-    if (shape.Uniform()) shape.value = expr_val;
-  } else if (e->IsTernary()) {
-    auto cond_shape = e->GetC()->GetDiversityShape();
-    auto lhs_shape = e->GetL()->GetDiversityShape();
-    auto rhs_shape = e->GetR()->GetDiversityShape();
-    if (cond_shape.Uniform()) {
-      shape = ComputeDiversityShape(lhs_shape, rhs_shape);
-    } else {
-      shape = DiversityShape(DiversityShapeKind::DIVERGENT);
-    }
-  } else {
-    shape = DiversityShape(DiversityShapeKind::UNIFORM, sbe::nu(0), expr_val);
-  }
-
-  return shape;
-}
-
+// Diversity shape is deduced according to two dependence:
+// 1. data dependence
+// 2. cfg dependence
+// if (cond)
+//    a = b;
+// DShape(a) = DShape(cond) && DShape(b);
 struct DiversityAnalysis final : public LoopVisitor {
 private:
   ptr<LoopInfo> li;
@@ -207,7 +172,11 @@ private:
 
   bool InVectorizedLoop();
 
+  // Get the diversity shape of an expression
+  DiversityShape ExprDShape(const ptr<AST::Expr> e);
+
 public:
+  // when changed is true, we need to re-run the analysis
   bool changed = false;
   DiversityAnalysis(const ptr<SymbolTable> s_tab, ptr<LoopInfo> l,
                     ptr<DiversityInfo> d);

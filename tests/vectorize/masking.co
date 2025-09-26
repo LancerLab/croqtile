@@ -1,11 +1,11 @@
 // RUN: choreo %s --vectorize | FileCheck %s
 #define H 128
 #define W 512
-__co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
+__co__ void vecadd(s32 [H, W] a, s32 [H, W] b)
 {
   parallel q by 1 {
     l1_a = dma.copy a => local;
-    l1_b = dma.copy b => local;
+    local s32[H, W] l1_b;
     with {i, j} in [a.span] {
       foreach i, j: vectorize(j, 128) {
         index = i * W + j; // stride = 1, scev => {}
@@ -13,12 +13,13 @@ __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
         if (i==0) { //uni
         } else {
           if (index < 100) {
-            val = l1_a.data.at(i, j); // vary
-          } else {
-            val = l1_b.data.at(i, j); // vary
+            val = l1_a.data.at(i, j);
+          } else if (index < 200) {
+            val = l1_b.at(i, j);
           }
         }
       }
+      dma.copy l1_b => b;
     }
   }
 }
@@ -28,18 +29,18 @@ __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
 
 // CHECK: [mask] start geneating masks.
 // CHECK: [mask] Inserted loop condition(exec): 
-// CHECK: `- Var Decl (bool): exec =  true at the beginning of loop: j
+// CHECK: `- Var Decl (bool): mask0 =  true at the beginning of loop: j
 // CHECK: [mask] Inserted scoped mask: 
-// CHECK: `- Var Decl (bool): mask0 =  exec at the beginning of loop: j
+// CHECK: `- Var Decl (bool): exec =  mask0 at the beginning of loop: j
 // CHECK: [mask] Inserted scoped mask: 
 // CHECK: `- Var Decl (bool): mask1 =  (mask0 &&  (index < 100) )  at the beginning of divergent branch:  (index < 100) 
 // CHECK: [mask] Inserted exec assignment: 
 // CHECK: `- Assign: exec = mask1 after divergenet branch:  (index < 100) 
 // CHECK: [mask] Inserted scoped mask: 
-// CHECK: `- Var Decl (bool): mask2 =  (mask0 &&  (!  (index < 100) ) )  at the beginning of divergent branch:  (!  (index < 100) ) 
+// CHECK: `- Var Decl (bool): mask2 =  (mask0 &&  ( (!  (index < 100) )  &&  (index < 200) ) )  at the beginning of divergent branch:  ( (!  (index < 100) )  &&  (index < 200) ) 
 // CHECK: [mask] Inserted exec assignment: 
-// CHECK: `- Assign: exec = mask2 after divergenet branch:  (!  (index < 100) ) 
+// CHECK: `- Assign: exec = mask2 after divergenet branch:  ( (!  (index < 100) )  &&  (index < 200) ) 
 // CHECK: [mask] Inserted exec assignment: 
 // CHECK: `- Assign: exec = mask0 after divergenet branch:  (index < 100) 
 // CHECK: [mask] Inserted exec assignment: 
-// CHECK: `- Assign: exec = mask0 after divergenet branch:  (!  (index < 100) ) 
+// CHECK: `- Assign: exec = mask0 after divergenet branch:  ( (!  (index < 100) )  &&  (index < 200) ) 

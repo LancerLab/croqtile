@@ -1,0 +1,63 @@
+// REQUIRES: TARGET-GCU400 GCUSIM
+// RUN: choreo -es -arch=gcu400 %s | FileCheck %s --check-prefix=CODEGEN1
+// RUN: choreo -es %s | FileCheck %s --check-prefix=CODEGEN2
+// RUN: choreo -t topscc -arch=gcu400 %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s
+#define N 2
+#define M 1000
+
+__co__ auto vecadd(f32 [N, M] a, f32 [N, M] b)  {
+    f32 [a.span] c;
+    parallel p by 1, q by 1 {
+      l1_a = dma.copy a.chunkat(p, q) => local;
+      l1_b = dma.copy b.chunkat(p, q) => local;
+
+      local f32[l1_a.span(0), l1_a.span(1)] l1_c;
+      foreach {i, j} in [l1_a.span(0), l1_a.span(1)]: vectorize(j, 128) {
+        l1_c.at(i, j) = l1_a.data.at(i, j) + l1_b.data.at(i, j);
+      }
+
+      out_store = dma.copy l1_c => c.chunkat(p, q);
+    }
+    return c;
+}
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::f32>(N, M);
+  auto b = choreo::make_spandata<choreo::f32>(N, M);
+  a.fill(1.0f);
+  b.fill(1.0f);
+
+  auto res = vecadd(a.view(), b.view());
+  
+  // verification
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      // std::cout << "i: " << i << ", j: " << j << "\n";
+      // std::cout << "a: " << a[i][j] << ", b: " << b[i][j] << ", res: " << res[i][j] << "\n";
+      if (a[i][j] + b[i][j] != res[i][j]) {
+        std::cout << "i: " << i << ", j: " << j << ", res: " << res[i][j]<< ", ref " << a[i][j] + b[i][j]  << "\n";
+        choreo::choreo_assert(a[i][j] + b[i][j] == res[i][j], "values are not equal.");
+      }
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+
+// CODEGEN1: __vector unsigned int __vec_iv_j_base = (__vector unsigned int)(__iv_j);
+// CODEGEN1: __vector unsigned int __vec_iv_j_plus = tcle::mid<__vector unsigned int, 0>(0);
+// CODEGEN1: __vector unsigned int __vec_iv_j = __vec_iv_j_base + __vec_iv_j_plus;
+// CODEGEN1: for (__iv_j = 0; __iv_j < 1000; __iv_j += 128) {
+// CODEGEN1:   __vector bool int mask0 = __vec_iv_j <= 1000;
+// CODEGEN1:   __vector bool int exec = mask0;
+// CODEGEN1:   __vector float anon_1 = tcle::load<__vector float>((char *)((float*)l1_a.data() + (__iv_i * 1000) + __vec_iv_j[0])) + tcle::load<__vector float>((char *)((float*)l1_b.data() + (__iv_i * 1000) + __vec_iv_j[0]));
+// CODEGEN1:   __vector float anon_2 = tcle::load<__vector float>((char *)((float*)l1_c + (__iv_i * 1000) + __vec_iv_j[0]));
+// CODEGEN1:   anon_1 = tcle::vsel(exec, anon_1, anon_2);
+// CODEGEN1:   tcle::store(anon_1, (char *)((float*)l1_c + (__iv_i * 1000) + __vec_iv_j[0]));
+// CODEGEN1:   __vec_iv_j += (__vector unsigned int)(128);
+// CODEGEN1: }
+
+// CODEGEN2: for (__iv_j = 0; __iv_j < 1000; ++__iv_j) {
+// CODEGEN2:   *((float*)l1_c + (__iv_i * 1000) + __iv_j) = *((float*)l1_a.data() + (__iv_i * 1000) + __iv_j) + *((float*)l1_b.data() + (__iv_i * 1000) + __iv_j);
+// CODEGEN2: }
+// CHECK: Test Passed

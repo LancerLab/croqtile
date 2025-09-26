@@ -38,7 +38,7 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
       if (e) res = SetUnion(res, GetAllSymbolicOperands(e.get()));
     return res;
   } else if (isa<AST::IntLiteral>(n) || isa<AST::FloatLiteral>(n) ||
-             isa<AST::StringLiteral>(n)) {
+             isa<AST::StringLiteral>(n) || isa<AST::BoolLiteral>(n)) {
     return {};
   } else if (auto ii = dyn_cast<AST::IntIndex>(n)) {
     return GetAllSymbolicOperands(ii->value.get());
@@ -935,7 +935,7 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
     HandleSelect(n, sel);
     return true;
   }
-  if (isa<ScalarType>(ty)) {
+  if (isa<ScalarType>(ty) || isa<VectorType>(ty)) {
     AddDef(current_stmt, n.name_str);
     if (n.init_expr) {
       VarSet operands = GetAllSymbolicOperands(n.init_expr.get());

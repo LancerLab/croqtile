@@ -7,6 +7,7 @@
 
 #include "ast.hpp"
 #include "loc.hpp"
+#include "utils.hpp"
 
 namespace Choreo {
 
@@ -840,6 +841,39 @@ public:
   virtual bool VisitNode(AST::ChoreoFunction&) { return true; }
   virtual bool VisitNode(AST::CppSourceCode&) { return true; }
   virtual bool VisitNode(AST::Program&) { return true; }
+};
+
+struct LoopVisitor : public VisitorWithSymTab {
+protected:
+  ptr<Loop> cur_loop;
+  std::string lname;
+
+  void TraceEachVisit(const AST::Node& n) {
+    if (trace_visit) { dbgs() << n.TypeNameString() << "\n"; }
+  }
+
+  virtual bool AfterBeforeVisitImpl(AST::Node&) { return true; }
+  virtual bool BeforeAfterVisitImpl(AST::Node&) { return true; }
+
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
+    if (isa<AST::ForeachBlock>(&n)) lname = SSTab().ScopeName();
+    AfterBeforeVisitImpl(n);
+    return true;
+  }
+
+  bool AfterVisitImpl(AST::Node& n) override {
+    if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
+    BeforeAfterVisitImpl(n);
+    if (isa<AST::ForeachBlock>(&n)) lname = SSTab().ScopeName();
+    return true;
+  }
+
+  bool InLoop() { return cur_loop != nullptr; }
+
+public:
+  LoopVisitor(const ptr<SymbolTable> s_tab, const std::string& pn)
+      : VisitorWithSymTab(pn, s_tab), cur_loop(nullptr) {}
 };
 
 } // end namespace Choreo

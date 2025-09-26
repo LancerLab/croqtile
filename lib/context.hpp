@@ -155,85 +155,6 @@ inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info,
   return false;
 }
 
-enum DiversityShapeKind { UNKNOWN = 0, UNIFORM, STRIDE, DIVERGENT };
-
-static inline ValueItem UncomputableValueItem() {
-  return sbe::sym("uncomputable");
-}
-
-struct DiversityShape {
-  using Kind = DiversityShapeKind;
-  DiversityShapeKind shape = UNKNOWN;
-  ValueItem stride; // stride for STRIDE shape
-  ValueItem value;  // value for UNIFORM shape
-
-  DiversityShape() = default;
-  DiversityShape(Kind k, ValueItem s = UncomputableValueItem(),
-                 ValueItem v = UncomputableValueItem())
-      : shape(k), stride(s), value(v) {
-    if (shape == Kind::STRIDE) {
-      if (!VIIsInt(stride) || !stride->Computable()) {
-        shape = Kind::DIVERGENT;
-        stride = UncomputableValueItem();
-        value = UncomputableValueItem();
-      }
-    }
-    if (shape == Kind::UNIFORM) {
-      if (!value->Computable()) value = UncomputableValueItem();
-    }
-  }
-  DiversityShape(const DiversityShape& other)
-      : shape(other.shape), stride(other.stride), value(other.value) {}
-
-  bool Uniform() const { return shape == Kind::UNIFORM; }
-
-  bool Stride() const { return shape == Kind::STRIDE; }
-
-  bool Divergent() const { return shape == Kind::DIVERGENT; }
-
-  bool Unknown() const { return shape == Kind::UNKNOWN; }
-
-  bool Varying() const {
-    return shape == Kind::STRIDE || shape == Kind::DIVERGENT;
-  }
-
-  bool ApprxEqual(const DiversityShape& other) const {
-    if (shape != other.shape) return false;
-    return true; // for DIVERGENT or UNKNOWN
-  }
-
-  DiversityShape& operator=(const DiversityShape& other) {
-    shape = other.shape;
-    stride = other.stride;
-    value = other.value;
-    return *this;
-  }
-
-  bool operator<(const DiversityShape& other) const {
-    return shape < other.shape;
-  }
-
-  bool operator>(const DiversityShape& other) const {
-    return shape > other.shape;
-  }
-};
-
-class Loop;
-struct SCEV {
-  enum SCEVType {
-    Unknown,
-    Val,
-    AddRecExpr,
-  };
-
-  virtual SCEVType GetType() const = 0;
-  virtual ~SCEV() = default;
-  virtual std::string ToString() const = 0;
-  virtual bool IsLoopInVariant(ptr<Loop>) const = 0;
-  virtual ValueItem GetValue() const = 0;
-  __UDT_TYPE_INFO_BASE__(SCEV)
-};
-
 struct OptimizedValues {
 private:
   std::vector<ValueItem> val_exprs;
@@ -388,7 +309,6 @@ public:
 };
 
 class SymbolTable;
-
 // per-compilation context
 class CompilationContext {
 private:
@@ -533,7 +453,7 @@ public:
     return 0;
   }
 
-  size_t GetSingleVectorByteSize() {
+  size_t GetSingleVectorByteSize() const {
     switch (GetArch()) {
     case TargetArch::GCU3: return 128;
     case TargetArch::GCU4: return 512;

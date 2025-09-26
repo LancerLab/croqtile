@@ -1,26 +1,53 @@
 #ifndef __CHOREO_DIVERGENT_ANALYSIS_HPP__
 #define __CHOREO_DIVERGENT_ANALYSIS_HPP__
+
 #include "ast.hpp"
 #include "context.hpp"
-#include "diversity_analysis.hpp" // Ensure this header defines DiversityAnalysis
+#include "diversity_analysis.hpp"
 #include "loop_utils.hpp"
 #include "scalar_evolution.hpp"
 #include "visitor.hpp"
 #include <unordered_map>
 
 namespace Choreo {
+
+// LoopChecker is used to find one foreachblock if has vectorization hint and if
+// all loops are normalized
+struct LoopChecker final : public VisitorWithScope {
+  LoopChecker();
+
+  bool NeedVectorize = false;
+  bool AllNormLoop = true;
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
+  bool Visit(AST::ForeachBlock& n) override;
+
+  bool HasVectorization() const;
+  bool IsAllLoopNorm() const;
+};
+
+// LoopAnalysis
+struct LoopAnalysis final : public LoopVisitor {
+  ptr<LoopInfo> li;
+
+public:
+  LoopAnalysis(const ptr<SymbolTable> s_tab);
+  bool Visit(AST::ForeachBlock& n) override;
+  ptr<LoopInfo> GetLoopInfo() const;
+};
+
 struct LoopVectorizeLegalityChecker final : public LoopVisitor {
 private:
   ptr<LoopInfo> li;
   ptr<ScopedSCEVTable> scev_table;
-  int vector_width = 0;
+  BaseType data_type = BaseType::UNKNOWN;
   std::unordered_map<std::string, std::vector<location>> loop_defs;
   std::unordered_map<std::string, std::vector<location>> loop_uses;
-  bool legal = true;
+  bool all_illegal = true;
+  std::string indent = "";
 
   bool NeedCheck();
   bool CheckDataAccessAlignment(AST::DataAccess& n);
-  void AddVectorSym(std::string sym, ptr<Type>&);
 
   void AddLoopUse(std::string sym, location);
   void FindLoopUses(ptr<AST::Node> n);
@@ -30,7 +57,7 @@ public:
   LoopVectorizeLegalityChecker(const ptr<SymbolTable> s_tab, ptr<LoopInfo> l,
                                ptr<ScopedSCEVTable> s);
 
-  bool IsLegal() const;
+  bool HasVectorize() const;
 
   bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::WhileBlock& n) override;
@@ -49,6 +76,8 @@ public:
   bool Visit(AST::NamedVariableDecl& n) override;
   bool Visit(AST::Assignment& n) override;
   bool Visit(AST::Call& n) override;
+
+  bool BeforeAfterVisitImpl(AST::Node& m) override;
 };
 
 struct BranchSimplicition final : public LoopVisitor {
@@ -71,16 +100,13 @@ public:
   bool Visit(AST::MultiNodes& n) override;
 };
 
+// Masking generation for vectorized loops
 // todo: break/continue statement
 struct MaskGen final : public LoopVisitor {
 private:
   ptr<LoopInfo> li;
   ptr<DiversityInfo> di;
   std::stack<std::string> mask_stack;
-  ptr<AST::Node> exec;
-  int mask_count = 0;
-  int vector_width = 0;
-  ptr<Type> vbool_ty = nullptr;
 
   std::string MaskName();
   bool NeedTransform();
@@ -88,7 +114,6 @@ private:
   ptr<AST::Expr> MakeMaskExpr(const location& loc, const ptr<AST::Node>& lhs,
                               const ptr<AST::Node>& rhs = nullptr,
                               std::string op = "");
-
   ptr<AST::Expr> MakeMaskIdExpr(const location& loc, const std::string& name);
   ptr<AST::NamedVariableDecl> MakeMaskDecl(const location& loc,
                                            const std::string& name,
@@ -102,11 +127,12 @@ public:
   bool Visit(AST::MultiNodes& n) override;
   bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::IfElseBlock& n) override;
+  bool Visit(AST::DataAccess& n) override;
   bool BeforeAfterVisitImpl(AST::Node& n) override;
 };
 
-struct LoopHandler final : public VisitorWithSymTab {
-  LoopHandler();
+struct LoopVectorizer final : public VisitorWithSymTab {
+  LoopVectorizer();
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
   bool RunOnProgram(AST::Node& root) override;

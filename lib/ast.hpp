@@ -10,6 +10,7 @@
 #include "context.hpp"
 #include "dmaconf.hpp"
 #include "loc.hpp"
+#include "loop_utils.hpp"
 #include "symtab.hpp"
 #include "symvals.hpp"
 
@@ -1011,15 +1012,11 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
 struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   ptr<Identifier> data = nullptr;
   ptr<MultiValues> indices = nullptr;
-  int id = 0;
-  static int da_id; // for unique identification
 
   DataAccess(const location& l, const ptr<Identifier>& i,
              const ptr<MultiValues>& m = nullptr)
       : Node(l), data(i), indices(m) {
     assert(i != nullptr && "no data is specified.");
-    id = da_id;
-    da_id++;
     if (m) assert((m->Count() > 0) && "requires at least one index.");
   }
 
@@ -1057,8 +1054,6 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   }
 
   void accept(Visitor&) override;
-
-  std::string Id() const { return std::to_string(id); }
 
   __UDT_TYPE_INFO__(Node, DataAccess)
 };
@@ -1556,39 +1551,6 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
   __UDT_TYPE_INFO__(Node, ParamList)
 };
 
-struct DivergentBranch : public Node, public TypeIDProvider<DivergentBranch> {
-  ptr<Node> pred = nullptr;        // the predicate expression
-  ptr<MultiNodes> stmts = nullptr; // the statements in this branch
-
-  DivergentBranch(const location& l, const ptr<Node>& c,
-                  const ptr<MultiNodes>& s)
-      : Node(l), pred(c), stmts(s) {
-    assert(pred != nullptr && "must contains the predicate expression.");
-    assert(stmts != nullptr && "must contains the statements.");
-  }
-
-  bool IsBlock() const override { return true; }
-
-  const ptr<Node> GetPred() const { return pred; }
-
-  ptr<Node> CloneImpl() const override {
-    return Make<DivergentBranch>(LOC(), CloneP(pred), CloneP(stmts));
-  }
-
-  void Print(std::ostream& os, const std::string& prefix = {},
-             bool with_type = false) const override {
-    os << "\n" << prefix << "`- Divergent Branch On Condition: ";
-    pred->Print(os, " ");
-    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
-    os << "\n" << prefix << " `- Statements:";
-    stmts->Print(os, prefix + "  ", with_type);
-  }
-
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__(Node, DivergentBranch)
-};
-
 struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
   ptr<Node> pred;
   ptr<MultiNodes> if_stmts;
@@ -1614,10 +1576,12 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Branch On Condition: ";
     pred->Print(os, " ");
-    if (pred->GetDiversityShape().Uniform())
-      os << " (uniform predicate)";
-    else
-      os << " (divergent predicate)";
+    if (!pred->GetDiversityShape().Unknown()) {
+      if (pred->GetDiversityShape().Uniform())
+        os << " (uniform predicate)";
+      else
+        os << " (divergent predicate)";
+    }
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (if_stmts->Count()) {
       os << "\n" << prefix << " `- If-Block:";
@@ -2627,7 +2591,6 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ptr<Node> lbound = nullptr;
   ptr<Node> ubound = nullptr;
   int stride = GetInvalidStride();
-  int width = 1; // default is 1
 
   LoopRange(const location& l, const ptr<Identifier>& i)
       : Node(l), iv(i) {} // the cmpt_bounds are yet to be inferred
@@ -2663,26 +2626,29 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
 ptr<Call> GetCall(const ptr<Node>& n);
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ranges;
-  ptr<MultiNodes> suffixs;
+  ptr<MultiValues> suffixs;
   ptr<MultiNodes> stmts;
+  ptr<Loop> loop;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
-      : Node(l), ranges(i), stmts(s) {
+      : Node(l), ranges(i), stmts(s), loop(nullptr) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
-                        const ptr<MultiNodes>& se, const ptr<MultiNodes>& s)
-      : Node(l), ranges(i), suffixs(se), stmts(s) {
+                        const ptr<MultiValues>& se, const ptr<MultiNodes>& s)
+      : Node(l), ranges(i), suffixs(se), stmts(s), loop(nullptr) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
   bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs),
-                              CloneP(stmts));
+    auto copied = Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs),
+                                     CloneP(stmts));
+    copied->loop = loop ? loop : nullptr;
+    return copied;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},

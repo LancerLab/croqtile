@@ -152,6 +152,7 @@ inline static size_t SizeOf(BaseType bt) {
   case BaseType::F64: return sizeof(double);
   case BaseType::U64:
   case BaseType::S64: return 8;
+  case BaseType::BOUNDED_INT:
   case BaseType::F32:
   case BaseType::U32:
   case BaseType::S32: return 4;
@@ -2035,6 +2036,12 @@ inline SpannedType* dyn_cast<SpannedType>(const Type* ty) {
   return dyn_cast<SpannedType>(const_cast<Type*>(ty));
 }
 
+inline bool IsActualVectorType(const ptr<Type>& ty) {
+  if (isa<VectorType>(ty)) return true;
+  if (auto bty = dyn_cast<BoundedType>(ty)) return bty->GetWidth() > 1;
+  return false;
+}
+
 inline size_t SizeOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return 0;
   if (isa<ScalarType>(&ty))
@@ -2082,7 +2089,37 @@ inline BaseType GetBaseType(const Type& ty) {
     return BaseType::S32;
   else if (auto t = dyn_cast<SpannedType>(&ty))
     return t->e_type;
+  else if (auto vt = dyn_cast<VectorType>(&ty))
+    return vt->ElemType();
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
+}
+
+inline BaseType ElementType(const ptr<Type>& ty) {
+  if (auto t = dyn_cast<SpannedType>(ty))
+    return t->e_type;
+  else if (IsActualVectorType(ty)) {
+    if (auto vty = dyn_cast<VectorType>(ty)) {
+      return vty->ElemType();
+    } else if (auto bv = dyn_cast<BoundedType>(ty)) {
+      return BaseType::S32;
+    }
+  }
+  choreo_unreachable(STR(*ty) + " does not have an element type.");
+  return BaseType::UNKNOWN;
+}
+
+inline size_t ElementCount(const ptr<Type>& ty) {
+  if (auto t = dyn_cast<SpannedType>(ty))
+    return t->ElementCount();
+  else if (IsActualVectorType(ty)) {
+    if (auto vty = dyn_cast<VectorType>(ty)) {
+      return vty->ElemCount();
+    } else if (auto bv = dyn_cast<BoundedType>(ty)) {
+      return bv->GetWidth();
+    }
+  }
+  choreo_unreachable(STR(*ty) + " does not have an element count.");
+  return 0;
 }
 
 inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
@@ -2106,7 +2143,7 @@ inline bool ConvertibleToInt(const ptr<Type>& ty) {
 
 inline bool ConvertibleToInt(const Type& ty) {
   return isa<ScalarIntegerType>(&ty) || isa<BooleanType>(&ty) ||
-         (isa<VectorType>(&ty) || (isa<ITupleType>(&ty) && ty.Dims() == 1));
+         (isa<ITupleType>(&ty) && ty.Dims() == 1);
 }
 
 inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {
@@ -2128,12 +2165,6 @@ inline int GetSingleWidth(const ptr<Type>& ty) {
     choreo_unreachable("can not get the single width for a " + PSTR(ty) +
                        " type.");
   return cast<BoundedType>(ty)->GetWidth();
-}
-
-inline bool IsActualVectorType(const ptr<Type>& ty) {
-  if (isa<VectorType>(ty)) return true;
-  if (auto bty = dyn_cast<BoundedType>(ty)) return bty->GetWidth() > 1;
-  return false;
 }
 
 // utility functions to generate types
