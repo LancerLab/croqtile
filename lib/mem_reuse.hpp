@@ -4,7 +4,6 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "context.hpp"
-#include "ginac/ginac.h"
 #include "liveness_analysis.hpp"
 #include "symvals.hpp"
 #include "typeresolve.hpp"

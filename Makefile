@@ -432,6 +432,12 @@ publish-to-apex: package
 publish-to-topsop: package
 	@bash scripts/publish-choreo-for-topsop.sh
 
+publish-sdk: sdk-package
+	pkg_name=$$(find $(REL_BUILD_DIR)/package/_CPack_Packages/Linux/DEB/ -name 'choreo-dev*.deb'); \
+	sdk_name=$$(basename $$pkg_name); \
+	md5sum $$pkg_name; \
+	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
+
 prepare: cln-setup setup-ginac
 run-samples: $(OPERATOR_NAMES:%=test-%)
 

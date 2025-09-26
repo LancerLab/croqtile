@@ -129,7 +129,18 @@ install(TARGETS choreo copp
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/lib/
   DESTINATION include/choreo
   COMPONENT sdk_headers
-  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+  FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*.hpp"
+    PATTERN "sym_replace.hpp" EXCLUDE
+)
+
+install(
+  FILES
+    ${CMAKE_BINARY_DIR}/choreo_header.inc
+    ${CMAKE_BINARY_DIR}/parser.tab.hh
+  DESTINATION include/choreo
+  COMPONENT sdk_headers
 )
 
 install(TARGETS choreo-dev ARCHIVE
@@ -199,20 +210,18 @@ endif()
 
 # Choreo Compiler Package: runtime headers + binaries
 add_custom_target(package-compiler
+  DEPENDS choreo copp
   COMMAND ${CMAKE_CPACK_COMMAND}
     -D CPACK_PROJECT_CONFIG_FILE=${CMAKE_BINARY_DIR}/CPackCompiler.cmake
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   COMMENT "Building standalone compiler package"
 )
 
-add_dependencies(package-compiler choreo copp)
-
 # SDK Package: headers + static lib
 add_custom_target(package-sdk
+  DEPENDS choreo-dev
   COMMAND ${CMAKE_CPACK_COMMAND}
     -D CPACK_PROJECT_CONFIG_FILE=${CMAKE_BINARY_DIR}/CPackSDK.cmake
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   COMMENT "Building SDK package (headers + static lib)"
 )
-
-add_dependencies(package-sdk choreo-dev)
