@@ -1235,6 +1235,7 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   }
 
   BaseType ElementType() const { return e_type; }
+  const ptr<MDSpanType> GetSpanType() { return s_type; }
   size_t Dims() const override { return s_type->Dims(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override {

@@ -191,8 +191,6 @@ private:
 public:
   TopsccCodeGen(const ptr<CodeGenInfo>& ci)
       : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()), cgi(ci) {
-    cu_name = "__choreo_" + OptionRegistry::GetInstance().GetInputName();
-    cmp_dir = CreateUniquePath();
     updating_cgi = AST::Make<CodeGenInfo>();
   }
 
@@ -245,9 +243,6 @@ public:
 private:
   CodeSegment cs = CS_UNKNOWN;
   std::vector<std::string> code_segments; // multiple code segment
-
-  std::string cmp_dir; // work directory
-  std::string cu_name; // compilation unit name
 
   std::string device_fn; // current device function name
 
