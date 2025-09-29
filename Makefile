@@ -325,6 +325,9 @@ setup-core: setup-choreo-kit setup-ginac setup-clang-format setup-git-hooks setu
 	git submodule update --init --recursive;\
 	ln -sf extern/not.sh tests
 
+setup-cuda:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-cuda FTP_SERVER=$(FTP_SERVER)
+
 setup-gcu2: setup-core
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)
 

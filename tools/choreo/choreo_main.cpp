@@ -1,6 +1,9 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "codegen_cuda.hpp"
+#ifdef __CHOREO_BUILD_TARGET_CUTE__
+#include "codegen_cute.hpp"
+#endif // __CHOREO_BUILD_TARGET_CUTE__
 #include "codegen_factor.hpp"
 #include "codegen_prepare.hpp"
 #include "codegen_topscc.hpp"
@@ -195,6 +198,13 @@ int main(int argc, char* argv[]) {
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
+#ifdef __CHOREO_BUILD_TARGET_CUTE__
+  case CompileTarget::Cute: {
+    Choreo::Cute::CuteCodeGen codegen(cgp.GetASTInfo());
+    if (!codegen.RunOnProgram(root)) return codegen.Status();
+    break;
+  }
+#endif
   case CompileTarget::Topscc: {
     // apply GCU specific checks
     GCUCheck gcu_checker;

@@ -30,6 +30,20 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-fdiagnostics-color)
 endif()
 
+option(ENABLE_CUTE "Enable CuTe code generation" ON)
+option(ENABLE_CUDA "Enable CUDA code generation" ON)
+
+if (ENABLE_CUTE)
+endif()
+
+if(ENABLE_CUTE)
+  add_compile_options(-D__CHOREO_BUILD_TARGET_CUTE__)
+  if (NOT ENABLE_CUDA)
+    message(STATUS "CuTe requires CUDA - automatically enabling CUDA support")
+    set(ENABLE_CUDA ON CACHE BOOL "Enable CUDA code generation" FORCE)
+  endif()
+endif()
+
 # Specify the build directory (this is automatically handled by CMake)
 set(BUILD_DIR ${CMAKE_BINARY_DIR}/build)
 
@@ -43,7 +57,14 @@ set(FLEX_PATH "${TOOLCHAIN_DIR}/bin/flex")
 set(BISON_PATH "${TOOLCHAIN_DIR}/bin/bison")
 set(BISON_ENV "BISON_PKGDATADIR=${TOOLCHAIN_DIR}/shared/bison/")
 
-add_compile_options(-Wall -Wextra -g  -D__CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}" -D__CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}" -D__CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}")
+# CUDA_HOME as a cache variable with environment fallback
+if(DEFINED ENV{CUDA_HOME})
+  set(CUDA_HOME $ENV{CUDA_HOME} CACHE PATH "Path to CUDA installation")
+else()
+  set(CUDA_HOME "/usr/local/cuda" CACHE PATH "Path to CUDA installation")
+endif()
+
+add_compile_options(-Wall -Wextra -g)
 
 option(PUBLIC_PACKAGE "Build for Public Release Package")
 

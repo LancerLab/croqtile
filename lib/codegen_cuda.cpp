@@ -159,7 +159,7 @@ fi
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
     outs() << "  export CUDA_INSTALL="
-           << STRINGIZE(__CHOREO_cuda_DIR__)
+           << STRINGIZE(__CHOREO_CUDA_DIR__)
                         << "\n  # JIT compile and execute\n";
     if (dyn_shaped) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
     outs() << "  ${cuda_script} ${build_path} ${host_src} ${target}\n";
