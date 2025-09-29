@@ -20,6 +20,7 @@ enum class CompileTarget {
   Factor,
   Topscc,
   CUDA,
+  Cute,
 };
 
 inline static const std::string STR(CompileTarget ct) {
@@ -28,6 +29,7 @@ inline static const std::string STR(CompileTarget ct) {
   case CompileTarget::Factor: return "Factor";
   case CompileTarget::Topscc: return "Topscc";
   case CompileTarget::CUDA: return "CUDA";
+  case CompileTarget::Cute: return "Cute";
   default: choreo_unreachable("Unsupported operand kind.");
   }
   return "";
@@ -39,7 +41,15 @@ enum class TargetArch {
   GCU21,
   GCU3,
   GCU4,
-  GPU,
+  GPU,  // TODO: unclear
+  // Nv series
+  SM70,
+  SM75,
+  SM80,
+  SM86,
+  SM89,
+  SM90,
+  SM100,
 };
 
 inline static const std::string STR(TargetArch ta) {
@@ -50,6 +60,13 @@ inline static const std::string STR(TargetArch ta) {
   case TargetArch::GCU3: return "GCU300";
   case TargetArch::GCU4: return "GCU400";
   case TargetArch::GPU: return "GPU";
+  case TargetArch::SM70: return "SM70";
+  case TargetArch::SM75: return "SM75";
+  case TargetArch::SM80: return "SM80";
+  case TargetArch::SM86: return "SM86";
+  case TargetArch::SM89: return "SM89";
+  case TargetArch::SM90: return "SM90";
+  case TargetArch::SM100: return "SM100";
   default: choreo_unreachable("Unsupported operand kind.");
   }
   return "";
@@ -401,6 +418,20 @@ public:
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
+
+    case TargetArch::SM70:
+    case TargetArch::SM75:
+    case TargetArch::SM80:
+    case TargetArch::SM86:
+    case TargetArch::SM89:
+    case TargetArch::SM90:
+    case TargetArch::SM100: {
+      switch (sto) {
+      case Storage::SHARED: return 48ull * 1024;   // 48k static
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+    }
+
 
     default: choreo_unreachable("Unsupported target arch.");
     }

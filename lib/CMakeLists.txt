@@ -85,6 +85,10 @@ set(CODEGEN_SOURCES
   codegen_topscc.cpp
 )
 
+if(ENABLE_CUTE)
+  list(APPEND CODEGEN_SOURCES codegen_cute.cpp)
+endif()
+
 set(CL_SOURCES
   command_line.cpp
 )
@@ -105,9 +109,44 @@ target_include_directories(support PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 
 target_compile_definitions(codegen PRIVATE
   __CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}"
-  __CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}"
   __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
 )
+
+if(ENABLE_CUDA)
+  # Verify CUDA_HOME exists
+  if(NOT EXISTS "${CUDA_HOME}/include/cuda_runtime.h")
+    message(FATAL_ERROR "CUDA is not found at CUDA_HOME=${CUDA_HOME}.")
+  else()
+    message(STATUS "Found CUDA via CUDA_HOME environment variable")
+  endif()
+
+  target_include_directories(codegen PRIVATE ${CUDA_HOME}/include)
+  link_directories(${CUDA_HOME}/lib64 ${CUDA_HOME}/targets/x86_64-linux/lib)
+
+  target_compile_definitions(codegen PRIVATE
+    __CHOREO_CUDA_DIR__="${CUDA_HOME}"
+  )
+
+  message(STATUS "CUTe enabled with CUDA from: ${CUDA_HOME}")
+endif()
+
+if(ENABLE_CUTE)
+  set(CUTLASS_DIR ${CMAKE_SOURCE_DIR}/external/cutlass)
+  if(NOT EXISTS "${CUTLASS_DIR}/include/cutlass/cutlass.h")
+    message(FATAL_ERROR "CUTLASS is not found at ${CUTLASS_DIR}.")
+  endif()
+
+  target_include_directories(codegen PRIVATE
+    ${CUTLASS_DIR}/include
+    ${CUTLASS_DIR}/tools/util/include  # for lightweight helpers (optional)
+  )
+
+  target_compile_definitions(codegen PRIVATE
+    __CHOREO_CUTE_DIR__="${CUTLASS_DIR}"
+  )
+
+  message(STATUS "CUTLASS/CUTe support enabled")
+endif()
 
 if(EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")
   target_compile_definitions(codegen PRIVATE
