@@ -629,11 +629,11 @@ bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
         std::string bts = NameBaseType(sty->ElementType(), false);
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
            << UnScopedSizeExpr(*sty) << "));\n";
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
            << ssm.HostName(item.name) << ", " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyHostToDevice));\n";
+           << ", cudaMemcpyHostToDevice));\n";
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
         global_buffers.insert(buf_sym);
       }
@@ -728,12 +728,12 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
              << ");\n";
         }
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
            << UnScopedSizeExpr(*sty) << "));\n";
         if (n.init_value) {
-          hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+          hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
              << sym_data << ", " << UnScopedSizeExpr(*sty)
-             << ", topsMemcpyHostToDevice));\n";
+             << ", cudaMemcpyHostToDevice));\n";
         }
         global_buffers.insert(buf_sym);
         return;
@@ -748,7 +748,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
                          << STR(FBInfo()) << "\n");
       } else {
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
            << UnScopedSizeExpr(*sty) << "));\n";
 
         if (!n.init_value) return;
@@ -772,7 +772,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         hs << h_indent << init_val_type << "* " << sym_init_vptr
            << " = reinterpret_cast<" << init_val_type << "*>(&" << sym_init_val
            << ");\n";
-        hs << h_indent << "choreo::abend_true(topsMemsetD" << data_len << "("
+        hs << h_indent << "choreo::abend_true(cudaMemsetD" << data_len << "("
            << buf_sym << ", *" << sym_init_vptr << ", "
            << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
       }
@@ -892,9 +892,9 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       auto sym = InScopeName(n.name_str);
       auto buf_sym = n.name_str + "__device";
       hs << h_indent << "bool * " << buf_sym << " = nullptr; // global event\n";
-      hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+      hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
          << ety->ElemCount() << "));\n";
-      hs << h_indent << "choreo::abend_true(topsMemset(&" << buf_sym << ", 0, "
+      hs << h_indent << "choreo::abend_true(cudaMemset(&" << buf_sym << ", 0, "
          << ety->ElemCount() << "));\n";
       ssm.MapHostSymbol(sym, buf_sym);
       ssm.MapDeviceSymbol(sym, n.name_str);
@@ -927,9 +927,9 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       auto sym = InScopeName(n.name_str);
       auto buf_sym = n.name_str + "__device";
       hs << h_indent << "bool * " << buf_sym << " = nullptr; // global event\n";
-      hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym
+      hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym
          << ", 1));\n";
-      hs << h_indent << "choreo::abend_true(topsMemset(&" << buf_sym
+      hs << h_indent << "choreo::abend_true(cudaMemset(&" << buf_sym
          << ", 0, 1));\n";
       ssm.MapHostSymbol(sym, buf_sym);
       ssm.MapDeviceSymbol(sym, n.name_str);
@@ -1061,23 +1061,16 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   case Storage::SHARED:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
-                          "__tops_bid_" + dname[i] + "()");
+                          "blockIdx." + dname[i]);
     if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_bid_x()");
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "blockIdx.x");
     break;
   case Storage::LOCAL:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
-                          "__tops_tid_" + dname[i] + "()");
+                          "threadIdx." + dname[i]);
     if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_tid_x()");
-    break;
-  case Storage::SUB:
-    for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
-                          "__tops_stid_" + dname[i] + "()");
-    if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_stid_x()");
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.x");
     break;
   default:
     choreo_unreachable("unsupported parallel-by level: " + STR(n.GetLevel()) +
@@ -1129,16 +1122,16 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   hs << ");\n";
 
   if (!n.IsAsync())
-    hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
+    hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
 
   // copy the span passed by ref back to host
   for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
     if (isa<SpannedType>(item.type)) {
       auto oname = UnScopedName(item.name);
       if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
            << ".data(), " << oname + "__device" << ", "
-           << UnScopedSizeExpr(*item.type) << ", topsMemcpyDeviceToHost));\n";
+           << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
     }
   }
 
@@ -1284,7 +1277,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     std::string buf_sym_from;
     std::string buf_sym;
-    std::string tops_dma_kind = "topsMemcpy";
+    std::string tops_dma_kind = "cudaMemcpy";
     if (global_buffers.count(f_sym + "__device")) {
       buf_sym_from = f_sym + "__device";
       tops_dma_kind.append("Device");
@@ -1310,7 +1303,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (n.operation == ".copy") {
       if (SymbolToSymbol()) {
         // direct copy
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
            << buf_sym_from << ", " << UnScopedSizeExpr(*f_sty) << ", "
            << tops_dma_kind << "));\n";
       } else
@@ -1578,19 +1571,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     // handles dma related to shared memory, where only single thread can
     // operate
-    bool local_in_warp = false, shared_in_block = false;
-    if (!n.future.empty()) {
+    bool shared_in_block = false;
+    if (!n.future.empty())
       shared_in_block = IsDMABlockShared(n);
-      local_in_warp = IsDMAWarpLocal(n);
-    }
 
-    assert(!(shared_in_block && local_in_warp) &&
+    assert(!shared_in_block &&
            "local and shared memory should not be used at the same time");
-    if (local_in_warp)
-      assert(CCtx().GetArch() == TargetArch::GCU4 &&
-             "only gcu400 need handle local synchronization");
 
-    if (shared_in_block || local_in_warp) {
+    if (shared_in_block) {
       ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
          << ") {\n";
       IncrDeviceIndent();
@@ -1837,14 +1825,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       }
     }
 
-    if (local_in_warp || shared_in_block) {
+    if (shared_in_block) {
       DecrDeviceIndent();
       ds << d_indent << "} // single instance\n";
       if (!fty->IsAsync()) {
         // not async, must syncthreads immediately
         // else, defer the sync till the wait time
         if (shared_in_block) ds << d_indent << "__syncthreads();\n";
-        if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
       }
     }
   };
@@ -1899,7 +1886,7 @@ bool CuteCodeGen::Visit(AST::Synchronize& n) {
 
   switch (n.scope->Get()) {
   case Storage::GLOBAL:
-    hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
+    hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
     break;
   case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
   case Storage::LOCAL: ds << d_indent << "__syncsubthreads();\n"; break;
@@ -2038,7 +2025,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         // TODO: make & into OpExprSTR?
-        hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
+        hs << h_indent << "choreo::abend_true(cudaMemset(&" << ExprSTR(f, true)
            << ", 1, " << ety->ElemCount() << ")); // trigger event\n";
         // TODO: support array reference
       } else {
@@ -2067,7 +2054,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
     } else if (auto ety = dyn_cast<EventType>(NodeType(*f))) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
-        hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
+        hs << h_indent << "choreo::abend_true(cudaMemset(&" << ExprSTR(f, true)
            << ", 1, 1)); // trigger event\n";
         // TODO: support array reference
       } else {
@@ -2357,16 +2344,16 @@ bool CuteCodeGen::Visit(AST::Return& n) {
       auto sym = id->name;
       if (IsChoreoInput(InScopeName(sym))) {
         // return the global storage, must map back
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << sym << ".data(), "
            << sym << "__device, " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyDeviceToHost));\n";
+           << ", cudaMemcpyDeviceToHost));\n";
         return_stream << "return choreo::copy_as_spanned(" << sym << ".data(), "
                       << sym << ".shape());\n";
       } else if (IsChoreoOutput(InScopeName(sym))) {
         // return the global storage, must map back
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << sym << ".data(), "
            << sym << "__device, " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyDeviceToHost));\n";
+           << ", cudaMemcpyDeviceToHost));\n";
         return_stream << "return " << sym << ";\n";
       } else {
         choreo_unreachable("unexpected situation");
@@ -2377,9 +2364,9 @@ bool CuteCodeGen::Visit(AST::Return& n) {
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       auto sym = id->name + "__buf__";
-      hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+      hs << h_indent << "choreo::abend_true(cudaMemcpy(" << sym << ".data(), "
          << sym << "__device, " << UnScopedSizeExpr(*sty)
-         << ", topsMemcpyDeviceToHost));\n";
+         << ", cudaMemcpyDeviceToHost));\n";
       return_stream << "return " << ExprSTR(n.value, true) << ";\n";
     } else {
       choreo_unreachable("not support return value of type: " + PSTR(vty));
@@ -2580,7 +2567,7 @@ void CuteCodeGen::EmitTopsFree() {
     if (!isa<SpannedType>(item.type)) continue;
     if (item.attr == ParamAttr::GLOBAL_INPUT) continue;
     if (!NeedDeviceFunc() && !IsChoreoOutput(item.name)) continue;
-    hs << h_indent << "choreo::abend_true(topsFree(" << UnScopedName(item.name)
+    hs << h_indent << "choreo::abend_true(cudaFree(" << UnScopedName(item.name)
        << "__device));\n";
   }
 }
@@ -2865,41 +2852,11 @@ CuteCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
     assert(l.has_value());
     // is marked as parallel whose level is decided by target check
     if (*l == "local")
-      return "__tops_tid_x()";
+      return "threadIdx.x";
     else if (*l == "shared")
-      return "__tops_bid_x()";
-    else if (*l == "sub-local")
-      return "__tops_stid_x()";
+      return "blockIdx.x";
     else
-      choreo_unreachable("invalid bounded type note.");
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string>
-CuteCodeGen::SubThreadIdString(const ptr<AST::Identifier>& id) const {
-  auto ty = NodeType(*id);
-  std::ostringstream oss;
-  if (isa<BoundedType>(ty) &&
-      PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pi")) {
-    auto l = RemovePrefixOrNull("pi:", cast<BoundedType>(ty)->GetNote());
-    assert(l.has_value());
-    // l should be (x|y|z):(shared|local)
-    if (l->length() <= 3)
-      choreo_unreachable("invalid bounded type note: " +
-                         cast<BoundedType>(ty)->GetNote() + ".");
-    oss << "__tops_";
-    if (l->substr(2) == "local")
-      oss << "tid_";
-    else if (l->substr(2) == "shared")
-      oss << "bid_";
-    else
-      choreo_unreachable("invalid bounded type note.");
-    if (l->at(0) > 'z' || l->at(0) < 'x')
-      choreo_unreachable("invalid bounded type note: " +
-                         cast<BoundedType>(ty)->GetNote() + ".");
-    oss << l->at(0) << "()";
-    return oss.str();
+      choreo_unreachable("invalid bounded type note: " + *l + ".");
   }
   return std::nullopt;
 }
@@ -3034,11 +2991,12 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       assert(!is_host);
       return id->name;
     }
+#if 0
     if (auto ids = ThreadIdString(id))
       oss << ids.value();
-    else if (auto sids = SubThreadIdString(id))
-      oss << sids.value();
-    else if (within_map.count(InScopeName(id->name)) && !is_host) {
+    else
+#endif
+      if (within_map.count(InScopeName(id->name)) && !is_host) {
       size_t i = 0;
       for (auto iv_name : within_map.at(InScopeName(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
@@ -3082,11 +3040,12 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       };
       for (auto item : da->GetIndices()) {
         if (auto id = AST::GetIdentifier(item)) {
+#if 0
           if (auto ids = ThreadIdString(id))
             AppendOffset(sbe::sym(ids.value()));
-          else if (auto sids = SubThreadIdString(id))
-            AppendOffset(sbe::sym(sids.value()));
-          else if (within_map.count(InScopeName(id->name))) {
+          else
+#endif
+            if (within_map.count(InScopeName(id->name))) {
             auto ivs = within_map.at(InScopeName(id->name));
             for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
               AppendOffset(sbe::sym(*iv_itr));

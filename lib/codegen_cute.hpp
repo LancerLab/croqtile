@@ -401,11 +401,6 @@ private:
            (max_parallel_level == Storage::LOCAL ||
             max_parallel_level == Storage::SUB);
   }
-  bool IsDMAWarpLocal(AST::DMA&) const {
-    return (parallel_level == Storage::LOCAL &&
-            max_parallel_level == Storage::SUB);
-  }
-
   const std::string ExprCastSTR(AST::ptr<AST::Node> n,
                                 std::optional<std::variant<int, float>> val,
                                 BaseType to, BaseType from,
@@ -424,8 +419,6 @@ private:
   const std::string CallSTR(AST::Call&) const;
 
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
-  std::optional<std::string>
-  SubThreadIdString(const ptr<AST::Identifier>&) const;
   std::pair<std::string, size_t> GenMdsOffset(const ptr<AST::ChunkAt>,
                                               ptr<DMAConfig> = nullptr) const;
   const std::string TileBaseOffset(const ptr<AST::ChunkAt>&) const;
