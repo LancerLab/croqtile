@@ -211,20 +211,20 @@ bool CommandLine::Parse(int argc, char** argv) {
     CCtx().SetArch(TargetArch::GCU4);
   else if (ToUpper(arch.GetValue()) == "GPU")
     CCtx().SetArch(TargetArch::GPU);
-  else if (ToUpper(arch.GetValue()) == "SM70")
-    CCtx().SetArch(TargetArch::SM70);
-  else if (ToUpper(arch.GetValue()) == "SM75")
-    CCtx().SetArch(TargetArch::SM75);
-  else if (ToUpper(arch.GetValue()) == "SM80")
-    CCtx().SetArch(TargetArch::SM80);
-  else if (ToUpper(arch.GetValue()) == "SM86")
-    CCtx().SetArch(TargetArch::SM86);
-  else if (ToUpper(arch.GetValue()) == "SM89")
-    CCtx().SetArch(TargetArch::SM89);
-  else if (ToUpper(arch.GetValue()) == "SM90")
-    CCtx().SetArch(TargetArch::SM90);
-  else if (ToUpper(arch.GetValue()) == "SM100")
-    CCtx().SetArch(TargetArch::SM90);
+  else if (ToUpper(arch.GetValue()) == "SM_70")
+    CCtx().SetArch(TargetArch::SM_70);
+  else if (ToUpper(arch.GetValue()) == "SM_75")
+    CCtx().SetArch(TargetArch::SM_75);
+  else if (ToUpper(arch.GetValue()) == "SM_80")
+    CCtx().SetArch(TargetArch::SM_80);
+  else if (ToUpper(arch.GetValue()) == "SM_86")
+    CCtx().SetArch(TargetArch::SM_86);
+  else if (ToUpper(arch.GetValue()) == "SM_89")
+    CCtx().SetArch(TargetArch::SM_89);
+  else if (ToUpper(arch.GetValue()) == "SM_90")
+    CCtx().SetArch(TargetArch::SM_90);
+  else if (ToUpper(arch.GetValue()) == "SM_100")
+    CCtx().SetArch(TargetArch::SM_90);
   else if (arch.GetValue() == "") {
     // fill the default
     if (CCtx().GetTarget() == CompileTarget::Topscc)
@@ -232,7 +232,7 @@ bool CommandLine::Parse(int argc, char** argv) {
     else if (CCtx().GetTarget() == CompileTarget::Factor)
       CCtx().SetArch(TargetArch::GCU3);
     else if (CCtx().GetTarget() == CompileTarget::Cute)
-      CCtx().SetArch(TargetArch::SM86);
+      CCtx().SetArch(TargetArch::SM_86);
     else
       errs() << "No available default Arch value. Compilation abort.\n";
   } else {

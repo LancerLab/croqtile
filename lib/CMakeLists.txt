@@ -142,7 +142,7 @@ if(ENABLE_CUTE)
   )
 
   target_compile_definitions(codegen PRIVATE
-    __CHOREO_CUTE_DIR__="${CUTLASS_DIR}"
+    __CHOREO_CUTE_DIR__=${CUTLASS_DIR}
   )
 
   message(STATUS "CUTLASS/CUTe support enabled")
