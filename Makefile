@@ -45,7 +45,7 @@ SYMBOLIC_DIR = $(WORK_DIR)/extern/ginac
 CLN_DIR = $(SYMBOLIC_DIR)/cln-1.3.7
 GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7
 
-SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/install/lib -lcln -L$(GINAC_DIR)/install/lib -lginac -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib
+SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/install/lib -L$(GINAC_DIR)/install/lib -lginac -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib -lcln -lgmp
 SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/install/include -I$(GINAC_DIR)/install/include
 
 # For CMAKE config
@@ -321,7 +321,7 @@ setup-git-hooks:
 
 setup-core: setup-choreo-kit setup-ginac setup-clang-format setup-git-hooks setup-gcu-acore
 	git submodule update --init --recursive;\
-	ln -sf extern/not.sh tests
+	ln -sf extern/bin/not.sh tests
 
 setup-cuda:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-cuda FTP_SERVER=$(FTP_SERVER)
