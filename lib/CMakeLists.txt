@@ -113,29 +113,17 @@ target_compile_definitions(codegen PRIVATE
 )
 
 if(ENABLE_CUDA)
-  # Verify CUDA_HOME exists
-  if(NOT EXISTS "${CUDA_HOME}/include/cuda_runtime.h")
-    message(FATAL_ERROR "CUDA is not found at CUDA_HOME=${CUDA_HOME}.")
-  else()
-    message(STATUS "Found CUDA via CUDA_HOME environment variable")
-  endif()
-
   target_include_directories(codegen PRIVATE ${CUDA_HOME}/include)
   link_directories(${CUDA_HOME}/lib64 ${CUDA_HOME}/targets/x86_64-linux/lib)
 
   target_compile_definitions(codegen PRIVATE
-    __CHOREO_CUDA_DIR__="${CUDA_HOME}"
+    __CHOREO_CUDA_DIR__=${CUDA_HOME}
   )
 
   message(STATUS "CUTe enabled with CUDA from: ${CUDA_HOME}")
 endif()
 
 if(ENABLE_CUTE)
-  set(CUTLASS_DIR ${CMAKE_SOURCE_DIR}/external/cutlass)
-  if(NOT EXISTS "${CUTLASS_DIR}/include/cutlass/cutlass.h")
-    message(FATAL_ERROR "CUTLASS is not found at ${CUTLASS_DIR}.")
-  endif()
-
   target_include_directories(codegen PRIVATE
     ${CUTLASS_DIR}/include
     ${CUTLASS_DIR}/tools/util/include  # for lightweight helpers (optional)

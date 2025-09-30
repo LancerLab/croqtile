@@ -2623,7 +2623,7 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
 )script";
   // we must use the built compilation tools
   if (RequiresE2ECompilation(CCtx().GetOutputKind()))
-    os << "\nexport CUDA_HOME=" << __CHOREO_CUDA_DIR__ << "\n";
+    os << "\nexport CUDA_HOME=" << STRINGIZE(__CHOREO_CUDA_DIR__) << "\n";
 
   os << R"script(
 if [ ! -n "${CUDA_HOME}" ] || [ ! -f ${CUDA_HOME}/bin/nvcc ]; then
