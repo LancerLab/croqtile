@@ -1,5 +1,124 @@
 #!/usr/bin/env bash
 
+#================ a simple set implementation ====================
+#
+# Add an element to the set (no duplicates)
+# Usage: set_add SET_NAME "element"
+set_add() {
+    local set_name="$1"
+    shift  # Remove the set name from arguments
+
+    # Handle case where no elements are provided
+    if [ $# -eq 0 ]; then
+        return 0
+    fi
+
+    local current_elements
+    eval "current_elements=(\"\${${set_name}[@]}\")"
+
+    # Process each new element
+    for new_element in "$@"; do
+        # Check if element already exists
+        local found=0
+        for existing_element in "${current_elements[@]}"; do
+            if [ "$existing_element" = "$new_element" ]; then
+                found=1
+                break
+            fi
+        done
+
+        # Add only if not found
+        if [ $found -eq 0 ]; then
+            current_elements+=("$new_element")
+        fi
+    done
+
+    # Update the original array
+    eval "$set_name=(\"\${current_elements[@]}\")"
+}
+
+# Check if element exists in set
+# Usage: set_contains SET_NAME "element"
+# Returns 0 if found, 1 if not found
+set_contains() {
+    local set_name="$1"
+    local search_element="$2"
+    local current_elements
+
+    eval "current_elements=(\"\${${set_name}[@]}\")"
+
+    # Handle empty array case
+    if [ ${#current_elements[@]} -eq 0 ]; then
+        return 1
+    fi
+
+    for element in "${current_elements[@]}"; do
+        if [ "$element" = "$search_element" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Check if set is empty
+# Usage: set_empty SET_NAME
+# Returns 0 if empty, 1 if not empty
+set_empty() {
+    local set_name="$1"
+    local current_elements
+
+    eval "current_elements=(\"\${${set_name}[@]}\")"
+
+    if [ ${#current_elements[@]} -eq 0 ]; then
+        return 0  # Empty
+    else
+        return 1  # Not empty
+    fi
+}
+
+# Get the size of the set
+# Usage: set_size SET_NAME
+# Echoes the number of elements
+set_size() {
+    local set_name="$1"
+    local current_elements
+
+    eval "current_elements=(\"\${${set_name}[@]}\")"
+    echo ${#current_elements[@]}
+}
+
+set_clear() {
+    local set_name="$1"
+    eval "$set_name=()"
+}
+
+set_print() {
+    local set_name="$1"
+    local delimiter="${2:- }"  # Default to space
+    local current_elements
+
+    eval "current_elements=(\"\${${set_name}[@]}\")"
+
+    # Handle empty set
+    if [ ${#current_elements[@]} -eq 0 ]; then
+        return 0  # Print nothing for empty set
+    fi
+
+    # Print elements with specified delimiter
+    local first=1
+    for element in "${current_elements[@]}"; do
+        if [ $first -eq 1 ]; then
+            printf '%s' "$element"
+            first=0
+        else
+            printf '%s%s' "$delimiter" "$element"
+        fi
+    done
+    printf '\n'
+}
+
+#================ a simple set implementation ====================
+
 # Get the directory where the script is located
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 timestamp=$(date +%Y%m%d%H%M%S)
@@ -44,7 +163,7 @@ num_skiped=0
 
 is_in_docker=false
 is_in_shell=false
-test_target=
+tst_targets=()
 requires_dynamic_shape=0
 expect_fail=
 expect_skip=
@@ -63,36 +182,28 @@ fi
 check_requirement() {
   local file=$1
   local requires=$(grep "^\/\/" $file | grep "REQUIRES:" | sed 's/.*REQUIRES://')
-  local tgt=$(echo $requires | grep "TARGET-.*\>" |sed 's/TARGET-//g' |sed 's/ .*//')
+  local tgts=$(echo $requires | grep "TARGET-.*\>" |sed 's/TARGET-//g')
   local expect_gcu_sim=$(echo $requires | grep "GCUSIM")
 
   # reset target requirement
   requires_dynamic_shape=0
-  test_target=
+  set_clear tst_targets
   expect_fail=
   expect_skip=
 
-  if [ ! -z "${expect_gcu_sim}" ]; then
-    [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
-    test_target=gcusim400
-  elif [ "${tgt}" == "GCU400" ]; then
-    [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
-    test_target=gcu400
-  elif [ "${tgt}" == "GCU300" ]; then
-    [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
-    test_target=gcu300
-  elif [ "${tgt}" == "GCU210" ]; then
-    [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
-    test_target=gcu210
-  elif [ "${tgt}" == "GCUALL" ]; then
-    [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
-    test_target=gcu-any
-  elif [ "${tgt}" == "GPU" ]; then
-    [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
-    test_target=gpu
-  elif [ ! -z "${tgt}" ]; then
-    echo "unexpected target $tgt"
+  if [ ! -z "${expect_gcu_sim}" ]; then set_add tst_targets "gcusim400"; fi
+  if [[ "${tgts}" == *"GCU400"* ]]; then set_add tst_targets "gcu400"; fi
+  if [[ "${tgts}" == *"GCU300"* ]]; then set_add tst_targets "gcu300"; fi
+  if [[ "${tgts}" == *"GCU210"* ]]; then set_add tst_targets "gcu210"; fi
+  if [[ "${tgts}" == *"GCUALL"* ]]; then
+    set_add tst_targets "gcu210" "gcu300" "gcu400"; fi
+  if [[ "${tgts}" == *"GPU"* ]]; then set_add tst_targets "gpu"; fi
+
+  if [ -z "${tgts}" ]; then
+    set_add tst_targets "gcu210" "gcu300" "gcu400" "gpu"
   fi
+
+  if set_empty tst_targets; then echo "invalid target: ${tgts}"; fi
 
   local dynshape=$(echo $requires | grep "DYNAMIC-SHAPE\>")
   [ ! -z "${dynshape}" ] && requires_dynamic_shape=1;
@@ -111,7 +222,7 @@ gcu_sim_arch=
 check_device_features() {
   if command -v nvidia-smi &> /dev/null; then
     if nvidia-smi > /dev/null 2>&1; then
-      echo "GPU is available."
+#      echo "GPU is available."
       is_gpu_available=1
       return
     fi
@@ -476,10 +587,6 @@ for file in "${files_array[@]}"; do
   fi
 
   if [ $is_gcu_available -eq 1 ]; then
-    if [[ -z $test_target ]] || [[ "$test_target" == "gcu-any" ]]; then
-      test_target=$gcu_arch;
-    fi
-
     if [ $requires_dynamic_shape -eq 1 ]; then
       if [ $is_dynshape_supported -eq 0 ]; then
         echo "SKIP(dyn-shape): ${file} "
@@ -489,9 +596,11 @@ for file in "${files_array[@]}"; do
     fi
 
   elif [ $is_gpu_available -eq 1 ]; then
-    if [ ! -z "$test_target" ] && [ "$test_target" != "gpu" ]; then
-      echo "SKIP($test_target): ${file}"
-      num_skiped=$(($num_skiped + 1));
+    if ! set_contains tst_targets "gpu"; then
+      for tgt in ${tst_targets[@]}; do
+        echo "SKIP(${tgt}): ${file}"
+        num_skiped=$(($num_skiped + 1));
+      done
       continue; #simply skip the unmatched target
     fi
   fi
@@ -523,22 +632,18 @@ for file in "${files_array[@]}"; do
     # There is a specified RUN-TARGET
     if [[ ! -z "$run_target" ]]; then # no RUN-TARGET specified
       # check if run-target violates the REQUIRES
-      if [[ "$test_target" != "gcu-any" ]] &&
-         [[ "$test_target" != "$run_target" ]]; then
-        echo "ERROR($file): test target ($test_target) does not match run target ($run_target)."
+      if ! set_contains tst_targets "$run_target"; then
+        echo "ERROR($file): run target ($run_target) is not listed as a test targets ($run_target)."
         exit 1
       fi
-
-      # override the test_target with the run_target
-      test_target=$run_target
     fi
 
     # specific - simulator
     exe_env=
     unset_env=
     allows_run=0
-    if [[ "$test_target" == "gcusim400" ]]; then
-      if [[ "$test_target" != "$gcu_sim_arch" ]]; then
+    if set_contains tst_targets "gcusim400" ]]; then
+      if [[ "gcusim400" != "$gcu_sim_arch" ]]; then
         echo "SKIP(SIM): ${file}"
         num_skiped=$(($num_skiped + 1));
         continue;
@@ -550,9 +655,9 @@ for file in "${files_array[@]}"; do
       fi
     fi
 
-    if  [[ "$test_target" != "$gcu_arch" ]] && [[ $allows_run -eq 0 ]] ; then
+    if set_contains tst_targets "$gcu_arch" && [[ $allows_run -eq 0 ]] ; then
       # Not matched, skip
-      echo "SKIP(${test_target}): ${file} ($run_count of $run_num)"
+      echo "SKIP(${gcu_arch}): ${file} ($run_count of $run_num)"
       num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
       continue;
     fi

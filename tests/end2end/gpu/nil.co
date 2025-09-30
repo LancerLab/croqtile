@@ -1,0 +1,11 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -t cute %s -o %s.cute.result && %s.cute.result | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ void nil() {}
+
+int main() {
+  nil();
+  std::cout << "Run Complete.\n";
+}
+
+// CHECK: Run Complete.

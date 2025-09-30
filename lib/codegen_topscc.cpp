@@ -554,11 +554,11 @@ void TopsccCodeGen::EmitFixedHostHead() {
 #include "tops/tops_ext.h"
 #include "tops/tops_runtime.h"
 
+#if __GCU_ARCH__ >= 300
+#include "tcle.h"
+#endif // __GCU_ARCH__ >= 300
 )";
 
-  oss << "#if __GCU_ARCH__ >= 300\n";
-  oss << "#include \"tcle.h\"\n";
-  oss << "#endif // __GCU_ARCH__ >= 300\n";
 
   oss << "// include the choreo header;\n";
   if (native_f16)

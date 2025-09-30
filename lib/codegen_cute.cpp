@@ -525,16 +525,8 @@ void CuteCodeGen::EmitFixedHostHead() {
 #include <iterator>
 #include <string>
 #include <vector>
-
-// dependant on the topsruntime
-#include "tops/tops_ext.h"
-#include "tops/tops_runtime.h"
-
+#include "cutlass/cutlass.h"
 )";
-
-  oss << "#if __GCU_ARCH__ >= 300\n";
-  oss << "#include \"tcle.h\"\n";
-  oss << "#endif // __GCU_ARCH__ >= 300\n";
 
   oss << "// include the choreo header;\n";
   if (native_f16)
@@ -2641,7 +2633,12 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   os << R"script(#!/usr/bin/env bash
 
 # This is the choreo generated bash script to compile cute code
+)script";
+  // we must use the built compilation tools
+  if (RequiresE2ECompilation(CCtx().GetOutputKind()))
+    os << "\nexport CUDA_HOME=" << __CHOREO_CUDA_DIR__ << "\n";
 
+  os << R"script(
 if [ ! -n "${CUDA_HOME}" ] || [ ! -f ${CUDA_HOME}/bin/nvcc ]; then
   echo "failed to find the CUDA installation."
   echo "install cuda or set CUDA_HOME to cuda installation directory."
@@ -2654,7 +2651,7 @@ NVCC_LIB=${CUDA_LIB}/lib
 )script";
 
   auto build_path = CreateUniquePath();
-  auto cc_file = build_path + "/__choreo_cute_" + filename + ".cpp";
+  auto cc_file = build_path + "/__choreo_cute_" + filename + ".cu";
   auto exe_file = exe_fn;
   if (exe_file.empty())
     exe_file = build_path + "/__choreo_cute_" + filename + ".exe";
@@ -2693,7 +2690,7 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -ltops -lm -O3)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1)";
   if (CCtx().GenDebugInfo()) os << " -g";
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();
@@ -2705,7 +2702,7 @@ show_usage() {
   auto input_file = OptionRegistry::GetInstance().GetInputFileName();
   auto input_abs_path = GetAbsPath(cwd.string(), input_file);
   os << " -I" << input_abs_path;
-  os << " -I" << STRINGIZE(__CHOREO_CUTE_DIR__);
+  os << " -I" << STRINGIZE(__CHOREO_CUTE_DIR__) << "/include";
   for (auto inc_path : CCtx().GetIncPaths()) os << " -I" << inc_path;
   for (auto lib_path : CCtx().GetLibPaths()) os << " -L" << lib_path;
   for (auto lib : CCtx().GetLibs()) os << " -l" << lib;
@@ -2714,7 +2711,6 @@ show_usage() {
        << (macro.second.empty() ? "" : ("=" + macro.second));
 
   os << "\"";
-  os << "\noption_detect";
   os << "\nexport LD_LIBRARY_PATH=${CUDA_LIB}:${LD_LIBRARY_PATH}\n\n";
 
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
