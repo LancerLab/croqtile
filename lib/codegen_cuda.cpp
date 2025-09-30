@@ -15,7 +15,7 @@
 #include "valno.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
-#error "missing macro definition of __CHOREO_CUDA_DIR__"
+#warning "missing macro definition of __CHOREO_CUDA_DIR__"
 #endif
 
 // utility macros define here
@@ -158,10 +158,12 @@ fi
     outs() << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
-    outs() << "  export CUDA_INSTALL="
+#ifdef __CHOREO_CUDA_DIR__
+    outs() << "  export CUDA_HOME="
            << STRINGIZE(__CHOREO_CUDA_DIR__)
                         << "\n  # JIT compile and execute\n";
-    outs() << " export PATH=${CUDA_INSTALL}/bin:$PATH\n";
+#endif
+    outs() << " if [ ! -z ${CUDA_HOME} ]; then export PATH=${CUDA_HOME}/bin:$PATH; fi\n";
     if (dyn_shaped) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
     outs() << "  ${cuda_script} ${build_path} ${host_src} ${target}\n";
     outs() << R"script(

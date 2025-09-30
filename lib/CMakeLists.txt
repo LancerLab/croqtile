@@ -78,16 +78,13 @@ set(CORE_SOURCES
 # Define the source files for your codegen library
 set(CODEGEN_SOURCES
   codegen.cpp
-  codegen_cuda.cpp
-  codegen_cuda_types.cpp
   codegen_factor.cpp
   codegen_factor_types.cpp
   codegen_topscc.cpp
+  codegen_cuda.cpp
+  codegen_cuda_types.cpp
+  codegen_cute.cpp
 )
-
-if(ENABLE_CUTE)
-  list(APPEND CODEGEN_SOURCES codegen_cute.cpp)
-endif()
 
 set(CL_SOURCES
   command_line.cpp
@@ -119,8 +116,6 @@ if(ENABLE_CUDA)
   target_compile_definitions(codegen PRIVATE
     __CHOREO_CUDA_DIR__=${CUDA_HOME}
   )
-
-  message(STATUS "CUTe enabled with CUDA from: ${CUDA_HOME}")
 endif()
 
 if(ENABLE_CUTE)
@@ -132,8 +127,6 @@ if(ENABLE_CUTE)
   target_compile_definitions(codegen PRIVATE
     __CHOREO_CUTE_DIR__=${CUTLASS_DIR}
   )
-
-  message(STATUS "CUTLASS/CUTe support enabled")
 endif()
 
 if(EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")

@@ -1,12 +1,14 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "codegen_cuda.hpp"
+#include "codegen_cute.hpp"
 #include "codegen_factor.hpp"
 #include "codegen_prepare.hpp"
 #include "codegen_topscc.hpp"
 #include "command_line.hpp"
 #include "earlysema.hpp"
 #include "gcucheck.hpp"
+#include "gpuadapt.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
 #include "mem_reuse.hpp"
@@ -25,10 +27,6 @@
 #include "types.hpp"
 #include "verifier.hpp"
 #include "visualize.hpp"
-#ifdef __CHOREO_BUILD_TARGET_CUTE__
-#include "codegen_cute.hpp"
-#include "gpuadapt.hpp"
-#endif // __CHOREO_BUILD_TARGET_CUTE__
 #include <cstdlib>
 #include <getopt.h>
 
@@ -194,11 +192,6 @@ int main(int argc, char* argv[]) {
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
-  case CompileTarget::CUDA: {
-    Choreo::CUDA::CUDACodeGen codegen;
-    if (!codegen.RunOnProgram(root)) return codegen.Status();
-    break;
-  }
   case CompileTarget::Topscc: {
     // apply GCU specific checks
     GCUCheck gcu_checker;
@@ -216,7 +209,11 @@ int main(int argc, char* argv[]) {
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
-#ifdef __CHOREO_BUILD_TARGET_CUTE__
+  case CompileTarget::CUDA: {
+    Choreo::CUDA::CUDACodeGen codegen;
+    if (!codegen.RunOnProgram(root)) return codegen.Status();
+    break;
+  }
   case CompileTarget::Cute: {
     GPUAdaptor gpu_adaptor;
     if (!gpu_adaptor.RunOnProgram(root)) return gpu_adaptor.Status();
@@ -225,7 +222,6 @@ int main(int argc, char* argv[]) {
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
-#endif
   default:
     errs() << "Invalid target: '" << STR(CCtx().GetTarget()) << "'\n";
     return 1;

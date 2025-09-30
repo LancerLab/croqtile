@@ -216,7 +216,7 @@ public:
     };
 
     // TODO: to confirm about the GPU value
-#if 0
+#if 1
       // linear copy
       // omitted
 

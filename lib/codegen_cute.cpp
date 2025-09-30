@@ -13,11 +13,11 @@
 #include "types.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
-#error "missing macro definition of __CHOREO_CUDA_DIR__"
+#warning "missing macro definition of __CHOREO_CUDA_DIR__"
 #endif // __CHOREO_CUDA_DIR__
 
 #ifndef __CHOREO_CUTE_DIR__
-#error "missing macro definition of __CHOREO_CUTE_DIR__"
+#warning "missing macro definition of __CHOREO_CUTE_DIR__"
 #endif // __CHOREO_CUTE_DIR__
 
 // #define USING_OP_INFO
@@ -2621,9 +2621,16 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
 
 # This is the choreo generated bash script to compile cute code
 )script";
+
   // we must use the built compilation tools
-  if (RequiresE2ECompilation(CCtx().GetOutputKind()))
+  if (RequiresE2ECompilation(CCtx().GetOutputKind())) {
+#ifdef __CHOREO_CUDA_DIR__
     os << "\nexport CUDA_HOME=" << STRINGIZE(__CHOREO_CUDA_DIR__) << "\n";
+#endif // __CHOREO_CUDA_DIR__
+#ifdef __CHOREO_CUTE_DIR__
+    os << "\nexport CUTE_HOME=" << STRINGIZE(__CHOREO_CUTE_DIR__) << "\n";
+#endif // __CHOREO_CUTE_DIR__
+  }
 
   os << R"script(
 if [ ! -n "${CUDA_HOME}" ] || [ ! -f ${CUDA_HOME}/bin/nvcc ]; then
@@ -2689,7 +2696,7 @@ show_usage() {
   auto input_file = OptionRegistry::GetInstance().GetInputFileName();
   auto input_abs_path = GetAbsPath(cwd.string(), input_file);
   os << " -I" << input_abs_path;
-  os << " -I" << STRINGIZE(__CHOREO_CUTE_DIR__) << "/include";
+  os << " -I${CUTE_HOME}/include";
   for (auto inc_path : CCtx().GetIncPaths()) os << " -I" << inc_path;
   for (auto lib_path : CCtx().GetLibPaths()) os << " -L" << lib_path;
   for (auto lib : CCtx().GetLibs()) os << " -l" << lib;
