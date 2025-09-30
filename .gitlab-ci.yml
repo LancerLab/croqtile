@@ -30,6 +30,7 @@ gpu_test:
   only:
     - main
     - release/alpha
+    - cute
     - merge_requests
   timeout: 10m
   after_script:
