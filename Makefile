@@ -42,9 +42,7 @@ GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 
 # For GiNaC
 SYMBOLIC_DIR = $(WORK_DIR)/extern/ginac
-CLN_TAR = $(SYMBOLIC_DIR)/cln-1.3.7.tar.bz2
 CLN_DIR = $(SYMBOLIC_DIR)/cln-1.3.7
-GINAC_TAR = $(SYMBOLIC_DIR)/ginac-1.8.7.tar.bz2
 GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7
 
 SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/install/lib -lcln -L$(GINAC_DIR)/install/lib -lginac -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib
@@ -350,38 +348,26 @@ gcu3-kmd:
 setup-gcu-acore:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore
 
-CLN_MD5=fb9dc1a6552dda517ce32d35a6af9105
-CLN_PACKAGE_NAME=cln-1.3.7.tar.bz2
-GINAC_MD5=857fb04d82d40308377afa1bd24c2990
-GINAC_PACKAGE_NAME=ginac-1.8.7.tar.bz2
-CUR_CLN_MD5:=$(shell md5sum $(CLN_TAR) 2>/dev/null| cut -d ' ' -f 1)
-CUR_GINAC_MD5:=$(shell md5sum $(GINAC_TAR) 2>/dev/null| cut -d ' ' -f 1)
+GINAC_MD5=9385e54f4d347fe25b635209971de987
+GINAC_PACKAGE_NAME=ginac-cln.tgz
+GINAC_PACKAGE=$(TOOLCHAIN_DIR)/$(GINAC_PACKAGE_NAME)
+CUR_GINAC_MD5:=$(shell md5sum $(GINAC_PACKAGE) 2>/dev/null| cut -d ' ' -f 1)
 
 download-ginac:
-	mkdir -p $(SYMBOLIC_DIR); \
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(CLN_PACKAGE_NAME) -o $(CLN_TAR);\
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GINAC_PACKAGE_NAME) -o $(GINAC_TAR);\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GINAC_PACKAGE_NAME) -o $(GINAC_PACKAGE);\
 
 check-ginac:
-	@if [ "$(CUR_CLN_MD5)" != "$(CLN_MD5)"  ] || [ "$(CUR_GINAC_MD5)" != "$(GINAC_MD5)"  ]; then \
+	@if [ "$(CUR_GINAC_MD5)" != "$(GINAC_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the ginac package..."; \
 		$(MAKE) download-ginac; \
 	else \
 		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
 	fi;
 
-cln-setup:
-	tar -xvf $(CLN_TAR) -C $(SYMBOLIC_DIR); \
-	cd $(CLN_DIR); \
-	./configure --prefix=$(CLN_DIR)/install --enable-static; \
-	$(MAKE) -j && $(MAKE) install
-
-setup-ginac: check-ginac cln-setup
-	$(MAKE) cln-setup; \
-	tar -xvf $(GINAC_TAR) -C $(SYMBOLIC_DIR); \
-	cd $(GINAC_DIR); \
-	PKG_CONFIG_PATH=$(CLN_DIR) ./configure --prefix=$(GINAC_DIR)/install --with-cln=$(CLN_DIR)/install  --enable-static; \
-	$(MAKE) -j && $(MAKE) install
+setup-ginac: check-ginac
+	@if [ ! -f "$(TOOLCHAIN_DIR)/ginac/ginac-1.8.7/install/lib/libginac.a" ]; then \
+	    tar -zxvf $(GINAC_PACKAGE) -C $(TOOLCHAIN_DIR);\
+	fi;
 
 CFORMAT_MD5=6ee59eba63782b362bc9ba1138911f3a
 CFORMAT_NAME=clang-format-19-1-2
@@ -438,6 +424,6 @@ publish-sdk: sdk-package
 	md5sum $$pkg_name; \
 	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
 
-prepare: cln-setup setup-ginac
+prepare: setup-ginac
 run-samples: $(OPERATOR_NAMES:%=test-%)
 
