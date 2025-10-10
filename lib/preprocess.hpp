@@ -365,17 +365,10 @@ private:
     os << R"script(#!/usr/bin/env bash
 
 # This is the choreo generated bash script to compile topscc code
-
-if [[ -z ${TOPSCC_INSTALL} ]]; then
-  if [[ \"$1\" == \"-st\" ]]; then
-    TOPSCC_INSTALL=/opt/tops;
-    shift 1;
-  fi
+TOPSCC_INSTALL=/opt/tops;
 )script";
 
-    os << "  TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
     os << R"script(
-fi
 if [[ -z "${TOPSCC_INSTALL}" ]]; then
   echo "failed to find the topscc installation."
   echo "install topscc or set TOPSCC_INSTALL to topscc installation directory."
