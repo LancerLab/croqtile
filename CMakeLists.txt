@@ -83,6 +83,7 @@ target_link_libraries(choreo PRIVATE
   core
   codegen
   support
+  pp
   ${EXTERN_LIBS}
 )
 
@@ -91,6 +92,7 @@ target_link_libraries(copp PRIVATE
   core
   codegen
   support
+  pp
   ${EXTERN_LIBS}
 )
 
@@ -100,6 +102,7 @@ add_library(choreo-dev STATIC
   $<TARGET_OBJECTS:core>
   $<TARGET_OBJECTS:codegen>
   $<TARGET_OBJECTS:support>
+  $<TARGET_OBJECTS:pp>
   tools/sdk/public_api.cpp
 )
 
