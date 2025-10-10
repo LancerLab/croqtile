@@ -202,7 +202,7 @@ if ! which not.sh &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.2"
+echo "        Choreo SimpleLit - v0.21"
 echo "---------------------------------------"
 echo ""
 
@@ -266,7 +266,7 @@ check_specific() {
   expect_skip=
 
   set_clear tst_targets
-  set_add tst_targets "gcu210" "gcu300" "gcu400" "gpu"
+  set_add tst_targets "gcu210" "gcu300" "gcu400" "sm_86"
 
   # Extract expect_fail and expect_skip with proper comment pattern
   if [[ -n "$comment_pattern" ]]; then
@@ -314,7 +314,9 @@ check_specific() {
   if [[ "${tgts}" == *"GCUALL"* ]]; then
     set_add tst_targets "gcu210" "gcu300" "gcu400"
   fi
-  if [[ "${tgts}" == *"GPU"* ]]; then set_add tst_targets "gpu"; fi
+  if [[ "${tgts}" == *"GPU"* ]]; then
+    set_add tst_targets "sm_86";
+  fi
 
   if [ -z "${tgts}" ]; then
     set_add tst_targets "gcu210" "gcu300" "gcu400" "gpu"
@@ -335,46 +337,62 @@ check_specific() {
   [ ! -z "${dynshape}" ] && requires_dynamic_shape=1
 }
 
-# check the hardware device availability
-gcu_arch=
-is_gpu_available=0
-is_gcu_available=0
+# Check the hardware device availability and type
+# Note: consider the machine only installed a single target
+device_type="none"
+gcu_arch="none"
+cuda_arch="none"
+mach=
+
+# some specific features
 is_dynshape_supported=0
 gcu_sim_lib=
 gcu_sim_arch=
-check_device_features() {
+
+detect_device_features() {
   if command -v nvidia-smi &> /dev/null; then
+    # GPU device is available
     if nvidia-smi > /dev/null 2>&1; then
-#      echo "GPU is available."
-      is_gpu_available=1
-      return
+      device_type="gpu"
+      cuda_arch="sm_86" # To figure out more precisely
+      mach=${cuda_arch}
     fi
+    if [ "${cuda_arch}" == "none" ]; then
+      echo "can not determine the gpu device type."
+      exit 1
+    fi
+    return
   fi
 
-  # is the simulators exist?
-  if [ -f "${script_dir}/../extern/lib/libgcusim.so" ]; then
+  local _gcu_dstr="$(lspci | grep -E '(Enflame|Tencent)' | head -1)"
+  case "${_gcu_dstr}" in
+    *S60G*)
+      gcu_arch=gcu300
+      ;;
+    *c035*|*S60*)
+      gcu_arch=gcu300
+      is_dynshape_supported=1
+      ;;
+    *I20*)
+      gcu_arch=gcu210
+      export TOPS_VISIBLE_DEVICES=1
+      ;;
+    *Tencent*)
+      gcu_arch=gcu210
+      ;;
+    "")
+      echo "can not determine the target device type."
+      exit 1
+      ;;
+  esac
+  if [ "$gcu_arch" != "none"  ]; then
+    mach=${gcu_arch}
+  elif [ -f "${script_dir}/../extern/lib/libgcusim.so" ]; then
+    # the simulators exist
+    device_type="gcu"
     gcu_sim_lib=${script_dir}/../extern/lib/
     gcu_sim_arch=gcusim400
-    is_gcu_available=1
-  fi
-
-  GCU_DEVICE_STR="$(lspci | grep -E '(Enflame|Tencent)' | head -1)"
-  if [ "${GCU_DEVICE_STR}" != "" ]; then
-    #echo "GCU is available."
-    is_gcu_available=1
-  fi
-  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_arch=gcu300
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]] || [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
-    gcu_arch=gcu300
-    is_dynshape_supported=1
-  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-    gcu_arch=gcu210
-    export TOPS_VISIBLE_DEVICES=1
-  elif [[ "${GCU_DEVICE_STR}" == *"Tencent"* ]]; then
-    gcu_arch=gcu210
-  elif [[ ! -z "${LIBRA_SIM_DIR}" ]]; then
-    gcu_arch=gcu400
+    mach=${gcu_sim_arch}
   else
     echo "can not determine the GCU device type."
     exit 1
@@ -387,7 +405,6 @@ reproduce_file="/tmp/reproduce_commands_${timestamp}.txt"
 rm -f $counter_file
 rm -f $reproduce_file
 touch $reproduce_file
-
 
 initialize_counters() {
   if [ ! -f "$counter_file" ]; then
@@ -457,6 +474,7 @@ execute_command() {
   command=${command//copp/"$(which copp)"}
   command=${command//FileCheck/"$(which FileCheck)"}
   command=${command//%gcu_arch/"-arch=${gcu_arch}"}
+  command=${command//%cuda_arch/"-arch ${cuda_arch}"}
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
 
@@ -506,7 +524,7 @@ execute_command() {
         printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
       fi
     elif [[ ! -z "${expect_fail}" ]] &&
-         [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
+         [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${mach})"* ]]; then
       increment_counter num_uepass 1
       append_reproduce_command "$command"
       if [[ ${#test_info} -gt $max_text_width ]]; then
@@ -531,7 +549,7 @@ execute_command() {
         printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
       fi
     elif [[ ! -z "${expect_fail}" ]] &&
-         [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
+         [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${mach})"* ]]; then
       increment_counter num_xfails 1
       if [[ ${#test_info} -gt $max_text_width ]]; then
         printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
@@ -600,14 +618,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# check device supported feature
-check_device_features
+# detect the device supported features
+detect_device_features
 initialize_counters
 
-if [ $is_gcu_available -eq 0 ] && [ $is_gpu_available -eq 0 ]; then
-  echo "No supported device was found. abort..."
-  exit 1
-fi
+case $device_type in
+  gpu) ;;
+  gcu) ;;
+  *)
+    echo "No supported device was found. abort..."
+    exit 1
+    ;;
+esac
 
 cleantmplocks() {
   rm -f $lock_file
@@ -681,7 +703,7 @@ retrieve_run_config() {
     run_environ="shell"
   elif [[ $line =~ [[:blank:]]*RUN-([^-]+):[[:blank:]]*(.+) ]]; then
     run_target=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
-    if [[ "${run_target}" == "$gcu_arch" ]]; then
+    if [[ "${run_target}" == "$mach" ]]; then
       run_command="${BASH_REMATCH[2]}"
       run_environ="shell"
     elif [[ "${run_target}" == "docker" ]]; then
@@ -711,7 +733,7 @@ for file in "${files_array[@]}"; do
       echo "SKIP(CUDA):  $file"
       num_skiped=$(($num_skiped + 1));
       continue;
-    elif [ $is_gcu_available -eq 0 ]; then
+    elif [ "$device_type" != "gpu" ]; then
       echo "SKIP(GPU):  $file"
       num_skiped=$(($num_skiped + 1));
       continue;
@@ -720,22 +742,13 @@ for file in "${files_array[@]}"; do
     fi
   fi
 
-  if [ $is_gcu_available -eq 1 ]; then
+  if [ "$device_type" == "gcu" ]; then
     if [ $requires_dynamic_shape -eq 1 ]; then
       if [ $is_dynshape_supported -eq 0 ]; then
         echo "SKIP(dyn-shape): ${file} "
         num_skiped=$(($num_skiped + 1));
         continue; #simply skip the unmatched target
       fi
-    fi
-
-  elif [ $is_gpu_available -eq 1 ]; then
-    if ! set_contains tst_targets "gpu"; then
-      for tgt in ${tst_targets[@]}; do
-        echo "SKIP(${tgt}): ${file}"
-        num_skiped=$(($num_skiped + 1));
-      done
-      continue; #simply skip the unmatched target
     fi
   fi
 
@@ -791,8 +804,8 @@ for file in "${files_array[@]}"; do
     # specific - simulator
     exe_env=
     unset_env=
-    allows_run=0
     if set_contains tst_targets "gcusim400" ]]; then
+      # requires simulator
       if [[ "gcusim400" != "$gcu_sim_arch" ]]; then
         echo "SKIP(SIM): ${file}"
         num_skiped=$(($num_skiped + 1));
@@ -801,18 +814,14 @@ for file in "${files_array[@]}"; do
         # set up for the simulator
         exe_env="old_path=${LD_LIBRARY_PATH}; export LD_LIBRARY_PATH=${gcu_sim_lib}:${LD_LIBRARY_PATH}; export INTERNAL_GCU_SIM=LIBRA;"
         unset_env="export LD_LIBRARY_PATH=${old_path}; unset INTERNAL_GCU_SIM;"
-        allows_run=1
       fi
-    else
-      allows_run=1
     fi
 
-    if ! set_contains tst_targets "$gcu_arch" || [[ $allows_run -eq 0 ]] ; then
+    if ! set_contains tst_targets "$mach"; then
       # Not matched, skip
-      for tgt in ${tst_targets[@]}; do
-        echo "SKIP($(toupper ${tgt})): ${file} ($run_count of $run_num)"
-        num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
-      done
+      _all_skipped_targets=$(set_print tst_targets)
+      echo "SKIP($(toupper "${_all_skipped_targets}")): ${file} ($run_count of $run_num)"
+      num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
       continue;
     fi
 
