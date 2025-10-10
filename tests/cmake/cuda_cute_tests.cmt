@@ -1,0 +1,131 @@
+# REQUIRES: LIBRARY-CUTE
+# RUN: bash %s 2>/dev/null | FileCheck %s
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.."
+BUILD_BASE="${ROOT}/_cmake_test_builds"
+mkdir -p "${BUILD_BASE}"
+
+# ----------------------------------------------------------------------------------
+# Config: stable defaults for a fixed environment (override with CLI args if needed)
+# ----------------------------------------------------------------------------------
+# Set these to your real installs once and commit them, so CI/devs don't need flags.
+DEFAULT_CUDA_GOOD="${DEFAULT_CUDA_GOOD:-${CUDA_HOME}}"
+#DEFAULT_CUDA_GOOD="${DEFAULT_CUDA_GOOD:-${ROOT}/extern/portable_cuda}"          # e.g., /usr/local/cuda-12.4
+DEFAULT_CUTE_GOOD="${DEFAULT_CUTE_GOOD:-${ROOT}/external/cutlass}"  # e.g., /opt/cutlass or /opt/cute
+
+echo "default cute: ${DEFAULT_CUTE_GOOD}"
+# Hard impossible paths for "bad" cases (we never accept user-provided BAD paths).
+# These should not exist on any sane system.
+CUDA_BAD="/__definitely_does_not_exist__/cuda"
+CUTE_BAD="/__definitely_does_not_exist__/cute_or_cutlass"
+
+
+# -------------- CLI: only allow --cuda=<path> and --cute=<path> for "good" roots --------------
+CUDA_GOOD="${DEFAULT_CUDA_GOOD}"
+CUTE_GOOD="${DEFAULT_CUTE_GOOD}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cuda=*) CUDA_GOOD="${1#*=}"; shift ;;
+    --cute=*) CUTE_GOOD="${1#*=}"; shift ;;
+    -h|--help)
+      cat <<EOF
+Usage: $0 [--cuda=/path/to/valid/cuda] [--cute=/path/to/valid/cute_or_cutlass]
+
+Defaults (override via environment or flags):
+  DEFAULT_CUDA_GOOD=${DEFAULT_CUDA_GOOD}
+  DEFAULT_CUTE_GOOD=${DEFAULT_CUTE_GOOD}
+
+Invalid (bad) roots are simulated with hardcoded impossible paths:
+  CUDA_BAD=${CUDA_BAD}
+  CUTE_BAD=${CUTE_BAD}
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown arg: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+echo "Using CUDA_GOOD=${CUDA_GOOD}"
+echo "Using CUTE_GOOD=${CUTE_GOOD}"
+echo "CUDA_BAD is fixed to:  ${CUDA_BAD}"
+echo "CUTE_BAD is fixed to:  ${CUTE_BAD}"
+echo
+
+run_case() {
+  local name="$1"; shift
+  local expect="$1"; shift   # OK | ERROR
+  local build="${BUILD_BASE}/${name}"
+  rm -rf "${build}"
+  mkdir -p "${build}"
+
+  echo "=== CASE: ${name} (expect: ${expect}) ==="
+
+  # Reset env every run
+  unset CUDA_HOME CUTE_HOME || true
+
+  local defs=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      ENV:CUDA_HOME=*) export CUDA_HOME="${1#ENV:CUDA_HOME=}"; echo "  export CUDA_HOME=${CUDA_HOME}" ;;
+      ENV:CUTE_HOME=*) export CUTE_HOME="${1#ENV:CUTE_HOME=}"; echo "  export CUTE_HOME=${CUTE_HOME}" ;;
+      D:*)             defs+=("${1#D:}") ;;
+      *)               echo "  (ignored arg) $1" ;;
+    esac
+    shift
+  done
+
+  set +e
+  cmake -S "${ROOT}" -B "${build}" "${defs[@]}"
+  rc=$?
+  set -e
+
+  if [[ "${expect}" == "OK" && $rc -eq 0 ]]; then
+    echo "  -> PASS (OK as expected)"
+  elif [[ "${expect}" == "ERROR" && $rc -ne 0 ]]; then
+    echo "  -> PASS (Error as expected)"
+  else
+    echo "  -> FAIL (rc=${rc}, expected ${expect})"
+    echo "---- CMake output (last 100 lines) ----"
+    tail -n 100 "${build}/CMakeFiles/CMakeOutput.log" 2>/dev/null || true
+    echo "---------------------------------------"
+  fi
+  echo
+}
+
+# ---------------------------------- MATRIX ----------------------------------
+# CUDA: default is ENABLE_CUDA=ON, but auto-disables if unusable (no hard error)
+run_case "default_no_env"                  OK
+run_case "default_env_bad_cuda"            OK     ENV:CUDA_HOME="${CUDA_BAD}"
+run_case "default_env_good_cuda"           OK     ENV:CUDA_HOME="${CUDA_GOOD}"
+run_case "force_cuda_on_bad_home"          ERROR  D:-DENABLE_CUDA=ON D:-DCUDA_HOME="${CUDA_BAD}"
+run_case "force_cuda_on_good_home"         OK     D:-DENABLE_CUDA=ON D:-DCUDA_HOME="${CUDA_GOOD}"
+
+# CUTE/CUTLASS: independent root; ENABLE_CUTE defaults OFF; requires working CUDA
+run_case "cute_default_no_env"             OK
+run_case "cute_on_cuda_bad_cute"           ERROR  D:-DENABLE_CUTE=ON D:-DENABLE_CUDA=ON D:-DCUDA_HOME="${CUDA_GOOD}" D:-DCUTE_HOME="${CUTE_BAD}"
+run_case "cute_on_cuda_good_cute"          OK     D:-DENABLE_CUTE=ON D:-DENABLE_CUDA=ON D:-DCUDA_HOME="${CUDA_GOOD}" D:-DCUTE_HOME="${CUTE_GOOD}"
+
+# Env variants (still independent)
+run_case "env_cuda_good_env_cute_bad"      ERROR  ENV:CUDA_HOME="${CUDA_GOOD}" ENV:CUTE_HOME="${CUTE_BAD}" D:-DENABLE_CUTE=ON
+run_case "env_cuda_good_env_cute_good"     OK     ENV:CUDA_HOME="${CUDA_GOOD}" ENV:CUTE_HOME="${CUTE_GOOD}" D:-DENABLE_CUTE=ON
+
+echo "=== Done ==="
+
+# CHECK:   -> PASS (OK as expected)
+# CHECK:   -> PASS (OK as expected)
+# CHECK:   -> PASS (OK as expected)
+# CHECK:   -> PASS (Error as expected)
+# CHECK:   -> PASS (OK as expected)
+# CHECK:   -> PASS (OK as expected)
+# CHECK:   -> PASS (Error as expected)
+# CHECK:   -> PASS (OK as expected)
+# CHECK:   -> PASS (Error as expected)
+# CHECK:   -> PASS (OK as expected)

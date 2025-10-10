@@ -5,59 +5,59 @@
 # Add an element to the set (no duplicates)
 # Usage: set_add SET_NAME "element"
 set_add() {
-    local set_name="$1"
-    shift  # Remove the set name from arguments
+  local set_name="$1"
+  shift  # Remove the set name from arguments
 
-    # Handle case where no elements are provided
-    if [ $# -eq 0 ]; then
-        return 0
-    fi
+  # Handle case where no elements are provided
+  if [ $# -eq 0 ]; then
+    return 0
+  fi
 
-    local current_elements
-    eval "current_elements=(\"\${${set_name}[@]}\")"
+  local current_elements
+  eval "current_elements=(\"\${${set_name}[@]}\")"
 
-    # Process each new element
-    for new_element in "$@"; do
-        # Check if element already exists
-        local found=0
-        for existing_element in "${current_elements[@]}"; do
-            if [ "$existing_element" = "$new_element" ]; then
-                found=1
-                break
-            fi
-        done
-
-        # Add only if not found
-        if [ $found -eq 0 ]; then
-            current_elements+=("$new_element")
-        fi
+  # Process each new element
+  for new_element in "$@"; do
+    # Check if element already exists
+    local found=0
+    for existing_element in "${current_elements[@]}"; do
+      if [ "$existing_element" = "$new_element" ]; then
+        found=1
+        break
+      fi
     done
 
-    # Update the original array
-    eval "$set_name=(\"\${current_elements[@]}\")"
+    # Add only if not found
+    if [ $found -eq 0 ]; then
+      current_elements+=("$new_element")
+    fi
+  done
+
+  # Update the original array
+  eval "$set_name=(\"\${current_elements[@]}\")"
 }
 
 # Check if element exists in set
 # Usage: set_contains SET_NAME "element"
 # Returns 0 if found, 1 if not found
 set_contains() {
-    local set_name="$1"
-    local search_element="$2"
-    local current_elements
+  local set_name="$1"
+  local search_element="$2"
+  local current_elements
 
-    eval "current_elements=(\"\${${set_name}[@]}\")"
+  eval "current_elements=(\"\${${set_name}[@]}\")"
 
-    # Handle empty array case
-    if [ ${#current_elements[@]} -eq 0 ]; then
-        return 1
-    fi
-
-    for element in "${current_elements[@]}"; do
-        if [ "$element" = "$search_element" ]; then
-            return 0
-        fi
-    done
+  # Handle empty array case
+  if [ ${#current_elements[@]} -eq 0 ]; then
     return 1
+  fi
+
+  for element in "${current_elements[@]}"; do
+    if [ "$element" = "$search_element" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Check if set is empty
@@ -117,7 +117,61 @@ set_print() {
     printf '\n'
 }
 
-#================ a simple set implementation ====================
+#===================== utilities =========================
+
+get_terminal_width() {
+    local width
+
+    # Try COLUMNS environment variable first
+    if [ -n "$COLUMNS" ]; then
+        width=$COLUMNS
+    # Try stty size
+    elif width=$(stty size 2>/dev/null | cut -d' ' -f2) && [ -n "$width" ]; then
+        :
+    # Try stty -a (older systems)
+    elif width=$(stty -a 2>/dev/null | grep -o 'columns [0-9]*' | cut -d' ' -f2) && [ -n "$width" ]; then
+        :
+    # Final fallback
+    else
+        width=80
+    fi
+
+    echo "$width"
+}
+
+
+validate_cuda_home() {
+  # Check if CUDA_HOME is set
+  if [[ -z "${CUDA_HOME}" ]]; then
+#    echo "Error: CUDA_HOME environment variable is not set" >&2
+    return 1
+  fi
+
+  # Check if CUDA_HOME points to a directory
+  if [[ ! -d "${CUDA_HOME}" ]]; then
+    echo "Error: CUDA_HOME does not point to a valid directory: ${CUDA_HOME}" >&2
+    return 1
+  fi
+
+  # Check for essential CUDA files/directories
+  local required_paths=(
+    "bin/nvcc"
+    "lib64"
+    "include/cuda.h"
+  )
+
+  for path in "${required_paths[@]}"; do
+    if [[ ! -e "${CUDA_HOME}/${path}" ]]; then
+      echo "Error: Missing required CUDA component: ${CUDA_HOME}/${path}" >&2
+      return 1
+    fi
+  done
+
+#  echo "CUDA_HOME is valid: ${CUDA_HOME}"
+  return 0
+}
+
+#=========================================================
 
 # Get the directory where the script is located
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
@@ -170,6 +224,9 @@ expect_skip=
 
 max_jobs=1
 
+need_cute=0
+need_cuda=0
+
 if [ -f /.dockerenv ] || grep -qE "(docker|containerd)" /proc/1/cgroup; then
   is_in_docker=true
   is_in_shell=false
@@ -179,37 +236,103 @@ else
 fi
 
 # Function to fill the target-specific variables
-check_requirement() {
-  local file=$1
-  local requires=$(grep "^\/\/" $file | grep "REQUIRES:" | sed 's/.*REQUIRES://')
-  local tgts=$(echo $requires | grep "TARGET-.*\>" |sed 's/TARGET-//g')
-  local expect_gcu_sim=$(echo $requires | grep "GCUSIM")
+check_specific() {
+  local file="$1"
 
-  # reset target requirement
+  # Validate input
+  if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+    echo "Error: Invalid file specified" >&2
+    return 1
+  fi
+
+  local ext="${file##*.}"
+  local comment_pattern
+
+  # Set comment pattern based on file extension
+  if [[ "${ext}" == "co" ]]; then
+    comment_pattern="^//"
+  elif [[ "${ext}" == "cmt" ]]; then
+    comment_pattern="^#"
+  else
+    echo "Error: Invalid test file: $file" >&2
+    return 1
+  fi
+
+  # Reset target requirement
   requires_dynamic_shape=0
-  set_clear tst_targets
+  need_cute=0
+  need_cuda=0
   expect_fail=
   expect_skip=
 
+  set_clear tst_targets
+  set_add tst_targets "gcu210" "gcu300" "gcu400" "gpu"
+
+  # Extract expect_fail and expect_skip with proper comment pattern
+  if [[ -n "$comment_pattern" ]]; then
+    expect_fail=$(grep "$comment_pattern" "$file" | grep "XFAIL:" | sed 's/.*XFAIL:[[:blank:]]*//')
+    expect_skip=$(grep "$comment_pattern" "$file" | grep "SKIP:")
+  else
+    # Fallback: search entire file if no specific pattern
+    expect_fail=$(grep "XFAIL:" "$file" | sed 's/.*XFAIL:[[:blank:]]*//')
+    expect_skip=$(grep "SKIP:" "$file")
+  fi
+
+  # Extract REQUIRES line from file contents
+  local requires=$(grep "REQUIRES:" "$file")
+
+  # If no REQUIRES line found, return early
+  if [[ -z "$requires" ]]; then
+    return 0
+  fi
+
+  # Early returns for comment-style files that only contain comment markers
+  if [[ "${ext}" == "co" ]] && [[ "${requires}" != "//"* ]]; then
+    return
+  fi
+  if [[ "${ext}" == "cmt" ]] && [[ "${requires}" != "#"* ]]; then
+    return
+  fi
+
+  # Extract the actual requirements part
+  requires=$(echo "${requires}" | sed 's/.*REQUIRES://')
+
+  # Extract components
+  local tgts=$(grep -o "TARGET-[^[:space:]]*" <<< "$requires" | sed 's/TARGET-//')
+  local libs=$(grep -o "LIBRARY-[^[:space:]]*" <<< "$requires" | sed 's/LIBRARY-//')
+  local cmps=$(grep -o "COMPILER-[^[:space:]]*" <<< "$requires" | sed 's/COMPILER-//')
+  local expect_gcu_sim=$(grep -q "GCUSIM" <<< "$requires" && echo "found")
+
+  # has some targets specified, resolve it
+  [ ! -z ${tgts} ] && set_clear tst_targets
+
+  # Process targets
   if [ ! -z "${expect_gcu_sim}" ]; then set_add tst_targets "gcusim400"; fi
   if [[ "${tgts}" == *"GCU400"* ]]; then set_add tst_targets "gcu400"; fi
   if [[ "${tgts}" == *"GCU300"* ]]; then set_add tst_targets "gcu300"; fi
   if [[ "${tgts}" == *"GCU210"* ]]; then set_add tst_targets "gcu210"; fi
   if [[ "${tgts}" == *"GCUALL"* ]]; then
-    set_add tst_targets "gcu210" "gcu300" "gcu400"; fi
+    set_add tst_targets "gcu210" "gcu300" "gcu400"
+  fi
   if [[ "${tgts}" == *"GPU"* ]]; then set_add tst_targets "gpu"; fi
 
   if [ -z "${tgts}" ]; then
     set_add tst_targets "gcu210" "gcu300" "gcu400" "gpu"
   fi
 
-  if set_empty tst_targets; then echo "invalid target: ${tgts}"; fi
+  if set_empty tst_targets; then
+    echo "invalid target: ${tgts}" >&2
+  fi
 
-  local dynshape=$(echo $requires | grep "DYNAMIC-SHAPE\>")
-  [ ! -z "${dynshape}" ] && requires_dynamic_shape=1;
+  # has library requirement
+  if [[ "${libs}" == *"CUTE"* ]]; then
+    need_cute=1
+    need_cuda=1
+  fi
 
-  expect_fail=$(grep "^\/\/" $file |grep "XFAIL:" | sed 's/.*XFAIL:[[:blank:]]*//')
-  expect_skip=$(grep "^\/\/" $file |grep "SKIP:")
+  # requires dynamic-shape support (some target only)
+  local dynshape=$(grep -q "DYNAMIC-SHAPE" <<< "$requires" && echo "found")
+  [ ! -z "${dynshape}" ] && requires_dynamic_shape=1
 }
 
 # check the hardware device availability
@@ -322,6 +445,7 @@ execute_command() {
   local total=$4
   local env_set="$5"
   local env_unset="$6"
+  local run_env="$7"
 
   # Replace %s with the filename
   command=${command//%s/"$file"}
@@ -344,13 +468,15 @@ execute_command() {
   local start_time_ns=$(date +%s%N)
 
   # execute the command
-  command="${env_set} $command"
+  command="${env_set} ${run_env} $command"
   working_command="$command"
 
   eval "$command" 2>/dev/null
   local exit_code=$?
 
-  eval "$env_unset" 2>/dev/null
+  if [ ! -z "${env_unset}" ]; then
+    eval "$env_unset" 2>/dev/null
+  fi
   working_command=""
 
   # Calculate elapsed time in nanoseconds
@@ -367,13 +493,7 @@ execute_command() {
       elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") µs"
   fi
 
-  # Check if TERM is unset. It enables 'tput' in some docker environment.
-  if [ -z "$TERM" ]; then
-    export TERM=xterm
-  #  echo "TERM was unset, set to 'xterm'"
-  fi
-
-  local term_width=$(tput cols)
+  local term_width=$(get_terminal_width)
   local max_text_width=$((term_width - 25))
 
   if [[ $exit_code -eq 0 ]]; then
@@ -450,7 +570,7 @@ while [[ $# -gt 0 ]]; do
           exit 1
       fi
 
-      max_jobs="$num_jobs"
+      max_jobs=$num_jobs
       shift
       ;;
     -l)
@@ -465,8 +585,8 @@ while [[ $# -gt 0 ]]; do
     *)
       # Handle the first positional argument (file or directory)
       if [ -d "$1" ]; then
-          # If it's a directory, find all .co files
-          files_array=($(find "$1" -type f -name '*.co'))
+          # If it's a directory, find all .co, .cmt(cmake test) files
+          files_array=($(find "$1" -type f -name '*.co' -o -name '*.cmt'))
       elif [ -f "$1" ]; then
           # If it's a file, add it to the array
           files_array=("$1")
@@ -544,7 +664,7 @@ on_ctrl_c() {
 trap on_ctrl_c SIGINT
 
 toupper() {
-    echo "$1" | tr '[:lower:]' '[:upper:]'
+  echo "$1" | tr '[:lower:]' '[:upper:]'
 }
 
 retrieve_run_config() {
@@ -555,11 +675,11 @@ retrieve_run_config() {
   run_environ=
   run_target=
 
-  if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+  if [[ $line =~ [[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
     # Extract the command after "RUN:"
     run_command="${BASH_REMATCH[1]}"
     run_environ="shell"
-  elif [[ $line =~ ^//[[:blank:]]*RUN-([^-]+):[[:blank:]]*(.+) ]]; then
+  elif [[ $line =~ [[:blank:]]*RUN-([^-]+):[[:blank:]]*(.+) ]]; then
     run_target=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
     if [[ "${run_target}" == "$gcu_arch" ]]; then
       run_command="${BASH_REMATCH[2]}"
@@ -569,7 +689,7 @@ retrieve_run_config() {
       run_environ="docker"
       run_target=
     fi
-  elif [[ $line =~ ^//[[:blank:]]*RUN-([^-]+)-([^-]+):[[:blank:]]*(.+) ]]; then
+  elif [[ $line =~ [[:blank:]]*RUN-([^-]+)-([^-]+):[[:blank:]]*(.+) ]]; then
     run_target=$(echo "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')
     run_environ=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
     run_command="${BASH_REMATCH[3]}"
@@ -578,12 +698,26 @@ retrieve_run_config() {
 
 for file in "${files_array[@]}"; do
   # check requirement specified by the file
-  check_requirement $file
+  check_specific $file
 
   if [ ! -z "$expect_skip" ]; then
     echo "SKIP:  $file"
     num_skiped=$(($num_skiped + 1));
     continue;
+  fi
+
+  if [ ${need_cuda} -eq 1 ]; then
+    if ! validate_cuda_home; then
+      echo "SKIP(CUDA):  $file"
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    elif [ $is_gcu_available -eq 0 ]; then
+      echo "SKIP(GPU):  $file"
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    else
+      run_env="CUDA_HOME=${CUDA_HOME}"
+    fi
   fi
 
   if [ $is_gcu_available -eq 1 ]; then
@@ -606,13 +740,29 @@ for file in "${files_array[@]}"; do
   fi
 
   # If it is in the end2end folder, keep it blocking
-  sequential=false
-  [[ "$(dirname ${file})" == *"end2end"* ]] && sequential=true;
+  sequential=0
+  [[ "$(dirname ${file})" == *"end2end"* ]] && sequential=1;
 
+  ext="${file##*.}"
   # Read the file and search for lines starting with "// RUN:"
   run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
   run_count=0
   while IFS= read -r line; do
+    # check if it is valid line
+    if [[ ${ext} == "co" ]]; then
+      if [[ "${line}" =~ ^//[[:blank:]]*RUN(.+) ]]; then
+        line=${line#//}
+      else
+       continue;
+      fi
+    elif [[ ${ext} == "cmt" ]]; then
+      if [[ "${line}" =~ ^\#[[:blank:]]*RUN(.+) ]]; then
+        line=${line#\#}
+      else
+       continue;
+      fi
+    fi
+
     retrieve_run_config $line
 
     [[ -z "$run_command" ]] && continue;
@@ -653,12 +803,16 @@ for file in "${files_array[@]}"; do
         unset_env="export LD_LIBRARY_PATH=${old_path}; unset INTERNAL_GCU_SIM;"
         allows_run=1
       fi
+    else
+      allows_run=1
     fi
 
-    if set_contains tst_targets "$gcu_arch" && [[ $allows_run -eq 0 ]] ; then
+    if ! set_contains tst_targets "$gcu_arch" || [[ $allows_run -eq 0 ]] ; then
       # Not matched, skip
-      echo "SKIP(${gcu_arch}): ${file} ($run_count of $run_num)"
-      num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
+      for tgt in ${tst_targets[@]}; do
+        echo "SKIP($(toupper ${tgt})): ${file} ($run_count of $run_num)"
+        num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
+      done
       continue;
     fi
 
@@ -666,12 +820,12 @@ for file in "${files_array[@]}"; do
     # Run the command in the background
     if [[ $max_jobs -eq 1 ]] || [[ $sequential -eq 1 ]]; then
       # specialised serial test logic
-      execute_command "$file" "$run_command" "$run_count" "$run_num" "${exe_env}" "${unset_env}"
+      execute_command "$file" "$run_command" "$run_count" "$run_num" "${exe_env}" "${unset_env}" "${run_env}"
     else
       while [[ $(jobs | wc -l) -ge $max_jobs ]]; do
         wait -n
       done
-      execute_command "$file" "$run_command" "$run_count" "$run_num" "${exe_env}" "${unset_env}" &
+      execute_command "$file" "$run_command" "$run_count" "$run_num" "${exe_env}" "${unset_env}" "${run_env}" &
     fi
 
   done < "$file"
@@ -685,7 +839,7 @@ cleantmplocks
 # Check for required commands
 if [ -n "${save_log}" ] && command -v date >/dev/null 2>&1 && command -v tee >/dev/null 2>&1; then
   # Prepare output directory and file
-  LOG_DIR="/tmp/choreo_log/$(whoami)"
+  LOG_DIR="/tmp/choreo_log_$(whoami)"
   mkdir -p ${LOG_DIR}
 
   TIMESTAMP=$(date "+%Y%m%d_%H%M%S")

@@ -110,22 +110,22 @@ target_compile_definitions(codegen PRIVATE
 )
 
 if(ENABLE_CUDA)
-  target_include_directories(codegen PRIVATE ${CUDA_HOME}/include)
-  link_directories(${CUDA_HOME}/lib64 ${CUDA_HOME}/targets/x86_64-linux/lib)
+  target_include_directories(codegen PRIVATE ${_cuda_root}/include)
+  link_directories(${_cuda_root}/lib64 ${_cuda_root}/targets/x86_64-linux/lib)
 
   target_compile_definitions(codegen PRIVATE
-    __CHOREO_CUDA_DIR__=${CUDA_HOME}
+    __CHOREO_CUDA_DIR__=${_cuda_root}
   )
 endif()
 
 if(ENABLE_CUTE)
   target_include_directories(codegen PRIVATE
-    ${CUTLASS_DIR}/include
-    ${CUTLASS_DIR}/tools/util/include  # for lightweight helpers (optional)
+    ${_cute_root}/include
+    ${_cute_root}/tools/util/include  # for lightweight helpers (optional)
   )
 
   target_compile_definitions(codegen PRIVATE
-    __CHOREO_CUTE_DIR__=${CUTLASS_DIR}
+    __CHOREO_CUTE_DIR__=${_cute_root}
   )
 endif()
 
