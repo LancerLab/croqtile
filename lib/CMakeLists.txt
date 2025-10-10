@@ -139,6 +139,10 @@ target_compile_definitions(pp PRIVATE
   __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
 )
 
+target_compile_definitions(pp PRIVATE
+  __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
+)
+
 if(EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")
   target_compile_definitions(codegen PRIVATE
     __CHOREO_GCU_ACORE_DIR__="${TOOLCHAIN_DIR}"
