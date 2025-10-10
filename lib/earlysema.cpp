@@ -1921,7 +1921,6 @@ bool EarlySemantics::Visit(AST::Call& n) {
     std::vector<ptr<DeviceDataType>> real_param_types;
     ptr<DeviceDataType> real_ret_type = nullptr;
     std::string mismatch_msg;
-std::cout << "device_function count: " << device_functions.size() << "\n";
     for (auto& f : device_functions) {
       if (f->name != n.function->name) continue;
       candidate_function = f;
