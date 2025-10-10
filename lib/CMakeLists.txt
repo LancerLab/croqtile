@@ -90,11 +90,16 @@ set(CL_SOURCES
   command_line.cpp
 )
 
+set(PP_SOURCES
+  preprocess.cpp
+)
+
 # Add the libraries
 add_library(parse OBJECT ${PARSER_SOURCES})
 add_library(core OBJECT ${CORE_SOURCES})
 add_library(codegen OBJECT ${CODEGEN_SOURCES})
 add_library(support OBJECT ${CL_SOURCES})
+add_library(pp OBJECT ${PP_SOURCES})
 
 add_dependencies(parse parser_deps)
 add_dependencies(codegen codegen_deps)
@@ -103,6 +108,7 @@ target_include_directories(parse PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(core PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(codegen PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(support PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
+target_include_directories(pp PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 
 target_compile_definitions(codegen PRIVATE
   __CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}"
@@ -128,6 +134,10 @@ if(ENABLE_CUTE)
     __CHOREO_CUTE_DIR__=${_cute_root}
   )
 endif()
+
+target_compile_definitions(pp PRIVATE
+  __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
+)
 
 if(EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")
   target_compile_definitions(codegen PRIVATE
