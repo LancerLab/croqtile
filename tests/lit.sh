@@ -356,12 +356,9 @@ detect_device_features() {
       device_type="gpu"
       cuda_arch="sm_86" # To figure out more precisely
       mach=${cuda_arch}
+      return
     fi
-    if [ "${cuda_arch}" == "none" ]; then
-      echo "can not determine the gpu device type."
-      exit 1
-    fi
-    return
+    # or else does not find a valid gpu device
   fi
 
   local _gcu_dstr="$(lspci | grep -E '(Enflame|Tencent)' | head -1)"
@@ -386,6 +383,7 @@ detect_device_features() {
       ;;
   esac
   if [ "$gcu_arch" != "none"  ]; then
+    device_type="gcu"
     mach=${gcu_arch}
   elif [ -f "${script_dir}/../extern/lib/libgcusim.so" ]; then
     # the simulators exist
