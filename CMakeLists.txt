@@ -51,7 +51,8 @@ option(ENABLE_CUDA "Enable CUDA support" ON)
 option(ENABLE_CUTE "Enable CUTE/CUTLASS support (requires CUDA)" ON)
 
 # Allow users to provide preferred defaults (empty by default)
-set(DEFAULT_CUDA_HOME "${CMAKE_SOURCE_DIR}/extern/portable_cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
+set(DEFAULT_CUDA_HOME "/usr/local/cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
+#set(DEFAULT_CUDA_HOME "${CMAKE_SOURCE_DIR}/extern/portable_cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
 set(DEFAULT_CUTE_HOME "${CMAKE_SOURCE_DIR}/external/cutlass" CACHE PATH "Optional default CUTE/CUTLASS path (used if CLI and ENV are invalid)")
 
 set(CUDA_HOME "")
