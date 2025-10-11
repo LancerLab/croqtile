@@ -7,8 +7,17 @@ namespace Choreo {
 
 struct ASTVerify : public VisitorWithScope {
   ASTVerify() : VisitorWithScope("astverify") {}
+  std::set<AST::Node*> visited;
 
   bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::Program>(&n)) visited.clear();
+
+    // a node can not be shared
+    if (visited.count(&n))
+      Error1(n.LOC(), "Node has be visited before:\n" + STR(n) + "\n");
+    else
+      visited.insert(&n);
+
     if (n.IsBlock()) return true;
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Return>(&n) ||

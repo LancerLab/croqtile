@@ -14,6 +14,7 @@ gpu_test:
   script:
     - echo "Running tests with GPU..."
     - make setup-core
+    - make setup-cuda
     - make build
     - make ci-test
   artifacts:

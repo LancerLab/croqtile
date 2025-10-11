@@ -1259,7 +1259,7 @@ assignment
         if (!symtab.Exists(dname)) {
           Parser::error(@1, "The symbol '" + dname + "` has not been defined.");
         } else {
-          $$ = AST::Make<AST::Assignment>(@3, $1,
+          $$ = AST::Make<AST::Assignment>(@3, cast<AST::DataAccess>($1->Clone()),
                 AST::Make<AST::Expr>(@2, $2, AST::Make<AST::Expr>(@1, $1), $4));
         }
       }
