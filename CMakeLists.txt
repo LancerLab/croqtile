@@ -30,6 +30,177 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-fdiagnostics-color)
 endif()
 
+# ============================
+# Cascading selection + validation
+# ============================
+
+# Track if user explicitly set via -D before we create cache entries
+set(_enable_cuda_user_set FALSE)
+set(_enable_cute_user_set FALSE)
+foreach(var IN ITEMS ENABLE_CUDA ENABLE_CUTE)
+  foreach(arg IN LISTS CMAKE_CACHE_ARGS)
+    if("${arg}" MATCHES "^${var}=")
+      set(_${var_lower}_user_set TRUE)
+      break()
+    endif()
+  endforeach()
+endforeach()
+
+# Public cache options (defaults: CUDA ON, CUTE OFF)
+option(ENABLE_CUDA "Enable CUDA support" ON)
+option(ENABLE_CUTE "Enable CUTE/CUTLASS support (requires CUDA)" ON)
+
+# Allow users to provide preferred defaults (empty by default)
+set(DEFAULT_CUDA_HOME "/usr/local/cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
+#set(DEFAULT_CUDA_HOME "${CMAKE_SOURCE_DIR}/extern/portable_cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
+set(DEFAULT_CUTE_HOME "${CMAKE_SOURCE_DIR}/external/cutlass" CACHE PATH "Optional default CUTE/CUTLASS path (used if CLI and ENV are invalid)")
+
+set(CUDA_HOME "")
+set(CUTE_HOME "")
+
+# ----- helpers -----
+function(_looks_like_valid_cuda ROOT OUT_VALID)
+  set(ok FALSE)
+  if(ROOT AND EXISTS "${ROOT}")
+    if(EXISTS "${ROOT}/bin/nvcc" OR
+       EXISTS "${ROOT}/bin/nvcc.exe" OR
+       EXISTS "${ROOT}/include/cuda.h")
+      set(ok TRUE)
+    endif()
+  endif()
+  set(${OUT_VALID} ${ok} PARENT_SCOPE)
+endfunction()
+
+function(_looks_like_valid_cute ROOT OUT_VALID)
+  set(ok FALSE)
+  if(ROOT AND EXISTS "${ROOT}")
+    if(EXISTS "${ROOT}/include/cute/tensor.hpp" OR
+       EXISTS "${ROOT}/include/cute/cute.hpp"   OR
+       EXISTS "${ROOT}/include/cutlass/cutlass.h")
+      set(ok TRUE)
+    endif()
+  endif()
+  set(${OUT_VALID} ${ok} PARENT_SCOPE)
+endfunction()
+
+# ============================
+# CUDA: cascade & validate
+# ============================
+set(_cuda_candidates "")
+if(NOT "${CUDA_HOME}" STREQUAL "")
+  # 1) CLI cache variable
+  set(_cuda_candidates "${CUDA_HOME}")
+elseif(DEFINED ENV{CUDA_HOME} AND NOT "$ENV{CUDA_HOME}" STREQUAL "")
+  # 2) Environment variable
+  set(_cuda_candidates "$ENV{CUDA_HOME}")
+elseif(NOT "${DEFAULT_CUDA_HOME}" STREQUAL "")
+  # 3) Optional/default fallbacks (edit these as you like)
+  set(_cuda_candidates "${DEFAULT_CUDA_HOME}")
+endif()
+
+set(_cuda_root "")
+set(_cuda_root_valid FALSE)
+if(NOT "${_cuda_candidates}" STREQUAL "")
+  _looks_like_valid_cuda("${_cuda_candidates}" _ok)
+  if(_ok)
+    set(_cuda_root "${_cuda_candidates}")
+    set(_cuda_root_valid TRUE)
+  endif()
+endif()
+
+# Auto behaviour vs explicit enable
+if(NOT _cuda_root_valid)
+  if(_enable_cuda_user_set)
+    # User forced ON, but nothing valid
+    message(FATAL_ERROR
+      "ENABLE_CUDA=ON but no valid CUDA found.\n"
+      "Tried (in order):\n  -DCUDA_HOME='${CUDA_HOME}'\n  ENV{CUDA_HOME}='$ENV{CUDA_HOME}'\n"
+      "  DEFAULT_CUDA_HOME='${DEFAULT_CUDA_HOME}' and common defaults.\n"
+      "Please set -DCUDA_HOME to a valid CUDA install or -DENABLE_CUDA=OFF.")
+  else()
+    # Not explicitly set → force OFF
+    if(ENABLE_CUDA)
+      message(STATUS "No valid CUDA found. Auto-disabling ENABLE_CUDA.")
+      set(ENABLE_CUDA OFF CACHE BOOL "Enable CUDA support" FORCE)
+    endif()
+  endif()
+endif()
+
+message(STATUS "ENABLE_CUDA = ${ENABLE_CUDA}")
+if(ENABLE_CUDA)
+  message(STATUS "Using CUDA from: ${_cuda_root}")
+endif()
+
+# ============================
+# CUTE/CUTLASS: cascade & validate (requires CUDA)
+# ============================
+set(_cute_candidates "")
+if(NOT "${CUTE_HOME}" STREQUAL "")
+  # 1) CLI cache variable
+  set(_cute_candidates "${CUTE_HOME}")
+elseif(DEFINED ENV{CUTE_HOME} AND NOT "$ENV{CUTE_HOME}" STREQUAL "")
+  # 2) Environment variable
+  set(_cute_candidates "$ENV{CUTE_HOME}")
+elseif(NOT "${DEFAULT_CUTE_HOME}" STREQUAL "")
+  # 3) Optional/default
+  set(_cute_candidates "${DEFAULT_CUTE_HOME}")
+endif()
+
+set(_cute_root "")
+set(_cute_root_valid FALSE)
+if(NOT "${_cute_candidates}" STREQUAL "")
+  _looks_like_valid_cute("${_cute_candidates}" _ok)
+  if(_ok)
+    set(_cute_root "${_cute_candidates}")
+    set(_cute_root_valid TRUE)
+  endif()
+endif()
+
+# Enforce CUDA dependency + cascade outcome
+if(ENABLE_CUTE)
+  # If user wants CUTE, CUDA must be valid
+  if(NOT ENABLE_CUDA OR NOT _cuda_root_valid)
+    if(_enable_cute_user_set)
+      message(FATAL_ERROR
+        "ENABLE_CUTE=ON requires a working CUDA toolchain.\n"
+        "Fix CUDA first (set a valid -DCUDA_HOME or ENV{CUDA_HOME}).")
+    else()
+      message(STATUS "No valid CUDA found. Auto-disabling ENABLE_CUTE.")
+      set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE support" FORCE)
+    endif()
+  endif()
+endif()
+
+if(ENABLE_CUTE)
+  if(NOT _cute_root_valid)
+    if(_enable_cute_user_set)
+      message(FATAL_ERROR
+        "ENABLE_CUTE=ON but no valid CUTE/CUTLASS found.\n"
+        "Tried (in order):\n  -DCUTE_HOME='${CUTE_HOME}'\n  ENV{CUTE_HOME}='$ENV{CUTE_HOME}'\n"
+        "  DEFAULT_CUTE_HOME='${DEFAULT_CUTE_HOME}'.")
+    else()
+      # CUTE enabled but came from cache default? (rare)
+      # Be conservative and turn it OFF if nothing valid
+      message(STATUS "No valid CUTE/CUTLASS found. Auto-disabling ENABLE_CUTE.")
+      set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE/CUTLASS support (requires CUDA)" FORCE)
+    endif()
+  endif()
+else()
+  # If user provided an invalid CUTE_HOME but CUTE is OFF, you can optionally warn:
+  if(NOT _cute_root_valid AND (NOT "${CUTE_HOME}" STREQUAL "" OR DEFINED ENV{CUTE_HOME}))
+    message(STATUS "CUTE is OFF; ignoring invalid CUTE_HOME candidates.")
+  endif()
+endif()
+
+message(STATUS "ENABLE_CUTE = ${ENABLE_CUTE}")
+if(ENABLE_CUTE)
+  message(STATUS "Using CUTE/CUTLASS from: ${_cute_root}")
+endif()
+
+# Dummy target to make configuration succeed when appropriate
+add_library(dummy INTERFACE)
+
+
 # Specify the build directory (this is automatically handled by CMake)
 set(BUILD_DIR ${CMAKE_BINARY_DIR}/build)
 
@@ -43,7 +214,14 @@ set(FLEX_PATH "${TOOLCHAIN_DIR}/bin/flex")
 set(BISON_PATH "${TOOLCHAIN_DIR}/bin/bison")
 set(BISON_ENV "BISON_PKGDATADIR=${TOOLCHAIN_DIR}/shared/bison/")
 
-add_compile_options(-Wall -Wextra -g  -D__CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}" -D__CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}" -D__CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}")
+# CUDA_HOME as a cache variable with environment fallback
+if(DEFINED ENV{CUDA_HOME})
+  set(CUDA_HOME $ENV{CUDA_HOME} CACHE PATH "Path to CUDA installation")
+else()
+  set(CUDA_HOME "/usr/local/cuda" CACHE PATH "Path to CUDA installation")
+endif()
+
+add_compile_options(-Wall -Wextra -g)
 
 option(PUBLIC_PACKAGE "Build for Public Release Package")
 

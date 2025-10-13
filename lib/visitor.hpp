@@ -120,7 +120,7 @@ protected:
   bool abend_after = false;
   bool prt_visitor = false;
   bool prt_node_ty = false;
-  bool analyze_device_functions = false;
+  bool resolve_fns = false;
   bool disabled = false;
   size_t error_count = 0;
 
@@ -184,7 +184,7 @@ public:
     if (std::getenv("CHOREO_PRINT_NODETYPE")) prt_node_ty = true;
 
     if (std::getenv("CHOREO_ANALYZE_DEVICE_FUNCTIONS"))
-      analyze_device_functions = true;
+      resolve_fns = true;
   }
 
   virtual ~Visitor() {}

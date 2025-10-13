@@ -645,71 +645,75 @@ bool SemaChecker::VisitNode(AST::Call& n) {
     }
   }
 
-  if (!n.IsBIF() && analyze_device_functions && n.device_functions.size() > 0) {
-    bool function_found = false;
-    auto function_name = n.function->name;
-    ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
-    std::string mismatch_msg = "";
-    for (size_t i = 0; i < n.device_functions.size(); i++) {
-      auto device_function = n.device_functions[i];
-      bool arg_match = true;
-      for (size_t param_index = 0; param_index < n.arguments->Count();
-           param_index++) {
-        auto pnode = n.arguments->ValueAt(param_index);
-        auto arg_ty = NodeType(*pnode);
-        auto param_ty = device_function->param_types[param_index];
+  if (n.IsBIF()) return true;
 
-        std::string attr = param_ty->attr;
-        if (auto spanned_ty = dyn_cast<SpannedType>(arg_ty)) {
-          auto m_ty = spanned_ty->GetStorage();
-          if ((attr.find("__private__") != std::string::npos) ||
-              (attr.find("__attribute__((address_space(5)))") !=
-               std::string::npos)) {
-            if (m_ty != Storage::LOCAL)
-              arg_match = false;
-            else
-              pnode->AddNote("annotate_as"); // annotate the addrspace
-          } else if ((attr.find("__shared__") != std::string::npos) ||
-                     (attr.find("__attribute__((shared))") !=
-                      std::string::npos)) {
-            if (m_ty != Storage::SHARED)
-              arg_match = false;
-            else
-              pnode->AddNote("annotate_as");
-          }
+  // resolve device functions
+  if (!resolve_fns) return true;
+  if (n.device_functions.empty()) return true;
 
-          if (!arg_match) {
-            mismatch_msg = "the type of " + std::to_string(param_index + 1) +
-                           "th argument '" + PSTR(arg_ty) + "' is not " +
-                           STR(m_ty) + ".";
-            break;
-          }
+  bool function_found = false;
+  auto function_name = n.function->name;
+  ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
+  std::string mismatch_msg = "";
+  for (size_t i = 0; i < n.device_functions.size(); i++) {
+    auto device_function = n.device_functions[i];
+    bool arg_match = true;
+    for (size_t param_index = 0; param_index < n.arguments->Count();
+         param_index++) {
+      auto pnode = n.arguments->ValueAt(param_index);
+      auto arg_ty = NodeType(*pnode);
+      auto param_ty = device_function->param_types[param_index];
+
+      std::string attr = param_ty->attr;
+      if (auto spanned_ty = dyn_cast<SpannedType>(arg_ty)) {
+        auto m_ty = spanned_ty->GetStorage();
+        if ((attr.find("__private__") != std::string::npos) ||
+            (attr.find("__attribute__((address_space(5)))") !=
+             std::string::npos)) {
+          if (m_ty != Storage::LOCAL)
+            arg_match = false;
+          else
+            pnode->AddNote("annotate_as"); // annotate the addrspace
+        } else if ((attr.find("__shared__") != std::string::npos) ||
+                   (attr.find("__attribute__((shared))") !=
+                    std::string::npos)) {
+          if (m_ty != Storage::SHARED)
+            arg_match = false;
+          else
+            pnode->AddNote("annotate_as");
         }
 
-        if (arg_match) {
-          matched_function = device_function;
-          function_found = true;
+        if (!arg_match) {
+          mismatch_msg = "the type of " + std::to_string(param_index + 1) +
+                         "th argument '" + PSTR(arg_ty) + "' is not " +
+                         STR(m_ty) + ".";
+          break;
         }
-      } // end of analyze_device_functions
-    } // end of device function loop
-
-    if (!function_found) {
-      Warning(n.LOC(), "unable to find a device function '" + function_name +
-                           "', because " + mismatch_msg);
-    } else if (debug_visit) {
-      if (matched_function->IsTemplated())
-        dbgs() << "Find instantiated device function '";
-      else
-        dbgs() << "Find matched device function '";
-      dbgs() << matched_function->name << "' -> "
-             << PSTR(matched_function->ret_type) << " (";
-      for (size_t i = 0; i < matched_function->param_types.size(); ++i) {
-        auto& pt = matched_function->param_types[i];
-        if (i > 0) dbgs() << ", ";
-        dbgs() << PSTR(pt);
       }
-      dbgs() << ")\n";
+
+      if (arg_match) {
+        matched_function = device_function;
+        function_found = true;
+      }
     }
+  } // end of device function loop
+
+  if (!function_found) {
+    Warning(n.LOC(), "unable to find a device function '" + function_name +
+                         "', because " + mismatch_msg);
+  } else if (debug_visit) {
+    if (matched_function->IsTemplated())
+      dbgs() << "Find instantiated device function '";
+    else
+      dbgs() << "Find matched device function '";
+    dbgs() << matched_function->name << "' -> "
+           << PSTR(matched_function->ret_type) << " (";
+    for (size_t i = 0; i < matched_function->param_types.size(); ++i) {
+      auto& pt = matched_function->param_types[i];
+      if (i > 0) dbgs() << ", ";
+      dbgs() << PSTR(pt);
+    }
+    dbgs() << ")\n";
   }
 
   return true;

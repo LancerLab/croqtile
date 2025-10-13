@@ -211,18 +211,19 @@ package_test:
     - make package
     - echo "Checking for generated packages..."
     - echo $(pwd)
-    - ls package/*.deb
-    - ls package/*.zip
-    - ls package/*.tar.gz
+    - ls build-release/package/*.deb
+    - ls build-release/package/*.zip
+    - ls build-release/package/*.tar.gz
     - echo "Package check passed!"
     - echo "Installing .deb package..."
-    - sudo dpkg --force-depends -i package/_CPack_Packages/Linux/DEB/*.deb
+    - sudo dpkg --force-depends -i build-release/package/_CPack_Packages/Linux/DEB/*.deb
     - choreo tests/smoke_test.co -es && echo "Choreo Pkg-Run Test Passed" || (echo "Choreo Pkg-Run Test Failed" && exit 1)
     - echo "Verifying installation..."
     - if [ -f /usr/local/bin/choreo ]; then echo "choreo found in /usr/local/bin"; fi
     - if [ -f /usr/bin/choreo ]; then echo "choreo found in /usr/bin"; fi
     - echo "Testing dpkg removal..."
-    - sudo dpkg -r choreo
+    - sudo dpkg -r choreo-executables
+    - sudo dpkg -r choreo-rt_headers
     - echo "dpkg -r completed!"
   tags:
     - PKG

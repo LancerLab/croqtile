@@ -2,3 +2,7 @@
 	path = extern/gtest
 	url = git@git.enflame.cn:era-dev/googletest.git
 	ignore = dirty
+[submodule "external/cutlass"]
+	path = external/cutlass
+	url = git@git.enflame.cn:era-dev/cutlass.git
+  branch = v4.2.1

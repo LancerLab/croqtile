@@ -780,7 +780,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       assert(!isa<UnknownType>(ety) && "no type for an init expression.");
     else {
       force_mutable = true;
-      if (analyze_device_functions) {
+      if (resolve_fns) {
         ety = n.init_expr->GetType();
         if (isa<UnknownType>(ety)) {
           Warning(n.LOC(), "can not infer the type of `" + n.name_str +
@@ -1913,7 +1913,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
     return ec == error_count;
   }
 
-  if (analyze_device_functions && !n.IsBIF()) {
+  if (resolve_fns && !n.IsBIF()) {
     auto function_name = n.function->name;
 
     ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
@@ -2068,7 +2068,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
         SetNodeType(n, call_ty);
       }
     }
-  } // end of analyze_device_functions
+  } // end of resolve_fns
 
   size_t count = 0;
   for (auto& v : n.arguments->AllValues()) {
@@ -2458,7 +2458,7 @@ bool EarlySemantics::ParseTemplateParams(
 
 bool EarlySemantics::Visit(AST::DeviceFunctionDecl& n) {
   TraceEachVisit(n);
-  if (analyze_device_functions) {
+  if (resolve_fns) {
     bool initized = false;
     bool change_type = false;
     for (size_t param_idx = 0; param_idx < n.param_types.size(); param_idx++) {

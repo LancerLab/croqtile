@@ -185,6 +185,32 @@ setup-acore: check-acore
 	    $(MAKE) install-acore; \
 	fi
 
+#-----------------------------------------------------------#
+CUDA_NAME=cuda_11.3.r11.3.tgz
+CUDA_URL=ftp://172.16.11.18/\%2fdev/choreo-toolchain/
+CUDA_PKG=$(TOOLCHAIN_DIR)/$(CUDA_NAME)
+CUDA_PKG_MD5=c623a27f7aef41ec3aa134e1e61b9fa7
+CUR_CUDA_PKG_MD5:=$(shell md5sum $(CUDA_PKG) 2>/dev/null| cut -d ' ' -f 1)
+
+check-cuda:
+	@if [ "$(CUDA_PKG_MD5)" != "$(CUR_CUDA_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the cuda package..."; \
+		$(MAKE) download-cuda; \
+	else \
+		echo "$(CUDA_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-cuda:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(CUDA_NAME) -o $(CUDA_NAME);\
+
+install-cuda:
+	tar -zvxf $(TOOLCHAIN_DIR)/$(CUDA_NAME) -C $(TOOLCHAIN_DIR)/
+
+setup-cuda: check-cuda
+	@if [ "$(CUR_CUDA_PKG_MD5)" != "$(CUDA_PKG_MD5)"  ]; then \
+	    $(MAKE) install-cuda; \
+	fi
+
 
 gcu2-kmd: check-gcu-platform-kit
 	sudo $(GCU_PLATFORM_PKG) -y -C enflame

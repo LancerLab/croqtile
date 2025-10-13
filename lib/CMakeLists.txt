@@ -78,11 +78,12 @@ set(CORE_SOURCES
 # Define the source files for your codegen library
 set(CODEGEN_SOURCES
   codegen.cpp
-  codegen_cuda.cpp
-  codegen_cuda_types.cpp
   codegen_factor.cpp
   codegen_factor_types.cpp
   codegen_topscc.cpp
+  codegen_cuda.cpp
+  codegen_cuda_types.cpp
+  codegen_cute.cpp
 )
 
 set(CL_SOURCES
@@ -111,7 +112,30 @@ target_include_directories(pp PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 
 target_compile_definitions(codegen PRIVATE
   __CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}"
-  __CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}"
+  __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
+)
+
+if(ENABLE_CUDA)
+  target_include_directories(codegen PRIVATE ${_cuda_root}/include)
+  link_directories(${_cuda_root}/lib64 ${_cuda_root}/targets/x86_64-linux/lib)
+
+  target_compile_definitions(codegen PRIVATE
+    __CHOREO_CUDA_DIR__=${_cuda_root}
+  )
+endif()
+
+if(ENABLE_CUTE)
+  target_include_directories(codegen PRIVATE
+    ${_cute_root}/include
+    ${_cute_root}/tools/util/include  # for lightweight helpers (optional)
+  )
+
+  target_compile_definitions(codegen PRIVATE
+    __CHOREO_CUTE_DIR__=${_cute_root}
+  )
+endif()
+
+target_compile_definitions(pp PRIVATE
   __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
 )
 

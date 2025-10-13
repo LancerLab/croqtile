@@ -1,0 +1,34 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ s32 [128, 256] matmul(s32 [128, 256] lhs, s32 [256, 256] rhs) {
+  s32[lhs.span(0), rhs.span(1)] output;
+
+  parallel p by 16, q by 64 {
+    foreach index = {m, n, k} in [128 / #p , 256 / #q, 256]
+      output.at(m#p, n#q) += lhs.at(m#p, k) * rhs.at(k, n#q);
+  }
+  return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::s32>(128, 256);
+  auto rhs = choreo::make_spandata<choreo::s32>(256, 256);
+  lhs.fill_random(-10, 10);
+  rhs.fill_random(-10, 10);
+
+  auto res = matmul(lhs.view(), rhs.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+      for (size_t k = 0; k < lhs.shape()[1]; ++k)
+        ref += lhs[i][k] * rhs[k][j];
+      choreo::choreo_assert(ref == res[i][j], "values are not equal.");
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

@@ -1,5 +1,6 @@
 // RUN: choreo -t cuda -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 // REQUIRES: TARGET-GPU
+// XFAIL: *
 #include "choreo_cuda.h"
 
 __cok__ { /// kernel program

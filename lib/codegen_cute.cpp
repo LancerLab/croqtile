@@ -1,4 +1,4 @@
-#include "codegen_topscc.hpp"
+#include "codegen_cute.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -12,41 +12,33 @@
 #include "operator_info.hpp"
 #include "types.hpp"
 
-#ifndef __CHOREO_TOPSCC_DIR__
-#error "missing macro definition of __CHOREO_TOPSCC_DIR__"
-#endif
+#ifndef __CHOREO_CUDA_DIR__
+#warning "missing macro definition of __CHOREO_CUDA_DIR__"
+#endif // __CHOREO_CUDA_DIR__
+
+#ifndef __CHOREO_CUTE_DIR__
+#warning "missing macro definition of __CHOREO_CUTE_DIR__"
+#endif // __CHOREO_CUTE_DIR__
 
 // #define USING_OP_INFO
 
 using namespace Choreo;
-using namespace Choreo::Topscc;
+using namespace Choreo::Cute;
 
 extern Option<bool> native_f16;
 extern Option<bool> native_bf16;
 extern Option<bool> verbose;
 extern Option<std::string> output;
 extern Option<bool> use_hetero_tileflow;
-extern Option<bool> use_system_toolchain;
 extern Option<bool> use_pic;
 extern Option<std::string> arch;
 extern Option<std::string> target_options;
 
-Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
-                         "Emit fatbin file.");
-Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
-                               "-ndecay-spv", false,
-                               " decay spanview to be pointers.");
-Option<bool>
-    dma_verbose(OptionKind::Hidden, "--dma-verbose", "", false,
-                " print DMA related informtion at runtime (debug only).");
-Option<bool> dma_opt(OptionKind::Hidden, "-fopt-dma", "", true,
-                     "optimize dma to linear copy.");
-Option<bool> split_8byte_dma_transfer(
-    OptionKind::Hidden, "-fsplit-8b-dma", "", true,
-    "8-byte DMA transfers will be split into 1-byte chunks when platforms that "
-    "do not support native 8-byte DMA.");
+extern Option<bool> no_decay_spanview;
+extern Option<bool> dma_verbose;
+extern Option<bool> dma_opt;
 
-namespace {
+namespace cute {
 
 inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
                        const std::string& from, const std::string& to,
@@ -82,7 +74,6 @@ const char* SingleInstancePredicate(bool shared_in_block) {
 inline const char* SyncByLevel(Storage s) {
   switch (s) {
   case Storage::SHARED: return "__syncthreads()";
-  case Storage::LOCAL: return "__syncsubthreads()";
   default:
     choreo_unreachable("unsupported storage location for the synchronization.");
   }
@@ -94,7 +85,6 @@ inline const char* TopsMdsStorage(Storage st) {
   case Storage::DEFAULT:
   case Storage::GLOBAL: return "tops::Global";
   case Storage::SHARED: return "tops::Shared";
-  case Storage::LOCAL: return "tops::Private";
   default: choreo_unreachable("storage type is not supported.");
   }
   return "";
@@ -103,7 +93,6 @@ inline const char* TopsMdsStorage(Storage st) {
 inline const char* TopsDeviceMemory(Storage st) {
   switch (st) {
   case Storage::SHARED: return "__shared__";
-  case Storage::LOCAL: return "__local__";
   default: choreo_unreachable("device storage type is not supported.");
   }
   return "";
@@ -112,7 +101,6 @@ inline const char* TopsDeviceMemory(Storage st) {
 inline std::string TopsParamStorage(Storage st) {
   switch (st) {
   case Storage::SHARED: return "__shared__";
-  case Storage::LOCAL: return "__private__";
   default: return "";
   }
   return "";
@@ -155,9 +143,11 @@ void GenerateSubscriptions(std::ostream& os, const std::string prefix,
   PrintSubscriptions(os, prefix, suffix, dims, indices);
 }
 
-} // namespace
+} // namespace cute
 
-bool TopsccCodeGen::RequiresImplPred(Storage cur) const {
+using namespace cute;
+
+bool CuteCodeGen::RequiresImplPred(Storage cur) const {
   // ignore any host code
   if (IsHost()) return false;
   // ignore any expression without storage
@@ -184,7 +174,7 @@ bool TopsccCodeGen::RequiresImplPred(Storage cur) const {
   return false;
 }
 
-const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
+const std::string CuteCodeGen::ShapeSTR(const Shape& s,
                                           const std::string& delimiter,
                                           BaseType cast_to) const {
   auto& vl = s.Value();
@@ -202,7 +192,7 @@ const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
   return oss.str();
 }
 
-bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
+bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
   if (isa<AST::Program>(&n)) {
@@ -257,7 +247,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   return true;
 }
 
-bool TopsccCodeGen::InMidVisitImpl(AST::Node& n) {
+bool CuteCodeGen::InMidVisitImpl(AST::Node& n) {
   if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
     if (!ie->HasElse()) return true;
     DecrIndent();
@@ -267,20 +257,11 @@ bool TopsccCodeGen::InMidVisitImpl(AST::Node& n) {
   return true;
 }
 
-bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
+bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "After visiting " << n.TypeNameString() << "\n";
 
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
-
-    // internal functionality: fatbin generation
-    if (emit_fatbin) {
-      if (!CompileWithScript("--gen-fatbin")) {
-        error_count++;
-        return false;
-      } else
-        return true;
-    }
 
     switch (CCtx().GetOutputKind()) {
     case OutputKind::TargetSourceCode: EmitSource(); break;
@@ -373,7 +354,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
 
 // tops::mdspan style offset
 std::pair<std::string, size_t>
-TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
+CuteCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
                             ptr<DMAConfig> config) const {
   auto& sops = ca->AllOperations();
   assert(!sops.empty());
@@ -458,11 +439,6 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
     offset << offsets[i].str();
   }
 
-  if (split_8byte_dma_transfer) {
-    auto sty = GetSpannedType(GetSymbolType(ca->data->name));
-    if (SizeOf(sty->ElementType()) == 8) offset << ", 0";
-  }
-
   VST_DEBUG(dbgs() << "Offset for chunkat (" << PSTR(ca)
                    << "): " << offset.str() << "\n");
 
@@ -479,7 +455,7 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
 //    tbo = p * 2 * (9 * 8)
 //
 const std::string
-TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
+CuteCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
   auto lidx = ca->IndexOfLastSpanAs();
   if (!lidx.has_value()) choreo_unreachable("unexpect");
   return GenOffset(ca, lidx.value());
@@ -489,7 +465,7 @@ TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
 // original span. It is VALID if and only if the final span is
 // address-contiguous within the original span.
 // end_idx: the offset is computed by sop in range [0, end_idx).
-const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
+const std::string CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
                                            size_t end_idx) const {
   if (ca->NoOperation()) return "";
 
@@ -540,7 +516,7 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   return ValueSTR(offset);
 }
 
-void TopsccCodeGen::EmitFixedHostHead() {
+void CuteCodeGen::EmitFixedHostHead() {
   std::ostringstream oss;
   oss <<
       R"(
@@ -549,16 +525,8 @@ void TopsccCodeGen::EmitFixedHostHead() {
 #include <iterator>
 #include <string>
 #include <vector>
-
-// dependant on the topsruntime
-#include "tops/tops_ext.h"
-#include "tops/tops_runtime.h"
-
-#if __GCU_ARCH__ >= 300
-#include "tcle.h"
-#endif // __GCU_ARCH__ >= 300
+#include "cutlass/cutlass.h"
 )";
-
 
   oss << "// include the choreo header;\n";
   if (native_f16)
@@ -572,9 +540,9 @@ using namespace choreo;
   code_segments.push_back(oss.str()); // reset the host code
 }
 
-void TopsccCodeGen::EmitFixedDeviceHead() {}
+void CuteCodeGen::EmitFixedDeviceHead() {}
 
-bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
+bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
 
   assert(n.name == fname && "inconsistent in function names.");
@@ -661,11 +629,11 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         std::string bts = NameBaseType(sty->ElementType(), false);
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
            << UnScopedSizeExpr(*sty) << "));\n";
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
            << ssm.HostName(item.name) << ", " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyHostToDevice));\n";
+           << ", cudaMemcpyHostToDevice));\n";
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
         global_buffers.insert(buf_sym);
       }
@@ -675,7 +643,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
+bool CuteCodeGen::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
 
   // If there is no AST::Return
@@ -687,7 +655,7 @@ bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
+bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
 
   auto nty = NodeType(n);
@@ -760,12 +728,12 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
              << ");\n";
         }
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
            << UnScopedSizeExpr(*sty) << "));\n";
         if (n.init_value) {
-          hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+          hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
              << sym_data << ", " << UnScopedSizeExpr(*sty)
-             << ", topsMemcpyHostToDevice));\n";
+             << ", cudaMemcpyHostToDevice));\n";
         }
         global_buffers.insert(buf_sym);
         return;
@@ -780,7 +748,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
                          << STR(FBInfo()) << "\n");
       } else {
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
            << UnScopedSizeExpr(*sty) << "));\n";
 
         if (!n.init_value) return;
@@ -804,7 +772,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         hs << h_indent << init_val_type << "* " << sym_init_vptr
            << " = reinterpret_cast<" << init_val_type << "*>(&" << sym_init_val
            << ");\n";
-        hs << h_indent << "choreo::abend_true(topsMemsetD" << data_len << "("
+        hs << h_indent << "choreo::abend_true(cudaMemsetD" << data_len << "("
            << buf_sym << ", *" << sym_init_vptr << ", "
            << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
       }
@@ -924,9 +892,9 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       auto sym = InScopeName(n.name_str);
       auto buf_sym = n.name_str + "__device";
       hs << h_indent << "bool * " << buf_sym << " = nullptr; // global event\n";
-      hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+      hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
          << ety->ElemCount() << "));\n";
-      hs << h_indent << "choreo::abend_true(topsMemset(&" << buf_sym << ", 0, "
+      hs << h_indent << "choreo::abend_true(cudaMemset(&" << buf_sym << ", 0, "
          << ety->ElemCount() << "));\n";
       ssm.MapHostSymbol(sym, buf_sym);
       ssm.MapDeviceSymbol(sym, n.name_str);
@@ -959,9 +927,9 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       auto sym = InScopeName(n.name_str);
       auto buf_sym = n.name_str + "__device";
       hs << h_indent << "bool * " << buf_sym << " = nullptr; // global event\n";
-      hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym
+      hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym
          << ", 1));\n";
-      hs << h_indent << "choreo::abend_true(topsMemset(&" << buf_sym
+      hs << h_indent << "choreo::abend_true(cudaMemset(&" << buf_sym
          << ", 0, 1));\n";
       ssm.MapHostSymbol(sym, buf_sym);
       ssm.MapDeviceSymbol(sym, n.name_str);
@@ -989,7 +957,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Assignment& n) {
+bool CuteCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
   if (!n.AssignToDataElement()) {
@@ -1084,7 +1052,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   return false;
 }
 
-bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
+bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
   // add the device name map
@@ -1093,23 +1061,16 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   case Storage::SHARED:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
-                          "__tops_bid_" + dname[i] + "()");
+                          "blockIdx." + dname[i]);
     if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_bid_x()");
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "blockIdx.x");
     break;
   case Storage::LOCAL:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
-                          "__tops_tid_" + dname[i] + "()");
+                          "threadIdx." + dname[i]);
     if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_tid_x()");
-    break;
-  case Storage::SUB:
-    for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
-                          "__tops_stid_" + dname[i] + "()");
-    if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_stid_x()");
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.x");
     break;
   default:
     choreo_unreachable("unsupported parallel-by level: " + STR(n.GetLevel()) +
@@ -1161,23 +1122,23 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   hs << ");\n";
 
   if (!n.IsAsync())
-    hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
+    hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
 
   // copy the span passed by ref back to host
   for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
     if (isa<SpannedType>(item.type)) {
       auto oname = UnScopedName(item.name);
       if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
            << ".data(), " << oname + "__device" << ", "
-           << UnScopedSizeExpr(*item.type) << ", topsMemcpyDeviceToHost));\n";
+           << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
     }
   }
 
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::DMA& n) {
+bool CuteCodeGen::Visit(AST::DMA& n) {
   TraceEachVisit(n);
 
   // Currently, DMA in host-side:
@@ -1316,7 +1277,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     std::string buf_sym_from;
     std::string buf_sym;
-    std::string tops_dma_kind = "topsMemcpy";
+    std::string tops_dma_kind = "cudaMemcpy";
     if (global_buffers.count(f_sym + "__device")) {
       buf_sym_from = f_sym + "__device";
       tops_dma_kind.append("Device");
@@ -1342,7 +1303,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (n.operation == ".copy") {
       if (SymbolToSymbol()) {
         // direct copy
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
            << buf_sym_from << ", " << UnScopedSizeExpr(*f_sty) << ", "
            << tops_dma_kind << "));\n";
       } else
@@ -1421,7 +1382,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
                     RemoveSuffix(buf_name, ".data()");
     auto bt = sty->ElementType();
     bool split_to_char = false;
-    if (split_8byte_dma_transfer && SizeOf(bt) == 8) split_to_char = true;
     std::string bts{split_to_char ? "char" : NameBaseType(bt)};
 
     std::ostringstream mds_decl;
@@ -1430,8 +1390,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
              << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)"
              << buf_expr;
     if (offset == "")
-      mds_decl << ", "
-               << ShapeSTR(new_shape.IsValid() ? new_shape : sty->GetShape());
+      mds_decl << ", " << ShapeSTR(sty->GetShape());
     else {
       mds_decl << " + ";
       if (split_to_char)
@@ -1568,14 +1527,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     const auto& f_buf_expr = f_buf.second;
     const auto& t_buf_name = t_buf.first;
     const auto& t_buf_expr = t_buf.second;
-    if (auto idx = f_ca->IndexOfLastSpanAs()) {
-      f_mds_offset = TileBaseOffset(f_ca);
-      f_shape = f_ca->OpAt(*idx)->GetBlockShape();
-    }
-    if (auto idx = t_ca->IndexOfLastSpanAs()) {
-      t_mds_offset = TileBaseOffset(t_ca);
-      t_shape = t_ca->OpAt(*idx)->GetBlockShape();
-    }
     if (!no_linear_opt && opt_to_linear_copy != DMA_OP::none) {
       if (TileToSymbol()) {
         assert(opt_to_linear_copy == DMA_OP::src);
@@ -1595,6 +1546,15 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           t_shape = t_ca->GetBlockShape();
         }
       }
+    } else {
+      if (auto idx = f_ca->IndexOfLastSpanAs()) {
+        f_mds_offset = TileBaseOffset(f_ca);
+        f_shape = f_ca->OpAt(*idx)->GetBlockShape();
+      }
+      if (auto idx = t_ca->IndexOfLastSpanAs()) {
+        t_mds_offset = TileBaseOffset(t_ca);
+        t_shape = t_ca->OpAt(*idx)->GetBlockShape();
+      }
     }
     const auto f_mds =
         GenMDSDecl(f_buf_name, f_buf_expr, f_sty, f_mds_offset, f_shape);
@@ -1611,19 +1571,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
     // handles dma related to shared memory, where only single thread can
     // operate
-    bool local_in_warp = false, shared_in_block = false;
-    if (!n.future.empty()) {
+    bool shared_in_block = false;
+    if (!n.future.empty())
       shared_in_block = IsDMABlockShared(n);
-      local_in_warp = IsDMAWarpLocal(n);
-    }
 
-    assert(!(shared_in_block && local_in_warp) &&
+    assert(!shared_in_block &&
            "local and shared memory should not be used at the same time");
-    if (local_in_warp)
-      assert(CCtx().GetArch() == TargetArch::GCU4 &&
-             "only gcu400 need handle local synchronization");
 
-    if (shared_in_block || local_in_warp) {
+    if (shared_in_block) {
       ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
          << ") {\n";
       IncrDeviceIndent();
@@ -1735,8 +1690,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         choreo_unreachable("unexpected situation.");
       }
     } else if (n.operation == ".pad") {
-      static int p_cnt = 0;
-      p_cnt++;
       auto pcmvSTR = [&](ptr<AST::MultiValues> mv) -> std::string {
         std::string res;
         for (const auto& v : mv->AllValues()) {
@@ -1746,15 +1699,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         return res;
       };
       auto pad_config = cast<PadConfig>(n.GetConfig());
-      auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
-      std::string pad_low = "__pad_low_" + f_buf_name + std::to_string(p_cnt);
-      std::string pad_high = "__pad_high_" + f_buf_name + std::to_string(p_cnt);
-      std::string pad_mid = "__pad_mid_" + f_buf_name + std::to_string(p_cnt);
-      ds << d_indent << "unsigned int " << pad_low << "[] = {"
+      ds << d_indent << "unsigned int __pad_low_" << f_buf_name << "[] = {"
          << pcmvSTR(pad_config->pad_low) << "};\n";
-      ds << d_indent << "unsigned int " << pad_high << "[] = {"
+      ds << d_indent << "unsigned int __pad_high_" << f_buf_name << "[] = {"
          << pcmvSTR(pad_config->pad_high) << "};\n";
-      ds << d_indent << "unsigned int " << pad_mid << "[] = {"
+      ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
          << pcmvSTR(pad_config->pad_mid) << "};\n";
 
       auto Pad = [&]() -> void {
@@ -1762,7 +1711,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
         ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
            << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << pad_low << ", " << pad_high << ", " << pad_mid << ", "
+           << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
+           << ", __pad_mid_" << f_buf_name << ", "
            << ExprSTR(pad_config->value, IsHost()) << ");\n";
         // set the device future
         if (!event_name.empty())
@@ -1786,9 +1736,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
         ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
            << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ", " << slice_shape_name << ", " << pad_low
-           << ", " << pad_high << ", " << pad_mid << ", "
-           << ExprSTR(pad_config->value, IsHost()) << ");\n";
+           << ", " << off_name << ", " << slice_shape_name << ", __pad_low_"
+           << f_buf_name << ", __pad_high_" << f_buf_name << ", __pad_mid_"
+           << f_buf_name << ", " << ExprSTR(pad_config->value, IsHost())
+           << ");\n";
         // set the device future
         if (!event_name.empty())
           ds << d_indent << future_name << ".set_event(" << event_name
@@ -1874,14 +1825,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       }
     }
 
-    if (local_in_warp || shared_in_block) {
+    if (shared_in_block) {
       DecrDeviceIndent();
       ds << d_indent << "} // single instance\n";
       if (!fty->IsAsync()) {
         // not async, must syncthreads immediately
         // else, defer the sync till the wait time
         if (shared_in_block) ds << d_indent << "__syncthreads();\n";
-        if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
       }
     }
   };
@@ -1911,7 +1861,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Rotate& n) {
+bool CuteCodeGen::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
 
   if (IsHost())
@@ -1931,12 +1881,12 @@ bool TopsccCodeGen::Visit(AST::Rotate& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Synchronize& n) {
+bool CuteCodeGen::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
 
   switch (n.scope->Get()) {
   case Storage::GLOBAL:
-    hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
+    hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
     break;
   case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
   case Storage::LOCAL: ds << d_indent << "__syncsubthreads();\n"; break;
@@ -1948,7 +1898,7 @@ bool TopsccCodeGen::Visit(AST::Synchronize& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Wait& n) {
+bool CuteCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
   bool local_in_warp = false, shared_in_block = false;
@@ -2051,19 +2001,19 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Break& n) {
+bool CuteCodeGen::Visit(AST::Break& n) {
   TraceEachVisit(n);
   IndStream() << "break;\n";
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Continue& n) {
+bool CuteCodeGen::Visit(AST::Continue& n) {
   TraceEachVisit(n);
   IndStream() << "continue;\n";
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Trigger& n) {
+bool CuteCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 
   for (auto& f : n.GetEvents()) {
@@ -2075,7 +2025,7 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         // TODO: make & into OpExprSTR?
-        hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
+        hs << h_indent << "choreo::abend_true(cudaMemset(&" << ExprSTR(f, true)
            << ", 1, " << ety->ElemCount() << ")); // trigger event\n";
         // TODO: support array reference
       } else {
@@ -2104,7 +2054,7 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
     } else if (auto ety = dyn_cast<EventType>(NodeType(*f))) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
-        hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
+        hs << h_indent << "choreo::abend_true(cudaMemset(&" << ExprSTR(f, true)
            << ", 1, 1)); // trigger event\n";
         // TODO: support array reference
       } else {
@@ -2136,7 +2086,7 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Call& n) {
+bool CuteCodeGen::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
   if (!emit_call) return true;
@@ -2266,7 +2216,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::ParamList& n) {
+bool CuteCodeGen::Visit(AST::ParamList& n) {
   int index = 0;
   for (auto param : n.values)
     updating_cgi->AddSymbolDetail(fname, {InScopeName(param->sym->name),
@@ -2275,7 +2225,7 @@ bool TopsccCodeGen::Visit(AST::ParamList& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::WithIn& n) {
+bool CuteCodeGen::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
 
   if (n.with)
@@ -2307,7 +2257,7 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::WhereBind& n) {
+bool CuteCodeGen::Visit(AST::WhereBind& n) {
   TraceEachVisit(n);
 
   // TODO
@@ -2316,13 +2266,13 @@ bool TopsccCodeGen::Visit(AST::WhereBind& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::WithBlock& n) {
+bool CuteCodeGen::Visit(AST::WithBlock& n) {
   TraceEachVisit(n);
   // anything required?
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
+bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
   for (auto& rn : n.GetRanges()) {
@@ -2347,7 +2297,7 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
+bool CuteCodeGen::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
   assert(!IsHost());
   ds << d_indent << "// inthreads: " << n.LOC() << "\n";
@@ -2357,7 +2307,7 @@ bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
+bool CuteCodeGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
 
   IndStream() << "// if-else: " << n.LOC() << "\n";
@@ -2370,7 +2320,7 @@ bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::WhileBlock& n) {
+bool CuteCodeGen::Visit(AST::WhileBlock& n) {
   TraceEachVisit(n);
 
   IndStream() << "// while: " << n.LOC() << "\n";
@@ -2380,7 +2330,7 @@ bool TopsccCodeGen::Visit(AST::WhileBlock& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Return& n) {
+bool CuteCodeGen::Visit(AST::Return& n) {
   TraceEachVisit(n);
 
   return_stream.str("");
@@ -2394,16 +2344,16 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
       auto sym = id->name;
       if (IsChoreoInput(InScopeName(sym))) {
         // return the global storage, must map back
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << sym << ".data(), "
            << sym << "__device, " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyDeviceToHost));\n";
+           << ", cudaMemcpyDeviceToHost));\n";
         return_stream << "return choreo::copy_as_spanned(" << sym << ".data(), "
                       << sym << ".shape());\n";
       } else if (IsChoreoOutput(InScopeName(sym))) {
         // return the global storage, must map back
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << sym << ".data(), "
            << sym << "__device, " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyDeviceToHost));\n";
+           << ", cudaMemcpyDeviceToHost));\n";
         return_stream << "return " << sym << ";\n";
       } else {
         choreo_unreachable("unexpected situation");
@@ -2414,9 +2364,9 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       auto sym = id->name + "__buf__";
-      hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+      hs << h_indent << "choreo::abend_true(cudaMemcpy(" << sym << ".data(), "
          << sym << "__device, " << UnScopedSizeExpr(*sty)
-         << ", topsMemcpyDeviceToHost));\n";
+         << ", cudaMemcpyDeviceToHost));\n";
       return_stream << "return " << ExprSTR(n.value, true) << ";\n";
     } else {
       choreo_unreachable("not support return value of type: " + PSTR(vty));
@@ -2432,7 +2382,7 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
+bool CuteCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
 
   if (n.kind == AST::CppSourceCode::Inline) {
@@ -2449,7 +2399,7 @@ bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
   return true;
 }
 
-void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
+void CuteCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   // handle the return type
   if (!void_return) {
     if (cgi->HasReturnSymbol(fname)) {
@@ -2479,7 +2429,7 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str() << "\n");
 }
 
-void TopsccCodeGen::EmitHostRuntimeCheck() {
+void CuteCodeGen::EmitHostRuntimeCheck() {
   // check if the input shape is as declared in choreo
   if (cgi->ParameterCount(fname) == 0) return;
 
@@ -2553,7 +2503,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   }
 }
 
-void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
+void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
   const auto& script = FCtx(fname).GetMemReuseScript(df_name);
   if (!script.has_value()) return;
   hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
@@ -2610,19 +2560,19 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
   return "";
 }
 
-void TopsccCodeGen::EmitTopsFree() {
+void CuteCodeGen::EmitTopsFree() {
   assert(IsHost());
   for (const auto& item : GetDeviceFuncIns(updating_cgi)) {
     if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
     if (!isa<SpannedType>(item.type)) continue;
     if (item.attr == ParamAttr::GLOBAL_INPUT) continue;
     if (!NeedDeviceFunc() && !IsChoreoOutput(item.name)) continue;
-    hs << h_indent << "choreo::abend_true(topsFree(" << UnScopedName(item.name)
+    hs << h_indent << "choreo::abend_true(cudaFree(" << UnScopedName(item.name)
        << "__device));\n";
   }
 }
 
-void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
+void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
   if (CCtx().GetArch() == TargetArch::GCU4) {
     auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
     oss << "__thread_dims__(" << lconfig.warp_dim_x << ", "
@@ -2660,76 +2610,45 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
   VST_DEBUG(dbgs() << "Device function prototype:\n" << oss.str() << "\n");
 }
 
-void TopsccCodeGen::EmitSource() {
+void CuteCodeGen::EmitSource() {
   for (auto& code : code_segments) outs() << code << "\n";
 }
 
-void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
+void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   auto filename = RemoveDirectoryPrefix(
       RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
   os << R"script(#!/usr/bin/env bash
 
-# This is the choreo generated bash script to compile topscc code
-
-if [[ -z ${TOPSCC_INSTALL} ]]; then
-  if [[ \"$1\" == \"-st\" ]]; then
-    TOPSCC_INSTALL=/opt/tops;
-    shift 1;
-  fi
+# This is the choreo generated bash script to compile cute code
 )script";
 
-  if (use_system_toolchain) {
-    os << R"script(
-	# Search for the binary in the PATH
-	FOUND_PATH=$(which "topscc" 2>/dev/null)
-
-	if [ -n "$FOUND_PATH" ]; then
-		# If the binary is found, extract the installation path
-		TOPSCC_INSTALL=$(dirname "$(dirname "$FOUND_PATH")")
-	elif [[ -f /opt/tops/bin/topscc ]]; then
-		# Search for the default topscc installation directory
-		TOPSCC_INSTALL=/opt/tops
-  elif [[ -d )script"
-       << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
-    os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__);
-    os << R"script(
-  fi
-)script";
-  } else
-    os << "  TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+  // we must use the built compilation tools
+  if (RequiresE2ECompilation(CCtx().GetOutputKind())) {
+#ifdef __CHOREO_CUDA_DIR__
+    os << "\nexport CUDA_HOME=" << STRINGIZE(__CHOREO_CUDA_DIR__) << "\n";
+#endif // __CHOREO_CUDA_DIR__
+#ifdef __CHOREO_CUTE_DIR__
+    os << "\nexport CUTE_HOME=" << STRINGIZE(__CHOREO_CUTE_DIR__) << "\n";
+#endif // __CHOREO_CUTE_DIR__
+  }
 
   os << R"script(
-fi
-
-if [[ -z "${TOPSCC_INSTALL}" ]]; then
-  echo "failed to find the topscc installation."
-  echo "install topscc or set TOPSCC_INSTALL to topscc installation directory."
+if [ ! -n "${CUDA_HOME}" ] || [ ! -f ${CUDA_HOME}/bin/nvcc ]; then
+  echo "failed to find the CUDA installation."
+  echo "install cuda or set CUDA_HOME to cuda installation directory."
   exit 1
 fi
 
-TOPSCC=${TOPSCC_INSTALL}/bin/topscc
-TOPSCC_LIB=${TOPSCC_INSTALL}/lib
+NVCC=${CUDA_HOME}/bin/nvcc
+NVCC_LIB=${CUDA_LIB}/lib
 
-)script";
-#ifdef __CHOREO_GCU_ACORE_DIR__
-  os << R"(if [[ -z "${ACORE_INSTALL}" ]]; then)" << "\n";
-  os << "  ACORE_INSTALL=" << STRINGIZE(__CHOREO_GCU_ACORE_DIR__) << "\n";
-  os << "fi\n";
-#endif
-  os << R"script(
-if [[ ! -z "${ACORE_INSTALL}" ]]; then
-  GCU_ACORE_INCLUDE=${ACORE_INSTALL}/include
-  GCU_ACORE_LIB_PATH=${ACORE_INSTALL}/lib
-  GCU_ACORE_LIB=libacoreop.bc
-fi
 )script";
 
   auto build_path = CreateUniquePath();
-  auto cc_file = build_path + "/__choreo_topscc_" + filename + ".cpp";
+  auto cc_file = build_path + "/__choreo_cute_" + filename + ".cu";
   auto exe_file = exe_fn;
   if (exe_file.empty())
-    exe_file = build_path + "/__choreo_topscc_" + filename + ".exe";
-  auto fb_file = "__choreo_topscc_" + filename + ".topsfb";
+    exe_file = build_path + "/__choreo_cute_" + filename + ".exe";
   os << "rm -fr " << build_path << "\n";
   os << "mkdir -p " << build_path << "\n\n";
 
@@ -2741,95 +2660,43 @@ fi
   for (auto& code : code_segments) os << code << "\n";
   os << "\nEOF\n\n";
 
-  // use simulator at this time
-  bool use_sim = (CCtx().GetArch() == TargetArch::GCU4);
-
-  // JIT: detect the environment
-  if (use_sim)
-    os << "gcu_arch=gcu400\n";
-  else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
-            (CCtx().GetOutputKind() == OutputKind::TargetExecutable) ||
-            (CCtx().GetOutputKind() == OutputKind::ShellScript)) &&
-           arch.GetValue() != "") {
-    // enforce the arch type
-    os << "gcu_arch=" << ToLower(STR(CCtx().GetArch())) << "\n";
-  } else
-    os << R"script(
-  # check the device just-in-time
-  # TODO: improve the target check with more solid code
-  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-  # echo $GCU_DEVICE_STR
-  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_arch=gcu300
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-    gcu_arch=gcu300
-    export TOPS_VISIBLE_DEVICES=1
-  elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
-    gcu_arch=gcu300
-  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-    gcu_arch=gcu210
-    export TOPS_VISIBLE_DEVICES=1
-  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
-    gcu_arch=gcu210
-  else
-    echo "can not determine the GCU device type."
-    exit 1
-  fi
-  )script";
+  // the arch type
+  os << "nv_arch=" << ToLower(STR(CCtx().GetArch())) << "\n";
 
   os << R"script(
 show_usage() {
-  echo "  Usage: $0 <-st> <actions>"
+  echo "  Usage: $0 <actions>"
   echo ""
   echo "  Options:"
-  echo "   -st,                 Use default system path for target compilation"
   echo "   --execute,           Compile and execute"
   echo "   --compile-link,      Compile and link"
   echo "   --compile-module,    Compile and generate the module"
   echo "   --gen-fatbin,        Compile and generate the fatbin"
   echo ""
   echo "  Environment Variables:"
+  echo "   CUDA_HOME:           (Must) Cuda compiler installation path"
+  echo "   CUTE_HOME:           (Must) Cute header library path"
   echo "   EXTRA_TARGET_CFLAGS: Extra target compilation flags"
-  echo "   TOPSCC_INSTALL:      Topscc compiler installation path"
   echo "   ACORE_INSTALL:       GCU Acore library installation path"
   exit 1
-}
-
-option_detect() {
-  local tmpf=/tmp/$(date +"%Y%m%d_%H%M%S.%3N")__nasty_option_detect__.cpp
-  echo "#include <krt/builtins.h>" > ${tmpf}
-  echo "__device__ void foo() { tops::abort();  }" >> ${tmpf}
-
-  ${TOPSCC} ${CFLAGS} -c ${tmpf} -o /dev/null 2>/dev/null
-
-  if [[ $? -eq 0 ]]; then
-    export CFLAGS="${CFLAGS} -D__CHOREO_USE_TOPS_ABORT__";
-  fi
-
-  rm -f ${tmpf}
 }
 
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1)";
   if (CCtx().GenDebugInfo()) os << " -g";
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";
   if (verbose) os << " -v"; // if it requires to be verbose
-#ifdef __CHOREO_GCU_ACORE_DIR__
-  os << R"( --tops-device-lib-path=${GCU_ACORE_LIB_PATH})";
-  os << R"( --tops-device-lib=${GCU_ACORE_LIB})";
-  os << R"( -I${GCU_ACORE_INCLUDE})";
-  os << R"( -D__ACORE_OP__ -fPIC)";
-#endif
   // always enclose
   os << " ${EXTRA_TARGET_CFLAGS}";
   std::filesystem::path cwd = std::filesystem::current_path();
   auto input_file = OptionRegistry::GetInstance().GetInputFileName();
   auto input_abs_path = GetAbsPath(cwd.string(), input_file);
   os << " -I" << input_abs_path;
+  os << " -I${CUTE_HOME}/include";
   for (auto inc_path : CCtx().GetIncPaths()) os << " -I" << inc_path;
   for (auto lib_path : CCtx().GetLibPaths()) os << " -L" << lib_path;
   for (auto lib : CCtx().GetLibs()) os << " -l" << lib;
@@ -2838,46 +2705,29 @@ option_detect() {
        << (macro.second.empty() ? "" : ("=" + macro.second));
 
   os << "\"";
-  os << "\noption_detect";
-  if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
-  os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
+  os << "\nexport LD_LIBRARY_PATH=${CUDA_LIB}:${LD_LIBRARY_PATH}\n\n";
 
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
   if (verbose)
-    os << "\n  echo ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
-  os << "\n  ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+    os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+  os << "\n  ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
   if (verbose) os << "\n  echo " << exe_file << "\n";
   os << "\n  " << exe_file << "\n";
   os << R"(elif [ "$1" == "--compile-module" ]; then)";
   if (verbose)
-    os << "\n  echo ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
+    os << "\n  echo ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
        << "\n";
-  os << "\n  ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
+  os << "\n  ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
   os << R"(elif [ "$1" == "--compile-link" ]; then)";
   if (verbose)
-    os << "\n  echo ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file
+    os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file
        << "\n";
-  os << "\n  ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
-  os << R"(elif [ "$1" == "--gen-fatbin" ]; then)";
-  os << "\n  __cur_dir=$(pwd)";
-  os << "\n  cd " << build_path;
-  if (verbose)
-    os << "\n  echo ${TOPSCC} -save-temps -c ${CFLAGS} " << cc_file << " -o "
-       << exe_file << "\n";
-  os << "\n  ${TOPSCC} -save-temps -c ${CFLAGS} " << cc_file << " -o "
-     << exe_file << "\n";
-  if (verbose)
-    os << "\n  echo cp " << cc_file
-       << "-tops-dtu-enflame-tops.topsfb ${__cur_dir}/" << fb_file;
-  os << "\n  cp " << cc_file << "-tops-dtu-enflame-tops.topsfb ${__cur_dir}/"
-     << fb_file;
-  os << "\n  cd ${__cur_dir}";
-  os << "\n  echo \"Fatbin file generated: " << fb_file << "\"";
+  os << "\n  ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
   os << "\nelse show_usage";
   os << "\nfi";
 }
 
-bool TopsccCodeGen::CompileWithScript(const std::string& action) {
+bool CuteCodeGen::CompileWithScript(const std::string& action) {
   assert(!action.empty() && "no action is specified.");
 
   char tempFileName[] = "/tmp/choreo_topscc_script_XXXXXX";
@@ -2919,12 +2769,12 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
 
 // TODO: eliminate the need of the value replacement?
 // Currently, it is guaranteed that ValueSTR can be used safely and directly.
-const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi,
+const std::string CuteCodeGen::ValueSTR(const ValueItem& vi,
                                           bool LL_suffix) const {
   return OpValueSTR(vi, "", true, LL_suffix);
 }
 
-const std::string TopsccCodeGen::ValueListSTR(const ValueList& vl,
+const std::string CuteCodeGen::ValueListSTR(const ValueList& vl,
                                               std::string sep,
                                               bool LL_suffix) const {
   std::ostringstream oss;
@@ -2936,7 +2786,7 @@ const std::string TopsccCodeGen::ValueListSTR(const ValueList& vl,
   return oss.str();
 }
 
-const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
+const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
                                             const std::string& parent_op,
                                             const bool is_left_child,
                                             bool LL_suffix) const {
@@ -3000,7 +2850,7 @@ const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
 }
 
 std::optional<std::string>
-TopsccCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
+CuteCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
   if (id == nullptr) return std::nullopt;
   auto ty = NodeType(*id);
   if (isa<BoundedType>(ty) &&
@@ -3009,41 +2859,11 @@ TopsccCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
     assert(l.has_value());
     // is marked as parallel whose level is decided by target check
     if (*l == "local")
-      return "__tops_tid_x()";
+      return "threadIdx.x";
     else if (*l == "shared")
-      return "__tops_bid_x()";
-    else if (*l == "sub-local")
-      return "__tops_stid_x()";
+      return "blockIdx.x";
     else
-      choreo_unreachable("invalid bounded type note.");
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string>
-TopsccCodeGen::SubThreadIdString(const ptr<AST::Identifier>& id) const {
-  auto ty = NodeType(*id);
-  std::ostringstream oss;
-  if (isa<BoundedType>(ty) &&
-      PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pi")) {
-    auto l = RemovePrefixOrNull("pi:", cast<BoundedType>(ty)->GetNote());
-    assert(l.has_value());
-    // l should be (x|y|z):(shared|local)
-    if (l->length() <= 3)
-      choreo_unreachable("invalid bounded type note: " +
-                         cast<BoundedType>(ty)->GetNote() + ".");
-    oss << "__tops_";
-    if (l->substr(2) == "local")
-      oss << "tid_";
-    else if (l->substr(2) == "shared")
-      oss << "bid_";
-    else
-      choreo_unreachable("invalid bounded type note.");
-    if (l->at(0) > 'z' || l->at(0) < 'x')
-      choreo_unreachable("invalid bounded type note: " +
-                         cast<BoundedType>(ty)->GetNote() + ".");
-    oss << l->at(0) << "()";
-    return oss.str();
+      choreo_unreachable("invalid bounded type note: " + *l + ".");
   }
   return std::nullopt;
 }
@@ -3051,7 +2871,7 @@ TopsccCodeGen::SubThreadIdString(const ptr<AST::Identifier>& id) const {
 // input is a `node` or `std::variant<int, float>`.
 // If `val` is existed, use it first.
 const std::string
-TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
+CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
                            std::optional<std::variant<int, float>> val,
                            BaseType t, BaseType f, bool is_host) const {
 
@@ -3150,13 +2970,13 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   return res.str();
 }
 
-const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
+const std::string CuteCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                          bool is_host) const {
   // start with the lowest precedence op ""
   return OpExprSTR(e, "", true, is_host);
 }
 
-const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
+const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
                                            const std::string& parent_op,
                                            bool is_left_child,
                                            bool is_host) const {
@@ -3178,11 +2998,12 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       assert(!is_host);
       return id->name;
     }
+#if 0
     if (auto ids = ThreadIdString(id))
       oss << ids.value();
-    else if (auto sids = SubThreadIdString(id))
-      oss << sids.value();
-    else if (within_map.count(InScopeName(id->name)) && !is_host) {
+    else
+#endif
+      if (within_map.count(InScopeName(id->name)) && !is_host) {
       size_t i = 0;
       for (auto iv_name : within_map.at(InScopeName(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
@@ -3226,11 +3047,12 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       };
       for (auto item : da->GetIndices()) {
         if (auto id = AST::GetIdentifier(item)) {
+#if 0
           if (auto ids = ThreadIdString(id))
             AppendOffset(sbe::sym(ids.value()));
-          else if (auto sids = SubThreadIdString(id))
-            AppendOffset(sbe::sym(sids.value()));
-          else if (within_map.count(InScopeName(id->name))) {
+          else
+#endif
+            if (within_map.count(InScopeName(id->name))) {
             auto ivs = within_map.at(InScopeName(id->name));
             for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
               AppendOffset(sbe::sym(*iv_itr));
@@ -3414,7 +3236,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   return oss.str();
 }
 
-const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
+const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
   std::ostringstream oss;
   auto func_name = [&n](const std::string& name) -> std::string {
     if (!n.IsArith()) return name;

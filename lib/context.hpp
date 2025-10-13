@@ -20,6 +20,7 @@ enum class CompileTarget {
   Factor,
   Topscc,
   CUDA,
+  Cute,
 };
 
 inline static const std::string STR(CompileTarget ct) {
@@ -28,6 +29,7 @@ inline static const std::string STR(CompileTarget ct) {
   case CompileTarget::Factor: return "Factor";
   case CompileTarget::Topscc: return "Topscc";
   case CompileTarget::CUDA: return "CUDA";
+  case CompileTarget::Cute: return "Cute";
   default: choreo_unreachable("Unsupported operand kind.");
   }
   return "";
@@ -39,7 +41,15 @@ enum class TargetArch {
   GCU21,
   GCU3,
   GCU4,
-  GPU,
+  GPU,  // TODO: unclear
+  // Nv series
+  SM_70,
+  SM_75,
+  SM_80,
+  SM_86,
+  SM_89,
+  SM_90,
+  SM_100,
 };
 
 inline static const std::string STR(TargetArch ta) {
@@ -50,6 +60,13 @@ inline static const std::string STR(TargetArch ta) {
   case TargetArch::GCU3: return "GCU300";
   case TargetArch::GCU4: return "GCU400";
   case TargetArch::GPU: return "GPU";
+  case TargetArch::SM_70: return "SM_70";
+  case TargetArch::SM_75: return "SM_75";
+  case TargetArch::SM_80: return "SM_80";
+  case TargetArch::SM_86: return "SM_86";
+  case TargetArch::SM_89: return "SM_89";
+  case TargetArch::SM_90: return "SM_90";
+  case TargetArch::SM_100: return "SM_100";
   default: choreo_unreachable("Unsupported operand kind.");
   }
   return "";
@@ -63,6 +80,19 @@ enum class OutputKind {
   TargetExecutable,
   ShellScript,
 };
+
+inline bool RequiresE2ECompilation(OutputKind ok) {
+  switch (ok) {
+  case OutputKind::TargetModule:
+  case OutputKind::TargetAssembly:
+  case OutputKind::TargetExecutable:
+  case OutputKind::ShellScript:
+    return true;
+  default:
+    break;
+  }
+  return false;
+}
 
 inline static const std::string STR(OutputKind ok) {
   switch (ok) {
@@ -401,6 +431,20 @@ public:
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
+
+    case TargetArch::SM_70:
+    case TargetArch::SM_75:
+    case TargetArch::SM_80:
+    case TargetArch::SM_86:
+    case TargetArch::SM_89:
+    case TargetArch::SM_90:
+    case TargetArch::SM_100: {
+      switch (sto) {
+      case Storage::SHARED: return 48ull * 1024;   // 48k static
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+    }
+
 
     default: choreo_unreachable("Unsupported target arch.");
     }

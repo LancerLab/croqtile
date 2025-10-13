@@ -287,9 +287,9 @@ FLEX = $(TOOLCHAIN_DIR)/bin/flex
 BISON_BIN = $(TOOLCHAIN_DIR)/bin/bison
 LIT:=$(WORK_DIR)/tests/lit.sh -j$(JOBS)
 FILECHECK:=$(TOOLCHAIN_DIR)/bin/FileCheck
-PACKAGE_NAME=choreo_toolchain_240703.tgz
+PACKAGE_NAME=choreo_toolchain_250930.tgz
 SUPPORT_PKG =$(TOOLCHAIN_DIR)/$(PACKAGE_NAME)
-PACKAGE_MD5:=2b630f549063d8fbfbe31ac23984ea6d
+PACKAGE_MD5:=a4297fca634dcdda3d08c467550d4b22
 CUR_PKG_MD5:=$(shell md5sum $(SUPPORT_PKG) 2>/dev/null| cut -d ' ' -f 1)
 BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
@@ -322,6 +322,9 @@ setup-git-hooks:
 setup-core: setup-choreo-kit setup-ginac setup-clang-format setup-git-hooks setup-gcu-acore
 	git submodule update --init --recursive;\
 	ln -sf extern/bin/not.sh tests
+
+setup-cuda:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-cuda FTP_SERVER=$(FTP_SERVER)
 
 setup-gcu2: setup-core
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)

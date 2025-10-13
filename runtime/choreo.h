@@ -970,6 +970,15 @@ public:
   }
 };
 
+// For API check: abend on failures
+static __attribute__((always_inline)) inline void abend_false(bool p) {
+  if (!p) std::abort();
+}
+
+static __attribute__((always_inline)) inline void abend_true(bool p) {
+  if (p) std::abort();
+}
+
 // target specific definations
 #ifdef __TOPSCC__
 template <typename T>
@@ -990,15 +999,6 @@ static int inline __addr2int__(T* v) {
 #include <krt/builtins.h>
 
 namespace choreo {
-
-// For tops API check: abend on failures
-static __attribute__((always_inline)) inline void abend_false(bool p) {
-  if (!p) std::abort();
-}
-
-static __attribute__((always_inline)) inline void abend_true(bool p) {
-  if (p) std::abort();
-}
 
 // --- light-weight choreo-topscc device library --- //
 
