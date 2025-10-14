@@ -284,14 +284,15 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     auto loop = fb->loop;
     if (loop && loop->CanVectorize()) {
       // create vector loop induction variable
-      auto iv_id = loop->IVName();
-      std::string sname = InScopeName(iv_id);
-      within_map.emplace(sname, std::vector<std::string>{sname});
-      bv_map.emplace(sname, std::vector<std::string>{sname});
-      std::string iv_name = "__iv_" + iv_id;
+      std::string sname = InScopeName(loop->IVName());
+      auto ivs = within_map.at(sname);
+      assert(ivs.size() == 1 &&
+             "vectorized foreach only supports one induction variable.");
+      auto iv = UnScopedName(ivs[0]);
+      std::string iv_name = "__iv_" + iv;
       int vector_width = loop->GetVectorWidth();
-      std::string vec_iv_plus_name = "__vec_iv_" + iv_id + "_plus";
-      std::string vec_iv_base_name = "__vec_iv_" + iv_id + "_base";
+      std::string vec_iv_plus_name = "__vec_iv_" + iv + "_plus";
+      std::string vec_iv_base_name = "__vec_iv_" + iv + "_base";
       auto vector_type = MakeVectorType(BaseType::U32, vector_width);
       ds << d_indent << VectorTypeSTR(vector_type) << " " << vec_iv_base_name
          << " = " << "(" << VectorTypeSTR(vector_type) << ")(" << iv_name
@@ -311,7 +312,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       } else
         choreo_unreachable("unsupported target architecture.");
 
-      std::string vec_iv_name = "__vec_iv_" + iv_id;
+      std::string vec_iv_name = "__vec_iv_" + iv;
       ds << d_indent << VectorTypeSTR(vector_type) << " " << vec_iv_name
          << " = " << vec_iv_base_name << " + " << vec_iv_plus_name << ";\n";
       return true;
@@ -655,7 +656,6 @@ void TopsccCodeGen::EmitFixedHostHead() {
 #include "tcle.h"
 #endif // __GCU_ARCH__ >= 300
 )";
-
 
   oss << "// include the choreo header;\n";
   if (native_f16)

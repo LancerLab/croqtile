@@ -27,11 +27,16 @@ struct LoopChecker final : public VisitorWithScope {
 };
 
 // LoopAnalysis
-struct LoopAnalysis final : public LoopVisitor {
-  ptr<LoopInfo> li;
+struct LoopAnalysis final : public VisitorWithSymTab {
+  LoopAnalysis();
 
-public:
-  LoopAnalysis(const ptr<SymbolTable> s_tab);
+  ptr<LoopInfo> li;
+  std::string parent_loop_name = "";
+  static int loop_count;
+  static std::string GenerateLoopName();
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
+
   bool Visit(AST::ForeachBlock& n) override;
   ptr<LoopInfo> GetLoopInfo() const;
 };
@@ -43,6 +48,7 @@ private:
   BaseType data_type = BaseType::UNKNOWN;
   std::unordered_map<std::string, std::vector<location>> loop_defs;
   std::unordered_map<std::string, std::vector<location>> loop_uses;
+  int Pb_level = 0;
   bool all_illegal = true;
   std::string indent = "";
 
@@ -52,6 +58,8 @@ private:
   void AddLoopUse(std::string sym, location);
   void FindLoopUses(ptr<AST::Node> n);
   void AddLoopDef(std::string sym, location);
+  bool AfterBeforeVisitImpl(AST::Node& n) override;
+  bool BeforeAfterVisitImpl(AST::Node& n) override;
 
 public:
   LoopVectorizeLegalityChecker(const ptr<SymbolTable> s_tab, ptr<LoopInfo> l,
@@ -76,8 +84,6 @@ public:
   bool Visit(AST::NamedVariableDecl& n) override;
   bool Visit(AST::Assignment& n) override;
   bool Visit(AST::Call& n) override;
-
-  bool BeforeAfterVisitImpl(AST::Node& m) override;
 };
 
 struct BranchSimplicition final : public LoopVisitor {

@@ -81,12 +81,13 @@ private:
   }
 
   bool IsAssignedSym(const std::string& sym_name) {
-    auto loop_name = InLoop() ? lname : NoLoopName();
+    ptr<Loop> loop = cur_loop;
     while (true) {
+      auto loop_name = loop ? loop->loop_name : NoLoopName();
       if (ssetab->IsAssignedInLoop(sym_name, loop_name)) return true;
-      auto parent_loop = li->GetParentLoopName(loop_name);
-      if (parent_loop.empty()) break;
-      loop_name = parent_loop;
+      if (!loop) break;
+      auto parent_loop = loop->parent_loop;
+      loop = parent_loop;
     }
     return false;
   }
@@ -97,13 +98,14 @@ private:
   }
 
   ptr<SCEV> GetSCEVOfSym(const std::string& sym_name) {
-    auto loop_name = InLoop() ? lname : NoLoopName();
+    auto loop = cur_loop;
     while (true) {
+      auto loop_name = loop ? loop->loop_name : NoLoopName();
       auto scev = ssetab->GetSCEV(sym_name, loop_name);
       if (scev) return scev;
-      auto parent_loop = li->GetParentLoopName(loop_name);
-      if (parent_loop.empty()) break;
-      loop_name = parent_loop;
+      if (!loop) break;
+      auto parent_loop = loop->parent_loop;
+      loop = parent_loop;
     }
     return nullptr;
   }

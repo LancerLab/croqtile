@@ -144,6 +144,8 @@ Option<bool> loop_norm(OptionKind::Hidden, "--loop-norm", "-ln", false,
                        "Normalize the loops in the choreo code.");
 Option<bool> vectorize(OptionKind::Hidden, "--vectorize", "-m", false,
                        "Apply masking to the vectorized foreach loop.");
+Option<bool> no_vectorize(OptionKind::Hidden, "--no-vectorize", "-nm", false,
+                          "Do not vectorize any foreach loop.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -281,12 +283,12 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetCrossCompile(cross_compile.GetValue());
   CCtx().SetTraceValueNumbers(print_vn.GetValue());
   CCtx().SetVectorize(vectorize.GetValue());
+  CCtx().SetNoVectorize(no_vectorize.GetValue());
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
   CCtx().SetLivenessAnalysis(liveness.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());
   CCtx().SetSimplifyFpValno(simplify_fp_valno.GetValue());
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
-  CCtx().SetBranchNorm(branch_norm.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
 
   if (!trace_visit.GetValue().empty())

@@ -93,7 +93,7 @@ bool ScalarEvolutionAnalysis::Visit(AST::Expr& n) {
   if (!NeedAnalyze(n.GetType())) return true;
   auto valno = n.Opts().HasVal() ? n.Opts().GetVal() : sbe::sym(STR(n));
   auto scev_val = MakeSCEVVal(valno);
-  auto loop_name = InLoop() ? lname : NoLoopName();
+  auto loop_name = InLoop() ? LoopName() : NoLoopName();
   auto op = n.op;
   if (n.IsReference()) {
     if (auto id = AST::GetIdentifier(n)) {
@@ -144,7 +144,7 @@ bool ScalarEvolutionAnalysis::Visit(AST::NamedVariableDecl& n) {
   auto init_scev = init_expr->GetSCEV();
   if (debug_visit)
     dbgs() << "decl:  `" << iv_name << "` -> " << STR(init_scev) << "\n";
-  AssignSCEVToSym(SymName(iv_name), init_scev, lname);
+  AssignSCEVToSym(SymName(iv_name), init_scev, LoopName());
 
   return true;
 }
@@ -168,14 +168,14 @@ bool ScalarEvolutionAnalysis::Visit(AST::Assignment& n) {
     auto expr_scev = expr->GetSCEV();
     if (debug_visit)
       dbgs() << "asgn:  `" << name << "` -> " << STR(expr_scev) << "\n";
-    AssignSCEVToSym(sym_name, expr_scev, lname);
+    AssignSCEVToSym(sym_name, expr_scev, LoopName());
   } else {
     // else, we will invalidate the scev of the symbol this assignment assigns
     // to, since we cannot track the scev for re-assignment variables.
     if (debug_visit)
       dbgs() << "asgn:  `" << name
              << "` is re-assigned, invalidate its scev.\n";
-    AssignSCEVToSym(sym_name, nullptr, lname);
+    AssignSCEVToSym(sym_name, nullptr, LoopName());
   }
   return true;
 }
@@ -202,13 +202,13 @@ bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
 
   if (debug_visit)
     dbgs() << "iv:    `" << iv_name << "` -> " << STR(ar_expr) << "\n";
-  AssignSCEVToSym(SymName(iv_name), ar_expr, lname);
+  AssignSCEVToSym(SymName(iv_name), ar_expr, LoopName());
   return true;
 }
 
 bool ScalarEvolutionAnalysis::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
-  auto loop_name = InLoop() ? lname : NoLoopName();
+  auto loop_name = InLoop() ? LoopName() : NoLoopName();
   for (auto pb : n.AllSubPVs()) {
     auto pb_id = AST::GetIdentifier(pb);
     auto se_val = MakeSCEVVal(sbe::sym(SymName(pb_id->name)), cur_loop);

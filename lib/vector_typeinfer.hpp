@@ -19,9 +19,8 @@ private:
   ptr<DiversityInfo> di;
 
   bool Skip(ptr<Type> ty, DiversityShape shape) {
-    auto loop = li->GetLoop(lname);
-    if (!loop) return true;
-    if (!loop->NeedVectorize()) return true;
+    if (!InLoop()) return true;
+    if (!cur_loop->CanVectorize()) return true;
     if (shape.Uniform()) return true;
     if (IsActualVectorType(ty)) return true;
 

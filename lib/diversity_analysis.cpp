@@ -15,9 +15,8 @@ DiversityAnalysis::DiversityAnalysis(const ptr<SymbolTable> s_tab,
 
 // we only analyze diversity in vectorized loops(loops with vectorization hint)
 bool DiversityAnalysis::InVectorizedLoop() {
-  auto loop = li->GetLoop(lname);
-  if (!loop) return false;
-  if (loop->NeedVectorize()) return true;
+  if (!InLoop()) return false;
+  if (cur_loop->NeedVectorize()) return true;
   return false;
 }
 
@@ -270,7 +269,7 @@ bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   if (!InVectorizedLoop()) return true;
   auto lname = SSTab().ScopeName();
-  auto loop = li->GetLoop(lname);
+  auto loop = n.loop;
   auto iv_ty = loop->GetIVType();
   auto iv_name = loop->IVName();
   int stride = 1;
@@ -309,6 +308,11 @@ bool DiversityAnalysis::BeforeAfterVisitImpl(AST::Node& n) {
     if (isa<AST::IfElseBlock>(&n)) {
       assert(!scope_shapes.empty());
       scope_shapes.pop();
+    } else if (isa<AST::ForeachBlock>(&n)) {
+      assert(!scope_shapes.empty());
+      scope_shapes.pop();
+      assert(scope_shapes.empty() &&
+             "scope_shapes should be empty after exiting scoped loop.");
     }
   }
   return true;

@@ -67,6 +67,7 @@ struct Visitor {
   virtual bool Visit(AST::BoolLiteral&) = 0;
   virtual bool Visit(AST::Expr&) = 0;
   virtual bool Visit(AST::CastExpr&) = 0;
+  virtual bool Visit(AST::AttributeExpr&) = 0;
   virtual bool Visit(AST::MultiDimSpans&) = 0;
   virtual bool Visit(AST::NamedTypeDecl&) = 0;
   virtual bool Visit(AST::NamedVariableDecl&) = 0;
@@ -184,8 +185,7 @@ public:
 
     if (std::getenv("CHOREO_PRINT_NODETYPE")) prt_node_ty = true;
 
-    if (std::getenv("CHOREO_ANALYZE_DEVICE_FUNCTIONS"))
-      resolve_fns = true;
+    if (std::getenv("CHOREO_ANALYZE_DEVICE_FUNCTIONS")) resolve_fns = true;
   }
 
   virtual ~Visitor() {}
@@ -502,6 +502,7 @@ public:
   bool Visit(AST::BoolLiteral&) override { return true; }
   bool Visit(AST::Expr&) override { return true; }
   bool Visit(AST::CastExpr&) override { return true; }
+  bool Visit(AST::AttributeExpr&) override { return true; }
   bool Visit(AST::MultiDimSpans&) override { return true; }
   bool Visit(AST::NamedTypeDecl&) override { return true; }
   bool Visit(AST::NamedVariableDecl&) override { return true; }
@@ -641,6 +642,10 @@ public:
     return VisitNode(n);
   }
   bool Visit(AST::CastExpr& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::AttributeExpr& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
   }
@@ -804,6 +809,7 @@ public:
   virtual bool VisitNode(AST::BoolLiteral&) { return true; }
   virtual bool VisitNode(AST::Expr&) { return true; }
   virtual bool VisitNode(AST::CastExpr&) { return true; }
+  virtual bool VisitNode(AST::AttributeExpr&) { return true; }
   virtual bool VisitNode(AST::MultiDimSpans&) { return true; }
   virtual bool VisitNode(AST::NamedTypeDecl&) { return true; }
   virtual bool VisitNode(AST::NamedVariableDecl&) { return true; }
@@ -846,7 +852,6 @@ public:
 struct LoopVisitor : public VisitorWithSymTab {
 protected:
   ptr<Loop> cur_loop;
-  std::string lname;
 
   void TraceEachVisit(const AST::Node& n) {
     if (trace_visit) { dbgs() << n.TypeNameString() << "\n"; }
@@ -857,7 +862,10 @@ protected:
 
   bool BeforeVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
-    if (isa<AST::ForeachBlock>(&n)) lname = SSTab().ScopeName();
+    if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+      cur_loop = fb->loop;
+      assert(cur_loop != nullptr && "internal error: loop is null.");
+    }
     AfterBeforeVisitImpl(n);
     return true;
   }
@@ -865,11 +873,12 @@ protected:
   bool AfterVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
     BeforeAfterVisitImpl(n);
-    if (isa<AST::ForeachBlock>(&n)) lname = SSTab().ScopeName();
+    if (isa<AST::ForeachBlock>(&n)) { cur_loop = cur_loop->parent_loop; }
     return true;
   }
 
   bool InLoop() { return cur_loop != nullptr; }
+  std::string LoopName() { return cur_loop ? cur_loop->loop_name : ""; }
 
 public:
   LoopVisitor(const ptr<SymbolTable> s_tab, const std::string& pn)

@@ -28,7 +28,7 @@ __co__ void func(int a) {
 // CHECK:     `- Iteration variables: i
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: j
-// CHECK:      `- Suffixes:      call vectorize(j, 32)
+// CHECK:      `- Suffixes:      @vectorize j, 32
 // CHECK:      `- Foreach Block:
 // CHECK:       `- Iteration variables: k
 // CHECK:  `- With Block:

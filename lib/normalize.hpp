@@ -61,7 +61,6 @@ public:
         auto rng = dyn_cast<AST::LoopRange>(fb->ranges->ValueAt(0));
         auto rng_type = dyn_cast<BoundedITupleType>(rng->IV()->GetType());
         if (fb->ranges->Count() == 1 && rng_type && rng_type->Dims() > 1) {
-          assert(!fb->suffixs || fb->suffixs->None());
           auto cname = rng->IVName();
           // create foreachblocks for each index variable
           for (auto with : within_map[cname]->values) {
@@ -99,26 +98,29 @@ public:
         auto suffixs = fb->suffixs;
         if (suffixs && suffixs->Count() > 0) {
           for (auto& suffix : suffixs->values) {
-            auto suffix_call = AST::GetCall(suffix);
-            assert(suffix_call && "expect a suffix call to be a Call node.");
-            auto args = suffix_call->arguments;
-            auto arg_id = AST::GetIdentifier(args->ValueAt(0));
-            bool found = false;
-            for (size_t j = 0; j < loops.size(); ++j) {
-              auto sub_fb = loops[j];
-              assert(sub_fb->ranges->Count() == 1 &&
-                     "expect only one range in the loop hierarchy.");
-              if (arg_id->name ==
-                  dyn_cast<AST::LoopRange>(sub_fb->GetRanges()[0])->IVName()) {
-                found = true;
-                sub_fb->suffixs = suffixs;
+            auto attr_expr = dyn_cast<AST::AttributeExpr>(suffix);
+
+            if (attr_expr->AttrName() == "vectorize") {
+              auto arg_id = AST::GetIdentifier(attr_expr->AttrValueAt(0));
+              assert(arg_id && "expect identifier as the argument.");
+              bool found = false;
+              for (size_t j = 0; j < loops.size(); ++j) {
+                auto sub_fb = loops[j];
+                assert(sub_fb->ranges->Count() == 1 &&
+                       "expect only one range in the loop hierarchy.");
+                if (arg_id->name ==
+                    dyn_cast<AST::LoopRange>(sub_fb->GetRanges()[0])
+                        ->IVName()) {
+                  found = true;
+                  sub_fb->suffixs = suffixs;
+                }
               }
-            }
-            // suffixes are not matched to any loop index variable
-            if (!found) {
-              Error(suffix_call->LOC(),
-                    "suffix expr '" + PSTR(suffix) +
-                        "' does not match any loop index variable.");
+              // suffixes are not matched to any loop index variable
+              if (!found) {
+                Error(attr_expr->LOC(),
+                      "suffix expr '" + PSTR(suffix) +
+                          "' does not match any loop index variable.");
+              }
             }
           }
         }
@@ -1148,17 +1150,17 @@ public:
     if (!disabled) root.accept(*this);
 
     if (HasError() || abend_after) return false;
-
-    LoopChecker lc;
-    root.accept(lc);
-    if (prt_visitor) dbgs() << " |- " << lc.GetName() << NewL;
-    if (CCtx().LoopNorm() || lc.HasVectorization()) {
-      LoopNorm ln;
-      if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
-      root.accept(ln);
-      if (ln.HasError()) return false;
+    if (!CCtx().NoVectorize()) {
+      LoopChecker lc;
+      root.accept(lc);
+      if (prt_visitor) dbgs() << " |- " << lc.GetName() << NewL;
+      if (CCtx().LoopNorm() || lc.HasVectorization()) {
+        LoopNorm ln;
+        if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
+        root.accept(ln);
+        if (ln.HasError()) return false;
+      }
     }
-
     return true;
   }
 };

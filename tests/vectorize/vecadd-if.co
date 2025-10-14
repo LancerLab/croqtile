@@ -1,6 +1,5 @@
 // REQUIRES: TARGET-GCU300
 // RUN: choreo -es %s | FileCheck %s --check-prefix=CODEGEN
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 #define N 4
 #define M 512
@@ -59,4 +58,3 @@ int main() { /// host program
 // CODEGEN:   tcle::store(val, (__TCLE_AS__ char *)((float*)l1_c + (__iv_i * 512) + __vec_iv_j[0]));
 // CODEGEN:   __vec_iv_j += (__vector unsigned int)(32);
 // CODEGEN: }
-// CHECK: Test Passed

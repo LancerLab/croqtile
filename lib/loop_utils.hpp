@@ -126,7 +126,9 @@ struct ScopedMaskInfo {
 struct Loop {
   std::string loop_name;
   std::string iv_name;
+  std::string scope_name; // scope name where the loop is defined
   ptr<Type> iv_type = nullptr;
+  ptr<Loop> parent_loop = nullptr;
   std::vector<ptr<Loop>> sub_loops;
   // scoped mask info, used to track the execution mask in this loop scope
   // and its child branch scope.
@@ -136,9 +138,10 @@ struct Loop {
   bool can_vectorize = true;
 
   explicit Loop(std::string n, std::string i, ptr<Type> it,
-                std::vector<ptr<Loop>> subs = {},
+                ptr<Loop> p = nullptr, std::vector<ptr<Loop>> subs = {},
                 ptr<ScopedMaskInfo> s = std::make_shared<ScopedMaskInfo>())
-      : loop_name(n), iv_name(i), iv_type(it), sub_loops(subs), smi(s) {}
+      : loop_name(n), iv_name(i), iv_type(it), parent_loop(p), sub_loops(subs),
+        smi(s) {}
 
   std::string IVName() { return iv_name; }
   ptr<Type> GetIVType() { return iv_type; }
@@ -161,8 +164,11 @@ struct Loop {
     return false;
   }
 
-  void dump(std::ostream& os, const std::string& prefix = "") const {
-    os << prefix << loop_name << "\n";
+  void dump(std::ostream& os, const std::string& prefix = "",
+            bool print_scope = false) const {
+    os << prefix << loop_name;
+    if (print_scope) os << ", " << scope_name;
+    os << "\n";
     for (const auto& sub_loop : sub_loops) {
       sub_loop->dump(os, prefix + "  ");
     }
@@ -260,41 +266,12 @@ struct LoopInfo {
   std::unordered_map<std::string, std::string>
       iv2loop; // key: iv name, value: loop name
   std::unordered_map<std::string, ptr<Loop>>
-      loops; // key: scope name of the loop
+      loops; // key: loop name, value: loop pointer
 
-  std::string GetParentLoopName(const std::string& lname) const {
-    auto removeLastLoop = [](const std::string& input) -> std::string {
-      size_t lastPos = input.rfind("::");
-      if (lastPos == std::string::npos) {
-        return input; // No "::" found, return the original string
-      }
-
-      // Find the second-to-last "::" by searching up to the last found
-      // position
-      size_t secondLastPos = input.rfind("::", lastPos - 1);
-      if (secondLastPos == std::string::npos) return input;
-      return input.substr(0,
-                          secondLastPos + 2); // Include the "::" in the result
-    };
-
-    if (lname == NoLoopName()) return "";
-    std::string parent_loop_name = removeLastLoop(lname);
-    while (parent_loop_name != "::") {
-      if (loops.find(parent_loop_name) != loops.end()) {
-        return parent_loop_name;
-      }
-      parent_loop_name = removeLastLoop(parent_loop_name);
-    }
-    return "";
-  }
-
-  std::string GetOutermostLoopName(const std::string& lname) const {
-    auto parent_lname = lname;
-    while (GetParentLoopName(parent_lname) != "") {
-      parent_lname = GetParentLoopName(parent_lname);
-    }
-
-    return parent_lname;
+  bool IsOuterMostLoop(const std::string& lname) const {
+    auto loop = GetLoop(lname);
+    if (loop && !loop->parent_loop) return true;
+    return false;
   }
 
   bool IsInnermostLoop(const std::string& lname) const {
@@ -303,13 +280,28 @@ struct LoopInfo {
   }
 
   ptr<Loop> GetLoop(const std::string& lname) const {
+    if (lname == "") return nullptr;
     auto it = loops.find(lname);
     if (it != loops.end()) { return it->second; }
     return nullptr;
   }
 
+  ptr<Loop> GetParentLoop(const std::string& lname) const {
+    if (lname == "") return nullptr;
+    auto loop = GetLoop(lname);
+    if (loop) { return loop->parent_loop; }
+    return nullptr;
+  }
+
+  std::vector<ptr<Loop>> GetSubLoops(const std::string& lname) const {
+    if (lname == "") return {};
+    auto loop = GetLoop(lname);
+    if (loop) { return loop->sub_loops; }
+    return {};
+  }
+
   void dump(std::ostream& os) {
-    for (const auto& [loop_name, loop] : loops) { loop->dump(os); }
+    for (const auto& [loop_name, loop] : loops) { loop->dump(os, "", true); }
   }
 };
 } // end namespace Choreo

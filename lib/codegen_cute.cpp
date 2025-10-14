@@ -175,8 +175,8 @@ bool CuteCodeGen::RequiresImplPred(Storage cur) const {
 }
 
 const std::string CuteCodeGen::ShapeSTR(const Shape& s,
-                                          const std::string& delimiter,
-                                          BaseType cast_to) const {
+                                        const std::string& delimiter,
+                                        BaseType cast_to) const {
   auto& vl = s.Value();
   assert(!vl.empty());
 
@@ -355,7 +355,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
 // tops::mdspan style offset
 std::pair<std::string, size_t>
 CuteCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
-                            ptr<DMAConfig> config) const {
+                          ptr<DMAConfig> config) const {
   auto& sops = ca->AllOperations();
   assert(!sops.empty());
 
@@ -466,7 +466,7 @@ CuteCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
 // address-contiguous within the original span.
 // end_idx: the offset is computed by sop in range [0, end_idx).
 const std::string CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
-                                           size_t end_idx) const {
+                                         size_t end_idx) const {
   if (ca->NoOperation()) return "";
 
   end_idx = std::min(end_idx, ca->OpCount());
@@ -1572,8 +1572,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // handles dma related to shared memory, where only single thread can
     // operate
     bool shared_in_block = false;
-    if (!n.future.empty())
-      shared_in_block = IsDMABlockShared(n);
+    if (!n.future.empty()) shared_in_block = IsDMABlockShared(n);
 
     assert(!shared_in_block &&
            "local and shared memory should not be used at the same time");
@@ -2770,13 +2769,13 @@ bool CuteCodeGen::CompileWithScript(const std::string& action) {
 // TODO: eliminate the need of the value replacement?
 // Currently, it is guaranteed that ValueSTR can be used safely and directly.
 const std::string CuteCodeGen::ValueSTR(const ValueItem& vi,
-                                          bool LL_suffix) const {
+                                        bool LL_suffix) const {
   return OpValueSTR(vi, "", true, LL_suffix);
 }
 
 const std::string CuteCodeGen::ValueListSTR(const ValueList& vl,
-                                              std::string sep,
-                                              bool LL_suffix) const {
+                                            std::string sep,
+                                            bool LL_suffix) const {
   std::ostringstream oss;
   if (!vl.empty()) {
     oss << ValueSTR(vl[0], LL_suffix);
@@ -2787,9 +2786,9 @@ const std::string CuteCodeGen::ValueListSTR(const ValueList& vl,
 }
 
 const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
-                                            const std::string& parent_op,
-                                            const bool is_left_child,
-                                            bool LL_suffix) const {
+                                          const std::string& parent_op,
+                                          const bool is_left_child,
+                                          bool LL_suffix) const {
   auto WrapParen = [&](const std::string& s, const std::string& cur_op) {
     if (Operator::NeedParen(cur_op, parent_op, is_left_child))
       return "(" + s + ")";
@@ -2872,8 +2871,8 @@ CuteCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
 // If `val` is existed, use it first.
 const std::string
 CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
-                           std::optional<std::variant<int, float>> val,
-                           BaseType t, BaseType f, bool is_host) const {
+                         std::optional<std::variant<int, float>> val,
+                         BaseType t, BaseType f, bool is_host) const {
 
   std::ostringstream res;
   std::string value;
@@ -2971,15 +2970,15 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
 }
 
 const std::string CuteCodeGen::ExprSTR(AST::ptr<AST::Node> e,
-                                         bool is_host) const {
+                                       bool is_host) const {
   // start with the lowest precedence op ""
   return OpExprSTR(e, "", true, is_host);
 }
 
 const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
-                                           const std::string& parent_op,
-                                           bool is_left_child,
-                                           bool is_host) const {
+                                         const std::string& parent_op,
+                                         bool is_left_child,
+                                         bool is_host) const {
   std::ostringstream oss;
 
   // If output a expression with op to `oss`, then the expr maybe should
@@ -3003,7 +3002,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       oss << ids.value();
     else
 #endif
-      if (within_map.count(InScopeName(id->name)) && !is_host) {
+    if (within_map.count(InScopeName(id->name)) && !is_host) {
       size_t i = 0;
       for (auto iv_name : within_map.at(InScopeName(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
@@ -3052,7 +3051,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             AppendOffset(sbe::sym(ids.value()));
           else
 #endif
-            if (within_map.count(InScopeName(id->name))) {
+          if (within_map.count(InScopeName(id->name))) {
             auto ivs = within_map.at(InScopeName(id->name));
             for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
               AppendOffset(sbe::sym(*iv_itr));

@@ -215,9 +215,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block suffix_exprs
-%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr suffix_expr
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
+%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr
+%nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -1967,7 +1968,7 @@ suffix_exprs
         $$ = $1;
       }
     | suffix_expr {
-        $$ = AST::Make<AST::MultiNodes>(@1, ", ");
+        $$ = AST::Make<AST::MultiValues>(@1, ", ");
         $$->Append($1);
       }
     ;
@@ -1975,15 +1976,9 @@ suffix_exprs
 suffix_expr
     : VECTORIZE LPAREN IDENTIFIER COMMA s_expr RPAREN {
         auto mv = AST::Make<AST::MultiValues>(@1, ", ");
-        mv->Append(AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $3)));
+        mv->Append(AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@3, $3)));
         mv->Append($5);
-        $$ = AST::Make<AST::Expr>(@1,
-              AST::Make<AST::Call>(@1,
-                AST::Make<AST::Identifier>(@1, $1), mv,
-                  AST::Call::BIF |
-                  AST::Call::COMPTIME |
-                  AST::Call::ANNO |
-                  AST::Call::EXPR));
+        $$ = AST::Make<AST::AttributeExpr>(@1, $1, mv);
     }
   ;
 

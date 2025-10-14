@@ -110,6 +110,7 @@ public:
   bool Visit(AST::BoolLiteral&) override;
   bool Visit(AST::Expr&) override;
   bool Visit(AST::CastExpr&) override;
+  bool Visit(AST::AttributeExpr&) override;
   bool Visit(AST::MultiDimSpans&) override;
   bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;

@@ -739,6 +739,38 @@ public:
   __UDT_TYPE_INFO__(Node, Expr)
 };
 
+struct AttributeExpr final : public Node, public TypeIDProvider<AttributeExpr> {
+private:
+  std::string attr_name;
+  ptr<MultiValues> attr_values = nullptr;
+
+public:
+  AttributeExpr(const location& l, const std::string& n,
+                const ptr<MultiValues>& v)
+      : Node(l, MakeUnknownType()), attr_name(n), attr_values(v) {
+    assert(attr_values && "null node is provided.");
+  }
+
+  std::string AttrName() const { return attr_name; }
+  ptr<Node> AttrValueAt(const size_t idx) { return attr_values->ValueAt(idx); }
+  size_t AttrValueCount() const { return attr_values->Count(); }
+
+public:
+  ptr<Node> CloneImpl() const override {
+    return AST::Make<AST::AttributeExpr>(loc, attr_name, CloneP(attr_values));
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << "@" << attr_name << " ";
+    if (attr_values) attr_values->Print(os, "", with_type);
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, AttributeExpr)
+};
+
 struct CastExpr : public Expr, public TypeIDProvider<CastExpr> {
 private:
   BaseType from;
@@ -3082,14 +3114,15 @@ inline bool IsSymbolOrArrayRef(const Node& n) {
   return false;
 }
 
-inline bool NeedVectorize(const ForeachBlock& n, ptr<AST::Call>& c) {
+inline bool NeedVectorize(const ForeachBlock& n, ptr<AST::AttributeExpr>& c) {
   if (!n.suffixs) return false;
 
   for (auto suffix : n.suffixs->values) {
-    if (auto suffix_call = GetCall(suffix);
-        suffix_call->IsAnno() && suffix_call->function->name == "vectorize") {
-      c = suffix_call;
-      return true;
+    if (auto attr = dyn_cast<AST::AttributeExpr>(suffix)) {
+      if (attr->AttrName() == "vectorize") {
+        c = attr;
+        return true;
+      }
     }
   }
   c = nullptr;
@@ -3097,7 +3130,7 @@ inline bool NeedVectorize(const ForeachBlock& n, ptr<AST::Call>& c) {
 }
 
 inline bool NeedVectorize(const ForeachBlock& n) {
-  ptr<AST::Call> c;
+  ptr<AST::AttributeExpr> c;
   return NeedVectorize(n, c);
 }
 

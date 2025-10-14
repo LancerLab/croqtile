@@ -217,225 +217,222 @@ public:
 
     // TODO: to confirm about the GPU value
 #if 1
-      // linear copy
-      // omitted
+    // linear copy
+    // omitted
 
-      // transpose
-      if (n.operation == ".transp" && IsLinearCopy()) {
-        RankLE5("dma.transp(not slice nor deslice)");
-        for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
-        for (size_t idx = 1; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = sbe::nu((int)(SizeOf(f_sty->e_type)));
-        auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
-                     sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.from->LOC(),
-                   "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
-        value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
-                sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.to->LOC(),
-                   "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
-        for (size_t idx = 1; idx < t_rank; ++idx)
-          value = value * t_shape.ValueAt(idx);
-        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
-                   "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
-                   "* dim3 * dim4 < 4GB.");
-      }
+    // transpose
+    if (n.operation == ".transp" && IsLinearCopy()) {
+      RankLE5("dma.transp(not slice nor deslice)");
+      for (size_t idx = 1; idx < f_rank; ++idx)
+        CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+      for (size_t idx = 1; idx < t_rank; ++idx)
+        CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+      auto bpe = sbe::nu((int)(SizeOf(f_sty->e_type)));
+      auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                   sbe::nu(128);
+      CheckValue(value, "<", 1 << 24, n.from->LOC(),
+                 "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
+      value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+              sbe::nu(128);
+      CheckValue(value, "<", 1 << 24, n.to->LOC(),
+                 "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
+      for (size_t idx = 1; idx < t_rank; ++idx)
+        value = value * t_shape.ValueAt(idx);
+      CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+                 "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
+                 "* dim3 * dim4 < 4GB.");
+    }
 
-      // pad
-      if (n.operation == ".pad" && IsLinearCopy()) {
-        RankLE5("dma.pad");
-        auto pc = cast<PadConfig>(n.config);
-        assert(f_rank == pc->pad_low->Count());
+    // pad
+    if (n.operation == ".pad" && IsLinearCopy()) {
+      RankLE5("dma.pad");
+      auto pc = cast<PadConfig>(n.config);
+      assert(f_rank == pc->pad_low->Count());
 
-        for (const auto& mv : {pc->pad_low, pc->pad_high}) {
-          for (auto v : mv->AllValues()) {
-            auto e = cast<AST::Expr>(v);
-            if (!e->Opts().HasVal()) continue;
-            auto val = e->Opts().GetVal();
-            if (VIIsInt(val)) {
-              if (sbe::clt(val, sbe::nu(0)) || sbe::cgt(val, sbe::nu(1 << 11)))
-                Error1(e->LOC(), "On GCU300, the config in "
-                                 "dma.pad must be in range [0, 2^11].");
-            } else {
-              auto msg = "On GCU300, the config in "
-                         "dma.pad must be in range [0, 2^11]";
-              auto asrt = sbe::cmp(">=", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
-              asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
-              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
-            }
-          }
-        }
-        // padding_mid
-        for (size_t idx = 0; idx < f_rank; ++idx) {
-          auto e = cast<AST::Expr>(pc->pad_mid->ValueAt(idx));
+      for (const auto& mv : {pc->pad_low, pc->pad_high}) {
+        for (auto v : mv->AllValues()) {
+          auto e = cast<AST::Expr>(v);
           if (!e->Opts().HasVal()) continue;
           auto val = e->Opts().GetVal();
           if (VIIsInt(val)) {
-            if (idx == f_rank - 1 && sbe::cne(val, sbe::nu(0)))
+            if (sbe::clt(val, sbe::nu(0)) || sbe::cgt(val, sbe::nu(1 << 11)))
+              Error1(e->LOC(), "On GCU300, the config in "
+                               "dma.pad must be in range [0, 2^11].");
+          } else {
+            auto msg = "On GCU300, the config in "
+                       "dma.pad must be in range [0, 2^11]";
+            auto asrt = sbe::cmp(">=", val, sbe::nu(0));
+            FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+            asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
+            FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+          }
+        }
+      }
+      // padding_mid
+      for (size_t idx = 0; idx < f_rank; ++idx) {
+        auto e = cast<AST::Expr>(pc->pad_mid->ValueAt(idx));
+        if (!e->Opts().HasVal()) continue;
+        auto val = e->Opts().GetVal();
+        if (VIIsInt(val)) {
+          if (idx == f_rank - 1 && sbe::cne(val, sbe::nu(0)))
+            Error1(e->LOC(),
+                   "On " + cur_arch +
+                       ", the value of padding_mid[rank-1] in dma.pad must "
+                       "be 0 (mid padding of dim[rank-1] is not supported by "
+                       "the hardware).");
+          else if (sbe::cgt(val, sbe::nu(1 << 10)))
+            Error1(e->LOC(), "On " + cur_arch +
+                                 ", the value of padding_mid in dma.pad must "
+                                 "be in range [0, 2^10].");
+        } else {
+          if (idx == f_rank - 1) {
+            auto asrt = sbe::cmp("==", val, sbe::nu(0));
+            FCtx(cur_fname).InsertAssertion(
+                asrt, e->LOC(),
+                "On " + cur_arch +
+                    ", the value of padding_mid[rank-1] in dma.pad must be 0 "
+                    "(mid padding of dim[rank-1] is not supported by the "
+                    "hardware)");
+          } else {
+            auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
+            FCtx(cur_fname).InsertAssertion(
+                asrt, e->LOC(),
+                "On " + cur_arch +
+                    ", the value of padding_mid in dma.pad must be in range "
+                    "[0, 2^10]");
+          }
+        }
+      }
+      if (f_rank == 5) {
+        for (const auto& mv : {pc->pad_low, pc->pad_high, pc->pad_mid}) {
+          auto v = mv->ValueAt(0);
+          auto e = cast<AST::Expr>(v);
+          if (!e->Opts().HasVal()) continue;
+          auto val = e->Opts().GetVal();
+          if (VIIsInt(val)) {
+            if (sbe::cne(val, sbe::nu(0)))
               Error1(e->LOC(),
                      "On " + cur_arch +
-                         ", the value of padding_mid[rank-1] in dma.pad must "
-                         "be 0 (mid padding of dim[rank-1] is not supported by "
-                         "the hardware).");
-            else if (sbe::cgt(val, sbe::nu(1 << 10)))
-              Error1(e->LOC(), "On " + cur_arch +
-                                   ", the value of padding_mid in dma.pad must "
-                                   "be in range [0, 2^10].");
+                         ", dma.pad does not support 5-dimensional "
+                         "array (if dim is 5, pad_config[0] must be 0).");
           } else {
-            if (idx == f_rank - 1) {
-              auto asrt = sbe::cmp("==", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
-                  "On " + cur_arch +
-                      ", the value of padding_mid[rank-1] in dma.pad must be 0 "
-                      "(mid padding of dim[rank-1] is not supported by the "
-                      "hardware)");
-            } else {
-              auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
-                  "On " + cur_arch +
-                      ", the value of padding_mid in dma.pad must be in range "
-                      "[0, 2^10]");
-            }
-          }
-        }
-        if (f_rank == 5) {
-          for (const auto& mv : {pc->pad_low, pc->pad_high, pc->pad_mid}) {
-            auto v = mv->ValueAt(0);
-            auto e = cast<AST::Expr>(v);
-            if (!e->Opts().HasVal()) continue;
-            auto val = e->Opts().GetVal();
-            if (VIIsInt(val)) {
-              if (sbe::cne(val, sbe::nu(0)))
-                Error1(e->LOC(),
-                       "On " + cur_arch +
-                           ", dma.pad does not support 5-dimensional "
-                           "array (if dim is 5, pad_config[0] must be 0).");
-            } else {
-              auto asrt = sbe::cmp("==", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
-                  "On " + cur_arch +
-                      ", dma.pad does not support 5-dimensional array (if dim "
-                      "is 5, pad_config[0] must be 0)");
-            }
+            auto asrt = sbe::cmp("==", val, sbe::nu(0));
+            FCtx(cur_fname).InsertAssertion(
+                asrt, e->LOC(),
+                "On " + cur_arch +
+                    ", dma.pad does not support 5-dimensional array (if dim "
+                    "is 5, pad_config[0] must be 0)");
           }
         }
       }
-      // slice
-      if (n.operation == ".copy" && IsSlice()) {
-        RankLE5("dma.copy(slice)");
-        for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
-        for (size_t idx = 0; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        // TODO: offset limitation: [0, 2^24)
-        if (f_rank == 5) {
-          for (auto tsi : f_ca->AllOperations()) {
-            if (tsi->SpecifyReshape()) continue;
-            auto first = tsi->Positions()->ValueAt(0);
-            auto t = dyn_cast<BoundedITupleType>(first->GetType());
-            assert(t != nullptr);
-            if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
-                Error1(n.LOC(),
-                       "On " + cur_arch +
-                           ", dma.copy(slice) does not "
-                           "support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0).");
-            } else {
-              choreo_unreachable("unexpected situation");
-              // TODO
-              // Is that the case?
-            }
-          }
-        }
-        // TODO: check for auto padding
-      }
-
-      // deslice
-      if (n.operation == ".copy" && IsDeslice()) {
-        RankLE5("dma.copy(deslice)");
-        for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
-        for (size_t idx = 0; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        // TODO: offset limitation: [0, 2^24)
-        if (t_rank == 5) {
-          for (auto tsi : t_ca->AllOperations()) {
-            if (tsi->SpecifyReshape()) continue;
-            auto first = tsi->Positions()->ValueAt(0);
-            auto t = dyn_cast<BoundedITupleType>(first->GetType());
-            assert(t != nullptr);
-            if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
-                Error1(n.LOC(),
-                       "On " + cur_arch +
-                           ", dma.copy(deslice) does not "
-                           "support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0).");
-            } else {
-              choreo_unreachable("unexpected situation");
-              // TODO
-              // Is that the case?
-            }
+    }
+    // slice
+    if (n.operation == ".copy" && IsSlice()) {
+      RankLE5("dma.copy(slice)");
+      for (size_t idx = 0; idx < f_rank; ++idx)
+        CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+      for (size_t idx = 0; idx < t_rank; ++idx)
+        CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+      // TODO: offset limitation: [0, 2^24)
+      if (f_rank == 5) {
+        for (auto tsi : f_ca->AllOperations()) {
+          if (tsi->SpecifyReshape()) continue;
+          auto first = tsi->Positions()->ValueAt(0);
+          auto t = dyn_cast<BoundedITupleType>(first->GetType());
+          assert(t != nullptr);
+          if (VIIsInt(t->ubounds.ValueAt(0))) {
+            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+              Error1(n.LOC(), "On " + cur_arch +
+                                  ", dma.copy(slice) does not "
+                                  "support 5-dimensional "
+                                  "array (if dim is 5, offsets[0] must be 0).");
+          } else {
+            choreo_unreachable("unexpected situation");
+            // TODO
+            // Is that the case?
           }
         }
       }
+      // TODO: check for auto padding
+    }
 
-      // slice transpose
-      if (n.operation == ".transp" && IsSlice()) {
-        RankLE5("dma.transp(slice then transpose)");
-        for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
-        for (size_t idx = 1; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = sbe::nu(SizeOf(f_sty->e_type));
-        auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
-                     sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.from->LOC(),
-                   "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
-        value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
-                sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.to->LOC(),
-                   "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
-        for (size_t idx = 1; idx < t_rank; ++idx)
-          value = value * t_shape.ValueAt(idx);
-        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
-                   "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
-                   "* dim3 * dim4 < 4GB.");
+    // deslice
+    if (n.operation == ".copy" && IsDeslice()) {
+      RankLE5("dma.copy(deslice)");
+      for (size_t idx = 0; idx < f_rank; ++idx)
+        CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+      for (size_t idx = 0; idx < t_rank; ++idx)
+        CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+      // TODO: offset limitation: [0, 2^24)
+      if (t_rank == 5) {
+        for (auto tsi : t_ca->AllOperations()) {
+          if (tsi->SpecifyReshape()) continue;
+          auto first = tsi->Positions()->ValueAt(0);
+          auto t = dyn_cast<BoundedITupleType>(first->GetType());
+          assert(t != nullptr);
+          if (VIIsInt(t->ubounds.ValueAt(0))) {
+            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+              Error1(n.LOC(), "On " + cur_arch +
+                                  ", dma.copy(deslice) does not "
+                                  "support 5-dimensional "
+                                  "array (if dim is 5, offsets[0] must be 0).");
+          } else {
+            choreo_unreachable("unexpected situation");
+            // TODO
+            // Is that the case?
+          }
+        }
       }
+    }
 
-      // transpose deslice
-      if (n.operation == ".transp" && IsDeslice()) {
-        RankLE5("dma.transp(transpose then deslice)");
-        for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
-        for (size_t idx = 1; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = sbe::nu((int)(SizeOf(f_sty->e_type)));
-        auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
-                     sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.from->LOC(),
-                   "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
-        value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
-                sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.to->LOC(),
-                   "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
-        for (size_t idx = 1; idx < t_rank; ++idx)
-          value = value * t_shape.ValueAt(idx);
-        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
-                   "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
-                   "* dim3 * dim4 < 4GB.");
-      }
+    // slice transpose
+    if (n.operation == ".transp" && IsSlice()) {
+      RankLE5("dma.transp(slice then transpose)");
+      for (size_t idx = 1; idx < f_rank; ++idx)
+        CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+      for (size_t idx = 1; idx < t_rank; ++idx)
+        CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+      auto bpe = sbe::nu(SizeOf(f_sty->e_type));
+      auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                   sbe::nu(128);
+      CheckValue(value, "<", 1 << 24, n.from->LOC(),
+                 "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
+      value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+              sbe::nu(128);
+      CheckValue(value, "<", 1 << 24, n.to->LOC(),
+                 "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
+      for (size_t idx = 1; idx < t_rank; ++idx)
+        value = value * t_shape.ValueAt(idx);
+      CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+                 "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
+                 "* dim3 * dim4 < 4GB.");
+    }
 
-      return;
+    // transpose deslice
+    if (n.operation == ".transp" && IsDeslice()) {
+      RankLE5("dma.transp(transpose then deslice)");
+      for (size_t idx = 1; idx < f_rank; ++idx)
+        CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+      for (size_t idx = 1; idx < t_rank; ++idx)
+        CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+      auto bpe = sbe::nu((int)(SizeOf(f_sty->e_type)));
+      auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                   sbe::nu(128);
+      CheckValue(value, "<", 1 << 24, n.from->LOC(),
+                 "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
+      value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+              sbe::nu(128);
+      CheckValue(value, "<", 1 << 24, n.to->LOC(),
+                 "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
+      for (size_t idx = 1; idx < t_rank; ++idx)
+        value = value * t_shape.ValueAt(idx);
+      CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+                 "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
+                 "* dim3 * dim4 < 4GB.");
+    }
+
+    return;
 #endif
-
   }
 
   void CheckDimSize(const Shape& s, size_t idx, const std::string& op,
@@ -691,7 +688,8 @@ public:
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
     if (n.IsArith())
-      Error1(n.LOC(), "Arithmetic built-in function is yet to supported on CUDA.");
+      Error1(n.LOC(),
+             "Arithmetic built-in function is yet to supported on CUDA.");
 
     if (n.function->name != "print" && n.function->name != "println") {
       for (auto& arg : n.GetArguments()) {

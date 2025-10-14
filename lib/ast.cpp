@@ -36,6 +36,12 @@ void Expr::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
+void AttributeExpr::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  if (attr_values) attr_values->accept(v);
+  v.Visit(*this);
+}
+
 void CastExpr::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   assert(!GetC());
@@ -311,7 +317,7 @@ void LoopRange::accept(Choreo::Visitor& v) {
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   ranges->accept(v);
-  // if (suffixs) suffixs->accept(v);
+  if (suffixs) suffixs->accept(v);
   v.Visit(*this);
   if (stmts) stmts->accept(v);
   v.AfterVisit(*this);

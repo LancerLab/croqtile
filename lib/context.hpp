@@ -41,7 +41,7 @@ enum class TargetArch {
   GCU21,
   GCU3,
   GCU4,
-  GPU,  // TODO: unclear
+  GPU, // TODO: unclear
   // Nv series
   SM_70,
   SM_75,
@@ -86,10 +86,8 @@ inline bool RequiresE2ECompilation(OutputKind ok) {
   case OutputKind::TargetModule:
   case OutputKind::TargetAssembly:
   case OutputKind::TargetExecutable:
-  case OutputKind::ShellScript:
-    return true;
-  default:
-    break;
+  case OutputKind::ShellScript: return true;
+  default: break;
   }
   return false;
 }
@@ -339,8 +337,8 @@ private:
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate debug information
-  bool branch_norm = false;       // enable branch normalization
   bool loop_norm = false;         // enable loop normalization
+  bool no_vectorize = false;      // do not vectorize any foreach loop
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -442,11 +440,10 @@ public:
     case TargetArch::SM_90:
     case TargetArch::SM_100: {
       switch (sto) {
-      case Storage::SHARED: return 48ull * 1024;   // 48k static
+      case Storage::SHARED: return 48ull * 1024; // 48k static
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
-
 
     default: choreo_unreachable("Unsupported target arch.");
     }
@@ -480,8 +477,8 @@ public:
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
-  bool BranchNorm() const { return branch_norm; }
   bool LoopNorm() const { return loop_norm; }
+  bool NoVectorize() const { return no_vectorize; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -501,8 +498,8 @@ public:
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
-  void SetBranchNorm(bool value) { branch_norm = value; }
   void SetLoopNorm(bool value) { loop_norm = value; }
+  void SetNoVectorize(bool value) { no_vectorize = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

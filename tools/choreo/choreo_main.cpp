@@ -152,12 +152,15 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  LoopVectorizer lv;
-  if (!lv.RunOnProgram(root)) return lv.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-  if (CCtx().TraceVectorize()) return 0;
+  if (!CCtx().NoVectorize()) {
+    LoopVectorizer lv;
+    if (!lv.RunOnProgram(root)) return lv.Status();
+    if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
+    if (CCtx().TraceVectorize()) return 0;
 
-  CCtx().SetGlobalSymbolTable(lv.SymTab());
+    CCtx().SetGlobalSymbolTable(lv.SymTab());
+  }
+
 
   LivenessAnalyzer la;
   if (!la.RunOnProgram(root)) return la.Status();
