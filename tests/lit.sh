@@ -343,6 +343,7 @@ device_type="none"
 gcu_arch="none"
 cuda_arch="none"
 mach=
+simulator=
 
 # some specific features
 is_dynshape_supported=0
@@ -385,12 +386,13 @@ detect_device_features() {
   if [ "$gcu_arch" != "none"  ]; then
     device_type="gcu"
     mach=${gcu_arch}
-  elif [ -f "${script_dir}/../extern/lib/libgcusim.so" ]; then
+  fi
+  if [ -f "${script_dir}/../extern/lib/libgcusim.so" ]; then
     # the simulators exist
     device_type="gcu"
     gcu_sim_lib=${script_dir}/../extern/lib/
     gcu_sim_arch=gcusim400
-    mach=${gcu_sim_arch}
+    simulator=${gcu_sim_arch}
   else
     echo "can not determine the GCU device type."
     exit 1
@@ -814,8 +816,7 @@ for file in "${files_array[@]}"; do
         unset_env="export LD_LIBRARY_PATH=${old_path}; unset INTERNAL_GCU_SIM;"
       fi
     fi
-
-    if ! set_contains tst_targets "$mach"; then
+    if ! set_contains tst_targets "$mach" && ! set_contains tst_targets "$simulator"; then
       # Not matched, skip
       _all_skipped_targets=$(set_print tst_targets)
       echo "SKIP($(toupper "${_all_skipped_targets}")): ${file} ($run_count of $run_num)"
