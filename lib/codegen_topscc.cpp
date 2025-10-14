@@ -2,13 +2,12 @@
 
 #include <filesystem>
 #include <iostream>
-#include <numeric>
 #include <sstream>
-#include <thread>
 
 #include "ast.hpp"
 #include "choreo_header.inc"
 #include "codegen.hpp"
+#include "io.hpp"
 #include "operator_info.hpp"
 #include "types.hpp"
 
@@ -157,6 +156,48 @@ void GenerateSubscriptions(std::ostream& os, const std::string prefix,
 
 } // namespace
 
+inline const std::string
+TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
+  auto smi = cur_loop ? cur_loop->smi : nullptr;
+  auto vty = dyn_cast<VectorType>(ty);
+  if (!vty) choreo_unreachable("expecting a vector type.");
+  auto elem_ty = vty->e_type;
+  auto ec = vty->ec;
+  auto elem_size = SizeOf(elem_ty);
+  auto vector_size = elem_size * ec;
+  if (elem_size == 1) {
+    assert(smi && "missing scoped mask info.");
+    auto mask_elem_type = smi->GetMaskEType();
+    vector_size *= SizeOf(mask_elem_type);
+  }
+  std::string vty_str;
+  if (vector_size == CCtx().GetSingleVectorByteSize())
+    vty_str = "__vector ";
+  else if (vector_size == 2 * CCtx().GetSingleVectorByteSize())
+    vty_str = "__vector2 ";
+  else if (vector_size == 4 * CCtx().GetSingleVectorByteSize())
+    vty_str = "__vector4 ";
+  else
+    choreo_unreachable(
+        "unsupported vector size: " + std::to_string(vector_size) + ".");
+  vty_str += NameBaseType(elem_ty);
+  if (elem_size == 1) {
+    assert(smi && "missing scoped mask info.");
+    auto mask_elem_type = smi->GetMaskEType();
+    if (SizeOf(mask_elem_type) == 8)
+      vty_str += " long long";
+    else if (SizeOf(mask_elem_type) == 4)
+      vty_str += " int";
+    else if (SizeOf(mask_elem_type) == 2)
+      vty_str += " short";
+    else if (SizeOf(mask_elem_type) == 1)
+      vty_str += " char";
+    else
+      choreo_unreachable("unsupported vector boolean type.");
+  }
+  return vty_str;
+}
+
 bool TopsccCodeGen::RequiresImplPred(Storage cur) const {
   // ignore any host code
   if (IsHost()) return false;
@@ -238,9 +279,46 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     IndStream() << "// with-in: " << n.LOC() << "\n";
     IndStream() << "{\n";
     IncrIndent();
-  } else if (isa<AST::ForeachBlock>(&n)) {
+  } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     IndStream() << "// foreach: " << n.LOC() << "\n";
+    auto loop = fb->loop;
+    if (loop && loop->CanVectorize()) {
+      // create vector loop induction variable
+      std::string sname = InScopeName(loop->IVName());
+      auto ivs = within_map.at(sname);
+      assert(ivs.size() == 1 &&
+             "vectorized foreach only supports one induction variable.");
+      auto iv = UnScopedName(ivs[0]);
+      std::string iv_name = "__iv_" + iv;
+      int vector_width = loop->GetVectorWidth();
+      std::string vec_iv_plus_name = "__vec_iv_" + iv + "_plus";
+      std::string vec_iv_base_name = "__vec_iv_" + iv + "_base";
+      auto vector_type = MakeVectorType(BaseType::U32, vector_width);
+      ds << d_indent << VectorTypeSTR(vector_type) << " " << vec_iv_base_name
+         << " = " << "(" << VectorTypeSTR(vector_type) << ")(" << iv_name
+         << ");\n";
+
+      ds << d_indent << VectorTypeSTR(vector_type) << " " << vec_iv_plus_name
+         << " = ";
+      if (CCtx().GetArch() == TargetArch::GCU3) {
+        ds << "{";
+        for (int i = 0; i < vector_width; ++i) {
+          if (i > 0) ds << ", ";
+          ds << i;
+        }
+        ds << "};\n";
+      } else if (CCtx().GetArch() == TargetArch::GCU4) {
+        ds << "tcle::mid<" << VectorTypeSTR(vector_type) << ", 0>(0);\n";
+      } else
+        choreo_unreachable("unsupported target architecture.");
+
+      std::string vec_iv_name = "__vec_iv_" + iv;
+      ds << d_indent << VectorTypeSTR(vector_type) << " " << vec_iv_name
+         << " = " << vec_iv_base_name << " + " << vec_iv_plus_name << ";\n";
+      return true;
+    }
   }
+
   if (isa<AST::IfElseBlock>(&n) || isa<AST::NamedVariableDecl>(&n)) {
     emit_call = false;
   } else if (isa<AST::IncrementBlock>(&n)) {
@@ -335,7 +413,22 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     for (int j = ranges->Count() - 1; j >= 0; --j) {
       auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
       auto cname = rng->IVName();
+
       auto ivs = within_map.at(InScopeName(cname));
+      auto loop = fb->loop;
+      if (loop && loop->CanVectorize()) {
+        std::string sname = InScopeName(cur_loop->IVName());
+        int vector_width = cur_loop->GetVectorWidth();
+        auto vector_type = MakeVectorType(BaseType::U32, vector_width);
+
+        IndStream() << SSMName(sname, IsHost()) << " += ("
+                    << VectorTypeSTR(vector_type) << ")(" << vector_width
+                    << ");\n";
+        // remap symbol of loop induction variable to its scalar version.
+        ssm.RemapDeviceSymbol(sname, "__iv_" + cur_loop->IVName());
+        ssm.RemapHostSymbol(sname, "__iv_" + cur_loop->IVName());
+      }
+
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
         DecrIndent();
         IndStream() << "} // " << UnScopedName(*iv_itr) << "\n";
@@ -351,8 +444,13 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << " // end inthreads\n";
     }
   } else if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
-    DecrIndent();
-    IndStream() << "} // end if-else: " << ie->LOC() << "\n";
+    auto pred = ie->GetPred();
+    if (!pred->GetDiversityShape().Varying()) {
+      DecrIndent();
+      IndStream() << "} // end if-else: " << ie->LOC() << "\n";
+    } else {
+      IndStream() << "// end if-else: " << ie->LOC() << "\n";
+    }
   } else if (auto ie = dyn_cast<AST::WhileBlock>(&n)) {
     DecrIndent();
     IndStream() << "} // end while: " << ie->LOC() << "\n";
@@ -558,7 +656,6 @@ void TopsccCodeGen::EmitFixedHostHead() {
 #include "tcle.h"
 #endif // __GCU_ARCH__ >= 300
 )";
-
 
   oss << "// include the choreo header;\n";
   if (native_f16)
@@ -886,6 +983,43 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     return true;
   }
 
+  // vector variable
+  if (IsActualVectorType(nty)) {
+    bool masking = false;
+    std::string mask;
+    auto smi = cur_loop->smi;
+    if (smi->NeedMask() && !n.HasNote("masking")) {
+      mask = smi->GetMaskInScope(SSTab().ScopeName());
+      if (!smi->IsMaskAlltrue(mask)) masking = true;
+    }
+
+    auto vector_width = ElementCount(nty);
+    auto ele_ty = ElementType(nty);
+    auto vty = MakeVectorType(ele_ty, vector_width);
+    IndStream() << VectorTypeSTR(vty) << " " << sym << " = ";
+    if (n.init_expr) {
+      auto rhs_ty = n.init_expr->GetType();
+      if (masking) Stream() << "tcle::vsel(exec, ";
+
+      bool rparen = false;
+      if (!IsActualVectorType(rhs_ty)) {
+        if (n.init_expr->HasNote("broadcast")) {
+          Stream() << "(" << VectorTypeSTR(vty) << ")" << "(";
+          rparen = true;
+        } else {
+          choreo_unreachable("not supported scalar -> vector");
+        }
+      }
+      Stream() << ExprSTR(n.init_expr, false);
+      if (rparen) Stream() << ")";
+      // if need masking, fill the inactive lanes with zero
+      if (masking) Stream() << ", (" << VectorTypeSTR(vty) << ")(0))";
+    }
+
+    Stream() << ";\n";
+    if (!IsHost()) ssm.MapDeviceSymbol(InScopeName(sym), sym);
+  }
+
   if (auto bty = dyn_cast<BoundedType>(nty)) {
     // bounded variable is not with a fixed value
     if (!IsActualBoundedIntegerType(bty))
@@ -1048,10 +1182,48 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
+  // vector type assign
+  if (IsActualVectorType(nty)) {
+    bool masking = false;
+    std::string mask;
+    auto smi = cur_loop->smi;
+    if (smi->NeedMask() && !n.HasNote("masking")) {
+      mask = smi->GetMaskInScope(SSTab().ScopeName());
+      if (!smi->IsMaskAlltrue(mask)) masking = true;
+    }
+
+    if (!n.AssignToDataElement()) {
+      IndStream() << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = ";
+      // if need masking, the inactive lanes are not modified
+      if (masking) Stream() << "tcle::vsel(exec, ";
+      Stream() << ExprSTR(n.value, IsHost());
+      if (masking) Stream() << ", " << n.GetName() << ")";
+      Stream() << ";\n";
+    } else {
+      // if it is assigned to a memory reference, which is a store
+      if (!IsHost()) {
+        auto rhs = n.value;
+        if (auto id = AST::GetIdentifier(rhs)) {
+          IndStream() << DASTR(n.da, ExprSTR(n.value, false), false, masking)
+                      << ";\n";
+        } else {
+          // need a temporary variable to hold the rhs value
+          auto tmp_val_name = symtab.GetAnonName();
+          ds << d_indent << VectorTypeSTR(nty) << " " << tmp_val_name << " = "
+             << ExprSTR(n.value, false) << ";\n";
+          ds << d_indent << DASTR(n.da, tmp_val_name, false, masking) << ";\n";
+        }
+      } else
+        choreo_unreachable(
+            "error: assignment to data element should be on device side.");
+    }
+    return true;
+  }
+
   if (n.AssignToDataElement()) {
-    if (!IsHost())
-      ds << d_indent << ExprSTR(n.da, false) << " = " << ExprSTR(n.value, false)
-         << ";\n";
+    if (!IsHost()) {
+      ds << d_indent << DASTR(n.da, ExprSTR(n.value, false), false) << ";\n";
+    }
 
     if (IsHost()) {
       // TODO: test the case!
@@ -2324,14 +2496,18 @@ bool TopsccCodeGen::Visit(AST::WithBlock& n) {
 
 bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
-
+  cur_loop = n.loop;
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
     auto cname = rng->IVName();
     for (auto iv_name : within_map.at(InScopeName(cname))) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));
-      auto iv_bty = cast<BoundedType>(iv_ty);
+      auto iv_bty = cast<BoundedITupleType>(iv_ty);
+      assert(iv_bty);
+      auto stride = iv_bty->GetStride(0);
+      auto width = iv_bty->GetWidth(0);
+      int increment = stride * width;
       IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
                   << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
                                   : "0")
@@ -2339,8 +2515,19 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
                   << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
                   << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
                                   : "")
-                  << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
+                  << "; "
+                  << (increment != 1 ? (SSMName(iv_name, IsHost()) +
+                                        " += " + std::to_string(increment))
+                                     : ("++" + SSMName(iv_name, IsHost())))
+                  << ") {\n";
+
       IncrIndent();
+      // if this loop needs vectorization, remap the iv to vec_iv
+      if (cur_loop && cur_loop->CanVectorize()) {
+        std::string vec_iv_name = "__vec_iv_" + cname;
+        ssm.RemapDeviceSymbol(iv_name, vec_iv_name);
+        ssm.RemapHostSymbol(iv_name, vec_iv_name);
+      }
     }
   }
 
@@ -2359,13 +2546,15 @@ bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
 
 bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
-
   IndStream() << "// if-else: " << n.LOC() << "\n";
-  if (auto c = dyn_cast<AST::Call>(n.pred))
-    IndStream() << "if (" << CallSTR(*c) << ") {\n";
-  else
-    IndStream() << "if (" << ExprSTR(n.pred, IsHost()) << ") {\n";
-  IncrIndent();
+  auto pred = n.GetPred();
+  if (!pred->GetDiversityShape().Varying()) {
+    if (auto c = dyn_cast<AST::Call>(n.pred))
+      IndStream() << "if (" << CallSTR(*c) << ") {\n";
+    else
+      IndStream() << "if (" << ExprSTR(n.pred, IsHost()) << ") {\n";
+    IncrIndent();
+  }
   emit_call = true;
   return true;
 }
@@ -3150,6 +3339,51 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   return res.str();
 }
 
+const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
+                                               const AST::DataAccess& da,
+                                               bool is_host) const {
+  size_t idx = 0;
+  std::ostringstream oss;
+  auto AppendOffset = [this, &oss, &shape, &idx](const ValueItem& op) {
+    auto offset = op;
+    assert(shape.Rank() >= idx + 1);
+    if (shape.Rank() > idx + 1)
+      offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
+    SimplifyExpression(offset);
+    if (!sbe::ceq(offset, sbe::nu(0))) oss << " + " << ValueSTR(offset);
+    ++idx;
+  };
+  for (auto item : da.GetIndices()) {
+    auto item_ty = item->GetType();
+    if (auto id = AST::GetIdentifier(item)) {
+      if (auto ids = ThreadIdString(id))
+        AppendOffset(sbe::sym(ids.value()));
+      else if (auto sids = SubThreadIdString(id))
+        AppendOffset(sbe::sym(sids.value()));
+      else if (within_map.count(InScopeName(id->name))) {
+        auto ivs = within_map.at(InScopeName(id->name));
+        for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
+          AppendOffset(sbe::sym(*iv_itr));
+      } else
+        AppendOffset(sbe::sym(InScopeName(id->name)));
+    } else if (auto il = AST::GetIntLiteral(*item)) {
+      AppendOffset(sbe::nu(il->Val()));
+    } else {
+      oss << " + ";
+      assert(shape.Rank() >= idx + 1);
+      if (shape.Rank() > idx + 1)
+        oss << OpExprSTR(item, "*", true, is_host) << "*"
+            << ValueSTR(shape.TrimDims(idx + 1).ElementCountValue());
+      else
+        oss << OpExprSTR(item, "+", false, is_host);
+      ++idx;
+    }
+    if (IsActualVectorType(item_ty)) oss << "[0]";
+  }
+  oss << ")";
+  return oss.str();
+}
+
 const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                          bool is_host) const {
   // start with the lowest precedence op ""
@@ -3205,51 +3439,21 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
     oss << sl->EscapedVal();
   } else if (auto b = dyn_cast<AST::BoolLiteral>(e)) {
-    oss << b->value;
+    oss << (b->value ? "true" : "false");
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     // currently, value of IntIndex is always IntLiteral or Identifier
     return OpExprSTR(ii->value, parent_op, true, is_host);
   } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
     if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
-      oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
-          << OpExprSTR(da->data, "+", true, is_host);
-      size_t idx = 0;
-      auto shape = sty->GetShape();
-      auto AppendOffset = [this, &oss, &shape, &idx](const ValueItem& op) {
-        auto offset = op;
-        assert(shape.Rank() >= idx + 1);
-        if (shape.Rank() > idx + 1)
-          offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
-        SimplifyExpression(offset);
-        if (!sbe::ceq(offset, sbe::nu(0))) oss << " + " << ValueSTR(offset);
-        ++idx;
-      };
-      for (auto item : da->GetIndices()) {
-        if (auto id = AST::GetIdentifier(item)) {
-          if (auto ids = ThreadIdString(id))
-            AppendOffset(sbe::sym(ids.value()));
-          else if (auto sids = SubThreadIdString(id))
-            AppendOffset(sbe::sym(sids.value()));
-          else if (within_map.count(InScopeName(id->name))) {
-            auto ivs = within_map.at(InScopeName(id->name));
-            for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
-              AppendOffset(sbe::sym(*iv_itr));
-          } else
-            AppendOffset(sbe::sym(InScopeName(id->name)));
-        } else if (auto il = AST::GetIntLiteral(*item)) {
-          AppendOffset(sbe::nu(il->Val()));
-        } else {
-          oss << " + ";
-          assert(shape.Rank() >= idx + 1);
-          if (shape.Rank() > idx + 1)
-            oss << OpExprSTR(item, "*", true, is_host) << "*"
-                << ValueSTR(shape.TrimDims(idx + 1).ElementCountValue());
-          else
-            oss << OpExprSTR(item, "+", false, is_host);
-          ++idx;
-        }
+      if (auto da_ty = dyn_cast<VectorType>(da->GetType())) {
+        oss << DASTR(da);
+      } else {
+        oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
+            << OpExprSTR(da->data, "+", true, is_host);
+        auto shape = sty->GetShape();
+
+        oss << AddressOffset(shape, *da, is_host);
       }
-      oss << ")";
     } else {
       assert(!da->AccessElement());
       assert(!within_map.count(InScopeName(da->data->name)));
@@ -3261,6 +3465,18 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
                        is_host);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
+    // if this expr needs broadcasting
+    bool rparen = false;
+    if (expr->HasNote("broadcast")) {
+      auto vector_width = cur_loop->GetVectorWidth();
+      auto ety = expr->GetType();
+      BaseType bty = ety->GetBaseType();
+      if (IsActualBoundedIntegerType(ety)) bty = BaseType::S32;
+
+      auto vty = MakeVectorType(bty, vector_width);
+      oss << "(" << VectorTypeSTR(vty) << ")" << "(";
+      rparen = true;
+    }
 
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {
@@ -3403,6 +3619,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     } else
       choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
                          "', expr: " + PSTR(expr) + ".");
+    if (rparen) oss << ")";
   } else if (auto c = dyn_cast<AST::Call>(e)) {
     assert(!is_host);
     return CallSTR(*c);
@@ -3464,5 +3681,83 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   }
   oss << ")";
 
+  return oss.str();
+}
+
+const std::string
+TopsccCodeGen::BuildTcleLoad(const std::string& addr_str,
+                             const std::string& ty_str) const {
+  std::ostringstream oss;
+  oss << "tcle::load<" << ty_str << ">(";
+  if (CCtx().GetArch() == TargetArch::GCU3)
+    oss << "(__TCLE_AS__ char *)(";
+  else if (CCtx().GetArch() == TargetArch::GCU4)
+    oss << "(char *)(";
+  else
+    choreo_unreachable("unsupported target arch.");
+  oss << addr_str << ")";
+  return oss.str();
+}
+
+const std::string
+TopsccCodeGen::BuildTcleStore(const std::string& addr_str, const std::string&,
+                              const std::string& val_str) const {
+  std::ostringstream oss;
+  oss << "tcle::store(" << val_str << ", ";
+  if (CCtx().GetArch() == TargetArch::GCU3)
+    oss << "(__TCLE_AS__ char *)(";
+  else if (CCtx().GetArch() == TargetArch::GCU4)
+    oss << "(char *)(";
+  else
+    choreo_unreachable("unsupported target arch.");
+  oss << addr_str << ")";
+  return oss.str();
+}
+
+const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
+                                       const std::string& val_str, bool is_load,
+                                       bool masking) const {
+  std::ostringstream oss;
+  if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
+    auto da_ty = da->GetType();
+    auto elem_ty = sty->ElementType();
+    if (auto vty = dyn_cast<VectorType>(da_ty)) {
+      if (da->HasNote("VLDST")) {
+        // continuous address, vector load/store
+        auto data_name = da->GetDataName();
+        auto addr_str = std::string("(") + NameBaseType(elem_ty) + "*)" +
+                        ssm.DeviceName(InScopeName(data_name)) +
+                        AddressOffset(sty->GetShape(), *da, false);
+        auto vty_str = VectorTypeSTR(vty);
+        if (is_load) {
+          // load
+          oss << BuildTcleLoad(addr_str, vty_str);
+        } else {
+          // store
+          auto st_val = val_str;
+          if (masking) {
+            // for now, it use tcle::vsel to do masking store, the store val
+            // 'st_val' is conditionally selected between 'val_str' and 'ld_val'
+            // from the same memory location.
+            auto ld_val = symtab.GetAnonName();
+            oss << VectorTypeSTR(vty) << " " << ld_val << " = "
+                << BuildTcleLoad(addr_str, vty_str) << ";\n";
+            oss << (IsHost() ? h_indent : d_indent);
+            oss << st_val << " = tcle::vsel(exec, " << val_str << ", " << ld_val
+                << ");\n";
+            oss << (IsHost() ? h_indent : d_indent);
+          }
+
+          oss << BuildTcleStore(addr_str, "", st_val);
+        }
+      } else if (da->HasNote("VGZST")) {
+        // random address, vector gather/scatter
+        choreo_unreachable(
+            "choreo currently do not support gather or scatter.");
+      }
+    } else {
+      oss << ExprSTR(da, false) << " = " << val_str;
+    }
+  }
   return oss.str();
 }

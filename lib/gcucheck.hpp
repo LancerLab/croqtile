@@ -40,6 +40,11 @@ inline int GCUDeviceParallelDepth(Storage l) {
   return levels[l];
 }
 
+inline size_t GCUVLdStAlignment(ptr<VectorType> vt) {
+  if (CCtx().GetArch() != TargetArch::GCU4) return SizeOf(*vt);
+  return 1;
+}
+
 struct GCUCheck : public VisitorWithSymTab {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;

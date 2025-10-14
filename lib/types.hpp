@@ -40,6 +40,7 @@ enum class BaseType {
   PARTIAL,
   EVENT,
   ARRAY,
+  VECTOR,
   ADDR,
   VOID,
   SPANNED,
@@ -151,6 +152,7 @@ inline static size_t SizeOf(BaseType bt) {
   case BaseType::F64: return sizeof(double);
   case BaseType::U64:
   case BaseType::S64: return 8;
+  case BaseType::BOUNDED_INT:
   case BaseType::F32:
   case BaseType::U32:
   case BaseType::S32: return 4;
@@ -197,6 +199,7 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
       {"ituple", BaseType::ITUPLE},
       {"event", BaseType::EVENT},
       {"array", BaseType::ARRAY},
+      {"vector", BaseType::VECTOR},
       {"address", BaseType::ADDR},
       {"void", BaseType::VOID},
       {"unknown", BaseType::UNKNOWN},
@@ -262,6 +265,7 @@ inline static std::string GetStringFrom(BaseType dataType) {
       {BaseType::INDEX, "index"},
       {BaseType::EVENT, "event"},
       {BaseType::ARRAY, "array"},
+      {BaseType::VECTOR, "vector"},
       {BaseType::ADDR, "address"},
       {BaseType::VOID, "void"},
       {BaseType::UNKNOWN, "unknown"},
@@ -849,6 +853,44 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   __UDT_TYPE_INFO__(Type, ScalarType)
 };
 
+struct VectorType final : public Type, public TypeIDProvider<VectorType> {
+  bool is_mutable = true;
+  using FundamentalType = BaseType;
+  FundamentalType e_type;
+  size_t ec = 0;
+  VectorType(BaseType e, size_t w) : Type(BaseType::VECTOR), e_type(e), ec(w) {
+    assert(w > 0 && "vector width must be positive.");
+  }
+
+  size_t ElemCount() const { return ec; }
+  BaseType ElemType() const { return e_type; }
+  size_t Dims() const override { return 1; }
+  bool IsComplete() const override { return true; }
+  bool HasSufficientInfo() const override { return true; }
+  bool ApprxEqual(const Type& ty) const override {
+    if (auto vt = dyn_cast<VectorType>(&ty)) {
+      return vt->ec == ec && vt->e_type == e_type;
+    }
+    return false;
+  }
+  void Print(std::ostream& os) const override {
+    if (is_mutable) os << "mutable ";
+    os << "vector<" << STR(e_type) << "," << ec << ">";
+  }
+  const std::string Name() const override { return "vector"; }
+  virtual const ptr<Type> Clone() const override {
+    return std::make_shared<VectorType>(e_type, ec);
+  }
+  bool operator==(const Type& ty) const override {
+    if (auto vt = dyn_cast<VectorType>(&ty)) {
+      return vt->ec == ec && vt->e_type == e_type;
+    }
+    return false;
+  }
+
+  __UDT_TYPE_INFO__(Type, VectorType)
+};
+
 inline bool ConvertibleToInt(const Type& ty);
 
 struct ScalarFloatType;
@@ -1394,6 +1436,10 @@ struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
   virtual void AppendNote(const std::string& n) { note += n; };
   virtual const ValueItem& GetUpperBound() const = 0;
   virtual const MultiBounds GetUpperBounds() const = 0;
+  virtual int GetStride() const = 0;
+  virtual IntegerList GetStrides() const = 0;
+  virtual int GetWidth() const = 0;
+  virtual IntegerList GetWidths() const = 0;
 
   bool LogicalEqual(const Type& ty) const override {
     if (auto fty = dyn_cast<BoundedType>(&ty)) return Dims() == fty->Dims();
@@ -1412,6 +1458,7 @@ struct BoundedIntegerType final : public BoundedType,
   ValueItem lbound = GetInvalidValueItem();
   ValueItem ubound = GetInvalidValueItem();
   int stride = GetInvalidStride();
+  int width = 1;
 
   BoundedIntegerType() : BoundedType(BaseType::BOUNDED_INT, "") {}
   BoundedIntegerType(int lb, int ub, int s = 1, const std::string& note = "")
@@ -1436,8 +1483,10 @@ struct BoundedIntegerType final : public BoundedType,
   const MultiBounds GetUpperBounds() const override {
     return MultiBounds(1, ubound);
   }
-  ValueItem GetStride() const { return ubound; }
-
+  int GetStride() const override { return stride; }
+  IntegerList GetStrides() const override { return IntegerList(1, stride); }
+  int GetWidth() const override { return width; }
+  IntegerList GetWidths() const override { return IntegerList(1, width); }
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedIntegerType>(&ty)) return false;
     auto bty = (BoundedIntegerType&)ty;
@@ -1470,11 +1519,27 @@ struct BoundedITupleType final : public BoundedType,
   MultiBounds lbounds;
   MultiBounds ubounds;
   IntegerList strides;
+  IntegerList widths;
 
   BoundedITupleType(const MultiBounds& l, const MultiBounds& u,
                     const IntegerList s, const std::string& n = "")
       : BoundedType(BaseType::BOUNDED_ITUPLE, n), lbounds(l), ubounds(u),
         strides(s) {
+    if (lbounds.IsValid())
+      assert((lbounds.DimCount() == ubounds.DimCount()) &&
+             (lbounds.DimCount() == strides.size()) &&
+             "expecting a valid bound.");
+    else
+      assert(!ubounds.IsValid() && strides.empty() &&
+             "expecting an invalid bound.");
+    widths = IntegerList(lbounds.DimCount(), 1);
+  }
+
+  BoundedITupleType(const MultiBounds& l, const MultiBounds& u,
+                    const IntegerList s, const IntegerList w,
+                    const std::string& n = "")
+      : BoundedType(BaseType::BOUNDED_ITUPLE, n), lbounds(l), ubounds(u),
+        strides(s), widths(w) {
     if (lbounds.IsValid())
       assert((lbounds.DimCount() == ubounds.DimCount()) &&
              (lbounds.DimCount() == strides.size()) &&
@@ -1494,29 +1559,34 @@ struct BoundedITupleType final : public BoundedType,
   const MultiBounds GetLowerBounds() const { return lbounds; }
   const MultiBounds GetUpperBounds() const override { return ubounds; }
   const Shape GetSizes() const { return ubounds - lbounds; }
-  IntegerList GetStrides() const { return strides; }
+  int GetStride() const override { return strides[0]; }
+  IntegerList GetStrides() const override { return strides; }
+  int GetWidth() const override { return widths[0]; }
+  IntegerList GetWidths() const override { return widths; }
   const ValueItem& GetUpperBound() const override { return ubounds.ValueAt(0); }
   const ValueItem& GetUpperBound(size_t idx) const {
     return ubounds.ValueAt(idx);
   }
-  const ValueItem& GetLowerBound(size_t idx) const {
+  const ValueItem& GetLowerBound(size_t idx = 0) const {
     return lbounds.ValueAt(idx);
   }
   int GetStride(size_t idx) const { return strides[idx]; }
+  int GetWidth(size_t idx) const { return widths[idx]; }
   bool IsPlain(size_t idx) const {
     return (*lbounds.ValueAt(idx) == *sbe::nu(0)) && (strides[idx] == 1);
   }
   bool HasValidBound() const override {
     return lbounds.IsValid() && ubounds.IsValid() && !strides.empty() &&
            (lbounds.DimCount() == ubounds.DimCount()) &&
-           (lbounds.DimCount() == strides.size());
+           (lbounds.DimCount() == strides.size()) &&
+           (strides.size() == widths.size());
   }
 
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedITupleType>(&ty)) return false;
     auto& t = (BoundedITupleType&)ty;
     return (t.lbounds == lbounds) && (t.ubounds == ubounds) &&
-           (t.strides == strides);
+           (t.strides == strides) && (t.widths == widths);
   }
 
   bool ApprxEqual(const Type& ty) const override {
@@ -1545,6 +1615,8 @@ struct BoundedITupleType final : public BoundedType,
 
     if (plain) {
       os << STR(ubounds);
+      if (strides[0] != 1) os << ", s = " << strides[0];
+      if (widths[0] != 1) os << ", w = " << widths[0];
       BoundedType::Print(os);
       return;
     }
@@ -1964,6 +2036,12 @@ inline SpannedType* dyn_cast<SpannedType>(const Type* ty) {
   return dyn_cast<SpannedType>(const_cast<Type*>(ty));
 }
 
+inline bool IsActualVectorType(const ptr<Type>& ty) {
+  if (isa<VectorType>(ty)) return true;
+  if (auto bty = dyn_cast<BoundedType>(ty)) return bty->GetWidth() > 1;
+  return false;
+}
+
 inline size_t SizeOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return 0;
   if (isa<ScalarType>(&ty))
@@ -1972,6 +2050,10 @@ inline size_t SizeOf(const Type& ty) {
     return 4;
   else if (auto t = dyn_cast<SpannedType>(&ty))
     return t->ByteSize();
+  else if (auto vt = dyn_cast<VectorType>(&ty)) {
+    return vt->ElemCount() * SizeOf(vt->ElemType());
+  }
+
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
   return 0;
 }
@@ -2007,7 +2089,37 @@ inline BaseType GetBaseType(const Type& ty) {
     return BaseType::S32;
   else if (auto t = dyn_cast<SpannedType>(&ty))
     return t->e_type;
+  else if (auto vt = dyn_cast<VectorType>(&ty))
+    return vt->ElemType();
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
+}
+
+inline BaseType ElementType(const ptr<Type>& ty) {
+  if (auto t = dyn_cast<SpannedType>(ty))
+    return t->e_type;
+  else if (IsActualVectorType(ty)) {
+    if (auto vty = dyn_cast<VectorType>(ty)) {
+      return vty->ElemType();
+    } else if (auto bv = dyn_cast<BoundedType>(ty)) {
+      return BaseType::S32;
+    }
+  }
+  choreo_unreachable(STR(*ty) + " does not have an element type.");
+  return BaseType::UNKNOWN;
+}
+
+inline size_t ElementCount(const ptr<Type>& ty) {
+  if (auto t = dyn_cast<SpannedType>(ty))
+    return t->ElementCount();
+  else if (IsActualVectorType(ty)) {
+    if (auto vty = dyn_cast<VectorType>(ty)) {
+      return vty->ElemCount();
+    } else if (auto bv = dyn_cast<BoundedType>(ty)) {
+      return bv->GetWidth();
+    }
+  }
+  choreo_unreachable(STR(*ty) + " does not have an element count.");
+  return 0;
 }
 
 inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
@@ -2017,7 +2129,7 @@ inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
 
 inline bool CanYieldAnInteger(const ptr<Type>& ty) {
   return isa<ScalarType>(ty) || IsActualBoundedIntegerType(ty) ||
-         (isa<ITupleType>(ty) && ty->Dims() == 1);
+         (isa<VectorType>(ty) || (isa<ITupleType>(ty) && ty->Dims() == 1));
 }
 
 inline bool CanYieldIndex(const ptr<Type>& ty) {
@@ -2039,6 +2151,20 @@ inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {
     choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) +
                        " type.");
   return cast<BoundedType>(ty)->GetUpperBound();
+}
+
+inline int GetSingleStride(const ptr<Type>& ty) {
+  if (!IsActualBoundedIntegerType(ty))
+    choreo_unreachable("can not get the single stride for a " + PSTR(ty) +
+                       " type.");
+  return cast<BoundedType>(ty)->GetStride();
+}
+
+inline int GetSingleWidth(const ptr<Type>& ty) {
+  if (!IsActualBoundedIntegerType(ty))
+    choreo_unreachable("can not get the single width for a " + PSTR(ty) +
+                       " type.");
+  return cast<BoundedType>(ty)->GetWidth();
 }
 
 // utility functions to generate types
@@ -2123,6 +2249,10 @@ inline ptr<ScalarFloatType> MakeF32Type(bool m = false) {
 
 inline ptr<ScalarFloatType> MakeF64Type(bool m = false) {
   return MakeScalarFloatType(BaseType::F64, m);
+}
+
+inline ptr<VectorType> MakeVectorType(BaseType bt, size_t n) {
+  return std::make_shared<VectorType>(bt, n);
 }
 
 inline ptr<StringType> MakeStringType() {
@@ -2213,6 +2343,14 @@ inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
                                                     const IntegerList& il,
                                                     const std::string& n = "") {
   return std::make_shared<BoundedITupleType>(lb, ub, il, n);
+}
+
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
+                                                    const MultiBounds& ub,
+                                                    const IntegerList& il,
+                                                    const IntegerList& wl,
+                                                    const std::string& n = "") {
+  return std::make_shared<BoundedITupleType>(lb, ub, il, wl, n);
 }
 
 inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {

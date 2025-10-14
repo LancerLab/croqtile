@@ -1,0 +1,52 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -es %s | FileCheck %s --check-prefix=CODEGEN
+
+#define N 128
+#define M 512
+
+__co__ auto vecadd(f32 [N, M] a, f32 [N, M] b)  {
+  f32 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f32[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach {i, j} in [l1_a.span(0), l1_a.span(1)]: vectorize(j, 32) {
+      val = l1_a.data.at(i, j) + l1_b.data.at(i, j);
+      l1_c.at(i, j) = val;
+    }
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::f32>(N, M);
+  auto b = choreo::make_spandata<choreo::f32>(N, M);
+  a.fill_random(-10.0f, 10.0f);
+  b.fill_random(-10.0f, 10.0f);
+
+  auto res = vecadd(a.view(), b.view());
+  
+  // verification
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      // std::cout << "i: " << i << ", j: " << j << "\n";
+      // std::cout << "a: " << a[i][j] << ", b: " << b[i][j] << ", res: " << res[i][j] << "\n";
+      if (a[i][j] + b[i][j] != res[i][j]) {
+        choreo::choreo_assert(a[i][j] + b[i][j] == res[i][j], "values are not equal.");
+      }
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CODEGEN: __vector unsigned int __vec_iv_j_base = (__vector unsigned int)(__iv_j);
+// CODEGEN: __vector unsigned int __vec_iv_j_plus = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+// CODEGEN: __vector unsigned int __vec_iv_j = __vec_iv_j_base + __vec_iv_j_plus;
+// CODEGEN: for (__iv_j = 0; __iv_j < 512; __iv_j += 32) {
+// CODEGEN:   __vector float val = tcle::load<__vector float>((__TCLE_AS__ char *)((float*)l1_a.data() + (__iv_i * 512) + __vec_iv_j[0])) + tcle::load<__vector float>((__TCLE_AS__ char *)((float*)l1_b.data() + (__iv_i * 512) + __vec_iv_j[0]));
+// CODEGEN:   tcle::store(val, (__TCLE_AS__ char *)((float*)l1_c + (__iv_i * 512) + __vec_iv_j[0]));
+// CODEGEN:   __vec_iv_j += (__vector unsigned int)(32);
+// CODEGEN: }

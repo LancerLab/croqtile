@@ -1659,6 +1659,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (IsMutable(*nty) && !isa<ScalarIntegerType>(nty)) return false;
   if (isa<EventType>(nty)) return false;
   if (isa<StringType>(nty)) return false;
+  if (isa<VoidType>(nty)) return false;
 
   if (auto e = dyn_cast<AST::Expr>(n)) {
     if (e->op == "elemof") return false;

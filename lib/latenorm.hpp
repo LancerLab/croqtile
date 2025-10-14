@@ -655,7 +655,6 @@ public:
     if (prt_visitor) dbgs() << " |- " << bic.GetName() << NewL;
     root.accept(bic);
     if (bic.HasError()) return false;
-
     if (abend_after) return false;
 
     return true;

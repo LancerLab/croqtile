@@ -163,7 +163,8 @@ if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
            << STRINGIZE(__CHOREO_CUDA_DIR__)
                         << "\n  # JIT compile and execute\n";
 #endif
-    outs() << " if [ ! -z ${CUDA_HOME} ]; then export PATH=${CUDA_HOME}/bin:$PATH; fi\n";
+    outs() << " if [ ! -z ${CUDA_HOME} ]; then export "
+              "PATH=${CUDA_HOME}/bin:$PATH; fi\n";
     if (dyn_shaped) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
     outs() << "  ${cuda_script} ${build_path} ${host_src} ${target}\n";
     outs() << R"script(

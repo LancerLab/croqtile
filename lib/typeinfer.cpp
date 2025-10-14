@@ -1,7 +1,5 @@
 #include "typeinfer.hpp"
 
-#include <iostream>
-
 #include "ast.hpp"
 #include "types.hpp"
 
@@ -59,6 +57,12 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
     dma_mem = Storage::NONE;
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = false;
+  } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+    for (auto& rn : fb->GetRanges()) {
+      auto range = cast<AST::LoopRange>(rn);
+      auto sym_ty = GetSymbolType(n.LOC(), range->IVName());
+      SetNodeType(*range->iv, sym_ty);
+    }
   }
 
   Visitor::AfterVisit(n);
@@ -331,7 +335,9 @@ bool TypeInference::Visit(AST::DataAccess& n) {
   } else
     SetNodeType(n, dty);
 #endif
-
+  if (!n.AccessElement()) return true;
+  auto dty = GetSymbolType(n.LOC(), n.GetDataName());
+  SetNodeType(*n.data, dty);
   return true;
 }
 
@@ -937,7 +943,6 @@ bool TypeInference::Visit(AST::Trigger& n) {
 
 bool TypeInference::Visit(AST::Call& n) {
   TraceEachVisit(n);
-
   cur_type = n.GetType(); // use early-sema's type
   assert(cur_type);
 

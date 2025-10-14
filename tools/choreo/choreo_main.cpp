@@ -11,6 +11,7 @@
 #include "gpuadapt.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
+#include "loop_vectorize.hpp"
 #include "mem_reuse.hpp"
 #include "memcheck.hpp"
 #include "normalize.hpp"
@@ -150,6 +151,16 @@ int main(int argc, char* argv[]) {
     if (!vl.RunOnProgram(root)) return vl.Status();
     return 0;
   }
+
+  if (!CCtx().NoVectorize()) {
+    LoopVectorizer lv;
+    if (!lv.RunOnProgram(root)) return lv.Status();
+    if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
+    if (CCtx().TraceVectorize()) return 0;
+
+    CCtx().SetGlobalSymbolTable(lv.SymTab());
+  }
+
 
   LivenessAnalyzer la;
   if (!la.RunOnProgram(root)) return la.Status();

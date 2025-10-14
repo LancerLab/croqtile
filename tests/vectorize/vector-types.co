@@ -1,0 +1,22 @@
+// RUN: choreo --vectorize %s | FileCheck %s 
+__co__ auto vecadd(f32 [128, 512] a, f32 [128, 512] b)  {
+  f32 [a.span] c;
+  parallel p by 2, q by 2 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f32[l1_a.span] l1_c;
+    
+    foreach {i, j} in [l1_a.span(0), l1_a.span(1)] : vectorize(j, 128) {
+      l1_c.at(i, j) = l1_a.data.at(i, j) + l1_b.data.at(i, j);
+    }
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+
+// CHECK: IV:   ::vecadd::paraby_0::paraby_1::within_0::j, Type: {int}->[256], w = 128
+// CHECK: DA:   ::vecadd::paraby_0::paraby_1::l1_c[i][j], Type: mutable vector<f32,128>
+// CHECK: DA:   ::vecadd::paraby_0::paraby_1::l1_a.data[i][j], Type: mutable vector<f32,128>
+// CHECK: DA:   ::vecadd::paraby_0::paraby_1::l1_b.data[i][j], Type: mutable vector<f32,128>

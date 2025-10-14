@@ -41,7 +41,7 @@ enum class TargetArch {
   GCU21,
   GCU3,
   GCU4,
-  GPU,  // TODO: unclear
+  GPU, // TODO: unclear
   // Nv series
   SM_70,
   SM_75,
@@ -86,10 +86,8 @@ inline bool RequiresE2ECompilation(OutputKind ok) {
   case OutputKind::TargetModule:
   case OutputKind::TargetAssembly:
   case OutputKind::TargetExecutable:
-  case OutputKind::ShellScript:
-    return true;
-  default:
-    break;
+  case OutputKind::ShellScript: return true;
+  default: break;
   }
   return false;
 }
@@ -309,7 +307,6 @@ public:
 };
 
 class SymbolTable;
-
 // per-compilation context
 class CompilationContext {
 private:
@@ -333,12 +330,15 @@ private:
   bool visualize = false;           // visualize the DMAs
   bool cross_compile = false;       // TODO: figure out
   bool trace_vn = false;            // trace the value numbering
+  bool trace_vectorize = false;     // trace the masking
   bool show_source_loc = true;    // show source code location when error, etc.
   bool liveness = false;          // analyze the liveness of the program
   bool mem_reuse = false;         // reuse the memory of the program
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate debug information
+  bool loop_norm = false;         // enable loop normalization
+  bool no_vectorize = false;      // do not vectorize any foreach loop
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -440,15 +440,22 @@ public:
     case TargetArch::SM_90:
     case TargetArch::SM_100: {
       switch (sto) {
-      case Storage::SHARED: return 48ull * 1024;   // 48k static
+      case Storage::SHARED: return 48ull * 1024; // 48k static
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
 
-
     default: choreo_unreachable("Unsupported target arch.");
     }
     return 0;
+  }
+
+  size_t GetSingleVectorByteSize() const {
+    switch (GetArch()) {
+    case TargetArch::GCU3: return 128;
+    case TargetArch::GCU4: return 512;
+    default: choreo_unreachable("Unsupported target arch.");
+    }
   }
 
 public:
@@ -464,11 +471,14 @@ public:
   bool Visualize() const { return visualize; }
   bool CrossCompile() const { return cross_compile; }
   bool TraceValueNumbers() const { return trace_vn; }
+  bool TraceVectorize() const { return trace_vectorize; }
   bool LivenessAnalysis() const { return liveness; }
   bool MemReuse() const { return mem_reuse; }
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
+  bool LoopNorm() const { return loop_norm; }
+  bool NoVectorize() const { return no_vectorize; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -482,11 +492,14 @@ public:
   void SetVisualize(bool value) { visualize = value; }
   void SetCrossCompile(bool value) { cross_compile = value; }
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
+  void SetVectorize(bool value) { trace_vectorize = value; }
   void SetLivenessAnalysis(bool value) { liveness = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
+  void SetLoopNorm(bool value) { loop_norm = value; }
+  void SetNoVectorize(bool value) { no_vectorize = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

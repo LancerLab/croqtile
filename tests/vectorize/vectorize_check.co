@@ -1,0 +1,13 @@
+// RUN: choreo %s --vectorize 2>&1 | FileCheck %s
+__co__ void func(int len) {
+  parallel p by 1 {
+    foreach {i, j} in [32, 32] : vectorize(p, 32) {}
+    foreach idx in [32, 32] : vectorize(idx, -12) {}
+    foreach idx in [128] : vectorize(idx, len) {}
+  }
+}
+
+// CHECK: vectorization should be applied on an loop induction variable
+// CHECK: the loop induction variable 'idx' is a bounded ituple and its dim is not 1, vectorization is not supported yet
+// CHECK: the vector length of `vectorize` should be a positive integer
+// CHECK: the second attribute value of `vectorize` should be an integer literal for the vector length

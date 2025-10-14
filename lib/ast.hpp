@@ -10,6 +10,7 @@
 #include "context.hpp"
 #include "dmaconf.hpp"
 #include "loc.hpp"
+#include "loop_utils.hpp"
 #include "symtab.hpp"
 #include "symvals.hpp"
 
@@ -43,6 +44,7 @@ struct Node {
 
 private:
   NoteMapType note;
+  DiversityShape dshape;
 
 protected:
   Storage level = Storage::NONE; // belongs to a specific level
@@ -57,7 +59,8 @@ public:
   virtual const ptr<Type>& GetType() const { return pty; }
   virtual const location& LOC() const { return loc; }
   virtual void SetLOC(const location& l) { loc = l; }
-
+  virtual void SetDiversityShape(const DiversityShape ds) { dshape = ds; }
+  virtual DiversityShape GetDiversityShape() const { return dshape; }
   virtual ~Node() = default;
 
   virtual const NoteMapType& Note() const { return note; }
@@ -72,6 +75,7 @@ public:
     auto n = CloneImpl();
     n->SetType(GetType());
     n->SetLevel(GetLevel());
+    n->SetDiversityShape(GetDiversityShape());
     if (!Note().empty()) n->Note() = Note();
     return n;
   }
@@ -559,6 +563,7 @@ private:
 
 private:
   OptimizedValues opt_vals;
+  ptr<SCEV> scev = nullptr;
 
 public:
   const ptr<Node>& GetR() const { return value_r; }
@@ -594,6 +599,8 @@ public:
 
   OptimizedValues& Opts() { return opt_vals; }
   const OptimizedValues& Opts() const { return opt_vals; }
+  ptr<SCEV> GetSCEV() const { return scev; }
+  void SetSCEV(const ptr<SCEV>& s) { scev = s; }
 
 public:
   Shape s; // to pass information between shape inference & type inference
@@ -730,6 +737,38 @@ public:
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, Expr)
+};
+
+struct AttributeExpr final : public Node, public TypeIDProvider<AttributeExpr> {
+private:
+  std::string attr_name;
+  ptr<MultiValues> attr_values = nullptr;
+
+public:
+  AttributeExpr(const location& l, const std::string& n,
+                const ptr<MultiValues>& v)
+      : Node(l, MakeUnknownType()), attr_name(n), attr_values(v) {
+    assert(attr_values && "null node is provided.");
+  }
+
+  std::string AttrName() const { return attr_name; }
+  ptr<Node> AttrValueAt(const size_t idx) { return attr_values->ValueAt(idx); }
+  size_t AttrValueCount() const { return attr_values->Count(); }
+
+public:
+  ptr<Node> CloneImpl() const override {
+    return AST::Make<AST::AttributeExpr>(loc, attr_name, CloneP(attr_values));
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << "@" << attr_name << " ";
+    if (attr_values) attr_values->Print(os, "", with_type);
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, AttributeExpr)
 };
 
 struct CastExpr : public Expr, public TypeIDProvider<CastExpr> {
@@ -1307,7 +1346,8 @@ struct Call : public Node, public TypeIDProvider<Call> {
     BIF = 0x1,
     COMPTIME = 0x2,
     ARITH = 0x4,
-    EXPR = 0x8
+    EXPR = 0x8,
+    ANNO = 0x10
   };
   // Overload bitwise OR
   friend constexpr CallAttr operator|(CallAttr lhs, CallAttr rhs) {
@@ -1345,6 +1385,7 @@ public:
   bool CompileTimeEval() const { return (bool)(attr & COMPTIME); }
   bool IsArith() const { return (bool)(attr & ARITH); }
   bool IsExpr() const { return (bool)(attr & EXPR); }
+  bool IsAnno() const { return (bool)(attr & ANNO); }
 
   void SetBIF() { attr = attr | BIF; }
   void SetCompileTimeEval() { attr = attr | COMPTIME; }
@@ -1567,6 +1608,12 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Branch On Condition: ";
     pred->Print(os, " ");
+    if (!pred->GetDiversityShape().Unknown()) {
+      if (pred->GetDiversityShape().Uniform())
+        os << " (uniform predicate)";
+      else
+        os << " (divergent predicate)";
+    }
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (if_stmts->Count()) {
       os << "\n" << prefix << " `- If-Block:";
@@ -1579,6 +1626,17 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
   }
 
   bool HasElse() const { return else_stmts && else_stmts->Count(); }
+
+  bool IsNorm() const {
+    if (pred->GetDiversityShape().Uniform()) return true; // uniform predicate
+    return false;
+  }
+
+  bool IsDivergent() const {
+    if (pred->GetDiversityShape().Divergent())
+      return true; // divergent predicate
+    return false;
+  }
 
   void accept(Visitor&) override;
 
@@ -2597,26 +2655,42 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   __UDT_TYPE_INFO__(Node, LoopRange)
 };
 
+ptr<Call> GetCall(const ptr<Node>& n);
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ranges;
+  ptr<MultiValues> suffixs;
   ptr<MultiNodes> stmts;
+  ptr<Loop> loop;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
-      : Node(l), ranges(i), stmts(s) {
+      : Node(l), ranges(i), stmts(s), loop(nullptr) {
+    assert(i != nullptr && "missing iteration variables for the statement.");
+  }
+
+  explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
+                        const ptr<MultiValues>& se, const ptr<MultiNodes>& s)
+      : Node(l), ranges(i), suffixs(se), stmts(s), loop(nullptr) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
   bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(stmts));
+    auto copied = Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs),
+                                     CloneP(stmts));
+    copied->loop = loop ? loop : nullptr;
+    return copied;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Foreach Block:";
     ranges->Print(os, prefix + " ", with_type);
+    if (suffixs) {
+      os << "\n" << prefix << " `- Suffixes: ";
+      suffixs->Print(os, prefix + " ", with_type);
+    }
     if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
 
@@ -2626,6 +2700,25 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   }
 
   void accept(Visitor&) override;
+
+  bool IsNorm() const {
+    if (ranges->Count() != 1) return false;
+    auto range = dyn_cast<LoopRange>(ranges->ValueAt(0));
+    assert(range && "invalid range in foreach block.");
+    auto range_type = dyn_cast<BoundedType>(range->IV()->GetType());
+    if (!range_type) return true;
+    assert(range_type && "invalid range type in foreach block.");
+
+    return range_type->Dims() == 1;
+  }
+
+  ptr<Identifier> GetIV() const {
+    if (ranges->Count() == 1) {
+      auto range = dyn_cast<AST::LoopRange>(ranges->ValueAt(0));
+      return range->IV();
+    }
+    return nullptr;
+  }
 
   __UDT_TYPE_INFO__(Node, ForeachBlock)
 };
@@ -2986,11 +3079,29 @@ inline ptr<Identifier> GetIdentifier(const ptr<Node>& n) {
     return nullptr;
 }
 
+inline ptr<Call> GetCall(const ptr<Node>& n) {
+  if (auto call = dyn_cast<Call>(n))
+    return call;
+  else if (auto expr = dyn_cast<Expr>(n))
+    return GetCall(expr->GetReference());
+  else
+    return nullptr;
+}
+
 inline IntLiteral* GetIntLiteral(const Node& n) {
   if (auto il = dyn_cast<IntLiteral>(&n))
     return il;
   else if (auto expr = dyn_cast<Expr>(&n))
     return expr->GetInt().get();
+  else
+    return nullptr;
+}
+
+inline ptr<IntLiteral> GetIntLiteral(const ptr<Node>& n) {
+  if (auto il = dyn_cast<IntLiteral>(n))
+    return il;
+  else if (auto expr = dyn_cast<Expr>(n))
+    return expr->GetInt();
   else
     return nullptr;
 }
@@ -3001,6 +3112,26 @@ inline bool IsSymbolOrArrayRef(const Node& n) {
   if (auto e = dyn_cast<Expr>(&n))
     if (e->op == "elemof") return true;
   return false;
+}
+
+inline bool NeedVectorize(const ForeachBlock& n, ptr<AST::AttributeExpr>& c) {
+  if (!n.suffixs) return false;
+
+  for (auto suffix : n.suffixs->values) {
+    if (auto attr = dyn_cast<AST::AttributeExpr>(suffix)) {
+      if (attr->AttrName() == "vectorize") {
+        c = attr;
+        return true;
+      }
+    }
+  }
+  c = nullptr;
+  return false;
+}
+
+inline bool NeedVectorize(const ForeachBlock& n) {
+  ptr<AST::AttributeExpr> c;
+  return NeedVectorize(n, c);
 }
 
 inline const ptr<Identifier> GetArrayBaseSymbol(const Expr& n) {

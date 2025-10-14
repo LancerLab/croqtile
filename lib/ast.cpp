@@ -9,6 +9,8 @@ void MultiNodes::accept(Choreo::Visitor& v) {
 
   for (auto& sub : values) sub->accept(v);
   v.Visit(*this);
+
+  v.AfterVisit(*this);
 }
 
 void MultiValues::accept(Choreo::Visitor& v) {
@@ -31,6 +33,12 @@ void Expr::accept(Choreo::Visitor& v) {
   assert(value_r && "invalid expression found.");
   value_r->accept(v);
 
+  v.Visit(*this);
+}
+
+void AttributeExpr::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  if (attr_values) attr_values->accept(v);
   v.Visit(*this);
 }
 
@@ -309,6 +317,7 @@ void LoopRange::accept(Choreo::Visitor& v) {
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   ranges->accept(v);
+  if (suffixs) suffixs->accept(v);
   v.Visit(*this);
   if (stmts) stmts->accept(v);
   v.AfterVisit(*this);

@@ -603,6 +603,52 @@ bool EarlySemantics::Visit(AST::CastExpr& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::AttributeExpr& n) {
+  TraceEachVisit(n);
+  if (n.AttrName() == "vectorize") {
+    if (n.AttrValueCount() != 2)
+      Error1(n.LOC(),
+             "suffix expresion 'vectorize' should have 2 attribute values");
+    auto loop_iv = AST::GetIdentifier(n.AttrValueAt(0));
+    auto vec_len = AST::GetIntLiteral(n.AttrValueAt(1));
+    if (!loop_iv)
+      Error1(loop_iv->LOC(),
+             "the first attribute value of `vectorize` should be an "
+             "identifier for the loop induction variable");
+
+    if (!SSTab().IsDeclared(loop_iv->name))
+      Error1(loop_iv->LOC(), "the loop induction variable '" + loop_iv->name +
+                                 "' is not declared in the current scope");
+
+    if (!within_map.count(InScopeName(loop_iv->name)) ||
+        within_map[InScopeName(loop_iv->name)].size() != 1)
+      Error1(loop_iv->LOC(),
+             "vectorization should be applied on an loop induction variable");
+
+    auto iv_ty = SSTab().LookupSymbol(loop_iv->name);
+    if (iv_ty) {
+      if (auto bit = dyn_cast<BoundedITupleType>(iv_ty)) {
+        if (bit->Dims() != 1)
+          Error1(loop_iv->LOC(), "the loop induction variable '" +
+                                     loop_iv->name +
+                                     "' is a bounded ituple and its dim is not "
+                                     "1, vectorization is not supported yet");
+      } else if (!isa<BoundedIntegerType>(iv_ty)) {
+        Error1(loop_iv->LOC(), "the loop induction variable '" + loop_iv->name +
+                                   "' should be a bounded integer type");
+      }
+    }
+    if (!vec_len)
+      Error1(n.AttrValueAt(1)->LOC(),
+             "the second attribute value of `vectorize` should be an integer "
+             "literal for the vector length");
+    if (vec_len && vec_len->Val() <= 0 && !IsUnKnownInteger(vec_len->Val()))
+      Error1(vec_len->LOC(),
+             "the vector length of `vectorize` should be a positive integer");
+  }
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   TraceEachVisit(n);
   size_t rank = GetInvalidRank();

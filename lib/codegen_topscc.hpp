@@ -1,14 +1,12 @@
 #ifndef __CHOREO_CODEGEN_TOPSCC_HPP__
 #define __CHOREO_CODEGEN_TOPSCC_HPP__
 
-#include <filesystem>
 #include <iostream>
 #include <sstream>
-#include <thread>
 
 #include "ast.hpp"
 #include "codegen.hpp"
-#include "operator_info.hpp"
+#include "io.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -95,7 +93,7 @@ public:
     }
   }
 
-  void DumpHostMap() {
+  void DumpHostMap() const {
     dbgs()
         << "==================== Host Map Information ====================\n";
     // Print a formatted table with columns for symbol and buffer name
@@ -115,7 +113,7 @@ public:
     dbgs() << "================================================================"
            << "\n";
   }
-  void DumpDeviceMap() {
+  void DumpDeviceMap() const {
     dbgs()
         << "==================== Device Map Information ====================\n";
     // Print a formatted table with columns for symbol and buffer name
@@ -187,11 +185,13 @@ private:
   // Only use it for function parameters.
   ptr<CodeGenInfo> updating_cgi;
   ScopedSymbolMap ssm;
+  ptr<Loop> cur_loop;
 
 public:
   TopsccCodeGen(const ptr<CodeGenInfo>& ci)
       : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()), cgi(ci) {
     updating_cgi = AST::Make<CodeGenInfo>();
+    cur_loop = nullptr;
   }
 
   bool BeforeVisitImpl(AST::Node&) override;
@@ -255,8 +255,7 @@ private:
   // idx of the most outer pb
   int parallel_idx = -1;
 
-  size_t host_param_count = 0; // host parameter count
-
+  size_t host_param_count = 0;     // host parameter count
   ptr<FunctionType> fty = nullptr; // current function type
   bool void_return = false;
 
@@ -417,6 +416,13 @@ private:
   const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string& parent_op,
                               const bool is_left_child, bool is_host) const;
   const std::string CallSTR(AST::Call&) const;
+  const std::string DASTR(AST::ptr<AST::DataAccess>&, const std::string& = "",
+                          bool is_load = true, bool masking = false) const;
+  const std::string BuildTcleLoad(const std::string& addr_str,
+                                  const std::string& ty_str) const;
+  const std::string BuildTcleStore(const std::string& addr_str,
+                                   const std::string& ty_str,
+                                   const std::string& val_str) const;
 
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
   std::optional<std::string>
@@ -432,8 +438,11 @@ private:
   const std::string SSMName(const std::string& sname, bool is_host) const {
     return (is_host) ? ssm.HostName(sname) : ssm.DeviceName(sname);
   }
+  const std::string AddressOffset(const Shape&, const AST::DataAccess&,
+                                  bool) const;
   // if it requires wrapping code in a single thread
   bool RequiresImplPred(Storage) const;
+  const std::string VectorTypeSTR(const ptr<Type>& vt) const;
 };
 
 } // namespace Topscc
