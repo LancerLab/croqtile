@@ -65,7 +65,7 @@ class ScalarEvolutionAnalysis final : public LoopVisitor {
 private:
   ptr<LoopInfo> li;
   ptr<ScopedSCEVTable> ssetab;
-
+  std::set<std::string> with_syms; // with symbols defined in with-in blocks
 private:
   bool InLoop();
   bool InVectorizedLoop();
@@ -127,6 +127,8 @@ public:
   bool Visit(AST::Identifier& n) override;
   bool Visit(AST::Assignment& n) override;
   bool Visit(AST::Call& n) override;
+  bool Visit(AST::DataAccess& n) override;
+  bool Visit(AST::WithIn& n) override;
   bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::ParallelBy& n) override;
   bool Visit(AST::Parameter& n) override;

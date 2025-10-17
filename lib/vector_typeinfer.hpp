@@ -17,6 +17,7 @@ struct VectorTypeInfer final : LoopVisitor {
 private:
   ptr<LoopInfo> li;
   ptr<DiversityInfo> di;
+  std::unordered_map<std::string, ptr<Type>> with_types;
 
   bool Skip(ptr<Type> ty, DiversityShape shape) {
     if (!InLoop()) return true;
@@ -62,26 +63,65 @@ public:
                   ptr<DiversityInfo> d)
       : LoopVisitor(s_tab, "vector-type-infer"), li(l), di(d) {}
 
+  bool Visit(AST::WithIn& n) {
+    TraceEachVisit(n);
+    if (n.with)
+      with_types.emplace(InScopeName(n.with->name), n.with->GetType());
+
+    return true;
+  }
+
   bool Visit(AST::ForeachBlock& n) {
     TraceEachVisit(n);
     ptr<AST::Call> c = nullptr;
 
-    cur_loop = n.loop;
-    if (cur_loop->CanVectorize()) {
-      auto iv_ty = cur_loop->GetIVType();
+    if (!cur_loop->CanVectorize()) return true;
 
-      auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
-      auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
-      auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetStrides();
-      IntegerList widths(iv_ty->Dims(), cur_loop->GetVectorWidth());
-      auto vty = MakeBoundedITupleType(lb, ub, s, widths);
-      cur_loop->SetIVType(vty);
+    auto iv_name = cur_loop->IVName();
+    bool with_found = false;
+    std::string with_sym;
+    ptr<Type> with_ty = nullptr;
 
-      if (debug_visit)
-        dbgs() << "IV:   " << InScopeName(cur_loop->IVName())
-               << ", Type: " << PSTR(vty) << "\n";
-      AssignSymVType(n.LOC(), InScopeName(cur_loop->IVName()), vty);
+    for (auto item : within_map) {
+      if (with_types.count(item.first) == 0) continue;
+      auto ivs = item.second;
+      if (ivs[ivs.size() - 1] == InScopeName(iv_name)) {
+        with_found = true;
+        with_sym = item.first;
+        with_ty = with_types[with_sym];
+        break;
+      }
     }
+
+    if (with_found) {
+      assert(isa<BoundedITupleType>(with_ty) && "with type should be valid.");
+      auto bit = dyn_cast<BoundedITupleType>(with_ty);
+
+      assert(bit && "with type should be BoundedITupleType.");
+      auto lb = bit->GetLowerBounds();
+      auto ub = bit->GetUpperBounds();
+      auto s = bit->GetStrides();
+      auto widths = bit->GetWidths();
+      widths[widths.size() - 1] = cur_loop->GetVectorWidth();
+      auto vty = MakeBoundedITupleType(lb, ub, s, widths);
+      if (debug_visit)
+        dbgs() << "IV:   " << with_sym << ", Type: " << PSTR(vty) << "\n";
+      AssignSymVType(n.LOC(), with_sym, vty);
+    }
+
+    auto iv_ty = cur_loop->GetIVType();
+
+    auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
+    auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
+    auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetStrides();
+    IntegerList widths(iv_ty->Dims(), cur_loop->GetVectorWidth());
+    auto vty = MakeBoundedITupleType(lb, ub, s, widths);
+    cur_loop->SetIVType(vty);
+
+    if (debug_visit)
+      dbgs() << "IV:   " << InScopeName(cur_loop->IVName())
+             << ", Type: " << PSTR(vty) << "\n";
+    AssignSymVType(n.LOC(), InScopeName(cur_loop->IVName()), vty);
 
     return true;
   }

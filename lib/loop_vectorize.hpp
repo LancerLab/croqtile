@@ -32,8 +32,6 @@ struct LoopAnalysis final : public VisitorWithSymTab {
 
   ptr<LoopInfo> li;
   std::string parent_loop_name = "";
-  static int loop_count;
-  static std::string GenerateLoopName();
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
 

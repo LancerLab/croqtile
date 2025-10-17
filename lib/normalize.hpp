@@ -32,9 +32,14 @@ inline Storage TargetLevel(int depth) {
   return Storage::NONE;
 }
 
+static inline std::string GenerateLoopName() {
+  static int loop_count = 0;
+  return "loop" + std::to_string(++loop_count);
+}
+
 struct LoopNorm final : public VisitorWithScope {
 public:
-  std::map<std::string, ptr<AST::MultiValues>> within_map; // map of with-in
+  std::map<std::string, ptr<AST::MultiValues>> matcher_map; // map of with-in
 
   LoopNorm() : VisitorWithScope("loopnorm") {}
   bool BeforeVisitImpl(AST::Node& n) override {
@@ -48,7 +53,7 @@ public:
 
   bool Visit(AST::WithIn& n) override {
     if (n.with && n.with_matchers) {
-      within_map[n.with->name] = n.with_matchers;
+      matcher_map[n.with->name] = n.with_matchers;
     }
     return true;
   }
@@ -56,17 +61,16 @@ public:
   bool Visit(AST::MultiNodes& n) override {
     for (size_t idx = 0; idx < n.Count(); ++idx) {
       if (auto fb = dyn_cast<AST::ForeachBlock>(n.SubAt(idx))) {
-        if (fb->IsNorm()) continue; // already normalized
         std::vector<ptr<AST::ForeachBlock>> loops;
-        auto rng = dyn_cast<AST::LoopRange>(fb->ranges->ValueAt(0));
-        auto rng_type = dyn_cast<BoundedITupleType>(rng->IV()->GetType());
-        if (fb->ranges->Count() == 1 && rng_type && rng_type->Dims() > 1) {
-          auto cname = rng->IVName();
-          // create foreachblocks for each index variable
-          for (auto with : within_map[cname]->values) {
-            auto with_iv = AST::GetIdentifier(with);
-            auto iv_ty = with_iv->GetType();
-            auto iv_name = with_iv->name;
+
+        auto rng = cast<AST::LoopRange>(fb->ranges->ValueAt(0));
+        auto cname = rng->IVName();
+        if (fb->ranges->Count() == 1 && matcher_map.count(cname)) {
+          // single range, multiple loops (range dim > 1)
+          for (auto matcher : matcher_map[cname]->values) {
+            auto matcher_iv = AST::GetIdentifier(matcher);
+            auto iv_ty = matcher_iv->GetType();
+            auto iv_name = matcher_iv->name;
             auto new_iv = AST::Make<AST::Identifier>(rng->LOC(), iv_name);
             new_iv->SetType(iv_ty);
             auto ranges = AST::Make<AST::MultiValues>(fb->ranges->LOC());
@@ -74,9 +78,13 @@ public:
             auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
             auto new_fb =
                 AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
+            auto loop = AST::Make<Loop>(GenerateLoopName(), iv_name, iv_ty);
+            new_fb->loop = loop;
+            loop->scope_name = SSTab().ScopeName();
             loops.push_back(new_fb);
           }
-        } else {
+        } else if (fb->ranges->Count() > 1) {
+          // multiple ranges, multiple loops
           const auto& ranges = fb->GetRangeNodes();
           for (size_t i = 0; i < ranges->Count(); ++i) {
             auto rng = cast<AST::LoopRange>(ranges->ValueAt(i));
@@ -85,8 +93,20 @@ public:
             auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
             auto new_fb =
                 AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
+            auto loop = AST::Make<Loop>(GenerateLoopName(), rng->IVName(),
+                                        rng->IV()->GetType());
+            new_fb->loop = loop;
             loops.push_back(new_fb);
           }
+        } else if (fb->ranges->Count() == 1 && !matcher_map.count(cname)) {
+          // single range, single loop
+          auto loop = AST::Make<Loop>(GenerateLoopName(), rng->IVName(),
+                                      rng->IV()->GetType());
+          fb->loop = loop;
+          continue;
+        } else {
+          Error1(fb->LOC(), "invalid range of foreach block: " + STR(fb));
+          continue;
         }
         // construct the loop hierarchy
         size_t loop_level = 0;

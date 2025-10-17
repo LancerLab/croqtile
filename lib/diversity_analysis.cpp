@@ -82,6 +82,22 @@ DiversityShape DiversityAnalysis::ExprDShape(const ptr<AST::Expr> e) {
   return shape;
 }
 
+bool DiversityAnalysis::Visit(AST::CastExpr& n) {
+  TraceEachVisit(n);
+
+  if (!InVectorizedLoop()) return true;
+  DiversityShape shape = n.GetR()->GetDiversityShape();
+  if (shape.Unknown()) shape = DiversityShape(DIVERGENT);
+  if (!n.GetDiversityShape().ApprxEqual(shape)) {
+    if (debug_visit)
+      dbgs() << "cast: `" << STR(n) << "` " << STR(n.GetDiversityShape())
+             << " -> " << STR(shape) << "\n";
+    n.SetDiversityShape(shape);
+    changed = true;
+  }
+  return true;
+}
+
 bool DiversityAnalysis::Visit(AST::Expr& n) {
   TraceEachVisit(n);
 
@@ -265,6 +281,12 @@ bool DiversityAnalysis::Visit(AST::Call& n) {
   return true;
 }
 
+bool DiversityAnalysis::Visit(AST::WithIn& n) {
+  TraceEachVisit(n);
+  if (n.with) { with_syms.insert(InScopeName(n.with->name)); }
+  return true;
+}
+
 bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   if (!InVectorizedLoop()) return true;
@@ -284,6 +306,25 @@ bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
   if (di->AssignSymbolShape(InScopeName(iv_name),
                             DiversityShape(STRIDE, sbe::nu(stride)))) {
     changed = true;
+  }
+
+  bool with_found = false;
+  std::string with_sym;
+  for (auto item : within_map) {
+    if (with_syms.count(item.first) == 0) continue;
+    auto ivs = item.second;
+    if (ivs[ivs.size() - 1] == InScopeName(iv_name)) {
+      with_found = true;
+      with_sym = item.first;
+      break;
+    }
+  }
+
+  if (with_found) {
+    if (di->AssignSymbolShape(with_sym,
+                              DiversityShape(STRIDE, sbe::nu(stride)))) {
+      changed = true;
+    }
   }
 
   assert(scope_shapes.empty() &&

@@ -5,8 +5,8 @@ ___co__ void vecadd(s32 [N, C, H, W] a, s32 [N,C,H, W] b)
   parallel q by 1 {
     l1_a = dma.copy a => local;
     l1_b = dma.copy b => local;
-    with {n, c, h, w} in [a.span] {
-      foreach n, c, h, w: vectorize(w, 128) {
+    with index = {n, c, h, w} in [a.span] {
+      foreach index: vectorize(w, 128) {
         index_0 = h * W + w;
         index_1 = h + 1;
         index_2 = h * 3;
@@ -17,21 +17,22 @@ ___co__ void vecadd(s32 [N, C, H, W] a, s32 [N,C,H, W] b)
         s32 val = l1_a.data.at(n, c, h, w);
         val = 1;
         index_0 = 1;
+      }
     }
   }
 }
-}
 
-// CHECK: param: `::vecadd::C` -> ::vecadd::C
 // CHECK: param: `::vecadd::W` -> ::vecadd::W
-// CHECK: param: `::vecadd::H` -> ::vecadd::H
 // CHECK: param: `::vecadd::N` -> ::vecadd::N
+// CHECK: param: `::vecadd::H` -> ::vecadd::H
+// CHECK: param: `::vecadd::C` -> ::vecadd::C
 // CHECK: pi:    `anon_pb_0__elem__x` -> ::vecadd::paraby_0::anon_pb_0__elem__x
 // CHECK: pi:    `q__elem__x` -> ::vecadd::paraby_0::paraby_1::q__elem__x
 // CHECK: iv:    `n` -> {0, +, 1} <loop1>
 // CHECK: iv:    `c` -> {0, +, 1} <loop2>
 // CHECK: iv:    `h` -> {0, +, 1} <loop3>
 // CHECK: iv:    `w` -> {0, +, 128} <loop4>
+// CHECK{LITERAL}: iv:    `index` -> {{{{0, +, (::vecadd::C * (::vecadd::H * ::vecadd::W))} <loop1>, +, (::vecadd::H * ::vecadd::W)} <loop2>, +, ::vecadd::W} <loop3>, +, 128} <loop4>
 // CHECK{LITERAL}: decl:  `index_0` -> {{0, +, ::vecadd::W} <loop3>, +, 128} <loop4>
 // CHECK: decl:  `index_1` -> {1, +, 1} <loop3>
 // CHECK: decl:  `index_2` -> {0, +, 3} <loop3>
@@ -39,6 +40,7 @@ ___co__ void vecadd(s32 [N, C, H, W] a, s32 [N,C,H, W] b)
 // CHECK: decl:  `index_4` -> {0, +, (1 / ::vecadd::W)} <loop3>
 // CHECK: decl:  `index_5` -> {1, +, 4} <loop3>
 // CHECK: decl:  `index_6` -> {(::vecadd::N + 2), +, 2} <loop3>
+// CHECK{LITERAL}: da:    `l1_a.data[n, c, h, w]` -> {{{{0, +, (::vecadd::C * (::vecadd::H * ::vecadd::W))} <loop1>, +, (::vecadd::H * ::vecadd::W)} <loop2>, +, ::vecadd::W} <loop3>, +, 128} <loop4>
 // CHECK: decl:  `val` -> l1_a.data[n, c, h, w]
 // CHECK: asgn:  `val` is re-assigned, invalidate its scev.
 // CHECK: asgn:  `index_0` is re-assigned, invalidate its scev.

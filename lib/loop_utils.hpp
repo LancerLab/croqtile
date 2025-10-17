@@ -192,18 +192,21 @@ struct SCEV {
     AddRecExpr,
   };
 
+  ptr<Loop> loop;
+  SCEV() = default;
+  explicit SCEV(ptr<Loop> l) : loop(l) {}
   virtual SCEVType GetType() const = 0;
   virtual ~SCEV() = default;
   virtual std::string ToString() const = 0;
   virtual bool IsLoopInVariant(ptr<Loop>) const = 0;
   virtual ValueItem GetValue() const = 0;
+  ptr<Loop> GetLoop() const { return loop; }
   __UDT_TYPE_INFO_BASE__(SCEV)
 };
 
 struct SCEVVal : public SCEV {
   ValueItem value;
-  ptr<Loop> loop = nullptr;
-  SCEVVal(ValueItem v, ptr<Loop> l = nullptr) : value(v), loop(l) {}
+  SCEVVal(ValueItem v, ptr<Loop> l = nullptr) : SCEV(l), value(v) {}
   SCEVType GetType() const override { return Val; }
   std::string ToString() const override { return STR(value); }
   bool IsLoopInVariant(ptr<Loop> l) const override {
@@ -218,10 +221,8 @@ struct SCEVVal : public SCEV {
 struct SCEVAddRecExpr : public SCEV {
   ptr<SCEV> base;
   ptr<SCEV> step;
-  ptr<Loop> loop;
-  ValueItem times = UncomputableValueItem(); // optional, for step * n
   SCEVAddRecExpr(ptr<SCEV> b, ptr<SCEV> s, ptr<Loop> l)
-      : base(b), step(s), loop(l) {}
+      : SCEV(l), base(b), step(s) {}
   SCEVType GetType() const override { return AddRecExpr; }
   std::string ToString() const override {
     std::ostringstream ss;
@@ -233,6 +234,17 @@ struct SCEVAddRecExpr : public SCEV {
     assert(l && loop && "loop cannot be null.");
     return loop->HasLoop(l->loop_name);
   }
+  ValueItem GetStep() const { return dyn_cast<SCEVVal>(step)->GetValue(); }
+  ValueItem GetStepOfLoop(ptr<Loop> l) const {
+    if (loop->loop_name == l->loop_name) {
+      return dyn_cast<SCEVVal>(step)->GetValue();
+    }
+    if (auto base_ar = dyn_cast<SCEVAddRecExpr>(base)) {
+      return base_ar->GetStepOfLoop(l);
+    }
+    return UncomputableValueItem();
+  }
+
   ValueItem GetValue() const override { return UncomputableValueItem(); }
   __UDT_TYPE_INFO__(SCEV, SCEVAddRecExpr)
 };
@@ -284,6 +296,13 @@ struct LoopInfo {
     auto it = loops.find(lname);
     if (it != loops.end()) { return it->second; }
     return nullptr;
+  }
+
+  ptr<Loop> GetLoopOfIV(const std::string& iv_name) const {
+    if (iv_name == "") return nullptr;
+    if (iv2loop.find(iv_name) == iv2loop.end()) return nullptr;
+    auto loop_name = iv2loop.at(iv_name);
+    return GetLoop(loop_name);
   }
 
   ptr<Loop> GetParentLoop(const std::string& lname) const {

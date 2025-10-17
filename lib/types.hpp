@@ -2039,7 +2039,10 @@ inline SpannedType* dyn_cast<SpannedType>(const Type* ty) {
 
 inline bool IsActualVectorType(const ptr<Type>& ty) {
   if (isa<VectorType>(ty)) return true;
-  if (auto bty = dyn_cast<BoundedType>(ty)) return bty->GetWidth() > 1;
+  if (auto bty = dyn_cast<BoundedIntegerType>(ty))
+    return bty->GetWidth() > 1;
+  else if (auto bty = dyn_cast<BoundedITupleType>(ty))
+    return bty->GetWidths()[bty->Dims() - 1] > 1;
   return false;
 }
 
@@ -2115,8 +2118,10 @@ inline size_t ElementCount(const ptr<Type>& ty) {
   else if (IsActualVectorType(ty)) {
     if (auto vty = dyn_cast<VectorType>(ty)) {
       return vty->ElemCount();
-    } else if (auto bv = dyn_cast<BoundedType>(ty)) {
-      return bv->GetWidth();
+    } else if (auto bit = dyn_cast<BoundedIntegerType>(ty)) {
+      return bit->GetWidth();
+    } else if (auto bit = dyn_cast<BoundedITupleType>(ty)) {
+      return bit->GetWidths()[bit->Dims() - 1];
     }
   }
   choreo_unreachable(STR(*ty) + " does not have an element count.");

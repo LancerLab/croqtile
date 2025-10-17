@@ -1,4 +1,8 @@
 #include "scalar_evolution.hpp"
+#include "ast.hpp"
+#include "io.hpp"
+#include "loop_utils.hpp"
+#include "symvals.hpp"
 
 namespace Choreo {
 
@@ -185,6 +189,56 @@ bool ScalarEvolutionAnalysis::Visit(AST::Call& n) {
   return true;
 }
 
+bool ScalarEvolutionAnalysis::Visit(AST::DataAccess& n) {
+  TraceEachVisit(n);
+  if (!n.AccessElement()) return true;
+  auto indices = n.GetIndices();
+  if (indices.size() == 1) {
+    auto idx_name = AST::GetIdentifier(indices[0])->name;
+    if (with_syms.count(InScopeName(idx_name))) {
+      auto with_scev = GetSCEVOfSym(SymName(idx_name));
+      n.scev = with_scev;
+      if (debug_visit)
+        dbgs() << "da:    `" << STR(n) << "` -> " << STR(with_scev) << "\n";
+      return true;
+    }
+  }
+
+  ValueItem stride = sbe::nu(1);
+  ptr<SCEV> ptr_scev = nullptr;
+
+  for (int i = indices.size() - 1; i >= 0; i--) {
+    if (auto idx = dyn_cast<AST::Expr>(indices[i])) {
+      ptr<SCEV> scev = idx->GetSCEV();
+
+      if (!ptr_scev) {
+        ptr_scev = scev;
+      } else {
+        scev = ComputeARSCEV(scev, MakeSCEVVal(stride), "*");
+        ptr_scev = ComputeARSCEV(ptr_scev, scev, "+");
+      }
+
+      // accumulate the stride
+      if (auto loop = scev->GetLoop()) {
+        auto iv_ty = loop->GetIVType();
+        auto loop_bound = GetSingleUpperBound(iv_ty);
+        stride = stride * loop_bound;
+      }
+    }
+  }
+  n.scev = ptr_scev;
+  if (debug_visit)
+    dbgs() << "da:    `" << STR(n) << "` -> " << STR(ptr_scev) << "\n";
+
+  return true;
+}
+
+bool ScalarEvolutionAnalysis::Visit(AST::WithIn& n) {
+  TraceEachVisit(n);
+  if (n.with) { with_syms.insert(InScopeName(n.with->name)); }
+  return true;
+}
+
 bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   cur_loop = n.loop;
@@ -194,7 +248,6 @@ bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
   // we register iv's scev of all loops, instead of only vectorized loops
   auto iv_ty = cur_loop->GetIVType();
   auto iv_name = cur_loop->IVName();
-  auto iv_sym = SymName(iv_name);
   auto upper_bound = GetSingleUpperBound(iv_ty);
   auto stride = GetSingleStride(iv_ty);
   auto step = sbe::nu(stride * vector_width);
@@ -203,6 +256,46 @@ bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
   if (debug_visit)
     dbgs() << "iv:    `" << iv_name << "` -> " << STR(ar_expr) << "\n";
   AssignSCEVToSym(SymName(iv_name), ar_expr, LoopName());
+
+  bool with_found = false;
+  std::string with_sym;
+  for (auto item : within_map) {
+    if (with_syms.count(item.first) == 0) continue;
+    auto ivs = item.second;
+    if (ivs[ivs.size() - 1] == InScopeName(iv_name)) {
+      with_found = true;
+      with_sym = item.first;
+      break;
+    }
+  }
+  if (with_found) {
+    auto matchers = within_map[with_sym];
+    ptr<SCEV> with_scev = nullptr;
+    ValueItem stride = sbe::nu(1);
+    for (int i = matchers.size() - 1; i >= 0; i--) {
+      auto matcher = matchers[i];
+      auto scev_ar = GetSCEVOfSym(matcher);
+
+      auto loop = li->GetLoopOfIV(matcher);
+      assert(loop && "loop should exist.");
+      if (!with_scev) {
+        with_scev = scev_ar;
+      } else {
+        scev_ar = ComputeARSCEV(scev_ar, MakeSCEVVal(stride), "*");
+        with_scev = ComputeARSCEV(with_scev, scev_ar, "+");
+      }
+
+      auto iv_ty = loop->GetIVType();
+      auto loop_bound = GetSingleUpperBound(iv_ty);
+      stride = stride * loop_bound;
+    }
+
+    if (debug_visit)
+      dbgs() << "iv:    `" << UnScopedName(with_sym) << "` -> "
+             << STR(with_scev) << "\n";
+    AssignSCEVToSym(with_sym, with_scev, LoopName());
+  }
+
   return true;
 }
 

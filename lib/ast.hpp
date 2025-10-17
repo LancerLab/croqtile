@@ -1044,6 +1044,7 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
 struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   ptr<Identifier> data = nullptr;
   ptr<MultiValues> indices = nullptr;
+  ptr<SCEV> scev = nullptr;
 
   DataAccess(const location& l, const ptr<Identifier>& i,
              const ptr<MultiValues>& m = nullptr)
@@ -1057,6 +1058,7 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
 
   const ptr<Identifier>& GetData() const { return data; };
   const std::string& GetDataName() const { return data->name; };
+  ptr<SCEV> GetSCEV() const { return scev; }
 
   bool AccessElement() const { return indices != nullptr; }
 
@@ -2708,16 +2710,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
 
   void accept(Visitor&) override;
 
-  bool IsNorm() const {
-    if (ranges->Count() != 1) return false;
-    auto range = dyn_cast<LoopRange>(ranges->ValueAt(0));
-    assert(range && "invalid range in foreach block.");
-    auto range_type = dyn_cast<BoundedType>(range->IV()->GetType());
-    if (!range_type) return true;
-    assert(range_type && "invalid range type in foreach block.");
-
-    return range_type->Dims() == 1;
-  }
+  bool IsNorm() const { return loop != nullptr; }
 
   ptr<Identifier> GetIV() const {
     if (ranges->Count() == 1) {

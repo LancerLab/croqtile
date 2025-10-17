@@ -25,12 +25,6 @@ LoopAnalysis::LoopAnalysis()
     : VisitorWithSymTab("loop-analysis", CCtx().GetGlobalSymbolTable()),
       li(AST::Make<LoopInfo>()) {}
 
-int LoopAnalysis::loop_count = 0;
-
-std::string LoopAnalysis::GenerateLoopName() {
-  return "loop" + std::to_string(++loop_count);
-}
-
 bool LoopAnalysis::BeforeVisitImpl(AST::Node&) { return true; }
 
 bool LoopAnalysis::AfterVisitImpl(AST::Node& n) {
@@ -44,11 +38,14 @@ bool LoopAnalysis::AfterVisitImpl(AST::Node& n) {
 
 bool LoopAnalysis::Visit(AST::ForeachBlock& n) {
   auto iv = n.GetIV();
-  auto loop_name = GenerateLoopName();
-  li->iv2loop[InScopeName(iv->name)] = loop_name;
 
-  ptr<Loop> loop = AST::Make<Loop>(loop_name, iv->name, iv->GetType());
+  ptr<Loop> loop = n.loop;
+  auto loop_name = loop->loop_name;
+  li->iv2loop[InScopeName(iv->name)] = loop_name;
+  loop->iv_name = iv->name;
+  loop->iv_type = iv->GetType();
   loop->scope_name = SSTab().ScopeName();
+
   ptr<AST::AttributeExpr> vectorize_attr = nullptr;
   int vector_width = 1;
   if (AST::NeedVectorize(n, vectorize_attr)) {
@@ -87,7 +84,6 @@ bool LoopVectorizeLegalityChecker::NeedCheck() {
 bool LoopVectorizeLegalityChecker::CheckDataAccessAlignment(
     AST::DataAccess& n) {
   if (!n.AccessElement()) return true;
-
   auto span_ty = dyn_cast<SpannedType>(n.data->GetType());
   assert(span_ty && "data access should be on spanned type.");
   auto e_ty = span_ty->ElementType();
@@ -99,37 +95,25 @@ bool LoopVectorizeLegalityChecker::CheckDataAccessAlignment(
   // simd operands.
   auto alignment = SizeOf(e_ty) * cur_loop->GetVectorWidth();
 
-  auto dim = span_ty->GetShape().DimCount();
-  auto accmulate_size = sbe::nu(1);
-  for (int i = dim - 1; i >= 0; --i) {
-    auto indice = n.GetIndices()[i];
-    auto indice_expr = dyn_cast<AST::Expr>(indice);
-    assert(indice_expr && "index should be an expression.");
-    auto iscev = dyn_cast<SCEVAddRecExpr>(indice_expr->GetSCEV());
-    // step is 1 if we cannot determine the step
-    auto step = sbe::nu(1);
-    if (iscev)
-      step = iscev->step->GetValue();
-    else if (auto ival = dyn_cast<SCEVVal>(indice_expr->GetSCEV())) {
-      if (ival->GetValue()->IsNumeric()) step = ival->GetValue();
-    }
-
-    if (i < int(dim - 1))
-      accmulate_size = accmulate_size * span_ty->GetShape().ValueAt(i + 1);
-    auto stride = step * accmulate_size * sbe::nu(SizeOf(e_ty));
-
-    bool IsAligned = false;
-    if (auto num_stride = dyn_cast<sbe::NumericValue>(stride)) {
-      if (num_stride->Value() % alignment == 0) { IsAligned = true; }
-    }
-
-    if (!IsAligned) {
-      if (debug_visit)
-        dbgs() << indent << "unaligned data access: " << STR(n)
-               << ", stride at the " << i + 1 << "th indice: " << STR(stride)
-               << "{" << alignment << "}.\n";
-      cur_loop->can_vectorize = false;
-      return false;
+  auto da_scev = n.GetSCEV();
+  if (auto da_ar = dyn_cast<SCEVAddRecExpr>(da_scev)) {
+    auto base = da_ar->base;
+    while (auto inner_ar = dyn_cast<SCEVAddRecExpr>(base)) {
+      auto step = inner_ar->step;
+      auto step_val = step->GetValue();
+      if (auto num_step = dyn_cast<sbe::NumericValue>(step_val)) {
+        auto stride = num_step->Value() * SizeOf(e_ty);
+        bool IsAligned = false;
+        if (stride % alignment == 0) { IsAligned = true; }
+        if (!IsAligned) {
+          if (debug_visit)
+            dbgs() << indent << "unaligned data access: " << STR(n)
+                   << ", stride: " << STR(stride) << "{" << alignment << "}.\n";
+          cur_loop->can_vectorize = false;
+          return false;
+        }
+      }
+      base = inner_ar->base;
     }
   }
 
@@ -819,7 +803,12 @@ bool LoopVectorizer::RunOnProgram(AST::Node& root) {
   lc.SetTraceVisit(trace_visit);
   root.accept(lc);
   if (HasError() || abend_after) return false;
-  if (!lc.IsAllLoopNorm() || !lc.HasVectorization()) return true;
+  if (!lc.IsAllLoopNorm() || !lc.HasVectorization()) {
+    if (debug_visit)
+      dbgs() << "[loop vectorization] some loops are not normalized or no loop "
+                "is marked to be vectorized. Skip vectorization.\n";
+    return true;
+  }
   if (prt_visitor) dbgs() << " |- " << lc.GetName() << NewL;
 
   LoopAnalysis la;

@@ -169,6 +169,7 @@ private:
   ptr<LoopInfo> li;
   ptr<DiversityInfo> di;
   std::stack<DiversityShape> scope_shapes;
+  std::set<std::string> with_syms; // with symbols defined in with-in blocks
 
   bool InVectorizedLoop();
 
@@ -182,11 +183,13 @@ public:
                     ptr<DiversityInfo> d);
 
   bool Visit(AST::Expr& n) override;
+  bool Visit(AST::CastExpr& n) override;
   bool Visit(AST::NamedVariableDecl& n) override;
   bool Visit(AST::Identifier& n) override;
   bool Visit(AST::DataAccess& n) override;
   bool Visit(AST::Assignment& n) override;
   bool Visit(AST::Call& n) override;
+  bool Visit(AST::WithIn& n) override;
   bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::IfElseBlock& n) override;
   bool BeforeAfterVisitImpl(AST::Node& n) override;
