@@ -1,4 +1,4 @@
-// RUN: choreo %s --vectorize 2>&1 | FileCheck %s
+// RUN: choreo %s -dvec 2>&1 | FileCheck %s
 __co__ void func(int len) {
   parallel p by 1 {
     foreach {i, j} in [32, 32] : vectorize(p, 32) {}

@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo --vectorize %s | FileCheck --match-full-lines %s
+// RUN: choreo -dvec %s | FileCheck --match-full-lines %s
 ___co__ void vecadd(s32 [N, C, H, W] a, s32 [N,C,H, W] b)
 {
   parallel q by 1 {

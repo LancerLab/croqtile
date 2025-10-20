@@ -1,4 +1,4 @@
-// RUN: choreo %s --vectorize | FileCheck %s
+// RUN: choreo %s -dvec | FileCheck %s
 __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
 {
   parallel q by 1 {

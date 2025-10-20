@@ -374,6 +374,7 @@ bool LoopVectorizeLegalityChecker::Visit(AST::Call& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   if (n.IsAnno()) return true;
+  if (n.IsArith()) return true;
   if (debug_visit)
     dbgs() << indent
            << "call is currently not supported in loop vectorization\n";

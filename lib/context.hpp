@@ -340,6 +340,7 @@ private:
   bool diag_dma = false;          // diagnose DMA at runtime
   bool loop_norm = false;         // enable loop normalization
   bool no_vectorize = false;      // do not vectorize any foreach loop
+  bool vectorize = false;         // enable loop vectorization
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -481,6 +482,7 @@ public:
   bool DMADiagnosis() const { return diag_dma; }
   bool LoopNorm() const { return loop_norm; }
   bool NoVectorize() const { return no_vectorize; }
+  bool Vectorize() const { return vectorize; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -494,7 +496,7 @@ public:
   void SetVisualize(bool value) { visualize = value; }
   void SetCrossCompile(bool value) { cross_compile = value; }
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
-  void SetVectorize(bool value) { trace_vectorize = value; }
+  void SetTraceVectorize(bool value) { trace_vectorize = value; }
   void SetLivenessAnalysis(bool value) { liveness = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
@@ -503,6 +505,7 @@ public:
   void SetDMADiagnosis(bool value) { diag_dma = value; }
   void SetLoopNorm(bool value) { loop_norm = value; }
   void SetNoVectorize(bool value) { no_vectorize = value; }
+  void SetVectorize(bool value) { vectorize = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;
