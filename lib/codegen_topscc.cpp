@@ -1,4 +1,5 @@
 #include "codegen_topscc.hpp"
+#include "codegen_utils.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -35,9 +36,6 @@ Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
 Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
                                "-ndecay-spv", false,
                                " decay spanview to be pointers.");
-Option<bool>
-    dma_verbose(OptionKind::Hidden, "--dma-verbose", "", false,
-                " print DMA related informtion at runtime (debug only).");
 Option<bool> dma_opt(OptionKind::Hidden, "-fopt-dma", "", true,
                      "optimize dma to linear copy.");
 Option<bool> split_8byte_dma_transfer(
@@ -46,47 +44,6 @@ Option<bool> split_8byte_dma_transfer(
     "do not support native 8-byte DMA.");
 
 namespace {
-
-inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
-                       const std::string& from, const std::string& to,
-                       const std::string action, const std::string& offset,
-                       size_t offcnt, const std::string& suffix = "") {
-  if (!dma_verbose) return;
-
-  os << indent << "printf(\"" << from << "->" << to << ", " << action
-     << " offset: {";
-  for (size_t i = 0; i < offcnt; ++i) {
-    if (i > 0) os << ", ";
-    os << "%d";
-  }
-  os << "} " << suffix << "\\n\"";
-  if (offcnt > 0) os << ", " << offset;
-  os << ");\n";
-}
-
-inline const std::string ImplicitPred(Storage cur) {
-  switch (cur) {
-  case Storage::LOCAL: return "__CHOREO_SINGLE_LOCAL__";
-  case Storage::SHARED: return "__CHOREO_SINGLE_SHARED__";
-  default: choreo_unreachable("unsupported storage level.");
-  }
-  return "";
-}
-
-const char* SingleInstancePredicate(bool shared_in_block) {
-  if (shared_in_block) return "__CHOREO_SINGLE_SHARED__";
-  return "__CHOREO_SINGLE_LOCAL__";
-}
-
-inline const char* SyncByLevel(Storage s) {
-  switch (s) {
-  case Storage::SHARED: return "__syncthreads()";
-  case Storage::LOCAL: return "__syncsubthreads()";
-  default:
-    choreo_unreachable("unsupported storage location for the synchronization.");
-  }
-  return "";
-}
 
 inline const char* TopsMdsStorage(Storage st) {
   switch (st) {
@@ -1082,7 +1039,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       } else
         GenerateSubscriptions(ds, d_indent + n.name_str, " = false;\n",
                               ety->Dimensions());
-      ds << d_indent << SyncByLevel(ety->GetStorage()) << ";\n";
+      ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
     } break;
     default: break;
     }
@@ -1114,7 +1071,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << d_indent << "}\n";
       } else
         ds << d_indent << n.name_str << " = false;\n"; // inited as untriggered
-      ds << d_indent << SyncByLevel(ety->GetStorage()) << ";\n";
+      ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
     } break;
     default: break;
     }
@@ -1484,7 +1441,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   if ((t_sty->GetStorage() == Storage::GLOBAL ||
        IsChoreoInput(InScopeName(t_sym))) &&
       IsHost()) {
-    if (n.async) choreo_unreachable("not support host-side async dma yet");
+    if (n.IsAsync()) choreo_unreachable("not support host-side async dma yet");
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     std::string buf_sym_from;
     std::string buf_sym;

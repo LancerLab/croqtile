@@ -14,7 +14,12 @@
 #include <memory>
 #include <random>
 
+#ifdef __CHOREO_TARGET_CUTE__
+#include "cute/tensor.hpp"
+#endif
+
 #ifdef __TOPSCC__
+
 #define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 // #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 #define __co_device__ __device__
@@ -25,6 +30,7 @@
 #define __co_host__
 #define __co_any__
 #endif // __TOPSCC__
+
 #define __cok__ namespace choreo
 
 namespace choreo {
@@ -979,6 +985,16 @@ static __attribute__((always_inline)) inline void abend_true(bool p) {
   if (p) std::abort();
 }
 
+static __attribute__((always_inline)) inline void verify_device_status() {
+#ifdef __CUDA__
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    printf("CUDA error after kernel: %s\n", cudaGetErrorString(err));
+    std::abort();
+  }
+#endif
+}
+
 // target specific definations
 #ifdef __TOPSCC__
 template <typename T>
@@ -1009,6 +1025,10 @@ __device__ __attribute__((always_inline)) static inline void __co_abort__() {
   abort();
 #endif
 }
+
+#endif // __TOPSCC__
+
+#ifdef __TOPSCC__
 
 // choreo device future
 struct future {
@@ -1202,6 +1222,199 @@ __device__ inline void rotate(Futures&... f) {
 }
 
 #endif
+
+#ifdef __CHOREO_TARGET_CUTE__
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+// SM90+ (Hopper) - use tma
+using AsyncCopyAtom = cute::SM90_TMA_LOAD;
+#else
+using AsyncCopyAtom = cute::AutoCopyAsync;
+#endif
+
+__device__ __attribute__((always_inline)) static inline void __co_abort__() {
+  __trap();
+}
+
+// choreo device future
+struct future {
+
+#if defined(__TOPSCC__)
+  using AtomType = tops::event;
+#else
+  using AtomType = void; // erase the type
+#endif // __TOPSCC__
+
+  AtomType* atom;
+  void* d = nullptr; // data: future's user must guarantee it is valid
+
+  // for runtime check purpose
+  //
+  // ST_NONE -> ST_INITED -> ST_TRIGGERED -> ST_WAITED
+  //                              ^              |
+  //                              +--------------+
+  enum Status {
+    ST_NONE = 0,
+    ST_INITED = 1,
+    ST_TRIGGERED = 2,
+    ST_WAITED = 3,
+  };
+
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+  Status s = ST_NONE;
+  const char* name = nullptr;
+  // source code locations
+  unsigned line = 0;
+  unsigned column = 0;
+
+  __device__ future(const char* n, unsigned l, unsigned c, void* data = nullptr)
+      : d(data), s(ST_NONE), name(n), line(l), column(c) {}
+#else
+  __device__ future(void* data = nullptr) : d(data) {}
+#endif //__CHOREO_DMA_DIAGNOSIS__
+
+  // context is retrieved to invoke data operations
+  __device__ auto get_atom() {
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+    if (s == ST_NONE) s = ST_INITED;
+    if (s != ST_INITED && s != ST_WAITED) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "is not initialized.\n",
+             line, column);
+      __co_abort__();
+    }
+#endif // __CHOREO_DMA_DIAGNOSIS__
+    return atom;
+  }
+
+  // when async, an event is obtained for later waiting
+  __device__ void set_atom(AtomType* a) {
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+    if (s == ST_TRIGGERED) {
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
+             "is triggered on an in-flight event.\n",
+             line, column);
+      __co_abort__();
+    } else if (s != ST_NONE) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "has been initialized before setting atom.\n",
+             line, column);
+      __co_abort__();
+    }
+#endif // __CHOREO_DMA_DIAGNOSIS__
+
+    atom = a;
+    s = ST_INITED;
+  }
+
+  // when sync, no wait is required. simply change the status
+  __device__ void set_nowait() {
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+    if (s != ST_INITED && s != ST_WAITED) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "is used incorrectly.\n",
+             line, column);
+      __co_abort__();
+    }
+    s = ST_WAITED;
+#endif // __CHOREO_DMA_DIAGNOSIS__
+  }
+
+  __device__ void set_data(void* data) { d = data; }
+  __device__ void set_atom_data(AtomType* a, void* data) {
+    set_atom(a);
+    set_data(data);
+  }
+
+  __device__ void wait_impl() {
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 900
+// TODO: TMA
+#elif __CUDA_ARCH__ >= 800
+    cute::cp_async_wait<0>();
+#endif
+#elif defined(__TOPSCC__)
+    tops::wait(e);
+#endif
+  }
+
+  __device__ void trigger() {
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+    if (s != ST_INITED && s != ST_WAITED) {
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
+             "has been triggered without atom set.\n",
+             line, column);
+      __co_abort__();
+    }
+#endif // __CHOREO_DMA_DIAGNOSIS__
+    s = ST_TRIGGERED;
+  }
+
+  __device__ void wait() {
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+    if (s == ST_TRIGGERED) {
+      s = ST_WAITED;
+    } else if (s == ST_WAITED) {
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
+             "has been waited multiple times.\n",
+             line, column);
+      __co_abort__();
+    } else if (s == ST_INITED) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "is used incorrectly.\n",
+             line, column);
+      __co_abort__();
+    } else
+      assert(s == ST_NONE); // waiting on not triggered future is acceptable
+#endif                      // __CHOREO_DMA_DIAGNOSIS__
+    wait_impl();
+  }
+
+  __device__ void* data() {
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+    if (!d) {
+      printf("[choreo-rt] internal error: future (defined at line %u:%u) is "
+             "not associated with a data.\n",
+             line, column);
+      __co_abort__();
+    }
+    if (s == ST_TRIGGERED) {
+      // TODO: requires krt %s support to print future name
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) is "
+             "not waited before using.\n",
+             line, column);
+      __co_abort__();
+    }
+#endif // __CHOREO_DMA_DIAGNOSIS__
+    return d;
+  }
+
+  __device__ void destroy() {
+#ifdef __TOPSCC__
+    tops_destroy_dte(ctx);
+#endif
+  }
+
+  __device__ ~future() {
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+    if (s == ST_TRIGGERED) {
+      // TODO: requires krt %s support to print future name
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
+             "has never been waited.\n",
+             line, column);
+      __co_abort__();
+    }
+    if (s >= ST_INITED) destroy();
+#else
+    destroy();
+#endif // __CHOREO_DMA_DIAGNOSIS__
+  }
+  __device__ future(const future& f) = delete;
+  __device__ future(future&& f) = delete;
+  __device__ future& operator=(const future& f) = delete;
+};
+
+#endif // __CHOREO_TARGET_CUTE__
 
 } // end namespace choreo
 

@@ -28,3 +28,4 @@ tests/*.sh
 extern/clang-format*
 
 !extern/Makefile
+!extern/cutlass

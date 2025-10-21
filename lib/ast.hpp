@@ -2373,7 +2373,11 @@ struct Select : public Node, public TypeIDProvider<Select> {
 struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
   std::string future;
+
+private:
   bool async;
+
+public:
   // if this DMA is chained with other DMA in pipeline mode
   bool chained;
   // SYMBOL string of its chained DMA B, direction is B->A
@@ -2384,6 +2388,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   ptr<Node> to = nullptr;
   ptr<DMAConfig> config = nullptr;
 
+public:
   explicit DMA(const location& l, const std::string& o, const std::string& r,
                const ptr<Node>& f, const ptr<Node>& t, bool a,
                const ptr<DMAConfig>& c = nullptr)
@@ -2458,6 +2463,8 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string SourceString() {
     return future + " = dma" + operation + " " + STR(*from) + " => " + STR(*to);
   }
+
+  bool IsAsync() { return async; }
 
   void accept(Visitor&) override;
 

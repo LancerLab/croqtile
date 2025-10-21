@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  if (!CCtx().NoVectorize()) {
+  if (!CCtx().NoVectorize() && CCtx().GetTarget() == CompileTarget::Topscc) {
     LoopVectorizer lv;
     if (!lv.RunOnProgram(root)) return lv.Status();
     if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);

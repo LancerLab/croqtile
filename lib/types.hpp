@@ -1688,6 +1688,7 @@ struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
   const std::string Name() const override { return "future"; }
   Shape GetShape() { return psty->GetShape(); }
   const ptr<SpannedType>& GetSpannedType() const { return psty; }
+  BaseType ElementType() const { return psty->ElementType(); }
   size_t Dims() const override { return psty->Dims(); }
   bool IsAsync() const { return async; }
 

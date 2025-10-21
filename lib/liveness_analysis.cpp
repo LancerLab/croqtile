@@ -631,10 +631,10 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       os << " = dma.any";
     } else {
       if (dma->future.empty())
-        assert(!dma->async && "expecting the dma is not async.");
+        assert(!dma->IsAsync() && "expecting the dma is not async.");
       else
         os << dma->future << " = ";
-      os << "dma" << dma->operation << (dma->async ? ".async" : "");
+      os << "dma" << dma->operation << (dma->IsAsync() ? ".async" : "");
       os << (dma->config ? " " + PSTR(dma->config) : "") << " ";
       os << STR(dma->from) << " => " << STR(dma->to);
     }
@@ -1083,7 +1083,7 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
   waited.
   */
   if (n.future.empty()) {
-    assert(!n.async && "async dma should have a future.");
+    assert(!n.IsAsync() && "async dma should have a future.");
     AddUse(current_stmt, n.FromSymbol());
     AddUse(current_stmt, n.ToSymbol());
   } else {
@@ -1099,7 +1099,7 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
       AddDef(current_stmt, n.future, true);
 
     AddIsBinding(current_stmt, n.future);
-    if (n.async) AddBinding(n.future, n.FromSymbol());
+    if (n.IsAsync()) AddBinding(n.future, n.FromSymbol());
     AddBinding(n.future, n.ToSymbol());
     AddFut2Buffers(n.future, BufInfo{n.FromSymbol(), n.ToSymbol()});
   }

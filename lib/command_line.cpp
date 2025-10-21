@@ -126,6 +126,8 @@ Option<bool> liveness(OptionKind::Hidden, "--liveness", "", true,
                       "Analyze the liveness of the program.");
 Option<bool> mem_reuse(OptionKind::Hidden, "--mem-reuse", "", true,
                        "Analyze the memory usage, then perform memory reuse.");
+Option<bool> diag_dma(OptionKind::Hidden, "--diag-dma", "-dd", true,
+                      "Enable runtime DMA diagnosis.");
 Option<bool> print_node_type(OptionKind::Hidden, "--print-node-type", "-pnt",
                              false, "Print node with its type.");
 Option<bool> verify_visitors(OptionKind::Hidden, "--verify", "-vf", false,
@@ -289,6 +291,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetMemReuse(mem_reuse.GetValue());
   CCtx().SetSimplifyFpValno(simplify_fp_valno.GetValue());
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
+  CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
 
   if (!trace_visit.GetValue().empty())
