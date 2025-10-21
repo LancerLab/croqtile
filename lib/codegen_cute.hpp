@@ -256,7 +256,6 @@ private:
 
   Storage parallel_level = Storage::NONE;
   Storage max_parallel_level = Storage::NONE;
-  std::vector<Storage> pl_stack;
   // idx of the most outer pb
   int parallel_idx = -1;
 
@@ -271,11 +270,13 @@ private:
   std::ostringstream hs;            // host stream
   std::ostringstream return_stream; // stream for return node
 
-  std::map<std::string, std::string> claimed_dte;
+  std::map<std::string, std::string> claimed_futs;
   std::vector<std::string> pld_checklist = {};
 
   std::set<std::string> global_buffers; // global buffers
   bool emit_call = true;                // emit the call statement
+
+  std::set<std::string> cooperatives; // futures with cooperative-dma
 
 private:
   void EmitFixedHostHead();
@@ -325,7 +326,7 @@ private:
   void ResetChoreoFunctionStates() {
     host_param_count = 0; // reset the count of host parameter
     symbolic_dimensions.clear();
-    claimed_dte.clear();
+    claimed_futs.clear();
     fty = nullptr;
     void_return = false;
     emit_call = true;
@@ -397,22 +398,22 @@ private:
   }
 
   bool IsDMABlockShared(AST::DMA&) const {
-    return (parallel_level == Storage::SHARED) &&
-           (max_parallel_level == Storage::LOCAL ||
-            max_parallel_level == Storage::SUB);
+    std::cout << "cur: " << STR(parallel_level) << "\n";
+    return parallel_level == Storage::SHARED;
   }
   const std::string ExprCastSTR(AST::ptr<AST::Node> n,
                                 std::optional<std::variant<int, float>> val,
                                 BaseType to, BaseType from,
                                 bool is_host = true) const;
 
-  const std::string ValueSTR(const ValueItem& vi, bool LL_suffix = false) const;
+  const std::string ValueSTR(const ValueItem& vi, bool = false,
+                             bool = false) const;
   const std::string ValueListSTR(const ValueList& vl, std::string sep = ", ",
                                  bool LL_suffix = false) const;
   const std::string OpValueSTR(const ValueItem& vi,
                                const std::string& parent_op,
-                               const bool is_left_child,
-                               bool LL_suffix = false) const;
+                               const bool is_left_child, bool LL_suffix = false,
+                               bool = false) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
   const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string& parent_op,
                               const bool is_left_child, bool is_host) const;
@@ -425,8 +426,8 @@ private:
   const std::string
   GenOffset(const ptr<AST::ChunkAt>&,
             size_t end_idx = std::numeric_limits<size_t>::max()) const;
-  const std::string ShapeSTR(const Shape&, const std::string& = ", ",
-                             BaseType cast_to = BaseType::UNKNOWN) const;
+  const std::string ShapeSTR(const Shape&, bool = false,
+                             const std::string& = ", ") const;
   const std::string SSMName(const std::string& sname, bool is_host) const {
     return (is_host) ? ssm.HostName(sname) : ssm.DeviceName(sname);
   }

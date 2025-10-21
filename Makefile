@@ -351,8 +351,8 @@ gcu3-kmd:
 setup-gcu-acore:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore
 
-GINAC_MD5=9385e54f4d347fe25b635209971de987
-GINAC_PACKAGE_NAME=ginac-cln.tgz
+GINAC_MD5=9d0eaa439c7b825311e99a9aa9b15f9a
+GINAC_PACKAGE_NAME=ginac-cln-251014.tgz
 GINAC_PACKAGE=$(TOOLCHAIN_DIR)/$(GINAC_PACKAGE_NAME)
 CUR_GINAC_MD5:=$(shell md5sum $(GINAC_PACKAGE) 2>/dev/null| cut -d ' ' -f 1)
 

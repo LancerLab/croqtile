@@ -1,4 +1,5 @@
 #include "codegen_cute.hpp"
+#include "codegen_utils.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -10,7 +11,6 @@
 #include "choreo_header.inc"
 #include "codegen.hpp"
 #include "operator_info.hpp"
-#include "types.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
 #warning "missing macro definition of __CHOREO_CUDA_DIR__"
@@ -39,47 +39,6 @@ extern Option<bool> dma_verbose;
 extern Option<bool> dma_opt;
 
 namespace cute {
-
-inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
-                       const std::string& from, const std::string& to,
-                       const std::string action, const std::string& offset,
-                       size_t offcnt, const std::string& suffix = "") {
-  if (!dma_verbose) return;
-
-  os << indent << "printf(\"" << from << "->" << to << ", " << action
-     << " offset: {";
-  for (size_t i = 0; i < offcnt; ++i) {
-    if (i > 0) os << ", ";
-    os << "%d";
-  }
-  os << "} " << suffix << "\\n\"";
-  if (offcnt > 0) os << ", " << offset;
-  os << ");\n";
-}
-
-inline const std::string ImplicitPred(Storage cur) {
-  switch (cur) {
-  case Storage::LOCAL: return "__CHOREO_SINGLE_LOCAL__";
-  case Storage::SHARED: return "__CHOREO_SINGLE_SHARED__";
-  default: choreo_unreachable("unsupported storage level.");
-  }
-  return "";
-}
-
-const char* SingleInstancePredicate(bool shared_in_block) {
-  if (shared_in_block) return "__CHOREO_SINGLE_SHARED__";
-  return "__CHOREO_SINGLE_LOCAL__";
-}
-
-inline const char* SyncByLevel(Storage s) {
-  switch (s) {
-  case Storage::SHARED: return "__syncthreads()";
-  default:
-    choreo_unreachable("unsupported storage location for the synchronization.");
-  }
-  return "";
-}
-
 inline const char* TopsMdsStorage(Storage st) {
   switch (st) {
   case Storage::DEFAULT:
@@ -106,9 +65,9 @@ inline std::string TopsParamStorage(Storage st) {
   return "";
 }
 
-inline const std::string GetDTEContextName() {
+inline const std::string GetCopyAtomName() {
   static unsigned i = 0;
-  return "choreo_topscc_ctx" + std::to_string(i++);
+  return "choreo_copy_atom" + std::to_string(i++);
 }
 
 inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
@@ -153,14 +112,7 @@ bool CuteCodeGen::RequiresImplPred(Storage cur) const {
   // ignore any expression without storage
   if (cur == Storage::NONE) return false;
 
-  if (max_parallel_level == Storage::SUB) {
-    switch (cur) {
-    case Storage::SUB: return false;
-    case Storage::LOCAL:
-    case Storage::SHARED: return true;
-    default: choreo_unreachable("irrational storage level.");
-    }
-  } else if (max_parallel_level == Storage::LOCAL) {
+  if (max_parallel_level == Storage::LOCAL) {
     switch (cur) {
     case Storage::SUB:
     case Storage::LOCAL: return false;
@@ -174,20 +126,15 @@ bool CuteCodeGen::RequiresImplPred(Storage cur) const {
   return false;
 }
 
-const std::string CuteCodeGen::ShapeSTR(const Shape& s,
-                                        const std::string& delimiter,
-                                        BaseType cast_to) const {
+const std::string CuteCodeGen::ShapeSTR(const Shape& s, bool shp_lit,
+                                        const std::string& delimiter) const {
   auto& vl = s.Value();
   assert(!vl.empty());
 
   std::ostringstream oss;
   for (unsigned i = 0; i < vl.size(); ++i) {
     if (i > 0) oss << delimiter;
-    bool need_static_cast = (cast_to != BaseType::UNKNOWN && !VIIsInt(vl[i]));
-    if (need_static_cast)
-      oss << "static_cast<" << NameBaseType(cast_to) << ">(";
-    oss << ValueSTR(vl[i]);
-    if (need_static_cast) oss << ")";
+    oss << ValueSTR(vl[i], ", ", shp_lit);
   }
   return oss.str();
 }
@@ -207,7 +154,6 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     device_fn = "__choreo_device_" + fname;
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
-    pl_stack.clear();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     // only on device-side
     if (pb->IsOuter()) {
@@ -223,7 +169,6 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
                 dbgs() << " (max-level: " << STR(max_parallel_level) << ")\n");
     }
     parallel_level = pb->GetLevel();
-    pl_stack.push_back(parallel_level);
   } else if (isa<AST::WithBlock>(&n)) {
     IndStream() << "// with-in: " << n.LOC() << "\n";
     IndStream() << "{\n";
@@ -299,14 +244,11 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     if (pb->IsOuter()) {
       max_parallel_level = Storage::NONE;
       parallel_level = Storage::NONE;
-      pl_stack.clear();
       ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
       ds << "}\n\n";
     } else {
-      assert(!pl_stack.empty());
-      pl_stack.pop_back();
-      parallel_level = pl_stack.back();
+      parallel_level = pb->GetLevel();
     }
   } else if (isa<AST::WithBlock>(&n)) {
     DecrIndent();
@@ -525,6 +467,7 @@ void CuteCodeGen::EmitFixedHostHead() {
 #include <iterator>
 #include <string>
 #include <vector>
+
 #include "cutlass/cutlass.h"
 )";
 
@@ -716,8 +659,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         std::string sym_data = sym + ".data()";
         hs << h_indent << "auto " << sym
            << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
-           << shape.Rank() << ">({" << ShapeSTR(shape, ", ", BaseType::U64)
-           << "});\n";
+           << shape.Rank() << ">({" << ShapeSTR(shape) << "});\n";
         if (n.init_value) {
           // support initialization of output
           hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
@@ -783,8 +725,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         choreo_unreachable(
             "error: shared/local buffer cannot be Choreo output.");
 
-      auto type_modifiers =
-          (sto == Storage::SHARED ? "__shared__ " : "__local__ __valigned__ ");
+      auto type_modifiers = (sto == Storage::SHARED ? "__shared__ " : "");
 
       if (!CCtx().MemReuse()) {
         ds << d_indent << type_modifiers << bts << " " << sym;
@@ -916,7 +857,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       } else
         GenerateSubscriptions(ds, d_indent + n.name_str, " = false;\n",
                               ety->Dimensions());
-      ds << d_indent << SyncByLevel(ety->GetStorage()) << ";\n";
+      ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
     } break;
     default: break;
     }
@@ -948,7 +889,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << d_indent << "}\n";
       } else
         ds << d_indent << n.name_str << " = false;\n"; // inited as untriggered
-      ds << d_indent << SyncByLevel(ety->GetStorage()) << ";\n";
+      ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
     } break;
     default: break;
     }
@@ -1148,28 +1089,31 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // - not support async.
 
   // Generate tops dte and choreo::future in device-side
-  auto claimFuture = [this, &n](const std::string& buf_expr) -> std::string {
-    if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
+  auto claimFuture = [this, &n](const std::string& buf_expr,
+                                bool is_async) -> std::string {
+    if (!n.future.empty() && claimed_futs.count(InScopeName(n.future)))
       return n.future;
 
+    auto cp_atom = GetCopyAtomName();
     // claim the date transfer engine
-    auto dte_ctx = GetDTEContextName();
-    ds << d_indent << "tops_dte_ctx_t " << dte_ctx << ";\n";
+    if (is_async) ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
+
     auto future_name = n.future;
     if (future_name.empty()) {
       static size_t future_count = 0;
       future_name = "__choreo_anon_fut__" + std::to_string(future_count++);
     } else {
-      claimed_dte.emplace(InScopeName(n.future), dte_ctx);
+      claimed_futs.emplace(InScopeName(n.future), cp_atom);
       ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
       ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
                           n.future + ".data()");
     }
-    ds << d_indent << "choreo::future " << future_name << "(" << dte_ctx
-       << ", \"" << n.future << "\", " << n.LOC().begin.line << ", "
-       << n.LOC().begin.column;
+    ds << d_indent << "future " << future_name << "(\"" << n.future << "\", "
+       << n.LOC().begin.line << ", " << n.LOC().begin.column;
     if (!buf_expr.empty()) ds << ", " << buf_expr;
     ds << ");\n";
+    if (is_async)
+      ds << d_indent << future_name << ".set_atom(&" << cp_atom << ");\n";
 
     return future_name;
   };
@@ -1190,7 +1134,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // It should not be claimed. And there is no future to remap to.
     if (IsHost()) return true;
 
-    claimFuture(UnScopedName(buf_name));
+    claimFuture(UnScopedName(buf_name), true);
     // make following buffer reference all be indirect
     // TODO: any better idea than this
     ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
@@ -1273,7 +1217,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   if ((t_sty->GetStorage() == Storage::GLOBAL ||
        IsChoreoInput(InScopeName(t_sym))) &&
       IsHost()) {
-    if (n.async) choreo_unreachable("not support host-side async dma yet");
+    if (n.IsAsync()) choreo_unreachable("not support host-side async dma yet");
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     std::string buf_sym_from;
     std::string buf_sym;
@@ -1372,39 +1316,43 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // return mds name and the declaration string.
   // If offset is not empty, means that need to do memory viewing.
   //   Just add offset to buf_expr, then utilize new_shape.
-  auto GenMDSDecl =
+  auto GenTensorDecl =
       [this](const std::string& buf_name, const std::string& buf_expr,
-             const ptr<SpannedType>& sty, const std::string& offset = "",
-             const Shape& new_shape =
-                 Shape()) -> std::pair<std::string, std::string> {
-    static int mds_cnt = 0;
-    auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
+             const Storage sto, BaseType bty, const std::string& offset = "",
+             const Shape& shp) -> std::pair<std::string, std::string> {
+    static int shp_cnt = 0;
+    shp_cnt++;
+    auto shp_name = "__shape" + std::to_string(shp_cnt) + "_" +
                     RemoveSuffix(buf_name, ".data()");
-    auto bt = sty->ElementType();
-    bool split_to_char = false;
-    std::string bts{split_to_char ? "char" : NameBaseType(bt)};
+    auto lyt_name = "__layout" + std::to_string(shp_cnt) + "_" +
+                    RemoveSuffix(buf_name, ".data()");
+    auto tsr_name = "__tensor" + std::to_string(shp_cnt) + "_" +
+                    RemoveSuffix(buf_name, ".data()");
 
-    std::ostringstream mds_decl;
-
-    mds_decl << d_indent << "tops::mdspan " << mds_name << "("
-             << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)"
-             << buf_expr;
-    if (offset == "")
-      mds_decl << ", " << ShapeSTR(sty->GetShape());
+    std::string mem_ty;
+    if (sto == Storage::GLOBAL || sto == Storage::DEFAULT)
+      mem_ty = "gmem";
     else {
-      mds_decl << " + ";
-      if (split_to_char)
-        mds_decl << offset << " * 8";
-      else
-        mds_decl << offset;
-      mds_decl << ", " << ShapeSTR(new_shape);
+      if (sto != Storage::SHARED)
+        choreo_unreachable("unsupported storage type: " + STR(sto));
+      mem_ty = "smem";
     }
-    if (split_to_char) mds_decl << ", 8";
-    mds_decl << ");\n";
-    return {mds_name, mds_decl.str()};
-  };
 
-  ValueList f_opt_condition, t_opt_condition;
+    std::string bts{NameBaseType(bty)};
+
+    std::ostringstream tsr_decl;
+
+    tsr_decl << d_indent << "auto " << shp_name << " = cute::make_shape("
+             << ShapeSTR(shp, true) << ");\n";
+    tsr_decl << d_indent << "auto " << lyt_name << " = cute::make_layout("
+             << shp_name << /*TODO: strides (when needed)*/ ");\n";
+    tsr_decl << d_indent << "auto " << tsr_name << " = cute::make_tensor("
+             << "cute::make_" << mem_ty << "_ptr<" << bts << ">(" << buf_name
+             << ((!offset.empty()) ? (" + " + offset) : "") << "), " << lyt_name
+             << ");\n";
+
+    return {tsr_name, tsr_decl.str()};
+  };
 
   // if the value is dst, means MAY do optimization on dst
   enum DMA_OP : uint8_t {
@@ -1414,111 +1362,20 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     both = src | dst
   };
 
-  // Check the current DMA. If the new span is address-contiguous within the
-  // original span, then slice or deslice can be optimized to linear copy.
-  auto OptToLinearCopy = [&]() -> DMA_OP {
-    if (!dma_opt) return DMA_OP::none;
-    if (SymbolToSymbol()) return DMA_OP::none;
-
-    // return `bool` if able to ensure true positive or true negative.
-    // return `ValueList` as the runtime condition if unable to ensure.
-    auto IsOptimizableChunkat =
-        [&](const ptr<AST::ChunkAt>& ca) -> std::variant<bool, ValueList> {
-      ValueList opt_condition;
-      Shape shape, new_shape;
-      shape = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetShape();
-      // check the shape transformation of each op inside ca
-      for (const auto& sop : ca->AllOperations()) {
-        if (sop->SpecifyReshape()) {
-          shape = sop->GetBlockShape();
-        } else {
-          new_shape = sop->GetBlockShape();
-          auto is_contiguous = IsContiguousSOp(*sop, shape);
-          if (auto val = std::get_if<bool>(&is_contiguous);
-              val && *val == false)
-            return false;
-          else if (!val)
-            opt_condition.push_back(std::get<ValueItem>(is_contiguous));
-
-          shape = new_shape;
-        }
-      }
-      if (opt_condition.empty()) return true;
-      return opt_condition;
-    };
-
-    DMA_OP optimizable = DMA_OP::none;
-    if (SymbolToTile()) {
-      auto res = IsOptimizableChunkat(t_ca);
-      if (auto val = std::get_if<bool>(&res); val && *val == true)
-        optimizable = DMA_OP::dst;
-      else if (!val) {
-        t_opt_condition = std::get<ValueList>(res);
-        optimizable = DMA_OP::dst;
-      }
-    } else if (TileToSymbol()) {
-      auto res = IsOptimizableChunkat(f_ca);
-      if (auto val = std::get_if<bool>(&res); val && *val == true)
-        optimizable = DMA_OP::src;
-      else if (!val) {
-        f_opt_condition = std::get<ValueList>(res);
-        optimizable = DMA_OP::src;
-      }
-    } else if (TileToTile()) {
-      // For tile to tile, there are 3 situtations.
-      auto res_f = IsOptimizableChunkat(f_ca);
-      if (auto val = std::get_if<bool>(&res_f); val && *val == true)
-        optimizable = DMA_OP::src;
-      else if (!val) {
-        f_opt_condition = std::get<ValueList>(res_f);
-        optimizable = DMA_OP::src;
-      }
-      auto res_t = IsOptimizableChunkat(t_ca);
-      if (auto val = std::get_if<bool>(&res_t); val && *val == true)
-        optimizable = (optimizable & DMA_OP::src) ? DMA_OP::both : DMA_OP::dst;
-      else if (!val) {
-        t_opt_condition = std::get<ValueList>(res_t);
-        optimizable = (optimizable & DMA_OP::src) ? DMA_OP::both : DMA_OP::dst;
-      }
-    }
-
-    VST_DEBUG({
-      if (optimizable != DMA_OP::none) {
-        dbgs() << "Optimize DMA at " << n.LOC() << " to linear copy:\n";
-        if (optimizable & DMA_OP::src) {
-          dbgs() << "\tSRC";
-          if (!f_opt_condition.empty()) dbgs() << " (runtime)";
-        }
-        if (optimizable & DMA_OP::dst) {
-          dbgs() << "\tDST";
-          if (!t_opt_condition.empty()) dbgs() << " (runtime)";
-        }
-        dbgs() << "\n";
-      }
-    });
-
-    return optimizable;
-  };
-
   const auto f_buf = GetBufferExpr(f_sym, f_idx, f_ty);
   const auto t_buf = GetBufferExpr(t_sym, t_idx, t_ty);
 
   auto future_name = n.future;
   // bind the data to the future
   if (SymbolToSymbol() || TileToSymbol() || TileToTile())
-    future_name = claimFuture(t_buf.second);
+    future_name = claimFuture(t_buf.second, fty->IsAsync());
   else
-    future_name = claimFuture("");
+    future_name = claimFuture("", fty->IsAsync());
 
   std::string event_name;
   if (fty->IsAsync()) event_name = future_name + "__event__";
 
-  // indicate which side can be optimized to linear copy
-  DMA_OP opt_to_linear_copy = OptToLinearCopy();
-
-  // if `no_linear_opt` is true, will not do linear optimization even
-  // `opt_to_linear_copy` is available. Use it to control runtime opt.
-  auto DMACodeGen = [&](bool no_linear_opt) {
+  auto DMACodeGen = [&]() {
     std::string f_mds_offset = "";
     std::string t_mds_offset = "";
     Shape f_shape = f_sty->GetShape();
@@ -1527,39 +1384,25 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     const auto& f_buf_expr = f_buf.second;
     const auto& t_buf_name = t_buf.first;
     const auto& t_buf_expr = t_buf.second;
-    if (!no_linear_opt && opt_to_linear_copy != DMA_OP::none) {
-      if (TileToSymbol()) {
-        assert(opt_to_linear_copy == DMA_OP::src);
-        f_mds_offset = GenOffset(f_ca);
-        f_shape = f_ca->GetBlockShape();
-      } else if (SymbolToTile()) {
-        assert(opt_to_linear_copy == DMA_OP::dst);
-        t_mds_offset = GenOffset(t_ca);
-        t_shape = t_ca->GetBlockShape();
-      } else if (TileToTile()) {
-        if (opt_to_linear_copy & DMA_OP::src) {
-          f_mds_offset = GenOffset(f_ca);
-          f_shape = f_ca->GetBlockShape();
-        }
-        if (opt_to_linear_copy & DMA_OP::dst) {
-          t_mds_offset = GenOffset(t_ca);
-          t_shape = t_ca->GetBlockShape();
-        }
-      }
-    } else {
-      if (auto idx = f_ca->IndexOfLastSpanAs()) {
-        f_mds_offset = TileBaseOffset(f_ca);
-        f_shape = f_ca->OpAt(*idx)->GetBlockShape();
-      }
-      if (auto idx = t_ca->IndexOfLastSpanAs()) {
-        t_mds_offset = TileBaseOffset(t_ca);
-        t_shape = t_ca->OpAt(*idx)->GetBlockShape();
-      }
-    }
+
+    if (auto idx = f_ca->IndexOfLastSpanAs()) {
+      f_mds_offset = TileBaseOffset(f_ca);
+      f_shape = f_ca->OpAt(*idx)->GetBlockShape();
+    } else
+      f_mds_offset = GenOffset(f_ca);
+
+    if (auto idx = t_ca->IndexOfLastSpanAs()) {
+      t_mds_offset = TileBaseOffset(t_ca);
+      t_shape = t_ca->OpAt(*idx)->GetBlockShape();
+    } else
+      t_mds_offset = GenOffset(t_ca);
+
     const auto f_mds =
-        GenMDSDecl(f_buf_name, f_buf_expr, f_sty, f_mds_offset, f_shape);
+        GenTensorDecl(f_buf_name, f_buf_expr, f_sty->GetStorage(),
+                      f_sty->ElementType(), f_mds_offset, fty->GetShape());
     const auto t_mds =
-        GenMDSDecl(t_buf_name, t_buf_expr, t_sty, t_mds_offset, t_shape);
+        GenTensorDecl(t_buf_name, t_buf_expr, t_sty->GetStorage(),
+                      t_sty->ElementType(), t_mds_offset, fty->GetShape());
 
     std::string f_mds_name{f_mds.first};
     std::string f_mds_decl{f_mds.second};
@@ -1571,123 +1414,24 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     // handles dma related to shared memory, where only single thread can
     // operate
-    bool shared_in_block = false;
-    if (!n.future.empty()) shared_in_block = IsDMABlockShared(n);
-
-    assert(!shared_in_block &&
-           "local and shared memory should not be used at the same time");
-
-    if (shared_in_block) {
-      ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
-         << ") {\n";
+    if (n.GetLevel() == Storage::SHARED) {
+      ds << d_indent << "if (" << SingleInstancePredicate() << ") {\n";
       IncrDeviceIndent();
-    }
+    } else if (!n.future.empty())
+      cooperatives.insert(InScopeName(n.future));
 
     if (n.operation == ".copy") {
-      auto LinearCopy = [&]() -> void {
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ");\n";
-        VerboseDMA(ds, d_indent, t_sym, f_sym, "copy", "", 0,
-                   ", line " + std::to_string(n.LOC().begin.line));
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
-      auto Deslice = [&]() -> void {
-        static int ds_cnt = 0;
-        auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
-                        t_sym + "_2_" + f_sym;
-        auto [offset, offcnt] = GenMdsOffset(t_ca);
-        VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", offset, offcnt,
-                   ", line " + std::to_string(n.LOC().begin.line));
-        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ");\n";
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
-      auto Slice = [&]() -> void {
-        static int s_cnt = 0;
-        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                        f_sym + "_2_" + t_sym;
-        auto [offset, offcnt] = GenMdsOffset(f_ca);
-        VerboseDMA(ds, d_indent, f_sym, t_sym, "slice", offset, offcnt,
-                   ", line " + std::to_string(n.LOC().begin.line));
-        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ");\n";
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
-      auto SliceDeslice = [&]() -> void {
-        static int s_cnt = 0;
-        auto s_off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                          f_sym + "_2_" + t_sym;
-        auto [s_offset, s_offcnt] = GenMdsOffset(f_ca);
-
-        static int ds_cnt = 0;
-        auto ds_off_name = "__deslice_offset" + std::to_string(ds_cnt++) +
-                           "__" + t_sym + "_2_" + f_sym;
-        auto [ds_offset, ds_offcnt] = GenMdsOffset(t_ca);
-
-        VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", ds_offset, ds_offcnt,
-                   ", line " + std::to_string(n.LOC().begin.line));
-        ds << d_indent << "int " << s_off_name << "[] = {" << s_offset
-           << "};\n";
-        ds << d_indent << "int " << ds_off_name << "[] = {" << ds_offset
-           << "};\n";
-
-        auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
-                                f_sym + "_2_" + t_sym;
-        ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-           << ShapeSTR(f_ca->GetBlockShape(), ", ", BaseType::U32) << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::slice_deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << s_off_name << ", " << slice_shape_name << ", "
-           << ds_off_name << ");\n";
-
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
-
-      if (SymbolToSymbol()) {
-        LinearCopy();
-      } else if (SymbolToTile()) {
-        if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
-          LinearCopy();
-        else
-          Deslice();
-      } else if (TileToSymbol()) {
-        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
-          LinearCopy();
-        else
-          Slice();
-      } else if (TileToTile()) {
-        if (opt_to_linear_copy == DMA_OP::both && !no_linear_opt)
-          LinearCopy();
-        else if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
-          Deslice();
-        else if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
-          Slice();
-        else
-          SliceDeslice();
+      if (fty->IsAsync()) {
+        ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
+           << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
+        ds << d_indent << "cute::cp_async_fence();\n";
+        ds << d_indent << future_name << ".trigger();\n";
       } else {
-        choreo_unreachable("unexpected situation.");
+        ds << d_indent << "cute::copy(" << f_mds_name << ", " << t_mds_name
+           << ");\n";
       }
+      VerboseDMA(ds, d_indent, t_sym, f_sym, "copy", "", 1,
+                 ", line " + std::to_string(n.LOC().begin.line));
     } else if (n.operation == ".pad") {
       auto pcmvSTR = [&](ptr<AST::MultiValues> mv) -> std::string {
         std::string res;
@@ -1730,7 +1474,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
                                 f_sym + "_2_" + t_sym;
         ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-           << ShapeSTR(f_ca->GetBlockShape(), ", ", BaseType::U32) << "};\n";
+           << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
         ds << d_indent;
         if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
         ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1748,10 +1492,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (SymbolToSymbol()) {
         Pad();
       } else if (TileToSymbol()) {
-        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
-          Pad();
-        else
-          SlicePad();
+        SlicePad();
       } else {
         choreo_unreachable(
             "only support dma.pad with (symbol=>symbol), (tile=>symbol).");
@@ -1810,52 +1551,26 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (SymbolToSymbol()) {
         Transpose();
       } else if (SymbolToTile()) {
-        if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
-          Transpose();
-        else
-          TransposeDeslice();
+        TransposeDeslice();
       } else if (TileToSymbol()) {
-        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
-          Transpose();
-        else
-          SliceTranspose();
+        SliceTranspose();
       } else if (TileToTile()) {
         choreo_unreachable("slice-transpose-deslice is not supported now.");
       }
     }
 
-    if (shared_in_block) {
+    if (n.GetLevel() == Storage::SHARED) {
       DecrDeviceIndent();
       ds << d_indent << "} // single instance\n";
       if (!fty->IsAsync()) {
         // not async, must syncthreads immediately
         // else, defer the sync till the wait time
-        if (shared_in_block) ds << d_indent << "__syncthreads();\n";
+        ds << d_indent << "__syncthreads();\n";
       }
     }
   };
 
-  if (!f_opt_condition.empty() || !t_opt_condition.empty()) {
-    // need generating runtime conditional optimization
-    std::ostringstream condition;
-    if (!f_opt_condition.empty())
-      condition << ValueListSTR(f_opt_condition, " && ");
-    if (!t_opt_condition.empty()) {
-      if (!f_opt_condition.empty()) condition << " && ";
-      condition << ValueListSTR(t_opt_condition, " && ");
-    }
-    IndStream() << "if (" << condition.str() << ") {\n";
-    IncrDeviceIndent();
-    DMACodeGen(false);
-    DecrDeviceIndent();
-    IndStream() << "} else {\n";
-    IncrDeviceIndent();
-    DMACodeGen(true);
-    DecrDeviceIndent();
-    IndStream() << "} // end DMA opt: " << n.LOC() << "\n";
-  } else {
-    DMACodeGen(false);
-  }
+  DMACodeGen();
 
   return true;
 }
@@ -1885,10 +1600,10 @@ bool CuteCodeGen::Visit(AST::Synchronize& n) {
 
   switch (n.scope->Get()) {
   case Storage::GLOBAL:
-    hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
+    hs << h_indent << "cudaDeviceSynchronize();\n";
+    hs << h_indent << "verify_device_status();\n";
     break;
   case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
-  case Storage::LOCAL: ds << d_indent << "__syncsubthreads();\n"; break;
   default:
     choreo_unreachable("unsupported synchronization type: " + PSTR(n.scope) +
                        ".");
@@ -1900,40 +1615,35 @@ bool CuteCodeGen::Visit(AST::Synchronize& n) {
 bool CuteCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
-  bool local_in_warp = false, shared_in_block = false;
-  for (auto& f : n.GetTargets()) {
-    if (!isa<FutureType>(NodeType(*f))) continue;
-    assert(cast<AST::Expr>(f)->GetSymbol());
-    auto name = cast<AST::Expr>(f)->GetSymbol()->name;
-    shared_in_block |= IsFutureBlockShared(InScopeName(name));
-    local_in_warp |= IsFutureWarpLocal(InScopeName(name));
-  }
-  assert(!(local_in_warp && shared_in_block) &&
-         "local and shared memory should not be used at the same time");
-  if (local_in_warp)
-    assert(CCtx().GetArch() == TargetArch::GCU4 &&
-           "only gcu400 need handle local synchronization");
-
-  if (shared_in_block || local_in_warp) {
-    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
-       << ") {\n";
-    IncrDeviceIndent();
-  }
-
-  for (auto& f : n.GetTargets()) {
-    auto expr = cast<AST::Expr>(f);
+  for (auto& t : n.GetTargets()) {
+    auto tty = NodeType(*t);
+    auto expr = cast<AST::Expr>(t);
     bool is_array_ref = (expr->op == "elemof");
-    if (isa<FutureType>(NodeType(*f))) {
+
+    if (isa<FutureType>(tty)) {
+      assert(expr->GetSymbol());
+      auto name = expr->GetSymbol()->name;
+      bool shared_in_block = (IsFutureBlockShared(InScopeName(name)) &&
+                              !cooperatives.count(InScopeName(name)));
+      if (shared_in_block) {
+        ds << d_indent << "if (" << SingleInstancePredicate() << ") {\n";
+        IncrDeviceIndent();
+      }
       assert(!IsHost());
-      ds << d_indent << ExprSTR(f, false) << ".wait();\n";
-    } else if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
+      ds << d_indent << ExprSTR(t, false) << ".wait();\n";
+      if (shared_in_block) {
+        DecrDeviceIndent();
+        ds << d_indent << "}\n";
+        ds << d_indent << "__syncthreads();\n";
+      }
+    } else if (auto ety = dyn_cast<EventArrayType>(tty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
       case Storage::SHARED:
       case Storage::LOCAL: {
-        ds << d_indent << "// wait event " << PSTR(f) << "\n";
+        ds << d_indent << "// wait event " << PSTR(t) << "\n";
         ds << d_indent << "while (";
         if (is_array_ref) {
           size_t lvl = GetSubScriptLevel(*expr);
@@ -1941,60 +1651,54 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
           // TODO: "!" same here
-          GenerateSubscriptions(ds, "!" + ExprSTR(f, false), " || ",
+          GenerateSubscriptions(ds, "!" + ExprSTR(t, false), " || ",
                                 bty->RemainderDimensions(lvl));
         } else
-          GenerateSubscriptions(ds, "!" + ExprSTR(f, false), " || ",
+          GenerateSubscriptions(ds, "!" + ExprSTR(t, false), " || ",
                                 ety->RemainderDimensions(0));
         ds << "false) continue;\n";
-        ds << d_indent << "// reset event " << PSTR(f) << "\n";
+        ds << d_indent << "// reset event " << PSTR(t) << "\n";
         if (is_array_ref) {
           size_t lvl = GetSubScriptLevel(*expr);
           auto bid = AST::GetArrayBaseSymbol(*expr);
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
-          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+          GenerateSubscriptions(ds, d_indent + ExprSTR(t, false), " = false;\n",
                                 bty->RemainderDimensions(lvl));
         } else
-          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+          GenerateSubscriptions(ds, d_indent + ExprSTR(t, false), " = false;\n",
                                 ety->RemainderDimensions(0));
       } break;
       default:
         choreo_unreachable("unsupported event array storage '" +
                            STR(ety->GetStorage()) + "'.");
       }
-    } else if (auto ety = dyn_cast<EventType>(NodeType(*f))) {
+    } else if (auto ety = dyn_cast<EventType>(tty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
       case Storage::SHARED:
       case Storage::LOCAL: {
-        ds << d_indent << "while (" << ExprSTR(f, false)
+        ds << d_indent << "while (" << ExprSTR(t, false)
            << " == false) continue; // spinlock\n";
         if (is_array_ref) {
-          ds << d_indent << "// reset event " << PSTR(f) << "\n";
+          ds << d_indent << "// reset event " << PSTR(t) << "\n";
           size_t lvl = GetSubScriptLevel(*expr);
           auto bid = AST::GetArrayBaseSymbol(*expr);
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
-          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+          GenerateSubscriptions(ds, d_indent + ExprSTR(t, false), " = false;\n",
                                 bty->RemainderDimensions(lvl));
         } else
-          ds << d_indent << ExprSTR(f, false) << " = false; // reset event\n";
+          ds << d_indent << ExprSTR(t, false) << " = false; // reset event\n";
       } break;
       default:
         choreo_unreachable("unsupported event storage '" +
                            STR(ety->GetStorage()) + "'.");
       }
-    }
-  }
-
-  if (shared_in_block || local_in_warp) {
-    DecrDeviceIndent();
-    ds << d_indent << "}\n";
-    if (shared_in_block) ds << d_indent << "__syncthreads();\n";
-    if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
+    } else
+      choreo_unreachable("unsupported wait target.");
   }
 
   return true;
@@ -2505,9 +2209,11 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
 void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
   const auto& script = FCtx(fname).GetMemReuseScript(df_name);
   if (!script.has_value()) return;
-  hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
+  hs << h_indent << R"(// JIT memory reuse begin)"
+     << "\n";
   for (const auto& s : script.value()) { hs << h_indent << s << "\n"; }
-  hs << h_indent << R"(// JIT memory reuse end)" << "\n";
+  hs << h_indent << R"(// JIT memory reuse end)"
+     << "\n";
 }
 
 static inline const std::string
@@ -2683,8 +2389,9 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__)";
   if (CCtx().GenDebugInfo()) os << " -g";
+  if (CCtx().DMADiagnosis()) os << " -D__CHOREO_DMA_DIAGNOSIS__";
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";
@@ -2768,9 +2475,9 @@ bool CuteCodeGen::CompileWithScript(const std::string& action) {
 
 // TODO: eliminate the need of the value replacement?
 // Currently, it is guaranteed that ValueSTR can be used safely and directly.
-const std::string CuteCodeGen::ValueSTR(const ValueItem& vi,
-                                        bool LL_suffix) const {
-  return OpValueSTR(vi, "", true, LL_suffix);
+const std::string CuteCodeGen::ValueSTR(const ValueItem& vi, bool LL_suffix,
+                                        bool shp_lit) const {
+  return OpValueSTR(vi, "", true, LL_suffix, shp_lit);
 }
 
 const std::string CuteCodeGen::ValueListSTR(const ValueList& vl,
@@ -2788,7 +2495,7 @@ const std::string CuteCodeGen::ValueListSTR(const ValueList& vl,
 const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
                                           const std::string& parent_op,
                                           const bool is_left_child,
-                                          bool LL_suffix) const {
+                                          bool LL_suffix, bool shp_lit) const {
   auto WrapParen = [&](const std::string& s, const std::string& cur_op) {
     if (Operator::NeedParen(cur_op, parent_op, is_left_child))
       return "(" + s + ")";
@@ -2805,10 +2512,13 @@ const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
       return "-1"; // it looks the API requires -1
   } else if (auto iv = VIInt(vi)) {
     if (iv >= (int64_t)std::numeric_limits<int32_t>::max() ||
-        iv <= (int64_t)std::numeric_limits<int32_t>::min())
-      return PSTR(vi) + "LL";
-    else if (LL_suffix)
-      return PSTR(vi) + "LL";
+        iv <= (int64_t)std::numeric_limits<int32_t>::min()) {
+      if (shp_lit)
+        choreo_unreachable("unable to represent a LLONG shape dimension.");
+      else
+        return PSTR(vi) + "LL";
+    } else if (shp_lit)
+      return "cute::Int<" + PSTR(vi) + ">{}";
     else
       return PSTR(vi);
   } else if (auto bv = VIBool(vi))
@@ -2819,13 +2529,15 @@ const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
     return res;
   } else if (auto uo = VIUop(vi)) {
     std::string op = STR(uo->GetOpCode());
-    std::string res = op + OpValueSTR(uo->GetOperand(), op, false, LL_suffix);
+    std::string res =
+        op + OpValueSTR(uo->GetOperand(), op, false, LL_suffix, shp_lit);
     return WrapParen(res, op);
   } else if (auto bo = VIBop(vi)) {
     if (bo->GetOpCode() == OpCode::ADD) {
       if (auto rv = VIInt(bo->GetRight()); rv && rv.value() < 0) {
-        std::string res = OpValueSTR(bo->GetLeft(), "-", true, LL_suffix) +
-                          " - " + std::to_string(-rv.value());
+        std::string res =
+            OpValueSTR(bo->GetLeft(), "-", true, LL_suffix, shp_lit) + " - " +
+            std::to_string(-rv.value());
         if (rv.value() >= (int64_t)std::numeric_limits<int32_t>::max() ||
             rv.value() <= (int64_t)std::numeric_limits<int32_t>::min())
           res += "LL";
@@ -2833,15 +2545,16 @@ const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
       }
     }
     std::string op = STR(bo->GetOpCode());
-    std::string res = OpValueSTR(bo->GetLeft(), op, true, LL_suffix) + " " +
-                      op + " " +
-                      OpValueSTR(bo->GetRight(), op, false, LL_suffix);
+    std::string res = OpValueSTR(bo->GetLeft(), op, true, LL_suffix, shp_lit) +
+                      " " + op + " " +
+                      OpValueSTR(bo->GetRight(), op, false, LL_suffix, shp_lit);
     return WrapParen(res, op);
   } else if (auto to = VITop(vi)) {
     std::string op = "?";
     std::string res = OpValueSTR(to->GetPred(), op, true) + " ? " +
-                      OpValueSTR(to->GetLeft(), op, true, LL_suffix) + " : " +
-                      OpValueSTR(to->GetRight(), op, false, LL_suffix);
+                      OpValueSTR(to->GetLeft(), op, true, LL_suffix, shp_lit) +
+                      " : " +
+                      OpValueSTR(to->GetRight(), op, false, LL_suffix, shp_lit);
     return WrapParen(res, op);
   } else
     choreo_unreachable("unsupported value.");
@@ -2873,7 +2586,6 @@ const std::string
 CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
                          std::optional<std::variant<int, float>> val,
                          BaseType t, BaseType f, bool is_host) const {
-
   std::ostringstream res;
   std::string value;
 
@@ -3082,7 +2794,6 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
                        is_host);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
-
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {
       auto sname = InScopeName(sym->name);

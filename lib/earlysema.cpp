@@ -1601,7 +1601,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
       ModifySymbolType(n.future + ".span", MakeRankedMDSpanType(rank));
       auto spanned_ty = MakeRankedSpannedType(rank, sty->ElementType(), sto);
       ModifySymbolType(n.future + ".data", spanned_ty);
-      ModifySymbolType(n.future, MakeFutureType(spanned_ty, n.async));
+      ModifySymbolType(n.future, MakeFutureType(spanned_ty, n.IsAsync()));
     } else {
       ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
                                 MakeRankedMDSpanType(rank));
@@ -1609,7 +1609,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
       ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
                                 spanned_ty);
       ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
-                                MakeFutureType(spanned_ty, n.async));
+                                MakeFutureType(spanned_ty, n.IsAsync()));
     }
 
     // set the buffer kind
@@ -1625,10 +1625,8 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     if (!to_sym.empty()) to_sym = InScopeName(to_sym);
     FCtx(fname).GetFutureBufferInfo().emplace(
         InScopeName(n.future), DMABufferInfo{to_sym, from_kind, to_kind});
-  } else {
-    if (n.async)
-      Error1(n.LOC(), "forbid to associated async dma without a named future.");
-  }
+  } else if (n.IsAsync())
+    Error1(n.LOC(), "forbid to associated async dma without a named future.");
 
   if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
     if (cast<AST::ChunkAt>(n.from)->HasTilingOperation() &&

@@ -81,6 +81,7 @@ set(CORE_SOURCES
 # Define the source files for your codegen library
 set(CODEGEN_SOURCES
   codegen.cpp
+  codegen_utils.cpp
   codegen_factor.cpp
   codegen_factor_types.cpp
   codegen_topscc.cpp

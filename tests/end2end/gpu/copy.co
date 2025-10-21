@@ -1,0 +1,31 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ auto dma_copy(s32 [6, 17, 64] input) {
+  s32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy.async input => shared;
+    wait f;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  a.fill_random(-10, 10);
+
+  auto res = dma_copy(a.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k)
+        choreo::choreo_assert(a[i][j][k] == res[i][j][k], "values are not equal.");
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

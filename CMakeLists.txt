@@ -8,6 +8,45 @@ string(REGEX MATCH "^[0-9]+\.[0-9]+\.[0-9]+" PROJECT_VERSION_ONLY "${VERSION_FRO
 
 project(Choreo VERSION ${PROJECT_VERSION_ONLY})
 
+# Function to check compiler compatibility
+function(check_compiler_compatibility)
+  set(COMPATIBLE_COMPILER FALSE)
+
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # GCC detected
+    message(STATUS "Detected GCC version: ${CMAKE_CXX_COMPILER_VERSION}")
+
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "9.0")
+      set(COMPATIBLE_COMPILER TRUE PARENT_SCOPE)
+      message(STATUS "✓ GCC 9.0+ with C++17 support confirmed")
+    else()
+      message(FATAL_ERROR "GCC ${CMAKE_CXX_COMPILER_VERSION} is too old. GCC 9.0+ required for full C++17 support.")
+    endif()
+
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Clang detected (includes AppleClang)
+    message(STATUS "Detected Clang version: ${CMAKE_CXX_COMPILER_VERSION}")
+
+    # Clang has good C++17 support since version 5.0, but we'll be conservative
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "5.0")
+      set(COMPATIBLE_COMPILER TRUE PARENT_SCOPE)
+      message(STATUS "✓ Clang 5.0+ with C++17 support confirmed")
+    else()
+      message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} is too old. Clang 5.0+ recommended for C++17 support.")
+    endif()
+
+  else()
+    # Other compilers (MSVC, Intel, etc.)
+    message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+    message(WARNING "C++17 support cannot be automatically verified.")
+    message(WARNING "Please ensure your compiler supports C++17.")
+    set(COMPATIBLE_COMPILER TRUE PARENT_SCOPE) # Assume it works, but warn user
+  endif()
+endfunction()
+
+# Check compiler compatibility
+check_compiler_compatibility()
+
 # Set C++ Standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -51,9 +90,22 @@ option(ENABLE_CUDA "Enable CUDA support" ON)
 option(ENABLE_CUTE "Enable CUTE/CUTLASS support (requires CUDA)" ON)
 
 # Allow users to provide preferred defaults (empty by default)
-set(DEFAULT_CUDA_HOME "/usr/local/cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
 #set(DEFAULT_CUDA_HOME "${CMAKE_SOURCE_DIR}/extern/portable_cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
-set(DEFAULT_CUTE_HOME "${CMAKE_SOURCE_DIR}/external/cutlass" CACHE PATH "Optional default CUTE/CUTLASS path (used if CLI and ENV are invalid)")
+set(DEFAULT_CUDA_HOME "/usr/local/cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
+
+# Find CUDA package to get version info
+find_package(CUDAToolkit REQUIRED)
+
+set(_cuda_with_cute4_support TRUE)
+set(DEFAULT_CUTE_HOME "")
+# Determine CUTLASS path based on CUDA version
+if(CUDAToolkit_VERSION VERSION_LESS 12.0)
+	# CUDA 11.x or earlier
+  set(_cuda_with_cute4_support FALSE)
+else()
+	# CUDA 12.x or later
+	set(DEFAULT_CUTE_HOME "${CMAKE_SOURCE_DIR}/extern/cutlass")
+endif()
 
 set(CUDA_HOME "")
 set(CUTE_HOME "")
@@ -128,7 +180,7 @@ endif()
 
 message(STATUS "ENABLE_CUDA = ${ENABLE_CUDA}")
 if(ENABLE_CUDA)
-  message(STATUS "Using CUDA from: ${_cuda_root}")
+  message(STATUS "Using CUDA from: ${_cuda_root}.")
 endif()
 
 # ============================
@@ -168,16 +220,15 @@ if(ENABLE_CUTE)
       message(STATUS "No valid CUDA found. Auto-disabling ENABLE_CUTE.")
       set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE support" FORCE)
     endif()
-  endif()
-endif()
-
-if(ENABLE_CUTE)
-  if(NOT _cute_root_valid)
+  elseif(NOT _cute_root_valid)
     if(_enable_cute_user_set)
       message(FATAL_ERROR
         "ENABLE_CUTE=ON but no valid CUTE/CUTLASS found.\n"
         "Tried (in order):\n  -DCUTE_HOME='${CUTE_HOME}'\n  ENV{CUTE_HOME}='$ENV{CUTE_HOME}'\n"
         "  DEFAULT_CUTE_HOME='${DEFAULT_CUTE_HOME}'.")
+    elseif(NOT _cuda_with_cute4_support)
+      message(STATUS "CUDA version is low. Auto-disabling ENABLE_CUTE.")
+      set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE/CUTLASS support (requires CUDA)" FORCE)
     else()
       # CUTE enabled but came from cache default? (rare)
       # Be conservative and turn it OFF if nothing valid
@@ -185,8 +236,8 @@ if(ENABLE_CUTE)
       set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE/CUTLASS support (requires CUDA)" FORCE)
     endif()
   endif()
-else()
-  # If user provided an invalid CUTE_HOME but CUTE is OFF, you can optionally warn:
+
+  # If user provided an invalid CUTE_HOME but CUTE is OFF, warn:
   if(NOT _cute_root_valid AND (NOT "${CUTE_HOME}" STREQUAL "" OR DEFINED ENV{CUTE_HOME}))
     message(STATUS "CUTE is OFF; ignoring invalid CUTE_HOME candidates.")
   endif()

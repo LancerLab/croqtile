@@ -33,6 +33,15 @@ inline int GPUDeviceParallelDepth(Storage l) {
   return levels[l];
 }
 
+inline bool IsTMAAvaliable() {
+  switch (CCtx().GetArch()) {
+  case TargetArch::SM_90:
+  case TargetArch::SM_100: return true;
+  default: break;
+  }
+  return false;
+}
+
 struct GPUAdaptor : public VisitorWithSymTab {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
@@ -570,6 +579,15 @@ public:
                             "` to be dynamically shaped (by " +
                             STR(sty->GetShape()) + ").");
       break;
+    case Storage::LOCAL:
+      if (pl_depth == 0)
+        Error1(n.LOC(), "local variable '" + n.name_str +
+                            "` must be declared inside parallel-by.");
+      if (sty->RuntimeShaped() && !CCtx().MemReuse())
+        Error1(n.LOC(), "GCU forbids local variable '" + n.name_str +
+                            "` to be dynamically shaped (by " +
+                            STR(sty->GetShape()) + ").");
+      break;
     default:
       Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
                           STR(st) + " inside choreo function.");
@@ -637,7 +655,28 @@ public:
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
 
-    // Check DMA first.
+    // DMA directions check:
+    // GPU's DMA is mainly serve for GMEM -> SMEM
+    auto fty = GetSpannedType(n.from->GetType());
+    auto tty = GetSpannedType(n.to->GetType());
+    assert(fty && tty);
+    auto fst = fty->GetStorage();
+    auto tst = tty->GetStorage();
+    if ((fst == Storage::SHARED) && (tst == Storage::GLOBAL) && n.IsAsync())
+      Error1(n.LOC(), "GPU does not allow the async copy (shared -> global).");
+    else if ((fst == Storage::SHARED) && (tst == Storage::SHARED) &&
+             n.IsAsync())
+      Error1(n.LOC(), "GPU does not allow the async copy (shared -> shared).");
+    else if ((fst == Storage::GLOBAL) && (tst == Storage::GLOBAL))
+      Error1(n.LOC(), "GPU does not allow the " +
+                          std::string(n.IsAsync() ? "async" : "sync") +
+                          " copy (global -> global).");
+
+    if (fst == Storage::GLOBAL && tst == Storage::SHARED && IsTMAAvaliable())
+      n.SetLevel(Storage::SHARED); // single instance in a block
+    else
+      n.SetLevel(Storage::LOCAL); // threads-cooperative
+
     CheckDMA(n);
 
     // The user does not have to explicitly claim a global memory that requires
@@ -650,10 +689,6 @@ public:
 
     // storage level must be specified
     if (sty->GetStorage() == Storage::NONE) return false;
-    if (sty->GetStorage() == Storage::LOCAL) {
-      Error1(n.LOC(), "local storage is not supported by cuda.");
-      return false;
-    }
 
     // not referencing the parameter
     if (!cur_params.count(InScopeName(f_name))) return false;
@@ -669,14 +704,14 @@ public:
       default: break;
       }
     };
-    if (auto to = dyn_cast<AST::ChunkAt>(n.to))
+    if (auto to = dyn_cast<AST::ChunkAt>(n.to)) {
       annotate_by_storage(
           cast<SpannedType>(GetSymbolType(to->RefSymbol()))->GetStorage());
-    else if (auto m = dyn_cast<AST::Memory>(n.to))
+    } else if (auto m = dyn_cast<AST::Memory>(n.to))
       annotate_by_storage(m->st);
-
     return true;
   }
+
   bool Visit(AST::ChunkAt& n) override {
     TraceEachVisit(n);
     return true;

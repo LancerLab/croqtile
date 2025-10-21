@@ -337,6 +337,7 @@ private:
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate debug information
+  bool diag_dma = false;          // diagnose DMA at runtime
   bool loop_norm = false;         // enable loop normalization
   bool no_vectorize = false;      // do not vectorize any foreach loop
 
@@ -477,6 +478,7 @@ public:
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
+  bool DMADiagnosis() const { return diag_dma; }
   bool LoopNorm() const { return loop_norm; }
   bool NoVectorize() const { return no_vectorize; }
 
@@ -498,6 +500,7 @@ public:
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
+  void SetDMADiagnosis(bool value) { diag_dma = value; }
   void SetLoopNorm(bool value) { loop_norm = value; }
   void SetNoVectorize(bool value) { no_vectorize = value; }
 
