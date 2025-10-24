@@ -266,7 +266,8 @@ public:
       bool annotate = pb->GetLevel() != Storage::NONE;
       if (CCtx().GetTarget() == CompileTarget::Factor ||
           CCtx().GetTarget() == CompileTarget::Topscc ||
-          CCtx().GetTarget() == CompileTarget::CUDA) {
+          CCtx().GetTarget() == CompileTarget::CUDA ||
+          CCtx().GetTarget() == CompileTarget::Cute) {
         // may fill gap only for a single level
         assert(pdepth < last_depth);
         if (pdepth > 0) assert(pdepth >= last_depth - 2);

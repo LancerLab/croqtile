@@ -550,8 +550,7 @@ inline typename std::enable_if<std::is_same<U, float>::value, void>::type
 fill_random(U* array, size_t N, U lb, U ub) {
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<U> rand_func(lb,
-                                              ub); // [-1.0, 1.0)
+  std::uniform_real_distribution<U> rand_func(lb, ub); // [lb, ub)
 
   std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
 }
@@ -600,7 +599,7 @@ inline typename std::enable_if<std::is_integral<U>::value, void>::type
 fill_random(U* array, size_t N, U lb, U ub) {
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_int_distribution<U> rand_func(lb, ub); // [-100, 100]
+  std::uniform_int_distribution<U> rand_func(lb, ub); // [lb, ub]
 
   std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
 }
@@ -951,7 +950,7 @@ public:
         std::cerr << "Error: Could not find valid position for buffer "
                   << chunk.buffer_id << std::endl;
         // indicate allocation failed
-        result.chunk_offsets[chunk.buffer_id] = -1;
+        result.chunk_offsets[chunk.buffer_id] = (size_t)-1;
         continue;
       }
 
@@ -1004,7 +1003,7 @@ __device__ static int inline __addr2int__(T* v) {
 #else
 template <typename T>
 static int inline __addr2int__(T* v) {
-  return (int)v;
+  return static_cast<int>(reinterpret_cast<std::uintptr_t>(v));
 }
 #endif
 
@@ -1413,6 +1412,119 @@ struct future {
   __device__ future(future&& f) = delete;
   __device__ future& operator=(const future& f) = delete;
 };
+
+// ------------------- C++17 utilities -------------------
+template <class...>
+using void_t = void;
+
+template <class T, class = void>
+struct has_value : std::false_type {};
+template <class T>
+struct has_value<T, void_t<decltype(T::value)>> : std::true_type {};
+
+// std::conjunction for C++14/17
+template <class...>
+struct conj : std::true_type {};
+template <class B1>
+struct conj<B1> : B1 {};
+template <class B1, class... Bn>
+struct conj<B1, Bn...> : std::conditional<B1::value, conj<Bn...>, B1>::type {};
+
+// ------------------- compile-time stride checks -------------------
+// One-stride divisibility check (only meaningful if stride is static
+// cute::C<...>)
+template <int Nelems, class StrideT>
+struct stride_ok_ct
+    : std::bool_constant<has_value<StrideT>::value &&
+                         ((int(StrideT::value) % Nelems == 0) ||
+                          (Nelems % int(StrideT::value) == 0))> {};
+
+// Fold over stride tuple at indices I...
+template <int Nelems, class Strides, std::size_t... I>
+struct all_strides_ok_ct_impl {
+  using type = conj<stride_ok_ct<
+      Nelems,
+      typename std::remove_cv<typename std::remove_reference<
+          decltype(std::get<I>(std::declval<Strides>()))>::type>::type>...>;
+  static constexpr bool value = type::value;
+};
+
+// Are ALL strides compile-time constants? (no divisibility yet)
+template <class Strides, std::size_t... I>
+struct all_strides_are_static_impl {
+  using type =
+      conj<has_value<typename std::remove_cv<typename std::remove_reference<
+          decltype(std::get<I>(std::declval<Strides>()))>::type>::type>...>;
+  static constexpr bool value = type::value;
+};
+
+// Trait: for a given Src tensor, can we prove Bits-wide vector is OK at compile
+// time?
+template <int Bits, class Src>
+struct layout_vec_ok_ct {
+  using E = typename Src::value_type;
+  static constexpr int Nelems = Bits / (8 * int(sizeof(E)));
+  using Strides = decltype(std::declval<Src>().layout().stride());
+  static constexpr std::size_t R =
+      decltype(size(std::declval<Strides>()))::value;
+
+  static constexpr bool value =
+      all_strides_ok_ct_impl<Nelems, Strides,
+                             std::make_index_sequence<R>{}>::value;
+};
+
+// Trait: are ALL strides of Src compile-time constants?
+template <class Src>
+struct all_strides_are_static {
+  using Strides = decltype(std::declval<Src>().layout().stride());
+  static constexpr std::size_t R =
+      decltype(size(std::declval<Strides>()))::value;
+
+  static constexpr bool value =
+      all_strides_are_static_impl<Strides,
+                                  std::make_index_sequence<R>{}>::value;
+};
+
+// ------------------- runtime pointer alignment (bytes) -------------------
+template <int Bits, class Ptr>
+CUTE_HOST_DEVICE bool aligned_at_least(Ptr p) {
+  constexpr std::uintptr_t A = Bits / 8;
+  return (reinterpret_cast<std::uintptr_t>(p) % A) == 0;
+}
+
+// ------------------- universal copy (any rank, C++17) -------------------
+template <class Src, class Dst>
+CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {
+#if 0
+  // adjust these two lines if your Engine exposes pointers differently
+  auto src_ptr = std::get<0>(src.data());
+  auto dst_ptr = std::get<0>(dst.data());
+
+  // If all strides are static, we can safely *attempt* wide vectors:
+  if constexpr (all_strides_are_static<Src>::value) {
+    // 128-bit (e.g., 4x int/float) if strides OK at compile time AND pointers aligned at runtime
+    if constexpr (layout_vec_ok_ct<128, Src>::value) {
+      if (aligned_at_least<128>(src_ptr) && aligned_at_least<128>(dst_ptr)) {
+static_assert(false, "path 1\n");
+        copy(cute::AutoVectorizingCopyWithAssumedAlignment<128>{}, src, dst);
+        return;
+      }
+    }
+    // 64-bit next
+    if constexpr (layout_vec_ok_ct<64, Src>::value) {
+static_assert(false, "path 2\n");
+      if (aligned_at_least<64>(src_ptr) && aligned_at_least<64>(dst_ptr)) {
+        copy(cute::AutoVectorizingCopyWithAssumedAlignment<64>{}, src, dst);
+        return;
+      }
+    }
+  }
+#endif
+
+  // Fallback: 32-bit (scalar element width) —always safe for any
+  // shape/stride/alignment
+  copy(cute::AutoVectorizingCopyWithAssumedAlignment<32>{}, src, dst);
+}
 
 #endif // __CHOREO_TARGET_CUTE__
 
