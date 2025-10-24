@@ -1,0 +1,29 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ auto transpose(s32 [3, 4, 5] a) {
+  s32 [4, 3, 5] o;
+  parallel p by 1 {
+    fa = dma.transp<1,0,2> a => local;
+    dma.copy fa.data => o;
+  }
+  return o;
+}
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::s32>(3,4,5);
+  a.fill_random(-10, 10);
+
+  auto res = transpose(a.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k)
+        choreo::choreo_assert(res[i][j][k] == a[j][i][k], "values are not equal.");
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
+

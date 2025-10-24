@@ -588,6 +588,7 @@ inline const std::string UnScopedExpr(const std::string& input) {
 
   return output;
 }
+
 // Remove all scope prefixes (e.g., ::foo::bar or ::$0) and return only the last
 // symbol. Handles both normal identifiers and dynamic shape variables like $0.
 // inline const std::string UnScopedExpr(const std::string& input) {

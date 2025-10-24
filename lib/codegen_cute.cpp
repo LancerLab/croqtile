@@ -44,6 +44,7 @@ inline const char* TopsMdsStorage(Storage st) {
   case Storage::DEFAULT:
   case Storage::GLOBAL: return "tops::Global";
   case Storage::SHARED: return "tops::Shared";
+  case Storage::LOCAL: return "tops::Local";
   default: choreo_unreachable("storage type is not supported.");
   }
   return "";
@@ -135,6 +136,21 @@ const std::string CuteCodeGen::ShapeSTR(const Shape& s, bool shp_lit,
   for (unsigned i = 0; i < vl.size(); ++i) {
     if (i > 0) oss << delimiter;
     oss << ValueSTR(vl[i], ", ", shp_lit);
+  }
+  return oss.str();
+}
+
+const std::string CuteCodeGen::ReShapeSTR(const Shape& s,
+                                          const std::vector<size_t>& order,
+                                          bool shp_lit,
+                                          const std::string& delimiter) const {
+  auto& vl = s.Value();
+  assert(!vl.empty());
+  assert(order.size() == vl.size());
+  std::ostringstream oss;
+  for (unsigned i = 0; i < vl.size(); ++i) {
+    if (i > 0) oss << delimiter;
+    oss << ValueSTR(vl[order[i]], ", ", shp_lit);
   }
   return oss.str();
 }
@@ -458,6 +474,28 @@ const std::string CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   return ValueSTR(offset);
 }
 
+const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,
+                                        const std::vector<size_t>& tc) const {
+  // Note: always generate stride since cute::copy may propagate strides
+
+  // TODO: handle multiple operations
+  Shape outer_shape = GetSpannedType(GetSymbolType(ca->data->name))->GetShape();
+
+  ValueList strds;
+  for (size_t i = 1; i < outer_shape.Rank(); ++i)
+    strds.push_back(outer_shape.TrimDims(i).ElementCountValue());
+  strds.push_back(sbe::nu(1));
+
+  if (tc.size() != 0) {
+    assert(tc.size() == strds.size());
+    ValueList t_strds = strds;
+    for (size_t i = 0; i < strds.size(); ++i) t_strds[i] = strds[tc[i]];
+    return t_strds;
+  }
+
+  return strds;
+}
+
 void CuteCodeGen::EmitFixedHostHead() {
   std::ostringstream oss;
   oss <<
@@ -642,7 +680,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   }
 
   if (auto sty = dyn_cast<SpannedType>(nty)) {
-    auto sym__init = sym + "__init";
     auto buf_sym = sym + "__device";
     // globals are declared in host, while shareds/locals are declared in device
     auto shape = sty->GetShape();
@@ -777,20 +814,21 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (sto != Storage::SHARED && sto != Storage::LOCAL)
         choreo_unreachable(
             "error: unexpected storage type in spm initialization.");
-      ds << d_indent << "if ("
-         << SingleInstancePredicate(sto == Storage::SHARED) << ") {\n";
-      IncrDeviceIndent();
-      ds << d_indent << "tops_dte_ctx_t " << sym__init << ";\n";
-      ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
-         << ");\n";
-      ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
-         << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
-         << "*)" << sym << ", " << ShapeSTR(sty->GetShape()) << "), "
-         << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
-                        GetBaseType(*n.init_value->GetType()), false)
-         << ");\n";
-      DecrDeviceIndent();
-      ds << d_indent << "} // single instance\n";
+      if (sto == Storage::SHARED) {
+        ds << d_indent << "if (" << SingleInstancePredicate() << ") {\n";
+        IncrDeviceIndent();
+      }
+      auto ec = sty->GetShape().ElementCountValue();
+      if (ec == sbe::nu(1))
+        ds << d_indent << sym << " = " << ExprSTR(n.init_value) << ";\n";
+      else {
+        ds << d_indent << "for (int i = 0; i < " << ValueSTR(ec) << "; ++i) ";
+        ds << sym << "[i] = " << ExprSTR(n.init_value) << ";\n";
+      }
+      if (sto == Storage::SHARED) {
+        DecrDeviceIndent();
+        ds << d_indent << "} // single instance\n";
+      }
     }
     return true;
   }
@@ -1318,38 +1356,53 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   //   Just add offset to buf_expr, then utilize new_shape.
   auto GenTensorDecl =
       [this](const std::string& buf_name, const std::string& buf_expr,
-             const Storage sto, BaseType bty, const std::string& offset = "",
-             const Shape& shp) -> std::pair<std::string, std::string> {
+             const Storage sto, BaseType bty, const Shape& shp,
+             const std::string& offset = "", const std::string& strides = "",
+             const std::vector<size_t>& transp = {})
+      -> std::pair<std::string, std::string> {
     static int shp_cnt = 0;
     shp_cnt++;
-    auto shp_name = "__shape" + std::to_string(shp_cnt) + "_" +
-                    RemoveSuffix(buf_name, ".data()");
-    auto lyt_name = "__layout" + std::to_string(shp_cnt) + "_" +
-                    RemoveSuffix(buf_name, ".data()");
-    auto tsr_name = "__tensor" + std::to_string(shp_cnt) + "_" +
-                    RemoveSuffix(buf_name, ".data()");
+    auto bname = RemoveSuffix(buf_name, ".data()");
+    auto shpcnt = std::to_string(shp_cnt);
+
+    auto shp_name = "__shape" + shpcnt + "_" + bname;
+    auto lyt_name = "__layout" + shpcnt + "_" + bname;
+    auto std_name = "__stride" + shpcnt + "_" + bname;
+    auto tsr_name = "__tensor" + shpcnt + "_" + bname;
 
     std::string mem_ty;
     if (sto == Storage::GLOBAL || sto == Storage::DEFAULT)
       mem_ty = "gmem";
-    else {
-      if (sto != Storage::SHARED)
-        choreo_unreachable("unsupported storage type: " + STR(sto));
+    else if (sto == Storage::SHARED)
       mem_ty = "smem";
-    }
+    else if (sto == Storage::LOCAL)
+      mem_ty = "";
+    else
+      choreo_unreachable("unsupported storage type: " + STR(sto));
 
     std::string bts{NameBaseType(bty)};
 
     std::ostringstream tsr_decl;
 
     tsr_decl << d_indent << "auto " << shp_name << " = cute::make_shape("
-             << ShapeSTR(shp, true) << ");\n";
-    tsr_decl << d_indent << "auto " << lyt_name << " = cute::make_layout("
-             << shp_name << /*TODO: strides (when needed)*/ ");\n";
-    tsr_decl << d_indent << "auto " << tsr_name << " = cute::make_tensor("
-             << "cute::make_" << mem_ty << "_ptr<" << bts << ">(" << buf_name
-             << ((!offset.empty()) ? (" + " + offset) : "") << "), " << lyt_name
+             << ((transp.empty()) ? ShapeSTR(shp, true)
+                                  : ReShapeSTR(shp, transp, true))
              << ");\n";
+    if (!strides.empty())
+      tsr_decl << d_indent << "auto " << std_name << " = cute::make_stride("
+               << strides << ");\n";
+    tsr_decl << d_indent << "auto " << lyt_name << " = cute::make_layout("
+             << shp_name;
+    if (!strides.empty()) tsr_decl << ", " << std_name;
+    tsr_decl << ");\n";
+    tsr_decl << d_indent << "auto " << tsr_name << " = cute::make_tensor(";
+    if (!mem_ty.empty())
+      tsr_decl << "cute::make_" << mem_ty << "_ptr<" << bts << ">";
+    else
+      tsr_decl << "(" << bts << "*)";
+    tsr_decl << "(" << buf_name << ((!offset.empty()) ? (" + " + offset) : "")
+             << ")";
+    tsr_decl << ", " << lyt_name << ");\n";
 
     return {tsr_name, tsr_decl.str()};
   };
@@ -1397,12 +1450,19 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     } else
       t_mds_offset = GenOffset(t_ca);
 
-    const auto f_mds =
-        GenTensorDecl(f_buf_name, f_buf_expr, f_sty->GetStorage(),
-                      f_sty->ElementType(), f_mds_offset, fty->GetShape());
-    const auto t_mds =
-        GenTensorDecl(t_buf_name, t_buf_expr, t_sty->GetStorage(),
-                      t_sty->ElementType(), t_mds_offset, fty->GetShape());
+    std::vector<size_t> transp_config;
+    if (n.operation == ".transp")
+      transp_config = cast<TransposeConfig>(n.GetConfig())->dim_values;
+
+    auto f_stride = GenStrides(f_ca, transp_config);
+    auto t_stride = GenStrides(t_ca);
+
+    const auto f_mds = GenTensorDecl(
+        f_buf_name, f_buf_expr, f_sty->GetStorage(), f_sty->ElementType(),
+        fty->GetShape(), f_mds_offset, ValueSTR(f_stride, false, true));
+    const auto t_mds = GenTensorDecl(
+        t_buf_name, t_buf_expr, t_sty->GetStorage(), t_sty->ElementType(),
+        fty->GetShape(), t_mds_offset, ValueSTR(t_stride, false, true));
 
     std::string f_mds_name{f_mds.first};
     std::string f_mds_decl{f_mds.second};
@@ -1420,17 +1480,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     } else if (!n.future.empty())
       cooperatives.insert(InScopeName(n.future));
 
-    if (n.operation == ".copy") {
+    if (n.operation == ".copy" || n.operation == ".transp") {
       if (fty->IsAsync()) {
         ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
            << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
         ds << d_indent << "cute::cp_async_fence();\n";
         ds << d_indent << future_name << ".trigger();\n";
       } else {
-        ds << d_indent << "cute::copy(" << f_mds_name << ", " << t_mds_name
+        ds << d_indent << "opt_copy(" << f_mds_name << ", " << t_mds_name
            << ");\n";
       }
-      VerboseDMA(ds, d_indent, t_sym, f_sym, "copy", "", 1,
+      VerboseDMA(ds, d_indent, t_sym, f_sym, n.operation.substr(1), "", 1,
                  ", line " + std::to_string(n.LOC().begin.line));
     } else if (n.operation == ".pad") {
       auto pcmvSTR = [&](ptr<AST::MultiValues> mv) -> std::string {
@@ -1496,66 +1556,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       } else {
         choreo_unreachable(
             "only support dma.pad with (symbol=>symbol), (tile=>symbol).");
-      }
-    } else if (n.operation == ".transp") {
-      static int t_cnt = 0;
-      auto transp_config = cast<TransposeConfig>(n.GetConfig());
-      auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
-      auto t_buf_name = RemoveSuffix(t_buf_expr, ".data()");
-      auto layout_name =
-          "__transpose_layout" + std::to_string(t_cnt++) + "__" + f_buf_name;
-      ds << d_indent << "int " << layout_name << "[] = {"
-         << DelimitedString(transp_config->dim_values) << "};\n";
-
-      auto Transpose = [&]() -> void {
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << layout_name << ");\n";
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
-      auto SliceTranspose = [&]() -> void {
-        static int s_cnt = 0;
-        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                        f_sym + "_2_" + t_sym;
-        auto [offset, offcnt] = GenMdsOffset(f_ca, n.GetConfig());
-        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "")
-           << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
-           << f_mds_name << ", " << off_name << ", " << layout_name << ");\n";
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
-      auto TransposeDeslice = [&]() -> void {
-        static int ds_cnt = 0;
-        auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
-                        t_sym + "_2_" + f_sym;
-        auto [offset, offcnt] = GenMdsOffset(t_ca, n.GetConfig());
-        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::transpose_deslice" << (fty->IsAsync() ? "_async" : "")
-           << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
-           << f_mds_name << ", " << layout_name << ", " << off_name << ");\n";
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
-
-      if (SymbolToSymbol()) {
-        Transpose();
-      } else if (SymbolToTile()) {
-        TransposeDeslice();
-      } else if (TileToSymbol()) {
-        SliceTranspose();
-      } else if (TileToTile()) {
-        choreo_unreachable("slice-transpose-deslice is not supported now.");
       }
     }
 
@@ -2480,14 +2480,14 @@ const std::string CuteCodeGen::ValueSTR(const ValueItem& vi, bool LL_suffix,
   return OpValueSTR(vi, "", true, LL_suffix, shp_lit);
 }
 
-const std::string CuteCodeGen::ValueListSTR(const ValueList& vl,
-                                            std::string sep,
-                                            bool LL_suffix) const {
+const std::string CuteCodeGen::ValueSTR(const ValueList& vl, bool LL_suffix,
+                                        bool shp_lit,
+                                        const std::string& sep) const {
   std::ostringstream oss;
   if (!vl.empty()) {
-    oss << ValueSTR(vl[0], LL_suffix);
+    oss << ValueSTR(vl[0], LL_suffix, shp_lit);
     for (unsigned i = 1; i < vl.size(); ++i)
-      oss << sep << ValueSTR(vl[i], LL_suffix);
+      oss << sep << ValueSTR(vl[i], LL_suffix, shp_lit);
   }
   return oss.str();
 }

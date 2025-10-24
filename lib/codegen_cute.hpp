@@ -408,8 +408,9 @@ private:
 
   const std::string ValueSTR(const ValueItem& vi, bool = false,
                              bool = false) const;
-  const std::string ValueListSTR(const ValueList& vl, std::string sep = ", ",
-                                 bool LL_suffix = false) const;
+  const std::string ValueSTR(const ValueList& vl, bool LL_suffix = false,
+                             bool shp_lit = false,
+                             const std::string& sep = ", ") const;
   const std::string OpValueSTR(const ValueItem& vi,
                                const std::string& parent_op,
                                const bool is_left_child, bool LL_suffix = false,
@@ -426,8 +427,12 @@ private:
   const std::string
   GenOffset(const ptr<AST::ChunkAt>&,
             size_t end_idx = std::numeric_limits<size_t>::max()) const;
+  const ValueList GenStrides(const ptr<AST::ChunkAt>&,
+                             const std::vector<size_t>& = {}) const;
   const std::string ShapeSTR(const Shape&, bool = false,
                              const std::string& = ", ") const;
+  const std::string ReShapeSTR(const Shape&, const std::vector<size_t>&,
+                               bool = false, const std::string& = ", ") const;
   const std::string SSMName(const std::string& sname, bool is_host) const {
     return (is_host) ? ssm.HostName(sname) : ssm.DeviceName(sname);
   }
