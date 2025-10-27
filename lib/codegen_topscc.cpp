@@ -115,7 +115,7 @@ void GenerateSubscriptions(std::ostream& os, const std::string prefix,
 
 inline const std::string
 TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
-  auto smi = cur_loop ? cur_loop->smi : nullptr;
+  auto smi = cur_loop ? cur_loop->GetScopedMaskInfo() : nullptr;
   auto vty = dyn_cast<VectorType>(ty);
   if (!vty) choreo_unreachable("expecting a vector type.");
   auto elem_ty = vty->e_type;
@@ -241,13 +241,13 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     auto loop = fb->loop;
     if (loop && loop->CanVectorize()) {
       // create vector loop induction variable
-      std::string sname = InScopeName(loop->IVName());
+      std::string sname = InScopeName(UnScopedName(loop->IVSym()));
       auto ivs = within_map.at(sname);
       assert(ivs.size() == 1 &&
              "vectorized foreach only supports one induction variable.");
       auto iv = UnScopedName(ivs[0]);
       std::string iv_name = "__iv_" + iv;
-      int vector_width = loop->GetVectorWidth();
+      int vector_width = loop->GetVectorFactor();
       std::string vec_iv_plus_name = "__vec_iv_" + iv + "_plus";
       std::string vec_iv_base_name = "__vec_iv_" + iv + "_base";
       auto vector_type = MakeVectorType(BaseType::U32, vector_width);
@@ -374,16 +374,17 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       auto ivs = within_map.at(InScopeName(cname));
       auto loop = fb->loop;
       if (loop && loop->CanVectorize()) {
-        std::string sname = InScopeName(cur_loop->IVName());
-        int vector_width = cur_loop->GetVectorWidth();
+        auto iv_name = UnScopedName(cur_loop->IVSym());
+        std::string sname = InScopeName(iv_name);
+        int vector_width = cur_loop->GetVectorFactor();
         auto vector_type = MakeVectorType(BaseType::U32, vector_width);
 
         IndStream() << SSMName(sname, IsHost()) << " += ("
                     << VectorTypeSTR(vector_type) << ")(" << vector_width
                     << ");\n";
         // remap symbol of loop induction variable to its scalar version.
-        ssm.RemapDeviceSymbol(sname, "__iv_" + cur_loop->IVName());
-        ssm.RemapHostSymbol(sname, "__iv_" + cur_loop->IVName());
+        ssm.RemapDeviceSymbol(sname, "__iv_" + iv_name);
+        ssm.RemapHostSymbol(sname, "__iv_" + iv_name);
       }
 
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
@@ -944,7 +945,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   if (IsActualVectorType(nty)) {
     bool masking = false;
     std::string mask;
-    auto smi = cur_loop->smi;
+    auto smi = cur_loop->GetScopedMaskInfo();
     if (smi->NeedMask() && !n.HasNote("masking")) {
       mask = smi->GetMaskInScope(SSTab().ScopeName());
       if (!smi->IsMaskAlltrue(mask)) masking = true;
@@ -1143,7 +1144,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   if (IsActualVectorType(nty)) {
     bool masking = false;
     std::string mask;
-    auto smi = cur_loop->smi;
+    auto smi = cur_loop->GetScopedMaskInfo();
     if (smi->NeedMask() && !n.HasNote("masking")) {
       mask = smi->GetMaskInScope(SSTab().ScopeName());
       if (!smi->IsMaskAlltrue(mask)) masking = true;
@@ -3425,7 +3426,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     // if this expr needs broadcasting
     bool rparen = false;
     if (expr->HasNote("broadcast")) {
-      auto vector_width = cur_loop->GetVectorWidth();
+      auto vector_width = cur_loop->GetVectorFactor();
       auto ety = expr->GetType();
       BaseType bty = ety->GetBaseType();
       if (IsActualBoundedIntegerType(ety)) bty = BaseType::S32;

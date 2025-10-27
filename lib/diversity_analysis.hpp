@@ -170,8 +170,9 @@ private:
   ptr<DiversityInfo> di;
   std::stack<DiversityShape> scope_shapes;
   std::set<std::string> with_syms; // with symbols defined in with-in blocks
+  std::string indent = "    ";
 
-  bool InVectorizedLoop();
+  bool NeedAnalysis();
 
   // Get the diversity shape of an expression
   DiversityShape ExprDShape(const ptr<AST::Expr> e);

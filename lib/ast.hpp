@@ -3114,7 +3114,8 @@ inline bool IsSymbolOrArrayRef(const Node& n) {
   return false;
 }
 
-inline bool NeedVectorize(const ForeachBlock& n, ptr<AST::AttributeExpr>& c) {
+inline bool HasVectorizationHint(const ForeachBlock& n,
+                                 ptr<AST::AttributeExpr>& c) {
   if (!n.suffixs) return false;
 
   for (auto suffix : n.suffixs->values) {
@@ -3129,9 +3130,9 @@ inline bool NeedVectorize(const ForeachBlock& n, ptr<AST::AttributeExpr>& c) {
   return false;
 }
 
-inline bool NeedVectorize(const ForeachBlock& n) {
+inline bool HasVectorizationHint(const ForeachBlock& n) {
   ptr<AST::AttributeExpr> c;
-  return NeedVectorize(n, c);
+  return HasVectorizationHint(n, c);
 }
 
 inline const ptr<Identifier> GetArrayBaseSymbol(const Expr& n) {

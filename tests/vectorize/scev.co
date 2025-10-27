@@ -22,10 +22,6 @@ ___co__ void vecadd(s32 [N, C, H, W] a, s32 [N,C,H, W] b)
   }
 }
 
-// CHECK: param: `::vecadd::W` -> ::vecadd::W
-// CHECK: param: `::vecadd::N` -> ::vecadd::N
-// CHECK: param: `::vecadd::H` -> ::vecadd::H
-// CHECK: param: `::vecadd::C` -> ::vecadd::C
 // CHECK: pi:    `anon_pb_0__elem__x` -> ::vecadd::paraby_0::anon_pb_0__elem__x
 // CHECK: pi:    `q__elem__x` -> ::vecadd::paraby_0::paraby_1::q__elem__x
 // CHECK: iv:    `n` -> {0, +, 1} <loop1>

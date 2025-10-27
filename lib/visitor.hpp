@@ -873,12 +873,12 @@ protected:
   bool AfterVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
     BeforeAfterVisitImpl(n);
-    if (isa<AST::ForeachBlock>(&n)) { cur_loop = cur_loop->parent_loop; }
+    if (isa<AST::ForeachBlock>(&n)) { cur_loop = cur_loop->GetParentLoop(); }
     return true;
   }
 
   bool InLoop() { return cur_loop != nullptr; }
-  std::string LoopName() { return cur_loop ? cur_loop->loop_name : ""; }
+  std::string LoopName() { return cur_loop ? cur_loop->LoopName() : ""; }
 
 public:
   LoopVisitor(const ptr<SymbolTable> s_tab, const std::string& pn)

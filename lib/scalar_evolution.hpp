@@ -66,9 +66,15 @@ private:
   ptr<LoopInfo> li;
   ptr<ScopedSCEVTable> ssetab;
   std::set<std::string> with_syms; // with symbols defined in with-in blocks
+  ptr<AST::Program> root_ptr;
+  std::string appointed_loop;
+  std::string indent = "    ";
+
 private:
   bool InLoop();
-  bool InVectorizedLoop();
+
+  bool InAppointedLoop();
+
   bool NeedAnalyze(ptr<Type> ty) {
     return IsActualBoundedIntegerType(ty) || isa<ScalarIntegerType>(ty);
   }
@@ -83,10 +89,10 @@ private:
   bool IsAssignedSym(const std::string& sym_name) {
     ptr<Loop> loop = cur_loop;
     while (true) {
-      auto loop_name = loop ? loop->loop_name : NoLoopName();
+      auto loop_name = loop ? loop->LoopName() : NoLoopName();
       if (ssetab->IsAssignedInLoop(sym_name, loop_name)) return true;
       if (!loop) break;
-      auto parent_loop = loop->parent_loop;
+      auto parent_loop = loop->GetParentLoop();
       loop = parent_loop;
     }
     return false;
@@ -100,11 +106,11 @@ private:
   ptr<SCEV> GetSCEVOfSym(const std::string& sym_name) {
     auto loop = cur_loop;
     while (true) {
-      auto loop_name = loop ? loop->loop_name : NoLoopName();
+      auto loop_name = loop ? loop->LoopName() : NoLoopName();
       auto scev = ssetab->GetSCEV(sym_name, loop_name);
       if (scev) return scev;
       if (!loop) break;
-      auto parent_loop = loop->parent_loop;
+      auto parent_loop = loop->GetParentLoop();
       loop = parent_loop;
     }
     return nullptr;
@@ -120,8 +126,10 @@ public:
   }
 
   ptr<ScopedSCEVTable> GetScevTab() { return ssetab; }
+  void ReComputeInLoop(const std::string& lname, bool debug = true);
 
 public:
+  bool Visit(AST::Program& n) override;
   bool Visit(AST::Expr& n) override;
   bool Visit(AST::NamedVariableDecl& n) override;
   bool Visit(AST::Identifier& n) override;

@@ -144,12 +144,12 @@ Option<bool> branch_norm(OptionKind::Hidden, "--branch-norm", "-bn", false,
                          "Normalize the if-else branches in the choreo code.");
 Option<bool> loop_norm(OptionKind::Hidden, "--loop-norm", "-ln", false,
                        "Normalize the loops in the choreo code.");
-Option<bool> debug_vectorize(OptionKind::Hidden, "--debug-vectorize", "-dvec", false,
-                       "debug loop vectorization process.");
+Option<bool> debug_vectorize(OptionKind::Hidden, "--debug-vectorize", "-dvec",
+                             false, "debug loop vectorization process.");
 Option<bool> no_vectorize(OptionKind::Hidden, "--no-vectorize", "-nm", false,
                           "Do not vectorize any foreach loop.");
 Option<bool> vectorize(OptionKind::Hidden, "--vectorize", "-vec", false,
-                          "Enable loop vectorization.");
+                       "Enable loop vectorization.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {

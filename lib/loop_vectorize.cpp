@@ -4,21 +4,20 @@
 namespace Choreo {
 
 // LoopChecker
-LoopChecker::LoopChecker() : VisitorWithScope("loop-checker") {}
+VectorizationHintChecker::VectorizationHintChecker()
+    : VisitorWithScope("hint-checker") {}
 
-bool LoopChecker::BeforeVisitImpl(AST::Node&) { return true; }
+bool VectorizationHintChecker::BeforeVisitImpl(AST::Node&) { return true; }
 
-bool LoopChecker::AfterVisitImpl(AST::Node&) { return true; }
+bool VectorizationHintChecker::AfterVisitImpl(AST::Node&) { return true; }
 
-bool LoopChecker::Visit(AST::ForeachBlock& n) {
-  if (!n.IsNorm()) AllNormLoop = false; // not all loops are normalized
-  if (AST::NeedVectorize(n)) NeedVectorize = true;
+bool VectorizationHintChecker::Visit(AST::ForeachBlock& n) {
+  if (!n.IsNorm()) has_hint = false; // not all loops are normalized
+  if (AST::HasVectorizationHint(n)) has_hint = true;
   return true;
 }
 
-bool LoopChecker::HasVectorization() const { return NeedVectorize; }
-
-bool LoopChecker::IsAllLoopNorm() const { return AllNormLoop; }
+bool VectorizationHintChecker::HasVectorizationHint() const { return has_hint; }
 
 // LoopAnalysis
 LoopAnalysis::LoopAnalysis()
@@ -30,7 +29,7 @@ bool LoopAnalysis::BeforeVisitImpl(AST::Node&) { return true; }
 bool LoopAnalysis::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::ForeachBlock>(&n)) {
     parent_loop_name = li->GetParentLoop(parent_loop_name)
-                           ? li->GetParentLoop(parent_loop_name)->loop_name
+                           ? li->GetParentLoop(parent_loop_name)->LoopName()
                            : "";
   }
   return true;
@@ -40,27 +39,28 @@ bool LoopAnalysis::Visit(AST::ForeachBlock& n) {
   auto iv = n.GetIV();
 
   ptr<Loop> loop = n.loop;
-  auto loop_name = loop->loop_name;
-  li->iv2loop[InScopeName(iv->name)] = loop_name;
-  loop->iv_name = iv->name;
-  loop->iv_type = iv->GetType();
-  loop->scope_name = SSTab().ScopeName();
+  auto loop_name = loop->LoopName();
+  loop->SetIVSym(InScopeName(iv->name));
+  loop->SetIVType(iv->GetType());
 
-  ptr<AST::AttributeExpr> vectorize_attr = nullptr;
-  int vector_width = 1;
-  if (AST::NeedVectorize(n, vectorize_attr)) {
-    vector_width = AST::GetIntLiteral(vectorize_attr->AttrValueAt(1))->ValS32();
-    loop->need_vectorize = true;
-    loop->can_vectorize =
-        true; // assume it can be vectorized, will be checked later
+  ptr<AST::AttributeExpr> vectorization_hint = nullptr;
+  if (AST::HasVectorizationHint(n, vectorization_hint)) {
+    loop->SetHasVectorizationHint(true);
+    loop->SetNeedVectorize(true);
+    loop->SetVectorFactor(
+        AST::GetIntLiteral(vectorization_hint->AttrValueAt(1))->ValS32());
+  } else {
+    // it needs trying to vectorize innermost loops later, but currently
+    // loop info is not ready, it cannot used to judge whether a loop is
+    // innermost or not. In later simple loop checker, we will set
+    // need_vectorize for innermost loops without vectorization hint.
   }
 
-  loop->vector_width = vector_width;
   // update loop info
-  li->loops.emplace(loop_name, loop);
+  li->AddLoop(loop);
   if (auto parent_loop = li->GetLoop(parent_loop_name)) {
-    parent_loop->sub_loops.push_back(loop);
-    loop->parent_loop = parent_loop;
+    parent_loop->AddSubLoop(loop);
+    loop->SetParentLoop(parent_loop);
   }
   n.loop = loop;
   parent_loop_name = loop_name;
@@ -68,217 +68,179 @@ bool LoopAnalysis::Visit(AST::ForeachBlock& n) {
 }
 ptr<LoopInfo> LoopAnalysis::GetLoopInfo() const { return li; }
 
-// LoopVectorizeLegalityChecker
-LoopVectorizeLegalityChecker::LoopVectorizeLegalityChecker(
-    const ptr<SymbolTable> s_tab, ptr<LoopInfo> l, ptr<ScopedSCEVTable> s)
-    : LoopVisitor(s_tab, "loop_vectorize_legality"), li(l), scev_table(s) {}
+// LoopVectorizeSimpleChecker
+LoopVectorizeSimpleChecker::LoopVectorizeSimpleChecker(
+    const ptr<SymbolTable> s_tab, ptr<LoopInfo> l)
+    : LoopVisitor(s_tab, "loop-vectorize-simple-checker"), li(l) {
+  for (auto& [loop_name, loop] : li->GetAllLoops()) {
+    can_vectorizes[loop_name] = true;
+  }
+}
 
-bool LoopVectorizeLegalityChecker::HasVectorize() const { return !all_illegal; }
-
-bool LoopVectorizeLegalityChecker::NeedCheck() {
-  if (!InLoop()) return false;
-  if (cur_loop->NeedVectorize()) return true;
+bool LoopVectorizeSimpleChecker::ExistLoopVectorizationLegal() {
+  for (auto& [loop_name, can_vectorize] : can_vectorizes) {
+    auto loop = li->GetLoop(loop_name);
+    if (loop->NeedVectorize() && can_vectorize) return true;
+  }
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::CheckDataAccessAlignment(
-    AST::DataAccess& n) {
-  if (!n.AccessElement()) return true;
-  auto span_ty = dyn_cast<SpannedType>(n.data->GetType());
-  assert(span_ty && "data access should be on spanned type.");
-  auto e_ty = span_ty->ElementType();
-  auto n_ty = n.GetType();
-  auto nds = n.GetDiversityShape();
+bool LoopVectorizeSimpleChecker::NeedCheck() {
+  if (!InLoop()) return false;
+  if (cur_loop->NeedVectorize()) return true;
+  if (CCtx().Vectorize() && li->IsInnermostLoop(cur_loop->LoopName()))
+    return true;
+  return false;
+}
 
-  if (!nds.Varying()) return true;
-  // In GCU target 3.0 the alignment requirement is equal to the vector size of
-  // simd operands.
-  auto alignment = SizeOf(e_ty) * cur_loop->GetVectorWidth();
+void LoopVectorizeSimpleChecker::SetLoopVectorizationFailed() {
+  can_vectorizes[cur_loop->LoopName()] = false;
+}
 
-  auto da_scev = n.GetSCEV();
-  if (auto da_ar = dyn_cast<SCEVAddRecExpr>(da_scev)) {
-    auto base = da_ar->base;
-    while (auto inner_ar = dyn_cast<SCEVAddRecExpr>(base)) {
-      auto step = inner_ar->step;
-      auto step_val = step->GetValue();
-      if (auto num_step = dyn_cast<sbe::NumericValue>(step_val)) {
-        auto stride = num_step->Value() * SizeOf(e_ty);
-        bool IsAligned = false;
-        if (stride % alignment == 0) { IsAligned = true; }
-        if (!IsAligned) {
-          if (debug_visit)
-            dbgs() << indent << "unaligned data access: " << STR(n)
-                   << ", stride: " << STR(stride) << "{" << alignment << "}.\n";
-          cur_loop->can_vectorize = false;
-          return false;
-        }
-      }
-      base = inner_ar->base;
-    }
+bool LoopVectorizeSimpleChecker::Visit(AST::DataAccess& n) {
+  TraceEachVisit(n);
+  if (!NeedCheck()) return true;
+  auto elem_ty = GetBaseType(*n.GetType());
+  if (cur_loop->GetDataType() == BaseType::UNKNOWN) {
+    cur_loop->SetDataType(elem_ty);
+  } else if (elem_ty != cur_loop->GetDataType()) {
+    if (debug_visit)
+      dbgs() << indent
+             << "vectorization of mixed type is currently not supported\n";
+    SetLoopVectorizationFailed();
+    return true;
   }
-
   return true;
 }
 
-/* One foreachblock is legal to be vectorized when all the following conditions
-are met:
-  0. it is marked to be vectorized.
-  1. it is a normalized loop.
-  2. it is an innermost loop.
-  3. it does not contain unsupported statements, e.g., DMA, wait, trigger,
-  return, select, etc.
-  4. it does not contain unsupported jump statements, e.g., break, continue,
-  etc(currently).
-  5. it does not contain call statments(currently).
-  5. all data accesses in the loop are aligned if target arch does not support
-  unaligned access
-  6. all assignments inside loop should not assign to a outside-defined
-  variable(currently), this will prevent any reduction computation.
-  7. all data accesses inside one same loop should has same element type.
-  8. the vector width of vectorized data access should be consistent with SIMD
-  width of target arch.
-  9. it ignores data dependence analysis for now.
-  10. it must be inside Parallelby. */
-bool LoopVectorizeLegalityChecker::Visit(AST::ForeachBlock& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
-  if (debug_visit) {
-    indent = "";
-    dbgs() << indent << "entering loop " << cur_loop->IVName() << "\n";
-    indent += "  ";
-  }
-  if (Pb_level == 0) {
-    Error1(n.LOC(), "only loop inside parallel-by can be vectorized.");
-    cur_loop->can_vectorize = false;
+  if (AST::HasVectorizationHint(n) &&
+      !li->IsInnermostLoop(cur_loop->LoopName())) {
+    Error1(n.LOC(), "only innermost loop can be vectorized.");
+    SetLoopVectorizationFailed();
     return false;
   }
-
-  // reset data type of data accesses for each loop
-  data_type = BaseType::UNKNOWN;
+  // only loop with vectorization hint or innermost loop needs to be checked
+  if (!NeedCheck()) return true;
+  cur_loop->SetNeedVectorize(true);
 
   if (!n.IsNorm() || !cur_loop) {
     Error1(n.LOC(), "cannot vectorize non-normalized loop.");
-    cur_loop->can_vectorize = false;
-    return false;
-  }
-  // skip if the loop does not need to be vectorized
-  if (!cur_loop->NeedVectorize()) {
-    if (debug_visit)
-      dbgs() << indent << "skip loop " << cur_loop->IVName()
-             << " without vectorization hint.\n";
-    cur_loop->can_vectorize = false;
-    return true;
-  }
-
-  if (!li->IsInnermostLoop(cur_loop->loop_name)) {
-    Error1(n.LOC(), "only innermost loop can be vectorized.");
-    cur_loop->can_vectorize = false;
+    SetLoopVectorizationFailed();
     return false;
   }
 
-  auto vector_width = cur_loop->GetVectorWidth();
-  auto IsPowerOf2 = [](int n) { return (n > 0) && ((n & (n - 1)) == 0); };
-  ptr<AST::AttributeExpr> vectorize_attr = nullptr;
-  AST::NeedVectorize(n, vectorize_attr);
-  assert(vectorize_attr && "vectorize hint should exist.");
-
-  if (vector_width <= 1 || !IsPowerOf2(vector_width)) {
-    Error1(vectorize_attr->AttrValueAt(1)->LOC(),
-           "vector width should be a power of 2 greater than 1.");
-    cur_loop->can_vectorize = false;
+  if (Pb_level == 0) {
+    Error1(n.LOC(), "only loop inside parallel-by can be vectorized.");
+    SetLoopVectorizationFailed();
     return false;
   }
-
   return true;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::WhileBlock& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::WhileBlock& n) {
   TraceEachVisit(n);
   Error1(n.LOC(), "while loop is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::DMA& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::DMA& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "DMA is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::Wait& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::Wait& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "data access is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::Trigger& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "trigger is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::Rotate& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "rotate is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::Return& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::Return& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "return is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::Select& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::Select& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "select is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::IncrementBlock& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::IncrementBlock& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "increment block is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::Synchronize& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "synchronize is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::InThreadsBlock& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "in-threads block is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::ParallelBy& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   Error1(n.LOC(), "parallel-by is not supported for vectorization.");
-  cur_loop->can_vectorize = false;
+  SetLoopVectorizationFailed();
   return false;
 }
 
-void LoopVectorizeLegalityChecker::AddLoopUse(std::string sym, location loc) {
+bool LoopVectorizeSimpleChecker::Visit(AST::Call& n) {
+  TraceEachVisit(n);
+  if (!NeedCheck()) return true;
+  if (n.IsAnno()) return true;
+  if (n.IsArith()) return true;
+  if (debug_visit)
+    dbgs() << indent << "found call stmt in loop `" << cur_loop->LoopName()
+           << "`, which currently not supported in loop "
+              "vectorization\n";
+
+  SetLoopVectorizationFailed();
+  return true;
+}
+
+void LoopVectorizeSimpleChecker::AddLoopUse(std::string sym, location loc) {
   if (loop_uses.find(sym) == loop_uses.end()) {
     loop_uses.emplace(sym, std::vector<location>{loc});
   } else {
@@ -286,7 +248,7 @@ void LoopVectorizeLegalityChecker::AddLoopUse(std::string sym, location loc) {
   }
 }
 
-void LoopVectorizeLegalityChecker::FindLoopUses(ptr<AST::Node> n) {
+void LoopVectorizeSimpleChecker::FindLoopUses(ptr<AST::Node> n) {
   if (!n) return;
   if (auto id = AST::GetIdentifier(n)) {
     auto id_sym = InScopeName(id->name);
@@ -302,7 +264,7 @@ void LoopVectorizeLegalityChecker::FindLoopUses(ptr<AST::Node> n) {
   }
 }
 
-void LoopVectorizeLegalityChecker::AddLoopDef(std::string sym, location loc) {
+void LoopVectorizeSimpleChecker::AddLoopDef(std::string sym, location loc) {
   if (loop_defs.find(sym) == loop_defs.end()) {
     loop_defs.emplace(sym, std::vector<location>{loc});
   } else {
@@ -310,24 +272,26 @@ void LoopVectorizeLegalityChecker::AddLoopDef(std::string sym, location loc) {
   }
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::NamedVariableDecl& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
   if (n.IsArray()) {
     if (debug_visit)
       dbgs() << indent
              << "Array definition is not supported in vectorization.\n";
-    cur_loop->can_vectorize = false;
+    SetLoopVectorizationFailed();
     return true;
   } else {
     auto name_sym = InScopeName(n.name_str);
     FindLoopUses(n.init_expr);
-    if (loop_uses.find(name_sym) != loop_uses.end()) {
+    auto nds = n.GetDiversityShape();
+    if (nds.Varying() && loop_uses.find(name_sym) != loop_uses.end() &&
+        loop_defs.find(name_sym) == loop_defs.end()) {
       if (debug_visit)
         dbgs() << indent
                << "variable " + name_sym +
                       " is used before its declaration in the loop.\n";
-      cur_loop->can_vectorize = false;
+      SetLoopVectorizationFailed();
       return true;
     }
     AddLoopDef(name_sym, n.LOC());
@@ -336,19 +300,21 @@ bool LoopVectorizeLegalityChecker::Visit(AST::NamedVariableDecl& n) {
   return true;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::Assignment& n) {
+bool LoopVectorizeSimpleChecker::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
 
   if (!n.AssignToDataElement()) {
     auto name_sym = InScopeName(n.GetName());
     FindLoopUses(n.value);
-    if (loop_uses.find(name_sym) != loop_uses.end()) {
+    auto nds = n.da->GetDiversityShape();
+    if (nds.Varying() && loop_uses.find(name_sym) != loop_uses.end() &&
+        loop_defs.find(name_sym) == loop_defs.end()) {
       if (debug_visit)
         dbgs() << indent
                << "variable " + name_sym +
                       " is used before its assignment in the loop.\n";
-      cur_loop->can_vectorize = false;
+      SetLoopVectorizationFailed();
       return true;
     }
     AddLoopDef(name_sym, n.LOC());
@@ -362,7 +328,7 @@ bool LoopVectorizeLegalityChecker::Visit(AST::Assignment& n) {
         dbgs() << indent
                << "cannot assign a varying value to a non-varying data access: "
                << STR(n) << "\n";
-      cur_loop->can_vectorize = false;
+      SetLoopVectorizationFailed();
       return true;
     }
   }
@@ -370,16 +336,124 @@ bool LoopVectorizeLegalityChecker::Visit(AST::Assignment& n) {
   return true;
 }
 
-bool LoopVectorizeLegalityChecker::Visit(AST::Call& n) {
-  TraceEachVisit(n);
-  if (!NeedCheck()) return true;
-  if (n.IsAnno()) return true;
-  if (n.IsArith()) return true;
-  if (debug_visit)
-    dbgs() << indent
-           << "call is currently not supported in loop vectorization\n";
+bool LoopVectorizeSimpleChecker::AfterBeforeVisitImpl(AST::Node& n) {
+  if (isa<AST::ParallelBy>(&n)) { Pb_level++; }
+  return true;
+}
 
-  cur_loop->can_vectorize = false;
+bool LoopVectorizeSimpleChecker::BeforeAfterVisitImpl(AST::Node& n) {
+  if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+    auto loop = fb->loop;
+    assert(loop);
+    auto loop_name = loop->LoopName();
+    if (li->IsInnermostLoop(loop_name) && can_vectorizes[loop_name]) {
+      loop->SetNeedVectorize(true);
+      if (debug_visit)
+        dbgs() << "[SimpleCheck] loop `" << loop->LoopName()
+               << "` is promised to be vectorized.\n";
+    } else {
+      loop->SetNeedVectorize(false);
+      if (debug_visit)
+        dbgs() << "[SimpleCheck] loop `" << loop->LoopName()
+               << "` cannot be vectorized.\n";
+    }
+  } else if (isa<AST::ParallelBy>(&n)) {
+    Pb_level--;
+    assert(Pb_level >= 0);
+  }
+  return true;
+}
+
+// LoopVectorizeLegalityChecker
+LoopVectorizeLegalityChecker::LoopVectorizeLegalityChecker(
+    const ptr<SymbolTable> s_tab, ptr<LoopInfo> l, ptr<ScopedSCEVTable> s)
+    : LoopVisitor(s_tab, "loop_vectorize_legality"), li(l), scev_table(s) {
+  for (auto& [loop_name, loop] : li->GetAllLoops()) {
+    can_vectorizes[loop_name] = loop->NeedVectorize() ? true : false;
+  }
+}
+
+bool LoopVectorizeLegalityChecker::NeedCheck() {
+  if (!InLoop()) return false;
+  if (cur_loop->LoopName() == appointed_loop) return true;
+  return false;
+}
+
+void LoopVectorizeLegalityChecker::SetLoopVectorizationFailed() {
+  can_vectorizes[cur_loop->LoopName()] = false;
+}
+
+void LoopVectorizeLegalityChecker::CheckLegalityInLoop(
+    AST::ForeachBlock& loop_node) {
+  cur_loop = loop_node.loop;
+  if (debug_visit)
+    dbgs() << "[Check] Check legality of loop `" << cur_loop->LoopName()
+           << "` for vectorization.\n";
+  loop_node.accept(*this);
+}
+
+bool LoopVectorizeLegalityChecker::IsLegalToVectorize(
+    const std::string& lname) {
+  if (can_vectorizes.find(lname) != can_vectorizes.end())
+    return can_vectorizes[lname];
+  return false;
+}
+
+bool LoopVectorizeLegalityChecker::CheckDataAccessAlignment(
+    AST::DataAccess& n) {
+  if (!n.AccessElement()) return true;
+  auto span_ty = dyn_cast<SpannedType>(n.data->GetType());
+  assert(span_ty && "data access should be on spanned type.");
+  auto e_ty = span_ty->ElementType();
+  auto n_ty = n.GetType();
+  auto nds = n.GetDiversityShape();
+
+  if (!nds.Varying()) return true;
+  // In GCU target 3.0 the alignment requirement is equal to the vector size of
+  // simd operands.
+  auto alignment = SizeOf(e_ty) * cur_loop->GetVectorFactor();
+
+  auto da_scev = n.GetSCEV();
+  if (auto da_ar = dyn_cast<SCEVAddRecExpr>(da_scev)) {
+    auto base = da_ar->GetBase();
+    while (auto inner_ar = dyn_cast<SCEVAddRecExpr>(base)) {
+      auto step = inner_ar->GetStep();
+      auto step_val = step->GetValue();
+      if (auto num_step = dyn_cast<sbe::NumericValue>(step_val)) {
+        auto stride = num_step->Value() * SizeOf(e_ty);
+        bool IsAligned = false;
+        if (stride % alignment == 0) { IsAligned = true; }
+        if (!IsAligned) {
+          if (debug_visit)
+            dbgs() << indent << "unaligned data access: " << STR(n)
+                   << ", stride: " << STR(stride) << "{" << alignment << "}.\n";
+          return false;
+        }
+      }
+      base = inner_ar->GetBase();
+    }
+  }
+
+  return true;
+}
+
+bool LoopVectorizeLegalityChecker::Visit(AST::ForeachBlock& n) {
+  TraceEachVisit(n);
+
+  auto vector_factor = cur_loop->GetVectorFactor();
+  auto IsPowerOf2 = [](int n) { return (n > 0) && ((n & (n - 1)) == 0); };
+  ptr<AST::AttributeExpr> vectorization_hint = nullptr;
+  if (AST::HasVectorizationHint(n, vectorization_hint)) {
+    if (vector_factor <= 1 || !IsPowerOf2(vector_factor)) {
+      Error1(vectorization_hint->AttrValueAt(1)->LOC(),
+             "vector width should be a power of 2 greater than 1.");
+      SetLoopVectorizationFailed();
+      return false;
+    }
+    // simple check about loop count
+    auto loop_count = cur_loop->GetLoopCount();
+  }
+
   return true;
 }
 
@@ -388,17 +462,8 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
   // check mixed type
   if (!n.AccessElement()) return true;
   auto elem_ty = GetBaseType(*n.GetType());
-  if (data_type == BaseType::UNKNOWN)
-    data_type = elem_ty;
-  else if (elem_ty != data_type) {
-    if (debug_visit)
-      dbgs() << indent
-             << "vectorization of mixed type is currently not supported\n";
-    cur_loop->can_vectorize = false;
-    return true;
-  }
-  auto vector_width = cur_loop->GetVectorWidth();
-  auto vector_size = SizeOf(elem_ty) * vector_width;
+  auto vector_factor = cur_loop->GetVectorFactor();
+  auto vector_size = SizeOf(elem_ty) * vector_factor;
   auto single_vector_size = CCtx().GetSingleVectorByteSize();
 
   if (vector_size != single_vector_size &&
@@ -406,43 +471,58 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
       vector_size != 4 * single_vector_size) {
     if (debug_visit)
       dbgs() << indent
-             << "vectorization with unsupported vector width: " << vector_width
+             << "vectorization with unsupported vector width: " << vector_factor
              << "\n";
-
-    cur_loop->can_vectorize = false;
+    SetLoopVectorizationFailed();
     return true;
   }
 
   // alignment check, GCU4 supports unaligned simd memory access
-  if (CCtx().GetArch() != TargetArch::GCU4) {
+  if (CCtx().GetArch() != TargetArch::GCU4)
     if (!CheckDataAccessAlignment(n)) {
-      cur_loop->can_vectorize = false;
+      SetLoopVectorizationFailed();
       return true;
+    }
+
+  auto scev = n.GetSCEV();
+  if (auto ar = dyn_cast<SCEVAddRecExpr>(scev)) {
+    auto step_val = ar->GetStep()->GetValue();
+    if (vector_factor > 1 && sbe::cne(step_val, sbe::nu(vector_factor))) {
+      SetLoopVectorizationFailed();
+      if (debug_visit) {
+        dbgs() << indent << "interleaved access with step "
+               << STR(step_val / sbe::nu(vector_factor))
+               << " is not legal for vectorization: " << STR(n) << "\n";
+      }
     }
   }
 
-  return true;
-}
-
-bool LoopVectorizeLegalityChecker::AfterBeforeVisitImpl(AST::Node& n) {
-  if (isa<AST::ParallelBy>(&n)) { Pb_level++; }
   return true;
 }
 
 bool LoopVectorizeLegalityChecker::BeforeAfterVisitImpl(AST::Node& n) {
   if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     auto loop = fb->loop;
-    if (loop && loop->CanVectorize()) {
+    if (loop->NeedVectorize() && can_vectorizes[loop->LoopName()]) {
       if (debug_visit)
-        dbgs() << indent << "loop " << loop->IVName()
-               << " is legal to be vectorized\n";
-      all_illegal = false;
+        dbgs() << "[check] vector factor = " << loop->GetVectorFactor()
+               << " is legal for loop `" << loop->LoopName() << "`.\n";
+    } else if (loop->NeedVectorize() && !can_vectorizes[loop->LoopName()]) {
+      if (debug_visit)
+        dbgs() << "[check] vector factor = " << loop->GetVectorFactor()
+               << " is illegal for loop `" << loop->LoopName()
+               << "`, cannot vectorize.\n";
     }
-  } else if (isa<AST::ParallelBy>(&n)) {
-    Pb_level--;
-    assert(Pb_level >= 0);
   }
   return true;
+}
+
+bool LoopVectorizeLegalityChecker::ExistLoopVectorizationLegal() {
+  for (auto& [loop_name, can_vectorize] : can_vectorizes) {
+    auto loop = li->GetLoop(loop_name);
+    if (loop->CanVectorize()) return true;
+  }
+  return false;
 }
 
 // BranchSimplicition
@@ -577,7 +657,7 @@ ptr<AST::Expr> MaskGen::MakeMaskExpr(const location& loc,
   } else {
     mask = AST::Make<AST::Expr>(loc, op, lhs, rhs);
   }
-  mask->SetType(MakeVectorType(BaseType::BOOL, cur_loop->GetVectorWidth()));
+  mask->SetType(MakeVectorType(BaseType::BOOL, cur_loop->GetVectorFactor()));
   mask->SetDiversityShape(DiversityShapeKind::DIVERGENT);
   return mask;
 }
@@ -585,7 +665,7 @@ ptr<AST::Expr> MaskGen::MakeMaskExpr(const location& loc,
 ptr<AST::Expr> MaskGen::MakeMaskIdExpr(const location& loc,
                                        const std::string& name) {
   auto mask = AST::MakeIdExpr(loc, name);
-  mask->SetType(MakeVectorType(BaseType::BOOL, cur_loop->GetVectorWidth()));
+  mask->SetType(MakeVectorType(BaseType::BOOL, cur_loop->GetVectorFactor()));
   mask->SetDiversityShape(DiversityShapeKind::DIVERGENT);
   return mask;
 }
@@ -593,7 +673,7 @@ ptr<AST::Expr> MaskGen::MakeMaskIdExpr(const location& loc,
 ptr<AST::NamedVariableDecl> MaskGen::MakeMaskDecl(const location& loc,
                                                   const std::string& name,
                                                   const ptr<AST::Expr>& rhs) {
-  auto mask_ty = MakeVectorType(BaseType::BOOL, cur_loop->GetVectorWidth());
+  auto mask_ty = MakeVectorType(BaseType::BOOL, cur_loop->GetVectorFactor());
   auto data_type = AST::Make<AST::DataType>(loc, BaseType::BOOL);
   data_type->SetType(mask_ty);
   auto mask =
@@ -608,7 +688,7 @@ ptr<AST::Assignment> MaskGen::MakeMaskAssign(const location& loc,
                                              const std::string& name,
                                              const ptr<AST::Expr>& rhs) {
   auto mask = AST::Make<AST::Assignment>(loc, name, rhs);
-  auto mask_ty = MakeVectorType(BaseType::BOOL, cur_loop->GetVectorWidth());
+  auto mask_ty = MakeVectorType(BaseType::BOOL, cur_loop->GetVectorFactor());
   mask->SetDecl(false);
   mask->SetType(mask_ty);
   mask->SetDiversityShape(DiversityShapeKind::DIVERGENT);
@@ -646,12 +726,12 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   if (!NeedTransform()) return true;
   assert(n.IsNorm() && "Loop should be normalized before MaskGen.");
-  assert(li->IsInnermostLoop(cur_loop->loop_name) &&
+  assert(li->IsInnermostLoop(cur_loop->LoopName()) &&
          "Only innermost loop can be vectorized.");
 
-  auto smi = cur_loop->smi;
+  auto smi = cur_loop->GetScopedMaskInfo();
   auto loc = n.stmts->LOC();
-  auto mask_ty = MakeVectorType(BaseType::BOOL, cur_loop->GetVectorWidth());
+  auto mask_ty = MakeVectorType(BaseType::BOOL, cur_loop->GetVectorFactor());
   auto iv = n.GetIV();
   auto iv_ty = iv->GetType();
   auto upper_bound = GetSingleUpperBound(iv_ty);
@@ -660,7 +740,7 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
   auto cur_mask_name = MaskName();
   // if the upper bound is a constant and is divisible by vector width
   if (auto ub_nu = dyn_cast<sbe::NumericValue>(upper_bound);
-      ub_nu && ub_nu->Value() % cur_loop->GetVectorWidth() == 0) {
+      ub_nu && ub_nu->Value() % cur_loop->GetVectorFactor() == 0) {
     // if there is no divergent branch inside the loop, masking is not needed
     if (!HasDivergentBranch(*n.stmts)) {
       if (debug_visit)
@@ -673,7 +753,7 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
     bool_literal->SetDiversityShape(DiversityShapeKind::UNIFORM);
     mask_expr = MakeMaskExpr(n.LOC(), bool_literal);
     mask_expr->Note().emplace("broadcast",
-                              std::to_string(cur_loop->GetVectorWidth()));
+                              std::to_string(cur_loop->GetVectorFactor()));
     loop_cond = MakeMaskDecl(loc, cur_mask_name, mask_expr);
     loop_cond->init_expr->SetType(MakeBooleanType(true));
     smi->all_true_masks.insert(cur_mask_name);
@@ -693,7 +773,7 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
   auto cur_mask =
       MakeMaskDecl(loc, "exec", MakeMaskIdExpr(loc, loop_cond->name_str));
   smi->SetMaskInScope(SSTab().ScopeName(), cur_mask_name);
-  smi->SetVectorWidth(cur_loop->GetVectorWidth());
+  smi->SetVectorWidth(cur_loop->GetVectorFactor());
 
   SSTab().DefineSymbol(cur_mask->name_str, mask_ty);
   di->AssignSymbolShape(InScopeName(cur_mask->name_str),
@@ -716,7 +796,7 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
 bool MaskGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
   if (!NeedTransform()) return true;
-  auto smi = cur_loop->smi;
+  auto smi = cur_loop->GetScopedMaskInfo();
   auto loc = n.if_stmts->LOC();
   auto pred = n.GetPred();
   auto pred_ds = pred->GetDiversityShape();
@@ -733,7 +813,7 @@ bool MaskGen::Visit(AST::IfElseBlock& n) {
 
   SSTab().DefineSymbol(
       cur_mask->name_str,
-      MakeVectorType(BaseType::BOOL, cur_loop->GetVectorWidth()));
+      MakeVectorType(BaseType::BOOL, cur_loop->GetVectorFactor()));
   di->AssignSymbolShape(InScopeName(cur_mask->name_str),
                         cur_mask->GetDiversityShape());
   // push the current mask to the stack
@@ -761,7 +841,7 @@ bool MaskGen::Visit(AST::DataAccess& n) {
   TraceEachVisit(n);
   if (!NeedTransform()) return true;
   if (!n.AccessElement()) return true;
-  auto smi = cur_loop->smi;
+  auto smi = cur_loop->GetScopedMaskInfo();
   auto span_ty = dyn_cast<SpannedType>(n.data->GetType());
   assert(span_ty && "data access should be on spanned type.");
   auto e_ty = span_ty->ElementType();
@@ -787,7 +867,284 @@ LoopVectorizer::LoopVectorizer()
 bool LoopVectorizer::BeforeVisitImpl(AST::Node&) { return true; }
 bool LoopVectorizer::AfterVisitImpl(AST::Node&) { return true; }
 
+bool LoopVectorizer::CheckVectorizationHint(AST::Node& root) {
+  VectorizationHintChecker vhc;
+  vhc.SetDebugVisit(debug_visit);
+  vhc.SetTraceVisit(trace_visit);
+  root.accept(vhc);
+  if (HasError() || abend_after) return false;
+  if (!vhc.HasVectorizationHint() && !CCtx().Vectorize()) {
+    if (debug_visit)
+      dbgs() << "[loop vectorization] no loop is marked to be vectorized or "
+                "option '--vectorize' is not set. Skip vectorization.\n";
+    return false;
+  }
+  if (prt_visitor) dbgs() << " |- " << vhc.GetName() << NewL;
+  return true;
+}
+
+bool LoopVectorizer::AnalyzeLoops(AST::Node& root) {
+  LoopAnalysis la;
+  la.SetDebugVisit(debug_visit);
+  la.SetTraceVisit(trace_visit);
+  root.accept(la);
+  li = la.GetLoopInfo();
+  if (debug_visit) li->dump(dbgs());
+  if (HasError() || abend_after) return false;
+  if (prt_visitor) dbgs() << " |- " << la.GetName() << NewL;
+
+  return true;
+}
+
+bool LoopVectorizer::CheckSimply(AST::Node& root) {
+  if (debug_visit)
+    dbgs() << "\n[simplecheck] start loop vectorization simple check.\n";
+  LoopVectorizeSimpleChecker lvc(SymTab(), li);
+  lvc.SetDebugVisit(debug_visit);
+  lvc.SetTraceVisit(trace_visit);
+  root.accept(lvc);
+  if (HasError() || abend_after) return false;
+  if (!lvc.ExistLoopVectorizationLegal()) {
+    if (debug_visit)
+      dbgs() << "[SimpleCheck] No loop is legal to be vectorized, "
+                "auto-vectorization exits.";
+    return false;
+  }
+  if (prt_visitor) dbgs() << " |- " << lvc.GetName() << NewL;
+  return true;
+}
+
+bool LoopVectorizer::AnalyzeDiversityShape(AST::Node& root) {
+  if (debug_visit) dbgs() << "\n[diversity] start diversity analysis.\n";
+  DiversityAnalysisHandler da(SymTab(), li);
+  da.SetDebugVisit(debug_visit);
+  da.SetTraceVisit(trace_visit);
+  da.RunOnProgram(root);
+  if (prt_visitor) dbgs() << " |- " << da.GetName() << NewL;
+  if (HasError() || abend_after) return false;
+  di = da.GetDiversityAnalysis();
+
+  return true;
+}
+
+// struct CostEngine final : public LoopVisitor {
+//   CostEngine()
+//       : LoopVisitor(nullptr, "loop_vectorization_cost_model") {}
+//   bool Visit(AST::ForeachBlock& n) {
+//     TraceEachVisit(n);
+//     return true;
+//   }
+// };
+
+// struct LoopVectorizationCostModel {
+// private:
+//   ptr<LoopInfo> li;
+//   CostEngine ce;
+// public:
+//   LoopVectorizationCostModel(ptr<LoopInfo> l)
+//       : li(l) {}
+
+//   size_t EstimateVectorizationCost(ptr<AST::ForeachBlock> loop) {
+//     loop->accept(ce);
+//     return 0;
+//   }
+// };
+
+struct LoopVectorizationPlanner final : public LoopVisitor {
+private:
+  ptr<LoopInfo> li;
+  ptr<ScalarEvolutionAnalysis> sea;
+  ptr<LoopVectorizeLegalityChecker> lvc;
+  // store the most profitable vectorization factor for each loop
+  std::unordered_map<std::string, size_t> vector_factors;
+
+  std::vector<size_t> vector_register_widths;
+  void UpdatePlan(const std::string& lname, size_t plan_id) {
+    auto loop = li->GetLoop(lname);
+    if (!loop->NeedVectorize()) return;
+    if (plan_id >= vector_register_widths.size()) return;
+    if (loop->HasVectorizationHint()) return;
+    size_t element_size = loop->GetDataType() == BaseType::UNKNOWN
+                              ? 4
+                              : SizeOf(loop->GetDataType());
+    loop->SetVectorFactor(vector_register_widths[plan_id] / element_size);
+    return;
+  }
+
+  void SettlePlan(const std::string& lname) {
+    auto loop = li->GetLoop(lname);
+    if (!loop->CanVectorize()) {
+      loop->SetVectorFactor(1);
+      return;
+    }
+    if (loop->HasVectorizationHint()) return;
+    loop->SetVectorFactor(vector_factors[lname]);
+    if (debug_visit)
+      dbgs() << "\n[plan] settled vectorization factor for loop `"
+             << loop->LoopName() << "`: " << loop->GetVectorFactor() << "\n";
+    return;
+  }
+
+public:
+  LoopVectorizationPlanner(const ptr<SymbolTable> s_tab, ptr<LoopInfo> l,
+                           ptr<ScalarEvolutionAnalysis> s,
+                           ptr<LoopVectorizeLegalityChecker> lc)
+      : LoopVisitor(s_tab, "loop_vectorization_planner"), li(l), sea(s),
+        lvc(lc) {
+    vector_register_widths = {};
+    auto vector1 = CCtx().GetSingleVectorByteSize();
+    if (CCtx().GetArch() == TargetArch::GCU3 ||
+        CCtx().GetArch() == TargetArch::GCU4) {
+      vector_register_widths.push_back(vector1);
+      vector_register_widths.push_back(vector1 * 2);
+      vector_register_widths.push_back(vector1 * 4);
+    } else {
+      choreo_unreachable(
+          "unsupported target arch in loop vectorization planner.");
+    }
+  }
+
+  bool Visit(AST::Program& n) {
+    n.accept(*sea);
+    return true;
+  }
+
+  bool Visit(AST::ForeachBlock& n) {
+    // for each loop, do legality check and update vectorization plan
+    if (!cur_loop->NeedVectorize()) return true;
+    if (debug_visit)
+      dbgs() << "\n[plan] Planning vectorization for loop `"
+             << cur_loop->LoopName() << "`\n";
+    auto loop_name = cur_loop->LoopName();
+    size_t plan_id = 0;
+    while (plan_id < vector_register_widths.size()) {
+      UpdatePlan(loop_name, plan_id++);
+      if (debug_visit) {
+        if (cur_loop->HasVectorizationHint())
+          dbgs() << "\n[plan] found vectorization hint, set vector factor to: "
+                 << cur_loop->GetVectorFactor() << "\n";
+        else
+          dbgs() << "\n[plan] try vector factor: "
+                 << cur_loop->GetVectorFactor() << "\n";
+      }
+      sea->ReComputeInLoop(loop_name, false);
+      lvc->CheckLegalityInLoop(n);
+      if (lvc->IsLegalToVectorize(loop_name)) {
+        auto loop_count = cur_loop->GetLoopCount();
+        // if loop count is known and less than vector factor and current plan
+        // is not 1, skip the new plan
+        if (loop_count->IsNumeric()) {
+          if (sbe::cle(loop_count, sbe::nu(cur_loop->GetVectorFactor())) &&
+              vector_factors[loop_name] > 1) {
+            if (debug_visit)
+              dbgs() << "[plan] loop count " << STR(loop_count)
+                     << " is less than vector factor "
+                     << cur_loop->GetVectorFactor() << ", skip this plan.\n";
+            continue;
+          }
+        }
+        vector_factors[loop_name] = cur_loop->GetVectorFactor(); // cost model
+        cur_loop->SetCanVectorize(true);
+      }
+      // if there is vectorization hint, do not try other plans
+      if (cur_loop->HasVectorizationHint()) break;
+    }
+
+    SettlePlan(loop_name);
+    sea->ReComputeInLoop(loop_name);
+
+    return true;
+  }
+};
+
+// do loop vectorization legality check until all loops are checked
+bool LoopVectorizer::ComputeVectorizationPlan(AST::Node& root) {
+  ptr<ScalarEvolutionAnalysis> sea =
+      std::make_shared<ScalarEvolutionAnalysis>(SymTab(), li);
+  sea->SetDebugVisit(debug_visit);
+  sea->SetTraceVisit(trace_visit);
+
+  ptr<LoopVectorizeLegalityChecker> lvc =
+      std::make_shared<LoopVectorizeLegalityChecker>(SymTab(), li,
+                                                     sea->GetScevTab());
+  lvc->SetDebugVisit(debug_visit);
+  lvc->SetTraceVisit(trace_visit);
+
+  LoopVectorizationPlanner planner(SymTab(), li, sea, lvc);
+  planner.SetDebugVisit(debug_visit);
+  planner.SetTraceVisit(trace_visit);
+  root.accept(planner);
+
+  if (!lvc->ExistLoopVectorizationLegal()) {
+    if (debug_visit)
+      dbgs() << "[plan] No loop is legal to be vectorized, "
+                "auto-vectorization exits.\n";
+    return false;
+  } else {
+    if (debug_visit) {
+      dbgs() << "\n[plan] Final vectorization plan:\n";
+      for (auto& [loop_name, loop] : li->GetAllLoops()) {
+        if (loop->CanVectorize()) {
+          dbgs() << "  - Loop `" << loop_name
+                 << "` will be vectorized with factor: "
+                 << loop->GetVectorFactor() << "\n";
+        } else {
+          dbgs() << "  - Loop `" << loop_name << "` cannot be vectorized.\n";
+        }
+      }
+    }
+  }
+
+  if (prt_visitor) dbgs() << " |- " << planner.GetName() << NewL;
+  if (HasError() || abend_after) return false;
+
+  return true;
+}
+
+bool LoopVectorizer::InferenceType(AST::Node& root) {
+  if (debug_visit) dbgs() << "\n[vinfer] start inferring vector types.\n";
+  VectorTypeInfer vti(SymTab(), li, di);
+  vti.SetDebugVisit(debug_visit);
+  vti.SetTraceVisit(trace_visit);
+  root.accept(vti);
+  if (prt_visitor) dbgs() << " |- " << vti.GetName() << NewL;
+  if (HasError() || abend_after) return false;
+  return true;
+}
+
+bool LoopVectorizer::LinearizeBranch(AST::Node& root) {
+  if (debug_visit) dbgs() << "\n[linearize] start linearization.\n";
+  Linearizer ln(SymTab(), li, di);
+  ln.SetDebugVisit(debug_visit);
+  ln.SetTraceVisit(trace_visit);
+  root.accept(ln);
+  if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
+  if (HasError() || abend_after) return false;
+
+  BranchSimplicition bs(SymTab());
+  bs.SetDebugVisit(debug_visit);
+  bs.SetTraceVisit(trace_visit);
+  root.accept(bs);
+  if (prt_visitor) dbgs() << " |- " << bs.GetName() << NewL;
+  if (HasError() || abend_after) return false;
+
+  return true;
+}
+
+bool LoopVectorizer::GenerateMask(AST::Node& root) {
+  if (debug_visit) dbgs() << "\n[mask] start geneating masks.\n";
+  MaskGen mg(SymTab(), li, di);
+  mg.SetDebugVisit(debug_visit);
+  mg.SetTraceVisit(trace_visit);
+  root.accept(mg);
+  if (prt_visitor) dbgs() << " |- " << mg.GetName() << NewL;
+  if (HasError() || abend_after) return false;
+  return true;
+}
+
+// main function to run loop auto-vectorization
 bool LoopVectorizer::RunOnProgram(AST::Node& root) {
+  // pre-checks
   if (!isa<AST::Program>(&root)) {
     Error1(root.LOC(), "Not running a choreo program.");
     return false;
@@ -799,96 +1156,46 @@ bool LoopVectorizer::RunOnProgram(AST::Node& root) {
   }
   if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
   debug_visit |= CCtx().TraceVectorize();
-  LoopChecker lc;
-  lc.SetDebugVisit(debug_visit);
-  lc.SetTraceVisit(trace_visit);
-  root.accept(lc);
-  if (HasError() || abend_after) return false;
-  if (!lc.IsAllLoopNorm() || !lc.HasVectorization()) {
-    if (debug_visit)
-      dbgs() << "[loop vectorization] some loops are not normalized or no loop "
-                "is marked to be vectorized. Skip vectorization.\n";
+
+  // main steps
+  if (!CheckVectorizationHint(root)) {
+    if (HasError() || abend_after) return false;
     return true;
   }
-  if (prt_visitor) dbgs() << " |- " << lc.GetName() << NewL;
 
-  LoopAnalysis la;
-  la.SetDebugVisit(debug_visit);
-  la.SetTraceVisit(trace_visit);
-  root.accept(la);
-  auto li = la.GetLoopInfo();
-  if (debug_visit) {
-    dbgs() << "LoopInfo:\n";
-    li->dump(dbgs());
-    dbgs() << "\n";
+  if (!AnalyzeLoops(root)) {
+    if (HasError() || abend_after) return false;
+    return true;
   }
-  if (HasError() || abend_after) return false;
-  if (prt_visitor) dbgs() << " |- " << la.GetName() << NewL;
 
-  if (lc.HasVectorization()) {
-    if (debug_visit) dbgs() << "\n[diversity] start diversity analysis.\n";
-    DiversityAnalysisHandler da(SymTab(), li);
-    da.SetDebugVisit(debug_visit);
-    da.SetTraceVisit(trace_visit);
-    da.RunOnProgram(root);
-    if (prt_visitor) dbgs() << " |- " << da.GetName() << NewL;
+  if (!AnalyzeDiversityShape(root)) {
     if (HasError() || abend_after) return false;
-    auto di = da.GetDiversityAnalysis();
+    return true;
+  }
 
-    if (debug_visit) dbgs() << "\n[scev] start scalar evolution analysis.\n";
-    ScalarEvolutionAnalysis sba(SymTab(), li);
-    sba.SetDebugVisit(debug_visit);
-    sba.SetTraceVisit(trace_visit);
-    root.accept(sba);
-    if (prt_visitor) dbgs() << " |- " << sba.GetName() << NewL;
+  if (!CheckSimply(root)) {
     if (HasError() || abend_after) return false;
-    auto scev_tab = sba.GetScevTab();
+    return true;
+  }
 
-    if (debug_visit)
-      dbgs() << "\n[legality] start loop vectorization legality check.\n";
-    LoopVectorizeLegalityChecker lvlc(SymTab(), li, scev_tab);
-    lvlc.SetDebugVisit(debug_visit);
-    lvlc.SetTraceVisit(trace_visit);
-    root.accept(lvlc);
+  if (!ComputeVectorizationPlan(root)) {
     if (HasError() || abend_after) return false;
-    if (prt_visitor) dbgs() << " |- " << lvlc.GetName() << NewL;
-    if (!lvlc.HasVectorize()) {
-      if (debug_visit)
-        dbgs() << "[loop vectorization] legality check failed. Skip "
-                  "vectorization.\n";
-      return true;
-    }
+    return true;
+  }
 
-    if (debug_visit) dbgs() << "\n[vinfer] start inferring vector types.\n";
-    VectorTypeInfer vti(SymTab(), li, di);
-    vti.SetDebugVisit(debug_visit);
-    vti.SetTraceVisit(trace_visit);
-    root.accept(vti);
-    if (prt_visitor) dbgs() << " |- " << vti.GetName() << NewL;
+  if (!InferenceType(root)) {
     if (HasError() || abend_after) return false;
+    return true;
+  }
 
-    if (debug_visit) dbgs() << "\n[linearize] start linearization.\n";
-    Linearizer ln(SymTab(), li, di);
-    ln.SetDebugVisit(debug_visit);
-    ln.SetTraceVisit(trace_visit);
-    root.accept(ln);
-    if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
+  if (!LinearizeBranch(root)) {
     if (HasError() || abend_after) return false;
+    return true;
+  }
 
-    BranchSimplicition bs(SymTab());
-    bs.SetDebugVisit(debug_visit);
-    bs.SetTraceVisit(trace_visit);
-    root.accept(bs);
-    if (prt_visitor) dbgs() << " |- " << bs.GetName() << NewL;
+  if (!GenerateMask(root)) {
     if (HasError() || abend_after) return false;
-
-    if (debug_visit) dbgs() << "\n[mask] start geneating masks.\n";
-    MaskGen mg(SymTab(), li, di);
-    mg.SetDebugVisit(debug_visit);
-    mg.SetTraceVisit(trace_visit);
-    root.accept(mg);
-    if (prt_visitor) dbgs() << " |- " << mg.GetName() << NewL;
-    if (HasError() || abend_after) return false;
+    return true;
   }
 
   return true;

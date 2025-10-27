@@ -7,6 +7,7 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+
 namespace Choreo {
 inline static const std::string NoLoopName() { return "no_loop"; }
 
@@ -124,37 +125,46 @@ struct ScopedMaskInfo {
 
 // Loop maps ForeachBlock(Normalized, only has one LoopRange)
 struct Loop {
+private:
   std::string loop_name;
-  std::string iv_name;
-  std::string scope_name; // scope name where the loop is defined
+  std::string scope_name;
+  // note: iv_sym is set once
+  std::string iv_sym;
   ptr<Type> iv_type = nullptr;
+
   ptr<Loop> parent_loop = nullptr;
   std::vector<ptr<Loop>> sub_loops;
-  // scoped mask info, used to track the execution mask in this loop scope
-  // and its child branch scope.
   ptr<ScopedMaskInfo> smi;
-  int vector_width = 1;
-  bool need_vectorize = false;
-  bool can_vectorize = true;
 
-  explicit Loop(std::string n, std::string i, ptr<Type> it,
+  int vector_factor = 1;
+  bool has_vectorization_hint = false;
+  bool need_vectorize = false;
+  bool can_vectorize = false;
+  BaseType data_type = BaseType::UNKNOWN;
+
+public:
+  explicit Loop(std::string n, ptr<Type> it, std::string sn = "",
                 ptr<Loop> p = nullptr, std::vector<ptr<Loop>> subs = {},
                 ptr<ScopedMaskInfo> s = std::make_shared<ScopedMaskInfo>())
-      : loop_name(n), iv_name(i), iv_type(it), parent_loop(p), sub_loops(subs),
-        smi(s) {}
+      : loop_name(n), scope_name(sn), iv_type(it), parent_loop(p),
+        sub_loops(subs), smi(s) {}
 
-  std::string IVName() { return iv_name; }
+  std::string LoopName() { return loop_name; }
+  std::string IVSym() { return iv_sym; }
+  std::string ScopeName() { return scope_name; }
+  void SetIVSym(const std::string& sym) { iv_sym = sym; }
   ptr<Type> GetIVType() { return iv_type; }
   void SetIVType(ptr<Type> ty) { iv_type = ty; }
 
-  int GetVectorWidth() { return vector_width; }
-  bool NeedVectorize() { return need_vectorize; }
-  bool CanVectorize() { return can_vectorize; }
+  ValueItem GetLoopCount() { return GetSingleUpperBound(iv_type); }
 
-  bool operator==(const Loop& other) const {
-    return loop_name == other.loop_name;
-  }
-  bool operator!=(const Loop& other) const { return !(*this == other); }
+  ptr<ScopedMaskInfo> GetScopedMaskInfo() { return smi; }
+  ptr<Loop> GetParentLoop() { return parent_loop; }
+  std::vector<ptr<Loop>> GetSubLoops() { return sub_loops; }
+
+  void SetParentLoop(ptr<Loop> p) { parent_loop = p; }
+  void AddSubLoop(ptr<Loop> sub) { sub_loops.push_back(sub); }
+
   bool HasLoop(const std::string& search_lname) const {
     for (const auto& sub_loop : sub_loops) {
       if (sub_loop->loop_name == search_lname ||
@@ -164,17 +174,33 @@ struct Loop {
     return false;
   }
 
+  int GetVectorFactor() { return vector_factor; }
+  bool HasVectorizationHint() { return has_vectorization_hint; }
+  bool NeedVectorize() { return need_vectorize; }
+  bool CanVectorize() { return can_vectorize; }
+  BaseType GetDataType() { return data_type; }
+
+  void SetVectorFactor(int vf) { vector_factor = vf; }
+  void SetHasVectorizationHint(bool has_hint) {
+    has_vectorization_hint = has_hint;
+  }
+  void SetNeedVectorize(bool need) { need_vectorize = need; }
+  void SetCanVectorize(bool can) { can_vectorize = can; }
+  void SetDataType(BaseType dt) { data_type = dt; }
+
+  bool operator==(const Loop& other) const {
+    return loop_name == other.loop_name;
+  }
+  bool operator!=(const Loop& other) const { return !(*this == other); }
+
   void dump(std::ostream& os, const std::string& prefix = "",
             bool print_scope = false) const {
     os << prefix << loop_name;
     if (print_scope) os << ", " << scope_name;
     os << "\n";
-    for (const auto& sub_loop : sub_loops) {
-      sub_loop->dump(os, prefix + "  ");
-    }
+    auto new_prefix = std::string(prefix.size() + 2, ' ');
+    for (const auto& sub_loop : sub_loops) { sub_loop->dump(os, new_prefix); }
   }
-
-  __UDT_TYPE_INFO_BASE__(Loop)
 };
 
 // scalar evolution expression
@@ -192,7 +218,10 @@ struct SCEV {
     AddRecExpr,
   };
 
-  ptr<Loop> loop;
+protected:
+  ptr<Loop> loop = nullptr;
+
+public:
   SCEV() = default;
   explicit SCEV(ptr<Loop> l) : loop(l) {}
   virtual SCEVType GetType() const = 0;
@@ -205,42 +234,50 @@ struct SCEV {
 };
 
 struct SCEVVal : public SCEV {
+private:
   ValueItem value;
+
+public:
   SCEVVal(ValueItem v, ptr<Loop> l = nullptr) : SCEV(l), value(v) {}
   SCEVType GetType() const override { return Val; }
   std::string ToString() const override { return STR(value); }
   bool IsLoopInVariant(ptr<Loop> l) const override {
     assert(l && "loop cannot be null.");
     if (!loop) return true;
-    return loop->HasLoop(l->loop_name);
+    return loop->HasLoop(l->LoopName());
   }
   ValueItem GetValue() const override { return value; }
   __UDT_TYPE_INFO__(SCEV, SCEVVal)
 };
 
 struct SCEVAddRecExpr : public SCEV {
-  ptr<SCEV> base;
-  ptr<SCEV> step;
+private:
+  ptr<SCEV> base = nullptr;
+  ptr<SCEV> step = nullptr;
+
+public:
   SCEVAddRecExpr(ptr<SCEV> b, ptr<SCEV> s, ptr<Loop> l)
       : SCEV(l), base(b), step(s) {}
   SCEVType GetType() const override { return AddRecExpr; }
   std::string ToString() const override {
     std::ostringstream ss;
     ss << "{" << base->ToString() << ", +, " << step->ToString() << "} <"
-       << loop->loop_name << ">";
+       << loop->LoopName() << ">";
     return ss.str();
   }
   bool IsLoopInVariant(ptr<Loop> l) const override {
     assert(l && loop && "loop cannot be null.");
-    return loop->HasLoop(l->loop_name);
+    return loop->HasLoop(l->LoopName());
   }
-  ValueItem GetStep() const { return dyn_cast<SCEVVal>(step)->GetValue(); }
-  ValueItem GetStepOfLoop(ptr<Loop> l) const {
-    if (loop->loop_name == l->loop_name) {
+  ptr<SCEV> GetBase() const { return base; }
+  ptr<SCEV> GetStep() const { return step; }
+  ValueItem GetStepVal() const { return dyn_cast<SCEVVal>(step)->GetValue(); }
+  ValueItem GetStepValOfLoop(ptr<Loop> l) const {
+    if (loop->LoopName() == l->LoopName()) {
       return dyn_cast<SCEVVal>(step)->GetValue();
     }
     if (auto base_ar = dyn_cast<SCEVAddRecExpr>(base)) {
-      return base_ar->GetStepOfLoop(l);
+      return base_ar->GetStepValOfLoop(l);
     }
     return UncomputableValueItem();
   }
@@ -275,20 +312,32 @@ inline std::string STR(const ptr<SCEV>& scev) {
 }
 
 struct LoopInfo {
+private:
+  // note: iv_sym may be changed if ast-tree is changed, so it may happen that
+  // one same induction variable may can not find its loop through iv2loop map
+  // after some ast transformations.
   std::unordered_map<std::string, std::string>
-      iv2loop; // key: iv name, value: loop name
+      iv2loop; // key: iv sym, value: loop name
   std::unordered_map<std::string, ptr<Loop>>
       loops; // key: loop name, value: loop pointer
+public:
+  void AddLoop(ptr<Loop> loop) {
+    iv2loop[loop->IVSym()] = loop->LoopName();
+    loops[loop->LoopName()] = loop;
+  }
+  std::unordered_map<std::string, ptr<Loop>> GetAllLoops() const {
+    return loops;
+  }
 
   bool IsOuterMostLoop(const std::string& lname) const {
     auto loop = GetLoop(lname);
-    if (loop && !loop->parent_loop) return true;
+    if (loop && !loop->GetParentLoop()) return true;
     return false;
   }
 
   bool IsInnermostLoop(const std::string& lname) const {
     return loops.find(lname) != loops.end() &&
-           loops.at(lname)->sub_loops.empty();
+           loops.at(lname)->GetSubLoops().empty();
   }
 
   ptr<Loop> GetLoop(const std::string& lname) const {
@@ -298,29 +347,35 @@ struct LoopInfo {
     return nullptr;
   }
 
-  ptr<Loop> GetLoopOfIV(const std::string& iv_name) const {
-    if (iv_name == "") return nullptr;
-    if (iv2loop.find(iv_name) == iv2loop.end()) return nullptr;
-    auto loop_name = iv2loop.at(iv_name);
+  ptr<Loop> GetLoopOfIV(const std::string& iv_sym) const {
+    if (iv_sym == "") return nullptr;
+    if (iv2loop.find(iv_sym) == iv2loop.end()) return nullptr;
+    auto loop_name = iv2loop.at(iv_sym);
     return GetLoop(loop_name);
   }
 
   ptr<Loop> GetParentLoop(const std::string& lname) const {
     if (lname == "") return nullptr;
     auto loop = GetLoop(lname);
-    if (loop) { return loop->parent_loop; }
+    if (loop) { return loop->GetParentLoop(); }
     return nullptr;
   }
 
   std::vector<ptr<Loop>> GetSubLoops(const std::string& lname) const {
     if (lname == "") return {};
     auto loop = GetLoop(lname);
-    if (loop) { return loop->sub_loops; }
+    if (loop) { return loop->GetSubLoops(); }
     return {};
   }
 
   void dump(std::ostream& os) {
-    for (const auto& [loop_name, loop] : loops) { loop->dump(os, "", true); }
+    size_t loop_idx = 0;
+    os << "Total loops: " << loops.size() << "\n";
+    for (const auto& [loop_name, loop] : loops) {
+
+      loop->dump(os, "(" + std::to_string(++loop_idx) + ") ", true);
+    }
+    os << "\n";
   }
 };
 } // end namespace Choreo

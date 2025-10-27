@@ -1,0 +1,49 @@
+// RUN: choreo %s --vectorize -es 2>&1 | FileCheck %s
+// RUN: choreo %s -es 2>&1 | FileCheck %s --check-prefix=NO-VEC
+// RUN: choreo %s --vectorize -dvec 2>&1 | FileCheck %s --check-prefix=VEC-CHECK
+#define M 128
+#define N 512
+#define K 100
+__co__ void func() {
+  parallel p by 1 {
+    local s32 [M, N] a;
+    local s32 [M, N] b;
+    foreach index in a.span {
+      a.at(index) = b.at(index);
+    }
+
+    foreach {i, j} in [M, K] {
+      a.at(i, j) = b.at(i, j);
+    }
+  }
+}
+
+
+// CHECK:  for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 128; ++__iv_index__elem__0) {
+// CHECK:    __vector4 unsigned int __vec_iv_index__elem__1_base = (__vector4 unsigned int)(__iv_index__elem__1);
+// CHECK:    __vector4 unsigned int __vec_iv_index__elem__1_plus = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127};
+// CHECK:    __vector4 unsigned int __vec_iv_index__elem__1 = __vec_iv_index__elem__1_base + __vec_iv_index__elem__1_plus;
+// CHECK:    for (__iv_index__elem__1 = 0; __iv_index__elem__1 < 512; __iv_index__elem__1 += 128) {
+// CHECK:      __vector4 int anon_1 = tcle::load<__vector4 int>((__TCLE_AS__ char *)((int*)b + (__iv_index__elem__0 * 512) + __vec_iv_index__elem__1[0]));
+// CHECK:      tcle::store(anon_1, (__TCLE_AS__ char *)((int*)a + (__iv_index__elem__0 * 512) + __vec_iv_index__elem__1[0]));
+// CHECK:      __vec_iv_index__elem__1 += (__vector4 unsigned int)(128);
+// CHECK:    } // index__elem__1
+// CHECK:  } // index__elem__0
+
+// CHECK: for (__iv_i = 0; __iv_i < 128; ++__iv_i) {
+// CHECK:   for (__iv_j = 0; __iv_j < 100; ++__iv_j) {
+// CHECK:     *((int*)a + (__iv_i * 512) + __iv_j) = *((int*)b + (__iv_i * 512) + __iv_j);
+// CHECK:   } // j
+// CHECK: } // i
+
+// NO-VEC: for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 128; ++__iv_index__elem__0) {
+// NO-VEC:   for (__iv_index__elem__1 = 0; __iv_index__elem__1 < 512; ++__iv_index__elem__1) {
+// NO-VEC:     *((int*)a + (__iv_index__elem__0 * 512) + __iv_index__elem__1) = *((int*)b + (__iv_index__elem__0 * 512) + __iv_index__elem__1);
+// NO-VEC:   } // index__elem__1
+// NO-VEC: } // index__elem__0
+
+// VEC-CHECK: [plan] Final vectorization plan:
+// VEC-CHECK:   - Loop `loop4` cannot be vectorized.
+// VEC-CHECK:   - Loop `loop3` cannot be vectorized.
+// VEC-CHECK:   - Loop `loop2` will be vectorized with factor: 128
+// VEC-CHECK:   - Loop `loop1` cannot be vectorized.

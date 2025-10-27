@@ -4,7 +4,7 @@ using namespace Choreo;
 void DiversityInfo::Dump(std::ostream& os) const {
   os << "[diversity] Diversity Shape:\n";
   for (auto& item : shapes)
-    os << "  " << item.first << " : " << STR(item.second) << "\n";
+    os << "    " << item.first << " : " << STR(item.second) << "\n";
 }
 
 DiversityAnalysis::DiversityAnalysis(const ptr<SymbolTable> s_tab,
@@ -14,9 +14,9 @@ DiversityAnalysis::DiversityAnalysis(const ptr<SymbolTable> s_tab,
 }
 
 // we only analyze diversity in vectorized loops(loops with vectorization hint)
-bool DiversityAnalysis::InVectorizedLoop() {
+bool DiversityAnalysis::NeedAnalysis() {
   if (!InLoop()) return false;
-  if (cur_loop->NeedVectorize()) return true;
+  if (li->IsInnermostLoop(cur_loop->LoopName())) return true;
   return false;
 }
 
@@ -85,13 +85,13 @@ DiversityShape DiversityAnalysis::ExprDShape(const ptr<AST::Expr> e) {
 bool DiversityAnalysis::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
 
-  if (!InVectorizedLoop()) return true;
+  if (!NeedAnalysis()) return true;
   DiversityShape shape = n.GetR()->GetDiversityShape();
   if (shape.Unknown()) shape = DiversityShape(DIVERGENT);
   if (!n.GetDiversityShape().ApprxEqual(shape)) {
     if (debug_visit)
-      dbgs() << "cast: `" << STR(n) << "` " << STR(n.GetDiversityShape())
-             << " -> " << STR(shape) << "\n";
+      dbgs() << indent << "cast: `" << STR(n) << "` "
+             << STR(n.GetDiversityShape()) << " -> " << STR(shape) << "\n";
     n.SetDiversityShape(shape);
     changed = true;
   }
@@ -101,13 +101,13 @@ bool DiversityAnalysis::Visit(AST::CastExpr& n) {
 bool DiversityAnalysis::Visit(AST::Expr& n) {
   TraceEachVisit(n);
 
-  if (!InVectorizedLoop()) return true;
+  if (!NeedAnalysis()) return true;
   DiversityShape shape = ExprDShape(AST::Make<AST::Expr>(n));
   if (shape.Unknown()) shape = DiversityShape(DIVERGENT);
   if (!n.GetDiversityShape().ApprxEqual(shape)) {
     if (debug_visit)
-      dbgs() << "expr: `" << STR(n) << "` " << STR(n.GetDiversityShape())
-             << " -> " << STR(shape) << "\n";
+      dbgs() << indent << "expr: `" << STR(n) << "` "
+             << STR(n.GetDiversityShape()) << " -> " << STR(shape) << "\n";
     n.SetDiversityShape(shape);
     changed = true;
   }
@@ -124,7 +124,7 @@ bool DiversityAnalysis::Visit(AST::Expr& n) {
 // and update this NamedVariableDecl node in next iteration.
 bool DiversityAnalysis::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
-  if (!InVectorizedLoop()) {
+  if (!NeedAnalysis()) {
     auto sym = InScopeName(n.name_str);
     di->AssignSymbolShape(sym, DiversityShape(UNIFORM));
     di->AddDefiniteUniformSymbol(sym);
@@ -150,8 +150,9 @@ bool DiversityAnalysis::Visit(AST::NamedVariableDecl& n) {
   }
   if (!n.GetDiversityShape().ApprxEqual(shape)) {
     if (debug_visit)
-      dbgs() << "decl: `" << n.name_str << " = " << STR(n.init_expr) << "` "
-             << STR(n.GetDiversityShape()) << " -> " << STR(shape) << "\n";
+      dbgs() << indent << "decl: `" << n.name_str << " = " << STR(n.init_expr)
+             << "` " << STR(n.GetDiversityShape()) << " -> " << STR(shape)
+             << "\n";
     changed = true;
     n.SetDiversityShape(shape);
   }
@@ -162,7 +163,7 @@ bool DiversityAnalysis::Visit(AST::NamedVariableDecl& n) {
 
 bool DiversityAnalysis::Visit(AST::Identifier& n) {
   TraceEachVisit(n);
-  if (!InVectorizedLoop()) return true;
+  if (!NeedAnalysis()) return true;
 
   auto sym_name = InScopeName(n.name);
   if (di->IsDefinedSymbol(sym_name)) {
@@ -177,7 +178,7 @@ bool DiversityAnalysis::Visit(AST::Identifier& n) {
 
 bool DiversityAnalysis::Visit(AST::DataAccess& n) {
   TraceEachVisit(n);
-  if (!InVectorizedLoop()) return true;
+  if (!NeedAnalysis()) return true;
 
   if (n.AccessElement()) {
     auto indices = n.GetIndices();
@@ -203,7 +204,7 @@ bool DiversityAnalysis::Visit(AST::DataAccess& n) {
 // access.
 bool DiversityAnalysis::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
-  if (!InVectorizedLoop()) {
+  if (!NeedAnalysis()) {
     if (n.IsDecl() && !n.AssignToDataElement()) {
       auto sym = InScopeName(n.da->GetDataName());
       di->AssignSymbolShape(sym, DiversityShape(UNIFORM));
@@ -237,7 +238,7 @@ bool DiversityAnalysis::Visit(AST::Assignment& n) {
     if (di->IsDefinedSymbol(InScopeName(iv_name))) {
       if (di->AssignSymbolShape(InScopeName(iv_name), val_shape)) {
         if (debug_visit)
-          dbgs() << "asgn: `" << PSTR(n.da) << " = " << PSTR(n.value)
+          dbgs() << indent << "asgn: `" << PSTR(n.da) << " = " << PSTR(n.value)
                  << "`, diversity: " << STR(val_shape) << "\n";
         changed = true;
       }
@@ -263,7 +264,7 @@ bool DiversityAnalysis::Visit(AST::Assignment& n) {
 
 bool DiversityAnalysis::Visit(AST::Call& n) {
   TraceEachVisit(n);
-  if (!InVectorizedLoop()) return true;
+  if (!NeedAnalysis()) return true;
 
   auto args = n.GetArguments();
   bool all_uniform = true;
@@ -289,11 +290,11 @@ bool DiversityAnalysis::Visit(AST::WithIn& n) {
 
 bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
-  if (!InVectorizedLoop()) return true;
+  if (!NeedAnalysis()) return true;
   auto lname = SSTab().ScopeName();
   auto loop = n.loop;
   auto iv_ty = loop->GetIVType();
-  auto iv_name = loop->IVName();
+  auto iv_sym = loop->IVSym();
   int stride = 1;
   assert(IsActualBoundedIntegerType(iv_ty));
 
@@ -303,8 +304,7 @@ bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
     stride = bit->GetStride(0);
   }
 
-  if (di->AssignSymbolShape(InScopeName(iv_name),
-                            DiversityShape(STRIDE, sbe::nu(stride)))) {
+  if (di->AssignSymbolShape(iv_sym, DiversityShape(STRIDE, sbe::nu(stride)))) {
     changed = true;
   }
 
@@ -313,7 +313,7 @@ bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
   for (auto item : within_map) {
     if (with_syms.count(item.first) == 0) continue;
     auto ivs = item.second;
-    if (ivs[ivs.size() - 1] == InScopeName(iv_name)) {
+    if (ivs[ivs.size() - 1] == iv_sym) {
       with_found = true;
       with_sym = item.first;
       break;
@@ -335,7 +335,7 @@ bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
 
 bool DiversityAnalysis::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
-  if (!InVectorizedLoop()) return true;
+  if (!NeedAnalysis()) return true;
   auto pred = n.GetPred();
   auto pred_shape = pred->GetDiversityShape();
   auto scope_shape = scope_shapes.top();
@@ -345,7 +345,7 @@ bool DiversityAnalysis::Visit(AST::IfElseBlock& n) {
 }
 
 bool DiversityAnalysis::BeforeAfterVisitImpl(AST::Node& n) {
-  if (InVectorizedLoop()) {
+  if (NeedAnalysis()) {
     if (isa<AST::IfElseBlock>(&n)) {
       assert(!scope_shapes.empty());
       scope_shapes.pop();

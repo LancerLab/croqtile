@@ -18,6 +18,7 @@ private:
   ptr<LoopInfo> li;
   ptr<DiversityInfo> di;
   std::unordered_map<std::string, ptr<Type>> with_types;
+  std::string indent = "    ";
 
   bool Skip(ptr<Type> ty, DiversityShape shape) {
     if (!InLoop()) return true;
@@ -77,7 +78,7 @@ public:
 
     if (!cur_loop->CanVectorize()) return true;
 
-    auto iv_name = cur_loop->IVName();
+    auto iv_sym = cur_loop->IVSym();
     bool with_found = false;
     std::string with_sym;
     ptr<Type> with_ty = nullptr;
@@ -85,7 +86,7 @@ public:
     for (auto item : within_map) {
       if (with_types.count(item.first) == 0) continue;
       auto ivs = item.second;
-      if (ivs[ivs.size() - 1] == InScopeName(iv_name)) {
+      if (ivs[ivs.size() - 1] == iv_sym) {
         with_found = true;
         with_sym = item.first;
         with_ty = with_types[with_sym];
@@ -102,10 +103,11 @@ public:
       auto ub = bit->GetUpperBounds();
       auto s = bit->GetStrides();
       auto widths = bit->GetWidths();
-      widths[widths.size() - 1] = cur_loop->GetVectorWidth();
+      widths[widths.size() - 1] = cur_loop->GetVectorFactor();
       auto vty = MakeBoundedITupleType(lb, ub, s, widths);
       if (debug_visit)
-        dbgs() << "IV:   " << with_sym << ", Type: " << PSTR(vty) << "\n";
+        dbgs() << indent << "IV:   " << with_sym << ", Type: " << PSTR(vty)
+               << "\n";
       AssignSymVType(n.LOC(), with_sym, vty);
     }
 
@@ -114,14 +116,14 @@ public:
     auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
     auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
     auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetStrides();
-    IntegerList widths(iv_ty->Dims(), cur_loop->GetVectorWidth());
+    IntegerList widths(iv_ty->Dims(), cur_loop->GetVectorFactor());
     auto vty = MakeBoundedITupleType(lb, ub, s, widths);
     cur_loop->SetIVType(vty);
 
     if (debug_visit)
-      dbgs() << "IV:   " << InScopeName(cur_loop->IVName())
+      dbgs() << indent << "IV:   " << cur_loop->IVSym()
              << ", Type: " << PSTR(vty) << "\n";
-    AssignSymVType(n.LOC(), InScopeName(cur_loop->IVName()), vty);
+    AssignSymVType(n.LOC(), cur_loop->IVSym(), vty);
 
     return true;
   }
@@ -161,7 +163,7 @@ public:
           auto da_vty = MakeVectorType(ety, ElemCount);
           n.SetType(da_vty);
           if (debug_visit) {
-            dbgs() << "DA:   " << InScopeName(n.GetDataName());
+            dbgs() << indent << "DA:   " << InScopeName(n.GetDataName());
             for (auto& idx : n.GetIndices()) dbgs() << "[" << PSTR(idx) << "]";
             dbgs() << ", Type: " << PSTR(da_vty) << "\n";
           }
@@ -211,7 +213,7 @@ public:
         auto etype = ElementType(lhs_ty);
         rhs->Note().emplace("broadcast", std::to_string(ecount));
         if (debug_visit)
-          dbgs() << "Expr: broadcast `" << STR(rhs)
+          dbgs() << indent << "Expr: broadcast `" << STR(rhs)
                  << "`, type: " << PSTR(MakeVectorType(etype, ecount)) << "\n";
         auto v_ty = MakeVectorType(etype, ecount);
         n.SetType(v_ty);
@@ -221,13 +223,11 @@ public:
         auto etype = ElementType(rhs_ty);
         lhs->Note().emplace("broadcast", std::to_string(ecount));
         if (debug_visit)
-          dbgs() << "Expr: broadcast `" << STR(lhs)
+          dbgs() << indent << "Expr: broadcast `" << STR(lhs)
                  << "`, type:  " << PSTR(MakeVectorType(etype, ecount)) << "\n";
         auto v_ty = MakeVectorType(etype, ecount);
         n.SetType(v_ty);
       } else {
-        dbgs() << "lhs: " << STR(lhs) << ", type: " << PSTR(lhs_ty) << "\n";
-        dbgs() << "rhs: " << STR(rhs) << ", type: " << PSTR(rhs_ty) << "\n";
         choreo_unreachable("at least one operand should be vector type.");
       }
     } else if (n.IsTernary()) {
@@ -265,7 +265,7 @@ public:
       // e.g., a.at[i] = 0;
       else if (from_ds.Uniform() && to_ds.Varying()) {
         from->Note().emplace("broadcast",
-                             std::to_string(cur_loop->GetVectorWidth()));
+                             std::to_string(cur_loop->GetVectorFactor()));
         n.SetType(to_ty);
       } else {
         // varying -> varying
@@ -283,7 +283,7 @@ public:
       if (n.IsDecl()) {
         assert(IsActualVectorType(from_ty));
         if (debug_visit)
-          dbgs() << "Asgn:   " << InScopeName(n.GetName()) << " = "
+          dbgs() << indent << "asgn:   " << InScopeName(n.GetName()) << " = "
                  << STR(n.value) << ", type: " << PSTR(from_ty) << "\n";
         n.SetType(from_ty);
       } else {
@@ -297,9 +297,9 @@ public:
         // broadcast operation
         if (IsActualVectorType(to_ty) && !IsActualVectorType(from_ty)) {
           from->Note().emplace("broadcast",
-                               std::to_string(cur_loop->GetVectorWidth()));
+                               std::to_string(cur_loop->GetVectorFactor()));
           if (debug_visit)
-            dbgs() << "[vinfer][asgn]: broadcast `" << STR(from)
+            dbgs() << indent << "Asgn: broadcast `" << STR(from)
                    << "`, type: " << PSTR(to_ty) << "\n";
         }
         n.SetType(to_ty);
@@ -320,17 +320,17 @@ public:
     ptr<Type> vty = nullptr;
     if (!IsActualVectorType(init_ty)) {
       init_expr->Note().emplace("broadcast",
-                                std::to_string(cur_loop->GetVectorWidth()));
-      vty = MakeVectorType(init_ty->GetBaseType(), cur_loop->GetVectorWidth());
+                                std::to_string(cur_loop->GetVectorFactor()));
+      vty = MakeVectorType(init_ty->GetBaseType(), cur_loop->GetVectorFactor());
       if (debug_visit)
-        dbgs() << "Expr: " << "broadcast `" << PSTR(init_expr)
+        dbgs() << indent << "Expr: " << "broadcast `" << PSTR(init_expr)
                << "`, type: " << PSTR(vty) << "\n";
     } else
       vty = init_ty;
 
     if (debug_visit)
-      dbgs() << "Decl: " << InScopeName(n.name_str) << " = " << STR(init_expr)
-             << ", type: " << PSTR(vty) << "\n";
+      dbgs() << indent << "Decl: " << InScopeName(n.name_str) << " = "
+             << STR(init_expr) << ", type: " << PSTR(vty) << "\n";
     n.SetType(vty);
     AssignSymVType(n.LOC(), InScopeName(n.name_str), vty);
     return true;
@@ -352,12 +352,12 @@ public:
 
     auto vty = nty;
     if (IsScalarBaseType(nty->GetBaseType())) {
-      vty = MakeVectorType(nty->GetBaseType(), cur_loop->GetVectorWidth());
+      vty = MakeVectorType(nty->GetBaseType(), cur_loop->GetVectorFactor());
       n.SetType(vty);
-      n.Note().emplace("widen", std::to_string(cur_loop->GetVectorWidth()));
+      n.Note().emplace("widen", std::to_string(cur_loop->GetVectorFactor()));
     }
     if (debug_visit) {
-      dbgs() << "call:  widen `" << n.function->name << "(";
+      dbgs() << indent << "call:  widen `" << n.function->name << "(";
       size_t i = 0;
       for (auto arg : n.GetArguments()) {
         dbgs() << PSTR(arg);

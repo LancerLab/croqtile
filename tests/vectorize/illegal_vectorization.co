@@ -1,0 +1,14 @@
+// RUN: choreo %s -dvec --vectorize 2>&1 | FileCheck %s
+#define M 128
+#define N 512
+__co__ void func(s32 [M,N] a, s32 [M, N] b) {
+  parallel p by 1 {
+    s32 sum = 0;
+    foreach index = {i, j} in a.span {
+      sum += j;
+    }
+  }
+}
+
+// CHECK: [simplecheck] start loop vectorization simple check.
+// CHECK: variable ::func::paraby_0::paraby_1::sum is used before its assignment in the loop.

@@ -78,9 +78,9 @@ public:
             auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
             auto new_fb =
                 AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
-            auto loop = AST::Make<Loop>(GenerateLoopName(), iv_name, iv_ty);
+            auto loop = std::make_shared<Loop>(GenerateLoopName(), iv_ty,
+                                               SSTab().ScopeName());
             new_fb->loop = loop;
-            loop->scope_name = SSTab().ScopeName();
             loops.push_back(new_fb);
           }
         } else if (fb->ranges->Count() > 1) {
@@ -93,15 +93,15 @@ public:
             auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
             auto new_fb =
                 AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
-            auto loop = AST::Make<Loop>(GenerateLoopName(), rng->IVName(),
-                                        rng->IV()->GetType());
+            auto loop = AST::Make<Loop>(
+                GenerateLoopName(), rng->IV()->GetType(), SSTab().ScopeName());
             new_fb->loop = loop;
             loops.push_back(new_fb);
           }
         } else if (fb->ranges->Count() == 1 && !matcher_map.count(cname)) {
           // single range, single loop
-          auto loop = AST::Make<Loop>(GenerateLoopName(), rng->IVName(),
-                                      rng->IV()->GetType());
+          auto loop =
+              std::make_shared<Loop>(GenerateLoopName(), rng->IV()->GetType());
           fb->loop = loop;
           continue;
         } else {
@@ -1172,10 +1172,11 @@ public:
 
     if (HasError() || abend_after) return false;
     if (!CCtx().NoVectorize()) {
-      LoopChecker lc;
-      root.accept(lc);
-      if (prt_visitor) dbgs() << " |- " << lc.GetName() << NewL;
-      if (CCtx().LoopNorm() || lc.HasVectorization()) {
+      VectorizationHintChecker vhc;
+      root.accept(vhc);
+      if (prt_visitor) dbgs() << " |- " << vhc.GetName() << NewL;
+      if (CCtx().LoopNorm() || CCtx().Vectorize() ||
+          vhc.HasVectorizationHint()) {
         LoopNorm ln;
         if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
         root.accept(ln);
