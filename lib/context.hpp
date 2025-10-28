@@ -341,6 +341,8 @@ private:
   bool loop_norm = false;         // enable loop normalization
   bool no_vectorize = false;      // do not vectorize any foreach loop
   bool vectorize = false;         // enable loop vectorization
+  size_t max_local_mem_capacity =
+      0; // max local memory capacity per thread (0: use default)
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -434,6 +436,7 @@ public:
       }
     }
 
+    case TargetArch::GPU:
     case TargetArch::SM_70:
     case TargetArch::SM_75:
     case TargetArch::SM_80:
@@ -442,6 +445,20 @@ public:
     case TargetArch::SM_90:
     case TargetArch::SM_100: {
       switch (sto) {
+      case Storage::LOCAL: {
+        if (MaxLocalMemCapacity() > 0) { return MaxLocalMemCapacity(); }
+        switch (arch) {
+        case TargetArch::SM_70:
+        case TargetArch::SM_75: return 1024;
+        case TargetArch::SM_80:
+        case TargetArch::SM_86: return 2048;
+        case TargetArch::SM_89: return 3072;
+        case TargetArch::SM_90: return 4096;
+        case TargetArch::SM_100: return 4096;
+        case TargetArch::GPU:
+        default: return 1024;
+        }
+      }
       case Storage::SHARED: return 48ull * 1024; // 48k static
       default: choreo_unreachable("Unsupported mem level.");
       }
@@ -483,6 +500,7 @@ public:
   bool LoopNorm() const { return loop_norm; }
   bool NoVectorize() const { return no_vectorize; }
   bool Vectorize() const { return vectorize; }
+  size_t MaxLocalMemCapacity() const { return max_local_mem_capacity; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -506,6 +524,9 @@ public:
   void SetLoopNorm(bool value) { loop_norm = value; }
   void SetNoVectorize(bool value) { no_vectorize = value; }
   void SetVectorize(bool value) { vectorize = value; }
+  void SetMaxLocalMemCapacityPerThread(size_t sz) {
+    max_local_mem_capacity = sz;
+  }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

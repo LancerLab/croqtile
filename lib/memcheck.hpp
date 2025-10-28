@@ -110,14 +110,20 @@ private:
         for (const auto& inst_set : ct_mem_alloc_inst_sets)
           if (inst_set.count(sto))
             for (const auto& inst : inst_set.at(sto)) oss << "\n\t\t" << inst;
-
-        Error1(n.LOC(),
-               __internal__::GetStringFrom(sto) + " memory OUT OF BOUND!\n\t" +
-                   "In the scope " + SSTab().ScopeName() + ", compile-time " +
-                   __internal__::GetStringFrom(sto) + " memory:\n\tUsed: " +
-                   std::to_string(ct_tot_mem_usage[sto]) +
-                   " bytes, Limit: " + std::to_string(mem_usage_limit[sto]) +
-                   " bytes. With variables:" + oss.str());
+        std::string error_msg =
+            __internal__::GetStringFrom(sto) + " memory OUT OF BOUND!\n\t" +
+            "In the scope " + SSTab().ScopeName() + ", compile-time " +
+            __internal__::GetStringFrom(sto) +
+            " memory:\n\tUsed: " + std::to_string(ct_tot_mem_usage[sto]) +
+            " bytes, Limit: " + std::to_string(mem_usage_limit[sto]) +
+            " bytes. With variables:" + oss.str();
+        if (sto == Storage::LOCAL &&
+            (CCtx().GetTarget() == CompileTarget::CUDA ||
+             CCtx().GetTarget() == CompileTarget::Cute))
+          error_msg +=
+              "\n\tNote: For CUDA/Cute target, the local memory limits can be "
+              "set via `--max-local-mem-capacity` option.";
+        Error1(n.LOC(), error_msg);
       }
     }
   }
@@ -172,6 +178,7 @@ private:
   // display memory occupancy as an integer percentage
   std::string GetCtMemOccupancyRate(Storage sto) {
     std::ostringstream oss;
+    if (mem_usage_limit.count(sto) == 0) return "N/A";
     assert(mem_usage_limit[sto] > 0 &&
            "memory limitation should greater than 0!");
     oss << (size_t)(100.0 * ct_tot_mem_usage[sto] / mem_usage_limit[sto])
@@ -231,6 +238,15 @@ public:
         // initialize max memory we can allocate in byte
         mem_usage_limit[sto] = CCtx().GetMemCapacity(sto);
       }
+    } else if (CCtx().GetTarget() == CompileTarget::CUDA ||
+               CCtx().GetTarget() == CompileTarget::Cute) {
+      valid_storage_type = {Storage::LOCAL, Storage::SHARED};
+      // initialize with ct_tot_mem_usage
+      for (const auto& sto : valid_storage_type) {
+        ct_tot_mem_usage[sto] = 0;
+        // initialize max memory we can allocate in byte
+        mem_usage_limit[sto] = CCtx().GetMemCapacity(sto);
+      }
     } else {
       choreo_unreachable("unsupported target in memory usage check.");
     }
@@ -247,6 +263,8 @@ public:
     auto sty = dyn_cast<SpannedType>(GetSymbolType(n.name_str));
     if (!sty) return true;
     auto sto = sty->GetStorage();
+    if (valid_storage_type.count(sto) == 0)
+      return true; // only check valid storage types
     assert(valid_storage_type.count(sto) &&
            "Only support Storage types in `valid_storage_type`!");
     if (n.Note().count("offset")) {

@@ -221,6 +221,9 @@ int main(int argc, char* argv[]) {
     break;
   }
   case CompileTarget::CUDA: {
+    Choreo::MemUsageCheck muc;
+    if (!muc.RunOnProgram(root)) return muc.Status();
+
     Choreo::CUDA::CUDACodeGen codegen;
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
@@ -228,6 +231,9 @@ int main(int argc, char* argv[]) {
   case CompileTarget::Cute: {
     GPUAdaptor gpu_adaptor;
     if (!gpu_adaptor.RunOnProgram(root)) return gpu_adaptor.Status();
+
+    Choreo::MemUsageCheck muc;
+    if (!muc.RunOnProgram(root)) return muc.Status();
 
     Choreo::Cute::CuteCodeGen codegen(cgp.GetASTInfo());
     if (!codegen.RunOnProgram(root)) return codegen.Status();

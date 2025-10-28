@@ -150,6 +150,10 @@ Option<bool> no_vectorize(OptionKind::Hidden, "--no-vectorize", "-nm", false,
                           "Do not vectorize any foreach loop.");
 Option<bool> vectorize(OptionKind::Hidden, "--vectorize", "-vec", false,
                        "Enable loop vectorization.");
+Option<size_t> max_local_mem_capacity(
+    OptionKind::Hidden, "--max-local-mem-capacity", "-fmax-local", 0,
+    "Set the max local memory capacity (in bytes) per thread. 0 means use "
+    "default value.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -296,6 +300,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
   CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
+  CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);
