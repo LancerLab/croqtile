@@ -393,7 +393,8 @@ detect_device_features() {
     gcu_sim_lib=${script_dir}/../extern/lib/
     gcu_sim_arch=gcusim400
     simulator=${gcu_sim_arch}
-  else
+  fi
+  if [ "$device_type" == "none" ]; then
     echo "can not determine the GCU device type."
     exit 1
   fi
