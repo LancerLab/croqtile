@@ -1,10 +1,10 @@
 // RUN: choreo -gs  -n -t cuda %s | FileCheck --match-full-lines %s
 
-__co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
-  parallel p by 128 {
-    parallel {q} by [128] {
+__co__ void sgemm(f32 [128, 128] lhs, f32 [128, 128] rhs, f32 [128, 128] output) { /// device program
+  parallel p by 32 {
+    parallel {q} by [32] {
     with index = {m_tile, n_tile, k_tile} in [1, 1, 1] {  // decl your tiled spans
-      shared f32[32, 32] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+      shared f32[4, 4] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
       foreach k_tile {
         lhs_load = dma.copy lhs.chunkat(p, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
         rhs_load = dma.copy rhs.chunkat(k_tile, q) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data

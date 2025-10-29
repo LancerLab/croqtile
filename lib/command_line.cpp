@@ -247,7 +247,8 @@ bool CommandLine::Parse(int argc, char** argv) {
       CCtx().SetArch(TargetArch::GCU3);
     else if (CCtx().GetTarget() == CompileTarget::Factor)
       CCtx().SetArch(TargetArch::GCU3);
-    else if (CCtx().GetTarget() == CompileTarget::Cute)
+    else if (CCtx().GetTarget() == CompileTarget::Cute ||
+             CCtx().GetTarget() == CompileTarget::CUDA)
       CCtx().SetArch(TargetArch::SM_86);
     else
       errs() << "No available default Arch value. Compilation abort.\n";
