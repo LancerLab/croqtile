@@ -144,8 +144,9 @@ protected:
   }
 
 public:
-  LateNormBase(const ptr<SymbolTable> s_tab, const std::string& pn)
-      : VisitorWithSymTab(pn, s_tab) {}
+  LateNormBase(const ptr<SymbolTable> s_tab, const std::string& pn,
+               bool ugs = false)
+      : VisitorWithSymTab(pn, s_tab, ugs) {}
   ~LateNormBase() {}
 
   bool Visit(AST::MultiNodes& n) override {
@@ -539,7 +540,7 @@ public:
 struct LateNorm : public LateNormBase {
 public:
   // it requires a symbol table
-  LateNorm(const ptr<SymbolTable> s_tab) : LateNormBase(s_tab, "latenorm") {}
+  LateNorm() : LateNormBase(nullptr, "latenorm", true) {}
 
   using LateNormBase::Visit;
 
@@ -612,7 +613,7 @@ public:
     return true;
   }
 
-  bool RunOnProgram(AST::Node& root) override {
+  bool RunOnProgramImpl(AST::Node& root) override {
     if (!isa<AST::Program>(&root)) {
       Error(root.LOC(), "Not running a choreo program.");
       return false;

@@ -189,8 +189,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     const std::vector<Range>& Values() const { return ranges; }
   };
 
-  LivenessAnalyzer()
-      : VisitorWithSymTab("liveness", CCtx().GetGlobalSymbolTable()) {
+  LivenessAnalyzer() : VisitorWithSymTab("liveness") {
     if (trace_visit) debug_visit = true; // force debug when tracing
     // cause --liveness is enabled by default.
     if (disabled) CCtx().SetLivenessAnalysis(false);

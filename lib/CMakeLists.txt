@@ -76,6 +76,7 @@ set(CORE_SOURCES
   mem_reuse.cpp
   diversity_analysis.cpp
   scalar_evolution.cpp
+  pipeline.cpp
 )
 
 # Define the source files for your codegen library

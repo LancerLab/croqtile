@@ -16,6 +16,7 @@
 #include "memcheck.hpp"
 #include "normalize.hpp"
 #include "options.hpp"
+#include "pipeline.hpp"
 #include "preprocess.hpp"
 #include "scanner.hpp"
 #include "semacheck.hpp"
@@ -26,7 +27,6 @@
 #include "ttrans_topscc.hpp"
 #include "typeinfer.hpp"
 #include "types.hpp"
-#include "verifier.hpp"
 #include "visualize.hpp"
 #include <cstdlib>
 #include <getopt.h>
@@ -105,78 +105,49 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  ASTVerify vf;
-
+  // Initialize the common ast pipeline
+  ASTPipeline pl(CCtx().VerifyVisitors());
   // apply early semantics check without knowing type details
-  EarlySemantics sv;
-  if (!sv.RunOnProgram(root)) return sv.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-
+  pl.AddStage<EarlySemantics>();
   // minor AST change: desugar for canonicalized AST
-  Normalizer ds;
-  if (!ds.RunOnProgram(root)) return ds.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-
-  if (CCtx().GetTarget() != CompileTarget::Topscc) {
-    SymReplace sr;
-    if (!sr.RunOnProgram(root)) return sr.Status();
-    if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-  }
-
+  pl.AddStage<Normalizer>();
+  if (CCtx().GetTarget() == CompileTarget::Factor) pl.AddStage<SymReplace>();
   // perform shape inference of mdspans, future, etc.
-  ShapeInference si;
-  if (!si.RunOnProgram(root)) return si.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-
+  pl.AddStage<ShapeInference>();
   // inference all the unknown types - decls
-  TypeInference ti;
-  if (!ti.RunOnProgram(root)) return ti.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-
-  if (CCtx().ShowInferredTypes() || CCtx().TraceValueNumbers()) return 0;
-
+  pl.AddStage<TypeInference>();
+  pl.AddAction([](ASTPipeline& p) {
+    if (CCtx().ShowInferredTypes() || CCtx().TraceValueNumbers()) p.SetAbend();
+    CCtx().SetGlobalSymbolTable(p.LastSymTab());
+  });
   // late normalize
-  LateNorm ln(ti.SymTab());
-  if (!ln.RunOnProgram(root)) return ln.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
+  pl.AddStage<LateNorm>();
+  pl.AddAction([](ASTPipeline& p) {
+    CCtx().SetGlobalSymbolTable(p.LastSymTab());
 
-  CCtx().SetGlobalSymbolTable(ln.SymTab());
+    // debug: dump the symbol table
+    if (std::getenv("DUMP_SYMTAB") || CCtx().DumpSymtab())
+      CCtx().GetGlobalSymbolTable()->Print(dbgs());
+  });
+  // to visualize the dma
+  if (std::getenv("VISUALIZE") || CCtx().Visualize())
+    pl.AddStageWithPost<Visualizer>([](ASTPipeline& p) { p.SetAbend(); });
 
-  // debug: dump the symbol table
-  if (std::getenv("DUMP_SYMTAB") || CCtx().DumpSymtab())
-    CCtx().GetGlobalSymbolTable()->Print(dbgs());
-
-  if (std::getenv("VISUALIZE") || CCtx().Visualize()) {
-    Visualizer vl;
-    if (!vl.RunOnProgram(root)) return vl.Status();
-    return 0;
-  }
-
+  // early loop vectorizer for the certain target
   if (!CCtx().NoVectorize() && CCtx().GetTarget() == CompileTarget::Topscc) {
-    LoopVectorizer lv;
-    if (!lv.RunOnProgram(root)) return lv.Status();
-    if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-    if (CCtx().TraceVectorize()) return 0;
-
-    CCtx().SetGlobalSymbolTable(lv.SymTab());
+    pl.AddStage<LoopVectorizer>();
+    if (CCtx().TraceVectorize())
+      pl.AddAction([](ASTPipeline& p) { p.SetAbend(); });
+    pl.AddAction(
+        [](ASTPipeline& p) { CCtx().SetGlobalSymbolTable(p.LastSymTab()); });
   }
 
-
-  LivenessAnalyzer la;
-  if (!la.RunOnProgram(root)) return la.Status();
-
-  MemAnalyzer ma;
-  if (!ma.RunOnProgram(root)) return ma.Status();
-  if (CCtx().GetTarget() == CompileTarget::Topscc) {
-    MemReuse mr(la, ma);
-    if (CCtx().MemReuse() && !mr.RunOnProgram(root)) return mr.Status();
-  }
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-
+  if ((CCtx().GetTarget() == CompileTarget::Topscc) && CCtx().MemReuse())
+    pl.AddStage<MemReuse>();
   // apply the semantic check
-  SemaChecker sc;
-  if (!sc.RunOnProgram(root)) return sc.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
+  pl.AddStage<SemaChecker>();
+
+  if (!pl.RunOnProgram(root)) return pl.Status();
 
   // --------- Following passes generate codes -------- //
 

@@ -31,7 +31,7 @@ struct MemAnalyzer : public VisitorWithSymTab {
   std::unordered_map<std::string, std::string> buf_dev_func_name;
   std::set<std::string> event_vars;
 
-  MemAnalyzer() : VisitorWithSymTab("memanlz", CCtx().GetGlobalSymbolTable()) {}
+  MemAnalyzer() : VisitorWithSymTab("memanlz") {}
   ~MemAnalyzer() {}
 
 private:
@@ -44,8 +44,8 @@ private:
 
 struct MemReuse : public VisitorWithSymTab {
 private:
-  const LivenessAnalyzer& la;
-  const MemAnalyzer& ma;
+  LivenessAnalyzer la;
+  MemAnalyzer ma;
 
   int parallel_level = 0;
   int max_parallel_level = 0;
@@ -234,9 +234,7 @@ private:
   };
 
 public:
-  MemReuse(const LivenessAnalyzer& la, const MemAnalyzer& ma)
-      : VisitorWithSymTab("memreuse", CCtx().GetGlobalSymbolTable()), la(la),
-        ma(ma) {
+  MemReuse() : VisitorWithSymTab("memreuse") {
     if (trace_visit) debug_visit = true;
     // TODO: maybe should do the same for other passes.
     if (disabled) CCtx().SetMemReuse(false);
@@ -267,6 +265,7 @@ private:
   bool ValidateResult(const HeapSimulator::Result& res,
                       const HeapSimulator::Chunks& chunks);
   void ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto);
+  bool RunOnProgramImpl(AST::Node& root) override;
 };
 
 } // end namespace Choreo

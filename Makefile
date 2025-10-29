@@ -271,7 +271,7 @@ lines:
 	@echo "test code"; wc -l $$(find tests/ -type f |grep -v "\.test"|grep -v "\.result") | grep total;
 
 format:
-	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp $(RT_DIR)/*.h $(RT_DIR)/*.cpp tests/standalone/*.cu tests/standalone/*.cpp
+	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp $(RT_DIR)/*.h tests/standalone/*.cu $(TOOLS_DIR)/choreo/*.cpp  $(TOOLS_DIR)/copp/*.cpp tests/standalone/*.cpp
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test

@@ -27,7 +27,7 @@ struct VectorizationHintChecker final : public VisitorWithScope {
 
 // LoopAnalysis
 struct LoopAnalysis final : public VisitorWithSymTab {
-  LoopAnalysis();
+  LoopAnalysis(const ptr<SymbolTable>& s_tab);
 
   ptr<LoopInfo> li;
   std::string parent_loop_name = "";
@@ -193,7 +193,7 @@ public:
   LoopVectorizer();
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
-  bool RunOnProgram(AST::Node& root) override;
+  bool RunOnProgramImpl(AST::Node& root) override;
 
   bool CheckVectorizationHint(AST::Node& root);
   bool AnalyzeLoops(AST::Node& root);

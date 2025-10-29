@@ -296,8 +296,8 @@ private:
 
 public:
   Visualizer()
-      : VisitorWithSymTab("visual", CCtx().GetGlobalSymbolTable()),
-        parallel_factor(1), start_x(0), start_y(0) {}
+      : VisitorWithSymTab("visual"), parallel_factor(1), start_x(0),
+        start_y(0) {}
   ~Visualizer() {}
 
   bool Visit(AST::ParallelBy& pb) override {

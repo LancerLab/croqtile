@@ -363,7 +363,7 @@ DiversityAnalysisHandler::DiversityAnalysisHandler(const ptr<SymbolTable> s_tab,
                                                    ptr<LoopInfo> li)
     : LoopVisitor(s_tab, "diversity"), li(li), di(AST::Make<DiversityInfo>()) {}
 
-bool DiversityAnalysisHandler::RunOnProgram(AST::Node& root) {
+bool DiversityAnalysisHandler::RunOnProgramImpl(AST::Node& root) {
   if (!isa<AST::Program>(&root)) {
     Error(root.LOC(), "Not running a choreo program.");
     return false;

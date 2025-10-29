@@ -442,3 +442,15 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
   n.Note().emplace("reuse", spm_name);
   n.Note().emplace("offset", offset);
 }
+
+bool MemReuse::RunOnProgramImpl(AST::Node& root) {
+  if (!CCtx().MemReuse()) return true;
+
+  la.SSTab().UpdateGlobal(SymTab());
+  if (!la.RunOnProgram(root)) return la.Status();
+  ma.SSTab().UpdateGlobal(SymTab());
+  if (!ma.RunOnProgram(root)) return ma.Status();
+
+  root.accept(*this);
+  return true;
+}

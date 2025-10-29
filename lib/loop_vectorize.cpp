@@ -20,9 +20,8 @@ bool VectorizationHintChecker::Visit(AST::ForeachBlock& n) {
 bool VectorizationHintChecker::HasVectorizationHint() const { return has_hint; }
 
 // LoopAnalysis
-LoopAnalysis::LoopAnalysis()
-    : VisitorWithSymTab("loop-analysis", CCtx().GetGlobalSymbolTable()),
-      li(AST::Make<LoopInfo>()) {}
+LoopAnalysis::LoopAnalysis(const ptr<SymbolTable>& s_tab)
+    : VisitorWithSymTab("loop-analysis", s_tab), li(AST::Make<LoopInfo>()) {}
 
 bool LoopAnalysis::BeforeVisitImpl(AST::Node&) { return true; }
 
@@ -861,8 +860,7 @@ bool MaskGen::BeforeAfterVisitImpl(AST::Node& n) {
 }
 
 // LoopVectorizer
-LoopVectorizer::LoopVectorizer()
-    : VisitorWithSymTab("loop", CCtx().GetGlobalSymbolTable()) {}
+LoopVectorizer::LoopVectorizer() : VisitorWithSymTab("loop") {}
 
 bool LoopVectorizer::BeforeVisitImpl(AST::Node&) { return true; }
 bool LoopVectorizer::AfterVisitImpl(AST::Node&) { return true; }
@@ -884,10 +882,10 @@ bool LoopVectorizer::CheckVectorizationHint(AST::Node& root) {
 }
 
 bool LoopVectorizer::AnalyzeLoops(AST::Node& root) {
-  LoopAnalysis la;
+  LoopAnalysis la(SymTab());
   la.SetDebugVisit(debug_visit);
   la.SetTraceVisit(trace_visit);
-  root.accept(la);
+  la.RunOnProgram(root);
   li = la.GetLoopInfo();
   if (debug_visit) li->dump(dbgs());
   if (HasError() || abend_after) return false;
@@ -902,7 +900,7 @@ bool LoopVectorizer::CheckSimply(AST::Node& root) {
   LoopVectorizeSimpleChecker lvc(SymTab(), li);
   lvc.SetDebugVisit(debug_visit);
   lvc.SetTraceVisit(trace_visit);
-  root.accept(lvc);
+  lvc.RunOnProgram(root);
   if (HasError() || abend_after) return false;
   if (!lvc.ExistLoopVectorizationLegal()) {
     if (debug_visit)
@@ -1073,7 +1071,7 @@ bool LoopVectorizer::ComputeVectorizationPlan(AST::Node& root) {
   LoopVectorizationPlanner planner(SymTab(), li, sea, lvc);
   planner.SetDebugVisit(debug_visit);
   planner.SetTraceVisit(trace_visit);
-  root.accept(planner);
+  planner.RunOnProgram(root);
 
   if (!lvc->ExistLoopVectorizationLegal()) {
     if (debug_visit)
@@ -1106,7 +1104,7 @@ bool LoopVectorizer::InferenceType(AST::Node& root) {
   VectorTypeInfer vti(SymTab(), li, di);
   vti.SetDebugVisit(debug_visit);
   vti.SetTraceVisit(trace_visit);
-  root.accept(vti);
+  vti.RunOnProgram(root);
   if (prt_visitor) dbgs() << " |- " << vti.GetName() << NewL;
   if (HasError() || abend_after) return false;
   return true;
@@ -1117,7 +1115,7 @@ bool LoopVectorizer::LinearizeBranch(AST::Node& root) {
   Linearizer ln(SymTab(), li, di);
   ln.SetDebugVisit(debug_visit);
   ln.SetTraceVisit(trace_visit);
-  root.accept(ln);
+  ln.RunOnProgram(root);
   if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
   if (HasError() || abend_after) return false;
 
@@ -1136,14 +1134,14 @@ bool LoopVectorizer::GenerateMask(AST::Node& root) {
   MaskGen mg(SymTab(), li, di);
   mg.SetDebugVisit(debug_visit);
   mg.SetTraceVisit(trace_visit);
-  root.accept(mg);
+  mg.RunOnProgram(root);
   if (prt_visitor) dbgs() << " |- " << mg.GetName() << NewL;
   if (HasError() || abend_after) return false;
   return true;
 }
 
 // main function to run loop auto-vectorization
-bool LoopVectorizer::RunOnProgram(AST::Node& root) {
+bool LoopVectorizer::RunOnProgramImpl(AST::Node& root) {
   // pre-checks
   if (!isa<AST::Program>(&root)) {
     Error1(root.LOC(), "Not running a choreo program.");

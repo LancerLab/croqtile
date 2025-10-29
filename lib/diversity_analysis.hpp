@@ -201,7 +201,7 @@ struct DiversityAnalysisHandler final : public LoopVisitor {
   ptr<DiversityInfo> di;
 
   DiversityAnalysisHandler(const ptr<SymbolTable> s_tab, ptr<LoopInfo> li);
-  bool RunOnProgram(AST::Node& root) override;
+  bool RunOnProgramImpl(AST::Node& root) override;
   ptr<DiversityInfo> GetDiversityAnalysis() const;
 };
 

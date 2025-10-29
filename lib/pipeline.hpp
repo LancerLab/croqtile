@@ -1,0 +1,90 @@
+#ifndef __CHOREO_PIPELINE_HPP__
+#define __CHOREO_PIPELINE_HPP__
+
+#include "ast.hpp"
+#include "verifier.hpp"
+#include "visitor.hpp"
+#include <unordered_map>
+
+namespace Choreo {
+
+class ASTPipeline;
+
+struct PipelineStage {
+  std::unique_ptr<Visitor> v;
+  std::function<bool()> pred = {};
+  std::function<void(ASTPipeline&)> cond_action = {};
+  std::function<void(ASTPipeline&)> action = {};
+  PipelineStage(std::unique_ptr<Visitor> visitor) : v(std::move(visitor)) {};
+  PipelineStage(std::unique_ptr<Visitor>&& visitor,
+                std::function<bool()> p_lambda,
+                std::function<void(ASTPipeline&)> post_lambda = {},
+                std::function<void(ASTPipeline&)> a_lambda = {})
+      : v(std::move(visitor)), pred(p_lambda), cond_action(post_lambda),
+        action(a_lambda) {};
+};
+
+class ASTPipeline {
+private:
+  ASTVerify vf;
+  bool verify; // enable ast verification
+
+  std::vector<PipelineStage> pl;
+
+  ptr<SymbolTable> symtab = nullptr;
+
+  bool abend = false;
+  bool debug = false;
+  int state = 0; // no error
+
+public:
+  ASTPipeline(bool v = false) : verify(v) {}
+
+  void Append(PipelineStage&& ps) {
+    pl.emplace_back(std::move(ps.v), ps.pred, ps.cond_action, ps.action);
+  }
+
+  // This does not require to invoke a visitor
+  // user may provide lambda to abort pipeline conditionally
+  void AddAction(std::function<void(ASTPipeline&)> action) {
+    Append({nullptr, {}, {}, action});
+  }
+
+  template <typename VisitorType>
+  void AddStage() {
+    Append({std::make_unique<VisitorType>()});
+  }
+
+  template <typename VisitorType>
+  void AddStageIf(std::function<bool()> pred) {
+    Append({std::make_unique<VisitorType>(), pred});
+  }
+
+  template <typename VisitorType>
+  void AddStageIfWithPost(std::function<bool()> pred,
+                          std::function<void(ASTPipeline&)> post) {
+    Append({std::make_unique<VisitorType>(), pred, post});
+  }
+
+  template <typename VisitorType>
+  void AddStageWithPost(std::function<void(ASTPipeline&)> post) {
+    Append({std::make_unique<VisitorType>(), {}, post});
+  }
+
+  void SetAbend() { abend = true; }
+
+  int Status() const { return state; }
+
+  const ptr<SymbolTable> LastSymTab() const {
+    if (!symtab) choreo_unreachable("unable to find a valid last symtab.");
+    return symtab;
+  }
+
+  void Dump() const;
+
+  bool RunOnProgram(AST::Node&);
+}; // ASTPipeline
+
+} // end namespace Choreo
+
+#endif // __CHOREO_PIPELINE_HPP__

@@ -66,11 +66,13 @@ public:
   static unsigned anon_type_count;
   static unsigned anon_pb_count;
 
-  void Print(std::ostream& os) {
+  void Print(std::ostream& os) const {
     for (auto item : table)
       os << "symbol: " << item.first
          << ", type: " << STR(*item.second.GetType()) << "\n";
   }
+
+  void Dump() const { Print(dbgs()); }
 };
 
 // TODO(albert): remove this when other utils ready
@@ -155,14 +157,10 @@ class ScopedSymbolTable {
 
   // global symbol table: set it when required
   ptr<SymbolTable> symtab = nullptr;
-  bool manage_symtab = false;
 
 public:
   ScopedSymbolTable(const ptr<SymbolTable>& s_tab) : symtab(s_tab) {
-    if (symtab == nullptr) {
-      symtab = std::make_shared<SymbolTable>();
-      manage_symtab = true;
-    }
+    if (symtab == nullptr) symtab = std::make_shared<SymbolTable>();
   }
 
   ~ScopedSymbolTable() {}
@@ -170,6 +168,7 @@ public:
   // produce the global symbol table
   const ptr<SymbolTable>& GlobalSymbolTable() const { return symtab; }
 
+  void UpdateGlobal(const ptr<SymbolTable>& s_tab) { symtab = s_tab; }
   size_t ScopeDepth() const { return scoped_symtab.size(); }
 
   void EnterScope(const std::string& name = "") {

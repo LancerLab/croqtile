@@ -111,6 +111,7 @@ struct Visitor {
 protected:
   // scoped variable handling
   ScopedSymbolTable scoped_symtab;
+  bool use_global_symtab = false;
 
 protected:
   std::string name;
@@ -131,8 +132,9 @@ protected:
   bool DebugIsEnabled() const { return debug_visit; }
 
 public:
-  Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr)
-      : scoped_symtab(s_tab), name(ToUpper(n)) {
+  Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr,
+          bool ugs = false)
+      : scoped_symtab(s_tab), use_global_symtab(ugs), name(ToUpper(n)) {
     if (name.empty()) choreo_unreachable("a visitor must be named.");
 
     if (AllVisitors.count(name))
@@ -205,7 +207,13 @@ public:
 
   virtual const std::string& GetName() { return name; }
 
-  virtual bool RunOnProgram(AST::Node& root) {
+  virtual bool RunOnProgram(AST::Node& root) final {
+    if (use_global_symtab)
+      scoped_symtab.UpdateGlobal(CCtx().GetGlobalSymbolTable());
+    return RunOnProgramImpl(root);
+  }
+
+  virtual bool RunOnProgramImpl(AST::Node& root) {
     if (!isa<AST::Program>(&root)) {
       Error(root.LOC(), "Not running a choreo program.");
       return false;
@@ -473,8 +481,8 @@ public:
 
 public:
   VisitorWithScope(const std::string& n,
-                   const ptr<SymbolTable>& s_tab = nullptr)
-      : Visitor(n, s_tab) {
+                   const ptr<SymbolTable>& s_tab = nullptr, bool ugs = false)
+      : Visitor(n, s_tab, ugs) {
     Reset();
   }
   ~VisitorWithScope() {}
@@ -587,8 +595,12 @@ public:
   }
 
 public:
-  VisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab)
-      : VisitorWithScope(n, s_tab) {}
+  VisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab,
+                    bool ugs = false)
+      : VisitorWithScope(n, s_tab, ugs) {}
+  // utilize the global symbol table
+  VisitorWithSymTab(const std::string& n)
+      : VisitorWithScope(n, nullptr, true) {}
   ~VisitorWithSymTab() {}
 };
 
@@ -596,6 +608,7 @@ struct TracedVisitorWithSymTab : public VisitorWithSymTab {
 public:
   TracedVisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab)
       : VisitorWithSymTab(n, s_tab) {}
+  TracedVisitorWithSymTab(const std::string& n) : VisitorWithSymTab(n) {}
   ~TracedVisitorWithSymTab() {}
 
 public:
@@ -883,6 +896,8 @@ protected:
 public:
   LoopVisitor(const ptr<SymbolTable> s_tab, const std::string& pn)
       : VisitorWithSymTab(pn, s_tab), cur_loop(nullptr) {}
+  LoopVisitor(const std::string& pn)
+      : VisitorWithSymTab(pn), cur_loop(nullptr) {}
 };
 
 } // end namespace Choreo

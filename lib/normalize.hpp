@@ -1160,7 +1160,7 @@ public:
   bool Visit(AST::ChoreoFunction&) override { return true; }
   bool Visit(AST::CppSourceCode&) override { return true; }
   bool Visit(AST::Program&) override { return true; }
-  bool RunOnProgram(AST::Node& root) override {
+  bool RunOnProgramImpl(AST::Node& root) override {
     if (!isa<AST::Program>(&root)) {
       Error(root.LOC(), "Not running a choreo program.");
       return false;

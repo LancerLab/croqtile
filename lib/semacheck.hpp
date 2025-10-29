@@ -32,8 +32,7 @@ private:
                      const ptr<AST::Node>&);
 
 public:
-  SemaChecker()
-      : TracedVisitorWithSymTab("check", CCtx().GetGlobalSymbolTable()) {
+  SemaChecker() : TracedVisitorWithSymTab("check") {
     if (CCtx().GetTarget() == CompileTarget::CUDA) allow_auto_threading = true;
   }
   ~SemaChecker() {}
