@@ -128,14 +128,19 @@ bool CuteCodeGen::RequiresImplPred(Storage cur) const {
 }
 
 const std::string CuteCodeGen::ShapeSTR(const Shape& s, bool shp_lit,
-                                        const std::string& delimiter) const {
+                                        const std::string& delimiter,
+                                        BaseType cast_to) const {
   auto& vl = s.Value();
   assert(!vl.empty());
 
   std::ostringstream oss;
   for (unsigned i = 0; i < vl.size(); ++i) {
     if (i > 0) oss << delimiter;
-    oss << ValueSTR(vl[i], ", ", shp_lit);
+    bool need_static_cast = (cast_to != BaseType::UNKNOWN && !VIIsInt(vl[i]));
+    if (need_static_cast)
+      oss << "static_cast<" << NameBaseType(cast_to) << ">(";
+    oss << ValueSTR(vl[i], false, shp_lit);
+    if (need_static_cast) oss << ")";
   }
   return oss.str();
 }
@@ -696,7 +701,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         std::string sym_data = sym + ".data()";
         hs << h_indent << "auto " << sym
            << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
-           << shape.Rank() << ">({" << ShapeSTR(shape) << "});\n";
+           << shape.Rank() << ">({"
+           << ShapeSTR(shape, false, ", ", BaseType::U64) << "});\n";
         if (n.init_value) {
           // support initialization of output
           hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
@@ -1354,11 +1360,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // return mds name and the declaration string.
   // If offset is not empty, means that need to do memory viewing.
   //   Just add offset to buf_expr, then utilize new_shape.
-  auto GenTensorDecl =
-      [this](const std::string& buf_name, const std::string& buf_expr,
-             const Storage sto, BaseType bty, const Shape& shp,
-             const std::string& offset = "", const std::string& strides = "",
-             const std::vector<size_t>& transp = {})
+  auto GenTensorDecl = [this](const std::string& buf_name,
+                              [[maybe_unused]] const std::string& buf_expr,
+                              const Storage sto, BaseType bty, const Shape& shp,
+                              const std::string& offset = "",
+                              const std::string& strides = "",
+                              const std::vector<size_t>& transp = {})
       -> std::pair<std::string, std::string> {
     static int shp_cnt = 0;
     shp_cnt++;
@@ -1456,10 +1463,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     auto f_stride = GenStrides(f_ca, transp_config);
     auto t_stride = GenStrides(t_ca);
-
     const auto f_mds = GenTensorDecl(
         f_buf_name, f_buf_expr, f_sty->GetStorage(), f_sty->ElementType(),
-        fty->GetShape(), f_mds_offset, ValueSTR(f_stride, false, true));
+        (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape()),
+        f_mds_offset, ValueSTR(f_stride, false, true));
     const auto t_mds = GenTensorDecl(
         t_buf_name, t_buf_expr, t_sty->GetStorage(), t_sty->ElementType(),
         fty->GetShape(), t_mds_offset, ValueSTR(t_stride, false, true));
@@ -1493,6 +1500,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       VerboseDMA(ds, d_indent, t_sym, f_sym, n.operation.substr(1), "", 1,
                  ", line " + std::to_string(n.LOC().begin.line));
     } else if (n.operation == ".pad") {
+      static int pad_cnt = 0;
+      auto pad_config = cast<PadConfig>(n.GetConfig());
+
       auto pcmvSTR = [&](ptr<AST::MultiValues> mv) -> std::string {
         std::string res;
         for (const auto& v : mv->AllValues()) {
@@ -1501,62 +1511,40 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         }
         return res;
       };
-      auto pad_config = cast<PadConfig>(n.GetConfig());
-      ds << d_indent << "unsigned int __pad_low_" << f_buf_name << "[] = {"
-         << pcmvSTR(pad_config->pad_low) << "};\n";
-      ds << d_indent << "unsigned int __pad_high_" << f_buf_name << "[] = {"
-         << pcmvSTR(pad_config->pad_high) << "};\n";
-      ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
-         << pcmvSTR(pad_config->pad_mid) << "};\n";
 
-      auto Pad = [&]() -> void {
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
-           << ", __pad_mid_" << f_buf_name << ", "
-           << ExprSTR(pad_config->value, IsHost()) << ");\n";
-        // set the device future
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
+      ds << d_indent << "cute::fill(" << t_mds_name << ", "
+         << ExprSTR(pad_config->GetPadValue(), IsHost()) << ");\n";
+      std::string pad_offset = "__pad_offset" + std::to_string(pad_cnt);
+      ds << d_indent << "auto " << pad_offset << " = " << t_mds_name
+         << ".layout()(" << "cute::make_coord(" << pcmvSTR(pad_config->pad_low)
+         << "));\n";
+      const auto t_pad_mds = GenTensorDecl(
+          t_buf_name, f_buf_expr, t_sty->GetStorage(), t_sty->ElementType(),
+          f_ca->GetBlockShape(), pad_offset, ValueSTR(t_stride, false, true));
+      std::string t_pad_mds_name{t_pad_mds.first};
+      std::string t_pad_mds_decl{t_pad_mds.second};
+      ds << t_pad_mds_decl;
 
-      auto SlicePad = [&]() -> void {
-        static int s_cnt = 0;
-        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                        f_sym + "_2_" + t_sym;
-        auto [offset, offcnt] = GenMdsOffset(f_ca);
-        VerboseDMA(ds, d_indent, t_sym, f_sym, "slice+pad", offset, offcnt,
-                   ", line " + std::to_string(n.LOC().begin.line));
-        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-        auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
-                                f_sym + "_2_" + t_sym;
-        ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-           << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ", " << slice_shape_name << ", __pad_low_"
-           << f_buf_name << ", __pad_high_" << f_buf_name << ", __pad_mid_"
-           << f_buf_name << ", " << ExprSTR(pad_config->value, IsHost())
-           << ");\n";
-        // set the device future
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      };
-
-      if (SymbolToSymbol()) {
-        Pad();
-      } else if (TileToSymbol()) {
-        SlicePad();
+      if (fty->IsAsync()) {
+        ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
+           << ".get_atom(), " << f_mds_name << ", " << t_pad_mds_name << ");\n";
+        ds << d_indent << "cute::cp_async_fence();\n";
+        ds << d_indent << future_name << ".trigger();\n";
       } else {
-        choreo_unreachable(
-            "only support dma.pad with (symbol=>symbol), (tile=>symbol).");
+        ds << d_indent << "opt_copy(" << f_mds_name << ", " << t_pad_mds_name
+           << ");\n";
       }
+
+      ++pad_cnt;
+
+      VerboseDMA(ds, d_indent, t_sym, f_sym, n.operation.substr(1), "", 1,
+                 ", line " + std::to_string(n.LOC().begin.line));
+
+      // TODO: support pad_mid
+      for (const auto& v : pad_config->pad_mid->AllValues())
+        if (auto il = AST::GetIntLiteral(v); !il || il->Val() != 0)
+          choreo_unreachable("only dma.pad with pad_mid set to 0 are supported "
+                             "for CuTe backend.");
     }
 
     if (n.GetLevel() == Storage::SHARED) {

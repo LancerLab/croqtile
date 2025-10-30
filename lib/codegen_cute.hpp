@@ -430,7 +430,8 @@ private:
   const ValueList GenStrides(const ptr<AST::ChunkAt>&,
                              const std::vector<size_t>& = {}) const;
   const std::string ShapeSTR(const Shape&, bool = false,
-                             const std::string& = ", ") const;
+                             const std::string& = ", ",
+                             BaseType cast_to = BaseType::UNKNOWN) const;
   const std::string ReShapeSTR(const Shape&, const std::vector<size_t>&,
                                bool = false, const std::string& = ", ") const;
   const std::string SSMName(const std::string& sname, bool is_host) const {
