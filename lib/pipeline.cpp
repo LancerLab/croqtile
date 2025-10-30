@@ -21,7 +21,7 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
       if (ps.v) {
         if (!ps.v->RunOnProgram(root)) {
           state = ps.v->Status();
-          if (state != 0) return false; // abend immediately
+          return false; // abend immediately
         }
         symtab = ps.v->SymTab();
         // TODO: force abend when failing on verifiers
