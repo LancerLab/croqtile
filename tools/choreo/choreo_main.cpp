@@ -6,28 +6,15 @@
 #include "codegen_prepare.hpp"
 #include "codegen_topscc.hpp"
 #include "command_line.hpp"
-#include "earlysema.hpp"
 #include "gcucheck.hpp"
 #include "gpuadapt.hpp"
-#include "latenorm.hpp"
-#include "liveness_analysis.hpp"
-#include "loop_vectorize.hpp"
-#include "mem_reuse.hpp"
 #include "memcheck.hpp"
-#include "normalize.hpp"
 #include "options.hpp"
 #include "pipeline.hpp"
 #include "preprocess.hpp"
 #include "scanner.hpp"
-#include "semacheck.hpp"
-#include "shapeinfer.hpp"
-#include "sym_replace.hpp"
-#include "symtab.hpp"
 #include "ttrans_factor.hpp"
 #include "ttrans_topscc.hpp"
-#include "typeinfer.hpp"
-#include "types.hpp"
-#include "visualize.hpp"
 #include <cstdlib>
 #include <getopt.h>
 
@@ -105,47 +92,7 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // Initialize the common ast pipeline
-  ASTPipeline pl(CCtx().VerifyVisitors());
-  // apply early semantics check without knowing type details
-  pl.AddStage<EarlySemantics>();
-  // minor AST change: desugar for canonicalized AST
-  pl.AddStage<Normalizer>();
-  if (CCtx().GetTarget() == CompileTarget::Factor) pl.AddStage<SymReplace>();
-  // perform shape inference of mdspans, future, etc.
-  pl.AddStage<ShapeInference>();
-  // inference all the unknown types - decls
-  pl.AddStage<TypeInference>();
-  pl.AddAction([](ASTPipeline& p) {
-    if (CCtx().ShowInferredTypes() || CCtx().TraceValueNumbers()) p.SetAbend();
-    CCtx().SetGlobalSymbolTable(p.LastSymTab());
-  });
-  // late normalize
-  pl.AddStage<LateNorm>();
-  pl.AddAction([](ASTPipeline& p) {
-    CCtx().SetGlobalSymbolTable(p.LastSymTab());
-
-    // debug: dump the symbol table
-    if (std::getenv("DUMP_SYMTAB") || CCtx().DumpSymtab())
-      CCtx().GetGlobalSymbolTable()->Print(dbgs());
-  });
-  // to visualize the dma
-  if (std::getenv("VISUALIZE") || CCtx().Visualize())
-    pl.AddStageWithPost<Visualizer>([](ASTPipeline& p) { p.SetAbend(); });
-
-  // early loop vectorizer for the certain target
-  if (!CCtx().NoVectorize() && CCtx().GetTarget() == CompileTarget::Topscc) {
-    pl.AddStage<LoopVectorizer>();
-    if (CCtx().TraceVectorize())
-      pl.AddAction([](ASTPipeline& p) { p.SetAbend(); });
-    pl.AddAction(
-        [](ASTPipeline& p) { CCtx().SetGlobalSymbolTable(p.LastSymTab()); });
-  }
-
-  if ((CCtx().GetTarget() == CompileTarget::Topscc) && CCtx().MemReuse())
-    pl.AddStage<MemReuse>();
-  // apply the semantic check
-  pl.AddStage<SemaChecker>();
+  auto& pl = ASTPipeline::GetInstance().PlanSemanticRoutine();
 
   if (!pl.RunOnProgram(root)) return pl.Status();
 

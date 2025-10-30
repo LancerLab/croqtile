@@ -4,6 +4,7 @@
 #include "ast.hpp"
 #include "verifier.hpp"
 #include "visitor.hpp"
+#include <mutex>
 #include <unordered_map>
 
 namespace Choreo {
@@ -27,7 +28,6 @@ struct PipelineStage {
 class ASTPipeline {
 private:
   ASTVerify vf;
-  bool verify; // enable ast verification
 
   std::vector<PipelineStage> pl;
 
@@ -38,7 +38,7 @@ private:
   int state = 0; // no error
 
 public:
-  ASTPipeline(bool v = false) : verify(v) {}
+  ASTPipeline() {}
 
   void Append(PipelineStage&& ps) {
     pl.emplace_back(std::move(ps.v), ps.pred, ps.cond_action, ps.action);
@@ -83,6 +83,17 @@ public:
   void Dump() const;
 
   bool RunOnProgram(AST::Node&);
+
+  // contains normal visitors
+  ASTPipeline& PlanSemanticRoutine();
+  ASTPipeline& PlanCodeGenRountine(CompileTarget);
+
+private:
+  static std::once_flag init_flag;
+  static std::unique_ptr<ASTPipeline> instance;
+
+public:
+  static ASTPipeline& GetInstance();
 }; // ASTPipeline
 
 } // end namespace Choreo

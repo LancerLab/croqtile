@@ -1,5 +1,5 @@
-#ifndef __CHOREO_UTILITY_HPP__
-#define __CHOREO_UTILITY_HPP__
+#ifndef __CHOREO_INFRA_UTILITY_HPP__
+#define __CHOREO_INFRA_UTILITY_HPP__
 
 #include "io.hpp"
 
@@ -141,4 +141,4 @@ ptr<T> cast_dbg(const ptr<U>& n) {
 }
 } // end namespace Choreo
 
-#endif // __CHOREO_UTILITY_HPP__
+#endif // __CHOREO_INFRA_UTILITY_HPP__

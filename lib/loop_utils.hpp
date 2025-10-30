@@ -1,9 +1,9 @@
 #ifndef __CHOREO_MASK_GEN_HPP__
 #define __CHOREO_MASK_GEN_HPP__
 
+#include "infra_utils.hpp"
 #include "io.hpp"
 #include "types.hpp"
-#include "utils.hpp"
 #include <ostream>
 #include <string>
 #include <unordered_map>

@@ -3,10 +3,10 @@
 
 #include "ast.hpp"
 #include "context.hpp"
+#include "infra_utils.hpp"
 #include "loop_utils.hpp"
 #include "symbexpr.hpp"
 #include "symvals.hpp"
-#include "utils.hpp"
 #include "visitor.hpp"
 #include <ostream>
 #include <stack>

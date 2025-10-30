@@ -10,7 +10,7 @@
 #include "types.hpp"
 #include "visitor.hpp"
 
-extern Option<bool> use_hetero_tileflow;
+extern Choreo::Option<bool> use_hetero_tileflow;
 
 namespace Choreo {
 

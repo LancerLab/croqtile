@@ -15,7 +15,7 @@ enum class CompileTarget;
 
 #include "aux.hpp"
 #include "context.hpp"
-#include "utils.hpp"
+#include "infra_utils.hpp"
 
 namespace Choreo {
 

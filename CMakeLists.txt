@@ -52,8 +52,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Define package version
-# set(CHOREO_PACKAGE_VERSION "core" CACHE STRING "Choose the package version: standalone or core")
+# Find threads package
+find_package(Threads REQUIRED)
+
 
 # use ccache if exists
 find_program(CCACHE_PROGRAM ccache)
@@ -94,17 +95,19 @@ option(ENABLE_CUTE "Enable CUTE/CUTLASS support (requires CUDA)" ON)
 set(DEFAULT_CUDA_HOME "/usr/local/cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
 
 # Find CUDA package to get version info
-find_package(CUDAToolkit REQUIRED)
+find_package(CUDAToolkit)
 
-set(_cuda_with_cute4_support TRUE)
-set(DEFAULT_CUTE_HOME "")
-# Determine CUTLASS path based on CUDA version
-if(CUDAToolkit_VERSION VERSION_LESS 12.0)
-	# CUDA 11.x or earlier
-  set(_cuda_with_cute4_support FALSE)
-else()
-	# CUDA 12.x or later
-	set(DEFAULT_CUTE_HOME "${CMAKE_SOURCE_DIR}/extern/cutlass")
+if(CUDAToolkit_FOUND)
+  set(_cuda_with_cute4_support TRUE)
+  set(DEFAULT_CUTE_HOME "")
+  # Determine CUTLASS path based on CUDA version
+  if(CUDAToolkit_VERSION VERSION_LESS 12.0)
+    # CUDA 11.x or earlier
+    set(_cuda_with_cute4_support FALSE)
+  else()
+    # CUDA 12.x or later
+    set(DEFAULT_CUTE_HOME "${CMAKE_SOURCE_DIR}/extern/cutlass")
+  endif()
 endif()
 
 set(CUDA_HOME "")
@@ -314,6 +317,7 @@ target_link_libraries(choreo PRIVATE
   support
   pp
   ${EXTERN_LIBS}
+  Threads::Threads
 )
 
 target_link_libraries(copp PRIVATE
@@ -323,6 +327,7 @@ target_link_libraries(copp PRIVATE
   support
   pp
   ${EXTERN_LIBS}
+  Threads::Threads
 )
 
 # choreo sdk library

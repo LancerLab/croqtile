@@ -6,8 +6,8 @@
 #include <unordered_set>
 
 #include "ast.hpp"
+#include "infra_utils.hpp"
 #include "loc.hpp"
-#include "utils.hpp"
 
 namespace Choreo {
 

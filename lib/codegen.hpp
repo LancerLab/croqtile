@@ -5,13 +5,11 @@
 #include <thread>
 
 #include "memcheck.hpp"
+#include "target_utils.hpp"
 #include "valbind.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
-
-extern Storage GCUDeviceParallelLevel(int);
-extern int GCUDeviceParallelDepth(Storage);
 
 struct SymbolDetail {
   // information from choreo code

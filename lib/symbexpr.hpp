@@ -2,8 +2,8 @@
 #define __CHOREO_SYMBOLIC_EXPRESSION_HPP__
 
 #include "aux.hpp"
+#include "infra_utils.hpp"
 #include "options.hpp"
-#include "utils.hpp"
 #include <cmath>
 #include <functional>
 #include <iostream>

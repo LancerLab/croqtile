@@ -8,13 +8,11 @@
 
 #include "loop_vectorize.hpp"
 #include "symtab.hpp"
+#include "target_utils.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
-
-extern int GCUDeviceParallelDepth(Storage);
-extern Storage GCUDeviceParallelLevel(int);
 
 inline int TargetDepth(Storage s) {
   if (CCtx().GetTarget() == CompileTarget::Topscc)
