@@ -1,20 +1,9 @@
 #include "ast.hpp"
-#include "codegen.hpp"
-#include "codegen_cuda.hpp"
-#include "codegen_cute.hpp"
-#include "codegen_factor.hpp"
-#include "codegen_prepare.hpp"
-#include "codegen_topscc.hpp"
 #include "command_line.hpp"
-#include "gcucheck.hpp"
-#include "gpuadapt.hpp"
-#include "memcheck.hpp"
 #include "options.hpp"
 #include "pipeline.hpp"
 #include "preprocess.hpp"
 #include "scanner.hpp"
-#include "ttrans_factor.hpp"
-#include "ttrans_topscc.hpp"
 #include <cstdlib>
 #include <getopt.h>
 
@@ -92,75 +81,9 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  auto& pl = ASTPipeline::GetInstance().PlanSemanticRoutine();
+  auto& pl = ASTPipeline::Get().PlanAllRoutines();
 
   if (!pl.RunOnProgram(root)) return pl.Status();
-
-  // --------- Following passes generate codes -------- //
-
-  if (CCtx().NoCodegen()) return 0; // do not generate code
-
-  // collect information for codegen
-  CodegenPrepare cgp;
-  if (!cgp.RunOnProgram(root)) return cgp.Status();
-
-  switch (CCtx().GetTarget()) {
-  case CompileTarget::Factor: {
-    // apply the gcu specific checking
-    GCUCheck gcu_checker;
-    if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
-
-    FactorTrans trans;
-    if (!trans.RunOnProgram(root)) return trans.Status();
-
-    MemUsageCheck mem_usage_checker;
-    if (!mem_usage_checker.RunOnProgram(root))
-      return mem_usage_checker.Status();
-
-    Choreo::Factor::FactorCodeGen codegen(cgp.GetASTInfo());
-    if (!codegen.RunOnProgram(root)) return codegen.Status();
-    break;
-  }
-  case CompileTarget::Topscc: {
-    // apply GCU specific checks
-    GCUCheck gcu_checker;
-    if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
-
-#if 0
-    TopsccTrans trans;
-    if (!trans.RunOnProgram(root)) return trans.Status();
-#endif
-
-    MemUsageCheck muc;
-    if (!muc.RunOnProgram(root)) return muc.Status();
-
-    Choreo::Topscc::TopsccCodeGen codegen(cgp.GetASTInfo());
-    if (!codegen.RunOnProgram(root)) return codegen.Status();
-    break;
-  }
-  case CompileTarget::CUDA: {
-    Choreo::MemUsageCheck muc;
-    if (!muc.RunOnProgram(root)) return muc.Status();
-
-    Choreo::CUDA::CUDACodeGen codegen;
-    if (!codegen.RunOnProgram(root)) return codegen.Status();
-    break;
-  }
-  case CompileTarget::Cute: {
-    GPUAdaptor gpu_adaptor;
-    if (!gpu_adaptor.RunOnProgram(root)) return gpu_adaptor.Status();
-
-    Choreo::MemUsageCheck muc;
-    if (!muc.RunOnProgram(root)) return muc.Status();
-
-    Choreo::Cute::CuteCodeGen codegen(cgp.GetASTInfo());
-    if (!codegen.RunOnProgram(root)) return codegen.Status();
-    break;
-  }
-  default:
-    errs() << "Invalid target: '" << STR(CCtx().GetTarget()) << "'\n";
-    return 1;
-  }
 
   return 0;
 }

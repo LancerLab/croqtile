@@ -113,6 +113,8 @@ protected:
   ScopedSymbolTable scoped_symtab;
   bool use_global_symtab = false;
 
+  std::string lvl_pfx;
+
 protected:
   std::string name;
   bool trace_visit = false;
@@ -207,11 +209,10 @@ public:
 
   virtual const std::string& GetName() { return name; }
 
-  virtual bool RunOnProgram(AST::Node& root) final {
-    if (use_global_symtab)
-      scoped_symtab.UpdateGlobal(CCtx().GetGlobalSymbolTable());
-    return RunOnProgramImpl(root);
-  }
+  virtual void SetLevelPrefix(const std::string& pfx) { lvl_pfx = pfx; }
+  const std::string LevelPrefix() { return lvl_pfx; }
+
+  virtual bool RunOnProgram(AST::Node& root) = 0;
 
   virtual bool RunOnProgramImpl(AST::Node& root) {
     if (!isa<AST::Program>(&root)) {
@@ -219,7 +220,7 @@ public:
       return false;
     }
 
-    if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
+    if (prt_visitor) dbgs() << LevelPrefix() << "|- " << GetName() << NewL;
 
     if (!disabled) root.accept(*this);
 
@@ -497,6 +498,12 @@ public:
 
   virtual const std::string GetScope(const std::string& name) const {
     return scoped_symtab.GetScope(name);
+  }
+
+  bool RunOnProgram(AST::Node& root) final {
+    if (use_global_symtab)
+      scoped_symtab.UpdateGlobal(CCtx().GetGlobalSymbolTable());
+    return RunOnProgramImpl(root);
   }
 
 public:
@@ -899,6 +906,84 @@ public:
   LoopVisitor(const std::string& pn)
       : VisitorWithSymTab(pn), cur_loop(nullptr) {}
 };
+
+class VisitorGroup : public Visitor {
+private:
+  std::vector<Visitor*> members;
+
+public:
+  VisitorGroup();
+
+  template <typename... Visitors>
+  VisitorGroup(const std::string& n, Visitors&... visitors)
+      : Visitor(n, nullptr, false) {
+    (members.push_back(&visitors), ...); // C++17 fold expression
+  }
+
+  //  VisitorGroup(const std::string& n) :  Visitor(n, nullptr, false) {}
+  bool RunOnProgram(AST::Node& root) final {
+    if (prt_visitor) dbgs() << LevelPrefix() << "|-+- " << GetName() << NewL;
+    // Run in sequence
+    for (auto& v : members) {
+      v->SetLevelPrefix("  ");
+      if (!v->RunOnProgram(root)) return false;
+    }
+    return true;
+  }
+
+private:
+  // disable the interfaces
+  bool InMidVisit(AST::Node&) final { return true; }
+  bool Visit(AST::MultiNodes&) final { return true; }
+  bool Visit(AST::MultiValues&) final { return true; }
+  bool Visit(AST::NoValue&) final { return true; }
+  bool Visit(AST::IntLiteral&) final { return true; }
+  bool Visit(AST::FloatLiteral&) final { return true; }
+  bool Visit(AST::StringLiteral&) final { return true; }
+  bool Visit(AST::BoolLiteral&) final { return true; }
+  bool Visit(AST::Expr&) final { return true; }
+  bool Visit(AST::CastExpr&) final { return true; }
+  bool Visit(AST::AttributeExpr&) final { return true; }
+  bool Visit(AST::MultiDimSpans&) final { return true; }
+  bool Visit(AST::NamedTypeDecl&) final { return true; }
+  bool Visit(AST::NamedVariableDecl&) final { return true; }
+  bool Visit(AST::IntTuple&) final { return true; }
+  bool Visit(AST::DataAccess&) final { return true; }
+  bool Visit(AST::Assignment&) final { return true; }
+  bool Visit(AST::IntIndex&) final { return true; }
+  bool Visit(AST::DataType&) final { return true; }
+  bool Visit(AST::Identifier&) final { return true; }
+  bool Visit(AST::Parameter&) final { return true; }
+  bool Visit(AST::ParamList&) final { return true; }
+  bool Visit(AST::ParallelBy&) final { return true; }
+  bool Visit(AST::WhereBind&) final { return true; }
+  bool Visit(AST::WithIn&) final { return true; }
+  bool Visit(AST::WithBlock&) final { return true; }
+  bool Visit(AST::Memory&) final { return true; }
+  bool Visit(AST::SpanAs&) final { return true; }
+  bool Visit(AST::DMA&) final { return true; }
+  bool Visit(AST::ChunkAt&) final { return true; }
+  bool Visit(AST::Wait&) final { return true; }
+  bool Visit(AST::Trigger&) final { return true; }
+  bool Visit(AST::Break&) final { return true; }
+  bool Visit(AST::Continue&) final { return true; }
+  bool Visit(AST::Call&) final { return true; }
+  bool Visit(AST::Rotate&) final { return true; }
+  bool Visit(AST::Synchronize&) final { return true; }
+  bool Visit(AST::Select&) final { return true; }
+  bool Visit(AST::Return&) final { return true; }
+  bool Visit(AST::LoopRange&) final { return true; }
+  bool Visit(AST::ForeachBlock&) final { return true; }
+  bool Visit(AST::InThreadsBlock&) final { return true; }
+  bool Visit(AST::WhileBlock&) final { return true; }
+  bool Visit(AST::IfElseBlock&) final { return true; }
+  bool Visit(AST::IncrementBlock&) final { return true; }
+  bool Visit(AST::FunctionDecl&) final { return true; }
+  bool Visit(AST::ChoreoFunction&) final { return true; }
+  bool Visit(AST::CppSourceCode&) final { return true; }
+  bool Visit(AST::DeviceFunctionDecl&) final { return true; }
+  bool Visit(AST::Program&) final { return true; }
+}; // VisitorGroup
 
 } // end namespace Choreo
 

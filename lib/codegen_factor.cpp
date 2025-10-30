@@ -322,7 +322,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
         e && isa<AST::SpanAs>(e->GetR())) {
       assert(e->IsReference());
       auto sa = dyn_cast<AST::SpanAs>(e->GetR());
-      int arg_idx = cgi->GetArgumentIndex(fname, InScopeName(sa->id->name));
+      int arg_idx = cgi.GetArgumentIndex(fname, InScopeName(sa->id->name));
       std::string buffer_name =
           arg_idx < 0 ? sa->id->name : "args[" + std::to_string(arg_idx) + "]";
       std::string storage_type = stringify(sty->GetStorage());
@@ -357,7 +357,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
       }
       // factor weird behavior: only the output needs alloc
       if (MemLevel(sty->GetStorage()) < 2 ||
-          cgi->IsReturnSymbol(fname, InScopeName(sym))) {
+          cgi.IsReturnSymbol(fname, InScopeName(sym))) {
         if (factor_symbols.GetTypeName(InScopeName(sym)) == "SRAMType")
           fs << indent << "auto " << sym << " = alloc_("
              << factor_symbols.GetTypeName(InScopeName(sym))
@@ -477,7 +477,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   // generate all launch configs when entered the first Parallel node
   if (*outer_pb_idx == "0") {
     int pb_idx = 0;
-    for (auto& lc : cgi->GetFunctionLaunches(fname)) {
+    for (auto& lc : cgi.GetFunctionLaunches(fname)) {
       auto pb_idx_str = pb_idx == 0 ? "" : "_" + std::to_string(pb_idx);
       fs << this->indent << "Dim3 grid_dim" << pb_idx_str << "("
          << lc.grid_dim_x;
@@ -509,7 +509,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
         }
         launch << "}, {"
                << ((void_return) ? ""
-                                 : UnScopedName(cgi->GetReturnSymbol(fname)))
+                                 : UnScopedName(cgi.GetReturnSymbol(fname)))
                << "});\n";
 
         if (debug_visit)
@@ -525,7 +525,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
       std::ostringstream ret;
       // note: factor code always requires a return statement
       ret << this->indent << "return std::vector<Value>{"
-          << ((!void_return) ? UnScopedName(cgi->GetReturnSymbol(fname)) : "")
+          << ((!void_return) ? UnScopedName(cgi.GetReturnSymbol(fname)) : "")
           << "};\n";
       if (debug_visit)
         VST_DEBUG(dbgs() << "[Factor Host] Return:\n" << ret.str());
@@ -582,8 +582,8 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
 
     // generate a reference name of the output
     if (!void_return) {
-      auto name = (cgi->HasReturnSymbol(fname))
-                      ? UnScopedName(cgi->GetReturnSymbol(fname))
+      auto name = (cgi.HasReturnSymbol(fname))
+                      ? UnScopedName(cgi.GetReturnSymbol(fname))
                       : "output";
       drefs << indent << "auto & " << name << " = results[0];\n";
     }
@@ -1136,7 +1136,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
     void_return = true;
     if (debug_visit) VST_DEBUG(dbgs() << "VOID\n");
   } else if (auto rty = dyn_cast<SpannedType>(fty->out_ty)) {
-    auto name = cgi->GetReturnSymbol(fname);
+    auto name = cgi.GetReturnSymbol(fname);
     std::string type_name = "__choreo_factor_out_type";
     auto type_string = "DRAMType(" + stringify(rty->ElementType()) + ", " +
                        ReplaceRuntimeNames(LSTR(rty->GetShape()), "", false) +
@@ -1172,7 +1172,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
                        << type_string << ");\n");
   } else {
     auto name =
-        (cgi->HasReturnSymbol(fname)) ? cgi->GetReturnSymbol(fname) : "output";
+        (cgi.HasReturnSymbol(fname)) ? cgi.GetReturnSymbol(fname) : "output";
     auto type_name = "__choreo_factor_out_type";
     auto type_string =
         "DRAMType(" + stringify(fty->out_ty->GetBaseType()) + ", (1))";
@@ -1519,7 +1519,7 @@ FactorCodeGen::ReplaceDynDimRef(const std::string& e) const {
 
 void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
   // check if the input shape is as declared in choreo
-  if (cgi->ParameterCount(fname) == 0) return;
+  if (cgi.ParameterCount(fname) == 0) return;
 
   struct Entry {
     size_t para_ordinal;
@@ -1589,8 +1589,8 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
 
 std::optional<std::string>
 FactorCodeGen::GetChoreoHostReturnTypeString() const {
-  if (!void_return && cgi->HasReturnSymbol(fname)) {
-    auto& item = cgi->GetReturnDetail(fname);
+  if (!void_return && cgi.HasReturnSymbol(fname)) {
+    auto& item = cgi.GetReturnDetail(fname);
     if (item.rty_str != "$") return item.rty_str;
   }
   return {};

@@ -76,8 +76,7 @@ private:
 
 public:
   CUDACodeGen()
-      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()),
-        cross_compile(CCtx().CrossCompile()) {}
+      : CodeGenerator("codegen"), cross_compile(CCtx().CrossCompile()) {}
   void ResetBuffers() {
     // ks.str("");
     // fs.str("");

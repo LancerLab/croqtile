@@ -494,9 +494,7 @@ public:
   }
 
 public:
-  GPUAdaptor()
-      : VisitorWithSymTab("gpu", CCtx().GetGlobalSymbolTable()),
-        cur_arch(STR(CCtx().GetArch())) {}
+  GPUAdaptor() : VisitorWithSymTab("gpu"), cur_arch(STR(CCtx().GetArch())) {}
   ~GPUAdaptor() {}
 
   bool Visit(AST::MultiNodes& n) override {

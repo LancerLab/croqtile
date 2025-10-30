@@ -740,9 +740,7 @@ public:
   }
 
 public:
-  GCUCheck()
-      : VisitorWithSymTab("gcu", CCtx().GetGlobalSymbolTable()),
-        cur_arch(STR(CCtx().GetArch())) {}
+  GCUCheck() : VisitorWithSymTab("gcu"), cur_arch(STR(CCtx().GetArch())) {}
   ~GCUCheck() {}
 
   bool Visit(AST::MultiNodes& n) override {

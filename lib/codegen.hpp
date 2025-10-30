@@ -1,6 +1,7 @@
 #ifndef CHOREO_CODEGEN_HPP_
 #define CHOREO_CODEGEN_HPP_
 
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -350,6 +351,11 @@ public:
       if (item.name == returns.at(fname)) return item;
     return all_syms.at(fname).at(0);
   }
+
+public:
+  static CodeGenInfo& Get();
+  static std::once_flag init_flag;
+  static std::unique_ptr<CodeGenInfo> instance;
 };
 
 // Codegenerators for targets
@@ -358,11 +364,8 @@ struct CodeGenerator : public VisitorWithSymTab {
   bool BeforeVisitImpl(AST::Node&) override { return true; }
   bool AfterVisitImpl(AST::Node&) override { return true; }
 
-  CodeGenerator(const std::string& n, const ptr<SymbolTable>& symtab)
-      : VisitorWithSymTab(n, symtab) {
-    if (symtab == nullptr)
-      choreo_unreachable("symbol table must be initialized.");
-  }
+  CodeGenerator(const std::string& n)
+      : VisitorWithSymTab(n), cgi(CodeGenInfo::Get()) {}
 
   virtual void TraceEachVisit(AST::Node& n, bool detail = false,
                               const std::string& m = "") const {
@@ -373,55 +376,8 @@ struct CodeGenerator : public VisitorWithSymTab {
       dbgs() << m << n.TypeNameString() << "\n";
   }
 
-#if 0
 protected:
-  std::vector<std::string> ProbeEnclosedIVs(const std::string& iv,
-                                            AST::ForeachBlock& n) {
-    assert(PrefixedWith(iv, "::") && "requires IV name to be scoped.");
-
-    std::vector<std::string> res;
-    bool ignore = true;
-    for (auto rng : n.GetRanges()) {
-      for (auto iv_name :
-           within_map.at(InScopeName(cast<AST::LoopRange>(rng)->IVName()))) {
-        if (iv_name == iv) {
-          ignore = false;
-          continue;
-        }
-        if (ignore) continue;
-        res.push_back(iv_name);
-      }
-    }
-
-    if (ignore)
-      choreo_unreachable("symbol '" + iv + "' is not found in " + STR(n) + ".");
-
-    // now probe further to find any other foreach/inc
-    std::stack<ptr<AST::MultiNodes>> worklist;
-    worklist.push(n.stmts);
-
-    while (!worklist.empty()) {
-      auto mn = worklist.top();
-      worklist.pop();
-
-      for (auto node : mn->AllSubs()) {
-        if (auto fb = dyn_cast<AST::ForeachBlock>(node)) {
-          for (auto rng : fb->GetRanges()) {
-            for (auto iv_name : within_map.at(
-                     InScopeName(cast<AST::LoopRange>(rng)->IVName())))
-              res.push_back(iv_name);
-          }
-          worklist.push(fb->stmts);
-        } else if (auto ib = dyn_cast<AST::IncrementBlock>(node)) {
-          for (auto iv : ib->GetIterationVars())
-            res.push_back(cast<AST::Identifier>(iv)->name);
-          worklist.push(ib->stmts);
-        }
-      }
-    }
-    return res;
-  }
-#endif
+  CodeGenInfo& cgi;
 };
 
 /////////////////////////////////////////////////////////////

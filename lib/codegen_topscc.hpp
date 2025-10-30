@@ -179,20 +179,14 @@ public:
 
 struct TopsccCodeGen : public CodeGenerator {
 private:
-  // fixed codegen info, which is not updated during the TopsccCodegen
-  ptr<CodeGenInfo> cgi;
   // update when visiting nodes in TopsccCodegen at any time.
   // Only use it for function parameters.
-  ptr<CodeGenInfo> updating_cgi;
+  CodeGenInfo updating_cgi;
   ScopedSymbolMap ssm;
   ptr<Loop> cur_loop;
 
 public:
-  TopsccCodeGen(const ptr<CodeGenInfo>& ci)
-      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()), cgi(ci) {
-    updating_cgi = AST::Make<CodeGenInfo>();
-    cur_loop = nullptr;
-  }
+  TopsccCodeGen() : CodeGenerator("codegen") { cur_loop = nullptr; }
 
   bool BeforeVisitImpl(AST::Node&) override;
   bool InMidVisitImpl(AST::Node&) override;
@@ -331,14 +325,12 @@ private:
   }
 
   // return all the parameters of device function in topscc code.
-  FilterRange<SymbolDetail>
-  GetDeviceFuncIns(const ptr<CodeGenInfo>& info) const {
-    return info->GetDeviceAllIns(fname);
+  FilterRange<SymbolDetail> GetDeviceFuncIns(CodeGenInfo& info) const {
+    return info.GetDeviceAllIns(fname);
   }
 
-  FilterRange<SymbolDetail>
-  GetChoreoFuncIns(const ptr<CodeGenInfo>& info) const {
-    return info->GetParameters(fname);
+  FilterRange<SymbolDetail> GetChoreoFuncIns(CodeGenInfo& info) const {
+    return info.GetParameters(fname);
   }
 
   const FutureBufferInfo& FBInfo() const {
@@ -368,7 +360,7 @@ private:
 
   bool IsChoreoOutput(const std::string& sname) {
     assert(PrefixedWith(sname, "::") && "expect a scoped name.");
-    return cgi->IsReturnSymbol(fname, sname);
+    return cgi.IsReturnSymbol(fname, sname);
   }
 
   bool IsHostSymbol(const std::string& sym) const {
@@ -377,17 +369,17 @@ private:
     return sym.find("::paraby") == std::string::npos;
   }
 
-  bool NeedDeviceFunc() const { return cgi->HasParallelBy(fname); }
+  bool NeedDeviceFunc() const { return cgi.HasParallelBy(fname); }
 
   bool IsHost() const { return parallel_level == Storage::NONE; }
 
   bool IsFutureBlockShared(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
-    return cgi->GetFunctionSharedFutures(fname).count(n);
+    return cgi.GetFunctionSharedFutures(fname).count(n);
   }
   bool IsFutureWarpLocal(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
-    return cgi->GetFunctionLocalFutures(fname).count(n);
+    return cgi.GetFunctionLocalFutures(fname).count(n);
   }
 
   bool IsDMABlockShared(AST::DMA&) const {

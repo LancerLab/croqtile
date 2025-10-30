@@ -35,6 +35,12 @@ inline int GCUDeviceParallelDepth(Storage l) {
   return levels[l];
 }
 
+inline int GetMaxParallelLevelFromNote(AST::ParallelBy& n) {
+  auto value = FindOrNull(n.Note(), "mxl");
+  if (value.has_value()) return std::stoi(*value);
+  return -1;
+}
+
 } // end namespace Choreo
 
 #endif // __CHOREO_TARGET_UTILS_HPP__

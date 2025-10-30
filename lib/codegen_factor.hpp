@@ -83,8 +83,6 @@ private:
   std::map<std::string, DimensionDetail> dims_info;
   std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
 
-  ptr<CodeGenInfo> cgi;
-
   StringifyTable factor_symbols;
 
   const FutureBufferInfo& FBInfo() const {
@@ -95,8 +93,7 @@ private:
   size_t factor_device_arity = 0;
 
 public:
-  FactorCodeGen(const ptr<CodeGenInfo>& ci)
-      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()), cgi(ci) {
+  FactorCodeGen() : CodeGenerator("codegen") {
     factor_pname = "__choreo_" + OptionRegistry::GetInstance().GetInputName();
   }
 
@@ -178,15 +175,15 @@ private:
   // in factor, there exists choreo-host/factor-host/factor-device functions.
   // There wrappers make the parameter clear.
   FilterRange<SymbolDetail> GetChoreoParameters() {
-    return cgi->GetParameters(fname);
+    return cgi.GetParameters(fname);
   }
 
   FilterRange<SymbolDetail> GetFactorHostInParams() {
-    return cgi->GetDeviceAllocIns(fname);
+    return cgi.GetDeviceAllocIns(fname);
   }
 
   FilterRange<SymbolDetail> GetFactorDeviceInParams() {
-    return cgi->GetDevicePassIns(fname);
+    return cgi.GetDevicePassIns(fname);
   }
 
   size_t GetFactorHostInArity() { return factor_host_arity; }

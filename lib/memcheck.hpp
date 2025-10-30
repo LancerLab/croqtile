@@ -221,7 +221,7 @@ private:
   }
 
 public:
-  MemUsageCheck() : VisitorWithSymTab("muchk", CCtx().GetGlobalSymbolTable()) {
+  MemUsageCheck() : VisitorWithSymTab("muchk") {
     if ((CCtx().GetTarget() == CompileTarget::Factor) ||
         (CCtx().GetTarget() == CompileTarget::Topscc)) {
       valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};

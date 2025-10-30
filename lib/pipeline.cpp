@@ -1,13 +1,24 @@
 #include "pipeline.hpp"
+#include "codegen.hpp"
+#include "codegen_cuda.hpp"
+#include "codegen_cute.hpp"
+#include "codegen_factor.hpp"
+#include "codegen_prepare.hpp"
+#include "codegen_topscc.hpp"
 #include "earlysema.hpp"
+#include "gcucheck.hpp"
+#include "gpuadapt.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
 #include "loop_vectorize.hpp"
 #include "mem_reuse.hpp"
+#include "memcheck.hpp"
 #include "normalize.hpp"
 #include "semacheck.hpp"
 #include "shapeinfer.hpp"
 #include "sym_replace.hpp"
+#include "ttrans_factor.hpp"
+#include "ttrans_topscc.hpp"
 #include "typeinfer.hpp"
 #include "visualize.hpp"
 
@@ -94,14 +105,48 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   return *this;
 }
 
-ASTPipeline& ASTPipeline::PlanCodeGenRountine(CompileTarget ct) {
-  choreo_unreachable("codegen rountine planning is not ready.");
+ASTPipeline& ASTPipeline::PlanCodeGenRoutine() {
   if (CCtx().NoCodegen()) { // do not generate code
     AddAction([](ASTPipeline& p) { p.SetAbend(); });
   }
+
+  AddStage<CodegenPrepare>();
+
+  switch (CCtx().GetTarget()) {
+  case CompileTarget::Factor: {
+    // apply the gcu specific checking
+    AddStage<GCUCheck>();
+    AddStage<FactorTrans>();
+    AddStage<MemUsageCheck>();
+    AddStage<Factor::FactorCodeGen>();
+    break;
+  }
+  case CompileTarget::Topscc: {
+    // apply GCU specific checks
+    AddStage<GCUCheck>();
+    AddStage<MemUsageCheck>();
+    AddStage<Topscc::TopsccCodeGen>();
+    break;
+  }
+  case CompileTarget::CUDA: {
+    AddStage<MemUsageCheck>();
+    AddStage<CUDA::CUDACodeGen>();
+    break;
+  }
+  case CompileTarget::Cute: {
+    AddStage<GPUAdaptor>();
+    AddStage<MemUsageCheck>();
+    AddStage<Cute::CuteCodeGen>();
+    break;
+  }
+  default:
+    errs() << "Invalid target: '" << STR(CCtx().GetTarget()) << "'\n";
+    abend = true;
+  }
+  return *this;
 }
 
-ASTPipeline& ASTPipeline::GetInstance() {
+ASTPipeline& ASTPipeline::Get() {
   std::call_once(init_flag,
                  []() { instance = std::make_unique<ASTPipeline>(); });
   return *instance;

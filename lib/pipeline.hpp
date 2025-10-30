@@ -55,6 +55,12 @@ public:
     Append({std::make_unique<VisitorType>()});
   }
 
+  template <typename VTy, typename... VTys>
+  void AddStages() {
+    AddStage<VTy>();
+    if constexpr (sizeof...(VTys) != 0) AddStages<VTys...>();
+  }
+
   template <typename VisitorType>
   void AddStageIf(std::function<bool()> pred) {
     Append({std::make_unique<VisitorType>(), pred});
@@ -86,14 +92,17 @@ public:
 
   // contains normal visitors
   ASTPipeline& PlanSemanticRoutine();
-  ASTPipeline& PlanCodeGenRountine(CompileTarget);
+  ASTPipeline& PlanCodeGenRoutine();
+  ASTPipeline& PlanAllRoutines() {
+    return PlanSemanticRoutine().PlanCodeGenRoutine();
+  }
 
 private:
   static std::once_flag init_flag;
   static std::unique_ptr<ASTPipeline> instance;
 
 public:
-  static ASTPipeline& GetInstance();
+  static ASTPipeline& Get();
 }; // ASTPipeline
 
 } // end namespace Choreo

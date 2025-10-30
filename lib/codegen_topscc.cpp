@@ -220,7 +220,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     // only on device-side
     if (pb->IsOuter()) {
       parallel_idx += 1;
-      if (cgi->GetFunctionTrait(fname).multiple_parallelby)
+      if (cgi.GetFunctionTrait(fname).multiple_parallelby)
         device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
       EmitDeviceFuncDecl(ds);
       ds << " {\n";
@@ -753,11 +753,11 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   // if a symbol is declared but have no symbol value(optimized value)
   // pass it to device func even it is unused.
   if (!FCtx(fname).HasSymbolValues(InScopeName(sym)))
-    updating_cgi->AddSymbolDetail(fname,
-                                  {InScopeName(sym), GetSymbolType(sym), true});
+    updating_cgi.AddSymbolDetail(fname,
+                                 {InScopeName(sym), GetSymbolType(sym), true});
   else
-    updating_cgi->AddSymbolDetail(fname,
-                                  {InScopeName(sym), GetSymbolType(sym), ref});
+    updating_cgi.AddSymbolDetail(fname,
+                                 {InScopeName(sym), GetSymbolType(sym), ref});
 
   // The type is determined first, and then
   // the device or host side is determined
@@ -1088,7 +1088,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     auto name = n.GetName();
     bool ref = n.Note().count("ref");
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value))
-      updating_cgi->AddSymbolDetail(
+      updating_cgi.AddSymbolDetail(
           fname, {InScopeName(name), GetSymbolType(name), ref});
   }
 
@@ -1252,7 +1252,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   EmitMemReuse(SSTab().ScopeName());
 
   // note: `thread_dims` for gcu400 is generated in `EmitDeviceFuncDecl`
-  auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
+  auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
   hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
      << ValueSTR(lconfig.grid_dim_x) << ", " << ValueSTR(lconfig.grid_dim_y)
      << ", " << ValueSTR(lconfig.grid_dim_z) << ");\n";
@@ -1280,7 +1280,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   const auto& offset_args =
       FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
   std::string mr_idx_suffix = "";
-  if (cgi->GetFunctionTrait(fname).multiple_parallelby)
+  if (cgi.GetFunctionTrait(fname).multiple_parallelby)
     mr_idx_suffix = std::to_string(parallel_idx);
   if (offset_args.has_value())
     for (const auto& [sto, offsets] : offset_args.value())
@@ -2399,9 +2399,9 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
 bool TopsccCodeGen::Visit(AST::ParamList& n) {
   int index = 0;
   for (auto param : n.values)
-    updating_cgi->AddSymbolDetail(fname, {InScopeName(param->sym->name),
-                                          param->GetType(), param->pass_by_ref,
-                                          index++, param->GetAttr()});
+    updating_cgi.AddSymbolDetail(fname, {InScopeName(param->sym->name),
+                                         param->GetType(), param->pass_by_ref,
+                                         index++, param->GetAttr()});
   return true;
 }
 
@@ -2421,9 +2421,9 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
     // for visibility of shapes
     if (IsHost()) {
       hs << h_indent << "int __iv_" << id->name << " = 0;\n";
-      updating_cgi->AddSymbolDetail(fname,
-                                    {InScopeName(id->name), id->GetType(), true,
-                                     -1, ParamAttr::NONE, "", true});
+      updating_cgi.AddSymbolDetail(fname,
+                                   {InScopeName(id->name), id->GetType(), true,
+                                    -1, ParamAttr::NONE, "", true});
     } else
       ds << d_indent << "int __iv_" << id->name << " = 0;\n";
   }
@@ -2599,8 +2599,8 @@ bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
 void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   // handle the return type
   if (!void_return) {
-    if (cgi->HasReturnSymbol(fname)) {
-      auto& item = cgi->GetReturnDetail(fname);
+    if (cgi.HasReturnSymbol(fname)) {
+      auto& item = cgi.GetReturnDetail(fname);
       if (item.rty_str != "$")
         oss << item.rty_str;
       else
@@ -2628,7 +2628,7 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
 
 void TopsccCodeGen::EmitHostRuntimeCheck() {
   // check if the input shape is as declared in choreo
-  if (cgi->ParameterCount(fname) == 0) return;
+  if (cgi.ParameterCount(fname) == 0) return;
 
   struct Entry {
     size_t para_ordinal;
@@ -2771,7 +2771,7 @@ void TopsccCodeGen::EmitTopsFree() {
 
 void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
   if (CCtx().GetArch() == TargetArch::GCU4) {
-    auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
+    auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
     oss << "__thread_dims__(" << lconfig.warp_dim_x << ", "
         << lconfig.warp_dim_y << ", " << lconfig.warp_dim_z << ")\n";
   }

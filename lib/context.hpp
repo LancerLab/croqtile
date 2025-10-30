@@ -387,6 +387,7 @@ public:
 
   size_t GetMemCapacity(Storage sto) const {
     switch (arch) {
+    case TargetArch::GCU20: // TODO
     case TargetArch::GCU21: {
       switch (sto) {
       case Storage::LOCAL: return 1008ull * 1024;             // 1008KB
