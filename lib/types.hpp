@@ -293,11 +293,11 @@ inline static std::string GetStringFrom(Storage st) {
 
 } // end namespace __internal__
 
-inline static std::string STR(size_t sz) { return std::to_string(sz); }
-inline static std::string STR(BaseType bt) {
+inline static const std::string STR(size_t sz) { return std::to_string(sz); }
+inline static const std::string STR(BaseType bt) {
   return __internal__::GetStringFrom(bt);
 }
-inline static std::string STR(Storage st) {
+inline static const std::string STR(Storage st) {
   return __internal__::GetStringFrom(st);
 }
 
@@ -423,13 +423,13 @@ inline static bool IsLossyCast(const BaseType f, const BaseType t) {
 
 // safe version for pointers
 template <typename T>
-inline static std::string PSTR(T* pt) {
+inline static const std::string PSTR(T* pt) {
   if (!pt) return "invalid";
   return STR(*pt);
 }
 
 template <typename T>
-inline static std::string PSTR(const ptr<T>& pt) {
+inline static const std::string PSTR(const ptr<T>& pt) {
   if (!pt) return "invalid";
   return STR(*pt);
 }

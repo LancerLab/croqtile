@@ -451,7 +451,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "__tanh"     return Choreo::Parser::make_TANH(yytext, loc);
   "__alignup"  return Choreo::Parser::make_ALIGNUP(yytext, loc);
   "__aligndown" return Choreo::Parser::make_ALIGNDOWN(yytext, loc);
-  "sublocal"    return Choreo::Parser::make_SUBLOCAL(Storage::SUB, loc);
+  "sublocal"   return Choreo::Parser::make_SUBLOCAL(Storage::SUB, loc);
   "local"    return Choreo::Parser::make_LOCAL(Storage::LOCAL, loc);
   "shared"   return Choreo::Parser::make_SHARED(Storage::SHARED, loc);
   "global"   return Choreo::Parser::make_GLOBAL(Storage::GLOBAL, loc);
@@ -496,6 +496,13 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
+  "mma"      return Choreo::Parser::make_MMA(yytext, loc);
+  ".fill"    return Choreo::Parser::make_FILL(yytext, loc);
+  ".load_a"  return Choreo::Parser::make_LOAD_A(yytext, loc);
+  ".load_b"  return Choreo::Parser::make_LOAD_B(yytext, loc);
+  ".store"   return Choreo::Parser::make_STORE(yytext, loc);
+  ".row"     return Choreo::Parser::make_ROW(yytext, loc);
+  ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT (yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);

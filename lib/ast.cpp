@@ -224,6 +224,20 @@ void DMA::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void MMA::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
+  if (operation->IsKind(MMAOperation::Fill))
+    operation->FillingValue()->accept(v);
+  else if (operation->IsKind(MMAOperation::Load))
+    operation->LoadFrom()->accept(v);
+  else if (operation->IsKind(MMAOperation::Store))
+    operation->StoreTo()->accept(v);
+
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 // this is not a visitor type that must be invoked manually
 void SpannedOperation::accept(Visitor& v) {
   Verify();

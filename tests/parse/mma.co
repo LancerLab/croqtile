@@ -1,0 +1,22 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ s32 [128, 256] matmul(s32 [128, 256] lhs, s32 [256, 256] rhs) {
+  s32[lhs.span(0), rhs.span(1)] output;
+
+  parallel p by 1, q by 16
+    mma.fill 0;
+    foreach k in [16] {
+      ma = mma.load_a lhs.chunkat(p, k);
+      mb = mma.load_b rhs.chunkat(k, q);
+      mma.row.col ma, mb;   // row * col
+      mma.store output.chunkat(p, q);
+    }
+  return output;
+}
+
+
+// CHECK:    `- MMA.FILL 0
+// CHECK:     `- MMA.LOAD_A lhs.ChunkAt(p, k)
+// CHECK:     `- MMA.LOAD_B rhs.ChunkAt(k, q)
+// CHECK:     `- MMA.EXEC.ROW.COL ma, mb
+// CHECK:     `- MMA.STORE output.ChunkAt(p, q)

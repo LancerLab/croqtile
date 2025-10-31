@@ -2473,6 +2473,158 @@ public:
   __UDT_TYPE_INFO__(Node, DMA)
 };
 
+struct MMAOperation {
+public:
+  enum Kind { Fill, Load, Exec, Store };
+  enum Fragment { FRAG_A, FRAG_B };
+  enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
+
+  using FillInfo = ptr<Expr>;
+  struct LoadInfo {
+    ptr<ChunkAt> ld_expr;
+    Fragment frag;
+    std::string future;
+    bool async;
+  };
+  struct ExecInfo {
+    ExecMethod method;
+    std::string lhs;
+    std::string rhs;
+  };
+  using StoreInfo = ptr<ChunkAt>;
+  using InfoType = std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo>;
+
+private:
+  Kind tag;
+  InfoType info;
+
+public:
+  MMAOperation(const ptr<Expr>& e) : tag(Fill), info(InfoType(e)) {}
+  MMAOperation(Fragment f, const ptr<ChunkAt>& e, const std::string& fu,
+               bool a = false)
+      : tag(Load), info(LoadInfo{e, f, fu, a}) {}
+  MMAOperation(ExecMethod m, const std::string& l, const std::string& r)
+      : tag(Exec), info(InfoType(ExecInfo{m, l, r})) {}
+  MMAOperation(const ptr<ChunkAt>& c) : tag(Store), info(InfoType(c)) {}
+
+public:
+  bool IsKind(Kind k) const { return k == tag; }
+  ptr<Expr> FillingValue() {
+    if (tag != Fill) choreo_unreachable("not a mma fill operation");
+    return std::get<0>(info);
+  }
+  const ptr<Expr> FillingValue() const {
+    if (tag != Fill) choreo_unreachable("not a mma fill operation");
+    return std::get<0>(info);
+  }
+
+  ptr<ChunkAt> LoadFrom() {
+    if (tag != Load) choreo_unreachable("not a mma store operation");
+    auto l_info = std::get<1>(info);
+    return l_info.ld_expr;
+  }
+  const ptr<ChunkAt> LoadFrom() const {
+    if (tag != Load) choreo_unreachable("not a mma store operation");
+    auto l_info = std::get<1>(info);
+    return l_info.ld_expr;
+  }
+
+  ptr<ChunkAt> StoreTo() {
+    if (tag != Store) choreo_unreachable("not a mma store operation");
+    return std::get<3>(info);
+  }
+  const ptr<ChunkAt> StoreTo() const {
+    if (tag != Store) choreo_unreachable("not a mma store operation");
+    return std::get<3>(info);
+  }
+
+  void SetAsync(bool async = true) {
+    if (tag != Load) choreo_unreachable("not a mma store operation");
+    auto l_info = std::get<1>(info);
+    l_info.async = async;
+  }
+
+  void SetFuture(const std::string& fut_name) {
+    if (tag != Load) choreo_unreachable("not a mma store operation");
+    auto l_info = std::get<1>(info);
+    l_info.future = fut_name;
+  }
+
+public:
+  const ptr<MMAOperation> Clone() const {
+    switch (tag) {
+    case Fill: return Make<MMAOperation>(CloneP(FillingValue())); break;
+    case Load: {
+      auto l_info = std::get<1>(info);
+      return Make<MMAOperation>(l_info.frag, CloneP(l_info.ld_expr),
+                                l_info.future, l_info.async);
+    } break;
+    case Exec: {
+      auto e_info = std::get<2>(info);
+      return Make<MMAOperation>(e_info.method, e_info.lhs, e_info.rhs);
+    } break;
+    case Store: {
+      return Make<MMAOperation>(CloneP(StoreTo()));
+    } break;
+    default: choreo_unreachable("unsupported MMA operation kind.");
+    }
+    return nullptr;
+  }
+
+  void Print(std::ostream& os) const {
+    switch (tag) {
+    case Fill: os << "MMA.FILL " << PSTR(FillingValue()); break;
+    case Load: {
+      auto l_info = std::get<1>(info);
+      if (!l_info.future.empty()) os << l_info.future << " = ";
+      os << "MMA.LOAD_" << ((l_info.frag == FRAG_A) ? "A" : "B")
+         << ((l_info.async) ? ".ASYNC" : "") << " " << PSTR(l_info.ld_expr);
+    } break;
+    case Exec: {
+      auto e_info = std::get<2>(info);
+      os << "MMA.EXEC";
+      switch (e_info.method) {
+      case ROW_ROW: os << ".ROW.ROW"; break;
+      case ROW_COL: os << ".ROW.COL"; break;
+      case COL_COL: os << ".COL.COL"; break;
+      case COL_ROW: os << ".COL.ROW"; break;
+      default: choreo_unreachable("unsupported dma execution mode."); break;
+      }
+      os << " " << e_info.lhs << ", " << e_info.rhs;
+    } break;
+    case Store: {
+      os << "MMA.STORE ";
+      os << PSTR(StoreTo());
+    } break;
+    default: choreo_unreachable("unsupported MMA operation kind.");
+    }
+  }
+
+private:
+  void Verify() {} // TODO
+};
+
+struct MMA : public Node, public TypeIDProvider<MMA> {
+  ptr<MMAOperation> operation;
+
+public:
+  MMA(const location& l, const ptr<MMAOperation>& op)
+      : Node(l), operation(op) {}
+  ptr<Node> CloneImpl() const override {
+    return Make<MMA>(LOC(), operation->Clone());
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n" << prefix << "`- ";
+    operation->Print(os);
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, MMA)
+};
+
 struct Wait : public Node, public TypeIDProvider<Wait> {
   ptr<MultiValues> targets;
 
