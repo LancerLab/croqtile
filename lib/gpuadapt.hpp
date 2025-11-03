@@ -253,6 +253,13 @@ public:
     }
 
     // pad
+    if (n.operation == ".pad") {
+      auto pc = cast<PadConfig>(n.config);
+      for (const auto& v : pc->pad_mid->AllValues())
+        if (auto il = AST::GetIntLiteral(v); !il || il->Val() != 0)
+          Error1(v->LOC(), "dma.pad with pad_mid is not supported for CuTe "
+                           "backend(must set pad_mid to 0).");
+    }
     if (n.operation == ".pad" && IsLinearCopy()) {
       RankLE5("dma.pad");
       auto pc = cast<PadConfig>(n.config);

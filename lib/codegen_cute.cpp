@@ -1539,12 +1539,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
       VerboseDMA(ds, d_indent, t_sym, f_sym, n.operation.substr(1), "", 1,
                  ", line " + std::to_string(n.LOC().begin.line));
-
-      // TODO: support pad_mid
-      for (const auto& v : pad_config->pad_mid->AllValues())
-        if (auto il = AST::GetIntLiteral(v); !il || il->Val() != 0)
-          choreo_unreachable("only dma.pad with pad_mid set to 0 are supported "
-                             "for CuTe backend.");
     }
 
     if (n.GetLevel() == Storage::SHARED) {

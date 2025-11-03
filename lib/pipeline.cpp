@@ -99,7 +99,7 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   }
 
   if ((CCtx().GetTarget() == CompileTarget::Topscc) && CCtx().MemReuse())
-    AddStage<MemReuse>();
+    AddStage<MemoryReuse>();
   // apply the semantic check
   AddStage<SemaChecker>();
   return *this;

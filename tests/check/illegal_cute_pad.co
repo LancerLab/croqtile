@@ -52,4 +52,4 @@ int main() { /// host program
   std::cout << "Test Passed\n" << std::endl;
 }
 
-// CHECK: Assertion failed: only dma.pad with pad_mid set to 0 are supported for CuTe backend.
+// CHECK: error: dma.pad with pad_mid is not supported for CuTe backend(must set pad_mid to 0).

@@ -446,11 +446,17 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
 bool MemReuse::RunOnProgramImpl(AST::Node& root) {
   if (!CCtx().MemReuse()) return true;
 
+  la.SetLevelPrefix("  ");
   la.SSTab().UpdateGlobal(SymTab());
   if (!la.RunOnProgram(root)) return la.Status();
+
+  ma.SetLevelPrefix("  ");
   ma.SSTab().UpdateGlobal(SymTab());
   if (!ma.RunOnProgram(root)) return ma.Status();
 
+  if (prt_visitor) dbgs() << LevelPrefix() << "|- " << GetName() << NewL;
+
   root.accept(*this);
+
   return true;
 }

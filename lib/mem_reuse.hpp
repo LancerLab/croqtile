@@ -268,6 +268,14 @@ private:
   bool RunOnProgramImpl(AST::Node& root) override;
 };
 
+class MemoryReuse : public VisitorGroup {
+private:
+  MemReuse mr;
+
+public:
+  MemoryReuse() : VisitorGroup("MemoryReuse", mr) {}
+};
+
 } // end namespace Choreo
 
 #endif // __CHOREO_MEM_REUSE_HPP__
