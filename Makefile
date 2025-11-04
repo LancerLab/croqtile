@@ -333,14 +333,17 @@ setup-gcu3: setup-core
 	git submodule update --init --recursive;\
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
 
-setup-gcu4: setup-gcu3
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu-sim
+setup-gcu4: setup-core
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-kit FTP_SERVER=$(FTP_SERVER)
 
 resetup-gcu2: install-choreo-kit
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-install FTP_SERVER=$(FTP_SERVER)
 
 resetup-gcu3: install-choreo-kit
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-install FTP_SERVER=$(FTP_SERVER)
+
+resetup-gcu4: install-choreo-kit
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-install FTP_SERVER=$(FTP_SERVER)
 
 gcu2-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kmd FTP_SERVER=$(FTP_SERVER)

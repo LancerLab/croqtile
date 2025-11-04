@@ -1029,9 +1029,21 @@ __device__ __attribute__((always_inline)) static inline void __co_abort__() {
 
 #ifdef __TOPSCC__
 
+#if __GCU_ARCH__ == 400
+using choreo_dte_ctx_t = tops_dte_ctx_base_s;
+__device__ __forceinline__ void tops_init_dte(tops_dte_ctx_base_s* ctx) {
+  ctx->init_comm();
+}
+__device__ __forceinline__ void tops_destroy_dte(tops_dte_ctx_base_s* ctx) {
+  ctx->destroy_comm();
+}
+#else
+using choreo_dte_ctx_t = tops_dte_ctx_t;
+#endif
+
 // choreo device future
 struct future {
-  tops_dte_ctx_t* ctx = nullptr;
+  choreo_dte_ctx_t* ctx = nullptr;
   tops::event e;
   void* d = nullptr; // data: future's user must guarantee it is valid
 
@@ -1052,9 +1064,20 @@ struct future {
   unsigned line = 0;
   unsigned column = 0;
 
-  __device__ future(tops_dte_ctx_t& dte, const char* n, unsigned l, unsigned c,
+  __device__ future(choreo_dte_ctx_t& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr)
+      : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
+#if __GCU_ARCH__ == 400
+  __device__ future(tops::local_dte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr)
       : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
+  __device__ future(tops::shared_dte& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr)
+      : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
+  __device__ future(tops::private_dte& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr)
+      : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
+#endif
 
   // context is retrieved to invoke data operations
   __device__ auto get_ctx() {

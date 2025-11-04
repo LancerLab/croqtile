@@ -410,11 +410,17 @@ private:
   const std::string CallSTR(AST::Call&) const;
   const std::string DASTR(AST::ptr<AST::DataAccess>&, const std::string& = "",
                           bool is_load = true, bool masking = false) const;
-  const std::string BuildTcleLoad(const std::string& addr_str,
-                                  const std::string& ty_str) const;
-  const std::string BuildTcleStore(const std::string& addr_str,
-                                   const std::string& ty_str,
-                                   const std::string& val_str) const;
+  const std::string BuildTcleLoad(const std::string& addr,
+                                  const std::string& ty) const;
+  const std::string BuildTcleLoadCond(const std::string& addr,
+                                      const std::string& other,
+                                      const std::string& mask,
+                                      const std::string& ty) const;
+  const std::string BuildTcleStore(const std::string& addr,
+                                   const std::string& val) const;
+  const std::string BuildTcleStoreCond(const std::string& addr,
+                                       const std::string& val,
+                                       const std::string& mask) const;
 
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
   std::optional<std::string>
@@ -435,6 +441,7 @@ private:
   // if it requires wrapping code in a single thread
   bool RequiresImplPred(Storage) const;
   const std::string VectorTypeSTR(const ptr<Type>& vt) const;
+  const std::string DMATypeSTR(Storage) const;
 };
 
 } // namespace Topscc

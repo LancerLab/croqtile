@@ -51,9 +51,7 @@ int main() { /// host program
 // CODEGEN1:   __vector bool int mask0 = __vec_iv_j <= 1000;
 // CODEGEN1:   __vector bool int exec = mask0;
 // CODEGEN1:   __vector float anon_1 = tcle::load<__vector float>((char *)((float*)l1_a.data() + (__iv_i * 1000) + __vec_iv_j[0])) + tcle::load<__vector float>((char *)((float*)l1_b.data() + (__iv_i * 1000) + __vec_iv_j[0]));
-// CODEGEN1:   __vector float anon_2 = tcle::load<__vector float>((char *)((float*)l1_c + (__iv_i * 1000) + __vec_iv_j[0]));
-// CODEGEN1:   anon_1 = tcle::vsel(exec, anon_1, anon_2);
-// CODEGEN1:   tcle::store(anon_1, (char *)((float*)l1_c + (__iv_i * 1000) + __vec_iv_j[0]));
+// CODEGEN1:   tcle::store(anon_1, (char *)((float*)l1_c + (__iv_i * 1000) + __vec_iv_j[0]), exec);
 // CODEGEN1:   __vec_iv_j += (__vector unsigned int)(128);
 // CODEGEN1: }
 

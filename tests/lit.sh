@@ -387,16 +387,19 @@ detect_device_features() {
     device_type="gcu"
     mach=${gcu_arch}
   fi
+
+  if [ "$device_type" == "none" ]; then
+    echo "can not determine device type."
+    exit 1
+  fi
+}
+
+detect_simulator_features() {
   if [ -f "${script_dir}/../extern/lib/libgcusim.so" ]; then
     # the simulators exist
-    device_type="gcu"
     gcu_sim_lib=${script_dir}/../extern/lib/
     gcu_sim_arch=gcusim400
     simulator=${gcu_sim_arch}
-  fi
-  if [ "$device_type" == "none" ]; then
-    echo "can not determine the GCU device type."
-    exit 1
   fi
 }
 
@@ -621,6 +624,7 @@ done
 
 # detect the device supported features
 detect_device_features
+detect_simulator_features
 initialize_counters
 
 case $device_type in

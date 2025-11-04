@@ -79,7 +79,7 @@ __co__ auto bar1(f16 [36, 15, 14, 64] a) {
 // CHECK:     int __iv_index__elem__0 = 0;
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
 // CHECK:       __local__ __valigned__ choreo::half a_local__buf__[5760];
-// CHECK:       tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:       tops::local_dte choreo_topscc_ctx0;
 // CHECK:       choreo::future a_local(choreo_topscc_ctx0, "a_local", {{[0-9]+}}, {{[0-9]+}}, a_local__buf__);
 // CHECK:       tops::mdspan __mds0_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
 // CHECK:       tops::mdspan __mds1_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 18, 5, 2, 32);
@@ -111,7 +111,7 @@ __co__ auto bar2(f16 [4, 36, 14, 64] a) {
 // CHECK:     int __iv_index__elem__0 = 0;
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
 // CHECK:       __local__ __valigned__ choreo::half a_local__buf__[512];
-// CHECK:       tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK:       tops::local_dte choreo_topscc_ctx1;
 // CHECK:       choreo::future a_local(choreo_topscc_ctx1, "a_local", {{[0-9]+}}, {{[0-9]+}}, a_local__buf__);
 // CHECK:       tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 4, 36, 14, 64);
 // CHECK:       tops::mdspan __mds3_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 2, 4, 2, 32);

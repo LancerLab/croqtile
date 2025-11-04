@@ -152,9 +152,40 @@ setup-gcu3-factor-kit: check-gcu3-factor-kit
 	    $(MAKE) install-gcu3-factor-kit; \
 	fi
 
+#------------------------- GCU-4.x -------------------------#
+GCU4_REL_PATH=251103/gcu400
+GCU4_PLATFORM_NAME=TopsPlatform_1.6.1.216-3aea03_deb_amd64.run
+GCU4_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU4_PLATFORM_NAME)
+GCU4_PLATFORM_PKG_MD5:=c42fccec6ec4d5b472ed91e51d0c4772
+CUR_GCU4_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU4_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
+
+check-gcu4-platform-kit:
+	@if [ "$(CUR_GCU4_PLATFORM_PKG_MD5)" != "$(GCU4_PLATFORM_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		$(MAKE) download-gcu4-platform-kit; \
+	else \
+		echo "$(GCU4_PLATFORM_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu4-platform-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU4_REL_PATH)/$(GCU4_PLATFORM_NAME) -o $(GCU4_PLATFORM_PKG);\
+	chmod +x $(GCU4_PLATFORM_PKG);
+
+install-gcu4-platform-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	$(GCU4_PLATFORM_PKG) -y -C topsruntime,topscc --install-dir $(TOOLCHAIN_DIR); \
+	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
+	rm -fr $(TOOLCHAIN_DIR)/opt;
+
+setup-gcu4-platform-kit: check-gcu4-platform-kit
+	@if [ "$(CUR_GCU4_PLATFORM_PKG_MD5)" != "$(GCU4_PLATFORM_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu4-platform-kit; \
+	fi
+
 install-gcu-sim:
 	@if [ ! -f "$(TOOLCHAIN_DIR)/lib/libgcusim.so" ]; then \
-		wget http://artifact.enflame.cn/artifactory/release_center/GCUSIM/1.0.79/libgcusim.so; \
+		wget http://artifact.enflame.cn/artifactory/release_center/GCUSIM/1.0.91/libgcusim.so; \
 		mv libgcusim.so $(TOOLCHAIN_DIR)/lib/libgcusim.so; \
 	fi;
 
@@ -219,9 +250,14 @@ gcu2-kmd: check-gcu-platform-kit
 gcu3-kmd: check-gcu3-platform-kit
 	sudo $(GCU3_PLATFORM_PKG) -y -C enflame --force-asic
 
+gcu4-kmd: check-gcu4-platform-kit
+	sudo $(GCU4_PLATFORM_PKG) -y -C enflame --force-asic
+
 gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit setup-gcu-factor-kit
 gcu3-kit: setup-gcu3-platform-kit setup-gcu3-factor-kit
+gcu4-kit: setup-gcu4-platform-kit install-gcu-sim
 gcu-sim: install-gcu-sim
 
 gcu2-install: install-gcu-sfc-kit install-gcu-platform-kit install-gcu-factor-kit
 gcu3-install: install-gcu3-platform-kit install-gcu3-factor-kit
+gcu4-install: install-gcu4-platform-kit

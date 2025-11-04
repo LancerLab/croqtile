@@ -155,6 +155,22 @@ TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
   return vty_str;
 }
 
+const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
+  if (CCtx().GetArch() == TargetArch::GCU4) {
+    if (sto == Storage::GLOBAL)
+      return "tops::shared_dte";
+    else if (sto == Storage::SHARED)
+      return "tops::shared_dte";
+    else if (sto == Storage::LOCAL)
+      return "tops::local_dte";
+    else if (sto == Storage::SUB)
+      return "tops::private_dte";
+    else
+      choreo_unreachable("unsupported storage for DMA context.");
+  } else
+    return "tops_dte_ctx_t";
+}
+
 bool TopsccCodeGen::RequiresImplPred(Storage cur) const {
   // ignore any host code
   if (IsHost()) return false;
@@ -926,7 +942,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << "if ("
          << SingleInstancePredicate(sto == Storage::SHARED) << ") {\n";
       IncrDeviceIndent();
-      ds << d_indent << "tops_dte_ctx_t " << sym__init << ";\n";
+      ds << d_indent << DMATypeSTR(sto) << " " << sym__init << ";\n";
       ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
          << ");\n";
       ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
@@ -1317,13 +1333,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // - not support async.
 
   // Generate tops dte and choreo::future in device-side
-  auto claimFuture = [this, &n](const std::string& buf_expr) -> std::string {
+  auto claimFuture = [this, &n](const std::string& buf_expr,
+                                Storage sto = Storage::DEFAULT) -> std::string {
     if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
       return n.future;
 
     // claim the date transfer engine
     auto dte_ctx = GetDTEContextName();
-    ds << d_indent << "tops_dte_ctx_t " << dte_ctx << ";\n";
+    ds << d_indent << DMATypeSTR(sto) << " " << dte_ctx << ";\n";
     auto future_name = n.future;
     if (future_name.empty()) {
       static size_t future_count = 0;
@@ -1386,6 +1403,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
+
+  Storage f_sto = f_sty->GetStorage();
+  Storage t_sto = t_sty->GetStorage();
+  Storage dma_sto = f_sto < t_sto ? f_sto : t_sto;
 
   auto SymbolToSymbol = [f_ca, t_ca]() -> bool {
     return f_ca->NoTilingOperation() && t_ca->NoTilingOperation();
@@ -1677,9 +1698,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   auto future_name = n.future;
   // bind the data to the future
   if (SymbolToSymbol() || TileToSymbol() || TileToTile())
-    future_name = claimFuture(t_buf.second);
+    future_name = claimFuture(t_buf.second, dma_sto);
   else
-    future_name = claimFuture("");
+    future_name = claimFuture("", dma_sto);
 
   std::string event_name;
   if (fty->IsAsync()) event_name = future_name + "__event__";
@@ -3657,8 +3678,17 @@ TopsccCodeGen::BuildTcleLoad(const std::string& addr_str,
   return oss.str();
 }
 
+const std::string TopsccCodeGen::BuildTcleLoadCond(
+    const std::string& addr, const std::string& other, const std::string& mask,
+    const std::string& ty) const {
+  std::ostringstream oss;
+  oss << "tcle::load<" << ty << ">(" << "(char *)(" << addr << "), " << other
+      << ", " << mask << ")";
+  return oss.str();
+}
+
 const std::string
-TopsccCodeGen::BuildTcleStore(const std::string& addr_str, const std::string&,
+TopsccCodeGen::BuildTcleStore(const std::string& addr_str,
                               const std::string& val_str) const {
   std::ostringstream oss;
   oss << "tcle::store(" << val_str << ", ";
@@ -3669,6 +3699,16 @@ TopsccCodeGen::BuildTcleStore(const std::string& addr_str, const std::string&,
   else
     choreo_unreachable("unsupported target arch.");
   oss << addr_str << ")";
+  return oss.str();
+}
+
+const std::string
+TopsccCodeGen::BuildTcleStoreCond(const std::string& addr,
+                                  const std::string& val,
+                                  const std::string& mask) const {
+  std::ostringstream oss;
+  oss << "tcle::store(" << val << ", "
+      << "(char *)(" << addr << ", " << mask << ")";
   return oss.str();
 }
 
@@ -3697,16 +3737,22 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
             // for now, it use tcle::vsel to do masking store, the store val
             // 'st_val' is conditionally selected between 'val_str' and 'ld_val'
             // from the same memory location.
-            auto ld_val = symtab.GetAnonName();
-            oss << VectorTypeSTR(vty) << " " << ld_val << " = "
-                << BuildTcleLoad(addr_str, vty_str) << ";\n";
-            oss << (IsHost() ? h_indent : d_indent);
-            oss << st_val << " = tcle::vsel(exec, " << val_str << ", " << ld_val
-                << ");\n";
-            oss << (IsHost() ? h_indent : d_indent);
+            if (CCtx().GetArch() == TargetArch::GCU4) {
+              oss << BuildTcleStoreCond(addr_str, val_str, "exec");
+            } else if (CCtx().GetArch() == TargetArch::GCU3) {
+              auto ld_val = symtab.GetAnonName();
+              oss << VectorTypeSTR(vty) << " " << ld_val << " = "
+                  << BuildTcleLoad(addr_str, vty_str) << ";\n";
+              oss << (IsHost() ? h_indent : d_indent);
+              oss << st_val << " = tcle::vsel(exec, " << val_str << ", "
+                  << ld_val << ");\n";
+              oss << (IsHost() ? h_indent : d_indent);
+              oss << BuildTcleStore(addr_str, st_val);
+            } else
+              choreo_unreachable("unspported target arch");
+          } else {
+            oss << BuildTcleStore(addr_str, st_val);
           }
-
-          oss << BuildTcleStore(addr_str, "", st_val);
         }
       } else if (da->HasNote("VGZST")) {
         // random address, vector gather/scatter

@@ -29,19 +29,19 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK: __global__ void __choreo_device_foo() {
 // CHECK:   __shared__ float s_A[30];
 // CHECK:   if (__CHOREO_SINGLE_SHARED__) {
-// CHECK:     tops_dte_ctx_t s_A__init;
+// CHECK:     tops::shared_dte s_A__init;
 // CHECK:     tops::dte_scope s_s_A__init(s_A__init);
 // CHECK:     tops::memset(s_A__init, tops::mdspan(tops::Shared, (float*)s_A, 5, 6), static_cast<float>(0));
 // CHECK:   } // single instance
 // CHECK:   __shared__ float s_B[30];
 // CHECK:   if (__CHOREO_SINGLE_SHARED__) {
-// CHECK:     tops_dte_ctx_t s_B__init;
+// CHECK:     tops::shared_dte s_B__init;
 // CHECK:     tops::dte_scope s_s_B__init(s_B__init);
 // CHECK:     tops::memset(s_B__init, tops::mdspan(tops::Shared, (float*)s_B, 5, 6), static_cast<float>(0));
 // CHECK:   } // single instance
 // CHECK:   __local__ __valigned__ float l_C[30];
 // CHECK:   if (__CHOREO_SINGLE_LOCAL__) {
-// CHECK:     tops_dte_ctx_t l_C__init;
+// CHECK:     tops::local_dte l_C__init;
 // CHECK:     tops::dte_scope s_l_C__init(l_C__init);
 // CHECK:     tops::memset(l_C__init, tops::mdspan(tops::Private, (float*)l_C, 5, 6), static_cast<float>(0));
 // CHECK:   } // single instance
@@ -51,7 +51,7 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK: __thread_dims__(4, 1, 1)
 // CHECK: __global__ void __choreo_device_foo1(choreo::f16 * a) {
 // CHECK:   __shared__ choreo::half a_shared__buf__[80640];
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   tops::shared_dte choreo_topscc_ctx0;
 // CHECK:   choreo::future a_shared(choreo_topscc_ctx0, "a_shared", 16, 16, a_shared__buf__);
 // CHECK:   tops::mdspan __mds0_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
 // CHECK:   tops::mdspan __mds1_a_shared__buf__(tops::Shared, (choreo::half*)a_shared__buf__, 18, 5, 14, 64);
@@ -61,7 +61,7 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK:   } // single instance
 // CHECK:   __syncthreads();
 // CHECK:   __local__ __valigned__ choreo::half a_local__buf__[11520];
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK:   tops::local_dte choreo_topscc_ctx1;
 // CHECK:   choreo::future a_local(choreo_topscc_ctx1, "a_local", 18, 17, a_local__buf__);
 // CHECK:   tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
 // CHECK:   tops::mdspan __mds3_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 18, 5, 2, 64);
