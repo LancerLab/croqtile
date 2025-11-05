@@ -834,6 +834,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (sto == Storage::SHARED) {
         DecrDeviceIndent();
         ds << d_indent << "} // single instance\n";
+        ds << d_indent << EmitSync(Storage::SHARED) << ";\n";
       }
     }
     return true;
@@ -2191,11 +2192,9 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
 void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
   const auto& script = FCtx(fname).GetMemReuseScript(df_name);
   if (!script.has_value()) return;
-  hs << h_indent << R"(// JIT memory reuse begin)"
-     << "\n";
+  hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
   for (const auto& s : script.value()) { hs << h_indent << s << "\n"; }
-  hs << h_indent << R"(// JIT memory reuse end)"
-     << "\n";
+  hs << h_indent << R"(// JIT memory reuse end)" << "\n";
 }
 
 static inline const std::string

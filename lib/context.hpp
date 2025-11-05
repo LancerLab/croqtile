@@ -460,7 +460,10 @@ public:
         default: return 1024;
         }
       }
-      case Storage::SHARED: return 48ull * 1024; // 48k static
+      // TODO: Memory capacity of GPU is not only determined by the
+      // arch, but also by the specific model?
+      case Storage::SHARED: return 48ull * 1024;              // 48KB
+      case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024; // 8GB
       default: choreo_unreachable("Unsupported mem level.");
       }
     }

@@ -223,7 +223,9 @@ private:
 public:
   MemUsageCheck() : VisitorWithSymTab("muchk") {
     if ((CCtx().GetTarget() == CompileTarget::Factor) ||
-        (CCtx().GetTarget() == CompileTarget::Topscc)) {
+        (CCtx().GetTarget() == CompileTarget::Topscc) ||
+        (CCtx().GetTarget() == CompileTarget::CUDA) ||
+        (CCtx().GetTarget() == CompileTarget::Cute)) {
       valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
       // initialize with ct_tot_mem_usage
       for (const auto& sto : valid_storage_type) {
@@ -235,15 +237,6 @@ public:
         L3 (global) is different with Dorado (3VG per Cluster) in
         http://wiki.enflame.cn/display/~james.zhu/Enflame+GCU+Programming+Model#EnflameGCUProgrammingModel-get_memory_space
         */
-        // initialize max memory we can allocate in byte
-        mem_usage_limit[sto] = CCtx().GetMemCapacity(sto);
-      }
-    } else if (CCtx().GetTarget() == CompileTarget::CUDA ||
-               CCtx().GetTarget() == CompileTarget::Cute) {
-      valid_storage_type = {Storage::LOCAL, Storage::SHARED};
-      // initialize with ct_tot_mem_usage
-      for (const auto& sto : valid_storage_type) {
-        ct_tot_mem_usage[sto] = 0;
         // initialize max memory we can allocate in byte
         mem_usage_limit[sto] = CCtx().GetMemCapacity(sto);
       }
