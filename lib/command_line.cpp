@@ -8,10 +8,10 @@ using namespace Choreo;
 extern location loc;
 
 // Major available options
-Option<std::string> target(
-    OptionKind::User, "--target", "-t", "topscc",
-    "Set the compilation target. The 'platform' includes <factor|topscc|cuda>.",
-    "--target <platform>", true);
+Option<std::string> target(OptionKind::User, "--target", "-t", "topscc",
+                           "Set the compilation target. The 'platform' "
+                           "includes <factor|topscc|cuda|cute>.",
+                           "--target <platform>", true);
 Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
                          "Set the architecture to execute the binary code.",
                          "-arch=<processor>");

@@ -460,6 +460,9 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "f32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F32(BaseType::F32, loc); }
   "f16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F16(BaseType::F16, loc); }
   "bf16"     { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_BF16(BaseType::BF16, loc); }
+  "f8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F8_E4M3(BaseType::F8_E4M3, loc); }
+  "f8_e4m3"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F8_E4M3(BaseType::F8_E4M3, loc); }
+  "f8_e5m2"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F8_E5M2(BaseType::F8_E5M2, loc); }
   "u32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U32(BaseType::U32, loc); }
   "s32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S32(BaseType::S32, loc); }
   "u64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U64(BaseType::U64, loc); }
@@ -470,7 +473,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "s8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S8(BaseType::S8, loc); }
   "int"      return Choreo::Parser::make_INT(BaseType::S32, loc);
   "bool"     return Choreo::Parser::make_BOOL(BaseType::BOOL, loc);
-  "half8"    return Choreo::Parser::make_F8(BaseType::F8, loc);
   "half"     return Choreo::Parser::make_F16(BaseType::F16, loc);
   "bfp16"    return Choreo::Parser::make_BF16(BaseType::BF16, loc);
   "float"    return Choreo::Parser::make_F32(BaseType::F32, loc);

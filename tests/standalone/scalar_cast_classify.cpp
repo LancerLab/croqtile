@@ -56,7 +56,7 @@ TEST_P(ScalarCastCoverageTest, AllCastsHandled) {
 
 std::vector<CastCheckParam> GenerateAllCastPairs() {
   std::vector<CastCheckParam> result;
-  constexpr int N = 14;
+  constexpr int N = 15;
   assert(static_cast<BaseType>(N - 1) == BaseType::BOOL);
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {

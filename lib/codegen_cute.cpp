@@ -2220,8 +2220,10 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "unsigned long long";
   else if (isa<BooleanType>(&ty))
     return "bool";
-  else if (isa<F8Type>(&ty))
-    return "choreo::half8";
+  else if (isa<FloatE4M3Type>(&ty))
+    return "choreo::float_e4m3_t";
+  else if (isa<FloatE5M2Type>(&ty))
+    return "choreo::float_e5m2_t";
   else if (isa<F16Type>(&ty))
     return "choreo::half";
   else if (isa<BF16Type>(&ty))
@@ -2589,8 +2591,9 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
 
   using BT = BaseType;
 
-  if (t == BT::F8 || f == BT::F8)
-    choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
+  // if (t == BT::F8 || f == BT::F8)
+  //   choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) +
+  //   "'");
 
   // need to do casting or converting.
   if (!IsValuePreservingCast(f, t)) {
