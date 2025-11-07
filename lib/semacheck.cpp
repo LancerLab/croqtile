@@ -632,8 +632,10 @@ bool SemaChecker::VisitNode(AST::Call& n) {
     if (n.IsArith()) {
       auto pty = NodeType(*n.arguments->ValueAt(0));
       if (!(isa<ScalarFloatType>(pty) || isa<VectorType>(pty)))
-        Error1(n.LOC(), "expect the argument to be a float type or vector type but got '" +
-                            PSTR(pty) + "'.");
+        Error1(
+            n.LOC(),
+            "expect the argument to be a float type or vector type but got '" +
+                PSTR(pty) + "'.");
 
       for (size_t i = 1; i < n.arguments->Count(); ++i) {
         auto sty = NodeType(*n.arguments->ValueAt(i));

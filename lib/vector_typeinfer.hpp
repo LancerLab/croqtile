@@ -242,9 +242,13 @@ public:
     assert(r_expr && "Only Expr can be R of CastExpr.");
     auto r_ty = r_expr->GetType();
     if (IsActualVectorType(r_ty)) {
-      n.SetType(r_ty);
+      auto ec = ElementCount(r_ty);
+      auto new_vty = MakeVectorType(nty->GetBaseType(), ec);
+      n.SetType(new_vty);
+      n.SetFrom(n.FromType(), ec);
+      n.SetTo(n.ToType(), ec);
       if (debug_visit)
-        dbgs() << indent << "cast: `" << STR(n) << "` -> " << PSTR(r_ty)
+        dbgs() << indent << "cast: `" << PSTR(nty) << "` -> " << PSTR(new_vty)
                << "\n";
     }
     return true;

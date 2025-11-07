@@ -3136,11 +3136,9 @@ const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
 
 // input is a `node` or `std::variant<int, float>`.
 // If `val` is existed, use it first.
-const std::string
-TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
-                           std::optional<std::variant<int, float>> val,
-                           BaseType t, BaseType f, bool is_host) const {
-
+const std::string TopsccCodeGen::ExprCastSTR(
+    AST::ptr<AST::Node> n, std::optional<std::variant<int, float>> val,
+    BaseType t, BaseType f, bool is_host, size_t element_count) const {
   std::ostringstream res;
   std::string value;
 
@@ -3161,11 +3159,6 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   if (f == t) return value;
 
   using BT = BaseType;
-
-  if (t == BT::F8_E4M3 || f == BT::F8_E4M3 || t == BT::F8_E5M2 ||
-      f == BT::F8_E5M2)
-    choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
-
   // need to do casting or converting.
   if (!IsValuePreservingCast(f, t)) {
     if (IsReinterpretiveCast(f, t))
@@ -3178,6 +3171,17 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
     else
       choreo_unreachable("unexpect cast");
   }
+
+  if (element_count > 1) { // vector type cast
+    auto tty = MakeVectorType(t, element_count);
+    auto fty = MakeVectorType(f, element_count);
+    res << "tcle::cvt<" << VectorTypeSTR(tty) << ">(" << value << ")";
+    return res.str();
+  }
+
+  if (t == BT::F8_E4M3 || f == BT::F8_E4M3 || t == BT::F8_E5M2 ||
+      f == BT::F8_E5M2)
+    choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
 
   switch (t) {
   case BT::S64: [[fallthrough]];
@@ -3355,7 +3359,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     // codegen for scalar type cast
     assert(ce->GetOp() == "cast");
     return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
-                       is_host);
+                       is_host, ce->ElementCount());
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
     // if this expr needs broadcasting
     bool rparen = false;

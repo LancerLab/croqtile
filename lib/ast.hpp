@@ -786,6 +786,7 @@ struct CastExpr : public Expr, public TypeIDProvider<CastExpr> {
 private:
   BaseType from;
   BaseType to;
+  size_t element_count = 1;
 
 public:
   CastExpr(const location& l, const ptr<Node>& val) : Expr(l, "cast", val) {
@@ -794,9 +795,17 @@ public:
 
   BaseType FromType() const { return from; }
   BaseType ToType() const { return to; }
+  bool IsVectorType() const { return element_count > 1; }
+  size_t ElementCount() const { return element_count; }
 
-  void SetFrom(BaseType bty) { from = bty; }
-  void SetTo(BaseType bty) { to = bty; }
+  void SetFrom(BaseType bty, size_t ec = 1) {
+    from = bty;
+    if (ec > 1) element_count = ec;
+  }
+  void SetTo(BaseType bty, size_t ec = 1) {
+    to = bty;
+    if (ec > 1) element_count = ec;
+  }
 
 public:
   ptr<Node> CloneImpl() const override {
