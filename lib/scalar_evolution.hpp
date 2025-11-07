@@ -131,6 +131,7 @@ public:
 public:
   bool Visit(AST::Program& n) override;
   bool Visit(AST::Expr& n) override;
+  bool Visit(AST::CastExpr& n) override;
   bool Visit(AST::NamedVariableDecl& n) override;
   bool Visit(AST::Identifier& n) override;
   bool Visit(AST::Assignment& n) override;

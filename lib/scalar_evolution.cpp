@@ -151,6 +151,19 @@ bool ScalarEvolutionAnalysis::Visit(AST::Expr& n) {
   return true;
 }
 
+bool ScalarEvolutionAnalysis::Visit(AST::CastExpr& n) {
+  TraceEachVisit(n);
+  if (!InAppointedLoop()) return true;
+  if (!NeedAnalyze(n.GetType())) return true;
+  auto r_expr = dyn_cast<AST::Expr>(n.GetR());
+  assert(r_expr && "Only Expr can be R of CastExpr.");
+  auto r_scev = r_expr->GetSCEV();
+  n.SetSCEV(r_scev);
+  if (debug_visit)
+    dbgs() << indent << "cast:  `" << STR(n) << "` -> " << STR(r_scev) << "\n";
+  return true;
+}
+
 bool ScalarEvolutionAnalysis::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
   if (!InAppointedLoop()) return true;

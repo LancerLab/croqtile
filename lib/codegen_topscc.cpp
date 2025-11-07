@@ -2443,9 +2443,10 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       IncrIndent();
       // if this loop needs vectorization, remap the iv to vec_iv
       if (cur_loop && cur_loop->CanVectorize()) {
-        std::string vec_iv_name = "__vec_iv_" + cname;
-        ssm.RemapDeviceSymbol(iv_name, vec_iv_name);
-        ssm.RemapHostSymbol(iv_name, vec_iv_name);
+        std::string vector_iv_name = "__vec_iv_" + cname;
+        std::string scalar_iv_name = ssm.DeviceName(iv_name);
+        ssm.RemapDeviceSymbol(iv_name, vector_iv_name);
+        ssm.RemapHostSymbol(iv_name, vector_iv_name);
       }
     }
   }
@@ -3247,7 +3248,10 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
     if (shape.Rank() > idx + 1)
       offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
     SimplifyExpression(offset);
-    if (!sbe::ceq(offset, sbe::nu(0))) oss << " + " << ValueSTR(offset);
+    if (!sbe::ceq(offset, sbe::nu(0))) {
+      if (idx > 0) oss << " + ";
+      oss << ValueSTR(offset);
+    }
     ++idx;
   };
   for (auto item : da.GetIndices()) {
@@ -3262,7 +3266,7 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
     } else if (auto il = AST::GetIntLiteral(*item)) {
       AppendOffset(sbe::nu(il->Val()));
     } else {
-      oss << " + ";
+      if (idx > 0) oss << " + ";
       assert(shape.Rank() >= idx + 1);
       if (shape.Rank() > idx + 1)
         oss << OpExprSTR(item, "*", true, is_host) << "*"
@@ -3271,9 +3275,8 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
         oss << OpExprSTR(item, "+", false, is_host);
       ++idx;
     }
-    if (IsActualVectorType(item_ty)) oss << "[0]";
+    if (IsActualVectorType(item_ty) && da.HasNote("VLDST")) { oss << "[0]"; }
   }
-  oss << ")";
   return oss.str();
 }
 
@@ -3341,7 +3344,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             << OpExprSTR(da->data, "+", true, is_host);
         auto shape = sty->GetShape();
 
-        oss << AddressOffset(shape, *da, is_host);
+        oss << " + " << AddressOffset(shape, *da, is_host) << ")";
       }
     } else {
       assert(!da->AccessElement());
@@ -3573,52 +3576,60 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   return oss.str();
 }
 
-const std::string
-TopsccCodeGen::BuildTcleLoad(const std::string& addr_str,
-                             const std::string& ty_str) const {
+const std::string TopsccCodeGen::BuildTcleLoad(const std::string& addr,
+                                               const std::string& ty,
+                                               const std::string& mask,
+                                               const std::string& other) const {
   std::ostringstream oss;
-  oss << "tcle::load<" << ty_str << ">(";
-  if (CCtx().GetArch() == TargetArch::GCU3)
-    oss << "(__TCLE_AS__ char *)(";
-  else if (CCtx().GetArch() == TargetArch::GCU4)
-    oss << "(char *)(";
-  else
-    choreo_unreachable("unsupported target arch.");
-  oss << addr_str << ")";
+  oss << "tcle::load<" << ty << ">(" << addr;
+  if (mask.empty()) {
+    oss << ")";
+  } else {
+    assert(!other.empty());
+    oss << ", " << other << ", " << mask << ")";
+  }
   return oss.str();
 }
 
-const std::string TopsccCodeGen::BuildTcleLoadCond(
-    const std::string& addr, const std::string& other, const std::string& mask,
-    const std::string& ty) const {
+const std::string TopsccCodeGen::BuildTcleStore(const std::string& addr_str,
+                                                const std::string& val_str,
+                                                const std::string& mask) const {
   std::ostringstream oss;
-  oss << "tcle::load<" << ty << ">(" << "(char *)(" << addr << "), " << other
-      << ", " << mask << ")";
+  oss << "tcle::store(" << val_str << ", " << addr_str;
+  if (mask.empty()) {
+    oss << ")";
+  } else {
+    oss << ", " << mask << ")";
+  }
   return oss.str();
 }
 
-const std::string
-TopsccCodeGen::BuildTcleStore(const std::string& addr_str,
-                              const std::string& val_str) const {
+const std::string TopsccCodeGen::BuildTcleGather(
+    const std::string& base, const std::string& offset,
+    const std::string& ty_str, const std::string& mask,
+    const std::string& other) const {
   std::ostringstream oss;
-  oss << "tcle::store(" << val_str << ", ";
-  if (CCtx().GetArch() == TargetArch::GCU3)
-    oss << "(__TCLE_AS__ char *)(";
-  else if (CCtx().GetArch() == TargetArch::GCU4)
-    oss << "(char *)(";
-  else
-    choreo_unreachable("unsupported target arch.");
-  oss << addr_str << ")";
+  oss << "tcle::gather<" << ty_str << ">(" << "(" << base << "), " << offset;
+  if (mask.empty()) {
+    oss << ")";
+  } else {
+    assert(!other.empty());
+    oss << ", " << other << ", " << mask << ")";
+  }
   return oss.str();
 }
 
-const std::string
-TopsccCodeGen::BuildTcleStoreCond(const std::string& addr,
-                                  const std::string& val,
-                                  const std::string& mask) const {
+const std::string TopsccCodeGen::BuildTcleScatter(
+    const std::string& value, const std::string& base,
+    const std::string& offset, const std::string& mask) const {
   std::ostringstream oss;
-  oss << "tcle::store(" << val << ", "
-      << "(char *)(" << addr << ", " << mask << ")";
+  oss << "tcle::scatter(" << value << ", " << "(" << base << "), " << offset;
+  if (mask.empty()) {
+    oss << ")";
+  } else {
+    oss << ", " << mask << ")";
+  }
+
   return oss.str();
 }
 
@@ -3630,13 +3641,16 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
     auto da_ty = da->GetType();
     auto elem_ty = sty->ElementType();
     if (auto vty = dyn_cast<VectorType>(da_ty)) {
+      auto vty_str = VectorTypeSTR(vty);
+      auto data_name = da->GetDataName();
       if (da->HasNote("VLDST")) {
         // continuous address, vector load/store
-        auto data_name = da->GetDataName();
-        auto addr_str = std::string("(") + NameBaseType(elem_ty) + "*)" +
-                        ssm.DeviceName(InScopeName(data_name)) +
-                        AddressOffset(sty->GetShape(), *da, false);
-        auto vty_str = VectorTypeSTR(vty);
+        std::string addr_str = "(" + std::string(NameBaseType(elem_ty)) +
+                               " *)" + ssm.DeviceName(InScopeName(data_name)) +
+                               " + " +
+                               AddressOffset(sty->GetShape(), *da, false);
+        if (CCtx().GetArch() == TargetArch::GCU3)
+          addr_str = "(__TCLE_AS__ void *)(" + addr_str + ")";
         if (is_load) {
           // load
           oss << BuildTcleLoad(addr_str, vty_str);
@@ -3648,7 +3662,7 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
             // 'st_val' is conditionally selected between 'val_str' and 'ld_val'
             // from the same memory location.
             if (CCtx().GetArch() == TargetArch::GCU4) {
-              oss << BuildTcleStoreCond(addr_str, val_str, "exec");
+              oss << BuildTcleStore(addr_str, val_str, "exec");
             } else if (CCtx().GetArch() == TargetArch::GCU3) {
               auto ld_val = symtab.GetAnonName();
               oss << VectorTypeSTR(vty) << " " << ld_val << " = "
@@ -3666,8 +3680,20 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
         }
       } else if (da->HasNote("VGZST")) {
         // random address, vector gather/scatter
-        choreo_unreachable(
-            "choreo currently do not support gather or scatter.");
+        auto base_addr_str = std::string("(") + NameBaseType(elem_ty) + " *)" +
+                             ssm.DeviceName(InScopeName(data_name));
+        auto addr_offsets_str = AddressOffset(sty->GetShape(), *da, false);
+        addr_offsets_str = "(" + addr_offsets_str + ")";
+        if (SizeOf(elem_ty) != 1) {
+          addr_offsets_str =
+              addr_offsets_str + " * " + std::to_string(SizeOf(elem_ty));
+        }
+        if (is_load) {
+          oss << BuildTcleGather(base_addr_str, addr_offsets_str, vty_str);
+        } else {
+          oss << BuildTcleScatter(val_str, base_addr_str, addr_offsets_str,
+                                  masking ? "exec" : "");
+        }
       }
     } else {
       oss << ExprSTR(da, false) << " = " << val_str;

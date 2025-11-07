@@ -66,7 +66,9 @@ public:
   virtual const NoteMapType& Note() const { return note; }
   virtual NoteMapType& Note() { return note; }
   virtual void AddNote(const std::string& s) { note.emplace(s, ""); }
-  virtual bool HasNote(const std::string& s) { return note.count(s) != 0; }
+  virtual bool HasNote(const std::string& s) const {
+    return note.count(s) != 0;
+  }
 
   virtual bool IsBlock() const { return false; }
   virtual ParallelLevel GetLevel() const { return level; }

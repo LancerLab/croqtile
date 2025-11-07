@@ -1,0 +1,48 @@
+// REQUIRES: TARGET-GCU400 GCUSIM
+// RUN: choreo -es -arch=gcu400 --vectorize %s | FileCheck %s --check-prefix=CODEGEN
+// RUN: choreo -t topscc -arch=gcu400 --vectorize %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s
+
+#define N 6
+#define M 256
+
+__co__ auto vecadd(f32 [N, M] a, f32 [N, M] b)  {
+  f32 [a.span(0), a.span(1)/2] c;
+  parallel p by 1, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f32[l1_a.span(0), l1_a.span(1)/2] l1_c;
+    foreach {i, j} in [l1_c.span] {
+      f32 val = l1_a.data.at(i, j * 2) + l1_b.data.at(i, j * 2);
+      l1_c.at(i, j) = val;
+    }
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+
+int main() { /// host program
+  choreo::f32 a[N][M] = {0};
+  choreo::f32 b[N][M] = {0};
+  auto a_data = choreo::make_spanview<2, choreo::f32>((float*)a, {N, M});
+  auto b_data = choreo::make_spanview<2, choreo::f32>((float*)b, {N, M});  
+  a_data.fill_random(-10.0f, 10.0f);
+  b_data.fill_random(-10.0f, 10.0f);
+
+  auto res = vecadd(a_data, b_data);
+  
+  // verification
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+  
+      if (a[i][j*2] + b[i][j*2] != res[i][j]) {
+        choreo::choreo_assert(a[i][j] + b[i][j] == res[i][j], "values are not equal.");
+      }
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+// CODEGEN: __vector float val = tcle::gather<__vector float>(((float *)l1_a.data()), ((__iv_i * 256) + __vec_iv_j * 2) * 4) + tcle::gather<__vector float>(((float *)l1_b.data()), ((__iv_i * 256) + __vec_iv_j * 2) * 4);
+// CODEGEN: tcle::store(val, (float *)l1_c + (__iv_i * 128) + __vec_iv_j[0]);
+// CHECK: Test Passed

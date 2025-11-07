@@ -483,15 +483,28 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
       return true;
     }
 
-  auto scev = n.GetSCEV();
-  if (auto ar = dyn_cast<SCEVAddRecExpr>(scev)) {
-    auto step_val = ar->GetStep()->GetValue();
-    if (vector_factor > 1 && sbe::cne(step_val, sbe::nu(vector_factor))) {
+  DiversityShape offset_shape = DiversityShape(UNIFORM, sbe::nu(0));
+  auto indices = n.GetIndices();
+  for (int idx = indices.size() - 1; idx >= 0; --idx) {
+    // process from last index to first index
+    auto index = indices[idx];
+    offset_shape =
+        ComputeDiversityShape(offset_shape, index->GetDiversityShape(), "+");
+  }
+
+  if (offset_shape.Varying() && !offset_shape.Stride(1)) {
+    // need gather/scatter for vectorized access
+    if (CCtx().GetArch() != TargetArch::GCU4) {
       SetLoopVectorizationFailed();
       if (debug_visit) {
-        dbgs() << indent << "interleaved access with step "
-               << STR(step_val / sbe::nu(vector_factor))
-               << " is not legal for vectorization: " << STR(n) << "\n";
+        dbgs() << indent << "Gather/Scatter is not legal for vectorization"
+               << " in " << STR(CCtx().GetArch()) << " target \n";
+      }
+    } else {
+      if (debug_visit) {
+        dbgs() << indent
+               << "Gather/Scatter is needed for vectorized access: " << STR(n)
+               << "\n";
       }
     }
   }
@@ -1032,7 +1045,7 @@ public:
         // if loop count is known and less than vector factor and current plan
         // is not 1, skip the new plan
         if (loop_count->IsNumeric()) {
-          if (sbe::cle(loop_count, sbe::nu(cur_loop->GetVectorFactor())) &&
+          if (sbe::clt(loop_count, sbe::nu(cur_loop->GetVectorFactor())) &&
               vector_factors[loop_name] > 1) {
             if (debug_visit)
               dbgs() << "[plan] loop count " << STR(loop_count)

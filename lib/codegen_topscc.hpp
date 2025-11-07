@@ -413,16 +413,21 @@ private:
   const std::string DASTR(AST::ptr<AST::DataAccess>&, const std::string& = "",
                           bool is_load = true, bool masking = false) const;
   const std::string BuildTcleLoad(const std::string& addr,
-                                  const std::string& ty) const;
-  const std::string BuildTcleLoadCond(const std::string& addr,
-                                      const std::string& other,
-                                      const std::string& mask,
-                                      const std::string& ty) const;
+                                  const std::string& ty,
+                                  const std::string& mask = "",
+                                  const std::string& other = "") const;
   const std::string BuildTcleStore(const std::string& addr,
-                                   const std::string& val) const;
-  const std::string BuildTcleStoreCond(const std::string& addr,
-                                       const std::string& val,
-                                       const std::string& mask) const;
+                                   const std::string& val,
+                                   const std::string& mask = "") const;
+  const std::string BuildTcleGather(const std::string& base,
+                                    const std::string& offset,
+                                    const std::string& ty_str,
+                                    const std::string& mask = "",
+                                    const std::string& other = "") const;
+  const std::string BuildTcleScatter(const std::string& value,
+                                     const std::string& base,
+                                     const std::string& offset,
+                                     const std::string& mask = "") const;
 
   std::pair<std::string, size_t> GenMdsOffset(const ptr<AST::ChunkAt>,
                                               ptr<DMAConfig> = nullptr) const;

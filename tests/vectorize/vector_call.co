@@ -42,5 +42,6 @@ int main() {
   std::cout << "Passed.\n";
 }
 // CHECK: call:  widen `__exp(CAST(f32=>f32: ' (0.000000f - lfl.data[index]) ') )`, type: mutable vector<f32,32>
-// CODEGEN: __vector float anon_1 = 1.000000f / (1.000000f + tcle::exp(0.000000f - tcle::load<__vector float>((__TCLE_AS__ char *)((float*)lfl.data() + (__iv_i * 12288) + (__iv_j * 192) + __vec_iv_k[0]))));
-// CODEGEN: tcle::store(anon_1, (__TCLE_AS__ char *)((float*)lout + (__iv_i * 12288) + (__iv_j * 192) + __vec_iv_k[0]));
+// CODEGEN: __vector float anon_1 = 1.000000f / (1.000000f + tcle::exp(0.000000f - tcle::load<__vector float>((__TCLE_AS__ void *)((float *)lfl.data() + (__iv_i * 12288) + (__iv_j * 192) + __vec_iv_k[0]))));
+// CODEGEN: tcle::store(anon_1, (__TCLE_AS__ void *)((float *)lout + (__iv_i * 12288) + (__iv_j * 192) + __vec_iv_k[0]));
+

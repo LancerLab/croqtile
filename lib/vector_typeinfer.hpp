@@ -173,8 +173,6 @@ public:
           n.AddNote("VLDST"); // load/store
         } else if (indice_ds.Divergent() || indice_ds.Stride()) {
           n.AddNote("VGZST"); // getter/scatter
-          choreo_unreachable(
-              "choreo currently do not support gather or scatter.");
         }
       }
     }
@@ -231,6 +229,23 @@ public:
         choreo_unreachable("at least one operand should be vector type.");
       }
     } else if (n.IsTernary()) {
+    }
+    return true;
+  }
+
+  bool Visit(AST::CastExpr& n) {
+    TraceEachVisit(n);
+    auto nty = n.GetType();
+    auto nds = n.GetDiversityShape();
+    if (Skip(nty, nds)) return true;
+    auto r_expr = dyn_cast<AST::Expr>(n.GetR());
+    assert(r_expr && "Only Expr can be R of CastExpr.");
+    auto r_ty = r_expr->GetType();
+    if (IsActualVectorType(r_ty)) {
+      n.SetType(r_ty);
+      if (debug_visit)
+        dbgs() << indent << "cast: `" << STR(n) << "` -> " << PSTR(r_ty)
+               << "\n";
     }
     return true;
   }

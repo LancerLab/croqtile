@@ -63,7 +63,7 @@ inline DiversityShape ComputeDiversityShape(const DiversityShape& lhs,
     if (op == "+" || op == "-")
       return DiversityShape(lhs);
     else if (op == "*") {
-      // e.g., 0,2,4,6 * 2, then it is still stride = 4
+      // e.g., 0,2,4,6 * 2, then its stride = 4
       if (IsValidValueItem(lhs.stride) && IsValidValueItem(rhs.value)) {
         auto stride = lhs.stride * rhs.value;
         return DiversityShape(Kind::STRIDE, stride);
