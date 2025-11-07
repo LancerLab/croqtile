@@ -1293,16 +1293,11 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     hs << ((i++ > 0) ? ", " : "");
     hs << UnScopedName(item.first);
   }
-  const auto& offset_args =
-      FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
-  std::string mr_idx_suffix = "";
-  if (cgi.GetFunctionTrait(fname).multiple_parallelby)
-    mr_idx_suffix = std::to_string(parallel_idx);
-  if (offset_args.has_value())
-    for (const auto& [sto, offsets] : offset_args.value())
-      for (size_t idx = 0; idx < offsets.size(); ++idx)
-        hs << ((i++ > 0) ? ", " : "") << "__co__" << STR(sto)
-           << "_chunk_offsets" << mr_idx_suffix << "[" << idx << "]";
+
+  if (const auto& mri = FCtx(fname).GetMemReuseInfo(SSTab().ScopeName()))
+    for (const auto& [sto, ie] : mri->infos)
+      for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
+        hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
 
   hs << ");\n";
 
@@ -2722,10 +2717,36 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
 }
 
 void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
-  const auto& script = FCtx(fname).GetMemReuseScript(df_name);
-  if (!script.has_value()) return;
+  const auto& mri = FCtx(fname).GetMemReuseInfo(df_name);
+  if (!mri) return;
   hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
-  for (const auto& s : script.value()) { hs << h_indent << s << "\n"; }
+  for (const auto& [sto, ie] : mri->infos) {
+    hs << h_indent << "HeapSimulator::Chunks " << ie.chunks_name << ";\n";
+    for (const auto& c : ie.chunks)
+      hs << h_indent << ie.chunks_name << ".push_back(" << c << ");\n";
+  }
+  hs << h_indent << "HeapSimulator " << mri->simulator << ";\n";
+  for (const auto& [sto, ie] : mri->infos) {
+    hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
+       << mri->simulator << ".Allocate(" << ie.chunks_name << ", 512);\n";
+    hs << h_indent << "unsigned " << ie.spm_size << " = " << ie.result
+       << ".heap_size;\n";
+    // special host runtime check
+    std::string mem_capacity = std::to_string(CCtx().GetMemCapacity(sto));
+    hs << h_indent << "choreo::runtime_check(" << ie.spm_size << " <= (size_t)"
+       << mem_capacity << ", \"In the memory reuse of dynamic shapes"
+       << ", the size of the initial " << STR(sto)
+       << " spm should not exceed the memory usage limit " << mem_capacity
+       << "bytes.\");";
+    hs << h_indent << "unsigned long " << ie.offsets_name << "["
+       << mri->infos[sto].offset_args.size() << "];" << "\n";
+    std::string idx = ie.chunks_name + "_idx";
+    hs << h_indent << "size_t " << idx << " = 0;\n";
+    hs << h_indent << "for (const auto& [buffer_id, offset] : " << ie.result
+       << ".chunk_offsets)\n";
+    hs << h_indent << "  " << ie.offsets_name << "[" << idx
+       << "++] = offset;\n";
+  }
   hs << h_indent << R"(// JIT memory reuse end)" << "\n";
 }
 
@@ -2816,12 +2837,10 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
     ssm.MapDeviceSymbolIfNotExist(item.first, UnScopedName(item.first));
   }
 
-  const auto& offset_args =
-      FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
-  if (offset_args.has_value())
-    for (const auto& [_, offsets] : offset_args.value())
-      for (size_t idx = 0; idx < offsets.size(); ++idx) {
-        auto dname = RegexReplaceAll(offsets[idx], "::", "_");
+  if (const auto& mri = FCtx(fname).GetMemReuseInfo(SSTab().ScopeName()))
+    for (const auto& [sto, ie] : mri->infos)
+      for (size_t idx = 0; idx < ie.offset_args.size(); ++idx) {
+        auto dname = RegexReplaceAll(ie.offset_args[idx], "::", "_");
         oss << ((index++ > 0) ? ", " : "") << "unsigned long " << dname;
       }
 

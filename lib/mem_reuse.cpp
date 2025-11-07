@@ -254,13 +254,13 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
   std::string co_func_name = GetFuncNameFromScopedName(df_name);
   if (ma.have_dynamic_shape.count(df_name) &&
       ma.have_dynamic_shape.at(df_name)) {
+    auto mri = FCtx(co_func_name).SetMemReuseInfo(df_name);
+    std::string simulator = "__co__heap_simulator" + idx_suffix;
+    mri->simulator = simulator;
+    auto& infos = mri->infos;
     std::set<Storage> required_storage;
-    // JIT memory reuse script
-    std::vector<std::string> script;
-    // the args which are passed to device function
-    FunctionContext::MemReuseOffsetMap offset_args;
 
-    auto GenPushBackScript = [&](const auto& bs) -> void {
+    auto SetChunkInfo = [&](const auto& bs) -> void {
       for (const auto& buffer : bs) {
         auto sto = ma.buf_sto.at(buffer.buffer_id);
         // global buffer reuse is not supported yet
@@ -268,12 +268,11 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
         if (sto != Storage::LOCAL && sto != Storage::SHARED)
           choreo_unreachable("The storage type: " + STR(sto) +
                              " is not supported yet!");
-        offset_args[sto].push_back("mr_offset" + buffer.buffer_id);
+        infos[sto].offset_args.push_back("mr_offset" + buffer.buffer_id);
+        auto chunks_name = "__co__" + STR(sto) + "_chunks" + idx_suffix;
         if (!required_storage.count(sto)) {
           required_storage.insert(sto);
-          script.insert(script.begin(), "HeapSimulator::Chunks __co__" +
-                                            STR(sto) + "_chunks" + idx_suffix +
-                                            ";");
+          infos[sto].chunks_name = "__co__" + STR(sto) + "_chunks" + idx_suffix;
         }
         std::string buffer_size;
         bool buffer_size_is_str = false;
@@ -286,13 +285,13 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
           choreo_unreachable("Unexpected type of buffer.size: " +
                              std::string(typeid(buffer.size).name()) +
                              "\n\twith buffer " + buffer.buffer_id);
-        script.push_back(
-            "__co__" + STR(sto) + "_chunks" + idx_suffix + ".push_back({" +
+        infos[sto].chunks.push_back(
+            std::string("{") +
             (buffer_size_is_str ? "static_cast<size_t>(" : "") + buffer_size +
             (buffer_size_is_str ? ")" : "") + ", " +
             std::to_string(buffer.start_time) + ", " +
             std::to_string(buffer.end_time) + ", \"" +
-            RegexReplaceAll(buffer.buffer_id, "::", "_") + "\"});");
+            RegexReplaceAll(buffer.buffer_id, "::", "_") + "\"}");
       }
     };
 
@@ -308,51 +307,29 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       return total_event_size;
     };
 
-    GenPushBackScript(ctx.buffers);
-    GenPushBackScript(ctx.dynamic_buffers);
+    SetChunkInfo(ctx.buffers);
+    SetChunkInfo(ctx.dynamic_buffers);
 
-    script.push_back("HeapSimulator __co__heap_simulator" + idx_suffix + ";");
     for (const auto& sto : required_storage) {
       std::string stos = STR(sto);
       std::string result = "__co__" + stos + "_result" + idx_suffix;
-      std::string offsets = "__co__" + stos + "_chunk_offsets" + idx_suffix;
-      script.push_back("HeapSimulator::Result " + result +
-                       " = "
-                       "__co__heap_simulator" +
-                       idx_suffix + ".Allocate(__co__" + stos + "_chunks" +
-                       idx_suffix + ", 512);");
+      std::string offsets_name =
+          "__co__" + stos + "_chunk_offsets" + idx_suffix;
+      infos[sto].result = result;
+      infos[sto].offsets_name = offsets_name;
       std::string spm_size_var = "__co__" + stos + "_spm_size" + idx_suffix;
-      script.push_back("unsigned " + spm_size_var + " = " + result +
-                       ".heap_size;");
+      infos[sto].spm_size = "__co__" + stos + "_spm_size" + idx_suffix;
       // special case for RtCheck which emits after general RtCheck.
       size_t mem_capacity = CCtx().GetMemCapacity(sto);
-      script.push_back("choreo::runtime_check(" + spm_size_var +
-                       " <= (size_t)" + std::to_string(mem_capacity) +
-                       ", \"In the memory reuse of dynamic shapes, the size "
-                       "of the initial " +
-                       stos + " spm should not exceed the memory usage limit " +
-                       std::to_string(mem_capacity) + "bytes.\");");
       size_t total_event_size = TotalEventSize(sto);
       if (sto == Storage::LOCAL)
         ctx.local_spm_size = mem_capacity - AlignUp(total_event_size, 8);
       else if (sto == Storage::SHARED)
         ctx.shared_spm_size = mem_capacity - AlignUp(total_event_size, 8);
-      // generate offsets in array
-      script.push_back("unsigned long " + offsets + "[" +
-                       std::to_string(offset_args.at(sto).size()) + "];");
-      // TODO: need validation?
-      script.push_back("size_t __co__" + stos + "_chunk_idx" + idx_suffix +
-                       " = 0;");
-      script.push_back("for (const auto& [buffer_id, offset] : " + result +
-                       ".chunk_offsets)");
-      script.push_back("  " + offsets + "[__co__" + stos + "_chunk_idx" +
-                       idx_suffix + "++] = offset;");
     }
-    FCtx(co_func_name).SetMemReuseScript(df_name, script);
-
     // record the offset args in sorted order
-    for (auto& [sto, args] : offset_args) std::sort(args.begin(), args.end());
-    FCtx(co_func_name).SetMemReuseOffsetArgs(df_name, offset_args);
+    for (auto& [sto, info] : infos)
+      std::sort(info.offset_args.begin(), info.offset_args.end());
 
     return;
   }

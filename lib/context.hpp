@@ -247,9 +247,6 @@ struct Assertion {
 
 // per-function context
 class FunctionContext {
-public:
-  using MemReuseOffsetMap = std::map<Storage, std::vector<std::string>>;
-
 private:
   FutureBufferInfo fbi;
   std::map<std::string, OptimizedValues> sym_values;
@@ -257,10 +254,19 @@ private:
   std::vector<Assertion> assertions;
 
   struct MemReuseInfo {
-    std::vector<std::string> mem_reuse_script;
-    MemReuseOffsetMap mem_reuse_offset_args;
+    std::string simulator;
+    struct InfoEntry {
+      std::string chunks_name;
+      std::vector<std::string> chunks;
+      std::string result;
+      std::string offsets_name;
+      std::vector<std::string> offset_args;
+      std::string spm_size;
+    };
+    std::map<Storage, InfoEntry> infos;
   };
-  std::map<std::string, MemReuseInfo> mem_reuse_infos;
+  // device func name => mri
+  std::map<std::string, ptr<MemReuseInfo>> mem_reuse_infos;
 
 public:
   FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
@@ -286,23 +292,21 @@ public:
   }
   const std::vector<Assertion>& GetAssertions() const { return assertions; }
 
-  std::optional<std::vector<std::string>>
-  GetMemReuseScript(const std::string& dev_func) const {
-    if (!mem_reuse_infos.count(dev_func)) return std::nullopt;
-    return mem_reuse_infos.at(dev_func).mem_reuse_script;
+  // return `nullptr` if no memory reuse info
+  ptr<MemReuseInfo> GetMemReuseInfo(const std::string& dev_func) const {
+    if (!mem_reuse_infos.count(dev_func)) return nullptr;
+    return mem_reuse_infos.at(dev_func);
   }
-  void SetMemReuseScript(const std::string& dev_func,
-                         const std::vector<std::string>& s) {
-    mem_reuse_infos[dev_func].mem_reuse_script = s;
+  ptr<MemReuseInfo> SetMemReuseInfo(const std::string& dev_func) {
+    if (mem_reuse_infos.count(dev_func)) return mem_reuse_infos.at(dev_func);
+    auto info = std::make_shared<MemReuseInfo>();
+    mem_reuse_infos.emplace(dev_func, info);
+    return info;
   }
-  std::optional<MemReuseOffsetMap>
-  GetMemReuseOffsetArgs(const std::string& dev_func) const {
-    if (!mem_reuse_infos.count(dev_func)) return std::nullopt;
-    return mem_reuse_infos.at(dev_func).mem_reuse_offset_args;
-  }
-  void SetMemReuseOffsetArgs(const std::string& dev_func,
-                             const MemReuseOffsetMap& s) {
-    mem_reuse_infos.at(dev_func).mem_reuse_offset_args = s;
+  bool HaveDynamicBuffer(const std::string& dev_func, Storage sto) const {
+    auto mri = GetMemReuseInfo(dev_func);
+    if (!mri) return false;
+    return mri->infos.count(sto);
   }
 };
 

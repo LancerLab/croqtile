@@ -738,28 +738,20 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 
         if (!n.init_value) return;
 
-        // support int/float-point literal initialization
-        std::string sym_init_val = sym + "_init_val";
-        hs << h_indent << bts << " " << sym_init_val << " = "
-           << ExprSTR(n.init_value) << ";\n";
-        std::string sym_init_vptr = sym + "_init_vptr";
-        size_t data_len = SizeOf(sty->ElementType()) * 8;
-        std::string init_val_type;
-        switch (data_len) {
-        case 32: init_val_type = "int"; break;
-        case 16: init_val_type = "unsigned short"; break;
-        case 8: init_val_type = "unsigned char"; break;
-        default:
-          choreo_unreachable("unsupported data length " +
-                             std::to_string(data_len) +
-                             " in global span init.");
-        }
-        hs << h_indent << init_val_type << "* " << sym_init_vptr
-           << " = reinterpret_cast<" << init_val_type << "*>(&" << sym_init_val
+        std::string sym_data = sym + ".data()";
+        hs << h_indent << "auto " << sym
+           << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
+           << shape.Rank() << ">({"
+           << ShapeSTR(shape, false, ", ", BaseType::U64) << "});\n";
+        hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
+           << sym << ".element_count()"
+           << ", "
+           << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
+                          GetBaseType(*n.init_value->GetType()), true)
            << ");\n";
-        hs << h_indent << "choreo::abend_true(cudaMemsetD" << data_len << "("
-           << buf_sym << ", *" << sym_init_vptr << ", "
-           << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
+           << sym_data << ", " << UnScopedSizeExpr(*sty)
+           << ", cudaMemcpyHostToDevice));\n";
       }
     };
 
@@ -780,8 +772,13 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       // memory reuse is enabled
 
       if (n.Note().count("spm")) {
-        ds << d_indent << type_modifiers << bts << " " << sym << "["
-           << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        if (sto == Storage::SHARED &&
+            FCtx(fname).HaveDynamicBuffer(SSTab().ScopeName(), sto))
+          ds << d_indent << "extern __shared__ " << bts << " " << sym
+             << "[];\n";
+        else
+          ds << d_indent << type_modifiers << bts << " " << sym << "["
+             << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;
       }
 
@@ -1077,7 +1074,14 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
      << ValueSTR(lconfig.block_dim_x) << ", " << ValueSTR(lconfig.block_dim_y)
      << ", " << ValueSTR(lconfig.block_dim_z) << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
-     << ", __" << fname << "_bdims" << parallel_idx << ">>>(";
+     << ", __" << fname << "_bdims" << parallel_idx;
+  if (auto dev_name = SSTab().ScopeName();
+      FCtx(fname).HaveDynamicBuffer(dev_name, Storage::SHARED)) {
+    auto mri = FCtx(fname).GetMemReuseInfo(dev_name);
+    assert(mri);
+    hs << ", " << mri->infos[Storage::SHARED].spm_size;
+  }
+  hs << ">>>(";
 
   size_t i = 0;
   for (auto& item : GetDeviceFuncIns(updating_cgi)) {
@@ -1094,16 +1098,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     hs << ((i++ > 0) ? ", " : "");
     hs << UnScopedName(item.first);
   }
-  const auto& offset_args =
-      FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
-  std::string mr_idx_suffix = "";
-  if (cgi.GetFunctionTrait(fname).multiple_parallelby)
-    mr_idx_suffix = std::to_string(parallel_idx);
-  if (offset_args.has_value())
-    for (const auto& [sto, offsets] : offset_args.value())
-      for (size_t idx = 0; idx < offsets.size(); ++idx)
-        hs << ((i++ > 0) ? ", " : "") << "__co__" << STR(sto)
-           << "_chunk_offsets" << mr_idx_suffix << "[" << idx << "]";
+  if (const auto& mri = FCtx(fname).GetMemReuseInfo(SSTab().ScopeName()))
+    for (const auto& [sto, ie] : mri->infos)
+      for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
+        hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
 
   hs << ");\n";
 
@@ -2190,10 +2188,36 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
 }
 
 void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
-  const auto& script = FCtx(fname).GetMemReuseScript(df_name);
-  if (!script.has_value()) return;
+  const auto& mri = FCtx(fname).GetMemReuseInfo(df_name);
+  if (!mri) return;
   hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
-  for (const auto& s : script.value()) { hs << h_indent << s << "\n"; }
+  for (const auto& [sto, ie] : mri->infos) {
+    hs << h_indent << "HeapSimulator::Chunks " << ie.chunks_name << ";\n";
+    for (const auto& c : ie.chunks)
+      hs << h_indent << ie.chunks_name << ".push_back(" << c << ");\n";
+  }
+  hs << h_indent << "HeapSimulator " << mri->simulator << ";\n";
+  for (const auto& [sto, ie] : mri->infos) {
+    hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
+       << mri->simulator << ".Allocate(" << ie.chunks_name << ", 512);\n";
+    hs << h_indent << "unsigned " << ie.spm_size << " = " << ie.result
+       << ".heap_size;\n";
+    // special host runtime check
+    std::string mem_capacity = std::to_string(CCtx().GetMemCapacity(sto));
+    hs << h_indent << "choreo::runtime_check(" << ie.spm_size << " <= (size_t)"
+       << mem_capacity << ", \"In the memory reuse of dynamic shapes"
+       << ", the size of the initial " << STR(sto)
+       << " spm should not exceed the memory usage limit " << mem_capacity
+       << "bytes.\");";
+    hs << h_indent << "unsigned long " << ie.offsets_name << "["
+       << mri->infos[sto].offset_args.size() << "];" << "\n";
+    std::string idx = ie.chunks_name + "_idx";
+    hs << h_indent << "size_t " << idx << " = 0;\n";
+    hs << h_indent << "for (const auto& [buffer_id, offset] : " << ie.result
+       << ".chunk_offsets)\n";
+    hs << h_indent << "  " << ie.offsets_name << "[" << idx
+       << "++] = offset;\n";
+  }
   hs << h_indent << R"(// JIT memory reuse end)" << "\n";
 }
 
@@ -2284,12 +2308,10 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
     ssm.MapDeviceSymbolIfNotExist(item.first, UnScopedName(item.first));
   }
 
-  const auto& offset_args =
-      FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
-  if (offset_args.has_value())
-    for (const auto& [_, offsets] : offset_args.value())
-      for (size_t idx = 0; idx < offsets.size(); ++idx) {
-        auto dname = RegexReplaceAll(offsets[idx], "::", "_");
+  if (const auto& mri = FCtx(fname).GetMemReuseInfo(SSTab().ScopeName()))
+    for (const auto& [sto, ie] : mri->infos)
+      for (size_t idx = 0; idx < ie.offset_args.size(); ++idx) {
+        auto dname = RegexReplaceAll(ie.offset_args[idx], "::", "_");
         oss << ((index++ > 0) ? ", " : "") << "unsigned long " << dname;
       }
 
