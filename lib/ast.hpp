@@ -442,7 +442,8 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
     assert(IsFloatPointBaseType(bt) &&
            "BaseType must be a float-point fundamental type.");
     switch (bt) {
-    case BaseType::F8:
+    case BaseType::F8_E4M3:
+    case BaseType::F8_E5M2:
     case BaseType::BF16:
     case BaseType::F16:
     case BaseType::F32: value = static_cast<float>(0.0); break;
@@ -1273,7 +1274,8 @@ private:
       case BaseType::F32:
       case BaseType::F16:
       case BaseType::BF16:
-      case BaseType::F8:
+      case BaseType::F8_E4M3:
+      case BaseType::F8_E5M2:
       case BaseType::U64:
       case BaseType::S64:
       case BaseType::U32:
@@ -1305,7 +1307,8 @@ private:
         SetType(MakeScalarIntegerType(base_type, is_mutable));
         break;
       case BaseType::BOOL: SetType(MakeBooleanType(is_mutable)); break;
-      case BaseType::F8:
+      case BaseType::F8_E4M3:
+      case BaseType::F8_E5M2:
       case BaseType::F16:
       case BaseType::BF16:
       case BaseType::F32:

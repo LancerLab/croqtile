@@ -440,8 +440,10 @@ HostTypeStringify(const Choreo::Type& ty, bool is_ret = false,
     res = "unsigned long long";
   else if (isa<BooleanType>(&ty))
     res = "bool";
-  else if (isa<F8Type>(&ty))
-    res = "choreo::half8";
+  else if (isa<FloatE4M3Type>(&ty))
+    res = "choreo::float_e4m3_t";
+  else if (isa<FloatE5M2Type>(&ty))
+    res = "choreo::float_e5m2_t";
   else if (isa<F16Type>(&ty))
     res = "choreo::half";
   else if (isa<BF16Type>(&ty))

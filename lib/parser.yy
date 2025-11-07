@@ -188,7 +188,7 @@ void choreo_info(const char *message) {
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
 %token <Choreo::Storage> SUBLOCAL LOCAL SHARED GLOBAL
-%token <Choreo::BaseType> F64 F32 F16 BF16 F8 U16 S16 U8 S8 U32 S32 U64 S64 BOOL VOID INT
+%token <Choreo::BaseType> F64 F32 F16 BF16 F8_E4M3 F8_E5M2 U16 S16 U8 S8 U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 // MMA related builtin operations
@@ -576,7 +576,8 @@ fundamental_type
     | F32   { $$ = $1; }
     | F16   { $$ = $1; }
     | BF16  { $$ = $1; }
-    | F8    { $$ = $1; }
+    | F8_E4M3 { $$ = $1; }
+    | F8_E5M2 { $$ = $1; }
     | U16   { $$ = $1; }
     | S16   { $$ = $1; }
     | U8    { $$ = $1; }
@@ -1389,7 +1390,8 @@ const_sizeof /* make it immediate values */
     | PIPE F32 PIPE { $$ = 4; }
     | PIPE BF16 PIPE { $$ = 2; }
     | PIPE F16 PIPE { $$ = 2; }
-    | PIPE F8 PIPE { $$ = 1; }
+    | PIPE F8_E4M3 PIPE { $$ = 1; }
+    | PIPE F8_E5M2 PIPE { $$ = 1; }
     ;
 
 mdspan_expr

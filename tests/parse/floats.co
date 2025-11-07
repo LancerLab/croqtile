@@ -1,7 +1,7 @@
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
 
-__co__ void floats(bool a, int b, half8 c, half d, bfp16 e, float f, double g) {
-  half8 aa = 1;
+__co__ void floats(bool a, int b, f8 c, half d, bfp16 e, float f, double g) {
+  f8 aa = 1;
   half bb = 2.0f;
   bfp16 cc = 3;
   float dd = 3.0f;
@@ -14,12 +14,12 @@ __co__ void floats(bool a, int b, half8 c, half d, bfp16 e, float f, double g) {
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: bool, symbol: a
 // CHECK:    `-  type: s32, symbol: b
-// CHECK:    `-  type: mutable f8, symbol: c
+// CHECK:    `-  type: mutable f8_e4m3, symbol: c
 // CHECK:    `-  type: mutable f16, symbol: d
 // CHECK:    `-  type: mutable bf16, symbol: e
 // CHECK:    `-  type: mutable f32, symbol: f
 // CHECK:    `-  type: mutable f64, symbol: g
-// CHECK:  `- Var Decl (mutable f8): aa = 1
+// CHECK:  `- Var Decl (mutable f8_e4m3): aa = 1
 // CHECK:  `- Var Decl (mutable f16): bb = 2.000000f
 // CHECK:  `- Var Decl (mutable bf16): cc = 3
 // CHECK:  `- Var Decl (mutable f32): dd = 3.000000f
