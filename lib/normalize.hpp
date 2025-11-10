@@ -75,8 +75,8 @@ public:
             auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
             auto new_fb =
                 AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
-            auto loop = std::make_shared<Loop>(GenerateLoopName(), iv_ty,
-                                               SSTab().ScopeName());
+            auto loop =
+                std::make_shared<Loop>(GenerateLoopName(), iv_ty, fb->LOC());
             new_fb->loop = loop;
             loops.push_back(new_fb);
           }
@@ -90,15 +90,15 @@ public:
             auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
             auto new_fb =
                 AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
-            auto loop = AST::Make<Loop>(
-                GenerateLoopName(), rng->IV()->GetType(), SSTab().ScopeName());
+            auto loop = AST::Make<Loop>(GenerateLoopName(),
+                                        rng->IV()->GetType(), fb->LOC());
             new_fb->loop = loop;
             loops.push_back(new_fb);
           }
         } else if (fb->ranges->Count() == 1 && !matcher_map.count(cname)) {
           // single range, single loop
-          auto loop =
-              std::make_shared<Loop>(GenerateLoopName(), rng->IV()->GetType());
+          auto loop = std::make_shared<Loop>(GenerateLoopName(),
+                                             rng->IV()->GetType(), fb->LOC());
           fb->loop = loop;
           continue;
         } else {

@@ -127,14 +127,14 @@ struct ScopedMaskInfo {
 struct Loop {
 private:
   std::string loop_name;
-  std::string scope_name;
-  // note: iv_sym is set once
-  std::string iv_sym;
   ptr<Type> iv_type = nullptr;
-
+  location loc;
   ptr<Loop> parent_loop = nullptr;
   std::vector<ptr<Loop>> sub_loops;
   ptr<ScopedMaskInfo> smi;
+
+  // note: iv_sym is set once
+  std::string iv_sym;
 
   int vector_factor = 1;
   bool has_vectorization_hint = false;
@@ -143,18 +143,20 @@ private:
   BaseType data_type = BaseType::UNKNOWN;
 
 public:
-  explicit Loop(std::string n, ptr<Type> it, std::string sn = "",
+  explicit Loop(std::string n, ptr<Type> it, const location& l,
                 ptr<Loop> p = nullptr, std::vector<ptr<Loop>> subs = {},
                 ptr<ScopedMaskInfo> s = std::make_shared<ScopedMaskInfo>())
-      : loop_name(n), scope_name(sn), iv_type(it), parent_loop(p),
-        sub_loops(subs), smi(s) {}
+      : loop_name(n), iv_type(it), loc(l), parent_loop(p), sub_loops(subs),
+        smi(s) {}
 
   std::string LoopName() { return loop_name; }
-  std::string IVSym() { return iv_sym; }
-  std::string ScopeName() { return scope_name; }
-  void SetIVSym(const std::string& sym) { iv_sym = sym; }
   ptr<Type> GetIVType() { return iv_type; }
+  const location& LOC() { return loc; }
+  std::string IVSym() { return iv_sym; }
+
+  void SetIVSym(const std::string& sym) { iv_sym = sym; }
   void SetIVType(ptr<Type> ty) { iv_type = ty; }
+  void SetLocation(const location& l) { loc = l; }
 
   ValueItem GetLoopCount() { return GetSingleUpperBound(iv_type); }
 
@@ -194,9 +196,9 @@ public:
   bool operator!=(const Loop& other) const { return !(*this == other); }
 
   void dump(std::ostream& os, const std::string& prefix = "",
-            bool print_scope = false) const {
+            bool print_loc = false) const {
     os << prefix << loop_name;
-    if (print_scope) os << ", " << scope_name;
+    if (print_loc) os << ", " << loc;
     os << "\n";
     auto new_prefix = std::string(prefix.size() + 2, ' ');
     for (const auto& sub_loop : sub_loops) { sub_loop->dump(os, new_prefix); }

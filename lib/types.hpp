@@ -2592,6 +2592,7 @@ inline static BaseType GetUnderlyingType(const ptr<Type>& ty) {
 
 inline static ptr<Type> MakeElemScalarType(BaseType bt, bool m = false) {
   switch (bt) {
+  case BaseType::F64:
   case BaseType::F32:
   case BaseType::F16:
   case BaseType::BF16:

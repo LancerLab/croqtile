@@ -46,7 +46,7 @@ int main() { /// host program
 // CODEGEN: __vector unsigned int __vec_iv_j_plus = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
 // CODEGEN: __vector unsigned int __vec_iv_j = __vec_iv_j_base + __vec_iv_j_plus;
 // CODEGEN: for (__iv_j = 0; __iv_j < 512; __iv_j += 32) {
-// CODEGEN:    __vector float val = tcle::load<__vector float>((__TCLE_AS__ void *)((float *)l1_a.data() + (__iv_i * 512) + __vec_iv_j[0])) + tcle::load<__vector float>((__TCLE_AS__ void *)((float *)l1_b.data() + (__iv_i * 512) + __vec_iv_j[0]));
-// CODEGEN:   tcle::store(val, (__TCLE_AS__ void *)((float *)l1_c + (__iv_i * 512) + __vec_iv_j[0]));
+// CODEGEN:    __vector float val = tcle::load<__vector float>((__TCLE_AS__ char *)((float *)l1_a.data() + (__iv_i * 512) + __vec_iv_j[0])) + tcle::load<__vector float>((__TCLE_AS__ char *)((float *)l1_b.data() + (__iv_i * 512) + __vec_iv_j[0]));
+// CODEGEN:   tcle::store(val, (__TCLE_AS__ char *)((float *)l1_c + (__iv_i * 512) + __vec_iv_j[0]));
 // CODEGEN:   __vec_iv_j += (__vector unsigned int)(32);
 // CODEGEN: }

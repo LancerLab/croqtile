@@ -53,6 +53,7 @@ enum class TargetArch {
   SM_90,
   SM_100,
   SM_120,
+  End
 };
 
 inline static const std::string STR(TargetArch ta) {

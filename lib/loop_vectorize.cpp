@@ -74,6 +74,22 @@ LoopVectorizeSimpleChecker::LoopVectorizeSimpleChecker(
   for (auto& [loop_name, loop] : li->GetAllLoops()) {
     can_vectorizes[loop_name] = true;
   }
+  for (auto i = 0; i < int(TargetArch::End); ++i) {
+    using BT = BaseType;
+    switch (TargetArch(i)) {
+    case TargetArch::GCU3:
+      legal_vtypes[(TargetArch)i] = {BT::S64, BT::U64,  BT::S32, BT::U32,
+                                     BT::S16, BT::U16,  BT::S8,  BT::U8,
+                                     BT::F32, BT::BF16, BT::F16};
+      break;
+    case TargetArch::GCU4:
+      legal_vtypes[(TargetArch)i] = {
+          BT::S64, BT::U64, BT::S32,  BT::U32, BT::S16,     BT::U16,    BT::S8,
+          BT::U8,  BT::F32, BT::BF16, BT::F16, BT::F8_E4M3, BT::F8_E5M2};
+      break;
+    default: legal_vtypes[(TargetArch)i] = {};
+    }
+  }
 }
 
 bool LoopVectorizeSimpleChecker::ExistLoopVectorizationLegal() {
@@ -102,6 +118,14 @@ bool LoopVectorizeSimpleChecker::Visit(AST::DataAccess& n) {
   auto elem_ty = GetBaseType(*n.GetType());
   if (cur_loop->GetDataType() == BaseType::UNKNOWN) {
     cur_loop->SetDataType(elem_ty);
+    if (legal_vtypes[CCtx().GetArch()].count(elem_ty) == 0) {
+      if (debug_visit)
+        dbgs() << indent << "data type " << STR(elem_ty)
+               << " is not legal for vectorization on target architecture "
+               << STR(CCtx().GetArch()) << "\n";
+      SetLoopVectorizationFailed();
+      return true;
+    }
   } else if (elem_ty != cur_loop->GetDataType()) {
     if (debug_visit)
       dbgs() << indent
@@ -370,6 +394,12 @@ LoopVectorizeLegalityChecker::LoopVectorizeLegalityChecker(
   for (auto& [loop_name, loop] : li->GetAllLoops()) {
     can_vectorizes[loop_name] = loop->NeedVectorize() ? true : false;
   }
+
+  for (auto i = 0; i < int(TargetArch::End); ++i) {
+    max_limits[(TargetArch)i] = 0;
+  }
+  max_limits[TargetArch::GCU3] = 128;
+  max_limits[TargetArch::GCU4] = 512;
 }
 
 bool LoopVectorizeLegalityChecker::NeedCheck() {
@@ -440,6 +470,15 @@ bool LoopVectorizeLegalityChecker::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
   auto vector_factor = cur_loop->GetVectorFactor();
+  if (vector_factor > max_limits[CCtx().GetArch()]) {
+    if (debug_visit)
+      dbgs() << "[plan] vector factor " << cur_loop->GetVectorFactor()
+             << " exceeds architecture limit " << max_limits[CCtx().GetArch()]
+             << ", skip this plan.\n";
+    SetLoopVectorizationFailed();
+    return false;
+  }
+
   auto IsPowerOf2 = [](int n) { return (n > 0) && ((n & (n - 1)) == 0); };
   ptr<AST::AttributeExpr> vectorization_hint = nullptr;
   if (AST::HasVectorizationHint(n, vectorization_hint)) {

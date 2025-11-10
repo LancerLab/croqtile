@@ -236,6 +236,7 @@ public:
 } // end anonymous namespace
 
 // Floating-point types
+using f64 = double;
 using f32 = float;
 
 // Function to convert float to half precision bits
@@ -592,6 +593,16 @@ namespace utils {
 // inline void fill_random(U*, size_t, U, U);
 
 // specializations
+// f64
+template <typename U>
+inline typename std::enable_if<std::is_same<U, double>::value, void>::type
+fill_random(U* array, size_t N, U lb, U ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<U> rand_func(lb, ub); // [lb, ub)
+
+  std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+}
 
 // f32
 template <typename U>

@@ -1,0 +1,164 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -t topscc --vectorize %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#define N 4
+#define M 1024
+
+__co__ auto ele_add_f32(f32 [N, M] a, f32 [N, M] b)  {
+  f32 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f32[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_f16(f16 [N, M] a, f16 [N, M] b)  {
+  f16 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f16[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_bf16(bf16 [N, M] a, bf16 [N, M] b)  {
+  bf16 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local bf16[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_s32(s32 [N, M] a, s32 [N, M] b)  {
+  s32 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local s32[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_u32(u32 [N, M] a, u32 [N, M] b)  {
+  u32 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local u32[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_s16(s16 [N, M] a, s16 [N, M] b)  {
+  s16 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local s16[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_u16(u16 [N, M] a, u16 [N, M] b)  {
+  u16 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local u16[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_s8(s8 [N, M] a, s8 [N, M] b)  {
+  s8 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local s8[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_u8(u8 [N, M] a, u8 [N, M] b)  {
+  u8 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local u8[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+
+
+#define TEST_TYPE(type) \
+  using t_##type = choreo::type; \
+  auto a_##type = choreo::make_spandata<t_##type>(4, 1024); \
+  auto b_##type = choreo::make_spandata<t_##type>(4, 1024); \
+  a_##type.fill_random(-10.0f, 10.0f); \
+  b_##type.fill_random(-10.0f, 10.0f); \
+  auto res_##type = ele_add_##type(a_##type.view(), b_##type.view()); \
+  for (size_t i = 0; i < res_##type.shape()[0]; ++i) \
+    for (size_t j = 0; j < res_##type.shape()[1]; ++j) { \
+      auto ref = float(a_##type[i][j]) + float(b_##type[i][j]); \
+      if (std::abs(float(res_##type[i][j]) - ref) > 0.1f) \
+        choreo::choreo_assert(a_##type[i][j] + b_##type[i][j] == res_##type[i][j], "values are not equal."); \
+    } \
+  std::cout << "Test " << #type << " Passed\n" << std::endl;
+
+int main() { /// host program
+  TEST_TYPE(f32);
+  TEST_TYPE(f16);
+  // TEST_TYPE(bf16);
+  TEST_TYPE(s32);
+  TEST_TYPE(u32);
+  TEST_TYPE(s16);
+  TEST_TYPE(u16);
+  TEST_TYPE(s8);
+  TEST_TYPE(u8);
+  
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

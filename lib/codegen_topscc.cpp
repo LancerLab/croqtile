@@ -123,7 +123,7 @@ TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
   auto ec = vty->ec;
   auto elem_size = SizeOf(elem_ty);
   auto vector_size = elem_size * ec;
-  if (elem_size == 1) {
+  if (elem_ty == BaseType::BOOL) {
     assert(smi && "missing scoped mask info.");
     auto mask_elem_type = smi->GetMaskEType();
     vector_size *= SizeOf(mask_elem_type);
@@ -138,8 +138,27 @@ TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
   else
     choreo_unreachable(
         "unsupported vector size: " + std::to_string(vector_size) + ".");
-  vty_str += NameBaseType(elem_ty);
-  if (elem_size == 1) {
+  auto ELEM_TYPE_STR = [&]() -> std::string {
+    switch (elem_ty) {
+    case BaseType::F64: return "double";
+    case BaseType::F32: return "float";
+    case BaseType::F16: return "__fp16";
+    case BaseType::BF16: return "__bf16";
+    case BaseType::U64: return "unsigned long long";
+    case BaseType::U32: return "unsigned int";
+    case BaseType::U16: return "unsigned short";
+    case BaseType::U8: return "unsigned char";
+    case BaseType::S64: return "long long";
+    case BaseType::S32: return "int";
+    case BaseType::S16: return "short";
+    case BaseType::S8: return "char";
+    case BaseType::BOOL: return "bool";
+    default: choreo_unreachable("unsupported base-type: " + STR(elem_ty) + ".");
+    }
+  };
+  vty_str += ELEM_TYPE_STR();
+
+  if (elem_ty == BaseType::BOOL) {
     assert(smi && "missing scoped mask info.");
     auto mask_elem_type = smi->GetMaskEType();
     if (SizeOf(mask_elem_type) == 8)
@@ -3246,15 +3265,17 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
                                                bool is_host) const {
   size_t idx = 0;
   std::ostringstream oss;
-  auto AppendOffset = [this, &oss, &shape, &idx](const ValueItem& op) {
+  size_t operand_cnt = 0;
+  auto AppendOffset = [this, &oss, &shape, &idx, &operand_cnt](const ValueItem& op) {
     auto offset = op;
     assert(shape.Rank() >= idx + 1);
     if (shape.Rank() > idx + 1)
       offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
     SimplifyExpression(offset);
     if (!sbe::ceq(offset, sbe::nu(0))) {
-      if (idx > 0) oss << " + ";
+      if (operand_cnt > 0) oss << " + ";
       oss << ValueSTR(offset);
+      ++operand_cnt;
     }
     ++idx;
   };
@@ -3278,6 +3299,7 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
       else
         oss << OpExprSTR(item, "+", false, is_host);
       ++idx;
+      ++operand_cnt;
     }
     if (IsActualVectorType(item_ty) && da.HasNote("VLDST")) { oss << "[0]"; }
   }
@@ -3654,7 +3676,7 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
                                " + " +
                                AddressOffset(sty->GetShape(), *da, false);
         if (CCtx().GetArch() == TargetArch::GCU3)
-          addr_str = "(__TCLE_AS__ void *)(" + addr_str + ")";
+          addr_str = "(__TCLE_AS__ char *)(" + addr_str + ")";
         if (is_load) {
           // load
           oss << BuildTcleLoad(addr_str, vty_str);

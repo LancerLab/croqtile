@@ -72,6 +72,7 @@ private:
   std::unordered_map<std::string, std::vector<location>> loop_uses;
   int Pb_level = 0;
   std::string indent = "    ";
+  std::map<TargetArch, std::set<BaseType>> legal_vtypes;
 
   bool NeedCheck();
   void SetLoopVectorizationFailed();
@@ -114,6 +115,8 @@ private:
   std::string appointed_loop;
   ptr<AST::Program> root_ptr;
   std::string indent = "    ";
+  // target architecture limits
+  std::map<TargetArch, size_t> max_limits; // arch limits
 
   bool NeedCheck();
   void SetLoopVectorizationFailed();

@@ -1,0 +1,90 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo --vectorize -es %s | FileCheck %s
+// RUN: choreo --vectorize -dvec %s | FileCheck %s --check-prefix=VEC-CHECK
+
+#define N 4
+#define M 128
+
+__co__ auto ele_add_f64(f64 [N, M] a, f64 [N, M] b)  {
+  f64 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f64[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_f32(f32 [N, M] a, f32 [N, M] b)  {
+  f32 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f32[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_f16(f16 [N, M] a, f16 [N, M] b)  {
+  f16 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f16[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+__co__ auto ele_add_u8(u8 [N, M] a, u8 [N, M] b)  {
+  u8 [a.span] c;
+  parallel p by 4, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local u8[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach idx in l1_a.span
+      l1_c.at(idx) = l1_a.data.at(idx) + l1_b.data.at(idx);;
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+
+// CHECK: for (__iv_idx__elem__1 = 0; __iv_idx__elem__1 < 128; ++__iv_idx__elem__1) {
+// CHECK:   *((double*)l1_c + (__iv_idx__elem__0 * 128) + __iv_idx__elem__1) = *((double*)l1_a.data() + (__iv_idx__elem__0 * 128) + __iv_idx__elem__1) + *((double*)l1_b.data() + (__iv_idx__elem__0 * 128) + __iv_idx__elem__1);
+// CHECK: }
+
+// CHECK: for (__iv_idx__elem__1 = 0; __iv_idx__elem__1 < 128; __iv_idx__elem__1 += 128) {
+// CHECK:   __vector4 float anon_4 = tcle::load<__vector4 float>((__TCLE_AS__ char *)((float *)l1_a.data() + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0])) + tcle::load<__vector4 float>((__TCLE_AS__ char *)((float *)l1_b.data() + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0]));
+// CHECK:   tcle::store(anon_4, (__TCLE_AS__ char *)((float *)l1_c + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0]));
+// CHECK:   __vec_iv_idx__elem__1 += (__vector4 unsigned int)(128);
+// CHECK: }
+
+// CHECK: for (__iv_idx__elem__1 = 0; __iv_idx__elem__1 < 128; __iv_idx__elem__1 += 128) {
+// CHECK:   __vector2 __fp16 anon_5 = tcle::load<__vector2 __fp16>((__TCLE_AS__ char *)((choreo::half *)l1_a.data() + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0])) + tcle::load<__vector2 __fp16>((__TCLE_AS__ char *)((choreo::half *)l1_b.data() + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0]));
+// CHECK:   tcle::store(anon_5, (__TCLE_AS__ char *)((choreo::half *)l1_c + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0]));
+// CHECK:   __vec_iv_idx__elem__1 += (__vector4 unsigned int)(128);
+// CHECK: }
+
+// CHECK: for (__iv_idx__elem__1 = 0; __iv_idx__elem__1 < 128; __iv_idx__elem__1 += 128) {
+// CHECK:   __vector unsigned char anon_6 = tcle::load<__vector unsigned char>((__TCLE_AS__ char *)((unsigned char *)l1_a.data() + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0])) + tcle::load<__vector unsigned char>((__TCLE_AS__ char *)((unsigned char *)l1_b.data() + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0]));
+// CHECK:   tcle::store(anon_6, (__TCLE_AS__ char *)((unsigned char *)l1_c + (__iv_idx__elem__0 * 128) + __vec_iv_idx__elem__1[0]));
+// CHECK:   __vec_iv_idx__elem__1 += (__vector4 unsigned int)(128);
+// CHECK: }
+
+// VEC-CHECK: data type f64 is not legal for vectorization on target architecture GCU300
+// VEC-CHECK: - Loop `loop8` will be vectorized with factor: 128
+// VEC-CHECK: - Loop `loop4` will be vectorized with factor: 128
+// VEC-CHECK: - Loop `loop6` will be vectorized with factor: 128
