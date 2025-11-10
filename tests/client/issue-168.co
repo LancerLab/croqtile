@@ -1,0 +1,17 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
+
+__co__ void foo(s32 [M, N] input, int x, u32 y) {
+  parallel p by 1 {
+    foreach x in 2 foreach x in 3 {}
+  }
+}
+
+// CHECK:    for (__iv_x__elem__0 = 0; __iv_x__elem__0 < 2; ++__iv_x__elem__0) {
+// CHECK:      {
+// CHECK:        int __iv_x__elem__0_anon_0 = 0;
+// CHECK:        for (__iv_x__elem__0_anon_0 = 0; __iv_x__elem__0_anon_0 < 3; ++__iv_x__elem__0_anon_0) {
+// CHECK:        } // x__elem__0_anon_0
+// CHECK:        __iv_x__elem__0_anon_0 = 0;
+// CHECK:      }
+// CHECK:    } // x__elem__0
+// CHECK:    __iv_x__elem__0 = 0;

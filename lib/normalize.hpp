@@ -165,6 +165,9 @@ private:
   int depth_count = 0;
   std::vector<int> depth_stack;
 
+  // within_map
+  std::set<std::string> within_norm_iv;
+
   bool handle_parameter = false;
   ptr<AST::Expr> list_ref = nullptr;
   void SetListReference(const location& l, const std::string& r) {
@@ -465,6 +468,15 @@ public:
         depth_stack.clear();
         max_pdepth = 0;
         depth_count = 0;
+      }
+    } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
+      for (const auto& node : wb->withins->AllSubs()) {
+        auto wi = cast<AST::WithIn>(node);
+        for (const auto& val : wi->with_matchers->AllValues()) {
+          auto iv = AST::GetIdentifier(val);
+          if (iv && within_norm_iv.count(iv->name))
+            within_norm_iv.erase(iv->name);
+        }
       }
     }
     return true;
@@ -799,8 +811,12 @@ public:
     auto bity = cast<BoundedITupleType>(wty);
     // fill the with-matchers
     for (size_t i = 0; i < wty->Dims(); ++i) {
-      mval->Append(AST::Make<AST::Identifier>(
-          n.with->LOC(), n.with->name + "__elem__" + std::to_string(i)));
+      auto name = n.with->name + "__elem__" + std::to_string(i);
+      if (within_norm_iv.count(name))
+        name += "_" + SymbolTable::GetAnonName();
+      else
+        within_norm_iv.insert(name);
+      mval->Append(AST::Make<AST::Identifier>(n.with->LOC(), name));
       if (bity->HasValidBound())
         mval->ValueAt(i)->SetType(
             MakeBoundedIntegerType(bity->GetUpperBound(i)));
