@@ -884,7 +884,8 @@ public:
       if (!TargetHasLevel(ParallelLevel::GROUP))
         Error1(n.LOC(), STR(CCtx().GetArch()) + " does not support " +
                             STR(n.Resource()) + " synchronization.");
-      else if (Level() != ParallelLevel::GROUP)
+      else if (Level() == ParallelLevel::SEQ ||
+               Level() == ParallelLevel::BLOCK)
         Error1(n.LOC(), "unsupported: " + STR(n.Resource()) +
                             " synchronization in " + STR(Level()) + " scope.");
       break;
