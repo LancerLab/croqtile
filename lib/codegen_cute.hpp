@@ -250,8 +250,13 @@ private:
   std::string h_indent; // host indentation
   std::string d_indent; // device indentation
 
-  Storage parallel_level = Storage::NONE;
-  Storage max_parallel_level = Storage::NONE;
+  std::stack<ParallelLevel> levels;
+  ParallelLevel Level() const { return levels.top(); }
+  bool IsParallel() const { return levels.size() > 2; }
+  bool NeedLevelPred() const {
+    return IsParallel() && (Level() != ParallelLevel::THREAD);
+  }
+
   // idx of the most outer pb
   int parallel_idx = -1;
 
@@ -380,7 +385,7 @@ private:
 
   bool NeedDeviceFunc() const { return cgi.HasParallelBy(fname); }
 
-  bool IsHost() const { return parallel_level == Storage::NONE; }
+  bool IsHost() const { return Level() == ParallelLevel::SEQ; }
 
   bool IsFutureBlockShared(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
@@ -391,10 +396,6 @@ private:
     return cgi.GetFunctionLocalFutures(fname).count(n);
   }
 
-  bool IsDMABlockShared(AST::DMA&) const {
-    std::cout << "cur: " << STR(parallel_level) << "\n";
-    return parallel_level == Storage::SHARED;
-  }
   const std::string ExprCastSTR(AST::ptr<AST::Node> n,
                                 std::optional<std::variant<int, float>> val,
                                 BaseType to, BaseType from,
@@ -431,8 +432,8 @@ private:
   const std::string SSMName(const std::string& sname, bool is_host) const {
     return (is_host) ? ssm.HostName(sname) : ssm.DeviceName(sname);
   }
-  // if it requires wrapping code in a single thread
-  bool RequiresImplPred(Storage) const;
+
+  bool ThreadCooperative(AST::DMA&) const;
 };
 
 } // namespace Cute

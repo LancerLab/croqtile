@@ -242,9 +242,13 @@ private:
   std::string h_indent; // host indentation
   std::string d_indent; // device indentation
 
-  Storage parallel_level = Storage::NONE;
-  Storage max_parallel_level = Storage::NONE;
-  std::vector<Storage> pl_stack;
+  std::stack<ParallelLevel> levels;
+  ParallelLevel Level() const { return levels.top(); }
+  bool IsParallel() const { return levels.size() > 2; }
+  bool NeedLevelPred() const {
+    return IsParallel() && (Level() != ParallelLevel::THREAD);
+  }
+
   // idx of the most outer pb
   int parallel_idx = -1;
 
@@ -370,8 +374,17 @@ private:
 
   bool NeedDeviceFunc() const { return cgi.HasParallelBy(fname); }
 
-  bool IsHost() const { return parallel_level == Storage::NONE; }
+  bool IsHost() const { return Level() == ParallelLevel::SEQ; }
 
+  Storage FutureStorage(const std::string& n) const {
+    assert(PrefixedWith(n, "::") && "requires a scoped name.");
+    if (cgi.GetFunctionSharedFutures(fname).count(n))
+      return Storage::SHARED;
+    else if (cgi.GetFunctionLocalFutures(fname).count(n))
+      return Storage::LOCAL;
+    assert("illegal future.");
+    return Storage::NONE;
+  }
   bool IsFutureBlockShared(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
     return cgi.GetFunctionSharedFutures(fname).count(n);
@@ -379,16 +392,6 @@ private:
   bool IsFutureWarpLocal(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
     return cgi.GetFunctionLocalFutures(fname).count(n);
-  }
-
-  bool IsDMABlockShared(AST::DMA&) const {
-    return (parallel_level == Storage::SHARED) &&
-           (max_parallel_level == Storage::LOCAL ||
-            max_parallel_level == Storage::SUB);
-  }
-  bool IsDMAWarpLocal(AST::DMA&) const {
-    return (parallel_level == Storage::LOCAL &&
-            max_parallel_level == Storage::SUB);
   }
 
   const std::string ExprCastSTR(AST::ptr<AST::Node> n,
@@ -421,9 +424,6 @@ private:
                                        const std::string& val,
                                        const std::string& mask) const;
 
-  std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
-  std::optional<std::string>
-  SubThreadIdString(const ptr<AST::Identifier>&) const;
   std::pair<std::string, size_t> GenMdsOffset(const ptr<AST::ChunkAt>,
                                               ptr<DMAConfig> = nullptr) const;
   const std::string TileBaseOffset(const ptr<AST::ChunkAt>&) const;
@@ -437,8 +437,6 @@ private:
   }
   const std::string AddressOffset(const Shape&, const AST::DataAccess&,
                                   bool) const;
-  // if it requires wrapping code in a single thread
-  bool RequiresImplPred(Storage) const;
   const std::string VectorTypeSTR(const ptr<Type>& vt) const;
   const std::string DMATypeSTR(Storage) const;
 };

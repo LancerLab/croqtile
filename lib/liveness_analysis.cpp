@@ -660,7 +660,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     r->ids->InlinePrint(os);
     os << ")";
   } else if (const auto sync = dyn_cast<AST::Synchronize>(&n)) {
-    os << "sync." << PSTR(sync->scope);
+    os << "sync." << STR(sync->Resource());
   } else if (const auto tr = dyn_cast<AST::Trigger>(&n)) {
     os << "trigger ";
     tr->targets->Print(os);
@@ -1347,12 +1347,4 @@ bool LivenessAnalyzer::Visit(AST::ChoreoFunction& n) {
   // deal with ChoreoFunction in BeforeVisitImpl due to the orders in
   // accept().
   return true;
-}
-
-bool LivenessAnalyzer::HasError() {
-  if (error_count > 0) {
-    dbgs() << "Totally " << error_count << " errors have been detected.\n";
-    return true;
-  }
-  return false;
 }

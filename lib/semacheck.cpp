@@ -858,14 +858,6 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
   return true;
 }
 
-bool SemaChecker::HasError() {
-  if (error_count) {
-    dbgs() << "Totally " << error_count << " errors have been detected.\n";
-    return true;
-  }
-  return false;
-}
-
 void SemaChecker::EmitAssertion(const ValueItem& pred,
                                 const std::string& message, const location& l,
                                 const ptr<AST::Node>& n) {

@@ -14,32 +14,31 @@
 
 namespace Choreo {
 
-inline int TargetDepth(Storage s) {
-  if (CCtx().GetTarget() == CompileTarget::Topscc)
-    return GCUDeviceParallelDepth(s);
-  else
-    choreo_unreachable("unsupported target: " + STR(CCtx().GetTarget()) + ".");
-  return -1;
-}
-
-inline Storage TargetLevel(int depth) {
-  if (CCtx().GetTarget() == CompileTarget::Topscc)
-    return GCUDeviceParallelLevel(depth);
-  else
-    choreo_unreachable("unsupported target: " + STR(CCtx().GetTarget()) + ".");
-  return Storage::NONE;
-}
-
 static inline std::string GenerateLoopName() {
   static int loop_count = 0;
   return "loop" + std::to_string(++loop_count);
 }
 
-struct LoopNorm final : public VisitorWithScope {
+struct NormBase : public VisitorWithScope {
+  void TraceEachVisit(const AST::Node& n) {
+    if (trace_visit) {
+      dbgs() << n.TypeNameString();
+      if (!n.IsBlock()) dbgs() << ": " << STR(n);
+      dbgs() << "\n";
+    }
+  }
+  NormBase(const std::string& name) : VisitorWithScope(name) {}
+#if 0
+  bool BeforeVisitImpl(AST::Node&) override { return true; }
+  bool AfterVisitImpl(AST::Node&) override { return true; }
+#endif
+};
+
+struct LoopNorm final : public NormBase {
 public:
   std::map<std::string, ptr<AST::MultiValues>> matcher_map; // map of with-in
 
-  LoopNorm() : VisitorWithScope("loopnorm") {}
+  LoopNorm() : NormBase("loopnorm") {}
   bool BeforeVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
     return true;
@@ -150,20 +149,24 @@ public:
     }
     return true;
   }
+
+  bool IsAllowed(AST::Node& root) const override {
+    if (CCtx().NoVectorize()) return false;
+
+    auto vhc = GetResult<VectorizationHintChecker>(root);
+    if (vhc->HasError()) return false;
+
+    return (CCtx().LoopNorm() || CCtx().Vectorize() ||
+            vhc->HasVectorizationHint());
+  }
 };
 
-struct Normalizer : public VisitorWithScope {
+struct CompoundNorm : public NormBase {
 private:
   bool changed = false;
 
   std::string old;
   size_t count = 0; // name suffix of runtime int values
-
-  // parallelization depth
-  int pdepth = 0;
-  int max_pdepth = 0;
-  int depth_count = 0;
-  std::vector<int> depth_stack;
 
   // within_map
   std::set<std::string> within_norm_iv;
@@ -209,11 +212,9 @@ private:
 
 public:
   // it does not require a symbol table
-  Normalizer() : VisitorWithScope("norm") {}
+  CompoundNorm() : NormBase("comp_n") {}
 
   bool BeforeVisitImpl(AST::Node& n) override {
-    if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
-
     if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
         SetListReference(n.LOC(), b->ref_name);
@@ -244,24 +245,11 @@ public:
                isa<AST::ForeachBlock>(&n)) {
       cur_node_index = multi_nodes.top()->GetIndex(&n);
       assert(cur_node_index != -1 && "unexpected node index.");
-    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      assert(pdepth >= 0);
-      if (pdepth == 0) depth_stack.push_back(0);
-      if (pb->GetLevel() != Storage::NONE)
-        pdepth = TargetDepth(pb->GetLevel()); // depth from the annotation
-      else
-        pdepth++;
-      assert(pdepth > max_pdepth);
-      max_pdepth = pdepth;
-      depth_stack.push_back(pdepth);
-      depth_count = depth_stack.size();
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
-    if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
-
     if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       ResetListReference();
       b->ref_name = ""; // no reference is required
@@ -278,197 +266,6 @@ public:
       count = 0;
     } else if (isa<AST::Return>(&n)) {
       cur_node_index = -1;
-    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      auto last_depth = depth_stack.back();
-      depth_stack.pop_back();
-      pdepth = depth_stack.back();
-      assert(pdepth >= 0);
-
-      bool annotate = pb->GetLevel() != Storage::NONE;
-      if (CCtx().GetTarget() == CompileTarget::Factor ||
-          CCtx().GetTarget() == CompileTarget::Topscc ||
-          CCtx().GetTarget() == CompileTarget::CUDA ||
-          CCtx().GetTarget() == CompileTarget::Cute) {
-        // may fill gap only for a single level
-        assert(pdepth < last_depth);
-        if (pdepth > 0) assert(pdepth >= last_depth - 2);
-        if (pdepth > 0 && pdepth == last_depth - 2) {
-          // This fills the missing parallel-by levels. e.g:
-          //
-          //   `__co__ void foo() {
-          //      parallel p by 10 : shared
-          //        parallelqp by 3 : sublocal {...}
-          //    }`
-          //
-          // is normalized as
-          //
-          //   `__co__ void foo() {
-          //      parallel p by 10 : shared
-          //       parallel 1 by 1 : local
-          //        parallel q by 3 : sublocal {...}
-          //    }`
-          //
-          // add the pb level
-          VST_DEBUG(dbgs() << "Replace `"; pb->InlinePrint(dbgs());
-                    dbgs() << "` by\n  +-");
-
-          auto new_pb = AST::MakeSimpleParallelBy(pb->LOC(), pb->stmts);
-          if (annotate) new_pb->SetLevel(TargetLevel(pdepth + 1));
-          new_pb->SetType(MakeBoundedIntegerType(sbe::nu(1)));
-          auto new_stmts = AST::Make<AST::MultiNodes>(pb->LOC());
-          new_stmts->Append(new_pb);
-          pb->stmts = new_stmts;
-
-          VST_DEBUG(pb->InlinePrint(dbgs()); dbgs() << "\n   +-";
-                    new_pb->InlinePrint(dbgs()); dbgs() << "\n");
-        } else if (pdepth == 0 && depth_count == 2 &&
-                   (!annotate || (annotate && last_depth == 2))) {
-          //
-          //   `__co__ void foo() { parallel p by 10 {...}}`
-          //
-          // is normalized as
-          //
-          //   `__co__ void foo() { parallel p by 10 parallel q by 1 {...}}`
-          //
-          VST_DEBUG(dbgs() << "Replace `"; pb->InlinePrint(dbgs());
-                    dbgs() << "` by\n  +-");
-          auto new_pb = cast<AST::ParallelBy>(pb->Clone());
-          new_pb->SetOuter(false);
-          new_pb->SetLevel(Storage::LOCAL);
-
-          auto anon_sym = SymbolTable::GetAnonPBName();
-          auto pv = AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym);
-          pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
-          pb->SetPV(pv);
-
-          // elements
-          auto spv = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
-          auto epv =
-              AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym + "__elem__x");
-          epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
-          spv->Append(epv);
-          pb->SetSubPVs(spv);
-
-          // bound
-          auto p_bound = AST::MakeIntExpr(new_pb->LOC(), 1);
-          p_bound->SetType(MakeIntegerType());
-          pb->SetBoundExpr(p_bound);
-
-          // element-bounds
-          auto spv_bounds = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
-          spv_bounds->Append(p_bound->Clone());
-          spv_bounds->SetType(MakeITupleType(1));
-          pb->SetBoundExprs(spv_bounds);
-          pb->SetOuter(true);
-          pb->SetLevel(Storage::SHARED);
-
-          // add the pb level
-          pb->stmts->values.clear();
-          pb->stmts->Append(new_pb);
-          VST_DEBUG(pb->InlinePrint(dbgs()); dbgs() << "\n   +-";
-                    new_pb->InlinePrint(dbgs()); dbgs() << "\n");
-        } else if (pdepth == 0 && depth_count == 2 && annotate &&
-                   last_depth == 1) {
-          //
-          //   `__co__ void foo() { parallel p by 10 : shared {...}}`
-          //
-          // is normalized as
-          //
-          //   `__co__ void foo() { parallel p by 10 : shared {...; parallel q
-          //   by 1{} }`
-          //
-          auto anon_sym = SymbolTable::GetAnonPBName();
-          auto pv = AST::Make<AST::Identifier>(pb->LOC(), anon_sym);
-          pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
-          // elements
-          auto spv = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-          auto epv =
-              AST::Make<AST::Identifier>(pb->LOC(), anon_sym + "__elem__x");
-          epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
-          spv->Append(epv);
-
-          // bound
-          auto p_bound = AST::MakeIntExpr(pb->LOC(), 1);
-          p_bound->SetType(MakeIntegerType());
-          auto spv_bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-          spv_bounds->Append(p_bound->Clone());
-          spv_bounds->SetType(MakeITupleType(1));
-
-          // add the level for completeness
-          VST_DEBUG(dbgs() << "Append `"; pb->InlinePrint(dbgs());
-                    dbgs() << "` with\n  +-");
-
-          auto new_pb = AST::Make<AST::ParallelBy>(pb->LOC(), pv, p_bound, spv,
-                                                   spv_bounds);
-          new_pb->SetOuter(false);
-          new_pb->SetLevel(Storage::LOCAL);
-          pb->stmts->Append(new_pb);
-          VST_DEBUG(new_pb->InlinePrint(dbgs()); dbgs() << "\n");
-        } else if (pdepth == 0 && depth_count == 2 && annotate &&
-                   last_depth == 3) {
-          //   `__co__ void foo() {
-          //      parallel p by 3 : sublocal {...}
-          //    }`
-          //
-          // is normalized as
-          //
-          //   `__co__ void foo() {
-          //      parallel q by 1 : shared
-          //       parallel r by 1 : local
-          //        parallel q by 3 : sublocal {...}
-          //    }`
-          //
-          VST_DEBUG(dbgs() << "Replace `"; pb->InlinePrint(dbgs());
-                    dbgs() << "` by\n  +-");
-          auto new_pb = cast<AST::ParallelBy>(pb->Clone());
-          new_pb->SetOuter(false);
-          new_pb->SetLevel(Storage::SUB);
-
-          auto new1_pb = AST::MakeSimpleParallelBy(pb->LOC());
-          new1_pb->SetOuter(false);
-          new1_pb->SetLevel(Storage::LOCAL);
-          new1_pb->stmts->Append(new_pb);
-
-          auto anon_sym = SymbolTable::GetAnonPBName();
-          auto pv = AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym);
-          pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
-          pb->SetPV(pv);
-
-          // elements
-          auto spv = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
-          auto epv =
-              AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym + "__elem__x");
-          epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
-          spv->Append(epv);
-          pb->SetSubPVs(spv);
-
-          // bound
-          auto p_bound = AST::MakeIntExpr(new_pb->LOC(), 1);
-          p_bound->SetType(MakeIntegerType());
-          pb->SetBoundExpr(p_bound);
-
-          // element-bounds
-          auto spv_bounds = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
-          spv_bounds->Append(p_bound->Clone());
-          spv_bounds->SetType(MakeITupleType(1));
-          pb->SetBoundExprs(spv_bounds);
-          pb->SetOuter(true);
-          pb->SetLevel(Storage::SHARED);
-
-          // add the pb level
-          pb->stmts->values.clear();
-          pb->stmts->Append(new1_pb);
-          VST_DEBUG(pb->InlinePrint(dbgs()); dbgs() << "\n   +-";
-                    new1_pb->InlinePrint(dbgs()); dbgs() << "\n    +-";
-                    new_pb->InlinePrint(dbgs()); dbgs() << "\n");
-        }
-      }
-
-      if (pdepth == 0) {
-        depth_stack.clear();
-        max_pdepth = 0;
-        depth_count = 0;
-      }
     } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
       for (const auto& node : wb->withins->AllSubs()) {
         auto wi = cast<AST::WithIn>(node);
@@ -539,10 +336,6 @@ public:
     return true;
   }
 
-  bool Visit(AST::IntLiteral&) override { return true; }
-  bool Visit(AST::FloatLiteral&) override { return true; }
-  bool Visit(AST::StringLiteral&) override { return true; }
-  bool Visit(AST::BoolLiteral&) override { return true; }
   bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);
     if (list_ref) { // could be with syntax sugar
@@ -667,8 +460,6 @@ public:
     return true;
   }
 
-  bool Visit(AST::MultiDimSpans&) override { return true; }
-  bool Visit(AST::NamedTypeDecl&) override { return true; }
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
 
@@ -740,7 +531,6 @@ public:
     }
     return true;
   }
-  bool Visit(AST::DataAccess&) override { return true; }
   bool Visit(AST::Assignment& n) override {
     auto l = n.da;
     auto r = n.value;
@@ -767,29 +557,6 @@ public:
 
     return true;
   }
-  bool Visit(AST::IntIndex&) override { return true; }
-  bool Visit(AST::DataType&) override { return true; }
-  bool Visit(AST::Identifier&) override { return true; }
-  bool Visit(AST::Parameter&) override { return true; }
-  bool Visit(AST::ParamList&) override { return true; }
-  bool Visit(AST::ParallelBy& n) override {
-    if (!n.HasSubPVs()) {
-      // `parallel p by 2`  ==> `parallel p={p__elem__x} by [2]`
-      auto spv = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-      spv->Append(AST::Make<AST::Identifier>(n.BPV()->LOC(),
-                                             n.BPV()->name + "__elem__x"));
-      n.SetSubPVs(spv);
-      auto sub = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-      sub->Append(n.BoundExpr()->Clone());
-      n.SetBoundExprs(sub);
-      n.SubPVs()->ValueAt(0)->SetType(NodeType(*n.BPV()));
-      n.SubPVs()->SetType(NodeType(*n.BPV()));
-      VST_DEBUG(dbgs() << "Generate cmpt_bpvs in parallelby for '"
-                       << PSTR(n.BPV()) << "': " << STR(n.SubPVs()) << "\n");
-    }
-    return true;
-  }
-  bool Visit(AST::WhereBind&) override { return true; }
 
   bool Visit(AST::WithIn& n) override {
     TraceEachVisit(n);
@@ -831,10 +598,6 @@ public:
 
     return true;
   }
-
-  bool Visit(AST::WithBlock&) override { return true; }
-  bool Visit(AST::Memory&) override { return true; }
-  bool Visit(AST::SpanAs&) override { return true; }
 
   bool Visit(AST::DMA& n) override {
     if (n.operation == ".any") return true;
@@ -996,8 +759,7 @@ public:
     }
     return true;
   }
-  bool Visit(AST::Wait&) override { return true; }
-  bool Visit(AST::Trigger&) override { return true; }
+
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
     if (n.IsArith() && n.IsBIF()) {
@@ -1045,9 +807,6 @@ public:
     return true;
   }
 
-  bool Visit(AST::Rotate&) override { return true; }
-  bool Visit(AST::Synchronize&) override { return true; }
-  bool Visit(AST::Select&) override { return true; }
   bool Visit(AST::Return& n) override {
     TraceEachVisit(n);
 
@@ -1093,7 +852,6 @@ public:
 
     return true;
   }
-  bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock& n) override {
     auto handle_bounds = [this, &n](auto get_bound, auto set_bound) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
@@ -1167,38 +925,333 @@ public:
 
     return true;
   }
-  bool Visit(AST::InThreadsBlock&) override { return true; }
-  bool Visit(AST::IfElseBlock&) override { return true; }
-  bool Visit(AST::IncrementBlock&) override { return true; }
-  bool Visit(AST::FunctionDecl&) override { return true; }
-  bool Visit(AST::ChoreoFunction&) override { return true; }
-  bool Visit(AST::CppSourceCode&) override { return true; }
-  bool Visit(AST::Program&) override { return true; }
-  bool RunOnProgramImpl(AST::Node& root) override {
-    if (!isa<AST::Program>(&root)) {
-      Error(root.LOC(), "Not running a choreo program.");
-      return false;
-    }
+};
 
-    if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
+// Try to amend the missing parallel-by levels that are unspecified.
+//
+// It always fill the parallel-by level to its target. i.e., 2-levels for GCU3,
+// 3-levels for GCU4, etc..
+struct ParaByFiller : public NormBase {
+private:
+  bool changed = false;
 
-    if (!disabled) root.accept(*this);
+  // literal parallel depth
+  int literal_depth = 0;
+  // maximum parallel depth for current nested-pbs
+  int max_depth = 0;
+  // last pb depth and its pointer
+  int last_depth = 0;
+  AST::ParallelBy* last_pb = nullptr;
 
-    if (HasError() || abend_after) return false;
-    if (!CCtx().NoVectorize()) {
-      VectorizationHintChecker vhc;
-      root.accept(vhc);
-      if (prt_visitor) dbgs() << " |- " << vhc.GetName() << NewL;
-      if (CCtx().LoopNorm() || CCtx().Vectorize() ||
-          vhc.HasVectorizationHint()) {
-        LoopNorm ln;
-        if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
-        root.accept(ln);
-        if (ln.HasError()) return false;
-      }
+  enum FillType { Inner, Outer };
+  struct FillInfo {
+    AST::ParallelBy* pb;
+    FillType ft;
+    ParallelLevel lvl;
+    FillInfo(AST::ParallelBy* p, FillType t, ParallelLevel l)
+        : pb(p), ft(t), lvl(l) {}
+  };
+  std::vector<FillInfo> fill_info;
+
+private:
+  bool ExplicitLevel(AST::ParallelBy& pb) const {
+    auto pl = pb.GetLevel();
+    assert(pl != ParallelLevel::UNKNOWN);
+    return pl != ParallelLevel::NONE;
+  }
+
+public:
+  // it does not require a symbol table
+  ParaByFiller() : NormBase("pbfill") {}
+
+  bool IsAllowed(AST::Node&) const override {
+    return CCtx().GetTarget() == CompileTarget::Factor ||
+           CCtx().GetTarget() == CompileTarget::Topscc ||
+           CCtx().GetTarget() == CompileTarget::CUDA ||
+           CCtx().GetTarget() == CompileTarget::Cute;
+  }
+
+  AST::ParallelBy& InsertInnerLevel(AST::ParallelBy& pb, ParallelLevel pl) {
+    // may fill gap only for a single level
+    VST_DEBUG(dbgs() << "Replace `"; pb.InlinePrint(dbgs());
+              dbgs() << "` by\n  +-");
+
+    auto new_pb = AST::MakeSimpleParallelBy(pb.LOC(), pb.stmts);
+    new_pb->SetOuter(false);
+    new_pb->SetLevel(pl);
+    pb.stmts = AST::Make<AST::MultiNodes>(pb.LOC(), new_pb);
+
+    VST_DEBUG(pb.InlinePrint(dbgs()); dbgs() << "\n   +-";
+              new_pb->InlinePrint(dbgs()); dbgs() << "\n");
+
+    return *new_pb;
+  }
+
+  AST::ParallelBy& InsertOuterLevel(AST::ParallelBy& pb, ParallelLevel pl) {
+    VST_DEBUG(dbgs() << "Replace `"; pb.InlinePrint(dbgs());
+              dbgs() << "` by\n  +-");
+
+    auto new_pb = cast<AST::ParallelBy>(pb.Clone());
+    new_pb->SetOuter(false);
+    // pb is now the outer level
+    pb.SetLevel(pl);
+
+    // convert current pb to be simple
+    auto anon_sym = SymbolTable::GetAnonPBName();
+    auto pv = AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym);
+    pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
+    pb.SetPV(pv);
+
+    // elements
+    auto spv = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
+    auto epv =
+        AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym + "__elem__x");
+    epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+    spv->Append(epv);
+    pb.SetSubPVs(spv);
+
+    // bound
+    auto p_bound = AST::MakeIntExpr(new_pb->LOC(), 1);
+    p_bound->SetType(MakeIntegerType());
+    pb.SetBoundExpr(p_bound);
+
+    // element-bounds
+    auto spv_bounds = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
+    spv_bounds->Append(p_bound->Clone());
+    spv_bounds->SetType(MakeITupleType(1));
+    pb.SetBoundExprs(spv_bounds);
+
+    // add the pb level
+    pb.stmts = AST::Make<AST::MultiNodes>(pb.LOC(), new_pb);
+
+    VST_DEBUG(pb.InlinePrint(dbgs()); dbgs() << "\n   +-";
+              new_pb->InlinePrint(dbgs()); dbgs() << "\n");
+
+    return pb;
+  }
+
+  void Reset() {
+    literal_depth = 0;
+    last_depth = 0;
+    max_depth = 0;
+    last_pb = nullptr;
+  }
+
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::ChoreoFunction>(&n)) {
+      Reset();
+    } else if (isa<AST::ParallelBy>(&n)) {
+      if (literal_depth == 0) Reset();
+      literal_depth++;
+      max_depth = (max_depth > literal_depth) ? max_depth : literal_depth;
     }
     return true;
   }
+
+  bool AfterVisitImpl(AST::Node& n) override {
+    if (!isa<AST::ParallelBy>(&n)) return true;
+    auto pb = cast<AST::ParallelBy>(&n);
+
+    bool support_group = TargetHasLevel(ParallelLevel::GROUP);
+    if (!support_group && pb->GetLevel() == ParallelLevel::GROUP)
+      Error1(pb->LOC(),
+             "group level is not supported by the target architecture.");
+
+    // Note: both filling outer/inner, pb points to the outer afterwards
+    if (last_depth == 0 && max_depth == 1) {
+      // only single parallel-by exists
+      if (!ExplicitLevel(*pb) || pb->GetLevel() == ParallelLevel::THREAD) {
+        //   parallel p by 32
+        // =>
+        //   parallel x by 1 : block
+        //    parallel y by 1 : group (optional)
+        //     parallel p by 32 : thread
+        pb->SetLevel(ParallelLevel::THREAD);
+        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+        if (support_group)
+          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+      } else if (pb->GetLevel() == ParallelLevel::BLOCK) {
+        //   parallel p by 32: block
+        // =>
+        //   parallel p by 32 : block
+        //    parallel x by 1 : group (optional)
+        //     parallel y by 1 : thread
+        fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
+        if (support_group)
+          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+      } else if (pb->GetLevel() == ParallelLevel::GROUP) {
+        //   parallel p by 32: group
+        // =>
+        //   parallel x by 1 : block
+        //    parallel p by 32 : group
+        //     parallel y by 1 : thread
+        fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
+        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+      } else
+        choreo_unreachable("unsupported single parallel-by level.");
+    } else if (last_depth == 0 && max_depth > 1) {
+      // now the max literal depth is confirmed
+      if (max_depth > TargetMaxDepth())
+        Error1(pb->LOC(),
+               "too many parallel-by levels: " + std::to_string(max_depth) +
+                   " > " + std::to_string(TargetMaxDepth()) + ".");
+
+    } else if (last_depth == max_depth) {
+      // In this case, last pb is the inner-most
+      if (!ExplicitLevel(*last_pb) ||
+          last_pb->GetLevel() == ParallelLevel::THREAD) {
+        last_pb->SetLevel(ParallelLevel::THREAD);
+        if (!ExplicitLevel(*pb)) {
+          if (!support_group) {
+            //   parallel p by 32
+            //    parallel q by 64
+            // =>
+            //   parallel p by 32 : block
+            //     parallel q by 64 : thread
+            assert(max_depth == 2);
+            pb->SetLevel(ParallelLevel::BLOCK);
+          } else {
+            if (literal_depth == 1) {
+              //   parallel p by 32
+              //    parallel q by 64
+              // =>
+              //   parallel p by 32 : block
+              //    parallel r by 1 : group
+              //     parallel q by 64 : thread
+              assert(max_depth == 2);
+              pb->SetLevel(ParallelLevel::BLOCK);
+              fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+            } else if (literal_depth == 2) {
+              //   parallel p by 32
+              //    parallel r by 4
+              //     parallel q by 64
+              // =>
+              //   parallel p by 32
+              //    parallel r by 4 : group
+              //     parallel q by 64 : thread
+              pb->SetLevel(ParallelLevel::GROUP);
+            } else
+              choreo_unreachable("internal error: parallel-by.");
+          }
+        } else {
+          if (pb->GetLevel() == ParallelLevel::THREAD)
+            Error1(pb->LOC(),
+                   "can not have multiple thread-level parallel-by.");
+          else if (pb->GetLevel() == ParallelLevel::GROUP) {
+            //   parallel r by 32 : group
+            //    parallel q by 64
+            // =>
+            //   parallel p by 1 : block
+            //    parallel r by 32 : group
+            //     parallel q by 64 : thread
+            if (max_depth == 2)
+              fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+          } else if (pb->GetLevel() == ParallelLevel::BLOCK) {
+            //   parallel p by 32 : block
+            //    parallel q by 64
+            // =>
+            //   parallel p by 32 : block
+            //    parallel r by 1 : group
+            //     parallel q by 64 : thread
+            if (support_group)
+              fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+          }
+        }
+      } else if (last_pb->GetLevel() == ParallelLevel::GROUP) {
+        // group as the inner-most
+        fill_info.emplace_back(last_pb, Inner, ParallelLevel::THREAD);
+        if (!ExplicitLevel(*pb)) {
+          if (literal_depth > 1) {
+            Error1(pb->LOC(), "can not have multiple group-level parallel-by.");
+
+          } else {
+            //   parallel p by 32
+            //    parallel r by 64 : group
+            // =>
+            //   parallel p by 1 : block
+            //    parallel r by 64 : group
+            //     parallel q by 1 : thread
+            pb->SetLevel(ParallelLevel::BLOCK);
+          }
+        } else {
+          switch (pb->GetLevel()) {
+          case ParallelLevel::THREAD:
+            Error1(pb->LOC(), "can not have group-level parallel-by inside a "
+                              "thread-level one.");
+            break;
+          case ParallelLevel::GROUP:
+            Error1(pb->LOC(), "can not have multiple group-level parallel-by.");
+            break;
+          case ParallelLevel::BLOCK: break;
+          default: choreo_unreachable("unsupported parallel level.");
+          }
+        }
+      } else if (last_pb->GetLevel() == ParallelLevel::BLOCK) {
+        Error1(pb->LOC(), "unsupported: parallel-by outside a block-level.");
+      }
+    } else {
+      assert(last_depth < max_depth);
+      assert(last_depth == 2 && literal_depth == 1);
+      if (!ExplicitLevel(*last_pb))
+        choreo_unreachable("internal error: failed to annotate parallel-by.");
+      else if (last_pb->GetLevel() != ParallelLevel::GROUP)
+        choreo_unreachable(
+            "internal error: failed to annotate group parallel-by.");
+      else {
+        if (!ExplicitLevel(*pb))
+          pb->SetLevel(ParallelLevel::BLOCK);
+        else if (pb->GetLevel() != ParallelLevel::BLOCK)
+          Error1(pb->LOC(), "expect a block-level parallel by.");
+      }
+    }
+    last_depth = literal_depth;
+    last_pb = pb;
+
+    literal_depth--;
+    assert(literal_depth >= 0);
+
+    if (literal_depth == 0) {
+      for (auto fi : fill_info) {
+        if (fi.ft == Outer)
+          InsertOuterLevel(*fi.pb, fi.lvl);
+        else
+          InsertInnerLevel(*fi.pb, fi.lvl);
+      }
+      fill_info.clear();
+    }
+    return true;
+  }
+
+  bool NormPB(AST::ParallelBy& n) {
+    // fill the sub elements
+    if (!n.HasSubPVs()) {
+      // `parallel p by 2`  ==> `parallel p={p__elem__x} by [2]`
+      auto spv = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+      spv->Append(AST::Make<AST::Identifier>(n.BPV()->LOC(),
+                                             n.BPV()->name + "__elem__x"));
+      n.SetSubPVs(spv);
+      auto sub = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+      sub->Append(n.BoundExpr()->Clone());
+      n.SetBoundExprs(sub);
+      n.SubPVs()->ValueAt(0)->SetType(NodeType(*n.BPV()));
+      n.SubPVs()->SetType(NodeType(*n.BPV()));
+      VST_DEBUG(dbgs() << "Generate cmpt_bpvs in parallelby for '"
+                       << PSTR(n.BPV()) << "': " << STR(n.SubPVs()) << "\n");
+    }
+    return true;
+  }
+
+  bool Visit(AST::ParallelBy& pb) override { return NormPB(pb); }
+};
+
+class Normalizer : public VisitorGroup {
+private:
+  CompoundNorm comp;
+  ParaByFiller filler;
+  LoopNorm ln;
+
+public:
+  Normalizer() : VisitorGroup("norm", comp, filler, ln) {}
 };
 
 } // end namespace Choreo

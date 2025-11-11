@@ -21,6 +21,7 @@ enum class CompileTarget {
   Topscc,
   CUDA,
   Cute,
+  MPI,
 };
 
 inline static const std::string STR(CompileTarget ct) {
@@ -30,6 +31,7 @@ inline static const std::string STR(CompileTarget ct) {
   case CompileTarget::Topscc: return "Topscc";
   case CompileTarget::CUDA: return "CUDA";
   case CompileTarget::Cute: return "Cute";
+  case CompileTarget::MPI: return "MPI";
   default: choreo_unreachable("Unsupported operand kind.");
   }
   return "";
@@ -50,6 +52,7 @@ enum class TargetArch {
   SM_89,
   SM_90,
   SM_100,
+  SM_120,
 };
 
 inline static const std::string STR(TargetArch ta) {
@@ -67,6 +70,7 @@ inline static const std::string STR(TargetArch ta) {
   case TargetArch::SM_89: return "SM_89";
   case TargetArch::SM_90: return "SM_90";
   case TargetArch::SM_100: return "SM_100";
+  case TargetArch::SM_120: return "SM_120";
   default: choreo_unreachable("Unsupported operand kind.");
   }
   return "";
@@ -316,6 +320,7 @@ class CompilationContext {
 private:
   std::map<std::string, FunctionContext> function_contexts;
   CompileTarget compile_target = CompileTarget::Unknown;
+  CompileTarget compile_sub_target = CompileTarget::Unknown;
   TargetArch arch = TargetArch::Unknown;
   OutputKind out_kind = OutputKind::TargetExecutable;
   uint8_t opt_level = 0;
@@ -379,6 +384,10 @@ public:
 
   CompileTarget GetTarget() const { return compile_target; }
   void SetTarget(CompileTarget ct) { compile_target = ct; }
+
+  // useful for MPI
+  CompileTarget GetSubTarget() const { return compile_sub_target; }
+  void SetSubTarget(CompileTarget ct) { compile_sub_target = ct; }
 
   TargetArch GetArch() const { return arch; }
   void SetArch(TargetArch ta) { arch = ta; }
@@ -448,7 +457,8 @@ public:
     case TargetArch::SM_86:
     case TargetArch::SM_89:
     case TargetArch::SM_90:
-    case TargetArch::SM_100: {
+    case TargetArch::SM_100:
+    case TargetArch::SM_120: {
       switch (sto) {
       case Storage::LOCAL: {
         if (MaxLocalMemCapacity() > 0) { return MaxLocalMemCapacity(); }
@@ -460,6 +470,7 @@ public:
         case TargetArch::SM_89: return 3072;
         case TargetArch::SM_90: return 4096;
         case TargetArch::SM_100: return 4096;
+        case TargetArch::SM_120: return 4096 /* TO-confirm */;
         case TargetArch::GPU:
         default: return 1024;
         }
@@ -567,6 +578,17 @@ public:
       return source_lines[line_no - 1];
     }
     return "";
+  }
+
+public:
+  bool SupportEvent() const {
+    switch (compile_target) {
+    case CompileTarget::Topscc:
+      return arch == TargetArch::GCU3 || arch == TargetArch::GCU4;
+    case CompileTarget::Cute: return true;
+    default: break;
+    }
+    return false;
   }
 
 public:

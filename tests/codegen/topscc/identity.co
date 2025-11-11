@@ -77,11 +77,11 @@ int main() { /// host program
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:   tops::mdspan __mds0_input(tops::Global, (float*)input + (__tops_bid_x() * 1024), 1024);
 // CHECK:   tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
-// CHECK:   if (__CHOREO_SINGLE_SHARED__) {
+// CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
 // CHECK:     tops::event input_load__event__ = tops::memcpy_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_input);
 // CHECK:     input_load.set_event(input_load__event__);
 // CHECK:   } // single instance
-// CHECK:   if (__CHOREO_SINGLE_SHARED__) {
+// CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
 // CHECK:     input_load.wait();
 // CHECK:   }
 // CHECK:   __syncthreads();
@@ -101,11 +101,11 @@ int main() { /// host program
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx3;
 // CHECK:   tops::mdspan __mds6_l2_out(tops::Shared, (float*)l2_out, 1024);
 // CHECK:   tops::mdspan __mds7_output(tops::Global, (float*)output + (__tops_bid_x() * 1024), 1024);
-// CHECK:   if (__CHOREO_SINGLE_SHARED__) {
+// CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
 // CHECK:     tops::event out_store__event__ = tops::memcpy_async(*out_store.get_ctx(), __mds7_output, __mds6_l2_out);
 // CHECK:     out_store.set_event(out_store__event__);
 // CHECK:   } // single instance
-// CHECK:   if (__CHOREO_SINGLE_SHARED__) {
+// CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
 // CHECK:     out_store.wait();
 // CHECK:   }
 // CHECK:   __syncthreads();

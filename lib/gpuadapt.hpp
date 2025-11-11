@@ -4,34 +4,10 @@
 // This apply the GPU target specific check and information annotation
 
 #include "ast.hpp"
+#include "target_utils.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
-
-extern int GetMaxParallelLevelFromNote(AST::ParallelBy& n);
-
-inline Storage GPUDeviceParallelLevel(int pl_depth) {
-  assert(pl_depth >= 0 && pl_depth <= 2);
-  static std::unordered_map<int, Storage> levels = {
-      {0, Storage::GLOBAL},
-      {1, Storage::SHARED},
-      {2, Storage::LOCAL},
-  };
-
-  if (!levels.count(pl_depth)) return Storage::NONE;
-  return levels[pl_depth];
-}
-
-inline int GPUDeviceParallelDepth(Storage l) {
-  static std::unordered_map<Storage, int> levels = {
-      {Storage::GLOBAL, 0},
-      {Storage::SHARED, 1},
-      {Storage::LOCAL, 2},
-  };
-
-  if (!levels.count(l)) return -1;
-  return levels[l];
-}
 
 inline bool IsTMAAvaliable() {
   switch (CCtx().GetArch()) {
@@ -45,11 +21,12 @@ inline bool IsTMAAvaliable() {
 struct GPUAdaptor : public VisitorWithSymTab {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
-  std::vector<int> pl_depths;
-  int pl_depth = 0;
-  int max_pl_depth = 0;
+  std::stack<ParallelLevel> levels;
   std::string cur_fname;
   std::string cur_arch;
+
+private:
+  ParallelLevel Level() const { return levels.top(); }
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
@@ -57,63 +34,28 @@ private:
     if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
       cur_params.clear();
       cur_fname = cf->name;
+      levels.push(ParallelLevel::SEQ);
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      if (pb->GetLevel() == Storage::NONE) {
-        pl_depth++;
-      } else
-        pl_depth = PDepth(pb->GetLevel()); // depth from annotation
-      pl_depths.push_back(pl_depth);
+      levels.push(pb->GetLevel());
 
-      max_pl_depth = GetMaxParallelLevelFromNote(*pb);
-      assert(max_pl_depth >= 2);
-
-      if (!ValidDepth(*pb, pl_depth)) return false;
-      if (!ValidDepth(*pb, max_pl_depth)) return false;
-
-      pb->SetMaxLevel(PLevel(max_pl_depth));
-      if (pb->GetLevel() == Storage::NONE) pb->SetLevel(PLevel(pl_depth));
+      pb->SetMaxLevel(TargetMaxLevel());
 
       VST_DEBUG(pb->InlinePrint(dbgs());
                 dbgs() << ": level << " << STR(pb->GetLevel()) << " / "
-                       << STR(pb->GetMaxLevel()) << "\n");
+                       << STR(TargetMaxLevel()) << "\n");
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(post)");
-    if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      std::string append_note = ":";
-      //      assert(pb->GetLevel() != Storage::NONE);
-      pl_depth = pl_depths.back();
-      if (ValidDepth(*pb, pl_depth)) {
-        if (CCtx().GetTarget() == CompileTarget::Topscc) {
-          auto sto = PBLevel();
-          // set the storage level when it is not explicitly set
-          if (pb->GetLevel() == Storage::NONE) pb->SetLevel(sto);
-          VST_DEBUG(dbgs() << "In function '" << fname << "': ";
-                    pb->InlinePrint(dbgs());
-                    dbgs() << ", level: " << STR(pb->GetLevel()) << " / "
-                           << STR(pb->GetMaxLevel()) << "\n");
-          append_note += STR(sto);
-        } else
-          append_note += std::to_string(max_pl_depth - pl_depth);
-        auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
-        pty->AppendNote(append_note);
-        for (auto& symbol : pb->AllSubPVs())
-          cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
-      }
-      pl_depths.pop_back();
-      // pl_depth may not be increasing in a sequential manner
-      // so need a container to store the state.
-      pl_depth = pl_depths.back();
-      assert(pl_depth >= 0 && "Unexpected parallel level");
-      if (pb->IsOuter()) { max_pl_depth = 0; }
+    if (isa<AST::ParallelBy>(&n)) {
+      levels.pop();
     }
 
     // mask stmts that are possible to be shared
     else if (auto c = dyn_cast<AST::Call>(&n))
-      if (!c->IsExpr()) n.SetLevel(PLevel(pl_depth));
+      if (!c->IsExpr()) n.SetLevel(Level());
 
     return true;
   }
@@ -122,45 +64,8 @@ private:
     if (trace_visit) dbgs() << n.TypeNameString() << sup << "\n";
   }
 
-private:
-  Storage PLevel(int depth) {
-    auto lvl = GPUDeviceParallelLevel(depth);
-    assert(lvl != Storage::NONE);
-    return lvl;
-  }
-
-  int PDepth(Storage l) {
-    auto depth = GPUDeviceParallelDepth(l);
-    assert(depth != -1);
-    return depth;
-  }
-
 public:
-  bool ValidDepth(const AST::Node& n, int depth) {
-    if (depth >= 3) {
-      Error1(n.LOC(), "the parallel level (depth: " + std::to_string(depth) +
-                          ") is not supported by current GPU architecture (" +
-                          cur_arch + ").");
-      return false;
-    }
-    return true;
-  }
-
-  Storage PBLevel() {
-    if (max_pl_depth == 1) {
-      switch (pl_depth) {
-      case 0: return Storage::GLOBAL; break;
-      case 1: return Storage::LOCAL; break;
-      default:
-        choreo_unreachable(
-            "unsupported parallel level: " + std::to_string(pl_depth) + ".");
-      }
-    } else
-      return PLevel(pl_depth);
-    return Storage::NONE;
-  }
-
-  bool IsHost() const { return pl_depth == 0; }
+  bool IsHost() const { return Level() == ParallelLevel::SEQ; }
 
   void CheckDMA(AST::DMA& n) {
     if (n.operation == ".any") return;
@@ -504,18 +409,6 @@ public:
   GPUAdaptor() : VisitorWithSymTab("gpu"), cur_arch(STR(CCtx().GetArch())) {}
   ~GPUAdaptor() {}
 
-  bool Visit(AST::MultiNodes& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::MultiValues& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::IntLiteral& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
   bool Visit(AST::FloatLiteral& n) override {
     TraceEachVisit(n);
 
@@ -527,22 +420,7 @@ public:
 
     return true;
   }
-  bool Visit(AST::BoolLiteral& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Expr& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::MultiDimSpans& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::NamedTypeDecl& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
+
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
     auto ty = GetSymbolType(n.name_str);
@@ -552,9 +430,6 @@ public:
       if (!mem) return true;
 
       auto st = mem->Get();
-      if (st == Storage::SUB || st == Storage::LOCAL)
-        Error1(n.LOC(), "local and sublocal is not supported by cuda.");
-
       if (n.init_expr != nullptr) {
         if (st == Storage::SHARED)
           Error1(n.LOC(), "initialization is not supported for " + STR(st) +
@@ -571,12 +446,12 @@ public:
     auto st = sty->GetStorage();
     switch (st) {
     case Storage::GLOBAL:
-      if (pl_depth != 0)
+      if (Level() != ParallelLevel::SEQ)
         Error1(n.LOC(), "global variable '" + n.name_str +
                             "` mustn't be declared inside parallel-by.");
       break;
     case Storage::SHARED:
-      if (pl_depth == 0)
+      if (Level() == ParallelLevel::SEQ)
         Error1(n.LOC(), "shared variable '" + n.name_str +
                             "` must be declared inside parallel-by.");
       if (sty->RuntimeShaped() && !CCtx().MemReuse())
@@ -585,7 +460,7 @@ public:
                             STR(sty->GetShape()) + ").");
       break;
     case Storage::LOCAL:
-      if (pl_depth == 0)
+      if (Level() == ParallelLevel::SEQ)
         Error1(n.LOC(), "local variable '" + n.name_str +
                             "` must be declared inside parallel-by.");
       if (sty->RuntimeShaped() && !CCtx().MemReuse())
@@ -600,63 +475,13 @@ public:
     }
     return true;
   }
-  bool Visit(AST::DataAccess& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::IntTuple& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Assignment& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::IntIndex& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::DataType& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Identifier& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
+
   bool Visit(AST::Parameter& n) override {
     TraceEachVisit(n);
     if (n.sym) cur_params.emplace(InScopeName(n.sym->name), &n);
     return true;
   }
-  bool Visit(AST::ParamList& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::ParallelBy& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::WhereBind& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::WithIn& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::WithBlock& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Memory& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::SpanAs& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
+
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
 
@@ -678,9 +503,9 @@ public:
                           " copy (global -> global).");
 
     if (fst == Storage::GLOBAL && tst == Storage::SHARED && IsTMAAvaliable())
-      n.SetLevel(Storage::SHARED); // single instance in a block
+      n.SetLevel(ParallelLevel::BLOCK); // single instance in a block
     else
-      n.SetLevel(Storage::LOCAL); // threads-cooperative
+      n.SetLevel(ParallelLevel::THREAD); // threads-cooperative
 
     CheckDMA(n);
 
@@ -717,14 +542,6 @@ public:
     return true;
   }
 
-  bool Visit(AST::ChunkAt& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Wait& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
     if (n.IsArith())
@@ -748,79 +565,32 @@ public:
     }
     return true;
   }
-  bool Visit(AST::Rotate& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
 
   bool Visit(AST::Synchronize& n) override {
     TraceEachVisit(n);
 
-    auto pl2s = [this]() {
-      switch (pl_depth) {
-      case 0: return Storage::GLOBAL;
-      case 1: return Storage::SHARED;
-      case 2: return Storage::LOCAL;
-      default: break;
-      }
-      return Storage::NONE;
-    };
+    auto pl = Level();
 
-    switch (n.scope->Get()) {
+    switch (n.Resource()) {
     case Storage::GLOBAL:
-      if (pl_depth != 0)
-        Error1(n.LOC(), "unsupported: " + PSTR(n.scope) +
-                            " synchronization in " + STR(pl2s()) + " scope.");
+      if ((pl == ParallelLevel::BLOCK) || (pl == ParallelLevel::GROUP) ||
+          (pl == ParallelLevel::THREAD) || (pl == ParallelLevel::TERM))
+        Error1(n.LOC(), "unsupported: " + STR(n.Resource()) +
+                            " synchronization in " + STR(pl) + " scope.");
       break;
     case Storage::SHARED:
-      if (pl_depth == 0)
-        Error1(n.LOC(), "unsupported: " + PSTR(n.scope) +
-                            " synchronization in " + STR(pl2s()) + " scope.");
+    case Storage::LOCAL:
+      if ((pl == ParallelLevel::SEQ) || (pl == ParallelLevel::TERM) ||
+          (pl == ParallelLevel::DEVICE))
+        Error1(n.LOC(), "unsupported: " + STR(n.Resource()) +
+                            " synchronization in " + STR(pl) + " scope.");
       break;
+    case Storage::NODE:
     default:
-      Error1(n.scope->LOC(),
-             "unsupported synchronization: " + PSTR(n.scope) + ".");
+      Error1(n.LOC(),
+             "unsupported synchronization: " + STR(n.Resource()) + ".");
     }
     return true;
-  }
-
-  bool Visit(AST::Select& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Return& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::LoopRange& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::ForeachBlock& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::FunctionDecl& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::ChoreoFunction& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::CppSourceCode& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Program& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-
-  bool HasError() override {
-    if (error_count)
-      dbgs() << "Totally " << error_count << " errors have been detected.\n";
-    return error_count != 0;
   }
 };
 

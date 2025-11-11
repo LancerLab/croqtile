@@ -10,6 +10,7 @@
 #include "codegen.hpp"
 #include "io.hpp"
 #include "operator_info.hpp"
+#include "target_utils.hpp"
 #include "types.hpp"
 
 #ifndef __CHOREO_TOPSCC_DIR__
@@ -158,44 +159,15 @@ TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
 const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
   if (CCtx().GetArch() == TargetArch::GCU4) {
     if (sto == Storage::GLOBAL)
-      return "tops::shared_dte";
+      return "tops::shared_dte"; // to confirm
     else if (sto == Storage::SHARED)
       return "tops::shared_dte";
     else if (sto == Storage::LOCAL)
       return "tops::local_dte";
-    else if (sto == Storage::SUB)
-      return "tops::private_dte";
     else
       choreo_unreachable("unsupported storage for DMA context.");
   } else
     return "tops_dte_ctx_t";
-}
-
-bool TopsccCodeGen::RequiresImplPred(Storage cur) const {
-  // ignore any host code
-  if (IsHost()) return false;
-  // ignore any expression without storage
-  if (cur == Storage::NONE) return false;
-
-  if (max_parallel_level == Storage::SUB) {
-    switch (cur) {
-    case Storage::SUB: return false;
-    case Storage::LOCAL:
-    case Storage::SHARED: return true;
-    default: choreo_unreachable("irrational storage level.");
-    }
-  } else if (max_parallel_level == Storage::LOCAL) {
-    switch (cur) {
-    case Storage::SUB:
-    case Storage::LOCAL: return false;
-    case Storage::SHARED: return true;
-    default: choreo_unreachable("irrational storage level.");
-    }
-  } else if (max_parallel_level == Storage::SHARED)
-    choreo_unreachable("irrational max_parallel_level storage level.");
-
-  choreo_unreachable("unexpected storage level.");
-  return false;
 }
 
 const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
@@ -226,13 +198,15 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     EmitFixedDeviceHead();
     ssm.EnterScope();
     ssm.MapDeviceSymbolIfNotExist("::__choreo_no_tiling__", "0");
+    levels.push(ParallelLevel::NONE);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     device_fn = "__choreo_device_" + fname;
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
-    pl_stack.clear();
+    levels.push(ParallelLevel::SEQ);
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    levels.push(pb->GetLevel());
     // only on device-side
     if (pb->IsOuter()) {
       parallel_idx += 1;
@@ -242,12 +216,9 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       ds << " {\n";
       IncrDeviceIndent();
       ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
-      max_parallel_level = pb->GetMaxLevel();
       VST_DEBUG(pb->InlinePrint(dbgs());
-                dbgs() << " (max-level: " << STR(max_parallel_level) << ")\n");
+                dbgs() << " (max-level: " << STR(TargetMaxLevel()) << ")\n");
     }
-    parallel_level = pb->GetLevel();
-    pl_stack.push_back(parallel_level);
   } else if (isa<AST::WithBlock>(&n)) {
     IndStream() << "// with-in: " << n.LOC() << "\n";
     IndStream() << "{\n";
@@ -299,11 +270,13 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     IncrIndent();
   }
 
-  if (!n.IsBlock() && RequiresImplPred(n.GetLevel())) {
-    ds << d_indent << "if (" << ImplicitPred(n.GetLevel())
+#if 0
+  if (!n.IsBlock() && NeedLevelPred()) {
+    ds << d_indent << "if (" << LevelPred(Level())
        << ") { // implicit inthreads\n";
     IncrDeviceIndent();
   }
+#endif
 
   return true;
 }
@@ -365,18 +338,12 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     hs.str("");
     return_stream.str("");
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    levels.pop();
     // only on device-side
     if (pb->IsOuter()) {
-      max_parallel_level = Storage::NONE;
-      parallel_level = Storage::NONE;
-      pl_stack.clear();
       ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
       ds << "}\n\n";
-    } else {
-      assert(!pl_stack.empty());
-      pl_stack.pop_back();
-      parallel_level = pl_stack.back();
     }
   } else if (isa<AST::WithBlock>(&n)) {
     DecrIndent();
@@ -435,10 +402,12 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     emit_call = true;
   }
 
-  if (!n.IsBlock() && RequiresImplPred(n.GetLevel())) {
+#if 0
+  if (!n.IsBlock() && NeedLevelPred()) {
     DecrDeviceIndent();
     ds << d_indent << "} // end implicit inthreads\n";
   }
+#endif
 
   return true;
 }
@@ -777,7 +746,6 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   // The type is determined first, and then
   // the device or host side is determined
-
   if (auto s = dyn_cast<AST::Select>(n.init_expr)) {
     assert(!IsHost() && "select should be on device side.");
     assert(!s->inDMA);
@@ -939,8 +907,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (sto != Storage::SHARED && sto != Storage::LOCAL)
         choreo_unreachable(
             "error: unexpected storage type in spm initialization.");
-      ds << d_indent << "if ("
-         << SingleInstancePredicate(sto == Storage::SHARED) << ") {\n";
+      ds << d_indent << BufferInitPred(sto) << "{\n";
       IncrDeviceIndent();
       ds << d_indent << DMATypeSTR(sto) << " " << sym__init << ";\n";
       ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
@@ -1048,14 +1015,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ety->PrintAsCArray(ds);
       ds << "; // " << STR(ety->GetStorage()) << " event\n";
       ds << d_indent << "// initialize the event\n";
-      if (RequiresImplPred(ety->GetStorage())) {
-        ds << d_indent << "if (" << ImplicitPred(ety->GetStorage()) << ") {\n";
-        GenerateSubscriptions(ds, "  " + d_indent + n.name_str, " = false;\n",
-                              ety->Dimensions());
-        ds << d_indent << "}\n";
-      } else
-        GenerateSubscriptions(ds, d_indent + n.name_str, " = false;\n",
-                              ety->Dimensions());
+      ds << d_indent << BufferInitPred(ety->GetStorage()) << "{\n";
+      GenerateSubscriptions(ds, "  " + d_indent + n.name_str, " = false;\n",
+                            ety->Dimensions());
+      ds << d_indent << "}\n";
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
     } break;
     default: break;
@@ -1081,13 +1044,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
          << " __volatile__ bool " << n.name_str << "; // "
          << STR(ety->GetStorage()) << " event\n";
-      if (RequiresImplPred(ety->GetStorage())) {
-        ds << d_indent << "if (" << ImplicitPred(ety->GetStorage()) << ") {\n";
-        ds << d_indent << "  " << n.name_str
-           << " = false;\n"; // inited as untriggered
-        ds << d_indent << "}\n";
-      } else
-        ds << d_indent << n.name_str << " = false;\n"; // inited as untriggered
+      ds << d_indent << BufferInitPred(ety->GetStorage()) << " {\n";
+      ds << d_indent << "  " << n.name_str
+         << " = false;\n"; // inited as untriggered
+      ds << d_indent << "}\n";
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
     } break;
     default: break;
@@ -1236,27 +1196,29 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   // add the device name map
   std::string dname[] = {"x", "y", "z"};
   switch (n.GetLevel()) {
-  case Storage::SHARED:
+  case ParallelLevel::BLOCK:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
                           "__tops_bid_" + dname[i] + "()");
     if (n.AllSubPVs().size() == 1)
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_bid_x()");
     break;
-  case Storage::LOCAL:
+  case ParallelLevel::GROUP:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
                           "__tops_tid_" + dname[i] + "()");
     if (n.AllSubPVs().size() == 1)
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_tid_x()");
     break;
-  case Storage::SUB:
+  case ParallelLevel::THREAD: {
+    std::string id_str = TargetHasLevel(ParallelLevel::GROUP) ? "stid" : "tid";
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
-                          "__tops_stid_" + dname[i] + "()");
+                          "__tops_" + id_str + "_" + dname[i] + "()");
     if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_stid_x()");
-    break;
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name),
+                          "__tops_" + id_str + "_x()");
+  } break;
   default:
     choreo_unreachable("unsupported parallel-by level: " + STR(n.GetLevel()) +
                        ".");
@@ -1270,11 +1232,18 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   // note: `thread_dims` for gcu400 is generated in `EmitDeviceFuncDecl`
   auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
   hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
-     << ValueSTR(lconfig.grid_dim_x) << ", " << ValueSTR(lconfig.grid_dim_y)
-     << ", " << ValueSTR(lconfig.grid_dim_z) << ");\n";
-  hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
-     << ValueSTR(lconfig.block_dim_x) << ", " << ValueSTR(lconfig.block_dim_y)
-     << ", " << ValueSTR(lconfig.block_dim_z) << ");\n";
+     << ValueSTR(lconfig.block_count.x) << ", "
+     << ValueSTR(lconfig.block_count.y) << ", "
+     << ValueSTR(lconfig.block_count.z) << ");\n";
+  hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "(";
+  if (TargetHasLevel(ParallelLevel::GROUP))
+    hs << ValueSTR(lconfig.group_count.x) << ", "
+       << ValueSTR(lconfig.group_count.y) << ", "
+       << ValueSTR(lconfig.group_count.z) << ");\n";
+  else
+    hs << ValueSTR(lconfig.thread_count.x) << ", "
+       << ValueSTR(lconfig.thread_count.y) << ", "
+       << ValueSTR(lconfig.thread_count.z) << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
      << ", __" << fname << "_bdims" << parallel_idx << ">>>(";
 
@@ -1755,23 +1724,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ds << f_mds_decl;
     ds << t_mds_decl;
 
-    // handles dma related to shared memory, where only single thread can
+    // handles dma in block, where only single thread in block can
     // operate
-    bool local_in_warp = false, shared_in_block = false;
-    if (!n.future.empty()) {
-      shared_in_block = IsDMABlockShared(n);
-      local_in_warp = IsDMAWarpLocal(n);
-    }
-
-    assert(!(shared_in_block && local_in_warp) &&
-           "local and shared memory should not be used at the same time");
-    if (local_in_warp)
-      assert(CCtx().GetArch() == TargetArch::GCU4 &&
-             "only gcu400 need handle local synchronization");
-
-    if (shared_in_block || local_in_warp) {
-      ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
-         << ") {\n";
+    if (NeedLevelPred()) {
+      ds << d_indent << LevelPred(Level()) << "{\n";
       IncrDeviceIndent();
     }
 
@@ -2020,14 +1976,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       }
     }
 
-    if (local_in_warp || shared_in_block) {
+    if (NeedLevelPred()) {
       DecrDeviceIndent();
       ds << d_indent << "} // single instance\n";
       if (!fty->IsAsync()) {
         // not async, must syncthreads immediately
         // else, defer the sync till the wait time
-        if (shared_in_block) ds << d_indent << "__syncthreads();\n";
-        if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
+        ds << d_indent << EmitSync(dma_sto) << ";\n";
       }
     }
   };
@@ -2080,15 +2035,15 @@ bool TopsccCodeGen::Visit(AST::Rotate& n) {
 bool TopsccCodeGen::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
 
-  switch (n.scope->Get()) {
+  switch (n.Resource()) {
   case Storage::GLOBAL:
     hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
     break;
   case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
   case Storage::LOCAL: ds << d_indent << "__syncsubthreads();\n"; break;
   default:
-    choreo_unreachable("unsupported synchronization type: " + PSTR(n.scope) +
-                       ".");
+    choreo_unreachable(
+        "unsupported synchronization type: " + STR(n.Resource()) + ".");
   }
 
   return true;
@@ -2097,23 +2052,14 @@ bool TopsccCodeGen::Visit(AST::Synchronize& n) {
 bool TopsccCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
-  bool local_in_warp = false, shared_in_block = false;
   for (auto& f : n.GetTargets()) {
     if (!isa<FutureType>(NodeType(*f))) continue;
     assert(cast<AST::Expr>(f)->GetSymbol());
     auto name = cast<AST::Expr>(f)->GetSymbol()->name;
-    shared_in_block |= IsFutureBlockShared(InScopeName(name));
-    local_in_warp |= IsFutureWarpLocal(InScopeName(name));
   }
-  assert(!(local_in_warp && shared_in_block) &&
-         "local and shared memory should not be used at the same time");
-  if (local_in_warp)
-    assert(CCtx().GetArch() == TargetArch::GCU4 &&
-           "only gcu400 need handle local synchronization");
 
-  if (shared_in_block || local_in_warp) {
-    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
-       << ") {\n";
+  if (NeedLevelPred()) {
+    ds << d_indent << LevelPred(Level()) << "{\n";
     IncrDeviceIndent();
   }
 
@@ -2187,11 +2133,10 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
     }
   }
 
-  if (shared_in_block || local_in_warp) {
+  if (NeedLevelPred()) {
     DecrDeviceIndent();
     ds << d_indent << "}\n";
-    if (shared_in_block) ds << d_indent << "__syncthreads();\n";
-    if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
+    ds << d_indent << "__syncthreads();\n";
   }
 
   return true;
@@ -2814,10 +2759,10 @@ void TopsccCodeGen::EmitTopsFree() {
 }
 
 void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
-  if (CCtx().GetArch() == TargetArch::GCU4) {
+  if (TargetHasLevel(ParallelLevel::GROUP)) {
     auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
-    oss << "__thread_dims__(" << lconfig.warp_dim_x << ", "
-        << lconfig.warp_dim_y << ", " << lconfig.warp_dim_z << ")\n";
+    oss << "__thread_dims__(" << lconfig.thread_count.x << ", "
+        << lconfig.thread_count.y << ", " << lconfig.thread_count.z << ")\n";
   }
 
   oss << "__global__ void " << device_fn << "(";
@@ -3188,55 +3133,6 @@ const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
   return "";
 }
 
-std::optional<std::string>
-TopsccCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
-  if (id == nullptr) return std::nullopt;
-  auto ty = NodeType(*id);
-  if (isa<BoundedType>(ty) &&
-      PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
-    auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());
-    assert(l.has_value());
-    // is marked as parallel whose level is decided by target check
-    if (*l == "local")
-      return "__tops_tid_x()";
-    else if (*l == "shared")
-      return "__tops_bid_x()";
-    else if (*l == "sub-local")
-      return "__tops_stid_x()";
-    else
-      choreo_unreachable("invalid bounded type note.");
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string>
-TopsccCodeGen::SubThreadIdString(const ptr<AST::Identifier>& id) const {
-  auto ty = NodeType(*id);
-  std::ostringstream oss;
-  if (isa<BoundedType>(ty) &&
-      PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pi")) {
-    auto l = RemovePrefixOrNull("pi:", cast<BoundedType>(ty)->GetNote());
-    assert(l.has_value());
-    // l should be (x|y|z):(shared|local)
-    if (l->length() <= 3)
-      choreo_unreachable("invalid bounded type note: " +
-                         cast<BoundedType>(ty)->GetNote() + ".");
-    oss << "__tops_";
-    if (l->substr(2) == "local")
-      oss << "tid_";
-    else if (l->substr(2) == "shared")
-      oss << "bid_";
-    else
-      choreo_unreachable("invalid bounded type note.");
-    if (l->at(0) > 'z' || l->at(0) < 'x')
-      choreo_unreachable("invalid bounded type note: " +
-                         cast<BoundedType>(ty)->GetNote() + ".");
-    oss << l->at(0) << "()";
-    return oss.str();
-  }
-  return std::nullopt;
-}
-
 // input is a `node` or `std::variant<int, float>`.
 // If `val` is existed, use it first.
 const std::string
@@ -3357,12 +3253,8 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
   for (auto item : da.GetIndices()) {
     auto item_ty = item->GetType();
     if (auto id = AST::GetIdentifier(item)) {
-      if (auto ids = ThreadIdString(id))
-        AppendOffset(sbe::sym(ids.value()));
-      else if (auto sids = SubThreadIdString(id))
-        AppendOffset(sbe::sym(sids.value()));
-      else if (within_map.count(InScopeName(id->name))) {
-        auto ivs = within_map.at(InScopeName(id->name));
+      if (bv_map.count(InScopeName(id->name))) {
+        auto ivs = bv_map.at(InScopeName(id->name));
         for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
           AppendOffset(sbe::sym(*iv_itr));
       } else
@@ -3413,13 +3305,9 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       assert(!is_host);
       return id->name;
     }
-    if (auto ids = ThreadIdString(id))
-      oss << ids.value();
-    else if (auto sids = SubThreadIdString(id))
-      oss << sids.value();
-    else if (within_map.count(InScopeName(id->name)) && !is_host) {
+    if (bv_map.count(InScopeName(id->name)) && !is_host) {
       size_t i = 0;
-      for (auto iv_name : within_map.at(InScopeName(id->name)))
+      for (auto iv_name : bv_map.at(InScopeName(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
             << UnScopedName(ssm.DeviceName(iv_name));
     } else
@@ -3457,7 +3345,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       }
     } else {
       assert(!da->AccessElement());
-      assert(!within_map.count(InScopeName(da->data->name)));
+      assert(!bv_map.count(InScopeName(da->data->name)));
       oss << UnScopedName(SSMName(InScopeName(da->data->name), is_host));
     }
   } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {

@@ -4,44 +4,40 @@
 // This apply the type check and symbol table generation
 
 #include "codegen.hpp"
+#include "target_utils.hpp"
 
 namespace Choreo {
 
-struct CodegenPrepareStage2 : public CodeGenerator {
+struct FutureInfoCollect : public CodeGenerator {
 private:
-  int parallel_depth = 0;
-  int mxpl = 0;
+  ParallelLevel level = ParallelLevel::SEQ;
 
 public:
-  CodegenPrepareStage2() : CodeGenerator("cgp_stage_2") {}
+  FutureInfoCollect() : CodeGenerator("cgp_stage_2") {}
 
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
-      parallel_depth = 0;
-      mxpl = 0;
+      level = ParallelLevel::SEQ;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      parallel_depth++;
-      mxpl = GetMaxParallelLevelFromNote(*pb);
+      assert(pb->GetLevel() - level == 1);
+      ++level;
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
-    if (isa<AST::ParallelBy>(&n)) {
-      if (parallel_depth == 1) mxpl = 0;
-      parallel_depth--;
-    }
+    if (isa<AST::ParallelBy>(&n)) { --level; }
     return true;
   }
 
   bool Visit(AST::DMA& n) override {
     if (n.future.empty() || (n.operation == ".any")) return true;
-    if ((mxpl == 2 || mxpl == 3) && parallel_depth == 1) {
+    if (level == ParallelLevel::BLOCK) {
       // the DMA is inside block-shared zone
       cgi.GetFunctionSharedFutures(fname).insert(InScopeName(n.future));
       VST_DEBUG(dbgs() << "Shared Future: " << InScopeName(n.future) << "\n");
     }
-    if (mxpl == 3 && parallel_depth == 2) {
+    if (level == ParallelLevel::GROUP) {
       // the DMA is inside warp-local zone
       cgi.GetFunctionLocalFutures(fname).insert(InScopeName(n.future));
       VST_DEBUG(dbgs() << "Local Future: " << InScopeName(n.future) << "\n");
@@ -80,36 +76,14 @@ private:
       }
 
       // All the pb in a nested pb is explicitly specified with pb level.
-      if (Storage s = n.GetLevel(); s != Storage::NONE) {
-        auto& lc = lcs.back();
-        switch (s) {
-        case Storage::SHARED: lc.SetGridDims(pb->BoundValues()); break;
-        case Storage::LOCAL: lc.SetBlockDims(pb->BoundValues()); break;
-        case Storage::SUB: lc.SetWarpDims(pb->BoundValues()); break;
-        default:
-          choreo_unreachable("The explicit parallel-by level " + STR(s) +
-                             " is not supported.");
-        }
-      } else {
-        if (parallel_depth == 1) {
-          lcs.back().SetBlockDims(pb->BoundValues());
-        } else if (parallel_depth == 2) {
-          auto& lc = lcs.back();
-          lc.OverwriteGDimsByBDims();
-          lc.ResetBDims();
-          lc.SetBlockDims(pb->BoundValues());
-        } else if (parallel_depth == 3) {
-          auto& lc = lcs.back();
-          lc.ResetWDims();
-          lc.SetWarpDims(pb->BoundValues());
-        } else {
-          // make the target to check
-#if 0
-          choreo_unreachable("The parallel-by level " +
-                             std::to_string(parallel_depth) +
-                             " is not supported.");
-#endif
-        }
+      auto& lc = lcs.back();
+      switch (pb->GetLevel()) {
+      case ParallelLevel::BLOCK: lc.SetBlockCount(pb->BoundValues()); break;
+      case ParallelLevel::GROUP: lc.SetGroupCount(pb->BoundValues()); break;
+      case ParallelLevel::THREAD: lc.SetThreadCount(pb->BoundValues()); break;
+      default:
+        choreo_unreachable("The explicit parallel-by level " +
+                           STR(pb->GetLevel()) + " is not supported.");
       }
     }
     return true;
@@ -129,10 +103,10 @@ private:
                 dbgs() << "': " << max_parallel_depth << "\n");
       if (parallel_depth == 1) {
         VST_DEBUG(dbgs() << "\tGrid Dims: "
-                         << cgi.GetFunctionLaunches(fname).back().grid_dim_x
+                         << cgi.GetFunctionLaunches(fname).back().block_count.x
                          << "\n");
         VST_DEBUG(dbgs() << "\tBlock Dims: "
-                         << cgi.GetFunctionLaunches(fname).back().block_dim_x
+                         << cgi.GetFunctionLaunches(fname).back().thread_count.x
                          << "\n");
         max_parallel_depth = 0;
       }
@@ -250,7 +224,7 @@ public:
 class CodegenPrepare : public VisitorGroup {
 private:
   CodegenPrepareStage1 s1;
-  CodegenPrepareStage2 s2;
+  FutureInfoCollect s2;
 
 public:
   CodegenPrepare() : VisitorGroup("prepare", s1, s2) {}

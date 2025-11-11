@@ -1,0 +1,69 @@
+// RUN: choreo -t topscc -arch=gcu300 -pa=pbfill -sa=pbfill %s | FileCheck %s
+
+__co__ void foo0() { parallel by 2; }
+__co__ void foo1() { parallel x by 3; }
+__co__ void foo2() { parallel y by 4 : thread; }
+__co__ void foo3() { parallel z by 5 : block; }
+
+
+__co__ void bar0() { parallel by 2 parallel by 4; }
+__co__ void bar1() { parallel x by 3 parallel y by 5; }
+__co__ void bar2() { parallel z by 4 : block parallel t by 6; }
+__co__ void bar3() { parallel r by 5 parallel s by 7 : thread; }
+
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo0
+// CHECK:  `- block Parallelization(o): index symbol: anon_pb_0, bound [0, 1)
+// CHECK:                      index component: {anon_pb_0__elem__x}, corresponding ubound: [1]
+// CHECK:   `- thread Parallelization: index symbol: anon_0, bound [0, 2)
+// CHECK:                       index component: {anon_0__elem__x}, corresponding ubound: [2]
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo1
+// CHECK:  `- block Parallelization(o): index symbol: anon_pb_1, bound [0, 1)
+// CHECK:                      index component: {anon_pb_1__elem__x}, corresponding ubound: [1]
+// CHECK:   `- thread Parallelization: index symbol: x, bound [0, 3)
+// CHECK:                       index component: {x__elem__x}, corresponding ubound: [3]
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo2
+// CHECK:  `- block Parallelization(o): index symbol: anon_pb_2, bound [0, 1)
+// CHECK:                      index component: {anon_pb_2__elem__x}, corresponding ubound: [1]
+// CHECK:   `- thread Parallelization: index symbol: y, bound [0, 4)
+// CHECK:                       index component: {y__elem__x}, corresponding ubound: [4]
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo3
+// CHECK:  `- block Parallelization(o): index symbol: z, bound [0, 5)
+// CHECK:                      index component: {z__elem__x}, corresponding ubound: [5]
+// CHECK:   `- thread Parallelization: index symbol: anon_pb_3, bound [0, 1)
+// CHECK:                       index component: {anon_pb_3__elem__x}, corresponding ubound: [1]
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: bar0
+// CHECK:  `- block Parallelization(o): index symbol: anon_1, bound [0, 2)
+// CHECK:                      index component: {anon_1__elem__x}, corresponding ubound: [2]
+// CHECK:   `- thread Parallelization: index symbol: anon_2, bound [0, 4)
+// CHECK:                       index component: {anon_2__elem__x}, corresponding ubound: [4]
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: bar1
+// CHECK:  `- block Parallelization(o): index symbol: x, bound [0, 3)
+// CHECK:                      index component: {x__elem__x}, corresponding ubound: [3]
+// CHECK:   `- thread Parallelization: index symbol: y, bound [0, 5)
+// CHECK:                       index component: {y__elem__x}, corresponding ubound: [5]
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: bar2
+// CHECK:  `- block Parallelization(o): index symbol: z, bound [0, 4)
+// CHECK:                      index component: {z__elem__x}, corresponding ubound: [4]
+// CHECK:   `- thread Parallelization: index symbol: t, bound [0, 6)
+// CHECK:                       index component: {t__elem__x}, corresponding ubound: [6]
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: bar3
+// CHECK:  `- block Parallelization(o): index symbol: r, bound [0, 5)
+// CHECK:                      index component: {r__elem__x}, corresponding ubound: [5]
+// CHECK:   `- thread Parallelization: index symbol: s, bound [0, 7)
+// CHECK:             index component: {s__elem__x}, corresponding ubound: [7]

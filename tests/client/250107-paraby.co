@@ -15,8 +15,8 @@ __co__ void ml2() {
   }
 }
 
-// CHECK: error: The symbol 'p' has been used in the same parallelby block.
-// CHECK: error: The symbol 'x' has been used in the same parallelby block.
-// CHECK: error: The symbol 'p' has been used in the same parallelby block.
-// CHECK: error: The symbol 'a' has been used in the same parallelby block.
+// CHECK: error: The parallel variable 'p' has been used in the same parallelby block.
+// CHECK: error: The parallel variable 'x' has been used in the same parallelby block.
+// CHECK: error: The parallel variable 'p' has been used in the same parallelby block.
+// CHECK: error: The parallel variable 'a' has been used in the same parallelby block.
 // CHECK: Parsing failed due to syntax errors.

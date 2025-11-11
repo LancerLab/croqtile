@@ -187,7 +187,8 @@ void choreo_info(const char *message) {
 %token <std::string> CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED TYPENAME DEVICE_TEMPLATE
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
-%token <Choreo::Storage> SUBLOCAL LOCAL SHARED GLOBAL
+%token <Choreo::Storage> STORAGE
+%token <Choreo::ParallelLevel> PBLEVEL
 %token <Choreo::BaseType> F64 F32 F16 BF16 F8_E4M3 F8_E5M2 U16 S16 U8 S8 U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
@@ -204,7 +205,6 @@ void choreo_info(const char *message) {
 %nterm <bool> bool_value sync_type pass_by_ref
 %nterm <int> integer_value index_or_none const_sizeof
 %nterm <std::vector<size_t>> optional_array_dims
-%nterm <Choreo::Storage> storage pl_annotation
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> host_code inlcpp_stmt
 
@@ -236,7 +236,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IfElseBlock>> if_else_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
-%nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby paraby_with_pl_anno
+%nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
 %nterm <std::vector<ptr<AST::SpannedOperation>>> spanned_ops
@@ -245,6 +245,8 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Select>> select_expr
 %nterm <AST::MMAOperation::ExecMethod> mma_exec_method
 %nterm <ptr<AST::MMAOperation>> mma_operation
+%nterm <Choreo::Storage> param_storage
+%nterm <Choreo::ParallelLevel> note_pl
 
 // resolving the ambiguity of dangling ELSE
 %nonassoc IF_PREC
@@ -630,6 +632,17 @@ parameter_list
       }
     ;
 
+param_storage
+    : STORAGE {
+        if ($1 == Storage::SHARED)
+          Parser::error(@1, "the shared data can not be used as a parameter.");
+        else if ($1 == Storage::LOCAL)
+          Parser::error(@1, "the local data can not be used as a parameter.");
+        else
+          $$ = $1;
+      }
+    ;
+
 parameter
     : param_type pass_by_ref IDENTIFIER { /* handle parameter type and name here */
         symtab.AddSymbol($3, $1->GetType());
@@ -638,15 +651,14 @@ parameter
     | param_type pass_by_ref {
         $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@1), $2);
       }
-    | GLOBAL param_type pass_by_ref IDENTIFIER { /* handle parameter type and name here */
+    | param_storage param_type pass_by_ref IDENTIFIER { /* handle parameter type and name here */
         symtab.AddSymbol($4, $2->GetType());
         $$ = AST::Make<AST::Parameter>(@1, $2, AST::Make<AST::Identifier>(@4, $4), $3, ParamAttr::GLOBAL_INPUT);
+        
       }
-    | GLOBAL param_type pass_by_ref {
+    | param_storage param_type pass_by_ref {
         $$ = AST::Make<AST::Parameter>(@1, $2, AST::Make<AST::Identifier>(@2), $3, ParamAttr::GLOBAL_INPUT);
       }
-    | SHARED { Parser::error(@1, "the shared data can not be used as a parameter."); }
-    | LOCAL { Parser::error(@1, "the local data can not be used as a parameter."); }
     ;
 
 pass_by_ref
@@ -691,13 +703,13 @@ statement
     ;
 
 sync_stmt
-    : SYNC DOT storage {
-        $$ = AST::Make<AST::Synchronize>(@1, AST::Make<AST::Memory>(@3, $3));
+    : SYNC DOT STORAGE {
+        $$ = AST::Make<AST::Synchronize>(@1, $3);
       }
     ;
 
 return_stmt
-    : RET          { $$ = AST::Make<AST::Return>(@1);}
+    : RET            { $$ = AST::Make<AST::Return>(@1); }
     | RET returnable { $$ = AST::Make<AST::Return>(@1, $2); }
     ;
 
@@ -726,22 +738,20 @@ paraby_block
     ;
 
 parabys
-    : parabys COMMA paraby_with_pl_anno {
+    : parabys COMMA paraby note_pl {
         // add the paraby as the first stmt of inner-most parallel-by
+        $1->SetLevel($4);
         auto pb = $1;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
         pb->stmts->Append($3);
         $$ = $1;
       }
-    | paraby_with_pl_anno { $$ = $1; }
-    ; /* do not allow empty paraby */
-
-paraby_with_pl_anno
-    : paraby pl_annotation {
+    | paraby note_pl {
         $1->SetLevel($2);
         $$ = $1;
       }
+    ; /* do not allow empty paraby */
 
 paraby
     : BY s_expr {
@@ -749,21 +759,44 @@ paraby
         $$ = AST::Make<AST::ParallelBy>(@1, anon_id, $2);
       }
     | IDENTIFIER BY s_expr {
-        if (paraby_symbols.find($1) != paraby_symbols.end())
-          Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
+        if (paraby_symbols.find($1) != paraby_symbols.end()) {
+          Parser::error(@1, "The parallel variable '" + $1 + "' has been used in the same parallelby block.");
+          YYERROR;
+        }
         paraby_symbols.insert($1);
         symtab.AddSymbol($1, MakeUnknownType());
-        $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), $3);
+        // torerate 'parallel p by [2]'
+        if ($3->IsReference()) {
+          if (auto mds = dyn_cast<AST::MultiDimSpans>($3->GetReference())) {
+            if (auto mv = dyn_cast<AST::MultiValues>(mds->list)) {
+              if (mv->Count() > 1) {
+                Parser::error(@1, "The parallel variable '" + $1 + "' can not be assigned multiple bounds.");
+                YYERROR;
+              } else
+                $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), cast<AST::Expr>(mv->ValueAt(0)));
+            } else {
+              auto expr = dyn_cast<AST::Expr>(mds->list);
+              assert(expr);
+              $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), expr);
+            }
+          } else
+            $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), $3);
+        } else
+          $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), $3);
       }
     | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT value_list RBRAKT {
-        if (paraby_symbols.find($1) != paraby_symbols.end())
-          Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
+        if (paraby_symbols.find($1) != paraby_symbols.end()) {
+          Parser::error(@1, "The parallel variable '" + $1 + "' has been used in the same parallelby block.");
+          //YYERROR;
+        }
         paraby_symbols.insert($1);
         symtab.AddSymbol($1, MakeUnknownType());
         for (auto id : $4->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
-          if (paraby_symbols.find(name) != paraby_symbols.end())
-            Parser::error(@1, "The symbol '" + name + "' has been used in the same parallelby block.");
+          if (paraby_symbols.find(name) != paraby_symbols.end()) {
+            Parser::error(@1, "The parallel variable '" + name + "' has been used in the same parallelby block.");
+            //YYERROR;
+          }
           paraby_symbols.insert(name);
           symtab.AddSymbol(name, MakeUnknownType());
         }
@@ -774,8 +807,10 @@ paraby
     | LBRACE id_list RBRACE BY LBRAKT value_list RBRAKT {
         for (auto id : $2->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
-          if (paraby_symbols.find(name) != paraby_symbols.end())
-            Parser::error(@1, "The symbol '" + name + "' has been used in the same parallelby block.");
+          if (paraby_symbols.find(name) != paraby_symbols.end()) {
+            Parser::error(@1, "The parallel variable '" + name + "' has been used in the same parallelby block.");
+            //YYERROR;
+          }
           paraby_symbols.insert(name);
           symtab.AddSymbol(name, MakeUnknownType());
         }
@@ -852,7 +887,7 @@ named_scalar_decls
         }
         $$ = $2;
       }
-    | storage named_scalar_decls {
+    | STORAGE named_scalar_decls {
         for (auto sub : $2->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
           decl->SetMemory(AST::Make<AST::Memory>(@1, $1));
@@ -928,7 +963,7 @@ event_decl
     ;
 
 named_spanned_decls
-    : storage mdspan_as_type spanned_decls {
+    : STORAGE mdspan_as_type spanned_decls {
         auto mem = AST::Make<AST::Memory>(@1, $1);
         for (auto item : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(item);
@@ -1175,21 +1210,14 @@ spanas_spanned_decl
     ;
 */
 
-storage
-    : LOCAL   { $$ = $1; }
-    | SHARED  { $$ = $1; }
-    | GLOBAL  { $$ = $1; }
-    ;
-
-pl_annotation
-    : COL storage { $$ = $2; }
-    | COL SUBLOCAL { $$ = $2; }
-    | /* empty */ { $$ = Storage::NONE; }
+note_pl
+    : COL PBLEVEL { $$ = $2; }
+    | /* empty */ { $$ = ParallelLevel::NONE; }
     ;
 
 storage_qual
     : /* Empty */ { $$ = AST::Make<AST::Memory>(loc); }
-    | storage { $$ = AST::Make<AST::Memory>(@1, $1); }
+    | STORAGE { $$ = AST::Make<AST::Memory>(@1, $1); }
     ;
 
 arith_operation
@@ -1675,7 +1703,7 @@ sync_type
 
 chunkat_or_storage_or_select
     : { ignore_fndata = true; } chunkat_expr { $$ = $2; ignore_fndata = false; }
-    | storage      { $$ = AST::Make<AST::Memory>(@1, $1); }
+    | STORAGE { $$ = AST::Make<AST::Memory>(@1, $1); }
     | select_expr  { $$ = $1; }
     ;
 

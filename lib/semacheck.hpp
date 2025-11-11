@@ -62,8 +62,6 @@ public:
   bool VisitNode(AST::Rotate&) override;
   bool VisitNode(AST::Select&) override;
   bool VisitNode(AST::Return&) override;
-
-  bool HasError() override;
 };
 
 } // end namespace Choreo

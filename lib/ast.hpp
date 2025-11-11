@@ -47,7 +47,7 @@ private:
   DiversityShape dshape;
 
 protected:
-  Storage level = Storage::NONE; // belongs to a specific level
+  ParallelLevel level = ParallelLevel::NONE; // belongs to a specific level
 
 public:
   Node(const location& l, const ptr<Type>& p = MakeUnknownType())
@@ -69,8 +69,8 @@ public:
   virtual bool HasNote(const std::string& s) { return note.count(s) != 0; }
 
   virtual bool IsBlock() const { return false; }
-  virtual Storage GetLevel() const { return level; }
-  virtual void SetLevel(Storage l) { level = l; }
+  virtual ParallelLevel GetLevel() const { return level; }
+  virtual void SetLevel(ParallelLevel l) { level = l; }
   virtual const ptr<Node> Clone() const {
     auto n = CloneImpl();
     n->SetType(GetType());
@@ -135,8 +135,16 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
   std::vector<ptr<Node>> values;
   std::string delimiter;
 
+  MultiNodes() = delete;
+
   explicit MultiNodes(const location& l, std::string d = "")
-      : Node(l), delimiter(d) {};
+      : Node(l), delimiter(d) {}
+
+  template <typename... Tys>
+  explicit MultiNodes(const location& l, Tys&&... args)
+      : Node(l), delimiter(", ") {
+    (Append(std::forward<Tys>(args)), ...);
+  }
 
   void Append(const ptr<Node>& m) {
     assert(m != nullptr && "Unexpected: null pointer.");
@@ -1664,7 +1672,7 @@ private:
   bool async = false;
   bool bracketed = false; // for late syntax check
 
-  Storage max_lvl = Storage::NONE;
+  ParallelLevel max_lvl = ParallelLevel::NONE;
   bool is_outer = false; // if it is the outer-most pb
 
 public:
@@ -1672,21 +1680,19 @@ public:
              const ptr<Expr>& pb = nullptr, const ptr<MultiValues>& c = nullptr,
              const ptr<MultiValues>& cbs = nullptr,
              const ptr<MultiNodes>& ss = nullptr, bool a = false,
-             Storage s = Storage::NONE, bool b = false)
+             ParallelLevel s = ParallelLevel::NONE, bool b = false)
       : Node(l), bpv(pv), bound_expr(pb), cmpt_bpvs(c), cmpt_bounds(cbs),
         stmts(ss), async(a), bracketed(b) {
 
     assert(bpv != nullptr && "requires a parallel variable.");
     if (cmpt_bpvs == nullptr) {
-      assert(cmpt_bounds == nullptr &&
-             "define sub-bounds without sub-parallel-variablex.");
+      assert(cmpt_bounds == nullptr);
       cmpt_bpvs = Make<MultiValues>(pv->LOC());
       cmpt_bounds = Make<MultiValues>(pv->LOC());
     } else {
-      assert(cmpt_bounds != nullptr &&
-             "miss sub-bounds for sub-parallel-variablex.");
+      assert(cmpt_bounds != nullptr);
       for (auto sv : cmpt_bpvs->AllValues())
-        assert(isa<Identifier>(sv) && "expect components to be idnetifiers.");
+        assert(isa<Identifier>(sv) && "expect components to be identifiers.");
     }
 
     if (stmts == nullptr) stmts = Make<MultiNodes>(l);
@@ -1704,7 +1710,7 @@ public:
     }
   }
 
-  bool HasSubPVs() const { return !cmpt_bounds->None(); }
+  bool HasSubPVs() const { return !cmpt_bpvs->None(); }
 
   bool IsBracketed() const { return bracketed; }
   void SetBracketed(bool b) { bracketed = b; }
@@ -1717,8 +1723,9 @@ public:
 
   const ptr<MultiValues> SubPVs() const { return cmpt_bpvs; }
   void SetSubPVs(const ptr<MultiValues>& spv) { cmpt_bpvs = spv; }
-  size_t SubPVCount() const { return cmpt_bpvs->AllValues().size(); }
+  size_t SubPVCount() const { return cmpt_bpvs->Count(); }
   const ptr<MultiValues> BoundExprs() const { return cmpt_bounds; }
+  size_t SubBoundCount() const { return cmpt_bounds->Count(); }
   void SetBoundExprs(const ptr<MultiValues>& sbs) { cmpt_bounds = sbs; }
   const std::vector<ptr<Node>> AllSubPVs() const {
     return cmpt_bpvs->AllValues();
@@ -1762,8 +1769,8 @@ public:
     return vl;
   }
 
-  Storage GetMaxLevel() const { return max_lvl; }
-  void SetMaxLevel(Storage s) { max_lvl = s; }
+  ParallelLevel GetMaxLevel() const { return max_lvl; }
+  void SetMaxLevel(ParallelLevel pl) { max_lvl = pl; }
   bool IsOuter() const { return is_outer; }
   void SetOuter(bool o) { is_outer = o; }
 
@@ -1793,7 +1800,7 @@ public:
     os << " by [";
     PrintBounds(os);
     os << "]";
-    if (GetLevel() != Storage::NONE) os << " : " << STR(GetLevel());
+    if (GetLevel() != ParallelLevel::NONE) os << " : " << STR(GetLevel());
   }
 
   void PrintBound(std::ostream& os) const {
@@ -1812,7 +1819,7 @@ public:
   void PrintWithoutStmts(std::ostream& os, const std::string& prefix,
                          bool = false) const {
     os << "\n" << prefix << "`- ";
-    if (GetLevel() != Storage::NONE) os << STR(GetLevel()) << " ";
+    if (GetLevel() != ParallelLevel::NONE) os << STR(GetLevel()) << " ";
     os << "Parallelization" << (IsOuter() ? "(o)" : "") << ":"
        << " index symbol: " << bpv->name << ", bound [0, ";
     PrintBound(os);
@@ -2763,18 +2770,19 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
 };
 
 struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
-  ptr<Memory> scope;
+  Storage buf_ty;
 
-  Synchronize(const location& loc, const ptr<Memory>& s)
-      : Node(loc), scope(s) {}
+  Synchronize(const location& loc, Storage s) : Node(loc), buf_ty(s) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<Synchronize>(LOC(), CloneP(scope));
+    return Make<Synchronize>(LOC(), buf_ty);
   }
+
+  Storage Resource() const { return buf_ty; }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    os << "\n" << prefix << "`- " << "Synchronize: " << PSTR(scope);
+    os << "\n" << prefix << "`- " << "Synchronize: " << STR(buf_ty);
   }
   void accept(Visitor&) override;
 
@@ -3261,6 +3269,13 @@ inline ptr<IntLiteral> GetIntLiteral(const ptr<Node>& n) {
     return nullptr;
 }
 
+inline bool AllConstant(const ptr<MultiValues>& mv) {
+  for (auto il : mv->AllValues())
+    if (!GetIntLiteral(il)) return false;
+
+  return true;
+}
+
 inline bool IsSymbolOrArrayRef(const Node& n) {
   auto id = GetName(n);
   if (id.has_value()) return true;
@@ -3344,7 +3359,9 @@ MakeSimpleParallelBy(const location& l, const ptr<MultiNodes> stmts = nullptr) {
   spv_bounds->Append(p_bound->Clone());
   spv_bounds->SetType(MakeITupleType(1));
 
-  return AST::Make<AST::ParallelBy>(l, pv, p_bound, spv, spv_bounds, stmts);
+  auto pb = AST::Make<AST::ParallelBy>(l, pv, p_bound, spv, spv_bounds, stmts);
+  pb->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+  return pb;
 }
 
 } // end of namespace AST
