@@ -225,6 +225,7 @@ public:
   bool Visit(AST::Assignment&) override;
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
+  bool Visit(AST::MMA&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Break&) override;

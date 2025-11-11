@@ -592,6 +592,14 @@ public:
     return false;
   }
 
+  bool SupportMMA() const {
+    switch (compile_target) {
+    case CompileTarget::Cute: return true;
+    default: break;
+    }
+    return false;
+  }
+
 public:
   static CompilationContext& GetInstance() {
     static CompilationContext instance;

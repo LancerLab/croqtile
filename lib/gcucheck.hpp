@@ -895,6 +895,13 @@ public:
     }
     return true;
   }
+
+  bool Visit(AST::MMA& n) override {
+    if (!CCtx().SupportMMA())
+      Error1(n.LOC(), "mma is not supported by the target: " +
+                          STR(CCtx().GetTarget()) + ".");
+    return true;
+  }
 };
 
 } // end namespace Choreo

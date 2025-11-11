@@ -10,6 +10,7 @@
 // to avoid definition error
 namespace Choreo {
 enum class Storage {
+  REG, /* register, normally not explicit */
   LOCAL,
   SHARED,
   GLOBAL /*device global*/,
@@ -297,9 +298,10 @@ inline static std::string GetStringFrom(BaseType dataType) {
 
 inline static std::string GetStringFrom(Storage st) {
   static const std::unordered_map<Storage, std::string> enumToString = {
-      {Storage::LOCAL, "local"},   {Storage::SHARED, "shared"},
-      {Storage::GLOBAL, "global"}, {Storage::NODE, "node"},
-      {Storage::NONE, "none"},     {Storage::DEFAULT, "default"},
+      {Storage::REG, "register"},    {Storage::LOCAL, "local"},
+      {Storage::SHARED, "shared"},   {Storage::GLOBAL, "global"},
+      {Storage::NODE, "node"},       {Storage::NONE, "none"},
+      {Storage::DEFAULT, "default"},
   };
 
   auto it = enumToString.find(st);

@@ -1103,8 +1103,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 }
 
 bool CuteCodeGen::Visit(AST::DMA& n) {
-  TraceEachVisit(n);
-
   // Currently, DMA in host-side:
   // - will not generate any future.
   // - are performed directly by manipulating pointers.
@@ -1532,9 +1530,16 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
-bool CuteCodeGen::Visit(AST::Rotate& n) {
-  TraceEachVisit(n);
+bool CuteCodeGen::Visit(AST::MMA& n) {
+  auto& op = *n.GetOperation();
+  switch (op.Tag()) {
+  case AST::MMAOperation::Fill: break;
+  default: break;
+  }
+  return true;
+}
 
+bool CuteCodeGen::Visit(AST::Rotate& n) {
   if (IsHost())
     choreo_unreachable(
         "rotate is only support in device side(inside parallel-by)!");

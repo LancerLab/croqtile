@@ -2497,22 +2497,27 @@ public:
 struct MMAOperation {
 public:
   enum Kind { Fill, Load, Exec, Store };
-  enum Fragment { FRAG_A, FRAG_B };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
-  using FillInfo = ptr<Expr>;
+  struct FillInfo {
+    std::string buffer_sym;
+    ptr<Expr> fill_expr;
+  };
   struct LoadInfo {
     ptr<ChunkAt> ld_expr;
-    Fragment frag;
     std::string future;
     bool async;
   };
   struct ExecInfo {
     ExecMethod method;
+    std::string acc;
     std::string lhs;
     std::string rhs;
   };
-  using StoreInfo = ptr<ChunkAt>;
+  struct StoreInfo {
+    std::string buf_sym;
+    ptr<ChunkAt> st_expr;
+  };
   using InfoType = std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo>;
 
 private:
@@ -2520,72 +2525,124 @@ private:
   InfoType info;
 
 public:
-  MMAOperation(const ptr<Expr>& e) : tag(Fill), info(InfoType(e)) {}
-  MMAOperation(Fragment f, const ptr<ChunkAt>& e, const std::string& fu,
-               bool a = false)
-      : tag(Load), info(LoadInfo{e, f, fu, a}) {}
-  MMAOperation(ExecMethod m, const std::string& l, const std::string& r)
-      : tag(Exec), info(InfoType(ExecInfo{m, l, r})) {}
-  MMAOperation(const ptr<ChunkAt>& c) : tag(Store), info(InfoType(c)) {}
+  MMAOperation(const std::string& n, const ptr<Expr>& e)
+      : tag(Fill), info(FillInfo{n, e}) {}
+  MMAOperation(const ptr<ChunkAt>& e, const std::string& fu, bool a = false)
+      : tag(Load), info(LoadInfo{e, fu, a}) {}
+  MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
+               const std::string& r)
+      : tag(Exec), info(ExecInfo{m, o, l, r}) {}
+  MMAOperation(const std::string& n, const ptr<ChunkAt>& c)
+      : tag(Store), info(StoreInfo{n, c}) {}
 
 public:
   bool IsKind(Kind k) const { return k == tag; }
+  const std::string FillingSymbol() const {
+    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
+    return std::get<0>(info).buffer_sym;
+  }
   ptr<Expr> FillingValue() {
-    if (tag != Fill) choreo_unreachable("not a mma fill operation");
-    return std::get<0>(info);
+    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
+    return std::get<0>(info).fill_expr;
   }
   const ptr<Expr> FillingValue() const {
-    if (tag != Fill) choreo_unreachable("not a mma fill operation");
-    return std::get<0>(info);
+    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
+    return std::get<0>(info).fill_expr;
   }
 
   ptr<ChunkAt> LoadFrom() {
-    if (tag != Load) choreo_unreachable("not a mma store operation");
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.ld_expr;
   }
   const ptr<ChunkAt> LoadFrom() const {
-    if (tag != Load) choreo_unreachable("not a mma store operation");
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.ld_expr;
   }
 
+  const std::string LoadTo() const {
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    auto l_info = std::get<1>(info);
+    return l_info.future;
+  }
+
   ptr<ChunkAt> StoreTo() {
-    if (tag != Store) choreo_unreachable("not a mma store operation");
-    return std::get<3>(info);
+    if (tag != Store) choreo_unreachable("not a mma store operation.");
+    return std::get<3>(info).st_expr;
   }
   const ptr<ChunkAt> StoreTo() const {
-    if (tag != Store) choreo_unreachable("not a mma store operation");
-    return std::get<3>(info);
+    if (tag != Store) choreo_unreachable("not a mma store operation.");
+    return std::get<3>(info).st_expr;
+  }
+  const std::string StoreFrom() const {
+    if (tag != Store) choreo_unreachable("not a mma store operation.");
+    return std::get<3>(info).buf_sym;
   }
 
   void SetAsync(bool async = true) {
-    if (tag != Load) choreo_unreachable("not a mma store operation");
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     l_info.async = async;
   }
 
+  bool IsAsync() const {
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    auto l_info = std::get<1>(info);
+    return l_info.async;
+  }
+
+  const std::string ExecOperand(size_t index) const {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    auto e_info = std::get<2>(info);
+    if (index == 0)
+      return e_info.acc;
+    else if (index == 1)
+      return e_info.lhs;
+    else if (index == 2)
+      return e_info.rhs;
+    else
+      choreo_unreachable("oob for mma exec operands.");
+  }
+
+  ExecMethod GetMethod() const {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    auto e_info = std::get<2>(info);
+    return e_info.method;
+  }
+
   void SetFuture(const std::string& fut_name) {
-    if (tag != Load) choreo_unreachable("not a mma store operation");
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     l_info.future = fut_name;
   }
 
+  const std::string GetFuture() const {
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    auto l_info = std::get<1>(info);
+    return l_info.future;
+  }
+
+  Kind Tag() const { return tag; }
+
 public:
   const ptr<MMAOperation> Clone() const {
     switch (tag) {
-    case Fill: return Make<MMAOperation>(CloneP(FillingValue())); break;
+    case Fill:
+      return Make<MMAOperation>(FillingSymbol(), CloneP(FillingValue()));
+      break;
     case Load: {
       auto l_info = std::get<1>(info);
-      return Make<MMAOperation>(l_info.frag, CloneP(l_info.ld_expr),
-                                l_info.future, l_info.async);
+      return Make<MMAOperation>(CloneP(l_info.ld_expr), l_info.future,
+                                l_info.async);
     } break;
     case Exec: {
       auto e_info = std::get<2>(info);
-      return Make<MMAOperation>(e_info.method, e_info.lhs, e_info.rhs);
+      return Make<MMAOperation>(e_info.method, e_info.acc, e_info.lhs,
+                                e_info.rhs);
     } break;
     case Store: {
-      return Make<MMAOperation>(CloneP(StoreTo()));
+      return Make<MMAOperation>(StoreFrom(), CloneP(StoreTo()));
     } break;
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
@@ -2594,12 +2651,14 @@ public:
 
   void Print(std::ostream& os) const {
     switch (tag) {
-    case Fill: os << "MMA.FILL " << PSTR(FillingValue()); break;
+    case Fill:
+      os << FillingSymbol() << " = MMA.FILL " << PSTR(FillingValue());
+      break;
     case Load: {
       auto l_info = std::get<1>(info);
       if (!l_info.future.empty()) os << l_info.future << " = ";
-      os << "MMA.LOAD_" << ((l_info.frag == FRAG_A) ? "A" : "B")
-         << ((l_info.async) ? ".ASYNC" : "") << " " << PSTR(l_info.ld_expr);
+      os << "MMA.LOAD" << ((l_info.async) ? ".ASYNC" : "") << " "
+         << PSTR(l_info.ld_expr);
     } break;
     case Exec: {
       auto e_info = std::get<2>(info);
@@ -2611,11 +2670,10 @@ public:
       case COL_ROW: os << ".COL.ROW"; break;
       default: choreo_unreachable("unsupported dma execution mode."); break;
       }
-      os << " " << e_info.lhs << ", " << e_info.rhs;
+      os << " " << e_info.acc << ", " << e_info.lhs << ", " << e_info.rhs;
     } break;
     case Store: {
-      os << "MMA.STORE ";
-      os << PSTR(StoreTo());
+      os << "MMA.STORE " << StoreFrom() << ", " << PSTR(StoreTo());
     } break;
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
@@ -2640,6 +2698,8 @@ public:
     os << "\n" << prefix << "`- ";
     operation->Print(os);
   }
+
+  const ptr<MMAOperation> GetOperation() const { return operation; }
 
   void accept(Visitor&) override;
 

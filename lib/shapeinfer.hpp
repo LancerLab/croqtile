@@ -309,6 +309,7 @@ public:
   bool Visit(AST::Memory& n) override;
   bool Visit(AST::SpanAs& n) override;
   bool Visit(AST::DMA& n) override;
+  bool Visit(AST::MMA& n) override;
   bool Visit(AST::ChunkAt& n) override;
   bool Visit(AST::Wait& n) override;
   bool Visit(AST::Trigger& n) override;

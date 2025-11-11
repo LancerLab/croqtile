@@ -35,5 +35,5 @@ __co__ void bar() {
 // GCU4CHK: error: unsupported: local synchronization in sequential scope.
 // GCU4CHK: error: unsupported: global synchronization in block scope.
 // GCU4CHK: error: unsupported: local synchronization in block scope.
+// GCU4CHK: error: unsupported: global synchronization in group scope.
 // GCU4CHK: error: unsupported: global synchronization in thread scope.
-// GCU4CHK: error: unsupported: local synchronization in thread scope.

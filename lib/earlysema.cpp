@@ -1305,17 +1305,6 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     // current is specified, but outer not.
     if (pl_depth > 1 && !explicit_pl) Warning(n.LOC(), pl_anno_msg);
     explicit_pl = true;
-#if 0
-    if (!explicit_pl_stk.empty() &&
-        Higher(explicit_pl_stk.top()) != n.GetLevel()) {
-      // ensure that the parallel scopes follow a decreasing hierarchy
-      Error1(n.LOC(), "Parallel levels must be specified in adjacent "
-                      "decreasing order. Current: '" +
-                          STR(n.GetLevel()) + "', previous outer one: '" +
-                          STR(explicit_pl_stk.top()) + "'.");
-    }
-#endif
-    explicit_pl_stk.push(n.GetLevel());
   } else {
     // outer is specified, but current not.
     if (explicit_pl) Warning(n.LOC(), pl_anno_msg);
@@ -1713,6 +1702,40 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   }
 
   return true;
+}
+
+bool EarlySemantics::Visit(AST::MMA& n) {
+  auto old_ec = error_count;
+  auto& op = *n.GetOperation();
+  switch (op.Tag()) {
+  case AST::MMAOperation::Fill: {
+    // MMA is a 2D operation
+    ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol(), __FILE__, __LINE__,
+                              MakeDummySpannedType());
+    if (!isa<ScalarType>(op.FillingValue()->GetType()))
+      Error1(n.LOC(), "Expect a scalar value for MMA fill.");
+  } break;
+  case AST::MMAOperation::Load: {
+    auto sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
+    if (!sty) Error1(n.LOC(), "Expected a spanned buffer for MMA load.");
+    ReportErrorWhenViolateODR(
+        n.LOC(), op.GetFuture(), __FILE__, __LINE__,
+        MakeFutureType(cast<SpannedType>(sty->Clone()), op.IsAsync()));
+  } break;
+  case AST::MMAOperation::Exec: {
+    ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(0));
+    ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(1));
+    ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(2));
+  } break;
+  case AST::MMAOperation::Store: {
+    ReportErrorWhenUseBeforeDefine(n.LOC(), op.StoreFrom());
+    auto sty = op.StoreTo()->GetType();
+    if (!isa<SpannedType>(sty))
+      Error1(n.LOC(), "Expected a spanned buffer for MMA store.");
+  } break;
+  default: break;
+  }
+  return error_count == old_ec;
 }
 
 bool EarlySemantics::Visit(AST::ChunkAt& n) {

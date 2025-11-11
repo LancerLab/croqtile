@@ -839,6 +839,35 @@ bool TypeInference::Visit(AST::DMA& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::MMA& n) {
+  TraceEachVisit(n);
+
+  auto& op = *n.GetOperation();
+  switch (op.Tag()) {
+  case AST::MMAOperation::Fill: {
+    SSTab().DefineSymbol(op.FillingSymbol(), MakeDummySpannedType());
+  } break;
+  case AST::MMAOperation::Load: {
+    SSTab().DefineSymbol(op.GetFuture(), n.GetType()->Clone());
+    if (CCtx().ShowInferredTypes()) {
+      dbgs() << "Future:    " << InScopeName(op.GetFuture())
+             << ", Type: " << AST::TYPE_STR(n) << "\n";
+    }
+  } break;
+  case AST::MMAOperation::Exec: {
+    ModifySymbolType(n.LOC(), op.ExecOperand(0), n.GetType()->Clone());
+    if (CCtx().ShowInferredTypes()) {
+      dbgs() << "Symbol:    " << InScopeName(op.ExecOperand(0))
+             << ", Type: " << AST::TYPE_STR(n) << "\n";
+    }
+  } break;
+  case AST::MMAOperation::Store: {
+  } break;
+  default: break;
+  }
+  return true;
+}
+
 bool TypeInference::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 

@@ -504,8 +504,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
   "mma"      return Choreo::Parser::make_MMA(yytext, loc);
   ".fill"    return Choreo::Parser::make_FILL(yytext, loc);
-  ".load_a"  return Choreo::Parser::make_LOAD_A(yytext, loc);
-  ".load_b"  return Choreo::Parser::make_LOAD_B(yytext, loc);
+  ".load"    return Choreo::Parser::make_LOAD(yytext, loc);
   ".store"   return Choreo::Parser::make_STORE(yytext, loc);
   ".row"     return Choreo::Parser::make_ROW(yytext, loc);
   ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);

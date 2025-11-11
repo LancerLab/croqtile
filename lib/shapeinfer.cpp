@@ -1068,6 +1068,66 @@ bool ShapeInference::Visit(AST::DMA& n) {
   return true;
 }
 
+bool ShapeInference::Visit(AST::MMA& n) {
+  TraceEachVisit(n);
+  auto& op = *n.GetOperation();
+  switch (op.Tag()) {
+  case AST::MMAOperation::Fill: {
+    DefineASymbol(op.FillingSymbol(), MakeDummySpannedType());
+  } break;
+  case AST::MMAOperation::Load: {
+    auto fty = cast<SpannedType>(op.LoadFrom()->GetType());
+    auto f_span = op.LoadTo() + ".span";
+    SymbolAliasNum(SSTab().ScopedName(f_span), cur_vn);
+    auto s =
+        MakeSpannedType(fty->ElementType(), GenShape(cur_vn), Storage::REG);
+    auto f = MakeFutureType(s, op.IsAsync());
+    DefineASymbol(op.LoadTo(), f);
+    DefineASymbol(f_span, s->Clone());
+    SetNodeType(n, f);
+  } break;
+  case AST::MMAOperation::Exec: {
+    auto fty = GetSpannedType(GetSymbolType(op.ExecOperand(1)));
+    assert(fty);
+    auto lspan =
+        RemoveSuffix(SSTab().InScopeName(op.ExecOperand(1)), ".data") + ".span";
+    auto rspan =
+        RemoveSuffix(SSTab().InScopeName(op.ExecOperand(2)), ".data") + ".span";
+    auto lsig = cast<MultiSigns>(SymbolSign(lspan));
+    auto rsig = cast<MultiSigns>(SymbolSign(rspan));
+    auto asig = m_sn();
+    switch (op.GetMethod()) {
+    case AST::MMAOperation::ROW_ROW:
+      asig->Append(lsig->NumAt(0));
+      asig->Append(rsig->NumAt(0));
+      break;
+    case AST::MMAOperation::ROW_COL:
+      asig->Append(lsig->NumAt(0));
+      asig->Append(rsig->NumAt(1));
+      break;
+    case AST::MMAOperation::COL_ROW:
+      asig->Append(lsig->NumAt(1));
+      asig->Append(rsig->NumAt(0));
+      break;
+    case AST::MMAOperation::COL_COL:
+      asig->Append(lsig->NumAt(1));
+      asig->Append(rsig->NumAt(1));
+      break;
+    default: choreo_unreachable("unsupported mma execution method.");
+    }
+    cur_vn = GetOrGenValNum(asig);
+    SymbolAliasNum(SSTab().InScopeName(op.ExecOperand(0)), cur_vn);
+    auto s =
+        MakeSpannedType(fty->ElementType(), GenShape(cur_vn), Storage::REG);
+    SetNodeType(n, s);
+  } break;
+  case AST::MMAOperation::Store: {
+  } break;
+  default: break;
+  }
+  return true;
+}
+
 bool ShapeInference::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
 

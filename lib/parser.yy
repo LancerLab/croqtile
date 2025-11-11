@@ -193,7 +193,7 @@ void choreo_info(const char *message) {
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 // MMA related builtin operations
-%token <std::string> MMA FILL LOAD_A LOAD_B STORE ROW COLUMN
+%token <std::string> MMA FILL LOAD STORE ROW COLUMN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK CONTINUE
@@ -244,7 +244,6 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 %nterm <AST::MMAOperation::ExecMethod> mma_exec_method
-%nterm <ptr<AST::MMAOperation>> mma_operation
 %nterm <Choreo::Storage> param_storage
 %nterm <Choreo::ParallelLevel> note_pl
 
@@ -1783,14 +1782,21 @@ subdata_expr
     ;
 
 mma_stmt
-    : IDENTIFIER ASSIGN MMA mma_operation {
-        if (!($4->IsKind(AST::MMAOperation::Load)))
-          Parser::error(@4, "expect a mma load operation.");
-        $4->SetFuture($1);
-        $$ = AST::Make<AST::MMA>(@3, $4);
+    : IDENTIFIER ASSIGN MMA FILL s_expr {
+        auto op = AST::Make<AST::MMAOperation>($1, $5);
+        $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_operation {
-        $$ = AST::Make<AST::MMA>(@1, $2);
+    | IDENTIFIER ASSIGN MMA LOAD sync_type chunkat_expr {
+        auto op = AST::Make<AST::MMAOperation>($6, $1, $5);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | MMA mma_exec_method IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
+        auto op = AST::Make<AST::MMAOperation>($2, $3, $5, $7);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | MMA STORE IDENTIFIER COMMA chunkat_expr {
+        auto op = AST::Make<AST::MMAOperation>($3, $5);
+        $$ = AST::Make<AST::MMA>(@1, op);
       }
     ;
 
@@ -1799,22 +1805,6 @@ mma_exec_method
     | ROW ROW       { $$ = AST::MMAOperation::ROW_ROW; }
     | COLUMN COLUMN { $$ = AST::MMAOperation::COL_COL; }
     | COLUMN ROW    { $$ = AST::MMAOperation::COL_ROW; }
-    ;
-
-mma_operation
-    : FILL s_expr { $$ = AST::Make<AST::MMAOperation>($2); }
-    | LOAD_A chunkat_expr sync_type {
-        $$ = AST::Make<AST::MMAOperation>(AST::MMAOperation::FRAG_A, $2, "", $3);
-      }
-    | LOAD_B chunkat_expr sync_type {
-        $$ = AST::Make<AST::MMAOperation>(AST::MMAOperation::FRAG_B, $2, "", $3);
-      }
-    | mma_exec_method IDENTIFIER COMMA IDENTIFIER {
-        $$ = AST::Make<AST::MMAOperation>($1, $2, $4);
-      }
-    | STORE chunkat_expr {
-        $$ = AST::Make<AST::MMAOperation>($2);
-      }
     ;
 
 data_element
