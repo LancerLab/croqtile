@@ -274,8 +274,6 @@ public:
   bool Visit(AST::IfElseBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::ChoreoFunction&) override;
-
-  bool HasError() override;
 };
 
 } // end namespace Choreo

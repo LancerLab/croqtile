@@ -133,6 +133,7 @@ protected:
   static std::unordered_set<std::string> AllVisitors;
 
   bool DebugIsEnabled() const { return debug_visit; }
+  bool TraceIsEnabled() const { return trace_visit; }
 
 public:
   Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr,
@@ -211,9 +212,10 @@ public:
   virtual const std::string& GetName() { return name; }
 
   virtual void SetLevelPrefix(const std::string& pfx) { lvl_pfx = pfx; }
-  const std::string LevelPrefix() { return lvl_pfx; }
+  const std::string LevelPrefix() const { return lvl_pfx; }
 
   virtual bool RunOnProgram(AST::Node& root) = 0;
+  virtual bool IsAllowed(AST::Node&) const { return true; }
 
   virtual bool RunOnProgramImpl(AST::Node& root) {
     if (!isa<AST::Program>(&root)) {
@@ -221,9 +223,7 @@ public:
       return false;
     }
 
-    if (prt_visitor) dbgs() << LevelPrefix() << "|- " << GetName() << NewL;
-
-    if (!disabled) root.accept(*this);
+    root.accept(*this);
 
     if (HasError() || abend_after) return false;
 
@@ -271,6 +271,17 @@ protected:
       count += vty->Dims();
     }
     return count;
+  }
+
+  // simple dependence runner
+  template <typename VisitorType>
+  std::unique_ptr<VisitorType> GetResult(AST::Node& root) const {
+    auto v = std::make_unique<VisitorType>();
+    v->SetLevelPrefix(LevelPrefix());
+    if (DebugIsEnabled()) v->SetDebugVisit(true);
+    if (TraceIsEnabled()) v->SetTraceVisit(true);
+    v->RunOnProgram(root);
+    return v;
   }
 
 public:
@@ -342,7 +353,13 @@ public:
   }
 
   virtual int Status() { return error_count; }
-  virtual bool HasError() { return error_count != 0; }
+  virtual bool HasError() const {
+    if (error_count > 0) {
+      dbgs() << "Totally " << error_count << " errors have been detected.\n";
+      return true;
+    }
+    return false;
+  }
 };
 
 // A visitor with simple symbol auto scoping functionality
@@ -502,8 +519,10 @@ public:
   }
 
   bool RunOnProgram(AST::Node& root) final {
+    if (!IsAllowed(root) || disabled) return true;
     if (use_global_symtab)
       scoped_symtab.UpdateGlobal(CCtx().GetGlobalSymbolTable());
+    if (prt_visitor) dbgs() << LevelPrefix() << "|- " << GetName() << NewL;
     return RunOnProgramImpl(root);
   }
 
@@ -929,12 +948,19 @@ public:
 
   //  VisitorGroup(const std::string& n) :  Visitor(n, nullptr, false) {}
   bool RunOnProgram(AST::Node& root) final {
+    if (!IsAllowed(root) || disabled) return true;
     if (prt_visitor) dbgs() << LevelPrefix() << "|-+- " << GetName() << NewL;
+
     // Run in sequence
     for (auto& v : members) {
-      v->SetLevelPrefix("  ");
+      v->SetLevelPrefix(LevelPrefix() + "  ");
+      if (DebugIsEnabled()) v->SetDebugVisit(true);
+      if (TraceIsEnabled()) v->SetTraceVisit(true);
       if (!v->RunOnProgram(root)) return false;
     }
+
+    if (abend_after) return false;
+
     return true;
   }
 

@@ -1,5 +1,5 @@
 // RUN: choreo -arch=gcu300 %s 2>&1 | FileCheck --check-prefix=CHECK %s
-// RUN: choreo -arch=gcu400 %s 2>&1 | FileCheck --check-prefix=GCU4CHK %s
+// RUN: choreo -D__GCU4__ -arch=gcu400 %s 2>&1 | FileCheck --check-prefix=GCU4CHK %s
 
 __co__ void bar() {
   sync.global;
@@ -13,26 +13,27 @@ __co__ void bar() {
       sync.global;  // error
       sync.shared;
       sync.local;
+#ifdef __GCU4__
       parallel by 1 {
         sync.global;
         sync.shared;
         sync.local;
       }
+#endif
     }
   }
 }
 
-// CHECK: error: unsupported: shared synchronization in global scope.
+// CHECK: error: unsupported: shared synchronization in sequential scope.
 // CHECK: error: GCU300 does not support local synchronization.
-// CHECK: error: unsupported: global synchronization in shared scope.
+// CHECK: error: unsupported: global synchronization in block scope.
 // CHECK: error: GCU300 does not support local synchronization.
-// CHECK: error: unsupported: global synchronization in local scope.
+// CHECK: error: unsupported: global synchronization in thread scope.
 // CHECK: error: GCU300 does not support local synchronization.
-// CHECK: error: the parallel level (depth: 3) is not supported by current GCU architecture (GCU300).
 
-// GCU4CHK: error: unsupported: shared synchronization in global scope.
-// GCU4CHK: error: unsupported: local synchronization in global scope.
-// GCU4CHK: error: unsupported: global synchronization in shared scope.
-// GCU4CHK: error: unsupported: local synchronization in shared scope.
-// GCU4CHK: error: unsupported: global synchronization in local scope.
-// GCU4CHK: error: unsupported: global synchronization in sub-local scope.
+// GCU4CHK: error: unsupported: shared synchronization in sequential scope.
+// GCU4CHK: error: unsupported: local synchronization in sequential scope.
+// GCU4CHK: error: unsupported: global synchronization in block scope.
+// GCU4CHK: error: unsupported: local synchronization in block scope.
+// GCU4CHK: error: unsupported: global synchronization in thread scope.
+// GCU4CHK: error: unsupported: local synchronization in thread scope.

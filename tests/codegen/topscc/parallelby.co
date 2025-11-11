@@ -4,19 +4,19 @@ __co__ auto bar() {
   parallel by 2 {
     call foo();
   }
-  parallel by 2 : shared {}
-  parallel by 2 : local {}
-  parallel by 2 : sublocal {}
+  parallel by 2 : block {}
+  parallel by 2 : group {}
+  parallel by 2 : thread {}
 
-  parallel {sx,sy,sz} by [2,2,1] : shared
-    parallel {lx,ly,lz} by [2,2,2] : local {}
+  parallel {sx,sy,sz} by [2,2,1] : block
+    parallel {lx,ly,lz} by [2,2,2] : group {}
 
-  parallel by 1 : shared
-    parallel by 2 : local
-      parallel by 4 : sublocal {}
+  parallel by 1 : block
+    parallel by 2 : group
+      parallel by 4 : thread {}
 }
 
-// CHECK: __thread_dims__(1, 1, 1)
+// CHECK: __thread_dims__(2, 1, 1)
 // CHECK: __global__ void __choreo_device_bar0()
 
 // CHECK: __thread_dims__(1, 1, 1)
@@ -36,7 +36,7 @@ __co__ auto bar() {
 
 // CHECK: void bar() {
 // CHECK:   dim3 __bar_gdims0(1, 1, 1);
-// CHECK:   dim3 __bar_bdims0(2, 1, 1);
+// CHECK:   dim3 __bar_bdims0(1, 1, 1);
 // CHECK:   __choreo_device_bar0<<<__bar_gdims0, __bar_bdims0>>>();
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());
 // CHECK:   dim3 __bar_gdims1(2, 1, 1);
@@ -74,6 +74,7 @@ __co__ auto bar1(f16 [36, 15, 14, 64] a) {
   return a;
 }
 
+// CHECK: __thread_dims__(7, 1, 1)
 // CHECK: __global__ void __choreo_device_bar1(choreo::f16 * a) {
 // CHECK:   {
 // CHECK:     int __iv_index__elem__0 = 0;
@@ -83,7 +84,7 @@ __co__ auto bar1(f16 [36, 15, 14, 64] a) {
 // CHECK:       choreo::future a_local(choreo_topscc_ctx0, "a_local", {{[0-9]+}}, {{[0-9]+}}, a_local__buf__);
 // CHECK:       tops::mdspan __mds0_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
 // CHECK:       tops::mdspan __mds1_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 18, 5, 2, 32);
-// CHECK:       int __slice_offset0__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 18), (int)(__tops_tid_x() * 5), (int)(__iv_index__elem__0 * 2)};
+// CHECK:       int __slice_offset0__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 18), (int)(__tops_bid_y() * 5), (int)(__tops_stid_x() * 2), (int)(__iv_index__elem__0 * 32)};
 // CHECK:       tops::slice(*a_local.get_ctx(), __mds1_a_local__buf__, __mds0_a, __slice_offset0__a_2_a_local__buf__);
 // CHECK:     } // index__elem__0
 // CHECK:     __iv_index__elem__0 = 0;
@@ -91,7 +92,7 @@ __co__ auto bar1(f16 [36, 15, 14, 64] a) {
 // CHECK: }
 
 // CHECK:  dim3 __bar1_gdims0(2, 3, 1);
-// CHECK:  dim3 __bar1_bdims0(7, 1, 1);
+// CHECK:  dim3 __bar1_bdims0(1, 1, 1);
 
 __co__ auto bar2(f16 [4, 36, 14, 64] a) {
   parallel {px, py} by [2, 9] {
@@ -106,6 +107,7 @@ __co__ auto bar2(f16 [4, 36, 14, 64] a) {
   return a;
 }
 
+// CHECK: __thread_dims__(7, 1, 1)
 // CHECK: __global__ void __choreo_device_bar2(choreo::f16 * a) {
 // CHECK:   {
 // CHECK:     int __iv_index__elem__0 = 0;
@@ -115,7 +117,7 @@ __co__ auto bar2(f16 [4, 36, 14, 64] a) {
 // CHECK:       choreo::future a_local(choreo_topscc_ctx1, "a_local", {{[0-9]+}}, {{[0-9]+}}, a_local__buf__);
 // CHECK:       tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 4, 36, 14, 64);
 // CHECK:       tops::mdspan __mds3_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 2, 4, 2, 32);
-// CHECK:       int __slice_offset1__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 2), (int)(__tops_bid_y() * 4), (int)(__tops_tid_x() * 2), (int)(__iv_index__elem__0 * 32)};
+// CHECK:       int __slice_offset1__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 2), (int)(__tops_bid_y() * 4), (int)(__tops_stid_x() * 2), (int)(__iv_index__elem__0 * 32)};
 // CHECK:       tops::slice(*a_local.get_ctx(), __mds3_a_local__buf__, __mds2_a, __slice_offset1__a_2_a_local__buf__);
 // CHECK:     } // index__elem__0
 // CHECK:     __iv_index__elem__0 = 0;
@@ -123,7 +125,7 @@ __co__ auto bar2(f16 [4, 36, 14, 64] a) {
 // CHECK: }
 
 // CHECK:   dim3 __bar2_gdims0(2, 9, 1);
-// CHECK:   dim3 __bar2_bdims0(7, 1, 1);
+// CHECK:   dim3 __bar2_bdims0(1, 1, 1);
 
 __co__ auto async(bf16 [7, 64] a) {
   parallel.async p by 2 { }
@@ -138,7 +140,7 @@ __co__ auto async(bf16 [7, 64] a) {
 
 __co__ void dynamic_expr_paraby(int n) {
   p_count = (n >= 4) ? 4 : n;
-  parallel p by p_count { }
+  parallel p by p_count : group { }
 }
 
 // CHECK: void dynamic_expr_paraby(int n) {
@@ -150,18 +152,18 @@ __co__ void dynamic_expr_paraby(int n) {
 
 __co__ auto F(f32 [8, 8, 24] a) {
   global f32[a.span] ans{1.0f};
-  parallel p by 4 : local {
+  parallel p by 4 : group {
     f = dma.copy.async a.chunkat(p, _, _) => ans.chunkat(p, _, _);
     wait f;
   }
   return ans;
 }
 
-// the below decl of global span used to have error due to the `: local` above
+// the below decl of global span used to have error due to the `: group` above
 // so add the multi co funcs test case.
 __co__ auto B(f32 [8, 8, 24] a) {
   f32[a.span] ans{1.9f};
-  parallel p by 4 : local {
+  parallel p by 4 : group {
     dma.copy a.chunkat(_, p, _) => ans.chunkat(_, p, _);
   }
   return ans;
@@ -169,9 +171,9 @@ __co__ auto B(f32 [8, 8, 24] a) {
 
 __co__ auto Z(f32 [8, 8, 24] a) {
   global f32[a.span] ans{2.9f};
-  parallel by 1 : shared {
+  parallel by 1 : block {
     f = dma.copy a => shared;
-    parallel p by 4 : local {
+    parallel p by 4 : group {
       dma.copy f.data.chunkat(p, _, _) => ans.chunkat(p, _, _);
     }
   }

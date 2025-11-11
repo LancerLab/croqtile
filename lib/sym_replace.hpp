@@ -45,12 +45,6 @@ public:
 
   explicit SymReplace() : VisitorWithScope("symrepl") {}
 
-  bool HasError() override {
-    if (error_count)
-      dbgs() << "Totally " << error_count << " errors have been detected.\n";
-    return error_count != 0;
-  }
-
   // terminal expr node.
   std::vector<ptr<AST::Node>> expr_nodes;
   // from node to InScope Name.

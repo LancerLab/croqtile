@@ -2,34 +2,33 @@
 
 __co__ auto foo() {
   parallel by 2 {
-    parallel by 4 : sublocal {}
+    parallel by 4 : thread {}
   }
 }
 
 
 __co__ auto bar() {
-  parallel by 2 : shared {
+  parallel by 2 : block {
     parallel by 4 {}
   }
 }
 
 __co__ auto baz() {
-  parallel p by 3 : local {
-    parallel by 2 : shared {}
+  parallel p by 3 : thread {
+    parallel by 2 : block {}
   }
 
-  parallel p by 3 : shared {
-    parallel by 4 : shared {}
+  parallel p by 3 : block {
+    parallel by 4 : block {}
   }
 
-  parallel p by 2 : shared {
-    parallel q by 4 : sublocal {}
+  parallel p by 2 : block {
+    parallel q by 4 : thread {}
   }
 }
 
-// CHECK: error: For nested parallel-by, either all must explicitly specify their parallelism level, or none should specify it — allowing Choreo to automatically infer the levels.
-// CHECK: error: For nested parallel-by, either all must explicitly specify their parallelism level, or none should specify it — allowing Choreo to automatically infer the levels.
-// CHECK: error: Parallel levels must be specified in adjacent decreasing order. Current: 'shared', previous outer one: 'local'.
-// CHECK: error: Parallel levels must be specified in adjacent decreasing order. Current: 'shared', previous outer one: 'shared'.
-// CHECK: error: Parallel levels must be specified in adjacent decreasing order. Current: 'sub-local', previous outer one: 'shared'.
-// CHECK: Totally 5 errors have been detected.
+// CHECK: warning: For nested parallel-by, it is better to either explicitly specify all parallelism levels, or none (Choreo to automatically infer the levels).
+// CHECK: warning: For nested parallel-by, it is better to either explicitly specify all parallelism levels, or none (Choreo to automatically infer the levels)
+// CHECK: error: unsupported: parallel-by outside a block-level.
+// CHECK: error: unsupported: parallel-by outside a block-level.
+// CHECK: Totally 2 errors have been detected.

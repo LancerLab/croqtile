@@ -1624,15 +1624,20 @@ static_assert(false, "path 2\n");
 } // end namespace choreo
 
 #if __GCU_ARCH__ == 400
-#define __CHOREO_SINGLE_SHARED__                                               \
+#define __CHOREO_BLOCK_SINGLE__                                                \
   threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&                  \
       subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
-#define __CHOREO_SINGLE_LOCAL__                                                \
+#define __CHOREO_GROUP_SINGLE__                                                \
   subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
-#else
-#define __CHOREO_SINGLE_SHARED__                                               \
+#elif __CHOREO_TARGET_CUTE__
+#define __CHOREO_BLOCK_SINGLE__                                                \
   threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
-#define __CHOREO_SINGLE_LOCAL__ "invalid to use sublocal predicate"
+#define __CHOREO_GROUP_SINGLE__                                                \
+  (threadIdx.x % 32) == 0 && threadIdx.y == 0 && threadIdx.z == 0
+#else
+#define __CHOREO_BLOCK_SINGLE__                                                \
+  threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
+#define __CHOREO_GROUP_SINGLE__ "invalid to use sublocal predicate"
 #endif
 
 #endif // __CHOREO_H__

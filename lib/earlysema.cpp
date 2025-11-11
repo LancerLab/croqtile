@@ -1,4 +1,5 @@
 #include "earlysema.hpp"
+#include "target_utils.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -60,7 +61,7 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     assert(pl_depth > 0);
     assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
     inthreads_levels.pop_back();
-    if (n.GetLevel() != Storage::NONE) explicit_pl_stk.pop();
+    if (n.GetLevel() != ParallelLevel::NONE) explicit_pl_stk.pop();
     pl_depth--;
     if (pl_depth == 0) explicit_pl = false;
   } else if (isa<AST::InThreadsBlock>(&n)) {
@@ -1297,26 +1298,27 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
   const std::string pl_anno_msg =
-      "For nested parallel-by, either all must explicitly specify their "
-      "parallelism level, or none should specify it — allowing Choreo "
-      "to automatically infer the levels.";
+      "For nested parallel-by, it is better to either explicitly specify all "
+      "parallelism levels, or none (Choreo to automatically infer the levels).";
   // The pb is specified with parallel level explicitly.
-  if (n.GetLevel() != Storage::NONE) {
+  if (n.GetLevel() != ParallelLevel::NONE) {
     // current is specified, but outer not.
-    if (pl_depth > 1 && !explicit_pl) Error1(n.LOC(), pl_anno_msg);
+    if (pl_depth > 1 && !explicit_pl) Warning(n.LOC(), pl_anno_msg);
     explicit_pl = true;
+#if 0
     if (!explicit_pl_stk.empty() &&
-        !NextLevelStorage(explicit_pl_stk.top(), n.GetLevel())) {
+        Higher(explicit_pl_stk.top()) != n.GetLevel()) {
       // ensure that the parallel scopes follow a decreasing hierarchy
       Error1(n.LOC(), "Parallel levels must be specified in adjacent "
                       "decreasing order. Current: '" +
                           STR(n.GetLevel()) + "', previous outer one: '" +
                           STR(explicit_pl_stk.top()) + "'.");
     }
+#endif
     explicit_pl_stk.push(n.GetLevel());
   } else {
     // outer is specified, but current not.
-    if (explicit_pl) Error1(n.LOC(), pl_anno_msg);
+    if (explicit_pl) Warning(n.LOC(), pl_anno_msg);
   }
 
   if (pl_depth > 1 && n.IsAsync())
@@ -2149,13 +2151,12 @@ bool EarlySemantics::Visit(AST::Call& n) {
 bool EarlySemantics::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
 
-  switch (n.scope->Get()) {
+  switch (n.Resource()) {
   case Storage::GLOBAL:
   case Storage::SHARED:
   case Storage::LOCAL: break;
   default:
-    Error1(n.scope->LOC(),
-           "Unsupported synchronization: " + PSTR(n.scope) + ".");
+    Error1(n.LOC(), "Unsupported synchronization: " + STR(n.Resource()) + ".");
     break;
   }
   return true;
@@ -2570,12 +2571,4 @@ bool EarlySemantics::ReportErrorWhenViolateODR(const location& loc,
   if (debug_visit)
     dbgs() << "Define Symbol '" << name << "' as: " << PSTR(type) << ".\n";
   return true;
-}
-
-bool EarlySemantics::HasError() {
-  if (error_count > 0) {
-    dbgs() << "Totally " << error_count << " errors have been detected.\n";
-    return true;
-  }
-  return false;
 }

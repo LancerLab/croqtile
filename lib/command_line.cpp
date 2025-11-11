@@ -10,8 +10,12 @@ extern location loc;
 // Major available options
 Option<std::string> target(OptionKind::User, "--target", "-t", "topscc",
                            "Set the compilation target. The 'platform' "
-                           "includes <factor|topscc|cuda|cute>.",
+                           "includes <factor|topscc|cuda|cute|mpi>.",
                            "--target <platform>", true);
+Option<std::string> subtarget(OptionKind::User, "--subtarget", "", "topscc",
+                              "Set the compilation sub-target. The 'platform' "
+                              "includes <factor|topscc|cuda|cute>.",
+                              "--subtarget <platform>", true);
 Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
                          "Set the architecture to execute the binary code.",
                          "-arch=<processor>");
@@ -210,8 +214,24 @@ bool CommandLine::Parse(int argc, char** argv) {
     CCtx().SetTarget(CompileTarget::CUDA);
   else if (ToUpper(target.GetValue()) == "CUTE")
     CCtx().SetTarget(CompileTarget::Cute);
+  else if (ToUpper(target.GetValue()) == "MPI")
+    CCtx().SetTarget(CompileTarget::MPI);
   else {
     errs() << "Compile Target '" << target.GetValue()
+           << "' is invalid. Compilation abort.\n";
+    exit(1);
+  }
+
+  if (ToUpper(subtarget.GetValue()) == "FACTOR")
+    CCtx().SetSubTarget(CompileTarget::Factor);
+  else if (ToUpper(subtarget.GetValue()) == "TOPSCC")
+    CCtx().SetSubTarget(CompileTarget::Topscc);
+  else if (ToUpper(subtarget.GetValue()) == "CUDA")
+    CCtx().SetSubTarget(CompileTarget::CUDA);
+  else if (ToUpper(subtarget.GetValue()) == "CUTE")
+    CCtx().SetSubTarget(CompileTarget::Cute);
+  else {
+    errs() << "Compile Sub-target '" << subtarget.GetValue()
            << "' is invalid. Compilation abort.\n";
     exit(1);
   }

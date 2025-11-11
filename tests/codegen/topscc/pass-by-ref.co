@@ -5,7 +5,7 @@
 // for now, scalar reference is not supported.
 __co__ void foo(global f32 [3,2,2] ggg, f32 [3, 2, 2] temp, f32 [3, 2, 2] & temp_ref, s32 [1] bar, int x, s32 refx) {
   refx = -1;
-  parallel p by 3 : local {
+  parallel p by 3 : thread {
     local f32 [1, 2, 2] l{9999.99f};
     dma.copy l => ggg.chunkat(p, _, _);
     dma.copy l => temp.chunkat(p, _, _);

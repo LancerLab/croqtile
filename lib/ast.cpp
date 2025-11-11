@@ -316,7 +316,6 @@ void Rotate::accept(Choreo::Visitor& v) {
 
 void Synchronize::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  scope->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }

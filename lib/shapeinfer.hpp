@@ -234,12 +234,6 @@ public:
     os << "\n";
   }
 
-  bool HasError() override {
-    if (error_count)
-      dbgs() << "Totally " << error_count << " errors have been detected.\n";
-    return error_count != 0;
-  }
-
 public:
   virtual bool BeforeVisitImpl(AST::Node& n) override;
   virtual bool InMidVisitImpl(AST::Node& n) override;

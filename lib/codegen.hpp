@@ -46,73 +46,54 @@ public:
   }
 };
 
+struct ParallelCounts {
+  ValueItem z = sbe::nu(1);
+  ValueItem y = sbe::nu(1);
+  ValueItem x = sbe::nu(1);
+  void Reset() {
+    z = sbe::nu(1);
+    y = sbe::nu(1);
+    x = sbe::nu(1);
+  }
+  bool EqualsOne() const {
+    return (x == sbe::nu(1)) && (y == sbe::nu(1)) && (z == sbe::nu(1));
+  }
+};
+
 struct LaunchConfig {
-  ValueItem grid_dim_z = sbe::nu(1);
-  ValueItem grid_dim_y = sbe::nu(1);
-  ValueItem grid_dim_x = sbe::nu(1);
-  ValueItem block_dim_z = sbe::nu(1);
-  ValueItem block_dim_y = sbe::nu(1);
-  ValueItem block_dim_x = sbe::nu(1);
-  ValueItem warp_dim_x = sbe::nu(1);
-  ValueItem warp_dim_y = sbe::nu(1);
-  ValueItem warp_dim_z = sbe::nu(1);
+  ParallelCounts block_count;
+  ParallelCounts group_count;
+  ParallelCounts thread_count;
 
-  // reset the warp dimensions to 1
-  void ResetWDims() {
-    warp_dim_x = sbe::nu(1);
-    warp_dim_y = sbe::nu(1);
-    warp_dim_z = sbe::nu(1);
-  }
-
-  // reset the block dimensions to 1
-  void ResetBDims() {
-    block_dim_x = sbe::nu(1);
-    block_dim_y = sbe::nu(1);
-    block_dim_z = sbe::nu(1);
-  }
-
-  // reset the grid dimensions to 1
-  void ResetGDims() {
-    grid_dim_x = sbe::nu(1);
-    grid_dim_y = sbe::nu(1);
-    grid_dim_z = sbe::nu(1);
-  }
-
-  void SetWarpDims(const ValueList& dims) {
-    ResetWDims();
+  void SetBlockCount(const ValueList& dims) {
+    block_count.Reset();
     switch (dims.size()) {
-    case 3: warp_dim_z = dims[2]; [[fallthrough]];
-    case 2: warp_dim_y = dims[1]; [[fallthrough]];
-    case 1: warp_dim_x = dims[0]; break;
+    case 3: block_count.z = dims[2]; [[fallthrough]];
+    case 2: block_count.y = dims[1]; [[fallthrough]];
+    case 1: block_count.x = dims[0]; break;
     default: choreo_unreachable("The number of dimensions is not supported.");
     }
   }
 
-  void SetBlockDims(const ValueList& dims) {
-    ResetBDims();
+  void SetGroupCount(const ValueList& dims) {
+    group_count.Reset();
     switch (dims.size()) {
-    case 3: block_dim_z = dims[2]; [[fallthrough]];
-    case 2: block_dim_y = dims[1]; [[fallthrough]];
-    case 1: block_dim_x = dims[0]; break;
+    case 3: group_count.z = dims[2]; [[fallthrough]];
+    case 2: group_count.y = dims[1]; [[fallthrough]];
+    case 1: group_count.x = dims[0]; break;
     default: choreo_unreachable("The number of dimensions is not supported.");
     }
   }
 
-  void SetGridDims(const ValueList& dims) {
-    ResetGDims();
+  void SetThreadCount(const ValueList& dims) {
+    thread_count.Reset();
     switch (dims.size()) {
-    case 3: grid_dim_z = dims[2]; [[fallthrough]];
-    case 2: grid_dim_y = dims[1]; [[fallthrough]];
-    case 1: grid_dim_x = dims[0]; break;
+    case 3: thread_count.z = dims[2]; [[fallthrough]];
+    case 2: thread_count.y = dims[1]; [[fallthrough]];
+    case 1: thread_count.x = dims[0]; break;
     default: choreo_unreachable("The number of dimensions is not supported.");
     }
   }
-
-  void OverwriteGDimsByBDims() {
-    grid_dim_x = block_dim_x;
-    grid_dim_y = block_dim_y;
-    grid_dim_z = block_dim_z;
-  };
 };
 
 struct OtherTrait {
@@ -378,6 +359,25 @@ struct CodeGenerator : public VisitorWithSymTab {
 
 protected:
   CodeGenInfo& cgi;
+
+protected:
+  Storage FutureStorage(const std::string& n) const {
+    assert(PrefixedWith(n, "::") && "requires a scoped name.");
+    if (cgi.GetFunctionSharedFutures(fname).count(n))
+      return Storage::SHARED;
+    else if (cgi.GetFunctionLocalFutures(fname).count(n))
+      return Storage::LOCAL;
+    assert("illegal future.");
+    return Storage::NONE;
+  }
+  bool IsBlockwiseFuture(const std::string& n) const {
+    assert(PrefixedWith(n, "::") && "requires a scoped name.");
+    return cgi.GetFunctionSharedFutures(fname).count(n);
+  }
+  bool IsGroupwiseFuture(const std::string& n) const {
+    assert(PrefixedWith(n, "::") && "requires a scoped name.");
+    return cgi.GetFunctionLocalFutures(fname).count(n);
+  }
 };
 
 /////////////////////////////////////////////////////////////

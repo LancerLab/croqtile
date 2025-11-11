@@ -2,7 +2,7 @@
 
 __co__ void foo(int xx) {
   global s32[1,2] g;
-  parallel by 1 : shared {
+  parallel by 1 : block {
     a = dma.copy g => local;
     b = dma.copy g => local;
     c = dma.copy g => local;

@@ -12,7 +12,7 @@ __co__ void foo(f32 [128, 512] a) {
 // CHECK-NOT: error: choreo assertion abort: 128/1 == 512/4
 // CHECK: __global__ void __choreo_device_foo(float * a) {
 // CHECK:   __local__ __valigned__ float L2_a[16384];
-// CHECK:   if (__CHOREO_SINGLE_LOCAL__) {
+// CHECK:   {
 // CHECK:     tops_dte_ctx_t L2_a__init;
 // CHECK:     tops::dte_scope s_L2_a__init(L2_a__init);
 // CHECK:     tops::memset(L2_a__init, tops::mdspan(tops::Private, (float*)L2_a, 128, 128), 0.000000f);

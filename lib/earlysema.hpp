@@ -32,7 +32,7 @@ private:
   int pl_depth = 0;
   std::vector<int> pl_depths;
   bool explicit_pl = false;
-  std::stack<Storage> explicit_pl_stk;
+  std::stack<ParallelLevel> explicit_pl_stk;
   bool allow_auto_threading = false;
   bool inside_loop = false;
 
@@ -149,8 +149,6 @@ public:
   bool Visit(AST::CppSourceCode&) override;
   bool Visit(AST::DeviceFunctionDecl&) override;
   bool Visit(AST::Program&) override;
-
-  bool HasError() override;
 };
 } // end namespace Choreo
 

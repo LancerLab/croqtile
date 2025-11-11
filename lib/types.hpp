@@ -9,7 +9,24 @@
 
 // to avoid definition error
 namespace Choreo {
-enum class Storage { SUB, LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
+enum class Storage {
+  LOCAL,
+  SHARED,
+  GLOBAL /*device global*/,
+  NODE /*cluster node*/,
+  DEFAULT,
+  NONE
+};
+enum class ParallelLevel {
+  THREAD,
+  GROUP,
+  BLOCK,
+  DEVICE,
+  TERM /* terminal machine in cluster*/,
+  SEQ,
+  NONE /*bottom*/,
+  UNKNOWN /*top*/
+};
 enum class CompileTarget;
 } // namespace Choreo
 
@@ -126,11 +143,6 @@ inline static Storage ProjectStorage(const Storage& a) {
     return Storage::GLOBAL;
   else
     return a;
-}
-
-// return if the next level of `a` is `b`. E.g., next level of shared is local.
-inline static bool NextLevelStorage(const Storage& a, const Storage& b) {
-  return static_cast<int>(a) == static_cast<int>(b) + 1;
 }
 
 enum class ParamAttr : uint16_t {
@@ -285,13 +297,27 @@ inline static std::string GetStringFrom(BaseType dataType) {
 
 inline static std::string GetStringFrom(Storage st) {
   static const std::unordered_map<Storage, std::string> enumToString = {
-      {Storage::SUB, "sub-local"}, {Storage::LOCAL, "local"},
-      {Storage::GLOBAL, "global"}, {Storage::SHARED, "shared"},
+      {Storage::LOCAL, "local"},   {Storage::SHARED, "shared"},
+      {Storage::GLOBAL, "global"}, {Storage::NODE, "node"},
       {Storage::NONE, "none"},     {Storage::DEFAULT, "default"},
   };
 
   auto it = enumToString.find(st);
-  assert(it != enumToString.end() && "unsupported type.");
+  assert(it != enumToString.end() && "unsupported storage.");
+
+  return it->second;
+}
+
+inline static std::string GetStringFrom(ParallelLevel st) {
+  static const std::unordered_map<ParallelLevel, std::string> enumToString = {
+      {ParallelLevel::THREAD, "thread"}, {ParallelLevel::GROUP, "group"},
+      {ParallelLevel::BLOCK, "block"},   {ParallelLevel::DEVICE, "device"},
+      {ParallelLevel::TERM, "term"},     {ParallelLevel::SEQ, "sequential"},
+      {ParallelLevel::NONE, "none"},     {ParallelLevel::UNKNOWN, "unknown"},
+  };
+
+  auto it = enumToString.find(st);
+  assert(it != enumToString.end() && "unsupported parallel level.");
 
   return it->second;
 }
@@ -304,6 +330,9 @@ inline static const std::string STR(BaseType bt) {
 }
 inline static const std::string STR(Storage st) {
   return __internal__::GetStringFrom(st);
+}
+inline static const std::string STR(ParallelLevel pl) {
+  return __internal__::GetStringFrom(pl);
 }
 
 inline static std::ostream& operator<<(std::ostream& os, BaseType bt) {
@@ -1716,6 +1745,7 @@ struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
   BaseType ElementType() const { return psty->ElementType(); }
   size_t Dims() const override { return psty->Dims(); }
   bool IsAsync() const { return async; }
+  Storage GetStorage() const { return psty->GetStorage(); }
 
   bool operator==(const Type& ty) const override {
     if (auto fty = dyn_cast<FutureType>(&ty))

@@ -39,18 +39,8 @@ extern Option<bool> dma_verbose;
 extern Option<bool> dma_opt;
 
 namespace cute {
-inline const char* TopsMdsStorage(Storage st) {
-  switch (st) {
-  case Storage::DEFAULT:
-  case Storage::GLOBAL: return "tops::Global";
-  case Storage::SHARED: return "tops::Shared";
-  case Storage::LOCAL: return "tops::Local";
-  default: choreo_unreachable("storage type is not supported.");
-  }
-  return "";
-}
 
-inline const char* TopsDeviceMemory(Storage st) {
+inline const char* CudaDeviceMemory(Storage st) {
   switch (st) {
   case Storage::SHARED: return "__shared__";
   default: choreo_unreachable("device storage type is not supported.");
@@ -107,23 +97,18 @@ void GenerateSubscriptions(std::ostream& os, const std::string prefix,
 
 using namespace cute;
 
-bool CuteCodeGen::RequiresImplPred(Storage cur) const {
-  // ignore any host code
-  if (IsHost()) return false;
-  // ignore any expression without storage
-  if (cur == Storage::NONE) return false;
-
-  if (max_parallel_level == Storage::LOCAL) {
-    switch (cur) {
-    case Storage::SUB:
-    case Storage::LOCAL: return false;
-    case Storage::SHARED: return true;
-    default: choreo_unreachable("irrational storage level.");
-    }
-  } else if (max_parallel_level == Storage::SHARED)
-    choreo_unreachable("irrational max_parallel_level storage level.");
-
-  choreo_unreachable("unexpected storage level.");
+bool CuteCodeGen::ThreadCooperative(AST::DMA&) const {
+  switch (CCtx().GetArch()) {
+  case TargetArch::SM_70:
+  case TargetArch::SM_75:
+  case TargetArch::SM_80:
+  case TargetArch::SM_86:
+  case TargetArch::SM_89: return true; // no TMA support
+  case TargetArch::SM_90:
+  case TargetArch::SM_100:
+  case TargetArch::SM_120: return false;
+  default: choreo_unreachable("unsupported target arch.");
+  }
   return false;
 }
 
@@ -170,12 +155,15 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     EmitFixedDeviceHead();
     ssm.EnterScope();
     ssm.MapDeviceSymbolIfNotExist("::__choreo_no_tiling__", "0");
+    levels.push(ParallelLevel::NONE);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     device_fn = "__choreo_device_" + fname;
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
+    levels.push(ParallelLevel::SEQ);
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    levels.push(pb->GetLevel());
     // only on device-side
     if (pb->IsOuter()) {
       parallel_idx += 1;
@@ -185,11 +173,9 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
       ds << " {\n";
       IncrDeviceIndent();
       ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
-      max_parallel_level = pb->GetMaxLevel();
       VST_DEBUG(pb->InlinePrint(dbgs());
-                dbgs() << " (max-level: " << STR(max_parallel_level) << ")\n");
+                dbgs() << " (max-level: " << STR(TargetMaxLevel()) << ")\n");
     }
-    parallel_level = pb->GetLevel();
   } else if (isa<AST::WithBlock>(&n)) {
     IndStream() << "// with-in: " << n.LOC() << "\n";
     IndStream() << "{\n";
@@ -202,12 +188,6 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::IncrementBlock>(&n)) {
     IndStream() << "// incr: " << n.LOC() << "\n";
     IncrIndent();
-  }
-
-  if (!n.IsBlock() && RequiresImplPred(n.GetLevel())) {
-    ds << d_indent << "if (" << ImplicitPred(n.GetLevel())
-       << ") { // implicit inthreads\n";
-    IncrDeviceIndent();
   }
 
   return true;
@@ -261,15 +241,12 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     hs.str("");
     return_stream.str("");
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    levels.pop();
     // only on device-side
     if (pb->IsOuter()) {
-      max_parallel_level = Storage::NONE;
-      parallel_level = Storage::NONE;
       ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
       ds << "}\n\n";
-    } else {
-      parallel_level = pb->GetLevel();
     }
   } else if (isa<AST::WithBlock>(&n)) {
     DecrIndent();
@@ -305,11 +282,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     IndStream() << "}\n";
   } else if (isa<AST::NamedVariableDecl>(&n)) {
     emit_call = true;
-  }
-
-  if (!n.IsBlock() && RequiresImplPred(n.GetLevel())) {
-    DecrDeviceIndent();
-    ds << d_indent << "} // end implicit inthreads\n";
   }
 
   return true;
@@ -818,7 +790,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         choreo_unreachable(
             "error: unexpected storage type in spm initialization.");
       if (sto == Storage::SHARED) {
-        ds << d_indent << "if (" << SingleInstancePredicate() << ") {\n";
+        ds << d_indent << LevelPred() << " {\n";
         IncrDeviceIndent();
       }
       auto ec = sty->GetShape().ElementCountValue();
@@ -854,7 +826,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     IndStream();
     if (mem != nullptr) {
       auto st = mem->Get();
-      Stream() << TopsDeviceMemory(st) << " ";
+      Stream() << CudaDeviceMemory(st) << " ";
     }
     Stream() << NameBaseType(GetBaseType(*nty), false) << " " << sym;
     if (n.init_expr) Stream() << " = " << ExprSTR(n.init_expr, false);
@@ -886,13 +858,13 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     case Storage::SHARED:
     case Storage::LOCAL: {
       assert(!IsHost());
-      ds << d_indent << TopsDeviceMemory(ety->GetStorage())
+      ds << d_indent << CudaDeviceMemory(ety->GetStorage())
          << " __volatile__ bool " << n.name_str;
       ety->PrintAsCArray(ds);
       ds << "; // " << STR(ety->GetStorage()) << " event\n";
       ds << d_indent << "// initialize the event\n";
-      if (RequiresImplPred(ety->GetStorage())) {
-        ds << d_indent << "if (" << ImplicitPred(ety->GetStorage()) << ") {\n";
+      if (ety->GetStorage() == Storage::SHARED) {
+        ds << d_indent << LevelPred() << " {\n";
         GenerateSubscriptions(ds, "  " + d_indent + n.name_str, " = false;\n",
                               ety->Dimensions());
         ds << d_indent << "}\n";
@@ -921,11 +893,11 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     case Storage::SHARED:
     case Storage::LOCAL: {
       assert(!IsHost());
-      ds << d_indent << TopsDeviceMemory(ety->GetStorage())
+      ds << d_indent << CudaDeviceMemory(ety->GetStorage())
          << " __volatile__ bool " << n.name_str << "; // "
          << STR(ety->GetStorage()) << " event\n";
-      if (RequiresImplPred(ety->GetStorage())) {
-        ds << d_indent << "if (" << ImplicitPred(ety->GetStorage()) << ") {\n";
+      if (ety->GetStorage() == Storage::SHARED) {
+        ds << d_indent << LevelPred() << " {\n";
         ds << d_indent << "  " << n.name_str
            << " = false;\n"; // inited as untriggered
         ds << d_indent << "}\n";
@@ -1041,14 +1013,18 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   // add the device name map
   std::string dname[] = {"x", "y", "z"};
   switch (n.GetLevel()) {
-  case Storage::SHARED:
+  case ParallelLevel::BLOCK:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
                           "blockIdx." + dname[i]);
     if (n.AllSubPVs().size() == 1)
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "blockIdx.x");
     break;
-  case Storage::LOCAL:
+  case ParallelLevel::GROUP:
+    assert(n.AllSubPVs().size() == 1);
+    ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "(threadIdx.x % 32)");
+    break;
+  case ParallelLevel::THREAD:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
                           "threadIdx." + dname[i]);
@@ -1068,11 +1044,15 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   // note: `thread_dims` for gcu400 is generated in `EmitDeviceFuncDecl`
   auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
   hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
-     << ValueSTR(lconfig.grid_dim_x) << ", " << ValueSTR(lconfig.grid_dim_y)
-     << ", " << ValueSTR(lconfig.grid_dim_z) << ");\n";
+     << ValueSTR(lconfig.block_count.x) << ", "
+     << ValueSTR(lconfig.block_count.y) << ", "
+     << ValueSTR(lconfig.block_count.z) << ");\n";
+  // GPU groups are virtual
+  auto tx = (lconfig.thread_count.x * lconfig.group_count.x)->Normalize();
+  auto ty = (lconfig.thread_count.y * lconfig.group_count.y)->Normalize();
+  auto tz = (lconfig.thread_count.z * lconfig.group_count.z)->Normalize();
   hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
-     << ValueSTR(lconfig.block_dim_x) << ", " << ValueSTR(lconfig.block_dim_y)
-     << ", " << ValueSTR(lconfig.block_dim_z) << ");\n";
+     << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << ValueSTR(tz) << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
      << ", __" << fname << "_bdims" << parallel_idx;
   if (auto dev_name = SSTab().ScopeName();
@@ -1478,13 +1458,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     ds << f_mds_decl;
     ds << t_mds_decl;
 
-    // handles dma related to shared memory, where only single thread can
-    // operate
-    if (n.GetLevel() == Storage::SHARED) {
-      ds << d_indent << "if (" << SingleInstancePredicate() << ") {\n";
-      IncrDeviceIndent();
-    } else if (!n.future.empty())
-      cooperatives.insert(InScopeName(n.future));
+    // handles dma related to shared memory
+    if (!ThreadCooperative(n)) ds << d_indent << LevelPred() << " {\n";
+    IncrDeviceIndent();
+    if (!n.future.empty()) cooperatives.insert(InScopeName(n.future));
 
     if (n.operation == ".copy" || n.operation == ".transp") {
       if (fty->IsAsync()) {
@@ -1540,14 +1517,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                  ", line " + std::to_string(n.LOC().begin.line));
     }
 
-    if (n.GetLevel() == Storage::SHARED) {
-      DecrDeviceIndent();
-      ds << d_indent << "} // single instance\n";
-      if (!fty->IsAsync()) {
-        // not async, must syncthreads immediately
-        // else, defer the sync till the wait time
-        ds << d_indent << "__syncthreads();\n";
-      }
+    DecrDeviceIndent();
+    if (!ThreadCooperative(n)) ds << d_indent << "} // single instance\n";
+
+    if (!fty->IsAsync()) {
+      // not async, must syncthreads immediately
+      // else, defer the sync till the wait time
+      ds << d_indent << "__syncthreads();\n";
     }
   };
 
@@ -1579,15 +1555,15 @@ bool CuteCodeGen::Visit(AST::Rotate& n) {
 bool CuteCodeGen::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
 
-  switch (n.scope->Get()) {
+  switch (n.Resource()) {
   case Storage::GLOBAL:
     hs << h_indent << "cudaDeviceSynchronize();\n";
     hs << h_indent << "verify_device_status();\n";
     break;
   case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
   default:
-    choreo_unreachable("unsupported synchronization type: " + PSTR(n.scope) +
-                       ".");
+    choreo_unreachable(
+        "unsupported synchronization type: " + STR(n.Resource()) + ".");
   }
 
   return true;
@@ -1607,7 +1583,7 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
       bool shared_in_block = (IsFutureBlockShared(InScopeName(name)) &&
                               !cooperatives.count(InScopeName(name)));
       if (shared_in_block) {
-        ds << d_indent << "if (" << SingleInstancePredicate() << ") {\n";
+        ds << d_indent << LevelPred() << " {\n";
         IncrDeviceIndent();
       }
       assert(!IsHost());
@@ -2285,12 +2261,6 @@ void CuteCodeGen::EmitTopsFree() {
 }
 
 void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
-  if (CCtx().GetArch() == TargetArch::GCU4) {
-    auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
-    oss << "__thread_dims__(" << lconfig.warp_dim_x << ", "
-        << lconfig.warp_dim_y << ", " << lconfig.warp_dim_z << ")\n";
-  }
-
   oss << "__global__ void " << device_fn << "(";
 
   size_t index = 0;

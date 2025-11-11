@@ -93,11 +93,6 @@ public:
   bool Visit(AST::ChoreoFunction&) override;
   bool Visit(AST::CppSourceCode&) override;
   bool Visit(AST::Program&) override;
-  bool HasError() override {
-    if (error_count)
-      dbgs() << "Totally " << error_count << " errors have been detected.\n";
-    return error_count != 0;
-  }
 
 private:
   bool SetAsCurrentType(AST::Node&, const std::string&);

@@ -2,6 +2,7 @@
 #define __CHOREO_CODEGEN_COMMON_H__
 
 #include "options.hpp"
+#include "target_utils.hpp"
 #include "types.hpp"
 
 namespace Choreo {
@@ -25,16 +26,37 @@ inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
   os << ");\n";
 }
 
-inline const char* SingleInstancePredicate(bool shared_in_block = true) {
-  if (shared_in_block) return "__CHOREO_SINGLE_SHARED__";
-  return "__CHOREO_SINGLE_LOCAL__";
+inline const char* LevelPred(ParallelLevel pl = ParallelLevel::BLOCK) {
+  switch (pl) {
+  case ParallelLevel::BLOCK: return "if (__CHOREO_BLOCK_SINGLE__) ";
+  case ParallelLevel::GROUP: return "if (__CHOREO_GROUP_SINGLE__) ";
+  case ParallelLevel::THREAD: return ""; // no guard is required
+  default: choreo_unreachable("unsupported storage.");
+  }
+  return "";
 }
 
-inline const std::string ImplicitPred(Storage cur) {
-  switch (cur) {
-  case Storage::LOCAL: return "__CHOREO_SINGLE_LOCAL__";
-  case Storage::SHARED: return "__CHOREO_SINGLE_SHARED__";
-  default: choreo_unreachable("unsupported storage level.");
+// buffer is flexible to be declared anywhere place. For example:
+//
+//   parallel p by 1, parallel q by 1 {
+//     shared f32 [1] bs{1};
+//     local f32 [1] bl;
+//     shared event es[3];
+//   }
+//
+// However, the initialization of 'bs' should be guarded implicitly to guarantee
+// 'atomic' initialization. This is especially important for the shared event
+// storage.
+
+inline const char* BufferInitPred(Storage s) {
+  switch (s) {
+  case Storage::SHARED: return LevelPred(ParallelLevel::BLOCK);
+  case Storage::LOCAL:
+    if (TargetHasLevel(ParallelLevel::GROUP))
+      return LevelPred(ParallelLevel::GROUP);
+    else
+      return "";
+  default: choreo_unreachable("unsupported storage.");
   }
   return "";
 }

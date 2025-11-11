@@ -1,0 +1,8 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void i_parallel_by1(int a, int b) {
+  parallel p by [5, b] { }
+}
+
+// CHECK: The parallel variable 'p' can not be assigned multiple bounds.
+// CHECK-NOT: error:

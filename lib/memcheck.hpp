@@ -357,12 +357,6 @@ public:
                      << GetMemUsageMapDetail(ct_tot_mem_usage));
     return true;
   }
-
-  bool HasError() override {
-    if (error_count)
-      dbgs() << "Totally " << error_count << " errors have been detected.\n";
-    return error_count != 0;
-  }
 };
 
 } // end namespace Choreo

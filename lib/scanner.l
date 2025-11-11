@@ -451,10 +451,14 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "__tanh"     return Choreo::Parser::make_TANH(yytext, loc);
   "__alignup"  return Choreo::Parser::make_ALIGNUP(yytext, loc);
   "__aligndown" return Choreo::Parser::make_ALIGNDOWN(yytext, loc);
-  "sublocal"   return Choreo::Parser::make_SUBLOCAL(Storage::SUB, loc);
-  "local"    return Choreo::Parser::make_LOCAL(Storage::LOCAL, loc);
-  "shared"   return Choreo::Parser::make_SHARED(Storage::SHARED, loc);
-  "global"   return Choreo::Parser::make_GLOBAL(Storage::GLOBAL, loc);
+  "local"    return Choreo::Parser::make_STORAGE(Storage::LOCAL, loc);
+  "shared"   return Choreo::Parser::make_STORAGE(Storage::SHARED, loc);
+  "global"   return Choreo::Parser::make_STORAGE(Storage::GLOBAL, loc);
+  "term"     return Choreo::Parser::make_PBLEVEL(ParallelLevel::TERM, loc);
+  "device"   return Choreo::Parser::make_PBLEVEL(ParallelLevel::DEVICE, loc);
+  "block"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::BLOCK, loc);
+  "group"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUP, loc);
+  "thread"   return Choreo::Parser::make_PBLEVEL(ParallelLevel::THREAD, loc);
   "mutable"  return Choreo::Parser::make_MUTABLE(yytext, loc);
   "f64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F64(BaseType::F64, loc); }
   "f32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F32(BaseType::F32, loc); }
