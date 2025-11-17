@@ -26,9 +26,22 @@ LivenessAnalyzer::VarSet LivenessAnalyzer::SetDiff(const VarSet& a,
   return ret;
 }
 
+LivenessAnalyzer::VarSet& LivenessAnalyzer::SetUnionInPlace(VarSet& a,
+                                                            const VarSet& b) {
+  a.insert(b.begin(), b.end());
+  return a;
+}
+
+LivenessAnalyzer::VarSet& LivenessAnalyzer::SetDiffInPlace(VarSet& a,
+                                                           const VarSet& b) {
+  for (const auto& item : b) a.erase(item);
+  return a;
+}
+
 LivenessAnalyzer::VarSet
 LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
   if (auto id = dyn_cast<AST::Identifier>(n)) {
+    if (id->name == "__choreo_no_tiling__") return {};
     return {InScopeName(id->name)};
   } else if (auto expr = dyn_cast<AST::Expr>(n)) {
     VarSet res;
@@ -68,7 +81,7 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
     (void)call;
     return {};
   } else {
-    choreo_unreachable("expecting the node to be an Expr or Identifier.");
+    choreo_unreachable("expecting node type: " + n->TypeNameString() + ".");
     return {};
   }
 }
@@ -94,7 +107,6 @@ LivenessAnalyzer::GetScopedName(const std::string& name) const {
   return PrefixedWith(name, "::") ? name : InScopeName(name);
 }
 
-// TODO: need to be tested.
 inline std::string RemoveWithin(const std::string& s) {
   auto scopes = SplitStringByDelimiter(s, "::");
   std::string ret = "::";
@@ -105,16 +117,14 @@ inline std::string RemoveWithin(const std::string& s) {
   return ret;
 }
 
-// TODO: `within` is useless when insert extra uses?
 int ScopeCompare(const std::string& s1, const std::string& s2) {
-  // TODO: is the functionality of `within` correct?
   std::string s1_no_within = RemoveWithin(s1);
   std::string s2_no_within = RemoveWithin(s2);
-  // ::foo::A <-> ::foo::A
+  // ::foo::A == ::foo::A
   if (s1_no_within == s2_no_within) return 0;
-  // ::foo::A <-> ::foo::A::B
+  // ::foo::A < ::foo::A::B
   if (PrefixedWith(s2_no_within, s1_no_within)) return -1;
-  // ::foo::A::B <-> ::foo::A
+  // ::foo::A::B > ::foo::A
   return 1;
 }
 
@@ -132,15 +142,16 @@ std::string ExactFirstLoopScope(const std::string& outer_scope,
   auto scopes_outer = SplitStringByDelimiter(outer_scope, "::");
   auto scopes_inner = SplitStringByDelimiter(inner_scope, "::");
 
-  size_t offset = 1;
   size_t so_size = scopes_outer.size();
   size_t si_size = scopes_inner.size();
-  while (so_size - 1 + offset < si_size &&
-         PrefixedWith(scopes_inner[so_size - 1 + offset], "within_"))
-    ++offset;
+  size_t idx;
+  for (idx = so_size; idx < si_size; idx++)
+    if (PrefixedWith(scopes_inner[idx], "foreach_")) break;
+
+  if (idx == si_size) return "";
+
   auto scopes_ret = std::vector<std::string>(scopes_inner.begin(),
-                                             scopes_inner.begin() +
-                                                 scopes_outer.size() + offset);
+                                             scopes_inner.begin() + idx + 1);
   return "::" + DelimitedString(scopes_ret, "::") + "::";
 }
 
@@ -153,7 +164,7 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
   if (inthreads_async_level && !visiting_synchronize)
     AddAsyncInthreadsVar(SSTab().ScopeName(), svar);
   // when using a var, its binding should also be treated as used.
-  // important when dealing with `AST::Rotate`
+  // important when dealing with `AST::Rotate` or future
   if (Bindings.count(svar)) {
     auto binding_vars = TransitiveClosure({svar}, Bindings);
     for (const auto& binding_var : binding_vars) {
@@ -166,11 +177,13 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
       AddUse(s, dst, add_extra_use);
   if (!add_extra_use) return;
   // for bounded vars defined in paraby, we add extra uses in other place.
-  if (paraby_bounded_vars.count(var)) return;
+  if (paraby_bounded_vars.count(svar)) return;
   // add the extra uses in `scope_end`
   for (const auto& event : var_events.at(svar)) {
     // only consider the def event.
     if (event.first != "def") continue;
+    // If there is no loop in the current scope, no need to add extra use.
+    if (SSTab().ScopeName().find("foreach_") == std::string::npos) continue;
     // errs() << "event for var: " << svar << "\n";
     // errs() << "event.second: " << event.second << "\n";
     // errs() << "current scope: " << SSTab().ScopeName() << "\n";
@@ -190,19 +203,28 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
       */
       std::string exact_scope =
           ExactFirstLoopScope(event.second, SSTab().ScopeName());
+      if (exact_scope.empty()) continue;
       // errs() << "exact_scope of (" << event.second << ", "
-      //           << SSTab().ScopeName() << "): " << exact_scope << "\n";
+      //        << SSTab().ScopeName() << "): " << exact_scope << "\n";
       if (!events_to_add[scope2stmt.at(exact_scope)].count({"use", svar})) {
         VST_DEBUG({
           dbgs() << "RECORD extra use " << svar << "\n\tin the end of "
-                 << stmt2number[scope2stmt.at(exact_scope)] << "\n";
+                 << stmt2id[scope2stmt.at(exact_scope)] << "\n";
         });
         events_to_add[scope2stmt.at(exact_scope)].insert({"use", svar});
       }
     } else if (res == 0) {
-      // no need to add extra use
+      /*
+      {
+        def x                             (event.second)
+        use x;                            (SSTab().ScopeName())
+      }
+      no need to add extra use
+      */
       break;
     } else {
+      // TODO: the case is invalid?
+      assert(false);
       /*
       {
         def x
@@ -237,16 +259,15 @@ void LivenessAnalyzer::AddDef(const Stmt* s, const std::string& var,
   var_events[svar].push_back({"def", SSTab().ScopeName()});
   if (is_buffer_or_future) {
     std::string svar_span = svar + ".span";
-    VST_DEBUG(dbgs() << "\tand the .span: " << svar_span << "\n");
+    VST_DEBUG(dbgs() << "\tand .span: " << svar_span << "\n");
     linfo[s].def.insert(svar_span);
     var_events[svar_span].push_back({"def", SSTab().ScopeName()});
   }
-  VST_DEBUG(dbgs() << "\n");
 }
 
 void LivenessAnalyzer::AddIsAlias(const Stmt* s, const std::string& alias_var) {
   std::string salias = GetScopedName(alias_var);
-  VST_DEBUG(dbgs() << "AddIsAlias: " << salias << "\n\n");
+  VST_DEBUG(dbgs() << "AddIsAlias: " << salias << "\n");
   assert(linfo[s].name_if_alias == "" && "expecting no alias before.");
   linfo[s].name_if_alias = salias;
 }
@@ -256,8 +277,7 @@ void LivenessAnalyzer::AddAlias(const std::string& alias_var,
                                 const std::string& original_var) {
   std::string salias = GetScopedName(alias_var);
   std::string soriginal = GetScopedName(original_var);
-  VST_DEBUG(dbgs() << "Add alias: " << salias << " <-> " << soriginal
-                   << "\n\n");
+  VST_DEBUG(dbgs() << "Add alias: " << salias << " <-> " << soriginal << "\n");
   Alias[salias] = soriginal;
 }
 
@@ -266,14 +286,14 @@ void LivenessAnalyzer::RemoveAlias(const std::string& alias_var) {
   assert(Alias.count(salias) &&
          "expecting the alias to be in the alias of current.");
   VST_DEBUG(dbgs() << "Remove alias: " << salias << " <-> " << Alias[salias]
-                   << "\n\n");
+                   << "\n");
   Alias.erase(salias);
 }
 
 void LivenessAnalyzer::AddIsBinding(const Stmt* s,
                                     const std::string& bind_res) {
   std::string sres = GetScopedName(bind_res);
-  VST_DEBUG(dbgs() << "AddIsBinding: " << sres << "\n\n");
+  VST_DEBUG(dbgs() << "AddIsBinding: " << sres << "\n");
   assert(linfo[s].name_if_binding == "" && "expecting no binding before.");
   linfo[s].name_if_binding = sres;
 }
@@ -284,7 +304,7 @@ void LivenessAnalyzer::AddBinding(const std::string& bind_res,
                                   const std::string& bind_src) {
   std::string sres = GetScopedName(bind_res);
   std::string ssrc = GetScopedName(bind_src);
-  VST_DEBUG(dbgs() << "AddBinding: " << sres << " <- " << ssrc << "\n\n");
+  VST_DEBUG(dbgs() << "AddBinding: " << sres << " <- " << ssrc << "\n");
   Bindings[sres].insert(ssrc);
 }
 
@@ -292,12 +312,12 @@ void LivenessAnalyzer::RemoveBinding(const std::string& bind_res,
                                      const std::string& bind_src) {
   std::string sres = GetScopedName(bind_res);
   std::string ssrc = GetScopedName(bind_src);
-  VST_DEBUG(dbgs() << "RemoveBinding: " << sres << " <- " << ssrc << "\n\n");
+  VST_DEBUG(dbgs() << "RemoveBinding: " << sres << " <- " << ssrc << "\n");
   Bindings[sres].erase(ssrc);
 }
 
 void LivenessAnalyzer::AddFut2Buffers(const std::string& fut,
-                                      const BufInfo& buf_info) {
+                                      const DMABufInfo& buf_info) {
   std::string sfut = GetScopedName(fut);
   std::string ssrc = GetScopedName(buf_info.first);
   std::string sdst = GetScopedName(buf_info.second);
@@ -367,48 +387,142 @@ LivenessAnalyzer::TransitiveClosure(const VarSet& vars,
   return result;
 }
 
-void LivenessAnalyzer::ComputeLiveInOut() {
-  for (int i = preorder_stmts.size() - 1; i >= 0; --i) {
-    const Stmt* s = preorder_stmts[i];
+void TopoSortBB(
+    std::shared_ptr<LivenessAnalyzer::BasicBlock> root,
+    std::unordered_set<size_t>& visited,
+    std::vector<std::shared_ptr<LivenessAnalyzer::BasicBlock>>& order) {
+  if (!root || visited.count(root->id)) return;
+  visited.insert(root->id);
+  for (auto succ : root->succs) TopoSortBB(succ, visited, order);
+  order.push_back(root);
+}
 
-    if (i < (int)preorder_stmts.size() - 1)
-      linfo[s].live_out = linfo[preorder_stmts[i + 1]].live_in;
+void LivenessAnalyzer::ComputeLiveRange() {
+  struct BlockInfo {
+    VarSet in;
+    VarSet out;
+  };
+  // fname -> bb_infos
+  std::map<std::string, std::map<size_t, BlockInfo>> bb_infos_map;
+  std::vector<std::pair<std::string, Ranges>> var_live_ranges;
 
-    VarSet all_use = linfo[s].use;
-
-    linfo[s].live_in =
-        SetUnion(linfo[s].use, SetDiff(linfo[s].live_out, linfo[s].def));
-
-    // If x is in use, then Alias[x] and Bindings[x] should also be in use.
-    for (const auto& item : linfo[s].use) {
-      VarSet alias_tc, binding_tc;
-      if (Alias.count(item)) {
-        alias_tc = TransitiveClosure({Alias[item]}, Alias, Bindings);
-        linfo[s].live_in = SetUnion(linfo[s].live_in, alias_tc);
+  for (const auto& [fname, bbl] : bb_lists) {
+    auto& bb_infos = bb_infos_map[fname];
+    std::unordered_set<size_t> visited;
+    std::vector<std::shared_ptr<BasicBlock>> order;
+    TopoSortBB(bbl.front(), visited, order);
+    for (auto& bb : order) {
+      VST_DEBUG(dbgs() << "visiting bb " << bb->id << "\n");
+      auto& bb_info = bb_infos[bb->id];
+      for (auto succ : bb->succs) {
+        auto& succ_info = bb_infos[succ->id];
+        SetUnionInPlace(bb_info.out, succ_info.in);
       }
-      if (Bindings.count(item)) {
-        binding_tc = TransitiveClosure(Bindings[item], Bindings, Alias);
-        linfo[s].live_in = SetUnion(linfo[s].live_in, binding_tc);
+      if (bb->stmt_ids.size() == 0) bb_info.in = bb_info.out;
+      for (int i = bb->stmt_ids.size() - 1; i >= 0; --i) {
+        const Stmt* s = preorder_stmts[bb->stmt_ids[i]];
+        if (i == static_cast<int>(bb->stmt_ids.size()) - 1)
+          linfo[s].live_out = bb_info.out;
+        else
+          linfo[s].live_out =
+              linfo[preorder_stmts[bb->stmt_ids[i + 1]]].live_in;
+        linfo[s].live_in =
+            SetUnion(linfo[s].use, SetDiff(linfo[s].live_out, linfo[s].def));
+        // If x is in use, then Alias[x] and Bindings[x] should also be in use.
+        for (const auto& item : linfo[s].use) {
+          VarSet alias_tc, binding_tc;
+          if (Alias.count(item)) {
+            alias_tc = TransitiveClosure({Alias[item]}, Alias, Bindings);
+            SetUnionInPlace(linfo[s].live_in, alias_tc);
+          }
+          if (Bindings.count(item)) {
+            binding_tc = TransitiveClosure(Bindings[item], Bindings, Alias);
+            SetUnionInPlace(linfo[s].live_in, binding_tc);
+          }
+          VST_DEBUG({
+            if (!alias_tc.empty() || !binding_tc.empty())
+              dbgs() << "The tc of use " << item << " in " << SSTR(s);
+            if (!alias_tc.empty())
+              for (const auto& i : alias_tc) dbgs() << "\t" << i << "\n";
+            if (!binding_tc.empty())
+              for (const auto& i : binding_tc) dbgs() << "\t" << i << "\n";
+          });
+        }
+        if (i == 0) bb_info.in = linfo[s].live_in;
+        // Restore binding relationship deleted by AST::Wait
+        if (stmt2binding_restore.count(s)) {
+          assert(isa<AST::Wait>(s));
+          std::string fut_name = stmt2binding_restore[s];
+          for (const auto& [src, dst] : fut2buffers[fut_name])
+            AddBinding(fut_name, src);
+        }
+        size_t id = stmt2id[s];
+        for (auto var : linfo[s].live_in) {
+          auto& range = var_ranges[var];
+          if (range.Values().empty()) {
+            range.PushBack(Range{id, id});
+          } else {
+            auto& last = range.Values().back();
+            if (id + 1 == last.start) {
+              // append to the last range
+              last.start = id;
+            } else {
+              // make a new range
+              range.PushBack(Range{id, id});
+            }
+          }
+        }
+        for (const auto& var : linfo[s].def) {
+          auto& range = var_ranges[var];
+          if (linfo[s].live_out.count(var)) {
+            assert(!range.Values().empty());
+            auto& last = range.Values().back();
+            if (id + 1 == last.start) {
+              // append to the last range
+              last.start = id;
+            } else {
+              // make a new range
+              range.PushBack(Range{id, id});
+            }
+          } else {
+            // variable never used
+            range.PushBack(Range{id, id});
+          }
+        }
       }
-      VST_DEBUG({
-        if (!alias_tc.empty() || !binding_tc.empty())
-          dbgs() << "The tc of use " << item << " in " << SSTR(s);
-        if (!alias_tc.empty())
-          for (const auto& i : alias_tc) dbgs() << "\t" << i << "\n";
-        if (!binding_tc.empty())
-          for (const auto& i : binding_tc) dbgs() << "\t" << i << "\n";
-      });
-    }
-
-    // Restore binding relationship deleted by AST::Wait
-    if (stmt2binding_restore.count(s)) {
-      assert(isa<AST::Wait>(s));
-      std::string fut_name = stmt2binding_restore[s];
-      for (const auto& [src, dst] : fut2buffers[fut_name])
-        AddBinding(fut_name, src);
     }
   }
+  for (auto& [var, ranges] : var_ranges) {
+    ranges.Merge();
+    var_live_ranges.push_back({var, ranges});
+  }
+  std::sort(var_live_ranges.begin(), var_live_ranges.end(),
+            [&](const std::pair<std::string, Ranges>& a,
+                const std::pair<std::string, Ranges>& b) {
+              if (a.second.Empty()) return !b.second.Empty();
+              if (b.second.Empty()) return false;
+              return std::tie(a.second.front().start, a.first) <
+                     std::tie(b.second.front().start, b.first);
+            });
   VST_DEBUG({
+    for (auto& [var, ranges] : var_live_ranges) {
+      if (ONLY_SHOW_BUFFER && !buffers.count(var)) continue;
+      if (buffers.count(var)) {
+        dbgs() << "BUFFER " << var << "\n";
+        dbgs() << "\trange:";
+        for (const auto& range : ranges.Values()) {
+          dbgs() << " [" << range.start << ", " << range.end;
+          dbgs() << "]";
+        }
+        dbgs() << "\n";
+      } else {
+        dbgs() << "VAR    " << var << "\n";
+        dbgs() << "\trange:";
+        for (const auto& range : ranges.Values())
+          dbgs() << " [" << range.start << ", " << range.end << "] ";
+        dbgs() << "\n";
+      }
+    }
     auto PrintSet = [](std::ostream& os, const std::string& label,
                        const LivenessAnalyzer::VarSet& vars) {
       os << "\t" << label << ": " << vars.size() << "\n";
@@ -424,6 +538,15 @@ void LivenessAnalyzer::ComputeLiveInOut() {
       dbgs() << "\n";
     }
     PrintSet(dbgs(), "buffers", buffers);
+    dbgs() << "\n";
+    for (const auto& [fname, bb_infos] : bb_infos_map) {
+      dbgs() << "For " << fname << ":\n";
+      for (const auto& [id, bbi] : bb_infos) {
+        dbgs() << "bb " << id << ":\n";
+        PrintSet(dbgs(), "live_in", bbi.in);
+        PrintSet(dbgs(), "live_out", bbi.out);
+      }
+    }
     dbgs() << "\n";
   });
 
@@ -453,76 +576,6 @@ void LivenessAnalyzer::ComputeLiveInOut() {
 #endif
 }
 
-// the start and end of the live range are both inclusive.
-void LivenessAnalyzer::ComputeLiveRange() {
-  // record the def points of each variable.
-  std::map<std::string, std::vector<size_t>> var_def_points;
-
-  // collect all the def points of each variable.
-  for (const auto* stmt : preorder_stmts)
-    for (const auto& var : linfo[stmt].def)
-      var_def_points[var].push_back(stmt2number.at(stmt));
-
-  std::vector<std::pair<std::string, Ranges>> var_live_ranges;
-
-  // calculate all the live ranges of each variable.
-  for (const auto& [var, def_points] : var_def_points) {
-    Ranges ranges;
-
-    // for each def point, find the corresponding live range.
-    for (size_t def_point : def_points) {
-      // find the last use of the variable after the def point.
-      size_t end_point = def_point;
-
-      // traverse from the def point to the end.
-      for (size_t i = def_point + 1; i < preorder_stmts.size(); ++i) {
-        auto current_stmt = preorder_stmts[i];
-        // if the variable is in the live_in or use of the current stmt,
-        // update the end_point.
-        if (linfo[current_stmt].live_in.count(var) ||
-            linfo[current_stmt].use.count(var))
-          end_point = i;
-
-        // if the variable is defined in the current stmt, stop the traverse.
-        if (linfo[current_stmt].def.count(var) && i != def_point) break;
-      }
-
-      // only add the live range if the variable is actually used.
-      if (end_point > def_point)
-        ranges.PushBack(Range{def_point, end_point});
-      else if (buffers.count(var) && end_point == def_point) {
-        // tolerate buffer appears on the single location
-        ranges.PushBack(Range{def_point, end_point});
-      }
-    }
-
-    // merge the overlapping ranges.
-    ranges.Merge();
-
-    var_live_ranges.push_back(std::make_pair(var, ranges));
-    var_ranges.emplace(var, ranges);
-  }
-  std::sort(var_live_ranges.begin(), var_live_ranges.end(),
-            [&](const std::pair<std::string, Ranges>& a,
-                const std::pair<std::string, Ranges>& b) {
-              return std::tie(var_def_points[a.first].front(), a.first) <
-                     std::tie(var_def_points[b.first].front(), b.first);
-            });
-  VST_DEBUG({
-    for (const auto& [var, ranges] : var_live_ranges) {
-      dbgs() << (buffers.count(var) ? "BUFFER " : "VAR    ") << var << "\n";
-      if (ranges.Values().empty()) {
-        dbgs() << "\trange: [" << var_def_points[var].front() << ", x] ";
-      } else {
-        dbgs() << "\trange:";
-        for (const auto& range : ranges.Values())
-          dbgs() << " [" << range.start << ", " << range.end << "] ";
-      }
-      dbgs() << "\n";
-    }
-  });
-}
-
 // n is the NamedVariableDecl or Assignment node.
 void LivenessAnalyzer::HandleSelect(AST::Node& n, ptr<AST::Select> sel) {
   std::string name;
@@ -532,10 +585,6 @@ void LivenessAnalyzer::HandleSelect(AST::Node& n, ptr<AST::Select> sel) {
     name = assign->GetName();
   else
     assert(false && "expecting a NamedVariableDecl or Assignment node!");
-  // if (!isa<FutureType>(NodeType(*sel))) {
-  //   dbgs() << "type of " << PSTR(sel) << " is\n\t" << AST::TYPE_STR(*sel)
-  //          << "\n";
-  // }
   assert(isa<FutureType>(NodeType(*sel)) || isa<SpannedType>(NodeType(*sel)));
   linfo[current_stmt].buffer_related = true;
   AddDef(current_stmt, name);
@@ -549,7 +598,7 @@ void LivenessAnalyzer::HandleSelect(AST::Node& n, ptr<AST::Select> sel) {
       // id->name has been bound with the src and dst.
       // And in co code, the future is used directly later.
       AddBinding(name, id->name);
-      for (const BufInfo& buf_info : fut2buffers[InScopeName(id->name)])
+      for (const DMABufInfo& buf_info : fut2buffers[InScopeName(id->name)])
         AddFut2Buffers(name, buf_info);
     } else if (auto expr = dyn_cast<AST::Expr>(item)) {
       // TODO: actually, there are many situations that the node can be either
@@ -559,7 +608,7 @@ void LivenessAnalyzer::HandleSelect(AST::Node& n, ptr<AST::Select> sel) {
       for (const auto& op : ops) {
         AddBinding(name, op);
         if (fut2buffers.count(op))
-          for (const BufInfo& buf_info : fut2buffers[op])
+          for (const DMABufInfo& buf_info : fut2buffers[op])
             AddFut2Buffers(name, buf_info);
       }
     } else {
@@ -580,7 +629,7 @@ inline void IncrDumpIndent() { dump_indent += "  "; }
 inline void DecrDumpIndent() {
   if (dump_indent.size() < 2)
     choreo_unreachable("the indent can not be decreased.");
-  dump_indent = dump_indent.substr(2);
+  dump_indent.erase(0, 2);
 }
 
 void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
@@ -588,9 +637,9 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
 #if DUMP_STMT_WITH_TYPE_INFO
   os << std::left << std::setw(25) << n.TypeNameString();
 #endif
-  auto num = std::to_string(stmt2number.at(&n));
-  if (num.size() < 3) num = std::string(3 - num.size(), ' ') + num;
-  os << "(" << num << ") ";
+  auto id = std::to_string(stmt2id.at(&n));
+  if (id.size() < 3) id = std::string(3 - id.size(), ' ') + id;
+  os << "(" << id << ") ";
   os << dump_indent;
 
   // special case for the else scope of if-else block
@@ -674,6 +723,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     os << "} by " << "[";
     pb->PrintBounds(os);
     os << "]";
+    if (pb->GetLevel() != ParallelLevel::NONE)
+      os << " : " << STR(pb->GetLevel());
   } else if (const auto wb = dyn_cast<AST::WithBlock>(&n)) {
     os << "with ";
     for (size_t i = 0; i < wb->withins->Count(); ++i) {
@@ -737,7 +788,16 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
 }
 
 inline bool IsLoopBlock(const AST::Node& n) {
-  return isa<AST::ParallelBy>(&n) || isa<AST::ForeachBlock>(&n);
+  return isa<AST::ForeachBlock>(&n);
+}
+
+inline bool IsBranch(const AST::Node& n) {
+  return isa<AST::IfElseBlock>(&n) || isa<AST::InThreadsBlock>(&n);
+}
+
+// TODO: should wait dma be treated as holding point?
+inline bool IsSyncPoint(const AST::Node& n) {
+  return isa<AST::Synchronize>(&n);
 }
 
 inline bool ShouldIndent(const AST::Node& n) {
@@ -752,20 +812,41 @@ void LivenessAnalyzer::HandleStmtInBefore(AST::Node& n) {
   preorder_stmts.push_back(&n);
 
   current_stmt = &n;
-  stmt2number.emplace(&n, stmt_number);
-  ++stmt_number;
+  stmt2id.emplace(&n, stmt_id);
 
+  std::stringstream ss;
+  DumpStmtBriefly(n, ss, ShouldIndent(n));
+  stmt2str.emplace(&n, ss.str());
+#if DUMP_EACH_STMT
+  VST_DEBUG(dbgs() << SSTR(&n));
+#endif
   DumpStmtBriefly(n, stmts_with_indent, ShouldIndent(n));
   if (ShouldIndent(n)) {
     IncrDumpIndent();
     scope2stmt.emplace(SSTab().ScopeName(), &n);
   }
-  std::stringstream ss;
-  DumpStmtBriefly(n, ss, false);
-  stmt2str.emplace(&n, ss.str());
-#if DUMP_EACH_STMT
-  VST_DEBUG(dbgs() << SSTR(&n));
-#endif
+
+  if (ShouldNewBB(n)) {
+    if (cur_bb) bb_list.push_back(cur_bb);
+    cur_bb = AST::Make<BasicBlock>();
+    if (!bb_list.empty()) {
+      cur_bb->id = bb_list.back()->id + 1;
+      ConnnectBB(bb_list.back(), cur_bb);
+    }
+  }
+  cur_bb->stmt_ids.push_back(stmt_id);
+  stmt2bb.emplace(current_stmt, cur_bb);
+  ++stmt_id;
+
+  if (isa<AST::IfElseBlock>(&n)) {
+    cur_bb->is_condition = true;
+    ie_bb_list.push(IfElseBBs{._if = cur_bb});
+  } else if (isa<AST::InThreadsBlock>(&n)) {
+    cur_bb->is_inthreads = true;
+    it_bb_list.push(InThreadsBBs{._it = cur_bb});
+  }
+
+  if (IsSyncPoint(n)) cur_bb->is_sync_point = true;
 }
 
 void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
@@ -773,6 +854,15 @@ void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
 
   auto ie = dyn_cast<AST::IfElseBlock>(&n);
   if (!ie) return;
+
+  bb_list.push_back(cur_bb);
+  if (ie->if_stmts) ie_bb_list.top()._then = bb_list.back();
+  auto _else = AST::Make<BasicBlock>();
+  _else->id = bb_list.back()->id + 1;
+  ie_bb_list.top()._else = _else;
+  assert(!ie_bb_list.empty());
+  ConnnectBB(ie_bb_list.top()._if, _else);
+  cur_bb = _else;
 
   // if there is no else block,
   // do the rbrace job in HandleStmtInAfter as usual.
@@ -786,8 +876,10 @@ void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
   auto if_end = AST::Make<ScopeEnd>(n.LOC(), &n);
   scope_ends.push_back(if_end);
   preorder_stmts.push_back(if_end.get());
-  stmt2number.emplace(if_end.get(), stmt_number);
-  ++stmt_number;
+  stmt2id.emplace(if_end.get(), stmt_id);
+  ie_bb_list.top()._then->stmt_ids.push_back(stmt_id);
+  stmt2bb.emplace(if_end.get(), ie_bb_list.top()._then);
+  ++stmt_id;
   DumpStmtBriefly(*if_end, stmts_with_indent, false);
 
   std::stringstream ss;
@@ -800,16 +892,18 @@ void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
   auto else_start = AST::Make<ScopeEnd>(n.LOC(), &n);
   scope_ends.push_back(else_start);
   preorder_stmts.push_back(else_start.get());
-  stmt2number.emplace(else_start.get(), stmt_number);
-  ++stmt_number;
+  stmt2id.emplace(else_start.get(), stmt_id);
+  ie_bb_list.top()._else->stmt_ids.push_back(stmt_id);
+  stmt2bb.emplace(else_start.get(), ie_bb_list.top()._else);
+  ++stmt_id;
   DumpStmtBriefly(*else_start, stmts_with_indent, true, true);
-
-  IncrDumpIndent();
   scope2stmt.emplace(SSTab().ScopeName(), else_start.get());
 
   ss.str("");
-  DumpStmtBriefly(*else_start, ss, false);
+  DumpStmtBriefly(*else_start, ss, true, true);
   stmt2str.emplace(else_start.get(), ss.str());
+
+  IncrDumpIndent();
 #if DUMP_EACH_STMT
   VST_DEBUG(dbgs() << SSTR(else_start.get()));
 #endif
@@ -823,12 +917,59 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
 
   DecrDumpIndent();
 
+  // generate the rbrace as scope end
   auto rbrace = AST::Make<ScopeEnd>(n.LOC(), &n);
-
   scope_ends.push_back(rbrace);
   preorder_stmts.push_back(rbrace.get());
-  stmt2number.emplace(rbrace.get(), stmt_number);
-  ++stmt_number;
+  stmt2id.emplace(rbrace.get(), stmt_id);
+
+  if (isa<AST::InThreadsBlock>(&n)) {
+    cur_bb->stmt_ids.push_back(stmt_id);
+    stmt2bb.emplace(rbrace.get(), cur_bb);
+    bb_list.push_back(cur_bb);
+    it_bb_list.top()._then = cur_bb;
+    auto _end = AST::Make<BasicBlock>();
+    _end->is_end = true;
+    _end->id = bb_list.back()->id + 1;
+    ConnnectBB(it_bb_list.top()._then, _end);
+    // seems that there is no need to add the edge
+    // ConnnectBB(it_bb_list.top()._it, _end);
+    end2cond.emplace(_end, it_bb_list.top()._it);
+    it_bb_list.pop();
+    cur_bb = _end;
+  } else if (isa<AST::Synchronize>(&n)) {
+    // TODO:
+  } else if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
+    if (ie->HasElse()) {
+      cur_bb->stmt_ids.push_back(stmt_id);
+      stmt2bb.emplace(rbrace.get(), cur_bb);
+      ie_bb_list.top()._else = cur_bb;
+    } else {
+      ie_bb_list.top()._then->stmt_ids.push_back(stmt_id);
+      stmt2bb.emplace(rbrace.get(), ie_bb_list.top()._then);
+    }
+    bb_list.push_back(cur_bb);
+    auto _end = AST::Make<BasicBlock>();
+    _end->is_end = true;
+    _end->id = bb_list.back()->id + 1;
+    ConnnectBB(ie_bb_list.top()._then, _end);
+    ConnnectBB(ie_bb_list.top()._else, _end);
+    end2cond.emplace(_end, ie_bb_list.top()._if);
+    ie_bb_list.pop();
+    cur_bb = _end;
+  } else if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+    cur_bb->stmt_ids.push_back(stmt_id);
+    stmt2bb.emplace(rbrace.get(), cur_bb);
+    bb_list.push_back(cur_bb);
+    bb_lists.emplace(cf->name, bb_list);
+    bb_list.clear();
+    cur_bb = nullptr;
+  } else {
+    cur_bb->stmt_ids.push_back(stmt_id);
+    stmt2bb.emplace(rbrace.get(), cur_bb);
+  }
+
+  ++stmt_id;
 
   DumpStmtBriefly(*rbrace, stmts_with_indent, false);
 
@@ -837,7 +978,7 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
       for (const auto& [event_type, var] : events_to_add[&n]) {
         if (event_type != "use") assert(false && "unexpected event type.");
         VST_DEBUG(dbgs() << "EXTRA use: " << var << " in "
-                         << stmt2number[rbrace.get()] << "\n";);
+                         << stmt2id[rbrace.get()] << "\n";);
         AddUse(rbrace.get(), var, false);
       }
     }
@@ -851,6 +992,9 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
 }
 
 bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
+  // skip the BeforeVisitImpl of Call node in pattern: v = Call x(...)
+  if (auto c = dyn_cast<AST::Call>(&n); c && c->IsExpr()) return true;
+
   HandleStmtInBefore(n);
 
   if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -859,7 +1003,7 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
       std::string sname = InScopeName(param->sym->name);
       if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
         linfo[current_stmt].buffer_related = true;
-        buffers.insert(sname);
+        AddBuffer(sname, sty->m_type);
         if (sty->RuntimeShaped()) {
           auto shape = sty->GetShape();
           for (const auto& v : shape.GetDynamicSymbols())
@@ -883,13 +1027,56 @@ bool LivenessAnalyzer::InMidVisitImpl(AST::Node& n) {
   return true;
 }
 
+void DumpCfgToDot(
+    const std::map<std::string, std::vector<ptr<LivenessAnalyzer::BB>>>&
+        blocks_list) {
+  for (const auto& [fname, blocks] : blocks_list) {
+    assert(!blocks.empty());
+    std::string filename = fname + ".dot";
+    std::ofstream ofs(filename);
+    ofs << "digraph CFG {\n";
+    ofs << "  node [shape=box, style=filled, fillcolor=lightgray];\n";
+    for (auto& bb : blocks) {
+      std::string label = "BB" + std::to_string(bb->id);
+      if (!bb->stmt_ids.empty()) {
+        label += "\\nstmt: ";
+        bool roll = true;
+        std::string temp = "";
+        for (size_t i = 0; i < bb->stmt_ids.size(); i++) {
+          temp += std::to_string(bb->stmt_ids[i]);
+          if (i > 0 && bb->stmt_ids[i] != bb->stmt_ids[i - 1] + 1) roll = false;
+          if (i + 1 < bb->stmt_ids.size()) temp += ",";
+        }
+        if (roll && bb->stmt_ids.size() > 1)
+          label += std::to_string(bb->stmt_ids.front()) + " ~ " +
+                   std::to_string(bb->stmt_ids.back());
+        else
+          label += temp;
+      }
+      if (bb->is_sync_point) label += "\\n(sync)";
+      if (bb->is_condition) label += "\\n(cond)";
+      if (bb->is_inthreads) label += "\\n(inthreads)";
+      if (bb->is_end) label += "\\n(end)";
+
+      ofs << "  " << bb->id << " [label=\"" << label << "\"];\n";
+
+      for (auto& succ : bb->succs)
+        ofs << "  " << bb->id << " -> " << succ->id << ";\n";
+    }
+
+    ofs << "}\n";
+    ofs.close();
+    dbgs() << "CFG written to " << filename << std::endl;
+  }
+}
+
 bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
   HandleStmtInAfter(n);
 
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << "\n" << stmts_with_indent.str() << "\n");
-    ComputeLiveInOut();
     ComputeLiveRange();
+    VST_DEBUG(DumpCfgToDot(bb_lists));
   } else if (auto w = dyn_cast<AST::Wait>(&n)) {
     auto FuturesOf = [&](const AST::Wait& n) {
       std::vector<ptr<AST::Node>> ret;
@@ -908,7 +1095,7 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
         RemoveBinding(fut_name, src);
       // since we will calculate live_in and live_out after visiting all the
       // nodes, we should record the binding info to do restoration in
-      // ComputeLiveInOut().
+      // ComputeLiveRange().
       stmt2binding_restore[&n] = fut_name;
     }
   } else if (isa<AST::InThreadsBlock>(&n)) {
@@ -920,7 +1107,6 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
 
 bool LivenessAnalyzer::Visit(AST::NamedTypeDecl& n) {
   TraceEachVisit(n);
-  // TODO: handle the case of named type decl
   AddDef(&n, n.name_str);
   AddUse(&n, GetAllSymbolicOperands(n.init_expr.get()));
   return true;
@@ -942,30 +1128,23 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
       AddUse(current_stmt, operands);
     }
   } else if (isa<StringType>(ty)) {
-    // TODO: handle the case of string type
-    assert(false && "not implemented yet.");
-  } else if (isa<IndexType>(ty)) {
-    // TODO: handle the case of index type
-    assert(false && "not implemented yet.");
+    choreo_unreachable("string variables are not supported yet.");
   } else if (isa<ITupleType>(ty)) {
     AddDef(current_stmt, n.name_str);
-    // TODO: arith between ituple?
     AddUse(current_stmt, GetAllSymbolicOperands(n.init_expr.get()));
-  } else if (isa<MDSpanType>(ty)) {
-    // TODO: handle the case of mdspan type
-    assert(false && "not implemented yet.");
   } else if (auto sty = dyn_cast<SpannedType>(ty)) {
     linfo[current_stmt].buffer_related = true;
     if (!IsRef(n)) {
       AddDef(current_stmt, n.name_str, true);
-      buffers.insert(InScopeName(n.name_str));
+      AddBuffer(InScopeName(n.name_str), sty->m_type);
     } else {
-      VST_DEBUG(dbgs() << "The nvd is a reference: " << STR(n) << ".\n\n");
+      VST_DEBUG(dbgs() << "The nvd is a reference: " << STR(n) << ".\n");
       assert(n.init_expr && "expecting the init_expr is not nullptr.");
       if (auto e = dyn_cast<AST::Expr>(n.init_expr)) {
         if (auto sa = dyn_cast<AST::SpanAs>(e->GetR())) {
           AddDef(current_stmt, n.name_str, true);
           AddUse(current_stmt, sa->id->name);
+          AddIsAlias(current_stmt, n.name_str);
           AddAlias(n.name_str, sa->id->name);
         } else {
           assert(false && "expecting the init_expr is a span_as.");
@@ -977,16 +1156,12 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
   } else if (isa<BoundedType>(ty)) {
     AddDef(current_stmt, n.name_str);
     AddUse(current_stmt, GetAllSymbolicOperands(n.init_expr.get()));
-  } else if (isa<FutureType>(ty)) {
-    // TODO: handle the case of future type
-    assert(false && "not implemented yet.");
   } else if (isa<EventType>(ty)) {
     AddDef(current_stmt, n.name_str);
   } else if (isa<VectorType>(ty)) {
     AddDef(current_stmt, n.name_str);
   } else {
-    assert(false && "expecting the type is spanned, scalar, string, index, "
-                    "ituple, or mdspan.");
+    choreo_unreachable("unexpect type of variable decl: " + PSTR(ty) + ".");
   }
   return true;
 }
@@ -994,10 +1169,17 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
 bool LivenessAnalyzer::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
+  auto HandleAnon = [&](const std::string name) {
+    if (PrefixedWith(name, "anon_"))
+      AddDef(current_stmt, name);
+    else
+      AddUse(current_stmt, name);
+  };
+
   if (auto sel = dyn_cast<AST::Select>(n.value)) {
-    // TODO: could be a select with non-span vars?
     HandleSelect(n, sel);
   } else if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
+    assert(CCtx().GetTarget() == CompileTarget::Factor);
     assert(IsRef(n) && "expecting the spanas assignment is a reference.");
     linfo[current_stmt].buffer_related = true;
     AddDef(current_stmt, n.GetName(), true);
@@ -1006,17 +1188,17 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
     AddAlias(n.GetName(), sa->id->name);
   } else {
     assert(!IsRef(n) && "expecting the assignment is not a reference.");
-    VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n)
-                     << ".\n\n");
+    VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n) << ".\n");
     if (n.AssignToDataElement())
       AddUse(current_stmt, n.GetDataArrayName());
     else
-      AddDef(current_stmt, n.GetName());
-    if (auto expr = dyn_cast<AST::Expr>(n.value)) {
-      VarSet operands = GetAllSymbolicOperands(expr.get());
+      HandleAnon(n.GetName());
+    if (isa<AST::Expr>(n.value)) {
+      VarSet operands = GetAllSymbolicOperands(n.value.get());
       AddUse(current_stmt, operands);
-    } else if (!isa<AST::Call>(n.value)) {
-      assert(false && "expecting the assignment value is an expr.");
+    } else if (isa<AST::Call>(n.value)) { // handle in AST::Call
+    } else {
+      choreo_unreachable("expecting the assignment value is an expr or call.");
     }
   }
   return true;
@@ -1060,8 +1242,8 @@ bool LivenessAnalyzer::Visit(AST::WithBlock& n) {
   if (n.reqs) {
     for (const auto& req : n.reqs->AllSubs()) {
       auto wb = cast<AST::WhereBind>(req);
-      // special case: if a symbol in where is def in with or with_matchers,
-      // ignore it. Because it is a use that after define.
+      // special case: if a symbol in where is defined in with or with_matchers,
+      // ignore it. Because it is a use that just after define.
       if (!def_set.count(AST::GetIdentifier(*wb->lhs)->name))
         AddUse(current_stmt, AST::GetIdentifier(*wb->lhs)->name);
       if (!def_set.count(AST::GetIdentifier(*wb->rhs)->name))
@@ -1075,10 +1257,10 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
   TraceEachVisit(n);
   linfo[current_stmt].buffer_related = true;
   /*
-  If the dma is sync, then only the dst buffer is alias to the future.
-  The src buffer can be reused immediately after the dma done.
+  If the dma is of sync, then only the dst buffer is alias to the future.
+  The src buffer can be reused immediately after the dma stmt.
 
-  If the dma is async, then the future is alias to the src buffer.
+  If the dma is of async, then the future is alias to both the src/dst buffers.
   The corresponding src buffer can be reused only after the future has been
   waited.
   */
@@ -1101,10 +1283,18 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     AddIsBinding(current_stmt, n.future);
     if (n.IsAsync()) AddBinding(n.future, n.FromSymbol());
     AddBinding(n.future, n.ToSymbol());
-    AddFut2Buffers(n.future, BufInfo{n.FromSymbol(), n.ToSymbol()});
+    AddFut2Buffers(n.future, DMABufInfo{n.FromSymbol(), n.ToSymbol()});
   }
 
   if (n.chained && n.chain_from != "") AddUse(current_stmt, n.chain_from);
+
+  if (auto pc = dyn_cast<PadConfig>(n.GetConfig())) {
+    for (const auto& mv : {pc->pad_low, pc->pad_high, pc->pad_mid})
+      for (const auto& v : mv->AllValues())
+        AddUse(current_stmt, GetAllSymbolicOperands(v.get()));
+    AddUse(current_stmt, GetAllSymbolicOperands(pc->GetPadValue().get()));
+  }
+
   return true;
 }
 
@@ -1117,16 +1307,8 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   for (auto tsi : n.AllOperations())
     for (const auto& pos : tsi->GetIndices()) {
       VST_DEBUG(dbgs() << "chunkat position: " << PSTR(pos) << ".\n");
-      if (auto expr = dyn_cast<AST::Expr>(pos)) {
-        VarSet operands = GetAllSymbolicOperands(expr.get());
-        AddUse(current_stmt, operands);
-      } else if (auto id = dyn_cast<AST::Identifier>(pos)) {
-        // ignore the __choreo_no_tiling__
-        if (id->name == "__choreo_no_tiling__") continue;
-        AddUse(current_stmt, id->name);
-      } else {
-        assert(false && "expecting the chunkat position is an expr.");
-      }
+      VarSet operands = GetAllSymbolicOperands(pos.get());
+      AddUse(current_stmt, operands);
     }
   return true;
 }
@@ -1159,7 +1341,7 @@ bool LivenessAnalyzer::Visit(AST::Wait& n) {
         name = AST::GetArrayBaseSymbol(*expr)->name;
       else
         name = AST::GetIdentifier(*item)->name;
-      AddUse(&n, name);
+      AddUse(current_stmt, name);
     }
   }
   return true;
@@ -1167,10 +1349,10 @@ bool LivenessAnalyzer::Visit(AST::Wait& n) {
 
 bool LivenessAnalyzer::Visit(AST::Call& n) {
   TraceEachVisit(n);
-  linfo[current_stmt].buffer_related = true;
   for (const auto& arg : n.GetArguments()) {
     auto sty = GetSpannedType(NodeType(*arg));
     if (sty) {
+      linfo[current_stmt].buffer_related = true;
       if (auto id = AST::GetIdentifier(*arg)) {
         AddUse(current_stmt, id->name);
       } else if (auto expr = dyn_cast<AST::Expr>(arg)) {
@@ -1193,18 +1375,8 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
         }
       }
     } else {
-      if (auto expr = dyn_cast<AST::Expr>(arg)) {
-        VarSet operands = GetAllSymbolicOperands(expr.get());
-        AddUse(current_stmt, operands);
-      } else if (isa<AST::StringLiteral>(arg)) {
-      } else {
-        VST_DEBUG({
-          dbgs() << "the argument is neither expr nor string literal: "
-                 << STR(*arg) << ".\n";
-          dbgs() << "its type is: " << AST::TYPE_STR(*arg) << ".\n";
-        });
-        assert(false && "expecting the argument is an expr.");
-      }
+      VarSet operands = GetAllSymbolicOperands(arg.get());
+      AddUse(current_stmt, operands);
     }
   }
   return true;
@@ -1228,7 +1400,7 @@ bool LivenessAnalyzer::Visit(AST::Rotate& n) {
       auto other_id = cast<AST::Identifier>(other);
       auto other_sname = InScopeName(other_id->name);
       if (other_sname == sname) continue;
-      for (const BufInfo& buf_info : fut2buffers[other_sname])
+      for (const DMABufInfo& buf_info : fut2buffers[other_sname])
         AddFut2Buffers(id->name, buf_info);
       AddBinding(id->name, other_id->name);
     }
@@ -1243,6 +1415,7 @@ bool LivenessAnalyzer::Visit(AST::Synchronize& n) {
   visiting_synchronize = true;
   for (const auto& [scope, vars] : async_inthreads_vars) {
     if (!PrefixedWith(scope, cur_scope)) continue;
+    // the scope of vars is inside cur_scope.
     /*
     {
       inthreads.async() { def x; ...}
@@ -1283,12 +1456,11 @@ bool LivenessAnalyzer::Visit(AST::Return& n) {
   TraceEachVisit(n);
   auto vty = NodeType(*n.value);
   if (isa<SpannedType>(vty)) {
+    linfo[current_stmt].buffer_related = true;
     if (auto id = AST::GetIdentifier(*n.value)) {
-      linfo[current_stmt].buffer_related = true;
       AddUse(current_stmt, id->name);
     } else if (auto expr = dyn_cast<AST::Expr>(n.value);
                expr && expr->op == "dataof") {
-      linfo[current_stmt].buffer_related = true;
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       AddUse(current_stmt, id->name);
@@ -1326,6 +1498,14 @@ bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
 bool LivenessAnalyzer::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
   AddUse(current_stmt, GetAllSymbolicOperands(n.pred.get()));
+
+  bb_list.push_back(cur_bb);
+  auto _then = AST::Make<BasicBlock>();
+  _then->id = cur_bb->id + 1;
+  ConnnectBB(cur_bb, _then);
+  it_bb_list.top()._then = _then;
+  cur_bb = _then;
+
   return true;
 }
 
@@ -1333,6 +1513,15 @@ bool LivenessAnalyzer::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
   VarSet operands = GetAllSymbolicOperands(n.pred.get());
   AddUse(current_stmt, operands);
+
+  assert(cur_bb && cur_bb == ie_bb_list.top()._if);
+  bb_list.push_back(cur_bb);
+  auto _then = AST::Make<BasicBlock>();
+  _then->id = bb_list.back()->id + 1;
+  ConnnectBB(bb_list.back(), _then);
+  ie_bb_list.top()._then = _then;
+  cur_bb = _then;
+
   return true;
 }
 

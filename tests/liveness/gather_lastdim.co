@@ -1,4 +1,4 @@
-// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+// RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
 
 __cok__ {
 #include "tcle.h"
@@ -385,8 +385,8 @@ int main() {
 
 // CHECK: (  0) foo(s32 mdspan<1> [128] off_buff_L3, s32 mdspan<2> [102400, 512] input, s32 mdspan<2> [102400, 512] id, s32 mdspan<1> [10] para) {
 // CHECK: (  1)   global s32 [ id.span ] output
-// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] {
-// CHECK: (  3)     parallel p = {p__elem__x} by [10] {
+// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] : block {
+// CHECK: (  3)     parallel p = {p__elem__x} by [10] : thread {
 // CHECK: (  4)       local s32 [ 1 512 ] output_L1
 // CHECK: (  5)       local s32 [ 128 ] off_buff
 // CHECK: (  6)       dma.copy off_buff_L3 => off_buff
@@ -411,45 +411,45 @@ int main() {
 // CHECK: ( 25) }
 
 // CHECK: BUFFER ::foo::id
-// CHECK:         range: [0, 23] 
+// CHECK:         range: [0, 20] 
 // CHECK: VAR    ::foo::id.span
-// CHECK:         range: [0, x] 
+// CHECK:         range: [0, 0] 
 // CHECK: BUFFER ::foo::input
-// CHECK:         range: [0, 23] 
+// CHECK:         range: [0, 20] 
 // CHECK: VAR    ::foo::input.span
-// CHECK:         range: [0, x] 
+// CHECK:         range: [0, 0] 
 // CHECK: BUFFER ::foo::off_buff_L3
-// CHECK:         range: [0, 23] 
+// CHECK:         range: [0, 6] 
 // CHECK: VAR    ::foo::off_buff_L3.span
-// CHECK:         range: [0, x] 
+// CHECK:         range: [0, 0] 
 // CHECK: BUFFER ::foo::para
-// CHECK:         range: [0, 23] 
+// CHECK:         range: [0, 8] 
 // CHECK: VAR    ::foo::para.span
-// CHECK:         range: [0, x] 
+// CHECK:         range: [0, 0] 
 // CHECK: BUFFER ::foo::output
 // CHECK:         range: [1, 24] 
 // CHECK: VAR    ::foo::output.span
-// CHECK:         range: [1, x] 
+// CHECK:         range: [1, 1] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::p
-// CHECK:         range: [3, 22] 
+// CHECK:         range: [3, 20] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::p__elem__x
-// CHECK:         range: [3, 22] 
+// CHECK:         range: [3, 20] 
 // CHECK: BUFFER ::foo::paraby_0::paraby_1::output_L1
 // CHECK:         range: [4, 20] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::output_L1.span
-// CHECK:         range: [4, x] 
+// CHECK:         range: [4, 4] 
 // CHECK: BUFFER ::foo::paraby_0::paraby_1::off_buff
 // CHECK:         range: [5, 20] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::off_buff.span
-// CHECK:         range: [5, x] 
+// CHECK:         range: [5, 5] 
 // CHECK: BUFFER ::foo::paraby_0::paraby_1::para_L1__buf__
 // CHECK:         range: [7, 20] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::para_L1__buf__.span
-// CHECK:         range: [7, x] 
+// CHECK:         range: [7, 7] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::para_L1
 // CHECK:         range: [8, 20] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::para_L1.span
-// CHECK:         range: [8, x] 
+// CHECK:         range: [8, 8] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::d0
 // CHECK:         range: [9, 20] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::d1
@@ -459,20 +459,20 @@ int main() {
 // CHECK: BUFFER ::foo::paraby_0::paraby_1::within_0::foreach_0::input_L1__buf__
 // CHECK:         range: [12, 17] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::input_L1__buf__.span
-// CHECK:         range: [12, x] 
+// CHECK:         range: [12, 12] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::input_L1
 // CHECK:         range: [13, 17] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::input_L1.span
-// CHECK:         range: [13, x] 
+// CHECK:         range: [13, 13] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::anon_1
 // CHECK:         range: [14, 16] 
 // CHECK: BUFFER ::foo::paraby_0::paraby_1::within_0::foreach_0::id_L1__buf__
 // CHECK:         range: [15, 17] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::id_L1__buf__.span
-// CHECK:         range: [15, x] 
+// CHECK:         range: [15, 15] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::id_L1
 // CHECK:         range: [16, 17] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::id_L1.span
-// CHECK:         range: [16, x] 
+// CHECK:         range: [16, 16] 
 // CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::anon_2
 // CHECK:         range: [18, 19]

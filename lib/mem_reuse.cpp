@@ -170,52 +170,36 @@ void MemReuse::Initialize() {
     }
     // TODO: local event?
 
-    auto ranges = var_ranges.at(sname);
-    if (ranges.Values().size() == 0) {
+    const auto& ranges = var_ranges.at(sname);
+    if (ranges.Values().size() == 1 &&
+        ranges.front().start == ranges.front().end) {
       VST_DEBUG(dbgs() << "Warning: buffer " << sname << " is never used!\n");
-    }
-    // For now, there is no case that a var is used in multiple ranges.
-    // Because there is no reassignment.
-    if (ranges.Values().size() > 1) {
-      VST_DEBUG({
-        dbgs() << "Warning: buffer " << sname
-               << " is used in multiple ranges:\n";
-        for (const auto& r : ranges.Values())
-          dbgs() << "\t[" << r.start << ", " << r.end << "]\n";
-      });
-      choreo_unreachable("multiple ranges for a buffer is not supported yet.");
     }
     std::string dev_func_name = GetDeclDevFuncOfBuffer(sname);
     if (auto sv = VIInt(size))
       DFCtx(dev_func_name)
-          .buffers.push_back({.size = (size_t)sv.value(),
-                              .start_time = ranges.Values()[0].start,
-                              .end_time = ranges.Values()[0].end,
-                              .buffer_id = sname});
+          .buffers.push_back(Buffer{.size = (size_t)sv.value(),
+                                    .ranges = ranges.Values(),
+                                    .buffer_id = sname});
     else
       DFCtx(dev_func_name)
-          .dynamic_buffers.push_back({.size = STR(size),
-                                      .start_time = ranges.Values()[0].start,
-                                      .end_time = ranges.Values()[0].end,
-                                      .buffer_id = sname});
+          .dynamic_buffers.push_back(DBuffer{.size = STR(size),
+                                             .ranges = ranges.Values(),
+                                             .buffer_id = sname});
   }
-
+  for (auto& [df_name, ctx] : DFCtxs()) ctx.SortBuffers();
   VST_DEBUG({
-    for (const auto& [df_name, ctx] : DFCtxs()) {
+    for (auto& [df_name, ctx] : DFCtxs()) {
       dbgs() << "For '" << df_name << "'\n";
       for (const auto& buffer : ctx.buffers) {
-        dbgs() << "static  buffer: " << buffer.buffer_id << "\n\t"
-               << STR(ma.buf_sto.at(buffer.buffer_id))
-               << ", size: " << buffer.size
-               << ", start_time: " << buffer.start_time
-               << ", end_time: " << buffer.end_time << "\n";
+        dbgs() << "\tstatic  buffer: " << buffer.buffer_id << "\n\t\t"
+               << STR(ma.buf_sto.at(buffer.buffer_id)) << ", " << buffer.size
+               << " bytes, " << RangesSTR(buffer.ranges) << "\n";
       }
       for (const auto& buffer : ctx.dynamic_buffers) {
-        dbgs() << "dynamic buffer: " << buffer.buffer_id << "\n\t"
-               << STR(ma.buf_sto.at(buffer.buffer_id))
-               << ", size: " << buffer.size
-               << ", start_time: " << buffer.start_time
-               << ", end_time: " << buffer.end_time << "\n";
+        dbgs() << "\tdynamic buffer: " << buffer.buffer_id << "\n\t\t"
+               << STR(ma.buf_sto.at(buffer.buffer_id)) << ", " << buffer.size
+               << " bytes, " << RangesSTR(buffer.ranges) << "\n";
       }
     }
   });
@@ -230,11 +214,10 @@ void MemReuse::AnalyzeMemOffset() {
       std::string co_func_name = GetFuncNameFromScopedName(df_name);
       // TODO: check that no pb, but dynamic
       if (df_name == co_func_name) continue;
-      if (!idx_count.count(co_func_name)) {
+      if (!idx_count.count(co_func_name))
         idx_count[co_func_name] = 0;
-      } else {
+      else
         idx_count[co_func_name] += 1;
-      }
       df_name_idx[df_name] = std::to_string(idx_count[co_func_name]);
     }
   }
@@ -275,22 +258,18 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
           infos[sto].chunks_name = "__co__" + STR(sto) + "_chunks" + idx_suffix;
         }
         std::string buffer_size;
-        bool buffer_size_is_str = false;
-        if constexpr (std::is_same_v<decltype(buffer.size), std::string>) {
-          buffer_size_is_str = true;
-          buffer_size = UnScopedExpr(buffer.size);
-        } else if constexpr (std::is_same_v<decltype(buffer.size), size_t>)
+        if constexpr (std::is_same_v<decltype(buffer.size), std::string>)
+          buffer_size =
+              "static_cast<size_t>(" + UnScopedExpr(buffer.size) + ")";
+        else if constexpr (std::is_same_v<decltype(buffer.size), size_t>)
           buffer_size = UnScopedExpr(std::to_string(buffer.size));
         else
           choreo_unreachable("Unexpected type of buffer.size: " +
                              std::string(typeid(buffer.size).name()) +
                              "\n\twith buffer " + buffer.buffer_id);
         infos[sto].chunks.push_back(
-            std::string("{") +
-            (buffer_size_is_str ? "static_cast<size_t>(" : "") + buffer_size +
-            (buffer_size_is_str ? ")" : "") + ", " +
-            std::to_string(buffer.start_time) + ", " +
-            std::to_string(buffer.end_time) + ", \"" +
+            std::string("{") + buffer_size + ", " + "{" +
+            RangesSTR(buffer.ranges, '{', '}') + "}" + ", \"" +
             RegexReplaceAll(buffer.buffer_id, "::", "_") + "\"}");
       }
     };
@@ -380,7 +359,7 @@ bool MemReuse::ValidateResult(const HeapSimulator::Result& res,
       if (i == j) continue;
       const auto& c1 = chunks[i];
       const auto& c2 = chunks[j];
-      if (c1.start_time <= c2.end_time && c2.start_time <= c1.end_time) {
+      if (c1.Interfere(c2)) {
         auto o1 = res.chunk_offsets.at(c1.buffer_id);
         auto o2 = res.chunk_offsets.at(c2.buffer_id);
         if ((o1 <= o2 && o1 + c1.size > o2) ||

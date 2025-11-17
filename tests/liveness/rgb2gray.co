@@ -1,4 +1,4 @@
-// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+// RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
 
 __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
   f32 [N, H, W] out;
@@ -26,8 +26,8 @@ __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
 
 // CHECK: (  0) rgb2gray(f32 mdspan<4> [::rgb2gray::N, 3, ::rgb2gray::H, ::rgb2gray::W] input) {
 // CHECK: (  1)   global f32 [ N H W ] out
-// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] {
-// CHECK: (  3)     parallel q = {q__elem__x} by [6] {
+// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] : block {
+// CHECK: (  3)     parallel q = {q__elem__x} by [6] : thread {
 // CHECK: (  4)       with index = {n, c, h, w} in  ([ N 3 H W ] / { (ubound q) , 3, 16, 512})  {
 // CHECK: (  5)         foreach n(::), h(::) {
 // CHECK: (  6)           anon_0 =  (q # n) 
@@ -58,29 +58,29 @@ __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
 // CHECK: ( 31) }
 
 // CHECK: VAR    ::rgb2gray::H
-// CHECK:         range: [0, 29] 
+// CHECK:         range: [0, 4] 
 // CHECK: VAR    ::rgb2gray::N
-// CHECK:         range: [0, 29] 
+// CHECK:         range: [0, 4] 
 // CHECK: VAR    ::rgb2gray::W
-// CHECK:         range: [0, 29] 
+// CHECK:         range: [0, 4] 
 // CHECK: BUFFER ::rgb2gray::input
-// CHECK:         range: [0, 29] 
+// CHECK:         range: [0, 26] 
 // CHECK: VAR    ::rgb2gray::input.span
-// CHECK:         range: [0, x] 
+// CHECK:         range: [0, 0] 
 // CHECK: BUFFER ::rgb2gray::out
 // CHECK:         range: [1, 30] 
 // CHECK: VAR    ::rgb2gray::out.span
-// CHECK:         range: [1, x] 
+// CHECK:         range: [1, 1] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::q
-// CHECK:         range: [3, 28] 
+// CHECK:         range: [3, 26] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::q__elem__x
-// CHECK:         range: [3, 28] 
+// CHECK:         range: [3, 26] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::c
 // CHECK:         range: [4, 26] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::h
 // CHECK:         range: [4, 26] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::index
-// CHECK:         range: [4, x] 
+// CHECK:         range: [4, 4] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::n
 // CHECK:         range: [4, 26] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::w
@@ -90,23 +90,23 @@ __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
 // CHECK: BUFFER ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::input_L1_A__buf__
 // CHECK:         range: [7, 23] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::input_L1_A__buf__.span
-// CHECK:         range: [7, x] 
+// CHECK:         range: [7, 7] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::input_L1_A
 // CHECK:         range: [8, 23] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::input_L1_A.span
-// CHECK:         range: [8, x] 
+// CHECK:         range: [8, 8] 
 // CHECK: BUFFER ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::input_L1_B__buf__
 // CHECK:         range: [9, 23] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::input_L1_B__buf__.span
-// CHECK:         range: [9, x] 
+// CHECK:         range: [9, 9] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::input_L1_B
 // CHECK:         range: [10, 23] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::input_L1_B.span
-// CHECK:         range: [10, x] 
+// CHECK:         range: [10, 10] 
 // CHECK: BUFFER ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::out_L1
 // CHECK:         range: [11, 25] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::out_L1.span
-// CHECK:         range: [11, x] 
+// CHECK:         range: [11, 11] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::anon_1
 // CHECK:         range: [12, 21] 
 // CHECK: VAR    ::rgb2gray::paraby_0::paraby_1::within_0::foreach_0::foreach_1::anon_2

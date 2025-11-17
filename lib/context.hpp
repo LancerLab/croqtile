@@ -261,11 +261,17 @@ private:
   struct MemReuseInfo {
     std::string simulator;
     struct InfoEntry {
+      // the name of chunks vector
       std::string chunks_name;
+      // the live ranges of each chunk
       std::vector<std::string> chunks;
+      // result of HeapSimulator
       std::string result;
+      // name of offset array
       std::string offsets_name;
+      // offset names in device func
       std::vector<std::string> offset_args;
+      // var of spm size
       std::string spm_size;
     };
     std::map<Storage, InfoEntry> infos;

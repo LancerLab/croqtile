@@ -19,14 +19,14 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   /*
   live_in(n)  = use(n) U (live_out(n) - def(n)) U
-  (transitive_closure({bindings[x] for x in use(n)})). live_out(n) =
+                  (transitive_closure({bindings[x] for x in use(n)})).
   live_in(next node). Since there is no branching in co.
+  TODO: live_out(n) = U of live_in(s) for all s in Succ(n)
 
   def of mem buffer
     can only be in NamedVariableDecl after norm.
-    Assignment: reference not def!
   use of mem buffer(not shape)
-    scalar:  x. Scalar cannot be assigned as the value in mem buffer.
+    scalar:  use. sv = buffer.at(...)
     SpanAs:  use. only change the shape of mem buffer, as ref.
     ChunkAt: use. Inside DMA. Whether used as src or dst.
     Wait:    use. Wait the DMA. The buffer is reusable when the Wait is done.
@@ -36,7 +36,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     Return:  use.
     Assignment:   use. rhs: spanas, select.
     FunctionDecl: use. But the buffers are Global buffers.
-    NamedVariableDecl: use if it is a ref.
 
   In fact, memory reuse does not have to take scope into account.
   The whole scratch pad is tentatively defined at the beginning of co
@@ -51,13 +50,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   add use in the last stmt of scope A::B.
   but there is another use in scope A later.
   so the live range is still [def point, the second use]
-
-  def in scope A
-    def in scope A::B
-    use in scope A
-    because we may of may not enter scope A::B
-    so should pick def in scope A as the begin of live range
-    just find the def inside the current scope or outer scope!
   */
 
   // Certain types of nodes are treated as statements.
@@ -90,28 +82,32 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   std::unordered_map<std::string, std::vector<Event>> var_events;
 
-  size_t stmt_number = 0; // only preorder.
+  size_t stmt_id = 0; // only preorder.
   // map from stmt to its index in preorder_stmts.
-  std::unordered_map<const Stmt*, size_t> stmt2number;
+  std::unordered_map<const Stmt*, size_t> stmt2id;
   std::vector<const Stmt*> preorder_stmts;
   std::unordered_map<const Stmt*, std::string> stmt2str;
 
   std::stringstream stmts_with_indent;
 
-#if 0
-  using BufSet = std::unordered_set<std::string>;
-  using VarSet = std::unordered_set<std::string>;
-  using BufNodes = std::unordered_set<AST::Node*>;
-#else
   using BufSet = std::set<std::string>;
   using VarSet = std::set<std::string>;
-  using BufNodes = std::set<AST::Node*>;
-#endif
-
-  BufSet buffers;
-
-  // use and def of vars about memory buffer. var can be future or buffer.
-  std::unordered_map<std::string, BufSet> var2buf;
+  BufSet buffers, lbuffers, sbuffers, gbuffers;
+  void AddBuffer(const std::string& sname, Storage sto) {
+    buffers.insert(sname);
+    switch (sto) {
+    case Storage::LOCAL: lbuffers.insert(sname); break;
+    case Storage::SHARED: sbuffers.insert(sname); break;
+    case Storage::GLOBAL: [[fallthrough]];
+    case Storage::DEFAULT: gbuffers.insert(sname); break;
+    default: choreo_unreachable("unexpect storage: " + STR(sto));
+    }
+  }
+  std::string GetFuncNameFromScopedName(const std::string& name) const {
+    // indicate that it is a co function name
+    if (!PrefixedWith(name, "::")) return name;
+    return SplitStringByDelimiter(name, "::", true)[0];
+  }
 
   // one to one. Alias of buffer. Could happen in spanas, etc.
   std::unordered_map<std::string, std::string> Alias;
@@ -121,8 +117,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   // record the binding info to do restoration in ComputeLiveInOut().
   std::unordered_map<const Stmt*, std::string> stmt2binding_restore;
-
-  std::unordered_map<size_t, location> idx2loc;
 
   std::unordered_set<std::string> paraby_bounded_vars;
 
@@ -141,9 +135,11 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   };
   std::unordered_map<const Stmt*, LivenessInfo> linfo;
 
-  using BufInfo = std::pair<std::string, std::string>;
-  std::unordered_map<std::string, std::set<BufInfo>> fut2buffers;
+  using DMABufInfo = std::pair<std::string, std::string>;
+  std::unordered_map<std::string, std::set<DMABufInfo>> fut2buffers;
   using StrUintMap = std::unordered_map<std::string, size_t>;
+
+  VarSet dma_any;
 
   struct Range {
     size_t start;
@@ -151,6 +147,12 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
     bool Overlaps(const Range& other) const {
       return start <= other.end && end >= other.start;
+    }
+
+    // [1,3] vs [4,8], same mask
+    bool BeforeAdjacent(const Range& other) const {
+      assert(start <= other.start);
+      return end + 1 == other.start;
     }
 
     bool operator<(const Range& other) const {
@@ -167,12 +169,12 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
     void Merge() {
       if (ranges.empty()) return;
-      std::sort(ranges.begin(), ranges.end());
+      Sort();
       std::vector<Range> merged;
       merged.push_back(ranges[0]);
       for (size_t i = 1; i < ranges.size(); ++i) {
         Range& back = merged.back();
-        if (back.Overlaps(ranges[i]))
+        if (back.BeforeAdjacent(ranges[i]))
           back.end = std::max(back.end, ranges[i].end);
         else
           merged.push_back(ranges[i]);
@@ -186,23 +188,78 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
       return ranges.front().start < other.ranges.front().start;
     }
 
+    std::vector<Range>& Values() { return ranges; }
     const std::vector<Range>& Values() const { return ranges; }
+
+    const Range& front() const {
+      assert(!ranges.empty());
+      return ranges.front();
+    }
+
+    void Sort() {
+      std::sort(
+          ranges.begin(), ranges.end(),
+          [&](const Range& a, const Range& b) { return a.start < b.start; });
+    }
   };
 
+  std::unordered_map<std::string, Ranges> var_ranges;
+
+  // BB graph related begin
+  struct BasicBlock {
+    size_t id = 0;
+    std::vector<size_t> stmt_ids;
+    std::vector<ptr<BasicBlock>> succs;
+    std::vector<ptr<BasicBlock>> preds;
+    bool is_sync_point = false;
+    bool is_condition = false;
+    bool is_inthreads = false;
+    bool is_end = false;
+  };
+  using BB = BasicBlock;
+  inline void ConnnectBB(ptr<BB> x, ptr<BB> y) {
+    x->succs.push_back(y);
+    y->preds.push_back(x);
+  }
+  std::vector<ptr<BB>> bb_list;
+  std::unordered_map<const Stmt*, ptr<BB>> stmt2bb;
+  ptr<BB> cur_bb = nullptr;
+  // fname -> bb_list
+  std::map<std::string, std::vector<ptr<BB>>> bb_lists;
+
+  inline bool ShouldNewBB(const AST::Node& n) {
+    return isa<AST::ParallelBy>(&n) || isa<AST::Synchronize>(&n) ||
+           isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
+           isa<AST::ChoreoFunction>(&n);
+  }
+
+  struct IfElseBBs {
+    ptr<BB> _if;
+    ptr<BB> _then = nullptr;
+    ptr<BB> _else = nullptr;
+    ptr<BB> _end = nullptr;
+  };
+  std::stack<IfElseBBs> ie_bb_list;
+  struct InThreadsBBs {
+    ptr<BB> _it;
+    ptr<BB> _then = nullptr;
+    ptr<BB> _end = nullptr;
+  };
+  std::stack<InThreadsBBs> it_bb_list;
+  std::map<ptr<BB>, ptr<BB>> end2cond;
+
+  // BB graph related end
   LivenessAnalyzer() : VisitorWithSymTab("liveness") {
     if (trace_visit) debug_visit = true; // force debug when tracing
-    // cause --liveness is enabled by default.
     if (disabled) CCtx().SetLivenessAnalysis(false);
   }
   ~LivenessAnalyzer() {}
 
-  std::unordered_map<std::string, Ranges> var_ranges;
-
-  VarSet dma_any;
-
 public:
   static VarSet SetUnion(const VarSet& a, const VarSet& b);
   static VarSet SetDiff(const VarSet& a, const VarSet& b);
+  static VarSet& SetUnionInPlace(VarSet& a, const VarSet& b);
+  static VarSet& SetDiffInPlace(VarSet& a, const VarSet& b);
   static bool IsRef(const AST::Node& n);
 
 private:
@@ -221,13 +278,12 @@ private:
   void AddIsBinding(const Stmt* s, const std::string& bind_res);
   void AddBinding(const std::string& bind_res, const std::string& bind_src);
   void RemoveBinding(const std::string& bind_res, const std::string& bind_src);
-  void AddFut2Buffers(const std::string& fut, const BufInfo& buf_info);
+  void AddFut2Buffers(const std::string& fut, const DMABufInfo& buf_info);
   void AddAsyncInthreadsVar(const std::string& scope_name,
                             const std::string& var);
-  void ComputeLiveInOut();
   void ComputeLiveRange();
   void HandleSelect(AST::Node& n, ptr<AST::Select> sel);
-  // handle stmt in Before/AfterVisitImpl
+  // handle stmt in Before/Mid/After VisitImpl
   void HandleStmtInBefore(AST::Node& n);
   void HandleStmtInMid(AST::Node& n);
   void HandleStmtInAfter(AST::Node& n);

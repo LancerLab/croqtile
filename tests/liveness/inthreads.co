@@ -1,4 +1,4 @@
-// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines --check-prefix=LIVENESS %s
+// RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines --check-prefix=LIVENESS %s
 
 #include "choreo.h"
 
@@ -88,8 +88,8 @@ int main()
 
 // LIVENESS: (  0) mem_reuse0(u8 mdspan<3> [512, 512, 1] i0, u8 mdspan<3> [512, 512, 1] i1) {
 // LIVENESS: (  1)   global u8 [ 512 512 (1 * 2)  ] output
-// LIVENESS: (  2)   parallel p = {p__elem__x} by [1] {
-// LIVENESS: (  3)     parallel q = {q__elem__x} by [2] {
+// LIVENESS: (  2)   parallel p = {p__elem__x} by [1] : block {
+// LIVENESS: (  3)     parallel q = {q__elem__x} by [2] : thread {
 // LIVENESS: (  4)       with idx = {idx__elem__0, idx__elem__1, idx__elem__2} in [ 2 1 1 ] {
 // LIVENESS: (  5)         foreach idx(::) {
 // LIVENESS: (  6)           shared u8 [ (output.span /  (ubound idx) )  ] s0
@@ -122,9 +122,9 @@ int main()
 // LIVENESS: ( 33) }
 
 // LIVENESS: BUFFER ::mem_reuse0::i0
-// LIVENESS-NEXT: 	range: [0, 31] 
+// LIVENESS-NEXT: 	range: [0, 28] 
 // LIVENESS: BUFFER ::mem_reuse0::i1
-// LIVENESS-NEXT: 	range: [0, 31] 
+// LIVENESS-NEXT: 	range: [0, 28] 
 // LIVENESS: BUFFER ::mem_reuse0::output
 // LIVENESS-NEXT: 	range: [1, 32] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s0

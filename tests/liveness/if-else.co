@@ -1,0 +1,109 @@
+// RUN: choreo -es -t topscc -dv=liveness %s | FileCheck --match-full-lines %s
+// RUN: choreo -es -t topscc -dv=memreuse %s | FileCheck --match-full-lines --check-prefix=MEMREUSE %s
+
+#include "choreo.h"
+
+#define N 64
+
+__co__ auto foo(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 1 {
+    shared f32[N] ss{3.0f};
+    if (x > 50) {
+      double ff = 1.5;
+      shared f32[N] ll{5.0f};
+      dma.copy ll => o;
+    } else {
+      res = dma.copy ss => local;
+      dma.copy res => o;
+    }
+  }
+  return o;
+}
+
+__co__ auto bar(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 1 {
+    shared f32[N] ss{3.0f};
+    if (x > 50) {
+      double ff = 1.5;
+      shared f32[N] ll{5.0f};
+      dma.copy ll => o;
+    } else {
+      res = dma.copy ss => local;
+      dma.copy res => o;
+    }
+    dma.copy ss => local;
+  }
+  return o;
+}
+
+int main() {
+  auto res = foo(51);
+  for(int i=0; i<res.shape()[0]; ++i) {
+    std::cout << res[i] << ' ';
+  }
+  std::cout << "\n";
+  return 0;
+}
+
+// CHECK: (  0) foo(s32 x) {
+// CHECK: (  1)   global f32 [ 64 ] o = {0.000000f}
+// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] : block {
+// CHECK: (  3)     parallel p = {p__elem__x} by [1] : thread {
+// CHECK: (  4)       shared f32 [ 64 ] ss = {3.000000f}
+// CHECK: (  5)       if  (x > 50)  {
+// CHECK: (  6)         mutable f64 ff = 1.500000
+// CHECK: (  7)         shared f32 [ 64 ] ll = {5.000000f}
+// CHECK: (  8)         dma.copy ll => o
+// CHECK: (  9)       }
+// CHECK: ( 10)       else {
+// CHECK: ( 11)         local f32 mdspan<1> [64] res__buf__
+// CHECK: ( 12)         res = dma.copy ss => res__buf__
+// CHECK: ( 13)         dma.copy res => o
+// CHECK: ( 14)       }
+// CHECK: ( 15)     }
+// CHECK: ( 16)   }
+// CHECK: ( 17)   return o
+// CHECK: ( 18) }
+// CHECK: ( 19) bar(s32 x) {
+// CHECK: ( 20)   global f32 [ 64 ] o = {0.000000f}
+// CHECK: ( 21)   parallel anon_pb_1 = {anon_pb_1__elem__x} by [1] : block {
+// CHECK: ( 22)     parallel p = {p__elem__x} by [1] : thread {
+// CHECK: ( 23)       shared f32 [ 64 ] ss = {3.000000f}
+// CHECK: ( 24)       if  (x > 50)  {
+// CHECK: ( 25)         mutable f64 ff = 1.500000
+// CHECK: ( 26)         shared f32 [ 64 ] ll = {5.000000f}
+// CHECK: ( 27)         dma.copy ll => o
+// CHECK: ( 28)       }
+// CHECK: ( 29)       else {
+// CHECK: ( 30)         local f32 mdspan<1> [64] res__buf__
+// CHECK: ( 31)         res = dma.copy ss => res__buf__
+// CHECK: ( 32)         dma.copy res => o
+// CHECK: ( 33)       }
+// CHECK: ( 34)       local f32 mdspan<1> [64] anon_0
+// CHECK: ( 35)       dma.copy ss => anon_0
+// CHECK: ( 36)     }
+// CHECK: ( 37)   }
+// CHECK: ( 38)   return o
+// CHECK: ( 39) }
+
+// CHECK: BUFFER ::foo::paraby_0::paraby_1::ss
+// CHECK: 	range: [4, 5]  [10, 12] 
+
+// CHECK: BUFFER ::bar::paraby_2::paraby_3::ss
+// CHECK: 	range: [23, 35] 
+
+// MEMREUSE: shared buffer: ::foo::paraby_0::paraby_1::ss
+// MEMREUSE: 	using spm:   anon_1
+// MEMREUSE: 	with offset: 0
+// MEMREUSE: shared buffer: ::foo::paraby_0::paraby_1::cond_if_0::ll
+// MEMREUSE: 	using spm:   anon_1
+// MEMREUSE: 	with offset: 0
+
+// MEMREUSE: shared buffer: ::bar::paraby_2::paraby_3::ss
+// MEMREUSE: 	using spm:   anon_3
+// MEMREUSE: 	with offset: 0
+// MEMREUSE: shared buffer: ::bar::paraby_2::paraby_3::cond_if_1::ll
+// MEMREUSE: 	using spm:   anon_3
+// MEMREUSE: 	with offset: 512

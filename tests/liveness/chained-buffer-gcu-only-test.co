@@ -1,4 +1,4 @@
-// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+// RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 
@@ -69,13 +69,13 @@ int main() { /// host program
 
 // CHECK: (  0) relu(f32 mdspan<2> [512, 1024] input) {
 // CHECK: (  1)   global f32 [ input.span(0) input.span(1) ] output
-// CHECK: (  2)   parallel p = {p__elem__x} by [2] {
+// CHECK: (  2)   parallel p = {p__elem__x} by [2] : block {
 // CHECK: (  3)     with index = {n_tile} in [ 16 ] {
 // CHECK: (  4)       foreach n_tile(::) {
 // CHECK: (  5)         shared f32 [ (input.span(0) /  (ubound p) )  (input.span(1) /  (ubound n_tile) )  ] l2_out
 // CHECK: (  6)         shared f32 mdspan<2> [256, 64] input_load__buf__
 // CHECK: (  7)         input_load = dma.copy.async input.ChunkAt(p, n_tile) => input_load__buf__, chain_to input_load_s
-// CHECK: (  8)         parallel q = {q__elem__x} by [1] {
+// CHECK: (  8)         parallel q = {q__elem__x} by [1] : thread {
 // CHECK: (  9)           local f32 mdspan<2> [256, 64] input_load_s__buf__
 // CHECK: ( 10)           input_load_s = dma.copy.async input_load => input_load_s__buf__, chain_from input_load
 // CHECK: ( 11)           local f32 mdspan<2> [256, 64] out_load_s__buf__
@@ -94,58 +94,58 @@ int main() { /// host program
 // CHECK: ( 24) }
 
 // CHECK: BUFFER ::relu::input
-// CHECK:         range: [0, 22] 
+// CHECK:         range: [0, 20] 
 // CHECK: VAR    ::relu::input.span
-// CHECK:         range: [0, x] 
+// CHECK:         range: [0, 0] 
 // CHECK: BUFFER ::relu::output
 // CHECK:         range: [1, 23] 
 // CHECK: VAR    ::relu::output.span
-// CHECK:         range: [1, x] 
+// CHECK:         range: [1, 1] 
 // CHECK: VAR    ::relu::paraby_0::p
-// CHECK:         range: [2, 22] 
+// CHECK:         range: [2, 20] 
 // CHECK: VAR    ::relu::paraby_0::p__elem__x
-// CHECK:         range: [2, 22] 
+// CHECK:         range: [2, 20] 
 // CHECK: VAR    ::relu::paraby_0::within_0::index
-// CHECK:         range: [3, x] 
+// CHECK:         range: [3, 3] 
 // CHECK: VAR    ::relu::paraby_0::within_0::n_tile
 // CHECK:         range: [3, 20] 
 // CHECK: BUFFER ::relu::paraby_0::within_0::foreach_0::l2_out
 // CHECK:         range: [5, 19] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::l2_out.span
-// CHECK:         range: [5, x] 
+// CHECK:         range: [5, 5] 
 // CHECK: BUFFER ::relu::paraby_0::within_0::foreach_0::input_load__buf__
-// CHECK:         range: [6, 17] 
+// CHECK:         range: [6, 13] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::input_load__buf__.span
-// CHECK:         range: [6, x] 
+// CHECK:         range: [6, 6] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::input_load
-// CHECK:         range: [7, 17] 
+// CHECK:         range: [7, 13] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::input_load.span
-// CHECK:         range: [7, x] 
+// CHECK:         range: [7, 7] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::q
-// CHECK:         range: [8, 17] 
+// CHECK:         range: [8, 8] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::q__elem__x
-// CHECK:         range: [8, 17] 
+// CHECK:         range: [8, 8] 
 // CHECK: BUFFER ::relu::paraby_0::within_0::foreach_0::paraby_1::input_load_s__buf__
 // CHECK:         range: [9, 14] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::input_load_s__buf__.span
-// CHECK:         range: [9, x] 
+// CHECK:         range: [9, 9] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::input_load_s
 // CHECK:         range: [10, 14] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::input_load_s.span
-// CHECK:         range: [10, x] 
+// CHECK:         range: [10, 10] 
 // CHECK: BUFFER ::relu::paraby_0::within_0::foreach_0::paraby_1::out_load_s__buf__
 // CHECK:         range: [11, 16] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_load_s__buf__.span
-// CHECK:         range: [11, x] 
+// CHECK:         range: [11, 11] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_load_s
 // CHECK:         range: [12, 16] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_load_s.span
-// CHECK:         range: [12, x] 
+// CHECK:         range: [12, 12] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_store_s
 // CHECK:         range: [15, 16] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_store_s.span
-// CHECK:         range: [15, x] 
+// CHECK:         range: [15, 15] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::out_store
 // CHECK:         range: [18, 19] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::out_store.span
-// CHECK:         range: [18, x]
+// CHECK:         range: [18, 18]

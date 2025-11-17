@@ -913,13 +913,19 @@ auto copy_as_spanned(T* ptr, const mdspan<Rank> dims) {
 }
 
 struct HeapSimulator {
-public:
-  struct Chunk {
+  using Range = std::pair<size_t, size_t>;
+  struct Buffer {
     size_t size;
-    size_t start_time;
-    size_t end_time;
+    std::vector<Range> ranges;
     std::string buffer_id;
+    bool Interfere(const Buffer& other) const {
+      for (const auto& [as, ae] : this->ranges)
+        for (const auto& [bs, be] : other.ranges)
+          if (as <= be && bs <= ae) return true;
+      return false;
+    }
   };
+  using Chunk = Buffer;
   using Chunks = std::vector<Chunk>;
 
   // memory allocation result
@@ -935,7 +941,7 @@ public:
     Result result;
     result.heap_size = 0;
 
-    size_t size = chunks.size();
+    size_t length = chunks.size();
 
     auto AlignUp = [alignment](size_t x) -> size_t {
       if (alignment == 0) return x;
@@ -951,24 +957,21 @@ public:
     // build interference graph - represent which buffers' lifetime overlap
     // TODO: O(n^2) maybe can be optimized
     std::vector<std::vector<bool>> interference_graph(
-        size, std::vector<bool>(size, false));
+        length, std::vector<bool>(length, false));
 
-    for (size_t i = 0; i < size; ++i) {
-      for (size_t j = i + 1; j < size; ++j) {
-        if (sorted_chunks[i].start_time <= sorted_chunks[j].end_time &&
-            sorted_chunks[j].start_time <= sorted_chunks[i].end_time) {
+    for (size_t i = 0; i < length; ++i)
+      for (size_t j = i + 1; j < length; ++j)
+        if (sorted_chunks[i].Interfere(sorted_chunks[j])) {
           interference_graph[i][j] = true;
           interference_graph[j][i] = true;
         }
-      }
-    }
 
     // assign space for each buffer
     std::map<size_t, size_t> assigned_offsets;
 
     using Range = std::pair<size_t, size_t>;
 
-    for (size_t i = 0; i < size; ++i) {
+    for (size_t i = 0; i < length; ++i) {
       const Chunk& chunk = sorted_chunks[i];
 
       // collect the allocated regions that overlap with the current buffer

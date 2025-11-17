@@ -3266,7 +3266,8 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
   size_t idx = 0;
   std::ostringstream oss;
   size_t operand_cnt = 0;
-  auto AppendOffset = [this, &oss, &shape, &idx, &operand_cnt](const ValueItem& op) {
+  auto AppendOffset = [this, &oss, &shape, &idx,
+                       &operand_cnt](const ValueItem& op) {
     auto offset = op;
     assert(shape.Rank() >= idx + 1);
     if (shape.Rank() > idx + 1)

@@ -1,0 +1,82 @@
+#include "choreo.h"
+
+#define N 64
+
+__co__ auto foo0(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 2 : shared {
+    parallel q by 2 : local {
+      shared f32[10] sa;
+      shared f32[10] sb;
+      inthreads(p < 1) {
+        call fff(sa);
+      }
+      inthreads(p >= 1) {
+        call fff(sb);
+      }
+    }
+  }
+  return o;
+}
+// a and b are both with specific block mask.
+// CHECK: BUFFER ::foo0::paraby_0::paraby_1::sa
+// CHECK: 	range: [4, 7, {{'0*1'}}]
+// CHECK: VAR    ::foo0::paraby_0::paraby_1::sa.span
+// CHECK: 	range: [4, 4] 
+// CHECK: BUFFER ::foo0::paraby_0::paraby_1::sb
+// CHECK: 	range: [5, 10, {{'0*10'}}]
+// MEMREUSE: shared buffer: ::foo0::paraby_0::paraby_1::sa
+// MEMREUSE: 	using spm:   anon_0
+// MEMREUSE: 	with offset: 0
+// MEMREUSE: shared buffer: ::foo0::paraby_0::paraby_1::sb
+// MEMREUSE: 	using spm:   anon_0
+// MEMREUSE: 	with offset: 0
+
+__co__ auto foo1(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 2 : shared {
+    parallel q by 2 : local {
+      inthreads(p < 1) {
+        shared f32[10] sa;
+        call fff(sa);
+      }
+      inthreads(p >= 1) {
+        shared f32[10] sb;
+        call fff(sb);
+      }
+    }
+  }
+  return o;
+}
+// CHECK: BUFFER ::foo1::paraby_2::paraby_3::inthreads_2::sa
+// CHECK:   range: [21, 22, '0001']
+// CHECK: BUFFER ::foo1::paraby_2::paraby_3::inthreads_3::sb
+// CHECK:   range: [25, 26, '0010']
+// MEMREUSE: shared buffer: ::foo1::paraby_2::paraby_3::inthreads_2::sa
+// MEMREUSE: 	using spm:   anon_1
+// MEMREUSE: 	with offset: 0
+// MEMREUSE: shared buffer: ::foo1::paraby_2::paraby_3::inthreads_3::sb
+// MEMREUSE: 	using spm:   anon_1
+// MEMREUSE: 	with offset: 0
+
+// TODO: expect sb reuse sa
+/*
+__co__ auto foo(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 1 : shared {
+    parallel q by 2 : local {
+      shared f32[10] sa;
+      shared f32[10] sb;
+      inthreads.async (q < 1) {
+        call fff(sa);
+      }
+      inthreads.async (q >= 1) {
+        call fff(sa);
+      }
+      sync.shared;
+      call fff(sb);
+    }
+  }
+  return o;
+}
+*/

@@ -52,18 +52,24 @@ private:
   // NOTE: use paraby scope to distinguish different device functions.
   // If equal to co func name, indicate that not in device scope.
   std::string cur_dev_func_name;
-
+  using Range = LivenessAnalyzer::Range;
   struct Buffer {
     size_t size;
-    size_t start_time;
-    size_t end_time;
+    std::vector<Range> ranges;
     std::string buffer_id;
+    bool Interfere(const Buffer& other) const {
+      for (const auto& a : this->ranges)
+        for (const auto& b : other.ranges)
+          if (a.Overlaps(b)) return true;
+      return false;
+    }
+    void Sort() { std::sort(ranges.begin(), ranges.end()); }
   };
   struct DBuffer {
     std::string size;
-    size_t start_time;
-    size_t end_time;
+    std::vector<Range> ranges;
     std::string buffer_id;
+    void Sort() { std::sort(ranges.begin(), ranges.end()); }
   };
 
   struct DevFuncMemReuseCtx {
@@ -74,7 +80,24 @@ private:
     std::vector<Buffer> buffers;
     std::vector<DBuffer> dynamic_buffers;
     std::map<std::string, size_t> mem_offset;
+    void SortBuffers() {
+      for (auto& b : buffers) b.Sort();
+      for (auto& b : dynamic_buffers) b.Sort();
+    }
   };
+
+  static std::string RangesSTR(std::vector<Range> ranges, char lp = '[',
+                               char rp = ']') {
+    std::ostringstream oss;
+    auto it = ranges.begin();
+    if (it != ranges.end()) {
+      oss << lp << it->start << "," << it->end << rp;
+      ++it;
+    }
+    for (; it != ranges.end(); ++it)
+      oss << ", " << lp << it->start << "," << it->end << rp;
+    return oss.str();
+  }
 
   std::map<std::string, DevFuncMemReuseCtx> df_ctxs;
 
@@ -88,7 +111,7 @@ private:
     return df_ctxs;
   }
 
-  std::string GetFuncNameFromScopedName(const std::string& name) {
+  std::string GetFuncNameFromScopedName(const std::string& name) const {
     // indicate that it is a co function name
     if (!PrefixedWith(name, "::")) return name;
     return SplitStringByDelimiter(name, "::", true)[0];
@@ -99,7 +122,6 @@ private:
   }
 
   struct HeapSimulator {
-  public:
     using Chunk = Buffer;
     using Chunks = std::vector<Chunk>;
 
@@ -130,15 +152,12 @@ private:
       std::vector<std::vector<bool>> interference_graph(
           length, std::vector<bool>(length, false));
 
-      for (size_t i = 0; i < length; ++i) {
-        for (size_t j = i + 1; j < length; ++j) {
-          if (sorted_chunks[i].start_time <= sorted_chunks[j].end_time &&
-              sorted_chunks[j].start_time <= sorted_chunks[i].end_time) {
+      for (size_t i = 0; i < length; ++i)
+        for (size_t j = i + 1; j < length; ++j)
+          if (sorted_chunks[i].Interfere(sorted_chunks[j])) {
             interference_graph[i][j] = true;
             interference_graph[j][i] = true;
           }
-        }
-      }
 
       // assign space for each buffer
       std::map<size_t, size_t> assigned_offsets;

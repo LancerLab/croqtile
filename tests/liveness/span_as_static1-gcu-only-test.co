@@ -1,4 +1,4 @@
-// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+// RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 #include <random>
@@ -92,8 +92,8 @@ int main() { /// host program
 
 // CHECK: (  0) transpose(s32 mdspan<6> [8, 2, 3, 2, 4, 2] input) {
 // CHECK{LITERAL}: (  1)   global s32 [[ input(3) input(5) input(0) input(1) input(2) input(4) ] ] output
-// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] {
-// CHECK: (  3)     parallel p = {p__elem__x} by [1] {
+// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] : block {
+// CHECK: (  3)     parallel p = {p__elem__x} by [1] : thread {
 // CHECK: (  4)       with index = {a4, a5, b, c, d} in [ 3 1 1 1 1 ] {
 // CHECK: (  5)         foreach index(::) {
 // CHECK: (  6)           anon_0 =  ( (b # c)  # d) 
@@ -114,17 +114,17 @@ int main() { /// host program
 // CHECK: ( 21) }
 
 // CHECK: BUFFER ::transpose::input
-// CHECK:         range: [0, 19]
+// CHECK:         range: [0, 16]
 // CHECK: VAR    ::transpose::input.span
-// CHECK:         range: [0, x]
+// CHECK:         range: [0, 0]
 // CHECK: BUFFER ::transpose::output
 // CHECK:         range: [1, 20]
 // CHECK: VAR    ::transpose::output.span
-// CHECK:         range: [1, x]
+// CHECK:         range: [1, 1]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::p
-// CHECK:         range: [3, 18]
+// CHECK:         range: [3, 3]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::p__elem__x
-// CHECK:         range: [3, 18]
+// CHECK:         range: [3, 3]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::a4
 // CHECK:         range: [4, 16]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::a5
@@ -140,15 +140,15 @@ int main() { /// host program
 // CHECK: BUFFER ::transpose::paraby_0::paraby_1::within_0::foreach_0::input_shape_c__buf__
 // CHECK: 	      range: [7, 11]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::foreach_0::input_shape_c__buf__.span
-// CHECK: 	      range: [7, x]
+// CHECK: 	      range: [7, 7]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::foreach_0::input_shape_c
 // CHECK:         range: [8, 11]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::foreach_0::input_shape_c.span
-// CHECK:         range: [8, x]
+// CHECK:         range: [8, 8]
 // CHECK: BUFFER ::transpose::paraby_0::paraby_1::within_0::foreach_0::output_shape_c
 // CHECK:         range: [10, 15]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::foreach_0::output_shape_c.span
-// CHECK:         range: [10, x]
+// CHECK:         range: [10, 10]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::foreach_0::anon_1
 // CHECK:         range: [12, 14]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::foreach_0::anon_2
@@ -156,4 +156,4 @@ int main() { /// host program
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::foreach_0::out_store
 // CHECK:         range: [14, 15]
 // CHECK: VAR    ::transpose::paraby_0::paraby_1::within_0::foreach_0::out_store.span
-// CHECK:         range: [14, x]
+// CHECK:         range: [14, 14]

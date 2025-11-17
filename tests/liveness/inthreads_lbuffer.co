@@ -1,0 +1,150 @@
+#include "choreo.h"
+
+#define N 64
+
+// for each foo* except foo2, expect that b can reuse a.
+
+__co__ auto foo0(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 4 {
+    local f32[10] a;
+    local f32[10] b;
+    if (x > 5) {
+      inthreads.async(p < 1) {
+        call fff(a);
+      }
+    } else {
+      inthreads.async(p >= 1) {
+        call fff(b);
+      }
+    }
+    sync.shared; // useless for local buffer
+  }
+  return o;
+}
+// a and b are both with thread mask.
+// CHECK: BUFFER ::foo0::paraby_0::paraby_1::a
+// CHECK: 	range: [4, 8, {{'0*1'}}] 
+// CHECK: BUFFER ::foo0::paraby_0::paraby_1::b
+// CHECK: 	range: [5, 6, {{'0*1110'}}]  [11, 13, {{'0*1110'}}]
+// MEMREUSE: local buffer: ::foo0::paraby_0::paraby_1::a
+// MEMREUSE: 	using spm:   anon_0
+// MEMREUSE: 	with offset: 0
+// MEMREUSE: local buffer: ::foo0::paraby_0::paraby_1::b
+// MEMREUSE: 	using spm:   anon_0
+// MEMREUSE: 	with offset: 0
+
+__co__ auto foo1(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 4 {
+    local f32[10] a;
+    local f32[10] b;
+    if (x > 5) {
+      inthreads.async(p < 1) {
+        call fff(a);
+      }
+    } else {
+      inthreads.async(p >= 1) {
+        call fff(b);
+      }
+    }
+    call fff(a, b);
+    sync.shared; // useless for local buffer
+  }
+  return o;
+}
+// the thread masks are all 1.
+// CHECK: BUFFER ::foo1::paraby_2::paraby_3::a
+// CHECK: 	range: [25, 37]
+// CHECK: BUFFER ::foo1::paraby_2::paraby_3::b
+// CHECK: 	range: [26, 37]
+// MEMREUSE: local buffer: ::foo1::paraby_2::paraby_3::a
+// MEMREUSE: 	using spm:   anon_1
+// MEMREUSE: 	with offset: 512
+// MEMREUSE: local buffer: ::foo1::paraby_2::paraby_3::b
+// MEMREUSE: 	using spm:   anon_1
+// MEMREUSE: 	with offset: 0
+
+__co__ auto foo2(int x) {
+  f32 [N] o{0.0f};
+  parallel p={px,py,pz} by [1,2,2] {
+    local f32[10] a;
+    local f32[10] b;
+    if (x > 5) {
+      inthreads.async(py < 1) {
+        call fff(a);
+      }
+    } else {
+      inthreads.async(pz >= 1) {
+        call fff(b);
+      }
+    }
+    sync.shared;
+  }
+  return o;
+}
+// CHECK: BUFFER ::foo2::paraby_4::paraby_5::a
+// CHECK: 	range: [47, 51, {{'0*11'}}] 
+// CHECK: BUFFER ::foo2::paraby_4::paraby_5::b
+// CHECK: 	range: [48, 49, {{'0*1010'}}]  [54, 56, {{'0*1010'}}] 
+// MEMREUSE: local buffer: ::foo2::paraby_4::paraby_5::a
+// MEMREUSE: 	using spm:   anon_2
+// MEMREUSE: 	with offset: 512
+// MEMREUSE: local buffer: ::foo2::paraby_4::paraby_5::b
+// MEMREUSE: 	using spm:   anon_2
+// MEMREUSE: 	with offset: 0
+
+__co__ auto foo3(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 4 {
+    if (x > 5) {
+      inthreads.async(p < 1) {
+        local f32[10] a;
+        call fff(a);
+      }
+    } else {
+      inthreads.async(p >= 1) {
+        local f32[10] b;
+        call fff(b);
+      }
+    }
+    sync.shared; // useless for local buffer
+  }
+  return o;
+}
+// CHECK: BUFFER ::foo3::paraby_6::paraby_7::cond_if_3::inthreads_6::a
+// CHECK: 	range: [70, 71, '0001'] 
+// CHECK: BUFFER ::foo3::paraby_6::paraby_7::cond_else4::inthreads_7::b
+// CHECK: 	range: [76, 77, '1110'] 
+// MEMREUSE: local buffer: ::foo3::paraby_6::paraby_7::cond_if_3::inthreads_6::a
+// MEMREUSE: 	using spm:   anon_3
+// MEMREUSE: 	with offset: 0
+// MEMREUSE: local buffer: ::foo3::paraby_6::paraby_7::cond_else4::inthreads_7::b
+// MEMREUSE: 	using spm:   anon_3
+// MEMREUSE: 	with offset: 0
+
+__co__ auto foo4(int x) {
+  f32 [N] o{0.0f};
+  parallel p by 4 {
+    local f32[10] a;
+    local f32[10] b;
+    inthreads.async(p < 1) {
+      call fff(a);
+    }
+    inthreads.async(p >= 1) {
+      call fff(b);
+    }
+    sync.shared; // useless for local buffer
+  }
+  return o;
+}
+// CHECK: BUFFER ::foo4::paraby_8::paraby_9::a
+// CHECK: 	range: [89, 92, '0001'] 
+// CHECK: BUFFER ::foo4::paraby_8::paraby_9::b
+// CHECK: 	range: [90, 95, '1110'] 
+// MEMREUSE: local buffer: ::foo4::paraby_8::paraby_9::a
+// MEMREUSE: 	using spm:   anon_4
+// MEMREUSE: 	with offset: 0
+// MEMREUSE: local buffer: ::foo4::paraby_8::paraby_9::b
+// MEMREUSE: 	using spm:   anon_4
+// MEMREUSE: 	with offset: 0
