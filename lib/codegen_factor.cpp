@@ -1664,17 +1664,15 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     auto ty = NodeType(*id);
     if (ContainsLoopVar(id->name))
       oss << "iv_" << id->name;
-    else if (isa<BoundedType>(ty) &&
-             PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
-      auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());
-      assert(l.has_value());
+    else if (isa<BoundedType>(ty) && ty->HasNote("pv")) {
+      auto l = ty->GetNote("pv");
       // is marked as parallel whose level is decided by target check
-      if (*l == "0")
+      if (l == "0")
         oss << "thread_id";
-      else if (*l == "1")
+      else if (l == "1")
         oss << "block_id";
       else
-        choreo_unreachable("invalid bounded type note.");
+        choreo_unreachable("invalid bounded type note: " + l + ".");
     } else {
       oss << id->name;
     }

@@ -845,10 +845,10 @@ bool TypeInference::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
-    SSTab().DefineSymbol(op.FillingSymbol(), MakeDummySpannedType());
+    AssignSymbolWithType(n.LOC(), op.FillingSymbol(), MakeDummySpannedType());
   } break;
   case AST::MMAOperation::Load: {
-    SSTab().DefineSymbol(op.GetFuture(), n.GetType()->Clone());
+    AssignSymbolWithType(n.LOC(), op.GetFuture(), n.GetType()->Clone());
     if (CCtx().ShowInferredTypes()) {
       dbgs() << "Future:    " << InScopeName(op.GetFuture())
              << ", Type: " << AST::TYPE_STR(n) << "\n";

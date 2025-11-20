@@ -1010,6 +1010,8 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
+  auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
+
   // add the device name map
   std::string dname[] = {"x", "y", "z"};
   switch (n.GetLevel()) {
@@ -1020,10 +1022,25 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (n.AllSubPVs().size() == 1)
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "blockIdx.x");
     break;
-  case ParallelLevel::GROUP:
-    assert(n.AllSubPVs().size() == 1);
-    ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "(threadIdx.x % 32)");
-    break;
+  case ParallelLevel::GROUP: {
+    assert(n.AllSubPVs().size() > 0);
+    // group ids are virtual
+    auto group_id_x =
+        (sbe::sym("threadIdx.x") / lconfig.thread_count.x)->Normalize();
+    auto group_id_y =
+        (sbe::sym("threadIdx.y") / lconfig.thread_count.y)->Normalize();
+    auto group_id_z =
+        (sbe::sym("threadIdx.z") / lconfig.thread_count.z)->Normalize();
+    if (n.AllSubPVs().size() == 1)
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), ValueSTR(group_id_x));
+    ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), ValueSTR(group_id_x));
+    if (n.AllSubPVs().size() > 1)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
+                          ValueSTR(group_id_y));
+    if (n.AllSubPVs().size() > 2)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name),
+                          ValueSTR(group_id_z));
+  } break;
   case ParallelLevel::THREAD:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
@@ -1042,7 +1059,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   EmitMemReuse(SSTab().ScopeName());
 
   // note: `thread_dims` for gcu400 is generated in `EmitDeviceFuncDecl`
-  auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
   hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
      << ValueSTR(lconfig.block_count.x) << ", "
      << ValueSTR(lconfig.block_count.y) << ", "
@@ -1532,8 +1548,53 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
 bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
+  auto FragSTR = [](MMAInfo::Fragment frag) {
+    switch (frag) {
+    case MMAInfo::FRAG_A: return "matrix_a";
+    case MMAInfo::FRAG_B: return "matrix_b";
+    case MMAInfo::FRAG_C: return "accumulator";
+    default: choreo_unreachable("unsupported frag."); break;
+    }
+    return "";
+  };
   switch (op.Tag()) {
-  case AST::MMAOperation::Fill: break;
+  case AST::MMAOperation::Fill: {
+    auto sym = op.FillingSymbol();
+    auto& ssmi = cgi.GetSymbolMMA(sym);
+    auto sty = GetSpannedType(GetSymbolType(sym));
+    assert(sty);
+    ds << d_indent
+       << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag) << ", ";
+    ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> " << sym
+       << "_frag;\n";
+    ds << d_indent << "nvcuda::wmma::fill_fragment(" << sym << "_frag, ("
+       << NameBaseType(ssmi.ty) << ")" << ExprSTR(op.FillingValue(), false)
+       << ");\n";
+  } break;
+  case AST::MMAOperation::Load: {
+    auto sym = op.LoadTo();
+    auto& ssmi = cgi.GetSymbolMMA(sym);
+    auto sty = GetSpannedType(GetSymbolType(sym));
+    auto fty = GetSpannedType(GetSymbolType(op.LoadFrom()->RefSymbol()));
+    ds << d_indent
+       << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag) << ", ";
+    ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty)
+       << ", nvcuda::wmma::row_major> " << sym << "_frag;\n";
+    ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
+       << ExprSTR(op.LoadFrom(), false) << ", " << fty->GetShape().ValueAt(1)
+       << ");\n";
+  } break;
+  case AST::MMAOperation::Exec: {
+    ds << d_indent << "nvcuda::wmma::mma_sync(" << op.ExecOperand(0)
+       << "_frag, " << op.ExecOperand(1) << "_frag, " << op.ExecOperand(2)
+       << "_frag, " << op.ExecOperand(0) << "_frag);\n";
+  } break;
+  case AST::MMAOperation::Store: {
+    auto tty = GetSpannedType(GetSymbolType(op.StoreTo()->RefSymbol()));
+    ds << d_indent << "nvcuda::wmma::store_matrix_sync("
+       << ExprSTR(op.StoreTo(), false) << ", " << op.StoreFrom() << "_frag, "
+       << tty->GetShape().ValueAt(1) << ", nvcuda::wmma::mem_row_major);\n";
+  } break;
   default: break;
   }
   return true;
@@ -2541,25 +2602,6 @@ const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
   return "";
 }
 
-std::optional<std::string>
-CuteCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
-  if (id == nullptr) return std::nullopt;
-  auto ty = NodeType(*id);
-  if (isa<BoundedType>(ty) &&
-      PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
-    auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());
-    assert(l.has_value());
-    // is marked as parallel whose level is decided by target check
-    if (*l == "local")
-      return "threadIdx.x";
-    else if (*l == "shared")
-      return "blockIdx.x";
-    else
-      choreo_unreachable("invalid bounded type note: " + *l + ".");
-  }
-  return std::nullopt;
-}
-
 // input is a `node` or `std::variant<int, float>`.
 // If `val` is existed, use it first.
 const std::string
@@ -2685,16 +2727,23 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     return s;
   };
 
+  auto HandleChunkAt = [this, &WrapParen,
+                        &parent_op](const ptr<AST::ChunkAt>& ca, bool is_host) {
+    auto caty = cast<SpannedType>(ca->GetType());
+    std::string res;
+    if (isa<FutureType>(NodeType(*ca->data)))
+      res = OpExprSTR(ca->data, parent_op, true, is_host) + ".data() + " +
+            GenOffset(ca);
+    else
+      res = OpExprSTR(ca->data, "+", true, is_host) + " + " + GenOffset(ca);
+    return WrapParen(res, "+");
+  };
+
   if (auto id = dyn_cast<AST::Identifier>(e)) {
     if (id->name == "__choreo_no_tiling__") {
       assert(!is_host);
       return id->name;
     }
-#if 0
-    if (auto ids = ThreadIdString(id))
-      oss << ids.value();
-    else
-#endif
     if (within_map.count(InScopeName(id->name)) && !is_host) {
       size_t i = 0;
       for (auto iv_name : within_map.at(InScopeName(id->name)))
@@ -2739,11 +2788,6 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       };
       for (auto item : da->GetIndices()) {
         if (auto id = AST::GetIdentifier(item)) {
-#if 0
-          if (auto ids = ThreadIdString(id))
-            AppendOffset(sbe::sym(ids.value()));
-          else
-#endif
           if (within_map.count(InScopeName(id->name))) {
             auto ivs = within_map.at(InScopeName(id->name));
             for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
@@ -2790,14 +2834,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     if (expr->IsReference()) {
       if (PSTR(expr) == "_") return "0";
       if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
-        auto caty = cast<SpannedType>(ca->GetType());
-        std::string res;
-        if (isa<FutureType>(NodeType(*ca->data)))
-          res = OpExprSTR(ca->data, parent_op, true, is_host) + ".data() + " +
-                GenOffset(ca);
-        else
-          res = OpExprSTR(ca->data, "+", true, is_host) + " + " + GenOffset(ca);
-        return WrapParen(res, "+");
+        return HandleChunkAt(ca, is_host);
       } else {
         return OpExprSTR(expr->GetReference(), parent_op, is_left_child,
                          is_host);
@@ -2916,6 +2953,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     } else
       choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
                          "', expr: " + PSTR(expr) + ".");
+  } else if (auto ca = dyn_cast<AST::ChunkAt>(e)) {
+    return HandleChunkAt(ca, is_host);
   } else if (auto c = dyn_cast<AST::Call>(e)) {
     assert(!is_host);
     return CallSTR(*c);

@@ -26,10 +26,15 @@ inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
   os << ");\n";
 }
 
-inline const char* LevelPred(ParallelLevel pl = ParallelLevel::BLOCK) {
+inline const std::string LevelPred(ParallelLevel pl = ParallelLevel::BLOCK,
+                                   int dim = -1) {
   switch (pl) {
   case ParallelLevel::BLOCK: return "if (__CHOREO_BLOCK_SINGLE__) ";
-  case ParallelLevel::GROUP: return "if (__CHOREO_GROUP_SINGLE__) ";
+  case ParallelLevel::GROUP:
+    if (dim == -1)
+      return "if (__CHOREO_GROUP_SINGLE__) ";
+    else
+      return "if (__CHOREO_GROUP_SINGLE__(" + std::to_string(dim) + ")) ";
   case ParallelLevel::THREAD: return ""; // no guard is required
   default: choreo_unreachable("unsupported storage.");
   }
@@ -48,7 +53,7 @@ inline const char* LevelPred(ParallelLevel pl = ParallelLevel::BLOCK) {
 // 'atomic' initialization. This is especially important for the shared event
 // storage.
 
-inline const char* BufferInitPred(Storage s) {
+inline const std::string BufferInitPred(Storage s) {
   switch (s) {
   case Storage::SHARED: return LevelPred(ParallelLevel::BLOCK);
   case Storage::LOCAL:

@@ -19,21 +19,21 @@ __co__ void bar1() {
   }
 }
 
-// CHECK: Bounded:   ::bar1::paraby_0::paraby_1::bdim, Type: {int,int}->[2, 6](pv)
+// CHECK: Bounded:   ::bar1::paraby_0::paraby_1::bdim, Type: {int,int}->[2, 6]
 // CHECK: Bounded:   ::bar1::paraby_0::paraby_1::x, Type: {int}->[2](pi:x)
 // CHECK: Bounded:   ::bar1::paraby_0::paraby_1::y, Type: {int}->[6](pi:y)
 // CHECK: Symbol:    ::bar1::paraby_0::paraby_1::l, Type: local f16 mdspan<1> [4]
-// CHECK: Bounded:   ::bar1::paraby_2::gdim, Type: {int,int,int}->[2, 6, 3](pv)
+// CHECK: Bounded:   ::bar1::paraby_2::gdim, Type: {int,int,int}->[2, 6, 3]
 // CHECK: Bounded:   ::bar1::paraby_2::xx, Type: {int}->[2](pi:x)
 // CHECK: Bounded:   ::bar1::paraby_2::yy, Type: {int}->[6](pi:y)
 // CHECK: Bounded:   ::bar1::paraby_2::zz, Type: {int}->[3](pi:z)
-// CHECK: Bounded:   ::bar1::paraby_2::paraby_3::bdim, Type: {int,int}->[4, 5](pv)
+// CHECK: Bounded:   ::bar1::paraby_2::paraby_3::bdim, Type: {int,int}->[4, 5]
 // CHECK: Bounded:   ::bar1::paraby_2::paraby_3::x, Type: {int}->[4](pi:x)
 // CHECK: Bounded:   ::bar1::paraby_2::paraby_3::y, Type: {int}->[5](pi:y)
 // CHECK: Symbol:    ::bar1::paraby_2::paraby_3::l, Type: local f16 mdspan<1> [4]
-// CHECK: Bounded:   ::bar1::paraby_4::p, Type: {int}->[4](pv)
+// CHECK: Bounded:   ::bar1::paraby_4::p, Type: {int}->[4]
 // CHECK: Bounded:   ::bar1::paraby_4::p__elem__x, Type: {int}->[4](pi:x)
-// CHECK: Bounded:   ::bar1::paraby_4::paraby_5::q, Type: {int,int,int}->[4, 3, 2](pv)
+// CHECK: Bounded:   ::bar1::paraby_4::paraby_5::q, Type: {int,int,int}->[4, 3, 2]
 // CHECK: Bounded:   ::bar1::paraby_4::paraby_5::x, Type: {int}->[4](pi:x)
 // CHECK: Bounded:   ::bar1::paraby_4::paraby_5::y, Type: {int}->[3](pi:y)
 // CHECK: Bounded:   ::bar1::paraby_4::paraby_5::z, Type: {int}->[2](pi:z)

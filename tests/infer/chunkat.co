@@ -48,7 +48,7 @@ __co__ void bar(f32 [32, 76] data, s8 [128] d2, int b) {
 // CHECKINF: Parameter: ::bar::data, Type: f32 mdspan<2> [32, 76]
 // CHECKINF: Parameter: ::bar::d2, Type: s8 mdspan<1> [128]
 // CHECKINF: Parameter: ::bar::b, Type: s32
-// CHECKINF: Bounded:   ::bar::paraby_1::anon_0, Type: {int,int}->[3, 4](pv)
+// CHECKINF: Bounded:   ::bar::paraby_1::anon_0, Type: {int,int}->[3, 4]
 // CHECKINF: Bounded:   ::bar::paraby_1::p0, Type: {int}->[3](pi:x)
 // CHECKINF: Bounded:   ::bar::paraby_1::p1, Type: {int}->[4](pi:y)
 // CHECKINF: Bounded:   ::bar::paraby_1::within_1::x, Type: {int}->[6]

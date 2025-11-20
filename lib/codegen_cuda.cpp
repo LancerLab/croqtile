@@ -643,12 +643,12 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
           // if (ContainsLoopVar(iv_str)) iv_str = "iv_" + iv_str;
 
           // special handling for the parallel tiling cuda
-          auto l = RemovePrefixOrNull("pv:", bity->GetNote());
-          if (l.has_value()) {
+          if (bity->HasNote("pv")) {
+            auto l = bity->GetNote("pv");
             // is marked as parallel whose level is decided by target check
-            if (*l == "0")
+            if (l == "0")
               iv_str = "thread_id";
-            else if (*l == "1")
+            else if (l == "1")
               iv_str = "block_id";
             else
               choreo_unreachable("invalid type note.");
@@ -693,12 +693,12 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
           // if (ContainsLoopVar(iv_str)) iv_str = "iv_" + iv_str;
 
           // special handling for the parallel tiling cuda
-          auto l = RemovePrefixOrNull("pv:", bity->GetNote());
-          if (l.has_value()) {
+          if (bity->HasNote("pv")) {
+            auto l = bity->GetNote("pv");
             // is marked as parallel whose level is decided by target check
-            if (*l == "0")
+            if (l == "0")
               iv_str = "thread_id";
-            else if (*l == "1")
+            else if (l == "1")
               iv_str = "block_id";
             else
               choreo_unreachable("invalid type note.");

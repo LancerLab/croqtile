@@ -47,17 +47,17 @@ private:
   bool AfterVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(post)");
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      std::string append_note = ":";
+      std::string append_note;
       levels.pop();
       if (CCtx().GetTarget() == CompileTarget::Topscc) {
-        append_note += STR(pb->GetLevel());
+        append_note = STR(pb->GetLevel());
       } else if (CCtx().GetTarget() == CompileTarget::Factor) {
-        append_note += std::to_string(TargetMaxLevel() - Level() - 1);
+        append_note = std::to_string(TargetMaxLevel() - Level() - 1);
       }
       auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
-      pty->AppendNote(append_note);
+      pty->AppendNote("pv", append_note);
       for (auto& symbol : pb->AllSubPVs())
-        cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
+        NodeType(*symbol)->AppendNote("pv", append_note);
     }
 
     // mask stmts that are possible to be shared

@@ -129,7 +129,7 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
       }
     }
   }
-// CHECK: Bounded:   ::with_foreach::paraby_0::paraby_1::p, Type: {int}->[1](pv)
+// CHECK: Bounded:   ::with_foreach::paraby_0::paraby_1::p, Type: {int}->[1]
 // CHECK: Bounded:   ::with_foreach::paraby_0::paraby_1::within_6::index, Type: {int,int}->[6, 32]
 // CHECK: Bounded:   ::with_foreach::paraby_0::paraby_1::within_6::index__elem__0, Type: {int}->[6]
 // CHECK: Bounded:   ::with_foreach::paraby_0::paraby_1::within_6::index__elem__1, Type: {int}->[32]

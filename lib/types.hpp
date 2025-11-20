@@ -692,6 +692,7 @@ inline MultiBounds operator-(const MultiBounds& lhs, const MultiBounds& rhs) {
 
 struct Type {
   BaseType bt = BaseType::UNKNOWN;
+  std::unordered_map<std::string, std::string> note; // key-val note
   Type(BaseType t) : bt(t) {}
   virtual BaseType GetBaseType() const { return bt; }
   virtual size_t Dims() const = 0;
@@ -707,8 +708,20 @@ struct Type {
   // used in early semantics
   virtual bool ApprxEqual(const Type& t) const = 0;
 
-  virtual const ptr<Type> Clone() const = 0;
+  virtual const ptr<Type> Clone() const {
+    auto nty = CloneImpl();
+    nty->note = note;
+    return nty;
+  }
+  virtual const ptr<Type> CloneImpl() const = 0;
 
+  virtual bool HasNote(const std::string& k) const { return note.count(k); };
+  virtual const std::string GetNote(const std::string& k) const {
+    return note.at(k);
+  };
+  virtual void AppendNote(const std::string& k, const std::string& v = "") {
+    note.emplace(k, v);
+  };
   virtual void Print(std::ostream&) const = 0;
   virtual const std::string Name() const = 0;
 
@@ -716,6 +729,16 @@ struct Type {
   virtual std::string EmitTo(CompileTarget) const {
     assert(false && "Emit stringify not impled for this type");
     return "";
+  }
+
+  void PrintNote(std::ostream& os) const {
+    if (note.empty()) return;
+    os << "(";
+    for (auto& item : note) {
+      os << item.first;
+      if (item.second.size() > 0) os << ":" << item.second;
+    }
+    os << ")";
   }
 
   // for runtime type disambiguation
@@ -762,7 +785,7 @@ struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   const std::string Name() const override { return "void_type"; }
   bool HasSufficientInfo() const override { return true; }
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<VoidType>();
   }
   bool operator==(const Type& ty) const override { return isa<VoidType>(&ty); }
@@ -779,7 +802,7 @@ struct AddrType final : public Type, public TypeIDProvider<AddrType> {
   const std::string Name() const override { return "addr_type"; }
   bool HasSufficientInfo() const override { return true; }
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<AddrType>();
   }
 
@@ -798,7 +821,7 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   const std::string Name() const override { return "unknown_type"; }
   bool HasSufficientInfo() const override { return false; }
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<UnknownType>();
   }
 
@@ -824,7 +847,7 @@ struct NoValueType final : public Type, public TypeIDProvider<NoValueType> {
   const std::string Name() const override { return "un_specified_value_type"; }
   bool HasSufficientInfo() const override { return true; }
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<NoValueType>();
   }
 
@@ -846,7 +869,7 @@ struct PlaceHolderType final : public Type,
   const std::string Name() const override { return "place_holder"; }
   bool HasSufficientInfo() const override { return false; }
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<PlaceHolderType>(Type::GetBaseType());
   }
 
@@ -872,7 +895,7 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   virtual bool IsMutable() const { return is_mutable; }
   virtual void SetMutable(bool m) { is_mutable = m; }
   virtual ptr<ScalarType> Clone(bool m) const = 0;
-  const ptr<Type> Clone() const override = 0;
+  // virtual const ptr<Type> CloneImpl() const override = 0;
 
   bool operator==(const Type& ty) const override {
     if (auto sty = dyn_cast<ScalarType>(&ty)) {
@@ -921,7 +944,7 @@ struct VectorType final : public Type, public TypeIDProvider<VectorType> {
     os << "vector<" << STR(e_type) << "," << ec << ">";
   }
   const std::string Name() const override { return "vector"; }
-  virtual const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<VectorType>(e_type, ec);
   }
   bool operator==(const Type& ty) const override {
@@ -953,7 +976,7 @@ struct ScalarIntegerType : public ScalarType,
 struct S8Type final : public ScalarIntegerType, public TypeIDProvider<S8Type> {
   S8Type(bool m) : ScalarIntegerType(BaseType::S8, m) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<S8Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -966,7 +989,7 @@ struct S8Type final : public ScalarIntegerType, public TypeIDProvider<S8Type> {
 struct U8Type final : public ScalarIntegerType, public TypeIDProvider<U8Type> {
   U8Type(bool m) : ScalarIntegerType(BaseType::U8, m) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<U8Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -980,7 +1003,7 @@ struct S16Type final : public ScalarIntegerType,
                        public TypeIDProvider<S16Type> {
   S16Type(bool m) : ScalarIntegerType(BaseType::S16, m) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<S16Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -994,7 +1017,7 @@ struct U16Type final : public ScalarIntegerType,
                        public TypeIDProvider<U16Type> {
   U16Type(bool m) : ScalarIntegerType(BaseType::U16, m) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<U16Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1008,7 +1031,7 @@ struct S32Type final : public ScalarIntegerType,
                        public TypeIDProvider<S32Type> {
   S32Type(bool m) : ScalarIntegerType(BaseType::S32, m) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<S32Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1024,7 +1047,7 @@ struct U32Type final : public ScalarIntegerType,
                        public TypeIDProvider<U32Type> {
   U32Type(bool m) : ScalarIntegerType(BaseType::U32, m) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<U32Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1038,7 +1061,7 @@ struct S64Type final : public ScalarIntegerType,
                        public TypeIDProvider<S64Type> {
   S64Type(bool m) : ScalarIntegerType(BaseType::S64, m) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<S64Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1052,7 +1075,7 @@ struct U64Type final : public ScalarIntegerType,
                        public TypeIDProvider<U64Type> {
   U64Type(bool m) : ScalarIntegerType(BaseType::U64, m) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<U64Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1076,7 +1099,7 @@ struct ScalarFloatType : public ScalarType,
 struct FloatE4M3Type final : public ScalarFloatType,
                              public TypeIDProvider<FloatE4M3Type> {
   FloatE4M3Type(bool m) : ScalarFloatType(BaseType::F8_E4M3, m) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatE4M3Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1088,7 +1111,7 @@ struct FloatE4M3Type final : public ScalarFloatType,
 struct FloatE5M2Type final : public ScalarFloatType,
                              public TypeIDProvider<FloatE5M2Type> {
   FloatE5M2Type(bool m) : ScalarFloatType(BaseType::F8_E5M2, m) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatE5M2Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1099,7 +1122,7 @@ struct FloatE5M2Type final : public ScalarFloatType,
 
 struct F16Type final : public ScalarFloatType, public TypeIDProvider<F16Type> {
   F16Type(bool m) : ScalarFloatType(BaseType::F16, m) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<F16Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1111,7 +1134,7 @@ struct F16Type final : public ScalarFloatType, public TypeIDProvider<F16Type> {
 struct BF16Type final : public ScalarFloatType,
                         public TypeIDProvider<BF16Type> {
   BF16Type(bool m) : ScalarFloatType(BaseType::BF16, m) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<BF16Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1122,7 +1145,7 @@ struct BF16Type final : public ScalarFloatType,
 
 struct F32Type final : public ScalarFloatType, public TypeIDProvider<F32Type> {
   F32Type(bool m) : ScalarFloatType(BaseType::F32, m) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<F32Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1133,7 +1156,7 @@ struct F32Type final : public ScalarFloatType, public TypeIDProvider<F32Type> {
 
 struct F64Type final : public ScalarFloatType, public TypeIDProvider<F64Type> {
   F64Type(bool m) : ScalarFloatType(BaseType::F64, m) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<F64Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1145,7 +1168,7 @@ struct F64Type final : public ScalarFloatType, public TypeIDProvider<F64Type> {
 struct BooleanType final : public ScalarType,
                            public TypeIDProvider<BooleanType> {
   BooleanType(bool m) : ScalarType(BaseType::BOOL, m) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<BooleanType>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
@@ -1158,7 +1181,7 @@ struct BooleanType final : public ScalarType,
 struct StringType : public Type, public TypeIDProvider<StringType> {
   StringType() : Type(BaseType::STRING) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<StringType>();
   }
   void Print(std::ostream& os) const override { os << "string"; }
@@ -1179,7 +1202,7 @@ struct StringType : public Type, public TypeIDProvider<StringType> {
 struct IndexType : public Type, public TypeIDProvider<IndexType> {
   IndexType() : Type(BaseType::INDEX) {}
   // note: index type takes 1 dim in mdspan/ituple declaration
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<IndexType>();
   }
   size_t Dims() const override { return 1; }
@@ -1209,7 +1232,7 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
   bool IsDimValid() const { return IsValidRank(dim_count); }
   bool IsComplete() const override { return true; }
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<ITupleType>(dim_count);
   }
 
@@ -1290,7 +1313,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
     return false;
   }
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<MDSpanType>(value);
   }
 
@@ -1326,7 +1349,7 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
            "element type must be a fundamental type.");
   }
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     assert(s_type);
     return std::make_shared<SpannedType>(
         e_type, cast<MDSpanType>(s_type->Clone()), m_type);
@@ -1427,7 +1450,7 @@ struct DeviceDataType final : public Type,
       : Type(BaseType::DEVICE), name(str), plain_name(plain_str), attr(at),
         data_type(bt), is_pointer(ip), init_expr(init) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<DeviceDataType>(name, plain_name, attr, data_type,
                                             is_pointer, init_expr);
   }
@@ -1485,11 +1508,11 @@ struct DeviceDataType final : public Type,
 };
 
 struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
-  std::string note = ""; // some annotation to make
-  BoundedType(BaseType tc, const std::string& n) : Type(tc), note(n) {}
+  BoundedType(BaseType tc, const std::string& k = "", const std::string& v = "")
+      : Type(tc) {
+    if (k.size() > 0) AppendNote(k, v);
+  }
   virtual bool HasValidBound() const = 0;
-  virtual std::string GetNote() const { return note; };
-  virtual void AppendNote(const std::string& n) { note += n; };
   virtual const ValueItem& GetUpperBound() const = 0;
   virtual const MultiBounds GetUpperBounds() const = 0;
   virtual int GetStride() const = 0;
@@ -1502,9 +1525,7 @@ struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
     return false;
   }
 
-  void Print(std::ostream& os) const override {
-    if (!note.empty()) os << "(" << note << ")";
-  }
+  void Print(std::ostream& os) const override { PrintNote(os); }
 
   __UDT_TYPE_INFO__(Type, BoundedType)
 };
@@ -1524,7 +1545,7 @@ struct BoundedIntegerType final : public BoundedType,
       : BoundedType(BaseType::BOUNDED_INT, note), lbound(lexpr), ubound(uexpr),
         stride(s) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<BoundedIntegerType>(lbound, ubound, stride);
   }
   size_t Dims() const override { return 1; }
@@ -1578,8 +1599,9 @@ struct BoundedITupleType final : public BoundedType,
   IntegerList widths;
 
   BoundedITupleType(const MultiBounds& l, const MultiBounds& u,
-                    const IntegerList s, const std::string& n = "")
-      : BoundedType(BaseType::BOUNDED_ITUPLE, n), lbounds(l), ubounds(u),
+                    const IntegerList s, const std::string& k = "",
+                    const std::string& v = "")
+      : BoundedType(BaseType::BOUNDED_ITUPLE, k, v), lbounds(l), ubounds(u),
         strides(s) {
     if (lbounds.IsValid())
       assert((lbounds.DimCount() == ubounds.DimCount()) &&
@@ -1593,8 +1615,8 @@ struct BoundedITupleType final : public BoundedType,
 
   BoundedITupleType(const MultiBounds& l, const MultiBounds& u,
                     const IntegerList s, const IntegerList w,
-                    const std::string& n = "")
-      : BoundedType(BaseType::BOUNDED_ITUPLE, n), lbounds(l), ubounds(u),
+                    const std::string& k = "", const std::string& v = "")
+      : BoundedType(BaseType::BOUNDED_ITUPLE, k, v), lbounds(l), ubounds(u),
         strides(s), widths(w) {
     if (lbounds.IsValid())
       assert((lbounds.DimCount() == ubounds.DimCount()) &&
@@ -1605,9 +1627,8 @@ struct BoundedITupleType final : public BoundedType,
              "expecting an invalid bound.");
   }
 
-  const ptr<Type> Clone() const override {
-    return std::make_shared<BoundedITupleType>(lbounds, ubounds, strides,
-                                               BoundedType::GetNote());
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<BoundedITupleType>(lbounds, ubounds, strides);
   }
   size_t Dims() const override { return ubounds.Rank(); }
   bool IsComplete() const override { return true; }
@@ -1710,7 +1731,7 @@ inline EventType* dyn_cast<EventType>(const Type*);
 struct EventType : public AsyncType, public TypeIDProvider<EventType> {
   Storage scope;
   explicit EventType(Storage s) : AsyncType(BaseType::EVENT), scope(s) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<EventType>(scope);
   }
   bool HasSufficientInfo() const override { return true; }
@@ -1735,7 +1756,7 @@ struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
 
   explicit FutureType(const ptr<SpannedType>& s, bool a)
       : AsyncType(BaseType::FUTURE), psty(s), async(a) {}
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<FutureType>(cast<SpannedType>(psty->Clone()),
                                         async);
   }
@@ -1791,7 +1812,7 @@ struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
   FunctionType(const ptr<Type>& ot, const std::vector<ptr<Type>>& its)
       : Type(BaseType::FUNCTION), out_ty(ot), in_tys(its) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     std::vector<ptr<Type>> intys;
     for (auto ity : in_tys) intys.push_back(ity->Clone());
     return std::make_shared<FunctionType>(out_ty->Clone(), intys);
@@ -1915,7 +1936,7 @@ struct EventArrayType final : public ArrayType,
   explicit EventArrayType(Storage s, const std::vector<size_t>& ec)
       : ArrayType(ec), event(std::make_shared<EventType>(s)) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<EventArrayType>(event->GetStorage(),
                                             ArrayType::Dimensions());
   }
@@ -1964,7 +1985,7 @@ struct SpannedArrayType final : public ArrayType,
                             const std::vector<size_t>& ads)
       : ArrayType(ads), spty(std::make_shared<SpannedType>(ft, s, m)) {}
 
-  const ptr<Type> Clone() const override {
+  const ptr<Type> CloneImpl() const override {
     return std::make_shared<SpannedArrayType>(
         spty->ElementType(), cast<MDSpanType>(spty->s_type->Clone()),
         spty->GetStorage(), ArrayType::Dimensions());
@@ -2388,34 +2409,36 @@ inline ptr<BoundedIntegerType> MakeUnknownBoundedIntegerType() {
 }
 
 inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& ub,
-                                                    const std::string& n = "") {
+                                                    const std::string& k = "",
+                                                    const std::string& v = "") {
   MultiBounds lb(ub.DimCount(), sbe::nu(0));
   IntegerList s(ub.DimCount());
   std::fill(s.begin(), s.end(), 1);
-  return std::make_shared<BoundedITupleType>(lb, ub, s, n);
+  return std::make_shared<BoundedITupleType>(lb, ub, s, k, v);
 }
 
 inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
                                                     const MultiBounds& ub,
-                                                    const std::string& n = "") {
+                                                    const std::string& k = "",
+                                                    const std::string& v = "") {
   IntegerList s(ub.DimCount());
   std::fill(s.begin(), s.end(), 1);
-  return std::make_shared<BoundedITupleType>(lb, ub, s, n);
+  return std::make_shared<BoundedITupleType>(lb, ub, s, k, v);
 }
 
 inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
                                                     const MultiBounds& ub,
                                                     const IntegerList& il,
-                                                    const std::string& n = "") {
-  return std::make_shared<BoundedITupleType>(lb, ub, il, n);
+                                                    const std::string& k = "",
+                                                    const std::string& v = "") {
+  return std::make_shared<BoundedITupleType>(lb, ub, il, k, v);
 }
 
-inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
-                                                    const MultiBounds& ub,
-                                                    const IntegerList& il,
-                                                    const IntegerList& wl,
-                                                    const std::string& n = "") {
-  return std::make_shared<BoundedITupleType>(lb, ub, il, wl, n);
+inline ptr<BoundedITupleType>
+MakeBoundedITupleType(const MultiBounds& lb, const MultiBounds& ub,
+                      const IntegerList& il, const IntegerList& wl,
+                      const std::string& k = "", const std::string& v = "") {
+  return std::make_shared<BoundedITupleType>(lb, ub, il, wl, k, v);
 }
 
 inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {

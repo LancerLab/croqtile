@@ -26,7 +26,7 @@ __co__ f32 [M] softmax(f32 [M, N] input,int TILE_M) {
 // CHECK: Parameter: ::softmax::input, Type: f32 mdspan<2> [::softmax::M, ::softmax::N]
 // CHECK: Parameter: ::softmax::TILE_M, Type: s32
 // CHECK: Symbol:    ::softmax::output, Type: global f32 mdspan<1> [::softmax::M]
-// CHECK: Bounded:   ::softmax::paraby_0::paraby_1::p, Type: {int}->[1](pv)
+// CHECK: Bounded:   ::softmax::paraby_0::paraby_1::p, Type: {int}->[1]
 // CHECK: Bounded:   ::softmax::paraby_0::paraby_1::p__elem__x, Type: {int}->[1](pi:x)
 // CHECK: Bounded:   ::softmax::paraby_0::paraby_1::within_0::index, Type: {int,int}->[(::softmax::M / ::softmax::TILE_M), 1]
 // CHECK: Bounded:   ::softmax::paraby_0::paraby_1::within_0::m_tile, Type: {int}->[(::softmax::M / ::softmax::TILE_M)]

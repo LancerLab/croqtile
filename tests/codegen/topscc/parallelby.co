@@ -28,7 +28,7 @@ __co__ auto bar() {
 // CHECK: __thread_dims__(2, 1, 1)
 // CHECK: __global__ void __choreo_device_bar3()
 
-// CHECK: __thread_dims__(1, 1, 1)
+// CHECK: __thread_dims__(8, 1, 1)
 // CHECK: __global__ void __choreo_device_bar4()
 
 // CHECK: __thread_dims__(4, 1, 1)
