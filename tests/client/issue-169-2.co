@@ -1,0 +1,9 @@
+// RUN: not choreo -es %s 2>&1 | FileCheck %s
+
+__co__ void foo() {
+  parallel p by 6
+    with {k} in 64
+      foreach k {}
+}
+
+// CHECK: error: expect a span type but got the s32 type.

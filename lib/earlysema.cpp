@@ -1317,7 +1317,7 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
   if (!SupportIntListCollapse(bty))
     Error1(n.BoundExpr()->LOC(),
            "the parallel bound requires integers but got '" + PSTR(bty) + "'.");
-  else if (isa<ITupleType>(bty) && !n.IsBracketed())
+  else if (!CanYieldAnInteger(bty) && !n.IsBracketed())
     Error1(n.BoundExpr()->LOC(),
            "must use mdspan instead of ituple to define the parallel bound.");
 
@@ -1431,8 +1431,14 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
                             PSTR(ity) + " type.");
   }
 
+  // `with {x} in 8 {}`
+  if (!n.with && n.with_matchers && isa<ScalarIntegerType>(ity))
+    Error1(n.in->LOC(),
+           "expect a span type but got the " + PSTR(ity) + " type.");
+
   // check the if rank equal between with-in and with-matcher
-  if (n.with_matchers && n.with_matchers->Count() != rank)
+  if (n.with_matchers && n.with_matchers->Count() != rank &&
+      isa<MDSpanType>(ity))
     Error1(n.in->LOC(), "un-matched with-matcher-count(" +
                             std::to_string(n.with_matchers->Count()) +
                             ") and mdspan rank(" + std::to_string(rank) + ").");

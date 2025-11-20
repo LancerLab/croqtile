@@ -1,0 +1,21 @@
+// RUN: choreo -t topscc %s -es -o - 2>&1 |FileCheck %s
+
+__co__ void foo() {
+  parallel p by 6
+    foreach k in 64
+    parallel q by #k / 3;
+}
+
+__co__ void bar() {
+  parallel p by 6
+    foreach k in [64]
+    parallel q by #k / 3;
+}
+
+__co__ void baz() {
+  parallel p by 6
+    foreach {k} in [64]
+    parallel q by #k / 3;
+}
+
+// CHECK-NOT: error:

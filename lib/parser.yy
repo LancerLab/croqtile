@@ -764,7 +764,7 @@ paraby
         }
         paraby_symbols.insert($1);
         symtab.AddSymbol($1, MakeUnknownType());
-        // torerate 'parallel p by [2]'
+        // tolerate 'parallel p by [2]'
         if ($3->IsReference()) {
           if (auto mds = dyn_cast<AST::MultiDimSpans>($3->GetReference())) {
             if (auto mv = dyn_cast<AST::MultiValues>(mds->list)) {

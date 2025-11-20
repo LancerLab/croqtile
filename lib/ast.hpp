@@ -1884,7 +1884,7 @@ struct WhereBind : public Node, public TypeIDProvider<WhereBind> {
 };
 
 struct WithIn : public Node, public TypeIDProvider<WithIn> {
-  ptr<Identifier> with; // either with or with_matcher
+  ptr<Identifier> with;
   ptr<Node> in;
   ptr<MultiValues> with_matchers;
 

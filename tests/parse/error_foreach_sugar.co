@@ -1,8 +1,0 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
-
-__co__ auto illegal_foreach_sugar() {
-  foreach {x,y} in 2 {}
-}
-
-// CHECK: error: un-matched with-matcher-count(2) and mdspan rank(1).
-// CHECK-NOT: error:
