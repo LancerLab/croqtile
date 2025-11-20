@@ -25,7 +25,7 @@ int main() {}
 // INFER: Symbol:    ::cofoo0::x, Type: s32
 // INFER: Symbol:    ::cofoo0::y, Type: s32
 // INFER: Symbol:    ::cofoo0::mds, Type: global u8 mdspan<5> [1, 2, 3, 1000, 2]
-// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::p, Type: {int}->[2](pv)
+// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::p, Type: {int}->[2]
 // INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::p__elem__x, Type: {int}->[2](pi:x)
 // INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::within_0::idx, Type: {int,int,int,int,int}->[1, 2, 3, 1000, 2]
 // INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::within_0::ia, Type: {int}->[1]

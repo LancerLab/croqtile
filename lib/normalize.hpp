@@ -182,7 +182,18 @@ private:
   using NodeInsertInfo =
       std::vector<std::tuple<int, ptr<AST::Node>, std::string>>;
   std::stack<AST::MultiNodes*> multi_nodes;
-  int cur_node_index = -1;
+  std::stack<int> cur_node_indices;
+  int GetNodeIndex() const { return cur_node_indices.top(); }
+  int GetValidNodeIndex() const {
+    assert(cur_node_indices.top() != -1 && "invalid node index.");
+    return cur_node_indices.top();
+  }
+  void SetNodeIndex(int i) {
+    cur_node_indices.pop();
+    cur_node_indices.push(i);
+  }
+  void PushNodeIndex(int i) { cur_node_indices.push(i); }
+  void PopNodeIndex() { cur_node_indices.pop(); }
   std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
 
   void InsertNode(int index, const ptr<AST::Node>& n, const std::string& name) {
@@ -240,11 +251,13 @@ public:
       changed = false;
     } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
       multi_nodes.push(m);
+      PushNodeIndex(0);
     } else if (isa<AST::DMA>(&n) || isa<AST::NamedVariableDecl>(&n) ||
                isa<AST::Assignment>(&n) || isa<AST::Return>(&n) ||
-               isa<AST::ForeachBlock>(&n)) {
-      cur_node_index = multi_nodes.top()->GetIndex(&n);
-      assert(cur_node_index != -1 && "unexpected node index.");
+               isa<AST::ForeachBlock>(&n) || isa<AST::ChunkAt>(&n)) {
+      auto idx = multi_nodes.top()->GetIndex(&n);
+      assert(idx != -1 && "unexpected node index.");
+      SetNodeIndex(idx);
     }
     return true;
   }
@@ -265,7 +278,7 @@ public:
     } else if (isa<AST::ChoreoFunction>(&n)) {
       count = 0;
     } else if (isa<AST::Return>(&n)) {
-      cur_node_index = -1;
+      SetNodeIndex(-1);
     } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
       for (const auto& node : wb->withins->AllSubs()) {
         auto wi = cast<AST::WithIn>(node);
@@ -295,7 +308,7 @@ public:
 
     mnodes_insertions.erase(&n);
     multi_nodes.pop();
-    cur_node_index = -1;
+    PopNodeIndex();
 
     return true;
   }
@@ -637,9 +650,9 @@ public:
     if (!isa<AST::Select>(n.to)) return true;
 
     auto anon_sym = SymbolTable::GetAnonName();
-    assert(cur_node_index != -1);
     // hoist the select to multinodes
-    int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+    int index =
+        GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
     cast<AST::Select>(n.to)->inDMA = false;
     auto assign = AST::Make<AST::Assignment>(n.to->LOC(), anon_sym, n.to);
     assign->SetType(n.to->GetType()->Clone());
@@ -658,9 +671,9 @@ public:
     TraceEachVisit(n);
 
     if (n.sa) {
-      assert(cur_node_index != -1);
       // hoist the span_as to multinodes
-      int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+      int index =
+          GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
       auto assign =
           AST::Make<AST::Assignment>(n.sa->LOC(), n.sa->nid->name, n.sa);
       assign->SetType(n.sa->GetType()->Clone());
@@ -675,7 +688,8 @@ public:
     if (CCtx().GetTarget() == CompileTarget::Factor && n.OpCount() > 0 &&
         // factor requires to generate 'bitcast' for a reshape
         n.OpAt(0)->SpecifyReshape()) {
-      int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+      int index =
+          GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
       auto nname = SymbolTable::GetAnonName();
       auto so = n.OpAt(0);
       auto id = AST::Make<AST::Identifier>(so->LOC(), nname);
@@ -712,8 +726,8 @@ public:
           if (auto lexpr = dyn_cast<AST::Expr>(expr->GetL())) {
             if (!lexpr->GetSymbol()) {
               // hoist the non-getith part
-              int index =
-                  cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+              int index = GetValidNodeIndex() +
+                          mnodes_insertions[multi_nodes.top()].size();
               auto nname = SymbolTable::GetAnonName();
               auto assign = AST::Make<AST::Assignment>(expr->GetL()->LOC(),
                                                        nname, expr->GetL());
@@ -735,7 +749,7 @@ public:
 
         // else, hoist the arith out
         int index =
-            cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+            GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, v);
         assign->SetType(v->GetType()->Clone());
@@ -835,9 +849,8 @@ public:
             loc, anon_sym, dt, sto, nullptr, std::vector<size_t>{}, il);
         nv->SetType(vty);
 
-        assert(cur_node_index != -1);
         int index =
-            cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+            GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
         InsertNode(index, nv, anon_sym);
 
         // replace return value now
@@ -869,8 +882,8 @@ public:
         } else if (bound_expr->op == "getith") {
           if (auto lexpr = dyn_cast<AST::Expr>(bound_expr->GetL())) {
             if (!lexpr->GetSymbol()) {
-              int index =
-                  cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+              int index = GetValidNodeIndex() +
+                          mnodes_insertions[multi_nodes.top()].size();
               auto nname = SymbolTable::GetAnonName();
               auto assign = AST::Make<AST::Assignment>(
                   bound_expr->GetL()->LOC(), nname, bound_expr->GetL());
@@ -891,7 +904,7 @@ public:
         }
 
         int index =
-            cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+            GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, bound_expr);
         auto bty = bound_expr->GetType();
@@ -943,7 +956,7 @@ private:
   int last_depth = 0;
   AST::ParallelBy* last_pb = nullptr;
 
-  enum FillType { Inner, Outer };
+  enum FillType { Inner, Outer, AppendInner };
   struct FillInfo {
     AST::ParallelBy* pb;
     FillType ft;
@@ -985,6 +998,21 @@ public:
               new_pb->InlinePrint(dbgs()); dbgs() << "\n");
 
     return *new_pb;
+  }
+
+  AST::ParallelBy& AppendInnerLevel(AST::ParallelBy& pb, ParallelLevel pl) {
+    // may fill gap only for a single level
+    VST_DEBUG(dbgs() << "Replace `"; pb.InlinePrint(dbgs());
+              dbgs() << "` by\n  +-");
+
+    auto new_pb =
+        AST::MakeSimpleParallelBy(pb.LOC(), nullptr, CCtx().GetMinGroupDim());
+    new_pb->SetLevel(pl);
+    pb.stmts->Append(new_pb);
+
+    VST_DEBUG(pb.InlinePrint(dbgs()));
+
+    return pb;
   }
 
   AST::ParallelBy& InsertOuterLevel(AST::ParallelBy& pb, ParallelLevel pl) {
@@ -1159,18 +1187,20 @@ public:
         }
       } else if (last_pb->GetLevel() == ParallelLevel::GROUP) {
         // group as the inner-most
-        fill_info.emplace_back(last_pb, Inner, ParallelLevel::THREAD);
+        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD);
         if (!ExplicitLevel(*pb)) {
           if (literal_depth > 1) {
             Error1(pb->LOC(), "can not have multiple group-level parallel-by.");
 
           } else {
             //   parallel p by 32
-            //    parallel r by 64 : group
+            //    parallel r by 64 : group { stmts; }
             // =>
             //   parallel p by 1 : block
-            //    parallel r by 64 : group
+            //    parallel r by 64 : group {
+            //     stmts;
             //     parallel q by 1 : thread
+            //    }
             pb->SetLevel(ParallelLevel::BLOCK);
           }
         } else {
@@ -1214,8 +1244,12 @@ public:
       for (auto fi : fill_info) {
         if (fi.ft == Outer)
           InsertOuterLevel(*fi.pb, fi.lvl);
-        else
+        else if (fi.ft == Inner)
           InsertInnerLevel(*fi.pb, fi.lvl);
+        else {
+          assert(fi.ft == AppendInner);
+          AppendInnerLevel(*fi.pb, fi.lvl);
+        }
       }
       fill_info.clear();
     }

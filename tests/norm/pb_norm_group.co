@@ -119,8 +119,8 @@ __co__ void wow7() { parallel x by 5 parallel y by 6: group parallel z by 7: thr
 // CHECK:                      index component: {r__elem__x}, corresponding ubound: [7]
 // CHECK:   `- group Parallelization: index symbol: s, bound [0, 9)
 // CHECK:                       index component: {s__elem__x}, corresponding ubound: [9]
-// CHECK:    `- thread Parallelization: index symbol: anon_pb_15, bound [0, 1)
-// CHECK:                        index component: {anon_pb_15__elem__x}, corresponding ubound: [1]
+// CHECK:    `- thread Parallelization: index symbol: anon_pb_15, bound [0,
+// CHECK:                        index component: {anon_pb_15__elem__x}, corresponding ubound: [
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: wow0

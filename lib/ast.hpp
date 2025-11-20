@@ -2271,7 +2271,7 @@ public:
           const std::vector<ptr<SpannedOperation>>& ops = {})
       : Node(l), data(s->nid), indices(idxes), sa(s), operations(ops) {}
 
-  std::string RefSymbol() const {
+  const std::string RefSymbol() const {
     assert(data && "ref data is not set.");
     return RemoveSuffix(data->name, ".data");
   }
@@ -3413,25 +3413,26 @@ inline bool IsLiteral(const Node& n) {
 }
 
 inline ptr<ParallelBy>
-MakeSimpleParallelBy(const location& l, const ptr<MultiNodes> stmts = nullptr) {
+MakeSimpleParallelBy(const location& l, const ptr<MultiNodes> stmts = nullptr,
+                     int bv = 1) {
   auto anon_sym = SymbolTable::GetAnonPBName();
   auto pv = AST::Make<AST::Identifier>(l, anon_sym);
-  pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
+  pv->SetType(MakeBoundedITupleType(Shape(1, bv)));
   // elements
   auto spv = AST::Make<AST::MultiValues>(l, ", ");
   auto epv = AST::Make<AST::Identifier>(l, anon_sym + "__elem__x");
-  epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+  epv->SetType(MakeBoundedIntegerType(sbe::nu(bv)));
   spv->Append(epv);
 
   // bound
-  auto p_bound = AST::MakeIntExpr(l, 1);
+  auto p_bound = AST::MakeIntExpr(l, bv);
   p_bound->SetType(MakeIntegerType());
   auto spv_bounds = AST::Make<AST::MultiValues>(l, ", ");
   spv_bounds->Append(p_bound->Clone());
   spv_bounds->SetType(MakeITupleType(1));
 
   auto pb = AST::Make<AST::ParallelBy>(l, pv, p_bound, spv, spv_bounds, stmts);
-  pb->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+  pb->SetType(MakeBoundedIntegerType(sbe::nu(bv)));
   return pb;
 }
 

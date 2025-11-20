@@ -14,10 +14,6 @@
 #include <memory>
 #include <random>
 
-#ifdef __CHOREO_TARGET_CUTE__
-#include "cute/tensor.hpp"
-#endif
-
 #ifdef __TOPSCC__
 
 #define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
@@ -25,18 +21,29 @@
 #define __co_device__ __device__
 #define __co_host__ __host__
 #define __co_any__ __device__ __host__
-#else
-#ifdef __CHOREO_TARGET_CUTE__
+
+#elif defined(__CHOREO_TARGET_CUTE__)
+
 #define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_FP8_E4M3_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_FP8_E5M2_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_INTEGRAL_SUPPORT__
-#endif
+
+#include "cute/tensor.hpp"
+#include <mma.h>
+
+#define __co_device__ __device__
+#define __co_host__ __host__
+#define __co_any__ __device__ __host__
+
+#else
+
 #define __co_device__
 #define __co_host__
 #define __co_any__
-#endif // __TOPSCC__
+
+#endif // TOPSCC and CUTE
 
 #define __cok__ namespace choreo
 
@@ -398,10 +405,12 @@ inline std::ostream& operator<<(std::ostream& os, const f16& v) {
 
 #else
 #ifdef __CHOREO_TARGET_CUTE__
-using __fp16 = cute::half_t;
-#endif
+using f16 = __half;
+using half = __half;
+#else
 using f16 = __fp16;
 using half = __fp16;
+#endif
 #endif // __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 
 __co_any__ inline static f16 f32_to_f16(f32 value) {
@@ -1643,7 +1652,7 @@ static_assert(false, "path 2\n");
       subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
 #define __CHOREO_GROUP_SINGLE__                                                \
   subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
-#elif __CHOREO_TARGET_CUTE__
+#elif defined(__CHOREO_TARGET_CUTE__)
 #define __CHOREO_BLOCK_SINGLE__                                                \
   threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
 #define __CHOREO_GROUP_SINGLE__                                                \

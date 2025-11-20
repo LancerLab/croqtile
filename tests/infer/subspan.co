@@ -23,9 +23,9 @@ __co__ auto subspan(s32 [32, 18, 9] a) {
 
 // CHECK: Parameter: ::subspan::a, Type: s32 mdspan<3> [32, 18, 9]
 // CHECK: Symbol:    ::subspan::b, Type: global f32 mdspan<3> [32, 18, 9]
-// CHECK: Bounded:   ::subspan::paraby_0::anon_pb_0, Type: {int}->[1](pv)
+// CHECK: Bounded:   ::subspan::paraby_0::anon_pb_0, Type: {int}->[1]
 // CHECK: Bounded:   ::subspan::paraby_0::anon_pb_0__elem__x, Type: {int}->[1](pi:x)
-// CHECK: Bounded:   ::subspan::paraby_0::paraby_1::p, Type: {int}->[3](pv)
+// CHECK: Bounded:   ::subspan::paraby_0::paraby_1::p, Type: {int}->[3]
 // CHECK: Bounded:   ::subspan::paraby_0::paraby_1::p__elem__x, Type: {int}->[3](pi:x)
 // CHECK: Symbol:    ::subspan::paraby_0::paraby_1::bshape, Type: ituple<2>
 // CHECK: Symbol:    ::subspan::paraby_0::paraby_1::cshape, Type: ituple<3>

@@ -27,7 +27,7 @@ __co__ void bounded_arith(s32 [180, 27, 12] a) {
 
 
 // CHECK: Parameter: ::bounded_arith::a, Type: s32 mdspan<3> [180, 27, 12]
-// CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::p, Type: {int}->[6](pv)
+// CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::p, Type: {int}->[6]
 // CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::within_0::index, Type: {int,int,int}->[10, 9, 2]
 // CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::within_0::x, Type: {int}->[10]
 // CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::within_0::y, Type: {int}->[9]
@@ -83,5 +83,5 @@ __co__ void bounded_decls() {
 // CHKVALNO:    } // end scope-2
 // CHKVALNO:   } // end scope-1
 
-// CHECK: Symbol:    ::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::b, Type: {int}->[6](pv)
+// CHECK: Symbol:    ::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::b, Type: {int}->[6]
 // CHECK: Function:  ::bounded_decls, Type: void (*)()

@@ -19,7 +19,7 @@ __co__ auto chunkat_dontcare(s32 [4, 8, 16] i) {
 
 // INFER: Parameter: ::chunkat_dontcare::i, Type: s32 mdspan<3> [4, 8, 16]
 // INFER: Symbol:    ::chunkat_dontcare::o, Type: global s32 mdspan<3> [4, 8, 16]
-// INFER: Bounded:   ::chunkat_dontcare::paraby_0::paraby_1::p, Type: {int}->[4](pv)
+// INFER: Bounded:   ::chunkat_dontcare::paraby_0::paraby_1::p, Type: {int}->[4]
 // INFER: Future:    ::chunkat_dontcare::paraby_0::paraby_1::l0, Type: sync=>local s32 mdspan<3> [4, 8, 16]
 // INFER: Bounded:   ::chunkat_dontcare::paraby_0::paraby_1::within_0::t0, Type: {int}->[2]
 // INFER: Future:    ::chunkat_dontcare::paraby_0::paraby_1::within_0::foreach_0::l2, Type: sync=>local s32 mdspan<3> [2, 8, 16]

@@ -101,12 +101,20 @@ struct OtherTrait {
   bool multiple_parallelby = false;
 };
 
+struct MMAInfo {
+  enum Fragment { FRAG_A, FRAG_B, FRAG_C };
+  BaseType ty;
+  ValueList shape;
+  Fragment frag;
+};
+
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, std::vector<LaunchConfig>>;
 using ReturnSymbols = std::map<std::string, std::string>;
 using FunctionTraits = std::map<std::string, OtherTrait>;
 using SharedFutures = std::map<std::string, std::set<std::string>>;
 using LocalFutures = std::map<std::string, std::set<std::string>>;
+using SymbolMMA = std::map<std::string, MMAInfo>;
 
 enum PassedOrDeclaredSymbolKind : int {
   PDSYM_NONE = 0,
@@ -125,6 +133,7 @@ private:
   FunctionTraits traits;
   SharedFutures shr_futs;
   LocalFutures loc_futs;
+  SymbolMMA sym_mmas;
 
   // TODO: maybe should add some vars here
 
@@ -167,6 +176,15 @@ public:
   }
   std::set<std::string>& GetFunctionLocalFutures(const std::string& fname) {
     return loc_futs[fname];
+  }
+
+  const MMAInfo& GetSymbolMMA(const std::string& sym) const {
+    return sym_mmas.at(sym);
+  }
+  MMAInfo& GetSymbolMMA(const std::string& sym) { return sym_mmas[sym]; }
+  void AddSymbolMMA(const std::string& sym, const MMAInfo& i) {
+    assert(!sym_mmas.count(sym));
+    sym_mmas.emplace(sym, i);
   }
 
   bool HasParallelBy(const std::string& fname) const {

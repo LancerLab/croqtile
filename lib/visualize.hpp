@@ -399,7 +399,7 @@ private:
         assert(id && "node other than identifier is not handled.");
         auto ty = GetSymbolType(id->name);
         if (auto bpvs = dyn_cast<BoundedITupleType>(ty)) {
-          bool parallel = (!bpvs->GetNote().empty());
+          bool parallel = bpvs->HasNote("pv"); // TODO: fix this
           auto vlist = bpvs->GetUpperBounds().Value();
           for (size_t i = 0; i < vlist.size(); ++i) {
             if (auto pint = VIInt(vlist[i])) {

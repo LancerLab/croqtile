@@ -481,6 +481,92 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   return true;
 }
 
+bool SemaChecker::VisitNode(AST::MMA& n) {
+  auto& op = *n.GetOperation();
+  switch (op.Tag()) {
+  case AST::MMAOperation::Fill: break;
+  case AST::MMAOperation::Load: break;
+  case AST::MMAOperation::Exec: {
+    auto& a_sym = op.ExecOperand(1);
+    auto& b_sym = op.ExecOperand(2);
+    auto& c_sym = op.ExecOperand(0);
+    auto a_ty = GetSpannedType(GetSymbolType(a_sym));
+    auto b_ty = GetSpannedType(GetSymbolType(b_sym));
+    auto c_ty = GetSpannedType(GetSymbolType(c_sym));
+    bool old_ec = error_count;
+    if (a_ty == nullptr)
+      Error1(n.LOC(), "Expect `" + a_sym + "' to contain a spanned data.");
+    if (b_ty == nullptr)
+      Error1(n.LOC(), "Expect `" + b_sym + "' to contain a spanned data.");
+    if (c_ty == nullptr)
+      Error1(n.LOC(), "Expect `" + c_sym + "' to contain a spanned data.");
+    if ((a_ty->ElementType() != b_ty->ElementType()) ||
+        (c_ty->ElementType() != b_ty->ElementType()))
+      Error1(n.LOC(), "Element type are inconsistent: `" + a_sym + "'(" +
+                          STR(a_ty->ElementType()) + "), `" + b_sym + "'(" +
+                          STR(a_ty->ElementType()) + "), `" + b_sym + "'(" +
+                          STR(c_ty->ElementType()) + ").");
+    if (old_ec != error_count) return false;
+
+    auto a_shape = a_ty->GetShape();
+    auto b_shape = b_ty->GetShape();
+    auto c_shape = c_ty->GetShape();
+    if ((a_shape.Rank() != 2) || a_shape.IsDynamic())
+      Error1(n.LOC(), "Expect `" + a_sym +
+                          "' to be a matrix with fixed size, but got: " +
+                          STR(a_shape) + ".");
+    if ((b_shape.Rank() != 2) || b_shape.IsDynamic())
+      Error1(n.LOC(), "Expect `" + b_sym +
+                          "' to be a matrix with fixed size, but got: " +
+                          STR(b_shape) + ".");
+    if ((c_shape.Rank() != 2) || c_shape.IsDynamic())
+      Error1(n.LOC(), "Expect `" + c_sym +
+                          "' to be a matrix with fixed size, but got: " +
+                          STR(c_shape) + ".");
+    if (old_ec != error_count) return false;
+
+    bool shape_match = true;
+    ValueList cs_vals;
+    switch (op.GetMethod()) {
+    case AST::MMAOperation::ROW_ROW:
+      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(1)))
+        shape_match = false;
+      cs_vals.push_back(a_shape.ValueAt(0));
+      cs_vals.push_back(b_shape.ValueAt(0));
+      break;
+    case AST::MMAOperation::ROW_COL:
+      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(0)))
+        shape_match = false;
+      cs_vals.push_back(a_shape.ValueAt(0));
+      cs_vals.push_back(b_shape.ValueAt(1));
+      break;
+    case AST::MMAOperation::COL_ROW:
+      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(1)))
+        shape_match = false;
+      cs_vals.push_back(a_shape.ValueAt(1));
+      cs_vals.push_back(b_shape.ValueAt(0));
+      break;
+    case AST::MMAOperation::COL_COL:
+      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(0)))
+        shape_match = false;
+      cs_vals.push_back(a_shape.ValueAt(1));
+      cs_vals.push_back(b_shape.ValueAt(1));
+      break;
+    default: choreo_unreachable("unsupported mma execution method.");
+    }
+    if (!shape_match) {
+      Error1(n.LOC(), "MMA: matrix shapes do not match: `" + a_sym + "'(" +
+                          STR(a_shape) + ") v.s. `" + b_sym + "'(" +
+                          STR(b_shape) + ").");
+      return false;
+    }
+  } break;
+  case AST::MMAOperation::Store: break;
+  default: choreo_unreachable("unsupported mma operation.");
+  }
+  return true;
+}
+
 bool SemaChecker::VisitNode(AST::ChunkAt& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 

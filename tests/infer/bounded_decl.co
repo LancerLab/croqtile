@@ -31,9 +31,9 @@ __co__ void bounded_decls(s32 [160, 27, 9] input) {
 // CHKVALNO: <Bounded> ' (pq1 + 1) 's ubound: 'const_6'
 
 // CHECK: Parameter: ::bounded_decls::input, Type: s32 mdspan<3> [160, 27, 9]
-// CHECK: Bounded:   ::bounded_decls::paraby_0::p, Type: {int}->[2](pv)
+// CHECK: Bounded:   ::bounded_decls::paraby_0::p, Type: {int}->[2]
 // CHECK: Bounded:   ::bounded_decls::paraby_0::p__elem__x, Type: {int}->[2](pi:x)
-// CHECK: Bounded:   ::bounded_decls::paraby_0::paraby_1::q, Type: {int}->[4](pv)
+// CHECK: Bounded:   ::bounded_decls::paraby_0::paraby_1::q, Type: {int}->[4]
 // CHECK: Bounded:   ::bounded_decls::paraby_0::paraby_1::q__elem__x, Type: {int}->[4](pi:x)
 // CHECK: Bounded:   ::bounded_decls::paraby_0::paraby_1::within_0::x, Type: {int}->[3]
 // CHECK: Bounded:   ::bounded_decls::paraby_0::paraby_1::within_0::y, Type: {int}->[9]

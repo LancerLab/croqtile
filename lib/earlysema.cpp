@@ -233,7 +233,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, sty->Clone());
+    SetNodeType(n, ty->Clone());
   } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
              (n.op == "%") || (n.op == "cdiv")) {
     auto lty = NodeType(*n.GetL());

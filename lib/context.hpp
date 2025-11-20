@@ -495,6 +495,24 @@ public:
     return 0;
   }
 
+  size_t GetMinGroupDim() const {
+    size_t bound = 1;
+    if (GetTarget() == CompileTarget::Topscc) {
+      switch (GetArch()) {
+      case TargetArch::GCU20:
+      case TargetArch::GCU21:
+      case TargetArch::GCU3: break;
+      case TargetArch::GCU4: bound = 8; break;
+      default: choreo_unreachable("unsupported target arch.");
+      }
+    } else if (GetTarget() == CompileTarget::Cute)
+      bound = 32;
+    else
+      choreo_unreachable("unsupported target.");
+
+    return bound;
+  }
+
   size_t GetSingleVectorByteSize() const {
     switch (GetArch()) {
     case TargetArch::GCU3: return 128;

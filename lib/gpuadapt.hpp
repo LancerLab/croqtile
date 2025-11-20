@@ -542,6 +542,86 @@ public:
     return true;
   }
 
+  bool Visit(AST::MMA& n) override {
+    auto& op = *n.GetOperation();
+    ValueList mma_shape;
+    switch (op.Tag()) {
+    case AST::MMAOperation::Fill: break;
+    case AST::MMAOperation::Load: break;
+    case AST::MMAOperation::Exec: {
+      auto& a_sym = op.ExecOperand(1);
+      auto& b_sym = op.ExecOperand(2);
+      auto a_ty = GetSpannedType(GetSymbolType(a_sym));
+      auto b_ty = GetSpannedType(GetSymbolType(b_sym));
+      auto a_shape = a_ty->GetShape();
+      auto b_shape = b_ty->GetShape();
+      switch (op.GetMethod()) {
+      case AST::MMAOperation::ROW_ROW:
+        mma_shape.push_back(a_shape.ValueAt(0));
+        mma_shape.push_back(a_shape.ValueAt(1));
+        mma_shape.push_back(b_shape.ValueAt(0));
+        break;
+      case AST::MMAOperation::ROW_COL:
+        mma_shape.push_back(a_shape.ValueAt(0));
+        mma_shape.push_back(a_shape.ValueAt(1));
+        mma_shape.push_back(b_shape.ValueAt(1));
+        break;
+      case AST::MMAOperation::COL_ROW:
+        mma_shape.push_back(a_shape.ValueAt(1));
+        mma_shape.push_back(a_shape.ValueAt(0));
+        mma_shape.push_back(b_shape.ValueAt(0));
+        break;
+      case AST::MMAOperation::COL_COL:
+        mma_shape.push_back(a_shape.ValueAt(1));
+        mma_shape.push_back(a_shape.ValueAt(0));
+        mma_shape.push_back(b_shape.ValueAt(1));
+        break;
+      default: choreo_unreachable("unsupported mma execution method.");
+      }
+      auto MMAShapeSTR = [](ValueList s) {
+        assert(s.size() == 3);
+        std::ostringstream oss;
+        oss << STR(s[0]) << "x" << STR(s[1]) << "x" << STR(s[2]);
+        return oss.str();
+      };
+      auto ety = a_ty->ElementType();
+      switch (ety) {
+      case BaseType::F16:
+        if (!sbe::ceq(mma_shape[0], sbe::nu(16)) ||
+            !sbe::ceq(mma_shape[1], sbe::nu(16)) ||
+            !sbe::ceq(mma_shape[2], sbe::nu(16)))
+          Error1(n.LOC(), "MMA [" + STR(ety) + ": " + MMAShapeSTR(mma_shape) +
+                              "] is not support by current architecture(" +
+                              STR(CCtx().GetArch()) + ").");
+        break;
+      case BaseType::F32:
+        if (sbe::ceq(mma_shape[0], sbe::nu(16)) ||
+            sbe::ceq(mma_shape[1], sbe::nu(16)) ||
+            sbe::ceq(mma_shape[2], sbe::nu(8)))
+          return true;
+        else if (sbe::ceq(mma_shape[0], sbe::nu(16)) ||
+                 sbe::ceq(mma_shape[1], sbe::nu(16)) ||
+                 sbe::ceq(mma_shape[2], sbe::nu(16))) {
+          // support tf32 mma here
+          Error1(n.LOC(), "MMA [" + STR(ety) + ": " + MMAShapeSTR(mma_shape) +
+                              "] is yet to support.");
+          return true;
+        } else
+          Error1(n.LOC(), "MMA [" + STR(ety) + ": " + MMAShapeSTR(mma_shape) +
+                              "] is not support by current architecture(" +
+                              STR(CCtx().GetArch()) + ").");
+        break;
+      default:
+        choreo_unreachable(STR(ety) + " is not supported by current MMA");
+        break;
+      }
+    } break;
+    case AST::MMAOperation::Store: break;
+    default: choreo_unreachable("unsupported mma operation.");
+    }
+    return true;
+  }
+
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
     if (n.IsArith())

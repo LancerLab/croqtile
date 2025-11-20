@@ -177,6 +177,56 @@ public:
   bool Visit(AST::Memory&) { return true; }
   bool Visit(AST::SpanAs&) { return true; }
   bool Visit(AST::DMA&) { return true; }
+  bool Visit(AST::MMA& n) {
+    auto& op = *n.GetOperation();
+    ValueList mma_shape;
+    switch (op.Tag()) {
+    case AST::MMAOperation::Fill: break;
+    case AST::MMAOperation::Load: break;
+    case AST::MMAOperation::Exec: {
+      auto& a_sym = op.ExecOperand(1);
+      auto& b_sym = op.ExecOperand(2);
+      auto& c_sym = op.ExecOperand(0);
+      auto a_ty = GetSpannedType(GetSymbolType(a_sym));
+      auto b_ty = GetSpannedType(GetSymbolType(b_sym));
+      auto a_shape = a_ty->GetShape();
+      auto b_shape = b_ty->GetShape();
+      switch (op.GetMethod()) {
+      case AST::MMAOperation::ROW_ROW:
+        mma_shape.push_back(a_shape.ValueAt(0));
+        mma_shape.push_back(a_shape.ValueAt(1));
+        mma_shape.push_back(b_shape.ValueAt(0));
+        break;
+      case AST::MMAOperation::ROW_COL:
+        mma_shape.push_back(a_shape.ValueAt(0));
+        mma_shape.push_back(a_shape.ValueAt(1));
+        mma_shape.push_back(b_shape.ValueAt(1));
+        break;
+      case AST::MMAOperation::COL_ROW:
+        mma_shape.push_back(a_shape.ValueAt(1));
+        mma_shape.push_back(a_shape.ValueAt(0));
+        mma_shape.push_back(b_shape.ValueAt(0));
+        break;
+      case AST::MMAOperation::COL_COL:
+        mma_shape.push_back(a_shape.ValueAt(1));
+        mma_shape.push_back(a_shape.ValueAt(0));
+        mma_shape.push_back(b_shape.ValueAt(1));
+        break;
+      default: choreo_unreachable("unsupported mma execution method.");
+      }
+      auto ety = a_ty->ElementType();
+      cgi.AddSymbolMMA(a_sym, MMAInfo{ety, mma_shape, MMAInfo::FRAG_A});
+      cgi.AddSymbolMMA(b_sym, MMAInfo{ety, mma_shape, MMAInfo::FRAG_B});
+      cgi.AddSymbolMMA(c_sym, MMAInfo{ety, mma_shape, MMAInfo::FRAG_C});
+      VST_DEBUG(dbgs() << "mma type: " << STR(ety)
+                       << ", shape: " << STR(mma_shape) << " -> " << a_sym
+                       << ", " << b_sym << ", " << c_sym << "\n");
+    } break;
+    case AST::MMAOperation::Store: break;
+    default: choreo_unreachable("unsupported mma operation.");
+    }
+    return true;
+  }
   bool Visit(AST::ChunkAt&) { return true; }
   bool Visit(AST::Wait&) { return true; }
   bool Visit(AST::Call&) { return true; }

@@ -805,7 +805,7 @@ bool ShapeInference::Visit(AST::ParallelBy& n) {
 
   std::string iv_name = SSTab().ScopedName("@" + n.BPV()->name);
   SymbolAliasNum(iv_name, b_valno);
-  SetNodeType(*n.BPV(), MakeBoundedITupleType(s, "pv"));
+  SetNodeType(*n.BPV(), MakeBoundedITupleType(s));
   DefineASymbol("@" + n.BPV()->name, MakeMDSpanType(s));
   VST_DEBUG(dbgs() << " |-<pvbound> " << n.BPV()->name << ": " << STR(s)
                    << "\n");
@@ -830,7 +830,7 @@ bool ShapeInference::Visit(AST::ParallelBy& n) {
     std::string pv_name = SSTab().ScopedName("@" + id->name);
     SymbolAliasNum(pv_name, valno);
     Shape s = GenShape(valno);
-    SetNodeType(*id, MakeBoundedITupleType(s, "pi:" + idx2dim[index]));
+    SetNodeType(*id, MakeBoundedITupleType(s, "pi", idx2dim[index]));
     DefineASymbol("@" + id->name, MakeMDSpanType(s));
 
     assert(!ast_vn.Hit(id.get(), VNKind::VNK_VALUE) &&
@@ -1739,9 +1739,8 @@ void ShapeInference::DefineASymbol(const std::string& name,
     SSTab().DefineSymbol(name, ty);
   else
     SSTab().DefineSymbol(name, ty->Clone());
-  if (debug_visit)
-    dbgs() << " |-<symtab> add: " << SSTab().InScopeName(name)
-           << ", type: " << PSTR(ty) << "\n";
+  VST_DEBUG(dbgs() << " |-<symtab> add: " << SSTab().InScopeName(name)
+                   << ", type: " << PSTR(ty) << "\n");
 }
 
 const SignTy ShapeInference::SignSpan(const AST::Node& n) {
