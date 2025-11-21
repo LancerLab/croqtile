@@ -194,23 +194,23 @@ public:
       switch (op.GetMethod()) {
       case AST::MMAOperation::ROW_ROW:
         mma_shape.push_back(a_shape.ValueAt(0));
-        mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(0));
+        mma_shape.push_back(a_shape.ValueAt(1));
         break;
       case AST::MMAOperation::ROW_COL:
         mma_shape.push_back(a_shape.ValueAt(0));
-        mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(1));
+        mma_shape.push_back(a_shape.ValueAt(1));
         break;
       case AST::MMAOperation::COL_ROW:
         mma_shape.push_back(a_shape.ValueAt(1));
-        mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(0));
+        mma_shape.push_back(a_shape.ValueAt(0));
         break;
       case AST::MMAOperation::COL_COL:
         mma_shape.push_back(a_shape.ValueAt(1));
-        mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(1));
+        mma_shape.push_back(a_shape.ValueAt(0));
         break;
       default: choreo_unreachable("unsupported mma execution method.");
       }

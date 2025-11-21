@@ -40,9 +40,7 @@ private:
 
       pb->SetMaxLevel(TargetMaxLevel());
 
-      VST_DEBUG(pb->InlinePrint(dbgs());
-                dbgs() << ": level << " << STR(pb->GetLevel()) << " / "
-                       << STR(TargetMaxLevel()) << "\n");
+      VST_DEBUG(pb->InlinePrint(dbgs()); dbgs() << "\n";);
     }
     return true;
   }
@@ -558,30 +556,30 @@ public:
       switch (op.GetMethod()) {
       case AST::MMAOperation::ROW_ROW:
         mma_shape.push_back(a_shape.ValueAt(0));
-        mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(0));
+        mma_shape.push_back(a_shape.ValueAt(1));
         break;
       case AST::MMAOperation::ROW_COL:
         mma_shape.push_back(a_shape.ValueAt(0));
-        mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(1));
+        mma_shape.push_back(a_shape.ValueAt(1));
         break;
       case AST::MMAOperation::COL_ROW:
         mma_shape.push_back(a_shape.ValueAt(1));
-        mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(0));
+        mma_shape.push_back(a_shape.ValueAt(0));
         break;
       case AST::MMAOperation::COL_COL:
         mma_shape.push_back(a_shape.ValueAt(1));
-        mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(1));
+        mma_shape.push_back(a_shape.ValueAt(0));
         break;
       default: choreo_unreachable("unsupported mma execution method.");
       }
       auto MMAShapeSTR = [](ValueList s) {
         assert(s.size() == 3);
         std::ostringstream oss;
-        oss << STR(s[0]) << "x" << STR(s[1]) << "x" << STR(s[2]);
+        oss << "m" << STR(s[0]) << "n" << STR(s[1]) << "k" << STR(s[2]);
         return oss.str();
       };
       auto ety = a_ty->ElementType();
@@ -615,6 +613,8 @@ public:
         choreo_unreachable(STR(ety) + " is not supported by current MMA");
         break;
       }
+      VST_DEBUG(dbgs() << STR(n) << ", mma_size: " << MMAShapeSTR(mma_shape)
+                       << "\n");
     } break;
     case AST::MMAOperation::Store: break;
     default: choreo_unreachable("unsupported mma operation.");
