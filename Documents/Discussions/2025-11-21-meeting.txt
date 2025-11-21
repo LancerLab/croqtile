@@ -1,0 +1,85 @@
+MMA work
+
+Short-Term (DCUT: 2025-12-06 focus p0/p1):
+
+Ref: https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-shape
+
+1. wmma (all dense)
+ - f16: m16n16k16, m8n32k16, m32n8k16 (p0)
+ - bf16: m16n16k16, m8n32k16, m32n8k16 (p0)
+ - tf32: m16n16k8 (p2)
+ - u8/s8: m16n16k16, m8n32k16, m32n8k16 (p2)
+ - u4/s4: m8n8k32 (p1)
+ - b1: m8n8k128 (p3)
+2. mma:
+ dense:
+  - f64: m8n8k4, m16n8k4, m16n8k8, m16n8k16(p3)
+  - f16: m8n8k4, m16n8k8, m16n8k16 (p0)
+  - bf16: m16n8k8, m16n8k16 (p0)
+  - tf32: m16n8k4, m16n8k8 (p2)
+  - u8/s8: m8n8k16, m16n8k16, m16n8k32 (p2)
+  - u4/s4: m8n8k32, m16n8k32, m16n8k64 (p1)
+  - b1: m8n8k128, m16n8k128, m16n8k256 (p3)
+  - e4m3/e5m2: m16n8k32, m16n8k16 (p1)
+  - e3m2/e2m3/e2m1: m16n8k32 (p1)
+ dense-scale:
+  - e4m3/e5m2/e3m2/e2m3/e2m1/ue8m0: m16n8k32 (p1)
+  - e2m1/ue8m0/ue4m3: m16n8k64 (p1)
+ sparse: TODO
+
+1> check for compatible shape and data types (a, b, c): typeinfer/gpuadapt
+2> missing datatypes: i.e. b1, u4/s4
+3> workable code
+
+Mid-Term (DCUT: 2025-12-19, focus on p0):
+1. elementwise operation: (p0)
+ - choice 1: foreach index in mc.span mc.at[index] += 1;  // auto-parallelisation
+ - choice 2: mc += 1;  // high-level semantics
+2. memory allocation: register -> local (p0)
+3. multiple checks, user diagnosis. (p1)
+4. GPU tricks: row.row/col.col/col.row (p2)
+5. More code examples: matmul+relu, conv2d, gemm(4-patterns), mma+dma (p1)
+
+Long-Term (DCUT: 2026-01-06)
+- Performance tuning driven feature development.
+
+Discussion:
+1. how to hint the invalid code:
+
+   parallel {m, n} by [M / MMA_M / 4, N / MMA_N / 4] : block {
+     mc = mma.fill 0.0;  // c = {0}
+     parallel g0 by 4: group {
+       foreach k in K / MMA_K {
+         ma = mma.load lhs.chunkat(m#g0, k);
+         mb = mma.load rhs.chunkat(k, n#g0);
+         mma.row.col mc, ma, mb;   // row * col : c += a * b;
+       }
+       mma.store mc, output.chunkat(m#g0, n#g0);
+     }
+   }
+
+    parallel {m, n} by [M / MMA_M, N / MMA_N] : block {
+      mc = mma.fill 0.0;  // c = {0}
+      parallel g by 4: group {
+        foreach k in K / MMA_K {
+          ma = mma.load lhs.chunkat(m, k#g);
+          mb = mma.load rhs.chunkat(k#g, n);
+          mma.row.col mc, ma, mb;   // row * col : c += a * b;
+        }
+        mma.store mc, output.chunkat(m, n);
+      }
+    }
+
+2. how to make g be evenly used by loading matrix of lhs and rhs
+
+    parallel {m, n} by [M / MMA_M, N / MMA_N] : block {
+      mc = mma.fill 0.0;  // c = {0}
+      parallel {g0, g1} by [2, 2]: group {
+        foreach k in K / MMA_K {
+          ma = mma.load lhs.chunkat(m#g0, k);
+          mb = mma.load rhs.chunkat(k, n#g1);
+          mma.row.col mc, ma, mb;   // row * col : c += a * b;
+        }
+        mma.store mc, output.chunkat(m#g0, n#g1);
+      }
+    }
