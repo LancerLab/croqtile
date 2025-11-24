@@ -1024,13 +1024,18 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     break;
   case ParallelLevel::GROUP: {
     assert(n.AllSubPVs().size() > 0);
-    // group ids are virtual
-    auto group_id_x =
-        (sbe::sym("threadIdx.x") / lconfig.thread_count.x)->Normalize();
-    auto group_id_y =
-        (sbe::sym("threadIdx.y") / lconfig.thread_count.y)->Normalize();
-    auto group_id_z =
-        (sbe::sym("threadIdx.z") / lconfig.thread_count.z)->Normalize();
+    // group ids are virtual on x axis
+    auto group_id_x = (sbe::sym("threadIdx.x") / lconfig.thread_count.x %
+                       lconfig.group_count.x)
+                          ->Normalize();
+    auto group_id_y = (sbe::sym("threadIdx.x") /
+                       (lconfig.thread_count.x * lconfig.group_count.x) %
+                       lconfig.group_count.y)
+                          ->Normalize();
+    auto group_id_z = (sbe::sym("threadIdx.x") /
+                       (lconfig.thread_count.x * lconfig.group_count.x *
+                        lconfig.group_count.y))
+                          ->Normalize();
     if (n.AllSubPVs().size() == 1)
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), ValueSTR(group_id_x));
     ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), ValueSTR(group_id_x));
@@ -1064,9 +1069,11 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
      << ValueSTR(lconfig.block_count.y) << ", "
      << ValueSTR(lconfig.block_count.z) << ");\n";
   // GPU groups are virtual
-  auto tx = (lconfig.thread_count.x * lconfig.group_count.x)->Normalize();
-  auto ty = (lconfig.thread_count.y * lconfig.group_count.y)->Normalize();
-  auto tz = (lconfig.thread_count.z * lconfig.group_count.z)->Normalize();
+  auto tx = (lconfig.thread_count.x * lconfig.group_count.x *
+             lconfig.group_count.y * lconfig.group_count.z)
+                ->Normalize();
+  auto ty = (lconfig.thread_count.y)->Normalize();
+  auto tz = (lconfig.thread_count.z)->Normalize();
   hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
      << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << ValueSTR(tz) << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
