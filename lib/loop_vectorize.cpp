@@ -470,7 +470,7 @@ bool LoopVectorizeLegalityChecker::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
   auto vector_factor = cur_loop->GetVectorFactor();
-  if (vector_factor > max_limits[CCtx().GetArch()]) {
+  if (static_cast<size_t>(vector_factor) > max_limits[CCtx().GetArch()]) {
     if (debug_visit)
       dbgs() << "[plan] vector factor " << cur_loop->GetVectorFactor()
              << " exceeds architecture limit " << max_limits[CCtx().GetArch()]

@@ -403,6 +403,28 @@ public:
       FCtx(cur_fname).InsertAssertion(asrt, loc, message);
   }
 
+  bool ValidMMAConfig(MMALimit::Sparsity s, BaseType mul, BaseType scale,
+                      BaseType acc, ValueList mma_shape,
+                      MMALimit::PTX_ISA_VER isa_ver = 82) {
+    if (mma_shape.size() != 3)
+      choreo_unreachable("unexpected dims size of MMA shape!");
+    assert(IsValueListNumeric(mma_shape));
+    MMALimit::MMAConfig cfg{.sparsity = s,
+                            .mul_ty = mul,
+                            .scale_ty = scale,
+                            .acc_ty = acc,
+                            .shape =
+                                MMALimit::MMAShape{.m = *VIInt(mma_shape[0]),
+                                                   .n = *VIInt(mma_shape[1]),
+                                                   .k = *VIInt(mma_shape[2])}};
+    if (!MMALimit::mma_configs.count(cfg)) return false;
+    if (MMALimit::mma_configs.at(cfg) > isa_ver) {
+      // TODO: warn the incompatibility of ISA version
+      return false;
+    }
+    return true;
+  }
+
 public:
   GPUAdaptor() : VisitorWithSymTab("gpu"), cur_arch(STR(CCtx().GetArch())) {}
   ~GPUAdaptor() {}
@@ -549,8 +571,10 @@ public:
     case AST::MMAOperation::Exec: {
       auto& a_sym = op.ExecOperand(1);
       auto& b_sym = op.ExecOperand(2);
+      auto& c_sym = op.ExecOperand(0);
       auto a_ty = GetSpannedType(GetSymbolType(a_sym));
       auto b_ty = GetSpannedType(GetSymbolType(b_sym));
+      auto c_ty = GetSpannedType(GetSymbolType(c_sym));
       auto a_shape = a_ty->GetShape();
       auto b_shape = b_ty->GetShape();
       switch (op.GetMethod()) {
@@ -582,6 +606,20 @@ public:
         oss << "m" << STR(s[0]) << "n" << STR(s[1]) << "k" << STR(s[2]);
         return oss.str();
       };
+#if 1
+      auto mul_ty = a_ty->ElementType();
+      auto scale_ty = BaseType::UNKNOWN;
+      auto acc_ty = c_ty->ElementType();
+      if (!ValidMMAConfig(MMALimit::DENSE, mul_ty, scale_ty, acc_ty, mma_shape,
+                          82))
+        Error1(n.LOC(), "MMA [" + STR(mul_ty) + "(mul)" +
+                            (scale_ty != BaseType::UNKNOWN
+                                 ? ":" + STR(scale_ty) + "(scale)"
+                                 : "") +
+                            STR(acc_ty) + "(acc):" + MMAShapeSTR(mma_shape) +
+                            "] is not supported by current architecture(" +
+                            STR(CCtx().GetArch()) + ").");
+#else
       auto ety = a_ty->ElementType();
       switch (ety) {
       case BaseType::F16:
@@ -613,6 +651,7 @@ public:
         choreo_unreachable(STR(ety) + " is not supported by current MMA");
         break;
       }
+#endif
       VST_DEBUG(dbgs() << STR(n) << ", mma_size: " << MMAShapeSTR(mma_shape)
                        << "\n");
     } break;

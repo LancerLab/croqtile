@@ -109,6 +109,45 @@ inline int operator-(ParallelLevel lhs, ParallelLevel rhs) {
   return pld.ToDepth(lhs) - pld.ToDepth(rhs);
 }
 
+// MMA related static limitation
+namespace MMALimit {
+
+enum Sparsity { DENSE, SPARSE };
+struct MMAShape {
+  int64_t m, n, k;
+  bool operator<(const MMAShape& rhs) const {
+    return std::tie(m, n, k) < std::tie(rhs.m, rhs.n, rhs.k);
+  }
+};
+struct MMAConfig {
+  Sparsity sparsity;
+  BaseType mul_ty;   // type of Multiplicands(A and B)
+  BaseType scale_ty; // UNKNOWN if NA
+  BaseType acc_ty;   // type of Accumulators(C and D)
+  MMAShape shape;
+
+  bool operator<(const MMAConfig& rhs) const {
+    return std::tie(sparsity, mul_ty, scale_ty, acc_ty, shape) <
+           std::tie(rhs.sparsity, rhs.mul_ty, rhs.scale_ty, rhs.acc_ty,
+                    rhs.shape);
+  }
+};
+
+using BT = BaseType;
+using PTX_ISA_VER = uint8_t;
+
+static const std::map<MMAConfig, PTX_ISA_VER> mma_configs = {
+    {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {16, 16, 16}}, 60},
+    // {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {8, 32, 16}}, 60},
+    // {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {32, 8, 16}}, 60},
+    // // TODO: accumulator could be f32, what's the ISA version?
+    // {{DENSE, BT::BF16, BT::UNKNOWN, BT::BF16, {16, 16, 16}}, 70},
+    // {{DENSE, BT::BF16, BT::UNKNOWN, BT::BF16, {8, 32, 16}}, 70},
+    // {{DENSE, BT::BF16, BT::UNKNOWN, BT::BF16, {32, 8, 16}}, 70},
+};
+
+} // namespace MMALimit
+
 } // end namespace Choreo
 
 #endif // __CHOREO_TARGET_UTILS_HPP__
