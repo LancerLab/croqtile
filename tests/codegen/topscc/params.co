@@ -23,4 +23,4 @@ __co__ auto mou(f8 d, half c, float a, bfp16 e, s32 [7] b) {
 // CHECK:   int* l_b = (int*)(anon_2 + 0);
 // CHECK:   miao((int*)l_b, a, 7, c, d, e);
 // CHECK: }
-// CHECK: void mou(choreo::float_e4m3_t d, choreo::half c, float a, choreo::bfp16 e, const choreo::spanned_view<choreo::s32, 1> & b)
+// CHECK: void mou(choreo::f8_e4m3_t d, choreo::half c, float a, choreo::bfp16 e, const choreo::spanned_view<choreo::s32, 1> & b)

@@ -34,14 +34,20 @@ enum CodeSegment {
   CS_CO,
 };
 
-inline const char* NameBaseType(BaseType bt, bool co_only = true) {
+inline const char* NameBaseType(BaseType bt, bool = true) {
   switch (bt) {
   case BaseType::F64: return "double";
+  case BaseType::TF32: return "tf32";
   case BaseType::F32: return "float";
-  case BaseType::F16: return (co_only) ? "choreo::half" : "choreo::f16";
-  case BaseType::BF16: return (co_only) ? "choreo::bfloat16" : "choreo::bf16";
-  case BaseType::F8_E4M3: return "choreo::float_e4m3_t";
-  case BaseType::F8_E5M2: return "choreo::float_e5m2_t";
+  case BaseType::F16: return "f16";
+  case BaseType::BF16: return "bf16";
+  case BaseType::F8_E4M3: return "f8_e4m3";
+  case BaseType::F8_E5M2: return "f8_e5m2";
+  case BaseType::F8_UE4M3: return "f8_ue4m3";
+  case BaseType::F8_UE8M0: return "f8_ue8m0";
+  case BaseType::F6_E2M3: return "f6_e2m3";
+  case BaseType::F6_E3M2: return "f6_e3m2";
+  case BaseType::F4_E2M1: return "f4_e2m1";
   case BaseType::U64: return "unsigned long long";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
@@ -50,6 +56,14 @@ inline const char* NameBaseType(BaseType bt, bool co_only = true) {
   case BaseType::S32: return "int";
   case BaseType::S16: return "short";
   case BaseType::S8: return "char";
+  case BaseType::U6: return "uint6b_t";
+  case BaseType::U4: return "uint4b_t";
+  case BaseType::U2: return "uint2b_t";
+  case BaseType::U1: return "uint1b_t";
+  case BaseType::S6: return "int6b_t";
+  case BaseType::S4: return "int4b_t";
+  case BaseType::S2: return "int2b_t";
+  case BaseType::BIN1: return "bin1_t";
   case BaseType::BOOL: return "bool";
   default: choreo_unreachable("unsupported base-type: " + STR(bt) + ".");
   }

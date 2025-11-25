@@ -23,20 +23,29 @@
 #define __co_any__ __device__ __host__
 
 #elif defined(__CHOREO_TARGET_CUTE__)
+#ifdef __USE_CUDA_TYPE__
+#include "cuda_bf16.h"
+#include "cuda_fp16.h"
+#include "cuda_fp4.h"
+#include "cuda_fp6.h"
+#include "cuda_fp8.h"
+#endif
 
+// #define __USE_CUTE_TYPE__
+#define __CHOREO_TARGET_NATIVE_TFLOAT32_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
-#define __CHOREO_TARGET_NATIVE_FP8_E4M3_SUPPORT__
-#define __CHOREO_TARGET_NATIVE_FP8_E5M2_SUPPORT__
-#define __CHOREO_TARGET_NATIVE_INTEGRAL_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_FP6_FP4_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
 
 #include "cute/tensor.hpp"
 #include <cuda/barrier>
 #include <mma.h>
 
-#define __co_device__ __device__
-#define __co_host__ __host__
-#define __co_any__ __device__ __host__
+#define __co_device__
+#define __co_host__
+#define __co_any__
 
 #else
 
@@ -263,6 +272,17 @@ public:
 using f64 = double;
 using f32 = float;
 
+#ifdef __CHOREO_TARGET_NATIVE_TFLOAT32_SUPPORT__
+// TF32 is only used in tensor core in CUDA and CUTE
+#if defined(__USE_CUTE_TYPE__)
+using tf32 = cute::tfloat32_t;
+#elif defined(__USE_CUDA_TYPE__)
+using tf32 = cute::tfloat32_t;
+#else
+#error "TF32 type is not supported on this target."
+#endif
+#endif
+
 // Function to convert float to half precision bits
 // Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
 //    and https://en.wikipedia.org/wiki/Single-precision_floating-point_format
@@ -339,6 +359,10 @@ __co_any__ inline static T __f16_to_f32(F value) {
   }
   return *reinterpret_cast<T*>(&resultBits);
 }
+
+struct co_native_base {
+  uint64_t data;
+};
 
 #ifndef __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 // this f16 accepts literal initialization, but without arith support
@@ -421,12 +445,17 @@ inline std::ostream& operator<<(std::ostream& os, const f16& v) {
 }
 
 #else
-#ifdef __CHOREO_TARGET_CUTE__
+#if defined(__USE_CUTE_TYPE__)
+using f16 = cute::half_t;
+using half = cute::half_t;
+#elif defined(__USE_CUDA_TYPE__)
 using f16 = __half;
 using half = __half;
-#else
+#elif defined(__TOPSCC__)
 using f16 = __fp16;
 using half = __fp16;
+#else
+#error "half float is not supported on this target."
 #endif
 #endif // __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 
@@ -541,8 +570,11 @@ inline std::ostream& operator<<(std::ostream& os, const bf16& v) {
 
 #else // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 #ifdef __CHOREO_TARGET_CUTE__
+#ifdef __USE_CUTE_TYPE__
 using __bf16 = cute::bfloat16_t;
-#elif defined(__CUDA_ARCH__)
+#else
+using __bf16 = __nv_bfloat16;
+#endif
 #endif
 using bf16 = __bf16;
 using bfp16 = __bf16;
@@ -566,24 +598,48 @@ using bfloat16 = __bf16;
 //    "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
 #endif
 
-#ifdef __CHOREO_TARGET_NATIVE_FP8_E4M3_SUPPORT__
-#ifdef __CHOREO_TARGET_CUTE__
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+#if defined(__USE_CUTE_TYPE__)
 using cute::float_e4m3_t;
-using f8 = cute::float_e4m3_t; // define f8 as float_e4m3_t
-using f8_e4m3 = cute::float_e4m3_t;
+using cute::float_e5m2_t;
+using cute::float_ue4m3_t;
+using cute::float_ue8m0_t;
+#elif defined(__USE_CUDA_TYPE__)
+using float_e4m3_t = __nv_fp8_e4m3;
+using float_e5m2_t = __nv_fp8_e5m2;
+using float_ue8m0_t = __nv_fp8_e8m0;
+using float_ue4m3_t =
+    choreo::co_native_base; // Placeholder for unsupported type
+#elif defined(__TOPSCC__) || __GCU_ARCH__ >= 400
+// TODO
 #else
 #error "FP8 E4M3 support requires CUTE Target."
 #endif
-#endif // __CHOREO_TARGET_NATIVE_FP8_E4M3_SUPPORT__
+using f8 = float_e4m3_t; // define f8 as float_e4m3_t
+using f8_e4m3 = float_e4m3_t;
+using f8_e5m2 = float_e5m2_t;
+using f8_ue8m0 = float_ue8m0_t;
+using f8_ue4m3 = float_ue4m3_t;
+#endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 
-#ifdef __CHOREO_TARGET_NATIVE_FP8_E5M2_SUPPORT__
-#ifdef __CHOREO_TARGET_CUTE__
-using cute::float_e5m2_t;
-using f8_e5m2 = cute::float_e5m2_t;
+#ifdef __CHOREO_TARGET_NATIVE_FP6_FP4_SUPPORT__
+#if defined(__USE_CUTE_TYPE__)
+using cute::float_e2m1_t;
+using cute::float_e2m3_t;
+using cute::float_e3m2_t;
+#elif defined(__USE_CUDA_TYPE__)
+using float_e3m2_t = __nv_fp6_e3m2;
+using float_e2m3_t = __nv_fp6_e2m3;
+using float_e2m1_t = __nv_fp4_e2m1;
+#elif defined(__TOPSCC__) || __GCU_ARCH__ >= 400
+// TODO
 #else
-#error "FP8 E5M2 support requires CUTE Target."
+#error "FP6/FP4 E3M2 support requires CUTE Target."
 #endif
-#endif // __CHOREO_TARGET_NATIVE_FP8_E5M2_SUPPORT__
+using f6_e3m2 = float_e3m2_t;
+using f6_e2m3 = float_e2m3_t;
+using f4_e2m1 = float_e2m1_t;
+#endif // __CHOREO_TARGET_NATIVE_FP6_FP4_SUPPORT__
 
 // Unsigned integer types
 using u64 = uint64_t; // 64-bit unsigned integer
@@ -597,10 +653,9 @@ using s32 = int32_t; // 32-bit signed integer
 using s16 = int16_t; // 16-bit signed integer
 using s8 = int8_t;   // 8-bit signed integer
 
-#if 0 // TODO: enable later
-// Tiny integer types
-#ifdef __CHOREO_TARGET_NATIVE_INTEGRAL_SUPPORT__
-#ifdef __CHOREO_TARGET_CUTE__
+// Sub-Byte integer types
+#ifdef __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
+#if defined(__USE_CUDA_TYPE__) || defined(__USE_CUTE_TYPE__)
 using cute::bin1_t;
 using cute::int2b_t;
 using cute::int4b_t;
@@ -609,9 +664,18 @@ using cute::uint1b_t;
 using cute::uint2b_t;
 using cute::uint4b_t;
 using cute::uint6b_t;
+#else
+#error "Sub-Byte integer types is not supported on this target."
 #endif
-#endif // __CHOREO_TARGET_NATIVE_INTEGRAL_SUPPORT__
-#endif
+using bin1 = bin1_t;
+using s2 = int2b_t;
+using s4 = int4b_t;
+using s6 = int6b_t;
+using u1 = uint1b_t;
+using u2 = uint2b_t;
+using u4 = uint4b_t;
+using u6 = uint6b_t;
+#endif // __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
 
 namespace utils {
 
@@ -678,19 +742,52 @@ fill_random(U* array, size_t N, float lb, float ub) {
   std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
 }
 
-#if defined(__CHOREO_TARGET_NATIVE_FP8_E4M3_SUPPORT__) ||                      \
-    defined(__CHOREO_TARGET_NATIVE_FP8_E5M2_SUPPORT__)
+#if defined(__CHOREO_TARGET_NATIVE_FP8_SUPPORT__)
 // float_e4m3_t float_e5m2_t
 template <typename U>
 inline typename std::enable_if<std::is_same<U, float_e4m3_t>::value ||
                                    std::is_same<U, float_e5m2_t>::value,
                                void>::type
-fill_random(U* array, size_t N, U lb, U ub) {
+fill_random(U* array, size_t N, float lb, float ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<float> rand_func(lb, ub); // [lb, ub)
+  std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
+}
+#endif
+
+#if defined(__CHOREO_TARGET_NATIVE_FP6_FP4_SUPPORT__)
+// float_e3m2_t float_e2m3_t float_e2m1_t
+template <typename U>
+inline typename std::enable_if<std::is_same<U, float_e3m2_t>::value ||
+                                   std::is_same<U, float_e2m3_t>::value ||
+                                   std::is_same<U, float_e2m1_t>::value,
+                               void>::type
+fill_random(U* array, size_t N, float lb, float ub) {
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<float> rand_func(lb, ub); // [lb, ub)
 
   std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
+}
+#endif // __CHOREO_TARGET_NATIVE_FP6_FP4_SUPPORT__
+
+#if defined(__CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__)
+// tiny integer types
+template <typename U>
+inline typename std::enable_if<
+    std::is_same<U, uint4b_t>::value || std::is_same<U, uint6b_t>::value ||
+        std::is_same<U, uint2b_t>::value || std::is_same<U, uint1b_t>::value ||
+        std::is_same<U, int6b_t>::value || std::is_same<U, int4b_t>::value ||
+        std::is_same<U, int2b_t>::value || std::is_same<U, bin1_t>::value,
+    void>::type
+fill_random(U* array, size_t N, int lb, int ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int> rand_func(lb, ub); // [lb, ub)
+
+  std::generate_n(&array[0], N,
+                  [&]() { return static_cast<U>(rand_func(gen)); });
 }
 #endif
 
@@ -698,12 +795,12 @@ fill_random(U* array, size_t N, U lb, U ub) {
 // if T is integer, utilize std::uniform_int_distribution
 template <typename U>
 inline typename std::enable_if<std::is_integral<U>::value, void>::type
-fill_random(U* array, size_t N, U lb, U ub) {
+fill_random(U* array, size_t N, int lb, int ub) {
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_int_distribution<U> rand_func(lb, ub); // [lb, ub]
+  std::uniform_int_distribution<int> rand_func(lb, ub); // [lb, ub]
 
-  std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+  std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
 }
 } // end namespace utils
 
@@ -842,8 +939,7 @@ public:
 
   template <typename U>
   __co_host__ void fill_random(U lb, U ub) {
-    utils::fill_random(this->data(), this->element_count(), static_cast<T>(lb),
-                       static_cast<T>(ub));
+    utils::fill_random(this->data(), this->element_count(), lb, ub);
   }
 
   __co_host__ spanned_view<T, Rank> view() {

@@ -37,6 +37,8 @@ extern Option<std::string> target_options;
 extern Option<bool> no_decay_spanview;
 extern Option<bool> dma_verbose;
 extern Option<bool> dma_opt;
+Option<bool> use_cuda_type(OptionKind::Hidden, "-use-cuda-type", "", true,
+                           "use cuda built-in types.");
 
 namespace cute {
 
@@ -2752,7 +2754,12 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
+  if (use_cuda_type)
+    os << " -D__USE_CUDA_TYPE__";
+  else
+    os << " -D__USE_CUTE_TYPE__";
+
   if (CCtx().GenDebugInfo()) os << " -g";
   if (CCtx().DMADiagnosis()) os << " -D__CHOREO_DMA_DIAGNOSIS__";
   if (!target_options.GetValue().empty())

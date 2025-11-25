@@ -9,22 +9,22 @@ __co__ auto mem_reuse0(u8 [K, N] i0, u8 [K, N] i1) {
   u8 [i0.span] output;
 
   parallel p by 8, q by 128 {
-    s1 = dma.copy.async i0.chunkat(p, _) => shared;
-    shared u8 [s1.span] output_s{0};
-    wait s1;
+    smem1 = dma.copy.async i0.chunkat(p, _) => shared;
+    shared u8 [smem1.span] output_s{0};
+    wait smem1;
 
     foreach i in [output_s.span(0)] {
-      output_s.at(i, q) = s1.data.at(i, q);
-      output_s.at(i, q + 128) = s1.data.at(i, q + 128);
+      output_s.at(i, q) = smem1.data.at(i, q);
+      output_s.at(i, q + 128) = smem1.data.at(i, q + 128);
     }
 
-    // s2 reuse s1
-    s2 = dma.copy.async i1.chunkat(p, _) => shared;
-    wait s2;
+    // smem2 reuse smem1
+    smem2 = dma.copy.async i1.chunkat(p, _) => shared;
+    wait smem2;
 
     foreach i in [output_s.span(0)] {
-      output_s.at(i, q) += s2.data.at(i, q);
-      output_s.at(i, q + 128) += s2.data.at(i, q + 128);
+      output_s.at(i, q) += smem2.data.at(i, q);
+      output_s.at(i, q + 128) += smem2.data.at(i, q + 128);
     }
 
     dma.copy output_s => output.chunkat(p, _);

@@ -341,7 +341,7 @@ bool TypeInference::Visit(AST::DataAccess& n) {
   auto dty = GetSymbolType(n.LOC(), n.GetDataName());
   if (n.AccessElement()) {
     auto sty = cast<SpannedType>(dty);
-    SetNodeType(n, MakeElemScalarType(sty->ElementType()));
+    SetNodeType(n, MakeScalarType(sty->ElementType()));
   } else
     SetNodeType(n, dty);
 #endif
@@ -359,7 +359,7 @@ bool TypeInference::Visit(AST::Assignment& n) {
     // should be assigned already by DataAccess
     assert(isa<ScalarType>(NodeType(*n.da)));
     auto dty = GetSymbolType(n.LOC(), n.GetDataArrayName());
-    auto ety = MakeElemScalarType(cast<SpannedType>(dty)->ElementType());
+    auto ety = MakeScalarType(cast<SpannedType>(dty)->ElementType());
     SetNodeType(*n.da, ety);
     SetNodeType(n, ety);
     return true;

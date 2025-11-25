@@ -189,7 +189,8 @@ void choreo_info(const char *message) {
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
 %token <Choreo::Storage> STORAGE
 %token <Choreo::ParallelLevel> PBLEVEL
-%token <Choreo::BaseType> F64 F32 F16 BF16 F8_E4M3 F8_E5M2 U16 S16 U8 S8 U32 S32 U64 S64 BOOL VOID INT
+%token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
+%token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 // MMA related builtin operations
@@ -578,11 +579,25 @@ mdspan_as_type
 
 fundamental_type
     : F64   { $$ = $1; }
+    | TF32   { $$ = $1; }
     | F32   { $$ = $1; }
     | F16   { $$ = $1; }
     | BF16  { $$ = $1; }
     | F8_E4M3 { $$ = $1; }
     | F8_E5M2 { $$ = $1; }
+    | F8_UE4M3 { $$ = $1; }
+    | F8_UE8M0 { $$ = $1; }
+    | F6_E2M3 { $$ = $1; }
+    | F6_E3M2 { $$ = $1; }
+    | F4_E2M1 { $$ = $1; }
+    | U1 { $$ = $1; }
+    | BIN1 { $$ = $1; }
+    | S2 { $$ = $1; }
+    | U2 { $$ = $1; }
+    | S4 { $$ = $1; }
+    | U4 { $$ = $1; }
+    | S6 { $$ = $1; }
+    | U6 { $$ = $1; }
     | U16   { $$ = $1; }
     | S16   { $$ = $1; }
     | U8    { $$ = $1; }
@@ -1417,12 +1432,26 @@ const_sizeof /* make it immediate values */
     | PIPE U16 PIPE { $$ = 2; }
     | PIPE S8 PIPE { $$ = 1; }
     | PIPE U8 PIPE { $$ = 1; }
+    | PIPE U6 PIPE { $$ = 1; }
+    | PIPE S6 PIPE { $$ = 1; }
+    | PIPE U4 PIPE { $$ = 1; }
+    | PIPE S4 PIPE { $$ = 1; }
+    | PIPE U2 PIPE { $$ = 1; }
+    | PIPE S2 PIPE { $$ = 1; }
+    | PIPE BIN1 PIPE { $$ = 1; }
+    | PIPE U1 PIPE { $$ = 1; }
     | PIPE F64 PIPE { $$ = 8; }
+    | PIPE TF32 PIPE { $$ = 4; }
     | PIPE F32 PIPE { $$ = 4; }
     | PIPE BF16 PIPE { $$ = 2; }
     | PIPE F16 PIPE { $$ = 2; }
     | PIPE F8_E4M3 PIPE { $$ = 1; }
     | PIPE F8_E5M2 PIPE { $$ = 1; }
+    | PIPE F8_UE4M3 PIPE { $$ = 1; }
+    | PIPE F8_UE8M0 PIPE { $$ = 1; }
+    | PIPE F6_E2M3 PIPE { $$ = 1; }
+    | PIPE F6_E3M2 PIPE { $$ = 1; }
+    | PIPE F4_E2M1 PIPE { $$ = 1; }
     ;
 
 mdspan_expr

@@ -41,10 +41,16 @@ namespace Choreo {
 enum class BaseType {
   F64,
   F32,
+  TF32,
   F16,
   BF16,
   F8_E4M3,
   F8_E5M2,
+  F8_UE8M0,
+  F8_UE4M3,
+  F6_E2M3,
+  F6_E3M2,
+  F4_E2M1,
   U64,
   S64,
   U32,
@@ -53,6 +59,15 @@ enum class BaseType {
   S16,
   U8,
   S8,
+  U6,
+  S6,
+  U4,
+  S4,
+  U2,
+  S2,
+  BIN1,
+  U1,
+  // End of ELEMENT TYPES
   BOOL,
   INDEX,
   ITUPLE,
@@ -75,14 +90,21 @@ enum class BaseType {
 
 inline static int IntegerBaseTypeRank(BaseType bt) {
   switch (bt) {
-  case BaseType::U64: return 9;
-  case BaseType::S64: return 8;
-  case BaseType::U32: return 7;
-  case BaseType::S32: return 6;
-  case BaseType::U16: return 5;
-  case BaseType::S16: return 4;
-  case BaseType::U8: return 3;
-  case BaseType::S8: return 2;
+  case BaseType::U64: return 15;
+  case BaseType::S64: return 14;
+  case BaseType::U32: return 13;
+  case BaseType::S32: return 12;
+  case BaseType::U16: return 11;
+  case BaseType::S16: return 10;
+  case BaseType::U8: return 9;
+  case BaseType::S8: return 8;
+  case BaseType::U6: return 7;
+  case BaseType::S6: return 6;
+  case BaseType::U4: return 5;
+  case BaseType::S4: return 4;
+  case BaseType::U2: return 3;
+  case BaseType::S2: return 2;
+  case BaseType::U1: return 1;
   case BaseType::BOOL: return 1;
   case BaseType::UNKNOWN: return 0;
   case BaseType::UNSPECVAL: return 0;
@@ -98,7 +120,10 @@ inline static bool ApprxEqual(BaseType lty, BaseType rty) {
 inline static bool IsIntegerBaseType(BaseType bt) {
   return bt == BaseType::S64 || bt == BaseType::U64 || bt == BaseType::S32 ||
          bt == BaseType::U32 || bt == BaseType::S16 || bt == BaseType::U16 ||
-         bt == BaseType::S8 || bt == BaseType::U8;
+         bt == BaseType::S8 || bt == BaseType::U8 || bt == BaseType::S6 ||
+         bt == BaseType::U6 || bt == BaseType::S4 || bt == BaseType::U4 ||
+         bt == BaseType::S2 || bt == BaseType::U2 || bt == BaseType::U1 ||
+         bt == BaseType::BIN1;
 }
 
 inline static bool IsBoolIntegerBaseType(BaseType bt) {
@@ -108,7 +133,8 @@ inline static bool IsBoolIntegerBaseType(BaseType bt) {
 inline static bool IsSignedIntegerBaseType(BaseType bt) {
   assert(IsIntegerBaseType(bt));
   return bt == BaseType::S64 || bt == BaseType::S32 || bt == BaseType::S16 ||
-         bt == BaseType::S8;
+         bt == BaseType::S8 || bt == BaseType::S6 || bt == BaseType::S4 ||
+         bt == BaseType::S2 || bt == BaseType::BIN1;
 }
 
 inline static bool IsUnsignedIntegerBaseType(BaseType bt) {
@@ -117,14 +143,32 @@ inline static bool IsUnsignedIntegerBaseType(BaseType bt) {
 }
 
 inline static bool IsFloatPointBaseType(BaseType bt) {
-  return bt == BaseType::F64 || bt == BaseType::F32 || bt == BaseType::F16 ||
-         bt == BaseType::BF16 || bt == BaseType::F8_E4M3 ||
-         bt == BaseType::F8_E5M2;
+  return bt == BaseType::F64 || bt == BaseType::F32 || bt == BaseType::TF32 ||
+         bt == BaseType::F16 || bt == BaseType::BF16 ||
+         bt == BaseType::F8_E4M3 || bt == BaseType::F8_E5M2 ||
+         bt == BaseType::F8_UE8M0 || bt == BaseType::F8_UE4M3 ||
+         bt == BaseType::F6_E2M3 || bt == BaseType::F6_E3M2 ||
+         bt == BaseType::F4_E2M1;
 }
 
 inline static bool IsScalarBaseType(BaseType bt) {
   return IsIntegerBaseType(bt) || IsFloatPointBaseType(bt) ||
          bt == BaseType::BOOL;
+}
+
+inline static bool IsFloatSubByteType(BaseType bt) {
+  return bt == BaseType::F6_E2M3 || bt == BaseType::F6_E3M2 ||
+         bt == BaseType::F4_E2M1;
+}
+
+inline static bool IsIntegerSubByteType(BaseType bt) {
+  return bt == BaseType::S6 || bt == BaseType::U6 || bt == BaseType::S4 ||
+         bt == BaseType::U4 || bt == BaseType::S2 || bt == BaseType::U2 ||
+         bt == BaseType::U1 || bt == BaseType::BIN1;
+}
+
+inline static bool IsSubByteType(BaseType bt) {
+  return IsFloatSubByteType(bt) || IsIntegerSubByteType(bt);
 }
 
 // note: FundamentalType does not contain Bool
@@ -163,12 +207,14 @@ inline static std::string STR(ParamAttr at) {
 }
 
 inline static size_t SizeOf(BaseType bt) {
+  if (!IsScalarBaseType(bt)) { choreo_unreachable("base type is not scalar."); }
   switch (bt) {
   case BaseType::F64: return sizeof(double);
   case BaseType::U64:
   case BaseType::S64: return 8;
   case BaseType::BOUNDED_INT:
   case BaseType::F32:
+  case BaseType::TF32:
   case BaseType::U32:
   case BaseType::S32: return 4;
   case BaseType::F16:
@@ -177,10 +223,23 @@ inline static size_t SizeOf(BaseType bt) {
   case BaseType::S16: return 2;
   case BaseType::F8_E4M3:
   case BaseType::F8_E5M2:
+  case BaseType::F8_UE8M0:
+  case BaseType::F8_UE4M3:
   case BaseType::U8:
-  case BaseType::S8: return 1;
+  case BaseType::S8:
+  case BaseType::U6:
+  case BaseType::S6:
+  case BaseType::F6_E3M2:
+  case BaseType::F6_E2M3:
+  case BaseType::F4_E2M1:
+  case BaseType::U4:
+  case BaseType::S4:
+  case BaseType::U2:
+  case BaseType::S2: return 1;
+  case BaseType::BIN1:
+  case BaseType::U1:
   case BaseType::BOOL: return sizeof(bool);
-  default: choreo_unreachable("base type is not supported.");
+  default: break;
   }
   return 0;
 }
@@ -189,9 +248,17 @@ inline static size_t SizeOf(BaseType bt) {
 inline static BaseType BaseTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
       {"f64", BaseType::F64},
+      {"tf32", BaseType::TF32},
       {"f32", BaseType::F32},
       {"f16", BaseType::F16},
       {"bf16", BaseType::BF16},
+      {"f8_e4m3", BaseType::F8_E4M3},
+      {"f8_e5m2", BaseType::F8_E5M2},
+      {"f8_ue8m0", BaseType::F8_UE8M0},
+      {"f8_ue4m3", BaseType::F8_UE4M3},
+      {"f6_e2m3", BaseType::F6_E2M3},
+      {"f6_e3m2", BaseType::F6_E3M2},
+      {"f4_e2m1", BaseType::F4_E2M1},
       {"u64", BaseType::U64},
       {"s64", BaseType::S64},
       {"u32", BaseType::U32},
@@ -200,8 +267,14 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
       {"s16", BaseType::S16},
       {"u8", BaseType::U8},
       {"s8", BaseType::S8},
-      {"f8_e4m3", BaseType::F8_E4M3},
-      {"f8_e5m2", BaseType::F8_E5M2},
+      {"u6", BaseType::U6},
+      {"s6", BaseType::S6},
+      {"u4", BaseType::U4},
+      {"s4", BaseType::S4},
+      {"u2", BaseType::U2},
+      {"s2", BaseType::S2},
+      {"bin1", BaseType::BIN1},
+      {"u1", BaseType::U1},
       {"bool", BaseType::BOOL},
       {"index", BaseType::INDEX},
       {"partial", BaseType::PARTIAL},
@@ -229,7 +302,7 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
   return it->second;
 }
 
-// map from device type string to BaseType
+// map from common device type string to BaseType
 inline static BaseType DSTR2BT(std::string type_name) {
   static const std::map<std::string, BaseType> known_types = {
       {"char", BaseType::S8},          {"short", BaseType::S16},
@@ -258,6 +331,7 @@ inline static std::string GetStringFrom(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
       {BaseType::F64, "f64"},
       {BaseType::F32, "f32"},
+      {BaseType::TF32, "tf32"},
       {BaseType::F16, "f16"},
       {BaseType::BF16, "bf16"},
       {BaseType::U64, "u64"},
@@ -266,10 +340,23 @@ inline static std::string GetStringFrom(BaseType dataType) {
       {BaseType::S32, "s32"},
       {BaseType::U16, "u16"},
       {BaseType::S16, "s16"},
-      {BaseType::U8, "u8"},
-      {BaseType::S8, "s8"},
       {BaseType::F8_E4M3, "f8_e4m3"},
       {BaseType::F8_E5M2, "f8_e5m2"},
+      {BaseType::F8_UE8M0, "f8_ue8m0"},
+      {BaseType::F8_UE4M3, "f8_ue4m3"},
+      {BaseType::F6_E2M3, "f6_e2m3"},
+      {BaseType::F6_E3M2, "f6_e3m2"},
+      {BaseType::F4_E2M1, "f4_e2m1"},
+      {BaseType::U8, "u8"},
+      {BaseType::S8, "s8"},
+      {BaseType::U6, "u6"},
+      {BaseType::S6, "s6"},
+      {BaseType::U4, "u4"},
+      {BaseType::S4, "s4"},
+      {BaseType::U2, "u2"},
+      {BaseType::S2, "s2"},
+      {BaseType::U1, "u1"},
+      {BaseType::BIN1, "bin1"},
       {BaseType::BOOL, "bool"},
       {BaseType::ITUPLE, "ituple"},
       {BaseType::PARTIAL, "partial"},
@@ -973,6 +1060,111 @@ struct ScalarIntegerType : public ScalarType,
   __UDT_TYPE_INFO__(ScalarType, ScalarIntegerType)
 };
 
+struct Bin1Type final : public ScalarIntegerType,
+                        public TypeIDProvider<Bin1Type> {
+  Bin1Type(bool m) : ScalarIntegerType(BaseType::BIN1, m) {}
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<Bin1Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<Bin1Type>(m);
+  }
+
+  __UDT_TYPE_INFO__(ScalarIntegerType, Bin1Type)
+};
+
+struct U1Type final : public ScalarIntegerType, public TypeIDProvider<U1Type> {
+  U1Type(bool m) : ScalarIntegerType(BaseType::U1, m) {}
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<U1Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<U1Type>(m);
+  }
+
+  __UDT_TYPE_INFO__(ScalarIntegerType, U1Type)
+};
+
+struct S2Type final : public ScalarIntegerType, public TypeIDProvider<S2Type> {
+  S2Type(bool m) : ScalarIntegerType(BaseType::S2, m) {}
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<S2Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<S2Type>(m);
+  }
+
+  __UDT_TYPE_INFO__(ScalarIntegerType, S2Type)
+};
+
+struct U2Type final : public ScalarIntegerType, public TypeIDProvider<U2Type> {
+  U2Type(bool m) : ScalarIntegerType(BaseType::U2, m) {}
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<U2Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<U2Type>(m);
+  }
+
+  __UDT_TYPE_INFO__(ScalarIntegerType, U2Type)
+};
+
+struct S4Type final : public ScalarIntegerType, public TypeIDProvider<S4Type> {
+  S4Type(bool m) : ScalarIntegerType(BaseType::S4, m) {}
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<S4Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<S4Type>(m);
+  }
+
+  __UDT_TYPE_INFO__(ScalarIntegerType, S4Type)
+};
+
+struct U4Type final : public ScalarIntegerType, public TypeIDProvider<U4Type> {
+  U4Type(bool m) : ScalarIntegerType(BaseType::U4, m) {}
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<U4Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<U4Type>(m);
+  }
+
+  __UDT_TYPE_INFO__(ScalarIntegerType, U4Type)
+};
+
+struct S6Type final : public ScalarIntegerType, public TypeIDProvider<S6Type> {
+  S6Type(bool m) : ScalarIntegerType(BaseType::S6, m) {}
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<S6Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<S6Type>(m);
+  }
+
+  __UDT_TYPE_INFO__(ScalarIntegerType, S6Type)
+};
+
+struct U6Type final : public ScalarIntegerType, public TypeIDProvider<U6Type> {
+  U6Type(bool m) : ScalarIntegerType(BaseType::U6, m) {}
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<U6Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<U6Type>(m);
+  }
+
+  __UDT_TYPE_INFO__(ScalarIntegerType, U6Type)
+};
+
 struct S8Type final : public ScalarIntegerType, public TypeIDProvider<S8Type> {
   S8Type(bool m) : ScalarIntegerType(BaseType::S8, m) {}
 
@@ -1096,6 +1288,66 @@ struct ScalarFloatType : public ScalarType,
   __UDT_TYPE_INFO__(ScalarType, ScalarFloatType)
 };
 
+struct FloatE2M1Type final : public ScalarFloatType,
+                             public TypeIDProvider<FloatE2M1Type> {
+  FloatE2M1Type(bool m) : ScalarFloatType(BaseType::F4_E2M1, m) {}
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<FloatE2M1Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<FloatE2M1Type>(m);
+  }
+  __UDT_TYPE_INFO__(ScalarFloatType, FloatE2M1Type)
+};
+
+struct FloatE3M2Type final : public ScalarFloatType,
+                             public TypeIDProvider<FloatE3M2Type> {
+  FloatE3M2Type(bool m) : ScalarFloatType(BaseType::F6_E3M2, m) {}
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<FloatE3M2Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<FloatE3M2Type>(m);
+  }
+  __UDT_TYPE_INFO__(ScalarFloatType, FloatE3M2Type)
+};
+
+struct FloatE2M3Type final : public ScalarFloatType,
+                             public TypeIDProvider<FloatE2M3Type> {
+  FloatE2M3Type(bool m) : ScalarFloatType(BaseType::F6_E2M3, m) {}
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<FloatE2M3Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<FloatE2M3Type>(m);
+  }
+  __UDT_TYPE_INFO__(ScalarFloatType, FloatE2M3Type)
+};
+
+struct FloatUE8M0Type final : public ScalarFloatType,
+                              public TypeIDProvider<FloatUE8M0Type> {
+  FloatUE8M0Type(bool m) : ScalarFloatType(BaseType::F8_UE8M0, m) {}
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<FloatUE8M0Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<FloatUE8M0Type>(m);
+  }
+  __UDT_TYPE_INFO__(ScalarFloatType, FloatUE8M0Type)
+};
+
+struct FloatUE4M3Type final : public ScalarFloatType,
+                              public TypeIDProvider<FloatUE4M3Type> {
+  FloatUE4M3Type(bool m) : ScalarFloatType(BaseType::F8_UE4M3, m) {}
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<FloatUE4M3Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<FloatUE4M3Type>(m);
+  }
+  __UDT_TYPE_INFO__(ScalarFloatType, FloatUE4M3Type)
+};
+
 struct FloatE4M3Type final : public ScalarFloatType,
                              public TypeIDProvider<FloatE4M3Type> {
   FloatE4M3Type(bool m) : ScalarFloatType(BaseType::F8_E4M3, m) {}
@@ -1143,6 +1395,17 @@ struct BF16Type final : public ScalarFloatType,
   __UDT_TYPE_INFO__(ScalarFloatType, BF16Type)
 };
 
+struct TF32Type final : public ScalarFloatType,
+                        public TypeIDProvider<TF32Type> {
+  TF32Type(bool m) : ScalarFloatType(BaseType::F32, m) {}
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<TF32Type>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<TF32Type>(m);
+  }
+  __UDT_TYPE_INFO__(ScalarFloatType, TF32Type)
+};
 struct F32Type final : public ScalarFloatType, public TypeIDProvider<F32Type> {
   F32Type(bool m) : ScalarFloatType(BaseType::F32, m) {}
   const ptr<Type> CloneImpl() const override {
@@ -2267,6 +2530,14 @@ inline ptr<UnknownType> MakeUnknownType() {
 inline ptr<ScalarIntegerType> MakeScalarIntegerType(BaseType t,
                                                     bool m = false) {
   switch (t) {
+  case BaseType::U1: return std::make_shared<U1Type>(m);
+  case BaseType::BIN1: return std::make_shared<Bin1Type>(m);
+  case BaseType::U2: return std::make_shared<U2Type>(m);
+  case BaseType::S2: return std::make_shared<S2Type>(m);
+  case BaseType::U4: return std::make_shared<U4Type>(m);
+  case BaseType::S4: return std::make_shared<S4Type>(m);
+  case BaseType::U6: return std::make_shared<U6Type>(m);
+  case BaseType::S6: return std::make_shared<S6Type>(m);
   case BaseType::S8: return std::make_shared<S8Type>(m);
   case BaseType::U8: return std::make_shared<U8Type>(m);
   case BaseType::S16: return std::make_shared<S16Type>(m);
@@ -2297,10 +2568,16 @@ inline ptr<BooleanType> MakeBooleanType(bool m = false) {
 
 inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt, bool m = false) {
   switch (bt) {
+  case BaseType::F4_E2M1: return std::make_shared<FloatE2M1Type>(m);
+  case BaseType::F6_E3M2: return std::make_shared<FloatE3M2Type>(m);
+  case BaseType::F6_E2M3: return std::make_shared<FloatE2M3Type>(m);
+  case BaseType::F8_UE8M0: return std::make_shared<FloatUE8M0Type>(m);
+  case BaseType::F8_UE4M3: return std::make_shared<FloatUE4M3Type>(m);
   case BaseType::F8_E4M3: return std::make_shared<FloatE4M3Type>(m);
   case BaseType::F8_E5M2: return std::make_shared<FloatE5M2Type>(m);
   case BaseType::F16: return std::make_shared<F16Type>(m);
   case BaseType::BF16: return std::make_shared<BF16Type>(m);
+  case BaseType::TF32: return std::make_shared<TF32Type>(m);
   case BaseType::F32: return std::make_shared<F32Type>(m);
   case BaseType::F64: return std::make_shared<F64Type>(m);
   default: choreo_unreachable("unsupported base type.");
@@ -2308,26 +2585,17 @@ inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt, bool m = false) {
   return nullptr;
 }
 
-inline ptr<ScalarType> MakeScalarType(BaseType bt, bool m = false) {
-  switch (bt) {
-  case BaseType::S8: return std::make_shared<S8Type>(m);
-  case BaseType::U8: return std::make_shared<U8Type>(m);
-  case BaseType::S16: return std::make_shared<S16Type>(m);
-  case BaseType::U16: return std::make_shared<U16Type>(m);
-  case BaseType::S32: return std::make_shared<IntegerType>(m);
-  case BaseType::U32: return std::make_shared<U32Type>(m);
-  case BaseType::S64: return std::make_shared<S64Type>(m);
-  case BaseType::U64: return std::make_shared<U64Type>(m);
-  case BaseType::BOOL: return std::make_shared<BooleanType>(m);
-  case BaseType::F8_E4M3: return std::make_shared<FloatE4M3Type>(m);
-  case BaseType::F8_E5M2: return std::make_shared<FloatE5M2Type>(m);
-  case BaseType::F16: return std::make_shared<F16Type>(m);
-  case BaseType::BF16: return std::make_shared<BF16Type>(m);
-  case BaseType::F32: return std::make_shared<F32Type>(m);
-  case BaseType::F64: return std::make_shared<F64Type>(m);
-  default: choreo_unreachable("unsupported base type.");
+inline static ptr<Type> MakeScalarType(BaseType bt, bool m = false) {
+  if (IsIntegerBaseType(bt))
+    return MakeScalarIntegerType(bt, m);
+  else if (IsFloatPointBaseType(bt))
+    return MakeScalarFloatType(bt, m);
+  else if (bt == BaseType::BOOL)
+    return MakeBooleanType(m);
+  else {
+    choreo_unreachable("unsupported base type for scalar type.");
+    return nullptr;
   }
-  return nullptr;
 }
 
 inline ptr<ScalarFloatType> MakeF32Type(bool m = false) {
@@ -2621,27 +2889,6 @@ inline static BaseType GetUnderlyingType(const ptr<Type>& ty) {
   else if (CanYieldAnInteger(ty))
     return BaseType::S32;
   return BaseType::UNKNOWN;
-}
-
-inline static ptr<Type> MakeElemScalarType(BaseType bt, bool m = false) {
-  switch (bt) {
-  case BaseType::F64:
-  case BaseType::F32:
-  case BaseType::F16:
-  case BaseType::BF16:
-  case BaseType::F8_E4M3:
-  case BaseType::F8_E5M2: return MakeScalarFloatType(bt, m);
-  case BaseType::S64:
-  case BaseType::U64:
-  case BaseType::S32:
-  case BaseType::U32:
-  case BaseType::U16:
-  case BaseType::S16:
-  case BaseType::U8:
-  case BaseType::S8:
-    return MakeScalarIntegerType(bt, m); // convert all implicitly?
-  default: choreo_unreachable("unsupported base type: " + STR(bt) + ".");
-  }
 }
 
 struct PromoteResult {

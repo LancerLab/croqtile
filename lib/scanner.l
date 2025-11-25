@@ -462,11 +462,17 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "mutable"  return Choreo::Parser::make_MUTABLE(yytext, loc);
   "f64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F64(BaseType::F64, loc); }
   "f32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F32(BaseType::F32, loc); }
+  "tf32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_TF32(BaseType::TF32, loc); }
   "f16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F16(BaseType::F16, loc); }
   "bf16"     { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_BF16(BaseType::BF16, loc); }
   "f8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F8_E4M3(BaseType::F8_E4M3, loc); }
   "f8_e4m3"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F8_E4M3(BaseType::F8_E4M3, loc); }
   "f8_e5m2"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F8_E5M2(BaseType::F8_E5M2, loc); }
+  "f8_ue4m3"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F8_UE4M3(BaseType::F8_UE4M3, loc); }
+  "f8_ue8m0"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F8_UE8M0(BaseType::F8_UE8M0, loc); }
+  "f6_e3m2"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F6_E3M2(BaseType::F6_E3M2, loc); }
+  "f6_e2m3"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F6_E2M3(BaseType::F6_E2M3, loc); }
+  "f4_e2m1"  { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F4_E2M1(BaseType::F4_E2M1, loc); }
   "u32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U32(BaseType::U32, loc); }
   "s32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S32(BaseType::S32, loc); }
   "u64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U64(BaseType::U64, loc); }
@@ -475,6 +481,14 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "s16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S16(BaseType::S16, loc); }
   "u8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U8(BaseType::U8, loc); }
   "s8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S8(BaseType::S8, loc); }
+  "u6"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U6(BaseType::U6, loc); }
+  "s6"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S6(BaseType::S6, loc); }
+  "u4"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U4(BaseType::U4, loc); }
+  "s4"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S4(BaseType::S4, loc); }
+  "u2"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U2(BaseType::U2, loc); }
+  "s2"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S2(BaseType::S2, loc); }
+  "bin1"     { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_BIN1(BaseType::BIN1, loc); }
+  "u1"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U1(BaseType::U1, loc); }
   "int"      return Choreo::Parser::make_INT(BaseType::S32, loc);
   "bool"     return Choreo::Parser::make_BOOL(BaseType::BOOL, loc);
   "half"     return Choreo::Parser::make_F16(BaseType::F16, loc);

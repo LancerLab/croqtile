@@ -1091,7 +1091,7 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   }
 
   // data element is considered as mutable
-  SetNodeType(n, MakeElemScalarType(sty->ElementType(), true));
+  SetNodeType(n, MakeScalarType(sty->ElementType(), true));
 
   return true;
 }

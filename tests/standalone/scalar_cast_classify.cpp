@@ -56,13 +56,22 @@ TEST_P(ScalarCastCoverageTest, AllCastsHandled) {
 
 std::vector<CastCheckParam> GenerateAllCastPairs() {
   std::vector<CastCheckParam> result;
-  constexpr int N = 15;
+  constexpr int N = 29;
   assert(static_cast<BaseType>(N - 1) == BaseType::BOOL);
+  auto SkipNow = [](BaseType bt) {
+    // skip sub-byte types and BOOL
+    if (Choreo::IsSubByteType(bt)) return true;
+    if (bt == BaseType::BOOL || bt == BaseType::F8_UE4M3 ||
+        bt == BaseType::F8_UE8M0 || bt == BaseType::TF32)
+      return true;
+
+    return false;
+  };
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
       // ignore BOOL
-      if (static_cast<BaseType>(i) == BaseType::BOOL ||
-          static_cast<BaseType>(j) == BaseType::BOOL)
+      if (SkipNow(static_cast<BaseType>(i)) ||
+          SkipNow(static_cast<BaseType>(j)))
         continue;
       result.push_back({static_cast<BaseType>(i), static_cast<BaseType>(j)});
     }
