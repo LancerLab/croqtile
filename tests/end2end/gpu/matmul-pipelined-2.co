@@ -1,0 +1,62 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 128
+#define N 256
+#define K 256
+
+__co__ auto matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
+  s32 [lhs.span(0), rhs.span(1)] output;
+
+  parallel {px, py} by [8, 16] : block
+    parallel {qx, qy} by [16, 16] : thread {
+    // TODO: enable auto shape inference
+    with tile_k in 16 {
+      lf0 = dma.copy lhs.chunkat(px, tile_k) => shared;
+      rf0 = dma.copy rhs.chunkat(tile_k, py) => shared;
+
+      lf1 = dma.any;
+      rf1 = dma.any;
+
+      foreach tile_k(1:) {
+        lf1 = dma.copy lhs.chunkat(px, tile_k) => shared;
+        rf1 = dma.copy rhs.chunkat(tile_k, py) => shared;
+
+        foreach k in [256 / #tile_k]
+          output.at(px#qx, py#qy) += lf0.data.at(qx, k) * rf0.data.at(k, qy);
+
+        swap(lf0, lf1);
+        swap(rf0, rf1);
+      }
+
+      foreach k in [256 / #tile_k]
+        output.at(px#qx, py#qy) += lf0.data.at(qx, k) * rf0.data.at(k, qy);
+    }
+  }
+
+  return output;
+}
+
+int main() { /// host program
+  auto lhs = choreo::make_spandata<choreo::s32>(M, K);
+  auto rhs = choreo::make_spandata<choreo::s32>(K, N);
+  lhs.fill_random(-10, 10);
+  rhs.fill_random(-10, 10);
+
+  auto res = matmul(lhs.view(), rhs.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+      for (size_t k = 0; k < lhs.shape()[1]; ++k)
+        ref += lhs[i][k] * rhs[k][j];
+//       std::cout << "res[" << i << "][" << j << "] = " << res[i][j] << ", ref = " << ref << std::endl;
+      choreo::choreo_assert(ref == res[i][j], "values are not equal.");
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
+
