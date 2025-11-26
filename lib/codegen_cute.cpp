@@ -1405,10 +1405,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     tsr_decl << d_indent << "auto " << tsr_name << " = cute::make_tensor(";
     if (!mem_ty.empty())
       tsr_decl << "cute::make_" << mem_ty << "_ptr<" << bts << ">";
-    else
-      tsr_decl << "(" << bts << "*)";
-    tsr_decl << "(" << buf_name << ((!offset.empty()) ? (" + " + offset) : "")
-             << ")";
+    tsr_decl << "((" << bts << "*)" << buf_name
+             << ((!offset.empty()) ? (" + " + offset) : "") << ")";
     tsr_decl << ", " << lyt_name << ");\n";
 
     return {tsr_name, tsr_decl.str()};
@@ -2737,12 +2735,13 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   auto HandleChunkAt = [this, &WrapParen,
                         &parent_op](const ptr<AST::ChunkAt>& ca, bool is_host) {
     auto caty = cast<SpannedType>(ca->GetType());
+
     std::string res;
     if (isa<FutureType>(NodeType(*ca->data)))
-      res = OpExprSTR(ca->data, parent_op, true, is_host) + ".data() + " +
-            GenOffset(ca);
+      res += OpExprSTR(ca->data, parent_op, true, is_host) + ".data() + " +
+             GenOffset(ca);
     else
-      res = OpExprSTR(ca->data, "+", true, is_host) + " + " + GenOffset(ca);
+      res += OpExprSTR(ca->data, "+", true, is_host) + " + " + GenOffset(ca);
     return WrapParen(res, "+");
   };
 
