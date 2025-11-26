@@ -949,19 +949,34 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   if (isa<SpannedType>(n.GetType())) {
     auto mds = dyn_cast<AST::MultiDimSpans>(n.type->mdspan_type);
     if (mds && mds->list) {
-      auto mv = cast<AST::MultiValues>(mds->list);
-      for (const auto& v : mv->AllValues()) {
-        auto bt = dyn_cast<BoundedType>(v->GetType());
+      if (auto e = dyn_cast<AST::Expr>(mds->list)) {
+        auto bt = dyn_cast<BoundedType>(e->GetType());
         if (bt)
-          Error1(v->LOC(), "Dimension of span can only be const integer "
+          Error1(e->LOC(), "Dimension of span can only be const integer "
                            "value, but got value of type " +
-                               v->GetType()->TypeNameString() + ": " +
-                               PSTR(v->GetType()) + ".");
-        if (mutables.Contains(v))
-          Error1(v->LOC(), "Dimension of span can only be const integer "
+                               e->GetType()->TypeNameString() + ": " +
+                               PSTR(e->GetType()) + ".");
+        if (mutables.Contains(e))
+          Error1(e->LOC(), "Dimension of span can only be const integer "
                            "value, but got value of type " +
-                               v->GetType()->TypeNameString() + ": " +
-                               PSTR(v->GetType()) + ".");
+                               e->GetType()->TypeNameString() + ": " +
+                               PSTR(e->GetType()) + ".");
+
+      } else {
+        auto mv = cast<AST::MultiValues>(mds->list);
+        for (const auto& v : mv->AllValues()) {
+          auto bt = dyn_cast<BoundedType>(v->GetType());
+          if (bt)
+            Error1(v->LOC(), "Dimension of span can only be const integer "
+                             "value, but got value of type " +
+                                 v->GetType()->TypeNameString() + ": " +
+                                 PSTR(v->GetType()) + ".");
+          if (mutables.Contains(v))
+            Error1(v->LOC(), "Dimension of span can only be const integer "
+                             "value, but got value of type " +
+                                 v->GetType()->TypeNameString() + ": " +
+                                 PSTR(v->GetType()) + ".");
+        }
       }
     }
   }

@@ -1312,30 +1312,6 @@ __device__ static inline void swap(future& a, future& b) {
   b.column = c;
 }
 
-template <typename T>
-struct is_future : std::false_type {};
-template <>
-struct is_future<future> : std::true_type {};
-
-template <typename T, typename... Rest>
-__device__ void inline LeftRotateFutures(T& first, T& second, Rest&... rest) {
-  static_assert(is_future<T>::value,
-                "All arguments must be of type choreo::future");
-  static_assert((is_future<Rest>::value && ...),
-                "All arguments must be of type choreo::future");
-
-  // swap the pointers
-  swap(first, second);
-
-  if constexpr (sizeof...(rest) > 0) LeftRotateFutures(second, rest...);
-}
-
-template <typename... Futures>
-__device__ inline void rotate(Futures&... f) {
-  static_assert(sizeof...(f) > 1, "rotate futures less than 1.");
-  LeftRotateFutures(f...);
-}
-
 #endif
 
 #ifdef __CHOREO_TARGET_CUTE__
@@ -1529,6 +1505,26 @@ struct future {
   __device__ future& operator=(const future& f) = delete;
 };
 
+__device__ static inline void swap(future& a, future& b) {
+  auto atom = a.atom;
+  auto d = a.d;
+  auto s = a.s;
+  auto l = a.line;
+  auto c = a.column;
+
+  a.atom = b.atom;
+  a.d = b.d;
+  a.s = b.s;
+  a.line = b.line;
+  a.column = b.column;
+
+  b.atom = atom;
+  b.d = d;
+  b.s = s;
+  b.line = l;
+  b.column = c;
+}
+
 // ------------------- C++17 utilities -------------------
 template <class...>
 using void_t = void;
@@ -1643,6 +1639,33 @@ static_assert(false, "path 2\n");
 }
 
 #endif // __CHOREO_TARGET_CUTE__
+
+#if defined(__TOPSCC__) || defined(__CHOREO_TARGET_CUTE__)
+
+template <typename T>
+struct is_future : std::false_type {};
+template <>
+struct is_future<future> : std::true_type {};
+
+template <typename T, typename... Rest>
+__device__ void inline LeftRotateFutures(T& first, T& second, Rest&... rest) {
+  static_assert(is_future<T>::value,
+                "All arguments must be of type choreo::future");
+  static_assert((is_future<Rest>::value && ...),
+                "All arguments must be of type choreo::future");
+
+  // swap the pointers
+  swap(first, second);
+
+  if constexpr (sizeof...(rest) > 0) LeftRotateFutures(second, rest...);
+}
+
+template <typename... Futures>
+__device__ inline void rotate(Futures&... f) {
+  static_assert(sizeof...(f) > 1, "rotate futures less than 1.");
+  LeftRotateFutures(f...);
+}
+#endif
 
 } // end namespace choreo
 

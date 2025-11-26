@@ -505,6 +505,8 @@ public:
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
 
+    if (n.operation == ".any") return true;
+
     // DMA directions check:
     // GPU's DMA is mainly serve for GMEM -> SMEM
     auto fty = GetSpannedType(n.from->GetType());
