@@ -2453,6 +2453,7 @@ public:
   struct FillInfo {
     std::string buffer_sym;
     ptr<Expr> fill_expr;
+    BaseType fill_elem_type;
   };
   struct LoadInfo {
     ptr<ChunkAt> ld_expr;
@@ -2476,8 +2477,9 @@ private:
   InfoType info;
 
 public:
-  MMAOperation(const std::string& n, const ptr<Expr>& e)
-      : tag(Fill), info(FillInfo{n, e}) {}
+  MMAOperation(const std::string& n, const ptr<Expr>& e,
+               BaseType t = BaseType::UNKNOWN)
+      : tag(Fill), info(FillInfo{n, e, t}) {}
   MMAOperation(const ptr<ChunkAt>& e, const std::string& fu, bool a = false)
       : tag(Load), info(LoadInfo{e, fu, a}) {}
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
@@ -2499,6 +2501,10 @@ public:
   const ptr<Expr> FillingValue() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
     return std::get<0>(info).fill_expr;
+  }
+  BaseType FillingType() const {
+    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
+    return std::get<0>(info).fill_elem_type;
   }
 
   ptr<ChunkAt> LoadFrom() {

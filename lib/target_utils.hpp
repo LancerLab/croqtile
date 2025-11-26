@@ -137,7 +137,9 @@ using BT = BaseType;
 using PTX_ISA_VER = uint8_t;
 
 static const std::map<MMAConfig, PTX_ISA_VER> mma_configs = {
+    {{DENSE, BT::BF16, BT::UNKNOWN, BT::F32, {16, 16, 16}}, 60},
     {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {16, 16, 16}}, 60},
+    {{DENSE, BT::F16, BT::UNKNOWN, BT::F32, {16, 16, 16}}, 60},
     // {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {8, 32, 16}}, 60},
     // {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {32, 8, 16}}, 60},
     // // TODO: accumulator could be f32, what's the ISA version?

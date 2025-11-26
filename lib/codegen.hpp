@@ -557,9 +557,9 @@ HostTypeStringify(const Choreo::Type& ty, bool is_ret = false,
   else if (isa<BooleanType>(&ty))
     res = "bool";
   else if (isa<FloatE4M3Type>(&ty))
-    res = "f8_e4m3_t";
+    res = "choreo::f8_e4m3_t";
   else if (isa<FloatE5M2Type>(&ty))
-    res = "f8_e5m2_t";
+    res = "choreo::f8_e5m2_t";
   else if (isa<F16Type>(&ty))
     res = "choreo::half";
   else if (isa<BF16Type>(&ty))

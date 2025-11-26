@@ -855,7 +855,8 @@ bool TypeInference::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
-    AssignSymbolWithType(n.LOC(), op.FillingSymbol(), MakeDummySpannedType());
+    auto fill_ty = MakeSpannedType(op.FillingType(), GenUninitShape());
+    AssignSymbolWithType(n.LOC(), op.FillingSymbol(), fill_ty);
   } break;
   case AST::MMAOperation::Load: {
     AssignSymbolWithType(n.LOC(), op.GetFuture(), n.GetType()->Clone());
@@ -865,7 +866,19 @@ bool TypeInference::Visit(AST::MMA& n) {
     }
   } break;
   case AST::MMAOperation::Exec: {
-    ModifySymbolType(n.LOC(), op.ExecOperand(0), n.GetType()->Clone());
+    auto acc_ty = GetSymbolType(n.LOC(), op.ExecOperand(0));
+    auto ety = cast<SpannedType>(acc_ty)->ElementType();
+    ptr<Type> mc_ty = nullptr;
+    // mc type is explicit annotated
+    if (ety != BaseType::UNKNOWN) {
+      auto shape = cast<SpannedType>(n.GetType())->GetShape();
+      auto storage = cast<SpannedType>(acc_ty)->GetStorage();
+      mc_ty = MakeSpannedType(ety, shape, storage);
+      SetNodeType(n, mc_ty);
+    } else {
+      mc_ty = n.GetType()->Clone();
+    }
+    ModifySymbolType(n.LOC(), op.ExecOperand(0), mc_ty);
     if (CCtx().ShowInferredTypes()) {
       dbgs() << "Symbol:    " << InScopeName(op.ExecOperand(0))
              << ", Type: " << AST::TYPE_STR(n) << "\n";
@@ -952,10 +965,11 @@ bool TypeInference::Visit(AST::ChunkAt& n) {
   auto fmty = sty->ElementType();
   auto sto = sty->GetStorage();
   assert(fmty != BaseType::UNKNOWN);
-  if ((dma_fmty != BaseType::UNKNOWN) && (fmty != dma_fmty)) {
-    Error1(n.LOC(), "assign/transfer data with a different type: " + STR(fmty) +
-                        " vs. " + STR(dma_fmty));
-  }
+  // if ((dma_fmty != BaseType::UNKNOWN) && (fmty != dma_fmty)) {
+  //   Error1(n.LOC(), "assign/transfer data with a different type: " +
+  //   STR(fmty) +
+  //                       " vs. " + STR(dma_fmty));
+  // }
   dma_fmty = fmty;
   dma_mem = sto;
 

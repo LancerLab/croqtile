@@ -1834,6 +1834,10 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($1, $5);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | IDENTIFIER ASSIGN MMA FILL DOT fundamental_type s_expr {
+        auto op = AST::Make<AST::MMAOperation>($1, $7, $6);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | IDENTIFIER ASSIGN MMA LOAD sync_type chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($6, $1, $5);
         $$ = AST::Make<AST::MMA>(@1, op);

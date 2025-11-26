@@ -229,6 +229,7 @@ public:
       auto& c_sym = op.ExecOperand(0);
       auto a_ty = GetSpannedType(GetSymbolType(a_sym));
       auto b_ty = GetSpannedType(GetSymbolType(b_sym));
+      auto c_ty = GetSpannedType(GetSymbolType(c_sym));
       auto a_shape = a_ty->GetShape();
       auto b_shape = b_ty->GetShape();
       switch (op.GetMethod()) {
@@ -254,18 +255,16 @@ public:
         break;
       default: choreo_unreachable("unsupported mma execution method.");
       }
-      auto ety = a_ty->ElementType();
-
-      VST_DEBUG(dbgs() << "mma type: " << STR(ety)
-                       << ", shape: " << STR(mma_shape) << " -> " << a_sym
-                       << ", " << b_sym << ", " << c_sym << "\n");
-
-      cgi.AddSymbolMMA(InScopeName(a_sym),
-                       MMAInfo{ety, mma_shape, MMAInfo::FRAG_A});
-      cgi.AddSymbolMMA(InScopeName(b_sym),
-                       MMAInfo{ety, mma_shape, MMAInfo::FRAG_B});
-      cgi.AddSymbolMMA(InScopeName(c_sym),
-                       MMAInfo{ety, mma_shape, MMAInfo::FRAG_C});
+      auto a_ety = a_ty->ElementType();
+      auto b_ety = b_ty->ElementType();
+      auto acc_ty = c_ty->ElementType();
+      cgi.AddSymbolMMA(a_sym, MMAInfo{a_ety, mma_shape, MMAInfo::FRAG_A});
+      cgi.AddSymbolMMA(b_sym, MMAInfo{b_ety, mma_shape, MMAInfo::FRAG_B});
+      cgi.AddSymbolMMA(c_sym, MMAInfo{acc_ty, mma_shape, MMAInfo::FRAG_C});
+      VST_DEBUG(dbgs() << "mma type: " << STR(a_ety) << ", " << STR(b_ety)
+                       << ", " << STR(acc_ty) << ", shape: " << STR(mma_shape)
+                       << " -> " << a_sym << ", " << b_sym << ", " << c_sym
+                       << "\n");
     } break;
     case AST::MMAOperation::Store: break;
     default: choreo_unreachable("unsupported mma operation.");

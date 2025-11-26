@@ -500,12 +500,10 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       Error1(n.LOC(), "Expect `" + b_sym + "' to contain a spanned data.");
     if (c_ty == nullptr)
       Error1(n.LOC(), "Expect `" + c_sym + "' to contain a spanned data.");
-    if ((a_ty->ElementType() != b_ty->ElementType()) ||
-        (c_ty->ElementType() != b_ty->ElementType()))
+    if ((a_ty->ElementType() != b_ty->ElementType()))
       Error1(n.LOC(), "Element type are inconsistent: `" + a_sym + "'(" +
                           STR(a_ty->ElementType()) + "), `" + b_sym + "'(" +
-                          STR(a_ty->ElementType()) + "), `" + b_sym + "'(" +
-                          STR(c_ty->ElementType()) + ").");
+                          STR(a_ty->ElementType()) + ").");
     if (old_ec != error_count) return false;
 
     auto a_shape = a_ty->GetShape();
