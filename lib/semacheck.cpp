@@ -503,7 +503,7 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
     if ((a_ty->ElementType() != b_ty->ElementType()))
       Error1(n.LOC(), "Element type are inconsistent: `" + a_sym + "'(" +
                           STR(a_ty->ElementType()) + "), `" + b_sym + "'(" +
-                          STR(a_ty->ElementType()) + ").");
+                          STR(b_ty->ElementType()) + ").");
     if (old_ec != error_count) return false;
 
     auto a_shape = a_ty->GetShape();
