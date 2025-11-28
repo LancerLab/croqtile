@@ -1,0 +1,20 @@
+// RUN: choreo %s 2>&1 | FileCheck %s
+
+__co__ void foo(f32 [3, 4] in1) {
+  parallel by 1 {
+    foo_f = dma.copy.async in1 => local;
+    foo_f = dma.copy.async in1 => local;
+  }
+}
+
+__co__ void bar(f32 [3, 4] in1) {
+  parallel by 1 {
+    bar_f = dma.any;
+    bar_f = dma.copy.async in1 => local;
+    bar_f = dma.copy.async in1 => local;
+  }
+}
+
+// CHECK: error: symbol `foo_f' has been declared already.
+// CHECK: error: symbol `bar_f' has been declared already.
+// CHECK-NOT: error: symbol `bar_f' has been declared already.

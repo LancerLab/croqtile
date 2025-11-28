@@ -1608,6 +1608,12 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 
     // rewrite the placeholder type
     if (SSTab().IsDeclared(n.future)) {
+      auto ptype = dyn_cast<PlaceHolderType>(GetSymbolType(n.future));
+      if (!ptype || ptype->GetBaseType() != BaseType::FUTURE) {
+        Error1(n.LOC(), "symbol `" + n.future + "' has been declared already.");
+        VST_DEBUG(dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__
+                         << ".\n");
+      }
       ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".span");
       ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".data");
       ModifySymbolType(n.future + ".span", MakeRankedMDSpanType(rank));
@@ -2607,12 +2613,11 @@ bool EarlySemantics::ReportErrorWhenViolateODR(const location& loc,
                                                const ptr<Type>& type) {
   if (SSTab().DeclaredInScope(name)) {
     Error1(loc, "symbol `" + name + "' has been declared already.");
-    if (debug_visit)
-      dbgs() << "Error in " << file << ", line: " << line << ".\n";
+    VST_DEBUG(dbgs() << "Error in " << file << ", line: " << line << ".\n");
     return false;
   }
   SSTab().DefineSymbol(name, type); // TODO: improve the type
-  if (debug_visit)
-    dbgs() << "Define Symbol '" << name << "' as: " << PSTR(type) << ".\n";
+  VST_DEBUG(dbgs() << "Define Symbol '" << name << "' as: " << PSTR(type)
+                   << ".\n");
   return true;
 }
