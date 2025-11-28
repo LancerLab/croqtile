@@ -514,15 +514,23 @@ public:
     assert(fty && tty);
     auto fst = fty->GetStorage();
     auto tst = tty->GetStorage();
-    if ((fst == Storage::SHARED) && (tst == Storage::GLOBAL) && n.IsAsync())
-      Error1(n.LOC(), "GPU does not allow the async copy (shared -> global).");
-    else if ((fst == Storage::SHARED) && (tst == Storage::SHARED) &&
-             n.IsAsync())
-      Error1(n.LOC(), "GPU does not allow the async copy (shared -> shared).");
-    else if ((fst == Storage::GLOBAL) && (tst == Storage::GLOBAL))
-      Error1(n.LOC(), "GPU does not allow the " +
-                          std::string(n.IsAsync() ? "async" : "sync") +
-                          " copy (global -> global).");
+
+    // Many restriction on dma
+    if (n.IsAsync()) {
+      if ((fst == Storage::SHARED && tst == Storage::GLOBAL) ||
+          (fst == Storage::SHARED && tst == Storage::SHARED) ||
+          (fst == Storage::SHARED && tst == Storage::LOCAL) ||
+          (fst == Storage::GLOBAL && tst == Storage::LOCAL) ||
+          (fst == Storage::DEFAULT && tst == Storage::LOCAL) ||
+          (fst == Storage::GLOBAL && tst == Storage::GLOBAL))
+        Error1(n.LOC(), "GPU does not allow the async " +
+                            n.operation.substr(1) + " (" + STR(fst) + " -> " +
+                            STR(tst) + ").");
+    } else {
+      if ((fst == Storage::GLOBAL) && (tst == Storage::GLOBAL))
+        Error1(n.LOC(), "GPU does not allow the sync " + n.operation.substr(1) +
+                            " (" + STR(fst) + " -> " + STR(tst) + ").");
+    }
 
     if (fst == Storage::GLOBAL && tst == Storage::SHARED && IsTMAAvaliable())
       n.SetLevel(ParallelLevel::BLOCK); // single instance in a block
