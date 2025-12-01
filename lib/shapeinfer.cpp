@@ -1041,9 +1041,10 @@ bool ShapeInference::Visit(AST::DMA& n) {
     }
   }
 
+  auto fsty = GetSpannedType(n.GetFrom()->GetType());
   // annotate the shape on AST for later type inference
   auto s = GenShape(cur_vn);
-  SetNodeType(n, MakeShapedFutureType(s, n.IsAsync()));
+  SetNodeType(n, MakeShapedFutureType(s, n.IsAsync(), fsty->ElementType()));
 
   if (n.future.empty()) {
     cur_vn.Invalidate();

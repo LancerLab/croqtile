@@ -2476,8 +2476,9 @@ inline ptr<FutureType> MakeRankedFutureType(size_t n, bool async) {
   return std::make_shared<FutureType>(MakeRankedSpannedType(n), async);
 }
 
-inline ptr<FutureType> MakeShapedFutureType(const Shape& v, bool async) {
-  return std::make_shared<FutureType>(MakeShapedSpannedType(v), async);
+inline ptr<FutureType> MakeShapedFutureType(const Shape& v, bool async,
+                                            BaseType bt = BaseType::UNKNOWN) {
+  return std::make_shared<FutureType>(MakeShapedSpannedType(v, bt), async);
 }
 
 inline ptr<FutureType> MakeDummyFutureType(bool async) {

@@ -424,7 +424,7 @@ private:
   std::pair<std::string, size_t> GenMdsOffset(const ptr<AST::ChunkAt>,
                                               ptr<DMAConfig> = nullptr) const;
   const std::string TileBaseOffset(const ptr<AST::ChunkAt>&) const;
-  const std::string
+  const ValueItem
   GenOffset(const ptr<AST::ChunkAt>&,
             size_t end_idx = std::numeric_limits<size_t>::max()) const;
   const ValueList GenStrides(const ptr<AST::ChunkAt>&,

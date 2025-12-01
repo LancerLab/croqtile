@@ -218,12 +218,17 @@ public:
       default: choreo_unreachable("unsupported mma execution method.");
       }
       auto ety = a_ty->ElementType();
-      cgi.AddSymbolMMA(a_sym, MMAInfo{ety, mma_shape, MMAInfo::FRAG_A});
-      cgi.AddSymbolMMA(b_sym, MMAInfo{ety, mma_shape, MMAInfo::FRAG_B});
-      cgi.AddSymbolMMA(c_sym, MMAInfo{ety, mma_shape, MMAInfo::FRAG_C});
+
       VST_DEBUG(dbgs() << "mma type: " << STR(ety)
                        << ", shape: " << STR(mma_shape) << " -> " << a_sym
                        << ", " << b_sym << ", " << c_sym << "\n");
+
+      cgi.AddSymbolMMA(InScopeName(a_sym),
+                       MMAInfo{ety, mma_shape, MMAInfo::FRAG_A});
+      cgi.AddSymbolMMA(InScopeName(b_sym),
+                       MMAInfo{ety, mma_shape, MMAInfo::FRAG_B});
+      cgi.AddSymbolMMA(InScopeName(c_sym),
+                       MMAInfo{ety, mma_shape, MMAInfo::FRAG_C});
     } break;
     case AST::MMAOperation::Store: break;
     default: choreo_unreachable("unsupported mma operation.");

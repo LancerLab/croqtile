@@ -2438,6 +2438,9 @@ public:
       : Node(l, MakePlaceHolderFutureType()), operation(".any"), future(f),
         async(true) {}
 
+  ptr<ChunkAt> GetFrom() const { return cast<ChunkAt>(from); }
+  ptr<ChunkAt> GetTo() const { return cast<ChunkAt>(to); }
+
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
 
   std::string ToSymbol() const {

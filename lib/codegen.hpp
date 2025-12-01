@@ -107,7 +107,16 @@ struct MMAInfo {
   BaseType ty;
   ValueList shape;
   Fragment frag;
+  bool operator==(MMAInfo i) {
+    return ty == i.ty && IsValueListEqual(shape, i.shape) && frag == i.frag;
+  }
 };
+
+inline std::ostream& operator<<(std::ostream& os, const MMAInfo& i) {
+  os << "[mma_info] " << STR(i.ty) << " | " << STR(i.shape)
+     << " | frag: " << (int)i.frag;
+  return os;
+}
 
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, std::vector<LaunchConfig>>;
@@ -184,8 +193,15 @@ public:
   }
   MMAInfo& GetSymbolMMA(const std::string& sym) { return sym_mmas[sym]; }
   void AddSymbolMMA(const std::string& sym, const MMAInfo& i) {
-    assert(!sym_mmas.count(sym));
-    sym_mmas.emplace(sym, i);
+    if (sym_mmas.count(sym)) {
+      if (sym_mmas[sym] == i)
+        return;
+      else
+        choreo_unreachable(
+            "unable to infer a MMA symbol with different information:" +
+            STR(sym_mmas[sym].shape) + " vs. " + STR(i.shape) + ".");
+    } else
+      sym_mmas.emplace(sym, i);
   }
 
   bool HasParallelBy(const std::string& fname) const {

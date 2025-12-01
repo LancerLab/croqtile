@@ -389,16 +389,16 @@ const std::string
 CuteCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
   auto lidx = ca->IndexOfLastSpanAs();
   if (!lidx.has_value()) choreo_unreachable("unexpect");
-  return GenOffset(ca, lidx.value());
+  return ValueSTR(GenOffset(ca, lidx.value()));
 }
 
 // given i.sop(...).sop(...)..., generate the offset of the final span in the
 // original span. It is VALID if and only if the final span is
 // address-contiguous within the original span.
 // end_idx: the offset is computed by sop in range [0, end_idx).
-const std::string CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
-                                         size_t end_idx) const {
-  if (ca->NoOperation()) return "";
+const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
+                                       size_t end_idx) const {
+  if (ca->NoOperation()) return sbe::nu(0);
 
   end_idx = std::min(end_idx, ca->OpCount());
 
@@ -444,7 +444,7 @@ const std::string CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
     }
   }
 
-  return ValueSTR(offset);
+  return offset;
 }
 
 const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,
@@ -1186,6 +1186,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       future_name = "__choreo_anon_fut__" + std::to_string(future_count);
     } else {
       claimed_futs.emplace(InScopeName(n.future), cp_atom);
+      auto fsty = GetSpannedType(GetSymbolType(n.future));
       ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
       ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
                           n.future + ".data()");
@@ -1224,6 +1225,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     claimFuture(UnScopedName(buf_name), true);
     // make following buffer reference all be indirect
     // TODO: any better idea than this
+    auto fsty = GetSpannedType(GetSymbolType(n.future));
     ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
     return true;
   }
@@ -1490,13 +1492,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       f_mds_offset = TileBaseOffset(f_ca);
       f_shape = f_ca->OpAt(*idx)->GetBlockShape();
     } else
-      f_mds_offset = GenOffset(f_ca);
+      f_mds_offset = ValueSTR(GenOffset(f_ca));
 
     if (auto idx = t_ca->IndexOfLastSpanAs()) {
       t_mds_offset = TileBaseOffset(t_ca);
       t_shape = t_ca->OpAt(*idx)->GetBlockShape();
     } else
-      t_mds_offset = GenOffset(t_ca);
+      t_mds_offset = ValueSTR(GenOffset(t_ca));
 
     std::vector<size_t> transp_config;
     if (n.operation == ".transp")
@@ -1607,7 +1609,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
     auto sym = op.FillingSymbol();
-    auto& ssmi = cgi.GetSymbolMMA(sym);
+    auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
     auto sty = GetSpannedType(GetSymbolType(sym));
     assert(sty);
     ds << d_indent
@@ -1620,7 +1622,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   } break;
   case AST::MMAOperation::Load: {
     auto sym = op.LoadTo();
-    auto& ssmi = cgi.GetSymbolMMA(sym);
+    auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
     auto sty = GetSpannedType(GetSymbolType(sym));
     auto fty = GetSpannedType(GetSymbolType(op.LoadFrom()->RefSymbol()));
     ds << d_indent
@@ -2781,12 +2783,17 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
                         &parent_op](const ptr<AST::ChunkAt>& ca, bool is_host) {
     auto caty = cast<SpannedType>(ca->GetType());
 
+    auto offset = GenOffset(ca);
     std::string res;
-    if (isa<FutureType>(NodeType(*ca->data)))
-      res += OpExprSTR(ca->data, parent_op, true, is_host) + ".data() + " +
-             GenOffset(ca);
-    else
-      res += OpExprSTR(ca->data, "+", true, is_host) + " + " + GenOffset(ca);
+    if (auto fty = dyn_cast<FutureType>(NodeType(*ca->data))) {
+      std::string ets = NameBaseType(fty->ElementType());
+      res = "(" + ets + "*)" + OpExprSTR(ca->data, parent_op, true, is_host) +
+            ".data()";
+    } else
+      res = OpExprSTR(ca->data, "+", true, is_host);
+
+    if (!sbe::ceq(offset, sbe::nu(0))) res += " + " + ValueSTR(offset);
+
     return WrapParen(res, "+");
   };
 
