@@ -121,31 +121,219 @@ struct MMAShape {
 };
 struct MMAConfig {
   Sparsity sparsity;
-  BaseType mul_ty;   // type of Multiplicands(A and B)
+  BaseType a_ty;     // type of lhs multiplicand(A)
+  BaseType b_ty;     // type of rhs multiplicand(B)
+  BaseType c_ty;     // type of accumulator(C)
+  BaseType d_ty;     // type of accumulator(D)
   BaseType scale_ty; // UNKNOWN if NA
-  BaseType acc_ty;   // type of Accumulators(C and D)
   MMAShape shape;
 
   bool operator<(const MMAConfig& rhs) const {
-    return std::tie(sparsity, mul_ty, scale_ty, acc_ty, shape) <
-           std::tie(rhs.sparsity, rhs.mul_ty, rhs.scale_ty, rhs.acc_ty,
-                    rhs.shape);
+    return std::tie(sparsity, a_ty, b_ty, scale_ty, c_ty, d_ty, shape) <
+           std::tie(rhs.sparsity, rhs.a_ty, rhs.b_ty, rhs.scale_ty, rhs.c_ty,
+                    rhs.d_ty, rhs.shape);
+  }
+
+  std::string ToString() const {
+    std::ostringstream oss;
+    oss << "MMAConfig(sparsity=" << (sparsity == DENSE ? "DENSE" : "SPARSE")
+        << ", a_ty=" << STR(a_ty) << ", b_ty=" << STR(b_ty)
+        << ", scale_ty=" << STR(scale_ty) << ", c_ty=" << STR(c_ty)
+        << ", d_ty=" << STR(d_ty) << ", shape=(" << shape.m << ", " << shape.n
+        << ", " << shape.k << "))";
+    return oss.str();
   }
 };
 
 using BT = BaseType;
-using PTX_ISA_VER = uint8_t;
+using CUDA_CC = uint8_t;
 
-static const std::map<MMAConfig, PTX_ISA_VER> mma_configs = {
-    {{DENSE, BT::BF16, BT::UNKNOWN, BT::F32, {16, 16, 16}}, 60},
-    {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {16, 16, 16}}, 60},
-    {{DENSE, BT::F16, BT::UNKNOWN, BT::F32, {16, 16, 16}}, 60},
-    // {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {8, 32, 16}}, 60},
-    // {{DENSE, BT::F16, BT::UNKNOWN, BT::F16, {32, 8, 16}}, 60},
-    // // TODO: accumulator could be f32, what's the ISA version?
-    // {{DENSE, BT::BF16, BT::UNKNOWN, BT::BF16, {16, 16, 16}}, 70},
-    // {{DENSE, BT::BF16, BT::UNKNOWN, BT::BF16, {8, 32, 16}}, 70},
-    // {{DENSE, BT::BF16, BT::UNKNOWN, BT::BF16, {32, 8, 16}}, 70},
+static const std::map<MMAConfig, CUDA_CC> wmma_configs = {
+    // 16 x 16 x 16
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {16, 16, 16}},
+     70},
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F32, BT::UNKNOWN, {16, 16, 16}},
+     70},
+    {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {16, 16, 16}},
+     70},
+    {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {16, 16, 16}}, 72},
+    {{DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {16, 16, 16}}, 72},
+    {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {16, 16, 16}},
+     80},
+    // 32 x 8 x 16
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F32, BT::UNKNOWN, {32, 8, 16}}, 70},
+    {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {32, 8, 16}}, 70},
+    {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {32, 8, 16}}, 72},
+    {{DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {32, 8, 16}}, 72},
+    {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {32, 8, 16}},
+     80},
+    // 8 x 32 x 16
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F32, BT::UNKNOWN, {8, 32, 16}}, 70},
+    {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {8, 32, 16}}, 70},
+    {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {8, 32, 16}}, 72},
+    {{DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {8, 32, 16}}, 72},
+    {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {8, 32, 16}},
+     80},
+    // 8 x 8 x 32
+    {{DENSE, BT::U4, BT::U4, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 32}}, 73},
+    {{DENSE, BT::S4, BT::S4, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 32}}, 73},
+    // 8 x 8 x 128
+    {{DENSE, BT::BIN1, BT::BIN1, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 128}},
+     73},
+    // 16 x 16 x 8
+    {{DENSE, BT::TF32, BT::TF32, BT::F32, BT::F32, BT::UNKNOWN, {16, 16, 8}},
+     80},
+    // 8 x 8 x 4
+    {{DENSE, BT::F64, BT::F64, BT::F64, BT::F64, BT::UNKNOWN, {8, 8, 4}}, 80},
+};
+
+static const std::map<MMAConfig, CUDA_CC> mma_configs = {
+    // sm80
+    // 16 x 8 x 8
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {16, 8, 8}}, 80},
+    {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 8}}, 80},
+    {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 8}},
+     80},
+    {{DENSE, BT::TF32, BT::TF32, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 8}},
+     80},
+
+    // 16 x 8 x 16
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {16, 8, 16}}, 80},
+    {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 16}}, 80},
+    {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 16}},
+     80},
+
+    // 16 x 8 x 4 (TF32)
+    {{DENSE, BT::TF32, BT::TF32, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 4}},
+     80},
+    // 8 x 8 x 4 (F64)
+    {{DENSE, BT::F64, BT::F64, BT::F64, BT::F64, BT::UNKNOWN, {8, 8, 4}}, 80},
+
+    // Integer S8/U8 -> S32 accumulators
+    // 8 x 8 x 16
+    {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 16}}, 80},
+    {{DENSE, BT::S8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 16}}, 80},
+    {{DENSE, BT::U8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 16}}, 80},
+    {{DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 16}}, 80},
+    // 16 x 8 x 16
+    {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 16}}, 80},
+    {{DENSE, BT::S8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 16}}, 80},
+    {{DENSE, BT::U8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 16}}, 80},
+    {{DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 16}}, 80},
+    // 16 x 8 x 32, satfinite and non-saturate
+    {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 32}}, 80},
+    {{DENSE, BT::S8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 32}}, 80},
+    {{DENSE, BT::U8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 32}}, 80},
+    {{DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 32}}, 80},
+    // 8 x 8 x 32, 4-bit S4/U4 variants -> S32
+    {{DENSE, BT::S4, BT::S4, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 32}}, 80},
+    {{DENSE, BT::S4, BT::U4, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 32}}, 80},
+    {{DENSE, BT::U4, BT::S4, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 32}}, 80},
+    {{DENSE, BT::U4, BT::U4, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 32}}, 80},
+
+    // 16 x 8 x 32
+    {{DENSE, BT::S4, BT::S4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 32}}, 80},
+    {{DENSE, BT::S4, BT::U4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 32}}, 80},
+    {{DENSE, BT::U4, BT::S4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 32}}, 80},
+    {{DENSE, BT::U4, BT::U4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 32}}, 80},
+
+    // 16 x 8 x 64
+    {{DENSE, BT::S4, BT::S4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 64}}, 80},
+    {{DENSE, BT::S4, BT::U4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 64}}, 80},
+    {{DENSE, BT::U4, BT::S4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 64}}, 80},
+    {{DENSE, BT::U4, BT::U4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 64}}, 80},
+
+    // Binary (b1) popc -> S32
+    // 8 x 8 x 128
+    {{DENSE, BT::BIN1, BT::BIN1, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 128}},
+     80},
+    // 16 x 8 x 128
+    {{DENSE, BT::BIN1, BT::BIN1, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 128}},
+     80},
+    // 16 x 8 x 256
+    {{DENSE, BT::BIN1, BT::BIN1, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 256}},
+     80},
+
+    // sm89 (all 16 x 8 x 32)
+    {{DENSE,
+      BT::F8_E4M3,
+      BT::F8_E4M3,
+      BT::F32,
+      BT::F32,
+      BT::UNKNOWN,
+      {16, 8, 32}},
+     89},
+    {{DENSE,
+      BT::F8_E4M3,
+      BT::F8_E5M2,
+      BT::F32,
+      BT::F32,
+      BT::UNKNOWN,
+      {16, 8, 32}},
+     89},
+    {{DENSE,
+      BT::F8_E5M2,
+      BT::F8_E5M2,
+      BT::F32,
+      BT::F32,
+      BT::UNKNOWN,
+      {16, 8, 32}},
+     89},
+    {{DENSE,
+      BT::F8_E5M2,
+      BT::F8_E4M3,
+      BT::F32,
+      BT::F32,
+      BT::UNKNOWN,
+      {16, 8, 32}},
+     89},
+
+    {{DENSE,
+      BT::F8_E4M3,
+      BT::F8_E4M3,
+      BT::F16,
+      BT::F16,
+      BT::UNKNOWN,
+      {16, 8, 32}},
+     89},
+    {{DENSE,
+      BT::F8_E4M3,
+      BT::F8_E5M2,
+      BT::F16,
+      BT::F16,
+      BT::UNKNOWN,
+      {16, 8, 32}},
+     89},
+    {{DENSE,
+      BT::F8_E5M2,
+      BT::F8_E4M3,
+      BT::F16,
+      BT::F16,
+      BT::UNKNOWN,
+      {16, 8, 32}},
+     89},
+    {{DENSE,
+      BT::F8_E5M2,
+      BT::F8_E5M2,
+      BT::F16,
+      BT::F16,
+      BT::UNKNOWN,
+      {16, 8, 32}},
+     89},
+
+    // sm90 (all for FP64) Complex double is supported now
+    // 16 x 8 x 4
+    {{DENSE, BT::F64, BT::F64, BT::F64, BT::F64, BT::UNKNOWN, {16, 8, 4}}, 90},
+    // 16 x 8 x 8
+    {{DENSE, BT::F64, BT::F64, BT::F64, BT::F64, BT::UNKNOWN, {16, 8, 8}}, 90},
+    // 16 x 8 x 16
+    {{DENSE, BT::F64, BT::F64, BT::F64, BT::F64, BT::UNKNOWN, {16, 8, 16}}, 90},
+    // sm100
+    // 2 x 1 x 1
+    {{DENSE, BT::F32, BT::F32, BT::F32, BT::F32, BT::UNKNOWN, {2, 1, 1}}, 100},
+    // 1 x 2 x 1
+    {{DENSE, BT::F32, BT::F32, BT::F32, BT::F32, BT::UNKNOWN, {1, 2, 1}}, 100},
+    // sm120 todo
 };
 
 } // namespace MMALimit

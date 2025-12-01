@@ -258,9 +258,9 @@ public:
       auto a_ety = a_ty->ElementType();
       auto b_ety = b_ty->ElementType();
       auto acc_ty = c_ty->ElementType();
-      cgi.AddSymbolMMA(a_sym, MMAInfo{a_ety, mma_shape, MMAInfo::FRAG_A});
-      cgi.AddSymbolMMA(b_sym, MMAInfo{b_ety, mma_shape, MMAInfo::FRAG_B});
-      cgi.AddSymbolMMA(c_sym, MMAInfo{acc_ty, mma_shape, MMAInfo::FRAG_C});
+      cgi.AddSymbolMMA(InScopeName(a_sym), MMAInfo{a_ety, mma_shape, MMAInfo::FRAG_A});
+      cgi.AddSymbolMMA(InScopeName(b_sym), MMAInfo{b_ety, mma_shape, MMAInfo::FRAG_B});
+      cgi.AddSymbolMMA(InScopeName(c_sym), MMAInfo{acc_ty, mma_shape, MMAInfo::FRAG_C});
       VST_DEBUG(dbgs() << "mma type: " << STR(a_ety) << ", " << STR(b_ety)
                        << ", " << STR(acc_ty) << ", shape: " << STR(mma_shape)
                        << " -> " << a_sym << ", " << b_sym << ", " << c_sym
