@@ -45,6 +45,22 @@
 
 #endif // TOPSCC and CUTE
 
+#if __GCU_ARCH__ == 400
+#define __CHOREO_BLOCK_SINGLE__                                                \
+  threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&                  \
+      subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
+#define __CHOREO_GROUP_SINGLE__                                                \
+  subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
+#elif defined(__CHOREO_TARGET_CUTE__)
+#define __CHOREO_BLOCK_SINGLE__                                                \
+  threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
+#define __CHOREO_GROUP_SINGLE__(GSIZE) (threadIdx.x % GSIZE) == 0
+#else
+#define __CHOREO_BLOCK_SINGLE__                                                \
+  threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
+#define __CHOREO_GROUP_SINGLE__ "invalid to use sublocal predicate"
+#endif
+
 #define __cok__ namespace choreo
 
 namespace choreo {
@@ -1327,18 +1343,58 @@ __device__ __attribute__((always_inline)) static inline void __co_abort__() {
   __trap();
 }
 
+// this facilitate the wait-N implementation for sm_80+
+// it is must be warp-wise since async copy is warp-wise.
+// a ring with 6 elements is 8-bytes. Therefore it may cost up-to 256-bytes
+// (32-warps) shared memory
+struct future;
+template <int N>
+struct future_ring {
+  static_assert(N < UCHAR_MAX, "ring size is too large.");
+  int8_t ring[N];
+
+  uint8_t head = 0; // lastest commit
+  uint8_t tail = 0; // oldest commit
+
+  __device__ void commit(future*);
+  __device__ int discard(future*);
+  __device__ void init() {
+    head = 0;
+    tail = 0;
+  }
+};
+
 // choreo device future
 struct future {
-
-#if defined(__TOPSCC__)
-  using AtomType = tops::event;
-#else
   using AtomType = void; // erase the type
-#endif // __TOPSCC__
 
   AtomType* atom;
   void* d = nullptr; // data: future's user must guarantee it is valid
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+// TODO: TMA
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  future_ring<6>* ring;
+  int8_t id;
+#else
+  // make host compilation happy
+  future_ring<6>* ring;
+  int8_t id;
+#endif
+  __device__ void set_ring(future_ring<6>* r) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+// TODO: TMA
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    if (__CHOREO_GROUP_SINGLE__(32)) {
+      if (!r) return;
+      ring = r + (threadIdx.x + threadIdx.y * blockDim.x +
+                  threadIdx.z * blockDim.x * blockDim.y) /
+                     32;
+    }
+#else
+// make host compilation happy
+#endif
+  }
   // for runtime check purpose
   //
   // ST_NONE -> ST_INITED -> ST_TRIGGERED -> ST_WAITED
@@ -1418,14 +1474,34 @@ struct future {
   }
 
   __device__ void wait_impl() {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 900
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 // TODO: TMA
-#elif __CUDA_ARCH__ >= 800
-    cute::cp_async_wait<0>();
-#endif
-#elif defined(__TOPSCC__)
-    tops::wait(e);
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    // cautious: must be warp based
+    if (__CHOREO_GROUP_SINGLE__(32)) {
+      assert(ring && "ring is invalid.");
+      int discard_count = ring->discard(this);
+      switch (discard_count) {
+      case -1: break;
+      case 1: cute::cp_async_wait<1>(); break;
+      case 2: cute::cp_async_wait<2>(); break;
+      case 3: cute::cp_async_wait<3>(); break;
+      case 4: cute::cp_async_wait<4>(); break;
+      case 5: cute::cp_async_wait<5>(); break;
+      default:
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+        printf("[choreo-rt] Unable to wait the %d futures (current defined at "
+               "line %u:%u).\n",
+               discard_count, line, column);
+#else
+        printf("[choreo-rt] Unable to wait the %d futures.\n", discard_count);
+#endif // DIAGNOSIS
+        __co_abort__();
+        break;
+      }
+    }
+#else
+// cuda host compilation
 #endif
   }
 
@@ -1439,6 +1515,17 @@ struct future {
     }
 #endif // __CHOREO_DMA_DIAGNOSIS__
     s = ST_TRIGGERED;
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    // cautious: must be warp based
+    if (__CHOREO_GROUP_SINGLE__(32)) {
+      assert(ring && "ring is invalid.");
+      ring->commit(this);
+    }
+#else
+// cuda host compilation
+#endif
   }
 
   __device__ void wait() {
@@ -1480,11 +1567,7 @@ struct future {
     return d;
   }
 
-  __device__ void destroy() {
-#ifdef __TOPSCC__
-    tops_destroy_dte(ctx);
-#endif
-  }
+  __device__ void destroy() {}
 
   __device__ ~future() {
 #ifdef __CHOREO_DMA_DIAGNOSIS__
@@ -1504,6 +1587,54 @@ struct future {
   __device__ future(future&& f) = delete;
   __device__ future& operator=(const future& f) = delete;
 };
+
+template <int N>
+inline __device__ void future_ring<N>::commit(future* f) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  // the uniqueness of id is guaranteed by choreo
+  ring[head] = f->id;
+  head = (head + 1) % N;
+#else
+// cuda host compilation
+#endif // CUDA_ARCH
+}
+
+template <int N>
+inline __device__ int future_ring<N>::discard(future* f) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  uint8_t p = tail;
+  while (p != head) {
+    if (ring[p] == f->id) {
+      int size = (p + 1 + N - tail) % N;
+      tail = (p + 1) % N;
+      return size;
+    } else
+      p = (p + 1) % N;
+  }
+
+  // the ring is now empty
+  if (tail == head) p = (p + 1) % N;
+
+  while (p != tail) {
+    // has been discarded already
+    if (ring[p] == f->id)
+      return -1;
+    else
+      p = (p + 1) % N;
+  }
+
+  printf("[choreo-rt] Internal error: future %d (defined at line %u:%u) "
+         "is not committed.\n",
+         f->id, f->line, f->column);
+
+  //  __co_abort__();
+#else
+// cuda host compilation
+#endif // CUDA_ARCH
+  return -1;
+}
 
 __device__ static inline void swap(future& a, future& b) {
   auto atom = a.atom;
@@ -1668,22 +1799,5 @@ __device__ inline void rotate(Futures&... f) {
 #endif
 
 } // end namespace choreo
-
-#if __GCU_ARCH__ == 400
-#define __CHOREO_BLOCK_SINGLE__                                                \
-  threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&                  \
-      subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
-#define __CHOREO_GROUP_SINGLE__                                                \
-  subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
-#elif defined(__CHOREO_TARGET_CUTE__)
-#define __CHOREO_BLOCK_SINGLE__                                                \
-  threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
-#define __CHOREO_GROUP_SINGLE__                                                \
-  (threadIdx.x % 32) == 0 && threadIdx.y == 0 && threadIdx.z == 0
-#else
-#define __CHOREO_BLOCK_SINGLE__                                                \
-  threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
-#define __CHOREO_GROUP_SINGLE__ "invalid to use sublocal predicate"
-#endif
 
 #endif // __CHOREO_H__

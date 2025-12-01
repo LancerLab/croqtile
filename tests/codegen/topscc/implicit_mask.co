@@ -40,7 +40,7 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK:     tops::memset(s_B__init, tops::mdspan(tops::Shared, (float*)s_B, 5, 6), static_cast<float>(0));
 // CHECK:   } // single instance
 // CHECK:   __local__ __valigned__ float l_C[30];
-// CHECK:   if (__CHOREO_GROUP_SINGLE__) {
+// CHECK:   if (__CHOREO_GROUP_SINGLE__(32)) {
 // CHECK:     tops::local_dte l_C__init;
 // CHECK:     tops::dte_scope s_l_C__init(l_C__init);
 // CHECK:     tops::memset(l_C__init, tops::mdspan(tops::Private, (float*)l_C, 5, 6), static_cast<float>(0));
@@ -65,7 +65,7 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK:   choreo::future a_local(choreo_topscc_ctx1, "a_local", 18, 17, a_local__buf__);
 // CHECK:   tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
 // CHECK:   tops::mdspan __mds3_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 18, 5, 2, 64);
-// CHECK:   if (__CHOREO_GROUP_SINGLE__) {
+// CHECK:   if (__CHOREO_GROUP_SINGLE__(32)) {
 // CHECK:     int __slice_offset1__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 18), (int)(__tops_bid_y() * 5), (int)(__tops_tid_x() * 2), 0};
 // CHECK:     tops::slice(*a_local.get_ctx(), __mds3_a_local__buf__, __mds2_a, __slice_offset1__a_2_a_local__buf__);
 // CHECK:   } // single instance

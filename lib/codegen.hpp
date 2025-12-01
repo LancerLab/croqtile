@@ -99,6 +99,7 @@ struct LaunchConfig {
 struct OtherTrait {
   bool has_parallelby = false;
   bool multiple_parallelby = false;
+  bool has_async_dma = false;
 };
 
 struct MMAInfo {
@@ -189,6 +190,10 @@ public:
 
   bool HasParallelBy(const std::string& fname) const {
     return GetFunctionTrait(fname).has_parallelby;
+  }
+
+  bool HasAsyncDMA(const std::string& fname) const {
+    return GetFunctionTrait(fname).has_async_dma;
   }
 
   bool HasReturnSymbol(const std::string& fname) const {

@@ -169,10 +169,6 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
       parallel_idx += 1;
       if (cgi.GetFunctionTrait(fname).multiple_parallelby)
         device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
-      EmitDeviceFuncDecl(ds);
-      ds << " {\n";
-      IncrDeviceIndent();
-      ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
       VST_DEBUG(pb->InlinePrint(dbgs());
                 dbgs() << " (max-level: " << STR(TargetMaxLevel()) << ")\n");
     }
@@ -746,8 +742,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (n.Note().count("spm")) {
         if (sto == Storage::SHARED &&
             FCtx(fname).HaveDynamicBuffer(SSTab().ScopeName(), sto))
-          ds << d_indent << "extern __shared__ " << bts << " " << sym
-             << "[];\n";
+          ds << d_indent << "auto " << sym << " = (" << bts << "*)&"
+             << device_fn << "__runtime_shared_buffer__;\n";
         else
           ds << d_indent << type_modifiers << bts << " " << sym << "["
              << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
@@ -1078,12 +1074,29 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
      << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << ValueSTR(tz) << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
      << ", __" << fname << "_bdims" << parallel_idx;
+
+  // plan the shared memory that is decided at runtime
+  cur_spm_size = sbe::nu(0);
+  cur_ring_offset = sbe::nu(0);
+  cur_ring_size = (tx * ty * tz + sbe::nu(31)) / sbe::nu(32) /* warp size */;
+
+  // add the size of the future ring (see choreo.h)
+  if (cgi.HasAsyncDMA(fname))
+    cur_spm_size = cur_spm_size + cur_ring_size * sbe::nu(8);
+
+  // add the size of dynamic shared
   if (auto dev_name = SSTab().ScopeName();
       FCtx(fname).HaveDynamicBuffer(dev_name, Storage::SHARED)) {
     auto mri = FCtx(fname).GetMemReuseInfo(dev_name);
     assert(mri);
-    hs << ", " << mri->infos[Storage::SHARED].spm_size;
+
+    cur_ring_offset =
+        sbe::sym(mri->infos[Storage::SHARED].spm_size)->Normalize();
+    cur_spm_size = cur_spm_size + cur_ring_offset;
   }
+
+  cur_spm_size = cur_spm_size->Normalize();
+  if (!sbe::ceq(cur_spm_size, sbe::nu(0))) hs << ", " << ValueSTR(cur_spm_size);
   hs << ">>>(";
 
   size_t i = 0;
@@ -1106,6 +1119,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
         hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
 
+  if (!cur_ring_offset->IsNumeric()) hs << ", " << ValueSTR(cur_ring_offset);
+
   hs << ");\n";
 
   if (!n.IsAsync())
@@ -1121,6 +1136,28 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
            << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
     }
   }
+
+  // handle device function
+  EmitDeviceFuncDecl(ds);
+  ds << " {\n";
+  IncrDeviceIndent();
+  if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
+        sbe::ceq(cur_ring_offset, sbe::nu(0)))) {
+    ds << d_indent << "extern __shared__ char " << device_fn
+       << "__runtime_shared_buffer__[];\n";
+    if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
+      ds << d_indent << "auto " << device_fn
+         << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&"
+         << device_fn
+         << "__runtime_shared_buffer__[" + ValueSTR(cur_ring_offset) << "]);\n";
+      ds << d_indent << "for (int i = 0; i < " << ValueSTR(cur_ring_size)
+         << "; ++i)\n";
+      ds << d_indent << "  (" << device_fn << "__ring__ + i)->init();\n";
+    }
+
+  } else
+    ds << d_indent << "auto " << device_fn << "__ring__ = nullptr;\n";
+  ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
 
   return true;
 }
@@ -1143,21 +1180,27 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (is_async) ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
 
     auto future_name = n.future;
+    static size_t future_count = 0;
+
     if (future_name.empty()) {
-      static size_t future_count = 0;
-      future_name = "__choreo_anon_fut__" + std::to_string(future_count++);
+      future_name = "__choreo_anon_fut__" + std::to_string(future_count);
     } else {
       claimed_futs.emplace(InScopeName(n.future), cp_atom);
       ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
       ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
                           n.future + ".data()");
     }
+    future_count++;
     ds << d_indent << "future " << future_name << "(\"" << n.future << "\", "
        << n.LOC().begin.line << ", " << n.LOC().begin.column;
     if (!buf_expr.empty()) ds << ", " << buf_expr;
     ds << ");\n";
-    if (is_async)
+    if (is_async) {
       ds << d_indent << future_name << ".set_atom(&" << cp_atom << ");\n";
+      ds << d_indent << future_name << ".set_ring(" << device_fn
+         << "__ring__);\n";
+      ds << d_indent << future_name << ".id = " << future_count << ";\n";
+    }
 
     return future_name;
   };
@@ -1486,7 +1529,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (fty->IsAsync()) {
         ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
            << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
-        ds << d_indent << "cute::cp_async_fence();\n";
         ds << d_indent << future_name << ".trigger();\n";
       } else {
         ds << d_indent << "opt_copy(" << f_mds_name << ", " << t_mds_name
@@ -2356,6 +2398,9 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
         oss << ((index++ > 0) ? ", " : "") << "unsigned long " << dname;
       }
 
+  if (!cur_ring_offset->IsNumeric())
+    oss << ", unsigned " << ValueSTR(cur_ring_offset);
+
   oss << ")";
 
   VST_DEBUG(dbgs() << "Device function prototype:\n" << oss.str() << "\n");
@@ -2435,7 +2480,7 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
   if (CCtx().GenDebugInfo()) os << " -g";
   if (CCtx().DMADiagnosis()) os << " -D__CHOREO_DMA_DIAGNOSIS__";
   if (!target_options.GetValue().empty())

@@ -176,7 +176,10 @@ public:
   bool Visit(AST::WithBlock&) { return true; }
   bool Visit(AST::Memory&) { return true; }
   bool Visit(AST::SpanAs&) { return true; }
-  bool Visit(AST::DMA&) { return true; }
+  bool Visit(AST::DMA& n) {
+    if (n.IsAsync()) cgi.GetFunctionTrait(fname).has_async_dma = true;
+    return true;
+  }
   bool Visit(AST::MMA& n) {
     auto& op = *n.GetOperation();
     ValueList mma_shape;

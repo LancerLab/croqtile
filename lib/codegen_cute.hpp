@@ -280,6 +280,10 @@ private:
 
   std::set<std::string> cooperatives; // futures with cooperative-dma
 
+  ValueItem cur_spm_size;    // extern shared buffer size
+  ValueItem cur_ring_offset; // extern shared buffer size
+  ValueItem cur_ring_size;   // extern shared buffer size
+
 private:
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();

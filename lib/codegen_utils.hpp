@@ -32,7 +32,7 @@ inline const std::string LevelPred(ParallelLevel pl = ParallelLevel::BLOCK,
   case ParallelLevel::BLOCK: return "if (__CHOREO_BLOCK_SINGLE__) ";
   case ParallelLevel::GROUP:
     if (dim == -1)
-      return "if (__CHOREO_GROUP_SINGLE__) ";
+      return "if (__CHOREO_GROUP_SINGLE__(32)) ";
     else
       return "if (__CHOREO_GROUP_SINGLE__(" + std::to_string(dim) + ")) ";
   case ParallelLevel::THREAD: return ""; // no guard is required
