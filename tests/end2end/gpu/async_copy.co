@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
 
 __co__ auto dma_copy(s32 [M, 17, 32] input) {
   s32 [input.span] output;
@@ -83,6 +83,9 @@ int main() { /// host program
   std::cout << "Test 2 Passed\n" << std::endl;
 }
 
+// CHECK-NOT: choreo-rt
 // CHECK: Test 0 Passed
+// CHECK-NOT: choreo-rt
 // CHECK: Test 1 Passed
+// CHECK-NOT: choreo-rt
 // CHECK: Test 2 Passed

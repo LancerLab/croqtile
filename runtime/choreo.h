@@ -1368,7 +1368,7 @@ struct future_ring {
 struct future {
   using AtomType = void; // erase the type
 
-  AtomType* atom;
+  AtomType* atom = nullptr;
   void* d = nullptr; // data: future's user must guarantee it is valid
 
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
@@ -1595,6 +1595,11 @@ inline __device__ void future_ring<N>::commit(future* f) {
   // the uniqueness of id is guaranteed by choreo
   ring[head] = f->id;
   head = (head + 1) % N;
+
+#ifdef __CHOREO_DEBUG_FUTURE_RING__
+  printf("committed feature: %d, [%d, %d)\n", f->id, tail, head);
+#endif
+
 #else
 // cuda host compilation
 #endif // CUDA_ARCH
@@ -1604,6 +1609,11 @@ template <int N>
 inline __device__ int future_ring<N>::discard(future* f) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+
+#ifdef __CHOREO_DEBUG_FUTURE_RING__
+  printf("discarding feature: %d, [%d, %d)\n", f->id, tail, head);
+#endif
+
   uint8_t p = tail;
   while (p != head) {
     if (ring[p] == f->id) {
@@ -1639,21 +1649,57 @@ inline __device__ int future_ring<N>::discard(future* f) {
 __device__ static inline void swap(future& a, future& b) {
   auto atom = a.atom;
   auto d = a.d;
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+// TODO: TMA
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  future_ring<6>* ring = a.ring;
+  int8_t id = a.id;
+#else
+#endif
+
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+  auto name = a.name;
   auto s = a.s;
   auto l = a.line;
   auto c = a.column;
+#endif
 
   a.atom = b.atom;
   a.d = b.d;
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+// TODO: TMA
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  a.ring = b.ring;
+  a.id = b.id;
+#else
+#endif
+
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+  a.name = b.name;
   a.s = b.s;
   a.line = b.line;
   a.column = b.column;
+#endif
 
   b.atom = atom;
   b.d = d;
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+// TODO: TMA
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  b.ring = ring;
+  b.id = id;
+#else
+#endif
+
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+  b.name = name;
   b.s = s;
   b.line = l;
   b.column = c;
+#endif
 }
 
 // ------------------- C++17 utilities -------------------
