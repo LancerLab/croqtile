@@ -116,7 +116,7 @@ __co__ void dma_test3(f32 [36, 27, 128] input) {
      foreach index {
         f0 = dma.transp<0, 2, 1> input.chunkat(p, index) => local;
         f1 = dma.transp.async<1, 2, 0> input.chunkat(p, index) => local;
-        swap(f0, f1);
+        swap f0, f1;
         wait f1;
      }
    }

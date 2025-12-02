@@ -2104,10 +2104,20 @@ swap_stmt
           Parser::error(@3, "Builtin function 'swap' accept exact two parameters.");
         $$ = AST::Make<AST::Rotate>(@1, $3);
       }
+    | SWAP id_list {
+        if ($2->Count() != 2)
+          Parser::error(@2, "Builtin function 'swap' accept exact two parameters.");
+        $$ = AST::Make<AST::Rotate>(@1, $2);
+      }
     | ROTATE LPAREN id_list RPAREN {
         if ($3->Count() < 2)
           Parser::error(@3, "Builtin function 'rotate' accept two or more parameters.");
         $$ = AST::Make<AST::Rotate>(@1, $3);
+      }
+    | ROTATE id_list {
+        if ($2->Count() < 2)
+          Parser::error(@2, "Builtin function 'rotate' accept two or more parameters.");
+        $$ = AST::Make<AST::Rotate>(@1, $2);
       }
     ;
 
