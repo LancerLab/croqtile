@@ -93,14 +93,14 @@ __co__ auto foo3() {
   s8 [1024*1024*24*2] o1;
   s32 [2,3,4,5,6] o2;
   parallel p by 1 {
-    shared s32 [1,2,3,4,5,6] s;
-    shared s8 [1024*1024*24] s1;
-    shared s32 [1,3,4,5,3] s2;
+    shared s32 [1,2,3,4,5,6] smem;
+    shared s8 [1024*1024*24] smem1;
+    shared s32 [1,3,4,5,3] smem2;
     with index in [2] {
       foreach index {
-        a = dma.copy s => o.chunkat(index, _, _, _, _, _);
-        b = dma.copy s1 => o1.chunkat(index);
-        c = dma.copy s2 => o2.chunkat(index, _, _, _, index);
+        a = dma.copy smem => o.chunkat(index, _, _, _, _, _);
+        b = dma.copy smem1 => o1.chunkat(index);
+        c = dma.copy smem2 => o2.chunkat(index, _, _, _, index);
       }
     }
   }
@@ -142,14 +142,14 @@ __co__ auto foo5() {
   s32 [(1024*64-32)*2,1] o1;
   s32 [2,3,4,5,6] o2;
   parallel p by 1 {
-    shared s32 [6,5,4,3,2,1] s;
-    shared s32 [1, 1024*64-32] s1;
-    shared s32 [3,5,4,3,1] s2;
+    shared s32 [6,5,4,3,2,1] smem;
+    shared s32 [1, 1024*64-32] smem1;
+    shared s32 [3,5,4,3,1] smem2;
     with index in [2] {
       foreach index {
-        a = dma.transp<5,4,3,2,1,0> s => o.chunkat(index, _, _, _, _, _);
-        b = dma.transp<1, 0> s1 => o1.chunkat(index, _);
-        c = dma.transp<4,3,2,1,0> s2 => o2.chunkat(index, _, _, _, index);
+        a = dma.transp<5,4,3,2,1,0> smem => o.chunkat(index, _, _, _, _, _);
+        b = dma.transp<1, 0> smem1 => o1.chunkat(index, _);
+        c = dma.transp<4,3,2,1,0> smem2 => o2.chunkat(index, _, _, _, index);
       }
     }
   }

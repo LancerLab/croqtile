@@ -24,4 +24,4 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
   return output;
 }
 
-// CHECK: error: MMA [f16(mul)f16(acc):m32n32k32] is not supported by current architecture
+// CHECK: error: MMA [f16(a)f16(b)f16(c)f16(d): m32n32k32] is not support by current architecture(SM_86).
