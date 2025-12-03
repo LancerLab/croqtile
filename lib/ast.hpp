@@ -2580,6 +2580,15 @@ public:
     return l_info.future;
   }
 
+  const std::string GetFragSym() const {
+    if (tag == Fill) return FillingSymbol();
+    if (tag == Load) return LoadTo();
+    if (tag == Exec) return ExecOperand(0);
+    if (tag == Store) return StoreFrom();
+    choreo_unreachable("unexpected mma operation!");
+    return "";
+  }
+
   Kind Tag() const { return tag; }
 
 public:

@@ -397,22 +397,7 @@ public:
       FCtx(cur_fname).InsertAssertion(asrt, loc, message);
   }
 
-  bool ValidMMAConfig(MMALimit::Sparsity s, BaseType mul_a, BaseType mul_b,
-                      BaseType scale, BaseType acc, ValueList mma_shape,
-                      MMALimit::CUDA_CC cc = 82) {
-    if (mma_shape.size() != 3)
-      choreo_unreachable("unexpected dims size of MMA shape!");
-    assert(IsValueListNumeric(mma_shape));
-    MMALimit::MMAConfig cfg{.sparsity = s,
-                            .a_ty = mul_a,
-                            .b_ty = mul_b,
-                            .c_ty = acc,
-                            .d_ty = acc,
-                            .scale_ty = scale,
-                            .shape =
-                                MMALimit::MMAShape{.m = *VIInt(mma_shape[0]),
-                                                   .n = *VIInt(mma_shape[1]),
-                                                   .k = *VIInt(mma_shape[2])}};
+  bool ValidMMAConfig(MMALimit::MMAConfig cfg, MMALimit::CUDA_CC cc) {
     bool find_cfg = false;
     if (MMALimit::wmma_configs.count(cfg) &&
         cc >= MMALimit::wmma_configs.at(cfg)) {
@@ -639,8 +624,9 @@ public:
       auto d_ty = c_ty;
       auto scale_ty = BaseType::UNKNOWN;
       auto arch = std::stoi(STR(CCtx().GetArch()).substr(3));
-      if (!ValidMMAConfig(MMALimit::DENSE, a_ty, b_ty, scale_ty, c_ty,
-                          mma_shape, arch))
+      MMALimit::MMAConfig mma_config{
+          MMALimit::DENSE, a_ty, b_ty, c_ty, d_ty, scale_ty, mma_shape};
+      if (!ValidMMAConfig(mma_config, arch))
         Error1(n.LOC(), "MMA [" + STR(a_ty) + "(a)" + STR(b_ty) + "(b)" +
                             (scale_ty != BaseType::UNKNOWN
                                  ? ":" + STR(scale_ty) + "(scale)"
@@ -649,6 +635,11 @@ public:
                             "(d): " + MMAShapeSTR(mma_shape) +
                             "] is not support by current architecture(" +
                             STR(CCtx().GetArch()) + ").");
+      n.Note().emplace("ptx_wrapped_header", mma_config.ToPTXWrappedHeader());
+      bool is_wmma = MMALimit::ConfigIsWMMA(mma_config);
+      FCtx(cur_fname).SetFragIsWMMA(InScopeName(a_sym), is_wmma);
+      FCtx(cur_fname).SetFragIsWMMA(InScopeName(b_sym), is_wmma);
+      FCtx(cur_fname).SetFragIsWMMA(InScopeName(c_sym), is_wmma);
 #else
       auto ety = a_ty->ElementType();
       switch (ety) {

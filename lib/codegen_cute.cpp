@@ -213,6 +213,58 @@ bool CuteCodeGen::ThreadCooperative(AST::DMA&) const {
   return false;
 }
 
+std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
+    const std::string& buf_name, [[maybe_unused]] const std::string& buf_expr,
+    const Storage sto, BaseType bty, const Shape& shp,
+    const std::string& offset, const std::string& strides,
+    const std::vector<size_t>& transp) {
+  static int shp_cnt = 0;
+  shp_cnt++;
+  auto bname = RemoveSuffix(buf_name, ".data()");
+  auto shpcnt = std::to_string(shp_cnt);
+
+  auto shp_name = "__shape" + shpcnt + "_" + bname;
+  auto lyt_name = "__layout" + shpcnt + "_" + bname;
+  auto std_name = "__stride" + shpcnt + "_" + bname;
+  auto tsr_name = "__tensor" + shpcnt + "_" + bname;
+
+  std::string mem_ty;
+  if (sto == Storage::GLOBAL || sto == Storage::DEFAULT)
+    mem_ty = "gmem";
+  else if (sto == Storage::SHARED)
+    mem_ty = "smem";
+  else if (sto == Storage::LOCAL)
+    mem_ty = "";
+  else
+    choreo_unreachable("unsupported storage type: " + STR(sto));
+
+  std::string bts{NameBaseType(bty)};
+
+  std::ostringstream tsr_decl;
+
+  tsr_decl << d_indent << "auto " << shp_name << " = cute::make_shape("
+           << ((transp.empty()) ? ShapeSTR(shp, true)
+                                : ReShapeSTR(shp, transp, true))
+           << ");\n";
+  if (!strides.empty())
+    tsr_decl << d_indent << "auto " << std_name << " = cute::make_stride("
+             << strides << ");\n";
+  tsr_decl << d_indent << "auto " << lyt_name << " = cute::make_layout("
+           << shp_name;
+  if (!strides.empty()) tsr_decl << ", " << std_name;
+  tsr_decl << ");\n";
+  tsr_decl << d_indent << "auto " << tsr_name << " = cute::make_tensor(";
+  if (!mem_ty.empty())
+    tsr_decl << "cute::make_" << mem_ty << "_ptr<" << bts << ">";
+  else
+    tsr_decl << "(" << bts << "*)";
+  tsr_decl << "(" << buf_name << ((!offset.empty()) ? (" + " + offset) : "")
+           << ")";
+  tsr_decl << ", " << lyt_name << ");\n";
+
+  return {tsr_name, tsr_decl.str()};
+}
+
 const std::string CuteCodeGen::ShapeSTR(const Shape& s, bool shp_lit,
                                         const std::string& delimiter,
                                         BaseType cast_to) const {
@@ -1792,54 +1844,118 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
 bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
-  auto FragSTR = [](MMAInfo::Fragment frag) {
-    switch (frag) {
-    case MMAInfo::FRAG_A: return "matrix_a";
-    case MMAInfo::FRAG_B: return "matrix_b";
-    case MMAInfo::FRAG_C: return "accumulator";
-    default: choreo_unreachable("unsupported frag."); break;
+  if (FCtx(fname).FragIsWMMA(InScopeName(op.GetFragSym()))) {
+    auto FragSTR = [](MMAInfo::Fragment frag) {
+      switch (frag) {
+      case MMAInfo::FRAG_A: return "matrix_a";
+      case MMAInfo::FRAG_B: return "matrix_b";
+      case MMAInfo::FRAG_C: return "accumulator";
+      default: choreo_unreachable("unsupported frag."); break;
+      }
+      return "";
+    };
+    switch (op.Tag()) {
+    case AST::MMAOperation::Fill: {
+      auto sym = op.FillingSymbol();
+      auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      auto sty = GetSpannedType(GetSymbolType(sym));
+      assert(sty);
+      ds << d_indent
+         << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
+         << ", ";
+      ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> " << sym
+         << "_frag;\n";
+      ds << d_indent << "nvcuda::wmma::fill_fragment(" << sym << "_frag, ("
+         << NameBaseType(ssmi.ty) << ")" << ExprSTR(op.FillingValue(), false)
+         << ");\n";
+    } break;
+    case AST::MMAOperation::Load: {
+      auto sym = op.LoadTo();
+      auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      auto sty = GetSpannedType(GetSymbolType(sym));
+      auto fty = GetSpannedType(GetSymbolType(op.LoadFrom()->RefSymbol()));
+      ds << d_indent
+         << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
+         << ", ";
+      ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty)
+         << ", nvcuda::wmma::row_major> " << sym << "_frag;\n";
+      ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
+         << ExprSTR(op.LoadFrom(), false) << ", " << fty->GetShape().ValueAt(1)
+         << ");\n";
+    } break;
+    case AST::MMAOperation::Exec: {
+      ds << d_indent << "nvcuda::wmma::mma_sync(" << op.ExecOperand(0)
+         << "_frag, " << op.ExecOperand(1) << "_frag, " << op.ExecOperand(2)
+         << "_frag, " << op.ExecOperand(0) << "_frag);\n";
+    } break;
+    case AST::MMAOperation::Store: {
+      auto tty = GetSpannedType(GetSymbolType(op.StoreTo()->RefSymbol()));
+      ds << d_indent << "nvcuda::wmma::store_matrix_sync("
+         << ExprSTR(op.StoreTo(), false) << ", " << op.StoreFrom() << "_frag, "
+         << tty->GetShape().ValueAt(1) << ", nvcuda::wmma::mem_row_major);\n";
+    } break;
+    default: break;
+    }
+  } else {
+    // n is not wmma. Inline PTX.
+    switch (op.Tag()) {
+    case AST::MMAOperation::Fill: {
+      // TODO: shall we split the op to two diff ops: fragment decl and fill?
+      // for example: decl; fill; use; store; fill; use again;
+      auto sym = op.FillingSymbol();
+      auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      assert(ssmi.ty != BaseType::UNKNOWN);
+      auto sty = GetSpannedType(GetSymbolType(sym));
+      assert(sty);
+      reg_num_d = GetRegNumOfD(sty->GetShape().ValueAt(0),
+                               sty->GetShape().ValueAt(1), ssmi.ty);
+      for (size_t i = 0; i < reg_num_d; ++i)
+        ds << d_indent << NameBaseType(ssmi.ty) << " " << sym << "_frag" << i
+           << ";\n";
+      for (size_t i = 0; i < reg_num_d; ++i)
+        ds << d_indent << sym << "_frag" << i << " = "
+           << ExprSTR(op.FillingValue(), false) << ";\n";
+    } break;
+    case AST::MMAOperation::Load: {
+      auto ca = op.LoadFrom();
+      auto f_sym = ca->data->name;
+      auto f_sty = GetSpannedType(GetSymbolType(f_sym));
+      const auto f_mds =
+          GenTensorDecl(f_sym, "", f_sty->GetStorage(), f_sty->ElementType(),
+                        ca->GetBlockShape(), ValueSTR(GenOffset(ca)),
+                        ValueSTR(GenStrides(ca), false, true));
+      frag2fromtensor[op.LoadTo()] = f_mds.first;
+      ds << f_mds.second;
+    } break;
+    case AST::MMAOperation::Exec: {
+      assert(n.Note().count("ptx_wrapped_header"));
+      cur_ptx_wrap_header = n.Note().at("ptx_wrapped_header");
+      ds << d_indent << cur_ptx_wrap_header << "(";
+      for (size_t i = 0; i < reg_num_d; ++i)
+        ds << op.ExecOperand(0) << "_frag" << i << ", ";
+      ds << frag2fromtensor.at(op.ExecOperand(1)) << ", "
+         << frag2fromtensor.at(op.ExecOperand(2));
+      for (size_t i = 0; i < reg_num_d; ++i)
+        ds << ", " << op.ExecOperand(0) << "_frag" << i;
+      ds << ");\n";
+    } break;
+    case AST::MMAOperation::Store: {
+      auto ca = op.StoreTo();
+      auto f_sym = ca->data->name;
+      auto f_sty = GetSpannedType(GetSymbolType(f_sym));
+      const auto f_mds =
+          GenTensorDecl(f_sym, "", f_sty->GetStorage(), f_sty->ElementType(),
+                        ca->GetBlockShape(), ValueSTR(GenOffset(ca)),
+                        ValueSTR(GenStrides(ca), false, true));
+      ds << f_mds.second;
+      ds << d_indent << cur_ptx_wrap_header << "_store(";
+      for (size_t i = 0; i < reg_num_d; ++i)
+        ds << op.StoreFrom() << "_frag" << i << ", ";
+      ds << f_mds.first << ");\n";
+    } break;
+    default: break;
     }
     return "";
-  };
-  switch (op.Tag()) {
-  case AST::MMAOperation::Fill: {
-    auto sym = op.FillingSymbol();
-    auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
-    auto sty = GetSpannedType(GetSymbolType(sym));
-    assert(sty);
-    ds << d_indent
-       << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag) << ", ";
-    ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> " << sym
-       << "_frag;\n";
-    ds << d_indent << "nvcuda::wmma::fill_fragment(" << sym << "_frag, ("
-       << NameBaseType(ssmi.ty) << ")" << ExprSTR(op.FillingValue(), false)
-       << ");\n";
-  } break;
-  case AST::MMAOperation::Load: {
-    auto sym = op.LoadTo();
-    auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
-    auto sty = GetSpannedType(GetSymbolType(sym));
-    auto fty = GetSpannedType(GetSymbolType(op.LoadFrom()->RefSymbol()));
-    ds << d_indent
-       << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag) << ", ";
-    ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty)
-       << ", nvcuda::wmma::row_major> " << sym << "_frag;\n";
-    ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
-       << ExprSTR(op.LoadFrom(), false) << ", " << fty->GetShape().ValueAt(1)
-       << ");\n";
-  } break;
-  case AST::MMAOperation::Exec: {
-    ds << d_indent << "nvcuda::wmma::mma_sync(" << op.ExecOperand(0)
-       << "_frag, " << op.ExecOperand(1) << "_frag, " << op.ExecOperand(2)
-       << "_frag, " << op.ExecOperand(0) << "_frag);\n";
-  } break;
-  case AST::MMAOperation::Store: {
-    auto tty = GetSpannedType(GetSymbolType(op.StoreTo()->RefSymbol()));
-    ds << d_indent << "nvcuda::wmma::store_matrix_sync("
-       << ExprSTR(op.StoreTo(), false) << ", " << op.StoreFrom() << "_frag, "
-       << tty->GetShape().ValueAt(1) << ", nvcuda::wmma::mem_row_major);\n";
-  } break;
-  default: break;
   }
   return true;
 }

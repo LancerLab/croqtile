@@ -128,6 +128,23 @@ struct MMAConfig {
   BaseType scale_ty; // UNKNOWN if NA
   MMAShape shape;
 
+  MMAConfig(Sparsity s, BaseType a_ty, BaseType b_ty, BaseType c_ty,
+            BaseType d_ty, BaseType scale_ty, MMAShape mma_shape)
+      : sparsity(s), a_ty(a_ty), b_ty(b_ty), c_ty(c_ty), d_ty(d_ty),
+        scale_ty(scale_ty), shape(mma_shape) {}
+
+  MMAConfig(Sparsity s, BaseType a_ty, BaseType b_ty, BaseType c_ty,
+            BaseType d_ty, BaseType scale_ty, const ValueList& mma_shape)
+      : sparsity(s), a_ty(a_ty), b_ty(b_ty), c_ty(c_ty), d_ty(d_ty),
+        scale_ty(scale_ty) {
+    if (mma_shape.size() != 3)
+      choreo_unreachable("unexpected dims size of MMA shape!");
+    assert(IsValueListNumeric(mma_shape));
+    this->shape = MMALimit::MMAShape{.m = *VIInt(mma_shape[0]),
+                                     .n = *VIInt(mma_shape[1]),
+                                     .k = *VIInt(mma_shape[2])};
+  }
+
   bool operator<(const MMAConfig& rhs) const {
     return std::tie(sparsity, a_ty, b_ty, scale_ty, c_ty, d_ty, shape) <
            std::tie(rhs.sparsity, rhs.a_ty, rhs.b_ty, rhs.scale_ty, rhs.c_ty,
@@ -142,6 +159,24 @@ struct MMAConfig {
         << ", d_ty=" << STR(d_ty) << ", shape=(" << shape.m << ", " << shape.n
         << ", " << shape.k << "))";
     return oss.str();
+  }
+
+  std::string ToPTXWrappedHeader(const std::string& sep = "_") {
+    // example: mma.sync.aligned.m8n8k4.row.col.f64.f64.f64.f64
+    std::vector<std::string> strs;
+    strs.push_back("mma");
+    strs.push_back("sync");
+    strs.push_back("aligned");
+    strs.push_back("m" + std::to_string(shape.m) + "n" +
+                   std::to_string(shape.n) + "k" + std::to_string(shape.k));
+    strs.push_back("row");
+    strs.push_back("col");
+    // TODO: STR is not worked for F8_E4M3...
+    strs.push_back(STR(a_ty));
+    strs.push_back(STR(b_ty));
+    strs.push_back(STR(c_ty));
+    strs.push_back(STR(d_ty));
+    return DelimitedString(strs, sep);
   }
 };
 
@@ -335,6 +370,10 @@ static const std::map<MMAConfig, CUDA_CC> mma_configs = {
     {{DENSE, BT::F32, BT::F32, BT::F32, BT::F32, BT::UNKNOWN, {1, 2, 1}}, 100},
     // sm120 todo
 };
+
+inline bool ConfigIsWMMA(const MMAConfig& config) {
+  return wmma_configs.count(config);
+}
 
 } // namespace MMALimit
 

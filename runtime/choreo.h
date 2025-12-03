@@ -1963,6 +1963,45 @@ static_assert(false, "path 2\n");
   copy(cute::AutoVectorizingCopyWithAssumedAlignment<32>{}, src, dst);
 }
 
+// TODO: move to choreo_mma_wrapper.h
+// ------------------- inline mma PTX -------------------
+template <class TensorA, class TensorB>
+inline __device__ void mma_sync_aligned_m8n8k4_row_col_f64_f64_f64_f64(
+    double& d0, double& d1, TensorA const& A, TensorB const& B,
+    const double& c0, const double& c1) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int A_row = lane >> 2;
+  int A_col = lane % 4;
+  int B_row = lane % 4;
+  int B_col = lane >> 2;
+  // TODO: load matrix
+  double A_frag = A(A_row, A_col);
+  double B_frag = B(B_row, B_col);
+  asm volatile("mma.sync.aligned.m8n8k4.row.col.f64.f64.f64.f64 "
+               "{%0, %1}, "
+               "{%2}, "
+               "{%3}, "
+               "{%4, %5};\n"
+               : "=d"(d0), "=d"(d1)
+               : "d"(A_frag), "d"(B_frag), "d"(c0), "d"(c1));
+}
+
+template <class TensorD>
+inline __device__ void
+mma_sync_aligned_m8n8k4_row_col_f64_f64_f64_f64_store(double& d0, double& d1,
+                                                      TensorD const& D) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int D_row = lane >> 2;
+  int D_col0 = (lane % 4) * 2;
+  int D_col1 = D_col0 + 1;
+  D(D_row, D_col0) = d0;
+  D(D_row, D_col1) = d1;
+}
+
 #endif // __CHOREO_TARGET_CUTE__
 
 #if defined(__TOPSCC__) || defined(__CHOREO_TARGET_CUTE__)

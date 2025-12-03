@@ -257,6 +257,7 @@ private:
   std::map<std::string, OptimizedValues> sym_values;
   std::vector<RuntimeCheckEntry> rt_checks;
   std::vector<Assertion> assertions;
+  std::map<std::string, bool> frag_is_wmma;
 
   struct MemReuseInfo {
     std::string simulator;
@@ -318,6 +319,21 @@ public:
     auto mri = GetMemReuseInfo(dev_func);
     if (!mri) return false;
     return mri->infos.count(sto);
+  }
+  bool FragIsWMMA(const std::string& scoped_frag_name) const {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    return frag_is_wmma.at(scoped_frag_name);
+  }
+  void SetFragIsWMMA(const std::string& scoped_frag_name, bool is_wmma) {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    if (frag_is_wmma.count(scoped_frag_name)) {
+      if (frag_is_wmma.at(scoped_frag_name) != is_wmma)
+        choreo_unreachable("expect the fragment to be always of wmma or mma.");
+    } else {
+      frag_is_wmma.emplace(scoped_frag_name, is_wmma);
+    }
   }
 };
 
