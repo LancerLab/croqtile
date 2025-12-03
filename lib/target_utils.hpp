@@ -223,6 +223,8 @@ static const std::map<MMAConfig, CUDA_CC> wmma_configs = {
 };
 
 static const std::map<MMAConfig, CUDA_CC> mma_configs = {
+    // sm70
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {8, 8, 4}}, 70},
     // sm80
     // 16 x 8 x 8
     {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {16, 8, 8}}, 80},

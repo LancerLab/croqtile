@@ -1909,12 +1909,23 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       assert(sty);
       reg_num_d = GetRegNumOfD(sty->GetShape().ValueAt(0),
                                sty->GetShape().ValueAt(1), ssmi.ty);
-      for (size_t i = 0; i < reg_num_d; ++i)
-        ds << d_indent << NameBaseType(ssmi.ty) << " " << sym << "_frag" << i
-           << ";\n";
-      for (size_t i = 0; i < reg_num_d; ++i)
+      bool use_uint32 = false;
+      if (SizeOf(ssmi.ty) < 4) {
+        use_uint32 = true;
+        reg_num_d /= 4 / SizeOf(ssmi.ty);
+      }
+      for (size_t i = 0; i < reg_num_d; ++i) {
+        if (use_uint32)
+          ds << d_indent << "uint32_t" << " " << sym << "_frag" << i << ";\n";
+        else
+          ds << d_indent << NameBaseType(ssmi.ty) << " " << sym << "_frag" << i
+             << ";\n";
+      }
+      for (size_t i = 0; i < reg_num_d; ++i) {
+        // TODO: if use_uint32
         ds << d_indent << sym << "_frag" << i << " = "
            << ExprSTR(op.FillingValue(), false) << ";\n";
+      }
     } break;
     case AST::MMAOperation::Load: {
       auto ca = op.LoadFrom();
