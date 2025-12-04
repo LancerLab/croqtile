@@ -172,10 +172,10 @@ struct MMAConfig {
     strs.push_back("row");
     strs.push_back("col");
     // TODO: STR is not worked for F8_E4M3...
+    strs.push_back(STR(d_ty));
     strs.push_back(STR(a_ty));
     strs.push_back(STR(b_ty));
     strs.push_back(STR(c_ty));
-    strs.push_back(STR(d_ty));
     return DelimitedString(strs, sep);
   }
 };

@@ -2002,6 +2002,259 @@ mma_sync_aligned_m8n8k4_row_col_f64_f64_f64_f64_store(double& d0, double& d1,
   D(D_row, D_col1) = d1;
 }
 
+template <class TensorA, class TensorB>
+inline __device__ void mma_sync_aligned_m8n8k4_row_col_f16_f16_f16_f16(
+    uint32_t& d0, uint32_t& d1, uint32_t& d2, uint32_t& d3, TensorA const& A,
+    TensorB const& B, const uint32_t& c0, const uint32_t& c1,
+    const uint32_t& c2, const uint32_t& c3) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int A_row;
+  if (lane < 16)
+    A_row = lane % 4;
+  else
+    A_row = lane % 4 + 4;
+  auto A_u32 = cute::recast<uint32_t>(A);
+  uint32_t a0 = A_u32(A_row, 0);
+  uint32_t a1 = A_u32(A_row, 1);
+  int B_col;
+  if (lane < 16)
+    B_col = lane % 4;
+  else
+    B_col = lane % 4 + 4;
+  uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(0, B_col))) << 16) |
+                uint16_t(reinterpret_cast<uint16_t&>(B(1, B_col)));
+  uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(2, B_col))) << 16) |
+                uint16_t(reinterpret_cast<uint16_t&>(B(3, B_col)));
+  asm volatile("mma.sync.aligned.m8n8k4.row.col.f16.f16.f16.f16"
+               "{%0, %1,  %2,  %3},"
+               "{%4, %5},"
+               "{%6, %7},"
+               "{%8, %9, %10, %11};\n"
+               : "=r"(d0), "=r"(d1), "=r"(d2), "=r"(d3)
+               : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(c0), "r"(c1), "r"(c2),
+                 "r"(c3));
+}
+
+template <class TensorD>
+inline __device__ void mma_sync_aligned_m8n8k4_row_col_f16_f16_f16_f16_store(
+    uint32_t& d0, uint32_t& d1, uint32_t& d2, uint32_t& d3, TensorD const& D) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int D_row;
+  if (lane < 16)
+    D_row = lane % 4;
+  else
+    D_row = lane % 4 + 4;
+  auto D_u32 = cute::recast<uint32_t>(D);
+  D_u32(D_row, 0) = d0;
+  D_u32(D_row, 1) = d1;
+  D_u32(D_row, 2) = d2;
+  D_u32(D_row, 3) = d3;
+}
+
+template <class TensorA, class TensorB>
+inline __device__ void mma_sync_aligned_m16n8k8_row_col_f16_f16_f16_f16(
+    uint32_t& d0, uint32_t& d1, TensorA const& A, TensorB const& B,
+    const uint32_t& c0, const uint32_t& c1) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int gid = lane >> 2;
+  int tid_in_group = lane % 4;
+  int A_row0 = gid;     // for 0, 1
+  int A_row1 = gid + 8; // for 2, 3
+  int A_col = tid_in_group;
+  auto A_u32 = cute::recast<uint32_t>(A);
+  uint32_t a0 = A_u32(A_row0, A_col);
+  uint32_t a1 = A_u32(A_row1, A_col);
+  int B_row = tid_in_group * 2;
+  int B_col = gid;
+  uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(B_row, B_col))) << 16) |
+                uint16_t(reinterpret_cast<uint16_t&>(B(B_row + 1, B_col)));
+  asm volatile("mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+               "{%0, %1},"
+               "{%2, %3},"
+               "{%4},"
+               "{%5, %6};\n"
+               : "=r"(d0), "=r"(d1)
+               : "r"(a0), "r"(a1), "r"(b0), "r"(c0), "r"(c1));
+}
+
+template <class TensorD>
+inline __device__ void mma_sync_aligned_m16n8k8_row_col_f16_f16_f16_f16_store(
+    uint32_t& d0, uint32_t& d1, TensorD const& D) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int gid = lane >> 2;
+  int tid_in_group = lane % 4;
+  int D_row0 = gid;
+  int D_row1 = gid + 8;
+  int D_col = tid_in_group;
+  auto D_u32 = cute::recast<uint32_t>(D);
+  D_u32(D_row0, D_col) = d0;
+  D_u32(D_row1, D_col) = d1;
+}
+
+template <class TensorA, class TensorB>
+inline __device__ void mma_sync_aligned_m16n8k8_row_col_f32_bf16_bf16_f32(
+    float& d0, float& d1, float& d2, float& d3, TensorA const& A,
+    TensorB const& B, const float& c0, const float& c1, const float& c2,
+    const float& c3) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int gid = lane >> 2;
+  int tid_in_group = lane % 4;
+  int A_row0 = gid;     // for 0, 1
+  int A_row1 = gid + 8; // for 2, 3
+  int A_col = tid_in_group;
+  auto A_u32 = cute::recast<uint32_t>(A);
+  uint32_t a0 = A_u32(A_row0, A_col);
+  uint32_t a1 = A_u32(A_row1, A_col);
+  int B_row = tid_in_group * 2;
+  int B_col = gid;
+  uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(B_row, B_col))) << 16) |
+                uint16_t(reinterpret_cast<uint16_t&>(B(B_row + 1, B_col)));
+  asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.bf16.bf16.f32 "
+               "{%0,  %1,  %2,  %3},"
+               "{%4,  %5},"
+               "{%6},"
+               "{%7,  %8,  %9,  %10};\n"
+               : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+               : "r"(a0), "r"(a1), "r"(b0), "f"(c0), "f"(c1), "f"(c2), "f"(c3));
+}
+
+template <class TensorD>
+inline __device__ void mma_sync_aligned_m16n8k8_row_col_f32_bf16_bf16_f32_store(
+    float& d0, float& d1, float& d2, float& d3, TensorD const& D) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int gid = lane >> 2;
+  int tid_in_group = lane % 4;
+  int D_row0 = gid;
+  int D_row1 = gid + 8;
+  int D_col = tid_in_group * 2;
+  D(D_row0, D_col) = d0;
+  D(D_row0, D_col + 1) = d1;
+  D(D_row1, D_col) = d2;
+  D(D_row1, D_col + 1) = d3;
+}
+
+template <class TensorA, class TensorB>
+inline __device__ void mma_sync_aligned_m16n8k16_row_col_f16_f16_f16_f16(
+    uint32_t& d0, uint32_t& d1, TensorA const& A, TensorB const& B,
+    const uint32_t& c0, const uint32_t& c1) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int gid = lane >> 2;
+  int tid_in_group = lane % 4;
+  int A_row0 = gid;              // for 0 and 1, 4 and 5
+  int A_row1 = gid + 8;          // for 2 and 3, 6 and 7
+  int A_col0 = tid_in_group;     // for 0, 1, 2 and 3
+  int A_col1 = tid_in_group + 4; // for 4, 5, 6 and 7
+  auto A_u32 = cute::recast<uint32_t>(A);
+  uint32_t a0 = A_u32(A_row0, A_col0);
+  uint32_t a1 = A_u32(A_row1, A_col0);
+  uint32_t a2 = A_u32(A_row0, A_col1);
+  uint32_t a3 = A_u32(A_row1, A_col1);
+  int B_row0 = tid_in_group * 2;
+  int B_row1 = tid_in_group * 2 + 8;
+  int B_col = gid;
+  uint32_t b0 =
+      (uint32_t(reinterpret_cast<uint16_t&>(B(B_row0, B_col))) << 16) |
+      uint16_t(reinterpret_cast<uint16_t&>(B(B_row0 + 1, B_col)));
+  uint32_t b1 =
+      (uint32_t(reinterpret_cast<uint16_t&>(B(B_row1, B_col))) << 16) |
+      uint16_t(reinterpret_cast<uint16_t&>(B(B_row1 + 1, B_col)));
+  asm volatile("mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 "
+               "{%0,  %1},"
+               "{%2,  %3,  %4,  %5},"
+               "{%6,  %7},"
+               "{%8,  %9};\n"
+               : "=r"(d0), "=r"(d1)
+               : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(c0),
+                 "r"(c1));
+}
+
+template <class TensorD>
+inline __device__ void mma_sync_aligned_m16n8k16_row_col_f16_f16_f16_f16_store(
+    uint32_t& d0, uint32_t& d1, TensorD const& D) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int gid = lane >> 2;
+  int tid_in_group = lane % 4;
+  int D_row0 = gid;
+  int D_row1 = gid + 8;
+  int D_col = tid_in_group;
+  auto D_u32 = cute::recast<uint32_t>(D);
+  D_u32(D_row0, D_col) = d0;
+  D_u32(D_row1, D_col) = d1;
+}
+
+template <class TensorA, class TensorB>
+inline __device__ void mma_sync_aligned_m16n8k16_row_col_f32_bf16_bf16_f32(
+    float& d0, float& d1, float& d2, float& d3, TensorA const& A,
+    TensorB const& B, const float& c0, const float& c1, const float& c2,
+    const float& c3) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int gid = lane >> 2;
+  int tid_in_group = lane % 4;
+  int A_row0 = gid;              // for 0 and 1, 4 and 5
+  int A_row1 = gid + 8;          // for 2 and 3, 6 and 7
+  int A_col0 = tid_in_group;     // for 0, 1, 2 and 3
+  int A_col1 = tid_in_group + 4; // for 4, 5, 6 and 7
+  auto A_u32 = cute::recast<uint32_t>(A);
+  uint32_t a0 = A_u32(A_row0, A_col0);
+  uint32_t a1 = A_u32(A_row1, A_col0);
+  uint32_t a2 = A_u32(A_row0, A_col1);
+  uint32_t a3 = A_u32(A_row1, A_col1);
+  int B_row0 = tid_in_group * 2;
+  int B_row1 = tid_in_group * 2 + 8;
+  int B_col = gid;
+  uint32_t b0 =
+      (uint32_t(reinterpret_cast<uint16_t&>(B(B_row0, B_col))) << 16) |
+      uint16_t(reinterpret_cast<uint16_t&>(B(B_row0 + 1, B_col)));
+  uint32_t b1 =
+      (uint32_t(reinterpret_cast<uint16_t&>(B(B_row1, B_col))) << 16) |
+      uint16_t(reinterpret_cast<uint16_t&>(B(B_row1 + 1, B_col)));
+  asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
+               "{%0,  %1,  %2,  %3},"
+               "{%4,  %5,  %6,  %7},"
+               "{%8,  %9},"
+               "{%10, %11, %12, %13};\n"
+               : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+               : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "f"(c0),
+                 "f"(c1), "f"(c2), "f"(c3));
+}
+
+template <class TensorD>
+inline __device__ void
+mma_sync_aligned_m16n8k16_row_col_f32_bf16_bf16_f32_store(float& d0, float& d1,
+                                                          float& d2, float& d3,
+                                                          TensorD const& D) {
+  assert(threadIdx.y == 0);
+  assert(threadIdx.z == 0);
+  int lane = threadIdx.x & 31;
+  int gid = lane >> 2;
+  int tid_in_group = lane % 4;
+  int D_row0 = gid;
+  int D_row1 = gid + 8;
+  int D_col = tid_in_group * 2;
+  D(D_row0, D_col) = d0;
+  D(D_row0, D_col + 1) = d1;
+  D(D_row1, D_col) = d2;
+  D(D_row1, D_col + 1) = d3;
+}
+
 #endif // __CHOREO_TARGET_CUTE__
 
 #if defined(__TOPSCC__) || defined(__CHOREO_TARGET_CUTE__)
