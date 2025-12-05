@@ -187,8 +187,6 @@ static const std::map<MMAConfig, CUDA_CC> wmma_configs = {
     // 16 x 16 x 16
     {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {16, 16, 16}},
      70},
-    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F32, BT::UNKNOWN, {16, 16, 16}},
-     70},
     {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {16, 16, 16}},
      70},
     {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {16, 16, 16}}, 72},
@@ -196,14 +194,14 @@ static const std::map<MMAConfig, CUDA_CC> wmma_configs = {
     {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {16, 16, 16}},
      80},
     // 32 x 8 x 16
-    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F32, BT::UNKNOWN, {32, 8, 16}}, 70},
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {32, 8, 16}}, 70},
     {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {32, 8, 16}}, 70},
     {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {32, 8, 16}}, 72},
     {{DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {32, 8, 16}}, 72},
     {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {32, 8, 16}},
      80},
     // 8 x 32 x 16
-    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F32, BT::UNKNOWN, {8, 32, 16}}, 70},
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {8, 32, 16}}, 70},
     {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {8, 32, 16}}, 70},
     {{DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN, {8, 32, 16}}, 72},
     {{DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN, {8, 32, 16}}, 72},

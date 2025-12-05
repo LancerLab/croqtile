@@ -33,6 +33,8 @@
 #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 #include "cuda_fp16.h"
 
+#define __CHOREO_TARGET_NATIVE_TFLOAT32_SUPPORT__
+
 #if CUDA_VERSION >= 11080
 #define __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 #if CUDA_VERSION >= 12090
@@ -296,6 +298,8 @@ using f32 = float;
 // TF32 is only used in tensor core in CUDA and CUTE
 #if defined(__USE_CUTE_TYPE__)
 using cute::tfloat32_t;
+#elif defined(__USE_CUDA_TYPE__)
+using tfloat32_t = nvcuda::wmma::precision::tf32;
 #else
 #error "TF32 type is not supported on this target."
 #endif

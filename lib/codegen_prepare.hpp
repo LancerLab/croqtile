@@ -258,6 +258,8 @@ public:
       auto a_ety = a_ty->ElementType();
       auto b_ety = b_ty->ElementType();
       auto acc_ty = c_ty->ElementType();
+      if (a_ety == BaseType::F32) a_ety = BaseType::TF32;
+      if (b_ety == BaseType::F32) b_ety = BaseType::TF32;
       cgi.AddSymbolMMA(InScopeName(a_sym),
                        MMAInfo{a_ety, mma_shape, MMAInfo::FRAG_A});
       cgi.AddSymbolMMA(InScopeName(b_sym),

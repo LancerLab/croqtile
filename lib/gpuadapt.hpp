@@ -624,6 +624,10 @@ public:
       auto d_ty = c_ty;
       auto scale_ty = BaseType::UNKNOWN;
       auto arch = std::stoi(STR(CCtx().GetArch()).substr(3));
+
+      if (a_ty == BaseType::F32) a_ty = BaseType::TF32;
+      if (b_ty == BaseType::F32) b_ty = BaseType::TF32;
+
       MMALimit::MMAConfig mma_config{
           MMALimit::DENSE, a_ty, b_ty, c_ty, d_ty, scale_ty, mma_shape};
       if (!ValidMMAConfig(mma_config, arch))
