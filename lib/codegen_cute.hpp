@@ -55,7 +55,7 @@ inline const char* NameBaseType(BaseType bt, bool = true) {
   case BaseType::S64: return "long long";
   case BaseType::S32: return "int";
   case BaseType::S16: return "short";
-  case BaseType::S8: return "char";
+  case BaseType::S8: return "signed char";
   case BaseType::U6: return "uint6b_t";
   case BaseType::U4: return "uint4b_t";
   case BaseType::U2: return "uint2b_t";

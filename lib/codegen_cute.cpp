@@ -2711,7 +2711,7 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
   if (isa<VoidType>(&ty))
     return "void";
   else if (isa<S8Type>(&ty))
-    return "char";
+    return "signed char";
   else if (isa<U8Type>(&ty))
     return "unsigned char";
   else if (isa<S16Type>(&ty))
