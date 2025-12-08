@@ -22,6 +22,10 @@ bool TypeInference::BeforeVisitImpl(AST::Node& n) {
     dma_mem = Storage::NONE;
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = true;
+  } else if (auto call = dyn_cast<AST::Call>(&n)) {
+    if (call->template_args) {
+      in_template_param = true; // enter template param visit
+    }
   }
   return true;
 }
@@ -87,6 +91,7 @@ bool TypeInference::AssignSymbolWithType(const location& loc,
 ptr<Type> TypeInference::GetSymbolType(const location& loc,
                                        const std::string& name) {
   if (!SSTab().IsDeclared(name)) {
+
     Error1(loc, "The symbol `" + name + "' has not been defined.");
     return nullptr;
   }
@@ -170,6 +175,8 @@ bool TypeInference::Visit(AST::MultiNodes& n) {
 
 bool TypeInference::Visit(AST::MultiValues& n) {
   TraceEachVisit(n);
+
+  if (in_template_param) in_template_param = false; // exit template param visit
   return true;
 }
 
@@ -235,6 +242,9 @@ bool TypeInference::Visit(AST::Identifier& n) {
 
   // for named dims in parameters
   if (allow_named_dim && !SSTab().DeclaredInScope(n.name))
+    AssignSymbolWithType(n.LOC(), n.name, MakeIntegerType());
+
+  if (in_template_param && !SSTab().IsDeclared(n.name))
     AssignSymbolWithType(n.LOC(), n.name, MakeIntegerType());
 
   return true;

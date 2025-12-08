@@ -34,6 +34,10 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     if (!a->AssignToDataElement()) assign_id = a->GetName();
   } else if (isa<AST::ForeachBlock>(&n) || isa<AST::WhileBlock>(&n)) {
     inside_loop = true;
+  } else if (auto call = dyn_cast<AST::Call>(&n)) {
+    if (call->template_args) {
+      in_template_param = true; // enter template param visit
+    }
   }
 
   return true;
@@ -90,6 +94,8 @@ bool EarlySemantics::Visit(AST::MultiValues& n) {
 
   if (n.None()) return true;
 
+  if (in_template_param) in_template_param = false; // exit template param visit
+
   if (auto ty = NodeType(*n.ValueAt(0)); ty && isa<BoundedType>(ty)) {
     size_t dims = 0;
     for (auto v : n.AllValues()) {
@@ -143,6 +149,12 @@ bool EarlySemantics::Visit(AST::BoolLiteral& n) {
 
 bool EarlySemantics::Visit(AST::Expr& n) {
   TraceEachVisit(n);
+
+  if (in_template_param) {
+    SetNodeType(n, MakeIntegerType());
+    return true;
+  }
+
   if (auto ref = n.GetReference()) {
     auto rty = NodeType(*ref);
     assert(!isa<UnknownType>(rty) && "reference type is unknown.");
@@ -1248,7 +1260,11 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
     } else
       ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
   } else {
-    ReportErrorWhenUseBeforeDefine(n.LOC(), n.name);
+    if (in_template_param && !SSTab().IsDeclared(n.name)) {
+      Warning(n.LOC(), "symbol `" + n.name + "' is used before declaration.");
+      SetNodeType(n, MakeIntegerType());
+    } else
+      ReportErrorWhenUseBeforeDefine(n.LOC(), n.name);
   }
   return true;
 }
@@ -2187,7 +2203,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
       }
       auto ty = NodeType(*v);
       // must be a scalar type
-      if (!ConvertibleToInt(ty))
+      if (ty && !ConvertibleToInt(ty))
         Error1(n.LOC(),
                "(" + std::to_string(count) + "th) template argument of type '" +
                    PSTR(ty) +

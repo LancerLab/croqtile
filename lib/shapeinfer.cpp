@@ -73,6 +73,10 @@ bool ShapeInference::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::Wait>(&n) || isa<AST::Rotate>(&n) ||
              isa<AST::Select>(&n) || isa<AST::Trigger>(&n) ||
              isa<AST::Call>(&n) || isa<AST::DataAccess>(&n)) {
+    if (auto call = dyn_cast<AST::Call>(&n)) {
+      if (call->template_args)
+        in_template_param = true; // enter template param visit
+    }
     gen_values = false;
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = true;
@@ -123,7 +127,9 @@ ptr<Type> ShapeInference::NodeType(const AST::Node& n) const {
       return GetSymbolType(id->name);
     }
   } else if (auto expr = dyn_cast<AST::Expr>(&n)) {
-    if (auto sym = expr->GetSymbol()) return GetSymbolType(sym->name);
+    if (auto sym = expr->GetSymbol()) {
+      if (SSTab().IsDeclared(sym->name)) return GetSymbolType(sym->name);
+    }
     return expr->GetType();
   }
   return VisitorWithScope::NodeType(n);
@@ -213,6 +219,7 @@ void ShapeInference::CollapseMultiValues(const AST::MultiValues& mv) {
 bool ShapeInference::Visit(AST::MultiValues& n) {
   TraceEachVisit(n);
 
+  if (in_template_param) in_template_param = false; // exit template param visit
   if (cannot_proceed || !CanBeValueNumbered(&n)) {
     cur_vn.Invalidate();
     return true;
@@ -652,6 +659,12 @@ bool ShapeInference::Visit(AST::Identifier& n) {
   if (!CanBeValueNumbered(&n)) { return false; }
 
   auto nty = NodeType(n);
+  if (in_template_param && !SSTab().IsDeclared(n.name)) {
+    DefineASymbol(n.name, MakeIntegerType());
+    GenValNum(SSTab().InScopeName(n.name));
+    cur_vn = GenValNo(n);
+    return true;
+  }
 
   if (SSTab().IsDeclared(n.name)) {
     // Not neccessary to generate new valno. Instead utlize existing valno

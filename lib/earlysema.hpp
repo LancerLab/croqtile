@@ -22,8 +22,8 @@ private:
 private:
   bool in_decl =
       false; // we need context to judge if it is declaration or reference
-  bool allow_named_dim = false; // tolerate same symbols (mdspan param only)
-
+  bool allow_named_dim = false;   // tolerate same symbols (mdspan param only)
+  bool in_template_param = false; // we are visiting template parameter list
   std::string assign_id;
   bool requires_return =
       false; // only void function does not require return value

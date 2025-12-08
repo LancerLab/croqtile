@@ -1,0 +1,9 @@
+// RUN: not choreo %s -es 2>&1 | FileCheck %s
+
+__co__ void bar() {
+  parallel by 1 {
+    call foo<M>();
+  }
+}
+
+// CHECK: warning: symbol `M' is used before declaration.

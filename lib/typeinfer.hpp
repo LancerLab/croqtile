@@ -18,7 +18,8 @@ private:
   std::vector<ptr<Type>> cur_param_types;
   BaseType dma_fmty = BaseType::UNKNOWN;
   Storage dma_mem = Storage::NONE;
-  bool allow_named_dim = false; // named dimensions (mdspan param only)
+  bool allow_named_dim = false;   // named dimensions (mdspan param only)
+  bool in_template_param = false; // we are visiting template parameter list
 
   bool BeforeBeforeVisit(AST::Node&) override;
   bool BeforeVisitImpl(AST::Node&) override;

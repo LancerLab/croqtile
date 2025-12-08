@@ -691,9 +691,9 @@ bool SemaChecker::VisitNode(AST::Call& n) {
       // fail if the template argument can not be evaluated as a compile-time
       // constant
       if (!expr->Opts().HasVal() || !expr->Opts().GetVal()->IsNumeric())
-        Error1(n.LOC(), "The " + Ordinal(count) +
-                            " template argument of type '" + PSTR(ty) +
-                            "` can not be evaluated at choreo compile time.");
+        Warning(n.LOC(), "The " + Ordinal(count) +
+                             " template argument of type '" + PSTR(ty) +
+                             "` can not be evaluated at choreo compile time.");
     }
   }
 

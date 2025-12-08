@@ -139,6 +139,8 @@ private:
     return FCtx(fname).GetSymbolValues(sym);
   }
 
+  bool in_template_param = false;
+
 private:
   // for debugging purpose only
   bool cannot_proceed = false;
