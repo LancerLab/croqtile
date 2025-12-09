@@ -366,8 +366,17 @@ inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
   strs.push_back(std::to_string(mma_config.shape.m) + "x" +
                  std::to_string(mma_config.shape.n) + "x" +
                  std::to_string(mma_config.shape.k));
-  strs.push_back(ToUpper(STR(mma_config.d_ty) + STR(mma_config.a_ty) +
-                         STR(mma_config.b_ty) + STR(mma_config.c_ty)));
+  auto ty_str = [](BaseType bt) -> std::string {
+    switch (bt) {
+    case BaseType::F8_E4M3: return "E4M3";
+    case BaseType::F8_E5M2: return "E5M2";
+    case BaseType::F8_UE4M3: return "UE4M3";
+    case BaseType::F8_UE8M0: return "UE8M0";
+    default: return STR(bt);
+    }
+  };
+  strs.push_back(ToUpper(ty_str(mma_config.d_ty) + ty_str(mma_config.a_ty) +
+                         ty_str(mma_config.b_ty) + ty_str(mma_config.c_ty)));
   // row, col
   strs.push_back("TN");
   // TODO: STR is not worked for F8_E4M3...

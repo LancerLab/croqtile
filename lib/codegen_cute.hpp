@@ -479,7 +479,7 @@ private:
     // if (mi.value() == 8 && ni.value() == 8 && ty == BaseType::F16) return 8;
     return mi.value() * ni.value() / CCtx().GetMinGroupDim();
   }
-  
+
   void UseUint32Reg(bool& use_uint32, size_t& reg_num, BaseType bt) {
     if (bt != BaseType::F32 && bt != BaseType::F64) {
       use_uint32 = true;
