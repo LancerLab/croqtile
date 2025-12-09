@@ -1214,6 +1214,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   ptr<Node> mdspan_type = nullptr;
   std::vector<size_t> array_dims;
   bool is_mutable = false;
+  bool infer_span = false;        // the span must be inferenced
 
 public:
   explicit DataType(const location& l, BaseType t, bool m = false)
@@ -1246,9 +1247,9 @@ public:
 
   // used for clone
   explicit DataType(const location& l, BaseType bt, size_t r,
-                    const ptr<Node> pt, const std::vector<size_t>& ad, bool im)
+                    const ptr<Node> pt, const std::vector<size_t>& ad, bool im, bool infer)
       : Node(l), base_type(bt), rank(r), mdspan_type(pt), array_dims(ad),
-        is_mutable(im) {}
+        is_mutable(im), infer_span(infer) {}
 
   BaseType getBaseType() const { return base_type; }
   ptr<Node> getPartialType() const { return mdspan_type; }
@@ -1262,7 +1263,7 @@ public:
   }
   bool isArray() const { return !array_dims.empty(); }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
-  bool isSpanned() const { return (bool)mdspan_type; }
+  bool ExplicitSpanned() const { return (bool)mdspan_type; }
 
   bool IsMutable() const { return is_mutable; }
   void SetMutable(bool m) { is_mutable = m; }
@@ -1272,7 +1273,7 @@ public:
 
   ptr<Node> CloneImpl() const override {
     return Make<DataType>(LOC(), base_type, rank, CloneP(mdspan_type),
-                          array_dims, is_mutable);
+                          array_dims, is_mutable, infer_span);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1280,14 +1281,15 @@ public:
     os << prefix;
     if (is_mutable) os << "mutable ";
     os << STR(base_type);
-    if (isSpanned()) os << " " << STR(mdspan_type);
+    if (ExplicitSpanned()) os << " " << STR(mdspan_type);
+    else if (infer_span) os << " [?]";
   }
 
   void accept(Visitor&) override;
 
 private:
   ptr<Type> InitSemaType() {
-    if (isSpanned()) {
+    if (ExplicitSpanned()) {
       switch (base_type) {
       case BaseType::F64:
       case BaseType::F32:
@@ -2399,6 +2401,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
 private:
   bool async;
+  bool enforce_tma;
 
 public:
   // if this DMA is chained with other DMA in pipeline mode
@@ -2449,6 +2452,8 @@ public:
   }
 
   void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
+  void SetTMA(bool is_tma = true) { enforce_tma = is_tma; }
+
   const ptr<DMAConfig>& GetConfig() const { return config; }
 
   ptr<Node> CloneImpl() const override {
@@ -2457,6 +2462,7 @@ public:
     n->chained = chained;
     n->chain_from = chain_from;
     n->chain_to = chain_to;
+    n->SetTMA(IsTMA());
     return n;
   }
 
@@ -2490,7 +2496,8 @@ public:
     return future + " = dma" + operation + " " + STR(*from) + " => " + STR(*to);
   }
 
-  bool IsAsync() { return async; }
+  bool IsAsync() const { return async; }
+  bool IsTMA() const { return enforce_tma; }
 
   void accept(Visitor&) override;
 

@@ -1404,6 +1404,7 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
     return (ElementCountValue() * sbe::nu(SizeOf(e_type)))->Normalize();
   }
   size_t ByteSize() const { return SizeOf(e_type) * GetShape().ElementCount(); }
+  ValueItem ElementSizeValue() const { return sbe::nu(SizeOf(e_type)); }
 
   const std::string ByteSizeExpression(bool ULL_suffix = false) const {
     if (RuntimeShaped())
@@ -2377,6 +2378,12 @@ inline ptr<SpannedType> MakeSpannedType(BaseType t, const Shape& v,
 // the shape detail
 inline ptr<SpannedType> MakeDummySpannedType() {
   return MakeSpannedType(BaseType::UNKNOWN, GenUninitShape(), Storage::DEFAULT);
+}
+
+inline ptr<SpannedType> MakeUnRankedSpannedType(BaseType bt,
+                                              Storage sto = Storage::DEFAULT) {
+  // only care about the rank of span
+  return MakeSpannedType(bt, GenUninitShape(), sto);
 }
 
 inline ptr<SpannedType> MakeRankedSpannedType(size_t n,

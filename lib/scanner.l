@@ -485,6 +485,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "true"     return Choreo::Parser::make_TRUE(yytext, loc);
   "false"    return Choreo::Parser::make_FALSE(yytext, loc);
   "dma"      return Choreo::Parser::make_DMA(yytext, loc);
+  "tma"      return Choreo::Parser::make_TMA(yytext, loc);
   ".copy"    return Choreo::Parser::make_COPY(yytext, loc);
   ".transp"  return Choreo::Parser::make_TRANSPOSE(yytext, loc);
   ".pad"     return Choreo::Parser::make_PAD(yytext, loc);

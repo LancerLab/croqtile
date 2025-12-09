@@ -295,6 +295,54 @@ inline void PrintValueListSizeExpr(const ValueList& vl, std::ostream& os,
   if (rb) os << rb;
 }
 
+inline const ValueList ValxN(ValueItem vi, size_t count) {
+  ValueList vl(count);
+  std::fill(vl.begin(), vl.end(), vi);
+  return vl;
+}
+
+inline const ValueList operator+(const ValueList& vl, const ValueItem& vi) {
+  ValueList res;
+  for (auto& i : vl) res.push_back((i + vi)->Normalize());
+  return res;
+}
+inline const ValueList operator-(const ValueList& vl, const ValueItem& vi) {
+  ValueList res;
+  for (auto& i : vl) res.push_back((i - vi)->Normalize());
+  return res;
+}
+inline const ValueList operator*(const ValueList& vl, const ValueItem& vi) {
+  ValueList res;
+  for (auto& i : vl) res.push_back((i * vi)->Normalize());
+  return res;
+}
+inline const ValueList operator/(const ValueList& vl, const ValueItem& vi) {
+  ValueList res;
+  for (auto& i : vl) res.push_back((i / vi)->Normalize());
+  return res;
+}
+
+inline const ValueList operator+(const ValueItem& vi, const ValueList& vl) {
+  return vl + vi;
+}
+inline const ValueList operator*(const ValueItem& vi, const ValueList& vl) {
+  return vl * vi;
+}
+
+inline const ValueList Reverse(const ValueList& vl) {
+  ValueList res(vl.size());
+  for (size_t i = 0; i < vl.size(); ++i) res[vl.size() - i - 1] = vl[i];
+  return res;
+}
+
+// Trim the first-n value
+inline const ValueList Trim(const ValueList& vl, size_t n = 1) {
+  assert(vl.size() > n);
+  ValueList res;
+  for (size_t i = n; i < vl.size(); ++i) res.push_back(vl[i]);
+  return res;
+}
+
 } // end namespace Choreo
 
 #endif // __CHOREO_SYMBOL_VALUES_H__

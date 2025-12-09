@@ -1236,12 +1236,12 @@ bool EarlySemantics::Visit(AST::DataType& n) {
 
   allow_named_dim = false; // no duplicated symbol is allowed except for mdspan
 
-  // sema type has been generated at construction ast. refine with dims
-  if (isa<SpannedType>(n.GetType())) {
-    if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType())) {
+  if (n.infer_span) {
+    SetNodeType(n, MakeUnRankedSpannedType(n.getBaseType()));
+  } else if (isa<SpannedType>(n.GetType())) {
+    // The sema type has been generated. refine with dims
+    if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType()))
       SetNodeType(n, MakeRankedSpannedType(sty->Dims(), n.base_type));
-    }
-    return true;
   }
   return true;
 }
@@ -1821,7 +1821,13 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   }
 
   auto sty = GetSpannedType(nty);
-  assert(IsValidRank(sty->Dims()));
+
+  if (!IsValidRank(sty->Dims())) {
+    SetNodeType(
+        n, MakeUnRankedSpannedType(sty->ElementType(), sty->GetStorage()));
+    return true;
+  }
+
   size_t rank = sty->Dims();
 
   for (auto op : n.AllOperations()) {

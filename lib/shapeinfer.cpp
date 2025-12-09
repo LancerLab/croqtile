@@ -737,7 +737,7 @@ bool ShapeInference::Visit(AST::Parameter& n) {
 
   if (cannot_proceed) return true;
 
-  if (n.type->isSpanned()) {
+  if (n.type->ExplicitSpanned()) {
     assert(isa<AST::MultiDimSpans>(n.type->mdspan_type.get()) &&
            "Invalid mdspan.");
     auto span = cast<AST::MultiDimSpans>(n.type->mdspan_type.get());

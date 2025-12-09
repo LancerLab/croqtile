@@ -118,6 +118,57 @@ inline std::ostream& operator<<(std::ostream& os, const MMAInfo& i) {
   return os;
 }
 
+struct TMADesc {
+private:
+  ptr<AST::ChunkAt> from; // shape for the global input/output
+  ptr<AST::ChunkAt> to;
+  std::string f_sym; // scoped symbol
+  std::string t_sym;
+  uint16_t idx;
+
+public:
+  TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
+          const std::string& fs, const std::string& ts)
+      : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++) {
+    assert(from && to);
+    auto fty = GetSpannedType(from->GetType());
+    auto tty = GetSpannedType(to->GetType());
+    if (((fty->GetStorage() == Storage::GLOBAL ||
+          fty->GetStorage() == Storage::DEFAULT) &&
+         tty->GetStorage() == Storage::SHARED) ||
+        ((tty->GetStorage() == Storage::GLOBAL ||
+          tty->GetStorage() == Storage::DEFAULT) &&
+         fty->GetStorage() == Storage::SHARED))
+      return;
+    choreo_unreachable("unsupported TMA storage: " + STR(fty->GetStorage()) +
+                       " => " + STR(tty->GetStorage()));
+  }
+
+  bool IsLoad() const {
+    auto tty = GetSpannedType(to->GetType());
+    if (tty->GetStorage() == Storage::SHARED) return true;
+    return false;
+  }
+
+  bool IsStore() const {
+    auto fty = GetSpannedType(from->GetType());
+    if (fty->GetStorage() == Storage::SHARED) return true;
+    return false;
+  }
+
+  const ptr<AST::ChunkAt> GetFrom() const { return from; }
+  const ptr<AST::ChunkAt> GetTo() const { return to; }
+  const std::string GetFromSymbol() const { return f_sym; }
+  const std::string GetToSymbol() const { return t_sym; }
+
+  const std::string GetName() const {
+    return "__choreo_tma_" + std::to_string(idx);
+  }
+
+private:
+  static int index;
+};
+
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, std::vector<LaunchConfig>>;
 using ReturnSymbols = std::map<std::string, std::string>;
@@ -125,6 +176,7 @@ using FunctionTraits = std::map<std::string, OtherTrait>;
 using SharedFutures = std::map<std::string, std::set<std::string>>;
 using LocalFutures = std::map<std::string, std::set<std::string>>;
 using SymbolMMA = std::map<std::string, MMAInfo>;
+using TMADescs = std::map<AST::ParallelBy*, std::vector<TMADesc>>;
 
 enum PassedOrDeclaredSymbolKind : int {
   PDSYM_NONE = 0,
@@ -144,6 +196,7 @@ private:
   SharedFutures shr_futs;
   LocalFutures loc_futs;
   SymbolMMA sym_mmas;
+  TMADescs tma_descs;
 
   // TODO: maybe should add some vars here
 
@@ -203,6 +256,15 @@ public:
     } else
       sym_mmas.emplace(sym, i);
   }
+
+  const std::vector<TMADesc> GetTMADesc(AST::ParallelBy* pb) const {
+    if (tma_descs.count(pb))
+      return tma_descs.at(pb);
+    else
+      return {};
+  }
+  const TMADescs& GetTMADescs() const { return tma_descs; }
+  TMADescs& GetTMADescs() { return tma_descs; }
 
   bool HasParallelBy(const std::string& fname) const {
     return GetFunctionTrait(fname).has_parallelby;

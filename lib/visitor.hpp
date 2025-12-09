@@ -622,6 +622,11 @@ public:
     return SymTab()->GetSymbol(InScopeName(n))->GetType();
   }
 
+  virtual ptr<Type> GetScopedSymbolType(const std::string& n) const {
+    assert(PrefixedWith(n, "::") && "expected a scoped symbol.");
+    return SymTab()->GetSymbol(n)->GetType();
+  }
+
 public:
   VisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab,
                     bool ugs = false)

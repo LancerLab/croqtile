@@ -260,6 +260,7 @@ private:
 
   // idx of the most outer pb
   int parallel_idx = -1;
+  AST::ParallelBy* cur_pb = nullptr;
 
   size_t host_param_count = 0; // host parameter count
 
@@ -289,7 +290,7 @@ private:
   void EmitFixedDeviceHead();
 
   void EmitHostFuncDecl(std::ostringstream&);
-  void EmitDeviceFuncDecl(std::ostringstream&);
+  void EmitDeviceFuncDecl(std::ostringstream&, AST::ParallelBy*);
 
   void EmitSource();
   void EmitScript(std::ostream& os, const std::string& exe_fn = "");
@@ -324,7 +325,7 @@ private:
       return ds;
     }
   }
-  const std::string Indent() { return IsHost() ? h_indent : d_indent; }
+  const std::string Indent() const { return IsHost() ? h_indent : d_indent; }
   void IncrIndent() { return IsHost() ? IncrHostIndent() : IncrDeviceIndent(); }
   void DecrIndent() { return IsHost() ? DecrHostIndent() : DecrDeviceIndent(); }
 
@@ -423,10 +424,14 @@ private:
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
   std::pair<std::string, size_t> GenMdsOffset(const ptr<AST::ChunkAt>,
                                               ptr<DMAConfig> = nullptr) const;
+  const ValueList GenIndices(const ptr<AST::ChunkAt>&,
+                             const ptr<DMAConfig>& = nullptr) const;
   const std::string TileBaseOffset(const ptr<AST::ChunkAt>&) const;
   const ValueItem
   GenOffset(const ptr<AST::ChunkAt>&,
             size_t end_idx = std::numeric_limits<size_t>::max()) const;
+  const ValueList GenStrides(const Shape& shape,
+                             const std::vector<size_t>& = {}) const;
   const ValueList GenStrides(const ptr<AST::ChunkAt>&,
                              const std::vector<size_t>& = {}) const;
   const std::string ShapeSTR(const Shape&, bool = false,
@@ -439,6 +444,14 @@ private:
   }
 
   bool ThreadCooperative(AST::DMA&) const;
+  std::pair<std::string, std::string>
+  GenTensorDecl(const std::string& name, const std::string& buf_expr,
+                const Storage sto, BaseType bty, const Shape& shp,
+                bool is_host = false, const std::string& offset = "",
+                const std::string& strides = "",
+                const std::vector<size_t>& transp = {}) const;
+  void EmitTMAConfiguration(AST::ParallelBy* pb);
+  const std::optional<std::string> GetTMAName(AST::DMA&) const;
 };
 
 } // namespace Cute

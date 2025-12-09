@@ -31,7 +31,9 @@
 #define __CHOREO_TARGET_NATIVE_INTEGRAL_SUPPORT__
 
 #include "cute/tensor.hpp"
+#include <cuda/barrier>
 #include <mma.h>
+namespace cde = cuda::device::experimental;
 
 #define __co_device__ __device__
 #define __co_host__ __host__
@@ -1332,12 +1334,22 @@ __device__ static inline void swap(future& a, future& b) {
 
 #ifdef __CHOREO_TARGET_CUTE__
 
+// SM90+ (Hopper+) - TMA barrier and token
+struct TMAAtom {
+  cuda::barrier<cuda::thread_scope_block>* bar;
+  cuda::barrier<cuda::thread_scope_block>::arrival_token tok;
+  //  TMAAtom(cuda::barrier<cuda::thread_scope_block> *b): bar(b) {}
+  __device__ auto& barrier() { return *bar; }
+  __device__ auto& token() { return tok; }
+};
+
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-// SM90+ (Hopper) - use tma
-using AsyncCopyAtom = cute::SM90_TMA_LOAD;
-#else
-using AsyncCopyAtom = cute::AutoCopyAsync;
+using TMALoadAtom = cute::SM90_TMA_LOAD;
+using TMAStoreAtom = cute::SM90_TMA_STORE;
+
 #endif
+
+using AsyncCopyAtom = cute::AutoCopyAsync;
 
 __device__ __attribute__((always_inline)) static inline void __co_abort__() {
   __trap();
@@ -1364,16 +1376,17 @@ struct future_ring {
   }
 };
 
+using AtomType = void; // erase the type
+
 // choreo device future
 struct future {
-  using AtomType = void; // erase the type
 
   AtomType* atom = nullptr;
   void* d = nullptr; // data: future's user must guarantee it is valid
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-// TODO: TMA
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  bool is_tma = false;
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   future_ring<6>* ring;
   int8_t id;
 #else
@@ -1382,9 +1395,7 @@ struct future {
   int8_t id;
 #endif
   __device__ void set_ring(future_ring<6>* r) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-// TODO: TMA
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     if (__CHOREO_GROUP_SINGLE__(32)) {
       if (!r) return;
       ring = r + (threadIdx.x + threadIdx.y * blockDim.x +
@@ -1474,9 +1485,13 @@ struct future {
   }
 
   __device__ void wait_impl() {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-// TODO: TMA
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    if (is_tma) {
+      auto& barrier = ((TMAAtom*)atom)->barrier();
+      auto& token = ((TMAAtom*)atom)->token();
+      barrier.wait(std::move(token));
+      return;
+    }
     // cautious: must be warp based
     if (__CHOREO_GROUP_SINGLE__(32)) {
       assert(ring && "ring is invalid.");
@@ -1650,9 +1665,7 @@ __device__ static inline void swap(future& a, future& b) {
   auto atom = a.atom;
   auto d = a.d;
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-// TODO: TMA
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   future_ring<6>* ring = a.ring;
   int8_t id = a.id;
 #else
@@ -1668,9 +1681,7 @@ __device__ static inline void swap(future& a, future& b) {
   a.atom = b.atom;
   a.d = b.d;
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-// TODO: TMA
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   a.ring = b.ring;
   a.id = b.id;
 #else
@@ -1686,9 +1697,7 @@ __device__ static inline void swap(future& a, future& b) {
   b.atom = atom;
   b.d = d;
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-// TODO: TMA
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   b.ring = ring;
   b.id = id;
 #else

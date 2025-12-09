@@ -54,12 +54,19 @@ private:
   // special case for `return select.data;`
   std::set<std::string> select_syms;
 
+  AST::ParallelBy* cur_device_pb = nullptr;
+
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
       parallel_depth = 0;
       cgi.GetFunctionTrait(fname).has_parallelby = false;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      if (pb->IsOuter()) {
+        cur_device_pb = pb;
+        auto& tma_descs = cgi.GetTMADescs();
+        tma_descs.emplace(pb, std::vector<TMADesc>{});
+      }
       if (parallel_depth == 0 && cgi.GetFunctionTrait(fname).has_parallelby)
         cgi.GetFunctionTrait(fname).multiple_parallelby = true;
       parallel_depth++;
@@ -111,6 +118,8 @@ private:
         max_parallel_depth = 0;
       }
       parallel_depth--;
+
+      if (pb->IsOuter()) cur_device_pb = nullptr;
     }
     return true;
   }
@@ -177,9 +186,32 @@ public:
   bool Visit(AST::Memory&) { return true; }
   bool Visit(AST::SpanAs&) { return true; }
   bool Visit(AST::DMA& n) {
-    if (n.IsAsync()) cgi.GetFunctionTrait(fname).has_async_dma = true;
+    if (n.IsAsync() && !n.IsTMA())
+      cgi.GetFunctionTrait(fname).has_async_dma = true;
+
+    if (!CCtx().TargetSupportTMA()) return true;
+    if (!cur_device_pb) return true; // not device dma
+
+    auto fsty = GetSpannedType(n.GetFrom()->GetType());
+    auto tsty = GetSpannedType(n.GetTo()->GetType());
+
+    if (((fsty->GetStorage() == Storage::GLOBAL ||
+          fsty->GetStorage() == Storage::DEFAULT) &&
+         tsty->GetStorage() == Storage::SHARED) ||
+        (fsty->GetStorage() == Storage::SHARED &&
+         (tsty->GetStorage() == Storage::GLOBAL ||
+          tsty->GetStorage() == Storage::DEFAULT))) {
+      auto& tma_descs = cgi.GetTMADescs();
+      tma_descs[cur_device_pb].emplace_back(
+          n.GetFrom(), n.GetTo(), InScopeName(n.GetFrom()->RefSymbol()),
+          InScopeName(n.GetTo()->RefSymbol()));
+    } else
+      choreo_unreachable("unsupport TMA direction: " + STR(fsty->GetStorage()) +
+                         " => " + STR(tsty->GetStorage()) + ".");
+
     return true;
   }
+
   bool Visit(AST::MMA& n) {
     auto& op = *n.GetOperation();
     ValueList mma_shape;

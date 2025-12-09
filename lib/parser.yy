@@ -191,7 +191,7 @@ void choreo_info(const char *message) {
 %token <Choreo::ParallelLevel> PBLEVEL
 %token <Choreo::BaseType> F64 F32 F16 BF16 F8_E4M3 F8_E5M2 U16 S16 U8 S8 U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
@@ -202,7 +202,7 @@ void choreo_info(const char *message) {
 // non-terminals
 %nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func id_with_namespace
 %nterm <ptr<DMAConfig>> dma_config
-%nterm <bool> bool_value sync_type pass_by_ref
+%nterm <bool> bool_value sync_type pass_by_ref tdma
 %nterm <int> integer_value index_or_none const_sizeof
 %nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::BaseType> fundamental_type
@@ -569,6 +569,10 @@ mdspan_as_type
 
         if (!mds) mds = AST::Make<AST::MultiDimSpans>(@3, "", $3);
         $$ = AST::Make<AST::DataType>(@1, $1, mds);
+      }
+    | fundamental_type LBRAKT AUTO RBRAKT {
+        $$ = AST::Make<AST::DataType>(@1, $1);
+        $$->infer_span = true;
       }
     ;
 
@@ -1647,24 +1651,39 @@ range_expr
       }
     ;
 
+tdma
+    : DMA { $$ = false; }
+    | TMA { $$ = true; }
+    ;
+
 dma_stmt
-    : IDENTIFIER ASSIGN DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
+    : IDENTIFIER ASSIGN tdma dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
         symtab.AddSymbol($1, MakeDummyFutureType($5));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $7, $9, $5, $6);
+        auto dma = AST::Make<AST::DMA>(@3, $4, $1, $7, $9, $5, $6);
+        dma->SetTMA($3);
+        $$ = dma;
       }
-    | IDENTIFIER ASSIGN DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+    | IDENTIFIER ASSIGN tdma dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
         symtab.AddSymbol($1, MakeDummyFutureType($5));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $11, $7, $9, $5, $6);
+        auto dma = AST::Make<AST::DMA>(@3, $4, $1, $11, $7, $9, $5, $6);
+        dma->SetTMA($3);
+        $$ = dma;
       }
-    | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
-        $$ = AST::Make<AST::DMA>(@1, $2, "", $5, $7, $3, $4);
+    | tdma dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
+        auto dma = AST::Make<AST::DMA>(@1, $2, "", $5, $7, $3, $4);
+        dma->SetTMA($1);
+        $$ = dma;
       }
-    | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
-        $$ = AST::Make<AST::DMA>(@1, $2, "", $9, $5, $7, $3, $4);
+    | tdma dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+        auto dma = AST::Make<AST::DMA>(@1, $2, "", $9, $5, $7, $3, $4);
+        dma->SetTMA($1);
+        $$ = dma;
       }
-    | IDENTIFIER ASSIGN DMA NONE {
+    | IDENTIFIER ASSIGN tdma NONE {
         symtab.AddSymbol($1, MakePlaceHolderFutureType());
-        $$ = AST::Make<AST::DMA>(@1, $1);
+        auto dma = AST::Make<AST::DMA>(@1, $1);
+        dma->SetTMA($3);
+        $$ = dma;
       }
     ;
 
