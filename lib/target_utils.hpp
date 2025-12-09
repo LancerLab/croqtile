@@ -160,24 +160,6 @@ struct MMAConfig {
         << ", " << shape.k << "))";
     return oss.str();
   }
-
-  std::string ToPTXWrappedHeader(const std::string& sep = "_") {
-    // example: mma.sync.aligned.m8n8k4.row.col.f64.f64.f64.f64
-    std::vector<std::string> strs;
-    strs.push_back("mma");
-    strs.push_back("sync");
-    strs.push_back("aligned");
-    strs.push_back("m" + std::to_string(shape.m) + "n" +
-                   std::to_string(shape.n) + "k" + std::to_string(shape.k));
-    strs.push_back("row");
-    strs.push_back("col");
-    // TODO: STR is not worked for F8_E4M3...
-    strs.push_back(STR(d_ty));
-    strs.push_back(STR(a_ty));
-    strs.push_back(STR(b_ty));
-    strs.push_back(STR(c_ty));
-    return DelimitedString(strs, sep);
-  }
 };
 
 using BT = BaseType;
@@ -373,6 +355,23 @@ static const std::map<MMAConfig, CUDA_CC> mma_configs = {
 
 inline bool ConfigIsWMMA(const MMAConfig& config) {
   return wmma_configs.count(config);
+}
+
+inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
+                                         const std::string& sep = "_") {
+  // example: SM80_16x8x8_F16F16F16F16_TN
+  assert(mma_configs.count(mma_config));
+  std::vector<std::string> strs;
+  strs.push_back("SM" + std::to_string(mma_configs.at(mma_config)));
+  strs.push_back(std::to_string(mma_config.shape.m) + "x" +
+                 std::to_string(mma_config.shape.n) + "x" +
+                 std::to_string(mma_config.shape.k));
+  strs.push_back(ToUpper(STR(mma_config.d_ty) + STR(mma_config.a_ty) +
+                         STR(mma_config.b_ty) + STR(mma_config.c_ty)));
+  // row, col
+  strs.push_back("TN");
+  // TODO: STR is not worked for F8_E4M3...
+  return DelimitedString(strs, sep);
 }
 
 } // namespace MMALimit

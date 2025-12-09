@@ -301,11 +301,6 @@ private:
 
   // mma related
   size_t reg_num_d;
-  // TODO: improve?
-  // Every time `mx = mma.load xxx` is called, the map will be updated
-  std::map<std::string, std::string> frag2fromtensor;
-  // Every time `mma.row.col mc, ma, mb` is called, it will be updated
-  std::string cur_ptx_wrap_header;
 
 private:
   void EmitFixedHostHead();
@@ -475,13 +470,21 @@ private:
   void EmitTMAConfiguration(AST::ParallelBy* pb);
   const std::optional<std::string> GetTMAName(AST::DMA&) const;
 
-  size_t GetRegNumOfD(ValueItem m, ValueItem n, BaseType ty) {
+  size_t GetRegNumOfFrag(ValueItem m, ValueItem n,
+                         [[maybe_unused]] BaseType ty) {
     auto mi = VIInt(m);
     auto ni = VIInt(n);
     if (!mi || !ni)
       choreo_unreachable("expect m and n of mma to be numeric value!");
-    if (mi.value() == 8 && ni.value() == 8 && ty == BaseType::F16) return 8;
+    // if (mi.value() == 8 && ni.value() == 8 && ty == BaseType::F16) return 8;
     return mi.value() * ni.value() / CCtx().GetMinGroupDim();
+  }
+  
+  void UseUint32Reg(bool& use_uint32, size_t& reg_num, BaseType bt) {
+    if (bt != BaseType::F32 && bt != BaseType::F64) {
+      use_uint32 = true;
+      reg_num /= 4 / SizeOf(bt);
+    }
   }
 };
 

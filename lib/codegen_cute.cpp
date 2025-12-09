@@ -1907,13 +1907,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       assert(ssmi.ty != BaseType::UNKNOWN);
       auto sty = GetSpannedType(GetSymbolType(sym));
       assert(sty);
-      reg_num_d = GetRegNumOfD(sty->GetShape().ValueAt(0),
-                               sty->GetShape().ValueAt(1), ssmi.ty);
+      reg_num_d = GetRegNumOfFrag(sty->GetShape().ValueAt(0),
+                                  sty->GetShape().ValueAt(1), ssmi.ty);
       bool use_uint32 = false;
-      if (SizeOf(ssmi.ty) < 4) {
-        use_uint32 = true;
-        reg_num_d /= 4 / SizeOf(ssmi.ty);
-      }
+      UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
       for (size_t i = 0; i < reg_num_d; ++i) {
         if (use_uint32)
           ds << d_indent << "uint32_t" << " " << sym << "_frag" << i << ";\n";
@@ -1935,19 +1932,42 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           GenTensorDecl(f_sym, "", f_sty->GetStorage(), f_sty->ElementType(),
                         ca->GetBlockShape(), ValueSTR(GenOffset(ca)),
                         ValueSTR(GenStrides(ca), false, true));
-      frag2fromtensor[op.LoadTo()] = f_mds.first;
       ds << f_mds.second;
+      auto sym = op.LoadTo();
+      auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      std::string frag_suffix;
+      if (ssmi.frag == MMAInfo::FRAG_A)
+        frag_suffix = "a";
+      else if (ssmi.frag == MMAInfo::FRAG_B)
+        frag_suffix = "b";
+      ds << d_indent << "auto " << sym << "_frag = load_fragment_"
+         << frag_suffix
+         << "<cute::" << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
+         << f_mds.first << ");\n";
     } break;
     case AST::MMAOperation::Exec: {
-      assert(n.Note().count("ptx_wrapped_header"));
-      cur_ptx_wrap_header = n.Note().at("ptx_wrapped_header");
-      ds << d_indent << cur_ptx_wrap_header << "(";
+      ds << d_indent << "cute::"
+         << FCtx(fname).MMAPolicyOfFrag(InScopeName(op.ExecOperand(0)))
+         << "::fma(";
       for (size_t i = 0; i < reg_num_d; ++i)
         ds << op.ExecOperand(0) << "_frag" << i << ", ";
-      ds << frag2fromtensor.at(op.ExecOperand(1)) << ", "
-         << frag2fromtensor.at(op.ExecOperand(2));
+      // TODO: test with mma config except mma.row.col
+      auto shape = cgi.GetSymbolMMA(InScopeName(op.ExecOperand(0))).shape;
+      auto m = shape[0], n = shape[1], k = shape[2];
+      auto a_type = cgi.GetSymbolMMA(InScopeName(op.ExecOperand(1))).ty;
+      auto b_type = cgi.GetSymbolMMA(InScopeName(op.ExecOperand(2))).ty;
+      size_t reg_num_a = GetRegNumOfFrag(m, k, a_type);
+      size_t reg_num_b = GetRegNumOfFrag(k, n, b_type);
+      bool use_uint32 = false;
+      UseUint32Reg(use_uint32, reg_num_a, a_type);
+      UseUint32Reg(use_uint32, reg_num_b, b_type);
+      for (size_t i = 0; i < reg_num_a; ++i)
+        ds << op.ExecOperand(1) << "_frag[" << i << "], ";
+      for (size_t i = 0; i < reg_num_b; ++i)
+        ds << op.ExecOperand(2) << "_frag[" << i << "], ";
       for (size_t i = 0; i < reg_num_d; ++i)
-        ds << ", " << op.ExecOperand(0) << "_frag" << i;
+        ds << op.ExecOperand(0) << "_frag" << i
+           << (i == reg_num_d - 1 ? "" : ", ");
       ds << ");\n";
     } break;
     case AST::MMAOperation::Store: {
@@ -1959,10 +1979,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                         ca->GetBlockShape(), ValueSTR(GenOffset(ca)),
                         ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
-      ds << d_indent << cur_ptx_wrap_header << "_store(";
+      auto sym = op.StoreFrom();
+      ds << d_indent << "store_fragment_d<cute::"
+         << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
+         << f_mds.first;
       for (size_t i = 0; i < reg_num_d; ++i)
-        ds << op.StoreFrom() << "_frag" << i << ", ";
-      ds << f_mds.first << ");\n";
+        ds << ", " << op.StoreFrom() << "_frag" << i;
+      ds << ");\n";
     } break;
     default: break;
     }

@@ -1971,601 +1971,565 @@ static_assert(false, "path 2\n");
 // ------------------- inline mma PTX -------------------
 
 template <class MMA>
-struct LoadA_Policy {
+struct MMA_Policy {
   static constexpr bool supported = false;
 };
 
-struct Policy_A_M16N8K8 {
+// for f16
+struct Policy_A_M8N8K4_0 {
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
-
-    int gid = lane >> 2;
-    int tid = lane & 3;
-
-    int A_row0 = gid;
-    int A_row1 = gid + 8;
-    int A_col = tid;
-
+    int row;
+    if (lane < 16)
+      row = lane & 3;
+    else
+      row = (lane & 3) + 4;
     auto A_u32 = cute::recast<uint32_t>(A);
-    uint32_t a0 = A_u32(A_row0, A_col);
-    uint32_t a1 = A_u32(A_row1, A_col);
-
+    uint32_t a0 = A_u32(row, 0);
+    uint32_t a1 = A_u32(row, 1);
     return cutlass::Array<uint32_t, 2>{a0, a1};
   }
 };
 
-struct Policy_A_M16N8K16 {
+// for f64
+struct Policy_A_M8N8K4_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int row = lane >> 2;
+    int col = lane & 3;
+    double a0 = A(row, col);
+    return cutlass::Array<double, 1>{a0};
+  }
+};
+
+// for s8, u8
+struct Policy_A_M8N8K16 {
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
-    int tid_in_group = lane % 4;
-    int A_row0 = gid;              // for 0 and 1, 4 and 5
-    int A_row1 = gid + 8;          // for 2 and 3, 6 and 7
-    int A_col0 = tid_in_group;     // for 0, 1, 2 and 3
-    int A_col1 = tid_in_group + 4; // for 4, 5, 6 and 7
+    int tid_in_group = lane & 3;
+    int row = gid;
+    int col = tid_in_group * 4;
+    uint32_t a0 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row, col + i)));
+    return cutlass::Array<uint32_t, 1>{a0};
+  }
+};
+
+// for s4, u4
+struct Policy_A_M8N8K32 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for b1
+struct Policy_A_M8N8K128 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for tf32
+struct Policy_A_M16N8K4 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col = tid_in_group;
     auto A_u32 = cute::recast<uint32_t>(A);
-    uint32_t a0 = A_u32(A_row0, A_col0);
-    uint32_t a1 = A_u32(A_row1, A_col0);
-    uint32_t a2 = A_u32(A_row0, A_col1);
-    uint32_t a3 = A_u32(A_row1, A_col1);
+    uint32_t a0 = A_u32(row0, col);
+    uint32_t a1 = A_u32(row1, col);
+    return cutlass::Array<uint32_t, 2>{a0, a1};
+  }
+};
+
+// for f16, bf16
+struct Policy_A_M16N8K8_0 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col = tid_in_group;
+    auto A_u32 = cute::recast<uint32_t>(A);
+    uint32_t a0 = A_u32(row0, col);
+    uint32_t a1 = A_u32(row1, col);
+    return cutlass::Array<uint32_t, 2>{a0, a1};
+  }
+};
+
+// for tf32
+struct Policy_A_M16N8K8_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group;
+    int col1 = tid_in_group + 4;
+    auto A_u32 = cute::recast<uint32_t>(A);
+    uint32_t a0 = A_u32(row0, col0);
+    uint32_t a1 = A_u32(row1, col0);
+    uint32_t a2 = A_u32(row0, col1);
+    uint32_t a3 = A_u32(row1, col1);
     return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
   }
 };
 
-template <>
-struct LoadA_Policy<cute::SM80_16x8x8_F16F16F16F16_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_A_M16N8K8;
-};
-
-template <>
-struct LoadA_Policy<cute::SM80_16x8x8_F32BF16BF16F32_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_A_M16N8K8;
-};
-
-template <>
-struct LoadA_Policy<cute::SM80_16x8x16_F16F16F16F16_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_A_M16N8K16;
-};
-
-template <>
-struct LoadA_Policy<cute::SM80_16x8x16_F32BF16BF16F32_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_A_M16N8K16;
-};
-
-template <class MMA, class Tensor>
-__device__ auto load_fragment_a(Tensor const& A) {
-  static_assert(LoadA_Policy<MMA>::supported, "No load policy for this MMA");
-
-  return LoadA_Policy<MMA>::type::load(A);
-}
-
-template <class MMA>
-struct LoadB_Policy {
-  static constexpr bool supported = false;
-};
-
-struct Policy_B_M16N8K8 {
+// for f64
+struct Policy_A_M16N8K8_2 {
   template <class Tensor>
-  __device__ static auto load(Tensor const& B) {
+  __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
-
     int gid = lane >> 2;
-    int tid_in_group = lane % 4;
-
-    int B_row = tid_in_group * 2;
-    int B_col = gid;
-
-    uint32_t b0 =
-        (uint32_t(reinterpret_cast<uint16_t&>(B(B_row, B_col))) << 16) |
-        uint16_t(reinterpret_cast<uint16_t&>(B(B_row + 1, B_col)));
-
-    return b0;
+    int tid_in_group = lane & 3;
+    // TODO: done in wmma?
   }
 };
 
-struct Policy_B_M16N8K16 {
+// for f16 and bf16
+struct Policy_A_M16N8K16_0 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;              // for 0 and 1, 4 and 5
+    int row1 = gid + 8;          // for 2 and 3, 6 and 7
+    int col0 = tid_in_group;     // for 0, 1, 2 and 3
+    int col1 = tid_in_group + 4; // for 4, 5, 6 and 7
+    auto A_u32 = cute::recast<uint32_t>(A);
+    uint32_t a0 = A_u32(row0, col0);
+    uint32_t a1 = A_u32(row1, col0);
+    uint32_t a2 = A_u32(row0, col1);
+    uint32_t a3 = A_u32(row1, col1);
+    return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+  }
+};
+
+// for f64
+struct Policy_A_M16N8K16_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    // TODO: done in wmma?
+  }
+};
+
+// for u8, s8, e4m3 and e5m2
+struct Policy_A_M16N8K16_2 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for s4 and u4
+struct Policy_A_M16N8K32_0 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for s8, u8, e4m3, e5m2, e3m2, e2m3 and e2m1
+struct Policy_A_M16N8K32_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for s4, u4 and e2m1
+struct Policy_A_M16N8K64 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for b1
+struct Policy_A_M16N8K128 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for b1
+struct Policy_A_M16N8K256 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for f16
+struct Policy_B_M8N8K4_0 {
   template <class Tensor>
   __device__ static auto load(Tensor const& B) {
     int lane = threadIdx.x & 31;
-
-    int gid = lane >> 2;
-    int tid_in_group = lane % 4;
-
-    int B_row0 = tid_in_group * 2;
-    int B_row1 = tid_in_group * 2 + 8;
-    int B_col = gid;
-
-    uint32_t b0 =
-        (uint32_t(reinterpret_cast<uint16_t&>(B(B_row0, B_col))) << 16) |
-        uint16_t(reinterpret_cast<uint16_t&>(B(B_row0 + 1, B_col)));
-    uint32_t b1 =
-        (uint32_t(reinterpret_cast<uint16_t&>(B(B_row1, B_col))) << 16) |
-        uint16_t(reinterpret_cast<uint16_t&>(B(B_row1 + 1, B_col)));
-
+    int col;
+    if (lane < 16)
+      col = lane & 3;
+    else
+      col = (lane & 3) + 4;
+    uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(0, col))) << 16) |
+                  uint16_t(reinterpret_cast<uint16_t&>(B(1, col)));
+    uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(2, col))) << 16) |
+                  uint16_t(reinterpret_cast<uint16_t&>(B(3, col)));
     return cutlass::Array<uint32_t, 2>{b0, b1};
   }
 };
 
-template <>
-struct LoadB_Policy<cute::SM80_16x8x8_F16F16F16F16_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_B_M16N8K8;
+// for f64
+struct Policy_B_M8N8K4_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int row = lane & 3;
+    int col = lane >> 2;
+    double b0 = B(row, col);
+    return cutlass::Array<double, 1>{b0};
+  }
 };
 
-template <>
-struct LoadB_Policy<cute::SM80_16x8x8_F32BF16BF16F32_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_B_M16N8K8;
+// for s8, u8
+struct Policy_B_M8N8K16 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row = tid_in_group * 4;
+    int col = gid;
+    uint32_t b0 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(row + i, col)));
+    return cutlass::Array<uint32_t, 1>{b0};
+  }
 };
 
-template <>
-struct LoadB_Policy<cute::SM80_16x8x16_F16F16F16F16_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_B_M16N8K16;
+// for s4, u4
+struct Policy_B_M8N8K32 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
 };
 
-template <>
-struct LoadB_Policy<cute::SM80_16x8x16_F32BF16BF16F32_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_B_M16N8K16;
+// for b1
+struct Policy_B_M8N8K128 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for tf32
+struct Policy_B_M16N8K4 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row = tid_in_group;
+    int col = gid;
+    auto B_u32 = cute::recast<uint32_t>(B);
+    uint32_t b0 = B_u32(row, col);
+    return cutlass::Array<uint32_t, 1>{b0};
+  }
+};
+
+// for f16, bf16
+struct Policy_B_M16N8K8_0 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row = tid_in_group * 2;
+    int col = gid;
+    uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(row, col))) << 16) |
+                  uint16_t(reinterpret_cast<uint16_t&>(B(row + 1, col)));
+    return cutlass::Array<uint32_t, 1>{b0};
+  }
+};
+
+// for tf32
+struct Policy_B_M16N8K8_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = tid_in_group;
+    int row1 = tid_in_group + 4;
+    int col = gid;
+    auto B_u32 = cute::recast<uint32_t>(B);
+    uint32_t b0 = B_u32(row0, col);
+    uint32_t b1 = B_u32(row1, col);
+    return cutlass::Array<uint32_t, 2>{b0, b1};
+  }
+};
+
+// for f64
+struct Policy_B_M16N8K8_2 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO: done in wmma?
+  }
+};
+
+// for f16 and bf16
+struct Policy_B_M16N8K16_0 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = tid_in_group * 2;
+    int row1 = tid_in_group * 2 + 8;
+    int col = gid;
+    uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(row0, col))) << 16) |
+                  uint16_t(reinterpret_cast<uint16_t&>(B(row0 + 1, col)));
+    uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(row1, col))) << 16) |
+                  uint16_t(reinterpret_cast<uint16_t&>(B(row1 + 1, col)));
+    return cutlass::Array<uint32_t, 2>{b0, b1};
+  }
+};
+
+// for f64
+struct Policy_B_M16N8K16_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    // TODO: done in wmma?
+  }
+};
+
+// for u8, s8, e4m3 and e5m2
+struct Policy_B_M16N8K16_2 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for s4 and u4
+struct Policy_B_M16N8K32_0 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for s8, u8, e4m3, e5m2, e3m2, e2m3 and e2m1
+struct Policy_B_M16N8K32_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for s4, u4 and e2m1
+struct Policy_B_M16N8K64 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for b1
+struct Policy_B_M16N8K128 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// for b1
+struct Policy_B_M16N8K256 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    // TODO
+  }
+};
+
+// ------------------- store D fragment -------------------
+// for m8n8k4(f16)
+struct Policy_D_M8N8_0 {
+  template <class Tensor>
+  __device__ static void store(Tensor const& D, uint32_t& d0, uint32_t& d1,
+                               uint32_t& d2, uint32_t& d3) {
+    int lane = threadIdx.x & 31;
+    int row;
+    if (lane < 16)
+      row = (lane & 3);
+    else
+      row = (lane & 3) + 4;
+    auto D_u32 = cute::recast<uint32_t>(D);
+    D_u32(row, 0) = d0;
+    D_u32(row, 1) = d1;
+    D_u32(row, 2) = d2;
+    D_u32(row, 3) = d3;
+  }
+};
+
+// for f32
+struct Policy_D_M8N8_1 {
+  template <class Tensor, class T>
+  __device__ static void store(Tensor const& D, T d0, T d1) {
+    int lane = threadIdx.x & 31;
+    // TODO
+  }
+};
+
+// for f64, s32
+struct Policy_D_M8N8_2 {
+  template <class Tensor, class T>
+  __device__ static void store(Tensor const& D, T& d0, T& d1) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row = gid;
+    int col0 = tid_in_group * 2;
+    int col1 = col0 + 1;
+    auto D_casted = cute::recast<T>(D);
+    D_casted(row, col0) = d0;
+    D_casted(row, col1) = d1;
+  }
+};
+
+// for packed f16, bf16
+struct Policy_D_M16N8_0 {
+  template <class Tensor, class T>
+  __device__ static void store(Tensor const& D, T& d0, T& d1) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col = tid_in_group;
+    auto D_u32 = cute::recast<uint32_t>(D);
+    D_u32(row0, col) = d0;
+    D_u32(row1, col) = d1;
+  }
+};
+
+// for f32 and f64
+struct Policy_D_M16N8_1 {
+  template <class Tensor, class T>
+  __device__ static void store(Tensor const& D, T& d0, T& d1, T& d2, T& d3) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group * 2;
+    int col1 = tid_in_group * 2;
+    D(row0, col0) = d0;
+    D(row0, col1) = d1;
+    D(row1, col0) = d2;
+    D(row1, col1) = d3;
+  }
 };
 
 template <class MMA, class Tensor>
-__device__ auto load_fragment_b(Tensor const& B) {
-  static_assert(LoadB_Policy<MMA>::supported, "No load policy for this MMA");
-
-  return LoadB_Policy<MMA>::type::load(B);
+__device__ auto load_fragment_a(Tensor const& A) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  return MMA_Policy<MMA>::typeA::load(A);
 }
 
-// ------------------- store D fragment -------------------
-template <class MMA>
-struct StoreD_Policy {
-  static constexpr bool supported = false;
-};
-
-struct Policy_D_M16N8_B16 {
-  template <class Tensor>
-  __device__ static void store(Tensor const& D, uint32_t d0, uint32_t d1) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid = lane & 3;
-
-    int D_row0 = gid;
-    int D_row1 = gid + 8;
-    int D_col = tid;
-
-    auto D_u32 = cute::recast<uint32_t>(D);
-    D_u32(D_row0, D_col) = d0;
-    D_u32(D_row1, D_col) = d1;
-  }
-};
-
-struct Policy_D_M16N8_B32 {
-  template <class Tensor>
-  __device__ static void store(Tensor const& D, uint32_t d0, uint32_t d1,
-                               uint32_t d2, uint32_t d3) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane % 4;
-    int D_row0 = gid;
-    int D_row1 = gid + 8;
-    int D_col = tid_in_group * 2;
-    D(D_row0, D_col) = d0;
-    D(D_row0, D_col + 1) = d1;
-    D(D_row1, D_col) = d2;
-    D(D_row1, D_col + 1) = d3;
-  }
-};
-
-template <>
-struct StoreD_Policy<cute::SM80_16x8x8_F16F16F16F16_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_D_M16N8_B16;
-};
-
-template <>
-struct StoreD_Policy<cute::SM80_16x8x8_F32BF16BF16F32_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_D_M16N8_B32;
-};
-
-template <>
-struct StoreD_Policy<cute::SM80_16x8x16_F16F16F16F16_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_D_M16N8_B16;
-};
-
-template <>
-struct StoreD_Policy<cute::SM80_16x8x16_F32BF16BF16F32_TN> {
-  static constexpr bool supported = true;
-  using type = Policy_D_M16N8_B32;
-};
+template <class MMA, class Tensor>
+__device__ auto load_fragment_b(Tensor const& B) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  return MMA_Policy<MMA>::typeB::load(B);
+}
 
 template <class MMA, class Tensor, class... DTypes>
 __device__ void store_fragment_d(Tensor const& D, DTypes const&... vals) {
-
-  static_assert(StoreD_Policy<MMA>::supported, "No store policy for this MMA");
-
-  StoreD_Policy<MMA>::type::store(D, vals...);
+  static_assert(MMA_Policy<MMA>::supported, "No store policy for this MMA");
+  MMA_Policy<MMA>::typeD::store(D, vals...);
 }
 
-// mma wrappers
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m8n8k4_row_col_f64_f64_f64_f64(
-    double& d0, double& d1, TensorA const& A, TensorB const& B,
-    const double& c0, const double& c1) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int A_row = lane >> 2;
-  int A_col = lane % 4;
-  int B_row = lane % 4;
-  int B_col = lane >> 2;
-  // TODO: load matrix
-  double A_frag = A(A_row, A_col);
-  double B_frag = B(B_row, B_col);
-  asm volatile("mma.sync.aligned.m8n8k4.row.col.f64.f64.f64.f64 "
-               "{%0, %1}, "
-               "{%2}, "
-               "{%3}, "
-               "{%4, %5};\n"
-               : "=d"(d0), "=d"(d1)
-               : "d"(A_frag), "d"(B_frag), "d"(c0), "d"(c1));
-}
+template <>
+struct MMA_Policy<cute::SM80_16x8x8_F16F16F16F16_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K8_0;
+  using typeB = Policy_B_M16N8K8_0;
+  using typeD = Policy_D_M16N8_0;
+};
 
-template <class TensorD>
-inline __device__ void
-mma_sync_aligned_m8n8k4_row_col_f64_f64_f64_f64_store(double& d0, double& d1,
-                                                      TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int D_row = lane >> 2;
-  int D_col0 = (lane % 4) * 2;
-  int D_col1 = D_col0 + 1;
-  D(D_row, D_col0) = d0;
-  D(D_row, D_col1) = d1;
-}
-
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m8n8k4_row_col_f16_f16_f16_f16(
-    uint32_t& d0, uint32_t& d1, uint32_t& d2, uint32_t& d3, TensorA const& A,
-    TensorB const& B, const uint32_t& c0, const uint32_t& c1,
-    const uint32_t& c2, const uint32_t& c3) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int A_row;
-  if (lane < 16)
-    A_row = lane % 4;
-  else
-    A_row = lane % 4 + 4;
-  auto A_u32 = cute::recast<uint32_t>(A);
-  uint32_t a0 = A_u32(A_row, 0);
-  uint32_t a1 = A_u32(A_row, 1);
-  int B_col;
-  if (lane < 16)
-    B_col = lane % 4;
-  else
-    B_col = lane % 4 + 4;
-  uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(0, B_col))) << 16) |
-                uint16_t(reinterpret_cast<uint16_t&>(B(1, B_col)));
-  uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(2, B_col))) << 16) |
-                uint16_t(reinterpret_cast<uint16_t&>(B(3, B_col)));
-  asm volatile("mma.sync.aligned.m8n8k4.row.col.f16.f16.f16.f16"
-               "{%0, %1,  %2,  %3},"
-               "{%4, %5},"
-               "{%6, %7},"
-               "{%8, %9, %10, %11};\n"
-               : "=r"(d0), "=r"(d1), "=r"(d2), "=r"(d3)
-               : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(c0), "r"(c1), "r"(c2),
-                 "r"(c3));
-}
-
-template <class TensorD>
-inline __device__ void mma_sync_aligned_m8n8k4_row_col_f16_f16_f16_f16_store(
-    uint32_t& d0, uint32_t& d1, uint32_t& d2, uint32_t& d3, TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int D_row;
-  if (lane < 16)
-    D_row = lane % 4;
-  else
-    D_row = lane % 4 + 4;
-  auto D_u32 = cute::recast<uint32_t>(D);
-  D_u32(D_row, 0) = d0;
-  D_u32(D_row, 1) = d1;
-  D_u32(D_row, 2) = d2;
-  D_u32(D_row, 3) = d3;
-}
-
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m16n8k8_row_col_f16_f16_f16_f16(
-    uint32_t& d0, uint32_t& d1, TensorA const& A, TensorB const& B,
-    const uint32_t& c0, const uint32_t& c1) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  auto A_Frag = load_fragment_a<cute::SM80_16x8x8_F16F16F16F16_TN>(A);
-  uint32_t a0 = A_Frag[0];
-  uint32_t a1 = A_Frag[1];
-  uint32_t b0 = load_fragment_b<cute::SM80_16x8x8_F16F16F16F16_TN>(B);
-  asm volatile("mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
-               "{%0, %1},"
-               "{%2, %3},"
-               "{%4},"
-               "{%5, %6};\n"
-               : "=r"(d0), "=r"(d1)
-               : "r"(a0), "r"(a1), "r"(b0), "r"(c0), "r"(c1));
-}
-
-template <class TensorD>
-inline __device__ void mma_sync_aligned_m16n8k8_row_col_f16_f16_f16_f16_store(
-    uint32_t& d0, uint32_t& d1, TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  store_fragment_d<cute::SM80_16x8x8_F16F16F16F16_TN>(D, d0, d1);
-}
-
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m16n8k8_row_col_f32_bf16_bf16_f32(
-    float& d0, float& d1, float& d2, float& d3, TensorA const& A,
-    TensorB const& B, const float& c0, const float& c1, const float& c2,
-    const float& c3) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  auto A_Frag = load_fragment_a<cute::SM80_16x8x8_F32BF16BF16F32_TN>(A);
-  uint32_t a0 = A_Frag[0];
-  uint32_t a1 = A_Frag[1];
-  uint32_t b0 = load_fragment_b<cute::SM80_16x8x8_F32BF16BF16F32_TN>(B);
-  asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.bf16.bf16.f32 "
-               "{%0,  %1,  %2,  %3},"
-               "{%4,  %5},"
-               "{%6},"
-               "{%7,  %8,  %9,  %10};\n"
-               : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-               : "r"(a0), "r"(a1), "r"(b0), "f"(c0), "f"(c1), "f"(c2), "f"(c3));
-}
-
-template <class TensorD>
-inline __device__ void mma_sync_aligned_m16n8k8_row_col_f32_bf16_bf16_f32_store(
-    float& d0, float& d1, float& d2, float& d3, TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  store_fragment_d<cute::SM80_16x8x8_F32BF16BF16F32_TN>(D, d0, d1, d2, d3);
-}
-
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m16n8k16_row_col_f16_f16_f16_f16(
-    uint32_t& d0, uint32_t& d1, TensorA const& A, TensorB const& B,
-    const uint32_t& c0, const uint32_t& c1) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  auto A_Frag = load_fragment_a<cute::SM80_16x8x16_F16F16F16F16_TN>(A);
-  uint32_t a0 = A_Frag[0];
-  uint32_t a1 = A_Frag[1];
-  uint32_t a2 = A_Frag[2];
-  uint32_t a3 = A_Frag[3];
-
-  auto B_Frag = load_fragment_b<cute::SM80_16x8x16_F16F16F16F16_TN>(B);
-  uint32_t b0 = B_Frag[0];
-  uint32_t b1 = B_Frag[1];
-  asm volatile("mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 "
-               "{%0,  %1},"
-               "{%2,  %3,  %4,  %5},"
-               "{%6,  %7},"
-               "{%8,  %9};\n"
-               : "=r"(d0), "=r"(d1)
-               : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(c0),
-                 "r"(c1));
-}
-
-template <class TensorD>
-inline __device__ void mma_sync_aligned_m16n8k16_row_col_f16_f16_f16_f16_store(
-    uint32_t& d0, uint32_t& d1, TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  store_fragment_d<cute::SM80_16x8x16_F16F16F16F16_TN>(D, d0, d1);
-}
-
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m16n8k16_row_col_f32_bf16_bf16_f32(
-    float& d0, float& d1, float& d2, float& d3, TensorA const& A,
-    TensorB const& B, const float& c0, const float& c1, const float& c2,
-    const float& c3) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  auto A_Frag = load_fragment_a<cute::SM80_16x8x16_F32BF16BF16F32_TN>(A);
-  uint32_t a0 = A_Frag[0];
-  uint32_t a1 = A_Frag[1];
-  uint32_t a2 = A_Frag[2];
-  uint32_t a3 = A_Frag[3];
-  auto B_Frag = load_fragment_b<cute::SM80_16x8x16_F32BF16BF16F32_TN>(B);
-  uint32_t b0 = B_Frag[0];
-  uint32_t b1 = B_Frag[1];
-  asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
-               "{%0,  %1,  %2,  %3},"
-               "{%4,  %5,  %6,  %7},"
-               "{%8,  %9},"
-               "{%10, %11, %12, %13};\n"
-               : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-               : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "f"(c0),
-                 "f"(c1), "f"(c2), "f"(c3));
-}
-
-template <class TensorD>
-inline __device__ void
-mma_sync_aligned_m16n8k16_row_col_f32_bf16_bf16_f32_store(float& d0, float& d1,
-                                                          float& d2, float& d3,
-                                                          TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  store_fragment_d<cute::SM80_16x8x16_F32BF16BF16F32_TN>(D, d0, d1, d2, d3);
-}
-#if 0
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m16n8k32_row_col_f32_f8_e4m3_f32(
-    float& d0, float& d1, float& d2, float& d3, TensorA const& A,
-    TensorB const& B, const float& c0, const float& c1, const float& c2,
-    const float& c3) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  auto A_U32 = cute::recast<uint32_t>(A);
-  int lane = threadIdx.x & 31;
-  int gid = lane >> 2;
-  int tid_in_group = lane % 4;
-  int A_row0 = gid;
-  int A_row1 = gid + 8;
-  int A_col0 = tid_in_group;
-  int A_col1 = tid_in_group + 4;
-  uint32_t a0 = A_U32(A_row0, A_col0);
-  uint32_t a1 = A_U32(A_row1, A_col0);
-  uint32_t a2 = A_U32(A_row0, A_col1);
-  uint32_t a3 = A_U32(A_row1, A_col1);
-  int B_row0 = tid_in_group * 4;
-  int B_row1 = tid_in_group * 4 + 16;
-  int B_col = gid;
-  uint16_t b0_0 = reinterpret_cast<const uint16_t&>(B(B_row0, B_col));
-  uint16_t b0_1 = reinterpret_cast<const uint16_t&>(B(B_row0 + 1, B_col));
-  uint16_t b0_2 = reinterpret_cast<const uint16_t&>(B(B_row0 + 2, B_col));
-  uint16_t b0_3 = reinterpret_cast<const uint16_t&>(B(B_row0 + 3, B_col));
-  uint32_t b0 = (uint32_t(b0_0) << 24) | (uint32_t(b0_1) << 16) |
-                (uint32_t(b0_2) << 8) | uint32_t(b0_3);
-  uint16_t b1_0 = reinterpret_cast<const uint16_t&>(B(B_row1, B_col));
-  uint16_t b1_1 = reinterpret_cast<const uint16_t&>(B(B_row1 + 1, B_col));
-  uint16_t b1_2 = reinterpret_cast<const uint16_t&>(B(B_row1 + 2, B_col));
-  uint16_t b1_3 = reinterpret_cast<const uint16_t&>(B(B_row1 + 3, B_col));
-  uint32_t b1 = (uint32_t(b1_0) << 24) | (uint32_t(b1_1) << 16) |
-                (uint32_t(b1_2) << 8) | uint32_t(b1_3);
-
-  asm("mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32 "
-      "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};\n"
-      : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-      : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "f"(c0), "f"(c1),
-        "f"(c2), "f"(c3));
-}
-
-template <class TensorD>
-inline __device__ void mma_sync_aligned_m16n8k32_row_col_f32_f8_e4m3_f32_store(
-    float& d0, float& d1, float& d2, float& d3, TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int gid = lane >> 2;
-  int tid_in_group = lane % 4;
-  int D_row0 = gid;
-  int D_row1 = gid + 8;
-  int D_col = tid_in_group * 2;
-  D(D_row0, D_col) = d0;
-  D(D_row0, D_col + 1) = d1;
-  D(D_row1, D_col) = d2;
-  D(D_row1, D_col + 1) = d3;
-}
-
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m16n8k4_row_col_f32_tf32_tf32_f32(
-    float& d0, float& d1, float& d2, float& d3, TensorA const& A,
-    TensorB const& B, const float& c0, const float& c1, const float& c2,
-    const float& c3) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int gid = lane >> 2;
-  int tid_in_group = lane % 4;
-  int A_row0 = gid;
-  int A_row1 = gid + 8;
-  int A_col = tid_in_group;
-  auto A_u32 = cute::recast<uint32_t>(A);
-  uint32_t a0 = A_u32(A_row0, A_col);
-  uint32_t a1 = A_u32(A_row1, A_col);
-  int B_row = tid_in_group;
-  int B_col = gid;
-  auto B_u32 = cute::recast<uint32_t>(B);
-  uint32_t b0 = B_u32(B_row, B_col);
-  asm volatile("mma.sync.aligned.m16n8k4.row.col.f32.tf32.tf32.f32 "
-               "{%0,  %1,  %2,  %3},"
-               "{%4,  %5},"
-               "{%6},"
-               "{%7,  %8,  %9,  %10};\n"
-               : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-               : "r"(a0), "r"(a1), "r"(b0), "f"(c0), "f"(c1), "f"(c2), "f"(c3));
-}
-
-template <class TensorD>
-inline __device__ void mma_sync_aligned_m16n8k4_row_col_f32_tf32_tf32_f32_store(
-    float& d0, float& d1, float& d2, float& d3, TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int gid = lane >> 2;
-  int tid_in_group = lane % 4;
-  int D_row0 = gid;
-  int D_row1 = gid + 8;
-  int D_col = tid_in_group * 2;
-  D(D_row0, D_col) = d0;
-  D(D_row0, D_col + 1) = d1;
-  D(D_row1, D_col) = d2;
-  D(D_row1, D_col + 1) = d3;
-}
-
-template <class TensorA, class TensorB>
-inline __device__ void mma_sync_aligned_m16n8k8_row_col_f32_tf32_tf32_f32(
-    float& d0, float& d1, float& d2, float& d3, TensorA const& A,
-    TensorB const& B, const float& c0, const float& c1, const float& c2,
-    const float& c3) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int gid = lane >> 2;
-  int tid_in_group = lane % 4;
-  int A_row0 = gid;
-  int A_row1 = gid + 8;
-  int A_col0 = tid_in_group;
-  int A_col1 = tid_in_group + 4;
-  auto A_u32 = cute::recast<uint32_t>(A);
-  uint32_t a0 = A_u32(A_row0, A_col0);
-  uint32_t a1 = A_u32(A_row1, A_col0);
-  uint32_t a2 = A_u32(A_row0, A_col1);
-  uint32_t a3 = A_u32(A_row1, A_col1);
-  int B_row0 = tid_in_group;
-  int B_row1 = tid_in_group + 4;
-  int B_col = gid;
-  auto B_u32 = cute::recast<uint32_t>(B);
-  uint32_t b0 = B_u32(B_row0, B_col);
-  uint32_t b1 = B_u32(B_row1, B_col);
-  asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 "
-               "{%0,  %1,  %2,  %3},"
-               "{%4,  %5,  %6,  %7},"
-               "{%8,  %9},"
-               "{%10, %11, %12, %13};\n"
-               : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-               : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "f"(c0),
-                 "f"(c1), "f"(c2), "f"(c3));
-}
-
-template <class TensorD>
-inline __device__ void mma_sync_aligned_m16n8k8_row_col_f32_tf32_tf32_f32_store(
-    float& d0, float& d1, float& d2, float& d3, TensorD const& D) {
-  assert(threadIdx.y == 0);
-  assert(threadIdx.z == 0);
-  int lane = threadIdx.x & 31;
-  int gid = lane >> 2;
-  int tid_in_group = lane % 4;
-  int D_row0 = gid;
-  int D_row1 = gid + 8;
-  int D_col = tid_in_group * 2;
-  D(D_row0, D_col) = d0;
-  D(D_row0, D_col + 1) = d1;
-  D(D_row1, D_col) = d2;
-  D(D_row1, D_col + 1) = d3;
-}
-#endif
 #endif // __CHOREO_TARGET_CUTE__
 
 #if defined(__TOPSCC__) || defined(__CHOREO_TARGET_CUTE__)

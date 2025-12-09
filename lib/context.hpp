@@ -258,6 +258,7 @@ private:
   std::vector<RuntimeCheckEntry> rt_checks;
   std::vector<Assertion> assertions;
   std::map<std::string, bool> frag_is_wmma;
+  std::map<std::string, std::string> MMA_policy_of_frag;
 
   struct MemReuseInfo {
     std::string simulator;
@@ -320,6 +321,7 @@ public:
     if (!mri) return false;
     return mri->infos.count(sto);
   }
+  // TODO: give error if there is no exec of mma
   bool FragIsWMMA(const std::string& scoped_frag_name) const {
     if (!PrefixedWith(scoped_frag_name, "::"))
       choreo_unreachable("expect the fragament name is scoped.");
@@ -334,6 +336,17 @@ public:
     } else {
       frag_is_wmma.emplace(scoped_frag_name, is_wmma);
     }
+  }
+  std::string MMAPolicyOfFrag(const std::string& scoped_frag_name) const {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    return MMA_policy_of_frag.at(scoped_frag_name);
+  }
+  void SetMMAPolicyOfFrag(const std::string& scoped_frag_name,
+                          const std::string& mma_policy) {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    MMA_policy_of_frag[scoped_frag_name] = mma_policy;
   }
 };
 
