@@ -12,6 +12,22 @@ const PlDepthMap& PlDepthMap::Get() {
   return *instance;
 }
 
+
+
+static std::unordered_map<int, ParallelLevel> gcu5_levels = {
+    {0, ParallelLevel::SEQ},
+    {1, ParallelLevel::BLOCK},
+    {2, ParallelLevel::GROUP},
+    {3, ParallelLevel::THREAD},
+};
+
+static std::unordered_map<ParallelLevel, int> gcu5_depths = {
+    {ParallelLevel::SEQ, 0},
+    {ParallelLevel::BLOCK, 1},
+    {ParallelLevel::GROUP, 2},
+    {ParallelLevel::THREAD, 3},
+};
+
 static std::unordered_map<int, ParallelLevel> gcu4_levels = {
     {0, ParallelLevel::SEQ},
     {1, ParallelLevel::BLOCK},
@@ -90,7 +106,10 @@ PlDepthMap::PlDepthMap() {
       choreo_unreachable("unsupported target.");
   } else if ((CCtx().GetTarget() == CompileTarget::Topscc) ||
              (CCtx().GetTarget() == CompileTarget::Factor)) {
-    if (CCtx().GetArch() == TargetArch::GCU4) {
+    if (CCtx().GetArch() == TargetArch::GCU5) {
+      to_levels = &gcu5_levels;
+      to_depths = &gcu5_depths;
+    } else if (CCtx().GetArch() == TargetArch::GCU4) {
       to_levels = &gcu4_levels;
       to_depths = &gcu4_depths;
     } else if (CCtx().GetArch() == TargetArch::GCU3 ||
@@ -98,7 +117,7 @@ PlDepthMap::PlDepthMap() {
                CCtx().GetArch() == TargetArch::GCU20) {
       to_levels = &gcu3_levels;
       to_depths = &gcu3_depths;
-    } else
+    }  else
       choreo_unreachable("unsupported target.");
   } else if (CCtx().GetTarget() == CompileTarget::CUDA) {
     to_levels = &gpu_simple_levels;

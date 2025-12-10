@@ -189,6 +189,42 @@ install-gcu-sim:
 		mv libgcusim.so $(TOOLCHAIN_DIR)/lib/libgcusim.so; \
 	fi;
 
+#------------------------- GCU-5.x -------------------------#
+GCU5_REL_PATH=251103/gcu500
+GCU5_TOPSCC_RT_NAME=topscc_rt.1.6.20251029.tar.gz
+GCU5_TOPSCC_RT=$(TOOLCHAIN_DIR)/$(GCU5_PLATFORM_NAME)
+GCU5_TOPSCC_RT_MD5:=bfc0034a433662db7ee3c6a3ac90d190
+CUR_GCU5_TOPSCC_RT_MD5:=$(shell md5sum $(GCU5_TOPSCC_RT) 2>/dev/null| cut -d ' ' -f 1)
+
+check-gcu5-tops-kit:
+	@if [ "$(CUR_GCU5_TOPSCC_RT_MD5)" != "$(GCU5_TOPSCC_RT_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		$(MAKE) download-gcu5-tops-kit; \
+	else \
+		echo "$(GCU5_TOPSCC_RT) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu5-tops-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU5_REL_PATH)/$(GCU5_TOPSCC_RT_NAME) -o $(GCU5_TOPSCC_RT_NAME)
+
+install-gcu5-tops-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	tar -zvxf $(GCU5_TOPSCC_RT_NAME) -C $(TOOLCHAIN_DIR); \
+	rsync -av $(TOOLCHAIN_DIR)/topscc_rt/opt/tops/* $(TOOLCHAIN_DIR); \
+	rm -fr $(TOOLCHAIN_DIR)/topscc_rt;
+
+setup-gcu5-tops-kit: check-gcu5-tops-kit
+	@if [ "$(CUR_GCU5_TOPSCC_RT_MD5)" != "$(GCU5_TOPSCC_RT_MD5)"  ]; then \
+	    $(MAKE) install-gcu5-tops-kit; \
+	fi
+
+install-gcu-sim5:
+	@if [ ! -f "$(TOOLCHAIN_DIR)/lib/libgcusim5.so" ]; then \
+		wget http://artifact.enflame.cn:80/artifactory/release_center/GCUSIM/5.0.24/libgcusim5.so; \
+		mv libgcusim5.so $(TOOLCHAIN_DIR)/lib/libgcusim5.so; \
+	fi;
+
 #-----------------------------------------------------------#
 ACORE_PATH=9dca97c
 ACORE_NAME=topsacore_3.3.20250822-9dca97c.tar.gz
@@ -256,7 +292,9 @@ gcu4-kmd: check-gcu4-platform-kit
 gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit setup-gcu-factor-kit
 gcu3-kit: setup-gcu3-platform-kit setup-gcu3-factor-kit
 gcu4-kit: setup-gcu4-platform-kit install-gcu-sim
-gcu-sim: install-gcu-sim
+gcu-sim4: install-gcu-sim
+gcu5-kit: setup-gcu5-tops-kit install-gcu-sim5
+gcu-sim5: install-gcu-sim5
 
 gcu2-install: install-gcu-sfc-kit install-gcu-platform-kit install-gcu-factor-kit
 gcu3-install: install-gcu3-platform-kit install-gcu3-factor-kit

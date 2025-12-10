@@ -2895,12 +2895,11 @@ fi
   for (auto& code : code_segments) os << code << "\n";
   os << "\nEOF\n\n";
 
-  // use simulator at this time
-  bool use_sim = (CCtx().GetArch() == TargetArch::GCU4);
-
   // JIT: detect the environment
-  if (use_sim)
+  if (CCtx().GetArch() == TargetArch::GCU4)
     os << "gcu_arch=gcu400\n";
+  else if (CCtx().GetArch() == TargetArch::GCU5)
+    os << "gcu_arch=gcu500\n";
   else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
             (CCtx().GetOutputKind() == OutputKind::TargetExecutable) ||
             (CCtx().GetOutputKind() == OutputKind::ShellScript)) &&
@@ -2978,6 +2977,9 @@ option_detect() {
   os << R"( -I${GCU_ACORE_INCLUDE})";
   os << R"( -D__ACORE_OP__ -fPIC)";
 #endif
+  if (CCtx().GetArch() == TargetArch::GCU5) { // enable gcusim5
+    os << R"( -Wl,--disable-new-dtags -rpath "${TOPSCC_LIB}")";
+  }
   // always enclose
   os << " ${EXTRA_TARGET_CFLAGS}";
   std::filesystem::path cwd = std::filesystem::current_path();
@@ -2993,7 +2995,12 @@ option_detect() {
 
   os << "\"";
   os << "\noption_detect";
-  if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
+  // if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
+  if (CCtx().GetArch() == TargetArch::GCU4)
+    os << "\nexport INTERNAL_GCU_SIM=LIBRA";
+  else if (CCtx().GetArch() == TargetArch::GCU5)
+    os << "\nexport INTERNAL_GCU_SIM=DRACO";
+
   os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
 
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";

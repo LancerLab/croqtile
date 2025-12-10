@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCU400 GCUSIM
+// REQUIRES: TARGET-GCU400 GCUSIM4
 // RUN: choreo -es -arch=gcu400 %s | FileCheck %s --check-prefix=CODEGEN1
 // RUN: choreo -es %s | FileCheck %s --check-prefix=CODEGEN2
 // RUN: choreo -t topscc -arch=gcu400 %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s

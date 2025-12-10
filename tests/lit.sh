@@ -301,13 +301,15 @@ check_specific() {
   local tgts=$(grep -o "TARGET-[^[:space:]]*" <<< "$requires" | sed 's/TARGET-//')
   local libs=$(grep -o "LIBRARY-[^[:space:]]*" <<< "$requires" | sed 's/LIBRARY-//')
   local cmps=$(grep -o "COMPILER-[^[:space:]]*" <<< "$requires" | sed 's/COMPILER-//')
-  local expect_gcu_sim=$(grep -q "GCUSIM" <<< "$requires" && echo "found")
+  local expect_gcu_sim4=$(grep -q "GCUSIM4" <<< "$requires" && echo "found")
+  local expect_gcu_sim5=$(grep -q "GCUSIM5" <<< "$requires" && echo "found")
 
   # has some targets specified, resolve it
   [ ! -z ${tgts} ] && set_clear tst_targets
 
   # Process targets
-  if [ ! -z "${expect_gcu_sim}" ]; then set_add tst_targets "gcusim400"; fi
+  if [ ! -z "${expect_gcu_sim4}" ]; then set_add tst_targets "gcusim400"; fi
+  if [ ! -z "${expect_gcu_sim5}" ]; then set_add tst_targets "gcusim500"; fi
   if [[ "${tgts}" == *"GCU400"* ]]; then set_add tst_targets "gcu400"; fi
   if [[ "${tgts}" == *"GCU300"* ]]; then set_add tst_targets "gcu300"; fi
   if [[ "${tgts}" == *"GCU210"* ]]; then set_add tst_targets "gcu210"; fi
@@ -343,7 +345,7 @@ device_type="none"
 gcu_arch="none"
 cuda_arch="none"
 mach=
-simulator=
+simulator="none"
 
 # some specific features
 is_dynshape_supported=0
@@ -399,6 +401,10 @@ detect_simulator_features() {
     # the simulators exist
     gcu_sim_lib=${script_dir}/../extern/lib/
     gcu_sim_arch=gcusim400
+    simulator=${gcu_sim_arch}
+  elif [ -f "${script_dir}/../extern/lib/libgcusim5.so" ]; then
+    gcu_sim_lib=${script_dir}/../extern/lib/
+    gcu_sim_arch=gcusim500
     simulator=${gcu_sim_arch}
   fi
 }
@@ -817,18 +823,24 @@ for file in "${files_array[@]}"; do
     # specific - simulator
     exe_env=
     unset_env=
-    if set_contains tst_targets "gcusim400" ]]; then
-      # requires simulator
-      if [[ "gcusim400" != "$gcu_sim_arch" ]]; then
-        echo "SKIP(SIM): ${file}"
+
+    # requires simulator
+    if set_contains tst_targets "gcusim400" || set_contains tst_targets "gcusim500"; then
+      if ! set_contains tst_targets "$simulator"; then
+      echo "SKIP(SIM): ${file} ($run_count of $run_num)"
         num_skiped=$(($num_skiped + 1));
         continue;
       else
-        # set up for the simulator
-        exe_env="old_path=${LD_LIBRARY_PATH}; export LD_LIBRARY_PATH=${gcu_sim_lib}:${LD_LIBRARY_PATH}; export INTERNAL_GCU_SIM=LIBRA;"
+        exe_env="old_path=${LD_LIBRARY_PATH}; export LD_LIBRARY_PATH=${gcu_sim_lib}:${LD_LIBRARY_PATH};"
         unset_env="export LD_LIBRARY_PATH=${old_path}; unset INTERNAL_GCU_SIM;"
+        if [[ "$simulator" == "gcusim400" ]]; then
+          exe_env="${exe_env} export INTERNAL_GCU_SIM=LIBRA;"
+        elif [[ "$simulator" == "gcusim500" ]]; then
+          exe_env="${exe_env} export INTERNAL_GCU_SIM=DRACO;"
+        fi
       fi
     fi
+
     if ! set_contains tst_targets "$mach" && ! set_contains tst_targets "$simulator"; then
       # Not matched, skip
       _all_skipped_targets=$(set_print tst_targets)

@@ -245,6 +245,8 @@ bool CommandLine::Parse(int argc, char** argv) {
     CCtx().SetArch(TargetArch::GCU3);
   else if (ToUpper(arch.GetValue()) == "GCU400")
     CCtx().SetArch(TargetArch::GCU4);
+  else if (ToUpper(arch.GetValue()) == "GCU500")
+    CCtx().SetArch(TargetArch::GCU5);
   else if (ToUpper(arch.GetValue()) == "GPU")
     CCtx().SetArch(TargetArch::GPU);
   else if (ToUpper(arch.GetValue()) == "SM_70")

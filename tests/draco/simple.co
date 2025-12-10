@@ -1,0 +1,26 @@
+// REQUIRES: TARGET-GCU500 GCUSIM5
+// RUN: choreo -t topscc -arch=gcu500 %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+#define N 128
+__co__ auto foo(f32 [N] a, f32 [N] b)  {
+  global f32[N] out;
+  parallel p by 1 {
+    foreach {i} in [a.span(0)] {
+      out.at(i) = a.at(i) + b.at(i);
+    }
+  }
+  return out;
+}
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::f32>(N);
+  auto b = choreo::make_spandata<choreo::f32>(N);
+  a.fill(1.0f);
+  b.fill(1.0f);
+  auto res = foo(a.view(), b.view());
+  for (size_t i = 0; i < N; ++i) {
+    choreo::choreo_assert(res[i] == 2.0f, "values are not equal.");
+  }
+  std::cout << "Test Passed\n";
+}
+
+// CHECK: Test Passed
