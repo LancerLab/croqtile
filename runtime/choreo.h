@@ -2125,7 +2125,15 @@ struct Policy_A_M16N8K8_2 {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
-    // TODO: done in wmma?
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group;
+    int col1 = tid_in_group + 4;
+    double a0 = A(row0, col0);
+    double a1 = A(row1, col0);
+    double a2 = A(row0, col1);
+    double a3 = A(row1, col1);
+    return cutlass::Array<double, 4>{a0, a1, a2, a3};
   }
 };
 
@@ -2155,7 +2163,19 @@ struct Policy_A_M16N8K16_1 {
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
-    // TODO: done in wmma?
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col = tid_in_group;
+    double a0 = A(row0, col);
+    double a1 = A(row1, col);
+    double a2 = A(row0, col + 4);
+    double a3 = A(row1, col + 4);
+    double a4 = A(row0, col + 8);
+    double a5 = A(row1, col + 8);
+    double a6 = A(row0, col + 12);
+    double a7 = A(row1, col + 12);
+    return cutlass::Array<double, 8>{a0, a1, a2, a3, a4, a5, a6, a7};
   }
 };
 
@@ -2425,7 +2445,12 @@ struct Policy_B_M16N8K8_2 {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
-    // TODO: done in wmma?
+    int row0 = tid_in_group;
+    int row1 = tid_in_group + 4;
+    int col = gid;
+    double b0 = B(row0, col);
+    double b1 = B(row1, col);
+    return cutlass::Array<double, 2>{b0, b1};
   }
 };
 
@@ -2453,7 +2478,14 @@ struct Policy_B_M16N8K16_1 {
   __device__ static auto load(Tensor const& B) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
-    // TODO: done in wmma?
+    int tid_in_group = lane & 3;
+    int row = tid_in_group;
+    int col = gid;
+    double b0 = B(row, col);
+    double b1 = B(row + 4, col);
+    double b2 = B(row + 8, col);
+    double b3 = B(row + 12, col);
+    return cutlass::Array<double, 4>{b0, b1, b2, b3};
   }
 };
 
@@ -2751,6 +2783,14 @@ struct MMA_Policy<cute::SM80_16x8x8_F32BF16BF16F32_TN> {
 };
 
 template <>
+struct MMA_Policy<cute::SM90_16x8x8_F64F64F64F64_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K8_2;
+  using typeB = Policy_B_M16N8K8_2;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
 struct MMA_Policy<cute::SM80_16x8x8_F32TF32TF32F32_TN> {
   static constexpr bool supported = true;
   using typeA = Policy_A_M16N8K8_1;
@@ -2766,13 +2806,20 @@ struct MMA_Policy<cute::SM80_16x8x16_F16F16F16F16_TN> {
   using typeD = Policy_D_M16N8_0;
 };
 
-// TODO
 template <>
 struct MMA_Policy<cute::SM80_16x8x16_F32F16F16F32_TN> {
   static constexpr bool supported = true;
   using typeA = Policy_A_M16N8K16_0;
   using typeB = Policy_B_M16N8K16_0;
-  using typeD = Policy_D_M16N8_0;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM90_16x8x16_F64F64F64F64_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K16_1;
+  using typeB = Policy_B_M16N8K16_1;
+  using typeD = Policy_D_M16N8_1;
 };
 
 template <>
