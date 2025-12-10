@@ -21,22 +21,22 @@ __co__ auto mem_reuse0(u8 [K, K, N] i0, u8 [K, K, N] i1) {
     foreach idx in [2, 1, N] {
       shared u8 [output.span / #idx] s0;
 
-      s1 = dma.copy.async i0.chunkat(idx) => shared;
-      s2 = dma.copy.async i1.chunkat(idx) => shared;
-      wait s1, s2;
+      smem1 = dma.copy.async i0.chunkat(idx) => shared;
+      smem2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait smem1, smem2;
 
-      local u8 [s1.span] l1;
+      local u8 [smem1.span] l1;
       inthreads.async (q == 0) {
         local u8 [l1.span] l0{0};
-        dma.copy s1 => l1;
+        dma.copy smem1 => l1;
         call foo0(l1, l0, |l0|);
         dma.copy l0 => s0.chunkat(_, _, q);
       }
       
-      local u8 [s2.span] l2;
+      local u8 [smem2.span] l2;
       inthreads.async (q == 1) {
         local u8 [l2.span] l0{0};
-        dma.copy s2 => l2;
+        dma.copy smem2 => l2;
         call foo0(l2, l0, |l0|);
         dma.copy l0 => s0.chunkat(_, _, q);
       }
@@ -93,22 +93,22 @@ int main()
 // LIVENESS: (  4)       with idx = {idx__elem__0, idx__elem__1, idx__elem__2} in [ 2 1 1 ] {
 // LIVENESS: (  5)         foreach idx(::) {
 // LIVENESS: (  6)           shared u8 [ (output.span /  (ubound idx) )  ] s0
-// LIVENESS: (  7)           shared u8 mdspan<3> [256, 512, 1] s1__buf__
-// LIVENESS: (  8)           s1 = dma.copy.async i0.ChunkAt(idx) => s1__buf__
-// LIVENESS: (  9)           shared u8 mdspan<3> [256, 512, 1] s2__buf__
-// LIVENESS: ( 10)           s2 = dma.copy.async i1.ChunkAt(idx) => s2__buf__
-// LIVENESS: ( 11)           wait s1, s2
-// LIVENESS: ( 12)           local u8 [ s1.span ] l1
+// LIVENESS: (  7)           shared u8 mdspan<3> [256, 512, 1] smem1__buf__
+// LIVENESS: (  8)           smem1 = dma.copy.async i0.ChunkAt(idx) => smem1__buf__
+// LIVENESS: (  9)           shared u8 mdspan<3> [256, 512, 1] smem2__buf__
+// LIVENESS: ( 10)           smem2 = dma.copy.async i1.ChunkAt(idx) => smem2__buf__
+// LIVENESS: ( 11)           wait smem1, smem2
+// LIVENESS: ( 12)           local u8 [ smem1.span ] l1
 // LIVENESS: ( 13)           inthreads.async  (q == 0)  {
 // LIVENESS: ( 14)             local u8 [ l1.span ] l0 = {0}
-// LIVENESS: ( 15)             dma.copy s1 => l1
+// LIVENESS: ( 15)             dma.copy smem1 => l1
 // LIVENESS: ( 16)             call foo0(l1, l0,  (sizeof l0) )
 // LIVENESS: ( 17)             dma.copy l0 => s0.ChunkAt(__choreo_no_tiling__, __choreo_no_tiling__, q)
 // LIVENESS: ( 18)           }
-// LIVENESS: ( 19)           local u8 [ s2.span ] l2
+// LIVENESS: ( 19)           local u8 [ smem2.span ] l2
 // LIVENESS: ( 20)           inthreads.async  (q == 1)  {
 // LIVENESS: ( 21)             local u8 [ l2.span ] l0 = {0}
-// LIVENESS: ( 22)             dma.copy s2 => l2
+// LIVENESS: ( 22)             dma.copy smem2 => l2
 // LIVENESS: ( 23)             call foo0(l2, l0,  (sizeof l0) )
 // LIVENESS: ( 24)             dma.copy l0 => s0.ChunkAt(__choreo_no_tiling__, __choreo_no_tiling__, q)
 // LIVENESS: ( 25)           }
@@ -129,13 +129,13 @@ int main()
 // LIVENESS-NEXT: 	range: [1, 32] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s0
 // LIVENESS-NEXT: 	range: [6, 27] 
-// LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s1__buf__
+// LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::smem1__buf__
 // LIVENESS-NEXT: 	range: [7, 26] 
-// LIVENESS: VAR    ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s1
+// LIVENESS: VAR    ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::smem1
 // LIVENESS-NEXT: 	range: [8, 26] 
-// LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s2__buf__
+// LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::smem2__buf__
 // LIVENESS-NEXT: 	range: [9, 26] 
-// LIVENESS: VAR    ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s2
+// LIVENESS: VAR    ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::smem2
 // LIVENESS-NEXT: 	range: [10, 26] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::l1
 // LIVENESS-NEXT: 	range: [12, 26] 

@@ -761,6 +761,14 @@ for file in "${files_array[@]}"; do
   sequential=0
   [[ "$(dirname ${file})" == *"end2end"* ]] && sequential=1;
 
+  if [[ -z "${CHOREO_ENABLE_GPU_MMA_TESTS}" ]] || [[ "${CHOREO_ENABLE_GPU_MMA_TESTS}" != "1" ]]; then
+    if [[ "$(dirname ${file})" == *"end2end/gpu/wmma"* ]] || [[ "$(dirname ${file})" == *"end2end/gpu/ptx_mma"* ]]; then
+      echo "SKIP(GPU-MMA): ${file} "
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    fi
+  fi
+
   ext="${file##*.}"
   # Read the file and search for lines starting with "// RUN:"
   run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)

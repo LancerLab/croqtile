@@ -2015,6 +2015,7 @@ struct Policy_A_M8N8K16 {
     int row = gid;
     int col = tid_in_group * 4;
     uint32_t a0 = 0;
+    // TODO: if use recast, res error
 #pragma unroll
     for (int i = 0; i < 4; i++)
       a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row, col + i)));
@@ -2146,7 +2147,28 @@ struct Policy_A_M16N8K16_2 {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
-    // TODO
+#if 1
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col = tid_in_group * 4;
+    uint32_t a0 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col + i)));
+    uint32_t a1 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      a1 = (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col + i)));
+    return cutlass::Array<uint32_t, 2>{a0, a1};
+#else
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col = tid_in_group;
+    auto A_u32 = cute::recast<uint32_t>(A);
+    uint32_t a0 = A_u32(row0, col);
+    uint32_t a1 = A_u32(row1, col);
+    return cutlass::Array<uint32_t, 2>{a0, a1};
+#endif
   }
 };
 
@@ -2161,22 +2183,54 @@ struct Policy_A_M16N8K32_0 {
   }
 };
 
-// for s8, u8, e4m3, e5m2, e3m2, e2m3 and e2m1
+// for e4m3, e5m2, e3m2, e2m3 and e2m1
 struct Policy_A_M16N8K32_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    auto A_u32 = cute::recast<uint32_t>(A);
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane % 4;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group;
+    int col1 = tid_in_group + 4;
+    uint32_t a0 = A_u32(row0, col0);
+    uint32_t a1 = A_u32(row1, col0);
+    uint32_t a2 = A_u32(row0, col1);
+    uint32_t a3 = A_u32(row1, col1);
+    return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+  }
+};
+
+// for s8, u8
+struct Policy_A_M16N8K32_2 {
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     auto A_U32 = cute::recast<uint32_t>(A);
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane % 4;
-    int A_row0 = gid;
-    int A_row1 = gid + 8;
-    int A_col0 = tid_in_group;
-    int A_col1 = tid_in_group + 4;
-    uint32_t a0 = A_U32(A_row0, A_col0);
-    uint32_t a1 = A_U32(A_row1, A_col0);
-    uint32_t a2 = A_U32(A_row0, A_col1);
-    uint32_t a3 = A_U32(A_row1, A_col1);
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group * 4;
+    int col1 = tid_in_group * 4 + 16;
+    uint32_t a0 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col0 + i)));
+    uint32_t a1 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      a1 = (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col0 + i)));
+    uint32_t a2 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      a2 = (a2 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col1 + i)));
+    uint32_t a3 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      a3 = (a3 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col1 + i)));
     return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
   }
 };
@@ -2377,7 +2431,13 @@ struct Policy_B_M16N8K16_2 {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
-    // TODO
+    int row = tid_in_group * 4;
+    int col = gid;
+    uint32_t b0 = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+      b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(row + i, col)));
+    return cutlass::Array<uint32_t, 1>{b0};
   }
 };
 
@@ -2400,19 +2460,19 @@ struct Policy_B_M16N8K32_1 {
     int gid = lane >> 2;
     int tid_in_group = lane % 4;
 
-    int B_row0 = tid_in_group * 4;
-    int B_row1 = tid_in_group * 4 + 16;
-    int B_col = gid;
+    int row0 = tid_in_group * 4;
+    int row1 = tid_in_group * 4 + 16;
+    int col = gid;
     uint32_t b0 =
-        (uint32_t(reinterpret_cast<uint8_t&>(B(B_row0, B_col))) << 24) |
-        (uint32_t(reinterpret_cast<uint8_t&>(B(B_row0 + 1, B_col))) << 16) |
-        (uint32_t(reinterpret_cast<uint8_t&>(B(B_row0 + 2, B_col))) << 8) |
-        uint8_t(reinterpret_cast<uint8_t&>(B(B_row0 + 3, B_col)));
+        (uint32_t(reinterpret_cast<uint8_t&>(B(row0, col))) << 24) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 1, col))) << 16) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 2, col))) << 8) |
+        uint8_t(reinterpret_cast<uint8_t&>(B(row0 + 3, col)));
     uint32_t b1 =
-        (uint32_t(reinterpret_cast<uint8_t&>(B(B_row1, B_col))) << 24) |
-        (uint32_t(reinterpret_cast<uint8_t&>(B(B_row1 + 1, B_col))) << 16) |
-        (uint32_t(reinterpret_cast<uint8_t&>(B(B_row1 + 2, B_col))) << 8) |
-        uint8_t(reinterpret_cast<uint8_t&>(B(B_row1 + 3, B_col)));
+        (uint32_t(reinterpret_cast<uint8_t&>(B(row1, col))) << 24) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 1, col))) << 16) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 2, col))) << 8) |
+        uint8_t(reinterpret_cast<uint8_t&>(B(row1 + 3, col)));
 
     return cutlass::Array<uint32_t, 2>{b0, b1};
   }
@@ -2455,8 +2515,9 @@ struct Policy_B_M16N8K256 {
 // for m8n8k4(f16)
 struct Policy_D_M8N8_0 {
   template <class Tensor>
-  __device__ static void store(Tensor const& D, uint32_t& d0, uint32_t& d1,
-                               uint32_t& d2, uint32_t& d3) {
+  __device__ static void store(Tensor& D, uint32_t const& d0,
+                               uint32_t const& d1, uint32_t const& d2,
+                               uint32_t const& d3) {
     int lane = threadIdx.x & 31;
     int row;
     if (lane < 16)
@@ -2473,17 +2534,33 @@ struct Policy_D_M8N8_0 {
 
 // for f32
 struct Policy_D_M8N8_1 {
-  template <class Tensor, class T>
-  __device__ static void store(Tensor const& D, T d0, T d1) {
+  template <class Tensor>
+  __device__ static void store(Tensor& D, float const& d0, float const& d1,
+                               float const& d2, float const& d3,
+                               float const& d4, float const& d5,
+                               float const& d6, float const& d7) {
     int lane = threadIdx.x & 31;
-    // TODO
+    // if (i == 2,3,6,7) => +2
+    int row = (lane & 1);
+    if (lane >= 16) row += 4;
+    // if (i >= 4) => +4
+    // if (i == 1,3,5,7) => +1
+    int col = lane & 2;
+    D(row, col) = d0;
+    D(row, col + 1) = d1;
+    D(row + 2, col) = d2;
+    D(row + 2, col + 1) = d3;
+    D(row, col + 4) = d4;
+    D(row, col + 4 + 1) = d5;
+    D(row + 2, col + 4) = d6;
+    D(row + 2, col + 4 + 1) = d7;
   }
 };
 
 // for f64, s32
 struct Policy_D_M8N8_2 {
   template <class Tensor, class T>
-  __device__ static void store(Tensor const& D, T& d0, T& d1) {
+  __device__ static void store(Tensor& D, T const& d0, T const& d1) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
@@ -2499,7 +2576,7 @@ struct Policy_D_M8N8_2 {
 // for packed f16, bf16
 struct Policy_D_M16N8_0 {
   template <class Tensor, class T>
-  __device__ static void store(Tensor const& D, T& d0, T& d1) {
+  __device__ static void store(Tensor& D, T const& d0, T const& d1) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
@@ -2512,10 +2589,11 @@ struct Policy_D_M16N8_0 {
   }
 };
 
-// for f32 and f64
+// for s32, f32 and f64
 struct Policy_D_M16N8_1 {
   template <class Tensor, class T>
-  __device__ static void store(Tensor const& D, T& d0, T& d1, T& d2, T& d3) {
+  __device__ static void store(Tensor& D, T const& d0, T const& d1, T const& d2,
+                               T const& d3) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
@@ -2531,22 +2609,81 @@ struct Policy_D_M16N8_1 {
 };
 
 template <class MMA, class Tensor>
-__device__ auto load_fragment_a(Tensor const& A) {
+__device__ static inline auto load_fragment_a(Tensor const& A) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   return MMA_Policy<MMA>::typeA::load(A);
 }
 
 template <class MMA, class Tensor>
-__device__ auto load_fragment_b(Tensor const& B) {
+__device__ static inline auto load_fragment_b(Tensor const& B) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   return MMA_Policy<MMA>::typeB::load(B);
 }
 
 template <class MMA, class Tensor, class... DTypes>
-__device__ void store_fragment_d(Tensor const& D, DTypes const&... vals) {
+__device__ static inline void store_fragment_d(Tensor const& D,
+                                               DTypes const&... vals) {
   static_assert(MMA_Policy<MMA>::supported, "No store policy for this MMA");
   MMA_Policy<MMA>::typeD::store(D, vals...);
 }
+
+template <>
+struct MMA_Policy<cute::SM70_8x8x4_F16F16F16F16_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M8N8K4_0;
+  using typeB = Policy_B_M8N8K4_0;
+  using typeD = Policy_D_M8N8_0;
+};
+
+template <>
+struct MMA_Policy<cute::SM70_8x8x4_F32F16F16F32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M8N8K4_0;
+  using typeB = Policy_B_M8N8K4_0;
+  using typeD = Policy_D_M8N8_1;
+};
+
+// SM80_8x8x4_F64F64F64F64_TN has been done in wmma
+
+template <>
+struct MMA_Policy<cute::SM80_8x8x16_S32S8S8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M8N8K16;
+  using typeB = Policy_B_M8N8K16;
+  using typeD = Policy_D_M8N8_2;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_8x8x16_S32S8U8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M8N8K16;
+  using typeB = Policy_B_M8N8K16;
+  using typeD = Policy_D_M8N8_2;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_8x8x16_S32U8S8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M8N8K16;
+  using typeB = Policy_B_M8N8K16;
+  using typeD = Policy_D_M8N8_2;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_8x8x16_S32U8U8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M8N8K16;
+  using typeB = Policy_B_M8N8K16;
+  using typeD = Policy_D_M8N8_2;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x4_F32TF32TF32F32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K4;
+  using typeB = Policy_B_M16N8K4;
+  using typeD = Policy_D_M16N8_1;
+};
 
 template <>
 struct MMA_Policy<cute::SM80_16x8x8_F16F16F16F16_TN> {
@@ -2555,6 +2692,89 @@ struct MMA_Policy<cute::SM80_16x8x8_F16F16F16F16_TN> {
   using typeB = Policy_B_M16N8K8_0;
   using typeD = Policy_D_M16N8_0;
 };
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x8_F32F16F16F32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K8_0;
+  using typeB = Policy_B_M16N8K8_0;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x8_F32BF16BF16F32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K8_0;
+  using typeB = Policy_B_M16N8K8_0;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x8_F32TF32TF32F32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K8_1;
+  using typeB = Policy_B_M16N8K8_1;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x16_F16F16F16F16_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K16_0;
+  using typeB = Policy_B_M16N8K16_0;
+  using typeD = Policy_D_M16N8_0;
+};
+
+// TODO
+template <>
+struct MMA_Policy<cute::SM80_16x8x16_F32F16F16F32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K16_0;
+  using typeB = Policy_B_M16N8K16_0;
+  using typeD = Policy_D_M16N8_0;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x16_F32BF16BF16F32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K16_0;
+  using typeB = Policy_B_M16N8K16_0;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x16_S32S8S8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K16_2;
+  using typeB = Policy_B_M16N8K16_2;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x16_S32S8U8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K16_2;
+  using typeB = Policy_B_M16N8K16_2;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x16_S32U8S8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K16_2;
+  using typeB = Policy_B_M16N8K16_2;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x16_S32U8U8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K16_2;
+  using typeB = Policy_B_M16N8K16_2;
+  using typeD = Policy_D_M16N8_1;
+};
+
+// TODO: 16x8x16 with fp8 (lack of CuTe fma)
 
 template <>
 struct MMA_Policy<cute::SM89_16x8x32_F32E4M3E4M3F32_TN> {
@@ -2619,6 +2839,44 @@ struct MMA_Policy<cute::SM89_16x8x32_F16E5M2E5M2F16_TN> {
   using typeB = Policy_B_M16N8K32_1;
   using typeD = Policy_D_M16N8_0;
 };
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x32_S32S8S8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K32_2;
+  using typeB = Policy_B_M16N8K32_1;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x32_S32S8U8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K32_2;
+  using typeB = Policy_B_M16N8K32_1;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x32_S32U8S8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K32_2;
+  using typeB = Policy_B_M16N8K32_1;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::SM80_16x8x32_S32U8U8S32_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K32_2;
+  using typeB = Policy_B_M16N8K32_1;
+  using typeD = Policy_D_M16N8_1;
+};
+
+// TODO: all 16x8x64 (sub byte)
+
+// TODO: all 16x8x128 (b1)
+
+// TODO: all 16x8x256 (b1)
 
 #endif // __CHOREO_TARGET_CUTE__
 

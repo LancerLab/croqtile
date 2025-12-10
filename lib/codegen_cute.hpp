@@ -470,13 +470,11 @@ private:
   void EmitTMAConfiguration(AST::ParallelBy* pb);
   const std::optional<std::string> GetTMAName(AST::DMA&) const;
 
-  size_t GetRegNumOfFrag(ValueItem m, ValueItem n,
-                         [[maybe_unused]] BaseType ty) {
+  size_t GetRegNumOfFrag(ValueItem m, ValueItem n) {
     auto mi = VIInt(m);
     auto ni = VIInt(n);
     if (!mi || !ni)
       choreo_unreachable("expect m and n of mma to be numeric value!");
-    // if (mi.value() == 8 && ni.value() == 8 && ty == BaseType::F16) return 8;
     return mi.value() * ni.value() / CCtx().GetMinGroupDim();
   }
 

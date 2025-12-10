@@ -1,0 +1,50 @@
+// REQUIRES: TARGET-GPU
+// RUN1: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 128
+#define N 128
+#define K 64
+
+__co__ auto matmul(s8 [M, K] lhs, s8 [K, N] rhs) {
+  s32 [M, N] output;
+
+  int MMA_M = 16, MMA_N = 8, MMA_K = 16;
+  parallel {m, n} by [M / MMA_M / 2, N / MMA_N / 2 ] : block {
+    mc = mma.fill.s32 0;
+    parallel {g0, g1} by [2, 2]: group {
+      foreach k in K / MMA_K {
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.chunkat(m#g0, n#g1);
+    };
+  }
+  return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::s8>(M, K);
+  auto rhs = choreo::make_spandata<choreo::s8>(K, N);
+
+  lhs.fill_random(-10, 10);
+  rhs.fill_random(-10, 10);
+
+  auto res = matmul(lhs.view(), rhs.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int32_t ref = 0;
+      for (size_t k = 0; k < lhs.shape()[1]; ++k)
+        ref += (lhs[i][k] * rhs[k][j]);
+      if (ref != res[i][j]) {
+        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << (res[i][j]) << "\n";
+      }
+      choreo::choreo_assert((ref == res[i][j]), "values are not equal.");
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

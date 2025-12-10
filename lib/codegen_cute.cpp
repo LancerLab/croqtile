@@ -213,58 +213,6 @@ bool CuteCodeGen::ThreadCooperative(AST::DMA&) const {
   return false;
 }
 
-std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
-    const std::string& buf_name, [[maybe_unused]] const std::string& buf_expr,
-    const Storage sto, BaseType bty, const Shape& shp,
-    const std::string& offset, const std::string& strides,
-    const std::vector<size_t>& transp) {
-  static int shp_cnt = 0;
-  shp_cnt++;
-  auto bname = RemoveSuffix(buf_name, ".data()");
-  auto shpcnt = std::to_string(shp_cnt);
-
-  auto shp_name = "__shape" + shpcnt + "_" + bname;
-  auto lyt_name = "__layout" + shpcnt + "_" + bname;
-  auto std_name = "__stride" + shpcnt + "_" + bname;
-  auto tsr_name = "__tensor" + shpcnt + "_" + bname;
-
-  std::string mem_ty;
-  if (sto == Storage::GLOBAL || sto == Storage::DEFAULT)
-    mem_ty = "gmem";
-  else if (sto == Storage::SHARED)
-    mem_ty = "smem";
-  else if (sto == Storage::LOCAL)
-    mem_ty = "";
-  else
-    choreo_unreachable("unsupported storage type: " + STR(sto));
-
-  std::string bts{NameBaseType(bty)};
-
-  std::ostringstream tsr_decl;
-
-  tsr_decl << d_indent << "auto " << shp_name << " = cute::make_shape("
-           << ((transp.empty()) ? ShapeSTR(shp, true)
-                                : ReShapeSTR(shp, transp, true))
-           << ");\n";
-  if (!strides.empty())
-    tsr_decl << d_indent << "auto " << std_name << " = cute::make_stride("
-             << strides << ");\n";
-  tsr_decl << d_indent << "auto " << lyt_name << " = cute::make_layout("
-           << shp_name;
-  if (!strides.empty()) tsr_decl << ", " << std_name;
-  tsr_decl << ");\n";
-  tsr_decl << d_indent << "auto " << tsr_name << " = cute::make_tensor(";
-  if (!mem_ty.empty())
-    tsr_decl << "cute::make_" << mem_ty << "_ptr<" << bts << ">";
-  else
-    tsr_decl << "(" << bts << "*)";
-  tsr_decl << "(" << buf_name << ((!offset.empty()) ? (" + " + offset) : "")
-           << ")";
-  tsr_decl << ", " << lyt_name << ");\n";
-
-  return {tsr_name, tsr_decl.str()};
-}
-
 const std::string CuteCodeGen::ShapeSTR(const Shape& s, bool shp_lit,
                                         const std::string& delimiter,
                                         BaseType cast_to) const {
@@ -1665,9 +1613,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     Shape f_shape = f_sty->GetShape();
     Shape t_shape = t_sty->GetShape();
     const auto& f_buf_name = f_buf.first;
-    const auto& f_buf_expr = f_buf.second;
     const auto& t_buf_name = t_buf.first;
-    const auto& t_buf_expr = t_buf.second;
 
     if (auto idx = f_ca->IndexOfLastSpanAs()) {
       f_mds_offset = TileBaseOffset(f_ca);
@@ -1897,6 +1843,24 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     default: break;
     }
   } else {
+    // special case of reg num
+    auto RegNumOf8x8x4 = [](const ValueList& shape, BaseType bt,
+                            MMAInfo::Fragment f, size_t& reg_num) {
+      if (sbe::ceq(shape[0], sbe::nu(8)) && sbe::ceq(shape[1], sbe::nu(8)) &&
+          sbe::ceq(shape[2], sbe::nu(4))) {
+        if (f == MMAInfo::FRAG_C) {
+          if (bt == BaseType::F16)
+            reg_num = 4;
+          else if (bt == BaseType::F32)
+            reg_num = 8;
+          else
+            assert(false && "unexpect mma config!");
+        } else if (f == MMAInfo::FRAG_A || f == MMAInfo::FRAG_B) {
+          assert(bt == BaseType::F16);
+          reg_num = 2;
+        }
+      }
+    };
     // n is not wmma. Inline PTX.
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: {
@@ -1908,9 +1872,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto sty = GetSpannedType(GetSymbolType(sym));
       assert(sty);
       reg_num_d = GetRegNumOfFrag(sty->GetShape().ValueAt(0),
-                                  sty->GetShape().ValueAt(1), ssmi.ty);
+                                  sty->GetShape().ValueAt(1));
       bool use_uint32 = false;
       UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
+      RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
       for (size_t i = 0; i < reg_num_d; ++i) {
         if (use_uint32)
           ds << d_indent << "uint32_t" << " " << sym << "_frag" << i << ";\n";
@@ -1928,10 +1893,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ca = op.LoadFrom();
       auto f_sym = ca->data->name;
       auto f_sty = GetSpannedType(GetSymbolType(f_sym));
-      const auto f_mds =
-          GenTensorDecl(f_sym, "", f_sty->GetStorage(), f_sty->ElementType(),
-                        ca->GetBlockShape(), ValueSTR(GenOffset(ca)),
-                        ValueSTR(GenStrides(ca), false, true));
+      const auto f_mds = GenTensorDecl(
+          RemoveSuffix(f_sym, ".data()"), f_sym, f_sty->GetStorage(),
+          f_sty->ElementType(), ca->GetBlockShape(), false,
+          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       auto sym = op.LoadTo();
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
@@ -1956,11 +1921,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto m = shape[0], n = shape[1], k = shape[2];
       auto a_type = cgi.GetSymbolMMA(InScopeName(op.ExecOperand(1))).ty;
       auto b_type = cgi.GetSymbolMMA(InScopeName(op.ExecOperand(2))).ty;
-      size_t reg_num_a = GetRegNumOfFrag(m, k, a_type);
-      size_t reg_num_b = GetRegNumOfFrag(k, n, b_type);
+      size_t reg_num_a = GetRegNumOfFrag(m, k);
+      size_t reg_num_b = GetRegNumOfFrag(k, n);
       bool use_uint32 = false;
       UseUint32Reg(use_uint32, reg_num_a, a_type);
       UseUint32Reg(use_uint32, reg_num_b, b_type);
+      RegNumOf8x8x4(shape, a_type, MMAInfo::FRAG_A, reg_num_a);
+      RegNumOf8x8x4(shape, b_type, MMAInfo::FRAG_B, reg_num_b);
       for (size_t i = 0; i < reg_num_a; ++i)
         ds << op.ExecOperand(1) << "_frag[" << i << "], ";
       for (size_t i = 0; i < reg_num_b; ++i)
@@ -1974,10 +1941,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ca = op.StoreTo();
       auto f_sym = ca->data->name;
       auto f_sty = GetSpannedType(GetSymbolType(f_sym));
-      const auto f_mds =
-          GenTensorDecl(f_sym, "", f_sty->GetStorage(), f_sty->ElementType(),
-                        ca->GetBlockShape(), ValueSTR(GenOffset(ca)),
-                        ValueSTR(GenStrides(ca), false, true));
+      const auto f_mds = GenTensorDecl(
+          RemoveSuffix(f_sym, ".data()"), f_sym, f_sty->GetStorage(),
+          f_sty->ElementType(), ca->GetBlockShape(), false,
+          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       auto sym = op.StoreFrom();
       ds << d_indent << "store_fragment_d<cute::"

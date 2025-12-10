@@ -10,12 +10,12 @@ __co__ auto matmul(f8_e4m3 [M, K] lhs, f8_e4m3 [K, N] rhs) {
 
   int MMA_M = 16, MMA_N = 8, MMA_K = 32;
   parallel {m, n} by [M / MMA_M / 2, N / MMA_N / 2 ] : block {
-    mc = mma.fill.f32 0.0f;  // c = {0}
+    mc = mma.fill.f32 0.0f;
     parallel {g0, g1} by [2, 2]: group {
       foreach k in K / MMA_K {
-        ma = mma.load lhs.chunkat(m#g0, k); // 8x4
-        mb = mma.load rhs.chunkat(k, n#g1); // 4x8
-        mma.row.col mc, ma, mb;   // row * col : c += a * b;;
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
       }
       mma.store mc, output.chunkat(m#g0, n#g1);
     };

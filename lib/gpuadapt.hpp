@@ -639,14 +639,16 @@ public:
                             "(d): " + MMAShapeSTR(mma_shape) +
                             "] is not support by current architecture(" +
                             STR(CCtx().GetArch()) + ").");
-      std::string mma_policy = MMALimit::MMAConfig2CuteMMAName(mma_config);
       bool is_wmma = MMALimit::ConfigIsWMMA(mma_config);
       FCtx(cur_fname).SetFragIsWMMA(InScopeName(a_sym), is_wmma);
       FCtx(cur_fname).SetFragIsWMMA(InScopeName(b_sym), is_wmma);
       FCtx(cur_fname).SetFragIsWMMA(InScopeName(c_sym), is_wmma);
-      FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
-      FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);
-      FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
+      if (!is_wmma) {
+        std::string mma_policy = MMALimit::MMAConfig2CuteMMAName(mma_config);
+        FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
+        FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);
+        FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
+      }
 #else
       auto ety = a_ty->ElementType();
       switch (ety) {
