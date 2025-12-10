@@ -987,7 +987,9 @@ public:
 
   template <typename U>
   __co_host__ void fill_random(U lb, U ub) {
-    using UT = std::conditional_t<std::is_same_v<U, double>, float, U>;
+    using UT = std::conditional_t<std::is_same<U, double>::value &&
+                                      !std::is_same<T, double>::value,
+                                  float, U>;
     utils::fill_random(this->data(), this->element_count(), static_cast<UT>(lb),
                        static_cast<UT>(ub));
   }
@@ -2048,7 +2050,7 @@ struct Policy_A_M8N8K128 {
 };
 
 // for tf32
-struct Policy_A_M16N8K4 {
+struct Policy_A_M16N8K4_0 {
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
@@ -2061,6 +2063,21 @@ struct Policy_A_M16N8K4 {
     uint32_t a0 = A_u32(row0, col);
     uint32_t a1 = A_u32(row1, col);
     return cutlass::Array<uint32_t, 2>{a0, a1};
+  }
+};
+
+struct Policy_A_M16N8K4_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col = tid_in_group;
+    double a0 = A(row0, col);
+    double a1 = A(row1, col);
+    return cutlass::Array<double, 2>{a0, a1};
   }
 };
 
@@ -2341,7 +2358,7 @@ struct Policy_B_M8N8K128 {
 };
 
 // for tf32
-struct Policy_B_M16N8K4 {
+struct Policy_B_M16N8K4_0 {
   template <class Tensor>
   __device__ static auto load(Tensor const& B) {
     int lane = threadIdx.x & 31;
@@ -2352,6 +2369,20 @@ struct Policy_B_M16N8K4 {
     auto B_u32 = cute::recast<uint32_t>(B);
     uint32_t b0 = B_u32(row, col);
     return cutlass::Array<uint32_t, 1>{b0};
+  }
+};
+
+// for f64
+struct Policy_B_M16N8K4_1 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row = tid_in_group;
+    int col = gid;
+    double b0 = B(row, col);
+    return cutlass::Array<double, 1>{b0};
   }
 };
 
@@ -2682,8 +2713,16 @@ struct MMA_Policy<cute::SM80_8x8x16_S32U8U8S32_TN> {
 template <>
 struct MMA_Policy<cute::SM80_16x8x4_F32TF32TF32F32_TN> {
   static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K4;
-  using typeB = Policy_B_M16N8K4;
+  using typeA = Policy_A_M16N8K4_0;
+  using typeB = Policy_B_M16N8K4_0;
+  using typeD = Policy_D_M16N8_1;
+};
+
+template <>
+struct MMA_Policy<cute::MMA_16x8x4_F64F64F64F64_TN> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_M16N8K4_1;
+  using typeB = Policy_B_M16N8K4_1;
   using typeD = Policy_D_M16N8_1;
 };
 
