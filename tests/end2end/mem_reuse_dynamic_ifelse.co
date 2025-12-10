@@ -27,16 +27,16 @@ __co__ auto mem_reuse0(u8 [K, K, N] i0, u8 [K, K, N] i1, int x) {
   parallel p by 1 {
     foreach idx in [2, 1, N] {
       shared u8 [i0.span / #idx] s0;
-      s1 = dma.copy.async i0.chunkat(idx) => shared;
-      s2 = dma.copy.async i1.chunkat(idx) => shared;
-      wait s1, s2;
+      smem1 = dma.copy.async i0.chunkat(idx) => shared;
+      smem2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait smem1, smem2;
       parallel q by 1 {
-        local u8 [s1.span] l0;
+        local u8 [smem1.span] l0;
         if (x > 50) {
-          l1 = dma.copy s1 => local;
+          l1 = dma.copy smem1 => local;
           call foo0(l1.data, l0, |l0|);
         } else {
-          l2 = dma.copy s2 => local;
+          l2 = dma.copy smem2 => local;
           call foo0(l2.data, l0, |l0|);
         }
         dma.copy l0 => s0;

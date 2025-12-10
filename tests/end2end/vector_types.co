@@ -136,8 +136,8 @@ __co__ auto ele_add_u8(u8 [N, M] a, u8 [N, M] b)  {
   using t_##type = choreo::type; \
   auto a_##type = choreo::make_spandata<t_##type>(4, 1024); \
   auto b_##type = choreo::make_spandata<t_##type>(4, 1024); \
-  a_##type.fill_random(-10.0f, 10.0f); \
-  b_##type.fill_random(-10.0f, 10.0f); \
+  a_##type.fill_random(0.0f, 10.0f); \
+  b_##type.fill_random(0.0f, 10.0f); \
   auto res_##type = ele_add_##type(a_##type.view(), b_##type.view()); \
   for (size_t i = 0; i < res_##type.shape()[0]; ++i) \
     for (size_t j = 0; j < res_##type.shape()[1]; ++j) { \

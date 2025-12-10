@@ -987,7 +987,9 @@ public:
 
   template <typename U>
   __co_host__ void fill_random(U lb, U ub) {
-    utils::fill_random(this->data(), this->element_count(), lb, ub);
+    using UT = std::conditional_t<std::is_same_v<U, double>, float, U>;
+    utils::fill_random(this->data(), this->element_count(), static_cast<UT>(lb),
+                       static_cast<UT>(ub));
   }
 
   __co_host__ spanned_view<T, Rank> view() {
