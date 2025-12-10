@@ -33,7 +33,6 @@
 #include "cute/tensor.hpp"
 #include <cuda/barrier>
 #include <mma.h>
-namespace cde = cuda::device::experimental;
 
 #define __co_device__ __device__
 #define __co_host__ __host__
@@ -696,7 +695,7 @@ fill_random(U* array, size_t N, U lb, U ub) {
 #endif
 
 // s32/u32 ...
-// if T is integer，utilize std::uniform_int_distribution
+// if T is integer, utilize std::uniform_int_distribution
 template <typename U>
 inline typename std::enable_if<std::is_integral<U>::value, void>::type
 fill_random(U* array, size_t N, U lb, U ub) {
@@ -1819,7 +1818,7 @@ static_assert(false, "path 2\n");
   }
 #endif
 
-  // Fallback: 32-bit (scalar element width) —always safe for any
+  // Fallback: 32-bit (scalar element width) - always safe for any
   // shape/stride/alignment
   copy(cute::AutoVectorizingCopyWithAssumedAlignment<32>{}, src, dst);
 }

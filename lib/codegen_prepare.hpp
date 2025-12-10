@@ -186,6 +186,11 @@ public:
   bool Visit(AST::Memory&) { return true; }
   bool Visit(AST::SpanAs&) { return true; }
   bool Visit(AST::DMA& n) {
+    if (n.IsTMA()) {
+      cgi.GetFunctionTrait(fname).has_tma = true;
+      cgi.GetModuleTrait().has_tma = true;
+    }
+
     if (n.IsAsync() && !n.IsTMA())
       cgi.GetFunctionTrait(fname).has_async_dma = true;
 

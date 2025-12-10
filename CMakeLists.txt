@@ -173,7 +173,7 @@ if(NOT _cuda_root_valid)
       "  DEFAULT_CUDA_HOME='${DEFAULT_CUDA_HOME}' and common defaults.\n"
       "Please set -DCUDA_HOME to a valid CUDA install or -DENABLE_CUDA=OFF.")
   else()
-    # Not explicitly set → force OFF
+    # Not explicitly set force OFF
     if(ENABLE_CUDA)
       message(STATUS "No valid CUDA found. Auto-disabling ENABLE_CUDA.")
       set(ENABLE_CUDA OFF CACHE BOOL "Enable CUDA support" FORCE)
@@ -184,6 +184,16 @@ endif()
 message(STATUS "ENABLE_CUDA = ${ENABLE_CUDA}")
 if(ENABLE_CUDA)
   message(STATUS "Using CUDA from: ${_cuda_root}.")
+  find_program(NVCC nvcc HINTS ${_cuda_root}/bin)
+	execute_process(
+		COMMAND ${NVCC} --version
+		OUTPUT_VARIABLE NVCC_OUT
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		)
+
+	string(REGEX MATCH "release ([0-9]+)\\.([0-9]+)" _ "${NVCC_OUT}")
+	set(CUDA_VERSION_MAJOR "${CMAKE_MATCH_1}")
+	set(CUDA_VERSION_MINOR "${CMAKE_MATCH_2}")
 endif()
 
 # ============================

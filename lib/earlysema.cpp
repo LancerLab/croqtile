@@ -1823,8 +1823,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   auto sty = GetSpannedType(nty);
 
   if (!IsValidRank(sty->Dims())) {
-    SetNodeType(
-        n, MakeUnRankedSpannedType(sty->ElementType(), sty->GetStorage()));
+    SetNodeType(n,
+                MakeUnRankedSpannedType(sty->ElementType(), sty->GetStorage()));
     return true;
   }
 

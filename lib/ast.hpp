@@ -1214,7 +1214,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   ptr<Node> mdspan_type = nullptr;
   std::vector<size_t> array_dims;
   bool is_mutable = false;
-  bool infer_span = false;        // the span must be inferenced
+  bool infer_span = false; // the span must be inferenced
 
 public:
   explicit DataType(const location& l, BaseType t, bool m = false)
@@ -1247,7 +1247,8 @@ public:
 
   // used for clone
   explicit DataType(const location& l, BaseType bt, size_t r,
-                    const ptr<Node> pt, const std::vector<size_t>& ad, bool im, bool infer)
+                    const ptr<Node> pt, const std::vector<size_t>& ad, bool im,
+                    bool infer)
       : Node(l), base_type(bt), rank(r), mdspan_type(pt), array_dims(ad),
         is_mutable(im), infer_span(infer) {}
 
@@ -1281,8 +1282,10 @@ public:
     os << prefix;
     if (is_mutable) os << "mutable ";
     os << STR(base_type);
-    if (ExplicitSpanned()) os << " " << STR(mdspan_type);
-    else if (infer_span) os << " [?]";
+    if (ExplicitSpanned())
+      os << " " << STR(mdspan_type);
+    else if (infer_span)
+      os << " [?]";
   }
 
   void accept(Visitor&) override;

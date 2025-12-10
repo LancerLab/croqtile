@@ -7,16 +7,10 @@
 #include "target_utils.hpp"
 #include "visitor.hpp"
 
-namespace Choreo {
+#define STRINGIFY2(x) #x
+#define STRINGIFY(x) STRINGIFY2(x)
 
-inline bool IsTMAAvaliable() {
-  switch (CCtx().GetArch()) {
-  case TargetArch::SM_90:
-  case TargetArch::SM_100: return true;
-  default: break;
-  }
-  return false;
-}
+namespace Choreo {
 
 struct GPUAdaptor : public VisitorWithSymTab {
 private:
@@ -505,6 +499,22 @@ public:
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
 
+#if CHOREO_CUDA_VERSION < 12040
+    if (n.IsTMA()) {
+      Error1(n.LOC(),
+             "TMA is not supported by current CUDA. "
+             "(Version " STRINGIFY(CHOREO_CUDA_VERSION_MAJOR) "." STRINGIFY(
+                 CHOREO_CUDA_VERSION_MINOR) " < 12.9+).");
+      return false;
+    }
+#endif
+
+    if (n.IsTMA() && !CCtx().TargetSupportTMA()) {
+      Error1(n.LOC(), "TMA is not supported by current architecture: " +
+                          STR(CCtx().GetArch()) + ".");
+      return false;
+    }
+
     if (n.operation == ".any") return true;
 
     // DMA directions check:
@@ -532,7 +542,8 @@ public:
                             " (" + STR(fst) + " -> " + STR(tst) + ").");
     }
 
-    if (fst == Storage::GLOBAL && tst == Storage::SHARED && IsTMAAvaliable())
+    if (fst == Storage::GLOBAL && tst == Storage::SHARED &&
+        CCtx().TargetSupportTMA())
       n.SetLevel(ParallelLevel::BLOCK); // single instance in a block
     else
       n.SetLevel(ParallelLevel::THREAD); // threads-cooperative

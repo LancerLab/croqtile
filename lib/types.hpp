@@ -2380,8 +2380,8 @@ inline ptr<SpannedType> MakeDummySpannedType() {
   return MakeSpannedType(BaseType::UNKNOWN, GenUninitShape(), Storage::DEFAULT);
 }
 
-inline ptr<SpannedType> MakeUnRankedSpannedType(BaseType bt,
-                                              Storage sto = Storage::DEFAULT) {
+inline ptr<SpannedType>
+MakeUnRankedSpannedType(BaseType bt, Storage sto = Storage::DEFAULT) {
   // only care about the rank of span
   return MakeSpannedType(bt, GenUninitShape(), sto);
 }

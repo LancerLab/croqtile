@@ -651,11 +651,9 @@ void CuteCodeGen::EmitFixedHostHead() {
   if (native_f16)
     oss << "#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__\n";
   if (native_bf16) oss << "#define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__\n";
-  oss << R"(#include "choreo.h"
-
-using namespace choreo;
-
-)";
+  oss << "#include \"choreo.h\"\n";
+  if (cgi.HasTMA()) oss << "namespace cde = cuda::device::experimental;\n";
+  oss << "\nusing namespace choreo;\n";
   code_segments.push_back(oss.str()); // reset the host code
 }
 

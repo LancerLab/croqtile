@@ -96,9 +96,14 @@ struct LaunchConfig {
   }
 };
 
-struct OtherTrait {
+struct ModuleTraits {
+  bool has_tma = false;
+};
+
+struct FuncTrait {
   bool has_parallelby = false;
   bool multiple_parallelby = false;
+  bool has_tma = false;
   bool has_async_dma = false;
 };
 
@@ -172,7 +177,7 @@ private:
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, std::vector<LaunchConfig>>;
 using ReturnSymbols = std::map<std::string, std::string>;
-using FunctionTraits = std::map<std::string, OtherTrait>;
+using FunctionTraits = std::map<std::string, FuncTrait>;
 using SharedFutures = std::map<std::string, std::set<std::string>>;
 using LocalFutures = std::map<std::string, std::set<std::string>>;
 using SymbolMMA = std::map<std::string, MMAInfo>;
@@ -192,7 +197,8 @@ private:
   SymbolDetails all_syms;
   LaunchDetails launches;
   ReturnSymbols returns;
-  FunctionTraits traits;
+  ModuleTraits m_traits;
+  FunctionTraits f_traits;
   SharedFutures shr_futs;
   LocalFutures loc_futs;
   SymbolMMA sym_mmas;
@@ -218,11 +224,14 @@ public:
     return launches[fname];
   }
 
-  const OtherTrait& GetFunctionTrait(const std::string& fname) const {
-    return traits.at(fname);
+  const ModuleTraits& GetModuleTrait() const { return m_traits; }
+  ModuleTraits& GetModuleTrait() { return m_traits; }
+
+  const FuncTrait& GetFunctionTrait(const std::string& fname) const {
+    return f_traits.at(fname);
   }
-  OtherTrait& GetFunctionTrait(const std::string& fname) {
-    return traits[fname];
+  FuncTrait& GetFunctionTrait(const std::string& fname) {
+    return f_traits[fname];
   }
 
   const std::set<std::string>&
@@ -268,6 +277,12 @@ public:
 
   bool HasParallelBy(const std::string& fname) const {
     return GetFunctionTrait(fname).has_parallelby;
+  }
+
+  bool HasTMA() const { return GetModuleTrait().has_tma; }
+
+  bool HasTMA(const std::string& fname) const {
+    return GetFunctionTrait(fname).has_tma;
   }
 
   bool HasAsyncDMA(const std::string& fname) const {

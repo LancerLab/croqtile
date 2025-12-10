@@ -107,6 +107,13 @@ add_library(codegen OBJECT ${CODEGEN_SOURCES})
 add_library(support OBJECT ${CL_SOURCES})
 add_library(pp OBJECT ${PP_SOURCES})
 
+set(CHOREO_COMPONENTS
+  parse
+  core
+  codegen
+  support
+  pp)
+
 add_dependencies(parse parser_deps)
 add_dependencies(codegen codegen_deps)
 
@@ -115,6 +122,7 @@ target_include_directories(core PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(codegen PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(support PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(pp PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
+
 
 target_compile_definitions(codegen PRIVATE
   __CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}"
@@ -128,6 +136,16 @@ if(ENABLE_CUDA)
   target_compile_definitions(codegen PRIVATE
     __CHOREO_CUDA_DIR__=${_cuda_root}
   )
+
+  math(EXPR CUDA_VERSION_NUMBER
+       "${CUDA_VERSION_MAJOR} * 1000 + ${CUDA_VERSION_MINOR} * 10")
+  foreach(tgt IN LISTS CHOREO_COMPONENTS)
+    target_compile_definitions(${tgt} PRIVATE
+      CHOREO_CUDA_VERSION_MAJOR=${CUDA_VERSION_MAJOR}
+      CHOREO_CUDA_VERSION_MINOR=${CUDA_VERSION_MINOR}
+      CHOREO_CUDA_VERSION=${CUDA_VERSION_NUMBER}
+    )
+  endforeach()
 endif()
 
 if(ENABLE_CUTE)
@@ -140,10 +158,6 @@ if(ENABLE_CUTE)
     __CHOREO_CUTE_DIR__=${_cute_root}
   )
 endif()
-
-target_compile_definitions(pp PRIVATE
-  __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
-)
 
 target_compile_definitions(pp PRIVATE
   __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
