@@ -12,8 +12,6 @@ const PlDepthMap& PlDepthMap::Get() {
   return *instance;
 }
 
-
-
 static std::unordered_map<int, ParallelLevel> gcu5_levels = {
     {0, ParallelLevel::SEQ},
     {1, ParallelLevel::BLOCK},
@@ -117,7 +115,7 @@ PlDepthMap::PlDepthMap() {
                CCtx().GetArch() == TargetArch::GCU20) {
       to_levels = &gcu3_levels;
       to_depths = &gcu3_depths;
-    }  else
+    } else
       choreo_unreachable("unsupported target.");
   } else if (CCtx().GetTarget() == CompileTarget::CUDA) {
     to_levels = &gpu_simple_levels;

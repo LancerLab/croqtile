@@ -81,7 +81,7 @@
 #define __CHOREO_BLOCK_SINGLE__                                                \
   threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&                  \
       subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
-#define __CHOREO_GROUP_SINGLE__                                                \
+#define __CHOREO_GROUP_SINGLE__(GSIZE)                                         \
   subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
 #elif defined(__CHOREO_TARGET_CUTE__)
 #define __CHOREO_BLOCK_SINGLE__                                                \
