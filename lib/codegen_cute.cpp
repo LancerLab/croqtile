@@ -656,9 +656,127 @@ void CuteCodeGen::EmitFixedHostHead() {
   oss << "#include \"choreo.h\"\n";
   if (cgi.HasTMA()) oss << "namespace cde = cuda::device::experimental;\n";
   oss << "\nusing namespace choreo;\n";
+  oss << "\n#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ "
+      << ArchNum(CCtx().GetArch()) << "\n";
+  EmitRuntimeEnvironmentChecker(oss);
   code_segments.push_back(oss.str()); // reset the host code
 }
 
+void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
+  os << "\nstatic inline void __choreo_check_cuda_environment__() ";
+  os << R"({
+  // ----------- ONE-TIME GUARD -----------
+  static bool already_checked = false;
+  if (already_checked) return;
+  already_checked = true;
+  // --------------------------------------
+
+  auto decode_cuda_version =
+   [](int v, int& major, int& minor, int& patch) {
+    major = v / 1000;
+    minor = (v % 1000) / 10;
+    patch = v % 10;
+  };
+
+  // ----------- Runtime version check -----------
+  int runtime_ver = 0;
+  cudaError_t err = cudaRuntimeGetVersion(&runtime_ver);
+  if (err != cudaSuccess) {
+    std::fprintf(stderr,
+		 "[choreo] CUDA runtime not available: %s\n",
+		 cudaGetErrorString(err));
+    std::exit(EXIT_FAILURE);
+  }
+
+  int driver_ver = 0;
+  err = cudaDriverGetVersion(&driver_ver);
+  if (err != cudaSuccess) {
+    std::fprintf(stderr,
+		 "[choreo] CUDA driver not available: %s\n",
+		 cudaGetErrorString(err));
+    std::exit(EXIT_FAILURE);
+  }
+
+  int rMaj, rMin, rPat;
+  int dMaj, dMin, dPat;
+  decode_cuda_version(runtime_ver, rMaj, rMin, rPat);
+  decode_cuda_version(driver_ver, dMaj, dMin, dPat);
+
+  int reqMaj, reqMin, reqPat;
+  decode_cuda_version(CUDART_VERSION, reqMaj, reqMin, reqPat);
+
+  if (runtime_ver < CUDART_VERSION) {
+    std::fprintf(stderr,
+	"[choreo] CUDA runtime too old:\n"
+	"  found runtime %d.%d.%d (encoded=%d)\n"
+	"  required      %d.%d.%d (encoded=%d)\n",
+	rMaj, rMin, rPat, runtime_ver,
+	reqMaj, reqMin, reqPat, CUDART_VERSION);
+    std::exit(EXIT_FAILURE);
+  }
+
+  // Optional: check driver vs runtime mismatch
+  if (driver_ver < runtime_ver) {
+    std::fprintf(stderr,
+	"[choreo] Warning: CUDA driver (%d.%d.%d, encoded=%d) is older than "
+	"the CUDA runtime (%d.%d.%d, encoded=%d). This may cause issues.\n",
+	dMaj, dMin, dPat, driver_ver,
+	rMaj, rMin, rPat, runtime_ver);
+  }
+
+  // ----------- Device capability check -----------
+  int device_count = 0;
+  err = cudaGetDeviceCount(&device_count);
+  if (err != cudaSuccess || device_count == 0) {
+    std::fprintf(stderr,
+		 "[choreo] No CUDA-capable devices found.\n");
+    std::exit(EXIT_FAILURE);
+  }
+
+  int device_id = 0;
+  err = cudaGetDevice(&device_id);
+  if (err != cudaSuccess) {
+      std::fprintf(stderr,
+		   "[choreo] cudaGetDevice failed: %s\n",
+		   cudaGetErrorString(err));
+      std::exit(EXIT_FAILURE);
+  }
+
+  cudaDeviceProp prop{};
+  err = cudaGetDeviceProperties(&prop, device_id);
+  if (err != cudaSuccess) {
+      std::fprintf(stderr,
+		   "[choreo] cudaGetDeviceProperties failed: %s\n",
+		   cudaGetErrorString(err));
+      std::exit(EXIT_FAILURE);
+  }
+
+  int sm = prop.major * 10 + prop.minor;
+  if (sm < __CHOREO_REQUIRED_GPU_DEVICE_SM__) {
+    std::fprintf(stderr,
+	"[choreo] Compute capability too low on device %d (%s):\n"
+	"  found SM %d.%d (sm_%d)\n"
+	"  required SM >= %d (sm_%d)\n",
+	device_id, prop.name,
+	prop.major, prop.minor, sm,
+	__CHOREO_REQUIRED_GPU_DEVICE_SM__, __CHOREO_REQUIRED_GPU_DEVICE_SM__);
+    std::exit(EXIT_FAILURE);
+  }
+
+#if 0
+  // ----------- Optional success log -----------
+  std::fprintf(stderr,
+    "[choreo] CUDA environment OK\n"
+    "  runtime %d.%d.%d (encoded=%d)\n"
+    "  driver  %d.%d.%d (encoded=%d)\n"
+    "  device  %d: %s, SM %d.%d (sm_%d)\n",
+    rMaj, rMin, rPat, runtime_ver,
+    dMaj, dMin, dPat, driver_ver,
+    device_id, prop.name, prop.major, prop.minor, sm);
+#endif
+}
+)";
+}
 void CuteCodeGen::EmitFixedDeviceHead() {}
 
 bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
@@ -721,6 +839,8 @@ bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
 
   hs << " {\n";
   IncrHostIndent();
+
+  hs << h_indent << "__choreo_check_cuda_environment__();\n";
 
   // name the symbolic dimensions for better readability
   for (auto item : symbolic_dimensions) {

@@ -32,7 +32,7 @@ inline static const std::string STR(CompileTarget ct) {
   case CompileTarget::CUDA: return "CUDA";
   case CompileTarget::Cute: return "Cute";
   case CompileTarget::MPI: return "MPI";
-  default: choreo_unreachable("Unsupported operand kind.");
+  default: choreo_unreachable("Unsupported target.");
   }
   return "";
 }
@@ -56,6 +56,25 @@ enum class TargetArch {
   End
 };
 
+inline static int ArchNum(TargetArch ta) {
+  switch (ta) {
+  case TargetArch::GCU20: return 200;
+  case TargetArch::GCU21: return 210;
+  case TargetArch::GCU3: return 300;
+  case TargetArch::GCU4: return 400;
+  case TargetArch::SM_70: return 70;
+  case TargetArch::SM_75: return 75;
+  case TargetArch::SM_80: return 80;
+  case TargetArch::SM_86: return 86;
+  case TargetArch::SM_89: return 89;
+  case TargetArch::SM_90: return 90;
+  case TargetArch::SM_100: return 100;
+  case TargetArch::SM_120: return 120;
+  default: choreo_unreachable("Unsupported Architecture.");
+  }
+  return 0;
+}
+
 inline static const std::string STR(TargetArch ta) {
   switch (ta) {
   case TargetArch::Unknown: return "Unknown";
@@ -72,7 +91,7 @@ inline static const std::string STR(TargetArch ta) {
   case TargetArch::SM_90: return "SM_90";
   case TargetArch::SM_100: return "SM_100";
   case TargetArch::SM_120: return "SM_120";
-  default: choreo_unreachable("Unsupported operand kind.");
+  default: choreo_unreachable("Unsupported architecture.");
   }
   return "";
 }
