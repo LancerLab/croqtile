@@ -635,6 +635,11 @@ struct Shape {
     return values[val_no];
   }
 
+  const ValueItem LeadingValue() const {
+    if (!IsValid()) choreo_unreachable("the shape is not accessible.");
+    return values[val_no].back();
+  }
+
   const Shape TrimDims(size_t n) const {
     if (n == 0) return *this;
 
@@ -1668,7 +1673,7 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
     return (ElementCountValue() * sbe::nu(SizeOf(e_type)))->Normalize();
   }
   size_t ByteSize() const { return SizeOf(e_type) * GetShape().ElementCount(); }
-  ValueItem ElementSizeValue() const { return sbe::nu(SizeOf(e_type)); }
+  const ValueItem ElementSizeValue() const { return sbe::nu(SizeOf(e_type)); }
 
   const std::string ByteSizeExpression(bool ULL_suffix = false) const {
     if (RuntimeShaped())

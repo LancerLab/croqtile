@@ -1,6 +1,7 @@
 #ifndef __CHOREO_CODEGEN_COMMON_H__
 #define __CHOREO_CODEGEN_COMMON_H__
 
+#include "ast.hpp"
 #include "options.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"

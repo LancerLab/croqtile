@@ -18,6 +18,7 @@ extern Choreo::SymbolTable symtab;
 
 namespace Choreo {
 struct Visitor;
+struct VisitorWithScope;
 
 namespace AST {
 

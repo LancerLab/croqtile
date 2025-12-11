@@ -1024,6 +1024,44 @@ private:
   bool Visit(AST::Program&) final { return true; }
 }; // VisitorGroup
 
+inline const std::set<std::string>
+ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
+  std::set<std::string> res;
+  if (n == nullptr) {
+    // nothing to do
+  } else if (auto id = dyn_cast<AST::Identifier>(n)) {
+    if (v)
+      res.insert(v->InScopeName(id->name));
+    else
+      res.insert(id->name);
+  } else if (auto expr = dyn_cast<AST::Expr>(n)) {
+    auto r = ReferredSymbols(expr->GetR().get(), v);
+    auto l = ReferredSymbols(expr->GetL().get(), v);
+    auto c = ReferredSymbols(expr->GetC().get(), v);
+    res.insert(r.begin(), r.end());
+    res.insert(l.begin(), l.end());
+    res.insert(c.begin(), c.end());
+  } else if (auto mv = dyn_cast<AST::MultiValues>(n)) {
+    for (auto sv : mv->AllValues()) {
+      auto r = ReferredSymbols(sv.get(), v);
+      res.insert(r.begin(), r.end());
+    }
+  } else if (auto ca = dyn_cast<AST::ChunkAt>(n)) {
+    for (auto& sop : ca->AllOperations()) {
+      for (auto& e : sop->GetIndices()) {
+        auto r = ReferredSymbols(e.get(), v);
+        res.insert(r.begin(), r.end());
+      }
+      if (v)
+        res.insert(v->InScopeName(ca->RefSymbol()));
+      else
+        res.insert(ca->RefSymbol());
+    }
+  }
+
+  return res;
+}
+
 } // end namespace Choreo
 
 #endif // __CHOREO_VISITOR_HPP__

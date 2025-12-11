@@ -200,19 +200,22 @@ public:
     auto fsty = GetSpannedType(n.GetFrom()->GetType());
     auto tsty = GetSpannedType(n.GetTo()->GetType());
 
-    if (((fsty->GetStorage() == Storage::GLOBAL ||
-          fsty->GetStorage() == Storage::DEFAULT) &&
-         tsty->GetStorage() == Storage::SHARED) ||
-        (fsty->GetStorage() == Storage::SHARED &&
-         (tsty->GetStorage() == Storage::GLOBAL ||
-          tsty->GetStorage() == Storage::DEFAULT))) {
-      auto& tma_descs = cgi.GetTMADescs();
-      tma_descs[cur_device_pb].emplace_back(
-          n.GetFrom(), n.GetTo(), InScopeName(n.GetFrom()->RefSymbol()),
-          InScopeName(n.GetTo()->RefSymbol()));
-    } else
-      choreo_unreachable("unsupport TMA direction: " + STR(fsty->GetStorage()) +
-                         " => " + STR(tsty->GetStorage()) + ".");
+    if (n.IsTMA()) {
+      if (((fsty->GetStorage() == Storage::GLOBAL ||
+            fsty->GetStorage() == Storage::DEFAULT) &&
+           tsty->GetStorage() == Storage::SHARED) ||
+          (fsty->GetStorage() == Storage::SHARED &&
+           (tsty->GetStorage() == Storage::GLOBAL ||
+            tsty->GetStorage() == Storage::DEFAULT))) {
+        auto& tma_descs = cgi.GetTMADescs();
+        tma_descs[cur_device_pb].emplace_back(
+            n.GetFrom(), n.GetTo(), InScopeName(n.GetFrom()->RefSymbol()),
+            InScopeName(n.GetTo()->RefSymbol()));
+      } else
+        choreo_unreachable(
+            "unsupport TMA direction: " + STR(fsty->GetStorage()) + " => " +
+            STR(tsty->GetStorage()) + ".");
+    }
 
     return true;
   }

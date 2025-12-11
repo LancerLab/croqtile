@@ -4,6 +4,7 @@
 // This apply the GPU target specific check and information annotation
 
 #include "ast.hpp"
+#include "codegen_utils.hpp"
 #include "target_utils.hpp"
 #include "visitor.hpp"
 
@@ -12,12 +13,53 @@
 
 namespace Choreo {
 
+struct ParallelSymbols {
+  std::map<ParallelLevel, std::set<std::string>> all_pvs;
+
+  void AddLevelPV(ParallelLevel pl, const std::string& sym) {
+    if (!all_pvs.count(pl)) all_pvs.emplace(pl, std::set<std::string>{});
+    all_pvs[pl].insert(sym);
+  }
+
+  const std::set<std::string> GetLevelPVs(ParallelLevel pl) const {
+    if (!all_pvs.count(pl)) return {};
+    return all_pvs.at(pl);
+  }
+
+  const std::set<std::string> GetInnerPVs(ParallelLevel pl) const {
+    std::set<std::string> inner;
+    for (auto& lvl_pvs : all_pvs) {
+      auto& pld = PlDepthMap::Get();
+      if (pld.ToDepth(lvl_pvs.first) > pld.ToDepth(pl))
+        inner.insert(lvl_pvs.second.begin(), lvl_pvs.second.end());
+    }
+    return inner;
+  }
+
+  ParallelLevel GetPVLevel(const std::string& sym) {
+    for (auto& lvl_pvs : all_pvs)
+      if (lvl_pvs.second.count(sym)) return lvl_pvs.first;
+    return ParallelLevel::UNKNOWN;
+  }
+
+  void Show(std::ostream& os, ParallelLevel pl) const {
+    os << STR(pl) << " parallel variables: { ";
+    if (all_pvs.count(pl))
+      for (auto& pv : all_pvs.at(pl)) os << pv << " ";
+    os << "}";
+  }
+
+  void Reset() { all_pvs.clear(); }
+};
+
 struct GPUAdaptor : public VisitorWithSymTab {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
   std::stack<ParallelLevel> levels;
   std::string cur_fname;
   std::string cur_arch;
+
+  ParallelSymbols ps;
 
 private:
   ParallelLevel Level() const { return levels.top(); }
@@ -26,15 +68,21 @@ private:
   bool BeforeVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(pre)");
     if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+      ps.Reset();
       cur_params.clear();
       cur_fname = cf->name;
       levels.push(ParallelLevel::SEQ);
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      levels.push(pb->GetLevel());
+      auto lvl = pb->GetLevel();
+      levels.push(lvl);
 
       pb->SetMaxLevel(TargetMaxLevel());
 
-      VST_DEBUG(pb->InlinePrint(dbgs()); dbgs() << "\n";);
+      ps.AddLevelPV(lvl, InScopeName(pb->BPV()->name));
+      for (auto id : pb->AllSubPVs())
+        ps.AddLevelPV(lvl, InScopeName(cast<AST::Identifier>(id)->name));
+
+      VST_DEBUG(ps.Show(dbgs(), lvl); dbgs() << "\n";);
     }
     return true;
   }
@@ -348,6 +396,89 @@ public:
 #endif
   }
 
+  void CheckTMA(AST::DMA& n) {
+    if (n.operation == ".any") return;
+
+    assert(isa<AST::ChunkAt>(n.from));
+    auto f_ca = cast<AST::ChunkAt>(n.from);
+    auto f_name = f_ca->RefSymbol();
+    auto f_sty = GetSpannedType(GetSymbolType(f_name));
+    auto f_shape = f_sty->GetShape();
+
+    assert(isa<AST::ChunkAt>(n.to));
+    auto t_ca = cast<AST::ChunkAt>(n.to);
+    auto t_name = t_ca->RefSymbol();
+    auto t_sty = GetSpannedType(GetSymbolType(t_name));
+    auto t_shape = t_sty->GetShape();
+    if ((f_sty->GetStorage() == Storage::GLOBAL ||
+         f_sty->GetStorage() == Storage::DEFAULT) &&
+        t_sty->GetStorage() == Storage::SHARED) {
+      // none-interleave tma requires the `leading-dimension * elementsize` be a
+      // multiple of 16
+      if (!(t_shape.LeadingValue()->IsSymbolic())) {
+        auto size =
+            (t_shape.LeadingValue() * t_sty->ElementSizeValue())->Normalize();
+        auto rem = size % sbe::nu(16);
+        if (!sbe::ceq(rem->Normalize(), sbe::nu(0)))
+          Error(f_ca->LOC(), "GPU TMA requires boxDim[0] * elementSizeInBytes "
+                             "be a mulitple of 16-bytes. (got: " +
+                                 STR(size) + ")");
+      } else {
+        // TODO: emit runtime assessment
+      }
+    } else if ((t_sty->GetStorage() == Storage::GLOBAL ||
+                t_sty->GetStorage() == Storage::DEFAULT) &&
+               f_sty->GetStorage() == Storage::SHARED) {
+      if (!(f_shape.LeadingValue()->IsSymbolic())) {
+        auto size =
+            (f_shape.LeadingValue() * f_sty->ElementSizeValue())->Normalize();
+        auto rem = size % sbe::nu(16);
+        if (!sbe::ceq(rem->Normalize(), sbe::nu(0)))
+          Error(t_ca->LOC(), "GPU TMA requires boxDim[0] * elementSizeInBytes "
+                             "be a mulitple of 16-bytes. (got: " +
+                                 STR(size) + ")");
+      } else {
+        // TODO: emit runtime assessment
+      }
+    }
+
+    // check if the chunkat utilize invalid parallel variable
+    auto intersection = [](const std::set<std::string>& set1,
+                           const std::set<std::string>& set2) {
+      std::set<std::string> intersection;
+
+      std::set_intersection(set1.begin(), set1.end(), set2.begin(), set2.end(),
+                            std::inserter(intersection, intersection.begin()));
+
+      return intersection;
+    };
+
+    auto& pvs = ps.GetInnerPVs(ParallelLevel::BLOCK);
+    auto& f_syms = ReferredSymbols(f_ca.get(), this);
+    auto& t_syms = ReferredSymbols(t_ca.get(), this);
+
+    auto format_string = [&](const std::set<std::string>& syms) {
+      std::ostringstream oss;
+      int i = 0;
+      for (auto& sym : syms) {
+        if (i++ != 0) oss << ", ";
+        oss << "`" << UnScopedName(sym) << "'(" << STR(ps.GetPVLevel(sym))
+            << ")";
+      }
+      return oss.str();
+    };
+    if (auto f_int = intersection(f_syms, pvs); !f_int.empty())
+      Error1(f_ca->LOC(), "TMA is " + STR(ParallelLevel::GROUP) +
+                              "-wise that parallel variable " +
+                              format_string(f_int) +
+                              " is/are used inproperly.");
+    if (auto t_int = intersection(t_syms, pvs); !t_int.empty())
+      Error1(t_ca->LOC(), "TMA is " + STR(ParallelLevel::GROUP) +
+                              "-wise that parallel variable " +
+                              format_string(t_int) +
+                              " is/are used inproperly.");
+  }
+
   void CheckDimSize(const Shape& s, size_t idx, const std::string& op,
                     size_t limit, const location& loc) {
     assert(idx < s.Rank());
@@ -516,7 +647,14 @@ public:
     auto tst = tty->GetStorage();
 
     // Many restriction on dma
-    if (n.IsAsync()) {
+    if (n.IsTMA()) {
+      if (!(fst == Storage::SHARED &&
+            (tst == Storage::GLOBAL || tst == Storage::DEFAULT)) &&
+          !((fst == Storage::GLOBAL || fst == Storage::DEFAULT) &&
+            tst == Storage::SHARED))
+        Error1(n.LOC(), "GPU does not allow the TMA " + n.operation.substr(1) +
+                            " (" + STR(fst) + " -> " + STR(tst) + ").");
+    } else if (n.IsAsync()) {
       if ((fst == Storage::SHARED && tst == Storage::GLOBAL) ||
           (fst == Storage::SHARED && tst == Storage::SHARED) ||
           (fst == Storage::SHARED && tst == Storage::LOCAL) ||
@@ -532,13 +670,15 @@ public:
                             " (" + STR(fst) + " -> " + STR(tst) + ").");
     }
 
-    if (fst == Storage::GLOBAL && tst == Storage::SHARED &&
-        CCtx().TargetSupportTMA())
+    if (fst == Storage::GLOBAL && tst == Storage::SHARED && n.IsTMA())
       n.SetLevel(ParallelLevel::BLOCK); // single instance in a block
     else
       n.SetLevel(ParallelLevel::THREAD); // threads-cooperative
 
-    CheckDMA(n);
+    if (n.IsTMA())
+      CheckTMA(n);
+    else
+      CheckDMA(n);
 
     // The user does not have to explicitly claim a global memory that requires
     // direct copy from host to device. Here Choreo judge if a spanned memory is

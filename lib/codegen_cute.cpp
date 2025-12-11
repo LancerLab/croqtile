@@ -427,7 +427,12 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
     for (auto p : sops[sop_idx]->GetIndices()) {
       if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
         const auto& vals = o.GetVals();
-        for (auto& val : vals) exprs.push_back(val);
+        for (auto& val : vals) {
+          if (sbe::ceq(val, sbe::sym("::__choreo_no_tiling__")))
+            exprs.push_back(sbe::nu(0));
+          else
+            exprs.push_back(val);
+        }
       } else
         choreo_unreachable("unsupported index: " + PSTR(p) + ".");
     }
@@ -444,7 +449,7 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
     for (size_t i = 0; i < exprs.size(); ++i) {
       // combine 'a' and 'c' between expressions like 'chunkat(a, b).chunk(c,
       // d)'
-      indices[i] = (indices[i] * shape.ValueAt(i))->Normalize();
+      indices[i] = (indices[i] * exprs[i] * shape.ValueAt(i))->Normalize();
     }
   }
 
@@ -1943,7 +1948,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_global_to_shared(" << t_buf_expr << ", &" << *tname
-         << "_tensor_map, " << ValueSTR(Reverse(GenIndices(t_ca)))
+         << "_tensor_map, " << ValueSTR(Reverse(GenIndices(f_ca)))
          << ", ((TMAAtom*)" << future_name << ".get_atom())->barrier());\n";
       ds << d_indent << "  ((TMAAtom*)" << future_name
          << ".get_atom())->token() = "
@@ -1963,7 +1968,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_shared_to_global(&" << *tname << "_tensor_map, "
-         << ValueSTR(Reverse(GenIndices(f_ca))) << "," << f_buf_expr << ");\n";
+         << ValueSTR(Reverse(GenIndices(t_ca))) << ", " << f_buf_expr << ");\n";
       ds << d_indent << "  cde::cp_async_bulk_commit_group();\n";
       ds << d_indent << "  cde::cp_async_bulk_wait_group_read<0>();\n";
       ds << d_indent << "}\n";
@@ -2896,7 +2901,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent << "uint32_t " << desc.GetName() << "_elem_strides[] = {"
        << ValueSTR(ValxN(sbe::nu(1), t_shape.Rank()))
        << "};\n"; // elements' strides
-    hs << h_indent << "CUtensorMap " << map_name << "{};\n";
+    hs << h_indent << "alignas(64) CUtensorMap " << map_name << "{};\n";
     hs << h_indent << "CUresult " << map_name
        << "_res = cuTensorMapEncodeTiled(\n";
     hs << h_indent << "        &" << map_name << ",\n"; // tensor_map
@@ -3099,7 +3104,7 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
   if (use_cuda_type)
     os << " -D__USE_CUDA_TYPE__";
   else

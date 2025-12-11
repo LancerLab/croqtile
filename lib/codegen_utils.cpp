@@ -1,4 +1,5 @@
 #include "codegen_utils.hpp"
+#include "visitor.hpp"
 
 namespace Choreo {
 
