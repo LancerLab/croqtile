@@ -1309,41 +1309,45 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       choreo_unreachable("group parallelism with more than 3 dimensions is "
                          "not supported.");
 
-    // when choreo users writes parallel {group_first, group_second, group_third} by {GPU_M, GPU_N, GPU_K}
-    // they tend to bind group_first to GPU_M, group_second to GPU_N, group_third to GPU_K, this is choreo convention
-    // however, in CUDA, threadIdx.y is the leading dimension, threadIdx.x is the trailing dimension
-    // so we need to reverse the order of the group ids to keep all choreo convention, whilst aligning to CUDA's convention
-    // this is the reason why we need to reverse the order of the group ids
-    // group_first -> group_id_first, group_second -> group_id_second, group_third -> group_id_third
+    // when choreo users writes parallel {group_first, group_second,
+    // group_third} by {GPU_M, GPU_N, GPU_K} they tend to bind group_first to
+    // GPU_M, group_second to GPU_N, group_third to GPU_K, this is choreo
+    // convention however, in CUDA, threadIdx.y is the leading dimension,
+    // threadIdx.x is the trailing dimension so we need to reverse the order of
+    // the group ids to keep all choreo convention, whilst aligning to CUDA's
+    // convention this is the reason why we need to reverse the order of the
+    // group ids group_first -> group_id_first, group_second -> group_id_second,
+    // group_third -> group_id_third
     if (n.AllSubPVs().size() == 1) {
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.y");
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.y");
     }
 
     if (n.AllSubPVs().size() == 2) {
-      auto group_id_first = (sbe::sym("threadIdx.y") /
-                       lconfig.group_count.y)
-                          ->Normalize();
-      auto group_id_second = (sbe::sym("threadIdx.y") %
-                       lconfig.group_count.y)
-                          ->Normalize();
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), ValueSTR(group_id_first));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), ValueSTR(group_id_second));
+      auto group_id_first =
+          (sbe::sym("threadIdx.y") / lconfig.group_count.y)->Normalize();
+      auto group_id_second =
+          (sbe::sym("threadIdx.y") % lconfig.group_count.y)->Normalize();
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
+                          ValueSTR(group_id_first));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
+                          ValueSTR(group_id_second));
     }
 
     if (n.AllSubPVs().size() == 3) {
-      auto group_id_first = (sbe::sym("threadIdx.y") /
-                       lconfig.group_count.z)
-                          ->Normalize();
-      auto group_id_second = ((sbe::sym("threadIdx.y") /
-                       lconfig.group_count.z)) % lconfig.group_count.y
-                          ->Normalize();
-      auto group_id_third = (sbe::sym("threadIdx.y") %
-                       lconfig.group_count.z)
-                          ->Normalize();
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), ValueSTR(group_id_first));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), ValueSTR(group_id_second));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name), ValueSTR(group_id_third));
+      auto group_id_first =
+          (sbe::sym("threadIdx.y") / lconfig.group_count.z)->Normalize();
+      auto group_id_second =
+          ((sbe::sym("threadIdx.y") / lconfig.group_count.z)) %
+          lconfig.group_count.y->Normalize();
+      auto group_id_third =
+          (sbe::sym("threadIdx.y") % lconfig.group_count.z)->Normalize();
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
+                          ValueSTR(group_id_first));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
+                          ValueSTR(group_id_second));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name),
+                          ValueSTR(group_id_third));
     }
 
   } break;
@@ -1354,24 +1358,24 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       choreo_unreachable("thread parallelism with more than 3 dimensions is "
                          "not supported.");
     // thr_m, thr_n, thr_k
-    // when choreo users writes parallel {thr_first, thr_second, thr_third} by {GPU_M, GPU_N, GPU_K}
-    // they tend to bind thr_first to GPU_M, thr_second to GPU_N, thr_third to GPU_K, this is choreo convention
-    // however, in CUDA, threadIdx.y is the leading dimension, threadIdx.x is the trailing dimension
-    // so we need to reverse the order of the thr ids to keep all choreo convention, whilst aligning to CUDA's convention
-    // this is the reason why we need to reverse the order of the thr ids
-    // thr_first -> thr_id_first, thr_second -> thr_id_second, thr_third -> thr_id_third
+    // when choreo users writes parallel {thr_first, thr_second, thr_third} by
+    // {GPU_M, GPU_N, GPU_K} they tend to bind thr_first to GPU_M, thr_second to
+    // GPU_N, thr_third to GPU_K, this is choreo convention however, in CUDA,
+    // threadIdx.y is the leading dimension, threadIdx.x is the trailing
+    // dimension so we need to reverse the order of the thr ids to keep all
+    // choreo convention, whilst aligning to CUDA's convention this is the
+    // reason why we need to reverse the order of the thr ids thr_first ->
+    // thr_id_first, thr_second -> thr_id_second, thr_third -> thr_id_third
     if (n.AllSubPVs().size() == 1) {
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.x");
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.x");
     }
 
     if (n.AllSubPVs().size() == 2) {
-      auto thread_id_first = (sbe::sym("threadIdx.x") /
-                      lconfig.thread_count.y)
-                        ->Normalize();
-      auto thread_id_second = (sbe::sym("threadIdx.x") %
-                      lconfig.thread_count.y)
-                        ->Normalize();
+      auto thread_id_first =
+          (sbe::sym("threadIdx.x") / lconfig.thread_count.y)->Normalize();
+      auto thread_id_second =
+          (sbe::sym("threadIdx.x") % lconfig.thread_count.y)->Normalize();
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
                           ValueSTR(thread_id_first));
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
@@ -1379,15 +1383,14 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     }
 
     if (n.AllSubPVs().size() == 3) {
-      auto thread_id_first = ((sbe::sym("threadIdx.x") /
-                      lconfig.thread_count.z)) / lconfig.thread_count.y
-                        ->Normalize();
-      auto thread_id_second = ((sbe::sym("threadIdx.x") /
-                      lconfig.thread_count.z)) % lconfig.thread_count.y
-                        ->Normalize();
-      auto thread_id_third = (sbe::sym("threadIdx.x") %
-                      lconfig.thread_count.z)
-                        ->Normalize();
+      auto thread_id_first =
+          ((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) /
+          lconfig.thread_count.y->Normalize();
+      auto thread_id_second =
+          ((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) %
+          lconfig.thread_count.y->Normalize();
+      auto thread_id_third =
+          (sbe::sym("threadIdx.x") % lconfig.thread_count.z)->Normalize();
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
                           ValueSTR(thread_id_first));
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
@@ -1414,12 +1417,17 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
      << ValueSTR(lconfig.block_count.y) << ", "
      << ValueSTR(lconfig.block_count.z) << ");\n";
   // GPU groups are virtual
-  // we binds all choreo threads to blockDim.x, and all choreo groups to blockDim.y
-  // this aligns choreo row-major convention to cuda's col-major oriented convention.
-  // users can still keep binding left-most parallel variable to left-most tensor dim, and right to right.
-  // without mindset to CUDA's thread majority that left-most are leading dim (thread x)
-  auto tx = (lconfig.thread_count.x * lconfig.thread_count.y * lconfig.thread_count.z)->Normalize();
-  auto ty = (lconfig.group_count.x * lconfig.group_count.y * lconfig.group_count.z)->Normalize();
+  // we binds all choreo threads to blockDim.x, and all choreo groups to
+  // blockDim.y this aligns choreo row-major convention to cuda's col-major
+  // oriented convention. users can still keep binding left-most parallel
+  // variable to left-most tensor dim, and right to right. without mindset to
+  // CUDA's thread majority that left-most are leading dim (thread x)
+  auto tx =
+      (lconfig.thread_count.x * lconfig.thread_count.y * lconfig.thread_count.z)
+          ->Normalize();
+  auto ty =
+      (lconfig.group_count.x * lconfig.group_count.y * lconfig.group_count.z)
+          ->Normalize();
   hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
      << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << "1" << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
@@ -2003,14 +2011,27 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       auto sty = GetSpannedType(GetSymbolType(sym));
       auto fty = GetSpannedType(GetSymbolType(op.LoadFrom()->RefSymbol()));
-      ds << d_indent
-         << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
-         << ", ";
-      ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty)
-         << ", nvcuda::wmma::row_major> " << sym << "_frag;\n";
-      ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
-         << ExprSTR(op.LoadFrom(), false) << ", " << fty->GetShape().ValueAt(1)
-         << ");\n";
+      if (ssmi.frag == MMAInfo::FRAG_A || ssmi.frag == MMAInfo::FRAG_B) {
+        ds << d_indent
+           << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
+           << ", ";
+        ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty)
+           << ", nvcuda::wmma::row_major> " << sym << "_frag;\n";
+        ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
+           << ExprSTR(op.LoadFrom(), false) << ", "
+           << fty->GetShape().ValueAt(1) << ");\n";
+      } else if (ssmi.frag == MMAInfo::FRAG_C) {
+        ds << d_indent
+           << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
+           << ", ";
+        ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> "
+           << sym << "_frag;\n";
+        ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
+           << ExprSTR(op.LoadFrom(), false) << ", "
+           << fty->GetShape().ValueAt(1) << ", nvcuda::wmma::mem_row_major);\n";
+      } else {
+        choreo_unreachable("unexpect MMA frag");
+      }
     } break;
     case AST::MMAOperation::Exec: {
       ds << d_indent << "nvcuda::wmma::mma_sync(" << op.ExecOperand(0)
@@ -2075,23 +2096,46 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     case AST::MMAOperation::Load: {
       auto ca = op.LoadFrom();
       auto f_sym = ca->data->name;
-      auto f_sty = GetSpannedType(GetSymbolType(f_sym));
+      auto ty = GetSymbolType(f_sym);
+      auto f_sty = GetSpannedType(ty);
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_sym, ".data()"), f_sym, f_sty->GetStorage(),
-          f_sty->ElementType(), ca->GetBlockShape(), false,
+          RemoveSuffix(f_sym, ".data()"),
+          (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
+          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
           ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       auto sym = op.LoadTo();
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
-      std::string frag_suffix;
-      if (ssmi.frag == MMAInfo::FRAG_A)
-        frag_suffix = "a";
-      else if (ssmi.frag == MMAInfo::FRAG_B)
-        frag_suffix = "b";
-      ds << d_indent << "auto " << sym << "_frag = load_fragment_"
-         << frag_suffix
-         << "<cute::" << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
-         << f_mds.first << ");\n";
+      if (ssmi.frag == MMAInfo::FRAG_A || ssmi.frag == MMAInfo::FRAG_B) {
+        std::string frag_suffix = (ssmi.frag == MMAInfo::FRAG_A) ? "a" : "b";
+        ds << d_indent << "auto " << sym << "_frag = load_fragment_"
+           << frag_suffix
+           << "<cute::" << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
+           << f_mds.first << ");\n";
+      } else if (ssmi.frag == MMAInfo::FRAG_C) {
+        auto sty = GetSpannedType(GetSymbolType(sym));
+        assert(sty);
+        reg_num_d = GetRegNumOfFrag(sty->GetShape().ValueAt(0),
+                                    sty->GetShape().ValueAt(1));
+        bool use_uint32 = false;
+        UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
+        RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
+        for (size_t i = 0; i < reg_num_d; ++i) {
+          if (use_uint32)
+            ds << d_indent << "uint32_t" << " " << sym << "_frag" << i << ";\n";
+          else
+            ds << d_indent << NameBaseType(ssmi.ty) << " " << sym << "_frag"
+               << i << ";\n";
+        }
+        ds << d_indent << "load_fragment_d<cute::"
+           << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
+           << f_mds.first;
+        for (size_t i = 0; i < reg_num_d; ++i)
+          ds << ", " << sym << "_frag" << i;
+        ds << ");\n";
+      } else {
+        choreo_unreachable("unexpect MMA frag");
+      }
     } break;
     case AST::MMAOperation::Exec: {
       ds << d_indent << "cute::"
@@ -2123,18 +2167,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     case AST::MMAOperation::Store: {
       auto ca = op.StoreTo();
       auto f_sym = ca->data->name;
-      auto f_sty = GetSpannedType(GetSymbolType(f_sym));
+      auto ty = GetSymbolType(f_sym);
+      auto f_sty = GetSpannedType(ty);
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_sym, ".data()"), f_sym, f_sty->GetStorage(),
-          f_sty->ElementType(), ca->GetBlockShape(), false,
+          RemoveSuffix(f_sym, ".data()"),
+          (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
+          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
           ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       auto sym = op.StoreFrom();
       ds << d_indent << "store_fragment_d<cute::"
          << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
          << f_mds.first;
-      for (size_t i = 0; i < reg_num_d; ++i)
-        ds << ", " << op.StoreFrom() << "_frag" << i;
+      for (size_t i = 0; i < reg_num_d; ++i) ds << ", " << sym << "_frag" << i;
       ds << ");\n";
     } break;
     default: break;

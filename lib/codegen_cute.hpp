@@ -317,7 +317,7 @@ private:
   // emit mem reuse script for each device function.
   void EmitMemReuse(const std::string& dev_func_name);
   void EmitTopsFree();
-  void EmitRuntimeEnvironmentChecker(std::ostream& ) const;
+  void EmitRuntimeEnvironmentChecker(std::ostream&) const;
 
 private:
   void IncrHostIndent() { h_indent += "  "; }

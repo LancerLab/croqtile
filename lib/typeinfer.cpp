@@ -867,12 +867,13 @@ bool TypeInference::Visit(AST::MMA& n) {
   } break;
   case AST::MMAOperation::Exec: {
     auto acc_ty = GetSymbolType(n.LOC(), op.ExecOperand(0));
-    auto ety = cast<SpannedType>(acc_ty)->ElementType();
+    auto sty = GetSpannedType(acc_ty);
+    auto ety = sty->ElementType();
     ptr<Type> mc_ty = nullptr;
     // mc type is explicit annotated
     if (ety != BaseType::UNKNOWN) {
       auto shape = cast<SpannedType>(n.GetType())->GetShape();
-      auto storage = cast<SpannedType>(acc_ty)->GetStorage();
+      auto storage = sty->GetStorage();
       mc_ty = MakeSpannedType(ety, shape, storage);
       SetNodeType(n, mc_ty);
     } else {

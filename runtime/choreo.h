@@ -2598,6 +2598,22 @@ struct Policy_B_M16N8K256 {
 // for m8n8k4(f16)
 struct Policy_D_M8N8_0 {
   template <class Tensor>
+  __device__ static void load(Tensor const& D, uint32_t& d0, uint32_t& d1,
+                              uint32_t& d2, uint32_t& d3) {
+    int lane = threadIdx.x & 31;
+    int row;
+    if (lane < 16)
+      row = (lane & 3);
+    else
+      row = (lane & 3) + 4;
+    auto D_u32 = cute::recast<uint32_t>(D);
+    d0 = D_u32(row, 0);
+    d1 = D_u32(row, 1);
+    d2 = D_u32(row, 2);
+    d3 = D_u32(row, 3);
+  }
+
+  template <class Tensor>
   __device__ static void store(Tensor& D, uint32_t const& d0,
                                uint32_t const& d1, uint32_t const& d2,
                                uint32_t const& d3) {
@@ -2617,6 +2633,24 @@ struct Policy_D_M8N8_0 {
 
 // for f32
 struct Policy_D_M8N8_1 {
+  template <class Tensor>
+  __device__ static void load(Tensor const& D, float& d0, float& d1, float& d2,
+                              float& d3, float& d4, float& d5, float& d6,
+                              float& d7) {
+    int lane = threadIdx.x & 31;
+    int row = (lane & 1);
+    if (lane >= 16) row += 4;
+    int col = lane & 2;
+    d0 = D(row, col);
+    d1 = D(row, col + 1);
+    d2 = D(row + 2, col);
+    d3 = D(row + 2, col + 1);
+    d4 = D(row, col + 4);
+    d5 = D(row, col + 4 + 1);
+    d6 = D(row + 2, col + 4);
+    d7 = D(row + 2, col + 4 + 1);
+  }
+
   template <class Tensor>
   __device__ static void store(Tensor& D, float const& d0, float const& d1,
                                float const& d2, float const& d3,
@@ -2643,6 +2677,19 @@ struct Policy_D_M8N8_1 {
 // for f64, s32
 struct Policy_D_M8N8_2 {
   template <class Tensor, class T>
+  __device__ static void load(Tensor const& D, T& d0, T& d1) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row = gid;
+    int col0 = tid_in_group * 2;
+    int col1 = col0 + 1;
+    auto D_casted = cute::recast<T>(D);
+    d0 = D_casted(row, col0);
+    d1 = D_casted(row, col1);
+  }
+
+  template <class Tensor, class T>
   __device__ static void store(Tensor& D, T const& d0, T const& d1) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
@@ -2659,6 +2706,19 @@ struct Policy_D_M8N8_2 {
 // for packed f16, bf16
 struct Policy_D_M16N8_0 {
   template <class Tensor, class T>
+  __device__ static void load(Tensor const& D, T& d0, T& d1) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col = tid_in_group;
+    auto D_u32 = cute::recast<uint32_t>(D);
+    d0 = D_u32(row0, col);
+    d1 = D_u32(row1, col);
+  }
+
+  template <class Tensor, class T>
   __device__ static void store(Tensor& D, T const& d0, T const& d1) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
@@ -2674,6 +2734,21 @@ struct Policy_D_M16N8_0 {
 
 // for s32, f32 and f64
 struct Policy_D_M16N8_1 {
+  template <class Tensor, class T>
+  __device__ static void load(Tensor const& D, T& d0, T& d1, T& d2, T& d3) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group * 2;
+    int col1 = tid_in_group * 2 + 1;
+    d0 = D(row0, col0);
+    d1 = D(row0, col1);
+    d2 = D(row1, col0);
+    d3 = D(row1, col1);
+  }
+
   template <class Tensor, class T>
   __device__ static void store(Tensor& D, T const& d0, T const& d1, T const& d2,
                                T const& d3) {
@@ -2704,9 +2779,16 @@ __device__ static inline auto load_fragment_b(Tensor const& B) {
 }
 
 template <class MMA, class Tensor, class... DTypes>
-__device__ static inline void store_fragment_d(Tensor const& D,
+__device__ static inline void load_fragment_d(Tensor const& D,
+                                              DTypes&... vals) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  MMA_Policy<MMA>::typeD::load(D, vals...);
+}
+
+template <class MMA, class Tensor, class... DTypes>
+__device__ static inline void store_fragment_d(Tensor& D,
                                                DTypes const&... vals) {
-  static_assert(MMA_Policy<MMA>::supported, "No store policy for this MMA");
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   MMA_Policy<MMA>::typeD::store(D, vals...);
 }
 
