@@ -1276,7 +1276,9 @@ namespace choreo {
 // --- light-weight choreo-topscc device library --- //
 
 __device__ __attribute__((always_inline)) static inline void __co_abort__() {
+#if __GCU_ARCH__ >= 300
   tops::abort();
+#endif
 }
 
 #endif // __TOPSCC__
