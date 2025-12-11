@@ -1317,6 +1317,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     // group_first -> group_id_first, group_second -> group_id_second, group_third -> group_id_third
     if (n.AllSubPVs().size() == 1) {
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.y");
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.y");
     }
 
     if (n.AllSubPVs().size() == 2) {
@@ -1361,6 +1362,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     // thr_first -> thr_id_first, thr_second -> thr_id_second, thr_third -> thr_id_third
     if (n.AllSubPVs().size() == 1) {
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.x");
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.x");
     }
 
     if (n.AllSubPVs().size() == 2) {
