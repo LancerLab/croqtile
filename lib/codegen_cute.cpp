@@ -1305,34 +1305,94 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     break;
   case ParallelLevel::GROUP: {
     assert(n.AllSubPVs().size() > 0);
-    // group ids are virtual on x axis
-    auto group_id_x = (sbe::sym("threadIdx.x") / lconfig.thread_count.x %
-                       lconfig.group_count.x)
-                          ->Normalize();
-    auto group_id_y = (sbe::sym("threadIdx.x") /
-                       (lconfig.thread_count.x * lconfig.group_count.x) %
+    if (n.AllSubPVs().size() > 3)
+      choreo_unreachable("group parallelism with more than 3 dimensions is "
+                         "not supported.");
+
+    // when choreo users writes parallel {group_first, group_second, group_third} by {GPU_M, GPU_N, GPU_K}
+    // they tend to bind group_first to GPU_M, group_second to GPU_N, group_third to GPU_K, this is choreo convention
+    // however, in CUDA, threadIdx.y is the leading dimension, threadIdx.x is the trailing dimension
+    // so we need to reverse the order of the group ids to keep all choreo convention, whilst aligning to CUDA's convention
+    // this is the reason why we need to reverse the order of the group ids
+    // group_first -> group_id_first, group_second -> group_id_second, group_third -> group_id_third
+    if (n.AllSubPVs().size() == 1) {
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.y");
+    }
+
+    if (n.AllSubPVs().size() == 2) {
+      auto group_id_first = (sbe::sym("threadIdx.y") /
                        lconfig.group_count.y)
                           ->Normalize();
-    auto group_id_z = (sbe::sym("threadIdx.x") /
-                       (lconfig.thread_count.x * lconfig.group_count.x *
-                        lconfig.group_count.y))
+      auto group_id_second = (sbe::sym("threadIdx.y") %
+                       lconfig.group_count.y)
                           ->Normalize();
-    if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), ValueSTR(group_id_x));
-    ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), ValueSTR(group_id_x));
-    if (n.AllSubPVs().size() > 1)
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
-                          ValueSTR(group_id_y));
-    if (n.AllSubPVs().size() > 2)
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name),
-                          ValueSTR(group_id_z));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), ValueSTR(group_id_first));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), ValueSTR(group_id_second));
+    }
+
+    if (n.AllSubPVs().size() == 3) {
+      auto group_id_first = (sbe::sym("threadIdx.y") /
+                       lconfig.group_count.z)
+                          ->Normalize();
+      auto group_id_second = ((sbe::sym("threadIdx.y") /
+                       lconfig.group_count.z)) % lconfig.group_count.y
+                          ->Normalize();
+      auto group_id_third = (sbe::sym("threadIdx.y") %
+                       lconfig.group_count.z)
+                          ->Normalize();
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), ValueSTR(group_id_first));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), ValueSTR(group_id_second));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name), ValueSTR(group_id_third));
+    }
+
   } break;
   case ParallelLevel::THREAD:
-    for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
-                          "threadIdx." + dname[i]);
-    if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.x");
+    assert(n.AllSubPVs().size() > 0);
+
+    if (n.AllSubPVs().size() > 3)
+      choreo_unreachable("thread parallelism with more than 3 dimensions is "
+                         "not supported.");
+    // thr_m, thr_n, thr_k
+    // when choreo users writes parallel {thr_first, thr_second, thr_third} by {GPU_M, GPU_N, GPU_K}
+    // they tend to bind thr_first to GPU_M, thr_second to GPU_N, thr_third to GPU_K, this is choreo convention
+    // however, in CUDA, threadIdx.y is the leading dimension, threadIdx.x is the trailing dimension
+    // so we need to reverse the order of the thr ids to keep all choreo convention, whilst aligning to CUDA's convention
+    // this is the reason why we need to reverse the order of the thr ids
+    // thr_first -> thr_id_first, thr_second -> thr_id_second, thr_third -> thr_id_third
+    if (n.AllSubPVs().size() == 1) {
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.x");
+    }
+
+    if (n.AllSubPVs().size() == 2) {
+      auto thread_id_first = (sbe::sym("threadIdx.x") /
+                      lconfig.thread_count.y)
+                        ->Normalize();
+      auto thread_id_second = (sbe::sym("threadIdx.x") %
+                      lconfig.thread_count.y)
+                        ->Normalize();
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
+                          ValueSTR(thread_id_first));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
+                          ValueSTR(thread_id_second));
+    }
+
+    if (n.AllSubPVs().size() == 3) {
+      auto thread_id_first = ((sbe::sym("threadIdx.x") /
+                      lconfig.thread_count.z)) / lconfig.thread_count.y
+                        ->Normalize();
+      auto thread_id_second = ((sbe::sym("threadIdx.x") /
+                      lconfig.thread_count.z)) % lconfig.thread_count.y
+                        ->Normalize();
+      auto thread_id_third = (sbe::sym("threadIdx.x") %
+                      lconfig.thread_count.z)
+                        ->Normalize();
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
+                          ValueSTR(thread_id_first));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
+                          ValueSTR(thread_id_second));
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name),
+                          ValueSTR(thread_id_third));
+    }
     break;
   default:
     choreo_unreachable("unsupported parallel-by level: " + STR(n.GetLevel()) +
@@ -1352,20 +1412,21 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
      << ValueSTR(lconfig.block_count.y) << ", "
      << ValueSTR(lconfig.block_count.z) << ");\n";
   // GPU groups are virtual
-  auto tx = (lconfig.thread_count.x * lconfig.group_count.x *
-             lconfig.group_count.y * lconfig.group_count.z)
-                ->Normalize();
-  auto ty = (lconfig.thread_count.y)->Normalize();
-  auto tz = (lconfig.thread_count.z)->Normalize();
+  // we binds all choreo threads to blockDim.x, and all choreo groups to blockDim.y
+  // this aligns choreo row-major convention to cuda's col-major oriented convention.
+  // users can still keep binding left-most parallel variable to left-most tensor dim, and right to right.
+  // without mindset to CUDA's thread majority that left-most are leading dim (thread x)
+  auto tx = (lconfig.thread_count.x * lconfig.thread_count.y * lconfig.thread_count.z)->Normalize();
+  auto ty = (lconfig.group_count.x * lconfig.group_count.y * lconfig.group_count.z)->Normalize();
   hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
-     << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << ValueSTR(tz) << ");\n";
+     << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << "1" << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
      << ", __" << fname << "_bdims" << parallel_idx;
 
   // plan the shared memory that is decided at runtime
   cur_spm_size = sbe::nu(0);
   cur_ring_offset = sbe::nu(0);
-  cur_ring_size = (tx * ty * tz + sbe::nu(31)) / sbe::nu(32) /* warp size */;
+  cur_ring_size = (tx * ty + sbe::nu(31)) / sbe::nu(32) /* warp size */;
 
   // add the size of the future ring (see choreo.h)
   if (cgi.HasAsyncDMA(fname))
