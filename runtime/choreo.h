@@ -6,6 +6,7 @@
 #endif
 
 #include <algorithm>
+#include <assert.h>
 #include <cmath>            // For fp16
 #include <cstdint>          // For fixed-width integer types
 #include <initializer_list> // for std::initializer_list
@@ -16,7 +17,7 @@
 
 #ifdef __TOPSCC__
 
-#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
 // #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 #define __co_device__ __device__
 #define __co_host__ __host__
@@ -26,14 +27,14 @@
 #ifdef __USE_CUDA_TYPE__
 #include "cuda.h"
 #if CUDA_VERSION >= 11000
-#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
 #include "cuda_bf16.h"
 #endif
 
 #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 #include "cuda_fp16.h"
 
-#define __CHOREO_TARGET_NATIVE_TFLOAT32_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_TF32_SUPPORT__
 
 #if CUDA_VERSION >= 11080
 #define __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
@@ -52,8 +53,8 @@
 
 #define __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
 #else // __USE_CUTE_TYPE__
-#define __CHOREO_TARGET_NATIVE_TFLOAT32_SUPPORT__
-#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_TF32_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 #define __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
@@ -65,9 +66,9 @@
 #include <cuda/barrier>
 #include <mma.h>
 
-#define __co_device__
-#define __co_host__
-#define __co_any__
+#define __co_device__ __device__
+#define __co_host__ __host__
+#define __co_any__ __device__ __host__
 
 #else
 
@@ -99,12 +100,18 @@ namespace choreo {
 
 constexpr size_t __inf__ = (size_t)((1LL << 32) - 1);
 
-inline void choreo_assert(bool p, const char* msg, const char* file = __FILE__,
-                          int line = __LINE__) {
+inline void __co_any__ choreo_assert(bool p, const char* msg,
+                                     const char* file = __FILE__,
+                                     int line = __LINE__) {
   if (!p) {
+#ifdef __TOPSCC__
     std::cerr << file << ":" << line << ": choreo assertion abort: " << msg
               << std::endl;
     std::abort();
+#else
+    printf("%s:%d: choreo assertion abort: %s\n", file, line, msg);
+    assert(false);
+#endif
   }
   return;
 }
@@ -167,9 +174,9 @@ public:
     }
   }
 
-  __co_any__ SimpleArray(const SimpleArray&) = default;
-  __co_any__ SimpleArray& operator=(const SimpleArray&) = default;
-  __co_any__ ~SimpleArray() = default;
+  SimpleArray(const SimpleArray&) = default;
+  SimpleArray& operator=(const SimpleArray&) = default;
+  ~SimpleArray() = default;
 
   // Returns the element at specified index
   __co_any__ T& operator[](uint32_t index) { return data[index]; }
@@ -294,7 +301,7 @@ public:
 using f64 = double;
 using f32 = float;
 
-#ifdef __CHOREO_TARGET_NATIVE_TFLOAT32_SUPPORT__
+#ifdef __CHOREO_TARGET_NATIVE_TF32_SUPPORT__
 // TF32 is only used in tensor core in CUDA and CUTE
 #if defined(__USE_CUTE_TYPE__)
 using cute::tfloat32_t;
@@ -387,7 +394,7 @@ struct co_native_base {
   uint64_t data;
 };
 
-#ifndef __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
+#ifndef __CHOREO_TARGET_NATIVE_F16_SUPPORT__
 // this f16 accepts literal initialization, but without arith support
 class f16 {
 private:
@@ -480,7 +487,7 @@ using half = __fp16;
 #else
 #error "half float is not supported on this target."
 #endif
-#endif // __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
+#endif // __CHOREO_TARGET_NATIVE_F16_SUPPORT__
 
 __co_any__ inline static f16 f32_to_f16(f32 value) {
   return __f32_to_f16<f16>(value);
@@ -715,140 +722,100 @@ using u4 = uint4b_t;
 using u6 = uint6b_t;
 #endif // __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
 
-namespace utils {
-
-// template <typename U>
-// inline void fill_random(U*, size_t, U, U);
-
-// specializations
-// f64
-template <typename U>
-inline typename std::enable_if<std::is_same<U, double>::value, void>::type
-fill_random(U* array, size_t N, U lb, U ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<U> rand_func(lb, ub); // [lb, ub)
-
-  std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
-}
-
-// f32
-template <typename U>
-inline typename std::enable_if<std::is_same<U, float>::value, void>::type
-fill_random(U* array, size_t N, U lb, U ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<U> rand_func(lb, ub); // [lb, ub)
-
-  std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
-}
-
-// f16
-template <typename U>
-inline typename std::enable_if<std::is_same<U, f16>::value, void>::type
-fill_random(U* array, size_t N, U lb, U ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> rand_func(
-      static_cast<float>(lb),
-      static_cast<float>(ub)); // [-1.0, 1.0)
-  std::generate_n(&array[0], N, [&]() { return f16(rand_func(gen)); });
-}
-
-// bf16
-template <typename U>
-inline typename std::enable_if<std::is_same<U, bf16>::value, void>::type
-fill_random(U* array, size_t N, U lb, U ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> rand_func(
-      static_cast<float>(lb),
-      static_cast<float>(ub)); // [-1.0, 1.0)
-
-  std::generate_n(&array[0], N, [&]() { return bf16(rand_func(gen)); });
-}
-
-// f16/bf16 with float lb/ub
-template <typename U>
-inline typename std::enable_if<
-    std::is_same<U, f16>::value || std::is_same<U, bf16>::value, void>::type
-fill_random(U* array, size_t N, float lb, float ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> rand_func(lb, ub);
-
-  std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
-}
-
+template <typename T>
+__co_any__ inline float to_f32(T value) {
+  if constexpr (std::is_same<T, f64>::value) {
+    return static_cast<float>(value);
+  } else if constexpr (std::is_same<T, f32>::value) {
+    return value;
+  } else if constexpr (std::is_same<T, f16>::value) {
+#ifndef __CHOREO_TARGET_NATIVE_F16_SUPPORT__
+    return __f16_to_f32<float>(value);
+#else
+    return static_cast<float>(value);
+#endif
+  } else if constexpr (std::is_same<T, bf16>::value) {
+#ifndef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+    return bf16::halfBitsToFloat(value);
+#else
+    return static_cast<float>(value);
+#endif
+  } else if constexpr (
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
-// float_e4m3_t float_e5m2_t
-template <typename U>
-inline typename std::enable_if<std::is_same<U, float_e4m3_t>::value ||
-                                   std::is_same<U, float_e5m2_t>::value,
-                               void>::type
-fill_random(U* array, size_t N, float lb, float ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> rand_func(lb, ub); // [lb, ub)
-  std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
-}
+      std::is_same<T, f8_e4m3>::value || std::is_same<T, f8_e5m2>::value ||
 #endif
-
 #ifdef __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
-template <typename U>
-inline typename std::enable_if<std::is_same<U, float_e3m2_t>::value ||
-                                   std::is_same<U, float_e2m3_t>::value,
-                               void>::type
-fill_random(U* array, size_t N, float lb, float ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> rand_func(lb, ub); // [lb, ub)
-
-  std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
-}
+      std::is_same<T, f6_e3m2>::value || std::is_same<T, f6_e2m3>::value ||
 #endif
-
 #ifdef __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
-template <typename U>
-inline typename std::enable_if<std::is_same<U, float_e2m1_t>::value, void>::type
-fill_random(U* array, size_t N, float lb, float ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> rand_func(lb, ub); // [lb, ub)
-
-  std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
-}
+      std::is_same<T, f4_e2m1>::value ||
 #endif
-
+#ifdef __CHOREO_TARGET_NATIVE_TF32_SUPPORT__
+      std::is_same<T, tf32>::value ||
+#endif
+      std::is_integral<T>::value) {
+    return static_cast<float>(value);
 #ifdef __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
-// tiny integer types
-template <typename U>
-inline typename std::enable_if<
-    std::is_same<U, uint4b_t>::value || std::is_same<U, uint6b_t>::value ||
-        std::is_same<U, uint2b_t>::value || std::is_same<U, uint1b_t>::value ||
-        std::is_same<U, int6b_t>::value || std::is_same<U, int4b_t>::value ||
-        std::is_same<U, int2b_t>::value || std::is_same<U, bin1_t>::value,
-    void>::type
-fill_random(U* array, size_t N, int lb, int ub) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<int> rand_func(lb, ub); // [lb, ub)
-
-  std::generate_n(&array[0], N,
-                  [&]() { return static_cast<U>(rand_func(gen)); });
-}
+  } else if constexpr (std::is_same<T, uint4b_t>::value ||
+                       std::is_same<T, uint6b_t>::value ||
+                       std::is_same<T, uint2b_t>::value ||
+                       std::is_same<T, uint1b_t>::value ||
+                       std::is_same<T, int6b_t>::value ||
+                       std::is_same<T, int4b_t>::value ||
+                       std::is_same<T, int2b_t>::value ||
+                       std::is_same<T, bin1_t>::value) {
+    return static_cast<float>(static_cast<int>(value));
 #endif
+  } else {
+    // todo: support more types
+    static_assert(sizeof(T) == 0, "Unsupported type for to_f32 conversion.");
+  }
+}
 
-// s32/u32 ...
-// if T is integer, utilize std::uniform_int_distribution
+namespace utils {
 template <typename U>
-inline typename std::enable_if<std::is_integral<U>::value, void>::type
-fill_random(U* array, size_t N, int lb, int ub) {
+__co_host__ inline void fill_random(U* array, size_t N, U lb, U ub) {
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_int_distribution<int> rand_func(lb, ub); // [lb, ub]
 
-  std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
+  if constexpr (std::is_integral<U>::value) {
+    std::uniform_int_distribution<U> dist(lb, ub);
+    std::generate_n(array, N, [&]() { return dist(gen); });
+  } else if constexpr (std::is_floating_point<U>::value) {
+    std::uniform_real_distribution<U> dist(lb, ub);
+    std::generate_n(array, N, [&]() { return dist(gen); });
+  } else if constexpr (std::is_same<U, f16>::value ||
+                       std::is_same<U, bf16>::value ||
+#ifdef __CHOREO_TARGET_NATIVE_TF32_SUPPORT__
+                       std::is_same<U, tf32>::value ||
+#endif
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+                       std::is_same<U, f8_e4m3>::value ||
+                       std::is_same<U, f8_e5m2>::value ||
+#endif
+#ifdef __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
+                       std::is_same<U, f6_e3m2>::value ||
+                       std::is_same<U, f6_e2m3>::value ||
+#endif
+#ifdef __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
+                       std::is_same<U, f4_e2m1>::value ||
+#endif
+                       false) {
+    std::uniform_real_distribution<float> dist(to_f32(lb), to_f32(ub));
+    std::generate_n(array, N, [&]() { return U(dist(gen)); });
+  } else if constexpr (
+#ifdef __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
+      std::is_same<U, uint4b_t>::value || std::is_same<U, uint6b_t>::value ||
+      std::is_same<U, uint2b_t>::value || std::is_same<U, uint1b_t>::value ||
+      std::is_same<U, int6b_t>::value || std::is_same<U, int4b_t>::value ||
+      std::is_same<U, int2b_t>::value || std::is_same<U, bin1_t>::value ||
+#endif
+      false) {
+    std::uniform_int_distribution<int> dist((int)lb, (int)ub);
+    std::generate_n(array, N, [&]() { return U(dist(gen)); });
+  } else {
+    static_assert(sizeof(U) == 0, "Unsupported type for fill_random.");
+  }
 }
 } // end namespace utils
 
@@ -987,11 +954,8 @@ public:
 
   template <typename U>
   __co_host__ void fill_random(U lb, U ub) {
-    using UT = std::conditional_t<std::is_same<U, double>::value &&
-                                      !std::is_same<T, double>::value,
-                                  float, U>;
-    utils::fill_random(this->data(), this->element_count(), static_cast<UT>(lb),
-                       static_cast<UT>(ub));
+    utils::fill_random(this->data(), this->element_count(), static_cast<T>(lb),
+                       static_cast<T>(ub));
   }
 
   __co_host__ spanned_view<T, Rank> view() {

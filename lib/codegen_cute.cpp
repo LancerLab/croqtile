@@ -3303,10 +3303,6 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
 
   using BT = BaseType;
 
-  // if (t == BT::F8 || f == BT::F8)
-  //   choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) +
-  //   "'");
-
   // need to do casting or converting.
   if (!IsValuePreservingCast(f, t)) {
     if (IsReinterpretiveCast(f, t))
@@ -3350,23 +3346,13 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
     break;
   }
   case BT::F32: {
-    if (IsBoolIntegerBaseType(f))
-      res << "static_cast<float>(" << value << ")";
-    else {
-      if (f == BT::F16)
-        res << "f16_to_f32(" << value << ")";
-      else if (f == BT::BF16)
-        res << "(float)(" << value << ")";
-      else if (f == BT::F64)
-        res << "static_cast<float>(" << value << ")";
-      else
-        choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) +
-                           "'");
-    }
+    res << (is_host ? "choreo::to_f32(" : "static_cast<float>(") << value
+        << ")";
     break;
   }
   case BT::F16:
-    res << "f32_to_f16(" << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
+    res << "choreo::f32_to_f16(" << ExprCastSTR(n, val, BT::F32, f, is_host)
+        << ")";
     break;
   case BT::BF16:
     res << "choreo::bf16(" << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";

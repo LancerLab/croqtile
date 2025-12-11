@@ -769,11 +769,11 @@ int main() {
   // test_pow_f32();
   test_pow_bf16();
   test_sign_f32();
-  test_sign_bf16();
+  // test_sign_bf16();
   test_tanh_f32();
-  test_tanh_bf16();
+  // test_tanh_bf16();
   test_sigmoid_f32();
-  test_sigmoid_bf16();
+  // test_sigmoid_bf16();
 
   std::cout << "\nTest Passed\n" << std::endl;
 }

@@ -482,6 +482,7 @@ inline static bool IsValuePreservingCast(const BaseType f, const BaseType t) {
       {BT::F8_E5M2, {BT::F8_E5M2, BT::BF16, BT::F16, BT::F32, BT::F64}},
       {BT::BF16, {BT::BF16, BT::F32, BT::F64}},
       {BT::F16, {BT::F16, BT::F32, BT::F64}},
+      {BT::TF32, {BT::TF32, BT::F32, BT::F64}},
       {BT::F32, {BT::F32, BT::F64}},
       {BT::F64, {BT::F64}},
   };
@@ -2910,17 +2911,16 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
 
   if (lty == rty) return res;
 
-  for (const auto ty : {lty, rty})
-    if (IsFloatPointBaseType(ty))
-      if (ty != BaseType::F64 && ty != BaseType::F32)
-        choreo_unreachable("unexpect type in promote: " + STR(ty));
-
   if (IsFloatPointBaseType(lty) && IsFloatPointBaseType(rty)) {
     // both floating-point
-    if (lty == BaseType::F64 || rty == BaseType::F64)
-      res.lty = res.rty = BaseType::F64;
-    else if (lty == BaseType::F32 || rty == BaseType::F32)
-      res.lty = res.rty = BaseType::F32;
+    if (IsValuePreservingCast(lty, rty))
+      res.lty = res.rty = rty;
+    else if (IsValuePreservingCast(rty, lty))
+      res.lty = res.rty = lty;
+    else
+      choreo_unreachable("unexpect floating-point types in promote: " +
+                         STR(lty) + " and " + STR(rty));
+
     return res;
   } else if (IsFloatPointBaseType(lty) || IsFloatPointBaseType(rty)) {
     // only one is floating-point
