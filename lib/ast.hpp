@@ -1155,6 +1155,8 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
     rb = ']';
   }
 
+  const ptr<Node> Val() const { return value; }
+
   bool IsNegative() const {
     if (auto il = dyn_cast<IntLiteral>(value)) return il->Val() < 0;
     return false;
@@ -2383,6 +2385,7 @@ public:
       : Node(l, MakePlaceHolderFutureType()), operation(".any"), future(f),
         async(true) {}
 
+  bool IsDummy() const { return operation == ".any"; }
   ptr<ChunkAt> GetFrom() const { return cast<ChunkAt>(from); }
   ptr<ChunkAt> GetTo() const { return cast<ChunkAt>(to); }
 

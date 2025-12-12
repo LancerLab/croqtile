@@ -1834,6 +1834,22 @@ const SignTy ShapeInference::SignNode(const AST::Node& n) {
       auto vl = vn.GenValueListFromSignature(esign);
       auto sz = MultiplyAll(vl);
       return vn.ValueItemToSignature(sz);
+    } else if (e->op == "getith") {
+      auto ii = cast<AST::IntIndex>(e->GetR());
+      // negative number must add the ubound
+      if (ii->IsNegative()) {
+        auto signature = o_sn("+");
+        signature->Append(GetValNo(*e->GetL(), VNKind::VNK_UBOUND));
+        signature->Append(GetValNo(*ii->Val()));
+        auto sign = vn.Simplify(signature);
+        if (sign != signature) {
+          VST_DEBUG(dbgs() << vn.ScopeIndent() << "<Simplify> '" << STR(n)
+                           << ": '" << STR(signature) << "' to '" << STR(sign)
+                           << "'\n");
+        }
+        return sign;
+      } else
+        return GetSign(*ii->Val());
     } else if (e->op == "#") {
       // TODO:
 #if 0
@@ -2073,9 +2089,10 @@ const NumTy ShapeInference::GenValNo(const AST::Node& n) {
       } else
         choreo_unreachable("unsupported dimof valno generation.");
     } else if (e->op == "getith") {
-      Generate(SignNode(n), VNKind::VNK_VALUE);
+      NumTy vvn = Generate(SignNode(n), VNKind::VNK_VALUE);
       // the upper bound is not changed
       NumTy uvn = GetValNo(*e->GetL(), VNKind::VNK_UBOUND);
+      ast_vn.Update(e, vvn, VNKind::VNK_VALUE);
       ast_vn.Update(e, uvn, VNKind::VNK_UBOUND);
       return uvn;
     } else if (e->op == "?") {

@@ -28,10 +28,11 @@ struct ParallelSymbols {
 
   const std::set<std::string> GetInnerPVs(ParallelLevel pl) const {
     std::set<std::string> inner;
+    auto& pld = PlDepthMap::Get();
     for (auto& lvl_pvs : all_pvs) {
-      auto& pld = PlDepthMap::Get();
-      if (pld.ToDepth(lvl_pvs.first) > pld.ToDepth(pl))
+      if (pld.ToDepth(lvl_pvs.first) > pld.ToDepth(pl)) {
         inner.insert(lvl_pvs.second.begin(), lvl_pvs.second.end());
+      }
     }
     return inner;
   }
@@ -468,15 +469,15 @@ public:
       return oss.str();
     };
     if (auto f_int = intersection(f_syms, pvs); !f_int.empty())
-      Error1(f_ca->LOC(), "TMA is " + STR(ParallelLevel::GROUP) +
+      Error1(f_ca->LOC(), "TMA is " + STR(ParallelLevel::BLOCK) +
                               "-wise that parallel variable " +
                               format_string(f_int) +
-                              " is/are used inproperly.");
+                              " can not be used as indices/tiling-factors.");
     if (auto t_int = intersection(t_syms, pvs); !t_int.empty())
-      Error1(t_ca->LOC(), "TMA is " + STR(ParallelLevel::GROUP) +
+      Error1(t_ca->LOC(), "TMA is " + STR(ParallelLevel::BLOCK) +
                               "-wise that parallel variable " +
                               format_string(t_int) +
-                              " is/are used inproperly.");
+                              " can not be used as indices/tiling-factors.");
   }
 
   void CheckDimSize(const Shape& s, size_t idx, const std::string& op,

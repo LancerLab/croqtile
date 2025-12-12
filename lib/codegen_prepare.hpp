@@ -186,6 +186,8 @@ public:
   bool Visit(AST::Memory&) { return true; }
   bool Visit(AST::SpanAs&) { return true; }
   bool Visit(AST::DMA& n) {
+    if (n.IsDummy()) return true;
+
     if (n.IsTMA()) {
       cgi.GetFunctionTrait(fname).has_tma = true;
       cgi.GetModuleTrait().has_tma = true;
