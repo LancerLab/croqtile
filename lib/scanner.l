@@ -457,6 +457,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "term"     return Choreo::Parser::make_PBLEVEL(ParallelLevel::TERM, loc);
   "device"   return Choreo::Parser::make_PBLEVEL(ParallelLevel::DEVICE, loc);
   "block"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::BLOCK, loc);
+  "group-4"  return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUPx4, loc);
   "group"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUP, loc);
   "thread"   return Choreo::Parser::make_PBLEVEL(ParallelLevel::THREAD, loc);
   "mutable"  return Choreo::Parser::make_MUTABLE(yytext, loc);

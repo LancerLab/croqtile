@@ -598,6 +598,31 @@ public:
     return false;
   }
 
+  bool TargetSupportWMMA() const {
+    switch (GetArch()) {
+    case TargetArch::SM_70:
+    case TargetArch::SM_75:
+    case TargetArch::SM_80:
+    case TargetArch::SM_86:
+    case TargetArch::SM_89:
+    case TargetArch::SM_90:
+    case TargetArch::SM_100:
+    case TargetArch::SM_120: return true;
+    default: break;
+    }
+    return false;
+  }
+
+  bool TargetSupportWGMMA() const {
+    switch (GetArch()) {
+    case TargetArch::SM_90:
+    case TargetArch::SM_100:
+    case TargetArch::SM_120: return true;
+    default: break;
+    }
+    return false;
+  }
+
 public:
   // Getters of compiler configurations
   bool DumpAst() const { return dump_ast; }

@@ -21,6 +21,7 @@ enum class Storage {
 enum class ParallelLevel {
   THREAD,
   GROUP,
+  GROUPx4,
   BLOCK,
   DEVICE,
   TERM /* terminal machine in cluster*/,
@@ -399,10 +400,11 @@ inline static std::string GetStringFrom(Storage st) {
 
 inline static std::string GetStringFrom(ParallelLevel st) {
   static const std::unordered_map<ParallelLevel, std::string> enumToString = {
-      {ParallelLevel::THREAD, "thread"}, {ParallelLevel::GROUP, "group"},
-      {ParallelLevel::BLOCK, "block"},   {ParallelLevel::DEVICE, "device"},
-      {ParallelLevel::TERM, "term"},     {ParallelLevel::SEQ, "sequential"},
-      {ParallelLevel::NONE, "none"},     {ParallelLevel::UNKNOWN, "unknown"},
+      {ParallelLevel::THREAD, "thread"},   {ParallelLevel::GROUP, "group"},
+      {ParallelLevel::GROUPx4, "group-4"}, {ParallelLevel::BLOCK, "block"},
+      {ParallelLevel::DEVICE, "device"},   {ParallelLevel::TERM, "term"},
+      {ParallelLevel::SEQ, "sequential"},  {ParallelLevel::NONE, "none"},
+      {ParallelLevel::UNKNOWN, "unknown"},
   };
 
   auto it = enumToString.find(st);

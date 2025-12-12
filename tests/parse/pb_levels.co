@@ -1,0 +1,13 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+__co__ void foo() {
+  parallel by 1: block
+  parallel by 1: group-4
+  parallel by 1: group
+  parallel by 1: thread {}
+}
+
+// CHECK:  `- block Parallelization: index symbol: anon_0, bound [0, 1)
+// CHECK:   `- group-4 Parallelization: index symbol: anon_1, bound [0, 1)
+// CHECK:    `- group Parallelization: index symbol: anon_2, bound [0, 1)
+// CHECK:     `- thread Parallelization: index symbol: anon_3, bound [0, 1)
