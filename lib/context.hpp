@@ -271,6 +271,7 @@ struct Assertion {
   std::string message;
 };
 
+enum class MMAType { WMMA, CTMMA, WGMMA, EFMMA };
 // per-function context
 class FunctionContext {
 private:
@@ -278,7 +279,7 @@ private:
   std::map<std::string, OptimizedValues> sym_values;
   std::vector<RuntimeCheckEntry> rt_checks;
   std::vector<Assertion> assertions;
-  std::map<std::string, bool> frag_is_wmma;
+  std::map<std::string, MMAType> frag_mma_type;
   std::map<std::string, std::string> MMA_policy_of_frag;
 
   struct MemReuseInfo {
@@ -346,16 +347,18 @@ public:
   bool FragIsWMMA(const std::string& scoped_frag_name) const {
     if (!PrefixedWith(scoped_frag_name, "::"))
       choreo_unreachable("expect the fragament name is scoped.");
-    return frag_is_wmma.at(scoped_frag_name);
+    return frag_mma_type.at(scoped_frag_name) == MMAType::WMMA;
   }
-  void SetFragIsWMMA(const std::string& scoped_frag_name, bool is_wmma) {
+  void SetFragMMAType(const std::string& scoped_frag_name,
+                      MMAType mma_ty) {
     if (!PrefixedWith(scoped_frag_name, "::"))
       choreo_unreachable("expect the fragament name is scoped.");
-    if (frag_is_wmma.count(scoped_frag_name)) {
-      if (frag_is_wmma.at(scoped_frag_name) != is_wmma)
-        choreo_unreachable("expect the fragment to be always of wmma or mma.");
+    if (frag_mma_type.count(scoped_frag_name)) {
+      if (frag_mma_type.at(scoped_frag_name) != mma_ty)
+        choreo_unreachable(
+            "expect the fragment to be always of wmma/mma/wgmma.");
     } else {
-      frag_is_wmma.emplace(scoped_frag_name, is_wmma);
+      frag_mma_type.emplace(scoped_frag_name, mma_ty);
     }
   }
   std::string MMAPolicyOfFrag(const std::string& scoped_frag_name) const {

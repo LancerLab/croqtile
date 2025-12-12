@@ -529,18 +529,6 @@ public:
       FCtx(cur_fname).InsertAssertion(asrt, loc, message);
   }
 
-  bool ValidMMAConfig(MMALimit::MMAConfig cfg, MMALimit::CUDA_CC cc) {
-    bool find_cfg = false;
-    if (MMALimit::wmma_configs.count(cfg) &&
-        cc >= MMALimit::wmma_configs.at(cfg)) {
-      find_cfg = true;
-    } else if (MMALimit::mma_configs.count(cfg) &&
-               cc >= MMALimit::mma_configs.at(cfg)) {
-      find_cfg = true;
-    }
-    return find_cfg;
-  }
-
 public:
   GPUAdaptor() : VisitorWithSymTab("gpu"), cur_arch(STR(CCtx().GetArch())) {}
   ~GPUAdaptor() {}
@@ -768,10 +756,11 @@ public:
 
       if (a_ty == BaseType::F32) a_ty = BaseType::TF32;
       if (b_ty == BaseType::F32) b_ty = BaseType::TF32;
+      auto& MMARegistry = MMALimit::MMAConfigRegistry::Get();
 
       MMALimit::MMAConfig mma_config{
           MMALimit::DENSE, a_ty, b_ty, c_ty, d_ty, scale_ty, mma_shape};
-      if (!ValidMMAConfig(mma_config, arch))
+      if (!MMARegistry.IsValidMMAConfig(mma_config, arch))
         Error1(n.LOC(), "MMA [" + STR(a_ty) + "(a)" + STR(b_ty) + "(b)" +
                             (scale_ty != BaseType::UNKNOWN
                                  ? ":" + STR(scale_ty) + "(scale)"
@@ -780,11 +769,12 @@ public:
                             "(d): " + MMAShapeSTR(mma_shape) +
                             "] is not support by current architecture(" +
                             STR(CCtx().GetArch()) + ").");
-      bool is_wmma = MMALimit::ConfigIsWMMA(mma_config);
-      FCtx(cur_fname).SetFragIsWMMA(InScopeName(a_sym), is_wmma);
-      FCtx(cur_fname).SetFragIsWMMA(InScopeName(b_sym), is_wmma);
-      FCtx(cur_fname).SetFragIsWMMA(InScopeName(c_sym), is_wmma);
-      if (!is_wmma) {
+
+      auto mma_ty = MMARegistry.GetMMAType(mma_config);
+      FCtx(cur_fname).SetFragMMAType(InScopeName(a_sym), mma_ty);
+      FCtx(cur_fname).SetFragMMAType(InScopeName(b_sym), mma_ty);
+      FCtx(cur_fname).SetFragMMAType(InScopeName(c_sym), mma_ty);
+      if (mma_ty == MMAType::CTMMA) {
         std::string mma_policy = MMALimit::MMAConfig2CuteMMAName(mma_config);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);

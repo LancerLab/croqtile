@@ -3,7 +3,6 @@
 
 #include "types.hpp"
 #include <mutex>
-#include <thread>
 
 namespace Choreo {
 
@@ -202,7 +201,7 @@ static const std::map<MMAConfig, CUDA_CC> wmma_configs = {
     {{DENSE, BT::F64, BT::F64, BT::F64, BT::F64, BT::UNKNOWN, {8, 8, 4}}, 80},
 };
 
-static const std::map<MMAConfig, CUDA_CC> mma_configs = {
+static const std::map<MMAConfig, CUDA_CC> cute_mma_configs = {
     // sm70
     {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {8, 8, 4}}, 70},
     {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {8, 8, 4}}, 70},
@@ -354,16 +353,133 @@ static const std::map<MMAConfig, CUDA_CC> mma_configs = {
     // sm120 todo
 };
 
-inline bool ConfigIsWMMA(const MMAConfig& config) {
-  return wmma_configs.count(config);
+// WGMMA configs
+// m is fixed to 64, k * sizeof(ty) == 32 bytes
+static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
+  std::map<MMAConfig, CUDA_CC> out;
+  // floating point types
+  int m = 64, k = 16;
+  for (int n = 8; n <= 256; n += 8) {
+    for (auto cd_ty : {BT::F16, BT::F32}) {
+      MMAConfig config(DENSE, BT::F16, BT::F16, cd_ty, cd_ty, BT::UNKNOWN,
+                       MMAShape{m, n, k});
+      out[config] = 90;
+    }
+    for (auto cd_ty : {BT::F32}) {
+      MMAConfig config(DENSE, BT::BF16, BT::BF16, cd_ty, cd_ty, BT::UNKNOWN,
+                       MMAShape{m, n, k});
+      out[config] = 90;
+    }
+  }
+
+  m = 64, k = 8;
+  for (int n = 16; n <= 256; n += 8) {
+    MMAConfig config(DENSE, BT::TF32, BT::TF32, BT::F32, BT::F32, BT::UNKNOWN,
+                     MMAShape{m, n, k});
+    out[config] = 90;
+  }
+
+  m = 64, k = 32;
+  for (int n = 8; n <= 128; n += 8)
+    for (auto a_ty : {BT::F8_E4M3, BT::F8_E5M2})
+      for (auto b_ty : {BT::F8_E4M3, BT::F8_E5M2})
+        for (auto cd_ty : {BT::F16, BT::F32}) {
+          MMAConfig config(DENSE, a_ty, b_ty, cd_ty, cd_ty, BT::UNKNOWN,
+                           MMAShape{m, n, k});
+          out[config] = 90;
+        }
+  // integer types
+  m = 64, k = 32;
+  for (int n : {8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192,
+                208, 224}) {
+    MMAConfig config(DENSE, BT::S8, BT::S8, BT::S32, BT::S32, BT::UNKNOWN,
+                     MMAShape{m, n, k});
+    out[config] = 90;
+    MMAConfig config_u(DENSE, BT::U8, BT::U8, BT::S32, BT::S32, BT::UNKNOWN,
+                       MMAShape{m, n, k});
+    out[config_u] = 90;
+  }
+  // binary types
+  m = 64, k = 256;
+  for (int n : {8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192,
+                208, 224, 240, 256}) {
+    MMAConfig config(DENSE, BT::BIN1, BT::BIN1, BT::S32, BT::S32, BT::UNKNOWN,
+                     MMAShape{m, n, k});
+    out[config] = 90;
+  }
+  return out;
 }
+
+class MMAConfigRegistry {
+public:
+  static MMAConfigRegistry& Get() {
+    static MMAConfigRegistry instance;
+    return instance;
+  }
+
+  const std::map<MMAConfig, CUDA_CC>& GetCuteMMAConfigs() const {
+    return cute_mma_configs;
+  }
+
+  const std::map<MMAConfig, CUDA_CC>& GetWMMAConfigs() const {
+    return wmma_configs;
+  }
+
+  const std::map<MMAConfig, CUDA_CC>& GetWGMMMAConfigs() const {
+    return wgmma_configs_;
+  }
+
+  bool IsWMMAConfig(const MMAConfig& config) const {
+    return wmma_configs.count(config);
+  }
+
+  bool IsCuteMMAConfig(const MMAConfig& config) const {
+    return cute_mma_configs.count(config);
+  }
+
+  bool IsWGMMMAConfig(const MMAConfig& config) const {
+    return wgmma_configs_.count(config);
+  }
+
+  bool IsValidMMAConfig(const MMAConfig& config, MMALimit::CUDA_CC cc) const {
+    if (IsWMMAConfig(config))
+      return wmma_configs.at(config) <= cc;
+    else if (IsWGMMMAConfig(config))
+      return wgmma_configs_.at(config) <= cc;
+    else if (IsCuteMMAConfig(config))
+      return cute_mma_configs.at(config) <= cc;
+    else
+      return false;
+  }
+
+  MMAType GetMMAType(const MMAConfig& config) const {
+    if (IsWMMAConfig(config))
+      return MMAType::WMMA;
+    else if (IsWGMMMAConfig(config))
+      return MMAType::WGMMA;
+    else if (IsCuteMMAConfig(config))
+      return MMAType::CTMMA;
+    else
+      choreo_unreachable("unsupported MMA config: " + config.ToString());
+    return MMAType::WMMA;
+  }
+
+private:
+  std::map<MMAConfig, CUDA_CC> wgmma_configs_;
+  MMAConfigRegistry() { wgmma_configs_ = GenerateWGMMAConfigs(); }
+
+  MMAConfigRegistry(const MMAConfigRegistry&) = delete;
+  MMAConfigRegistry& operator=(const MMAConfigRegistry&) = delete;
+  MMAConfigRegistry(MMAConfigRegistry&&) = delete;
+  MMAConfigRegistry& operator=(MMAConfigRegistry&&) = delete;
+};
 
 inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
                                          const std::string& sep = "_") {
   // example: SM80_16x8x8_F16F16F16F16_TN
-  assert(mma_configs.count(mma_config));
+  assert(cute_mma_configs.count(mma_config));
   std::vector<std::string> strs;
-  strs.push_back("SM" + std::to_string(mma_configs.at(mma_config)));
+  strs.push_back("SM" + std::to_string(cute_mma_configs.at(mma_config)));
   strs.push_back(std::to_string(mma_config.shape.m) + "x" +
                  std::to_string(mma_config.shape.n) + "x" +
                  std::to_string(mma_config.shape.k));
