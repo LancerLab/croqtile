@@ -349,8 +349,7 @@ public:
       choreo_unreachable("expect the fragament name is scoped.");
     return frag_mma_type.at(scoped_frag_name) == MMAType::WMMA;
   }
-  void SetFragMMAType(const std::string& scoped_frag_name,
-                      MMAType mma_ty) {
+  void SetFragMMAType(const std::string& scoped_frag_name, MMAType mma_ty) {
     if (!PrefixedWith(scoped_frag_name, "::"))
       choreo_unreachable("expect the fragament name is scoped.");
     if (frag_mma_type.count(scoped_frag_name)) {
@@ -529,36 +528,61 @@ public:
       }
     case TargetArch::GPU:
     case TargetArch::SM_70:
-    case TargetArch::SM_75:
-    case TargetArch::SM_80:
-    case TargetArch::SM_86:
-    case TargetArch::SM_89:
-    case TargetArch::SM_90:
-    case TargetArch::SM_100:
-    case TargetArch::SM_120: {
       switch (sto) {
-      case Storage::LOCAL: {
-        if (MaxLocalMemCapacity() > 0) { return MaxLocalMemCapacity(); }
-        switch (arch) {
-        case TargetArch::SM_70:
-        case TargetArch::SM_75: return 1024;
-        case TargetArch::SM_80:
-        case TargetArch::SM_86: return 2048;
-        case TargetArch::SM_89: return 3072;
-        case TargetArch::SM_90: return 4096;
-        case TargetArch::SM_100: return 4096;
-        case TargetArch::SM_120: return 4096 /* TO-confirm */;
-        case TargetArch::GPU:
-        default: return 1024;
-        }
-      }
-      // TODO: Memory capacity of GPU is not only determined by the
-      // arch, but also by the specific model?
+      case Storage::LOCAL: return 1024;                       // 1KB
       case Storage::SHARED: return 48ull * 1024;              // 48KB
       case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024; // 8GB
       default: choreo_unreachable("Unsupported mem level.");
       }
-    }
+
+    case TargetArch::SM_75:
+      switch (sto) {
+      case Storage::LOCAL: return 1024;                       // 1KB
+      case Storage::SHARED: return 64ull * 1024;              // 64KB
+      case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024; // 8GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+
+    case TargetArch::SM_80:
+      switch (sto) {
+      case Storage::LOCAL: return 2048;                        // 2KB
+      case Storage::SHARED: return 164ull * 1024;              // 164KB
+      case Storage::GLOBAL: return 64ull * 1024 * 1024 * 1024; // 64GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+
+    case TargetArch::SM_86:
+    case TargetArch::SM_89:
+      switch (sto) {
+      case Storage::LOCAL: return 2048;                        // 2KB
+      case Storage::SHARED: return 100ull * 1024;              // 100KB
+      case Storage::GLOBAL: return 32ull * 1024 * 1024 * 1024; // 32GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+
+    case TargetArch::SM_90:
+      switch (sto) {
+      case Storage::LOCAL: return 2048;                        // 2KB
+      case Storage::SHARED: return 164ull * 1024;              // 164KB
+      case Storage::GLOBAL: return 80ull * 1024 * 1024 * 1024; // 80GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+
+    case TargetArch::SM_100:
+      switch (sto) {
+      case Storage::LOCAL: return 2048;                         // 2KB
+      case Storage::SHARED: return 228ull * 1024;               // 228KB
+      case Storage::GLOBAL: return 192ull * 1024 * 1024 * 1024; // 192GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+
+    case TargetArch::SM_120:
+      switch (sto) {
+      case Storage::LOCAL: return 2048;                         // 2KB
+      case Storage::SHARED: return 300ull * 1024;               // 300KB
+      case Storage::GLOBAL: return 256ull * 1024 * 1024 * 1024; // 256GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
 
     default: choreo_unreachable("Unsupported target arch.");
     }
