@@ -237,7 +237,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
   std::string co_func_name = GetFuncNameFromScopedName(df_name);
   if (ma.have_dynamic_shape.count(df_name) &&
       ma.have_dynamic_shape.at(df_name)) {
-    auto mri = FCtx(co_func_name).SetMemReuseInfo(df_name);
+    auto mri = FCtx(co_func_name).SetDynMemReuseInfo(df_name);
     std::string simulator = "__co__heap_simulator" + idx_suffix;
     mri->simulator = simulator;
     auto& infos = mri->infos;
@@ -329,21 +329,25 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
   }
 
   HeapSimulator simulator;
+  auto mri = FCtx(co_func_name).SetStaticMemReuseInfo(df_name);
 
   if (!local_chunks.empty()) {
     HeapSimulator::Result local_result = simulator.Allocate(local_chunks, 512);
     assert(ValidateResult(local_result, local_chunks));
     ctx.local_spm_size = local_result.heap_size;
+    mri->infos[Storage::LOCAL].spm_size = ctx.local_spm_size;
     for (const auto& [buffer_id, offset] : local_result.chunk_offsets)
       ctx.mem_offset.emplace(buffer_id, offset);
     VST_DEBUG(dbgs() << "For '" << df_name << "'\n\tLocal memory usage: "
                      << local_result.heap_size << " bytes\n");
   }
   if (!shared_chunks.empty()) {
+    // TODO: better: 512 for topscc, 128 for Cuda?
     HeapSimulator::Result shared_result =
         simulator.Allocate(shared_chunks, 512);
     assert(ValidateResult(shared_result, shared_chunks));
     ctx.shared_spm_size = shared_result.heap_size;
+    mri->infos[Storage::SHARED].spm_size = ctx.shared_spm_size;
     for (const auto& [buffer_id, offset] : shared_result.chunk_offsets)
       ctx.mem_offset.emplace(buffer_id, offset);
     VST_DEBUG(dbgs() << "For '" << df_name << "'\n\tShared memory usage: "
@@ -413,6 +417,10 @@ bool MemReuse::RunOnProgramImpl(AST::Node& root) {
   if (prt_visitor) dbgs() << LevelPrefix() << "|- " << GetName() << NewL;
 
   root.accept(*this);
+
+  if (HasError()) return false;
+
+  if (abend_after) return false;
 
   return true;
 }

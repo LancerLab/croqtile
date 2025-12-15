@@ -282,7 +282,7 @@ private:
   std::map<std::string, MMAType> frag_mma_type;
   std::map<std::string, std::string> MMA_policy_of_frag;
 
-  struct MemReuseInfo {
+  struct DynMemReuseInfo {
     std::string simulator;
     struct InfoEntry {
       // the name of chunks vector
@@ -300,8 +300,16 @@ private:
     };
     std::map<Storage, InfoEntry> infos;
   };
+  struct StaticMemReuseInfo {
+    struct InfoEntry {
+      // the actual size of spm
+      size_t spm_size;
+    };
+    std::map<Storage, InfoEntry> infos;
+  };
   // device func name => mri
-  std::map<std::string, ptr<MemReuseInfo>> mem_reuse_infos;
+  std::map<std::string, ptr<DynMemReuseInfo>> dyn_mr_infos;
+  std::map<std::string, ptr<StaticMemReuseInfo>> static_mr_infos;
 
 public:
   FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
@@ -328,18 +336,29 @@ public:
   const std::vector<Assertion>& GetAssertions() const { return assertions; }
 
   // return `nullptr` if no memory reuse info
-  ptr<MemReuseInfo> GetMemReuseInfo(const std::string& dev_func) const {
-    if (!mem_reuse_infos.count(dev_func)) return nullptr;
-    return mem_reuse_infos.at(dev_func);
+  ptr<DynMemReuseInfo> GetDynMemReuseInfo(const std::string& dev_func) const {
+    if (!dyn_mr_infos.count(dev_func)) return nullptr;
+    return dyn_mr_infos.at(dev_func);
   }
-  ptr<MemReuseInfo> SetMemReuseInfo(const std::string& dev_func) {
-    if (mem_reuse_infos.count(dev_func)) return mem_reuse_infos.at(dev_func);
-    auto info = std::make_shared<MemReuseInfo>();
-    mem_reuse_infos.emplace(dev_func, info);
+  ptr<DynMemReuseInfo> SetDynMemReuseInfo(const std::string& dev_func) {
+    if (dyn_mr_infos.count(dev_func)) return dyn_mr_infos.at(dev_func);
+    auto info = std::make_shared<DynMemReuseInfo>();
+    dyn_mr_infos.emplace(dev_func, info);
+    return info;
+  }
+  ptr<StaticMemReuseInfo>
+  GetStaticMemReuseInfo(const std::string& dev_func) const {
+    if (!static_mr_infos.count(dev_func)) return nullptr;
+    return static_mr_infos.at(dev_func);
+  }
+  ptr<StaticMemReuseInfo> SetStaticMemReuseInfo(const std::string& dev_func) {
+    if (static_mr_infos.count(dev_func)) return static_mr_infos.at(dev_func);
+    auto info = std::make_shared<StaticMemReuseInfo>();
+    static_mr_infos.emplace(dev_func, info);
     return info;
   }
   bool HaveDynamicBuffer(const std::string& dev_func, Storage sto) const {
-    auto mri = GetMemReuseInfo(dev_func);
+    auto mri = GetDynMemReuseInfo(dev_func);
     if (!mri) return false;
     return mri->infos.count(sto);
   }

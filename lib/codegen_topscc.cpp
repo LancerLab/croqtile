@@ -1282,7 +1282,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     hs << UnScopedName(item.first);
   }
 
-  if (const auto& mri = FCtx(fname).GetMemReuseInfo(SSTab().ScopeName()))
+  if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
     for (const auto& [sto, ie] : mri->infos)
       for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
         hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
@@ -2682,7 +2682,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
 }
 
 void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
-  const auto& mri = FCtx(fname).GetMemReuseInfo(df_name);
+  const auto& mri = FCtx(fname).GetDynMemReuseInfo(df_name);
   if (!mri) return;
   hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
   for (const auto& [sto, ie] : mri->infos) {
@@ -2702,7 +2702,7 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
        << mem_capacity << ", \"In the memory reuse of dynamic shapes"
        << ", the size of the initial " << STR(sto)
        << " spm should not exceed the memory usage limit " << mem_capacity
-       << "bytes.\");";
+       << "bytes.\");\n";
     hs << h_indent << "unsigned long " << ie.offsets_name << "["
        << mri->infos[sto].offset_args.size() << "];" << "\n";
     std::string idx = ie.chunks_name + "_idx";
@@ -2802,7 +2802,7 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
     ssm.MapDeviceSymbolIfNotExist(item.first, UnScopedName(item.first));
   }
 
-  if (const auto& mri = FCtx(fname).GetMemReuseInfo(SSTab().ScopeName()))
+  if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
     for (const auto& [sto, ie] : mri->infos)
       for (size_t idx = 0; idx < ie.offset_args.size(); ++idx) {
         auto dname = RegexReplaceAll(ie.offset_args[idx], "::", "_");

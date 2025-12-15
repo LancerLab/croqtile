@@ -1031,7 +1031,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       if (n.Note().count("spm")) {
         if (sto == Storage::SHARED &&
-            FCtx(fname).HaveDynamicBuffer(SSTab().ScopeName(), sto))
+            (FCtx(fname).HaveDynamicBuffer(SSTab().ScopeName(), sto) ||
+             set_cuda_func_attribute_max_dynamic_shared_memory_size))
           ds << d_indent << "auto " << sym << " = (" << bts << "*)&"
              << device_fn << "__runtime_shared_buffer__;\n";
         else
@@ -1435,8 +1436,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
           ->Normalize();
   hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
      << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << "1" << ");\n";
-  hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
-     << ", __" << fname << "_bdims" << parallel_idx;
 
   // plan the shared memory that is decided at runtime
   cur_spm_size = sbe::nu(0);
@@ -1447,18 +1446,50 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   if (cgi.HasAsyncDMA(fname))
     cur_spm_size = cur_spm_size + cur_ring_size * sbe::nu(8);
 
-  // add the size of dynamic shared
+  /*
+  | static shared | dynamic shared |
+  ^                 ^
+  shared_base       shared_base + static_size
+  must satisfy the constraints:
+  - static shared <= 48KB
+  - dynamic shared <= MaxDynamicSharedMemorySize
+  - the sum <= the capacity of arch
+  */
+  auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
+    hs << h_indent << "cudaFuncSetAttribute(" << device_fn
+       << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
+       << ValueSTR(cur_spm_size) << ");\n";
+    set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
+  };
+
   if (auto dev_name = SSTab().ScopeName();
       FCtx(fname).HaveDynamicBuffer(dev_name, Storage::SHARED)) {
-    auto mri = FCtx(fname).GetMemReuseInfo(dev_name);
+    // add the size of dynamic shared
+    auto mri = FCtx(fname).GetDynMemReuseInfo(dev_name);
     assert(mri);
-
     cur_ring_offset =
         sbe::sym(mri->infos[Storage::SHARED].spm_size)->Normalize();
     cur_spm_size = cur_spm_size + cur_ring_offset;
+    cur_spm_size = cur_spm_size->Normalize();
+    EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
+  } else {
+    // add the size of static shared
+    auto mri = FCtx(fname).GetStaticMemReuseInfo(dev_name);
+    if (mri) {
+      // 48KB is the largest capacity that static shared memory supports.
+      if (mri->infos[Storage::SHARED].spm_size > 48 * 1024) {
+        set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
+        cur_ring_offset = sbe::nu(mri->infos[Storage::SHARED].spm_size);
+        cur_spm_size = cur_spm_size + cur_ring_offset;
+        cur_spm_size = cur_spm_size->Normalize();
+        EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
+      }
+    }
   }
 
-  cur_spm_size = cur_spm_size->Normalize();
+  hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
+     << ", __" << fname << "_bdims" << parallel_idx;
+
   if (!sbe::ceq(cur_spm_size, sbe::nu(0))) hs << ", " << ValueSTR(cur_spm_size);
   hs << ">>>(";
 
@@ -1477,7 +1508,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     hs << ((i++ > 0) ? ", " : "");
     hs << UnScopedName(item.first);
   }
-  if (const auto& mri = FCtx(fname).GetMemReuseInfo(SSTab().ScopeName()))
+  if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
     for (const auto& [sto, ie] : mri->infos)
       for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
         hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
@@ -2824,7 +2855,7 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
 }
 
 void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
-  const auto& mri = FCtx(fname).GetMemReuseInfo(df_name);
+  const auto& mri = FCtx(fname).GetDynMemReuseInfo(df_name);
   if (!mri) return;
   hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
   for (const auto& [sto, ie] : mri->infos) {
@@ -2844,7 +2875,7 @@ void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
        << mem_capacity << ", \"In the memory reuse of dynamic shapes"
        << ", the size of the initial " << STR(sto)
        << " spm should not exceed the memory usage limit " << mem_capacity
-       << "bytes.\");";
+       << "bytes.\");\n";
     hs << h_indent << "unsigned long " << ie.offsets_name << "["
        << mri->infos[sto].offset_args.size() << "];" << "\n";
     std::string idx = ie.chunks_name + "_idx";
@@ -3011,7 +3042,7 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
     ssm.MapDeviceSymbolIfNotExist(item.first, UnScopedName(item.first));
   }
 
-  if (const auto& mri = FCtx(fname).GetMemReuseInfo(SSTab().ScopeName()))
+  if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
     for (const auto& [sto, ie] : mri->infos)
       for (size_t idx = 0; idx < ie.offset_args.size(); ++idx) {
         auto dname = RegexReplaceAll(ie.offset_args[idx], "::", "_");

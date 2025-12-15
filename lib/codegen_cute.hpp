@@ -301,6 +301,8 @@ private:
 
   // mma related
   size_t reg_num_d;
+  // once the flag is set, always use dynamic reuse!
+  bool set_cuda_func_attribute_max_dynamic_shared_memory_size = false;
 
 private:
   void EmitFixedHostHead();
