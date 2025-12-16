@@ -1309,6 +1309,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (n.AllSubPVs().size() == 1)
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "blockIdx.x");
     break;
+  case ParallelLevel::GROUPx4: {
+    choreo_unreachable("group-4 is yet to be supported.");
+  } break;
   case ParallelLevel::GROUP: {
     assert(n.AllSubPVs().size() > 0);
     if (n.AllSubPVs().size() > 3)
@@ -1327,9 +1330,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (n.AllSubPVs().size() == 1) {
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.y");
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.y");
-    }
-
-    if (n.AllSubPVs().size() == 2) {
+    } else if (n.AllSubPVs().size() == 2) {
       auto group_id_first =
           (sbe::sym("threadIdx.y") / lconfig.group_count.y)->Normalize();
       auto group_id_second =
@@ -1338,9 +1339,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
                           ValueSTR(group_id_first));
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
                           ValueSTR(group_id_second));
-    }
-
-    if (n.AllSubPVs().size() == 3) {
+    } else if (n.AllSubPVs().size() == 3) {
       auto group_id_first =
           (sbe::sym("threadIdx.y") / lconfig.group_count.z)->Normalize();
       auto group_id_second =
@@ -1355,7 +1354,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name),
                           ValueSTR(group_id_third));
     }
-
   } break;
   case ParallelLevel::THREAD:
     assert(n.AllSubPVs().size() > 0);
@@ -1375,9 +1373,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (n.AllSubPVs().size() == 1) {
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.x");
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.x");
-    }
-
-    if (n.AllSubPVs().size() == 2) {
+    } else if (n.AllSubPVs().size() == 2) {
       auto thread_id_first =
           (sbe::sym("threadIdx.x") / lconfig.thread_count.y)->Normalize();
       auto thread_id_second =
@@ -1386,9 +1382,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
                           ValueSTR(thread_id_first));
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
                           ValueSTR(thread_id_second));
-    }
-
-    if (n.AllSubPVs().size() == 3) {
+    } else if (n.AllSubPVs().size() == 3) {
       auto thread_id_first =
           ((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) /
           lconfig.thread_count.y->Normalize();

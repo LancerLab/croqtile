@@ -29,6 +29,6 @@ __co__ auto baz() {
 
 // CHECK: warning: For nested parallel-by, it is better to either explicitly specify all parallelism levels, or none (Choreo to automatically infer the levels).
 // CHECK: warning: For nested parallel-by, it is better to either explicitly specify all parallelism levels, or none (Choreo to automatically infer the levels)
-// CHECK: error: unsupported: parallel-by outside a block-level.
-// CHECK: error: unsupported: parallel-by outside a block-level.
+// CHECK: error: unable to infer the parallel-by level(s) between thread and block.
+// CHECK: error: unable to infer the parallel-by level(s) between block and block.
 // CHECK: Totally 2 errors have been detected.

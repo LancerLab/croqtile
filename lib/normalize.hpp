@@ -941,23 +941,34 @@ private:
   int literal_depth = 0;
   // maximum parallel depth for current nested-pbs
   int max_depth = 0;
-  // last pb depth and its pointer
+  // last parallel depth and its pointer
   int last_depth = 0;
   AST::ParallelBy* last_pb = nullptr;
 
-  enum FillType { Inner, Outer, AppendInner };
+  // Note: post-visiting each parallel-by
+  //
+  //  ...
+  //   pb <- literal_depth
+  //    pb <- last_depth
+  //     ...
+  //      pb <- max_depth
+  //
+
+  enum FillType { Inner, Outer, AppendInner, LastInner };
   struct FillInfo {
     AST::ParallelBy* pb;
     FillType ft;
     ParallelLevel lvl;
-    FillInfo(AST::ParallelBy* p, FillType t, ParallelLevel l)
-        : pb(p), ft(t), lvl(l) {}
+    size_t ubound;
+    FillInfo(AST::ParallelBy* p, FillType t, ParallelLevel l, size_t ub = 1)
+        : pb(p), ft(t), lvl(l), ubound(ub) {}
   };
   std::vector<FillInfo> fill_info;
 
 private:
-  bool ExplicitLevel(AST::ParallelBy& pb) const {
-    auto pl = pb.GetLevel();
+  bool ExplicitLevel(AST::ParallelBy* pb) const {
+    assert(pb != nullptr);
+    auto pl = pb->GetLevel();
     assert(pl != ParallelLevel::UNKNOWN);
     return pl != ParallelLevel::NONE;
   }
@@ -973,12 +984,13 @@ public:
            CCtx().GetTarget() == CompileTarget::Cute;
   }
 
-  AST::ParallelBy& InsertInnerLevel(AST::ParallelBy& pb, ParallelLevel pl) {
+  AST::ParallelBy& InsertInnerLevel(AST::ParallelBy& pb, ParallelLevel pl,
+                                    size_t ub) {
     // may fill gap only for a single level
     VST_DEBUG(dbgs() << "Replace `"; pb.InlinePrint(dbgs());
               dbgs() << "` by\n  +-");
 
-    auto new_pb = AST::MakeSimpleParallelBy(pb.LOC(), pb.stmts);
+    auto new_pb = AST::MakeSimpleParallelBy(pb.LOC(), pb.stmts, ub);
     new_pb->SetOuter(false);
     new_pb->SetLevel(pl);
     pb.stmts = AST::Make<AST::MultiNodes>(pb.LOC(), new_pb);
@@ -989,14 +1001,32 @@ public:
     return *new_pb;
   }
 
-  AST::ParallelBy& AppendInnerLevel(AST::ParallelBy& pb, ParallelLevel pl) {
+  AST::ParallelBy& AppendInnerLevel(AST::ParallelBy& pb, ParallelLevel pl,
+                                    size_t ub) {
     // may fill gap only for a single level
     VST_DEBUG(dbgs() << "Replace `"; pb.InlinePrint(dbgs());
               dbgs() << "` by\n  +-");
 
-    auto new_pb =
-        AST::MakeSimpleParallelBy(pb.LOC(), nullptr, CCtx().GetMinGroupDim());
+    auto new_pb = AST::MakeSimpleParallelBy(pb.LOC(), nullptr, ub);
     new_pb->SetLevel(pl);
+    pb.stmts->Append(new_pb);
+
+    VST_DEBUG(pb.InlinePrint(dbgs()));
+
+    return pb;
+  }
+
+  AST::ParallelBy& InsertLastInnerLevel(AST::ParallelBy& pb, ParallelLevel pl,
+                                        size_t ub) {
+    // may fill gap only for a single level
+    VST_DEBUG(dbgs() << "Replace `"; pb.InlinePrint(dbgs());
+              dbgs() << "` by\n  +-");
+
+    auto last_pb = cast<AST::ParallelBy>(pb.stmts->Last());
+    auto new_pb = AST::MakeSimpleParallelBy(
+        pb.LOC(), AST::Make<AST::MultiNodes>(pb.LOC(), last_pb), ub);
+    new_pb->SetLevel(pl);
+    pb.stmts->PopBack();
     pb.stmts->Append(new_pb);
 
     VST_DEBUG(pb.InlinePrint(dbgs()));
@@ -1057,10 +1087,11 @@ public:
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
       Reset();
-    } else if (isa<AST::ParallelBy>(&n)) {
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       if (literal_depth == 0) Reset();
       literal_depth++;
-      max_depth = (max_depth > literal_depth) ? max_depth : literal_depth;
+      max_depth = std::max(max_depth, literal_depth);
+      last_pb = pb;
     }
     return true;
   }
@@ -1069,178 +1100,365 @@ public:
     if (!isa<AST::ParallelBy>(&n)) return true;
     auto pb = cast<AST::ParallelBy>(&n);
 
-    bool support_group = TargetHasLevel(ParallelLevel::GROUP);
-    if (!support_group && pb->GetLevel() == ParallelLevel::GROUP)
-      Error1(pb->LOC(),
-             "group level is not supported by the target architecture.");
+    assert(last_depth <= max_depth);
+    assert(literal_depth <= max_depth);
 
-    // Note: both filling outer/inner, pb points to the outer afterwards
-    if (last_depth == 0 && max_depth == 1) {
-      // only single parallel-by exists
-      if (!ExplicitLevel(*pb) || pb->GetLevel() == ParallelLevel::THREAD) {
-        //   parallel p by 32
-        // =>
-        //   parallel x by 1 : block
-        //    parallel y by 1 : group (optional)
-        //     parallel p by 32 : thread
-        pb->SetLevel(ParallelLevel::THREAD);
-        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-        if (support_group)
-          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
-      } else if (pb->GetLevel() == ParallelLevel::BLOCK) {
-        //   parallel p by 32: block
-        // =>
-        //   parallel p by 32 : block
-        //    parallel x by 1 : group (optional)
-        //     parallel y by 1 : thread
-        fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
-        if (support_group)
-          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
-      } else if (pb->GetLevel() == ParallelLevel::GROUP) {
-        //   parallel p by 32: group
-        // =>
-        //   parallel x by 1 : block
-        //    parallel p by 32 : group
-        //     parallel y by 1 : thread
-        fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
-        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-      } else
-        choreo_unreachable("unsupported single parallel-by level.");
-    } else if (last_depth == 0 && max_depth > 1) {
-      // now the max literal depth is confirmed
+    if (ExplicitLevel(pb) && !TargetHasLevel(pb->GetLevel()))
+      Error1(pb->LOC(),
+             STR(pb->GetLevel()) +
+                 " level is not supported by the target architecture: " +
+                 STR(CCtx().GetArch()) + ".");
+
+    // The max literal depth is confirmed, last_pb is the inner-most
+    if (last_pb == pb) {
       if (max_depth > TargetMaxDepth())
         Error1(pb->LOC(),
                "too many parallel-by levels: " + std::to_string(max_depth) +
                    " > " + std::to_string(TargetMaxDepth()) + ".");
-
-    } else if (last_depth == max_depth) {
-      // In this case, last pb is the inner-most
-      if (!ExplicitLevel(*last_pb) ||
-          last_pb->GetLevel() == ParallelLevel::THREAD) {
-        last_pb->SetLevel(ParallelLevel::THREAD);
-        if (!ExplicitLevel(*pb)) {
-          if (!support_group) {
-            //   parallel p by 32
-            //    parallel q by 64
-            // =>
-            //   parallel p by 32 : block
-            //     parallel q by 64 : thread
-            assert(max_depth == 2);
-            pb->SetLevel(ParallelLevel::BLOCK);
-          } else {
-            if (literal_depth == 1) {
-              //   parallel p by 32
-              //    parallel q by 64
-              // =>
-              //   parallel p by 32 : block
-              //    parallel r by 1 : group
-              //     parallel q by 64 : thread
-              assert(max_depth == 2);
-              pb->SetLevel(ParallelLevel::BLOCK);
-              fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
-            } else if (literal_depth == 2) {
-              //   parallel p by 32
-              //    parallel r by 4
-              //     parallel q by 64
-              // =>
-              //   parallel p by 32
-              //    parallel r by 4 : group
-              //     parallel q by 64 : thread
-              pb->SetLevel(ParallelLevel::GROUP);
-            } else
-              choreo_unreachable("internal error: parallel-by.");
-          }
-        } else {
-          if (pb->GetLevel() == ParallelLevel::THREAD)
-            Error1(pb->LOC(),
-                   "can not have multiple thread-level parallel-by.");
-          else if (pb->GetLevel() == ParallelLevel::GROUP) {
-            //   parallel r by 32 : group
-            //    parallel q by 64
-            // =>
-            //   parallel p by 1 : block
-            //    parallel r by 32 : group
-            //     parallel q by 64 : thread
-            if (max_depth == 2)
-              fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-          } else if (pb->GetLevel() == ParallelLevel::BLOCK) {
-            //   parallel p by 32 : block
-            //    parallel q by 64
-            // =>
-            //   parallel p by 32 : block
-            //    parallel r by 1 : group
-            //     parallel q by 64 : thread
-            if (support_group)
-              fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
-          }
-        }
-      } else if (last_pb->GetLevel() == ParallelLevel::GROUP) {
-        // group as the inner-most
-        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD);
-        if (!ExplicitLevel(*pb)) {
-          if (literal_depth > 1) {
-            Error1(pb->LOC(), "can not have multiple group-level parallel-by.");
-
-          } else {
-            //   parallel p by 32
-            //    parallel r by 64 : group { stmts; }
-            // =>
-            //   parallel p by 1 : block
-            //    parallel r by 64 : group {
-            //     stmts;
-            //     parallel q by 1 : thread
-            //    }
-            pb->SetLevel(ParallelLevel::BLOCK);
-          }
-        } else {
-          switch (pb->GetLevel()) {
-          case ParallelLevel::THREAD:
-            Error1(pb->LOC(), "can not have group-level parallel-by inside a "
-                              "thread-level one.");
-            break;
-          case ParallelLevel::GROUP:
-            Error1(pb->LOC(), "can not have multiple group-level parallel-by.");
-            break;
-          case ParallelLevel::BLOCK: break;
-          default: choreo_unreachable("unsupported parallel level.");
-          }
-        }
-      } else if (last_pb->GetLevel() == ParallelLevel::BLOCK) {
-        Error1(pb->LOC(), "unsupported: parallel-by outside a block-level.");
-      }
-    } else {
-      assert(last_depth < max_depth);
-      assert(last_depth == 2 && literal_depth == 1);
-      if (!ExplicitLevel(*last_pb))
-        choreo_unreachable("internal error: failed to annotate parallel-by.");
-      else if (last_pb->GetLevel() != ParallelLevel::GROUP)
-        choreo_unreachable(
-            "internal error: failed to annotate group parallel-by.");
-      else {
-        if (!ExplicitLevel(*pb))
-          pb->SetLevel(ParallelLevel::BLOCK);
-        else if (pb->GetLevel() != ParallelLevel::BLOCK)
-          Error1(pb->LOC(), "expect a block-level parallel by.");
-      }
+      // if not annotated, the inner-most is always thread level
+      if (!ExplicitLevel(last_pb)) last_pb->SetLevel(ParallelLevel::THREAD);
     }
-    last_depth = literal_depth;
-    last_pb = pb;
 
-    literal_depth--;
+    if (max_depth == 1) {
+      assert(literal_depth == 1);
+      HandleSingleLevel(pb);
+    } else if (pb != last_pb) {
+      // guess and fill
+      if (!ExplicitLevel(pb)) InferImplicitLevel(pb);
+      FillMissingLevels(pb);
+    }
+
+    last_depth = literal_depth--;
     assert(literal_depth >= 0);
+    last_pb = pb;
 
     if (literal_depth == 0) {
       for (auto fi : fill_info) {
         if (fi.ft == Outer)
           InsertOuterLevel(*fi.pb, fi.lvl);
         else if (fi.ft == Inner)
-          InsertInnerLevel(*fi.pb, fi.lvl);
+          InsertInnerLevel(*fi.pb, fi.lvl, fi.ubound);
+        else if (fi.ft == AppendInner)
+          AppendInnerLevel(*fi.pb, fi.lvl, fi.ubound);
         else {
-          assert(fi.ft == AppendInner);
-          AppendInnerLevel(*fi.pb, fi.lvl);
+          assert(fi.ft == LastInner);
+          InsertLastInnerLevel(*fi.pb, fi.lvl, fi.ubound);
         }
       }
       fill_info.clear();
+    }
+    return true;
+  }
+
+  bool InferImplicitLevel(AST::ParallelBy* pb) {
+    // std::cout << "start infering: " << PSTR(pb) << "\n";
+    auto last_level = last_pb->GetLevel();
+
+    // Maintain this table for easier code check:
+    // +--------------------+-----+--------------------------+
+    // |      LEVEL and DEPTH     |     TARGET LEVELS        |
+    // +--------------+-----+-----+--------+--------+--------+
+    // |      last    | max | cur | N == 2 | N == 3 | N == 4 |
+    // +----------+---+-----+-----+--------+--------+--------+
+    // | THREAD   | 2 |  2  |  1  | BLOCK  | BLOCK  | BLOCK  |
+    // | GROUP    | 2 |  2  |  1  | error  | BLOCK  | BLOCK  |
+    // | GROUPx4  | 2 |  2  |  1  | error  | BLOCK  | BLOCK  |
+    // | BLOCK    | 2 |  2  |  1  | error  | error  | error  |
+    // +----------+---+-----+-----+--------+--------+--------+
+    // | THREAD   | 2 |  3  |  1  |   -    | error  | error  |
+    // | GROUP    | 2 |  3  |  1  |   -    | BLOCK  | BLOCK  |
+    // | GROUPx4  | 2 |  3  |  1  |   -    | BLOCK  | BLOCK  |
+    // | BLOCK    | 2 |  3  |  1  |   -    | error  | error  |
+    // +----------+---+--------+--+--------+--------+--------+
+    // | THREAD   | 3 |  3  |  2  |   -    | GROUP  | GROUP  |
+    // | GROUP    | 3 |  3  |  2  |   -    | error  | GROUPx4|
+    // | GROUPx4  | 3 |  3  |  2  |   -    | error  | error  |
+    // | BLOCK    | 3 |  3  |  2  |   -    | error  | error  |
+    // +----------+---+-----+-----+--------+--------+--------+
+    // | THREAD   | 2 |  4  |  1  |   -    |   -    | error  |
+    // | GROUP    | 2 |  4  |  1  |   -    |   -    | error  |
+    // | GROUPx4  | 2 |  4  |  1  |   -    |   -    | BLOCK  |
+    // | BLOCK    | 2 |  4  |  1  |   -    |   -    | error  |
+    // +----------+---+-----+-----+--------+--------+--------+
+    // | THREAD   | 3 |  4  |  2  |   -    |   -    | error  |
+    // | GROUP    | 3 |  4  |  2  |   -    |   -    | GROUPx4|
+    // | GROUPx4  | 3 |  4  |  2  |   -    |   -    | error  |
+    // | BLOCK    | 3 |  4  |  2  |   -    |   -    | error  |
+    // +----------+---+-----+-----+--------+--------+--------+
+    // | THREAD   | 4 |  4  |  3  |   -    |   -    | GROUP  |
+    // | GROUP    | 4 |  4  |  3  |   -    |   -    | error  |
+    // | GROUPx4  | 4 |  4  |  3  |   -    |   -    | error  |
+    // | BLOCK    | 4 |  4  |  3  |   -    |   -    | error  |
+    // +----------+---+-----+-----+--------+--------+--------+
+
+    if (max_depth == 2) {
+      // std::cout << "literal depth: " << literal_depth << "\n";
+      assert(literal_depth == 1);
+      switch (last_level) {
+      case ParallelLevel::THREAD: {
+        pb->SetLevel(ParallelLevel::BLOCK);
+      } break;
+      case ParallelLevel::GROUP: {
+        if (TargetMaxDepth() == 2)
+          Error1(pb->LOC(), "the parallel level can not be inferred.");
+        else
+          pb->SetLevel(ParallelLevel::BLOCK);
+      } break;
+      case ParallelLevel::GROUPx4: {
+        if (TargetMaxDepth() == 2)
+          Error1(pb->LOC(), "the parallel level can not be inferred.");
+        else
+          pb->SetLevel(ParallelLevel::BLOCK);
+      } break;
+      case ParallelLevel::BLOCK: {
+        Error1(pb->LOC(), "the parallel level can not be inferred.");
+      } break;
+      default: choreo_unreachable("unsupported parallel level.");
+      }
+    } else if (max_depth == 3) {
+      if (literal_depth == 1) {
+        assert(last_depth == 2);
+        switch (last_level) {
+        case ParallelLevel::THREAD: {
+          if (TargetMaxDepth() == 3 || TargetMaxDepth() == 4)
+            Error1(pb->LOC(), "the parallel level can not be inferred.");
+          else
+            pb->SetLevel(ParallelLevel::BLOCK);
+        } break;
+        case ParallelLevel::GROUP: {
+          pb->SetLevel(ParallelLevel::BLOCK);
+        } break;
+        case ParallelLevel::GROUPx4: {
+          pb->SetLevel(ParallelLevel::BLOCK);
+        } break;
+        case ParallelLevel::BLOCK: {
+          Error1(pb->LOC(), "the parallel level can not be inferred.");
+        } break;
+        default: choreo_unreachable("unsupported parallel level.");
+        }
+      } else if (literal_depth == 2) {
+        switch (last_level) {
+        case ParallelLevel::THREAD: {
+          if (TargetMaxDepth() == 2)
+            Error1(pb->LOC(), "the parallel level can not be inferred.");
+          else
+            pb->SetLevel(ParallelLevel::GROUP);
+        } break;
+        case ParallelLevel::GROUP: {
+          if (TargetMaxDepth() <= 3)
+            Error1(pb->LOC(), "the parallel level can not be inferred.");
+          else
+            pb->SetLevel(ParallelLevel::GROUPx4);
+        } break;
+        case ParallelLevel::GROUPx4: {
+          pb->SetLevel(ParallelLevel::BLOCK);
+        } break;
+        case ParallelLevel::BLOCK: {
+          Error1(pb->LOC(), "the parallel level can not be inferred.");
+        } break;
+        default: choreo_unreachable("unsupported parallel level.");
+        }
+      } else
+        choreo_unreachable("unsupported literal depth: " +
+                           std::to_string(literal_depth));
+    } else if (max_depth == 4) {
+      if (last_level == ParallelLevel::GROUPx4 && literal_depth == 1)
+        pb->SetLevel(ParallelLevel::BLOCK);
+      else if (last_level == ParallelLevel::GROUP && literal_depth == 2)
+        pb->SetLevel(ParallelLevel::GROUPx4);
+      else if (last_level == ParallelLevel::THREAD && literal_depth == 3)
+        pb->SetLevel(ParallelLevel::GROUP);
+      else
+        Error1(pb->LOC(), "the parallel level can not be inferred.");
+    }
+    return true;
+  }
+
+  bool FillMissingLevels(AST::ParallelBy* pb) {
+    bool support_group = TargetHasLevel(ParallelLevel::GROUP);
+    bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
+
+    auto last_level = last_pb->GetLevel();
+    auto cur_level = pb->GetLevel();
+
+    // missing betweens
+    switch (last_level) {
+    case ParallelLevel::THREAD: {
+      switch (cur_level) {
+      case ParallelLevel::BLOCK: {
+        if (support_group)
+          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+        if (support_4x_group)
+          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUPx4);
+      } break;
+      case ParallelLevel::GROUPx4: {
+        if (support_group)
+          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+      } break;
+      case ParallelLevel::GROUP:
+        // no-fill
+        break;
+      case ParallelLevel::THREAD:
+      default:
+        Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
+                              STR(cur_level) + " and " + STR(last_level) + ".");
+        break;
+      }
+    } break;
+    case ParallelLevel::GROUP: {
+      switch (cur_level) {
+      case ParallelLevel::BLOCK: {
+        if (support_4x_group)
+          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUPx4);
+      } break;
+      case ParallelLevel::GROUPx4: {
+        // no-fill
+      } break;
+      case ParallelLevel::GROUP:
+      case ParallelLevel::THREAD:
+      default:
+        Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
+                              STR(cur_level) + " and " + STR(last_level) + ".");
+        break;
+      }
+    } break;
+    case ParallelLevel::GROUPx4: {
+      switch (cur_level) {
+      case ParallelLevel::BLOCK: {
+        // no-fill
+      } break;
+      case ParallelLevel::GROUPx4:
+      case ParallelLevel::GROUP:
+      case ParallelLevel::THREAD:
+      default:
+        Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
+                              STR(last_level) + " and " + STR(cur_level) + ".");
+        break;
+      }
+    } break;
+    case ParallelLevel::BLOCK:
+    default:
+      Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
+                            STR(cur_level) + " and " + STR(last_level) + ".");
+    }
+
+    // missing inners
+    if (last_depth == max_depth) {
+      switch (last_level) {
+      case ParallelLevel::BLOCK: {
+        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD,
+                               CCtx().GetMinGroupDim());
+        if (support_group)
+          fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUP);
+        if (support_4x_group)
+          fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUPx4);
+      } break;
+      case ParallelLevel::GROUPx4: {
+        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD,
+                               CCtx().GetMinGroupDim());
+        if (support_group)
+          fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUP);
+      } break;
+      case ParallelLevel::GROUP: {
+        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD,
+                               CCtx().GetMinGroupDim());
+      } break;
+      case ParallelLevel::THREAD: break;
+      default:
+        Error1(pb->LOC(), "unable to infer the parallel-by level(s) inside " +
+                              STR(cur_level) + ".");
+        break;
+      }
+    }
+
+    // missing outers
+    if (literal_depth == 1) {
+      switch (cur_level) {
+      case ParallelLevel::BLOCK: {
+      } break;
+      case ParallelLevel::GROUPx4: {
+        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+      } break;
+      case ParallelLevel::GROUP: {
+        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+        if (support_4x_group)
+          fill_info.emplace_back(pb, Outer, ParallelLevel::GROUPx4);
+      } break;
+      case ParallelLevel::THREAD:
+        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+        if (support_4x_group)
+          fill_info.emplace_back(pb, Outer, ParallelLevel::GROUPx4);
+        if (support_group)
+          fill_info.emplace_back(pb, Outer, ParallelLevel::GROUP);
+        break;
+      default:
+        Error1(pb->LOC(), "unable to infer parallel-by level outside " +
+                              STR(cur_level) + ".");
+        break;
+      }
+    }
+
+    return true;
+  }
+
+  bool HandleSingleLevel(AST::ParallelBy* pb) {
+    bool support_group = TargetHasLevel(ParallelLevel::GROUP);
+    bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
+
+    switch (pb->GetLevel()) {
+    case ParallelLevel::THREAD: {
+      //   parallel p by 32
+      // =>
+      //   parallel x by 1 : block
+      //    parallel y by 1 : group-4 (optional)
+      //     parallel z by 1 : group  (optional)
+      //      parallel p by 32 : thread
+      pb->SetLevel(ParallelLevel::THREAD);
+      fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+      if (support_group)
+        fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+      if (support_4x_group)
+        fill_info.emplace_back(pb, Inner, ParallelLevel::GROUPx4);
+    } break;
+    case ParallelLevel::BLOCK: {
+      //   parallel p by 32: block
+      // =>
+      //   parallel p by 32 : block
+      //    parallel x by 1 : group-4 (optional)
+      //     parallel y by 1 : group (optional)
+      //      parallel y by 1 : thread
+      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
+      if (support_group)
+        fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+      if (support_4x_group)
+        fill_info.emplace_back(pb, Inner, ParallelLevel::GROUPx4);
+    } break;
+    case ParallelLevel::GROUPx4: {
+      //   parallel p by 32: group-4
+      // =>
+      //   parallel x by 1 : block
+      //    parallel p by 32 : group-4
+      //     parallel y by 1 : group
+      //      parallel z by 1 : thread
+      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
+      fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+      fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+    } break;
+    case ParallelLevel::GROUP: {
+      //   parallel p by 32: group
+      // =>
+      //   parallel x by 1 : block
+      //    parallel y by 1 : group-4 (optional)
+      //     parallel p by 32 : group
+      //      parallel z by 1 : thread
+      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
+      if (support_4x_group)
+        fill_info.emplace_back(pb, Outer, ParallelLevel::GROUPx4);
+      fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
+    } break;
+    default:
+      choreo_unreachable("unsupported single parallel-by level.");
+      return true;
     }
     return true;
   }

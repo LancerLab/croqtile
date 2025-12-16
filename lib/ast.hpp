@@ -159,6 +159,8 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     values.insert(values.begin() + index, m);
   }
 
+  void PopBack() { values.pop_back(); }
+
   size_t Count() const { return values.size(); }
   bool None() const { return Count() == 0; }
 

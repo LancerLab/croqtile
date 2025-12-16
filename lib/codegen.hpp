@@ -62,6 +62,7 @@ struct ParallelCounts {
 
 struct LaunchConfig {
   ParallelCounts block_count;
+  ParallelCounts group4_count;
   ParallelCounts group_count;
   ParallelCounts thread_count;
 
@@ -81,6 +82,16 @@ struct LaunchConfig {
     case 3: group_count.z = dims[2]; [[fallthrough]];
     case 2: group_count.y = dims[1]; [[fallthrough]];
     case 1: group_count.x = dims[0]; break;
+    default: choreo_unreachable("The number of dimensions is not supported.");
+    }
+  }
+
+  void SetGroupx4Count(const ValueList& dims) {
+    group4_count.Reset();
+    switch (dims.size()) {
+    case 3: group4_count.z = dims[2]; [[fallthrough]];
+    case 2: group4_count.y = dims[1]; [[fallthrough]];
+    case 1: group4_count.x = dims[0]; break;
     default: choreo_unreachable("The number of dimensions is not supported.");
     }
   }

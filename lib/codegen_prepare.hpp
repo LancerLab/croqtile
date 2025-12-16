@@ -87,6 +87,7 @@ private:
       switch (pb->GetLevel()) {
       case ParallelLevel::BLOCK: lc.SetBlockCount(pb->BoundValues()); break;
       case ParallelLevel::GROUP: lc.SetGroupCount(pb->BoundValues()); break;
+      case ParallelLevel::GROUPx4: lc.SetGroupx4Count(pb->BoundValues()); break;
       case ParallelLevel::THREAD: lc.SetThreadCount(pb->BoundValues()); break;
       default:
         choreo_unreachable("The explicit parallel-by level " +

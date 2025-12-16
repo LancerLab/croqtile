@@ -99,8 +99,8 @@ static std::unordered_map<int, ParallelLevel> wgmma_levels = {
 };
 
 static std::unordered_map<ParallelLevel, int> wgmma_depths = {
-    {ParallelLevel::SEQ, 0},    {ParallelLevel::BLOCK, 1},
-    {ParallelLevel::GROUP, 2},  {ParallelLevel::GROUPx4, 3},
+    {ParallelLevel::SEQ, 0},     {ParallelLevel::BLOCK, 1},
+    {ParallelLevel::GROUPx4, 2}, {ParallelLevel::GROUP, 3},
     {ParallelLevel::THREAD, 4},
 };
 
@@ -133,7 +133,6 @@ PlDepthMap::PlDepthMap() {
     to_levels = &gpu_simple_levels;
     to_depths = &gpu_simple_depths;
   } else if (CCtx().GetTarget() == CompileTarget::Cute) {
-#if 0
     if (CCtx().TargetSupportWGMMA()) {
       to_levels = &wgmma_levels;
       to_depths = &wgmma_depths;
@@ -141,10 +140,6 @@ PlDepthMap::PlDepthMap() {
       to_levels = &wmma_levels;
       to_depths = &wmma_depths;
     }
-#else
-    to_levels = &wmma_levels;
-    to_depths = &wmma_depths;
-#endif
   } else
     choreo_unreachable("unsupported target.");
 
