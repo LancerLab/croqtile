@@ -1,0 +1,63 @@
+#define M 256
+#define N 256
+#define K 256
+
+__co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int TILE_M = 32, TILE_N = 32, TILE_K = 16;
+  int WARP_M = 16, WARP_N = 16, WARP_K = 16;
+  int THR_M = 8, THR_N = 4;
+
+  // each block handles 128x128 block
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill 0.0;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+        lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
+
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+
+          ma = mma.load lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          // TODO: support this usage
+          // mc = mma.load thr_output_s;
+          mma.row.row mc, ma, mb;   // row * col : c += a * b;
+        }
+        // TODO: we have to trigger this store multiple times, which is meaningless
+        // but we have to use iv_warp_m and iv_warp_n, we cannot hoist it.
+        mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+      }
+    }
+  }
+
+  return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+  // lhs.fill_random(1, 10);
+  // rhs.fill_random(1, 10);
+  lhs.fill(1.0);
+  rhs.fill(1.0);
+
+  auto res = matmul(lhs.view(), rhs.view());
+
+  float tolerance = 0.005f;
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      __half ref = 0.0f;
+      for (size_t k = 0; k < lhs.shape()[1]; ++k)
+        ref += lhs[i][k] * rhs[k][j];
+      auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
+      if (delta >= tolerance) {
+        std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
+      }
+      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}

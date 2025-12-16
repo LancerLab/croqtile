@@ -131,6 +131,7 @@ target_compile_definitions(codegen PRIVATE
 
 if(ENABLE_CUDA)
   target_include_directories(codegen PRIVATE ${_cuda_root}/include)
+  target_include_directories(support PRIVATE ${_cuda_root}/include)
   link_directories(${_cuda_root}/lib64 ${_cuda_root}/targets/x86_64-linux/lib)
 
   target_compile_definitions(codegen PRIVATE

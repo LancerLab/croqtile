@@ -1,33 +1,30 @@
-#define M 256
-#define N 256
-#define K 256
+#define M 64 
+#define N 64 
+#define K 64 
 
-__co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
+__co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
   f16 [M, N] output{0.0f};
 
-  int TILE_M = 32, TILE_N = 32, TILE_K = 16;
-  int WARP_M = 16, WARP_N = 16, WARP_K = 16;
-  int THR_M = 8, THR_N = 4;
+  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;
 
-  // each block handles 128x128 block
-  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+  // each block handles 64x64 block with WGMMA
+  // WGMMA requires 128 threads (4 warps x 32 threads/warp)
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill 0.0;
     foreach {iv_k} in [cdiv(K, TILE_K)] {
+      // load 64x64 to smem
       lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
-      rhs_load_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
-
-      parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
-
-        mc = mma.fill 0.0;
-        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
-
-          ma = mma.load lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
-          mb = mma.load rhs_load_s.chunkat(iv_warp_k, iv_warp_n);
-          // mc = mma.load thr_output_s;
-          mma.row.col mc, ma, mb;   // row * col : c += a * b;
-          mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+      rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
+      // WGMMA requires 128 threads: 4 warps x 32 threads/warp
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel {thr_id} by [128] : thread {
+          ma = mma.load lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;   // row * col : c += a * b;
         }
       }
     }
+    mma.store mc, output.chunkat(block_m, block_n);
   }
 
   return output;
@@ -35,7 +32,7 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
 
 int main() {
   auto lhs = choreo::make_spandata<choreo::f16>(M, K);
-  auto rhs = choreo::make_spandata<choreo::f16>(K, N);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
   // lhs.fill_random(1, 10);
   // rhs.fill_random(1, 10);
   lhs.fill(1.0);
@@ -51,6 +48,7 @@ int main() {
       for (size_t k = 0; k < lhs.shape()[1]; ++k)
         ref += lhs[i][k] * rhs[k][j];
       auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
+      std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
       if (delta >= tolerance) {
         std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
       }

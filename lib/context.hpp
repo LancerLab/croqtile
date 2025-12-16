@@ -52,6 +52,7 @@ enum class TargetArch {
   SM_86,
   SM_89,
   SM_90,
+  SM_90a,
   SM_100,
   SM_120,
   End
@@ -91,6 +92,7 @@ inline static const std::string STR(TargetArch ta) {
   case TargetArch::SM_86: return "SM_86";
   case TargetArch::SM_89: return "SM_89";
   case TargetArch::SM_90: return "SM_90";
+  case TargetArch::SM_90a: return "SM_90a";
   case TargetArch::SM_100: return "SM_100";
   case TargetArch::SM_120: return "SM_120";
   default: choreo_unreachable("Unsupported architecture.");
@@ -279,7 +281,10 @@ private:
   std::map<std::string, OptimizedValues> sym_values;
   std::vector<RuntimeCheckEntry> rt_checks;
   std::vector<Assertion> assertions;
+  // TODO: consider to merge
   std::map<std::string, MMAType> frag_mma_type;
+  std::map<std::string, bool> frag_is_wmma;
+  std::map<std::string, bool> frag_is_wgmma;  // true for WGMMA fragments
   std::map<std::string, std::string> MMA_policy_of_frag;
 
   struct DynMemReuseInfo {
@@ -389,6 +394,24 @@ public:
     if (!PrefixedWith(scoped_frag_name, "::"))
       choreo_unreachable("expect the fragament name is scoped.");
     MMA_policy_of_frag[scoped_frag_name] = mma_policy;
+  }
+
+  // WGMMA-specific methods
+  bool FragIsWGMMA(const std::string& scoped_frag_name) const {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    if (!frag_is_wgmma.count(scoped_frag_name)) return false;
+    return frag_is_wgmma.at(scoped_frag_name);
+  }
+  void SetFragIsWGMMA(const std::string& scoped_frag_name, bool is_wgmma) {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    if (frag_is_wgmma.count(scoped_frag_name)) {
+      if (frag_is_wgmma.at(scoped_frag_name) != is_wgmma)
+        choreo_unreachable("expect the fragment to be always of wgmma or not.");
+    } else {
+      frag_is_wgmma.emplace(scoped_frag_name, is_wgmma);
+    }
   }
 };
 

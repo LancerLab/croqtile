@@ -199,6 +199,12 @@ static const std::map<MMAConfig, CUDA_CC> wmma_configs = {
      80},
     // 8 x 8 x 4
     {{DENSE, BT::F64, BT::F64, BT::F64, BT::F64, BT::UNKNOWN, {8, 8, 4}}, 80},
+    // WGMMA configs (SM90+, 128-thread warp groups)
+    // 64 x 64 x 16 (K=16 only for F16→F16, per GMMA spec)
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {64, 64, 16}},
+     90},
+    {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {64, 64, 16}},
+     90},
 };
 
 static const std::map<MMAConfig, CUDA_CC> cute_mma_configs = {
@@ -473,6 +479,38 @@ private:
   MMAConfigRegistry(MMAConfigRegistry&&) = delete;
   MMAConfigRegistry& operator=(MMAConfigRegistry&&) = delete;
 };
+// Helper functions for WGMMA detection and thread group size
+inline bool IsWGMMAShape(const MMAShape& shape) {
+  // WGMMA uses 64x64 tile sizes (M and N both >= 64)
+  return shape.m == 64 && shape.n == 64;
+}
+
+inline bool IsWGMMAShape(const ValueList& shape) {
+  // WGMMA uses 64x64 tile sizes (M and N both >= 64)
+  return sbe::ceq(shape[0], sbe::nu(64)) && sbe::ceq(shape[1], sbe::nu(64));
+}
+
+inline size_t GetThreadGroupSize(const MMAShape& shape) {
+  // WGMMA: 64x64 shapes use 128 threads (warp group)
+  // WMMA/MMA: all others use 32 threads (warp)
+  return IsWGMMAShape(shape) ? 128 : 32;
+}
+
+inline size_t GetThreadGroupSize(const ValueList& shape) {
+  // WGMMA: 64x64 shapes use 128 threads (warp group)
+  // WMMA/MMA: all others use 32 threads (warp)
+  return IsWGMMAShape(shape) ? 128 : 32;
+}
+
+inline bool ConfigIsWMMA(const MMAConfig& config) {
+  return wmma_configs.count(config);
+}
+
+inline bool ConfigIsWGMMA(const MMAConfig& config) {
+  // WGMMA configs are in wmma_configs with 64x64 shapes
+  if (!wmma_configs.count(config)) return false;
+  return IsWGMMAShape(config.shape);
+}
 
 inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
                                          const std::string& sep = "_") {

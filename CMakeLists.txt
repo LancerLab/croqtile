@@ -319,6 +319,17 @@ set(EXTERN_LIBS
   stdc++fs
 )
 
+# Add CUDA runtime library if CUDA is enabled
+if(ENABLE_CUDA)
+  # Try to find libcudart in standard CUDA locations
+  find_library(CUDART_LIB cudart HINTS ${_cuda_root}/lib64 ${_cuda_root}/targets/x86_64-linux/lib)
+  if(CUDART_LIB)
+    list(APPEND EXTERN_LIBS ${CUDART_LIB})
+  else()
+    message(WARNING "CUDA runtime library (libcudart) not found. Auto-detection may not work.")
+  endif()
+endif()
+
 # Link the library to the executable
 target_link_libraries(choreo PRIVATE
   parse

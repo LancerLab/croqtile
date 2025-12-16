@@ -2730,6 +2730,325 @@ struct Policy_D_M16N8_1 {
   }
 };
 
+// --------------- WGMMA primitives (SM90+) ---------------
+// refer to: https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-leading-dimension-byte-offset
+// 9.7.15.5.1.2.2. Matrix Descriptor Format
+// SWIZZLE pattern enum
+enum class WGMMA_Swizzle : uint64_t {
+  NS = 0,    // No swizzle
+  B32 = 3,   // 32B swizzle
+  B64 = 2,   // 64B swizzle
+  B128 = 1   // 128B swizzle
+};
+
+// Major order enum
+enum class WGMMA_MajorOrder {
+  K_MAJOR,   // K dimension is major (leading)
+  MN_MAJOR   // M and N dimensions are major (leading)
+};
+
+// Helper function to encode matrix descriptor
+__device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
+    return (((x) & 0x3FFFF) >> 0x4);
+}
+
+// Unified shared memory descriptor encoding template
+// Automatically determines stride and leading dimension based on major order and swizzle
+template<WGMMA_MajorOrder MajorOrder, WGMMA_Swizzle Swizzle, typename T>
+__device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
+  uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
+  uint64_t desc = 0x0000000000000000;
+  desc |= matrix_descriptor_encode(addr);
+
+  // Determine stride and leading dimension based on major order and swizzle
+  uint64_t stride_bytes = 0;
+  uint64_t leading_dim = 0;
+
+  if constexpr (MajorOrder == WGMMA_MajorOrder::K_MAJOR) {
+    // K-major layout: stride varies by swizzle pattern
+    switch (Swizzle) {
+      case WGMMA_Swizzle::NS:
+        stride_bytes = 128;
+        leading_dim = 64;
+        break;
+      case WGMMA_Swizzle::B32:
+        stride_bytes = 16;
+        leading_dim = 256;
+        break;
+      case WGMMA_Swizzle::B64:
+        stride_bytes = 16;
+        leading_dim = 512;
+        break;
+      case WGMMA_Swizzle::B128:
+        stride_bytes = 16;
+        leading_dim = 1024;
+        break;
+    }
+  } else {  // MN_MAJOR
+    // MN-major layout: stride varies by swizzle pattern
+    switch (Swizzle) {
+      case WGMMA_Swizzle::NS:
+        stride_bytes = 256;
+        leading_dim = 128;
+        break;
+      case WGMMA_Swizzle::B32:
+        stride_bytes = 256;
+        leading_dim = 512;
+        break;
+      case WGMMA_Swizzle::B64:
+        stride_bytes = 512;
+        leading_dim = 1024;
+        break;
+      case WGMMA_Swizzle::B128:
+        stride_bytes = 1024;
+        leading_dim = 2048;
+        break;
+    }
+  }
+
+  desc |= matrix_descriptor_encode(stride_bytes) << 16;
+  desc |= matrix_descriptor_encode(leading_dim) << 32;
+  desc |= static_cast<uint64_t>(Swizzle) << 62;
+
+  return desc;
+}
+
+// WGMMA fence/sync primitives
+__device__ static inline void warpgroup_arrive() {
+    asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
+}
+
+__device__ static inline void warpgroup_commit_batch() {
+    asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
+}
+
+template <int PD>
+__device__ static inline void warpgroup_wait() {
+    static_assert(PD >= 0 && PD <= 7, "WGMMA wait: N must be in range [0, 7]");
+    asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(PD) : "memory");
+}
+
+// Unified WGMMA template with automatic descriptor selection
+// Template parameters:
+//   - InputT: input data type (__half or __nv_bfloat16)
+//   - OutputT: output data type (float or same as InputT)
+//   - MajorOrderA: major order for matrix A (K_MAJOR or MN_MAJOR)
+//   - SwizzleA: swizzle pattern for matrix A
+//   - MajorOrderB: major order for matrix B (K_MAJOR or MN_MAJOR)
+//   - SwizzleB: swizzle pattern for matrix B
+//   - TransA: transpose A (0 or 1)
+//   - TransB: transpose B (0 or 1)
+template<typename InputT, typename OutputT,
+         WGMMA_MajorOrder MajorOrderA = WGMMA_MajorOrder::K_MAJOR,
+         WGMMA_Swizzle SwizzleA = WGMMA_Swizzle::NS,
+         WGMMA_MajorOrder MajorOrderB = WGMMA_MajorOrder::K_MAJOR,
+         WGMMA_Swizzle SwizzleB = WGMMA_Swizzle::NS,
+         int TransA = 0, int TransB = 0>
+__device__ static __forceinline__ void wgmma_m64n64k16(
+    OutputT d[4][8],
+    InputT* sA,
+    InputT* sB) {
+  static_assert(std::is_same_v<InputT, __half> || std::is_same_v<InputT, __nv_bfloat16>,
+                "wgmma_m64n64k16_unified requires __half or __nv_bfloat16 input type");
+  static_assert(std::is_same_v<OutputT, float> || std::is_same_v<OutputT, InputT>,
+                "wgmma_m64n64k16_unified requires float or same as InputT output type");
+
+  uint64_t desc_a = wgmma_make_smem_desc<MajorOrderA, SwizzleA>(&sA[0]);
+  uint64_t desc_b = wgmma_make_smem_desc<MajorOrderB, SwizzleB>(&sB[0]);
+
+  // Determine PTX instruction based on input and output types
+  if constexpr (std::is_same_v<InputT, __half> && std::is_same_v<OutputT, __half>) {
+    asm volatile(
+        "{\n"
+        "wgmma.mma_async.sync.aligned.m64n64k16.f16.f16.f16 "
+        "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
+        " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
+        " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
+        " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
+        " %32,"
+        " %33,"
+        " %34, %35, %36, %37, %38;\n"
+        "}\n"
+        : "+h"(*(uint16_t*)&d[0][0]), "+h"(*(uint16_t*)&d[0][1]), "+h"(*(uint16_t*)&d[0][2]), "+h"(*(uint16_t*)&d[0][3]),
+          "+h"(*(uint16_t*)&d[0][4]), "+h"(*(uint16_t*)&d[0][5]), "+h"(*(uint16_t*)&d[0][6]), "+h"(*(uint16_t*)&d[0][7]),
+          "+h"(*(uint16_t*)&d[1][0]), "+h"(*(uint16_t*)&d[1][1]), "+h"(*(uint16_t*)&d[1][2]), "+h"(*(uint16_t*)&d[1][3]),
+          "+h"(*(uint16_t*)&d[1][4]), "+h"(*(uint16_t*)&d[1][5]), "+h"(*(uint16_t*)&d[1][6]), "+h"(*(uint16_t*)&d[1][7]),
+          "+h"(*(uint16_t*)&d[2][0]), "+h"(*(uint16_t*)&d[2][1]), "+h"(*(uint16_t*)&d[2][2]), "+h"(*(uint16_t*)&d[2][3]),
+          "+h"(*(uint16_t*)&d[2][4]), "+h"(*(uint16_t*)&d[2][5]), "+h"(*(uint16_t*)&d[2][6]), "+h"(*(uint16_t*)&d[2][7]),
+          "+h"(*(uint16_t*)&d[3][0]), "+h"(*(uint16_t*)&d[3][1]), "+h"(*(uint16_t*)&d[3][2]), "+h"(*(uint16_t*)&d[3][3]),
+          "+h"(*(uint16_t*)&d[3][4]), "+h"(*(uint16_t*)&d[3][5]), "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
+        : "l"(desc_a), "l"(desc_b),
+          "n"(1), "n"(1), "n"(1), "n"(TransA), "n"(TransB));
+  } else if constexpr (std::is_same_v<InputT, __half> && std::is_same_v<OutputT, float>) {
+    asm volatile(
+        "{\n"
+        "wgmma.mma_async.sync.aligned.m64n64k16.f32.f16.f16 "
+        "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
+        " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
+        " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
+        " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
+        " %32,"
+        " %33,"
+        " %34, %35, %36, %37, %38;\n"
+        "}\n"
+        : "+f"(d[0][0]), "+f"(d[0][1]), "+f"(d[0][2]), "+f"(d[0][3]),
+          "+f"(d[0][4]), "+f"(d[0][5]), "+f"(d[0][6]), "+f"(d[0][7]),
+          "+f"(d[1][0]), "+f"(d[1][1]), "+f"(d[1][2]), "+f"(d[1][3]),
+          "+f"(d[1][4]), "+f"(d[1][5]), "+f"(d[1][6]), "+f"(d[1][7]),
+          "+f"(d[2][0]), "+f"(d[2][1]), "+f"(d[2][2]), "+f"(d[2][3]),
+          "+f"(d[2][4]), "+f"(d[2][5]), "+f"(d[2][6]), "+f"(d[2][7]),
+          "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]),
+          "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
+        : "l"(desc_a), "l"(desc_b),
+          "n"(1), "n"(1), "n"(1), "n"(TransA), "n"(TransB));
+  } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> && std::is_same_v<OutputT, __nv_bfloat16>) {
+    asm volatile(
+        "{\n"
+        "wgmma.mma_async.sync.aligned.m64n64k16.bf16.bf16.bf16 "
+        "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
+        " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
+        " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
+        " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
+        " %32,"
+        " %33,"
+        " %34, %35, %36, %37, %38;\n"
+        "}\n"
+        : "+h"(*(uint16_t*)&d[0][0]), "+h"(*(uint16_t*)&d[0][1]), "+h"(*(uint16_t*)&d[0][2]), "+h"(*(uint16_t*)&d[0][3]),
+          "+h"(*(uint16_t*)&d[0][4]), "+h"(*(uint16_t*)&d[0][5]), "+h"(*(uint16_t*)&d[0][6]), "+h"(*(uint16_t*)&d[0][7]),
+          "+h"(*(uint16_t*)&d[1][0]), "+h"(*(uint16_t*)&d[1][1]), "+h"(*(uint16_t*)&d[1][2]), "+h"(*(uint16_t*)&d[1][3]),
+          "+h"(*(uint16_t*)&d[1][4]), "+h"(*(uint16_t*)&d[1][5]), "+h"(*(uint16_t*)&d[1][6]), "+h"(*(uint16_t*)&d[1][7]),
+          "+h"(*(uint16_t*)&d[2][0]), "+h"(*(uint16_t*)&d[2][1]), "+h"(*(uint16_t*)&d[2][2]), "+h"(*(uint16_t*)&d[2][3]),
+          "+h"(*(uint16_t*)&d[2][4]), "+h"(*(uint16_t*)&d[2][5]), "+h"(*(uint16_t*)&d[2][6]), "+h"(*(uint16_t*)&d[2][7]),
+          "+h"(*(uint16_t*)&d[3][0]), "+h"(*(uint16_t*)&d[3][1]), "+h"(*(uint16_t*)&d[3][2]), "+h"(*(uint16_t*)&d[3][3]),
+          "+h"(*(uint16_t*)&d[3][4]), "+h"(*(uint16_t*)&d[3][5]), "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
+        : "l"(desc_a), "l"(desc_b),
+          "n"(1), "n"(1), "n"(1), "n"(TransA), "n"(TransB));
+  } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> && std::is_same_v<OutputT, float>) {
+    asm volatile(
+        "{\n"
+        "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
+        "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
+        " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
+        " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
+        " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
+        " %32,"
+        " %33,"
+        " %34, %35, %36, %37, %38;\n"
+        "}\n"
+        : "+f"(d[0][0]), "+f"(d[0][1]), "+f"(d[0][2]), "+f"(d[0][3]),
+          "+f"(d[0][4]), "+f"(d[0][5]), "+f"(d[0][6]), "+f"(d[0][7]),
+          "+f"(d[1][0]), "+f"(d[1][1]), "+f"(d[1][2]), "+f"(d[1][3]),
+          "+f"(d[1][4]), "+f"(d[1][5]), "+f"(d[1][6]), "+f"(d[1][7]),
+          "+f"(d[2][0]), "+f"(d[2][1]), "+f"(d[2][2]), "+f"(d[2][3]),
+          "+f"(d[2][4]), "+f"(d[2][5]), "+f"(d[2][6]), "+f"(d[2][7]),
+          "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]),
+          "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
+        : "l"(desc_a), "l"(desc_b),
+          "n"(1), "n"(1), "n"(1), "n"(TransA), "n"(TransB));
+  }
+}
+
+// WGMMA 64x64x16 for FP16 (produces FP32 accumulator) - with K_MAJOR and MN_MAJOR support
+
+// WGMMA accumulator store helper (64x64 output, 128 threads)
+// Each thread holds d[4][8] = 32 elements of the 64x64 output
+// The layout follows WGMMA's output register mapping:
+// - 128 threads in a warp group (4 warps x 32 threads)
+// - Each thread holds 32 floats (4 rows x 8 columns in the local view)
+// - Total: 128 threads x 32 elements = 4096 elements = 64x64 output
+//
+// Thread layout for m64n64 (column-major output):
+// - warp_id (0-3): selects which 16-row section (each warp handles 16 rows)
+// - lane (0-31): lane within warp
+// - row = warp_id * 16 + lane / 4 (each group of 4 lanes handles same row)
+// - col = 16 * w + 2 * (tid % 4) (each thread handles 2 columns per iteration)
+// - d[w][0..7] maps to 8 elements: (row, col), (row, col+1), (row+8, col), (row+8, col+1), ...
+template<typename AccumT, typename OutputT>
+__device__ static inline void wgmma_store_row_major(OutputT* output, AccumT (&d)[4][8], int stride) {
+  static_assert(std::is_same_v<AccumT, float>, "wgmma_store_d requires float accumulator type");
+  static_assert(std::is_same_v<OutputT, __half>, "wgmma_store_d requires __half output type");
+  int tid = threadIdx.x % 128;
+  int lane = tid % 32;          // 0-31: lane within warp
+  int warp = tid / 32;          // 0-3: which warp in warp group
+
+  // Row calculation: each group of 4 lanes handles the same row
+  int row = warp * 16 + lane / 4;
+
+  // Store d[w][0..7] to global memory
+  // d[w][0] -> (row, col)
+  // d[w][1] -> (row, col+1)
+  // d[w][2] -> (row+8, col)
+  // d[w][3] -> (row+8, col+1)
+  // d[w][4] -> (row, col+8)
+  // d[w][5] -> (row, col+9)
+  // d[w][6] -> (row+8, col+8)
+  // d[w][7] -> (row+8, col+9)
+  for (int w = 0; w < 4; ++w) {
+    int col = 16 * w + 2 * (tid % 4);
+
+    // Store the 8 elements from d[w][0..7]
+    output[row * stride + col] = __float2half(d[w][0]);
+    output[row * stride + (col + 1)] = __float2half(d[w][1]);
+    output[(row + 8) * stride + col] = __float2half(d[w][2]);
+    output[(row + 8) * stride + (col + 1)] = __float2half(d[w][3]);
+    output[(row) * stride + (col + 8)] = __float2half(d[w][4]);
+    output[(row) * stride + (col + 9)] = __float2half(d[w][5]);
+    output[(row + 8) * stride + (col + 8)] = __float2half(d[w][6]);
+    output[(row + 8) * stride + (col + 9)] = __float2half(d[w][7]);
+  }
+}
+
+template<typename AccumT, typename OutputT>
+__device__ static inline void wgmma_store_col_major(OutputT* output, AccumT (&d)[4][8], int stride) {
+  static_assert(std::is_same_v<AccumT, float>, "wgmma_store_d requires float accumulator type");
+  static_assert(std::is_same_v<OutputT, __half>, "wgmma_store_d requires __half output type");
+  int tid = threadIdx.x % 128;
+  int lane = tid % 32;          // 0-31: lane within warp
+  int warp = tid / 32;          // 0-3: which warp in warp group
+
+  // Row calculation: each group of 4 lanes handles the same row
+  int row = warp * 16 + lane / 4;
+
+  // Store d[w][0..7] to global memory
+  // d[w][0] -> (row, col)
+  // d[w][1] -> (row, col+1)
+  // d[w][2] -> (row+8, col)
+  // d[w][3] -> (row+8, col+1)
+  // d[w][4] -> (row, col+8)
+  // d[w][5] -> (row, col+9)
+  // d[w][6] -> (row+8, col+8)
+  // d[w][7] -> (row+8, col+9)
+  for (int w = 0; w < 4; ++w) {
+    int col = 16 * w + 2 * (tid % 4);
+
+    // Store the 8 elements from d[w][0..7]
+    output[row + col * stride] = __float2half(d[w][0]);
+    output[row + (col + 1) * stride] = __float2half(d[w][1]);
+    output[(row + 8) + col * stride] = __float2half(d[w][2]);
+    output[(row + 8) + (col + 1) * stride] = __float2half(d[w][3]);
+    output[(row) + (col + 8) * stride] = __float2half(d[w][4]);
+    output[(row) + (col + 9) * stride] = __float2half(d[w][5]);
+    output[(row + 8) + (col + 8) * stride] = __float2half(d[w][6]);
+    output[(row + 8) + (col + 9) * stride] = __float2half(d[w][7]);
+  }
+}
+
+// Unified WGMMA store function - uses row-major layout by default
+// This is the main interface for storing WGMMA accumulator to global memory
+template<typename AccumT, typename OutputT>
+__device__ static inline void wgmma_store_d(OutputT* output, AccumT (&d)[4][8], int stride) {
+  static_assert(std::is_same_v<AccumT, float>, "wgmma_store_d requires float accumulator type");
+  static_assert(std::is_same_v<OutputT, __half>, "wgmma_store_d requires __half output type");
+  // Use row-major layout by default (most common case)
+  wgmma_store_row_major(output, d, stride);
+}
+
+// --------------- GMMA/WGMMA (SM90+) ---------------
+// Note: WGMMA (Warp Group MMA) uses PTX inline assembly directly via:
+//   - wgmma_m64n64k16<AccumT, InputT>(d, sA, stride_a, ldim_a, sB, stride_b, ldim_b)
+//   - wgmma_store_d<AccumT, OutputT>(output, d, stride)
+// No cute MMA policies are needed for WGMMA.
+
 template <class MMA, class Tensor>
 __device__ static inline auto load_fragment_a(Tensor const& A) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
@@ -3029,6 +3348,10 @@ struct MMA_Policy<cute::SM80_16x8x32_S32U8U8S32_TN> {
 // TODO: all 16x8x128 (b1)
 
 // TODO: all 16x8x256 (b1)
+
+// --------------- WGMMA policies (SM90+) ---------------
+// Note: WGMMA uses PTX inline assembly directly via wgmma_m64n64k16<> template.
+// No MMA_Policy specializations are needed for WGMMA as it bypasses the cute MMA policy system.
 
 #endif // __CHOREO_TARGET_CUTE__
 
