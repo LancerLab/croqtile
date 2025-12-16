@@ -1333,6 +1333,7 @@ bool SimplePreprocessor::Process(std::istream& input) {
   code_partition = CP_USER;
   std::string cur_line;
   std::string line_to_handle;
+  int extra_line = 0;
   while (std::getline(input, cur_line)) {
     // we skip the include of choreo.h, which is not needed for extracting
     // device kernels from preprocessed file
@@ -1346,14 +1347,19 @@ bool SimplePreprocessor::Process(std::istream& input) {
     }
     if (code_partition == CP_KERNEL) cok_codes.push_back(cur_line);
 
-    if (line_to_handle.back() == '\\') {
+    auto fisrt_pos = cur_line.find_first_of("//");
+    // todo: more robust way to detect if in comment
+    bool in_comment = c_skip || (fisrt_pos != std::string::npos &&
+                             fisrt_pos == cur_line.find_first_not_of(' '));
+
+    if (line_to_handle.back() == '\\' && !in_comment) {
       line_to_handle.pop_back();
       line_to_handle += " " + trim(cur_line);
     } else
       line_to_handle = cur_line;
 
     size_t bs_pos = cur_line.find_last_of('\\');
-    if (bs_pos != std::string::npos &&
+    if (bs_pos != std::string::npos && !in_comment &&
         bs_pos == cur_line.find_last_not_of(' ')) {
       if (bs_pos != cur_line.size() - 1)
         errs() << ("copp: in line " + std::to_string(line_num) +
@@ -1361,8 +1367,13 @@ bool SimplePreprocessor::Process(std::istream& input) {
       line_num++;
       line_to_handle =
           line_to_handle.substr(0, line_to_handle.find_last_not_of(' ') + 1);
+      extra_line++;
       continue;
     }
+
+    for (int i = 0; i < extra_line; ++i)
+      output << "// #line " << line_num - extra_line + i << "\n";
+    extra_line = 0;
 
     if (code_partition == CP_USER) {
       HandleOneUserLine(line_to_handle);
