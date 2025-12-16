@@ -206,6 +206,7 @@ bool CuteCodeGen::ThreadCooperative(AST::DMA&) const {
   case TargetArch::SM_86:
   case TargetArch::SM_89: return true; // no TMA support
   case TargetArch::SM_90:
+  case TargetArch::SM_90a:
   case TargetArch::SM_100:
   case TargetArch::SM_120: return false;
   default: choreo_unreachable("unsupported target arch.");
@@ -3207,8 +3208,6 @@ NVCC_LIB=${CUDA_LIB}/lib
 
   // the arch type
   auto arch_str = ToLower(STR(CCtx().GetArch()));
-  // For SM_90, we need to use sm_90a for WGMMA support
-  if (arch_str == "sm_90") arch_str = "sm_90a";
   os << "nv_arch=" << arch_str << "\n";
 
   os << R"script(
@@ -3232,7 +3231,15 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="--gpu-architecture=compute_90a --gpu-code=sm_90a -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
+  // Generate CUDA architecture flags based on the target architecture
+  std::string compute_arch = arch_str;
+  std::string code_arch = arch_str;
+  // Convert sm_XX to compute_XX for the compute architecture
+  if (compute_arch.substr(0, 3) == "sm_") {
+    compute_arch = "compute_" + compute_arch.substr(3);
+  }
+
+  os << R"(export CFLAGS="--gpu-architecture=)" << compute_arch << R"( --gpu-code=)" << code_arch << R"( -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
   if (use_cuda_type)
     os << " -D__USE_CUDA_TYPE__";
   else

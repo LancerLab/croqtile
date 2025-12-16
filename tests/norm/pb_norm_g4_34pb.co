@@ -1,4 +1,4 @@
-// RUN: choreo -t cute -arch=sm_90 -pa=pbfill -sa=pbfill %s | FileCheck %s
+// RUN: choreo -t cute -arch=sm_90a -pa=pbfill -sa=pbfill %s | FileCheck %s
 
 
 __co__ void wow0() { parallel by 2 parallel by 4 parallel by 6;  }

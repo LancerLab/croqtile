@@ -70,6 +70,7 @@ inline static int ArchNum(TargetArch ta) {
   case TargetArch::SM_86: return 86;
   case TargetArch::SM_89: return 89;
   case TargetArch::SM_90: return 90;
+  case TargetArch::SM_90a: return 90;
   case TargetArch::SM_100: return 100;
   case TargetArch::SM_120: return 120;
   default: choreo_unreachable("Unsupported Architecture.");
@@ -610,6 +611,14 @@ public:
       default: choreo_unreachable("Unsupported mem level.");
       }
 
+    case TargetArch::SM_90a:
+      switch (sto) {
+      case Storage::LOCAL: return 2048;                        // 2KB
+      case Storage::SHARED: return 164ull * 1024;              // 164KB
+      case Storage::GLOBAL: return 80ull * 1024 * 1024 * 1024; // 80GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+
     case TargetArch::SM_100:
       switch (sto) {
       case Storage::LOCAL: return 2048;                         // 2KB
@@ -660,6 +669,7 @@ public:
   bool TargetSupportTMA() const {
     switch (GetArch()) {
     case TargetArch::SM_90:
+    case TargetArch::SM_90a:
     case TargetArch::SM_100:
     case TargetArch::SM_120: return true;
     default: break;
@@ -675,6 +685,7 @@ public:
     case TargetArch::SM_86:
     case TargetArch::SM_89:
     case TargetArch::SM_90:
+    case TargetArch::SM_90a:
     case TargetArch::SM_100:
     case TargetArch::SM_120: return true;
     default: break;
@@ -684,7 +695,7 @@ public:
 
   bool TargetSupportWGMMA() const {
     switch (GetArch()) {
-    case TargetArch::SM_90:
+    case TargetArch::SM_90a:
     case TargetArch::SM_100:
     case TargetArch::SM_120: return true;
     default: break;

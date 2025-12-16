@@ -261,10 +261,10 @@ bool CommandLine::Parse(int argc, char** argv) {
     CCtx().SetArch(TargetArch::SM_89);
   else if (ToUpper(arch.GetValue()) == "SM_90")
     CCtx().SetArch(TargetArch::SM_90);
-  else if (ToUpper(arch.GetValue()) == "SM_90a")
-    CCtx().SetArch(TargetArch::SM_90);
+  else if (ToUpper(arch.GetValue()) == "SM_90A")
+    CCtx().SetArch(TargetArch::SM_90a);
   else if (ToUpper(arch.GetValue()) == "SM_100")
-    CCtx().SetArch(TargetArch::SM_90);
+    CCtx().SetArch(TargetArch::SM_100);
   else if (arch.GetValue() == "") {
     // fill the default
     if (CCtx().GetTarget() == CompileTarget::Topscc)
