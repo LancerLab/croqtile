@@ -285,7 +285,7 @@ private:
   // TODO: consider to merge
   std::map<std::string, MMAType> frag_mma_type;
   std::map<std::string, bool> frag_is_wmma;
-  std::map<std::string, bool> frag_is_wgmma;  // true for WGMMA fragments
+  std::map<std::string, bool> frag_is_wgmma; // true for WGMMA fragments
   std::map<std::string, std::string> MMA_policy_of_frag;
 
   struct DynMemReuseInfo {

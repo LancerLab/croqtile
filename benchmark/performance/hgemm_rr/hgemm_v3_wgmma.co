@@ -14,13 +14,13 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
     foreach {iv_k} in [cdiv(K, TILE_K)] {
       // load 64x64 to smem
       lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
-      rhs_load_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
+      rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
       // WGMMA requires 128 threads: 4 warps x 32 threads/warp
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel {thr_id} by [128] : thread {
           ma = mma.load lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load rhs_load_s.chunkat(iv_warp, _);
-          mma.row.col mc, ma, mb;   // row * col : c += a * b;
+          mb = mma.load rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;   // row * col : c += a * b;
         }
       }
     }
@@ -32,7 +32,7 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
 
 int main() {
   auto lhs = choreo::make_spandata<choreo::f16>(M, K);
-  auto rhs = choreo::make_spandata<choreo::f16>(K, N);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
   // lhs.fill_random(1, 10);
   // rhs.fill_random(1, 10);
   lhs.fill(1.0);
@@ -49,10 +49,10 @@ int main() {
         ref += lhs[i][k] * rhs[k][j];
       auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
       std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
-      // if (delta >= tolerance) {
-      //   std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
-      // }
-      // choreo::choreo_assert((delta < tolerance), "values are not equal.");
+      if (delta >= tolerance) {
+        std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
+      }
+      choreo::choreo_assert((delta < tolerance), "values are not equal.");
     }
 
   std::cout << "Test Passed\n" << std::endl;

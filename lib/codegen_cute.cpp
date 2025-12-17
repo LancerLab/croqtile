@@ -2017,15 +2017,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     auto& ssmi = cgi.GetSymbolMMA(InScopeName(op.GetFragSym()));
     // Determine accumulator type: f32 for f16->f32, f16 for f16->f16
     std::string accum_type = (ssmi.ty == BaseType::F16) ? "f16" : "f32";
-    // For now, assume f16 input always uses f32 accumulator for better precision
-    accum_type = "f32";  // TODO: make configurable based on MMA config
-    (void)accum_type;  // suppress unused warning for now
+    // For now, assume f16 input always uses f32 accumulator for better
+    // precision
+    accum_type = "f32"; // TODO: make configurable based on MMA config
+    (void)accum_type;   // suppress unused warning for now
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: {
       auto sym = op.FillingSymbol();
-      // Declare WGMMA accumulator: float d[4][8] for 64x64 output with 128 threads
+      // Declare WGMMA accumulator: float d[4][8] for 64x64 output with 128
+      // threads
       ds << d_indent << "float " << sym << "_d[4][8];\n";
-      ds << d_indent << "memset(" << sym << "_d, 0, sizeof(" << sym << "_d));\n";
+      ds << d_indent << "memset(" << sym << "_d, 0, sizeof(" << sym
+         << "_d));\n";
       // Signal warp group that we're about to start WGMMA operations
       ds << d_indent << "warpgroup_arrive();\n";
     } break;
@@ -2038,19 +2041,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
          << ExprSTR(op.LoadFrom(), false) << ");\n";
     } break;
     case AST::MMAOperation::Exec: {
-      // WGMMA execution using unified template with automatic descriptor selection
-      // Operands: C (accum), A, B - result stored in C
+      // WGMMA execution using unified template with automatic descriptor
+      // selection Operands: C (accum), A, B - result stored in C
       auto c_sym = op.ExecOperand(0);
       auto a_sym = op.ExecOperand(1);
       auto b_sym = op.ExecOperand(2);
 
       // Get input type from symbol MMA info
       auto a_type = cgi.GetSymbolMMA(InScopeName(a_sym)).ty;
-      std::string input_type = (a_type == BaseType::F16) ? "__half" : "__nv_bfloat16";
+      std::string input_type =
+          (a_type == BaseType::F16) ? "__half" : "__nv_bfloat16";
 
       // Detect memory layout based on MMA execution method
-      // mma.row.row: both A and B are K_MAJOR (left operand K-major, right operand K-major)
-      // mma.row.col: A is K_MAJOR, B is MN_MAJOR (left operand K-major, right operand MN-major)
+      // mma.row.row: both A and B are K_MAJOR (left operand K-major, right
+      // operand K-major) mma.row.col: A is K_MAJOR, B is MN_MAJOR (left operand
+      // K-major, right operand MN-major)
       std::string major_order_a, major_order_b;
       int trans_a = 0;
       int trans_b = 0;
@@ -2085,12 +2090,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
       // Use unified template with appropriate major orders
       ds << d_indent << "// WGMMA 64x64x16 execution using unified template\n";
-      ds << d_indent << "// Note: warpgroup_arrive() should be called once before first WGMMA\n";
-      ds << d_indent << "// and warpgroup_wait() should be called once after all WGMMAs\n";
+      ds << d_indent
+         << "// Note: warpgroup_arrive() should be called once before first "
+            "WGMMA\n";
+      ds << d_indent
+         << "// and warpgroup_wait() should be called once after all WGMMAs\n";
       ds << d_indent << "wgmma_m64n64k16<" << input_type << ", float,\n";
-      ds << d_indent << "                " << major_order_a << ", WGMMA_Swizzle::NS,\n";
-      ds << d_indent << "                " << major_order_b << ", WGMMA_Swizzle::NS,\n";
-      ds << d_indent << "                " << trans_a << ", " << trans_b << ">(\n";
+      ds << d_indent << "                " << major_order_a
+         << ", WGMMA_Swizzle::NS,\n";
+      ds << d_indent << "                " << major_order_b
+         << ", WGMMA_Swizzle::NS,\n";
+      ds << d_indent << "                " << trans_a << ", " << trans_b
+         << ">(\n";
       ds << d_indent << "    " << c_sym << "_d,\n";
       ds << d_indent << "    " << a_sym << "_smem_ptr,\n";
       ds << d_indent << "    " << b_sym << "_smem_ptr);\n";
@@ -2106,9 +2117,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ds << d_indent << "warpgroup_wait<0>();\n";
       // Store WGMMA accumulator to global memory
       ds << d_indent << "// WGMMA store accumulator to global memory\n";
-      ds << d_indent << "choreo::wgmma_store_d<float, " << NameBaseType(store_ssmi.ty) << ">(\n";
+      ds << d_indent << "choreo::wgmma_store_d<float, "
+         << NameBaseType(store_ssmi.ty) << ">(\n";
       ds << d_indent << "    (" << NameBaseType(store_ssmi.ty) << "*)("
-         << ExprSTR(op.StoreTo(), false) << "), " << from_sym << "_d, " << N << ");\n";
+         << ExprSTR(op.StoreTo(), false) << "), " << from_sym << "_d, " << N
+         << ");\n";
     } break;
     default: break;
     }

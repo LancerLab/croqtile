@@ -777,7 +777,8 @@ public:
       if (is_wgmma && arch < 90)
         Error1(n.LOC(), "WGMMA [" + MMAShapeSTR(mma_shape) +
                             "] requires SM90+ architecture, "
-                            "but target is SM" + std::to_string(arch) + ".");
+                            "but target is SM" +
+                            std::to_string(arch) + ".");
 
       FCtx(cur_fname).SetFragIsWGMMA(InScopeName(a_sym), is_wgmma);
       FCtx(cur_fname).SetFragIsWGMMA(InScopeName(b_sym), is_wgmma);

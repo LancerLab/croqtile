@@ -2,7 +2,7 @@
 #define N 256
 #define K 256
 
-__co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
+__co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
   f16 [M, N] output{0.0f};
 
   int TILE_M = 32, TILE_N = 32, TILE_K = 16;
@@ -15,15 +15,15 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
       mc = mma.fill 0.0;
       foreach {iv_k} in [cdiv(K, TILE_K)] {
         lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
-        rhs_load_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
+        rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
 
         foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
 
           ma = mma.load lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
-          mb = mma.load rhs_load_s.chunkat(iv_warp_k, iv_warp_n);
+          mb = mma.load rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
           // TODO: support this usage
           // mc = mma.load thr_output_s;
-          mma.row.col mc, ma, mb;   // row * col : c += a * b;
+          mma.row.row mc, ma, mb;   // row * col : c += a * b;
         }
         // TODO: we have to trigger this store multiple times, which is meaningless
         // but we have to use iv_warp_m and iv_warp_n, we cannot hoist it.
@@ -37,7 +37,7 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
 
 int main() {
   auto lhs = choreo::make_spandata<choreo::f16>(M, K);
-  auto rhs = choreo::make_spandata<choreo::f16>(K, N);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
   // lhs.fill_random(1, 10);
   // rhs.fill_random(1, 10);
   lhs.fill(1.0);

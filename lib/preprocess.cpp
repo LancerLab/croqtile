@@ -1350,7 +1350,7 @@ bool SimplePreprocessor::Process(std::istream& input) {
     auto fisrt_pos = cur_line.find_first_of("//");
     // todo: more robust way to detect if in comment
     bool in_comment = c_skip || (fisrt_pos != std::string::npos &&
-                             fisrt_pos == cur_line.find_first_not_of(' '));
+                                 fisrt_pos == cur_line.find_first_not_of(' '));
 
     if (line_to_handle.back() == '\\' && !in_comment) {
       line_to_handle.pop_back();
