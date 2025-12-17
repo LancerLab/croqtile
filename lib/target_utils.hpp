@@ -199,12 +199,6 @@ static const std::map<MMAConfig, CUDA_CC> wmma_configs = {
      80},
     // 8 x 8 x 4
     {{DENSE, BT::F64, BT::F64, BT::F64, BT::F64, BT::UNKNOWN, {8, 8, 4}}, 80},
-    // WGMMA configs (SM90+, 128-thread warp groups)
-    // 64 x 64 x 16 (K=16 only for F16→F16, per GMMA spec)
-    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {64, 64, 16}},
-     90},
-    {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {64, 64, 16}},
-     90},
 };
 
 static const std::map<MMAConfig, CUDA_CC> cute_mma_configs = {
