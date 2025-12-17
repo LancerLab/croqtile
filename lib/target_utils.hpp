@@ -443,14 +443,14 @@ public:
     return cute_mma_configs.count(config);
   }
 
-  bool IsWGMMMAConfig(const MMAConfig& config) const {
+  bool IsWGMMAConfig(const MMAConfig& config) const {
     return wgmma_configs_.count(config);
   }
 
   bool IsValidMMAConfig(const MMAConfig& config, MMALimit::CUDA_CC cc) const {
     if (IsWMMAConfig(config))
       return wmma_configs.at(config) <= cc;
-    else if (IsWGMMMAConfig(config))
+    else if (IsWGMMAConfig(config))
       return wgmma_configs_.at(config) <= cc;
     else if (IsCuteMMAConfig(config))
       return cute_mma_configs.at(config) <= cc;
@@ -461,7 +461,7 @@ public:
   MMAType GetMMAType(const MMAConfig& config) const {
     if (IsWMMAConfig(config))
       return MMAType::WMMA;
-    else if (IsWGMMMAConfig(config))
+    else if (IsWGMMAConfig(config))
       return MMAType::WGMMA;
     else if (IsCuteMMAConfig(config))
       return MMAType::CTMMA;
@@ -534,7 +534,6 @@ inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
                          ty_str(mma_config.b_ty) + ty_str(mma_config.c_ty)));
   // row, col
   strs.push_back("TN");
-  // TODO: STR is not worked for F8_E4M3...
   return DelimitedString(strs, sep);
 }
 

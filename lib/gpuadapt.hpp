@@ -770,20 +770,15 @@ public:
                             "] is not support by current architecture(" +
                             STR(CCtx().GetArch()) + ").");
 
-      bool is_wmma = MMALimit::ConfigIsWMMA(mma_config);
-      bool is_wgmma = MMALimit::ConfigIsWGMMA(mma_config);
+      auto mma_ty = MMARegistry.GetMMAType(mma_config);
 
       // WGMMA requires SM90+ architecture
-      if (is_wgmma && arch < 90)
+      if (mma_ty == MMAType::WGMMA && arch < 90)
         Error1(n.LOC(), "WGMMA [" + MMAShapeSTR(mma_shape) +
                             "] requires SM90+ architecture, "
                             "but target is SM" +
                             std::to_string(arch) + ".");
 
-      FCtx(cur_fname).SetFragIsWGMMA(InScopeName(a_sym), is_wgmma);
-      FCtx(cur_fname).SetFragIsWGMMA(InScopeName(b_sym), is_wgmma);
-      FCtx(cur_fname).SetFragIsWGMMA(InScopeName(c_sym), is_wgmma);
-      auto mma_ty = MMARegistry.GetMMAType(mma_config);
       FCtx(cur_fname).SetFragMMAType(InScopeName(a_sym), mma_ty);
       FCtx(cur_fname).SetFragMMAType(InScopeName(b_sym), mma_ty);
       FCtx(cur_fname).SetFragMMAType(InScopeName(c_sym), mma_ty);

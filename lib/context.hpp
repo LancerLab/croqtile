@@ -284,8 +284,6 @@ private:
   std::vector<Assertion> assertions;
   // TODO: consider to merge
   std::map<std::string, MMAType> frag_mma_type;
-  std::map<std::string, bool> frag_is_wmma;
-  std::map<std::string, bool> frag_is_wgmma; // true for WGMMA fragments
   std::map<std::string, std::string> MMA_policy_of_frag;
 
   struct DynMemReuseInfo {
@@ -374,6 +372,14 @@ public:
       choreo_unreachable("expect the fragament name is scoped.");
     return frag_mma_type.at(scoped_frag_name) == MMAType::WMMA;
   }
+  // WGMMA-specific methods
+  bool FragIsWGMMA(const std::string& scoped_frag_name) const {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    if (!frag_mma_type.count(scoped_frag_name)) return false;
+    return frag_mma_type.at(scoped_frag_name) == MMAType::WGMMA;
+  }
+
   void SetFragMMAType(const std::string& scoped_frag_name, MMAType mma_ty) {
     if (!PrefixedWith(scoped_frag_name, "::"))
       choreo_unreachable("expect the fragament name is scoped.");
@@ -395,24 +401,6 @@ public:
     if (!PrefixedWith(scoped_frag_name, "::"))
       choreo_unreachable("expect the fragament name is scoped.");
     MMA_policy_of_frag[scoped_frag_name] = mma_policy;
-  }
-
-  // WGMMA-specific methods
-  bool FragIsWGMMA(const std::string& scoped_frag_name) const {
-    if (!PrefixedWith(scoped_frag_name, "::"))
-      choreo_unreachable("expect the fragament name is scoped.");
-    if (!frag_is_wgmma.count(scoped_frag_name)) return false;
-    return frag_is_wgmma.at(scoped_frag_name);
-  }
-  void SetFragIsWGMMA(const std::string& scoped_frag_name, bool is_wgmma) {
-    if (!PrefixedWith(scoped_frag_name, "::"))
-      choreo_unreachable("expect the fragament name is scoped.");
-    if (frag_is_wgmma.count(scoped_frag_name)) {
-      if (frag_is_wgmma.at(scoped_frag_name) != is_wgmma)
-        choreo_unreachable("expect the fragment to be always of wgmma or not.");
-    } else {
-      frag_is_wgmma.emplace(scoped_frag_name, is_wgmma);
-    }
   }
 };
 
