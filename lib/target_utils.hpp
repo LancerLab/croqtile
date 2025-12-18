@@ -410,90 +410,35 @@ static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
   return out;
 }
 
-class MMAConfigRegistry {
-public:
-  static MMAConfigRegistry& Get() {
-    static MMAConfigRegistry instance;
+class WGMMAConfigRegistry {
+private:
+  friend const std::map<MMAConfig, CUDA_CC>& WGMMAConfigs();
+
+  static WGMMAConfigRegistry& Get() {
+    static WGMMAConfigRegistry instance;
     return instance;
   }
 
-  const std::map<MMAConfig, CUDA_CC>& GetCuteMMAConfigs() const {
-    return cute_mma_configs;
-  }
-
-  const std::map<MMAConfig, CUDA_CC>& GetWMMAConfigs() const {
-    return wmma_configs;
-  }
-
-  const std::map<MMAConfig, CUDA_CC>& GetWGMMMAConfigs() const {
+  const std::map<MMAConfig, CUDA_CC>& GetConfigs() const {
     return wgmma_configs_;
-  }
-
-  bool IsWMMAConfig(const MMAConfig& config) const {
-    return wmma_configs.count(config);
-  }
-
-  bool IsCuteMMAConfig(const MMAConfig& config) const {
-    return cute_mma_configs.count(config);
-  }
-
-  bool IsWGMMAConfig(const MMAConfig& config) const {
-    return wgmma_configs_.count(config);
-  }
-
-  bool IsValidMMAConfig(const MMAConfig& config, MMALimit::CUDA_CC cc) const {
-    if (IsWMMAConfig(config))
-      return wmma_configs.at(config) <= cc;
-    else if (IsWGMMAConfig(config))
-      return wgmma_configs_.at(config) <= cc;
-    else if (IsCuteMMAConfig(config))
-      return cute_mma_configs.at(config) <= cc;
-    else
-      return false;
-  }
-
-  MMAType GetMMAType(const MMAConfig& config) const {
-    if (IsWMMAConfig(config))
-      return MMAType::WMMA;
-    else if (IsWGMMAConfig(config))
-      return MMAType::WGMMA;
-    else if (IsCuteMMAConfig(config))
-      return MMAType::CTMMA;
-    else
-      choreo_unreachable("unsupported MMA config: " + config.ToString());
-    return MMAType::WMMA;
   }
 
 private:
   std::map<MMAConfig, CUDA_CC> wgmma_configs_;
-  MMAConfigRegistry() { wgmma_configs_ = GenerateWGMMAConfigs(); }
+  WGMMAConfigRegistry() { wgmma_configs_ = GenerateWGMMAConfigs(); }
 
-  MMAConfigRegistry(const MMAConfigRegistry&) = delete;
-  MMAConfigRegistry& operator=(const MMAConfigRegistry&) = delete;
-  MMAConfigRegistry(MMAConfigRegistry&&) = delete;
-  MMAConfigRegistry& operator=(MMAConfigRegistry&&) = delete;
+  WGMMAConfigRegistry(const WGMMAConfigRegistry&) = delete;
+  WGMMAConfigRegistry& operator=(const WGMMAConfigRegistry&) = delete;
+  WGMMAConfigRegistry(WGMMAConfigRegistry&&) = delete;
+  WGMMAConfigRegistry& operator=(WGMMAConfigRegistry&&) = delete;
 };
-// Helper functions for WGMMA detection and thread group size
-inline bool IsWGMMAShape(const MMAShape& shape) {
-  // WGMMA uses 64x64 tile sizes (M and N both >= 64)
-  return shape.m == 64 && shape.n == 64;
+
+inline const std::map<MMAConfig, CUDA_CC>& WGMMAConfigs() {
+  return WGMMAConfigRegistry::Get().GetConfigs();
 }
 
-inline bool IsWGMMAShape(const ValueList& shape) {
-  // WGMMA uses 64x64 tile sizes (M and N both >= 64)
-  return sbe::ceq(shape[0], sbe::nu(64)) && sbe::ceq(shape[1], sbe::nu(64));
-}
-
-inline size_t GetThreadGroupSize(const MMAShape& shape) {
-  // WGMMA: 64x64 shapes use 128 threads (warp group)
-  // WMMA/MMA: all others use 32 threads (warp)
-  return IsWGMMAShape(shape) ? 128 : 32;
-}
-
-inline size_t GetThreadGroupSize(const ValueList& shape) {
-  // WGMMA: 64x64 shapes use 128 threads (warp group)
-  // WMMA/MMA: all others use 32 threads (warp)
-  return IsWGMMAShape(shape) ? 128 : 32;
+inline bool ConfigIsCuteMMA(const MMAConfig& config) {
+  return cute_mma_configs.count(config);
 }
 
 inline bool ConfigIsWMMA(const MMAConfig& config) {
@@ -501,9 +446,36 @@ inline bool ConfigIsWMMA(const MMAConfig& config) {
 }
 
 inline bool ConfigIsWGMMA(const MMAConfig& config) {
-  // WGMMA configs are in wmma_configs with 64x64 shapes
-  if (!wmma_configs.count(config)) return false;
-  return IsWGMMAShape(config.shape);
+  return WGMMAConfigs().count(config);
+}
+
+inline bool IsValidMMAConfig(const MMAConfig& config, MMALimit::CUDA_CC cc) {
+  if (ConfigIsWMMA(config))
+    return wmma_configs.at(config) <= cc;
+  else if (ConfigIsWGMMA(config))
+    return WGMMAConfigs().at(config) <= cc;
+  else if (ConfigIsCuteMMA(config))
+    return cute_mma_configs.at(config) <= cc;
+  else
+    return false;
+}
+
+inline size_t GetThreadGroupSize(const MMAConfig& config) {
+  // WGMMA: 64x64 shapes use 128 threads (warp group)
+  // WMMA/MMA: all others use 32 threads (warp)
+  return ConfigIsWGMMA(config) ? 128 : 32;
+}
+
+inline MMAType GetMMAType(const MMAConfig& config) {
+  if (ConfigIsWMMA(config))
+    return MMAType::WMMA;
+  else if (ConfigIsWGMMA(config))
+    return MMAType::WGMMA;
+  else if (ConfigIsCuteMMA(config))
+    return MMAType::CTMMA;
+  else
+    choreo_unreachable("unsupported MMA config: " + config.ToString());
+  return MMAType::WMMA;
 }
 
 inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
@@ -528,6 +500,33 @@ inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
                          ty_str(mma_config.b_ty) + ty_str(mma_config.c_ty)));
   // row, col
   strs.push_back("TN");
+  return DelimitedString(strs, sep);
+}
+
+inline std::string MMAConfig2WGMMAName(const MMAConfig& mma_config,
+                                       const std::string& sep = "_") {
+  // example: SM90::GMMA::MMA_64x96x16_F16F16F16_RS
+  // R: A from register, S: B from smem
+  assert(ConfigIsWGMMA(mma_config));
+  std::vector<std::string> strs;
+  strs.push_back("SM" + std::to_string(WGMMAConfigs().at(mma_config)) +
+                 "::GMMA::MMA");
+  strs.push_back(std::to_string(mma_config.shape.m) + "x" +
+                 std::to_string(mma_config.shape.n) + "x" +
+                 std::to_string(mma_config.shape.k));
+  auto ty_str = [](BaseType bt) -> std::string {
+    switch (bt) {
+    case BaseType::F8_E4M3: return "E4M3";
+    case BaseType::F8_E5M2: return "E5M2";
+    case BaseType::F8_UE4M3: return "UE4M3";
+    case BaseType::F8_UE8M0: return "UE8M0";
+    default: return STR(bt);
+    }
+  };
+  strs.push_back(ToUpper(ty_str(mma_config.d_ty) + ty_str(mma_config.a_ty) +
+                         ty_str(mma_config.b_ty)));
+  // TODO: both fragments read from smem for now
+  strs.push_back("SS");
   return DelimitedString(strs, sep);
 }
 

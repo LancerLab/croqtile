@@ -123,6 +123,7 @@ struct MMAInfo {
   BaseType ty;
   ValueList shape;
   Fragment frag;
+  AST::MMAOperation::ExecMethod method = AST::MMAOperation::ExecMethod::ROW_COL;
   bool operator==(MMAInfo i) {
     return ty == i.ty && IsValueListEqual(shape, i.shape) && frag == i.frag;
   }

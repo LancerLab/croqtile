@@ -756,11 +756,10 @@ public:
 
       if (a_ty == BaseType::F32) a_ty = BaseType::TF32;
       if (b_ty == BaseType::F32) b_ty = BaseType::TF32;
-      auto& MMARegistry = MMALimit::MMAConfigRegistry::Get();
 
       MMALimit::MMAConfig mma_config{
           MMALimit::DENSE, a_ty, b_ty, c_ty, d_ty, scale_ty, mma_shape};
-      if (!MMARegistry.IsValidMMAConfig(mma_config, arch))
+      if (!IsValidMMAConfig(mma_config, arch))
         Error1(n.LOC(), "MMA [" + STR(a_ty) + "(a)" + STR(b_ty) + "(b)" +
                             (scale_ty != BaseType::UNKNOWN
                                  ? ":" + STR(scale_ty) + "(scale)"
@@ -770,7 +769,7 @@ public:
                             "] is not support by current architecture(" +
                             STR(CCtx().GetArch()) + ").");
 
-      auto mma_ty = MMARegistry.GetMMAType(mma_config);
+      auto mma_ty = GetMMAType(mma_config);
 
       // WGMMA requires SM90+ architecture
       if (mma_ty == MMAType::WGMMA && arch < 90)
@@ -787,6 +786,9 @@ public:
         std::string mma_policy = MMALimit::MMAConfig2CuteMMAName(mma_config);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);
+        FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
+      } else if (mma_ty == MMAType::WGMMA) {
+        std::string mma_policy = MMALimit::MMAConfig2WGMMAName(mma_config);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
       }
 #else

@@ -2282,16 +2282,20 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
     } break;
     case AST::MMAOperation::Exec: {
-      ds << d_indent << "cute::"
-         << FCtx(fname).MMAPolicyOfFrag(InScopeName(op.ExecOperand(0)))
+      auto c_sym = op.ExecOperand(0);
+      auto a_sym = op.ExecOperand(1);
+      auto b_sym = op.ExecOperand(2);
+
+      ds << d_indent
+         << "cute::" << FCtx(fname).MMAPolicyOfFrag(InScopeName(c_sym))
          << "::fma(";
       for (size_t i = 0; i < reg_num_d; ++i)
-        ds << op.ExecOperand(0) << "_frag" << i << ", ";
+        ds << c_sym << "_frag" << i << ", ";
       // TODO: test with mma config except mma.row.col
-      auto shape = cgi.GetSymbolMMA(InScopeName(op.ExecOperand(0))).shape;
+      auto shape = cgi.GetSymbolMMA(InScopeName(c_sym)).shape;
       auto m = shape[0], n = shape[1], k = shape[2];
-      auto a_type = cgi.GetSymbolMMA(InScopeName(op.ExecOperand(1))).ty;
-      auto b_type = cgi.GetSymbolMMA(InScopeName(op.ExecOperand(2))).ty;
+      auto a_type = cgi.GetSymbolMMA(InScopeName(a_sym)).ty;
+      auto b_type = cgi.GetSymbolMMA(InScopeName(b_sym)).ty;
       size_t reg_num_a = GetRegNumOfFrag(m, k);
       size_t reg_num_b = GetRegNumOfFrag(k, n);
       bool use_uint32 = false;
@@ -2300,12 +2304,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       RegNumOf8x8x4(shape, a_type, MMAInfo::FRAG_A, reg_num_a);
       RegNumOf8x8x4(shape, b_type, MMAInfo::FRAG_B, reg_num_b);
       for (size_t i = 0; i < reg_num_a; ++i)
-        ds << op.ExecOperand(1) << "_frag[" << i << "], ";
+        ds << a_sym << "_frag[" << i << "], ";
       for (size_t i = 0; i < reg_num_b; ++i)
-        ds << op.ExecOperand(2) << "_frag[" << i << "], ";
+        ds << b_sym << "_frag[" << i << "], ";
       for (size_t i = 0; i < reg_num_d; ++i)
-        ds << op.ExecOperand(0) << "_frag" << i
-           << (i == reg_num_d - 1 ? "" : ", ");
+        ds << c_sym << "_frag" << i << (i == reg_num_d - 1 ? "" : ", ");
       ds << ");\n";
     } break;
     case AST::MMAOperation::Store: {

@@ -186,7 +186,7 @@ public:
   bool Visit(AST::WithBlock&) { return true; }
   bool Visit(AST::Memory&) { return true; }
   bool Visit(AST::SpanAs&) { return true; }
-  bool Visit(AST::DMA& n) {
+  bool Visit(AST::DMA& n) override {
     if (n.IsDummy()) return true;
 
     if (n.IsTMA()) {
@@ -223,7 +223,7 @@ public:
     return true;
   }
 
-  bool Visit(AST::MMA& n) {
+  bool Visit(AST::MMA& n) override {
     auto& op = *n.GetOperation();
     ValueList mma_shape;
     switch (op.Tag()) {
@@ -266,12 +266,15 @@ public:
       auto acc_ty = c_ty->ElementType();
       if (a_ety == BaseType::F32) a_ety = BaseType::TF32;
       if (b_ety == BaseType::F32) b_ety = BaseType::TF32;
-      cgi.AddSymbolMMA(InScopeName(a_sym),
-                       MMAInfo{a_ety, mma_shape, MMAInfo::FRAG_A});
-      cgi.AddSymbolMMA(InScopeName(b_sym),
-                       MMAInfo{b_ety, mma_shape, MMAInfo::FRAG_B});
-      cgi.AddSymbolMMA(InScopeName(c_sym),
-                       MMAInfo{acc_ty, mma_shape, MMAInfo::FRAG_C});
+      cgi.AddSymbolMMA(
+          InScopeName(a_sym),
+          MMAInfo{a_ety, mma_shape, MMAInfo::FRAG_A, op.GetMethod()});
+      cgi.AddSymbolMMA(
+          InScopeName(b_sym),
+          MMAInfo{b_ety, mma_shape, MMAInfo::FRAG_B, op.GetMethod()});
+      cgi.AddSymbolMMA(
+          InScopeName(c_sym),
+          MMAInfo{acc_ty, mma_shape, MMAInfo::FRAG_C, op.GetMethod()});
       VST_DEBUG(dbgs() << "mma type: " << STR(a_ety) << ", " << STR(b_ety)
                        << ", " << STR(acc_ty) << ", shape: " << STR(mma_shape)
                        << " -> " << a_sym << ", " << b_sym << ", " << c_sym
