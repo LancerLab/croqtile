@@ -442,6 +442,8 @@ private:
   bool vectorize = false;         // enable loop vectorization
   size_t max_local_mem_capacity =
       0; // max local memory capacity per thread (0: use default)
+  bool inhibit_warning = false;  // Inhibit all warning messages.
+  bool warning_as_error = false; // Make all warnings into errors.
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -715,6 +717,8 @@ public:
   bool NoVectorize() const { return no_vectorize; }
   bool Vectorize() const { return vectorize; }
   size_t MaxLocalMemCapacity() const { return max_local_mem_capacity; }
+  bool InhibitWarning() const { return inhibit_warning; }
+  bool WarningAsError() const { return warning_as_error; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -741,6 +745,8 @@ public:
   void SetMaxLocalMemCapacityPerThread(size_t sz) {
     max_local_mem_capacity = sz;
   }
+  void SetInhibitWarning(bool value) { inhibit_warning = value; }
+  void SetWarningAsError(bool value) { warning_as_error = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

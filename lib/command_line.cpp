@@ -74,6 +74,10 @@ Option<bool>
 
 Option<bool> verbose(OptionKind::User, "--verbose", "-v", false,
                      "Display the programs invoked by the compiler.");
+Option<bool> inhibit_warning(OptionKind::User, "-w", "", false,
+                             "Inhibit all warning messages.");
+Option<bool> warning_as_error(OptionKind::User, "-Werror", "", false,
+                              "Make all warnings into errors.");
 
 Option<std::string>
     target_options(OptionKind::Hidden, "--target-options", "-tos", "",
@@ -326,6 +330,8 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
+  CCtx().SetInhibitWarning(inhibit_warning.GetValue());
+  CCtx().SetWarningAsError(warning_as_error.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);

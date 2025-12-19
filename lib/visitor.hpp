@@ -128,7 +128,7 @@ protected:
   bool prt_node_ty = false;
   bool resolve_fns = false;
   bool disabled = false;
-  size_t error_count = 0;
+  mutable size_t error_count = 0;
 
   static std::unordered_set<std::string> AllVisitors;
 
@@ -333,6 +333,11 @@ public:
   }
 
   void Warning(const location& loc, const std::string& message) const {
+    if (CCtx().InhibitWarning()) return;
+    if (CCtx().WarningAsError()) {
+      Error1(loc, message);
+      return;
+    }
     errs() << loc << ": " << (should_use_colors() ? color_yellow : "")
            << "warning: " << (should_use_colors() ? color_reset : "");
     errs() << message << "\n";
@@ -347,7 +352,7 @@ public:
   }
 
   // short-hand: emit error with the error count incremented by 1
-  void Error1(const location& loc, const std::string& message) {
+  void Error1(const location& loc, const std::string& message) const {
     Error(loc, message);
     error_count++;
   }
