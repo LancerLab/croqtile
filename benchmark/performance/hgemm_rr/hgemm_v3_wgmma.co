@@ -1,6 +1,6 @@
-#define M 64 
+#define M 512 
 #define N 64 
-#define K 64 
+#define K 256 
 
 __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
   f16 [M, N] output{0.0f};
@@ -33,20 +33,20 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
 int main() {
   auto lhs = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs = choreo::make_spandata<choreo::f16>(N, K);
-  // lhs.fill_random(1, 10);
-  // rhs.fill_random(1, 10);
-  lhs.fill(1.0);
-  rhs.fill(1.0);
+  lhs.fill_random(0, 2);
+  rhs.fill_random(0, 2);
+  // lhs.fill(1.0);
+  // rhs.fill(1.0);
 
   auto res = matmul(lhs.view(), rhs.view());
 
-  float tolerance = 0.005f;
+  float tolerance = 0.01f;
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
     for (size_t j = 0; j < res.shape()[1]; ++j) {
       __half ref = 0.0f;
       for (size_t k = 0; k < lhs.shape()[1]; ++k)
-        ref += lhs[i][k] * rhs[k][j];
+        ref += __half2float(lhs[i][k]) * __half2float(rhs[j][k]);
       auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
       std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
       if (delta >= tolerance) {

@@ -2,7 +2,7 @@
 #define N 64 
 #define K 64
 
-__co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
+__co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
   f16 [M, N] output{0.0f};
 
   int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;

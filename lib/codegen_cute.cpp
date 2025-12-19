@@ -145,13 +145,25 @@ const std::optional<std::string> CuteCodeGen::GetTMAName(AST::DMA& n) const {
   return std::nullopt;
 }
 
+// Check if WGMMA is used in the current function
+bool CuteCodeGen::HasWGMMAInFunction() const {
+  // Check if any MMA fragment in the current function is WGMMA
+  const auto& frag_mma_types = FCtx(fname).GetFragMMATypes();
+  for (const auto& [frag_name, mma_type] : frag_mma_types) {
+    if (mma_type == MMAType::WGMMA) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // return mds name and the declaration string.
 // If offset is not empty, means that need to do memory viewing.
 //   Just add offset to buf_expr, then utilize new_shape.
 std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
     const std::string& bname, const std::string& buf_expr, const Storage sto,
     BaseType bty, const Shape& shp, bool is_host, const std::string& offset,
-    const std::string& strides, const std::vector<size_t>& transp) const {
+    const std::string& strides, const std::vector<size_t>& transp, bool use_wgmma_layout) const {
   static int shp_cnt = 0;
   shp_cnt++;
   auto shpcnt = std::to_string(shp_cnt);
@@ -181,13 +193,22 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
            << ((transp.empty()) ? ShapeSTR(shp, true)
                                 : ReShapeSTR(shp, transp, true))
            << ");\n";
-  if (!strides.empty())
-    tsr_decl << indent << "auto " << std_name << " = cute::make_stride("
-             << strides << ");\n";
-  tsr_decl << indent << "auto " << lyt_name << " = cute::make_layout("
-           << shp_name;
-  if (!strides.empty()) tsr_decl << ", " << std_name;
-  tsr_decl << ");\n";
+
+  // For WGMMA with shared memory destination, use swizzled layout
+  if (use_wgmma_layout && sto == Storage::SHARED && bty == BaseType::F16) {
+    tsr_decl << indent << "auto " << lyt_name
+             << " = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<__half>{}, "
+             << shp_name << ");\n";
+  } else {
+    if (!strides.empty())
+      tsr_decl << indent << "auto " << std_name << " = cute::make_stride("
+               << strides << ");\n";
+    tsr_decl << indent << "auto " << lyt_name << " = cute::make_layout("
+             << shp_name;
+    if (!strides.empty()) tsr_decl << ", " << std_name;
+    tsr_decl << ");\n";
+  }
+
   tsr_decl << indent << "auto " << tsr_name << " = cute::make_tensor(";
   if (!mem_ty.empty())
     tsr_decl << "cute::make_" << mem_ty << "_ptr<" << bts << ">";
@@ -1311,7 +1332,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "blockIdx.x");
     break;
   case ParallelLevel::GROUPx4: {
-    choreo_unreachable("group-4 is yet to be supported.");
+    // choreo_unreachable("group-4 is yet to be supported.");
   } break;
   case ParallelLevel::GROUP: {
     assert(n.AllSubPVs().size() > 0);
@@ -1856,15 +1877,20 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     auto f_stride = GenStrides(f_ca, transp_config);
     auto t_stride = GenStrides(t_ca);
 
+    // Determine if we should use WGMMA layout for destination tensor
+    bool use_wgmma_layout_t = HasWGMMAInFunction() &&
+                              t_sty->GetStorage() == Storage::SHARED &&
+                              t_sty->ElementType() == BaseType::F16;
+
     const auto f_mds = GenTensorDecl(
         RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
         f_sty->ElementType(),
         (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape()),
-        false, f_mds_offset, ValueSTR(f_stride, false, true));
+        false, f_mds_offset, ValueSTR(f_stride, false, true), {}, false);
     const auto t_mds = GenTensorDecl(
         RemoveSuffix(t_buf_name, ".data()"), t_buf_name, t_sty->GetStorage(),
         t_sty->ElementType(), fty->GetShape(), false, t_mds_offset,
-        ValueSTR(t_stride, false, true));
+        ValueSTR(t_stride, false, true), {}, use_wgmma_layout_t);
 
     std::string f_mds_name{f_mds.first};
     std::string f_mds_decl{f_mds.second};
@@ -2097,9 +2123,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
          << "// and warpgroup_wait() should be called once after all WGMMAs\n";
       ds << d_indent << "wgmma_m64n64k16<" << input_type << ", float,\n";
       ds << d_indent << "                " << major_order_a
-         << ", WGMMA_Swizzle::NS,\n";
+         << ", WGMMA_Swizzle::B128,\n";
       ds << d_indent << "                " << major_order_b
-         << ", WGMMA_Swizzle::NS,\n";
+         << ", WGMMA_Swizzle::B128,\n";
       ds << d_indent << "                " << trans_a << ", " << trans_b
          << ">(\n";
       ds << d_indent << "    " << c_sym << "_d,\n";

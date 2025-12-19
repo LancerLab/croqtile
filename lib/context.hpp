@@ -402,6 +402,9 @@ public:
       choreo_unreachable("expect the fragament name is scoped.");
     MMA_policy_of_frag[scoped_frag_name] = mma_policy;
   }
+  const std::map<std::string, MMAType>& GetFragMMATypes() const {
+    return frag_mma_type;
+  }
 };
 
 class SymbolTable;

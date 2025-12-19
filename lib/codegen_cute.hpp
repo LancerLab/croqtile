@@ -464,12 +464,13 @@ private:
   }
 
   bool ThreadCooperative(AST::DMA&) const;
+  bool HasWGMMAInFunction() const;
   std::pair<std::string, std::string>
   GenTensorDecl(const std::string& name, const std::string& buf_expr,
                 const Storage sto, BaseType bty, const Shape& shp,
                 bool is_host = false, const std::string& offset = "",
                 const std::string& strides = "",
-                const std::vector<size_t>& transp = {}) const;
+                const std::vector<size_t>& transp = {}, bool use_wgmma_layout = false) const;
   void EmitTMAConfiguration(AST::ParallelBy* pb);
   const std::optional<std::string> GetTMAName(AST::DMA&) const;
 
