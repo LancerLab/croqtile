@@ -17,8 +17,8 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
       rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
       // WGMMA requires 128 threads: 4 warps x 32 threads/warp
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
-        parallel {thr_id} by [128] : thread {
-          ma = mma.load lhs_load_s.chunkat(_, iv_warp);
+        parallel p by 1 : group-4 {
+          ma = mma.load lhs_load_s.chunkat(p, iv_warp);
           mb = mma.load rhs_load_s.chunkat(_, iv_warp);
           mma.row.row mc, ma, mb;   // row * col : c += a * b;
         }

@@ -775,6 +775,7 @@ paraby
     : BY s_expr {
         auto anon_id = AST::Make<AST::Identifier>(@1, SymbolTable::GetAnonName());
         $$ = AST::Make<AST::ParallelBy>(@1, anon_id, $2);
+        $$->SetEnforced();
       }
     | IDENTIFIER BY s_expr {
         if (paraby_symbols.find($1) != paraby_symbols.end()) {
@@ -801,6 +802,7 @@ paraby
             $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), $3);
         } else
           $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), $3);
+        $$->SetEnforced();
       }
     | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT value_list RBRAKT {
         if (paraby_symbols.find($1) != paraby_symbols.end()) {
@@ -821,6 +823,7 @@ paraby
         $8->SetDelimiter(", ");
         $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), nullptr, $4, $8);
         $$->SetBracketed(true);
+        $$->SetEnforced();
       }
     | LBRACE id_list RBRACE BY LBRAKT value_list RBRAKT {
         for (auto id : $2->AllValues()) {
@@ -836,6 +839,7 @@ paraby
         $6->SetDelimiter(", ");
         $$ = AST::Make<AST::ParallelBy>(@1, anon_id, nullptr, $2, $6);
         $$->SetBracketed(true);
+        $$->SetEnforced();
       }
     ;
 

@@ -416,7 +416,7 @@ private:
   CompileTarget compile_sub_target = CompileTarget::Unknown;
   TargetArch arch = TargetArch::Unknown;
   OutputKind out_kind = OutputKind::TargetExecutable;
-  uint8_t opt_level = 0;
+  int8_t opt_level = -1; // undecided
 
 private:
   // compiler configurations
@@ -487,8 +487,13 @@ public:
   TargetArch GetArch() const { return arch; }
   void SetArch(TargetArch ta) { arch = ta; }
 
-  uint8_t GetOptimizationLevel() const { return opt_level; }
-  void SetOptimizationLevel(uint8_t lv) { opt_level = lv; }
+  int GetOptimizationLevel() const {
+    if (opt_level == -1)
+      return TargetDefaultOptLevel();
+    else
+      return (int)opt_level;
+  }
+  void SetOptimizationLevel(int8_t lv) { opt_level = lv; }
 
   OutputKind GetOutputKind() { return out_kind; }
   void SetOutputKind(OutputKind ok) { out_kind = ok; }
@@ -634,21 +639,21 @@ public:
   }
 
   size_t GetMinGroupDim() const {
-    size_t bound = 1;
+    size_t min_v = 1;
     if (GetTarget() == CompileTarget::Topscc) {
       switch (GetArch()) {
       case TargetArch::GCU20:
       case TargetArch::GCU21:
-      case TargetArch::GCU3: break;
-      case TargetArch::GCU4: bound = 8; break;
+      case TargetArch::GCU3:
+      case TargetArch::GCU4: break;
       default: choreo_unreachable("unsupported target arch.");
       }
     } else if (GetTarget() == CompileTarget::Cute)
-      bound = 32;
+      min_v = 32;
     else
       choreo_unreachable("unsupported target.");
 
-    return bound;
+    return min_v;
   }
 
   size_t GetSingleVectorByteSize() const {
@@ -657,6 +662,17 @@ public:
     case TargetArch::GCU4: return 512;
     default: choreo_unreachable("Unsupported target arch.");
     }
+  }
+
+  int TargetDefaultOptLevel() const {
+    switch (GetTarget()) {
+    case CompileTarget::Factor:
+    case CompileTarget::Topscc: return 3;
+    case CompileTarget::CUDA:
+    case CompileTarget::Cute: return 3;
+    default: choreo_unreachable("unsupported target.");
+    }
+    return -1;
   }
 
   bool TargetSupportTMA() const {

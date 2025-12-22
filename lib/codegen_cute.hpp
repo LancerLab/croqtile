@@ -303,6 +303,7 @@ private:
   size_t reg_num_d;
   // once the flag is set, always use dynamic reuse!
   bool set_cuda_func_attribute_max_dynamic_shared_memory_size = false;
+  static const std::string vid_pfx;
 
 private:
   void EmitFixedHostHead();
@@ -316,6 +317,7 @@ private:
   bool CompileWithScript(const std::string&);
 
   void EmitHostRuntimeCheck();
+  void EmitDeviceVirtualIndices(AST::ParallelBy*);
   // emit mem reuse script for each device function.
   void EmitMemReuse(const std::string& dev_func_name);
   void EmitTopsFree();
@@ -470,7 +472,8 @@ private:
                 const Storage sto, BaseType bty, const Shape& shp,
                 bool is_host = false, const std::string& offset = "",
                 const std::string& strides = "",
-                const std::vector<size_t>& transp = {}, bool use_wgmma_layout = false) const;
+                const std::vector<size_t>& transp = {},
+                bool use_wgmma_layout = false) const;
   void EmitTMAConfiguration(AST::ParallelBy* pb);
   const std::optional<std::string> GetTMAName(AST::DMA&) const;
 

@@ -204,6 +204,42 @@ enum PassedOrDeclaredSymbolKind : int {
   PDSYM_WITH_REFERENCE = 0x10, // with reference symbols
 };
 
+class PBTree {
+public:
+  // Constructor/Destructor
+  PBTree();
+  ~PBTree();
+
+  // Core tree operations
+  bool AddChild(AST::ParallelBy* parent, AST::ParallelBy* child);
+  const std::vector<AST::ParallelBy*> GetChildren(AST::ParallelBy* node) const;
+  AST::ParallelBy* GetParent(AST::ParallelBy* node) const;
+  const std::vector<AST::ParallelBy*> GetSiblings(AST::ParallelBy* node) const;
+  void Clear();
+
+  // Additional utility methods
+  bool IsRoot(AST::ParallelBy* node) const;
+  bool IsEmpty() const;
+  size_t GetSize() const;
+  size_t GetDepth(AST::ParallelBy* node) const;
+  std::vector<AST::ParallelBy*> GetAllNodes() const;
+
+  // Tree traversal methods
+  std::vector<AST::ParallelBy*> GetDescendants(AST::ParallelBy* node) const;
+  bool IsAncestor(AST::ParallelBy* ancestor, AST::ParallelBy* descendant) const;
+
+private:
+  // Internal data structures
+  std::unordered_map<AST::ParallelBy*, std::vector<AST::ParallelBy*>>
+      children_map_;
+  std::unordered_map<AST::ParallelBy*, AST::ParallelBy*> parent_map_;
+  std::unordered_set<AST::ParallelBy*> all_nodes_;
+
+  // Helper methods
+  bool ValidateNode(AST::ParallelBy* node) const;
+  void RemoveFromMaps(AST::ParallelBy* node);
+};
+
 struct CodeGenInfo {
 private:
   SymbolDetails all_syms;
@@ -215,6 +251,7 @@ private:
   LocalFutures loc_futs;
   SymbolMMA sym_mmas;
   TMADescs tma_descs;
+  PBTree pb_tree;
 
   // TODO: maybe should add some vars here
 
@@ -286,6 +323,9 @@ public:
   }
   const TMADescs& GetTMADescs() const { return tma_descs; }
   TMADescs& GetTMADescs() { return tma_descs; }
+
+  const PBTree& GetPBTree() const { return pb_tree; }
+  PBTree& GetPBTree() { return pb_tree; }
 
   bool HasParallelBy(const std::string& fname) const {
     return GetFunctionTrait(fname).has_parallelby;

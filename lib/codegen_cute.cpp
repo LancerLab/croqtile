@@ -133,6 +133,8 @@ const std::string TMAMapDataType(BaseType bt) {
 
 using namespace cute;
 
+const std::string CuteCodeGen::vid_pfx = "__choreo_v";
+
 const std::optional<std::string> CuteCodeGen::GetTMAName(AST::DMA& n) const {
   if (cur_pb == nullptr) return std::nullopt;
   auto& tma_descs = cgi.GetTMADesc(cur_pb);
@@ -150,9 +152,7 @@ bool CuteCodeGen::HasWGMMAInFunction() const {
   // Check if any MMA fragment in the current function is WGMMA
   const auto& frag_mma_types = FCtx(fname).GetFragMMATypes();
   for (const auto& [frag_name, mma_type] : frag_mma_types) {
-    if (mma_type == MMAType::WGMMA) {
-      return true;
-    }
+    if (mma_type == MMAType::WGMMA) { return true; }
   }
   return false;
 }
@@ -163,7 +163,8 @@ bool CuteCodeGen::HasWGMMAInFunction() const {
 std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
     const std::string& bname, const std::string& buf_expr, const Storage sto,
     BaseType bty, const Shape& shp, bool is_host, const std::string& offset,
-    const std::string& strides, const std::vector<size_t>& transp, bool use_wgmma_layout) const {
+    const std::string& strides, const std::vector<size_t>& transp,
+    bool use_wgmma_layout) const {
   static int shp_cnt = 0;
   shp_cnt++;
   auto shpcnt = std::to_string(shp_cnt);
@@ -197,7 +198,9 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
   // For WGMMA with shared memory destination, use swizzled layout
   if (use_wgmma_layout && sto == Storage::SHARED && bty == BaseType::F16) {
     tsr_decl << indent << "auto " << lyt_name
-             << " = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<__half>{}, "
+             << " = "
+                "cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<__"
+                "half>{}, "
              << shp_name << ");\n";
   } else {
     if (!strides.empty())
@@ -1332,246 +1335,193 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "blockIdx.x");
     break;
   case ParallelLevel::GROUPx4: {
-    // choreo_unreachable("group-4 is yet to be supported.");
+    if (n.AllSubPVs().size() == 1)
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), vid_pfx + "g4id_x");
+    if (n.AllSubPVs().size() > 0)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), vid_pfx + "g4id_x");
+    if (n.AllSubPVs().size() > 1)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "g4id_y");
+    if (n.AllSubPVs().size() > 2)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "g4id_z");
   } break;
   case ParallelLevel::GROUP: {
-    assert(n.AllSubPVs().size() > 0);
-    if (n.AllSubPVs().size() > 3)
-      choreo_unreachable("group parallelism with more than 3 dimensions is "
-                         "not supported.");
+    if (n.AllSubPVs().size() == 1)
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), vid_pfx + "gid_x");
 
-    // when choreo users writes parallel {group_first, group_second,
-    // group_third} by {GPU_M, GPU_N, GPU_K} they tend to bind group_first to
-    // GPU_M, group_second to GPU_N, group_third to GPU_K, this is choreo
-    // convention however, in CUDA, threadIdx.y is the leading dimension,
-    // threadIdx.x is the trailing dimension so we need to reverse the order of
-    // the group ids to keep all choreo convention, whilst aligning to CUDA's
-    // convention this is the reason why we need to reverse the order of the
-    // group ids group_first -> group_id_first, group_second -> group_id_second,
-    // group_third -> group_id_third
-    if (n.AllSubPVs().size() == 1) {
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.y");
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.y");
-    } else if (n.AllSubPVs().size() == 2) {
-      auto group_id_first =
-          (sbe::sym("threadIdx.y") / lconfig.group_count.y)->Normalize();
-      auto group_id_second =
-          (sbe::sym("threadIdx.y") % lconfig.group_count.y)->Normalize();
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
-                          ValueSTR(group_id_first));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
-                          ValueSTR(group_id_second));
-    } else if (n.AllSubPVs().size() == 3) {
-      auto group_id_first =
-          (sbe::sym("threadIdx.y") / lconfig.group_count.z)->Normalize();
-      auto group_id_second =
-          ((sbe::sym("threadIdx.y") / lconfig.group_count.z)) %
-          lconfig.group_count.y->Normalize();
-      auto group_id_third =
-          (sbe::sym("threadIdx.y") % lconfig.group_count.z)->Normalize();
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
-                          ValueSTR(group_id_first));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
-                          ValueSTR(group_id_second));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name),
-                          ValueSTR(group_id_third));
-    }
+    if (n.AllSubPVs().size() > 0)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), vid_pfx + "gid_x");
+    if (n.AllSubPVs().size() > 1)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "gid_y");
+    if (n.AllSubPVs().size() > 2)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "gid_z");
   } break;
-  case ParallelLevel::THREAD:
-    assert(n.AllSubPVs().size() > 0);
+  case ParallelLevel::THREAD: {
+    if (n.AllSubPVs().size() == 1)
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), vid_pfx + "tid_x");
 
-    if (n.AllSubPVs().size() > 3)
-      choreo_unreachable("thread parallelism with more than 3 dimensions is "
-                         "not supported.");
-    // thr_m, thr_n, thr_k
-    // when choreo users writes parallel {thr_first, thr_second, thr_third} by
-    // {GPU_M, GPU_N, GPU_K} they tend to bind thr_first to GPU_M, thr_second to
-    // GPU_N, thr_third to GPU_K, this is choreo convention however, in CUDA,
-    // threadIdx.y is the leading dimension, threadIdx.x is the trailing
-    // dimension so we need to reverse the order of the thr ids to keep all
-    // choreo convention, whilst aligning to CUDA's convention this is the
-    // reason why we need to reverse the order of the thr ids thr_first ->
-    // thr_id_first, thr_second -> thr_id_second, thr_third -> thr_id_third
-    if (n.AllSubPVs().size() == 1) {
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), "threadIdx.x");
-      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "threadIdx.x");
-    } else if (n.AllSubPVs().size() == 2) {
-      auto thread_id_first =
-          (sbe::sym("threadIdx.x") / lconfig.thread_count.y)->Normalize();
-      auto thread_id_second =
-          (sbe::sym("threadIdx.x") % lconfig.thread_count.y)->Normalize();
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
-                          ValueSTR(thread_id_first));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
-                          ValueSTR(thread_id_second));
-    } else if (n.AllSubPVs().size() == 3) {
-      auto thread_id_first =
-          ((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) /
-          lconfig.thread_count.y->Normalize();
-      auto thread_id_second =
-          ((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) %
-          lconfig.thread_count.y->Normalize();
-      auto thread_id_third =
-          (sbe::sym("threadIdx.x") % lconfig.thread_count.z)->Normalize();
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name),
-                          ValueSTR(thread_id_first));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name),
-                          ValueSTR(thread_id_second));
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name),
-                          ValueSTR(thread_id_third));
-    }
-    break;
+    if (n.AllSubPVs().size() > 0)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(0)->name), vid_pfx + "tid_x");
+    if (n.AllSubPVs().size() > 1)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "tid_y");
+    if (n.AllSubPVs().size() > 2)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "tid_z");
+  } break;
   default:
     choreo_unreachable("unsupported parallel-by level: " + STR(n.GetLevel()) +
                        ".");
   }
 
   // only do the whole codegen when accessing the outer parallel-by
-  if (!n.IsOuter()) return true;
+  if (n.IsOuter()) {
 
-  EmitMemReuse(SSTab().ScopeName());
+    EmitMemReuse(SSTab().ScopeName());
 
-  EmitTMAConfiguration(&n);
+    EmitTMAConfiguration(&n);
 
-  // note: `thread_dims` for gcu400 is generated in `EmitDeviceFuncDecl`
-  hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
-     << ValueSTR(lconfig.block_count.x) << ", "
-     << ValueSTR(lconfig.block_count.y) << ", "
-     << ValueSTR(lconfig.block_count.z) << ");\n";
-  // GPU groups are virtual
-  // we binds all choreo threads to blockDim.x, and all choreo groups to
-  // blockDim.y this aligns choreo row-major convention to cuda's col-major
-  // oriented convention. users can still keep binding left-most parallel
-  // variable to left-most tensor dim, and right to right. without mindset to
-  // CUDA's thread majority that left-most are leading dim (thread x)
-  auto tx =
-      (lconfig.thread_count.x * lconfig.thread_count.y * lconfig.thread_count.z)
-          ->Normalize();
-  auto ty =
-      (lconfig.group_count.x * lconfig.group_count.y * lconfig.group_count.z)
-          ->Normalize();
-  hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
-     << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << "1" << ");\n";
+    // note: `thread_dims` for gcu400 is generated in `EmitDeviceFuncDecl`
+    hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
+       << ValueSTR(lconfig.block_count.x) << ", "
+       << ValueSTR(lconfig.block_count.y) << ", "
+       << ValueSTR(lconfig.block_count.z) << ");\n";
+    // GPU groups are virtual
+    // we binds all choreo threads to blockDim.x, and all choreo groups to
+    // blockDim.y this aligns choreo row-major convention to cuda's col-major
+    // oriented convention. users can still keep binding left-most parallel
+    // variable to left-most tensor dim, and right to right. without mindset to
+    // CUDA's thread majority that left-most are leading dim (thread x)
+    auto tx = (lconfig.thread_count.x * lconfig.thread_count.y *
+               lconfig.thread_count.z)
+                  ->Normalize();
+    auto ty = (lconfig.group_count.x * lconfig.group4_count.x *
+               lconfig.group_count.y * lconfig.group_count.z)
+                  ->Normalize();
+    hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
+       << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << "1" << ");\n";
 
-  // plan the shared memory that is decided at runtime
-  cur_spm_size = sbe::nu(0);
-  cur_ring_offset = sbe::nu(0);
-  cur_ring_size = (tx * ty + sbe::nu(31)) / sbe::nu(32) /* warp size */;
+    // plan the shared memory that is decided at runtime
+    cur_spm_size = sbe::nu(0);
+    cur_ring_offset = sbe::nu(0);
+    cur_ring_size = (tx * ty + sbe::nu(31)) / sbe::nu(32) /* warp size */;
 
-  // add the size of the future ring (see choreo.h)
-  if (cgi.HasAsyncDMA(fname))
-    cur_spm_size = cur_spm_size + cur_ring_size * sbe::nu(8);
+    // add the size of the future ring (see choreo.h)
+    if (cgi.HasAsyncDMA(fname))
+      cur_spm_size = cur_spm_size + cur_ring_size * sbe::nu(8);
 
-  /*
-  | static shared | dynamic shared |
-  ^                 ^
-  shared_base       shared_base + static_size
-  must satisfy the constraints:
-  - static shared <= 48KB
-  - dynamic shared <= MaxDynamicSharedMemorySize
-  - the sum <= the capacity of arch
-  */
-  auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
-    hs << h_indent << "cudaFuncSetAttribute(" << device_fn
-       << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
-       << ValueSTR(cur_spm_size) << ");\n";
-    set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
-  };
+    /*
+    | static shared | dynamic shared |
+    ^                 ^
+    shared_base       shared_base + static_size
+    must satisfy the constraints:
+    - static shared <= 48KB
+    - dynamic shared <= MaxDynamicSharedMemorySize
+    - the sum <= the capacity of arch
+    */
+    auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
+      hs << h_indent << "cudaFuncSetAttribute(" << device_fn
+         << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
+         << ValueSTR(cur_spm_size) << ");\n";
+      set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
+    };
 
-  if (auto dev_name = SSTab().ScopeName();
-      FCtx(fname).HaveDynamicBuffer(dev_name, Storage::SHARED)) {
-    // add the size of dynamic shared
-    auto mri = FCtx(fname).GetDynMemReuseInfo(dev_name);
-    assert(mri);
-    cur_ring_offset =
-        sbe::sym(mri->infos[Storage::SHARED].spm_size)->Normalize();
-    cur_spm_size = cur_spm_size + cur_ring_offset;
-    cur_spm_size = cur_spm_size->Normalize();
-    EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
-  } else {
-    // add the size of static shared
-    auto mri = FCtx(fname).GetStaticMemReuseInfo(dev_name);
-    if (mri) {
-      // 48KB is the largest capacity that static shared memory supports.
-      if (mri->infos[Storage::SHARED].spm_size > 48 * 1024) {
-        set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
-        cur_ring_offset = sbe::nu(mri->infos[Storage::SHARED].spm_size);
-        cur_spm_size = cur_spm_size + cur_ring_offset;
-        cur_spm_size = cur_spm_size->Normalize();
-        EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
+    if (auto dev_name = SSTab().ScopeName();
+        FCtx(fname).HaveDynamicBuffer(dev_name, Storage::SHARED)) {
+      // add the size of dynamic shared
+      auto mri = FCtx(fname).GetDynMemReuseInfo(dev_name);
+      assert(mri);
+      cur_ring_offset =
+          sbe::sym(mri->infos[Storage::SHARED].spm_size)->Normalize();
+      cur_spm_size = cur_spm_size + cur_ring_offset;
+      cur_spm_size = cur_spm_size->Normalize();
+      EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
+    } else {
+      // add the size of static shared
+      auto mri = FCtx(fname).GetStaticMemReuseInfo(dev_name);
+      if (mri) {
+        // 48KB is the largest capacity that static shared memory supports.
+        if (mri->infos[Storage::SHARED].spm_size > 48 * 1024) {
+          set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
+          cur_ring_offset = sbe::nu(mri->infos[Storage::SHARED].spm_size);
+          cur_spm_size = cur_spm_size + cur_ring_offset;
+          cur_spm_size = cur_spm_size->Normalize();
+          EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
+        }
       }
     }
-  }
 
-  hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
-     << ", __" << fname << "_bdims" << parallel_idx;
+    hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
+       << ", __" << fname << "_bdims" << parallel_idx;
 
-  if (!sbe::ceq(cur_spm_size, sbe::nu(0))) hs << ", " << ValueSTR(cur_spm_size);
-  hs << ">>>(";
+    if (!sbe::ceq(cur_spm_size, sbe::nu(0)))
+      hs << ", " << ValueSTR(cur_spm_size);
+    hs << ">>>(";
 
-  size_t i = 0;
-  for (auto& item : GetDeviceFuncIns(updating_cgi)) {
-    auto sname = item.name;
-    if (isa<SpannedType>(item.type)) sname += "__device";
-    if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
-    hs << ((i++ == 0) ? "" : ", ");
-    if (ssm.HasHostName(sname))
-      hs << ssm.HostName(sname);
-    else
-      hs << UnScopedName(ssm.DeviceName(sname));
-  }
-  for (auto item : symbolic_dimensions) {
-    hs << ((i++ > 0) ? ", " : "");
-    hs << UnScopedName(item.first);
-  }
-  if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
-    for (const auto& [sto, ie] : mri->infos)
-      for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
-        hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
-
-  // tma configurations
-  for (auto desc : cgi.GetTMADesc(&n))
-    hs << ", " << desc.GetName() + "_tensor_map";
-
-  if (!cur_ring_offset->IsNumeric()) hs << ", " << ValueSTR(cur_ring_offset);
-
-  hs << ");\n";
-
-  if (!n.IsAsync())
-    hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
-
-  // copy the span passed by ref back to host
-  for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
-    if (isa<SpannedType>(item.type)) {
-      auto oname = UnScopedName(item.name);
-      if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
-        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
-           << ".data(), " << oname + "__device" << ", "
-           << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
+    size_t i = 0;
+    for (auto& item : GetDeviceFuncIns(updating_cgi)) {
+      auto sname = item.name;
+      if (isa<SpannedType>(item.type)) sname += "__device";
+      if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
+      hs << ((i++ == 0) ? "" : ", ");
+      if (ssm.HasHostName(sname))
+        hs << ssm.HostName(sname);
+      else
+        hs << UnScopedName(ssm.DeviceName(sname));
     }
-  }
+    for (auto item : symbolic_dimensions) {
+      hs << ((i++ > 0) ? ", " : "");
+      hs << UnScopedName(item.first);
+    }
+    if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
+      for (const auto& [sto, ie] : mri->infos)
+        for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
+          hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
 
-  // handle device function
-  EmitDeviceFuncDecl(ds, &n);
-  ds << " {\n";
-  IncrDeviceIndent();
-  if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
-        sbe::ceq(cur_ring_offset, sbe::nu(0)))) {
-    ds << d_indent << "extern __shared__ char " << device_fn
-       << "__runtime_shared_buffer__[];\n";
-    if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
-      ds << d_indent << "auto " << device_fn
-         << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&"
-         << device_fn
-         << "__runtime_shared_buffer__[" + ValueSTR(cur_ring_offset) << "]);\n";
-      ds << d_indent << "for (int i = 0; i < " << ValueSTR(cur_ring_size)
-         << "; ++i)\n";
-      ds << d_indent << "  (" << device_fn << "__ring__ + i)->init();\n";
+    // tma configurations
+    for (auto desc : cgi.GetTMADesc(&n))
+      hs << ", " << desc.GetName() + "_tensor_map";
+
+    if (!cur_ring_offset->IsNumeric()) hs << ", " << ValueSTR(cur_ring_offset);
+
+    hs << ");\n";
+
+    if (!n.IsAsync())
+      hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
+
+    // copy the span passed by ref back to host
+    for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
+      if (isa<SpannedType>(item.type)) {
+        auto oname = UnScopedName(item.name);
+        if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
+          hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
+             << ".data(), " << oname + "__device" << ", "
+             << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
+      }
     }
 
-  } else
-    ds << d_indent << "auto " << device_fn << "__ring__ = nullptr;\n";
-  ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
+    // handle device function
+    EmitDeviceFuncDecl(ds, &n);
+    ds << " {\n";
+    IncrDeviceIndent();
+    if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
+          sbe::ceq(cur_ring_offset, sbe::nu(0)))) {
+      ds << d_indent << "extern __shared__ char " << device_fn
+         << "__runtime_shared_buffer__[];\n";
+      if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
+        ds << d_indent << "auto " << device_fn
+           << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&"
+           << device_fn
+           << "__runtime_shared_buffer__[" + ValueSTR(cur_ring_offset)
+           << "]);\n";
+        ds << d_indent << "for (int i = 0; i < " << ValueSTR(cur_ring_size)
+           << "; ++i)\n";
+        ds << d_indent << "  (" << device_fn << "__ring__ + i)->init();\n";
+      }
+
+    } else
+      ds << d_indent << "auto " << device_fn << "__ring__ = nullptr;\n";
+    ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
+  }
+
+  EmitDeviceVirtualIndices(&n);
 
   return true;
 }
@@ -2917,6 +2867,117 @@ void CuteCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str() << "\n");
 }
 
+void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
+  auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
+  switch (pb->GetLevel()) {
+  case ParallelLevel::GROUPx4: {
+    auto cs = cgi.GetPBTree().GetChildren(pb);
+    assert(!cs.empty());
+    auto& spb = cs[0];
+    assert(spb->GetLevel() == ParallelLevel::GROUP);
+    if (spb->AllSubPVs().size() == 1) {
+      ds << d_indent << "auto " << vid_pfx << "g4id_x = threadIdx.y / 4;\n";
+    } else if (spb->AllSubPVs().size() == 2) {
+      ds << d_indent << "auto " << vid_pfx << "g4id_x = "
+         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.y / sbe::nu(4))
+                    ->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "g4id_y = "
+         << STR((sbe::sym("threadIdx.y") % lconfig.group_count.y)->Normalize())
+         << ";\n";
+    } else if (spb->AllSubPVs().size() == 3) {
+      ds << d_indent << "auto " << vid_pfx << "g4id_x = "
+         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.z / sbe::nu(4))
+                    ->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "g4id_y = "
+         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.z) %
+                lconfig.group_count.y->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "g4id_z = "
+         << STR((sbe::sym("threadIdx.y") % lconfig.group_count.z)->Normalize())
+         << ";\n";
+    }
+  } break;
+  case ParallelLevel::GROUP: {
+    assert(pb->AllSubPVs().size() > 0);
+    if (pb->AllSubPVs().size() > 3)
+      choreo_unreachable("group parallelism with more than 3 dimensions is "
+                         "not supported.");
+
+    // when choreo users writes parallel {group_first, group_second,
+    // group_third} by {GPU_M, GPU_N, GPU_K} they tend to bind group_first to
+    // GPU_M, group_second to GPU_N, group_third to GPU_K, this is choreo
+    // convention however, in CUDA, threadIdx.y is the leading dimension,
+    // threadIdx.x is the trailing dimension so we need to reverse the order of
+    // the group ids to keep all choreo convention, whilst aligning to CUDA's
+    // convention this is the reason why we need to reverse the order of the
+    // group ids group_first -> group_id_first, group_second -> group_id_second,
+    // group_third -> group_id_third
+    if (pb->AllSubPVs().size() == 1) {
+      ds << d_indent << "auto " << vid_pfx << "gid_x = threadIdx.y;\n";
+    } else if (pb->AllSubPVs().size() == 2) {
+      ds << d_indent << "auto " << vid_pfx << "gid_x = "
+         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.y)->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "gid_y = "
+         << STR((sbe::sym("threadIdx.y") % lconfig.group_count.y)->Normalize())
+         << ";\n";
+    } else if (pb->AllSubPVs().size() == 3) {
+      ds << d_indent << "auto " << vid_pfx << "gid_x = "
+         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.z)->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "gid_y = "
+         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.z) %
+                lconfig.group_count.y->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "gid_z = "
+         << STR((sbe::sym("threadIdx.y") % lconfig.group_count.z)->Normalize())
+         << ";\n";
+    }
+  } break;
+  case ParallelLevel::THREAD:
+    assert(pb->AllSubPVs().size() > 0);
+
+    if (pb->AllSubPVs().size() > 3)
+      choreo_unreachable("thread parallelism with more than 3 dimensions is "
+                         "not supported.");
+    // thr_m, thr_n, thr_k
+    // when choreo users writes parallel {thr_first, thr_second, thr_third} by
+    // {GPU_M, GPU_N, GPU_K} they tend to bind thr_first to GPU_M, thr_second to
+    // GPU_N, thr_third to GPU_K, this is choreo convention however, in CUDA,
+    // threadIdx.y is the leading dimension, threadIdx.x is the trailing
+    // dimension so we need to reverse the order of the thr ids to keep all
+    // choreo convention, whilst aligning to CUDA's convention this is the
+    // reason why we need to reverse the order of the thr ids thr_first ->
+    // thr_id_first, thr_second -> thr_id_second, thr_third -> thr_id_third
+    if (pb->AllSubPVs().size() == 1) {
+      ds << d_indent << "auto " << vid_pfx << "tid_x = threadIdx.x;\n";
+    } else if (pb->AllSubPVs().size() == 2) {
+      ds << d_indent << "auto " << vid_pfx << "tid_x = "
+         << STR((sbe::sym("threadIdx.x") / lconfig.thread_count.y)->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "tid_y = "
+         << STR((sbe::sym("threadIdx.x") % lconfig.thread_count.y)->Normalize())
+         << ";\n";
+    } else if (pb->AllSubPVs().size() == 3) {
+      ds << d_indent << "auto " << vid_pfx << "tid_x = "
+         << STR(((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) /
+                lconfig.thread_count.y->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "tid_y = "
+         << STR(((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) %
+                lconfig.thread_count.y->Normalize())
+         << ";\n";
+      ds << d_indent << "auto " << vid_pfx << "tid_z = "
+         << STR((sbe::sym("threadIdx.x") % lconfig.thread_count.z)->Normalize())
+         << ";\n";
+    }
+    break;
+  default: break;
+  }
+}
+
 void CuteCodeGen::EmitHostRuntimeCheck() {
   // check if the input shape is as declared in choreo
   if (cgi.ParameterCount(fname) == 0) return;
@@ -3213,10 +3274,14 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   // we must use the built compilation tools
   if (RequiresE2ECompilation(CCtx().GetOutputKind())) {
 #ifdef __CHOREO_CUDA_DIR__
-    os << "\nexport CUDA_HOME=" << STRINGIZE(__CHOREO_CUDA_DIR__) << "\n";
+    os << "\nif [ -z \"${CUDA_HOME}\" ]; then";
+    os << "\n  export CUDA_HOME=" << STRINGIZE(__CHOREO_CUDA_DIR__);
+    os << "\nfi\n";
 #endif // __CHOREO_CUDA_DIR__
 #ifdef __CHOREO_CUTE_DIR__
-    os << "\nexport CUTE_HOME=" << STRINGIZE(__CHOREO_CUTE_DIR__) << "\n";
+    os << "\nif [ -z \"${CUTE_HOME}\" ]; then";
+    os << "\n  export CUTE_HOME=" << STRINGIZE(__CHOREO_CUTE_DIR__);
+    os << "\nfi\n";
 #endif // __CHOREO_CUTE_DIR__
   }
 
@@ -3224,6 +3289,12 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
 if [ ! -n "${CUDA_HOME}" ] || [ ! -f ${CUDA_HOME}/bin/nvcc ]; then
   echo "failed to find the CUDA installation."
   echo "install cuda or set CUDA_HOME to cuda installation directory."
+  exit 1
+fi
+
+if [ ! -n "${CUTE_HOME}" ] || [ ! -f ${CUTE_HOME}/include/cutlass/cutlass.h ]; then
+  echo "failed to find the CUTE installation."
+  echo "install cuda or set CUTE_HOME to cute installation directory."
   exit 1
 fi
 
@@ -3281,7 +3352,10 @@ show_usage() {
     compute_arch = "compute_" + compute_arch.substr(3);
   }
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
+  os << R"(export CFLAGS="--gpu-architecture=)" << compute_arch
+     << R"( --gpu-code=)" << code_arch
+     << R"( -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
+  os << " -O" << CCtx().GetOptimizationLevel();
   if (use_cuda_type)
     os << " -D__USE_CUDA_TYPE__";
   else
@@ -3307,7 +3381,7 @@ show_usage() {
     os << " -D" << macro.first
        << (macro.second.empty() ? "" : ("=" + macro.second));
 
-  os << " -L/usr/local/cuda/lib64 -lcuda\"";
+  os << " -L${CUDA_HOME}/lib64 -lcuda\"";
   os << "\nexport LD_LIBRARY_PATH=${CUDA_LIB}:${LD_LIBRARY_PATH}\n\n";
 
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";

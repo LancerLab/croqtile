@@ -1633,6 +1633,7 @@ private:
 
   ParallelLevel max_lvl = ParallelLevel::NONE;
   bool is_outer = false; // if it is the outer-most pb
+  bool enforced = false;
 
 public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
@@ -1673,6 +1674,10 @@ public:
 
   bool IsBracketed() const { return bracketed; }
   void SetBracketed(bool b) { bracketed = b; }
+
+  void SetEnforced(bool e = true) { enforced = e; }
+  bool IsEnforced() const { return enforced; }
+
   bool IsAsync() const { return async; }
   void SetAsync(bool a) { async = a; }
   //  size_t SubCount() const { return cmpt_bpvs->Count(); }
@@ -1743,6 +1748,7 @@ public:
     pb->SetBracketed(IsBracketed());
     pb->SetMaxLevel(GetMaxLevel());
     pb->SetOuter(IsOuter());
+    pb->SetEnforced(IsEnforced());
     return pb;
   }
 

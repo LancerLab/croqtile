@@ -44,8 +44,8 @@ __co__ void foo5() { parallel t by 7 : block;  }
 // CHECK:                       index component: {anon_pb_10__elem__x}, corresponding ubound: [1]
 // CHECK:    `- group Parallelization: index symbol: z, bound [0, 5)
 // CHECK:                        index component: {z__elem__x}, corresponding ubound: [5]
-// CHECK:     `- thread Parallelization: index symbol: anon_pb_9, bound [0, 1)
-// CHECK:                         index component: {anon_pb_9__elem__x}, corresponding ubound: [1]
+// CHECK:     `- thread Parallelization: index symbol: anon_pb_9, bound [0, 32)
+// CHECK:                         index component: {anon_pb_9__elem__x}, corresponding ubound: [32]
 
 // CHECK:  `- Name: foo4
 // CHECK:  `- block Parallelization(o): index symbol: anon_pb_14, bound [0, 1)
@@ -54,8 +54,8 @@ __co__ void foo5() { parallel t by 7 : block;  }
 // CHECK:                       index component: {s__elem__x}, corresponding ubound: [6]
 // CHECK:    `- group Parallelization: index symbol: anon_pb_13, bound [0, 1)
 // CHECK:                        index component: {anon_pb_13__elem__x}, corresponding ubound: [1]
-// CHECK:     `- thread Parallelization: index symbol: anon_pb_12, bound [0, 1)
-// CHECK:                         index component: {anon_pb_12__elem__x}, corresponding ubound: [1]
+// CHECK:     `- thread Parallelization: index symbol: anon_pb_12, bound [0, 128)
+// CHECK:                         index component: {anon_pb_12__elem__x}, corresponding ubound: [128]
 
 // CHECK:  `- Name: foo5
 // CHECK:  `- block Parallelization(o): index symbol: t, bound [0, 7)

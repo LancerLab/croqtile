@@ -93,8 +93,8 @@ __co__ void bar14() { parallel r by 15 : block parallel s by 17 : thread;  }
 // CHECK:                       index component: {s__elem__x}, corresponding ubound: [11]
 // CHECK:    `- group Parallelization: index symbol: anon_pb_15, bound [0, 1)
 // CHECK:                        index component: {anon_pb_15__elem__x}, corresponding ubound: [1]
-// CHECK:     `- thread Parallelization: index symbol: anon_pb_14, bound [0, 32)
-// CHECK:                         index component: {anon_pb_14__elem__x}, corresponding ubound: [32]
+// CHECK:     `- thread Parallelization: index symbol: anon_pb_14, bound [0, 128)
+// CHECK:                         index component: {anon_pb_14__elem__x}, corresponding ubound: [128]
 
 // CHECK:  `- Name: bar8
 // CHECK:  `- block Parallelization(o): index symbol: r, bound [0, 10)
@@ -103,8 +103,8 @@ __co__ void bar14() { parallel r by 15 : block parallel s by 17 : thread;  }
 // CHECK:                       index component: {s__elem__x}, corresponding ubound: [12]
 // CHECK:    `- group Parallelization: index symbol: anon_pb_17, bound [0, 1)
 // CHECK:                        index component: {anon_pb_17__elem__x}, corresponding ubound: [1]
-// CHECK:     `- thread Parallelization: index symbol: anon_pb_16, bound [0, 32)
-// CHECK:                         index component: {anon_pb_16__elem__x}, corresponding ubound: [32]
+// CHECK:     `- thread Parallelization: index symbol: anon_pb_16, bound [0, 128)
+// CHECK:                         index component: {anon_pb_16__elem__x}, corresponding ubound: [128]
 
 // CHECK:  `- Name: bar9
 // CHECK:  `- block Parallelization(o): index symbol: anon_pb_19, bound [0, 1)

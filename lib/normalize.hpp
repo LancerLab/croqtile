@@ -1346,16 +1346,16 @@ public:
     if (last_depth == max_depth) {
       switch (last_level) {
       case ParallelLevel::BLOCK: {
-        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD,
-                               CCtx().GetMinGroupDim());
-        if (support_group)
+        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD);
+        if (support_4x_group) {
           fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUP);
-        if (support_4x_group)
           fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUPx4);
+        } else if (support_group)
+          fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUP);
       } break;
       case ParallelLevel::GROUPx4: {
         fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD,
-                               CCtx().GetMinGroupDim());
+                               CCtx().GetMinGroupDim() * 4);
         if (support_group)
           fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUP);
       } break;
@@ -1439,8 +1439,8 @@ public:
       //   parallel x by 1 : block
       //    parallel p by 32 : group-4
       //     parallel y by 1 : group
-      //      parallel z by 1 : thread
-      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
+      //      parallel z by 128 : thread
+      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD, 128);
       fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
       fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
     } break;
@@ -1450,8 +1450,9 @@ public:
       //   parallel x by 1 : block
       //    parallel y by 1 : group-4 (optional)
       //     parallel p by 32 : group
-      //      parallel z by 1 : thread
-      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
+      //      parallel z by 32 : thread (gpu)
+      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD,
+                             CCtx().GetMinGroupDim());
       if (support_4x_group)
         fill_info.emplace_back(pb, Outer, ParallelLevel::GROUPx4);
       fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);

@@ -4,9 +4,8 @@
 // This apply the GPU target specific check and information annotation
 
 #include "ast.hpp"
-#include "codegen_utils.hpp"
+#include "codegen.hpp"
 #include "target_utils.hpp"
-#include "visitor.hpp"
 
 #define STRINGIFY2(x) #x
 #define STRINGIFY(x) STRINGIFY2(x)
@@ -53,7 +52,7 @@ struct ParallelSymbols {
   void Reset() { all_pvs.clear(); }
 };
 
-struct GPUAdaptor : public VisitorWithSymTab {
+struct GPUAdaptor : public CodeGenerator {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
   std::stack<ParallelLevel> levels;
@@ -62,12 +61,14 @@ private:
 
   ParallelSymbols ps;
 
+  bool enforced_group = false;
+  bool enforced_4x_group = false;
+
 private:
   ParallelLevel Level() const { return levels.top(); }
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
-    TraceEachVisit(n, "(pre)");
     if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
       ps.Reset();
       cur_params.clear();
@@ -84,13 +85,17 @@ private:
         ps.AddLevelPV(lvl, InScopeName(cast<AST::Identifier>(id)->name));
 
       VST_DEBUG(ps.Show(dbgs(), lvl); dbgs() << "\n";);
+      CheckPBSettings(pb);
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
-    TraceEachVisit(n, "(post)");
-    if (isa<AST::ParallelBy>(&n)) {
+    if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      if (pb->GetLevel() == ParallelLevel::GROUP)
+        enforced_group = false;
+      else if (pb->GetLevel() == ParallelLevel::GROUPx4)
+        enforced_4x_group = false;
       levels.pop();
     }
 
@@ -101,12 +106,33 @@ private:
     return true;
   }
 
-  void TraceEachVisit(AST::Node& n, std::string sup = "") {
-    if (trace_visit) dbgs() << n.TypeNameString() << sup << "\n";
-  }
-
 public:
   bool IsHost() const { return Level() == ParallelLevel::SEQ; }
+
+  void CheckPBSettings(AST::ParallelBy* pb) {
+    if (pb->GetLevel() == ParallelLevel::THREAD) {
+      auto bv = pb->BoundValues().back();
+      auto ppb = cgi.GetPBTree().GetParent(pb);
+      assert(ppb->GetLevel() == ParallelLevel::GROUP);
+      if (ppb->IsEnforced() && !sbe::ceq(bv, sbe::nu(32)))
+        Error1(pb->LOC(),
+               "The leading dimension must be 32 when 'group' exists for " +
+                   STR(CCtx().GetArch()) + ".");
+
+      if (TargetHasLevel(ParallelLevel::GROUPx4)) {
+        auto gppb = cgi.GetPBTree().GetParent(ppb);
+        assert(gppb->GetLevel() == ParallelLevel::GROUPx4);
+        if (ppb->IsEnforced() && gppb->IsEnforced())
+          Error1(ppb->LOC(), "unable to have a 'group' parallel-by inside the "
+                             "'group-4' parallel-by.");
+        else if (gppb->IsEnforced() && !sbe::ceq(bv, sbe::nu(128)))
+          Error1(
+              pb->LOC(),
+              "The leading dimension must be 128 when 'group-4' exists for " +
+                  STR(CCtx().GetArch()) + ".");
+      }
+    }
+  }
 
   void CheckDMA(AST::DMA& n) {
     if (n.operation == ".any") return;
@@ -530,11 +556,10 @@ public:
   }
 
 public:
-  GPUAdaptor() : VisitorWithSymTab("gpu"), cur_arch(STR(CCtx().GetArch())) {}
+  GPUAdaptor() : CodeGenerator("gpu"), cur_arch(STR(CCtx().GetArch())) {}
   ~GPUAdaptor() {}
 
   bool Visit(AST::FloatLiteral& n) override {
-    TraceEachVisit(n);
 
     if (CCtx().GetTarget() == CompileTarget::Factor) {
       if (!n.IsFloat32())
@@ -546,7 +571,6 @@ public:
   }
 
   bool Visit(AST::NamedVariableDecl& n) override {
-    TraceEachVisit(n);
     auto ty = GetSymbolType(n.name_str);
 
     if (!isa<SpannedType>(ty)) {
@@ -601,14 +625,11 @@ public:
   }
 
   bool Visit(AST::Parameter& n) override {
-    TraceEachVisit(n);
     if (n.sym) cur_params.emplace(InScopeName(n.sym->name), &n);
     return true;
   }
 
   bool Visit(AST::DMA& n) override {
-    TraceEachVisit(n);
-
 #if CHOREO_CUDA_VERSION < 12040
     if (n.IsTMA()) {
       Error1(n.LOC(),
@@ -834,7 +855,6 @@ public:
   }
 
   bool Visit(AST::Call& n) override {
-    TraceEachVisit(n);
     if (n.IsArith())
       Error1(n.LOC(),
              "Arithmetic built-in function is yet to supported on CUDA.");
@@ -858,8 +878,6 @@ public:
   }
 
   bool Visit(AST::Synchronize& n) override {
-    TraceEachVisit(n);
-
     auto pl = Level();
 
     switch (n.Resource()) {

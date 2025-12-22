@@ -8,12 +8,12 @@
 
 namespace Choreo {
 
-struct FutureInfoCollect : public CodeGenerator {
+struct FutureAnalysis : public CodeGenerator {
 private:
   ParallelLevel level = ParallelLevel::SEQ;
 
 public:
-  FutureInfoCollect() : CodeGenerator("cgp_stage_2") {}
+  FutureAnalysis() : CodeGenerator("futanly") {}
 
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
@@ -46,7 +46,7 @@ public:
   }
 };
 
-struct CodegenPrepareStage1 : public CodeGenerator {
+struct CodegenInfoCollect : public CodeGenerator {
 private:
   int parallel_depth = 0;
   int max_parallel_depth = 0;
@@ -55,6 +55,7 @@ private:
   std::set<std::string> select_syms;
 
   AST::ParallelBy* cur_device_pb = nullptr;
+  std::vector<AST::ParallelBy*> pb_stack;
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
@@ -64,9 +65,14 @@ private:
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       if (pb->IsOuter()) {
         cur_device_pb = pb;
+        assert(pb_stack.empty());
         auto& tma_descs = cgi.GetTMADescs();
         tma_descs.emplace(pb, std::vector<TMADesc>{});
+      } else {
+        assert(!pb_stack.empty());
       }
+      pb_stack.push_back(pb);
+      cgi.GetPBTree().AddChild(*(pb_stack.rbegin() + 1), pb_stack.back());
       if (parallel_depth == 0 && cgi.GetFunctionTrait(fname).has_parallelby)
         cgi.GetFunctionTrait(fname).multiple_parallelby = true;
       parallel_depth++;
@@ -109,6 +115,7 @@ private:
       n.Note().insert_or_assign("mxl", std::to_string(max_parallel_depth));
       VST_DEBUG(dbgs() << "max depth of `"; pb->InlinePrint(dbgs());
                 dbgs() << "': " << max_parallel_depth << "\n");
+      pb_stack.pop_back();
       if (parallel_depth == 1) {
         VST_DEBUG(dbgs() << "\tGrid Dims: "
                          << cgi.GetFunctionLaunches(fname).back().block_count.x
@@ -129,8 +136,8 @@ private:
   bool IsHost() const { return parallel_depth == 0; }
 
 public:
-  CodegenPrepareStage1() : CodeGenerator("cgp_stage_1") {}
-  ~CodegenPrepareStage1() {}
+  CodegenInfoCollect() : CodeGenerator("cg_info") {}
+  ~CodegenInfoCollect() {}
 
   bool Visit(AST::MultiNodes&) { return true; }
   bool Visit(AST::MultiValues&) { return true; }
@@ -331,11 +338,11 @@ public:
 
 class CodegenPrepare : public VisitorGroup {
 private:
-  CodegenPrepareStage1 s1;
-  FutureInfoCollect s2;
+  CodegenInfoCollect cic;
+  FutureAnalysis fa;
 
 public:
-  CodegenPrepare() : VisitorGroup("prepare", s1, s2) {}
+  CodegenPrepare() : VisitorGroup("codegen", cic, fa) {}
 };
 
 } // end namespace Choreo
