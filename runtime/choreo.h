@@ -2817,17 +2817,23 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
 
 // WGMMA fence/sync primitives
 __device__ static inline void warpgroup_arrive() {
+#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
+#endif
 }
 
 __device__ static inline void warpgroup_commit_batch() {
+#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
+#endif
 }
 
 template <int PD>
 __device__ static inline void warpgroup_wait() {
+#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   static_assert(PD >= 0 && PD <= 7, "WGMMA wait: N must be in range [0, 7]");
   asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(PD) : "memory");
+#endif
 }
 
 // Unified WGMMA template with automatic descriptor selection
@@ -2861,6 +2867,7 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
   // Determine PTX instruction based on input and output types
   if constexpr (std::is_same_v<InputT, __half> &&
                 std::is_same_v<OutputT, __half>) {
+#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.f16.f16.f16 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -2889,8 +2896,10 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(TransA), "n"(TransB));
+#endif
   } else if constexpr (std::is_same_v<InputT, __half> &&
                        std::is_same_v<OutputT, float>) {
+#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.f32.f16.f16 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -2911,8 +2920,10 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(TransA), "n"(TransB));
+#endif
   } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> &&
                        std::is_same_v<OutputT, __nv_bfloat16>) {
+#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.bf16.bf16.bf16 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -2941,8 +2952,10 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(TransA), "n"(TransB));
+#endif
   } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> &&
                        std::is_same_v<OutputT, float>) {
+#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -2963,6 +2976,7 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(TransA), "n"(TransB));
+#endif
   }
 }
 
