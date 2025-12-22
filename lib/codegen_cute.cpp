@@ -2083,21 +2083,30 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ds << d_indent << "    " << b_sym << "_smem_ptr);\n";
     } break;
     case AST::MMAOperation::Store: {
-      auto from_sym = op.StoreFrom();
-      auto& store_ssmi = cgi.GetSymbolMMA(InScopeName(from_sym));
-      auto n_val = VIInt(store_ssmi.shape[1]);
-      int64_t N = n_val ? *n_val : 64;
-      // Finalize WGMMA operations before storing
       ds << d_indent << "// Finalize WGMMA operations\n";
       ds << d_indent << "warpgroup_commit_batch();\n";
       ds << d_indent << "warpgroup_wait<0>();\n";
-      // Store WGMMA accumulator to global memory
-      ds << d_indent << "// WGMMA store accumulator to global memory\n";
-      ds << d_indent << "choreo::wgmma_store_d<float, "
-         << NameBaseType(store_ssmi.ty) << ">(\n";
-      ds << d_indent << "    (" << NameBaseType(store_ssmi.ty) << "*)("
-         << ExprSTR(op.StoreTo(), false) << "), " << from_sym << "_d, " << N
-         << ");\n";
+      auto ca = op.StoreTo();
+      auto f_sym = ca->data->name;
+      auto ty = GetSymbolType(f_sym);
+      auto f_sty = GetSpannedType(ty);
+      auto accum_type = ssmi.ty;
+      accum_type = BaseType::F32; // TODO: make configurable based on MMA
+                                  // config
+      const auto f_mds = GenTensorDecl(
+          RemoveSuffix(f_sym, ".data()"),
+          (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
+          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
+          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
+      ds << f_mds.second;
+      auto sym = op.StoreFrom();
+      std::string DIM_N = STR(ssmi.shape.at(1));
+      std::string CUTE_WGMMA_ATOM =
+          "CUTE_WGMMA_M" + STR(ssmi.shape.at(0)) + "K" + STR(ssmi.shape.at(2));
+
+      ds << d_indent << "store_fragment_d<" << CUTE_WGMMA_ATOM << ", " << DIM_N
+         << ">(" << f_mds.first << ", " << "reinterpret_cast<"
+         << NameBaseType(accum_type) << "*>(" << sym << "_d[0]));\n";
     } break;
     default: break;
     }

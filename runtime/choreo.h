@@ -2836,6 +2836,18 @@ __device__ static inline void warpgroup_wait() {
 #endif
 }
 
+// Accumulation type casting helper
+template <class T, class F>
+struct AccumTCast {
+  static constexpr bool supported = false;
+};
+
+template <>
+struct AccumTCast<f16, f32> {
+  static constexpr bool supported = true;
+  __device__ static inline f16 cast(f32 val) { return __float2half(val); }
+};
+
 // Unified WGMMA template with automatic descriptor selection
 // Template parameters:
 //   - InputT: input data type (__half or __nv_bfloat16)
@@ -2980,131 +2992,65 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
   }
 }
 
-// WGMMA 64x64x16 for FP16 (produces FP32 accumulator) - with K_MAJOR and
-// MN_MAJOR support
+// wgmma store d
+// reference:
+// https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-shape
+struct Policy_WGMMA_D_M64K16 {
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;             // 0-31: lane within warp
+    int warp = tid / 32;             // 0-3: which warp in warp group
+    int row0 = warp * 16 + lane / 4; // fisrt row
+    int row1 = row0 + 8;             // second row
+    int col_num = N / 8;             // number of column pairs
 
-// WGMMA accumulator store helper (64x64 output, 128 threads)
-// Each thread holds d[4][8] = 32 elements of the 64x64 output
-// The layout follows WGMMA's output register mapping:
-// - 128 threads in a warp group (4 warps x 32 threads)
-// - Each thread holds 32 floats (4 rows x 8 columns in the local view)
-// - Total: 128 threads x 32 elements = 4096 elements = 64x64 output
-//
-// Thread layout for m64n64 (column-major output):
-// - warp_id (0-3): selects which 16-row section (each warp handles 16 rows)
-// - lane (0-31): lane within warp
-// - row = warp_id * 16 + lane / 4 (each group of 4 lanes handles same row)
-// - col = 16 * w + 2 * (tid % 4) (each thread handles 2 columns per iteration)
-// - d[w][0..7] maps to 8 elements: (row, col), (row, col+1), (row+8, col),
-// (row+8, col+1), ...
-template <typename AccumT, typename OutputT>
-__device__ static inline void
-wgmma_store_row_major(OutputT* output, AccumT (&d)[4][8], int stride) {
-  static_assert(std::is_same_v<AccumT, float>,
-                "wgmma_store_d requires float accumulator type");
-  static_assert(std::is_same_v<OutputT, __half>,
-                "wgmma_store_d requires __half output type");
-  int tid = threadIdx.x % 128;
-  int lane = tid % 32; // 0-31: lane within warp
-  int warp = tid / 32; // 0-3: which warp in warp group
-
-  // Row calculation: each group of 4 lanes handles the same row
-  int row = warp * 16 + lane / 4;
-
-  // Store d[w][0..7] to global memory
-  // d[w][0] -> (row, col)
-  // d[w][1] -> (row, col+1)
-  // d[w][2] -> (row+8, col)
-  // d[w][3] -> (row+8, col+1)
-  // d[w][4] -> (row, col+8)
-  // d[w][5] -> (row, col+9)
-  // d[w][6] -> (row+8, col+8)
-  // d[w][7] -> (row+8, col+9)
-  for (int w = 0; w < 4; ++w) {
-    int col = 16 * w + 2 * (tid % 4);
-
-    // Store the 8 elements from d[w][0..7]
-    output[row * stride + col] = __float2half(d[w][0]);
-    output[row * stride + (col + 1)] = __float2half(d[w][1]);
-    output[(row + 8) * stride + col] = __float2half(d[w][2]);
-    output[(row + 8) * stride + (col + 1)] = __float2half(d[w][3]);
-    output[(row)*stride + (col + 8)] = __float2half(d[w][4]);
-    output[(row)*stride + (col + 9)] = __float2half(d[w][5]);
-    output[(row + 8) * stride + (col + 8)] = __float2half(d[w][6]);
-    output[(row + 8) * stride + (col + 9)] = __float2half(d[w][7]);
+    if constexpr (AccumTCast<typename Tensor::value_type, AccumT>::supported) {
+      auto cast = [](auto&& x) -> auto {
+        return AccumTCast<typename Tensor::value_type,
+                          std::decay_t<decltype(x)>>::cast(x);
+      };
+#pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row0, col0) = cast(d[c * 4]);
+        D(row0, col1) = cast(d[c * 4 + 1]);
+        D(row1, col0) = cast(d[c * 4 + 2]);
+        D(row1, col1) = cast(d[c * 4 + 3]);
+      }
+    } else {
+      static_assert(std::is_same<typename Tensor::value_type, AccumT>::value,
+                    "WGMMA D store: unsupported accumulation type cast");
+#pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row0, col0) = d[c * 4];
+        D(row0, col1) = d[c * 4 + 1];
+        D(row1, col0) = d[c * 4 + 2];
+        D(row1, col1) = d[c * 4 + 3];
+      }
+    }
   }
-}
+};
 
-template <typename AccumT, typename OutputT>
-__device__ static inline void
-wgmma_store_col_major(OutputT* output, AccumT (&d)[4][8], int stride) {
-  static_assert(std::is_same_v<AccumT, float>,
-                "wgmma_store_d requires float accumulator type");
-  static_assert(std::is_same_v<OutputT, __half>,
-                "wgmma_store_d requires __half output type");
-  int tid = threadIdx.x % 128;
-  int lane = tid % 32; // 0-31: lane within warp
-  int warp = tid / 32; // 0-3: which warp in warp group
-
-  // Row calculation: each group of 4 lanes handles the same row
-  int row = warp * 16 + lane / 4;
-
-  // Store d[w][0..7] to global memory
-  // d[w][0] -> (row, col)
-  // d[w][1] -> (row, col+1)
-  // d[w][2] -> (row+8, col)
-  // d[w][3] -> (row+8, col+1)
-  // d[w][4] -> (row, col+8)
-  // d[w][5] -> (row, col+9)
-  // d[w][6] -> (row+8, col+8)
-  // d[w][7] -> (row+8, col+9)
-  for (int w = 0; w < 4; ++w) {
-    int col = 16 * w + 2 * (tid % 4);
-
-    // Store the 8 elements from d[w][0..7]
-    output[row + col * stride] = __float2half(d[w][0]);
-    output[row + (col + 1) * stride] = __float2half(d[w][1]);
-    output[(row + 8) + col * stride] = __float2half(d[w][2]);
-    output[(row + 8) + (col + 1) * stride] = __float2half(d[w][3]);
-    output[(row) + (col + 8) * stride] = __float2half(d[w][4]);
-    output[(row) + (col + 9) * stride] = __float2half(d[w][5]);
-    output[(row + 8) + (col + 8) * stride] = __float2half(d[w][6]);
-    output[(row + 8) + (col + 9) * stride] = __float2half(d[w][7]);
-  }
-}
-
-// Unified WGMMA store function - uses row-major layout by default
-// This is the main interface for storing WGMMA accumulator to global memory
-template <typename AccumT, typename OutputT>
-__device__ static inline void wgmma_store_d(OutputT* output, AccumT (&d)[4][8],
-                                            int stride) {
-  static_assert(std::is_same_v<AccumT, float>,
-                "wgmma_store_d requires float accumulator type");
-  static_assert(std::is_same_v<OutputT, __half>,
-                "wgmma_store_d requires __half output type");
-  // Use row-major layout by default (most common case)
-  wgmma_store_row_major(output, d, stride);
-}
-
-// --------------- GMMA/WGMMA (SM90+) ---------------
-// Note: WGMMA (Warp Group MMA) uses PTX inline assembly directly via:
-//   - wgmma_m64n64k16<AccumT, InputT>(d, sA, stride_a, ldim_a, sB, stride_b,
-//   ldim_b)
-//   - wgmma_store_d<AccumT, OutputT>(output, d, stride)
-// No cute MMA policies are needed for WGMMA.
-
+// unified MMA load/store fragment interfaces
+// load A fragment
 template <class MMA, class Tensor>
 __device__ static inline auto load_fragment_a(Tensor const& A) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   return MMA_Policy<MMA>::typeA::load(A);
 }
 
+// load B fragment
 template <class MMA, class Tensor>
 __device__ static inline auto load_fragment_b(Tensor const& B) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   return MMA_Policy<MMA>::typeB::load(B);
 }
 
+// load/store D fragment
 template <class MMA, class Tensor, class... DTypes>
 __device__ static inline void load_fragment_d(Tensor const& D,
                                               DTypes&... vals) {
@@ -3118,6 +3064,31 @@ __device__ static inline void store_fragment_d(Tensor& D,
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   MMA_Policy<MMA>::typeD::store(D, vals...);
 }
+
+// for wgmma store d with pointer
+template <class MMA, int N, class Tensor, class AccumT>
+__device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "WGMMA store_fragment_d only supports float accumulator type");
+  static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
+                    std::is_same<typename Tensor::value_type, AccumT>::value,
+                "WGMMA store_fragment_d unsupported type cast");
+
+  MMA_Policy<MMA>::typeD::template store<Tensor, AccumT, N>(D, d);
+}
+
+// --------------- MMA policy specializations ---------------
+struct MMA {};
+struct CUTE_MMA : MMA {};
+struct CUTE_WGMMA : MMA {};
+struct CUTE_WGMMA_M64K8 : CUTE_WGMMA {};
+struct CUTE_WGMMA_M64K16 : CUTE_WGMMA {};
+struct CUTE_WGMMA_M64K32 : CUTE_WGMMA {};
+struct CUTE_WGMMA_M64K64 : CUTE_WGMMA {};
+struct CUTE_WGMMA_M64k256 : CUTE_WGMMA {};
 
 template <>
 struct MMA_Policy<cute::SM70_8x8x4_F16F16F16F16_TN> {
@@ -3385,6 +3356,13 @@ struct MMA_Policy<cute::SM80_16x8x32_S32U8U8S32_TN> {
   using typeA = Policy_A_M16N8K32_2;
   using typeB = Policy_B_M16N8K32_1;
   using typeD = Policy_D_M16N8_1;
+};
+
+// wgmma policies
+template <>
+struct MMA_Policy<CUTE_WGMMA_M64K16> {
+  static constexpr bool supported = true;
+  using typeD = Policy_WGMMA_D_M64K16;
 };
 
 // TODO: all 16x8x64 (sub byte)
