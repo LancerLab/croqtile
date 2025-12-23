@@ -1969,33 +1969,60 @@ struct MMA_Policy {
   static constexpr bool supported = false;
 };
 
-// --------------- load A policies ---------------
-// for f16
-struct Policy_A_M8N8K4_0 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    int lane = threadIdx.x & 31;
-    int row;
-    if (lane < 16)
-      row = lane & 3;
-    else
-      row = (lane & 3) + 4;
-    auto A_u32 = cute::recast<uint32_t>(A);
-    uint32_t a0 = A_u32(row, 0);
-    uint32_t a1 = A_u32(row, 1);
-    return cutlass::Array<uint32_t, 2>{a0, a1};
-  }
+// Accumulation type casting helper
+template <class T, class F>
+struct AccumTCast {
+  static constexpr bool supported = false;
 };
 
-// for f64
-struct Policy_A_M8N8K4_1 {
+template <>
+struct AccumTCast<f16, f32> {
+  static constexpr bool supported = true;
+  __device__ static inline f16 cast(f32 val) { return f32_to_f16(val); }
+};
+
+template <>
+struct AccumTCast<f32, f16> {
+  static constexpr bool supported = true;
+  __device__ static inline f32 cast(f16 val) { return f16_to_f32(val); }
+};
+
+template <class T, class F>
+__device__ static inline T cast_if(F val) {
+  if constexpr (AccumTCast<F, T>::supported) {
+    return AccumTCast<F, T>::cast(val);
+  } else {
+    static_assert(std::is_same<T, F>::value,
+                  "unsupported accumulation type casting");
+    return val;
+  }
+}
+
+// --------------- load A policies ---------------
+struct Policy_A_M8N8K4 {
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
-    int row = lane >> 2;
-    int col = lane & 3;
-    double a0 = A(row, col);
-    return cutlass::Array<double, 1>{a0};
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, f16>::value) {
+      int row;
+      if (lane < 16)
+        row = lane & 3;
+      else
+        row = (lane & 3) + 4;
+      auto A_u32 = cute::recast<uint32_t>(A);
+      uint32_t a0 = A_u32(row, 0);
+      uint32_t a1 = A_u32(row, 1);
+      return cutlass::Array<uint32_t, 2>{a0, a1};
+    } else if constexpr (std::is_same<value_type, double>::value) {
+      int row = lane >> 2;
+      int col = lane & 3;
+      double a0 = A(row, col);
+      return cutlass::Array<double, 1>{a0};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA");
+    }
   }
 };
 
@@ -2040,7 +2067,7 @@ struct Policy_A_M8N8K128 {
 };
 
 // for tf32
-struct Policy_A_M16N8K4_0 {
+struct Policy_A_M16N8K4 {
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
@@ -2049,47 +2076,25 @@ struct Policy_A_M16N8K4_0 {
     int row0 = gid;
     int row1 = gid + 8;
     int col = tid_in_group;
-    auto A_u32 = cute::recast<uint32_t>(A);
-    uint32_t a0 = A_u32(row0, col);
-    uint32_t a1 = A_u32(row1, col);
-    return cutlass::Array<uint32_t, 2>{a0, a1};
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, tf32>::value ||
+                  std::is_same<value_type, float>::value) {
+      auto A_u32 = cute::recast<uint32_t>(A);
+      uint32_t a0 = A_u32(row0, col);
+      uint32_t a1 = A_u32(row1, col);
+      return cutlass::Array<uint32_t, 2>{a0, a1};
+    } else if constexpr (std::is_same<value_type, double>::value) {
+      double a0 = A(row0, col);
+      double a1 = A(row1, col);
+      return cutlass::Array<double, 2>{a0, a1};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
   }
 };
 
-struct Policy_A_M16N8K4_1 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col = tid_in_group;
-    double a0 = A(row0, col);
-    double a1 = A(row1, col);
-    return cutlass::Array<double, 2>{a0, a1};
-  }
-};
-
-// for f16, bf16
-struct Policy_A_M16N8K8_0 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col = tid_in_group;
-    auto A_u32 = cute::recast<uint32_t>(A);
-    uint32_t a0 = A_u32(row0, col);
-    uint32_t a1 = A_u32(row1, col);
-    return cutlass::Array<uint32_t, 2>{a0, a1};
-  }
-};
-
-// for tf32
-struct Policy_A_M16N8K8_1 {
+struct Policy_A_M16N8K8 {
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
@@ -2099,17 +2104,86 @@ struct Policy_A_M16N8K8_1 {
     int row1 = gid + 8;
     int col0 = tid_in_group;
     int col1 = tid_in_group + 4;
-    auto A_u32 = cute::recast<uint32_t>(A);
-    uint32_t a0 = A_u32(row0, col0);
-    uint32_t a1 = A_u32(row1, col0);
-    uint32_t a2 = A_u32(row0, col1);
-    uint32_t a3 = A_u32(row1, col1);
-    return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, f16>::value ||
+                  std::is_same<value_type, bf16>::value) {
+      auto A_u32 = cute::recast<uint32_t>(A);
+      uint32_t a0 = A_u32(row0, col0);
+      uint32_t a1 = A_u32(row1, col0);
+      return cutlass::Array<uint32_t, 2>{a0, a1};
+    } else if constexpr (std::is_same<value_type, tf32>::value ||
+                         std::is_same<value_type, float>::value) {
+      auto A_u32 = cute::recast<uint32_t>(A);
+      uint32_t a0 = A_u32(row0, col0);
+      uint32_t a1 = A_u32(row1, col0);
+      uint32_t a2 = A_u32(row0, col1);
+      uint32_t a3 = A_u32(row1, col1);
+      return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+    } else if constexpr (std::is_same<value_type, double>::value) {
+      double a0 = A(row0, col0);
+      double a1 = A(row1, col0);
+      double a2 = A(row0, col1);
+      double a3 = A(row1, col1);
+      return cutlass::Array<double, 4>{a0, a1, a2, a3};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
   }
 };
 
-// for f64
-struct Policy_A_M16N8K8_2 {
+struct Policy_A_M16N8K16 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid, row1 = gid + 8;
+
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, double>::value) {
+      int col0 = tid_in_group, col1 = tid_in_group + 4, col2 = tid_in_group + 8,
+          col3 = tid_in_group + 12;
+      double a0 = A(row0, col0);
+      double a1 = A(row1, col0);
+      double a2 = A(row0, col1);
+      double a3 = A(row1, col1);
+      double a4 = A(row0, col2);
+      double a5 = A(row1, col2);
+      double a6 = A(row0, col3);
+      double a7 = A(row1, col3);
+      return cutlass::Array<double, 8>{a0, a1, a2, a3, a4, a5, a6, a7};
+    } else if constexpr (std::is_same<value_type, f16>::value ||
+                         std::is_same<value_type, bf16>::value) {
+      auto A_u32 = cute::recast<uint32_t>(A);
+      int col0 = tid_in_group, col1 = tid_in_group + 4;
+      uint32_t a0 = A_u32(row0, col0);
+      uint32_t a1 = A_u32(row1, col0);
+      uint32_t a2 = A_u32(row0, col1);
+      uint32_t a3 = A_u32(row1, col1);
+      return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+    } else if constexpr (std::is_same<value_type, uint8_t>::value ||
+                         std::is_same<value_type, int8_t>::value ||
+                         std::is_same<value_type, f8_e4m3>::value ||
+                         std::is_same<value_type, f8_e5m2>::value) {
+      int col = tid_in_group * 4;
+      uint32_t a0 = 0;
+#pragma unroll
+      for (int i = 0; i < 4; i++)
+        a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col + i)));
+      uint32_t a1 = 0;
+#pragma unroll
+      for (int i = 0; i < 4; i++)
+        a1 = (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col + i)));
+      return cutlass::Array<uint32_t, 2>{a0, a1};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
+  }
+};
+
+struct Policy_A_M16N8K32 {
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
@@ -2117,150 +2191,43 @@ struct Policy_A_M16N8K8_2 {
     int tid_in_group = lane & 3;
     int row0 = gid;
     int row1 = gid + 8;
-    int col0 = tid_in_group;
-    int col1 = tid_in_group + 4;
-    double a0 = A(row0, col0);
-    double a1 = A(row1, col0);
-    double a2 = A(row0, col1);
-    double a3 = A(row1, col1);
-    return cutlass::Array<double, 4>{a0, a1, a2, a3};
-  }
-};
-
-// for f16 and bf16
-struct Policy_A_M16N8K16_0 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row0 = gid;              // for 0 and 1, 4 and 5
-    int row1 = gid + 8;          // for 2 and 3, 6 and 7
-    int col0 = tid_in_group;     // for 0, 1, 2 and 3
-    int col1 = tid_in_group + 4; // for 4, 5, 6 and 7
-    auto A_u32 = cute::recast<uint32_t>(A);
-    uint32_t a0 = A_u32(row0, col0);
-    uint32_t a1 = A_u32(row1, col0);
-    uint32_t a2 = A_u32(row0, col1);
-    uint32_t a3 = A_u32(row1, col1);
-    return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
-  }
-};
-
-// for f64
-struct Policy_A_M16N8K16_1 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col = tid_in_group;
-    double a0 = A(row0, col);
-    double a1 = A(row1, col);
-    double a2 = A(row0, col + 4);
-    double a3 = A(row1, col + 4);
-    double a4 = A(row0, col + 8);
-    double a5 = A(row1, col + 8);
-    double a6 = A(row0, col + 12);
-    double a7 = A(row1, col + 12);
-    return cutlass::Array<double, 8>{a0, a1, a2, a3, a4, a5, a6, a7};
-  }
-};
-
-// for u8, s8, e4m3 and e5m2
-struct Policy_A_M16N8K16_2 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-#if 1
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col = tid_in_group * 4;
-    uint32_t a0 = 0;
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, f8_e4m3>::value ||
+                  std::is_same<value_type, f8_e5m2>::value) {
+      int col0 = tid_in_group;
+      int col1 = tid_in_group + 4;
+      auto A_u32 = cute::recast<uint32_t>(A);
+      uint32_t a0 = A_u32(row0, col0);
+      uint32_t a1 = A_u32(row1, col0);
+      uint32_t a2 = A_u32(row0, col1);
+      uint32_t a3 = A_u32(row1, col1);
+      return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+    } else if constexpr (std::is_same<value_type, uint8_t>::value ||
+                         std::is_same<value_type, int8_t>::value) {
+      int col0 = tid_in_group * 4;
+      int col1 = tid_in_group * 4 + 16;
+      uint32_t a0 = 0;
 #pragma unroll
-    for (int i = 0; i < 4; i++)
-      a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col + i)));
-    uint32_t a1 = 0;
+      for (int i = 0; i < 4; i++)
+        a0 =
+            (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col0 + i)));
+      uint32_t a1 = 0;
 #pragma unroll
-    for (int i = 0; i < 4; i++)
-      a1 = (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col + i)));
-    return cutlass::Array<uint32_t, 2>{a0, a1};
-#else
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col = tid_in_group;
-    auto A_u32 = cute::recast<uint32_t>(A);
-    uint32_t a0 = A_u32(row0, col);
-    uint32_t a1 = A_u32(row1, col);
-    return cutlass::Array<uint32_t, 2>{a0, a1};
-#endif
-  }
-};
-
-// for s4 and u4
-struct Policy_A_M16N8K32_0 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    // TODO
-  }
-};
-
-// for e4m3, e5m2, e3m2, e2m3 and e2m1
-struct Policy_A_M16N8K32_1 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    auto A_u32 = cute::recast<uint32_t>(A);
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane % 4;
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col0 = tid_in_group;
-    int col1 = tid_in_group + 4;
-    uint32_t a0 = A_u32(row0, col0);
-    uint32_t a1 = A_u32(row1, col0);
-    uint32_t a2 = A_u32(row0, col1);
-    uint32_t a3 = A_u32(row1, col1);
-    return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
-  }
-};
-
-// for s8, u8
-struct Policy_A_M16N8K32_2 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& A) {
-    auto A_U32 = cute::recast<uint32_t>(A);
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane % 4;
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col0 = tid_in_group * 4;
-    int col1 = tid_in_group * 4 + 16;
-    uint32_t a0 = 0;
+      for (int i = 0; i < 4; i++)
+        a1 =
+            (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col0 + i)));
+      uint32_t a2 = 0;
 #pragma unroll
-    for (int i = 0; i < 4; i++)
-      a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col0 + i)));
-    uint32_t a1 = 0;
+      for (int i = 0; i < 4; i++)
+        a2 =
+            (a2 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col1 + i)));
+      uint32_t a3 = 0;
 #pragma unroll
-    for (int i = 0; i < 4; i++)
-      a1 = (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col0 + i)));
-    uint32_t a2 = 0;
-#pragma unroll
-    for (int i = 0; i < 4; i++)
-      a2 = (a2 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col1 + i)));
-    uint32_t a3 = 0;
-#pragma unroll
-    for (int i = 0; i < 4; i++)
-      a3 = (a3 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col1 + i)));
-    return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+      for (int i = 0; i < 4; i++)
+        a3 =
+            (a3 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col1 + i)));
+      return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+    }
   }
 };
 
@@ -2298,33 +2265,31 @@ struct Policy_A_M16N8K256 {
 };
 
 // --------------- load B policies ---------------
-// for f16
-struct Policy_B_M8N8K4_0 {
+struct Policy_B_M8N8K4 {
   template <class Tensor>
   __device__ static auto load(Tensor const& B) {
     int lane = threadIdx.x & 31;
-    int col;
-    if (lane < 16)
-      col = lane & 3;
-    else
-      col = (lane & 3) + 4;
-    uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(0, col))) << 16) |
-                  uint16_t(reinterpret_cast<uint16_t&>(B(1, col)));
-    uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(2, col))) << 16) |
-                  uint16_t(reinterpret_cast<uint16_t&>(B(3, col)));
-    return cutlass::Array<uint32_t, 2>{b0, b1};
-  }
-};
-
-// for f64
-struct Policy_B_M8N8K4_1 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& B) {
-    int lane = threadIdx.x & 31;
-    int row = lane & 3;
-    int col = lane >> 2;
-    double b0 = B(row, col);
-    return cutlass::Array<double, 1>{b0};
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, f16>::value) {
+      int col;
+      if (lane < 16)
+        col = lane & 3;
+      else
+        col = (lane & 3) + 4;
+      uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(0, col))) << 16) |
+                    uint16_t(reinterpret_cast<uint16_t&>(B(1, col)));
+      uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(2, col))) << 16) |
+                    uint16_t(reinterpret_cast<uint16_t&>(B(3, col)));
+      return cutlass::Array<uint32_t, 2>{b0, b1};
+    } else if constexpr (std::is_same<value_type, double>::value) {
+      int row = lane & 3;
+      int col = lane >> 2;
+      double b0 = B(row, col);
+      return cutlass::Array<double, 1>{b0};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA");
+    }
   }
 };
 
@@ -2367,8 +2332,7 @@ struct Policy_B_M8N8K128 {
   }
 };
 
-// for tf32
-struct Policy_B_M16N8K4_0 {
+struct Policy_B_M16N8K4 {
   template <class Tensor>
   __device__ static auto load(Tensor const& B) {
     int lane = threadIdx.x & 31;
@@ -2376,43 +2340,22 @@ struct Policy_B_M16N8K4_0 {
     int tid_in_group = lane & 3;
     int row = tid_in_group;
     int col = gid;
-    auto B_u32 = cute::recast<uint32_t>(B);
-    uint32_t b0 = B_u32(row, col);
-    return cutlass::Array<uint32_t, 1>{b0};
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, tf32>::value ||
+                  std::is_same<value_type, float>::value) {
+      auto b0 = reinterpret_cast<uint32_t&>(B(row, col));
+      return cutlass::Array<uint32_t, 1>{b0};
+    } else if constexpr (std::is_same<value_type, double>::value) {
+      double b0_d = B(row, col);
+      return cutlass::Array<double, 1>{b0_d};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
   }
 };
 
-// for f64
-struct Policy_B_M16N8K4_1 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& B) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row = tid_in_group;
-    int col = gid;
-    double b0 = B(row, col);
-    return cutlass::Array<double, 1>{b0};
-  }
-};
-
-// for f16, bf16
-struct Policy_B_M16N8K8_0 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& B) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row = tid_in_group * 2;
-    int col = gid;
-    uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(row, col))) << 16) |
-                  uint16_t(reinterpret_cast<uint16_t&>(B(row + 1, col)));
-    return cutlass::Array<uint32_t, 1>{b0};
-  }
-};
-
-// for tf32
-struct Policy_B_M16N8K8_1 {
+struct Policy_B_M16N8K8 {
   template <class Tensor>
   __device__ static auto load(Tensor const& B) {
     int lane = threadIdx.x & 31;
@@ -2421,94 +2364,78 @@ struct Policy_B_M16N8K8_1 {
     int row0 = tid_in_group;
     int row1 = tid_in_group + 4;
     int col = gid;
-    auto B_u32 = cute::recast<uint32_t>(B);
-    uint32_t b0 = B_u32(row0, col);
-    uint32_t b1 = B_u32(row1, col);
-    return cutlass::Array<uint32_t, 2>{b0, b1};
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, f16>::value ||
+                  std::is_same<value_type, bf16>::value) {
+      int row = tid_in_group * 2;
+      uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(row, col))) << 16) |
+                    uint16_t(reinterpret_cast<uint16_t&>(B(row + 1, col)));
+      return cutlass::Array<uint32_t, 1>{b0};
+    } else if constexpr (std::is_same<value_type, tf32>::value ||
+                         std::is_same<value_type, float>::value) {
+      auto B_u32 = cute::recast<uint32_t>(B);
+      uint32_t b0 = B_u32(row0, col);
+      uint32_t b1 = B_u32(row1, col);
+      return cutlass::Array<uint32_t, 2>{b0, b1};
+    } else if constexpr (std::is_same<value_type, double>::value) {
+      double b0 = B(row0, col);
+      double b1 = B(row1, col);
+      return cutlass::Array<double, 2>{b0, b1};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
   }
 };
 
-// for f64
-struct Policy_B_M16N8K8_2 {
+struct Policy_B_M16N8K16 {
   template <class Tensor>
   __device__ static auto load(Tensor const& B) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
-    int row0 = tid_in_group;
-    int row1 = tid_in_group + 4;
-    int col = gid;
-    double b0 = B(row0, col);
-    double b1 = B(row1, col);
-    return cutlass::Array<double, 2>{b0, b1};
-  }
-};
 
-// for f16 and bf16
-struct Policy_B_M16N8K16_0 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& B) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row0 = tid_in_group * 2;
-    int row1 = tid_in_group * 2 + 8;
-    int col = gid;
-    uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(row0, col))) << 16) |
-                  uint16_t(reinterpret_cast<uint16_t&>(B(row0 + 1, col)));
-    uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(row1, col))) << 16) |
-                  uint16_t(reinterpret_cast<uint16_t&>(B(row1 + 1, col)));
-    return cutlass::Array<uint32_t, 2>{b0, b1};
-  }
-};
-
-// for f64
-struct Policy_B_M16N8K16_1 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& B) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row = tid_in_group;
-    int col = gid;
-    double b0 = B(row, col);
-    double b1 = B(row + 4, col);
-    double b2 = B(row + 8, col);
-    double b3 = B(row + 12, col);
-    return cutlass::Array<double, 4>{b0, b1, b2, b3};
-  }
-};
-
-// for u8, s8, e4m3 and e5m2
-struct Policy_B_M16N8K16_2 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& B) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row = tid_in_group * 4;
-    int col = gid;
-    uint32_t b0 = 0;
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, double>::value) {
+      int row = tid_in_group;
+      int col = gid;
+      double b0 = B(row, col);
+      double b1 = B(row + 4, col);
+      double b2 = B(row + 8, col);
+      double b3 = B(row + 12, col);
+      return cutlass::Array<double, 4>{b0, b1, b2, b3};
+    } else if constexpr (std::is_same<value_type, f16>::value ||
+                         std::is_same<value_type, bf16>::value) {
+      int row0 = tid_in_group * 2;
+      int row1 = tid_in_group * 2 + 8;
+      int col = gid;
+      uint32_t b0 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row0, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row0 + 1, col)));
+      uint32_t b1 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row1, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row1 + 1, col)));
+      return cutlass::Array<uint32_t, 2>{b0, b1};
+    } else if constexpr (std::is_same<value_type, uint8_t>::value ||
+                         std::is_same<value_type, int8_t>::value ||
+                         std::is_same<value_type, f8_e4m3>::value ||
+                         std::is_same<value_type, f8_e5m2>::value) {
+      int row = tid_in_group * 4;
+      int col = gid;
+      uint32_t b0 = 0;
 #pragma unroll
-    for (int i = 0; i < 4; i++)
-      b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(row + i, col)));
-    return cutlass::Array<uint32_t, 1>{b0};
-  }
-};
-
-// for s4 and u4
-struct Policy_B_M16N8K32_0 {
-  template <class Tensor>
-  __device__ static auto load(Tensor const& B) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    // TODO
+      for (int i = 0; i < 4; i++)
+        b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(row + i, col)));
+      return cutlass::Array<uint32_t, 1>{b0};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
   }
 };
 
 // for s8, u8, e4m3, e5m2, e3m2, e2m3 and e2m1
-struct Policy_B_M16N8K32_1 {
+struct Policy_B_M16N8K32 {
   template <class Tensor>
   __device__ static auto load(Tensor const& B) {
     int lane = threadIdx.x & 31;
@@ -2518,18 +2445,26 @@ struct Policy_B_M16N8K32_1 {
     int row0 = tid_in_group * 4;
     int row1 = tid_in_group * 4 + 16;
     int col = gid;
-    uint32_t b0 =
-        (uint32_t(reinterpret_cast<uint8_t&>(B(row0, col))) << 24) |
-        (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 1, col))) << 16) |
-        (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 2, col))) << 8) |
-        uint8_t(reinterpret_cast<uint8_t&>(B(row0 + 3, col)));
-    uint32_t b1 =
-        (uint32_t(reinterpret_cast<uint8_t&>(B(row1, col))) << 24) |
-        (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 1, col))) << 16) |
-        (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 2, col))) << 8) |
-        uint8_t(reinterpret_cast<uint8_t&>(B(row1 + 3, col)));
+    if constexpr (std::is_same<typename Tensor::value_type, s8>::value ||
+                  std::is_same<typename Tensor::value_type, u8>::value ||
+                  std::is_same<typename Tensor::value_type, f8_e4m3>::value ||
+                  std::is_same<typename Tensor::value_type, f8_e5m2>::value) {
+      uint32_t b0 =
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row0, col))) << 24) |
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 1, col))) << 16) |
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 2, col))) << 8) |
+          uint8_t(reinterpret_cast<uint8_t&>(B(row0 + 3, col)));
+      uint32_t b1 =
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row1, col))) << 24) |
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 1, col))) << 16) |
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 2, col))) << 8) |
+          uint8_t(reinterpret_cast<uint8_t&>(B(row1 + 3, col)));
 
-    return cutlass::Array<uint32_t, 2>{b0, b1};
+      return cutlass::Array<uint32_t, 2>{b0, b1};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
   }
 };
 
@@ -2566,148 +2501,105 @@ struct Policy_B_M16N8K256 {
   }
 };
 
-// ------------------- store D fragment -------------------
-// for m8n8k4(f16)
-struct Policy_D_M8N8_0 {
-  template <class Tensor>
-  __device__ static void load(Tensor const& D, uint32_t& d0, uint32_t& d1,
-                              uint32_t& d2, uint32_t& d3) {
+// ------------------- store/load D fragment -------------------
+struct Policy_D_M8N8 {
+  template <class Tensor, class AccumT>
+  __device__ static void store(Tensor& D, AccumT const* d) {
     int lane = threadIdx.x & 31;
-    int row;
-    if (lane < 16)
-      row = (lane & 3);
-    else
-      row = (lane & 3) + 4;
-    auto D_u32 = cute::recast<uint32_t>(D);
-    d0 = D_u32(row, 0);
-    d1 = D_u32(row, 1);
-    d2 = D_u32(row, 2);
-    d3 = D_u32(row, 3);
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, double>::value ||
+                  std::is_same<value_type, s32>::value) {
+      static_assert(std::is_same<AccumT, value_type>::value,
+                    "AccumT must be same as value_type");
+      int gid = lane >> 2;
+      int tid_in_group = lane & 3;
+      int row = gid;
+      int col0 = tid_in_group * 2;
+      int col1 = col0 + 1;
+      auto D_casted = cute::recast<AccumT>(D);
+      D_casted(row, col0) = d[0];
+      D_casted(row, col1) = d[1];
+    } else if constexpr (std::is_same<AccumT, float>::value) {
+      int row = (lane & 1);
+      if (lane >= 16) row += 4;
+      int col = lane & 2;
+      D(row, col) = cast_if<value_type>(d[0]);
+      D(row, col + 1) = cast_if<value_type>(d[1]);
+      D(row + 2, col) = cast_if<value_type>(d[2]);
+      D(row + 2, col + 1) = cast_if<value_type>(d[3]);
+      D(row, col + 4) = cast_if<value_type>(d[4]);
+      D(row, col + 4 + 1) = cast_if<value_type>(d[5]);
+      D(row + 2, col + 4) = cast_if<value_type>(d[6]);
+      D(row + 2, col + 4 + 1) = cast_if<value_type>(d[7]);
+    } else if constexpr (std::is_same<AccumT, f16>::value) {
+      static_assert(std::is_same<AccumT, value_type>::value,
+                    "AccumT must be same as value_type");
+      int row = (lane & 3);
+      if (lane >= 16) row = row + 4;
+      D(row, 0) = d[0];
+      D(row, 1) = d[1];
+      D(row, 2) = d[2];
+      D(row, 3) = d[3];
+      D(row, 4) = d[4];
+      D(row, 5) = d[5];
+      D(row, 6) = d[6];
+      D(row, 7) = d[7];
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
   }
-
-  template <class Tensor>
-  __device__ static void store(Tensor& D, uint32_t const& d0,
-                               uint32_t const& d1, uint32_t const& d2,
-                               uint32_t const& d3) {
+  template <class Tensor, class AccumT>
+  __device__ static void load(Tensor const& D, AccumT* d) {
     int lane = threadIdx.x & 31;
-    int row;
-    if (lane < 16)
-      row = (lane & 3);
-    else
-      row = (lane & 3) + 4;
-    auto D_u32 = cute::recast<uint32_t>(D);
-    D_u32(row, 0) = d0;
-    D_u32(row, 1) = d1;
-    D_u32(row, 2) = d2;
-    D_u32(row, 3) = d3;
-  }
-};
-
-// for f32
-struct Policy_D_M8N8_1 {
-  template <class Tensor>
-  __device__ static void load(Tensor const& D, float& d0, float& d1, float& d2,
-                              float& d3, float& d4, float& d5, float& d6,
-                              float& d7) {
-    int lane = threadIdx.x & 31;
-    int row = (lane & 1);
-    if (lane >= 16) row += 4;
-    int col = lane & 2;
-    d0 = D(row, col);
-    d1 = D(row, col + 1);
-    d2 = D(row + 2, col);
-    d3 = D(row + 2, col + 1);
-    d4 = D(row, col + 4);
-    d5 = D(row, col + 4 + 1);
-    d6 = D(row + 2, col + 4);
-    d7 = D(row + 2, col + 4 + 1);
-  }
-
-  template <class Tensor>
-  __device__ static void store(Tensor& D, float const& d0, float const& d1,
-                               float const& d2, float const& d3,
-                               float const& d4, float const& d5,
-                               float const& d6, float const& d7) {
-    int lane = threadIdx.x & 31;
-    // if (i == 2,3,6,7) => +2
-    int row = (lane & 1);
-    if (lane >= 16) row += 4;
-    // if (i >= 4) => +4
-    // if (i == 1,3,5,7) => +1
-    int col = lane & 2;
-    D(row, col) = d0;
-    D(row, col + 1) = d1;
-    D(row + 2, col) = d2;
-    D(row + 2, col + 1) = d3;
-    D(row, col + 4) = d4;
-    D(row, col + 4 + 1) = d5;
-    D(row + 2, col + 4) = d6;
-    D(row + 2, col + 4 + 1) = d7;
-  }
-};
-
-// for f64, s32
-struct Policy_D_M8N8_2 {
-  template <class Tensor, class T>
-  __device__ static void load(Tensor const& D, T& d0, T& d1) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row = gid;
-    int col0 = tid_in_group * 2;
-    int col1 = col0 + 1;
-    auto D_casted = cute::recast<T>(D);
-    d0 = D_casted(row, col0);
-    d1 = D_casted(row, col1);
-  }
-
-  template <class Tensor, class T>
-  __device__ static void store(Tensor& D, T const& d0, T const& d1) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row = gid;
-    int col0 = tid_in_group * 2;
-    int col1 = col0 + 1;
-    auto D_casted = cute::recast<T>(D);
-    D_casted(row, col0) = d0;
-    D_casted(row, col1) = d1;
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, double>::value ||
+                  std::is_same<value_type, s32>::value) {
+      static_assert(std::is_same<AccumT, value_type>::value,
+                    "AccumT must be same as value_type");
+      int gid = lane >> 2;
+      int tid_in_group = lane & 3;
+      int row = gid;
+      int col0 = tid_in_group * 2;
+      int col1 = col0 + 1;
+      auto D_casted = cute::recast<AccumT>(D);
+      d[0] = D_casted(row, col0);
+      d[1] = D_casted(row, col1);
+    } else if constexpr (std::is_same<value_type, float>::value) {
+      int row = (lane & 1);
+      if (lane >= 16) row += 4;
+      int col = lane & 2;
+      d[0] = cast_if<AccumT>(D(row, col));
+      d[1] = cast_if<AccumT>(D(row, col + 1));
+      d[2] = cast_if<AccumT>(D(row + 2, col));
+      d[3] = cast_if<AccumT>(D(row + 2, col + 1));
+      d[4] = cast_if<AccumT>(D(row, col + 4));
+      d[5] = cast_if<AccumT>(D(row, col + 4 + 1));
+      d[6] = cast_if<AccumT>(D(row + 2, col + 4));
+      d[7] = cast_if<AccumT>(D(row + 2, col + 4 + 1));
+    } else if constexpr (std::is_same<value_type, f16>::value) {
+      static_assert(std::is_same<AccumT, value_type>::value,
+                    "AccumT must be same as value_type");
+      int row = (lane & 3);
+      if (lane >= 16) row = row + 4;
+      d[0] = D(row, 0);
+      d[1] = D(row, 1);
+      d[2] = D(row, 2);
+      d[3] = D(row, 3);
+      d[4] = D(row, 4);
+      d[5] = D(row, 5);
+      d[6] = D(row, 6);
+      d[7] = D(row, 7);
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
   }
 };
 
-// for packed f16, bf16
-struct Policy_D_M16N8_0 {
-  template <class Tensor, class T>
-  __device__ static void load(Tensor const& D, T& d0, T& d1) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col = tid_in_group;
-    auto D_u32 = cute::recast<uint32_t>(D);
-    d0 = D_u32(row0, col);
-    d1 = D_u32(row1, col);
-  }
-
-  template <class Tensor, class T>
-  __device__ static void store(Tensor& D, T const& d0, T const& d1) {
-    int lane = threadIdx.x & 31;
-    int gid = lane >> 2;
-    int tid_in_group = lane & 3;
-    int row0 = gid;
-    int row1 = gid + 8;
-    int col = tid_in_group;
-    auto D_u32 = cute::recast<uint32_t>(D);
-    D_u32(row0, col) = d0;
-    D_u32(row1, col) = d1;
-  }
-};
-
-// for s32, f32 and f64
-struct Policy_D_M16N8_1 {
-  template <class Tensor, class T>
-  __device__ static void load(Tensor const& D, T& d0, T& d1, T& d2, T& d3) {
+struct Policy_D_M16N8 {
+  template <class Tensor, class AccumT>
+  __device__ static void load(Tensor const& D, AccumT* d) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
@@ -2715,15 +2607,14 @@ struct Policy_D_M16N8_1 {
     int row1 = gid + 8;
     int col0 = tid_in_group * 2;
     int col1 = tid_in_group * 2 + 1;
-    d0 = D(row0, col0);
-    d1 = D(row0, col1);
-    d2 = D(row1, col0);
-    d3 = D(row1, col1);
+    d[0] = cast_if<AccumT>(D(row0, col0));
+    d[1] = cast_if<AccumT>(D(row0, col1));
+    d[2] = cast_if<AccumT>(D(row1, col0));
+    d[3] = cast_if<AccumT>(D(row1, col1));
   }
 
-  template <class Tensor, class T>
-  __device__ static void store(Tensor& D, T const& d0, T const& d1, T const& d2,
-                               T const& d3) {
+  template <class Tensor, class AccumT>
+  __device__ static void store(Tensor& D, AccumT const* d) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
     int tid_in_group = lane & 3;
@@ -2731,10 +2622,11 @@ struct Policy_D_M16N8_1 {
     int row1 = gid + 8;
     int col0 = tid_in_group * 2;
     int col1 = tid_in_group * 2 + 1;
-    D(row0, col0) = d0;
-    D(row0, col1) = d1;
-    D(row1, col0) = d2;
-    D(row1, col1) = d3;
+    using value_type = typename Tensor::value_type;
+    D(row0, col0) = cast_if<value_type>(d[0]);
+    D(row0, col1) = cast_if<value_type>(d[1]);
+    D(row1, col0) = cast_if<value_type>(d[2]);
+    D(row1, col1) = cast_if<value_type>(d[3]);
   }
 };
 
@@ -2881,18 +2773,6 @@ __device__ static inline void warpgroup_wait() {
   asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(PD) : "memory");
 #endif
 }
-
-// Accumulation type casting helper
-template <class T, class F>
-struct AccumTCast {
-  static constexpr bool supported = false;
-};
-
-template <>
-struct AccumTCast<f16, f32> {
-  static constexpr bool supported = true;
-  __device__ static inline f16 cast(f32 val) { return f32_to_f16(val); }
-};
 
 // Unified WGMMA template with automatic descriptor selection
 // Template parameters:
@@ -3049,33 +2929,15 @@ struct Policy_WGMMA_D_M64K16 {
     int row0 = warp * 16 + lane / 4; // fisrt row
     int row1 = row0 + 8;             // second row
     int col_num = N / 8;             // number of column pairs
-
-    if constexpr (AccumTCast<typename Tensor::value_type, AccumT>::supported) {
-      auto cast = [](auto&& x) -> auto {
-        return AccumTCast<typename Tensor::value_type,
-                          std::decay_t<decltype(x)>>::cast(x);
-      };
+    using value_type = typename Tensor::value_type;
 #pragma unroll
-      for (int c = 0; c < col_num; c++) {
-        int col0 = c * 8 + (tid % 4) * 2;
-        int col1 = col0 + 1;
-        D(row0, col0) = cast(d[c * 4]);
-        D(row0, col1) = cast(d[c * 4 + 1]);
-        D(row1, col0) = cast(d[c * 4 + 2]);
-        D(row1, col1) = cast(d[c * 4 + 3]);
-      }
-    } else {
-      static_assert(std::is_same<typename Tensor::value_type, AccumT>::value,
-                    "WGMMA D store: unsupported accumulation type cast");
-#pragma unroll
-      for (int c = 0; c < col_num; c++) {
-        int col0 = c * 8 + (tid % 4) * 2;
-        int col1 = col0 + 1;
-        D(row0, col0) = d[c * 4];
-        D(row0, col1) = d[c * 4 + 1];
-        D(row1, col0) = d[c * 4 + 2];
-        D(row1, col1) = d[c * 4 + 3];
-      }
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(row0, col0) = cast_if<value_type>(d[c * 4]);
+      D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
 };
@@ -3095,39 +2957,53 @@ __device__ static inline auto load_fragment_b(Tensor const& B) {
   return MMA_Policy<MMA>::typeB::load(B);
 }
 
-// load/store D fragment
-template <class MMA, class Tensor, class... DTypes>
+// load d fragment with pointer
+template <class MMA, int N = 0, class Tensor, class AccumT>
 __device__ static inline void load_fragment_d(Tensor const& D,
-                                              DTypes&... vals) {
+                                              AccumT* const d) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
-  MMA_Policy<MMA>::typeD::load(D, vals...);
-}
-
-template <class MMA, class Tensor, class... DTypes>
-__device__ static inline void store_fragment_d(Tensor& D,
-                                               DTypes const&... vals) {
-  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
-  MMA_Policy<MMA>::typeD::store(D, vals...);
-}
-
-// for wgmma store d with pointer
-template <class MMA, int N, class Tensor, class AccumT>
-__device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
-  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
-  static_assert(
-      std::is_same<AccumT, float>::value || std::is_same<AccumT, f16>::value ||
-          std::is_same<AccumT, s32>::value,
-      "WGMMA store_fragment_d only supports float/f16/s32 accumulator type");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, double>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "load d only supports float/double/f16/s32 accumulator type");
   static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
                     std::is_same<typename Tensor::value_type, AccumT>::value,
-                "WGMMA store_fragment_d unsupported type cast");
+                "load d unsupported type cast");
+  if constexpr (N > 0)
+    MMA_Policy<MMA>::typeD::template load<Tensor, AccumT, N>(D, d);
+  else
+    MMA_Policy<MMA>::typeD::template load<Tensor, AccumT>(D, d);
+}
 
-  MMA_Policy<MMA>::typeD::template store<Tensor, AccumT, N>(D, d);
+// store d fragment with pointer
+template <class MMA, int N = 0, class Tensor, class AccumT>
+__device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, double>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "store d only supports float/double/f16/s32 accumulator type");
+  static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
+                    std::is_same<typename Tensor::value_type, AccumT>::value,
+                "store d unsupported type cast");
+  if constexpr (N > 0)
+    MMA_Policy<MMA>::typeD::template store<Tensor, AccumT, N>(D, d);
+  else
+    MMA_Policy<MMA>::typeD::template store<Tensor, AccumT>(D, d);
 }
 
 // --------------- MMA policy specializations ---------------
 struct MMA {};
 struct CUTE_MMA : MMA {};
+struct CUTE_MMA_M8N8K4 : CUTE_MMA {};
+struct CUTE_MMA_M8N8K16 : CUTE_MMA {};
+struct CUTE_MMA_M16N8K4 : CUTE_MMA {};
+struct CUTE_MMA_M16N8K8 : CUTE_MMA {};
+struct CUTE_MMA_M16N8K16 : CUTE_MMA {};
+struct CUTE_MMA_M16N8K32 : CUTE_MMA {};
+struct CUTE_MMA_M16N8K128 : CUTE_MMA {};
 struct CUTE_WGMMA : MMA {};
 struct CUTE_WGMMA_M64K8 : CUTE_WGMMA {};
 struct CUTE_WGMMA_M64K16 : CUTE_WGMMA {};
@@ -3136,271 +3012,51 @@ struct CUTE_WGMMA_M64K64 : CUTE_WGMMA {};
 struct CUTE_WGMMA_M64k256 : CUTE_WGMMA {};
 
 template <>
-struct MMA_Policy<cute::SM70_8x8x4_F16F16F16F16_TN> {
+struct MMA_Policy<CUTE_MMA_M8N8K4> {
   static constexpr bool supported = true;
-  using typeA = Policy_A_M8N8K4_0;
-  using typeB = Policy_B_M8N8K4_0;
-  using typeD = Policy_D_M8N8_0;
+  using typeA = Policy_A_M8N8K4;
+  using typeB = Policy_B_M8N8K4;
+  using typeD = Policy_D_M8N8;
 };
 
 template <>
-struct MMA_Policy<cute::SM70_8x8x4_F32F16F16F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M8N8K4_0;
-  using typeB = Policy_B_M8N8K4_0;
-  using typeD = Policy_D_M8N8_1;
-};
-
-// SM80_8x8x4_F64F64F64F64_TN has been done in wmma
-
-template <>
-struct MMA_Policy<cute::SM80_8x8x16_S32S8S8S32_TN> {
+struct MMA_Policy<CUTE_MMA_M8N8K16> {
   static constexpr bool supported = true;
   using typeA = Policy_A_M8N8K16;
   using typeB = Policy_B_M8N8K16;
-  using typeD = Policy_D_M8N8_2;
+  using typeD = Policy_D_M8N8;
 };
 
 template <>
-struct MMA_Policy<cute::SM80_8x8x16_S32S8U8S32_TN> {
+struct MMA_Policy<CUTE_MMA_M16N8K4> {
   static constexpr bool supported = true;
-  using typeA = Policy_A_M8N8K16;
-  using typeB = Policy_B_M8N8K16;
-  using typeD = Policy_D_M8N8_2;
+  using typeA = Policy_A_M16N8K4;
+  using typeB = Policy_B_M16N8K4;
+  using typeD = Policy_D_M16N8;
 };
 
 template <>
-struct MMA_Policy<cute::SM80_8x8x16_S32U8S8S32_TN> {
+struct MMA_Policy<CUTE_MMA_M16N8K8> {
   static constexpr bool supported = true;
-  using typeA = Policy_A_M8N8K16;
-  using typeB = Policy_B_M8N8K16;
-  using typeD = Policy_D_M8N8_2;
+  using typeA = Policy_A_M16N8K8;
+  using typeB = Policy_B_M16N8K8;
+  using typeD = Policy_D_M16N8;
 };
 
 template <>
-struct MMA_Policy<cute::SM80_8x8x16_S32U8U8S32_TN> {
+struct MMA_Policy<CUTE_MMA_M16N8K16> {
   static constexpr bool supported = true;
-  using typeA = Policy_A_M8N8K16;
-  using typeB = Policy_B_M8N8K16;
-  using typeD = Policy_D_M8N8_2;
+  using typeA = Policy_A_M16N8K16;
+  using typeB = Policy_B_M16N8K16;
+  using typeD = Policy_D_M16N8;
 };
 
 template <>
-struct MMA_Policy<cute::SM80_16x8x4_F32TF32TF32F32_TN> {
+struct MMA_Policy<CUTE_MMA_M16N8K32> {
   static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K4_0;
-  using typeB = Policy_B_M16N8K4_0;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::MMA_16x8x4_F64F64F64F64_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K4_1;
-  using typeB = Policy_B_M16N8K4_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x8_F16F16F16F16_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K8_0;
-  using typeB = Policy_B_M16N8K8_0;
-  using typeD = Policy_D_M16N8_0;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x8_F32F16F16F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K8_0;
-  using typeB = Policy_B_M16N8K8_0;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x8_F32BF16BF16F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K8_0;
-  using typeB = Policy_B_M16N8K8_0;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM90_16x8x8_F64F64F64F64_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K8_2;
-  using typeB = Policy_B_M16N8K8_2;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x8_F32TF32TF32F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K8_1;
-  using typeB = Policy_B_M16N8K8_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x16_F16F16F16F16_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K16_0;
-  using typeB = Policy_B_M16N8K16_0;
-  using typeD = Policy_D_M16N8_0;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x16_F32F16F16F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K16_0;
-  using typeB = Policy_B_M16N8K16_0;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM90_16x8x16_F64F64F64F64_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K16_1;
-  using typeB = Policy_B_M16N8K16_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x16_F32BF16BF16F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K16_0;
-  using typeB = Policy_B_M16N8K16_0;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x16_S32S8S8S32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K16_2;
-  using typeB = Policy_B_M16N8K16_2;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x16_S32S8U8S32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K16_2;
-  using typeB = Policy_B_M16N8K16_2;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x16_S32U8S8S32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K16_2;
-  using typeB = Policy_B_M16N8K16_2;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x16_S32U8U8S32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K16_2;
-  using typeB = Policy_B_M16N8K16_2;
-  using typeD = Policy_D_M16N8_1;
-};
-
-// TODO: 16x8x16 with fp8 (lack of CuTe fma)
-
-template <>
-struct MMA_Policy<cute::SM89_16x8x32_F32E4M3E4M3F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_1;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM89_16x8x32_F32E4M3E5M2F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_1;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM89_16x8x32_F32E5M2E5M2F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_1;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM89_16x8x32_F32E5M2E4M3F32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_1;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM89_16x8x32_F16E4M3E4M3F16_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_1;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_0;
-};
-
-template <>
-struct MMA_Policy<cute::SM89_16x8x32_F16E4M3E5M2F16_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_1;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_0;
-};
-
-template <>
-struct MMA_Policy<cute::SM89_16x8x32_F16E5M2E4M3F16_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_1;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_0;
-};
-
-template <>
-struct MMA_Policy<cute::SM89_16x8x32_F16E5M2E5M2F16_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_1;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_0;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x32_S32S8S8S32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_2;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x32_S32S8U8S32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_2;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x32_S32U8S8S32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_2;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_1;
-};
-
-template <>
-struct MMA_Policy<cute::SM80_16x8x32_S32U8U8S32_TN> {
-  static constexpr bool supported = true;
-  using typeA = Policy_A_M16N8K32_2;
-  using typeB = Policy_B_M16N8K32_1;
-  using typeD = Policy_D_M16N8_1;
+  using typeA = Policy_A_M16N8K32;
+  using typeB = Policy_B_M16N8K32;
+  using typeD = Policy_D_M16N8;
 };
 
 // wgmma policies
@@ -3417,9 +3073,9 @@ struct MMA_Policy<CUTE_WGMMA_M64K16> {
 // TODO: all 16x8x256 (b1)
 
 // --------------- WGMMA policies (SM90+) ---------------
-// Note: WGMMA uses PTX inline assembly directly via wgmma_m64n64k16<> template.
-// No MMA_Policy specializations are needed for WGMMA as it bypasses the cute
-// MMA policy system.
+// Note: WGMMA uses PTX inline assembly directly via wgmma_m64n64k16<>
+// template. No MMA_Policy specializations are needed for WGMMA as it bypasses
+// the cute MMA policy system.
 
 #endif // __CHOREO_TARGET_CUTE__
 

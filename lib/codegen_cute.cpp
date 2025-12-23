@@ -2169,6 +2169,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     default: break;
     }
   } else {
+    // CUTE MMA api name in choreo
+    auto GetMMAAtomName = [](MMAInfo& ssmi) -> std::string {
+      std::string CUTE_MMA_ATOM = "CUTE_MMA_M" + STR(ssmi.shape.at(0)) + "N" +
+                                  STR(ssmi.shape.at(1)) + "K" +
+                                  STR(ssmi.shape.at(2));
+      return CUTE_MMA_ATOM;
+    };
     // special case of reg num
     auto RegNumOf8x8x4 = [](const ValueList& shape, BaseType bt,
                             MMAInfo::Fragment f, size_t& reg_num) {
@@ -2202,18 +2209,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool use_uint32 = false;
       UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
       RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
-      for (size_t i = 0; i < reg_num_d; ++i) {
-        if (use_uint32)
-          ds << d_indent << "uint32_t" << " " << sym << "_frag" << i << ";\n";
-        else
-          ds << d_indent << NameBaseType(ssmi.ty) << " " << sym << "_frag" << i
-             << ";\n";
-      }
-      for (size_t i = 0; i < reg_num_d; ++i) {
-        // TODO: if use_uint32
-        ds << d_indent << sym << "_frag" << i << " = "
-           << ExprSTR(op.FillingValue(), false) << ";\n";
-      }
+      ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty)) << " "
+         << sym << "_frag[" << reg_num_d << "] ;\n";
+
     } break;
     case AST::MMAOperation::Load: {
       auto ca = op.LoadFrom();
@@ -2230,10 +2228,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       if (ssmi.frag == MMAInfo::FRAG_A || ssmi.frag == MMAInfo::FRAG_B) {
         std::string frag_suffix = (ssmi.frag == MMAInfo::FRAG_A) ? "a" : "b";
+        std::string CUTE_MMA_ATOM = GetMMAAtomName(ssmi);
         ds << d_indent << "auto " << sym << "_frag = load_fragment_"
-           << frag_suffix
-           << "<cute::" << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
-           << f_mds.first << ");\n";
+           << frag_suffix << "<" << CUTE_MMA_ATOM << ">(" << f_mds.first
+           << ");\n";
       } else if (ssmi.frag == MMAInfo::FRAG_C) {
         auto sty = GetSpannedType(GetSymbolType(sym));
         assert(sty);
@@ -2242,19 +2240,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool use_uint32 = false;
         UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
         RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
-        for (size_t i = 0; i < reg_num_d; ++i) {
-          if (use_uint32)
-            ds << d_indent << "uint32_t" << " " << sym << "_frag" << i << ";\n";
-          else
-            ds << d_indent << NameBaseType(ssmi.ty) << " " << sym << "_frag"
-               << i << ";\n";
-        }
-        ds << d_indent << "load_fragment_d<cute::"
-           << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
-           << f_mds.first;
-        for (size_t i = 0; i < reg_num_d; ++i)
-          ds << ", " << sym << "_frag" << i;
-        ds << ");\n";
+        std::string CUTE_MMA_ATOM = GetMMAAtomName(ssmi);
+        ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
+           << " " << sym << "_frag[" << reg_num_d << "] ;\n";
+        ds << d_indent << "load_fragment_d<" << CUTE_MMA_ATOM << ">("
+           << f_mds.first << ", " << "reinterpret_cast<"
+           << NameBaseType(ssmi.ty) << "*> (" << sym << "_frag));\n";
       } else {
         choreo_unreachable("unexpect MMA frag");
       }
@@ -2268,7 +2259,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
          << "cute::" << FCtx(fname).MMAPolicyOfFrag(InScopeName(c_sym))
          << "::fma(";
       for (size_t i = 0; i < reg_num_d; ++i)
-        ds << c_sym << "_frag" << i << ", ";
+        ds << c_sym << "_frag[" << i << "], ";
       // TODO: test with mma config except mma.row.col
       auto shape = cgi.GetSymbolMMA(InScopeName(c_sym)).shape;
       auto m = shape[0], n = shape[1], k = shape[2];
@@ -2285,8 +2276,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << a_sym << "_frag[" << i << "], ";
       for (size_t i = 0; i < reg_num_b; ++i)
         ds << b_sym << "_frag[" << i << "], ";
-      for (size_t i = 0; i < reg_num_d; ++i)
-        ds << c_sym << "_frag" << i << (i == reg_num_d - 1 ? "" : ", ");
+      for (size_t i = 0; i < reg_num_d; ++i) {
+        ds << c_sym << "_frag[" << i << "]";
+        if (i != reg_num_d - 1) ds << ", ";
+      }
       ds << ");\n";
     } break;
     case AST::MMAOperation::Store: {
@@ -2301,11 +2294,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       auto sym = op.StoreFrom();
-      ds << d_indent << "store_fragment_d<cute::"
-         << FCtx(fname).MMAPolicyOfFrag(InScopeName(sym)) << ">("
-         << f_mds.first;
-      for (size_t i = 0; i < reg_num_d; ++i) ds << ", " << sym << "_frag" << i;
-      ds << ");\n";
+      auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      std::string CUTE_MMA_ATOM = GetMMAAtomName(ssmi);
+      ds << d_indent << "store_fragment_d<" << CUTE_MMA_ATOM << ">("
+         << f_mds.first << ", " << "reinterpret_cast<" << NameBaseType(ssmi.ty)
+         << "*> (" << sym << "_frag));\n";
     } break;
     default: break;
     }

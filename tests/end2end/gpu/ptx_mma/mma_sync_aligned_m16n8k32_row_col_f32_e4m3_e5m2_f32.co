@@ -6,7 +6,7 @@
 #define K 128
 
 __co__ auto matmul(f8_e4m3 [M, K] lhs, f8_e5m2 [K, N] rhs) {
-  f32 [M, N] output;a
+  f32 [M, N] output;
 
   int MMA_M = 16, MMA_N = 8, MMA_K = 32;
   parallel {m, n} by [M / MMA_M / 2, N / MMA_N / 2 ] : block {
