@@ -1998,7 +1998,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (NeedLevelPred()) {
       DecrDeviceIndent();
       ds << d_indent << "} // single instance\n";
-      if (!fty->IsAsync()) {
+      if (!fty->IsAsync() && dma_sto < Storage::GLOBAL) {
         // not async, must syncthreads immediately
         // else, defer the sync till the wait time
         ds << d_indent << EmitSync(dma_sto) << ";\n";

@@ -1409,10 +1409,6 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
              "bound item " + STR(bv) +
                  " in parallelby is invalid: should be greater than 0.");
 
-  if (auto size = pl_depths.size(); size >= 2)
-    if (pl_depths[size - 1] == pl_depths[size - 2] && pl_depths.back() == 2)
-      Error1(n.LOC(), "Multiple inner parallels are not allowed!");
-
   diverges.Add(InScopeName(n.BPV()->name));
   for (auto& v : n.AllSubPVs()) {
     auto name = AST::GetName(*v);

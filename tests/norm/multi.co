@@ -1,0 +1,27 @@
+// RUN: choreo -t cute -arch=sm_90a -pa=pbfill -sa=pbfill %s | FileCheck %s
+
+__co__ void foo() {
+
+  parallel p by 3 : block {
+    parallel q by 1 : group-4 {}
+    parallel r by 2 : group {
+      parallel s by 3;
+    }
+  }
+
+}
+
+// CHECK:  `- block Parallelization(o): index symbol: p, bound [0, 3)
+// CHECK:                      index component: {p__elem__x}, corresponding ubound: [3]
+// CHECK:   `- group-4 Parallelization: index symbol: q, bound [0, 1)
+// CHECK:                       index component: {q__elem__x}, corresponding ubound: [1]
+// CHECK:    `- group Parallelization: index symbol: anon_pb_1, bound [0, 1)
+// CHECK:                        index component: {anon_pb_1__elem__x}, corresponding ubound: [1]
+// CHECK:     `- thread Parallelization: index symbol: anon_pb_0, bound [0, 128)
+// CHECK:                         index component: {anon_pb_0__elem__x}, corresponding ubound: [128]
+// CHECK:   `- group-4 Parallelization: index symbol: anon_pb_2, bound [0, 1)
+// CHECK:                       index component: {anon_pb_2__elem__x}, corresponding ubound: [1]
+// CHECK:    `- group Parallelization: index symbol: r, bound [0, 2)
+// CHECK:                        index component: {r__elem__x}, corresponding ubound: [2]
+// CHECK:     `- thread Parallelization: index symbol: s, bound [0, 3)
+// CHECK:                         index component: {s__elem__x}, corresponding ubound: [3]

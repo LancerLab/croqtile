@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "loop_vectorize.hpp"
+#include "pbtree.hpp"
 #include "symtab.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"
@@ -28,10 +29,6 @@ struct NormBase : public VisitorWithScope {
     }
   }
   NormBase(const std::string& name) : VisitorWithScope(name) {}
-#if 0
-  bool BeforeVisitImpl(AST::Node&) override { return true; }
-  bool AfterVisitImpl(AST::Node&) override { return true; }
-#endif
 };
 
 struct LoopNorm final : public NormBase {
@@ -937,21 +934,18 @@ struct ParaByFiller : public NormBase {
 private:
   bool changed = false;
 
-  // literal parallel depth
-  int literal_depth = 0;
-  // maximum parallel depth for current nested-pbs
-  int max_depth = 0;
-  // last parallel depth and its pointer
-  int last_depth = 0;
-  AST::ParallelBy* last_pb = nullptr;
+  // analyze the parallel-by structure
+  std::vector<AST::ParallelBy*> pb_stack;
+  PBTree pb_tree;
 
   // Note: post-visiting each parallel-by
   //
   //  ...
   //   pb <- literal_depth
-  //    pb <- last_depth
+  //    pb <- ddepth
   //     ...
   //      pb <- max_depth
+  //
   //
 
   enum FillType { Inner, Outer, AppendInner, LastInner };
@@ -966,6 +960,17 @@ private:
   std::vector<FillInfo> fill_info;
 
 private:
+  const char* Name(FillType fty) const {
+    switch (fty) {
+    case Inner: return "Inner";
+    case Outer: return "Outer";
+    case AppendInner: return "AppendInner";
+    case LastInner: return "LastInner";
+    default: choreo_unreachable("unsupported fill type.");
+    }
+    return "";
+  }
+
   bool ExplicitLevel(AST::ParallelBy* pb) const {
     assert(pb != nullptr);
     auto pl = pb->GetLevel();
@@ -993,6 +998,7 @@ public:
     auto new_pb = AST::MakeSimpleParallelBy(pb.LOC(), pb.stmts, ub);
     new_pb->SetOuter(false);
     new_pb->SetLevel(pl);
+    new_pb->SetEnforced(false);
     pb.stmts = AST::Make<AST::MultiNodes>(pb.LOC(), new_pb);
 
     VST_DEBUG(pb.InlinePrint(dbgs()); dbgs() << "\n   +-";
@@ -1003,12 +1009,12 @@ public:
 
   AST::ParallelBy& AppendInnerLevel(AST::ParallelBy& pb, ParallelLevel pl,
                                     size_t ub) {
-    // may fill gap only for a single level
     VST_DEBUG(dbgs() << "Replace `"; pb.InlinePrint(dbgs());
               dbgs() << "` by\n  +-");
 
     auto new_pb = AST::MakeSimpleParallelBy(pb.LOC(), nullptr, ub);
     new_pb->SetLevel(pl);
+    new_pb->SetEnforced(false);
     pb.stmts->Append(new_pb);
 
     VST_DEBUG(pb.InlinePrint(dbgs()));
@@ -1022,10 +1028,11 @@ public:
     VST_DEBUG(dbgs() << "Replace `"; pb.InlinePrint(dbgs());
               dbgs() << "` by\n  +-");
 
-    auto last_pb = cast<AST::ParallelBy>(pb.stmts->Last());
+    auto lpb = cast<AST::ParallelBy>(pb.stmts->Last());
     auto new_pb = AST::MakeSimpleParallelBy(
-        pb.LOC(), AST::Make<AST::MultiNodes>(pb.LOC(), last_pb), ub);
+        pb.LOC(), AST::Make<AST::MultiNodes>(pb.LOC(), lpb), ub);
     new_pb->SetLevel(pl);
+    new_pb->SetEnforced(false);
     pb.stmts->PopBack();
     pb.stmts->Append(new_pb);
 
@@ -1042,6 +1049,7 @@ public:
     new_pb->SetOuter(false);
     // pb is now the outer level
     pb.SetLevel(pl);
+    pb.SetEnforced(false);
 
     // convert current pb to be simple
     auto anon_sym = SymbolTable::GetAnonPBName();
@@ -1077,62 +1085,29 @@ public:
     return pb;
   }
 
-  void Reset() {
-    literal_depth = 0;
-    last_depth = 0;
-    max_depth = 0;
-    last_pb = nullptr;
+  void Reset() { pb_tree.Clear(); }
+
+  void FillPB(AST::ParallelBy* pb, FillType ty, ParallelLevel pl, int v = 1) {
+    VST_DEBUG(dbgs() << "[PB-Fill] " << Name(ty) << "(" << STR(pl) << "): ";
+              pb->InlinePrint(dbgs()); dbgs() << "\n");
+    fill_info.emplace_back(pb, ty, pl, v);
   }
 
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
       Reset();
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      if (literal_depth == 0) Reset();
-      literal_depth++;
-      max_depth = std::max(max_depth, literal_depth);
-      last_pb = pb;
+      pb_stack.push_back(pb);
+      if (pb_stack.size() > 1)
+        pb_tree.AddChild(*(pb_stack.rbegin() + 1), pb_stack.back());
+      else
+        pb_tree.AddSingle(pb);
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
-    if (!isa<AST::ParallelBy>(&n)) return true;
-    auto pb = cast<AST::ParallelBy>(&n);
-
-    assert(last_depth <= max_depth);
-    assert(literal_depth <= max_depth);
-
-    if (ExplicitLevel(pb) && !TargetHasLevel(pb->GetLevel()))
-      Error1(pb->LOC(),
-             STR(pb->GetLevel()) +
-                 " level is not supported by the target architecture: " +
-                 STR(CCtx().GetArch()) + ".");
-
-    // The max literal depth is confirmed, last_pb is the inner-most
-    if (last_pb == pb) {
-      if (max_depth > TargetMaxDepth())
-        Error1(pb->LOC(),
-               "too many parallel-by levels: " + std::to_string(max_depth) +
-                   " > " + std::to_string(TargetMaxDepth()) + ".");
-      // if not annotated, the inner-most is always thread level
-      if (!ExplicitLevel(last_pb)) last_pb->SetLevel(ParallelLevel::THREAD);
-    }
-
-    if (max_depth == 1) {
-      assert(literal_depth == 1);
-      HandleSingleLevel(pb);
-    } else if (pb != last_pb) {
-      // guess and fill
-      if (!ExplicitLevel(pb)) InferImplicitLevel(pb);
-      FillMissingLevels(pb);
-    }
-
-    last_depth = literal_depth--;
-    assert(literal_depth >= 0);
-    last_pb = pb;
-
-    if (literal_depth == 0) {
+    if (isa<AST::ChoreoFunction>(&n)) {
       for (auto fi : fill_info) {
         if (fi.ft == Outer)
           InsertOuterLevel(*fi.pb, fi.lvl);
@@ -1146,90 +1121,131 @@ public:
         }
       }
       fill_info.clear();
+      return true;
     }
+    if (!isa<AST::ParallelBy>(&n)) return true;
+    pb_stack.pop_back();
+    auto pb = cast<AST::ParallelBy>(&n);
+
+    if (ExplicitLevel(pb) && !TargetHasLevel(pb->GetLevel()))
+      Error1(pb->LOC(),
+             STR(pb->GetLevel()) +
+                 " level is not supported by the target architecture: " +
+                 STR(CCtx().GetArch()) + ".");
+
+    auto literal_depth = pb_tree.GetDepth(pb) + 1;
+    if (literal_depth > (size_t)TargetMaxDepth()) {
+      Error1(pb->LOC(),
+             "too many parallel-by levels: " + std::to_string(literal_depth) +
+                 " > " + std::to_string(TargetMaxDepth()) + ".");
+    }
+
+    if (!ExplicitLevel(pb)) InferImplicitLevel(pb);
+
+    FillMissingLevels(pb);
+
     return true;
   }
 
-  bool InferImplicitLevel(AST::ParallelBy* pb) {
-    // std::cout << "start infering: " << PSTR(pb) << "\n";
-    auto last_level = last_pb->GetLevel();
+  bool InferImplicitLevel(AST::ParallelBy* pb) const {
+    auto InferAs = [this, &pb](ParallelLevel pl) {
+      VST_DEBUG(dbgs() << "[PB-Infer] " << STR(pl) << ": ";
+                pb->InlinePrint(dbgs()); dbgs() << "\n";);
+      pb->SetLevel(pl);
+    };
+
+    if (pb_tree.IsLeaf(pb)) {
+      // if not annotated, the inner-most is always thread level
+      InferAs(ParallelLevel::THREAD);
+      return true;
+    }
+
+    assert(pb_tree.GetDepth(pb) < (size_t)TargetMaxDepth());
+    auto literal_depth = pb_tree.GetDepth(pb) + 1;
+
+    auto& children = pb_tree.GetChildren(pb);
+    auto& child = children.front();
+
+    auto child_level = child->GetLevel();
+    assert(child_level != ParallelLevel::UNKNOWN);
+    assert(child_level != ParallelLevel::NONE);
+
+    auto max_literal_depth = pb_tree.GetDepth(pb) + pb_tree.GetHeight(pb);
 
     // Maintain this table for easier code check:
-    // +--------------------+-----+--------------------------+
-    // |      LEVEL and DEPTH     |     TARGET LEVELS        |
-    // +--------------+-----+-----+--------+--------+--------+
-    // |      last    | max | cur | N == 2 | N == 3 | N == 4 |
-    // +----------+---+-----+-----+--------+--------+--------+
-    // | THREAD   | 2 |  2  |  1  | BLOCK  | BLOCK  | BLOCK  |
-    // | GROUP    | 2 |  2  |  1  | error  | BLOCK  | BLOCK  |
-    // | GROUPx4  | 2 |  2  |  1  | error  | BLOCK  | BLOCK  |
-    // | BLOCK    | 2 |  2  |  1  | error  | error  | error  |
-    // +----------+---+-----+-----+--------+--------+--------+
-    // | THREAD   | 2 |  3  |  1  |   -    | error  | error  |
-    // | GROUP    | 2 |  3  |  1  |   -    | BLOCK  | BLOCK  |
-    // | GROUPx4  | 2 |  3  |  1  |   -    | BLOCK  | BLOCK  |
-    // | BLOCK    | 2 |  3  |  1  |   -    | error  | error  |
-    // +----------+---+--------+--+--------+--------+--------+
-    // | THREAD   | 3 |  3  |  2  |   -    | GROUP  | GROUP  |
-    // | GROUP    | 3 |  3  |  2  |   -    | error  | GROUPx4|
-    // | GROUPx4  | 3 |  3  |  2  |   -    | error  | error  |
-    // | BLOCK    | 3 |  3  |  2  |   -    | error  | error  |
-    // +----------+---+-----+-----+--------+--------+--------+
-    // | THREAD   | 2 |  4  |  1  |   -    |   -    | error  |
-    // | GROUP    | 2 |  4  |  1  |   -    |   -    | error  |
-    // | GROUPx4  | 2 |  4  |  1  |   -    |   -    | BLOCK  |
-    // | BLOCK    | 2 |  4  |  1  |   -    |   -    | error  |
-    // +----------+---+-----+-----+--------+--------+--------+
-    // | THREAD   | 3 |  4  |  2  |   -    |   -    | error  |
-    // | GROUP    | 3 |  4  |  2  |   -    |   -    | GROUPx4|
-    // | GROUPx4  | 3 |  4  |  2  |   -    |   -    | error  |
-    // | BLOCK    | 3 |  4  |  2  |   -    |   -    | error  |
-    // +----------+---+-----+-----+--------+--------+--------+
-    // | THREAD   | 4 |  4  |  3  |   -    |   -    | GROUP  |
-    // | GROUP    | 4 |  4  |  3  |   -    |   -    | error  |
-    // | GROUPx4  | 4 |  4  |  3  |   -    |   -    | error  |
-    // | BLOCK    | 4 |  4  |  3  |   -    |   -    | error  |
-    // +----------+---+-----+-----+--------+--------+--------+
+    // +--------------------------+------------------------+
+    // | LEVEL and LITERAL DEPTH  |     PARENT LEVELS      |
+    // +--------------+-----+-----+-------+-------+--------+
+    // |    CHILD     | MAX | P.. | N = 2 | N = 3 | N = 4  |
+    // +----------+---+-----+-----+-------+-------+--------+
+    // | THREAD   | 2 |  2  |  1  | BLOCK | BLOCK | BLOCK  |
+    // | GROUP    | 2 |  2  |  1  | error | BLOCK | BLOCK  |
+    // | GROUPx4  | 2 |  2  |  1  | error | BLOCK | BLOCK  |
+    // | BLOCK    | 2 |  2  |  1  | error | error | error  |
+    // +----------+---+-----+-----+-------+-------+--------+
+    // | THREAD   | 2 |  3  |  1  |   -   | error | error  |
+    // | GROUP    | 2 |  3  |  1  |   -   | BLOCK | BLOCK  |
+    // | GROUPx4  | 2 |  3  |  1  |   -   | BLOCK | BLOCK  |
+    // | BLOCK    | 2 |  3  |  1  |   -   | error | error  |
+    // +----------+---+-----+-----+-------+-------+--------+
+    // | THREAD   | 3 |  3  |  2  |   -   | GROUP | GROUP  |
+    // | GROUP    | 3 |  3  |  2  |   -   | error | GROUPx4|
+    // | GROUPx4  | 3 |  3  |  2  |   -   | error | error  |
+    // | BLOCK    | 3 |  3  |  2  |   -   | error | error  |
+    // +----------+---+-----+-----+-------+-------+--------+
+    // | THREAD   | 2 |  4  |  1  |   -   |   -   | error  |
+    // | GROUP    | 2 |  4  |  1  |   -   |   -   | error  |
+    // | GROUPx4  | 2 |  4  |  1  |   -   |   -   | BLOCK  |
+    // | BLOCK    | 2 |  4  |  1  |   -   |   -   | error  |
+    // +----------+---+-----+-----+-------+-------+--------+
+    // | THREAD   | 3 |  4  |  2  |   -   |   -   | error  |
+    // | GROUP    | 3 |  4  |  2  |   -   |   -   | GROUPx4|
+    // | GROUPx4  | 3 |  4  |  2  |   -   |   -   | error  |
+    // | BLOCK    | 3 |  4  |  2  |   -   |   -   | error  |
+    // +----------+---+-----+-----+-------+-------+--------+
+    // | THREAD   | 4 |  4  |  3  |   -   |   -   | GROUP  |
+    // | GROUP    | 4 |  4  |  3  |   -   |   -   | error  |
+    // | GROUPx4  | 4 |  4  |  3  |   -   |   -   | error  |
+    // | BLOCK    | 4 |  4  |  3  |   -   |   -   | error  |
+    // +----------+---+-----+-----+-------+-------+--------+
 
-    if (max_depth == 2) {
-      // std::cout << "literal depth: " << literal_depth << "\n";
+    if (max_literal_depth == 2) {
       assert(literal_depth == 1);
-      switch (last_level) {
+      switch (child_level) {
       case ParallelLevel::THREAD: {
-        pb->SetLevel(ParallelLevel::BLOCK);
+        InferAs(ParallelLevel::BLOCK);
       } break;
       case ParallelLevel::GROUP: {
         if (TargetMaxDepth() == 2)
           Error1(pb->LOC(), "the parallel level can not be inferred.");
         else
-          pb->SetLevel(ParallelLevel::BLOCK);
+          InferAs(ParallelLevel::BLOCK);
       } break;
       case ParallelLevel::GROUPx4: {
         if (TargetMaxDepth() == 2)
           Error1(pb->LOC(), "the parallel level can not be inferred.");
         else
-          pb->SetLevel(ParallelLevel::BLOCK);
+          InferAs(ParallelLevel::BLOCK);
       } break;
       case ParallelLevel::BLOCK: {
         Error1(pb->LOC(), "the parallel level can not be inferred.");
       } break;
       default: choreo_unreachable("unsupported parallel level.");
       }
-    } else if (max_depth == 3) {
+    } else if (max_literal_depth == 3) {
       if (literal_depth == 1) {
-        assert(last_depth == 2);
-        switch (last_level) {
+        switch (child_level) {
         case ParallelLevel::THREAD: {
           if (TargetMaxDepth() == 3 || TargetMaxDepth() == 4)
             Error1(pb->LOC(), "the parallel level can not be inferred.");
           else
-            pb->SetLevel(ParallelLevel::BLOCK);
+            InferAs(ParallelLevel::BLOCK);
         } break;
         case ParallelLevel::GROUP: {
-          pb->SetLevel(ParallelLevel::BLOCK);
+          InferAs(ParallelLevel::BLOCK);
         } break;
         case ParallelLevel::GROUPx4: {
-          pb->SetLevel(ParallelLevel::BLOCK);
+          InferAs(ParallelLevel::BLOCK);
         } break;
         case ParallelLevel::BLOCK: {
           Error1(pb->LOC(), "the parallel level can not be inferred.");
@@ -1237,21 +1253,21 @@ public:
         default: choreo_unreachable("unsupported parallel level.");
         }
       } else if (literal_depth == 2) {
-        switch (last_level) {
+        switch (child_level) {
         case ParallelLevel::THREAD: {
           if (TargetMaxDepth() == 2)
             Error1(pb->LOC(), "the parallel level can not be inferred.");
           else
-            pb->SetLevel(ParallelLevel::GROUP);
+            InferAs(ParallelLevel::GROUP);
         } break;
         case ParallelLevel::GROUP: {
           if (TargetMaxDepth() <= 3)
             Error1(pb->LOC(), "the parallel level can not be inferred.");
           else
-            pb->SetLevel(ParallelLevel::GROUPx4);
+            InferAs(ParallelLevel::GROUPx4);
         } break;
         case ParallelLevel::GROUPx4: {
-          pb->SetLevel(ParallelLevel::BLOCK);
+          InferAs(ParallelLevel::BLOCK);
         } break;
         case ParallelLevel::BLOCK: {
           Error1(pb->LOC(), "the parallel level can not be inferred.");
@@ -1261,13 +1277,13 @@ public:
       } else
         choreo_unreachable("unsupported literal depth: " +
                            std::to_string(literal_depth));
-    } else if (max_depth == 4) {
-      if (last_level == ParallelLevel::GROUPx4 && literal_depth == 1)
-        pb->SetLevel(ParallelLevel::BLOCK);
-      else if (last_level == ParallelLevel::GROUP && literal_depth == 2)
-        pb->SetLevel(ParallelLevel::GROUPx4);
-      else if (last_level == ParallelLevel::THREAD && literal_depth == 3)
-        pb->SetLevel(ParallelLevel::GROUP);
+    } else if (max_literal_depth == 4) {
+      if (child_level == ParallelLevel::GROUPx4 && literal_depth == 1)
+        InferAs(ParallelLevel::BLOCK);
+      else if (child_level == ParallelLevel::GROUP && literal_depth == 2)
+        InferAs(ParallelLevel::GROUPx4);
+      else if (child_level == ParallelLevel::THREAD && literal_depth == 3)
+        InferAs(ParallelLevel::GROUP);
       else
         Error1(pb->LOC(), "the parallel level can not be inferred.");
     }
@@ -1275,25 +1291,44 @@ public:
   }
 
   bool FillMissingLevels(AST::ParallelBy* pb) {
+    for (auto& child : pb_tree.GetChildren(pb)) {
+      auto cd = TargetDepth(child->GetLevel());
+      auto pd = TargetDepth(pb->GetLevel());
+      if (pd >= cd) {
+        Error1(pb->LOC(), "unable to infer the parallel-by level(s) between " +
+                              STR(pb->GetLevel()) + " and " +
+                              STR(child->GetLevel()) + ".");
+      } else if (cd - pd > 1)
+        FillMissingBetweens(pb, child);
+    }
+
+    if (pb_tree.IsLeaf(pb)) FillMissingInners(pb);
+    if (pb_tree.IsRoot(pb)) FillMissingOuters(pb);
+
+    return true;
+  }
+
+  // Fill the missing levels between parent and child
+  bool FillMissingBetweens(AST::ParallelBy* pb, AST::ParallelBy* child) {
     bool support_group = TargetHasLevel(ParallelLevel::GROUP);
     bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
 
-    auto last_level = last_pb->GetLevel();
-    auto cur_level = pb->GetLevel();
+    auto pl = pb->GetLevel();
+    auto cl = child->GetLevel();
 
-    // missing betweens
-    switch (last_level) {
+    assert(pl != ParallelLevel::UNKNOWN);
+    assert(cl != ParallelLevel::UNKNOWN);
+    assert(TargetDepth(pl) < TargetDepth(cl));
+
+    switch (cl) {
     case ParallelLevel::THREAD: {
-      switch (cur_level) {
+      switch (pl) {
       case ParallelLevel::BLOCK: {
-        if (support_group)
-          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
-        if (support_4x_group)
-          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUPx4);
+        if (support_group) FillPB(child, Outer, ParallelLevel::GROUP);
+        if (support_4x_group) FillPB(child, Outer, ParallelLevel::GROUPx4);
       } break;
       case ParallelLevel::GROUPx4: {
-        if (support_group)
-          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
+        if (support_group) FillPB(child, Outer, ParallelLevel::GROUP);
       } break;
       case ParallelLevel::GROUP:
         // no-fill
@@ -1301,15 +1336,14 @@ public:
       case ParallelLevel::THREAD:
       default:
         Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
-                              STR(cur_level) + " and " + STR(last_level) + ".");
+                              STR(pl) + " and " + STR(cl) + ".");
         break;
       }
     } break;
     case ParallelLevel::GROUP: {
-      switch (cur_level) {
+      switch (pl) {
       case ParallelLevel::BLOCK: {
-        if (support_4x_group)
-          fill_info.emplace_back(pb, Inner, ParallelLevel::GROUPx4);
+        if (support_4x_group) FillPB(child, Outer, ParallelLevel::GROUPx4);
       } break;
       case ParallelLevel::GROUPx4: {
         // no-fill
@@ -1318,12 +1352,12 @@ public:
       case ParallelLevel::THREAD:
       default:
         Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
-                              STR(cur_level) + " and " + STR(last_level) + ".");
+                              STR(pl) + " and " + STR(cl) + ".");
         break;
       }
     } break;
     case ParallelLevel::GROUPx4: {
-      switch (cur_level) {
+      switch (pl) {
       case ParallelLevel::BLOCK: {
         // no-fill
       } break;
@@ -1332,70 +1366,85 @@ public:
       case ParallelLevel::THREAD:
       default:
         Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
-                              STR(last_level) + " and " + STR(cur_level) + ".");
+                              STR(cl) + " and " + STR(pl) + ".");
         break;
       }
     } break;
     case ParallelLevel::BLOCK:
     default:
       Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
-                            STR(cur_level) + " and " + STR(last_level) + ".");
+                            STR(pl) + " and " + STR(cl) + ".");
     }
+    return true;
+  }
 
-    // missing inners
-    if (last_depth == max_depth) {
-      switch (last_level) {
-      case ParallelLevel::BLOCK: {
-        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD);
-        if (support_4x_group) {
-          fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUP);
-          fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUPx4);
-        } else if (support_group)
-          fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUP);
-      } break;
-      case ParallelLevel::GROUPx4: {
-        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD,
-                               CCtx().GetMinGroupDim() * 4);
-        if (support_group)
-          fill_info.emplace_back(last_pb, LastInner, ParallelLevel::GROUP);
-      } break;
-      case ParallelLevel::GROUP: {
-        fill_info.emplace_back(last_pb, AppendInner, ParallelLevel::THREAD,
-                               CCtx().GetMinGroupDim());
-      } break;
-      case ParallelLevel::THREAD: break;
-      default:
-        Error1(pb->LOC(), "unable to infer the parallel-by level(s) inside " +
-                              STR(cur_level) + ".");
-        break;
-      }
+  bool FillMissingInners(AST::ParallelBy* pb) {
+    assert(pb_tree.IsLeaf(pb) && "can not fill non-leaf inners.");
+    auto level = pb->GetLevel();
+    assert(level != ParallelLevel::UNKNOWN);
+    bool support_group = TargetHasLevel(ParallelLevel::GROUP);
+    bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
+
+    switch (level) {
+    case ParallelLevel::BLOCK: {
+      FillPB(pb, AppendInner, ParallelLevel::THREAD);
+      if (support_4x_group) {
+        FillPB(pb, LastInner, ParallelLevel::GROUP);
+        FillPB(pb, LastInner, ParallelLevel::GROUPx4);
+      } else if (support_group)
+        FillPB(pb, LastInner, ParallelLevel::GROUP);
+    } break;
+    case ParallelLevel::GROUPx4: {
+      FillPB(pb, AppendInner, ParallelLevel::THREAD,
+             CCtx().GetMinGroupDim() * 4);
+      if (support_group) FillPB(pb, LastInner, ParallelLevel::GROUP);
+    } break;
+    case ParallelLevel::GROUP: {
+      FillPB(pb, AppendInner, ParallelLevel::THREAD, CCtx().GetMinGroupDim());
+    } break;
+    case ParallelLevel::THREAD: break;
+    default:
+      Error1(pb->LOC(), "unable to infer the parallel-by level(s) inside " +
+                            STR(level) + ".");
+      break;
     }
+    return true;
+  }
 
-    // missing outers
-    if (literal_depth == 1) {
-      switch (cur_level) {
-      case ParallelLevel::BLOCK: {
-      } break;
-      case ParallelLevel::GROUPx4: {
-        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-      } break;
-      case ParallelLevel::GROUP: {
-        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-        if (support_4x_group)
-          fill_info.emplace_back(pb, Outer, ParallelLevel::GROUPx4);
-      } break;
-      case ParallelLevel::THREAD:
-        fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-        if (support_4x_group)
-          fill_info.emplace_back(pb, Outer, ParallelLevel::GROUPx4);
-        if (support_group)
-          fill_info.emplace_back(pb, Outer, ParallelLevel::GROUP);
-        break;
-      default:
-        Error1(pb->LOC(), "unable to infer parallel-by level outside " +
-                              STR(cur_level) + ".");
-        break;
-      }
+  bool FillMissingOuters(AST::ParallelBy* pb,
+                         ParallelLevel min_lvl = ParallelLevel::SEQ) {
+    auto level = pb->GetLevel();
+    assert(level != ParallelLevel::UNKNOWN);
+    bool support_group = TargetHasLevel(ParallelLevel::GROUP);
+    bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
+    switch (level) {
+    case ParallelLevel::BLOCK: {
+    } break;
+    case ParallelLevel::GROUPx4: {
+      if (TargetDepth(min_lvl) < TargetDepth(ParallelLevel::BLOCK))
+        FillPB(pb, Outer, ParallelLevel::BLOCK);
+    } break;
+    case ParallelLevel::GROUP: {
+      if (support_4x_group &&
+          (TargetDepth(min_lvl) < TargetDepth(ParallelLevel::GROUPx4)))
+        FillPB(pb, Outer, ParallelLevel::GROUPx4);
+      if (TargetDepth(min_lvl) < TargetDepth(ParallelLevel::BLOCK))
+        FillPB(pb, Outer, ParallelLevel::BLOCK);
+    } break;
+    case ParallelLevel::THREAD: {
+      if (support_group &&
+          (TargetDepth(min_lvl) < TargetDepth(ParallelLevel::GROUP)))
+        FillPB(pb, Outer, ParallelLevel::GROUP);
+      if (support_4x_group &&
+          (TargetDepth(min_lvl) < TargetDepth(ParallelLevel::GROUPx4)))
+        FillPB(pb, Outer, ParallelLevel::GROUPx4);
+      if (TargetDepth(min_lvl) < TargetDepth(ParallelLevel::BLOCK))
+        FillPB(pb, Outer, ParallelLevel::BLOCK);
+    } break;
+    default:
+      Error1(pb->LOC(),
+             "unable to infer parallel-by level outside " + STR(level) + ".");
+      break;
     }
 
     return true;

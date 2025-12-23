@@ -47,6 +47,8 @@ public:
 
 inline int TargetDepth(ParallelLevel pl) {
   if (CCtx().GetTarget() == CompileTarget::Topscc ||
+      CCtx().GetTarget() == CompileTarget::Factor ||
+      CCtx().GetTarget() == CompileTarget::CUDA ||
       CCtx().GetTarget() == CompileTarget::Cute ||
       CCtx().GetTarget() == CompileTarget::MPI)
     return PlDepthMap::Get().ToDepth(pl);
@@ -57,6 +59,8 @@ inline int TargetDepth(ParallelLevel pl) {
 
 inline ParallelLevel TargetLevel(int depth) {
   if (CCtx().GetTarget() == CompileTarget::Topscc ||
+      CCtx().GetTarget() == CompileTarget::Factor ||
+      CCtx().GetTarget() == CompileTarget::CUDA ||
       CCtx().GetTarget() == CompileTarget::Cute)
     return PlDepthMap::Get().ToLevel(depth);
   else
@@ -93,10 +97,10 @@ inline ParallelLevel operator--(ParallelLevel& pl) {
   auto l = pld.ToLevel(pld.ToDepth(pl) - 1);
   switch (l) {
   case ParallelLevel::UNKNOWN:
-    choreo_unreachable("no higher parallel level exists for an unknown level.");
+    choreo_unreachable("no lower parallel level exists for an unknown level.");
     break;
   case ParallelLevel::NONE:
-    choreo_unreachable("no higher parallel level exists for an none level.");
+    choreo_unreachable("no lower parallel level exists for an none level.");
     break;
   default: pl = l; return l;
   }

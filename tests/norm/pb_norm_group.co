@@ -25,28 +25,28 @@ __co__ void wow7() { parallel x by 5 parallel y by 6: group parallel z by 7: thr
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo0
-// CHECK:  `- block Parallelization(o): index symbol: anon_pb_0, bound [0, 1)
-// CHECK:                      index component: {anon_pb_0__elem__x}, corresponding ubound: [1]
-// CHECK:   `- group Parallelization: index symbol: anon_pb_1, bound [0, 1)
-// CHECK:                       index component: {anon_pb_1__elem__x}, corresponding ubound: [1]
+// CHECK:  `- block Parallelization(o): index symbol: anon_pb_1, bound [0, 1)
+// CHECK:                      index component: {anon_pb_1__elem__x}, corresponding ubound: [1]
+// CHECK:   `- group Parallelization: index symbol: anon_pb_0, bound [0, 1)
+// CHECK:                       index component: {anon_pb_0__elem__x}, corresponding ubound: [1]
 // CHECK:    `- thread Parallelization: index symbol: anon_0, bound [0, 2)
 // CHECK:                        index component: {anon_0__elem__x}, corresponding ubound: [2]
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo1
-// CHECK:  `- block Parallelization(o): index symbol: anon_pb_2, bound [0, 1)
-// CHECK:                      index component: {anon_pb_2__elem__x}, corresponding ubound: [1]
-// CHECK:   `- group Parallelization: index symbol: anon_pb_3, bound [0, 1)
-// CHECK:                       index component: {anon_pb_3__elem__x}, corresponding ubound: [1]
+// CHECK:  `- block Parallelization(o): index symbol: anon_pb_3, bound [0, 1)
+// CHECK:                      index component: {anon_pb_3__elem__x}, corresponding ubound: [1]
+// CHECK:   `- group Parallelization: index symbol: anon_pb_2, bound [0, 1)
+// CHECK:                       index component: {anon_pb_2__elem__x}, corresponding ubound: [1]
 // CHECK:    `- thread Parallelization: index symbol: x, bound [0, 3)
 // CHECK:                        index component: {x__elem__x}, corresponding ubound: [3]
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo2
-// CHECK:  `- block Parallelization(o): index symbol: anon_pb_4, bound [0, 1)
-// CHECK:                      index component: {anon_pb_4__elem__x}, corresponding ubound: [1]
-// CHECK:   `- group Parallelization: index symbol: anon_pb_5, bound [0, 1)
-// CHECK:                       index component: {anon_pb_5__elem__x}, corresponding ubound: [1]
+// CHECK:  `- block Parallelization(o): index symbol: anon_pb_5, bound [0, 1)
+// CHECK:                      index component: {anon_pb_5__elem__x}, corresponding ubound: [1]
+// CHECK:   `- group Parallelization: index symbol: anon_pb_4, bound [0, 1)
+// CHECK:                       index component: {anon_pb_4__elem__x}, corresponding ubound: [1]
 // CHECK:    `- thread Parallelization: index symbol: y, bound [0, 4)
 // CHECK:                        index component: {y__elem__x}, corresponding ubound: [4]
 
@@ -56,8 +56,8 @@ __co__ void wow7() { parallel x by 5 parallel y by 6: group parallel z by 7: thr
 // CHECK:                      index component: {anon_pb_7__elem__x}, corresponding ubound: [1]
 // CHECK:   `- group Parallelization: index symbol: z, bound [0, 5)
 // CHECK:                       index component: {z__elem__x}, corresponding ubound: [5]
-// CHECK:    `- thread Parallelization: index symbol: anon_pb_6, bound [0, 1)
-// CHECK:                        index component: {anon_pb_6__elem__x}, corresponding ubound: [1]
+// CHECK:    `- thread Parallelization: index symbol: anon_pb_6, bound [0, {{(32|1)}})
+// CHECK:                        index component: {anon_pb_6__elem__x}, corresponding ubound: [{{(32|1)}}]
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo4
@@ -119,8 +119,8 @@ __co__ void wow7() { parallel x by 5 parallel y by 6: group parallel z by 7: thr
 // CHECK:                      index component: {r__elem__x}, corresponding ubound: [7]
 // CHECK:   `- group Parallelization: index symbol: s, bound [0, 9)
 // CHECK:                       index component: {s__elem__x}, corresponding ubound: [9]
-// CHECK:    `- thread Parallelization: index symbol: anon_pb_15, bound [0,
-// CHECK:                        index component: {anon_pb_15__elem__x}, corresponding ubound: [
+// CHECK:    `- thread Parallelization: index symbol: anon_pb_15, bound [0, {{(32|1)}})
+// CHECK:                        index component: {anon_pb_15__elem__x}, corresponding ubound: [{{(32|1)}}]
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: wow0

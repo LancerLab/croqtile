@@ -11,27 +11,28 @@ namespace Choreo {
 struct FutureAnalysis : public CodeGenerator {
 private:
   ParallelLevel level = ParallelLevel::SEQ;
+  std::vector<ParallelLevel> pl_stack;
 
 public:
   FutureAnalysis() : CodeGenerator("futanly") {}
 
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
-      level = ParallelLevel::SEQ;
+      pl_stack.push_back(ParallelLevel::SEQ);
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      assert(pb->GetLevel() - level == 1);
-      ++level;
+      pl_stack.push_back(pb->GetLevel());
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
-    if (isa<AST::ParallelBy>(&n)) { --level; }
+    if (isa<AST::ParallelBy>(&n)) { pl_stack.pop_back(); }
     return true;
   }
 
   bool Visit(AST::DMA& n) override {
     if (n.future.empty() || (n.operation == ".any")) return true;
+    auto level = pl_stack.back();
     if (level == ParallelLevel::BLOCK) {
       // the DMA is inside block-shared zone
       cgi.GetFunctionSharedFutures(fname).insert(InScopeName(n.future));
@@ -49,7 +50,6 @@ public:
 struct CodegenInfoCollect : public CodeGenerator {
 private:
   int parallel_depth = 0;
-  int max_parallel_depth = 0;
 
   // special case for `return select.data;`
   std::set<std::string> select_syms;
@@ -72,12 +72,13 @@ private:
         assert(!pb_stack.empty());
       }
       pb_stack.push_back(pb);
-      cgi.GetPBTree().AddChild(*(pb_stack.rbegin() + 1), pb_stack.back());
+      if (pb_stack.size() > 1) {
+        cgi.GetPBTree().AddChild(*(pb_stack.rbegin() + 1), pb_stack.back());
+      } else
+        cgi.GetPBTree().AddSingle(pb);
       if (parallel_depth == 0 && cgi.GetFunctionTrait(fname).has_parallelby)
         cgi.GetFunctionTrait(fname).multiple_parallelby = true;
       parallel_depth++;
-      assert(parallel_depth > max_parallel_depth);
-      max_parallel_depth = parallel_depth;
 
       auto& lcs = cgi.GetFunctionLaunches(fname);
 
@@ -112,9 +113,6 @@ private:
                << ", index: " << item.p_index << "\n";
       });
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      n.Note().insert_or_assign("mxl", std::to_string(max_parallel_depth));
-      VST_DEBUG(dbgs() << "max depth of `"; pb->InlinePrint(dbgs());
-                dbgs() << "': " << max_parallel_depth << "\n");
       pb_stack.pop_back();
       if (parallel_depth == 1) {
         VST_DEBUG(dbgs() << "\tGrid Dims: "
@@ -123,7 +121,6 @@ private:
         VST_DEBUG(dbgs() << "\tBlock Dims: "
                          << cgi.GetFunctionLaunches(fname).back().thread_count.x
                          << "\n");
-        max_parallel_depth = 0;
       }
       parallel_depth--;
 
@@ -139,15 +136,6 @@ public:
   CodegenInfoCollect() : CodeGenerator("cg_info") {}
   ~CodegenInfoCollect() {}
 
-  bool Visit(AST::MultiNodes&) { return true; }
-  bool Visit(AST::MultiValues&) { return true; }
-  bool Visit(AST::IntLiteral&) { return true; }
-  bool Visit(AST::FloatLiteral&) { return true; }
-  bool Visit(AST::BoolLiteral&) { return true; }
-  bool Visit(AST::Expr&) { return true; }
-  bool Visit(AST::MultiDimSpans&) { return true; }
-  bool Visit(AST::NamedTypeDecl&) { return true; }
-
   bool Visit(AST::NamedVariableDecl& n) override {
     auto name = n.name_str;
     bool ref = n.Note().count("ref");
@@ -155,8 +143,6 @@ public:
     if (isa<AST::Select>(n.init_expr)) select_syms.insert(InScopeName(name));
     return true;
   }
-
-  bool Visit(AST::IntTuple&) { return true; }
 
   bool Visit(AST::Assignment& n) override {
     if (n.AssignToDataElement()) return true;
@@ -168,10 +154,6 @@ public:
     }
     return true;
   }
-  bool Visit(AST::IntIndex&) { return true; }
-  bool Visit(AST::DataType&) { return true; }
-  bool Visit(AST::Identifier&) { return true; }
-  bool Visit(AST::Parameter&) { return true; }
 
   bool Visit(AST::ParamList& n) override {
     int index = 0;
@@ -188,11 +170,6 @@ public:
     return true;
   }
 
-  bool Visit(AST::WhereBind&) { return true; }
-  bool Visit(AST::WithIn&) { return true; }
-  bool Visit(AST::WithBlock&) { return true; }
-  bool Visit(AST::Memory&) { return true; }
-  bool Visit(AST::SpanAs&) { return true; }
   bool Visit(AST::DMA& n) override {
     if (n.IsDummy()) return true;
 
@@ -292,11 +269,6 @@ public:
     }
     return true;
   }
-  bool Visit(AST::ChunkAt&) { return true; }
-  bool Visit(AST::Wait&) { return true; }
-  bool Visit(AST::Call&) { return true; }
-  bool Visit(AST::Rotate&) { return true; }
-  bool Visit(AST::Select&) { return true; }
 
   bool Visit(AST::Return& n) override {
     std::string ret_name;
@@ -327,13 +299,6 @@ public:
 
     return true;
   }
-
-  bool Visit(AST::LoopRange&) { return true; }
-  bool Visit(AST::ForeachBlock&) { return true; }
-  bool Visit(AST::FunctionDecl&) { return true; }
-  bool Visit(AST::ChoreoFunction&) { return true; }
-  bool Visit(AST::CppSourceCode&) { return true; }
-  bool Visit(AST::Program&) { return true; }
 };
 
 class CodegenPrepare : public VisitorGroup {
