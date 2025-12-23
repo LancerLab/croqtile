@@ -10,7 +10,7 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
   // each block handles 64x64 block with WGMMA
   // WGMMA requires 128 threads (4 warps x 32 threads/warp)
   parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
-    mc = mma.fill 0.0;
+    mc = mma.fill.f32 0.0f;
     foreach {iv_k} in [cdiv(K, TILE_K)] {
       // load 64x64 to smem
       lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;

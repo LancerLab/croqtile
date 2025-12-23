@@ -1993,18 +1993,26 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     auto& ssmi = cgi.GetSymbolMMA(InScopeName(op.GetFragSym()));
     // Determine accumulator type: f32 for f16->f32, f16 for f16->f16
     std::string accum_type = (ssmi.ty == BaseType::F16) ? "f16" : "f32";
-    // For now, assume f16 input always uses f32 accumulator for better
-    // precision
-    accum_type = "f32"; // TODO: make configurable based on MMA config
-    (void)accum_type;   // suppress unused warning for now
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: {
       auto sym = op.FillingSymbol();
-      // Declare WGMMA accumulator: float d[4][8] for 64x64 output with 128
-      // threads
-      ds << d_indent << "float " << sym << "_d[4][8];\n";
-      ds << d_indent << "memset(" << sym << "_d, 0, sizeof(" << sym
-         << "_d));\n";
+      // dtype of accu: s32, f16, f32 (f16 => u32)
+      auto acc_dtype = ssmi.ty;
+      ValueItem frag_len = sbe::bop(OpCode::DIVIDE, ssmi.shape[1], sbe::nu(2))
+                               ->Normalize(); // N / 2
+      if (ssmi.ty == BaseType::F16) {
+        acc_dtype = BaseType::U32;
+        frag_len = sbe::bop(OpCode::DIVIDE, frag_len, sbe::nu(2))->Normalize();
+      }
+      if (!VIIsInt(frag_len))
+        choreo_unreachable(
+            "expect the length of wgmma fragment to be integer but not symbol");
+      reg_num_d = *VIInt(frag_len);
+      ds << d_indent << NameBaseType(acc_dtype) << " " << sym << "_frag["
+         << reg_num_d << "];\n";
+      // TODO: only support init with 0 for now
+      ds << d_indent << "memset(" << sym << "_frag, 0, sizeof(" << sym
+         << "_frag));\n";
       // Signal warp group that we're about to start WGMMA operations
       ds << d_indent << "warpgroup_arrive();\n";
     } break;
@@ -2012,75 +2020,62 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto sym = op.LoadTo();
       // For WGMMA, we store the shared memory pointer for later use in Exec
       // The actual data should already be in shared memory
-      ds << d_indent << "// WGMMA: " << sym << " points to shared memory\n";
       ds << d_indent << "__half* " << sym << "_smem_ptr = (__half*)("
          << ExprSTR(op.LoadFrom(), false) << ");\n";
+      std::string major_order = "WGMMA_MajorOrder::MN_MAJOR";
+      if (ssmi.frag == MMAInfo::FRAG_A) {
+        if (ssmi.method == AST::MMAOperation::ROW_ROW ||
+            ssmi.method == AST::MMAOperation::ROW_COL)
+          major_order = "WGMMA_MajorOrder::K_MAJOR";
+      } else if (ssmi.frag == MMAInfo::FRAG_B) {
+        if (ssmi.method == AST::MMAOperation::ROW_ROW ||
+            ssmi.method == AST::MMAOperation::COL_ROW)
+          major_order = "WGMMA_MajorOrder::K_MAJOR";
+      }
+      ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
+         << major_order << ", WGMMA_Swizzle::B128>(" << sym << "_smem_ptr);\n";
     } break;
     case AST::MMAOperation::Exec: {
-      // WGMMA execution using unified template with automatic descriptor
-      // selection Operands: C (accum), A, B - result stored in C
-      auto c_sym = op.ExecOperand(0);
-      auto a_sym = op.ExecOperand(1);
-      auto b_sym = op.ExecOperand(2);
-
-      // Get input type from symbol MMA info
-      auto a_type = cgi.GetSymbolMMA(InScopeName(a_sym)).ty;
-      std::string input_type =
-          (a_type == BaseType::F16) ? "__half" : "__nv_bfloat16";
-
       // Detect memory layout based on MMA execution method
       // mma.row.row: both A and B are K_MAJOR (left operand K-major, right
       // operand K-major) mma.row.col: A is K_MAJOR, B is MN_MAJOR (left operand
       // K-major, right operand MN-major)
-      std::string major_order_a, major_order_b;
       int trans_a = 0;
       int trans_b = 0;
-
       if (op.GetMethod() == AST::MMAOperation::ROW_ROW) {
-        // Both operands are K_MAJOR
-        major_order_a = "WGMMA_MajorOrder::K_MAJOR";
-        major_order_b = "WGMMA_MajorOrder::K_MAJOR";
         trans_a = 0;
         trans_b = 0;
       } else if (op.GetMethod() == AST::MMAOperation::ROW_COL) {
-        // A is K_MAJOR, B is MN_MAJOR
-        major_order_a = "WGMMA_MajorOrder::K_MAJOR";
-        major_order_b = "WGMMA_MajorOrder::MN_MAJOR";
         trans_a = 0;
-        trans_b = 0;
+        trans_b = 1;
       } else if (op.GetMethod() == AST::MMAOperation::COL_ROW) {
-        // A is MN_MAJOR, B is K_MAJOR
-        major_order_a = "WGMMA_MajorOrder::MN_MAJOR";
-        major_order_b = "WGMMA_MajorOrder::K_MAJOR";
-        trans_a = 0;
+        trans_a = 1;
         trans_b = 0;
       } else if (op.GetMethod() == AST::MMAOperation::COL_COL) {
-        // Both operands are MN_MAJOR
-        major_order_a = "WGMMA_MajorOrder::MN_MAJOR";
-        major_order_b = "WGMMA_MajorOrder::MN_MAJOR";
-        trans_a = 0;
-        trans_b = 0;
+        trans_a = 1;
+        trans_b = 1;
       } else {
         choreo_unreachable("Unsupported MMA execution method");
       }
-
-      // Use unified template with appropriate major orders
-      ds << d_indent << "// WGMMA 64x64x16 execution using unified template\n";
+      auto c_sym = op.ExecOperand(0);
+      auto a_sym = op.ExecOperand(1);
+      auto b_sym = op.ExecOperand(2);
+      std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(c_sym));
+      std::string cc = SplitStringByDelimiter(mma_policy, "::")[0];
+      auto cute_gmma_major_cast = "static_cast<cute::" + cc + "::GMMA::Major>";
+      // WGMMA execution using unified template with automatic descriptor
+      // selection Operands: C (accum), A, B - result stored in C
       ds << d_indent
          << "// Note: warpgroup_arrive() should be called once before first "
             "WGMMA\n";
       ds << d_indent
          << "// and warpgroup_wait() should be called once after all WGMMAs\n";
-      ds << d_indent << "wgmma_m64n64k16<" << input_type << ", float,\n";
-      ds << d_indent << "                " << major_order_a
-         << ", WGMMA_Swizzle::B128,\n";
-      ds << d_indent << "                " << major_order_b
-         << ", WGMMA_Swizzle::B128,\n";
-      ds << d_indent << "                " << trans_a << ", " << trans_b
-         << ">(\n";
-      ds << d_indent << "    " << c_sym << "_d,\n";
-      ds << d_indent << "    " << a_sym << "_smem_ptr,\n";
-      ds << d_indent << "    " << b_sym << "_smem_ptr);\n";
+      ds << d_indent << "cute::" << mma_policy << "<" << cute_gmma_major_cast
+         << "(" << trans_a << "), " << cute_gmma_major_cast << "(" << trans_b
+         << ")>::fma(" << "desc_" << a_sym << ", desc_" << b_sym;
+      for (size_t i = 0; i < reg_num_d; ++i)
+        ds << ", " << c_sym << "_frag[" << i << "]";
+      ds << ");\n";
     } break;
     case AST::MMAOperation::Store: {
       ds << d_indent << "// Finalize WGMMA operations\n";
@@ -2091,8 +2086,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
       auto accum_type = ssmi.ty;
-      accum_type = BaseType::F32; // TODO: make configurable based on MMA
-                                  // config
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(f_sym, ".data()"),
           (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
@@ -2106,7 +2099,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
       ds << d_indent << "store_fragment_d<" << CUTE_WGMMA_ATOM << ", " << DIM_N
          << ">(" << f_mds.first << ", " << "reinterpret_cast<"
-         << NameBaseType(accum_type) << "*>(" << sym << "_d[0]));\n";
+         << NameBaseType(accum_type) << "*>(" << sym << "_frag));\n";
     } break;
     default: break;
     }
