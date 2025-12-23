@@ -2,27 +2,28 @@
 #define N 256
 #define K 256
 
-__co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
+__co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
   f16 [M, N] output{0.0f};
 
   int TILE_M = 32, TILE_N = 32, TILE_K = 16;
   int WARP_M = 16, WARP_N = 16, WARP_K = 16;
   int THR_M = 8, THR_N = 4;
 
+  // each block handles 128x128 block
   parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
     foreach {iv_k} in [cdiv(K, TILE_K)] {
       lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
-      rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
+      rhs_load_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
 
       parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+
         foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
           lhs_load_w = dma.copy lhs_load_s.chunkat(iv_warp_m, iv_warp_k) => local;
-          rhs_load_w = dma.copy rhs_load_s.chunkat(iv_warp_n, iv_warp_k) => local;
+          rhs_load_w = dma.copy rhs_load_s.chunkat(iv_warp_k, iv_warp_n) => local;
 
-          // each thread (8x4 grid of threads) handles 8x16 block
           foreach {iv_thr_m, iv_thr_n, iv_thr_k} in [cdiv(WARP_M, THR_M), cdiv(WARP_N, THR_N), WARP_K] {
             parallel {thr_m, thr_n} by [THR_M, THR_N] : thread {
-              output.at(block_m#iv_warp_m#iv_thr_m#thr_m, block_n#iv_warp_n#iv_thr_n#thr_n) += lhs_load_w.data.at(iv_thr_m#thr_m, iv_thr_k) * rhs_load_w.data.at(iv_thr_n#thr_n, iv_thr_k);
+              output.at(block_m#iv_warp_m#iv_thr_m#thr_m, block_n#iv_warp_n#iv_thr_n#thr_n) += lhs_load_w.data.at(iv_thr_m#thr_m, iv_thr_k) * rhs_load_w.data.at(iv_thr_k, iv_thr_n#thr_n);
             }
           }
 
@@ -36,7 +37,7 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
 
 int main() {
   auto lhs = choreo::make_spandata<choreo::f16>(M, K);
-  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+  auto rhs = choreo::make_spandata<choreo::f16>(K, N);
   lhs.fill_random(1, 10);
   rhs.fill_random(1, 10);
 

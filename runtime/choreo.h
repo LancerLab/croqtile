@@ -2756,6 +2756,44 @@ enum class WGMMA_MajorOrder {
   MN_MAJOR // M and N dimensions are major (leading)
 };
 
+// mma shape enum
+enum class WGMMA_MMAShape {
+  M64N64K16,
+};
+
+// helper functions to get mma property at compile time
+template<WGMMA_MMAShape Shape>
+__device__ constexpr int get_mma_m() {
+  if constexpr (Shape == WGMMA_MMAShape::M64N64K16) return 64;
+  return 0;
+}
+
+template<WGMMA_MMAShape Shape>
+__device__ constexpr int get_mma_n() {
+  if constexpr (Shape == WGMMA_MMAShape::M64N64K16) return 64;
+  return 0;
+}
+
+template<WGMMA_MMAShape Shape>
+__device__ constexpr int get_mma_k() {
+  if constexpr (Shape == WGMMA_MMAShape::M64N64K16) return 16;
+  return 0;
+}
+
+template<WGMMA_MajorOrder MajorOrder>
+__device__ constexpr int get_trans_a() {
+  if constexpr (MajorOrder == WGMMA_MajorOrder::K_MAJOR) return 0;
+  if constexpr (MajorOrder == WGMMA_MajorOrder::MN_MAJOR) return 1;
+  return 0;
+}
+
+template<WGMMA_MajorOrder MajorOrder>
+__device__ constexpr int get_trans_b() {
+  if constexpr (MajorOrder == WGMMA_MajorOrder::K_MAJOR) return 0;
+  if constexpr (MajorOrder == WGMMA_MajorOrder::MN_MAJOR) return 1;
+  return 0;
+}
+
 // Helper function to encode matrix descriptor
 __device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
   return (((x) & 0x3FFFF) >> 0x4);
@@ -2771,53 +2809,53 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
   desc |= matrix_descriptor_encode(addr);
 
   // Determine stride and leading dimension based on major order and swizzle
-  uint64_t stride_bytes = 0;
-  uint64_t leading_dim = 0;
+  uint64_t LBO = 0;
+  uint64_t SBO = 0;
 
   if constexpr (MajorOrder == WGMMA_MajorOrder::K_MAJOR) {
     // K-major layout: stride varies by swizzle pattern
     switch (Swizzle) {
     case WGMMA_Swizzle::NS:
-      stride_bytes = 128;
-      leading_dim = 64;
+      LBO = 256;
+      SBO = 128;
       break;
     case WGMMA_Swizzle::B32:
-      stride_bytes = 16;
-      leading_dim = 256;
+      LBO = 16;
+      SBO = 256;
       break;
     case WGMMA_Swizzle::B64:
-      stride_bytes = 16;
-      leading_dim = 512;
+      LBO = 16;
+      SBO = 512;
       break;
     case WGMMA_Swizzle::B128:
-      stride_bytes = 16;
-      leading_dim = 1024;
+      LBO = 16;
+      SBO = 1024;
       break;
     }
   } else { // MN_MAJOR
     // MN-major layout: stride varies by swizzle pattern
     switch (Swizzle) {
     case WGMMA_Swizzle::NS:
-      stride_bytes = 256;
-      leading_dim = 128;
+      LBO = 256;
+      SBO = 128;
       break;
     case WGMMA_Swizzle::B32:
-      stride_bytes = 256;
-      leading_dim = 512;
+      LBO = 256;
+      SBO = 512;
       break;
     case WGMMA_Swizzle::B64:
-      stride_bytes = 512;
-      leading_dim = 1024;
+      LBO = 512;
+      SBO = 1024;
       break;
     case WGMMA_Swizzle::B128:
-      stride_bytes = 1024;
-      leading_dim = 2048;
+      LBO = 1024;
+      SBO = 2048;
       break;
     }
   }
 
-  desc |= matrix_descriptor_encode(stride_bytes) << 16;
-  desc |= matrix_descriptor_encode(leading_dim) << 32;
+  desc |= matrix_descriptor_encode(LBO) << 16;
+  desc |= matrix_descriptor_encode(SBO) << 32;
   desc |= static_cast<uint64_t>(Swizzle) << 62;
 
   return desc;
@@ -2864,14 +2902,11 @@ struct AccumTCast<f16, f32> {
 //   - SwizzleA: swizzle pattern for matrix A
 //   - MajorOrderB: major order for matrix B (K_MAJOR or MN_MAJOR)
 //   - SwizzleB: swizzle pattern for matrix B
-//   - TransA: transpose A (0 or 1)
-//   - TransB: transpose B (0 or 1)
 template <typename InputT, typename OutputT,
           WGMMA_MajorOrder MajorOrderA = WGMMA_MajorOrder::K_MAJOR,
           WGMMA_Swizzle SwizzleA = WGMMA_Swizzle::NS,
           WGMMA_MajorOrder MajorOrderB = WGMMA_MajorOrder::K_MAJOR,
-          WGMMA_Swizzle SwizzleB = WGMMA_Swizzle::NS, int TransA = 0,
-          int TransB = 0>
+          WGMMA_Swizzle SwizzleB = WGMMA_Swizzle::NS>
 __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                                                        InputT* sA, InputT* sB) {
   static_assert(
@@ -2883,6 +2918,8 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
 
   uint64_t desc_a = wgmma_make_smem_desc<MajorOrderA, SwizzleA>(&sA[0]);
   uint64_t desc_b = wgmma_make_smem_desc<MajorOrderB, SwizzleB>(&sB[0]);
+  constexpr uint64_t trans_a = get_trans_a<MajorOrderA>();
+  constexpr uint64_t trans_b = get_trans_b<MajorOrderB>();
 
   // Determine PTX instruction based on input and output types
   if constexpr (std::is_same_v<InputT, __half> &&
@@ -2915,7 +2952,7 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+h"(*(uint16_t*)&d[3][4]), "+h"(*(uint16_t*)&d[3][5]),
                    "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(TransA), "n"(TransB));
+                   "n"(trans_a), "n"(trans_b));
 #endif
   } else if constexpr (std::is_same_v<InputT, __half> &&
                        std::is_same_v<OutputT, float>) {
@@ -2939,7 +2976,7 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]),
                    "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(TransA), "n"(TransB));
+                   "n"(trans_a), "n"(trans_b));
 #endif
   } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> &&
                        std::is_same_v<OutputT, __nv_bfloat16>) {
@@ -2971,7 +3008,7 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+h"(*(uint16_t*)&d[3][4]), "+h"(*(uint16_t*)&d[3][5]),
                    "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(TransA), "n"(TransB));
+                   "n"(trans_a), "n"(trans_b));
 #endif
   } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> &&
                        std::is_same_v<OutputT, float>) {
@@ -2995,7 +3032,7 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]),
                    "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(TransA), "n"(TransB));
+                   "n"(trans_a), "n"(trans_b));
 #endif
   }
 }
