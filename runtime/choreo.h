@@ -490,11 +490,19 @@ using half = __fp16;
 #endif // __CHOREO_TARGET_NATIVE_F16_SUPPORT__
 
 __co_any__ inline static f16 f32_to_f16(f32 value) {
+  #ifdef __USE_CUDA_TYPE__
+  return __float2half(value);
+  #else
   return __f32_to_f16<f16>(value);
+  #endif
 }
 
 __co_any__ inline static f32 f16_to_f32(f16 value) {
+  #ifdef __USE_CUDA_TYPE__
+  return __half2float(value);
+  #else
   return __f16_to_f32<f32>(value);
+  #endif
 }
 
 #ifndef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
@@ -2845,7 +2853,7 @@ struct AccumTCast {
 template <>
 struct AccumTCast<f16, f32> {
   static constexpr bool supported = true;
-  __device__ static inline f16 cast(f32 val) { return __float2half(val); }
+  __device__ static inline f16 cast(f32 val) { return f32_to_f16(val); }
 };
 
 // Unified WGMMA template with automatic descriptor selection
@@ -3072,7 +3080,7 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
   static_assert(std::is_same<AccumT, float>::value ||
                     std::is_same<AccumT, f16>::value ||
                     std::is_same<AccumT, s32>::value,
-                "WGMMA store_fragment_d only supports float accumulator type");
+                "WGMMA store_fragment_d only supports float/f16/s32 accumulator type");
   static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
                     std::is_same<typename Tensor::value_type, AccumT>::value,
                 "WGMMA store_fragment_d unsupported type cast");
