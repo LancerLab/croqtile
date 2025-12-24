@@ -3354,9 +3354,10 @@ show_usage() {
     compute_arch = "compute_" + compute_arch.substr(3);
   }
 
-  os << R"(export CFLAGS="--gpu-architecture=)" << compute_arch
-     << R"( --gpu-code=)" << code_arch
-     << R"( -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
+  // os << R"(export CFLAGS="--gpu-architecture=)" << compute_arch
+  //    << R"( --gpu-code=)" << code_arch
+  //    << R"( -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
   os << " -O" << CCtx().GetOptimizationLevel();
   if (use_cuda_type)
     os << " -D__USE_CUDA_TYPE__";
