@@ -803,8 +803,8 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
     bool_literal->SetType(MakeBooleanType(true));
     bool_literal->SetDiversityShape(DiversityShapeKind::UNIFORM);
     mask_expr = MakeMaskExpr(n.LOC(), bool_literal);
-    mask_expr->Note().emplace("broadcast",
-                              std::to_string(cur_loop->GetVectorFactor()));
+    mask_expr->AddNote("broadcast",
+                       std::to_string(cur_loop->GetVectorFactor()));
     loop_cond = MakeMaskDecl(loc, cur_mask_name, mask_expr);
     loop_cond->init_expr->SetType(MakeBooleanType(true));
     smi->all_true_masks.insert(cur_mask_name);

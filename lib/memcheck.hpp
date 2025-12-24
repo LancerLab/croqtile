@@ -260,7 +260,7 @@ public:
       return true; // only check valid storage types
     assert(valid_storage_type.count(sto) &&
            "Only support Storage types in `valid_storage_type`!");
-    if (n.Note().count("offset")) {
+    if (n.HasNote("offset")) {
       VST_DEBUG({
         dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
                << " reuses the space of self-defined SPM!\n";

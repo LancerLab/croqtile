@@ -65,11 +65,12 @@ public:
   virtual ~Node() = default;
 
   virtual const NoteMapType& Note() const { return note; }
-  virtual NoteMapType& Note() { return note; }
-  virtual void AddNote(const std::string& s) { note.emplace(s, ""); }
-  virtual bool HasNote(const std::string& s) const {
-    return note.count(s) != 0;
+  virtual bool HasNote(const std::string& k) const { return note.count(k); }
+  virtual std::string GetNote(const std::string& k) const { return note.at(k); }
+  virtual void AddNote(const std::string& k, const std::string& v = "") {
+    note.emplace(k, v);
   }
+  virtual void EraseNote(const std::string& k) { note.erase(k); }
 
   virtual bool IsBlock() const { return false; }
   virtual ParallelLevel GetLevel() const { return level; }
@@ -79,7 +80,7 @@ public:
     n->SetType(GetType());
     n->SetLevel(GetLevel());
     n->SetDiversityShape(GetDiversityShape());
-    if (!Note().empty()) n->Note() = Note();
+    if (!note.empty()) n->note = note;
     return n;
   }
   virtual ptr<Node> CloneImpl() const = 0;

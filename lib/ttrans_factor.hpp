@@ -131,7 +131,7 @@ private:
       }
     } else if (auto m = dyn_cast<AST::Select>(&n)) {
       if (kind == Kind::T_SWAP) {
-        if (m->Note().count("gen")) { replace_swap_names.push(false); }
+        if (m->HasNote("gen")) { replace_swap_names.push(false); }
       }
     }
 
@@ -153,7 +153,7 @@ private:
       }
     } else if (auto m = dyn_cast<AST::Select>(&n)) {
       if (kind == Kind::T_SWAP) {
-        if (m->Note().count("gen")) {
+        if (m->HasNote("gen")) {
           assert(!replace_swap_names.empty());
           replace_swap_names.pop();
         }
@@ -342,7 +342,7 @@ public:
     if (!n.future.empty()) {
       auto fut = n.future;
       n.future = NameToReplace(fut, n);
-      if (fut != n.future) n.Note().insert_or_assign("use-fut", "true");
+      if (fut != n.future) n.AddNote("use-fut");
     }
 
     return true;
@@ -432,8 +432,8 @@ public:
       auto true_on_rhs = AST::Make<AST::Select>(n.LOC(), Condition, rl_list);
       true_on_lhs->SetType(nty);
       true_on_rhs->SetType(nty);
-      true_on_lhs->Note().insert_or_assign("gen", "true");
-      true_on_rhs->Note().insert_or_assign("gen", "true");
+      true_on_lhs->AddNote("gen");
+      true_on_rhs->AddNote("gen");
       auto lbs = AST::Make<AST::Assignment>(
           n.LOC(), UnScopedName(lname + SWAP_SFX_PRE), true_on_lhs);
       auto las = AST::Make<AST::Assignment>(
@@ -467,8 +467,8 @@ public:
           AST::Make<AST::Select>(n.LOC(), Condition, rl_buf_list);
       true_on_lbuf->SetType(sty);
       true_on_rbuf->SetType(sty);
-      true_on_lbuf->Note().insert_or_assign("gen", "true");
-      true_on_rbuf->Note().insert_or_assign("gen", "true");
+      true_on_lbuf->AddNote("gen");
+      true_on_rbuf->AddNote("gen");
       auto lbs_buf = AST::Make<AST::Assignment>(
           n.LOC(), UnScopedName(lbuf_name + SWAP_SFX_PRE), true_on_lbuf);
       auto las_buf = AST::Make<AST::Assignment>(

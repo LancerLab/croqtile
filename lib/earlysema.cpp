@@ -1552,8 +1552,14 @@ bool EarlySemantics::Visit(AST::SpanAs& n) {
     return false;
   }
 
-  auto asty = MakeRankedSpannedType(n.list->Count(), (BaseType)sty->e_type,
-                                    sty->m_type);
+  size_t cnt = n.list->Count();
+  // handle `y = x.span_as([...])`
+  if (n.list->Count() == 1)
+    if (auto e = dyn_cast<AST::Expr>(n.list->ValueAt(0)))
+      if (auto mds = dyn_cast<AST::MultiDimSpans>(e->GetReference()))
+        cnt = mds->rank;
+
+  auto asty = MakeRankedSpannedType(cnt, (BaseType)sty->e_type, sty->m_type);
   ReportErrorWhenViolateODR(n.LOC(), n.nid->name, __FILE__, __LINE__, asty);
   SetNodeType(n, asty);
 

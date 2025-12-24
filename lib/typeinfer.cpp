@@ -256,7 +256,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   // annotate it should not take storage
   if (n.init_expr && (isa<AST::Select>(AST::Ref(n.init_expr)) ||
                       isa<AST::SpanAs>(AST::Ref(n.init_expr))))
-    n.Note().insert_or_assign("ref", "true");
+    n.AddNote("ref");
 
   if (cur_type && !SetAsCurrentType(n, n.name_str)) {
     cur_type.reset();
@@ -366,7 +366,7 @@ bool TypeInference::Visit(AST::Assignment& n) {
   }
 
   if (n.value && (isa<AST::Select>(n.value) || isa<AST::SpanAs>(n.value)))
-    n.Note().insert_or_assign("ref", "true");
+    n.AddNote("ref");
 
   if (!n.IsDecl()) {
     auto vty = GetSymbolType(n.LOC(), n.GetName());

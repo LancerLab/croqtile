@@ -499,6 +499,9 @@ public:
   void SetOutputKind(OutputKind ok) { out_kind = ok; }
 
   size_t GetMemCapacity(Storage sto) const {
+    // special case for nv GPU.
+    size_t max_local = MaxLocalMemCapacity();
+
     switch (arch) {
     case TargetArch::GCU20: // TODO
     case TargetArch::GCU21: {
@@ -549,7 +552,7 @@ public:
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
-    case TargetArch::GCU5:
+    case TargetArch::GCU5: {
       switch (sto) {
       case Storage::LOCAL:
         switch (GetTarget()) {
@@ -567,69 +570,70 @@ public:
         return 128ull * 1024 * 1024 * 1024; // todo: check this
       default: choreo_unreachable("Unsupported mem level.");
       }
+    }
     case TargetArch::GPU:
     case TargetArch::SM_70:
       switch (sto) {
-      case Storage::LOCAL: return 1024;                       // 1KB
-      case Storage::SHARED: return 48ull * 1024;              // 48KB
-      case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024; // 8GB
+      case Storage::LOCAL: return max_local > 0 ? max_local : 1024; // 1KB
+      case Storage::SHARED: return 48ull * 1024;                    // 48KB
+      case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024;       // 8GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
     case TargetArch::SM_75:
       switch (sto) {
-      case Storage::LOCAL: return 1024;                       // 1KB
-      case Storage::SHARED: return 64ull * 1024;              // 64KB
-      case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024; // 8GB
+      case Storage::LOCAL: return max_local > 0 ? max_local : 1024; // 1KB
+      case Storage::SHARED: return 64ull * 1024;                    // 64KB
+      case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024;       // 8GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
     case TargetArch::SM_80:
       switch (sto) {
-      case Storage::LOCAL: return 2048;                        // 2KB
-      case Storage::SHARED: return 164ull * 1024;              // 164KB
-      case Storage::GLOBAL: return 64ull * 1024 * 1024 * 1024; // 64GB
+      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
+      case Storage::SHARED: return 164ull * 1024;                   // 164KB
+      case Storage::GLOBAL: return 64ull * 1024 * 1024 * 1024;      // 64GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
     case TargetArch::SM_86:
     case TargetArch::SM_89:
       switch (sto) {
-      case Storage::LOCAL: return 2048;                        // 2KB
-      case Storage::SHARED: return 100ull * 1024;              // 100KB
-      case Storage::GLOBAL: return 32ull * 1024 * 1024 * 1024; // 32GB
+      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
+      case Storage::SHARED: return 100ull * 1024;                   // 100KB
+      case Storage::GLOBAL: return 32ull * 1024 * 1024 * 1024;      // 32GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
     case TargetArch::SM_90:
       switch (sto) {
-      case Storage::LOCAL: return 2048;                        // 2KB
-      case Storage::SHARED: return 164ull * 1024;              // 164KB
-      case Storage::GLOBAL: return 80ull * 1024 * 1024 * 1024; // 80GB
+      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
+      case Storage::SHARED: return 164ull * 1024;                   // 164KB
+      case Storage::GLOBAL: return 80ull * 1024 * 1024 * 1024;      // 80GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
     case TargetArch::SM_90A:
       switch (sto) {
-      case Storage::LOCAL: return 2048;                        // 2KB
-      case Storage::SHARED: return 164ull * 1024;              // 164KB
-      case Storage::GLOBAL: return 80ull * 1024 * 1024 * 1024; // 80GB
+      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
+      case Storage::SHARED: return 164ull * 1024;                   // 164KB
+      case Storage::GLOBAL: return 80ull * 1024 * 1024 * 1024;      // 80GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
     case TargetArch::SM_100:
       switch (sto) {
-      case Storage::LOCAL: return 2048;                         // 2KB
-      case Storage::SHARED: return 228ull * 1024;               // 228KB
-      case Storage::GLOBAL: return 192ull * 1024 * 1024 * 1024; // 192GB
+      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
+      case Storage::SHARED: return 228ull * 1024;                   // 228KB
+      case Storage::GLOBAL: return 192ull * 1024 * 1024 * 1024;     // 192GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
     case TargetArch::SM_120:
       switch (sto) {
-      case Storage::LOCAL: return 2048;                         // 2KB
-      case Storage::SHARED: return 300ull * 1024;               // 300KB
-      case Storage::GLOBAL: return 256ull * 1024 * 1024 * 1024; // 256GB
+      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
+      case Storage::SHARED: return 300ull * 1024;                   // 300KB
+      case Storage::GLOBAL: return 256ull * 1024 * 1024 * 1024;     // 256GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 

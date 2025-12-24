@@ -752,7 +752,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   auto nty = NodeType(n);
   auto sym = n.name_str;
 
-  bool ref = n.Note().count("ref");
+  bool ref = n.HasNote("ref");
   // workaround:
   // if a symbol is declared but have no symbol value(optimized value)
   // pass it to device func even it is unused.
@@ -787,6 +787,19 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
     return true;
   }
+
+  if (auto e = dyn_cast<AST::Expr>(n.init_expr))
+    if (auto sa = dyn_cast<AST::SpanAs>(e->GetReference())) {
+      if (IsHost()) choreo_unreachable("span-as should be on device side.");
+      ds << d_indent << "auto* " << sym << " = ";
+      auto tty = GetSymbolType(sa->id->name);
+      if (isa<FutureType>(tty))
+        ds << sa->id->name << ".data();\n";
+      else
+        ds << sa->id->name << ";\n";
+      ssm.MapDeviceSymbol(InScopeName(sym), sym);
+      return true;
+    }
 
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     auto sym__init = sym + "__init";
@@ -885,22 +898,23 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       // memory reuse is enabled
 
-      if (n.Note().count("spm")) {
+      if (n.HasNote("spm")) {
         ds << d_indent << type_modifiers << bts << " " << sym << "["
            << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;
       }
 
       // the buffer is not the declared whole spm.
-      if (auto reuse = FindOrNull(n.Note(), "reuse")) {
-        auto offset = n.Note().at("offset");
+      if (n.HasNote("reuse")) {
+        auto reuse = n.GetNote("reuse");
+        auto offset = n.GetNote("offset");
         ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
-           << "(" << *reuse << " + " << offset << ");\n";
+           << "(" << reuse << " + " << offset << ");\n";
       } else {
         // the buffer is not reused
         // which means that it is declared but never used.
         // TODO: should we DCE the unused buffer?
-        assert(!n.Note().count("offset"));
+        assert(!n.HasNote("offset"));
         ds << d_indent << type_modifiers << bts << " " << sym << "["
            << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
       }
@@ -1081,7 +1095,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
 
   if (!n.AssignToDataElement()) {
     auto name = n.GetName();
-    bool ref = n.Note().count("ref");
+    bool ref = n.HasNote("ref");
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value))
       updating_cgi.AddSymbolDetail(
           fname, {InScopeName(name), GetSymbolType(name), ref});

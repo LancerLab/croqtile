@@ -845,7 +845,7 @@ public:
         VST_DEBUG(dbgs() << STR(n) << "\n");
 
         // In host, its return type is still 'int'
-        n.Note().insert_or_assign("host-type", "int");
+        n.AddNote("host-type", "int");
       }
     }
 

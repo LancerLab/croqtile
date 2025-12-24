@@ -814,7 +814,7 @@ struct Type {
   virtual const std::string GetNote(const std::string& k) const {
     return note.at(k);
   };
-  virtual void AppendNote(const std::string& k, const std::string& v = "") {
+  virtual void AddNote(const std::string& k, const std::string& v = "") {
     note.emplace(k, v);
   };
   virtual void Print(std::ostream&) const = 0;
@@ -1782,7 +1782,7 @@ struct DeviceDataType final : public Type,
 struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
   BoundedType(BaseType tc, const std::string& k = "", const std::string& v = "")
       : Type(tc) {
-    if (k.size() > 0) AppendNote(k, v);
+    if (k.size() > 0) AddNote(k, v);
   }
   virtual bool HasValidBound() const = 0;
   virtual const ValueItem& GetUpperBound() const = 0;

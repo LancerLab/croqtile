@@ -1,12 +1,6 @@
 // RUN: choreo -gs -t factor %s | FileCheck --match-full-lines %s
 
 __co__ auto span_as0(f32 [32, 18, 9] a) {
-  c = a.span_as([ 288, 18 ]);
-  d = a.span_as([ 576, 1, 3, 3 ]);
-
-  s32 [1, 2, 3] m;
-  n = m.span_as([6]);
-
   f32 [a.span] b;
   f32 [a.span] o;
   parallel p by 3 {
@@ -21,31 +15,23 @@ __co__ auto span_as0(f32 [32, 18, 9] a) {
 }
 
 // CHECK:   auto a_type = DRAMType(FloatType(32), {32, 18, 9});
-// CHECK:   auto c_type = DRAMType(FloatType(32), {288, 18});
-// CHECK:   auto d_type = DRAMType(FloatType(32), {576, 1, 3, 3});
-// CHECK:   auto m_type = DRAMType(IntType(32), {1, 2, 3});
-// CHECK:   auto n_type = DRAMType(IntType(32), {6});
 // CHECK:   auto b_type = DRAMType(FloatType(32), {32, 18, 9});
 // CHECK:   auto o_type = DRAMType(FloatType(32), {32, 18, 9});
 
-// CHECK:  D(host_func_)("__choreo_span_as0", {a_type, m_type, b_type, o_type, StreamType()}, [&](auto args) {
-// CHECK:    auto c = bitcast_(DRAMType(FloatType(32), {288, 18}), args[0]);
-// CHECK:    auto d = bitcast_(DRAMType(FloatType(32), {576, 1, 3, 3}), args[0]);
-// CHECK:    auto n = bitcast_(DRAMType(IntType(32), {6}), m);
+// CHECK:  D(host_func_)("__choreo_span_as0", {a_type, b_type, o_type, StreamType()}, [&](auto args) {
+// CHECK:    auto & a = args[0];
+// CHECK:    auto & b = args[1];
+// CHECK:    auto & o = args[2];
 // CHECK:    Dim3 grid_dim(1);
 // CHECK:    Dim3 block_dim(3);
-// CHECK:    auto ts = launch_kernel_("__choreo_span_as0_parallel", grid_dim, block_dim, args.back(), {args[0], c, d, args[1], n, args[2], args[3]}, {});
+// CHECK:    auto ts = launch_kernel_("__choreo_span_as0_parallel", grid_dim, block_dim, args.back(), {args[0], args[1], args[2]}, {});
 // CHECK:    return std::vector<Value>{};
 // CHECK:  }, true); // end of choreo-factor host program
 
-// CHECK:  D(func_)("__choreo_span_as0_parallel", {a_type, c_type, d_type, m_type, n_type, b_type, o_type}, {}, [&](auto args, auto results) {
+// CHECK:  D(func_)("__choreo_span_as0_parallel", {a_type, b_type, o_type}, {}, [&](auto args, auto results) {
 // CHECK:    auto & a = args[0];
-// CHECK:    auto & c = args[1];
-// CHECK:    auto & d = args[2];
-// CHECK:    auto & m = args[3];
-// CHECK:    auto & n = args[4];
-// CHECK:    auto & b = args[5];
-// CHECK:    auto & o = args[6];
+// CHECK:    auto & b = args[1];
+// CHECK:    auto & o = args[2];
 // CHECK:    auto thread_id = thread_id_();
 // CHECK:    auto block_id = block_id_();
 // CHECK:    auto a_local__buf__ = alloc_(L1Type(FloatType(32),{4, 3, 9}));
@@ -59,14 +45,17 @@ __co__ auto span_as0(f32 [32, 18, 9] a) {
 // CHECK:    y = 0;
 // CHECK:    for_(x, 4, 1, [&](auto iv_x) {
 // CHECK:      for_(y, 4, 1, [&](auto iv_y) {
-// CHECK:        auto anon_3 = bitcast_(DRAMType(FloatType(32), {16, 9, 36}), a);
-// CHECK:        async_load_(a_local, anon_3, a_local__buf__, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
+// CHECK:        auto anon_0 = bitcast_(DRAMType(FloatType(32), {16, 9, 36}), a);
+// CHECK:        async_load_(a_local, anon_0, a_local__buf__, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
 // CHECK:        wait_dma_(a_local);
-// CHECK:        auto anon_4 = bitcast_(DRAMType(FloatType(32), {144, 36}), b);
-// CHECK:        async_load_(b_local, anon_4, b_local__buf__, {Value(48)*thread_id,Value(12)*thread_id});
+// CHECK:        auto anon_1 = bitcast_(DRAMType(FloatType(32), {144, 36}), b);
+// CHECK:        async_load_(b_local, anon_1, b_local__buf__, {Value(48)*thread_id,Value(12)*thread_id});
 // CHECK:        wait_dma_(b_local);
-// CHECK:        auto anon_5 = bitcast_(DRAMType(FloatType(32), {16, 9, 36}), o);
-// CHECK:        async_store_(o_store, a_local__buf__, anon_5, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
+// CHECK:        auto anon_2 = bitcast_(DRAMType(FloatType(32), {16, 9, 36}), o);
+// CHECK:        async_store_(o_store, a_local__buf__, anon_2, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
+// CHECK:        wait_dma_(o_store);
 // CHECK:      }); // end of choreo-foreach block on 'y'.
+// CHECK:      y = 0;
 // CHECK:    }); // end of choreo-foreach block on 'x'.
+// CHECK:    x = 0;
 // CHECK:  }); // end of choreo-factor device function

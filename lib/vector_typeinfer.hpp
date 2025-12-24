@@ -209,7 +209,7 @@ public:
         // broadcast rhs to vector
         auto ecount = ElementCount(lhs_ty);
         auto etype = ElementType(lhs_ty);
-        rhs->Note().emplace("broadcast", std::to_string(ecount));
+        rhs->AddNote("broadcast", std::to_string(ecount));
         if (debug_visit)
           dbgs() << indent << "Expr: broadcast `" << STR(rhs)
                  << "`, type: " << PSTR(MakeVectorType(etype, ecount)) << "\n";
@@ -219,7 +219,7 @@ public:
         // broadcast lhs to vector
         auto ecount = ElementCount(rhs_ty);
         auto etype = ElementType(rhs_ty);
-        lhs->Note().emplace("broadcast", std::to_string(ecount));
+        lhs->AddNote("broadcast", std::to_string(ecount));
         if (debug_visit)
           dbgs() << indent << "Expr: broadcast `" << STR(lhs)
                  << "`, type:  " << PSTR(MakeVectorType(etype, ecount)) << "\n";
@@ -283,8 +283,7 @@ public:
       // uniform -> varying
       // e.g., a.at[i] = 0;
       else if (from_ds.Uniform() && to_ds.Varying()) {
-        from->Note().emplace("broadcast",
-                             std::to_string(cur_loop->GetVectorFactor()));
+        from->AddNote("broadcast", std::to_string(cur_loop->GetVectorFactor()));
         n.SetType(to_ty);
       } else {
         // varying -> varying
@@ -315,8 +314,8 @@ public:
         // 2. if to is a vector type and from is a scalar type, there exist a
         // broadcast operation
         if (IsActualVectorType(to_ty) && !IsActualVectorType(from_ty)) {
-          from->Note().emplace("broadcast",
-                               std::to_string(cur_loop->GetVectorFactor()));
+          from->AddNote("broadcast",
+                        std::to_string(cur_loop->GetVectorFactor()));
           if (debug_visit)
             dbgs() << indent << "Asgn: broadcast `" << STR(from)
                    << "`, type: " << PSTR(to_ty) << "\n";
@@ -338,8 +337,8 @@ public:
 
     ptr<Type> vty = nullptr;
     if (!IsActualVectorType(init_ty)) {
-      init_expr->Note().emplace("broadcast",
-                                std::to_string(cur_loop->GetVectorFactor()));
+      init_expr->AddNote("broadcast",
+                         std::to_string(cur_loop->GetVectorFactor()));
       vty = MakeVectorType(init_ty->GetBaseType(), cur_loop->GetVectorFactor());
       if (debug_visit)
         dbgs() << indent << "Expr: " << "broadcast `" << PSTR(init_expr)
@@ -373,7 +372,7 @@ public:
     if (IsScalarBaseType(nty->GetBaseType())) {
       vty = MakeVectorType(nty->GetBaseType(), cur_loop->GetVectorFactor());
       n.SetType(vty);
-      n.Note().emplace("widen", std::to_string(cur_loop->GetVectorFactor()));
+      n.AddNote("widen", std::to_string(cur_loop->GetVectorFactor()));
     }
     if (debug_visit) {
       dbgs() << indent << "call:  widen `" << n.function->name << "(";

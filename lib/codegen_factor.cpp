@@ -732,7 +732,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
 
   // buffer the allocation in another stream
   // if use pipeline-mode, make all cdma with shared_ annotation
-  if (!d.Note().count("use-fut")) {
+  if (!d.HasNote("use-fut")) {
     if (d.chained == true && ((d.chain_to != "" && src_level > dst_level) ||
                               (d.chain_from != "" && src_level < dst_level)))
       alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name

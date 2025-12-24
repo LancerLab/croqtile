@@ -944,7 +944,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   auto nty = NodeType(n);
   auto sym = n.name_str;
 
-  bool ref = n.Note().count("ref");
+  bool ref = n.HasNote("ref");
   // workaround:
   // if a symbol is declared but have no symbol value(optimized value)
   // pass it to device func even it is unused.
@@ -1068,7 +1068,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       // memory reuse is enabled
 
-      if (n.Note().count("spm")) {
+      if (n.HasNote("spm")) {
         if (sto == Storage::SHARED &&
             (FCtx(fname).HaveDynamicBuffer(SSTab().ScopeName(), sto) ||
              set_cuda_func_attribute_max_dynamic_shared_memory_size))
@@ -1081,15 +1081,16 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       }
 
       // the buffer is not the declared whole spm.
-      if (auto reuse = FindOrNull(n.Note(), "reuse")) {
-        auto offset = n.Note().at("offset");
+      if (n.HasNote("reuse")) {
+        auto reuse = n.GetNote("reuse");
+        auto offset = n.GetNote("offset");
         ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
-           << "(" << *reuse << " + " << offset << ");\n";
+           << "(" << reuse << " + " << offset << ");\n";
       } else {
         // the buffer is not reused
         // which means that it is declared but never used.
         // TODO: should we DCE the unused buffer?
-        assert(!n.Note().count("offset"));
+        assert(!n.HasNote("offset"));
         ds << d_indent << type_modifiers << bts << " " << sym << "["
            << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
       }
@@ -1243,7 +1244,7 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 
   if (!n.AssignToDataElement()) {
     auto name = n.GetName();
-    bool ref = n.Note().count("ref");
+    bool ref = n.HasNote("ref");
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value))
       updating_cgi.AddSymbolDetail(
           fname, {InScopeName(name), GetSymbolType(name), ref});
@@ -3371,7 +3372,7 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
   os << " -O" << CCtx().GetOptimizationLevel();
   if (use_cuda_type)
     os << " -D__USE_CUDA_TYPE__";

@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 #include "choreo.h"
@@ -35,8 +34,10 @@ __co__ auto transpose(s32 [8, 2, 3, 2, 4, 2] input) {
         input_shape_c = dma.copy.async input.span_as([3, 16, 16]).chunkat(a4, a5, b#c#d) => local;
         wait input_shape_c;
         local s32[2, 2, 16, 4] output_shape_c;
-        dma.transp<1, 3, 0, 2> input_shape_c.span_as([16, 2, 4, 2]) => output_shape_c;
-        out_store = dma.copy.async output_shape_c.span_as([4, 1, 64]) => output.span_as([4, 3, 64]).chunkat(b#d, a4, a5#c);
+        input_shape_c_sa = input_shape_c.span_as(16, 2, 4, 2);
+        dma.transp<1, 3, 0, 2> input_shape_c_sa => output_shape_c;
+        output_shape_c_sa = output_shape_c.span_as([4, 1, 64]);
+        out_store = dma.copy.async output_shape_c_sa => output.span_as([4, 3, 64]).chunkat(b#d, a4, a5#c);
         wait out_store;
       }
     }

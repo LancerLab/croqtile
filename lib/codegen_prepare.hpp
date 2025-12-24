@@ -196,7 +196,7 @@ public:
 
   bool Visit(AST::NamedVariableDecl& n) override {
     auto name = n.name_str;
-    bool ref = n.Note().count("ref");
+    bool ref = n.HasNote("ref");
     cgi.AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name), ref});
     if (isa<AST::Select>(n.init_expr)) select_syms.insert(InScopeName(name));
     return true;
@@ -205,7 +205,7 @@ public:
   bool Visit(AST::Assignment& n) override {
     if (n.AssignToDataElement()) return true;
     auto name = n.GetName();
-    bool ref = n.Note().count("ref");
+    bool ref = n.HasNote("ref");
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value)) {
       cgi.AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name), ref});
       if (isa<AST::Select>(n.value)) select_syms.insert(InScopeName(name));
@@ -346,8 +346,8 @@ public:
     }
     for (auto& item : cgi.GetFunctionSymbols(fname)) {
       if (item.name == InScopeName(ret_name)) {
-        if (auto val = FindOrNull(n.Note(), "host-type"))
-          item.SetAsReturn(*val);
+        if (n.HasNote("host-type"))
+          item.SetAsReturn(n.GetNote("host-type"));
         else
           item.SetAsReturn("$");
       }

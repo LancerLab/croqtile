@@ -30,7 +30,10 @@ private:
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(pre)");
-    if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+    if (isa<AST::Program>(&n)) {
+      if (CCtx().MaxLocalMemCapacity() > 0)
+        Error1(n.LOC(), "Local memory capacity cannot be set manually on GCU.");
+    } else if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
       cur_params.clear();
       cur_fname = cf->name;
       levels.push(ParallelLevel::SEQ);
@@ -55,9 +58,9 @@ private:
         append_note = std::to_string(TargetMaxLevel() - Level() - 1);
       }
       auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
-      pty->AppendNote("pv", append_note);
+      pty->AddNote("pv", append_note);
       for (auto& symbol : pb->AllSubPVs())
-        NodeType(*symbol)->AppendNote("pv", append_note);
+        NodeType(*symbol)->AddNote("pv", append_note);
     }
 
     // mask stmts that are possible to be shared
@@ -738,6 +741,13 @@ public:
     auto sty = cast<SpannedType>(ty);
 
     auto st = sty->GetStorage();
+
+    if (auto e = dyn_cast<AST::Expr>(n.init_expr))
+      if (isa<AST::SpanAs>(e->GetReference()))
+        if (st == Storage::GLOBAL)
+          Error1(n.LOC(), "declare reference by span_as cannot be applied to "
+                          "global variable.");
+
     switch (st) {
     case Storage::GLOBAL:
       if (Level() != ParallelLevel::SEQ)
