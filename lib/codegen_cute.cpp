@@ -2866,7 +2866,7 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
   auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
   switch (pb->GetLevel()) {
   case ParallelLevel::GROUPx4: {
-    auto cs = cgi.GetPBTree().GetChildren(pb);
+    auto cs = cgi.GetPBTree(fname).GetChildren(pb);
     assert(!cs.empty());
     auto& spb = cs[0];
     assert(spb->GetLevel() == ParallelLevel::GROUP);

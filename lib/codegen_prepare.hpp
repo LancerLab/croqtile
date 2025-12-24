@@ -49,22 +49,26 @@ public:
 
 struct CodegenInfoCollect : public CodeGenerator {
 private:
-  int parallel_depth = 0;
-
   // special case for `return select.data;`
   std::set<std::string> select_syms;
 
-  AST::ParallelBy* cur_device_pb = nullptr;
+  AST::ParallelBy* block_pb = nullptr;
   std::vector<AST::ParallelBy*> pb_stack;
+
+private:
+  auto Level() const {
+    if (pb_stack.empty()) return ParallelLevel::SEQ;
+    return pb_stack.back()->GetLevel();
+  }
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
-      parallel_depth = 0;
-      cgi.GetFunctionTrait(fname).has_parallelby = false;
+      pb_stack.clear();
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      if (pb->IsOuter()) {
-        cur_device_pb = pb;
+      auto pb_level = pb->GetLevel();
+      if (pb_level == ParallelLevel::BLOCK) {
+        block_pb = pb;
         assert(pb_stack.empty());
         auto& tma_descs = cgi.GetTMADescs();
         tma_descs.emplace(pb, std::vector<TMADesc>{});
@@ -73,23 +77,17 @@ private:
       }
       pb_stack.push_back(pb);
       if (pb_stack.size() > 1) {
-        cgi.GetPBTree().AddChild(*(pb_stack.rbegin() + 1), pb_stack.back());
+        cgi.GetPBTree(fname).AddChild(*(pb_stack.rbegin() + 1),
+                                      pb_stack.back());
       } else
-        cgi.GetPBTree().AddSingle(pb);
-      if (parallel_depth == 0 && cgi.GetFunctionTrait(fname).has_parallelby)
-        cgi.GetFunctionTrait(fname).multiple_parallelby = true;
-      parallel_depth++;
+        cgi.GetPBTree(fname).AddSingle(pb);
 
       auto& lcs = cgi.GetFunctionLaunches(fname);
 
       // Add a new launch config
-      if (parallel_depth == 1) {
-        // represents the index of the current ParallelBy in cgi
-        n.Note().insert_or_assign("outer_pb_idx", std::to_string(lcs.size()));
-        lcs.push_back({});
-      }
+      if (pb_level == ParallelLevel::BLOCK) lcs.push_back({});
 
-      // All the pb in a nested pb is explicitly specified with pb level.
+      // Set the launch configure
       auto& lc = lcs.back();
       switch (pb->GetLevel()) {
       case ParallelLevel::BLOCK: lc.SetBlockCount(pb->BoundValues()); break;
@@ -103,8 +101,13 @@ private:
     }
     return true;
   }
+
   bool AfterVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
+      cgi.GetFunctionTrait(fname).has_parallelby =
+          !cgi.GetPBTree(fname).IsEmpty();
+      cgi.GetFunctionTrait(fname).multiple_parallelby =
+          (cgi.GetPBTree(fname).GetRootCount() > 1);
       VST_DEBUG(dbgs() << "Symbols in " << fname << ":\n");
       VST_DEBUG(for (auto& item : cgi.GetFunctionSymbols(fname)) {
         dbgs() << " |- " << item.name << ", ty: " << PSTR(item.type)
@@ -113,24 +116,79 @@ private:
                << ", index: " << item.p_index << "\n";
       });
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      auto lvl = pb->GetLevel();
+      assert(lvl == Level());
       pb_stack.pop_back();
-      if (parallel_depth == 1) {
-        VST_DEBUG(dbgs() << "\tGrid Dims: "
-                         << cgi.GetFunctionLaunches(fname).back().block_count.x
+      if (lvl == ParallelLevel::BLOCK) {
+        assert(pb_stack.empty());
+        auto& children = cgi.GetPBTree(fname).GetChildren(pb);
+        if (children.size() >= 2) {
+          // check if there are multiple compatible branches
+          std::vector<AST::ParallelBy*> leaves;
+          std::map<AST::ParallelBy*, ValueList> pcs;
+          std::deque<AST::ParallelBy*> work_list;
+          work_list.push_back(pb);
+          while (!work_list.empty()) {
+            auto cpb = work_list.back();
+            work_list.pop_back();
+            pcs.emplace(cpb, cpb->BoundValues());
+            if (cgi.GetPBTree(fname).IsLeaf(cpb))
+              leaves.push_back(cpb);
+            else
+              for (auto& child : cgi.GetPBTree(fname).GetChildren(cpb))
+                work_list.push_front(child);
+          }
+          auto xyz = [this, &pcs](AST::ParallelBy* leaf,
+                                  AST::ParallelBy* root) {
+            assert(leaf != nullptr);
+            assert(root != nullptr);
+            assert(leaf != root);
+            ValueItem acc_x = sbe::nu(1), acc_y = sbe::nu(1),
+                      acc_z = sbe::nu(1);
+            auto cnode = leaf;
+            while (cnode != root) {
+              assert(pcs[cnode].size() > 0);
+              acc_x = (acc_x * pcs[cnode][0])->Normalize();
+              if (pcs[cnode].size() > 1)
+                acc_y = (acc_y * pcs[cnode][1])->Normalize();
+              if (pcs[cnode].size() > 2)
+                acc_z = (acc_z * pcs[cnode][2])->Normalize();
+              cnode = cgi.GetPBTree(fname).GetParent(cnode);
+            }
+            return ValueList{acc_x, acc_y, acc_z};
+          };
+          // compatible: the muliplication of launch parameters equals
+          assert(!leaves.empty());
+          auto bleaf = *leaves.begin();
+          auto bcount = xyz(bleaf, pb);
+          for (auto itr = leaves.begin() + 1; itr != leaves.end(); ++itr) {
+            auto bc = xyz(*itr, pb);
+            for (auto i = 0; i < 3; ++i)
+              if (!sbe::ceq(bcount[i], bc[i]))
+                Error1(bleaf->LOC(), "mulitple inner parallel-bys must have "
+                                     "compatible block dimension (dim-" +
+                                         std::to_string(i) + ": " +
+                                         STR(bcount[i]) + " != " + STR(bc[i]) +
+                                         ").");
+          }
+        }
+        auto& lcs = cgi.GetFunctionLaunches(fname);
+        VST_DEBUG(dbgs() << "\tBlock Count: " << lcs.back().block_count
                          << "\n");
-        VST_DEBUG(dbgs() << "\tBlock Dims: "
-                         << cgi.GetFunctionLaunches(fname).back().thread_count.x
+        VST_DEBUG(dbgs() << "\tGroup-4 Count: " << lcs.back().group4_count
                          << "\n");
+        VST_DEBUG(dbgs() << "\tGroup Count: " << lcs.back().group_count
+                         << "\n");
+        VST_DEBUG(dbgs() << "\tThread Count: " << lcs.back().thread_count
+                         << "\n");
+        block_pb = nullptr;
       }
-      parallel_depth--;
-
-      if (pb->IsOuter()) cur_device_pb = nullptr;
     }
     return true;
   }
 
 private:
-  bool IsHost() const { return parallel_depth == 0; }
+  bool IsHost() const { return Level() == ParallelLevel::SEQ; }
 
 public:
   CodegenInfoCollect() : CodeGenerator("cg_info") {}
@@ -182,7 +240,7 @@ public:
       cgi.GetFunctionTrait(fname).has_async_dma = true;
 
     if (!CCtx().TargetSupportTMA()) return true;
-    if (!cur_device_pb) return true; // not device dma
+    if (!block_pb) return true; // not device dma
 
     auto fsty = GetSpannedType(n.GetFrom()->GetType());
     auto tsty = GetSpannedType(n.GetTo()->GetType());
@@ -195,9 +253,9 @@ public:
            (tsty->GetStorage() == Storage::GLOBAL ||
             tsty->GetStorage() == Storage::DEFAULT))) {
         auto& tma_descs = cgi.GetTMADescs();
-        tma_descs[cur_device_pb].emplace_back(
-            n.GetFrom(), n.GetTo(), InScopeName(n.GetFrom()->RefSymbol()),
-            InScopeName(n.GetTo()->RefSymbol()));
+        tma_descs[block_pb].emplace_back(n.GetFrom(), n.GetTo(),
+                                         InScopeName(n.GetFrom()->RefSymbol()),
+                                         InScopeName(n.GetTo()->RefSymbol()));
       } else
         choreo_unreachable(
             "unsupport TMA direction: " + STR(fsty->GetStorage()) + " => " +

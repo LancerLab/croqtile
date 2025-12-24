@@ -61,6 +61,11 @@ struct ParallelCounts {
   }
 };
 
+inline std::ostream& operator<<(std::ostream& os, ParallelCounts pc) {
+  os << STR(pc.z) << ", " << STR(pc.y) << ", " << STR(pc.x);
+  return os;
+}
+
 struct LaunchConfig {
   ParallelCounts block_count;
   ParallelCounts group4_count;
@@ -195,6 +200,7 @@ using SharedFutures = std::map<std::string, std::set<std::string>>;
 using LocalFutures = std::map<std::string, std::set<std::string>>;
 using SymbolMMA = std::map<std::string, MMAInfo>;
 using TMADescs = std::map<AST::ParallelBy*, std::vector<TMADesc>>;
+using PBTreeInfo = std::map<std::string, PBTree>;
 
 enum PassedOrDeclaredSymbolKind : int {
   PDSYM_NONE = 0,
@@ -216,7 +222,7 @@ private:
   LocalFutures loc_futs;
   SymbolMMA sym_mmas;
   TMADescs tma_descs;
-  PBTree pb_tree;
+  PBTreeInfo pb_tree;
 
   // TODO: maybe should add some vars here
 
@@ -289,8 +295,10 @@ public:
   const TMADescs& GetTMADescs() const { return tma_descs; }
   TMADescs& GetTMADescs() { return tma_descs; }
 
-  const PBTree& GetPBTree() const { return pb_tree; }
-  PBTree& GetPBTree() { return pb_tree; }
+  const PBTree& GetPBTree(const std::string& fn) const {
+    return pb_tree.at(fn);
+  }
+  PBTree& GetPBTree(const std::string& fn) { return pb_tree[fn]; }
 
   bool HasParallelBy(const std::string& fname) const {
     return GetFunctionTrait(fname).has_parallelby;

@@ -72,6 +72,7 @@ private:
 
   int parallel_level = 0;
   bool factor_host_unbraced = false;
+  int launch_count = 0;
 
   ptr<FunctionType> fty = nullptr;
 
@@ -170,6 +171,7 @@ private:
     }
     fty = nullptr;
     void_return = false;
+    launch_count = 0;
   }
 
   // in factor, there exists choreo-host/factor-host/factor-device functions.

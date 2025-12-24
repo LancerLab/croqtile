@@ -190,24 +190,6 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
 
     fs << "} // end of " << factor_fname << "\n\n";
 
-    // std::string placeholder = fs.str();
-    // while (!alloc_fs_stack.empty()) {
-    //   std::cout << alloc_fs_stack.size() << std::endl;
-    //   std::cout << alloc_indent_stack.size() << std::endl;
-    //   std::cout << alloc_pos_stack.size() << std::endl;
-    //   std::cout << alloc_fs_stack.top().str() << std::endl;
-    //   std::cout << alloc_indent_stack.top() << std::endl;
-    //   std::cout << alloc_pos_stack.top() << std::endl;
-    //   if (!alloc_fs_stack.top().str().empty())
-    //     placeholder.insert(alloc_pos_stack.top(),
-    //     alloc_fs_stack.top().str());
-    //   alloc_fs_stack.pop();
-    //   alloc_pos_stack.pop();
-    //   alloc_indent_stack.pop();
-    // }
-    // fs.str("");
-    // fs << placeholder;
-
     // append the function code to factor source code
     std::string factor_function_code = fs.str();
     factor_code += factor_function_code;
@@ -220,13 +202,6 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
 
     std::string placeholder = fs.str();
     if (!alloc_fs_stack.empty()) {
-      // std::cout << "exit parallelby" << std::endl;
-      // std::cout << alloc_fs_stack.size() << std::endl;
-      // std::cout << alloc_indent_stack.size() << std::endl;
-      // std::cout << alloc_pos_stack.size() << std::endl;
-      // std::cout << alloc_fs_stack.top().str() << std::endl;
-      // std::cout << alloc_indent_stack.top() << std::endl;
-      // std::cout << alloc_pos_stack.top() << std::endl;
       if (!alloc_fs_stack.top().str().empty())
         placeholder.insert(alloc_pos_stack.top(), alloc_fs_stack.top().str());
       alloc_fs_stack.pop();
@@ -258,13 +233,6 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
     // handle allocations of this within block
     std::string placeholder = fs.str();
     if (!alloc_fs_stack.empty()) {
-      // std::cout << "exit within" << std::endl;
-      // std::cout << alloc_fs_stack.size() << std::endl;
-      // std::cout << alloc_indent_stack.size() << std::endl;
-      // std::cout << alloc_pos_stack.size() << std::endl;
-      // std::cout << alloc_fs_stack.top().str() << std::endl;
-      // std::cout << alloc_indent_stack.top() << std::endl;
-      // std::cout << alloc_pos_stack.top() << std::endl;
       if (!alloc_fs_stack.top().str().empty())
         placeholder.insert(alloc_pos_stack.top(), alloc_fs_stack.top().str());
       alloc_fs_stack.pop();
@@ -462,20 +430,11 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     alloc_pos_stack.push(fs.str().size());
     alloc_indent_stack.push(indent);
     alloc_fs_stack.push(std::ostringstream());
-    // std::cout << "enter inner parallelby" << std::endl;
-    // std::cout << alloc_fs_stack.size() << std::endl;
-    // std::cout << alloc_indent_stack.size() << std::endl;
-    // std::cout << alloc_pos_stack.size() << std::endl;
-    // std::cout << alloc_fs_stack.top().str() << std::endl;
-    // std::cout << alloc_indent_stack.top() << std::endl;
-    // std::cout << alloc_pos_stack.top() << std::endl;
     return true;
   }
-  auto outer_pb_idx = FindOrNull(by.Note(), "outer_pb_idx");
-  assert(outer_pb_idx.has_value());
 
   // generate all launch configs when entered the first Parallel node
-  if (*outer_pb_idx == "0") {
+  if ((by.GetLevel() == ParallelLevel::BLOCK) && (launch_count == 0)) {
     int pb_idx = 0;
     for (auto& lc : cgi.GetFunctionLaunches(fname)) {
       auto pb_idx_str = pb_idx == 0 ? "" : "_" + std::to_string(pb_idx);
@@ -542,8 +501,10 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     std::ostringstream dfun;
     {
 
-      dfun << this->indent << "D(func_)(\"" << factor_fname << "_parallel"
-           << (*outer_pb_idx == "0" ? "" : "_" + *outer_pb_idx) << "\", ";
+      dfun << this->indent << "D(func_)(\"" << factor_fname << "_parallel";
+      if (launch_count != 0) dfun << "_" << launch_count;
+      ++launch_count;
+      dfun << "\", ";
 
       // input arguments of factor device function
       dfun << "{";
@@ -609,13 +570,6 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   alloc_pos_stack.push(fs.str().size());
   alloc_indent_stack.push(indent);
   alloc_fs_stack.push(std::ostringstream());
-  // std::cout << "enter parallelby" << std::endl;
-  // std::cout << alloc_fs_stack.size() << std::endl;
-  // std::cout << alloc_indent_stack.size() << std::endl;
-  // std::cout << alloc_pos_stack.size() << std::endl;
-  // std::cout << alloc_fs_stack.top().str() << std::endl;
-  // std::cout << alloc_indent_stack.top() << std::endl;
-  // std::cout << alloc_pos_stack.top() << std::endl;
 
   return true;
 }
@@ -654,13 +608,6 @@ bool FactorCodeGen::Visit(AST::WithIn& n) {
   alloc_pos_stack.push(fs.str().size());
   alloc_indent_stack.push(indent);
   alloc_fs_stack.push(std::ostringstream());
-  // std::cout << "enter WithIn" << std::endl;
-  // std::cout << alloc_fs_stack.size() << std::endl;
-  // std::cout << alloc_indent_stack.size() << std::endl;
-  // std::cout << alloc_pos_stack.size() << std::endl;
-  // std::cout << alloc_fs_stack.top().str() << std::endl;
-  // std::cout << alloc_indent_stack.top() << std::endl;
-  // std::cout << alloc_pos_stack.top() << std::endl;
 
   // associate with to the matcher.
   if (n.with && n.with_matchers) {

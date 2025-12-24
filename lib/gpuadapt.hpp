@@ -112,7 +112,7 @@ public:
   void CheckPBSettings(AST::ParallelBy* pb) {
     if (pb->GetLevel() == ParallelLevel::THREAD) {
       auto bv = pb->BoundValues().back();
-      auto ppb = cgi.GetPBTree().GetParent(pb);
+      auto ppb = cgi.GetPBTree(fname).GetParent(pb);
       assert(ppb->GetLevel() == ParallelLevel::GROUP);
       if (ppb->IsEnforced() && !sbe::ceq(bv, sbe::nu(32)))
         Error1(pb->LOC(),
@@ -120,7 +120,7 @@ public:
                    STR(CCtx().GetArch()) + ".");
 
       if (TargetHasLevel(ParallelLevel::GROUPx4)) {
-        auto gppb = cgi.GetPBTree().GetParent(ppb);
+        auto gppb = cgi.GetPBTree(fname).GetParent(ppb);
         assert(gppb->GetLevel() == ParallelLevel::GROUPx4);
         if (ppb->IsEnforced() && gppb->IsEnforced())
           Error1(ppb->LOC(), "unable to have a 'group' parallel-by inside the "

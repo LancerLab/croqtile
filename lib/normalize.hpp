@@ -1450,69 +1450,6 @@ public:
     return true;
   }
 
-  bool HandleSingleLevel(AST::ParallelBy* pb) {
-    bool support_group = TargetHasLevel(ParallelLevel::GROUP);
-    bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
-
-    switch (pb->GetLevel()) {
-    case ParallelLevel::THREAD: {
-      //   parallel p by 32
-      // =>
-      //   parallel x by 1 : block
-      //    parallel y by 1 : group-4 (optional)
-      //     parallel z by 1 : group  (optional)
-      //      parallel p by 32 : thread
-      pb->SetLevel(ParallelLevel::THREAD);
-      fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-      if (support_group)
-        fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
-      if (support_4x_group)
-        fill_info.emplace_back(pb, Inner, ParallelLevel::GROUPx4);
-    } break;
-    case ParallelLevel::BLOCK: {
-      //   parallel p by 32: block
-      // =>
-      //   parallel p by 32 : block
-      //    parallel x by 1 : group-4 (optional)
-      //     parallel y by 1 : group (optional)
-      //      parallel y by 1 : thread
-      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD);
-      if (support_group)
-        fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
-      if (support_4x_group)
-        fill_info.emplace_back(pb, Inner, ParallelLevel::GROUPx4);
-    } break;
-    case ParallelLevel::GROUPx4: {
-      //   parallel p by 32: group-4
-      // =>
-      //   parallel x by 1 : block
-      //    parallel p by 32 : group-4
-      //     parallel y by 1 : group
-      //      parallel z by 128 : thread
-      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD, 128);
-      fill_info.emplace_back(pb, Inner, ParallelLevel::GROUP);
-      fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-    } break;
-    case ParallelLevel::GROUP: {
-      //   parallel p by 32: group
-      // =>
-      //   parallel x by 1 : block
-      //    parallel y by 1 : group-4 (optional)
-      //     parallel p by 32 : group
-      //      parallel z by 32 : thread (gpu)
-      fill_info.emplace_back(pb, Inner, ParallelLevel::THREAD,
-                             CCtx().GetMinGroupDim());
-      if (support_4x_group)
-        fill_info.emplace_back(pb, Outer, ParallelLevel::GROUPx4);
-      fill_info.emplace_back(pb, Outer, ParallelLevel::BLOCK);
-    } break;
-    default:
-      choreo_unreachable("unsupported single parallel-by level.");
-      return true;
-    }
-    return true;
-  }
-
   bool NormPB(AST::ParallelBy& n) {
     // fill the sub elements
     if (!n.HasSubPVs()) {

@@ -27,6 +27,7 @@ public:
   size_t GetSize() const;
   size_t GetDepth(AST::ParallelBy* node) const;
   size_t GetHeight(AST::ParallelBy* node) const;
+  size_t GetRootCount() const;
   const std::vector<AST::ParallelBy*> GetAllNodes() const;
 
   // Tree traversal methods
@@ -279,6 +280,13 @@ inline void PBTree::PrintRecursive(AST::ParallelBy* node, int depth,
   auto& children = GetChildren(node);
   for (size_t i = 0; i < children.size(); ++i)
     PrintRecursive(children[i], depth + 1, max_depth, os);
+}
+
+inline size_t PBTree::GetRootCount() const {
+  size_t count = 0;
+  for (auto* node : all_nodes_)
+    if (IsRoot(node)) count++;
+  return count;
 }
 
 } // end namespace Choreo
