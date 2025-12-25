@@ -2654,32 +2654,32 @@ enum class WGMMA_MMAShape {
 };
 
 // helper functions to get mma property at compile time
-template<WGMMA_MMAShape Shape>
+template <WGMMA_MMAShape Shape>
 __device__ constexpr int get_mma_m() {
   if constexpr (Shape == WGMMA_MMAShape::M64N64K16) return 64;
   return 0;
 }
 
-template<WGMMA_MMAShape Shape>
+template <WGMMA_MMAShape Shape>
 __device__ constexpr int get_mma_n() {
   if constexpr (Shape == WGMMA_MMAShape::M64N64K16) return 64;
   return 0;
 }
 
-template<WGMMA_MMAShape Shape>
+template <WGMMA_MMAShape Shape>
 __device__ constexpr int get_mma_k() {
   if constexpr (Shape == WGMMA_MMAShape::M64N64K16) return 16;
   return 0;
 }
 
-template<WGMMA_MajorOrder MajorOrder>
+template <WGMMA_MajorOrder MajorOrder>
 __device__ constexpr int get_trans_a() {
   if constexpr (MajorOrder == WGMMA_MajorOrder::K_MAJOR) return 0;
   if constexpr (MajorOrder == WGMMA_MajorOrder::MN_MAJOR) return 1;
   return 0;
 }
 
-template<WGMMA_MajorOrder MajorOrder>
+template <WGMMA_MajorOrder MajorOrder>
 __device__ constexpr int get_trans_b() {
   if constexpr (MajorOrder == WGMMA_MajorOrder::K_MAJOR) return 0;
   if constexpr (MajorOrder == WGMMA_MajorOrder::MN_MAJOR) return 1;

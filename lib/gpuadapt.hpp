@@ -123,8 +123,9 @@ public:
         auto gppb = cgi.GetPBTree(fname).GetParent(ppb);
         assert(gppb->GetLevel() == ParallelLevel::GROUPx4);
         if (ppb->IsEnforced() && gppb->IsEnforced())
-          Error1(ppb->LOC(), "unable to have a 'group' parallel-by inside the "
-                             "'group-4' parallel-by.");
+          Error1(ppb->LOC(), "explicit 'group' inside the 'group-4' "
+                             "parallel-by is not supported by " +
+                                 STR(CCtx().GetArch()) + ".");
         else if (gppb->IsEnforced() && !sbe::ceq(bv, sbe::nu(128)))
           Error1(
               pb->LOC(),

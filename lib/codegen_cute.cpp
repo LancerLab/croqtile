@@ -230,7 +230,7 @@ bool CuteCodeGen::ThreadCooperative(AST::DMA&) const {
   case TargetArch::SM_86:
   case TargetArch::SM_89: return true; // no TMA support
   case TargetArch::SM_90:
-  case TargetArch::SM_90a:
+  case TargetArch::SM_90A:
   case TargetArch::SM_100:
   case TargetArch::SM_120: return false;
   default: choreo_unreachable("unsupported target arch.");
@@ -371,6 +371,12 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
       ds << "}\n\n";
+    } else {
+      auto& siblings = cgi.GetPBTree(fname).GetSiblings(pb);
+      if (!siblings.empty()) {
+        DecrDeviceIndent();
+        ds << d_indent << "} // end inner parallel-by\n";
+      }
     }
   } else if (isa<AST::WithBlock>(&n)) {
     DecrIndent();
@@ -1519,6 +1525,12 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     } else
       ds << d_indent << "auto " << device_fn << "__ring__ = nullptr;\n";
     ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
+  } else {
+    auto& siblings = cgi.GetPBTree(fname).GetSiblings(&n);
+    if (!siblings.empty()) {
+      ds << d_indent << "{ // inner parallel-by: " << n.LOC() << "\n";
+      IncrDeviceIndent();
+    }
   }
 
   EmitDeviceVirtualIndices(&n);
@@ -3339,17 +3351,6 @@ show_usage() {
 # compile, execute
 )script";
 
-  // Generate CUDA architecture flags based on the target architecture
-  std::string compute_arch = arch_str;
-  std::string code_arch = arch_str;
-  // Convert sm_XX to compute_XX for the compute architecture
-  if (compute_arch.substr(0, 3) == "sm_") {
-    compute_arch = "compute_" + compute_arch.substr(3);
-  }
-
-  // os << R"(export CFLAGS="--gpu-architecture=)" << compute_arch
-  //    << R"( --gpu-code=)" << code_arch
-  //    << R"( -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++)";
   os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -O3 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
   os << " -O" << CCtx().GetOptimizationLevel();
   if (use_cuda_type)

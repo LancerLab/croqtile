@@ -52,7 +52,7 @@ enum class TargetArch {
   SM_86,
   SM_89,
   SM_90,
-  SM_90a,
+  SM_90A,
   SM_100,
   SM_120,
   End
@@ -70,7 +70,7 @@ inline static int ArchNum(TargetArch ta) {
   case TargetArch::SM_86: return 86;
   case TargetArch::SM_89: return 89;
   case TargetArch::SM_90: return 90;
-  case TargetArch::SM_90a: return 90;
+  case TargetArch::SM_90A: return 90;
   case TargetArch::SM_100: return 100;
   case TargetArch::SM_120: return 120;
   default: choreo_unreachable("Unsupported Architecture.");
@@ -93,7 +93,7 @@ inline static const std::string STR(TargetArch ta) {
   case TargetArch::SM_86: return "SM_86";
   case TargetArch::SM_89: return "SM_89";
   case TargetArch::SM_90: return "SM_90";
-  case TargetArch::SM_90a: return "SM_90a";
+  case TargetArch::SM_90A: return "SM_90A";
   case TargetArch::SM_100: return "SM_100";
   case TargetArch::SM_120: return "SM_120";
   default: choreo_unreachable("Unsupported architecture.");
@@ -609,7 +609,7 @@ public:
       default: choreo_unreachable("Unsupported mem level.");
       }
 
-    case TargetArch::SM_90a:
+    case TargetArch::SM_90A:
       switch (sto) {
       case Storage::LOCAL: return 2048;                        // 2KB
       case Storage::SHARED: return 164ull * 1024;              // 164KB
@@ -678,7 +678,7 @@ public:
   bool TargetSupportTMA() const {
     switch (GetArch()) {
     case TargetArch::SM_90:
-    case TargetArch::SM_90a:
+    case TargetArch::SM_90A:
     case TargetArch::SM_100:
     case TargetArch::SM_120: return true;
     default: break;
@@ -694,7 +694,7 @@ public:
     case TargetArch::SM_86:
     case TargetArch::SM_89:
     case TargetArch::SM_90:
-    case TargetArch::SM_90a:
+    case TargetArch::SM_90A:
     case TargetArch::SM_100:
     case TargetArch::SM_120: return true;
     default: break;
@@ -704,7 +704,7 @@ public:
 
   bool TargetSupportWGMMA() const {
     switch (GetArch()) {
-    case TargetArch::SM_90a:
+    case TargetArch::SM_90A:
     case TargetArch::SM_100:
     case TargetArch::SM_120: return true;
     default: break;
