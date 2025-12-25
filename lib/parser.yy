@@ -29,6 +29,14 @@ struct SymbolWithInitVal {
   SymbolWithInitVal(const std::string & n, T i) : name(n), init_val(i) {}
 };
 
+struct DMAOperationWithSwizzle {
+  std::string operation;
+  int swizzle_value;
+  DMAOperationWithSwizzle() : operation(""), swizzle_value(0) {}
+  DMAOperationWithSwizzle(const std::string& op, int swizzle)
+    : operation(op), swizzle_value(swizzle) {}
+};
+
 class PContext {
 private:
   size_t error_count = 0;
@@ -192,7 +200,7 @@ void choreo_info(const char *message) {
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
@@ -201,10 +209,11 @@ void choreo_info(const char *message) {
 %token <std::string> VECTORIZE
 
 // non-terminals
-%nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func id_with_namespace
-%nterm <ptr<DMAConfig>> dma_config
+%nterm <std::string> builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func id_with_namespace
+%nterm <ptr<DMAConfig>> dma_config swizzle_config
+%nterm <DMAOperationWithSwizzle> dma_operation_swizzle
 %nterm <bool> bool_value sync_type pass_by_ref tdma
-%nterm <int> integer_value index_or_none const_sizeof
+%nterm <int> integer_value index_or_none const_sizeof swizzle_value
 %nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> host_code inlcpp_stmt
@@ -1690,26 +1699,50 @@ tdma
     ;
 
 dma_stmt
-    : IDENTIFIER ASSIGN tdma dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
+    : IDENTIFIER ASSIGN tdma dma_operation_swizzle sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
         symtab.AddSymbol($1, MakeDummyFutureType($5));
-        auto dma = AST::Make<AST::DMA>(@3, $4, $1, $7, $9, $5, $6);
+        auto dma = AST::Make<AST::DMA>(@3, $4.operation, $1, $7, $9, $5, $6);
         dma->SetTMA($3);
+        // Handle swizzle from dma_operation_swizzle (only if explicitly specified in syntax)
+        if ($4.swizzle_value > 0) {
+          dma->SetSwizzleValue($4.swizzle_value);
+          dma->SetSwizzleExplicit(true);
+        }
+        // If swizzle is not specified in dma_operation_swizzle, swizzle_explicit remains false
         $$ = dma;
       }
-    | IDENTIFIER ASSIGN tdma dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+    | IDENTIFIER ASSIGN tdma dma_operation_swizzle sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
         symtab.AddSymbol($1, MakeDummyFutureType($5));
-        auto dma = AST::Make<AST::DMA>(@3, $4, $1, $11, $7, $9, $5, $6);
+        auto dma = AST::Make<AST::DMA>(@3, $4.operation, $1, $11, $7, $9, $5, $6);
         dma->SetTMA($3);
+        // Handle swizzle from dma_operation_swizzle (only if explicitly specified in syntax)
+        if ($4.swizzle_value > 0) {
+          dma->SetSwizzleValue($4.swizzle_value);
+          dma->SetSwizzleExplicit(true);
+        }
+        // If swizzle is not specified in dma_operation_swizzle, swizzle_explicit remains false
         $$ = dma;
       }
-    | tdma dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
-        auto dma = AST::Make<AST::DMA>(@1, $2, "", $5, $7, $3, $4);
+    | tdma dma_operation_swizzle sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
+        auto dma = AST::Make<AST::DMA>(@1, $2.operation, "", $5, $7, $3, $4);
         dma->SetTMA($1);
+        // Handle swizzle from dma_operation_swizzle (only if explicitly specified in syntax)
+        if ($2.swizzle_value > 0) {
+          dma->SetSwizzleValue($2.swizzle_value);
+          dma->SetSwizzleExplicit(true);
+        }
+        // If swizzle is not specified in dma_operation_swizzle, swizzle_explicit remains false
         $$ = dma;
       }
-    | tdma dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
-        auto dma = AST::Make<AST::DMA>(@1, $2, "", $9, $5, $7, $3, $4);
+    | tdma dma_operation_swizzle sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+        auto dma = AST::Make<AST::DMA>(@1, $2.operation, "", $9, $5, $7, $3, $4);
         dma->SetTMA($1);
+        // Handle swizzle from dma_operation_swizzle (only if explicitly specified in syntax)
+        if ($2.swizzle_value > 0) {
+          dma->SetSwizzleValue($2.swizzle_value);
+          dma->SetSwizzleExplicit(true);
+        }
+        // If swizzle is not specified in dma_operation_swizzle, swizzle_explicit remains false
         $$ = dma;
       }
     | IDENTIFIER ASSIGN tdma NONE {
@@ -1720,10 +1753,19 @@ dma_stmt
       }
     ;
 
-dma_operation
-    : COPY      { $$ = $1; }
-    | PAD       { $$ = $1; }
-    | TRANSPOSE { $$ = $1; }
+dma_operation_swizzle
+    : COPY {
+        $$ = DMAOperationWithSwizzle($1, 0);  // 0 means no swizzle specified
+      }
+    | COPY DOT SWIZZLE LPAREN swizzle_value RPAREN {
+        $$ = DMAOperationWithSwizzle($1, $5);  // explicit swizzle value
+      }
+    | PAD {
+        $$ = DMAOperationWithSwizzle($1, 0);
+      }
+    | TRANSPOSE {
+        $$ = DMAOperationWithSwizzle($1, 0);
+      }
     ;
 
 dma_config
@@ -1745,6 +1787,23 @@ dma_config
         $$ = tc;
     }
     | /* Empty for no config */ { $$ = nullptr; }
+    ;
+
+swizzle_value
+    : NUM {
+        if ($1 != 128 && $1 != 64 && $1 != 32) {
+          Parser::error(@1, "swizzle value must be 128, 64, or 32");
+          YYERROR;
+        }
+        $$ = $1;
+      }
+    ;
+
+swizzle_config
+    : SWIZZLE LPAREN swizzle_value RPAREN {
+        $$ = AST::Make<SwizzleConfig>($3);
+      }
+    | /* Empty for no swizzle config */ { $$ = nullptr; }
     ;
 
 sync_type
@@ -1844,6 +1903,10 @@ mma_stmt
       }
     | IDENTIFIER ASSIGN MMA LOAD sync_type chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($6, $1, $5);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | IDENTIFIER ASSIGN MMA LOAD DOT SWIZZLE LPAREN swizzle_value RPAREN sync_type chunkat_expr {
+        auto op = AST::Make<AST::MMAOperation>($11, $1, $10, $8);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | MMA mma_exec_method IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {

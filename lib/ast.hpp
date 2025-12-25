@@ -2354,6 +2354,8 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 private:
   bool async;
   bool enforce_tma;
+  int swizzle_value = 128;  // Default to 128B swizzle
+  bool swizzle_explicit = false;  // Whether swizzle was explicitly specified
 
 public:
   // if this DMA is chained with other DMA in pipeline mode
@@ -2406,8 +2408,12 @@ public:
 
   void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
   void SetTMA(bool is_tma = true) { enforce_tma = is_tma; }
+  void SetSwizzleValue(int swizzle) { swizzle_value = swizzle; }
+  void SetSwizzleExplicit(bool explicit_flag = true) { swizzle_explicit = explicit_flag; }
 
   const ptr<DMAConfig>& GetConfig() const { return config; }
+  int GetSwizzleValue() const { return swizzle_value; }
+  bool IsSwizzleExplicit() const { return swizzle_explicit; }
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<DMA>(LOC(), operation, future, CloneP(from), CloneP(to),
@@ -2416,6 +2422,8 @@ public:
     n->chain_from = chain_from;
     n->chain_to = chain_to;
     n->SetTMA(IsTMA());
+    n->SetSwizzleValue(swizzle_value);
+    n->SetSwizzleExplicit(swizzle_explicit);
     return n;
   }
 
@@ -2471,6 +2479,7 @@ public:
     ptr<ChunkAt> ld_expr;
     std::string future;
     bool async;
+    int swizzle_value;  // 128, 64, or 32; default 128
   };
   struct ExecInfo {
     ExecMethod method;
@@ -2492,8 +2501,9 @@ public:
   MMAOperation(const std::string& n, const ptr<Expr>& e,
                BaseType t = BaseType::UNKNOWN)
       : tag(Fill), info(FillInfo{n, e, t}) {}
-  MMAOperation(const ptr<ChunkAt>& e, const std::string& fu, bool a = false)
-      : tag(Load), info(LoadInfo{e, fu, a}) {}
+  MMAOperation(const ptr<ChunkAt>& e, const std::string& fu, bool a = false,
+               int swizzle = 128)
+      : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
                const std::string& r)
       : tag(Exec), info(ExecInfo{m, o, l, r}) {}
@@ -2601,6 +2611,18 @@ public:
     return "";
   }
 
+  int GetSwizzleValue() const {
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    auto l_info = std::get<1>(info);
+    return l_info.swizzle_value;
+  }
+
+  void SetSwizzleValue(int swizzle) {
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    auto l_info = std::get<1>(info);
+    l_info.swizzle_value = swizzle;
+  }
+
   Kind Tag() const { return tag; }
 
 public:
@@ -2612,7 +2634,7 @@ public:
     case Load: {
       auto l_info = std::get<1>(info);
       return Make<MMAOperation>(CloneP(l_info.ld_expr), l_info.future,
-                                l_info.async);
+                                l_info.async, l_info.swizzle_value);
     } break;
     case Exec: {
       auto e_info = std::get<2>(info);

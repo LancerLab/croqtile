@@ -461,6 +461,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "group"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUP, loc);
   "thread"   return Choreo::Parser::make_PBLEVEL(ParallelLevel::THREAD, loc);
   "mutable"  return Choreo::Parser::make_MUTABLE(yytext, loc);
+  "swizzle"  return Choreo::Parser::make_SWIZZLE(yytext, loc);
   "f64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F64(BaseType::F64, loc); }
   "f32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F32(BaseType::F32, loc); }
   "tf32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_TF32(BaseType::TF32, loc); }

@@ -309,6 +309,19 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     return true;
   }
 
+  // Check swizzle: only report error if swizzle is explicitly specified
+  // and we're not in a WGMMA context
+  if (n.IsSwizzleExplicit()) {
+    // For now, we just validate the swizzle value is valid (128, 64, or 32)
+    // The WGMMA context check will be done in codegen phase
+    int swizzle_val = n.GetSwizzleValue();
+    if (swizzle_val != 128 && swizzle_val != 64 && swizzle_val != 32) {
+      Error1(n.LOC(), "Invalid swizzle value: " + std::to_string(swizzle_val) +
+                      ". Must be 128, 64, or 32.");
+      return false;
+    }
+  }
+
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
   if (!isa<FutureType>(ty))
@@ -485,7 +498,37 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: break;
-  case AST::MMAOperation::Load: break;
+  case AST::MMAOperation::Load: {
+    // Check swizzle consistency between DMA and MMA load
+    // Find the corresponding DMA operation that loads to shared memory
+    auto load_from = op.LoadFrom();
+    if (load_from && isa<AST::ChunkAt>(load_from)) {
+      auto ref_sym = load_from->RefSymbol();
+      // Try to find a DMA that writes to this symbol
+      // This is a simplified check - in a full implementation, we'd track all DMAs
+      // For now, we just validate that the swizzle value is valid
+      int mma_swizzle = op.GetSwizzleValue();
+      if (mma_swizzle != 128 && mma_swizzle != 64 && mma_swizzle != 32) {
+        Error1(n.LOC(), "Invalid swizzle value in MMA load: " +
+                        std::to_string(mma_swizzle) +
+                        ". Must be 128, 64, or 32.");
+        return false;
+      }
+
+      // Provide guidance on TILE_K constraints
+      // Note: These are recommendations, not enforced constraints
+      // Users should set TILE_K accordingly:
+      // - swizzle(128): TILE_K = 64 (default)
+      // - swizzle(64):  TILE_K = 32
+      // - swizzle(32):  TILE_K = 16
+      if (mma_swizzle == 64) {
+        VST_DEBUG(dbgs() << "MMA load with swizzle(64): Consider setting TILE_K = 32 for optimal performance\n");
+      } else if (mma_swizzle == 32) {
+        VST_DEBUG(dbgs() << "MMA load with swizzle(32): Consider setting TILE_K = 16 for optimal performance\n");
+      }
+    }
+    break;
+  }
   case AST::MMAOperation::Exec: {
     auto& a_sym = op.ExecOperand(1);
     auto& b_sym = op.ExecOperand(2);

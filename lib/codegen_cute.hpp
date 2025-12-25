@@ -473,7 +473,7 @@ private:
                 bool is_host = false, const std::string& offset = "",
                 const std::string& strides = "",
                 const std::vector<size_t>& transp = {},
-                bool use_wgmma_layout = false) const;
+                bool use_wgmma_layout = false, int swizzle_value = 128) const;
   void EmitTMAConfiguration(AST::ParallelBy* pb);
   const std::optional<std::string> GetTMAName(AST::DMA&) const;
 
