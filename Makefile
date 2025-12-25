@@ -161,7 +161,7 @@ $(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) | $(BUILD_DIR)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 $(COPP_BIN): $(TOOLS_DIR)/copp/choreo_preprocess.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
-	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
+	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -static-libstdc++ -o $@
 
 choreo_header.inc : $(RT_DIR)/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@

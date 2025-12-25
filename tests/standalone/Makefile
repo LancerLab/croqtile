@@ -3,7 +3,7 @@ CXX = g++
 NV_CXX = nvcc
 CXXFLAGS = -Wall -g -std=c++17
 CUDA_SYS_INCLUDES="-I/usr/local/cuda/include"
-NV_FLAGS = -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas $(CUDA_SYS_INCLUDES) --expt-relaxed-constexpr
+NV_FLAGS = -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas $(CUDA_SYS_INCLUDES) --expt-relaxed-constexpr -static-libstdc++
 
 ROOT=../../
 GTEST_DIR = $(ROOT)/extern/gtest/
@@ -33,7 +33,7 @@ $(GTEST_DIR)/libgtest_main.a: $(GTEST_DIR)/googletest/src/gtest_main.cc
 	ar -rv $@ $(GTEST_DIR)/gtest_main.o
 
 %.test: %.o $(GTEST_LIBS)
-	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread
+	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread -static-libstdc++
 
 # Pattern rule for object files
 %.o: %.cpp $(HEADER_FILES)
