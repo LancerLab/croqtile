@@ -202,7 +202,7 @@ if ! which not.sh &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.21"
+echo "        Choreo SimpleLit - v0.22"
 echo "---------------------------------------"
 echo ""
 
@@ -266,7 +266,7 @@ check_specific() {
   expect_skip=
 
   set_clear tst_targets
-  set_add tst_targets "gcu210" "gcu300" "gcu400" "sm_86"
+  set_add tst_targets "gcu210" "gcu300" "gcu400" "sm_86" "sm_90a"
 
   # Extract expect_fail and expect_skip with proper comment pattern
   if [[ -n "$comment_pattern" ]]; then
@@ -310,18 +310,22 @@ check_specific() {
   # Process targets
   if [ ! -z "${expect_gcu_sim4}" ]; then set_add tst_targets "gcusim400"; fi
   if [ ! -z "${expect_gcu_sim5}" ]; then set_add tst_targets "gcusim500"; fi
-  if [[ "${tgts}" == *"GCU400"* ]]; then set_add tst_targets "gcu400"; fi
-  if [[ "${tgts}" == *"GCU300"* ]]; then set_add tst_targets "gcu300"; fi
-  if [[ "${tgts}" == *"GCU210"* ]]; then set_add tst_targets "gcu210"; fi
-  if [[ "${tgts}" == *"GCUALL"* ]]; then
-    set_add tst_targets "gcu210" "gcu300" "gcu400"
-  fi
-  if [[ "${tgts}" == *"GPU"* ]]; then
-    set_add tst_targets "sm_86";
-  fi
+  for tgt in ${tgts}; do
+    if [[ "${tgt}" == "GCU400" ]]; then set_add tst_targets "gcu400";
+    elif [[ "${tgt}" == "GCU300" ]]; then set_add tst_targets "gcu300";
+    elif [[ "${tgt}" == "GCU210" ]]; then set_add tst_targets "gcu210";
+    elif [[ "${tgt}" == "SM_90" ]]; then set_add tst_targets "sm_90";
+    elif [[ "${tgt}" == "SM_90A" ]]; then set_add tst_targets "sm_90a";
+    elif [[ "${tgt}" == "SM_"* ]]; then set_add tst_targets "$(tolower ${tgt})";
+    elif [[ "${tgt}" == "GCUALL" ]]; then
+      set_add tst_targets "gcu210" "gcu300" "gcu400"
+    elif [[ "${tgt}" == "GPU" ]]; then
+      set_add tst_targets "sm_86" "sm_90a"
+    fi
+  done
 
   if [ -z "${tgts}" ]; then
-    set_add tst_targets "gcu210" "gcu300" "gcu400" "gpu"
+    set_add tst_targets "gcu210" "gcu300" "gcu400" "sm_86" "sm_90a"
   fi
 
   if set_empty tst_targets; then
@@ -352,18 +356,50 @@ is_dynshape_supported=0
 gcu_sim_lib=
 gcu_sim_arch=
 
-detect_device_features() {
-  if command -v nvidia-smi &> /dev/null; then
+gpu_detect() {
+  if command -v nvidia-smi >/dev/null 2>&1; then
     # GPU device is available
-    if nvidia-smi > /dev/null 2>&1; then
-      device_type="gpu"
-      cuda_arch="sm_86" # To figure out more precisely
-      mach=${cuda_arch}
-      return
-    fi
-    # or else does not find a valid gpu device
-  fi
+    while IFS=',' read -r name cap; do
+      name=$(echo "$name" | xargs)
+      cap=$(echo "$cap" | xargs)
 
+      # Defensive parsing
+      if [ -z "$cap" ]; then
+        cuda_arch="none"
+        continue;
+      fi
+
+      major=${cap%%.*}
+      minor=${cap##*.}
+
+      # Ignore pre-sm_70
+      if [ "$major" -lt 7 ]; then
+        cuda_arch="none"
+        continue;
+      fi
+
+      # Hopper special case
+      if [ "$major" -eq 9 ] && [ "$minor" -eq 0 ]; then
+        if echo "$name" | grep -qi "\(GH200\|H800\|H20\)"; then
+          cuda_arch="sm_90a" # enforce sm_90a now
+        else
+          cuda_arch="sm_90"
+        fi
+      else
+        cuda_arch="sm_${major}${minor}"
+      fi
+      break;
+    done < <(nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null)
+
+    # or else does not find a valid gpu device
+    if [ "$cuda_arch" != "none" ]; then
+      device_type="gpu"
+      mach=${cuda_arch}
+    fi
+  fi
+}
+
+gcu_detect() {
   local _gcu_dstr="$(lspci | grep -E '(Enflame|Tencent)' | head -1)"
   case "${_gcu_dstr}" in
     *S60G*)
@@ -389,8 +425,13 @@ detect_device_features() {
     device_type="gcu"
     mach=${gcu_arch}
   fi
+}
 
-  if [ "$device_type" == "none" ]; then
+hardware_detect() {
+  if [[ "${device_type}" == "none" ]]; then gpu_detect; fi
+  if [[ "${device_type}" == "none" ]]; then gcu_detect; fi
+
+  if [[ "{$device_type}" == "none" ]]; then
     echo "can not determine device type."
     exit 1
   fi
@@ -629,7 +670,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # detect the device supported features
-detect_device_features
+hardware_detect
 detect_simulator_features
 initialize_counters
 
@@ -695,6 +736,10 @@ on_ctrl_c() {
 }
 
 trap on_ctrl_c SIGINT
+
+tolower() {
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
 
 toupper() {
   echo "$1" | tr '[:lower:]' '[:upper:]'

@@ -101,7 +101,7 @@ test: build-with-cmake-ninja
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
 test-debug: debug
-	$(LIT) -l tests && $(MAKE) standalone_test
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
 test-release: release
 	$(LIT) tests && $(MAKE) standalone_test
