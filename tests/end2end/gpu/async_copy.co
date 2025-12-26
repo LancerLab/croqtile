@@ -16,13 +16,13 @@ __co__ auto dma_copy(s32 [M, 17, 32] input) {
 __co__ auto dma_add(s32 [M, 17, 32] in0, s32 [6, N, 32] in1) {
   s32 [in0.span] output;
 
-  parallel by 1 : group {
+  parallel q0 by in1.span(1) : group {
     f0 = dma.copy.async in0 => shared;
     f1 = dma.copy.async in1 => shared;
     wait f0, f1;
     shared s32 [f0.span] out;
     foreach x in [in1.span(0)]
-      parallel {q0, q1} by [in1.span(1), in1.span(2)]
+      parallel {q1} by [in1.span(2)]
         out.at(x, q0, q1) = f0.data.at(x, q0, q1) + f1.data.at(x, q0, q1);
     dma.copy out => output;
   }
@@ -33,13 +33,13 @@ __co__ auto dma_add(s32 [M, 17, 32] in0, s32 [6, N, 32] in1) {
 __co__ auto dma_add1(s32 [M, 17, 32] in0, s32 [6, N, 32] in1) {
   s32 [in0.span] output;
 
-  parallel by 1 : group {
+  parallel q0 by in1.span(1) : group {
     f0 = dma.copy.async in0 => shared;
     f1 = dma.copy.async in1 => shared;
     wait f1, f0; // wait f1 first
     shared s32 [f0.span] out;
     foreach x in [in1.span(0)]
-      parallel {q0, q1} by [in1.span(1), in1.span(2)]
+      parallel {q1} by [in1.span(2)]
         out.at(x, q0, q1) = f0.data.at(x, q0, q1) + f1.data.at(x, q0, q1);
     dma.copy out => output;
   }

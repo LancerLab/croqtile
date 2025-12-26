@@ -1,0 +1,59 @@
+// RUN: choreo %s -t cute -arch=sm_90a 2>&1 | FileCheck %s
+
+// Test that total thread dimension (product of all dimensions) is checked,
+// not just the leading dimension. The total must be a multiple of 32 for 'group'
+// and a multiple of 128 for 'group-4'.
+
+__co__ void test_valid_8x4() {
+  parallel by 1 : block {
+    parallel by 1 : group {
+      parallel {x, y} by [8, 4] : thread {
+        // 8 * 4 = 32, should be valid
+      }
+    }
+  }
+}
+
+__co__ void test_valid_4x8() {
+  parallel by 1 : block {
+    parallel by 1 : group {
+      parallel {x, y} by [4, 8] : thread {
+        // 4 * 8 = 32, should be valid
+      }
+    }
+  }
+}
+
+__co__ void test_valid_2x16() {
+  parallel by 1 : block {
+    parallel by 1 : group {
+      parallel {x, y} by [2, 16] : thread {
+        // 2 * 16 = 32, should be valid
+      }
+    }
+  }
+}
+
+__co__ void test_invalid_8x3() {
+  parallel by 1 : block {
+    parallel by 1 : group {
+      parallel {x, y} by [8, 3] : thread {
+        // 8 * 3 = 24, should be invalid (not multiple of 32)
+      }
+    }
+  }
+}
+
+__co__ void test_invalid_4x7() {
+  parallel by 1 : block {
+    parallel by 1 : group {
+      parallel {x, y} by [4, 7] : thread {
+        // 4 * 7 = 28, should be invalid (not multiple of 32)
+      }
+    }
+  }
+}
+
+// CHECK: error: The total thread dimension must be a multiple of 32 when 'group' exists for SM_90A.
+// CHECK: error: The total thread dimension must be a multiple of 32 when 'group' exists for SM_90A.
+

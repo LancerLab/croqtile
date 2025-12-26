@@ -111,12 +111,17 @@ public:
 
   void CheckPBSettings(AST::ParallelBy* pb) {
     if (pb->GetLevel() == ParallelLevel::THREAD) {
-      auto bv = pb->BoundValues().back();
+      // Calculate total thread dimension (product of all dimensions)
+      auto total_threads = sbe::nu(1);
+      for (auto bv : pb->BoundValues()) {
+        total_threads = (total_threads * bv)->Normalize();
+      }
+
       auto ppb = cgi.GetPBTree(fname).GetParent(pb);
       assert(ppb->GetLevel() == ParallelLevel::GROUP);
-      if (ppb->IsEnforced() && !sbe::ceq(bv, sbe::nu(32)))
+      if (ppb->IsEnforced() && !sbe::ceq(total_threads, sbe::nu(32)))
         Error1(pb->LOC(),
-               "The leading dimension must be 32 when 'group' exists for " +
+               "The total thread dimension must be a multiple of 32 when 'group' exists for " +
                    STR(CCtx().GetArch()) + ".");
 
       if (TargetHasLevel(ParallelLevel::GROUPx4)) {
@@ -126,10 +131,10 @@ public:
           Error1(ppb->LOC(), "explicit 'group' inside the 'group-4' "
                              "parallel-by is not supported by " +
                                  STR(CCtx().GetArch()) + ".");
-        else if (gppb->IsEnforced() && !sbe::ceq(bv, sbe::nu(128)))
+        else if (gppb->IsEnforced() && !sbe::ceq(total_threads, sbe::nu(128)))
           Error1(
               pb->LOC(),
-              "The leading dimension must be 128 when 'group-4' exists for " +
+              "The total thread dimension must be a multiple of 128 when 'group-4' exists for " +
                   STR(CCtx().GetArch()) + ".");
       }
     }

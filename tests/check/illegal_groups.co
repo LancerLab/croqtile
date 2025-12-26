@@ -11,8 +11,8 @@ __co__ void foo(f32 [64, 32] a) {
   }
 }
 
-// CHECK: error: The leading dimension must be 128 when 'group-4' exists for SM_90A.
-// CHECK: error: The leading dimension must be 32 when 'group' exists for SM_90A.
+// CHECK: error: The total thread dimension must be a multiple of 128 when 'group-4' exists for SM_90A.
+// CHECK: error: The total thread dimension must be a multiple of 32 when 'group' exists for SM_90A.
 
 __co__ void bar() {
   parallel by 1 {
@@ -24,4 +24,4 @@ __co__ void bar() {
 }
 
 // CHECK: error: explicit 'group' inside the 'group-4' parallel-by is not supported by SM_90A.
-// CHECK: The leading dimension must be 128 when 'group-4' exists for SM_90A.
+// CHECK: The total thread dimension must be a multiple of 128 when 'group-4' exists for SM_90A.
