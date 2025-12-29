@@ -1,6 +1,6 @@
-#define M 256
-#define N 256
-#define K 256
+#define M 256 
+#define N 256 
+#define K 256 
 
 __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
   f16 [M, N] output{0.0f};
@@ -48,7 +48,7 @@ int main() {
     for (size_t j = 0; j < res.shape()[1]; ++j) {
       __half ref = 0.0f;
       for (size_t k = 0; k < lhs.shape()[1]; ++k)
-        ref += lhs[i][k] * rhs[k][j];
+        ref += lhs[i][k] * rhs[j][k];
       auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
       if (delta >= tolerance) {
         std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";

@@ -2000,7 +2000,18 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
          << ".get_atom())->token() = ((TMAAtom*)" << future_name
          << ".get_atom())->barrier().arrive();\n";
       ds << d_indent << "}\n";
-      ds << d_indent << future_name << ".trigger();\n";
+
+      // For async tma.copy.async, trigger the future
+      // For sync tma.copy, directly wait and set_nowait
+      if (fty->IsAsync()) {
+        ds << d_indent << future_name << ".trigger();\n";
+      } else {
+        // Synchronous tma.copy: wait immediately
+        ds << d_indent << "((TMAAtom*)" << future_name
+           << ".get_atom())->barrier().wait(std::move(((TMAAtom*)"
+           << future_name << ".get_atom())->token()));\n";
+        ds << d_indent << future_name << ".set_nowait();\n";
+      }
     } else if ((tsto == Storage::GLOBAL || tsto == Storage::DEFAULT) &&
                fsto == Storage::SHARED) {
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
