@@ -640,6 +640,7 @@ public:
     if (!MemDefaultAligned()) return 1;
     switch (arch) {
     case TargetArch::GCU20:
+    case TargetArch::GCU21:
     case TargetArch::GCU3:
     case TargetArch::GCU4:
     case TargetArch::GCU5: {
