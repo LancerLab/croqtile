@@ -1075,7 +1075,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
           ds << d_indent << "auto " << sym << " = (" << bts << "*)&"
              << device_fn << "__runtime_shared_buffer__;\n";
         else
-          ds << d_indent << type_modifiers << bts << " " << sym << "["
+          ds << d_indent << type_modifiers << "alignas("
+             << n.GetNote("alignment") << ") " << bts << " " << sym << "["
              << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;
       }
@@ -1448,17 +1449,27 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       cur_spm_size = cur_spm_size + cur_ring_offset;
       cur_spm_size = cur_spm_size->Normalize();
       EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
+      Note(n.LOC(),
+           "In the current kernel `" + device_fn +
+               "`, cudaFuncAttributeMaxDynamicSharedMemorySize is set, cause "
+               "shared memory usage has exceeded the default limit 48KB.");
     } else {
       // add the size of static shared
       auto mri = FCtx(fname).GetStaticMemReuseInfo(dev_name);
       if (mri) {
         // 48KB is the largest capacity that static shared memory supports.
         if (mri->infos[Storage::SHARED].spm_size > 48 * 1024) {
-          set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
           cur_ring_offset = sbe::nu(mri->infos[Storage::SHARED].spm_size);
           cur_spm_size = cur_spm_size + cur_ring_offset;
           cur_spm_size = cur_spm_size->Normalize();
           EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
+          Note(
+              n.LOC(),
+              "In the current kernel `" + device_fn +
+                  "`, cudaFuncAttributeMaxDynamicSharedMemorySize is set to `" +
+                  ValueSTR(cur_spm_size) + "` bytes, " +
+                  "cause shared memory usage" +
+                  " has exceeded the default limit 48KB.");
         }
       }
     }

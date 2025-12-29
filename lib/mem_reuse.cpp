@@ -107,6 +107,9 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             Storage::SHARED);
         shared_spm->SetType(ssty);
         shared_spm->AddNote("spm");
+        shared_spm->AddNote("alignment",
+                            std::to_string(CCtx().GetMemoryAlignment(
+                                CCtx().GetArch(), Storage::SHARED)));
         pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
         SSTab().DefineSymbol(DFCtx().shared_spm_name, ssty);
         VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
@@ -124,6 +127,9 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             Storage::LOCAL);
         local_spm->SetType(lsty);
         local_spm->AddNote("spm");
+        local_spm->AddNote("alignment",
+                           std::to_string(CCtx().GetMemoryAlignment(
+                               CCtx().GetArch(), Storage::LOCAL)));
         pb->stmts->values.insert(pb->stmts->values.begin(), local_spm);
         SSTab().DefineSymbol(DFCtx().local_spm_name, lsty);
         VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
@@ -332,7 +338,9 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
   auto mri = FCtx(co_func_name).SetStaticMemReuseInfo(df_name);
 
   if (!local_chunks.empty()) {
-    HeapSimulator::Result local_result = simulator.Allocate(local_chunks, 512);
+    HeapSimulator::Result local_result = simulator.Allocate(
+        local_chunks,
+        CCtx().GetMemoryAlignment(CCtx().GetArch(), Storage::LOCAL));
     assert(ValidateResult(local_result, local_chunks));
     ctx.local_spm_size = local_result.heap_size;
     mri->infos[Storage::LOCAL].spm_size = ctx.local_spm_size;
@@ -342,9 +350,9 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
                      << local_result.heap_size << " bytes\n");
   }
   if (!shared_chunks.empty()) {
-    // TODO: better: 512 for topscc, 128 for Cuda?
-    HeapSimulator::Result shared_result =
-        simulator.Allocate(shared_chunks, 512);
+    HeapSimulator::Result shared_result = simulator.Allocate(
+        shared_chunks,
+        CCtx().GetMemoryAlignment(CCtx().GetArch(), Storage::SHARED));
     assert(ValidateResult(shared_result, shared_chunks));
     ctx.shared_spm_size = shared_result.heap_size;
     mri->infos[Storage::SHARED].spm_size = ctx.shared_spm_size;
@@ -401,6 +409,8 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
 
   n.AddNote("reuse", spm_name);
   n.AddNote("offset", offset);
+  n.AddNote("alignment",
+            std::to_string(CCtx().GetMemoryAlignment(CCtx().GetArch(), sto)));
 }
 
 bool MemReuse::RunOnProgramImpl(AST::Node& root) {

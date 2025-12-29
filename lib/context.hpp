@@ -445,8 +445,9 @@ private:
   bool vectorize = false;         // enable loop vectorization
   size_t max_local_mem_capacity =
       0; // max local memory capacity per thread (0: use default)
-  bool inhibit_warning = false;  // Inhibit all warning messages.
-  bool warning_as_error = false; // Make all warnings into errors.
+  bool mem_default_aligned = true; // alignment is set by default in mem reuse.
+  bool inhibit_warning = false;    // Inhibit all warning messages.
+  bool warning_as_error = false;   // Make all warnings into errors.
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -576,7 +577,6 @@ public:
       switch (sto) {
       case Storage::LOCAL: return max_local > 0 ? max_local : 1024; // 1KB
       case Storage::SHARED: return 48ull * 1024;                    // 48KB
-      case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024;       // 8GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
@@ -584,7 +584,6 @@ public:
       switch (sto) {
       case Storage::LOCAL: return max_local > 0 ? max_local : 1024; // 1KB
       case Storage::SHARED: return 64ull * 1024;                    // 64KB
-      case Storage::GLOBAL: return 8ull * 1024 * 1024 * 1024;       // 8GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
@@ -592,7 +591,6 @@ public:
       switch (sto) {
       case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
       case Storage::SHARED: return 164ull * 1024;                   // 164KB
-      case Storage::GLOBAL: return 64ull * 1024 * 1024 * 1024;      // 64GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
@@ -601,7 +599,6 @@ public:
       switch (sto) {
       case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
       case Storage::SHARED: return 100ull * 1024;                   // 100KB
-      case Storage::GLOBAL: return 32ull * 1024 * 1024 * 1024;      // 32GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
@@ -609,7 +606,6 @@ public:
       switch (sto) {
       case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
       case Storage::SHARED: return 164ull * 1024;                   // 164KB
-      case Storage::GLOBAL: return 80ull * 1024 * 1024 * 1024;      // 80GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
@@ -617,7 +613,6 @@ public:
       switch (sto) {
       case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
       case Storage::SHARED: return 164ull * 1024;                   // 164KB
-      case Storage::GLOBAL: return 80ull * 1024 * 1024 * 1024;      // 80GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
@@ -625,7 +620,6 @@ public:
       switch (sto) {
       case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
       case Storage::SHARED: return 228ull * 1024;                   // 228KB
-      case Storage::GLOBAL: return 192ull * 1024 * 1024 * 1024;     // 192GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
@@ -633,13 +627,52 @@ public:
       switch (sto) {
       case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
       case Storage::SHARED: return 300ull * 1024;                   // 300KB
-      case Storage::GLOBAL: return 256ull * 1024 * 1024 * 1024;     // 256GB
       default: choreo_unreachable("Unsupported mem level.");
       }
 
     default: choreo_unreachable("Unsupported target arch.");
     }
     return 0;
+  }
+
+  // return memory alignment in byte. Used in memory reuse pass.
+  size_t GetMemoryAlignment(TargetArch arch, Storage sto) const {
+    if (!MemDefaultAligned()) return 1;
+    switch (arch) {
+    case TargetArch::GCU20:
+    case TargetArch::GCU3:
+    case TargetArch::GCU4:
+    case TargetArch::GCU5: {
+      switch (sto) {
+      case Storage::LOCAL:
+      case Storage::SHARED: return 512;
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+    }
+    case TargetArch::GPU:
+    case TargetArch::SM_70:
+    case TargetArch::SM_75:
+    case TargetArch::SM_80:
+    case TargetArch::SM_86:
+    case TargetArch::SM_89: {
+      switch (sto) {
+      case Storage::LOCAL: return 16;
+      case Storage::SHARED: return 16;
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+    }
+    case TargetArch::SM_90:
+    case TargetArch::SM_90A:
+    case TargetArch::SM_100:
+    case TargetArch::SM_120: {
+      switch (sto) {
+      case Storage::LOCAL: return 16;
+      case Storage::SHARED: return 32;
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+    }
+    default: choreo_unreachable("Unsupported target arch.");
+    }
   }
 
   size_t GetMinGroupDim() const {
@@ -740,6 +773,7 @@ public:
   bool NoVectorize() const { return no_vectorize; }
   bool Vectorize() const { return vectorize; }
   size_t MaxLocalMemCapacity() const { return max_local_mem_capacity; }
+  bool MemDefaultAligned() const { return mem_default_aligned; }
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
 
@@ -768,6 +802,7 @@ public:
   void SetMaxLocalMemCapacityPerThread(size_t sz) {
     max_local_mem_capacity = sz;
   }
+  void SetMemDefaultAligned(bool value) { mem_default_aligned = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
 

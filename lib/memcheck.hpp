@@ -41,7 +41,7 @@ private:
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
 
   CtMemUsageMap mem_usage_limit;
-  std::unordered_set<Storage> valid_storage_type;
+  std::unordered_set<Storage> tocheck_storage;
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
@@ -103,7 +103,7 @@ private:
 
   // Check whether the ct memory usage at each level exceeds limits
   void CheckCtMemUsage(AST::Node& n) {
-    for (const auto& sto : valid_storage_type) {
+    for (const auto& sto : tocheck_storage) {
       if (ct_tot_mem_usage[sto] > mem_usage_limit[sto]) {
         // get the variables which lead to out of bound
         std::ostringstream oss;
@@ -226,9 +226,14 @@ public:
         (CCtx().GetTarget() == CompileTarget::Topscc) ||
         (CCtx().GetTarget() == CompileTarget::CUDA) ||
         (CCtx().GetTarget() == CompileTarget::Cute)) {
-      valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
+      // for cuda and cute backend, ignore global memory cap check.
+      if (CCtx().GetTarget() == CompileTarget::CUDA ||
+          CCtx().GetTarget() == CompileTarget::Cute)
+        tocheck_storage = {Storage::LOCAL, Storage::SHARED};
+      else
+        tocheck_storage = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
       // initialize with ct_tot_mem_usage
-      for (const auto& sto : valid_storage_type) {
+      for (const auto& sto : tocheck_storage) {
         ct_tot_mem_usage[sto] = 0;
         /*
         TODO:
@@ -256,10 +261,10 @@ public:
     auto sty = dyn_cast<SpannedType>(GetSymbolType(n.name_str));
     if (!sty) return true;
     auto sto = sty->GetStorage();
-    if (valid_storage_type.count(sto) == 0)
+    if (tocheck_storage.count(sto) == 0)
       return true; // only check valid storage types
-    assert(valid_storage_type.count(sto) &&
-           "Only support Storage types in `valid_storage_type`!");
+    assert(tocheck_storage.count(sto) &&
+           "Only support Storage types in `tocheck_storage`!");
     if (n.HasNote("offset")) {
       VST_DEBUG({
         dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
@@ -283,8 +288,9 @@ public:
                        << sty->ByteSizeExpression(false) << " bytes.\n");
       rt_mem_usage_list.top()[sto].push_back(byte_size);
       rt_tot_mem_usage[sto].push_back(byte_size);
-      rt_mem_usage_check_list.push_back(std::make_tuple(
-          SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto], sto));
+      if (mem_usage_limit.count(sto))
+        rt_mem_usage_check_list.push_back(std::make_tuple(
+            SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit.at(sto), sto));
     } else {
       // compile time usage
       auto size = sty->ByteSize() * array_dim_product;
@@ -321,9 +327,10 @@ public:
         std::string byte_size = sty->ByteSizeExpression(true);
         rt_mem_usage_list.top()[func_param_sto].push_back(byte_size);
         rt_tot_mem_usage[func_param_sto].push_back(byte_size);
-        rt_mem_usage_check_list.push_back(
-            std::make_tuple(SumUpCtRtUsage(func_param_sto), p->LOC(),
-                            mem_usage_limit[func_param_sto], func_param_sto));
+        if (mem_usage_limit.count(func_param_sto))
+          rt_mem_usage_check_list.push_back(std::make_tuple(
+              SumUpCtRtUsage(func_param_sto), p->LOC(),
+              mem_usage_limit.at(func_param_sto), func_param_sto));
         VST_DEBUG(dbgs() << "[MemUsage] "
                          << "Function parameter `" << name << "`("
                          << __internal__::GetStringFrom(func_param_sto)

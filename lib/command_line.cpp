@@ -162,6 +162,9 @@ Option<size_t> max_local_mem_capacity(
     OptionKind::Hidden, "--max-local-mem-capacity", "-fmax-local", 0,
     "Set the max local memory capacity (in bytes) per thread. 0 means use "
     "default value.");
+Option<bool> mem_default_aligned(OptionKind::Hidden, "--mem-default-aligned",
+                                 "-fmem_aligned", true,
+                                 "Use the default alignment in memory reuse.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -330,6 +333,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
+  CCtx().SetMemDefaultAligned(mem_default_aligned.GetValue());
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
 
