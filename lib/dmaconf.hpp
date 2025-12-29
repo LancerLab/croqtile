@@ -64,7 +64,7 @@ struct TransposeConfig final : public DMAConfig,
 
 struct SwizzleConfig final : public DMAConfig,
                              public TypeIDProvider<SwizzleConfig> {
-  int swizzle_value;  // 128, 64, or 32
+  int swizzle_value; // 128, 64, or 32
 
   explicit SwizzleConfig(int val = 128) : swizzle_value(val) {}
 

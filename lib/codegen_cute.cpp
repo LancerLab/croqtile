@@ -200,14 +200,16 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
     // Select swizzle layout based on swizzle value
     std::string swizzle_layout;
     switch (swizzle_value) {
-      case 32:  swizzle_layout = "cute::SM90::GMMA::Layout_K_SW32_Atom"; break;
-      case 64:  swizzle_layout = "cute::SM90::GMMA::Layout_K_SW64_Atom"; break;
-      case 128: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
-      default:  swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
+    case 32: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW32_Atom"; break;
+    case 64: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW64_Atom"; break;
+    case 128: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
+    default: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
     }
     tsr_decl << indent << "auto " << lyt_name
              << " = "
-                "cute::tile_to_shape(" << swizzle_layout << "<__"
+                "cute::tile_to_shape("
+             << swizzle_layout
+             << "<__"
                 "half>{}, "
              << shp_name << ");\n";
   } else {
@@ -1864,7 +1866,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                               t_sty->GetStorage() == Storage::SHARED &&
                               t_sty->ElementType() == BaseType::F16;
 
-    // Use swizzle value only if explicitly specified, otherwise use 0 (no swizzle)
+    // Use swizzle value only if explicitly specified, otherwise use 0 (no
+    // swizzle)
     int swizzle_value = n.IsSwizzleExplicit() ? n.GetSwizzleValue() : 0;
 
     const auto f_mds = GenTensorDecl(
@@ -2071,13 +2074,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       int swizzle_val = op.GetSwizzleValue();
       std::string swizzle_enum;
       switch (swizzle_val) {
-        case 32:  swizzle_enum = "WGMMA_Swizzle::B32"; break;
-        case 64:  swizzle_enum = "WGMMA_Swizzle::B64"; break;
-        case 128: swizzle_enum = "WGMMA_Swizzle::B128"; break;
-        default:  swizzle_enum = "WGMMA_Swizzle::B128"; break;
+      case 32: swizzle_enum = "WGMMA_Swizzle::B32"; break;
+      case 64: swizzle_enum = "WGMMA_Swizzle::B64"; break;
+      case 128: swizzle_enum = "WGMMA_Swizzle::B128"; break;
+      default: swizzle_enum = "WGMMA_Swizzle::B128"; break;
       }
       ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
-         << major_order << ", " << swizzle_enum << ">(" << sym << "_smem_ptr);\n";
+         << major_order << ", " << swizzle_enum << ">(" << sym
+         << "_smem_ptr);\n";
     } break;
     case AST::MMAOperation::Exec: {
       // Detect memory layout based on MMA execution method

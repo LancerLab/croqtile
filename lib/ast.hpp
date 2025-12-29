@@ -2355,8 +2355,8 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 private:
   bool async;
   bool enforce_tma;
-  int swizzle_value = 128;  // Default to 128B swizzle
-  bool swizzle_explicit = false;  // Whether swizzle was explicitly specified
+  int swizzle_value = 128;       // Default to 128B swizzle
+  bool swizzle_explicit = false; // Whether swizzle was explicitly specified
 
 public:
   // if this DMA is chained with other DMA in pipeline mode
@@ -2410,7 +2410,9 @@ public:
   void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
   void SetTMA(bool is_tma = true) { enforce_tma = is_tma; }
   void SetSwizzleValue(int swizzle) { swizzle_value = swizzle; }
-  void SetSwizzleExplicit(bool explicit_flag = true) { swizzle_explicit = explicit_flag; }
+  void SetSwizzleExplicit(bool explicit_flag = true) {
+    swizzle_explicit = explicit_flag;
+  }
 
   const ptr<DMAConfig>& GetConfig() const { return config; }
   int GetSwizzleValue() const { return swizzle_value; }
@@ -2480,7 +2482,7 @@ public:
     ptr<ChunkAt> ld_expr;
     std::string future;
     bool async;
-    int swizzle_value;  // 128, 64, or 32; default 128
+    int swizzle_value; // 128, 64, or 32; default 128
   };
   struct ExecInfo {
     ExecMethod method;

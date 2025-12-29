@@ -317,7 +317,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     int swizzle_val = n.GetSwizzleValue();
     if (swizzle_val != 128 && swizzle_val != 64 && swizzle_val != 32) {
       Error1(n.LOC(), "Invalid swizzle value: " + std::to_string(swizzle_val) +
-                      ". Must be 128, 64, or 32.");
+                          ". Must be 128, 64, or 32.");
       return false;
     }
   }
@@ -505,13 +505,13 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
     if (load_from && isa<AST::ChunkAt>(load_from)) {
       auto ref_sym = load_from->RefSymbol();
       // Try to find a DMA that writes to this symbol
-      // This is a simplified check - in a full implementation, we'd track all DMAs
-      // For now, we just validate that the swizzle value is valid
+      // This is a simplified check - in a full implementation, we'd track all
+      // DMAs For now, we just validate that the swizzle value is valid
       int mma_swizzle = op.GetSwizzleValue();
       if (mma_swizzle != 128 && mma_swizzle != 64 && mma_swizzle != 32) {
         Error1(n.LOC(), "Invalid swizzle value in MMA load: " +
-                        std::to_string(mma_swizzle) +
-                        ". Must be 128, 64, or 32.");
+                            std::to_string(mma_swizzle) +
+                            ". Must be 128, 64, or 32.");
         return false;
       }
 
@@ -522,9 +522,11 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       // - swizzle(64):  TILE_K = 32
       // - swizzle(32):  TILE_K = 16
       if (mma_swizzle == 64) {
-        VST_DEBUG(dbgs() << "MMA load with swizzle(64): Consider setting TILE_K = 32 for optimal performance\n");
+        VST_DEBUG(dbgs() << "MMA load with swizzle(64): Consider setting "
+                            "TILE_K = 32 for optimal performance\n");
       } else if (mma_swizzle == 32) {
-        VST_DEBUG(dbgs() << "MMA load with swizzle(32): Consider setting TILE_K = 16 for optimal performance\n");
+        VST_DEBUG(dbgs() << "MMA load with swizzle(32): Consider setting "
+                            "TILE_K = 16 for optimal performance\n");
       }
     }
     break;
