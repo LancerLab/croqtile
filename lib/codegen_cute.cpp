@@ -2196,8 +2196,35 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent
            << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
            << ", ";
-        ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty)
-           << ", nvcuda::wmma::row_major> " << sym << "_frag;\n";
+        std::string wmma_major;
+        if (ssmi.frag == MMAInfo::FRAG_A) {
+          switch (ssmi.method) {
+          case AST::MMAOperation::ExecMethod::ROW_COL:
+          case AST::MMAOperation::ExecMethod::ROW_ROW:
+            wmma_major = "nvcuda::wmma::row_major";
+            break;
+          case AST::MMAOperation::ExecMethod::COL_COL:
+          case AST::MMAOperation::ExecMethod::COL_ROW:
+            wmma_major = "nvcuda::wmma::row_major";
+            break;
+          default: choreo_unreachable("invalid MMA execution method");
+          }
+        } else {
+          switch (ssmi.method) {
+          case AST::MMAOperation::ExecMethod::ROW_COL:
+          case AST::MMAOperation::ExecMethod::COL_COL:
+            wmma_major = "nvcuda::wmma::row_major";
+            break;
+          case AST::MMAOperation::ExecMethod::ROW_ROW:
+          case AST::MMAOperation::ExecMethod::COL_ROW:
+            wmma_major = "nvcuda::wmma::col_major";
+            break;
+          default: choreo_unreachable("invalid MMA execution method");
+          }
+        }
+        ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << ", "
+           << wmma_major << "> " << sym << "_frag;\n";
+
         ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
            << ExprSTR(op.LoadFrom(), false) << ", "
            << fty->GetShape().ValueAt(1) << ");\n";

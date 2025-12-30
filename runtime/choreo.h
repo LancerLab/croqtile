@@ -740,13 +740,21 @@ __co_any__ inline float to_f32(T value) {
 #ifndef __CHOREO_TARGET_NATIVE_F16_SUPPORT__
     return __f16_to_f32<float>(value);
 #else
+#ifdef __USE_CUDA_TYPE__
+    return __half2float(value);
+#else
     return static_cast<float>(value);
+#endif
 #endif
   } else if constexpr (std::is_same<T, bf16>::value) {
 #ifndef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
     return bf16::halfBitsToFloat(value);
 #else
+#ifdef __USE_CUDA_TYPE__
+    return __bfloat162float(value);
+#else
     return static_cast<float>(value);
+#endif
 #endif
   } else if constexpr (
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
