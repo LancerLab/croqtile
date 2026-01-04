@@ -2645,8 +2645,7 @@ bool CuteCodeGen::Visit(AST::Call& n) {
             print_args +=
                 "(" + ExprSTR(arg, IsHost()) + " ? \"true\" : \"false\"), ";
           }
-        } else if (BaseType bt = type->GetBaseType();
-                   IsFloatPointBaseType(bt)) {
+        } else if (BaseType bt = type->GetBaseType(); IsFloatType(bt)) {
           print_format += "%f";
           print_args +=
               ExprCastSTR(arg, std::nullopt,
@@ -3626,9 +3625,9 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   case BT::S8: [[fallthrough]];
   case BT::U8: {
     auto nbt = NameBaseType(t, is_host);
-    if (IsBoolIntegerBaseType(f))
+    if (IsIntegralType(f))
       res << "static_cast<" << nbt << ">(" << value << ")";
-    else if (IsFloatPointBaseType(f)) {
+    else if (IsFloatType(f)) {
       if (f != BT::F32 && f != BT::F64)
         res << "static_cast<" << nbt << ">("
             << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
@@ -3638,7 +3637,7 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
     break;
   }
   case BT::F64: {
-    if (IsBoolIntegerBaseType(f))
+    if (IsIntegralType(f))
       res << "static_cast<double>(" << value << ")";
     else
       res << "static_cast<double>(" << ExprCastSTR(n, val, BT::F32, f, is_host)

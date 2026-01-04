@@ -2,6 +2,9 @@
 #include "target_utils.hpp"
 #include "types.hpp"
 
+// Note: Early semantics lacks shape details. Therefore, any semantic analysis,
+// type inference, etc. related to shapes, are pulled off.
+
 using namespace Choreo;
 
 bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
@@ -1756,7 +1759,9 @@ bool EarlySemantics::Visit(AST::MMA& n) {
   case AST::MMAOperation::Fill: {
     // MMA is a 2D operation
     ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol(), __FILE__, __LINE__,
-                              MakeDummySpannedType());
+                              MakeRankedSpannedType(2));
+    ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol() + ".span", __FILE__,
+                              __LINE__, MakeRankedMDSpanType(2));
     if (!isa<ScalarType>(op.FillingValue()->GetType()))
       Error1(n.LOC(), "Expect a scalar value for MMA fill.");
   } break;
@@ -1766,6 +1771,8 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     ReportErrorWhenViolateODR(
         n.LOC(), op.GetFuture(), __FILE__, __LINE__,
         MakeFutureType(cast<SpannedType>(sty->Clone()), op.IsAsync()));
+    ReportErrorWhenViolateODR(n.LOC(), op.GetFuture() + ".span", __FILE__,
+                              __LINE__, cast<SpannedType>(sty->Clone()));
   } break;
   case AST::MMAOperation::Exec: {
     ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(0));
@@ -2088,7 +2095,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
             auto arg_bt = templ_arg_ty->GetBaseType();
             auto device_type_match = [](BaseType lhs, std::string str) {
               using BT = BaseType;
-              if (!(IsBoolIntegerBaseType(lhs) || lhs == BT::BOUNDED_INT ||
+              if (!(IsIntegralType(lhs) || lhs == BT::BOUNDED_INT ||
                     lhs == BT::INDEX)) {
                 choreo_unreachable(
                     "Unexpected base type for device type match: " + STR(lhs));

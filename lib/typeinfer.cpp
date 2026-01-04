@@ -183,7 +183,7 @@ bool TypeInference::Visit(AST::MultiValues& n) {
 bool TypeInference::Visit(AST::IntLiteral& n) {
   TraceEachVisit(n);
   BaseType res = n.GetType()->GetBaseType();
-  assert(IsIntegerBaseType(res));
+  assert(IsIntegerType(res));
   SetNodeType(n, MakeScalarIntegerType(res, false));
   return true;
 }
@@ -871,7 +871,7 @@ bool TypeInference::Visit(AST::MMA& n) {
     auto ety = sty->ElementType();
     ptr<Type> mc_ty = nullptr;
     // mc type is explicit annotated
-    if (ety != BaseType::UNKNOWN) {
+    if (ety != BaseType::UNKSCALAR) {
       auto shape = cast<SpannedType>(n.GetType())->GetShape();
       auto storage = sty->GetStorage();
       mc_ty = MakeSpannedType(ety, shape, storage);

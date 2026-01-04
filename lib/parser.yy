@@ -1895,18 +1895,22 @@ subdata_expr
 mma_stmt
     : IDENTIFIER ASSIGN MMA FILL s_expr {
         auto op = AST::Make<AST::MMAOperation>($1, $5);
+        symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | IDENTIFIER ASSIGN MMA FILL DOT fundamental_type s_expr {
         auto op = AST::Make<AST::MMAOperation>($1, $7, $6);
+        symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | IDENTIFIER ASSIGN MMA LOAD sync_type chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($6, $1, $5);
+        symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | IDENTIFIER ASSIGN MMA LOAD DOT SWIZZLE LPAREN swizzle_value RPAREN sync_type chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($11, $1, $10, $8);
+        symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | MMA mma_exec_method IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {

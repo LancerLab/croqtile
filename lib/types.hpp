@@ -38,7 +38,6 @@ enum class CompileTarget;
 
 namespace Choreo {
 
-// if the type needs deduction, mark it as 'UNKNOWN'
 enum class BaseType {
   F64,
   F32,
@@ -68,8 +67,10 @@ enum class BaseType {
   S2,
   BIN1,
   U1,
-  // End of ELEMENT TYPES
+  // NUMERIC TYPES ENDS
   BOOL,
+  UNKSCALAR, // unknown scalar, must be inferred
+  // SCALAR TYPES ENDS
   INDEX,
   ITUPLE,
   PARTIAL,
@@ -83,13 +84,13 @@ enum class BaseType {
   BOUNDED_ITUPLE,
   FUTURE,
   STRING,
-  UNSPECVAL,
   FUNCTION,
   DEVICE,
-  UNKNOWN,
+  UNKNOWN, // must be inferred
+  UNSPECVAL,
 };
 
-inline static int IntegerBaseTypeRank(BaseType bt) {
+inline static int BaseTypeRank(BaseType bt) {
   switch (bt) {
   case BaseType::U64: return 15;
   case BaseType::S64: return 14;
@@ -107,6 +108,7 @@ inline static int IntegerBaseTypeRank(BaseType bt) {
   case BaseType::S2: return 2;
   case BaseType::U1: return 1;
   case BaseType::BOOL: return 1;
+  case BaseType::UNKSCALAR: return 0;
   case BaseType::UNKNOWN: return 0;
   case BaseType::UNSPECVAL: return 0;
   default: return -1;
@@ -118,7 +120,7 @@ inline static bool ApprxEqual(BaseType lty, BaseType rty) {
   return lty == rty;
 }
 
-inline static bool IsIntegerBaseType(BaseType bt) {
+inline static bool IsIntegerType(BaseType bt) {
   return bt == BaseType::S64 || bt == BaseType::U64 || bt == BaseType::S32 ||
          bt == BaseType::U32 || bt == BaseType::S16 || bt == BaseType::U16 ||
          bt == BaseType::S8 || bt == BaseType::U8 || bt == BaseType::S6 ||
@@ -127,23 +129,24 @@ inline static bool IsIntegerBaseType(BaseType bt) {
          bt == BaseType::BIN1;
 }
 
-inline static bool IsBoolIntegerBaseType(BaseType bt) {
-  return bt == BaseType::BOOL || IsIntegerBaseType(bt);
+// integrals include integer and bool
+inline static bool IsIntegralType(BaseType bt) {
+  return bt == BaseType::BOOL || IsIntegerType(bt);
 }
 
-inline static bool IsSignedIntegerBaseType(BaseType bt) {
-  assert(IsIntegerBaseType(bt));
+inline static bool IsSignedType(BaseType bt) {
+  assert(IsIntegerType(bt));
   return bt == BaseType::S64 || bt == BaseType::S32 || bt == BaseType::S16 ||
          bt == BaseType::S8 || bt == BaseType::S6 || bt == BaseType::S4 ||
          bt == BaseType::S2 || bt == BaseType::BIN1;
 }
 
-inline static bool IsUnsignedIntegerBaseType(BaseType bt) {
-  assert(IsIntegerBaseType(bt));
-  return !IsSignedIntegerBaseType(bt);
+inline static bool IsUnsignedType(BaseType bt) {
+  assert(IsIntegerType(bt));
+  return !IsSignedType(bt);
 }
 
-inline static bool IsFloatPointBaseType(BaseType bt) {
+inline static bool IsFloatType(BaseType bt) {
   return bt == BaseType::F64 || bt == BaseType::F32 || bt == BaseType::TF32 ||
          bt == BaseType::F16 || bt == BaseType::BF16 ||
          bt == BaseType::F8_E4M3 || bt == BaseType::F8_E5M2 ||
@@ -152,9 +155,13 @@ inline static bool IsFloatPointBaseType(BaseType bt) {
          bt == BaseType::F4_E2M1;
 }
 
-inline static bool IsScalarBaseType(BaseType bt) {
-  return IsIntegerBaseType(bt) || IsFloatPointBaseType(bt) ||
-         bt == BaseType::BOOL;
+// note: NumericType does not contain bool
+inline static bool IsNumericType(BaseType bt) {
+  return IsIntegerType(bt) || IsFloatType(bt);
+}
+
+inline static bool IsScalarType(BaseType bt) {
+  return IsNumericType(bt) || bt == BaseType::BOOL || bt == BaseType::UNKSCALAR;
 }
 
 inline static bool IsFloatSubByteType(BaseType bt) {
@@ -170,11 +177,6 @@ inline static bool IsIntegerSubByteType(BaseType bt) {
 
 inline static bool IsSubByteType(BaseType bt) {
   return IsFloatSubByteType(bt) || IsIntegerSubByteType(bt);
-}
-
-// note: FundamentalType does not contain Bool
-inline static bool IsFundamentalType(BaseType bt) {
-  return IsIntegerBaseType(bt) || IsFloatPointBaseType(bt);
 }
 
 inline static bool Compatible(const Storage& a, const Storage& b) {
@@ -208,7 +210,7 @@ inline static std::string STR(ParamAttr at) {
 }
 
 inline static size_t SizeOf(BaseType bt) {
-  if (!IsScalarBaseType(bt)) { choreo_unreachable("base type is not scalar."); }
+  if (!IsScalarType(bt)) { choreo_unreachable("base type is not scalar."); }
   switch (bt) {
   case BaseType::F64: return sizeof(double);
   case BaseType::U64:
@@ -293,6 +295,7 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
       {"vector", BaseType::VECTOR},
       {"address", BaseType::ADDR},
       {"void", BaseType::VOID},
+      {"unk", BaseType::UNKSCALAR},
       {"unknown", BaseType::UNKNOWN},
       {"inf", BaseType::UNSPECVAL},
   };
@@ -374,6 +377,7 @@ inline static std::string GetStringFrom(BaseType dataType) {
       {BaseType::VECTOR, "vector"},
       {BaseType::ADDR, "address"},
       {BaseType::VOID, "void"},
+      {BaseType::UNKSCALAR, "unk"},
       {BaseType::UNKNOWN, "unknown"},
       {BaseType::UNSPECVAL, "inf"},
   };
@@ -464,7 +468,7 @@ inline static std::ostream& operator<<(std::ostream& os, BaseType bt) {
 // floating-point value
 inline static bool IsValuePreservingCast(const BaseType f, const BaseType t) {
   using BT = BaseType;
-  if (!IsFundamentalType(f) || !IsFundamentalType(t))
+  if (!IsNumericType(f) || !IsNumericType(t))
     choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
   static const std::unordered_map<BT, std::unordered_set<BT>> table = {
       {BT::U8,
@@ -496,7 +500,7 @@ inline static bool IsValuePreservingCast(const BaseType f, const BaseType t) {
 // actually signed <=> unsigned
 inline static bool IsReinterpretiveCast(const BaseType f, const BaseType t) {
   using BT = BaseType;
-  if (!IsFundamentalType(f) || !IsFundamentalType(t))
+  if (!IsNumericType(f) || !IsNumericType(t))
     choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
   static const std::unordered_map<BT, std::unordered_set<BT>> table = {
       {BT::U8, {BT::S8}},   {BT::S8, {BT::U8, BT::U16, BT::U32, BT::U64}},
@@ -511,7 +515,7 @@ inline static bool IsReinterpretiveCast(const BaseType f, const BaseType t) {
 
 inline static bool IsLossyCast(const BaseType f, const BaseType t) {
   using BT = BaseType;
-  if (!IsFundamentalType(f) || !IsFundamentalType(t))
+  if (!IsNumericType(f) || !IsNumericType(t))
     choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
   static const std::unordered_map<BT, std::unordered_set<BT>> table = {
       {BT::U8, {BT::F8_E4M3, BT::F8_E5M2}},
@@ -980,7 +984,7 @@ struct PlaceHolderType final : public Type,
 struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   bool is_mutable = false;
   ScalarType(BaseType t, bool m) : Type(t), is_mutable(m) {
-    assert(IsScalarBaseType(t));
+    assert(IsScalarType(t));
   }
 
   size_t Dims() const override { return 1; }
@@ -1414,6 +1418,7 @@ struct TF32Type final : public ScalarFloatType,
   }
   __UDT_TYPE_INFO__(ScalarFloatType, TF32Type)
 };
+
 struct F32Type final : public ScalarFloatType, public TypeIDProvider<F32Type> {
   F32Type(bool m) : ScalarFloatType(BaseType::F32, m) {}
   const ptr<Type> CloneImpl() const override {
@@ -1447,6 +1452,26 @@ struct BooleanType final : public ScalarType,
   }
 
   __UDT_TYPE_INFO__(ScalarType, BooleanType)
+};
+
+struct UnknownScalarType final : public ScalarType,
+                                 public TypeIDProvider<UnknownScalarType> {
+  UnknownScalarType(bool m) : ScalarType(BaseType::UNKSCALAR, m) {}
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<UnknownScalarType>(IsMutable());
+  }
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<UnknownScalarType>(m);
+  }
+
+  bool operator==(const Type&) const override {
+    choreo_unreachable("The unknown element type is not strictly comparable.");
+  }
+  bool ApprxEqual(const Type& ty) const override {
+    return isa<ScalarType>(&ty);
+  }
+
+  __UDT_TYPE_INFO__(ScalarType, UnknownScalarType)
 };
 
 struct StringType : public Type, public TypeIDProvider<StringType> {
@@ -1616,8 +1641,7 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
               Storage m = Storage::DEFAULT)
       : Type(BaseType::SPANNED), e_type(t), s_type(s), m_type(m) {
     assert((s_type != nullptr) && "mdspan is not initialized.");
-    assert((IsFundamentalType(e_type) || e_type == BaseType::UNKNOWN) &&
-           "element type must be a fundamental type.");
+    assert(IsScalarType(e_type) && "element type must be a scalar type.");
   }
 
   const ptr<Type> CloneImpl() const override {
@@ -1774,7 +1798,7 @@ struct DeviceDataType final : public Type,
   }
 
   bool IsNaiveType() {
-    return IsFundamentalType(data_type) || data_type == BaseType::VOID;
+    return IsNumericType(data_type) || data_type == BaseType::VOID;
   }
   __UDT_TYPE_INFO__(Type, DeviceDataType)
 };
@@ -2531,6 +2555,10 @@ inline ptr<VoidType> MakeVoidType() { return std::make_shared<VoidType>(); }
 
 inline ptr<AddrType> MakeAddrType() { return std::make_shared<AddrType>(); }
 
+inline ptr<UnknownScalarType> MakeUnknownScalarType(bool is_mutable = false) {
+  return std::make_shared<UnknownScalarType>(is_mutable);
+}
+
 inline ptr<UnknownType> MakeUnknownType() {
   return std::make_shared<UnknownType>();
 }
@@ -2594,12 +2622,14 @@ inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt, bool m = false) {
 }
 
 inline static ptr<Type> MakeScalarType(BaseType bt, bool m = false) {
-  if (IsIntegerBaseType(bt))
+  if (IsIntegerType(bt))
     return MakeScalarIntegerType(bt, m);
-  else if (IsFloatPointBaseType(bt))
+  else if (IsFloatType(bt))
     return MakeScalarFloatType(bt, m);
   else if (bt == BaseType::BOOL)
     return MakeBooleanType(m);
+  else if (bt == BaseType::UNKSCALAR)
+    return MakeUnknownScalarType(m);
   else {
     choreo_unreachable("unsupported base type for scalar type.");
     return nullptr;
@@ -2653,7 +2683,8 @@ inline ptr<SpannedType> MakeSpannedType(BaseType t, const Shape& v,
 // all the values are fake. it is used only to indicate a spanned type without
 // the shape detail
 inline ptr<SpannedType> MakeDummySpannedType() {
-  return MakeSpannedType(BaseType::UNKNOWN, GenUninitShape(), Storage::DEFAULT);
+  return MakeSpannedType(BaseType::UNKSCALAR, GenUninitShape(),
+                         Storage::DEFAULT);
 }
 
 inline ptr<SpannedType>
@@ -2663,14 +2694,14 @@ MakeUnRankedSpannedType(BaseType bt, Storage sto = Storage::DEFAULT) {
 }
 
 inline ptr<SpannedType> MakeRankedSpannedType(size_t n,
-                                              BaseType bt = BaseType::UNKNOWN,
+                                              BaseType bt = BaseType::UNKSCALAR,
                                               Storage sto = Storage::DEFAULT) {
   // only care about the rank of span
   return MakeSpannedType(bt, Shape(n), sto);
 }
 
-inline ptr<SpannedType> MakeShapedSpannedType(const Shape& s,
-                                              BaseType bt = BaseType::UNKNOWN) {
+inline ptr<SpannedType>
+MakeShapedSpannedType(const Shape& s, BaseType bt = BaseType::UNKSCALAR) {
   // only care about the precise shape
   return MakeSpannedType(bt, s, Storage::DEFAULT);
 }
@@ -2791,12 +2822,12 @@ inline ptr<DeviceDataType> MakeDeviceDataType(const std::string& name,
 // only return spanned type, scalar type, void type and unknown type
 inline ptr<Type> MakeChoreoDataType(const ptr<DeviceDataType>& dt) {
   if (dt->is_pointer) {
-    if (IsFundamentalType(dt->data_type) || dt->data_type == BaseType::VOID)
+    if (IsNumericType(dt->data_type) || dt->data_type == BaseType::VOID)
       return MakeSpannedType(dt->data_type, GenUninitShape());
     else
       return MakeDummySpannedType();
   } else {
-    if (IsFundamentalType(dt->data_type) || dt->data_type == BaseType::BOOL)
+    if (IsNumericType(dt->data_type) || dt->data_type == BaseType::BOOL)
       return MakeScalarType(dt->data_type, true);
     else if (dt->data_type == BaseType::VOID)
       return MakeVoidType();
@@ -2908,17 +2939,16 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
   using BT = BaseType;
 
   for (const auto ty : {lty, rty})
-    if (!(IsIntegerBaseType(ty) || IsFloatPointBaseType(ty) ||
-          ty == BaseType::UNKNOWN))
+    if (!(IsIntegerType(ty) || IsFloatType(ty) || ty == BaseType::UNKSCALAR))
       choreo_unreachable("unexpect type in promote: " + STR(ty));
 
   PromoteResult res{.lty = lty, .rty = rty};
 
-  if (lty == BaseType::UNKNOWN || rty == BaseType::UNKNOWN) return res;
+  if (lty == BaseType::UNKSCALAR || rty == BaseType::UNKSCALAR) return res;
 
   if (lty == rty) return res;
 
-  if (IsFloatPointBaseType(lty) && IsFloatPointBaseType(rty)) {
+  if (IsFloatType(lty) && IsFloatType(rty)) {
     // both floating-point
     if (IsValuePreservingCast(lty, rty))
       res.lty = res.rty = rty;
@@ -2929,9 +2959,9 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
                          STR(lty) + " and " + STR(rty));
 
     return res;
-  } else if (IsFloatPointBaseType(lty) || IsFloatPointBaseType(rty)) {
+  } else if (IsFloatType(lty) || IsFloatType(rty)) {
     // only one is floating-point
-    if (IsFloatPointBaseType(lty))
+    if (IsFloatType(lty))
       res.rty = lty;
     else
       res.lty = rty;
@@ -2944,8 +2974,8 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
     };
     auto CanRepresent = [](BT signed_type, BT unsigned_type) -> bool {
       // return if `signed_type` can represent `unsigned_type`
-      assert(IsSignedIntegerBaseType(signed_type));
-      assert(IsUnsignedIntegerBaseType(unsigned_type));
+      assert(IsSignedType(signed_type));
+      assert(IsUnsignedType(unsigned_type));
       switch (signed_type) {
       case BT::S64:
         return unsigned_type == BT::U32 || unsigned_type == BT::U16 ||
@@ -2956,7 +2986,7 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
       }
     };
     auto UnsignedVersion = [](BaseType signed_type) {
-      assert(IsSignedIntegerBaseType(signed_type));
+      assert(IsSignedType(signed_type));
       switch (signed_type) {
       case BaseType::S64: return BaseType::U64;
       case BaseType::S32: return BaseType::U32;
@@ -2969,12 +2999,12 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
     lty = IntegralPromotion(lty);
     rty = IntegralPromotion(rty);
 
-    int rank_l = IntegerBaseTypeRank(lty);
-    int rank_r = IntegerBaseTypeRank(rty);
+    int rank_l = BaseTypeRank(lty);
+    int rank_r = BaseTypeRank(rty);
 
     // both unsigned or both
-    if ((IsUnsignedIntegerBaseType(lty) && IsUnsignedIntegerBaseType(rty)) ||
-        (IsSignedIntegerBaseType(lty) && IsSignedIntegerBaseType(rty))) {
+    if ((IsUnsignedType(lty) && IsUnsignedType(rty)) ||
+        (IsSignedType(lty) && IsSignedType(rty))) {
       if (rank_l > rank_r)
         res.rty = lty;
       else
@@ -2983,7 +3013,7 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
     }
 
     // one unsigned, one signed
-    if (IsUnsignedIntegerBaseType(lty) && IsSignedIntegerBaseType(rty)) {
+    if (IsUnsignedType(lty) && IsSignedType(rty)) {
       if (rank_l > rank_r) // use the unsigned
         res.rty = lty;
       else if (CanRepresent(rty, lty)) // rty can represent lty
@@ -2992,7 +3022,7 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
         res.lty = res.rty = UnsignedVersion(rty);
       return res;
     }
-    if (IsSignedIntegerBaseType(lty) && IsUnsignedIntegerBaseType(rty)) {
+    if (IsSignedType(lty) && IsUnsignedType(rty)) {
       if (rank_r > rank_l)
         res.lty = rty;
       else if (CanRepresent(lty, rty))

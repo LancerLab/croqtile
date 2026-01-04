@@ -2327,8 +2327,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
             print_args +=
                 "(" + ExprSTR(arg, IsHost()) + " ? \"true\" : \"false\"), ";
           }
-        } else if (BaseType bt = type->GetBaseType();
-                   IsFloatPointBaseType(bt)) {
+        } else if (BaseType bt = type->GetBaseType(); IsFloatType(bt)) {
           print_format += "%f";
           print_args +=
               ExprCastSTR(arg, std::nullopt,
@@ -3233,9 +3232,9 @@ const std::string TopsccCodeGen::ExprCastSTR(
   case BT::S8: [[fallthrough]];
   case BT::U8: {
     auto nbt = NameBaseType(t, is_host);
-    if (IsBoolIntegerBaseType(f))
+    if (IsIntegralType(f))
       res << "static_cast<" << nbt << ">(" << value << ")";
-    else if (IsFloatPointBaseType(f)) {
+    else if (IsFloatType(f)) {
       if (f != BT::F32 && f != BT::F64)
         res << "static_cast<" << nbt << ">("
             << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
@@ -3245,7 +3244,7 @@ const std::string TopsccCodeGen::ExprCastSTR(
     break;
   }
   case BT::F64: {
-    if (IsBoolIntegerBaseType(f))
+    if (IsIntegralType(f))
       res << "static_cast<double>(" << value << ")";
     else
       res << "static_cast<double>(" << ExprCastSTR(n, val, BT::F32, f, is_host)
@@ -3253,7 +3252,7 @@ const std::string TopsccCodeGen::ExprCastSTR(
     break;
   }
   case BT::F32: {
-    if (IsBoolIntegerBaseType(f))
+    if (IsIntegralType(f))
       res << "static_cast<float>(" << value << ")";
     else {
       if (f == BT::F16)

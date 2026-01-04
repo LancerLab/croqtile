@@ -369,7 +369,7 @@ public:
     if (!need_widen) return true;
 
     auto vty = nty;
-    if (IsScalarBaseType(nty->GetBaseType())) {
+    if (IsScalarType(nty->GetBaseType())) {
       vty = MakeVectorType(nty->GetBaseType(), cur_loop->GetVectorFactor());
       n.SetType(vty);
       n.AddNote("widen", std::to_string(cur_loop->GetVectorFactor()));

@@ -362,7 +362,7 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
       : Node(l, MakeScalarIntegerType(BaseType::UNKNOWN)), value(v) {}
   IntLiteral(const location& l, BaseType bt)
       : Node(l, MakeScalarIntegerType(bt)), value(0) {
-    assert(IsIntegerBaseType(bt) &&
+    assert(IsIntegerType(bt) &&
            "BaseType must be an integer fundamental type.");
     switch (bt) {
     case BaseType::S32: value = static_cast<int>(0); break;
@@ -430,7 +430,7 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
   }
 
   FloatLiteral(const location& l, BaseType bt) : Node(l, MakeF32Type()) {
-    assert(IsFloatPointBaseType(bt) &&
+    assert(IsFloatType(bt) &&
            "BaseType must be a float-point fundamental type.");
     switch (bt) {
     case BaseType::F32: value = static_cast<float>(0.0); break;
@@ -1272,7 +1272,7 @@ public:
 private:
   ptr<Type> InitSemaType() {
     if (ExplicitSpanned()) {
-      if (IsIntegerBaseType(base_type) || IsFloatPointBaseType(base_type)) {
+      if (IsIntegerType(base_type) || IsFloatType(base_type)) {
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
         // need type inference
         if (array_dims.size() == 0)
@@ -1284,7 +1284,7 @@ private:
         choreo_unreachable("Unexpected BaseType: " + STR(base_type) + ".");
       }
     } else {
-      if (IsScalarBaseType(base_type)) {
+      if (IsScalarType(base_type)) {
         SetType(MakeScalarType(base_type, is_mutable));
       } else if (base_type == BaseType::EVENT) {
         if (array_dims.size() == 0)
@@ -2502,7 +2502,7 @@ private:
 
 public:
   MMAOperation(const std::string& n, const ptr<Expr>& e,
-               BaseType t = BaseType::UNKNOWN)
+               BaseType t = BaseType::UNKSCALAR)
       : tag(Fill), info(FillInfo{n, e, t}) {}
   MMAOperation(const ptr<ChunkAt>& e, const std::string& fu, bool a = false,
                int swizzle = 128)
@@ -2697,9 +2697,10 @@ public:
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
-             bool = false) const override {
+             bool with_type = false) const override {
     os << "\n" << prefix << "`- ";
     operation->Print(os);
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
   const ptr<MMAOperation> GetOperation() const { return operation; }
