@@ -13,4 +13,4 @@ __co__ void illegal_multi_pb() {
   }
 }
 
-// CHECK-COUNT-1:  error: mulitple inner parallel-bys must have compatible block dimension (dim-0: 384 != 96)
+// CHECK-COUNT-1:  error: mulitple inner parallel-bys must have compatible block dimension 384 != 96.

@@ -2308,6 +2308,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
       ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty)) << " "
          << sym << "_frag[" << reg_num_d << "] ;\n";
+      ds << d_indent << "memset(" << sym << "_frag, 0, sizeof(" << sym
+         << "_frag));\n";
 
     } break;
     case AST::MMAOperation::Load: {
