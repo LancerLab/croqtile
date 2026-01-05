@@ -309,6 +309,11 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
       VST_DEBUG(pb->InlinePrint(dbgs());
                 dbgs() << " (max-level: " << STR(TargetMaxLevel()) << ")\n");
     }
+    if (pb->GetLevel() == ParallelLevel::GROUPx4 ||
+        pb->GetLevel() == ParallelLevel::GROUP) {
+      // check if the parallelby level is enforce
+      if (pb->IsEnforced()) bdim_level = pb->GetLevel();
+    }
   } else if (isa<AST::WithBlock>(&n)) {
     IndStream() << "// with-in: " << n.LOC() << "\n";
     IndStream() << "{\n";
@@ -387,6 +392,10 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
         DecrDeviceIndent();
         ds << d_indent << "} // end inner parallel-by\n";
       }
+    }
+    // reset the block dim enforcement level
+    if (pb->GetLevel() == ParallelLevel::THREAD) {
+      bdim_level = ParallelLevel::THREAD;
     }
   } else if (isa<AST::WithBlock>(&n)) {
     DecrIndent();
@@ -1360,7 +1369,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (n.AllSubPVs().size() > 1)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "g4id_y");
     if (n.AllSubPVs().size() > 2)
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "g4id_z");
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name), vid_pfx + "g4id_z");
   } break;
   case ParallelLevel::GROUP: {
     if (n.AllSubPVs().size() == 1)
@@ -1371,7 +1380,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (n.AllSubPVs().size() > 1)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "gid_y");
     if (n.AllSubPVs().size() > 2)
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "gid_z");
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name), vid_pfx + "gid_z");
   } break;
   case ParallelLevel::THREAD: {
     if (n.AllSubPVs().size() == 1)
@@ -1382,7 +1391,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (n.AllSubPVs().size() > 1)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "tid_y");
     if (n.AllSubPVs().size() > 2)
-      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(1)->name), vid_pfx + "tid_z");
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(2)->name), vid_pfx + "tid_z");
   } break;
   default:
     choreo_unreachable("unsupported parallel-by level: " + STR(n.GetLevel()) +
@@ -1407,19 +1416,21 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     // oriented convention. users can still keep binding left-most parallel
     // variable to left-most tensor dim, and right to right. without mindset to
     // CUDA's thread majority that left-most are leading dim (thread x)
-    auto tx = (lconfig.thread_count.x * lconfig.thread_count.y *
-               lconfig.thread_count.z)
-                  ->Normalize();
-    auto ty = (lconfig.group_count.x * lconfig.group4_count.x *
-               lconfig.group_count.y * lconfig.group_count.z)
-                  ->Normalize();
+    auto inner_thr_count = (lconfig.thread_count.x * lconfig.thread_count.y *
+                            lconfig.thread_count.z)
+                               ->Normalize();
+    auto group_count = (lconfig.group_count.x * lconfig.group4_count.x *
+                        lconfig.group_count.y * lconfig.group_count.z)
+                           ->Normalize();
+    auto thr_count = (inner_thr_count * group_count)->Normalize();
+
     hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
-       << ValueSTR(tx) << ", " << ValueSTR(ty) << ", " << "1" << ");\n";
+       << ValueSTR(thr_count) << ", 1, 1" << ");\n";
 
     // plan the shared memory that is decided at runtime
     cur_spm_size = sbe::nu(0);
     cur_ring_offset = sbe::nu(0);
-    cur_ring_size = (tx * ty + sbe::nu(31)) / sbe::nu(32) /* warp size */;
+    cur_ring_size = (thr_count + sbe::nu(31)) / sbe::nu(32) /* warp size */;
 
     // add the size of the future ring (see choreo.h)
     if (cgi.HasAsyncDMA(fname))
@@ -2947,35 +2958,65 @@ void CuteCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str() << "\n");
 }
 
+/*inner parallel-by need different threads-mapping strategy, but launch
+config is only set for the outermost parallel-by.
+We should allow users to write inner parallel-by blocks like the following
+ways:
+parallel by 1 : block {
+  (1) parallel by 4 : group
+        parallel by 32 : thread //  must be 32 if explicit
+          ...
+  (2) parallel by 1 : group-4
+        parallel by 128 : thread // must be 128 if explicit
+          ...
+  (3) parallel by 128 : thread
+        ...
+}
+The above three cases should all be supported, and can be used within a same
+block level parallel-by at same time.
+To support this, we flatten the within-block parallel-by levels, and
+generate the virtual indices according to the level settings. All indices are
+mapped to threadIdx.x, and we compute the virtual indices based on the level
+settings. For case (1), we compute the virtual indices based on group and
+thread levels. For case (2), we compute the virtual indices based on group-4
+and thread levels. For case (3), we only compute the virtual indices based on
+thread level.
+Note: (1) we must ensure that the total number of threads of all inner
+parallel-by be same, because they share the same launch configuration. (2) we
+should allow three-dimension parallel-by indices generation.
+*/
 void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
-  auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
+  // no need to generate virtual indices for non-enforced parallel-by
+  // generated by normalization
+  if (!pb->IsEnforced()) return;
+
+  const auto& bvs = pb->BoundValues();
+  auto sub_pvs = pb->SubPVs();
+  sbe::Operand pv_x = bvs.size() > 0 ? bvs.at(0) : sbe::nu(1);
+  sbe::Operand pv_y = bvs.size() > 1 ? bvs.at(1) : sbe::nu(1);
+  sbe::Operand pv_z = bvs.size() > 2 ? bvs.at(2) : sbe::nu(1);
+
   switch (pb->GetLevel()) {
   case ParallelLevel::GROUPx4: {
-    auto cs = cgi.GetPBTree(fname).GetChildren(pb);
-    assert(!cs.empty());
-    auto& spb = cs[0];
-    assert(spb->GetLevel() == ParallelLevel::GROUP);
-    if (spb->AllSubPVs().size() == 1) {
-      ds << d_indent << "auto " << vid_pfx << "g4id_x = threadIdx.y / 4;\n";
-    } else if (spb->AllSubPVs().size() == 2) {
-      ds << d_indent << "auto " << vid_pfx << "g4id_x = "
-         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.y / sbe::nu(4))
-                    ->Normalize())
+    assert(pb->AllSubPVs().size() > 0);
+    std::string g4id = vid_pfx + "g4id";
+    std::string vid_x = vid_pfx + "g4id_x";
+    std::string vid_y = vid_pfx + "g4id_y";
+    std::string vid_z = vid_pfx + "g4id_z";
+    if (pb->AllSubPVs().size() == 1) {
+      ds << d_indent << "auto " << vid_x << " = threadIdx.x / 128;\n";
+    } else if (pb->AllSubPVs().size() == 2) {
+      ds << d_indent << "auto " << g4id << " = threadIdx.x / 128;\n";
+      ds << d_indent << "auto " << vid_x << " = " << g4id << " / " << STR(pv_y);
+      ds << d_indent << "auto " << vid_y << " = " << g4id << " % " << STR(pv_y)
          << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "g4id_y = "
-         << STR((sbe::sym("threadIdx.y") % lconfig.group_count.y)->Normalize())
-         << ";\n";
-    } else if (spb->AllSubPVs().size() == 3) {
-      ds << d_indent << "auto " << vid_pfx << "g4id_x = "
-         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.z / sbe::nu(4))
-                    ->Normalize())
-         << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "g4id_y = "
-         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.z) %
-                lconfig.group_count.y->Normalize())
-         << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "g4id_z = "
-         << STR((sbe::sym("threadIdx.y") % lconfig.group_count.z)->Normalize())
+    } else if (pb->AllSubPVs().size() == 3) {
+      ds << d_indent << "auto " << g4id << "g4id = threadIdx.x / 128;\n";
+      ds << d_indent << "auto " << vid_x << " = " << g4id << " / " << STR(pv_y)
+         << " / " << STR(pv_z) << ";\n";
+      ds << d_indent << "auto " << vid_y << " = " << g4id << " / " << STR(pv_z)
+         << " % " << STR(pv_y) << ";\n";
+      ds << d_indent << "auto " << vid_z << " = " << g4id << " % " << STR(pv_z)
          << ";\n";
     }
   } break;
@@ -2985,75 +3026,79 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       choreo_unreachable("group parallelism with more than 3 dimensions is "
                          "not supported.");
 
-    // when choreo users writes parallel {group_first, group_second,
-    // group_third} by {GPU_M, GPU_N, GPU_K} they tend to bind group_first to
-    // GPU_M, group_second to GPU_N, group_third to GPU_K, this is choreo
-    // convention however, in CUDA, threadIdx.y is the leading dimension,
-    // threadIdx.x is the trailing dimension so we need to reverse the order of
-    // the group ids to keep all choreo convention, whilst aligning to CUDA's
-    // convention this is the reason why we need to reverse the order of the
-    // group ids group_first -> group_id_first, group_second -> group_id_second,
-    // group_third -> group_id_third
+    std::string gid = vid_pfx + "gid";
+    std::string vid_x = vid_pfx + "gid_x";
+    std::string vid_y = vid_pfx + "gid_y";
+    std::string vid_z = vid_pfx + "gid_z";
     if (pb->AllSubPVs().size() == 1) {
-      ds << d_indent << "auto " << vid_pfx << "gid_x = threadIdx.y;\n";
+      ds << d_indent << "auto " << vid_x << " = threadIdx.x / 32;\n";
     } else if (pb->AllSubPVs().size() == 2) {
-      ds << d_indent << "auto " << vid_pfx << "gid_x = "
-         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.y)->Normalize())
+      ds << d_indent << "auto " << gid << " = threadIdx.x / 32;\n";
+      ds << d_indent << "auto " << vid_x << " = " << gid << " / " << STR(pv_y)
          << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "gid_y = "
-         << STR((sbe::sym("threadIdx.y") % lconfig.group_count.y)->Normalize())
+      ds << d_indent << "auto " << vid_y << " = " << gid << " % " << STR(pv_y)
          << ";\n";
     } else if (pb->AllSubPVs().size() == 3) {
-      ds << d_indent << "auto " << vid_pfx << "gid_x = "
-         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.z)->Normalize())
-         << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "gid_y = "
-         << STR((sbe::sym("threadIdx.y") / lconfig.group_count.z) %
-                lconfig.group_count.y->Normalize())
-         << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "gid_z = "
-         << STR((sbe::sym("threadIdx.y") % lconfig.group_count.z)->Normalize())
+      ds << d_indent << "auto " << gid << " = threadIdx.x / 32;\n";
+      ds << d_indent << "auto " << vid_x << " = " << gid << " / " << STR(pv_y)
+         << " / " << STR(pv_z) << ";\n";
+      ds << d_indent << "auto " << vid_y << " = " << gid << " / " << STR(pv_z)
+         << " % " << STR(pv_y) << ";\n";
+      ds << d_indent << "auto " << vid_z << " = " << gid << " % " << STR(pv_z)
          << ";\n";
     }
   } break;
-  case ParallelLevel::THREAD:
+  case ParallelLevel::THREAD: {
     assert(pb->AllSubPVs().size() > 0);
-
     if (pb->AllSubPVs().size() > 3)
       choreo_unreachable("thread parallelism with more than 3 dimensions is "
                          "not supported.");
-    // thr_m, thr_n, thr_k
-    // when choreo users writes parallel {thr_first, thr_second, thr_third} by
-    // {GPU_M, GPU_N, GPU_K} they tend to bind thr_first to GPU_M, thr_second to
-    // GPU_N, thr_third to GPU_K, this is choreo convention however, in CUDA,
-    // threadIdx.y is the leading dimension, threadIdx.x is the trailing
-    // dimension so we need to reverse the order of the thr ids to keep all
-    // choreo convention, whilst aligning to CUDA's convention this is the
-    // reason why we need to reverse the order of the thr ids thr_first ->
-    // thr_id_first, thr_second -> thr_id_second, thr_third -> thr_id_third
+
+    std::string tid = vid_pfx + "tid";
+    std::string vid_x = vid_pfx + "tid_x";
+    std::string vid_y = vid_pfx + "tid_y";
+    std::string vid_z = vid_pfx + "tid_z";
     if (pb->AllSubPVs().size() == 1) {
-      ds << d_indent << "auto " << vid_pfx << "tid_x = threadIdx.x;\n";
+      if (bdim_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "auto " << vid_x << " = threadIdx.x % 128;\n";
+      else if (bdim_level == ParallelLevel::GROUP)
+        ds << d_indent << "auto " << vid_x << " = threadIdx.x % 32;\n";
+      else if (bdim_level == ParallelLevel::THREAD)
+        ds << d_indent << "auto " << vid_x << " = threadIdx.x;\n";
+      else
+        choreo_unreachable("invalid bdim level.");
     } else if (pb->AllSubPVs().size() == 2) {
-      ds << d_indent << "auto " << vid_pfx << "tid_x = "
-         << STR((sbe::sym("threadIdx.x") / lconfig.thread_count.y)->Normalize())
+      if (bdim_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "auto " << tid << " = threadIdx.x % 128;\n";
+      else if (bdim_level == ParallelLevel::GROUP)
+        ds << d_indent << "auto " << tid << " = threadIdx.x % 32;\n";
+      else if (bdim_level == ParallelLevel::THREAD)
+        ds << d_indent << "auto " << tid << " = threadIdx.x;\n";
+      else
+        choreo_unreachable("invalid bdim level.");
+
+      ds << d_indent << "auto " << vid_x << " = " << tid << " / " << STR(pv_y)
          << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "tid_y = "
-         << STR((sbe::sym("threadIdx.x") % lconfig.thread_count.y)->Normalize())
+      ds << d_indent << "auto " << vid_y << " = " << tid << " % " << STR(pv_y)
          << ";\n";
     } else if (pb->AllSubPVs().size() == 3) {
-      ds << d_indent << "auto " << vid_pfx << "tid_x = "
-         << STR(((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) /
-                lconfig.thread_count.y->Normalize())
-         << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "tid_y = "
-         << STR(((sbe::sym("threadIdx.x") / lconfig.thread_count.z)) %
-                lconfig.thread_count.y->Normalize())
-         << ";\n";
-      ds << d_indent << "auto " << vid_pfx << "tid_z = "
-         << STR((sbe::sym("threadIdx.x") % lconfig.thread_count.z)->Normalize())
+      if (bdim_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "auto " << tid << " = threadIdx.x % 128;\n";
+      else if (bdim_level == ParallelLevel::GROUP)
+        ds << d_indent << "auto " << tid << " = threadIdx.x % 32;\n";
+      else if (bdim_level == ParallelLevel::THREAD)
+        ds << d_indent << "auto " << tid << " = threadIdx.x;\n";
+      else
+        choreo_unreachable("invalid bdim level.");
+
+      ds << d_indent << "auto " << vid_x << " = " << tid << " / " << STR(pv_y)
+         << " / " << STR(pv_z) << ";\n";
+      ds << d_indent << "auto " << vid_y << " = " << tid << " / " << STR(pv_z)
+         << " % " << STR(pv_y) << ";\n";
+      ds << d_indent << "auto " << vid_z << " = " << tid << " % " << STR(pv_z)
          << ";\n";
     }
-    break;
+  } break;
   default: break;
   }
 }

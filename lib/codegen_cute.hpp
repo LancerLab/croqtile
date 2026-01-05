@@ -304,6 +304,8 @@ private:
   // once the flag is set, always use dynamic reuse!
   bool set_cuda_func_attribute_max_dynamic_shared_memory_size = false;
   static const std::string vid_pfx;
+  // block dim enforcement level, default to thread level
+  ParallelLevel bdim_level = ParallelLevel::THREAD;
 
 private:
   void EmitFixedHostHead();

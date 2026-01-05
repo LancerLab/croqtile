@@ -155,7 +155,7 @@ private:
                 acc_z = (acc_z * pcs[cnode][2])->Normalize();
               cnode = cgi.GetPBTree(fname).GetParent(cnode);
             }
-            return ValueList{acc_x, acc_y, acc_z};
+            return acc_x * acc_y * acc_z;
           };
           // compatible: the muliplication of launch parameters equals
           assert(!leaves.empty());
@@ -163,13 +163,10 @@ private:
           auto bcount = xyz(bleaf, pb);
           for (auto itr = leaves.begin() + 1; itr != leaves.end(); ++itr) {
             auto bc = xyz(*itr, pb);
-            for (auto i = 0; i < 3; ++i)
-              if (!sbe::ceq(bcount[i], bc[i]))
-                Error1(bleaf->LOC(), "mulitple inner parallel-bys must have "
-                                     "compatible block dimension (dim-" +
-                                         std::to_string(i) + ": " +
-                                         STR(bcount[i]) + " != " + STR(bc[i]) +
-                                         ").");
+              if (!sbe::ceq(bcount, bc))
+                Error1((*itr)->LOC(), "mulitple inner parallel-bys must have "
+                                     "compatible block dimension " + STR(bcount) +
+                                     " != " + STR(bc) + ".");
           }
         }
         auto& lcs = cgi.GetFunctionLaunches(fname);

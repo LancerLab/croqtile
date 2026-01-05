@@ -1,0 +1,45 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+
+#define M 128
+#define N 256
+#define K 128
+
+__co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output;
+
+  int MMA_M = 16, MMA_N = 8, MMA_K = 16;
+  parallel {m, n} by [M / MMA_M/2, N / MMA_N/2] : block {
+    // inner pb (1)
+    parallel {g0}  by [2]: group-4
+      parallel by 128 : thread {}
+    // inner pb (2)
+    parallel {g0} by [8]: group
+      parallel {t0} by [32]: thread {}
+    // inner pb (3)
+    parallel t by 256: thread {}
+    // inner pb (4)
+    parallel {t0, t1} by [2, 128] : thread {}
+    // inner pb (5)
+    parallel {g0, g1, g2} by [2, 2, 2] : group {}
+  }
+  return output;
+}
+// (1)
+// CHECK: auto __choreo_vg4id_x = threadIdx.x / 128;
+// CHECK: auto __choreo_vtid_x = threadIdx.x % 128;
+// (2)
+// CHECK: auto __choreo_vgid_x = threadIdx.x / 32;
+// CHECK: auto __choreo_vtid_x = threadIdx.x % 32;
+// (3)
+// CHECK: auto __choreo_vtid_x = threadIdx.x;
+// (4)
+// CHECK: auto __choreo_vtid = threadIdx.x;
+// CHECK: auto __choreo_vtid_x = __choreo_vtid / 128;
+// CHECK: auto __choreo_vtid_y = __choreo_vtid % 128;
+// (5)
+// CHECK: auto __choreo_vgid = threadIdx.x / 32;
+// CHECK: auto __choreo_vgid_x = __choreo_vgid / 2 / 2;
+// CHECK: auto __choreo_vgid_y = __choreo_vgid / 2 % 2;
+// CHECK: auto __choreo_vgid_z = __choreo_vgid % 2;
+// launch configuration
+// CHECK: dim3 __matmul_bdims0(256, 1, 1);
