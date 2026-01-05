@@ -61,32 +61,32 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
     return sbe::sym(osn->Value());
   } else if (auto osn = OpSign(sign)) {
     auto op = osn->Operation();
-    auto& oprds = osn->OperandValueNums();
+    auto& oprds = osn->OperandSigns();
     if (oprds.size() == 3) {
       // ternary operation
       assert(op == "?" && "unexpected ternary operation.");
-      auto pvi = GenValueItemFromSignature(SignNum(oprds[0]));
-      auto lvi = GenValueItemFromSignature(SignNum(oprds[1]));
-      auto rvi = GenValueItemFromSignature(SignNum(oprds[2]));
+      auto pvi = GenValueItemFromSignature(oprds[0]);
+      auto lvi = GenValueItemFromSignature(oprds[1]);
+      auto rvi = GenValueItemFromSignature(oprds[2]);
       if (pvi && lvi && rvi) return sbe::sel(pvi, lvi, rvi)->Normalize();
     } else if (oprds.size() == 2) {
       if ((op == "+") || (op == "-") || (op == "*") || (op == "/") ||
           (op == "%") || (op == ">") || (op == "<") || (op == "|") ||
           (op == "&") || (op == "^") || (op == ">=") || (op == "<=") ||
           (op == "==") || (op == "!=") || (op == ">>") || (op == "<<")) {
-        auto lvi = GenValueItemFromSignature(SignNum(oprds[0]));
-        auto rvi = GenValueItemFromSignature(SignNum(oprds[1]));
+        auto lvi = GenValueItemFromSignature(oprds[0]);
+        auto rvi = GenValueItemFromSignature(oprds[1]);
         if (lvi && rvi) return sbe::bop(ToOpCode(op), lvi, rvi)->Normalize();
       } else if (op == "cdiv") {
-        auto lvi = GenValueItemFromSignature(SignNum(oprds[0]));
-        auto rvi = GenValueItemFromSignature(SignNum(oprds[1]));
+        auto lvi = GenValueItemFromSignature(oprds[0]);
+        auto rvi = GenValueItemFromSignature(oprds[1]);
         if (lvi && rvi)
           return sbe::bop(OpCode::DIVIDE, lvi + (rvi - sbe::nu(1)), rvi)
               ->Normalize();
       }
     } else if (oprds.size() == 1) {
       if ((op == "!") || (op == "~")) {
-        if (auto ovi = GenValueItemFromSignature(SignNum(oprds[0])))
+        if (auto ovi = GenValueItemFromSignature(oprds[0]))
           return sbe::uop(ToOpCode(op), ovi)->Normalize();
       }
     }
@@ -104,9 +104,8 @@ ValueNumbering::GenValueListFromValueNumber(const NumTy& valno) {
 const ValueList ValueNumbering::GenValueListFromSignature(const SignTy& input) {
   if (!IsValid(input)) choreo_unreachable("signature is invalid.");
   std::vector<ValueItem> res;
-  if (auto osn = MSign(input)) {
-    for (auto n : osn->AllValueNums())
-      res.push_back(GenValueItemFromValueNumber(n));
+  if (auto msn = MSign(input)) {
+    for (auto n : msn->AllSigns()) res.push_back(GenValueItemFromSignature(n));
   } else
     res.push_back(GenValueItemFromSignature(input));
 
@@ -130,8 +129,7 @@ const SignTy ValueNumbering::ValueItemToSignature(const ValueItem& vi,
     return sign;
   } else if (auto bop = VIUop(vi)) {
     auto osign = ValueItemToSignature(bop->GetOperand(), true);
-    auto ovn = GetValueNumberOfSignature(osign);
-    auto sign = o_sn(STR(bop->GetOpCode()), ovn);
+    auto sign = o_sn(STR(bop->GetOpCode()), osign);
     if (gen) {
       auto vn = GetOrGenValueNumberFromSignature(sign);
       return GetSignatureFromValueNumber(vn);
@@ -140,9 +138,7 @@ const SignTy ValueNumbering::ValueItemToSignature(const ValueItem& vi,
   } else if (auto bop = VIBop(vi)) {
     auto lsign = ValueItemToSignature(bop->GetLeft(), true);
     auto rsign = ValueItemToSignature(bop->GetRight(), true);
-    auto lvn = GetValueNumberOfSignature(lsign);
-    auto rvn = GetValueNumberOfSignature(rsign);
-    auto sign = o_sn(STR(bop->GetOpCode()), lvn, rvn);
+    auto sign = o_sn(STR(bop->GetOpCode()), lsign, rsign);
     if (gen) {
       auto vn = GetOrGenValueNumberFromSignature(sign);
       return GetSignatureFromValueNumber(vn);
@@ -152,10 +148,7 @@ const SignTy ValueNumbering::ValueItemToSignature(const ValueItem& vi,
     auto psign = ValueItemToSignature(top->GetPred(), true);
     auto lsign = ValueItemToSignature(top->GetLeft(), true);
     auto rsign = ValueItemToSignature(top->GetRight(), true);
-    auto pvn = GetValueNumberOfSignature(psign);
-    auto lvn = GetValueNumberOfSignature(lsign);
-    auto rvn = GetValueNumberOfSignature(rsign);
-    auto sign = o_sn(STR(top->GetOpCode()), pvn, lvn, rvn);
+    auto sign = o_sn(STR(top->GetOpCode()), psign, lsign, rsign);
     if (gen) {
       auto vn = GetOrGenValueNumberFromSignature(sign);
       return GetSignatureFromValueNumber(vn);
@@ -174,31 +167,38 @@ const SignTy ValueNumbering::ValueListToSignature(const ValueList& vl,
   auto signs = m_sn();
   for (auto vi : vl) {
     auto vis = ValueItemToSignature(vi, gen);
-    NumTy vn = GetInvalidValueNumber();
-    if (gen)
-      vn = GetOrGenValueNumberFromSignature(vis);
-    else
-      vn = GetValueNumberOfSignature(vis);
-    signs->Append(vn);
+    if (gen) GetOrGenValueNumberFromSignature(vis);
+    signs->Append(vis);
   }
   return signs;
 }
 
-// It binds a expression signature with an existing value number.  use it
-// carefully.
+// It associate a expression signature with an existing value number.
+// Note: the valno is still bound to its signature afther the operation.
+//
+//    sign -(alias)-> valno -(bind)-> sign
+//
 void ValueNumbering::AssociateSignatureWithValueNumber(const SignTy& sign,
                                                        const NumTy& valno) {
   if (!IsValid(sign)) choreo_unreachable("signature is invalid.");
   if (!valno.IsValid()) choreo_unreachable("signature is invalid.");
   assert(vntbl.Exists(valno) && "invalid value number is provided.");
-  if (vntbl.Exists(sign))
-    assert((vntbl.GetValueNum(sign) == valno) &&
-           "must associate signature with different value number.");
+  if (vntbl.Exists(sign)) {
+    if (vntbl.GetValueNum(sign) != valno) {
+      vntbl.ReAlias(valno, sign);
+      if (trace)
+        dbgs() << ScopeIndent() << "ReAlias \"" << ToSTR(sign) << "\" -> "
+               << ToSTR(valno) << "\n";
+    }
+    // tolerate alias to the existing ones
+    return;
+  }
 
   vntbl.Alias(valno, sign);
 
   if (trace)
-    dbgs() << ScopeIndent() << "Alias \"" << sign << "\" -> " << valno << "\n";
+    dbgs() << ScopeIndent() << "Alias \"" << ToSTR(sign) << "\" -> "
+           << ToSTR(valno) << "\n";
 }
 
 void ValueNumbering::AssociateSignatureWithInvalidValueNumber(
@@ -209,9 +209,16 @@ void ValueNumbering::AssociateSignatureWithInvalidValueNumber(
   vntbl.DummyGen(sign);
 
   if (trace)
-    dbgs() << ScopeIndent() << "Alias \"" << sign << "\" -> #<invalid>\n";
+    dbgs() << ScopeIndent() << "Alias \"" << ToSTR(sign)
+           << "\" -> #<invalid>\n";
 }
 
+// Note: the valno is NOT bound to old signature after the operation.
+//
+//    sign -(alias)-> valno     (old sign)
+//     ^               |
+//     +--- (bind) --- +
+//
 void ValueNumbering::RebindSignatureWithValueNumber(const SignTy& s,
                                                     const NumTy& v) {
   if (!IsValid(s)) choreo_unreachable("signature is invalid.");
@@ -222,14 +229,13 @@ void ValueNumbering::RebindSignatureWithValueNumber(const SignTy& s,
   vntbl.BindDummy(s, v);
 
   if (trace)
-    dbgs() << ScopeIndent() << "Alias(Rebind) \"" << STR(s) << "\" -> "
-           << STR(v) << "\n";
+    dbgs() << ScopeIndent() << "Alias(Rebind) \"" << ToSTR(s) << "\" -> "
+           << ToSTR(v) << "\n";
 }
 
 const SignTy ValueNumbering::Simplify(const SignTy& sign) {
   if (!IsValid(sign)) choreo_unreachable("signature is invalid.");
-  if (auto mss = MSign(sign); mss && mss->Count() == 1)
-    return SignNum(mss->NumAt(0));
+  if (auto mss = MSign(sign); mss && mss->Count() == 1) return mss->At(0);
 
   // Applies the algebraic simplification
   std::set<OpTy> optimizable = {
@@ -241,13 +247,15 @@ const SignTy ValueNumbering::Simplify(const SignTy& sign) {
                                  const SignTy& rhs) {
     // For multiple signatures, it is possible to generate new intermediate
     // value numbers
-    auto& lvns = MSign(lhs)->AllValueNums();
-    auto& rvns = MSign(rhs)->AllValueNums();
-    assert(lvns.size() == rvns.size());
+    auto& lsns = MSign(lhs)->AllSigns();
+    auto& rsns = MSign(rhs)->AllSigns();
+    assert(lsns.size() == rsns.size());
     auto r_sign = m_sn();
-    for (size_t i = 0; i < lvns.size(); ++i) {
-      auto e_sign = Simplify(o_sn(op, lvns[i], rvns[i]));
-      r_sign->Append(GetOrGenValueNumberFromSignature(e_sign));
+    for (size_t i = 0; i < lsns.size(); ++i) {
+      auto e_sign = Simplify(o_sn(op, lsns[i], rsns[i]));
+      // make sure there is corresponding valno
+      GetOrGenValueNumberFromSignature(e_sign);
+      r_sign->Append(e_sign);
     }
     return r_sign;
   };
@@ -256,41 +264,34 @@ const SignTy ValueNumbering::Simplify(const SignTy& sign) {
   if (!osn) return sign;
 
   auto op = osn->Operation();
-  auto& operands = osn->OperandValueNums();
+  auto& operands = osn->OperandSigns();
 
   if ((operands.size() == 2)) {
-    NumTy lvn = operands[0];
-    NumTy rvn = operands[1];
-    auto lsign = SignNum(lvn);
-    auto rsign = SignNum(rvn);
+    auto lsign = operands[0];
+    auto rsign = operands[1];
 
     if (op == "concat") {
-      auto lns = NumVector(lvn);
-      auto rns = NumVector(rvn);
-      auto r_msn = m_sn();
-      for (const NumTy& n : lns) r_msn->Append(n);
-      for (const NumTy& n : rns) r_msn->Append(n);
-      return r_msn;
+      return Concat(lsign, rsign);
     } else if (optimizable.count(op)) {
       if (lsign->Count() == rsign->Count()) {
         if (lsign->Count() == 1) {
           if (op == "#") { // operation '#' is special
             auto simple_sign = TryToSimplifyBinary("*", lsign, rsign);
             if (!IsUnknown(simple_sign)) return simple_sign;
-            return o_sn("*", lvn, rvn);
+            return o_sn("*", lsign, rsign);
           } else {
             auto simple_sign = TryToSimplifyBinary(op, lsign, rsign);
             if (!IsUnknown(simple_sign)) return simple_sign;
-            return o_sn(op, lvn, rvn);
+            return o_sn(op, lsign, rsign);
           }
         } else
           return HandleMultiSigns(op, MSign(lsign), MSign(rsign));
       } else {
         // else, multivalues operates on a single value
         if (lsign->Count() > rsign->Count())
-          return HandleMultiSigns(op, lsign, m_sn(rvn, lsign->Count()));
+          return HandleMultiSigns(op, lsign, m_sn(rsign, lsign->Count()));
         else
-          return HandleMultiSigns(op, m_sn(lvn, rsign->Count()), rsign);
+          return HandleMultiSigns(op, m_sn(lsign, rsign->Count()), rsign);
       }
     }
   }
@@ -317,8 +318,8 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
     if (*res_vi != *opt_vi) {
       auto res = ValueItemToSignature(opt_vi);
       if (trace && verbose)
-        dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
-               << rhs << " to '" << res << "'\n";
+        dbgs() << ScopeIndent() << "<Simplify> '" << ToSTR(lhs) << " " << op
+               << " " << ToSTR(rhs) << " to '" << ToSTR(res) << "'\n";
       return res;
     }
   }
@@ -360,10 +361,9 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
       for (auto div_vn : bind_set) {
         auto osn = OpSign(SignNum(div_vn));
         if (!osn || !osn->IsOp("/")) continue;
-        auto& div = osn->OperandValueNums();
+        auto& div = osn->OperandSigns();
         assert(div.size() == 2);
-        if (GetValueNumberOfSignature(lhs) == div[0])
-          return Report(GetSignatureFromValueNumber(div[1]));
+        if (NumSign(lhs) == NumSign(div[0])) return Report(div[1]);
       }
     }
   } else if (op == "-") {
@@ -378,9 +378,9 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
       for (auto minus_vn : bind_set) {
         auto osn = OpSign(SignNum(minus_vn));
         if (!osn || !osn->IsOp("-")) continue;
-        auto& minus = osn->OperandValueNums();
+        auto& minus = osn->OperandSigns();
         assert(minus.size() == 2);
-        if (NumSign(rhs) == minus[1]) return Report(SignNum(minus[0]));
+        if (NumSign(rhs) == NumSign(minus[1])) return Report(minus[0]);
       }
     }
   } else if (op == "#") {
@@ -396,9 +396,9 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
       for (auto div_vn : bind_set) {
         auto osn = OpSign(SignNum(div_vn));
         if (!osn || !osn->IsOp("/")) continue;
-        auto& div = osn->OperandValueNums();
+        auto& div = osn->OperandSigns();
         assert(div.size() == 2);
-        if (NumSign(lhs) == div[1]) return Report(SignNum(div[0]));
+        if (NumSign(lhs) == NumSign(div[1])) return Report(div[0]);
       }
     } else if (rhs->Count() == 1) {
       // TODO: # is different with *
@@ -410,9 +410,9 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
       for (auto div_vn : bind_set) {
         auto osn = OpSign(SignNum(div_vn));
         if (!osn || !osn->IsOp("/")) continue;
-        auto& div = osn->OperandValueNums();
+        auto& div = osn->OperandSigns();
         assert(div.size() == 2);
-        if (NumSign(rhs) == div[1]) return Report(SignNum(div[0]));
+        if (NumSign(rhs) == NumSign(div[1])) return Report(div[0]);
       }
     }
   }
@@ -471,8 +471,8 @@ ValueNumbering::GenerateValueNumberFromSignature(const SignTy& signature) {
   NumTy valNo = vntbl.Generate(signature);
 
   if (trace)
-    dbgs() << ScopeIndent() << "New VN " << STR(valNo) << ": '" << signature
-           << "'\n";
+    dbgs() << ScopeIndent() << "New VN " << ToSTR(valNo) << ": '"
+           << ToSTR(signature) << "'\n";
 
   return valNo;
 }
@@ -489,10 +489,10 @@ const std::vector<NumTy> ValueNumbering::Flatten(const NumTy& valno) const {
     assert(val_no.IsValid());
 
     auto valsign = SignNum(val_no);
-    if (auto osn = MSign(valsign)) {
-      auto vns = osn->AllValueNums();
-      for (auto v = vns.rbegin(); v != vns.rend(); v++)
-        work_list.push_front(*v);
+    if (auto msn = MSign(valsign)) {
+      auto sns = msn->AllSigns();
+      for (auto s = sns.rbegin(); s != sns.rend(); s++)
+        work_list.push_front(NumSign(*s));
     } else
       mvn.push_back(val_no);
   }

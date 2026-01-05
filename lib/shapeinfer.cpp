@@ -159,7 +159,7 @@ void ShapeInference::CollapseMultiValues(const AST::MultiValues& mv) {
       auto msn = MSign(val_sign);
       assert(msn);
       for (int i = msn->Count() - 1; i >= 0; --i)
-        work_list.push_front(msn->NumAt(i));
+        work_list.push_front(GetValNum(msn->At(i)));
     }
   };
 
@@ -201,7 +201,7 @@ void ShapeInference::CollapseMultiValues(const AST::MultiValues& mv) {
     assert(!vs.empty());
 
     auto mss = m_sn();
-    for (auto& n : vs) mss->Append(n);
+    for (auto& n : vs) mss->Append(vn.SignNum(n));
 
     auto valno = GetOrGenValNum(vn.Simplify(mss));
     ast_vn.Update(&mv, valno, vnt);
@@ -383,7 +383,7 @@ bool ShapeInference::Visit(AST::MultiDimSpans& n) {
     cur_mdspan_vn = cur_vn;
 
   } else if (n.Rank() > 0) {
-    auto unknown_spans = m_sn(NumTy::Unknown(), n.Rank());
+    auto unknown_spans = m_sn(unk_sn(), n.Rank());
     cur_mdspan_vn = GetOrGenValNum(unknown_spans);
     ast_vn.Update(&n, cur_mdspan_vn, VNKind::VNK_VALUE);
   } else {
@@ -838,7 +838,7 @@ bool ShapeInference::Visit(AST::ParallelBy& n) {
   auto msn = vn.ToMSign(b_sign);
   std::string idx2dim[] = {"x", "y", "z"};
   for (size_t index = 0; index < msn->Count(); ++index) {
-    auto valno = msn->NumAt(index);
+    auto valno = GetValNum(msn->At(index));
     auto id = n.GetSubPV(index);
     std::string pv_name = SSTab().ScopedName("@" + id->name);
     SymbolAliasNum(pv_name, valno);
@@ -911,7 +911,7 @@ bool ShapeInference::Visit(AST::WithIn& n) {
 
   auto sign = vn.ToMSign(mds_sign);
   for (size_t index = 0; index < sign->Count(); ++index) {
-    const NumTy& valno = sign->NumAt(index);
+    const NumTy& valno = GetValNum(sign->At(index));
     if (valno.IsUnknown()) continue; // do not associate it with vn of "?"
     if (n.with) {
       std::string name = SSTab().ScopedName("@" + n.with->name) + "(" +
@@ -1031,26 +1031,22 @@ bool ShapeInference::Visit(AST::DMA& n) {
 
     auto mss = m_sn();
     for (size_t i = 0; i < size; ++i) {
-      auto h_l_sig =
-          vn.Simplify(o_sn("+", GetValNo(*pcfg->pad_high->ValueAt(i)),
-                           GetValNo(*pcfg->pad_low->ValueAt(i))));
-      auto h_l = GetOrGenValNum(h_l_sig);
-      auto h_l_m_sig =
-          vn.Simplify(o_sn("+", h_l, GetValNo(*pcfg->pad_mid->ValueAt(i))));
+      auto h_l_sig = vn.MakeOpSign("+", GetSign(*pcfg->pad_high->ValueAt(i)),
+                                   GetSign(*pcfg->pad_low->ValueAt(i)));
       // now generate signature for original signature plus padding values
-      mss->Append(GetOrGenValNum(h_l_m_sig));
+      mss->Append(
+          vn.MakeOpSign("+", h_l_sig, GetSign(*pcfg->pad_mid->ValueAt(i))));
     }
     // update the cur_vn
-    cur_vn =
-        GetOrGenValNum(vn.Simplify(o_sn("+", cur_vn, GetOrGenValNum(mss))));
+    cur_vn = vn.MakeOpNum("+", cur_vn, GetOrGenValNum(mss));
   } else if (auto tcfg = dyn_cast<TransposeConfig>(n.config)) {
     // gen new vn if and only if n.to is AST::Memory
     if (isa<AST::Memory>(n.to)) {
       auto& dim_values = tcfg->dim_values;
       auto shape_components = vn.NumVector(vn.SignNum(cur_vn));
-      auto mss = m_sn();
-      for (auto dim : dim_values) mss->Append(shape_components[dim]);
-      cur_vn = GetOrGenValNum(mss);
+      std::vector<NumTy> mss;
+      for (auto dim : dim_values) mss.push_back(shape_components[dim]);
+      cur_vn = vn.MakePluralNum(mss);
     }
   }
 
@@ -1088,6 +1084,9 @@ bool ShapeInference::Visit(AST::MMA& n) {
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
     DefineASymbol(op.FillingSymbol(), MakeDummySpannedType());
+    DefineASymbol(op.FillingSymbol() + ".span", MakeUninitMDSpanType());
+    SymbolAliasNoNum(SSTab().InScopeName(op.FillingSymbol()) +
+                     ".span"); // valno is yet invalid
   } break;
   case AST::MMAOperation::Load: {
     auto fty = cast<SpannedType>(op.LoadFrom()->GetType());
@@ -1112,28 +1111,33 @@ bool ShapeInference::Visit(AST::MMA& n) {
     auto asig = m_sn();
     switch (op.GetMethod()) {
     case AST::MMAOperation::ROW_ROW:
-      asig->Append(lsig->NumAt(0));
-      asig->Append(rsig->NumAt(0));
+      asig->Append(lsig->At(0));
+      asig->Append(rsig->At(0));
       break;
     case AST::MMAOperation::ROW_COL:
-      asig->Append(lsig->NumAt(0));
-      asig->Append(rsig->NumAt(1));
+      asig->Append(lsig->At(0));
+      asig->Append(rsig->At(1));
       break;
     case AST::MMAOperation::COL_ROW:
-      asig->Append(lsig->NumAt(1));
-      asig->Append(rsig->NumAt(0));
+      asig->Append(lsig->At(1));
+      asig->Append(rsig->At(0));
       break;
     case AST::MMAOperation::COL_COL:
-      asig->Append(lsig->NumAt(1));
-      asig->Append(rsig->NumAt(1));
+      asig->Append(lsig->At(1));
+      asig->Append(rsig->At(1));
       break;
     default: choreo_unreachable("unsupported mma execution method.");
     }
     cur_vn = GetOrGenValNum(asig);
-    SymbolAliasNum(SSTab().InScopeName(op.ExecOperand(0)), cur_vn);
-    auto s =
+    auto mdsym = SSTab().InScopeName(op.ExecOperand(0)) + ".span";
+    if (!vn.HasValidValueNumberOfSignature(s_sn(mdsym)))
+      SymbolAliasNum(mdsym, cur_vn);
+    auto mty = MakeMDSpanType(GenShape(cur_vn));
+    auto sty =
         MakeSpannedType(fty->ElementType(), GenShape(cur_vn), Storage::REG);
-    SetNodeType(n, s);
+    UpdateSymbolType(op.ExecOperand(0), sty);
+    UpdateSymbolType(op.ExecOperand(0) + ".span", mty);
+    SetNodeType(n, sty);
   } break;
   case AST::MMAOperation::Store: {
   } break;
@@ -1202,7 +1206,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
     if (op->SpecifyReshape()) {
       auto rshp_vn = GetValNo(*op->RShape());
       auto rvi = vn.GenValueListFromValueNumber(rshp_vn);
-      auto cvi = vn.GenValueListFromSignature(m_sn(cur_vns));
+      auto cvi = vn.GenValueListFromSignature(vn.MakePluralSign(cur_vns));
       // check if the mutilplicant is equal
       auto r_count = MultiplyAll(rvi);
       auto c_count = MultiplyAll(cvi);
@@ -1264,8 +1268,8 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
                    "the subspan dimension (dim: " + std::to_string(index) +
                        ") is larger than the data (" + STR(rvi) + " > " +
                        PSTR(lvi) + ").");
-          auto mod_sig = vn.Simplify(o_sn("%", cur_vns[index], tfs_vns[index]));
-          mod_vns.push_back(GetOrGenValNum(mod_sig));
+          auto mod_vn = vn.MakeOpNum("%", cur_vns[index], tfs_vns[index]);
+          mod_vns.push_back(mod_vn);
           res_vns.push_back(tfs_vns[index]);
         } else if (op->OpCode() == AST::SpannedOperation::TILEAT) {
           // block.span = data.span / tiling_factor
@@ -1280,8 +1284,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
                    "the tiling factor (dim: " + std::to_string(index) +
                        ") is larger than the data dimension (" + STR(rvi) +
                        " > " + PSTR(lvi) + ").");
-          auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], tfs_vns[index]));
-          res_vns.push_back(GetOrGenValNum(res_sig));
+          res_vns.push_back(vn.MakeOpNum("/", cur_vns[index], tfs_vns[index]));
         } else if (op->OpCode() == AST::SpannedOperation::TILING) {
           // block.span = data.span / #pos
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
@@ -1291,8 +1294,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
                    "the tiling factor (dim: " + std::to_string(index) +
                        ") is larger than the data dimension (" + STR(rvi) +
                        " > " + STR(lvi) + ").");
-          auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], pos_vns[index]));
-          res_vns.push_back(GetOrGenValNum(res_sig));
+          res_vns.push_back(vn.MakeOpNum("/", cur_vns[index], pos_vns[index]));
         } else
           choreo_unreachable("unsupported operation.");
       }
@@ -1306,16 +1308,15 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       cur_vns = res_vns;
       is_modspan = false;
     }
-    op->SetBlockShape(GenShape(m_sn(res_vns)));
+    op->SetBlockShape(GenShape(vn.MakePluralSign(res_vns)));
   }
 
   Shape block_shape;
   // generate signature for multi-valnos
-  auto b_sign = m_sn(cur_vns);   // signature of the sub-block
-  if (is_modspan) {              // remainder value as the current shape value
-    auto m_sign = m_sn(mod_vns); // specific for modspan operation
-    cur_vn = GetOrGenValNum(m_sign);
-    auto b_valno = GetOrGenValNum(b_sign);
+  auto b_sign = vn.MakePluralSign(cur_vns); // signature of the sub-block
+  if (is_modspan) { // remainder value as the current shape value
+    cur_vn = vn.MakePluralNum(mod_vns); // specific for modspan operation
+    auto b_valno = GetValNum(b_sign);
     block_shape = GenShape(b_valno);
   } else
     cur_vn = GetOrGenValNum(b_sign);
@@ -1791,18 +1792,18 @@ const SignTy ShapeInference::SignSpan(const AST::Node& n) {
       return vn.ValueItemToSignature(s.ElementCountValue(), true);
     }
     auto signature = o_sn(e->op);
-    if (e->GetC()) signature->Append(GetValNo(*e->GetC()));
+    if (e->GetC()) signature->Append(GetSign(*e->GetC()));
     if (e->GetL()) {
       if (HasValNo(*e->GetL(), VNKind::VNK_MDSPAN))
-        signature->Append(GetValNo(*e->GetL(), VNKind::VNK_MDSPAN));
+        signature->Append(GetSign(*e->GetL(), VNKind::VNK_MDSPAN));
       else
-        signature->Append(GetValNo(*e->GetL()));
+        signature->Append(GetSign(*e->GetL()));
     }
     assert(e->GetR() && "expression is invalid.");
     if (HasValNo(*e->GetR(), VNKind::VNK_MDSPAN))
-      signature->Append(GetValNo(*e->GetR(), VNKind::VNK_MDSPAN));
+      signature->Append(GetSign(*e->GetR(), VNKind::VNK_MDSPAN));
     else
-      signature->Append(GetValNo(*e->GetR()));
+      signature->Append(GetSign(*e->GetR()));
     auto sign = vn.Simplify(signature);
     if (sign != signature) {
       VST_DEBUG(dbgs() << vn.ScopeIndent() << "<Simplify> '" << STR(n) << ": '"
@@ -1839,8 +1840,8 @@ const SignTy ShapeInference::SignNode(const AST::Node& n) {
       // negative number must add the ubound
       if (ii->IsNegative()) {
         auto signature = o_sn("+");
-        signature->Append(GetValNo(*e->GetL(), VNKind::VNK_UBOUND));
-        signature->Append(GetValNo(*ii->Val()));
+        signature->Append(GetSign(*e->GetL(), VNKind::VNK_UBOUND));
+        signature->Append(GetSign(*ii->Val()));
         auto sign = vn.Simplify(signature);
         if (sign != signature) {
           VST_DEBUG(dbgs() << vn.ScopeIndent() << "<Simplify> '" << STR(n)
@@ -1876,10 +1877,10 @@ const SignTy ShapeInference::SignNode(const AST::Node& n) {
     if (e->IsReference()) return GetSign(n);
     if (e->op == "ubound") return GetSign(*e->GetR(), VNKind::VNK_UBOUND);
     auto signature = o_sn(e->op);
-    if (e->GetC()) signature->Append(GetValNo(*e->GetC()));
-    if (e->GetL()) signature->Append(GetValNo(*e->GetL()));
+    if (e->GetC()) signature->Append(GetSign(*e->GetC()));
+    if (e->GetL()) signature->Append(GetSign(*e->GetL()));
     assert(e->GetR() && "expression is invalid.");
-    signature->Append(GetValNo(*e->GetR()));
+    signature->Append(GetSign(*e->GetR()));
     auto sign = vn.Simplify(signature);
     if (sign != signature) {
       VST_DEBUG(dbgs() << vn.ScopeIndent() << "<Simplify> '" << STR(n) << ": '"
@@ -1939,17 +1940,17 @@ ShapeInference::SignBounded(const AST::Node& n) {
       } else if (e->op == "#") {
         if (IsActualBoundedIntegerType(lhs.GetType()) &&
             IsActualBoundedIntegerType(rhs.GetType())) {
-          auto lvn = GetValNo(lhs, VNKind::VNK_UBOUND);
-          auto rvn = GetValNo(rhs, VNKind::VNK_UBOUND);
-          ub_sign = vn.Simplify(o_sn("*", lvn, rvn));
+          auto lsn = GetSign(lhs, VNKind::VNK_UBOUND);
+          auto rsn = GetSign(rhs, VNKind::VNK_UBOUND);
+          ub_sign = vn.Simplify(o_sn("*", lsn, rsn));
         } else
           choreo_unreachable("operation is not permitted.");
       } else if (e->op == "#+" || e->op == "#-") {
         if (IsActualBoundedIntegerType(lhs.GetType()) &&
             isa<ScalarIntegerType>(rhs.GetType())) {
-          auto lvn = GetValNo(lhs, VNKind::VNK_UBOUND);
-          auto rvn = GetValNo(rhs, VNKind::VNK_VALUE);
-          ub_sign = vn.Simplify(o_sn(e->op.substr(1), lvn, rvn));
+          auto lsn = GetSign(lhs, VNKind::VNK_UBOUND);
+          auto rsn = GetSign(rhs, VNKind::VNK_VALUE);
+          ub_sign = vn.Simplify(o_sn(e->op.substr(1), lsn, rsn));
         } else
           choreo_unreachable("operation is not permitted.");
       } else
@@ -2060,7 +2061,7 @@ const NumTy ShapeInference::GenValNo(const AST::Node& n) {
         if ((size_t)index >= msign->Count())
           Error1(n.LOC(), "out of bound in 'dimof'.");
 
-        NumTy valno = vn.ToMSign(msign)->NumAt(index);
+        NumTy valno = GetValNum(vn.ToMSign(msign)->At(index));
         ast_vn.Update(e, valno, VNKind::VNK_VALUE);
         return valno;
       } else if (ast_vn.Hit(e->GetL().get(), VNKind::VNK_VALUE)) {
@@ -2070,7 +2071,7 @@ const NumTy ShapeInference::GenValNo(const AST::Node& n) {
         if ((size_t)index >= msign->Count())
           Error1(n.LOC(), "out of bound in 'dimof'.");
 
-        NumTy valno = vn.ToMSign(msign)->NumAt(index);
+        NumTy valno = GetValNum(vn.ToMSign(msign)->At(index));
         ast_vn.Update(e, valno, VNKind::VNK_VALUE);
         return valno;
       } else if (ast_vn.Hit(e->GetL().get(), VNKind::VNK_UBOUND)) {
@@ -2079,11 +2080,11 @@ const NumTy ShapeInference::GenValNo(const AST::Node& n) {
         if ((size_t)index >= msign->Count())
           Error1(n.LOC(), "out of bound in 'dimof'.");
 
-        NumTy valno = vn.ToMSign(msign)->NumAt(index);
+        NumTy valno = GetValNum(vn.ToMSign(msign)->At(index));
         ast_vn.Update(e, valno, VNKind::VNK_VALUE);
 
         SignTy usign = GetSign(*e->GetL(), VNKind::VNK_UBOUND);
-        NumTy uvalno = vn.ToMSign(usign)->NumAt(index);
+        NumTy uvalno = GetValNum(vn.ToMSign(usign)->At(index));
         ast_vn.Update(e, uvalno, VNKind::VNK_UBOUND);
         return uvalno;
       } else

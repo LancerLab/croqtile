@@ -212,6 +212,10 @@ private:
     vn.AssociateSignatureWithValueNumber(s_sn(symbol), valno);
   }
 
+  void SymbolAliasNoNum(const std::string& symbol) {
+    vn.AssociateSignatureWithInvalidValueNumber(s_sn(symbol));
+  }
+
   void SymbolRebindNum(const std::string& symbol, const NumTy& valno) {
     vn.RebindSignatureWithValueNumber(s_sn(symbol), valno);
   }
@@ -245,6 +249,17 @@ public:
   // enable NodeType to retrieve a scoped name
   ptr<Type> GetSymbolType(const std::string& n) const override {
     return SSTab().LookupSymbol(n);
+  }
+
+  void UpdateSymbolType(const std::string& n, const ptr<Type>& ty) {
+    VST_DEBUG(dbgs() << " |-<symtab> update `" << n
+                     << "': " << PSTR(GetSymbolType(n)));
+    if (SSTab().ModifySymbolType(n, ty)) {
+      VST_DEBUG(dbgs() << " -> " << PSTR(ty) << "\n");
+    } else {
+      VST_DEBUG(dbgs() << " FAILED! No symbol to modify.\n");
+      choreo_unreachable("internal error: failed to update symbol type.");
+    }
   }
 
   ptr<Type> NodeType(const AST::Node& n) const override;
