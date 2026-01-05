@@ -1,4 +1,3 @@
-// REQUIRES: TARGET-GCUALL
 // RUN: choreo -es -adf %s -o - 2>&1 | FileCheck %s
 __cok__ {
   __device__ void getVoid();
@@ -20,6 +19,6 @@ __co__ void func() {
 
 // CHECK: error: Missing default argument on 3th parameter
 // CHECK: error: can not initialize `d' with a void type.
-// CHECK: error: `e' with a type of "unknown mdspan<>" can not be declared as 'mutable'.
+// CHECK: error: `e' with a type of "unk mdspan<>" can not be declared as 'mutable'.
 // CHECK: error: `f' with a type of "s32 mdspan<>" can not be declared as 'mutable'.
 // CHECK: warning: can not infer the type of `g' from the initialization expression '
