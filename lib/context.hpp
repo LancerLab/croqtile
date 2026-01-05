@@ -366,11 +366,20 @@ public:
     if (!mri) return false;
     return mri->infos.count(sto);
   }
-  // TODO: give error if there is no exec of mma
+  bool FragHasMMAType(const std::string& scoped_frag_name) const {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    return frag_mma_type.count(scoped_frag_name);
+  }
   bool FragIsWMMA(const std::string& scoped_frag_name) const {
     if (!PrefixedWith(scoped_frag_name, "::"))
       choreo_unreachable("expect the fragament name is scoped.");
     return frag_mma_type.at(scoped_frag_name) == MMAType::WMMA;
+  }
+  bool FragIsCTMMA(const std::string& scoped_frag_name) const {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    return frag_mma_type.at(scoped_frag_name) == MMAType::CTMMA;
   }
   // WGMMA-specific methods
   bool FragIsWGMMA(const std::string& scoped_frag_name) const {

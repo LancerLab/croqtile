@@ -992,6 +992,19 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     return true;
   }
 
+  if (auto e = dyn_cast<AST::Expr>(n.init_expr))
+    if (auto sa = dyn_cast<AST::SpanAs>(e->GetReference())) {
+      if (IsHost()) choreo_unreachable("span-as should be on device side.");
+      ds << d_indent << "auto* " << sym << " = ";
+      auto tty = GetSymbolType(sa->id->name);
+      if (isa<FutureType>(tty))
+        ds << sa->id->name << ".data();\n";
+      else
+        ds << sa->id->name << ";\n";
+      ssm.MapDeviceSymbol(InScopeName(sym), sym);
+      return true;
+    }
+
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     auto buf_sym = sym + "__device";
     // globals are declared in host, while shareds/locals are declared in device
@@ -2048,9 +2061,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
 bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
-  if (FCtx(fname).FragIsWGMMA(InScopeName(op.GetFragSym()))) {
+  std::string scoped_frag_name = InScopeName(op.GetFragSym());
+  if (!FCtx(fname).FragHasMMAType(scoped_frag_name)) {
+    Error1(n.LOC(), "the MMA operation of `" + scoped_frag_name +
+                        "` cannot be executed.");
+    choreo_unreachable(
+        "MMA information is incomplete (maybe lack of mma exec).");
+  }
+
+  if (FCtx(fname).FragIsWGMMA(scoped_frag_name)) {
     // WGMMA codegen path (128-thread warp group) using PTX inline assembly
-    auto& ssmi = cgi.GetSymbolMMA(InScopeName(op.GetFragSym()));
+    auto& ssmi = cgi.GetSymbolMMA(scoped_frag_name);
     // Determine accumulator type: f32 for f16->f32, f16 for f16->f16
     std::string accum_type = (ssmi.ty == BaseType::F16) ? "f16" : "f32";
     switch (op.Tag()) {
@@ -2173,7 +2194,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     } break;
     default: break;
     }
-  } else if (FCtx(fname).FragIsWMMA(InScopeName(op.GetFragSym()))) {
+  } else if (FCtx(fname).FragIsWMMA(scoped_frag_name)) {
     auto FragSTR = [](MMAInfo::Fragment frag) {
       switch (frag) {
       case MMAInfo::FRAG_A: return "matrix_a";
@@ -2265,7 +2286,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     } break;
     default: break;
     }
-  } else {
+  } else if (FCtx(fname).FragIsCTMMA(scoped_frag_name)) {
     // CUTE MMA api name in choreo
     auto GetMMAAtomName = [](MMAInfo& ssmi) -> std::string {
       std::string CUTE_MMA_ATOM = "CUTE_MMA_M" + STR(ssmi.shape.at(0)) + "N" +
@@ -2402,6 +2423,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     default: break;
     }
     return "";
+  } else {
+    choreo_unreachable("unexpect mma type!");
   }
   return true;
 }
