@@ -2046,7 +2046,7 @@ struct Policy_A_M8N8K16 {
     uint32_t a0 = 0;
     // TODO: if use recast, res error
 #pragma unroll
-    for (int i = 0; i < 4; i++)
+    for (int i = 3; i >= 0; i--)
       a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row, col + i)));
     return cutlass::Array<uint32_t, 1>{a0};
   }
@@ -2177,11 +2177,11 @@ struct Policy_A_M16N8K16 {
       int col = tid_in_group * 4;
       uint32_t a0 = 0;
 #pragma unroll
-      for (int i = 0; i < 4; i++)
+      for (int i = 3; i >= 0; i--)
         a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col + i)));
       uint32_t a1 = 0;
 #pragma unroll
-      for (int i = 0; i < 4; i++)
+      for (int i = 3; i >= 0; i--)
         a1 = (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col + i)));
       return cutlass::Array<uint32_t, 2>{a0, a1};
     } else {
@@ -2216,22 +2216,22 @@ struct Policy_A_M16N8K32 {
       int col1 = tid_in_group * 4 + 16;
       uint32_t a0 = 0;
 #pragma unroll
-      for (int i = 0; i < 4; i++)
+      for (int i = 3; i >= 0; i--)
         a0 =
             (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col0 + i)));
       uint32_t a1 = 0;
 #pragma unroll
-      for (int i = 0; i < 4; i++)
+      for (int i = 3; i >= 0; i--)
         a1 =
             (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col0 + i)));
       uint32_t a2 = 0;
 #pragma unroll
-      for (int i = 0; i < 4; i++)
+      for (int i = 3; i >= 0; i--)
         a2 =
             (a2 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col1 + i)));
       uint32_t a3 = 0;
 #pragma unroll
-      for (int i = 0; i < 4; i++)
+      for (int i = 3; i >= 0; i--)
         a3 =
             (a3 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col1 + i)));
       return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
@@ -2284,10 +2284,10 @@ struct Policy_B_M8N8K4 {
         col = lane & 3;
       else
         col = (lane & 3) + 4;
-      uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(0, col))) << 16) |
-                    uint16_t(reinterpret_cast<uint16_t&>(B(1, col)));
-      uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(2, col))) << 16) |
-                    uint16_t(reinterpret_cast<uint16_t&>(B(3, col)));
+      uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(1, col))) << 16) |
+                    uint16_t(reinterpret_cast<uint16_t&>(B(0, col)));
+      uint32_t b1 = (uint32_t(reinterpret_cast<uint16_t&>(B(3, col))) << 16) |
+                    uint16_t(reinterpret_cast<uint16_t&>(B(2, col)));
       return cutlass::Array<uint32_t, 2>{b0, b1};
     } else if constexpr (std::is_same<value_type, double>::value) {
       int row = lane & 3;
@@ -2312,7 +2312,7 @@ struct Policy_B_M8N8K16 {
     int col = gid;
     uint32_t b0 = 0;
 #pragma unroll
-    for (int i = 0; i < 4; i++)
+    for (int i = 3; i >= 0; i--)
       b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(row + i, col)));
     return cutlass::Array<uint32_t, 1>{b0};
   }
@@ -2376,8 +2376,9 @@ struct Policy_B_M16N8K8 {
     if constexpr (std::is_same<value_type, f16>::value ||
                   std::is_same<value_type, bf16>::value) {
       int row = tid_in_group * 2;
-      uint32_t b0 = (uint32_t(reinterpret_cast<uint16_t&>(B(row, col))) << 16) |
-                    uint16_t(reinterpret_cast<uint16_t&>(B(row + 1, col)));
+      uint32_t b0 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row + 1, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row, col)));
       return cutlass::Array<uint32_t, 1>{b0};
     } else if constexpr (std::is_same<value_type, tf32>::value ||
                          std::is_same<value_type, float>::value) {
@@ -2418,11 +2419,11 @@ struct Policy_B_M16N8K16 {
       int row1 = tid_in_group * 2 + 8;
       int col = gid;
       uint32_t b0 =
-          (uint32_t(reinterpret_cast<uint16_t&>(B(row0, col))) << 16) |
-          uint16_t(reinterpret_cast<uint16_t&>(B(row0 + 1, col)));
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row0 + 1, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row0, col)));
       uint32_t b1 =
-          (uint32_t(reinterpret_cast<uint16_t&>(B(row1, col))) << 16) |
-          uint16_t(reinterpret_cast<uint16_t&>(B(row1 + 1, col)));
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row1 + 1, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row1, col)));
       return cutlass::Array<uint32_t, 2>{b0, b1};
     } else if constexpr (std::is_same<value_type, uint8_t>::value ||
                          std::is_same<value_type, int8_t>::value ||
@@ -2432,7 +2433,7 @@ struct Policy_B_M16N8K16 {
       int col = gid;
       uint32_t b0 = 0;
 #pragma unroll
-      for (int i = 0; i < 4; i++)
+      for (int i = 3; i >= 0; i--)
         b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(row + i, col)));
       return cutlass::Array<uint32_t, 1>{b0};
     } else {
@@ -2458,15 +2459,15 @@ struct Policy_B_M16N8K32 {
                   std::is_same<typename Tensor::value_type, f8_e4m3>::value ||
                   std::is_same<typename Tensor::value_type, f8_e5m2>::value) {
       uint32_t b0 =
-          (uint32_t(reinterpret_cast<uint8_t&>(B(row0, col))) << 24) |
-          (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 1, col))) << 16) |
-          (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 2, col))) << 8) |
-          uint8_t(reinterpret_cast<uint8_t&>(B(row0 + 3, col)));
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 3, col))) << 24) |
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 2, col))) << 16) |
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row0 + 1, col))) << 8) |
+          uint8_t(reinterpret_cast<uint8_t&>(B(row0, col)));
       uint32_t b1 =
-          (uint32_t(reinterpret_cast<uint8_t&>(B(row1, col))) << 24) |
-          (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 1, col))) << 16) |
-          (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 2, col))) << 8) |
-          uint8_t(reinterpret_cast<uint8_t&>(B(row1 + 3, col)));
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 3, col))) << 24) |
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 2, col))) << 16) |
+          (uint32_t(reinterpret_cast<uint8_t&>(B(row1 + 1, col))) << 8) |
+          uint8_t(reinterpret_cast<uint8_t&>(B(row1, col)));
 
       return cutlass::Array<uint32_t, 2>{b0, b1};
     } else {

@@ -163,10 +163,10 @@ private:
           auto bcount = xyz(bleaf, pb);
           for (auto itr = leaves.begin() + 1; itr != leaves.end(); ++itr) {
             auto bc = xyz(*itr, pb);
-              if (!sbe::ceq(bcount, bc))
-                Error1((*itr)->LOC(), "mulitple inner parallel-bys must have "
-                                     "compatible block dimension " + STR(bcount) +
-                                     " != " + STR(bc) + ".");
+            if (!sbe::ceq(bcount, bc))
+              Error1((*itr)->LOC(), "mulitple inner parallel-bys must have "
+                                    "compatible block dimension " +
+                                        STR(bcount) + " != " + STR(bc) + ".");
           }
         }
         auto& lcs = cgi.GetFunctionLaunches(fname);
