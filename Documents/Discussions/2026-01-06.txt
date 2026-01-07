@@ -1,0 +1,13 @@
+Qwen-3 operations:
+
+1. MOE top-k f32: dynamic input shape. (p0)
+2. MOE gemm bf16, f16: shapes? (p0)
+3. Attention, Sampling (p1)
+4. GGUF (TODO, p2)
+
+AR:
+- Bob: top-k/gemm shape.
+- Bob/Albert/Garfee: environment setting-up.
+- Sijie: top-K.
+- Enming: gemm.
+- Albert/Garfee: decouple code for opensource.
