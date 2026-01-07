@@ -2237,11 +2237,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             break;
           case AST::MMAOperation::ExecMethod::COL_COL:
           case AST::MMAOperation::ExecMethod::COL_ROW:
-            wmma_major = "nvcuda::wmma::row_major";
+            wmma_major = "nvcuda::wmma::col_major";
             break;
           default: choreo_unreachable("invalid MMA execution method");
           }
-        } else {
+        } else if (ssmi.frag == MMAInfo::FRAG_B) {
           switch (ssmi.method) {
           case AST::MMAOperation::ExecMethod::ROW_COL:
           case AST::MMAOperation::ExecMethod::COL_COL:

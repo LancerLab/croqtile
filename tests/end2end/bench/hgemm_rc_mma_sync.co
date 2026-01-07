@@ -1,3 +1,6 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute -arch=sm_86 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
 #define M 256
 #define N 256
 #define K 256
@@ -53,3 +56,5 @@ int main() {
 
   std::cout << "Test Passed\n" << std::endl;
 }
+
+// CHECK: Test Passed
