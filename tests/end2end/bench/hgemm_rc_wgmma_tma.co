@@ -1,0 +1,65 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 256 
+#define N 256 
+#define K 256 
+
+__co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;
+
+  // each block handles 64x64 block with WGMMA
+  // WGMMA requires 128 threads (4 warps x 32 threads/warp)
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      // load 64x64 to smem
+      // Test new syntax: dma.copy.swizzle(128)
+      lhs_load_s = tma.copy.swizzle(128) lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+      // WGMMA requires 128 threads: 4 warps x 32 threads/warp
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swizzle(128) lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;   // row * col : c += a * b;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+  lhs.fill_random(0, 2);
+  rhs.fill_random(0, 2);
+  // lhs.fill(1.0);
+  // rhs.fill(1.0);
+
+  auto res = matmul(lhs.view(), rhs.view());
+
+  float tolerance = 0.01f;
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      __half ref = 0.0f;
+      for (size_t k = 0; k < lhs.shape()[1]; ++k)
+        ref += __half2float(lhs[i][k]) * __half2float(rhs[j][k]);
+      auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
+      // std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
+      if (delta >= tolerance) {
+        std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
+      }
+      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

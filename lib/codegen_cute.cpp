@@ -25,6 +25,24 @@
 using namespace Choreo;
 using namespace Choreo::Cute;
 
+// TMA_Swizzle enum and cuda_stringify helper for code generation
+enum class TMA_Swizzle {
+  NONE = 0,  // No swizzle
+  B32 = 1,   // 32B swizzle
+  B64 = 2,   // 64B swizzle
+  B128 = 3   // 128B swizzle
+};
+
+inline const char* cuda_stringify(TMA_Swizzle swizzle) {
+  switch (swizzle) {
+  case TMA_Swizzle::NONE: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE";
+  case TMA_Swizzle::B32: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_32B";
+  case TMA_Swizzle::B64: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_64B";
+  case TMA_Swizzle::B128: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B";
+  default: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE";
+  }
+}
+
 extern Option<bool> native_f16;
 extern Option<bool> native_bf16;
 extern Option<bool> verbose;
@@ -3269,6 +3287,26 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     auto g_shape = gmem_ty->GetShape();
     auto t_shape = g_ca->GetBlockShape();
     auto map_name = desc.GetName() + "_tensor_map";
+
+    // Convert swizzle value to TMA_Swizzle enum and get CUtensorMapSwizzle string
+    int swizzle_val = desc.GetSwizzleValue();
+    TMA_Swizzle tma_swizzle;
+    switch (swizzle_val) {
+    case 32:
+      tma_swizzle = TMA_Swizzle::B32;
+      break;
+    case 64:
+      tma_swizzle = TMA_Swizzle::B64;
+      break;
+    case 128:
+      tma_swizzle = TMA_Swizzle::B128;
+      break;
+    default:
+      tma_swizzle = TMA_Swizzle::NONE;
+      break;
+    }
+    std::string cu_swizzle_str = cuda_stringify(tma_swizzle);
+
     hs << h_indent << "uint64_t " << desc.GetName() << "_shape[] = {"
        << ValueSTR(Reverse(g_shape.Value())) << "};\n"; // shape of buffer
     // For TMA, strides should be in the same order as shape (not reversed)
@@ -3297,7 +3335,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent
        << "        CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE,\n";
     hs << h_indent
-       << "        CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE,\n";
+       << "        " << cu_swizzle_str << ",\n";
     hs << h_indent
        << "        CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE,\n";
     hs << h_indent

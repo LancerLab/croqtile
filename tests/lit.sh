@@ -314,7 +314,7 @@ check_specific() {
     if [[ "${tgt}" == "GCU400" ]]; then set_add tst_targets "gcu400";
     elif [[ "${tgt}" == "GCU300" ]]; then set_add tst_targets "gcu300";
     elif [[ "${tgt}" == "GCU210" ]]; then set_add tst_targets "gcu210";
-    elif [[ "${tgt}" == "SM_90" ]]; then set_add tst_targets "sm_90";
+    elif [[ "${tgt}" == "SM_90" ]]; then set_add tst_targets "sm_90" "sm_90a";
     elif [[ "${tgt}" == "SM_90A" ]]; then set_add tst_targets "sm_90a";
     elif [[ "${tgt}" == "SM_"* ]]; then set_add tst_targets "$(tolower ${tgt})";
     elif [[ "${tgt}" == "GCUALL" ]]; then

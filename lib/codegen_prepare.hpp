@@ -252,7 +252,8 @@ public:
         auto& tma_descs = cgi.GetTMADescs();
         tma_descs[block_pb].emplace_back(n.GetFrom(), n.GetTo(),
                                          InScopeName(n.GetFrom()->RefSymbol()),
-                                         InScopeName(n.GetTo()->RefSymbol()));
+                                         InScopeName(n.GetTo()->RefSymbol()),
+                                         n.GetSwizzleValue());
       } else
         choreo_unreachable(
             "unsupport TMA direction: " + STR(fsty->GetStorage()) + " => " +

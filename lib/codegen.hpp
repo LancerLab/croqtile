@@ -148,11 +148,12 @@ private:
   std::string f_sym; // scoped symbol
   std::string t_sym;
   uint16_t idx;
+  int swizzle_value = 0;  // Default to NONE (no swizzle)
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
-          const std::string& fs, const std::string& ts)
-      : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++) {
+          const std::string& fs, const std::string& ts, int swizzle = 0)
+      : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++), swizzle_value(swizzle) {
     assert(from && to);
     auto fty = GetSpannedType(from->GetType());
     auto tty = GetSpannedType(to->GetType());
@@ -183,6 +184,7 @@ public:
   const ptr<AST::ChunkAt> GetTo() const { return to; }
   const std::string GetFromSymbol() const { return f_sym; }
   const std::string GetToSymbol() const { return t_sym; }
+  int GetSwizzleValue() const { return swizzle_value; }
 
   const std::string GetName() const {
     return "__choreo_tma_" + std::to_string(idx);

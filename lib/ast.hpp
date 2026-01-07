@@ -2355,7 +2355,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 private:
   bool async;
   bool enforce_tma;
-  int swizzle_value = 128;       // Default to 128B swizzle
+  int swizzle_value = 0;         // Default to NONE (no swizzle)
   bool swizzle_explicit = false; // Whether swizzle was explicitly specified
 
 public:
