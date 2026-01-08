@@ -534,6 +534,11 @@ inline std::string MMAConfig2WGMMAName(const MMAConfig& mma_config,
   return DelimitedString(strs, sep);
 }
 
+inline std::vector<BaseType> InferResultType() {
+  // TODO
+  return {};
+}
+
 } // namespace MMALimit
 
 } // end namespace Choreo

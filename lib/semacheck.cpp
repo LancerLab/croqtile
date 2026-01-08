@@ -124,10 +124,12 @@ bool SemaChecker::VisitNode(AST::MultiDimSpans& n) {
         }
   return true;
 }
+
 bool SemaChecker::VisitNode(AST::NamedTypeDecl& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
+
 bool SemaChecker::VisitNode(AST::NamedVariableDecl& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
@@ -954,7 +956,7 @@ bool SemaChecker::ReportUnknownSymbol(const std::string& name,
                                       const location& loc, const char* file,
                                       int line) {
   if (isa<UnknownType>(GetSymbolType(name))) {
-    Error1(loc, "failed to obtain the type of " + name + ".");
+    Error1(loc, "failed to obtain the type of `" + name + "'.");
     VST_DEBUG(dbgs() << file << ":" << line << "\n");
     return false;
   }
@@ -970,11 +972,6 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
     return false;
   }
 
-  // dbgs() << "checking node = " << STR(n) << "\n";
-  // dbgs() << "checking node = " << PSTR(NodeType(n)) << "\n";
-  // dbgs() << "ignore_detail = " << ignore_detail << "\n";
-  // dbgs() << "has-sufficient-info = " << NodeType(n)->HasSufficientInfo() <<
-  // "\n";
   if (!ignore_detail && !NodeType(n)->HasSufficientInfo()) {
     Error1(n.LOC(), "failed to obtain a type with sufficient info.");
     VST_DEBUG(dbgs() << file << ":" << line << ", " << STR(n) << "("

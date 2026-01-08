@@ -574,16 +574,15 @@ inline const std::string STR(const NumTy& v) { return v.ToString(); }
 
 using Choreo::STR;
 
-// Assumptions:
+// Note:
 //  1. A value number is 1-1 mapped with a constant signature.
 //  2. If not representing constant, the value number and its signatures are 1-n
-//  mapped, where multiple signaturea could have a same value number.
-//  3. signatures are scoped. Any signature exists on scope stack indicates an
+//  mapped, where multiple signatures could have a same value number.
 //  valid expression.
 class ValueNumberTable {
 private:
-  // a signature may either be inside the scoped_sign or const_pool
-  std::unordered_map<SignTy, NumTy> scoped_sign;
+  // a signature may either be inside the sign_pool or const_pool
+  std::unordered_map<SignTy, NumTy> sign_pool;
   std::unordered_map<SignTy, NumTy> const_pool;
   std::unordered_map<NumTy, std::vector<SignTy>> value_nums;
 
@@ -597,14 +596,7 @@ private:
   bool IsConstant(const SignTy& s) const { return isa<ConstSign>(s); }
 
   bool ValueNumExists(const SignTy& expr) const {
-#if 0
-    for (auto expr_valno = scoped_sign.rbegin();
-         expr_valno != scoped_sign.rend(); expr_valno++) {
-      if (!expr_valno->count(expr)) continue;
-      return true;
-    }
-#endif
-    if (scoped_sign.count(expr)) return true;
+    if (sign_pool.count(expr)) return true;
     return const_pool.count(expr) != 0;
   }
 
@@ -623,14 +615,7 @@ public:
   bool Exists(NumTy vn) const { return SignatureExists(vn); }
 
   NumTy GetValueNum(const SignTy& expr) const {
-    if (scoped_sign.count(expr)) return scoped_sign.at(expr);
-#if 0
-    for (auto expr_valno = scoped_sign.rbegin();
-         expr_valno != scoped_sign.rend(); expr_valno++) {
-      if (!expr_valno->count(expr)) continue;
-      return expr_valno->at(expr);
-    }
-#endif
+    if (sign_pool.count(expr)) return sign_pool.at(expr);
     if (const_pool.count(expr) == 0)
       choreo_unreachable("can not find valno of expression : " + STR(expr) +
                          ".");
@@ -656,7 +641,7 @@ public:
     if (IsConstant(s))
       const_pool.emplace(s, vn);
     else
-      scoped_sign.emplace(s, vn);
+      sign_pool.emplace(s, vn);
 
     value_nums.at(vn).push_back(s);
   }
@@ -670,18 +655,9 @@ public:
                          " does not exists.");
     if (IsConstant(s)) choreo_unreachable("ReAlias fails: constant.");
 
-#if 0
-    for (auto expr_valno = scoped_sign.rbegin();
-         expr_valno != scoped_sign.rend(); expr_valno++) {
-      if (!expr_valno->count(s)) continue;
-      (*expr_valno)[s] = vn;
-    }
-#endif
-
-    scoped_sign[s] = vn;
+    sign_pool[s] = vn;
     auto& signs = value_nums[vn];
     signs.erase(std::remove(signs.begin(), signs.end(), s), signs.end());
-    //    if (signs.empty()) value_nums.erase(vn);
   }
 
   // specific: take a dummy signature in (not associated with an invalid valno)
@@ -690,7 +666,7 @@ public:
 
     if (Exists(s)) choreo_unreachable("signature: " + STR(s) + " exists.");
 
-    scoped_sign.emplace(s, GetInvalidValueNumber());
+    sign_pool.emplace(s, GetInvalidValueNumber());
   }
 
   // Generate a valno for the new signature
@@ -708,7 +684,7 @@ public:
     if (IsConstant(s))
       const_pool.emplace(s, valno);
     else
-      scoped_sign.emplace(s, valno);
+      sign_pool.emplace(s, valno);
 
     value_nums.emplace(valno, std::vector<SignTy>{});
     value_nums[valno].push_back(s);
@@ -729,49 +705,18 @@ public:
     if (GetValueNum(s).IsValid())
       choreo_unreachable("signature: " + STR(s) + " has a valid valno.");
 
-#if 0
-    for (auto expr_valno = scoped_sign.rbegin();
-         expr_valno != scoped_sign.rend(); expr_valno++) {
-      if (!expr_valno->count(s)) continue;
-      (*expr_valno)[s] = v;
-    }
-#endif
-
-    scoped_sign[s] = v;
+    sign_pool[s] = v;
 
     value_nums[v].push_back(s);
   }
 
 public:
-  void EnterScope() {
-    // scoped_sign.push_back({});
-  }
-  void LeaveScope() {
-#if 0
-    assert(!scoped_sign.empty());
-
-    for (auto& item : scoped_sign.back()) {
-      // Dummy Signature is not associated with a valid valno
-      if (!item.second.IsValid()) continue;
-
-      auto& signs = value_nums[item.second];
-      signs.erase(std::remove(signs.begin(), signs.end(), item.first),
-                  signs.end());
-      // remove the valno entry totally when no signatures is mapped
-      if (signs.empty()) value_nums.erase(item.second);
-    }
-
-    // drop all the signatures in the frame
-    scoped_sign.pop_back();
-
-    // reset value number when leaving the function scope
-    if (scoped_sign.size() <= 1) Reset();
-#endif
-  }
+  void EnterScope() {}
+  void LeaveScope() {}
 
 public:
   void Print(std::ostream& os) const {
-    for (auto& item : scoped_sign)
+    for (auto& item : sign_pool)
       os << "expr: \"" << item.first << "\", valno: " << item.second << "\n";
     for (auto& item : const_pool)
       os << "const: \"" << item.first << "\", valno: " << item.second << "\n";

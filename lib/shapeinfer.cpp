@@ -532,8 +532,8 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
                      << STR(SymVal(InScopeName(name)).GetVals()) << "\n");
   }
 
-  if (isa<FutureType>(n.GetType()) || isa<SpannedType>(n.GetType()))
-    DefineASymbol(name + ".span", GetSpannedType(n.GetType())->GetMDSpanType());
+  if (auto sty = GetSpannedType(n.GetType()))
+    DefineASymbol(name + ".span", sty->GetMDSpanType());
 
   cur_mdspan_vn.Invalidate(); // stop propagation
   cur_vn.Invalidate();
@@ -1731,7 +1731,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
     return true;
   }
   // mutable integers can now be valued
-  if (IsMutable(*nty) && !isa<ScalarIntegerType>(nty)) return false;
+  // if (isa<ScalarIntegerType>(nty) && IsMutable(*nty)) return true;
   if (isa<EventType>(nty)) return false;
   if (isa<StringType>(nty)) return false;
   if (isa<VoidType>(nty)) return false;

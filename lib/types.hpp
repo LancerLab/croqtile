@@ -1651,7 +1651,7 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   }
 
   BaseType ElementType() const { return e_type; }
-  const ptr<MDSpanType> GetSpanType() { return s_type; }
+  const ptr<MDSpanType> GetMDSpanType() { return s_type; }
   size_t Dims() const override { return s_type->Dims(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override {
@@ -1684,7 +1684,6 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   }
 
   Shape GetShape() const { return s_type->GetShape(); }
-  ptr<MDSpanType> GetMDSpanType() { return s_type; }
   const ptr<MDSpanType> GetMDSpanType() const { return s_type; }
 
   bool RuntimeShaped() const {
@@ -3045,7 +3044,13 @@ inline static ptr<Type> MutateType(const ptr<Type>& ty) {
 
 inline bool IsMutable(const Type& ty) {
   auto sty = dyn_cast<ScalarType>(&ty);
-  if (!sty) return false;
+  if (!sty) {
+    // spanned are always mutable
+    if (isa<SpannedType>(&ty))
+      return true;
+    else
+      return false;
+  }
   return sty->IsMutable();
 }
 

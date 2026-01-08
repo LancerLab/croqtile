@@ -31,9 +31,11 @@ private:
   bool ModifySymbolType(const location&, const std::string&, const ptr<Type>&);
   void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
     n.SetType(ty);
-    if (debug_visit)
-      dbgs() << "Set type of " << STR(n) << " AS '" << PSTR(n.GetType())
-             << "'\n";
+    if (debug_visit) {
+      dbgs() << " |- node type: `";
+      n.InlinePrint(dbgs());
+      dbgs() << "' -> '" << PSTR(n.GetType()) << "'\n";
+    }
   }
 
   void TraceEachVisit(const AST::Node& n) {

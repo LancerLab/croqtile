@@ -120,12 +120,6 @@ inline std::string TYPE_STR(const std::shared_ptr<AST::Node>& n) {
   return STR(*n->GetType());
 }
 
-template <typename N>
-const ptr<N> CloneP(const ptr<N>& i) {
-  if (i == nullptr) return nullptr;
-  return cast<N>(i->Clone());
-}
-
 //---------------------------------------------------------------------------//
 
 // A group of nodes
@@ -1043,9 +1037,13 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   ptr<MultiValues> indices = nullptr;
   ptr<SCEV> scev = nullptr;
 
+private:
+  bool is_decl = false; // decl or ref
+
+public:
   DataAccess(const location& l, const ptr<Identifier>& i,
-             const ptr<MultiValues>& m = nullptr)
-      : Node(l), data(i), indices(m) {
+             const ptr<MultiValues>& m = nullptr, bool isd = false)
+      : Node(l), data(i), indices(m), is_decl(isd) {
     assert(i != nullptr && "no data is specified.");
     if (m) assert((m->Count() > 0) && "requires at least one index.");
   }
@@ -1058,6 +1056,8 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   ptr<SCEV> GetSCEV() const { return scev; }
 
   bool AccessElement() const { return indices != nullptr; }
+  void SetDecl(bool isd = true) { is_decl = isd; }
+  bool IsDecl() const { return is_decl; }
 
   const std::vector<ptr<Node>>& GetIndices() const {
     if (!indices) choreo_unreachable("unexpected null indices.");
@@ -1065,7 +1065,7 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<DataAccess>(LOC(), CloneP(data), CloneP(indices));
+    return Make<DataAccess>(LOC(), CloneP(data), CloneP(indices), is_decl);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1093,10 +1093,6 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
   ptr<DataAccess> da = nullptr;
   ptr<Node> value = nullptr;
 
-private:
-  // if it is actually a declaration
-  bool is_decl = true;
-
 public:
   explicit Assignment(const location& l, const std::string& n,
                       const ptr<Node>& v)
@@ -1106,12 +1102,11 @@ public:
                       const ptr<Node>& v)
       : Node(l), da(n), value(v) {}
 
-  void SetDecl(bool d) { is_decl = d; }
-  bool IsDecl() const { return is_decl; }
+  void SetDecl(bool d = true) { da->SetDecl(d); }
+  bool IsDecl() const { return da->IsDecl(); }
 
   ptr<Node> CloneImpl() const override {
     auto c = Make<Assignment>(LOC(), CloneP(da), CloneP(value));
-    c->is_decl = is_decl;
     return c;
   }
 

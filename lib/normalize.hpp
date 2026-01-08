@@ -643,6 +643,7 @@ public:
     auto assign = AST::Make<AST::Assignment>(n.to->LOC(), anon_sym, n.to);
     assign->SetType(n.to->GetType()->Clone());
     assign->da->SetType(n.to->GetType()->Clone());
+    assign->SetDecl();
     InsertNode(index, assign, anon_sym);
     VST_DEBUG(dbgs() << n.TypeNameString() << ": replace-0 " << PSTR(n.to)
                      << " with " << anon_sym << "(" << PSTR(assign->GetType())
@@ -664,6 +665,7 @@ public:
           AST::Make<AST::Assignment>(n.sa->LOC(), n.sa->nid->name, n.sa);
       assign->SetType(n.sa->GetType()->Clone());
       assign->da->SetType(n.sa->GetType()->Clone());
+      assign->SetDecl();
       InsertNode(index, assign, n.sa->nid->name);
       VST_DEBUG(dbgs() << n.TypeNameString() << ": replace-1 " << PSTR(n.sa)
                        << " with " << n.sa->nid->name << "("
@@ -684,6 +686,7 @@ public:
       auto sa = AST::Make<AST::SpanAs>(
           id->LOC(), cast<AST::Identifier>(n.data->Clone()), id, mv);
       auto assign = AST::Make<AST::Assignment>(id->LOC(), nname, sa);
+      assign->SetDecl();
       auto sty = cast<SpannedType>(n.GetType());
       auto nty = MakeRankedSpannedType(so->GetRank(), sty->ElementType(),
                                        sty->GetStorage());
@@ -719,6 +722,7 @@ public:
                                                        nname, expr->GetL());
               assign->SetType(expr->GetL()->GetType()->Clone());
               assign->da->SetType(expr->GetL()->GetType()->Clone());
+              assign->SetDecl();
               InsertNode(index, assign, nname);
               VST_DEBUG(dbgs()
                         << n.TypeNameString() << ": replace-2 "
@@ -740,6 +744,7 @@ public:
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, v);
         assign->SetType(v->GetType()->Clone());
         assign->da->SetType(v->GetType()->Clone());
+        assign->SetDecl();
         InsertNode(index, assign, nname);
         repls.emplace_back(i, AST::MakeIdExpr(v->LOC(), nname));
         VST_DEBUG(dbgs() << n.TypeNameString() << ": replace-3 " << PSTR(v)
@@ -876,6 +881,7 @@ public:
               auto lty = bound_expr->GetL()->GetType();
               assign->SetType(lty);
               assign->da->SetType(lty);
+              assign->SetDecl();
               InsertNode(index, assign, nname);
               VST_DEBUG(dbgs() << "range - getith: replace "
                                << PSTR(bound_expr->GetL()) << "\n with "
@@ -896,6 +902,7 @@ public:
         auto bty = bound_expr->GetType();
         assign->SetType(bty);
         assign->da->SetType(bty);
+        assign->SetDecl();
         InsertNode(index, assign, nname);
         auto id_expr = AST::MakeIdExpr(v->LOC(), nname);
         id_expr->SetType(bty);

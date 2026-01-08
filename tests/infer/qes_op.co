@@ -93,9 +93,9 @@ __co__ void qes_op(int u_x, int u_y, float _f, double _d) {
 // VALNO:   New VN #21: '?:#19:#20:#11'
 // VALNO:   Alias "::qes_op::u_5" -> #21
 // VALNO:   New VN #22: 'const_0.500000f'
-// VALNO:   New VN #23: 'const_1.500000f'
-// VALNO:   New VN #24: 'const_-0.500000'
-// VALNO:   New VN #25: 'const_1.700000'
+// VALNO:   New VN #24: 'const_1.500000f'
+// VALNO:   New VN #26: 'const_-0.500000'
+// VALNO:   New VN #28: 'const_1.700000'
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::qes_op::u_x, Type: s32

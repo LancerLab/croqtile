@@ -3872,7 +3872,9 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     // currently, value of IntIndex is always IntLiteral or Identifier
     return OpExprSTR(ii->value, parent_op, true, is_host);
   } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
-    if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
+    if (da->AccessElement()) {
+      auto sty = GetSpannedType(GetSymbolType(da->data->name));
+      assert(sty && "can only access the element of a spanned type.");
       oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
           << OpExprSTR(da->data, "+", true, is_host);
       size_t idx = 0;
@@ -3909,9 +3911,12 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       }
       oss << ")";
     } else {
-      assert(!da->AccessElement());
-      assert(!within_map.count(InScopeName(da->data->name)));
-      oss << UnScopedName(SSMName(InScopeName(da->data->name), is_host));
+      if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
+        // TODO: high-level tensor operations
+      } else {
+        assert(!within_map.count(InScopeName(da->data->name)));
+        oss << UnScopedName(SSMName(InScopeName(da->data->name), is_host));
+      }
     }
   } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
     // codegen for scalar type cast

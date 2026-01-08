@@ -387,6 +387,39 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       // with nodes like:
       //   a {1 + (1)}
       SetNodeType(n, lty->Clone());
+    } else if (isa<SpannedType>(lty) || isa<SpannedType>(rty)) {
+      // For spanned arithmetics, shape consistent check is deferred
+      auto lety = BaseType::UNKSCALAR;
+      auto rety = BaseType::UNKSCALAR;
+      bool no_support = false;
+      if (auto lsty = dyn_cast<SpannedType>(lty))
+        lety = lsty->ElementType();
+      else if (isa<ScalarType>(lty))
+        lety = lty->GetBaseType();
+      else
+        no_support = true;
+
+      if (auto rsty = dyn_cast<SpannedType>(rty))
+        rety = rsty->ElementType();
+      else if (isa<ScalarType>(rty))
+        rety = rty->GetBaseType();
+      else
+        no_support = true;
+
+      if (lety != BaseType::UNKSCALAR && rety != BaseType::UNKSCALAR &&
+          lety != rety)
+        no_support = true;
+
+      if (no_support)
+        Error1(n.LOC(), "in operation \"" + n.op +
+                            "\": unable to apply to the types (" + PSTR(lty) +
+                            " vs. " + PSTR(rty) + ").");
+
+      if (auto lsty = dyn_cast<SpannedType>(lty))
+        SetNodeType(n, lsty->Clone());
+      else if (auto rsty = dyn_cast<SpannedType>(rty))
+        SetNodeType(n, rsty->Clone());
+
     } else if (!lty->ApprxEqual(*rty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
                           "\": unable to apply to the types (" + PSTR(lty) +
@@ -1131,7 +1164,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
   // Decide if it is a declaration or assignment
   if (!SSTab().IsDeclared(n.GetName()))
-    n.SetDecl(true);
+    n.SetDecl();
   else {
     // We must distiguish new decl with assignment
     //
@@ -1140,7 +1173,8 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     //
     // if 'symbol' is mutable, (1) is an assignment. Or else, it is creating a
     // new symbol with identical nameof the outer scope.
-    if (IsMutable(*NodeType(*n.da)))
+    auto ety = NodeType(*n.da);
+    if (IsMutable(*ety))
       n.SetDecl(false);
     else {
       if (!SSTab().DeclaredInScope(n.GetName())) {

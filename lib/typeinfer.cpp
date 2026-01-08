@@ -1,6 +1,7 @@
 #include "typeinfer.hpp"
 
 #include "ast.hpp"
+#include "target_utils.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -82,8 +83,8 @@ bool TypeInference::AssignSymbolWithType(const location& loc,
     return false;
   }
 
-  VST_DEBUG(dbgs() << "Assign symbol `" << sym << "` with type: " << STR(*ty)
-                   << "\n");
+  VST_DEBUG(dbgs() << " |- symbol type: `" << sym << "` -> '" << STR(*ty)
+                   << "''\n");
 
   return true;
 }
@@ -115,8 +116,8 @@ bool TypeInference::ModifySymbolType(const location& loc,
     return false;
   }
 
-  VST_DEBUG(dbgs() << "Modify symbol `" << name << "` with type: " << STR(*ty)
-                   << "\n");
+  VST_DEBUG(dbgs() << " |- modify type: `" << name << "` -> '" << STR(*ty)
+                   << "'\n");
 
   return true;
 }
@@ -337,17 +338,19 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
 bool TypeInference::Visit(AST::DataAccess& n) {
   TraceEachVisit(n);
 
-#if 0
+  // type is not ready for a decl
+  if (n.IsDecl()) return true;
+
+  // It is a reference
   auto dty = GetSymbolType(n.LOC(), n.GetDataName());
+  SetNodeType(*n.data, dty);
+
   if (n.AccessElement()) {
     auto sty = cast<SpannedType>(dty);
     SetNodeType(n, MakeScalarType(sty->ElementType()));
   } else
     SetNodeType(n, dty);
-#endif
-  if (!n.AccessElement()) return true;
-  auto dty = GetSymbolType(n.LOC(), n.GetDataName());
-  SetNodeType(*n.data, dty);
+
   return true;
 }
 
@@ -497,9 +500,8 @@ bool TypeInference::Visit(AST::Expr& n) {
     if (auto id = dyn_cast<AST::Identifier>(ref)) {
       if (auto pty = GetSymbolType(n.LOC(), id->name)) {
         // special handling of the span-of spanned type
-        if (SuffixedWith(id->name, ".span")) {
+        if (SuffixedWith(id->name, ".span"))
           assert(isa<MDSpanType>(pty) && "incorrect type annotated.");
-        }
         SetNodeType(n, pty);
         cur_type = n.GetType();
         return true;
@@ -518,7 +520,7 @@ bool TypeInference::Visit(AST::Expr& n) {
       return false;
     }
 
-    SetNodeType(n, ref->GetType());
+    SetNodeType(n, NodeType(*ref));
     cur_type = n.GetType();
     return true;
   }
@@ -573,8 +575,8 @@ bool TypeInference::Visit(AST::Expr& n) {
       return true;
     }
 
-    auto& pty_lhs = n.GetL()->GetType();
-    auto& pty_rhs = n.GetR()->GetType();
+    auto pty_lhs = NodeType(*n.GetL());
+    auto pty_rhs = NodeType(*n.GetR());
 
     if (n.IsCompare()) {
       if ((IsActualBoundedIntegerType(pty_lhs) && ConvertibleToInt(pty_rhs)) ||
@@ -714,12 +716,18 @@ bool TypeInference::Visit(AST::Expr& n) {
                CanYieldAnInteger(pty_lhs)) {
       bool is_mutable = IsMutable(*pty_lhs) || IsMutable(*pty_rhs);
       SetNodeType(n, MakeIntegerType(is_mutable));
+    } else if (isa<SpannedType>(pty_lhs) || isa<SpannedType>(pty_rhs)) {
+      // set to any operand for later check
+      if (isa<SpannedType>(pty_lhs))
+        SetNodeType(n, pty_lhs);
+      else if (isa<SpannedType>(pty_rhs))
+        SetNodeType(n, pty_rhs);
     } else if (*pty_lhs != *pty_rhs) {
       Error1(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                           "' binary operation.");
       return false;
     } else {
-      SetNodeType(n, n.GetR()->GetType());
+      SetNodeType(n, NodeType(*n.GetR()));
     }
     cur_type = n.GetType();
     return true;
@@ -727,8 +735,8 @@ bool TypeInference::Visit(AST::Expr& n) {
 
   if (n.GetForm() == AST::Expr::Ternary) {
     if (n.op == "?") {
-      auto& pty_lhs = n.GetL()->GetType();
-      auto& pty_rhs = n.GetR()->GetType();
+      auto pty_lhs = NodeType(*n.GetL());
+      auto pty_rhs = NodeType(*n.GetR());
 
       if (pty_lhs->HasSufficientInfo() && pty_rhs->HasSufficientInfo()) {
         if (CanYieldAnInteger(pty_lhs) && CanYieldAnInteger(pty_rhs)) {
@@ -760,9 +768,9 @@ bool TypeInference::Visit(AST::Expr& n) {
 
 bool TypeInference::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
-  auto cast_from = n.GetR()->GetType();
+  auto cast_from = NodeType(*n.GetR());
   SetNodeType(n, MakeScalarType(n.ToType(), true));
-  VST_DEBUG(dbgs() << "cast type of node `" << PSTR(n.GetR()) << "`:\n\t`"
+  VST_DEBUG(dbgs() << " |- type node cast: `" << PSTR(n.GetR()) << "`:\n\t`"
                    << PSTR(cast_from) << "` to `" << PSTR(n.GetType())
                    << "`\n");
   cur_type = n.GetType();
@@ -856,10 +864,17 @@ bool TypeInference::Visit(AST::MMA& n) {
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
     auto fill_ty = MakeSpannedType(op.FillingType(), GenUninitShape());
+    // any usage of this symbol is illegal util the inference happens
     AssignSymbolWithType(n.LOC(), op.FillingSymbol(), fill_ty);
+    AssignSymbolWithType(n.LOC(), op.FillingSymbol() + ".span",
+                         fill_ty->GetMDSpanType());
   } break;
   case AST::MMAOperation::Load: {
     AssignSymbolWithType(n.LOC(), op.GetFuture(), n.GetType()->Clone());
+    auto sty = GetSpannedType(n.GetType());
+    assert(sty && "expect a spanned type.");
+    AssignSymbolWithType(n.LOC(), op.GetFuture() + ".span",
+                         sty->GetMDSpanType()->Clone());
     if (CCtx().ShowInferredTypes()) {
       dbgs() << "Future:    " << InScopeName(op.GetFuture())
              << ", Type: " << AST::TYPE_STR(n) << "\n";
@@ -869,17 +884,35 @@ bool TypeInference::Visit(AST::MMA& n) {
     auto acc_ty = GetSymbolType(n.LOC(), op.ExecOperand(0));
     auto sty = GetSpannedType(acc_ty);
     auto ety = sty->ElementType();
-    ptr<Type> mc_ty = nullptr;
-    // mc type is explicit annotated
+    ptr<SpannedType> mc_ty = nullptr;
+    auto nsty = cast<SpannedType>(n.GetType());
+    // mc type is explicit annotated, set it
     if (ety != BaseType::UNKSCALAR) {
-      auto shape = cast<SpannedType>(n.GetType())->GetShape();
+      auto shape = nsty->GetShape();
       auto storage = sty->GetStorage();
       mc_ty = MakeSpannedType(ety, shape, storage);
-      SetNodeType(n, mc_ty);
     } else {
-      mc_ty = n.GetType()->Clone();
+      mc_ty = cast<SpannedType>(n.GetType());
     }
+
+    // element type must be inferred
+    if (mc_ty->ElementType() == BaseType::UNKSCALAR) {
+      auto candidate_tys = MMALimit::InferResultType();
+      if (candidate_tys.empty())
+        Error1(n.LOC(), "Failed to infer the element type of `" +
+                            op.ExecOperand(0) +
+                            ". Please explicitly annotate.");
+      else {
+        auto shape = mc_ty->GetShape();
+        auto storage = mc_ty->GetStorage();
+        mc_ty = MakeSpannedType(candidate_tys.front(), shape, storage);
+      }
+    }
+
     ModifySymbolType(n.LOC(), op.ExecOperand(0), mc_ty);
+    SetNodeType(n, mc_ty);
+    auto mcs_ty = mc_ty->GetMDSpanType()->Clone();
+    ModifySymbolType(n.LOC(), op.ExecOperand(0) + ".span", mcs_ty);
     if (CCtx().ShowInferredTypes()) {
       dbgs() << "Symbol:    " << InScopeName(op.ExecOperand(0))
              << ", Type: " << AST::TYPE_STR(n) << "\n";

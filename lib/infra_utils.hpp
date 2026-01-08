@@ -139,6 +139,13 @@ ptr<T> cast_dbg(const ptr<U>& n) {
   }
   return t;
 }
+
+template <typename N>
+const ptr<N> CloneP(const ptr<N>& i) {
+  if (i == nullptr) return nullptr;
+  return cast<N>(i->Clone());
+}
+
 } // end namespace Choreo
 
 #endif // __CHOREO_INFRA_UTILITY_HPP__
