@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "ast.hpp"
+#include "choreo_cute_header.inc"
 #include "choreo_header.inc"
 #include "codegen.hpp"
 #include "operator_info.hpp"
@@ -940,7 +941,7 @@ bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
         // Only the globals are declared in host.
         // The shareds/locals are declared in device.
         auto sym = UnScopedName(item.name);
-        std::string bts = NameBaseType(sty->ElementType(), false);
+        std::string bts = NameBaseType(sty->ElementType());
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
@@ -1035,7 +1036,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     bool spmem = false; // allocatable scratchpad memory: share, local
 
     auto HandleGlobal = [&]() -> void {
-      bts = NameBaseType(sty->ElementType(), false); // use the device type name
+      bts = NameBaseType(sty->ElementType()); // use the device type name
 
       if (IsChoreoOutput(InScopeName(sym))) {
         // the sym is choreo output
@@ -1200,7 +1201,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       auto st = mem->Get();
       Stream() << CudaDeviceMemory(st) << " ";
     }
-    Stream() << NameBaseType(GetBaseType(*nty), false) << " " << sym;
+    Stream() << NameBaseType(GetBaseType(*nty)) << " " << sym;
     if (n.init_expr) Stream() << " = " << ExprSTR(n.init_expr, false);
     Stream() << ";\n";
 
@@ -1287,6 +1288,9 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 bool CuteCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
+  // self-updating operation has been generated already
+  if (n.HasNote("update")) return true;
+
   if (!n.AssignToDataElement()) {
     auto name = n.GetName();
     bool ref = n.HasNote("ref");
@@ -1335,8 +1339,8 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
     assert(!IsHost() && "span-as should be on device side.");
     ds << d_indent << "auto * " << n.GetName() << " = ";
     auto tty = GetSymbolType(sa->id->name);
-    ds << "static_cast<" << NameBaseType(dyn_cast<SpannedType>(nty)->ElementType())
-       << "*>(";
+    ds << "static_cast<"
+       << NameBaseType(dyn_cast<SpannedType>(nty)->ElementType()) << "*>(";
     if (isa<FutureType>(tty))
       ds << sa->id->name << ".data());\n";
     else
@@ -1729,7 +1733,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
   if (t_sty->GetStorage() == Storage::GLOBAL && use_hetero_tileflow &&
       IsHost()) {
-    std::string bts = NameBaseType(t_sty->ElementType(), false);
+    std::string bts = NameBaseType(t_sty->ElementType());
     auto buf_sym = t_sym + "__device";
     auto buf_sym_from = f_sym + "__device";
     if (n.operation == ".copy") {
@@ -1767,7 +1771,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
        IsChoreoInput(InScopeName(t_sym))) &&
       IsHost()) {
     if (n.IsAsync()) choreo_unreachable("not support host-side async dma yet");
-    std::string bts = NameBaseType(t_sty->ElementType(), false);
+    std::string bts = NameBaseType(t_sty->ElementType());
     std::string buf_sym_from;
     std::string buf_sym;
     std::string tops_dma_kind = "cudaMemcpy";
@@ -2111,6 +2115,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         choreo_unreachable(
             "expect the length of wgmma fragment to be integer but not symbol");
       reg_num_d = *VIInt(frag_len);
+
       ds << d_indent << NameBaseType(acc_dtype) << " " << sym << "_frag["
          << reg_num_d << "];\n";
       // TODO: only support init with 0 for now
@@ -2118,6 +2123,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
          << "_frag));\n";
       // Signal warp group that we're about to start WGMMA operations
       ds << d_indent << "warpgroup_arrive();\n";
+      ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
     } break;
     case AST::MMAOperation::Load: {
       auto sym = op.LoadTo();
@@ -2147,6 +2153,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
          << major_order << ", " << swizzle_enum << ">(" << sym
          << "_smem_ptr);\n";
+      ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
     } break;
     case AST::MMAOperation::Exec: {
       // Detect memory layout based on MMA execution method
@@ -2240,6 +2247,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ds << d_indent << "nvcuda::wmma::fill_fragment(" << sym << "_frag, ("
          << NameBaseType(ssmi.ty) << ")" << ExprSTR(op.FillingValue(), false)
          << ");\n";
+      ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
     } break;
     case AST::MMAOperation::Load: {
       auto sym = op.LoadTo();
@@ -2281,7 +2289,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
         ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
            << ExprSTR(op.LoadFrom(), false) << ", "
-           << fty->GetShape().ValueAt(fty->GetShape().Rank()-1) << ");\n";
+           << fty->GetShape().ValueAt(fty->GetShape().Rank() - 1) << ");\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
       } else if (ssmi.frag == MMAInfo::FRAG_C) {
         ds << d_indent
            << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
@@ -2290,7 +2299,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << sym << "_frag;\n";
         ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
            << ExprSTR(op.LoadFrom(), false) << ", "
-           << fty->GetShape().ValueAt(fty->GetShape().Rank()-1) << ", nvcuda::wmma::mem_row_major);\n";
+           << fty->GetShape().ValueAt(fty->GetShape().Rank() - 1)
+           << ", nvcuda::wmma::mem_row_major);\n";
       } else {
         choreo_unreachable("unexpect MMA frag");
       }
@@ -3381,7 +3391,7 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
   else if (isa<EventType>(&ty))
     return "bool"; // use bool for event
   else if (auto sty = dyn_cast<SpannedType>(&ty))
-    return std::string(NameBaseType(sty->ElementType(), false)) + " *";
+    return std::string(NameBaseType(sty->ElementType())) + " *";
   else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
     // There should have no BoundedIntegerType.
     // They have been normalized to BoundedITupleType.
@@ -3498,6 +3508,8 @@ NVCC_LIB=${CUDA_LIB}/lib
   // place the choreo header
   os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
   os << __choreo_header_as_string << "\nEOF\n\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo_cute.h\n";
+  os << __choreo_cute_header_as_string << "\nEOF\n\n";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
   for (auto& code : code_segments) os << code << "\n";
@@ -3755,7 +3767,7 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   case BT::U16: [[fallthrough]];
   case BT::S8: [[fallthrough]];
   case BT::U8: {
-    auto nbt = NameBaseType(t, is_host);
+    auto nbt = NameBaseType(t);
     if (IsIntegralType(f))
       res << "static_cast<" << nbt << ">(" << value << ")";
     else if (IsFloatType(f)) {
@@ -3845,8 +3857,9 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       for (auto iv_name : within_map.at(InScopeName(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
             << UnScopedName(ssm.DeviceName(iv_name));
-    } else
+    } else {
       oss << UnScopedName(SSMName(InScopeName(id->name), is_host));
+    }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
@@ -3907,11 +3920,12 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       }
       oss << ")";
     } else {
-      if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
-        // TODO: high-level tensor operations
+      auto sym = da->data->name;
+      if (auto sty = GetSpannedType(GetSymbolType(sym))) {
+        oss << UnScopedName(SSMName(InScopeName(sym), is_host));
       } else {
         assert(!within_map.count(InScopeName(da->data->name)));
-        oss << UnScopedName(SSMName(InScopeName(da->data->name), is_host));
+        oss << UnScopedName(SSMName(InScopeName(sym), is_host));
       }
     }
   } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
@@ -4103,7 +4117,7 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
   for (auto& a : n.GetArguments()) {
     oss << ((i++ == 0) ? "" : ", ");
     if (auto sty = GetSpannedType(NodeType(*a))) {
-      std::string bts{NameBaseType(sty->ElementType(), IsHost())};
+      std::string bts{NameBaseType(sty->ElementType())};
       auto m_ty = sty->GetStorage();
       auto mem_attr = CudaParamStorage(m_ty);
       if (a->HasNote("annotate_as") && !mem_attr.empty())
@@ -4126,17 +4140,31 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
 
 const std::string CuteCodeGen::EmitSpannedArith(AST::Expr& e) const {
   std::ostringstream oss;
+  oss << "choreo::nv_cute::warp_cooperative::"; // namespace
+  bool emitted = false;
   if (e.IsBinary()) {
     auto& l = e.GetL();
     auto& r = e.GetR();
     auto lty = NodeType(*l);
     auto rty = NodeType(*r);
+    auto lsty = GetSpannedType(lty);
+    auto rsty = GetSpannedType(rty);
     auto& op = e.GetOp();
-    if (op == "+") {
+    if (lsty && isa<ScalarType>(rty)) {
+      if (lsty->GetStorage() == Storage::REG) {
+        assert(l->HasNote("update"));
+        oss << "fragment_scalar_elementwise(" << ExprSTR(l, false) << ","
+            << ExprSTR(r, false) << ", [](" << NameBaseType(lsty->ElementType())
+            << "* a, " << NameBaseType(lsty->ElementType())
+            << "b) { return a + b };);\n";
+        emitted = true;
+      }
+    }
+  }
 
-    } else
-      choreo_unreachable("unsupported spanned arithmetic operation");
-  } else
+  if (!emitted) {
     choreo_unreachable("unsupported spanned arithmetic operation");
+    return "";
+  }
   return oss.str();
 }

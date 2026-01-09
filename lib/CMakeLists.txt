@@ -14,6 +14,7 @@ add_custom_command(
 
 file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo.h CHOREO_HEADER_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo_cuda.h CHOREO_CUDA_HEADER_CONTENT)
+file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo_cute.h CHOREO_CUTE_HEADER_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/scripts/factor_script.sh FACTOR_SCRIPT_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/scripts/cuda_script.sh CUDA_SCRIPT_CONTENT)
 
@@ -25,6 +26,11 @@ configure_file(
 configure_file(
   ${CMAKE_SOURCE_DIR}/scripts/choreo_cuda_header_template.in
   ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc
+  @ONLY
+)
+configure_file(
+  ${CMAKE_SOURCE_DIR}/scripts/choreo_cute_header_template.in
+  ${CMAKE_BINARY_DIR}/choreo_cute_header.inc
   @ONLY
 )
 configure_file(
@@ -52,6 +58,7 @@ add_custom_target(
   ${CMAKE_BINARY_DIR}/cuda_script.inc
   ${CMAKE_BINARY_DIR}/factor_script.inc
   ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc
+  ${CMAKE_BINARY_DIR}/choreo_cute_header.inc
   ${CMAKE_BINARY_DIR}/choreo_header.inc
 )
 

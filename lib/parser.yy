@@ -1298,8 +1298,10 @@ assignment
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
         } else {
           auto da = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1));
-          $$ = AST::Make<AST::Assignment>(@3,
-              da, AST::Make<AST::Expr>(@2, $2, AST::Make<AST::Expr>(@1, da), $4));
+          auto da_expr = AST::Make<AST::Expr>(@1, da);
+          da_expr->AddNote("update");
+          $$ = AST::Make<AST::Assignment>(@3, da, AST::Make<AST::Expr>(@2, $2, da_expr, $4));
+          $$->AddNote("update");
         }
       }
     | IDENTIFIER ASSIGN select_expr {

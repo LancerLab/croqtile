@@ -34,7 +34,7 @@ enum CodeSegment {
   CS_CO,
 };
 
-inline const char* NameBaseType(BaseType bt, bool = true) {
+inline const char* NameBaseType(BaseType bt) {
   switch (bt) {
   case BaseType::F64: return "double";
   case BaseType::TF32: return "tf32";

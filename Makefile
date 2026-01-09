@@ -179,6 +179,14 @@ choreo_cuda_header.inc : $(RT_DIR)/choreo_cuda.h
 	echo ")\";" >> $@
 	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
 
+choreo_cute_header.inc : $(RT_DIR)/choreo_cuda.h
+	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
+	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
+	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@
+	cat $< >> $@
+	echo ")\";" >> $@
+	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
+
 factor_script.inc : scripts/factor_script.sh
 	echo "#ifndef __CHOREO_FACTOR_SCRIPT_H__" > $@
 	echo "#define __CHOREO_FACTOR_SCRIPT_H__" >> $@

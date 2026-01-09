@@ -1114,6 +1114,7 @@ public:
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Assign";
     if (with_type) os << (IsDecl() ? "(decl)" : "");
+    // if (HasNote("update")) os << "(u)";
     os << ": ";
     da->Print(os, "", with_type);
     os << " = ";
