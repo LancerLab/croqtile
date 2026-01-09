@@ -1335,10 +1335,12 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
     assert(!IsHost() && "span-as should be on device side.");
     ds << d_indent << "auto * " << n.GetName() << " = ";
     auto tty = GetSymbolType(sa->id->name);
+    ds << "static_cast<" << NameBaseType(dyn_cast<SpannedType>(nty)->ElementType())
+       << "*>(";
     if (isa<FutureType>(tty))
-      ds << sa->id->name << ".data();\n";
+      ds << sa->id->name << ".data());\n";
     else
-      ds << sa->id->name << ";\n";
+      ds << sa->id->name << ");\n";
     ssm.MapDeviceSymbol(InScopeName(n.GetName()), n.GetName());
     return true;
   }
@@ -2279,7 +2281,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
         ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
            << ExprSTR(op.LoadFrom(), false) << ", "
-           << fty->GetShape().ValueAt(1) << ");\n";
+           << fty->GetShape().ValueAt(fty->GetShape().Rank()-1) << ");\n";
       } else if (ssmi.frag == MMAInfo::FRAG_C) {
         ds << d_indent
            << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
@@ -2288,7 +2290,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << sym << "_frag;\n";
         ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
            << ExprSTR(op.LoadFrom(), false) << ", "
-           << fty->GetShape().ValueAt(1) << ", nvcuda::wmma::mem_row_major);\n";
+           << fty->GetShape().ValueAt(fty->GetShape().Rank()-1) << ", nvcuda::wmma::mem_row_major);\n";
       } else {
         choreo_unreachable("unexpect MMA frag");
       }
