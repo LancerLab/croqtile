@@ -250,10 +250,9 @@ public:
            (tsty->GetStorage() == Storage::GLOBAL ||
             tsty->GetStorage() == Storage::DEFAULT))) {
         auto& tma_descs = cgi.GetTMADescs();
-        tma_descs[block_pb].emplace_back(n.GetFrom(), n.GetTo(),
-                                         InScopeName(n.GetFrom()->RefSymbol()),
-                                         InScopeName(n.GetTo()->RefSymbol()),
-                                         n.GetSwizzleValue());
+        tma_descs[block_pb].emplace_back(
+            n.GetFrom(), n.GetTo(), InScopeName(n.GetFrom()->RefSymbol()),
+            InScopeName(n.GetTo()->RefSymbol()), n.GetSwizzleValue());
       } else
         choreo_unreachable(
             "unsupport TMA direction: " + STR(fsty->GetStorage()) + " => " +

@@ -2642,19 +2642,22 @@ struct Policy_D_M16N8 {
 // --------------- TMA primitives (SM90+) ---------------
 // TMA SWIZZLE pattern enum for CUtensorMapSwizzle
 enum class TMA_Swizzle {
-  NONE = 0,  // No swizzle
-  B32 = 1,   // 32B swizzle
-  B64 = 2,   // 64B swizzle
-  B128 = 3   // 128B swizzle
+  NONE = 0, // No swizzle
+  B32 = 1,  // 32B swizzle
+  B64 = 2,  // 64B swizzle
+  B128 = 3  // 128B swizzle
 };
 
-// Helper function to convert TMA_Swizzle to CUtensorMapSwizzle string representation
+// Helper function to convert TMA_Swizzle to CUtensorMapSwizzle string
+// representation
 inline constexpr const char* cuda_stringify(TMA_Swizzle swizzle) {
   switch (swizzle) {
-  case TMA_Swizzle::NONE: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE";
+  case TMA_Swizzle::NONE:
+    return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE";
   case TMA_Swizzle::B32: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_32B";
   case TMA_Swizzle::B64: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_64B";
-  case TMA_Swizzle::B128: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B";
+  case TMA_Swizzle::B128:
+    return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B";
   default: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE";
   }
 }

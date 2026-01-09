@@ -108,6 +108,54 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
 
     EmitAssertion(asrt0, message, expr->LOC(), expr);
     EmitAssertion(asrt1, message, expr->LOC(), expr);
+  } else if (n.IsBinary() && n.IsArith()) {
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
+    auto lsty = dyn_cast<SpannedType>(lty);
+    auto rsty = dyn_cast<SpannedType>(rty);
+
+    // non-spanned types are checked already
+    if (!lsty && !rsty) return true;
+
+    // Allows `tensor <op> scalar`
+    if ((lsty && isa<ScalarType>(rty)) || (rsty && isa<ScalarType>(lty)))
+      return true;
+
+    auto lshape = lsty->GetShape();
+    auto rshape = rsty->GetShape();
+
+    assert(lshape.IsValid());
+    assert(rshape.IsValid());
+
+    bool compatible = true;
+    bool warn = false;
+    if (lshape.Rank() == rshape.Rank()) {
+      if (lshape != rshape) compatible = false;
+    } else {
+      // only allow broadcasting of msb dimenisons
+      auto min_rank = std::min(lshape.Rank(), rshape.Rank());
+      assert(min_rank >= 1);
+      for (size_t i = 1; i <= min_rank; ++i) {
+        auto lidx = lshape.Rank() - i;
+        auto ridx = rshape.Rank() - i;
+        if (sbe::must_ne(lshape.ValueAt(lidx), rshape.ValueAt(ridx))) {
+          compatible = false;
+          break;
+        } else if (sbe::may_ne(lshape.ValueAt(lidx), rshape.ValueAt(ridx))) {
+          warn = true;
+          break;
+        }
+      }
+    }
+    if (!compatible) {
+      Error1(n.LOC(), "inconsistent shapes for spanned-operation `" + n.op +
+                          "`(" + STR(lshape) + " v.s. " + STR(rshape) + ").");
+    } else if (warn) {
+      Warning(n.LOC(), "shapes may be inconsistent for spanned-operation `" +
+                           n.op + "`(" + STR(lshape) + " v.s. " + STR(rshape) +
+                           ").");
+      // TODO: emit runtime check
+    }
   }
 
   return true;

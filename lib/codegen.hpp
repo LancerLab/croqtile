@@ -148,12 +148,13 @@ private:
   std::string f_sym; // scoped symbol
   std::string t_sym;
   uint16_t idx;
-  int swizzle_value = 0;  // Default to NONE (no swizzle)
+  int swizzle_value = 0; // Default to NONE (no swizzle)
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
           const std::string& fs, const std::string& ts, int swizzle = 0)
-      : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++), swizzle_value(swizzle) {
+      : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++),
+        swizzle_value(swizzle) {
     assert(from && to);
     auto fty = GetSpannedType(from->GetType());
     auto tty = GetSpannedType(to->GetType());

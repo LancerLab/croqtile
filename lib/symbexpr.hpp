@@ -1282,14 +1282,40 @@ inline bool cge(const Operand& vi1, const Operand& vi2) {
   if (auto v = dyn_cast<BooleanValue>(oc_ge(vi1, vi2))) return v->Value();
   return false;
 }
+
 inline bool ceq(const Operand& vi1, const Operand& vi2) {
   if (auto v = dyn_cast<BooleanValue>(oc_eq(vi1, vi2))) return v->Value();
   return false;
 }
+// may not equal
 inline bool cne(const Operand& vi1, const Operand& vi2) {
   if (auto v = dyn_cast<BooleanValue>(oc_ne(vi1, vi2))) return v->Value();
   return false;
 }
+
+// must equal
+inline bool must_eq(const Operand& vi1, const Operand& vi2) {
+  return ceq(vi1, vi2);
+}
+// may be equal
+inline bool may_eq(const Operand& vi1, const Operand& vi2) {
+  auto res = (vi1 - vi2)->Normalize();
+  if (auto n = dyn_cast<NumericValue>(res)) return n->Value() == 0;
+  return res->IsSymbolic();
+}
+// must not equal
+inline bool must_ne(const Operand& vi1, const Operand& vi2) {
+  auto res = (vi1 - vi2)->Normalize();
+  if (auto n = dyn_cast<NumericValue>(res)) return n->Value() != 0;
+  return false;
+}
+// may not equal
+inline bool may_ne(const Operand& vi1, const Operand& vi2) {
+  auto res = (vi1 - vi2)->Normalize();
+  if (auto n = dyn_cast<NumericValue>(res)) return n->Value() != 0;
+  return true;
+}
+
 inline bool is_true(const Operand& oprd) {
   if (auto b = dyn_cast<BooleanValue>(oprd))
     if (b->IsTrue()) return true;

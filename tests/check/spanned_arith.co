@@ -1,0 +1,16 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void spanned_arith(f32 [32, 16] a, f32 [16] b, f32 [8] c, f32 d, f32 [e] f, f32 [128, 64, 16] g, f32 [128, 32, 16] h) {
+  parallel by 1 {
+    a += b;
+    a *= c;
+    a -= d;
+    a /= f;
+    a %= g;
+    a += h;
+  }
+}
+
+// CHECK: error: inconsistent shapes for spanned-operation `*`([32, 16] v.s. [8]).
+// CHECK: warning: shapes may be inconsistent for spanned-operation `/`([32, 16] v.s. [::spanned_arith::e]).
+// CHECK: error: inconsistent shapes for spanned-operation `%`([32, 16] v.s. [128, 64, 16]).

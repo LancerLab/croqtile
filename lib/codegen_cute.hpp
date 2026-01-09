@@ -493,6 +493,8 @@ private:
       reg_num /= 4 / SizeOf(bt);
     }
   }
+
+  const std::string EmitSpannedArith(AST::Expr& e) const;
 };
 
 } // namespace Cute

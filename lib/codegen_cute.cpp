@@ -27,18 +27,20 @@ using namespace Choreo::Cute;
 
 // TMA_Swizzle enum and cuda_stringify helper for code generation
 enum class TMA_Swizzle {
-  NONE = 0,  // No swizzle
-  B32 = 1,   // 32B swizzle
-  B64 = 2,   // 64B swizzle
-  B128 = 3   // 128B swizzle
+  NONE = 0, // No swizzle
+  B32 = 1,  // 32B swizzle
+  B64 = 2,  // 64B swizzle
+  B128 = 3  // 128B swizzle
 };
 
 inline const char* cuda_stringify(TMA_Swizzle swizzle) {
   switch (swizzle) {
-  case TMA_Swizzle::NONE: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE";
+  case TMA_Swizzle::NONE:
+    return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE";
   case TMA_Swizzle::B32: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_32B";
   case TMA_Swizzle::B64: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_64B";
-  case TMA_Swizzle::B128: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B";
+  case TMA_Swizzle::B128:
+    return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B";
   default: return "CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE";
   }
 }
@@ -3288,22 +3290,15 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     auto t_shape = g_ca->GetBlockShape();
     auto map_name = desc.GetName() + "_tensor_map";
 
-    // Convert swizzle value to TMA_Swizzle enum and get CUtensorMapSwizzle string
+    // Convert swizzle value to TMA_Swizzle enum and get CUtensorMapSwizzle
+    // string
     int swizzle_val = desc.GetSwizzleValue();
     TMA_Swizzle tma_swizzle;
     switch (swizzle_val) {
-    case 32:
-      tma_swizzle = TMA_Swizzle::B32;
-      break;
-    case 64:
-      tma_swizzle = TMA_Swizzle::B64;
-      break;
-    case 128:
-      tma_swizzle = TMA_Swizzle::B128;
-      break;
-    default:
-      tma_swizzle = TMA_Swizzle::NONE;
-      break;
+    case 32: tma_swizzle = TMA_Swizzle::B32; break;
+    case 64: tma_swizzle = TMA_Swizzle::B64; break;
+    case 128: tma_swizzle = TMA_Swizzle::B128; break;
+    default: tma_swizzle = TMA_Swizzle::NONE; break;
     }
     std::string cu_swizzle_str = cuda_stringify(tma_swizzle);
 
@@ -3334,8 +3329,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent << "        " << desc.GetName() << "_elem_strides,\n";
     hs << h_indent
        << "        CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE,\n";
-    hs << h_indent
-       << "        " << cu_swizzle_str << ",\n";
+    hs << h_indent << "        " << cu_swizzle_str << ",\n";
     hs << h_indent
        << "        CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE,\n";
     hs << h_indent
@@ -4020,9 +4014,13 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
                  expr->isBitwise()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();
+        auto lty = NodeType(*l);
+        auto rty = NodeType(*r);
         auto& op = expr->GetOp();
-        if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
-            IsActualBoundedIntegerType(r->GetType())) {
+        if (isa<SpannedType>(lty) || isa<SpannedType>(rty)) {
+          oss << EmitSpannedArith(*expr);
+        } else if (op == "#" && IsActualBoundedIntegerType(lty) &&
+                   IsActualBoundedIntegerType(rty)) {
           auto rty = cast<BoundedType>(NodeType(*r));
           assert(rty->Dims() == 1);
           std::string r_upper_bound;
@@ -4036,8 +4034,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           res << L << " * " << r_upper_bound << " + " << R;
           oss << WrapParen(res.str(), "+");
         } else if ((op == "#+" || op == "#-") &&
-                   IsActualBoundedIntegerType(l->GetType()) &&
-                   isa<ScalarIntegerType>(r->GetType())) {
+                   IsActualBoundedIntegerType(lty) &&
+                   isa<ScalarIntegerType>(rty)) {
           oss << OpExprSTR(l, parent_op, is_left_child, is_host);
         } else if (op == "#/" || op == "#*" || op == "#%") {
           choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
@@ -4121,5 +4119,22 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
   }
   oss << ")";
 
+  return oss.str();
+}
+
+const std::string CuteCodeGen::EmitSpannedArith(AST::Expr& e) const {
+  std::ostringstream oss;
+  if (e.IsBinary()) {
+    auto& l = e.GetL();
+    auto& r = e.GetR();
+    auto lty = NodeType(*l);
+    auto rty = NodeType(*r);
+    auto& op = e.GetOp();
+    if (op == "+") {
+
+    } else
+      choreo_unreachable("unsupported spanned arithmetic operation");
+  } else
+    choreo_unreachable("unsupported spanned arithmetic operation");
   return oss.str();
 }
