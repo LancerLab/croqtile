@@ -23,8 +23,8 @@ __co__ f16 [64, 64] test_dma_copy_swizzle_128(f16 [64, 16] lhs, f16 [16, 64] rhs
   return output;
 }
 
-// CHECK: auto __layout{{[0-9]+}}_lhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<__half>{}, __shape{{[0-9]+}}_lhs_load__buf__);
-// CHECK: auto __layout{{[0-9]+}}_rhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<__half>{}, __shape{{[0-9]+}}_rhs_load__buf__);
+// CHECK: auto __layout{{[0-9]+}}_lhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<f16>{}, __shape{{[0-9]+}}_lhs_load__buf__);
+// CHECK: auto __layout{{[0-9]+}}_rhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<f16>{}, __shape{{[0-9]+}}_rhs_load__buf__);
 
 // Test 2: Valid new syntax with swizzle(64)
 __co__ f16 [64, 64] test_dma_copy_swizzle_64(f16 [64, 16] lhs, f16 [16, 64] rhs) {
@@ -49,8 +49,8 @@ __co__ f16 [64, 64] test_dma_copy_swizzle_64(f16 [64, 16] lhs, f16 [16, 64] rhs)
   return output;
 }
 
-// CHECK: auto __layout{{[0-9]+}}_lhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW64_Atom<__half>{}, __shape{{[0-9]+}}_lhs_load__buf__);
-// CHECK: auto __layout{{[0-9]+}}_rhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW64_Atom<__half>{}, __shape{{[0-9]+}}_rhs_load__buf__);
+// CHECK: auto __layout{{[0-9]+}}_lhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW64_Atom<f16>{}, __shape{{[0-9]+}}_lhs_load__buf__);
+// CHECK: auto __layout{{[0-9]+}}_rhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW64_Atom<f16>{}, __shape{{[0-9]+}}_rhs_load__buf__);
 
 // Test 3: Valid new syntax with swizzle(32)
 __co__ f16 [64, 64] test_dma_copy_swizzle_32(f16 [64, 16] lhs, f16 [16, 64] rhs) {
@@ -75,6 +75,6 @@ __co__ f16 [64, 64] test_dma_copy_swizzle_32(f16 [64, 16] lhs, f16 [16, 64] rhs)
   return output;
 }
 
-// CHECK: auto __layout{{[0-9]+}}_lhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW32_Atom<__half>{}, __shape{{[0-9]+}}_lhs_load__buf__);
-// CHECK: auto __layout{{[0-9]+}}_rhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW32_Atom<__half>{}, __shape{{[0-9]+}}_rhs_load__buf__);
+// CHECK: auto __layout{{[0-9]+}}_lhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW32_Atom<f16>{}, __shape{{[0-9]+}}_lhs_load__buf__);
+// CHECK: auto __layout{{[0-9]+}}_rhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW32_Atom<f16>{}, __shape{{[0-9]+}}_rhs_load__buf__);
 

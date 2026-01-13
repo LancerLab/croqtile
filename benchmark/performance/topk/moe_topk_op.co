@@ -1,0 +1,350 @@
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
+#define CALL(name, ...) name(__VA_ARGS__)
+
+template <typename T>
+__device__ __forceinline__ T SHFL_XOR(T var, int lane_mask, int width) {
+  return __shfl_xor_sync(uint32_t(-1), var, lane_mask, width);
+}
+template <typename T>
+__device__ __forceinline__ T CUDA_EXP(T var) {
+  return expf(var);
+}
+
+template <typename T, typename C>
+void moe_topk_softmax_cpu_baseline(const T* scores, int num_tokens,
+                                   int num_experts, int K, T* topk_sco,
+                                   C* topk_idx, bool renormalize = true);
+
+// clang-format off
+// CALL(moe_topk1,                                 /* calling function */
+//      gating_output, topk_indices, token_expert_indices, topk_weights, /* in
+//      and out*/ num_blocks, WARP_SIZE_PARAM, WARPS_PER_TB, /* _, blockdim.x,
+//      blockdim.y*/ VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG, WARP_SIZE_PARAM
+//      /* template */
+// );
+// hardcode version for https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct
+__co__ void moe_topk2(f32[N_TOKENS, N_EXPERTS] scores, u32[N_TOKENS, K]& topk_ids,
+                      s32[N_TOKENS, K]& topk_expert_ids, f32[N_TOKENS, K]& topk_scores,
+                      int N_BLOCK, int BLOCK_DIM_X, int BLOCK_DIM_Y,
+                      int VPT, int NUM_EXPERTS, int WARPS_PER_CTA,
+                      int BYTES_PER_LDG, int WARP_SIZE_PARAM,
+                      bool renormalize) {
+  assert(scores.span(1) == NUM_EXPERTS, "");
+  assert(BYTES_PER_LDG == (BYTES_PER_LDG & (-1 * BYTES_PER_LDG)),
+         "BYTES_PER_LDG must be power of 2");
+  assert(BYTES_PER_LDG <= 16, "BYTES_PER_LDG must be leq 16");
+  int ELTS_PER_LDG = BYTES_PER_LDG / | f32 | ;
+  int ELTS_PER_ROW = NUM_EXPERTS;
+  // One data line will be processed by several threads.
+  // Each thread will handle VPT elements.
+  // These several threads form a sub-warp.
+  int THREADS_PER_ROW = ELTS_PER_ROW / VPT;
+  int THREADS_PER_SWARP = THREADS_PER_ROW;
+  int SWARP_CNT = WARP_SIZE_PARAM / THREADS_PER_SWARP;
+  int LDG_PER_THREAD = VPT / ELTS_PER_LDG;
+  assert(VPT % ELTS_PER_LDG == 0,
+         "The elements per thread must be a multiple of the elements per ldg");
+  assert(WARP_SIZE_PARAM % THREADS_PER_ROW == 0,
+         "The threads per row must cleanly divide the threads per warp");
+  assert(THREADS_PER_ROW == (THREADS_PER_ROW & (-1 * THREADS_PER_ROW)),
+         "THREADS_PER_ROW must be power of 2");
+  assert(THREADS_PER_ROW <= WARP_SIZE_PARAM,
+         "THREADS_PER_ROW can be at most warp size");
+  int ELTS_PER_WARP = WARP_SIZE_PARAM * VPT;
+  int ROWS_PER_WARP = ELTS_PER_WARP / ELTS_PER_ROW;
+  int ROWS_PER_CTA = WARPS_PER_CTA * ROWS_PER_WARP;
+  // Restrictions for previous section.
+  assert(ELTS_PER_WARP % ELTS_PER_ROW == 0,
+         "The elts per row must cleanly divide the total elt per warp");
+
+  parallel n by N_BLOCK : block {
+    parallel gid by WARPS_PER_CTA : group {
+      parallel {sgid, tid_in_sg} by [SWARP_CNT, THREADS_PER_SWARP] : thread {
+        row_chunk = dma.copy scores.chunkat(n # gid # sgid, tid_in_sg) => local;
+        f32 thread_max = row_chunk.data.at(0, 0);
+        foreach v in VPT
+          thread_max = MAX(thread_max, row_chunk.data.at(0, v));
+        mutable mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          f32 other_tmax = call SHFL_XOR(thread_max, mask, THREADS_PER_ROW);
+          thread_max = MAX(thread_max, other_tmax);
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 row_sum = 0.0f;
+        foreach v in VPT {
+          f32 temp = call CUDA_EXP(row_chunk.data.at(0, v) - thread_max);
+          row_chunk.data.at(0, v) = temp;
+          row_sum += row_chunk.data.at(0, v);
+        }
+        mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          // TODO: += call
+          f32 temp = call SHFL_XOR(row_sum, mask, THREADS_PER_ROW);
+          row_sum += temp;
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 reciprocal_row_sum = 1.0f / row_sum;
+        foreach v in VPT
+          row_chunk.data.at(0, v) = row_chunk.data.at(0, v) * reciprocal_row_sum;
+
+        assert(row_chunk.span(0) == 1, "");
+        assert(|row_chunk.span| == VPT, "");
+        mutable f32 selected_sum = 0.0f;
+
+        foreach k in K {
+          max_val = row_chunk.data.at(0, 0);
+          mutable expert = tid_in_sg * VPT;
+          foreach v in VPT {
+            val = row_chunk.data.at(0, v);
+            if (val > max_val) {
+              max_val = val;
+              expert = tid_in_sg * VPT + v;
+            }
+          }
+          mask = THREADS_PER_ROW >> 1;
+          foreach idx in 100 {
+            f32 other_max = call SHFL_XOR(max_val, mask, THREADS_PER_ROW);
+            s32 other_expert = call SHFL_XOR(expert, mask, THREADS_PER_ROW);
+            if (other_max > max_val ||
+                (other_max == max_val && other_expert < expert)) {
+              max_val = other_max;
+              expert = other_expert;
+            }
+            // TODO: >>=
+            mask = mask >> 1;
+            if (mask == 0) break;
+          }
+          inthreads (tid_in_sg == 0) {
+            topk_scores.at(n # gid # sgid, k) = max_val;
+            topk_ids.at(n # gid # sgid, k) = expert;
+            if (renormalize == true) selected_sum += max_val;
+          }
+          sync.shared;
+
+          // clear winning value
+          if (k + 1 < K) {
+            if (expert / VPT == tid_in_sg)
+              row_chunk.data.at(0, expert % VPT) = -10000.0f;
+          }
+        }
+
+        if (renormalize == true) {
+          inthreads (tid_in_sg == 0) {
+            f32 denom = (selected_sum > 0.0f) ? selected_sum : 1.0f;
+            foreach k in K
+              topk_scores.at(n # gid # sgid, k) /= denom;
+          }
+        }
+      }
+    }
+  }
+}
+
+// clang-format on
+
+// Constructs some constants needed to partition the work across threads at
+// compile time.
+template <int EXPERTS, int BYTES_PER_LDG, int WARP_SIZE_PARAM,
+          typename InputType>
+struct TopkConstants {
+  static constexpr int ELTS_PER_LDG = BYTES_PER_LDG / sizeof(InputType);
+  static_assert(EXPERTS / (ELTS_PER_LDG * WARP_SIZE_PARAM) == 0 ||
+                    EXPERTS % (ELTS_PER_LDG * WARP_SIZE_PARAM) == 0,
+                "");
+  static constexpr int VECs_PER_THREAD =
+      MAX(1, EXPERTS / (ELTS_PER_LDG * WARP_SIZE_PARAM));
+  static constexpr int VPT = VECs_PER_THREAD * ELTS_PER_LDG;
+  static constexpr int THREADS_PER_ROW = EXPERTS / VPT;
+  static const int ROWS_PER_WARP = WARP_SIZE_PARAM / THREADS_PER_ROW;
+};
+
+#define LAUNCH_SOFTMAX(NUM_EXPERTS, WARPS_PER_TB, MAX_BYTES)                   \
+  topkGatingSoftmaxLauncherHelper<NUM_EXPERTS, WARPS_PER_TB, 32, MAX_BYTES>(   \
+      gating_output, topk_weights, topk_indices, token_expert_indices,         \
+      num_tokens, topk, 0, num_experts, renormalize);
+
+template <int EXPERTS, int WARPS_PER_TB, int WARP_SIZE_PARAM,
+          int MAX_BYTES_PER_LDG, typename IndType, typename InputType,
+          size_t Rank = 2>
+void topkGatingSoftmaxLauncherHelper(
+    choreo::spanned_view<InputType, Rank> gating_output,
+    choreo::spanned_view<InputType, Rank> topk_weights,
+    choreo::spanned_view<IndType, Rank> topk_indices,
+    choreo::spanned_view<s32, Rank> token_expert_indices, const int num_rows,
+    const int k, const int start_expert, const int end_expert,
+    const bool renormalize) {
+  static constexpr int BYTES_PER_LDG =
+      MIN(MAX_BYTES_PER_LDG, sizeof(InputType) * EXPERTS);
+  using Constants =
+      TopkConstants<EXPERTS, BYTES_PER_LDG, WARP_SIZE_PARAM, InputType>;
+  static constexpr int VPT = Constants::VPT;
+  static constexpr int ROWS_PER_WARP = Constants::ROWS_PER_WARP;
+  const int num_warps = (num_rows + ROWS_PER_WARP - 1) / ROWS_PER_WARP;
+  const int num_blocks = (num_warps + WARPS_PER_TB - 1) / WARPS_PER_TB;
+
+  CALL(moe_topk2, /* calling function */
+       gating_output, topk_indices, token_expert_indices,
+       topk_weights,                              /* in and out*/
+       num_blocks, WARP_SIZE_PARAM, WARPS_PER_TB, /* _, blockdim.x, blockdim.y*/
+       VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG,
+       WARP_SIZE_PARAM, /* template */
+       renormalize);
+}
+
+template <typename T, typename C, size_t Rank>
+void topk_softmax_helper(
+    choreo::spanned_view<T, Rank> topk_weights,           // [num_tokens, topk]
+    choreo::spanned_view<C, Rank> topk_indices,           // [num_tokens, topk]
+    choreo::spanned_view<s32, Rank> token_expert_indices, // [num_tokens, topk]
+    choreo::spanned_view<T, Rank> gating_output, // [num_tokens, num_experts]
+    bool renormalize) {
+  const int num_tokens = gating_output.shape()[0];
+  const int num_experts = gating_output.shape()[1];
+  const int topk = topk_weights.shape()[1];
+
+  const bool is_pow_2 =
+      (num_experts != 0) && ((num_experts & (num_experts - 1)) == 0);
+  const bool needs_workspace = !is_pow_2 || num_experts > 256;
+  assert(!needs_workspace);
+  const int64_t workspace_size = needs_workspace ? num_tokens * num_experts : 0;
+
+  static constexpr int WARPS_PER_TB = 4;
+  static constexpr int BYTES_PER_LDG_POWER_OF_2 = 16;
+
+  switch (num_experts) {
+  case 128: LAUNCH_SOFTMAX(128, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  default: assert(false);
+  }
+}
+
+extern "C" void
+topk_softmax(const float* gating_output, // [num_tokens, num_experts]
+             int* token_expert_indices,  // [num_tokens, topk]
+             float* topk_weights,        // [num_tokens, topk]
+             uint32_t* topk_indices,     // [num_tokens, topk]
+             const int num_experts, const int num_tokens, const int topk) {
+  size_t _num_experts = num_experts;
+  size_t _num_tokens = num_tokens;
+  size_t _topk = topk;
+  auto scores = choreo::make_spanview<2, choreo::f32>(
+      (float*)gating_output, {_num_tokens, _num_experts});
+  auto topk_experts_ids = choreo::make_spanview<2, choreo::s32>(
+      token_expert_indices, {_num_tokens, _topk});
+  auto topk_scores =
+      choreo::make_spanview<2, choreo::f32>(topk_weights, {_num_tokens, _topk});
+  auto topk_ids =
+      choreo::make_spanview<2, choreo::u32>(topk_indices, {_num_tokens, _topk});
+  topk_softmax_helper(topk_scores, topk_ids, topk_experts_ids, scores, false);
+}
+
+void run(const int N_TOKENS, const int N_EXPERTS, const int K) {
+  auto scores = choreo::make_spandata<choreo::f32>(N_TOKENS, N_EXPERTS);
+  scores.fill_random(0.0f, 100.0f);
+
+  auto topk_ids = choreo::make_spandata<choreo::u32>(N_TOKENS, K);
+  auto topk_experts_ids = choreo::make_spandata<choreo::s32>(N_TOKENS, K);
+  auto topk_scores = choreo::make_spandata<choreo::f32>(N_TOKENS, K);
+
+  bool renorm = false;
+
+  topk_softmax(scores.data(), topk_experts_ids.data(), topk_scores.data(),
+               topk_ids.data(), N_EXPERTS, N_TOKENS, K);
+
+  auto host_topk_ids = choreo::make_spandata<choreo::s32>(N_TOKENS, K);
+  auto host_topk_scores = choreo::make_spandata<choreo::f32>(N_TOKENS, K);
+  moe_topk_softmax_cpu_baseline(scores.data(), N_TOKENS, N_EXPERTS, K,
+                                host_topk_scores.data(), host_topk_ids.data(),
+                                renorm);
+  constexpr float EP = 0.00001f;
+  for (size_t i = 0; i < N_TOKENS; ++i)
+    for (size_t j = 0; j < K; ++j) {
+      auto g_sco = topk_scores[i][j];
+      auto g_idx = topk_ids[i][j];
+      auto h_sco = host_topk_scores[i][j];
+      auto h_idx = host_topk_ids[i][j];
+      if (g_idx != h_idx || std::abs(g_sco - h_sco) > EP) {
+        std::cout << "scores of token " << i << ":\nindex\tscores\n";
+        for (int x = 0; x < N_EXPERTS; ++x)
+          std::cout << x << "\t" << scores[i][x] << "\n";
+        std::cout << "res of device:\n";
+        for (int x = 0; x < K; ++x)
+          std::cout << "\t" << x << ":\t" << topk_ids[i][x] << " -> "
+                    << topk_scores[i][x] << "\n";
+        std::cout << "res of host:\n";
+        for (int x = 0; x < K; ++x)
+          std::cout << "\t" << x << ":\t" << host_topk_ids[i][x] << " -> "
+                    << host_topk_scores[i][x] << "\n";
+
+        std::cout << "[" << i << ", " << j << "]: \n";
+        std::cout << "\t" << g_idx << ", " << g_sco << "\n";
+        std::cout << "\t" << h_idx << ", " << h_sco << "\n";
+
+        choreo::choreo_assert(false, "values are not equal.");
+      }
+    }
+}
+
+int main() {
+
+  run(1024 * 1024, 128, 8);
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+template <typename T, typename C>
+void moe_topk_softmax_cpu_baseline(const T* scores, // [num_tokens, num_experts]
+                                   int num_tokens, int num_experts, int K,
+                                   T* topk_sco, // [num_tokens, K]
+                                   C* topk_idx, // [num_tokens, K]
+                                   bool renormalize) {
+  for (int t = 0; t < num_tokens; ++t) {
+    const T* row = scores + t * num_experts;
+
+    // 1. row-wise max
+    T row_max = row[0];
+    for (int e = 1; e < num_experts; ++e) {
+      row_max = std::max(row_max, row[e]);
+    }
+
+    // 2. softmax
+    std::vector<T> probs(num_experts);
+    T row_sum = T(0);
+    for (int e = 0; e < num_experts; ++e) {
+      probs[e] = std::exp(row[e] - row_max);
+      row_sum += probs[e];
+    }
+
+    const T inv_sum = row_sum > T(0) ? T(1) / row_sum : T(0);
+    for (int e = 0; e < num_experts; ++e) { probs[e] *= inv_sum; }
+
+    // 3. top-K on softmax probs
+    std::vector<std::pair<T, C>> vec;
+    vec.reserve(num_experts);
+    for (int e = 0; e < num_experts; ++e) {
+      vec.emplace_back(probs[e], static_cast<C>(e));
+    }
+
+    std::sort(vec.begin(), vec.end(), [](const auto& a, const auto& b) {
+      if (a.first != b.first) return a.first > b.first;
+      return a.second < b.second;
+    });
+
+    // 4. write top-K
+    T selected_sum = T(0);
+    for (int i = 0; i < K; ++i) {
+      topk_sco[t * K + i] = vec[i].first;
+      topk_idx[t * K + i] = vec[i].second;
+      selected_sum += vec[i].first;
+    }
+
+    // 5. renormalize
+    if (renormalize && selected_sum > T(0)) {
+      const T inv_sel = T(1) / selected_sum;
+      for (int i = 0; i < K; ++i) { topk_sco[t * K + i] *= inv_sel; }
+    }
+  }
+}

@@ -3064,17 +3064,18 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       ds << d_indent << "auto " << vid_x << " = threadIdx.x / 128;\n";
     } else if (pb->AllSubPVs().size() == 2) {
       ds << d_indent << "auto " << g4id << " = threadIdx.x / 128;\n";
-      ds << d_indent << "auto " << vid_x << " = " << g4id << " / " << STR(pv_y);
-      ds << d_indent << "auto " << vid_y << " = " << g4id << " % " << STR(pv_y)
-         << ";\n";
+      ds << d_indent << "auto " << vid_x << " = " << g4id << " / "
+         << ValueSTR(pv_y);
+      ds << d_indent << "auto " << vid_y << " = " << g4id << " % "
+         << ValueSTR(pv_y) << ";\n";
     } else if (pb->AllSubPVs().size() == 3) {
       ds << d_indent << "auto " << g4id << "g4id = threadIdx.x / 128;\n";
-      ds << d_indent << "auto " << vid_x << " = " << g4id << " / " << STR(pv_y)
-         << " / " << STR(pv_z) << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << g4id << " / " << STR(pv_z)
-         << " % " << STR(pv_y) << ";\n";
-      ds << d_indent << "auto " << vid_z << " = " << g4id << " % " << STR(pv_z)
-         << ";\n";
+      ds << d_indent << "auto " << vid_x << " = " << g4id << " / "
+         << ValueSTR(pv_y) << " / " << ValueSTR(pv_z) << ";\n";
+      ds << d_indent << "auto " << vid_y << " = " << g4id << " / "
+         << ValueSTR(pv_z) << " % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "auto " << vid_z << " = " << g4id << " % "
+         << ValueSTR(pv_z) << ";\n";
     }
   } break;
   case ParallelLevel::GROUP: {
@@ -3091,18 +3092,18 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       ds << d_indent << "auto " << vid_x << " = threadIdx.x / 32;\n";
     } else if (pb->AllSubPVs().size() == 2) {
       ds << d_indent << "auto " << gid << " = threadIdx.x / 32;\n";
-      ds << d_indent << "auto " << vid_x << " = " << gid << " / " << STR(pv_y)
-         << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << gid << " % " << STR(pv_y)
-         << ";\n";
+      ds << d_indent << "auto " << vid_x << " = " << gid << " / "
+         << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "auto " << vid_y << " = " << gid << " % "
+         << ValueSTR(pv_y) << ";\n";
     } else if (pb->AllSubPVs().size() == 3) {
       ds << d_indent << "auto " << gid << " = threadIdx.x / 32;\n";
-      ds << d_indent << "auto " << vid_x << " = " << gid << " / " << STR(pv_y)
-         << " / " << STR(pv_z) << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << gid << " / " << STR(pv_z)
-         << " % " << STR(pv_y) << ";\n";
-      ds << d_indent << "auto " << vid_z << " = " << gid << " % " << STR(pv_z)
-         << ";\n";
+      ds << d_indent << "auto " << vid_x << " = " << gid << " / "
+         << ValueSTR(pv_y) << " / " << ValueSTR(pv_z) << ";\n";
+      ds << d_indent << "auto " << vid_y << " = " << gid << " / "
+         << ValueSTR(pv_z) << " % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "auto " << vid_z << " = " << gid << " % "
+         << ValueSTR(pv_z) << ";\n";
     }
   } break;
   case ParallelLevel::THREAD: {
@@ -3134,10 +3135,10 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       else
         choreo_unreachable("invalid bdim level.");
 
-      ds << d_indent << "auto " << vid_x << " = " << tid << " / " << STR(pv_y)
-         << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << tid << " % " << STR(pv_y)
-         << ";\n";
+      ds << d_indent << "auto " << vid_x << " = " << tid << " / "
+         << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "auto " << vid_y << " = " << tid << " % "
+         << ValueSTR(pv_y) << ";\n";
     } else if (pb->AllSubPVs().size() == 3) {
       if (bdim_level == ParallelLevel::GROUPx4)
         ds << d_indent << "auto " << tid << " = threadIdx.x % 128;\n";
@@ -3148,12 +3149,12 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       else
         choreo_unreachable("invalid bdim level.");
 
-      ds << d_indent << "auto " << vid_x << " = " << tid << " / " << STR(pv_y)
-         << " / " << STR(pv_z) << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << tid << " / " << STR(pv_z)
-         << " % " << STR(pv_y) << ";\n";
-      ds << d_indent << "auto " << vid_z << " = " << tid << " % " << STR(pv_z)
-         << ";\n";
+      ds << d_indent << "auto " << vid_x << " = " << tid << " / "
+         << ValueSTR(pv_y) << " / " << ValueSTR(pv_z) << ";\n";
+      ds << d_indent << "auto " << vid_y << " = " << tid << " / "
+         << ValueSTR(pv_z) << " % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "auto " << vid_z << " = " << tid << " % "
+         << ValueSTR(pv_z) << ";\n";
     }
   } break;
   default: break;

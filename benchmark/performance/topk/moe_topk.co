@@ -1,0 +1,1007 @@
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
+#define P(x)                                                                   \
+  std::cerr << #x << ": " << x << "\n";
+#define KP(x)                                                                  \
+  println("x", ": ", x);
+#define CKP(x)                                                                 \
+  println!("x", ": ", x);
+
+#define CALL(name, ...) name(__VA_ARGS__)
+
+template <int K>
+__device__ void warp_topk(f32* vals, s32* idxs);
+
+template <typename T>
+__device__ __forceinline__ T SHFL_XOR(T var, int lane_mask, int width) {
+  return __shfl_xor_sync(uint32_t(-1), var, lane_mask, width);
+}
+template <typename T>
+__device__ __forceinline__ T CUDA_EXP(T var) {
+  return expf(var);
+}
+
+template <typename T, typename C>
+void moe_topk_cpu_baseline(const T* scores, int num_tokens, int num_experts,
+                           int K, T* topk_sco, C* topk_idx);
+template <typename T, typename C>
+void moe_topk_softmax_cpu_baseline(const T* scores, int num_tokens,
+                                   int num_experts, int K, T* topk_sco,
+                                   C* topk_idx, bool renormalize = true);
+
+// clang-format off
+__co__ void moe_topk0(f32 [N_TOKENS, N_EXPERTS] scores,
+                      s32 [N_TOKENS, K]& topk_ids, f32 [N_TOKENS, K]& topk_scores,
+                      int N_BLOCK, int BLOCK_DIM_X, int BLOCK_DIM_Y,
+                      int VPT, int EXPERTS, int BYTES_PER_LDG) {
+  __cpp__("auto start = std::chrono::high_resolution_clock::now();");
+  N_THREAD = BLOCK_DIM_X * BLOCK_DIM_Y;
+  parallel n by N_BLOCK : block {
+    foreach m in [ |scores.span| / N_THREAD / N_BLOCK ] {
+      shared_scores = dma.copy scores.chunkat(n#m, _) => shared;
+      shared_scores_1d = shared_scores.span_as(|shared_scores.span|);
+
+      shared s32 [shared_scores.span(0) * K] shared_topk_ids_1d;
+      shared f32 [shared_scores.span(0) * K] shared_topk_scores_1d;
+      parallel gid by [N_THREAD / 32] : group {
+        parallel tid by 32 : thread {
+          score = shared_scores_1d.at(gid # tid);
+          
+          local s32 [K] frag_idx{-1};
+          local f32 [K] frag_val{-1.0f};
+          frag_idx.at(0) = tid;
+          frag_val.at(0) = score;
+          if (K == 8) {
+            call warp_topk<8>(frag_val, frag_idx);
+          } else if (K == 4) {
+            call warp_topk<4>(frag_val, frag_idx);
+          } else if (K == 2) {
+            call warp_topk<2>(frag_val, frag_idx);
+          } else {
+            println("error!!!!!!!!!");
+          }
+          
+          inthreads (tid == 0) {
+            // println("in gpu, frag_idx and frag_val:");
+#if 0
+            // TODO: use DMA to store, but result in __syncthreads() with only one thd.
+            dma.copy frag_idx => shared_topk_ids_1d.chunkat(gid);
+            dma.copy frag_val => shared_topk_scores_1d.chunkat(gid);
+#else
+            foreach k in K {
+              // println(frag_idx.at(k), " -> ", frag_val.at(k));
+              shared_topk_ids_1d.at(gid # k) = frag_idx.at(k);
+              shared_topk_scores_1d.at(gid # k) = frag_val.at(k);
+            }
+#endif
+          }
+        }
+      }
+      shared_topk_ids = shared_topk_ids_1d.span_as(shared_scores.span(0), K);
+      shared_topk_scores = shared_topk_scores_1d.span_as(shared_scores.span(0), K);
+      dma.copy shared_topk_ids => topk_ids.chunkat(n#m, _);
+      dma.copy shared_topk_scores => topk_scores.chunkat(n#m, _);
+    }
+  }
+  __cpp__("auto end = std::chrono::high_resolution_clock::now();\n");
+  __cpp__("auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);\n");
+  __cpp__(R"(std::cout << "time spend: " << duration.count() << "\n";)");
+}
+
+// CALL(moe_topk1,                                 /* calling function */
+//      gating_output, topk_indices, topk_weights, /* in and out*/
+//      num_blocks, WARP_SIZE_PARAM, WARPS_PER_TB, /* _, blockdim.x, blockdim.y*/
+//      VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG, WARP_SIZE_PARAM /* template */
+// );
+__co__ void moe_topk1(f32 [N_TOKENS, N_EXPERTS] scores,
+                      s32 [N_TOKENS, K]& topk_ids, f32 [N_TOKENS, K]& topk_scores,
+                      int N_BLOCK, int BLOCK_DIM_X, int BLOCK_DIM_Y,
+                      int VPT, int NUM_EXPERTS,
+                      int WARPS_PER_CTA, int BYTES_PER_LDG, int WARP_SIZE_PARAM) {
+  assert(scores.span(1) == NUM_EXPERTS, "");
+  assert(BYTES_PER_LDG == (BYTES_PER_LDG & (-1 * BYTES_PER_LDG)),
+                "BYTES_PER_LDG must be power of 2");
+  assert(BYTES_PER_LDG <= 16, "BYTES_PER_LDG must be leq 16");
+  int ELTS_PER_LDG = BYTES_PER_LDG / |f32|;
+  int ELTS_PER_ROW = NUM_EXPERTS;
+  // One data line will be processed by several threads. 
+  // Each thread will handle VPT elements.
+  // These several threads form a sub-warp.
+  int THREADS_PER_ROW = ELTS_PER_ROW / VPT;
+  int THREADS_PER_SWARP = THREADS_PER_ROW;
+  int SWARP_CNT = WARP_SIZE_PARAM / THREADS_PER_SWARP;
+  int LDG_PER_THREAD = VPT / ELTS_PER_LDG;
+  assert(VPT % ELTS_PER_LDG == 0,
+         "The elements per thread must be a multiple of the elements per ldg");
+  assert(WARP_SIZE_PARAM % THREADS_PER_ROW == 0,
+         "The threads per row must cleanly divide the threads per warp");
+  assert(THREADS_PER_ROW == (THREADS_PER_ROW & (-1 * THREADS_PER_ROW)),
+         "THREADS_PER_ROW must be power of 2");
+  assert(THREADS_PER_ROW <= WARP_SIZE_PARAM,
+         "THREADS_PER_ROW can be at most warp size");
+  int ELTS_PER_WARP = WARP_SIZE_PARAM * VPT;
+  int ROWS_PER_WARP = ELTS_PER_WARP / ELTS_PER_ROW;
+  int ROWS_PER_CTA = WARPS_PER_CTA * ROWS_PER_WARP;
+  // Restrictions for previous section.
+  assert(ELTS_PER_WARP % ELTS_PER_ROW == 0,
+         "The elts per row must cleanly divide the total elt per warp");
+
+  KP(THREADS_PER_ROW)
+
+  parallel n by N_BLOCK : block {
+    parallel gid by WARPS_PER_CTA : group {
+      parallel {sgid, tid_in_sg} by [SWARP_CNT, THREADS_PER_SWARP] : thread {
+        row_chunk = dma.copy scores.chunkat(n # gid # sgid, tid_in_sg) => local;
+        // row_chunk represents the score processed by a single thread. 
+        // It shouldn't be larger than a single row, right?
+        assert(row_chunk.span(0) == 1, "");
+        assert(|row_chunk.span| == VPT, "");
+        foreach k in K {
+          max_val = row_chunk.data.at(0, 0);
+          mutable expert = tid_in_sg * VPT;
+          foreach v in VPT {
+            val = row_chunk.data.at(0, v);
+            if (val > max_val) {
+              max_val = val;
+              expert = tid_in_sg * VPT + v;
+            }
+          }
+          // for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2)
+          mutable mask = THREADS_PER_ROW >> 1;
+          // 2^9 = 512
+          foreach idx in 9 {
+            f32 other_max = call SHFL_XOR(max_val, mask, THREADS_PER_ROW);
+            s32 other_expert = call SHFL_XOR(expert, mask, THREADS_PER_ROW);
+            if (other_max > max_val || 
+                (other_max == max_val && other_expert < expert)) {
+              max_val = other_max;
+              expert = other_expert;
+            }
+            // TODO: >>=
+            mask = mask >> 1;
+            if (mask == 0) break;
+          }
+          if (tid_in_sg == 0) {
+            topk_scores.at(n # gid # sgid, k) = max_val;
+            topk_ids.at(n # gid # sgid, k) = expert;
+          }
+          sync.shared;
+
+          // clear winning value
+          if (k+1 < K) {
+            if (expert / VPT == tid_in_sg) {
+              row_chunk.data.at(0, expert % VPT) = -10000.0f;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// CALL(moe_topk1,                                 /* calling function */
+//      gating_output, topk_indices, token_expert_indices, topk_weights, /* in and out*/
+//      num_blocks, WARP_SIZE_PARAM, WARPS_PER_TB, /* _, blockdim.x, blockdim.y*/
+//      VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG, WARP_SIZE_PARAM /* template */
+// );
+// softmax is added.
+__co__ void moe_topk2(f32 [N_TOKENS, N_EXPERTS] scores,
+                      s32 [N_TOKENS, K]& topk_ids,  s32 [N_TOKENS, K]& topk_expert_ids, f32 [N_TOKENS, K]& topk_scores,
+                      int N_BLOCK, int BLOCK_DIM_X, int BLOCK_DIM_Y,
+                      int VPT, int NUM_EXPERTS,
+                      int WARPS_PER_CTA, int BYTES_PER_LDG, int WARP_SIZE_PARAM,
+                      bool renormalize) {
+  assert(scores.span(1) == NUM_EXPERTS, "");
+  assert(BYTES_PER_LDG == (BYTES_PER_LDG & (-1 * BYTES_PER_LDG)),
+                "BYTES_PER_LDG must be power of 2");
+  assert(BYTES_PER_LDG <= 16, "BYTES_PER_LDG must be leq 16");
+  int ELTS_PER_LDG = BYTES_PER_LDG / |f32|;
+  int ELTS_PER_ROW = NUM_EXPERTS;
+  // One data line will be processed by several threads. 
+  // Each thread will handle VPT elements.
+  // These several threads form a sub-warp.
+  int THREADS_PER_ROW = ELTS_PER_ROW / VPT;
+  int THREADS_PER_SWARP = THREADS_PER_ROW;
+  int SWARP_CNT = WARP_SIZE_PARAM / THREADS_PER_SWARP;
+  int LDG_PER_THREAD = VPT / ELTS_PER_LDG;
+  assert(VPT % ELTS_PER_LDG == 0,
+         "The elements per thread must be a multiple of the elements per ldg");
+  assert(WARP_SIZE_PARAM % THREADS_PER_ROW == 0,
+         "The threads per row must cleanly divide the threads per warp");
+  assert(THREADS_PER_ROW == (THREADS_PER_ROW & (-1 * THREADS_PER_ROW)),
+         "THREADS_PER_ROW must be power of 2");
+  assert(THREADS_PER_ROW <= WARP_SIZE_PARAM,
+         "THREADS_PER_ROW can be at most warp size");
+  int ELTS_PER_WARP = WARP_SIZE_PARAM * VPT;
+  int ROWS_PER_WARP = ELTS_PER_WARP / ELTS_PER_ROW;
+  int ROWS_PER_CTA = WARPS_PER_CTA * ROWS_PER_WARP;
+  // Restrictions for previous section.
+  assert(ELTS_PER_WARP % ELTS_PER_ROW == 0,
+         "The elts per row must cleanly divide the total elt per warp");
+
+  KP(THREADS_PER_ROW)
+
+  parallel n by N_BLOCK : block {
+    parallel gid by WARPS_PER_CTA : group {
+      parallel {sgid, tid_in_sg} by [SWARP_CNT, THREADS_PER_SWARP] : thread {
+        row_chunk = dma.copy scores.chunkat(n # gid # sgid, tid_in_sg) => local;
+
+        f32 thread_max = row_chunk.data.at(0, 0);
+        foreach v in VPT
+          thread_max = MAX(thread_max, row_chunk.data.at(0, v));
+        mutable mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          f32 other_tmax = call SHFL_XOR(thread_max, mask, THREADS_PER_ROW);
+          thread_max = MAX(thread_max, other_tmax);
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 row_sum = 0.0f;
+        foreach v in VPT {
+          f32 temp = call CUDA_EXP(row_chunk.data.at(0, v) - thread_max);
+          row_chunk.data.at(0, v) = temp;
+          row_sum += row_chunk.data.at(0, v);
+        }
+        mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          // TODO: += call
+          f32 temp = call SHFL_XOR(row_sum, mask, THREADS_PER_ROW);
+          row_sum += temp;
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 reciprocal_row_sum = 1.0f / row_sum;
+        foreach v in VPT
+          row_chunk.data.at(0, v) = row_chunk.data.at(0, v) * reciprocal_row_sum;
+
+        // row_chunk represents the score processed by a single thread. 
+        // It shouldn't be larger than a single row, right?
+        assert(row_chunk.span(0) == 1, "");
+        assert(|row_chunk.span| == VPT, "");
+        mutable f32 selected_sum = 0.0f;
+        foreach k in K {
+          max_val = row_chunk.data.at(0, 0);
+          mutable expert = tid_in_sg * VPT;
+          foreach v in VPT {
+            val = row_chunk.data.at(0, v);
+            if (val > max_val) {
+              max_val = val;
+              expert = tid_in_sg * VPT + v;
+            }
+          }
+          // for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2)
+          mask = THREADS_PER_ROW >> 1;
+          // 2^9 = 512
+          foreach idx in 9 {
+            f32 other_max = call SHFL_XOR(max_val, mask, THREADS_PER_ROW);
+            s32 other_expert = call SHFL_XOR(expert, mask, THREADS_PER_ROW);
+            if (other_max > max_val || 
+                (other_max == max_val && other_expert < expert)) {
+              max_val = other_max;
+              expert = other_expert;
+            }
+            mask = mask >> 1;
+            if (mask == 0) break;
+          }
+          inthreads (tid_in_sg == 0) {
+            // write result
+            topk_scores.at(n # gid # sgid, k) = max_val;
+            // TODO: why need start_expert? Its values is always 0.
+            topk_ids.at(n # gid # sgid, k) = expert;
+            if (renormalize == true) selected_sum += max_val;
+          }
+          sync.shared;
+
+          // clear winning value
+          if (k+1 < K) {
+            if (expert / VPT == tid_in_sg) {
+              row_chunk.data.at(0, expert % VPT) = -10000.0f;
+            }
+          }
+        }
+
+        if (renormalize == true) {
+          inthreads (tid_in_sg == 0) {
+            f32 denom = (selected_sum > 0.0f) ? selected_sum : 1.0f;
+            foreach k in K {
+              topk_scores.at(n # gid # sgid, k) /= denom;
+            }
+          }
+        } 
+      }
+    }
+  }
+}
+
+#define _N_EXPERTS 32
+#define _K 4
+#define _VPT 4
+#define _WARP_SIZE_PARAM 32
+#define _BYTES_PER_LDG 16
+#define _WARPS_PER_CTA 4
+
+// CALL(moe_topk1,                                   /* calling function */
+//      gating_output, topk_indices, topk_weights,   /* in and out*/
+//      num_blocks, WARP_SIZE_PARAM, WARPS_PER_TB,   /* _, blockdim.x, blockdim.y*/
+//      VPT, EXPERTS,                                /* template */
+//      WARPS_PER_TB, BYTES_PER_LDG, WARP_SIZE_PARAM /* template */
+// );
+// same with moe_topk2, but all static except N_TOKENS.
+__co__ void moe_topk3(f32 [N_TOKENS, _N_EXPERTS] scores,
+                      s32 [N_TOKENS, _K]& topk_ids, f32 [N_TOKENS, _K]& topk_scores,
+                      int N_BLOCK, int BLOCK_DIM_X, int BLOCK_DIM_Y,
+                      int VPT, int NUM_EXPERTS,
+                      int WARPS_PER_CTA, int BYTES_PER_LDG, int WARP_SIZE_PARAM) {
+  assert(scores.span(1) == NUM_EXPERTS, "");
+  assert(_BYTES_PER_LDG == (_BYTES_PER_LDG & (-1 * _BYTES_PER_LDG)),
+                "_BYTES_PER_LDG must be power of 2");
+  assert(_BYTES_PER_LDG <= 16, "_BYTES_PER_LDG must be leq 16");
+  int ELTS_PER_LDG = _BYTES_PER_LDG / |f32|;
+  int ELTS_PER_ROW = scores.span(1);
+  // CKP(ELTS_PER_LDG);
+  // CKP(ELTS_PER_ROW);
+  // One data line will be processed by several threads. 
+  // Each thread will handle VPT elements.
+  // These several threads form a sub-warp.
+  int THREADS_PER_ROW = ELTS_PER_ROW / _VPT;
+  int THREADS_PER_SWARP = THREADS_PER_ROW;
+  int SWARP_CNT = _WARP_SIZE_PARAM / THREADS_PER_SWARP;
+  int LDG_PER_THREAD = _VPT / ELTS_PER_LDG;
+  // CKP(THREADS_PER_ROW);
+  // CKP(THREADS_PER_SWARP);
+  // CKP(SWARP_CNT);
+  // CKP(LDG_PER_THREAD);
+
+  assert(_VPT % ELTS_PER_LDG == 0,
+         "The elements per thread must be a multiple of the elements per ldg");
+  assert(_WARP_SIZE_PARAM % THREADS_PER_ROW == 0,
+         "The threads per row must cleanly divide the threads per warp");
+  assert(THREADS_PER_ROW == (THREADS_PER_ROW & (-1 * THREADS_PER_ROW)),
+         "THREADS_PER_ROW must be power of 2");
+  assert(THREADS_PER_ROW <= _WARP_SIZE_PARAM,
+         "THREADS_PER_ROW can be at most warp size");
+  int ELTS_PER_WARP = _WARP_SIZE_PARAM * _VPT;
+  int ROWS_PER_WARP = ELTS_PER_WARP / ELTS_PER_ROW;
+  int ROWS_PER_CTA = _WARPS_PER_CTA * ROWS_PER_WARP;
+  // CKP(ELTS_PER_WARP);
+  // CKP(ROWS_PER_WARP);
+  // CKP(ROWS_PER_CTA);
+  
+  // Restrictions for previous section.
+  assert(ELTS_PER_WARP % ELTS_PER_ROW == 0,
+         "The elts per row must cleanly divide the total elt per warp");
+
+  KP(THREADS_PER_ROW)
+
+  parallel n by N_BLOCK : block {
+    parallel gid by _WARPS_PER_CTA : group {
+      // println!(SWARP_CNT);
+      // println!(THREADS_PER_SWARP);
+      parallel {sgid, tid_in_sg} by [SWARP_CNT, THREADS_PER_SWARP] : thread {
+        row_chunk = dma.copy scores.chunkat(n # gid # sgid, tid_in_sg) => local;
+
+        f32 thread_max = row_chunk.data.at(0, 0);
+        foreach v in _VPT
+          thread_max = MAX(thread_max, row_chunk.data.at(0, v));
+        mutable mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          f32 other_tmax = call SHFL_XOR(thread_max, mask, THREADS_PER_ROW);
+          thread_max = MAX(thread_max, other_tmax);
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 row_sum = 0.0f;
+        foreach v in _VPT {
+          f32 temp = call CUDA_EXP(row_chunk.data.at(0, v) - thread_max);
+          row_chunk.data.at(0, v) = temp;
+          row_sum += row_chunk.data.at(0, v);
+        }
+        mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          f32 temp =  call SHFL_XOR(row_sum, mask, THREADS_PER_ROW);
+          row_sum += temp;
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 reciprocal_row_sum = 1.0f / row_sum;
+        foreach v in _VPT
+          row_chunk.data.at(0, v) = row_chunk.data.at(0, v) * reciprocal_row_sum;
+
+        // row_chunk represents the score processed by a single thread. 
+        // It shouldn't be larger than a single row, right?
+        assert(row_chunk.span(0) == 1, "");
+        assert(|row_chunk.span| == _VPT, "");
+        foreach k in _K {
+          max_val = row_chunk.data.at(0, 0);
+          mutable expert = tid_in_sg * _VPT;
+          foreach v in _VPT {
+            val = row_chunk.data.at(0, v);
+            if (val > max_val) {
+              max_val = val;
+              expert = tid_in_sg * _VPT + v;
+            }
+          }
+          // for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2)
+          mask = THREADS_PER_ROW >> 1;
+          // 2^9 = 512
+          foreach idx in 9 {
+            f32 other_max = call SHFL_XOR(max_val, mask, THREADS_PER_ROW);
+            s32 other_expert = call SHFL_XOR(expert, mask, THREADS_PER_ROW);
+            if (other_max > max_val || 
+                (other_max == max_val && other_expert < expert)) {
+              max_val = other_max;
+              expert = other_expert;
+            }
+            mask = mask >> 1;
+            if (mask == 0) break;
+          }
+          if (tid_in_sg == 0) {
+            // write result
+            topk_scores.at(n # gid # sgid, k) = max_val;
+            topk_ids.at(n # gid # sgid, k) = expert;
+          }
+          sync.shared;
+
+          // clear winning value
+          if (k+1 < _K) {
+            if (expert / _VPT == tid_in_sg) {
+              row_chunk.data.at(0, expert % _VPT) = -10000.0f;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// same with moe_topk2, but try smem
+__co__ void moe_topk4(f32 [N_TOKENS, N_EXPERTS] scores,
+                      s32 [N_TOKENS, K]& topk_ids, f32 [N_TOKENS, K]& topk_scores,
+                      int N_BLOCK, int BLOCK_DIM_X, int BLOCK_DIM_Y,
+                      int VPT, int NUM_EXPERTS,
+                      int WARPS_PER_CTA, int BYTES_PER_LDG, int WARP_SIZE_PARAM) {
+  assert(scores.span(1) == NUM_EXPERTS, "");
+  assert(BYTES_PER_LDG == (BYTES_PER_LDG & (-1 * BYTES_PER_LDG)),
+                "BYTES_PER_LDG must be power of 2");
+  assert(BYTES_PER_LDG <= 16, "BYTES_PER_LDG must be leq 16");
+  int ELTS_PER_LDG = BYTES_PER_LDG / |f32|;
+  int ELTS_PER_ROW = NUM_EXPERTS;
+  // One data line will be processed by several threads. 
+  // Each thread will handle VPT elements.
+  // These several threads form a sub-warp.
+  int THREADS_PER_ROW = ELTS_PER_ROW / VPT;
+  int THREADS_PER_SWARP = THREADS_PER_ROW;
+  int SWARP_CNT = WARP_SIZE_PARAM / THREADS_PER_SWARP;
+  int LDG_PER_THREAD = VPT / ELTS_PER_LDG;
+  assert(VPT % ELTS_PER_LDG == 0,
+         "The elements per thread must be a multiple of the elements per ldg");
+  assert(WARP_SIZE_PARAM % THREADS_PER_ROW == 0,
+         "The threads per row must cleanly divide the threads per warp");
+  assert(THREADS_PER_ROW == (THREADS_PER_ROW & (-1 * THREADS_PER_ROW)),
+         "THREADS_PER_ROW must be power of 2");
+  assert(THREADS_PER_ROW <= WARP_SIZE_PARAM,
+         "THREADS_PER_ROW can be at most warp size");
+  int ELTS_PER_WARP = WARP_SIZE_PARAM * VPT;
+  int ROWS_PER_WARP = ELTS_PER_WARP / ELTS_PER_ROW;
+  int ROWS_PER_CTA = WARPS_PER_CTA * ROWS_PER_WARP;
+  // Restrictions for previous section.
+  assert(ELTS_PER_WARP % ELTS_PER_ROW == 0,
+         "The elts per row must cleanly divide the total elt per warp");
+
+  KP(THREADS_PER_ROW)
+
+  parallel n by N_BLOCK : block {
+    shared f32 [ROWS_PER_WARP, K] shared_scores;
+    shared s32 [ROWS_PER_WARP, K] shared_ids;
+    parallel gid by WARPS_PER_CTA : group {
+      // println!(SWARP_CNT);
+      // println!(THREADS_PER_SWARP);
+      parallel {sgid, tid_in_sg} by [SWARP_CNT, THREADS_PER_SWARP] : thread {
+        row_chunk = dma.copy scores.chunkat(n # gid # sgid, tid_in_sg) => local;
+
+        f32 thread_max = row_chunk.data.at(0, 0);
+        foreach v in VPT
+          thread_max = MAX(thread_max, row_chunk.data.at(0, v));
+        mutable mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          f32 other_tmax = call SHFL_XOR(thread_max, mask, THREADS_PER_ROW);
+          thread_max = MAX(thread_max, other_tmax);
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 row_sum = 0.0f;
+        foreach v in VPT {
+          f32 temp = call CUDA_EXP(row_chunk.data.at(0, v) - thread_max);
+          row_chunk.data.at(0, v) = temp;
+          row_sum += row_chunk.data.at(0, v);
+        }
+        mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          f32 temp =  call SHFL_XOR(row_sum, mask, THREADS_PER_ROW);
+          row_sum += temp;
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 reciprocal_row_sum = 1.0f / row_sum;
+        foreach v in VPT
+          row_chunk.data.at(0, v) = row_chunk.data.at(0, v) * reciprocal_row_sum;
+
+        // row_chunk represents the score processed by a single thread. 
+        // It shouldn't be larger than a single row, right?
+        assert(row_chunk.span(0) == 1, "");
+        assert(|row_chunk.span| == VPT, "");
+        foreach k in K {
+          max_val = row_chunk.data.at(0, 0);
+          mutable expert = tid_in_sg * VPT;
+          foreach v in VPT {
+            val = row_chunk.data.at(0, v);
+            if (val > max_val) {
+              max_val = val;
+              expert = tid_in_sg * VPT + v;
+            }
+          }
+          // for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2)
+          mask = THREADS_PER_ROW >> 1;
+          // 2^9 = 512
+          foreach idx in 9 {
+            f32 other_max = call SHFL_XOR(max_val, mask, THREADS_PER_ROW);
+            s32 other_expert = call SHFL_XOR(expert, mask, THREADS_PER_ROW);
+            if (other_max > max_val || 
+                (other_max == max_val && other_expert < expert)) {
+              max_val = other_max;
+              expert = other_expert;
+            }
+            mask = mask >> 1;
+            if (mask == 0) break;
+          }
+          if (tid_in_sg == 0) {
+            shared_scores.at(gid # sgid, k) = max_val;
+            shared_ids.at(gid # sgid, k) = expert;
+          }
+          sync.shared;
+
+          // clear winning value
+          if (k+1 < K) {
+            if (expert / VPT == tid_in_sg) {
+              row_chunk.data.at(0, expert % VPT) = -10000.0f;
+            }
+          }
+        }
+      }
+    }
+    dma.copy shared_scores => topk_scores.chunkat(n, _);
+    dma.copy shared_ids => topk_ids.chunkat(n, _);
+  }
+}
+
+// SoA => AoS
+__co__ void moe_topk5(f32 [N_TOKENS, N_EXPERTS] scores,
+                      s32 [N_TOKENS, K]& topk_ids, f32 [N_TOKENS, KK]& topk_scores,
+                      int N_BLOCK, int BLOCK_DIM_X, int BLOCK_DIM_Y,
+                      int VPT, int NUM_EXPERTS,
+                      int WARPS_PER_CTA, int BYTES_PER_LDG, int WARP_SIZE_PARAM) {
+  assert(scores.span(1) == NUM_EXPERTS, "");
+  assert(BYTES_PER_LDG == (BYTES_PER_LDG & (-1 * BYTES_PER_LDG)),
+                "BYTES_PER_LDG must be power of 2");
+  assert(BYTES_PER_LDG <= 16, "BYTES_PER_LDG must be leq 16");
+  int ELTS_PER_LDG = BYTES_PER_LDG / |f32|;
+  int ELTS_PER_ROW = NUM_EXPERTS;
+  // One data line will be processed by several threads. 
+  // Each thread will handle VPT elements.
+  // These several threads form a sub-warp.
+  int THREADS_PER_ROW = ELTS_PER_ROW / VPT;
+  int THREADS_PER_SWARP = THREADS_PER_ROW;
+  int SWARP_CNT = WARP_SIZE_PARAM / THREADS_PER_SWARP;
+  int LDG_PER_THREAD = VPT / ELTS_PER_LDG;
+  assert(VPT % ELTS_PER_LDG == 0,
+         "The elements per thread must be a multiple of the elements per ldg");
+  assert(WARP_SIZE_PARAM % THREADS_PER_ROW == 0,
+         "The threads per row must cleanly divide the threads per warp");
+  assert(THREADS_PER_ROW == (THREADS_PER_ROW & (-1 * THREADS_PER_ROW)),
+         "THREADS_PER_ROW must be power of 2");
+  assert(THREADS_PER_ROW <= WARP_SIZE_PARAM,
+         "THREADS_PER_ROW can be at most warp size");
+  int ELTS_PER_WARP = WARP_SIZE_PARAM * VPT;
+  int ROWS_PER_WARP = ELTS_PER_WARP / ELTS_PER_ROW;
+  int ROWS_PER_CTA = WARPS_PER_CTA * ROWS_PER_WARP;
+  // Restrictions for previous section.
+  assert(ELTS_PER_WARP % ELTS_PER_ROW == 0,
+         "The elts per row must cleanly divide the total elt per warp");
+
+  KP(THREADS_PER_ROW)
+
+  parallel n by N_BLOCK : block {
+    parallel gid by WARPS_PER_CTA : group {
+      parallel {sgid, tid_in_sg} by [SWARP_CNT, THREADS_PER_SWARP] : thread {
+        row_chunk = dma.copy scores.chunkat(n # gid # sgid, tid_in_sg) => local;
+
+        f32 thread_max = row_chunk.data.at(0, 0);
+        foreach v in VPT
+          thread_max = MAX(thread_max, row_chunk.data.at(0, v));
+        mutable mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          f32 other_tmax = call SHFL_XOR(thread_max, mask, THREADS_PER_ROW);
+          thread_max = MAX(thread_max, other_tmax);
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 row_sum = 0.0f;
+        foreach v in VPT {
+          f32 temp = call CUDA_EXP(row_chunk.data.at(0, v) - thread_max);
+          row_chunk.data.at(0, v) = temp;
+          row_sum += row_chunk.data.at(0, v);
+        }
+        mask = THREADS_PER_ROW >> 1;
+        foreach idx in 9 {
+          f32 temp =  call SHFL_XOR(row_sum, mask, THREADS_PER_ROW);
+          row_sum += temp;
+          mask = mask >> 1;
+          if (mask == 0) break;
+        }
+        f32 reciprocal_row_sum = 1.0f / row_sum;
+        foreach v in VPT
+          row_chunk.data.at(0, v) = row_chunk.data.at(0, v) * reciprocal_row_sum;
+
+        assert(row_chunk.span(0) == 1, "");
+        assert(|row_chunk.span| == VPT, "");
+        foreach k in K {
+          max_val = row_chunk.data.at(0, 0);
+          mutable expert = tid_in_sg * VPT;
+          foreach v in VPT {
+            val = row_chunk.data.at(0, v);
+            if (val > max_val) {
+              max_val = val;
+              expert = tid_in_sg * VPT + v;
+            }
+          }
+          // for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2)
+          mask = THREADS_PER_ROW >> 1;
+          // 2^9 = 512
+          foreach idx in 9 {
+            f32 other_max = call SHFL_XOR(max_val, mask, THREADS_PER_ROW);
+            s32 other_expert = call SHFL_XOR(expert, mask, THREADS_PER_ROW);
+            if (other_max > max_val || 
+                (other_max == max_val && other_expert < expert)) {
+              max_val = other_max;
+              expert = other_expert;
+            }
+            mask = mask >> 1;
+            if (mask == 0) break;
+          }
+          if (tid_in_sg == 0) {
+            topk_scores.at(n # gid # sgid, k*2) = max_val;
+            topk_scores.at(n # gid # sgid, k*2+1) = expert;
+          }
+          sync.shared;
+
+          // clear winning value
+          if (k+1 < K) {
+            if (expert / VPT == tid_in_sg) {
+              row_chunk.data.at(0, expert % VPT) = -10000.0f;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+// clang-format on
+
+// Constructs some constants needed to partition the work across threads at
+// compile time.
+template <int EXPERTS, int BYTES_PER_LDG, int WARP_SIZE_PARAM,
+          typename InputType>
+struct TopkConstants {
+  static constexpr int ELTS_PER_LDG = BYTES_PER_LDG / sizeof(InputType);
+  static_assert(EXPERTS / (ELTS_PER_LDG * WARP_SIZE_PARAM) == 0 ||
+                    EXPERTS % (ELTS_PER_LDG * WARP_SIZE_PARAM) == 0,
+                "");
+  static constexpr int VECs_PER_THREAD =
+      MAX(1, EXPERTS / (ELTS_PER_LDG * WARP_SIZE_PARAM));
+  static constexpr int VPT = VECs_PER_THREAD * ELTS_PER_LDG;
+  static constexpr int THREADS_PER_ROW = EXPERTS / VPT;
+  static const int ROWS_PER_WARP = WARP_SIZE_PARAM / THREADS_PER_ROW;
+};
+
+#define LAUNCH_SOFTMAX(NUM_EXPERTS, WARPS_PER_TB, MAX_BYTES)                   \
+  topkGatingSoftmaxLauncherHelper<NUM_EXPERTS, WARPS_PER_TB, 32, MAX_BYTES>(   \
+      gating_output, topk_weights, topk_indices, token_expert_indices,         \
+      num_tokens, topk, 0, num_experts, renormalize);
+
+template <int EXPERTS, int WARPS_PER_TB, int WARP_SIZE_PARAM,
+          int MAX_BYTES_PER_LDG, typename IndType, typename InputType,
+          size_t Rank = 2>
+void topkGatingSoftmaxLauncherHelper(
+    choreo::spanned_view<InputType, Rank> gating_output,
+    choreo::spanned_view<InputType, Rank> topk_weights,
+    choreo::spanned_view<IndType, Rank> topk_indices,
+    choreo::spanned_view<s32, Rank> token_expert_indices,
+    const int num_rows, const int k, const int start_expert,
+    const int end_expert, const bool renormalize) {
+  static constexpr int BYTES_PER_LDG =
+      MIN(MAX_BYTES_PER_LDG, sizeof(InputType) * EXPERTS);
+  using Constants =
+      TopkConstants<EXPERTS, BYTES_PER_LDG, WARP_SIZE_PARAM, InputType>;
+  static constexpr int VPT = Constants::VPT;
+  static constexpr int ROWS_PER_WARP = Constants::ROWS_PER_WARP;
+  const int num_warps = (num_rows + ROWS_PER_WARP - 1) / ROWS_PER_WARP;
+  const int num_blocks = (num_warps + WARPS_PER_TB - 1) / WARPS_PER_TB;
+
+  P(VPT)
+  P(ROWS_PER_WARP)
+  P(num_warps)
+  P(num_blocks)
+  P(WARP_SIZE_PARAM)
+  P(BYTES_PER_LDG)
+
+#if 0
+  CALL(moe_topk0, gating_output, topk_indices, topk_weights, num_blocks,
+      WARP_SIZE_PARAM, WARPS_PER_TB, VPT, EXPERTS, BYTES_PER_LDG);
+#else
+  CALL(moe_topk2, /* calling function */
+       gating_output, topk_indices, token_expert_indices,
+       topk_weights,                              /* in and out*/
+       num_blocks, WARP_SIZE_PARAM, WARPS_PER_TB, /* _, blockdim.x, blockdim.y*/
+       VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG,
+       WARP_SIZE_PARAM, /* template */
+       renormalize);
+  // CALL(moe_topk5,                                 /* calling function */
+  //      gating_output, topk_indices, topk_weights, /* in and out*/
+  //      num_blocks, WARP_SIZE_PARAM, WARPS_PER_TB, /* _, blockdim.x,
+  //      blockdim.y*/ VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG,
+  //      WARP_SIZE_PARAM /* template */
+  // );
+#endif
+}
+
+template <typename T, typename C, size_t Rank>
+void topk_softmax(
+    choreo::spanned_view<T, Rank> topk_weights,         // [num_tokens, topk]
+    choreo::spanned_view<C, Rank> topk_indices,         // [num_tokens, topk]
+    choreo::spanned_view<C, Rank> token_expert_indices, // [num_tokens, topk]
+    choreo::spanned_view<T, Rank> gating_output, // [num_tokens, num_experts]
+    bool renormalize) {
+  const int num_tokens = gating_output.shape()[0];
+  const int num_experts = gating_output.shape()[1];
+  const int topk = topk_weights.shape()[1];
+
+  const bool is_pow_2 =
+      (num_experts != 0) && ((num_experts & (num_experts - 1)) == 0);
+  // TODO: workspace?
+  const bool needs_workspace = !is_pow_2 || num_experts > 256;
+  const int64_t workspace_size = needs_workspace ? num_tokens * num_experts : 0;
+
+  static constexpr int WARPS_PER_TB = 4;
+  static constexpr int BYTES_PER_LDG_POWER_OF_2 = 16;
+
+  switch (num_experts) {
+  case 1: LAUNCH_SOFTMAX(1, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 2: LAUNCH_SOFTMAX(2, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 4: LAUNCH_SOFTMAX(4, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 8: LAUNCH_SOFTMAX(8, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 16: LAUNCH_SOFTMAX(16, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 32: LAUNCH_SOFTMAX(32, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 64: LAUNCH_SOFTMAX(64, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 128: LAUNCH_SOFTMAX(128, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 256: LAUNCH_SOFTMAX(256, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  case 512: LAUNCH_SOFTMAX(512, WARPS_PER_TB, BYTES_PER_LDG_POWER_OF_2); break;
+  default: assert(false);
+  }
+}
+
+void run(const int N_TOKENS, const int N_EXPERTS, const int K) {
+  auto scores = choreo::make_spandata<choreo::f32>(N_TOKENS, N_EXPERTS);
+  scores.fill_random(0.0f, 100.0f);
+
+  auto topk_ids = choreo::make_spandata<choreo::s32>(N_TOKENS, K);
+  auto topk_experts_ids = choreo::make_spandata<choreo::s32>(N_TOKENS, K);
+  auto topk_scores = choreo::make_spandata<choreo::f32>(N_TOKENS, K);
+
+  topk_softmax(topk_scores.view(), topk_ids.view(), topk_experts_ids.view(),
+               scores.view(), true);
+
+  auto host_topk_ids = choreo::make_spandata<choreo::s32>(N_TOKENS, K);
+  auto host_topk_scores = choreo::make_spandata<choreo::f32>(N_TOKENS, K);
+#if 0
+  moe_topk_cpu_baseline(scores.data(), N_TOKENS, N_EXPERTS, K,
+                        host_topk_scores.data(), host_topk_ids.data());
+#else
+  moe_topk_softmax_cpu_baseline(scores.data(), N_TOKENS, N_EXPERTS, K,
+                                host_topk_scores.data(), host_topk_ids.data(),
+                                true);
+#endif
+  constexpr float EP = 0.00001f;
+  for (size_t i = 0; i < N_TOKENS; ++i)
+    for (size_t j = 0; j < K; ++j) {
+      auto g_sco = topk_scores[i][j];
+      auto g_idx = topk_ids[i][j];
+      // auto g_sco = topk_scores[i][j*2];
+      // int g_idx = topk_scores[i][j*2+1];
+      auto h_sco = host_topk_scores[i][j];
+      auto h_idx = host_topk_ids[i][j];
+      if (g_idx != h_idx || std::abs(g_sco - h_sco) > EP) {
+        std::cout << "scores of token " << i << ":\nindex\tscores\n";
+        for (int x = 0; x < N_EXPERTS; ++x)
+          std::cout << x << "\t" << scores[i][x] << "\n";
+        std::cout << "res of device:\n";
+        for (int x = 0; x < K; ++x)
+          std::cout << "\t" << x << ":\t" << topk_ids[i][x] << " -> "
+                    << topk_scores[i][x] << "\n";
+        std::cout << "res of host:\n";
+        for (int x = 0; x < K; ++x)
+          std::cout << "\t" << x << ":\t" << host_topk_ids[i][x] << " -> "
+                    << host_topk_scores[i][x] << "\n";
+
+        std::cout << "[" << i << ", " << j << "]: \n";
+        std::cout << "\t" << g_idx << ", " << g_sco << "\n";
+        std::cout << "\t" << h_idx << ", " << h_sco << "\n";
+
+        choreo::choreo_assert(false, "values are not equal.");
+      }
+    }
+}
+
+int main() {
+
+  run(1024 * 1024, 32, 4);
+  run(1024 * 1024, 64, 4);
+  run(1024 * 1024, 32, 8);
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+template <int K>
+__device__ void warp_topk(f32* vals, s32* idxs) {
+  // Assume: vals[0..k_val-1] initialized (e.g., vals[0]=score,
+  // idxs[0]=lane_id),
+  //         vals[k_val..MAX_K-1] = -INF, idxs[...] = -1
+
+  // Butterfly network: distances 16,8,4,2,1
+  for (int d = 16; d > 0; d >>= 1) {
+    // Shuffle peer's candidates
+    f32 peer_vals[K];
+    int peer_idxs[K];
+    for (int i = 0; i < K; ++i) {
+      peer_vals[i] = __shfl_xor_sync(0xffffffff, vals[i], d);
+      peer_idxs[i] = __shfl_xor_sync(0xffffffff, idxs[i], d);
+    }
+
+    // Merge local + peer → temp top-K (size up to 2*k_val)
+    // Since k_val may be small, linear merge is fine
+    f32 merged_vals[2 * K];
+    int merged_idxs[2 * K];
+    int n_merged = 0;
+
+    // Insert local
+    for (int i = 0; i < K && vals[i] > -1.5f; ++i) {
+      merged_vals[n_merged] = vals[i];
+      merged_idxs[n_merged] = idxs[i];
+      ++n_merged;
+    }
+    // Insert peer
+    for (int i = 0; i < K && peer_vals[i] > -1.5f; ++i) {
+      merged_vals[n_merged] = peer_vals[i];
+      merged_idxs[n_merged] = peer_idxs[i];
+      ++n_merged;
+    }
+
+    // ---- Selection: get top-K from merged list ----
+    // Simple O(n*k) selection (n ≤ 2*K ≤ 64, k ≤ 32 → cheap)
+    // We'll use "partial insertion sort"
+    for (int i = 0; i < K; ++i) {
+      f32 best_val = -2.0f;
+      int best_j = -1;
+      for (int j = i; j < n_merged; ++j) {
+        if (merged_vals[j] > best_val) {
+          best_val = merged_vals[j];
+          best_j = j;
+        } else if (merged_vals[j] == best_val) {
+          // Additional processing to ensure consistency with the CPU results
+          if (merged_idxs[best_j] > merged_idxs[j]) {
+            best_val = merged_vals[j];
+            best_j = j;
+          }
+        }
+      }
+      if (best_j == -1) break;
+      // Swap to position i
+      f32 tmp_v = merged_vals[i];
+      merged_vals[i] = merged_vals[best_j];
+      merged_vals[best_j] = tmp_v;
+      int tmp_i = merged_idxs[i];
+      merged_idxs[i] = merged_idxs[best_j];
+      merged_idxs[best_j] = tmp_i;
+
+      vals[i] = merged_vals[i];
+      idxs[i] = merged_idxs[i];
+    }
+    // // Pad rest with -INF (optional, for correctness if reused)
+    // for (int i = K; i < K; ++i) {
+    //   vals[i] = -2.0f;
+    //   idxs[i] = -1;
+    // }
+  }
+
+  // Optional: broadcast lane 0 result to all lanes
+  // for (int i = 0; i < K; ++i) {
+  //   vals[i] = __shfl_sync(0xffffffff, vals[i], 0);
+  //   idxs[i] = __shfl_sync(0xffffffff, idxs[i], 0);
+  // }
+}
+
+template <typename T, typename C>
+void moe_topk_cpu_baseline(const T* scores, int num_tokens, int num_experts,
+                           int K, T* topk_sco, C* topk_idx) {
+  for (int t = 0; t < num_tokens; ++t) {
+    std::vector<std::pair<T, C>> vec;
+    vec.reserve(num_experts);
+
+    for (int e = 0; e < num_experts; ++e)
+      vec.emplace_back(scores[t * num_experts + e], e);
+
+    std::sort(vec.begin(), vec.end(), [](const auto& a, const auto& b) {
+      if (a.first != b.first) return a.first > b.first;
+      return a.second < b.second;
+    });
+
+    for (int i = 0; i < K; ++i) {
+      topk_sco[t * K + i] = vec[i].first;
+      topk_idx[t * K + i] = vec[i].second;
+    }
+  }
+}
+
+template <typename T, typename C>
+void moe_topk_softmax_cpu_baseline(const T* scores, // [num_tokens, num_experts]
+                                   int num_tokens, int num_experts, int K,
+                                   T* topk_sco, // [num_tokens, K]
+                                   C* topk_idx, // [num_tokens, K]
+                                   bool renormalize) {
+  for (int t = 0; t < num_tokens; ++t) {
+    const T* row = scores + t * num_experts;
+
+    // 1. row-wise max
+    T row_max = row[0];
+    for (int e = 1; e < num_experts; ++e) {
+      row_max = std::max(row_max, row[e]);
+    }
+
+    // 2. softmax
+    std::vector<T> probs(num_experts);
+    T row_sum = T(0);
+    for (int e = 0; e < num_experts; ++e) {
+      probs[e] = std::exp(row[e] - row_max);
+      row_sum += probs[e];
+    }
+
+    const T inv_sum = row_sum > T(0) ? T(1) / row_sum : T(0);
+    for (int e = 0; e < num_experts; ++e) { probs[e] *= inv_sum; }
+
+    // 3. top-K on softmax probs
+    std::vector<std::pair<T, C>> vec;
+    vec.reserve(num_experts);
+    for (int e = 0; e < num_experts; ++e) {
+      vec.emplace_back(probs[e], static_cast<C>(e));
+    }
+
+    std::sort(vec.begin(), vec.end(), [](const auto& a, const auto& b) {
+      if (a.first != b.first) return a.first > b.first;
+      return a.second < b.second;
+    });
+
+    // 4. write top-K
+    T selected_sum = T(0);
+    for (int i = 0; i < K; ++i) {
+      topk_sco[t * K + i] = vec[i].first;
+      topk_idx[t * K + i] = vec[i].second;
+      selected_sum += vec[i].first;
+    }
+
+    // 5. renormalize
+    if (renormalize && selected_sum > T(0)) {
+      const T inv_sel = T(1) / selected_sum;
+      for (int i = 0; i < K; ++i) { topk_sco[t * K + i] *= inv_sel; }
+    }
+  }
+}
