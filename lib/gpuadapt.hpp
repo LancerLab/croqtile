@@ -864,21 +864,6 @@ public:
       Error1(n.LOC(),
              "Arithmetic built-in function is yet to supported on CUDA.");
 
-    if (n.function->name != "print" && n.function->name != "println") {
-      for (auto& arg : n.GetArguments()) {
-        if (auto sty = GetSpannedType(arg->GetType()))
-          if (sty->GetStorage() == Storage::GLOBAL)
-            Error1(n.LOC(), "function call '" + n.function->name +
-                                "` with global data '" + STR(arg) +
-                                "` is not allowed.");
-        if (auto id = AST::GetIdentifier(arg))
-          if (cur_params.count(InScopeName(STR(id))) &&
-              isa<SpannedType>(GetSymbolType(id->name)))
-            Error1(n.LOC(), "function call '" + n.function->name +
-                                "` with global data '" + STR(arg) +
-                                "` is not allowed.");
-      }
-    }
     return true;
   }
 

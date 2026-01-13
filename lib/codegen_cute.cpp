@@ -217,7 +217,8 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
            << ");\n";
 
   // For WGMMA with shared memory destination, use swizzled layout
-  if (use_wgmma_layout && sto == Storage::SHARED && bty == BaseType::F16) {
+  if (use_wgmma_layout && sto == Storage::SHARED &&
+      (bty == BaseType::F16 || bty == BaseType::BF16)) {
     // Select swizzle layout based on swizzle value
     std::string swizzle_layout;
     switch (swizzle_value) {
@@ -229,10 +230,8 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
     tsr_decl << indent << "auto " << lyt_name
              << " = "
                 "cute::tile_to_shape("
-             << swizzle_layout
-             << "<__"
-                "half>{}, "
-             << shp_name << ");\n";
+             << swizzle_layout << "<" << STR(bty) << ">{}, " << shp_name
+             << ");\n";
   } else {
     if (!strides.empty())
       tsr_decl << indent << "auto " << std_name << " = cute::make_stride("
@@ -1914,7 +1913,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // Determine if we should use WGMMA layout for destination tensor
     bool use_wgmma_layout_t = HasWGMMAInFunction() &&
                               t_sty->GetStorage() == Storage::SHARED &&
-                              t_sty->ElementType() == BaseType::F16;
+                              (t_sty->ElementType() == BaseType::F16 ||
+                               t_sty->ElementType() == BaseType::BF16);
 
     // Use swizzle value only if explicitly specified, otherwise use 0 (no
     // swizzle)

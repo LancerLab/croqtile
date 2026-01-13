@@ -2236,7 +2236,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
     count++;
     auto ty = NodeType(*v);
     // must be a callable type
-    if (!CanYieldAnInteger(ty) && !isa<SpannedType>(ty))
+    if (!CanYieldAnInteger(ty) && !isa<SpannedType>(ty) && !isa<AddrType>(ty))
       Error1(v->LOC(), "(" + Ordinal(count) + ") argument of type '" +
                            PSTR(ty) +
                            "` can not be passed to the kernel function.");

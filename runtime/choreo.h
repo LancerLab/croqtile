@@ -618,6 +618,22 @@ using bf16 = __bf16;
 using bfp16 = __bf16;
 using bfloat16 = __bf16;
 
+__co_any__ inline static bf16 f32_to_bf16(f32 value) {
+#ifdef __USE_CUDA_TYPE__
+  return __float2bfloat16(value);
+#else
+  return bf16(value);
+#endif
+}
+
+__co_any__ inline static f32 bf16_to_f32(bf16 value) {
+#ifdef __USE_CUDA_TYPE__
+  return __bfloat162float(value);
+#else
+  return f32(value);
+#endif
+}
+
 // Check for __bf16 support
 #if !defined(__TOPSCC__) && !defined(__clang__) && !defined(__GNUC__) &&       \
     !defined(__CUDACC__)
@@ -2005,6 +2021,18 @@ __device__ static inline T cast_if(F val) {
     return val;
   }
 }
+
+template <>
+struct AccumTCast<bf16, f32> {
+  static constexpr bool supported = true;
+  __device__ static inline bf16 cast(f32 val) { return f32_to_bf16(val); }
+};
+
+template <>
+struct AccumTCast<f32, bf16> {
+  static constexpr bool supported = true;
+  __device__ static inline f32 cast(bf16 val) { return bf16_to_f32(val); }
+};
 
 // --------------- load A policies ---------------
 struct Policy_A_M8N8K4 {
