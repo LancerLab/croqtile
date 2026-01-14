@@ -716,6 +716,7 @@ void CuteCodeGen::EmitFixedHostHead() {
   oss <<
       R"(
 #include <fstream>
+#include <cstdlib>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -808,15 +809,75 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
     std::exit(EXIT_FAILURE);
   }
 
-  int device_id = 0;
-  err = cudaGetDevice(&device_id);
-  if (err != cudaSuccess) {
+  // ----------- Device selection -----------
+  // If CHOREO_CUDA_DEVICE is set, honor it.
+  // Otherwise pick a device meeting the SM requirement with the most free memory.
+  int device_id = -1;
+  if (const char* env_dev = std::getenv("CHOREO_CUDA_DEVICE")) {
+    int wanted = std::atoi(env_dev);
+    if (wanted < 0 || wanted >= device_count) {
       std::fprintf(stderr,
-		   "[choreo] cudaGetDevice failed: %s\n",
-		   cudaGetErrorString(err));
+		   "[choreo] Invalid CHOREO_CUDA_DEVICE=%d (device_count=%d)\n",
+		   wanted, device_count);
       std::exit(EXIT_FAILURE);
+    }
+    err = cudaSetDevice(wanted);
+    if (err != cudaSuccess) {
+      std::fprintf(stderr,
+		   "[choreo] cudaSetDevice(%d) failed: %s\n",
+		   wanted, cudaGetErrorString(err));
+      std::exit(EXIT_FAILURE);
+    }
+    device_id = wanted;
+  } else {
+    size_t best_free = 0;
+    int best_dev = -1;
+    for (int i = 0; i < device_count; ++i) {
+      cudaDeviceProp p{};
+      cudaError_t eprop = cudaGetDeviceProperties(&p, i);
+      if (eprop != cudaSuccess) continue;
+      int smi = p.major * 10 + p.minor;
+      if (smi < __CHOREO_REQUIRED_GPU_DEVICE_SM__) continue;
+
+      cudaError_t eset = cudaSetDevice(i);
+      if (eset != cudaSuccess) {
+        (void)cudaGetLastError();
+        continue;
+      }
+      // Force context init; if this fails (e.g. OOM), skip this device.
+      cudaError_t ectx = cudaFree(0);
+      if (ectx != cudaSuccess) {
+        (void)cudaGetLastError();
+        continue;
+      }
+      size_t free_b = 0, total_b = 0;
+      cudaError_t emem = cudaMemGetInfo(&free_b, &total_b);
+      if (emem != cudaSuccess) {
+        (void)cudaGetLastError();
+        continue;
+      }
+      if (free_b > best_free) {
+        best_free = free_b;
+        best_dev = i;
+      }
+    }
+    if (best_dev < 0) {
+      std::fprintf(stderr,
+		   "[choreo] No suitable CUDA device found (SM >= %d).\n",
+		   __CHOREO_REQUIRED_GPU_DEVICE_SM__);
+      std::exit(EXIT_FAILURE);
+    }
+    err = cudaSetDevice(best_dev);
+    if (err != cudaSuccess) {
+      std::fprintf(stderr,
+		   "[choreo] cudaSetDevice(%d) failed: %s\n",
+		   best_dev, cudaGetErrorString(err));
+      std::exit(EXIT_FAILURE);
+    }
+    device_id = best_dev;
   }
 
+  // ----------- Device capability check (selected device) -----------
   cudaDeviceProp prop{};
   err = cudaGetDeviceProperties(&prop, device_id);
   if (err != cudaSuccess) {
@@ -1946,7 +2007,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     ds << t_mds_decl;
 
     // handles dma related to shared memory
-    if (!ThreadCooperative(n)) ds << d_indent << LevelPred() << " {\n";
+    // For async cp.async (non-TMA), threads in the warp must participate;
+    // avoid the block-single guard so every lane issues copy/trigger.
+    bool need_single_instance = !ThreadCooperative(n);
+    if (fty->IsAsync() && !n.IsTMA()) need_single_instance = false;
+
+    if (need_single_instance) ds << d_indent << LevelPred() << " {\n";
     IncrDeviceIndent();
     if (!n.future.empty()) cooperatives.insert(InScopeName(n.future));
 
@@ -2005,7 +2071,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
 
     DecrDeviceIndent();
-    if (!ThreadCooperative(n)) ds << d_indent << "} // single instance\n";
+    if (need_single_instance) ds << d_indent << "} // single instance\n";
 
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
@@ -2064,6 +2130,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << future_name << ".trigger();\n";
       } else {
         // Synchronous tma.copy: wait immediately
+        // Make sure the future is marked initialized before marking it nowait
+        // to avoid runtime diagnostics when the state is still ST_NONE.
+        ds << d_indent << "(void)" << future_name << ".get_atom();\n";
         ds << d_indent << "((TMAAtom*)" << future_name
            << ".get_atom())->barrier().wait(std::move(((TMAAtom*)"
            << future_name << ".get_atom())->token()));\n";
@@ -2136,8 +2205,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto sym = op.LoadTo();
       // For WGMMA, we store the shared memory pointer for later use in Exec
       // The actual data should already be in shared memory
-      ds << d_indent << "__half* " << sym << "_smem_ptr = (__half*)("
-         << ExprSTR(op.LoadFrom(), false) << ");\n";
+      std::string elem_ty = NameBaseType(ssmi.ty);
+      ds << d_indent << elem_ty << "* " << sym << "_smem_ptr = (" << elem_ty
+        << "*)(" << ExprSTR(op.LoadFrom(), false) << ");\n";
+      bool frag_is_fp8 = ssmi.ty == BaseType::F8_E4M3 ||
+                         ssmi.ty == BaseType::F8_E5M2 ||
+                         ssmi.ty == BaseType::F8_UE4M3 ||
+                         ssmi.ty == BaseType::F8_UE8M0;
       std::string major_order = "WGMMA_MajorOrder::MN_MAJOR";
       if (ssmi.frag == MMAInfo::FRAG_A) {
         if (ssmi.method == AST::MMAOperation::ROW_ROW ||
@@ -2193,13 +2267,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // WGMMA execution using unified template with automatic descriptor
       // selection Operands: C (accum), A, B - result stored in C
       ds << d_indent
-         << "// Note: warpgroup_arrive() should be called once before first "
-            "WGMMA\n";
+        << "// Note: warpgroup_arrive() should be called once before first "
+          "WGMMA\n";
       ds << d_indent
-         << "// and warpgroup_wait() should be called once after all WGMMAs\n";
-      ds << d_indent << "cute::" << mma_policy << "<" << cute_gmma_major_cast
-         << "(" << trans_a << "), " << cute_gmma_major_cast << "(" << trans_b
-         << ")>::fma(" << "desc_" << a_sym << ", desc_" << b_sym;
+        << "// and warpgroup_wait() should be called once after all WGMMAs\n";
+      bool policy_is_tn = mma_policy.rfind("_TN") != std::string::npos;
+      ds << d_indent << "cute::" << mma_policy << "<";
+      if (!policy_is_tn) {
+        ds << cute_gmma_major_cast << "(" << trans_a << "), "
+          << cute_gmma_major_cast << "(" << trans_b << ")";
+      }
+      ds << ">::fma(" << "desc_" << a_sym << ", desc_" << b_sym;
       for (size_t i = 0; i < reg_num_d; ++i)
         ds << ", " << c_sym << "_frag[" << i << "]";
       ds << ");\n";
@@ -4041,6 +4119,20 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         auto lty = NodeType(*l);
         auto rty = NodeType(*r);
         auto& op = expr->GetOp();
+
+        auto IsFp8Scalar = [](const ptr<Type>& ty) -> bool {
+          if (auto sty = dyn_cast<ScalarType>(ty)) {
+            auto bt = sty->GetBaseType();
+            return bt == BaseType::F8_E4M3 || bt == BaseType::F8_E5M2 ||
+                   bt == BaseType::F8_UE8M0 || bt == BaseType::F8_UE4M3;
+          }
+          return false;
+        };
+
+        auto ToF32 = [is_host](const std::string& s) -> std::string {
+          if (is_host) return "choreo::to_f32(" + s + ")";
+          return "static_cast<float>(" + s + ")";
+        };
         if (isa<SpannedType>(lty) || isa<SpannedType>(rty)) {
           oss << EmitSpannedArith(*expr);
         } else if (op == "#" && IsActualBoundedIntegerType(lty) &&
@@ -4066,8 +4158,15 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
                              "', expr: " + PSTR(expr) + ".");
         } else {
           std::ostringstream res;
-          res << OpExprSTR(l, op, true, is_host) << " " << op << " "
-              << OpExprSTR(r, op, false, is_host);
+          // FP8 scalar arithmetic: upcast operands to FP32 first.
+          // This avoids relying on FP8 operator overloads which may not exist.
+          if (expr->IsArith() && (IsFp8Scalar(lty) || IsFp8Scalar(rty))) {
+            res << ToF32(OpExprSTR(l, op, true, is_host)) << " " << op << " "
+                << ToF32(OpExprSTR(r, op, false, is_host));
+          } else {
+            res << OpExprSTR(l, op, true, is_host) << " " << op << " "
+                << OpExprSTR(r, op, false, is_host);
+          }
           oss << WrapParen(res.str(), op);
         }
       }

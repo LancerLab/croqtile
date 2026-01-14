@@ -392,6 +392,16 @@ static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
                            MMAShape{m, n, k});
           out[config] = 90;
         }
+  // Add FP8 WGMMA support for k=16 shapes on SM90+ (enable frontend acceptance)
+  m = 64; k = 16;
+  for (int n = 8; n <= 256; n += 8)
+    for (auto a_ty : {BT::F8_E4M3, BT::F8_E5M2})
+      for (auto b_ty : {BT::F8_E4M3, BT::F8_E5M2})
+        for (auto cd_ty : {BT::F16, BT::F32}) {
+          MMAConfig config(DENSE, a_ty, b_ty, cd_ty, cd_ty, BT::UNKNOWN,
+                           MMAShape{m, n, k});
+          out[config] = 90;
+        }
   // integer types
   m = 64, k = 32;
   for (int n : {8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192,
@@ -530,7 +540,13 @@ inline std::string MMAConfig2WGMMAName(const MMAConfig& mma_config,
   strs.push_back(ToUpper(ty_str(mma_config.d_ty) + ty_str(mma_config.a_ty) +
                          ty_str(mma_config.b_ty)));
   // TODO: both fragments read from smem for now
-  strs.push_back("SS");
+  bool is_fp8 = mma_config.a_ty == BaseType::F8_E4M3 ||
+                mma_config.a_ty == BaseType::F8_E5M2 ||
+                mma_config.b_ty == BaseType::F8_E4M3 ||
+                mma_config.b_ty == BaseType::F8_E5M2;
+  // FP8 GMMA kernels in CUTLASS use the "*_TN" naming (layouts are encoded),
+  // other datatypes keep the original layout-parameterized form.
+  strs.push_back(is_fp8 ? "SS_TN" : "SS");
   return DelimitedString(strs, sep);
 }
 

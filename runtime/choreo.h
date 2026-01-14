@@ -42,6 +42,8 @@
 #define __CHOREO_TARGET_NATIVE_FP8_E8M0_SUPPORT__
 #endif
 #include "cuda_fp8.h"
+#else
+/* FP8 native types are only available when compiling for SM90+ targets. */
 #endif
 
 #if CUDA_VERSION >= 12090
@@ -63,6 +65,8 @@
 #endif
 
 #include "cute/tensor.hpp"
+#include "cute/algorithm/copy.hpp"
+#include "cute/algorithm/prefetch.hpp"
 #include <cuda/barrier>
 #include <mma.h>
 
@@ -679,6 +683,22 @@ using f8_e4m3 = float_e4m3_t;
 using f8_e5m2 = float_e5m2_t;
 using f8_ue8m0 = float_ue8m0_t;
 using f8_ue4m3 = float_ue4m3_t;
+
+// Minimal arithmetic support for FP8 scalar types.
+// Choreo's codegen may form expressions like `fp8 + fp8` before casting.
+// CUTLASS/CUTE FP8 types and CUDA FP8 types don't consistently provide these operators,
+// so we define them here and return FP32.
+#if defined(__USE_CUDA_TYPE__)
+__host__ __device__ static inline float operator+(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b) { return float(a) + float(b); }
+__host__ __device__ static inline float operator-(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b) { return float(a) - float(b); }
+__host__ __device__ static inline float operator*(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b) { return float(a) * float(b); }
+__host__ __device__ static inline float operator/(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b) { return float(a) / float(b); }
+
+__host__ __device__ static inline float operator+(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b) { return float(a) + float(b); }
+__host__ __device__ static inline float operator-(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b) { return float(a) - float(b); }
+__host__ __device__ static inline float operator*(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b) { return float(a) * float(b); }
+__host__ __device__ static inline float operator/(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b) { return float(a) / float(b); }
+#endif
 #endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 
 #ifdef __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
@@ -1234,8 +1254,19 @@ static __attribute__((always_inline)) inline void abend_false(bool p) {
   if (!p) std::abort();
 }
 
-static __attribute__((always_inline)) inline void abend_true(bool p) {
-  if (p) std::abort();
+// Abort if the condition/error-code is non-zero.
+// Note: this intentionally takes an integer-like value (not bool) so we don't
+// lose CUDA error codes via implicit conversion.
+static __attribute__((always_inline)) inline void abend_true(int p) {
+  if (p) {
+#if defined(__CUDACC__) || defined(__CUDA__)
+    auto err = static_cast<cudaError_t>(p);
+    fprintf(stderr, "CUDA failure: %d (%s)\n", err, cudaGetErrorString(err));
+#else
+    fprintf(stderr, "Runtime failure (abend_true triggered)\n");
+#endif
+    std::abort();
+  }
 }
 
 static __attribute__((always_inline)) inline void verify_device_status() {
@@ -2849,9 +2880,10 @@ template <typename InputT, typename OutputT,
           WGMMA_Swizzle SwizzleB = WGMMA_Swizzle::NS>
 __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                                                        InputT* sA, InputT* sB) {
-  static_assert(
-      std::is_same_v<InputT, __half> || std::is_same_v<InputT, __nv_bfloat16>,
-      "wgmma_m64n64k16_unified requires __half or __nv_bfloat16 input type");
+    static_assert(
+      std::is_same_v<InputT, __half> || std::is_same_v<InputT, __nv_bfloat16> ||
+        std::is_same_v<InputT, f8_e4m3> || std::is_same_v<InputT, f8_e5m2>,
+      "wgmma_m64n64k16_unified requires __half, __nv_bfloat16 or fp8 input type");
   static_assert(
       std::is_same_v<OutputT, float> || std::is_same_v<OutputT, InputT>,
       "wgmma_m64n64k16_unified requires float or same as InputT output type");
@@ -2975,6 +3007,32 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "n"(trans_a), "n"(trans_b));
 #endif
   }
+  else if constexpr ((std::is_same_v<InputT, f8_e4m3> ||
+                      std::is_same_v<InputT, f8_e5m2>) &&
+                     std::is_same_v<OutputT, float>) {
+#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+    asm volatile("{\n"
+                 "wgmma.mma_async.sync.aligned.m64n64k16.f32.f8.f8 "
+                 "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
+                 " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
+                 " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
+                 " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
+                 " %32," 
+                 " %33," 
+                 " %34, %35, %36, %37, %38;\n"
+                 "}\n"
+                 : "+f"(d[0][0]), "+f"(d[0][1]), "+f"(d[0][2]), "+f"(d[0][3]),
+                   "+f"(d[0][4]), "+f"(d[0][5]), "+f"(d[0][6]), "+f"(d[0][7]),
+                   "+f"(d[1][0]), "+f"(d[1][1]), "+f"(d[1][2]), "+f"(d[1][3]),
+                   "+f"(d[1][4]), "+f"(d[1][5]), "+f"(d[1][6]), "+f"(d[1][7]),
+                   "+f"(d[2][0]), "+f"(d[2][1]), "+f"(d[2][2]), "+f"(d[2][3]),
+                   "+f"(d[2][4]), "+f"(d[2][5]), "+f"(d[2][6]), "+f"(d[2][7]),
+                   "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]),
+                   "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
+                 : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
+                   "n"(trans_a), "n"(trans_b));
+#endif
+  }
 }
 
 // wgmma store d
@@ -2987,6 +3045,29 @@ struct Policy_WGMMA_D_M64K16 {
     int lane = tid % 32;             // 0-31: lane within warp
     int warp = tid / 32;             // 0-3: which warp in warp group
     int row0 = warp * 16 + lane / 4; // fisrt row
+    int row1 = row0 + 8;             // second row
+    int col_num = N / 8;             // number of column pairs
+    using value_type = typename Tensor::value_type;
+#pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(row0, col0) = cast_if<value_type>(d[c * 4]);
+      D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+};
+
+// Store policy for 64x64x32 WGMMA (accumulator layout matches K=16)
+struct Policy_WGMMA_D_M64K32 {
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;             // 0-31: lane within warp
+    int warp = tid / 32;             // 0-3: which warp in warp group
+    int row0 = warp * 16 + lane / 4; // first row
     int row1 = row0 + 8;             // second row
     int col_num = N / 8;             // number of column pairs
     using value_type = typename Tensor::value_type;
@@ -3124,6 +3205,12 @@ template <>
 struct MMA_Policy<CUTE_WGMMA_M64K16> {
   static constexpr bool supported = true;
   using typeD = Policy_WGMMA_D_M64K16;
+};
+
+template <>
+struct MMA_Policy<CUTE_WGMMA_M64K32> {
+  static constexpr bool supported = true;
+  using typeD = Policy_WGMMA_D_M64K32;
 };
 
 // TODO: all 16x8x64 (sub byte)
