@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GPU
+// REQUIRES: TARGET-SM_90
 // RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
 
 __co__ auto dma_copy(f8_e5m2 [M, 17, 32] input) {
