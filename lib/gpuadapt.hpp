@@ -165,7 +165,7 @@ public:
       t_rank = t_ca->AllOperations().back()->GetRank();
       t_shape = t_ca->AllOperations().back()->GetBlockShape();
     }
-
+#if 0 // TODO: dma size limitation in GPU
     // common limitation (currently guarded by memcheck)
     for (auto& sty : {f_sty, t_sty}) {
       if (sty->RuntimeShaped()) {
@@ -185,6 +185,7 @@ public:
                               "DMA cannot exceed 2^32.");
       }
     }
+  #endif
     auto IsLinearCopy = [&]() -> bool {
       return f_ca->NoTilingOperation() && t_ca->NoTilingOperation();
     };
