@@ -985,7 +985,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   else {
     auto sv = FCtx(fname).GetSymbolValues(sname);
     // workround: for symbolic valno, treat it as ref to do codegen.
-    if (sv.HasVals() && sv.GetVals().size() == 1 && VIIsSym(sv.GetVal()))
+    if (n.IsMutable() && sv.HasVals() && sv.GetVals().size() == 1 &&
+        VIIsSym(sv.GetVal()))
       ref = true;
     updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), ref});
   }

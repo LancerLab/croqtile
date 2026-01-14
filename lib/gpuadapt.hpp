@@ -197,7 +197,7 @@ public:
                               "DMA cannot exceed 2^32.");
       }
     }
-  #endif
+#endif
     auto IsLinearCopy = [&]() -> bool {
       return f_ca->NoTilingOperation() && t_ca->NoTilingOperation();
     };
