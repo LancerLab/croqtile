@@ -3168,6 +3168,9 @@ __device__ inline void rotate(Futures&... f) {
 
 } // end namespace choreo
 
+#ifdef __CHOREO_TARGET_CUTE__
 // target specific libraries (non-shared)
 #include "choreo_cute.h"
+#endif // __CHOREO_TARGET_CUTE__
+
 #endif // __CHOREO_H__

@@ -396,6 +396,7 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/lib/
 install(
   FILES
     ${CMAKE_BINARY_DIR}/choreo_header.inc
+    ${CMAKE_BINARY_DIR}/choreo_cute_header.inc
     ${CMAKE_BINARY_DIR}/parser.tab.hh
   DESTINATION include/choreo
   COMPONENT sdk_headers

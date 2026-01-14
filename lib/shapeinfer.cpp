@@ -501,7 +501,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
       nty = NodeType(*n.type);
     } else {
       nty = NodeType(*n.type);
-      if (auto sty = dyn_cast<ScalarIntegerType>(nty); sty && sty->IsMutable())
+      if (auto sty = dyn_cast<ScalarType>(nty); sty && sty->IsMutable())
         cur_vn = GenValNum(SSTab().ScopedName(name));
     }
   }

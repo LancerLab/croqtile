@@ -756,12 +756,16 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   // workaround:
   // if a symbol is declared but have no symbol value(optimized value)
   // pass it to device func even it is unused.
-  if (!FCtx(fname).HasSymbolValues(InScopeName(sym)))
-    updating_cgi.AddSymbolDetail(fname,
-                                 {InScopeName(sym), GetSymbolType(sym), true});
-  else
-    updating_cgi.AddSymbolDetail(fname,
-                                 {InScopeName(sym), GetSymbolType(sym), ref});
+  auto sname = InScopeName(sym);
+  if (!FCtx(fname).HasSymbolValues(sname))
+    updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), true});
+  else {
+    auto sv = FCtx(fname).GetSymbolValues(sname);
+    // workround: for symbolic valno, treat it as ref to do codegen.
+    if (sv.HasVals() && sv.GetVals().size() == 1 && VIIsSym(sv.GetVal()))
+      ref = true;
+    updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), ref});
+  }
 
   // The type is determined first, and then
   // the device or host side is determined
