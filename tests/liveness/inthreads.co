@@ -1,4 +1,4 @@
-// RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines --check-prefix=LIVENESS %s
+// RUN: choreo -dv=liveness -sa=liveness -ddir=build %s -o - | FileCheck --match-full-lines --check-prefix=LIVENESS %s
 
 #include "choreo.h"
 

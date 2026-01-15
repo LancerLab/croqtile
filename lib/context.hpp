@@ -442,21 +442,22 @@ private:
   bool cross_compile = false;       // TODO: figure out
   bool trace_vn = false;            // trace the value numbering
   bool trace_vectorize = false;     // trace the masking
-  bool show_source_loc = true;    // show source code location when error, etc.
-  bool liveness = false;          // analyze the liveness of the program
-  bool mem_reuse = false;         // reuse the memory of the program
-  bool simplify_fp_valno = false; // simplify the floating point value number
-  bool verify = false;            // verify visitors for legality
-  bool gen_debug_info = false;    // generate debug information
-  bool diag_dma = false;          // diagnose DMA at runtime
-  bool loop_norm = false;         // enable loop normalization
-  bool no_vectorize = false;      // do not vectorize any foreach loop
-  bool vectorize = false;         // enable loop vectorization
+  bool show_source_loc = true;      // show source code location when error, etc.
+  bool liveness = false;            // analyze the liveness of the program
+  bool mem_reuse = false;           // reuse the memory of the program
+  bool simplify_fp_valno = false;   // simplify the floating point value number
+  bool verify = false;              // verify visitors for legality
+  bool gen_debug_info = false;      // generate debug information
+  bool diag_dma = false;            // diagnose DMA at runtime
+  bool loop_norm = false;           // enable loop normalization
+  bool no_vectorize = false;        // do not vectorize any foreach loop
+  bool vectorize = false;           // enable loop vectorization
   size_t max_local_mem_capacity =
-      0; // max local memory capacity per thread (0: use default)
+      0;                             // max local memory capacity per thread (0: use default)
   bool mem_default_aligned = true; // alignment is set by default in mem reuse.
   bool inhibit_warning = false;    // Inhibit all warning messages.
   bool warning_as_error = false;   // Make all warnings into errors.
+  std::string debug_file_dir;      // directory for compiler debug artifacts
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -786,6 +787,8 @@ public:
   bool MemDefaultAligned() const { return mem_default_aligned; }
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
+  const std::string& GetDebugFileDir() const { return debug_file_dir; }
+  void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }

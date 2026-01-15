@@ -1,4 +1,4 @@
-// RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+// RUN: choreo -dv=liveness -sa=liveness -ddir=build %s -o - | FileCheck --match-full-lines %s
 
 __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
   f32 [N, H, W] out;

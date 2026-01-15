@@ -1031,7 +1031,17 @@ void DumpCfgToDot(
         blocks_list) {
   for (const auto& [fname, blocks] : blocks_list) {
     assert(!blocks.empty());
-    std::string filename = fname + ".dot";
+    std::string base_name = fname + ".dot";
+    std::string filename = base_name;
+    const auto& debug_dir = CCtx().GetDebugFileDir();
+    if (!debug_dir.empty()) {
+      filename = debug_dir;
+      if (!filename.empty()) {
+        const char last = filename.back();
+        if (last != '/' && last != '\\') filename += '/';
+      }
+      filename += base_name;
+    }
     std::ofstream ofs(filename);
     ofs << "digraph CFG {\n";
     ofs << "  node [shape=box, style=filled, fillcolor=lightgray];\n";

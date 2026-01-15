@@ -22,6 +22,10 @@ Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
 Option<std::string> output(OptionKind::User, "-o", "", "",
                            "Place the output into <file>.", "-o <file>", true);
 
+Option<std::string> debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
+                   "Place compiler debug artifacts under <dir>.",
+                   "--ddir=<dir>");
+
 Option<bool>
     emit_source(OptionKind::User, "-es", "", false,
                 "Emit target source file without target source compilation.");
@@ -341,6 +345,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetMemDefaultAligned(mem_default_aligned.GetValue());
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
+  CCtx().SetDebugFileDir(debug_file_dir.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);
