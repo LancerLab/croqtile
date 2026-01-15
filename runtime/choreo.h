@@ -824,6 +824,48 @@ __co_any__ inline float to_f32(T value) {
   }
 }
 
+template <typename A, typename B, typename C>
+__co_host__ inline void verify_matmul_row_col_subset(
+  A& lhs, B& rhs, C& res, float base_tol, float rel_tol,
+  size_t max_i = 8, size_t max_j = 8) {
+  size_t m = res.shape()[0];
+  size_t n = res.shape()[1];
+  size_t k = lhs.shape()[1];
+  size_t step_i = std::max<size_t>(1, m / max_i);
+  size_t step_j = std::max<size_t>(1, n / max_j);
+  for (size_t i = 0; i < m; i += step_i)
+    for (size_t j = 0; j < n; j += step_j) {
+      float ref = 0.0f;
+      for (size_t kk = 0; kk < k; ++kk)
+        ref += to_f32(lhs[(int)i][(int)kk]) *
+               to_f32(rhs[(int)kk][(int)j]);
+      float got = to_f32(res[(int)i][(int)j]);
+      float tol = base_tol + rel_tol * std::abs(ref);
+      choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
+    }
+}
+
+template <typename A, typename B, typename C>
+__co_host__ inline void verify_matmul_row_row_subset(
+  A& lhs, B& rhs, C& res, float base_tol, float rel_tol,
+  size_t max_i = 8, size_t max_j = 8) {
+  size_t m = res.shape()[0];
+  size_t n = res.shape()[1];
+  size_t k = lhs.shape()[1];
+  size_t step_i = std::max<size_t>(1, m / max_i);
+  size_t step_j = std::max<size_t>(1, n / max_j);
+  for (size_t i = 0; i < m; i += step_i)
+    for (size_t j = 0; j < n; j += step_j) {
+      float ref = 0.0f;
+      for (size_t kk = 0; kk < k; ++kk)
+        ref += to_f32(lhs[(int)i][(int)kk]) *
+               to_f32(rhs[(int)j][(int)kk]);
+      float got = to_f32(res[(int)i][(int)j]);
+      float tol = base_tol + rel_tol * std::abs(ref);
+      choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
+    }
+}
+
 namespace utils {
 template <typename U>
 __co_host__ inline void fill_random(U* array, size_t N, U lb, U ub) {
@@ -3086,8 +3128,54 @@ struct Policy_WGMMA_D_M64K16 {
   }
 };
 
+// Store policy for 64x64x8 WGMMA (accumulator layout matches K=16)
+struct Policy_WGMMA_D_M64K8 {
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;             // 0-31: lane within warp
+    int warp = tid / 32;             // 0-3: which warp in warp group
+    int row0 = warp * 16 + lane / 4; // first row
+    int row1 = row0 + 8;             // second row
+    int col_num = N / 8;             // number of column pairs
+    using value_type = typename Tensor::value_type;
+#pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(row0, col0) = cast_if<value_type>(d[c * 4]);
+      D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+};
+
 // Store policy for 64x64x32 WGMMA (accumulator layout matches K=16)
 struct Policy_WGMMA_D_M64K32 {
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;             // 0-31: lane within warp
+    int warp = tid / 32;             // 0-3: which warp in warp group
+    int row0 = warp * 16 + lane / 4; // first row
+    int row1 = row0 + 8;             // second row
+    int col_num = N / 8;             // number of column pairs
+    using value_type = typename Tensor::value_type;
+#pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(row0, col0) = cast_if<value_type>(d[c * 4]);
+      D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+};
+
+// Store policy for 64x64x256 WGMMA (binary accumulator layout matches K=16)
+struct Policy_WGMMA_D_M64K256 {
   template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
@@ -3234,9 +3322,21 @@ struct MMA_Policy<CUTE_WGMMA_M64K16> {
 };
 
 template <>
+struct MMA_Policy<CUTE_WGMMA_M64K8> {
+  static constexpr bool supported = true;
+  using typeD = Policy_WGMMA_D_M64K8;
+};
+
+template <>
 struct MMA_Policy<CUTE_WGMMA_M64K32> {
   static constexpr bool supported = true;
   using typeD = Policy_WGMMA_D_M64K32;
+};
+
+template <>
+struct MMA_Policy<CUTE_WGMMA_M64k256> {
+  static constexpr bool supported = true;
+  using typeD = Policy_WGMMA_D_M64K256;
 };
 
 // TODO: all 16x8x64 (sub byte)

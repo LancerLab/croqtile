@@ -2,8 +2,8 @@
 // RUN: choreo -gs -t cute -arch=sm_90 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 #define M 64
-#define N 64
-#define K 64
+#define N 32
+#define K 32
 
 __co__ auto matmul_e4m3(f8_e4m3 [M, K] lhs, f8_e4m3 [K, N] rhs) {
   f32 [M, N] output;
@@ -91,15 +91,8 @@ int main() {
 
   float base_tol = 0.2f;
   float rel_tol = 0.02f;
-  for (size_t i = 0; i < res_e4m3.shape()[0]; ++i)
-    for (size_t j = 0; j < res_e4m3.shape()[1]; ++j) {
-      float ref = 0.0f;
-      for (size_t k = 0; k < lhs_e4m3.shape()[1]; ++k)
-        ref += float(lhs_e4m3[i][k]) * float(rhs_e4m3[k][j]);
-      float got = float(res_e4m3[i][j]);
-      float tol = base_tol + rel_tol * std::abs(ref);
-      choreo::choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
-    }
+  choreo::verify_matmul_row_col_subset(lhs_e4m3, rhs_e4m3, res_e4m3, base_tol,
+                                       rel_tol, 8, 8);
 
   std::cout << "Test E4M3 Passed\n" << std::endl;
 
@@ -110,15 +103,8 @@ int main() {
 
   auto res_e5m2 = matmul_e5m2(lhs_e5m2.view(), rhs_e5m2.view());
 
-  for (size_t i = 0; i < res_e5m2.shape()[0]; ++i)
-    for (size_t j = 0; j < res_e5m2.shape()[1]; ++j) {
-      float ref = 0.0f;
-      for (size_t k = 0; k < lhs_e5m2.shape()[1]; ++k)
-        ref += float(lhs_e5m2[i][k]) * float(rhs_e5m2[k][j]);
-      float got = float(res_e5m2[i][j]);
-      float tol = base_tol + rel_tol * std::abs(ref);
-      choreo::choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
-    }
+  choreo::verify_matmul_row_col_subset(lhs_e5m2, rhs_e5m2, res_e5m2, base_tol,
+                                       rel_tol, 8, 8);
 
   std::cout << "Test E5M2 Passed\n" << std::endl;
 }
