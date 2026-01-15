@@ -32,9 +32,16 @@ struct SymbolWithInitVal {
 struct DMAOperationWithSwizzle {
   std::string operation;
   int swizzle_value;
-  DMAOperationWithSwizzle() : operation(""), swizzle_value(0) {}
-  DMAOperationWithSwizzle(const std::string& op, int swizzle)
-    : operation(op), swizzle_value(swizzle) {}
+  bool sparse;
+  int sparse_n;
+  int sparse_m;
+  DMAOperationWithSwizzle()
+      : operation(""), swizzle_value(0), sparse(false), sparse_n(0),
+        sparse_m(0) {}
+  DMAOperationWithSwizzle(const std::string& op, int swizzle, bool sp = false,
+                          int sp_n = 0, int sp_m = 0)
+      : operation(op), swizzle_value(swizzle), sparse(sp), sparse_n(sp_n),
+        sparse_m(sp_m) {}
 };
 
 class PContext {
@@ -200,7 +207,7 @@ void choreo_info(const char *message) {
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SP SPLPAREN
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
@@ -1510,6 +1517,13 @@ dataid_expr
           $$ = AST::Make<AST::Expr>(@1, "dataof", AST::MakeIdExpr(@1, $1));
         }
       }
+    | IDENTIFIER FNMDATA {
+        if (ignore_fndata) {
+          $$ = AST::MakeIdExpr(@1, $1);
+        } else {
+          $$ = AST::Make<AST::Expr>(@1, "mdataof", AST::MakeIdExpr(@1, $1));
+        }
+      }
     ;
 
 within_block
@@ -1710,6 +1724,10 @@ dma_stmt
           dma->SetSwizzleValue($4.swizzle_value);
           dma->SetSwizzleExplicit(true);
         }
+        if ($4.sparse) {
+          dma->SetSparse(true);
+          dma->SetSparsePattern($4.sparse_n, $4.sparse_m);
+        }
         // If swizzle is not specified in dma_operation_swizzle, swizzle_explicit remains false
         $$ = dma;
       }
@@ -1722,6 +1740,10 @@ dma_stmt
           dma->SetSwizzleValue($4.swizzle_value);
           dma->SetSwizzleExplicit(true);
         }
+        if ($4.sparse) {
+          dma->SetSparse(true);
+          dma->SetSparsePattern($4.sparse_n, $4.sparse_m);
+        }
         // If swizzle is not specified in dma_operation_swizzle, swizzle_explicit remains false
         $$ = dma;
       }
@@ -1733,6 +1755,10 @@ dma_stmt
           dma->SetSwizzleValue($2.swizzle_value);
           dma->SetSwizzleExplicit(true);
         }
+        if ($2.sparse) {
+          dma->SetSparse(true);
+          dma->SetSparsePattern($2.sparse_n, $2.sparse_m);
+        }
         // If swizzle is not specified in dma_operation_swizzle, swizzle_explicit remains false
         $$ = dma;
       }
@@ -1743,6 +1769,10 @@ dma_stmt
         if ($2.swizzle_value > 0) {
           dma->SetSwizzleValue($2.swizzle_value);
           dma->SetSwizzleExplicit(true);
+        }
+        if ($2.sparse) {
+          dma->SetSparse(true);
+          dma->SetSparsePattern($2.sparse_n, $2.sparse_m);
         }
         // If swizzle is not specified in dma_operation_swizzle, swizzle_explicit remains false
         $$ = dma;
@@ -1761,6 +1791,12 @@ dma_operation_swizzle
       }
     | COPY DOT SWIZZLE LPAREN swizzle_value RPAREN {
         $$ = DMAOperationWithSwizzle($1, $5);  // explicit swizzle value
+      }
+    | COPY SP {
+        $$ = DMAOperationWithSwizzle($1, 0, true, 2, 4);
+      }
+    | COPY SPLPAREN integer_value COL integer_value RPAREN {
+        $$ = DMAOperationWithSwizzle($1, 0, true, $3, $5);
       }
     | PAD {
         $$ = DMAOperationWithSwizzle($1, 0);
@@ -1919,6 +1955,10 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($2, $3, $5, $7);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA mma_exec_method SP IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
+        auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, true);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | MMA STORE IDENTIFIER COMMA chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($3, $5);
         $$ = AST::Make<AST::MMA>(@1, op);
@@ -1937,6 +1977,9 @@ data_element
         $$ = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1), $4);
       }
     | IDENTIFIER FNDATA AT LPAREN data_indices RPAREN {
+        $$ = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1+$2), $5);
+      }
+    | IDENTIFIER FNMDATA AT LPAREN data_indices RPAREN {
         $$ = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1+$2), $5);
       }
     ;
@@ -2024,6 +2067,12 @@ ids_expr /* enforce: either a ref to id or a subscription */
             Parser::error($1->LOC(), "expect a symbol but got a " + $1->GetR()->TypeNameString() + ".");
           $$ = $1;
         } else if ($1->op == "dataof") {  // ignore the dataof
+          auto er = cast<AST::Expr>($1->GetR());
+          if ((er->op == "elemof") || (er->GetSymbol()))
+            $$ = er;
+          else
+            Parser::error($1->LOC(), "expect a subscription but got a " + $1->op + ".");
+        } else if ($1->op == "mdataof") {  // ignore the mdataof
           auto er = cast<AST::Expr>($1->GetR());
           if ((er->op == "elemof") || (er->GetSymbol()))
             $$ = er;

@@ -58,6 +58,9 @@ extern Option<std::string> target_options;
 extern Option<bool> no_decay_spanview;
 extern Option<bool> dma_verbose;
 extern Option<bool> dma_opt;
+namespace Choreo {
+extern Option<bool> sim_sparse;
+} // namespace Choreo
 Option<bool> use_cuda_type(OptionKind::Hidden, "-use-cuda-type", "", true,
                            "use cuda built-in types.");
 
@@ -1686,7 +1689,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
   // Generate tops dte and choreo::future in device-side
   auto claimFuture = [this, &n](const std::string& buf_expr, bool is_async,
-                                bool is_tma = false) -> std::string {
+                                bool is_tma = false,
+                                const std::string& mdata_expr = "")
+      -> std::string {
     if (!n.future.empty() && claimed_futs.count(InScopeName(n.future)))
       return n.future;
 
@@ -1718,11 +1723,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
       ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
                           n.future + ".data()");
+      if (n.IsSparse())
+        ssm.MapDeviceSymbol(InScopeName(n.future) + ".mdata",
+                            n.future + ".mdata()");
     }
     future_count++;
     ds << d_indent << "future " << future_name << "(\"" << n.future << "\", "
        << n.LOC().begin.line << ", " << n.LOC().begin.column;
     if (!buf_expr.empty()) ds << ", " << buf_expr;
+    if (!mdata_expr.empty()) ds << ", " << mdata_expr;
     ds << ");\n";
     if (is_tma) {
       ds << d_indent << future_name << ".is_tma = true;\n";
@@ -1944,12 +1953,34 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   const auto f_buf = GetBufferExpr(f_sym, f_idx, f_ty);
   const auto t_buf = GetBufferExpr(t_sym, t_idx, t_ty);
 
+  std::string mdata_expr = "";
+  if (n.IsSparse() && !n.future.empty()) {
+    static size_t mdata_count = 0;
+    auto mdata_sym = "__choreo_mdata__" + std::to_string(mdata_count++);
+    auto m = ValueSTR(f_sty->GetShape().ValueAt(0));
+    auto nval = ValueSTR(f_sty->GetShape().ValueAt(1));
+    auto k = ValueSTR(f_sty->GetShape().ValueAt(2));
+    ds << d_indent << "constexpr int " << mdata_sym << "_M = " << m << ";\n";
+    ds << d_indent << "constexpr int " << mdata_sym << "_N = " << nval << ";\n";
+    ds << d_indent << "constexpr int " << mdata_sym << "_K = " << k << ";\n";
+    if (t_sty->GetStorage() == Storage::SHARED)
+      ds << d_indent << "__shared__ uint8_t " << mdata_sym << "[" << mdata_sym
+         << "_M * " << mdata_sym << "_N * (" << mdata_sym << "_K / 4)];\n";
+    else
+      ds << d_indent << "uint8_t " << mdata_sym << "[" << mdata_sym << "_M * "
+         << mdata_sym << "_N * (" << mdata_sym << "_K / 4)];\n";
+    mdata_expr = mdata_sym;
+  }
+
   auto future_name = n.future;
+  bool bind_data = SymbolToSymbol() || TileToSymbol() || TileToTile();
+  std::string bound_mdata_expr = (n.IsSparse() && bind_data) ? mdata_expr : "";
   // bind the data to the future
-  if (SymbolToSymbol() || TileToSymbol() || TileToTile())
-    future_name = claimFuture(t_buf.second, fty->IsAsync(), n.IsTMA());
+  if (bind_data)
+    future_name =
+        claimFuture(t_buf.second, fty->IsAsync(), n.IsTMA(), bound_mdata_expr);
   else
-    future_name = claimFuture("", fty->IsAsync(), n.IsTMA());
+    future_name = claimFuture("", fty->IsAsync(), n.IsTMA(), "");
 
   auto DMACodeGen = [&]() {
     std::string f_mds_offset = "";
@@ -2017,7 +2048,66 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!n.future.empty()) cooperatives.insert(InScopeName(n.future));
 
     if (n.operation == ".copy" || n.operation == ".transp") {
-      if (fty->IsAsync()) {
+      if (n.IsSparse() && n.operation == ".copy" && SymbolToSymbol() &&
+          !fty->IsAsync()) {
+        std::string meta_ptr;
+        if (isa<FutureType>(f_ty))
+          meta_ptr = "((uint8_t*)" + f_sym + ".mdata())";
+        else
+          meta_ptr = "((uint8_t*)" + mdata_expr + ")";
+
+        auto M = ValueSTR(f_shape.ValueAt(0));
+        auto N = ValueSTR(f_shape.ValueAt(1));
+        auto K = ValueSTR(f_shape.ValueAt(2));
+        ds << d_indent << "constexpr int __sp_M = " << M << ";\n";
+        ds << d_indent << "constexpr int __sp_N = " << N << ";\n";
+        ds << d_indent << "constexpr int __sp_K = " << K << ";\n";
+        ds << d_indent << "static_assert(__sp_K % 4 == 0, \"sparse K must be multiple of 4\");\n";
+
+        auto f_ptr = std::string("((") + NameBaseType(f_sty->ElementType()) +
+               "*)" + f_buf.second + ")";
+        auto t_ptr = std::string("((") + NameBaseType(t_sty->ElementType()) +
+               "*)" + t_buf.second + ")";
+        if (t_sty->GetStorage() == Storage::SHARED) {
+          ds << d_indent << "// sparse encode (2:4)\n";
+          ds << d_indent << "for (int i = 0; i < __sp_M; ++i) {\n";
+          ds << d_indent << "  for (int j = 0; j < __sp_N; ++j) {\n";
+          ds << d_indent << "    for (int k4 = 0; k4 < __sp_K / 4; ++k4) {\n";
+          ds << d_indent << "      int base = (i * __sp_N + j) * __sp_K + k4 * 4;\n";
+          ds << d_indent << "      int out_base = (i * __sp_N + j) * (__sp_K / 2) + k4 * 2;\n";
+          ds << d_indent << "      auto a0 = " << f_ptr << "[base + 0];\n";
+          ds << d_indent << "      auto a1 = " << f_ptr << "[base + 1];\n";
+          ds << d_indent << "      auto a2 = " << f_ptr << "[base + 2];\n";
+          ds << d_indent << "      auto a3 = " << f_ptr << "[base + 3];\n";
+          ds << d_indent << "      uint8_t mask = 0;\n";
+          ds << d_indent << "      int count = 0;\n";
+          ds << d_indent << "      if (a0 != 0 && count < 2) { " << t_ptr << "[out_base + count] = a0; mask |= 1; ++count; }\n";
+          ds << d_indent << "      if (a1 != 0 && count < 2) { " << t_ptr << "[out_base + count] = a1; mask |= 2; ++count; }\n";
+          ds << d_indent << "      if (a2 != 0 && count < 2) { " << t_ptr << "[out_base + count] = a2; mask |= 4; ++count; }\n";
+          ds << d_indent << "      if (a3 != 0 && count < 2) { " << t_ptr << "[out_base + count] = a3; mask |= 8; ++count; }\n";
+          ds << d_indent << "      if (count < 2) { for (int t = count; t < 2; ++t) " << t_ptr << "[out_base + t] = 0; }\n";
+          ds << d_indent << "      " << meta_ptr << "[(i * __sp_N + j) * (__sp_K / 4) + k4] = mask;\n";
+          ds << d_indent << "    }\n";
+          ds << d_indent << "  }\n";
+          ds << d_indent << "}\n";
+        } else {
+          ds << d_indent << "// sparse decode (2:4)\n";
+          ds << d_indent << "for (int i = 0; i < __sp_M; ++i) {\n";
+          ds << d_indent << "  for (int j = 0; j < __sp_N; ++j) {\n";
+          ds << d_indent << "    for (int k4 = 0; k4 < __sp_K / 4; ++k4) {\n";
+          ds << d_indent << "      int out_base = (i * __sp_N + j) * __sp_K + k4 * 4;\n";
+          ds << d_indent << "      int in_base = (i * __sp_N + j) * (__sp_K / 2) + k4 * 2;\n";
+          ds << d_indent << "      uint8_t mask = " << meta_ptr << "[(i * __sp_N + j) * (__sp_K / 4) + k4];\n";
+          ds << d_indent << "      int idx = 0;\n";
+          ds << d_indent << "      " << t_ptr << "[out_base + 0] = (mask & 1) ? " << f_ptr << "[in_base + idx++] : 0;\n";
+          ds << d_indent << "      " << t_ptr << "[out_base + 1] = (mask & 2) ? " << f_ptr << "[in_base + idx++] : 0;\n";
+          ds << d_indent << "      " << t_ptr << "[out_base + 2] = (mask & 4) ? " << f_ptr << "[in_base + idx++] : 0;\n";
+          ds << d_indent << "      " << t_ptr << "[out_base + 3] = (mask & 8) ? " << f_ptr << "[in_base + idx++] : 0;\n";
+          ds << d_indent << "    }\n";
+          ds << d_indent << "  }\n";
+          ds << d_indent << "}\n";
+        }
+      } else if (fty->IsAsync()) {
         ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
            << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
         ds << d_indent << future_name << ".trigger();\n";
@@ -3029,9 +3119,9 @@ bool CuteCodeGen::Visit(AST::Return& n) {
       } else {
         choreo_unreachable("unexpected situation");
       }
-    } else if (auto expr = cast<AST::Expr>(n.value);
-               expr && expr->op == "dataof") {
-      // return future.data, must map back
+     } else if (auto expr = cast<AST::Expr>(n.value);
+            expr && (expr->op == "dataof" || expr->op == "mdataof")) {
+      // return future.data/mdata, must map back
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       auto sym = id->name + "__buf__";
@@ -4047,14 +4137,15 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
-      } else if (expr->GetOp() == "dataof") {
+      } else if (expr->GetOp() == "dataof" || expr->GetOp() == "mdataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
           if (is_host)
             oss << id->name << "__buf__";
           else
-            oss << id->name << ".data()";
+            oss << id->name
+                << (expr->GetOp() == "mdataof" ? ".mdata()" : ".data()");
         } else
           choreo_unreachable("Can not retrieve name of the future.");
       } else if (expr->GetOp() == "sizeof") {

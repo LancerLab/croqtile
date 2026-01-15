@@ -796,8 +796,9 @@ public:
       if (a_ty == BaseType::F32) a_ty = BaseType::TF32;
       if (b_ty == BaseType::F32) b_ty = BaseType::TF32;
 
-      MMALimit::MMAConfig mma_config{
-          MMALimit::DENSE, a_ty, b_ty, c_ty, d_ty, scale_ty, mma_shape};
+        auto sparsity = op.IsSparse() ? MMALimit::SPARSE : MMALimit::DENSE;
+        MMALimit::MMAConfig mma_config{sparsity, a_ty, b_ty, c_ty, d_ty, scale_ty,
+                       mma_shape};
       if (!IsValidMMAConfig(mma_config, arch))
         Error1(n.LOC(), "MMA [" + STR(a_ty) + "(a)" + STR(b_ty) + "(b)" +
                             (scale_ty != BaseType::UNKNOWN

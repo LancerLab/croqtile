@@ -1,0 +1,45 @@
+// RUN: choreo -e %s | FileCheck %s --match-full-lines
+
+__co__ void sparse_dma(f32 [16, 16] input) {
+  parallel p by 1 {
+    with {x, y} in [1, 1] {
+      f = dma.copy.sp(2:4) input.chunkat(x, y) => local;
+      f32 v = f.mdata.at(x, y);
+    }
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: sparse_dma
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: f32 [ 16 16 ], symbol: input
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- {x, y} in [ 1 1 ]
+// CHECK:    (with statements)
+// CHECK:    `- DMA.copy
+// CHECK:      `- future: f
+// CHECK:      `- sparse: 2:4
+// CHECK:      `- from: input.ChunkAt(x, y)
+// CHECK:      `- to: local
+// CHECK:    `- Var Decl (mutable f32): v = f.mdata[x, y]
+
+__co__ f16 [16, 16] sparse_mma(f16 [16, 16] a, f16 [16, 16] b) {
+  f16 [16, 16] c;
+  parallel p by 1 {
+    with {x, y} in [1, 1] {
+      mc = mma.fill 0;
+      ma = mma.load a.chunkat(x, y);
+      mb = mma.load b.chunkat(x, y);
+      mma.row.col.sp mc, ma, mb;
+      mma.store mc, c.chunkat(x, y);
+    }
+  }
+  return c;
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: sparse_mma
+// CHECK:  `- Return type: f16 [ 16 16 ]
+// CHECK:  `- MMA.EXEC.ROW.COL.SP mc, ma, mb

@@ -1356,7 +1356,7 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
       if (auto id = AST::GetIdentifier(*arg)) {
         AddUse(current_stmt, id->name);
       } else if (auto expr = dyn_cast<AST::Expr>(arg)) {
-        if (expr->op == "dataof") {
+        if (expr->op == "dataof" || expr->op == "mdataof") {
           // TODO: will only the dims of future be used?
           assert(isa<FutureType>(expr->GetR()->GetType()) &&
                  "expect a future operand.");

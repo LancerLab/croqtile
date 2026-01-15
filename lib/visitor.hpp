@@ -239,7 +239,7 @@ public:
     else if (auto expr = dyn_cast<AST::Expr>(&n)) {
       if (auto id = expr->GetSymbol()) {
         return GetSymbolType(id->name);
-      } else if (expr->op == "dataof") {
+      } else if (expr->op == "dataof" || expr->op == "mdataof") {
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
           if (!GetSymbolType(id->name)) {
             // TODO: make NodeType be used properly
@@ -247,7 +247,8 @@ public:
             // '" + id->name + "'.");
             return nullptr;
           }
-          return GetSymbolType(id->name + ".data");
+          return GetSymbolType(id->name +
+                               (expr->op == "mdataof" ? ".mdata" : ".data"));
         }
       } else if (expr->op == "spanof") {
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {

@@ -509,6 +509,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".async"   return Choreo::Parser::make_ASYNC(yytext, loc);
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
   ".span_as" return Choreo::Parser::make_FNSPANAS(yytext, loc);
+  ".mdata"   return Choreo::Parser::make_FNMDATA(yytext, loc);
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
   ".chunk"   return Choreo::Parser::make_CHUNK(yytext, loc);
@@ -525,6 +526,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".store"   return Choreo::Parser::make_STORE(yytext, loc);
   ".row"     return Choreo::Parser::make_ROW(yytext, loc);
   ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);
+  ".sp("    return Choreo::Parser::make_SPLPAREN(yytext, loc);
+  ".sp"      return Choreo::Parser::make_SP(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT (yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);

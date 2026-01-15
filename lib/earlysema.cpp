@@ -163,7 +163,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     assert(!isa<UnknownType>(rty) && "reference type is unknown.");
     SetNodeType(n, rty);
     if (diverges.Contains(dyn_cast<AST::Identifier>(ref))) diverges.Add(n);
-  } else if (n.op == "dataof") {
+  } else if (n.op == "dataof" || n.op == "mdataof") {
     auto ty = NodeType(*n.GetR());
     if (!isa<FutureType>(ty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -173,7 +173,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     if (auto sym = cast<AST::Expr>(n.GetR())->GetSymbol())
-      SetNodeType(n, SSTab().LookupSymbol(sym->name + ".data"));
+      SetNodeType(n, SSTab().LookupSymbol(sym->name +
+                                          (n.op == "mdataof" ? ".mdata"
+                                                            : ".data")));
     else
       SetNodeType(n, MakeDummySpannedType());
   } else if (n.op == "addrof") {
@@ -1674,6 +1676,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
       ModifySymbolType(n.future + ".span", MakeRankedMDSpanType(rank));
       auto spanned_ty = MakeRankedSpannedType(rank, sty->ElementType(), sto);
       ModifySymbolType(n.future + ".data", spanned_ty);
+      if (n.IsSparse()) ModifySymbolType(n.future + ".mdata", spanned_ty);
       ModifySymbolType(n.future, MakeFutureType(spanned_ty, n.IsAsync()));
     } else {
       ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
@@ -1681,6 +1684,9 @@ bool EarlySemantics::Visit(AST::DMA& n) {
       auto spanned_ty = MakeRankedSpannedType(rank, sty->ElementType(), sto);
       ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
                                 spanned_ty);
+      if (n.IsSparse())
+        ReportErrorWhenViolateODR(n.LOC(), n.future + ".mdata", __FILE__,
+                                  __LINE__, spanned_ty);
       ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
                                 MakeFutureType(spanned_ty, n.IsAsync()));
     }

@@ -206,7 +206,7 @@ public:
     TraceEachVisit(n);
 
     if (kind == Kind::T_NONE) return true;
-    if (n.op != "dataof") return true;
+    if (n.op != "dataof" && n.op != "mdataof") return true;
 
     auto id = dyn_cast<AST::Expr>(n.GetR())->GetSymbol();
     if (!id) return true;

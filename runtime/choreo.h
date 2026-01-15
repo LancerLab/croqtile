@@ -1388,6 +1388,7 @@ struct future {
   choreo_dte_ctx_t* ctx = nullptr;
   choreo_event e;
   void* d = nullptr; // data: future's user must guarantee it is valid
+  void* md = nullptr; // metadata: optional structured sparsity metadata
 
   // for runtime check purpose
   //
@@ -1407,18 +1408,22 @@ struct future {
   unsigned column = 0;
 
   __device__ future(choreo_dte_ctx_t& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr)
-      : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
+        line(l), column(c) {}
 #if __GCU_ARCH__ == 400
   __device__ future(tops::local_dte& dte, const char* n, unsigned l, unsigned c,
-                    void* data = nullptr)
-      : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
+                    void* data = nullptr, void* mdata = nullptr)
+      : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
+        line(l), column(c) {}
   __device__ future(tops::shared_dte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr)
-      : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
+        line(l), column(c) {}
   __device__ future(tops::private_dte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr)
-      : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
+        line(l), column(c) {}
 #endif
 
   // context is retrieved to invoke data operations
@@ -1526,6 +1531,22 @@ struct future {
     return d;
   }
 
+  __device__ void* mdata() {
+    if (!md) {
+      printf("[choreo-rt] internal error: future (defined at line %u:%u) is "
+             "not associated with a metadata.\n",
+             line, column);
+      __co_abort__();
+    }
+    if (s == ST_TRIGGERED) {
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) is "
+             "not waited before using.\n",
+             line, column);
+      __co_abort__();
+    }
+    return md;
+  }
+
   __device__ ~future() {
     if (s == ST_TRIGGERED) {
       // TODO: requires krt %s support to print future name
@@ -1617,6 +1638,7 @@ struct future {
 
   AtomType* atom = nullptr;
   void* d = nullptr; // data: future's user must guarantee it is valid
+  void* md = nullptr; // metadata: optional structured sparsity metadata
 
   bool is_tma = false;
 
@@ -1659,10 +1681,13 @@ struct future {
   unsigned line = 0;
   unsigned column = 0;
 
-  __device__ future(const char* n, unsigned l, unsigned c, void* data = nullptr)
-      : d(data), s(ST_NONE), name(n), line(l), column(c) {}
+  __device__ future(const char* n, unsigned l, unsigned c, void* data = nullptr,
+                    void* mdata = nullptr)
+      : d(data), md(mdata ? mdata : data), s(ST_NONE), name(n), line(l),
+        column(c) {}
 #else
-  __device__ future(void* data = nullptr) : d(data) {}
+  __device__ future(void* data = nullptr, void* mdata = nullptr)
+      : d(data), md(mdata ? mdata : data) {}
 #endif //__CHOREO_DMA_DIAGNOSIS__
 
   // context is retrieved to invoke data operations
@@ -1814,6 +1839,24 @@ struct future {
     }
 #endif // __CHOREO_DMA_DIAGNOSIS__
     return d;
+  }
+
+  __device__ void* mdata() {
+#ifdef __CHOREO_DMA_DIAGNOSIS__
+    if (!md) {
+      printf("[choreo-rt] internal error: future (defined at line %u:%u) is "
+             "not associated with a metadata.\n",
+             line, column);
+      __co_abort__();
+    }
+    if (s == ST_TRIGGERED) {
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) is "
+             "not waited before using.\n",
+             line, column);
+      __co_abort__();
+    }
+#endif // __CHOREO_DMA_DIAGNOSIS__
+    return md ? md : d;
   }
 
   __device__ void destroy() {}

@@ -85,6 +85,7 @@ inline const std::unordered_map<std::string, OpInfo> op_table = {
     {"sizeof", {x, Assoc::Left}}, // UNUSED: Value(...)
     {"ubound", {x, Assoc::Left}}, // UNUSED: Value(ub(bv))
     {"dataof", {x, Assoc::Left}}, // UNUSED: future.data => id__buf__ or id.data()
+    {"mdataof", {x, Assoc::Left}}, // UNUSED: future.mdata => id__mdata__ or id.mdata()
 
     {"#+",     {x, Assoc::Left}}, // the ub is changed
     {"#-",     {x, Assoc::Left}}, 

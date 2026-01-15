@@ -2353,6 +2353,9 @@ private:
   bool enforce_tma;
   int swizzle_value = 0;         // Default to NONE (no swizzle)
   bool swizzle_explicit = false; // Whether swizzle was explicitly specified
+  bool sparse = false;
+  int sparse_n = 0;
+  int sparse_m = 0;
 
 public:
   // if this DMA is chained with other DMA in pipeline mode
@@ -2409,10 +2412,19 @@ public:
   void SetSwizzleExplicit(bool explicit_flag = true) {
     swizzle_explicit = explicit_flag;
   }
+  void SetSparse(bool enabled = true) { sparse = enabled; }
+  void SetSparsePattern(int n, int m) {
+    sparse_n = n;
+    sparse_m = m;
+  }
 
   const ptr<DMAConfig>& GetConfig() const { return config; }
   int GetSwizzleValue() const { return swizzle_value; }
   bool IsSwizzleExplicit() const { return swizzle_explicit; }
+  bool IsSparse() const { return sparse; }
+  std::pair<int, int> GetSparsePattern() const {
+    return {sparse_n, sparse_m};
+  }
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<DMA>(LOC(), operation, future, CloneP(from), CloneP(to),
@@ -2423,6 +2435,8 @@ public:
     n->SetTMA(IsTMA());
     n->SetSwizzleValue(swizzle_value);
     n->SetSwizzleExplicit(swizzle_explicit);
+    n->SetSparse(sparse);
+    n->SetSparsePattern(sparse_n, sparse_m);
     return n;
   }
 
@@ -2439,6 +2453,9 @@ public:
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (config) os << "\n" << prefix << "  `- config: " << STR(*config);
     if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
+    if (sparse) {
+      os << "\n" << prefix << "  `- sparse: " << sparse_n << ":" << sparse_m;
+    }
     os << "\n" << prefix << "  `- from: ";
     from->Print(os, "", with_type);
     os << "\n" << prefix << "  `- to: ";
@@ -2485,6 +2502,7 @@ public:
     std::string acc;
     std::string lhs;
     std::string rhs;
+    bool sparse;
   };
   struct StoreInfo {
     std::string buf_sym;
@@ -2504,8 +2522,8 @@ public:
                int swizzle = 128)
       : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
-               const std::string& r)
-      : tag(Exec), info(ExecInfo{m, o, l, r}) {}
+               const std::string& r, bool sp = false)
+      : tag(Exec), info(ExecInfo{m, o, l, r, sp}) {}
   MMAOperation(const std::string& n, const ptr<ChunkAt>& c)
       : tag(Store), info(StoreInfo{n, c}) {}
 
@@ -2589,6 +2607,12 @@ public:
     return e_info.method;
   }
 
+  bool IsSparse() const {
+    if (tag != Exec) return false;
+    auto e_info = std::get<2>(info);
+    return e_info.sparse;
+  }
+
   void SetFuture(const std::string& fut_name) {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
@@ -2638,7 +2662,7 @@ public:
     case Exec: {
       auto e_info = std::get<2>(info);
       return Make<MMAOperation>(e_info.method, e_info.acc, e_info.lhs,
-                                e_info.rhs);
+                                e_info.rhs, e_info.sparse);
     } break;
     case Store: {
       return Make<MMAOperation>(StoreFrom(), CloneP(StoreTo()));
@@ -2669,6 +2693,7 @@ public:
       case COL_ROW: os << ".COL.ROW"; break;
       default: choreo_unreachable("unsupported dma execution mode."); break;
       }
+      if (e_info.sparse) os << ".SP";
       os << " " << e_info.acc << ", " << e_info.lhs << ", " << e_info.rhs;
     } break;
     case Store: {

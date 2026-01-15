@@ -331,7 +331,7 @@ public:
       ret_name = id->name;
     } else {
       if (auto expr = dyn_cast<AST::Expr>(n.value);
-          expr && expr->op == "dataof") {
+          expr && (expr->op == "dataof" || expr->op == "mdataof")) {
         id = cast<AST::Expr>(expr->GetR())->GetSymbol().get();
         assert(id && "Expect a symbol.");
         // `return select.data;` is ignored in cgi.

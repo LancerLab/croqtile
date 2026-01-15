@@ -181,6 +181,8 @@ SymReplace::StringifyOpFromSymExpr(ptr<AST::Node> n, const std::string& op,
     symbol_name = "!" + sym_expr_r_str;
   else if (op == "dataof")
     symbol_name = sym_expr_r_str + ".data";
+  else if (op == "mdataof")
+    symbol_name = sym_expr_r_str + ".mdata";
   else if (op == "sizeof")
     symbol_name = "|" + sym_expr_r_str + "|";
   else if (op == "ubound")
@@ -331,7 +333,8 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
                          ") is not supported in SymReplace yet.");
     }
   } else if (e->IsUnary()) {
-    if (op == "!" || op == "dataof" || op == "sizeof" || op == "~") {
+    if (op == "!" || op == "dataof" || op == "mdataof" || op == "sizeof" ||
+      op == "~") {
       // construct new SymExpr from Symbol.
       res = StringifyOpFromSymExpr(
           n, op, GetSymExprFromSymValno(GetSymValnoFromExpr(R)));

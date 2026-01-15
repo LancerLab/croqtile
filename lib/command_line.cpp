@@ -30,6 +30,11 @@ Option<bool> compile_only(
     "Compile choreo code and the generated target code; Without linking.");
 Option<bool> generate_script(OptionKind::User, "--generate-script", "-gs",
                              false, "Generate target script.");
+namespace Choreo {
+Option<bool>
+  sim_sparse(OptionKind::User, "--sim", "-sim", false,
+         "Enable simulated sparse DMA encode/decode (non-production).");
+} // namespace Choreo
 Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
                                  "Generate source-level debug information.");
 

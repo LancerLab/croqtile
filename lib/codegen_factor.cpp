@@ -1683,7 +1683,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->op == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound(), true); }
-      } else if (expr->op == "dataof") {
+      } else if (expr->op == "dataof" || expr->op == "mdataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {

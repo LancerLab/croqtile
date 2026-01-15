@@ -452,24 +452,41 @@ inline const std::map<MMAConfig, CUDA_CC>& WGMMAConfigs() {
 }
 
 inline bool ConfigIsCuteMMA(const MMAConfig& config) {
+  if (config.sparsity == SPARSE) {
+    auto dense = config;
+    dense.sparsity = DENSE;
+    return cute_mma_configs.count(dense);
+  }
   return cute_mma_configs.count(config);
 }
 
 inline bool ConfigIsWMMA(const MMAConfig& config) {
+  if (config.sparsity == SPARSE) {
+    auto dense = config;
+    dense.sparsity = DENSE;
+    return wmma_configs.count(dense);
+  }
   return wmma_configs.count(config);
 }
 
 inline bool ConfigIsWGMMA(const MMAConfig& config) {
+  if (config.sparsity == SPARSE) {
+    auto dense = config;
+    dense.sparsity = DENSE;
+    return WGMMAConfigs().count(dense);
+  }
   return WGMMAConfigs().count(config);
 }
 
 inline bool IsValidMMAConfig(const MMAConfig& config, MMALimit::CUDA_CC cc) {
-  if (ConfigIsWMMA(config))
-    return wmma_configs.at(config) <= cc;
-  else if (ConfigIsWGMMA(config))
-    return WGMMAConfigs().at(config) <= cc;
-  else if (ConfigIsCuteMMA(config))
-    return cute_mma_configs.at(config) <= cc;
+  auto dense = config;
+  if (config.sparsity == SPARSE) dense.sparsity = DENSE;
+  if (ConfigIsWMMA(dense))
+    return wmma_configs.at(dense) <= cc;
+  else if (ConfigIsWGMMA(dense))
+    return WGMMAConfigs().at(dense) <= cc;
+  else if (ConfigIsCuteMMA(dense))
+    return cute_mma_configs.at(dense) <= cc;
   else
     return false;
 }
@@ -481,11 +498,13 @@ inline size_t GetThreadGroupSize(const MMAConfig& config) {
 }
 
 inline MMAType GetMMAType(const MMAConfig& config) {
-  if (ConfigIsWMMA(config))
+  auto dense = config;
+  if (config.sparsity == SPARSE) dense.sparsity = DENSE;
+  if (ConfigIsWMMA(dense))
     return MMAType::WMMA;
-  else if (ConfigIsWGMMA(config))
+  else if (ConfigIsWGMMA(dense))
     return MMAType::WGMMA;
-  else if (ConfigIsCuteMMA(config))
+  else if (ConfigIsCuteMMA(dense))
     return MMAType::CTMMA;
   else
     choreo_unreachable("unsupported MMA config: " + config.ToString());
@@ -495,9 +514,11 @@ inline MMAType GetMMAType(const MMAConfig& config) {
 inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
                                          const std::string& sep = "_") {
   // example: SM80_16x8x8_F16F16F16F16_TN
-  assert(cute_mma_configs.count(mma_config));
+  auto dense = mma_config;
+  if (dense.sparsity == SPARSE) dense.sparsity = DENSE;
+  assert(cute_mma_configs.count(dense));
   std::vector<std::string> strs;
-  strs.push_back("SM" + std::to_string(cute_mma_configs.at(mma_config)));
+  strs.push_back("SM" + std::to_string(cute_mma_configs.at(dense)));
   strs.push_back(std::to_string(mma_config.shape.m) + "x" +
                  std::to_string(mma_config.shape.n) + "x" +
                  std::to_string(mma_config.shape.k));
@@ -521,9 +542,11 @@ inline std::string MMAConfig2WGMMAName(const MMAConfig& mma_config,
                                        const std::string& sep = "_") {
   // example: SM90::GMMA::MMA_64x96x16_F16F16F16_RS
   // R: A from register, S: B from smem
-  assert(ConfigIsWGMMA(mma_config));
+  auto dense = mma_config;
+  if (dense.sparsity == SPARSE) dense.sparsity = DENSE;
+  assert(ConfigIsWGMMA(dense));
   std::vector<std::string> strs;
-  strs.push_back("SM" + std::to_string(WGMMAConfigs().at(mma_config)) +
+  strs.push_back("SM" + std::to_string(WGMMAConfigs().at(dense)) +
                  "::GMMA::MMA");
   strs.push_back(std::to_string(mma_config.shape.m) + "x" +
                  std::to_string(mma_config.shape.n) + "x" +

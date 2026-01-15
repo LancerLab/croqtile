@@ -372,6 +372,26 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     }
   }
 
+  if (n.IsSparse()) {
+    extern Option<bool> sim_sparse;
+    if (!sim_sparse) {
+      Error1(n.LOC(),
+             "Sparse DMA requires -sim (simulation only); hardware path is not implemented.");
+      return false;
+    }
+    if (n.operation != ".copy") {
+      Error1(n.LOC(), "Sparse DMA only supports dma.copy.sp currently.");
+      return false;
+    }
+    auto sp = n.GetSparsePattern();
+    if (!(sp.first == 2 && sp.second == 4)) {
+      Error1(n.LOC(), "Only 2:4 structured sparsity is supported; got " +
+                          std::to_string(sp.first) + ":" +
+                          std::to_string(sp.second) + ".");
+      return false;
+    }
+  }
+
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
   if (!isa<FutureType>(ty))
@@ -402,6 +422,18 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   auto stty = cast<SpannedType>(tty);
   auto f_shape = sfty->GetShape();
   auto t_shape = stty->GetShape();
+
+  if (n.IsSparse()) {
+    if (!n.GetFrom()->NoTilingOperation() || !n.GetTo()->NoTilingOperation()) {
+      Error1(n.LOC(), "Sparse DMA currently requires symbol-to-symbol copy with no tiling.");
+      return false;
+    }
+    if (f_shape.Rank() != 3 || t_shape.Rank() != 3 || f_shape.IsDynamic() ||
+        t_shape.IsDynamic()) {
+      Error1(n.LOC(), "Sparse DMA currently requires static rank-3 tensors.");
+      return false;
+    }
+  }
 
   if (n.operation == ".transp") {
     // no transposed shape need to be generated
@@ -648,6 +680,29 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
                           STR(a_shape) + ") v.s. `" + b_sym + "'(" +
                           STR(b_shape) + ").");
       return false;
+    }
+
+    if (op.IsSparse()) {
+      ValueItem k_dim;
+      switch (op.GetMethod()) {
+      case AST::MMAOperation::ROW_ROW:
+      case AST::MMAOperation::ROW_COL:
+        k_dim = a_shape.ValueAt(1);
+        break;
+      case AST::MMAOperation::COL_ROW:
+      case AST::MMAOperation::COL_COL:
+        k_dim = a_shape.ValueAt(0);
+        break;
+      default: break;
+      }
+      if (auto kv = VIInt(k_dim)) {
+        if ((*kv % 4) != 0) {
+          Error1(n.LOC(), "Sparse MMA requires K dimension to be a multiple of 4.");
+          return false;
+        }
+      } else {
+        Warning(n.LOC(), "Sparse MMA expects K dimension multiple of 4; unable to verify at compile time.");
+      }
     }
   } break;
   case AST::MMAOperation::Store: break;

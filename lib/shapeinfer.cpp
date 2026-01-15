@@ -1782,7 +1782,8 @@ const SignTy ShapeInference::SignSpan(const AST::Node& n) {
     }
     // or else, it is a new name definition
     return s_sn(SSTab().ScopedName(name));
-  } else if (auto e = dyn_cast<AST::Expr>(&n); e && e->op == "dataof") {
+  } else if (auto e = dyn_cast<AST::Expr>(&n);
+             e && (e->op == "dataof" || e->op == "mdataof")) {
     return GetSign(*e->GetR(), VNKind::VNK_MDSPAN); // simple propagate
   } else if (auto* s = dyn_cast<AST::Select>(&n)) {
     // any one could have the same span

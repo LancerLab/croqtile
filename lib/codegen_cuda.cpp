@@ -906,7 +906,7 @@ bool CUDACodeGen::Visit(AST::Call& c) {
           fs << std::to_string(size);
 #endif
         fs << shape.ElemCountExprString();
-      } else if (arg->op == "dataof") {
+      } else if (arg->op == "dataof" || arg->op == "mdataof") {
         fs << STR(arg->GetR()) << "__buf__.data";
       }
       break;

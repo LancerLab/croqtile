@@ -1336,7 +1336,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   // Generate tops dte and choreo::future in device-side
   auto claimFuture = [this, &n](const std::string& buf_expr,
-                                Storage sto = Storage::DEFAULT) -> std::string {
+                                Storage sto = Storage::DEFAULT,
+                                const std::string& mdata_expr = "")
+      -> std::string {
     if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
       return n.future;
 
@@ -1352,11 +1354,15 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
       ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
                           n.future + ".data()");
+      if (n.IsSparse())
+        ssm.MapDeviceSymbol(InScopeName(n.future) + ".mdata",
+                            n.future + ".mdata()");
     }
     ds << d_indent << "choreo::future " << future_name << "(" << dte_ctx
        << ", \"" << n.future << "\", " << n.LOC().begin.line << ", "
        << n.LOC().begin.column;
     if (!buf_expr.empty()) ds << ", " << buf_expr;
+    if (!mdata_expr.empty()) ds << ", " << mdata_expr;
     ds << ");\n";
 
     return future_name;
@@ -1697,12 +1703,25 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   const auto f_buf = GetBufferExpr(f_sym, f_idx, f_ty);
   const auto t_buf = GetBufferExpr(t_sym, t_idx, t_ty);
 
+  std::string mdata_expr = "";
+  if (n.IsSparse()) {
+    static size_t mdata_count = 0;
+    auto mdata_sym = "__choreo_mdata__" + std::to_string(mdata_count++);
+    if (t_sty->GetStorage() == Storage::SHARED)
+      ds << d_indent << "__shared__ uint32_t " << mdata_sym << "[1];\n";
+    else
+      ds << d_indent << "uint32_t " << mdata_sym << "[1];\n";
+    mdata_expr = mdata_sym;
+  }
+
   auto future_name = n.future;
+  bool bind_data = SymbolToSymbol() || TileToSymbol() || TileToTile();
+  std::string bound_mdata_expr = (n.IsSparse() && bind_data) ? mdata_expr : "";
   // bind the data to the future
-  if (SymbolToSymbol() || TileToSymbol() || TileToTile())
-    future_name = claimFuture(t_buf.second, dma_sto);
+  if (bind_data)
+    future_name = claimFuture(t_buf.second, dma_sto, bound_mdata_expr);
   else
-    future_name = claimFuture("", dma_sto);
+    future_name = claimFuture("", dma_sto, "");
 
   std::string event_name;
   if (fty->IsAsync()) event_name = future_name + "__event__";
@@ -2554,8 +2573,8 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
       } else {
         choreo_unreachable("unexpected situation");
       }
-    } else if (auto expr = cast<AST::Expr>(n.value);
-               expr && expr->op == "dataof") {
+     } else if (auto expr = cast<AST::Expr>(n.value);
+            expr && (expr->op == "dataof" || expr->op == "mdataof")) {
       // return future.data, must map back
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
@@ -3456,14 +3475,15 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
-      } else if (expr->GetOp() == "dataof") {
+      } else if (expr->GetOp() == "dataof" || expr->GetOp() == "mdataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
           if (is_host)
             oss << id->name << "__buf__";
           else
-            oss << id->name << ".data()";
+            oss << id->name
+                << (expr->GetOp() == "mdataof" ? ".mdata()" : ".data()");
         } else
           choreo_unreachable("Can not retrieve name of the future.");
       } else if (expr->GetOp() == "sizeof") {
