@@ -1083,7 +1083,13 @@ bool ShapeInference::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
-    DefineASymbol(op.FillingSymbol(), MakeDummySpannedType());
+    auto fill_ty = op.FillingType();
+    if (fill_ty != BaseType::UNKSCALAR) {
+      DefineASymbol(op.FillingSymbol(),
+                    MakeSpannedType(fill_ty, GenUninitShape(), Storage::REG));
+    } else {
+      DefineASymbol(op.FillingSymbol(), MakeDummySpannedType());
+    }
     DefineASymbol(op.FillingSymbol() + ".span", MakeUninitMDSpanType());
     SymbolAliasNoNum(SSTab().InScopeName(op.FillingSymbol()) +
                      ".span"); // valno is yet invalid
@@ -1133,8 +1139,11 @@ bool ShapeInference::Visit(AST::MMA& n) {
     if (!vn.HasValidValueNumberOfSignature(s_sn(mdsym)))
       SymbolAliasNum(mdsym, cur_vn);
     auto mty = MakeMDSpanType(GenShape(cur_vn));
-    auto sty =
-        MakeSpannedType(fty->ElementType(), GenShape(cur_vn), Storage::REG);
+    auto c_sty = GetSpannedType(GetSymbolType(op.ExecOperand(0)));
+    auto c_elem = (c_sty && c_sty->ElementType() != BaseType::UNKSCALAR)
+              ? c_sty->ElementType()
+              : fty->ElementType();
+    auto sty = MakeSpannedType(c_elem, GenShape(cur_vn), Storage::REG);
     UpdateSymbolType(op.ExecOperand(0), sty);
     UpdateSymbolType(op.ExecOperand(0) + ".span", mty);
     SetNodeType(n, sty);

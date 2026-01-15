@@ -1,0 +1,56 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ auto tma_ab_buffer(f8_e4m3 [16, 16, 128] l, f8_e4m3 [16, 16, 128] r) {
+  f32 [l.span] output;
+
+  parallel p by 8 : block {
+    with k in [8] {
+      l0 = tma.copy.async l.chunkat(_,k,p) => shared;
+      r0 = tma.copy.async r.chunkat(_,k,p) => shared;
+      l1 = tma.any;
+      r1 = tma.any;
+      shared f32 [l0.span] out;
+      foreach k(1:) {
+        l1 = tma.copy.async l.chunkat(_,k,p) => shared;
+        r1 = tma.copy.async r.chunkat(_,k,p) => shared;
+        wait l0, r0;
+        foreach index in [l0.span]
+          out.at(index) = l0.data.at(index) + r0.data.at(index);
+        tma.copy out => output.chunkat(_,k-1,p);
+        swap l0, l1;
+        swap r0, r1;
+      }
+      wait l0, r0;
+      foreach index in [l0.span]
+        out.at(index) = l0.data.at(index) + r0.data.at(index);
+      tma.copy out => output.chunkat(_,k(-1),p);
+    }
+  }
+
+  return output;
+}
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::f8_e4m3>(16, 16, 128);
+  auto b = choreo::make_spandata<choreo::f8_e4m3>(16, 16, 128);
+  a.fill_random(-2.0f, 2.0f);
+  b.fill_random(-2.0f, 2.0f);
+
+  auto res1 = tma_ab_buffer(a.view(), b.view());
+
+  float tolerance = 0.2f;
+  // verfication
+  for (size_t i = 0; i < res1.shape()[0]; ++i)
+    for (size_t j = 0; j < res1.shape()[1]; ++j)
+      for (size_t k = 0; k < res1.shape()[2]; ++k) {
+        float ref = float(a[i][j][k]) + float(b[i][j][k]);
+        float got = float(res1[i][j][k]);
+        choreo::choreo_assert(std::abs(got - ref) <= tolerance,
+                              "values are not equal.");
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

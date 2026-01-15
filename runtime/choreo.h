@@ -2065,6 +2065,32 @@ struct AccumTCast<f32, bf16> {
   __device__ static inline f32 cast(bf16 val) { return bf16_to_f32(val); }
 };
 
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+template <>
+struct AccumTCast<f8_e4m3, f32> {
+  static constexpr bool supported = true;
+  __device__ static inline f8_e4m3 cast(f32 val) { return f8_e4m3(val); }
+};
+
+template <>
+struct AccumTCast<f32, f8_e4m3> {
+  static constexpr bool supported = true;
+  __device__ static inline f32 cast(f8_e4m3 val) { return float(val); }
+};
+
+template <>
+struct AccumTCast<f8_e5m2, f32> {
+  static constexpr bool supported = true;
+  __device__ static inline f8_e5m2 cast(f32 val) { return f8_e5m2(val); }
+};
+
+template <>
+struct AccumTCast<f32, f8_e5m2> {
+  static constexpr bool supported = true;
+  __device__ static inline f32 cast(f8_e5m2 val) { return float(val); }
+};
+#endif
+
 // --------------- load A policies ---------------
 struct Policy_A_M8N8K4 {
   template <class Tensor>
