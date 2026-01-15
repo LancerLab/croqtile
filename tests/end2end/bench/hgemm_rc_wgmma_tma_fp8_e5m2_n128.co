@@ -1,0 +1,47 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 64
+#define N 128
+#define K 32
+
+__co__ auto matmul(f8_e5m2 [M, K] lhs, f8_e5m2 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 32, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_load_s = tma.copy.swizzle(32) lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swizzle(32) rhs.chunkat(block_n, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swizzle(32) lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swizzle(32) rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::f8_e5m2>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f8_e5m2>(N, K);
+  lhs.fill_random(-2.0f, 2.0f);
+  rhs.fill_random(-2.0f, 2.0f);
+
+  auto res = matmul(lhs.view(), rhs.view());
+
+  float base_tol = 0.35f;
+  float rel_tol = 0.06f;
+  choreo::verify_matmul_row_row_subset(lhs, rhs, res, base_tol, rel_tol, 8, 8);
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
