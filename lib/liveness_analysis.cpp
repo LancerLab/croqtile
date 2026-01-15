@@ -1,4 +1,3 @@
-
 #include "liveness_analysis.hpp"
 #include "ast.hpp"
 #include "aux.hpp"
@@ -1076,7 +1075,7 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << "\n" << stmts_with_indent.str() << "\n");
     ComputeLiveRange();
-    VST_DEBUG(DumpCfgToDot(bb_lists));
+    // VST_DEBUG(DumpCfgToDot(bb_lists));
   } else if (auto w = dyn_cast<AST::Wait>(&n)) {
     auto FuturesOf = [&](const AST::Wait& n) {
       std::vector<ptr<AST::Node>> ret;
