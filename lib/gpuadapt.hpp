@@ -123,7 +123,7 @@ public:
         auto asrt = sbe::oc_eq(total_threads, sbe::nu(32));
         auto msg = "The total thread dimension must be a multiple of 32 "
                    "when 'group' exists for " +
-                   STR(CCtx().GetArch()) + ".";
+                   ToUpper(CCtx().GetArch()) + ".";
         if (auto b = VIBool(asrt)) {
           if (b.value() == false) Error1(pb->LOC(), msg);
         } else
@@ -136,12 +136,12 @@ public:
         if (ppb->IsEnforced() && gppb->IsEnforced())
           Error1(ppb->LOC(), "explicit 'group' inside the 'group-4' "
                              "parallel-by is not supported by " +
-                                 STR(CCtx().GetArch()) + ".");
+                                 ToUpper(CCtx().GetArch()) + ".");
         else if (gppb->IsEnforced()) {
           auto asrt = sbe::oc_eq(total_threads, sbe::nu(128));
           auto msg = "The total thread dimension must be a multiple of "
                      "128 when 'group-4' exists for " +
-                     STR(CCtx().GetArch()) + ".";
+                     ToUpper(CCtx().GetArch()) + ".";
           if (auto b = VIBool(asrt)) {
             if (b.value() == false) Error1(pb->LOC(), msg);
           } else
@@ -574,19 +574,8 @@ public:
   }
 
 public:
-  GPUAdaptor() : CodeGenerator("gpu"), cur_arch(STR(CCtx().GetArch())) {}
+  GPUAdaptor() : CodeGenerator("gpu"), cur_arch(ToUpper(CCtx().GetArch())) {}
   ~GPUAdaptor() {}
-
-  bool Visit(AST::FloatLiteral& n) override {
-
-    if (CCtx().GetTarget() == CompileTarget::Factor) {
-      if (!n.IsFloat32())
-        Error1(n.LOC(), "Factor backend in Choreo does not support " +
-                            PSTR(n.GetType()) + " float-point number yet!");
-    }
-
-    return true;
-  }
 
   bool Visit(AST::NamedVariableDecl& n) override {
     auto ty = GetSymbolType(n.name_str);
@@ -660,7 +649,7 @@ public:
 
     if (n.IsTMA() && !CCtx().TargetSupportTMA()) {
       Error1(n.LOC(), "TMA is not supported by current architecture: " +
-                          STR(CCtx().GetArch()) + ".");
+                          CCtx().GetArch() + ".");
       return false;
     }
 
@@ -791,14 +780,14 @@ public:
       auto c_ty = c_sty->ElementType();
       auto d_ty = c_ty;
       auto scale_ty = BaseType::UNKNOWN;
-      auto arch = std::stoi(STR(CCtx().GetArch()).substr(3));
+      auto arch = CCtx().ArchNum();
 
       if (a_ty == BaseType::F32) a_ty = BaseType::TF32;
       if (b_ty == BaseType::F32) b_ty = BaseType::TF32;
 
-        auto sparsity = op.IsSparse() ? MMALimit::SPARSE : MMALimit::DENSE;
-        MMALimit::MMAConfig mma_config{sparsity, a_ty, b_ty, c_ty, d_ty, scale_ty,
-                       mma_shape};
+      auto sparsity = op.IsSparse() ? MMALimit::SPARSE : MMALimit::DENSE;
+      MMALimit::MMAConfig mma_config{sparsity, a_ty,     b_ty,     c_ty,
+                                     d_ty,     scale_ty, mma_shape};
       if (!IsValidMMAConfig(mma_config, arch))
         Error1(n.LOC(), "MMA [" + STR(a_ty) + "(a)" + STR(b_ty) + "(b)" +
                             (scale_ty != BaseType::UNKNOWN
@@ -807,7 +796,7 @@ public:
                             STR(c_ty) + "(c)" + STR(d_ty) +
                             "(d): " + MMAShapeSTR(mma_shape) +
                             "] is not support by current architecture(" +
-                            STR(CCtx().GetArch()) + ").");
+                            ToUpper(CCtx().GetArch()) + ").");
 
       auto mma_ty = GetMMAType(mma_config);
 
@@ -840,7 +829,7 @@ public:
             !sbe::ceq(mma_shape[2], sbe::nu(16)))
           Error1(n.LOC(), "MMA [" + STR(ety) + ": " + MMAShapeSTR(mma_shape) +
                               "] is not support by current architecture(" +
-                              STR(CCtx().GetArch()) + ").");
+                              CCtx().GetArch() + ").");
         break;
       case BaseType::F32:
         if (sbe::ceq(mma_shape[0], sbe::nu(16)) ||
@@ -857,7 +846,7 @@ public:
         } else
           Error1(n.LOC(), "MMA [" + STR(ety) + ": " + MMAShapeSTR(mma_shape) +
                               "] is not support by current architecture(" +
-                              STR(CCtx().GetArch()) + ").");
+                              CCtx().GetArch() + ").");
         break;
       default:
         choreo_unreachable(STR(ety) + " is not supported by current MMA");

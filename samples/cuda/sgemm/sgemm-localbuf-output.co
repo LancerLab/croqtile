@@ -1,5 +1,3 @@
-#include "choreo_cuda.h"
-
 __cok__ { /// kernel program
 
 inline __device__ void matmul_kernel_reg_stationary(float *lhs, float *rhs,

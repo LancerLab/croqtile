@@ -334,7 +334,7 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
     }
   } else if (e->IsUnary()) {
     if (op == "!" || op == "dataof" || op == "mdataof" || op == "sizeof" ||
-      op == "~") {
+        op == "~") {
       // construct new SymExpr from Symbol.
       res = StringifyOpFromSymExpr(
           n, op, GetSymExprFromSymValno(GetSymValnoFromExpr(R)));

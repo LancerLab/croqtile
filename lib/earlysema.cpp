@@ -173,9 +173,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     if (auto sym = cast<AST::Expr>(n.GetR())->GetSymbol())
-      SetNodeType(n, SSTab().LookupSymbol(sym->name +
-                                          (n.op == "mdataof" ? ".mdata"
-                                                            : ".data")));
+      SetNodeType(n, SSTab().LookupSymbol(
+                         sym->name + (n.op == "mdataof" ? ".mdata" : ".data")));
     else
       SetNodeType(n, MakeDummySpannedType());
   } else if (n.op == "addrof") {
@@ -1632,10 +1631,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     }
   }
 
-  // target specific check
-  if ((CCtx().GetTarget() == CompileTarget::Factor ||
-       CCtx().GetTarget() == CompileTarget::Topscc) &&
-      pl_depth == 0) {
+  if (pl_depth == 0) {
     if (auto m = dyn_cast<AST::Memory>(n.to)) {
       if ((m->Get() != Storage::GLOBAL) && (m->Get() != Storage::DEFAULT)) {
         Error1(n.LOC(),
@@ -1710,7 +1706,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
     if (cast<AST::ChunkAt>(n.from)->HasTilingOperation() &&
         cast<AST::ChunkAt>(n.to)->HasTilingOperation() &&
-        (CCtx().GetTarget() != CompileTarget::Topscc)) {
+        (CCtx().HasFeature(ChoreoFeature::DSDMA))) {
       Error1(n.LOC(),
              "slice and deslice in single DMA statement is not supported yet.");
     }
@@ -2418,7 +2414,7 @@ bool EarlySemantics::Visit(AST::Return& n) {
       return false;
     }
 
-    if (CCtx().GetTarget() == CompileTarget::Factor) {
+    if (CCtx().HasFeature(ChoreoFeature::NSVR)) {
       if (isa<ScalarType>(vty)) {
         Error1(
             n.LOC(),

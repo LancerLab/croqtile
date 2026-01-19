@@ -1,4 +1,4 @@
-// RUN: copp %s | grep -v "\<CHECK\>" | FileCheck %s
+// RUN: copp %s -o - | grep -v "\<CHECK\>" | FileCheck %s
 
 __co__ int foo(f32 d[]) {
    must show 0

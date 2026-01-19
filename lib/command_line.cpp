@@ -1,5 +1,6 @@
 #include "command_line.hpp"
 #include "context.hpp"
+#include "target_registry.hpp"
 #include <fstream>
 #include <sys/stat.h>
 
@@ -22,7 +23,8 @@ Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
 Option<std::string> output(OptionKind::User, "-o", "", "",
                            "Place the output into <file>.", "-o <file>", true);
 
-Option<std::string> debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
+Option<std::string>
+    debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
                    "Place compiler debug artifacts under <dir>.",
                    "--ddir=<dir>");
 
@@ -36,8 +38,8 @@ Option<bool> generate_script(OptionKind::User, "--generate-script", "-gs",
                              false, "Generate target script.");
 namespace Choreo {
 Option<bool>
-  sim_sparse(OptionKind::User, "--sim", "-sim", false,
-         "Enable simulated sparse DMA encode/decode (non-production).");
+    sim_sparse(OptionKind::User, "--sim", "-sim", false,
+               "Enable simulated sparse DMA encode/decode (non-production).");
 } // namespace Choreo
 Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
                                  "Generate source-level debug information.");
@@ -222,81 +224,14 @@ bool CommandLine::Parse(int argc, char** argv) {
   }
 
   // set the compilation targets
-  if (ToUpper(target.GetValue()) == "FACTOR")
-    CCtx().SetTarget(CompileTarget::Factor);
-  else if (ToUpper(target.GetValue()) == "TOPSCC")
-    CCtx().SetTarget(CompileTarget::Topscc);
-  else if (ToUpper(target.GetValue()) == "CUDA")
-    CCtx().SetTarget(CompileTarget::CUDA);
-  else if (ToUpper(target.GetValue()) == "CUTE")
-    CCtx().SetTarget(CompileTarget::Cute);
-  else if (ToUpper(target.GetValue()) == "MPI")
-    CCtx().SetTarget(CompileTarget::MPI);
-  else {
+  if (!CCtx().SetTarget(TargetRegistry::Create(ToLower(target.GetValue())))) {
     errs() << "Compile Target '" << target.GetValue()
            << "' is invalid. Compilation abort.\n";
     exit(1);
   }
 
-  if (ToUpper(subtarget.GetValue()) == "FACTOR")
-    CCtx().SetSubTarget(CompileTarget::Factor);
-  else if (ToUpper(subtarget.GetValue()) == "TOPSCC")
-    CCtx().SetSubTarget(CompileTarget::Topscc);
-  else if (ToUpper(subtarget.GetValue()) == "CUDA")
-    CCtx().SetSubTarget(CompileTarget::CUDA);
-  else if (ToUpper(subtarget.GetValue()) == "CUTE")
-    CCtx().SetSubTarget(CompileTarget::Cute);
-  else {
-    errs() << "Compile Sub-target '" << subtarget.GetValue()
-           << "' is invalid. Compilation abort.\n";
-    exit(1);
-  }
-
   // set the arch to compile
-  if (ToUpper(arch.GetValue()) == "GCU200")
-    CCtx().SetArch(TargetArch::GCU20);
-  else if (ToUpper(arch.GetValue()) == "GCU210")
-    CCtx().SetArch(TargetArch::GCU21);
-  else if (ToUpper(arch.GetValue()) == "GCU300")
-    CCtx().SetArch(TargetArch::GCU3);
-  else if (ToUpper(arch.GetValue()) == "GCU400")
-    CCtx().SetArch(TargetArch::GCU4);
-  else if (ToUpper(arch.GetValue()) == "GCU500")
-    CCtx().SetArch(TargetArch::GCU5);
-  else if (ToUpper(arch.GetValue()) == "GPU")
-    CCtx().SetArch(TargetArch::GPU);
-  else if (ToUpper(arch.GetValue()) == "SM_70")
-    CCtx().SetArch(TargetArch::SM_70);
-  else if (ToUpper(arch.GetValue()) == "SM_75")
-    CCtx().SetArch(TargetArch::SM_75);
-  else if (ToUpper(arch.GetValue()) == "SM_80")
-    CCtx().SetArch(TargetArch::SM_80);
-  else if (ToUpper(arch.GetValue()) == "SM_86")
-    CCtx().SetArch(TargetArch::SM_86);
-  else if (ToUpper(arch.GetValue()) == "SM_89")
-    CCtx().SetArch(TargetArch::SM_89);
-  else if (ToUpper(arch.GetValue()) == "SM_90")
-    CCtx().SetArch(TargetArch::SM_90);
-  else if (ToUpper(arch.GetValue()) == "SM_90A")
-    CCtx().SetArch(TargetArch::SM_90A);
-  else if (ToUpper(arch.GetValue()) == "SM_100")
-    CCtx().SetArch(TargetArch::SM_100);
-  else if (arch.GetValue() == "") {
-    // fill the default
-    if (CCtx().GetTarget() == CompileTarget::Topscc)
-      CCtx().SetArch(TargetArch::GCU3);
-    else if (CCtx().GetTarget() == CompileTarget::Factor)
-      CCtx().SetArch(TargetArch::GCU3);
-    else if (CCtx().GetTarget() == CompileTarget::Cute ||
-             CCtx().GetTarget() == CompileTarget::CUDA)
-      CCtx().SetArch(TargetArch::SM_86);
-    else
-      errs() << "No available default Arch value. Compilation abort.\n";
-  } else {
-    errs() << "Arch '" << arch.GetValue()
-           << "' is invalid. Compilation abort.\n";
-    exit(1);
-  }
+  if (!arch.GetValue().empty()) CCtx().AddArch(ToLower(arch.GetValue()));
 
   if (pp_only) {
     if (no_pp) {

@@ -5,6 +5,7 @@
 
 #include "loc.hpp"
 #include "symvals.hpp"
+#include "target.hpp"
 #include "types.hpp"
 #include <map>
 #include <memory>
@@ -13,93 +14,6 @@
 extern Choreo::location loc;
 
 namespace Choreo {
-
-// The target languages
-enum class CompileTarget {
-  Unknown,
-  Factor,
-  Topscc,
-  CUDA,
-  Cute,
-  MPI,
-};
-
-inline static const std::string STR(CompileTarget ct) {
-  switch (ct) {
-  case CompileTarget::Unknown: return "Unknown";
-  case CompileTarget::Factor: return "Factor";
-  case CompileTarget::Topscc: return "Topscc";
-  case CompileTarget::CUDA: return "CUDA";
-  case CompileTarget::Cute: return "Cute";
-  case CompileTarget::MPI: return "MPI";
-  default: choreo_unreachable("Unsupported target.");
-  }
-  return "";
-}
-
-enum class TargetArch {
-  Unknown,
-  GCU20,
-  GCU21,
-  GCU3,
-  GCU4,
-  GCU5,
-  GPU, // TODO: unclear
-  // Nv series
-  SM_70,
-  SM_75,
-  SM_80,
-  SM_86,
-  SM_89,
-  SM_90,
-  SM_90A,
-  SM_100,
-  SM_120,
-  End
-};
-
-inline static int ArchNum(TargetArch ta) {
-  switch (ta) {
-  case TargetArch::GCU20: return 200;
-  case TargetArch::GCU21: return 210;
-  case TargetArch::GCU3: return 300;
-  case TargetArch::GCU4: return 400;
-  case TargetArch::SM_70: return 70;
-  case TargetArch::SM_75: return 75;
-  case TargetArch::SM_80: return 80;
-  case TargetArch::SM_86: return 86;
-  case TargetArch::SM_89: return 89;
-  case TargetArch::SM_90: return 90;
-  case TargetArch::SM_90A: return 90;
-  case TargetArch::SM_100: return 100;
-  case TargetArch::SM_120: return 120;
-  default: choreo_unreachable("Unsupported Architecture.");
-  }
-  return 0;
-}
-
-inline static const std::string STR(TargetArch ta) {
-  switch (ta) {
-  case TargetArch::Unknown: return "Unknown";
-  case TargetArch::GCU20: return "GCU200";
-  case TargetArch::GCU21: return "GCU210";
-  case TargetArch::GCU3: return "GCU300";
-  case TargetArch::GCU4: return "GCU400";
-  case TargetArch::GCU5: return "GCU500";
-  case TargetArch::GPU: return "GPU";
-  case TargetArch::SM_70: return "SM_70";
-  case TargetArch::SM_75: return "SM_75";
-  case TargetArch::SM_80: return "SM_80";
-  case TargetArch::SM_86: return "SM_86";
-  case TargetArch::SM_89: return "SM_89";
-  case TargetArch::SM_90: return "SM_90";
-  case TargetArch::SM_90A: return "SM_90A";
-  case TargetArch::SM_100: return "SM_100";
-  case TargetArch::SM_120: return "SM_120";
-  default: choreo_unreachable("Unsupported architecture.");
-  }
-  return "";
-}
 
 enum class OutputKind {
   PreProcessedCode,
@@ -421,9 +335,9 @@ class SymbolTable;
 class CompilationContext {
 private:
   std::map<std::string, FunctionContext> function_contexts;
-  CompileTarget compile_target = CompileTarget::Unknown;
-  CompileTarget compile_sub_target = CompileTarget::Unknown;
-  TargetArch arch = TargetArch::Unknown;
+  std::unique_ptr<Target> compile_target = nullptr;
+  std::vector<ArchId> archs;
+  std::vector<FeatureToggle> features;
   OutputKind out_kind = OutputKind::TargetExecutable;
   int8_t opt_level = -1; // undecided
 
@@ -442,18 +356,18 @@ private:
   bool cross_compile = false;       // TODO: figure out
   bool trace_vn = false;            // trace the value numbering
   bool trace_vectorize = false;     // trace the masking
-  bool show_source_loc = true;      // show source code location when error, etc.
-  bool liveness = false;            // analyze the liveness of the program
-  bool mem_reuse = false;           // reuse the memory of the program
-  bool simplify_fp_valno = false;   // simplify the floating point value number
-  bool verify = false;              // verify visitors for legality
-  bool gen_debug_info = false;      // generate debug information
-  bool diag_dma = false;            // diagnose DMA at runtime
-  bool loop_norm = false;           // enable loop normalization
-  bool no_vectorize = false;        // do not vectorize any foreach loop
-  bool vectorize = false;           // enable loop vectorization
+  bool show_source_loc = true;    // show source code location when error, etc.
+  bool liveness = false;          // analyze the liveness of the program
+  bool mem_reuse = false;         // reuse the memory of the program
+  bool simplify_fp_valno = false; // simplify the floating point value number
+  bool verify = false;            // verify visitors for legality
+  bool gen_debug_info = false;    // generate debug information
+  bool diag_dma = false;          // diagnose DMA at runtime
+  bool loop_norm = false;         // enable loop normalization
+  bool no_vectorize = false;      // do not vectorize any foreach loop
+  bool vectorize = false;         // enable loop vectorization
   size_t max_local_mem_capacity =
-      0;                             // max local memory capacity per thread (0: use default)
+      0; // max local memory capacity per thread (0: use default)
   bool mem_default_aligned = true; // alignment is set by default in mem reuse.
   bool inhibit_warning = false;    // Inhibit all warning messages.
   bool warning_as_error = false;   // Make all warnings into errors.
@@ -488,15 +402,37 @@ public:
     return function_contexts.at(fname);
   }
 
-  CompileTarget GetTarget() const { return compile_target; }
-  void SetTarget(CompileTarget ct) { compile_target = ct; }
+  const Target& GetTarget() const { return *compile_target; }
+  Target& GetTarget() { return *compile_target; }
+  bool SetTarget(std::unique_ptr<Target>&& ct) {
+    if (ct == nullptr) return false;
+    compile_target = std::move(ct);
+    return true;
+  }
 
+  const std::string TargetName() const { return compile_target->Name(); }
+#if 0
   // useful for MPI
-  CompileTarget GetSubTarget() const { return compile_sub_target; }
+  std::string GetSubTarget() const { return compile_sub_target; }
   void SetSubTarget(CompileTarget ct) { compile_sub_target = ct; }
+#endif
 
-  TargetArch GetArch() const { return arch; }
-  void SetArch(TargetArch ta) { arch = ta; }
+  const std::vector<ArchId> GetArchs() const {
+    if (archs.size() == 0) return {GetTarget().DefaultArch()};
+    return archs;
+  }
+  const ArchId GetArch() const {
+    if (archs.size() == 0) return GetTarget().DefaultArch();
+    if (archs.size() != 1)
+      choreo_unreachable("unexpected multiple architecture.");
+    return archs[0];
+  }
+  void AddArch(const ArchId& arch) {
+    if (!GetTarget().IsArchSupported(arch))
+      choreo_unreachable("-arch=" + arch + " is not supported by target '" +
+                         GetTarget().Name() + "'.");
+    archs.push_back(arch);
+  }
 
   int GetOptimizationLevel() const {
     if (opt_level == -1)
@@ -510,254 +446,29 @@ public:
   void SetOutputKind(OutputKind ok) { out_kind = ok; }
 
   size_t GetMemCapacity(Storage sto) const {
-    // special case for nv GPU.
-    size_t max_local = MaxLocalMemCapacity();
-
-    switch (arch) {
-    case TargetArch::GCU20: // TODO
-    case TargetArch::GCU21: {
-      switch (sto) {
-      case Storage::LOCAL: return 1008ull * 1024;             // 1008KB
-      case Storage::SHARED: return 24ull * 1024 * 1024;       // 24MB
-      case Storage::GLOBAL: return 4ull * 1024 * 1024 * 1024; // 4GB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-    }
-
-    case TargetArch::GCU3: {
-      switch (sto) {
-      case Storage::LOCAL:
-        switch (GetTarget()) {
-        case CompileTarget::Factor: return 1.5 * 1024 * 1024; // 1.5MB
-        case CompileTarget::Topscc:
-          return 1.5 * 1024 * 1024 - 512; // special case
-        default: choreo_unreachable("Unhandled target.");
-        }
-      case Storage::SHARED:
-        switch (GetTarget()) {
-        case CompileTarget::Factor: return 24ull * 1024 * 1024; // 24MB
-        case CompileTarget::Topscc: return 64ull * 1024 * 1024; // 64MB
-        default: choreo_unreachable("Unhandled target.");
-        }
-      case Storage::GLOBAL: return 40.75 * 1024 * 1024 * 1024; // 40.75GB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-    }
-
-    case TargetArch::GCU4: {
-      switch (sto) {
-      case Storage::LOCAL:
-        switch (GetTarget()) {
-        case CompileTarget::Topscc:
-          return 1.5 * 1024 * 1024 - 512; // todo: check this
-        default: choreo_unreachable("Unhandled target.");
-        }
-      case Storage::SHARED:
-        switch (GetTarget()) {
-        case CompileTarget::Topscc:
-          return 64ull * 1024 * 1024; // todo: check this
-        default: choreo_unreachable("Unhandled target.");
-        }
-      case Storage::GLOBAL:
-        return 40.75 * 1024 * 1024 * 1024; // todo: check this
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-    }
-    case TargetArch::GCU5: {
-      switch (sto) {
-      case Storage::LOCAL:
-        switch (GetTarget()) {
-        case CompileTarget::Topscc:
-          return 4 * 1024 * 1024 - 512; // todo: check this
-        default: choreo_unreachable("Unhandled target.");
-        }
-      case Storage::SHARED:
-        switch (GetTarget()) {
-        case CompileTarget::Topscc:
-          return 256ull * 1024 * 1024; // todo: check this
-        default: choreo_unreachable("Unhandled target.");
-        }
-      case Storage::GLOBAL:
-        return 128ull * 1024 * 1024 * 1024; // todo: check this
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-    }
-    case TargetArch::GPU:
-    case TargetArch::SM_70:
-      switch (sto) {
-      case Storage::LOCAL: return max_local > 0 ? max_local : 1024; // 1KB
-      case Storage::SHARED: return 48ull * 1024;                    // 48KB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-
-    case TargetArch::SM_75:
-      switch (sto) {
-      case Storage::LOCAL: return max_local > 0 ? max_local : 1024; // 1KB
-      case Storage::SHARED: return 64ull * 1024;                    // 64KB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-
-    case TargetArch::SM_80:
-      switch (sto) {
-      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
-      case Storage::SHARED: return 164ull * 1024;                   // 164KB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-
-    case TargetArch::SM_86:
-    case TargetArch::SM_89:
-      switch (sto) {
-      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
-      case Storage::SHARED: return 100ull * 1024;                   // 100KB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-
-    case TargetArch::SM_90:
-      switch (sto) {
-      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
-      case Storage::SHARED: return 164ull * 1024;                   // 164KB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-
-    case TargetArch::SM_90A:
-      switch (sto) {
-      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
-      case Storage::SHARED: return 164ull * 1024;                   // 164KB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-
-    case TargetArch::SM_100:
-      switch (sto) {
-      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
-      case Storage::SHARED: return 228ull * 1024;                   // 228KB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-
-    case TargetArch::SM_120:
-      switch (sto) {
-      case Storage::LOCAL: return max_local > 0 ? max_local : 2048; // 2KB
-      case Storage::SHARED: return 300ull * 1024;                   // 300KB
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-
-    default: choreo_unreachable("Unsupported target arch.");
-    }
-    return 0;
+    if (sto == Storage::LOCAL &&
+        GetTarget().IsFeatureSupported(STR(ChoreoFeature::SLML)) &&
+        MaxLocalMemCapacity() != 0)
+      return MaxLocalMemCapacity();
+    return GetTarget().GetMemCapacity(sto, GetArch());
   }
 
   // return memory alignment in byte. Used in memory reuse pass.
-  size_t GetMemoryAlignment(TargetArch arch, Storage sto) const {
+  size_t GetMemoryAlignment(const ArchId& arch, Storage sto) const {
     if (!MemDefaultAligned()) return 1;
-    switch (arch) {
-    case TargetArch::GCU20:
-    case TargetArch::GCU21:
-    case TargetArch::GCU3:
-    case TargetArch::GCU4:
-    case TargetArch::GCU5: {
-      switch (sto) {
-      case Storage::LOCAL:
-      case Storage::SHARED: return 512;
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-    }
-    case TargetArch::GPU:
-    case TargetArch::SM_70:
-    case TargetArch::SM_75:
-    case TargetArch::SM_80:
-    case TargetArch::SM_86:
-    case TargetArch::SM_89: {
-      switch (sto) {
-      case Storage::LOCAL: return 16;
-      case Storage::SHARED: return 16;
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-    }
-    case TargetArch::SM_90:
-    case TargetArch::SM_90A:
-    case TargetArch::SM_100:
-    case TargetArch::SM_120: {
-      switch (sto) {
-      case Storage::LOCAL: return 16;
-      case Storage::SHARED: return 32;
-      default: choreo_unreachable("Unsupported mem level.");
-      }
-    }
-    default: choreo_unreachable("Unsupported target arch.");
-    }
+    return GetTarget().GetMemAlignment(sto, arch);
   }
 
   size_t GetMinGroupDim() const {
-    size_t min_v = 1;
-    if (GetTarget() == CompileTarget::Topscc) {
-      switch (GetArch()) {
-      case TargetArch::GCU20:
-      case TargetArch::GCU21:
-      case TargetArch::GCU3:
-      case TargetArch::GCU4: break;
-      default: choreo_unreachable("unsupported target arch.");
-      }
-    } else if (GetTarget() == CompileTarget::Cute)
-      min_v = 32;
-    else
-      choreo_unreachable("unsupported target.");
-
-    return min_v;
+    return GetTarget().GetMinGroupDim(GetArch());
   }
 
-  size_t GetSingleVectorByteSize() const {
-    switch (GetArch()) {
-    case TargetArch::GCU3: return 128;
-    case TargetArch::GCU4: return 512;
-    default: choreo_unreachable("Unsupported target arch.");
-    }
+  size_t GetVectorLength() const {
+    return GetTarget().GetVectorLength(GetArch());
   }
 
   int TargetDefaultOptLevel() const {
-    switch (GetTarget()) {
-    case CompileTarget::Factor:
-    case CompileTarget::Topscc: return 3;
-    case CompileTarget::CUDA:
-    case CompileTarget::Cute: return 3;
-    default: choreo_unreachable("unsupported target.");
-    }
-    return -1;
-  }
-
-  bool TargetSupportTMA() const {
-    switch (GetArch()) {
-    case TargetArch::SM_90:
-    case TargetArch::SM_90A:
-    case TargetArch::SM_100:
-    case TargetArch::SM_120: return true;
-    default: break;
-    }
-    return false;
-  }
-
-  bool TargetSupportWMMA() const {
-    switch (GetArch()) {
-    case TargetArch::SM_70:
-    case TargetArch::SM_75:
-    case TargetArch::SM_80:
-    case TargetArch::SM_86:
-    case TargetArch::SM_89:
-    case TargetArch::SM_90:
-    case TargetArch::SM_90A:
-    case TargetArch::SM_100:
-    case TargetArch::SM_120: return true;
-    default: break;
-    }
-    return false;
-  }
-
-  bool TargetSupportWGMMA() const {
-    switch (GetArch()) {
-    case TargetArch::SM_90A:
-    case TargetArch::SM_100:
-    case TargetArch::SM_120: return true;
-    default: break;
-    }
-    return false;
+    return GetTarget().DefaultOptLevel(GetArch());
   }
 
 public:
@@ -853,22 +564,40 @@ public:
   }
 
 public:
-  bool SupportEvent() const {
-    switch (compile_target) {
-    case CompileTarget::Topscc:
-      return arch == TargetArch::GCU3 || arch == TargetArch::GCU4;
-    case CompileTarget::Cute: return true;
-    default: break;
-    }
-    return false;
+  int ArchNum() const { return GetTarget().ArchNum(GetArch()); }
+  bool HasFeature(ChoreoFeature cf) const {
+    return GetTarget().IsFeatureSupported(STR(cf));
+  }
+  bool HasFeature(ChoreoFeature cf, ArchId arch) const {
+    return GetTarget().IsFeatureSupported(arch, STR(cf));
+  }
+  bool TargetSupportEvent() const {
+    return HasFeature(ChoreoFeature::EVENT, GetArch());
+  }
+  bool TargetSupportMMA() const {
+    return HasFeature(ChoreoFeature::MMA, GetArch());
+  }
+  bool TargetSupportWGMMA() const {
+    return HasFeature(ChoreoFeature::WGMMA, GetArch());
+  }
+  bool TargetSupportTMA() const {
+    return HasFeature(ChoreoFeature::TMA, GetArch());
+  }
+  bool TargetSupportMemAlloc() const {
+    return HasFeature(ChoreoFeature::MEMALLOC, GetArch());
+  }
+  bool TargetSupportVectorize() const {
+    return HasFeature(ChoreoFeature::VECTORIZE, GetArch());
   }
 
-  bool SupportMMA() const {
-    switch (compile_target) {
-    case CompileTarget::Cute: return true;
-    default: break;
-    }
-    return false;
+  size_t TargetVectorizeLimit() const {
+    return GetTarget().VectorizeLimit(GetArch());
+  }
+  auto TargetVectorizeTypes() const {
+    return GetTarget().VectorizableTypes(GetArch());
+  }
+  auto TargetParallelLevels() const {
+    return GetTarget().GetParallelLevels(GetArch());
   }
 
 public:

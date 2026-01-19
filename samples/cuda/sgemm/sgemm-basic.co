@@ -1,5 +1,3 @@
-#include "choreo_cuda.h"
-
 __cok__ { /// kernel program
 
 template<int M, int N, int K, int THD_Y, int THD_X>

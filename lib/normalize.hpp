@@ -673,8 +673,8 @@ public:
       n.sa.reset();
     }
 
-    if (CCtx().GetTarget() == CompileTarget::Factor && n.OpCount() > 0 &&
-        // factor requires to generate 'bitcast' for a reshape
+    if (CCtx().HasFeature(ChoreoFeature::RSTM0) && n.OpCount() > 0 &&
+        // special mode: requires to generate 'bitcast' for a reshape
         n.OpAt(0)->SpecifyReshape()) {
       int index =
           GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
@@ -817,14 +817,15 @@ public:
 
     if (AST::GetIdentifier(*n.value)) return true;
 
-    if (CCtx().GetTarget() != CompileTarget::Factor) return true;
+    if (!CCtx().HasFeature(ChoreoFeature::RSTM0)) return true;
 
     // non-identifier may be normalized
     auto vty = NodeType(*n.value);
 
-    // tricky: we must convert a integer to be 's32 [1] ...' for a factor return
-    // value;
-    if (isa<ScalarIntegerType>(vty)) {
+    // tricky: we must convert a integer to be 's32 [1] ...' for a specific
+    // return value;
+    if (CCtx().HasFeature(ChoreoFeature::RSTM0) &&
+        isa<ScalarIntegerType>(vty)) {
       auto expr = cast<AST::Expr>(n.value);
       if (auto il = expr->GetInt()) {
         auto& loc = n.value->LOC();
@@ -989,13 +990,6 @@ public:
   // it does not require a symbol table
   ParaByFiller() : NormBase("pbfill") {}
 
-  bool IsAllowed(AST::Node&) const override {
-    return CCtx().GetTarget() == CompileTarget::Factor ||
-           CCtx().GetTarget() == CompileTarget::Topscc ||
-           CCtx().GetTarget() == CompileTarget::CUDA ||
-           CCtx().GetTarget() == CompileTarget::Cute;
-  }
-
   AST::ParallelBy& InsertInnerLevel(AST::ParallelBy& pb, ParallelLevel pl,
                                     size_t ub) {
     // may fill gap only for a single level
@@ -1138,7 +1132,7 @@ public:
       Error1(pb->LOC(),
              STR(pb->GetLevel()) +
                  " level is not supported by the target architecture: " +
-                 STR(CCtx().GetArch()) + ".");
+                 CCtx().GetArch() + ".");
 
     auto literal_depth = pb_tree.GetDepth(pb) + 1;
     if (literal_depth > (size_t)TargetMaxDepth()) {

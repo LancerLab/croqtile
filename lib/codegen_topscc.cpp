@@ -129,11 +129,11 @@ TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
     vector_size *= SizeOf(mask_elem_type);
   }
   std::string vty_str;
-  if (vector_size == CCtx().GetSingleVectorByteSize())
+  if (vector_size == CCtx().GetVectorLength())
     vty_str = "__vector ";
-  else if (vector_size == 2 * CCtx().GetSingleVectorByteSize())
+  else if (vector_size == 2 * CCtx().GetVectorLength())
     vty_str = "__vector2 ";
-  else if (vector_size == 4 * CCtx().GetSingleVectorByteSize())
+  else if (vector_size == 4 * CCtx().GetVectorLength())
     vty_str = "__vector4 ";
   else
     choreo_unreachable(
@@ -176,7 +176,7 @@ TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
 }
 
 const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
-  if (CCtx().GetArch() == TargetArch::GCU4) {
+  if (CCtx().GetArch() == "gcu400") {
     if (sto == Storage::GLOBAL)
       return "tops::shared_dte"; // to confirm
     else if (sto == Storage::SHARED)
@@ -263,14 +263,14 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
 
       ds << d_indent << VectorTypeSTR(vector_type) << " " << vec_iv_plus_name
          << " = ";
-      if (CCtx().GetArch() == TargetArch::GCU3) {
+      if (CCtx().GetArch() == "gcu300") {
         ds << "{";
         for (int i = 0; i < vector_width; ++i) {
           if (i > 0) ds << ", ";
           ds << i;
         }
         ds << "};\n";
-      } else if (CCtx().GetArch() == TargetArch::GCU4) {
+      } else if (CCtx().GetArch() == "gcu400") {
         ds << "tcle::mid<" << VectorTypeSTR(vector_type) << ", 0>(0);\n";
       } else
         choreo_unreachable("unsupported target architecture.");
@@ -1335,10 +1335,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // - not support async.
 
   // Generate tops dte and choreo::future in device-side
-  auto claimFuture = [this, &n](const std::string& buf_expr,
-                                Storage sto = Storage::DEFAULT,
-                                const std::string& mdata_expr = "")
-      -> std::string {
+  auto claimFuture =
+      [this, &n](const std::string& buf_expr, Storage sto = Storage::DEFAULT,
+                 const std::string& mdata_expr = "") -> std::string {
     if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
       return n.future;
 
@@ -2342,8 +2341,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
                                     type->GetBaseType(), IsHost());
           print_args += ", ";
         } else if (isa<BooleanType>(type) || isa<EventType>(type)) {
-          if (CCtx().GetArch() == TargetArch::GCU20 ||
-              CCtx().GetArch() == TargetArch::GCU21) {
+          if (CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210") {
             print_format += "%d";
             print_args += "(" + ExprSTR(arg, IsHost()) + " ? 1 : 0), ";
           } else {
@@ -2573,8 +2571,8 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
       } else {
         choreo_unreachable("unexpected situation");
       }
-     } else if (auto expr = cast<AST::Expr>(n.value);
-            expr && (expr->op == "dataof" || expr->op == "mdataof")) {
+    } else if (auto expr = cast<AST::Expr>(n.value);
+               expr && (expr->op == "dataof" || expr->op == "mdataof")) {
       // return future.data, must map back
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
@@ -2933,16 +2931,14 @@ fi
   os << "\nEOF\n\n";
 
   // JIT: detect the environment
-  if (CCtx().GetArch() == TargetArch::GCU4)
-    os << "gcu_arch=gcu400\n";
-  else if (CCtx().GetArch() == TargetArch::GCU5)
-    os << "gcu_arch=gcu500\n";
+  if (CCtx().GetArch() == "gcu400" || CCtx().GetArch() == "gcu500")
+    os << "gcu_arch=" << ToLower(CCtx().GetArch()) << "\n";
   else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
             (CCtx().GetOutputKind() == OutputKind::TargetExecutable) ||
             (CCtx().GetOutputKind() == OutputKind::ShellScript)) &&
            arch.GetValue() != "") {
     // enforce the arch type
-    os << "gcu_arch=" << ToLower(STR(CCtx().GetArch())) << "\n";
+    os << "gcu_arch=" << ToLower(CCtx().GetArch()) << "\n";
   } else
     os << R"script(
   # check the device just-in-time
@@ -3014,7 +3010,7 @@ option_detect() {
   os << R"( -I${GCU_ACORE_INCLUDE})";
   os << R"( -D__ACORE_OP__ -fPIC)";
 #endif
-  if (CCtx().GetArch() == TargetArch::GCU5) { // enable gcusim5
+  if (CCtx().GetArch() == "gcu500") { // enable gcusim5
     os << R"( -Wl,--disable-new-dtags -rpath "${TOPSCC_LIB}")";
   }
   // always enclose
@@ -3033,9 +3029,9 @@ option_detect() {
   os << "\"";
   os << "\noption_detect";
   // if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
-  if (CCtx().GetArch() == TargetArch::GCU4)
+  if (CCtx().GetArch() == "gcu400")
     os << "\nexport INTERNAL_GCU_SIM=LIBRA";
-  else if (CCtx().GetArch() == TargetArch::GCU5)
+  else if (CCtx().GetArch() == "gcu500")
     os << "\nexport INTERNAL_GCU_SIM=DRACO";
 
   os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
@@ -3721,7 +3717,7 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
                                " *)" + ssm.DeviceName(InScopeName(data_name)) +
                                " + " +
                                AddressOffset(sty->GetShape(), *da, false);
-        if (CCtx().GetArch() == TargetArch::GCU3)
+        if (CCtx().GetArch() == "gcu300")
           addr_str = "(__TCLE_AS__ char *)(" + addr_str + ")";
         if (is_load) {
           // load
@@ -3733,9 +3729,9 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
             // for now, it use tcle::vsel to do masking store, the store val
             // 'st_val' is conditionally selected between 'val_str' and 'ld_val'
             // from the same memory location.
-            if (CCtx().GetArch() == TargetArch::GCU4) {
+            if (CCtx().GetArch() == "gcu400") {
               oss << BuildTcleStore(addr_str, val_str, "exec");
-            } else if (CCtx().GetArch() == TargetArch::GCU3) {
+            } else if (CCtx().GetArch() == "gcu300") {
               auto ld_val = symtab.GetAnonName();
               oss << VectorTypeSTR(vty) << " " << ld_val << " = "
                   << BuildTcleLoad(addr_str, vty_str) << ";\n";

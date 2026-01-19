@@ -47,9 +47,9 @@ private:
   std::string alias; // name alias
   T value;
   T default_value;
-  std::string description; // explanation of this option
-  std::string option_desc; // for describing the option, if needed
-  bool requires_arg;       // if it requires extra argument
+  std::string description;   // explanation of this option
+  std::string option_desc;   // for describing the option, if needed
+  bool requires_arg = false; // if it requires extra argument
 
 public:
   Option(OptionKind, const std::string&, const std::string&, const T&,

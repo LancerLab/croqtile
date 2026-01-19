@@ -51,4 +51,10 @@ __co__ void foo() {
 // CHECK200: error: Event is not supported on GCU200.
 // CHECK200: Totally 6 errors have been detected.
 
-// CHECKfactor: Assertion failed: unsupported type (global event) for type declaration.
+// CHECKfactor: error: Event is not supported on GCU300.
+// CHECKfactor: error: Event is not supported on GCU300.
+// CHECKfactor: error: Event is not supported on GCU300.
+// CHECKfactor: error: Event is not supported on GCU300.
+// CHECKfactor: error: Event is not supported on GCU300.
+// CHECKfactor: error: Event is not supported on GCU300.
+// CHECKfactor: Totally 6 errors have been detected.

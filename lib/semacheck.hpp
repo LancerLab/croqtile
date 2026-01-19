@@ -10,8 +10,6 @@ namespace Choreo {
 
 struct SemaChecker : public TracedVisitorWithSymTab {
 private:
-  bool allow_auto_threading = false;
-
   std::set<std::string> pending_async; // a simple check to detect async
                                        // entities that are not waited
   std::set<std::string> waited_async;  // a simple check to detect async
@@ -32,9 +30,7 @@ private:
                      const ptr<AST::Node>&);
 
 public:
-  SemaChecker() : TracedVisitorWithSymTab("check") {
-    if (CCtx().GetTarget() == CompileTarget::CUDA) allow_auto_threading = true;
-  }
+  SemaChecker() : TracedVisitorWithSymTab("check") {}
   ~SemaChecker() {}
 
   bool VisitNode(AST::IntLiteral&) override;

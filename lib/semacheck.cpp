@@ -375,8 +375,8 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   if (n.IsSparse()) {
     extern Option<bool> sim_sparse;
     if (!sim_sparse) {
-      Error1(n.LOC(),
-             "Sparse DMA requires -sim (simulation only); hardware path is not implemented.");
+      Error1(n.LOC(), "Sparse DMA requires -sim (simulation only); hardware "
+                      "path is not implemented.");
       return false;
     }
     if (n.operation != ".copy") {
@@ -425,7 +425,8 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 
   if (n.IsSparse()) {
     if (!n.GetFrom()->NoTilingOperation() || !n.GetTo()->NoTilingOperation()) {
-      Error1(n.LOC(), "Sparse DMA currently requires symbol-to-symbol copy with no tiling.");
+      Error1(n.LOC(), "Sparse DMA currently requires symbol-to-symbol copy "
+                      "with no tiling.");
       return false;
     }
     if (f_shape.Rank() != 3 || t_shape.Rank() != 3 || f_shape.IsDynamic() ||
@@ -496,8 +497,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
         }
       }
     }
-  } else if (!(cast<SpannedType>(fty)->LogicalEqual(*tty)) &&
-             !allow_auto_threading) {
+  } else if (!(cast<SpannedType>(fty)->LogicalEqual(*tty))) {
     // check: to-buffer size must be larger or equal than from
     auto asrt = sbe::bop(OpCode::LE, f_shape.ElementCountValue(),
                          t_shape.ElementCountValue())
@@ -686,22 +686,20 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       ValueItem k_dim;
       switch (op.GetMethod()) {
       case AST::MMAOperation::ROW_ROW:
-      case AST::MMAOperation::ROW_COL:
-        k_dim = a_shape.ValueAt(1);
-        break;
+      case AST::MMAOperation::ROW_COL: k_dim = a_shape.ValueAt(1); break;
       case AST::MMAOperation::COL_ROW:
-      case AST::MMAOperation::COL_COL:
-        k_dim = a_shape.ValueAt(0);
-        break;
+      case AST::MMAOperation::COL_COL: k_dim = a_shape.ValueAt(0); break;
       default: break;
       }
       if (auto kv = VIInt(k_dim)) {
         if ((*kv % 4) != 0) {
-          Error1(n.LOC(), "Sparse MMA requires K dimension to be a multiple of 4.");
+          Error1(n.LOC(),
+                 "Sparse MMA requires K dimension to be a multiple of 4.");
           return false;
         }
       } else {
-        Warning(n.LOC(), "Sparse MMA expects K dimension multiple of 4; unable to verify at compile time.");
+        Warning(n.LOC(), "Sparse MMA expects K dimension multiple of 4; unable "
+                         "to verify at compile time.");
       }
     }
   } break;

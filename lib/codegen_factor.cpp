@@ -1934,8 +1934,8 @@ void FactorCodeGen::EmitFactorSource() {
     } else {
       auto ofname = OptionRegistry::GetInstance().GetOutputFileName();
       auto kernel_filename = AppendNameAheadOfSuffix(
-          ofname, "_" + ToLower(STR(CCtx().GetTarget())) + "_" +
-                      ToLower(STR(CCtx().GetArch())) + "_device_kernel");
+          ofname, "_" + ToLower(CCtx().TargetName()) + "_" +
+                      ToLower(CCtx().GetArch()) + "_device_kernel");
       std::ofstream knls(kernel_filename);
       knls << "// ------------------------------------------------------- //\n";
       knls << "// Choreo generated DEVICE code (factor) for: \n";

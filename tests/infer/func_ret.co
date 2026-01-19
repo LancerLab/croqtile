@@ -1,5 +1,4 @@
 // RUN: choreo -t factor %s -i | FileCheck --check-prefix=CHECK-FACT %s
-// RUN: choreo -t cuda %s -i | FileCheck --check-prefix=CHECK-CUDA %s
 
 __co__ auto bar(int) {}
 
@@ -9,8 +8,3 @@ __co__ auto correct() { s32[1] aa; return aa; }
 // CHECK-FACT: Function:  ::bar, Type: void (*)(s32)
 // CHECK-FACT: Symbol:    ::correct::aa, Type: global s32 mdspan<1> [1]
 // CHECK-FACT: Function:  ::correct, Type: s32 mdspan<1> [1] (*)()
-
-// CHECK-CUDA: Parameter: ::bar::anon_0, Type: s32
-// CHECK-CUDA: Function:  ::bar, Type: void (*)(s32)
-// CHECK-CUDA: Symbol:    ::correct::aa, Type: global s32 mdspan<1> [1]
-// CHECK-CUDA: Function:  ::correct, Type: s32 mdspan<1> [1] (*)()
