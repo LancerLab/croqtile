@@ -389,6 +389,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");
+    stream_name = "";
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
     // only on device-side
@@ -1626,6 +1627,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 
     hs << ");\n";
 
+    // TODO: cudaStreamSynchronize
     if (!n.IsAsync())
       hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
 
