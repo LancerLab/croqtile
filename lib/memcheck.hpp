@@ -117,12 +117,10 @@ private:
             " memory:\n\tUsed: " + std::to_string(ct_tot_mem_usage[sto]) +
             " bytes, Limit: " + std::to_string(mem_usage_limit[sto]) +
             " bytes. With variables:" + oss.str();
-        if (sto == Storage::LOCAL &&
-            (CCtx().GetTarget() == CompileTarget::CUDA ||
-             CCtx().GetTarget() == CompileTarget::Cute))
-          error_msg +=
-              "\n\tNote: For CUDA/Cute target, the local memory limits can be "
-              "set via `--max-local-mem-capacity` option.";
+        if (sto == Storage::LOCAL && CCtx().HasFeature(ChoreoFeature::SLML))
+          error_msg += "\n\tNote: For " + CCtx().TargetName() +
+                       " target, the local memory limits can be set via "
+                       "`--max-local-mem-capacity` option.";
         Error1(n.LOC(), error_msg);
       }
     }
@@ -222,35 +220,27 @@ private:
 
 public:
   MemUsageCheck() : VisitorWithSymTab("muchk") {
-    if ((CCtx().GetTarget() == CompileTarget::Factor) ||
-        (CCtx().GetTarget() == CompileTarget::Topscc) ||
-        (CCtx().GetTarget() == CompileTarget::CUDA) ||
-        (CCtx().GetTarget() == CompileTarget::Cute)) {
-      // for cuda and cute backend, ignore global memory cap check.
-      if (CCtx().GetTarget() == CompileTarget::CUDA ||
-          CCtx().GetTarget() == CompileTarget::Cute)
-        tocheck_storage = {Storage::LOCAL, Storage::SHARED};
-      else
-        tocheck_storage = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
-      // initialize with ct_tot_mem_usage
-      for (const auto& sto : tocheck_storage) {
-        ct_tot_mem_usage[sto] = 0;
-        /*
-        TODO:
-        For GCU3, all is different with Scorpio (1 Die) in the link below
-        Is S60G same with c035?
-        L3 (global) is different with Dorado (3VG per Cluster) in
-        http://wiki.enflame.cn/display/~james.zhu/Enflame+GCU+Programming+Model#EnflameGCUProgrammingModel-get_memory_space
-        */
-        // initialize max memory we can allocate in byte
-        mem_usage_limit[sto] = CCtx().GetMemCapacity(sto);
-      }
-    } else {
-      choreo_unreachable("unsupported target in memory usage check.");
+    // for cuda and cute backend, ignore global memory cap check.
+    if (!CCtx().HasFeature(ChoreoFeature::MGM))
+      tocheck_storage = {Storage::LOCAL, Storage::SHARED};
+    else
+      tocheck_storage = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
+    // initialize with ct_tot_mem_usage
+    for (const auto& sto : tocheck_storage) {
+      ct_tot_mem_usage[sto] = 0;
+      /*
+      TODO:
+      For GCU3, all is different with Scorpio (1 Die) in the link below
+      Is S60G same with c035?
+      L3 (global) is different with Dorado (3VG per Cluster) in
+      http://wiki.enflame.cn/display/~james.zhu/Enflame+GCU+Programming+Model#EnflameGCUProgrammingModel-get_memory_space
+      */
+      // initialize max memory we can allocate in byte
+      mem_usage_limit[sto] = CCtx().GetMemCapacity(sto);
     }
     VST_DEBUG(dbgs() << "[MemUsage] "
                      << "Memory usage limit of architecture "
-                     << STR(CCtx().GetArch()) << " is:\n"
+                     << ToUpper(CCtx().GetArch()) << " is:\n"
                      << GetMemUsageMapDetail(mem_usage_limit));
   }
   ~MemUsageCheck() {}

@@ -275,8 +275,8 @@ bool ShapeInference::Visit(AST::Expr& n) {
 
   auto ShouldOpt = [](const ValueList& vl) -> bool {
     if (!IsValidValueList(vl)) return false;
-    // factor should always use expression when symbolic
-    if (CCtx().GetTarget() == CompileTarget::Factor)
+    // restricted mode: should always use expression when symbolic
+    if (CCtx().HasFeature(ChoreoFeature::RSTM0))
       return IsValueListNumericOrBool(vl);
     return true;
   };
@@ -1141,8 +1141,8 @@ bool ShapeInference::Visit(AST::MMA& n) {
     auto mty = MakeMDSpanType(GenShape(cur_vn));
     auto c_sty = GetSpannedType(GetSymbolType(op.ExecOperand(0)));
     auto c_elem = (c_sty && c_sty->ElementType() != BaseType::UNKSCALAR)
-              ? c_sty->ElementType()
-              : fty->ElementType();
+                      ? c_sty->ElementType()
+                      : fty->ElementType();
     auto sty = MakeSpannedType(c_elem, GenShape(cur_vn), Storage::REG);
     UpdateSymbolType(op.ExecOperand(0), sty);
     UpdateSymbolType(op.ExecOperand(0) + ".span", mty);

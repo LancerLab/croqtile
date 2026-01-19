@@ -74,22 +74,6 @@ LoopVectorizeSimpleChecker::LoopVectorizeSimpleChecker(
   for (auto& [loop_name, loop] : li->GetAllLoops()) {
     can_vectorizes[loop_name] = true;
   }
-  for (auto i = 0; i < int(TargetArch::End); ++i) {
-    using BT = BaseType;
-    switch (TargetArch(i)) {
-    case TargetArch::GCU3:
-      legal_vtypes[(TargetArch)i] = {BT::S64, BT::U64,  BT::S32, BT::U32,
-                                     BT::S16, BT::U16,  BT::S8,  BT::U8,
-                                     BT::F32, BT::BF16, BT::F16};
-      break;
-    case TargetArch::GCU4:
-      legal_vtypes[(TargetArch)i] = {
-          BT::S64, BT::U64, BT::S32,  BT::U32, BT::S16,     BT::U16,    BT::S8,
-          BT::U8,  BT::F32, BT::BF16, BT::F16, BT::F8_E4M3, BT::F8_E5M2};
-      break;
-    default: legal_vtypes[(TargetArch)i] = {};
-    }
-  }
 }
 
 bool LoopVectorizeSimpleChecker::ExistLoopVectorizationLegal() {
@@ -118,11 +102,11 @@ bool LoopVectorizeSimpleChecker::Visit(AST::DataAccess& n) {
   auto elem_ty = GetBaseType(*n.GetType());
   if (cur_loop->GetDataType() == BaseType::UNKNOWN) {
     cur_loop->SetDataType(elem_ty);
-    if (legal_vtypes[CCtx().GetArch()].count(elem_ty) == 0) {
+    if (CCtx().TargetVectorizeTypes().count(elem_ty) == 0) {
       if (debug_visit)
         dbgs() << indent << "data type " << STR(elem_ty)
                << " is not legal for vectorization on target architecture "
-               << STR(CCtx().GetArch()) << "\n";
+               << ToUpper(CCtx().GetArch()) << "\n";
       SetLoopVectorizationFailed();
       return true;
     }
@@ -394,12 +378,6 @@ LoopVectorizeLegalityChecker::LoopVectorizeLegalityChecker(
   for (auto& [loop_name, loop] : li->GetAllLoops()) {
     can_vectorizes[loop_name] = loop->NeedVectorize() ? true : false;
   }
-
-  for (auto i = 0; i < int(TargetArch::End); ++i) {
-    max_limits[(TargetArch)i] = 0;
-  }
-  max_limits[TargetArch::GCU3] = 128;
-  max_limits[TargetArch::GCU4] = 512;
 }
 
 bool LoopVectorizeLegalityChecker::NeedCheck() {
@@ -470,10 +448,10 @@ bool LoopVectorizeLegalityChecker::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
   auto vector_factor = cur_loop->GetVectorFactor();
-  if (static_cast<size_t>(vector_factor) > max_limits[CCtx().GetArch()]) {
+  if (static_cast<size_t>(vector_factor) > CCtx().TargetVectorizeLimit()) {
     if (debug_visit)
       dbgs() << "[plan] vector factor " << cur_loop->GetVectorFactor()
-             << " exceeds architecture limit " << max_limits[CCtx().GetArch()]
+             << " exceeds architecture limit " << CCtx().TargetVectorizeLimit()
              << ", skip this plan.\n";
     SetLoopVectorizationFailed();
     return false;
@@ -502,7 +480,7 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
   auto elem_ty = GetBaseType(*n.GetType());
   auto vector_factor = cur_loop->GetVectorFactor();
   auto vector_size = SizeOf(elem_ty) * vector_factor;
-  auto single_vector_size = CCtx().GetSingleVectorByteSize();
+  auto single_vector_size = CCtx().GetVectorLength();
 
   if (vector_size != single_vector_size &&
       vector_size != 2 * single_vector_size &&
@@ -516,7 +494,7 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
   }
 
   // alignment check, GCU4 supports unaligned simd memory access
-  if (CCtx().GetArch() != TargetArch::GCU4)
+  if (CCtx().GetTarget().EnforceVectorAlignment(CCtx().GetArch()))
     if (!CheckDataAccessAlignment(n)) {
       SetLoopVectorizationFailed();
       return true;
@@ -533,18 +511,17 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
 
   if (offset_shape.Varying() && !offset_shape.Stride(1)) {
     // need gather/scatter for vectorized access
-    if (CCtx().GetArch() != TargetArch::GCU4) {
+    if (CCtx().GetTarget().EnforceVectorAlignment(CCtx().GetArch()))
       SetLoopVectorizationFailed();
-      if (debug_visit) {
-        dbgs() << indent << "Gather/Scatter is not legal for vectorization"
-               << " in " << STR(CCtx().GetArch()) << " target \n";
-      }
-    } else {
-      if (debug_visit) {
-        dbgs() << indent
-               << "Gather/Scatter is needed for vectorized access: " << STR(n)
-               << "\n";
-      }
+    if (debug_visit) {
+      dbgs() << indent << "Gather/Scatter is not legal for vectorization"
+             << " in " << ToUpper(CCtx().GetArch()) << " target \n";
+    }
+  } else {
+    if (debug_visit) {
+      dbgs() << indent
+             << "Gather/Scatter is needed for vectorized access: " << STR(n)
+             << "\n";
     }
   }
 
@@ -1042,9 +1019,8 @@ public:
       : LoopVisitor(s_tab, "loop_vectorization_planner"), li(l), sea(s),
         lvc(lc) {
     vector_register_widths = {};
-    auto vector1 = CCtx().GetSingleVectorByteSize();
-    if (CCtx().GetArch() == TargetArch::GCU3 ||
-        CCtx().GetArch() == TargetArch::GCU4) {
+    auto vector1 = CCtx().GetVectorLength();
+    if (CCtx().TargetSupportVectorize()) {
       vector_register_widths.push_back(vector1);
       vector_register_widths.push_back(vector1 * 2);
       vector_register_widths.push_back(vector1 * 4);
@@ -1199,9 +1175,10 @@ bool LoopVectorizer::RunOnProgramImpl(AST::Node& root) {
     Error1(root.LOC(), "Not running a choreo program.");
     return false;
   }
-  if (CCtx().GetTarget() != CompileTarget::Topscc) {
+  if (!CCtx().TargetSupportVectorize()) {
     Error1(root.LOC(),
-           "Loop vectorization transformations are only for topscc target.");
+           "Loop vectorization transformations is not available for " +
+               std::string(CCtx().TargetName()) + ".");
     return true;
   }
   if (prt_visitor) dbgs() << "|- " << GetName() << NewL;

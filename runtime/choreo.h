@@ -64,9 +64,11 @@
 #define __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
 #endif
 
-#include "cute/tensor.hpp"
+#if __CUDA_ARCH__ >= 900
 #include "cute/algorithm/copy.hpp"
 #include "cute/algorithm/prefetch.hpp"
+#endif // __CUDA_ARCH__ >= 900
+#include "cute/tensor.hpp"
 #include <cuda/barrier>
 #include <mma.h>
 
@@ -686,18 +688,42 @@ using f8_ue4m3 = float_ue4m3_t;
 
 // Minimal arithmetic support for FP8 scalar types.
 // Choreo's codegen may form expressions like `fp8 + fp8` before casting.
-// CUTLASS/CUTE FP8 types and CUDA FP8 types don't consistently provide these operators,
-// so we define them here and return FP32.
+// CUTLASS/CUTE FP8 types and CUDA FP8 types don't consistently provide these
+// operators, so we define them here and return FP32.
 #if defined(__USE_CUDA_TYPE__)
-__host__ __device__ static inline float operator+(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b) { return float(a) + float(b); }
-__host__ __device__ static inline float operator-(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b) { return float(a) - float(b); }
-__host__ __device__ static inline float operator*(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b) { return float(a) * float(b); }
-__host__ __device__ static inline float operator/(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b) { return float(a) / float(b); }
+__host__ __device__ static inline float operator+(__nv_fp8_e4m3 a,
+                                                  __nv_fp8_e4m3 b) {
+  return float(a) + float(b);
+}
+__host__ __device__ static inline float operator-(__nv_fp8_e4m3 a,
+                                                  __nv_fp8_e4m3 b) {
+  return float(a) - float(b);
+}
+__host__ __device__ static inline float operator*(__nv_fp8_e4m3 a,
+                                                  __nv_fp8_e4m3 b) {
+  return float(a) * float(b);
+}
+__host__ __device__ static inline float operator/(__nv_fp8_e4m3 a,
+                                                  __nv_fp8_e4m3 b) {
+  return float(a) / float(b);
+}
 
-__host__ __device__ static inline float operator+(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b) { return float(a) + float(b); }
-__host__ __device__ static inline float operator-(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b) { return float(a) - float(b); }
-__host__ __device__ static inline float operator*(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b) { return float(a) * float(b); }
-__host__ __device__ static inline float operator/(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b) { return float(a) / float(b); }
+__host__ __device__ static inline float operator+(__nv_fp8_e5m2 a,
+                                                  __nv_fp8_e5m2 b) {
+  return float(a) + float(b);
+}
+__host__ __device__ static inline float operator-(__nv_fp8_e5m2 a,
+                                                  __nv_fp8_e5m2 b) {
+  return float(a) - float(b);
+}
+__host__ __device__ static inline float operator*(__nv_fp8_e5m2 a,
+                                                  __nv_fp8_e5m2 b) {
+  return float(a) * float(b);
+}
+__host__ __device__ static inline float operator/(__nv_fp8_e5m2 a,
+                                                  __nv_fp8_e5m2 b) {
+  return float(a) / float(b);
+}
 #endif
 #endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 
@@ -825,9 +851,10 @@ __co_any__ inline float to_f32(T value) {
 }
 
 template <typename A, typename B, typename C>
-__co_host__ inline void verify_matmul_row_col_subset(
-  A& lhs, B& rhs, C& res, float base_tol, float rel_tol,
-  size_t max_i = 8, size_t max_j = 8) {
+__co_host__ inline void
+verify_matmul_row_col_subset(A& lhs, B& rhs, C& res, float base_tol,
+                             float rel_tol, size_t max_i = 8,
+                             size_t max_j = 8) {
   size_t m = res.shape()[0];
   size_t n = res.shape()[1];
   size_t k = lhs.shape()[1];
@@ -837,8 +864,7 @@ __co_host__ inline void verify_matmul_row_col_subset(
     for (size_t j = 0; j < n; j += step_j) {
       float ref = 0.0f;
       for (size_t kk = 0; kk < k; ++kk)
-        ref += to_f32(lhs[(int)i][(int)kk]) *
-               to_f32(rhs[(int)kk][(int)j]);
+        ref += to_f32(lhs[(int)i][(int)kk]) * to_f32(rhs[(int)kk][(int)j]);
       float got = to_f32(res[(int)i][(int)j]);
       float tol = base_tol + rel_tol * std::abs(ref);
       choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
@@ -846,9 +872,10 @@ __co_host__ inline void verify_matmul_row_col_subset(
 }
 
 template <typename A, typename B, typename C>
-__co_host__ inline void verify_matmul_row_row_subset(
-  A& lhs, B& rhs, C& res, float base_tol, float rel_tol,
-  size_t max_i = 8, size_t max_j = 8) {
+__co_host__ inline void
+verify_matmul_row_row_subset(A& lhs, B& rhs, C& res, float base_tol,
+                             float rel_tol, size_t max_i = 8,
+                             size_t max_j = 8) {
   size_t m = res.shape()[0];
   size_t n = res.shape()[1];
   size_t k = lhs.shape()[1];
@@ -858,8 +885,7 @@ __co_host__ inline void verify_matmul_row_row_subset(
     for (size_t j = 0; j < n; j += step_j) {
       float ref = 0.0f;
       for (size_t kk = 0; kk < k; ++kk)
-        ref += to_f32(lhs[(int)i][(int)kk]) *
-               to_f32(rhs[(int)j][(int)kk]);
+        ref += to_f32(lhs[(int)i][(int)kk]) * to_f32(rhs[(int)j][(int)kk]);
       float got = to_f32(res[(int)i][(int)j]);
       float tol = base_tol + rel_tol * std::abs(ref);
       choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
@@ -1387,7 +1413,7 @@ using choreo_event = tops::event;
 struct future {
   choreo_dte_ctx_t* ctx = nullptr;
   choreo_event e;
-  void* d = nullptr; // data: future's user must guarantee it is valid
+  void* d = nullptr;  // data: future's user must guarantee it is valid
   void* md = nullptr; // metadata: optional structured sparsity metadata
 
   // for runtime check purpose
@@ -1637,7 +1663,7 @@ using AtomType = void; // erase the type
 struct future {
 
   AtomType* atom = nullptr;
-  void* d = nullptr; // data: future's user must guarantee it is valid
+  void* d = nullptr;  // data: future's user must guarantee it is valid
   void* md = nullptr; // metadata: optional structured sparsity metadata
 
   bool is_tma = false;
@@ -2991,10 +3017,11 @@ template <typename InputT, typename OutputT,
           WGMMA_Swizzle SwizzleB = WGMMA_Swizzle::NS>
 __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                                                        InputT* sA, InputT* sB) {
-    static_assert(
+  static_assert(
       std::is_same_v<InputT, __half> || std::is_same_v<InputT, __nv_bfloat16> ||
-        std::is_same_v<InputT, f8_e4m3> || std::is_same_v<InputT, f8_e5m2>,
-      "wgmma_m64n64k16_unified requires __half, __nv_bfloat16 or fp8 input type");
+          std::is_same_v<InputT, f8_e4m3> || std::is_same_v<InputT, f8_e5m2>,
+      "wgmma_m64n64k16_unified requires __half, __nv_bfloat16 or fp8 input "
+      "type");
   static_assert(
       std::is_same_v<OutputT, float> || std::is_same_v<OutputT, InputT>,
       "wgmma_m64n64k16_unified requires float or same as InputT output type");
@@ -3117,10 +3144,9 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(trans_a), "n"(trans_b));
 #endif
-  }
-  else if constexpr ((std::is_same_v<InputT, f8_e4m3> ||
-                      std::is_same_v<InputT, f8_e5m2>) &&
-                     std::is_same_v<OutputT, float>) {
+  } else if constexpr ((std::is_same_v<InputT, f8_e4m3> ||
+                        std::is_same_v<InputT, f8_e5m2>) &&
+                       std::is_same_v<OutputT, float>) {
 #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.f32.f8.f8 "
@@ -3128,8 +3154,8 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                  " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
                  " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
                  " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
-                 " %32," 
-                 " %33," 
+                 " %32,"
+                 " %33,"
                  " %34, %35, %36, %37, %38;\n"
                  "}\n"
                  : "+f"(d[0][0]), "+f"(d[0][1]), "+f"(d[0][2]), "+f"(d[0][3]),

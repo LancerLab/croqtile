@@ -10,7 +10,7 @@
 namespace Choreo {
 
 inline size_t GCUVLdStAlignment(ptr<VectorType> vt) {
-  if (CCtx().GetArch() != TargetArch::GCU4) return SizeOf(*vt);
+  if (CCtx().GetArch() != "gcu400") return SizeOf(*vt);
   return 1;
 }
 
@@ -52,9 +52,9 @@ private:
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       std::string append_note;
       levels.pop();
-      if (CCtx().GetTarget() == CompileTarget::Topscc) {
+      if (CCtx().TargetName() == "topscc") {
         append_note = STR(pb->GetLevel());
-      } else if (CCtx().GetTarget() == CompileTarget::Factor) {
+      } else if (CCtx().TargetName() == "factor") {
         append_note = std::to_string(TargetMaxLevel() - Level() - 1);
       }
       auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
@@ -79,8 +79,7 @@ public:
     if (pl == ParallelLevel::NONE) {
       Error1(n.LOC(), "internal error: the parallel level is not inferenced.");
       return false;
-    } else if (CCtx().GetArch() == TargetArch::GCU3 &&
-               pl == ParallelLevel::GROUP) {
+    } else if (CCtx().GetArch() == "gcu300" && pl == ParallelLevel::GROUP) {
       Error1(n.LOC(), "the parallel level (" + STR(pl) +
                           ") is not supported by current GCU architecture (" +
                           cur_arch + ").");
@@ -153,8 +152,8 @@ public:
                             std::to_string(f_rank) + ".");
     };
 
-    if (CCtx().GetArch() == TargetArch::GCU3 ||
-        CCtx().GetArch() == TargetArch::GCU4) { // TODO: check this for GCU400
+    if (CCtx().GetArch() == "gcu300" ||
+        CCtx().GetArch() == "gcu400") { // TODO: check this for GCU400
       // linear copy
       // omitted
 
@@ -374,8 +373,7 @@ public:
       return;
     }
 
-    if (CCtx().GetArch() == TargetArch::GCU20 ||
-        CCtx().GetArch() == TargetArch::GCU21) {
+    if (CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210") {
       // linear copy
       // omitted
 
@@ -695,13 +693,13 @@ public:
   }
 
 public:
-  GCUCheck() : VisitorWithSymTab("gcu"), cur_arch(STR(CCtx().GetArch())) {}
+  GCUCheck() : VisitorWithSymTab("gcu"), cur_arch(ToUpper(CCtx().GetArch())) {}
   ~GCUCheck() {}
 
   bool Visit(AST::FloatLiteral& n) override {
     TraceEachVisit(n);
 
-    if (CCtx().GetTarget() == CompileTarget::Factor) {
+    if (CCtx().TargetName() == "factor") {
       if (!n.IsFloat32())
         Error1(n.LOC(), "Factor backend in Choreo does not support " +
                             PSTR(n.GetType()) + " float-point number yet!");
@@ -714,12 +712,11 @@ public:
     TraceEachVisit(n);
     auto ty = GetSymbolType(n.name_str);
     if (isa<EventType>(ty) || isa<EventArrayType>(ty))
-      if (CCtx().GetArch() == TargetArch::GCU20 ||
-          CCtx().GetArch() == TargetArch::GCU21)
+      if (!CCtx().TargetSupportEvent())
         Error1(n.LOC(), "Event is not supported on " + cur_arch + ".");
 
     if (isa<AST::Select>(n.init_expr))
-      if (IsHost() && CCtx().GetTarget() != CompileTarget::Factor)
+      if (IsHost() && CCtx().TargetName() != "factor")
         Error1(n.LOC(), "select in host is not supported.");
 
     if (!isa<SpannedType>(ty)) {
@@ -782,9 +779,8 @@ public:
 
   bool Visit(AST::DataAccess& n) override {
     TraceEachVisit(n);
-    if ((CCtx().GetArch() == TargetArch::GCU20 ||
-         CCtx().GetArch() == TargetArch::GCU21 ||
-         CCtx().GetArch() == TargetArch::GCU3) &&
+    if ((CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210" ||
+         CCtx().GetArch() == "gcu300") &&
         n.indices != nullptr) {
       if (auto sty = GetSpannedType(GetSymbolType(n.data->name)))
         if (sty->GetStorage() == Storage::GLOBAL ||
@@ -801,7 +797,7 @@ public:
   }
   bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
-    if (CCtx().GetTarget() == CompileTarget::Factor) {
+    if (CCtx().TargetName() == "factor") {
       auto shape = GetShape(NodeType(n));
       if (shape.IsDynamic())
         Error1(n.LOC(),
@@ -853,11 +849,11 @@ public:
 
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
-    if (n.IsArith() && (CCtx().GetArch() == TargetArch::GCU20 ||
-                        CCtx().GetArch() == TargetArch::GCU21))
+    if (n.IsArith() &&
+        (CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210"))
       Error1(n.LOC(), "Arithmetic built-in function is not supported on GCU2.");
 
-    if (CCtx().GetArch() == TargetArch::GCU3 && n.function->name != "print" &&
+    if (CCtx().GetArch() == "gcu300" && n.function->name != "print" &&
         n.function->name != "println") {
       for (auto& arg : n.GetArguments()) {
         if (auto sty = GetSpannedType(arg->GetType()))
@@ -892,7 +888,7 @@ public:
       break;
     case Storage::LOCAL:
       if (!TargetHasLevel(ParallelLevel::GROUP))
-        Error1(n.LOC(), STR(CCtx().GetArch()) + " does not support " +
+        Error1(n.LOC(), ToUpper(CCtx().GetArch()) + " does not support " +
                             STR(n.Resource()) + " synchronization.");
       else if (Level() == ParallelLevel::SEQ || Level() == ParallelLevel::BLOCK)
         Error1(n.LOC(), "unsupported: " + STR(n.Resource()) +
@@ -906,9 +902,9 @@ public:
   }
 
   bool Visit(AST::MMA& n) override {
-    if (!CCtx().SupportMMA())
+    if (!CCtx().TargetSupportMMA())
       Error1(n.LOC(), "mma is not supported by the target: " +
-                          STR(CCtx().GetTarget()) + ".");
+                          std::string(CCtx().TargetName()) + ".");
     return true;
   }
 };

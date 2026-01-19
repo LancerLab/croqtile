@@ -1,10 +1,5 @@
 #include "pipeline.hpp"
-#include "codegen.hpp"
-#include "codegen_cuda.hpp"
-#include "codegen_cute.hpp"
-#include "codegen_factor.hpp"
 #include "codegen_prepare.hpp"
-#include "codegen_topscc.hpp"
 #include "earlysema.hpp"
 #include "gcucheck.hpp"
 #include "gpuadapt.hpp"
@@ -17,8 +12,6 @@
 #include "semacheck.hpp"
 #include "shapeinfer.hpp"
 #include "sym_replace.hpp"
-#include "ttrans_factor.hpp"
-#include "ttrans_topscc.hpp"
 #include "typeinfer.hpp"
 #include "visualize.hpp"
 
@@ -67,7 +60,7 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   AddStage<EarlySemantics>();
   // minor AST change: desugar for canonicalized AST
   AddStage<Normalizer>();
-  if (CCtx().GetTarget() == CompileTarget::Factor) AddStage<SymReplace>();
+  if (CCtx().HasFeature(ChoreoFeature::RSTM0)) AddStage<SymReplace>();
   // perform shape inference of mdspans, future, etc.
   AddStage<ShapeInference>();
   // inference all the unknown types - decls
@@ -90,7 +83,7 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
     AddStageWithPost<Visualizer>([](ASTPipeline& p) { p.SetAbend(); });
 
   // early loop vectorizer for the certain target
-  if (!CCtx().NoVectorize() && CCtx().GetTarget() == CompileTarget::Topscc) {
+  if (!CCtx().NoVectorize() && CCtx().TargetSupportVectorize()) {
     AddStage<LoopVectorizer>();
     if (CCtx().TraceVectorize())
       AddAction([](ASTPipeline& p) { p.SetAbend(); });
@@ -98,10 +91,9 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
         [](ASTPipeline& p) { CCtx().SetGlobalSymbolTable(p.LastSymTab()); });
   }
 
-  if ((CCtx().GetTarget() == CompileTarget::Topscc) && CCtx().MemReuse())
+  if (CCtx().TargetSupportMemAlloc() && CCtx().MemReuse())
     AddStage<MemoryReuse>();
-  if ((CCtx().GetTarget() == CompileTarget::Cute) && CCtx().MemReuse())
-    AddStage<MemoryReuse>();
+
   // apply the semantic check
   AddStage<SemaChecker>();
   return *this;
@@ -114,35 +106,10 @@ ASTPipeline& ASTPipeline::PlanCodeGenRoutine() {
 
   AddStage<CodegenPrepare>();
 
-  switch (CCtx().GetTarget()) {
-  case CompileTarget::Factor: {
-    // apply the gcu specific checking
-    AddStage<GCUCheck>();
-    AddStage<FactorTrans>();
-    AddStage<MemUsageCheck>();
-    AddStage<Factor::FactorCodeGen>();
-    break;
-  }
-  case CompileTarget::Topscc: {
-    // apply GCU specific checks
-    AddStage<GCUCheck>();
-    AddStage<MemUsageCheck>();
-    AddStage<Topscc::TopsccCodeGen>();
-    break;
-  }
-  case CompileTarget::CUDA: {
-    AddStage<MemUsageCheck>();
-    AddStage<CUDA::CUDACodeGen>();
-    break;
-  }
-  case CompileTarget::Cute: {
-    AddStage<GPUAdaptor>();
-    AddStage<MemUsageCheck>();
-    AddStage<Cute::CuteCodeGen>();
-    break;
-  }
-  default:
-    errs() << "Invalid target: '" << STR(CCtx().GetTarget()) << "'\n";
+  // delegate to target for codegen plan
+  if (!CCtx().GetTarget().PlanCodeGenStages(*this)) {
+    errs() << "Failed to initialize codegen for target '" << CCtx().TargetName()
+           << "'\n";
     abend = true;
   }
   return *this;

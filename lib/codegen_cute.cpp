@@ -256,19 +256,7 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
 }
 
 bool CuteCodeGen::ThreadCooperative(AST::DMA&) const {
-  switch (CCtx().GetArch()) {
-  case TargetArch::SM_70:
-  case TargetArch::SM_75:
-  case TargetArch::SM_80:
-  case TargetArch::SM_86:
-  case TargetArch::SM_89: return true; // no TMA support
-  case TargetArch::SM_90:
-  case TargetArch::SM_90A:
-  case TargetArch::SM_100:
-  case TargetArch::SM_120: return false;
-  default: choreo_unreachable("unsupported target arch.");
-  }
-  return false;
+  return !CCtx().HasFeature(ChoreoFeature::TMA);
 }
 
 const std::string CuteCodeGen::ShapeSTR(const Shape& s, bool shp_lit,
@@ -735,8 +723,8 @@ void CuteCodeGen::EmitFixedHostHead() {
   oss << "#include \"choreo.h\"\n";
   if (cgi.HasTMA()) oss << "namespace cde = cuda::device::experimental;\n";
   oss << "\nusing namespace choreo;\n";
-  oss << "\n#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ "
-      << ArchNum(CCtx().GetArch()) << "\n";
+  oss << "\n#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ " << CCtx().ArchNum()
+      << "\n";
   EmitRuntimeEnvironmentChecker(oss);
   code_segments.push_back(oss.str()); // reset the host code
 }
@@ -944,12 +932,12 @@ bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
     }
   };
 
-  // Go through all the symbols appeared in topscc host function, do:
+  // Go through all the symbols appeared in cute host function, do:
   //
   //  - decide the host parameter names,
   //  - map the runtime shape dimensions to the real host code expression
-  //  - decide the topscc-host parameter names,
-  //  - decide the topscc-host parameter indices,
+  //  - decide the cute-host parameter names,
+  //  - decide the cute-host parameter indices,
   //
   size_t host_pindex = 0;
   for (auto& item : GetChoreoFuncIns(cgi)) {
@@ -1688,10 +1676,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // - not support async.
 
   // Generate tops dte and choreo::future in device-side
-  auto claimFuture = [this, &n](const std::string& buf_expr, bool is_async,
-                                bool is_tma = false,
-                                const std::string& mdata_expr = "")
-      -> std::string {
+  auto claimFuture = [this,
+                      &n](const std::string& buf_expr, bool is_async,
+                          bool is_tma = false,
+                          const std::string& mdata_expr = "") -> std::string {
     if (!n.future.empty() && claimed_futs.count(InScopeName(n.future)))
       return n.future;
 
@@ -2062,31 +2050,43 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "constexpr int __sp_M = " << M << ";\n";
         ds << d_indent << "constexpr int __sp_N = " << N << ";\n";
         ds << d_indent << "constexpr int __sp_K = " << K << ";\n";
-        ds << d_indent << "static_assert(__sp_K % 4 == 0, \"sparse K must be multiple of 4\");\n";
+        ds << d_indent
+           << "static_assert(__sp_K % 4 == 0, \"sparse K must be multiple of "
+              "4\");\n";
 
         auto f_ptr = std::string("((") + NameBaseType(f_sty->ElementType()) +
-               "*)" + f_buf.second + ")";
+                     "*)" + f_buf.second + ")";
         auto t_ptr = std::string("((") + NameBaseType(t_sty->ElementType()) +
-               "*)" + t_buf.second + ")";
+                     "*)" + t_buf.second + ")";
         if (t_sty->GetStorage() == Storage::SHARED) {
           ds << d_indent << "// sparse encode (2:4)\n";
           ds << d_indent << "for (int i = 0; i < __sp_M; ++i) {\n";
           ds << d_indent << "  for (int j = 0; j < __sp_N; ++j) {\n";
           ds << d_indent << "    for (int k4 = 0; k4 < __sp_K / 4; ++k4) {\n";
-          ds << d_indent << "      int base = (i * __sp_N + j) * __sp_K + k4 * 4;\n";
-          ds << d_indent << "      int out_base = (i * __sp_N + j) * (__sp_K / 2) + k4 * 2;\n";
+          ds << d_indent
+             << "      int base = (i * __sp_N + j) * __sp_K + k4 * 4;\n";
+          ds << d_indent
+             << "      int out_base = (i * __sp_N + j) * (__sp_K / 2) + k4 * "
+                "2;\n";
           ds << d_indent << "      auto a0 = " << f_ptr << "[base + 0];\n";
           ds << d_indent << "      auto a1 = " << f_ptr << "[base + 1];\n";
           ds << d_indent << "      auto a2 = " << f_ptr << "[base + 2];\n";
           ds << d_indent << "      auto a3 = " << f_ptr << "[base + 3];\n";
           ds << d_indent << "      uint8_t mask = 0;\n";
           ds << d_indent << "      int count = 0;\n";
-          ds << d_indent << "      if (a0 != 0 && count < 2) { " << t_ptr << "[out_base + count] = a0; mask |= 1; ++count; }\n";
-          ds << d_indent << "      if (a1 != 0 && count < 2) { " << t_ptr << "[out_base + count] = a1; mask |= 2; ++count; }\n";
-          ds << d_indent << "      if (a2 != 0 && count < 2) { " << t_ptr << "[out_base + count] = a2; mask |= 4; ++count; }\n";
-          ds << d_indent << "      if (a3 != 0 && count < 2) { " << t_ptr << "[out_base + count] = a3; mask |= 8; ++count; }\n";
-          ds << d_indent << "      if (count < 2) { for (int t = count; t < 2; ++t) " << t_ptr << "[out_base + t] = 0; }\n";
-          ds << d_indent << "      " << meta_ptr << "[(i * __sp_N + j) * (__sp_K / 4) + k4] = mask;\n";
+          ds << d_indent << "      if (a0 != 0 && count < 2) { " << t_ptr
+             << "[out_base + count] = a0; mask |= 1; ++count; }\n";
+          ds << d_indent << "      if (a1 != 0 && count < 2) { " << t_ptr
+             << "[out_base + count] = a1; mask |= 2; ++count; }\n";
+          ds << d_indent << "      if (a2 != 0 && count < 2) { " << t_ptr
+             << "[out_base + count] = a2; mask |= 4; ++count; }\n";
+          ds << d_indent << "      if (a3 != 0 && count < 2) { " << t_ptr
+             << "[out_base + count] = a3; mask |= 8; ++count; }\n";
+          ds << d_indent
+             << "      if (count < 2) { for (int t = count; t < 2; ++t) "
+             << t_ptr << "[out_base + t] = 0; }\n";
+          ds << d_indent << "      " << meta_ptr
+             << "[(i * __sp_N + j) * (__sp_K / 4) + k4] = mask;\n";
           ds << d_indent << "    }\n";
           ds << d_indent << "  }\n";
           ds << d_indent << "}\n";
@@ -2095,14 +2095,26 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           ds << d_indent << "for (int i = 0; i < __sp_M; ++i) {\n";
           ds << d_indent << "  for (int j = 0; j < __sp_N; ++j) {\n";
           ds << d_indent << "    for (int k4 = 0; k4 < __sp_K / 4; ++k4) {\n";
-          ds << d_indent << "      int out_base = (i * __sp_N + j) * __sp_K + k4 * 4;\n";
-          ds << d_indent << "      int in_base = (i * __sp_N + j) * (__sp_K / 2) + k4 * 2;\n";
-          ds << d_indent << "      uint8_t mask = " << meta_ptr << "[(i * __sp_N + j) * (__sp_K / 4) + k4];\n";
+          ds << d_indent
+             << "      int out_base = (i * __sp_N + j) * __sp_K + k4 * 4;\n";
+          ds << d_indent
+             << "      int in_base = (i * __sp_N + j) * (__sp_K / 2) + k4 * "
+                "2;\n";
+          ds << d_indent << "      uint8_t mask = " << meta_ptr
+             << "[(i * __sp_N + j) * (__sp_K / 4) + k4];\n";
           ds << d_indent << "      int idx = 0;\n";
-          ds << d_indent << "      " << t_ptr << "[out_base + 0] = (mask & 1) ? " << f_ptr << "[in_base + idx++] : 0;\n";
-          ds << d_indent << "      " << t_ptr << "[out_base + 1] = (mask & 2) ? " << f_ptr << "[in_base + idx++] : 0;\n";
-          ds << d_indent << "      " << t_ptr << "[out_base + 2] = (mask & 4) ? " << f_ptr << "[in_base + idx++] : 0;\n";
-          ds << d_indent << "      " << t_ptr << "[out_base + 3] = (mask & 8) ? " << f_ptr << "[in_base + idx++] : 0;\n";
+          ds << d_indent << "      " << t_ptr
+             << "[out_base + 0] = (mask & 1) ? " << f_ptr
+             << "[in_base + idx++] : 0;\n";
+          ds << d_indent << "      " << t_ptr
+             << "[out_base + 1] = (mask & 2) ? " << f_ptr
+             << "[in_base + idx++] : 0;\n";
+          ds << d_indent << "      " << t_ptr
+             << "[out_base + 2] = (mask & 4) ? " << f_ptr
+             << "[in_base + idx++] : 0;\n";
+          ds << d_indent << "      " << t_ptr
+             << "[out_base + 3] = (mask & 8) ? " << f_ptr
+             << "[in_base + idx++] : 0;\n";
           ds << d_indent << "    }\n";
           ds << d_indent << "  }\n";
           ds << d_indent << "}\n";
@@ -2297,11 +2309,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // The actual data should already be in shared memory
       std::string elem_ty = NameBaseType(ssmi.ty);
       ds << d_indent << elem_ty << "* " << sym << "_smem_ptr = (" << elem_ty
-        << "*)(" << ExprSTR(op.LoadFrom(), false) << ");\n";
-      bool frag_is_fp8 = ssmi.ty == BaseType::F8_E4M3 ||
-                         ssmi.ty == BaseType::F8_E5M2 ||
-                         ssmi.ty == BaseType::F8_UE4M3 ||
-                         ssmi.ty == BaseType::F8_UE8M0;
+         << "*)(" << ExprSTR(op.LoadFrom(), false) << ");\n";
+      bool frag_is_fp8 =
+          ssmi.ty == BaseType::F8_E4M3 || ssmi.ty == BaseType::F8_E5M2 ||
+          ssmi.ty == BaseType::F8_UE4M3 || ssmi.ty == BaseType::F8_UE8M0;
       std::string major_order = "WGMMA_MajorOrder::MN_MAJOR";
       if (ssmi.frag == MMAInfo::FRAG_A) {
         if (ssmi.method == AST::MMAOperation::ROW_ROW ||
@@ -2357,15 +2368,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // WGMMA execution using unified template with automatic descriptor
       // selection Operands: C (accum), A, B - result stored in C
       ds << d_indent
-        << "// Note: warpgroup_arrive() should be called once before first "
-          "WGMMA\n";
+         << "// Note: warpgroup_arrive() should be called once before first "
+            "WGMMA\n";
       ds << d_indent
-        << "// and warpgroup_wait() should be called once after all WGMMAs\n";
+         << "// and warpgroup_wait() should be called once after all WGMMAs\n";
       bool policy_is_tn = mma_policy.rfind("_TN") != std::string::npos;
       ds << d_indent << "cute::" << mma_policy << "<";
       if (!policy_is_tn) {
         ds << cute_gmma_major_cast << "(" << trans_a << "), "
-          << cute_gmma_major_cast << "(" << trans_b << ")";
+           << cute_gmma_major_cast << "(" << trans_b << ")";
       }
       ds << ">::fma(" << "desc_" << a_sym << ", desc_" << b_sym;
       for (size_t i = 0; i < reg_num_d; ++i)
@@ -2906,15 +2917,9 @@ bool CuteCodeGen::Visit(AST::Call& n) {
                                     type->GetBaseType(), IsHost());
           print_args += ", ";
         } else if (isa<BooleanType>(type) || isa<EventType>(type)) {
-          if (CCtx().GetArch() == TargetArch::GCU20 ||
-              CCtx().GetArch() == TargetArch::GCU21) {
-            print_format += "%d";
-            print_args += "(" + ExprSTR(arg, IsHost()) + " ? 1 : 0), ";
-          } else {
-            print_format += "%s";
-            print_args +=
-                "(" + ExprSTR(arg, IsHost()) + " ? \"true\" : \"false\"), ";
-          }
+          print_format += "%s";
+          print_args +=
+              "(" + ExprSTR(arg, IsHost()) + " ? \"true\" : \"false\"), ";
         } else if (BaseType bt = type->GetBaseType(); IsFloatType(bt)) {
           print_format += "%f";
           print_args +=
@@ -3119,8 +3124,8 @@ bool CuteCodeGen::Visit(AST::Return& n) {
       } else {
         choreo_unreachable("unexpected situation");
       }
-     } else if (auto expr = cast<AST::Expr>(n.value);
-            expr && (expr->op == "dataof" || expr->op == "mdataof")) {
+    } else if (auto expr = cast<AST::Expr>(n.value);
+               expr && (expr->op == "dataof" || expr->op == "mdataof")) {
       // return future.data/mdata, must map back
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
@@ -3692,7 +3697,7 @@ NVCC_LIB=${CUDA_LIB}/lib
   os << "\nEOF\n\n";
 
   // the arch type
-  auto arch_str = ToLower(STR(CCtx().GetArch()));
+  auto arch_str = ToLower(CCtx().GetArch());
   os << "nv_arch=" << arch_str << "\n";
 
   os << R"script(
@@ -3709,7 +3714,6 @@ show_usage() {
   echo "   CUDA_HOME:           (Must) Cuda compiler installation path"
   echo "   CUTE_HOME:           (Must) Cute header library path"
   echo "   EXTRA_TARGET_CFLAGS: Extra target compilation flags"
-  echo "   ACORE_INSTALL:       GCU Acore library installation path"
   exit 1
 }
 
@@ -3769,7 +3773,7 @@ show_usage() {
 bool CuteCodeGen::CompileWithScript(const std::string& action) {
   assert(!action.empty() && "no action is specified.");
 
-  char tempFileName[] = "/tmp/choreo_topscc_script_XXXXXX";
+  char tempFileName[] = "/tmp/choreo_cute_script_XXXXXX";
   int fd = mkstemp(tempFileName);
   if (fd == -1) {
     errs() << "Failed to create temporary file.\n";

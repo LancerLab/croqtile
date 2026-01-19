@@ -9,8 +9,8 @@ namespace Choreo {
 // parallel level <-> parallel depth mapping
 class PlDepthMap {
 private:
-  std::unordered_map<int, ParallelLevel>* to_levels = nullptr;
-  std::unordered_map<ParallelLevel, int>* to_depths = nullptr;
+  std::unordered_map<int, ParallelLevel> to_levels;
+  std::unordered_map<ParallelLevel, int> to_depths;
 
   int max_depth = -1;
   ParallelLevel max_level = ParallelLevel::UNKNOWN;
@@ -20,8 +20,8 @@ public:
 
   ParallelLevel ToLevel(int depth) const {
     if (depth == -1) return ParallelLevel::NONE;
-    if (!to_levels->count(depth)) return ParallelLevel::UNKNOWN;
-    return (*to_levels)[depth];
+    if (!to_levels.count(depth)) return ParallelLevel::UNKNOWN;
+    return to_levels.at(depth);
   }
 
   int ToDepth(ParallelLevel pl) const {
@@ -29,12 +29,11 @@ public:
     if (pl == ParallelLevel::UNKNOWN)
       choreo_unreachable(
           "can not get the parallel depth of an unknown parallel level");
-    if (!to_depths->count(pl))
-      choreo_unreachable("unsupported parallel level.");
-    return (*to_depths)[pl];
+    if (!to_depths.count(pl)) choreo_unreachable("unsupported parallel level.");
+    return to_depths.at(pl);
   }
 
-  bool HasLevel(ParallelLevel pl) const { return to_depths->count(pl); }
+  bool HasLevel(ParallelLevel pl) const { return to_depths.count(pl); }
 
   ParallelLevel MaxLevel() const { return max_level; }
   int MaxDepth() const { return max_depth; }
@@ -46,26 +45,11 @@ public:
 };
 
 inline int TargetDepth(ParallelLevel pl) {
-  if (CCtx().GetTarget() == CompileTarget::Topscc ||
-      CCtx().GetTarget() == CompileTarget::Factor ||
-      CCtx().GetTarget() == CompileTarget::CUDA ||
-      CCtx().GetTarget() == CompileTarget::Cute ||
-      CCtx().GetTarget() == CompileTarget::MPI)
-    return PlDepthMap::Get().ToDepth(pl);
-  else
-    choreo_unreachable("unsupported target: " + STR(CCtx().GetTarget()) + ".");
-  return -1;
+  return PlDepthMap::Get().ToDepth(pl);
 }
 
 inline ParallelLevel TargetLevel(int depth) {
-  if (CCtx().GetTarget() == CompileTarget::Topscc ||
-      CCtx().GetTarget() == CompileTarget::Factor ||
-      CCtx().GetTarget() == CompileTarget::CUDA ||
-      CCtx().GetTarget() == CompileTarget::Cute)
-    return PlDepthMap::Get().ToLevel(depth);
-  else
-    choreo_unreachable("unsupported target: " + STR(CCtx().GetTarget()) + ".");
-  return ParallelLevel::NONE;
+  return PlDepthMap::Get().ToLevel(depth);
 }
 
 inline int TargetMaxDepth() { return PlDepthMap::Get().MaxDepth(); }
@@ -393,7 +377,8 @@ static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
           out[config] = 90;
         }
   // Add FP8 WGMMA support for k=16 shapes on SM90+ (enable frontend acceptance)
-  m = 64; k = 16;
+  m = 64;
+  k = 16;
   for (int n = 8; n <= 256; n += 8)
     for (auto a_ty : {BT::F8_E4M3, BT::F8_E5M2})
       for (auto b_ty : {BT::F8_E4M3, BT::F8_E5M2})

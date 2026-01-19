@@ -28,7 +28,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cuda_header.inc choreo_cute_header.inc factor_script.inc cuda_script.inc
+HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cute_header.inc factor_script.inc cuda_script.inc
 
 CC = g++
 CFLAGS += -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
@@ -164,14 +164,6 @@ $(COPP_BIN): $(TOOLS_DIR)/copp/choreo_preprocess.cpp $(BUILD_DIR)/parser.tab.o $
 	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -static-libstdc++ -o $@
 
 choreo_header.inc : $(RT_DIR)/choreo.h
-	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
-	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
-	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@
-	cat $< >> $@
-	echo ")\";" >> $@
-	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
-
-choreo_cuda_header.inc : $(RT_DIR)/choreo_cuda.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
 	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
 	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@

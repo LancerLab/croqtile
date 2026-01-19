@@ -97,8 +97,6 @@ public:
       trace_visit = true;
       type_equals.SetDebug(true);
     }
-    if (CCtx().GetTarget() == Choreo::CompileTarget::CUDA)
-      allow_auto_threading = true;
   }
   ~EarlySemantics() {}
 

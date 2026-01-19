@@ -154,17 +154,9 @@ static std::string trim(const std::string& str) {
 SimplePreprocessor::SimplePreprocessor(std::ostream& o)
     : output(o), debug(debugPP) {
   // Replicate the target-specific macros
-  switch (CCtx().GetTarget()) {
-  case CompileTarget::Topscc: globalDefines.emplace("__TOPSCC__", ""); break;
-  default: break;
-  }
-  switch (CCtx().GetArch()) {
-  case TargetArch::GCU20: globalDefines.emplace("__GCU_ARCH__", "200"); break;
-  case TargetArch::GCU21: globalDefines.emplace("__GCU_ARCH__", "210"); break;
-  case TargetArch::GCU3: globalDefines.emplace("__GCU_ARCH__", "300"); break;
-  case TargetArch::GCU4: globalDefines.emplace("__GCU_ARCH__", "400"); break;
-  default: break;
-  }
+  for (auto& macro : CCtx().GetTarget().ChoreoMacros(CCtx().GetArch()))
+    globalDefines.emplace(macro.first, macro.second);
+
   // command-line macros override
   for (auto& item : CCtx().GetCLMacros())
     globalDefines[item.first] = item.second;

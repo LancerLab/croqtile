@@ -1,4 +1,4 @@
-// RUN: copp %s | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
+// RUN: copp %s -o - | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
 
 #define ABC 3
 __co__ int ifdef(f32 d[]) {

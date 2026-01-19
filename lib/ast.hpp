@@ -2422,9 +2422,7 @@ public:
   int GetSwizzleValue() const { return swizzle_value; }
   bool IsSwizzleExplicit() const { return swizzle_explicit; }
   bool IsSparse() const { return sparse; }
-  std::pair<int, int> GetSparsePattern() const {
-    return {sparse_n, sparse_m};
-  }
+  std::pair<int, int> GetSparsePattern() const { return {sparse_n, sparse_m}; }
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<DMA>(LOC(), operation, future, CloneP(from), CloneP(to),

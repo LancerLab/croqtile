@@ -541,9 +541,9 @@ bool TypeInference::Visit(AST::Expr& n) {
     } else if (n.op == "dataof" || n.op == "mdataof") {
       auto ref = cast<AST::Expr>(n.GetR())->GetReference();
       auto id = cast<AST::Identifier>(ref);
-      SetNodeType(n, GetSymbolType(id->LOC(), id->name +
-                                              (n.op == "mdataof" ? ".mdata"
-                                                                : ".data")));
+      SetNodeType(n, GetSymbolType(
+                         id->LOC(),
+                         id->name + (n.op == "mdataof" ? ".mdata" : ".data")));
     } else if (n.op == "addrof") {
       // earlysema has set it already
       assert(isa<AddrType>(NodeType(n)));

@@ -1188,7 +1188,6 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
   if (auto sel = dyn_cast<AST::Select>(n.value)) {
     HandleSelect(n, sel);
   } else if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
-    assert(CCtx().GetTarget() == CompileTarget::Factor);
     assert(IsRef(n) && "expecting the spanas assignment is a reference.");
     linfo[current_stmt].buffer_related = true;
     AddDef(current_stmt, n.GetName(), true);
