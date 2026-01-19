@@ -2480,9 +2480,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << ", "
            << wmma_major << "> " << sym << "_frag;\n";
 
-        ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
-           << ExprSTR(op.LoadFrom(), false) << ", "
-           << fty->GetShape().ValueAt(fty->GetShape().Rank() - 1) << ");\n";
+          ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
+            << ExprSTR(op.LoadFrom(), false) << ", "
+            << ValueSTR(
+                fty->GetShape().ValueAt(fty->GetShape().Rank() - 1))
+            << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
       } else if (ssmi.frag == MMAInfo::FRAG_C) {
         ds << d_indent
@@ -2490,10 +2492,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << ", ";
         ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> "
            << sym << "_frag;\n";
-        ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
-           << ExprSTR(op.LoadFrom(), false) << ", "
-           << fty->GetShape().ValueAt(fty->GetShape().Rank() - 1)
-           << ", nvcuda::wmma::mem_row_major);\n";
+          ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
+            << ExprSTR(op.LoadFrom(), false) << ", "
+            << ValueSTR(
+                fty->GetShape().ValueAt(fty->GetShape().Rank() - 1))
+            << ", nvcuda::wmma::mem_row_major);\n";
       } else {
         choreo_unreachable("unexpect MMA frag");
       }
@@ -2506,8 +2509,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     case AST::MMAOperation::Store: {
       auto tty = GetSpannedType(GetSymbolType(op.StoreTo()->RefSymbol()));
       ds << d_indent << "nvcuda::wmma::store_matrix_sync("
-         << ExprSTR(op.StoreTo(), false) << ", " << op.StoreFrom() << "_frag, "
-         << tty->GetShape().ValueAt(1) << ", nvcuda::wmma::mem_row_major);\n";
+        << ExprSTR(op.StoreTo(), false) << ", " << op.StoreFrom() << "_frag, "
+        << ValueSTR(tty->GetShape().ValueAt(1))
+        << ", nvcuda::wmma::mem_row_major);\n";
     } break;
     default: break;
     }
