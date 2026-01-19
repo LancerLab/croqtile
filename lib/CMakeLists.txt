@@ -72,6 +72,7 @@ set(CORE_SOURCES
   pipeline.cpp
   target_registry.cpp
   target_utils.cpp
+  target.cpp
   topscc_target.cpp
   cute_target.cpp
   factor_target.cpp
@@ -93,6 +94,7 @@ set(CL_SOURCES
 
 set(PP_SOURCES
   preprocess.cpp
+  topscc_preprocess.cpp
 )
 
 # Add the libraries

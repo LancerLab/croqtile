@@ -18,11 +18,11 @@ struct Range {
   size_t start{}, end{};
 };
 
-class SimplePreprocessor {
+class Preprocess {
 public:
-  SimplePreprocessor(std::ostream& o);
+  Preprocess(std::ostream& o);
 
-private:
+protected:
   using DefineMap = std::unordered_map<std::string, std::string>;
   using FuncMap =
       std::unordered_map<std::string, std::tuple<std::string, std::string>>;
@@ -59,33 +59,32 @@ private:
   size_t line_num = 1;
 
   bool has_cok = false;
-  std::string build_path;
+
   std::string cc_file;
   std::string pp_file;
   std::vector<std::string> include_lines;
   std::vector<std::string> cok_codes;
 
+  std::string build_path;
+
   bool debug = false;
 
-private:
-  std::vector<Bundle> find_bundles(const std::string& code);
-  std::vector<Range> extract_cok_sections(const std::string& code,
-                                          size_t base_offset = 0);
+protected:
+  const std::string SubStituteMacroFuncs(const std::string& line,
+                                         const FuncMap& funcs, bool& changed);
 
-  void EmitScript(std::ostream& os);
-  std::string SubStituteMacroFuncs(const std::string& line,
-                                   const FuncMap& funcs, bool& changed);
-
-  std::string SubStituteDefines(const std::string& line,
-                                const DefineMap& defines, const FuncMap& funcs);
-  std::string SubstituteGlobalDefines(const std::string& line);
-  std::string SubstituteLocalDefines(const std::string& line);
-  std::string SubstituteGlobalMacroFuncs(const std::string& line,
-                                         bool& changed);
-  std::string SubstituteLocalMacroFuncs(const std::string& line, bool& changed);
+  const std::string SubStituteDefines(const std::string& line,
+                                      const DefineMap& defines,
+                                      const FuncMap& funcs);
+  const std::string SubstituteGlobalDefines(const std::string& line);
+  const std::string SubstituteLocalDefines(const std::string& line);
+  const std::string SubstituteGlobalMacroFuncs(const std::string& line,
+                                               bool& changed);
+  const std::string SubstituteLocalMacroFuncs(const std::string& line,
+                                              bool& changed);
   bool isDirective(const std::string& line, const std::string& directive,
                    bool blank = true);
-  std::string
+  const std::string
   preprocessBooleanExpression(const std::string& expr, const DefineMap& defines,
                               std::unordered_map<std::string, bool>& macroMap);
   bool EvaluateBooleanExpression(const std::string& condition_expr,
@@ -96,9 +95,9 @@ private:
   void HandleOneChoreoLine(const std::string& line, bool handle_comment = true);
 
 public:
-  bool ExtractDeviceKernel(std::stringstream& cok_ss);
-  bool Process(std::istream& input);
-};
+  virtual bool ExtractDeviceKernel(std::ostream&) { return true; }
+  virtual bool Process(std::istream& input);
+}; // class Preprocess
 
 } // end namespace Choreo
 

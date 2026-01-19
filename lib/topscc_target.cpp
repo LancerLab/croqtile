@@ -3,6 +3,7 @@
 #include "gcucheck.hpp"
 #include "pipeline.hpp"
 #include "target_registry.hpp"
+#include "topscc_preprocess.hpp"
 #include "ttrans_topscc.hpp"
 #include "types.hpp"
 
@@ -111,6 +112,10 @@ public:
     p.AddStage<MemUsageCheck>();
     p.AddStage<Topscc::TopsccCodeGen>();
     return true;
+  }
+
+  const std::unique_ptr<Preprocess> MakePP(std::ostream& os) const override {
+    return std::make_unique<TopsccPreprocess>(os);
   }
 
 private:

@@ -1,14 +1,17 @@
-#ifndef __CHOREO_TARAGET_HPP__
-#define __CHOREO_TARAGET_HPP__
+#ifndef __CHOREO_TARGET_HPP__
+#define __CHOREO_TARGET_HPP__
 
 #include "aux.hpp"
+#include "preprocess.hpp"
 #include <set>
+
 namespace Choreo {
 
 enum class Storage;
 enum class BaseType;
 enum class ParallelLevel;
 class ASTPipeline;
+class Preprocess;
 
 // see the Description
 enum class ChoreoFeature {
@@ -165,6 +168,8 @@ public:
   virtual const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId&) const = 0;
 
+  virtual const std::unique_ptr<Preprocess> MakePP(std::ostream& os) const;
+
 public:
   virtual int ArchNum(std::string arch) const {
     if (arch.empty())
@@ -187,8 +192,8 @@ public:
     arch.erase(arch.begin(), it.base());
     return std::stoi(arch);
   }
-};
+}; // class Target
 
 } // end namespace Choreo
 
-#endif //__CHOREO_TARAGET_HPP__
+#endif //__CHOREO_TARGET_HPP__

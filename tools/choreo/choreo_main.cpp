@@ -33,14 +33,14 @@ int main(int argc, char* argv[]) {
   if (!CCtx().NoPreProcess()) {
     if (CCtx().PrintPassNames()) dbgs() << "|- preprocess the choreo program\n";
     if (CCtx().GetOutputKind() == OutputKind::PreProcessedCode) {
-      SimplePreprocessor spp(r.GetOutputStream());
-      if (!spp.Process(r.GetInputStream())) return 1;
+      auto spp = CCtx().GetTarget().MakePP(r.GetOutputStream());
+      if (!spp->Process(r.GetInputStream())) return 1;
       return 0;
     } else {
-      SimplePreprocessor spp(pps);
-      if (!spp.Process(r.GetInputStream())) return 1;
+      auto spp = CCtx().GetTarget().MakePP(pps);
+      if (!spp->Process(r.GetInputStream())) return 1;
       if (CCtx().HasFeature(ChoreoFeature::HDRPARSE))
-        if (!spp.ExtractDeviceKernel(cok_ss)) return 1;
+        if (!spp->ExtractDeviceKernel(cok_ss)) return 1;
     }
   }
 

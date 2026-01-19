@@ -8,8 +8,6 @@
 
 namespace Choreo {
 
-class Target;
-
 using TargetCreateFn = std::unique_ptr<Target> (*)();
 
 class TargetRegistry {
@@ -19,7 +17,7 @@ public:
 
   static std::unique_ptr<Target> Create(const std::string&);
   static std::vector<TargetInfo> List();
-};
+}; // TargetRegistry
 
 } // namespace Choreo
 
