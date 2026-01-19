@@ -1,0 +1,24 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
+
+__co__ void foo(int a, stream _s) {
+  parallel p by 6 : block {
+    println(a + p);
+  }
+}
+
+int main() {
+  cudaStream_t s;
+  cudaStreamCreate(&s);
+  foo(100, s);
+  cudaStreamDestroy(s);
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK-DAG: 100
+// CHECK-DAG: 101
+// CHECK-DAG: 102
+// CHECK-DAG: 103
+// CHECK-DAG: 104
+// CHECK-DAG: 105
+// CHECK: Test Passed

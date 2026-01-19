@@ -607,7 +607,9 @@ HostTypeStringify(const Choreo::Type& ty, bool is_ret = false,
     assert(bitt->Dims() == 1);
     (void)bitt;
     res = "int";
-  } else
+  } else if (isa<StreamType>(&ty))
+    res = "cudaStream_t";
+  else
     choreo_unreachable("unsupported host function type: " + STR(ty) + ".");
 
   if (isa<ScalarType>(&ty)) assert(!is_ref);

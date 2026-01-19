@@ -84,6 +84,7 @@ enum class BaseType {
   BOUNDED_ITUPLE,
   FUTURE,
   STRING,
+  STREAM,
   FUNCTION,
   DEVICE,
   UNKNOWN, // must be inferred
@@ -286,6 +287,7 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
       {"bounded_ituple", BaseType::BOUNDED_ITUPLE},
       {"FUTURE", BaseType::FUTURE},
       {"string", BaseType::STRING},
+      {"stream", BaseType::STREAM},
       {"function", BaseType::FUNCTION},
       {"device", BaseType::DEVICE},
       {"index", BaseType::INDEX},
@@ -369,6 +371,7 @@ inline static std::string GetStringFrom(BaseType dataType) {
       {BaseType::BOUNDED_ITUPLE, "bounded_ituple"},
       {BaseType::FUTURE, "FUTURE"},
       {BaseType::STRING, "string"},
+      {BaseType::STREAM, "stream"},
       {BaseType::FUNCTION, "function"},
       {BaseType::DEVICE, "device"},
       {BaseType::INDEX, "index"},
@@ -909,6 +912,28 @@ struct AddrType final : public Type, public TypeIDProvider<AddrType> {
   bool ApprxEqual(const Type& ty) const override { return isa<AddrType>(&ty); }
 
   __UDT_TYPE_INFO__(Type, AddrType)
+};
+
+struct StreamType final : public Type, public TypeIDProvider<StreamType> {
+  explicit StreamType() : Type(BaseType::STREAM) {}
+  size_t Dims() const override { return GetInvalidRank(); }
+  bool IsComplete() const override { return true; }
+  void Print(std::ostream& os) const override { os << "stream"; }
+  const std::string Name() const override { return "stream_type"; }
+  bool HasSufficientInfo() const override { return true; }
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<StreamType>();
+  }
+
+  bool operator==(const Type& ty) const override {
+    return isa<StreamType>(&ty);
+  }
+  bool ApprxEqual(const Type& ty) const override {
+    return isa<StreamType>(&ty);
+  }
+
+  __UDT_TYPE_INFO__(Type, StreamType)
 };
 
 // The type is unknown. It requires type inference
@@ -2553,6 +2578,10 @@ inline Shape GenUninitShape() { return Shape(); }
 inline ptr<VoidType> MakeVoidType() { return std::make_shared<VoidType>(); }
 
 inline ptr<AddrType> MakeAddrType() { return std::make_shared<AddrType>(); }
+
+inline ptr<StreamType> MakeStreamType() {
+  return std::make_shared<StreamType>();
+}
 
 inline ptr<UnknownScalarType> MakeUnknownScalarType(bool is_mutable = false) {
   return std::make_shared<UnknownScalarType>(is_mutable);

@@ -1293,6 +1293,8 @@ private:
           SetType(MakeUninitITupleType());
         else
           SetType(MakeITupleType(rank));
+      } else if (base_type == BaseType::STREAM) {
+        SetType(MakeStreamType());
       } else if (base_type == BaseType::UNKNOWN) {
         SetType(MakeUnknownType()); // need type inference
       } else if (base_type == BaseType::VOID) {

@@ -306,6 +306,8 @@ private:
   static const std::string vid_pfx;
   // block dim enforcement level, default to thread level
   ParallelLevel bdim_level = ParallelLevel::THREAD;
+  // TODO: for now, only support one stream!
+  std::string stream_name;
 
 private:
   void EmitFixedHostHead();

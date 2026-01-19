@@ -793,6 +793,8 @@ public:
   bool Visit(AST::Parameter& n) override {
     TraceEachVisit(n);
     if (n.sym) cur_params.emplace(InScopeName(n.sym->name), &n);
+    if (isa<StreamType>(GetSymbolType(n.sym->name)))
+      Error1(n.LOC(), "Stream is not supported for GCU backend yet.");
     return true;
   }
   bool Visit(AST::ParallelBy& n) override {

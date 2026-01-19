@@ -1587,8 +1587,15 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
        << ", __" << fname << "_bdims" << parallel_idx;
 
-    if (!sbe::ceq(cur_spm_size, sbe::nu(0)))
+    bool explicit_smem = false;
+    if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
       hs << ", " << ValueSTR(cur_spm_size);
+      explicit_smem = true;
+    }
+    if (stream_name != "") {
+      if (!explicit_smem) hs << ", 0";
+      hs << ", " << stream_name;
+    }
     hs << ">>>(";
 
     size_t i = 0;
@@ -2943,9 +2950,9 @@ bool CuteCodeGen::Visit(AST::Call& n) {
         } else if (isa<BoundedIntegerType>(type)) {
           choreo_unreachable("All the BoundedIntegerType vars should have been "
                              "normed to BoundedITupleType vars.");
-        } else if (isa<BoundedITupleType>(type)) {
+        } else if (auto bit = dyn_cast<BoundedITupleType>(type)) {
           print_format += "{";
-          for (int i = 0; i < (int)e->s.Rank(); ++i) {
+          for (size_t i = 0; i < bit->Dims(); ++i) {
             if (i != 0) print_format += ", ";
             print_format += "%lld";
           }
@@ -2984,10 +2991,17 @@ bool CuteCodeGen::Visit(AST::Call& n) {
 
 bool CuteCodeGen::Visit(AST::ParamList& n) {
   int index = 0;
-  for (auto param : n.values)
+  for (auto param : n.values) {
+    auto ty = GetSymbolType(param->sym->name);
+    if (isa<StreamType>(ty)) {
+      if (stream_name != "") Error1(n.LOC(), "Only one stream supported now!");
+      stream_name = param->sym->name;
+      continue;
+    }
     updating_cgi.AddSymbolDetail(fname, {InScopeName(param->sym->name),
                                          param->GetType(), param->pass_by_ref,
                                          index++, param->GetAttr()});
+  }
   return true;
 }
 

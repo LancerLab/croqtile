@@ -695,6 +695,17 @@ bool TypeInference::Visit(AST::Expr& n) {
         SetNodeType(n, MakeIntegerType(true));
       } else
         SetNodeType(n, pty_lhs);
+    } else if (isa<BoundedITupleType>(pty_rhs) &&
+               isa<ScalarIntegerType>(pty_lhs)) {
+      if (n.op == "#-" || n.op == "#+" || n.op == "#" || n.op == "#*" ||
+          n.op == "#/" || n.op == "#%")
+        Error1(n.LOC(), "The operands of the expression cannot undergo '" +
+                            n.op + "' binary operation.");
+      else if (n.op == "&" || n.op == "|" || n.op == "^" || n.op == "<<" ||
+               n.op == ">>")
+        SetNodeType(n, MakeIntegerType(true));
+      else
+        SetNodeType(n, pty_rhs);
     } else if (isa<BoundedITupleType>(pty_lhs) &&
                isa<BoundedITupleType>(pty_rhs)) {
       // to support `chunkat(x, y#z)`

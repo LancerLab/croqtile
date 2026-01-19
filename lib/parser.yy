@@ -201,7 +201,7 @@ void choreo_info(const char *message) {
 %token <std::string> IDENTIFIER ATTR_CO DEVICE_EXPR
 %token <std::string> CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED TYPENAME DEVICE_TEMPLATE
 // type related
-%token <std::string> MDSPAN ITUPLE EVENT MUTABLE
+%token <std::string> MDSPAN ITUPLE EVENT MUTABLE STREAM
 %token <Choreo::Storage> STORAGE
 %token <Choreo::ParallelLevel> PBLEVEL
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
@@ -506,6 +506,7 @@ return_type
 
 param_type
     : scalar_type { $$ = $1; }
+    | STREAM { $$ = AST::Make<AST::DataType>(@1, BaseType::STREAM); }
     | fundamental_type param_mdspan {
         $$ = AST::Make<AST::DataType>(@1, $1, $2);
       }
