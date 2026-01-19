@@ -62,9 +62,11 @@ all: build
 # lit max-jobs config
 JOBS ?= 1
 
+build: CHOREO_DEFAULT_TARGET=topscc
 build: build-with-cmake-ninja
 
 # Specific Release/debug build
+release: CHOREO_DEFAULT_TARGET=topscc
 release: CMAKE_BUILD_TYPE=Release
 release: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
 release: STANDALONE=OFF
@@ -86,6 +88,7 @@ package-full: release-full
 sdk-package: release
 	@cmake --build $(REL_BUILD_DIR) --target package-sdk
 
+debug: CHOREO_DEFAULT_TARGET=topscc
 debug: CMAKE_BUILD_TYPE=Debug
 debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
 debug: build-with-cmake-ninja
@@ -97,7 +100,7 @@ legacy: $(TARGET)
 test-legacy: legacy
 	$(LIT) tests && $(MAKE) standalone_test
 
-test: build-with-cmake-ninja
+test: build
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
 test-debug: debug
@@ -122,13 +125,13 @@ clean:
 build-with-cmake:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
 	time $(MAKE) -C $(CMAKE_BUILD_DIR)
 
 build-with-cmake-ninja:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) -DSTANDALONE=$(STANDALONE)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) -DSTANDALONE=$(STANDALONE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
 	time ninja -C $(CMAKE_BUILD_DIR)
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
@@ -136,7 +139,7 @@ build-with-cmake-ninja:
 config-with-cmake-ninja:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
 
 
 # Legacy Makefile

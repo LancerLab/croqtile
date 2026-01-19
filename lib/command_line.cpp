@@ -6,17 +6,20 @@
 
 using namespace Choreo;
 
+#ifndef __CHOREO_DEFAULT_TARGET__
+#error "no default target is specified."
+#endif
+
 extern location loc;
 
 // Major available options
-Option<std::string> target(OptionKind::User, "--target", "-t", "topscc",
-                           "Set the compilation target. The 'platform' "
-                           "includes <factor|topscc|cuda|cute|mpi>.",
+Option<std::string> target(OptionKind::User, "--target", "-t",
+                           __CHOREO_DEFAULT_TARGET__,
+                           "Set the compilation target. Use '--help-target' to "
+                           "show current supported targets.",
                            "--target <platform>", true);
-Option<std::string> subtarget(OptionKind::User, "--subtarget", "", "topscc",
-                              "Set the compilation sub-target. The 'platform' "
-                              "includes <factor|topscc|cuda|cute>.",
-                              "--subtarget <platform>", true);
+Option<bool> help_target(OptionKind::User, "--help-target", "", false,
+                         "Show all available compilation target.");
 Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
                          "Set the architecture to execute the binary code.",
                          "-arch=<processor>");
@@ -60,15 +63,6 @@ Option<bool> use_hetero_tileflow(
     OptionKind::Hidden, "--use-hetero-tileflow", "-ht", false,
     "(Experimental) Allow choreo code to apply implicit/aggressive tileflow"
     "optimisation under heterogeneous scenario.");
-Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
-                                  "-st",
-#ifdef __CHOREO_INSTALLATION_PACKAGE__
-                                  true,
-#else
-                                  false,
-#endif
-                                  "(Experimental) Use system installed "
-                                  "toolchain: topscc, topsrt, etc for choreo.");
 Option<bool>
     use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,
             "Generate position-independent code if possible (small mode).");
@@ -221,6 +215,13 @@ bool CommandLine::Parse(int argc, char** argv) {
     std::cerr << "error: no input file.\n";
     ret_code = 1;
     return false;
+  }
+
+  if (help_target) {
+    std::cout << "Available Choreo targets includes: ";
+    for (auto& ti : TargetRegistry::List())
+      std::cout << " - " << ti.name << ": " << ti.description << ".\n";
+    return 0;
   }
 
   // set the compilation targets

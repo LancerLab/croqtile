@@ -220,7 +220,7 @@ private:
 
 public:
   MemUsageCheck() : VisitorWithSymTab("muchk") {
-    // for cuda and cute backend, ignore global memory cap check.
+    // Don not manage global memory cap when target requires
     if (!CCtx().HasFeature(ChoreoFeature::MGM))
       tocheck_storage = {Storage::LOCAL, Storage::SHARED};
     else
@@ -228,13 +228,6 @@ public:
     // initialize with ct_tot_mem_usage
     for (const auto& sto : tocheck_storage) {
       ct_tot_mem_usage[sto] = 0;
-      /*
-      TODO:
-      For GCU3, all is different with Scorpio (1 Die) in the link below
-      Is S60G same with c035?
-      L3 (global) is different with Dorado (3VG per Cluster) in
-      http://wiki.enflame.cn/display/~james.zhu/Enflame+GCU+Programming+Model#EnflameGCUProgrammingModel-get_memory_space
-      */
       // initialize max memory we can allocate in byte
       mem_usage_limit[sto] = CCtx().GetMemCapacity(sto);
     }

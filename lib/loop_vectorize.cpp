@@ -416,7 +416,7 @@ bool LoopVectorizeLegalityChecker::CheckDataAccessAlignment(
   auto nds = n.GetDiversityShape();
 
   if (!nds.Varying()) return true;
-  // In GCU target 3.0 the alignment requirement is equal to the vector size of
+  // The alignment requirement is equal to the vector size of
   // simd operands.
   auto alignment = SizeOf(e_ty) * cur_loop->GetVectorFactor();
 
@@ -493,7 +493,8 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
     return true;
   }
 
-  // alignment check, GCU4 supports unaligned simd memory access
+  // It applies the alignment check unless the target supports unaligned simd
+  // memory access
   if (CCtx().GetTarget().EnforceVectorAlignment(CCtx().GetArch()))
     if (!CheckDataAccessAlignment(n)) {
       SetLoopVectorizationFailed();

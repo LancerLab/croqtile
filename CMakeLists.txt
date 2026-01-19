@@ -65,6 +65,8 @@ else()
     message(STATUS "ccache not found, compilation will not be cached")
 endif()
 
+option(CHOREO_DEFAULT_TARGET "cute")
+
 # allow diagnostics-color
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-fdiagnostics-color)

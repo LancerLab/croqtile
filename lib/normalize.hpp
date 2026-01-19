@@ -936,8 +936,7 @@ public:
 
 // Try to amend the missing parallel-by levels that are unspecified.
 //
-// It always fill the parallel-by level to its target. i.e., 2-levels for GCU3,
-// 3-levels for GCU4, etc..
+// It always fill the parallel-by level to its target.
 struct ParaByFiller : public NormBase {
 private:
   bool changed = false;

@@ -1,8 +1,6 @@
 #include "pipeline.hpp"
 #include "codegen_prepare.hpp"
 #include "earlysema.hpp"
-#include "gcucheck.hpp"
-#include "gpuadapt.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
 #include "loop_vectorize.hpp"

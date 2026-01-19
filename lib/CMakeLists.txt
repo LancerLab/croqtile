@@ -120,6 +120,9 @@ target_include_directories(codegen PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(support PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(pp PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 
+target_compile_definitions(support PRIVATE
+  __CHOREO_DEFAULT_TARGET__="${CHOREO_DEFAULT_TARGET}"
+)
 
 target_compile_definitions(codegen PRIVATE
   __CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}"

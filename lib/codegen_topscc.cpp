@@ -17,8 +17,15 @@
 #error "missing macro definition of __CHOREO_TOPSCC_DIR__"
 #endif
 
-// #define USING_OP_INFO
-
+Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
+                                  "-st",
+#ifdef __CHOREO_INSTALLATION_PACKAGE__
+                                  true,
+#else
+                                  false,
+#endif
+                                  "(Experimental) Use system installed "
+                                  "toolchain: topscc, topsrt, etc for choreo.");
 using namespace Choreo;
 using namespace Choreo::Topscc;
 

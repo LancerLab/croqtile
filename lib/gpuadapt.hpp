@@ -262,10 +262,12 @@ public:
           auto val = e->Opts().GetVal();
           if (VIIsInt(val)) {
             if (sbe::clt(val, sbe::nu(0)) || sbe::cgt(val, sbe::nu(1 << 11)))
-              Error1(e->LOC(), "On GCU300, the config in "
-                               "dma.pad must be in range [0, 2^11].");
+              Error1(e->LOC(), "On " + CCtx().GetArch() +
+                                   ", the config in "
+                                   "dma.pad must be in range [0, 2^11].");
           } else {
-            auto msg = "On GCU300, the config in "
+            auto msg = "On " + CCtx().GetArch() +
+                       ", the config in "
                        "dma.pad must be in range [0, 2^11]";
             auto asrt = sbe::cmp(">=", val, sbe::nu(0));
             FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);

@@ -370,7 +370,7 @@ private:
     return "hp" + std::to_string(host_param_count++);
   }
 
-  // return all the parameters of device function in topscc code.
+  // return all the parameters of device function in code.
   FilterRange<SymbolDetail> GetDeviceFuncIns(CodeGenInfo& info) const {
     return info.GetDeviceAllIns(fname);
   }
