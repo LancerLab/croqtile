@@ -621,7 +621,7 @@ public:
         Error1(n.LOC(), "local variable '" + n.name_str +
                             "` must be declared inside parallel-by.");
       if (sty->RuntimeShaped() && !CCtx().MemReuse())
-        Error1(n.LOC(), "GCU forbids local variable '" + n.name_str +
+        Error1(n.LOC(), "GPU forbids local variable '" + n.name_str +
                             "` to be dynamically shaped (by " +
                             STR(sty->GetShape()) + ").");
       break;

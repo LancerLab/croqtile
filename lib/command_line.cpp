@@ -1,6 +1,5 @@
 #include "command_line.hpp"
 #include "context.hpp"
-#include "target_registry.hpp"
 #include <fstream>
 #include <sys/stat.h>
 
@@ -18,8 +17,6 @@ Option<std::string> target(OptionKind::User, "--target", "-t",
                            "Set the compilation target. Use '--help-target' to "
                            "show current supported targets.",
                            "--target <platform>", true);
-Option<bool> help_target(OptionKind::User, "--help-target", "", false,
-                         "Show all available compilation target.");
 Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
                          "Set the architecture to execute the binary code.",
                          "-arch=<processor>");
@@ -30,7 +27,6 @@ Option<std::string>
     debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
                    "Place compiler debug artifacts under <dir>.",
                    "--ddir=<dir>");
-
 Option<bool>
     emit_source(OptionKind::User, "-es", "", false,
                 "Emit target source file without target source compilation.");
@@ -178,6 +174,7 @@ inline bool file_exists(const std::string& filename) {
 }
 
 bool CommandLine::Parse(int argc, char** argv) {
+
   // parse all the options
   auto& r = OptionRegistry::GetInstance();
   r.Reset();
@@ -215,13 +212,6 @@ bool CommandLine::Parse(int argc, char** argv) {
     std::cerr << "error: no input file.\n";
     ret_code = 1;
     return false;
-  }
-
-  if (help_target) {
-    std::cout << "Available Choreo targets includes: ";
-    for (auto& ti : TargetRegistry::List())
-      std::cout << " - " << ti.name << ": " << ti.description << ".\n";
-    return 0;
   }
 
   // set the compilation targets

@@ -339,6 +339,7 @@ target_link_libraries(choreo PRIVATE
   codegen
   support
   pp
+  -Wl,--whole-archive targets -Wl,--no-whole-archive
   ${EXTERN_LIBS}
   Threads::Threads
 )
@@ -349,6 +350,7 @@ target_link_libraries(copp PRIVATE
   codegen
   support
   pp
+  -Wl,--whole-archive targets -Wl,--no-whole-archive
   ${EXTERN_LIBS}
   Threads::Threads
 )
@@ -360,6 +362,7 @@ add_library(choreo-dev STATIC
   $<TARGET_OBJECTS:codegen>
   $<TARGET_OBJECTS:support>
   $<TARGET_OBJECTS:pp>
+  $<TARGET_OBJECTS:targets>
   tools/sdk/public_api.cpp
 )
 
@@ -419,9 +422,7 @@ string(STRIP "${CPACK_PACKAGE_VERSION}" CPACK_PACKAGE_VERSION)
 
 # Common metadata
 set(CPACK_PACKAGE_NAME "choreo")
-set(CPACK_PACKAGE_VENDOR "ERA Developers")
-set(CPACK_PACKAGE_CONTACT "heng.shi@enflame-tech.com")
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "heng.shi@enflame-tech.com")
+set(CPACK_PACKAGE_VENDOR "Choreo Developers")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 
 # Where final artifacts go

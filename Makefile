@@ -31,7 +31,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cute_header.inc factor_script.inc cuda_script.inc
 
 CC = g++
-CFLAGS += -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR) -D__CHOREO_DEFAULT_TARGET__=topscc"
+CFLAGS += -MMD -MP -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_DEFAULT_TARGET__=\"topscc\"
 
 # fix version of clang-format
 CLANG_FORMAT:=$(WORK_DIR)/extern/clang-format-19-1-2
@@ -144,7 +144,8 @@ config-with-cmake-ninja:
 
 
 # Legacy Makefile
-BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cpp))
+SRC_CPP := $(shell find $(SRC_DIR) -type f -name '*.cpp')
+BUILD_OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRC_CPP))
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -162,10 +163,13 @@ $(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh | $(BUILD_DIR)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
 
 $(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 $(COPP_BIN): $(TOOLS_DIR)/copp/choreo_preprocess.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
 	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -static-libstdc++ -o $@
+
+-include $(OBJ:.o=.d)
 
 choreo_header.inc : $(RT_DIR)/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@

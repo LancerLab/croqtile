@@ -12,25 +12,7 @@ add_custom_command(
   COMMENT "Generating parser.tab.cc and parser.tab.hh with bison"
 )
 
-file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo.h CHOREO_HEADER_CONTENT)
-file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo_cute.h CHOREO_CUTE_HEADER_CONTENT)
-file(READ ${CMAKE_SOURCE_DIR}/scripts/factor_script.sh FACTOR_SCRIPT_CONTENT)
-
-configure_file(
-  ${CMAKE_SOURCE_DIR}/scripts/choreo_header_template.in
-  ${CMAKE_BINARY_DIR}/choreo_header.inc
-  @ONLY
-)
-configure_file(
-  ${CMAKE_SOURCE_DIR}/scripts/choreo_cute_header_template.in
-  ${CMAKE_BINARY_DIR}/choreo_cute_header.inc
-  @ONLY
-)
-configure_file(
-  ${CMAKE_SOURCE_DIR}/scripts/factor_script_template.in
-  ${CMAKE_BINARY_DIR}/factor_script.inc
-  @ONLY
-)
+add_subdirectory(Target)
 
 add_custom_target(
   parser_deps ALL
@@ -38,14 +20,6 @@ add_custom_target(
   ${CMAKE_BINARY_DIR}/scanner.yy.cc
   ${CMAKE_BINARY_DIR}/parser.tab.cc
   ${CMAKE_BINARY_DIR}/parser.tab.hh
-)
-
-add_custom_target(
-  codegen_deps ALL
-  DEPENDS
-  ${CMAKE_BINARY_DIR}/factor_script.inc
-  ${CMAKE_BINARY_DIR}/choreo_cute_header.inc
-  ${CMAKE_BINARY_DIR}/choreo_header.inc
 )
 
 set(PARSER_SOURCES
@@ -73,19 +47,12 @@ set(CORE_SOURCES
   target_registry.cpp
   target_utils.cpp
   target.cpp
-  topscc_target.cpp
-  cute_target.cpp
-  factor_target.cpp
 )
 
 # Define the source files for your codegen library
 set(CODEGEN_SOURCES
   codegen.cpp
   codegen_utils.cpp
-  codegen_factor.cpp
-  codegen_factor_types.cpp
-  codegen_topscc.cpp
-  codegen_cute.cpp
 )
 
 set(CL_SOURCES
@@ -94,7 +61,6 @@ set(CL_SOURCES
 
 set(PP_SOURCES
   preprocess.cpp
-  topscc_preprocess.cpp
 )
 
 # Add the libraries
@@ -109,10 +75,10 @@ set(CHOREO_COMPONENTS
   core
   codegen
   support
-  pp)
+  pp
+)
 
 add_dependencies(parse parser_deps)
-add_dependencies(codegen codegen_deps)
 
 target_include_directories(parse PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(core PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
@@ -123,49 +89,3 @@ target_include_directories(pp PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_compile_definitions(support PRIVATE
   __CHOREO_DEFAULT_TARGET__="${CHOREO_DEFAULT_TARGET}"
 )
-
-target_compile_definitions(codegen PRIVATE
-  __CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}"
-  __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
-)
-
-if(ENABLE_CUDA)
-  target_include_directories(codegen PRIVATE ${_cuda_root}/include)
-  target_include_directories(support PRIVATE ${_cuda_root}/include)
-  link_directories(${_cuda_root}/lib64 ${_cuda_root}/targets/x86_64-linux/lib)
-
-  target_compile_definitions(codegen PRIVATE
-    __CHOREO_CUDA_DIR__=${_cuda_root}
-  )
-
-  math(EXPR CUDA_VERSION_NUMBER
-       "${CUDA_VERSION_MAJOR} * 1000 + ${CUDA_VERSION_MINOR} * 10")
-  foreach(tgt IN LISTS CHOREO_COMPONENTS)
-    target_compile_definitions(${tgt} PRIVATE
-      CHOREO_CUDA_VERSION_MAJOR=${CUDA_VERSION_MAJOR}
-      CHOREO_CUDA_VERSION_MINOR=${CUDA_VERSION_MINOR}
-      CHOREO_CUDA_VERSION=${CUDA_VERSION_NUMBER}
-    )
-  endforeach()
-endif()
-
-if(ENABLE_CUTE)
-  target_include_directories(codegen PRIVATE
-    ${_cute_root}/include
-    ${_cute_root}/tools/util/include  # for lightweight helpers (optional)
-  )
-
-  target_compile_definitions(codegen PRIVATE
-    __CHOREO_CUTE_DIR__=${_cute_root}
-  )
-endif()
-
-target_compile_definitions(pp PRIVATE
-  __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
-)
-
-if(EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")
-  target_compile_definitions(codegen PRIVATE
-    __CHOREO_GCU_ACORE_DIR__="${TOOLCHAIN_DIR}"
-  )
-endif()

@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "aux.hpp"
+#include "target_registry.hpp"
 
 namespace Choreo {
 
@@ -171,6 +172,11 @@ public:
     if (option == "--help" || option == "-H") {
       Help(OptionKind::User);
       return false;
+    } else if (option == "--help-target") {
+      std::cout << "available Choreo targets includes: ";
+      for (auto& ti : TargetRegistry::List())
+        std::cout << " - " << ti.name << ": " << ti.description << ".\n";
+      std::cout << "\n";
     } else if (option == "--help-hidden") {
       Help(OptionKind::Hidden);
       return false;
