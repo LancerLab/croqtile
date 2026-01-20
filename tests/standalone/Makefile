@@ -32,15 +32,18 @@ $(GTEST_DIR)/libgtest_main.a: $(GTEST_DIR)/googletest/src/gtest_main.cc
 	$(CXX) $(CXXFLAGS) -I$(GTEST_DIR)/googletest/include -I$(GTEST_DIR)/googletest -pthread -c $< -o $(GTEST_DIR)/gtest_main.o
 	ar -rv $@ $(GTEST_DIR)/gtest_main.o
 
-%.test: %.o $(GTEST_LIBS)
-	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread -static-libstdc++
+target_registry.o: $(ROOT)/lib/target_registry.cpp
+	$(CXX) $(CXXFLAGS) -I$(ROOT)/lib -c -o $@ $< -pthread -static-libstdc++
+
+%.test: %.o $(GTEST_LIBS) target_registry.o
+	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< target_registry.o -pthread -static-libstdc++
 
 # Pattern rule for object files
 %.o: %.cpp $(HEADER_FILES)
 	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -I$(GTEST_DIR)/googletest/include/ -c $< -o $@
 
-%.cutest: %.cu $(GTEST_LIBS)
-	$(NV_CXX) ${NV_FLAGS} -I$(ROOT)/ -I$(ROOT)/lib -I$(GTEST_DIR)/googletest/include/ -L../../ -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -lpthread
+%.cutest: %.cu $(GTEST_LIBS) target_registry.o
+	$(NV_CXX) ${NV_FLAGS} -I$(ROOT)/ -I$(ROOT)/lib -I$(GTEST_DIR)/googletest/include/ -L../../ -L$(GTEST_DIR) target_registry.o -lgtest_main -lgtest -o $@ $< -lpthread
 
 # Clean up
 clean:
