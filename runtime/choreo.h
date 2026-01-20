@@ -1259,6 +1259,150 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
   return res;
 }
 
+namespace utils {
+template <typename U>
+__co_host__ inline U from_f32(float v) {
+  if constexpr (std::is_same<U, f16>::value) {
+    return f16(v);
+  } else if constexpr (std::is_same<U, bf16>::value) {
+    return bf16(v);
+  } else {
+    return static_cast<U>(v);
+  }
+}
+
+// Host-side 2:4 sparse init/encode trait with metadata packed by META_K groups.
+template <typename ValueT, typename MetaT, size_t META_K>
+struct Sparse2to4HostPolicy {
+  static_assert(META_K % 4 == 0, "META_K must be a multiple of 4.");
+  static constexpr size_t groups_per_strip = META_K / 4;
+  static constexpr size_t bits_per_strip = groups_per_strip * 4;
+  static_assert(bits_per_strip <= sizeof(MetaT) * 8,
+                "MetaT is too small for META_K.");
+
+  __co_host__ static inline void init_structured_sparse_A(
+      std::vector<float>& dense_f, spanned_data<ValueT, 2>& dense,
+      std::mt19937& gen) {
+    const size_t M = dense.shape()[0];
+    const size_t K = dense.shape()[1];
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::uniform_int_distribution<int> pick(0, 3);
+    dense_f.assign(M * K, 0.0f);
+    dense.fill(ValueT(0));
+    for (size_t r = 0; r < M; ++r) {
+      for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+        int idx0 = pick(gen);
+        int idx1 = pick(gen);
+        while (idx1 == idx0) idx1 = pick(gen);
+        if (idx0 > idx1) std::swap(idx0, idx1);
+        float v0 = dist(gen);
+        float v1 = dist(gen);
+        if (v0 == 0.0f) v0 = 1.0f;
+        if (v1 == 0.0f) v1 = -1.0f;
+        size_t base = r * K + c_group * 4;
+        ValueT t0 = from_f32<ValueT>(v0);
+        ValueT t1 = from_f32<ValueT>(v1);
+        dense.data()[base + idx0] = t0;
+        dense.data()[base + idx1] = t1;
+        dense_f[base + idx0] = to_f32(t0);
+        dense_f[base + idx1] = to_f32(t1);
+      }
+    }
+  }
+
+  // Initialize RHS with K-major layout [N, K] stored as rhs[k * N + n].
+  __co_host__ static inline void init_rhs_kmajor(
+      std::vector<float>& rhs_f, spanned_data<ValueT, 2>& rhs,
+      std::mt19937& gen) {
+    const size_t N = rhs.shape()[0];
+    const size_t K = rhs.shape()[1];
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<ValueT> rhs_t(K * N);
+    rhs_f.resize(K * N);
+    for (size_t i = 0; i < rhs_t.size(); ++i) {
+      ValueT tv = from_f32<ValueT>(dist(gen));
+      rhs_t[i] = tv;
+      rhs_f[i] = to_f32(tv);
+    }
+    for (size_t n = 0; n < N; ++n)
+      for (size_t k = 0; k < K; ++k) rhs[n][k] = rhs_t[k * N + n];
+  }
+
+  // Encode 2:4 sparse A into packed values and META_K-grouped metadata.
+  __co_host__ static inline void encode(
+      const std::vector<float>& dense_f, spanned_data<ValueT, 2>& dense,
+      spanned_data<ValueT, 2>& packed, spanned_data<MetaT, 2>& meta,
+      std::vector<MetaT>* row_meta = nullptr) {
+    const size_t M = dense.shape()[0];
+    const size_t K = dense.shape()[1];
+    const size_t strips = K / META_K;
+    if (row_meta) row_meta->assign(M * strips, MetaT(0));
+    for (size_t r = 0; r < M; ++r) {
+      for (size_t strip = 0; strip < strips; ++strip) {
+        MetaT meta_val = 0;
+        for (size_t cg = 0; cg < groups_per_strip; ++cg) {
+          size_t c_group = strip * groups_per_strip + cg;
+          size_t base = r * K + c_group * 4;
+          size_t in_base = r * (K / 2) + c_group * 2;
+          int idxs[2] = {-1, -1};
+          int nz = 0;
+          for (int i = 0; i < 4; ++i) {
+            if (dense_f[base + i] != 0.0f) {
+              if (nz < 2) idxs[nz] = i;
+              nz++;
+            }
+          }
+          choreo_assert(nz == 2, "Invalid 2:4 structure");
+          if (idxs[0] > idxs[1]) std::swap(idxs[0], idxs[1]);
+          packed.data()[in_base + 0] = dense.data()[base + idxs[0]];
+          packed.data()[in_base + 1] = dense.data()[base + idxs[1]];
+          int pair_idx = static_cast<int>(cg) * 2;
+          meta_val |= (static_cast<MetaT>(idxs[0]) << (pair_idx * 2));
+          meta_val |= (static_cast<MetaT>(idxs[1]) << ((pair_idx + 1) * 2));
+        }
+        meta[r][strip] = meta_val;
+        if (row_meta) (*row_meta)[r * strips + strip] = meta_val;
+      }
+    }
+  }
+
+  __co_host__ static inline void compress_ref(
+      const std::vector<float>& dense_f, std::vector<float>& sparse_f,
+      std::vector<MetaT>& meta_out, size_t M, size_t K) {
+    const size_t k_sparse = K / 2;
+    const size_t meta_cols = K / META_K;
+    sparse_f.assign(M * k_sparse, 0.0f);
+    meta_out.assign(M * meta_cols, MetaT(0));
+    for (size_t r = 0; r < M; ++r) {
+      for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+        size_t base = r * K + c_group * 4;
+        int idxs[2] = {-1, -1};
+        int nz = 0;
+        for (int i = 0; i < 4; ++i) {
+          if (dense_f[base + i] != 0.0f) {
+            if (nz < 2) idxs[nz] = i;
+            nz++;
+          }
+        }
+        choreo_assert(nz == 2, "Invalid 2:4 structure");
+        if (idxs[0] > idxs[1]) std::swap(idxs[0], idxs[1]);
+
+        size_t sparse_col_base = c_group * 2;
+        sparse_f[r * k_sparse + sparse_col_base + 0] = dense_f[base + idxs[0]];
+        sparse_f[r * k_sparse + sparse_col_base + 1] = dense_f[base + idxs[1]];
+
+        size_t pack_col = c_group / groups_per_strip;
+        size_t pair_idx = (c_group % groups_per_strip) * 2;
+        MetaT packed = meta_out[r * meta_cols + pack_col];
+        packed |= (static_cast<MetaT>(idxs[0]) << (pair_idx * 2));
+        packed |= (static_cast<MetaT>(idxs[1]) << ((pair_idx + 1) * 2));
+        meta_out[r * meta_cols + pack_col] = packed;
+      }
+    }
+  }
+};
+} // namespace utils
+
 template <size_t Rank, typename T>
 auto copy_as_spanned(T* ptr, const mdspan<Rank> dims) {
   size_t element_count = span_size(dims);
