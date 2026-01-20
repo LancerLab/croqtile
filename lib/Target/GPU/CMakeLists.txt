@@ -6,7 +6,7 @@ add_custom_target(
 )
 
 set(GPU_TARGET_SOURCES
-  codegen_cute.cpp
+  cute_codegen.cpp
   cute_target.cpp
 )
 

@@ -1,4 +1,4 @@
-#include "codegen_topscc.hpp"
+#include "topscc_codegen.hpp"
 #include "codegen_utils.hpp"
 
 #include <filesystem>

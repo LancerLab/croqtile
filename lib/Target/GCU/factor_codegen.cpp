@@ -1,4 +1,4 @@
-#include "codegen_factor.hpp"
+#include "factor_codegen.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -9,7 +9,7 @@
 #include "ast.hpp"
 #include "choreo_header.inc"
 #include "codegen.hpp"
-#include "codegen_factor_types.hpp"
+#include "factor_codegen_types.hpp"
 #include "factor_script.inc"
 #include "types.hpp"
 

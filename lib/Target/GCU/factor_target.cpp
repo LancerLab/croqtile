@@ -1,9 +1,9 @@
-#include "codegen_factor.hpp"
+#include "factor_codegen.hpp"
+#include "factor_transform.hpp"
+#include "gcu_check.hpp"
 #include "gcu_target.hpp"
-#include "gcucheck.hpp"
 #include "pipeline.hpp"
 #include "target_registry.hpp"
-#include "ttrans_factor.hpp"
 
 using namespace Choreo;
 

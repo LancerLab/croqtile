@@ -1,4 +1,4 @@
-#include "codegen_factor_types.hpp"
+#include "factor_codegen_types.hpp"
 
 using namespace Choreo;
 

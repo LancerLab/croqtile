@@ -12,7 +12,7 @@ namespace catz {
 ////////////////////////////////////////////////////
 #define DEFINE_BINARY_OPERATOR_FOR_COORD(op)                                   \
   template <typename OtherRowType, typename OtherColType>                      \
-  constexpr auto operator op(const Coord<OtherRowType, OtherColType> &other)   \
+  constexpr auto operator op(const Coord<OtherRowType, OtherColType>& other)   \
       const {                                                                  \
     auto new_rows = rows op other.rows;                                        \
     auto new_cols = cols op other.cols;                                        \
@@ -38,7 +38,7 @@ struct Coord {
 
   template <typename OtherRowType, typename OtherColType>
   constexpr auto
-  ceil_div(const Coord<OtherRowType, OtherColType> &other) const {
+  ceil_div(const Coord<OtherRowType, OtherColType>& other) const {
     auto new_rows = (rows + other.rows - I1()) / other.rows;
     auto new_cols = (cols + other.cols - I1()) / other.cols;
     return Coord<decltype(new_rows), decltype(new_cols)>(new_rows, new_cols);

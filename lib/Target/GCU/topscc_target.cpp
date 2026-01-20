@@ -1,10 +1,10 @@
-#include "codegen_topscc.hpp"
+#include "gcu_check.hpp"
 #include "gcu_target.hpp"
-#include "gcucheck.hpp"
 #include "pipeline.hpp"
 #include "target_registry.hpp"
+#include "topscc_codegen.hpp"
 #include "topscc_preprocess.hpp"
-#include "ttrans_topscc.hpp"
+#include "topscc_transform.hpp"
 #include "types.hpp"
 
 using namespace Choreo;

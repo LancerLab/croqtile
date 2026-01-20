@@ -5,8 +5,6 @@ TOOLCHAIN_DIR=$(WORK_DIR)/extern
 TOOLS_DIR=$(WORK_DIR)/tools
 RT_DIR=$(WORK_DIR)/runtime
 
-FTP_SERVER:=172.16.11.18
-
 # Targets
 CHOREO_BIN = build/choreo
 COPP_BIN = build/copp
@@ -17,24 +15,29 @@ DBG_BUILD_DIR = $(WORK_DIR)/build-debug
 REL_BUILD_DIR = $(WORK_DIR)/build-release
 LEX_SRC = $(SRC_DIR)/scanner.l
 PARSER_SRC = $(SRC_DIR)/parser.yy
-#BISON_FLAGS = --language=c++ --skeleton=lalr1.cc -t -d  # Generates both parser.tab.c and parser.tab.h
-#BISON_FLAGS = --report=all -t -d  # Generates both parser.tab.cpp and parser.tab.h
 BISON_FLAGS = -t -d  # Generates both parser.tab.cpp and parser.tab.h
 
 # Test targets
 TEST_FILES :=  $(shell find tests -name '*_test.co')
 TEST_TARGETS := $(TEST_FILES:.co=.test)
-#$(info TEST_FILES is $(TEST_FILES))
-#$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cute_header.inc factor_script.inc cuda_script.inc
+HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cute_header.inc factor_script.inc
+
+CHOREO_DEFAULT_TARGET ?= cute
+CLANG_FORMAT ?= /usr/bin/clang-format
 
 CC = g++
-CFLAGS += -MMD -MP -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_DEFAULT_TARGET__=\"topscc\"
+CFLAGS += -MMD -MP -std=c++17 -Wall -Wextra -g
 
-# fix version of clang-format
-CLANG_FORMAT:=$(WORK_DIR)/extern/clang-format-19-1-2
+TARGET_DIRS := $(sort $(wildcard lib/Target/*/))
+TARGET_MK   := $(addsuffix target.mk,$(TARGET_DIRS))
+
+-include $(TARGET_MK)
+-include .local.mk
+
+CC = g++
+CFLAGS += -D__CHOREO_DEFAULT_TARGET__=\"$(CHOREO_DEFAULT_TARGET)\"
 
 # For gtest
 GTEST_DIR = extern/gtest
@@ -62,11 +65,10 @@ all: build
 # lit max-jobs config
 JOBS ?= 1
 
-build: CHOREO_DEFAULT_TARGET=topscc
+build:
 build: build-with-cmake-ninja
 
 # Specific Release/debug build
-release: CHOREO_DEFAULT_TARGET=topscc
 release: CMAKE_BUILD_TYPE=Release
 release: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
 release: STANDALONE=OFF
@@ -88,12 +90,10 @@ package-full: release-full
 sdk-package: release
 	@cmake --build $(REL_BUILD_DIR) --target package-sdk
 
-debug: CHOREO_DEFAULT_TARGET=topscc
 debug: CMAKE_BUILD_TYPE=Debug
 debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
 debug: build-with-cmake-ninja
 
-legacy: CHOREO_DEFAULT_TARGET=topscc
 legacy: $(TARGET)
 	ln -sf $(CHOREO_BIN) $(WORK_DIR)/choreo
 	ln -sf $(COPP_BIN) $(WORK_DIR)/copp
@@ -162,7 +162,7 @@ parser.tab.cc parser.tab.hh: $(PARSER_SRC)
 $(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh | $(BUILD_DIR)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
 
-$(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) | $(BUILD_DIR)
+$(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
@@ -178,30 +178,6 @@ choreo_header.inc : $(RT_DIR)/choreo.h
 	cat $< >> $@
 	echo ")\";" >> $@
 	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
-
-choreo_cute_header.inc : $(RT_DIR)/choreo_cute.h
-	echo "#ifndef __CHOREO_CUTE_RUNTIME_HEADER_H__" > $@
-	echo "#define __CHOREO_CUTE_RUNTIME_HEADER_H__" >> $@
-	echo -n "static const char* __choreo_cute_header_as_string = R\"(" >> $@
-	cat $< >> $@
-	echo ")\";" >> $@
-	echo "#endif // __CHOREO_CUTE_RUNTIME_HEADER_H__" >> $@
-
-factor_script.inc : scripts/factor_script.sh
-	echo "#ifndef __CHOREO_FACTOR_SCRIPT_H__" > $@
-	echo "#define __CHOREO_FACTOR_SCRIPT_H__" >> $@
-	echo -n "static const char* __factor_script_as_string = R\"__co_factor__(" >> $@
-	cat $< >> $@
-	echo ")__co_factor__\";" >> $@
-	echo "#endif // __CHOREO_FACTOR_SCRIPT_H__" >> $@
-
-cuda_script.inc : scripts/cuda_script.sh
-	echo "#ifndef __CHOREO_CUDA_SCRIPT_H__" > $@
-	echo "#define __CHOREO_CUDA_SCRIPT_H__" >> $@
-	echo -n "static const char* __cuda_script_as_string = R\"__co_cuda__(" >> $@
-	cat $< >> $@
-	echo ")__co_cuda__\";" >> $@
-	echo "#endif // __CHOREO_CUDA_SCRIPT_H__" >> $@
 
 clean-legacy:
 	@rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
@@ -231,55 +207,44 @@ help:
 	@echo "                      - Test specific operator"
 	@echo "                        Available operators: $(OPERATOR_NAMES)"
 
-# =============================================================================
-# Sample Tests for topscc/elementwise
-# =============================================================================
-
-ELEMENTWISE_DIR = samples/topscc/elementwise
-OPERATOR_NAMES = $(notdir $(basename $(wildcard $(ELEMENTWISE_DIR)/*.co)))
-CHOREO_FLAGS = -gs -t topscc
-
-sample-test: $(OPERATOR_NAMES:%=sample-test-%)
-
-sample-test-%: $(ELEMENTWISE_DIR)/%.co
-	@TMPDIR=$$(mktemp -d) && \
-	echo -n "Testing $*... " && \
-	if choreo $(CHOREO_FLAGS) $< -o $$TMPDIR/test.result > /dev/null 2>&1 && \
-	   bash $$TMPDIR/test.result --execute > /dev/null 2>&1; then \
-		echo "PASSED"; \
-		ret=0; \
-	else \
-		echo "FAILED"; \
-		ret=1; \
-	fi; \
-	rm -rf $$TMPDIR; \
-	exit $$ret
-
-sample-test-operator:
-	@if [ -z "$(OPERATOR)" ]; then \
-		echo "Usage: make sample-test-operator OPERATOR=operator_name"; \
-		echo "Available operators: $(OPERATOR_NAMES)"; \
-		exit 1; \
-	fi
-	@TMPDIR=$$(mktemp -d) && \
-	echo -n "Testing $(OPERATOR)... " && \
-	if choreo $(CHOREO_FLAGS) $(ELEMENTWISE_DIR)/$(OPERATOR).co -o $$TMPDIR/test.result > /dev/null 2>&1 && \
-	   bash $$TMPDIR/test.result --execute > /dev/null 2>&1; then \
-		echo "PASSED"; \
-		ret=0; \
-	else \
-		echo "FAILED"; \
-		ret=1; \
-	fi; \
-	rm -rf $$TMPDIR; \
-	exit $$ret
+CODE_DIRS := $(SRC_DIR) $(RT_DIR) tools
+TEST_DIRS := tests benchmark samples
 
 lines:
-	@echo "source code:"; wc -l lib/*.cpp lib/*.yy lib/*.l lib/*.hpp Makefile $(RT_DIR)/*.h | grep total;
-	@echo "test code"; wc -l $$(find tests/ -type f |grep -v "\.test"|grep -v "\.result") | grep total;
+	@source_files="$$(find $(CODE_DIRS) -type f \( \
+		-name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o \
+		-name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' -o \
+		-name '*.cu' -o -name '*.cuh' -o -name Makefile -o \
+		-name 'CMakeList.txt' -o -name '*.mk' \
+	\) -print)"; \
+	if [ -z "$$source_files" ]; then \
+	  echo "No source files."; \
+	else \
+	  echo "- library, runtime & tools: $$(wc -l $$source_files | grep total)"; \
+	fi; \
+	test_files="$$(find $(TEST_DIRS) -type f \( \
+		-name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o \
+		-name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' -o \
+		-name '*.cu' -o -name '*.cuh' -o -name '*.co' \
+	\) -print)"; \
+	if [ -z "$$test_files" ]; then \
+	  echo "No test files."; \
+	else \
+	  echo "- tests, samples & benchmarks: $$(wc -l $$test_files | grep total)"; \
+	fi;
 
+FORMAT_DIRS := $(SRC_DIR) $(RT_DIR) tests/standalone
 format:
-	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp $(RT_DIR)/*.h tests/standalone/*.cu $(TOOLS_DIR)/choreo/*.cpp  $(TOOLS_DIR)/copp/*.cpp tests/standalone/*.cpp
+	files="$$(find $(FORMAT_DIRS) -type f \( \
+		-name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o \
+		-name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' -o \
+		-name '*.cu' -o -name '*.cuh' \
+	\) -print)"; \
+	if [ -z "$$files" ]; then \
+	  echo "No files to format."; \
+	else \
+	  $(CLANG_FORMAT) -i -Werror $$files; \
+	fi
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test
@@ -294,156 +259,7 @@ standalone_test: $(TARGET)
 FLEX = $(TOOLCHAIN_DIR)/bin/flex
 BISON_BIN = $(TOOLCHAIN_DIR)/bin/bison
 LIT:=$(WORK_DIR)/tests/lit.sh -j$(JOBS)
-FILECHECK:=$(TOOLCHAIN_DIR)/bin/FileCheck
-PACKAGE_NAME=choreo_toolchain_250930.tgz
-SUPPORT_PKG =$(TOOLCHAIN_DIR)/$(PACKAGE_NAME)
-PACKAGE_MD5:=a4297fca634dcdda3d08c467550d4b22
-CUR_PKG_MD5:=$(shell md5sum $(SUPPORT_PKG) 2>/dev/null| cut -d ' ' -f 1)
-BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
-BISON:=$(BISON_ENV) $(BISON_BIN)
+BISON?=/usr/bin/bison
 
-check-choreo-kit:
-	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the supporting package..."; \
-		$(MAKE) download-choreo-kit; \
-	else \
-		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
-	fi;
-
-download-choreo-kit:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(PACKAGE_NAME) -o $(SUPPORT_PKG);\
-
-install-choreo-kit: check-choreo-kit
-	cd $(TOOLCHAIN_DIR) && tar -zvxf $(SUPPORT_PKG); \
-	chmod +x $(BISON_BIN)
-
-setup-choreo-kit: check-choreo-kit
-	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
-	  $(MAKE) install-choreo-kit; \
-	fi;
-
-setup-git-hooks:
-	@mkdir .git/hooks; \
-	cp ./scripts/hooks/pre-commit-check.sh .git/hooks/pre-commit; \
-	chmod +x .git/hooks/pre-commit
-
-setup-core: setup-choreo-kit setup-ginac setup-clang-format setup-git-hooks setup-gcu-acore
-	git submodule update --init --recursive;\
-	ln -sf $(WORK_DIR)/extern/bin/not.sh tests
-
-setup-cuda:
-	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-cuda FTP_SERVER=$(FTP_SERVER)
-
-setup-gcu2: setup-core
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)
-
-setup-gcu3: setup-core
-	git submodule update --init --recursive;\
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
-
-setup-gcu4: setup-core
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-kit FTP_SERVER=$(FTP_SERVER)
-
-setup-gcu5: setup-core
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-kit FTP_SERVER=$(FTP_SERVER)
-
-resetup-gcu2: install-choreo-kit
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-install FTP_SERVER=$(FTP_SERVER)
-
-resetup-gcu3: install-choreo-kit
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-install FTP_SERVER=$(FTP_SERVER)
-
-resetup-gcu4: install-choreo-kit
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-install FTP_SERVER=$(FTP_SERVER)
-
-resetup-gcu5: install-choreo-kit
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-install FTP_SERVER=$(FTP_SERVER)
-
-gcu2-kmd:
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kmd FTP_SERVER=$(FTP_SERVER)
-
-gcu3-kmd:
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
-
-setup-gcu-acore:
-	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore
-
-GINAC_MD5=9d0eaa439c7b825311e99a9aa9b15f9a
-GINAC_PACKAGE_NAME=ginac-cln-251014.tgz
-GINAC_PACKAGE=$(TOOLCHAIN_DIR)/$(GINAC_PACKAGE_NAME)
-CUR_GINAC_MD5:=$(shell md5sum $(GINAC_PACKAGE) 2>/dev/null| cut -d ' ' -f 1)
-
-download-ginac:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GINAC_PACKAGE_NAME) -o $(GINAC_PACKAGE);\
-
-check-ginac:
-	@if [ "$(CUR_GINAC_MD5)" != "$(GINAC_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the ginac package..."; \
-		$(MAKE) download-ginac; \
-	else \
-		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
-	fi;
-
-setup-ginac: check-ginac
-	@if [ ! -f "$(TOOLCHAIN_DIR)/ginac/ginac-1.8.7/install/lib/libginac.a" ]; then \
-	    tar -zxvf $(GINAC_PACKAGE) -C $(TOOLCHAIN_DIR);\
-	fi;
-
-CFORMAT_MD5=6ee59eba63782b362bc9ba1138911f3a
-CFORMAT_NAME=clang-format-19-1-2
-CUR_CFORMAT_MD5:=$(shell md5sum $(CLANG_FORMAT) 2>/dev/null| cut -d ' ' -f 1)
-
-download-clang-format:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(CFORMAT_NAME) -o $(CLANG_FORMAT);\
-
-check-clang-format:
-	@if [ "$(CUR_CFORMAT_MD5)" != "$(CFORMAT_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the clang-format..."; \
-		$(MAKE) download-clang-format; \
-	else \
-		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
-	fi;
-
-setup-clang-format: check-clang-format
-	chmod +x $(CLANG_FORMAT)
-
-# utils to serve Choreo Documents
-MKDOCS_CMD = mkdocs serve --dev-addr=0.0.0.0:8000
-
-serve-doc: stop-doc start-doc
-
-stop-doc:
-	@echo "Stopping existing mkdocs serve processes..."
-	@ps aux | grep 'mkdocs serve' | grep -v grep | awk '{print $$2}' | xargs -r kill
-	@echo "Old mkdocs serve processes stopped."
-
-start-doc:
-	@echo "Starting mkdocs serve in the background..."
-	nohup $(MKDOCS_CMD) &>/dev/null &
-
-status-doc:
-	@echo "Checking mkdocs serve process..."
-	@ps aux | grep 'mkdocs serve' | grep -v grep || echo "No mkdocs serve process is running."
-
-# utils to publish packages to releases or package registry
-publish-package: package
-	@bash scripts/publish-package.sh
-
-publish-release: package
-	@bash scripts/publish-release.sh
-
-publish-to-apex: package
-	@bash scripts/publish-choreo-for-apex.sh
-
-publish-to-topsop: package
-	@bash scripts/publish-choreo-for-topsop.sh
-
-publish-sdk: sdk-package
-	pkg_name=$$(find $(REL_BUILD_DIR)/package/_CPack_Packages/Linux/DEB/ -name 'choreo-dev*.deb'); \
-	sdk_name=$$(basename $$pkg_name); \
-	md5sum $$pkg_name; \
-	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
-
-prepare: setup-ginac
-run-samples: $(OPERATOR_NAMES:%=test-%)
-
+setup-core: $(SETUP_TARGET_DEPENDS)
+	git submodule update --init --recursive;

@@ -1,3 +1,11 @@
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/factor_script.sh FACTOR_SCRIPT_CONTENT)
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/factor_script_template.in
+  ${CMAKE_BINARY_DIR}/factor_script.inc
+  @ONLY
+)
+
 add_custom_target(
   gcu_deps ALL
   DEPENDS
@@ -8,10 +16,10 @@ add_custom_target(
 set(GCU_TARGET_SOURCES
   topscc_target.cpp
   topscc_preprocess.cpp
-  codegen_topscc.cpp
+  topscc_codegen.cpp
   factor_target.cpp
-  codegen_factor.cpp
-  codegen_factor_types.cpp
+  factor_codegen.cpp
+  factor_codegen_types.cpp
 )
 
 add_library(GCUTarget OBJECT ${GCU_TARGET_SOURCES})

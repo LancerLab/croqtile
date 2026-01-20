@@ -18,7 +18,7 @@ struct IndexDyn {
   static constexpr bool isStatic() { return false; }
 
   // Prefix increment operator
-  constexpr IndexDyn &operator++() {
+  constexpr IndexDyn& operator++() {
     ++value;
     return *this;
   }
@@ -58,28 +58,28 @@ inline constexpr bool is_index_like_v = is_index_like<T>::value;
 template <
     typename Lhs, typename Rhs,
     typename = std::enable_if_t<is_index_like_v<Lhs> && is_index_like_v<Rhs>>>
-constexpr bool operator<(const Lhs &lhs, const Rhs &rhs) {
+constexpr bool operator<(const Lhs& lhs, const Rhs& rhs) {
   return lhs.value < rhs.value;
 }
 
 #define DEFINE_BINARY_OPERATOR_FOR_INDEX(op)                                   \
   template <int Value, int OtherValue>                                         \
-  constexpr auto operator op(const Index<Value> &lhs,                          \
-                             const Index<OtherValue> &rhs) {                   \
+  constexpr auto operator op(const Index<Value>& lhs,                          \
+                             const Index<OtherValue>& rhs) {                   \
     return Index<Value op OtherValue>();                                       \
   }                                                                            \
                                                                                \
   template <int Value>                                                         \
-  constexpr auto operator op(const IndexDyn &lhs, const Index<Value> &rhs) {   \
+  constexpr auto operator op(const IndexDyn& lhs, const Index<Value>& rhs) {   \
     return IndexDyn(lhs.value op Value);                                       \
   }                                                                            \
                                                                                \
   template <int Value>                                                         \
-  constexpr auto operator op(const Index<Value> &lhs, const IndexDyn &rhs) {   \
+  constexpr auto operator op(const Index<Value>& lhs, const IndexDyn& rhs) {   \
     return IndexDyn(lhs.value op rhs.value);                                   \
   }                                                                            \
                                                                                \
-  constexpr auto operator op(const IndexDyn &lhs, const IndexDyn &rhs) {       \
+  constexpr auto operator op(const IndexDyn& lhs, const IndexDyn& rhs) {       \
     return IndexDyn(lhs.value op rhs.value);                                   \
   }                                                                            \
   // /* Index + int */                                                   \
@@ -93,46 +93,48 @@ constexpr bool operator<(const Lhs &lhs, const Rhs &rhs) {
   //     return Index<lhs op Value>{};                                    \
   // }                                                                    \
 
-#define DEFINE_POINTER_OPERATOR_FOR_INDEX_AND_FLOAT(op)                                  \
+#define DEFINE_POINTER_OPERATOR_FOR_INDEX_AND_FLOAT(op)                        \
   /* need to constraint allowed type */                                        \
   /* float* + Index */                                                         \
   template <int Value>                                                         \
-  constexpr __device__ float *operator op(float *ptr,                          \
-                                          const Index<Value> &index) {         \
+  constexpr __device__ float* operator op(float* ptr,                          \
+                                          const Index<Value>& index) {         \
     return ptr op index.value;                                                 \
   }                                                                            \
   /* Index + float* */                                                         \
   template <int Value>                                                         \
-  constexpr __device__ float *operator op(const Index<Value> &index,           \
-                                          float *ptr) {                        \
+  constexpr __device__ float* operator op(const Index<Value>& index,           \
+                                          float* ptr) {                        \
     return ptr op index.value;                                                 \
   }                                                                            \
-  constexpr __device__ float *operator op(float *ptr, const IndexDyn &index) { \
+  constexpr __device__ float* operator op(float* ptr,                          \
+                                          const IndexDyn & index) {            \
     return ptr op index.value;                                                 \
   }                                                                            \
   /* Index + float* */                                                         \
-  constexpr __device__ float *operator op(const IndexDyn &index, float *ptr) { \
+  constexpr __device__ float* operator op(const IndexDyn & index,              \
+                                          float* ptr) {                        \
     return ptr op index.value;                                                 \
   }
-#define DEFINE_POINTER_OPERATOR_FOR_INDEX_AND_HALF(op)                                  \
+#define DEFINE_POINTER_OPERATOR_FOR_INDEX_AND_HALF(op)                         \
   /* need to constraint allowed type */                                        \
-  /* half* + Index */                                                         \
+  /* half* + Index */                                                          \
   template <int Value>                                                         \
-  constexpr __device__ half *operator op(half *ptr,                          \
-                                          const Index<Value> &index) {         \
+  constexpr __device__ half* operator op(half * ptr,                           \
+                                         const Index<Value>& index) {          \
     return ptr op index.value;                                                 \
   }                                                                            \
-  /* Index + half* */                                                         \
+  /* Index + half* */                                                          \
   template <int Value>                                                         \
-  constexpr __device__ half *operator op(const Index<Value> &index,           \
-                                          half *ptr) {                        \
+  constexpr __device__ half* operator op(const Index<Value>& index,            \
+                                         half * ptr) {                         \
     return ptr op index.value;                                                 \
   }                                                                            \
-  constexpr __device__ half *operator op(half *ptr, const IndexDyn &index) { \
+  constexpr __device__ half* operator op(half * ptr, const IndexDyn & index) { \
     return ptr op index.value;                                                 \
   }                                                                            \
-  /* Index + half* */                                                         \
-  constexpr __device__ half *operator op(const IndexDyn &index, half *ptr) { \
+  /* Index + half* */                                                          \
+  constexpr __device__ half* operator op(const IndexDyn & index, half * ptr) { \
     return ptr op index.value;                                                 \
   }
 
@@ -149,21 +151,21 @@ DEFINE_POINTER_OPERATOR_FOR_INDEX_AND_HALF(-)
 
 // define special ceil-div
 template <int Value, int OtherValue>
-constexpr auto ceil_div(const Index<Value> &lhs, const Index<OtherValue> &rhs) {
+constexpr auto ceil_div(const Index<Value>& lhs, const Index<OtherValue>& rhs) {
   return Index<(Value + OtherValue - 1) / OtherValue>();
 }
 
-constexpr auto ceil_div(const IndexDyn &lhs, const IndexDyn &rhs) {
+constexpr auto ceil_div(const IndexDyn& lhs, const IndexDyn& rhs) {
   return IndexDyn((lhs.value + rhs.value - 1) / rhs.value);
 }
 
 template <int Value>
-constexpr auto ceil_div(const Index<Value> &lhs, const IndexDyn &rhs) {
+constexpr auto ceil_div(const Index<Value>& lhs, const IndexDyn& rhs) {
   return IndexDyn((lhs.value + rhs.value - 1) / rhs.value);
 }
 
 template <int Value>
-constexpr auto ceil_div(const IndexDyn &lhs, const Index<Value> &rhs) {
+constexpr auto ceil_div(const IndexDyn& lhs, const Index<Value>& rhs) {
   return IndexDyn((lhs.value + rhs - 1) / rhs);
 }
 

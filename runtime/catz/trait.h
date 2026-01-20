@@ -18,7 +18,8 @@ constexpr bool is_compile_time_constant_v = is_compile_time_constant<T>::value;
 template <typename T, T Value, typename = void>
 struct is_integral_constant_convertible : std::false_type {};
 
-// 2. If it can be used as a template parameter, match this specialization version
+// 2. If it can be used as a template parameter, match this specialization
+// version
 template <typename T, T Value>
 struct is_integral_constant_convertible<
     T, Value, std::void_t<decltype(std::integral_constant<T, Value>{})>>

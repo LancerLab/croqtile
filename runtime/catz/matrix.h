@@ -25,18 +25,18 @@ template <typename T, typename ShapeType, typename StrideType>
 struct Matrix {
   static_assert(is_allowed_type<T>::value,
                 "T must be one of the allowed types: float, half, or float4.");
-  T *data;
+  T* data;
   ShapeType shape;
   StrideType stride;
 
-  constexpr __device__ Matrix(T *dt, ShapeType sp, StrideType st)
+  constexpr __device__ Matrix(T* dt, ShapeType sp, StrideType st)
       : data(dt), shape(sp), stride(st) {}
 
-  constexpr __device__ Matrix(const Matrix &other)
+  constexpr __device__ Matrix(const Matrix& other)
       : data(other.data), shape(other.shape), stride(other.stride) {}
 
   // move
-  constexpr __device__ Matrix(Matrix &&other) noexcept
+  constexpr __device__ Matrix(Matrix&& other) noexcept
       : data(other.data), shape(other.shape), stride(other.stride) {
     other.data = nullptr;
   }
@@ -47,15 +47,15 @@ struct Matrix {
 
   // TODO: make it device'd code
   template <typename TileVarType, typename NewShapeType>
-  constexpr inline __device__ auto tile(const TileVarType &tile_var,
-                                        const NewShapeType &new_shape) {
+  constexpr inline __device__ auto tile(const TileVarType& tile_var,
+                                        const NewShapeType& new_shape) {
     auto new_data = data + tile_var.rows * new_shape.rows * stride.rows +
                     tile_var.cols * new_shape.cols * stride.cols;
     return Matrix<T, NewShapeType, StrideType>(new_data, new_shape, stride);
   }
 
   template <typename TileVarType>
-  constexpr inline __device__ auto dist_to(const TileVarType &tile_var) {
+  constexpr inline __device__ auto dist_to(const TileVarType& tile_var) {
     // shape = 8 x 2
     // y in 0-4, x in 0-4
     auto new_data =
@@ -95,12 +95,12 @@ struct Matrix {
   template <typename U = T>
   inline __device__
       typename std::enable_if<std::is_same<U, half>::value, void>::type
-      load_fragments(unsigned *loader) {
+      load_fragments(unsigned* loader) {
     // TODO: add loader length check
     auto lane_id = IndexDyn((threadIdx.y * blockDim.x + threadIdx.x) % I32());
     auto lane_rank = lane_id % shape.rows;
     auto lane_group = lane_id / shape.rows;
-    const half *data_ptr = data + lane_rank * stride.rows + lane_group * I8();
+    const half* data_ptr = data + lane_rank * stride.rows + lane_group * I8();
     if (shape.rows() == 16 && shape.cols() == 8) {
       // LHS X2
       asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [%2];"
@@ -129,7 +129,7 @@ struct Matrix {
   template <typename U = T>
   constexpr inline __device__
       typename std::enable_if<std::is_same<U, float>::value, void>::type
-      load_fragments_c(float *loader) {
+      load_fragments_c(float* loader) {
     auto lane_id = IndexDyn((threadIdx.y * blockDim.x + threadIdx.x) % I32());
     if (shape.rows() == 16 && shape.cols() == 8) {
       loader[0] =
@@ -146,7 +146,7 @@ struct Matrix {
   template <typename U = T>
   constexpr inline __device__
       typename std::enable_if<std::is_same<U, float>::value, void>::type
-      store_fragments_c(float *storer) {
+      store_fragments_c(float* storer) {
     auto lane_id = IndexDyn((threadIdx.y * blockDim.x + threadIdx.x) % I32());
     if (shape.rows == 16 && shape.cols == 8) {
       data[(lane_id / I4()) * stride.rows + (lane_id % I4()) * I2()] =
@@ -166,7 +166,7 @@ struct Matrix {
 
   template <typename NewShapeType, typename NewStrideType>
   constexpr __device__ void
-  operator=(const Matrix<T, NewShapeType, NewStrideType> &other) {
+  operator=(const Matrix<T, NewShapeType, NewStrideType>& other) {
     *data = *other.data;
   }
 
@@ -178,7 +178,7 @@ struct Matrix {
   template <typename U = T, typename NewShapeType, typename NewStrideType>
   constexpr inline __device__
       typename std::enable_if<std::is_same<U, half>::value, void>::type
-      operator=(const Matrix<float, NewShapeType, NewStrideType> &other) {
+      operator=(const Matrix<float, NewShapeType, NewStrideType>& other) {
     *data = __float2half(*other.data);
   }
 
@@ -186,7 +186,7 @@ struct Matrix {
   template <typename U = T, typename NewShapeType, typename NewStrideType>
   constexpr inline __device__
       typename std::enable_if<std::is_same<U, float>::value, void>::type
-      operator=(const Matrix<half, NewShapeType, NewStrideType> &other) {
+      operator=(const Matrix<half, NewShapeType, NewStrideType>& other) {
     *data = __half2float(*other.data);
   }
 
@@ -199,7 +199,7 @@ struct Matrix {
 
   // operator '<=' is syntax sugar that combines dist-to-threads and '='
   // operator
-  constexpr inline __device__ void operator<=(const Matrix &other) {
+  constexpr inline __device__ void operator<=(const Matrix& other) {
     // can make 11352
     auto total_threads = IndexDyn(blockDim.x * blockDim.y);
     // int total_threads = 256;
@@ -242,7 +242,7 @@ struct Matrix {
   template <typename U = T, typename NewShapeType, typename NewStrideType>
   constexpr inline __device__
       typename std::enable_if<std::is_same<U, half>::value, void>::type
-      operator<=(const Matrix<float, NewShapeType, NewStrideType> &other) {
+      operator<=(const Matrix<float, NewShapeType, NewStrideType>& other) {
     int total_threads = blockDim.x * blockDim.y;
     int total_elements = shape.rows * shape.cols;
     int thread_id = threadIdx.x + threadIdx.y * blockDim.x;
@@ -313,7 +313,7 @@ struct Matrix {
   // }
   // special operator that allows any same-volume copy, when the volume is
   // dividable by threads volume
-  constexpr inline __device__ void operator<<=(const Matrix &other) {
+  constexpr inline __device__ void operator<<=(const Matrix& other) {
     int total_threads = blockDim.x;
     // int total_threads = blockDim.x * blockDim.y;
     int total_elements = shape.rows * shape.cols;
@@ -334,7 +334,7 @@ struct Matrix {
   template <typename U = T, typename NewShapeType, typename NewStrideType>
   constexpr inline __device__
       typename std::enable_if<std::is_same<U, half>::value, void>::type
-      operator<<=(const Matrix<float, NewShapeType, NewStrideType> &other) {
+      operator<<=(const Matrix<float, NewShapeType, NewStrideType>& other) {
     int total_threads = blockDim.x;
     // int total_threads = blockDim.x * blockDim.y;
     int total_elements = shape.rows * shape.cols;

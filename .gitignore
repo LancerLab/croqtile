@@ -12,12 +12,14 @@ choreo
 copp
 build/
 build-release/
+build-debug/
 package/
 sgemm-ref
 demo/*.bin
 demo/*.fb
 demo/__*
 __*
+.local.mk
 tests/standalone/*.test
 tests/standalone/*.cutest
 

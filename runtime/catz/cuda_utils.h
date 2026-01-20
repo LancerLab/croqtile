@@ -8,7 +8,7 @@
 
 namespace catz {
 
-__device__ __forceinline__ uint get_smem_ptr(const void *ptr) {
+__device__ __forceinline__ uint get_smem_ptr(const void* ptr) {
   return static_cast<unsigned>(__cvta_generic_to_shared(ptr));
 }
 

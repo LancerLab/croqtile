@@ -1,6 +1,6 @@
-#include "codegen_cute.hpp"
+#include "cute_codegen.hpp"
+#include "gpu_adapt.hpp"
 #include "gpu_target.hpp"
-#include "gpuadapt.hpp"
 #include "memcheck.hpp"
 #include "pipeline.hpp"
 #include "target_registry.hpp"

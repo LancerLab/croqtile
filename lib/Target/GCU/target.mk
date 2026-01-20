@@ -1,0 +1,205 @@
+FTP_SERVER:=172.16.11.18
+
+SETUP_TARGET_DEPENDS += setup-choreo-kit
+SETUP_TARGET_DEPENDS += setup-ginac
+SETUP_TARGET_DEPENDS += setup-clang-format
+SETUP_TARGET_DEPENDS += setup-git-hooks
+SETUP_TARGET_DEPENDS += setup-gcu-acore
+CHOREO_DEFAULT_TARGET = topscc
+CLANG_FORMAT:=$(WORK_DIR)/extern/clang-format-19-1-2
+
+FILECHECK:=$(TOOLCHAIN_DIR)/bin/FileCheck
+PACKAGE_NAME=choreo_toolchain_250930.tgz
+SUPPORT_PKG =$(TOOLCHAIN_DIR)/$(PACKAGE_NAME)
+PACKAGE_MD5:=a4297fca634dcdda3d08c467550d4b22
+CUR_PKG_MD5:=$(shell md5sum $(SUPPORT_PKG) 2>/dev/null| cut -d ' ' -f 1)
+BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
+BISON:=$(BISON_ENV) $(BISON_BIN)
+CFLAGS += -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)"
+
+.PHONY: setup-gcu2 setup-gcu3 setup-git-hooks
+
+check-choreo-kit:
+	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the supporting package..."; \
+		$(MAKE) download-choreo-kit; \
+	else \
+		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
+	fi;
+
+download-choreo-kit:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(PACKAGE_NAME) -o $(SUPPORT_PKG);\
+
+install-choreo-kit: check-choreo-kit
+	cd $(TOOLCHAIN_DIR) && tar -zvxf $(SUPPORT_PKG); \
+	chmod +x $(BISON_BIN); \
+	ln -sf $(WORK_DIR)/extern/bin/not.sh tests
+
+setup-choreo-kit: check-choreo-kit
+	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
+	  $(MAKE) install-choreo-kit; \
+	fi;
+
+setup-clang-format: check-clang-format
+	chmod +x $(CLANG_FORMAT)
+
+setup-git-hooks:
+	@mkdir .git/hooks; \
+	cp ./scripts/hooks/pre-commit-check.sh .git/hooks/pre-commit; \
+	chmod +x .git/hooks/pre-commit
+
+setup-gcu-acore:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore
+
+setup-cuda:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-cuda FTP_SERVER=$(FTP_SERVER)
+
+setup-gcu2: setup-core
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)
+
+setup-gcu3: setup-core
+	git submodule update --init --recursive;\
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
+
+setup-gcu4: setup-core
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-kit FTP_SERVER=$(FTP_SERVER)
+
+setup-gcu5: setup-core
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-kit FTP_SERVER=$(FTP_SERVER)
+
+resetup-gcu2: install-choreo-kit
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-install FTP_SERVER=$(FTP_SERVER)
+
+resetup-gcu3: install-choreo-kit
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-install FTP_SERVER=$(FTP_SERVER)
+
+resetup-gcu4: install-choreo-kit
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-install FTP_SERVER=$(FTP_SERVER)
+
+resetup-gcu5: install-choreo-kit
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-install FTP_SERVER=$(FTP_SERVER)
+
+gcu2-kmd:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kmd FTP_SERVER=$(FTP_SERVER)
+
+gcu3-kmd:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
+
+GINAC_MD5=9d0eaa439c7b825311e99a9aa9b15f9a
+GINAC_PACKAGE_NAME=ginac-cln-251014.tgz
+GINAC_PACKAGE=$(TOOLCHAIN_DIR)/$(GINAC_PACKAGE_NAME)
+CUR_GINAC_MD5:=$(shell md5sum $(GINAC_PACKAGE) 2>/dev/null| cut -d ' ' -f 1)
+
+download-ginac:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GINAC_PACKAGE_NAME) -o $(GINAC_PACKAGE);\
+
+check-ginac:
+	@if [ "$(CUR_GINAC_MD5)" != "$(GINAC_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the ginac package..."; \
+		$(MAKE) download-ginac; \
+	else \
+		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
+	fi;
+
+setup-ginac: check-ginac
+	@if [ ! -f "$(TOOLCHAIN_DIR)/ginac/ginac-1.8.7/install/lib/libginac.a" ]; then \
+	    tar -zxvf $(GINAC_PACKAGE) -C $(TOOLCHAIN_DIR);\
+	fi;
+
+CFORMAT_MD5=6ee59eba63782b362bc9ba1138911f3a
+CFORMAT_NAME=clang-format-19-1-2
+CUR_CFORMAT_MD5:=$(shell md5sum $(CLANG_FORMAT) 2>/dev/null| cut -d ' ' -f 1)
+
+download-clang-format:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(CFORMAT_NAME) -o $(CLANG_FORMAT);\
+
+check-clang-format:
+	@if [ "$(CUR_CFORMAT_MD5)" != "$(CFORMAT_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the clang-format..."; \
+		$(MAKE) download-clang-format; \
+	else \
+		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
+	fi;
+
+# utils to serve Choreo Documents
+MKDOCS_CMD = mkdocs serve --dev-addr=0.0.0.0:8000
+
+serve-doc: stop-doc start-doc
+
+stop-doc:
+	@echo "Stopping existing mkdocs serve processes..."
+	@ps aux | grep 'mkdocs serve' | grep -v grep | awk '{print $$2}' | xargs -r kill
+	@echo "Old mkdocs serve processes stopped."
+
+start-doc:
+	@echo "Starting mkdocs serve in the background..."
+	nohup $(MKDOCS_CMD) &>/dev/null &
+
+status-doc:
+	@echo "Checking mkdocs serve process..."
+	@ps aux | grep 'mkdocs serve' | grep -v grep || echo "No mkdocs serve process is running."
+
+# utils to publish packages to releases or package registry
+publish-package: package
+	@bash scripts/publish-package.sh
+
+publish-release: package
+	@bash scripts/publish-release.sh
+
+publish-to-apex: package
+	@bash scripts/publish-choreo-for-apex.sh
+
+publish-to-topsop: package
+	@bash scripts/publish-choreo-for-topsop.sh
+
+publish-sdk: sdk-package
+	pkg_name=$$(find $(REL_BUILD_DIR)/package/_CPack_Packages/Linux/DEB/ -name 'choreo-dev*.deb'); \
+	sdk_name=$$(basename $$pkg_name); \
+	md5sum $$pkg_name; \
+	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
+
+prepare: setup-ginac
+# =============================================================================
+# Sample Tests for topscc/elementwise
+# =============================================================================
+
+ELEMENTWISE_DIR = samples/topscc/elementwise
+OPERATOR_NAMES = $(notdir $(basename $(wildcard $(ELEMENTWISE_DIR)/*.co)))
+CHOREO_FLAGS = -gs -t topscc
+
+sample-test: $(OPERATOR_NAMES:%=sample-test-%)
+
+sample-test-%: $(ELEMENTWISE_DIR)/%.co
+	@TMPDIR=$$(mktemp -d) && \
+	echo -n "Testing $*... " && \
+	if choreo $(CHOREO_FLAGS) $< -o $$TMPDIR/test.result > /dev/null 2>&1 && \
+	   bash $$TMPDIR/test.result --execute > /dev/null 2>&1; then \
+		echo "PASSED"; \
+		ret=0; \
+	else \
+		echo "FAILED"; \
+		ret=1; \
+	fi; \
+	rm -rf $$TMPDIR; \
+	exit $$ret
+
+sample-test-operator:
+	@if [ -z "$(OPERATOR)" ]; then \
+		echo "Usage: make sample-test-operator OPERATOR=operator_name"; \
+		echo "Available operators: $(OPERATOR_NAMES)"; \
+		exit 1; \
+	fi
+	@TMPDIR=$$(mktemp -d) && \
+	echo -n "Testing $(OPERATOR)... " && \
+	if choreo $(CHOREO_FLAGS) $(ELEMENTWISE_DIR)/$(OPERATOR).co -o $$TMPDIR/test.result > /dev/null 2>&1 && \
+	   bash $$TMPDIR/test.result --execute > /dev/null 2>&1; then \
+		echo "PASSED"; \
+		ret=0; \
+	else \
+		echo "FAILED"; \
+		ret=1; \
+	fi; \
+	rm -rf $$TMPDIR; \
+	exit $$ret
+
+run-samples: $(OPERATOR_NAMES:%=test-%)

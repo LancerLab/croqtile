@@ -1,6 +1,5 @@
 file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo.h CHOREO_HEADER_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo_cute.h CHOREO_CUTE_HEADER_CONTENT)
-file(READ ${CMAKE_SOURCE_DIR}/scripts/factor_script.sh FACTOR_SCRIPT_CONTENT)
 
 configure_file(
   ${CMAKE_SOURCE_DIR}/scripts/choreo_header_template.in
@@ -11,12 +10,6 @@ configure_file(
 configure_file(
   ${CMAKE_SOURCE_DIR}/scripts/choreo_cute_header_template.in
   ${CMAKE_BINARY_DIR}/choreo_cute_header.inc
-  @ONLY
-)
-
-configure_file(
-  ${CMAKE_SOURCE_DIR}/scripts/factor_script_template.in
-  ${CMAKE_BINARY_DIR}/factor_script.inc
   @ONLY
 )
 

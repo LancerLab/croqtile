@@ -4,9 +4,9 @@
 namespace catz {
 
 // KERNEL UTILS
-#define OFFSET(row, col, ld) ((row)*(ld)+(col))
+#define OFFSET(row, col, ld) ((row) * (ld) + (col))
 #define FETCH_FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
-#define CEIL_DIV(dividend, divisor) (((dividend) + (divisor)-1) / (divisor))
+#define CEIL_DIV(dividend, divisor) (((dividend) + (divisor) - 1) / (divisor))
 
 // TODO: impl volume
 // TODO: Matrix own.
