@@ -376,7 +376,8 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   if (n.IsSparse()) {
     extern Option<bool> sim_sparse;
     if (!sim_sparse) {
-      Warning(n.LOC(), "Sparse DMA is enabled without -sim; this path is experimental.");
+      Warning(n.LOC(),
+              "Sparse DMA is enabled without -sim; this path is experimental.");
     }
     if (n.operation != ".copy") {
       Error1(n.LOC(), "Sparse DMA only supports dma.copy.sp currently.");
@@ -431,7 +432,8 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     if ((f_shape.Rank() != 2 && f_shape.Rank() != 3) ||
         (t_shape.Rank() != 2 && t_shape.Rank() != 3) || f_shape.IsDynamic() ||
         t_shape.IsDynamic()) {
-      Error1(n.LOC(), "Sparse DMA currently requires static rank-2 or rank-3 tensors.");
+      Error1(n.LOC(),
+             "Sparse DMA currently requires static rank-2 or rank-3 tensors.");
       return false;
     }
   }
@@ -651,7 +653,8 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
     ValueList cs_vals;
     switch (op.GetMethod()) {
     case AST::MMAOperation::ROW_ROW:
-      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(1))) shape_match = false;
+      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(1)))
+        shape_match = false;
       if (op.IsSparse() && !shape_match) {
         auto a_k = a_shape.ValueAt(1);
         auto b_k = b_shape.ValueAt(1);
@@ -662,7 +665,8 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       cs_vals.push_back(b_shape.ValueAt(0));
       break;
     case AST::MMAOperation::ROW_COL:
-      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(0))) shape_match = false;
+      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(0)))
+        shape_match = false;
       if (op.IsSparse() && !shape_match) {
         auto a_k = a_shape.ValueAt(1);
         auto b_k = b_shape.ValueAt(0);
@@ -673,7 +677,8 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       cs_vals.push_back(b_shape.ValueAt(1));
       break;
     case AST::MMAOperation::COL_ROW:
-      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(1))) shape_match = false;
+      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(1)))
+        shape_match = false;
       if (op.IsSparse() && !shape_match) {
         auto a_k = a_shape.ValueAt(0);
         auto b_k = b_shape.ValueAt(1);
@@ -684,7 +689,8 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       cs_vals.push_back(b_shape.ValueAt(0));
       break;
     case AST::MMAOperation::COL_COL:
-      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(0))) shape_match = false;
+      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(0)))
+        shape_match = false;
       if (op.IsSparse() && !shape_match) {
         auto a_k = a_shape.ValueAt(0);
         auto b_k = b_shape.ValueAt(0);
@@ -714,8 +720,10 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       }
       if (auto kv = VIInt(k_dim)) {
         if ((*kv % 4) != 0) {
-          Error1(n.LOC(),
-                 "Sparse MMA requires K dimension to be a multiple of 4. Got: " + STR(k_dim));
+          Error1(
+              n.LOC(),
+              "Sparse MMA requires K dimension to be a multiple of 4. Got: " +
+                  STR(k_dim));
           return false;
         }
       } else {

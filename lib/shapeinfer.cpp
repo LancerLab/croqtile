@@ -1150,8 +1150,9 @@ bool ShapeInference::Visit(AST::MMA& n) {
     // Metadata handling for sparse MMA (operand 3)
     if (op.IsSparse() && !op.ExecOperand(3).empty()) {
       auto mdata_sym = op.ExecOperand(3);
-      auto mdata_span = RemoveSuffix(SSTab().InScopeName(mdata_sym), ".data") + ".span";
-      // We don't necessarily update the result shape based on E, 
+      auto mdata_span =
+          RemoveSuffix(SSTab().InScopeName(mdata_sym), ".data") + ".span";
+      // We don't necessarily update the result shape based on E,
       // but we ensure it's visited and registered in the valno table if needed.
     }
 
