@@ -77,7 +77,7 @@ public:
     } else {
       switch (sto) {
       case Storage::LOCAL: return 16;
-      case Storage::SHARED: return 32;
+      case Storage::SHARED: return 128; // req of wgmma and tma
       default: choreo_unreachable("Unsupported mem level.");
       }
     }

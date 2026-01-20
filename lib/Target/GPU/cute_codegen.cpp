@@ -1053,7 +1053,14 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (sa) {
           // is span_as
           hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name;
-          if (sto == Storage::GLOBAL)
+          bool is_global_arg = false;
+          for (const auto& item : GetChoreoFuncIns(cgi)) {
+            if (UnScopedName(item.name) == sa->id->name) {
+              is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
+              break;
+            }
+          }
+          if (is_global_arg)
             hs << ".data();\n";
           else
             hs << "__device;\n";
@@ -1083,7 +1090,14 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (sa) {
           // is span_as
           hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name;
-          if (sto == Storage::GLOBAL)
+          bool is_global_arg = false;
+          for (const auto& item : GetChoreoFuncIns(cgi)) {
+            if (UnScopedName(item.name) == sa->id->name) {
+              is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
+              break;
+            }
+          }
+          if (is_global_arg)
             hs << ".data();\n";
           else
             hs << "__device;\n";
@@ -1584,9 +1598,13 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 
     hs << ");\n";
 
-    // TODO: cudaStreamSynchronize
-    if (!n.IsAsync())
-      hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
+    if (!n.IsAsync()) {
+      if (stream_name != "")
+        hs << h_indent << "choreo::abend_true(cudaStreamSynchronize("
+           << stream_name << "));\n";
+      else
+        hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
+    }
 
     // copy the span passed by ref back to host
     for (const auto& item : GetChoreoFuncIns(updating_cgi)) {

@@ -9,7 +9,7 @@ __co__ void foo(f32 [M, N] a) {
 
 // CHECK: __global__ void __choreo_device_foo(float * a, unsigned M, unsigned N) {
 // CHECK:   if (!((N < 3))) {
-// CHECK:     printf("tests/codegen/topscc/assert.co:6.5: choreo assertion abort: expected \"N\" is less than 3.");
+// CHECK:     printf("{{.*}}assert.co:6.5: choreo assertion abort: expected \"N\" is less than 3.");
 // CHECK:     __co_abort__();
 // CHECK:   }
 // CHECK: }
@@ -17,5 +17,5 @@ __co__ void foo(f32 [M, N] a) {
 // CHECK: void foo(const choreo::spanned_view<choreo::f32, 2> & a) {
 // CHECK:   auto &M = a.shape()[0];
 // CHECK:   auto &N = a.shape()[1];
-// CHECK:   choreo_assert((M > 8), "expected \"M\" is larger than 8.", "tests/codegen/topscc/assert.co", 4);
+// CHECK:   choreo_assert((M > 8), "expected \"M\" is larger than 8.", "{{.*}}assert.co", 4);
 // CHECK: }
