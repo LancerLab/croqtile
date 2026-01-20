@@ -1198,6 +1198,43 @@ make_spanview(T* ptr, std::initializer_list<size_t> init) {
   return spanned_view<T, Rank>(ptr, make_mdspan<Rank>(init));
 }
 
+// remove const version
+template <typename T, size_t Rank>
+__co_any__ spanned_view<std::remove_const_t<T>, Rank>
+make_spanview(T* ptr, std::initializer_list<size_t> init) {
+    using U = std::remove_const_t<T>;
+    return spanned_view<U, Rank>(
+        const_cast<U*>(ptr),
+        make_mdspan<Rank>(init)
+    );
+}
+
+// void* version
+template <typename T, size_t Rank>
+__co_any__ spanned_view<std::remove_const_t<T>, Rank>
+make_spanview(void* ptr, std::initializer_list<size_t> init) {
+    static_assert(!std::is_void_v<T>, "T must not be void");
+    static_assert(std::is_object_v<T>, "T must be an object type");
+    using U = std::remove_const_t<T>;
+    return spanned_view<U, Rank>(
+        reinterpret_cast<U*>(ptr),
+        make_mdspan<Rank>(init)
+    );
+}
+
+// const void* version
+template <typename T, size_t Rank>
+__co_any__ spanned_view<std::remove_const_t<T>, Rank>
+make_spanview(const void* ptr, std::initializer_list<size_t> init) {
+    static_assert(!std::is_void_v<T>, "T must not be void");
+    static_assert(std::is_object_v<T>, "T must be an object type");
+    using U = std::remove_const_t<T>;
+    return spanned_view<U, Rank>(
+        const_cast<U*>(reinterpret_cast<const U*>(ptr)),
+        make_mdspan<Rank>(init)
+    );
+}
+
 template <typename T, size_t N>
 __co_any__ spanned_view<T, 1> make_spanview(T (&arr)[N]) {
   return spanned_view<T, 1>((T*)arr, {N});
