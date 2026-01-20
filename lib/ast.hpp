@@ -2668,7 +2668,7 @@ public:
     case Exec: {
       auto e_info = std::get<2>(info);
       return Make<MMAOperation>(e_info.method, e_info.acc, e_info.lhs,
-                                e_info.rhs, e_info.sparse);
+                                e_info.rhs, e_info.mdata, e_info.sparse);
     } break;
     case Store: {
       return Make<MMAOperation>(StoreFrom(), CloneP(StoreTo()));

@@ -1384,6 +1384,8 @@ struct Sparse2to4HostPolicy {
     }
   }
 
+  // TODO: remove this function after all sparse utils fixed down, 
+  // this one is only for debug verbose purpose
   __co_host__ static inline void compress_ref(const std::vector<float>& dense_f,
                                               std::vector<float>& sparse_f,
                                               std::vector<MetaT>& meta_out,
@@ -1420,6 +1422,64 @@ struct Sparse2to4HostPolicy {
     }
   }
 };
+} // namespace utils
+
+namespace utils {
+
+// -----------------------------------------------------------------------------
+// dtype-driven META_K inference (non-breaking addition).
+// See: SparseMetaK and aliases introduced elsewhere in this file.
+// -----------------------------------------------------------------------------
+
+// Default inference: conservative default for 16-bit value types.
+template <typename ValueT, typename MetaT>
+struct SparseMetaK {
+  static constexpr size_t value = 16;
+};
+
+// fp8 defaults (SM90 sparse MMA use wider META_K).
+// METADATA K SIZE is super easy to infer
+// for 2:4 sparsity, each 4 elems group has 2 non-zeros, need 2 indices with 2 bits each
+// to indicate its order in 0-3. thus 1 elem vs 1 bit
+// for fp16/bf16, we have mma.sp shape m16n8k32 and m16n8k16 options, 32/16 is the metadata k size
+// for fp8 e4m3 or e5m2, we have mma.sp shape m16n8k64, 64 is the metadata k size
+template <>
+struct SparseMetaK<choreo::f8_e4m3, choreo::u32> { static constexpr size_t value = 64; };
+template <>
+struct SparseMetaK<choreo::f8_e5m2, choreo::u32> { static constexpr size_t value = 64; };
+
+// Convenience forwarding alias (non-breaking):
+template <typename ValueT, typename MetaT>
+using SparseHostPolicy =
+    Sparse2to4HostPolicy<ValueT, MetaT, SparseMetaK<ValueT, MetaT>::value>;
+
+template <typename ValueT, typename MetaT = choreo::u32>
+using SparsePolicy = SparseHostPolicy<ValueT, MetaT>;
+
+// Common fixed META_K aliases (for f16/bf16 sparse MMA variants).
+template <typename ValueT, typename MetaT = choreo::u32>
+using SparsePolicyK16 = Sparse2to4HostPolicy<ValueT, MetaT, 16>;
+
+template <typename ValueT, typename MetaT = choreo::u32>
+using SparsePolicyK32 = Sparse2to4HostPolicy<ValueT, MetaT, 32>;
+
+// --- Compile-time smoke tests to prevent regressions ------------------------
+static_assert(SparseMetaK<choreo::f16, choreo::u32>::value == 16,
+              "Regression: SparseMetaK<f16,u32> changed");
+static_assert(SparseMetaK<choreo::bf16, choreo::u32>::value == 16,
+              "Regression: SparseMetaK<bf16,u32> changed");
+static_assert(SparseMetaK<choreo::f8_e4m3, choreo::u32>::value == 64,
+              "Regression: SparseMetaK<f8_e4m3,u32> changed");
+static_assert(SparseMetaK<choreo::f8_e5m2, choreo::u32>::value == 64,
+              "Regression: SparseMetaK<f8_e5m2,u32> changed");
+
+static_assert(std::is_same<SparseHostPolicy<choreo::f16, choreo::u32>,
+                           Sparse2to4HostPolicy<choreo::f16, choreo::u32, 16>>::value,
+              "Regression: SparseHostPolicy<f16,u32> must match explicit instantiation");
+static_assert(std::is_same<SparseHostPolicy<choreo::f8_e4m3, choreo::u32>,
+                           Sparse2to4HostPolicy<choreo::f8_e4m3, choreo::u32, 64>>::value,
+              "Regression: SparseHostPolicy<f8_e4m3,u32> must match explicit instantiation");
+
 } // namespace utils
 
 template <size_t Rank, typename T>

@@ -4,6 +4,7 @@
 *.o
 *.inc
 *.out
+tmp
 **gcusim.**
 tests/*co.test
 extern/*

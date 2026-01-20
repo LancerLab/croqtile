@@ -254,6 +254,24 @@ static const std::map<MMAConfig, CUDA_CC> cute_mma_configs = {
     {{DENSE, BT::U4, BT::S4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 64}}, 80},
     {{DENSE, BT::U4, BT::U4, BT::S32, BT::S32, BT::UNKNOWN, {16, 8, 64}}, 80},
 
+    // sm90 FP8 16 x 8 x 64 (sparse path frontend acceptance)
+    {{DENSE,
+      BT::F8_E4M3,
+      BT::F8_E4M3,
+      BT::F8_E4M3,
+      BT::F8_E4M3,
+      BT::UNKNOWN,
+      {16, 8, 64}},
+     90},
+    {{DENSE,
+      BT::F8_E5M2,
+      BT::F8_E5M2,
+      BT::F8_E5M2,
+      BT::F8_E5M2,
+      BT::UNKNOWN,
+      {16, 8, 64}},
+     90},
+
     // Binary (b1) popc -> S32
     // 8 x 8 x 128
     {{DENSE, BT::BIN1, BT::BIN1, BT::S32, BT::S32, BT::UNKNOWN, {8, 8, 128}},
@@ -298,6 +316,41 @@ static const std::map<MMAConfig, CUDA_CC> cute_mma_configs = {
       BT::UNKNOWN,
       {16, 8, 32}},
      89},
+
+    // TODO(albert): use SPARSE to mark supported sparse configs separately
+    // FP8 16 x 8 x 64 for sparse
+    {{DENSE,
+      BT::F8_E4M3,
+      BT::F8_E4M3,
+      BT::F32,
+      BT::F32,
+      BT::UNKNOWN,
+      {16, 8, 64}},
+     90},
+    {{DENSE,
+      BT::F8_E4M3,
+      BT::F8_E5M2,
+      BT::F32,
+      BT::F32,
+      BT::UNKNOWN,
+      {16, 8, 64}},
+     90},
+    {{DENSE,
+      BT::F8_E5M2,
+      BT::F8_E5M2,
+      BT::F32,
+      BT::F32,
+      BT::UNKNOWN,
+      {16, 8, 64}},
+     90},
+    {{DENSE,
+      BT::F8_E5M2,
+      BT::F8_E4M3,
+      BT::F32,
+      BT::F32,
+      BT::UNKNOWN,
+      {16, 8, 64}},
+     90},
 
     {{DENSE,
       BT::F8_E4M3,
@@ -497,8 +550,17 @@ inline MMAType GetMMAType(const MMAConfig& config) {
     return MMAType::WGMMA;
   else if (ConfigIsCuteMMA(dense))
     return MMAType::CTMMA;
-  else
+  else {
+    // Provide clearer guidance for common unsupported FP8+k64 attempts
+    if ((config.a_ty == BT::F8_E4M3 || config.a_ty == BT::F8_E5M2 ||
+         config.b_ty == BT::F8_E4M3 || config.b_ty == BT::F8_E5M2) &&
+        config.shape.k == 64) {
+      choreo_unreachable(
+          "unsupported MMA config: " + config.ToString() +
+          " — FP8 m16n8k64 requires GPU compute capability >= SM_90");
+    }
     choreo_unreachable("unsupported MMA config: " + config.ToString());
+  }
   return MMAType::WMMA;
 }
 

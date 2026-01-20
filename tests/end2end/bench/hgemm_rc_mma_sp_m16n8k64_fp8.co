@@ -1,18 +1,18 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t cute -arch=sm_80 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute -arch=sm_90 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 #define M 256
 #define N 256
 #define K 256
-#define META_K 16
+#define META_K 64
 
 // Sparse GEMM: A is 2:4 structured sparse (pre-packed), B is dense
-// K-major operands for row.row MMA
+// K-major operands for row.row MMA with FP8 types
 
-__co__ auto matmul_sp_k16_f16(f16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_meta, f16 [N, K] rhs) {
+__co__ auto matmul_sp_k64_e4m3(f8_e4m3 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_meta, f8_e4m3 [N, K] rhs) {
   f32 [M, N] output{0.0f};
   int TILE_M = 64, TILE_N = 64, TILE_K = 64;
-  int WARP_M = 16, WARP_N = 8, WARP_K = 16;
+  int WARP_M = 16, WARP_N = 8, WARP_K = 64;
   parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
     parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
       mc = mma.fill.f32 0.0f;
@@ -33,10 +33,10 @@ __co__ auto matmul_sp_k16_f16(f16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_m
   return output;
 }
 
-__co__ auto matmul_sp_k16_bf16(bf16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_meta, bf16 [N, K] rhs) {
+__co__ auto matmul_sp_k64_e5m2(f8_e5m2 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_meta, f8_e5m2 [N, K] rhs) {
   f32 [M, N] output{0.0f};
   int TILE_M = 64, TILE_N = 64, TILE_K = 64;
-  int WARP_M = 16, WARP_N = 8, WARP_K = 16;
+  int WARP_M = 16, WARP_N = 8, WARP_K = 64;
   parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
     parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
       mc = mma.fill.f32 0.0f;
@@ -60,20 +60,20 @@ __co__ auto matmul_sp_k16_bf16(bf16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs
 template <typename T>
 using SparsePolicy = choreo::utils::SparsePolicy<T>;
 
-int run_case_k16_f16(const char* tag) {
+int run_case_k64_e4m3(const char* tag) {
   std::mt19937 gen(42);
-  auto lhs_dense = choreo::make_spandata<choreo::f16>(M, K);
-  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
-  SparsePolicy<choreo::f16>::init_structured_sparse_A(lhs_dense, gen);
+  auto lhs_dense = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+  SparsePolicy<choreo::f8_e4m3>::init_structured_sparse_A(lhs_dense, gen);
   rhs.fill_random(-1.0f, 1.0f);
 
-  auto lhs_packed = choreo::make_spandata<choreo::f16>(M, K / 2);
+  auto lhs_packed = choreo::make_spandata<choreo::f8_e4m3>(M, K / 2);
   auto lhs_meta = choreo::make_spandata<choreo::u32>(M, K / META_K);
-  SparsePolicy<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta);
+  SparsePolicy<choreo::f8_e4m3>::encode(lhs_dense, lhs_packed, lhs_meta);
 
-  auto res = matmul_sp_k16_f16(lhs_packed.view(), lhs_meta.view(), rhs.view());
+  auto res = matmul_sp_k64_e4m3(lhs_packed.view(), lhs_meta.view(), rhs.view());
 
-  float tolerance = 0.1f;
+  float tolerance = 0.5f; // Adjusted for FP8 precision
   int errors = 0;
   for (size_t i = 0; i < M; ++i)
     for (size_t j = 0; j < N; ++j) {
@@ -87,20 +87,20 @@ int run_case_k16_f16(const char* tag) {
   return errors;
 }
 
-int run_case_k16_bf16(const char* tag) {
+int run_case_k64_e5m2(const char* tag) {
   std::mt19937 gen(42);
-  auto lhs_dense = choreo::make_spandata<choreo::bf16>(M, K);
-  auto rhs = choreo::make_spandata<choreo::bf16>(N, K);
-  SparsePolicy<choreo::bf16>::init_structured_sparse_A(lhs_dense, gen);
+  auto lhs_dense = choreo::make_spandata<choreo::f8_e5m2>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f8_e5m2>(N, K);
+  SparsePolicy<choreo::f8_e5m2>::init_structured_sparse_A(lhs_dense, gen);
   rhs.fill_random(-1.0f, 1.0f);
 
-  auto lhs_packed = choreo::make_spandata<choreo::bf16>(M, K / 2);
+  auto lhs_packed = choreo::make_spandata<choreo::f8_e5m2>(M, K / 2);
   auto lhs_meta = choreo::make_spandata<choreo::u32>(M, K / META_K);
-  SparsePolicy<choreo::bf16>::encode(lhs_dense, lhs_packed, lhs_meta);
+  SparsePolicy<choreo::f8_e5m2>::encode(lhs_dense, lhs_packed, lhs_meta);
 
-  auto res = matmul_sp_k16_bf16(lhs_packed.view(), lhs_meta.view(), rhs.view());
+  auto res = matmul_sp_k64_e5m2(lhs_packed.view(), lhs_meta.view(), rhs.view());
 
-  float tolerance = 0.1f;
+  float tolerance = 0.5f; // Adjusted for FP8 precision
   int errors = 0;
   for (size_t i = 0; i < M; ++i)
     for (size_t j = 0; j < N; ++j) {
@@ -116,14 +116,15 @@ int run_case_k16_bf16(const char* tag) {
 
 int main() {
   int errors = 0;
-  errors += run_case_k16_f16("k16_f16");
-  errors += run_case_k16_bf16("k16_bf16");
-  if (errors > 0) {
-    std::cout << "FAILED: " << errors << " errors\n";
-    return 1;
+  errors += run_case_k64_e4m3("k64_e4m3");
+  errors += run_case_k64_e5m2("k64_e5m2");
+  if (errors == 0) {
+    std::cout << "Test Passed\n";
+    return 0;
   }
-  std::cout << "Test Passed\n";
-  return 0;
+  std::cout << "FAILED: " << errors << " errors\n";
+  return 1;
 }
 
-// CHECK: Test Passed
+// CHECK: Test Passed</content>
+<parameter name="filePath">/home/albert/choreo/tests/end2end/bench/hgemm_rc_mma_sp_m16n8k64_fp8.co
