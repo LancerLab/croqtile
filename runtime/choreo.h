@@ -1322,13 +1322,11 @@ struct Sparse2to4HostPolicy {
                 "MetaT is too small for META_K.");
 
   __co_host__ static inline void
-  init_structured_sparse_A(std::vector<float>& dense_f,
-                           spanned_data<ValueT, 2>& dense, std::mt19937& gen) {
+  init_structured_sparse_A(spanned_data<ValueT, 2>& dense, std::mt19937& gen) {
     const size_t M = dense.shape()[0];
     const size_t K = dense.shape()[1];
     std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
     std::uniform_int_distribution<int> pick(0, 3);
-    dense_f.assign(M * K, 0.0f);
     dense.fill(ValueT(0));
     for (size_t r = 0; r < M; ++r) {
       for (size_t c_group = 0; c_group < K / 4; ++c_group) {
@@ -1345,35 +1343,14 @@ struct Sparse2to4HostPolicy {
         ValueT t1 = from_f32<ValueT>(v1);
         dense.data()[base + idx0] = t0;
         dense.data()[base + idx1] = t1;
-        dense_f[base + idx0] = to_f32(t0);
-        dense_f[base + idx1] = to_f32(t1);
       }
     }
   }
 
-  // Initialize RHS with K-major layout [N, K] stored as rhs[k * N + n].
-  __co_host__ static inline void init_rhs_kmajor(std::vector<float>& rhs_f,
-                                                 spanned_data<ValueT, 2>& rhs,
-                                                 std::mt19937& gen) {
-    const size_t N = rhs.shape()[0];
-    const size_t K = rhs.shape()[1];
-    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-    std::vector<ValueT> rhs_t(K * N);
-    rhs_f.resize(K * N);
-    for (size_t i = 0; i < rhs_t.size(); ++i) {
-      ValueT tv = from_f32<ValueT>(dist(gen));
-      rhs_t[i] = tv;
-      rhs_f[i] = to_f32(tv);
-    }
-    for (size_t n = 0; n < N; ++n)
-      for (size_t k = 0; k < K; ++k) rhs[n][k] = rhs_t[k * N + n];
-  }
-
   // Encode 2:4 sparse A into packed values and META_K-grouped metadata.
   __co_host__ static inline void
-  encode(const std::vector<float>& dense_f, spanned_data<ValueT, 2>& dense,
-         spanned_data<ValueT, 2>& packed, spanned_data<MetaT, 2>& meta,
-         std::vector<MetaT>* row_meta = nullptr) {
+    encode(spanned_data<ValueT, 2>& dense, spanned_data<ValueT, 2>& packed,
+      spanned_data<MetaT, 2>& meta, std::vector<MetaT>* row_meta = nullptr) {
     const size_t M = dense.shape()[0];
     const size_t K = dense.shape()[1];
     const size_t strips = K / META_K;
@@ -1388,7 +1365,7 @@ struct Sparse2to4HostPolicy {
           int idxs[2] = {-1, -1};
           int nz = 0;
           for (int i = 0; i < 4; ++i) {
-            if (dense_f[base + i] != 0.0f) {
+            if (to_f32(dense.data()[base + i]) != 0.0f) {
               if (nz < 2) idxs[nz] = i;
               nz++;
             }
