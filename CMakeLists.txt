@@ -423,6 +423,7 @@ string(STRIP "${CPACK_PACKAGE_VERSION}" CPACK_PACKAGE_VERSION)
 # Common metadata
 set(CPACK_PACKAGE_NAME "choreo")
 set(CPACK_PACKAGE_VENDOR "Choreo Developers")
+set(CPACK_PACKAGE_CONTACT "https://github.com/tbd/choreo/issues")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 
 # Where final artifacts go
