@@ -1,18 +1,20 @@
 // REQUIRES: TARGET-GPU
 // RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
-__co__ s32 [6, 64] ele_add(s32 [6, 64] lhs, s32 [6, 64] rhs) {
-  s32[lhs.span] output;
+__co__ s32 [6, 64] ele_add(s32 [2, 3, 64] lhs, s32 [2, 3, 64] rhs) {
+  l = lhs.span_as(6, 64);
+  r = rhs.span_as(6, 64);
+  s32[l.span] output;
 
   parallel p by 6, q by 64
-    output.at(p, q) = lhs.at(p, q) + rhs.at(p, q);
+    output.at(p, q) = l.at(p, q) + r.at(p, q);
 
   return output;
 }
 
 int main() { /// host program
-  auto a = choreo::make_spandata<choreo::s32>(6, 64);
-  auto b = choreo::make_spandata<choreo::s32>(6, 64);
+  auto a = choreo::make_spandata<choreo::s32>(2, 3, 64);
+  auto b = choreo::make_spandata<choreo::s32>(2, 3, 64);
   a.fill_random(-10, 10);
   b.fill_random(-10, 10);
 
@@ -21,8 +23,10 @@ int main() { /// host program
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
     for (size_t j = 0; j < res.shape()[1]; ++j) {
-      if (a[i][j] + b[i][j] != res[i][j])
-        choreo::choreo_assert(a[i][j] + b[i][j] == res[i][j], "values are not equal.");
+      auto aa = a[i/3][i%3][j];
+      auto bb = b[i/3][i%3][j];
+      if (aa + bb != res[i][j])
+        choreo::choreo_assert(aa + bb == res[i][j], "values are not equal.");
     }
 
   std::cout << "Test Passed\n" << std::endl;

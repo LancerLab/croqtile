@@ -1069,19 +1069,23 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 
     return true;
   }
-
-  if (auto e = dyn_cast<AST::Expr>(n.init_expr))
-    if (auto sa = dyn_cast<AST::SpanAs>(e->GetReference())) {
-      if (IsHost()) choreo_unreachable("span-as should be on device side.");
-      ds << d_indent << "auto* " << sym << " = ";
-      auto tty = GetSymbolType(sa->id->name);
-      if (isa<FutureType>(tty))
-        ds << sa->id->name << ".data();\n";
-      else
-        ds << sa->id->name << ";\n";
-      ssm.MapDeviceSymbol(InScopeName(sym), sym);
-      return true;
+  ptr<AST::SpanAs> sa = nullptr;
+  if (auto e = dyn_cast<AST::Expr>(n.init_expr)) {
+    sa = dyn_cast<AST::SpanAs>(e->GetReference());
+    if (sa) {
+      // handle span_as of global buffer in `HandleGlobal`
+      if (!IsHost()) {
+        ds << d_indent << "auto* " << sym << " = ";
+        auto tty = GetSymbolType(sa->id->name);
+        if (isa<FutureType>(tty))
+          ds << sa->id->name << ".data();\n";
+        else
+          ds << sa->id->name << ";\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        return true;
+      }
     }
+  }
 
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     auto buf_sym = sym + "__device";
@@ -1111,13 +1115,20 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
                             GetBaseType(*n.init_value->GetType()), true)
              << ");\n";
         }
-        hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
-           << UnScopedSizeExpr(*sty) << "));\n";
-        if (n.init_value) {
-          hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
-             << sym_data << ", " << UnScopedSizeExpr(*sty)
-             << ", cudaMemcpyHostToDevice));\n";
+        if (sa) {
+          // is span_as
+          hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name
+             << "__device;\n";
+
+        } else {
+          hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
+          hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
+             << UnScopedSizeExpr(*sty) << "));\n";
+          if (n.init_value) {
+            hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym
+               << ", " << sym_data << ", " << UnScopedSizeExpr(*sty)
+               << ", cudaMemcpyHostToDevice));\n";
+          }
         }
         global_buffers.insert(buf_sym);
         return;
@@ -1131,26 +1142,32 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         VST_DEBUG(dbgs() << "Found " << buf_sym << " in FBInfo - "
                          << STR(FBInfo()) << "\n");
       } else {
-        hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
-           << UnScopedSizeExpr(*sty) << "));\n";
+        if (sa) {
+          // is span_as
+          hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name
+             << "__device;\n";
+        } else {
+          hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
+          hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
+             << UnScopedSizeExpr(*sty) << "));\n";
 
-        if (!n.init_value) return;
+          if (!n.init_value) return;
 
-        std::string sym_data = sym + ".data()";
-        hs << h_indent << "auto " << sym
-           << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
-           << shape.Rank() << ">({"
-           << ShapeSTR(shape, false, ", ", BaseType::U64) << "});\n";
-        hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
-           << sym << ".element_count()"
-           << ", "
-           << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
-                          GetBaseType(*n.init_value->GetType()), true)
-           << ");\n";
-        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
-           << sym_data << ", " << UnScopedSizeExpr(*sty)
-           << ", cudaMemcpyHostToDevice));\n";
+          std::string sym_data = sym + ".data()";
+          hs << h_indent << "auto " << sym
+             << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
+             << shape.Rank() << ">({"
+             << ShapeSTR(shape, false, ", ", BaseType::U64) << "});\n";
+          hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
+             << sym << ".element_count()"
+             << ", "
+             << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
+                            GetBaseType(*n.init_value->GetType()), true)
+             << ");\n";
+          hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
+             << sym_data << ", " << UnScopedSizeExpr(*sty)
+             << ", cudaMemcpyHostToDevice));\n";
+        }
       }
     };
 
@@ -2318,7 +2335,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string elem_ty = NameBaseType(ssmi.ty);
       ds << d_indent << elem_ty << "* " << sym << "_smem_ptr = (" << elem_ty
          << "*)(" << ExprSTR(op.LoadFrom(), false) << ");\n";
-      bool frag_is_fp8 =
+      [[maybe_unused]] bool frag_is_fp8 =
           ssmi.ty == BaseType::F8_E4M3 || ssmi.ty == BaseType::F8_E5M2 ||
           ssmi.ty == BaseType::F8_UE4M3 || ssmi.ty == BaseType::F8_UE8M0;
       std::string major_order = "WGMMA_MajorOrder::MN_MAJOR";
@@ -3776,6 +3793,7 @@ void CuteCodeGen::EmitTopsFree() {
     if (!isa<SpannedType>(item.type)) continue;
     if (item.attr == ParamAttr::GLOBAL_INPUT) continue;
     if (!NeedDeviceFunc() && !IsChoreoOutput(item.name)) continue;
+    if (item.IsReference()) continue;
     hs << h_indent << "choreo::abend_true(cudaFree(" << UnScopedName(item.name)
        << "__device));\n";
   }
