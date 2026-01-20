@@ -64,10 +64,6 @@
 #define __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
 #endif
 
-#if __CUDA_ARCH__ >= 900
-#include "cute/algorithm/copy.hpp"
-#include "cute/algorithm/prefetch.hpp"
-#endif // __CUDA_ARCH__ >= 900
 #include "cute/tensor.hpp"
 #include <cuda/barrier>
 #include <mma.h>
