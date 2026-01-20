@@ -281,22 +281,42 @@ public:
       case AST::MMAOperation::ROW_ROW:
         mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(0));
-        mma_shape.push_back(a_shape.ValueAt(1));
+        if (op.IsSparse())
+          mma_shape.push_back(
+              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(1), sbe::nu(2))
+                  ->Normalize());
+        else
+          mma_shape.push_back(a_shape.ValueAt(1));
         break;
       case AST::MMAOperation::ROW_COL:
         mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(1));
-        mma_shape.push_back(a_shape.ValueAt(1));
+        if (op.IsSparse())
+          mma_shape.push_back(
+              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(1), sbe::nu(2))
+                  ->Normalize());
+        else
+          mma_shape.push_back(a_shape.ValueAt(1));
         break;
       case AST::MMAOperation::COL_ROW:
         mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(0));
-        mma_shape.push_back(a_shape.ValueAt(0));
+        if (op.IsSparse())
+          mma_shape.push_back(
+              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(0), sbe::nu(2))
+                  ->Normalize());
+        else
+          mma_shape.push_back(a_shape.ValueAt(0));
         break;
       case AST::MMAOperation::COL_COL:
         mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(1));
-        mma_shape.push_back(a_shape.ValueAt(0));
+        if (op.IsSparse())
+          mma_shape.push_back(
+              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(0), sbe::nu(2))
+                  ->Normalize());
+        else
+          mma_shape.push_back(a_shape.ValueAt(0));
         break;
       default: choreo_unreachable("unsupported mma execution method.");
       }
@@ -314,9 +334,19 @@ public:
       cgi.AddSymbolMMA(
           InScopeName(c_sym),
           MMAInfo{acc_ty, mma_shape, MMAInfo::FRAG_C, op.GetMethod()});
+
+      if (op.IsSparse() && !op.ExecOperand(3).empty()) {
+        auto e_sym = op.ExecOperand(3);
+        auto e_ty = GetSpannedType(GetSymbolType(e_sym));
+        cgi.AddSymbolMMA(
+            InScopeName(e_sym),
+            MMAInfo{e_ty->ElementType(), mma_shape, MMAInfo::FRAG_E, op.GetMethod()});
+      }
+
       VST_DEBUG(dbgs() << "mma type: " << STR(a_ety) << ", " << STR(b_ety)
                        << ", " << STR(acc_ty) << ", shape: " << STR(mma_shape)
                        << " -> " << a_sym << ", " << b_sym << ", " << c_sym
+                       << (op.IsSparse() ? ", " + op.ExecOperand(3) : "")
                        << "\n");
     } break;
     case AST::MMAOperation::Store: break;

@@ -2502,6 +2502,7 @@ public:
     std::string acc;
     std::string lhs;
     std::string rhs;
+    std::string mdata;
     bool sparse;
   };
   struct StoreInfo {
@@ -2523,7 +2524,10 @@ public:
       : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
                const std::string& r, bool sp = false)
-      : tag(Exec), info(ExecInfo{m, o, l, r, sp}) {}
+      : tag(Exec), info(ExecInfo{m, o, l, r, "", sp}) {}
+  MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
+               const std::string& r, const std::string& e, bool sp)
+      : tag(Exec), info(ExecInfo{m, o, l, r, e, sp}) {}
   MMAOperation(const std::string& n, const ptr<ChunkAt>& c)
       : tag(Store), info(StoreInfo{n, c}) {}
 
@@ -2597,6 +2601,8 @@ public:
       return e_info.lhs;
     else if (index == 2)
       return e_info.rhs;
+    else if (index == 3)
+      return e_info.mdata;
     else
       choreo_unreachable("oob for mma exec operands.");
   }

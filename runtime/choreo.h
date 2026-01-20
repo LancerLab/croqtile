@@ -937,7 +937,109 @@ __co_host__ inline void fill_random(U* array, size_t N, U lb, U ub) {
     static_assert(sizeof(U) == 0, "Unsupported type for fill_random.");
   }
 }
+
+// Helper to check if a value is zero
+template <typename U>
+__co_host__ inline bool is_zero(const U& v) {
+  if constexpr (std::is_integral<U>::value) {
+    return v == 0;
+  } else if constexpr (std::is_floating_point<U>::value) {
+    return v == static_cast<U>(0);
+  } else if constexpr (std::is_same<U, f16>::value ||
+                       std::is_same<U, bf16>::value ||
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+                       std::is_same<U, f8_e4m3>::value ||
+                       std::is_same<U, f8_e5m2>::value ||
+#endif
+                       false) {
+    return to_f32(v) == 0.0f;
+  } else {
+    return false;
+  }
+}
+
+// Fill a 2:4 structured sparse matrix (rank-2) with the first 2 of every 4 = nonzero
+template <typename U>
+__co_host__ inline void fill_ss(U* array, size_t M, size_t K, U nonzero = U(1)) {
+  for (size_t i = 0; i < M; ++i) {
+    for (size_t k4 = 0; k4 < K / 4; ++k4) {
+      size_t base = i * K + k4 * 4;
+      array[base + 0] = nonzero;
+      array[base + 1] = nonzero;
+      array[base + 2] = U(0);
+      array[base + 3] = U(0);
+    }
+  }
+}
+
+// Fill a 2:4 structured sparse matrix (rank-2) with random values
+template <typename U>
+__co_host__ inline void fill_random_ss(U* array, size_t M, size_t K, U lb, U ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int> pick_pos(0, 3);
+  for (size_t i = 0; i < M; ++i) {
+    for (size_t k4 = 0; k4 < K / 4; ++k4) {
+      size_t base = i * K + k4 * 4;
+      // pick two distinct positions
+      int p0 = pick_pos(gen);
+      int p1 = pick_pos(gen);
+      while (p1 == p0) p1 = pick_pos(gen);
+      if (p1 < p0) std::swap(p0, p1);
+      for (int p = 0; p < 4; ++p) array[base + p] = U(0);
+      U v0 = U(1);
+      U v1 = U(1);
+      if constexpr (std::is_integral<U>::value) {
+        std::uniform_int_distribution<int> dist((int)lb, (int)ub);
+        v0 = U(dist(gen));
+        v1 = U(dist(gen));
+      } else if constexpr (std::is_floating_point<U>::value) {
+        std::uniform_real_distribution<float> dist((float)lb, (float)ub);
+        v0 = U(dist(gen));
+        v1 = U(dist(gen));
+      } else {
+        std::uniform_real_distribution<float> dist(to_f32(lb), to_f32(ub));
+        v0 = U(dist(gen));
+        v1 = U(dist(gen));
+      }
+      if (is_zero(v0)) v0 = U(1);
+      if (is_zero(v1)) v1 = U(1);
+      array[base + p0] = v0;
+      array[base + p1] = v1;
+    }
+  }
+}
+
+// Encode 2:4 structured sparse data into packed values and metadata
+// Input: dense [M, K] with 2:4 sparsity pattern
+// Output: packed [M, K/2] values, metadata [M, K/4] byte masks
+template <typename U>
+__co_host__ inline void encode_sparse_2to4(const U* dense, U* packed,
+                                           uint8_t* metadata, size_t M, size_t K) {
+  const size_t chunks = K / 4;
+  for (size_t i = 0; i < M; ++i) {
+    for (size_t k4 = 0; k4 < chunks; ++k4) {
+      size_t base = i * K + k4 * 4;
+      size_t out_base = i * (K / 2) + k4 * 2;
+      U a0 = dense[base + 0];
+      U a1 = dense[base + 1];
+      U a2 = dense[base + 2];
+      U a3 = dense[base + 3];
+      uint8_t nibble = 0;
+      int count = 0;
+      int idxs[2] = {0, 0};
+      if (!is_zero(a0) && count < 2) { packed[out_base + count++] = a0; idxs[count-1] = 0; }
+      if (!is_zero(a1) && count < 2) { packed[out_base + count++] = a1; idxs[count-1] = 1; }
+      if (!is_zero(a2) && count < 2) { packed[out_base + count++] = a2; idxs[count-1] = 2; }
+      if (!is_zero(a3) && count < 2) { packed[out_base + count++] = a3; idxs[count-1] = 3; }
+      while (count < 2) packed[out_base + count++] = U(0);
+      nibble = (idxs[0] & 0x3) | ((idxs[1] & 0x3) << 2);
+      metadata[i * chunks + k4] = nibble;
+    }
+  }
+}
 } // end namespace utils
+
 
 // A 'spanned_view' is a memview of data. It is ranked, but no necessary to have
 // compile-time dimensions
@@ -2435,8 +2537,97 @@ struct Policy_A_M16N8K32 {
   }
 };
 
+// Sparse A load policy for m16n8k16 (compressed K/2 = 8 elements per row)
+// Each thread loads 2 half values from the compressed sparse matrix
+struct Policy_A_Sparse_M16N8K16 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int group_id = lane >> 2;      // 0..7
+    int thread_id = lane & 0x3;    // 0..3
+
+    using value_type = typename Tensor::value_type;
+    static_assert(std::is_same<value_type, f16>::value ||
+                  std::is_same<value_type, bf16>::value,
+                  "Sparse m16n8k16 only supports f16/bf16");
+
+    // For 2:4 sparse m16n8k16: A is [16, 8] (compressed from [16, 16])
+    // Each thread loads 2 values packed into one uint32_t
+    int col_base = thread_id * 2;  // 0, 2, 4, 6
+    uint32_t a0 =
+        (uint32_t(reinterpret_cast<uint16_t&>(A(group_id, col_base + 1))) << 16) |
+        uint16_t(reinterpret_cast<uint16_t&>(A(group_id, col_base)));
+    uint32_t a1 =
+        (uint32_t(reinterpret_cast<uint16_t&>(A(group_id + 8, col_base + 1))) << 16) |
+        uint16_t(reinterpret_cast<uint16_t&>(A(group_id + 8, col_base)));
+    return cutlass::Array<uint32_t, 2>{a0, a1};
+  }
+};
+
+// Sparse A load policy for m16n8k32 (compressed K/2 = 16 elements per row)
+// Each thread loads 4 half values from the compressed sparse matrix
+struct Policy_A_Sparse_M16N8K32 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int group_id = lane >> 2;      // 0..7
+    int thread_id = lane & 0x3;    // 0..3
+
+    using value_type = typename Tensor::value_type;
+    static_assert(std::is_same<value_type, f16>::value ||
+                  std::is_same<value_type, bf16>::value,
+                  "Sparse m16n8k32 only supports f16/bf16");
+
+    // For 2:4 sparse m16n8k32: A is [16, 16] (compressed from [16, 32])
+    // Fragment layout requires 8 half values -> 4 uint32_t registers
+    // Following the sptc-demo pattern for manual lane loading
+    value_type vals[8];
+    #pragma unroll
+    for (int ai = 0; ai < 8; ++ai) {
+      int row = (ai < 2 || (ai >= 4 && ai < 6)) ? group_id : (group_id + 8);
+      int col_base = (ai < 4) ? (thread_id * 4) : (thread_id * 4 + 16);
+      int chunk = col_base / 4;
+      int val_idx = ai & 0x1;
+      // A is [16, 16] compressed; chunk * 2 + val_idx gives column
+      vals[ai] = A(row, chunk * 2 + val_idx);
+    }
+    const uint32_t* p0 = reinterpret_cast<const uint32_t*>(&vals[0]);
+    const uint32_t* p1 = reinterpret_cast<const uint32_t*>(&vals[2]);
+    const uint32_t* p2 = reinterpret_cast<const uint32_t*>(&vals[4]);
+    const uint32_t* p3 = reinterpret_cast<const uint32_t*>(&vals[6]);
+    return cutlass::Array<uint32_t, 4>{p0[0], p1[0], p2[0], p3[0]};
+  }
+};
+
+// Sparse metadata load policy for m16n8k32
+struct Policy_E_Sparse_M16N8K32 {
+  template <class Tensor>
+  __device__ static uint32_t load(Tensor const& E) {
+    int lane = threadIdx.x & 31;
+    uint32_t meta = 0;
+    int group_id = lane >> 2; // 0..7
+    int thread_id = lane & 3; // 0..3
+    meta |= (uint32_t)(uint8_t)E(group_id, thread_id) << 0;
+    meta |= (uint32_t)(uint8_t)E(group_id + 8, thread_id) << 4;
+    meta |= (uint32_t)(uint8_t)E(group_id, thread_id + 4) << 8;
+    meta |= (uint32_t)(uint8_t)E(group_id + 8, thread_id + 4) << 12;
+    return meta;
+  }
+};
+
+// Sparse metadata load policy for m16n8k16
+struct Policy_E_Sparse_M16N8K16 {
+  template <class Tensor>
+  __device__ static uint32_t load(Tensor const& E) {
+    int lane = threadIdx.x & 31;
+    int group_id = lane >> 2; // 0..7
+    return E(group_id);
+  }
+};
+
 // for s4, u4 and e2m1
 struct Policy_A_M16N8K64 {
+
   template <class Tensor>
   __device__ static auto load(Tensor const& A) {
     int lane = threadIdx.x & 31;
@@ -2639,7 +2830,54 @@ struct Policy_B_M16N8K16 {
   }
 };
 
-// for s8, u8, e4m3, e5m2, e3m2, e2m3 and e2m1
+// Sparse B policy for m16n8k16 with K-major [N, K] layout
+struct Policy_B_Sparse_M16N8K16 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, double>::value) {
+      int row = tid_in_group;
+      int col = gid;
+      double b0 = B(col, row);
+      double b1 = B(col, row + 4);
+      double b2 = B(col, row + 8);
+      double b3 = B(col, row + 12);
+      return cutlass::Array<double, 4>{b0, b1, b2, b3};
+    } else if constexpr (std::is_same<value_type, f16>::value ||
+                         std::is_same<value_type, bf16>::value) {
+      int row0 = tid_in_group * 2;
+      int row1 = tid_in_group * 2 + 8;
+      int col = gid;
+      uint32_t b0 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 1))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(col, row0)));
+      uint32_t b1 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row1 + 1))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(col, row1)));
+      return cutlass::Array<uint32_t, 2>{b0, b1};
+    } else if constexpr (std::is_same<value_type, uint8_t>::value ||
+                         std::is_same<value_type, int8_t>::value ||
+                         std::is_same<value_type, f8_e4m3>::value ||
+                         std::is_same<value_type, f8_e5m2>::value) {
+      int row = tid_in_group * 4;
+      int col = gid;
+      uint32_t b0 = 0;
+#pragma unroll
+      for (int i = 3; i >= 0; i--)
+        b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(col, row + i)));
+      return cutlass::Array<uint32_t, 1>{b0};
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
+  }
+};
+
+// for s8, u8, e4m3, e5m2, e3m2, e2m3, e2m1, and also f16/bf16 for sparse MMA
 struct Policy_B_M16N8K32 {
   template <class Tensor>
   __device__ static auto load(Tensor const& B) {
@@ -2650,7 +2888,24 @@ struct Policy_B_M16N8K32 {
     int row0 = tid_in_group * 4;
     int row1 = tid_in_group * 4 + 16;
     int col = gid;
-    if constexpr (std::is_same<typename Tensor::value_type, s8>::value ||
+    if constexpr (std::is_same<typename Tensor::value_type, f16>::value ||
+                  std::is_same<typename Tensor::value_type, bf16>::value) {
+      // For f16/bf16 m16n8k32: B is [32, 8], need 4 registers
+      int row2 = tid_in_group * 4 + 8;
+      uint32_t b0 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row0 + 1, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row0, col)));
+      uint32_t b1 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row0 + 3, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row0 + 2, col)));
+      uint32_t b2 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row2 + 1, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row2, col)));
+      uint32_t b3 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(row2 + 3, col))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(row2 + 2, col)));
+      return cutlass::Array<uint32_t, 4>{b0, b1, b2, b3};
+    } else if constexpr (std::is_same<typename Tensor::value_type, s8>::value ||
                   std::is_same<typename Tensor::value_type, u8>::value ||
                   std::is_same<typename Tensor::value_type, f8_e4m3>::value ||
                   std::is_same<typename Tensor::value_type, f8_e5m2>::value) {
@@ -2669,6 +2924,41 @@ struct Policy_B_M16N8K32 {
     } else {
       static_assert(sizeof(Tensor) != sizeof(Tensor),
                     "unsupported data type in this MMA policy");
+    }
+  }
+};
+
+// Sparse row.row path expects B in K-major (shape [N, K]).
+// This policy swaps B indices for f16/bf16 to match that layout.
+struct Policy_B_Sparse_M16N8K32 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane % 4;
+
+    int row0 = tid_in_group * 4;
+    int row1 = tid_in_group * 4 + 16;
+    int col = gid;
+    if constexpr (std::is_same<typename Tensor::value_type, f16>::value ||
+                  std::is_same<typename Tensor::value_type, bf16>::value) {
+      int row2 = tid_in_group * 4 + 8;
+      // Swap indices: B is [N, K]
+      uint32_t b0 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 1))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(col, row0)));
+      uint32_t b1 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 3))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(col, row0 + 2)));
+      uint32_t b2 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row2 + 1))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(col, row2)));
+      uint32_t b3 =
+          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row2 + 3))) << 16) |
+          uint16_t(reinterpret_cast<uint16_t&>(B(col, row2 + 2)));
+      return cutlass::Array<uint32_t, 4>{b0, b1, b2, b3};
+    } else {
+      return Policy_B_M16N8K32::load(B);
     }
   }
 };
@@ -3281,6 +3571,13 @@ __device__ static inline auto load_fragment_b(Tensor const& B) {
   return MMA_Policy<MMA>::typeB::load(B);
 }
 
+// load E fragment (metadata)
+template <class MMA, class Tensor>
+__device__ static inline auto load_fragment_e(Tensor const& E) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  return MMA_Policy<MMA>::typeE::load(E);
+}
+
 // load d fragment with pointer
 template <class MMA, int N = 0, class Tensor, class AccumT>
 __device__ static inline void load_fragment_d(Tensor const& D,
@@ -3328,6 +3625,9 @@ struct CUTE_MMA_M16N8K8 : CUTE_MMA {};
 struct CUTE_MMA_M16N8K16 : CUTE_MMA {};
 struct CUTE_MMA_M16N8K32 : CUTE_MMA {};
 struct CUTE_MMA_M16N8K128 : CUTE_MMA {};
+// Sparse MMA atom types for 2:4 structured sparsity
+struct CUTE_MMA_SPARSE_M16N8K16 : CUTE_MMA {};
+struct CUTE_MMA_SPARSE_M16N8K32 : CUTE_MMA {};
 struct CUTE_WGMMA : MMA {};
 struct CUTE_WGMMA_M64K8 : CUTE_WGMMA {};
 struct CUTE_WGMMA_M64K16 : CUTE_WGMMA {};
@@ -3383,9 +3683,29 @@ struct MMA_Policy<CUTE_MMA_M16N8K32> {
   using typeD = Policy_D_M16N8;
 };
 
+// Sparse MMA policies for 2:4 structured sparsity
+template <>
+struct MMA_Policy<CUTE_MMA_SPARSE_M16N8K16> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_Sparse_M16N8K16;
+  using typeB = Policy_B_Sparse_M16N8K16;
+  using typeD = Policy_D_M16N8;
+  using typeE = Policy_E_Sparse_M16N8K16;
+};
+
+template <>
+struct MMA_Policy<CUTE_MMA_SPARSE_M16N8K32> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_Sparse_M16N8K32;
+  using typeB = Policy_B_Sparse_M16N8K32;
+  using typeD = Policy_D_M16N8;
+  using typeE = Policy_E_Sparse_M16N8K32;
+};
+
 // wgmma policies
 template <>
 struct MMA_Policy<CUTE_WGMMA_M64K16> {
+
   static constexpr bool supported = true;
   using typeD = Policy_WGMMA_D_M64K16;
 };
@@ -3419,7 +3739,147 @@ struct MMA_Policy<CUTE_WGMMA_M64k256> {
 // template. No MMA_Policy specializations are needed for WGMMA as it bypasses
 // the cute MMA policy system.
 
+} // end namespace choreo (temporary close for cute namespace)
+
+namespace cute {
+
+// --------------- Sparse MMA PTX wrappers for SM80+ ---------------
+// These implement mma.sp.sync.aligned instructions for 2:4 structured sparsity
+
+// fp16 m16n8k16 sparse MMA: C = A_sparse * B + C
+struct SM80_SPARSE_16x8x16_F32F16F16F32_TN {
+  using DRegisters = float[4];
+  using ARegisters = uint32_t[2];
+  using BRegisters = uint32_t[2];
+  using CRegisters = float[4];
+
+  CUTE_HOST_DEVICE static void fma(
+      float& d0, float& d1, float& d2, float& d3,
+      uint32_t const& a0, uint32_t const& a1,
+      uint32_t const& b0, uint32_t const& b1,
+      float const& c0, float const& c1, float const& c2, float const& c3,
+      uint32_t const& e, int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if (__CUDACC_VER_MAJOR__ > 12) || (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+    asm volatile(
+        "mma.sp::ordered_metadata.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
+        "{%0, %1, %2, %3}, {%4, %5}, {%6, %7}, {%0, %1, %2, %3}, %8, 0x0;\n"
+        : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+        : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(e));
+#else
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
+        "{%0, %1, %2, %3}, {%4, %5}, {%6, %7}, {%0, %1, %2, %3}, %8, 0x0;\n"
+        : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+        : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(e));
+#endif
+#endif
+  }
+};
+
+// fp16 m16n8k32 sparse MMA: C = A_sparse * B + C
+struct SM80_SPARSE_16x8x32_F32F16F16F32_TN {
+  using DRegisters = float[4];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = float[4];
+
+  CUTE_HOST_DEVICE static void fma(
+      float& d0, float& d1, float& d2, float& d3,
+      uint32_t const& a0, uint32_t const& a1, uint32_t const& a2, uint32_t const& a3,
+      uint32_t const& b0, uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
+      float const& c0, float const& c1, float const& c2, float const& c3,
+      uint32_t const& e, int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if (__CUDACC_VER_MAJOR__ > 12) || (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+    asm volatile(
+        "mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.f32.f16.f16.f32 "
+        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, {%0, %1, %2, %3}, %12, 0x0;\n"
+        : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3),
+          "r"(b0), "r"(b1), "r"(b2), "r"(b3), "r"(e));
+#else
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k32.row.col.f32.f16.f16.f32 "
+        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, {%0, %1, %2, %3}, %12, 0x0;\n"
+        : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3),
+          "r"(b0), "r"(b1), "r"(b2), "r"(b3), "r"(e));
+#endif
+#endif
+  }
+};
+
+// bf16 m16n8k16 sparse MMA: C = A_sparse * B + C
+struct SM80_SPARSE_16x8x16_F32BF16BF16F32_TN {
+  using DRegisters = float[4];
+  using ARegisters = uint32_t[2];
+  using BRegisters = uint32_t[2];
+  using CRegisters = float[4];
+
+  CUTE_HOST_DEVICE static void fma(
+      float& d0, float& d1, float& d2, float& d3,
+      uint32_t const& a0, uint32_t const& a1,
+      uint32_t const& b0, uint32_t const& b1,
+      float const& c0, float const& c1, float const& c2, float const& c3,
+      uint32_t const& e, int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if (__CUDACC_VER_MAJOR__ > 12) || (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+    asm volatile(
+        "mma.sp::ordered_metadata.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
+        "{%0, %1, %2, %3}, {%4, %5}, {%6, %7}, {%0, %1, %2, %3}, %8, 0x0;\n"
+        : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+        : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(e));
+#else
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
+        "{%0, %1, %2, %3}, {%4, %5}, {%6, %7}, {%0, %1, %2, %3}, %8, 0x0;\n"
+        : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+        : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(e));
+#endif
+#endif
+  }
+};
+
+// bf16 m16n8k32 sparse MMA: C = A_sparse * B + C
+struct SM80_SPARSE_16x8x32_F32BF16BF16F32_TN {
+  using DRegisters = float[4];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = float[4];
+
+  CUTE_HOST_DEVICE static void fma(
+      float& d0, float& d1, float& d2, float& d3,
+      uint32_t const& a0, uint32_t const& a1, uint32_t const& a2, uint32_t const& a3,
+      uint32_t const& b0, uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
+      float const& c0, float const& c1, float const& c2, float const& c3,
+      uint32_t const& e, int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if (__CUDACC_VER_MAJOR__ > 12) || (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+    asm volatile(
+        "mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.f32.bf16.bf16.f32 "
+        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, {%0, %1, %2, %3}, %12, 0x0;\n"
+        : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3),
+          "r"(b0), "r"(b1), "r"(b2), "r"(b3), "r"(e));
+#else
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k32.row.col.f32.bf16.bf16.f32 "
+        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, {%0, %1, %2, %3}, %12, 0x0;\n"
+        : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3),
+          "r"(b0), "r"(b1), "r"(b2), "r"(b3), "r"(e));
+#endif
+#endif
+  }
+};
+
+} // namespace cute
+
+namespace choreo {
+
 #endif // __CHOREO_TARGET_CUTE__
+
 
 #if defined(__TOPSCC__) || defined(__CHOREO_TARGET_CUTE__)
 

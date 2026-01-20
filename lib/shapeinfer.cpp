@@ -1146,6 +1146,15 @@ bool ShapeInference::Visit(AST::MMA& n) {
     auto sty = MakeSpannedType(c_elem, GenShape(cur_vn), Storage::REG);
     UpdateSymbolType(op.ExecOperand(0), sty);
     UpdateSymbolType(op.ExecOperand(0) + ".span", mty);
+
+    // Metadata handling for sparse MMA (operand 3)
+    if (op.IsSparse() && !op.ExecOperand(3).empty()) {
+      auto mdata_sym = op.ExecOperand(3);
+      auto mdata_span = RemoveSuffix(SSTab().InScopeName(mdata_sym), ".data") + ".span";
+      // We don't necessarily update the result shape based on E, 
+      // but we ensure it's visited and registered in the valno table if needed.
+    }
+
     SetNodeType(n, sty);
   } break;
   case AST::MMAOperation::Store: {

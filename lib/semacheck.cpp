@@ -365,9 +365,10 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     // For now, we just validate the swizzle value is valid (128, 64, or 32)
     // The WGMMA context check will be done in codegen phase
     int swizzle_val = n.GetSwizzleValue();
-    if (swizzle_val != 128 && swizzle_val != 64 && swizzle_val != 32) {
+    if (swizzle_val != 0 && swizzle_val != 128 && swizzle_val != 64 &&
+        swizzle_val != 32) {
       Error1(n.LOC(), "Invalid swizzle value: " + std::to_string(swizzle_val) +
-                          ". Must be 128, 64, or 32.");
+                          ". Must be 0, 128, 64, or 32.");
       return false;
     }
   }
@@ -375,9 +376,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   if (n.IsSparse()) {
     extern Option<bool> sim_sparse;
     if (!sim_sparse) {
-      Error1(n.LOC(), "Sparse DMA requires -sim (simulation only); hardware "
-                      "path is not implemented.");
-      return false;
+      Warning(n.LOC(), "Sparse DMA is enabled without -sim; this path is experimental.");
     }
     if (n.operation != ".copy") {
       Error1(n.LOC(), "Sparse DMA only supports dma.copy.sp currently.");
@@ -429,9 +428,10 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                       "with no tiling.");
       return false;
     }
-    if (f_shape.Rank() != 3 || t_shape.Rank() != 3 || f_shape.IsDynamic() ||
+    if ((f_shape.Rank() != 2 && f_shape.Rank() != 3) ||
+        (t_shape.Rank() != 2 && t_shape.Rank() != 3) || f_shape.IsDynamic() ||
         t_shape.IsDynamic()) {
-      Error1(n.LOC(), "Sparse DMA currently requires static rank-3 tensors.");
+      Error1(n.LOC(), "Sparse DMA currently requires static rank-2 or rank-3 tensors.");
       return false;
     }
   }
@@ -647,35 +647,56 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
     if (old_ec != error_count) return false;
 
     bool shape_match = true;
+    bool sparse_packed_match = false;
     ValueList cs_vals;
     switch (op.GetMethod()) {
     case AST::MMAOperation::ROW_ROW:
-      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(1)))
-        shape_match = false;
+      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(1))) shape_match = false;
+      if (op.IsSparse() && !shape_match) {
+        auto a_k = a_shape.ValueAt(1);
+        auto b_k = b_shape.ValueAt(1);
+        auto a_k2 = sbe::bop(OpCode::MULTIPLY, a_k, sbe::nu(2))->Normalize();
+        if (sbe::ceq(a_k2, b_k)) sparse_packed_match = true;
+      }
       cs_vals.push_back(a_shape.ValueAt(0));
       cs_vals.push_back(b_shape.ValueAt(0));
       break;
     case AST::MMAOperation::ROW_COL:
-      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(0)))
-        shape_match = false;
+      if (!sbe::ceq(a_shape.ValueAt(1), b_shape.ValueAt(0))) shape_match = false;
+      if (op.IsSparse() && !shape_match) {
+        auto a_k = a_shape.ValueAt(1);
+        auto b_k = b_shape.ValueAt(0);
+        auto a_k2 = sbe::bop(OpCode::MULTIPLY, a_k, sbe::nu(2))->Normalize();
+        if (sbe::ceq(a_k2, b_k)) sparse_packed_match = true;
+      }
       cs_vals.push_back(a_shape.ValueAt(0));
       cs_vals.push_back(b_shape.ValueAt(1));
       break;
     case AST::MMAOperation::COL_ROW:
-      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(1)))
-        shape_match = false;
+      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(1))) shape_match = false;
+      if (op.IsSparse() && !shape_match) {
+        auto a_k = a_shape.ValueAt(0);
+        auto b_k = b_shape.ValueAt(1);
+        auto a_k2 = sbe::bop(OpCode::MULTIPLY, a_k, sbe::nu(2))->Normalize();
+        if (sbe::ceq(a_k2, b_k)) sparse_packed_match = true;
+      }
       cs_vals.push_back(a_shape.ValueAt(1));
       cs_vals.push_back(b_shape.ValueAt(0));
       break;
     case AST::MMAOperation::COL_COL:
-      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(0)))
-        shape_match = false;
+      if (!sbe::ceq(a_shape.ValueAt(0), b_shape.ValueAt(0))) shape_match = false;
+      if (op.IsSparse() && !shape_match) {
+        auto a_k = a_shape.ValueAt(0);
+        auto b_k = b_shape.ValueAt(0);
+        auto a_k2 = sbe::bop(OpCode::MULTIPLY, a_k, sbe::nu(2))->Normalize();
+        if (sbe::ceq(a_k2, b_k)) sparse_packed_match = true;
+      }
       cs_vals.push_back(a_shape.ValueAt(1));
       cs_vals.push_back(b_shape.ValueAt(1));
       break;
     default: choreo_unreachable("unsupported mma execution method.");
     }
-    if (!shape_match) {
+    if (!shape_match && !sparse_packed_match) {
       Error1(n.LOC(), "MMA: matrix shapes do not match: `" + a_sym + "'(" +
                           STR(a_shape) + ") v.s. `" + b_sym + "'(" +
                           STR(b_shape) + ").");
@@ -694,7 +715,7 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       if (auto kv = VIInt(k_dim)) {
         if ((*kv % 4) != 0) {
           Error1(n.LOC(),
-                 "Sparse MMA requires K dimension to be a multiple of 4.");
+                 "Sparse MMA requires K dimension to be a multiple of 4. Got: " + STR(k_dim));
           return false;
         }
       } else {

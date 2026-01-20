@@ -208,6 +208,12 @@ static const std::map<MMAConfig, CUDA_CC> cute_mma_configs = {
     {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 16}},
      80},
 
+    // 16 x 8 x 32 (Structured Sparse Logical Shapes)
+    {{DENSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {16, 8, 32}}, 80},
+    {{DENSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 32}}, 80},
+    {{DENSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 32}},
+     80},
+
     // 16 x 8 x 4 (TF32)
     {{DENSE, BT::TF32, BT::TF32, BT::F32, BT::F32, BT::UNKNOWN, {16, 8, 4}},
      80},
@@ -498,12 +504,13 @@ inline MMAType GetMMAType(const MMAConfig& config) {
 
 inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
                                          const std::string& sep = "_") {
-  // example: SM80_16x8x8_F16F16F16F16_TN
+  // example: SM80_SPARSE_16x8x8_F16F16F16F16_TN
   auto dense = mma_config;
   if (dense.sparsity == SPARSE) dense.sparsity = DENSE;
   assert(cute_mma_configs.count(dense));
   std::vector<std::string> strs;
   strs.push_back("SM" + std::to_string(cute_mma_configs.at(dense)));
+  if (mma_config.sparsity == SPARSE) strs.push_back("SPARSE");
   strs.push_back(std::to_string(mma_config.shape.m) + "x" +
                  std::to_string(mma_config.shape.n) + "x" +
                  std::to_string(mma_config.shape.k));

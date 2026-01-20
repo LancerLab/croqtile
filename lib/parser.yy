@@ -1960,6 +1960,10 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, true);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA mma_exec_method SP IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
+        auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, true);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | MMA STORE IDENTIFIER COMMA chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($3, $5);
         $$ = AST::Make<AST::MMA>(@1, op);

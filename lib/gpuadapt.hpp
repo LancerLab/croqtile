@@ -751,22 +751,42 @@ public:
       case AST::MMAOperation::ROW_ROW:
         mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(0));
-        mma_shape.push_back(a_shape.ValueAt(1));
+        if (op.IsSparse())
+          mma_shape.push_back(
+              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(1), sbe::nu(2))
+                  ->Normalize());
+        else
+          mma_shape.push_back(a_shape.ValueAt(1));
         break;
       case AST::MMAOperation::ROW_COL:
         mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(1));
-        mma_shape.push_back(a_shape.ValueAt(1));
+        if (op.IsSparse())
+          mma_shape.push_back(
+              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(1), sbe::nu(2))
+                  ->Normalize());
+        else
+          mma_shape.push_back(a_shape.ValueAt(1));
         break;
       case AST::MMAOperation::COL_ROW:
         mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(0));
-        mma_shape.push_back(a_shape.ValueAt(0));
+        if (op.IsSparse())
+          mma_shape.push_back(
+              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(0), sbe::nu(2))
+                  ->Normalize());
+        else
+          mma_shape.push_back(a_shape.ValueAt(0));
         break;
       case AST::MMAOperation::COL_COL:
         mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(1));
-        mma_shape.push_back(a_shape.ValueAt(0));
+        if (op.IsSparse())
+          mma_shape.push_back(
+              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(0), sbe::nu(2))
+                  ->Normalize());
+        else
+          mma_shape.push_back(a_shape.ValueAt(0));
         break;
       default: choreo_unreachable("unsupported mma execution method.");
       }
@@ -812,12 +832,19 @@ public:
       FCtx(cur_fname).SetFragMMAType(InScopeName(a_sym), mma_ty);
       FCtx(cur_fname).SetFragMMAType(InScopeName(b_sym), mma_ty);
       FCtx(cur_fname).SetFragMMAType(InScopeName(c_sym), mma_ty);
+      if (op.IsSparse() && !op.ExecOperand(3).empty()) {
+        FCtx(cur_fname).SetFragMMAType(InScopeName(op.ExecOperand(3)), mma_ty);
+      }
+
       // TODO: consider to merge predicate
       if (mma_ty == MMAType::CTMMA) {
         std::string mma_policy = MMALimit::MMAConfig2CuteMMAName(mma_config);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
+        if (op.IsSparse() && !op.ExecOperand(3).empty()) {
+          FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(op.ExecOperand(3)), mma_policy);
+        }
       } else if (mma_ty == MMAType::WGMMA) {
         std::string mma_policy = MMALimit::MMAConfig2WGMMAName(mma_config);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);

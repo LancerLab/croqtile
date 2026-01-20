@@ -1814,6 +1814,8 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(0));
     ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(1));
     ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(2));
+    if (op.IsSparse() && !op.ExecOperand(3).empty())
+      ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(3));
   } break;
   case AST::MMAOperation::Store: {
     ReportErrorWhenUseBeforeDefine(n.LOC(), op.StoreFrom());
