@@ -1,0 +1,152 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute -arch=sm_80 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 256
+#define N 256
+#define K 256
+#define META_K 32
+
+// Sparse GEMM: A is 2:4 structured sparse (pre-packed), B is dense
+// K-major operands for row.row MMA
+
+__co__ auto matmul_sp_k32_f16(f16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_meta, f16 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+  int TILE_M = 64, TILE_N = 64, TILE_K = 64;
+  int WARP_M = 16, WARP_N = 8, WARP_K = 32;
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+        lhs_load_s = dma.copy.swizzle(64) lhs_packed.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => local;
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          ma = mma.load.swizzle(64) lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          me = mma.load lhs_load_s_mdata.chunkat(iv_warp_m, iv_warp_k);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+      mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+    }
+  }
+  return output;
+}
+
+__co__ auto matmul_sp_k32_bf16(bf16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_meta, bf16 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+  int TILE_M = 64, TILE_N = 64, TILE_K = 64;
+  int WARP_M = 16, WARP_N = 8, WARP_K = 32;
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+        lhs_load_s = dma.copy.swizzle(64) lhs_packed.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => local;
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          ma = mma.load.swizzle(64) lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          me = mma.load lhs_load_s_mdata.chunkat(iv_warp_m, iv_warp_k);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+      mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+    }
+  }
+  return output;
+}
+
+template <typename T>
+using SparsePolicy = choreo::utils::Sparse2to4HostPolicy<T, choreo::u32, META_K>;
+
+int run_case_k32_f16(const char* tag) {
+  std::mt19937 gen(42);
+  auto lhs_dense = choreo::make_spandata<choreo::f16>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+  std::vector<float> lhs_dense_f;
+  std::vector<float> rhs_f;
+  SparsePolicy<choreo::f16>::init_structured_sparse_A(lhs_dense_f, lhs_dense, gen);
+  SparsePolicy<choreo::f16>::init_rhs_kmajor(rhs_f, rhs, gen);
+
+  auto lhs_packed = choreo::make_spandata<choreo::f16>(M, K / 2);
+  auto lhs_meta = choreo::make_spandata<choreo::u32>(M, K / META_K);
+  SparsePolicy<choreo::f16>::encode(lhs_dense_f, lhs_dense, lhs_packed, lhs_meta);
+
+  std::vector<float> A_sparse_ref;
+  std::vector<uint32_t> E_ref;
+  SparsePolicy<choreo::f16>::compress_ref(lhs_dense_f, A_sparse_ref, E_ref, M, K);
+  int packed_err = 0;
+  for (size_t i = 0; i < A_sparse_ref.size(); ++i) {
+    if (A_sparse_ref[i] != choreo::to_f32(lhs_packed.data()[i])) packed_err++;
+  }
+  int meta_err = 0;
+  for (size_t i = 0; i < E_ref.size(); ++i) {
+    if (E_ref[i] != lhs_meta.data()[i]) meta_err++;
+  }
+  int rhs_mismatch = 0;
+  for (size_t n = 0; n < N; ++n)
+    for (size_t k = 0; k < K; ++k)
+      if (rhs[n][k] != choreo::utils::from_f32<choreo::f16>(rhs_f[k * N + n])) rhs_mismatch++;
+  choreo::choreo_assert(packed_err == 0, "k32 packed mismatch");
+  choreo::choreo_assert(meta_err == 0, "k32 meta mismatch");
+  choreo::choreo_assert(rhs_mismatch == 0, "k32 rhs mismatch");
+
+  auto res = matmul_sp_k32_f16(lhs_packed.view(), lhs_meta.view(), rhs.view());
+
+  float tolerance = 0.1f;
+  int errors = 0;
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += lhs_dense_f[i * K + k] * rhs_f[k * N + j];
+      float got = res[i][j];
+      if (std::abs(got - ref) >= tolerance) errors++;
+    }
+  std::cout << tag << ": " << errors << " errors\n";
+  return errors;
+}
+
+int run_case_k32_bf16(const char* tag) {
+  std::mt19937 gen(42);
+  auto lhs_dense = choreo::make_spandata<choreo::bf16>(M, K);
+  auto rhs = choreo::make_spandata<choreo::bf16>(N, K);
+  std::vector<float> lhs_dense_f;
+  std::vector<float> rhs_f;
+  SparsePolicy<choreo::bf16>::init_structured_sparse_A(lhs_dense_f, lhs_dense, gen);
+  SparsePolicy<choreo::bf16>::init_rhs_kmajor(rhs_f, rhs, gen);
+
+  auto lhs_packed = choreo::make_spandata<choreo::bf16>(M, K / 2);
+  auto lhs_meta = choreo::make_spandata<choreo::u32>(M, K / META_K);
+  SparsePolicy<choreo::bf16>::encode(lhs_dense_f, lhs_dense, lhs_packed, lhs_meta);
+
+  auto res = matmul_sp_k32_bf16(lhs_packed.view(), lhs_meta.view(), rhs.view());
+
+  float tolerance = 0.1f;
+  int errors = 0;
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += lhs_dense_f[i * K + k] * rhs_f[k * N + j];
+      float got = res[i][j];
+      if (std::abs(got - ref) >= tolerance) errors++;
+    }
+  std::cout << tag << ": " << errors << " errors\n";
+  return errors;
+}
+
+int main() {
+  int errors = 0;
+  errors += run_case_k32_f16("k32_f16");
+  errors += run_case_k32_bf16("k32_bf16");
+  if (errors == 0) {
+    std::cout << "Test Passed\n";
+    return 0;
+  }
+  std::cout << "FAILED: " << errors << " errors\n";
+  return 1;
+}
+
+// CHECK: Test Passed

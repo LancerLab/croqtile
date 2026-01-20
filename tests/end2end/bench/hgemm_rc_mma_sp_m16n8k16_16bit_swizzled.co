@@ -1,0 +1,193 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute -arch=sm_80 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 256
+#define N 256
+#define K 256
+#define META_K 16
+
+// Sparse GEMM: A is 2:4 structured sparse (pre-packed), B is dense
+// K-major operands for row.row MMA
+
+__co__ auto matmul_sp_k16_f16(f16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_meta, f16 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+  int TILE_M = 64, TILE_N = 64, TILE_K = 64;
+  int WARP_M = 16, WARP_N = 8, WARP_K = 16;
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+        lhs_load_s = dma.copy.swizzle(64) lhs_packed.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => local;
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          ma = mma.load.swizzle(64) lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          me = mma.load lhs_load_s_mdata.chunkat(iv_warp_m, iv_warp_k);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+      mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+    }
+  }
+  return output;
+}
+
+__co__ auto matmul_sp_k16_bf16(bf16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_meta, bf16 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+  int TILE_M = 64, TILE_N = 64, TILE_K = 64;
+  int WARP_M = 16, WARP_N = 8, WARP_K = 16;
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+        lhs_load_s = dma.copy.swizzle(64) lhs_packed.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => local;
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          ma = mma.load.swizzle(64) lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          me = mma.load lhs_load_s_mdata.chunkat(iv_warp_m, iv_warp_k);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+      mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+    }
+  }
+  return output;
+}
+
+template <typename T>
+using SparsePolicy = choreo::utils::Sparse2to4HostPolicy<T, choreo::u32, META_K>;
+
+int run_case_k16_f16(const char* tag) {
+  std::mt19937 gen(42);
+  auto lhs_dense = choreo::make_spandata<choreo::f16>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+  std::vector<float> lhs_dense_f;
+  std::vector<float> rhs_f;
+  SparsePolicy<choreo::f16>::init_structured_sparse_A(lhs_dense_f, lhs_dense, gen);
+  SparsePolicy<choreo::f16>::init_rhs_kmajor(rhs_f, rhs, gen);
+
+  auto lhs_packed = choreo::make_spandata<choreo::f16>(M, K / 2);
+  auto lhs_meta = choreo::make_spandata<choreo::u32>(M, K / META_K);
+  std::vector<choreo::u32> row_meta;
+  SparsePolicy<choreo::f16>::encode(lhs_dense_f, lhs_dense, lhs_packed, lhs_meta, &row_meta);
+
+  size_t strips = K / META_K;
+  size_t groups_per_strip = META_K / 4;
+  std::vector<float> lhs_dec_f(M * K, 0.0f);
+  for (size_t r = 0; r < M; ++r) {
+    for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+      size_t strip = c_group / groups_per_strip;
+      size_t base = r * K + c_group * 4;
+      size_t in_base = r * (K / 2) + c_group * 2;
+      int pair_idx = (c_group % groups_per_strip) * 2;
+      choreo::u32 meta = row_meta[r * strips + strip];
+      choreo::u32 pos0 = (meta >> (pair_idx * 2)) & 0x3;
+      choreo::u32 pos1 = (meta >> ((pair_idx + 1) * 2)) & 0x3;
+      lhs_dec_f[base + pos0] = choreo::to_f32(lhs_packed.data()[in_base + 0]);
+      lhs_dec_f[base + pos1] = choreo::to_f32(lhs_packed.data()[in_base + 1]);
+    }
+  }
+  int decode_err = 0;
+  for (size_t i = 0; i < lhs_dec_f.size(); ++i)
+    if (lhs_dec_f[i] != lhs_dense_f[i]) decode_err++;
+  choreo::choreo_assert(decode_err == 0, "k16 decode mismatch");
+
+  int meta_err = 0;
+  for (size_t r = 0; r < M; ++r) {
+    for (size_t strip = 0; strip < strips; ++strip) {
+      if (lhs_meta[r][strip] != static_cast<uint32_t>(row_meta[r * strips + strip])) meta_err++;
+    }
+  }
+  choreo::choreo_assert(meta_err == 0, "k16 meta mismatch");
+
+  auto res = matmul_sp_k16_f16(lhs_packed.view(), lhs_meta.view(), rhs.view());
+
+  float tolerance = 0.1f;
+  int errors = 0;
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += lhs_dense_f[i * K + k] * rhs_f[k * N + j];
+      float got = res[i][j];
+      if (std::abs(got - ref) >= tolerance) errors++;
+    }
+  std::cout << tag << ": " << errors << " errors\n";
+  return errors;
+}
+
+int run_case_k16_bf16(const char* tag) {
+  std::mt19937 gen(42);
+  auto lhs_dense = choreo::make_spandata<choreo::bf16>(M, K);
+  auto rhs = choreo::make_spandata<choreo::bf16>(N, K);
+  std::vector<float> lhs_dense_f;
+  std::vector<float> rhs_f;
+  SparsePolicy<choreo::bf16>::init_structured_sparse_A(lhs_dense_f, lhs_dense, gen);
+  SparsePolicy<choreo::bf16>::init_rhs_kmajor(rhs_f, rhs, gen);
+
+  auto lhs_packed = choreo::make_spandata<choreo::bf16>(M, K / 2);
+  auto lhs_meta = choreo::make_spandata<choreo::u32>(M, K / META_K);
+  std::vector<choreo::u32> row_meta;
+  SparsePolicy<choreo::bf16>::encode(lhs_dense_f, lhs_dense, lhs_packed, lhs_meta, &row_meta);
+
+  size_t strips = K / META_K;
+  size_t groups_per_strip = META_K / 4;
+  std::vector<float> lhs_dec_f(M * K, 0.0f);
+  for (size_t r = 0; r < M; ++r) {
+    for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+      size_t strip = c_group / groups_per_strip;
+      size_t base = r * K + c_group * 4;
+      size_t in_base = r * (K / 2) + c_group * 2;
+      int pair_idx = (c_group % groups_per_strip) * 2;
+      choreo::u32 meta = row_meta[r * strips + strip];
+      choreo::u32 pos0 = (meta >> (pair_idx * 2)) & 0x3;
+      choreo::u32 pos1 = (meta >> ((pair_idx + 1) * 2)) & 0x3;
+      lhs_dec_f[base + pos0] = choreo::to_f32(lhs_packed.data()[in_base + 0]);
+      lhs_dec_f[base + pos1] = choreo::to_f32(lhs_packed.data()[in_base + 1]);
+    }
+  }
+  int decode_err = 0;
+  for (size_t i = 0; i < lhs_dec_f.size(); ++i)
+    if (lhs_dec_f[i] != lhs_dense_f[i]) decode_err++;
+  choreo::choreo_assert(decode_err == 0, "k16 decode mismatch");
+
+  int meta_err = 0;
+  for (size_t r = 0; r < M; ++r) {
+    for (size_t strip = 0; strip < strips; ++strip) {
+      if (lhs_meta[r][strip] != static_cast<uint32_t>(row_meta[r * strips + strip])) meta_err++;
+    }
+  }
+  choreo::choreo_assert(meta_err == 0, "k16 meta mismatch");
+
+  auto res = matmul_sp_k16_bf16(lhs_packed.view(), lhs_meta.view(), rhs.view());
+
+  float tolerance = 0.1f;
+  int errors = 0;
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += lhs_dense_f[i * K + k] * rhs_f[k * N + j];
+      float got = res[i][j];
+      if (std::abs(got - ref) >= tolerance) errors++;
+    }
+  std::cout << tag << ": " << errors << " errors\n";
+  return errors;
+}
+
+int main() {
+  int errors = 0;
+  errors += run_case_k16_f16("k16_f16");
+  errors += run_case_k16_bf16("k16_bf16");
+  if (errors > 0) {
+    std::cout << "FAILED: " << errors << " errors\n";
+    return 1;
+  }
+  std::cout << "Test Passed\n";
+  return 0;
+}
+
+// CHECK: Test Passed
