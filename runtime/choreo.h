@@ -2626,7 +2626,9 @@ struct Policy_E_Sparse_M16N8K16 {
   __device__ static uint32_t load(Tensor const& E) {
     int lane = threadIdx.x & 31;
     int group_id = lane >> 2; // 0..7
-    return E(group_id);
+    uint32_t lo = E(group_id, 0) & 0xFFFFu;
+    uint32_t hi = E(group_id + 8, 0) & 0xFFFFu;
+    return (hi << 16) | lo;
   }
 };
 
@@ -2942,26 +2944,24 @@ struct Policy_B_Sparse_M16N8K32 {
     int gid = lane >> 2;
     int tid_in_group = lane % 4;
 
-    int row0 = tid_in_group * 4;
-    int row1 = tid_in_group * 4 + 16;
-    int col = gid;
-    if constexpr (std::is_same<typename Tensor::value_type, f16>::value ||
-                  std::is_same<typename Tensor::value_type, bf16>::value) {
-      int row2 = tid_in_group * 4 + 8;
-      // Swap indices: B is [N, K]
-      uint32_t b0 =
-          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 1))) << 16) |
-          uint16_t(reinterpret_cast<uint16_t&>(B(col, row0)));
-      uint32_t b1 =
-          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 3))) << 16) |
-          uint16_t(reinterpret_cast<uint16_t&>(B(col, row0 + 2)));
-      uint32_t b2 =
-          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row2 + 1))) << 16) |
-          uint16_t(reinterpret_cast<uint16_t&>(B(col, row2)));
-      uint32_t b3 =
-          (uint32_t(reinterpret_cast<uint16_t&>(B(col, row2 + 3))) << 16) |
-          uint16_t(reinterpret_cast<uint16_t&>(B(col, row2 + 2)));
-      return cutlass::Array<uint32_t, 4>{b0, b1, b2, b3};
+  int row0 = tid_in_group * 2;
+  int col = gid;
+  if constexpr (std::is_same<typename Tensor::value_type, f16>::value ||
+          std::is_same<typename Tensor::value_type, bf16>::value) {
+    // Swap indices: B is [N, K]
+    uint32_t b0 =
+      (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 1))) << 16) |
+      uint16_t(reinterpret_cast<uint16_t&>(B(col, row0)));
+    uint32_t b1 =
+      (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 9))) << 16) |
+      uint16_t(reinterpret_cast<uint16_t&>(B(col, row0 + 8)));
+    uint32_t b2 =
+      (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 17))) << 16) |
+      uint16_t(reinterpret_cast<uint16_t&>(B(col, row0 + 16)));
+    uint32_t b3 =
+      (uint32_t(reinterpret_cast<uint16_t&>(B(col, row0 + 25))) << 16) |
+      uint16_t(reinterpret_cast<uint16_t&>(B(col, row0 + 24)));
+    return cutlass::Array<uint32_t, 4>{b0, b1, b2, b3};
     } else {
       return Policy_B_M16N8K32::load(B);
     }
@@ -3156,7 +3156,7 @@ inline constexpr const char* cuda_stringify(TMA_Swizzle swizzle) {
 // --------------- WGMMA primitives (SM90+) ---------------
 // refer to:
 // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-leading-dimension-byte-offset
-// 9.7.15.5.1.2.2. Matrix Descriptor Format
+// 9.7.15.5.1.2.2. Matrix Descriptor Format
 // SWIZZLE pattern enum
 enum class WGMMA_Swizzle : uint64_t {
   NS = 0,  // No swizzle
