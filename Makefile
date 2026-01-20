@@ -31,7 +31,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cute_header.inc factor_script.inc cuda_script.inc
 
 CC = g++
-CFLAGS += -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
+CFLAGS += -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR) -D__CHOREO_DEFAULT_TARGET__=topscc"
 
 # fix version of clang-format
 CLANG_FORMAT:=$(WORK_DIR)/extern/clang-format-19-1-2
@@ -93,6 +93,7 @@ debug: CMAKE_BUILD_TYPE=Debug
 debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
 debug: build-with-cmake-ninja
 
+legacy: CHOREO_DEFAULT_TARGET=topscc
 legacy: $(TARGET)
 	ln -sf $(CHOREO_BIN) $(WORK_DIR)/choreo
 	ln -sf $(COPP_BIN) $(WORK_DIR)/copp
