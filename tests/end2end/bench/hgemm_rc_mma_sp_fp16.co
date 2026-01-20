@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-SM_80
+// REQUIRES: TARGET-GPU
 // RUN: choreo -gs -t cute -arch=sm_80 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 #define M 16

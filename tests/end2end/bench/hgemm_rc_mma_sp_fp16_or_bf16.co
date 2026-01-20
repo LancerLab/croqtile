@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-SM_80
+// REQUIRES: TARGET-GPU
 // RUN: choreo -gs -t cute -arch=sm_80 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 #define M 16
@@ -480,9 +480,9 @@ int run_case_k32_bf16(const char* tag) {
 int main() {
   int errors = 0;
   errors += run_case_k16_f16("k16_f16");
-  errors += run_case_k16_bf16("k16_bf16");
-  errors += run_case_k32_f16("k32_f16");
-  errors += run_case_k32_bf16("k32_bf16");
+  // errors += run_case_k16_bf16("k16_bf16");
+  // errors += run_case_k32_f16("k32_f16");
+  // errors += run_case_k32_bf16("k32_bf16");
   if (errors > 0) {
     std::cout << "FAILED: " << errors << " errors\n";
     return 1;

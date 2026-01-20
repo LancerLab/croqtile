@@ -2604,14 +2604,19 @@ struct Policy_E_Sparse_M16N8K32 {
   template <class Tensor>
   __device__ static uint32_t load(Tensor const& E) {
     int lane = threadIdx.x & 31;
-    uint32_t meta = 0;
     int group_id = lane >> 2; // 0..7
     int thread_id = lane & 3; // 0..3
-    meta |= (uint32_t)(uint8_t)E(group_id, thread_id) << 0;
-    meta |= (uint32_t)(uint8_t)E(group_id + 8, thread_id) << 4;
-    meta |= (uint32_t)(uint8_t)E(group_id, thread_id + 4) << 8;
-    meta |= (uint32_t)(uint8_t)E(group_id + 8, thread_id + 4) << 12;
-    return meta;
+    if (thread_id == 0 || thread_id == 1) {
+      uint32_t e0 = E(group_id, 0);
+      uint32_t e1 = E(group_id + 8, 0);
+      uint32_t lo0 = e0 & 0xFFFFu;
+      uint32_t hi0 = (e0 >> 16) & 0xFFFFu;
+      uint32_t lo1 = e1 & 0xFFFFu;
+      uint32_t hi1 = (e1 >> 16) & 0xFFFFu;
+      if (thread_id == 0) return (lo1 << 16) | lo0;
+      return (hi1 << 16) | hi0;
+    }
+    return 0;
   }
 };
 
