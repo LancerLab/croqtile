@@ -43,6 +43,10 @@ CFLAGS += -MMD -MP -std=c++17 -Wall -Wextra -g
 TARGET_DIRS := $(sort $(wildcard lib/Target/*/))
 TARGET_MK   := $(addsuffix target.mk,$(TARGET_DIRS))
 
+all: build
+
+build: build-with-cmake-ninja
+
 -include $(TARGET_MK)
 -include .local.mk
 
@@ -70,11 +74,6 @@ STANDALONE = OFF
 PUBLIC_PACKAGE=OFF
 
 # Build rules
-all: build
-
-
-build:
-build: build-with-cmake-ninja
 
 # Specific Release/debug build
 release: CMAKE_BUILD_TYPE=Release
@@ -116,10 +115,7 @@ test-debug: debug
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
 test-release: release
-	$(LIT) tests && $(MAKE) standalone_test
-
-test-libra: release
-	$(LIT) tests/libra && $(MAKE) standalone_test
+	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
 ci-test:
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake

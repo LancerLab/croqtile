@@ -169,6 +169,10 @@ publish-sdk: sdk-package
 	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
 
 prepare: setup-ginac
+
+test-libra: release
+	$(LIT) tests/libra && $(MAKE) standalone-test-with-cmake
+
 # =============================================================================
 # Sample Tests for topscc/elementwise
 # =============================================================================
