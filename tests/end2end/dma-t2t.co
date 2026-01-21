@@ -114,10 +114,8 @@ __co__ auto fooo(f32 [8, 8, 24] a) {
   return ans;
 }
 
-// CODEGEN-OPT: auto anon_2 = __tops_tid_x() * 2 + __iv_o__elem__0;
-// CODEGEN-OPT: auto anon_3 = __tops_tid_x() * 2 + __iv_o__elem__0;
-// CODEGEN-OPT: tops::mdspan __mds12_a(tops::Global, (float*)a + (0 * 24 + (0 * 192 + anon_2 * 192)), 1, 8, 24);
-// CODEGEN-OPT: tops::mdspan __mds13_ans(tops::Global, (float*)ans + (0 * 24 + (0 * 192 + anon_3 * 192)), 1, 8, 24);
+// CODEGEN-OPT: tops::mdspan __mds12_a(tops::Global, (float*)a + (0 * 24 + (0 * 192 + (__tops_tid_x() * 2 + __iv_o__elem__0) * 192)), 1, 8, 24);
+// CODEGEN-OPT: tops::mdspan __mds13_ans(tops::Global, (float*)ans + (0 * 24 + (0 * 192 + (__tops_tid_x() * 2 + __iv_o__elem__0) * 192)), 1, 8, 24);
 // CODEGEN-OPT: tops::event f__event__ = tops::memcpy_async(*f.get_ctx(), __mds13_ans, __mds12_a);
 
 // CODEGEN:     auto anon_2 = __tops_tid_x() * 2 + __iv_o__elem__0;
