@@ -19,6 +19,16 @@ CFLAGS += -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_FACTOR_DIR__="$(
 
 .PHONY: setup-gcu2 setup-gcu3 setup-git-hooks
 
+$(LGY_BUILD_DIR)/factor_script.inc: lib/Target/GCU/factor_script.sh
+	echo "#ifndef __CHOREO_FACTOR_SCRIPT_HEADER_H__" > $@
+	echo "#define __CHOREO_FACTOR_SCRIPT_HEADER_H__" >> $@
+	echo -n "static const char* __factor_script_as_string = R\"__factor_script(" >> $@
+	cat $< >> $@
+	echo ")__factor_script\";" >> $@
+	echo "#endif // __CHOREO_FACTOR_SCRIPT_HEADER_H__" >> $@
+
+HEADER_FILES += $(LGY_BUILD_DIR)/factor_script.inc
+
 check-choreo-kit:
 	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the supporting package..."; \

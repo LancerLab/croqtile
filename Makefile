@@ -6,23 +6,33 @@ TOOLS_DIR=$(WORK_DIR)/tools
 RT_DIR=$(WORK_DIR)/runtime
 
 # Targets
-CHOREO_BIN = build/choreo
-COPP_BIN = build/copp
-TARGET = $(CHOREO_BIN) $(COPP_BIN)
 SRC_DIR = $(WORK_DIR)/lib
 BUILD_DIR = $(WORK_DIR)/build
 DBG_BUILD_DIR = $(WORK_DIR)/build-debug
 REL_BUILD_DIR = $(WORK_DIR)/build-release
+LGY_BUILD_DIR = $(WORK_DIR)/build-legacy
+CHOREO_BIN = $(LGY_BUILD_DIR)/choreo
+COPP_BIN =  $(LGY_BUILD_DIR)/copp
+TARGET = $(CHOREO_BIN) $(COPP_BIN)
 LEX_SRC = $(SRC_DIR)/scanner.l
 PARSER_SRC = $(SRC_DIR)/parser.yy
 BISON_FLAGS = -t -d  # Generates both parser.tab.cpp and parser.tab.h
+
+# lit max-jobs config
+JOBS ?= 1
+
+# toolchains
+FLEX = $(TOOLCHAIN_DIR)/bin/flex
+BISON_BIN = $(TOOLCHAIN_DIR)/bin/bison
+LIT:=$(WORK_DIR)/tests/lit.sh -j$(JOBS)
+BISON?=/usr/bin/bison
 
 # Test targets
 TEST_FILES :=  $(shell find tests -name '*_test.co')
 TEST_TARGETS := $(TEST_FILES:.co=.test)
 
 # headers
-HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cute_header.inc factor_script.inc
+HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') $(LGY_BUILD_DIR)/choreo_header.inc
 
 CHOREO_DEFAULT_TARGET ?= cute
 CLANG_FORMAT ?= /usr/bin/clang-format
@@ -45,11 +55,11 @@ GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 
 # For GiNaC
 SYMBOLIC_DIR = $(WORK_DIR)/extern/ginac
-CLN_DIR = $(SYMBOLIC_DIR)/cln-1.3.7
-GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7
+CLN_DIR = $(SYMBOLIC_DIR)/cln-1.3.7/install
+GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7/install
 
-SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/install/lib -L$(GINAC_DIR)/install/lib -lginac -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib -lcln -lgmp
-SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/install/include -I$(GINAC_DIR)/install/include
+SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/lib/ -L$(GINAC_DIR)/lib/ -lginac -lcln -static -lgmp
+SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/include -I$(GINAC_DIR)/include
 
 # For CMAKE config
 CMAKE_BUILD_DIR = $(BUILD_DIR)
@@ -62,8 +72,6 @@ PUBLIC_PACKAGE=OFF
 # Build rules
 all: build
 
-# lit max-jobs config
-JOBS ?= 1
 
 build:
 build: build-with-cmake-ninja
@@ -120,7 +128,7 @@ standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
 
 clean:
-	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(TEST_TARGETS) tests/*.result
+	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(LGY_BUILD_DIR) $(TEST_TARGETS) tests/*.result
 	@cd tests/standalone/ && $(MAKE) clean
 
 build-with-cmake:
@@ -145,33 +153,36 @@ config-with-cmake-ninja:
 
 # Legacy Makefile
 SRC_CPP := $(shell find $(SRC_DIR) -type f -name '*.cpp')
-BUILD_OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRC_CPP))
+LGY_BUILD_OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(LGY_BUILD_DIR)/%.o,$(SRC_CPP))
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+$(LGY_BUILD_DIR):
+	mkdir -p $(LGY_BUILD_DIR)
 
-$(CHOREO_BIN): $(TOOLS_DIR)/choreo/choreo_main.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
-	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
+$(CHOREO_BIN): $(TOOLS_DIR)/choreo/choreo_main.cpp $(LGY_BUILD_DIR)/parser.tab.o $(LGY_BUILD_DIR)/scanner.yy.o $(LGY_BUILD_OBJECTS) | $(LGY_BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -lpthread -o $@
 
-scanner.yy.cc: $(LEX_SRC)
+$(LGY_BUILD_DIR)/scanner.yy.cc: $(LEX_SRC) | $(LGY_BUILD_DIR)
 	$(FLEX) -o $@ $(LEX_SRC)
 
-parser.tab.cc parser.tab.hh: $(PARSER_SRC)
-	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
+$(LGY_BUILD_DIR)/parser.tab.hh $(LGY_BUILD_DIR)/parser.tab.cc: $(PARSER_SRC) | $(LGY_BUILD_DIR)
+	$(BISON) $(BISON_FLAGS) $(PARSER_SRC) --defines=$(LGY_BUILD_DIR)/parser.tab.hh -o $(LGY_BUILD_DIR)/parser.tab.cc
 
-$(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh | $(BUILD_DIR)
-	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
+$(LGY_BUILD_DIR)/parser.tab.o: $(LGY_BUILD_DIR)/parser.tab.cc $(HEADER_FILES) parser.tab.hh | $(LGY_BUILD_DIR)
+	$(CC) -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
 
-$(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp | $(BUILD_DIR)
+$(LGY_BUILD_DIR)/%.o: $(LGY_BUILD_DIR)/%.cc $(HEADER_FILES) parser.tab.hh | $(LGY_BUILD_DIR)
+	$(CC) -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
+
+$(LGY_BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp | $(LGY_BUILD_DIR)
 	@mkdir -p $(dir $@)
-	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
+	$(CC) -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
-$(COPP_BIN): $(TOOLS_DIR)/copp/choreo_preprocess.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
-	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -static-libstdc++ -o $@
+$(COPP_BIN): $(TOOLS_DIR)/copp/choreo_preprocess.cpp $(LGY_BUILD_DIR)/parser.tab.o $(LGY_BUILD_DIR)/scanner.yy.o $(LGY_BUILD_OBJECTS)
+	$(CC) $(CFLAGS) $^ -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -static-libstdc++ -lpthread -o $@
 
 -include $(OBJ:.o=.d)
 
-choreo_header.inc : $(RT_DIR)/choreo.h
+$(LGY_BUILD_DIR)/choreo_header.inc : $(RT_DIR)/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
 	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
 	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@
@@ -180,8 +191,9 @@ choreo_header.inc : $(RT_DIR)/choreo.h
 	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
 
 clean-legacy:
-	@rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
-	@cd tests/standalone/ && $(MAKE) clean
+	@rm $(LGY_BUILD_DIR)/* $(TEST_TARGETS)
+	@cd $(WORK_DIR) && find tests -name '*.result' -exec rm -f {} \;
+	@cd $(WORK_DIR)/tests/standalone/ && $(MAKE) clean
 
 clobber: clean
 	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf
@@ -254,12 +266,6 @@ standalone_test: $(TARGET)
 	@echo "Tested $<"
 
 .PHONY: all clean lines test
-
-# toolchains
-FLEX = $(TOOLCHAIN_DIR)/bin/flex
-BISON_BIN = $(TOOLCHAIN_DIR)/bin/bison
-LIT:=$(WORK_DIR)/tests/lit.sh -j$(JOBS)
-BISON?=/usr/bin/bison
 
 setup-core: $(SETUP_TARGET_DEPENDS)
 	git submodule update --init --recursive;
