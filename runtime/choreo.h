@@ -1443,10 +1443,12 @@ struct SparseMetaK {
 // to indicate its order in 0-3. thus 1 elem vs 1 bit
 // for fp16/bf16, we have mma.sp shape m16n8k32 and m16n8k16 options, 32/16 is the metadata k size
 // for fp8 e4m3 or e5m2, we have mma.sp shape m16n8k64, 64 is the metadata k size
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 template <>
 struct SparseMetaK<choreo::f8_e4m3, choreo::u32> { static constexpr size_t value = 64; };
 template <>
 struct SparseMetaK<choreo::f8_e5m2, choreo::u32> { static constexpr size_t value = 64; };
+#endif
 
 // Convenience forwarding alias (non-breaking):
 template <typename ValueT, typename MetaT>
@@ -1468,17 +1470,21 @@ static_assert(SparseMetaK<choreo::f16, choreo::u32>::value == 16,
               "Regression: SparseMetaK<f16,u32> changed");
 static_assert(SparseMetaK<choreo::bf16, choreo::u32>::value == 16,
               "Regression: SparseMetaK<bf16,u32> changed");
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 static_assert(SparseMetaK<choreo::f8_e4m3, choreo::u32>::value == 64,
               "Regression: SparseMetaK<f8_e4m3,u32> changed");
 static_assert(SparseMetaK<choreo::f8_e5m2, choreo::u32>::value == 64,
               "Regression: SparseMetaK<f8_e5m2,u32> changed");
+#endif
 
 static_assert(std::is_same<SparseHostPolicy<choreo::f16, choreo::u32>,
                            Sparse2to4HostPolicy<choreo::f16, choreo::u32, 16>>::value,
               "Regression: SparseHostPolicy<f16,u32> must match explicit instantiation");
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 static_assert(std::is_same<SparseHostPolicy<choreo::f8_e4m3, choreo::u32>,
                            Sparse2to4HostPolicy<choreo::f8_e4m3, choreo::u32, 64>>::value,
               "Regression: SparseHostPolicy<f8_e4m3,u32> must match explicit instantiation");
+#endif
 
 } // namespace utils
 
