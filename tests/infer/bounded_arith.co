@@ -52,29 +52,29 @@ __co__ void bounded_decls() {
 // CHKVALNO:   scope-1 {
 // CHKVALNO:    scope-2 {
 // CHKVALNO:     Alias "::bounded_decls::paraby_2::@anon_pb_1" -> #0
-// CHKVALNO:     New VN #40: '::bounded_decls::paraby_2::anon_pb_1'
+// CHKVALNO:     New VN #42: '::bounded_decls::paraby_2::anon_pb_1'
 // CHKVALNO:     Alias "::bounded_decls::paraby_2::@anon_pb_1__elem__x" -> #0
-// CHKVALNO:     New VN #41: '::bounded_decls::paraby_2::anon_pb_1__elem__x'
+// CHKVALNO:     New VN #43: '::bounded_decls::paraby_2::anon_pb_1__elem__x'
 // CHKVALNO:     scope-3 {
 // CHKVALNO:      Alias "::bounded_decls::paraby_2::paraby_3::@p" -> #8
-// CHKVALNO:      New VN #42: '::bounded_decls::paraby_2::paraby_3::p'
+// CHKVALNO:      New VN #44: '::bounded_decls::paraby_2::paraby_3::p'
 // CHKVALNO:      Alias "::bounded_decls::paraby_2::paraby_3::@p__elem__x" -> #8
-// CHKVALNO:      New VN #43: '::bounded_decls::paraby_2::paraby_3::p__elem__x'
+// CHKVALNO:      New VN #45: '::bounded_decls::paraby_2::paraby_3::p__elem__x'
 // CHKVALNO:      scope-4 {
-// CHKVALNO:       New VN #44: 'const_16'
-// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile(0)" -> #44
-// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile__elem__0" -> #44
-// CHKVALNO:       New VN #45: '::bounded_decls::paraby_2::paraby_3::within_1::n_tile__elem__0'
-// CHKVALNO:       New VN #46: '::bounded_decls::paraby_2::paraby_3::within_1::n_tile'
-// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile" -> #44
+// CHKVALNO:       New VN #46: 'const_16'
+// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile(0)" -> #46
+// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile__elem__0" -> #46
+// CHKVALNO:       New VN #47: '::bounded_decls::paraby_2::paraby_3::within_1::n_tile__elem__0'
+// CHKVALNO:       New VN #48: '::bounded_decls::paraby_2::paraby_3::within_1::n_tile'
+// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile" -> #46
 // CHKVALNO:       scope-5 {
-// CHKVALNO:        New VN #47: '%:#46:#13'
-// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::@a" -> #44
-// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::a" -> #47
-// CHKVALNO:        New VN #48: '+:#42:#25'
-// CHKVALNO:        New VN #49: '/:#48:#13'
+// CHKVALNO:        New VN #49: '%:#48:#13'
+// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::@a" -> #46
+// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::a" -> #49
+// CHKVALNO:        New VN #50: '+:#44:#25'
+// CHKVALNO:        New VN #51: '/:#50:#13'
 // CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::@b" -> #8
-// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::b" -> #49
+// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::b" -> #51
 // CHKVALNO:       } // end scope-5
 // CHKVALNO:      } // end scope-4
 // CHKVALNO:     } // end scope-3

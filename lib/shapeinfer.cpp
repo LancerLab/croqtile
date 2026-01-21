@@ -1873,16 +1873,18 @@ const SignTy ShapeInference::SignNode(const AST::Node& n) {
       } else
         return GetSign(*ii->Val());
     } else if (e->op == "#") {
-      // TODO:
-#if 0
-      auto signature0 = o_sn("*");
-      signature0->Append(GetValNo(*e->GetL()));
-      signature0->Append(GetValNo(*e->GetR(), VNKind::VNK_UBOUND));
-      auto sign0 = vn.Simplify(signature0);
-
+      auto sign0 = o_sn("*", GetSign(*e->GetL()),
+                        GetSign(*e->GetR(), VNKind::VNK_UBOUND));
+      auto s0 = vn.Simplify(sign0);
+      if (s0 != sign0) {
+        VST_DEBUG(dbgs() << vn.ScopeIndent() << "<Simplify> '" << STR(n)
+                         << ": '" << STR(sign0) << "' to '" << STR(s0)
+                         << "'\n");
+      }
+      GetOrGenValNum(s0); // force to generate the valno
       auto signature = o_sn("+");
-      signature->Append(GetOrGenValNum(sign0));
-      signature->Append(GetValNo(*e->GetR()));
+      signature->Append(s0);
+      signature->Append(GetSign(*e->GetR()));
       auto sign = vn.Simplify(signature);
       if (sign != signature) {
         VST_DEBUG(dbgs() << vn.ScopeIndent() << "<Simplify> '" << STR(n)
@@ -1890,7 +1892,6 @@ const SignTy ShapeInference::SignNode(const AST::Node& n) {
                          << "'\n");
       }
       return sign;
-#endif
     } else if (e->op == "#+" || e->op == "#-") {
       // bound is mutated without value change
       return GetSign(*e->GetL());

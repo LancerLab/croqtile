@@ -3701,7 +3701,8 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
        << ValueSTR(Reverse(g_shape.Value())) << "};\n"; // shape of buffer
     // For TMA, strides should be in the same order as shape (not reversed)
     hs << h_indent << "uint64_t " << desc.GetName() << "_strides[] = {"
-       << ValueSTR(Trim(Reverse(GenStrides(g_shape) * gmem_ty->ElementSizeValue())))
+       << ValueSTR(
+              Trim(Reverse(GenStrides(g_shape) * gmem_ty->ElementSizeValue())))
        << "};\n"; // strides of shape
     hs << h_indent << "uint32_t " << desc.GetName() << "_box_shape[] = {"
        << ValueSTR(Reverse(t_shape.Value())) << "};\n"; // shape of tile block

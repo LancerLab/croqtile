@@ -1349,8 +1349,8 @@ struct Sparse2to4HostPolicy {
 
   // Encode 2:4 sparse A into packed values and META_K-grouped metadata.
   __co_host__ static inline void
-    encode(spanned_data<ValueT, 2>& dense, spanned_data<ValueT, 2>& packed,
-      spanned_data<MetaT, 2>& meta, std::vector<MetaT>* row_meta = nullptr) {
+  encode(spanned_data<ValueT, 2>& dense, spanned_data<ValueT, 2>& packed,
+         spanned_data<MetaT, 2>& meta, std::vector<MetaT>* row_meta = nullptr) {
     const size_t M = dense.shape()[0];
     const size_t K = dense.shape()[1];
     const size_t strips = K / META_K;
@@ -1384,7 +1384,7 @@ struct Sparse2to4HostPolicy {
     }
   }
 
-  // TODO: remove this function after all sparse utils fixed down, 
+  // TODO: remove this function after all sparse utils fixed down,
   // this one is only for debug verbose purpose
   __co_host__ static inline void compress_ref(const std::vector<float>& dense_f,
                                               std::vector<float>& sparse_f,
@@ -1439,15 +1439,20 @@ struct SparseMetaK {
 
 // fp8 defaults (SM90 sparse MMA use wider META_K).
 // METADATA K SIZE is super easy to infer
-// for 2:4 sparsity, each 4 elems group has 2 non-zeros, need 2 indices with 2 bits each
-// to indicate its order in 0-3. thus 1 elem vs 1 bit
-// for fp16/bf16, we have mma.sp shape m16n8k32 and m16n8k16 options, 32/16 is the metadata k size
-// for fp8 e4m3 or e5m2, we have mma.sp shape m16n8k64, 64 is the metadata k size
+// for 2:4 sparsity, each 4 elems group has 2 non-zeros, need 2 indices with 2
+// bits each to indicate its order in 0-3. thus 1 elem vs 1 bit for fp16/bf16,
+// we have mma.sp shape m16n8k32 and m16n8k16 options, 32/16 is the metadata k
+// size for fp8 e4m3 or e5m2, we have mma.sp shape m16n8k64, 64 is the metadata
+// k size
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 template <>
-struct SparseMetaK<choreo::f8_e4m3, choreo::u32> { static constexpr size_t value = 64; };
+struct SparseMetaK<choreo::f8_e4m3, choreo::u32> {
+  static constexpr size_t value = 64;
+};
 template <>
-struct SparseMetaK<choreo::f8_e5m2, choreo::u32> { static constexpr size_t value = 64; };
+struct SparseMetaK<choreo::f8_e5m2, choreo::u32> {
+  static constexpr size_t value = 64;
+};
 #endif
 
 // Convenience forwarding alias (non-breaking):
@@ -1477,13 +1482,16 @@ static_assert(SparseMetaK<choreo::f8_e5m2, choreo::u32>::value == 64,
               "Regression: SparseMetaK<f8_e5m2,u32> changed");
 #endif
 
-static_assert(std::is_same<SparseHostPolicy<choreo::f16, choreo::u32>,
-                           Sparse2to4HostPolicy<choreo::f16, choreo::u32, 16>>::value,
-              "Regression: SparseHostPolicy<f16,u32> must match explicit instantiation");
+static_assert(
+    std::is_same<SparseHostPolicy<choreo::f16, choreo::u32>,
+                 Sparse2to4HostPolicy<choreo::f16, choreo::u32, 16>>::value,
+    "Regression: SparseHostPolicy<f16,u32> must match explicit instantiation");
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
-static_assert(std::is_same<SparseHostPolicy<choreo::f8_e4m3, choreo::u32>,
-                           Sparse2to4HostPolicy<choreo::f8_e4m3, choreo::u32, 64>>::value,
-              "Regression: SparseHostPolicy<f8_e4m3,u32> must match explicit instantiation");
+static_assert(
+    std::is_same<SparseHostPolicy<choreo::f8_e4m3, choreo::u32>,
+                 Sparse2to4HostPolicy<choreo::f8_e4m3, choreo::u32, 64>>::value,
+    "Regression: SparseHostPolicy<f8_e4m3,u32> must match explicit "
+    "instantiation");
 #endif
 
 } // namespace utils
