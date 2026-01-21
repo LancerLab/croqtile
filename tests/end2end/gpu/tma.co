@@ -1,5 +1,5 @@
-// REQUIRES: TARGET-GPU
-// NOTRUNYET: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 __co__ auto tma_copy_async(f32 [6, 16, 64] input) {
   f32 [input.span] output;

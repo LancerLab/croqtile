@@ -28,13 +28,11 @@ if(ENABLE_CUDA)
 
   math(EXPR CUDA_VERSION_NUMBER
        "${CUDA_VERSION_MAJOR} * 1000 + ${CUDA_VERSION_MINOR} * 10")
-  foreach(tgt IN LISTS GPUTarget)
-    target_compile_definitions(${tgt} PRIVATE
+  target_compile_definitions(GPUTarget PRIVATE
       CHOREO_CUDA_VERSION_MAJOR=${CUDA_VERSION_MAJOR}
       CHOREO_CUDA_VERSION_MINOR=${CUDA_VERSION_MINOR}
       CHOREO_CUDA_VERSION=${CUDA_VERSION_NUMBER}
-    )
-  endforeach()
+  )
 endif()
 
 if(ENABLE_CUTE)
