@@ -1076,11 +1076,13 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       // handle span_as of global buffer in `HandleGlobal`
       if (!IsHost()) {
         ds << d_indent << "auto* " << sym << " = ";
+        ds << "static_cast<"
+           << NameBaseType(dyn_cast<SpannedType>(nty)->ElementType()) << "*>(";
         auto tty = GetSymbolType(sa->id->name);
         if (isa<FutureType>(tty))
-          ds << sa->id->name << ".data();\n";
+          ds << sa->id->name << ".data());\n";
         else
-          ds << sa->id->name << ";\n";
+          ds << sa->id->name << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
         return true;
       }
