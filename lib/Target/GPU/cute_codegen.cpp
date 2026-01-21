@@ -496,7 +496,7 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
             exprs.push_back(val);
         }
       } else
-        choreo_unreachable("unsupported index: " + PSTR(p) + ".");
+        exprs.push_back(sbe::sym(OpExprSTR(p, "*", true, IsHost())));
     }
 
     if (auto tc = dyn_cast<TransposeConfig>(config)) {
