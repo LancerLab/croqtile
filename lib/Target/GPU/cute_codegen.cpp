@@ -3660,12 +3660,11 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     std::string g_unscoped = UnScopedName(g_sym);
     std::string g_scoped = InScopeName(g_unscoped);
 
-    // Determine whether this tensor is a true GLOBAL_INPUT parameter.
-    // Previous implementation used IsChoreoInput/IsChoreoOutput on the
-    // scoped name — that is insufficient because it returns true for
-    // both global _and_ non-global buffers. Correct behavior is to
-    // consult the parameter attribute (ParamAttr::GLOBAL_INPUT) when
-    // the symbol corresponds to a function parameter.
+    // Determine whether this tensor is a true GLOBAL argument.
+    // Correct behavior is to consult the parameter attribute
+    // (ParamAttr::GLOBAL_INPUT) when the symbol corresponds to a
+    // function parameter. Do NOT treat choreo output as global by
+    // default, because output may be shadowed to device memory.
     bool is_global_arg = false;
     bool found_param = false;
     for (const auto &item : GetChoreoFuncIns(cgi)) {
@@ -3674,10 +3673,6 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
         break;
       }
-    }
-    // Fallback for non-parameter host globals: preserve previous behavior.
-    if (!found_param) {
-      is_global_arg = IsChoreoInput(g_scoped) || IsChoreoOutput(g_scoped);
     }
 
     std::string base_expr = is_global_arg ? (g_unscoped + ".data()")

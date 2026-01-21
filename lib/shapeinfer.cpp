@@ -1143,6 +1143,16 @@ bool ShapeInference::Visit(AST::MMA& n) {
     auto c_elem = (c_sty && c_sty->ElementType() != BaseType::UNKSCALAR)
                       ? c_sty->ElementType()
                       : fty->ElementType();
+    if (op.IsSparse()) {
+      auto a_elem = fty->ElementType();
+      bool a_is_fp8 = a_elem == BaseType::F8_E4M3 || a_elem == BaseType::F8_E5M2 ||
+                      a_elem == BaseType::F8_UE4M3 || a_elem == BaseType::F8_UE8M0;
+      bool c_is_fp8 = c_elem == BaseType::F8_E4M3 || c_elem == BaseType::F8_E5M2 ||
+                      c_elem == BaseType::F8_UE4M3 || c_elem == BaseType::F8_UE8M0;
+      if (a_is_fp8 && c_is_fp8) {
+        c_elem = BaseType::F32;
+      }
+    }
     auto sty = MakeSpannedType(c_elem, GenShape(cur_vn), Storage::REG);
     UpdateSymbolType(op.ExecOperand(0), sty);
     UpdateSymbolType(op.ExecOperand(0) + ".span", mty);
