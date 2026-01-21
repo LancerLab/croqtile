@@ -1,14 +1,11 @@
-// Note: Currently you need modify choreo-gen scripts.
-// remove __choreo_check_cuda_environment__ in wrapper functions.
-
 #define Experts 128
 #define TOPK 8
 
-__co__ void moe_gemm_wmma_v1(global bf16 [M, K] input,
-  global bf16 [Experts, N, K] weights,
+__co__ void moe_gemm_wmma(global bf16 [M, K] input, 
+  global bf16 [Experts, N, K] weights, 
   global bf16 [M, N] output,
-  global s32 [M] sorted_token_id,
-  global s32 [Experts1] expert_offsets,
+  global s32 [M] sorted_token_id, 
+  global s32 [Experts1] expert_offsets, 
   global f32 [M] topk_weights, bool use_topk_weight, int topk, stream s) {
     int MMA_M = 8, MMA_N = 32, MMA_K = 16;
     int M_BLK = 32, N_BLK = 32;
@@ -36,13 +33,14 @@ __co__ void moe_gemm_wmma_v1(global bf16 [M, K] input,
               sB_3d = dma.copy weights.subspan(1, N_BLK, MMA_K).at(expert_id, n_tile_idx, k_tile_idx) => shared;
               sB = sB_3d.span_as(N_BLK, MMA_K);
               sync.shared;
+
               ma = mma.load sA.chunkat(g0, _);
               mb = mma.load sB.chunkat(g1, _);
               mma.row.row mc, ma, mb;
             } // k_tile_idx
             mma.store mc, sC.chunkat(g0, g1);
           } // group
-
+          
           sync.shared;
           // store back to global memory with topk weight
           parallel {i, jo} by [32, 4] : thread {
@@ -55,54 +53,79 @@ __co__ void moe_gemm_wmma_v1(global bf16 [M, K] input,
                 output.at(token_idx, n_tile_idx # col) = val;
               }
             }
-          }
+          } 
       } // m_tile_idx
     } // if num_rows_in_segment
   } // block
 }
 
-__co__ void moe_gemm_wmma_v2(global bf16 [M, K] input,
-                            global bf16 [Experts, N, K] weights,
+// tranform indices for k-major 128B swizzle
+template <typename T>
+__device__ __forceinline__ void assign_k_sw128b(T* ptr, int row, int col, int stride, T val) {
+  static_assert(sizeof(T) == 2, "Only support f16/bf16");
+  int k_swz = ((col >> 3) ^ row) & 7;
+  int idx   = row * stride + ((k_swz << 3) | (col & 7));
+  ptr[idx] = val;
+}
+
+__co__ void moe_gemm_wgmma(global bf16 [M, K] input, 
+                            global bf16 [Experts, N, K] weights, 
                             global bf16 [M, N] output,
-                            global s32 [M] sorted_token_id,
-                            global s32 [Experts1] expert_offsets,
+                            global s32 [M] sorted_token_id, 
+                            global s32 [Experts1] expert_offsets, 
                             global f32 [M] topk_weights, bool use_topk_weight, int topk, stream s) {
-  int MMA_M = 16, MMA_N = 16, MMA_K = 16;
-  int M_BLK = 32, N_BLK = 32;
+  int MMA_M = 64, MMA_N = 64, MMA_K = 16;
+  int M_BLK = 64, N_BLK = 64, TILE_K = 64;
   parallel.async {expert_id, n_tile_idx} by [Experts, N / N_BLK] : block {
-    shared bf16 [M_BLK, MMA_K] sA {0.0f};
-    shared f32 [M_BLK, N_BLK] sC {0.0f};
+    shared bf16 [M_BLK, TILE_K] sA {0.0f}; // 64 x 64
+    shared bf16 [N_BLK, TILE_K] sB {0.0f}; // 64 x 64
+    shared f32 [M_BLK, N_BLK] sC {0.0f}; // 64 x 64
+
     int segment_start = expert_offsets.at(expert_id);
     int segment_end = expert_offsets.at(expert_id + 1);
     int num_rows_in_segment = segment_end - segment_start;
+  
     if (num_rows_in_segment > 0) {
+
       foreach {m_tile_idx} in [cdiv(num_rows_in_segment, M_BLK)] {
         mc = mma.fill.f32 0.0f;
-        parallel {g0, g1} by [M_BLK / MMA_M, N_BLK / MMA_N]: group {
-          foreach {k_tile_idx} in [K / MMA_K]  {
-            parallel row by 32 : thread {
-              // load sA
-              foreach {j} in [M_BLK * MMA_K / 128] {
-                col = g0#g1#j;
-                if (m_tile_idx # row < num_rows_in_segment && k_tile_idx # col < K)  {
-                  token_idx = sorted_token_id.at(segment_start + m_tile_idx # row) / ((use_topk_weight) ? 1 : topk);
-                  sA.at(row, col) = input.at(token_idx, k_tile_idx # col);
+        parallel g by 1 : group-4 {
+          foreach {ko} in [K / TILE_K]  {
+            // load sA and sB
+            parallel {t0, t1} by [64, 2] : thread {
+              foreach {j} in [M_BLK * TILE_K / 128] {
+                row = t0, col = t1 # j;
+                bf16 input_val = 0.0f;
+                if (m_tile_idx # row < num_rows_in_segment && ko # col < K)  {
+                  token_idx = sorted_token_id.at(segment_start + m_tile_idx # row) / ((use_topk_weight) ?1:topk);
+                  input_val = input.at(token_idx, ko # col);
                 }
+                call assign_k_sw128b(sA, row, col, TILE_K, input_val);
               }
-            } // thread
-            sB_3d = dma.copy weights.subspan(1, N_BLK, MMA_K).at(expert_id, n_tile_idx, k_tile_idx) => shared;
-            sB = sB_3d.span_as(N_BLK, MMA_K);
-            sync.shared;
-            ma = mma.load sA.chunkat(g0, _);
-            mb = mma.load sB.chunkat(g1, _);
-            mma.row.row mc, ma, mb;
-          } // k_tile_idx
-          mma.store mc, sC.chunkat(g0, g1);
-        } // group
 
+              foreach {j} in [N_BLK * TILE_K / 128] {
+                row = t0, col = t1 # j;
+                bf16 weight_val = 0.0f;
+                if (n_tile_idx # row < N && ko # col < K && expert_id < Experts) {
+                  weight_val = weights.at(expert_id, n_tile_idx # row, ko # col);
+                }
+                call assign_k_sw128b(sB, row, col, TILE_K, weight_val);
+              }
+            }
+            sync.shared;
+
+            // compute mma
+            foreach {ki} in [TILE_K / MMA_K] {
+              ma = mma.load.swizzle(128) sA.chunkat(_, ki);
+              mb = mma.load.swizzle(128) sB.chunkat(_, ki);
+              mma.row.row mc, ma, mb;
+            }
+          }
+          mma.store mc, sC;
+        }
         sync.shared;
         // store back to global memory with topk weight
-        parallel {i, jo} by [32, 4] : thread {
+        parallel {i, jo} by [64, 2] : thread {
           foreach {ji} in [M_BLK * N_BLK / 128] {
             row = i; col = jo # ji;
             if (m_tile_idx # row < num_rows_in_segment && n_tile_idx # col < N) {
@@ -112,7 +135,7 @@ __co__ void moe_gemm_wmma_v2(global bf16 [M, K] input,
               output.at(token_idx, n_tile_idx # col) = val;
             }
           }
-        }
+        } 
       } // m_tile_idx
     } // if num_rows_in_segment
   } // block
@@ -144,9 +167,9 @@ extern "C" void moe_gemm_wmma(
   } else {
       calculate_expert_offsets_light(expert_ids, size_m, expert_counts, expert_offsets, num_experts, stream);
   }
-
+  
   #define LAUNCH_MOE_GEMM_WMMA_KERNEL(VERSION, TYPE) \
-    moe_gemm_wmma_v##VERSION( \
+    moe_gemm_##VERSION( \
       make_spanview<TYPE, 2>(input, {size_t(size_m), size_t(size_k)}), \
       make_spanview<TYPE, 3>(weights, {size_t(num_experts), size_t(size_n), size_t(size_k)}), \
       make_spanview<TYPE, 2>(output, {size_t(size_m), size_t(size_n)}), \
@@ -154,16 +177,17 @@ extern "C" void moe_gemm_wmma(
       make_spanview<int32_t, 1>(expert_offsets, {size_t(num_experts + 1)}), \
       make_spanview<float, 1>(topk_weights, {size_t(size_m)}), \
       (topk_weights != nullptr), \
-      topk, stream\
+      topk, \
+      stream\
     );
 
   if (data_type == 0) { // half
     // todo: implement half version
   } else if (data_type == 1) { // bfloat16
     if (is_prefill) {
-      LAUNCH_MOE_GEMM_WMMA_KERNEL(2, bf16)
+      LAUNCH_MOE_GEMM_WMMA_KERNEL(wgmma, bf16)
     } else {
-      LAUNCH_MOE_GEMM_WMMA_KERNEL(1, bf16)
+      LAUNCH_MOE_GEMM_WMMA_KERNEL(wmma, bf16)
     }
   }
 }
