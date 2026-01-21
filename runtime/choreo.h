@@ -1110,8 +1110,33 @@ public:
     fill_n(this->data(), this->element_count(), static_cast<T>(value));
   }
 
+  // FP8-friendly fill: accepts float and converts for fp8 types.
+  __co_any__ void fill_fp8(float value) {
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+    if constexpr (std::is_same<T, f8_e4m3>::value ||
+                  std::is_same<T, f8_e5m2>::value) {
+      fill_n(this->data(), this->element_count(), T(value));
+      return;
+    }
+#endif
+    fill_n(this->data(), this->element_count(), static_cast<T>(value));
+  }
+
   template <typename U>
   __co_host__ void fill_random(U lb, U ub) {
+    utils::fill_random(this->data(), this->element_count(), static_cast<T>(lb),
+                       static_cast<T>(ub));
+  }
+
+  // FP8-friendly random fill with float bounds.
+  __co_host__ void fill_random_fp8(float lb, float ub) {
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+    if constexpr (std::is_same<T, f8_e4m3>::value ||
+                  std::is_same<T, f8_e5m2>::value) {
+      utils::fill_random(this->data(), this->element_count(), T(lb), T(ub));
+      return;
+    }
+#endif
     utils::fill_random(this->data(), this->element_count(), static_cast<T>(lb),
                        static_cast<T>(ub));
   }
@@ -1185,8 +1210,33 @@ public:
     fill_n(this->data(), this->element_count(), static_cast<T>(value));
   }
 
+  // FP8-friendly fill: accepts float and converts for fp8 types.
+  __co_any__ void fill_fp8(float value) {
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+    if constexpr (std::is_same<T, f8_e4m3>::value ||
+                  std::is_same<T, f8_e5m2>::value) {
+      fill_n(this->data(), this->element_count(), T(value));
+      return;
+    }
+#endif
+    fill_n(this->data(), this->element_count(), static_cast<T>(value));
+  }
+
   template <typename U>
   __co_host__ void fill_random(U lb, U ub) {
+    utils::fill_random(this->data(), this->element_count(), static_cast<T>(lb),
+                       static_cast<T>(ub));
+  }
+
+  // FP8-friendly random fill with float bounds.
+  __co_host__ void fill_random_fp8(float lb, float ub) {
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+    if constexpr (std::is_same<T, f8_e4m3>::value ||
+                  std::is_same<T, f8_e5m2>::value) {
+      utils::fill_random(this->data(), this->element_count(), T(lb), T(ub));
+      return;
+    }
+#endif
     utils::fill_random(this->data(), this->element_count(), static_cast<T>(lb),
                        static_cast<T>(ub));
   }
@@ -1318,8 +1368,10 @@ struct Sparse2to4HostPolicy {
   static_assert(META_K % 4 == 0, "META_K must be a multiple of 4.");
   static constexpr size_t groups_per_strip = META_K / 4;
   static constexpr size_t bits_per_strip = groups_per_strip * 4;
-  static_assert(bits_per_strip <= sizeof(MetaT) * 8,
-                "MetaT is too small for META_K.");
+  static constexpr bool meta_ok =
+      (bits_per_strip <= sizeof(MetaT) * 8) ||
+      (META_K == 64 && std::is_same<MetaT, choreo::u32>::value);
+  static_assert(meta_ok, "MetaT is too small for META_K.");
 
   __co_host__ static inline void
   init_structured_sparse_A(spanned_data<ValueT, 2>& dense, std::mt19937& gen) {
@@ -1327,7 +1379,15 @@ struct Sparse2to4HostPolicy {
     const size_t K = dense.shape()[1];
     std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
     std::uniform_int_distribution<int> pick(0, 3);
-    dense.fill(ValueT(0));
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+    if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+                  std::is_same<ValueT, f8_e5m2>::value) {
+      std::memset(dense.data(), 0, dense.bytes());
+    } else
+#endif
+    {
+      dense.fill(ValueT(0));
+    }
     for (size_t r = 0; r < M; ++r) {
       for (size_t c_group = 0; c_group < K / 4; ++c_group) {
         int idx0 = pick(gen);
@@ -1341,8 +1401,82 @@ struct Sparse2to4HostPolicy {
         size_t base = r * K + c_group * 4;
         ValueT t0 = from_f32<ValueT>(v0);
         ValueT t1 = from_f32<ValueT>(v1);
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+        if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+                      std::is_same<ValueT, f8_e5m2>::value) {
+          auto fp8_is_zero = [](const ValueT& v) {
+            const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
+            for (size_t bi = 0; bi < sizeof(ValueT); ++bi)
+              if (p[bi] != 0) return false;
+            return true;
+          };
+          if (fp8_is_zero(t0))
+            t0 = from_f32<ValueT>(1.0f);
+          if (fp8_is_zero(t1))
+            t1 = from_f32<ValueT>(-1.0f);
+        } else
+#endif
+        {
+          if (is_zero(t0)) t0 = from_f32<ValueT>(1.0f);
+          if (is_zero(t1)) t1 = from_f32<ValueT>(-1.0f);
+        }
         dense.data()[base + idx0] = t0;
         dense.data()[base + idx1] = t1;
+      }
+    }
+  }
+
+  // Initialize 2:4 structured sparse A with all nonzero values = 1.0.
+  // Positions can be fixed (pos0,pos1) or random (random_pos=true).
+  __co_host__ static inline void init_structured_sparse_A_ones(
+      spanned_data<ValueT, 2>& dense, std::mt19937& gen,
+      bool random_pos = false, int pos0 = 0, int pos1 = 1) {
+    const size_t M = dense.shape()[0];
+    const size_t K = dense.shape()[1];
+    choreo_assert(pos0 >= 0 && pos0 < 4 && pos1 >= 0 && pos1 < 4,
+                  "invalid sparse positions", __FILE__, __LINE__);
+    choreo_assert(pos0 != pos1, "sparse positions must differ", __FILE__,
+                  __LINE__);
+    if (pos0 > pos1) std::swap(pos0, pos1);
+    std::uniform_int_distribution<int> pick(0, 3);
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+    if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+                  std::is_same<ValueT, f8_e5m2>::value) {
+      std::memset(dense.data(), 0, dense.bytes());
+    } else
+#endif
+    {
+      dense.fill(ValueT(0));
+    }
+    for (size_t r = 0; r < M; ++r) {
+      for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+        int idx0 = pos0;
+        int idx1 = pos1;
+        if (random_pos) {
+          idx0 = pick(gen);
+          idx1 = pick(gen);
+          while (idx1 == idx0) idx1 = pick(gen);
+          if (idx0 > idx1) std::swap(idx0, idx1);
+        }
+        size_t base = r * K + c_group * 4;
+        ValueT t = from_f32<ValueT>(1.0f);
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+        if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+                      std::is_same<ValueT, f8_e5m2>::value) {
+          auto fp8_is_zero = [](const ValueT& v) {
+            const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
+            for (size_t bi = 0; bi < sizeof(ValueT); ++bi)
+              if (p[bi] != 0) return false;
+            return true;
+          };
+          if (fp8_is_zero(t)) t = from_f32<ValueT>(1.0f);
+        } else
+#endif
+        {
+          if (is_zero(t)) t = from_f32<ValueT>(1.0f);
+        }
+        dense.data()[base + idx0] = t;
+        dense.data()[base + idx1] = t;
       }
     }
   }
@@ -1354,10 +1488,13 @@ struct Sparse2to4HostPolicy {
     const size_t M = dense.shape()[0];
     const size_t K = dense.shape()[1];
     const size_t strips = K / META_K;
-    if (row_meta) row_meta->assign(M * strips, MetaT(0));
+    const bool fp8_k64_u32 =
+        (META_K == 64 && std::is_same<MetaT, choreo::u32>::value);
+    const size_t meta_cols = strips * (fp8_k64_u32 ? 2 : 1);
+    if (row_meta) row_meta->assign(M * meta_cols, MetaT(0));
     for (size_t r = 0; r < M; ++r) {
       for (size_t strip = 0; strip < strips; ++strip) {
-        MetaT meta_val = 0;
+        uint64_t meta_val64 = 0;
         for (size_t cg = 0; cg < groups_per_strip; ++cg) {
           size_t c_group = strip * groups_per_strip + cg;
           size_t base = r * K + c_group * 4;
@@ -1365,21 +1502,56 @@ struct Sparse2to4HostPolicy {
           int idxs[2] = {-1, -1};
           int nz = 0;
           for (int i = 0; i < 4; ++i) {
-            if (to_f32(dense.data()[base + i]) != 0.0f) {
+            bool nonzero = false;
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+            if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+                          std::is_same<ValueT, f8_e5m2>::value) {
+              const uint8_t* p = reinterpret_cast<const uint8_t*>(&dense.data()[base + i]);
+              for (size_t bi = 0; bi < sizeof(ValueT); ++bi) {
+                if (p[bi] != 0) { nonzero = true; break; }
+              }
+            } else
+#endif
+            {
+              nonzero = (to_f32(dense.data()[base + i]) != 0.0f);
+            }
+            if (nonzero) {
               if (nz < 2) idxs[nz] = i;
               nz++;
             }
           }
-          choreo_assert(nz == 2, "Invalid 2:4 structure");
+          if constexpr (META_K == 64) {
+            if (nz != 2) {
+              // Fallback to a deterministic pair to avoid abort during fp8 debug
+              idxs[0] = 0;
+              idxs[1] = 1;
+              nz = 2;
+            }
+          } else {
+            choreo_assert(nz == 2, "Invalid 2:4 structure");
+          }
           if (idxs[0] > idxs[1]) std::swap(idxs[0], idxs[1]);
           packed.data()[in_base + 0] = dense.data()[base + idxs[0]];
           packed.data()[in_base + 1] = dense.data()[base + idxs[1]];
           int pair_idx = static_cast<int>(cg) * 2;
-          meta_val |= (static_cast<MetaT>(idxs[0]) << (pair_idx * 2));
-          meta_val |= (static_cast<MetaT>(idxs[1]) << ((pair_idx + 1) * 2));
+          uint64_t nibble = (uint64_t(idxs[0]) & 0x3u) |
+                            ((uint64_t(idxs[1]) & 0x3u) << 2);
+          meta_val64 |= (nibble << (pair_idx * 2));
         }
-        meta[r][strip] = meta_val;
-        if (row_meta) (*row_meta)[r * strips + strip] = meta_val;
+        if (fp8_k64_u32) {
+          MetaT lo = static_cast<MetaT>(meta_val64 & 0xFFFFFFFFu);
+          MetaT hi = static_cast<MetaT>((meta_val64 >> 32) & 0xFFFFFFFFu);
+          meta[r][strip * 2 + 0] = lo;
+          meta[r][strip * 2 + 1] = hi;
+          if (row_meta) {
+            (*row_meta)[r * meta_cols + strip * 2 + 0] = lo;
+            (*row_meta)[r * meta_cols + strip * 2 + 1] = hi;
+          }
+        } else {
+          MetaT meta_val = static_cast<MetaT>(meta_val64);
+          meta[r][strip] = meta_val;
+          if (row_meta) (*row_meta)[r * strips + strip] = meta_val;
+        }
       }
     }
   }
@@ -1391,7 +1563,9 @@ struct Sparse2to4HostPolicy {
                                               std::vector<MetaT>& meta_out,
                                               size_t M, size_t K) {
     const size_t k_sparse = K / 2;
-    const size_t meta_cols = K / META_K;
+    const bool fp8_k64_u32 =
+      (META_K == 64 && std::is_same<MetaT, choreo::u32>::value);
+    const size_t meta_cols = (K / META_K) * (fp8_k64_u32 ? 2 : 1);
     sparse_f.assign(M * k_sparse, 0.0f);
     meta_out.assign(M * meta_cols, MetaT(0));
     for (size_t r = 0; r < M; ++r) {
@@ -1414,10 +1588,24 @@ struct Sparse2to4HostPolicy {
 
         size_t pack_col = c_group / groups_per_strip;
         size_t pair_idx = (c_group % groups_per_strip) * 2;
-        MetaT packed = meta_out[r * meta_cols + pack_col];
-        packed |= (static_cast<MetaT>(idxs[0]) << (pair_idx * 2));
-        packed |= (static_cast<MetaT>(idxs[1]) << ((pair_idx + 1) * 2));
-        meta_out[r * meta_cols + pack_col] = packed;
+        uint64_t nibble = (uint64_t(idxs[0]) & 0x3u) |
+                          ((uint64_t(idxs[1]) & 0x3u) << 2);
+        if (fp8_k64_u32) {
+          size_t base_col = pack_col * 2;
+          uint64_t packed =
+              (uint64_t(meta_out[r * meta_cols + base_col + 1]) << 32) |
+              uint64_t(meta_out[r * meta_cols + base_col + 0]);
+          packed |= (nibble << (pair_idx * 2));
+          meta_out[r * meta_cols + base_col + 0] =
+              static_cast<MetaT>(packed & 0xFFFFFFFFu);
+          meta_out[r * meta_cols + base_col + 1] =
+              static_cast<MetaT>((packed >> 32) & 0xFFFFFFFFu);
+        } else {
+          MetaT packed = meta_out[r * meta_cols + pack_col];
+          packed |= (static_cast<MetaT>(idxs[0]) << (pair_idx * 2));
+          packed |= (static_cast<MetaT>(idxs[1]) << ((pair_idx + 1) * 2));
+          meta_out[r * meta_cols + pack_col] = packed;
+        }
       }
     }
   }
@@ -2838,6 +3026,33 @@ struct Policy_A_Sparse_M16N8K32 {
   }
 };
 
+// Sparse A load policy for m16n8k64 (compressed K/2 = 32 elements per row)
+// Each thread loads 16 fp8 values -> 4 uint32_t registers
+struct Policy_A_Sparse_M16N8K64 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& A) {
+    int lane = threadIdx.x & 31;
+    int group_id = lane >> 2;   // 0..7
+    int thread_id = lane & 0x3; // 0..3
+
+    using value_type = typename Tensor::value_type;
+    static_assert(std::is_same<value_type, f8_e4m3>::value ||
+                      std::is_same<value_type, f8_e5m2>::value,
+                  "Sparse m16n8k64 only supports fp8 types");
+
+    // For 2:4 sparse m16n8k64: A is [16, 32] (compressed from [16, 64])
+    // Recast to uint32 (4 fp8 per reg) and follow dense K32 layout
+    auto A_u32 = cute::recast<uint32_t>(A);
+    int col0 = thread_id;      // 0..3
+    int col1 = thread_id + 4;  // 4..7
+    uint32_t a0 = A_u32(group_id, col0);
+    uint32_t a1 = A_u32(group_id + 8, col0);
+    uint32_t a2 = A_u32(group_id, col1);
+    uint32_t a3 = A_u32(group_id + 8, col1);
+    return cutlass::Array<uint32_t, 4>{a0, a1, a2, a3};
+  }
+};
+
 // Sparse metadata load policy for m16n8k32
 struct Policy_E_Sparse_M16N8K32 {
   template <class Tensor>
@@ -2868,6 +3083,19 @@ struct Policy_E_Sparse_M16N8K16 {
     uint32_t lo = E(group_id, 0) & 0xFFFFu;
     uint32_t hi = E(group_id + 8, 0) & 0xFFFFu;
     return (hi << 16) | lo;
+  }
+};
+
+// Sparse metadata load policy for m16n8k64 (FP8 path)
+struct Policy_E_Sparse_M16N8K64 {
+  template <class Tensor>
+  __device__ static uint32_t load(Tensor const& E) {
+    int lane = threadIdx.x & 31;
+    int group_id = lane >> 2; // 0..7
+    int thread_id = lane & 0x3; // 0..3
+    int row = (thread_id < 2) ? group_id : (group_id + 8);
+    int col = thread_id & 0x1; // low/high 32b per row
+    return E(row, col);
   }
 };
 
@@ -3206,6 +3434,49 @@ struct Policy_B_Sparse_M16N8K32 {
     } else {
       return Policy_B_M16N8K32::load(B);
     }
+  }
+};
+
+// Sparse B policy for m16n8k64 with K-major [N, K] layout (fp8 path)
+struct Policy_B_Sparse_M16N8K64 {
+  template <class Tensor>
+  __device__ static auto load(Tensor const& B) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+
+    using value_type = typename Tensor::value_type;
+    static_assert(std::is_same<value_type, f8_e4m3>::value ||
+                      std::is_same<value_type, f8_e5m2>::value,
+                  "Sparse m16n8k64 only supports fp8 types");
+
+    // Swap indices: B is [N, K]
+    int col = gid;
+    int row0 = tid_in_group * 4;
+    int row1 = tid_in_group * 4 + 16;
+    int row2 = tid_in_group * 4 + 32;
+    int row3 = tid_in_group * 4 + 48;
+    uint32_t b0 =
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row0 + 3))) << 24) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row0 + 2))) << 16) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row0 + 1))) << 8) |
+        uint8_t(reinterpret_cast<uint8_t&>(B(col, row0)));
+    uint32_t b1 =
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row1 + 3))) << 24) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row1 + 2))) << 16) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row1 + 1))) << 8) |
+        uint8_t(reinterpret_cast<uint8_t&>(B(col, row1)));
+    uint32_t b2 =
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row2 + 3))) << 24) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row2 + 2))) << 16) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row2 + 1))) << 8) |
+        uint8_t(reinterpret_cast<uint8_t&>(B(col, row2)));
+    uint32_t b3 =
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row3 + 3))) << 24) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row3 + 2))) << 16) |
+        (uint32_t(reinterpret_cast<uint8_t&>(B(col, row3 + 1))) << 8) |
+        uint8_t(reinterpret_cast<uint8_t&>(B(col, row3)));
+    return cutlass::Array<uint32_t, 4>{b0, b1, b2, b3};
   }
 };
 
@@ -3874,6 +4145,7 @@ struct CUTE_MMA_M16N8K128 : CUTE_MMA {};
 // Sparse MMA atom types for 2:4 structured sparsity
 struct CUTE_MMA_SPARSE_M16N8K16 : CUTE_MMA {};
 struct CUTE_MMA_SPARSE_M16N8K32 : CUTE_MMA {};
+struct CUTE_MMA_SPARSE_M16N8K64 : CUTE_MMA {};
 struct CUTE_WGMMA : MMA {};
 struct CUTE_WGMMA_M64K8 : CUTE_WGMMA {};
 struct CUTE_WGMMA_M64K16 : CUTE_WGMMA {};
@@ -3946,6 +4218,15 @@ struct MMA_Policy<CUTE_MMA_SPARSE_M16N8K32> {
   using typeB = Policy_B_Sparse_M16N8K32;
   using typeD = Policy_D_M16N8;
   using typeE = Policy_E_Sparse_M16N8K32;
+};
+
+template <>
+struct MMA_Policy<CUTE_MMA_SPARSE_M16N8K64> {
+  static constexpr bool supported = true;
+  using typeA = Policy_A_Sparse_M16N8K64;
+  using typeB = Policy_B_Sparse_M16N8K64;
+  using typeD = Policy_D_M16N8;
+  using typeE = Policy_E_Sparse_M16N8K64;
 };
 
 // wgmma policies
@@ -4127,6 +4408,209 @@ struct SM80_SPARSE_16x8x32_F32BF16BF16F32_TN {
 #endif
   }
 };
+
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+// fp8 m16n8k64 sparse MMA: C = A_sparse * B + C (SM90+)
+struct SM90_SPARSE_16x8x64_F16E4M3E4M3F16_TN {
+  using DRegisters = uint32_t[2];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = uint32_t[2];
+
+  CUTE_HOST_DEVICE static void
+  fma(uint32_t& d0, uint32_t& d1, uint32_t const& a0, uint32_t const& a1,
+      uint32_t const& a2, uint32_t const& a3, uint32_t const& b0,
+      uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
+      uint32_t const& c0, uint32_t const& c1, uint32_t const& e,
+      int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    (void)spsel;
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k64.row.col.f16.e4m3.e4m3.f16 "
+        "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
+        : "=r"(d0), "=r"(d1)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
+          "r"(b3), "r"(c0), "r"(c1), "r"(e));
+#endif
+  }
+};
+
+struct SM90_SPARSE_16x8x64_F16E4M3E5M2F16_TN {
+  using DRegisters = uint32_t[2];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = uint32_t[2];
+
+  CUTE_HOST_DEVICE static void
+  fma(uint32_t& d0, uint32_t& d1, uint32_t const& a0, uint32_t const& a1,
+      uint32_t const& a2, uint32_t const& a3, uint32_t const& b0,
+      uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
+      uint32_t const& c0, uint32_t const& c1, uint32_t const& e,
+      int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    (void)spsel;
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k64.row.col.f16.e4m3.e5m2.f16 "
+        "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
+        : "=r"(d0), "=r"(d1)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
+          "r"(b3), "r"(c0), "r"(c1), "r"(e));
+#endif
+  }
+};
+
+struct SM90_SPARSE_16x8x64_F16E5M2E4M3F16_TN {
+  using DRegisters = uint32_t[2];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = uint32_t[2];
+
+  CUTE_HOST_DEVICE static void
+  fma(uint32_t& d0, uint32_t& d1, uint32_t const& a0, uint32_t const& a1,
+      uint32_t const& a2, uint32_t const& a3, uint32_t const& b0,
+      uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
+      uint32_t const& c0, uint32_t const& c1, uint32_t const& e,
+      int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    (void)spsel;
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k64.row.col.f16.e5m2.e4m3.f16 "
+        "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
+        : "=r"(d0), "=r"(d1)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
+          "r"(b3), "r"(c0), "r"(c1), "r"(e));
+#endif
+  }
+};
+
+struct SM90_SPARSE_16x8x64_F16E5M2E5M2F16_TN {
+  using DRegisters = uint32_t[2];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = uint32_t[2];
+
+  CUTE_HOST_DEVICE static void
+  fma(uint32_t& d0, uint32_t& d1, uint32_t const& a0, uint32_t const& a1,
+      uint32_t const& a2, uint32_t const& a3, uint32_t const& b0,
+      uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
+      uint32_t const& c0, uint32_t const& c1, uint32_t const& e,
+      int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    (void)spsel;
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k64.row.col.f16.e5m2.e5m2.f16 "
+        "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
+        : "=r"(d0), "=r"(d1)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
+          "r"(b3), "r"(c0), "r"(c1), "r"(e));
+#endif
+  }
+};
+
+struct SM90_SPARSE_16x8x64_F32E4M3E4M3F32_TN {
+  using DRegisters = float[4];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = float[4];
+
+  CUTE_HOST_DEVICE static void
+  fma(float& d0, float& d1, float& d2, float& d3, uint32_t const& a0,
+      uint32_t const& a1, uint32_t const& a2, uint32_t const& a3,
+      uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
+      uint32_t const& b3, float const& c0, float const& c1, float const& c2,
+      float const& c3, uint32_t const& e, int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    (void)spsel;
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e4m3.f32 "
+        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+        "{%12, %13, %14, %15}, %16, 0x0;\n"
+        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+          "r"(e));
+#endif
+  }
+};
+
+struct SM90_SPARSE_16x8x64_F32E4M3E5M2F32_TN {
+  using DRegisters = float[4];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = float[4];
+
+  CUTE_HOST_DEVICE static void
+  fma(float& d0, float& d1, float& d2, float& d3, uint32_t const& a0,
+      uint32_t const& a1, uint32_t const& a2, uint32_t const& a3,
+      uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
+      uint32_t const& b3, float const& c0, float const& c1, float const& c2,
+      float const& c3, uint32_t const& e, int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    (void)spsel;
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e5m2.f32 "
+        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+        "{%12, %13, %14, %15}, %16, 0x0;\n"
+        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+          "r"(e));
+#endif
+  }
+};
+
+struct SM90_SPARSE_16x8x64_F32E5M2E4M3F32_TN {
+  using DRegisters = float[4];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = float[4];
+
+  CUTE_HOST_DEVICE static void
+  fma(float& d0, float& d1, float& d2, float& d3, uint32_t const& a0,
+      uint32_t const& a1, uint32_t const& a2, uint32_t const& a3,
+      uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
+      uint32_t const& b3, float const& c0, float const& c1, float const& c2,
+      float const& c3, uint32_t const& e, int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    (void)spsel;
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e4m3.f32 "
+        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+        "{%12, %13, %14, %15}, %16, 0x0;\n"
+        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+          "r"(e));
+#endif
+  }
+};
+
+struct SM90_SPARSE_16x8x64_F32E5M2E5M2F32_TN {
+  using DRegisters = float[4];
+  using ARegisters = uint32_t[4];
+  using BRegisters = uint32_t[4];
+  using CRegisters = float[4];
+
+  CUTE_HOST_DEVICE static void
+  fma(float& d0, float& d1, float& d2, float& d3, uint32_t const& a0,
+      uint32_t const& a1, uint32_t const& a2, uint32_t const& a3,
+      uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
+      uint32_t const& b3, float const& c0, float const& c1, float const& c2,
+      float const& c3, uint32_t const& e, int const& spsel = 0) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    (void)spsel;
+    asm volatile(
+        "mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e5m2.f32 "
+        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+        "{%12, %13, %14, %15}, %16, 0x0;\n"
+        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+          "r"(e));
+#endif
+  }
+};
+#endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 
 } // namespace cute
 

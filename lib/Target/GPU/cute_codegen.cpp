@@ -2638,8 +2638,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool use_uint32 = false;
       UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
       RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
-      ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty)) << " "
-         << sym << "_frag[" << reg_num_d << "] ;\n";
+      ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
+        << " " << sym << "_frag[" << reg_num_d << "] ;\n";
       ds << d_indent << "memset(" << sym << "_frag, 0, sizeof(" << sym
          << "_frag));\n";
 
@@ -2666,11 +2666,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                *n_val == 8 && *k_val == 16;
       bool shape_is_m16n8k32 = m_val && n_val && k_val && *m_val == 16 &&
                                *n_val == 8 && *k_val == 32;
+      bool shape_is_m16n8k64 = m_val && n_val && k_val && *m_val == 16 &&
+                               *n_val == 8 && *k_val == 64;
       auto mma_atom_name = [&]() {
         if (policy_is_sparse && shape_is_m16n8k32)
           return std::string("CUTE_MMA_SPARSE_M16N8K32");
         if (policy_is_sparse && shape_is_m16n8k16)
           return std::string("CUTE_MMA_SPARSE_M16N8K16");
+        if (policy_is_sparse && shape_is_m16n8k64)
+          return std::string("CUTE_MMA_SPARSE_M16N8K64");
         return GetMMAAtomName(ssmi);
       };
       if (ssmi.frag == MMAInfo::FRAG_A || ssmi.frag == MMAInfo::FRAG_B ||
@@ -2718,11 +2722,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
         RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
         std::string CUTE_MMA_ATOM = mma_atom_name();
-        ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
+        ds << d_indent
+            << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
            << " " << sym << "_frag[" << reg_num_d << "] ;\n";
         ds << d_indent << "load_fragment_d<" << CUTE_MMA_ATOM << ">("
            << f_mds.first << ", " << "reinterpret_cast<"
-           << NameBaseType(ssmi.ty) << "*> (" << sym << "_frag));\n";
+            << NameBaseType(ssmi.ty)
+           << "*> (" << sym << "_frag));\n";
       } else {
         choreo_unreachable("unexpect MMA frag");
       }
@@ -2828,12 +2834,22 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto k_val = VIInt(ssmi.shape.at(2));
       bool shape_is_m16n8k32 = m_val && n_val && k_val && *m_val == 16 &&
                                *n_val == 8 && *k_val == 32;
+      bool shape_is_m16n8k16 = m_val && n_val && k_val && *m_val == 16 &&
+               *n_val == 8 && *k_val == 16;
+      bool shape_is_m16n8k64 = m_val && n_val && k_val && *m_val == 16 &&
+           *n_val == 8 && *k_val == 64;
       std::string CUTE_MMA_ATOM = (policy_is_sparse && shape_is_m16n8k32)
                                       ? "CUTE_MMA_SPARSE_M16N8K32"
-                                      : GetMMAAtomName(ssmi);
+                  : (policy_is_sparse && shape_is_m16n8k16)
+                    ? "CUTE_MMA_SPARSE_M16N8K16"
+                    : (policy_is_sparse &&
+                       shape_is_m16n8k64)
+                      ? "CUTE_MMA_SPARSE_M16N8K64"
+                      : GetMMAAtomName(ssmi);
       ds << d_indent << "store_fragment_d<" << CUTE_MMA_ATOM << ">("
-         << f_mds.first << ", " << "reinterpret_cast<" << NameBaseType(ssmi.ty)
-         << "*> (" << sym << "_frag));\n";
+        << f_mds.first << ", " << "reinterpret_cast<"
+        << NameBaseType(ssmi.ty)
+        << "*> (" << sym << "_frag));\n";
     } break;
     default: break;
     }
