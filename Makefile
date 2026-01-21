@@ -74,6 +74,14 @@ STANDALONE = OFF
 PUBLIC_PACKAGE=OFF
 
 # Build rules
+# Ensure running `make` with no target invokes the `build` target by default.
+# This overrides any `.DEFAULT_GOAL` set in included makefragments.
+.DEFAULT_GOAL := build
+
+all: build
+
+
+build: build-with-cmake-ninja
 
 # Specific Release/debug build
 release: CMAKE_BUILD_TYPE=Release

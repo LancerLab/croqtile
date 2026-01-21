@@ -1,0 +1,93 @@
+
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 64 
+#define N 64 
+#define K 64 
+
+__co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;
+
+  // each block handles 64x64 block with WGMMA
+  // WGMMA requires 128 threads (4 warps x 32 threads/warp)
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, TILE_K] lhs_load_s;
+    shared f16 [WARP_N, TILE_K] rhs_load_s;
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      // load 64x64 to smem
+      // Test new syntax: dma.copy.swizzle(128)
+      tma.copy.swizzle(128) lhs.chunkat(block_m, iv_k) => lhs_load_s;
+      tma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      // WGMMA requires 128 threads: 4 warps x 32 threads/warp
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swizzle(128) lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;   // row * col : c += a * b;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+}
+
+// int matmul(const half *a_d, const half *b_d, half *c_d, int M, int K, int N) {
+// int main(int argc, char **argv) {
+int main() {
+  // size_t M = 512;
+  // size_t N = 2048;
+  // size_t K = 256;
+
+  auto a_h = new half[M * K];
+  auto b_h = new half[N * K];
+  auto c_h = new half[M * N];
+
+  half *a_d, *b_d, *c_d;
+
+  for (size_t i = 0; i < M * K; ++i) a_h[i] = __float2half(static_cast<float>(rand() % 2));
+  for (size_t i = 0; i < N * K; ++i) b_h[i] = __float2half(static_cast<float>(rand() % 2));
+  for (size_t i = 0; i < M * N; ++i) c_h[i] = __float2half(0.0f);
+
+  cudaMalloc(&a_d, M * K * sizeof(half));
+  cudaMalloc(&b_d, N * K * sizeof(half));
+  cudaMalloc(&c_d, M * N * sizeof(half));
+
+  cudaMemcpy(a_d, a_h, M * K * sizeof(half), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_d, b_h, N * K * sizeof(half), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_d, c_h, M * N * sizeof(half), cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  auto lhs_d = choreo::make_spanview<2, choreo::f16>(a_d, {M, K});
+  auto rhs_d = choreo::make_spanview<2, choreo::f16>(b_d, {N, K});
+  auto res_d = choreo::make_spanview<2, choreo::f16>(c_d, {M, N});
+  matmul(lhs_d, rhs_d, res_d);
+
+  cudaMemcpy(c_h, c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  auto lhs_h = choreo::make_spanview<2, choreo::f16>(a_h, {M, K});
+  auto rhs_h = choreo::make_spanview<2, choreo::f16>(b_h, {N, K});
+  auto res_h = choreo::make_spanview<2, choreo::f16>(c_h, {M, N});
+
+  float tolerance = 0.005f;
+  // verfication
+  for (size_t i = 0; i < res_h.shape()[0]; ++i) {
+    for (size_t j = 0; j < res_h.shape()[1]; ++j) {
+      auto ref = 0.0f;
+      for (size_t k = 0; k < lhs_h.shape()[1]; ++k)
+        ref += __half2float(lhs_h[i][k] * rhs_h[j][k]);
+      auto delta = std::abs((ref - __half2float(res_h[i][j])) / ref);
+      if (delta >= tolerance) {
+        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << __half2float(res_h[i][j]) << ", delta: " << delta * 100 << "%\n";
+      }
+      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+    }
+  }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

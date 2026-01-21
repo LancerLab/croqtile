@@ -801,75 +801,8 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
     std::exit(EXIT_FAILURE);
   }
 
-  // ----------- Device selection -----------
-  // If CHOREO_CUDA_DEVICE is set, honor it.
-  // Otherwise pick a device meeting the SM requirement with the most free memory.
-  int device_id = -1;
-  if (const char* env_dev = std::getenv("CHOREO_CUDA_DEVICE")) {
-    int wanted = std::atoi(env_dev);
-    if (wanted < 0 || wanted >= device_count) {
-      std::fprintf(stderr,
-		   "[choreo] Invalid CHOREO_CUDA_DEVICE=%d (device_count=%d)\n",
-		   wanted, device_count);
-      std::exit(EXIT_FAILURE);
-    }
-    err = cudaSetDevice(wanted);
-    if (err != cudaSuccess) {
-      std::fprintf(stderr,
-		   "[choreo] cudaSetDevice(%d) failed: %s\n",
-		   wanted, cudaGetErrorString(err));
-      std::exit(EXIT_FAILURE);
-    }
-    device_id = wanted;
-  } else {
-    size_t best_free = 0;
-    int best_dev = -1;
-    for (int i = 0; i < device_count; ++i) {
-      cudaDeviceProp p{};
-      cudaError_t eprop = cudaGetDeviceProperties(&p, i);
-      if (eprop != cudaSuccess) continue;
-      int smi = p.major * 10 + p.minor;
-      if (smi < __CHOREO_REQUIRED_GPU_DEVICE_SM__) continue;
-
-      cudaError_t eset = cudaSetDevice(i);
-      if (eset != cudaSuccess) {
-        (void)cudaGetLastError();
-        continue;
-      }
-      // Force context init; if this fails (e.g. OOM), skip this device.
-      cudaError_t ectx = cudaFree(0);
-      if (ectx != cudaSuccess) {
-        (void)cudaGetLastError();
-        continue;
-      }
-      size_t free_b = 0, total_b = 0;
-      cudaError_t emem = cudaMemGetInfo(&free_b, &total_b);
-      if (emem != cudaSuccess) {
-        (void)cudaGetLastError();
-        continue;
-      }
-      if (free_b > best_free) {
-        best_free = free_b;
-        best_dev = i;
-      }
-    }
-    if (best_dev < 0) {
-      std::fprintf(stderr,
-		   "[choreo] No suitable CUDA device found (SM >= %d).\n",
-		   __CHOREO_REQUIRED_GPU_DEVICE_SM__);
-      std::exit(EXIT_FAILURE);
-    }
-    err = cudaSetDevice(best_dev);
-    if (err != cudaSuccess) {
-      std::fprintf(stderr,
-		   "[choreo] cudaSetDevice(%d) failed: %s\n",
-		   best_dev, cudaGetErrorString(err));
-      std::exit(EXIT_FAILURE);
-    }
-    device_id = best_dev;
-  }
-
   // ----------- Device capability check (selected device) -----------
+  int device_id = 0;
   cudaDeviceProp prop{};
   err = cudaGetDeviceProperties(&prop, device_id);
   if (err != cudaSuccess) {
@@ -2722,13 +2655,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
         RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
         std::string CUTE_MMA_ATOM = mma_atom_name();
-        ds << d_indent
-            << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
+        ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
            << " " << sym << "_frag[" << reg_num_d << "] ;\n";
         ds << d_indent << "load_fragment_d<" << CUTE_MMA_ATOM << ">("
            << f_mds.first << ", " << "reinterpret_cast<"
-            << NameBaseType(ssmi.ty)
-           << "*> (" << sym << "_frag));\n";
+           << NameBaseType(ssmi.ty) << "*> (" << sym << "_frag));\n";
       } else {
         choreo_unreachable("unexpect MMA frag");
       }
@@ -2837,7 +2768,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool shape_is_m16n8k16 = m_val && n_val && k_val && *m_val == 16 &&
                *n_val == 8 && *k_val == 16;
       bool shape_is_m16n8k64 = m_val && n_val && k_val && *m_val == 16 &&
-           *n_val == 8 && *k_val == 64;
+               *n_val == 8 && *k_val == 64;
       std::string CUTE_MMA_ATOM = (policy_is_sparse && shape_is_m16n8k32)
                                       ? "CUTE_MMA_SPARSE_M16N8K32"
                   : (policy_is_sparse && shape_is_m16n8k16)
@@ -2847,9 +2778,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                       ? "CUTE_MMA_SPARSE_M16N8K64"
                       : GetMMAAtomName(ssmi);
       ds << d_indent << "store_fragment_d<" << CUTE_MMA_ATOM << ">("
-        << f_mds.first << ", " << "reinterpret_cast<"
-        << NameBaseType(ssmi.ty)
-        << "*> (" << sym << "_frag));\n";
+         << f_mds.first << ", " << "reinterpret_cast<" << NameBaseType(ssmi.ty)
+         << "*> (" << sym << "_frag));\n";
     } break;
     default: break;
     }
@@ -3727,6 +3657,39 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent << "uint32_t " << desc.GetName() << "_elem_strides[] = {"
        << ValueSTR(ValxN(sbe::nu(1), t_shape.Rank()))
        << "};\n"; // elements' strides
+    std::string g_unscoped = UnScopedName(g_sym);
+    std::string g_scoped = InScopeName(g_unscoped);
+
+    // Determine whether this tensor is a true GLOBAL_INPUT parameter.
+    // Previous implementation used IsChoreoInput/IsChoreoOutput on the
+    // scoped name — that is insufficient because it returns true for
+    // both global _and_ non-global buffers. Correct behavior is to
+    // consult the parameter attribute (ParamAttr::GLOBAL_INPUT) when
+    // the symbol corresponds to a function parameter.
+    bool is_global_arg = false;
+    bool found_param = false;
+    for (const auto &item : GetChoreoFuncIns(cgi)) {
+      if (UnScopedName(item.name) == g_unscoped) {
+        found_param = true;
+        is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
+        break;
+      }
+    }
+    // Fallback for non-parameter host globals: preserve previous behavior.
+    if (!found_param) {
+      is_global_arg = IsChoreoInput(g_scoped) || IsChoreoOutput(g_scoped);
+    }
+
+    std::string base_expr = is_global_arg ? (g_unscoped + ".data()")
+                                          : SSMName((g_unscoped + "__device"), true);
+
+    // errs() << "[choreo][tma] g_sym=" << g_sym
+    //        << " g_scoped=" << g_scoped
+    //        << " storage=" << STR(gmem_ty->GetStorage())
+    //        << " is_global_arg=" << (is_global_arg ? "1" : "0")
+    //        << " base_expr=" << base_expr << "\n";
+    // errs().flush();
+
     hs << h_indent << "alignas(64) CUtensorMap " << map_name << "{};\n";
     hs << h_indent << "CUresult " << map_name
        << "_res = cuTensorMapEncodeTiled(\n";
@@ -3734,9 +3697,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent << "        " << TMAMapDataType(gmem_ty->ElementType())
        << ",\n"; // tma element type
     hs << h_indent << "        " << g_shape.Rank() << ",\n";
-    hs << h_indent << "        "
-       << SSMName((UnScopedName(g_sym) + "__device"), true)
-       << ",\n"; // base symbol
+    hs << h_indent << "        " << base_expr << ",\n"; // base symbol
     hs << h_indent << "        " << desc.GetName() << "_shape,\n";
     hs << h_indent << "        " << desc.GetName() << "_strides,\n";
     hs << h_indent << "        " << desc.GetName() << "_box_shape,\n";
