@@ -1,0 +1,105 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90 -use-cuda-type=false %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ auto tma_ab_buffer_f6(f6_e2m3 [16, 16, 128] l, f6_e2m3 [16, 16, 128] r) {
+  f32 [l.span] output;
+
+  parallel p by 8 : block {
+    with k in [8] {
+      l0 = tma.copy.async l.chunkat(_,k,p) => shared;
+      r0 = tma.copy.async r.chunkat(_,k,p) => shared;
+      l1 = tma.any;
+      r1 = tma.any;
+      shared f32 [l0.span] out;
+      foreach k(1:) {
+        l1 = tma.copy.async l.chunkat(_,k,p) => shared;
+        r1 = tma.copy.async r.chunkat(_,k,p) => shared;
+        wait l0, r0;
+        foreach index in [l0.span]
+          out.at(index) = l0.data.at(index) + r0.data.at(index);
+        tma.copy out => output.chunkat(_,k-1,p);
+        swap l0, l1;
+        swap r0, r1;
+      }
+      wait l0, r0;
+      foreach index in [l0.span]
+        out.at(index) = l0.data.at(index) + r0.data.at(index);
+      tma.copy out => output.chunkat(_,k(-1),p);
+    }
+  }
+
+  return output;
+}
+
+__co__ auto tma_ab_buffer_f4(f4_e2m1 [16, 16, 128] l, f4_e2m1 [16, 16, 128] r) {
+  f32 [l.span] output;
+
+  parallel p by 8 : block {
+    with k in [8] {
+      l0 = tma.copy.async l.chunkat(_,k,p) => shared;
+      r0 = tma.copy.async r.chunkat(_,k,p) => shared;
+      l1 = tma.any;
+      r1 = tma.any;
+      shared f32 [l0.span] out;
+      foreach k(1:) {
+        l1 = tma.copy.async l.chunkat(_,k,p) => shared;
+        r1 = tma.copy.async r.chunkat(_,k,p) => shared;
+        wait l0, r0;
+        foreach index in [l0.span]
+          out.at(index) = l0.data.at(index) + r0.data.at(index);
+        tma.copy out => output.chunkat(_,k-1,p);
+        swap l0, l1;
+        swap r0, r1;
+      }
+      wait l0, r0;
+      foreach index in [l0.span]
+        out.at(index) = l0.data.at(index) + r0.data.at(index);
+      tma.copy out => output.chunkat(_,k(-1),p);
+    }
+  }
+
+  return output;
+}
+
+int main() { /// host program
+  auto a6 = choreo::make_spandata<choreo::f6_e2m3>(16, 16, 128);
+  auto b6 = choreo::make_spandata<choreo::f6_e2m3>(16, 16, 128);
+  a6.fill_random(-2.0f, 2.0f);
+  b6.fill_random(-2.0f, 2.0f);
+
+  auto res6 = tma_ab_buffer_f6(a6.view(), b6.view());
+
+  float tolerance = 0.2f;
+  for (size_t i = 0; i < res6.shape()[0]; ++i)
+    for (size_t j = 0; j < res6.shape()[1]; ++j)
+      for (size_t k = 0; k < res6.shape()[2]; ++k) {
+        float ref = float(a6[i][j][k]) + float(b6[i][j][k]);
+        float got = float(res6[i][j][k]);
+        choreo::choreo_assert(std::abs(got - ref) <= tolerance,
+                              "values are not equal.");
+      }
+
+  std::cout << "Test F6 Passed\n" << std::endl;
+
+  auto a4 = choreo::make_spandata<choreo::f4_e2m1>(16, 16, 128);
+  auto b4 = choreo::make_spandata<choreo::f4_e2m1>(16, 16, 128);
+  a4.fill_random(-2.0f, 2.0f);
+  b4.fill_random(-2.0f, 2.0f);
+
+  auto res4 = tma_ab_buffer_f4(a4.view(), b4.view());
+
+  for (size_t i = 0; i < res4.shape()[0]; ++i)
+    for (size_t j = 0; j < res4.shape()[1]; ++j)
+      for (size_t k = 0; k < res4.shape()[2]; ++k) {
+        float ref = float(choreo::f4_e2m1(float(a4[i][j][k]) +
+                                          float(b4[i][j][k])));
+        float got = float(res4[i][j][k]);
+        choreo::choreo_assert(std::abs(got - ref) <= tolerance,
+                              "values are not equal.");
+      }
+
+  std::cout << "Test F4 Passed\n" << std::endl;
+}
+
+// CHECK: Test F6 Passed
+// CHECK: Test F4 Passed

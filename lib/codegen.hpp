@@ -122,6 +122,7 @@ struct FuncTrait {
   bool multiple_parallelby = false;
   bool has_tma = false;
   bool has_async_dma = false;
+  bool has_subbyte_tma = false;
 };
 
 struct MMAInfo {

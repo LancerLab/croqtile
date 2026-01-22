@@ -51,6 +51,10 @@
 #define __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
 #include "cuda_fp4.h"
 #include "cuda_fp6.h"
+#else
+// Fallback to CUTE FP4/FP6 types when CUDA native types are unavailable.
+#define __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
+#define __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
 #endif
 
 #define __CHOREO_TARGET_NATIVE_SUB_BYTE_INTEGRAL_SUPPORT__
@@ -727,7 +731,11 @@ __host__ __device__ static inline float operator/(__nv_fp8_e5m2 a,
 #if defined(__USE_CUTE_TYPE__)
 using cute::float_e2m1_t;
 #elif defined(__USE_CUDA_TYPE__)
+#if CUDA_VERSION >= 12090
 using float_e2m1_t = __nv_fp4_e2m1;
+#else
+using float_e2m1_t = cute::float_e2m1_t;
+#endif
 #elif defined(__TOPSCC__) || __GCU_ARCH__ >= 400
 // TODO
 #else
@@ -742,8 +750,13 @@ using f4_e2m1 = float_e2m1_t;
 using cute::float_e2m3_t;
 using cute::float_e3m2_t;
 #elif defined(__USE_CUDA_TYPE__)
+#if CUDA_VERSION >= 12090
 using float_e3m2_t = __nv_fp6_e3m2;
 using float_e2m3_t = __nv_fp6_e2m3;
+#else
+using float_e3m2_t = cute::float_e3m2_t;
+using float_e2m3_t = cute::float_e2m3_t;
+#endif
 #elif defined(__TOPSCC__) || __GCU_ARCH__ >= 400
 // TODO
 #else

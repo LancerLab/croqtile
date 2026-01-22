@@ -124,6 +124,9 @@ const std::string TMAMapDataType(BaseType bt) {
     return "CUtensorMapDataType::CU_TENSOR_MAP_DATA_TYPE_FLOAT64";
   case BaseType::F8_E4M3:
   case BaseType::F8_E5M2:
+  case BaseType::F6_E2M3:
+  case BaseType::F6_E3M2:
+  case BaseType::F4_E2M1:
   case BaseType::U8:
     return "CUtensorMapDataType::CU_TENSOR_MAP_DATA_TYPE_UINT8";
   case BaseType::U16:
@@ -802,20 +805,20 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   err = cudaGetDeviceProperties(&prop, device_id);
   if (err != cudaSuccess) {
       std::fprintf(stderr,
-		   "[choreo] cudaGetDeviceProperties failed: %s\n",
-		   cudaGetErrorString(err));
+                   "[choreo] cudaGetDeviceProperties failed: %s\n",
+                   cudaGetErrorString(err));
       std::exit(EXIT_FAILURE);
   }
 
   int sm = prop.major * 10 + prop.minor;
   if (sm < __CHOREO_REQUIRED_GPU_DEVICE_SM__) {
     std::fprintf(stderr,
-	"[choreo] Compute capability too low on device %d (%s):\n"
-	"  found SM %d.%d (sm_%d)\n"
-	"  required SM >= %d (sm_%d)\n",
-	device_id, prop.name,
-	prop.major, prop.minor, sm,
-	__CHOREO_REQUIRED_GPU_DEVICE_SM__, __CHOREO_REQUIRED_GPU_DEVICE_SM__);
+        "[choreo] Compute capability too low on device %d (%s):\n"
+        "  found SM %d.%d (sm_%d)\n"
+        "  required SM >= %d (sm_%d)\n",
+        device_id, prop.name,
+        prop.major, prop.minor, sm,
+        __CHOREO_REQUIRED_GPU_DEVICE_SM__, __CHOREO_REQUIRED_GPU_DEVICE_SM__);
     std::exit(EXIT_FAILURE);
   }
 
@@ -1419,7 +1422,20 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
-  auto& lconfig = cgi.GetFunctionLaunches(fname)[parallel_idx];
+  auto& lcs = cgi.GetFunctionLaunches(fname);
+  if (parallel_idx < 0) parallel_idx = 0;
+  if (lcs.size() <= static_cast<size_t>(parallel_idx)) {
+    lcs.resize(static_cast<size_t>(parallel_idx + 1));
+  }
+  auto& lconfig = lcs[parallel_idx];
+  // Ensure launch config is up-to-date even when earlier passes skipped it.
+  switch (n.GetLevel()) {
+  case ParallelLevel::BLOCK: lconfig.SetBlockCount(n.BoundValues()); break;
+  case ParallelLevel::GROUP: lconfig.SetGroupCount(n.BoundValues()); break;
+  case ParallelLevel::GROUPx4: lconfig.SetGroupx4Count(n.BoundValues()); break;
+  case ParallelLevel::THREAD: lconfig.SetThreadCount(n.BoundValues()); break;
+  default: break;
+  }
 
   // add the device name map
   std::string dname[] = {"x", "y", "z"};
@@ -1471,6 +1487,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   // only do the whole codegen when accessing the outer parallel-by
   if (n.IsOuter()) {
 
+    ValueItem cur_spm_size = sbe::nu(0);
+    ValueItem cur_ring_offset = sbe::nu(0);
+    ValueItem cur_ring_size = sbe::nu(0);
+
     EmitMemReuse(SSTab().ScopeName());
 
     EmitTMAConfiguration(&n);
@@ -1497,8 +1517,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
        << ValueSTR(thr_count) << ", 1, 1" << ");\n";
 
     // plan the shared memory that is decided at runtime
-    cur_spm_size = sbe::nu(0);
-    cur_ring_offset = sbe::nu(0);
     cur_ring_size = (thr_count + sbe::nu(31)) / sbe::nu(32) /* warp size */;
 
     // add the size of the future ring (see choreo.h)
@@ -1618,7 +1636,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     }
 
     // handle device function
-    EmitDeviceFuncDecl(ds, &n);
+    EmitDeviceFuncDecl(ds, &n, cur_ring_offset);
     ds << " {\n";
     IncrDeviceIndent();
     if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
@@ -1947,12 +1965,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   auto future_name = n.future;
   bool bind_data = SymbolToSymbol() || TileToSymbol() || TileToTile();
   std::string bound_mdata_expr = (n.IsSparse() && bind_data) ? mdata_expr : "";
+  bool use_tma = n.IsTMA();
+
   // bind the data to the future
   if (bind_data)
     future_name =
-        claimFuture(t_buf.second, fty->IsAsync(), n.IsTMA(), bound_mdata_expr);
+        claimFuture(t_buf.second, fty->IsAsync(), use_tma, bound_mdata_expr);
   else
-    future_name = claimFuture("", fty->IsAsync(), n.IsTMA(), "");
+    future_name = claimFuture("", fty->IsAsync(), use_tma, "");
 
   auto DMACodeGen = [&]() {
     std::string f_mds_offset = "";
@@ -2014,16 +2034,16 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // avoid the block-single guard so every lane issues copy/trigger.
     bool need_single_instance = !ThreadCooperative(n);
     if (fty->IsAsync() && !n.IsTMA()) need_single_instance = false;
+        bool is_subbyte_copy = (n.operation == ".copy") && !n.IsSparse() &&
+           (IsFloatSubByteType(f_sty->ElementType()) ||
+          IsFloatSubByteType(t_sty->ElementType()));
+    bool need_subbyte_async_sync = false;
 
     if (need_single_instance) ds << d_indent << LevelPred() << " {\n";
     IncrDeviceIndent();
     if (!n.future.empty()) cooperatives.insert(InScopeName(n.future));
 
     if (n.operation == ".copy" || n.operation == ".transp") {
-      bool is_subbyte_copy = (n.operation == ".copy") && !n.IsSparse() &&
-                             !fty->IsAsync() && SymbolToSymbol() &&
-                             (IsFloatSubByteType(f_sty->ElementType()) ||
-                              IsFloatSubByteType(t_sty->ElementType()));
       if (n.IsSparse() && n.operation == ".copy" && SymbolToSymbol() &&
           !fty->IsAsync()) {
         std::string meta_ptr;
@@ -2108,16 +2128,28 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           ds << d_indent << "}\n";
         }
       } else if (is_subbyte_copy) {
-        auto f_ptr = std::string("((") + NameBaseType(f_sty->ElementType()) +
-                     "*)" + f_buf.second + ") + " + f_mds_offset;
-        auto t_ptr = std::string("((") + NameBaseType(t_sty->ElementType()) +
-                     "*)" + t_buf.second + ") + " + t_mds_offset;
-        auto elem_count = ValueSTR(f_shape.ElementCountValue());
-        ds << d_indent << "for (size_t __i = 0; __i < " << elem_count
-           << "; ++__i) {" << "\n";
-        ds << d_indent << "  (" << t_ptr << ")[__i] = (" << f_ptr
-           << ")[__i];\n";
-        ds << d_indent << "}\n";
+        const auto f_byte = GenTensorDecl(
+            RemoveSuffix(f_buf_name, ".data()") + "_byte", f_buf_name,
+            f_sty->GetStorage(), BaseType::U8, fty->GetShape(), false,
+            f_mds_offset, ValueSTR(f_stride, false, true));
+        const auto t_byte = GenTensorDecl(
+            RemoveSuffix(t_buf_name, ".data()") + "_byte", t_buf_name,
+            t_sty->GetStorage(), BaseType::U8, fty->GetShape(), false,
+            t_mds_offset, ValueSTR(t_stride, false, true));
+        ds << f_byte.second;
+        ds << t_byte.second;
+        if (fty->IsAsync()) {
+          if (!n.future.empty())
+            async_subbyte_futures.insert(InScopeName(n.future));
+          ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
+             << ".get_atom(), " << f_byte.first << ", " << t_byte.first
+             << ");\n";
+          ds << d_indent << future_name << ".trigger();\n";
+          if (need_single_instance) need_subbyte_async_sync = true;
+        } else {
+          ds << d_indent << "cute::copy(" << f_byte.first << ", "
+             << t_byte.first << ");\n";
+        }
       } else if (fty->IsAsync()) {
         ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
            << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
@@ -2173,6 +2205,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     DecrDeviceIndent();
     if (need_single_instance) ds << d_indent << "} // single instance\n";
+
+    if (need_subbyte_async_sync) {
+      ds << d_indent << "__syncthreads();\n";
+    }
 
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
@@ -2254,7 +2290,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
   };
 
-  if (n.IsTMA())
+  if (use_tma)
     TMACodeGen();
   else
     DMACodeGen();
@@ -3818,7 +3854,8 @@ void CuteCodeGen::EmitTopsFree() {
 }
 
 void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
-                                     AST::ParallelBy* pb) {
+                                     AST::ParallelBy* pb,
+                                     const ValueItem& cur_ring_offset) {
   oss << "__global__ void " << device_fn << "(";
 
   size_t index = 0;

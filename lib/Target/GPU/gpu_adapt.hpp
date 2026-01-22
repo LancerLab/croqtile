@@ -457,19 +457,33 @@ public:
     auto t_name = t_ca->RefSymbol();
     auto t_sty = GetSpannedType(GetSymbolType(t_name));
     auto t_shape = t_sty->GetShape();
+    auto elem_bits = [](BaseType bt) -> size_t {
+      if (IsFloatSubByteType(bt)) return 8;
+      switch (bt) {
+      case BaseType::F4_E2M1: return 4;
+      case BaseType::F6_E2M3:
+      case BaseType::F6_E3M2: return 6;
+      default: return SizeOf(bt) * 8;
+      }
+    };
+    auto tma_align_bits = [&](BaseType bt) -> size_t {
+      if (IsFloatSubByteType(bt)) return 16 * 8;
+      return 16 * 8;
+    };
     if ((f_sty->GetStorage() == Storage::GLOBAL ||
          f_sty->GetStorage() == Storage::DEFAULT) &&
         t_sty->GetStorage() == Storage::SHARED) {
       // none-interleave tma requires the `leading-dimension * elementsize` be a
       // multiple of 16
       if (!(t_shape.LeadingValue()->IsSymbolic())) {
-        auto size =
-            (t_shape.LeadingValue() * t_sty->ElementSizeValue())->Normalize();
-        auto rem = size % sbe::nu(16);
+        auto bits =
+            (t_shape.LeadingValue() * sbe::nu(elem_bits(t_sty->ElementType())))
+                ->Normalize();
+        auto rem = bits % sbe::nu(tma_align_bits(t_sty->ElementType()));
         if (!sbe::ceq(rem->Normalize(), sbe::nu(0)))
-          Error(f_ca->LOC(), "GPU TMA requires boxDim[0] * elementSizeInBytes "
-                             "be a mulitple of 16-bytes. (got: " +
-                                 STR(size) + ")");
+          Error(f_ca->LOC(), "GPU TMA requires boxDim[0] * elementSizeInBits "
+                             "be aligned to the TMA requirement. (got: " +
+                                 STR(bits) + ")");
       } else {
         // TODO: emit runtime assessment
       }
@@ -477,13 +491,14 @@ public:
                 t_sty->GetStorage() == Storage::DEFAULT) &&
                f_sty->GetStorage() == Storage::SHARED) {
       if (!(f_shape.LeadingValue()->IsSymbolic())) {
-        auto size =
-            (f_shape.LeadingValue() * f_sty->ElementSizeValue())->Normalize();
-        auto rem = size % sbe::nu(16);
+        auto bits =
+            (f_shape.LeadingValue() * sbe::nu(elem_bits(f_sty->ElementType())))
+                ->Normalize();
+        auto rem = bits % sbe::nu(tma_align_bits(f_sty->ElementType()));
         if (!sbe::ceq(rem->Normalize(), sbe::nu(0)))
-          Error(t_ca->LOC(), "GPU TMA requires boxDim[0] * elementSizeInBytes "
-                             "be a mulitple of 16-bytes. (got: " +
-                                 STR(size) + ")");
+          Error(t_ca->LOC(), "GPU TMA requires boxDim[0] * elementSizeInBits "
+                             "be aligned to the TMA requirement. (got: " +
+                                 STR(bits) + ")");
       } else {
         // TODO: emit runtime assessment
       }

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 
 #include "ast.hpp"
 #include "codegen.hpp"
@@ -294,10 +295,8 @@ private:
   bool emit_call = true;                // emit the call statement
 
   std::set<std::string> cooperatives; // futures with cooperative-dma
+  std::unordered_set<std::string> async_subbyte_futures;
 
-  ValueItem cur_spm_size;    // extern shared buffer size
-  ValueItem cur_ring_offset; // extern shared buffer size
-  ValueItem cur_ring_size;   // extern shared buffer size
 
   // mma related
   size_t reg_num_d;
@@ -314,7 +313,8 @@ private:
   void EmitFixedDeviceHead();
 
   void EmitHostFuncDecl(std::ostringstream&);
-  void EmitDeviceFuncDecl(std::ostringstream&, AST::ParallelBy*);
+  void EmitDeviceFuncDecl(std::ostringstream&, AST::ParallelBy*,
+                          const ValueItem& cur_ring_offset);
 
   void EmitSource();
   void EmitScript(std::ostream& os, const std::string& exe_fn = "");
@@ -360,6 +360,7 @@ private:
     host_param_count = 0; // reset the count of host parameter
     symbolic_dimensions.clear();
     claimed_futs.clear();
+    async_subbyte_futures.clear();
     fty = nullptr;
     void_return = false;
     emit_call = true;
