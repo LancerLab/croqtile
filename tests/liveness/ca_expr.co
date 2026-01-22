@@ -1,4 +1,4 @@
-// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines %s
+// RUN: choreo -es %s | FileCheck --match-full-lines %s
 
 __co__ auto matmul1(f32 [32, 512, 768] lhs, f32 [768, 768] rhs) {
   f32 [lhs.span(0), lhs.span(1), rhs.span(1)] output;

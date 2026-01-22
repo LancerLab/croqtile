@@ -1,5 +1,5 @@
-// RUN: choreo -es -t topscc -dv=liveness %s | FileCheck --match-full-lines %s
-// RUN: choreo -es -t topscc -dv=memreuse %s | FileCheck --match-full-lines --check-prefix=MEMREUSE %s
+// RUN: choreo -es -dv=liveness %s | FileCheck --match-full-lines %s
+// RUN: choreo -es -dv=memreuse %s | FileCheck --match-full-lines --check-prefix=MEMREUSE %s
 
 #include "choreo.h"
 

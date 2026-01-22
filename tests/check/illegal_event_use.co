@@ -1,4 +1,4 @@
-// RUN: choreo -es -t topscc %s 2>&1 | FileCheck %s --check-prefix=CHECK
+// RUN: choreo -es %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=CHECK
 
 __co__ auto placeholder(f32 [24, 17, 128] a) {
   global event g[3];

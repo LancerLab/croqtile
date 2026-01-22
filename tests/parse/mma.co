@@ -1,4 +1,4 @@
-// RUN: choreo -e %s | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
 
 __co__ s32 [128, 256] matmul(s32 [128, 256] lhs, s32 [256, 256] rhs) {
   s32[lhs.span(0), rhs.span(1)] output;

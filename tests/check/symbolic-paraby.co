@@ -1,4 +1,4 @@
-// RUN: choreo -t topscc %s 2>&1 -o - | FileCheck %s
+// RUN: choreo %s 2>&1 -o - | FileCheck %s
 
 #include "choreo.h"
 
@@ -29,44 +29,6 @@ __co__ s32 [N, 17, 128] ele_add(s32 [N, 17, 128] lhs, s32 [N, 17, 128] rhs, int 
     }
   }
   return output;
-}
-
-int main() { 
-  choreo::s32 a[6][17][128] = {0};
-  choreo::s32 b[6][17][128] = {0};
-  
-  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128});
-  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128});
-  a_data.fill_random(-10, 10);
-  b_data.fill_random(-10, 10);
-
-  int PF = 6;
-  auto res = ele_add(a_data, b_data, PF);
-
- 
-  for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; j < res.shape()[1]; ++j)
-      for (size_t k = 0; k < res.shape()[2]; ++k) {
-        // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
-        // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
-        choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
-      }
-
-  std::cout << "Test Passed with PF: " << PF << "\n";
-
-  PF = 2;
-  auto res1 = ele_add(a_data, b_data, PF);
-
- 
-  for (size_t i = 0; i < res1.shape()[0]; ++i)
-    for (size_t j = 0; j < res1.shape()[1]; ++j)
-      for (size_t k = 0; k < res1.shape()[2]; ++k) {
-        // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
-        // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res1: " << res1[i][j][k] << "\n";
-        choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
-      }
-
-  std::cout << "Test Passed with PF: " << PF << "\n";
 }
 
 // CHECK: error: bound -5 in parallelby is invalid: should be greater than 0.

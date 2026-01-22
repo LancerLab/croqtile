@@ -1,29 +1,16 @@
-// RUN: not choreo -t topscc %s 2>&1 | FileCheck %s
-// RUN: not choreo -t factor %s 2>&1 | FileCheck %s --check-prefix=CHECKF
+// RUN: not choreo %s 2>&1 | FileCheck %s
 
 __co__ s32 mdspan<3> foo() {}
 // CHECK: non-void function 'foo` does not contain a return statement.
-// CHECKF: non-void function 'foo` does not contain a return statement.
 
 __co__ auto bar(int) {}
 // CHECK-NOT: bar
-// CHECKF-NOT: bar
 
 __co__ void foobar(bool) {}
 // CHECK-NOT: foobar
-// CHECKF-NOT: foobar
 
 __co__ void barfoo(s32 [1] i) { return i; }
 // CHECK: return statement found in void function 'barfoo`.
-// CHECKF: return statement found in void function 'barfoo`.
 
-__co__ auto correct(s32 [1] i) { return i; }
-// CHECK-NOT: correct
-// CHECKF-NOT: correct
-
-__co__ int correct_int() { return 1; }
-// CHECK-NOT: correct_int
-// CHECKF: error: returning scalar value in Factor backend is not supported yet.
 
 // CHECK: Totally 2 errors have been detected.
-// CHECKF: Totally 3 errors have been detected.

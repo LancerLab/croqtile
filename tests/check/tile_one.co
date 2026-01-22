@@ -1,4 +1,4 @@
-// RUN: choreo -t topscc %s -es -o - 2>&1 |FileCheck %s
+// RUN: choreo %s -es -o - 2>&1 |FileCheck %s
 
 #define EE 1
 #define CC 1

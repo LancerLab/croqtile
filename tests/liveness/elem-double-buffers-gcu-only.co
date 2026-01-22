@@ -45,28 +45,6 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
   return output;
 }
 
-int main() {
-  choreo::s32 a[6][17][128] = {0};
-  choreo::s32 b[6][17][128] = {0};
-
-  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128});
-  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128});
-  a_data.fill_random(-10, 10);
-  b_data.fill_random(-10, 10);
-  auto res = ele_add(a_data, b_data);
-
- 
-  for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; j < res.shape()[1]; ++j)
-      for (size_t k = 0; k < res.shape()[2]; ++k) {
-        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
-          assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
-        }
-      }
-
-  std::cout << "Test Passed\n" << std::endl;
-}
-
 // CHECK: (  0) ele_add(s32 mdspan<3> [6, 17, 128] lhs, s32 mdspan<3> [6, 17, 128] rhs) {
 // CHECK: (  1)   global s32 [ lhs.span ] output
 // CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] : block {

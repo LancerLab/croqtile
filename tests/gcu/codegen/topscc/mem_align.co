@@ -1,0 +1,16 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck %s --check-prefix=CHECK-tops
+
+#include "choreo.h"
+
+
+__co__ void foo() {
+  parallel {m, n} by [1, 1] : block {
+    shared f32 [1] smem0;
+    shared f32 [1] smem1;
+    dma.copy smem0 => smem1;
+  }
+}
+
+// CHECK-tops:  __shared__ unsigned char anon_1[1024];
+// CHECK-tops:  float* smem0 = (float*)(anon_1 + 512);
+// CHECK-tops:  float* smem1 = (float*)(anon_1 + 0);

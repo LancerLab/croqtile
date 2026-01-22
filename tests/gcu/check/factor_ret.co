@@ -1,0 +1,6 @@
+// RUN: not choreo -t factor %s 2>&1 | FileCheck %s --check-prefix=CHECKF
+
+__co__ int correct_int() { return 1; }
+// CHECK-NOT: correct_int
+// CHECKF: error: returning scalar value in Factor backend is not supported yet.
+
