@@ -43,7 +43,7 @@ __co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] i
 // CHECK: ( 14)           anon_1 =  (p # d0) 
 // CHECK: ( 15)           local s32 mdspan<2> [1, 512] id_L1__buf__
 // CHECK: ( 16)           id_L1 = dma.copy id.ChunkAt(anon_1, d1) => id_L1__buf__
-// CHECK: ( 17)           call call_gather_kernel_2( (dataof input_L1) ,  (dataof id_L1) , output_L1, off_buff,  (dataof para_L1) )
+// CHECK: ( 17)           call call_gather_kernel( (dataof input_L1) ,  (dataof id_L1) , output_L1, off_buff,  (dataof para_L1) )
 // CHECK: ( 18)           anon_2 =  (p # d0) 
 // CHECK: ( 19)           dma.copy output_L1 => output.ChunkAt(anon_2, d1)
 // CHECK: ( 20)         }

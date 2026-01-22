@@ -1,4 +1,5 @@
-// RUN: not choreo -t topscc -arch=gcu3 %s 2>&1 | FileCheck %s
+// RUN: not choreo -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s
+
 __co__ auto illegal_call(f32 [36] input) {
   global f32 [3] l3_ptr;
   parallel p by 3 {
