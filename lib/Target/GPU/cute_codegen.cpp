@@ -3758,6 +3758,12 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "choreo::float_e4m3_t";
   else if (isa<FloatE5M2Type>(&ty))
     return "choreo::float_e5m2_t";
+  else if (isa<FloatE2M3Type>(&ty))
+    return "choreo::float_e2m3_t";
+  else if (isa<FloatE3M2Type>(&ty))
+    return "choreo::float_e3m2_t";
+  else if (isa<FloatE2M1Type>(&ty))
+    return "choreo::float_e2m1_t";
   else if (isa<F16Type>(&ty))
     return "choreo::half";
   else if (isa<BF16Type>(&ty))

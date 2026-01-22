@@ -733,6 +733,7 @@ using float_e2m1_t = __nv_fp4_e2m1;
 #else
 #error "FP4 is not supported on this target."
 #endif
+using f4_e2m1_t = float_e2m1_t;
 using f4_e2m1 = float_e2m1_t;
 #endif // __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
 
@@ -748,6 +749,8 @@ using float_e2m3_t = __nv_fp6_e2m3;
 #else
 #error "FP6 is not supported on this target."
 #endif
+using f6_e3m2_t = float_e3m2_t;
+using f6_e2m3_t = float_e2m3_t;
 using f6_e3m2 = float_e3m2_t;
 using f6_e2m3 = float_e2m3_t;
 #endif // __CHOREO_TARGET_NATIVE_FP6_SUPPORT__

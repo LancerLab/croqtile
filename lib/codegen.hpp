@@ -588,6 +588,12 @@ HostTypeStringify(const Choreo::Type& ty, bool is_ret = false,
     res = "choreo::f8_e4m3_t";
   else if (isa<FloatE5M2Type>(&ty))
     res = "choreo::f8_e5m2_t";
+  else if (isa<FloatE2M3Type>(&ty))
+    res = "choreo::f6_e2m3_t";
+  else if (isa<FloatE3M2Type>(&ty))
+    res = "choreo::f6_e3m2_t";
+  else if (isa<FloatE2M1Type>(&ty))
+    res = "choreo::f4_e2m1_t";
   else if (isa<F16Type>(&ty))
     res = "choreo::half";
   else if (isa<BF16Type>(&ty))
