@@ -1,0 +1,107 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+// RUN: choreo -vn %s | FileCheck --check-prefix=VALNO --match-full-lines %s
+
+__co__ void bar1() {
+  parallel bdim = {x, y} by [2, 6] {
+    local f16[4] l;
+  }
+
+  parallel gdim = {xx, yy, zz} by [2, 6, 3] {
+    parallel bdim = {x, y} by [4, 5] {
+      local f16[4] l;
+    }
+  }
+
+  parallel p by 4 {
+    parallel q = {x, y, z} by [4, 3, 2] {
+      local f16[4] l;
+    }
+  }
+}
+
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::bdim, Type: {int,int}->[2, 6]
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::x, Type: {int}->[2](pi:x)
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::y, Type: {int}->[6](pi:y)
+// CHECK: Symbol:    ::bar1{{(::paraby_[0-9]+)*}}::l, Type: local f16 mdspan<1> [4]
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::gdim, Type: {int,int,int}->[2, 6, 3]
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::xx, Type: {int}->[2](pi:x)
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::yy, Type: {int}->[6](pi:y)
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::zz, Type: {int}->[3](pi:z)
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::bdim, Type: {int,int}->[4, 5]
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::x, Type: {int}->[4](pi:x)
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::y, Type: {int}->[5](pi:y)
+// CHECK: Symbol:    ::bar1{{(::paraby_[0-9]+)*}}::l, Type: local f16 mdspan<1> [4]
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::p, Type: {int}->[4]
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::p__elem__x, Type: {int}->[4](pi:x)
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::q, Type: {int,int,int}->[4, 3, 2]
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::x, Type: {int}->[4](pi:x)
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::y, Type: {int}->[3](pi:y)
+// CHECK: Bounded:   ::bar1{{(::paraby_[0-9]+)*}}::z, Type: {int}->[2](pi:z)
+// CHECK: Symbol:    ::bar1{{(::paraby_[0-9]+)*}}::l, Type: local f16 mdspan<1> [4]
+// CHECK: Function:  ::bar1, Type: void (*)()
+
+// VALNO:  scope-1 {
+// VALNO:   New VN #0: 'const_1'
+// VALNO:   Alias "::@__choreo_no_tiling__" -> #0
+// VALNO:   New VN #1: '::__choreo_no_tiling__'
+// VALNO:   scope-2 {
+// VALNO:    scope-3 {
+// VALNO:     New VN #4: 'const_2'
+// VALNO:     New VN #5: 'const_6'
+// VALNO:     New VN #6: 'const_12'
+// VALNO:     New VN #7: '#4,#5'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@bdim" -> #7
+// VALNO:     New VN #8: '::bar1{{(::paraby_[0-9]+)*}}::bdim'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@x" -> #4
+// VALNO:     New VN #9: '::bar1{{(::paraby_[0-9]+)*}}::x'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@y" -> #5
+// VALNO:     New VN #10: '::bar1{{(::paraby_[0-9]+)*}}::y'
+// VALNO:     New VN #11: 'const_4'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::l.span" -> #11
+// VALNO:    } // end scope-3
+// VALNO:   } // end scope-2
+// VALNO:   scope-2 {
+// VALNO:    New VN #12: 'const_3'
+// VALNO:    New VN #13: 'const_36'
+// VALNO:    New VN #14: '#4,#5,#12'
+// VALNO:    Alias "::bar1{{(::paraby_[0-9]+)*}}::@gdim" -> #14
+// VALNO:    New VN #15: '::bar1{{(::paraby_[0-9]+)*}}::gdim'
+// VALNO:    Alias "::bar1{{(::paraby_[0-9]+)*}}::@xx" -> #4
+// VALNO:    New VN #16: '::bar1{{(::paraby_[0-9]+)*}}::xx'
+// VALNO:    Alias "::bar1{{(::paraby_[0-9]+)*}}::@yy" -> #5
+// VALNO:    New VN #17: '::bar1{{(::paraby_[0-9]+)*}}::yy'
+// VALNO:    Alias "::bar1{{(::paraby_[0-9]+)*}}::@zz" -> #12
+// VALNO:    New VN #18: '::bar1{{(::paraby_[0-9]+)*}}::zz'
+// VALNO:    scope-3 {
+// VALNO:     New VN #19: 'const_5'
+// VALNO:     New VN #20: 'const_20'
+// VALNO:     New VN #21: '#11,#19'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@bdim" -> #21
+// VALNO:     New VN #22: '::bar1{{(::paraby_[0-9]+)*}}::bdim'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@x" -> #11
+// VALNO:     New VN #23: '::bar1{{(::paraby_[0-9]+)*}}::x'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@y" -> #19
+// VALNO:     New VN #24: '::bar1{{(::paraby_[0-9]+)*}}::y'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::l.span" -> #11
+// VALNO:    } // end scope-3
+// VALNO:   } // end scope-2
+// VALNO:   scope-2 {
+// VALNO:    Alias "::bar1{{(::paraby_[0-9]+)*}}::@p" -> #11
+// VALNO:    New VN #25: '::bar1{{(::paraby_[0-9]+)*}}::p'
+// VALNO:    Alias "::bar1{{(::paraby_[0-9]+)*}}::@p__elem__x" -> #11
+// VALNO:    New VN #26: '::bar1{{(::paraby_[0-9]+)*}}::p__elem__x'
+// VALNO:    scope-3 {
+// VALNO:     New VN #27: 'const_24'
+// VALNO:     New VN #28: '#11,#12,#4'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@q" -> #28
+// VALNO:     New VN #29: '::bar1{{(::paraby_[0-9]+)*}}::q'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@x" -> #11
+// VALNO:     New VN #30: '::bar1{{(::paraby_[0-9]+)*}}::x'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@y" -> #12
+// VALNO:     New VN #31: '::bar1{{(::paraby_[0-9]+)*}}::y'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::@z" -> #4
+// VALNO:     New VN #32: '::bar1{{(::paraby_[0-9]+)*}}::z'
+// VALNO:     Alias "::bar1{{(::paraby_[0-9]+)*}}::l.span" -> #11
+// VALNO:    } // end scope-3
+// VALNO:   } // end scope-2
+// VALNO:  } // end scope-1

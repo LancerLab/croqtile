@@ -19,7 +19,7 @@ __co__ void foo(s32[128, 256] input, u8[2, N] dinput) {
 // CHECK: Symbol:    ::foo::input1, Type: global s32 mdspan<2> {{\[128, 256\]\[\[2\]\]}}
 // CHECK: Symbol:    ::foo::input2, Type: global u8 mdspan<2> {{\[128, 256\]\[\[3\]\[2\]\]}}
 // CHECK: Symbol:    ::foo::input3, Type: global u8 mdspan<2> {{\[1, ::foo::N\]\[\[1\]\]}}
-// CHECK: Symbol:    ::foo::paraby_0::paraby_1::u8_s0, Type: shared u8 mdspan<2> {{\[1, 256\]\[\[2\]\]}}
-// CHECK: Future:    ::foo::paraby_0::paraby_1::within_0::foreach_0::(anon), Type: sync=>shared u8 mdspan<2> {{\[1, 256\]}}
-// CHECK: Future:    ::foo::paraby_0::paraby_1::l0, Type: sync=>local u8 mdspan<2> {{\[1, 256\]}}
-// CHECK: Future:    ::foo::paraby_0::paraby_1::within_1::foreach_1::(anon), Type: sync=>global u8 mdspan<2> {{\[1, ::foo::N\]}}
+// CHECK: Symbol:    ::foo{{(::paraby_[0-9]+)*}}::u8_s0, Type: shared u8 mdspan<2> {{\[1, 256\]\[\[2\]\]}}
+// CHECK: Future:    ::foo{{(::paraby_[0-9]+)*}}::within_0::foreach_0::(anon), Type: sync=>shared u8 mdspan<2> {{\[1, 256\]}}
+// CHECK: Future:    ::foo{{(::paraby_[0-9]+)*}}::l0, Type: sync=>local u8 mdspan<2> {{\[1, 256\]}}
+// CHECK: Future:    ::foo{{(::paraby_[0-9]+)*}}::within_1::foreach_1::(anon), Type: sync=>global u8 mdspan<2> {{\[1, ::foo::N\]}}

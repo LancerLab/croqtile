@@ -15,29 +15,29 @@ __co__ void bounded_arith(s32 [180, 27, 12] a) {
   }
 }
 
-// CHKVALNO:      Alias "::bounded_arith::paraby_0::paraby_1::within_0::@y" -> [[Y_VAL:#[0-9]+]]
+// CHKVALNO:      Alias "::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::@y" -> [[Y_VAL:#[0-9]+]]
 // CHKVALNO:       New VN [[CONST_VAL:#[0-9]+]]: 'const_90'
 // CHKVALNO:       <Bounded> ' (x # y) 's ubound: 'const_90'
-// CHKVALNO:       Alias "::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::@anon_0" -> [[CONST_VAL]]
+// CHKVALNO:       Alias "::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::@anon_0" -> [[CONST_VAL]]
 // CHKVALNO:       <Bounded> ' (y + 1) 's ubound: 'const_9'
-// CHKVALNO:       Alias "::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::@anon_1" -> [[Y_VAL]]
+// CHKVALNO:       Alias "::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::@anon_1" -> [[Y_VAL]]
 // CHKVALNO:       <Bounded> ' ( (x # y)  # z) 's ubound: 'const_180'
-// CHKVALNO:       Alias "::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::@anon_2" -> #{{[0-9]+}}
+// CHKVALNO:       Alias "::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::@anon_2" -> #{{[0-9]+}}
 // CHKVALNO:       <Bounded> ' (y + 2) 's ubound: 'const_9'
 
 
 // CHECK: Parameter: ::bounded_arith::a, Type: s32 mdspan<3> [180, 27, 12]
-// CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::p, Type: {int}->[6]
-// CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::within_0::index, Type: {int,int,int}->[10, 9, 2]
-// CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::within_0::x, Type: {int}->[10]
-// CHECK: Bounded:   ::bounded_arith::paraby_0::paraby_1::within_0::y, Type: {int}->[9]
-// CHECK: Future:    ::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [18, 3, 2]
-// CHECK: Symbol:    ::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::anon_0, Type: {int}->[90]
-// CHECK: Symbol:    ::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::anon_1, Type: {int}->[9]
-// CHECK: Future:    ::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [2, 3, 2]
-// CHECK: Symbol:    ::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::anon_2, Type: {int}->[180]
-// CHECK: Symbol:    ::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::anon_3, Type: {int}->[9]
-// CHECK: Future:    ::bounded_arith::paraby_0::paraby_1::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [1, 3, 2]
+// CHECK: Bounded:   ::bounded_arith{{(::paraby_[0-9]+)*}}::p, Type: {int}->[6]
+// CHECK: Bounded:   ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::index, Type: {int,int,int}->[10, 9, 2]
+// CHECK: Bounded:   ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::x, Type: {int}->[10]
+// CHECK: Bounded:   ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::y, Type: {int}->[9]
+// CHECK: Future:    ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [18, 3, 2]
+// CHECK: Symbol:    ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::anon_0, Type: {int}->[90]
+// CHECK: Symbol:    ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::anon_1, Type: {int}->[9]
+// CHECK: Future:    ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [2, 3, 2]
+// CHECK: Symbol:    ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::anon_2, Type: {int}->[180]
+// CHECK: Symbol:    ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::anon_3, Type: {int}->[9]
+// CHECK: Future:    ::bounded_arith{{(::paraby_[0-9]+)*}}::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [1, 3, 2]
 // CHECK: Function:  ::bounded_arith, Type: void (*)(s32 mdspan<3> [180, 27, 12])
 
 __co__ void bounded_decls() {
@@ -49,37 +49,27 @@ __co__ void bounded_decls() {
   }
 }
 
-// CHKVALNO:   scope-1 {
-// CHKVALNO:    scope-2 {
-// CHKVALNO:     Alias "::bounded_decls::paraby_2::@anon_pb_1" -> #0
-// CHKVALNO:     New VN #42: '::bounded_decls::paraby_2::anon_pb_1'
-// CHKVALNO:     Alias "::bounded_decls::paraby_2::@anon_pb_1__elem__x" -> #0
-// CHKVALNO:     New VN #43: '::bounded_decls::paraby_2::anon_pb_1__elem__x'
-// CHKVALNO:     scope-3 {
-// CHKVALNO:      Alias "::bounded_decls::paraby_2::paraby_3::@p" -> #8
-// CHKVALNO:      New VN #44: '::bounded_decls::paraby_2::paraby_3::p'
-// CHKVALNO:      Alias "::bounded_decls::paraby_2::paraby_3::@p__elem__x" -> #8
-// CHKVALNO:      New VN #45: '::bounded_decls::paraby_2::paraby_3::p__elem__x'
-// CHKVALNO:      scope-4 {
-// CHKVALNO:       New VN #46: 'const_16'
-// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile(0)" -> #46
-// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile__elem__0" -> #46
-// CHKVALNO:       New VN #47: '::bounded_decls::paraby_2::paraby_3::within_1::n_tile__elem__0'
-// CHKVALNO:       New VN #48: '::bounded_decls::paraby_2::paraby_3::within_1::n_tile'
-// CHKVALNO:       Alias "::bounded_decls::paraby_2::paraby_3::within_1::@n_tile" -> #46
-// CHKVALNO:       scope-5 {
-// CHKVALNO:        New VN #49: '%:#48:#13'
-// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::@a" -> #46
-// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::a" -> #49
-// CHKVALNO:        New VN #50: '+:#44:#25'
-// CHKVALNO:        New VN #51: '/:#50:#13'
-// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::@b" -> #8
-// CHKVALNO:        Alias "::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::b" -> #51
-// CHKVALNO:       } // end scope-5
-// CHKVALNO:      } // end scope-4
-// CHKVALNO:     } // end scope-3
-// CHKVALNO:    } // end scope-2
-// CHKVALNO:   } // end scope-1
+// CHKVALNO:     Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::@anon_pb_{{[0-9]+}}" -> #{{[0-9]+}}
+// CHKVALNO:     New VN #[[vn0:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::anon_pb_{{[0-9]+}}'
+// CHKVALNO:     Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::@anon_pb_{{[0-9]+}}__elem__x" -> #{{[0-9]+}}
+// CHKVALNO:     New VN #[[vn1:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::anon_pb_{{[0-9]+}}__elem__x'
+// CHKVALNO:      Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::@p" -> #[[vn01:[0-9]+]]
+// CHKVALNO:      New VN #[[vn2:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::p'
+// CHKVALNO:      Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::@p__elem__x" -> #[[vn01]]
+// CHKVALNO:      New VN #[[vn3:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::p__elem__x'
+// CHKVALNO:       New VN #[[vn4:[0-9]+]]: 'const_16'
+// CHKVALNO:       Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::@n_tile(0)" -> #[[vn4]]
+// CHKVALNO:       Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::@n_tile__elem__0" -> #[[vn4]]
+// CHKVALNO:       New VN #[[vn5:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::n_tile__elem__0'
+// CHKVALNO:       New VN #[[vn6:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::n_tile'
+// CHKVALNO:       Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::@n_tile" -> #[[vn4]]
+// CHKVALNO:        New VN #[[vn7:[0-9]+]]: '%:#[[vn6]]:#[[vn02:[0-9]+]]'
+// CHKVALNO:        Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::@a" -> #[[vn4]]
+// CHKVALNO:        Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::a" -> #[[vn7]]
+// CHKVALNO:        New VN #[[vn8:[0-9]+]]: '+:#[[vn2]]:#{{[0-9]+}}'
+// CHKVALNO:        New VN #[[vn9:[0-9]+]]: '/:#[[vn8]]:#[[vn02]]'
+// CHKVALNO:        Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::@b" -> #[[vn01]]
+// CHKVALNO:        Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::b" -> #[[vn9]]
 
-// CHECK: Symbol:    ::bounded_decls::paraby_2::paraby_3::within_1::foreach_1::b, Type: {int}->[6]
+// CHECK: Symbol:    ::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::b, Type: {int}->[6]
 // CHECK: Function:  ::bounded_decls, Type: void (*)()

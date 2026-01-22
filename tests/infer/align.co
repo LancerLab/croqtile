@@ -8,33 +8,33 @@ __co__ void foo(f32 [128, 512] a) {
 }
 
 // CHECK:   scope-1 {
-// CHECK:    New VN #0: 'const_1'
-// CHECK:    Alias "::@__choreo_no_tiling__" -> #0
-// CHECK:    New VN #1: '::__choreo_no_tiling__'
-// CHECK:    New VN #2: 'const_128'
-// CHECK:    New VN #3: 'const_512'
-// CHECK:    New VN #4: '#2,#3'
-// CHECK:    Alias "::foo::a.span" -> #4
+// CHECK:    New VN #[[vn0:[0-9]+]]: 'const_1'
+// CHECK:    Alias "::@__choreo_no_tiling__" -> #[[vn0]]
+// CHECK:    New VN #[[vn1:[0-9]+]]: '::__choreo_no_tiling__'
+// CHECK:    New VN #[[vn2:[0-9]+]]: 'const_128'
+// CHECK:    New VN #[[vn3:[0-9]+]]: 'const_512'
+// CHECK:    New VN #[[vn4:[0-9]+]]: '#[[vn2]],#[[vn3]]'
+// CHECK:    Alias "::foo::a.span" -> #[[vn4]]
 // CHECK:    scope-2 {
-// CHECK:     New VN #5: 'const_3'
-// CHECK:     Alias "::foo::paraby_0::@p" -> #5
-// CHECK:     New VN #6: '::foo::paraby_0::p'
-// CHECK:     Alias "::foo::paraby_0::@p__elem__x" -> #5
-// CHECK:     New VN #7: '::foo::paraby_0::p__elem__x'
+// CHECK:     New VN #[[vn5:[0-9]+]]: 'const_3'
+// CHECK:     Alias "::foo{{(::paraby_[0-9]+)*}}::@p" -> #[[vn5]]
+// CHECK:     New VN #[[vn6:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::p'
+// CHECK:     Alias "::foo{{(::paraby_[0-9]+)*}}::@p__elem__x" -> #[[vn5]]
+// CHECK:     New VN #[[vn7:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::p__elem__x'
 // CHECK:     scope-3 {
-// CHECK:      New VN #8: 'const_6'
-// CHECK:      Alias "::foo::paraby_0::paraby_1::@q" -> #8
-// CHECK:      New VN #9: '::foo::paraby_0::paraby_1::q'
-// CHECK:      Alias "::foo::paraby_0::paraby_1::@q__elem__x" -> #8
-// CHECK:      New VN #10: '::foo::paraby_0::paraby_1::q__elem__x'
-// CHECK:      New VN #11: 'const_0'
-// CHECK:      New VN #12: 'const_134'
-// CHECK:      New VN #13: 'const_133'
-// CHECK:      New VN #14: 'const_22'
-// CHECK:      New VN #15: 'const_132'
-// CHECK:      New VN #16: 'true'
-// CHECK:      New VN #17: 'const_42'
-// CHECK:      New VN #18: 'const_32'
+// CHECK:      New VN #[[vn8:[0-9]+]]: 'const_6'
+// CHECK:      Alias "::foo{{(::paraby_[0-9]+)*}}::@q" -> #[[vn8]]
+// CHECK:      New VN #[[vn9:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::q'
+// CHECK:      Alias "::foo{{(::paraby_[0-9]+)*}}::@q__elem__x" -> #[[vn8]]
+// CHECK:      New VN #[[vn10:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::q__elem__x'
+// CHECK:      New VN #[[vn11:[0-9]+]]: 'const_0'
+// CHECK:      New VN #[[vn12:[0-9]+]]: 'const_134'
+// CHECK:      New VN #[[vn13:[0-9]+]]: 'const_133'
+// CHECK:      New VN #[[vn14:[0-9]+]]: 'const_22'
+// CHECK:      New VN #[[vn15:[0-9]+]]: 'const_132'
+// CHECK:      New VN #[[vn16:[0-9]+]]: 'true'
+// CHECK:      New VN #[[vn17:[0-9]+]]: 'const_42'
+// CHECK:      New VN #[[vn18:[0-9]+]]: 'const_32'
 // CHECK:     } // end scope-3
 // CHECK:    } // end scope-2
 // CHECK:   } // end scope-1

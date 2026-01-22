@@ -18,6 +18,6 @@ __co__ s32 [128, 256] matmul(s32 [128, 256] lhs, s32 [256, 256] rhs) {
   return output;
 }
 
-// CHECK: Future:    ::matmul::paraby_0::paraby_1::within_0::foreach_0::ma, Type: sync=>register s32 mdspan<2> [16, 32]
-// CHECK: Future:    ::matmul::paraby_0::paraby_1::within_0::foreach_0::mb, Type: sync=>register s32 mdspan<2> [32, 16]
-// CHECK: Symbol:    ::matmul::paraby_0::paraby_1::mc, Type: register s32 mdspan<2> [16, 16]
+// CHECK: Future:    ::matmul{{(::paraby_[0-9]+)*}}::within_0::foreach_0::ma, Type: sync=>register s32 mdspan<2> [16, 32]
+// CHECK: Future:    ::matmul{{(::paraby_[0-9]+)*}}::within_0::foreach_0::mb, Type: sync=>register s32 mdspan<2> [32, 16]
+// CHECK: Symbol:    ::matmul{{(::paraby_[0-9]+)*}}::mc, Type: register s32 mdspan<2> [16, 16]

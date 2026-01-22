@@ -1,0 +1,92 @@
+// RUN: choreo -vn -dv=valno %s | FileCheck --check-prefix=VALNO --match-full-lines %s
+
+#include "choreo.h"
+
+__co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by 6 {
+    with idx0 = {q, x, y} in lhs.span / {#p, 2, 32}, // [6/6, lhs.span(1) / 2, 128/32] = [1, lhs.span(1) / 2, 4 ]
+         idx1 = {w, z, b} in rhs.span / {#p, 2, 32}
+    where x <-> z {
+      foreach idx0 {
+        lhs_load = dma.copy lhs.chunkat(q, x, y) => local;
+        rhs_load = dma.copy rhs.chunkat(w, z, b) => local;
+
+        local s32[lhs_load.span] l1_out;
+        call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        out_store = dma.copy l1_out => output.chunkat(q,x,y);
+      }
+    }
+  }
+  return output;
+}
+
+// VALNO:  scope-1 {
+// VALNO:   New VN #0: 'const_1'
+// VALNO:   Alias "::@__choreo_no_tiling__" -> #0
+// VALNO:   New VN #1: '::__choreo_no_tiling__'
+// VALNO:   New VN #2: 'const_6'
+// VALNO:   New VN #3: '::ele_add::$0'
+// VALNO:   New VN #4: 'const_128'
+// VALNO:   New VN #5: '#2,#3,#4'
+// VALNO:   Alias "::ele_add::lhs.span" -> #5
+// VALNO:   New VN #6: '::ele_add::$1'
+// VALNO:   New VN #7: '#2,#6,#4'
+// VALNO:   Alias "::ele_add::rhs.span" -> #7
+// VALNO:   Alias "::ele_add::output.span" -> #5
+// VALNO:   scope-2 {
+// VALNO:    Alias "::ele_add{{(::paraby_[0-9]+)*}}::@anon_pb_0" -> #0
+// VALNO:    New VN #8: '::ele_add{{(::paraby_[0-9]+)*}}::anon_pb_0'
+// VALNO:    Alias "::ele_add{{(::paraby_[0-9]+)*}}::@anon_pb_0__elem__x" -> #0
+// VALNO:    New VN #9: '::ele_add{{(::paraby_[0-9]+)*}}::anon_pb_0__elem__x'
+// VALNO:    scope-3 {
+// VALNO:     Alias "::ele_add{{(::paraby_[0-9]+)*}}::@p" -> #2
+// VALNO:     New VN #10: '::ele_add{{(::paraby_[0-9]+)*}}::p'
+// VALNO:     Alias "::ele_add{{(::paraby_[0-9]+)*}}::@p__elem__x" -> #2
+// VALNO:     New VN #11: '::ele_add{{(::paraby_[0-9]+)*}}::p__elem__x'
+// VALNO:     scope-4 {
+// VALNO:      New VN #12: 'const_2'
+// VALNO:      New VN #13: 'const_32'
+// VALNO:      New VN #14: '#2,#12,#13'
+// VALNO:      New VN #15: '/:#3:#12'
+// VALNO:      New VN #16: 'const_4'
+// VALNO:      New VN #17: '#0,#15,#16'
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@idx0(0)" -> #0
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@q" -> #0
+// VALNO:      New VN #18: '::ele_add{{(::paraby_[0-9]+)*}}::within_0::q'
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@idx0(1)" -> #15
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@x" -> #15
+// VALNO:      New VN #19: '::ele_add{{(::paraby_[0-9]+)*}}::within_0::x'
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@idx0(2)" -> #16
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@y" -> #16
+// VALNO:      New VN #20: '::ele_add{{(::paraby_[0-9]+)*}}::within_0::y'
+// VALNO:      New VN #21: '::ele_add{{(::paraby_[0-9]+)*}}::within_0::idx0'
+// VALNO:      New VN #22: '#18,#19,#20'
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@idx0" -> #17
+// VALNO:      New VN #23: '/:#6:#12'
+// VALNO:      New VN #24: '#0,#23,#16'
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@idx1(0)" -> #0
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@w" -> #0
+// VALNO:      New VN #25: '::ele_add{{(::paraby_[0-9]+)*}}::within_0::w'
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@idx1(1)" -> #23
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@z" -> #23
+// VALNO:      New VN #26: '::ele_add{{(::paraby_[0-9]+)*}}::within_0::z'
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@idx1(2)" -> #16
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@b" -> #16
+// VALNO:      New VN #27: '::ele_add{{(::paraby_[0-9]+)*}}::within_0::b'
+// VALNO:      New VN #28: '::ele_add{{(::paraby_[0-9]+)*}}::within_0::idx1'
+// VALNO:      New VN #29: '#25,#26,#27'
+// VALNO:      Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::@idx1" -> #24
+// VALNO:      scope-5 {
+// VALNO:       Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::foreach_0::lhs_load.span" -> #14
+// VALNO:       Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::foreach_0::rhs_load.span" -> #14
+// VALNO:       Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::foreach_0::l1_out.span" -> #14
+// VALNO:       New VN #30: 'const_384'
+// VALNO:       Alias "::ele_add{{(::paraby_[0-9]+)*}}::within_0::foreach_0::out_store.span" -> #14
+// VALNO:      } // end scope-5
+// VALNO:     } // end scope-4
+// VALNO:    } // end scope-3
+// VALNO:   } // end scope-2
+// VALNO:  } // end scope-1

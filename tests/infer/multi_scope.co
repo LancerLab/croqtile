@@ -1,10 +1,6 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
 // RUN: choreo -vn %s | FileCheck --check-prefix=VALNO --match-full-lines %s
 
-// recognize the __co__ function
-
-#include <iostream>
-
 // choreo program
 __co__ void foo(f32 [2, 3, 4] d, int e) {
   int f = 4;
@@ -47,29 +43,23 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:   New VN #15: '+:#6:#7'
 // VALNO:   New VN #16: '#7,#15,#4'
 // VALNO:   Alias "::foo::c" -> #16
-// VALNO:   scope-2 {
-// VALNO:    scope-3 {
-// VALNO:     New VN #19: 'const_6'
-// VALNO:     Alias "::foo::paraby_0::paraby_1::@p" -> #19
-// VALNO:     New VN #20: '::foo::paraby_0::paraby_1::p'
-// VALNO:     Alias "::foo::paraby_0::paraby_1::@p__elem__x" -> #19
-// VALNO:     New VN #21: '::foo::paraby_0::paraby_1::p__elem__x'
-// VALNO:     New VN #22: 'const_25'
-// VALNO:     New VN #23: '#22,#0,#6'
-// VALNO:     Alias "::foo::paraby_0::paraby_1::a" -> #23
-// VALNO:     scope-4 {
-// VALNO:      Alias "::foo::paraby_0::paraby_1::within_0::@g(0)" -> #3
-// VALNO:      Alias "::foo::paraby_0::paraby_1::within_0::@g__elem__0" -> #3
-// VALNO:      New VN #24: '::foo::paraby_0::paraby_1::within_0::g__elem__0'
-// VALNO:      New VN #25: '::foo::paraby_0::paraby_1::within_0::g'
-// VALNO:      Alias "::foo::paraby_0::paraby_1::within_0::@g" -> #3
-// VALNO:      New VN #26: 'const_23'
-// VALNO:      New VN #27: '#7,#26'
-// VALNO:      Alias "::foo::paraby_0::paraby_1::within_0::b" -> #27
-// VALNO:      Alias "::foo::paraby_0::paraby_1::within_0::f" -> #7
-// VALNO:     } // end scope-4
-// VALNO:    } // end scope-3
-// VALNO:   } // end scope-2
+// VALNO:     New VN #[[vn0:[0-9]+]]: 'const_6'
+// VALNO:     Alias "::foo{{(::paraby_[0-9]+)*}}::@p" -> #[[vn0]]
+// VALNO:     New VN #[[vn1:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::p'
+// VALNO:     Alias "::foo{{(::paraby_[0-9]+)*}}::@p__elem__x" -> #[[vn0]]
+// VALNO:     New VN #[[vn2:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::p__elem__x'
+// VALNO:     New VN #[[vn3:[0-9]+]]: 'const_25'
+// VALNO:     New VN #[[vn4:[0-9]+]]: '#[[vn3]],#0,#6'
+// VALNO:     Alias "::foo{{(::paraby_[0-9]+)*}}::a" -> #[[vn4]]
+// VALNO:      Alias "::foo{{(::paraby_[0-9]+)*}}::within_0::@g(0)" -> #3
+// VALNO:      Alias "::foo{{(::paraby_[0-9]+)*}}::within_0::@g__elem__0" -> #3
+// VALNO:      New VN #[[vn5:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::within_0::g__elem__0'
+// VALNO:      New VN #[[vn6:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::within_0::g'
+// VALNO:      Alias "::foo{{(::paraby_[0-9]+)*}}::within_0::@g" -> #3
+// VALNO:      New VN #[[vn7:[0-9]+]]: 'const_23'
+// VALNO:      New VN #[[vn8:[0-9]+]]: '#7,#[[vn7]]'
+// VALNO:      Alias "::foo{{(::paraby_[0-9]+)*}}::within_0::b" -> #[[vn8]]
+// VALNO:      Alias "::foo{{(::paraby_[0-9]+)*}}::within_0::f" -> #7
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]
@@ -78,6 +68,6 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // CHECK: Partial:   ::foo::a, Type: mdspan<3> [5, 1, 1]
 // CHECK: Partial:   ::foo::b, Type: mdspan<3> [1, (::foo::e + 1), 20]
 // CHECK: Symbol:    ::foo::c, Type: ituple<3>
-// CHECK: Partial:   ::foo::paraby_0::paraby_1::a, Type: mdspan<3> [25, 1, ::foo::e]
-// CHECK: Partial:   ::foo::paraby_0::paraby_1::within_0::b, Type: mdspan<2> [5, 23]
-// CHECK: Symbol:    ::foo::paraby_0::paraby_1::within_0::f, Type: s32
+// CHECK: Partial:   ::foo{{(::paraby_[0-9]+)*}}::a, Type: mdspan<3> [25, 1, ::foo::e]
+// CHECK: Partial:   ::foo{{(::paraby_[0-9]+)*}}::within_0::b, Type: mdspan<2> [5, 23]
+// CHECK: Symbol:    ::foo{{(::paraby_[0-9]+)*}}::within_0::f, Type: s32

@@ -31,9 +31,9 @@ __co__ void foo(f32 [M, N] data, int b) {
 // CHKINF: Bounded:   ::foo::within_0::x, Type: {int}->[(::foo::M / 3)]
 // CHKINF: Bounded:   ::foo::within_0::y, Type: {int}->[(::foo::N / 2)]
 // CHKINF: Future:    ::foo::within_0::(anon), Type: sync=>global f32 mdspan<2> [(::foo::M / 7), (::foo::N / 8)]
-// CHKINF: Bounded:   ::foo::paraby_0::paraby_1::p, Type: {int}->[3]
-// CHKINF: Bounded:   ::foo::paraby_0::paraby_1::p__elem__x, Type: {int}->[3]
-// CHKINF: Future:    ::foo::paraby_0::paraby_1::f, Type: sync=>local f32 mdspan<2> [(::foo::M / ::foo::b), (::foo::N / 5)]
+// CHKINF: Bounded:   ::foo{{(::paraby_[0-9]+)*}}::p, Type: {int}->[3]
+// CHKINF: Bounded:   ::foo{{(::paraby_[0-9]+)*}}::p__elem__x, Type: {int}->[3]
+// CHKINF: Future:    ::foo{{(::paraby_[0-9]+)*}}::f, Type: sync=>local f32 mdspan<2> [(::foo::M / ::foo::b), (::foo::N / 5)]
 // CHKINF: Function:  ::foo, Type: void (*)(f32 mdspan<2> [::foo::M, ::foo::N], s32)
 
 __co__ void bar(f32 [32, 76] data, s8 [128] d2, int b) {
@@ -48,12 +48,12 @@ __co__ void bar(f32 [32, 76] data, s8 [128] d2, int b) {
 // CHECKINF: Parameter: ::bar::data, Type: f32 mdspan<2> [32, 76]
 // CHECKINF: Parameter: ::bar::d2, Type: s8 mdspan<1> [128]
 // CHECKINF: Parameter: ::bar::b, Type: s32
-// CHECKINF: Bounded:   ::bar::paraby_1::anon_0, Type: {int,int}->[3, 4]
-// CHECKINF: Bounded:   ::bar::paraby_1::p0, Type: {int}->[3](pi:x)
-// CHECKINF: Bounded:   ::bar::paraby_1::p1, Type: {int}->[4](pi:y)
-// CHECKINF: Bounded:   ::bar::paraby_1::within_1::x, Type: {int}->[6]
-// CHECKINF: Bounded:   ::bar::paraby_1::within_1::y, Type: {int}->[3]
-// CHECKINF: Future:    ::bar::paraby_1::within_1::f0, Type: sync=>local f32 mdspan<2> [(32 / ::bar::b), 38]
-// CHECKINF: Future:    ::bar::paraby_1::within_1::f1, Type: sync=>local f32 mdspan<2> [3, 3]
-// CHECKINF: Future:    ::bar::paraby_1::within_1::f2, Type: sync=>local s8 mdspan<1> [16]
+// CHECKINF: Bounded:   ::bar{{(::paraby_[0-9]+)*}}::anon_0, Type: {int,int}->[3, 4]
+// CHECKINF: Bounded:   ::bar{{(::paraby_[0-9]+)*}}::p0, Type: {int}->[3](pi:x)
+// CHECKINF: Bounded:   ::bar{{(::paraby_[0-9]+)*}}::p1, Type: {int}->[4](pi:y)
+// CHECKINF: Bounded:   ::bar{{(::paraby_[0-9]+)*}}::within_1::x, Type: {int}->[6]
+// CHECKINF: Bounded:   ::bar{{(::paraby_[0-9]+)*}}::within_1::y, Type: {int}->[3]
+// CHECKINF: Future:    ::bar{{(::paraby_[0-9]+)*}}::within_1::f0, Type: sync=>local f32 mdspan<2> [(32 / ::bar::b), 38]
+// CHECKINF: Future:    ::bar{{(::paraby_[0-9]+)*}}::within_1::f1, Type: sync=>local f32 mdspan<2> [3, 3]
+// CHECKINF: Future:    ::bar{{(::paraby_[0-9]+)*}}::within_1::f2, Type: sync=>local s8 mdspan<1> [16]
 // CHECKINF: Function:  ::bar, Type: void (*)(f32 mdspan<2> [32, 76], s8 mdspan<1> [128], s32)
