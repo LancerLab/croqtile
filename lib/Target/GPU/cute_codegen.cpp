@@ -1052,8 +1052,11 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         }
         if (sa) {
           // is span_as
-          hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name
-             << "__device;\n";
+          hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name;
+          if (sto == Storage::GLOBAL)
+            hs << ".data();\n";
+          else
+            hs << "__device;\n";
 
         } else {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
@@ -1079,8 +1082,11 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       } else {
         if (sa) {
           // is span_as
-          hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name
-             << "__device;\n";
+          hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name;
+          if (sto == Storage::GLOBAL)
+            hs << ".data();\n";
+          else
+            hs << "__device;\n";
         } else {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
@@ -2571,8 +2577,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool use_uint32 = false;
       UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
       RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
-      ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
-        << " " << sym << "_frag[" << reg_num_d << "] ;\n";
+      ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty)) << " "
+         << sym << "_frag[" << reg_num_d << "] ;\n";
       ds << d_indent << "memset(" << sym << "_frag, 0, sizeof(" << sym
          << "_frag));\n";
 
@@ -2766,17 +2772,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool shape_is_m16n8k32 = m_val && n_val && k_val && *m_val == 16 &&
                                *n_val == 8 && *k_val == 32;
       bool shape_is_m16n8k16 = m_val && n_val && k_val && *m_val == 16 &&
-               *n_val == 8 && *k_val == 16;
+                               *n_val == 8 && *k_val == 16;
       bool shape_is_m16n8k64 = m_val && n_val && k_val && *m_val == 16 &&
-               *n_val == 8 && *k_val == 64;
-      std::string CUTE_MMA_ATOM = (policy_is_sparse && shape_is_m16n8k32)
-                                      ? "CUTE_MMA_SPARSE_M16N8K32"
-                  : (policy_is_sparse && shape_is_m16n8k16)
-                    ? "CUTE_MMA_SPARSE_M16N8K16"
-                    : (policy_is_sparse &&
-                       shape_is_m16n8k64)
-                      ? "CUTE_MMA_SPARSE_M16N8K64"
-                      : GetMMAAtomName(ssmi);
+                               *n_val == 8 && *k_val == 64;
+      std::string CUTE_MMA_ATOM =
+          (policy_is_sparse && shape_is_m16n8k32)   ? "CUTE_MMA_SPARSE_M16N8K32"
+          : (policy_is_sparse && shape_is_m16n8k16) ? "CUTE_MMA_SPARSE_M16N8K16"
+          : (policy_is_sparse && shape_is_m16n8k64) ? "CUTE_MMA_SPARSE_M16N8K64"
+                                                    : GetMMAAtomName(ssmi);
       ds << d_indent << "store_fragment_d<" << CUTE_MMA_ATOM << ">("
          << f_mds.first << ", " << "reinterpret_cast<" << NameBaseType(ssmi.ty)
          << "*> (" << sym << "_frag));\n";
@@ -3667,7 +3670,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     // default, because output may be shadowed to device memory.
     bool is_global_arg = false;
     bool found_param = false;
-    for (const auto &item : GetChoreoFuncIns(cgi)) {
+    for (const auto& item : GetChoreoFuncIns(cgi)) {
       if (UnScopedName(item.name) == g_unscoped) {
         found_param = true;
         is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
@@ -3675,8 +3678,9 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       }
     }
 
-    std::string base_expr = is_global_arg ? (g_unscoped + ".data()")
-                                          : SSMName((g_unscoped + "__device"), true);
+    std::string base_expr = is_global_arg
+                                ? (g_unscoped + ".data()")
+                                : SSMName((g_unscoped + "__device"), true);
 
     // errs() << "[choreo][tma] g_sym=" << g_sym
     //        << " g_scoped=" << g_scoped
