@@ -6,8 +6,17 @@
 #include "target_utils.hpp"
 #include "types.hpp"
 
+extern Choreo::Option<bool> native_f16;
+extern Choreo::Option<bool> native_bf16;
+extern Choreo::Option<bool> use_pic;
+extern Choreo::Option<bool> verbose;
+extern Choreo::Option<std::string> target_options;
+extern Choreo::Option<bool> use_hetero_tileflow;
+
 namespace Choreo {
 
+extern Option<bool> no_decay_spanview;
+extern Option<bool> dma_opt;
 extern Option<bool> dma_verbose;
 
 inline void VerboseDMA(std::ostringstream& os, const std::string& indent,

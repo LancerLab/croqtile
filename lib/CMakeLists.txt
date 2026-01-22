@@ -74,8 +74,9 @@ set(CHOREO_COMPONENTS
   parse
   core
   codegen
-  support
+  targets
   pp
+  support
 )
 
 add_dependencies(parse parser_deps)

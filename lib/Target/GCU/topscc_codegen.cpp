@@ -29,23 +29,10 @@ Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
 using namespace Choreo;
 using namespace Choreo::Topscc;
 
-extern Option<bool> native_f16;
-extern Option<bool> native_bf16;
-extern Option<bool> verbose;
-extern Option<std::string> output;
-extern Option<bool> use_hetero_tileflow;
 extern Option<bool> use_system_toolchain;
-extern Option<bool> use_pic;
-extern Option<std::string> arch;
-extern Option<std::string> target_options;
 
 Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
                          "Emit fatbin file.");
-Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
-                               "-ndecay-spv", false,
-                               " decay spanview to be pointers.");
-Option<bool> dma_opt(OptionKind::Hidden, "-fopt-dma", "", true,
-                     "optimize dma to linear copy.");
 Option<bool> split_8byte_dma_transfer(
     OptionKind::Hidden, "-fsplit-8b-dma", "", true,
     "8-byte DMA transfers will be split into 1-byte chunks when platforms that "
@@ -2942,8 +2929,7 @@ fi
     os << "gcu_arch=" << ToLower(CCtx().GetArch()) << "\n";
   else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
             (CCtx().GetOutputKind() == OutputKind::TargetExecutable) ||
-            (CCtx().GetOutputKind() == OutputKind::ShellScript)) &&
-           arch.GetValue() != "") {
+            (CCtx().GetOutputKind() == OutputKind::ShellScript))) {
     // enforce the arch type
     os << "gcu_arch=" << ToLower(CCtx().GetArch()) << "\n";
   } else

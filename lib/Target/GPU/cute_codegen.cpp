@@ -49,15 +49,8 @@ inline const char* cuda_stringify(TMA_Swizzle swizzle) {
 extern Option<bool> native_f16;
 extern Option<bool> native_bf16;
 extern Option<bool> verbose;
-extern Option<std::string> output;
-extern Option<bool> use_hetero_tileflow;
 extern Option<bool> use_pic;
-extern Option<std::string> arch;
-extern Option<std::string> target_options;
 
-extern Option<bool> no_decay_spanview;
-extern Option<bool> dma_verbose;
-extern Option<bool> dma_opt;
 namespace Choreo {
 extern Option<bool> sim_sparse;
 } // namespace Choreo

@@ -813,7 +813,7 @@ for file in "${files_array[@]}"; do
   [[ "$(dirname ${file})" == *"end2end"* ]] && sequential=1;
 
   if [[ -z "${CHOREO_ENABLE_GPU_MMA_TESTS}" ]] || [[ "${CHOREO_ENABLE_GPU_MMA_TESTS}" != "1" ]]; then
-    if [[ "$(dirname ${file})" == *"end2end/gpu/wmma"* ]] || [[ "$(dirname ${file})" == *"end2end/gpu/ptx_mma"* ]]; then
+    if [[ "$(dirname ${file})" == *"gpu/end2end/wmma"* ]] || [[ "$(dirname ${file})" == *"gpu/end2end/ptx_mma"* ]]; then
       echo "SKIP(GPU-MMA): ${file} "
       num_skiped=$(($num_skiped + 1));
       continue;
