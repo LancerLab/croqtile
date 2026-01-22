@@ -45,9 +45,9 @@ inline const char* NameBaseType(BaseType bt) {
   case BaseType::F8_E5M2: return "f8_e5m2";
   case BaseType::F8_UE4M3: return "f8_ue4m3";
   case BaseType::F8_UE8M0: return "f8_ue8m0";
-  case BaseType::F6_E2M3: return "f6_e2m3";
-  case BaseType::F6_E3M2: return "f6_e3m2";
-  case BaseType::F4_E2M1: return "f4_e2m1";
+  case BaseType::F6_E2M3: return "choreo::f6_e2m3";
+  case BaseType::F6_E3M2: return "choreo::f6_e3m2";
+  case BaseType::F4_E2M1: return "choreo::f4_e2m1";
   case BaseType::U64: return "unsigned long long";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";

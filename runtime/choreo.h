@@ -4795,6 +4795,15 @@ __device__ inline void rotate(Futures&... f) {
 
 } // end namespace choreo
 
+// Expose sub-byte float aliases in global namespace for generated device code
+#ifdef __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
+using choreo::f6_e3m2;
+using choreo::f6_e2m3;
+#endif
+#ifdef __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
+using choreo::f4_e2m1;
+#endif
+
 #ifdef __CHOREO_TARGET_CUTE__
 // target specific libraries (non-shared)
 #include "choreo_cute.h"

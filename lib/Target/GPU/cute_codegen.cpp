@@ -2020,6 +2020,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!n.future.empty()) cooperatives.insert(InScopeName(n.future));
 
     if (n.operation == ".copy" || n.operation == ".transp") {
+      bool is_subbyte_copy = (n.operation == ".copy") && !n.IsSparse() &&
+                             !fty->IsAsync() && SymbolToSymbol() &&
+                             (IsFloatSubByteType(f_sty->ElementType()) ||
+                              IsFloatSubByteType(t_sty->ElementType()));
       if (n.IsSparse() && n.operation == ".copy" && SymbolToSymbol() &&
           !fty->IsAsync()) {
         std::string meta_ptr;
@@ -2103,6 +2107,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           ds << d_indent << "  }\n";
           ds << d_indent << "}\n";
         }
+      } else if (is_subbyte_copy) {
+        auto f_ptr = std::string("((") + NameBaseType(f_sty->ElementType()) +
+               "*)" + f_buf.second + ") + " + f_mds_offset;
+        auto t_ptr = std::string("((") + NameBaseType(t_sty->ElementType()) +
+               "*)" + t_buf.second + ") + " + t_mds_offset;
+        auto elem_count = ValueSTR(f_shape.ElementCountValue());
+          ds << d_indent << "for (size_t __i = 0; __i < " << elem_count
+            << "; ++__i) {" << "\n";
+          ds << d_indent << "  (" << t_ptr << ")[__i] = (" << f_ptr
+            << ")[__i];\n";
+          ds << d_indent << "}\n";
       } else if (fty->IsAsync()) {
         ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
            << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
