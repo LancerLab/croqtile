@@ -171,7 +171,7 @@ publish-sdk: sdk-package
 prepare: setup-ginac
 
 test-libra: release
-	$(LIT) tests/libra && $(MAKE) standalone-test-with-cmake
+	$(LIT) tests/gcu/libra && $(MAKE) standalone-test-with-cmake
 
 # =============================================================================
 # Sample Tests for topscc/elementwise
