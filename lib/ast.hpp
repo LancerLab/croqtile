@@ -2658,7 +2658,8 @@ public:
   const ptr<MMAOperation> Clone() const {
     switch (tag) {
     case Fill:
-      return Make<MMAOperation>(FillingSymbol(), CloneP(FillingValue()));
+      return Make<MMAOperation>(FillingSymbol(), CloneP(FillingValue()),
+                                FillingType());
       break;
     case Load: {
       auto l_info = std::get<1>(info);

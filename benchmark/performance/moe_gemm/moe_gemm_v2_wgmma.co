@@ -1,11 +1,11 @@
 #define Experts 128
 #define TOPK 8
 
-__co__ void moe_gemm_wmma(global bf16 [M, K] input, 
-  global bf16 [Experts, N, K] weights, 
+__co__ void moe_gemm_wmma(global bf16 [M, K] input,
+  global bf16 [Experts, N, K] weights,
   global bf16 [M, N] output,
-  global s32 [M] sorted_token_id, 
-  global s32 [Experts1] expert_offsets, 
+  global s32 [M] sorted_token_id,
+  global s32 [Experts1] expert_offsets,
   global f32 [M] topk_weights, bool use_topk_weight, int topk, stream s) {
     int MMA_M = 8, MMA_N = 32, MMA_K = 16;
     int M_BLK = 32, N_BLK = 32;
@@ -40,7 +40,7 @@ __co__ void moe_gemm_wmma(global bf16 [M, K] input,
             } // k_tile_idx
             mma.store mc, sC.chunkat(g0, g1);
           } // group
-          
+
           sync.shared;
           // store back to global memory with topk weight
           parallel {i, jo} by [32, 4] : thread {
@@ -53,7 +53,7 @@ __co__ void moe_gemm_wmma(global bf16 [M, K] input,
                 output.at(token_idx, n_tile_idx # col) = val;
               }
             }
-          } 
+          }
       } // m_tile_idx
     } // if num_rows_in_segment
   } // block
@@ -68,23 +68,23 @@ __device__ __forceinline__ void assign_k_sw128b(T* ptr, int row, int col, int st
   ptr[idx] = val;
 }
 
-__co__ void moe_gemm_wgmma(global bf16 [M, K] input, 
-                            global bf16 [Experts, N, K] weights, 
+__co__ void moe_gemm_wgmma_tma(global bf16 [M, K] input,
+                            global bf16 [Experts, N, K] weights_3d,
                             global bf16 [M, N] output,
-                            global s32 [M] sorted_token_id, 
-                            global s32 [Experts1] expert_offsets, 
+                            global s32 [M] sorted_token_id,
+                            global s32 [Experts1] expert_offsets,
                             global f32 [M] topk_weights, bool use_topk_weight, int topk, stream s) {
   int MMA_M = 64, MMA_N = 64, MMA_K = 16;
   int M_BLK = 64, N_BLK = 64, TILE_K = 64;
+  weights = weights_3d.span_as(Experts * N, K);
   parallel.async {expert_id, n_tile_idx} by [Experts, N / N_BLK] : block {
     shared bf16 [M_BLK, TILE_K] sA {0.0f}; // 64 x 64
-    shared bf16 [N_BLK, TILE_K] sB {0.0f}; // 64 x 64
     shared f32 [M_BLK, N_BLK] sC {0.0f}; // 64 x 64
 
     int segment_start = expert_offsets.at(expert_id);
     int segment_end = expert_offsets.at(expert_id + 1);
     int num_rows_in_segment = segment_end - segment_start;
-  
+
     if (num_rows_in_segment > 0) {
 
       foreach {m_tile_idx} in [cdiv(num_rows_in_segment, M_BLK)] {
@@ -102,18 +102,10 @@ __co__ void moe_gemm_wgmma(global bf16 [M, K] input,
                 }
                 call assign_k_sw128b(sA, row, col, TILE_K, input_val);
               }
-
-              foreach {j} in [N_BLK * TILE_K / 128] {
-                row = t0, col = t1 # j;
-                bf16 weight_val = 0.0f;
-                if (n_tile_idx # row < N && ko # col < K && expert_id < Experts) {
-                  weight_val = weights.at(expert_id, n_tile_idx # row, ko # col);
-                }
-                call assign_k_sw128b(sB, row, col, TILE_K, weight_val);
-              }
             }
             sync.shared;
 
+            sB = tma.copy.swizzle(128) weights.subspan(N_BLK, TILE_K).at(expert_id#n_tile_idx, ko) => shared;
             // compute mma
             foreach {ki} in [TILE_K / MMA_K] {
               ma = mma.load.swizzle(128) sA.chunkat(_, ki);
@@ -135,13 +127,12 @@ __co__ void moe_gemm_wgmma(global bf16 [M, K] input,
               output.at(token_idx, n_tile_idx # col) = val;
             }
           }
-        } 
+        }
       } // m_tile_idx
     } // if num_rows_in_segment
   } // block
 }
 
-#include "helpers.hpp"
 #include "moe_utils.cuh"
 
 extern "C" void moe_gemm_wmma(
@@ -167,7 +158,7 @@ extern "C" void moe_gemm_wmma(
   } else {
       calculate_expert_offsets_light(expert_ids, size_m, expert_counts, expert_offsets, num_experts, stream);
   }
-  
+
   #define LAUNCH_MOE_GEMM_WMMA_KERNEL(VERSION, TYPE) \
     moe_gemm_##VERSION( \
       make_spanview<TYPE, 2>(input, {size_t(size_m), size_t(size_k)}), \
@@ -185,7 +176,7 @@ extern "C" void moe_gemm_wmma(
     // todo: implement half version
   } else if (data_type == 1) { // bfloat16
     if (is_prefill) {
-      LAUNCH_MOE_GEMM_WMMA_KERNEL(wgmma, bf16)
+      LAUNCH_MOE_GEMM_WMMA_KERNEL(wgmma_tma, bf16)
     } else {
       LAUNCH_MOE_GEMM_WMMA_KERNEL(wmma, bf16)
     }
