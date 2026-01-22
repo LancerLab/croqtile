@@ -1,0 +1,24 @@
+// RUN: choreo -dp=memreuse -dv=muchk -sa=muchk -t cute %s 2>&1 | FileCheck %s --check-prefix=CHECK-CUTE
+
+__co__ auto mem_usage_check(s32 [128, 128, 128] i0, s32 [64, 256, 2] i1) {
+  s32 [i0.span] output;
+
+  parallel p by 1 {
+    with idx = {x, y, z} in [32, 16, 2] {
+      foreach x, y, z {
+        smem0 = dma.copy.async i0.chunkat(x, y, z) => shared;
+        smem1 = dma.copy.async i1.chunkat(x, y, z) => shared;
+        wait smem0, smem1;
+        parallel q by 1 {
+          local s8[1024, 1008] l;
+        }
+      }
+    }
+  }
+  return output;
+}
+
+// CHECK-CUTE: In the scope ::mem_usage_check::paraby_0::within_0::foreach_0::paraby_1::paraby_2::, compile-time local memory:
+// CHECK-CUTE:         Used: 1032192 bytes, Limit: 2048 bytes. With variables:
+// CHECK-CUTE:                 ::mem_usage_check::paraby_0::within_0::foreach_0::paraby_1::paraby_2::l
+// CHECK-CUTE:         Note: For cute target, the local memory limits can be set via `--max-local-mem-capacity` option.

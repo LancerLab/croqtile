@@ -15,5 +15,5 @@ __co__ void foo(s8 [1, 2] input) {
   }
 }
 
-// CHECK: error: some asyncs are not explicitly waited: ::foo::paraby_0::paraby_1::f, ::foo::paraby_0::paraby_1::within_0::foreach_0::f2.
+// CHECK: error: some asyncs are not explicitly waited: ::foo{{(::paraby_[0-9]+)*}}::f, ::foo{{(::paraby_[0-9]+)*}}::within_0::foreach_0::f2.
 // CHECK: Totally 1 errors have been detected.

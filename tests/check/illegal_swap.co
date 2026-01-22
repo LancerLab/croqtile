@@ -11,4 +11,4 @@ __co__ auto illegal_swap(u8 [1] i) {
   }
 }
 
-// CHECK: error: swapping values defined in different scopes is forbidden (::illegal_swap::paraby_0::paraby_1::f vs. ::illegal_swap::paraby_0::paraby_1::within_0::f1
+// CHECK: error: swapping values defined in different scopes is forbidden (::illegal_swap{{(::paraby_[0-9]+)*}}::f vs. ::illegal_swap{{(::paraby_[0-9]+)*}}::within_0::f1

@@ -1,4 +1,4 @@
-// RUN: choreo -arch=gcu300 -es %s 2>&1 | FileCheck --check-prefix=CHECK %s
+// RUN: choreo -t topscc -arch=gcu300 -es %s 2>&1 | FileCheck --check-prefix=CHECK %s
 
 __cok__ {
 __co_device__ extern "C" void kernel(int* i, char* ii) {
