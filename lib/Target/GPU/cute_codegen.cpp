@@ -1314,8 +1314,8 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 
   // self-updating operation has been generated already
   auto sty = GetSpannedType(nty);
-  if (sty && sty->GetStorage() == Storage::REG && n.HasNote("update"))
-    return true;
+  // if (sty && sty->GetStorage() == Storage::REG && n.HasNote("update"))
+  //   return true;
 
   if (!n.AssignToDataElement()) {
     auto name = n.GetName();
@@ -1389,8 +1389,12 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 
   if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty)) {
     assert(!IsHost() && "bounded/spanned/future should be on device side.");
-    ds << d_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName() << " = "
-       << ExprSTR(n.value, false) << ";\n";
+    if (!(sty && sty->GetStorage() == Storage::REG && n.HasNote("update")))
+      ds << d_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName()
+         << " = ";
+    else
+      ds << d_indent;
+    ds << ExprSTR(n.value, false) << ";\n";
     return true;
   }
 
@@ -2102,15 +2106,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         }
       } else if (is_subbyte_copy) {
         auto f_ptr = std::string("((") + NameBaseType(f_sty->ElementType()) +
-               "*)" + f_buf.second + ") + " + f_mds_offset;
+                     "*)" + f_buf.second + ") + " + f_mds_offset;
         auto t_ptr = std::string("((") + NameBaseType(t_sty->ElementType()) +
-               "*)" + t_buf.second + ") + " + t_mds_offset;
+                     "*)" + t_buf.second + ") + " + t_mds_offset;
         auto elem_count = ValueSTR(f_shape.ElementCountValue());
-          ds << d_indent << "for (size_t __i = 0; __i < " << elem_count
-            << "; ++__i) {" << "\n";
-          ds << d_indent << "  (" << t_ptr << ")[__i] = (" << f_ptr
-            << ")[__i];\n";
-          ds << d_indent << "}\n";
+        ds << d_indent << "for (size_t __i = 0; __i < " << elem_count
+           << "; ++__i) {" << "\n";
+        ds << d_indent << "  (" << t_ptr << ")[__i] = (" << f_ptr
+           << ")[__i];\n";
+        ds << d_indent << "}\n";
       } else if (fty->IsAsync()) {
         ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
            << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
@@ -3935,13 +3939,16 @@ show_usage() {
 )script";
 
   os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
-  os << " -O" << CCtx().GetOptimizationLevel();
+  if (CCtx().GenDebugInfo())
+    os << " -O0";
+  else
+    os << " -O" << CCtx().GetOptimizationLevel();
   if (use_cuda_type)
     os << " -D__USE_CUDA_TYPE__";
   else
     os << " -D__USE_CUTE_TYPE__";
 
-  if (CCtx().GenDebugInfo()) os << " -g";
+  if (CCtx().GenDebugInfo()) os << " -g -G";
   if (CCtx().DMADiagnosis()) os << " -D__CHOREO_DMA_DIAGNOSIS__";
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();
@@ -4569,10 +4576,10 @@ const std::string CuteCodeGen::EmitSpannedArith(AST::Expr& e) const {
     if (lsty && isa<ScalarType>(rty)) {
       if (lsty->GetStorage() == Storage::REG) {
         assert(l->HasNote("update"));
-        oss << "fragment_scalar_elementwise(" << ExprSTR(l, false) << ","
+        oss << "fragment_scalar_elementwise(" << ExprSTR(l, false) << ", "
             << ExprSTR(r, false) << ", [](" << NameBaseType(lsty->ElementType())
-            << "* a, " << NameBaseType(lsty->ElementType())
-            << "b) { return a + b };);\n";
+            << " a, " << NameBaseType(lsty->ElementType())
+            << " b) { return a + b; })";
         emitted = true;
       }
     }
