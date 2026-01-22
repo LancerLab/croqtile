@@ -2929,7 +2929,8 @@ fi
     os << "gcu_arch=" << ToLower(CCtx().GetArch()) << "\n";
   else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
             (CCtx().GetOutputKind() == OutputKind::TargetExecutable) ||
-            (CCtx().GetOutputKind() == OutputKind::ShellScript))) {
+            (CCtx().GetOutputKind() == OutputKind::ShellScript)) &&
+           CCtx().IsArchSet()) {
     // enforce the arch type
     os << "gcu_arch=" << ToLower(CCtx().GetArch()) << "\n";
   } else

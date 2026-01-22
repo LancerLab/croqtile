@@ -417,6 +417,7 @@ public:
   void SetSubTarget(CompileTarget ct) { compile_sub_target = ct; }
 #endif
 
+  const bool IsArchSet() const { return !archs.empty(); }
   const std::vector<ArchId> GetArchs() const {
     if (archs.size() == 0) return {GetTarget().DefaultArch()};
     return archs;

@@ -1415,10 +1415,8 @@ struct Sparse2to4HostPolicy {
             const uint64_t neg_zero = (uint64_t(1) << (sizeof(ValueT) * 8 - 1));
             return (raw == 0) || (raw == neg_zero);
           };
-          if (fp8_is_zero(t0))
-            t0 = from_f32<ValueT>(1.0f);
-          if (fp8_is_zero(t1))
-            t1 = from_f32<ValueT>(-1.0f);
+          if (fp8_is_zero(t0)) t0 = from_f32<ValueT>(1.0f);
+          if (fp8_is_zero(t1)) t1 = from_f32<ValueT>(-1.0f);
         } else
 #endif
         {
@@ -1433,9 +1431,10 @@ struct Sparse2to4HostPolicy {
 
   // Initialize 2:4 structured sparse A with all nonzero values = 1.0.
   // Positions can be fixed (pos0,pos1) or random (random_pos=true).
-  __co_host__ static inline void init_structured_sparse_A_ones(
-      spanned_data<ValueT, 2>& dense, std::mt19937& gen,
-      bool random_pos = false, int pos0 = 0, int pos1 = 1) {
+  __co_host__ static inline void
+  init_structured_sparse_A_ones(spanned_data<ValueT, 2>& dense,
+                                std::mt19937& gen, bool random_pos = false,
+                                int pos0 = 0, int pos1 = 1) {
     const size_t M = dense.shape()[0];
     const size_t K = dense.shape()[1];
     choreo_assert(pos0 >= 0 && pos0 < 4 && pos1 >= 0 && pos1 < 4,
@@ -1490,8 +1489,8 @@ struct Sparse2to4HostPolicy {
 
   // Encode 2:4 sparse A into packed values and META_K-grouped metadata.
   __co_host__ static inline void
-    encode(spanned_data<ValueT, 2>& dense, spanned_data<ValueT, 2>& packed,
-      spanned_data<MetaT, 2>& meta, std::vector<MetaT>* row_meta = nullptr) {
+  encode(spanned_data<ValueT, 2>& dense, spanned_data<ValueT, 2>& packed,
+         spanned_data<MetaT, 2>& meta, std::vector<MetaT>* row_meta = nullptr) {
     const size_t M = dense.shape()[0];
     const size_t K = dense.shape()[1];
     const size_t strips = K / META_K;
@@ -1515,11 +1514,13 @@ struct Sparse2to4HostPolicy {
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
             if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
                           std::is_same<ValueT, f8_e5m2>::value) {
-              const uint8_t* p = reinterpret_cast<const uint8_t*>(&dense.data()[base + i]);
+              const uint8_t* p =
+                  reinterpret_cast<const uint8_t*>(&dense.data()[base + i]);
               uint64_t raw = 0;
               for (size_t bi = 0; bi < sizeof(ValueT); ++bi)
                 raw |= (uint64_t(p[bi]) << (8 * bi));
-              const uint64_t neg_zero = (uint64_t(1) << (sizeof(ValueT) * 8 - 1));
+              const uint64_t neg_zero =
+                  (uint64_t(1) << (sizeof(ValueT) * 8 - 1));
               nonzero = (raw != 0) && (raw != neg_zero);
             } else
 #endif
@@ -1573,7 +1574,8 @@ struct Sparse2to4HostPolicy {
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
           if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
                         std::is_same<ValueT, f8_e5m2>::value) {
-            // If we synthesized idxs for nz<2, force zeros at the synthetic slot
+            // If we synthesized idxs for nz<2, force zeros at the synthetic
+            // slot
             if (nz == 2) {
               if (idxs[0] == 0 && idxs[1] == 3) {
                 // preserve existing values
@@ -1586,8 +1588,8 @@ struct Sparse2to4HostPolicy {
           int pair_idx = static_cast<int>(cg) * 2;
           // ordered_metadata uses the same 2-bit index encoding; order is
           // enforced by sorted idxs.
-          uint32_t nibble = (uint32_t(idxs[0]) & 0x3u) |
-                            ((uint32_t(idxs[1]) & 0x3u) << 2);
+          uint32_t nibble =
+              (uint32_t(idxs[0]) & 0x3u) | ((uint32_t(idxs[1]) & 0x3u) << 2);
           uint32_t shift = static_cast<uint32_t>(pair_idx * 2); // 4 * cg
           if (fp8_k64_u32) {
             if (shift < 32)
@@ -1616,7 +1618,7 @@ struct Sparse2to4HostPolicy {
     }
   }
 
-  // TODO: remove this function after all sparse utils fixed down, 
+  // TODO: remove this function after all sparse utils fixed down,
   // this one is only for debug verbose purpose
   __co_host__ static inline void compress_ref(const std::vector<float>& dense_f,
                                               std::vector<float>& sparse_f,
@@ -1624,7 +1626,7 @@ struct Sparse2to4HostPolicy {
                                               size_t M, size_t K) {
     const size_t k_sparse = K / 2;
     const bool fp8_k64_u32 =
-      (META_K == 64 && std::is_same<MetaT, choreo::u32>::value);
+        (META_K == 64 && std::is_same<MetaT, choreo::u32>::value);
     const size_t meta_cols = (K / META_K) * (fp8_k64_u32 ? 2 : 1);
     sparse_f.assign(M * k_sparse, 0.0f);
     meta_out.assign(M * meta_cols, MetaT(0));
@@ -1648,8 +1650,8 @@ struct Sparse2to4HostPolicy {
 
         size_t pack_col = c_group / groups_per_strip;
         size_t pair_idx = (c_group % groups_per_strip) * 2;
-        uint64_t nibble = (uint64_t(idxs[0]) & 0x3u) |
-                          ((uint64_t(idxs[1]) & 0x3u) << 2);
+        uint64_t nibble =
+            (uint64_t(idxs[0]) & 0x3u) | ((uint64_t(idxs[1]) & 0x3u) << 2);
         if (fp8_k64_u32) {
           size_t base_col = pack_col * 2;
           uint64_t packed =
@@ -1687,15 +1689,20 @@ struct SparseMetaK {
 
 // fp8 defaults (SM90 sparse MMA use wider META_K).
 // METADATA K SIZE is super easy to infer
-// for 2:4 sparsity, each 4 elems group has 2 non-zeros, need 2 indices with 2 bits each
-// to indicate its order in 0-3. thus 1 elem vs 1 bit
-// for fp16/bf16, we have mma.sp shape m16n8k32 and m16n8k16 options, 32/16 is the metadata k size
-// for fp8 e4m3 or e5m2, we have mma.sp shape m16n8k64, 64 is the metadata k size
+// for 2:4 sparsity, each 4 elems group has 2 non-zeros, need 2 indices with 2
+// bits each to indicate its order in 0-3. thus 1 elem vs 1 bit for fp16/bf16,
+// we have mma.sp shape m16n8k32 and m16n8k16 options, 32/16 is the metadata k
+// size for fp8 e4m3 or e5m2, we have mma.sp shape m16n8k64, 64 is the metadata
+// k size
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 template <>
-struct SparseMetaK<choreo::f8_e4m3, choreo::u32> { static constexpr size_t value = 64; };
+struct SparseMetaK<choreo::f8_e4m3, choreo::u32> {
+  static constexpr size_t value = 64;
+};
 template <>
-struct SparseMetaK<choreo::f8_e5m2, choreo::u32> { static constexpr size_t value = 64; };
+struct SparseMetaK<choreo::f8_e5m2, choreo::u32> {
+  static constexpr size_t value = 64;
+};
 #endif
 
 // Convenience forwarding alias (non-breaking):
@@ -1725,13 +1732,16 @@ static_assert(SparseMetaK<choreo::f8_e5m2, choreo::u32>::value == 64,
               "Regression: SparseMetaK<f8_e5m2,u32> changed");
 #endif
 
-static_assert(std::is_same<SparseHostPolicy<choreo::f16, choreo::u32>,
-                           Sparse2to4HostPolicy<choreo::f16, choreo::u32, 16>>::value,
-              "Regression: SparseHostPolicy<f16,u32> must match explicit instantiation");
+static_assert(
+    std::is_same<SparseHostPolicy<choreo::f16, choreo::u32>,
+                 Sparse2to4HostPolicy<choreo::f16, choreo::u32, 16>>::value,
+    "Regression: SparseHostPolicy<f16,u32> must match explicit instantiation");
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
-static_assert(std::is_same<SparseHostPolicy<choreo::f8_e4m3, choreo::u32>,
-                           Sparse2to4HostPolicy<choreo::f8_e4m3, choreo::u32, 64>>::value,
-              "Regression: SparseHostPolicy<f8_e4m3,u32> must match explicit instantiation");
+static_assert(
+    std::is_same<SparseHostPolicy<choreo::f8_e4m3, choreo::u32>,
+                 Sparse2to4HostPolicy<choreo::f8_e4m3, choreo::u32, 64>>::value,
+    "Regression: SparseHostPolicy<f8_e4m3,u32> must match explicit "
+    "instantiation");
 #endif
 
 } // namespace utils
@@ -3095,8 +3105,8 @@ struct Policy_A_Sparse_M16N8K64 {
     // For 2:4 sparse m16n8k64: A is [16, 32] (compressed from [16, 64])
     // Recast to uint32 (4 fp8 per reg) and follow dense K32 layout
     auto A_u32 = cute::recast<uint32_t>(A);
-    int col0 = thread_id;      // 0..3
-    int col1 = thread_id + 4;  // 4..7
+    int col0 = thread_id;     // 0..3
+    int col1 = thread_id + 4; // 4..7
     uint32_t a0 = A_u32(group_id, col0);
     uint32_t a1 = A_u32(group_id + 8, col0);
     uint32_t a2 = A_u32(group_id, col1);
@@ -4477,18 +4487,20 @@ struct SM90_SPARSE_16x8x64_F16E4M3E4M3F16_TN {
   using BRegisters = uint32_t[4];
   using CRegisters = uint32_t[2];
 
-  CUTE_HOST_DEVICE static void
-  fma(uint32_t& d0, uint32_t& d1, uint32_t const& a0, uint32_t const& a1,
-      uint32_t const& a2, uint32_t const& a3, uint32_t const& b0,
-      uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
-      uint32_t const& c0, uint32_t const& c1, uint32_t const& e,
-      int const& spsel = 0) {
+  CUTE_HOST_DEVICE static void fma(uint32_t& d0, uint32_t& d1,
+                                   uint32_t const& a0, uint32_t const& a1,
+                                   uint32_t const& a2, uint32_t const& a3,
+                                   uint32_t const& b0, uint32_t const& b1,
+                                   uint32_t const& b2, uint32_t const& b3,
+                                   uint32_t const& c0, uint32_t const& c1,
+                                   uint32_t const& e, int const& spsel = 0) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
 #if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
     (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
-        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e4m3.e4m3.f16 "
+        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e4m3.e4m3."
+        "f16 "
         "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
@@ -4511,18 +4523,20 @@ struct SM90_SPARSE_16x8x64_F16E4M3E5M2F16_TN {
   using BRegisters = uint32_t[4];
   using CRegisters = uint32_t[2];
 
-  CUTE_HOST_DEVICE static void
-  fma(uint32_t& d0, uint32_t& d1, uint32_t const& a0, uint32_t const& a1,
-      uint32_t const& a2, uint32_t const& a3, uint32_t const& b0,
-      uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
-      uint32_t const& c0, uint32_t const& c1, uint32_t const& e,
-      int const& spsel = 0) {
+  CUTE_HOST_DEVICE static void fma(uint32_t& d0, uint32_t& d1,
+                                   uint32_t const& a0, uint32_t const& a1,
+                                   uint32_t const& a2, uint32_t const& a3,
+                                   uint32_t const& b0, uint32_t const& b1,
+                                   uint32_t const& b2, uint32_t const& b3,
+                                   uint32_t const& c0, uint32_t const& c1,
+                                   uint32_t const& e, int const& spsel = 0) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
 #if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
     (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
-        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e4m3.e5m2.f16 "
+        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e4m3.e5m2."
+        "f16 "
         "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
@@ -4545,18 +4559,20 @@ struct SM90_SPARSE_16x8x64_F16E5M2E4M3F16_TN {
   using BRegisters = uint32_t[4];
   using CRegisters = uint32_t[2];
 
-  CUTE_HOST_DEVICE static void
-  fma(uint32_t& d0, uint32_t& d1, uint32_t const& a0, uint32_t const& a1,
-      uint32_t const& a2, uint32_t const& a3, uint32_t const& b0,
-      uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
-      uint32_t const& c0, uint32_t const& c1, uint32_t const& e,
-      int const& spsel = 0) {
+  CUTE_HOST_DEVICE static void fma(uint32_t& d0, uint32_t& d1,
+                                   uint32_t const& a0, uint32_t const& a1,
+                                   uint32_t const& a2, uint32_t const& a3,
+                                   uint32_t const& b0, uint32_t const& b1,
+                                   uint32_t const& b2, uint32_t const& b3,
+                                   uint32_t const& c0, uint32_t const& c1,
+                                   uint32_t const& e, int const& spsel = 0) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
 #if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
     (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
-        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e5m2.e4m3.f16 "
+        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e5m2.e4m3."
+        "f16 "
         "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
@@ -4579,18 +4595,20 @@ struct SM90_SPARSE_16x8x64_F16E5M2E5M2F16_TN {
   using BRegisters = uint32_t[4];
   using CRegisters = uint32_t[2];
 
-  CUTE_HOST_DEVICE static void
-  fma(uint32_t& d0, uint32_t& d1, uint32_t const& a0, uint32_t const& a1,
-      uint32_t const& a2, uint32_t const& a3, uint32_t const& b0,
-      uint32_t const& b1, uint32_t const& b2, uint32_t const& b3,
-      uint32_t const& c0, uint32_t const& c1, uint32_t const& e,
-      int const& spsel = 0) {
+  CUTE_HOST_DEVICE static void fma(uint32_t& d0, uint32_t& d1,
+                                   uint32_t const& a0, uint32_t const& a1,
+                                   uint32_t const& a2, uint32_t const& a3,
+                                   uint32_t const& b0, uint32_t const& b1,
+                                   uint32_t const& b2, uint32_t const& b3,
+                                   uint32_t const& c0, uint32_t const& c1,
+                                   uint32_t const& e, int const& spsel = 0) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
 #if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
     (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
-        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e5m2.e5m2.f16 "
+        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e5m2.e5m2."
+        "f16 "
         "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
@@ -4623,23 +4641,22 @@ struct SM90_SPARSE_16x8x64_F32E4M3E4M3F32_TN {
     (void)spsel;
 #if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
     (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
-    asm volatile(
-        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32.e4m3.e4m3.f32 "
-        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
-        "{%12, %13, %14, %15}, %16, 0x0;\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
-          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(e));
+    asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32."
+                 "e4m3.e4m3.f32 "
+                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+                 "{%12, %13, %14, %15}, %16, 0x0;\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+                   "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+                   "r"(e));
 #else
-    asm volatile(
-        "mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e4m3.f32 "
-        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
-        "{%12, %13, %14, %15}, %16, 0x0;\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
-          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(e));
+    asm volatile("mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e4m3.f32 "
+                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+                 "{%12, %13, %14, %15}, %16, 0x0;\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+                   "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+                   "r"(e));
 #endif
 #endif
   }
@@ -4661,23 +4678,22 @@ struct SM90_SPARSE_16x8x64_F32E4M3E5M2F32_TN {
     (void)spsel;
 #if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
     (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
-    asm volatile(
-        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32.e4m3.e5m2.f32 "
-        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
-        "{%12, %13, %14, %15}, %16, 0x0;\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
-          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(e));
+    asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32."
+                 "e4m3.e5m2.f32 "
+                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+                 "{%12, %13, %14, %15}, %16, 0x0;\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+                   "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+                   "r"(e));
 #else
-    asm volatile(
-        "mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e5m2.f32 "
-        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
-        "{%12, %13, %14, %15}, %16, 0x0;\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
-          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(e));
+    asm volatile("mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e5m2.f32 "
+                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+                 "{%12, %13, %14, %15}, %16, 0x0;\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+                   "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+                   "r"(e));
 #endif
 #endif
   }
@@ -4699,23 +4715,22 @@ struct SM90_SPARSE_16x8x64_F32E5M2E4M3F32_TN {
     (void)spsel;
 #if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
     (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
-    asm volatile(
-        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32.e5m2.e4m3.f32 "
-        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
-        "{%12, %13, %14, %15}, %16, 0x0;\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
-          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(e));
+    asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32."
+                 "e5m2.e4m3.f32 "
+                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+                 "{%12, %13, %14, %15}, %16, 0x0;\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+                   "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+                   "r"(e));
 #else
-    asm volatile(
-        "mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e4m3.f32 "
-        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
-        "{%12, %13, %14, %15}, %16, 0x0;\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
-          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(e));
+    asm volatile("mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e4m3.f32 "
+                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+                 "{%12, %13, %14, %15}, %16, 0x0;\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+                   "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+                   "r"(e));
 #endif
 #endif
   }
@@ -4737,23 +4752,22 @@ struct SM90_SPARSE_16x8x64_F32E5M2E5M2F32_TN {
     (void)spsel;
 #if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
     (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
-    asm volatile(
-        "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32.e5m2.e5m2.f32 "
-        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
-        "{%12, %13, %14, %15}, %16, 0x0;\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
-          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(e));
+    asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32."
+                 "e5m2.e5m2.f32 "
+                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+                 "{%12, %13, %14, %15}, %16, 0x0;\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+                   "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+                   "r"(e));
 #else
-    asm volatile(
-        "mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e5m2.f32 "
-        "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
-        "{%12, %13, %14, %15}, %16, 0x0;\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
-          "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(e));
+    asm volatile("mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e5m2.f32 "
+                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
+                 "{%12, %13, %14, %15}, %16, 0x0;\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
+                   "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
+                   "r"(e));
 #endif
 #endif
   }
@@ -4797,8 +4811,8 @@ __device__ inline void rotate(Futures&... f) {
 
 // Expose sub-byte float aliases in global namespace for generated device code
 #ifdef __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
-using choreo::f6_e3m2;
 using choreo::f6_e2m3;
+using choreo::f6_e3m2;
 #endif
 #ifdef __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
 using choreo::f4_e2m1;
