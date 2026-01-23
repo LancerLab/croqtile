@@ -84,6 +84,16 @@
 
 #endif // TOPSCC and CUTE
 
+// GCU target must not enable native FP8 support
+#if defined(__GCU_ARCH__)
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+#undef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+#endif
+#ifdef __CHOREO_TARGET_NATIVE_FP8_E8M0_SUPPORT__
+#undef __CHOREO_TARGET_NATIVE_FP8_E8M0_SUPPORT__
+#endif
+#endif
+
 #if __GCU_ARCH__ == 400
 #define __CHOREO_BLOCK_SINGLE__                                                \
   threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&                  \
@@ -1376,13 +1386,13 @@ __co_host__ inline U from_f32(float v) {
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
   } else if constexpr (std::is_same<U, f8_e4m3>::value) {
 #ifdef __USE_CUDA_TYPE__
-    return __nv_cvt_float_to_fp8(v, __NV_SATFINITE, __NV_E4M3);
+  return f8_e4m3(v);
 #else
     return f8_e4m3(v);
 #endif
   } else if constexpr (std::is_same<U, f8_e5m2>::value) {
 #ifdef __USE_CUDA_TYPE__
-    return __nv_cvt_float_to_fp8(v, __NV_SATFINITE, __NV_E5M2);
+  return f8_e5m2(v);
 #else
     return f8_e5m2(v);
 #endif
