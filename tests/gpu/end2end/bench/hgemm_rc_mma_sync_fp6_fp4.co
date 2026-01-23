@@ -1,0 +1,101 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CUDA_VISIBLE_DEVICES=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 64
+#define N 32
+#define K 32
+
+__co__ auto matmul_f6(f6_e2m3 [M, K] lhs, f6_e2m3 [K, N] rhs) {
+  f32 [M, N] output;
+
+  int MMA_M = 16, MMA_N = 8, MMA_K = 16;
+
+  parallel {m, n} by [M / MMA_M / 4, N / MMA_N ] : block {
+    parallel {g0, g1} by [4, 1]: group {
+      mc = mma.fill.f32 0.0;
+      foreach k in K / MMA_K {
+        fl = dma.copy lhs => shared;
+        fr = dma.copy rhs => shared;
+
+        shared f16 [fl.span] fl_f16;
+        shared f16 [fr.span] fr_f16;
+        foreach index in [fl.span]
+          fl_f16.at(index) = fl.data.at(index);
+        foreach index in [fr.span]
+          fr_f16.at(index) = fr.data.at(index);
+
+        ma = mma.load fl_f16.chunkat(m#g0, k);
+        mb = mma.load fr_f16.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.chunkat(m#g0, n#g1);
+    }
+  }
+
+  return output;
+}
+
+__co__ auto matmul_f4(f4_e2m1 [M, K] lhs, f4_e2m1 [K, N] rhs) {
+  f32 [M, N] output;
+
+  int MMA_M = 16, MMA_N = 8, MMA_K = 16;
+
+  parallel {m, n} by [M / MMA_M / 4, N / MMA_N ] : block {
+    parallel {g0, g1} by [4, 1]: group {
+      mc = mma.fill.f32 0.0;
+      foreach k in K / MMA_K {
+        fl = dma.copy lhs => shared;
+        fr = dma.copy rhs => shared;
+
+        shared f16 [fl.span] fl_f16;
+        shared f16 [fr.span] fr_f16;
+        foreach index in [fl.span]
+          fl_f16.at(index) = fl.data.at(index);
+        foreach index in [fr.span]
+          fr_f16.at(index) = fr.data.at(index);
+
+        ma = mma.load fl_f16.chunkat(m#g0, k);
+        mb = mma.load fr_f16.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.chunkat(m#g0, n#g1);
+    }
+  }
+
+  return output;
+}
+
+int main() {
+  {
+    auto lhs = choreo::make_spandata<choreo::f6_e2m3>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f6_e2m3>(K, N);
+    lhs.fill_random(-2.0f, 2.0f);
+    rhs.fill_random(-2.0f, 2.0f);
+
+    auto res = matmul_f6(lhs.view(), rhs.view());
+
+    float base_tol = 0.6f;
+    float rel_tol = 0.3f;
+    choreo::verify_matmul_row_col_subset(lhs, rhs, res, base_tol, rel_tol, 8, 8);
+
+    std::cout << "Test F6 Passed\n" << std::endl;
+  }
+
+  {
+    auto lhs = choreo::make_spandata<choreo::f4_e2m1>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f4_e2m1>(K, N);
+    lhs.fill_random(-2.0f, 2.0f);
+    rhs.fill_random(-2.0f, 2.0f);
+
+    auto res = matmul_f4(lhs.view(), rhs.view());
+
+    float base_tol = 1.0f;
+    float rel_tol = 0.5f;
+    choreo::verify_matmul_row_col_subset(lhs, rhs, res, base_tol, rel_tol, 8, 8);
+
+    std::cout << "Test F4 Passed\n" << std::endl;
+  }
+}
+
+// CHECK: Test F6 Passed
+// CHECK: Test F4 Passed

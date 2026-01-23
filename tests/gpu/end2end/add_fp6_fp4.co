@@ -1,0 +1,67 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ auto ele_add_f6(f6_e2m3 [6, 64] lhs, f6_e2m3 [6, 64] rhs) {
+  f16[lhs.span] output;
+
+  parallel p by 6, q by 64
+    output.at(p, q) = lhs.at(p, q) + rhs.at(p, q);
+
+  return output;
+}
+
+__co__ auto ele_add_f4(f4_e2m1 [6, 64] lhs, f4_e2m1 [6, 64] rhs) {
+  f16[lhs.span] output;
+
+  parallel p by 6, q by 64
+    output.at(p, q) = lhs.at(p, q) + rhs.at(p, q);
+
+  return output;
+}
+
+int main() {
+  {
+    using t = choreo::f6_e2m3;
+    auto a = choreo::make_spandata<t>(6, 64);
+    auto b = choreo::make_spandata<t>(6, 64);
+    a.fill_random(-2.0f, 2.0f);
+    b.fill_random(-2.0f, 2.0f);
+
+    auto res = ele_add_f6(a.view(), b.view());
+
+    float tolerance = 0.35f;
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        float ref = float(a[i][j]) + float(b[i][j]);
+        float got = float(res[i][j]);
+        float diff = std::abs(got - ref);
+        choreo::choreo_assert(diff <= tolerance, "values are not equal.");
+      }
+
+    std::cout << "Test F6 Passed\n" << std::endl;
+  }
+
+  {
+    using t = choreo::f4_e2m1;
+    auto a = choreo::make_spandata<t>(6, 64);
+    auto b = choreo::make_spandata<t>(6, 64);
+    a.fill_random(-2.0f, 2.0f);
+    b.fill_random(-2.0f, 2.0f);
+
+    auto res = ele_add_f4(a.view(), b.view());
+
+    float tolerance = 0.6f;
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        float ref = float(a[i][j]) + float(b[i][j]);
+        float got = float(res[i][j]);
+        float diff = std::abs(got - ref);
+        choreo::choreo_assert(diff <= tolerance, "values are not equal.");
+      }
+
+    std::cout << "Test F4 Passed\n" << std::endl;
+  }
+}
+
+// CHECK: Test F6 Passed
+// CHECK: Test F4 Passed

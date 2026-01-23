@@ -263,6 +263,7 @@ static const std::map<MMAConfig, CUDA_CC> cute_mma_configs = {
       BT::UNKNOWN,
       {16, 8, 64}},
      90},
+
     {{DENSE,
       BT::F8_E5M2,
       BT::F8_E5M2,

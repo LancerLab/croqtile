@@ -739,7 +739,6 @@ __host__ __device__ static inline float operator/(__nv_fp8_e5m2 a,
   return float(a) / float(b);
 }
 #endif
-#endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 
 #ifdef __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
 #if defined(__USE_CUTE_TYPE__)
@@ -1446,8 +1445,8 @@ struct Sparse2to4HostPolicy {
         ValueT t0 = from_f32<ValueT>(v0);
         ValueT t1 = from_f32<ValueT>(v1);
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
-        if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
-                      std::is_same<ValueT, f8_e5m2>::value) {
+    if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+            std::is_same<ValueT, f8_e5m2>::value) {
           auto fp8_is_zero = [](const ValueT& v) {
             const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
             uint64_t raw = 0;
@@ -1553,8 +1552,8 @@ struct Sparse2to4HostPolicy {
           for (int i = 0; i < 4; ++i) {
             bool nonzero = false;
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
-            if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
-                          std::is_same<ValueT, f8_e5m2>::value) {
+      if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+              std::is_same<ValueT, f8_e5m2>::value) {
               const uint8_t* p =
                   reinterpret_cast<const uint8_t*>(&dense.data()[base + i]);
               uint64_t raw = 0;
@@ -1575,8 +1574,8 @@ struct Sparse2to4HostPolicy {
           }
           if constexpr (META_K == 64) {
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
-            if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
-                          std::is_same<ValueT, f8_e5m2>::value) {
+      if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+              std::is_same<ValueT, f8_e5m2>::value) {
               // Handle corner cases to match SM90 legacy compressor behavior
               if (nz == 1) {
                 int only = idxs[0];
@@ -1613,8 +1612,8 @@ struct Sparse2to4HostPolicy {
           ValueT v0 = dense.data()[base + idxs[0]];
           ValueT v1 = dense.data()[base + idxs[1]];
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
-          if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
-                        std::is_same<ValueT, f8_e5m2>::value) {
+      if constexpr (std::is_same<ValueT, f8_e4m3>::value ||
+            std::is_same<ValueT, f8_e5m2>::value) {
             // If we synthesized idxs for nz<2, force zeros at the synthetic
             // slot
             if (nz == 2) {
@@ -1743,6 +1742,7 @@ struct SparseMetaK<choreo::f8_e5m2, choreo::u32> {
 };
 #endif
 
+
 // Convenience forwarding alias (non-breaking):
 template <typename ValueT, typename MetaT>
 using SparseHostPolicy =
@@ -1757,6 +1757,7 @@ using SparsePolicyK16 = Sparse2to4HostPolicy<ValueT, MetaT, 16>;
 
 template <typename ValueT, typename MetaT = choreo::u32>
 using SparsePolicyK32 = Sparse2to4HostPolicy<ValueT, MetaT, 32>;
+
 
 // --- Compile-time smoke tests to prevent regressions ------------------------
 static_assert(SparseMetaK<choreo::f16, choreo::u32>::value == 16,
