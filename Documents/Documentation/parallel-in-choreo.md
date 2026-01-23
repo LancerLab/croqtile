@@ -56,7 +56,7 @@ This achieves the same parallelization as the previous example. It uses the **co
 
 ### Sub-Level Parallelism
 
-Targets like *CUDA* and *Topscc* allow a single parallelism level to be divided into up to three sub-levels. In Choreo, `ituple` and `mdspan` are used for this syntax:
+Targets like *CUDA* allow a single parallelism level to be divided into up to three sub-levels. In Choreo, `ituple` and `mdspan` are used for this syntax:
 
 ```choreo
 parallel {px, py, pz} by [1, 1, 2] {
@@ -89,7 +89,7 @@ The concept of bounded variables will be explored further in later sections, whe
 
 ### Heterogeneity: Transpiling to Kernel Launch
 
-For targets like *CUDA*, *TopsCC*, or *Factor*, the `parallel-by` block not only specifies the number of parallel threads but also defines the boundary between host and device code, leveraging Choreo's ability to manage heterogeneity. Specifically:
+For targets like *CUDA/Cute*, the `parallel-by` block not only specifies the number of parallel threads but also defines the boundary between host and device code, leveraging Choreo's ability to manage heterogeneity. Specifically:
 
 - Code **outside** the `parallel-by` block is transpiled into **host code**.
 - Code **inside** the block is transpiled into **device code**, as illustrated below:
@@ -107,13 +107,13 @@ __co__ void foo(...) {
 }
 ```
 
-For those familiar with *CUDA* or *TopsCC*, this is analogous to a **Kernel Launch** occurring at the `parallel-by` statement. However, Choreo abstracts these details with the unified SPMD parallelism model, allowing developers to focus on their algorithms without worrying about the underlying heterogeneity.
+For those familiar with *CUDA*, this is analogous to a **Kernel Launch** occurring at the `parallel-by` statement. However, Choreo abstracts these details with the unified SPMD parallelism model, allowing developers to focus on their algorithms without worrying about the underlying heterogeneity.
 
 ### Restrictions on Storage Specifiers
 
 Since the `parallel-by` construct in Choreo is related to hardware, including heterogeneity and memory hierarchy, it is subject to the constraints of the target platform.
 
-For example, for *TopsCC*/*Factor* targets, a *spanned* buffer must be annotated with the appropriate storage specifier within the *parallel execution block*. This is because the target platform allows only *scratchpad memory*, such as *shared* and *local* memory, to be allocated by device code. Conversely, code outside the *parallel execution block* can only declare *global* or default host memory, which the target platform allows the host code to manage.
+For example, for *CUDA/Cute* targets, a *spanned* buffer must be annotated with the appropriate storage specifier within the *parallel execution block*. This is because the target platform allows only *scratchpad memory*, such as *shared* and *local* memory, to be allocated by device code. Conversely, code outside the *parallel execution block* can only declare *global* or default host memory, which the target platform allows the host code to manage.
 
 Additionally, *shared* and *local* memory types have a lifetime limited to the duration of the kernel launch. Therefore, referencing them outside the *parallel execution block* is not possible. This constraint ensures proper lifetime management of these memory types.
 

@@ -48,7 +48,7 @@ shared u8 [512, 144] b;
 local u8 [72, 1024] c;
 ```
 
-Since Choreo handles storage in a heterogenous context, a buffer definition without a storage specifier defaults to the storage type of the host program, i.e., CPU memory. Other storage specifiers are defined by the target. For example, *Topscc* (for GCU hardware) supports:
+Since Choreo handles storage in a heterogenous context, a buffer definition without a storage specifier defaults to the storage type of the host program, i.e., CPU memory. Other storage specifiers are defined by the target. For example, *Cuda/Cute* (for GPU hardware) supports:
 
 - *global*: Refers to the device's global storage.
 - *shared*: Refers to the device block's shared storage

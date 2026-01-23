@@ -324,7 +324,7 @@ private:
   void EmitDeviceVirtualIndices(AST::ParallelBy*);
   // emit mem reuse script for each device function.
   void EmitMemReuse(const std::string& dev_func_name);
-  void EmitTopsFree();
+  void EmitCudaFree();
   void EmitRuntimeEnvironmentChecker(std::ostream&) const;
 
 private:

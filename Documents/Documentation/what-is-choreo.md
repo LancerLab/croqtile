@@ -16,6 +16,6 @@ However, managing DMA transfers efficiently can be complex. It involves coordina
 ## Key Features of Choreo
 
 - **High-Level Abstractions**: Choreo simplifies complex DMA orchestration with concise syntax, reducing the boilerplate code required for memory transfers.
-- **Interoperability**: Choreo integrates seamlessly with other kernel programming models like **Factor**, **Topscc**, and others, making it ideal for use in heterogeneous environments.
+- **Interoperability**: Choreo integrates seamlessly with other kernel programming models like **CUDA/Cute**, and others, making it ideal for use in heterogeneous environments.
 - **Optimized for Performance**: Choreo abstracts the complexity of DMA, enabling high-performance memory transfers without requiring manual fine-tuning.
 - **Ease of Integration**: Choreo can be integrated into existing systems, allowing for simplified memory management in both standalone and hybrid kernel programming environments.

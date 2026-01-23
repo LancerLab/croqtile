@@ -9,10 +9,10 @@ A typical *Choreo-C++* program is composed of multiple parts, depending on the t
 * The Tileflow Program
 
 ### Host, Device and Tileflow
-The code below showcases a *Choreo-C++* program targeting *TopsCC*/*CUDA*:
+The code below showcases a *Choreo-C++* program targeting *CUDA/Cute*:
 
 ```choreo
-// Device program: typically runs on GPU/NPU/GCU
+// Device program: typically runs on GPU/NPU
 __device__ void device_function(...) {
   // High-performance device kernel implementation
 }
@@ -42,11 +42,11 @@ In a simple high-performance kernel implementation, programmers typically prepar
 
 **Device Program**
 
-The *Device Program* defines computation-intensive operations executed on the target device. In the example above, the device function is prefixed with `__device__`, which is an keyword from *CUDA*/*TopsCC*, indicating it runs exclusively on the heterogeneous device. Similar to the *host program*, any device program is not altered in Choreo compilation process.
+The *Device Program* defines computation-intensive operations executed on the target device. In the example above, the device function is prefixed with `__device__`, which is an keyword from *CUDA/Cute*, indicating it runs exclusively on the heterogeneous device. Similar to the *host program*, any device program is not altered in Choreo compilation process.
 
 **Tileflow Program**
 
-Those familiar with *CUDA*/*TopsCC* may already be acquainted with host programs and device programs. However, the *Tileflow Program*, composed of *Choreo functions* (prefixed with `__co__`), is the core of *Choreo-C++* programs. It orchestrates data movement among different hosts/devices and among different storage levels within a single device. In a typical workflow, the Tileflow program moves data to an appropriate storage location (as buffer) and calls *device programs* to perform computations. Once the work is complete, it moves the results back to the host.
+Those familiar with *CUDA/Cute* may already be acquainted with host programs and device programs. However, the *Tileflow Program*, composed of *Choreo functions* (prefixed with `__co__`), is the core of *Choreo-C++* programs. It orchestrates data movement among different hosts/devices and among different storage levels within a single device. In a typical workflow, the Tileflow program moves data to an appropriate storage location (as buffer) and calls *device programs* to perform computations. Once the work is complete, it moves the results back to the host.
 
 ### Transpilation and Compilation
 The Choreo compilation process typically involves three major steps: **Pre-processing**, **Transpilation**, and **Target Compilation**. To better understand how different parts of a Choreo-C++ program work together, the full compilation workflow is illustrated below:
@@ -59,8 +59,8 @@ Thus, the Choreo compiler functions as a end-to-end compiler, with the key step 
 
 One notable feature of Choreo compilation is its support for both:
 
-- **Single Source Compilation Model**: Similar to *CUDA*/*TopsCC*, where the target compiler allows device and host programs to be in a single source file for target compilation.
-- **Separate Source Compilation Model**: Similar to *OpenCL*/*Factor*, where host and device code must be compiled separately.
+- **Single Source Compilation Model**: Similar to *CUDA/Cute*, where the target compiler allows device and host programs to be in a single source file for target compilation.
+- **Separate Source Compilation Model**: Similar to *OpenCL*, where host and device code must be compiled separately.
 
 The code shown above naturally supports the *Single Source Compilation Model*. However, to support the *Separate Source Compilation Model*, Choreo requires wrapping the Device Program with the `__cok__` block, as shown below:
 
@@ -74,10 +74,10 @@ __co__ void choreo_function(...) { ... }
 void foo() { ... }
 ```
 
-This is the code structure for a *Choreo-Factor C++* program. The Factor compiler requires the device program (`device_function` in the code) to be stored in a separate file from the host program. The `__cok__ {}` wrapper enables the Choreo compiler to handle user-provided device code properly. It helps Choreo separate device and host code from a single Choreo source file for different compilation processes. Therefore, do not be surprised if you encounter `__cok__` in certain Choreo code; it is necessary for integrating support for the *Separate Source Compilation Model*.
+This is the code structure for a *Choreo-OpenCL C++* program. The OpenCL compiler requires the device program (`device_function` in the code) to be stored in a separate file from the host program. The `__cok__ {}` wrapper enables the Choreo compiler to handle user-provided device code properly. It helps Choreo separate device and host code from a single Choreo source file for different compilation processes. Therefore, do not be surprised if you encounter `__cok__` in certain Choreo code; it is necessary for integrating support for the *Separate Source Compilation Model*.
 
-## A Full Choreo-Topscc C++ Code Example
-Below is a complete *Choreo-Topscc C++* code example that performs element-wise addition on two arrays of the same size and element type:
+## A Full Choreo-Cute C++ Code Example
+Below is a complete *Choreo-Cute C++* code example that performs element-wise addition on two arrays of the same size and element type:
 
 ```choreo
 // Device Program
@@ -194,7 +194,7 @@ Similarly, the most significant dimension is listed first in this shape array (`
 
 ### Device Program: Parallel Computation
 
-The **device program** defines the computational kernel that will be executed on the target device, such as a GPU or GCU. The kernel is designed to operate on input data, process it in parallel, and generate the output.
+The **device program** defines the computational kernel that will be executed on the target device such as a GPU. The kernel is designed to operate on input data, process it in parallel, and generate the output.
 
 We repeat the code as below:
 
@@ -204,7 +204,7 @@ __device__ void kernel(int * a, int * b, int * c, int n) {
 }
 ```
 
-For targets that only support the _Separated Source Programming Model_, the code may need to be wrapped within a `__cok__ {}` block. The equivalent *Choreo-Factor C++* code is shown below:
+For targets that only support the _Separated Source Programming Model_, the code may need to be wrapped within a `__cok__ {}` block. The equivalent *Choreo-OpenCL C++* code is shown below:
 
 ```choreo
 __cok__ {
@@ -214,11 +214,11 @@ __cok__ {
 } // end of __cok__
 ```
 
-Here, the `extern "C"` annotation replaces the `__device__` keyword used in *TopsCC* target, as *Factor* requires C-linkage for the device functions.
+Here, the `extern "C"` annotation replaces the `__device__` keyword used in *CUDA/Cute* target, as *OpenCL* requires C-linkage for the device functions.
 
-Choreo's device programming model varies depending on the target hardware and its supported features. For example, the *TopsCC* and *Factor* target allows the use of *TCLE (Target Compiler Language Extension)*, or *intrinsic function* to fully leverage the computational power of the parallel target hardware.
+Choreo's device programming model varies depending on the target hardware and its supported features. For example, some private targets allows the use of vectorizing programming interfaces, or *intrinsic function* to fully leverage the computational power of the parallel target hardware.
 
-Programmers must be aware that the device program follows the *Single-Program-Multiple-Data (SPMD)* paradigm. In this paradigm, multiple instances of the same device program are executed in parallel, making it highly efficient for exploiting data-level parallelism on target hardware. However, unlike traditional *TopsCC* programs, the device program does not manage data movement —whether between the host and device or across multiple storage levels within the device. Instead, the *tileflow program* orchestrates these tasks in a much simpler and safer manner.
+Programmers must be aware that the device program follows the *Single-Program-Multiple-Data (SPMD)* paradigm. In this paradigm, multiple instances of the same device program are executed in parallel, making it highly efficient for exploiting data-level parallelism on target hardware. However, unlike traditional *CUDA/Cute* programs, the device program does not manage data movement —whether between the host and device or across multiple storage levels within the device. Instead, the *tileflow program* orchestrates these tasks in a much simpler and safer manner.
 
 ### Tileflow Program: Orchestrating the Data Movement
 
@@ -253,7 +253,7 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 
 In this code, the `__co__`-prefixed choreo function accepts two inputs `lhs` and `rhs`, both with the shape `[6, 17, 128]` and the element type of `s32` (signed 32-bit integer). And the output is defined to have the same shape and type as the inputs.
 
-The `parallel p by 6 {...}` block indicates that the enclosed code runs in parallel. Specifically, six instances of the code are executed concurrently. This implies a transition in the execution environment from the host to the device. For those familiar with *CUDA* or *TopsCC*, this concept is analogous to a kernel launch, where multiple threads or processes are initiated to perform computations simultaneously on the device.
+The `parallel p by 6 {...}` block indicates that the enclosed code runs in parallel. Specifically, six instances of the code are executed concurrently. This implies a transition in the execution environment from the host to the device. For those familiar with *CUDA*, this concept is analogous to a kernel launch, where multiple threads or processes are initiated to perform computations simultaneously on the device.
 
 Inside the `parallel-by` block, a `with-in` block binds the symbol `index` to two values, `17` and `4`. In Choreo, `index` is referred to as a `bounded-ituple` with two `bounded` values, which can be used in `foreach` statements. (We will explain `bounded` types in later chapters.)
 

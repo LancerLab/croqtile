@@ -85,7 +85,7 @@ struct DiversityShape {
 
 // it stores info of masking
 struct ScopedMaskInfo {
-  // vector bool type of tops c++ needs explicitly specify the element type
+  // vector bool type of some c++ needs explicitly specify the element type
   // like __vector bool int, so we need to track the element type of mask
   BaseType mask_element_type = BaseType::S32;
   int vector_width = 0;

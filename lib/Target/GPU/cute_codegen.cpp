@@ -517,7 +517,6 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
   return indices;
 }
 
-// tops::mdspan style offset
 std::pair<std::string, size_t>
 CuteCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
                           ptr<DMAConfig> config) const {
@@ -946,7 +945,7 @@ bool CuteCodeGen::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
 
   // If there is no AST::Return
-  if (return_stream.str().empty() && NeedDeviceFunc()) EmitTopsFree();
+  if (return_stream.str().empty() && NeedDeviceFunc()) EmitCudaFree();
 
   DecrHostIndent();
   hs << "}\n\n";
@@ -1677,7 +1676,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // - not support tiling.
   // - not support async.
 
-  // Generate tops dte and choreo::future in device-side
   auto claimFuture = [this,
                       &n](const std::string& buf_expr, bool is_async,
                           bool is_tma = false,
@@ -1840,27 +1838,27 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     std::string bts = NameBaseType(t_sty->ElementType());
     std::string buf_sym_from;
     std::string buf_sym;
-    std::string tops_dma_kind = "cudaMemcpy";
+    std::string cuda_dma_kind = "cudaMemcpy";
     if (global_buffers.count(f_sym + "__device")) {
       buf_sym_from = f_sym + "__device";
-      tops_dma_kind.append("Device");
+      cuda_dma_kind.append("Device");
     } else {
       buf_sym_from = f_sym + ".data()";
       if (f_sty->GetStorage() == Storage::GLOBAL)
-        tops_dma_kind.append("Device");
+        cuda_dma_kind.append("Device");
       else
-        tops_dma_kind.append("Host");
+        cuda_dma_kind.append("Host");
     }
 
     if (global_buffers.count(t_sym + "__device")) {
       buf_sym = t_sym + "__device";
-      tops_dma_kind.append("ToDevice");
+      cuda_dma_kind.append("ToDevice");
     } else {
       buf_sym = t_sym + ".data()";
       if (f_sty->GetStorage() == Storage::GLOBAL)
-        tops_dma_kind.append("ToDevice");
+        cuda_dma_kind.append("ToDevice");
       else
-        tops_dma_kind.append("ToHost");
+        cuda_dma_kind.append("ToHost");
     }
 
     if (n.operation == ".copy") {
@@ -1868,7 +1866,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         // direct copy
         hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
            << buf_sym_from << ", " << UnScopedSizeExpr(*f_sty) << ", "
-           << tops_dma_kind << "));\n";
+           << cuda_dma_kind << "));\n";
       } else
         choreo_unreachable(
             "not support tiling chunkat in dma copy at host side for now");
@@ -3363,7 +3361,7 @@ bool CuteCodeGen::Visit(AST::Return& n) {
     choreo_unreachable("not support return value of type: " + PSTR(vty));
   }
 
-  EmitTopsFree();
+  EmitCudaFree();
 
   hs << h_indent << return_stream.str();
 
@@ -3840,7 +3838,7 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
   return "";
 }
 
-void CuteCodeGen::EmitTopsFree() {
+void CuteCodeGen::EmitCudaFree() {
   assert(IsHost());
   for (const auto& item : GetDeviceFuncIns(updating_cgi)) {
     if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;

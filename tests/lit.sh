@@ -411,7 +411,6 @@ gcu_detect() {
       ;;
     *I20*)
       gcu_arch=gcu210
-      export TOPS_VISIBLE_DEVICES=1
       ;;
     *Tencent*)
       gcu_arch=gcu210

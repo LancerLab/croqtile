@@ -57,7 +57,7 @@ tests a specific operator (e.g., add, mul, relu, sigmoid, softmax, tanh).
 
 
 ## Compile Choreo-C++ Program
-In the current implementation, Choreo performs **source-to-source translation** (or **transpilation**) to convert *Choreo-C++* programs into vendor-supported C++ language code and APIs (such as Factor, Topscc, and CUDA).
+In the current implementation, Choreo performs **source-to-source translation** (or **transpilation**) to convert *Choreo-C++* programs into vendor-supported C++ language code and APIs (such as CUDA/Cute, and more).
 
 However, since Choreo integrates lower-level *target compiler* in its compilation process, it appears as an **end-to-end compiler** when the vendor-provided device-level C++ compiler is properly configured.
 
@@ -102,7 +102,7 @@ Options:
   -bf16n, --native-bf16     Utilize native bf16 type when target platform support.
   -f16n, --native-f16       Utilize native f16 type when target platform support.
   -n, --remove-comments     Remove all comments in non-choreo code. (Useful for FileCheck)
-  -t, --target <platform>   Set the compilation target. The 'platform' includes <factor|topscc|cuda>.
+  -t, --target <platform>   Set the compilation target. Use '--help-target' to show current supported targets.
   -v, --verbose             Display the programs invoked by the compiler.
   -E                        Preprocess only; do not compile.
   -arch=<processor>         Set the architecture to execute the binary code.

@@ -88,8 +88,8 @@
 
 #endif // PRIVATE_TGT0 and CUTE
 
-// GCU target must not enable native FP8 support
-#if defined(__GCU_ARCH__)
+// private target must not enable native FP8 support
+#if defined(__CHOREO_PRIVATE_TGT0__)
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 #undef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 #endif

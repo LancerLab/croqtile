@@ -38,7 +38,7 @@ Executing the statement `wait f0;` causes the program to check if `data0` has be
 
 ### Operation Type
 
-Choreo's DMA statement is an abstraction designed to support modern hardware. Beyond simple linear memory copies, advanced hardware such as the **Data Transfer Engine (DTE)** of GCU hardware and the **Tensor Memory Accelerator (TMA)** can transfer shaped data and apply shape transformations in-flight. Choreo maps these functionalities at the software level as different **DMA Operation Types**. The supported operations include:
+Choreo's DMA statement is an abstraction designed to support modern hardware. Beyond simple linear memory copies, advanced hardware such as the **Tensor Memory Accelerator (TMA)** can transfer shaped data and apply shape transformations in-flight. Choreo maps these functionalities at the software level as different **DMA Operation Types**. The supported operations include:
 
 - `dma.copy`: Copies flat memory directly.
 - `dma.pad`: Pads shaped data while transferring the data.
@@ -52,29 +52,9 @@ dma.transp<0, 2, 1> input => shared;  // Result shape [32, 9, 16]
 dma.pad<{1, 0, 3}, {0, 1, 2}, {0, 0, 0}, 0.1f> input => shared; // Result shape [33, 17, 14]
 ```
 
-Here, the **DMA configuration**s are enclosed by `<>`. The configuration varies according to different operations. The detailed configuration syntax and limitations for a specific platform, such as *Topscc*, are listed below as an example:
+Here, the **DMA configuration**s are enclosed by `<>`. The configuration varies according to different operations. The detailed configuration syntax and limitations for a specific platform, such as *CUDA/Cute*, are listed below as an example:
 
-Programmers should note that support for DMA types other than `dma.copy` varies by platform. For instance, on the *Topscc*/*Factor* platform, the implementation directly maps hardware-supported advanced data transfer features. On the *CUDA* platform, it could be either a mapping of TMA or an orchestration of load instructions from multiple threads. It is also possible to implement advanced DMA operations using software-only methods or software-hardware cooperation, though these are not yet supported.
-
-<!-- ### Operation Type
-
-Choreo's DMA statement is an abstraction that is extended to support modern hardware. Despite linear memory copies, advanced hardware, such as *Data Transfer Engine (DTE)* of GCU hardware and *Tensor Memory Accelerator (TMA)*, are capable to transfer shaped data and apply shape transformations inflight. Choreo maps such functionality in software level as different **DMA Operation Type**. The supported operations includes:
- 
-- `dma.copy`: it copies the flat memory directly.
-- `dma.pad`: it *pad*s shaped data while transferring the data.
-- `dma.transp`: it *transpose*s the shaped data while transferring the data.
-
-The configurations, such as padding and transposing details are programmed as parameters of DMA operation. For example:
-
-```choreo
-global f32 [32, 16, 9] input;
-dma.transp<0, 2, 1> input => shared;  // result shape [32, 9, 16]
-dma.pad<{1, 0, 3}, {0, 1, 2}, {0, 0, 0}, 0.1f> input => shared; // result shape [33, 17, 12]
-```
-
-The **DMA configurations** are enclosed by `<>`. The configuration varies according to different operations. The detailed configuration syntax and limitation for *Topscc* is listed below as an example:
-
-Programmers must note that, for the support of DMA type other than `dma.copy`, it differs by platforms. For example, for *Topscc*/*Factor* platform, the implementation directly maps hardware supported advanced data transference features. And for *CUDA* platform, it could be either a mapping of TMA, or orchestration of load instructions from multiple threads. It is also possible to implement the advanced DMA operations by using software-only methods or software-hardware cooperations but not yet appear in current support.  -->
+Programmers should note that support for DMA types other than `dma.copy` varies by platform. For instance, on the *CUDA/Cute* platform, it could be either a mapping of TMA or an orchestration of load instructions from multiple threads. It is also possible to implement advanced DMA operations using software-only methods or software-hardware cooperation, though these are not yet supported.
 
 ### Data Expression
 

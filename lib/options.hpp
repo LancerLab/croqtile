@@ -173,10 +173,11 @@ public:
       Help(OptionKind::User);
       return false;
     } else if (option == "--help-target") {
-      std::cout << "available Choreo targets includes: ";
+      std::cout << "The supported compile targets including: ";
       for (auto& ti : TargetRegistry::List())
-        std::cout << " - " << ti.name << ": " << ti.description << ".\n";
+        std::cout << "\n - " << ti.name << ": " << ti.description;
       std::cout << "\n";
+      return false;
     } else if (option == "--help-hidden") {
       Help(OptionKind::Hidden);
       return false;

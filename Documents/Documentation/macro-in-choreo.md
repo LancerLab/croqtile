@@ -66,5 +66,5 @@ chore-preprocessing -> choreo compilation -> c/c++ preprocessing -> c/c++ compil
 The primary target of choreo preprocessing is to make host/device macros work as a whole, but such a workflow makes it possible sometimes different. From an implementation perspective, Choreo pre-processor only substitute/conditionally-compile code inside the tileflow function, while leaving other pre-processing to the C++ preprocessor. That could restrict Choreo pre-processing in a limited scope.
 
 ## Pre-defined Macros
-To mimic a target native compilation, choreo preprocess also takes the builtin macros from the target. For example, `__TOPSCC__` is globally defined at topscc target compilation, while `__CUDA__` is globally defined to generate CUDA code.
+To mimic a target native compilation, choreo preprocess also takes the builtin macros from the target. For example, `__CUDA__` is globally defined to generate CUDA/Cute code, while `__CUDA_ARCH__` is only set for CUDA/Cute device code compilation.
 Consequently, these macros can be utilized inside tileflow functions as well as the host code.
