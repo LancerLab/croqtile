@@ -117,6 +117,76 @@ set_print() {
     printf '\n'
 }
 
+# ---- hook registry for target configure----
+
+# Hooks stored as newline-separated "PHASE FUNC" pairs
+HOOKS=""
+
+register_hook() {
+  # usage: register_hook <phase> <funcname>
+  local phase="$1"
+  local func="$2"
+
+  # optional sanity: must look like a shell identifier
+  case "$func" in
+    ''|*[!a-zA-Z0-9_]*|[0-9]*)
+      echo "test-runner: invalid hook function name: $func" >&2
+      exit 2
+      ;;
+  esac
+
+  # Ensure function exists *now* (config may define it before registering)
+  command -v "$func" >/dev/null 2>&1 || {
+    echo "lit.sh: hook function not found: $func (phase $phase)" >&2
+    exit 2
+  }
+
+  HOOKS="${HOOKS}${HOOKS:+
+}${phase} ${func}"
+}
+
+run_hooks() {
+  local phase="$1"
+  shift
+
+  local line p func
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    p="${line%% *}"
+    func="${line#* }"
+    [[ "$p" == "$phase" ]] || continue
+
+    # call hook in *current shell*
+    "$func" "$@"
+  done <<< "$HOOKS"
+}
+
+run_hooks_strict() {
+  local phase="$1"
+  shift
+
+  local line p func
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+
+    p="${line%% *}"
+    func="${line#* }"
+
+    [[ "$p" == "$phase" ]] || continue
+
+    #echo "==> hook[$phase]: $func" >&2
+
+    # Contain failure even under `set -e`
+    if ! "$func" "$@"; then
+      # echo "!! hook failed [$phase]: $func" >&2
+      return 1
+    fi
+  done <<< "$HOOKS"
+
+  return 0
+}
+
 #===================== utilities =========================
 
 get_terminal_width() {
@@ -171,6 +241,104 @@ validate_cuda_home() {
   return 0
 }
 
+CFG_SOURCED=""
+
+already_sourced_cfg() {
+  echo "$CFG_SOURCED" | grep -Fqx "$1" 2>/dev/null
+}
+
+mark_sourced_cfg() {
+  if [ -z "$CFG_SOURCED" ]; then
+    CFG_SOURCED="$1"
+  else
+    CFG_SOURCED="$CFG_SOURCED
+$1"
+  fi
+}
+
+abspath_dir_of() {
+  p="$1"
+  if [ -d "$p" ]; then
+    (cd "$p" 2>/dev/null && pwd) || return 1
+  else
+    (cd "$(dirname "$p")" 2>/dev/null && pwd) || return 1
+  fi
+}
+
+find_tests_root() {
+  # usage: find_tests_root <test_path>
+  # returns absolute path to nearest ancestor directory named "tests"
+  d="$(abspath_dir_of "$1")"
+
+  while :; do
+    base="$(basename "$d")"
+    if [ "$base" = "tests" ]; then
+      printf "%s\n" "$d"
+      return 0
+    fi
+    parent="$(dirname "$d")"
+    [ "$parent" = "$d" ] && break
+    d="$parent"
+  done
+
+  echo "lit.sh: could not find ancestor directory named 'tests' for: $1" >&2
+  return 2
+}
+
+load_cfg_chain_from_tests() {
+  # usage: load_cfg_chain_from_tests <test_path> [cfg_name]
+  test_path="$1"
+  cfg_name="${2:-lit.cfg}"
+
+  tests_root="$(find_tests_root "$test_path")"
+  test_dir="$(abspath_dir_of "$test_path")"
+
+  # Build the relative path from tests_root -> test_dir using string stripping
+  # Assumes test_dir is under tests_root.
+  case "$test_dir" in
+    "$tests_root") rel="" ;;
+    "$tests_root"/*) rel="${test_dir#"$tests_root"/}" ;;
+    *)
+      echo "lit.sh: $test_dir is not under $tests_root" >&2
+      return 2
+      ;;
+  esac
+
+  # Source tests_root/lit.cfg first (if present)
+  d="$tests_root"
+  cfg="$d/$cfg_name"
+  if [ -f "$cfg" ]; then
+    cfg_abs="$(cd "$(dirname "$cfg")" && pwd)/$(basename "$cfg")"
+    if ! already_sourced_cfg "$cfg_abs"; then
+      mark_sourced_cfg "$cfg_abs"
+       #echo "==> sourcing cfg: $cfg_abs" >&2
+      . "$cfg_abs"
+    fi
+  fi
+
+  # Then walk rel segments: tests_root/seg1, tests_root/seg1/seg2, ...
+  # and source cfg at each level if present.
+  if [ -n "$rel" ]; then
+    oldIFS="$IFS"
+    IFS="/"
+    set -- $rel
+    IFS="$oldIFS"
+
+    for seg in "$@"; do
+      d="$d/$seg"
+      cfg="$d/$cfg_name"
+      if [ -f "$cfg" ]; then
+        cfg_abs="$(cd "$(dirname "$cfg")" && pwd)/$(basename "$cfg")"
+        if ! already_sourced_cfg "$cfg_abs"; then
+          mark_sourced_cfg "$cfg_abs"
+           #echo "==> sourcing cfg: $cfg_abs" >&2
+          . "$cfg_abs"
+        fi
+      fi
+    done
+  fi
+}
+
 #=========================================================
 
 # Get the directory where the script is located
@@ -202,7 +370,7 @@ if ! which not.sh &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.22"
+echo "        Choreo SimpleLit - v0.30"
 echo "---------------------------------------"
 echo ""
 
@@ -217,7 +385,7 @@ num_skiped=0
 
 is_in_docker=false
 is_in_shell=false
-tst_targets=()
+REQ_TARGETS=()
 requires_dynamic_shape=0
 expect_fail=
 expect_skip=
@@ -235,8 +403,18 @@ else
   is_in_shell=true
 fi
 
+# Check the hardware device availability and type
+# Note: consider the machine only installed a single target
+device_type="none"
+cuda_arch="none"
+mach=
+simulator="none"
+
+# some specific features
+is_dynshape_supported=0
+
 # Function to fill the target-specific variables
-check_specific() {
+prepare() {
   local file="$1"
 
   # Validate input
@@ -258,15 +436,23 @@ check_specific() {
     return 1
   fi
 
+  # now load the configure
+  CFG_SOURCED=""
+  HOOKS=""
+  load_cfg_chain_from_tests "$file"
+
+  # detect the hardware
+  run_hooks "hw_detect";
+
+  # target-specific preparation
+  run_hooks "target_prepare"
+
   # Reset target requirement
   requires_dynamic_shape=0
   need_cute=0
   need_cuda=0
   expect_fail=
   expect_skip=
-
-  set_clear tst_targets
-  set_add tst_targets "gcu210" "gcu300" "gcu400" "sm_86" "sm_90a"
 
   # Extract expect_fail and expect_skip with proper comment pattern
   if [[ -n "$comment_pattern" ]]; then
@@ -280,6 +466,8 @@ check_specific() {
 
   # Extract REQUIRES line from file contents
   local requires=$(grep "REQUIRES:" "$file")
+
+  set_clear REQ_TARGETS
 
   # If no REQUIRES line found, return early
   if [[ -z "$requires" ]]; then
@@ -301,34 +489,13 @@ check_specific() {
   local tgts=$(grep -o "TARGET-[^[:space:]]*" <<< "$requires" | sed 's/TARGET-//')
   local libs=$(grep -o "LIBRARY-[^[:space:]]*" <<< "$requires" | sed 's/LIBRARY-//')
   local cmps=$(grep -o "COMPILER-[^[:space:]]*" <<< "$requires" | sed 's/COMPILER-//')
-  local expect_gcu_sim4=$(grep -q "GCUSIM4" <<< "$requires" && echo "found")
-  local expect_gcu_sim5=$(grep -q "GCUSIM5" <<< "$requires" && echo "found")
-
-  # has some targets specified, resolve it
-  [ ! -z ${tgts} ] && set_clear tst_targets
 
   # Process targets
-  if [ ! -z "${expect_gcu_sim4}" ]; then set_add tst_targets "gcusim400"; fi
-  if [ ! -z "${expect_gcu_sim5}" ]; then set_add tst_targets "gcusim500"; fi
-  for tgt in ${tgts}; do
-    if [[ "${tgt}" == "GCU400" ]]; then set_add tst_targets "gcu400";
-    elif [[ "${tgt}" == "GCU300" ]]; then set_add tst_targets "gcu300";
-    elif [[ "${tgt}" == "GCU210" ]]; then set_add tst_targets "gcu210";
-    elif [[ "${tgt}" == "SM_90" ]]; then set_add tst_targets "sm_90" "sm_90a";
-    elif [[ "${tgt}" == "SM_90A" ]]; then set_add tst_targets "sm_90a";
-    elif [[ "${tgt}" == "SM_"* ]]; then set_add tst_targets "$(tolower ${tgt})";
-    elif [[ "${tgt}" == "GCUALL" ]]; then
-      set_add tst_targets "gcu210" "gcu300" "gcu400"
-    elif [[ "${tgt}" == "GPU" ]]; then
-      set_add tst_targets "sm_86" "sm_90a"
-    fi
-  done
-
-  if [ -z "${tgts}" ]; then
-    set_add tst_targets "gcu210" "gcu300" "gcu400" "sm_86" "sm_90a"
+  if [ ! -z "${tgts}" ]; then
+    run_hooks "set_archs" ${tgts}
   fi
 
-  if set_empty tst_targets; then
+  if set_empty REQ_TARGETS && [ ! -z "${tgts}" ]; then
     echo "invalid target: ${tgts}" >&2
   fi
 
@@ -341,112 +508,6 @@ check_specific() {
   # requires dynamic-shape support (some target only)
   local dynshape=$(grep -q "DYNAMIC-SHAPE" <<< "$requires" && echo "found")
   [ ! -z "${dynshape}" ] && requires_dynamic_shape=1
-}
-
-# Check the hardware device availability and type
-# Note: consider the machine only installed a single target
-device_type="none"
-gcu_arch="none"
-cuda_arch="none"
-mach=
-simulator="none"
-
-# some specific features
-is_dynshape_supported=0
-gcu_sim_lib=
-gcu_sim_arch=
-
-gpu_detect() {
-  if command -v nvidia-smi >/dev/null 2>&1; then
-    # GPU device is available
-    while IFS=',' read -r name cap; do
-      name=$(echo "$name" | xargs)
-      cap=$(echo "$cap" | xargs)
-
-      # Defensive parsing
-      if [ -z "$cap" ]; then
-        cuda_arch="none"
-        continue;
-      fi
-
-      major=${cap%%.*}
-      minor=${cap##*.}
-
-      # Ignore pre-sm_70
-      if [ "$major" -lt 7 ]; then
-        cuda_arch="none"
-        continue;
-      fi
-
-      # Hopper special case
-      if [ "$major" -eq 9 ] && [ "$minor" -eq 0 ]; then
-        if echo "$name" | grep -qi "\(GH200\|H800\|H20\)"; then
-          cuda_arch="sm_90a" # enforce sm_90a now
-        else
-          cuda_arch="sm_90"
-        fi
-      else
-        cuda_arch="sm_${major}${minor}"
-      fi
-      break;
-    done < <(nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null)
-
-    # or else does not find a valid gpu device
-    if [ "$cuda_arch" != "none" ]; then
-      device_type="gpu"
-      mach=${cuda_arch}
-    fi
-  fi
-}
-
-gcu_detect() {
-  local _gcu_dstr="$(lspci | grep -E '(Enflame|Tencent)' | head -1)"
-  case "${_gcu_dstr}" in
-    *S60G*)
-      gcu_arch=gcu300
-      ;;
-    *c035*|*S60*)
-      gcu_arch=gcu300
-      is_dynshape_supported=1
-      ;;
-    *I20*)
-      gcu_arch=gcu210
-      ;;
-    *Tencent*)
-      gcu_arch=gcu210
-      ;;
-    "")
-      echo "can not determine the target device type."
-      exit 1
-      ;;
-  esac
-  if [ "$gcu_arch" != "none"  ]; then
-    device_type="gcu"
-    mach=${gcu_arch}
-  fi
-}
-
-hardware_detect() {
-  if [[ "${device_type}" == "none" ]]; then gpu_detect; fi
-  if [[ "${device_type}" == "none" ]]; then gcu_detect; fi
-
-  if [[ "{$device_type}" == "none" ]]; then
-    echo "can not determine device type."
-    exit 1
-  fi
-}
-
-detect_simulator_features() {
-  if [ -f "${script_dir}/../extern/lib/libgcusim.so" ]; then
-    # the simulators exist
-    gcu_sim_lib=${script_dir}/../extern/lib/
-    gcu_sim_arch=gcusim400
-    simulator=${gcu_sim_arch}
-  elif [ -f "${script_dir}/../extern/lib/libgcusim5.so" ]; then
-    gcu_sim_lib=${script_dir}/../extern/lib/
-    gcu_sim_arch=gcusim500
-    simulator=${gcu_sim_arch}
-  fi
 }
 
 lock_file="/tmp/test_script_lock_${timestamp}"
@@ -523,10 +584,10 @@ execute_command() {
   command=${command//choreo/"$(which choreo) -n"}
   command=${command//copp/"$(which copp)"}
   command=${command//FileCheck/"$(which FileCheck)"}
-  command=${command//%gcu_arch/"-arch=${gcu_arch}"}
   command=${command//%cuda_arch/"-arch ${cuda_arch}"}
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
+  run_hooks "target_cmd" "command"
 
   # num_tested=$(($num_tested + 1))
   # echo "num_tested before add " $(read_counter "num_tested")
@@ -668,20 +729,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# detect the device supported features
-hardware_detect
-detect_simulator_features
-initialize_counters
-
-case $device_type in
-  gpu) ;;
-  gcu) ;;
-  *)
-    echo "No supported device was found. abort..."
-    exit 1
-    ;;
-esac
-
 cleantmplocks() {
   rm -f $lock_file
   rm -f $counter_lock_file
@@ -734,8 +781,6 @@ on_ctrl_c() {
   exit 1
 }
 
-trap on_ctrl_c SIGINT
-
 tolower() {
   echo "$1" | tr '[:upper:]' '[:lower:]'
 }
@@ -773,9 +818,14 @@ retrieve_run_config() {
   fi
 }
 
+# detect the device supported features
+initialize_counters
+
+trap on_ctrl_c SIGINT
+
 for file in "${files_array[@]}"; do
   # check requirement specified by the file
-  check_specific $file
+  prepare $file
 
   if [ ! -z "$expect_skip" ]; then
     echo "SKIP:  $file"
@@ -797,14 +847,11 @@ for file in "${files_array[@]}"; do
     fi
   fi
 
-  if [ "$device_type" == "gcu" ]; then
-    if [ $requires_dynamic_shape -eq 1 ]; then
-      if [ $is_dynshape_supported -eq 0 ]; then
-        echo "SKIP(dyn-shape): ${file} "
-        num_skiped=$(($num_skiped + 1));
-        continue; #simply skip the unmatched target
-      fi
-    fi
+  exe_env=
+  unset_env=
+
+  if ! run_hooks_strict "target_noskip" ; then
+    continue; #target requires skipping
   fi
 
   # If it is in the end2end folder, keep it blocking
@@ -819,10 +866,11 @@ for file in "${files_array[@]}"; do
     fi
   fi
 
-  ext="${file##*.}"
-  # Read the file and search for lines starting with "// RUN:"
   run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
   run_count=0
+
+  ext="${file##*.}"
+  # Read the file and search for lines starting with "// RUN:"
   while IFS= read -r line; do
     # check if it is valid line
     if [[ ${ext} == "co" ]]; then
@@ -855,42 +903,25 @@ for file in "${files_array[@]}"; do
       continue;
     fi
 
-    # There is a specified RUN-TARGET
-    if [[ ! -z "$run_target" ]]; then # no RUN-TARGET specified
+    # There is a RUN-TARGET
+    if [[ ! -z "$run_target" ]]; then
       # check if run-target violates the REQUIRES
-      if ! set_contains tst_targets "$run_target"; then
+      if ! set_contains REQ_TARGETS "$run_target"; then
         echo "ERROR($file): run target ($run_target) is not listed as a test targets ($run_target)."
         exit 1
       fi
     fi
 
-    # specific - simulator
-    exe_env=
-    unset_env=
-
-    # requires simulator
-    if set_contains tst_targets "gcusim400" || set_contains tst_targets "gcusim500"; then
-      if ! set_contains tst_targets "$simulator"; then
-      echo "SKIP(SIM): ${file} ($run_count of $run_num)"
-        num_skiped=$(($num_skiped + 1));
+    # requires specific device to run
+    if ! set_empty REQ_TARGETS; then
+      #echo "device: $device_type, reqs: $(set_print REQ_TARGETS), mach: $mach"
+      if [[ $device_type == "none"  ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
+        # Not matched, skip
+        _all_skipped_targets=$(set_print REQ_TARGETS)
+        echo "SKIP($(toupper "${_all_skipped_targets}")): ${file} ($run_count of $run_num)"
+        num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
         continue;
-      else
-        exe_env="old_path=${LD_LIBRARY_PATH}; export LD_LIBRARY_PATH=${gcu_sim_lib}:${LD_LIBRARY_PATH};"
-        unset_env="export LD_LIBRARY_PATH=${old_path}; unset INTERNAL_GCU_SIM;"
-        if [[ "$simulator" == "gcusim400" ]]; then
-          exe_env="${exe_env} export INTERNAL_GCU_SIM=LIBRA;"
-        elif [[ "$simulator" == "gcusim500" ]]; then
-          exe_env="${exe_env} export INTERNAL_GCU_SIM=DRACO;"
-        fi
       fi
-    fi
-
-    if ! set_contains tst_targets "$mach" && ! set_contains tst_targets "$simulator"; then
-      # Not matched, skip
-      _all_skipped_targets=$(set_print tst_targets)
-      echo "SKIP($(toupper "${_all_skipped_targets}")): ${file} ($run_count of $run_num)"
-      num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
-      continue;
     fi
 
     # Arch Matches: Execute the command with replacements
