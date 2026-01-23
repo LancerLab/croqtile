@@ -1,4 +1,3 @@
-// REQUIRES: TARGET-GCU300
 // RUN: choreo -t topscc %s -es -o - | FileCheck %s
 
 __device__ void kernel(int* , int *, int) {}

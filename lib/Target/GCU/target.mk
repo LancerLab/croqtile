@@ -141,7 +141,7 @@ stop-doc:
 	@ps aux | grep 'mkdocs serve' | grep -v grep | awk '{print $$2}' | xargs -r kill
 	@echo "Old mkdocs serve processes stopped."
 
-start-doc:
+start-doc: docs
 	@echo "Starting mkdocs serve in the background..."
 	nohup $(MKDOCS_CMD) &>/dev/null &
 

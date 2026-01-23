@@ -1,5 +1,4 @@
-// REQUIRES: TARGET-GCUALL
-// RUN: choreo -es -t factor %s | FileCheck --match-full-lines %s && rm -f %s.factor.result
+// RUN: choreo -es -t factor %s | FileCheck --match-full-lines %s
 
 #include <chrono>
 
