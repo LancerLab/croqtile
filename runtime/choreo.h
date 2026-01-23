@@ -1360,6 +1360,20 @@ __co_host__ inline U from_f32(float v) {
     return f16(v);
   } else if constexpr (std::is_same<U, bf16>::value) {
     return bf16(v);
+#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+  } else if constexpr (std::is_same<U, f8_e4m3>::value) {
+#ifdef __USE_CUDA_TYPE__
+    return __nv_cvt_float_to_fp8(v, __NV_SATFINITE, __NV_E4M3);
+#else
+    return f8_e4m3(v);
+#endif
+  } else if constexpr (std::is_same<U, f8_e5m2>::value) {
+#ifdef __USE_CUDA_TYPE__
+    return __nv_cvt_float_to_fp8(v, __NV_SATFINITE, __NV_E5M2);
+#else
+    return f8_e5m2(v);
+#endif
+#endif
   } else {
     return static_cast<U>(v);
   }

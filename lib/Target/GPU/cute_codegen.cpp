@@ -4200,6 +4200,12 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   case BT::BF16:
     res << "choreo::bf16(" << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
     break;
+  case BT::F8_E4M3:
+  case BT::F8_E5M2:
+    res << "choreo::utils::from_f32<"
+        << ((t == BT::F8_E4M3) ? "f8_e4m3" : "f8_e5m2") << ">("
+        << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
+    break;
   default:
     choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
   }
