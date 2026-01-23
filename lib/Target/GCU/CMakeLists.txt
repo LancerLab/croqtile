@@ -1,8 +1,16 @@
-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/factor_script.sh FACTOR_SCRIPT_CONTENT)
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/runtime/factor_script.sh FACTOR_SCRIPT_CONTENT)
 
 configure_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/factor_script_template.in
+  ${CMAKE_CURRENT_SOURCE_DIR}/runtime/factor_script_template.in
   ${CMAKE_BINARY_DIR}/factor_script.inc
+  @ONLY
+)
+
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/runtime/topscc_header.h TOPSCC_HEADER_CONTENT)
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/runtime/topscc_header_template.in
+  ${CMAKE_BINARY_DIR}/topscc_header.inc
   @ONLY
 )
 
@@ -11,6 +19,7 @@ add_custom_target(
   DEPENDS
   ${CMAKE_BINARY_DIR}/factor_script.inc
   ${CMAKE_BINARY_DIR}/choreo_header.inc
+  ${CMAKE_BINARY_DIR}/topscc_header.inc
 )
 
 set(GCU_TARGET_SOURCES

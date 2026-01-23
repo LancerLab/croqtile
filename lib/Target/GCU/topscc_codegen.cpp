@@ -11,6 +11,7 @@
 #include "io.hpp"
 #include "operator_info.hpp"
 #include "target_utils.hpp"
+#include "topscc_header.inc"
 #include "types.hpp"
 
 #ifndef __CHOREO_TOPSCC_DIR__
@@ -2918,7 +2919,24 @@ fi
 
   // place the choreo header
   os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
-  os << __choreo_header_as_string << "\nEOF\n\n";
+  os << __choreo_header_as_string << "\nEOF\n";
+
+  // place the topscc header
+  os << "cat <<'EOF' > " << build_path << "/private_target0_runtime.h\n";
+  os << __topscc_header_as_string << "\nEOF\n";
+
+  // place the target hack.
+  // TODO: move all the target-specific to target runtime header
+  os << "cat <<'EOF' > " << build_path << "/private_target0_defines.h\n";
+  os << R"(#ifdef __TOPSCC__
+#define __CHOREO_PRIVATE_TGT0__
+#endif
+#define __CHOREO_TGT0_ARCH__ __GCU_ARCH__
+#define tgt0HostMalloc topsHostMalloc
+#define tgt0HostFree topsHostFree
+EOF
+
+)";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
   for (auto& code : code_segments) os << code << "\n";

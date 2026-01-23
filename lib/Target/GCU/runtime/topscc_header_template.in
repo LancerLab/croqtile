@@ -1,0 +1,7 @@
+#ifndef __CHOREO_TOPSCC_HEADER_H__
+#define __CHOREO_TOPSCC_HEADER_H__
+
+static const char* __topscc_header_as_string = R"__co_topscc__(@TOPSCC_HEADER_CONTENT@)__co_topscc__";
+
+#endif // __CHOREO_TOPSCC_HEADER_H__
+
