@@ -3,6 +3,7 @@ SHELL:=/bin/bash
 WORK_DIR:=$(PWD)
 TOOLCHAIN_DIR=$(WORK_DIR)/extern
 TOOLS_DIR=$(WORK_DIR)/tools
+SCRIPT_DIR=$(WORK_DIR)/scripts
 RT_DIR=$(WORK_DIR)/runtime
 
 # Targets
@@ -17,6 +18,7 @@ TARGET = $(CHOREO_BIN) $(COPP_BIN)
 LEX_SRC = $(SRC_DIR)/scanner.l
 PARSER_SRC = $(SRC_DIR)/parser.yy
 BISON_FLAGS = -t -d  # Generates both parser.tab.cpp and parser.tab.h
+MDPP = $(SCRIPT_DIR)/mdpp.awk # Markdown Pre-process
 
 # lit max-jobs config
 JOBS ?= 1
@@ -43,7 +45,7 @@ CFLAGS += -MMD -MP -std=c++17 -Wall -Wextra -g
 TARGET_DIRS := $(sort $(wildcard lib/Target/*/))
 TARGET_MK   := $(addsuffix target.mk,$(TARGET_DIRS))
 
-all: build
+all: build docs
 
 build: build-with-cmake-ninja
 
@@ -225,6 +227,17 @@ help:
 
 CODE_DIRS := $(SRC_DIR) $(RT_DIR) tools
 TEST_DIRS := tests benchmark samples
+
+DOC_DIR := Documents/Documentation/
+DOC_FILES := $(DOC_DIR)/getting-started-with-choreo.md \
+						 $(DOC_DIR)/call-in-choreo.md
+
+.PHONY: docs
+
+docs: $(DOC_FILES)
+
+Documents/Documentation/%.md: Documents/Documentation/%.mdsrc
+	@base="$(@D)"; awk -v base="$$base" -f $(MDPP) $< > $@
 
 lines:
 	@source_files="$$(find $(CODE_DIRS) -type f \( \
