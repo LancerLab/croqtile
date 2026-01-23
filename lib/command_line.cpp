@@ -22,6 +22,10 @@ Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
                          "-arch=<processor>");
 Option<std::string> output(OptionKind::User, "-o", "", "",
                            "Place the output into <file>.", "-o <file>", true);
+Option<std::string>
+  api_mode(OptionKind::User, "--api", "-api", "cffi",
+       "Select API mode for generated code (cffi|sglang).",
+       "--api=<mode>", true);
 
 Option<std::string>
     debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
@@ -223,6 +227,17 @@ bool CommandLine::Parse(int argc, char** argv) {
 
   // set the arch to compile
   if (!arch.GetValue().empty()) CCtx().AddArch(ToLower(arch.GetValue()));
+
+  // set API mode
+  {
+    auto api = ToLower(api_mode.GetValue());
+    if (api != "cffi" && api != "sglang") {
+      errs() << "Invalid --api value: '" << api_mode.GetValue()
+             << "'. Supported values: cffi, sglang.\n";
+      exit(1);
+    }
+    CCtx().SetApiMode(api);
+  }
 
   if (pp_only) {
     if (no_pp) {

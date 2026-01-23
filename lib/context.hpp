@@ -372,6 +372,7 @@ private:
   bool inhibit_warning = false;    // Inhibit all warning messages.
   bool warning_as_error = false;   // Make all warnings into errors.
   std::string debug_file_dir;      // directory for compiler debug artifacts
+  std::string api_mode = "cffi";   // API mode for generated code
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -501,6 +502,8 @@ public:
   bool WarningAsError() const { return warning_as_error; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
+  const std::string& GetApiMode() const { return api_mode; }
+  void SetApiMode(const std::string& mode) { api_mode = mode; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }

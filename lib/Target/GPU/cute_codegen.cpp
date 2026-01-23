@@ -717,9 +717,11 @@ void CuteCodeGen::EmitFixedHostHead() {
   oss << "#include \"choreo.h\"\n";
   if (cgi.HasTMA()) oss << "namespace cde = cuda::device::experimental;\n";
   oss << "\nusing namespace choreo;\n";
-  oss << "\n#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ " << CCtx().ArchNum()
-      << "\n";
-  EmitRuntimeEnvironmentChecker(oss);
+  if (CCtx().GetApiMode() != "sglang") {
+    oss << "\n#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ " << CCtx().ArchNum()
+        << "\n";
+    EmitRuntimeEnvironmentChecker(oss);
+  }
   code_segments.push_back(oss.str()); // reset the host code
 }
 
@@ -894,7 +896,8 @@ bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
   hs << " {\n";
   IncrHostIndent();
 
-  hs << h_indent << "__choreo_check_cuda_environment__();\n";
+  if (CCtx().GetApiMode() != "sglang")
+    hs << h_indent << "__choreo_check_cuda_environment__();\n";
 
   // name the symbolic dimensions for better readability
   for (auto item : symbolic_dimensions) {

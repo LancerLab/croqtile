@@ -1,0 +1,21 @@
+// RUN: choreo -es -t cute -arch=sm_80 %s -o - | FileCheck %s --check-prefix=CHECK-CFFI
+// RUN: choreo -es -t cute -arch=sm_80 -api=sglang %s -o - | FileCheck %s --check-prefix=CHECK-SGLANG
+
+__co__ s32 [1] foo(s32 [1] a, s32 [1] b) {
+  s32[a.span] out;
+  parallel p by 1 : block {
+    out.at(p) = a.at(p) + b.at(p);
+  }
+  return out;
+}
+
+// CHECK-CFFI: #define __CHOREO_REQUIRED_GPU_DEVICE_SM__
+// CHECK-CFFI: static inline void __choreo_check_cuda_environment__()
+// CHECK-CFFI: foo(
+// CHECK-CFFI: __choreo_check_cuda_environment__();
+
+// CHECK-SGLANG-NOT: __CHOREO_REQUIRED_GPU_DEVICE_SM__
+// CHECK-SGLANG-NOT: __choreo_check_cuda_environment__
+// CHECK-SGLANG: foo(
+// CHECK-SGLANG-NOT: __CHOREO_REQUIRED_GPU_DEVICE_SM__
+// CHECK-SGLANG-NOT: __choreo_check_cuda_environment__

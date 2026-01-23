@@ -304,6 +304,14 @@ template <typename T>
 inline bool Option<T>::Parse(int argc, char** argv, int& currentArg) {
   // be like: -o ab.o, requires an extra parameter
   if (requires_arg) {
+    std::string arg = argv[currentArg];
+    auto pos = arg.find('=');
+    if (pos != std::string::npos) {
+      std::string valstr = arg.substr(pos + 1);
+      std::istringstream iss(valstr);
+      iss >> value;
+      return true;
+    }
     if (currentArg + 1 < argc) {
       std::istringstream iss(argv[++currentArg]);
       iss >> value; // Handle parsing according to type T
