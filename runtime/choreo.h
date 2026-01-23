@@ -738,7 +738,9 @@ __host__ __device__ static inline float operator/(__nv_fp8_e5m2 a,
                                                   __nv_fp8_e5m2 b) {
   return float(a) / float(b);
 }
-#endif
+#endif // __USE_CUDA_TYPE__
+
+#endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 
 #ifdef __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
 #if defined(__USE_CUTE_TYPE__)
