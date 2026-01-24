@@ -236,8 +236,8 @@ DOC_FILES := $(DOC_DIR)/getting-started-with-choreo.md \
 
 docs: $(DOC_FILES)
 
-Documents/Documentation/%.md: Documents/Documentation/%.mdsrc
-	@base="$(@D)"; awk -v base="$$base" -f $(MDPP) $< > $@
+Documents/Documentation/%.md: Documents/Documentation/%.src.md
+	@base="$(@D)"; gawk -v base="$$base" -f $(MDPP) $< > $@
 
 lines:
 	@source_files="$$(find $(CODE_DIRS) -type f \( \
