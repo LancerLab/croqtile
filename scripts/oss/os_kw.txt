@@ -1,0 +1,10 @@
+(?i)gcu
+(?i)dtu
+(?i)efrt
+(?i)efvm
+(?i)eflame
+(?i)tops
+(?i)dorado
+(?i)scorpio
+(?i)libra
+(?i)draco
