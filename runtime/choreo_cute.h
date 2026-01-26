@@ -2138,7 +2138,7 @@ struct MMA_Policy<CUTE_WGMMA_M64k256> {
 // template. No MMA_Policy specializations are needed for WGMMA as it bypasses
 // the cute MMA policy system.
 
-} // end namespace choreo (temporary close for cute namespace)
+} // namespace choreo
 
 namespace cute {
 
@@ -2575,7 +2575,6 @@ struct SM90_SPARSE_16x8x64_F32E5M2E5M2F32_TN {
   }
 };
 #endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
-
 
 } // namespace cute
 

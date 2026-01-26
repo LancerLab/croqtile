@@ -297,7 +297,6 @@ private:
   std::set<std::string> cooperatives; // futures with cooperative-dma
   std::unordered_set<std::string> async_subbyte_futures;
 
-
   // mma related
   size_t reg_num_d;
   // once the flag is set, always use dynamic reuse!

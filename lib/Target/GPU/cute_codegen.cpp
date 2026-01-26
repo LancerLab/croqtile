@@ -2032,9 +2032,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // avoid the block-single guard so every lane issues copy/trigger.
     bool need_single_instance = !ThreadCooperative(n);
     if (fty->IsAsync() && !n.IsTMA()) need_single_instance = false;
-        bool is_subbyte_copy = (n.operation == ".copy") && !n.IsSparse() &&
-           (IsFloatSubByteType(f_sty->ElementType()) ||
-          IsFloatSubByteType(t_sty->ElementType()));
+    bool is_subbyte_copy = (n.operation == ".copy") && !n.IsSparse() &&
+                           (IsFloatSubByteType(f_sty->ElementType()) ||
+                            IsFloatSubByteType(t_sty->ElementType()));
     bool need_subbyte_async_sync = false;
 
     if (need_single_instance) ds << d_indent << LevelPred() << " {\n";
@@ -2204,9 +2204,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     DecrDeviceIndent();
     if (need_single_instance) ds << d_indent << "} // single instance\n";
 
-    if (need_subbyte_async_sync) {
-      ds << d_indent << "__syncthreads();\n";
-    }
+    if (need_subbyte_async_sync) { ds << d_indent << "__syncthreads();\n"; }
 
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately

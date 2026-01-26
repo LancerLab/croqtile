@@ -23,9 +23,9 @@ Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
 Option<std::string> output(OptionKind::User, "-o", "", "",
                            "Place the output into <file>.", "-o <file>", true);
 Option<std::string>
-  api_mode(OptionKind::User, "--api", "-api", "cffi",
-       "Select API mode for generated code (cffi|sglang).",
-       "--api=<mode>", true);
+    api_mode(OptionKind::User, "--api", "-api", "cffi",
+             "Select API mode for generated code (cffi|sglang).",
+             "--api=<mode>", true);
 
 Option<std::string>
     debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
