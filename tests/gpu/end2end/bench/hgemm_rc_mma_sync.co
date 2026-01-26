@@ -40,6 +40,32 @@ int main() {
 
   auto res = matmul(lhs.view(), rhs.view());
 
+  choreo::TimerOption topt;
+  topt.warmup = 10;
+  topt.repeat = 50;
+  auto avg_ms = choreo::timing(
+      [&]() {
+        auto tmp = matmul(lhs.view(), rhs.view());
+        (void)tmp;
+      },
+      topt);
+  std::cout << "Timing avg ms: " << avg_ms << "\n";
+
+  choreo::ProfilerOption popt;
+  popt.warmup = 5;
+  popt.repeat = 10;
+  popt.kernel_name = "hgemm_rc_mma_sync";
+  popt.ncu_args = "--target-processes all";
+  bool prof_ok = choreo::profile(
+      [&]() {
+        auto tmp = matmul(lhs.view(), rhs.view());
+        (void)tmp;
+      },
+      popt);
+  std::cout << "Profile: " << (prof_ok ? "OK" : "FAILED") << "\n";
+  std::cout << "NCU path: " << popt.ncu_path << "\n";
+  std::cout << "NCU output: " << popt.ncu_output << "\n";
+
   float tolerance = 0.005f;
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)

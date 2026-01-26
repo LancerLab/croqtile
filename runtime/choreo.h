@@ -14,6 +14,9 @@
 #include <map>
 #include <memory>
 #include <random>
+#include <string>
+#include <cstdlib>
+#include <sstream>
 
 #if __has_include("private_target0_defines.h")
 #include "private_target0_defines.h"
@@ -28,6 +31,12 @@
 #define __co_any__ __device__ __host__
 
 #elif defined(__CHOREO_TARGET_CUTE__)
+#include <cuda_runtime.h>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <utility>
+#include <limits.h>
 #ifdef __USE_CUDA_TYPE__
 #include "cuda.h"
 #if CUDA_VERSION >= 11000
@@ -75,6 +84,7 @@
 #include "cute/tensor.hpp"
 #include <cuda/barrier>
 #include <mma.h>
+#include <unistd.h>
 
 #define __co_device__ __device__
 #define __co_host__ __host__
@@ -1974,6 +1984,198 @@ static __attribute__((always_inline)) inline void verify_device_status() {
   }
 #endif
 }
+
+#ifdef __CHOREO_TARGET_CUTE__
+
+struct TimerOption {
+  int warmup = 10;
+  int repeat = 100;
+  bool sync = true;
+};
+
+struct ProfilerOption {
+  int warmup = 10;
+  int repeat = 100;
+  int device = 0;
+  std::string arch;
+  std::string kernel_name;
+  std::string ncu_path;
+  std::string ncu_output = "ncu.txt";
+  std::string ncu_args;
+  bool page_all = true;
+};
+
+namespace detail {
+inline std::string get_env(const char* key) {
+  const char* val = std::getenv(key);
+  return val ? std::string(val) : std::string();
+}
+
+inline bool file_exists(const std::string& path) {
+  std::error_code ec;
+  return !path.empty() && std::filesystem::exists(path, ec);
+}
+
+inline std::string shell_escape(const std::string& input) {
+  std::string out = "'";
+  for (char c : input) {
+    if (c == '\'')
+      out += "'\\''";
+    else
+      out += c;
+  }
+  out += "'";
+  return out;
+}
+
+inline std::string sanitize_filename(const std::string& input) {
+  if (input.empty()) return "kernel";
+  std::string out;
+  out.reserve(input.size());
+  for (char c : input) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '-' || c == '_')
+      out.push_back(c);
+    else
+      out.push_back('_');
+  }
+  return out;
+}
+
+inline std::string resolve_ncu_path(const std::string& hint) {
+  if (!hint.empty()) return hint;
+  auto cuda_home = get_env("CUDA_HOME");
+  if (!cuda_home.empty()) {
+    auto candidate = cuda_home + "/bin/ncu";
+    if (file_exists(candidate)) return candidate;
+  }
+  auto cuda_path = get_env("CUDA_PATH");
+  if (!cuda_path.empty()) {
+    auto candidate = cuda_path + "/bin/ncu";
+    if (file_exists(candidate)) return candidate;
+  }
+  return "ncu";
+}
+
+inline std::string self_exe_path() {
+  char buf[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+  if (len <= 0) return "";
+  buf[len] = '\0';
+  return std::string(buf);
+}
+
+inline std::string self_cmdline_tail_escaped() {
+  std::ifstream fs("/proc/self/cmdline", std::ios::binary);
+  if (!fs) return "";
+  std::string data((std::istreambuf_iterator<char>(fs)),
+                   std::istreambuf_iterator<char>());
+  std::string out;
+  std::string cur;
+  size_t arg_idx = 0;
+  for (char ch : data) {
+    if (ch == '\0') {
+      if (arg_idx > 0) {
+        if (!out.empty()) out += " ";
+        out += shell_escape(cur);
+      }
+      cur.clear();
+      ++arg_idx;
+    } else {
+      cur.push_back(ch);
+    }
+  }
+  if (!cur.empty() && arg_idx > 0) {
+    if (!out.empty()) out += " ";
+    out += shell_escape(cur);
+  }
+  return out;
+}
+
+inline std::string query_arch(int device) {
+  cudaDeviceProp prop;
+  cudaError_t err = cudaGetDeviceProperties(&prop, device);
+  if (err != cudaSuccess) return "";
+  std::ostringstream oss;
+  oss << "sm" << prop.major << prop.minor;
+  return oss.str();
+}
+} // namespace detail
+
+template <typename F, typename... Args>
+inline double timing(F&& matmul, const TimerOption& opt, Args&&... args) {
+  int warmup = std::max(0, opt.warmup);
+  int repeat = std::max(1, opt.repeat);
+
+  for (int i = 0; i < warmup; ++i)
+    matmul(std::forward<Args>(args)...);
+
+  if (opt.sync) abend_true(cudaDeviceSynchronize());
+
+  cudaEvent_t start = nullptr;
+  cudaEvent_t stop = nullptr;
+  abend_true(cudaEventCreate(&start));
+  abend_true(cudaEventCreate(&stop));
+  abend_true(cudaEventRecord(start));
+  for (int i = 0; i < repeat; ++i)
+    matmul(std::forward<Args>(args)...);
+  abend_true(cudaEventRecord(stop));
+  abend_true(cudaEventSynchronize(stop));
+
+  float elapsed_ms = 0.0f;
+  abend_true(cudaEventElapsedTime(&elapsed_ms, start, stop));
+  abend_true(cudaEventDestroy(start));
+  abend_true(cudaEventDestroy(stop));
+  return static_cast<double>(elapsed_ms) / static_cast<double>(repeat);
+}
+
+template <typename F, typename... Args>
+inline bool profile(F&& matmul, ProfilerOption& opt, Args&&... args) {
+  if (opt.device >= 0) abend_true(cudaSetDevice(opt.device));
+  if (opt.arch.empty()) opt.arch = detail::query_arch(opt.device);
+
+  const char* in_run = std::getenv("CHOREO_PROFILE_RUN");
+  if (in_run && std::string(in_run) == "1") {
+    int warmup = std::max(0, opt.warmup);
+    int repeat = std::max(1, opt.repeat);
+    for (int i = 0; i < warmup; ++i)
+      matmul(std::forward<Args>(args)...);
+    for (int i = 0; i < repeat; ++i)
+      matmul(std::forward<Args>(args)...);
+    abend_true(cudaDeviceSynchronize());
+    return true;
+  }
+
+  std::string ncu = detail::resolve_ncu_path(opt.ncu_path);
+  opt.ncu_path = ncu;
+  std::string exe = detail::self_exe_path();
+  if (exe.empty()) {
+    std::cerr << "[choreo] failed to resolve current executable path.\n";
+    return false;
+  }
+
+  std::string cmd_args = detail::self_cmdline_tail_escaped();
+  std::string out_file = opt.ncu_output;
+  if (out_file.empty() || out_file == "ncu.txt") {
+    std::string kname = detail::sanitize_filename(opt.kernel_name);
+    out_file = kname + ".ncu.txt";
+  }
+  opt.ncu_output = out_file;
+
+  std::ostringstream cmd;
+  cmd << "CHOREO_PROFILE_RUN=1 ";
+  if (opt.device >= 0) cmd << "CUDA_VISIBLE_DEVICES=" << opt.device << " ";
+  cmd << detail::shell_escape(ncu) << " ";
+  if (!opt.ncu_args.empty()) cmd << opt.ncu_args << " ";
+  cmd << detail::shell_escape(exe) << " ";
+  if (!cmd_args.empty()) cmd << cmd_args << " ";
+  cmd << "> " << detail::shell_escape(out_file) << " 2>&1";
+
+  int ret = std::system(cmd.str().c_str());
+  return ret == 0;
+}
+
+#endif // __CHOREO_TARGET_CUTE__
 
 // target specific definations
 #ifdef __CHOREO_PRIVATE_TGT0__
