@@ -122,7 +122,6 @@ struct FuncTrait {
   bool multiple_parallelby = false;
   bool has_tma = false;
   bool has_async_dma = false;
-  bool has_subbyte_tma = false;
 };
 
 struct MMAInfo {
@@ -144,18 +143,21 @@ inline std::ostream& operator<<(std::ostream& os, const MMAInfo& i) {
 
 struct TMADesc {
 private:
+  std::string tma_name;
   ptr<AST::ChunkAt> from; // shape for the global input/output
   ptr<AST::ChunkAt> to;
   std::string f_sym; // scoped symbol
   std::string t_sym;
   uint16_t idx;
   int swizzle_value = 0; // Default to NONE (no swizzle)
+  ParallelLevel pb_level = ParallelLevel::BLOCK;
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
-          const std::string& fs, const std::string& ts, int swizzle = 0)
+          const std::string& fs, const std::string& ts, int swizzle = 0,
+          ParallelLevel pb_lvl = ParallelLevel::BLOCK)
       : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++),
-        swizzle_value(swizzle) {
+        swizzle_value(swizzle), pb_level(pb_lvl) {
     assert(from && to);
     auto fty = GetSpannedType(from->GetType());
     auto tty = GetSpannedType(to->GetType());
@@ -191,6 +193,8 @@ public:
   const std::string GetName() const {
     return "__choreo_tma_" + std::to_string(idx);
   }
+
+  ParallelLevel GetPBLevel() const { return pb_level; }
 
 private:
   static int index;

@@ -936,8 +936,10 @@ bool TypeInference::Visit(AST::MMA& n) {
              << ", Type: " << AST::TYPE_STR(n) << "\n";
     }
   } break;
-  case AST::MMAOperation::Store: {
-  } break;
+  case AST::MMAOperation::Store:
+  case AST::MMAOperation::Commit:
+    // no type inference is necessary
+    break;
   default: break;
   }
   return true;

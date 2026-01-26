@@ -527,7 +527,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".store"   return Choreo::Parser::make_STORE(yytext, loc);
   ".row"     return Choreo::Parser::make_ROW(yytext, loc);
   ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);
-  ".sp("    return Choreo::Parser::make_SPLPAREN(yytext, loc);
+  ".commit"  return Choreo::Parser::make_COMMIT(yytext, loc);
+  ".sp("     return Choreo::Parser::make_SPLPAREN(yytext, loc);
   ".sp"      return Choreo::Parser::make_SP(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT (yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);

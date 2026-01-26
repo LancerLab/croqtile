@@ -306,6 +306,7 @@ private:
   ParallelLevel bdim_level = ParallelLevel::THREAD;
   // TODO: for now, only support one stream!
   std::string stream_name;
+  int tma_count = 0;
 
 private:
   void EmitFixedHostHead();

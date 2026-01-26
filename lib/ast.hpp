@@ -2491,7 +2491,7 @@ public:
 
 struct MMAOperation {
 public:
-  enum Kind { Fill, Load, Exec, Store };
+  enum Kind { Fill, Load, Exec, Store, Commit };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
   struct FillInfo {
@@ -2538,6 +2538,7 @@ public:
       : tag(Exec), info(ExecInfo{m, o, l, r, e, sp}) {}
   MMAOperation(const std::string& n, const ptr<ChunkAt>& c)
       : tag(Store), info(StoreInfo{n, c}) {}
+  MMAOperation() : tag(Commit), info() {}
 
 public:
   bool IsKind(Kind k) const { return k == tag; }
@@ -2682,6 +2683,7 @@ public:
     case Store: {
       return Make<MMAOperation>(StoreFrom(), CloneP(StoreTo()));
     } break;
+    case Commit: return Make<MMAOperation>(); break;
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
     return nullptr;

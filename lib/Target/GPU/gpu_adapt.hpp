@@ -902,6 +902,7 @@ public:
                        << "\n");
     } break;
     case AST::MMAOperation::Store: break;
+    case AST::MMAOperation::Commit: break;
     default: choreo_unreachable("unsupported mma operation.");
     }
     return true;

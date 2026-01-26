@@ -75,7 +75,8 @@ inline std::string CudaParamStorage(Storage st) {
   return "";
 }
 
-inline const std::string GetCopyAtomName() {
+inline const std::string GetCopyAtomName(int idx = -1) {
+  if (idx >= 0) return "choreo_copy_atom" + std::to_string(idx);
   static unsigned i = 0;
   return "choreo_copy_atom" + std::to_string(i++);
 }
@@ -386,6 +387,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     hs.str("");
     return_stream.str("");
     stream_name = "";
+    tma_count = 0;
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
     // only on device-side
@@ -731,6 +733,7 @@ void CuteCodeGen::EmitFixedHostHead() {
   if (native_bf16) oss << "#define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__\n";
   oss << "#include \"choreo.h\"\n";
   if (cgi.HasTMA()) oss << "namespace cde = cuda::device::experimental;\n";
+  oss << "#include <cooperative_groups.h>";
   oss << "\nusing namespace choreo;\n";
   if (CCtx().GetApiMode() != "sglang") {
     oss << "\n#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ " << CCtx().ArchNum()
@@ -1161,7 +1164,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
              << device_fn << "__runtime_shared_buffer__;\n";
         else
           ds << d_indent << type_modifiers << "alignas("
-             << n.GetNote("alignment") << ") " << bts << " " << sym << "["
+             << "128" << ") " << bts << " " << sym << "["
              << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;
       }
@@ -1677,6 +1680,35 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     }
   }
 
+  if (n.GetLevel() == ParallelLevel::BLOCK && cgi.HasTMA()) {
+    ds << d_indent
+       << "auto wg = "
+          "cooperative_groups::tiled_partition<128>(cooperative_groups::this_"
+          "thread_block());\n";
+  }
+  auto& tma_descs = cgi.GetTMADescs()[&n];
+  if (!tma_descs.empty()) {
+    assert(n.GetLevel() == ParallelLevel::BLOCK);
+    for (TMADesc& desc : tma_descs) {
+      auto cp_atom = GetCopyAtomName();
+      auto tma_barrier_name = cp_atom + "_barrier";
+      ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
+         << tma_barrier_name << ";\n";
+      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      std::string threads_waited =
+          (desc.GetPBLevel() == ParallelLevel::GROUP
+               ? "32"
+               : (desc.GetPBLevel() == ParallelLevel::GROUPx4 ? "128"
+                                                              : "blockDim.x"));
+      ds << d_indent << "  init(&" << tma_barrier_name << ", " << threads_waited
+         << ");\n";
+      ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
+      ds << d_indent << "}\n";
+      ds << d_indent << "__syncthreads();\n";
+      ds << d_indent << "TMAAtom " << cp_atom << "{&" << cp_atom
+         << "_barrier};\n\n";
+    }
+  }
   EmitDeviceVirtualIndices(&n);
 
   return true;
@@ -1689,6 +1721,16 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // - not support tiling.
   // - not support async.
 
+  const auto& tma_descs = cgi.GetTMADescs()[cur_pb];
+  ParallelLevel enforced_pb_level = ParallelLevel::BLOCK;
+  if (n.IsTMA() && !isa<PlaceHolderType>(NodeType(n))) {
+    int tma_idx = tma_count++;
+    assert(tma_idx < static_cast<int>(tma_descs.size()));
+    const TMADesc& tma_desc = tma_descs[tma_idx];
+    enforced_pb_level = tma_desc.GetPBLevel();
+  }
+
+  // Generate tops dte and choreo::future in device-side
   auto claimFuture = [this,
                       &n](const std::string& buf_expr, bool is_async,
                           bool is_tma = false,
@@ -1696,25 +1738,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!n.future.empty() && claimed_futs.count(InScopeName(n.future)))
       return n.future;
 
-    auto cp_atom = GetCopyAtomName();
-    // claim the date transfer engine
-    if (is_tma) {
-      ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
-         << cp_atom << "_barrier;\n";
-      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-      ds << d_indent << "  init(&" << cp_atom
-         << "_barrier, blockDim.x * blockDim.y * blockDim.z);\n";
-      ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
-      ds << d_indent << "}\n";
-      ds << d_indent << "__syncthreads();\n";
-      ds << d_indent << "TMAAtom " << cp_atom << "{&" << cp_atom
-         << "_barrier};\n";
-    } else if (is_async) {
-      ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
-    }
-
     auto future_name = n.future;
     static size_t future_count = 0;
+
+    auto cp_atom = GetCopyAtomName(future_count);
+    // claim the date transfer engine
+    if (!is_tma && is_async) {
+      ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
+    }
 
     if (future_name.empty()) {
       future_name = "__choreo_anon_fut__" + std::to_string(future_count);
@@ -2222,7 +2253,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
       // else, defer the sync till the wait time
-      ds << d_indent << "__syncthreads();\n";
+      if (enforced_pb_level == ParallelLevel::GROUP)
+        ds << d_indent << "__syncwarp();\n";
+      else if (enforced_pb_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "wg.sync();\n";
+      else
+        ds << d_indent << "__syncthreads();\n";
     }
   };
 
@@ -2254,7 +2290,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     assert(tname.has_value());
     if ((fsto == Storage::GLOBAL || fsto == Storage::DEFAULT) &&
         tsto == Storage::SHARED) {
-      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      if (enforced_pb_level == ParallelLevel::GROUP)
+        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(32)) {\n";
+      else if (enforced_pb_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
+      else
+        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_global_to_shared(" << t_buf_expr << ", &" << *tname
          << "_tensor_map, " << ValueSTR(Reverse(GenIndices(f_ca)))
@@ -2278,17 +2320,29 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         // Synchronous tma.copy: wait immediately
         // Make sure the future is marked initialized before marking it nowait
         // to avoid runtime diagnostics when the state is still ST_NONE.
-        ds << d_indent << "(void)" << future_name << ".get_atom();\n";
         ds << d_indent << "((TMAAtom*)" << future_name
            << ".get_atom())->barrier().wait(std::move(((TMAAtom*)"
            << future_name << ".get_atom())->token()));\n";
-        ds << d_indent << future_name << ".set_nowait();\n";
+        ds << d_indent << future_name << ".set_nowait();\n\n";
       }
     } else if ((tsto == Storage::GLOBAL || tsto == Storage::DEFAULT) &&
                fsto == Storage::SHARED) {
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
-      ds << d_indent << "__syncthreads();\n";
-      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+
+      if (enforced_pb_level == ParallelLevel::GROUP)
+        ds << d_indent << "__syncwarp();\n";
+      else if (enforced_pb_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "wg.sync();\n";
+      else
+        ds << d_indent << "__syncthreads();\n";
+
+      if (enforced_pb_level == ParallelLevel::GROUP)
+        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(32)) {\n";
+      else if (enforced_pb_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
+      else
+        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_shared_to_global(&" << *tname << "_tensor_map, "
          << ValueSTR(Reverse(GenIndices(t_ca))) << ", " << f_buf_expr << ");\n";
@@ -2309,6 +2363,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
 bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
+
+  if (op.Tag() == AST::MMAOperation::Commit) {
+    ds << d_indent << "// Finalize WGMMA operations\n";
+    ds << d_indent << "warpgroup_commit_batch();\n";
+    ds << d_indent << "warpgroup_wait<0>();\n";
+    return true;
+  }
   std::string scoped_frag_name = InScopeName(op.GetFragSym());
   if (!FCtx(fname).FragHasMMAType(scoped_frag_name)) {
     Error1(n.LOC(), "the MMA operation of `" + scoped_frag_name +

@@ -209,7 +209,7 @@ void choreo_info(const char *message) {
 // builtin operations
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SP SPLPAREN
 // MMA related builtin operations
-%token <std::string> MMA FILL LOAD STORE ROW COLUMN
+%token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK CONTINUE
@@ -1970,6 +1970,10 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($3, $5);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA COMMIT {
+      auto op = AST::Make<AST::MMAOperation>();
+      $$ = AST::Make<AST::MMA>(@1, op);
+    }
     ;
 
 mma_exec_method

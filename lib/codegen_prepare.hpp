@@ -53,6 +53,7 @@ private:
   std::set<std::string> select_syms;
 
   AST::ParallelBy* block_pb = nullptr;
+  ParallelLevel inner_pb_level = ParallelLevel::BLOCK;
   std::vector<AST::ParallelBy*> pb_stack;
 
 private:
@@ -73,6 +74,10 @@ private:
         auto& tma_descs = cgi.GetTMADescs();
         tma_descs.emplace(pb, std::vector<TMADesc>{});
       } else {
+        if (pb_level == ParallelLevel::GROUP ||
+            pb_level == ParallelLevel::GROUPx4) {
+          if (pb->IsEnforced()) inner_pb_level = pb_level;
+        }
         assert(!pb_stack.empty());
       }
       pb_stack.push_back(pb);
@@ -250,9 +255,10 @@ public:
            (tsty->GetStorage() == Storage::GLOBAL ||
             tsty->GetStorage() == Storage::DEFAULT))) {
         auto& tma_descs = cgi.GetTMADescs();
-        tma_descs[block_pb].emplace_back(
-            n.GetFrom(), n.GetTo(), InScopeName(n.GetFrom()->RefSymbol()),
-            InScopeName(n.GetTo()->RefSymbol()), n.GetSwizzleValue());
+        tma_descs[block_pb].emplace_back(n.GetFrom(), n.GetTo(),
+                                         InScopeName(n.GetFrom()->RefSymbol()),
+                                         InScopeName(n.GetTo()->RefSymbol()),
+                                         n.GetSwizzleValue(), inner_pb_level);
       } else
         choreo_unreachable(
             "unsupport TMA direction: " + STR(fsty->GetStorage()) + " => " +
@@ -350,6 +356,7 @@ public:
                        << "\n");
     } break;
     case AST::MMAOperation::Store: break;
+    case AST::MMAOperation::Commit: break;
     default: choreo_unreachable("unsupported mma operation.");
     }
     return true;
