@@ -1,7 +1,6 @@
 FTP_SERVER:=172.16.11.18
 
 SETUP_TARGET_DEPENDS += setup-choreo-kit
-SETUP_TARGET_DEPENDS += setup-ginac
 SETUP_TARGET_DEPENDS += setup-clang-format
 SETUP_TARGET_DEPENDS += setup-git-hooks
 SETUP_TARGET_DEPENDS += setup-gcu-acore
@@ -95,27 +94,6 @@ gcu2-kmd:
 gcu3-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
 
-GINAC_MD5=9d0eaa439c7b825311e99a9aa9b15f9a
-GINAC_PACKAGE_NAME=ginac-cln-251014.tgz
-GINAC_PACKAGE=$(TOOLCHAIN_DIR)/$(GINAC_PACKAGE_NAME)
-CUR_GINAC_MD5:=$(shell md5sum $(GINAC_PACKAGE) 2>/dev/null| cut -d ' ' -f 1)
-
-download-ginac:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GINAC_PACKAGE_NAME) -o $(GINAC_PACKAGE);\
-
-check-ginac:
-	@if [ "$(CUR_GINAC_MD5)" != "$(GINAC_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the ginac package..."; \
-		$(MAKE) download-ginac; \
-	else \
-		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
-	fi;
-
-setup-ginac: check-ginac
-	@if [ ! -f "$(TOOLCHAIN_DIR)/ginac/ginac-1.8.7/install/lib/libginac.a" ]; then \
-	    tar -zxvf $(GINAC_PACKAGE) -C $(TOOLCHAIN_DIR);\
-	fi;
-
 CFORMAT_MD5=6ee59eba63782b362bc9ba1138911f3a
 CFORMAT_NAME=clang-format-19-1-2
 CUR_CFORMAT_MD5:=$(shell md5sum $(CLANG_FORMAT) 2>/dev/null| cut -d ' ' -f 1)
@@ -167,8 +145,6 @@ publish-sdk: sdk-package
 	sdk_name=$$(basename $$pkg_name); \
 	md5sum $$pkg_name; \
 	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
-
-prepare: setup-ginac
 
 test-libra: release
 	$(LIT) tests/gcu/libra && $(MAKE) standalone-test-with-cmake

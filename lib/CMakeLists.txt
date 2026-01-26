@@ -33,7 +33,6 @@ set(CORE_SOURCES
   semacheck.cpp
   shapeinfer.cpp
   symtab.cpp
-  sym_replace.cpp
   typeinfer.cpp
   types.cpp
   valno.cpp

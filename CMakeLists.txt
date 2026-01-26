@@ -272,10 +272,6 @@ set(BUILD_DIR ${CMAKE_BINARY_DIR}/build)
 
 set(TOOLCHAIN_DIR "${CMAKE_SOURCE_DIR}/extern")
 
-set(SYMBOLIC_DIR "${CMAKE_SOURCE_DIR}/extern/ginac")
-set(CLN_DIR "${SYMBOLIC_DIR}/cln-1.3.7/install")
-set(GINAC_DIR "${SYMBOLIC_DIR}/ginac-1.8.7/install")
-
 set(FLEX_PATH "${TOOLCHAIN_DIR}/bin/flex")
 set(BISON_PATH "${TOOLCHAIN_DIR}/bin/bison")
 set(BISON_ENV "BISON_PKGDATADIR=${TOOLCHAIN_DIR}/shared/bison/")
@@ -304,7 +300,6 @@ endif()
 include_directories(${CMAKE_BINARY_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/lib)
 include_directories(${CMAKE_SOURCE_DIR}/runtime)
-include_directories(${CLN_DIR}/include ${GINAC_DIR}/include)
 
 # add code sources and rules
 add_subdirectory(lib)
@@ -315,9 +310,6 @@ add_executable(copp tools/copp/choreo_preprocess.cpp)
 add_executable(choreo tools/choreo/choreo_main.cpp)
 
 set(EXTERN_LIBS
-  ${GINAC_DIR}/lib/libginac.a
-  ${CLN_DIR}/lib/libcln.a
-  gmp
   stdc++fs
 )
 
@@ -450,21 +442,17 @@ configure_file(${CMAKE_SOURCE_DIR}/cmake/CPackSDK.cmake.in
                ${CMAKE_BINARY_DIR}/CPackSDK.cmake @ONLY)
 
 # Set standalone packaging mode if CMake variable STANDALONE=ON
-option(STANDALONE "Build standalone package (contains extern and ginac/cln)" OFF)
+option(STANDALONE "Build standalone package (contains extern)" OFF)
 if(STANDALONE)
   set(CHOREO_STANDALONE_PACKAGE ON)
-  message(STATUS "Building STANDALONE package: extern/bin, extern/include, extern/lib, extern/shared, and ginac/cln are all contained.")
+  message(STATUS "Building STANDALONE package: extern/bin, extern/include, extern/lib, extern/shared, and are all contained.")
 else()
   set(CHOREO_STANDALONE_PACKAGE OFF)
-  message(STATUS "Building CORE package: Only contains the main program and header files, excluding extern and ginac/cln.")
+  message(STATUS "Building CORE package: Only contains the main program and header files, excluding extern.")
 endif()
 
 if(CHOREO_STANDALONE_PACKAGE)
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.27), libgmp10 (>= 6.1.2)")
-  install(DIRECTORY ${GINAC_DIR}/include/ DESTINATION include USE_SOURCE_PERMISSIONS)
-  install(DIRECTORY ${CLN_DIR}/include/ DESTINATION include USE_SOURCE_PERMISSIONS)
-  install(DIRECTORY ${GINAC_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libginac.a")
-  install(DIRECTORY ${CLN_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libcln.a")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.27)")
   install(DIRECTORY ${CMAKE_SOURCE_DIR}/extern/bin/ DESTINATION extern/bin USE_SOURCE_PERMISSIONS)
   install(DIRECTORY ${CMAKE_SOURCE_DIR}/extern/include/ DESTINATION extern/include USE_SOURCE_PERMISSIONS)
   install(DIRECTORY ${CMAKE_SOURCE_DIR}/extern/lib/ DESTINATION extern/lib USE_SOURCE_PERMISSIONS)

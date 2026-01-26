@@ -59,14 +59,6 @@ CFLAGS += -D__CHOREO_DEFAULT_TARGET__=\"$(CHOREO_DEFAULT_TARGET)\"
 GTEST_DIR = extern/gtest
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 
-# For GiNaC
-SYMBOLIC_DIR = $(WORK_DIR)/extern/ginac
-CLN_DIR = $(SYMBOLIC_DIR)/cln-1.3.7/install
-GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7/install
-
-SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/lib/ -L$(GINAC_DIR)/lib/ -lginac -lcln -static -lgmp
-SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/include -I$(GINAC_DIR)/include
-
 # For CMAKE config
 CMAKE_BUILD_DIR = $(BUILD_DIR)
 CMAKE = cmake
@@ -165,7 +157,7 @@ $(LGY_BUILD_DIR):
 	mkdir -p $(LGY_BUILD_DIR)
 
 $(CHOREO_BIN): $(TOOLS_DIR)/choreo/choreo_main.cpp $(LGY_BUILD_DIR)/parser.tab.o $(LGY_BUILD_DIR)/scanner.yy.o $(LGY_BUILD_OBJECTS) | $(LGY_BUILD_DIR)
-	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -lpthread -o $@
+	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) -lpthread -o $@
 
 $(LGY_BUILD_DIR)/scanner.yy.cc: $(LEX_SRC) | $(LGY_BUILD_DIR)
 	$(FLEX) -o $@ $(LEX_SRC)
@@ -181,10 +173,10 @@ $(LGY_BUILD_DIR)/%.o: $(LGY_BUILD_DIR)/%.cc $(HEADER_FILES) parser.tab.hh | $(LG
 
 $(LGY_BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp | $(LGY_BUILD_DIR)
 	@mkdir -p $(dir $@)
-	$(CC) -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
+	$(CC) -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c  -o $@
 
 $(COPP_BIN): $(TOOLS_DIR)/copp/choreo_preprocess.cpp $(LGY_BUILD_DIR)/parser.tab.o $(LGY_BUILD_DIR)/scanner.yy.o $(LGY_BUILD_OBJECTS)
-	$(CC) $(CFLAGS) $^ -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -static-libstdc++ -lpthread -o $@
+	$(CC) $(CFLAGS) $^ -I$(LGY_BUILD_DIR) -I$(SRC_DIR) -static-libstdc++ -lpthread -o $@
 
 -include $(OBJ:.o=.d)
 

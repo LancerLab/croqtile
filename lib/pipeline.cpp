@@ -9,7 +9,6 @@
 #include "normalize.hpp"
 #include "semacheck.hpp"
 #include "shapeinfer.hpp"
-#include "sym_replace.hpp"
 #include "typeinfer.hpp"
 #include "visualize.hpp"
 
@@ -58,7 +57,6 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   AddStage<EarlySemantics>();
   // minor AST change: desugar for canonicalized AST
   AddStage<Normalizer>();
-  if (CCtx().HasFeature(ChoreoFeature::RSTM0)) AddStage<SymReplace>();
   // perform shape inference of mdspans, future, etc.
   AddStage<ShapeInference>();
   // inference all the unknown types - decls
