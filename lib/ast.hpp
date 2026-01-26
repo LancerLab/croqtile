@@ -1940,7 +1940,7 @@ private:
   using RSInfo = ptr<MultiValues>; // reshape Infomation
 
   std::variant<TSInfo, RSInfo> info;
-  const ptr<MultiValues> strides = nullptr;
+  ptr<MultiValues> strides = nullptr;
 
   Shape block_shape; // block shape after applying the operation
 
@@ -2043,12 +2043,19 @@ public:
   }
 
   const ptr<MultiValues> GetStrides() const {
-    if (!strides) return strides;
-    if (tag == Kind::SUBSPAN || tag == Kind::MODSPAN)
-      return Make<MultiValues>(loc, Positions()->Count(),
-                               Make<IntLiteral>(loc, 1), ", ");
-    else
-      choreo_unreachable("unsupported stride kind.");
+    if (tag == Kind::MODSPAN || tag == Kind::SUBSPAN) return strides;
+    return nullptr;
+  }
+
+  const ValueList StridesAsValueList() const {
+    if (!strides) choreo_unreachable("no strides exist.");
+    ValueList vl;
+    for (auto b : strides->AllValues()) {
+      auto e = cast<Expr>(b);
+      if (!e->Opts().HasVal()) return {};
+      vl.push_back(e->Opts().GetVal());
+    }
+    return vl;
   }
 
   void SetBlockShape(const Shape shape) {
@@ -2076,6 +2083,7 @@ public:
       n = Make<SpannedOperation>(loc, CloneP(Positions()), tag);
     n->block_shape = block_shape;
     n->rank = rank;
+    if (strides) n->strides = CloneP(strides);
     return n;
   }
 

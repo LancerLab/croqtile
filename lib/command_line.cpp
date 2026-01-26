@@ -83,6 +83,8 @@ Option<bool> inhibit_warning(OptionKind::User, "-w", "", false,
                              "Inhibit all warning messages.");
 Option<bool> warning_as_error(OptionKind::User, "-Werror", "", false,
                               "Make all warnings into errors.");
+Option<bool> disable_runtime_check(OptionKind::User, "--disable-runtime-check",
+                                   "", false, "Disable all runtime checks.");
 
 Option<std::string>
     target_options(OptionKind::Hidden, "--target-options", "-tos", "",
@@ -286,6 +288,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetMemDefaultAligned(mem_default_aligned.GetValue());
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
+  CCtx().SetDisableRuntimeCheck(disable_runtime_check.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
 
   if (!trace_visit.GetValue().empty())

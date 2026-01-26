@@ -1026,8 +1026,11 @@ bool TypeInference::Visit(AST::ChunkAt& n) {
   dma_mem = sto;
 
   // update all the positions with correct types
-  for (auto tsi : n.AllOperations())
+  for (auto tsi : n.AllOperations()) {
     for (auto& v : tsi->GetIndices()) { SetNodeType(*v, NodeType(*v)); }
+    if (auto s = tsi->GetStrides())
+      for (auto& v : s->AllValues()) SetNodeType(*v, NodeType(*v));
+  }
 
   // also update current node
   SetNodeType(n, MakeSpannedType(

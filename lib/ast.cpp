@@ -246,6 +246,7 @@ void SpannedOperation::accept(Visitor& v) {
   else {
     Positions()->accept(v);
     if (MultipleExprs()) TFSS()->accept(v);
+    if (auto s = GetStrides()) s->accept(v);
   }
 }
 

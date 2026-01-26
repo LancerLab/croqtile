@@ -629,7 +629,10 @@ struct Shape {
     std::fill(vl.begin(), vl.end(), sbe::sym(v));
     val_no = values.Insert(vl);
   }
-  Shape(const ValueList& v) { val_no = values.Insert(v); }
+  Shape(const ValueList& v) {
+    val_no = values.Insert(v);
+    dim_count = v.size();
+  }
   // could be inconsistently sized, but only be verified with sema checker
   Shape(size_t n, const ValueList& v) : dim_count(n) {
     val_no = values.Insert(v);

@@ -1911,12 +1911,14 @@ spanned_op
     | SUBSPAN LPAREN value_list RPAREN STRIDE LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
         $3->SetDelimiter(", ");
         $7->SetDelimiter(", ");
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $11, $7, $3, AST::SpannedOperation::SUBSPAN));
+        $11->SetDelimiter(", ");
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $11, $3, $7, AST::SpannedOperation::SUBSPAN));
       }
     | MODSPAN LPAREN value_list RPAREN STRIDE LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
         $3->SetDelimiter(", ");
         $7->SetDelimiter(", ");
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $11, $7, $3, AST::SpannedOperation::MODSPAN));
+        $11->SetDelimiter(", ");
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $11, $3, $7, AST::SpannedOperation::MODSPAN));
       }
     | FNSPANAS LPAREN g_value_list RPAREN {
         $3->SetDelimiter(", ");
@@ -2333,6 +2335,7 @@ inline ptr<AST::SpannedOperation> OptSpannedOperation(const ptr<AST::SpannedOper
   bool not_tiled = true;
 
   auto no_tiling_norm = [&](ptr<AST::MultiValues> mv) -> void {
+    if (mv == nullptr) return;
     for (auto v : mv->AllValues()) {
       if (auto id = AST::GetIdentifier(*v))
         if (id->name == "_") {
@@ -2347,7 +2350,7 @@ inline ptr<AST::SpannedOperation> OptSpannedOperation(const ptr<AST::SpannedOper
   case AST::SpannedOperation::Kind::TILING: no_tiling_norm(tsi->Positions()); break;
   case AST::SpannedOperation::Kind::TILEAT: [[fallthrough]];
   case AST::SpannedOperation::Kind::SUBSPAN: [[fallthrough]];
-  case AST::SpannedOperation::Kind::MODSPAN: no_tiling_norm(tsi->TFSS()); break;
+  case AST::SpannedOperation::Kind::MODSPAN: no_tiling_norm(tsi->TFSS()); no_tiling_norm(tsi->GetStrides()); break;
   default: choreo_unreachable("Unexpect SpannedOperation Kind");
   }
 

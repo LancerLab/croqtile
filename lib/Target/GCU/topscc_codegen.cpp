@@ -2638,6 +2638,7 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
 }
 
 void TopsccCodeGen::EmitHostRuntimeCheck() {
+  if (CCtx().DisableRuntimeCheck()) return;
   // check if the input shape is as declared in choreo
   if (cgi.ParameterCount(fname) == 0) return;
 
@@ -2728,11 +2729,13 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
        << ".heap_size;\n";
     // special host runtime check
     std::string mem_capacity = std::to_string(CCtx().GetMemCapacity(sto));
-    hs << h_indent << "choreo::runtime_check(" << ie.spm_size << " <= (size_t)"
-       << mem_capacity << ", \"In the memory reuse of dynamic shapes"
-       << ", the size of the initial " << STR(sto)
-       << " spm should not exceed the memory usage limit " << mem_capacity
-       << "bytes.\");\n";
+    if (!CCtx().DisableRuntimeCheck())
+      hs << h_indent << "choreo::runtime_check(" << ie.spm_size
+         << " <= (size_t)" << mem_capacity
+         << ", \"In the memory reuse of dynamic shapes"
+         << ", the size of the initial " << STR(sto)
+         << " spm should not exceed the memory usage limit " << mem_capacity
+         << "bytes.\");\n";
     hs << h_indent << "unsigned long " << ie.offsets_name << "["
        << mri->infos[sto].offset_args.size() << "];" << "\n";
     std::string idx = ie.chunks_name + "_idx";
