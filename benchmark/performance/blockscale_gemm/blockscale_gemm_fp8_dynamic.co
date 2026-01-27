@@ -35,10 +35,12 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs,
         mma.store mc_k, output_s;
         sync.shared;
         parallel {m, n} by [WARP_M, 2] : thread {
-          sa = scale_a.at(block_m # m, iv_k);
-          sb = scale_b.at(nb, iv_k);
-          foreach {ni} in [WARP_N / 2] {
-            output.at(block_m # m, block_n # (n # ni)) += output_s.at(m, n # ni) * sa * sb;
+          inthreads(block_m # m < M){
+            sa = scale_a.at(block_m # m, iv_k);
+            sb = scale_b.at(nb, iv_k);
+            foreach {ni} in [WARP_N / 2] {
+              output.at(block_m # m, block_n # (n # ni)) += output_s.at(m, n # ni) * sa * sb;
+            }
           }
         }
         sync.shared;
