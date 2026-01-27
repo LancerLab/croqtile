@@ -70,9 +70,13 @@ __co__ void bmm(global f8_e4m3 [B, M, K] lhs,
           mma.row.row mc_k, ma, mb;
         }
       }
+<<<<<<< HEAD
       mma.store mc_k, output_s;
       sync.shared;
       dma.copy output_s => output_flat.chunkat(block_b # block_m, block_n);
+=======
+      mma.store mc_k, output_flat.chunkat(block_b # block_m, block_n);
+>>>>>>> 82605b9b63 ([bench] update bmm)
     }
   }
 }
@@ -130,7 +134,7 @@ int main() {
   std::cout << "NCU output: " << popt.ncu_output << "\n";
 
   cudaMemset(c_d, 0, B * M * N * sizeof(float));
-  bmm(lhs_d, rhs_d, out_d);
+  bmm_old(lhs_d, rhs_d, out_d);
 
   cudaMemcpy(c_h, c_d, B * M * N * sizeof(float), cudaMemcpyDeviceToHost);
 
