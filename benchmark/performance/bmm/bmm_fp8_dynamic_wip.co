@@ -4,7 +4,7 @@
 #define BLK_K 128
 
 // TODO support symbolic representation for data size
-__co__ void bmm(global f8_e4m3 [B, M, K] lhs,
+__co__ void bmm_old(global f8_e4m3 [B, M, K] lhs,
                global f8_e4m3 [B, N, K] rhs,
                global f32 [B, M, N] output) {
   int WARP_M = 64, WARP_N = 64, WARP_K = 32;
@@ -19,13 +19,13 @@ __co__ void bmm(global f8_e4m3 [B, M, K] lhs,
     parallel p by 1 : group-4 {
       foreach {iv_k} in [cdiv(K, BLK_K)] {
         // load 64x128 and 128x64 to smem
-        tma.copy.swizzle<128> lhs.subspan(1, WARP_M, BLK_K).stride(1, WARP_M, BLK_K).at(block_b, block_m, iv_k) => lhs_load_s;
-        tma.copy.swizzle<128> rhs.subspan(1, WARP_N, BLK_K).stride(1, WARP_N, BLK_K).at(block_b, block_n, iv_k) => rhs_load_s;
+        tma.copy.swizzle(128) lhs.subspan(1, WARP_M, BLK_K).stride(1, WARP_M, BLK_K).at(block_b, block_m, iv_k) => lhs_load_s;
+        tma.copy.swizzle(128) rhs.subspan(1, WARP_N, BLK_K).stride(1, WARP_N, BLK_K).at(block_b, block_n, iv_k) => rhs_load_s;
         mc_k = mma.fill.f32 0.0f;
         // WGMMA requires 128 threads: 4 warps x 32 threads/warp
         foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
-          ma = mma.load.swizzle<128> lhs_load_s.span_as([WARP_M, BLK_K]).chunkat(_, iv_warp);
-          mb = mma.load.swizzle<128> rhs_load_s.span_as([WARP_N, BLK_K]).chunkat(_, iv_warp);
+          ma = mma.load.swizzle(128) lhs_load_s.span_as([WARP_M, BLK_K]).chunkat(_, iv_warp);
+          mb = mma.load.swizzle(128) rhs_load_s.span_as([WARP_N, BLK_K]).chunkat(_, iv_warp);
           mma.row.row mc_k, ma, mb;
         }
         mma.store mc_k, output_s;
@@ -43,30 +43,50 @@ __co__ void bmm(global f8_e4m3 [B, M, K] lhs,
   }
 }
 
+// TODO support symbolic representation for data size
+__co__ void bmm(global f8_e4m3 [B, M, K] lhs,
+               global f8_e4m3 [B, N, K] rhs,
+               global f32 [B, M, N] output) {
+  int WARP_M = 64, WARP_N = 64, WARP_K = 32;
+  output_flat = output.span_as([B * M, N]);
+
+  // each block handles 64x64 block with WGMMA
+  // WGMMA requires 128 threads (4 warps x 32 threads/warp)
+  parallel {block_b, block_m, block_n} by [B, cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f8_e4m3 [1, WARP_M, BLK_K] lhs_load_s;
+    shared f8_e4m3 [1, WARP_N, BLK_K] rhs_load_s;
+    shared f32 [WARP_M, WARP_N] output_s {0.0f};
+
+    parallel p by 1 : group-4 {
+      mc_k = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, BLK_K)] {
+        // load 64x128 and 128x64 to smem
+        tma.copy.swizzle(128) lhs.subspan(1, WARP_M, BLK_K).stride(1, WARP_M, BLK_K).at(block_b, block_m, iv_k) => lhs_load_s;
+        tma.copy.swizzle(128) rhs.subspan(1, WARP_N, BLK_K).stride(1, WARP_N, BLK_K).at(block_b, block_n, iv_k) => rhs_load_s;
+        // WGMMA requires 128 threads: 4 warps x 32 threads/warp
+        foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
+          ma = mma.load.swizzle(128) lhs_load_s.span_as([WARP_M, BLK_K]).chunkat(_, iv_warp);
+          mb = mma.load.swizzle(128) rhs_load_s.span_as([WARP_N, BLK_K]).chunkat(_, iv_warp);
+          mma.row.row mc_k, ma, mb;
+        }
+      }
+      mma.store mc_k, output_flat.chunkat(block_b # block_m, block_n);
+    }
+  }
+}
+
 int main() {
-  size_t B = 3;
-  size_t M = 127;
-  size_t N = 128;
-  size_t K = 128;
+  size_t B = 4;
+  size_t M = 256;
+  size_t N = 256;
+  size_t K = 256;
 
   auto a_h = new __nv_fp8_e4m3[B * M * K];
   auto b_h = new __nv_fp8_e4m3[B * N * K];
-  auto b_h_logical = new __nv_fp8_e4m3[B * K * N];
   auto c_h = new float[B * M * N];
 
-  for (size_t i = 0; i < B * M * K; i++) {
-    a_h[i] = __nv_fp8_e4m3(static_cast<float>(rand() % 2));
-  }
-  for (size_t i = 0; i < B * K * N; i++) {
-    b_h_logical[i] = __nv_fp8_e4m3(static_cast<float>(rand() % 2));
-  }
-  for (size_t b = 0; b < B; ++b) {
-    for (size_t k = 0; k < K; ++k) {
-      for (size_t n = 0; n < N; ++n) {
-        b_h[(b * N + n) * K + k] = b_h_logical[(b * K + k) * N + n];
-      }
-    }
-  }
+  choreo::utils::fill_random(a_h, B * M * K, __nv_fp8_e4m3(0.0f), __nv_fp8_e4m3(1.0f));
+  choreo::utils::fill_random(b_h, B * N * K, __nv_fp8_e4m3(0.0f), __nv_fp8_e4m3(1.0f));
   choreo::fill(c_h, c_h + B * M * N, 0.0f);
 
   __nv_fp8_e4m3 *a_d, *b_d;
@@ -87,20 +107,34 @@ int main() {
   topt.repeat = 50;
   auto avg_ms = choreo::timing(
       [&]() {
-        cudaMemset(c_d, 0, B * M * N * sizeof(float));
-        bmm(lhs_d, rhs_d, out_d);
+        bmm_old(lhs_d, rhs_d, out_d);
       },
       topt);
   std::cout << "Timing avg ms: " << avg_ms << "\n";
 
+  choreo::ProfilerOption popt;
+  popt.warmup = 5;
+  popt.repeat = 10;
+  popt.device = -1;
+  popt.kernel_name = "bmm_fp8_dynamic_wip";
+  popt.ncu_args = "--target-processes all";
+  bool prof_ok = choreo::profile(
+      [&]() {
+        bmm_old(lhs_d, rhs_d, out_d);
+      },
+      popt);
+  std::cout << "Profile: " << (prof_ok ? "OK" : "FAILED") << "\n";
+  std::cout << "NCU path: " << popt.ncu_path << "\n";
+  std::cout << "NCU output: " << popt.ncu_output << "\n";
+
   cudaMemset(c_d, 0, B * M * N * sizeof(float));
-  bmm(lhs_d, rhs_d, out_d);
+  bmm_old(lhs_d, rhs_d, out_d);
 
   cudaMemcpy(c_h, c_d, B * M * N * sizeof(float), cudaMemcpyDeviceToHost);
 
   // verification
   auto lhs = choreo::make_spanview<choreo::f8_e4m3, 3>(a_h, {B, M, K});
-  auto rhs = choreo::make_spanview<choreo::f8_e4m3, 3>(b_h_logical, {B, K, N});
+  auto rhs = choreo::make_spanview<choreo::f8_e4m3, 3>(b_h, {B, N, K});
   auto res = choreo::make_spanview<choreo::f32, 3>(c_h, {B, M, N});
 
   float base_tol = 0.3f;
@@ -111,7 +145,7 @@ int main() {
         float ref = 0.0f;
         for (size_t k = 0; k < K; ++k) {
           ref += choreo::to_f32(lhs[(int)b][(int)i][(int)k]) *
-                 choreo::to_f32(rhs[(int)b][(int)k][(int)j]);
+                 choreo::to_f32(rhs[(int)b][(int)j][(int)k]);
         }
         float got = choreo::to_f32(res[(int)b][(int)i][(int)j]);
         float tol = base_tol + rel_tol * std::abs(ref);

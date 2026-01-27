@@ -2165,7 +2165,7 @@ inline bool profile(F&& matmul, ProfilerOption& opt, Args&&... args) {
   std::ostringstream cmd;
   cmd << "CHOREO_PROFILE_RUN=1 ";
   if (opt.device >= 0) cmd << "CUDA_VISIBLE_DEVICES=" << opt.device << " ";
-  cmd << detail::shell_escape(ncu) << " ";
+  cmd << "sudo -E " << detail::shell_escape(ncu) << " ";
   if (!opt.ncu_args.empty()) cmd << opt.ncu_args << " ";
   cmd << detail::shell_escape(exe) << " ";
   if (!cmd_args.empty()) cmd << cmd_args << " ";
