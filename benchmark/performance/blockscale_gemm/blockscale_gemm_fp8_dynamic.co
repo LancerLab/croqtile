@@ -1,0 +1,130 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+#define BLK_N 128
+#define BLK_K 128
+
+// TODO support symbolic representation for data size
+__co__ void matmul(global f8_e4m3 [M, K] lhs,
+                   global f32 [M, DIV_BLK_K] scale_a,
+                   global f8_e4m3 [N, K] rhs,
+                   global f32 [DIV_BLK_N, DIV_BLK_K] scale_b,
+                   global f32 [M, N] output) {
+  int WARP_M = 64, WARP_N = 64, WARP_K = 32;
+
+  // each block handles 64x64 block with WGMMA
+  // WGMMA requires 128 threads (4 warps x 32 threads/warp)
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f8_e4m3 [WARP_M, BLK_K] lhs_load_s;
+    shared f8_e4m3 [WARP_N, BLK_K] rhs_load_s;
+    shared f32 [WARP_M, WARP_N] output_s {0.0f};
+
+    parallel p by 1 : group-4 {
+      nb = block_n / (BLK_N / WARP_N);
+      foreach {iv_k} in [cdiv(K, BLK_K)] {
+        // load 64x32 to smem
+        // tma.copy.swizzle(128) lhs.chunkat(block_m, iv_k) => lhs_load_s;
+        tma.copy.swizzle(128) lhs.subspan(WARP_M, BLK_K).stride(WARP_M, BLK_K).at(block_m, iv_k) => lhs_load_s;
+        tma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => rhs_load_s;
+        mc_k = mma.fill.f32 0.0f;
+        // WGMMA requires 128 threads: 4 warps x 32 threads/warp
+        foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
+          ma = mma.load.swizzle(128) lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc_k, ma, mb; 
+        }
+        mma.store mc_k, output_s;
+        sync.shared;
+        parallel {m, n} by [WARP_M, 2] : thread {
+          sa = scale_a.at(block_m # m, iv_k);
+          sb = scale_b.at(nb, iv_k);
+          foreach {ni} in [WARP_N / 2] {
+            output.at(block_m # m, block_n # (n # ni)) += output_s.at(m, n # ni) * sa * sb;
+          }
+        }
+        sync.shared;
+      }
+    }
+  }
+}
+
+int main() {
+  size_t M = 127;
+  size_t N = 128;
+  size_t K = 128;
+
+  auto a_h = new __nv_fp8_e4m3[M * K];
+  auto scale_a_h = new float[M * (K / BLK_K)];
+  auto b_h = new __nv_fp8_e4m3[N * K];
+  auto scale_b_h = new float[(N / BLK_N) * (K / BLK_K)];
+  auto c_h = new float[M * N];
+
+  for (size_t i = 0; i < M * K; i++) {
+    a_h[i] = __nv_fp8_e4m3(static_cast<float>(rand() % 2));
+  }
+  for (size_t i = 0; i < M * (K / BLK_K); i++) {
+    scale_a_h[i] = static_cast<float>(rand() % 2 + 1);
+  }
+  for (size_t i = 0; i < N * K; i++) {
+    b_h[i] = __nv_fp8_e4m3(static_cast<float>(rand() % 2));
+  }
+  for (size_t i = 0; i < (N / BLK_N) * (K / BLK_K); i++) {
+    scale_b_h[i] = static_cast<float>(rand() % 2 + 1);
+  }
+  for (size_t i = 0; i < M * N; i++) {
+    c_h[i] = 0.0f;
+  }
+
+  __nv_fp8_e4m3 *a_d, *b_d;
+  float *scale_a_d, *scale_b_d, *c_d;
+  cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3));
+  cudaMalloc(&scale_a_d, M * (K / BLK_K) * sizeof(float));
+  cudaMalloc(&b_d, N * K * sizeof(__nv_fp8_e4m3));
+  cudaMalloc(&scale_b_d, (N / BLK_N) * (K / BLK_K) * sizeof(float));
+  cudaMalloc(&c_d, M * N * sizeof(float));
+
+  cudaMemcpy(a_d, a_h, M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice);
+  cudaMemcpy(scale_a_d, scale_a_h, M * (K / BLK_K) * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_d, b_h, N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice);
+  cudaMemcpy(scale_b_d, scale_b_h, (N / BLK_N) * (K / BLK_K) * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_d, c_h, M * N * sizeof(float), cudaMemcpyHostToDevice);
+
+  auto lhd_d = choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K});
+  auto scale_a_d_view = choreo::make_spanview<choreo::f32, 2>(scale_a_d, {M, K / BLK_K});
+  auto rhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {N, K});
+  auto scale_b_d_view = choreo::make_spanview<choreo::f32, 2>(scale_b_d, {N / BLK_N, K / BLK_K});
+  auto out_d = choreo::make_spanview<choreo::f32, 2>(c_d, {M, N});
+  matmul(lhd_d, scale_a_d_view, rhs_d, scale_b_d_view, out_d);
+
+  cudaMemcpy(c_h, c_d, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+
+  // verification
+  auto lhs = choreo::make_spanview<choreo::f8_e4m3, 2>(a_h, {M, K});
+  auto scale_a = choreo::make_spanview<choreo::f32, 2>(scale_a_h, {M, K / BLK_K});
+  auto rhs = choreo::make_spanview<choreo::f8_e4m3, 2>(b_h, {N, K});
+  auto scale_b = choreo::make_spanview<choreo::f32, 2>(scale_b_h, {N / BLK_N, K / BLK_K});
+  auto res = choreo::make_spanview<choreo::f32, 2>(c_h, {M, N});
+
+  float base_tol = 0.3f;
+  float rel_tol = 0.05f;
+  // verification (subset) with blockwise scaling
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t kb = 0; kb < (size_t)(K / BLK_K); ++kb) {
+        float sa = choreo::to_f32(scale_a[(int)i][(int)kb]);
+        float sb = choreo::to_f32(scale_b[(int)(j / BLK_N)][(int)kb]);
+        for (size_t kk = 0; kk < (size_t)BLK_K; ++kk) {
+          size_t k = kb * BLK_K + kk;
+          ref += choreo::to_f32(lhs[(int)i][(int)k]) * sa *
+                 choreo::to_f32(rhs[(int)j][(int)k]) * sb;
+        }
+      }
+      float got = choreo::to_f32(res[(int)i][(int)j]);
+      float tol = base_tol + rel_tol * std::abs(ref);
+      choreo::choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

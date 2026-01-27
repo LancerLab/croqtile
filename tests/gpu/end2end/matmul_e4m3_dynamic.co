@@ -1,0 +1,76 @@
+__co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f32 [M, N] output) {
+  int WARP_M = 64, WARP_N = 64, TILE_K = 32, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f8_e4m3 [WARP_M, TILE_K] lhs_load_s;
+    shared f8_e4m3 [WARP_N, TILE_K] rhs_load_s;
+
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      tma.copy.swizzle(32) lhs.subspan(WARP_M, TILE_K).stride(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
+
+      tma.copy.swizzle(32) rhs.chunkat(block_n, iv_k) => rhs_load_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swizzle(32) lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swizzle(32) rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared f32 [WARP_M, WARP_N] output_s;
+    mma.store mc, output_s;
+    
+    tma.copy output_s => output.subspan(WARP_M, WARP_N).stride(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+int main() {
+  size_t M = 127;
+  size_t N = 64;
+  size_t K = 64;
+
+  auto a_h = new __nv_fp8_e4m3[M * K];
+  auto b_h = new __nv_fp8_e4m3[N * K];
+  auto c_h = new float[M * N];
+
+  for(size_t i = 0; i < M * K; i++) {
+    a_h[i] = __nv_fp8_e4m3(static_cast<float>(rand() % 2));
+  }
+  for(size_t i = 0; i < N * K; i++) {
+    b_h[i] = __nv_fp8_e4m3(static_cast<float>(rand() % 2));
+  }
+  for(size_t i = 0; i < M * N; i++) {
+    c_h[i] = 0.0f;
+  }
+
+  __nv_fp8_e4m3 *a_d;
+  __nv_fp8_e4m3 *b_d;
+  float *c_d;
+  cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3));
+  cudaMalloc(&b_d, N * K * sizeof(__nv_fp8_e4m3));
+  cudaMalloc(&c_d, M * N * sizeof(float));
+
+  cudaMemcpy(a_d, a_h, M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_d, b_h, N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_d, c_h, M * N * sizeof(float), cudaMemcpyHostToDevice);
+
+  auto lhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K});
+  auto rhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {N, K});
+  auto res_d = choreo::make_spanview<float, 2>(c_d, {M, N});
+
+  matmul(lhs_d, rhs_d, res_d);
+
+  cudaMemcpy(c_h, c_d, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+
+  auto lhs_h = choreo::make_spanview<2, choreo::f8_e4m3>(a_h, {M, K});
+  auto rhs_h = choreo::make_spanview<2, choreo::f8_e4m3>(b_h, {N, K});
+  auto res_h = choreo::make_spanview<2, float>(c_h, {M, N});
+
+  float base_tol = 0.3f;
+  float rel_tol = 0.05f;
+  choreo::verify_matmul_row_row_subset(lhs_h, rhs_h, res_h, base_tol, rel_tol, 8, 8);
+  std::cout << "Test Passed\n" << std::endl;
+}
