@@ -1164,7 +1164,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
              << device_fn << "__runtime_shared_buffer__;\n";
         else
           ds << d_indent << type_modifiers << "alignas("
-             << "128" << ") " << bts << " " << sym << "["
+             << n.GetNote("alignment") << ") " << bts << " " << sym << "["
              << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;
       }
