@@ -1,19 +1,19 @@
 // RUN: choreo -gs -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
 
-// Test 1: Valid new syntax with swizzle(128)
+// Test 1: Valid new syntax with swiz<128>
 __co__ f16 [64, 64] test_dma_copy_swizzle_128(f16 [64, 16] lhs, f16 [16, 64] rhs) {
   f16 [64, 64] output{0.0f};
 
   parallel p by 1 : block {
     mc = mma.fill.f32 0.0f;
 
-    // New syntax: dma.copy.swizzle(128)
-    lhs_load = dma.copy.swizzle(128) lhs.chunkat(_, _) => shared;
-    rhs_load = dma.copy.swizzle(128) rhs.chunkat(_, _) => shared;
+    // New syntax: dma.copy.swiz<128>
+    lhs_load = dma.copy.swiz<128> lhs.chunkat(_, _) => shared;
+    rhs_load = dma.copy.swiz<128> rhs.chunkat(_, _) => shared;
 
     parallel q by 1 : group-4 {
-      ma = mma.load.swizzle(128) lhs_load.chunkat(_, _);
-      mb = mma.load.swizzle(128) rhs_load.chunkat(_, _);
+      ma = mma.load.swiz<128> lhs_load.chunkat(_, _);
+      mb = mma.load.swiz<128> rhs_load.chunkat(_, _);
       mma.row.col mc, ma, mb;
     }
 
@@ -26,20 +26,20 @@ __co__ f16 [64, 64] test_dma_copy_swizzle_128(f16 [64, 16] lhs, f16 [16, 64] rhs
 // CHECK: auto __layout{{[0-9]+}}_lhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<f16>{}, __shape{{[0-9]+}}_lhs_load__buf__);
 // CHECK: auto __layout{{[0-9]+}}_rhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW128_Atom<f16>{}, __shape{{[0-9]+}}_rhs_load__buf__);
 
-// Test 2: Valid new syntax with swizzle(64)
+// Test 2: Valid new syntax with swiz<64>
 __co__ f16 [64, 64] test_dma_copy_swizzle_64(f16 [64, 16] lhs, f16 [16, 64] rhs) {
   f16 [64, 64] output{0.0f};
 
   parallel p by 1 : block {
     mc = mma.fill.f32 0.0f;
 
-    // New syntax: dma.copy.swizzle(64)
-    lhs_load = dma.copy.swizzle(64) lhs.chunkat(_, _) => shared;
-    rhs_load = dma.copy.swizzle(64) rhs.chunkat(_, _) => shared;
+    // New syntax: dma.copy.swiz<64>
+    lhs_load = dma.copy.swiz<64> lhs.chunkat(_, _) => shared;
+    rhs_load = dma.copy.swiz<64> rhs.chunkat(_, _) => shared;
 
     parallel q by 1 : group-4 {
-      ma = mma.load.swizzle(64) lhs_load.chunkat(_, _);
-      mb = mma.load.swizzle(64) rhs_load.chunkat(_, _);
+      ma = mma.load.swiz<64> lhs_load.chunkat(_, _);
+      mb = mma.load.swiz<64> rhs_load.chunkat(_, _);
       mma.row.col mc, ma, mb;
     }
 
@@ -52,20 +52,20 @@ __co__ f16 [64, 64] test_dma_copy_swizzle_64(f16 [64, 16] lhs, f16 [16, 64] rhs)
 // CHECK: auto __layout{{[0-9]+}}_lhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW64_Atom<f16>{}, __shape{{[0-9]+}}_lhs_load__buf__);
 // CHECK: auto __layout{{[0-9]+}}_rhs_load__buf__ = cute::tile_to_shape(cute::SM90::GMMA::Layout_K_SW64_Atom<f16>{}, __shape{{[0-9]+}}_rhs_load__buf__);
 
-// Test 3: Valid new syntax with swizzle(32)
+// Test 3: Valid new syntax with swiz<32>
 __co__ f16 [64, 64] test_dma_copy_swizzle_32(f16 [64, 16] lhs, f16 [16, 64] rhs) {
   f16 [64, 64] output{0.0f};
 
   parallel p by 1 : block {
     mc = mma.fill.f32 0.0f;
 
-    // New syntax: dma.copy.swizzle(32)
-    lhs_load = dma.copy.swizzle(32) lhs.chunkat(_, _) => shared;
-    rhs_load = dma.copy.swizzle(32) rhs.chunkat(_, _) => shared;
+    // New syntax: dma.copy.swiz<32>
+    lhs_load = dma.copy.swiz<32> lhs.chunkat(_, _) => shared;
+    rhs_load = dma.copy.swiz<32> rhs.chunkat(_, _) => shared;
 
     parallel q by 1 : group-4 {
-      ma = mma.load.swizzle(32) lhs_load.chunkat(_, _);
-      mb = mma.load.swizzle(32) rhs_load.chunkat(_, _);
+      ma = mma.load.swiz<32> lhs_load.chunkat(_, _);
+      mb = mma.load.swiz<32> rhs_load.chunkat(_, _);
       mma.row.col mc, ma, mb;
     }
 

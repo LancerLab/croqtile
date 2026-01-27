@@ -17,12 +17,12 @@ __co__ auto matmul_sp_k16_f16(f16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs_m
     parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
       mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, TILE_K)] {
-        lhs_load_s = dma.copy.swizzle(64) lhs_packed.chunkat(block_m, iv_k) => shared;
-        rhs_load_s = dma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s = dma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
         lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => local;
         foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
-          ma = mma.load.swizzle(64) lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
-          mb = mma.load.swizzle(128) rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          ma = mma.load.swiz<64> lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
           me = mma.load lhs_load_s_mdata.chunkat(iv_warp_m, iv_warp_k);
           mma.row.row.sp mc, ma, mb, me;
         }
@@ -41,12 +41,12 @@ __co__ auto matmul_sp_k16_bf16(bf16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs
     parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
       mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, TILE_K)] {
-        lhs_load_s = dma.copy.swizzle(64) lhs_packed.chunkat(block_m, iv_k) => shared;
-        rhs_load_s = dma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s = dma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
         lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => local;
         foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
-          ma = mma.load.swizzle(64) lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
-          mb = mma.load.swizzle(128) rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          ma = mma.load.swiz<64> lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
           me = mma.load lhs_load_s_mdata.chunkat(iv_warp_m, iv_warp_k);
           mma.row.row.sp mc, ma, mb, me;
         }

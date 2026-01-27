@@ -149,15 +149,15 @@ private:
   std::string f_sym; // scoped symbol
   std::string t_sym;
   uint16_t idx;
-  int swizzle_value = 0; // Default to NONE (no swizzle)
+  SwizMode swiz_mode = SwizMode::NONE; // Default to no swizzle
   ParallelLevel pb_level = ParallelLevel::BLOCK;
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
-          const std::string& fs, const std::string& ts, int swizzle = 0,
+          const std::string& fs, const std::string& ts, SwizMode swizzle = SwizMode::NONE,
           ParallelLevel pb_lvl = ParallelLevel::BLOCK)
       : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++),
-        swizzle_value(swizzle), pb_level(pb_lvl) {
+        swiz_mode(swizzle), pb_level(pb_lvl) {
     assert(from && to);
     auto fty = GetSpannedType(from->GetType());
     auto tty = GetSpannedType(to->GetType());
@@ -188,7 +188,7 @@ public:
   const ptr<AST::ChunkAt> GetTo() const { return to; }
   const std::string GetFromSymbol() const { return f_sym; }
   const std::string GetToSymbol() const { return t_sym; }
-  int GetSwizzleValue() const { return swizzle_value; }
+  SwizMode GetSwizzleMode() const { return swiz_mode; }
 
   const std::string GetName() const {
     return "__choreo_tma_" + std::to_string(idx);

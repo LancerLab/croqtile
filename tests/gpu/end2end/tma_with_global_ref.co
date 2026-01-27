@@ -18,14 +18,14 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
     mc = mma.fill.f32 0.0f;
     foreach {iv_k} in [cdiv(K, TILE_K)] {
       // load 64x64 to smem
-      // Test new syntax: dma.copy.swizzle(128)
-      tma.copy.swizzle(128) lhs.chunkat(block_m, iv_k) => lhs_load_s;
-      tma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      // Test new syntax: dma.copy.swiz<128>
+      tma.copy.swiz<128> lhs.chunkat(block_m, iv_k) => lhs_load_s;
+      tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => rhs_load_s;
       // WGMMA requires 128 threads: 4 warps x 32 threads/warp
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.load.swizzle(128) lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swizzle(128) rhs_load_s.chunkat(_, iv_warp);
+          ma = mma.load.swiz<128> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
           mma.row.row mc, ma, mb;   // row * col : c += a * b;
         }
       }

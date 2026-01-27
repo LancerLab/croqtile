@@ -2354,6 +2354,17 @@ struct Select : public Node, public TypeIDProvider<Select> {
   __UDT_TYPE_INFO__(Node, Select)
 };
 
+struct DMAAttribute {
+  SwizMode sw_mode = SwizMode::NONE;
+  bool zfill = false;
+  bool is_sparse = false;
+  int sparse_n = 0;
+  int sparse_m = 0;
+  DMAAttribute(SwizMode swiz = SwizMode::NONE, bool zf = false, bool sp = false,
+               int sp_n = 0, int sp_m = 0)
+    : sw_mode(swiz), zfill(zf), is_sparse(sp), sparse_n(sp_n), sparse_m(sp_m) {}
+};
+
 struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
   std::string future;
@@ -2361,11 +2372,6 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 private:
   bool async;
   bool enforce_tma;
-  int swizzle_value = 0;         // Default to NONE (no swizzle)
-  bool swizzle_explicit = false; // Whether swizzle was explicitly specified
-  bool sparse = false;
-  int sparse_n = 0;
-  int sparse_m = 0;
 
 public:
   // if this DMA is chained with other DMA in pipeline mode
@@ -2376,14 +2382,15 @@ public:
   std::string chain_to;
   ptr<Node> from = nullptr;
   ptr<Node> to = nullptr;
+  DMAAttribute attr;
   ptr<DMAConfig> config = nullptr;
 
 public:
   explicit DMA(const location& l, const std::string& o, const std::string& r,
-               const ptr<Node>& f, const ptr<Node>& t, bool a,
-               const ptr<DMAConfig>& c = nullptr)
+               const ptr<Node>& f, const ptr<Node>& t, bool a, const DMAAttribute & at = {},
+               bool is_tma = false, const ptr<DMAConfig>& c = nullptr)
       : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),
-        from(f), to(t), config(c) {
+        enforce_tma(is_tma), from(f), to(t), attr(at), config(c) {
     chained = false;
     chain_to = "";
     chain_from = "";
@@ -2392,18 +2399,18 @@ public:
 
   explicit DMA(const location& l, const std::string& o, const std::string& r,
                const std::string& chained_from, const ptr<Node>& f,
-               const ptr<Node>& t, bool a, const ptr<DMAConfig>& c = nullptr)
-      : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),
-        from(f), to(t), config(c) {
+               const ptr<Node>& t, bool a, const DMAAttribute & at = {}, bool is_tma = false, const ptr<DMAConfig>& c = nullptr)
+      : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),enforce_tma(is_tma), 
+        from(f), to(t), attr(at), config(c) {
     chained = true;
     chain_from = chained_from;
     if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
   }
 
   // The dummy dma
-  explicit DMA(const location& l, const std::string& f)
+  explicit DMA(const location& l, const std::string& f, bool is_tma = false)
       : Node(l, MakePlaceHolderFutureType()), operation(".any"), future(f),
-        async(true) {}
+        async(true), enforce_tma(is_tma) {}
 
   bool IsDummy() const { return operation == ".any"; }
   ptr<ChunkAt> GetFrom() const { return cast<ChunkAt>(from); }
@@ -2417,34 +2424,19 @@ public:
   }
 
   void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
-  void SetTMA(bool is_tma = true) { enforce_tma = is_tma; }
-  void SetSwizzleValue(int swizzle) { swizzle_value = swizzle; }
-  void SetSwizzleExplicit(bool explicit_flag = true) {
-    swizzle_explicit = explicit_flag;
-  }
-  void SetSparse(bool enabled = true) { sparse = enabled; }
-  void SetSparsePattern(int n, int m) {
-    sparse_n = n;
-    sparse_m = m;
-  }
+  bool IsSparse() const { return attr.is_sparse; }
+  bool IsOOBZeroFill() const { return attr.zfill; }
+  SwizMode GetSwizzleMode() const { return attr.sw_mode; }
+  const std::pair<int, int> GetSparsePattern() const { return {attr.sparse_n, attr.sparse_m}; }
 
   const ptr<DMAConfig>& GetConfig() const { return config; }
-  int GetSwizzleValue() const { return swizzle_value; }
-  bool IsSwizzleExplicit() const { return swizzle_explicit; }
-  bool IsSparse() const { return sparse; }
-  std::pair<int, int> GetSparsePattern() const { return {sparse_n, sparse_m}; }
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<DMA>(LOC(), operation, future, CloneP(from), CloneP(to),
-                       async, config);
+                       async, attr, enforce_tma, config);
     n->chained = chained;
     n->chain_from = chain_from;
     n->chain_to = chain_to;
-    n->SetTMA(IsTMA());
-    n->SetSwizzleValue(swizzle_value);
-    n->SetSwizzleExplicit(swizzle_explicit);
-    n->SetSparse(sparse);
-    n->SetSparsePattern(sparse_n, sparse_m);
     return n;
   }
 
@@ -2461,8 +2453,8 @@ public:
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (config) os << "\n" << prefix << "  `- config: " << STR(*config);
     if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
-    if (sparse) {
-      os << "\n" << prefix << "  `- sparse: " << sparse_n << ":" << sparse_m;
+    if (attr.is_sparse) {
+      os << "\n" << prefix << "  `- sparse: " << attr.sparse_n << ":" << attr.sparse_m;
     }
     os << "\n" << prefix << "  `- from: ";
     from->Print(os, "", with_type);
@@ -2503,7 +2495,7 @@ public:
     ptr<ChunkAt> ld_expr;
     std::string future;
     bool async;
-    int swizzle_value; // 128, 64, or 32; default 128
+    SwizMode swiz_mode; // 128, 64, or 32; default 128
   };
   struct ExecInfo {
     ExecMethod method;
@@ -2511,7 +2503,7 @@ public:
     std::string lhs;
     std::string rhs;
     std::string mdata;
-    bool sparse;
+    bool is_sparse;
   };
   struct StoreInfo {
     std::string buf_sym;
@@ -2528,7 +2520,7 @@ public:
                BaseType t = BaseType::UNKSCALAR)
       : tag(Fill), info(FillInfo{n, e, t}) {}
   MMAOperation(const ptr<ChunkAt>& e, const std::string& fu, bool a = false,
-               int swizzle = 128)
+               SwizMode swizzle = SwizMode::B128)
       : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
                const std::string& r, bool sp = false)
@@ -2625,7 +2617,7 @@ public:
   bool IsSparse() const {
     if (tag != Exec) return false;
     auto e_info = std::get<2>(info);
-    return e_info.sparse;
+    return e_info.is_sparse;
   }
 
   void SetFuture(const std::string& fut_name) {
@@ -2649,16 +2641,16 @@ public:
     return "";
   }
 
-  int GetSwizzleValue() const {
+  SwizMode GetSwizzleMode() const {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
-    return l_info.swizzle_value;
+    return l_info.swiz_mode;
   }
 
-  void SetSwizzleValue(int swizzle) {
+  void SetSwizzleMode(SwizMode sm) {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
-    l_info.swizzle_value = swizzle;
+    l_info.swiz_mode = sm;
   }
 
   Kind Tag() const { return tag; }
@@ -2673,12 +2665,12 @@ public:
     case Load: {
       auto l_info = std::get<1>(info);
       return Make<MMAOperation>(CloneP(l_info.ld_expr), l_info.future,
-                                l_info.async, l_info.swizzle_value);
+                                l_info.async, l_info.swiz_mode);
     } break;
     case Exec: {
       auto e_info = std::get<2>(info);
       return Make<MMAOperation>(e_info.method, e_info.acc, e_info.lhs,
-                                e_info.rhs, e_info.mdata, e_info.sparse);
+                                e_info.rhs, e_info.mdata, e_info.is_sparse);
     } break;
     case Store: {
       return Make<MMAOperation>(StoreFrom(), CloneP(StoreTo()));
@@ -2710,7 +2702,7 @@ public:
       case COL_ROW: os << ".COL.ROW"; break;
       default: choreo_unreachable("unsupported dma execution mode."); break;
       }
-      if (e_info.sparse) os << ".SP";
+      if (e_info.is_sparse) os << ".SP";
       os << " " << e_info.acc << ", " << e_info.lhs << ", " << e_info.rhs;
     } break;
     case Store: {

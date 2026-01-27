@@ -462,7 +462,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "group"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUP, loc);
   "thread"   return Choreo::Parser::make_PBLEVEL(ParallelLevel::THREAD, loc);
   "mutable"  return Choreo::Parser::make_MUTABLE(yytext, loc);
-  "swizzle"  return Choreo::Parser::make_SWIZZLE(yytext, loc);
   "f64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F64(BaseType::F64, loc); }
   "f32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F32(BaseType::F32, loc); }
   "tf32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_TF32(BaseType::TF32, loc); }
@@ -506,6 +505,10 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".copy"    return Choreo::Parser::make_COPY(yytext, loc);
   ".transp"  return Choreo::Parser::make_TRANSPOSE(yytext, loc);
   ".pad"     return Choreo::Parser::make_PAD(yytext, loc);
+  ".swizzle" return Choreo::Parser::make_SWIZZLE(yytext, loc);
+  ".swiz"    return Choreo::Parser::make_SWIZZLE(yytext, loc);
+  ".sp"      return Choreo::Parser::make_SPARSE(yytext, loc);
+  ".zfill"   return Choreo::Parser::make_ZFILL(yytext, loc);
   ".any"     return Choreo::Parser::make_NONE(yytext, loc);
   ".async"   return Choreo::Parser::make_ASYNC(yytext, loc);
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
@@ -528,9 +531,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".row"     return Choreo::Parser::make_ROW(yytext, loc);
   ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);
   ".commit"  return Choreo::Parser::make_COMMIT(yytext, loc);
-  ".sp("     return Choreo::Parser::make_SPLPAREN(yytext, loc);
-  ".sp"      return Choreo::Parser::make_SP(yytext, loc);
-  "assert"   return Choreo::Parser::make_ASSERT (yytext,loc);
+  "assert"   return Choreo::Parser::make_ASSERT(yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);

@@ -10,6 +10,7 @@ namespace Choreo {
 enum class Storage;
 enum class BaseType;
 enum class ParallelLevel;
+enum class SwizMode;
 class ASTPipeline;
 class Preprocess;
 
@@ -158,6 +159,10 @@ public:
   }
 
   virtual const std::set<BaseType> VectorizableTypes(const ArchId&) const {
+    return {};
+  }
+
+  virtual const std::set<SwizMode> SupportedSwizzleModes(const ArchId &) const {
     return {};
   }
 

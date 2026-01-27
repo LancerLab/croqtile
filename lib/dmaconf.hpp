@@ -62,26 +62,24 @@ struct TransposeConfig final : public DMAConfig,
   __UDT_TYPE_INFO__(DMAConfig, TransposeConfig)
 };
 
-struct SwizzleConfig final : public DMAConfig,
-                             public TypeIDProvider<SwizzleConfig> {
-  int swizzle_value; // 128, 64, or 32
-
-  explicit SwizzleConfig(int val = 128) : swizzle_value(val) {}
-
-  const std::string Name() const override { return "swizzle"; }
-  void Print(std::ostream& os) const override {
-    os << "swizzle: " << swizzle_value;
-  };
-
-  int GetSwizzleValue() const { return swizzle_value; }
-
-  __UDT_TYPE_INFO__(DMAConfig, SwizzleConfig)
-};
-
 inline std::string STR(const DMAConfig& dc) {
   std::ostringstream oss;
   dc.Print(oss);
   return oss.str();
+}
+
+enum class SwizMode { NONE, B32, B64, B128};
+
+inline const std::string STR(SwizMode sm) {
+  switch (sm) {
+    case SwizMode::NONE: return "none";
+    case SwizMode::B32: return "b32";
+    case SwizMode::B64: return "b64";
+    case SwizMode::B128: return "b128";
+    default:
+      choreo_unreachable("unsupported swizzle mode.");
+  }
+  return "";
 }
 
 } // end namespace Choreo

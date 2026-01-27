@@ -3,7 +3,7 @@
 __co__ void sparse_dma(f32 [16, 16] input) {
   parallel p by 1 {
     with {x, y} in [1, 1] {
-      f = dma.copy.sp(2:4) input.chunkat(x, y) => local;
+      f = dma.copy.sp<2:4> input.chunkat(x, y) => local;
       f32 v = f.mdata.at(x, y);
     }
   }

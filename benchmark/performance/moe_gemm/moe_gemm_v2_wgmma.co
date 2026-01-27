@@ -105,11 +105,11 @@ __co__ void moe_gemm_wgmma_tma(global bf16 [M, K] input,
             }
             sync.shared;
 
-            sB = tma.copy.swizzle(128) weights.subspan(N_BLK, TILE_K).at(expert_id#n_tile_idx, ko) => shared;
+            sB = tma.copy.swizzle<128> weights.subspan(N_BLK, TILE_K).at(expert_id#n_tile_idx, ko) => shared;
             // compute mma
             foreach {ki} in [TILE_K / MMA_K] {
-              ma = mma.load.swizzle(128) sA.chunkat(_, ki);
-              mb = mma.load.swizzle(128) sB.chunkat(_, ki);
+              ma = mma.load.swizzle<128> sA.chunkat(_, ki);
+              mb = mma.load.swizzle<128> sB.chunkat(_, ki);
               mma.row.row mc, ma, mb;
             }
           }

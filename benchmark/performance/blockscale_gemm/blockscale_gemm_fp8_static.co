@@ -23,13 +23,13 @@ __co__ auto matmul(f8_e4m3 [M, K] lhs,
       nb = block_n / (BLK_N / WARP_N);
       foreach {iv_k} in [cdiv(K, BLK_K)] {
         // load 64x32 to smem
-        lhs_load_s = tma.copy.swizzle(128) lhs.chunkat(block_m, iv_k) => shared;
-        rhs_load_s = tma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s = tma.copy.swizzle<128> lhs.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = tma.copy.swizzle<128> rhs.chunkat(block_n, iv_k) => shared;
         mc_k = mma.fill.f32 0.0f;
         // WGMMA requires 128 threads: 4 warps x 32 threads/warp
         foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
-          ma = mma.load.swizzle(128) lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swizzle(128) rhs_load_s.chunkat(_, iv_warp);
+          ma = mma.load.swizzle<128> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swizzle<128> rhs_load_s.chunkat(_, iv_warp);
           mma.row.row mc_k, ma, mb;   // row * row : c += a * b;
         }
         mma.store mc_k, sTmp;

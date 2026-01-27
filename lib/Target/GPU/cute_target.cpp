@@ -3,6 +3,7 @@
 #include "gpu_target.hpp"
 #include "memcheck.hpp"
 #include "pipeline.hpp"
+#include "dmaconf.hpp"
 #include "target_registry.hpp"
 #include "types.hpp"
 
@@ -17,6 +18,13 @@ public:
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
 
   int DefaultOptLevel(const ArchId&) const override { return 3; }
+
+  const std::set<SwizMode> SupportedSwizzleModes(const ArchId & arch) const override{
+    if (IsFeatureSupported(arch, STR(ChoreoFeature::TMA)))
+      return {SwizMode::NONE, SwizMode::B32, SwizMode::B64, SwizMode::B128};
+    else
+      return {};
+  }
 
   const std::vector<ArchInfo> SupportedArchs() const override {
     return {

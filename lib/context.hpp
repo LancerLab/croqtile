@@ -606,6 +606,9 @@ public:
   auto TargetParallelLevels() const {
     return GetTarget().GetParallelLevels(GetArch());
   }
+  auto TargetSwizzleModes() const {
+    return GetTarget().SupportedSwizzleModes(GetArch());
+  }
 
 public:
   static CompilationContext& GetInstance() {

@@ -185,7 +185,7 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
     const std::string& bname, const std::string& buf_expr, const Storage sto,
     BaseType bty, const Shape& shp, bool is_host, const std::string& offset,
     const std::string& strides, const std::vector<size_t>& transp,
-    bool use_wgmma_layout, int swizzle_value) const {
+    bool use_wgmma_layout, SwizMode swizzle_mode) const {
   static int shp_cnt = 0;
   shp_cnt++;
   auto shpcnt = std::to_string(shp_cnt);
@@ -221,10 +221,10 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
       (bty == BaseType::F16 || bty == BaseType::BF16)) {
     // Select swizzle layout based on swizzle value
     std::string swizzle_layout;
-    switch (swizzle_value) {
-    case 32: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW32_Atom"; break;
-    case 64: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW64_Atom"; break;
-    case 128: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
+    switch (swizzle_mode) {
+      case SwizMode::B32: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW32_Atom"; break;
+    case SwizMode::B64: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW64_Atom"; break;
+    case SwizMode::B128: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
     default: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
     }
     tsr_decl << indent << "auto " << lyt_name
@@ -2051,7 +2051,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     // Use swizzle value only if explicitly specified, otherwise use 0 (no
     // swizzle)
-    int swizzle_value = n.IsSwizzleExplicit() ? n.GetSwizzleValue() : 0;
+    auto swizzle_mode = n.GetSwizzleMode();
 
     const auto f_mds = GenTensorDecl(
         RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
@@ -2061,7 +2061,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     const auto t_mds = GenTensorDecl(
         RemoveSuffix(t_buf_name, ".data()"), t_buf_name, t_sty->GetStorage(),
         t_sty->ElementType(), fty->GetShape(), false, t_mds_offset,
-        ValueSTR(t_stride, false, true), {}, use_wgmma_layout_t, swizzle_value);
+        ValueSTR(t_stride, false, true), {}, use_wgmma_layout_t, swizzle_mode);
 
     std::string f_mds_name{f_mds.first};
     std::string f_mds_decl{f_mds.second};
@@ -2429,13 +2429,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           major_order = "WGMMA_MajorOrder::K_MAJOR";
       }
       // Get swizzle value from MMA operation (default 128)
-      int swizzle_val = op.GetSwizzleValue();
+      auto swizzle_val = op.GetSwizzleMode();
       std::string swizzle_enum;
       switch (swizzle_val) {
-      case 0: swizzle_enum = "WGMMA_Swizzle::NS"; break;
-      case 32: swizzle_enum = "WGMMA_Swizzle::B32"; break;
-      case 64: swizzle_enum = "WGMMA_Swizzle::B64"; break;
-      case 128: swizzle_enum = "WGMMA_Swizzle::B128"; break;
+        case SwizMode::NONE: swizzle_enum = "WGMMA_Swizzle::NS"; break;
+      case SwizMode::B32: swizzle_enum = "WGMMA_Swizzle::B32"; break;
+      case SwizMode::B64: swizzle_enum = "WGMMA_Swizzle::B64"; break;
+      case SwizMode::B128: swizzle_enum = "WGMMA_Swizzle::B128"; break;
       default: swizzle_enum = "WGMMA_Swizzle::B128"; break;
       }
       ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
@@ -3780,12 +3780,12 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
 
     // Convert swizzle value to TMA_Swizzle enum and get CUtensorMapSwizzle
     // string
-    int swizzle_val = desc.GetSwizzleValue();
+    auto swizzle_mode = desc.GetSwizzleMode();
     TMA_Swizzle tma_swizzle;
-    switch (swizzle_val) {
-    case 32: tma_swizzle = TMA_Swizzle::B32; break;
-    case 64: tma_swizzle = TMA_Swizzle::B64; break;
-    case 128: tma_swizzle = TMA_Swizzle::B128; break;
+    switch (swizzle_mode) {
+      case SwizMode::B32: tma_swizzle = TMA_Swizzle::B32; break;
+    case SwizMode::B64: tma_swizzle = TMA_Swizzle::B64; break;
+    case SwizMode::B128: tma_swizzle = TMA_Swizzle::B128; break;
     default: tma_swizzle = TMA_Swizzle::NONE; break;
     }
     std::string cu_swizzle_str = cuda_stringify(tma_swizzle);

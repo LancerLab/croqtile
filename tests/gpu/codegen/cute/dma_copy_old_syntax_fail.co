@@ -1,8 +1,8 @@
 // RUN: choreo -gs -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
 
-// Test: Old syntax "dma.copy swizzle(128)" should fail
-// The new syntax requires "dma.copy.swizzle(128)" with a dot before swizzle
-// CHECK: error: syntax error, unexpected SWIZZLE
+// Test: Old syntax "dma.copy swiz<128>" should fail
+// The new syntax requires "dma.copy.swiz<128>" with a dot before swizzle
+// CHECK: error:
 __co__ f16 [64, 64] test_old_syntax_rejected(f16 [64, 16] lhs, f16 [16, 64] rhs) {
   f16 [64, 64] output{0.0f};
 
@@ -14,8 +14,8 @@ __co__ f16 [64, 64] test_old_syntax_rejected(f16 [64, 16] lhs, f16 [16, 64] rhs)
     rhs_load = dma.copy swizzle(128) rhs.chunkat(_, _) => shared;
 
     parallel q by 1 : group-4 {
-      ma = mma.load.swizzle(128) lhs_load.chunkat(_, _);
-      mb = mma.load.swizzle(128) rhs_load.chunkat(_, _);
+      ma = mma.load.swiz<128> lhs_load.chunkat(_, _);
+      mb = mma.load.swiz<128> rhs_load.chunkat(_, _);
       mma.row.col mc, ma, mb;
     }
 

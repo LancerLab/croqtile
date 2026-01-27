@@ -19,13 +19,13 @@ __co__ void bmm(global f8_e4m3 [B, M, K] lhs,
     parallel p by 1 : group-4 {
       foreach {iv_k} in [cdiv(K, BLK_K)] {
         // load 64x128 and 128x64 to smem
-        tma.copy.swizzle(128) lhs.subspan(1, WARP_M, BLK_K).stride(1, WARP_M, BLK_K).at(block_b, block_m, iv_k) => lhs_load_s;
-        tma.copy.swizzle(128) rhs.subspan(1, WARP_N, BLK_K).stride(1, WARP_N, BLK_K).at(block_b, block_n, iv_k) => rhs_load_s;
+        tma.copy.swizzle<128> lhs.subspan(1, WARP_M, BLK_K).stride(1, WARP_M, BLK_K).at(block_b, block_m, iv_k) => lhs_load_s;
+        tma.copy.swizzle<128> rhs.subspan(1, WARP_N, BLK_K).stride(1, WARP_N, BLK_K).at(block_b, block_n, iv_k) => rhs_load_s;
         mc_k = mma.fill.f32 0.0f;
         // WGMMA requires 128 threads: 4 warps x 32 threads/warp
         foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
-          ma = mma.load.swizzle(128) lhs_load_s.span_as([WARP_M, BLK_K]).chunkat(_, iv_warp);
-          mb = mma.load.swizzle(128) rhs_load_s.span_as([WARP_N, BLK_K]).chunkat(_, iv_warp);
+          ma = mma.load.swizzle<128> lhs_load_s.span_as([WARP_M, BLK_K]).chunkat(_, iv_warp);
+          mb = mma.load.swizzle<128> rhs_load_s.span_as([WARP_N, BLK_K]).chunkat(_, iv_warp);
           mma.row.row mc_k, ma, mb;
         }
         mma.store mc_k, output_s;
