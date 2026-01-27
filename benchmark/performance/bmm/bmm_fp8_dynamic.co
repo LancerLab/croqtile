@@ -54,8 +54,12 @@ int main() {
   auto b_h_logical = new __nv_fp8_e4m3[B * K * N];
   auto c_h = new float[B * M * N];
 
-  choreo::utils::fill_random(a_h, B * M * K, __nv_fp8_e4m3(0.0f), __nv_fp8_e4m3(1.0f));
-  choreo::utils::fill_random(b_h_logical, B * K * N, __nv_fp8_e4m3(0.0f), __nv_fp8_e4m3(1.0f));
+  for (size_t i = 0; i < B * M * K; i++) {
+    a_h[i] = __nv_fp8_e4m3(static_cast<float>(rand() % 2));
+  }
+  for (size_t i = 0; i < B * K * N; i++) {
+    b_h_logical[i] = __nv_fp8_e4m3(static_cast<float>(rand() % 2));
+  }
   for (size_t b = 0; b < B; ++b) {
     for (size_t k = 0; k < K; ++k) {
       for (size_t n = 0; n < N; ++n) {
@@ -63,7 +67,9 @@ int main() {
       }
     }
   }
-  choreo::utils::fill(c_h, c_h + B * M * N, 0.0f);
+  for (size_t i = 0; i < B * M * N; i++) {
+    c_h[i] = 0.0f;
+  }
 
   __nv_fp8_e4m3 *a_d, *b_d;
   float *c_d;
