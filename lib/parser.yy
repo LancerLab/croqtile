@@ -1711,6 +1711,12 @@ dma_attrib
         $1.sparse_m = $6;
         $$ = $1;
       }
+    | dma_attrib SPARSE LT integer_value COMMA integer_value GT {
+        $1.is_sparse = true;
+        $1.sparse_n = $4;
+        $1.sparse_m = $6;
+        $$ = $1;
+      }
     | dma_attrib ZFILL { $1.zfill = true; $$ = $1; }
     | /*empty*/ {}
     ;
@@ -1899,12 +1905,12 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, $12);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method SP IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
-        auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, true);
-        $$ = AST::Make<AST::MMA>(@1, op);
-      }
     | MMA mma_exec_method SPARSE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, true);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | MMA mma_exec_method SPARSE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
+        auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, true);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | MMA STORE IDENTIFIER COMMA chunkat_expr {

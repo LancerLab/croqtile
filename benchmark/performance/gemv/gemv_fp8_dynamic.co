@@ -36,7 +36,7 @@ __co__ void gemv_v2(global f8_e4m3 [M, K] lhs,
         f32 acc = 0.0f;
         foreach {iv_k} in [cdiv(K, BLK_K)] {
           // Load A tile via TMA, X tile via DMA (broadcast)
-          lhs_tile = tma.copy.swizzle(128) lhs.subspan(BLK_M, BLK_K).at(block_m, iv_k) => shared;
+          lhs_tile = tma.copy.swizzle<128> lhs.subspan(BLK_M, BLK_K).at(block_m, iv_k) => shared;
           rhs_tile = dma.copy rhs.subspan(BLK_K).at(iv_k) => shared;
           sync.shared;
 

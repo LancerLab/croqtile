@@ -2503,7 +2503,7 @@ public:
     std::string lhs;
     std::string rhs;
     std::string mdata;
-    bool sparse;
+    bool is_sparse;
     bool scale;
     ptr<ChunkAt> scale_a;
     ptr<Expr> scale_b;
@@ -2731,7 +2731,7 @@ public:
       case COL_ROW: os << ".COL.ROW"; break;
       default: choreo_unreachable("unsupported dma execution mode."); break;
       }
-      if (e_info.sparse) os << ".SP";
+      if (e_info.is_sparse) os << ".SP";
       if (e_info.scale) os << ".SCALE";
       os << " " << e_info.acc << ", " << e_info.lhs << ", " << e_info.rhs;
     } break;
