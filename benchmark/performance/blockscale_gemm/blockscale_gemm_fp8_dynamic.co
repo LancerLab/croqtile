@@ -9,47 +9,38 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs,
                    global f8_e4m3 [N, K] rhs,
                    global f32 [DIV_BLK_N, DIV_BLK_K] scale_b,
                    global f32 [M, N] output) {
-  int WARP_M = 64, WARP_N = 64, WARP_K = 32;
+  int WARP_M = 64, WARP_N = 128, WARP_K = 32;
 
   // each block handles 64x64 block with WGMMA
   // WGMMA requires 128 threads (4 warps x 32 threads/warp)
   parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
     shared f8_e4m3 [WARP_M, BLK_K] lhs_load_s;
     shared f8_e4m3 [WARP_N, BLK_K] rhs_load_s;
-    shared f32 [WARP_M, WARP_N] output_s {0.0f};
 
     parallel p by 1 : group-4 {
-      nb = block_n / (BLK_N / WARP_N);
+      mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, BLK_K)] {
         // load 64x32 to smem
         // tma.copy.swizzle<128> lhs.chunkat(block_m, iv_k) => lhs_load_s;
         tma.copy.swiz<128>.zfill lhs.subspan(WARP_M, BLK_K).stride(WARP_M, BLK_K).at(block_m, iv_k) => lhs_load_s;
         tma.copy.swizzle<128> rhs.chunkat(block_n, iv_k) => rhs_load_s;
-        mc_k = mma.fill.f32 0.0f;
+        
         // WGMMA requires 128 threads: 4 warps x 32 threads/warp
         foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
           ma = mma.load.swizzle<128> lhs_load_s.chunkat(_, iv_warp);
           mb = mma.load.swizzle<128> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row mc_k, ma, mb; 
+          mma.row.row.scale mc, ma, mb, scale_a.chunkat(block_m, iv_k), scale_b.at(block_n, iv_k);
         }
-        mma.store mc_k, output_s;
-        sync.shared;
-        parallel {m, n} by [WARP_M, 2] : thread {
-          inthreads(block_m # m < M){
-            sa = scale_a.at(block_m # m, iv_k);
-            sb = scale_b.at(nb, iv_k);
-            foreach {ni} in [WARP_N / 2] {
-              output.at(block_m # m, block_n # (n # ni)) += output_s.at(m, n # ni) * sa * sb;
-            }
-          }
-        }
-        sync.shared;
       }
+      mma.store mc, output.chunkat(block_m, block_n);
     }
   }
 }
 
 int main() {
+  // size_t M = 4096;
+  // size_t N = 16384;
+  // size_t K = 7168;
   size_t M = 127;
   size_t N = 128;
   size_t K = 128;
