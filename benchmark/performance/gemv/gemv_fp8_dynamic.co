@@ -1,0 +1,133 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define BLK_M 256
+#define BLK_K 128
+
+// TODO support symbolic representation for data size
+// v1 gemv, use choreo scalar description, may trigger auto vectorization in future
+__co__ void gemv(global f8_e4m3 [M, K] lhs,
+                global f8_e4m3 [K] rhs,
+                global f32 [M] output) {
+  parallel {block_m} by [cdiv(M, BLK_M)] : block {
+    parallel m by BLK_M : thread {
+      if (block_m # m < M) {
+        f32 acc = 0.0f;
+        foreach {k} in [K] {
+          acc += lhs.at(block_m # m, k) * rhs.at(k);
+        }
+        output.at(block_m # m) = acc;
+      }
+    }
+  }
+}
+
+// v2 gemv, use choreo explicit tileflow description
+// - Block-tiling on M (rows)
+// - TMA load for A tile (rows x K-tile) into shared
+// - Cooperative load of X (rhs) tile into shared once per block
+// - Per-thread row accumulation in registers
+__co__ void gemv_v2(global f8_e4m3 [M, K] lhs,
+                   global f8_e4m3 [K] rhs,
+                   global f32 [M] output) {
+  parallel {block_m} by [cdiv(M, BLK_M)] : block {
+    parallel m by BLK_M : thread {
+      if (block_m # m < M) {
+        f32 acc = 0.0f;
+        foreach {iv_k} in [cdiv(K, BLK_K)] {
+          // Load A tile via TMA, X tile via DMA (broadcast)
+          lhs_tile = tma.copy.swizzle(128) lhs.subspan(BLK_M, BLK_K).at(block_m, iv_k) => shared;
+          rhs_tile = dma.copy rhs.subspan(BLK_K).at(iv_k) => shared;
+          sync.shared;
+
+          foreach {kk} in [BLK_K] {
+            if (iv_k # kk < K) {
+              acc += lhs_tile.data.at(m, kk) * rhs_tile.data.at(kk);
+            }
+          }
+          sync.shared;
+        }
+        output.at(block_m # m) = acc;
+      }
+    }
+  }
+}
+
+int main() {
+  size_t M = 4096;
+  size_t K = 4096;
+
+  auto a_h = new __nv_fp8_e4m3[M * K];
+  auto x_h = new __nv_fp8_e4m3[K];
+  auto y_h = new float[M];
+
+  choreo::utils::fill_random(a_h, M * K, __nv_fp8_e4m3(0.0f), __nv_fp8_e4m3(1.0f));
+  choreo::utils::fill_random(x_h, K, __nv_fp8_e4m3(0.0f), __nv_fp8_e4m3(1.0f));
+  choreo::fill(y_h, y_h + M, 0.0f);
+
+  __nv_fp8_e4m3 *a_d, *x_d;
+  float *y_d;
+  cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3));
+  cudaMalloc(&x_d, K * sizeof(__nv_fp8_e4m3));
+  cudaMalloc(&y_d, M * sizeof(float));
+
+  cudaMemcpy(a_d, a_h, M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice);
+  cudaMemcpy(x_d, x_h, K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice);
+  cudaMemcpy(y_d, y_h, M * sizeof(float), cudaMemcpyHostToDevice);
+
+  auto lhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K});
+  auto rhs_d = choreo::make_spanview<choreo::f8_e4m3, 1>(x_d, {K});
+  auto out_d = choreo::make_spanview<choreo::f32, 1>(y_d, {M});
+
+  auto lhs = choreo::make_spanview<choreo::f8_e4m3, 2>(a_h, {M, K});
+  auto rhs = choreo::make_spanview<choreo::f8_e4m3, 1>(x_h, {K});
+
+  auto verify = [&](const char *label) {
+    auto res = choreo::make_spanview<choreo::f32, 1>(y_h, {M});
+    float base_tol = 0.3f;
+    float rel_tol = 0.05f;
+    for (size_t i = 0; i < M; ++i) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k) {
+        ref += choreo::to_f32(lhs[(int)i][(int)k]) * choreo::to_f32(rhs[(int)k]);
+      }
+      float got = choreo::to_f32(res[(int)i]);
+      float tol = base_tol + rel_tol * std::abs(ref);
+      choreo::choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
+    }
+    std::cout << "Test Passed " << label << "\n" << std::endl;
+  };
+
+  choreo::TimerOption topt;
+  topt.warmup = 10;
+  topt.repeat = 50;
+
+  auto avg_ms_gemv = choreo::timing(
+      [&]() {
+        cudaMemset(y_d, 0, M * sizeof(float));
+        gemv(lhs_d, rhs_d, out_d);
+      },
+      topt);
+  std::cout << "Timing gemv avg ms: " << avg_ms_gemv << "\n";
+
+  cudaMemset(y_d, 0, M * sizeof(float));
+  gemv(lhs_d, rhs_d, out_d);
+  cudaMemcpy(y_h, y_d, M * sizeof(float), cudaMemcpyDeviceToHost);
+  verify("gemv");
+
+  auto avg_ms_gemv_v2 = choreo::timing(
+      [&]() {
+        cudaMemset(y_d, 0, M * sizeof(float));
+        gemv_v2(lhs_d, rhs_d, out_d);
+      },
+      topt);
+  std::cout << "Timing gemv_v2 avg ms: " << avg_ms_gemv_v2 << "\n";
+
+  cudaMemset(y_d, 0, M * sizeof(float));
+  gemv_v2(lhs_d, rhs_d, out_d);
+  cudaMemcpy(y_h, y_d, M * sizeof(float), cudaMemcpyDeviceToHost);
+  verify("gemv_v2");
+}
+
+// CHECK: Test Passed gemv
+// CHECK: Test Passed gemv_v2
