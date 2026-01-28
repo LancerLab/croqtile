@@ -2005,7 +2005,7 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
 }
 
 template <typename AccT, typename ScaleT>
-__device__ static inline void scale_accumulator(AccT* d, ScaleT* scale_a_ptr,
+__device__ static inline void scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
                                                 int scale_a_ld,
                                                 ScaleT scale_b) {
   if constexpr (std::is_same_v<AccT, f16> && std::is_same_v<ScaleT, f32>) {
@@ -2020,10 +2020,10 @@ __device__ static inline void scale_accumulator(AccT* d, ScaleT* scale_a_ptr,
 #pragma unroll
     for (int c = 0; c < __col_num; c++) {
       int base = c * 4;
-      d[base + 0] = f16(float(d[base + 0]) * sa0 * scale_b);
-      d[base + 1] = f16(float(d[base + 1]) * sa0 * scale_b);
-      d[base + 2] = f16(float(d[base + 2]) * sa1 * scale_b);
-      d[base + 3] = f16(float(d[base + 3]) * sa1 * scale_b);
+      d[base + 0] += f16(float(scale_d[base + 0]) * sa0 * scale_b);
+      d[base + 1] += f16(float(scale_d[base + 1]) * sa0 * scale_b);
+      d[base + 2] += f16(float(scale_d[base + 2]) * sa1 * scale_b);
+      d[base + 3] += f16(float(scale_d[base + 3]) * sa1 * scale_b);
     }
   }
 }

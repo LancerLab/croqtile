@@ -2549,6 +2549,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       auto& ssmi_c = cgi.GetSymbolMMA(InScopeName(c_sym));
       std::string acc_ty = NameBaseType(ssmi_c.ty);
+
+      if (op.HasScale()) {
+        // dtype of accu: s32, f16, f32 (f16 => u32)
+        auto acc_dtype = ssmi.ty;
+        ValueItem frag_len = sbe::bop(OpCode::DIVIDE, ssmi.shape[1], sbe::nu(2))
+                                 ->Normalize(); // N / 2
+        if (ssmi.ty == BaseType::F16) {
+          acc_dtype = BaseType::U32;
+          frag_len = sbe::bop(OpCode::DIVIDE, frag_len, sbe::nu(2))->Normalize();
+        }
+        reg_num_d = *VIInt(frag_len);
+
+        ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym << "_scale_frag["
+          << reg_num_d << "];\n";
+      }
       ds << d_indent << "cute::" << mma_policy << "<";
       if (!policy_is_tn) {
         ds << cute_gmma_major_cast << "(" << trans_a << "), "
@@ -2556,6 +2571,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       ds << ">::fma(" << "desc_" << a_sym << ", desc_" << b_sym;
       for (size_t i = 0; i < reg_num_d; ++i) {
+        if (op.HasScale())
+          ds << ", " << c_sym << "_scale_frag[" << i << "]";
+        else
         ds << ", " << c_sym << "_frag[" << i << "]";
       }
       if (policy_is_sparse) ds << ", " << a_sym << "_meta";
@@ -2572,7 +2590,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "scale_accumulator<" << acc_ty
            << ", float"
               ">("
-           << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_frag"
+           << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_frag), "
+           << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_scale_frag"
            << "), " << c_sym << "_scale_a_ptr, " << scale_a_ld << ", " << c_sym
            << "_scale_b_val);\n";
       }
