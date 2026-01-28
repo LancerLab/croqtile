@@ -154,10 +154,11 @@ private:
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
-          const std::string& fs, const std::string& ts, SwizMode swizzle = SwizMode::NONE,
+          const std::string& fs, const std::string& ts,
+          SwizMode swizzle = SwizMode::NONE,
           ParallelLevel pb_lvl = ParallelLevel::BLOCK)
-      : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++),
-        swiz_mode(swizzle), pb_level(pb_lvl) {
+      : from(f), to(t), f_sym(fs), t_sym(ts), idx(index++), swiz_mode(swizzle),
+        pb_level(pb_lvl) {
     assert(from && to);
     auto fty = GetSpannedType(from->GetType());
     auto tty = GetSpannedType(to->GetType());

@@ -222,9 +222,15 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
     // Select swizzle layout based on swizzle value
     std::string swizzle_layout;
     switch (swizzle_mode) {
-      case SwizMode::B32: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW32_Atom"; break;
-    case SwizMode::B64: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW64_Atom"; break;
-    case SwizMode::B128: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
+    case SwizMode::B32:
+      swizzle_layout = "cute::SM90::GMMA::Layout_K_SW32_Atom";
+      break;
+    case SwizMode::B64:
+      swizzle_layout = "cute::SM90::GMMA::Layout_K_SW64_Atom";
+      break;
+    case SwizMode::B128:
+      swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom";
+      break;
     default: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
     }
     tsr_decl << indent << "auto " << lyt_name
@@ -2432,7 +2438,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto swizzle_val = op.GetSwizzleMode();
       std::string swizzle_enum;
       switch (swizzle_val) {
-        case SwizMode::NONE: swizzle_enum = "WGMMA_Swizzle::NS"; break;
+      case SwizMode::NONE: swizzle_enum = "WGMMA_Swizzle::NS"; break;
       case SwizMode::B32: swizzle_enum = "WGMMA_Swizzle::B32"; break;
       case SwizMode::B64: swizzle_enum = "WGMMA_Swizzle::B64"; break;
       case SwizMode::B128: swizzle_enum = "WGMMA_Swizzle::B128"; break;
@@ -2543,24 +2549,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       auto& ssmi_c = cgi.GetSymbolMMA(InScopeName(c_sym));
       std::string acc_ty = NameBaseType(ssmi_c.ty);
-      if (op.HasScale()) {
-        ds << d_indent << acc_ty << " " << c_sym << "_scale_frag["
-          << reg_num_d << "];\n";
-        ds << d_indent << "memset(" << c_sym << "_scale_frag, 0, sizeof("
-          << c_sym << "_scale_frag));\n";
-      }
-
       ds << d_indent << "cute::" << mma_policy << "<";
       if (!policy_is_tn) {
         ds << cute_gmma_major_cast << "(" << trans_a << "), "
-          << cute_gmma_major_cast << "(" << trans_b << ")";
+           << cute_gmma_major_cast << "(" << trans_b << ")";
       }
       ds << ">::fma(" << "desc_" << a_sym << ", desc_" << b_sym;
       for (size_t i = 0; i < reg_num_d; ++i) {
-        if (op.HasScale())
-         ds << ", " << c_sym << "_scale_frag[" << i << "]";
-        else
-         ds << ", " << c_sym << "_frag[" << i << "]";
+        ds << ", " << c_sym << "_frag[" << i << "]";
       }
       if (policy_is_sparse) ds << ", " << a_sym << "_meta";
       ds << ");\n";
@@ -2569,42 +2565,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         std::string dim_n = STR(ssmi_c.shape.at(1));
         auto scale_a_strides = GenStrides(op.ScaleA());
         std::string scale_a_ld = ValueSTR(scale_a_strides.front());
-        ds << d_indent << "float* " << c_sym
-          << "_scale_a_ptr = (float*)(" << ExprSTR(op.ScaleA(), false)
-          << ");\n";
+        ds << d_indent << "float* " << c_sym << "_scale_a_ptr = (float*)("
+           << ExprSTR(op.ScaleA(), false) << ");\n";
         ds << d_indent << "float " << c_sym << "_scale_b_val = "
-          << "static_cast<float>(" << ExprSTR(op.ScaleB(), false)
-          << ");\n";
-        ds << d_indent << "{\n";
-        IncrDeviceIndent();
-        ds << d_indent << "int __tid = threadIdx.x % 128;\n";
-        ds << d_indent << "int __lane = __tid % 32;\n";
-        ds << d_indent << "int __warp = __tid / 32;\n";
-        ds << d_indent << "int __row0 = __warp * 16 + __lane / 4;\n";
-        ds << d_indent << "int __row1 = __row0 + 8;\n";
-        ds << d_indent << "int __col_num = " << dim_n << " / 8;\n";
-          ds << d_indent << "int __scale_a_ld = " << scale_a_ld << ";\n";
-          ds << d_indent << "float __sa0 = " << c_sym
-            << "_scale_a_ptr[__row0 * __scale_a_ld];\n";
-          ds << d_indent << "float __sa1 = " << c_sym
-            << "_scale_a_ptr[__row1 * __scale_a_ld];\n";
-        ds << d_indent << "float __sb = " << c_sym << "_scale_b_val;\n";
-        ds << d_indent << "#pragma unroll\n";
-        ds << d_indent << "for (int __c = 0; __c < __col_num; ++__c) {\n";
-        IncrDeviceIndent();
-        ds << d_indent << "int __base = __c * 4;\n";
-        ds << d_indent << c_sym << "_frag[__base + 0] += (" << acc_ty
-          << ")((float)" << c_sym << "_scale_frag[__base + 0] * __sa0 * __sb);\n";
-        ds << d_indent << c_sym << "_frag[__base + 1] += (" << acc_ty
-          << ")((float)" << c_sym << "_scale_frag[__base + 1] * __sa0 * __sb);\n";
-        ds << d_indent << c_sym << "_frag[__base + 2] += (" << acc_ty
-          << ")((float)" << c_sym << "_scale_frag[__base + 2] * __sa1 * __sb);\n";
-        ds << d_indent << c_sym << "_frag[__base + 3] += (" << acc_ty
-          << ")((float)" << c_sym << "_scale_frag[__base + 3] * __sa1 * __sb);\n";
-        DecrDeviceIndent();
-        ds << d_indent << "}\n";
-        DecrDeviceIndent();
-        ds << d_indent << "}\n";
+           << "static_cast<float>(" << ExprSTR(op.ScaleB(), false) << ");\n";
+        ds << d_indent << "scale_accumulator<" << acc_ty
+           << ", float"
+              ">("
+           << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_frag"
+           << "), " << c_sym << "_scale_a_ptr, " << scale_a_ld << ", " << c_sym
+           << "_scale_b_val);\n";
       }
     } break;
     case AST::MMAOperation::Store: {
@@ -3838,7 +3808,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     auto swizzle_mode = desc.GetSwizzleMode();
     TMA_Swizzle tma_swizzle;
     switch (swizzle_mode) {
-      case SwizMode::B32: tma_swizzle = TMA_Swizzle::B32; break;
+    case SwizMode::B32: tma_swizzle = TMA_Swizzle::B32; break;
     case SwizMode::B64: tma_swizzle = TMA_Swizzle::B64; break;
     case SwizMode::B128: tma_swizzle = TMA_Swizzle::B128; break;
     default: tma_swizzle = TMA_Swizzle::NONE; break;

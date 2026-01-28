@@ -162,7 +162,7 @@ public:
     return {};
   }
 
-  virtual const std::set<SwizMode> SupportedSwizzleModes(const ArchId &) const {
+  virtual const std::set<SwizMode> SupportedSwizzleModes(const ArchId&) const {
     return {};
   }
 

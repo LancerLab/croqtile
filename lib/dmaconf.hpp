@@ -68,16 +68,15 @@ inline std::string STR(const DMAConfig& dc) {
   return oss.str();
 }
 
-enum class SwizMode { NONE, B32, B64, B128};
+enum class SwizMode { NONE, B32, B64, B128 };
 
 inline const std::string STR(SwizMode sm) {
   switch (sm) {
-    case SwizMode::NONE: return "none";
-    case SwizMode::B32: return "b32";
-    case SwizMode::B64: return "b64";
-    case SwizMode::B128: return "b128";
-    default:
-      choreo_unreachable("unsupported swizzle mode.");
+  case SwizMode::NONE: return "none";
+  case SwizMode::B32: return "b32";
+  case SwizMode::B64: return "b64";
+  case SwizMode::B128: return "b128";
+  default: choreo_unreachable("unsupported swizzle mode.");
   }
   return "";
 }

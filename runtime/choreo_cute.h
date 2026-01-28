@@ -2004,6 +2004,30 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
     MMA_Policy<MMA>::typeD::template store<Tensor, AccumT>(D, d);
 }
 
+template <typename AccT, typename ScaleT>
+__device__ static inline void scale_accumulator(AccT* d, ScaleT* scale_a_ptr,
+                                                int scale_a_ld,
+                                                ScaleT scale_b) {
+  if constexpr (std::is_same_v<AccT, f16> && std::is_same_v<ScaleT, f32>) {
+    int __tid = threadIdx.x % 128;
+    int __lane = __tid % 32;
+    int __warp = __tid / 32;
+    int __row0 = __warp * 16 + __lane / 4;
+    int __row1 = __row0 + 8;
+    int __col_num = 64 / 8;
+    float sa0 = scale_a_ptr[__row0 * scale_a_ld];
+    float sa1 = scale_a_ptr[__row1 * scale_a_ld];
+#pragma unroll
+    for (int c = 0; c < __col_num; c++) {
+      int base = c * 4;
+      d[base + 0] = f16(float(d[base + 0]) * sa0 * scale_b);
+      d[base + 1] = f16(float(d[base + 1]) * sa0 * scale_b);
+      d[base + 2] = f16(float(d[base + 2]) * sa1 * scale_b);
+      d[base + 3] = f16(float(d[base + 3]) * sa1 * scale_b);
+    }
+  }
+}
+
 // --------------- MMA policy specializations ---------------
 struct MMA {};
 struct CUTE_MMA : MMA {};

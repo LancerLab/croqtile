@@ -7,16 +7,16 @@
 
 #include <algorithm>
 #include <assert.h>
-#include <cmath>            // For fp16
-#include <cstdint>          // For fixed-width integer types
+#include <cmath>   // For fp16
+#include <cstdint> // For fixed-width integer types
+#include <cstdlib>
 #include <initializer_list> // for std::initializer_list
 #include <iostream>         // report error
 #include <map>
 #include <memory>
 #include <random>
-#include <string>
-#include <cstdlib>
 #include <sstream>
+#include <string>
 
 #if __has_include("private_target0_defines.h")
 #include "private_target0_defines.h"
@@ -35,8 +35,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <utility>
 #include <limits.h>
+#include <utility>
 #ifdef __USE_CUDA_TYPE__
 #include "cuda.h"
 #if CUDA_VERSION >= 11000
@@ -2107,8 +2107,7 @@ inline double timing(F&& matmul, const TimerOption& opt, Args&&... args) {
   int warmup = std::max(0, opt.warmup);
   int repeat = std::max(1, opt.repeat);
 
-  for (int i = 0; i < warmup; ++i)
-    matmul(std::forward<Args>(args)...);
+  for (int i = 0; i < warmup; ++i) matmul(std::forward<Args>(args)...);
 
   if (opt.sync) abend_true(cudaDeviceSynchronize());
 
@@ -2117,8 +2116,7 @@ inline double timing(F&& matmul, const TimerOption& opt, Args&&... args) {
   abend_true(cudaEventCreate(&start));
   abend_true(cudaEventCreate(&stop));
   abend_true(cudaEventRecord(start));
-  for (int i = 0; i < repeat; ++i)
-    matmul(std::forward<Args>(args)...);
+  for (int i = 0; i < repeat; ++i) matmul(std::forward<Args>(args)...);
   abend_true(cudaEventRecord(stop));
   abend_true(cudaEventSynchronize(stop));
 
@@ -2138,10 +2136,8 @@ inline bool profile(F&& matmul, ProfilerOption& opt, Args&&... args) {
   if (in_run && std::string(in_run) == "1") {
     int warmup = std::max(0, opt.warmup);
     int repeat = std::max(1, opt.repeat);
-    for (int i = 0; i < warmup; ++i)
-      matmul(std::forward<Args>(args)...);
-    for (int i = 0; i < repeat; ++i)
-      matmul(std::forward<Args>(args)...);
+    for (int i = 0; i < warmup; ++i) matmul(std::forward<Args>(args)...);
+    for (int i = 0; i < repeat; ++i) matmul(std::forward<Args>(args)...);
     abend_true(cudaDeviceSynchronize());
     return true;
   }

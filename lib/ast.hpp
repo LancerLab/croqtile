@@ -2362,7 +2362,8 @@ struct DMAAttribute {
   int sparse_m = 0;
   DMAAttribute(SwizMode swiz = SwizMode::NONE, bool zf = false, bool sp = false,
                int sp_n = 0, int sp_m = 0)
-    : sw_mode(swiz), zfill(zf), is_sparse(sp), sparse_n(sp_n), sparse_m(sp_m) {}
+      : sw_mode(swiz), zfill(zf), is_sparse(sp), sparse_n(sp_n),
+        sparse_m(sp_m) {}
 };
 
 struct DMA : public Node, public TypeIDProvider<DMA> {
@@ -2387,8 +2388,9 @@ public:
 
 public:
   explicit DMA(const location& l, const std::string& o, const std::string& r,
-               const ptr<Node>& f, const ptr<Node>& t, bool a, const DMAAttribute & at = {},
-               bool is_tma = false, const ptr<DMAConfig>& c = nullptr)
+               const ptr<Node>& f, const ptr<Node>& t, bool a,
+               const DMAAttribute& at = {}, bool is_tma = false,
+               const ptr<DMAConfig>& c = nullptr)
       : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),
         enforce_tma(is_tma), from(f), to(t), attr(at), config(c) {
     chained = false;
@@ -2399,9 +2401,10 @@ public:
 
   explicit DMA(const location& l, const std::string& o, const std::string& r,
                const std::string& chained_from, const ptr<Node>& f,
-               const ptr<Node>& t, bool a, const DMAAttribute & at = {}, bool is_tma = false, const ptr<DMAConfig>& c = nullptr)
-      : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),enforce_tma(is_tma), 
-        from(f), to(t), attr(at), config(c) {
+               const ptr<Node>& t, bool a, const DMAAttribute& at = {},
+               bool is_tma = false, const ptr<DMAConfig>& c = nullptr)
+      : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),
+        enforce_tma(is_tma), from(f), to(t), attr(at), config(c) {
     chained = true;
     chain_from = chained_from;
     if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
@@ -2427,7 +2430,9 @@ public:
   bool IsSparse() const { return attr.is_sparse; }
   bool IsOOBZeroFill() const { return attr.zfill; }
   SwizMode GetSwizzleMode() const { return attr.sw_mode; }
-  const std::pair<int, int> GetSparsePattern() const { return {attr.sparse_n, attr.sparse_m}; }
+  const std::pair<int, int> GetSparsePattern() const {
+    return {attr.sparse_n, attr.sparse_m};
+  }
 
   const ptr<DMAConfig>& GetConfig() const { return config; }
 
@@ -2454,7 +2459,8 @@ public:
     if (config) os << "\n" << prefix << "  `- config: " << STR(*config);
     if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
     if (attr.is_sparse) {
-      os << "\n" << prefix << "  `- sparse: " << attr.sparse_n << ":" << attr.sparse_m;
+      os << "\n"
+         << prefix << "  `- sparse: " << attr.sparse_n << ":" << attr.sparse_m;
     }
     os << "\n" << prefix << "  `- from: ";
     from->Print(os, "", with_type);
@@ -2527,14 +2533,16 @@ public:
       : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
                const std::string& r, bool sp = false)
-      : tag(Exec), info(ExecInfo{m, o, l, r, "", sp, false, nullptr, nullptr}) {}
+      : tag(Exec), info(ExecInfo{m, o, l, r, "", sp, false, nullptr, nullptr}) {
+  }
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
                const std::string& r, const std::string& e, bool sp)
       : tag(Exec), info(ExecInfo{m, o, l, r, e, sp, false, nullptr, nullptr}) {}
-    MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
-           const std::string& r, const ptr<ChunkAt>& scale_a,
-           const ptr<Expr>& scale_b)
-      : tag(Exec), info(ExecInfo{m, o, l, r, "", false, true, scale_a, scale_b}) {}
+  MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
+               const std::string& r, const ptr<ChunkAt>& scale_a,
+               const ptr<Expr>& scale_b)
+      : tag(Exec),
+        info(ExecInfo{m, o, l, r, "", false, true, scale_a, scale_b}) {}
   MMAOperation(const std::string& n, const ptr<ChunkAt>& c)
       : tag(Store), info(StoreInfo{n, c}) {}
   MMAOperation() : tag(Commit), info() {}

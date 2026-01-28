@@ -365,9 +365,8 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   if (!swiz_set.empty() && !swiz_set.count(n.GetSwizzleMode())) {
     // For now, we just validate the swizzle value is valid (128, 64, or 32)
     // The WGMMA context check will be done in codegen phase
-    Error1(n.LOC(), "Invalid swizzle mode: " + STR(n.GetSwizzleMode()) +
-                          "."); 
-      return false;
+    Error1(n.LOC(), "Invalid swizzle mode: " + STR(n.GetSwizzleMode()) + ".");
+    return false;
   }
 
   if (n.IsSparse()) {
@@ -591,8 +590,8 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       auto mma_swizzle = op.GetSwizzleMode();
       auto swiz_set = CCtx().TargetSwizzleModes();
       if (!swiz_set.empty() && !swiz_set.count(mma_swizzle)) {
-        Error1(n.LOC(), "Invalid swizzle value in MMA load: " +
-                            STR(mma_swizzle) + ".");
+        Error1(n.LOC(),
+               "Invalid swizzle value in MMA load: " + STR(mma_swizzle) + ".");
         return false;
       }
 
