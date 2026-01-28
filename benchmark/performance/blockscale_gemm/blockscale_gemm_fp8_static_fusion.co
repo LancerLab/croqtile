@@ -1,0 +1,141 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 128
+#define N 2048
+#define K 512
+#define BLK_N 128
+#define BLK_K 128
+#define N_SMALL 64
+#define SCALE_B_M_SMALL 1
+
+__co__ auto matmul_m64n128k32(f8_e4m3 [M, K] lhs,
+                             f32 [M, K / BLK_K] scale_a,
+                             f8_e4m3 [N, K] rhs,
+                             f32 [N / BLK_N, K / BLK_K] scale_b) {
+  f32 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 128, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    parallel p by 1 : group-4 {
+      mc = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, BLK_K)] {
+        lhs_load_s = tma.copy.swizzle(128) lhs.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = tma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
+          ma = mma.load.swizzle(128) lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row.scale mc, ma, mb, scale_a.chunkat(block_m, iv_k), scale_b.at(block_n, iv_k);
+        }
+      }
+      mma.store mc, output.chunkat(block_m, block_n);
+    }
+  }
+
+  return output;
+}
+
+__co__ auto matmul_m64n64k32(f8_e4m3 [M, K] lhs,
+                            f32 [M, K / BLK_K] scale_a,
+                            f8_e4m3 [N_SMALL, K] rhs,
+                            f32 [SCALE_B_M_SMALL, K / BLK_K] scale_b) {
+  f32 [M, N_SMALL] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N_SMALL, WARP_N)] : block {
+    parallel p by 1 : group-4 {
+      mc = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, BLK_K)] {
+        lhs_load_s = tma.copy.swizzle(128) lhs.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = tma.copy.swizzle(128) rhs.chunkat(block_n, iv_k) => shared;
+        foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
+          ma = mma.load.swizzle(128) lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swizzle(128) rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row.scale mc, ma, mb, scale_a.chunkat(block_m, iv_k), scale_b.at(block_n / (BLK_N / WARP_N), iv_k);
+        }
+      }
+      mma.store mc, output.chunkat(block_m, block_n);
+    }
+  }
+
+  return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+  auto scale_a = choreo::make_spandata<choreo::f32>(M, K / 128);
+  auto rhs = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+  auto scale_b = choreo::make_spandata<choreo::f32>(N / 128, K / 128);
+  auto rhs_small = choreo::make_spandata<choreo::f8_e4m3>(N_SMALL, K);
+  auto scale_b_small = choreo::make_spandata<choreo::f32>(SCALE_B_M_SMALL, K / 128);
+  lhs.fill_random(-2.0f, 2.0f);
+  scale_a.fill_random(0.5f, 2.0f);
+  rhs.fill_random(-2.0f, 2.0f);
+  scale_b.fill_random(0.5f, 2.0f);
+  rhs_small.fill_random(-2.0f, 2.0f);
+  scale_b_small.fill_random(0.5f, 2.0f);
+
+  choreo::TimerOption topt;
+  topt.warmup = 10;
+  topt.repeat = 50;
+
+  auto avg_ms_m64n128k32 = choreo::timing(
+      [&]() { matmul_m64n128k32(lhs.view(), scale_a.view(), rhs.view(), scale_b.view()); },
+      topt);
+  std::cout << "Timing m64n128k32 avg ms: " << avg_ms_m64n128k32 << "\n";
+
+  auto res = matmul_m64n128k32(lhs.view(), scale_a.view(), rhs.view(), scale_b.view());
+
+  float base_tol = 0.3f;
+  float rel_tol = 0.05f;
+  // verification (subset) with blockwise scaling
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t kb = 0; kb < (size_t)(K / BLK_K); ++kb) {
+        float sa = choreo::to_f32(scale_a[(int)i][(int)kb]);
+        float sb = choreo::to_f32(scale_b[(int)(j / BLK_N)][(int)kb]);
+        for (size_t kk = 0; kk < (size_t)BLK_K; ++kk) {
+          size_t k = kb * BLK_K + kk;
+          ref += choreo::to_f32(lhs[(int)i][(int)k]) * sa *
+                 choreo::to_f32(rhs[(int)j][(int)k]) * sb;
+        }
+      }
+      float got = choreo::to_f32(res[(int)i][(int)j]);
+      float tol = base_tol + rel_tol * std::abs(ref);
+      choreo::choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
+    }
+
+  std::cout << "Test Passed m64n128k32\n" << std::endl;
+
+  auto avg_ms_m64n64k32 = choreo::timing(
+      [&]() { matmul_m64n64k32(lhs.view(), scale_a.view(), rhs_small.view(), scale_b_small.view()); },
+      topt);
+  std::cout << "Timing m64n64k32 avg ms: " << avg_ms_m64n64k32 << "\n";
+
+  auto res_small = matmul_m64n64k32(lhs.view(), scale_a.view(), rhs_small.view(), scale_b_small.view());
+
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N_SMALL; ++j) {
+      float ref = 0.0f;
+      for (size_t kb = 0; kb < (size_t)(K / BLK_K); ++kb) {
+        float sa = choreo::to_f32(scale_a[(int)i][(int)kb]);
+        float sb = choreo::to_f32(scale_b_small[(int)(j / BLK_N)][(int)kb]);
+        for (size_t kk = 0; kk < (size_t)BLK_K; ++kk) {
+          size_t k = kb * BLK_K + kk;
+          ref += choreo::to_f32(lhs[(int)i][(int)k]) * sa *
+                 choreo::to_f32(rhs_small[(int)j][(int)k]) * sb;
+        }
+      }
+      float got = choreo::to_f32(res_small[(int)i][(int)j]);
+      float tol = base_tol + rel_tol * std::abs(ref);
+      choreo::choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
+    }
+
+  std::cout << "Test Passed m64n64k32\n" << std::endl;
+}
+
+// CHECK: Test Passed m64n128k32
+// CHECK: Test Passed m64n64k32

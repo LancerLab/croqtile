@@ -2503,7 +2503,10 @@ public:
     std::string lhs;
     std::string rhs;
     std::string mdata;
-    bool is_sparse;
+    bool sparse;
+    bool scale;
+    ptr<ChunkAt> scale_a;
+    ptr<Expr> scale_b;
   };
   struct StoreInfo {
     std::string buf_sym;
@@ -2524,10 +2527,14 @@ public:
       : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
                const std::string& r, bool sp = false)
-      : tag(Exec), info(ExecInfo{m, o, l, r, "", sp}) {}
+      : tag(Exec), info(ExecInfo{m, o, l, r, "", sp, false, nullptr, nullptr}) {}
   MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
                const std::string& r, const std::string& e, bool sp)
-      : tag(Exec), info(ExecInfo{m, o, l, r, e, sp}) {}
+      : tag(Exec), info(ExecInfo{m, o, l, r, e, sp, false, nullptr, nullptr}) {}
+    MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
+           const std::string& r, const ptr<ChunkAt>& scale_a,
+           const ptr<Expr>& scale_b)
+      : tag(Exec), info(ExecInfo{m, o, l, r, "", false, true, scale_a, scale_b}) {}
   MMAOperation(const std::string& n, const ptr<ChunkAt>& c)
       : tag(Store), info(StoreInfo{n, c}) {}
   MMAOperation() : tag(Commit), info() {}
@@ -2620,6 +2627,24 @@ public:
     return e_info.is_sparse;
   }
 
+  bool HasScale() const {
+    if (tag != Exec) return false;
+    auto e_info = std::get<2>(info);
+    return e_info.scale;
+  }
+
+  ptr<ChunkAt> ScaleA() const {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    auto e_info = std::get<2>(info);
+    return e_info.scale_a;
+  }
+
+  ptr<Expr> ScaleB() const {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    auto e_info = std::get<2>(info);
+    return e_info.scale_b;
+  }
+
   void SetFuture(const std::string& fut_name) {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
@@ -2669,6 +2694,10 @@ public:
     } break;
     case Exec: {
       auto e_info = std::get<2>(info);
+      if (e_info.scale)
+        return Make<MMAOperation>(e_info.method, e_info.acc, e_info.lhs,
+                                  e_info.rhs, CloneP(e_info.scale_a),
+                                  CloneP(e_info.scale_b));
       return Make<MMAOperation>(e_info.method, e_info.acc, e_info.lhs,
                                 e_info.rhs, e_info.mdata, e_info.is_sparse);
     } break;
@@ -2702,7 +2731,8 @@ public:
       case COL_ROW: os << ".COL.ROW"; break;
       default: choreo_unreachable("unsupported dma execution mode."); break;
       }
-      if (e_info.is_sparse) os << ".SP";
+      if (e_info.sparse) os << ".SP";
+      if (e_info.scale) os << ".SCALE";
       os << " " << e_info.acc << ", " << e_info.lhs << ", " << e_info.rhs;
     } break;
     case Store: {

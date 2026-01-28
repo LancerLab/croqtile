@@ -59,6 +59,15 @@ int main() {
   rhs.fill_random(-2.0f, 2.0f);
   scale_b.fill_random(0.5f, 2.0f);
 
+  choreo::TimerOption topt;
+  topt.warmup = 10;
+  topt.repeat = 50;
+
+  auto avg_ms = choreo::timing(
+      [&]() { matmul(lhs.view(), scale_a.view(), rhs.view(), scale_b.view()); },
+      topt);
+  std::cout << "Timing static avg ms: " << avg_ms << "\n";
+
   auto res = matmul(lhs.view(), scale_a.view(), rhs.view(), scale_b.view());
 
   float base_tol = 0.3f;

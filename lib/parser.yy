@@ -194,7 +194,7 @@ void choreo_info(const char *message) {
 // builtin operations
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN
 // MMA related builtin operations
-%token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT
+%token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK CONTINUE
@@ -1895,7 +1895,11 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($2, $3, $5, $7);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method SPARSE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
+    | MMA mma_exec_method SCALE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER COMMA chunkat_expr COMMA s_expr {
+        auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, $12);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | MMA mma_exec_method SP IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, true);
         $$ = AST::Make<AST::MMA>(@1, op);
       }

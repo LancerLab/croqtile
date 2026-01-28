@@ -231,6 +231,12 @@ void MMA::accept(Choreo::Visitor& v) {
     operation->FillingValue()->accept(v);
   else if (operation->IsKind(MMAOperation::Load))
     operation->LoadFrom()->accept(v);
+  else if (operation->IsKind(MMAOperation::Exec)) {
+    if (operation->HasScale()) {
+      if (operation->ScaleA()) operation->ScaleA()->accept(v);
+      if (operation->ScaleB()) operation->ScaleB()->accept(v);
+    }
+  }
   else if (operation->IsKind(MMAOperation::Store))
     operation->StoreTo()->accept(v);
 
