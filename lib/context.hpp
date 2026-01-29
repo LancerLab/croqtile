@@ -372,8 +372,10 @@ private:
   bool inhibit_warning = false;    // Inhibit all warning messages.
   bool warning_as_error = false;   // Make all warnings into errors.
   bool disable_runtime_check = false; // Disable all runtime checks.
-  std::string debug_file_dir;         // directory for compiler debug artifacts
-  std::string api_mode = "cffi";      // API mode for generated code
+  bool disable_cuda_runtime_env_check =
+      false;                     // Do not emit cuda runtime env check.
+  std::string debug_file_dir;    // directory for compiler debug artifacts
+  std::string api_mode = "cffi"; // API mode for generated code
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -502,6 +504,9 @@ public:
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
   bool DisableRuntimeCheck() const { return disable_runtime_check; }
+  bool DisableCudaRuntimeEnvCheck() const {
+    return disable_cuda_runtime_env_check;
+  }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -536,6 +541,9 @@ public:
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
   void SetDisableRuntimeCheck(bool value) { disable_runtime_check = value; }
+  void SetDisableCudaRuntimeEnvCheck(bool value) {
+    disable_cuda_runtime_env_check = value;
+  }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

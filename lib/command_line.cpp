@@ -85,6 +85,9 @@ Option<bool> warning_as_error(OptionKind::User, "-Werror", "", false,
                               "Make all warnings into errors.");
 Option<bool> disable_runtime_check(OptionKind::User, "--disable-runtime-check",
                                    "", false, "Disable all runtime checks.");
+Option<bool> disable_cuda_runtime_env_check(
+    OptionKind::User, "--disable-cuda-runtime-env-check", "", false,
+    "Do not emit cuda runtime enviroment check.");
 
 Option<std::string>
     target_options(OptionKind::Hidden, "--target-options", "-tos", "",
@@ -289,6 +292,8 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
   CCtx().SetDisableRuntimeCheck(disable_runtime_check.GetValue());
+  CCtx().SetDisableCudaRuntimeEnvCheck(
+      disable_cuda_runtime_env_check.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
 
   if (!trace_visit.GetValue().empty())
