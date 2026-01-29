@@ -1393,7 +1393,7 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 
 namespace utils {
 template <typename U>
-__co_host__ inline U from_f32(float v) {
+__co_any__ inline U from_f32(float v) {
   if constexpr (std::is_same<U, f16>::value) {
     return f16(v);
   } else if constexpr (std::is_same<U, bf16>::value) {

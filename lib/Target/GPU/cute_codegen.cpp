@@ -2564,7 +2564,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
         ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym
            << "_scale_frag[" << reg_num_d << "];\n";
-        ds << d_indent << "memset(" << c_sym << "_frag, 0, sizeof(" << c_sym
+        ds << d_indent << "memset(" << c_sym << "_scale_frag, 0, sizeof(" << c_sym
            << "_scale_frag));\n";
       }
       ds << d_indent << "cute::" << mma_policy << "<";
