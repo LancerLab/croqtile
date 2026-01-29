@@ -2004,26 +2004,45 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
     MMA_Policy<MMA>::typeD::template store<Tensor, AccumT>(D, d);
 }
 
-template <typename AccT, typename ScaleT>
-__device__ static inline void scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
-                                                int scale_a_ld,
-                                                ScaleT scale_b) {
-  if constexpr (std::is_same_v<AccT, f16> && std::is_same_v<ScaleT, f32>) {
-    int __tid = threadIdx.x % 128;
-    int __lane = __tid % 32;
-    int __warp = __tid / 32;
-    int __row0 = __warp * 16 + __lane / 4;
-    int __row1 = __row0 + 8;
-    int __col_num = 64 / 8;
-    float sa0 = scale_a_ptr[__row0 * scale_a_ld];
-    float sa1 = scale_a_ptr[__row1 * scale_a_ld];
+template <typename AccT, typename ScaleT, int N>
+__device__ static inline void
+scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
+                  ScaleT scale_b) {
+  static_assert(std::is_same_v<ScaleT, f32>,
+                "scale_accumulator only supports f32 scale type");
+  static_assert(
+      std::is_same_v<AccT, f16> || std::is_same_v<AccT, float>,
+      "scale_accumulator only supports f16 or float accumulator type");
+
+  int itd = threadIdx.x % 128;
+  int lane = itd % 32;
+  int warp = itd / 32;
+  int row0 = warp * 16 + lane / 4;
+  int row1 = row0 + 8;
+  int col_num = N / 8;
+  float sa0 = scale_a_ptr[row0 * scale_a_ld];
+  float sa1 = scale_a_ptr[row1 * scale_a_ld];
+  if constexpr (std::is_same_v<AccT, f16>) {
 #pragma unroll
-    for (int c = 0; c < __col_num; c++) {
+    for (int c = 0; c < col_num; c++) {
       int base = c * 4;
-      d[base + 0] += f16(float(scale_d[base + 0]) * sa0 * scale_b);
-      d[base + 1] += f16(float(scale_d[base + 1]) * sa0 * scale_b);
-      d[base + 2] += f16(float(scale_d[base + 2]) * sa1 * scale_b);
-      d[base + 3] += f16(float(scale_d[base + 3]) * sa1 * scale_b);
+      d[base + 0] +=
+          utils::from_f32<f16>(to_f32(scale_d[base + 0]) * sa0 * scale_b);
+      d[base + 1] +=
+          utils::from_f32<f16>(to_f32(scale_d[base + 1]) * sa0 * scale_b);
+      d[base + 2] +=
+          utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1 * scale_b);
+      d[base + 3] +=
+          utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1 * scale_b);
+    }
+  } else if constexpr (std::is_same_v<AccT, float>) {
+#pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int base = c * 4;
+      d[base + 0] += scale_d[base + 0] * sa0 * scale_b;
+      d[base + 1] += scale_d[base + 1] * sa0 * scale_b;
+      d[base + 2] += scale_d[base + 2] * sa1 * scale_b;
+      d[base + 3] += scale_d[base + 3] * sa1 * scale_b;
     }
   }
 }

@@ -2557,12 +2557,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                  ->Normalize(); // N / 2
         if (ssmi.ty == BaseType::F16) {
           acc_dtype = BaseType::U32;
-          frag_len = sbe::bop(OpCode::DIVIDE, frag_len, sbe::nu(2))->Normalize();
+          frag_len =
+              sbe::bop(OpCode::DIVIDE, frag_len, sbe::nu(2))->Normalize();
         }
         reg_num_d = *VIInt(frag_len);
 
-        ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym << "_scale_frag["
-          << reg_num_d << "];\n";
+        ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym
+           << "_scale_frag[" << reg_num_d << "];\n";
+        ds << d_indent << "memset(" << c_sym << "_frag, 0, sizeof(" << c_sym
+           << "_scale_frag));\n";
       }
       ds << d_indent << "cute::" << mma_policy << "<";
       if (!policy_is_tn) {
@@ -2574,7 +2577,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (op.HasScale())
           ds << ", " << c_sym << "_scale_frag[" << i << "]";
         else
-        ds << ", " << c_sym << "_frag[" << i << "]";
+          ds << ", " << c_sym << "_frag[" << i << "]";
       }
       if (policy_is_sparse) ds << ", " << a_sym << "_meta";
       ds << ");\n";
@@ -2587,9 +2590,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << ExprSTR(op.ScaleA(), false) << ");\n";
         ds << d_indent << "float " << c_sym << "_scale_b_val = "
            << "static_cast<float>(" << ExprSTR(op.ScaleB(), false) << ");\n";
-        ds << d_indent << "scale_accumulator<" << acc_ty
-           << ", float"
-              ">("
+        ds << d_indent << "scale_accumulator<" << acc_ty << ", float, " << dim_n
+           << ">("
            << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_frag), "
            << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_scale_frag"
            << "), " << c_sym << "_scale_a_ptr, " << scale_a_ld << ", " << c_sym
