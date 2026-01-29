@@ -13,6 +13,7 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
   parallel {m, n} by [M / MMA_M / 2, N / MMA_N / 2] : block {
     mc = mma.fill 0.0;  // c = {0}
     parallel {g0, g1} by [2, 2] : group {
+      mma.fill mc, 0.0;  // c = {0}
       //foreach k in K / MMA_K /#g {
       foreach k in K / MMA_K {
         ma = mma.load lhs.chunkat(m#g0, k);

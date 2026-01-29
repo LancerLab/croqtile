@@ -1083,16 +1083,17 @@ bool ShapeInference::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
-    auto fill_ty = op.FillingType();
-    if (fill_ty != BaseType::UNKSCALAR) {
-      DefineASymbol(op.FillingSymbol(),
-                    MakeSpannedType(fill_ty, GenUninitShape(), Storage::REG));
-    } else {
-      DefineASymbol(op.FillingSymbol(), MakeDummySpannedType());
+    if (op.FillingIsDecl()) {
+      auto fill_ty = op.FillingType();
+      if (fill_ty != BaseType::UNKSCALAR)
+        DefineASymbol(op.FillingSymbol(),
+                      MakeSpannedType(fill_ty, GenUninitShape(), Storage::REG));
+      else
+        DefineASymbol(op.FillingSymbol(), MakeDummySpannedType());
+      DefineASymbol(op.FillingSymbol() + ".span", MakeUninitMDSpanType());
+      SymbolAliasNoNum(SSTab().InScopeName(op.FillingSymbol()) +
+                       ".span"); // valno is yet invalid
     }
-    DefineASymbol(op.FillingSymbol() + ".span", MakeUninitMDSpanType());
-    SymbolAliasNoNum(SSTab().InScopeName(op.FillingSymbol()) +
-                     ".span"); // valno is yet invalid
   } break;
   case AST::MMAOperation::Load: {
     auto fty = cast<SpannedType>(op.LoadFrom()->GetType());

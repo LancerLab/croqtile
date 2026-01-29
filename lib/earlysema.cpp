@@ -1794,12 +1794,14 @@ bool EarlySemantics::Visit(AST::MMA& n) {
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
     // MMA is a 2D operation
-    ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol(), __FILE__, __LINE__,
-                              MakeRankedSpannedType(2));
-    ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol() + ".span", __FILE__,
-                              __LINE__, MakeRankedMDSpanType(2));
-    if (!isa<ScalarType>(op.FillingValue()->GetType()))
-      Error1(n.LOC(), "Expect a scalar value for MMA fill.");
+    if (op.FillingIsDecl()) {
+      ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol(), __FILE__, __LINE__,
+                                MakeRankedSpannedType(2));
+      ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol() + ".span", __FILE__,
+                                __LINE__, MakeRankedMDSpanType(2));
+      if (!isa<ScalarType>(op.FillingValue()->GetType()))
+        Error1(n.LOC(), "Expect a scalar value for MMA fill.");
+    }
   } break;
   case AST::MMAOperation::Load: {
     auto sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());

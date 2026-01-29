@@ -58,6 +58,7 @@ private:
   std::stack<ParallelLevel> levels;
   std::string cur_fname;
   std::string cur_arch;
+  bool has_stream_param;
 
   ParallelSymbols ps;
 
@@ -73,6 +74,7 @@ private:
       ps.Reset();
       cur_params.clear();
       cur_fname = cf->name;
+      has_stream_param = false;
       levels.push(ParallelLevel::SEQ);
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       auto lvl = pb->GetLevel();
@@ -649,6 +651,11 @@ public:
   }
 
   bool Visit(AST::Parameter& n) override {
+    auto ty = GetSymbolType(n.sym->name);
+    if (isa<StreamType>(ty)) {
+      if (has_stream_param) Error1(n.LOC(), "Only one stream supported now!");
+      has_stream_param = true;
+    }
     if (n.sym) cur_params.emplace(InScopeName(n.sym->name), &n);
     return true;
   }
@@ -751,7 +758,13 @@ public:
     auto& op = *n.GetOperation();
     ValueList mma_shape;
     switch (op.Tag()) {
-    case AST::MMAOperation::Fill: break;
+    case AST::MMAOperation::Fill: {
+      auto sym = op.FillingSymbol();
+      auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      if (ssmi.frag != MMAInfo::FRAG_C && ssmi.frag != MMAInfo::FRAG_UNK)
+        Error1(n.LOC(),
+               "Only the acc of mma operation can be used in fill op.");
+    } break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::Exec: {
       auto& a_sym = op.ExecOperand(1);
@@ -811,7 +824,6 @@ public:
         oss << "m" << STR(s[0]) << "n" << STR(s[1]) << "k" << STR(s[2]);
         return oss.str();
       };
-#if 1
       auto a_ty = a_sty->ElementType();
       auto b_ty = b_sty->ElementType();
       auto c_ty = c_sty->ElementType();
@@ -865,39 +877,6 @@ public:
         std::string mma_policy = MMALimit::MMAConfig2WGMMAName(mma_config);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
       }
-#else
-      auto ety = a_ty->ElementType();
-      switch (ety) {
-      case BaseType::F16:
-        if (!sbe::ceq(mma_shape[0], sbe::nu(16)) ||
-            !sbe::ceq(mma_shape[1], sbe::nu(16)) ||
-            !sbe::ceq(mma_shape[2], sbe::nu(16)))
-          Error1(n.LOC(), "MMA [" + STR(ety) + ": " + MMAShapeSTR(mma_shape) +
-                              "] is not support by current architecture(" +
-                              CCtx().GetArch() + ").");
-        break;
-      case BaseType::F32:
-        if (sbe::ceq(mma_shape[0], sbe::nu(16)) ||
-            sbe::ceq(mma_shape[1], sbe::nu(16)) ||
-            sbe::ceq(mma_shape[2], sbe::nu(8)))
-          return true;
-        else if (sbe::ceq(mma_shape[0], sbe::nu(16)) ||
-                 sbe::ceq(mma_shape[1], sbe::nu(16)) ||
-                 sbe::ceq(mma_shape[2], sbe::nu(16))) {
-          // support tf32 mma here
-          Error1(n.LOC(), "MMA [" + STR(ety) + ": " + MMAShapeSTR(mma_shape) +
-                              "] is yet to support.");
-          return true;
-        } else
-          Error1(n.LOC(), "MMA [" + STR(ety) + ": " + MMAShapeSTR(mma_shape) +
-                              "] is not support by current architecture(" +
-                              CCtx().GetArch() + ").");
-        break;
-      default:
-        choreo_unreachable(STR(ety) + " is not supported by current MMA");
-        break;
-      }
-#endif
       VST_DEBUG(dbgs() << STR(n) << ", mma_size: " << MMAShapeSTR(mma_shape)
                        << "\n");
     } break;

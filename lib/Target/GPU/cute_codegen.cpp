@@ -2396,7 +2396,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto acc_dtype = ssmi.ty;
       ValueItem frag_len = sbe::bop(OpCode::DIVIDE, ssmi.shape[1], sbe::nu(2))
                                ->Normalize(); // N / 2
+      bool use_uint32 = false;
       if (ssmi.ty == BaseType::F16) {
+        use_uint32 = true;
         acc_dtype = BaseType::U32;
         frag_len = sbe::bop(OpCode::DIVIDE, frag_len, sbe::nu(2))->Normalize();
       }
@@ -2405,14 +2407,42 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             "expect the length of wgmma fragment to be integer but not symbol");
       reg_num_d = *VIInt(frag_len);
 
-      ds << d_indent << NameBaseType(acc_dtype) << " " << sym << "_frag["
-         << reg_num_d << "];\n";
-      // TODO: only support init with 0 for now
-      ds << d_indent << "memset(" << sym << "_frag, 0, sizeof(" << sym
-         << "_frag));\n";
+      if (op.FillingIsDecl()) {
+        ds << d_indent << NameBaseType(acc_dtype) << " " << sym << "_frag["
+           << reg_num_d << "];\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
+      }
+      static int fill_cnt = 0;
+      // TODO: #pragma unroll
+      // if ubound is large, may lead to low performance
+      std::string orig_init_val =
+          ExprCastSTR(op.FillingValue(), std::nullopt, ssmi.ty,
+                      GetBaseType(*op.FillingValue()->GetType()), false);
+      if (use_uint32) {
+        ds << d_indent << "uint32_t " << "__frag_init_val" << fill_cnt
+           << " = 0;\n";
+#if 0
+        // TODO: enable initialization of arbitrary values after template cast is done.
+        std::string temp = "__fiv_temp" + fill_cnt;
+        ds << d_indent << "auto " << temp << " = " << orig_init_val << ";\n";
+        for (int i=0; i<SizeOf(BaseType::U32) / SizeOf(ssmi.ty); ++i)
+          ds << 
+        ds << ";\n";
+#endif
+      } else {
+        ds << d_indent << "auto " << "__frag_init_val" << fill_cnt << " = "
+           << orig_init_val << ";\n";
+      }
+      ds << d_indent << "for (int " << sym << "_frag_idx" << " = 0; " << sym
+         << "_frag_idx" << " < " << reg_num_d << "; ++" << sym << "_frag_idx"
+         << ")\n";
+      IncrDeviceIndent();
+      ds << d_indent << sym << "_frag[" << sym << "_frag_idx"
+         << "] = " << "__frag_init_val" << fill_cnt << ";\n";
+      ++fill_cnt;
+      DecrDeviceIndent();
       // Signal warp group that we're about to start WGMMA operations
       ds << d_indent << "warpgroup_arrive();\n";
-      ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
     } break;
     case AST::MMAOperation::Load: {
       auto sym = op.LoadTo();
@@ -2640,15 +2670,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       auto sty = GetSpannedType(GetSymbolType(sym));
       assert(sty);
-      ds << d_indent
-         << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
-         << ", ";
-      ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> " << sym
-         << "_frag;\n";
+      if (op.FillingIsDecl()) {
+        ds << d_indent
+           << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
+           << ", ";
+        ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> "
+           << sym << "_frag;\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
+      }
       ds << d_indent << "nvcuda::wmma::fill_fragment(" << sym << "_frag, ("
          << NameBaseType(ssmi.ty) << ")" << ExprSTR(op.FillingValue(), false)
          << ");\n";
-      ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
     } break;
     case AST::MMAOperation::Load: {
       auto sym = op.LoadTo();
@@ -2750,8 +2782,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     // n is not wmma. Inline PTX.
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: {
-      // TODO: shall we split the op to two diff ops: fragment decl and fill?
-      // for example: decl; fill; use; store; fill; use again;
       auto sym = op.FillingSymbol();
       auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       assert(ssmi.ty != BaseType::UNKNOWN);
@@ -2762,11 +2792,38 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool use_uint32 = false;
       UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
       RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
-      ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty)) << " "
-         << sym << "_frag[" << reg_num_d << "] ;\n";
-      ds << d_indent << "memset(" << sym << "_frag, 0, sizeof(" << sym
-         << "_frag));\n";
-
+      if (op.FillingIsDecl())
+        ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
+           << " " << sym << "_frag[" << reg_num_d << "];\n";
+      static int fill_cnt = 0;
+      // TODO: #pragma unroll
+      // if ubound is large, may lead to low performance
+      std::string orig_init_val =
+          ExprCastSTR(op.FillingValue(), std::nullopt, ssmi.ty,
+                      GetBaseType(*op.FillingValue()->GetType()), false);
+      if (use_uint32) {
+        ds << d_indent << "uint32_t " << "__frag_init_val" << fill_cnt
+           << " = 0;\n";
+#if 0
+        // TODO: enable initialization of arbitrary values after template cast is done.
+        std::string temp = "__fiv_temp" + fill_cnt;
+        ds << d_indent << "auto " << temp << " = " << orig_init_val << ";\n";
+        for (int i=0; i<SizeOf(BaseType::U32) / SizeOf(ssmi.ty); ++i)
+          ds << 
+        ds << ";\n";
+#endif
+      } else {
+        ds << d_indent << "auto " << "__frag_init_val" << fill_cnt << " = "
+           << orig_init_val << ";\n";
+      }
+      ds << d_indent << "for (int " << sym << "_frag_idx" << " = 0; " << sym
+         << "_frag_idx" << " < " << reg_num_d << "; ++" << sym << "_frag_idx"
+         << ")\n";
+      IncrDeviceIndent();
+      ds << d_indent << sym << "_frag[" << sym << "_frag_idx"
+         << "] = " << "__frag_init_val" << fill_cnt << ";\n";
+      ++fill_cnt;
+      DecrDeviceIndent();
     } break;
     case AST::MMAOperation::Load: {
       auto ca = op.LoadFrom();
@@ -3318,7 +3375,8 @@ bool CuteCodeGen::Visit(AST::ParamList& n) {
   for (auto param : n.values) {
     auto ty = GetSymbolType(param->sym->name);
     if (isa<StreamType>(ty)) {
-      if (stream_name != "") Error1(n.LOC(), "Only one stream supported now!");
+      if (stream_name != "")
+        choreo_unreachable("Unexpect: only one stream supported now!");
       stream_name = param->sym->name;
       continue;
     }

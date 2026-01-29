@@ -125,7 +125,7 @@ struct FuncTrait {
 };
 
 struct MMAInfo {
-  enum Fragment { FRAG_A, FRAG_B, FRAG_C, FRAG_E };
+  enum Fragment { FRAG_UNK, FRAG_A, FRAG_B, FRAG_C, FRAG_E };
   BaseType ty;
   ValueList shape;
   Fragment frag;

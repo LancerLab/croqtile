@@ -1,0 +1,23 @@
+// RUN: not choreo -t cute -arch=sm_86 %s 2>&1 | FileCheck %s --check-prefix=CHECK
+
+#include "choreo.h"
+
+
+#define M 128
+#define N 256
+#define K 64
+
+__co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs, stream s0, stream s1) {
+  f16 [M, N] output;
+
+  int MMA_M = 8, MMA_N = 8, MMA_K = 4;
+  parallel {m, n} by [M / MMA_M / 4, N / MMA_N ] : block {
+    parallel {g0, g1} by [4, 1]: group {
+    };
+  }
+    
+
+  return output;
+}
+
+// CHECK: error: Only one stream supported now!

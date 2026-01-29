@@ -1882,6 +1882,12 @@ mma_stmt
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA FILL IDENTIFIER COMMA s_expr {
+        if (!symtab.Exists($3))
+          Parser::error(@3, "The symbol `" + $3 + "' has not been defined.");
+        auto op = AST::Make<AST::MMAOperation>($3, $5, BaseType::UNKSCALAR, false);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | IDENTIFIER ASSIGN MMA FILL DOT fundamental_type s_expr {
         auto op = AST::Make<AST::MMAOperation>($1, $7, $6);
         symtab.AddSymbol($1, MakeUnknownType());

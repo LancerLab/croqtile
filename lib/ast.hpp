@@ -2496,6 +2496,7 @@ public:
     std::string buffer_sym;
     ptr<Expr> fill_expr;
     BaseType fill_elem_type;
+    bool is_decl; // true by default. If `mma.fill mc, 0.0f`, false
   };
   struct LoadInfo {
     ptr<ChunkAt> ld_expr;
@@ -2526,8 +2527,8 @@ private:
 
 public:
   MMAOperation(const std::string& n, const ptr<Expr>& e,
-               BaseType t = BaseType::UNKSCALAR)
-      : tag(Fill), info(FillInfo{n, e, t}) {}
+               BaseType t = BaseType::UNKSCALAR, bool is_decl = true)
+      : tag(Fill), info(FillInfo{n, e, t, is_decl}) {}
   MMAOperation(const ptr<ChunkAt>& e, const std::string& fu, bool a = false,
                SwizMode swizzle = SwizMode::B128)
       : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
@@ -2549,6 +2550,7 @@ public:
 
 public:
   bool IsKind(Kind k) const { return k == tag; }
+
   const std::string FillingSymbol() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
     return std::get<0>(info).buffer_sym;
@@ -2565,6 +2567,10 @@ public:
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
     return std::get<0>(info).fill_elem_type;
   }
+  bool FillingIsDecl() const {
+    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
+    return std::get<0>(info).is_decl;
+  }
 
   ptr<ChunkAt> LoadFrom() {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
@@ -2576,7 +2582,6 @@ public:
     auto l_info = std::get<1>(info);
     return l_info.ld_expr;
   }
-
   const std::string LoadTo() const {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
@@ -2693,7 +2698,7 @@ public:
     switch (tag) {
     case Fill:
       return Make<MMAOperation>(FillingSymbol(), CloneP(FillingValue()),
-                                FillingType());
+                                FillingType(), FillingIsDecl());
       break;
     case Load: {
       auto l_info = std::get<1>(info);
@@ -2720,9 +2725,12 @@ public:
 
   void Print(std::ostream& os) const {
     switch (tag) {
-    case Fill:
-      os << FillingSymbol() << " = MMA.FILL " << PSTR(FillingValue());
-      break;
+    case Fill: {
+      if (FillingIsDecl())
+        os << FillingSymbol() << " = MMA.FILL " << PSTR(FillingValue());
+      else
+        os << "MMA.FILL " << FillingSymbol() << ", " << PSTR(FillingValue());
+    } break;
     case Load: {
       auto l_info = std::get<1>(info);
       if (!l_info.future.empty()) os << l_info.future << " = ";

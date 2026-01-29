@@ -12,6 +12,7 @@ __co__ auto matmul(f32 [M, K] lhs, f32 [K, N] rhs) {
   parallel {m, n} by [M / MMA_M / 2, N / MMA_N / 2 ] : block {
     mc = mma.fill 0.0f;
     parallel {g0, g1} by [2, 2]: group {
+      mma.fill mc, 0.0f;
       foreach k in K / MMA_K {
         ma = mma.load lhs.chunkat(m#g0, k);
         mb = mma.load rhs.chunkat(k, n#g1);

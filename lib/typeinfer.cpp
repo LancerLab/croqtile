@@ -881,11 +881,13 @@ bool TypeInference::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
-    auto fill_ty = MakeSpannedType(op.FillingType(), GenUninitShape());
-    // any usage of this symbol is illegal util the inference happens
-    AssignSymbolWithType(n.LOC(), op.FillingSymbol(), fill_ty);
-    AssignSymbolWithType(n.LOC(), op.FillingSymbol() + ".span",
-                         fill_ty->GetMDSpanType());
+    if (op.FillingIsDecl()) {
+      auto fill_ty = MakeSpannedType(op.FillingType(), GenUninitShape());
+      // any usage of this symbol is illegal util the inference happens
+      AssignSymbolWithType(n.LOC(), op.FillingSymbol(), fill_ty);
+      AssignSymbolWithType(n.LOC(), op.FillingSymbol() + ".span",
+                           fill_ty->GetMDSpanType());
+    }
   } break;
   case AST::MMAOperation::Load: {
     AssignSymbolWithType(n.LOC(), op.GetFuture(), n.GetType()->Clone());
