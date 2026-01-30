@@ -20,11 +20,11 @@ struct MemAnalyzer : public VisitorWithSymTab {
   int parallel_level;
   // NOTE: use paraby scope to distinguish different device functions.
   // If equal to co func name, indicate that not in device scope.
-  std::string cur_dev_func_name;
+  std::string cur_dev_fname;
 
   // whether JIT memory reuse is needed.
-  // the key is dec func name, the val is false by default.
-  std::map<std::string, bool> have_dynamic_shape;
+  // dev_fname -> (sto -> need).
+  std::map<std::string, std::map<Storage, bool>> sto_have_dyn;
 
   std::unordered_map<std::string, ValueItem> buf_size;
   std::unordered_map<std::string, Storage> buf_sto;
@@ -39,6 +39,7 @@ private:
   bool AfterVisitImpl(AST::Node&) override;
   bool Visit(AST::NamedVariableDecl& n) override;
 
+  // NOTE: all nvd with ref note will be ignored in memory reuse.
   static bool IsRef(const AST::Node& n) { return n.HasNote("ref"); }
 };
 
@@ -48,10 +49,9 @@ private:
   MemAnalyzer ma;
 
   int parallel_level = 0;
-  int max_parallel_level = 0;
   // NOTE: use paraby scope to distinguish different device functions.
   // If equal to co func name, indicate that not in device scope.
-  std::string cur_dev_func_name;
+  std::string cur_dev_fname;
   using Range = LivenessAnalyzer::Range;
   struct Buffer {
     size_t size;
@@ -102,8 +102,8 @@ private:
   std::map<std::string, DevFuncMemReuseCtx> df_ctxs;
 
   DevFuncMemReuseCtx& DFCtx(std::string dev_func_name = "") {
-    if (dev_func_name == "") assert(cur_dev_func_name != "");
-    return df_ctxs[dev_func_name == "" ? cur_dev_func_name : dev_func_name];
+    if (dev_func_name == "") assert(cur_dev_fname != "");
+    return df_ctxs[dev_func_name == "" ? cur_dev_fname : dev_func_name];
   }
 
   std::map<std::string, DevFuncMemReuseCtx>& DFCtxs() { return df_ctxs; }

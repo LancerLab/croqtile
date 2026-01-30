@@ -201,8 +201,9 @@ private:
   std::map<std::string, std::string> MMA_policy_of_frag;
 
   struct DynMemReuseInfo {
-    std::string simulator;
     struct InfoEntry {
+      // the name of simulator var
+      std::string simulator;
       // the name of chunks vector
       std::string chunks_name;
       // the live ranges of each chunk

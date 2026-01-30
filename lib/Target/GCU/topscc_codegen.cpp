@@ -2721,10 +2721,10 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
     for (const auto& c : ie.chunks)
       hs << h_indent << ie.chunks_name << ".push_back(" << c << ");\n";
   }
-  hs << h_indent << "HeapSimulator " << mri->simulator << ";\n";
   for (const auto& [sto, ie] : mri->infos) {
+    hs << h_indent << "HeapSimulator " << ie.simulator << ";\n";
     hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
-       << mri->simulator << ".Allocate(" << ie.chunks_name << ", 512);\n";
+       << ie.simulator << ".Allocate(" << ie.chunks_name << ", 512);\n";
     hs << h_indent << "unsigned " << ie.spm_size << " = " << ie.result
        << ".heap_size;\n";
     // special host runtime check
@@ -2735,7 +2735,7 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
          << ", \"In the memory reuse of dynamic shapes"
          << ", the size of the initial " << STR(sto)
          << " spm should not exceed the memory usage limit " << mem_capacity
-         << "bytes.\");\n";
+         << " bytes.\");\n";
     hs << h_indent << "unsigned long " << ie.offsets_name << "["
        << mri->infos[sto].offset_args.size() << "];" << "\n";
     std::string idx = ie.chunks_name + "_idx";
