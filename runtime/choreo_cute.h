@@ -15,11 +15,11 @@ struct TMAAtom {
   __device__ auto& token() { return tok; }
 };
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 using TMALoadAtom = cute::SM90_TMA_LOAD;
 using TMAStoreAtom = cute::SM90_TMA_STORE;
 
-#endif
+  #endif
 
 using AsyncCopyAtom = cute::AutoCopyAsync;
 
@@ -59,25 +59,25 @@ struct future {
 
   bool is_tma = false;
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   future_ring<6>* ring;
   int8_t id;
-#else
+  #else
   // make host compilation happy
   future_ring<6>* ring;
   int8_t id;
-#endif
+  #endif
   __device__ void set_ring(future_ring<6>* r) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     if (__CHOREO_GROUP_SINGLE__(32)) {
       if (!r) return;
       ring = r + (threadIdx.x + threadIdx.y * blockDim.x +
                   threadIdx.z * blockDim.x * blockDim.y) /
                      32;
     }
-#else
-// make host compilation happy
-#endif
+  #else
+  // make host compilation happy
+  #endif
   }
   // for runtime check purpose
   //
@@ -91,7 +91,7 @@ struct future {
     ST_WAITED = 3,
   };
 
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
   Status s = ST_NONE;
   const char* name = nullptr;
   // source code locations
@@ -102,14 +102,14 @@ struct future {
                     void* mdata = nullptr)
       : d(data), md(mdata ? mdata : data), s(ST_NONE), name(n), line(l),
         column(c) {}
-#else
+  #else
   __device__ future(void* data = nullptr, void* mdata = nullptr)
       : d(data), md(mdata ? mdata : data) {}
-#endif //__CHOREO_DMA_DIAGNOSIS__
+  #endif //__CHOREO_DMA_DIAGNOSIS__
 
   // context is retrieved to invoke data operations
   __device__ auto get_atom() {
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s == ST_NONE) s = ST_INITED;
     if (s != ST_INITED && s != ST_WAITED) {
       printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
@@ -117,13 +117,13 @@ struct future {
              line, column);
       __co_abort__();
     }
-#endif // __CHOREO_DMA_DIAGNOSIS__
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     return atom;
   }
 
   // when async, an event is obtained for later waiting
   __device__ void set_atom(AtomType* a) {
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s == ST_TRIGGERED) {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
              "is triggered on an in-flight event.\n",
@@ -135,7 +135,7 @@ struct future {
              line, column);
       __co_abort__();
     }
-#endif // __CHOREO_DMA_DIAGNOSIS__
+  #endif // __CHOREO_DMA_DIAGNOSIS__
 
     atom = a;
     s = ST_INITED;
@@ -143,7 +143,7 @@ struct future {
 
   // when sync, no wait is required. simply change the status
   __device__ void set_nowait() {
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s != ST_INITED && s != ST_WAITED) {
       printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
              "is used incorrectly.\n",
@@ -151,7 +151,7 @@ struct future {
       __co_abort__();
     }
     s = ST_WAITED;
-#endif // __CHOREO_DMA_DIAGNOSIS__
+  #endif // __CHOREO_DMA_DIAGNOSIS__
   }
 
   __device__ void set_data(void* data) { d = data; }
@@ -161,7 +161,7 @@ struct future {
   }
 
   __device__ void wait_impl() {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     if (is_tma) {
       auto& barrier = ((TMAAtom*)atom)->barrier();
       auto& token = ((TMAAtom*)atom)->token();
@@ -180,47 +180,47 @@ struct future {
       case 4: cute::cp_async_wait<4>(); break;
       case 5: cute::cp_async_wait<5>(); break;
       default:
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+    #ifdef __CHOREO_DMA_DIAGNOSIS__
         printf("[choreo-rt] Unable to wait the %d futures (current defined at "
                "line %u:%u).\n",
                discard_count, line, column);
-#else
+    #else
         printf("[choreo-rt] Unable to wait the %d futures.\n", discard_count);
-#endif // DIAGNOSIS
+    #endif // DIAGNOSIS
         __co_abort__();
         break;
       }
     }
-#else
-// cuda host compilation
-#endif
+  #else
+  // cuda host compilation
+  #endif
   }
 
   __device__ void trigger() {
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s != ST_INITED && s != ST_WAITED) {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
              "has been triggered without atom set.\n",
              line, column);
       __co_abort__();
     }
-#endif // __CHOREO_DMA_DIAGNOSIS__
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     s = ST_TRIGGERED;
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     // cautious: must be warp based
     if (__CHOREO_GROUP_SINGLE__(32)) {
       assert(ring && "ring is invalid.");
       ring->commit(this);
     }
-#else
-// cuda host compilation
-#endif
+  #else
+  // cuda host compilation
+  #endif
   }
 
   __device__ void wait() {
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s == ST_TRIGGERED) {
       s = ST_WAITED;
     } else if (s == ST_WAITED) {
@@ -235,12 +235,12 @@ struct future {
       __co_abort__();
     } else
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
-#endif                      // __CHOREO_DMA_DIAGNOSIS__
+  #endif                    // __CHOREO_DMA_DIAGNOSIS__
     wait_impl();
   }
 
   __device__ void* data() {
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (!d) {
       printf("[choreo-rt] internal error: future (defined at line %u:%u) is "
              "not associated with a data.\n",
@@ -254,12 +254,12 @@ struct future {
              line, column);
       __co_abort__();
     }
-#endif // __CHOREO_DMA_DIAGNOSIS__
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     return d;
   }
 
   __device__ void* mdata() {
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (!md) {
       printf("[choreo-rt] internal error: future (defined at line %u:%u) is "
              "not associated with a metadata.\n",
@@ -272,14 +272,14 @@ struct future {
              line, column);
       __co_abort__();
     }
-#endif // __CHOREO_DMA_DIAGNOSIS__
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     return md ? md : d;
   }
 
   __device__ void destroy() {}
 
   __device__ ~future() {
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s == ST_TRIGGERED) {
       // TODO: requires krt %s support to print future name
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
@@ -288,9 +288,9 @@ struct future {
       __co_abort__();
     }
     if (s >= ST_INITED) destroy();
-#else
+  #else
     destroy();
-#endif // __CHOREO_DMA_DIAGNOSIS__
+  #endif // __CHOREO_DMA_DIAGNOSIS__
   }
   __device__ future(const future& f) = delete;
   __device__ future(future&& f) = delete;
@@ -299,29 +299,29 @@ struct future {
 
 template <int N>
 inline __device__ void future_ring<N>::commit(future* f) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   // the uniqueness of id is guaranteed by choreo
   ring[head] = f->id;
   head = (head + 1) % N;
 
-#ifdef __CHOREO_DEBUG_FUTURE_RING__
+    #ifdef __CHOREO_DEBUG_FUTURE_RING__
   printf("committed feature: %d, [%d, %d)\n", f->id, tail, head);
-#endif
+    #endif
 
-#else
-// cuda host compilation
-#endif // CUDA_ARCH
+  #else
+  // cuda host compilation
+  #endif // CUDA_ARCH
 }
 
 template <int N>
 inline __device__ int future_ring<N>::discard(future* f) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 
-#ifdef __CHOREO_DEBUG_FUTURE_RING__
+    #ifdef __CHOREO_DEBUG_FUTURE_RING__
   printf("discarding feature: %d, [%d, %d)\n", f->id, tail, head);
-#endif
+    #endif
 
   uint8_t p = tail;
   while (p != head) {
@@ -348,10 +348,10 @@ inline __device__ int future_ring<N>::discard(future* f) {
          "is not committed.\n",
          f->id, f->line, f->column);
 
-  //  __co_abort__();
-#else
-// cuda host compilation
-#endif // CUDA_ARCH
+      //  __co_abort__();
+  #else
+  // cuda host compilation
+  #endif // CUDA_ARCH
   return -1;
 }
 
@@ -359,50 +359,50 @@ __device__ static inline void swap(future& a, future& b) {
   auto atom = a.atom;
   auto d = a.d;
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   future_ring<6>* ring = a.ring;
   int8_t id = a.id;
-#else
-#endif
+  #else
+  #endif
 
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
   auto name = a.name;
   auto s = a.s;
   auto l = a.line;
   auto c = a.column;
-#endif
+  #endif
 
   a.atom = b.atom;
   a.d = b.d;
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   a.ring = b.ring;
   a.id = b.id;
-#else
-#endif
+  #else
+  #endif
 
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
   a.name = b.name;
   a.s = b.s;
   a.line = b.line;
   a.column = b.column;
-#endif
+  #endif
 
   b.atom = atom;
   b.d = d;
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   b.ring = ring;
   b.id = id;
-#else
-#endif
+  #else
+  #endif
 
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
   b.name = name;
   b.s = s;
   b.line = l;
   b.column = c;
-#endif
+  #endif
 }
 
 // ------------------- C++17 utilities -------------------
@@ -487,7 +487,7 @@ CUTE_HOST_DEVICE bool aligned_at_least(Ptr p) {
 // ------------------- universal copy (any rank, C++17) -------------------
 template <class Src, class Dst>
 CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {
-#if 0
+  #if 0
   // adjust these two lines if your Engine exposes pointers differently
   auto src_ptr = std::get<0>(src.data());
   auto dst_ptr = std::get<0>(dst.data());
@@ -511,7 +511,7 @@ static_assert(false, "path 2\n");
       }
     }
   }
-#endif
+  #endif
 
   // Fallback: 32-bit (scalar element width) - always safe for any
   // shape/stride/alignment
@@ -567,7 +567,7 @@ struct AccumTCast<f32, bf16> {
   __device__ static inline f32 cast(bf16 val) { return bf16_to_f32(val); }
 };
 
-#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+  #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 template <>
 struct AccumTCast<f8_e4m3, f32> {
   static constexpr bool supported = true;
@@ -591,7 +591,7 @@ struct AccumTCast<f32, f8_e5m2> {
   static constexpr bool supported = true;
   __device__ static inline f32 cast(f8_e5m2 val) { return float(val); }
 };
-#endif
+  #endif
 
 // --------------- load A policies ---------------
 struct Policy_A_M8N8K4 {
@@ -631,8 +631,8 @@ struct Policy_A_M8N8K16 {
     int row = gid;
     int col = tid_in_group * 4;
     uint32_t a0 = 0;
-    // TODO: if use recast, res error
-#pragma unroll
+      // TODO: if use recast, res error
+  #pragma unroll
     for (int i = 3; i >= 0; i--)
       a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row, col + i)));
     return cutlass::Array<uint32_t, 1>{a0};
@@ -763,11 +763,11 @@ struct Policy_A_M16N8K16 {
                          std::is_same<value_type, f8_e5m2>::value) {
       int col = tid_in_group * 4;
       uint32_t a0 = 0;
-#pragma unroll
+  #pragma unroll
       for (int i = 3; i >= 0; i--)
         a0 = (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col + i)));
       uint32_t a1 = 0;
-#pragma unroll
+  #pragma unroll
       for (int i = 3; i >= 0; i--)
         a1 = (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col + i)));
       return cutlass::Array<uint32_t, 2>{a0, a1};
@@ -802,22 +802,22 @@ struct Policy_A_M16N8K32 {
       int col0 = tid_in_group * 4;
       int col1 = tid_in_group * 4 + 16;
       uint32_t a0 = 0;
-#pragma unroll
+  #pragma unroll
       for (int i = 3; i >= 0; i--)
         a0 =
             (a0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col0 + i)));
       uint32_t a1 = 0;
-#pragma unroll
+  #pragma unroll
       for (int i = 3; i >= 0; i--)
         a1 =
             (a1 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col0 + i)));
       uint32_t a2 = 0;
-#pragma unroll
+  #pragma unroll
       for (int i = 3; i >= 0; i--)
         a2 =
             (a2 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row0, col1 + i)));
       uint32_t a3 = 0;
-#pragma unroll
+  #pragma unroll
       for (int i = 3; i >= 0; i--)
         a3 =
             (a3 << 8) | uint32_t(reinterpret_cast<uint8_t&>(A(row1, col1 + i)));
@@ -873,7 +873,7 @@ struct Policy_A_Sparse_M16N8K32 {
     // Fragment layout requires 8 half values -> 4 uint32_t registers
     // Following the sptc-demo pattern for manual lane loading
     value_type vals[8];
-#pragma unroll
+  #pragma unroll
     for (int ai = 0; ai < 8; ++ai) {
       int row = (ai < 2 || (ai >= 4 && ai < 6)) ? group_id : (group_id + 8);
       int col_base = (ai < 4) ? (thread_id * 4) : (thread_id * 4 + 16);
@@ -1044,7 +1044,7 @@ struct Policy_B_M8N8K16 {
     int row = tid_in_group * 4;
     int col = gid;
     uint32_t b0 = 0;
-#pragma unroll
+  #pragma unroll
     for (int i = 3; i >= 0; i--)
       b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(row + i, col)));
     return cutlass::Array<uint32_t, 1>{b0};
@@ -1165,7 +1165,7 @@ struct Policy_B_M16N8K16 {
       int row = tid_in_group * 4;
       int col = gid;
       uint32_t b0 = 0;
-#pragma unroll
+  #pragma unroll
       for (int i = 3; i >= 0; i--)
         b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(row + i, col)));
       return cutlass::Array<uint32_t, 1>{b0};
@@ -1212,7 +1212,7 @@ struct Policy_B_Sparse_M16N8K16 {
       int row = tid_in_group * 4;
       int col = gid;
       uint32_t b0 = 0;
-#pragma unroll
+  #pragma unroll
       for (int i = 3; i >= 0; i--)
         b0 = (b0 << 8) | uint32_t(reinterpret_cast<uint8_t&>(B(col, row + i)));
       return cutlass::Array<uint32_t, 1>{b0};
@@ -1662,23 +1662,23 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
 
 // WGMMA fence/sync primitives
 __device__ static inline void warpgroup_arrive() {
-#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
-#endif
+  #endif
 }
 
 __device__ static inline void warpgroup_commit_batch() {
-#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
-#endif
+  #endif
 }
 
 template <int PD>
 __device__ static inline void warpgroup_wait() {
-#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   static_assert(PD >= 0 && PD <= 7, "WGMMA wait: N must be in range [0, 7]");
   asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(PD) : "memory");
-#endif
+  #endif
 }
 
 // Unified WGMMA template with automatic descriptor selection
@@ -1713,7 +1713,7 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
   // Determine PTX instruction based on input and output types
   if constexpr (std::is_same_v<InputT, __half> &&
                 std::is_same_v<OutputT, __half>) {
-#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.f16.f16.f16 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -1742,10 +1742,10 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(trans_a), "n"(trans_b));
-#endif
+  #endif
   } else if constexpr (std::is_same_v<InputT, __half> &&
                        std::is_same_v<OutputT, float>) {
-#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.f32.f16.f16 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -1766,10 +1766,10 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(trans_a), "n"(trans_b));
-#endif
+  #endif
   } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> &&
                        std::is_same_v<OutputT, __nv_bfloat16>) {
-#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.bf16.bf16.bf16 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -1798,10 +1798,10 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(trans_a), "n"(trans_b));
-#endif
+  #endif
   } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> &&
                        std::is_same_v<OutputT, float>) {
-#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -1822,11 +1822,11 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(trans_a), "n"(trans_b));
-#endif
+  #endif
   } else if constexpr ((std::is_same_v<InputT, f8_e4m3> ||
                         std::is_same_v<InputT, f8_e5m2>) &&
                        std::is_same_v<OutputT, float>) {
-#if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
+  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
     asm volatile("{\n"
                  "wgmma.mma_async.sync.aligned.m64n64k16.f32.f8.f8 "
                  "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
@@ -1847,7 +1847,7 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
                    "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
                  : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
                    "n"(trans_a), "n"(trans_b));
-#endif
+  #endif
   }
 }
 
@@ -1864,7 +1864,7 @@ struct Policy_WGMMA_D_M64K16 {
     int row1 = row0 + 8;             // second row
     int col_num = N / 8;             // number of column pairs
     using value_type = typename Tensor::value_type;
-#pragma unroll
+  #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int col0 = c * 8 + (tid % 4) * 2;
       int col1 = col0 + 1;
@@ -1887,7 +1887,7 @@ struct Policy_WGMMA_D_M64K8 {
     int row1 = row0 + 8;             // second row
     int col_num = N / 8;             // number of column pairs
     using value_type = typename Tensor::value_type;
-#pragma unroll
+  #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int col0 = c * 8 + (tid % 4) * 2;
       int col1 = col0 + 1;
@@ -1910,7 +1910,7 @@ struct Policy_WGMMA_D_M64K32 {
     int row1 = row0 + 8;             // second row
     int col_num = N / 8;             // number of column pairs
     using value_type = typename Tensor::value_type;
-#pragma unroll
+  #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int col0 = c * 8 + (tid % 4) * 2;
       int col1 = col0 + 1;
@@ -1933,7 +1933,7 @@ struct Policy_WGMMA_D_M64K256 {
     int row1 = row0 + 8;             // second row
     int col_num = N / 8;             // number of column pairs
     using value_type = typename Tensor::value_type;
-#pragma unroll
+  #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int col0 = c * 8 + (tid % 4) * 2;
       int col1 = col0 + 1;
@@ -2024,7 +2024,7 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
   float sa0 = scale_a_ptr[row0 * scale_a_ld];
   float sa1 = scale_a_ptr[row1 * scale_a_ld];
   if constexpr (std::is_same_v<AccT, f16>) {
-#pragma unroll
+  #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
       d[base + 0] +=
@@ -2037,7 +2037,7 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
           utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1 * scale_b);
     }
   } else if constexpr (std::is_same_v<AccT, float>) {
-#pragma unroll
+  #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
       d[base + 0] += scale_d[base + 0] * sa0 * scale_b;
@@ -2202,23 +2202,23 @@ struct SM80_SPARSE_16x8x16_F32F16F16F32_TN {
                                    float const& c0, float const& c1,
                                    float const& c2, float const& c3,
                                    uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    #if (__CUDACC_VER_MAJOR__ > 12) ||                                         \
+        (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
         "mma.sp::ordered_metadata.sync.aligned.m16n8k16.row.col.f32.f16.f16."
         "f32 "
         "{%0, %1, %2, %3}, {%4, %5}, {%6, %7}, {%0, %1, %2, %3}, %8, 0x0;\n"
         : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
         : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(e));
-#else
+    #else
     asm volatile(
         "mma.sp.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
         "{%0, %1, %2, %3}, {%4, %5}, {%6, %7}, {%0, %1, %2, %3}, %8, 0x0;\n"
         : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
         : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(e));
-#endif
-#endif
+    #endif
+  #endif
   }
 };
 
@@ -2235,9 +2235,9 @@ struct SM80_SPARSE_16x8x32_F32F16F16F32_TN {
       uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
       uint32_t const& b3, float const& c0, float const& c1, float const& c2,
       float const& c3, uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    #if (__CUDACC_VER_MAJOR__ > 12) ||                                         \
+        (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.f32."
                  "f16.f16.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, {%0, "
@@ -2245,15 +2245,15 @@ struct SM80_SPARSE_16x8x32_F32F16F16F32_TN {
                  : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "r"(e));
-#else
+    #else
     asm volatile("mma.sp.sync.aligned.m16n8k32.row.col.f32.f16.f16.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, {%0, "
                  "%1, %2, %3}, %12, 0x0;\n"
                  : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "r"(e));
-#endif
-#endif
+    #endif
+  #endif
   }
 };
 
@@ -2270,23 +2270,23 @@ struct SM80_SPARSE_16x8x16_F32BF16BF16F32_TN {
                                    float const& c0, float const& c1,
                                    float const& c2, float const& c3,
                                    uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    #if (__CUDACC_VER_MAJOR__ > 12) ||                                         \
+        (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
         "mma.sp::ordered_metadata.sync.aligned.m16n8k16.row.col.f32.bf16.bf16."
         "f32 "
         "{%0, %1, %2, %3}, {%4, %5}, {%6, %7}, {%0, %1, %2, %3}, %8, 0x0;\n"
         : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
         : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(e));
-#else
+    #else
     asm volatile(
         "mma.sp.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
         "{%0, %1, %2, %3}, {%4, %5}, {%6, %7}, {%0, %1, %2, %3}, %8, 0x0;\n"
         : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
         : "r"(a0), "r"(a1), "r"(b0), "r"(b1), "r"(e));
-#endif
-#endif
+    #endif
+  #endif
   }
 };
 
@@ -2303,9 +2303,9 @@ struct SM80_SPARSE_16x8x32_F32BF16BF16F32_TN {
       uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
       uint32_t const& b3, float const& c0, float const& c1, float const& c2,
       float const& c3, uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    #if (__CUDACC_VER_MAJOR__ > 12) ||                                         \
+        (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.f32."
                  "bf16.bf16.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, {%0, "
@@ -2313,19 +2313,19 @@ struct SM80_SPARSE_16x8x32_F32BF16BF16F32_TN {
                  : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "r"(e));
-#else
+    #else
     asm volatile("mma.sp.sync.aligned.m16n8k32.row.col.f32.bf16.bf16.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, {%0, "
                  "%1, %2, %3}, %12, 0x0;\n"
                  : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "r"(e));
-#endif
-#endif
+    #endif
+  #endif
   }
 };
 
-#ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+  #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 // fp8 m16n8k64 sparse MMA: C = A_sparse * B + C (SM90+)
 struct SM90_SPARSE_16x8x64_F16E4M3E4M3F16_TN {
   using DRegisters = uint32_t[2];
@@ -2340,10 +2340,10 @@ struct SM90_SPARSE_16x8x64_F16E4M3E4M3F16_TN {
                                    uint32_t const& b2, uint32_t const& b3,
                                    uint32_t const& c0, uint32_t const& c1,
                                    uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+      #if (__CUDACC_VER_MAJOR__ > 12) ||                                       \
+          (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
         "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e4m3.e4m3."
         "f16 "
@@ -2351,15 +2351,15 @@ struct SM90_SPARSE_16x8x64_F16E4M3E4M3F16_TN {
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
           "r"(b3), "r"(c0), "r"(c1), "r"(e));
-#else
+      #else
     asm volatile(
         "mma.sp.sync.aligned.m16n8k64.row.col.f16.e4m3.e4m3.f16 "
         "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
           "r"(b3), "r"(c0), "r"(c1), "r"(e));
-#endif
-#endif
+      #endif
+    #endif
   }
 };
 
@@ -2376,10 +2376,10 @@ struct SM90_SPARSE_16x8x64_F16E4M3E5M2F16_TN {
                                    uint32_t const& b2, uint32_t const& b3,
                                    uint32_t const& c0, uint32_t const& c1,
                                    uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+      #if (__CUDACC_VER_MAJOR__ > 12) ||                                       \
+          (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
         "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e4m3.e5m2."
         "f16 "
@@ -2387,15 +2387,15 @@ struct SM90_SPARSE_16x8x64_F16E4M3E5M2F16_TN {
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
           "r"(b3), "r"(c0), "r"(c1), "r"(e));
-#else
+      #else
     asm volatile(
         "mma.sp.sync.aligned.m16n8k64.row.col.f16.e4m3.e5m2.f16 "
         "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
           "r"(b3), "r"(c0), "r"(c1), "r"(e));
-#endif
-#endif
+      #endif
+    #endif
   }
 };
 
@@ -2412,10 +2412,10 @@ struct SM90_SPARSE_16x8x64_F16E5M2E4M3F16_TN {
                                    uint32_t const& b2, uint32_t const& b3,
                                    uint32_t const& c0, uint32_t const& c1,
                                    uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+      #if (__CUDACC_VER_MAJOR__ > 12) ||                                       \
+          (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
         "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e5m2.e4m3."
         "f16 "
@@ -2423,15 +2423,15 @@ struct SM90_SPARSE_16x8x64_F16E5M2E4M3F16_TN {
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
           "r"(b3), "r"(c0), "r"(c1), "r"(e));
-#else
+      #else
     asm volatile(
         "mma.sp.sync.aligned.m16n8k64.row.col.f16.e5m2.e4m3.f16 "
         "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
           "r"(b3), "r"(c0), "r"(c1), "r"(e));
-#endif
-#endif
+      #endif
+    #endif
   }
 };
 
@@ -2448,10 +2448,10 @@ struct SM90_SPARSE_16x8x64_F16E5M2E5M2F16_TN {
                                    uint32_t const& b2, uint32_t const& b3,
                                    uint32_t const& c0, uint32_t const& c1,
                                    uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+      #if (__CUDACC_VER_MAJOR__ > 12) ||                                       \
+          (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile(
         "mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f16.e5m2.e5m2."
         "f16 "
@@ -2459,15 +2459,15 @@ struct SM90_SPARSE_16x8x64_F16E5M2E5M2F16_TN {
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
           "r"(b3), "r"(c0), "r"(c1), "r"(e));
-#else
+      #else
     asm volatile(
         "mma.sp.sync.aligned.m16n8k64.row.col.f16.e5m2.e5m2.f16 "
         "{%0, %1}, {%2, %3, %4, %5}, {%6, %7, %8, %9}, {%10, %11}, %12, 0x0;\n"
         : "=r"(d0), "=r"(d1)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(b2),
           "r"(b3), "r"(c0), "r"(c1), "r"(e));
-#endif
-#endif
+      #endif
+    #endif
   }
 };
 
@@ -2483,10 +2483,10 @@ struct SM90_SPARSE_16x8x64_F32E4M3E4M3F32_TN {
       uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
       uint32_t const& b3, float const& c0, float const& c1, float const& c2,
       float const& c3, uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+      #if (__CUDACC_VER_MAJOR__ > 12) ||                                       \
+          (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32."
                  "e4m3.e4m3.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
@@ -2495,7 +2495,7 @@ struct SM90_SPARSE_16x8x64_F32E4M3E4M3F32_TN {
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
                    "r"(e));
-#else
+      #else
     asm volatile("mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e4m3.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
                  "{%12, %13, %14, %15}, %16, 0x0;\n"
@@ -2503,8 +2503,8 @@ struct SM90_SPARSE_16x8x64_F32E4M3E4M3F32_TN {
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
                    "r"(e));
-#endif
-#endif
+      #endif
+    #endif
   }
 };
 
@@ -2520,10 +2520,10 @@ struct SM90_SPARSE_16x8x64_F32E4M3E5M2F32_TN {
       uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
       uint32_t const& b3, float const& c0, float const& c1, float const& c2,
       float const& c3, uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+      #if (__CUDACC_VER_MAJOR__ > 12) ||                                       \
+          (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32."
                  "e4m3.e5m2.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
@@ -2532,7 +2532,7 @@ struct SM90_SPARSE_16x8x64_F32E4M3E5M2F32_TN {
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
                    "r"(e));
-#else
+      #else
     asm volatile("mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e5m2.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
                  "{%12, %13, %14, %15}, %16, 0x0;\n"
@@ -2540,8 +2540,8 @@ struct SM90_SPARSE_16x8x64_F32E4M3E5M2F32_TN {
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
                    "r"(e));
-#endif
-#endif
+      #endif
+    #endif
   }
 };
 
@@ -2557,10 +2557,10 @@ struct SM90_SPARSE_16x8x64_F32E5M2E4M3F32_TN {
       uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
       uint32_t const& b3, float const& c0, float const& c1, float const& c2,
       float const& c3, uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+      #if (__CUDACC_VER_MAJOR__ > 12) ||                                       \
+          (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32."
                  "e5m2.e4m3.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
@@ -2569,7 +2569,7 @@ struct SM90_SPARSE_16x8x64_F32E5M2E4M3F32_TN {
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
                    "r"(e));
-#else
+      #else
     asm volatile("mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e4m3.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
                  "{%12, %13, %14, %15}, %16, 0x0;\n"
@@ -2577,8 +2577,8 @@ struct SM90_SPARSE_16x8x64_F32E5M2E4M3F32_TN {
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
                    "r"(e));
-#endif
-#endif
+      #endif
+    #endif
   }
 };
 
@@ -2594,10 +2594,10 @@ struct SM90_SPARSE_16x8x64_F32E5M2E5M2F32_TN {
       uint32_t const& b0, uint32_t const& b1, uint32_t const& b2,
       uint32_t const& b3, float const& c0, float const& c1, float const& c2,
       float const& c3, uint32_t const& e, int const& spsel = 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
     (void)spsel;
-#if (__CUDACC_VER_MAJOR__ > 12) ||                                             \
-    (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
+      #if (__CUDACC_VER_MAJOR__ > 12) ||                                       \
+          (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 3)
     asm volatile("mma.sp::ordered_metadata.sync.aligned.m16n8k64.row.col.f32."
                  "e5m2.e5m2.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
@@ -2606,7 +2606,7 @@ struct SM90_SPARSE_16x8x64_F32E5M2E5M2F32_TN {
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
                    "r"(e));
-#else
+      #else
     asm volatile("mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e5m2.f32 "
                  "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9, %10, %11}, "
                  "{%12, %13, %14, %15}, %16, 0x0;\n"
@@ -2614,11 +2614,11 @@ struct SM90_SPARSE_16x8x64_F32E5M2E5M2F32_TN {
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1),
                    "r"(b2), "r"(b3), "f"(c0), "f"(c1), "f"(c2), "f"(c3),
                    "r"(e));
-#endif
-#endif
+      #endif
+    #endif
   }
 };
-#endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+  #endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
 
 } // namespace cute
 
@@ -2633,7 +2633,7 @@ constexpr int _WARP_SIZE = 32;
 template <typename FragTy, typename FTy>
 __device__ __attribute__((always_inline)) inline void
 fragment_elementwise(FragTy& frag, FTy&& f) {
-#pragma unroll
+  #pragma unroll
   for (int i = 0; i < frag.num_elements; ++i)
     frag.x[i] = f(frag.x[i]); // each lane updates its own elements
 }
@@ -2641,7 +2641,7 @@ fragment_elementwise(FragTy& frag, FTy&& f) {
 template <typename FragTy, typename ETy, typename FTy>
 __device__ __attribute__((always_inline)) inline void
 fragment_scalar_elementwise(FragTy& frag, const ETy& s, FTy&& f) {
-#pragma unroll
+  #pragma unroll
   for (int i = 0; i < frag.num_elements; ++i)
     frag.x[i] = f(frag.x[i], s); // each lane updates its own elements
 }
@@ -2650,7 +2650,7 @@ template <typename FragTy, typename ETy, typename FTy>
 __device__ __attribute__((always_inline)) inline void
 fragment_scalarx2_elementwise(FragTy& frag, const ETy& s0, const ETy& s1,
                               FTy&& f) {
-#pragma unroll
+  #pragma unroll
   for (int i = 0; i < frag.num_elements; ++i)
     frag.x[i] = f(frag.x[i], s0, s1); // each lane updates its own elements
 }
@@ -2662,7 +2662,7 @@ inplace_matrix_uop(ETy __restrict__* m, FTy&& f) {
   asm("mov.u32 %0, %laneid;" : "=r"(lane));
 
   int MN = M * N;
-#pragma unroll
+  #pragma unroll
   for (int idx = lane; idx < MN; idx += _WARP_SIZE) {
     int r = idx / N;
     m[r * LD + (idx - r * N)] = f(m[r * LD + (idx - r * N)]);
@@ -2677,7 +2677,7 @@ inplace_matrix_vector_bop(ETy __restrict__* m, const ETy __restrict__* v0,
   asm("mov.u32 %0, %laneid;" : "=r"(lane));
 
   int MN = M * N;
-#pragma unroll
+  #pragma unroll
   for (int idx = lane; idx < MN; idx += _WARP_SIZE) {
     int r = idx / N;
     int c = idx - r * N;
@@ -2693,7 +2693,7 @@ inplace_matrix_vectorx2_bop(ETy __restrict__* m, const ETy __restrict__* v0,
   asm("mov.u32 %0, %laneid;" : "=r"(lane));
 
   int MN = M * N;
-#pragma unroll
+  #pragma unroll
   for (int idx = lane; idx < MN; idx += _WARP_SIZE) {
     int r = idx / N;
     int c = idx - r * N;

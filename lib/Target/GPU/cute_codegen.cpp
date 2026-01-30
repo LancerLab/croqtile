@@ -14,11 +14,11 @@
 #include "operator_info.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
-#warning "missing macro definition of __CHOREO_CUDA_DIR__"
+  #warning "missing macro definition of __CHOREO_CUDA_DIR__"
 #endif // __CHOREO_CUDA_DIR__
 
 #ifndef __CHOREO_CUTE_DIR__
-#warning "missing macro definition of __CHOREO_CUTE_DIR__"
+  #warning "missing macro definition of __CHOREO_CUTE_DIR__"
 #endif // __CHOREO_CUTE_DIR__
 
 // #define USING_OP_INFO
@@ -2597,8 +2597,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
         ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym
            << "_scale_frag[" << reg_num_d << "];\n";
-        ds << d_indent << "memset(" << c_sym << "_scale_frag, 0, sizeof(" << c_sym
-           << "_scale_frag));\n";
+        ds << d_indent << "memset(" << c_sym << "_scale_frag, 0, sizeof("
+           << c_sym << "_scale_frag));\n";
       }
       ds << d_indent << "cute::" << mma_policy << "<";
       if (!policy_is_tn) {

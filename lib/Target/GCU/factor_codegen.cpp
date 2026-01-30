@@ -14,7 +14,7 @@
 #include "types.hpp"
 
 #ifndef __CHOREO_FACTOR_DIR__
-#error "missing macro definition of __CHOREO_FACTOR_DIR__"
+  #error "missing macro definition of __CHOREO_FACTOR_DIR__"
 #endif
 
 // utility macros define here

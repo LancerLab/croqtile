@@ -6,7 +6,7 @@
 using namespace Choreo;
 
 #ifndef __CHOREO_DEFAULT_TARGET__
-#error "no default target is specified."
+  #error "no default target is specified."
 #endif
 
 extern location loc;

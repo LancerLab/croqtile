@@ -32,15 +32,15 @@ choreo_unreachable_impl(const char* file, int line,
 // and clang-6. This pre-requisition should be satisfied.
 
 #if defined(__GNUC__) && !defined(__clang__)
-#if (__GNUC__ < 8) || (__GNUC__ == 8 && __GNUC_MINOR__ < 1)
-#error "GCC version must be at least 8.1"
-#endif
+  #if (__GNUC__ < 8) || (__GNUC__ == 8 && __GNUC_MINOR__ < 1)
+    #error "GCC version must be at least 8.1"
+  #endif
 #endif
 
 #if defined(__clang__)
-#if (__clang_major__ < 6)
-#error "Clang version must be at least 6"
-#endif
+  #if (__clang_major__ < 6)
+    #error "Clang version must be at least 6"
+  #endif
 #endif
 
 // Macro that captures the file and line

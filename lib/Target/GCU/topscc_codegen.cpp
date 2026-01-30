@@ -15,7 +15,7 @@
 #include "types.hpp"
 
 #ifndef __CHOREO_TOPSCC_DIR__
-#error "missing macro definition of __CHOREO_TOPSCC_DIR__"
+  #error "missing macro definition of __CHOREO_TOPSCC_DIR__"
 #endif
 
 Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",

@@ -1,17 +1,17 @@
 #ifdef __TOPSCC__
-#include <krt/builtins.h>
+  #include <krt/builtins.h>
 
 namespace choreo {
 
 // --- light-weight choreo device library --- //
 
 __device__ __attribute__((always_inline)) static inline void __co_abort__() {
-#if __GCU_ARCH__ >= 300
+  #if __GCU_ARCH__ >= 300
   tops::abort();
-#endif
+  #endif
 }
 
-#if __GCU_ARCH__ == 400
+  #if __GCU_ARCH__ == 400
 using choreo_dte_ctx_t = tops_dte_ctx_base_s;
 using choreo_event = tops::event;
 __device__ __forceinline__ void tops_init_dte(tops_dte_ctx_base_s* ctx) {
@@ -20,7 +20,7 @@ __device__ __forceinline__ void tops_init_dte(tops_dte_ctx_base_s* ctx) {
 __device__ __forceinline__ void tops_destroy_dte(tops_dte_ctx_base_s* ctx) {
   ctx->destroy_comm();
 }
-#elif __GCU_ARCH__ == 500
+  #elif __GCU_ARCH__ == 500
 struct choreo_dte_ctx_t {
   __device__ __forceinline__ void init() {}
   __device__ __forceinline__ void destory() {}
@@ -35,10 +35,10 @@ struct choreo_event {
   choreo_dte_ctx_t* ctx;
 };
 
-#else
+  #else
 using choreo_dte_ctx_t = tops_dte_ctx_t;
 using choreo_event = tops::event;
-#endif
+  #endif
 
 // choreo device future
 struct future {
@@ -68,7 +68,7 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
         line(l), column(c) {}
-#if __GCU_ARCH__ == 400
+  #if __GCU_ARCH__ == 400
   __device__ future(tops::local_dte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
@@ -81,7 +81,7 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
         line(l), column(c) {}
-#endif
+  #endif
 
   // context is retrieved to invoke data operations
   __device__ auto get_ctx() {
@@ -141,10 +141,10 @@ struct future {
 
   __device__ void wait() {
     if (s == ST_TRIGGERED) {
-#if __GCU_ARCH__ <= 400
+  #if __GCU_ARCH__ <= 400
       tops::wait(e);
-#elif __GCU_ARCH__ == 500
-#endif
+  #elif __GCU_ARCH__ == 500
+  #endif
       s = ST_WAITED;
     } else if (s == ST_WAITED) {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
@@ -160,7 +160,7 @@ struct future {
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
   }
 
-#if 0
+  #if 0
   __device__ choreo_event& event() {
     if (s == ST_TRIGGERED) {
       printf("[choreo-rt] internal error: future (defined at line %u:%u) is not associated with an event.\n",
@@ -169,7 +169,7 @@ struct future {
     }
     return e;
   }
-#endif
+  #endif
 
   __device__ void* data() {
     if (!d) {

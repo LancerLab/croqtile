@@ -11,3 +11,4 @@ AllowShortFunctionsOnASingleLine: true
 AllowShortCaseLabelsOnASingleLine: true 
 DerivePointerAlignment: false
 PointerAlignment: Left
+IndentPPDirectives: BeforeHash

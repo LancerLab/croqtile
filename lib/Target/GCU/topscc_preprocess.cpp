@@ -4,7 +4,7 @@
 #include <filesystem>
 
 #ifndef __CHOREO_TOPSCC_DIR__
-#error "missing macro definition of __CHOREO_TOPSCC_DIR__"
+  #error "missing macro definition of __CHOREO_TOPSCC_DIR__"
 #endif
 
 using namespace Choreo;
