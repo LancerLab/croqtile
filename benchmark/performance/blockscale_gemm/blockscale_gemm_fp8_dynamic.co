@@ -18,21 +18,21 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs,
     shared f8_e4m3 [WARP_N, BLK_K] rhs_load_s;
 
     parallel p by 1 : group-4 {
-      mc = mma.fill.f32 0.0f;
+      mc = mma.fill.f16 0.0f; // mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, BLK_K)] {
         // load 64x32 to smem
-        // tma.copy.swizzle<128> lhs.chunkat(block_m, iv_k) => lhs_load_s;
-        tma.copy.swiz<128>.zfill lhs.subspan(WARP_M, BLK_K).stride(WARP_M, BLK_K).at(block_m, iv_k) => lhs_load_s;
-        tma.copy.swizzle<128> rhs.chunkat(block_n, iv_k) => rhs_load_s;
-        
+        tma.copy.swiz<128>.zfill lhs.subspan(WARP_M, BLK_K).at(block_m, iv_k) => lhs_load_s;
+        tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+
         // WGMMA requires 128 threads: 4 warps x 32 threads/warp
         foreach {iv_warp} in [cdiv(BLK_K, WARP_K)] {
-          ma = mma.load.swizzle<128> lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swizzle<128> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row.scale mc, ma, mb, scale_a.chunkat(block_m, iv_k), scale_b.at(block_n, iv_k);
+          ma = mma.load.swiz<128> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+
+          mma.row.row.scale mc, ma, mb, scale_a.subspan(WARP_M, 1).at(block_m, iv_k), scale_b.at(block_n, iv_k); // out of bound risk
         }
       }
-      mma.store mc, output.chunkat(block_m, block_n);
+      mma.store mc, output.subspan(WARP_M, WARP_N).at(block_m, block_n); // out of bound risk
     }
   }
 }
