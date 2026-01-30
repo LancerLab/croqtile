@@ -2299,12 +2299,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     assert(tname.has_value());
     if ((fsto == Storage::GLOBAL || fsto == Storage::DEFAULT) &&
         tsto == Storage::SHARED) {
-      if (enforced_pb_level == ParallelLevel::GROUP)
-        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(32)) {\n";
-      else if (enforced_pb_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
-      else
-        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      // if (enforced_pb_level == ParallelLevel::GROUP)
+      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(32)) {\n";
+      // else if (enforced_pb_level == ParallelLevel::GROUPx4)
+      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
+      // else
+      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
 
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_global_to_shared(" << t_buf_expr << ", &" << *tname
@@ -2345,12 +2345,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       else
         ds << d_indent << "__syncthreads();\n";
 
-      if (enforced_pb_level == ParallelLevel::GROUP)
-        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(32)) {\n";
-      else if (enforced_pb_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
-      else
-        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      // if (enforced_pb_level == ParallelLevel::GROUP)
+      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(32)) {\n";
+      // else if (enforced_pb_level == ParallelLevel::GROUPx4)
+      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
+      // else
+      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
 
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_shared_to_global(&" << *tname << "_tensor_map, "

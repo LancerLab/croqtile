@@ -2004,6 +2004,7 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
     MMA_Policy<MMA>::typeD::template store<Tensor, AccumT>(D, d);
 }
 
+// only for M64N32 WGMMA accumulator scaling
 template <typename AccT, typename ScaleT, int N>
 __device__ static inline void
 scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
