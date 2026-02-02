@@ -707,8 +707,8 @@ using float_ue4m3_t =
 using f8 = float_e4m3_t; // define f8 as float_e4m3_t
 using f8_e4m3 = float_e4m3_t;
 using f8_e5m2 = float_e5m2_t;
-using f8_ue8m0 = float_ue8m0_t;
 using f8_ue4m3 = float_ue4m3_t;
+using f8_ue8m0 = float_ue8m0_t;
 
   // Minimal arithmetic support for FP8 scalar types.
   // Choreo's codegen may form expressions like `fp8 + fp8` before casting.
@@ -928,6 +928,82 @@ verify_matmul_row_row_subset(A& lhs, B& rhs, C& res, float base_tol,
       choreo_assert(std::abs(got - ref) <= tol, "values are not equal.");
     }
 }
+
+// bitcast from floating-point to uintx_t
+// The type in is_same is the underlying type not the type alias.
+#if defined(__USE_CUDA_TYPE__)
+template <typename T>
+__host__ __device__ static inline auto bitcast_uint(T x) {
+  if constexpr (std::is_same<T, int8_t>::value ||
+                std::is_same<T, uint8_t>::value)
+    return reinterpret_cast<uint8_t&>(x);
+  else if constexpr (std::is_same<T, float>::value)
+    return __float_as_uint(x);
+  #if defined(__CHOREO_TARGET_NATIVE_TF32_SUPPORT__)
+  else if constexpr (std::is_same<T, tf32>::value)
+    return __float_as_uint(x);
+  #endif // __CHOREO_TARGET_NATIVE_TF32_SUPPORT__
+  #if defined(__CHOREO_TARGET_NATIVE_F16_SUPPORT__)
+  else if constexpr (std::is_same<T, __half>::value)
+    return __half_as_ushort(x);
+  #endif // __CHOREO_TARGET_NATIVE_F16_SUPPORT__
+  #if defined(__CHOREO_TARGET_NATIVE_BF16_SUPPORT__)
+  else if constexpr (std::is_same<T, __nv_bfloat16>::value)
+    return __bfloat16_as_ushort(x);
+  #endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+  #if defined(__CHOREO_TARGET_NATIVE_FP8_SUPPORT__)
+  else if constexpr (std::is_same<T, __nv_fp8_e4m3>::value ||
+                     std::is_same<T, __nv_fp8_e5m2>::value)
+    return static_cast<uint8_t>(x.__x);
+  #endif // __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
+  #ifdef __CHOREO_TARGET_NATIVE_FP8_E8M0_SUPPORT__
+  else if constexpr (std::is_same<T, __nv_fp8_e8m0>::value)
+    return static_cast<uint8_t>(x.__x);
+  #endif // __CHOREO_TARGET_NATIVE_FP8_E8M0_SUPPORT__
+  else
+    static_assert(sizeof(T) == 0, "Unsupported type for bitcast_uint");
+}
+#endif // defined(__USE_CUDA_TYPE__)
+#if defined(__USE_CUTE_TYPE__)
+template <typename T>
+__host__ __device__ static inline auto bitcast_uint(T x) {
+  #if !defined(__CHOREO_TARGET_NATIVE_TF32_SUPPORT__) ||                       \
+      !defined(__CHOREO_TARGET_NATIVE_F16_SUPPORT__) ||                        \
+      !defined(__CHOREO_TARGET_NATIVE_BF16_SUPPORT__) ||                       \
+      !defined(__CHOREO_TARGET_NATIVE_FP8_SUPPORT__)
+    #error "All of the following macros must be defined: \
+__CHOREO_TARGET_NATIVE_TF32_SUPPORT__, \
+__CHOREO_TARGET_NATIVE_F16_SUPPORT__, \
+__CHOREO_TARGET_NATIVE_BF16_SUPPORT__, \
+__CHOREO_TARGET_NATIVE_FP8_SUPPORT__"
+  #endif
+  if constexpr (std::is_same<T, cute::float_e4m3_t>::value ||
+                std::is_same<T, cute::float_e5m2_t>::value ||
+                std::is_same<T, cute::float_ue4m3_t>::value ||
+                std::is_same<T, cute::float_ue8m0_t>::value)
+    return x.raw();
+  else if constexpr (std::is_same<T, cute::half_t>::value ||
+                     std::is_same<T, cute::bfloat16_t>::value)
+    return x.raw();
+  else if constexpr (std::is_same<T, int8_t>::value ||
+                     std::is_same<T, uint8_t>::value)
+    return reinterpret_cast<uint8_t&>(x);
+  else if constexpr (std::is_same<T, float>::value ||
+                     std::is_same<T, tf32>::value)
+    return __float_as_uint(x);
+  else
+    static_assert(sizeof(T) == 0, "Unsupported type for bitcast_uint");
+}
+#endif // defined(__USE_CUTE_TYPE__)
+
+#if defined(__CHOREO_TARGET_CUTE__)
+// note: As long as result is of uint32_t type, then always using bitcast_u32
+// will not incur any additional performance overhead.
+template <typename T>
+__host__ __device__ static inline uint32_t bitcast_u32(T x) {
+  return uint32_t(bitcast_uint(x));
+}
+#endif // defined(__CHOREO_TARGET_CUTE__)
 
 namespace utils {
 template <typename U>
