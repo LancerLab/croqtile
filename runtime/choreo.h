@@ -929,16 +929,12 @@ verify_matmul_row_row_subset(A& lhs, B& rhs, C& res, float base_tol,
     }
 }
 
-// bitcast from floating-point to uintx_t
+// bitcast to uintx_t.
 // The type in is_same is the underlying type not the type alias.
 #if defined(__USE_CUDA_TYPE__)
 template <typename T>
-__host__ __device__ static inline auto bitcast_uint(T x) {
-  if constexpr (std::is_same<T, int8_t>::value ||
-                std::is_same<T, uint8_t>::value)
-    return reinterpret_cast<uint8_t&>(x);
-  else if constexpr (std::is_same<T, float>::value)
-    return __float_as_uint(x);
+__host__ __device__ inline auto bitcast_uint(T x) {
+  if constexpr (std::is_same<T, float>::value) return __float_as_uint(x);
   #if defined(__CHOREO_TARGET_NATIVE_TF32_SUPPORT__)
   else if constexpr (std::is_same<T, tf32>::value)
     return __float_as_uint(x);
@@ -960,13 +956,22 @@ __host__ __device__ static inline auto bitcast_uint(T x) {
   else if constexpr (std::is_same<T, __nv_fp8_e8m0>::value)
     return static_cast<uint8_t>(x.__x);
   #endif // __CHOREO_TARGET_NATIVE_FP8_E8M0_SUPPORT__
-  else
+  else if constexpr (std::is_integral_v<T>) {
+    static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
+                  "integral T must be 1, 2, or 4 bytes");
+    if constexpr (sizeof(T) == 1)
+      return reinterpret_cast<uint8_t&>(x);
+    else if constexpr (sizeof(T) == 2)
+      return reinterpret_cast<uint16_t&>(x);
+    else
+      return reinterpret_cast<uint32_t&>(x);
+  } else
     static_assert(sizeof(T) == 0, "Unsupported type for bitcast_uint");
 }
 #endif // defined(__USE_CUDA_TYPE__)
 #if defined(__USE_CUTE_TYPE__)
 template <typename T>
-__host__ __device__ static inline auto bitcast_uint(T x) {
+__host__ __device__ inline auto bitcast_uint(T x) {
   #if !defined(__CHOREO_TARGET_NATIVE_TF32_SUPPORT__) ||                       \
       !defined(__CHOREO_TARGET_NATIVE_F16_SUPPORT__) ||                        \
       !defined(__CHOREO_TARGET_NATIVE_BF16_SUPPORT__) ||                       \
@@ -985,13 +990,19 @@ __CHOREO_TARGET_NATIVE_FP8_SUPPORT__"
   else if constexpr (std::is_same<T, cute::half_t>::value ||
                      std::is_same<T, cute::bfloat16_t>::value)
     return x.raw();
-  else if constexpr (std::is_same<T, int8_t>::value ||
-                     std::is_same<T, uint8_t>::value)
-    return reinterpret_cast<uint8_t&>(x);
   else if constexpr (std::is_same<T, float>::value ||
                      std::is_same<T, tf32>::value)
     return __float_as_uint(x);
-  else
+  else if constexpr (std::is_integral_v<T>) {
+    static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
+                  "integral T must be 1, 2, or 4 bytes");
+    if constexpr (sizeof(T) == 1)
+      return reinterpret_cast<uint8_t&>(x);
+    else if constexpr (sizeof(T) == 2)
+      return reinterpret_cast<uint16_t&>(x);
+    else
+      return reinterpret_cast<uint32_t&>(x);
+  } else
     static_assert(sizeof(T) == 0, "Unsupported type for bitcast_uint");
 }
 #endif // defined(__USE_CUTE_TYPE__)
@@ -1000,8 +1011,23 @@ __CHOREO_TARGET_NATIVE_FP8_SUPPORT__"
 // note: As long as result is of uint32_t type, then always using bitcast_u32
 // will not incur any additional performance overhead.
 template <typename T>
-__host__ __device__ static inline uint32_t bitcast_u32(T x) {
+__host__ __device__ inline uint32_t bitcast_u32(T x) {
   return uint32_t(bitcast_uint(x));
+}
+
+template <typename T>
+__host__ __device__ constexpr inline uint32_t broadcast_to_u32(T x) {
+  static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
+                "T must be 1, 2, or 4 bytes");
+
+  if constexpr (sizeof(T) == 1) {
+    return bitcast_u32(x) * 0x01010101U;
+  } else if constexpr (sizeof(T) == 2) {
+    uint32_t v = bitcast_u32(x);
+    return (v << 16) | v;
+  } else {
+    return bitcast_u32(x);
+  }
 }
 #endif // defined(__CHOREO_TARGET_CUTE__)
 

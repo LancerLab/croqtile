@@ -2418,30 +2418,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       static int fill_cnt = 0;
       // TODO: #pragma unroll
       // if ubound is large, may lead to low performance
-      std::string orig_init_val =
+      std::string scalar_init_val =
           ExprCastSTR(op.FillingValue(), std::nullopt, ssmi.ty,
                       GetBaseType(*op.FillingValue()->GetType()), false);
+      std::string frag_iv_str = "__frag_init_val" + std::to_string(fill_cnt);
       if (use_uint32) {
-        ds << d_indent << "uint32_t " << "__frag_init_val" << fill_cnt
-           << " = 0;\n";
-#if 0
-        // TODO: enable initialization of arbitrary values after template cast is done.
         std::string temp = "__fiv_temp" + fill_cnt;
-        ds << d_indent << "auto " << temp << " = " << orig_init_val << ";\n";
-        for (int i=0; i<SizeOf(BaseType::U32) / SizeOf(ssmi.ty); ++i)
-          ds << 
-        ds << ";\n";
-#endif
+        ds << d_indent << "uint32_t " << frag_iv_str << " = broadcast_to_u32("
+           << scalar_init_val << ");\n";
       } else {
-        ds << d_indent << "auto " << "__frag_init_val" << fill_cnt << " = "
-           << orig_init_val << ";\n";
+        ds << d_indent << NameBaseType(ssmi.ty) << " " << frag_iv_str << " = "
+           << scalar_init_val << ";\n";
       }
-      ds << d_indent << "for (int " << sym << "_frag_idx" << " = 0; " << sym
-         << "_frag_idx" << " < " << reg_num_d << "; ++" << sym << "_frag_idx"
-         << ")\n";
+      ds << d_indent << "for (int idx = 0; idx < " << reg_num_d << "; ++idx)\n";
       IncrDeviceIndent();
-      ds << d_indent << sym << "_frag[" << sym << "_frag_idx"
-         << "] = " << "__frag_init_val" << fill_cnt << ";\n";
+      ds << d_indent << sym << "_frag[idx] = " << frag_iv_str << ";\n";
       ++fill_cnt;
       DecrDeviceIndent();
       // Signal warp group that we're about to start WGMMA operations
@@ -2801,30 +2792,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       static int fill_cnt = 0;
       // TODO: #pragma unroll
       // if ubound is large, may lead to low performance
-      std::string orig_init_val =
+      std::string scalar_init_val =
           ExprCastSTR(op.FillingValue(), std::nullopt, ssmi.ty,
                       GetBaseType(*op.FillingValue()->GetType()), false);
+      std::string frag_iv_str = "__frag_init_val" + std::to_string(fill_cnt);
       if (use_uint32) {
-        ds << d_indent << "uint32_t " << "__frag_init_val" << fill_cnt
-           << " = 0;\n";
-#if 0
-        // TODO: enable initialization of arbitrary values after template cast is done.
         std::string temp = "__fiv_temp" + fill_cnt;
-        ds << d_indent << "auto " << temp << " = " << orig_init_val << ";\n";
-        for (int i=0; i<SizeOf(BaseType::U32) / SizeOf(ssmi.ty); ++i)
-          ds << 
-        ds << ";\n";
-#endif
+        ds << d_indent << "uint32_t " << frag_iv_str << " = broadcast_to_u32("
+           << scalar_init_val << ");\n";
       } else {
-        ds << d_indent << "auto " << "__frag_init_val" << fill_cnt << " = "
-           << orig_init_val << ";\n";
+        ds << d_indent << NameBaseType(ssmi.ty) << " " << frag_iv_str << " = "
+           << scalar_init_val << ";\n";
       }
-      ds << d_indent << "for (int " << sym << "_frag_idx" << " = 0; " << sym
-         << "_frag_idx" << " < " << reg_num_d << "; ++" << sym << "_frag_idx"
-         << ")\n";
+      ds << d_indent << "for (int idx = 0; idx < " << reg_num_d << "; ++idx)\n";
       IncrDeviceIndent();
-      ds << d_indent << sym << "_frag[" << sym << "_frag_idx"
-         << "] = " << "__frag_init_val" << fill_cnt << ";\n";
+      ds << d_indent << sym << "_frag[idx] = " << frag_iv_str << ";\n";
       ++fill_cnt;
       DecrDeviceIndent();
     } break;

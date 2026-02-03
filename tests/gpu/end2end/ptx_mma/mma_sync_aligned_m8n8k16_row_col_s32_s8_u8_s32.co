@@ -10,7 +10,7 @@ __co__ auto matmul(s8 [M, K] lhs, u8 [K, N] rhs) {
 
   int MMA_M = 8, MMA_N = 8, MMA_K = 16;
   parallel {m, n} by [M / MMA_M / 2, N / MMA_N / 2 ] : block {
-    mc = mma.fill.s32 0;
+    mc = mma.fill.s32 1;
     parallel {g0, g1} by [2, 2]: group {
       foreach k in K / MMA_K {
         ma = mma.load lhs.chunkat(m#g0, k);
@@ -35,7 +35,7 @@ int main() {
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
     for (size_t j = 0; j < res.shape()[1]; ++j) {
-      int32_t ref = 0;
+      int32_t ref = 1;
       for (size_t k = 0; k < lhs.shape()[1]; ++k)
         ref += (lhs[i][k] * rhs[k][j]);
       if (ref != res[i][j]) {
