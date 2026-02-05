@@ -346,20 +346,13 @@ public:
       // TODO: offset limitation: [0, 2^24)
       if (f_rank == 5) {
         for (auto tsi : f_ca->AllOperations()) {
-          if (tsi->SpecifyReshape()) continue;
-          auto first = tsi->Positions()->ValueAt(0);
-          auto t = dyn_cast<BoundedITupleType>(first->GetType());
-          assert(t != nullptr);
-          if (VIIsInt(t->ubounds.ValueAt(0))) {
-            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+          if (auto indices = tsi->GetIndices()) {
+            auto val = indices->Opts().GetVals()[0];
+            if (VIIsInt(val) && !IsValueItemEqual(1, val))
               Error1(n.LOC(), "On " + cur_arch +
                                   ", dma.copy(slice) does not "
                                   "support 5-dimensional "
                                   "array (if dim is 5, offsets[0] must be 0).");
-          } else {
-            choreo_unreachable("unexpected situation");
-            // TODO
-            // Is that the case?
           }
         }
       }
@@ -376,20 +369,13 @@ public:
       // TODO: offset limitation: [0, 2^24)
       if (t_rank == 5) {
         for (auto tsi : t_ca->AllOperations()) {
-          if (tsi->SpecifyReshape()) continue;
-          auto first = tsi->Positions()->ValueAt(0);
-          auto t = dyn_cast<BoundedITupleType>(first->GetType());
-          assert(t != nullptr);
-          if (VIIsInt(t->ubounds.ValueAt(0))) {
-            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+          if (auto indices = tsi->GetIndices()) {
+            auto val = indices->Opts().GetVals()[0];
+            if (VIIsInt(val) && !IsValueItemEqual(1, val))
               Error1(n.LOC(), "On " + cur_arch +
                                   ", dma.copy(deslice) does not "
                                   "support 5-dimensional "
                                   "array (if dim is 5, offsets[0] must be 0).");
-          } else {
-            choreo_unreachable("unexpected situation");
-            // TODO
-            // Is that the case?
           }
         }
       }

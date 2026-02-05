@@ -38,13 +38,13 @@ __co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
 // CHECK: (  5)         foreach x(::) {
 // CHECK: (  6)           foreach y(::) {
 // CHECK: (  7)             local s32 mdspan<3> [1, 1, 16] lhs_load__buf__
-// CHECK: (  8)             lhs_load = dma.copy.async lhs.ChunkAt(p, x, y) => lhs_load__buf__
+// CHECK: (  8)             lhs_load = dma.copy.async lhs.Chunk( (ubound p) ,  (ubound x) , (ubound y) ).At(p, x, y) => lhs_load__buf__
 // CHECK: (  9)             local s32 mdspan<3> [1, 1, 16] rhs_load__buf__
-// CHECK: ( 10)             rhs_load = dma.copy.async rhs.ChunkAt(p, x, y) => rhs_load__buf__
+// CHECK: ( 10)             rhs_load = dma.copy.async rhs.Chunk( (ubound p) ,  (ubound x) , (ubound y) ).At(p, x, y) => rhs_load__buf__
 // CHECK: ( 11)             wait lhs_load, rhs_load
 // CHECK: ( 12)             local s32 [ lhs_load.span ] l1_out
 // CHECK: ( 13)             call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out,  (sizeof lhs_load.span) )
-// CHECK: ( 14)             out_store = dma.copy.async l1_out => output.ChunkAt(p, x, y)
+// CHECK: ( 14)             out_store = dma.copy.async l1_out => output.Chunk( (ubound p) ,  (ubound x) , (ubound y) ).At(p, x, y)
 // CHECK: ( 15)             wait out_store
 // CHECK: ( 16)           }
 // CHECK: ( 17)         }

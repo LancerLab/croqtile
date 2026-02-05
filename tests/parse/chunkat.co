@@ -26,7 +26,7 @@ __co__ void bar(f32 [7, 4] data) {
 }
 
 // CHECK:    `- Call: foobar
-// CHECK:      `- with arguments: data.ChunkAt(x, y)
+// CHECK:      `- with arguments: data.Chunk( (ubound x) , (ubound y) ).At(x, y)
 
 __co__ void wow() {
   f32 [7] data[2];
@@ -37,16 +37,17 @@ __co__ void wow() {
 }
 
 // CHECK:    `- DMA.copy
-// CHECK:      `- from: data[0].ChunkAt(x)
+// CHECK:      `- from: data[0].Chunk( (ubound x) ).At(x)
 // CHECK:      `- to: local
 // CHECK:    `- Call: foobar
-// CHECK:      `- with arguments: data[1].ChunkAt(x)
+// CHECK:      `- with arguments: data[1].Chunk( (ubound x) ).At(x)
 
 __co__ void cow(f32 [9] inp) {
   with {x} in [3] {
     dma.copy inp.subspan(3).at(x) => local;
     dma.copy inp.chunk(3).at(x) => local;
     dma.copy inp.modspan(3).at(x) => local;
+    dma.copy inp.view([3], {2}).from(x) => local;
   }
 }
 
@@ -59,6 +60,9 @@ __co__ void cow(f32 [9] inp) {
 // CHECK:    `- DMA.copy
 // CHECK:      `- from: inp.ModSpan(3).At(x)
 // CHECK:      `- to: local
+// CHECK:    `- DMA.copy
+// CHECK:      `- from: inp.VIEW(3).Stride(2).From(x)
+// CHECK:      `- to: local
 
 __co__ void mow(f32 [9] inp) {
   with {x} in [3] {
@@ -67,7 +71,7 @@ __co__ void mow(f32 [9] inp) {
 }
 
 // CHECK:    `- DMA.copy
-// CHECK:      `- from: inp.SubSpan(3).At(x).ModSpan(4).At(x).ChunkAt(x)
+// CHECK:      `- from: inp.SubSpan(3).At(x).ModSpan(4).At(x).Chunk( (ubound x) ).At(x)
 // CHECK:      `- to: local
 
 __co__ void baz(f32 [4, 8, 64] i) {
@@ -79,5 +83,5 @@ __co__ void baz(f32 [4, 8, 64] i) {
   }
 }
 
-// CHECK: from: i.SubSpan( (4 /  (ubound p) ) ,  (8 /  (ubound x) ) , 64).At(0, 0, 0)
-// CHECK: from: i.SubSpan( (4 /  (ubound p) ) ,  (8 /  (ubound x) ) ,  (64 /  (ubound y) ) ).At(0, 0, 0)
+// CHECK: from: i.SubSpan( (4 /  (ubound p) ) ,  (8 /  (ubound x) ) , 64)
+// CHECK: from: i.SubSpan( (4 /  (ubound p) ) ,  (8 /  (ubound x) ) ,  (64 /  (ubound y) ) )

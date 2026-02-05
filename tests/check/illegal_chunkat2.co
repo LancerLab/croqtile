@@ -10,8 +10,8 @@ __co__ auto illegal_chunkat(f32 [16, 32, 64] a) {
   }
 }
 
-// CHECK: error: the tiling factor (dim: 0) is larger than the data dimension (32 > 16).
-// CHECK: error: the subspan dimension (dim: 1) is larger than original (33 > 32).
-// CHECK: error: the subspan dimension (dim: 1) is larger than the data (17 > 16).
-// CHECK: error: the subspan dimension (dim: 2) is larger than the data (33 > 32).
+// CHECK: error: tiling factor exceeds data size (32 > 16) in dimension 0.
+// CHECK: error: subspan too large for dimension 1 (33 > 32).
+// CHECK: error: subspan too large for dimension 1 (17 > 16).
+// CHECK: error: subspan too large for dimension 2 (33 > 32).
 // CHECK: Totally 4 errors have been detected.

@@ -26,7 +26,7 @@ __co__ auto illegal_mdspan(f32 [?] a) {
 }
 
 // CHECK-NOT: error:{{.*}}mds0{{.*}}
-// CHECK: error: `mds1' is declared as "mdspan<>" but initialized as "ituple<2>".
+// CHECK: error: `mds1' is declared as "mdspan<> []" but initialized as "ituple<2>".
 // CHECK: error: `mds2' is declared as "mdspan<1> []" but initialized as "mdspan<2> []".
 // CHECK: error: `mds3' is declared as "mdspan<5> []" but initialized as "mdspan<2> []".
 // CHECK-NOT: error:{{.*}}mds4{{.*}}

@@ -287,7 +287,7 @@ bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
   auto iv_ty = cur_loop->GetIVType();
   auto iv_sym = cur_loop->IVSym();
   auto upper_bound = GetSingleUpperBound(iv_ty);
-  auto stride = GetSingleStride(iv_ty);
+  auto stride = GetSingleStep(iv_ty);
   auto step = sbe::nu(stride * vector_width);
   auto ar_expr = MakeSCEVAddRecExpr(sbe::nu(0), step, cur_loop);
 

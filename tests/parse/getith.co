@@ -28,7 +28,7 @@ __co__ int getith(int a, f32 [3, 4] input) {
 // CHECK:     (with statements)
 // CHECK:     `- Assign: sum =  (sum + index(0))
 // CHECK:     `- DMA.copy
-// CHECK:       `- from: input.ChunkAt(x(-1), y)
+// CHECK:       `- from: input.Chunk( (ubound x(-1)) , (ubound y) ).At(x(-1), y)
 // CHECK:       `- to: local
 // CHECK:     `- Assign: sum =  (sum + y(-2))
 // CHECK:     `- Assign: sum =  (sum + index(1)(-2))

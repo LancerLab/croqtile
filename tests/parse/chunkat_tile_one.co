@@ -30,21 +30,21 @@ __co__ auto chunkat_tile_one(s32 [4, 8, 16] i) {
 // CHECK:     `- Iteration variables: t0
 // CHECK:     `- DMA.copy
 // CHECK:       `- future: l2
-// CHECK:       `- from: i.ChunkAt(t0, __choreo_no_tiling__, __choreo_no_tiling__)
+// CHECK:       `- from: i.Chunk( (ubound t0) , 1, 1).At(t0, __choreo_no_tiling__, __choreo_no_tiling__)
 // CHECK:       `- to: local
 // CHECK:     `- DMA.copy
 // CHECK:       `- future: l3
-// CHECK:       `- from: i.ChunkAt(__choreo_no_tiling__, t0, __choreo_no_tiling__)
+// CHECK:       `- from: i.Chunk(1, (ubound t0) , 1).At(__choreo_no_tiling__, t0, __choreo_no_tiling__)
 // CHECK:       `- to: local
 // CHECK:     `- DMA.copy
 // CHECK:       `- future: l4
-// CHECK:       `- from: i.ChunkAt(__choreo_no_tiling__, t0, t0)
+// CHECK:       `- from: i.Chunk(1, (ubound t0) , (ubound t0) ).At(__choreo_no_tiling__, t0, t0)
 // CHECK:       `- to: local
 // CHECK:     `- DMA.copy
 // CHECK:       `- future: l5
-// CHECK:       `- from: i.ChunkAt(__choreo_no_tiling__, t0, __choreo_no_tiling__)
+// CHECK:       `- from: i.Chunk(1, (ubound t0) , 1).At(__choreo_no_tiling__, t0, __choreo_no_tiling__)
 // CHECK:       `- to: local
 // CHECK:     `- DMA.copy
 // CHECK:       `- from: l5
-// CHECK:       `- to: o.ChunkAt(__choreo_no_tiling__, t0, __choreo_no_tiling__)
+// CHECK:       `- to: o.Chunk(1, (ubound t0) , 1).At(__choreo_no_tiling__, t0, __choreo_no_tiling__)
 

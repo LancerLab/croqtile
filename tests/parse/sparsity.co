@@ -21,7 +21,7 @@ __co__ void sparse_dma(f32 [16, 16] input) {
 // CHECK:    `- DMA.copy
 // CHECK:      `- future: f
 // CHECK:      `- sparse: 2:4
-// CHECK:      `- from: input.ChunkAt(x, y)
+// CHECK:      `- from: input.Chunk( (ubound x) , (ubound y) ).At(x, y)
 // CHECK:      `- to: local
 // CHECK:    `- Var Decl (mutable f32): v = f.mdata[x, y]
 

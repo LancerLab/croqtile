@@ -1,0 +1,18 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void foo(s32 [77, 320] data, int i) {
+  parallel p by 2 foreach x in 3 {
+    f = dma.copy data.subspan(32, 44).at(0, i) => shared;
+    f1 = dma.copy f.data.modspan(18, 20).at(x, 7) => shared;
+    index = {3, 2};
+    dma.copy f1.data.subspan(1, 4).at(index) => shared;
+    dma.copy f1.data.modspan(4, 3).at(f.data.at(i, 7), 5) => shared;
+    dma.copy f1.view([2, 2]).from(101, 7) => shared;
+  }
+}
+
+// CHECK: error: index out of bounds for dimension 1 (7 >= 2).
+// CHECK: error: index out of bounds for dimension 1 (2 >= 1).
+// CHECK: error: index out of bounds for dimension 1 (5 >= 1).
+// CHECK: error: offset out of bounds for dimension 0 (101 >= 14).
+// CHECK: error: offset out of bounds for dimension 1 (7 >= 4).

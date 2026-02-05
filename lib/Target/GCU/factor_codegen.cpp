@@ -680,7 +680,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
 
     std::ostringstream offss;
     size_t dim_cursor = 0;
-    for (auto& bv : ca->AllOperations()[0]->GetIndices()) {
+    for (auto& bv : ca->FirstOp()->IndexNodes()) {
       // It could either be identifier or a 'getith' expr
       if (auto id = AST::GetIdentifier(bv)) {
         auto bvn = id->name;
@@ -944,8 +944,8 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
       }
       fs << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(0)));
       fs << ", ";
-      if (IsValidStride(loop_range->stride))
-        fs << loop_range->stride;
+      if (IsValidStep(loop_range->step))
+        fs << loop_range->step;
       else
         fs << 1;
       fs << ", [&](auto iv_" << iv_name << ") {\n";
@@ -973,8 +973,8 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
         }
         fs << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(i)));
         fs << ", ";
-        if (IsValidStride(loop_range->stride))
-          fs << loop_range->stride;
+        if (IsValidStep(loop_range->step))
+          fs << loop_range->step;
         else
           fs << 1;
         fs << ", [&](auto iv_" << name << ") {\n";

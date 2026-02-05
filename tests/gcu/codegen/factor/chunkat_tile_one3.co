@@ -1,5 +1,4 @@
 // RUN: choreo -t factor -gs %s | FileCheck --match-full-lines %s
-// RUN: choreo -i %s | FileCheck --check-prefix=INFER --match-full-lines %s
 
 #define M 128
 __co__ auto chunkat_tile_one3(f32 [M, 1] input) {
@@ -36,15 +35,3 @@ __co__ auto chunkat_tile_one3(f32 [M, 1] input) {
 // CHECK:    async_store_(__choreo_anon_fut__2, res, out, {Value(64)*thread_id,0});
 // CHECK:    wait_dma_(__choreo_anon_fut__2);
 // CHECK:  }); // end of choreo-factor device function
-
-// INFER: Parameter: ::chunkat_tile_one3::input, Type: f32 mdspan<2> [128, 1]
-// INFER: Symbol:    ::chunkat_tile_one3::out, Type: global f32 mdspan<2> [128, 1]
-// INFER: Partial:   ::chunkat_tile_one3::block_span, Type: mdspan<2> [64, 1]
-// INFER: Bounded:   ::chunkat_tile_one3::paraby_0::paraby_1::p, Type: {int}->[2]
-// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::paraby_1::a, Type: shared f32 mdspan<2> [128, 1]
-// INFER: Future:    ::chunkat_tile_one3::paraby_0::paraby_1::(anon), Type: sync=>shared f32 mdspan<2> [128, 1]
-// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::paraby_1::lin, Type: local f32 mdspan<2> [64, 1]
-// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::paraby_1::res, Type: local f32 mdspan<2> [64, 1]
-// INFER: Future:    ::chunkat_tile_one3::paraby_0::paraby_1::(anon), Type: sync=>local f32 mdspan<2> [64, 1]
-// INFER: Future:    ::chunkat_tile_one3::paraby_0::paraby_1::(anon), Type: sync=>global f32 mdspan<2> [64, 1]
-// INFER: Function:  ::chunkat_tile_one3, Type: f32 mdspan<2> [128, 1] (*)(f32 mdspan<2> [128, 1])

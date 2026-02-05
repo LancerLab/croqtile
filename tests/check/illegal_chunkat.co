@@ -8,7 +8,7 @@ __co__ auto illegal_chunkat(f32 [3, 4] a) {
   }
 }
 
-// CHECK: error: un-matched ranks between spanned data (2) and bounded variables (4).
+// CHECK: error: data rank (2) must be consistent with tiling factor count (4).
 
 __co__ auto illegal_chunkat2(f32 [3, 4, 5, 2, 2] a) {
   parallel p by 2 {
@@ -18,6 +18,6 @@ __co__ auto illegal_chunkat2(f32 [3, 4, 5, 2, 2] a) {
   }
 }
 
-// CHECK: error: un-matched ranks between spanned data (5) and bounded variables (3).
+// CHECK: error: data rank (5) must be consistent with tiling factor count (3).
 
 // CHECK: Totally 2 errors have been detected.

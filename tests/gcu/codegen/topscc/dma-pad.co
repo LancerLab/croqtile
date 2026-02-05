@@ -45,7 +45,7 @@ __co__ auto foo1(s32 [N, M] a) {
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;
 // CHECK:   choreo::future f1(choreo_topscc_ctx2, "f1", {{.*}}, {{.*}}, f1__buf__);
 // CHECK:   if ((M / 2 - 1 + M * (N - 1) + 1 == M / 2 * N)) {
-// CHECK:     tops::mdspan __mds4_a(tops::Global, (int*)a + (0 * (M * N) + M / 2 * __tops_tid_x()), N, (M / 2));
+// CHECK:     tops::mdspan __mds4_a(tops::Global, (int*)a + (M / 2 * __tops_tid_x()), N, (M / 2));
 // CHECK:     tops::mdspan __mds5_f1__buf__(tops::Private, (int*)f1__buf__, (N + 1), (M / 2));
 // CHECK:     unsigned int __pad_low_a2[] = {1, 0};
 // CHECK:     unsigned int __pad_high_a2[] = {0, 0};
@@ -68,7 +68,7 @@ __co__ auto foo1(s32 [N, M] a) {
 // CHECK:   choreo::future __choreo_anon_fut__2(choreo_topscc_ctx3, "", {{.*}}, {{.*}});
 // CHECK:   if ((M / 2 - 1 + M * N + 1 == M / 2 * (N + 1))) {
 // CHECK:     tops::mdspan __mds8_f1(tops::Private, (int*)f1.data(), (N + 1), (M / 2));
-// CHECK:     tops::mdspan __mds9_res(tops::Global, (int*)res + (0 * (M * (N + 1)) + M / 2 * __tops_tid_x()), (N + 1), (M / 2));
+// CHECK:     tops::mdspan __mds9_res(tops::Global, (int*)res + (M / 2 * __tops_tid_x()), (N + 1), (M / 2));
 // CHECK:     tops::memcpy(*__choreo_anon_fut__2.get_ctx(), __mds9_res, __mds8_f1);
 // CHECK:   } else {
 // CHECK:     tops::mdspan __mds10_f1(tops::Private, (int*)f1.data(), (N + 1), (M / 2));

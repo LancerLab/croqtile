@@ -17,14 +17,16 @@ __co__ void bar(int x) {
 // VALNO:  scope-1 {
 // VALNO:   New VN #0: 'const_1'
 // VALNO:   Alias "::@__choreo_no_tiling__" -> #0
-// VALNO:   New VN #1: '::__choreo_no_tiling__'
-// VALNO:   New VN #2: 'const_50'
-// VALNO:   Alias "::foo::H" -> #2
+// VALNO:   New VN #1: 'const_0'
+// VALNO:   Alias "::__choreo_no_tiling__" -> #1
+// VALNO:   New VN #2: '::__choreo_parent_dim__'
+// VALNO:   New VN #3: 'const_50'
+// VALNO:   Alias "::foo::H" -> #3
 // VALNO:  } // end scope-1
 // VALNO:  scope-1 {
-// VALNO:   New VN #3: '::bar::x'
-// VALNO:   New VN #4: 'const_100'
-// VALNO:   New VN #5: '==:#3:#4'
-// VALNO:   New VN #6: 'const_50.000000f'
-// VALNO:   Alias "::bar::H" -> #6
+// VALNO:   New VN #4: '::bar::x'
+// VALNO:   New VN #5: 'const_100'
+// VALNO:   New VN #6: '==:#4:#5'
+// VALNO:   New VN #7: 'const_50.000000f'
+// VALNO:   Alias "::bar::H" -> #7
 // VALNO:  } // end scope-1

@@ -101,7 +101,7 @@ public:
       assert(bit && "with type should be BoundedITupleType.");
       auto lb = bit->GetLowerBounds();
       auto ub = bit->GetUpperBounds();
-      auto s = bit->GetStrides();
+      auto s = bit->GetSteps();
       auto widths = bit->GetWidths();
       widths[widths.size() - 1] = cur_loop->GetVectorFactor();
       auto vty = MakeBoundedITupleType(lb, ub, s, widths);
@@ -115,7 +115,7 @@ public:
 
     auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
     auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
-    auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetStrides();
+    auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetSteps();
     IntegerList widths(iv_ty->Dims(), cur_loop->GetVectorFactor());
     auto vty = MakeBoundedITupleType(lb, ub, s, widths);
     cur_loop->SetIVType(vty);

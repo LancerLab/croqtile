@@ -221,7 +221,7 @@ public:
     return false;
   }
 
-  ptr<Type> LookupSymbol(const std::string& n) const {
+  const ptr<Type> LookupSymbol(const std::string& n) const {
     for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
       if (it->count(n)) return it->at(n);
     }

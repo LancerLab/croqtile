@@ -297,7 +297,7 @@ public:
   }
 
 public:
-  virtual ptr<Type> GetSymbolType(const std::string& n) const {
+  virtual const ptr<Type> GetSymbolType(const std::string& n) const {
     return scoped_symtab.LookupSymbol(n);
   }
 
@@ -346,8 +346,9 @@ public:
   }
 
   void Note(const location& loc, const std::string& message) const {
+    if (CCtx().InhibitWarning()) return;
     errs() << loc << ": " << ((should_use_colors()) ? color_blue : "")
-           << "note: " << (should_use_colors() ? color_reset : "");
+           << "info: " << (should_use_colors() ? color_reset : "");
     errs() << message << "\n";
     ShowSourceLocation(loc);
   }
@@ -415,6 +416,7 @@ public:
       SSTab().DefineSymbol("__choreo_no_tiling__",
                            MakeBoundedITupleType(MultiBounds(1, 1)));
       SSTab().DefineSymbol("@__choreo_no_tiling__", MakeIntegerType());
+      SSTab().DefineSymbol("__choreo_parent_dim__", MakeIntegerType());
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
       fname = f->name;
@@ -624,7 +626,7 @@ protected:
 
 public:
   // use the immutable symbol table directly
-  ptr<Type> GetSymbolType(const std::string& n) const override {
+  const ptr<Type> GetSymbolType(const std::string& n) const override {
     return SymTab()->GetSymbol(InScopeName(n))->GetType();
   }
 
@@ -1054,9 +1056,38 @@ ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
     }
   } else if (auto ca = dyn_cast<AST::ChunkAt>(n)) {
     for (auto& sop : ca->AllOperations()) {
-      for (auto& e : sop->GetIndices()) {
-        auto r = ReferredSymbols(e.get(), v);
+      if (auto t = dyn_cast<AST::SOP::Tiling>(sop)) {
+        auto r = ReferredSymbols(t->GetTilingFactors().get(), v);
         res.insert(r.begin(), r.end());
+      } else if (auto t = dyn_cast<AST::SOP::TileAt>(sop)) {
+        auto r0 = ReferredSymbols(t->GetTilingFactors().get(), v);
+        res.insert(r0.begin(), r0.end());
+        auto r1 = ReferredSymbols(t->GetIndices().get(), v);
+        res.insert(r1.begin(), r1.end());
+      } else if (auto t = dyn_cast<AST::SOP::SubSpan>(sop)) {
+        auto r0 = ReferredSymbols(t->GetSubSpan().get(), v);
+        res.insert(r0.begin(), r0.end());
+        auto r1 = ReferredSymbols(t->GetIndices().get(), v);
+        res.insert(r1.begin(), r1.end());
+        auto r2 = ReferredSymbols(t->GetStrides().get(), v);
+        res.insert(r2.begin(), r2.end());
+      } else if (auto t = dyn_cast<AST::SOP::ModSpan>(sop)) {
+        auto r0 = ReferredSymbols(t->GetSubSpan().get(), v);
+        res.insert(r0.begin(), r0.end());
+        auto r1 = ReferredSymbols(t->GetIndices().get(), v);
+        res.insert(r1.begin(), r1.end());
+        auto r2 = ReferredSymbols(t->GetStrides().get(), v);
+        res.insert(r2.begin(), r2.end());
+      } else if (auto t = dyn_cast<AST::SOP::View>(sop)) {
+        auto r0 = ReferredSymbols(t->GetSubSpan().get(), v);
+        res.insert(r0.begin(), r0.end());
+        auto r1 = ReferredSymbols(t->GetOffsets().get(), v);
+        res.insert(r1.begin(), r1.end());
+        auto r2 = ReferredSymbols(t->GetStrides().get(), v);
+        res.insert(r2.begin(), r2.end());
+      } else if (auto t = dyn_cast<AST::SOP::Reshape>(sop)) {
+        auto r0 = ReferredSymbols(t->GetNewSpan().get(), v);
+        res.insert(r0.begin(), r0.end());
       }
       if (v)
         res.insert(v->InScopeName(ca->RefSymbol()));

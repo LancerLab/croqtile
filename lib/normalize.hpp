@@ -675,21 +675,20 @@ public:
 
     if (CCtx().HasFeature(ChoreoFeature::RSTM0) && n.OpCount() > 0 &&
         // special mode: requires to generate 'bitcast' for a reshape
-        n.OpAt(0)->SpecifyReshape()) {
+        isa<AST::SOP::Reshape>(n.FirstOp())) {
       int index =
           GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
       auto nname = SymbolTable::GetAnonName();
-      auto so = n.OpAt(0);
+      auto so = cast<AST::SOP::Reshape>(n.FirstOp());
       auto id = AST::Make<AST::Identifier>(so->LOC(), nname);
-      auto mv = cast<AST::MultiValues>(so->RShape()->Clone());
+      auto mv = cast<AST::MultiValues>(so->GetNewSpan()->Clone());
       mv->SetDelimiter(", ");
       auto sa = AST::Make<AST::SpanAs>(
           id->LOC(), cast<AST::Identifier>(n.data->Clone()), id, mv);
       auto assign = AST::Make<AST::Assignment>(id->LOC(), nname, sa);
       assign->SetDecl();
       auto sty = cast<SpannedType>(n.GetType());
-      auto nty = MakeRankedSpannedType(so->GetRank(), sty->ElementType(),
-                                       sty->GetStorage());
+      auto nty = MakeUnRankedSpannedType(sty->ElementType(), sty->GetStorage());
       sa->SetType(nty);
       assign->SetType(nty);
       InsertNode(index, assign, nname);
@@ -707,7 +706,7 @@ public:
     for (auto tsi : n.AllOperations()) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
       int i = -1;
-      for (auto& v : tsi->GetIndices()) {
+      for (auto& v : tsi->IndexNodes()) {
         ++i;
         auto expr = cast<AST::Expr>(v);
         if (expr->op == "getith") {
@@ -753,12 +752,12 @@ public:
       }
       for (auto& repl : repls) {
         VST_DEBUG(dbgs() << n.TypeNameString() << ": replace "
-                         << PSTR(tsi->Positions()->ValueAt(repl.first))
+                         << PSTR(tsi->GetIndices()->ValueAt(repl.first))
                          << " with ");
 
-        tsi->Positions()->values[repl.first] = repl.second;
+        tsi->GetIndices()->SetValueAt(repl.first, repl.second);
 
-        VST_DEBUG(dbgs() << PSTR(tsi->Positions()->ValueAt(repl.first)) << "("
+        VST_DEBUG(dbgs() << PSTR(tsi->GetIndices()->ValueAt(repl.first)) << "("
                          << PSTR(repl.second->GetType()) << ").\n");
       }
     }

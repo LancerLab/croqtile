@@ -751,8 +751,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       os << lr->iv->name << "(";
       os << (lr->lbound ? PSTR(lr->lbound) : "") << ":";
       os << (lr->ubound ? PSTR(lr->ubound) : "") << ":";
-      os << (IsValidStride(lr->stride) ? std::to_string(lr->stride) : "")
-         << ")";
+      os << (IsValidStep(lr->step) ? std::to_string(lr->step) : "") << ")";
     }
   } else if (const auto itb = dyn_cast<AST::InThreadsBlock>(&n)) {
     os << "inthreads" << (itb->async ? ".async " : " ") << PSTR(itb->pred);
@@ -1314,9 +1313,9 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   AddUse(current_stmt, n.RefSymbol());
 
   for (auto tsi : n.AllOperations())
-    for (const auto& pos : tsi->GetIndices()) {
-      VST_DEBUG(dbgs() << "chunkat position: " << PSTR(pos) << ".\n");
-      VarSet operands = GetAllSymbolicOperands(pos.get());
+    for (const auto& rfn : tsi->ReferredNodes()) {
+      VST_DEBUG(dbgs() << "chunkat referred node: " << PSTR(rfn) << ".\n");
+      VarSet operands = GetAllSymbolicOperands(rfn.get());
       AddUse(current_stmt, operands);
     }
   return true;

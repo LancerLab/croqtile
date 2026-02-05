@@ -21,7 +21,7 @@ __co__ auto foo(s32[N,8] input2) {
   return t;
 }
 
-// CODEGEN-OPT:  tops::mdspan __mds0_input2(tops::Global, (int*)input2 + (0 * 8 + __iv_idx__elem__0 * 8), 1, 8);
+// CODEGEN-OPT:  tops::mdspan __mds0_input2(tops::Global, (int*)input2 + (__iv_idx__elem__0 * 8), 1, 8);
 // CODEGEN-OPT:  tops::mdspan __mds1_i1__buf__(tops::Private, (int*)i1__buf__, 1, 8);
 // CODEGEN-OPT:  tops::memcpy(*i1.get_ctx(), __mds1_i1__buf__, __mds0_input2);
 
@@ -43,7 +43,7 @@ __co__ auto bar(f32 [8, 12, 24] a) {
   return ans;
 }
 
-// CODEGEN-OPT:  tops::mdspan __mds4_a(tops::Global, (float*)a + (0 * 24 + (0 * 288 + __tops_tid_x() * 576)), 2, 12, 24);
+// CODEGEN-OPT:  tops::mdspan __mds4_a(tops::Global, (float*)a + (__tops_tid_x() * 576), 2, 12, 24);
 // CODEGEN-OPT:  tops::mdspan __mds5_ans_l(tops::Private, (float*)ans_l, 12, 24, 2);
 // CODEGEN-OPT:  int __transpose_layout0__a[] = {1, 2, 0};
 // CODEGEN-OPT:  tops::transpose(*__choreo_anon_fut__1.get_ctx(), __mds5_ans_l, __mds4_a, __transpose_layout0__a);
@@ -67,7 +67,7 @@ __co__ auto baz(f32 [8, 12, 24] a) {
 }
 
 // CODEGEN-OPT: tops::mdspan __mds10_l(tops::Private, (float*)l.data(), 8, 3, 24);
-// CODEGEN-OPT: tops::mdspan __mds11_ans(tops::Global, (float*)ans + (0 * 8 + (0 * 192 + __tops_tid_x() * 576)), 3, 24, 8);
+// CODEGEN-OPT: tops::mdspan __mds11_ans(tops::Global, (float*)ans + (__tops_tid_x() * 576), 3, 24, 8);
 // CODEGEN-OPT: int __transpose_layout1__l[] = {1, 2, 0};
 // CODEGEN-OPT: tops::transpose(*__choreo_anon_fut__3.get_ctx(), __mds11_ans, __mds10_l, __transpose_layout1__l);
 
@@ -90,7 +90,7 @@ __co__ auto ccc_sss(s32[4, 8, 16] input) {
   return t;
 }
 
-// CODEGEN-OPT: tops::mdspan __mds12_input(tops::Global, (int*)input + (0 * 16 + (0 * 16 + (0 * 16 + (0 * 128 + (0 * 16 + (0 * 128 + __tops_tid_x() * 128)) + __iv_x * 16))) + __iv_y * 8), 1, 1, 8);
+// CODEGEN-OPT: tops::mdspan __mds12_input(tops::Global, (int*)input + (__tops_tid_x() * 128 + __iv_x * 16 + __iv_y * 8), 1, 1, 8);
 // CODEGEN-OPT: tops::mdspan __mds13_i1__buf__(tops::Private, (int*)i1__buf__, 1, 1, 8);
 // CODEGEN-OPT: tops::memcpy(*i1.get_ctx(), __mds13_i1__buf__, __mds12_input);
 // CODEGEN-OPT: tops::mdspan __mds14_i1(tops::Private, (int*)i1.data(), 1, 1, 8);
@@ -120,11 +120,11 @@ __co__ auto rcrs_rsrc(s32[4*8*16] input) {
   return t;
 }
 
-// CODEGEN-OPT: tops::mdspan __mds18_si(tops::Shared, (int*)si.data() + (__iv_y * 16 + (__iv_x * 32 + (0 * 16 + (0 * 128 + __iv_z * 128)))), 1, 16);
+// CODEGEN-OPT: tops::mdspan __mds18_si(tops::Shared, (int*)si.data() + (__iv_y * 16 + (__iv_x * 32 + __iv_z * 128)), 1, 16);
 // CODEGEN-OPT: tops::mdspan __mds19_t(tops::Global, (int*)t + (__iv_y * 16 + (__iv_x * 32 + __iv_z * 128)), 1, 16);
 // CODEGEN-OPT: tops::memcpy(*__choreo_anon_fut__5.get_ctx(), __mds19_t, __mds18_si);
 
-// CODEGEN:     tops::mdspan __mds18_si(tops::Shared, (int*)si.data() + (0 * 16 + (0 * 128 + __iv_z * 128)), 4, 32);
+// CODEGEN:     tops::mdspan __mds18_si(tops::Shared, (int*)si.data() + (__iv_z * 128), 4, 32);
 // CODEGEN:     tops::mdspan __mds19_t(tops::Global, (int*)t + (__iv_z * 128), 4, 32);
 // CODEGEN:     int __slice_offset0__si_2_t[] = {(int)(__iv_x * 1), (int)(__iv_y * 16)};
 // CODEGEN:     int __deslice_offset0__t_2_si[] = {(int)(__iv_x * 1), (int)(__iv_y * 16)};
@@ -142,14 +142,14 @@ __co__ auto not_contiguous(s32[8*16*128] input2) {
   return t;
 }
 
-// CODEGEN-OPT: tops::mdspan __mds20_input2(tops::Global, (int*)input2 + (0 * 128 + (0 * 2048 + __tops_bid_x() * 8192)), 64, 128);
+// CODEGEN-OPT: tops::mdspan __mds20_input2(tops::Global, (int*)input2 + (__tops_bid_x() * 8192), 64, 128);
 // CODEGEN-OPT: tops::mdspan __mds21_t(tops::Global, (int*)t + 0, 128, 128);
 // CODEGEN-OPT: int __slice_offset0__input2_2_t[] = {(int)(__tops_tid_x() * 16), (int)(__iv_idx__elem__0 * 8)};
 // CODEGEN-OPT: int __deslice_offset0__t_2_input2[] = {(int)(anon_3 * 16), (int)(__iv_idx__elem__0 * 8)};
 // CODEGEN-OPT: unsigned int __slice_shape1__input2_2_t[] = {16, 8};
 // CODEGEN-OPT: tops::slice_deslice(*__choreo_anon_fut__6.get_ctx(), __mds21_t, __mds20_input2, __slice_offset0__input2_2_t, __slice_shape1__input2_2_t, __deslice_offset0__t_2_input2);
 
-// CODEGEN:     tops::mdspan __mds20_input2(tops::Global, (int*)input2 + (0 * 128 + (0 * 2048 + __tops_bid_x() * 8192)), 64, 128);
+// CODEGEN:     tops::mdspan __mds20_input2(tops::Global, (int*)input2 + (__tops_bid_x() * 8192), 64, 128);
 // CODEGEN:     tops::mdspan __mds21_t(tops::Global, (int*)t + 0, 128, 128);
 // CODEGEN:     int __slice_offset1__input2_2_t[] = {(int)(__tops_tid_x() * 16), (int)(__iv_idx__elem__0 * 8)};
 // CODEGEN:     int __deslice_offset1__t_2_input2[] = {(int)(anon_3 * 16), (int)(__iv_idx__elem__0 * 8)};

@@ -43,31 +43,31 @@ __co__ auto illegal_mdspan_arith(f32 [1, 2, 3] a, s32 [78, 69] b, int c, bool bl
 }
 
 // CHECK: error: in operation "+": unable to apply to the types (mdspan<2> [] vs. mdspan<2> []).
-// CHECK: error: `mds3' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds3' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "-": unable to apply to the types (mdspan<2> [] vs. mdspan<2> []).
-// CHECK: error: `mds4' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds4' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "*": unable to apply to the types (mdspan<2> [] vs. mdspan<2> []).
-// CHECK: error: `mds5' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds5' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "/": dimension inconsistent (2 vs. 3).
-// CHECK: error: `mds6' is declared as "mdspan<>" but initialized as "unknown".
-// CHECK: error: `mds7' is declared as "mdspan<>" but initialized as "ituple<2>".
+// CHECK: error: `mds6' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: `mds7' is declared as "mdspan<> []" but initialized as "ituple<2>".
 // CHECK: error: in operation "+": unable to apply to the types (mdspan<2> [] vs. mdspan<2> []).
 // CHECK: error: in operation "+": unable to apply to the types (unknown vs. mdspan<2> []).
-// CHECK: error: `mds8' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds8' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "+": dimension inconsistent (3 vs. 2).
-// CHECK: error: `mds14' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds14' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "*": dimension inconsistent (2 vs. 3).
-// CHECK: error: `mds15' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds15' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "-": dimension inconsistent (2 vs. 3).
-// CHECK: error: `mds16' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds16' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "/": dimension inconsistent (3 vs. 2).
-// CHECK: error: `mds17' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds17' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "/": dimension inconsistent (2 vs. 3).
-// CHECK: error: `mds20' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mds20' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "-": unable to apply to the types (mdspan<3> [] vs. bool).
-// CHECK: error: `mdspan23' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mdspan23' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "*": unable to apply to the types (bool vs. mdspan<3> []).
-// CHECK: error: `mdspan24' is declared as "mdspan<>" but initialized as "unknown".
+// CHECK: error: `mdspan24' is declared as "mdspan<> []" but initialized as "unknown".
 // CHECK: error: in operation "*": unable to apply to the types (mdspan<2> [] vs. bool).
 // CHECK: error: unexpected data type 'unknown' is found in mdspan.
 // CHECK: error: in operation "+": unable to apply to the types (bool vs. mdspan<3> []).

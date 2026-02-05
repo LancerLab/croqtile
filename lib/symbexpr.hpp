@@ -1223,6 +1223,12 @@ inline Operand operator%(const Operand& vi1, const Operand& vi2) {
   return bop(OpCode::IRES, vi1, vi2)->Normalize();
 }
 
+inline void operator+=(Operand& vi1, const Operand& vi2) { vi1 = vi1 + vi2; }
+inline void operator-=(Operand& vi1, const Operand& vi2) { vi1 = vi1 - vi2; }
+inline void operator*=(Operand& vi1, const Operand& vi2) { vi1 = vi1 * vi2; }
+inline void operator/=(Operand& vi1, const Operand& vi2) { vi1 = vi1 / vi2; }
+inline void operator%=(Operand& vi1, const Operand& vi2) { vi1 = vi1 % vi2; }
+
 inline Operand oc_lt(const Operand& vi1, const Operand& vi2) {
   return bop(OpCode::LT, vi1, vi2)->Normalize();
 }

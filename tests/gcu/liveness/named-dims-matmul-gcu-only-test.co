@@ -81,11 +81,11 @@ int main() { /// host program
 // CHECK: (  9)           local s32 [ m n ] l1_out = {0}
 // CHECK: ( 10)           foreach k_tile(::) {
 // CHECK: ( 11)             local s32 mdspan<2> [4, 512] lhs_load__buf__
-// CHECK: ( 12)             lhs_load = dma.copy lhs.ChunkAt(m_tile, k_tile) => lhs_load__buf__
+// CHECK: ( 12)             lhs_load = dma.copy lhs.Chunk( (ubound m_tile) ,  (ubound k_tile) ).At(m_tile, k_tile) => lhs_load__buf__
 // CHECK: ( 13)             local s32 mdspan<2> [512, 64] rhs_load__buf__
-// CHECK: ( 14)             rhs_load = dma.copy rhs.ChunkAt(k_tile, n_tile) => rhs_load__buf__
+// CHECK: ( 14)             rhs_load = dma.copy rhs.Chunk( (ubound k_tile) ,  (ubound n_tile) ).At(k_tile, n_tile) => rhs_load__buf__
 // CHECK: ( 15)             call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out)
-// CHECK: ( 16)             dma.copy l1_out => output.ChunkAt(m_tile, n_tile)
+// CHECK: ( 16)             dma.copy l1_out => output.Chunk( (ubound m_tile) ,  (ubound n_tile) ).At(m_tile, n_tile)
 // CHECK: ( 17)           }
 // CHECK: ( 18)         }
 // CHECK: ( 19)       }

@@ -13,7 +13,7 @@ namespace Choreo {
 
 struct EarlySemantics : public VisitorWithScope {
 private:
-  TypeConstraints type_equals{this};
+  TypeConstraints type_equals{this, true};
 
   AttributeDeriver mutables{this, "mutables"};
   AttributeDeriver diverges{this, "diverges"};

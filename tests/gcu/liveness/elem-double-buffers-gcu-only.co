@@ -53,27 +53,27 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 // CHECK: (  5)         local s32 [ (rhs.span / { (ubound p) ,  (ubound x) ,  (ubound y) })  ] l_out
 // CHECK: (  6)         foreach x(::) {
 // CHECK: (  7)           local s32 mdspan<3> [1, 1, 32] lfA__buf__
-// CHECK: (  8)           lfA = dma.copy.async lhs.ChunkAt(p, x, y) => lfA__buf__
+// CHECK: (  8)           lfA = dma.copy.async lhs.Chunk( (ubound p) ,  (ubound x) , (ubound y) ).At(p, x, y) => lfA__buf__
 // CHECK: (  9)           local s32 mdspan<3> [1, 1, 32] rfA__buf__
-// CHECK: ( 10)           rfA = dma.copy.async rhs.ChunkAt(p, x, y) => rfA__buf__
+// CHECK: ( 10)           rfA = dma.copy.async rhs.Chunk( (ubound p) ,  (ubound x) , (ubound y) ).At(p, x, y) => rfA__buf__
 // CHECK: ( 11)           local s32 mdspan<3> [1, 1, 32] lfB__buf__
 // CHECK: ( 12)           lfB = dma.any
 // CHECK: ( 13)           local s32 mdspan<3> [1, 1, 32] rfB__buf__
 // CHECK: ( 14)           rfB = dma.any
 // CHECK: ( 15)           anon_0 = 1
 // CHECK: ( 16)           foreach y(anon_0::1) {
-// CHECK: ( 17)             lfB = dma.copy.async lhs.ChunkAt(p, x, y) => lfB__buf__
-// CHECK: ( 18)             rfB = dma.copy.async rhs.ChunkAt(p, x, y) => rfB__buf__
+// CHECK: ( 17)             lfB = dma.copy.async lhs.Chunk( (ubound p) ,  (ubound x) , (ubound y) ).At(p, x, y) => lfB__buf__
+// CHECK: ( 18)             rfB = dma.copy.async rhs.Chunk( (ubound p) ,  (ubound x) , (ubound y) ).At(p, x, y) => rfB__buf__
 // CHECK: ( 19)             wait lfA, rfA
 // CHECK: ( 20)             call kernel( (dataof lfA) ,  (dataof rfA) , l_out,  (sizeof lfB.span) )
 // CHECK: ( 21)             anon_1 =  (y - 1) 
-// CHECK: ( 22)             dma.copy l_out => output.ChunkAt(p, x, anon_1)
+// CHECK: ( 22)             dma.copy l_out => output.Chunk( (ubound p) ,  (ubound x) , (ubound (y - 1) ) ).At(p, x, anon_1)
 // CHECK: ( 23)             swap(lfA, lfB)
 // CHECK: ( 24)             swap(rfA, rfB)
 // CHECK: ( 25)           }
 // CHECK: ( 26)           wait lfA, rfA
 // CHECK: ( 27)           call kernel( (dataof lfA) ,  (dataof rfA) , l_out,  (sizeof lfB.span) )
-// CHECK: ( 28)           dma.copy l_out => output.ChunkAt(p, x, y(-1))
+// CHECK: ( 28)           dma.copy l_out => output.Chunk( (ubound p) ,  (ubound x) , (ubound y(-1)) ).At(p, x, y(-1))
 // CHECK: ( 29)         }
 // CHECK: ( 30)       }
 // CHECK: ( 31)     }

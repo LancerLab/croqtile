@@ -13,12 +13,14 @@ __co__ void foo(s32 yyy) {
 // VALNO:  scope-1 {
 // VALNO:   New VN #0: 'const_1'
 // VALNO:   Alias "::@__choreo_no_tiling__" -> #0
-// VALNO:   New VN #1: '::__choreo_no_tiling__'
-// VALNO:   New VN #2: '::foo::yyy'
-// VALNO:   New VN #3: 'const_555'
-// VALNO:   New VN #4: '::foo::x'
-// VALNO:   New VN #5: '+:#4:#2'
-// VALNO:   New VN #6: '::foo::y'
+// VALNO:   New VN #1: 'const_0'
+// VALNO:   Alias "::__choreo_no_tiling__" -> #1
+// VALNO:   New VN #2: '::__choreo_parent_dim__'
+// VALNO:   New VN #3: '::foo::yyy'
+// VALNO:   New VN #4: 'const_555'
+// VALNO:   New VN #5: '::foo::x'
+// VALNO:   New VN #6: '+:#5:#3'
+// VALNO:   New VN #7: '::foo::y'
 // VALNO:  } // end scope-1
 
 // CHECK:  int x = 555;

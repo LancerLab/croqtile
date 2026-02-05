@@ -96,29 +96,20 @@ public:
     assert(isa<AST::ChunkAt>(n.from));
     auto f_ca = cast<AST::ChunkAt>(n.from);
     auto f_name = f_ca->RefSymbol();
-    auto f_sty = GetSpannedType(GetSymbolType(f_name));
+    auto f_sty = GetSpannedType(NodeType(*f_ca));
     auto f_shape = f_sty->GetShape();
     auto f_rank = f_shape.Rank();
 
     assert(isa<AST::ChunkAt>(n.to));
     auto t_ca = cast<AST::ChunkAt>(n.to);
     auto t_name = t_ca->RefSymbol();
-    auto t_sty = GetSpannedType(GetSymbolType(t_name));
+    auto t_sty = GetSpannedType(NodeType(*t_ca));
     auto t_shape = t_sty->GetShape();
     auto t_rank = t_shape.Rank();
 
-    // consider reshapes that may change the rank
-    if (f_ca->HasOperation()) {
-      f_rank = f_ca->AllOperations().back()->GetRank();
-      f_shape = f_ca->AllOperations().back()->GetBlockShape();
-    }
-    if (t_ca->HasOperation()) {
-      t_rank = t_ca->AllOperations().back()->GetRank();
-      t_shape = t_ca->AllOperations().back()->GetBlockShape();
-    }
-
     // common limitation (currently guarded by memcheck)
-    for (auto& sty : {f_sty, t_sty}) {
+    for (auto& sty : {GetSpannedType(GetSymbolType(f_name)),
+                      GetSpannedType(GetSymbolType(t_name))}) {
       if (sty->RuntimeShaped()) {
         auto bs = sty->ByteSizeValue();
         if (!IsComputable(bs)) continue; // TODO: dst shape should be computable
@@ -150,6 +141,18 @@ public:
         Error1(n.LOC(), "On " + cur_arch + ", the rank in " + dma_op +
                             " must be in range [1, 5], but got " +
                             std::to_string(f_rank) + ".");
+    };
+
+    auto msb_is_zero = [](const ptr<AST::SpannedOperation>& so) {
+      if (auto indices = so->GetIndices()) {
+        auto val = indices->Opts().GetVals()[0];
+        if (VIIsInt(val) && !IsValueItemEqual(0, val)) return false;
+      }
+      if (auto tf = so->GetTilingFactors()) {
+        auto val = tf->Opts().GetVals()[0];
+        if (VIIsInt(val) && !IsValueItemEqual(1, val)) return false;
+      }
+      return true;
     };
 
     if (CCtx().GetArch() == "gcu300" ||
@@ -272,23 +275,12 @@ public:
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
         // TODO: offset limitation: [0, 2^24)
         if (f_rank == 5) {
-          for (auto tsi : f_ca->AllOperations()) {
-            if (tsi->SpecifyReshape()) continue;
-            auto first = tsi->Positions()->ValueAt(0);
-            auto t = dyn_cast<BoundedITupleType>(first->GetType());
-            assert(t != nullptr);
-            if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
-                Error1(n.LOC(),
-                       "On " + cur_arch +
-                           ", dma.copy(slice) does not "
-                           "support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0).");
-            } else {
-              choreo_unreachable("unexpected situation");
-              // TODO
-              // Is that the case?
-            }
+          for (auto so : f_ca->AllOperations()) {
+            if (!msb_is_zero(so))
+              Error1(n.LOC(), "On " + cur_arch +
+                                  ", dma.copy(slice) does not "
+                                  "support 5-dimensional "
+                                  "array (if dim is 5, offsets[0] must be 0).");
           }
         }
         // TODO: check for auto padding
@@ -303,23 +295,12 @@ public:
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
         // TODO: offset limitation: [0, 2^24)
         if (t_rank == 5) {
-          for (auto tsi : t_ca->AllOperations()) {
-            if (tsi->SpecifyReshape()) continue;
-            auto first = tsi->Positions()->ValueAt(0);
-            auto t = dyn_cast<BoundedITupleType>(first->GetType());
-            assert(t != nullptr);
-            if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
-                Error1(n.LOC(),
-                       "On " + cur_arch +
-                           ", dma.copy(deslice) does not "
-                           "support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0).");
-            } else {
-              choreo_unreachable("unexpected situation");
-              // TODO
-              // Is that the case?
-            }
+          for (auto so : t_ca->AllOperations()) {
+            if (!msb_is_zero(so))
+              Error1(n.LOC(), "On " + cur_arch +
+                                  ", dma.copy(deslice) does not "
+                                  "support 5-dimensional "
+                                  "array (if dim is 5, offsets[0] must be 0).");
           }
         }
       }
@@ -513,23 +494,12 @@ public:
         for (size_t idx = 0; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 16, n.to->LOC());
         if (f_rank == 5) {
-          for (auto tsi : f_ca->AllOperations()) {
-            if (tsi->SpecifyReshape()) continue;
-            auto first = tsi->Positions()->ValueAt(0);
-            auto t = dyn_cast<BoundedITupleType>(first->GetType());
-            assert(t != nullptr);
-            if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
-                Error1(n.LOC(),
-                       "On " + cur_arch +
-                           ", dma.copy(slice) does not "
-                           "support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0).");
-            } else {
-              choreo_unreachable("unexpected situation");
-              // TODO
-              // Is that the case?
-            }
+          for (auto so : f_ca->AllOperations()) {
+            if (!msb_is_zero(so))
+              Error1(n.LOC(), "On " + cur_arch +
+                                  ", dma.copy(slice) does not "
+                                  "support 5-dimensional "
+                                  "array (if dim is 5, offsets[0] must be 0).");
           }
         }
       }
@@ -564,22 +534,12 @@ public:
         }
 
         if (f_rank == 5) {
-          for (auto tsi : f_ca->AllOperations()) {
-            if (tsi->SpecifyReshape()) continue;
-            auto first = tsi->Positions()->ValueAt(0);
-            auto t = dyn_cast<BoundedITupleType>(first->GetType());
-            assert(t != nullptr);
-            if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
-                Error1(n.LOC(),
-                       "On " + cur_arch +
-                           ", dma.transp(slice then "
-                           "transpose) does not support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0).");
-            } else {
-              // TODO
-              // Is that the case?
-            }
+          for (auto so : f_ca->AllOperations()) {
+            if (!msb_is_zero(so))
+              Error1(n.LOC(), "On " + cur_arch +
+                                  ", dma.transp(slice then "
+                                  "transpose) does not support 5-dimensional "
+                                  "array (if dim is 5, offsets[0] must be 0).");
           }
         }
 
@@ -611,22 +571,12 @@ public:
         }
 
         if (t_rank == 5) {
-          for (auto tsi : t_ca->AllOperations()) {
-            if (tsi->SpecifyReshape()) continue;
-            auto first = tsi->Positions()->ValueAt(0);
-            auto t = dyn_cast<BoundedITupleType>(first->GetType());
-            assert(t != nullptr);
-            if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
-                Error1(n.LOC(),
-                       "On " + cur_arch +
-                           ", dma.transp(transpose then "
-                           "deslice) does not support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0).");
-            } else {
-              // TODO
-              // Is that the case?
-            }
+          for (auto so : t_ca->AllOperations()) {
+            if (!msb_is_zero(so))
+              Error1(n.LOC(), "On " + cur_arch +
+                                  ", dma.transp(transpose then "
+                                  "deslice) does not support 5-dimensional "
+                                  "array (if dim is 5, offsets[0] must be 0).");
           }
         }
 

@@ -21,14 +21,14 @@ __co__ void foo(global f32 [??, 16, M] a) {
   if (c(0) > 1);
 }
 
-// CHECK: note: `b's value can not be evaluated.
-// CHECK: note: mdspan contains unspecific value.
-// CHECK: note: `d's value can not be evaluated.
+// CHECK: info: `b's value can not be evaluated.
+// CHECK: info: mdspan contains unspecific value.
+// CHECK: info: `d's value can not be evaluated.
 // CHECK: error: The destination block shape can not be evaluated.
 // CHECK: error: The destination block shape can not be evaluated.
 // CHECK: error: The upper bound(s) of 'i' can not be evaluated.
 // CHECK: error: The parallel count can not be evaluated.
 // CHECK: error: The parallel count can not be evaluated.
 // CHECK: error: The inthreads-condition can not be evaluated.
-// CHECK: note: `aa's value can not be evaluated.
+// CHECK: info: `aa's value can not be evaluated.
 // CHECK: error: The if-condition can not be evaluated.

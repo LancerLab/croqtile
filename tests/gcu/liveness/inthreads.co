@@ -58,26 +58,26 @@ __co__ auto mem_reuse0(u8 [K, K, N] i0, u8 [K, K, N] i1) {
 // LIVENESS: (  5)         foreach idx(::) {
 // LIVENESS: (  6)           shared u8 [ (output.span /  (ubound idx) )  ] s0
 // LIVENESS: (  7)           shared u8 mdspan<3> [256, 512, 1] smem1__buf__
-// LIVENESS: (  8)           smem1 = dma.copy.async i0.ChunkAt(idx) => smem1__buf__
+// LIVENESS: (  8)           smem1 = dma.copy.async i0.Chunk( (ubound idx) ).At(idx) => smem1__buf__
 // LIVENESS: (  9)           shared u8 mdspan<3> [256, 512, 1] smem2__buf__
-// LIVENESS: ( 10)           smem2 = dma.copy.async i1.ChunkAt(idx) => smem2__buf__
+// LIVENESS: ( 10)           smem2 = dma.copy.async i1.Chunk( (ubound idx) ).At(idx) => smem2__buf__
 // LIVENESS: ( 11)           wait smem1, smem2
 // LIVENESS: ( 12)           local u8 [ smem1.span ] l1
 // LIVENESS: ( 13)           inthreads.async  (q == 0)  {
 // LIVENESS: ( 14)             local u8 [ l1.span ] l0 = {0}
 // LIVENESS: ( 15)             dma.copy smem1 => l1
 // LIVENESS: ( 16)             call foo0(l1, l0,  (sizeof l0) )
-// LIVENESS: ( 17)             dma.copy l0 => s0.ChunkAt(__choreo_no_tiling__, __choreo_no_tiling__, q)
+// LIVENESS: ( 17)             dma.copy l0 => s0.Chunk(1, 1, (ubound q) ).At(__choreo_no_tiling__, __choreo_no_tiling__, q)
 // LIVENESS: ( 18)           }
 // LIVENESS: ( 19)           local u8 [ smem2.span ] l2
 // LIVENESS: ( 20)           inthreads.async  (q == 1)  {
 // LIVENESS: ( 21)             local u8 [ l2.span ] l0 = {0}
 // LIVENESS: ( 22)             dma.copy smem2 => l2
 // LIVENESS: ( 23)             call foo0(l2, l0,  (sizeof l0) )
-// LIVENESS: ( 24)             dma.copy l0 => s0.ChunkAt(__choreo_no_tiling__, __choreo_no_tiling__, q)
+// LIVENESS: ( 24)             dma.copy l0 => s0.Chunk(1, 1, (ubound q) ).At(__choreo_no_tiling__, __choreo_no_tiling__, q)
 // LIVENESS: ( 25)           }
 // LIVENESS: ( 26)           sync.shared
-// LIVENESS: ( 27)           dma.copy s0 => output.ChunkAt(idx)
+// LIVENESS: ( 27)           dma.copy s0 => output.Chunk( (ubound idx) ).At(idx)
 // LIVENESS: ( 28)         }
 // LIVENESS: ( 29)       }
 // LIVENESS: ( 30)     }

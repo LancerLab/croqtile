@@ -15,6 +15,8 @@ inline constexpr bool always_false = false;
 
 namespace __internal {
 static constexpr size_t INVALID_UNSIGNED = std::numeric_limits<size_t>::max();
+static constexpr size_t UNKNOWN_UNSIGNED =
+    std::numeric_limits<size_t>::max() - 1;
 static constexpr int INVALID_SIGNED = std::numeric_limits<int>::max();
 static constexpr int UNKNOWN_SIGNED =
     std::numeric_limits<int>::min(); // represent literal value '?' only
@@ -28,6 +30,9 @@ static constexpr double UNKNOWN_DOUBLE =
 
 inline constexpr size_t GetInvalidUnsigned() {
   return __internal::INVALID_UNSIGNED;
+}
+inline constexpr size_t GetUnknownUnsigned() {
+  return __internal::UNKNOWN_UNSIGNED;
 }
 inline constexpr int GetInvalidSigned() { return __internal::INVALID_SIGNED; }
 inline constexpr float GetInvalidFloat() { return __internal::INVALID_FLOAT; }
@@ -56,16 +61,18 @@ inline constexpr bool IsUnKnownFloatPoint(float v) { return std::isinf(v); }
 inline constexpr bool IsUnKnownFloatPoint(double v) { return std::isinf(v); }
 
 inline constexpr size_t GetInvalidRank() { return GetInvalidUnsigned(); }
+inline constexpr size_t GetUnknownRank() { return GetUnknownUnsigned(); }
 inline constexpr int GetInvalidValueNumber() { return GetInvalidSigned(); }
 inline constexpr int GetInvalidBound() { return GetInvalidSigned(); }
-inline constexpr int GetInvalidStride() { return GetInvalidSigned(); }
+inline constexpr int GetInvalidStep() { return GetInvalidSigned(); }
 
 inline constexpr bool IsValidRank(size_t v) { return v != GetInvalidRank(); }
+inline constexpr bool IsUnknownRank(size_t v) { return v == GetUnknownRank(); }
 inline constexpr bool IsValidValueNumber(int v) {
   return v != GetInvalidValueNumber();
 }
 inline constexpr bool IsValidBound(int v) { return v != GetInvalidBound(); }
-inline constexpr bool IsValidStride(int v) { return v != GetInvalidStride(); }
+inline constexpr bool IsValidStep(int v) { return v != GetInvalidStep(); }
 
 // ------------------------------------------------------------------------- //
 using ValueItem = sbe::Operand;
@@ -106,6 +113,13 @@ inline bool IsComputable(const ValueList& vl) {
 inline std::string STR(const ValueItem& vi) {
   if (!IsValidValueItem(vi)) return "invalid";
   return vi->ToString();
+}
+
+inline bool operator==(const ValueList& l, const ValueList& r) {
+  if (l.size() != r.size()) return false;
+  for (size_t i = 0; i < l.size(); ++i)
+    if (!sbe::ceq(l[i], r[i])) return false;
+  return true;
 }
 
 inline bool VIIsNil(const ValueItem& vi) { return isa<sbe::InvalidValue>(vi); }

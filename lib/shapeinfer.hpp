@@ -247,7 +247,7 @@ public:
 
 public:
   // enable NodeType to retrieve a scoped name
-  ptr<Type> GetSymbolType(const std::string& n) const override {
+  const ptr<Type> GetSymbolType(const std::string& n) const override {
     return SSTab().LookupSymbol(n);
   }
 

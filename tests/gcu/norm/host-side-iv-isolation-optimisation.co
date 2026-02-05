@@ -91,6 +91,6 @@ int main() { /// host program
 // CHECK:         `- DMA.copy.async
 // CHECK:           `- future: out_store
 // CHECK:           `- from: l2_out
-// CHECK:           `- to: output__future__.ChunkAt(anon_3)
+// CHECK:           `- to: output__future__.Chunk( (ubound ( (p # l_tile) # tile0) ) ).At(anon_3)
 // CHECK:         `- WAIT: out_store
 

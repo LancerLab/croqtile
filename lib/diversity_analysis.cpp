@@ -299,9 +299,9 @@ bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
   assert(IsActualBoundedIntegerType(iv_ty));
 
   if (auto bit = dyn_cast<BoundedIntegerType>(iv_ty)) {
-    stride = bit->GetStride();
+    stride = bit->GetStep();
   } else if (auto bit = dyn_cast<BoundedITupleType>(iv_ty)) {
-    stride = bit->GetStride(0);
+    stride = bit->GetStep(0);
   }
 
   if (di->AssignSymbolShape(iv_sym, DiversityShape(STRIDE, sbe::nu(stride)))) {

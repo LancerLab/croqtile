@@ -244,24 +244,42 @@ void MMA::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+Choreo::AST::SpannedOperation::~SpannedOperation() = default;
+
 // this is not a visitor type that must be invoked manually
-void SpannedOperation::accept(Visitor& v) {
-  Verify();
-  if (SpecifyReshape())
-    RShape()->accept(v);
-  else {
-    Positions()->accept(v);
-    if (MultipleExprs()) TFSS()->accept(v);
-    if (auto s = GetStrides()) s->accept(v);
-  }
+void SOP::Tiling::accept(Visitor& v) { tfactor->accept(v); }
+
+void SOP::TileAt::accept(Visitor& v) {
+  tfactor->accept(v);
+  indices->accept(v);
 }
+
+void SOP::SubSpan::accept(Visitor& v) {
+  subspan->accept(v);
+  if (indices) indices->accept(v);
+  if (strides) strides->accept(v);
+}
+
+void SOP::ModSpan::accept(Visitor& v) {
+  subspan->accept(v);
+  if (indices) indices->accept(v);
+  if (strides) strides->accept(v);
+}
+
+void SOP::View::accept(Visitor& v) {
+  subspan->accept(v);
+  if (offsets) offsets->accept(v);
+  if (strides) strides->accept(v);
+}
+
+void SOP::Reshape::accept(Visitor& v) { newspan->accept(v); }
 
 void ChunkAt::accept(Choreo::Visitor& v) {
   // handle span_as
   if (sa) sa->accept(v);
   // indices seems to be always present, check the size.
   if (indices && indices->Count() > 0) indices->accept(v);
-  // note: visit the ts_infos inside
+  // note: visit the spanned_operations inside
   v.Visit(*this);
 }
 

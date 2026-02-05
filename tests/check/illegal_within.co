@@ -20,7 +20,7 @@ __co__ auto illegal_within(f32 [3, ?, 18] a, s16 [?, 4] b) {
 // CHECK: error: symbol `y' has been declared already.
 // CHECK: error: symbol `x' has been declared already.
 // CHECK: error: symbol `y' has been declared already.
-// CHECK: note: symbol `x' has been defined inside the with statement already.
-// CHECK: note: symbol `y' has been defined inside the with statement already
+// CHECK: info: symbol `x' has been defined inside the with statement already.
+// CHECK: info: symbol `y' has been defined inside the with statement already
 // CHECK: error: symbol `x' is not defined inside the with statement.
 // CHECK: Totally 8 errors have been detected.

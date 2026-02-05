@@ -515,6 +515,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".span_as" return Choreo::Parser::make_FNSPANAS(yytext, loc);
   ".mdata"   return Choreo::Parser::make_FNMDATA(yytext, loc);
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
+  ".view"    return Choreo::Parser::make_VIEW(yytext, loc);
+  ".from"    return Choreo::Parser::make_FROM(yytext, loc);
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
   ".chunk"   return Choreo::Parser::make_CHUNK(yytext, loc);
   ".subspan" return Choreo::Parser::make_SUBSPAN(yytext, loc);

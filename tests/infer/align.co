@@ -10,7 +10,8 @@ __co__ void foo(f32 [128, 512] a) {
 // CHECK:   scope-1 {
 // CHECK:    New VN #[[vn0:[0-9]+]]: 'const_1'
 // CHECK:    Alias "::@__choreo_no_tiling__" -> #[[vn0]]
-// CHECK:    New VN #[[vn1:[0-9]+]]: '::__choreo_no_tiling__'
+// CHECK:    New VN #[[vn1:[0-9]+]]: 'const_0'
+// CHECK:    Alias "::__choreo_no_tiling__" -> #[[vn1]]
 // CHECK:    New VN #[[vn2:[0-9]+]]: 'const_128'
 // CHECK:    New VN #[[vn3:[0-9]+]]: 'const_512'
 // CHECK:    New VN #[[vn4:[0-9]+]]: '#[[vn2]],#[[vn3]]'
@@ -27,7 +28,6 @@ __co__ void foo(f32 [128, 512] a) {
 // CHECK:      New VN #[[vn9:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::q'
 // CHECK:      Alias "::foo{{(::paraby_[0-9]+)*}}::@q__elem__x" -> #[[vn8]]
 // CHECK:      New VN #[[vn10:[0-9]+]]: '::foo{{(::paraby_[0-9]+)*}}::q__elem__x'
-// CHECK:      New VN #[[vn11:[0-9]+]]: 'const_0'
 // CHECK:      New VN #[[vn12:[0-9]+]]: 'const_134'
 // CHECK:      New VN #[[vn13:[0-9]+]]: 'const_133'
 // CHECK:      New VN #[[vn14:[0-9]+]]: 'const_22'

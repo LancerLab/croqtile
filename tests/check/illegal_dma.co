@@ -4,10 +4,6 @@ __co__ void illegal_copy(f32 [1, 2, 3] src) {
   parallel p by 1 {
     dma.copy src => local;
   }
-  f32 [3, 2] dst0;
-  dma.copy src => dst0;
-  f32 [3, 3, 2, 2, 1] dst1;
-  dma.copy src => dst1;
   f16 [3, 2, 1] dst2;
   dma.copy src => dst2;
   s32 [3, 2, 1, 4] dst3;
@@ -33,16 +29,14 @@ __co__ void illegal_transp(s32 [2, 16] src) {
   dma.transp<1> src => dst0;
 }
 
-// CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
-// CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
-// CHECK: error: The DMA statement contains a type mismatch: the element types of the 'from'(f32) and 'to'(f16) arrays are inconsistent.
-// CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
-// CHECK: error: The DMA statement contains a rank mismatch: the paddings have inconsistent ranks.
-// CHECK: error: The rank of the data to transfer is inconsistent with the DMA padding settings
-// CHECK: error: The DMA statement contains a rank mismatch: the 'transpose layout' and 'from' arrays have inconsistent dimensions.
-// CHECK: error: The DMA statement contains a rank mismatch: the 'transpose layout' and 'to' arrays have inconsistent dimensions.
+// CHECK: error: DMA statement contains a type mismatch: the element types of the 'from'(f32) and 'to'(f16) are inconsistent.
+// CHECK: error: DMA statement has a rank mismatch between 'from' and 'to': 3 != 4.
+// CHECK: error: DMA statement contains a type mismatch: the element types of the 'from'(f32) and 'to'(s32) are inconsistent.
+// CHECK: error: DMA PAD statement has a rank mismatch between the pad-low and pad-high: 2 != 3.
+// CHECK: error: DMA PAD statement has a rank mismatch: 3 != 2.
+// CHECK: error: DMA TRANSPOSE statement has a rank mismatch between the 'transpose layout' and 'from': 3 != 2.
+// CHECK: error: DMA TRANSPOSE statement has a rank mismatch: the 'transpose layout' and 'to': 3 != 2.
 // CHECK: error: The DMA statement contains an error: the transpose layout is invalid.
-// CHECK: error: The DMA statement contains a rank mismatch: the 'transpose layout' and 'from' arrays have inconsistent dimensions.
-// CHECK: error: The DMA statement contains a rank mismatch: the 'transpose layout' and 'to' arrays have inconsistent dimensions.
+// CHECK: error: DMA TRANSPOSE statement has a rank mismatch between the 'transpose layout' and 'from': 1 != 2.
+// CHECK: error: DMA TRANSPOSE statement has a rank mismatch: the 'transpose layout' and 'to': 1 != 2.
 // CHECK: error: The DMA statement contains an error: the transpose layout is invalid.
-// CHECK: Totally 12 errors have been detected.

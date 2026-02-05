@@ -450,7 +450,7 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
   // handle each chunkat inside a seqeunce like 'chunkat(a, b).chunkat(c)...'
   for (size_t sop_idx = sop_base; sop_idx < sops.size(); ++sop_idx) {
     // span_as reshape operation would not affect index generation
-    assert(!sops[sop_idx]->SpecifyReshape());
+    assert(!isa<AST::SOP::Reshape>(sops[sop_idx]));
 
     // For each chunkat expression, The tiled-block's shape is cooked by shape
     // inference. The block shape is different with the result shape of chunkat
@@ -463,8 +463,8 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
     // For each 'a, b, c, ...' inside 'chunkat(a, b, c, ...)', that 'b' inside
     // 'chunkat(a, b, c, ...)' could be bounded var like b = {b0, b1} Therefore,
     // we collect all the expressions first.
-    for (size_t pi = 0; pi < sops[sop_idx]->GetIndices().size(); ++pi) {
-      auto p = sops[sop_idx]->GetIndices()[pi];
+    for (size_t pi = 0; pi < sops[sop_idx]->IndexNodes().size(); ++pi) {
+      auto p = sops[sop_idx]->IndexNodes()[pi];
       // exprs[x] will perform multiplication operations with other values later
       // thus the parent_op is `*`
       auto idx_exprs =
@@ -557,12 +557,12 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   Shape new_shape;
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
-    if (sop->SpecifyReshape()) {
+    if (isa<AST::SOP::Reshape>(sop)) {
       outer_shape = sop->GetBlockShape();
     } else {
       new_shape = sop->GetBlockShape();
       size_t i = 0;
-      for (auto p : sop->GetIndices()) {
+      for (auto p : sop->IndexNodes()) {
         if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
           const auto& vals = o.GetVals();
           for (auto val : vals) {
@@ -1621,7 +1621,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       shape = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetShape();
       // check the shape transformation of each op inside ca
       for (const auto& sop : ca->AllOperations()) {
-        if (sop->SpecifyReshape()) {
+        if (isa<AST::SOP::Reshape>(sop)) {
           shape = sop->GetBlockShape();
         } else {
           new_shape = sop->GetBlockShape();
@@ -2471,9 +2471,9 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedITupleType>(iv_ty);
       assert(iv_bty);
-      auto stride = iv_bty->GetStride(0);
+      auto step = iv_bty->GetStep(0);
       auto width = iv_bty->GetWidth(0);
-      int increment = stride * width;
+      int increment = step * width;
       IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
                   << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
                                   : "0")

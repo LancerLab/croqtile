@@ -99,7 +99,7 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             AST::Make<AST::NamedVariableDecl>(n.LOC(), DFCtx().shared_spm_name);
         assert(DFCtx().shared_spm_size > 0 &&
                "Shared scratch pad memory size is not set.");
-        auto ssty = MakeSpannedType(
+        auto ssty = MakeDenseSpannedType(
             BaseType::U8, Shape(1, Size_t2Int(DFCtx().shared_spm_size)),
             Storage::SHARED);
         shared_spm->SetType(ssty);
@@ -119,7 +119,7 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             AST::Make<AST::NamedVariableDecl>(n.LOC(), DFCtx().local_spm_name);
         assert(DFCtx().local_spm_size > 0 &&
                "Local scratch pad memory size is not set.");
-        auto lsty = MakeSpannedType(
+        auto lsty = MakeDenseSpannedType(
             BaseType::U8, Shape(1, Size_t2Int(DFCtx().local_spm_size)),
             Storage::LOCAL);
         local_spm->SetType(lsty);

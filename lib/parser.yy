@@ -14,6 +14,7 @@
 // guard the conflict count
 %expect 0
 
+// code is placed to the generated header
 %code requires {
 
 #include "loc.hpp"
@@ -38,8 +39,18 @@ public:
   bool HasError() { return error_count > 0; }
   void recordError() { error_count++; }
 };
+
+namespace Choreo {
+  void info(const location &loc , const std::string &message);
 }
 
+} // %code requires
+
+// inject into Parser class
+%code provides {
+} // %code provide
+
+// go into the generated source file
 %code top {
 
 #include <stdio.h>
@@ -61,6 +72,7 @@ extern AST::Program root;
 extern Choreo::SymbolTable symtab;
 
 const char* color_red = "\033[31m";
+const char* color_blue = "\033[34m";
 const char* color_reset = "\033[0m";
 const char* color_green = "\033[32m";
 
@@ -93,22 +105,14 @@ static bool ignore_fndata = false;
 std::pair<ptr<AST::Identifier>, ptr<AST::MultiValues>> ElementMultiValues(const ptr<AST::Expr>&);
 std::set<std::string> paraby_symbols;
 
-inline ptr<AST::SpannedOperation> OptSpannedOperation(const ptr<AST::SpannedOperation> &);
+inline const ptr<AST::MultiValues> DeSugerDimensions(const ptr<AST::MultiValues> &, bool = true, bool = false);
+inline const ptr<AST::MultiValues> UBoundAll(const ptr<AST::MultiValues> &, bool = false);
 
-}
+} // %code top
 
 %{
 #include <stdio.h>
 extern int yylex();
-
-void choreo_info(const char *message) {
-    // fprintf(stderr, "Error: %s\n", s);
-  errs() << ((should_use_colors()) ? color_green : "") << "Info: "
-         << ((should_use_colors()) ? color_reset : "");
-  errs() << message << "\n";
-  errs() << "Info location: " << ::loc << "\n";
-}
-
 %}
 
 // make yylex() expects one parameter of type 'Choreo::Scanner &'
@@ -192,7 +196,7 @@ void choreo_info(const char *message) {
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
@@ -221,7 +225,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
-%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims
+%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims opt_stride_list opt_strides at_list opt_at_list opt_from_list
 %nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
@@ -1831,47 +1835,72 @@ spanned_ops
       }
     ;
 
+opt_stride_list
+    : STRIDE LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $$ = $3;
+      }
+    | /*empty*/ { $$ = nullptr; }
+    ;
+
+opt_strides
+    : COMMA LBRACE value_list RBRACE {
+        $3->SetDelimiter(", ");
+        $$ = $3;
+      }
+    | /*empty*/ { $$ = nullptr; }
+    ;
+
+at_list
+    : AT LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $$ = $3;
+      }
+    ;
+
+opt_at_list
+    : at_list { $$ = $1; }
+    | /*empty*/ { $$ = nullptr; }
+    ;
+
+opt_from_list
+    : FROM LPAREN value_list RPAREN  {
+        $3->SetDelimiter(", ");
+        $$ = $3;
+      }
+    | /*empty*/ { $$ = nullptr; }
+    ;
+
 spanned_op
     : CHUNKAT LPAREN value_list RPAREN {
-        $3->SetDelimiter(", ");
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $3, AST::SpannedOperation::TILING));
+        auto ds = DeSugerDimensions($3, true, true);
+        if (ds == nullptr) {
+          Choreo::info(@3, "no tiling is applied.");
+          $$ = nullptr;
+        }
+        else
+          $$ = AST::Make<AST::SOP::TileAt>(@1, UBoundAll(ds), $3);
       }
     | CHUNK LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
-        $3->SetDelimiter(", ");
+        auto ds = DeSugerDimensions($3);
         $7->SetDelimiter(", ");
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $7, $3, AST::SpannedOperation::TILEAT));
+        $$ = AST::Make<AST::SOP::TileAt>(@1, UBoundAll(ds, true), $7);
       }
-    | SUBSPAN LPAREN value_list RPAREN {
-        $3->SetDelimiter(", ");
-        auto p = AST::Make<AST::MultiValues>(@3, ", ");
-        for (size_t i = 0; i < $3->Count(); ++i) p->Append(AST::Make<AST::Expr>(@3, AST::Make<AST::IntLiteral>(@3, 0)));
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, p, $3, AST::SpannedOperation::SUBSPAN));
+    | SUBSPAN LPAREN value_list RPAREN opt_stride_list opt_at_list {
+        auto ds = DeSugerDimensions($3, false);
+        $$ = AST::Make<AST::SOP::SubSpan>(@1, ds, $6, $5);
       }
-    | SUBSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
-        $3->SetDelimiter(", ");
-        $7->SetDelimiter(", ");
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $7, $3, AST::SpannedOperation::SUBSPAN));
-      }
-    | MODSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
-        $3->SetDelimiter(", ");
-        $7->SetDelimiter(", ");
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $7, $3, AST::SpannedOperation::MODSPAN));
-      }
-    | SUBSPAN LPAREN value_list RPAREN STRIDE LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
-        $3->SetDelimiter(", ");
-        $7->SetDelimiter(", ");
-        $11->SetDelimiter(", ");
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $11, $3, $7, AST::SpannedOperation::SUBSPAN));
-      }
-    | MODSPAN LPAREN value_list RPAREN STRIDE LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
-        $3->SetDelimiter(", ");
-        $7->SetDelimiter(", ");
-        $11->SetDelimiter(", ");
-        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $11, $3, $7, AST::SpannedOperation::MODSPAN));
+    | MODSPAN LPAREN value_list RPAREN opt_stride_list opt_at_list {
+        auto ds = DeSugerDimensions($3, false);
+        $$ = AST::Make<AST::SOP::ModSpan>(@1, ds, $6, $5);
       }
     | FNSPANAS LPAREN g_value_list RPAREN {
         $3->SetDelimiter(", ");
-        $$ = AST::Make<AST::SpannedOperation>(@1, $3, AST::SpannedOperation::RESHAPE);
+        $$ = AST::Make<AST::SOP::Reshape>(@1, $3);
+      }
+    | VIEW LPAREN LBRAKT value_list RBRAKT opt_strides RPAREN opt_from_list {
+        $4->SetDelimiter(", ");
+        $$ = AST::Make<AST::SOP::View>(@1, $4, $8, $6);
       }
     ;
 
@@ -2298,34 +2327,45 @@ ElementMultiValues(const ptr<AST::Expr>&e) {
   return std::make_pair(id, mv);
 }
 
-inline ptr<AST::SpannedOperation> OptSpannedOperation(const ptr<AST::SpannedOperation> &tsi) {
-  if (tsi == nullptr) return nullptr;
+inline const ptr<AST::MultiValues> DeSugerDimensions(const ptr<AST::MultiValues>& mv, bool notile, bool ret_null) {
+  if (mv == nullptr) return nullptr;
 
-  bool not_tiled = true;
-
-  auto no_tiling_norm = [&](ptr<AST::MultiValues> mv) -> void {
-    if (mv == nullptr) return;
-    for (auto v : mv->AllValues()) {
-      if (auto id = AST::GetIdentifier(*v))
-        if (id->name == "_") {
-          id->name = "__choreo_no_tiling__";
-          continue;
-        }
-      not_tiled = false;
-    }
-  };
-
-  switch (tsi->OpCode()) {
-  case AST::SpannedOperation::Kind::TILING: no_tiling_norm(tsi->Positions()); break;
-  case AST::SpannedOperation::Kind::TILEAT: [[fallthrough]];
-  case AST::SpannedOperation::Kind::SUBSPAN: [[fallthrough]];
-  case AST::SpannedOperation::Kind::MODSPAN: no_tiling_norm(tsi->TFSS()); no_tiling_norm(tsi->GetStrides()); break;
-  default: choreo_unreachable("Unexpect SpannedOperation Kind");
+  bool all_notile = true;;
+  for (auto v : mv->AllValues()) {
+    if (auto id = AST::GetIdentifier(*v); id && (id->name == "_")) {
+      if (notile)
+        id->name = "__choreo_no_tiling__";
+      else
+        id->name = "__choreo_parent_dim__";
+    } else
+      all_notile = false;
   }
 
-  if (not_tiled) return nullptr;
+  if (all_notile && ret_null) return nullptr; 
 
-  return tsi;
+  mv->SetDelimiter(", ");
+
+  return mv;
+}
+
+inline const ptr<AST::MultiValues> UBoundAll(const ptr<AST::MultiValues>& mv, bool notile_only) {
+  if (mv == nullptr) return nullptr;
+
+  auto res = AST::Make<AST::MultiValues>(mv->LOC());
+
+  for (auto v : mv->AllValues()) {
+    if (auto id = AST::GetIdentifier(*v); id && (id->name == "__choreo_no_tiling__"))
+      res->Append(AST::MakeIntExpr(id->LOC(), 1));
+    else {
+      if (notile_only)
+        res->Append(v);
+      else
+        res->Append(AST::Make<AST::Expr>(v->LOC(), "ubound", v->Clone()));
+    }
+  }
+  res->SetDelimiter(", ");
+
+  return res;
 }
 
 // Bison expects us to provide implementation - otherwise linker complains
@@ -2351,4 +2391,27 @@ void Parser::error(const location &loc , const std::string &message) {
   }
 
   pctx.recordError();
+}
+
+void Choreo::info(const location &loc , const std::string &message) {
+  if (CCtx().InhibitWarning()) return;
+  errs() << loc << ": ";
+  errs() << ((should_use_colors()) ? color_blue: "") << "info: "
+         << ((should_use_colors()) ? color_reset : "");
+  errs() << message << "\n";
+
+  if (!CCtx().ShowSourceLocation()) return;
+
+  // Retrieve the line that caused the error
+  std::string error_line = CCtx().GetSourceLine(loc.begin.line);
+  if (!error_line.empty()) {
+    errs() << "  " << error_line << "\n"; // Print the source line
+
+    // Print caret (^) under the error position
+    errs() << "  ";
+    for (int i = 1; i < loc.begin.column; ++i)
+      errs() << " "; // Align the caret with the exact error position
+
+    errs() << "^" << "\n";
+  }
 }

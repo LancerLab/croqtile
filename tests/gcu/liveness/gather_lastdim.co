@@ -39,13 +39,13 @@ __co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] i
 // CHECK: ( 10)         foreach d0(::), d1(::) {
 // CHECK: ( 11)           anon_0 =  (p # d0) 
 // CHECK: ( 12)           local s32 mdspan<2> [1, 512] input_L1__buf__
-// CHECK: ( 13)           input_L1 = dma.copy input.ChunkAt(anon_0, d1) => input_L1__buf__
+// CHECK: ( 13)           input_L1 = dma.copy input.Chunk( (ubound (p # d0) ) ,  (ubound d1) ).At(anon_0, d1) => input_L1__buf__
 // CHECK: ( 14)           anon_1 =  (p # d0) 
 // CHECK: ( 15)           local s32 mdspan<2> [1, 512] id_L1__buf__
-// CHECK: ( 16)           id_L1 = dma.copy id.ChunkAt(anon_1, d1) => id_L1__buf__
+// CHECK: ( 16)           id_L1 = dma.copy id.Chunk( (ubound (p # d0) ) ,  (ubound d1) ).At(anon_1, d1) => id_L1__buf__
 // CHECK: ( 17)           call call_gather_kernel( (dataof input_L1) ,  (dataof id_L1) , output_L1, off_buff,  (dataof para_L1) )
 // CHECK: ( 18)           anon_2 =  (p # d0) 
-// CHECK: ( 19)           dma.copy output_L1 => output.ChunkAt(anon_2, d1)
+// CHECK: ( 19)           dma.copy output_L1 => output.Chunk( (ubound (p # d0) ) ,  (ubound d1) ).At(anon_2, d1)
 // CHECK: ( 20)         }
 // CHECK: ( 21)       }
 // CHECK: ( 22)     }

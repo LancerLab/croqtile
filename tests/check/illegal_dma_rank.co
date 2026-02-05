@@ -1,0 +1,18 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void illegal_pad(f32 [1, 2, 3] src) {
+  parallel p by 1 {
+    dma.pad<{1, 0}, {1, 0}, {0, 0}, 2> src => local;
+    dma.pad<{1, 1, 1}, {1, 1, 1}, {1, 1, 0}, 1> src => local;
+  }
+}
+
+__co__ void illegal_transp(s32 [2, 16] src) {
+  // the errors are reported when SEMA
+  s32[2, 16] dst0;
+  dma.transp<1, 0, 2> src => dst0;
+}
+
+// CHECK: error: DMA PAD statement has a rank mismatch: 3 != 2.
+// CHECK: error: DMA TRANSPOSE statement has a rank mismatch between the 'transpose layout' and 'from': 3 != 2.
+// CHECK: error: DMA TRANSPOSE statement has a rank mismatch: the 'transpose layout' and 'to': 3 != 2.

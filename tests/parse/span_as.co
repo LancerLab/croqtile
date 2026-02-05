@@ -21,14 +21,14 @@ __co__ auto span_as(s32 [32, 18, 9] a) {
 // CHECK:  `- Var Decl (f32 [ a.span ], default): b
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 2)
 // CHECK:   `- DMA.copy
-// CHECK:     `- from: a.SpanAs([ 16 9 36 ]).ChunkAt(p, p, p)
+// CHECK:     `- from: a.SpanAs([ 16 9 36 ]).Chunk( (ubound p) , (ubound p) , (ubound p) ).At(p, p, p)
 // CHECK:     `- to: local
 // CHECK:   `- DMA.copy
-// CHECK:     `- from: a.SpanAs([ 144 36 ]).ChunkAt(p, p)
+// CHECK:     `- from: a.SpanAs([ 144 36 ]).Chunk( (ubound p) , (ubound p) ).At(p, p)
 // CHECK:     `- to: local
 // CHECK:   `- DMA.copy
 // CHECK:     `- future: f
-// CHECK:     `- from: b.SpanAs([ 8 2 18 18 ]).ChunkAt(p, p, p, p)
+// CHECK:     `- from: b.SpanAs([ 8 2 18 18 ]).Chunk( (ubound p) , (ubound p) , (ubound p) , (ubound p) ).At(p, p, p, p)
 // CHECK:     `- to: local
 // CHECK:   `- Var Decl (f32 [ 4 9 9 ], shared): c
 // CHECK:   `- DMA.copy

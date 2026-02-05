@@ -99,6 +99,8 @@ public:
   __UDT_TYPE_INFO_BASE__(node)
 };
 
+using NodeList = std::vector<ptr<Node>>;
+
 // utility functions
 template <typename T>
 bool istypeof(const Node* n) {
@@ -109,7 +111,7 @@ bool istypeof(const ptr<Node>& n) {
   return isa<T>(n->GetType());
 }
 
-inline std::string STR(const AST::Node& n) {
+inline std::string STR(const Node& n) {
   std::ostringstream oss;
   n.Print(oss);
   return oss.str();
@@ -130,7 +132,7 @@ inline std::string TYPE_STR(const std::shared_ptr<AST::Node>& n) {
 //   non-term : non-term term_1 | term_2
 //
 struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
-  std::vector<ptr<Node>> values;
+  NodeList values;
   std::string delimiter;
 
   MultiNodes() = delete;
@@ -161,15 +163,16 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
   void SetDelimiter(const std::string& d) { delimiter = d; }
 
-  std::vector<ptr<Node>> AllSubs() { return values; }
+  NodeList AllSubs() { return values; }
 
   ptr<Node> SubAt(const size_t idx) const {
     assert(idx < this->Count() &&
-           "Out-of-bound error when querying MultiValues\n");
+           "Out-of-bound error when querying MultiNodes\n");
     return values[idx];
   }
 
   const ptr<Node> Last() { return values.back(); }
+  const ptr<Node> First() { return values.front(); }
 
   // retrieve the index if the element is inside the MultiNodes
   int GetIndex(Node* n) const {
@@ -209,9 +212,13 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 };
 
 struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
-  std::vector<ptr<Node>> values;
+  NodeList values;
   std::string delimiter;
 
+private:
+  OptimizedValues opt_vals;
+
+public:
   explicit MultiValues(const location& l, std::string d = "")
       : Node(l), delimiter(d) {}
 
@@ -241,6 +248,9 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
   size_t Count() const { return values.size(); }
   bool None() const { return values.empty(); }
 
+  OptimizedValues& Opts() { return opt_vals; }
+  const OptimizedValues& Opts() const { return opt_vals; }
+
   void SetDelimiter(const std::string& d) { delimiter = d; }
 
   ptr<Node> ValueAt(const size_t idx) const {
@@ -257,7 +267,7 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   ptr<Node> operator[](const size_t idx) const { return ValueAt(idx); }
 
-  const std::vector<ptr<Node>>& AllValues() const { return values; }
+  const NodeList& AllValues() const { return values; }
 
   bool IsBlock() const override { return true; }
 
@@ -297,6 +307,14 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   __UDT_TYPE_INFO__(Node, MultiValues)
 };
+
+inline const NodeList MakeNodeList(const ptr<MultiValues>& mv) {
+  if (!mv) return {};
+
+  NodeList nl;
+  for (auto n : mv->AllValues()) nl.push_back(n);
+  return nl;
+}
 
 struct BoolLiteral : public Node, public TypeIDProvider<BoolLiteral> {
   bool value;
@@ -1059,7 +1077,7 @@ public:
   void SetDecl(bool isd = true) { is_decl = isd; }
   bool IsDecl() const { return is_decl; }
 
-  const std::vector<ptr<Node>>& GetIndices() const {
+  const NodeList& GetIndices() const {
     if (!indices) choreo_unreachable("unexpected null indices.");
     return indices->AllValues();
   }
@@ -1272,10 +1290,10 @@ private:
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
         // need type inference
         if (!IsArrayType())
-          SetType(MakeSpannedType(base_type, GenUninitShape()));
+          SetType(MakeUnRankedSpannedType(base_type));
         else
-          SetType(MakeSpannedArrayType(base_type, GenUninitShape(),
-                                       ArrayAsValueList()));
+          SetType(MakeStridedSpannedArrayType(base_type, GenUnknownShape(), {},
+                                              ArrayAsValueList()));
       } else {
         choreo_unreachable("Unexpected BaseType: " + STR(base_type) + ".");
       }
@@ -1348,9 +1366,7 @@ public:
     if (template_args) template_args->SetDelimiter(", ");
   }
 
-  const std::vector<ptr<Node>>& GetArguments() const {
-    return arguments->AllValues();
-  }
+  const NodeList& GetArguments() const { return arguments->AllValues(); }
 
   bool IsBIF() const { return (bool)(attr & BIF); }
   bool CompileTimeEval() const { return (bool)(attr & COMPTIME); }
@@ -1694,12 +1710,8 @@ public:
   const ptr<MultiValues> BoundExprs() const { return cmpt_bounds; }
   size_t SubBoundCount() const { return cmpt_bounds->Count(); }
   void SetBoundExprs(const ptr<MultiValues>& sbs) { cmpt_bounds = sbs; }
-  const std::vector<ptr<Node>> AllSubPVs() const {
-    return cmpt_bpvs->AllValues();
-  }
-  const std::vector<ptr<Node>> AllBoundExprs() const {
-    return cmpt_bounds->AllValues();
-  }
+  const NodeList AllSubPVs() const { return cmpt_bpvs->AllValues(); }
+  const NodeList AllBoundExprs() const { return cmpt_bounds->AllValues(); }
 
   ValueItem BoundValue() const {
     if (!bound_expr->Opts().HasVal()) return GetInvalidValueItem();
@@ -1855,9 +1867,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
          ptr<MultiValues> m)
       : Node(l), with(w), in(i), with_matchers(m) {}
 
-  const std::vector<ptr<Node>>& GetMatchers() const {
-    return with_matchers->AllValues();
-  }
+  const NodeList& GetMatchers() const { return with_matchers->AllValues(); }
 
   ptr<Node> CloneImpl() const override {
     return Make<WithIn>(LOC(), CloneP(with), CloneP(in), CloneP(with_matchers));
@@ -1924,237 +1934,290 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 // Information about operation on data, including tile/tiling, subscription, or
 // reshape, and etc..
 struct SpannedOperation {
-public:
-  enum Kind {
-    TILING,  // chunkat
-    TILEAT,  // chunk-at
-    SUBSPAN, // subspan-at
-    MODSPAN, // modspan-at
-    RESHAPE, // span_as
-  };
-
-private:
+protected:
   const location loc;
 
-  Kind tag = Kind::TILING;
-  struct TSInfo { // information about tiling and subscription
-    ptr<MultiValues> indices = nullptr;   // subscription expression of data
-    ptr<MultiValues> tfss_expr = nullptr; // tiling-factor or subspan values
-  };
-  using RSInfo = ptr<MultiValues>; // reshape Infomation
-
-  std::variant<TSInfo, RSInfo> info;
-  ptr<MultiValues> strides = nullptr;
-
-  Shape block_shape; // block shape after applying the operation
-
-  size_t rank; // used for early semantics
+  Shape block_shape;       // block shape after applying the operation
+  ValueList block_strides; // block strides after applying the operation
 
 public:
-  SpannedOperation(const location& l, const ptr<MultiValues>& p,
-                   const ptr<MultiValues>& b, Kind ok = Kind::TILEAT)
-      : loc(l), tag(ok), info(TSInfo{p, b}), strides(nullptr) {
-    assert(ok == Kind::TILEAT || ok == Kind::SUBSPAN || ok == Kind::MODSPAN);
-    Verify();
-  }
+  SpannedOperation(const location& l) : loc(l) {}
+  virtual ~SpannedOperation();
 
-  SpannedOperation(const location& l, const ptr<MultiValues>& p,
-                   Kind ok = Kind::TILING)
-      : loc(l), tag(ok),
-        info((ok == Kind::TILING)
-                 ? std::variant<TSInfo, RSInfo>(TSInfo{p, nullptr})
-                 : std::variant<TSInfo, RSInfo>(RSInfo{p})),
-        strides(nullptr) {
-    assert(ok == Kind::RESHAPE || ok == Kind::TILING);
-    Verify();
-  }
-
-  SpannedOperation(const location& l, const ptr<MultiValues>& p,
-                   const ptr<MultiValues>& b, const ptr<MultiValues>& s,
-                   Kind ok = Kind::TILEAT)
-      : loc(l), tag(ok), info(TSInfo{p, b}), strides(s) {
-    assert(ok == Kind::TILEAT || ok == Kind::SUBSPAN || ok == Kind::MODSPAN);
-    Verify();
-  }
-  Kind OpCode() const { return tag; }
-
-  const location& LOC() const { return loc; }
-
-  bool SpecifyTileFactor() const {
-    return tag == Kind::TILING || tag == Kind::TILEAT;
-  }
-  bool SpecifyBlock() const {
-    return tag == Kind::SUBSPAN || tag == Kind::MODSPAN;
-  }
-  bool SpecifyReshape() const { return tag == Kind::RESHAPE; }
-
-  ptr<MultiValues>& Positions() { return std::get<0>(info).indices; }
-  ptr<MultiValues>& TFSS() { return std::get<0>(info).tfss_expr; }
-  ptr<MultiValues>& RShape() { return std::get<1>(info); }
-  const ptr<MultiValues>& Positions() const {
-    return std::get<0>(info).indices;
-  }
-  const ptr<MultiValues>& TFSS() const { return std::get<0>(info).tfss_expr; }
-  const ptr<MultiValues>& RShape() const { return std::get<1>(info); }
-
-  bool MultipleExprs() const { return !SpecifyReshape() && TFSS() != nullptr; }
-
-  // return a valid tiling-factor/subspan array
-  const std::vector<ptr<Node>> GetTFSSNodes() const {
-    if (info.index() != 0)
-      return {};
-    else if (TFSS())
-      return TFSS()->AllValues();
-    else
-      return {};
-  }
-
-  // return a valid position array
-  const std::vector<ptr<Node>> GetIndices() const {
-    if (info.index() != 0) return {};
-    return Positions()->AllValues();
-  }
-
-  // return a valid span_as array
-  const std::vector<ptr<Node>> GetSANodes() const {
-    if (info.index() != 1) return {};
-    return RShape()->AllValues();
-  }
-
-  const ptr<Node> TFSSAt(size_t index) const {
-    assert(TFSS());
-    return TFSS()->ValueAt(index);
-  }
-
-  const ptr<Node> PosAt(size_t index) const {
-    assert(Positions());
-    return Positions()->ValueAt(index);
-  }
-
-  ptr<MultiValues> GetTilingFactors() const {
-    if (tag != Kind::TILEAT) choreo_unreachable("no tiling factor exist.");
-    return TFSS();
-  }
-
-  ptr<MultiValues> GetSubSpanExpr() const {
-    if (tag != Kind::SUBSPAN) choreo_unreachable("no sub-span exist.");
-    return TFSS();
-  }
-
-  ptr<MultiValues> GetModSpanExpr() const {
-    if (tag != Kind::MODSPAN) choreo_unreachable("no mod-span exist.");
-    return TFSS();
-  }
-
-  const ptr<MultiValues> GetStrides() const {
-    if (tag == Kind::MODSPAN || tag == Kind::SUBSPAN) return strides;
-    return nullptr;
-  }
-
-  const ValueList StridesAsValueList() const {
-    if (!strides) choreo_unreachable("no strides exist.");
-    ValueList vl;
-    for (auto b : strides->AllValues()) {
-      auto e = cast<Expr>(b);
-      if (!e->Opts().HasVal()) return {};
-      vl.push_back(e->Opts().GetVal());
-    }
-    return vl;
-  }
-
-  void SetBlockShape(const Shape shape) {
-    if (!shape.IsValid()) choreo_unreachable("invalid shape is specified.");
+public:
+  virtual const location& LOC() const { return loc; }
+  virtual void SetBlockShape(const Shape shape) {
+    if (!shape.IsValidOrDummy())
+      choreo_unreachable("invalid shape is specified.");
     block_shape = shape;
-    rank = block_shape.Rank(); // update the rank
   }
 
-  const Shape& GetBlockShape() const {
-    if (!block_shape.IsValid())
+  virtual const Shape& GetBlockShape() const {
+    if (!block_shape.IsValidOrDummy())
       choreo_unreachable("retrieving an invalid shape.");
     return block_shape;
   }
 
-  size_t GetRank() const { return rank; }
-  void SetRank(size_t r) { rank = r; }
+  virtual size_t GetRank() const {
+    if (!block_shape.IsValidOrDummy())
+      choreo_unreachable("retrieving an invalid shape.");
+    return block_shape.Rank();
+  }
+  virtual const ValueList GetBlockStrides() const { return block_strides; }
+  virtual void SetBlockStrides(const ValueList& s) { block_strides = s; }
 
-  const ptr<SpannedOperation> Clone() const {
-    ptr<SpannedOperation> n = nullptr;
-    if (SpecifyReshape())
-      n = Make<SpannedOperation>(loc, CloneP(RShape()), tag);
-    else if (TFSS() != nullptr)
-      n = Make<SpannedOperation>(loc, CloneP(Positions()), CloneP(TFSS()), tag);
-    else
-      n = Make<SpannedOperation>(loc, CloneP(Positions()), tag);
-    n->block_shape = block_shape;
-    n->rank = rank;
-    if (strides) n->strides = CloneP(strides);
-    return n;
+  virtual const NodeList TilingFactorNodes() const { return {}; }
+  virtual const NodeList SubSpanNodes() const { return {}; }
+  virtual const NodeList StrideNodes() const { return {}; }
+  virtual const NodeList IndexNodes() const { return {}; }
+  virtual const NodeList OffsetNodes() const { return {}; }
+  virtual const NodeList ReferredNodes() const = 0;
+  virtual const ptr<MultiValues> GetTilingFactors() const { return nullptr; }
+  virtual const ptr<MultiValues> GetSubSpan() const { return nullptr; }
+  virtual const ptr<MultiValues> GetStrides() const { return nullptr; }
+  virtual const ptr<MultiValues> GetIndices() const { return nullptr; }
+  virtual const ptr<MultiValues> GetOffsets() const { return nullptr; }
+
+  virtual const ptr<SpannedOperation> CloneImpl() const = 0;
+  virtual const ptr<SpannedOperation> Clone() const {
+    auto sop = CloneImpl();
+    sop->block_shape = block_shape;
+    sop->block_strides = block_strides;
+    return sop;
   }
 
-  void Print(std::ostream& os) const {
-    switch (tag) {
-    case Kind::TILING: os << ".ChunkAt(" << STR(Positions()) << ")"; break;
-    case Kind::TILEAT:
-      os << ".Chunk(" << STR(TFSS()) << ").At(" << STR(Positions()) << ")";
-      break;
-    case Kind::SUBSPAN:
-      os << ".SubSpan(" << STR(TFSS()) << ")";
-      if (strides) os << ".Stride(" << STR(GetStrides()) << ")";
-      os << ".At(" << STR(Positions()) << ")";
-      break;
-    case Kind::MODSPAN:
-      os << ".ModSpan(" << STR(TFSS()) << ")";
-      if (strides) os << ".Stride(" << STR(GetStrides()) << ")";
-      os << ".At(" << STR(Positions()) << ")";
-      break;
-    case Kind::RESHAPE: os << ".SpanAs(" << STR(RShape()) << ")"; break;
-    default: choreo_unreachable("unsupported SpannedOperation kind.");
-    }
-  }
+  virtual void accept(Visitor& v) = 0;
+  virtual void Print(std::ostream& os) const = 0;
 
-  void Dump(std::ostream& os) const {
+  virtual void Dump(std::ostream& os) const {
     Print(os);
-    os << "(shape: " << STR(GetBlockShape()) << ")";
+    os << "(shape: " << STR(GetBlockShape()) << ", strides: ";
+    PrintValueList(GetBlockStrides(), os);
+    os << ")";
   }
 
-  void accept(Visitor&);
-
-private:
-  void Verify() {
-    switch (tag) {
-    case Kind::TILING:
-      if (info.index() != 0)
-        choreo_unreachable("unexpected reshape info for a tiling operation.");
-      if (!Positions()) choreo_unreachable("no tiling factors/subscriptions.");
-      if (TFSS()) choreo_unreachable("unexpected tiling/block info.");
-      break;
-    case Kind::TILEAT:
-      if (info.index() != 0)
-        choreo_unreachable("unexpected reshape info for a tiling operation.");
-      if (!Positions()) choreo_unreachable("no subscription Positions().");
-      if (!TFSS()) choreo_unreachable("no tiling factors.");
-      break;
-    case Kind::SUBSPAN:
-      if (info.index() != 0)
-        choreo_unreachable("unexpected reshape info for a tiling operation.");
-      if (!Positions()) choreo_unreachable("no subscription Positions().");
-      if (!TFSS()) choreo_unreachable("no block shape is provided.");
-      break;
-    case Kind::MODSPAN:
-      if (info.index() != 0)
-        choreo_unreachable("unexpected reshape info for a tiling operation.");
-      if (!Positions()) choreo_unreachable("no subscription Positions().");
-      if (!TFSS()) choreo_unreachable("no block shape is provided.");
-      break;
-    case Kind::RESHAPE:
-      if (info.index() != 1)
-        choreo_unreachable("unexpected tiling info for a reshape operation.");
-      if (!RShape()) choreo_unreachable("no reshape info is provided.");
-      break;
-    default: choreo_unreachable("unsupported SpannedOperation kind.");
-    }
-  }
+  __UDT_TYPE_INFO_BASE__(spanned - operation)
 };
+
+inline std::string STR(const SpannedOperation& so) {
+  std::ostringstream oss;
+  so.Print(oss);
+  return oss.str();
+}
+
+inline Identifier* GetIdentifier(const Node&);
+inline ptr<Expr> MakeIntExpr(const location&, int);
+
+namespace SOP {
+struct Tiling : public SpannedOperation, public TypeIDProvider<Tiling> {
+  ptr<MultiValues> tfactor = nullptr; // tiling-factor
+  Tiling(const location& l, const ptr<MultiValues>& tf)
+      : SpannedOperation(l), tfactor(tf) {
+    if (tf == nullptr) choreo_unreachable("must provide the tiling factor.");
+  }
+  const NodeList TilingFactorNodes() const override {
+    return MakeNodeList(GetTilingFactors());
+  }
+  const NodeList IndexNodes() const override { return MakeNodeList(tfactor); }
+  const NodeList ReferredNodes() const override { return TilingFactorNodes(); }
+  const ptr<MultiValues> GetTilingFactors() const override {
+    auto res = AST::Make<AST::MultiValues>(tfactor->LOC());
+
+    for (auto v : tfactor->AllValues()) {
+      if (auto id = GetIdentifier(*v); id && (id->name == "_"))
+        res->Append(AST::MakeIntExpr(id->LOC(), 1));
+      else
+        res->Append(AST::Make<AST::Expr>(v->LOC(), "ubound", v->Clone()));
+    }
+    res->SetDelimiter(", ");
+    return res;
+  }
+
+  const ptr<MultiValues> GetIndices() const override { return tfactor; }
+  const ptr<SpannedOperation> CloneImpl() const override {
+    return Make<Tiling>(LOC(), CloneP(tfactor));
+  }
+
+  void accept(Visitor& v) override;
+
+  void Print(std::ostream& os) const override {
+    os << ".ChunkAt(" << STR(tfactor) << ")";
+  }
+
+  __UDT_TYPE_INFO__(SpannedOperation, Tiling)
+};
+
+struct TileAt : public SpannedOperation, public TypeIDProvider<TileAt> {
+  ptr<MultiValues> tfactor = nullptr; // tiling-factor
+  ptr<MultiValues> indices = nullptr; // subscripting indices
+  TileAt(const location& l, const ptr<MultiValues>& tf,
+         const ptr<MultiValues>& i)
+      : SpannedOperation(l), tfactor(tf), indices(i) {}
+
+  const ptr<MultiValues> GetTilingFactors() const override { return tfactor; }
+  const ptr<MultiValues> GetIndices() const override { return indices; }
+  const NodeList TilingFactorNodes() const override {
+    return MakeNodeList(tfactor);
+  }
+  const NodeList IndexNodes() const override { return MakeNodeList(indices); }
+  const NodeList ReferredNodes() const override {
+    auto res = TilingFactorNodes();
+    auto& idn = IndexNodes();
+    res.insert(res.end(), idn.begin(), idn.end());
+    return res;
+  }
+  const ptr<SpannedOperation> CloneImpl() const override {
+    return Make<TileAt>(LOC(), CloneP(tfactor), CloneP(indices));
+  }
+
+  void accept(Visitor& v) override;
+
+  void Print(std::ostream& os) const override {
+    os << ".Chunk(" << STR(tfactor) << ").At(" << STR(indices) << ")";
+  }
+
+  __UDT_TYPE_INFO__(SpannedOperation, TileAt)
+};
+
+struct SubSpan : public SpannedOperation, public TypeIDProvider<SubSpan> {
+  ptr<MultiValues> subspan = nullptr; // subspan shape
+  ptr<MultiValues> indices = nullptr; // subscripting indices
+  ptr<MultiValues> strides = nullptr; // optional strides
+  SubSpan(const location& l, const ptr<MultiValues>& s,
+          const ptr<MultiValues>& i, const ptr<MultiValues>& strd = nullptr)
+      : SpannedOperation(l), subspan(s), indices(i), strides(strd) {
+    if (s == nullptr) choreo_unreachable("must provide the sub-span.");
+  }
+
+  const ptr<MultiValues> GetSubSpan() const override { return subspan; }
+  const ptr<MultiValues> GetStrides() const override { return strides; }
+  const ptr<MultiValues> GetIndices() const override { return indices; }
+  const NodeList SubSpanNodes() const override { return MakeNodeList(subspan); }
+  const NodeList StrideNodes() const override { return MakeNodeList(strides); }
+  const NodeList IndexNodes() const override { return MakeNodeList(indices); }
+  const NodeList ReferredNodes() const override {
+    auto res = SubSpanNodes();
+    auto& idn = IndexNodes();
+    res.insert(res.end(), idn.begin(), idn.end());
+    auto& stn = StrideNodes();
+    res.insert(res.end(), stn.begin(), stn.end());
+    return res;
+  }
+  void SetIndexNodes(const ptr<AST::MultiValues>& mv) { indices = mv; }
+  const ptr<SpannedOperation> CloneImpl() const override {
+    return Make<SubSpan>(LOC(), CloneP(subspan), CloneP(indices),
+                         CloneP(strides));
+  }
+
+  void accept(Visitor& v) override;
+  void Print(std::ostream& os) const override {
+    os << ".SubSpan(" << STR(subspan) << ")";
+    if (strides) os << ".Stride(" << STR(strides) << ")";
+    if (indices) os << ".At(" << STR(indices) << ")";
+  }
+
+  __UDT_TYPE_INFO__(SpannedOperation, SubSpan)
+};
+
+struct ModSpan : public SpannedOperation, public TypeIDProvider<ModSpan> {
+  ptr<MultiValues> subspan = nullptr; // subspan shape
+  ptr<MultiValues> indices = nullptr; // subscripting indices
+  ptr<MultiValues> strides = nullptr; // optional strides
+  ModSpan(const location& l, const ptr<MultiValues>& s,
+          const ptr<MultiValues>& i, const ptr<MultiValues>& strd = nullptr)
+      : SpannedOperation(l), subspan(s), indices(i), strides(strd) {
+    if (s == nullptr) choreo_unreachable("must provide the sub-span.");
+  }
+
+  const ptr<MultiValues> GetSubSpan() const override { return subspan; }
+  const ptr<MultiValues> GetStrides() const override { return strides; }
+  const ptr<MultiValues> GetIndices() const override { return indices; }
+  const NodeList SubSpanNodes() const override { return MakeNodeList(subspan); }
+  const NodeList StrideNodes() const override { return MakeNodeList(strides); }
+  const NodeList IndexNodes() const override { return MakeNodeList(indices); }
+  const NodeList ReferredNodes() const override {
+    auto res = SubSpanNodes();
+    auto& idn = IndexNodes();
+    res.insert(res.end(), idn.begin(), idn.end());
+    auto& stn = StrideNodes();
+    res.insert(res.end(), stn.begin(), stn.end());
+    return res;
+  }
+  void SetIndexNodes(const ptr<AST::MultiValues>& mv) { indices = mv; }
+  const ptr<SpannedOperation> CloneImpl() const override {
+    return Make<ModSpan>(LOC(), CloneP(subspan), CloneP(indices),
+                         CloneP(strides));
+  }
+
+  void accept(Visitor& v) override;
+  void Print(std::ostream& os) const override {
+    os << ".ModSpan(" << STR(subspan) << ")";
+    if (strides) os << ".Stride(" << STR(strides) << ")";
+    if (indices) os << ".At(" << STR(indices) << ")";
+  }
+
+  __UDT_TYPE_INFO__(SpannedOperation, ModSpan)
+};
+
+struct View : public SpannedOperation, public TypeIDProvider<View> {
+  ptr<MultiValues> subspan = nullptr; // subspan shape
+  ptr<MultiValues> offsets = nullptr; // optional offsets
+  ptr<MultiValues> strides = nullptr; // optional strides
+  View(const location& l, const ptr<MultiValues>& s,
+       const ptr<MultiValues>& off, const ptr<MultiValues>& strd = nullptr)
+      : SpannedOperation(l), subspan(s), offsets(off), strides(strd) {
+    if (s == nullptr) choreo_unreachable("must provide the sub-span.");
+  }
+  const ptr<MultiValues> GetSubSpan() const override { return subspan; }
+  const ptr<MultiValues> GetStrides() const override { return strides; }
+  const ptr<MultiValues> GetOffsets() const override { return offsets; }
+  const NodeList SubSpanNodes() const override { return MakeNodeList(subspan); }
+  const NodeList StrideNodes() const override { return MakeNodeList(strides); }
+  const NodeList OffsetNodes() const override { return MakeNodeList(offsets); }
+  const NodeList ReferredNodes() const override {
+    auto res = SubSpanNodes();
+    auto& ofn = OffsetNodes();
+    res.insert(res.end(), ofn.begin(), ofn.end());
+    auto& stn = StrideNodes();
+    res.insert(res.end(), stn.begin(), stn.end());
+    return res;
+  }
+  const ptr<SpannedOperation> CloneImpl() const override {
+    return Make<View>(LOC(), CloneP(subspan), CloneP(offsets), CloneP(strides));
+  }
+
+  void accept(Visitor& v) override;
+  void Print(std::ostream& os) const override {
+    os << ".VIEW(" << STR(subspan) << ")";
+    if (strides) os << ".Stride(" << STR(strides) << ")";
+    if (offsets) os << ".From(" << STR(offsets) << ")";
+  }
+
+  __UDT_TYPE_INFO__(SpannedOperation, View)
+};
+
+struct Reshape : public SpannedOperation, public TypeIDProvider<Reshape> {
+  ptr<MultiValues> newspan = nullptr; // new shape
+  Reshape(const location& l, const ptr<MultiValues>& s)
+      : SpannedOperation(l), newspan(s) {
+    if (s == nullptr) choreo_unreachable("must provide the sub-span.");
+  }
+  const ptr<MultiValues> GetNewSpan() const { return newspan; }
+  const NodeList ReferredNodes() const override {
+    return MakeNodeList(newspan);
+  }
+  const ptr<SpannedOperation> CloneImpl() const override {
+    return Make<Reshape>(LOC(), CloneP(newspan));
+  }
+
+  void accept(Visitor& v) override;
+  void Print(std::ostream& os) const override {
+    os << ".SpanAs(" << STR(newspan) << ")";
+  }
+  __UDT_TYPE_INFO__(SpannedOperation, Reshape)
+};
+
+} // end namespace SOP
 
 // If the block after applying the operation is contiguous in the original
 // block. Return true/false: true positive or true negative Return ValueItem if
@@ -2162,7 +2225,7 @@ private:
 //  the ValueItem is evaluted to true at runtime.
 inline std::variant<bool, ValueItem> IsContiguousSOp(const SpannedOperation& k,
                                                      Shape original_shape) {
-  if (k.SpecifyReshape()) return true;
+  if (isa<SOP::Reshape>(&k)) return true;
 
   Shape new_shape = k.GetBlockShape();
   assert(original_shape.SameRankAs(new_shape));
@@ -2202,18 +2265,6 @@ inline std::variant<bool, ValueItem> IsContiguousSOp(const SpannedOperation& k,
   return res->Normalize();
 }
 
-inline const std::string STR(const SpannedOperation::Kind& k) {
-  switch (k) {
-  case SpannedOperation::TILING: return "chunkat";
-  case SpannedOperation::TILEAT: return "chunk-at";
-  case SpannedOperation::SUBSPAN: return "subspan-at";
-  case SpannedOperation::MODSPAN: return "modspan-at";
-  case SpannedOperation::RESHAPE: return "span_as";
-  default: choreo_unreachable("unsupported SpannedOperation kind.");
-  }
-  return "";
-}
-
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;               // spanned data name
   ptr<MultiValues> indices = nullptr; // indexing of data arrays
@@ -2250,29 +2301,32 @@ public:
     assert(index < operations.size());
     return operations[index];
   }
-  size_t OpCount() const { return operations.size(); }
-  bool HasOperation(const SpannedOperation::Kind& k) const {
-    for (auto& so : AllOperations())
-      if (so->OpCode() == k) return true;
-    return false;
+  const ptr<SpannedOperation>& FirstOp() const {
+    assert(!operations.empty());
+    return operations.front();
   }
+  const ptr<SpannedOperation>& LastOp() const {
+    assert(!operations.empty());
+    return operations.back();
+  }
+  size_t OpCount() const { return operations.size(); }
   bool NoTilingOperation() const { return !HasTilingOperation(); }
   bool HasTilingOperation() const { return TilingOperationCount() > 0; }
   size_t TilingOperationCount() const {
     size_t count = 0;
     for (auto& so : AllOperations())
-      if (!so->SpecifyReshape()) count++;
+      if (!isa<SOP::Reshape>(so)) count++;
     return count;
   }
   bool HasReshape() const {
     for (auto& so : AllOperations())
-      if (so->SpecifyReshape()) return true;
+      if (isa<SOP::Reshape>(so)) return true;
     return false;
   }
   bool ReshapeOnly() const {
     bool reshape_only = false;
     for (auto& so : AllOperations()) {
-      if (!so->SpecifyReshape()) return false;
+      if (!isa<SOP::Reshape>(so)) return false;
       reshape_only = true;
     }
     return reshape_only;
@@ -2282,7 +2336,7 @@ public:
     int li = -1;
     int i = 0;
     for (auto sop : AllOperations()) {
-      if (sop->SpecifyReshape()) li = i;
+      if (isa<SOP::Reshape>(sop)) li = i;
       ++i;
     }
     if (li == -1) return std::nullopt;
@@ -2805,9 +2859,7 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
     targets->Print(os, "", with_type);
   }
 
-  const std::vector<ptr<Node>>& GetTargets() const {
-    return targets->AllValues();
-  }
+  const NodeList& GetTargets() const { return targets->AllValues(); }
 
   void accept(Visitor&) override;
 
@@ -2829,9 +2881,7 @@ struct Trigger : public Node, public TypeIDProvider<Trigger> {
     targets->Print(os, "", with_type);
   }
 
-  const std::vector<ptr<Node>>& GetEvents() const {
-    return targets->AllValues();
-  }
+  const NodeList& GetEvents() const { return targets->AllValues(); }
 
   void accept(Visitor&) override;
 
@@ -2907,7 +2957,7 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
   ptr<Identifier> IdAt(int index) {
     return cast<Identifier>(ids->ValueAt(index));
   }
-  const std::vector<ptr<Node>>& GetIds() const { return ids->AllValues(); }
+  const NodeList& GetIds() const { return ids->AllValues(); }
 
   ptr<Node> CloneImpl() const override {
     return Make<Rotate>(LOC(), CloneP(ids));
@@ -2949,33 +2999,32 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   // both will be normalized to Expr which ref to anon_x
   ptr<Node> lbound = nullptr;
   ptr<Node> ubound = nullptr;
-  int stride = GetInvalidStride();
+  int step = GetInvalidStep();
 
   LoopRange(const location& l, const ptr<Identifier>& i)
       : Node(l), iv(i) {} // the cmpt_bounds are yet to be inferred
   LoopRange(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
-      : Node(l), iv(i), lbound(lb), ubound(ub), stride(s) {}
+      : Node(l), iv(i), lbound(lb), ubound(ub), step(s) {}
 
   const std::string IVName() const { return iv->name; }
   const ptr<Identifier> IV() const { return iv; }
 
   ptr<Node> CloneImpl() const override {
     return Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv), CloneP(lbound),
-                           CloneP(ubound), stride);
+                           CloneP(ubound), step);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
     os << "\n" << prefix << "`- Iteration variables: " << iv->name;
 
-    if (!lbound && !ubound && !IsValidStride(stride)) return;
+    if (!lbound && !ubound && !IsValidStep(step)) return;
 
     os << "\n" << prefix << "`- Loop Control: (";
     os << (lbound ? PSTR(lbound) : std::string("?")) << ":";
     os << (ubound ? PSTR(ubound) : std::string("?")) << ":";
-    os << (IsValidStride(stride) ? std::to_string(stride) : std::string("?"))
-       << ")";
+    os << (IsValidStep(step) ? std::to_string(step) : std::string("?")) << ")";
   }
   void accept(Visitor&) override;
 
@@ -3022,9 +3071,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   }
 
   ptr<MultiValues> GetRangeNodes() const { return ranges; }
-  const std::vector<ptr<Node>>& GetRanges() const {
-    return ranges->AllValues();
-  }
+  const NodeList& GetRanges() const { return ranges->AllValues(); }
 
   void accept(Visitor&) override;
 
@@ -3133,9 +3180,7 @@ struct IncrementBlock : public Node, public TypeIDProvider<IncrementBlock> {
 
   void accept(Visitor&) override;
 
-  const std::vector<ptr<Node>>& GetIterationVars() const {
-    return bvs->AllValues();
-  }
+  const NodeList& GetIterationVars() const { return bvs->AllValues(); }
 
   const ptr<Node>& GetPredicate() const { return pred; }
 
@@ -3518,6 +3563,24 @@ MakeSimpleParallelBy(const location& l, const ptr<MultiNodes> stmts = nullptr,
   auto pb = AST::Make<AST::ParallelBy>(l, pv, p_bound, spv, spv_bounds, stmts);
   pb->SetType(MakeBoundedIntegerType(sbe::nu(bv)));
   return pb;
+}
+
+inline const ptr<MultiValues> MakeMultiValues(const location& loc, size_t count,
+                                              const ptr<Node>& v) {
+  auto mv = AST::Make<AST::MultiValues>(loc);
+  for (size_t i = 0; i < count; ++i) mv->Append(v->Clone());
+  return mv;
+}
+
+inline const ValueList MakeValueList(const ptr<MultiValues>& mv) {
+  if (!mv) choreo_unreachable("invalid multi-values.");
+  ValueList vl;
+  for (auto b : mv->AllValues()) {
+    auto e = cast<Expr>(b);
+    if (!e->Opts().HasVal()) return {};
+    vl.push_back(e->Opts().GetVal());
+  }
+  return vl;
 }
 
 } // end of namespace AST

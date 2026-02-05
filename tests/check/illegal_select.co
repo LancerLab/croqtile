@@ -26,9 +26,8 @@ __co__ auto illegal_select(f32 [128, 128] i) {
   }
 }
 
-// CHECK: expect `i_local4`(f32 mdspan<1> []) to be the same type as `i_local0`(f32 mdspan<2> []).
-// CHECK: expect `i_local5`(s32 mdspan<2> []) to be the same type as `i_local0`(f32 mdspan<2> []).
+// CHECK: error: expect `i_local4`(f32 mdspan<1> []) to be the same type as `i_local0`(f32 mdspan<2> []).
+// CHECK: error: expect `i_local5`(s32 mdspan<2> []) to be the same type as `i_local0`(f32 mdspan<2> []).
 // CHECK: error: expect `i` to be a (bounded) integer type, but got SpannedType.
 // CHECK-NOT: error:
 // CHECK: Totally 3 errors have been detected.
-

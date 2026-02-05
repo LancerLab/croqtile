@@ -330,6 +330,13 @@ bool SemaChecker::VisitNode(AST::SpanAs& n) {
     return false;
   }
 
+  auto p = sty->IsDense() & nty->IsDense();
+  if (p == Modality::MUST)
+    Error1(n.LOC(), "span_as is applied on non-contiguous spanned data.");
+  else if (p == Modality::MAY)
+    Warning(n.LOC(),
+            "span_as could be applied on non-contiguous spanned data.");
+
   if (!sty->RuntimeShaped() && !nty->RuntimeShaped()) {
     // check if the shape size are same
     if (sty->ElementCount() != nty->ElementCount()) {
@@ -545,11 +552,12 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     bool has_noncontiguous = false;
     size_t last_tiling = 0;
     for (size_t i = 0; i < ca->OpCount(); ++i)
-      if (!ca->OpAt(i)->SpecifyReshape()) last_tiling = i;
+      if (!isa<AST::SOP::Reshape>(ca->OpAt(i))) last_tiling = i;
     bool has_reshape = false;
     for (size_t i = 0; i < ca->OpCount(); ++i) {
       const auto& sop = ca->OpAt(i);
-      if (ca->OpAt(ca->OpCount() - i - 1)->SpecifyReshape()) has_reshape = true;
+      if (isa<AST::SOP::Reshape>(ca->OpAt(ca->OpCount() - i - 1)))
+        has_reshape = true;
       auto is_contiguous = AST::IsContiguousSOp(*sop, original_shape);
       if (auto val = std::get_if<bool>(&is_contiguous); val && *val == false) {
         has_noncontiguous = true;
@@ -565,7 +573,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                   "The reshape operation inside DMA expression maybe is "
                   "executed on a noncontiguous tiling result.");
       }
-      if (has_noncontiguous && sop->SpecifyReshape())
+      if (has_noncontiguous && isa<AST::SOP::Reshape>(sop))
         Warning(sop->LOC(), "The reshape operation inside DMA expression is "
                             "executed on a noncontiguous tiling result.");
       original_shape = sop->GetBlockShape();

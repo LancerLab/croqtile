@@ -65,7 +65,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:      `- Iteration variables: index
 // CHECK:      `- DMA.copy.async
 // CHECK:        `- future: f
-// CHECK:        `- from: input.ChunkAt(p, index)
+// CHECK:        `- from: input.Chunk( (ubound p) , (ubound index) ).At(p, index)
 // CHECK:        `- to: local
 // CHECK:      `- Assign: sum =  (sum + index(0))
 // CHECK:      `- WAIT: f
@@ -84,7 +84,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:        `- Iteration variables: m
 // CHECK:        `- DMA.copy.async
 // CHECK:          `- future: f
-// CHECK:          `- from: input.ChunkAt(p, idx, m)
+// CHECK:          `- from: input.Chunk( (ubound p) , (ubound idx) , (ubound m) ).At(p, idx, m)
 // CHECK:          `- to: local
 // CHECK:        `- Assign: sum =  (sum + index(0))
 // CHECK:        `- WAIT: f

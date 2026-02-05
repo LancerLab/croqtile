@@ -475,7 +475,7 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
   // handle each chunkat inside a seqeunce like 'chunkat(a, b).chunkat(c)...'
   for (size_t sop_idx = sop_base; sop_idx < sops.size(); ++sop_idx) {
     // span_as reshape operation would not affect index generation
-    assert(!sops[sop_idx]->SpecifyReshape());
+    assert(!isa<AST::SOP::Reshape>(sops[sop_idx]));
 
     // For each chunkat expression, The tiled-block's shape is cooked by shape
     // inference. The block shape is different with the result shape of chunkat
@@ -488,7 +488,7 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
     // For each 'a, b, c, ...' inside 'chunkat(a, b, c, ...)', that 'b' inside
     // 'chunkat(a, b, c, ...)' could be bounded var like b = {b0, b1} Therefore,
     // we collect all the expressions first.
-    for (auto p : sops[sop_idx]->GetIndices()) {
+    for (auto p : sops[sop_idx]->IndexNodes()) {
       if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
         const auto& vals = o.GetVals();
         for (auto& val : vals) {
@@ -513,7 +513,7 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
     for (size_t i = 0; i < exprs.size(); ++i) {
       // combine 'a' and 'c' between expressions like 'chunkat(a, b).chunk(c,
       // d)'
-      indices[i] = (indices[i] * exprs[i] * shape.ValueAt(i))->Normalize();
+      indices[i] = indices[i] * exprs[i] * shape.ValueAt(i);
     }
   }
 
@@ -548,7 +548,7 @@ CuteCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
   // handle each chunkat inside a seqeunce like 'chunkat(a, b).chunkat(c)...'
   for (size_t sop_idx = sop_base; sop_idx < sops.size(); ++sop_idx) {
     // span_as reshape operation would not affect index generation
-    assert(!sops[sop_idx]->SpecifyReshape());
+    assert(!isa<AST::SOP::Reshape>(sops[sop_idx]));
 
     // For each chunkat expression, The tiled-block's shape is cooked by shape
     // inference. The block shape is different with the result shape of chunkat
@@ -561,8 +561,8 @@ CuteCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
     // For each 'a, b, c, ...' inside 'chunkat(a, b, c, ...)', that 'b' inside
     // 'chunkat(a, b, c, ...)' could be bounded var like b = {b0, b1} Therefore,
     // we collect all the expressions first.
-    for (size_t pi = 0; pi < sops[sop_idx]->GetIndices().size(); ++pi) {
-      auto p = sops[sop_idx]->GetIndices()[pi];
+    for (size_t pi = 0; pi < sops[sop_idx]->IndexNodes().size(); ++pi) {
+      auto p = sops[sop_idx]->IndexNodes()[pi];
       // exprs[x] will perform multiplication operations with other values later
       // thus the parent_op is `*`
       auto idx_exprs =
@@ -640,7 +640,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   assert(ca->OpCount() == 1 &&
          "count of spanned operations in CuTe DMA should be 1.");
   if (auto s = ca->OpAt(0)->GetStrides()) {
-    auto stride_vl = ca->OpAt(0)->StridesAsValueList();
+    auto stride_vl = AST::MakeValueList(ca->OpAt(0)->GetStrides());
     stride_shape = Shape(stride_vl);
   }
 
@@ -649,7 +649,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   Shape new_shape;
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
-    if (sop->SpecifyReshape()) {
+    if (isa<AST::SOP::Reshape>(sop)) {
       outer_shape = sop->GetBlockShape();
     } else {
       // if stride is defined, use it as tiled shape.
@@ -658,7 +658,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
       else
         new_shape = sop->GetBlockShape();
       size_t i = 0;
-      for (auto p : sop->GetIndices()) {
+      for (auto p : sop->IndexNodes()) {
         if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
           const auto& vals = o.GetVals();
           for (auto val : vals) {

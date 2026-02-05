@@ -394,7 +394,7 @@ private:
         parallel_bounds; // specify which dimension is executed in parallel
 
     if (ca.HasOperation() && ca.AllOperations().size() == 1) {
-      for (auto pos : ca.AllOperations()[0]->GetIndices()) {
+      for (auto pos : ca.FirstOp()->IndexNodes()) {
         auto id = dyn_cast<AST::Identifier>(pos);
         assert(id && "node other than identifier is not handled.");
         auto ty = GetSymbolType(id->name);

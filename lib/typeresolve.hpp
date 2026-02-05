@@ -15,13 +15,15 @@ class TypeConstraints {
 
   bool debug = false;
   bool report_type = false;
+  bool ignore_rank = false;
 
   FutureBufferInfo& FBInfo() {
     return FCtx(visitor->CurrentFunctionName()).GetFutureBufferInfo();
   }
 
 public:
-  TypeConstraints(VisitorWithScope* v) : visitor(v) {}
+  TypeConstraints(VisitorWithScope* v, bool ir = false)
+      : visitor(v), ignore_rank(ir) {}
 
   void SetDebug(bool d) { debug = d; }
   void SetTypeReport(bool r) { report_type = r; }
@@ -124,8 +126,13 @@ public:
             }
           }
           if (report_type) ReportSymbolType(e, ty);
-        } else if (*ty != *sty) {
-          if (report_error) {
+        } else {
+          bool equal;
+          if (ignore_rank)
+            equal = ty->ApprxEqual(*sty);
+          else
+            equal = (*ty == *sty);
+          if (!equal && report_error) {
             visitor->Error(l, n + " is typed as " + PSTR(sty) +
                                   " but is resolved as " + PSTR(ty) + ".");
             return false;

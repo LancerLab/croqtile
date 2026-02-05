@@ -87,15 +87,15 @@ int main() {
 // CHECK: (  5)         foreach index(::) {
 // CHECK: (  6)           anon_0 =  (p # n) 
 // CHECK: (  7)           local s32 mdspan<3> [1, 1, 32] lhs_load__buf__
-// CHECK: (  8)           lhs_load = dma.copy.async lhs.ChunkAt(anon_0, x, y) => lhs_load__buf__
+// CHECK: (  8)           lhs_load = dma.copy.async lhs.Chunk( (ubound (p # n) ) ,  (ubound x) , (ubound y) ).At(anon_0, x, y) => lhs_load__buf__
 // CHECK: (  9)           anon_1 =  (p # n) 
 // CHECK: ( 10)           local s32 mdspan<3> [1, 1, 32] rhs_load__buf__
-// CHECK: ( 11)           rhs_load = dma.copy.async rhs.ChunkAt(anon_1, x, y) => rhs_load__buf__
+// CHECK: ( 11)           rhs_load = dma.copy.async rhs.Chunk( (ubound (p # n) ) ,  (ubound x) , (ubound y) ).At(anon_1, x, y) => rhs_load__buf__
 // CHECK: ( 12)           wait lhs_load, rhs_load
 // CHECK: ( 13)           local s32 [ lhs_load.span ] l1_out
 // CHECK: ( 14)           call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out,  (sizeof lhs_load.span) )
 // CHECK: ( 15)           anon_2 =  (p # n) 
-// CHECK: ( 16)           out_store = dma.copy.async l1_out => output.ChunkAt(anon_2, x, y)
+// CHECK: ( 16)           out_store = dma.copy.async l1_out => output.Chunk( (ubound (p # n) ) ,  (ubound x) , (ubound y) ).At(anon_2, x, y)
 // CHECK: ( 17)           wait out_store
 // CHECK: ( 18)         }
 // CHECK: ( 19)       }
@@ -108,13 +108,13 @@ int main() {
 // CHECK: ( 26)         foreach rm(anon_3::1) {
 // CHECK: ( 27)           foreach x(::), y(::) {
 // CHECK: ( 28)             local s32 mdspan<3> [1, 1, 32] lhs_load__buf__
-// CHECK: ( 29)             lhs_load = dma.copy.async lhs.ChunkAt(rm, x, y) => lhs_load__buf__
+// CHECK: ( 29)             lhs_load = dma.copy.async lhs.Chunk( (ubound rm) ,  (ubound x) , (ubound y) ).At(rm, x, y) => lhs_load__buf__
 // CHECK: ( 30)             local s32 mdspan<3> [1, 1, 32] rhs_load__buf__
-// CHECK: ( 31)             rhs_load = dma.copy.async rhs.ChunkAt(rm, x, y) => rhs_load__buf__
+// CHECK: ( 31)             rhs_load = dma.copy.async rhs.Chunk( (ubound rm) ,  (ubound x) , (ubound y) ).At(rm, x, y) => rhs_load__buf__
 // CHECK: ( 32)             wait lhs_load, rhs_load
 // CHECK: ( 33)             local s32 [ lhs_load.span ] l1_out
 // CHECK: ( 34)             call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out,  (sizeof lhs_load.span) )
-// CHECK: ( 35)             out_store = dma.copy.async l1_out => output.ChunkAt(rm, x, y)
+// CHECK: ( 35)             out_store = dma.copy.async l1_out => output.Chunk( (ubound rm) ,  (ubound x) , (ubound y) ).At(rm, x, y)
 // CHECK: ( 36)             wait out_store
 // CHECK: ( 37)           }
 // CHECK: ( 38)         }

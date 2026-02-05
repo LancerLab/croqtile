@@ -46,7 +46,7 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
 // CHECK: (  4)       foreach n_tile(::) {
 // CHECK: (  5)         shared f32 [ (input.span(0) /  (ubound p) )  (input.span(1) /  (ubound n_tile) )  ] l2_out
 // CHECK: (  6)         shared f32 mdspan<2> [256, 64] input_load__buf__
-// CHECK: (  7)         input_load = dma.copy.async input.ChunkAt(p, n_tile) => input_load__buf__, chain_to input_load_s
+// CHECK: (  7)         input_load = dma.copy.async input.Chunk( (ubound p) , (ubound n_tile) ).At(p, n_tile) => input_load__buf__, chain_to input_load_s
 // CHECK: (  8)         parallel q = {q__elem__x} by [1] : thread {
 // CHECK: (  9)           local f32 mdspan<2> [256, 64] input_load_s__buf__
 // CHECK: ( 10)           input_load_s = dma.copy.async input_load => input_load_s__buf__, chain_from input_load
@@ -57,7 +57,7 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
 // CHECK: ( 15)           out_store_s = dma.copy.async out_load_s => l2_out
 // CHECK: ( 16)           wait out_store_s
 // CHECK: ( 17)         }
-// CHECK: ( 18)         out_store = dma.copy.async l2_out => output.ChunkAt(p, n_tile)
+// CHECK: ( 18)         out_store = dma.copy.async l2_out => output.Chunk( (ubound p) , (ubound n_tile) ).At(p, n_tile)
 // CHECK: ( 19)         wait out_store
 // CHECK: ( 20)       }
 // CHECK: ( 21)     }

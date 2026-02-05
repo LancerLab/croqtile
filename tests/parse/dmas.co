@@ -34,12 +34,12 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
 // CHECK:      `- DMA.pad.async
 // CHECK:        `- config: padding: low{1, 1}, high{0, 0}, mid{1, 0}, value: 1
 // CHECK:        `- future: f
-// CHECK:        `- from: input.ChunkAt(p, index)
+// CHECK:        `- from: input.Chunk( (ubound p) , (ubound index) ).At(p, index)
 // CHECK:        `- to: local
 // CHECK:      `- DMA.pad
 // CHECK:        `- config: padding: low{0, 0, 0}, high{0, 1, 2}, mid{1, 0, 3}, value: 0
 // CHECK:        `- future: f1
-// CHECK:        `- from: input.ChunkAt(p, index)
+// CHECK:        `- from: input.Chunk( (ubound p) , (ubound index) ).At(p, index)
 // CHECK:        `- to: local
 // CHECK:      `- Assign: sum =  (sum + index(0))
 // CHECK:      `- WAIT: f, f1
@@ -69,7 +69,7 @@ __co__ void dma_test1(f32 [36, 27, 128] input) {
 // CHECK:    `- index in [ 5 6 ]
 // CHECK:    (with statements)
 // CHECK:    `- DMA.copy
-// CHECK:      `- from: input.ChunkAt(p, index)
+// CHECK:      `- from: input.Chunk( (ubound p) , (ubound index) ).At(p, index)
 // CHECK:      `- to: dst
 // CHECK:    `- DMA.copy
 // CHECK:      `- future: f
@@ -106,7 +106,7 @@ __co__ void dma_test2(f32 [27, 128] input) {
 // CHECK:     `- WAIT: f0
 // CHECK:     `- DMA.copy
 // CHECK:       `- future: f0
-// CHECK:       `- from: input.ChunkAt(index)
+// CHECK:       `- from: input.Chunk( (ubound index) ).At(index)
 // CHECK:       `- to: local
 // CHECK:  `- Return: dst
 
@@ -137,11 +137,11 @@ __co__ void dma_test3(f32 [36, 27, 128] input) {
 // CHECK:     `- Iteration variables: index
 // CHECK:     `- DMA.transp
 // CHECK:       `- future: f0
-// CHECK:       `- from: input.ChunkAt(p, index)
+// CHECK:       `- from: input.Chunk( (ubound p) , (ubound index) ).At(p, index)
 // CHECK:       `- to: local
 // CHECK:     `- DMA.transp.async
 // CHECK:       `- future: f1
-// CHECK:       `- from: input.ChunkAt(p, index)
+// CHECK:       `- from: input.Chunk( (ubound p) , (ubound index) ).At(p, index)
 // CHECK:       `- to: local
 // CHECK:     `- Swap: f0, f1
 // CHECK:     `- WAIT: f1
