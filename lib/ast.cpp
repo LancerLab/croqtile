@@ -76,6 +76,7 @@ void NamedVariableDecl::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
   if (mem) mem->accept(v);
+  if (array_dims) array_dims->accept(v);
   // be careful of the accpeting orders
   if (init_value) init_value->accept(v);
   if (type) type->accept(v);

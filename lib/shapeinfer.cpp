@@ -424,6 +424,16 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
 
   auto& name = n.name_str;
 
+  if (n.IsArray()) {
+    auto array_vn = GetValNo(*n.array_dims);
+    n.array_shape = GenShape(array_vn);
+    // apply the inferred shape to DataType node.
+    n.type->array_dims = n.array_shape;
+    if (auto eaty = dyn_cast<EventArrayType>(NodeType(n)); eaty) {
+      eaty->dims = n.ArrayDimAsValueList();
+    }
+  }
+
   if (!CanBeValueNumbered(&n)) {
     DefineASymbol(name, NodeType(n));
     return true; // mutables and events are not valno-able
@@ -491,10 +501,10 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
     if (cur_mdspan_vn.IsValid()) {
       SymbolAliasNum(SSTab().ScopedName(name + ".span"), cur_mdspan_vn);
       auto mds_value = GenShape(cur_mdspan_vn);
-      if (n.IsArray())
+      if (n.IsArray()) {
         nty = MakeSpannedArrayType(n.type->base_type, mds_value,
-                                   n.ArrayDimensions(), sto);
-      else
+                                   n.ArrayDimAsValueList(), sto);
+      } else
         nty = MakeSpannedType(n.type->base_type, mds_value, sto);
     } else if (cur_vn.IsValid()) {
       SymbolAliasNum(SSTab().ScopedName(name), cur_vn);
@@ -758,7 +768,7 @@ bool ShapeInference::Visit(AST::Parameter& n) {
                   MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
     } else {
       // the value number is unknown at compile time
-      Error1(n.LOC(), "The type can not be inference at compile time.");
+      Error1(n.LOC(), "The type can not be inferred at compile time.");
       return false;
     }
 
@@ -774,7 +784,7 @@ bool ShapeInference::Visit(AST::Parameter& n) {
     return true;
   }
 
-  if (n.sym && n.type->isScalar()) {
+  if (n.sym && n.type->IsScalar()) {
     assert(!cur_mdspan_vn.IsValid() && "unexpected current mdspan value.");
 
     // get the value number and make it defined

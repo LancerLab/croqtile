@@ -52,7 +52,7 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
     // need to consider the event type!
     event_vars.insert(sname);
     buf_sto.emplace(sname, n.mem->Get());
-    buf_size.emplace(sname, sbe::nu(n.ArraySize()));
+    buf_size.emplace(sname, n.ArraySize());
     buf_dev_func_name.emplace(sname, cur_dev_fname);
     return true;
   }
@@ -62,13 +62,13 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
     auto sto = sty->GetStorage();
     buf_sto.emplace(sname, sto);
     if (!sty->RuntimeShaped()) {
-      auto total_size = sty->ByteSizeValue() * sbe::nu(n.ArraySize());
+      auto total_size = sty->ByteSizeValue() * n.ArraySize();
       buf_size.emplace(sname, total_size);
       VST_DEBUG(dbgs() << "\tstatic  size:  " << total_size << "\n");
     } else {
       sto_have_dyn[cur_dev_fname][sto] = true;
       auto size_expr = sty->ByteSizeValue();
-      if (n.IsArray()) size_expr = size_expr * sbe::nu(n.ArraySize());
+      if (n.IsArray()) size_expr = size_expr * n.ArraySize();
       buf_size.emplace(sname, size_expr);
       VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
     }

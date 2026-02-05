@@ -208,7 +208,6 @@ void choreo_info(const char *message) {
 %nterm <AST::DMAAttribute> dma_attrib
 %nterm <bool> bool_value sync_type pass_by_ref tdma
 %nterm <int> integer_value index_or_none const_sizeof
-%nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> host_code inlcpp_stmt
 
@@ -222,7 +221,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
-%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs
+%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims
 %nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
@@ -879,7 +878,7 @@ multi_decls
 
 named_scalar_decls
     : MUTABLE scalar_type scalar_decls {
-        assert($2->isScalar() && "Not a scalar type.");
+        assert($2->IsScalar() && "Not a scalar type.");
         $2->SetMutable(true);
         $2->ReGenSemaType();
         for (auto sub : $3->AllSubs()) {
@@ -892,7 +891,7 @@ named_scalar_decls
         $$ = $3;
       }
     | scalar_type scalar_decls {
-        assert($1->isScalar() && "Not a scalar type.");
+        assert($1->IsScalar() && "Not a scalar type.");
         for (auto sub : $2->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
           decl->type = cast<AST::DataType>($1->Clone());
@@ -984,7 +983,8 @@ event_decls
 event_decl
     : IDENTIFIER optional_array_dims {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
-             AST::Make<AST::DataType>(@1, BaseType::EVENT, $2), nullptr, $2);
+             AST::Make<AST::DataType>(@1, BaseType::EVENT, $2), nullptr);
+        $$->SetArrayDims($2);
       }
     ;
 
@@ -996,7 +996,8 @@ named_spanned_decls
           symtab.AddSymbol(decl->name_str, $2->GetType()->Clone());
           decl->type = cast<AST::DataType>($2->Clone());
           if (decl->IsArray()) {
-            decl->type->array_dims = decl->ArrayDimensions();
+            // uninit array_dims in type
+            decl->type->array_dims = ValxN(sbe::nu(-1), decl->ArrayDimensions()->Count());
             decl->type->ReGenSemaType();
           }
           decl->mem = cast<AST::Memory>(mem->Clone());
@@ -1011,7 +1012,8 @@ named_spanned_decls
           symtab.AddSymbol(decl->name_str, $1->GetType()->Clone());
           decl->type = cast<AST::DataType>($1->Clone());
           if (decl->IsArray()) {
-            decl->type->array_dims = decl->ArrayDimensions();
+            // uninit array_dims in type
+            decl->type->array_dims = ValxN(sbe::nu(-1), decl->ArrayDimensions()->Count());
             decl->type->ReGenSemaType();
           }
           decl->mem = cast<AST::Memory>(mem->Clone());
@@ -1034,17 +1036,21 @@ spanned_decls
 
 spanned_decl
     : IDENTIFIER optional_array_dims {
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $2);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1);
+        $$->SetArrayDims($2);
       }
     | IDENTIFIER optional_array_dims span_init_val {
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $2, $3);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $3);
+        $$->SetArrayDims($2);
       }
     ;
 
 optional_array_dims
     : /*empty*/ {}
-    | optional_array_dims LBRAKT NUM RBRAKT {
-        $1.push_back($3);
+    | optional_array_dims LBRAKT s_expr RBRAKT {
+        if ($1 == nullptr)
+          $1 = AST::Make<AST::MultiValues>(loc);
+        $1->Append($3);
         $$ = $1;
       }
     ;

@@ -1058,19 +1058,27 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   if (auto sty = dyn_cast<ScalarType>(n.GetType()))
     if (sty->IsMutable()) mutables.Add(InScopeName(n.name_str));
 
+  if (n.IsArray()) {
+    for (const auto& d : n.ArrayDimensions()->AllValues()) {
+      auto dty = d->GetType();
+      if (!isa<ScalarIntegerType>(dty))
+        Error1(d->LOC(), "Dimension of array can only be const integer "
+                         "value, but got value of type " +
+                             dty->TypeNameString() + ": " + PSTR(dty) + ".");
+    }
+  }
+
   return true;
 }
 
 bool EarlySemantics::Visit(AST::IntTuple& n) {
   TraceEachVisit(n);
   size_t dim_count = 0;
-  for (auto& v : n.GetValues()->AllValues()) {
-    if (auto itt = dyn_cast<ITupleType>(v->GetType())) {
+  for (auto& v : n.GetValues()->AllValues())
+    if (auto itt = dyn_cast<ITupleType>(v->GetType()))
       dim_count += itt->dim_count;
-    } else {
+    else
       ++dim_count;
-    }
-  }
 
   for (auto& v : n.GetValues()->AllValues()) {
     bool is_mutable = false;

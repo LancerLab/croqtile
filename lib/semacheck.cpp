@@ -74,7 +74,8 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
     }
 
     auto dims = arr_ty->Dimensions();
-    int bound = arr_ty->Dimension(subscription_level - 1);
+    const ValueItem& bound_vi = arr_ty->Dimension(subscription_level - 1);
+    int bound = *VIInt(bound_vi);
     auto idx = n.GetR();
 
     // TODO: parallel p by 2 { xxx; dma arr[p] => local; }
@@ -97,7 +98,7 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
     }
 
     // 0 <= index < bound
-    auto asrt0 = sbe::bop(OpCode::LT, index, sbe::nu(bound))->Normalize();
+    auto asrt0 = sbe::bop(OpCode::LT, index, bound_vi)->Normalize();
     auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
     assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
 
@@ -755,7 +756,7 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
 
     // check if any indices are out of bound
     for (size_t i = 0; i < rank; ++i) {
-      int bound = arr_ty->Dimension(i);
+      int bound = *VIInt(arr_ty->Dimension(i));
 
       auto expr = n.indices->ValueAt(i);
       // TODO: improve the out-of-bound check for bounded vars
@@ -777,7 +778,8 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
       }
 
       // 0 <= index < bound
-      auto asrt0 = sbe::bop(OpCode::LT, index, sbe::nu(bound))->Normalize();
+      auto asrt0 =
+          sbe::bop(OpCode::LT, index, arr_ty->Dimension(i))->Normalize();
       auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
       assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
 

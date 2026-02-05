@@ -1187,7 +1187,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType base_type;
   size_t rank = GetInvalidRank(); // for annotated ituple only
   ptr<Node> mdspan_type = nullptr;
-  std::vector<size_t> array_dims;
+  std::optional<Shape> array_dims = std::nullopt;
   bool is_mutable = false;
   bool infer_span = false; // the span must be inferenced
 
@@ -1205,16 +1205,15 @@ public:
     InitSemaType();
   }
 
-  explicit DataType(const location& l, BaseType bt, int r,
-                    const std::vector<size_t> ad = {})
-      : Node(l), base_type(bt), rank(r), array_dims(ad) {
+  explicit DataType(const location& l, BaseType bt, int r)
+      : Node(l), base_type(bt), rank(r) {
     assert(bt == BaseType::ITUPLE && "unexpected type!");
     InitSemaType();
   }
 
-  explicit DataType(const location& l, BaseType bt,
-                    const std::vector<size_t>& ad)
-      : Node(l), base_type(bt), rank(1), array_dims(ad) {
+  explicit DataType(const location& l, BaseType bt, const ptr<MultiValues>& ad)
+      : Node(l), base_type(bt), rank(1) {
+    if (ad != nullptr) array_dims = ValxN(sbe::nu(-1), ad->Count());
     assert(((bt == BaseType::EVENT) || (bt == BaseType::UNKNOWN)) &&
            "unexpected type!");
     InitSemaType();
@@ -1222,7 +1221,7 @@ public:
 
   // used for clone
   explicit DataType(const location& l, BaseType bt, size_t r,
-                    const ptr<Node> pt, const std::vector<size_t>& ad, bool im,
+                    const ptr<Node> pt, const std::optional<Shape>& ad, bool im,
                     bool infer)
       : Node(l), base_type(bt), rank(r), mdspan_type(pt), array_dims(ad),
         is_mutable(im), infer_span(infer) {}
@@ -1232,12 +1231,13 @@ public:
 
   bool IsVoid() const { return base_type == BaseType::VOID; }
   bool IsUnknown() const { return base_type == BaseType::UNKNOWN; }
-  bool isScalar() const {
+  bool IsScalar() const {
     return (base_type != BaseType::ITUPLE) && (base_type != BaseType::EVENT) &&
            (base_type != BaseType::ARRAY) && (base_type != BaseType::ADDR) &&
            (base_type != BaseType::VOID) && (base_type != BaseType::VOID);
   }
-  bool isArray() const { return !array_dims.empty(); }
+  bool IsArrayType() const { return array_dims.has_value(); }
+  ValueList ArrayAsValueList() const { return array_dims.value().Value(); }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
   bool ExplicitSpanned() const { return (bool)mdspan_type; }
 
@@ -1271,11 +1271,11 @@ private:
       if (IsIntegerType(base_type) || IsFloatType(base_type)) {
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
         // need type inference
-        if (array_dims.size() == 0)
+        if (!IsArrayType())
           SetType(MakeSpannedType(base_type, GenUninitShape()));
         else
-          SetType(
-              MakeSpannedArrayType(base_type, GenUninitShape(), array_dims));
+          SetType(MakeSpannedArrayType(base_type, GenUninitShape(),
+                                       ArrayAsValueList()));
       } else {
         choreo_unreachable("Unexpected BaseType: " + STR(base_type) + ".");
       }
@@ -1283,10 +1283,10 @@ private:
       if (IsScalarType(base_type)) {
         SetType(MakeScalarType(base_type, is_mutable));
       } else if (base_type == BaseType::EVENT) {
-        if (array_dims.size() == 0)
+        if (!IsArrayType())
           SetType(MakeEventType(Storage::DEFAULT));
         else
-          SetType(MakeEventArrayType(Storage::DEFAULT, array_dims));
+          SetType(MakeEventArrayType(Storage::DEFAULT, ArrayAsValueList()));
       } else if (base_type == BaseType::ITUPLE) {
         if (!IsValidRank(rank))
           // type inference to deduce the dim count
@@ -1411,23 +1411,22 @@ struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
   const std::string init_str;
-  ptr<Memory> mem = nullptr;            // storage location (null for stack)
-  ptr<DataType> type = nullptr;         // type annotation
-  ptr<Node> init_expr = nullptr;        // associated initializer
-  const ptr<Node> init_value = nullptr; // associated initial value
-  std::vector<size_t> array_dims = {};  // has element when it is an array
+  ptr<Memory> mem = nullptr;             // storage location (null for stack)
+  ptr<DataType> type = nullptr;          // type annotation
+  ptr<Node> init_expr = nullptr;         // associated initializer
+  const ptr<Node> init_value = nullptr;  // associated initial value
+  ptr<MultiValues> array_dims = nullptr; // has element when it is an array
+  Shape array_shape;                     // the shape is static
   bool is_mutable = false;
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t = nullptr,
                              const ptr<Memory>& s = nullptr,
                              const ptr<Node>& i = nullptr,
-                             const std::vector<size_t> ad = {},
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(i),
-        init_value(v), array_dims(ad) {
-
+        init_value(v) {
     if (init_expr)
       assert(!init_value && "initial value can not be set when initialization "
                             "expression is specified.");
@@ -1438,23 +1437,26 @@ struct NamedVariableDecl : public Node,
     assert(name_str.size() > 0 && "Invalid name string.");
   }
 
-  // array variable
-  explicit NamedVariableDecl(const location& l, const std::string& n,
-                             const ptr<DataType>& t, const ptr<Memory>& s,
-                             const std::vector<size_t> ad,
-                             const ptr<Node>& v = nullptr,
-                             const std::string& d = "=")
-      : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(nullptr),
-        init_value(v), array_dims(ad) {}
-
-  bool IsArray() const { return !array_dims.empty(); }
-  size_t ArrayDimension(size_t idx) const { return array_dims.at(idx); }
-  const std::vector<size_t>& ArrayDimensions() const { return array_dims; }
-  size_t ArraySize() const {
-    size_t size = 1;
-    for (auto d : array_dims) size *= d;
-    return size;
+  void SetArrayDims(ptr<MultiValues> ad) {
+    if (ad == nullptr) return;
+    array_dims = ad;
+    array_dims->SetDelimiter(", ");
+    array_shape = Shape(array_dims->Count());
   }
+  bool IsArray() const { return array_dims != nullptr; }
+  ptr<Node> ArrayDimension(size_t idx) const {
+    return array_dims->ValueAt(idx);
+  }
+  const ptr<MultiValues>& ArrayDimensions() const { return array_dims; }
+  const ValueList ArrayDimAsValueList() const {
+    if (!array_dims) return {};
+    return array_shape.Value();
+  }
+  ValueItem ArraySize() const {
+    if (!IsArray()) return sbe::nu(1);
+    return MultiplyAll(ArrayDimAsValueList());
+  }
+
   bool IsMutable() const { return is_mutable; }
   void SetMutable(bool m) { is_mutable = m; }
 
@@ -1463,9 +1465,10 @@ struct NamedVariableDecl : public Node,
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<NamedVariableDecl>(LOC(), name_str, CloneP(type), CloneP(mem),
-                                     CloneP(init_expr), array_dims,
-                                     CloneP(init_value), init_str);
+                                     CloneP(init_expr), CloneP(init_value),
+                                     init_str);
     n->SetMutable(IsMutable());
+    n->SetArrayDims(ArrayDimensions());
     return n;
   }
 
@@ -1475,7 +1478,8 @@ struct NamedVariableDecl : public Node,
     if (type) type->Print(os, "", with_type);
     if (mem) os << ", " << PSTR(mem);
     os << "): " << name_str;
-    for (auto d : array_dims) os << "[" << d << "]";
+    if (IsArray())
+      for (const auto& d : array_dims->AllValues()) os << "[" << STR(d) << "]";
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (init_expr) {
       os << " " << init_str << " ";

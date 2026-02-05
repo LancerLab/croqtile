@@ -228,8 +228,9 @@ bool TypeInference::Visit(AST::DataType& n) {
   // compound type
   if (auto mdspan = dyn_cast<AST::MultiDimSpans>(n.mdspan_type)) {
     auto shape = cast<MDSpanType>(mdspan->GetType())->GetShape();
-    if (n.isArray())
-      SetNodeType(n, MakeSpannedArrayType(n.base_type, shape, n.array_dims));
+    if (n.IsArrayType())
+      SetNodeType(
+          n, MakeSpannedArrayType(n.base_type, shape, n.ArrayAsValueList()));
     else
       SetNodeType(n, MakeSpannedType(n.getBaseType(), shape));
     cur_type = n.GetType();
@@ -292,6 +293,22 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
     dbgs() << ((AST::istypeof<FutureType>(&n)) ? "Future" : "Symbol");
     dbgs() << ":    " << InScopeName(n.name_str) << ", Type: " << PSTR(nty);
     dbgs() << "\n";
+  }
+
+  if (n.IsArray()) {
+    if (n.array_shape.IsDynamic())
+      Error1(n.LOC(),
+             "The array dimensions should be static (compile-time known).");
+    else {
+      int idx = 0;
+      for (const auto& d : n.ArrayDimAsValueList()) {
+        if (auto v = *VIInt(d); v <= 0)
+          Error1(n.ArrayDimension(idx)->LOC(),
+                 "The array dimensions should be greater than 0, but got " +
+                     std::to_string(v) + ".");
+        ++idx;
+      }
+    }
   }
 
   return true;

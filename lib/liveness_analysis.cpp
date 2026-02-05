@@ -664,7 +664,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
         GetSymbolType(nvd->name_str)->Print(os);
       os << " " << nvd->name_str;
       if (nvd->IsArray())
-        for (auto d : nvd->array_dims) os << "[" << d << "]";
+        for (const auto& d : nvd->ArrayDimensions()->AllValues())
+          os << "[" << STR(d) << "]";
     }
     if (nvd->init_expr)
       os << " " << nvd->init_str << " " << PSTR(nvd->init_expr);

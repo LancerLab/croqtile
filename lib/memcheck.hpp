@@ -256,10 +256,7 @@ public:
       return true;
     }
     size_t array_dim_product = 1;
-    if (n.IsArray())
-      array_dim_product = std::accumulate(n.ArrayDimensions().begin(),
-                                          n.ArrayDimensions().end(), 1,
-                                          std::multiplies<size_t>());
+    if (n.IsArray()) array_dim_product = *VIInt(n.ArraySize());
     if (sty->RuntimeShaped()) {
       // runtime usage
       std::string byte_size = sty->ByteSizeExpression(true);

@@ -76,8 +76,7 @@ inline const std::string GetDTEContextName() {
 }
 
 inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
-                               const std::string suffix,
-                               const std::vector<size_t>& dims,
+                               const std::string suffix, const ValueList& dims,
                                std::vector<size_t>& indices, size_t depth = 0) {
   if (depth == dims.size()) {
     os << prefix;
@@ -86,7 +85,7 @@ inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
     return;
   }
 
-  for (size_t i = 0; i < dims[depth]; ++i) {
+  for (int i = 0; i < *VIInt(dims[depth]); ++i) {
     indices[depth] = i;
     PrintSubscriptions(os, prefix, suffix, dims, indices, depth + 1);
   }
@@ -101,8 +100,7 @@ std::string GetAbsPath(const std::filesystem::path& cwd,
 }
 
 void GenerateSubscriptions(std::ostream& os, const std::string prefix,
-                           const std::string suffix,
-                           const std::vector<size_t>& dims) {
+                           const std::string suffix, const ValueList& dims) {
   std::vector<size_t> indices(dims.size());
   PrintSubscriptions(os, prefix, suffix, dims, indices);
 }
@@ -891,7 +889,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       if (!CCtx().MemReuse()) {
         ds << d_indent << type_modifiers << bts << " " << sym;
-        for (auto dim : n.ArrayDimensions()) ds << "[" << dim << "]";
+        for (const auto& dim : n.ArrayDimAsValueList())
+          ds << "[" << ValueSTR(dim) << "]";
         ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;
       }
@@ -1541,14 +1540,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         // array!
         std::string array_idx = "";
         auto subscriptions = subscription->AllValues();
-        auto array_sizes = array_ty->Dimensions();
+        const ValueList& array_sizes = array_ty->Dimensions();
         for (size_t i = 0; i < subscriptions.size(); ++i) {
           if (array_idx.empty())
             array_idx = ExprSTR(subscriptions[i], IsHost());
           else
-            array_idx = "(" + array_idx + ")*" +
-                        std::to_string(array_sizes[i]) + "+" +
-                        ExprSTR(subscriptions[i], IsHost());
+            array_idx = "(" + array_idx + ")*" + ValueSTR(array_sizes[i]) +
+                        "+" + ExprSTR(subscriptions[i], IsHost());
         }
         std::string elem_count =
             ValueSTR(cast<SpannedType>(sym_ty)->GetShape().ElementCountValue());
