@@ -1839,13 +1839,7 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   void SetStorage(Storage s) { m_type = s; }
   Storage GetStorage() const { return m_type; }
 
-  void Print(std::ostream& os) const override {
-    if (m_type != Storage::NONE && m_type != Storage::DEFAULT)
-      os << STR(m_type) << " ";
-    os << STR(e_type) << " ";
-    s_type->Print(os);
-    //    os << " {" << STR(strides) << "}";
-  }
+  void Print(std::ostream& os) const override;
 
   const std::string Name() const override { return "spanned"; }
 
@@ -2800,23 +2794,23 @@ MakeDenseSpannedType(BaseType t, const Shape& v,
   return std::make_shared<SpannedType>(t, MakeMDSpanType(v), strides, s);
 }
 
-inline ptr<SpannedType>
-MakeStridedSpannedType(BaseType t, const Shape& v, const ValueList& strd,
-                       const Storage& s = Storage::DEFAULT) {
+inline ptr<SpannedType> MakeSpannedType(BaseType t, const Shape& v,
+                                        const ValueList& strd,
+                                        const Storage& s = Storage::DEFAULT) {
   return std::make_shared<SpannedType>(t, MakeMDSpanType(v), strd, s);
 }
 
 // all the values are fake. it is used only to indicate a spanned type without
 // the shape detail
 inline ptr<SpannedType> MakeDummySpannedType() {
-  return MakeStridedSpannedType(BaseType::UNKSCALAR, GenUnknownShape(), {},
-                                Storage::DEFAULT);
+  return MakeSpannedType(BaseType::UNKSCALAR, GenUnknownShape(), {},
+                         Storage::DEFAULT);
 }
 
 inline ptr<SpannedType>
 MakeUnRankedSpannedType(BaseType bt, Storage sto = Storage::DEFAULT) {
   // only care about the rank of span
-  return MakeStridedSpannedType(bt, GenUnknownShape(), {}, sto);
+  return MakeSpannedType(bt, GenUnknownShape(), {}, sto);
 }
 
 inline ptr<SpannedType> MakeRankedSpannedType(size_t n,
@@ -2824,7 +2818,7 @@ inline ptr<SpannedType> MakeRankedSpannedType(size_t n,
                                               Storage sto = Storage::DEFAULT) {
   if (!IsValidRank(n)) MakeUnRankedSpannedType(bt, sto);
   // only care about the rank of span
-  return MakeStridedSpannedType(bt, Shape(n), {}, sto);
+  return MakeSpannedType(bt, Shape(n), {}, sto);
 }
 
 inline ptr<SpannedType>
@@ -2837,7 +2831,7 @@ inline ptr<SpannedType>
 MakeShapedStridedSpannedType(const Shape& s, const ValueList& strd,
                              BaseType bt = BaseType::UNKSCALAR) {
   // only care about the precise shape
-  return MakeStridedSpannedType(bt, s, strd, Storage::DEFAULT);
+  return MakeSpannedType(bt, s, strd, Storage::DEFAULT);
 }
 
 inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {
@@ -2989,16 +2983,15 @@ inline static ptr<Type> ShadowTypeStorage(const ptr<Type>& ty) {
                                          sty->GetStrides(), at->dims,
                                          ProjectStorage(sty->GetStorage()));
     else
-      return MakeStridedSpannedType(sty->ElementType(), sty->GetShape(),
-                                    sty->GetStrides(),
-                                    ProjectStorage(sty->GetStorage()));
+      return MakeSpannedType(sty->ElementType(), sty->GetShape(),
+                             sty->GetStrides(),
+                             ProjectStorage(sty->GetStorage()));
   } else if (auto fty = dyn_cast<FutureType>(ty)) {
     auto sty = fty->GetSpannedType();
-    return MakeFutureType(
-        MakeStridedSpannedType(sty->ElementType(), sty->GetShape(),
-                               sty->GetStrides(),
-                               ProjectStorage(sty->GetStorage())),
-        fty->IsAsync());
+    return MakeFutureType(MakeSpannedType(sty->ElementType(), sty->GetShape(),
+                                          sty->GetStrides(),
+                                          ProjectStorage(sty->GetStorage())),
+                          fty->IsAsync());
   } else
     return ty;
 }

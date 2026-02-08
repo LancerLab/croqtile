@@ -569,8 +569,7 @@ public:
       auto shape = cast<FutureType>(ty)->GetShape();
       auto fty = GetSpannedType(NodeType(*cast<AST::ChunkAt>(n.from)->data));
       assert(fty);
-      auto sty =
-          MakeStridedSpannedType(fty->ElementType(), shape, fty->GetStrides(),
+      auto sty = MakeSpannedType(fty->ElementType(), shape, fty->GetStrides(),
                                  cast<AST::Memory>(n.to)->Get());
 
       auto to_buffer_name = ProperBufferName(n.future);

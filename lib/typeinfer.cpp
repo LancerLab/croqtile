@@ -234,7 +234,7 @@ bool TypeInference::Visit(AST::DataType& n) {
       SetNodeType(n, MakeStridedSpannedArrayType(n.base_type, shape, strides,
                                                  n.ArrayAsValueList()));
     else
-      SetNodeType(n, MakeStridedSpannedType(n.getBaseType(), shape, strides));
+      SetNodeType(n, MakeSpannedType(n.getBaseType(), shape, strides));
     cur_type = n.GetType();
   }
 
@@ -865,8 +865,8 @@ bool TypeInference::Visit(AST::DMA& n) {
 
   // update the future type. fill info including storage, fundamental type
   auto fty = cast<FutureType>(n.GetType());
-  auto sty = MakeStridedSpannedType(dma_fmty, fty->GetShape(),
-                                    fty->GetStrides(), dma_mem);
+  auto sty =
+      MakeSpannedType(dma_fmty, fty->GetShape(), fty->GetStrides(), dma_mem);
   auto nty = MakeFutureType(sty, fty->IsAsync());
   n.SetType(nty);
 
@@ -1059,8 +1059,8 @@ bool TypeInference::Visit(AST::ChunkAt& n) {
 
   // also update current node
   auto nty = cast<SpannedType>(n.GetType());
-  SetNodeType(
-      n, MakeStridedSpannedType(fmty, nty->GetShape(), nty->GetStrides(), sto));
+  SetNodeType(n,
+              MakeSpannedType(fmty, nty->GetShape(), nty->GetStrides(), sto));
 
   return true;
 }
@@ -1120,8 +1120,8 @@ bool TypeInference::Visit(AST::Select& n) {
   assert(sty);
   dma_mem = sty->GetStorage();
   dma_fmty = sty->ElementType();
-  SetNodeType(n, MakeStridedSpannedType(dma_fmty, sty->GetShape(),
-                                        sty->GetStrides(), dma_mem));
+  SetNodeType(n, MakeSpannedType(dma_fmty, sty->GetShape(), sty->GetStrides(),
+                                 dma_mem));
   cur_type = n.GetType();
 
   return true;

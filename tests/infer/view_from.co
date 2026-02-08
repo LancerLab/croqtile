@@ -1,0 +1,13 @@
+// RUN: choreo -ii %s | FileCheck %s
+
+__co__ void foo(f32 [64, 32] a) {
+  parallel p by 3 {
+    dma.copy a.view([16, 4]).from(14, 13) => shared;
+    dma.copy a.view([17, 3], {7, 2}).from(11, 10) => shared;
+  }
+}
+
+// CHECK: Parameter: ::foo::a, Type: f32 mdspan<2> [64, 32] {32, 1}
+// CHECK: Future:    ::foo::paraby_0::paraby_1::(anon), Type: sync=>shared f32 mdspan<2> [16, 4] {32, 1}
+// CHECK: Future:    ::foo::paraby_0::paraby_1::(anon), Type: sync=>shared f32 mdspan<2> [17, 3] {224, 2}
+// CHECK: Function:  ::foo, Type: void (*)(f32 mdspan<2> [64, 32] {32, 1})

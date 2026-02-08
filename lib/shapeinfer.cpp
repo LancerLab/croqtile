@@ -1236,8 +1236,8 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
     auto res_shape = GenShape(cur_vn);
 
     // set the chunkat's type
-    auto nty = MakeStridedSpannedType(sty->e_type, res_shape, sty->GetStrides(),
-                                      sty->GetStorage());
+    auto nty = MakeSpannedType(sty->e_type, res_shape, sty->GetStrides(),
+                               sty->GetStorage());
     SetNodeType(n, nty);
 
     n.SetBlockShape(nty->GetShape());
@@ -1505,8 +1505,8 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
   auto res_shape = GenShape(psn);
 
   // set the chunkat's type
-  SetNodeType(n, MakeStridedSpannedType(sty->e_type, res_shape, cur_strd,
-                                        sty->GetStorage()));
+  SetNodeType(
+      n, MakeSpannedType(sty->e_type, res_shape, cur_strd, sty->GetStorage()));
   n.SetBlockShape(res_shape); // TODO: this is redudant
 
   VST_DEBUG(dbgs() << " |-<output> shape: " << STR(res_shape) << "\n");

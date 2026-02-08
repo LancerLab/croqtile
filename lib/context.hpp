@@ -352,6 +352,7 @@ private:
   bool drop_comment = false;        // drop any comments
   bool debug_all = false;           // enable full debug
   bool show_inferred_types = false; // show the inferred types
+  bool show_strides = false;        // show the strides
   bool dump_symtab = false;         // dump symbol table after type check
   bool visualize = false;           // visualize the DMAs
   bool cross_compile = false;       // TODO: figure out
@@ -486,6 +487,7 @@ public:
   bool DropComments() const { return drop_comment; }
   bool DebugAll() const { return debug_all; }
   bool ShowInferredTypes() const { return show_inferred_types; }
+  bool ShowStrides() const { return show_strides; }
   bool DumpSymtab() const { return dump_symtab; }
   bool Visualize() const { return visualize; }
   bool CrossCompile() const { return cross_compile; }
@@ -521,6 +523,7 @@ public:
   void SetDropComments(bool value) { drop_comment = value; }
   void SetDebugAll(bool value) { debug_all = value; }
   void SetShowInferredTypes(bool value) { show_inferred_types = value; }
+  void SetShowStrides(bool value) { show_strides = value; }
   void SetDumpSymtab(bool value) { dump_symtab = value; }
   void SetVisualize(bool value) { visualize = value; }
   void SetCrossCompile(bool value) { cross_compile = value; }

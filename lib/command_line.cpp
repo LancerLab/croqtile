@@ -52,6 +52,9 @@ Option<bool>
              "Remove all comments in non-choreo code. (Useful for FileCheck)");
 Option<bool> inf_type(OptionKind::User, "--infer-types", "-i", false,
                       "Show the result of type inference.");
+Option<bool> inf_ty_strd(OptionKind::User, "--infer-types-with-strides", "-ii",
+                         false,
+                         "Show the result of type inference (with strides).");
 Option<bool> pp_only(OptionKind::User, "-E", "", false,
                      "Preprocess only; do not compile.");
 Option<bool> no_pp(OptionKind::Hidden, "--no-preprocess", "-npp", false,
@@ -272,7 +275,8 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetNoPreProcess(no_pp.GetValue());
   CCtx().SetDropComments(del_comm.GetValue());
   CCtx().SetDebugAll(debug_on.GetValue());
-  CCtx().SetShowInferredTypes(inf_type.GetValue());
+  CCtx().SetShowInferredTypes(inf_type.GetValue() || inf_ty_strd.GetValue());
+  CCtx().SetShowStrides(inf_ty_strd.GetValue());
   CCtx().SetDumpSymtab(dump_sym.GetValue());
   CCtx().SetVisualize(visualiz.GetValue());
   CCtx().SetCrossCompile(cross_compile.GetValue());
