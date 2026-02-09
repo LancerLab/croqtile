@@ -230,6 +230,8 @@ bool ShapeInference::Visit(AST::MultiValues& n) {
   if (gen_values) {
     CollapseMultiValues(n);
     n.Opts().SetVals(vn.GenValueListFromValueNumber(ast_vn.Get(&n)));
+    VST_DEBUG(dbgs() << " |-<exprval> values of multivalues: ["
+                     << STR(n.Opts().GetVals()) << "]\n");
   }
 
   cur_vn.Invalidate();
@@ -275,6 +277,7 @@ bool ShapeInference::Visit(AST::Expr& n) {
     return true;
   }
 
+  if (n.IsReference()) SetNodeType(n, NodeType(*n.GetReference()));
   auto nty = NodeType(n);
   cur_vn = GenValNo(n);
 
@@ -1045,7 +1048,7 @@ bool ShapeInference::Visit(AST::DMA& n) {
   if (auto pcfg = dyn_cast<PadConfig>(n.config)) {
     size_t size = pcfg->pad_high->Count();
 
-    auto from_vn = GetValNo(*n.GetFrom());
+    auto from_vn = GetValNo(*n.GetFrom(), VNKind::VNK_MDSPAN);
     auto s_cnt = vn.Flatten(from_vn).size();
     if (s_cnt != size) {
       Error1(n.LOC(), "rank mismatch: padding config requires " +
@@ -1066,7 +1069,7 @@ bool ShapeInference::Visit(AST::DMA& n) {
     cur_vn = vn.MakeOpNum("+", from_vn, GetOrGenValNum(mss));
   } else if (auto tcfg = dyn_cast<TransposeConfig>(n.config)) {
     auto size = tcfg->dim_values.size();
-    auto from_vn = GetValNo(*n.GetFrom());
+    auto from_vn = GetValNo(*n.GetFrom(), VNKind::VNK_MDSPAN);
     auto s_cnt = vn.Flatten(from_vn).size();
     if (s_cnt != size) {
       Error1(n.LOC(), "rank mismatch: transpose config requires " +
@@ -1085,11 +1088,20 @@ bool ShapeInference::Visit(AST::DMA& n) {
     }
   }
 
-  auto fsty = GetSpannedType(n.GetFrom()->GetType());
-  // annotate the shape on AST for later type inference
   auto s = GenShape(cur_vn);
-  SetNodeType(n, MakeShapedFutureType(s, n.IsAsync(), fsty->GetStrides(),
-                                      fsty->ElementType()));
+  // annotate the shape on AST for later type inference
+  if (n.IsDstInferred()) {
+    auto fsty = GetSpannedType(n.GetFrom()->GetType());
+    auto tsty = MakeDenseSpannedType(fsty->ElementType(), s,
+                                     cast<AST::Memory>(n.GetTo())->Get());
+    SetNodeType(*n.GetTo(), tsty);
+    SetNodeType(n, MakeFutureType(CloneP(tsty), n.IsAsync()));
+  } else {
+    auto tsty = GetSpannedType(n.GetTo()->GetType());
+    assert(tsty);
+    SetNodeType(n, MakeShapedFutureType(s, n.IsAsync(), tsty->GetStrides(),
+                                        tsty->ElementType()));
+  }
 
   if (n.future.empty()) {
     cur_vn.Invalidate();
@@ -1243,7 +1255,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
     n.SetBlockShape(nty->GetShape());
 
     assert(n.GetBlockShape().IsValid());
-    ast_vn.Update(&n, cur_vn);
+    ast_vn.Update(&n, cur_vn, VNKind::VNK_MDSPAN);
 
     return true;
   }
@@ -1274,6 +1286,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
     std::vector<NumTy> sbs_vns;  // value number of subspan
     std::vector<NumTy> idx_vns;  // value number of indices
     std::vector<NumTy> off_vns;  // value number of offsets
+    std::vector<NumTy> stp_vns;  // value number of steps
     std::vector<NumTy> strd_vns; // value number of strides
 
     if (auto rop = dyn_cast<AST::SOP::Reshape>(op)) {
@@ -1312,11 +1325,13 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       auto sbs = op->GetSubSpan();
       auto idx = op->GetIndices();
       auto off = op->GetOffsets();
+      auto stp = op->GetSteps();
       auto strd = op->GetStrides();
       if (tfs) tfs_vns = vn.Flatten(GetValNo(*tfs));
       if (sbs) sbs_vns = vn.Flatten(GetValNo(*sbs));
       if (idx) idx_vns = vn.Flatten(GetValNo(*idx));
       if (off) off_vns = vn.Flatten(GetValNo(*off));
+      if (stp) stp_vns = vn.Flatten(GetValNo(*stp));
       if (strd) strd_vns = vn.Flatten(GetValNo(*strd));
 
       if (sbs)
@@ -1413,20 +1428,39 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         }
       }
 
-      if (strd) {
-        if (strd_vns.size() != cur_strd.size()) {
+      if (stp) {
+        if (stp_vns.size() != cur_strd.size()) {
           Error1(strd->LOC(), "stepping value count (" +
                                   std::to_string(strd_vns.size()) +
                                   ") must be consistent with data (" +
                                   std::to_string(cur_strd.size()) + ").");
           return false;
         }
+
+        for (size_t index = 0; index < stp_vns.size(); ++index) {
+          auto sti = vn.GenValueItemFromValueNumber(stp_vns[index]);
+          if (sbe::ceq(sti, sbe::nu(0)))
+            Note(stp->LOC(), "zero step may be unexpected unless use it "
+                             "intentionally for repeated data access.");
+          cur_strd[index] = cur_strd[index] * sti;
+        }
+      }
+
+      if (strd) {
+        if (strd_vns.size() != cur_strd.size()) {
+          Error1(strd->LOC(), "stride value count (" +
+                                  std::to_string(strd_vns.size()) +
+                                  ") must be consistent with data (" +
+                                  std::to_string(cur_strd.size()) + ").");
+          return false;
+        }
+
         for (size_t index = 0; index < strd_vns.size(); ++index) {
           auto sti = vn.GenValueItemFromValueNumber(strd_vns[index]);
-          cur_strd[index] = (cur_strd[index] * sti)->Normalize();
-          if (sbe::ceq(cur_strd[index], sbe::nu(0)))
-            Note(strd->LOC(), "zero stepping may be unexpected unless use it "
+          if (sbe::ceq(sti, sbe::nu(0)))
+            Note(strd->LOC(), "zero stride may be unexpected unless use it "
                               "intentionally for repeated data access.");
+          cur_strd[index] = sti;
         }
       }
       // update shape and value numbers
@@ -1490,6 +1524,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       }
       auto block_shape = GenShape(vn.MakePluralSign(sbs_vns));
       op->SetBlockShape(block_shape);
+      op->SetBlockStrides(cur_strd);
       VST_DEBUG(dbgs() << " |-<sop: " << PSTR(op)
                        << "> block shape: " << STR(block_shape)
                        << ", strides: " << STR(cur_strd) << "\n");
@@ -1513,7 +1548,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
 
   assert(n.GetBlockShape().IsValid());
 
-  ast_vn.Update(&n, cur_vn);
+  ast_vn.Update(&n, cur_vn, VNKind::VNK_MDSPAN);
 
   return true;
 }
@@ -1897,7 +1932,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
 
   assert(!n->IsBlock() && "do not pass in block node.");
 
-  if (isa<AST::ChunkAt>(n)) return false;
+  // if (isa<AST::ChunkAt>(n)) return false;
   if (isa<AST::StringLiteral>(n)) return false;
   if (isa<AST::DataAccess>(n)) return false;
   if (isa<AST::Call>(n)) return false;

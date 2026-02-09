@@ -2,7 +2,7 @@
 
 __co__ void foo(f32 [3, 4] a) {
   parallel p by 1, q by 2
-    dma.copy a.subspan(3, 4).stride(1, 3).at(p, q) => local;
+    dma.copy a.subspan(3, 4).step(1, 3).at(p, q) => local;
 }
 
 
@@ -14,5 +14,5 @@ __co__ void foo(f32 [3, 4] a) {
 // CHECK:  `- Parallelization: index symbol: p, bound [0, 1)
 // CHECK:   `- Parallelization: index symbol: q, bound [0, 2)
 // CHECK:    `- DMA.copy
-// CHECK:      `- from: a.SubSpan(3, 4).Stride(1, 3).At(p, q)
+// CHECK:      `- from: a.SubSpan(3, 4).Step(1, 3).At(p, q)
 // CHECK:      `- to: local

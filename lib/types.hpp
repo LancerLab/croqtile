@@ -1726,6 +1726,14 @@ inline Modality operator|(const Modality l, const Modality r) {
   return r;
 }
 
+inline Modality operator&=(Modality& l, const Modality r) {
+  l = l & r;
+  return l;
+}
+inline Modality operator|=(Modality& l, const Modality r) {
+  l = l | r;
+  return l;
+}
 // providing the shape and stride, judge if it is contiguous
 inline Modality IsContiguous(const Shape& shape, const ValueList& strides) {
   if (!shape.IsValid()) choreo_unreachable("the shape is not accessible.");
@@ -1734,12 +1742,11 @@ inline Modality IsContiguous(const Shape& shape, const ValueList& strides) {
   if (!sbe::ceq(strides.back(), sbe::nu(1))) return Modality::NOT;
 
   auto strd = sbe::nu(1);
-  Modality p = Modality::NOT;
+  Modality p = Modality::MUST;
   for (int i = shape.DimCount() - 2; i >= 0; --i) {
-    strd = (strd * shape.Value()[i + 1])->Normalize();
-    if (sbe::must_ne(strd, strides[i])) p = Modality::MUST;
-    if (sbe::may_ne(strd, strides[i]) && (p == Modality::NOT))
-      p = Modality::MAY;
+    strd *= shape.Value()[i + 1];
+    if (sbe::must_ne(strd, strides[i])) p &= Modality::NOT;
+    if (sbe::may_ne(strd, strides[i])) p &= Modality::MAY;
   }
   return p;
 }

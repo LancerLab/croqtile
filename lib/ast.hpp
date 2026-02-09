@@ -274,6 +274,7 @@ public:
   ptr<Node> CloneImpl() const override {
     auto mv = Make<MultiValues>(LOC(), delimiter);
     for (auto v : values) mv->Append(CloneP(v));
+    mv->opt_vals = opt_vals;
     return mv;
   }
 
@@ -990,8 +991,9 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
   ptr<Node> CloneImpl() const override { return Make<Memory>(LOC(), st); }
 
   void Print(std::ostream& os, const std::string& = {},
-             bool = false) const override {
+             bool with_type = false) const override {
     os << STR(st);
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
   Storage Get() const { return st; }
@@ -1969,12 +1971,14 @@ public:
   virtual const NodeList TilingFactorNodes() const { return {}; }
   virtual const NodeList SubSpanNodes() const { return {}; }
   virtual const NodeList StrideNodes() const { return {}; }
+  virtual const NodeList StepNodes() const { return {}; }
   virtual const NodeList IndexNodes() const { return {}; }
   virtual const NodeList OffsetNodes() const { return {}; }
   virtual const NodeList ReferredNodes() const = 0;
   virtual const ptr<MultiValues> GetTilingFactors() const { return nullptr; }
   virtual const ptr<MultiValues> GetSubSpan() const { return nullptr; }
   virtual const ptr<MultiValues> GetStrides() const { return nullptr; }
+  virtual const ptr<MultiValues> GetSteps() const { return nullptr; }
   virtual const ptr<MultiValues> GetIndices() const { return nullptr; }
   virtual const ptr<MultiValues> GetOffsets() const { return nullptr; }
 
@@ -2082,37 +2086,44 @@ struct TileAt : public SpannedOperation, public TypeIDProvider<TileAt> {
 struct SubSpan : public SpannedOperation, public TypeIDProvider<SubSpan> {
   ptr<MultiValues> subspan = nullptr; // subspan shape
   ptr<MultiValues> indices = nullptr; // subscripting indices
+  ptr<MultiValues> steps = nullptr;   // optional steps
   ptr<MultiValues> strides = nullptr; // optional strides
   SubSpan(const location& l, const ptr<MultiValues>& s,
-          const ptr<MultiValues>& i, const ptr<MultiValues>& strd = nullptr)
-      : SpannedOperation(l), subspan(s), indices(i), strides(strd) {
+          const ptr<MultiValues>& i, const ptr<MultiValues>& stp = nullptr,
+          const ptr<MultiValues>& strd = nullptr)
+      : SpannedOperation(l), subspan(s), indices(i), steps(stp), strides(strd) {
     if (s == nullptr) choreo_unreachable("must provide the sub-span.");
   }
 
   const ptr<MultiValues> GetSubSpan() const override { return subspan; }
+  const ptr<MultiValues> GetSteps() const override { return steps; }
   const ptr<MultiValues> GetStrides() const override { return strides; }
   const ptr<MultiValues> GetIndices() const override { return indices; }
   const NodeList SubSpanNodes() const override { return MakeNodeList(subspan); }
+  const NodeList StepNodes() const override { return MakeNodeList(steps); }
   const NodeList StrideNodes() const override { return MakeNodeList(strides); }
   const NodeList IndexNodes() const override { return MakeNodeList(indices); }
   const NodeList ReferredNodes() const override {
     auto res = SubSpanNodes();
     auto& idn = IndexNodes();
     res.insert(res.end(), idn.begin(), idn.end());
-    auto& stn = StrideNodes();
+    auto& stn = StepNodes();
     res.insert(res.end(), stn.begin(), stn.end());
+    auto& sdn = StrideNodes();
+    res.insert(res.end(), sdn.begin(), sdn.end());
     return res;
   }
   void SetIndexNodes(const ptr<AST::MultiValues>& mv) { indices = mv; }
   const ptr<SpannedOperation> CloneImpl() const override {
-    return Make<SubSpan>(LOC(), CloneP(subspan), CloneP(indices),
+    return Make<SubSpan>(LOC(), CloneP(subspan), CloneP(indices), CloneP(steps),
                          CloneP(strides));
   }
 
   void accept(Visitor& v) override;
   void Print(std::ostream& os) const override {
     os << ".SubSpan(" << STR(subspan) << ")";
-    if (strides) os << ".Stride(" << STR(strides) << ")";
+    if (steps) os << ".Step(" << STR(steps) << ")";
+    if (strides) os << ".Stride(" << STR(steps) << ")";
     if (indices) os << ".At(" << STR(indices) << ")";
   }
 
@@ -2122,37 +2133,44 @@ struct SubSpan : public SpannedOperation, public TypeIDProvider<SubSpan> {
 struct ModSpan : public SpannedOperation, public TypeIDProvider<ModSpan> {
   ptr<MultiValues> subspan = nullptr; // subspan shape
   ptr<MultiValues> indices = nullptr; // subscripting indices
-  ptr<MultiValues> strides = nullptr; // optional strides
+  ptr<MultiValues> steps = nullptr;   // optional steps
+  ptr<MultiValues> strides = nullptr; // optional sttrides
   ModSpan(const location& l, const ptr<MultiValues>& s,
-          const ptr<MultiValues>& i, const ptr<MultiValues>& strd = nullptr)
-      : SpannedOperation(l), subspan(s), indices(i), strides(strd) {
+          const ptr<MultiValues>& i, const ptr<MultiValues>& stp = nullptr,
+          const ptr<MultiValues>& strd = nullptr)
+      : SpannedOperation(l), subspan(s), indices(i), steps(stp), strides(strd) {
     if (s == nullptr) choreo_unreachable("must provide the sub-span.");
   }
 
   const ptr<MultiValues> GetSubSpan() const override { return subspan; }
+  const ptr<MultiValues> GetSteps() const override { return steps; }
   const ptr<MultiValues> GetStrides() const override { return strides; }
   const ptr<MultiValues> GetIndices() const override { return indices; }
   const NodeList SubSpanNodes() const override { return MakeNodeList(subspan); }
+  const NodeList StepNodes() const override { return MakeNodeList(steps); }
   const NodeList StrideNodes() const override { return MakeNodeList(strides); }
   const NodeList IndexNodes() const override { return MakeNodeList(indices); }
   const NodeList ReferredNodes() const override {
     auto res = SubSpanNodes();
     auto& idn = IndexNodes();
     res.insert(res.end(), idn.begin(), idn.end());
-    auto& stn = StrideNodes();
+    auto& stn = StepNodes();
     res.insert(res.end(), stn.begin(), stn.end());
+    auto& sdn = StrideNodes();
+    res.insert(res.end(), sdn.begin(), sdn.end());
     return res;
   }
   void SetIndexNodes(const ptr<AST::MultiValues>& mv) { indices = mv; }
   const ptr<SpannedOperation> CloneImpl() const override {
-    return Make<ModSpan>(LOC(), CloneP(subspan), CloneP(indices),
+    return Make<ModSpan>(LOC(), CloneP(subspan), CloneP(indices), CloneP(steps),
                          CloneP(strides));
   }
 
   void accept(Visitor& v) override;
   void Print(std::ostream& os) const override {
     os << ".ModSpan(" << STR(subspan) << ")";
-    if (strides) os << ".Stride(" << STR(strides) << ")";
+    if (steps) os << ".Step(" << STR(steps) << ")";
+    if (strides) os << ".Stride(" << STR(steps) << ")";
     if (indices) os << ".At(" << STR(indices) << ")";
   }
 
@@ -2474,8 +2492,11 @@ public:
         async(true), enforce_tma(is_tma) {}
 
   bool IsDummy() const { return operation == ".any"; }
-  ptr<ChunkAt> GetFrom() const { return cast<ChunkAt>(from); }
-  ptr<ChunkAt> GetTo() const { return cast<ChunkAt>(to); }
+  const ptr<Node> GetFrom() const { return from; }
+  const ptr<Node> GetTo() const { return to; }
+  const ptr<ChunkAt> GetSrc() const { return cast<ChunkAt>(from); }
+  const ptr<ChunkAt> GetDst() const { return cast<ChunkAt>(to); }
+  bool IsDstInferred() const { return isa<Memory>(to); }
 
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
 

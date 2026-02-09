@@ -9,7 +9,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
     shared f16 [WARP_N, TILE_K] rhs_load_s;
     mc = mma.fill.f32 0.0f;
     foreach {iv_k} in [cdiv(K, TILE_K)] {
-      tma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K).stride(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
+      tma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
       tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => rhs_load_s;
 
       // WGMMA requires 128 threads: 4 warps x 32 threads/warp
@@ -25,8 +25,8 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
     shared f16 [WARP_M, WARP_N] output_s;
     mma.store mc, output_s;
 
-    // tma.copy output_s => output.subspan(M0, WARP_N).stride(WARP_M, WARP_N).at(block_m, block_n);
-    tma.copy output_s => output.subspan(WARP_M, WARP_N).stride(WARP_M, WARP_N).at(block_m, block_n);
+    // tma.copy output_s => output.subspan(M0, WARP_N).at(block_m, block_n);
+    tma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
   }
 }
 

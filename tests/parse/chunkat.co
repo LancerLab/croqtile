@@ -47,7 +47,7 @@ __co__ void cow(f32 [9] inp) {
     dma.copy inp.subspan(3).at(x) => local;
     dma.copy inp.chunk(3).at(x) => local;
     dma.copy inp.modspan(3).at(x) => local;
-    dma.copy inp.view([3], {2}).from(x) => local;
+    dma.copy inp.view(3 : 2).from(x) => local;
   }
 }
 

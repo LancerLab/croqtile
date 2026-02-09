@@ -1,4 +1,4 @@
-// RUN: choreo -es %s 2>&1 | FileCheck %s
+// RUN: choreo -es -o /dev/null %s 2>&1 | FileCheck %s
 
 __co__ void foo(s32[N, M, K] input2) {
   parallel p by 2, q by 4
@@ -9,5 +9,4 @@ __co__ void foo(s32[N, M, K] input2) {
     }
 }
 
-// CHECK: warning: The reshape operation inside DMA expression maybe is executed on a noncontiguous tiling result.
-// CHECK: warning: There may have more than one tiling executed in noncontiguous manner.
+// CHECK: warning: 'span_as' may be applied to non-contiguous spanned data ([(::foo::N / 2), (::foo::M / 4), (::foo::K / 16)] {(::foo::K * ::foo::M), ::foo::K, 1}).

@@ -1208,6 +1208,10 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       return false;
     }
 
+    if (auto e = dyn_cast<AST::Expr>(n.value);
+        e && isa<AST::ChunkAt>(e->GetReference()))
+      n.AddNote("ref");
+
     ReportErrorWhenViolateODR(n.LOC(), n.GetName(), __FILE__, __LINE__,
                               ShadowTypeStorage(sty));
 

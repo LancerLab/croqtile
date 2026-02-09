@@ -521,6 +521,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".chunk"   return Choreo::Parser::make_CHUNK(yytext, loc);
   ".subspan" return Choreo::Parser::make_SUBSPAN(yytext, loc);
   ".modspan" return Choreo::Parser::make_MODSPAN(yytext, loc);
+  ".step"    return Choreo::Parser::make_STEP(yytext, loc);
   ".stride"  return Choreo::Parser::make_STRIDE(yytext, loc);
   ".at"      return Choreo::Parser::make_AT(yytext, loc);
   "=>"       return Choreo::Parser::make_TRANS(loc);

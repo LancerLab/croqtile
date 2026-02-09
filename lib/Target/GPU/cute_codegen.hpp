@@ -447,6 +447,8 @@ private:
   const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string& parent_op,
                               const bool is_left_child, bool is_host) const;
   const std::string CallSTR(AST::Call&) const;
+  const ValueItem TileAddr(const ptr<AST::ChunkAt>& ca, bool is_host,
+                           ValueItem scale = sbe::nu(1)) const;
 
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
   std::pair<std::string, size_t> GenMdsOffset(const ptr<AST::ChunkAt>,
@@ -457,8 +459,6 @@ private:
   const ValueItem
   GenOffset(const ptr<AST::ChunkAt>&,
             size_t end_idx = std::numeric_limits<size_t>::max()) const;
-  const ValueList GenStrides(const Shape& shape,
-                             const std::vector<size_t>& = {}) const;
   const ValueList GenStrides(const ptr<AST::ChunkAt>&,
                              const std::vector<size_t>& = {}) const;
   const std::string ShapeSTR(const Shape&, bool = false,

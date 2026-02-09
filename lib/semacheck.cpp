@@ -330,8 +330,8 @@ bool SemaChecker::VisitNode(AST::SpanAs& n) {
     return false;
   }
 
-  auto p = sty->IsDense() & nty->IsDense();
-  if (p == Modality::MUST)
+  auto p = (sty->IsDense() & nty->IsDense());
+  if (p == Modality::NOT)
     Error1(n.LOC(), "span_as is applied on non-contiguous spanned data.");
   else if (p == Modality::MAY)
     Warning(n.LOC(),
@@ -428,7 +428,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   auto t_shape = stty->GetShape();
 
   if (n.IsSparse()) {
-    if (!n.GetFrom()->NoTilingOperation() || !n.GetTo()->NoTilingOperation()) {
+    if (!n.GetSrc()->NoTilingOperation() || !n.GetDst()->NoTilingOperation()) {
       Error1(n.LOC(), "Sparse DMA currently requires symbol-to-symbol copy "
                       "with no tiling.");
       return false;
@@ -544,6 +544,35 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     }
   }
 
+  for (const auto& ca_node : {n.from, n.to}) {
+    const auto& ca = cast<AST::ChunkAt>(ca_node);
+    auto sty = GetSpannedType(GetSymbolType(ca->RefSymbol()));
+    assert(sty);
+    Shape s = sty->GetShape();
+    ValueList strd = sty->GetStrides();
+
+    for (auto& op : ca->AllOperations()) {
+      if (auto rop = dyn_cast<AST::SOP::Reshape>(op)) {
+        switch (IsContiguous(s, strd)) {
+        case Modality::NOT:
+          Warning(rop->LOC(),
+                  "'span_as' is applied to non-contiguous spanned data (" +
+                      STR(s) + " {" + STR(strd) + "}).");
+          break;
+        case Modality::MAY:
+          Warning(rop->LOC(),
+                  "'span_as' may be applied to non-contiguous spanned data (" +
+                      STR(s) + " {" + STR(strd) + "}).");
+          break;
+        case Modality::MUST:
+        default: break;
+        }
+      }
+      s = op->GetBlockShape();
+      strd = op->GetBlockStrides();
+    }
+  }
+#if 0
   // Check if the spanned operations are valid
   for (const auto& ca_node : {n.from, n.to}) {
     const auto& ca = cast<AST::ChunkAt>(ca_node);
@@ -579,6 +608,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       original_shape = sop->GetBlockShape();
     }
   }
+#endif
 
   return true;
 }

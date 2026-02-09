@@ -196,7 +196,7 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
@@ -220,12 +220,12 @@ extern int yylex();
 %nterm <std::vector<AST::ptr<Choreo::DeviceDataType>>> device_params
 %nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type_list device_nested_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
-%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims opt_stride_list opt_strides at_list opt_at_list opt_from_list
+%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
+%nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
 %nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
@@ -765,7 +765,7 @@ paraby_block
 parabys
     : parabys COMMA paraby note_pl {
         // add the paraby as the first stmt of inner-most parallel-by
-        $1->SetLevel($4);
+        $3->SetLevel($4);
         auto pb = $1;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
@@ -1280,6 +1280,7 @@ assignment
           $$ = AST::Make<AST::Assignment>(@2, $1, $3);
         }
       }
+  /*
     | IDENTIFIER ASSIGN ids_expr span_as {
         symtab.AddSymbol($1, MakeUnknownType());
         auto ide = ElementMultiValues($3);
@@ -1290,6 +1291,7 @@ assignment
         // TODO: make it a named variable instead of expr assignment
         // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5, $4);
       }
+  */
     | IDENTIFIER ASSIGN ituple_derivation {
         $$ = AST::Make<AST::NamedVariableDecl>(@1,
               $1, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $3);
@@ -1335,6 +1337,23 @@ assignment
         } else {
           $$ = AST::Make<AST::Assignment>(@3, cast<AST::DataAccess>($1->Clone()),
                 AST::Make<AST::Expr>(@2, $2, AST::Make<AST::Expr>(@1, $1), $4));
+        }
+      }
+    | IDENTIFIER ASSIGN subdata_expr {
+        symtab.AddSymbol($1, MakeUnknownType());
+        auto & sops = $3->AllOperations();
+        if ((sops.size() == 1) && (isa<AST::SOP::Reshape>($3->FirstOp()))) {
+          auto rop = dyn_cast<AST::SOP::Reshape>($3->FirstOp());
+          //auto expr = AST::Make<AST::Expr>(@1, $3);
+          auto ref_id = AST::Make<AST::Identifier>(@3, $3->RefSymbol());
+          auto id = AST::Make<AST::Identifier>(@1, $1);
+          auto expr = AST::Make<AST::Expr>(@3, AST::Make<AST::SpanAs>(@1, ref_id, rop->GetNewSpan()));
+          $$ = AST::Make<AST::NamedVariableDecl>(@1,
+                $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
+        } else {
+          // TODO: make it a named variable instead of expr assignment
+          // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5, $4);
+          $$ = AST::Make<AST::Assignment>(@1, $1, AST::Make<AST::Expr>(@1, $3));
         }
       }
     | IDENTIFIER ASSIGN LBRAKT {
@@ -1809,13 +1828,6 @@ chunkat_or_storage_or_select
     | select_expr  { $$ = $1; }
     ;
 
-span_as
-    : FNSPANAS LPAREN g_value_list RPAREN {
-        $$ = AST::Make<AST::SpanAs>(@1, nullptr/*fill later*/, $3);
-        parsing_derivation_decl = false;
-      }
-    ;
-
 chunkat_expr
     : subdata_expr { $$ = $1; }
     | ids_expr {
@@ -1835,20 +1847,31 @@ spanned_ops
       }
     ;
 
-opt_stride_list
-    : STRIDE LPAREN value_list RPAREN {
+step_list
+    : STEP LPAREN value_list RPAREN {
         $3->SetDelimiter(", ");
         $$ = $3;
+      }
+    ;
+
+opt_step_list
+    : step_list { $$ = $1; }
+    | /*empty*/ { $$ = nullptr; }
+    ;
+
+opt_stride_list
+    : COL value_list {
+        $2->SetDelimiter(", ");
+        $$ = $2;
       }
     | /*empty*/ { $$ = nullptr; }
     ;
 
-opt_strides
-    : COMMA LBRACE value_list RBRACE {
-        $3->SetDelimiter(", ");
-        $$ = $3;
+shape_stride
+    : value_list opt_stride_list {
+        $1->SetDelimiter(", ");
+        $$ = std::make_pair($1, $2);
       }
-    | /*empty*/ { $$ = nullptr; }
     ;
 
 at_list
@@ -1886,21 +1909,21 @@ spanned_op
         $7->SetDelimiter(", ");
         $$ = AST::Make<AST::SOP::TileAt>(@1, UBoundAll(ds, true), $7);
       }
-    | SUBSPAN LPAREN value_list RPAREN opt_stride_list opt_at_list {
-        auto ds = DeSugerDimensions($3, false);
-        $$ = AST::Make<AST::SOP::SubSpan>(@1, ds, $6, $5);
+    | SUBSPAN LPAREN shape_stride RPAREN opt_step_list opt_at_list {
+        auto ds = DeSugerDimensions($3.first, false);
+        $$ = AST::Make<AST::SOP::SubSpan>(@1, ds, $6, $5, $3.second);
       }
-    | MODSPAN LPAREN value_list RPAREN opt_stride_list opt_at_list {
-        auto ds = DeSugerDimensions($3, false);
-        $$ = AST::Make<AST::SOP::ModSpan>(@1, ds, $6, $5);
+    | MODSPAN LPAREN shape_stride RPAREN opt_step_list opt_at_list {
+        auto ds = DeSugerDimensions($3.first, false);
+        $$ = AST::Make<AST::SOP::ModSpan>(@1, ds, $6, $5, $3.second);
       }
     | FNSPANAS LPAREN g_value_list RPAREN {
         $3->SetDelimiter(", ");
         $$ = AST::Make<AST::SOP::Reshape>(@1, $3);
       }
-    | VIEW LPAREN LBRAKT value_list RBRAKT opt_strides RPAREN opt_from_list {
-        $4->SetDelimiter(", ");
-        $$ = AST::Make<AST::SOP::View>(@1, $4, $8, $6);
+    | VIEW LPAREN shape_stride RPAREN opt_from_list {
+        auto ds = DeSugerDimensions($3.first, false);
+        $$ = AST::Make<AST::SOP::View>(@1, ds, $5, $3.second);
       }
     ;
 

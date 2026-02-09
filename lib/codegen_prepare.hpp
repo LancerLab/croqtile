@@ -255,9 +255,9 @@ public:
            (tsty->GetStorage() == Storage::GLOBAL ||
             tsty->GetStorage() == Storage::DEFAULT))) {
         auto& tma_descs = cgi.GetTMADescs();
-        tma_descs[block_pb].emplace_back(n.GetFrom(), n.GetTo(),
-                                         InScopeName(n.GetFrom()->RefSymbol()),
-                                         InScopeName(n.GetTo()->RefSymbol()),
+        tma_descs[block_pb].emplace_back(n.GetSrc(), n.GetDst(),
+                                         InScopeName(n.GetSrc()->RefSymbol()),
+                                         InScopeName(n.GetDst()->RefSymbol()),
                                          n.GetSwizzleMode(), inner_pb_level);
       } else
         choreo_unreachable(

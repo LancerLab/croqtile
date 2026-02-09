@@ -7,7 +7,7 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global 
 
     mc = mma.fill.f32 0.0f;
     foreach {iv_k} in [cdiv(K, TILE_K)] {
-      tma.copy.swiz<32> lhs.subspan(WARP_M, TILE_K).stride(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
+      tma.copy.swiz<32> lhs.subspan(WARP_M, TILE_K).step(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
 
       tma.copy.swiz<32> rhs.chunkat(block_n, iv_k) => rhs_load_s;
 
@@ -23,7 +23,7 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global 
     shared f32 [WARP_M, WARP_N] output_s;
     mma.store mc, output_s;
     
-    tma.copy output_s => output.subspan(WARP_M, WARP_N).stride(WARP_M, WARP_N).at(block_m, block_n);
+    tma.copy output_s => output.subspan(WARP_M, WARP_N).step(WARP_M, WARP_N).at(block_m, block_n);
   }
 }
 

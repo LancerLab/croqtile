@@ -622,8 +622,7 @@ CuteCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
 }
 
 // given i.sop(...).sop(...)..., generate the offset of the final span in the
-// original span. It is VALID if and only if the final span is
-// address-contiguous within the original span.
+// original span.
 // end_idx: the offset is computed by sop in range [0, end_idx).
 const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
                                        size_t end_idx) const {
@@ -631,90 +630,49 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
 
   end_idx = std::min(end_idx, ca->OpCount());
 
-  Shape outer_shape = GetSpannedType(GetSymbolType(ca->data->name))->GetShape();
-
   auto offset = sbe::nu(0);
-
-  Shape stride_shape;
 
   assert(ca->OpCount() == 1 &&
          "count of spanned operations in CuTe DMA should be 1.");
-  if (auto s = ca->OpAt(0)->GetStrides()) {
-    auto stride_vl = AST::MakeValueList(ca->OpAt(0)->GetStrides());
-    stride_shape = Shape(stride_vl);
-  }
 
-  // outer_shape is the shape of original span
-  // new_shape is the shape of tiled span
-  Shape new_shape;
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
     if (isa<AST::SOP::Reshape>(sop)) {
-      outer_shape = sop->GetBlockShape();
-    } else {
-      // if stride is defined, use it as tiled shape.
-      if (stride_shape.IsValid())
-        new_shape = stride_shape;
-      else
-        new_shape = sop->GetBlockShape();
-      size_t i = 0;
-      for (auto p : sop->IndexNodes()) {
-        if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
-          const auto& vals = o.GetVals();
-          for (auto val : vals) {
-            auto outer_factor = sbe::nu(1);
-            if (outer_shape.Rank() > i + 1)
-              outer_factor = outer_shape.TrimDims(i + 1).ElementCountValue();
-            auto factor = new_shape.ValueAt(i) * outer_factor;
-            offset = offset + val * factor;
-            ++i;
-          }
-        } else {
-          auto idx_exprs =
-              SplitStringByDelimiter(OpExprSTR(p, "*", true, IsHost()));
-          for (auto i_expr : idx_exprs) {
-            ValueItem outer_factor = sbe::nu(1);
-            if (outer_shape.Rank() > i + 1)
-              outer_factor = outer_shape.TrimDims(i + 1).ElementCountValue();
-            auto factor = new_shape.ValueAt(i) * outer_factor;
-            offset = offset + sbe::sym(i_expr) * factor;
-            ++i;
-          }
-        }
-      }
-      outer_shape = new_shape;
-    }
+      return sbe::nu(0);
+    } else if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
+               isa<AST::SOP::ModSpan>(sop) || isa<AST::SOP::SubSpan>(sop)) {
+      auto idx = sop->GetIndices()->Opts();
+      auto strd = sop->GetBlockStrides();
+      auto blk = sop->GetBlockShape();
+      assert(idx.HasVals());
+      assert(idx.GetVals().size() == strd.size());
+      assert(blk.Rank() == strd.size());
+
+      for (size_t ith = 0; ith < idx.GetVals().size(); ++ith)
+        offset += idx.GetVals()[ith] * strd[ith] * blk.ValueAt(ith);
+    } else if (isa<AST::SOP::View>(sop)) {
+      auto off = sop->GetOffsets()->Opts();
+      auto strd = sop->GetBlockStrides();
+      for (size_t ith = 0; ith < off.GetVals().size(); ++ith)
+        offset += off.GetVals()[ith] * strd[ith];
+    } else
+      choreo_unreachable("unsupported spanned operation.");
   }
 
   return offset;
 }
 
-const ValueList CuteCodeGen::GenStrides(const Shape& outer_shape,
-                                        const std::vector<size_t>& tc) const {
-  // Note: always generate stride since cute::copy may propagate strides
-
-  ValueList strds;
-  for (size_t i = 1; i < outer_shape.Rank(); ++i)
-    strds.push_back(outer_shape.TrimDims(i).ElementCountValue());
-  strds.push_back(sbe::nu(1));
-
-  if (tc.size() != 0) {
-    assert(tc.size() == strds.size());
-    ValueList t_strds = strds;
-    for (size_t i = 0; i < strds.size(); ++i) t_strds[i] = strds[tc[i]];
-    return t_strds;
-  }
-
-  return strds;
-}
-
 const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,
                                         const std::vector<size_t>& tc) const {
-  // Note: always generate stride since cute::copy may propagate strides
-
-  // TODO: handle multiple operations
-  Shape outer_shape = GetSpannedType(GetSymbolType(ca->data->name))->GetShape();
-  return GenStrides(outer_shape, tc);
+  auto sty = GetSpannedType(NodeType(*ca));
+  auto strides = sty->GetStrides();
+  if (tc.size() != 0) {
+    assert(tc.size() == strides.size());
+    ValueList t_strds = strides;
+    for (size_t i = 0; i < strides.size(); ++i) t_strds[i] = strides[tc[i]];
+    return t_strds;
+  }
+  return strides;
 }
 
 void CuteCodeGen::EmitFixedHostHead() {
@@ -2040,8 +1998,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (auto idx = t_ca->IndexOfLastSpanAs()) {
       t_mds_offset = TileBaseOffset(t_ca);
       t_shape = t_ca->OpAt(*idx)->GetBlockShape();
-    } else
+    } else {
       t_mds_offset = ValueSTR(GenOffset(t_ca));
+    }
 
     std::vector<size_t> transp_config;
     if (n.operation == ".transp")
@@ -2441,8 +2400,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // For WGMMA, we store the shared memory pointer for later use in Exec
       // The actual data should already be in shared memory
       std::string elem_ty = NameBaseType(ssmi.ty);
+      auto tile_addr = TileAddr(op.LoadFrom(), false);
       ds << d_indent << elem_ty << "* " << sym << "_smem_ptr = (" << elem_ty
-         << "*)(" << ExprSTR(op.LoadFrom(), false) << ");\n";
+         << "*)(" << ValueSTR(tile_addr) << ");\n";
       [[maybe_unused]] bool frag_is_fp8 =
           ssmi.ty == BaseType::F8_E4M3 || ssmi.ty == BaseType::F8_E5M2 ||
           ssmi.ty == BaseType::F8_UE4M3 || ssmi.ty == BaseType::F8_UE8M0;
@@ -2625,13 +2585,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ds << d_indent << "warpgroup_commit_batch();\n";
       ds << d_indent << "warpgroup_wait<0>();\n";
       auto ca = op.StoreTo();
-      auto f_sym = ca->data->name;
-      auto ty = GetSymbolType(f_sym);
+      auto t_sym = ca->data->name;
+      auto ty = GetSymbolType(t_sym);
       auto f_sty = GetSpannedType(ty);
       auto accum_type = ssmi.ty;
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_sym, ".data()"),
-          (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
+          RemoveSuffix(t_sym, ".data()"),
+          (isa<FutureType>(ty) ? t_sym + ".data()" : t_sym),
           f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
           ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
@@ -2713,7 +2673,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << wmma_major << "> " << sym << "_frag;\n";
 
         ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
-           << ExprSTR(op.LoadFrom(), false) << ", "
+           << ValueSTR(TileAddr(op.LoadFrom(), false)) << ", "
            << ValueSTR(fty->GetShape().ValueAt(fty->GetShape().Rank() - 1))
            << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
@@ -2739,8 +2699,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     case AST::MMAOperation::Store: {
       auto tty = GetSpannedType(GetSymbolType(op.StoreTo()->RefSymbol()));
       ds << d_indent << "nvcuda::wmma::store_matrix_sync("
-         << ExprSTR(op.StoreTo(), false) << ", " << op.StoreFrom() << "_frag, "
-         << ValueSTR(tty->GetShape().ValueAt(1))
+         << ValueSTR(TileAddr(op.StoreTo(), false)) << ", " << op.StoreFrom()
+         << "_frag, " << ValueSTR(tty->GetShape().ValueAt(1))
          << ", nvcuda::wmma::mem_row_major);\n";
     } break;
     default: break;
@@ -2981,11 +2941,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto f_sym = ca->data->name;
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
-      const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_sym, ".data()"),
-          (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
-          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
-          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
+      auto fca_sty = GetSpannedType(NodeType(*ca));
+      const auto f_mds =
+          GenTensorDecl(RemoveSuffix(f_sym, ".data()"),
+                        (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
+                        f_sty->GetStorage(), f_sty->ElementType(),
+                        ca->GetBlockShape(), false, ValueSTR(GenOffset(ca)),
+                        ValueSTR(fca_sty->GetStrides(), false, true));
       ds << f_mds.second;
       auto sym = op.StoreFrom();
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
@@ -3862,6 +3824,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
        << ", " << gtsr.first << ");\n";
 #endif
     auto g_shape = gmem_ty->GetShape();
+    auto g_stride = gmem_ty->GetStrides();
     auto t_shape = g_ca->GetBlockShape();
     auto map_name = desc.GetName() + "_tensor_map";
 
@@ -3881,8 +3844,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
        << ValueSTR(Reverse(g_shape.Value())) << "};\n"; // shape of buffer
     // For TMA, strides should be in the same order as shape (not reversed)
     hs << h_indent << "uint64_t " << desc.GetName() << "_strides[] = {"
-       << ValueSTR(
-              Trim(Reverse(GenStrides(g_shape) * gmem_ty->ElementSizeValue())))
+       << ValueSTR(Trim(Reverse(g_stride * gmem_ty->ElementSizeValue())))
        << "};\n"; // strides of shape
     hs << h_indent << "uint32_t " << desc.GetName() << "_box_shape[] = {"
        << ValueSTR(Reverse(t_shape.Value())) << "};\n"; // shape of tile block
@@ -4419,6 +4381,21 @@ const std::string CuteCodeGen::ExprSTR(AST::ptr<AST::Node> e,
   return OpExprSTR(e, "", true, is_host);
 }
 
+const ValueItem CuteCodeGen::TileAddr(const ptr<AST::ChunkAt>& ca, bool is_host,
+                                      ValueItem scale) const {
+  auto caty = cast<SpannedType>(ca->GetType());
+
+  auto offset = GenOffset(ca) * scale;
+  ValueItem base;
+  if (auto fty = dyn_cast<FutureType>(NodeType(*ca->data))) {
+    base = sbe::sym(std::string("(") + NameBaseType(fty->ElementType()) + "*)" +
+                    ExprSTR(ca->data, is_host) + ".data()");
+  } else
+    base = sbe::sym(ExprSTR(ca->data, is_host));
+
+  return base + offset;
+}
+
 const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
                                          const std::string& parent_op,
                                          bool is_left_child,
@@ -4434,24 +4411,6 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     if (Operator::NeedParen(cur_op, parent_op, is_left_child))
       return "(" + s + ")";
     return s;
-  };
-
-  auto HandleChunkAt = [this, &WrapParen,
-                        &parent_op](const ptr<AST::ChunkAt>& ca, bool is_host) {
-    auto caty = cast<SpannedType>(ca->GetType());
-
-    auto offset = GenOffset(ca);
-    std::string res;
-    if (auto fty = dyn_cast<FutureType>(NodeType(*ca->data))) {
-      std::string ets = NameBaseType(fty->ElementType());
-      res = "(" + ets + "*)" + OpExprSTR(ca->data, parent_op, true, is_host) +
-            ".data()";
-    } else
-      res = OpExprSTR(ca->data, "+", true, is_host);
-
-    if (!sbe::ceq(offset, sbe::nu(0))) res += " + " + ValueSTR(offset);
-
-    return WrapParen(res, "+");
   };
 
   if (auto id = dyn_cast<AST::Identifier>(e)) {
@@ -4555,12 +4514,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
 
     if (expr->IsReference()) {
       if (PSTR(expr) == "_") return "0";
-      if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
-        return HandleChunkAt(ca, is_host);
-      } else {
-        return OpExprSTR(expr->GetReference(), parent_op, is_left_child,
-                         is_host);
-      }
+      return OpExprSTR(expr->GetReference(), parent_op, is_left_child, is_host);
     } else if (expr->IsUnary()) {
       if (expr->GetOp() == "!") {
         oss << "!"
@@ -4702,7 +4656,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
                          "', expr: " + PSTR(expr) + ".");
   } else if (auto ca = dyn_cast<AST::ChunkAt>(e)) {
-    return HandleChunkAt(ca, is_host);
+    return ValueSTR(TileAddr(ca, is_host));
   } else if (auto c = dyn_cast<AST::Call>(e)) {
     assert(!is_host);
     return CallSTR(*c);

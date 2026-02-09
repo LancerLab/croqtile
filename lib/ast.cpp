@@ -257,13 +257,13 @@ void SOP::TileAt::accept(Visitor& v) {
 void SOP::SubSpan::accept(Visitor& v) {
   subspan->accept(v);
   if (indices) indices->accept(v);
-  if (strides) strides->accept(v);
+  if (steps) steps->accept(v);
 }
 
 void SOP::ModSpan::accept(Visitor& v) {
   subspan->accept(v);
   if (indices) indices->accept(v);
-  if (strides) strides->accept(v);
+  if (steps) steps->accept(v);
 }
 
 void SOP::View::accept(Visitor& v) {

@@ -1,0 +1,15 @@
+// RUN: choreo -t cute -arch=sm_86 -es %s | FileCheck %s
+
+__co__ void foo(f32 [64, 32] a) {
+  parallel p by 8, q by 4 : thread {
+    dma.copy a.view(16, 4).from(14, 13) => shared; // offset: 14*32 + 13*1
+    dma.copy a.view(17, 3 : 7, 2).from(11, 10) => shared; // offset: 11*7 + 10*2
+    dma.copy a.subspan(2, 11).at(11, 2) => shared; // offset: 2*11*32 + 11*2*1
+    dma.copy a.chunkat(p, q) => shared; // offset: 64/8*32*p + 32/4*1*q
+  }
+}
+
+// CHECK: cute::make_gmem_ptr<float>((float*)a + 461)
+// CHECK: cute::make_gmem_ptr<float>((float*)a + 97)
+// CHECK: cute::make_gmem_ptr<float>((float*)a + 726)
+// CHECK: cute::make_gmem_ptr<float>((float*)a + (blockIdx.x * 256 + __choreo_vtid_x * 8))

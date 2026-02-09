@@ -1050,12 +1050,8 @@ bool TypeInference::Visit(AST::ChunkAt& n) {
   dma_mem = sto;
 
   // update all the positions with correct types
-  for (auto op : n.AllOperations()) {
-    for (auto& v : op->IndexNodes()) SetNodeType(*v, NodeType(*v));
-    for (auto& v : op->StrideNodes()) SetNodeType(*v, NodeType(*v));
-    for (auto& v : op->SubSpanNodes()) SetNodeType(*v, NodeType(*v));
-    for (auto& v : op->OffsetNodes()) SetNodeType(*v, NodeType(*v));
-  }
+  for (auto op : n.AllOperations())
+    for (auto& v : op->ReferredNodes()) SetNodeType(*v, NodeType(*v));
 
   // also update current node
   auto nty = cast<SpannedType>(n.GetType());

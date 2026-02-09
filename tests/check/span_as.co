@@ -10,5 +10,5 @@ __co__ auto span_as(s32 [32, 18, 9] a) {
 // TODO: support span_expr instead of a list
 }
 
-// CHECK: Inconsistent mdspan size: b(6270) = spanas (anon_2(5184)).
+// CHECK: error: Inconsistent mdspan size: b(6270) = spanas (anon_2(5184)).
 // CHECK: Totally 1 errors have been detected.

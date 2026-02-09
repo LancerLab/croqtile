@@ -133,6 +133,7 @@ struct MMAInfo {
   bool operator==(MMAInfo i) {
     return ty == i.ty && IsValueListEqual(shape, i.shape) && frag == i.frag;
   }
+  const ValueList& GetShape() const { return shape; }
 };
 
 inline std::ostream& operator<<(std::ostream& os, const MMAInfo& i) {

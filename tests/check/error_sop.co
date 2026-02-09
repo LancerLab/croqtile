@@ -15,5 +15,5 @@ __co__ auto foo(s32[2, 16, 128] input2) {
   return t;
 }
 
-// CHECK: warning: The reshape operation inside DMA expression is executed on a noncontiguous tiling result.
-// CHECK: warning: There are more than one tiling executed in noncontiguous manner.
+// CHECK: warning: 'span_as' is applied to non-contiguous spanned data ([1, 4, 8] {2048, 128, 1}).
+// CHECK: warning: 'span_as' is applied to non-contiguous spanned data ([1, 4, 128] {2048, 128, 1}).

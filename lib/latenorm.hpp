@@ -565,12 +565,7 @@ public:
     auto future_name = ((n.future.empty()) ? "" : InScopeName(n.future));
     if (n.future.empty() || FBInfo()[future_name].buffer.empty()) {
       // It requires to generate an anonymous buffer for "=> local/share/global"
-      auto ty = NodeType(n);
-      auto shape = cast<FutureType>(ty)->GetShape();
-      auto fty = GetSpannedType(NodeType(*cast<AST::ChunkAt>(n.from)->data));
-      assert(fty);
-      auto sty = MakeSpannedType(fty->ElementType(), shape, fty->GetStrides(),
-                                 cast<AST::Memory>(n.to)->Get());
+      auto sty = cast<SpannedType>(NodeType(*n.GetTo()));
 
       auto to_buffer_name = ProperBufferName(n.future);
       // Note: Later passes only cares about the type. So it is possible to
