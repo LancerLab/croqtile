@@ -41,6 +41,7 @@ struct future_ring {
   uint8_t tail = 0; // oldest commit
 
   __device__ void commit(future*);
+  // note: return the remaining count N to feed cp_async_wait<N>
   __device__ int discard(future*);
   __device__ void init() {
     head = 0;
@@ -52,7 +53,6 @@ using AtomType = void; // erase the type
 
 // choreo device future
 struct future {
-
   AtomType* atom = nullptr;
   void* d = nullptr;  // data: future's user must guarantee it is valid
   void* md = nullptr; // metadata: optional structured sparsity metadata
@@ -69,12 +69,7 @@ struct future {
   #endif
   __device__ void set_ring(future_ring<6>* r) {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-    if (__CHOREO_GROUP_SINGLE__(32)) {
-      if (!r) return;
-      ring = r + (threadIdx.x + threadIdx.y * blockDim.x +
-                  threadIdx.z * blockDim.x * blockDim.y) /
-                     32;
-    }
+    ring = r + __CHOREO_GROUP_ID__;
   #else
   // make host compilation happy
   #endif
@@ -168,29 +163,37 @@ struct future {
       barrier.wait(std::move(token));
       return;
     }
+    // TODO: make shared memory be allocated by host
+    __shared__ int discard_count;
+    discard_count = 0;
     // cautious: must be warp based
-    if (__CHOREO_GROUP_SINGLE__(32)) {
+    if (__CHOREO_GROUP_SINGLE__) {
       assert(ring && "ring is invalid.");
-      int discard_count = ring->discard(this);
-      switch (discard_count) {
-      case -1: break;
-      case 1: cute::cp_async_wait<1>(); break;
-      case 2: cute::cp_async_wait<2>(); break;
-      case 3: cute::cp_async_wait<3>(); break;
-      case 4: cute::cp_async_wait<4>(); break;
-      case 5: cute::cp_async_wait<5>(); break;
-      default:
-    #ifdef __CHOREO_DMA_DIAGNOSIS__
-        printf("[choreo-rt] Unable to wait the %d futures (current defined at "
-               "line %u:%u).\n",
-               discard_count, line, column);
-    #else
-        printf("[choreo-rt] Unable to wait the %d futures.\n", discard_count);
-    #endif // DIAGNOSIS
-        __co_abort__();
-        break;
-      }
+      discard_count = ring->discard(this);
     }
+    // sync it to warp threads
+    discard_count = __shfl_sync(0xffffffff, discard_count, 0);
+    switch (discard_count) {
+    case -1: break;
+    case 0: cute::cp_async_wait<0>(); break;
+    case 1: cute::cp_async_wait<1>(); break;
+    case 2: cute::cp_async_wait<2>(); break;
+    case 3: cute::cp_async_wait<3>(); break;
+    case 4: cute::cp_async_wait<4>(); break;
+    case 5: cute::cp_async_wait<5>(); break;
+    default:
+    #ifdef __CHOREO_DMA_DIAGNOSIS__
+      printf("[choreo-rt] Unable to wait the %d futures (current defined at "
+             "line %u:%u).\n",
+             discard_count, line, column);
+    #else
+      printf("[choreo-rt] Unable to wait the %d futures.\n", discard_count);
+    #endif // DIAGNOSIS
+      __co_abort__();
+      break;
+    }
+    __syncwarp();
+
   #else
   // cuda host compilation
   #endif
@@ -210,7 +213,7 @@ struct future {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     // cautious: must be warp based
-    if (__CHOREO_GROUP_SINGLE__(32)) {
+    if (__CHOREO_GROUP_SINGLE__) {
       assert(ring && "ring is invalid.");
       ring->commit(this);
     }
@@ -326,7 +329,7 @@ inline __device__ int future_ring<N>::discard(future* f) {
   uint8_t p = tail;
   while (p != head) {
     if (ring[p] == f->id) {
-      int size = (p + 1 + N - tail) % N;
+      int size = (head - p - 1 + N) % N;
       tail = (p + 1) % N;
       return size;
     } else

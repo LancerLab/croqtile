@@ -117,7 +117,11 @@
 #elif defined(__CHOREO_TARGET_CUTE__)
   #define __CHOREO_BLOCK_SINGLE__                                              \
     threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
-  #define __CHOREO_GROUP_SINGLE__(GSIZE) (threadIdx.x % GSIZE) == 0
+  #define __CHOREO_GROUP_SINGLE__ threadIdx.x % 32 == 0
+  #define __CHOREO_GROUP_ID__                                                  \
+    (threadIdx.x + threadIdx.y * blockDim.x +                                  \
+     threadIdx.z * blockDim.x * blockDim.y) /                                  \
+        32
 #else
   #define __CHOREO_BLOCK_SINGLE__                                              \
     threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0

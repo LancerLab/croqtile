@@ -27,8 +27,9 @@ __co__ void foo(int n, int m) {
 // CHECK: __global__ void __choreo_device_foo0(int n, int m, unsigned long mr_offset_foo_paraby_0_s, unsigned long mr_offset_foo_paraby_0_ss, unsigned __co__shared_spm_size0) {
 // CHECK:   extern __shared__ char __choreo_device_foo0__runtime_shared_buffer__[];
 // CHECK:   auto __choreo_device_foo0__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&__choreo_device_foo0__runtime_shared_buffer__[__co__shared_spm_size0]);
-// CHECK:   for (int i = 0; i < 1; ++i)
-// CHECK:     (__choreo_device_foo0__ring__ + i)->init();
+// CHECK:   if (threadIdx.x <= 1 && threadIdx.y == 0 && threadIdx.z == 0)
+// CHECK:     __choreo_device_foo0__ring__[threadIdx.x].init();
+// CHECK:   __syncthreads();
 // CHECK:   alignas(16) unsigned char anon_5[32];
 // CHECK:   auto anon_4 = (unsigned char*)&__choreo_device_foo0__runtime_shared_buffer__;
 // CHECK:   unsigned char* s = (unsigned char*)(anon_4 + mr_offset_foo_paraby_0_s);
@@ -43,8 +44,9 @@ __co__ void foo(int n, int m) {
 // CHECK: __global__ void __choreo_device_foo1(int n, int m, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_l, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_ll, unsigned long mr_offset_foo_paraby_3_s, unsigned long mr_offset_foo_paraby_3_ss, unsigned __co__shared_spm_size1) {
 // CHECK:   extern __shared__ char __choreo_device_foo1__runtime_shared_buffer__[];
 // CHECK:   auto __choreo_device_foo1__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&__choreo_device_foo1__runtime_shared_buffer__[__co__shared_spm_size1]);
-// CHECK:   for (int i = 0; i < 1; ++i)
-// CHECK:     (__choreo_device_foo1__ring__ + i)->init();
+// CHECK:   if (threadIdx.x <= 1 && threadIdx.y == 0 && threadIdx.z == 0)
+// CHECK:     __choreo_device_foo1__ring__[threadIdx.x].init();
+// CHECK:   __syncthreads();
 // CHECK:   alignas(16) unsigned char anon_7[2048];
 // CHECK:   auto anon_6 = (unsigned char*)&__choreo_device_foo1__runtime_shared_buffer__;
 // CHECK:   unsigned char* s = (unsigned char*)(anon_6 + mr_offset_foo_paraby_3_s);

@@ -1469,8 +1469,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   if (n.IsOuter()) {
 
     ValueItem cur_spm_size = sbe::nu(0);
-    ValueItem cur_ring_offset = sbe::nu(0);
-    ValueItem cur_ring_size = sbe::nu(0);
+    ValueItem ring_start = sbe::nu(0);
+    ValueItem ring_size = sbe::nu(0);
 
     EmitMemReuse(SSTab().ScopeName());
 
@@ -1486,23 +1486,21 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     // oriented convention. users can still keep binding left-most parallel
     // variable to left-most tensor dim, and right to right. without mindset to
     // CUDA's thread majority that left-most are leading dim (thread x)
-    auto inner_thr_count = (lconfig.thread_count.x * lconfig.thread_count.y *
-                            lconfig.thread_count.z)
-                               ->Normalize();
-    auto group_count = (lconfig.group_count.x * lconfig.group4_count.x *
-                        lconfig.group_count.y * lconfig.group_count.z)
-                           ->Normalize();
-    auto thr_count = (inner_thr_count * group_count)->Normalize();
+    auto inner_thr_count = lconfig.thread_count.x * lconfig.thread_count.y *
+                           lconfig.thread_count.z;
+    auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
+                       lconfig.group_count.y * lconfig.group_count.z;
+    auto thr_count = inner_thr_count * group_count;
 
     hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
        << ValueSTR(thr_count) << ", 1, 1" << ");\n";
 
     // plan the shared memory that is decided at runtime
-    cur_ring_size = (thr_count + sbe::nu(31)) / sbe::nu(32) /* warp size */;
-
-    // add the size of the future ring (see choreo.h)
-    if (cgi.HasAsyncDMA(fname))
-      cur_spm_size = cur_spm_size + cur_ring_size * sbe::nu(8);
+    if (cgi.HasAsyncDMA(fname)) {
+      ring_size = group_count * sbe::nu(8);
+      // add the size of the future ring (see choreo.h)
+      cur_spm_size += ring_size;
+    }
 
     /*
     | static shared | dynamic shared |
@@ -1525,10 +1523,11 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       // add the size of dynamic shared
       auto mri = FCtx(fname).GetDynMemReuseInfo(dev_name);
       assert(mri);
-      cur_ring_offset =
+      auto code_spm_end =
           sbe::sym(mri->infos[Storage::SHARED].spm_size)->Normalize();
-      cur_spm_size = cur_spm_size + cur_ring_offset;
-      cur_spm_size = cur_spm_size->Normalize();
+      cur_spm_size += code_spm_end;
+      ring_start = code_spm_end;
+
       EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
       Note(n.LOC(),
            "In the current kernel `" + device_fn +
@@ -1540,9 +1539,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       if (mri) {
         // 48KB is the largest capacity that static shared memory supports.
         if (mri->infos[Storage::SHARED].spm_size > 48 * 1024) {
-          cur_ring_offset = sbe::nu(mri->infos[Storage::SHARED].spm_size);
-          cur_spm_size = cur_spm_size + cur_ring_offset;
-          cur_spm_size = cur_spm_size->Normalize();
+          auto code_spm_end = sbe::nu(mri->infos[Storage::SHARED].spm_size);
+          cur_spm_size += code_spm_end;
+          ring_start = code_spm_end;
           EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
           Note(
               n.LOC(),
@@ -1593,7 +1592,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     for (auto desc : cgi.GetTMADesc(&n))
       hs << ", " << desc.GetName() + "_tensor_map";
 
-    if (!cur_ring_offset->IsNumeric()) hs << ", " << ValueSTR(cur_ring_offset);
+    if (!ring_start->IsNumeric()) hs << ", " << ValueSTR(ring_start);
 
     hs << ");\n";
 
@@ -1617,22 +1616,23 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     }
 
     // handle device function
-    EmitDeviceFuncDecl(ds, &n, cur_ring_offset);
+    EmitDeviceFuncDecl(ds, &n, ring_start);
     ds << " {\n";
     IncrDeviceIndent();
     if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
-          sbe::ceq(cur_ring_offset, sbe::nu(0)))) {
+          sbe::ceq(ring_start, sbe::nu(0)))) {
       ds << d_indent << "extern __shared__ char " << device_fn
          << "__runtime_shared_buffer__[];\n";
       if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
         ds << d_indent << "auto " << device_fn
            << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&"
-           << device_fn
-           << "__runtime_shared_buffer__[" + ValueSTR(cur_ring_offset)
+           << device_fn << "__runtime_shared_buffer__[" + ValueSTR(ring_start)
            << "]);\n";
-        ds << d_indent << "for (int i = 0; i < " << ValueSTR(cur_ring_size)
-           << "; ++i)\n";
-        ds << d_indent << "  (" << device_fn << "__ring__ + i)->init();\n";
+        ds << d_indent << "if (threadIdx.x <= " << ValueSTR(group_count)
+           << " && threadIdx.y == 0 && threadIdx.z == 0)";
+        ds << d_indent << "  " << device_fn
+           << "__ring__[threadIdx.x].init();\n";
+        ds << d_indent << "__syncthreads();  // must sync\n";
       }
 
     } else
@@ -2152,6 +2152,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
              << ".get_atom(), " << f_byte.first << ", " << t_byte.first
              << ");\n";
+          ds << d_indent << "cute::cp_async_fence();\n";
           ds << d_indent << future_name << ".trigger();\n";
           if (need_single_instance) need_subbyte_async_sync = true;
         } else {
@@ -2161,6 +2162,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       } else if (fty->IsAsync()) {
         ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
            << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
+        ds << d_indent << "cute::cp_async_fence();\n";
         ds << d_indent << future_name << ".trigger();\n";
       } else {
         ds << d_indent << "opt_copy(" << f_mds_name << ", " << t_mds_name
@@ -2257,7 +2259,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if ((fsto == Storage::GLOBAL || fsto == Storage::DEFAULT) &&
         tsto == Storage::SHARED) {
       // if (enforced_pb_level == ParallelLevel::GROUP)
-      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(32)) {\n";
+      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
       // else if (enforced_pb_level == ParallelLevel::GROUPx4)
       //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
       // else
@@ -2303,7 +2305,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "__syncthreads();\n";
 
       // if (enforced_pb_level == ParallelLevel::GROUP)
-      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(32)) {\n";
+      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
       // else if (enforced_pb_level == ParallelLevel::GROUPx4)
       //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
       // else
@@ -3977,7 +3979,7 @@ void CuteCodeGen::EmitCudaFree() {
 
 void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
                                      AST::ParallelBy* pb,
-                                     const ValueItem& cur_ring_offset) {
+                                     const ValueItem& ring_start) {
   oss << "__global__ void " << device_fn << "(";
 
   size_t index = 0;
@@ -4006,8 +4008,7 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
     oss << ", const __grid_constant__ CUtensorMap "
         << desc.GetName() + "_tensor_map";
 
-  if (!cur_ring_offset->IsNumeric())
-    oss << ", unsigned " << ValueSTR(cur_ring_offset);
+  if (!ring_start->IsNumeric()) oss << ", unsigned " << ValueSTR(ring_start);
 
   oss << ")";
 
