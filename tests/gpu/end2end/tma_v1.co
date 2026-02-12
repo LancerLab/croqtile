@@ -4,12 +4,11 @@
 __co__ auto tma_copy_tiled(f32 [6, 16, 128] input) {
   f32 [input.span] output;
 
-  parallel p by 32 : block
-    parallel q by 1 : group {
-      f = tma.copy.async input.chunkat(_,_,p # q) => shared;
-      wait f;
-      tma.copy f.data => output.chunkat(_,_,p # q);
-    }
+  parallel p by 32 : block {
+    f = tma.copy.async input.chunkat(_,_,p) => shared;
+    wait f;
+    tma.copy f.data => output.chunkat(_,_,p);
+  }
 
   return output;
 }
