@@ -272,7 +272,7 @@ find_tests_root() {
 
   while :; do
     base="$(basename "$d")"
-    if [ "$base" = "tests" ]; then
+    if [ "$base" = "tests" ] || [ "$base" = "benchmark" ]; then
       printf "%s\n" "$d"
       return 0
     fi
