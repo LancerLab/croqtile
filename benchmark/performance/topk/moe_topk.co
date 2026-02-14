@@ -842,12 +842,60 @@ void run(const int N_TOKENS, const int N_EXPERTS, const int K) {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+  bool enable_timing = true;
+  auto is_disable_timing_arg = [](const char* s) {
+    const char* t = "--disable-timing";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  for (int i = 1; i < argc; ++i) {
+    if (is_disable_timing_arg(argv[i])) {
+      enable_timing = false;
+      break;
+    }
+  }
 
-  run(1024 * 1024, 32, 4);
-  run(1024 * 1024, 64, 4);
-  run(1024 * 1024, 32, 8);
+  const char* timing_env = std::getenv("CHOREO_DISABLE_TIMING");
+  if (timing_env && timing_env[0] == '1' && timing_env[1] == '\0') {
+    enable_timing = false;
+  }
 
+
+  if (enable_timing) {
+    choreo::TimerOption topt;
+    topt.warmup = 10;
+    topt.repeat = 50;
+    auto avg_ms = choreo::timing(
+        [&]() { run(1024 * 1024, 32, 4); },
+        topt);
+    std::cout << "Timing avg ms: " << avg_ms << "\n";
+  } else {
+    run(1024 * 1024, 32, 4);
+  }
+  if (enable_timing) {
+    choreo::TimerOption topt;
+    topt.warmup = 10;
+    topt.repeat = 50;
+    auto avg_ms = choreo::timing(
+        [&]() { run(1024 * 1024, 64, 4); },
+        topt);
+    std::cout << "Timing avg ms: " << avg_ms << "\n";
+  } else {
+    run(1024 * 1024, 64, 4);
+  }
+  if (enable_timing) {
+    choreo::TimerOption topt;
+    topt.warmup = 10;
+    topt.repeat = 50;
+    auto avg_ms = choreo::timing(
+        [&]() { run(1024 * 1024, 32, 8); },
+        topt);
+    std::cout << "Timing avg ms: " << avg_ms << "\n";
+  } else {
+    run(1024 * 1024, 32, 8);
+  }
   std::cout << "Test Passed\n" << std::endl;
 }
 

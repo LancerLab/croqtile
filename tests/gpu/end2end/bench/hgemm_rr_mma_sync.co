@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t cute -arch=sm_86 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute -arch=sm_86 %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 #define M 256
 #define N 256
@@ -32,11 +32,40 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
   return output;
 }
 
-int main() {
+int main(int argc, char** argv) {
+  bool enable_timing = true;
+  auto is_disable_timing_arg = [](const char* s) {
+    const char* t = "--disable-timing";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  for (int i = 1; i < argc; ++i) {
+    if (is_disable_timing_arg(argv[i])) {
+      enable_timing = false;
+      break;
+    }
+  }
+
+  const char* timing_env = std::getenv("CHOREO_DISABLE_TIMING");
+  if (timing_env && timing_env[0] == '1' && timing_env[1] == '\0') {
+    enable_timing = false;
+  }
+
   auto lhs = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs = choreo::make_spandata<choreo::f16>(K, N);
   lhs.fill_random(1.0, 10.0);
   rhs.fill_random(1.0, 10.0);
+
+  if (enable_timing) {
+    choreo::TimerOption topt;
+    topt.warmup = 10;
+    topt.repeat = 50;
+    auto avg_ms = choreo::timing(
+        [&]() { matmul(lhs.view(), rhs.view()); },
+        topt);
+    std::cout << "Timing avg ms: " << avg_ms << "\n";
+  }
 
   auto res = matmul(lhs.view(), rhs.view());
 

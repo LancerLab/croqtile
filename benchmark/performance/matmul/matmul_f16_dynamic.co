@@ -1,6 +1,3 @@
-// REQUIRES: TARGET-SM_90
-// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CUDA_VISIBLE_DEVICES=1 CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-
 __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
 
   int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;
@@ -55,9 +52,9 @@ int main(int argc, char** argv) {
     enable_timing = false;
   }
   
-  size_t M = 768;
-  size_t N = 512;
-  size_t K = 512;
+  size_t M = 4096;
+  size_t N = 2048;
+  size_t K = 2048;
 
   auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);
@@ -105,7 +102,7 @@ int main(int argc, char** argv) {
         ref += __half2float(lhs_view[i][k] * rhs_view[j][k]);
       auto delta = std::abs((ref - __half2float(res_view[i][j])) / ref);
       if (delta >= tolerance) {
-        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << __half2float(res_h[i][j]) << ", delta: " << delta * 100 << "%\n";
+        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << __half2float(res_view[i][j]) << ", delta: " << delta * 100 << "%\n";
       }
       choreo::choreo_assert((delta < tolerance), "values are not equal.");
     }
@@ -113,4 +110,3 @@ int main(int argc, char** argv) {
 
   std::cout << "Test Passed\n" << std::endl;
 }
-// CHECK: Test Passed

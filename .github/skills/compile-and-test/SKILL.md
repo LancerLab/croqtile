@@ -5,6 +5,8 @@ description: Build, test, run, and debug workflows for the Choreo compiler proje
 
 # Choreo Project Build and Test Skill
 
+> Consolidation note: this skill is the **single source of truth** for the former `run-code` behavior. The `run-code` skill now acts as a thin compatibility entry and delegates here.
+
 You are a build, test, and debugging expert for the Choreo compiler project. Choreo is an orchestration-language compiler for heterogeneous computing, supporting two backends: GPU (CUDA/CuTe) and GCU (Factor/Topscc).
 
 ---
@@ -256,6 +258,21 @@ Choose the best compiler-option combination based on the issue type.
 
 ## How to Run `.co` Files
 
+### Preferred Script (GPU end-to-end / benchmark first choice)
+
+For GPU end-to-end and benchmark execution, **prefer the helper script**:
+
+```bash
+scripts/run_co_auto_gpu.sh path/to/file.co --arch sm_90a --disable-timing
+```
+
+This script will:
+- run `choreo -gs -t cute ...` to generate the execute script,
+- select the least-used GPU via `nvidia-smi` (or use `--gpu`),
+- execute with `CUDA_VISIBLE_DEVICES=<gpu>`.
+
+Use manual commands only when debugging script internals or when a custom flow is required.
+
 ### 1) Files with `RUN:` directives (tests/ and part of benchmark/, samples/)
 
 These files embed execution directives parsed/executed by the `lit.sh` test driver.
@@ -278,6 +295,11 @@ These files embed execution directives parsed/executed by the `lit.sh` test driv
 ./tests/lit.sh -l tests/
 ```
 
+For quick standalone GPU execution (without FileCheck), prefer:
+```bash
+scripts/run_co_auto_gpu.sh tests/gpu/end2end/add.co --arch sm_90a --disable-timing
+```
+
 #### Run test suites with make
 ```bash
 make test
@@ -287,6 +309,12 @@ make test-release
 
 ### 2) Files without `RUN:` directives (part of samples/ and benchmark/)
 
+Preferred:
+```bash
+scripts/run_co_auto_gpu.sh path/to/file.co --arch sm_90a --disable-timing
+```
+
+Fallback manual:
 ```bash
 ./choreo -gs -t cute path/to/file.co -o /tmp/output.cute.result
 bash /tmp/output.cute.result --execute
@@ -325,6 +353,11 @@ nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu --for
 ```
 
 ### Select the Least-Used GPU
+```bash
+scripts/run_co_auto_gpu.sh path/to/file.co --arch sm_90a --disable-timing
+```
+
+Manual fallback:
 ```bash
 FREE_GPU=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | sort -t',' -k2 -n | head -1 | cut -d',' -f1 | tr -d ' ')
 CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/output.cute.result --execute
@@ -378,7 +411,7 @@ CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/output.cute.result --execute
 4. During GPU execution
    ├─ check GPU status
    ├─ select idle GPU
-   └─ run with CUDA_VISIBLE_DEVICES=X
+   └─ prefer `scripts/run_co_auto_gpu.sh ...` (manual `CUDA_VISIBLE_DEVICES=X` as fallback)
 ```
 
 ### When debugging compiler issues
@@ -425,10 +458,7 @@ make build
 
 ### Manually Compile and Run GPU End-to-End Test
 ```bash
-FREE_GPU=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | sort -t',' -k2 -n | head -1 | cut -d',' -f1 | tr -d ' ')
-./choreo -n -gs -t cute path/to/file.co -o /tmp/test_output.cute.result
-CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/test_output.cute.result --execute
-rm -f /tmp/test_output.cute.result
+scripts/run_co_auto_gpu.sh path/to/file.co --arch sm_90a --disable-timing
 ```
 
 ### Common Fast Debug Commands
@@ -452,9 +482,7 @@ rm -f /tmp/test_output.cute.result
 ### Run Benchmarks
 ```bash
 ./tests/lit.sh benchmark/performance/hgemm_rr/
-FREE_GPU=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | sort -t',' -k2 -n | head -1 | cut -d',' -f1 | tr -d ' ')
-./choreo -n -gs -t cute -arch=sm_86 benchmark/performance/hgemm_rr/hgemm_v1_warptiling.co -o /tmp/bench.cute.result
-CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/bench.cute.result --execute
+scripts/run_co_auto_gpu.sh benchmark/performance/hgemm_rr/hgemm_v1_warptiling.co --arch sm_90a --disable-timing
 ```
 
 ### Run Full Test Suite

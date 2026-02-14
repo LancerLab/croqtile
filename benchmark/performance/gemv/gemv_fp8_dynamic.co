@@ -53,7 +53,26 @@ __co__ void gemv_v2(global f8_e4m3 [M, K] lhs,
   }
 }
 
-int main() {
+int main(int argc, char** argv) {
+  bool enable_timing = true;
+  auto is_disable_timing_arg = [](const char* s) {
+    const char* t = "--disable-timing";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  for (int i = 1; i < argc; ++i) {
+    if (is_disable_timing_arg(argv[i])) {
+      enable_timing = false;
+      break;
+    }
+  }
+
+  const char* timing_env = std::getenv("CHOREO_DISABLE_TIMING");
+  if (timing_env && timing_env[0] == '1' && timing_env[1] == '\0') {
+    enable_timing = false;
+  }
+
   size_t M = 4096;
   size_t K = 4096;
 
@@ -98,30 +117,32 @@ int main() {
     std::cout << "Test Passed " << label << "\n" << std::endl;
   };
 
-  choreo::TimerOption topt;
-  topt.warmup = 10;
-  topt.repeat = 50;
+  if (enable_timing) {
+    choreo::TimerOption topt;
+    topt.warmup = 10;
+    topt.repeat = 50;
 
-  auto avg_ms_gemv = choreo::timing(
-      [&]() {
-        cudaMemset(y_d, 0, M * sizeof(float));
-        gemv(lhs_d, rhs_d, out_d);
-      },
-      topt);
-  std::cout << "Timing gemv avg ms: " << avg_ms_gemv << "\n";
+    auto avg_ms_gemv = choreo::timing(
+        [&]() {
+          cudaMemset(y_d, 0, M * sizeof(float));
+          gemv(lhs_d, rhs_d, out_d);
+        },
+        topt);
+    std::cout << "Timing gemv avg ms: " << avg_ms_gemv << "\n";
+
+    auto avg_ms_gemv_v2 = choreo::timing(
+        [&]() {
+          cudaMemset(y_d, 0, M * sizeof(float));
+          gemv_v2(lhs_d, rhs_d, out_d);
+        },
+        topt);
+    std::cout << "Timing gemv_v2 avg ms: " << avg_ms_gemv_v2 << "\n";
+  }
 
   cudaMemset(y_d, 0, M * sizeof(float));
   gemv(lhs_d, rhs_d, out_d);
   cudaMemcpy(y_h, y_d, M * sizeof(float), cudaMemcpyDeviceToHost);
   verify("gemv");
-
-  auto avg_ms_gemv_v2 = choreo::timing(
-      [&]() {
-        cudaMemset(y_d, 0, M * sizeof(float));
-        gemv_v2(lhs_d, rhs_d, out_d);
-      },
-      topt);
-  std::cout << "Timing gemv_v2 avg ms: " << avg_ms_gemv_v2 << "\n";
 
   cudaMemset(y_d, 0, M * sizeof(float));
   gemv_v2(lhs_d, rhs_d, out_d);

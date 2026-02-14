@@ -118,6 +118,10 @@ __co__ void moe_gemm_wmma_v2(global bf16 [M, K] input,
   } // block
 }
 
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+
 #include "helpers.hpp"
 #include "moe_utils.cuh"
 
@@ -139,6 +143,33 @@ extern "C" void moe_gemm_wmma(
   bool is_prefill,
   cudaStream_t stream
 ) {
+  bool enable_timing = true;
+  if (const char* disable_env = std::getenv("CHOREO_DISABLE_TIMING")) {
+    if (std::strcmp(disable_env, "1") == 0 || std::strcmp(disable_env, "true") == 0 || std::strcmp(disable_env, "on") == 0) {
+      enable_timing = false;
+    }
+  }
+
+  auto launch_with_timing = [&](auto&& fn, const char* tag) {
+    if (!enable_timing) {
+      fn();
+      return;
+    }
+    cudaEvent_t start_ev = nullptr;
+    cudaEvent_t stop_ev = nullptr;
+    cudaEventCreate(&start_ev);
+    cudaEventCreate(&stop_ev);
+    cudaEventRecord(start_ev, stream);
+    fn();
+    cudaEventRecord(stop_ev, stream);
+    cudaEventSynchronize(stop_ev);
+    float elapsed_ms = 0.0f;
+    cudaEventElapsedTime(&elapsed_ms, start_ev, stop_ev);
+    std::cout << "Timing " << tag << " ms: " << elapsed_ms << "\n";
+    cudaEventDestroy(start_ev);
+    cudaEventDestroy(stop_ev);
+  };
+
   if (is_prefill) {
       calculate_expert_offsets(expert_ids, size_m, expert_counts, expert_offsets, num_experts, stream);
   } else {
@@ -161,9 +192,9 @@ extern "C" void moe_gemm_wmma(
     // todo: implement half version
   } else if (data_type == 1) { // bfloat16
     if (is_prefill) {
-      LAUNCH_MOE_GEMM_WMMA_KERNEL(2, bf16)
+      launch_with_timing([&]() { LAUNCH_MOE_GEMM_WMMA_KERNEL(2, bf16) }, "moe_gemm_wmma_v2");
     } else {
-      LAUNCH_MOE_GEMM_WMMA_KERNEL(1, bf16)
+      launch_with_timing([&]() { LAUNCH_MOE_GEMM_WMMA_KERNEL(1, bf16) }, "moe_gemm_wmma_v1");
     }
   }
 }

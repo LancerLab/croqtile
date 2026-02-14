@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t cute -arch=sm_80 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute -arch=sm_80 %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 #define M 256
 #define N 256
@@ -60,7 +60,7 @@ __co__ auto matmul_sp_k16_bf16(bf16 [M, K/2] lhs_packed, u32 [M, K / META_K] lhs
 template <typename T>
 using SparsePolicy = choreo::utils::SparsePolicy<T>;
 
-int run_case_k16_f16(const char* tag) {
+int run_case_k16_f16(const char* tag, bool enable_timing) {
   std::mt19937 gen(42);
   auto lhs_dense = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs = choreo::make_spandata<choreo::f16>(N, K);
@@ -70,6 +70,16 @@ int run_case_k16_f16(const char* tag) {
   auto lhs_packed = choreo::make_spandata<choreo::f16>(M, K / 2);
   auto lhs_meta = choreo::make_spandata<choreo::u32>(M, K / META_K);
   SparsePolicy<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta);
+
+  if (enable_timing) {
+    choreo::TimerOption topt;
+    topt.warmup = 10;
+    topt.repeat = 50;
+    auto avg_ms = choreo::timing(
+        [&]() { matmul_sp_k16_f16(lhs_packed.view(), lhs_meta.view(), rhs.view()); },
+        topt);
+    std::cout << "Timing avg ms: " << avg_ms << "\n";
+  }
 
   auto res = matmul_sp_k16_f16(lhs_packed.view(), lhs_meta.view(), rhs.view());
 
@@ -87,7 +97,7 @@ int run_case_k16_f16(const char* tag) {
   return errors;
 }
 
-int run_case_k16_bf16(const char* tag) {
+int run_case_k16_bf16(const char* tag, bool enable_timing) {
   std::mt19937 gen(42);
   auto lhs_dense = choreo::make_spandata<choreo::bf16>(M, K);
   auto rhs = choreo::make_spandata<choreo::bf16>(N, K);
@@ -114,10 +124,29 @@ int run_case_k16_bf16(const char* tag) {
   return errors;
 }
 
-int main() {
+int main(int argc, char** argv) {
+  bool enable_timing = true;
+  auto is_disable_timing_arg = [](const char* s) {
+    const char* t = "--disable-timing";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  for (int i = 1; i < argc; ++i) {
+    if (is_disable_timing_arg(argv[i])) {
+      enable_timing = false;
+      break;
+    }
+  }
+
+  const char* timing_env = std::getenv("CHOREO_DISABLE_TIMING");
+  if (timing_env && timing_env[0] == '1' && timing_env[1] == '\0') {
+    enable_timing = false;
+  }
+
   int errors = 0;
-  errors += run_case_k16_f16("k16_f16");
-  errors += run_case_k16_bf16("k16_bf16");
+  errors += run_case_k16_f16("k16_f16", enable_timing);
+  errors += run_case_k16_bf16("k16_bf16", enable_timing);
   if (errors > 0) {
     std::cout << "FAILED: " << errors << " errors\n";
     return 1;
