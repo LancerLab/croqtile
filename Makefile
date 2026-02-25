@@ -197,6 +197,22 @@ clobber: clean
 	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf
 
 # =============================================================================
+# Auto-tune helper
+
+# find all scripts in the scripts directory whose name begins with
+# "auto_tune_" and run them one by one.  the order is deterministic
+# (sorted lexicographically) so repeated invocations behave the same.
+AUTOTUNE_SCRIPTS := $(sort $(wildcard $(SCRIPT_DIR)/auto_tune_*.sh))
+
+.PHONY: auto_tune
+auto_tune:
+	@echo "running auto-tune scripts ($(AUTOTUNE_SCRIPTS))"
+	@for s in $(AUTOTUNE_SCRIPTS); do \
+		echo "---- $$s ----"; \
+		bash "$$s" || exit 1; \
+	done
+
+# =============================================================================
 # Help and Documentation
 # =============================================================================
 
