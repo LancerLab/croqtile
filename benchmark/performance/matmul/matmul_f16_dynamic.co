@@ -1,3 +1,10 @@
+#include <cstring>
+#include <cstdlib>
+
+// H800 PCIe (Hopper PCIe class) FP16 Tensor Core peak throughput.
+#define H800_PCIE_PEAK_F16_TFLOPS 1513
+#define H800_PCIE_PEAK_F8_TFLOPS 3026
+
 // Tunable defaults for auto-tuning/profiling workflows.
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 128
@@ -65,6 +72,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
 int main(int argc, char** argv) {
   bool enable_timing = true;
   bool skip_verify = false;
+  double user_flops = -1.0;
   auto is_disable_timing_arg = [](const char* s) {
     const char* t = "--disable-timing";
     int i = 0;
@@ -84,6 +92,10 @@ int main(int argc, char** argv) {
     }
     if (is_skip_verify_arg(argv[i])) {
       skip_verify = true;
+    }
+    if (std::strncmp(argv[i], "--flops=", 8) == 0) {
+      user_flops = std::atof(argv[i] + 8);
+      continue;
     }
   }
 
@@ -139,6 +151,13 @@ int main(int argc, char** argv) {
     topt.repeat = repeat;
     auto avg_ms = choreo::timing([&]() { matmul(lhs_d, rhs_d, res_d); cudaDeviceSynchronize(); }, topt);
     std::cout << "Timing avg ms: " << avg_ms << "\n";
+
+    double flops = (user_flops > 0.0) ? user_flops : (2.0 * double(M) * double(N) * double(K));
+    double tflops = (flops / (avg_ms / 1000.0)) / 1e12;
+    std::cout << "TFLOPS: " << tflops << "\n";
+
+    double eff = (tflops / H800_PCIE_PEAK_F16_TFLOPS) * 100.0;
+    std::cout << "HW efficiency: " << eff << "%\n";
   } else {
     matmul(lhs_d, rhs_d, res_d);
   }
