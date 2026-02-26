@@ -1,0 +1,62 @@
+// RUN: choreo -dv=liveness -sa=liveness -t cute -arch=sm_90a %s | FileCheck --match-full-lines %s
+
+// TODO: add fragment liveness
+
+#define MATMUL_WARP_M 64
+#define MATMUL_TILE_M 128
+#define MATMUL_TILE_K 64
+#define MATMUL_WARP_K 16
+#define MATMUL_SWIZ 128
+
+#if 1
+#define MATMUL_TILE_N 64
+#define MATMUL_WARP_N 64
+#else
+#define MATMUL_TILE_N 128
+#define MATMUL_WARP_N 128
+#endif
+
+#define MATMUL_DEFAULT_M 2048
+#define MATMUL_DEFAULT_N 2048
+#define MATMUL_DEFAULT_K 2048
+
+__co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block {
+    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s_0;
+    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s_1;
+    shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    mc0 = mma.fill.f32 0.0f;
+    mc1 = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+      dma.copy lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m*2, iv_k) => lhs_load_s_0;
+      dma.copy lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m*2+1, iv_k) => lhs_load_s_1;
+      dma.copy rhs.chunkat(block_n, iv_k) => rhs_load_s;
+
+      // split TILE_M into two 64-row parts, one WGMMA workgroup each
+      foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+        parallel p0 by 1 : group-4 {
+          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s_0.chunkat(p0, iv_warp);
+          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc0, ma, mb;
+        }
+        parallel p1 by 1 : group-4 {
+          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s_1.chunkat(p1, iv_warp);
+          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc1, ma, mb;
+        }
+      }
+    }
+
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s_0;
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s_1;
+    mma.store mc0, output_s_0;
+    mma.store mc1, output_s_1;
+    dma.copy output_s_0 => output.subspan(MATMUL_WARP_M, MATMUL_TILE_N).at(block_m*2, block_n);
+    dma.copy output_s_1 => output.subspan(MATMUL_WARP_M, MATMUL_TILE_N).at(block_m*2+1, block_n);
+  }
+}
+
+// CHECK: BUFFER ::matmul::paraby_0::output_s_0
+// CHECK: 	range: [38, 43]
+// CHECK: BUFFER ::matmul::paraby_0::output_s_1
+// CHECK: 	range: [39, 45]

@@ -317,6 +317,7 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::WithBlock&) override;
   bool Visit(AST::DMA&) override;
+  bool Visit(AST::MMA&) override;
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Call&) override;

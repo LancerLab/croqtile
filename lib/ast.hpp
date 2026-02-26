@@ -2828,6 +2828,7 @@ public:
       }
       if (e_info.is_sparse) os << ".SP";
       if (e_info.scale) os << ".SCALE";
+      // TODO: missing scale
       os << " " << e_info.acc << ", " << e_info.lhs << ", " << e_info.rhs;
     } break;
     case Store: {
