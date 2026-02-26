@@ -3,7 +3,7 @@
 
 // Tunable defaults for profiling workflows.
 #define MATMUL_WARP_M 64
-#define MATMUL_WARP_N 128
+#define MATMUL_WARP_N 64
 #define MATMUL_TILE_M 128
 #define MATMUL_TILE_K 128
 #define MATMUL_WARP_K 32
@@ -40,42 +40,31 @@
 #define MATMUL_DEFAULT_K 2048
 
 __co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f16 [M, N] output) {
-
   // each block handles a 128x128 base tile split into two 64x128 parts
   // using two workgroups; each half executes one WGMMA.  warp_m==64
   // and warp_k==32 are fixed by ISA; warp_n is tunable.  The tiling
   // scheme mirrors the f16 mwg kernel but with e4m3 data types.
   // WGMMA requires 128 threads (4 warps x 32 threads/warp)
   parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block {
-    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s_0;
-    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s_1;
+    shared f8_e4m3 [MATMUL_TILE_M, MATMUL_TILE_K] lhs_load_s;
     shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
-
-    mc0 = mma.fill.f32 0.0f;
-    mc1 = mma.fill.f32 0.0f;
+    shared f16 [MATMUL_TILE_M, MATMUL_WARP_N] output_s;
+    
+    mc = mma.fill.f16 0.0f;
     foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m*2, iv_k) => lhs_load_s_0;
-      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m*2+1, iv_k) => lhs_load_s_1;
+      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
       tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
-
-      // split TILE_M into two 64-row parts, one WGMMA workgroup each
-      foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-        parallel p0 by 1 : group-4 {
-          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s_0.chunkat(p0, iv_warp);
+      parallel p1 by 2 : group-4 {
+        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(p1, iv_warp);
           mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row mc0, ma, mb;
+          mma.row.row mc, ma, mb;
         }
-        parallel p1 by 1 : group-4 {
-          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s_1.chunkat(p1, iv_warp);
-          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row mc1, ma, mb;
-        }
+        if (iv_k == cdiv(K, MATMUL_TILE_K) - 1)
+          mma.store mc, output_s.chunkat(p1, _);
       }
     }
-
-    // directly store accumulators into global output to avoid excess shared memory
-    mma.store mc0, output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m*2, block_n);
-    mma.store mc1, output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m*2+1, block_n);
+    tma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(block_m, block_n);
   }
 }
 

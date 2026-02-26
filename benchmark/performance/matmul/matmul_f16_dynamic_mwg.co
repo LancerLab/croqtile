@@ -47,37 +47,26 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
   // each block handles 128x64 block with two WGMMA accumulators
   // WGMMA requires 128 threads (4 warps x 32 threads/warp)
   parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block {
-    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s_0;
-    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s_1;
+    shared f16 [MATMUL_TILE_M, MATMUL_TILE_K] lhs_load_s;
     shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
-    mc0 = mma.fill.f32 0.0f;
-    mc1 = mma.fill.f32 0.0f;
-    foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m*2, iv_k) => lhs_load_s_0;
-      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m*2+1, iv_k) => lhs_load_s_1;
-      tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+    shared f16 [MATMUL_TILE_M, MATMUL_WARP_N] output_s;
 
-      // split TILE_M into two 64-row parts, one WGMMA workgroup each
-      foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-        parallel p0 by 1 : group-4 {
-          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s_0.chunkat(p0, iv_warp);
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+      tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      parallel p1 by 2 : group-4 {
+        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(p1, iv_warp);
           mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row mc0, ma, mb;
+          mma.row.row mc, ma, mb;
         }
-        parallel p1 by 1 : group-4 {
-          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s_1.chunkat(p1, iv_warp);
-          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row mc1, ma, mb;
-        }
+        // if (iv_k == cdiv(K, MATMUL_TILE_K) - 1) mma.store mc, output_s.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(p1, 0);
+        if (iv_k == cdiv(K, MATMUL_TILE_K) - 1) mma.store mc, output_s.chunkat(p1, _);
       }
     }
+    tma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(block_m, block_n);
 
-    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s_0;
-    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s_1;
-    mma.store mc0, output_s_0;
-    mma.store mc1, output_s_1;
-    tma.copy output_s_0 => output.subspan(MATMUL_WARP_M, MATMUL_TILE_N).at(block_m*2, block_n);
-    tma.copy output_s_1 => output.subspan(MATMUL_WARP_M, MATMUL_TILE_N).at(block_m*2+1, block_n);
   }
 }
 
