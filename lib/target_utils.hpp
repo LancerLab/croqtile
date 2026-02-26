@@ -461,7 +461,7 @@ static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
   }
 
   m = 64, k = 32;
-  for (int n = 8; n <= 128; n += 8)
+  for (int n = 8; n <= 256; n += 8)
     for (auto a_ty : {BT::F8_E4M3, BT::F8_E5M2})
       for (auto b_ty : {BT::F8_E4M3, BT::F8_E5M2})
         for (auto cd_ty : {BT::F16, BT::F32}) {
