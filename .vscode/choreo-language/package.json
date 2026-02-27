@@ -1,0 +1,35 @@
+{
+  "name": "choreo-language",
+  "displayName": "Choreo Language",
+  "description": "Local Choreo language support (.co) for this workspace",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "choreo",
+        "aliases": [
+          "Choreo",
+          "choreo"
+        ],
+        "extensions": [
+          ".co"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "choreo",
+        "scopeName": "source.choreo",
+        "path": "./syntaxes/choreo.tmLanguage.json"
+      }
+    ]
+  }
+}

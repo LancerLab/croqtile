@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="json" ContentType="application/json"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="tmLanguage" ContentType="text/plain"/>
+  <Default Extension="tmLanguage.json" ContentType="application/json"/>
+</Types>
