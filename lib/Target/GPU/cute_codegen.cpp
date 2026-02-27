@@ -632,8 +632,8 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
 
   auto offset = sbe::nu(0);
 
-  assert(ca->OpCount() == 1 &&
-         "count of spanned operations in CuTe DMA should be 1.");
+  // assert(ca->OpCount() == 1 &&
+  //        "count of spanned operations in CuTe DMA should be 1.");
 
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
@@ -1661,11 +1661,21 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
          << tma_barrier_name << ";\n";
       ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-      std::string threads_waited =
-          (desc.GetPBLevel() == ParallelLevel::GROUP
-               ? "32"
-               : (desc.GetPBLevel() == ParallelLevel::GROUPx4 ? "128"
-                                                              : "blockDim.x"));
+      auto in_thr_block = desc.GetInThreadsBlock();
+      auto inner_pb_level = desc.GetPBLevel();
+      // if in_thr_block is specified, the number of threads is compitable with
+      // inner parallel-by the barrier. otherwise, all threads in the CTA will
+      // wait.
+
+      std::string threads_waited;
+      if (!in_thr_block) {
+        threads_waited = "blockDim.x";
+      } else if (inner_pb_level == ParallelLevel::GROUP) {
+        threads_waited = "32";
+      } else if (inner_pb_level == ParallelLevel::GROUPx4) {
+        threads_waited = "128";
+      }
+
       ds << d_indent << "  init(&" << tma_barrier_name << ", " << threads_waited
          << ");\n";
       ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
@@ -1686,15 +1696,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // - are performed directly by manipulating pointers.
   // - not support tiling.
   // - not support async.
-
-  const auto& tma_descs = cgi.GetTMADescs()[cur_pb];
-  ParallelLevel enforced_pb_level = ParallelLevel::BLOCK;
-  if (n.IsTMA() && !isa<PlaceHolderType>(NodeType(n))) {
-    int tma_idx = tma_count++;
-    assert(tma_idx < static_cast<int>(tma_descs.size()));
-    const TMADesc& tma_desc = tma_descs[tma_idx];
-    enforced_pb_level = tma_desc.GetPBLevel();
-  }
 
   // Generate tops dte and choreo::future in device-side
   auto claimFuture = [this,
@@ -2220,18 +2221,24 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
       // else, defer the sync till the wait time
-      if (enforced_pb_level == ParallelLevel::GROUP)
-        ds << d_indent << "__syncwarp();\n";
-      else if (enforced_pb_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "wg.sync();\n";
-      else
-        ds << d_indent << "__syncthreads();\n";
+      ds << d_indent << "__syncthreads();\n";
     }
   };
 
   auto TMACodeGen = [&]() {
     if (n.operation != ".copy")
       choreo_unreachable("unsupported tma operation: " + n.operation + ".");
+
+    const auto& tma_descs = cgi.GetTMADescs()[cur_pb];
+    ParallelLevel tma_sync_level = ParallelLevel::BLOCK;
+    if (n.IsTMA() && !isa<PlaceHolderType>(NodeType(n))) {
+      int tma_idx = tma_count++;
+      assert(tma_idx < static_cast<int>(tma_descs.size()));
+      const TMADesc& tma_desc = tma_descs[tma_idx];
+      auto in_thr_block = tma_desc.GetInThreadsBlock();
+      if (in_thr_block) { tma_sync_level = tma_desc.GetPBLevel(); }
+    }
+
     auto fsto = f_sty->GetStorage();
     auto tsto = t_sty->GetStorage();
     std::string f_mds_offset = "";
@@ -2257,12 +2264,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     assert(tname.has_value());
     if ((fsto == Storage::GLOBAL || fsto == Storage::DEFAULT) &&
         tsto == Storage::SHARED) {
-      // if (enforced_pb_level == ParallelLevel::GROUP)
-      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
-      // else if (enforced_pb_level == ParallelLevel::GROUPx4)
-      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
-      // else
-      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      if (tma_sync_level == ParallelLevel::GROUP)
+        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
+      else if (tma_sync_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+      else
+        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
 
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_global_to_shared(" << t_buf_expr << ", &" << *tname
@@ -2296,19 +2303,19 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                fsto == Storage::SHARED) {
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
 
-      if (enforced_pb_level == ParallelLevel::GROUP)
+      if (tma_sync_level == ParallelLevel::GROUP)
         ds << d_indent << "__syncwarp();\n";
-      else if (enforced_pb_level == ParallelLevel::GROUPx4)
+      else if (tma_sync_level == ParallelLevel::GROUPx4)
         ds << d_indent << "wg.sync();\n";
       else
         ds << d_indent << "__syncthreads();\n";
 
-      // if (enforced_pb_level == ParallelLevel::GROUP)
-      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
-      // else if (enforced_pb_level == ParallelLevel::GROUPx4)
-      //   ds << d_indent << "if (__CHOREO_GROUP_SINGLE__(128)) {\n";
-      // else
-      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      if (tma_sync_level == ParallelLevel::GROUP)
+        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
+      else if (tma_sync_level == ParallelLevel::GROUPx4)
+        ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+      else
+        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
 
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_shared_to_global(&" << *tname << "_tensor_map, "

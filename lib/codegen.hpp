@@ -152,6 +152,8 @@ private:
   uint16_t idx;
   SwizMode swiz_mode = SwizMode::NONE; // Default to no swizzle
   ParallelLevel pb_level = ParallelLevel::BLOCK;
+  AST::InThreadsBlock* in_thr_block =
+      nullptr; // if the TMA is within an inthreads, record it here
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
@@ -197,6 +199,9 @@ public:
   }
 
   ParallelLevel GetPBLevel() const { return pb_level; }
+
+  void SetInThreadsBlock(AST::InThreadsBlock* in) { in_thr_block = in; }
+  AST::InThreadsBlock* GetInThreadsBlock() const { return in_thr_block; }
 
 private:
   static int index;

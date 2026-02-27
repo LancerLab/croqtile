@@ -118,6 +118,7 @@
   #define __CHOREO_BLOCK_SINGLE__                                              \
     threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
   #define __CHOREO_GROUP_SINGLE__ threadIdx.x % 32 == 0
+  #define __CHOREO_GROUPX4_SINGLE__ threadIdx.x % 128 == 0
   #define __CHOREO_GROUP_ID__                                                  \
     (threadIdx.x + threadIdx.y * blockDim.x +                                  \
      threadIdx.z * blockDim.x * blockDim.y) /                                  \

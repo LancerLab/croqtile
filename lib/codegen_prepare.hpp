@@ -55,6 +55,7 @@ private:
   AST::ParallelBy* block_pb = nullptr;
   ParallelLevel inner_pb_level = ParallelLevel::BLOCK;
   std::vector<AST::ParallelBy*> pb_stack;
+  AST::InThreadsBlock* in_thr_block = nullptr;
 
 private:
   auto Level() const {
@@ -103,6 +104,18 @@ private:
         choreo_unreachable("The explicit parallel-by level " +
                            STR(pb->GetLevel()) + " is not supported.");
       }
+    } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
+      if (inner_pb_level == ParallelLevel::GROUPx4 ||
+          inner_pb_level == ParallelLevel::GROUP)
+        in_thr_block = it;
+      // todo: predicate of inthreads_block should be analyzed to make sure it
+      // is compatible with the inner parallel-by level. For example, if the
+      // inner parallel-by is group, the predicate should be "p1 == 0" to make
+      // sure only one warp participates in the TMA copy. if the inner
+      // parallel-by is group4, the predicate should be "p1 == 0 || p1 == 2"
+      //  to make sure two warpgroup participate in the TMA copy.
+      // There may exist complex expressions for the predicate, such as "p1 % 2
+      // && p1 < 4".
     }
     return true;
   }
@@ -185,6 +198,8 @@ private:
                          << "\n");
         block_pb = nullptr;
       }
+    } else if (isa<AST::InThreadsBlock>(&n)) {
+      in_thr_block = nullptr;
     }
     return true;
   }
@@ -255,10 +270,12 @@ public:
            (tsty->GetStorage() == Storage::GLOBAL ||
             tsty->GetStorage() == Storage::DEFAULT))) {
         auto& tma_descs = cgi.GetTMADescs();
-        tma_descs[block_pb].emplace_back(n.GetSrc(), n.GetDst(),
-                                         InScopeName(n.GetSrc()->RefSymbol()),
-                                         InScopeName(n.GetDst()->RefSymbol()),
-                                         n.GetSwizzleMode(), inner_pb_level);
+        auto tma_desc = TMADesc(n.GetSrc(), n.GetDst(),
+                                InScopeName(n.GetSrc()->RefSymbol()),
+                                InScopeName(n.GetDst()->RefSymbol()),
+                                n.GetSwizzleMode(), inner_pb_level);
+        tma_desc.SetInThreadsBlock(in_thr_block);
+        tma_descs.at(block_pb).push_back(tma_desc);
       } else
         choreo_unreachable(
             "unsupport TMA direction: " + STR(fsty->GetStorage()) + " => " +
