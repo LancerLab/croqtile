@@ -3,7 +3,7 @@ Choreo is a low-level Embedded Domain Specific Language (**EDSL**) for C++ speci
 
 Traditionally, programming DMA has focused on hardware configuration rather than the data itself. In modern heterogeneous hardware like GPUs, programmers often need to move smaller chunks of data to faster memory to enhance performance. This requirement can make programming more complex and sometimes results in hard-to-maintain code.
 
-To address these challenges, Choreo is designed to simplify DMA programming by introducing a novel paradigm called **'TileFlow' programming**. It has already shown significant improvement on productivity, safety, and adaptibility over existing design, and is proven effective for building **high-performance machine learnig kernels** on heterogeneous hardware.
+To address these challenges, Choreo is designed to simplify DMA programming by introducing a novel paradigm called **'TileFlow' programming**. It has already shown significant improvement on productivity, safety, and adaptibility over existing design, and is proven effective for building **machine learnig computing kernels** on heterogeneous hardware.
 
 ## Features and Design Targets
 ### Productivity
@@ -18,7 +18,7 @@ Furthermore, as Choreo simplify operations of data movement, it provides the hig
 ```cpp
   dma.copy input.chunkat(tiling_factors) => shared;
 ```
-This code moves a data chunk of 'input' with specified tiling factors to a storage location named 'shared'. The code is usually observed in programs with hardware DMA support. Choreo compiler hides the complexities of DMA configurations, index calculations, and storage management with easy-to-maintain semantics. Therefore, it allows programmers to concentrate on high-level strategies for building high-performance kernels, which are normally essential for building ML/HPC applications.
+This code moves a data chunk of 'input' with specified tiling factors to a storage location named 'shared'. The code is usually observed in programs with hardware DMA support. Choreo compiler hides the complexities of DMA configurations, index calculations, and storage management with easy-to-maintain semantics. Therefore, it allows programmers to concentrate on high-level strategies for building computing kernels, which are normally essential for building ML applications.
 
 ### Code Safety
 Another primary design goal of Choreo is to **ensure code safety** by catching errors at compile-time or as early as possible at runtime. To achieve this, Choreo employs **compile-time checks** and instruments **runtime-check** based on the shapes and rules inferred from the *tileflow code*.
