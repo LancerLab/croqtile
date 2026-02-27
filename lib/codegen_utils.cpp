@@ -12,4 +12,10 @@ Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
                                " decay spanview to be pointers.");
 Option<bool> dma_opt(OptionKind::Hidden, "-fopt-dma", "", true,
                      "optimize dma to linear copy.");
+Option<bool> tma_cluster_aware(
+    OptionKind::User, "--tma-cluster-aware", "", false,
+    "Enable cluster-aware PTX mbarrier TMA codegen for global->shared copy.");
+Option<bool> ptx_barrier(
+    OptionKind::User, "--ptx-barrier", "", false,
+    "Enable PTX mbarrier-style synchronization for TMA cluster-aware path.");
 } // end namespace Choreo

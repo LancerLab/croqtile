@@ -18,6 +18,8 @@ namespace Choreo {
 extern Option<bool> no_decay_spanview;
 extern Option<bool> dma_opt;
 extern Option<bool> dma_verbose;
+extern Option<bool> tma_cluster_aware;
+extern Option<bool> ptx_barrier;
 
 inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
                        const std::string& from, const std::string& to,

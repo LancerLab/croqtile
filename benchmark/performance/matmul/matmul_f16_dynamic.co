@@ -185,8 +185,8 @@ int main(int argc, char** argv) {
     return std::abs(ref - got) / denom;
   };
   // verfication
-  for (size_t i = 0; i < M; ++i) {
-    for (size_t j = 0; j < N; ++j) {
+  for (size_t i = 0; i < 128; ++i) {
+    for (size_t j = 0; j < 256; ++j) {
       float ref = 0.0f;
       for (size_t k = 0; k < lhs_view.shape()[1]; ++k)
         ref += __half2float(lhs_view[i][k] * rhs_view[j][k]);

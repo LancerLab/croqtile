@@ -6,13 +6,162 @@
 #ifdef __CHOREO_TARGET_CUTE__
 
 namespace choreo {
+
+#ifndef CHOREO_PTX_BARRIER_MAX_SPINS
+#define CHOREO_PTX_BARRIER_MAX_SPINS (1u << 24)
+#endif
+
+__device__ __forceinline__ uint32_t tma_to_shared_u32(const void* p) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  return static_cast<uint32_t>(__cvta_generic_to_shared(p));
+#else
+  (void)p;
+  return 0;
+#endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_init(uint64_t* bar,
+                                                  uint32_t thread_count) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  asm volatile("mbarrier.init.shared::cta.b64 [%0], %1;\n"
+               :
+               : "r"(bar_ptr), "r"(thread_count));
+#else
+  (void)bar;
+  (void)thread_count;
+#endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_expect_tx(uint64_t* bar,
+                                                       uint32_t bytes) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  asm volatile(
+      "mbarrier.arrive.expect_tx.release.cta.shared::cta.b64 _, [%0], %1;\n"
+      :
+      : "r"(bar_ptr), "r"(bytes));
+#else
+  (void)bar;
+  (void)bytes;
+#endif
+}
+
+__device__ __forceinline__ void
+tma_load_2d_shared_cta_global_mbarrier(void* dst, const void* tma_map,
+                                       uint64_t* bar, int32_t coord0,
+                                       int32_t coord1) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t dst_ptr = tma_to_shared_u32(dst);
+  asm volatile(
+      "cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes "
+      "[%0], [%1, {%3, %4}], [%2];"
+      :
+      : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+        "r"(coord1)
+      : "memory");
+#else
+  (void)dst;
+  (void)tma_map;
+  (void)bar;
+  (void)coord0;
+  (void)coord1;
+#endif
+}
+
+__device__ __forceinline__ void
+tma_load_2d_shared_cluster_global_mbarrier(void* dst, const void* tma_map,
+                                           uint64_t* bar, int32_t coord0,
+                                           int32_t coord1) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t dst_ptr = tma_to_shared_u32(dst);
+  asm volatile(
+      "cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes "
+      "[%0], [%1, {%3, %4}], [%2];"
+      :
+      : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+        "r"(coord1)
+      : "memory");
+#else
+  (void)dst;
+  (void)tma_map;
+  (void)bar;
+  (void)coord0;
+  (void)coord1;
+#endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_arrive(uint64_t* bar,
+                                                    uint32_t count = 1) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  asm volatile("mbarrier.arrive.release.cta.shared::cta.b64 _, [%0], %1;\n"
+               :
+               : "r"(bar_ptr), "r"(count)
+               : "memory");
+#else
+  (void)bar;
+  (void)count;
+#endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_wait_parity(uint64_t* bar,
+                                                         int phase_bit) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t spins = 0;
+  while (true) {
+    uint32_t ready = 0;
+    asm volatile(
+        "{\n"
+        ".reg .pred P1;\n"
+        "mbarrier.try_wait.parity.acquire.cta.shared::cta.b64 P1, [%1], %2;\n"
+        "selp.b32 %0, 1, 0, P1;\n"
+        "}\n"
+        : "=r"(ready)
+        : "r"(bar_ptr), "r"(phase_bit)
+        : "memory");
+
+    if (ready) return;
+
+    ++spins;
+    if (spins >= CHOREO_PTX_BARRIER_MAX_SPINS) {
+      printf("[choreo-rt] PTX mbarrier wait timeout: bar=%u, phase=%d, spins=%u\\n",
+             bar_ptr, phase_bit, spins);
+      __trap();
+    }
+
+    if ((spins & 0x3FFu) == 0u) __nanosleep(64);
+  }
+#else
+  (void)bar;
+  (void)phase_bit;
+#endif
+}
+
 // SM90+ (Hopper+) - TMA barrier and token
 struct TMAAtom {
   cuda::barrier<cuda::thread_scope_block>* bar;
   cuda::barrier<cuda::thread_scope_block>::arrival_token tok;
+  uint64_t* ptx_bar = nullptr;
+  int ptx_phase = 0;
+  bool use_ptx_mbarrier = false;
   //  TMAAtom(cuda::barrier<cuda::thread_scope_block> *b): bar(b) {}
   __device__ auto& barrier() { return *bar; }
   __device__ auto& token() { return tok; }
+  __device__ uint64_t* ptx_barrier() { return ptx_bar; }
+  __device__ int ptx_phase_bit() const { return ptx_phase; }
+  __device__ void toggle_ptx_phase() { ptx_phase ^= 1; }
+  __device__ bool IsPTXMBarrier() const { return use_ptx_mbarrier; }
+  __device__ void EnablePTXMBarrier(uint64_t* b) {
+    ptx_bar = b;
+    ptx_phase = 0;
+    use_ptx_mbarrier = true;
+  }
 };
 
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
@@ -158,9 +307,19 @@ struct future {
   __device__ void wait_impl() {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     if (is_tma) {
-      auto& barrier = ((TMAAtom*)atom)->barrier();
-      auto& token = ((TMAAtom*)atom)->token();
-      barrier.wait(std::move(token));
+      auto* tma_atom = ((TMAAtom*)atom);
+      if (tma_atom->IsPTXMBarrier()) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+        tma_mbarrier_wait_parity(tma_atom->ptx_barrier(),
+                                 tma_atom->ptx_phase_bit());
+  #else
+        __co_abort__();
+  #endif
+      } else {
+        auto& barrier = tma_atom->barrier();
+        auto& token = tma_atom->token();
+        barrier.wait(std::move(token));
+      }
       return;
     }
     // TODO: make shared memory be allocated by host
