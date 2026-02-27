@@ -346,11 +346,22 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 timestamp=$(date +%Y%m%d%H%M%S)
 
 # Add the script's parent directory to PATH
-export PATH="$script_dir:${script_dir}/../:${script_dir}/../extern/bin:$PATH"
+export PATH="$script_dir:${script_dir}/../:${script_dir}/../extern/bin/:${script_dir}/../extern/:$PATH"
 
 # Check if FileCheck exists in the PATH
-if ! which FileCheck &>/dev/null; then
-  echo "Error: FileCheck tool not found in PATH."
+FILECHECK=$(which FileCheck \
+            FileCheck-18 FileCheck-17 FileCheck-16 \
+            FileCheck-15 FileCheck-14 \
+            FileCheck-10)
+
+if [ -z "$FILECHECK" ]; then
+  echo "-------------------------------------------------------"
+  echo "ERROR: FileCheck utility not found!"
+  echo "This project requires FileCheck (from LLVM) for testing."
+  echo ""
+  echo "On Ubuntu/Debian, install it with:"
+  echo "  sudo apt update && sudo apt install llvm-dev"
+  echo "-------------------------------------------------------"
   exit 1
 fi
 
@@ -366,6 +377,11 @@ fi
 
 if ! which not.sh &>/dev/null; then
   echo "Error: not.sh is not found in PATH."
+  exit 1
+fi
+
+if ! which bc &>/dev/null; then
+  echo "Error: bc is not found in PATH."
   exit 1
 fi
 
@@ -583,7 +599,7 @@ execute_command() {
   #       Or else FileCheck will check the line of "// CHECK:"
   command=${command//choreo/"$(which choreo) -n"}
   command=${command//copp/"$(which copp)"}
-  command=${command//FileCheck/"$(which FileCheck)"}
+  command=${command//FileCheck/"${FILECHECK}"}
   command=${command//%cuda_arch/"-arch ${cuda_arch}"}
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
