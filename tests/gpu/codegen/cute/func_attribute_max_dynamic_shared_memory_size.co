@@ -13,8 +13,8 @@ __co__ s32 [6, 132, 64] foo(s32 [6, 132, 64] lhs, s32 [6, 132, 64] rhs) {
   return output;
 }
 
-// CHECK: cudaFuncSetAttribute(__choreo_device_foo, cudaFuncAttributeMaxDynamicSharedMemorySize, 67592);
-// CHECK: __choreo_device_foo<<<__foo_gdims0, __foo_bdims0, 67592>>>(lhs__device, rhs__device, output__device);
+// CHECK: cudaFuncSetAttribute(__choreo_device_foo, cudaFuncAttributeMaxDynamicSharedMemorySize, 67592 + (16 - 1));
+// CHECK: __choreo_device_foo<<<__foo_gdims0, __foo_bdims0, 67592 + (16 - 1)>>>(lhs__device, rhs__device, output__device);
 
 __co__ s32 [6, 17, 64] bar(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
   s32[lhs.span] output;
@@ -29,7 +29,7 @@ __co__ s32 [6, 17, 64] bar(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
   return output;
 }
 // CHECK-NOT: cudaFuncSetAttribute(__choreo_device_bar
-// CHECK: __choreo_device_bar<<<__bar_gdims0, __bar_bdims0, 8>>>(lhs__device, rhs__device, output__device);
+// CHECK: __choreo_device_bar<<<__bar_gdims0, __bar_bdims0, 8 + (16 - 1)>>>(lhs__device, rhs__device, output__device);
 
 __co__ s32 [N, M, K] baz(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
   s32[lhs.span] output;
@@ -43,5 +43,5 @@ __co__ s32 [N, M, K] baz(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
   }
   return output;
 }
-// CHECK: cudaFuncSetAttribute(__choreo_device_baz, cudaFuncAttributeMaxDynamicSharedMemorySize, (__co__shared_spm_size + 8));
-// CHECK: __choreo_device_baz<<<__baz_gdims0, __baz_bdims0, (__co__shared_spm_size + 8)>>>(lhs__device, rhs__device, output__device, K, M, N, __co__shared_chunk_offsets[0], __co__shared_chunk_offsets[1], __co__shared_chunk_offsets[2], __co__shared_spm_size);
+// CHECK: cudaFuncSetAttribute(__choreo_device_baz, cudaFuncAttributeMaxDynamicSharedMemorySize, (__co__shared_spm_size + 8) + (16 - 1));
+// CHECK: __choreo_device_baz<<<__baz_gdims0, __baz_bdims0, (__co__shared_spm_size + 8) + (16 - 1)>>>(lhs__device, rhs__device, output__device, K, M, N, __co__shared_chunk_offsets[0], __co__shared_chunk_offsets[1], __co__shared_chunk_offsets[2], __co__shared_spm_size);

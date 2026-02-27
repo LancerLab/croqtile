@@ -487,6 +487,13 @@ CUTE_HOST_DEVICE bool aligned_at_least(Ptr p) {
   return (reinterpret_cast<std::uintptr_t>(p) % A) == 0;
 }
 
+template <size_t Bits, class Ptr>
+CUTE_HOST_DEVICE std::uintptr_t aligned_up_ptr(Ptr p) {
+  constexpr std::uintptr_t Align = Bits / 8;
+  auto ptr = reinterpret_cast<std::uintptr_t>(p);
+  return (ptr + Align - 1) & ~(Align - 1);
+}
+
 // ------------------- universal copy (any rank, C++17) -------------------
 template <class Src, class Dst>
 CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {

@@ -1126,8 +1126,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (sto == Storage::SHARED &&
             (FCtx(fname).HaveDynamicBuffer(SSTab().ScopeName(), sto) ||
              set_cuda_func_attribute_max_dynamic_shared_memory_size))
-          ds << d_indent << "auto " << sym << " = (" << bts << "*)&"
-             << device_fn << "__runtime_shared_buffer__;\n";
+          ds << d_indent << "auto " << sym << " = (" << bts << "*)" << device_fn
+             << "__runtime_shared_buffer__;\n";
         else
           ds << d_indent << type_modifiers << "alignas("
              << n.GetNote("alignment") << ") " << bts << " " << sym << "["
@@ -1514,7 +1514,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
       hs << h_indent << "cudaFuncSetAttribute(" << device_fn
          << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
-         << ValueSTR(cur_spm_size) << ");\n";
+         << ValueSTR(cur_spm_size) << " + ("
+         << CCtx().GetMemoryAlignment(CCtx().GetArch(), Storage::SHARED)
+         << " - 1));\n";
       set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
     };
 
@@ -1559,7 +1561,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 
     bool explicit_smem = false;
     if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
-      hs << ", " << ValueSTR(cur_spm_size);
+      // TODO: conservative padding. To be optimized.
+      auto align = CCtx().GetMemoryAlignment(CCtx().GetArch(), Storage::SHARED);
+      hs << ", " << ValueSTR(cur_spm_size) << " + (" << align << " - 1)";
       explicit_smem = true;
     }
     if (stream_name != "") {
@@ -1622,12 +1626,20 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
           sbe::ceq(ring_start, sbe::nu(0)))) {
       ds << d_indent << "extern __shared__ char " << device_fn
-         << "__runtime_shared_buffer__[];\n";
-      if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
+         << "__runtime_shared_buffer__raw[];\n";
+      // NOTE: If extern shared mem is enabled, then its address will be
+      // immediately followed by the preceding static shared area.
+      // Therefore, we need to manually perform the alignment.
+      ds << d_indent << "auto " << device_fn
+         << "__runtime_shared_buffer__ = "
+            "reinterpret_cast<char*>(aligned_up_ptr<"
+         << CCtx().GetMemoryAlignment(CCtx().GetArch(), Storage::SHARED)
+         << " * 8>(" << device_fn << "__runtime_shared_buffer__raw));\n";
+      if (!sbe::ceq(cur_spm_size, sbe::nu(0)) && cgi.HasAsyncDMA(fname)) {
         ds << d_indent << "auto " << device_fn
-           << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&"
-           << device_fn << "__runtime_shared_buffer__[" + ValueSTR(ring_start)
-           << "]);\n";
+           << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>("
+           << device_fn << "__runtime_shared_buffer__ + " + ValueSTR(ring_start)
+           << ");\n";
         ds << d_indent << "if (threadIdx.x <= " << ValueSTR(group_count)
            << " && threadIdx.y == 0 && threadIdx.z == 0)";
         ds << d_indent << "  " << device_fn

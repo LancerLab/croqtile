@@ -25,13 +25,10 @@ __co__ void foo(int n, int m) {
 }
 
 // CHECK: __global__ void __choreo_device_foo0(int n, int m, unsigned long mr_offset_foo_paraby_0_s, unsigned long mr_offset_foo_paraby_0_ss, unsigned __co__shared_spm_size0) {
-// CHECK:   extern __shared__ char __choreo_device_foo0__runtime_shared_buffer__[];
-// CHECK:   auto __choreo_device_foo0__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&__choreo_device_foo0__runtime_shared_buffer__[__co__shared_spm_size0]);
-// CHECK:   if (threadIdx.x <= 1 && threadIdx.y == 0 && threadIdx.z == 0)
-// CHECK:     __choreo_device_foo0__ring__[threadIdx.x].init();
-// CHECK:   __syncthreads();
+// CHECK:   extern __shared__ char __choreo_device_foo0__runtime_shared_buffer__raw[];
+// CHECK:   auto __choreo_device_foo0__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo0__runtime_shared_buffer__raw));
 // CHECK:   alignas(16) unsigned char anon_5[32];
-// CHECK:   auto anon_4 = (unsigned char*)&__choreo_device_foo0__runtime_shared_buffer__;
+// CHECK:   auto anon_4 = (unsigned char*)__choreo_device_foo0__runtime_shared_buffer__;
 // CHECK:   unsigned char* s = (unsigned char*)(anon_4 + mr_offset_foo_paraby_0_s);
 // CHECK:   unsigned char* ss = (unsigned char*)(anon_4 + mr_offset_foo_paraby_0_ss);
 // CHECK:   kernel((unsigned char*)s, (unsigned char*)ss);
@@ -42,13 +39,10 @@ __co__ void foo(int n, int m) {
 // CHECK: }
 
 // CHECK: __global__ void __choreo_device_foo1(int n, int m, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_l, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_ll, unsigned long mr_offset_foo_paraby_3_s, unsigned long mr_offset_foo_paraby_3_ss, unsigned __co__shared_spm_size1) {
-// CHECK:   extern __shared__ char __choreo_device_foo1__runtime_shared_buffer__[];
-// CHECK:   auto __choreo_device_foo1__ring__ = reinterpret_cast<choreo::future_ring<6>*>(&__choreo_device_foo1__runtime_shared_buffer__[__co__shared_spm_size1]);
-// CHECK:   if (threadIdx.x <= 1 && threadIdx.y == 0 && threadIdx.z == 0)
-// CHECK:     __choreo_device_foo1__ring__[threadIdx.x].init();
-// CHECK:   __syncthreads();
+// CHECK:   extern __shared__ char __choreo_device_foo1__runtime_shared_buffer__raw[];
+// CHECK:   auto __choreo_device_foo1__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo1__runtime_shared_buffer__raw));
 // CHECK:   alignas(16) unsigned char anon_7[2048];
-// CHECK:   auto anon_6 = (unsigned char*)&__choreo_device_foo1__runtime_shared_buffer__;
+// CHECK:   auto anon_6 = (unsigned char*)__choreo_device_foo1__runtime_shared_buffer__;
 // CHECK:   unsigned char* s = (unsigned char*)(anon_6 + mr_offset_foo_paraby_3_s);
 // CHECK:   unsigned char* ss = (unsigned char*)(anon_6 + mr_offset_foo_paraby_3_ss);
 // CHECK:   kernel((unsigned char*)s, (unsigned char*)ss);
@@ -74,8 +68,8 @@ __co__ void foo(int n, int m) {
 // CHECK:   // JIT memory reuse end
 // CHECK:   dim3 __foo_gdims0(2, 1, 1);
 // CHECK:   dim3 __foo_bdims0(16, 1, 1);
-// CHECK:   cudaFuncSetAttribute(__choreo_device_foo0, cudaFuncAttributeMaxDynamicSharedMemorySize, __co__shared_spm_size0);
-// CHECK:   __choreo_device_foo0<<<__foo_gdims0, __foo_bdims0, __co__shared_spm_size0>>>(n, m, __co__shared_chunk_offsets0[0], __co__shared_chunk_offsets0[1], __co__shared_spm_size0);
+// CHECK:   cudaFuncSetAttribute(__choreo_device_foo0, cudaFuncAttributeMaxDynamicSharedMemorySize, __co__shared_spm_size0 + (16 - 1));
+// CHECK:   __choreo_device_foo0<<<__foo_gdims0, __foo_bdims0, __co__shared_spm_size0 + (16 - 1)>>>(n, m, __co__shared_chunk_offsets0[0], __co__shared_chunk_offsets0[1], __co__shared_spm_size0);
 // CHECK:   choreo::abend_true(cudaDeviceSynchronize());
 // CHECK:   // JIT memory reuse begin
 // CHECK:   HeapSimulator::Chunks __co__local_chunks1;
@@ -103,7 +97,7 @@ __co__ void foo(int n, int m) {
 // CHECK:   // JIT memory reuse end
 // CHECK:   dim3 __foo_gdims1(2, 1, 1);
 // CHECK:   dim3 __foo_bdims1(16, 1, 1);
-// CHECK:   cudaFuncSetAttribute(__choreo_device_foo1, cudaFuncAttributeMaxDynamicSharedMemorySize, __co__shared_spm_size1);
-// CHECK:   __choreo_device_foo1<<<__foo_gdims1, __foo_bdims1, __co__shared_spm_size1>>>(n, m, __co__local_chunk_offsets1[0], __co__local_chunk_offsets1[1], __co__shared_chunk_offsets1[0], __co__shared_chunk_offsets1[1], __co__shared_spm_size1);
+// CHECK:   cudaFuncSetAttribute(__choreo_device_foo1, cudaFuncAttributeMaxDynamicSharedMemorySize, __co__shared_spm_size1 + (16 - 1));
+// CHECK:   __choreo_device_foo1<<<__foo_gdims1, __foo_bdims1, __co__shared_spm_size1 + (16 - 1)>>>(n, m, __co__local_chunk_offsets1[0], __co__local_chunk_offsets1[1], __co__shared_chunk_offsets1[0], __co__shared_chunk_offsets1[1], __co__shared_spm_size1);
 // CHECK:   choreo::abend_true(cudaDeviceSynchronize());
 // CHECK: }
