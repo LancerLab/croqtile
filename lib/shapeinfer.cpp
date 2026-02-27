@@ -234,6 +234,14 @@ bool ShapeInference::Visit(AST::MultiValues& n) {
                      << STR(n.Opts().GetVals()) << "]\n");
   }
 
+  if (n.HasNote("array_dims")) {
+    // apply the inferred shape to DataType node.
+    auto nty = NodeType(n);
+    assert(isa<ArrayType>(nty));
+    cast<ArrayType>(nty)->dims = GenShape(GetValNo(n)).Value();
+    SetNodeType(n, nty);
+  }
+
   cur_vn.Invalidate();
 
   return true;
@@ -434,11 +442,12 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
 
   if (n.IsArray()) {
     auto array_vn = GetValNo(*n.array_dims);
-    n.array_shape = GenShape(array_vn);
     // apply the inferred shape to DataType node.
-    n.type->array_dims = n.array_shape;
-    if (auto eaty = dyn_cast<EventArrayType>(NodeType(n)); eaty) {
-      eaty->dims = n.ArrayDimAsValueList();
+    n.type->array_dims = GenShape(array_vn).Value();
+    // special case for event var. Because `CanBeValueNumbered(event)` is false.
+    if (auto eaty = dyn_cast<EventArrayType>(NodeType(*n.type)); eaty) {
+      eaty->dims = n.type->array_dims;
+      SetNodeType(n, eaty);
     }
   }
 
@@ -1128,39 +1137,55 @@ bool ShapeInference::Visit(AST::DMA& n) {
 
 bool ShapeInference::Visit(AST::MMA& n) {
   TraceEachVisit(n);
+  // NOTE: The node type maybe differ from symbol type!
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
     if (op.FillingIsDecl()) {
+      NumTy array_vn;
+      if (op.FillingArrayDims()) array_vn = GetValNo(*op.FillingArrayDims());
+      std::string fill_sym = AST::FragName(op.FillingTo());
       auto fill_ty = op.FillingType();
-      if (fill_ty != BaseType::UNKSCALAR)
-        DefineASymbol(op.FillingSymbol(),
-                      MakeUnRankedSpannedType(fill_ty, Storage::REG));
-      else
-        DefineASymbol(op.FillingSymbol(), MakeDummySpannedType());
-      DefineASymbol(op.FillingSymbol() + ".span", MakeUninitMDSpanType());
-      SymbolAliasNoNum(SSTab().InScopeName(op.FillingSymbol()) +
+      if (fill_ty != BaseType::UNKSCALAR) {
+        if (op.FillingArrayDims())
+          DefineASymbol(fill_sym,
+                        MakeUnRankedSpannedArrayType(
+                            fill_ty, GenShape(array_vn).Value(), Storage::REG));
+        else
+          DefineASymbol(fill_sym,
+                        MakeUnRankedSpannedType(fill_ty, Storage::REG));
+      } else {
+        if (op.FillingArrayDims())
+          DefineASymbol(fill_sym,
+                        MakeDummySpannedArrayType(GenShape(array_vn).Value()));
+        else
+          DefineASymbol(fill_sym, MakeDummySpannedType());
+      }
+      DefineASymbol(fill_sym + ".span", MakeUninitMDSpanType());
+      SymbolAliasNoNum(SSTab().InScopeName(fill_sym) +
                        ".span"); // valno is yet invalid
     }
   } break;
   case AST::MMAOperation::Load: {
+    std::string load_to_sym = AST::FragName(op.LoadTo());
     auto fty = cast<SpannedType>(op.LoadFrom()->GetType());
-    auto f_span = op.LoadTo() + ".span";
+    auto f_span = load_to_sym + ".span";
     SymbolAliasNum(SSTab().ScopedName(f_span), cur_vn);
     auto s = MakeDenseSpannedType(fty->ElementType(), GenShape(cur_vn),
                                   Storage::REG);
     auto f = MakeFutureType(s, op.IsAsync());
-    DefineASymbol(op.LoadTo(), f);
+    DefineASymbol(load_to_sym, f);
     DefineASymbol(f_span, s->Clone());
     SetNodeType(n, f);
   } break;
   case AST::MMAOperation::Exec: {
-    auto fty = GetSpannedType(GetSymbolType(op.ExecOperand(1)));
+    std::string op0_sym = AST::FragName(op.ExecOperand(0)); // mc
+    std::string op1_sym = AST::FragName(op.ExecOperand(1)); // ma
+    std::string op2_sym = AST::FragName(op.ExecOperand(2)); // mb
+    auto fty = GetSpannedType(GetSymbolType(op1_sym));
     assert(fty);
-    auto lspan =
-        RemoveSuffix(SSTab().InScopeName(op.ExecOperand(1)), ".data") + ".span";
-    auto rspan =
-        RemoveSuffix(SSTab().InScopeName(op.ExecOperand(2)), ".data") + ".span";
+    auto lspan = RemoveSuffix(SSTab().InScopeName(op1_sym), ".data") + ".span";
+    auto rspan = RemoveSuffix(SSTab().InScopeName(op2_sym), ".data") + ".span";
     auto lsig = cast<MultiSigns>(SymbolSign(lspan));
     auto rsig = cast<MultiSigns>(SymbolSign(rspan));
     auto asig = m_sn();
@@ -1184,11 +1209,11 @@ bool ShapeInference::Visit(AST::MMA& n) {
     default: choreo_unreachable("unsupported mma execution method.");
     }
     cur_vn = GetOrGenValNum(asig);
-    auto mdsym = SSTab().InScopeName(op.ExecOperand(0)) + ".span";
+    auto mdsym = SSTab().InScopeName(op0_sym) + ".span";
     if (!vn.HasValidValueNumberOfSignature(s_sn(mdsym)))
       SymbolAliasNum(mdsym, cur_vn);
     auto mty = MakeMDSpanType(GenShape(cur_vn));
-    auto c_sty = GetSpannedType(GetSymbolType(op.ExecOperand(0)));
+    auto c_sty = GetSpannedType(GetSymbolType(op0_sym));
     auto c_elem = (c_sty && c_sty->ElementType() != BaseType::UNKSCALAR)
                       ? c_sty->ElementType()
                       : fty->ElementType();
@@ -1202,20 +1227,29 @@ bool ShapeInference::Visit(AST::MMA& n) {
           c_elem == BaseType::F8_UE4M3 || c_elem == BaseType::F8_UE8M0;
       if (a_is_fp8 && c_is_fp8) { c_elem = BaseType::F32; }
     }
-    auto sty = MakeDenseSpannedType(c_elem, GenShape(cur_vn), Storage::REG);
-    UpdateSymbolType(op.ExecOperand(0), sty);
-    UpdateSymbolType(op.ExecOperand(0) + ".span", mty);
+    if (AST::FragIsArrayElem(op.ExecOperand(0))) {
+      auto pty = SSTab().LookupSymbol(op0_sym);
+      assert(isa<ArrayType>(pty));
+      auto sty = MakeDenseSpannedArrayType(
+          c_elem, GenShape(cur_vn), GetArrayDimensions(pty), Storage::REG);
+      UpdateSymbolType(op0_sym, sty);
+    } else {
+      auto sty = MakeDenseSpannedType(c_elem, GenShape(cur_vn), Storage::REG);
+      UpdateSymbolType(op0_sym, sty);
+    }
+    UpdateSymbolType(op0_sym + ".span", mty);
 
     // Metadata handling for sparse MMA (operand 3)
-    if (op.IsSparse() && !op.ExecOperand(3).empty()) {
-      auto mdata_sym = op.ExecOperand(3);
+    if (op.IsSparse() && op.ExecOperand(3)) {
+      std::string mdata_sym = AST::FragName(op.ExecOperand(3));
       auto mdata_span =
           RemoveSuffix(SSTab().InScopeName(mdata_sym), ".data") + ".span";
       // We don't necessarily update the result shape based on E,
       // but we ensure it's visited and registered in the valno table if needed.
     }
-
-    SetNodeType(n, sty);
+    auto sym_ty = GetSymbolType(op0_sym);
+    // always set the node type to spannedtype in exec.
+    SetNodeType(n, GetSpannedType(sym_ty)->Clone());
   } break;
   case AST::MMAOperation::Store: {
   } break;

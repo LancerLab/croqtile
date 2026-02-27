@@ -889,7 +889,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       if (!CCtx().MemReuse()) {
         ds << d_indent << type_modifiers << bts << " " << sym;
-        for (const auto& dim : n.ArrayDimAsValueList())
+        for (const auto& dim : GetArrayDimensions(nty))
           ds << "[" << ValueSTR(dim) << "]";
         ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;

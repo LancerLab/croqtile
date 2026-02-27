@@ -275,9 +275,9 @@ public:
     case AST::MMAOperation::Fill: break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::Exec: {
-      auto& a_sym = op.ExecOperand(1);
-      auto& b_sym = op.ExecOperand(2);
-      auto& c_sym = op.ExecOperand(0);
+      auto& a_sym = AST::FragName(op.ExecOperand(1));
+      auto& b_sym = AST::FragName(op.ExecOperand(2));
+      auto& c_sym = AST::FragName(op.ExecOperand(0));
       auto a_ty = GetSpannedType(GetSymbolType(a_sym));
       auto b_ty = GetSpannedType(GetSymbolType(b_sym));
       auto c_ty = GetSpannedType(GetSymbolType(c_sym));
@@ -288,9 +288,7 @@ public:
         mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(0));
         if (op.IsSparse())
-          mma_shape.push_back(
-              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(1), sbe::nu(2))
-                  ->Normalize());
+          mma_shape.push_back(a_shape.ValueAt(1) * sbe::nu(2));
         else
           mma_shape.push_back(a_shape.ValueAt(1));
         break;
@@ -298,9 +296,7 @@ public:
         mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(1));
         if (op.IsSparse())
-          mma_shape.push_back(
-              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(1), sbe::nu(2))
-                  ->Normalize());
+          mma_shape.push_back(a_shape.ValueAt(1) * sbe::nu(2));
         else
           mma_shape.push_back(a_shape.ValueAt(1));
         break;
@@ -308,9 +304,7 @@ public:
         mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(0));
         if (op.IsSparse())
-          mma_shape.push_back(
-              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(0), sbe::nu(2))
-                  ->Normalize());
+          mma_shape.push_back(a_shape.ValueAt(0) * sbe::nu(2));
         else
           mma_shape.push_back(a_shape.ValueAt(0));
         break;
@@ -318,9 +312,7 @@ public:
         mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(1));
         if (op.IsSparse())
-          mma_shape.push_back(
-              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(0), sbe::nu(2))
-                  ->Normalize());
+          mma_shape.push_back(a_shape.ValueAt(0) * sbe::nu(2));
         else
           mma_shape.push_back(a_shape.ValueAt(0));
         break;
@@ -341,8 +333,8 @@ public:
           InScopeName(c_sym),
           MMAInfo{acc_ty, mma_shape, MMAInfo::FRAG_C, op.GetMethod()});
 
-      if (op.IsSparse() && !op.ExecOperand(3).empty()) {
-        auto e_sym = op.ExecOperand(3);
+      if (op.IsSparse() && op.ExecOperand(3)) {
+        auto e_sym = AST::FragName(op.ExecOperand(3));
         auto e_ty = GetSpannedType(GetSymbolType(e_sym));
         cgi.AddSymbolMMA(InScopeName(e_sym),
                          MMAInfo{e_ty->ElementType(), mma_shape,
@@ -352,7 +344,7 @@ public:
       VST_DEBUG(dbgs() << "mma type: " << STR(a_ety) << ", " << STR(b_ety)
                        << ", " << STR(acc_ty) << ", shape: " << STR(mma_shape)
                        << " -> " << a_sym << ", " << b_sym << ", " << c_sym
-                       << (op.IsSparse() ? ", " + op.ExecOperand(3) : "")
+                       << (op.IsSparse() ? ", " + PSTR(op.ExecOperand(3)) : "")
                        << "\n");
     } break;
     case AST::MMAOperation::Store: break;

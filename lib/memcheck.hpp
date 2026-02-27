@@ -241,7 +241,8 @@ public:
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
     // mem alloc could happen here
-    auto sty = dyn_cast<SpannedType>(GetSymbolType(n.name_str));
+    auto sym_ty = GetSymbolType(n.name_str);
+    auto sty = dyn_cast<SpannedType>(sym_ty);
     if (!sty) return true;
     auto sto = sty->GetStorage();
     if (tocheck_storage.count(sto) == 0)
@@ -256,7 +257,8 @@ public:
       return true;
     }
     size_t array_dim_product = 1;
-    if (n.IsArray()) array_dim_product = *VIInt(n.ArraySize());
+    if (auto aty = dyn_cast<ArrayType>(sym_ty))
+      array_dim_product = *VIInt(aty->ElemCount());
     if (sty->RuntimeShaped()) {
       // runtime usage
       std::string byte_size = sty->ByteSizeExpression(true);

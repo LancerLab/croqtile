@@ -228,9 +228,10 @@ void DMA::accept(Choreo::Visitor& v) {
 void MMA::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
-  if (operation->IsKind(MMAOperation::Fill))
+  if (operation->IsKind(MMAOperation::Fill)) {
     operation->FillingValue()->accept(v);
-  else if (operation->IsKind(MMAOperation::Load))
+    if (operation->FillingArrayDims()) operation->FillingArrayDims()->accept(v);
+  } else if (operation->IsKind(MMAOperation::Load))
     operation->LoadFrom()->accept(v);
   else if (operation->IsKind(MMAOperation::Exec)) {
     if (operation->HasScale()) {

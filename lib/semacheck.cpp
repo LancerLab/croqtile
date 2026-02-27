@@ -651,9 +651,9 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
     break;
   }
   case AST::MMAOperation::Exec: {
-    auto& a_sym = op.ExecOperand(1);
-    auto& b_sym = op.ExecOperand(2);
-    auto& c_sym = op.ExecOperand(0);
+    auto& a_sym = AST::FragName(op.ExecOperand(1));
+    auto& b_sym = AST::FragName(op.ExecOperand(2));
+    auto& c_sym = AST::FragName(op.ExecOperand(0));
     auto a_ty = GetSpannedType(GetSymbolType(a_sym));
     auto b_ty = GetSpannedType(GetSymbolType(b_sym));
     auto c_ty = GetSpannedType(GetSymbolType(c_sym));
@@ -693,7 +693,7 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       if (op.IsSparse() && !shape_match) {
         auto a_k = a_shape.ValueAt(1);
         auto b_k = b_shape.ValueAt(1);
-        auto a_k2 = sbe::bop(OpCode::MULTIPLY, a_k, sbe::nu(2))->Normalize();
+        auto a_k2 = a_k * sbe::nu(2);
         if (sbe::ceq(a_k2, b_k)) sparse_packed_match = true;
       }
       cs_vals.push_back(a_shape.ValueAt(0));
@@ -705,7 +705,7 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       if (op.IsSparse() && !shape_match) {
         auto a_k = a_shape.ValueAt(1);
         auto b_k = b_shape.ValueAt(0);
-        auto a_k2 = sbe::bop(OpCode::MULTIPLY, a_k, sbe::nu(2))->Normalize();
+        auto a_k2 = a_k * sbe::nu(2);
         if (sbe::ceq(a_k2, b_k)) sparse_packed_match = true;
       }
       cs_vals.push_back(a_shape.ValueAt(0));
@@ -717,7 +717,7 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       if (op.IsSparse() && !shape_match) {
         auto a_k = a_shape.ValueAt(0);
         auto b_k = b_shape.ValueAt(1);
-        auto a_k2 = sbe::bop(OpCode::MULTIPLY, a_k, sbe::nu(2))->Normalize();
+        auto a_k2 = a_k * sbe::nu(2);
         if (sbe::ceq(a_k2, b_k)) sparse_packed_match = true;
       }
       cs_vals.push_back(a_shape.ValueAt(1));
@@ -729,7 +729,7 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       if (op.IsSparse() && !shape_match) {
         auto a_k = a_shape.ValueAt(0);
         auto b_k = b_shape.ValueAt(0);
-        auto a_k2 = sbe::bop(OpCode::MULTIPLY, a_k, sbe::nu(2))->Normalize();
+        auto a_k2 = a_k * sbe::nu(2);
         if (sbe::ceq(a_k2, b_k)) sparse_packed_match = true;
       }
       cs_vals.push_back(a_shape.ValueAt(1));

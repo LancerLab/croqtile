@@ -8,7 +8,7 @@ __co__ s32 [128, 256] matmul(s32 [128, 256] lhs, s32 [256, 256] rhs) {
     foreach k in [16] {
       ma = mma.load lhs.chunkat(p, k);
       mb = mma.load rhs.chunkat(k, q);
-      mma.row.col mc, ma, mb;   // row * col
+      mma.row.col mc, ma, mb;
       mma.store mc, output.chunkat(p, q);
     }
   return output;

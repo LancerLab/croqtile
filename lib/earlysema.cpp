@@ -110,6 +110,17 @@ bool EarlySemantics::Visit(AST::MultiValues& n) {
     SetNodeType(n, MakeBoundedITupleType(Shape(dims)));
   }
 
+  if (n.HasNote("array_dims")) {
+    for (const auto& d : n.AllValues()) {
+      auto dty = d->GetType();
+      if (!isa<ScalarIntegerType>(dty))
+        Error1(d->LOC(), "Dimension of array can only be const integer "
+                         "value, but got value of type " +
+                             dty->TypeNameString() + ": " + PSTR(dty) + ".");
+    }
+    SetNodeType(n, MakeRankedArrayType(n.Count()));
+  }
+
   return true;
 }
 
@@ -1058,16 +1069,6 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   if (auto sty = dyn_cast<ScalarType>(n.GetType()))
     if (sty->IsMutable()) mutables.Add(InScopeName(n.name_str));
 
-  if (n.IsArray()) {
-    for (const auto& d : n.ArrayDimensions()->AllValues()) {
-      auto dty = d->GetType();
-      if (!isa<ScalarIntegerType>(dty))
-        Error1(d->LOC(), "Dimension of array can only be const integer "
-                         "value, but got value of type " +
-                             dty->TypeNameString() + ": " + PSTR(dty) + ".");
-    }
-  }
-
   return true;
 }
 
@@ -1819,33 +1820,58 @@ bool EarlySemantics::Visit(AST::MMA& n) {
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: {
     // MMA is a 2D operation
+    std::string fill_sym = FragName(op.FillingTo());
     if (op.FillingIsDecl()) {
-      ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol(), __FILE__, __LINE__,
-                                MakeRankedSpannedType(2));
-      ReportErrorWhenViolateODR(n.LOC(), op.FillingSymbol() + ".span", __FILE__,
-                                __LINE__, MakeRankedMDSpanType(2));
+      // `mc[1] = mma.fill 0;` is invalid.
+      assert(!AST::FragIsArrayElem(op.FillingTo()));
+      if (op.FillingArrayDims()) {
+        auto arr_type = cast<ArrayType>(op.FillingArrayDims()->GetType());
+        ReportErrorWhenViolateODR(
+            n.LOC(), fill_sym, __FILE__, __LINE__,
+            MakeRankedSpannedArrayType(2, arr_type->dims));
+      } else {
+        ReportErrorWhenViolateODR(n.LOC(), fill_sym, __FILE__, __LINE__,
+                                  MakeRankedSpannedType(2));
+      }
+      ReportErrorWhenViolateODR(n.LOC(), fill_sym + ".span", __FILE__, __LINE__,
+                                MakeRankedMDSpanType(2));
       if (!isa<ScalarType>(op.FillingValue()->GetType()))
         Error1(n.LOC(), "Expect a scalar value for MMA fill.");
+    } else {
+      ReportErrorWhenUseBeforeDefine(n.LOC(), fill_sym);
     }
   } break;
   case AST::MMAOperation::Load: {
+    std::string fut_sym = AST::FragName(op.GetFuture());
+    assert(!AST::FragIsArrayElem(op.GetFuture()) &&
+           "For now, frag with indices is only supported for mc.");
     auto sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
     if (!sty) Error1(n.LOC(), "Expected a spanned buffer for MMA load.");
     ReportErrorWhenViolateODR(
-        n.LOC(), op.GetFuture(), __FILE__, __LINE__,
+        n.LOC(), fut_sym, __FILE__, __LINE__,
         MakeFutureType(cast<SpannedType>(sty->Clone()), op.IsAsync()));
-    ReportErrorWhenViolateODR(n.LOC(), op.GetFuture() + ".span", __FILE__,
-                              __LINE__, cast<SpannedType>(sty->Clone()));
+    ReportErrorWhenViolateODR(n.LOC(), fut_sym + ".span", __FILE__, __LINE__,
+                              cast<SpannedType>(sty->Clone()));
   } break;
   case AST::MMAOperation::Exec: {
-    ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(0));
-    ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(1));
-    ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(2));
-    if (op.IsSparse() && !op.ExecOperand(3).empty())
-      ReportErrorWhenUseBeforeDefine(n.LOC(), op.ExecOperand(3));
+    std::string op0_sym = AST::FragName(op.ExecOperand(0));
+    std::string op1_sym = AST::FragName(op.ExecOperand(1));
+    std::string op2_sym = AST::FragName(op.ExecOperand(2));
+    ReportErrorWhenUseBeforeDefine(n.LOC(), op0_sym);
+    ReportErrorWhenUseBeforeDefine(n.LOC(), op1_sym);
+    ReportErrorWhenUseBeforeDefine(n.LOC(), op2_sym);
+    if (op.IsSparse() && op.ExecOperand(3)) {
+      std::string op3_sym = AST::FragName(op.ExecOperand(3));
+      ReportErrorWhenUseBeforeDefine(n.LOC(), op3_sym);
+    }
+    if (isa<ArrayType>(GetSymbolType(op0_sym)) &&
+        !AST::FragIsArrayElem(op.ExecOperand(0)))
+      Error1(op.ExecOperand(0)->LOC(),
+             "Cannot use the whole fragment array in mma exec operation.");
   } break;
   case AST::MMAOperation::Store: {
-    ReportErrorWhenUseBeforeDefine(n.LOC(), op.StoreFrom());
+    std::string sto_from_sym = AST::FragName(op.StoreFrom());
+    ReportErrorWhenUseBeforeDefine(n.LOC(), sto_from_sym);
     auto sty = op.StoreTo()->GetType();
     if (!isa<SpannedType>(sty))
       Error1(n.LOC(), "Expected a spanned buffer for MMA store.");

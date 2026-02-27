@@ -46,13 +46,17 @@ bool MemAnalyzer::AfterVisitImpl(AST::Node& n) {
 
 bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
   auto ty = GetSymbolType(n.name_str);
+  ValueItem elem_count = sbe::nu(1);
+  auto aty = dyn_cast<ArrayType>(ty);
+  if (aty) elem_count = aty->ElemCount();
   auto sname = InScopeName(n.name_str);
 
   if (auto et = dyn_cast<EventType>(ty)) {
     // need to consider the event type!
     event_vars.insert(sname);
     buf_sto.emplace(sname, n.mem->Get());
-    buf_size.emplace(sname, n.ArraySize());
+    // event is bool
+    buf_size.emplace(sname, elem_count);
     buf_dev_func_name.emplace(sname, cur_dev_fname);
     return true;
   }
@@ -62,13 +66,13 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
     auto sto = sty->GetStorage();
     buf_sto.emplace(sname, sto);
     if (!sty->RuntimeShaped()) {
-      auto total_size = sty->ByteSizeValue() * n.ArraySize();
+      auto total_size = sty->ByteSizeValue() * elem_count;
       buf_size.emplace(sname, total_size);
       VST_DEBUG(dbgs() << "\tstatic  size:  " << total_size << "\n");
     } else {
       sto_have_dyn[cur_dev_fname][sto] = true;
       auto size_expr = sty->ByteSizeValue();
-      if (n.IsArray()) size_expr = size_expr * n.ArraySize();
+      if (n.IsArray()) size_expr = size_expr * elem_count;
       buf_size.emplace(sname, size_expr);
       VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
     }

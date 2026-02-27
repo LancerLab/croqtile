@@ -846,6 +846,8 @@ inline MultiBounds operator-(const MultiBounds& lhs, const MultiBounds& rhs) {
   return {vl.size(), vl};
 }
 
+ValueList GenUninitValueList(size_t rank);
+
 struct Type {
   BaseType bt = BaseType::UNKNOWN;
   std::unordered_map<std::string, std::string> note; // key-val note
@@ -2284,9 +2286,29 @@ struct ArrayType : public Type, public TypeIDProvider<ArrayType> {
   ValueList dims;
 
   ArrayType(ValueList l) : Type(BaseType::ARRAY) { dims = l; }
+  ArrayType(size_t rank) : Type(BaseType::ARRAY) {
+    dims = GenUninitValueList(rank);
+  }
 
-  virtual const ptr<Type> ArrayElementType() const = 0;
-  virtual const ptr<Type> SubScriptType(size_t) = 0;
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<ArrayType>(Dimensions());
+  }
+
+  size_t Dims() const override { return ArrayRank(); }
+
+  bool IsComplete() const override { return true; }
+  bool HasSufficientInfo() const override { return true; }
+
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  const std::string Name() const override { return "array"; }
+
+  virtual const ptr<Type> ArrayElementType() const {
+    return std::make_shared<NoValueType>();
+  }
+  virtual const ptr<Type> SubScriptType(size_t) {
+    return std::make_shared<NoValueType>();
+  };
 
   size_t ArrayRank() const { return dims.size(); }
 
@@ -2339,6 +2361,8 @@ struct EventArrayType final : public ArrayType,
   ptr<EventType> event;
   explicit EventArrayType(Storage s, const ValueList& ec)
       : ArrayType(ec), event(std::make_shared<EventType>(s)) {}
+  explicit EventArrayType(Storage s, size_t rank)
+      : ArrayType(rank), event(std::make_shared<EventType>(s)) {}
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<EventArrayType>(event->GetStorage(),
@@ -2389,6 +2413,12 @@ struct SpannedArrayType final : public ArrayType,
                             const ValueList& strd, Storage m,
                             const ValueList& ads)
       : ArrayType(ads), spty(std::make_shared<SpannedType>(ft, s, strd, m)) {}
+
+  explicit SpannedArrayType(BaseType ft, const ptr<MDSpanType>& s,
+                            const ValueList& strd, Storage m, size_t array_rank)
+      : ArrayType(array_rank),
+        spty(std::make_shared<SpannedType>(ft, s, strd, m)) {}
+
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<SpannedArrayType>(
         spty->ElementType(), cast<MDSpanType>(spty->s_type->Clone()),
@@ -2666,6 +2696,11 @@ inline int GetSingleWidth(const ptr<Type>& ty) {
 inline Shape GenInvalidShape() { return Shape(); }
 inline Shape GenUnknownShape() { return Shape(GetUnknownRank()); }
 
+// To indicate uninferred array dims.
+inline ValueList GenUninitValueList(size_t rank) {
+  return ValxN(sbe::nu(0), rank);
+}
+
 inline ptr<VoidType> MakeVoidType() { return std::make_shared<VoidType>(); }
 
 inline ptr<AddrType> MakeAddrType() { return std::make_shared<AddrType>(); }
@@ -2895,6 +2930,14 @@ inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {
       GenUnknownShape(), GenUnknownShape(), IntegerList(), "");
 }
 
+inline ptr<ArrayType> MakeArrayType(const ValueList& ad) {
+  return std::make_shared<ArrayType>(ad);
+}
+
+inline ptr<ArrayType> MakeRankedArrayType(size_t rank) {
+  return std::make_shared<ArrayType>(rank);
+}
+
 inline ptr<EventType> MakeEventType(Storage s) {
   return std::make_shared<EventType>(s);
 }
@@ -2904,19 +2947,42 @@ inline ptr<EventArrayType> MakeEventArrayType(Storage s, const ValueList& ad) {
 }
 
 inline ptr<SpannedArrayType>
-MakeDenseSpannedArrayType(BaseType ft, const Shape& v, const ValueList& ad = {},
+MakeDenseSpannedArrayType(BaseType bt, const Shape& v, const ValueList& ad,
                           const Storage& s = Storage::DEFAULT) {
   auto strides = v.GenDenseStrides();
-  return std::make_shared<SpannedArrayType>((BaseType)ft, MakeMDSpanType(v),
-                                            strides, s, ad);
+  return std::make_shared<SpannedArrayType>(bt, MakeMDSpanType(v), strides, s,
+                                            ad);
+}
+
+inline ptr<SpannedArrayType>
+MakeRankedSpannedArrayType(size_t n, const ValueList& ad,
+                           BaseType bt = BaseType::UNKSCALAR,
+                           const Storage& s = Storage::DEFAULT) {
+  // only care about the rank of span
+  return std::make_shared<SpannedArrayType>(bt, MakeMDSpanType(Shape(n)),
+                                            ValueList{}, s, ad);
+}
+
+inline ptr<SpannedArrayType>
+MakeUnRankedSpannedArrayType(BaseType bt, const ValueList& ad,
+                             const Storage& sto = Storage::DEFAULT) {
+  // only care about the rank of span
+  return std::make_shared<SpannedArrayType>(
+      bt, MakeMDSpanType(GenUnknownShape()), ValueList{}, sto, ad);
 }
 
 inline ptr<SpannedArrayType>
 MakeStridedSpannedArrayType(BaseType ft, const Shape& v, const ValueList& strd,
-                            const ValueList& ad = {},
+                            const ValueList& ad,
                             const Storage& s = Storage::DEFAULT) {
-  return std::make_shared<SpannedArrayType>((BaseType)ft, MakeMDSpanType(v),
-                                            strd, s, ad);
+  return std::make_shared<SpannedArrayType>(ft, MakeMDSpanType(v), strd, s, ad);
+}
+
+// like MakeDummySpannedType, but the array dim are real.;
+inline ptr<SpannedArrayType> MakeDummySpannedArrayType(const ValueList& ad) {
+  return std::make_shared<SpannedArrayType>(BaseType::UNKSCALAR,
+                                            MakeMDSpanType(GenUnknownShape()),
+                                            ValueList{}, Storage::DEFAULT, ad);
 }
 
 inline ptr<FutureType> MakeFutureType(const ptr<SpannedType>& v, bool async) {
@@ -3008,8 +3074,9 @@ inline static ptr<SpannedType> GetSpannedType(const ptr<Type>& ty) {
     return fty->GetSpannedType();
   else if (auto sty = dyn_cast<SpannedType>(ty))
     return sty;
-  else
-    return nullptr;
+  else if (auto saty = dyn_cast<SpannedArrayType>(ty))
+    return saty->spty;
+  return nullptr;
 }
 
 inline static ptr<MDSpanType> GetMDSpanType(const ptr<Type>& ty) {
@@ -3034,6 +3101,11 @@ inline static Shape GetShape(const ptr<Type>& ty) {
     return bty->GetSizes();
 
   return Shape(); // avoid warning
+}
+
+inline static ValueList GetArrayDimensions(const ptr<Type>& ty) {
+  if (auto aty = dyn_cast<ArrayType>(ty)) return aty->Dimensions();
+  return {};
 }
 
 inline static bool GeneralFutureType(const Type& ty) {

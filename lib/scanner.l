@@ -423,6 +423,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
   "stream"   return Choreo::Parser::make_STREAM(yytext, loc);
   "event"    return Choreo::Parser::make_EVENT(yytext, loc);
+  "frag"     return Choreo::Parser::make_FRAG(yytext, loc);
   "print"    return Choreo::Parser::make_PRINT(yytext, loc);
   "println"  return Choreo::Parser::make_PRINTLN(yytext, loc);
   "__acos"     return Choreo::Parser::make_ACOS(yytext, loc);

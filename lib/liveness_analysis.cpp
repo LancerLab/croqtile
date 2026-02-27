@@ -694,15 +694,16 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
   } else if (const auto mma = dyn_cast<AST::MMA>(&n)) {
     // TODO: handel swizzle, scale; use values after typeinfer.
     auto op = mma->GetOperation();
-    auto frag = op->GetFragSym();
+    auto frag = op->GetFrag();
+    auto sym = AST::FragName(frag);
     switch (op->Tag()) {
     case AST::MMAOperation::Fill: {
       if (op->FillingIsDecl()) {
-        os << frag << " = mma.fill." << STR(op->FillingType()) << " "
+        os << PSTR(frag) << " = mma.fill." << STR(op->FillingType()) << " "
            << PSTR(op->FillingValue());
       } else {
-        os << " = mma.fill." << STR(op->FillingType()) << " " << frag << ", "
-           << PSTR(op->FillingValue());
+        os << " = mma.fill." << STR(op->FillingType()) << " " << PSTR(frag)
+           << ", " << PSTR(op->FillingValue());
       }
     } break;
     case AST::MMAOperation::Load: {

@@ -17,5 +17,5 @@ __co__ auto check_arr_dim(int M) {
 // CHECK: error: The array dimensions should be greater than 0, but got -1.
 // CHECK: error: The array dimensions should be greater than 0, but got 0.
 // CHECK: error: The array dimensions should be greater than 0, but got -5.
-// CHECK: error: The array dimensions should be static (compile-time known).
+// CHECK: error: The array dimensions should be static (compile-time known), but got ::check_arr_dim::M.
 // CHECK: Totally 5 errors have been detected.

@@ -1207,7 +1207,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType base_type;
   size_t rank = GetInvalidRank(); // for annotated ituple only
   ptr<Node> mdspan_type = nullptr;
-  std::optional<Shape> array_dims = std::nullopt;
+  ValueList array_dims;
   bool is_mutable = false;
   bool infer_span = false; // the span must be inferenced
 
@@ -1233,7 +1233,8 @@ public:
 
   explicit DataType(const location& l, BaseType bt, const ptr<MultiValues>& ad)
       : Node(l), base_type(bt), rank(1) {
-    if (ad != nullptr) array_dims = ValxN(sbe::nu(-1), ad->Count());
+    // infer the real array dim at shapeinfer.
+    if (ad != nullptr) array_dims = GenUninitValueList(ad->Count());
     assert(((bt == BaseType::EVENT) || (bt == BaseType::UNKNOWN)) &&
            "unexpected type!");
     InitSemaType();
@@ -1241,7 +1242,7 @@ public:
 
   // used for clone
   explicit DataType(const location& l, BaseType bt, size_t r,
-                    const ptr<Node> pt, const std::optional<Shape>& ad, bool im,
+                    const ptr<Node> pt, const ValueList& ad, bool im,
                     bool infer)
       : Node(l), base_type(bt), rank(r), mdspan_type(pt), array_dims(ad),
         is_mutable(im), infer_span(infer) {}
@@ -1256,8 +1257,11 @@ public:
            (base_type != BaseType::ARRAY) && (base_type != BaseType::ADDR) &&
            (base_type != BaseType::VOID) && (base_type != BaseType::VOID);
   }
-  bool IsArrayType() const { return array_dims.has_value(); }
-  ValueList ArrayAsValueList() const { return array_dims.value().Value(); }
+  bool IsArrayType() const { return !array_dims.empty(); }
+  ValueList ArrayDims() const {
+    if (!IsArrayType()) choreo_unreachable("The type is not array.");
+    return array_dims;
+  }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
   bool ExplicitSpanned() const { return (bool)mdspan_type; }
 
@@ -1295,7 +1299,7 @@ private:
           SetType(MakeUnRankedSpannedType(base_type));
         else
           SetType(MakeStridedSpannedArrayType(base_type, GenUnknownShape(), {},
-                                              ArrayAsValueList()));
+                                              ArrayDims()));
       } else {
         choreo_unreachable("Unexpected BaseType: " + STR(base_type) + ".");
       }
@@ -1306,7 +1310,7 @@ private:
         if (!IsArrayType())
           SetType(MakeEventType(Storage::DEFAULT));
         else
-          SetType(MakeEventArrayType(Storage::DEFAULT, ArrayAsValueList()));
+          SetType(MakeEventArrayType(Storage::DEFAULT, ArrayDims()));
       } else if (base_type == BaseType::ITUPLE) {
         if (!IsValidRank(rank))
           // type inference to deduce the dim count
@@ -1434,7 +1438,6 @@ struct NamedVariableDecl : public Node,
   ptr<Node> init_expr = nullptr;         // associated initializer
   const ptr<Node> init_value = nullptr;  // associated initial value
   ptr<MultiValues> array_dims = nullptr; // has element when it is an array
-  Shape array_shape;                     // the shape is static
   bool is_mutable = false;
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
@@ -1459,21 +1462,12 @@ struct NamedVariableDecl : public Node,
     if (ad == nullptr) return;
     array_dims = ad;
     array_dims->SetDelimiter(", ");
-    array_shape = Shape(array_dims->Count());
   }
   bool IsArray() const { return array_dims != nullptr; }
   ptr<Node> ArrayDimension(size_t idx) const {
     return array_dims->ValueAt(idx);
   }
   const ptr<MultiValues>& ArrayDimensions() const { return array_dims; }
-  const ValueList ArrayDimAsValueList() const {
-    if (!array_dims) return {};
-    return array_shape.Value();
-  }
-  ValueItem ArraySize() const {
-    if (!IsArray()) return sbe::nu(1);
-    return MultiplyAll(ArrayDimAsValueList());
-  }
 
   bool IsMutable() const { return is_mutable; }
   void SetMutable(bool m) { is_mutable = m; }
@@ -2571,31 +2565,38 @@ public:
   enum Kind { Fill, Load, Exec, Store, Commit };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
+  // NOTE: acc, lhs, rhs are not accepted in ast.cpp.
+
   struct FillInfo {
-    std::string buffer_sym;
+    // TODO: for now, fill can only be operated on fragment C.
+    // If multibuffer is to be enabled, fill should be able to all fragments.
+    // And, mma.load should pass frag as parameter rather than return value.
+    ptr<Expr> buffer;
     ptr<Expr> fill_expr;
+    bool is_decl; // If `mma.fill mc, 0.0f`, false
     BaseType fill_elem_type;
-    bool is_decl; // true by default. If `mma.fill mc, 0.0f`, false
+    ptr<MultiValues> array_dims; // nullptr by default.
   };
   struct LoadInfo {
+    // for now, load is always decl+load.
     ptr<ChunkAt> ld_expr;
-    std::string future;
+    ptr<Expr> future;
     bool async;
     SwizMode swiz_mode; // 128, 64, or 32; default 128
   };
   struct ExecInfo {
     ExecMethod method;
-    std::string acc;
-    std::string lhs;
-    std::string rhs;
-    std::string mdata;
+    ptr<Expr> acc;
+    ptr<Expr> lhs;
+    ptr<Expr> rhs;
+    ptr<Expr> mdata;
     bool is_sparse;
     bool scale;
     ptr<ChunkAt> scale_a;
     ptr<Expr> scale_b;
   };
   struct StoreInfo {
-    std::string buf_sym;
+    ptr<Expr> buffer;
     ptr<ChunkAt> st_expr;
   };
   using InfoType = std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo>;
@@ -2605,34 +2606,38 @@ private:
   InfoType info;
 
 public:
-  MMAOperation(const std::string& n, const ptr<Expr>& e,
-               BaseType t = BaseType::UNKSCALAR, bool is_decl = true)
-      : tag(Fill), info(FillInfo{n, e, t, is_decl}) {}
-  MMAOperation(const ptr<ChunkAt>& e, const std::string& fu, bool a = false,
+  MMAOperation(const ptr<Expr>& n, const ptr<Expr>& e, bool is_decl,
+               BaseType t = BaseType::UNKSCALAR)
+      : tag(Fill), info(FillInfo{n, e, is_decl, t, nullptr}) {}
+
+  MMAOperation(const ptr<ChunkAt>& e, const ptr<Expr>& fu, bool a = false,
                SwizMode swizzle = SwizMode::B128)
       : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
-  MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
-               const std::string& r, bool sp = false)
-      : tag(Exec), info(ExecInfo{m, o, l, r, "", sp, false, nullptr, nullptr}) {
-  }
-  MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
-               const std::string& r, const std::string& e, bool sp)
+
+  MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
+               const ptr<Expr>& r, bool sp = false)
+      : tag(Exec),
+        info(ExecInfo{m, o, l, r, nullptr, sp, false, nullptr, nullptr}) {}
+  MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
+               const ptr<Expr>& r, const ptr<Expr>& e, bool sp)
       : tag(Exec), info(ExecInfo{m, o, l, r, e, sp, false, nullptr, nullptr}) {}
-  MMAOperation(ExecMethod m, const std::string& o, const std::string& l,
-               const std::string& r, const ptr<ChunkAt>& scale_a,
+  MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
+               const ptr<Expr>& r, const ptr<ChunkAt>& scale_a,
                const ptr<Expr>& scale_b)
       : tag(Exec),
-        info(ExecInfo{m, o, l, r, "", false, true, scale_a, scale_b}) {}
-  MMAOperation(const std::string& n, const ptr<ChunkAt>& c)
+        info(ExecInfo{m, o, l, r, nullptr, false, true, scale_a, scale_b}) {}
+
+  MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c)
       : tag(Store), info(StoreInfo{n, c}) {}
+
   MMAOperation() : tag(Commit), info() {}
 
 public:
   bool IsKind(Kind k) const { return k == tag; }
 
-  const std::string FillingSymbol() const {
+  const ptr<Expr> FillingTo() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
-    return std::get<0>(info).buffer_sym;
+    return std::get<0>(info).buffer;
   }
   ptr<Expr> FillingValue() {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
@@ -2650,6 +2655,14 @@ public:
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
     return std::get<0>(info).is_decl;
   }
+  void SetFillingArrayDims(ptr<MultiValues> d) {
+    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
+    std::get<0>(info).array_dims = d;
+  }
+  const ptr<MultiValues> FillingArrayDims() const {
+    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
+    return std::get<0>(info).array_dims;
+  }
 
   ptr<ChunkAt> LoadFrom() {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
@@ -2661,7 +2674,7 @@ public:
     auto l_info = std::get<1>(info);
     return l_info.ld_expr;
   }
-  const std::string LoadTo() const {
+  const ptr<Expr> LoadTo() const {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.future;
@@ -2675,9 +2688,9 @@ public:
     if (tag != Store) choreo_unreachable("not a mma store operation.");
     return std::get<3>(info).st_expr;
   }
-  const std::string StoreFrom() const {
+  const ptr<Expr> StoreFrom() const {
     if (tag != Store) choreo_unreachable("not a mma store operation.");
-    return std::get<3>(info).buf_sym;
+    return std::get<3>(info).buffer;
   }
 
   void SetAsync(bool async = true) {
@@ -2692,7 +2705,7 @@ public:
     return l_info.async;
   }
 
-  const std::string ExecOperand(size_t index) const {
+  const ptr<Expr> ExecOperand(size_t index) const {
     if (tag != Exec) choreo_unreachable("not a mma exec operation.");
     auto e_info = std::get<2>(info);
     if (index == 0)
@@ -2737,25 +2750,21 @@ public:
     return e_info.scale_b;
   }
 
-  void SetFuture(const std::string& fut_name) {
+  void SetFuture(const ptr<AST::Expr>& fut) {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
-    l_info.future = fut_name;
+    l_info.future = fut;
   }
 
-  const std::string GetFuture() const {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
-    auto l_info = std::get<1>(info);
-    return l_info.future;
-  }
+  const ptr<Expr> GetFuture() const { return LoadTo(); }
 
-  const std::string GetFragSym() const {
-    if (tag == Fill) return FillingSymbol();
+  const ptr<Expr> GetFrag() const {
+    if (tag == Fill) return FillingTo();
     if (tag == Load) return LoadTo();
     if (tag == Exec) return ExecOperand(0);
     if (tag == Store) return StoreFrom();
     choreo_unreachable("unexpected mma operation!");
-    return "";
+    return nullptr;
   }
 
   SwizMode GetSwizzleMode() const {
@@ -2776,27 +2785,26 @@ public:
   const ptr<MMAOperation> Clone() const {
     switch (tag) {
     case Fill:
-      return Make<MMAOperation>(FillingSymbol(), CloneP(FillingValue()),
-                                FillingType(), FillingIsDecl());
-      break;
+      return Make<MMAOperation>(CloneP(FillingTo()), CloneP(FillingValue()),
+                                FillingIsDecl(), FillingType());
     case Load: {
       auto l_info = std::get<1>(info);
-      return Make<MMAOperation>(CloneP(l_info.ld_expr), l_info.future,
+      return Make<MMAOperation>(CloneP(l_info.ld_expr), CloneP(l_info.future),
                                 l_info.async, l_info.swiz_mode);
-    } break;
+    }
     case Exec: {
       auto e_info = std::get<2>(info);
       if (e_info.scale)
-        return Make<MMAOperation>(e_info.method, e_info.acc, e_info.lhs,
-                                  e_info.rhs, CloneP(e_info.scale_a),
-                                  CloneP(e_info.scale_b));
-      return Make<MMAOperation>(e_info.method, e_info.acc, e_info.lhs,
-                                e_info.rhs, e_info.mdata, e_info.is_sparse);
-    } break;
-    case Store: {
-      return Make<MMAOperation>(StoreFrom(), CloneP(StoreTo()));
-    } break;
-    case Commit: return Make<MMAOperation>(); break;
+        return Make<MMAOperation>(
+            e_info.method, CloneP(e_info.acc), CloneP(e_info.lhs),
+            CloneP(e_info.rhs), CloneP(e_info.scale_a), CloneP(e_info.scale_b));
+      return Make<MMAOperation>(e_info.method, CloneP(e_info.acc),
+                                CloneP(e_info.lhs), CloneP(e_info.rhs),
+                                CloneP(e_info.mdata), e_info.is_sparse);
+    }
+    case Store:
+      return Make<MMAOperation>(CloneP(StoreFrom()), CloneP(StoreTo()));
+    case Commit: return Make<MMAOperation>();
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
     return nullptr;
@@ -2806,13 +2814,13 @@ public:
     switch (tag) {
     case Fill: {
       if (FillingIsDecl())
-        os << FillingSymbol() << " = MMA.FILL " << PSTR(FillingValue());
+        os << PSTR(FillingTo()) << " = MMA.FILL " << PSTR(FillingValue());
       else
-        os << "MMA.FILL " << FillingSymbol() << ", " << PSTR(FillingValue());
+        os << "MMA.FILL " << PSTR(FillingTo()) << ", " << PSTR(FillingValue());
     } break;
     case Load: {
       auto l_info = std::get<1>(info);
-      if (!l_info.future.empty()) os << l_info.future << " = ";
+      if (l_info.future) os << PSTR(l_info.future) << " = ";
       os << "MMA.LOAD" << ((l_info.async) ? ".ASYNC" : "") << " "
          << PSTR(l_info.ld_expr);
     } break;
@@ -2829,10 +2837,11 @@ public:
       if (e_info.is_sparse) os << ".SP";
       if (e_info.scale) os << ".SCALE";
       // TODO: missing scale
-      os << " " << e_info.acc << ", " << e_info.lhs << ", " << e_info.rhs;
+      os << " " << PSTR(e_info.acc) << ", " << PSTR(e_info.lhs) << ", "
+         << PSTR(e_info.rhs);
     } break;
     case Store: {
-      os << "MMA.STORE " << StoreFrom() << ", " << PSTR(StoreTo());
+      os << "MMA.STORE " << PSTR(StoreFrom()) << ", " << PSTR(StoreTo());
     } break;
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
@@ -3603,6 +3612,16 @@ inline const ValueList MakeValueList(const ptr<MultiValues>& mv) {
     vl.push_back(e->Opts().GetVal());
   }
   return vl;
+}
+
+inline bool FragIsArrayElem(const ptr<AST::Expr>& e) {
+  if (e->op == "elemof") return true;
+  return false;
+}
+
+inline const std::string FragName(const ptr<AST::Expr>& e) {
+  if (auto id = e->GetSymbol()) return id->name;
+  return GetArrayBaseSymbol(*e)->name;
 }
 
 } // end of namespace AST

@@ -1114,7 +1114,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       if (!CCtx().MemReuse()) {
         ds << d_indent << type_modifiers << bts << " " << sym;
-        for (const auto& dim : n.ArrayDimAsValueList())
+        for (const auto& dim : GetArrayDimensions(nty))
           ds << "[" << ValueSTR(dim) << "]";
         ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;
@@ -1810,13 +1810,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     std::string bts = NameBaseType(t_sty->ElementType());
     auto buf_sym = t_sym + "__device";
     auto buf_sym_from = f_sym + "__device";
+    static int s_cnt = 0;
     if (n.operation == ".copy") {
       if (SymbolToSymbol()) {
         // direct copy
         hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
            << ";\n";
       } else if (SymbolToTile()) {
-        static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
         auto [offset, offcnt] = GenMdsOffset(t_ca);
@@ -1824,7 +1824,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         hs << h_indent << bts << " * " << buf_sym << " + " << off_name << " = "
            << buf_sym_from << ";\n";
       } else if (TileToSymbol()) {
-        static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
         auto [offset, offcnt] = GenMdsOffset(f_ca);
@@ -2338,43 +2337,67 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     ds << d_indent << "warpgroup_wait<0>();\n";
     return true;
   }
-  std::string scoped_frag_name = InScopeName(op.GetFragSym());
-  if (!FCtx(fname).FragHasMMAType(scoped_frag_name)) {
-    Error1(n.LOC(), "the MMA operation of `" + scoped_frag_name +
+
+  const ptr<AST::Expr>& frag = op.GetFrag(); // the primary frag node
+  std::string sym = AST::FragName(frag);     // the primary symbol
+  std::string scoped_frag_sym = InScopeName(sym);
+  if (!FCtx(fname).FragHasMMAType(scoped_frag_sym)) {
+    Error1(n.LOC(), "the MMA operation of `" + scoped_frag_sym +
                         "` cannot be executed.");
     choreo_unreachable(
         "MMA information is incomplete (maybe lack of mma exec).");
   }
 
-  if (FCtx(fname).FragIsWGMMA(scoped_frag_name)) {
+  auto TraverseWholeArrayBegin = [&](const ValueList& array_dims,
+                                     std::string& indices) {
+    for (size_t i = 0; i < array_dims.size(); ++i) {
+      std::string idx = "idx" + std::to_string(i);
+      indices += "[" + idx + "]";
+      ds << d_indent << "for (int " << idx << " = 0; " << idx << " < "
+         << ValueSTR(array_dims[i]) << "; ++" << idx << ")\n";
+      IncrDeviceIndent();
+    }
+  };
+  auto TraverseWholeArrayEnd = [&](const ValueList& array_dims) {
+    for (size_t i = 0; i < array_dims.size(); ++i) DecrDeviceIndent();
+  };
+
+  static int fill_cnt = 0;
+
+  if (FCtx(fname).FragIsWGMMA(scoped_frag_sym)) {
     // WGMMA codegen path (128-thread warp group) using PTX inline assembly
-    auto& ssmi = cgi.GetSymbolMMA(scoped_frag_name);
+    auto& ssmi = cgi.GetSymbolMMA(scoped_frag_sym);
     // Determine accumulator type: f32 for f16->f32, f16 for f16->f16
     std::string accum_type = (ssmi.ty == BaseType::F16) ? "f16" : "f32";
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: {
-      auto sym = op.FillingSymbol();
       // dtype of accu: s32, f16, f32 (f16 => u32)
       auto acc_dtype = ssmi.ty;
-      ValueItem frag_len = sbe::bop(OpCode::DIVIDE, ssmi.shape[1], sbe::nu(2))
-                               ->Normalize(); // N / 2
+      ValueItem frag_len = ssmi.shape[1] / sbe::nu(2); // N / 2
       bool use_uint32 = false;
       if (ssmi.ty == BaseType::F16) {
         use_uint32 = true;
         acc_dtype = BaseType::U32;
-        frag_len = sbe::bop(OpCode::DIVIDE, frag_len, sbe::nu(2))->Normalize();
+        frag_len = frag_len / sbe::nu(2);
       }
       if (!VIIsInt(frag_len))
         choreo_unreachable(
             "expect the length of wgmma fragment to be integer but not symbol");
+      // the register number in a single mc frag.
       reg_num_d = *VIInt(frag_len);
 
+      ptr<ArrayType> aty = nullptr;
+      if (op.FillingArrayDims())
+        aty = cast<ArrayType>(NodeType(*op.FillingArrayDims()));
+
       if (op.FillingIsDecl()) {
-        ds << d_indent << NameBaseType(acc_dtype) << " " << sym << "_frag["
-           << reg_num_d << "];\n";
-        ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
+        ds << d_indent << NameBaseType(acc_dtype) << " " << sym;
+        if (aty)
+          for (const auto& dim : aty->Dimensions())
+            ds << "[" << ValueSTR(dim) << "]";
+        ds << "[" << reg_num_d << "];\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
       }
-      static int fill_cnt = 0;
       // TODO: #pragma unroll
       // if ubound is large, may lead to low performance
       std::string scalar_init_val =
@@ -2382,23 +2405,38 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                       GetBaseType(*op.FillingValue()->GetType()), false);
       std::string frag_iv_str = "__frag_init_val" + std::to_string(fill_cnt);
       if (use_uint32) {
-        std::string temp = "__fiv_temp" + fill_cnt;
+        std::string temp = "__fiv_temp" + std::to_string(fill_cnt);
         ds << d_indent << "uint32_t " << frag_iv_str << " = broadcast_to_u32("
            << scalar_init_val << ");\n";
       } else {
         ds << d_indent << NameBaseType(ssmi.ty) << " " << frag_iv_str << " = "
            << scalar_init_val << ";\n";
       }
-      ds << d_indent << "for (int idx = 0; idx < " << reg_num_d << "; ++idx)\n";
-      IncrDeviceIndent();
-      ds << d_indent << sym << "_frag[idx] = " << frag_iv_str << ";\n";
+      if (aty && !AST::FragIsArrayElem(frag)) {
+        // need to fill the whole fragment array
+        std::string indices;
+        TraverseWholeArrayBegin(aty->Dimensions(), indices);
+        // the loop body
+        ds << d_indent << "for (int idx = 0; idx < " << reg_num_d
+           << "; ++idx) {\n";
+        IncrDeviceIndent();
+        ds << d_indent << sym << indices << "[idx] = " << frag_iv_str << ";\n";
+        DecrDeviceIndent();
+        ds << d_indent << "}\n";
+        TraverseWholeArrayEnd(aty->Dimensions());
+      } else {
+        ds << d_indent << "for (int idx = 0; idx < " << reg_num_d
+           << "; ++idx)\n";
+        IncrDeviceIndent();
+        ds << d_indent << ExprSTR(frag, false) << "[idx] = " << frag_iv_str
+           << ";\n";
+        DecrDeviceIndent();
+      }
       ++fill_cnt;
-      DecrDeviceIndent();
       // Signal warp group that we're about to start WGMMA operations
       ds << d_indent << "warpgroup_arrive();\n";
     } break;
     case AST::MMAOperation::Load: {
-      auto sym = op.LoadTo();
       // For WGMMA, we store the shared memory pointer for later use in Exec
       // The actual data should already be in shared memory
       std::string elem_ty = NameBaseType(ssmi.ty);
@@ -2450,7 +2488,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         }
       }
-      ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
+      ssm.MapDeviceSymbol(InScopeName(sym), sym);
     } break;
     case AST::MMAOperation::Exec: {
       // Detect memory layout based on MMA execution method
@@ -2474,9 +2512,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       } else {
         choreo_unreachable("Unsupported MMA execution method");
       }
-      auto c_sym = op.ExecOperand(0);
-      auto a_sym = op.ExecOperand(1);
-      auto b_sym = op.ExecOperand(2);
+      auto c_sym = AST::FragName(op.ExecOperand(0));
+      auto a_sym = AST::FragName(op.ExecOperand(1));
+      auto b_sym = AST::FragName(op.ExecOperand(2));
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(c_sym));
       std::string cc = SplitStringByDelimiter(mma_policy, "::")[0];
       auto cute_gmma_major_cast = "static_cast<cute::" + cc + "::GMMA::Major>";
@@ -2537,12 +2575,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       if (op.HasScale()) {
         // dtype of accu: s32, f16, f32 (f16 => u32)
         auto acc_dtype = ssmi.ty;
-        ValueItem frag_len = sbe::bop(OpCode::DIVIDE, ssmi.shape[1], sbe::nu(2))
-                                 ->Normalize(); // N / 2
+        ValueItem frag_len = ssmi.shape[1] / sbe::nu(2);
         if (ssmi.ty == BaseType::F16) {
           acc_dtype = BaseType::U32;
-          frag_len =
-              sbe::bop(OpCode::DIVIDE, frag_len, sbe::nu(2))->Normalize();
+          frag_len = frag_len / sbe::nu(2);
         }
         reg_num_d = *VIInt(frag_len);
 
@@ -2561,7 +2597,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (op.HasScale())
           ds << ", " << c_sym << "_scale_frag[" << i << "]";
         else
-          ds << ", " << c_sym << "_frag[" << i << "]";
+          ds << ", " << ExprSTR(frag, false) << "[" << i << "]";
       }
       if (policy_is_sparse) ds << ", " << a_sym << "_meta";
       ds << ");\n";
@@ -2576,7 +2612,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << "static_cast<float>(" << ExprSTR(op.ScaleB(), false) << ");\n";
         ds << d_indent << "scale_accumulator<" << acc_ty << ", float, " << dim_n
            << ">("
-           << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_frag), "
+           << "reinterpret_cast<" << acc_ty << "*>(" << ExprSTR(frag, false)
+           << "), "
            << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_scale_frag"
            << "), " << c_sym << "_scale_a_ptr, " << scale_a_ld << ", " << c_sym
            << "_scale_b_val);\n";
@@ -2597,18 +2634,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
           ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
-      auto sym = op.StoreFrom();
       std::string DIM_N = STR(ssmi.shape.at(1));
       std::string CUTE_WGMMA_ATOM =
           "CUTE_WGMMA_M" + STR(ssmi.shape.at(0)) + "K" + STR(ssmi.shape.at(2));
 
       ds << d_indent << "store_fragment_d<" << CUTE_WGMMA_ATOM << ", " << DIM_N
          << ">(" << f_mds.first << ", " << "reinterpret_cast<"
-         << NameBaseType(accum_type) << "*>(" << sym << "_frag));\n";
+         << NameBaseType(accum_type) << "*>(" << ExprSTR(frag, false)
+         << "));\n";
     } break;
     default: break;
     }
-  } else if (FCtx(fname).FragIsWMMA(scoped_frag_name)) {
+  } else if (FCtx(fname).FragIsWMMA(scoped_frag_sym)) {
     auto FragSTR = [](MMAInfo::Fragment frag) {
       switch (frag) {
       case MMAInfo::FRAG_A: return "matrix_a";
@@ -2620,24 +2657,39 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     };
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: {
-      auto sym = op.FillingSymbol();
       auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       auto sty = GetSpannedType(GetSymbolType(sym));
       assert(sty);
+      ptr<ArrayType> aty = nullptr;
+      if (op.FillingArrayDims())
+        aty = cast<ArrayType>(NodeType(*op.FillingArrayDims()));
       if (op.FillingIsDecl()) {
         ds << d_indent
            << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
            << ", ";
         ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> "
-           << sym << "_frag;\n";
-        ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
+           << sym;
+        if (aty)
+          for (const auto& dim : aty->Dimensions())
+            ds << "[" << ValueSTR(dim) << "]";
+        ds << ";\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
       }
-      ds << d_indent << "nvcuda::wmma::fill_fragment(" << sym << "_frag, ("
-         << NameBaseType(ssmi.ty) << ")" << ExprSTR(op.FillingValue(), false)
-         << ");\n";
+      if (aty && !AST::FragIsArrayElem(frag)) {
+        std::string indices;
+        TraverseWholeArrayBegin(aty->Dimensions(), indices);
+        ds << d_indent << "nvcuda::wmma::fill_fragment(" << sym << indices
+           << ", (" << NameBaseType(ssmi.ty) << ")"
+           << ExprSTR(op.FillingValue(), false) << ");\n";
+        TraverseWholeArrayEnd(aty->Dimensions());
+      } else {
+        ds << d_indent << "nvcuda::wmma::fill_fragment(" << ExprSTR(frag, false)
+           << ", (" << NameBaseType(ssmi.ty) << ")"
+           << ExprSTR(op.FillingValue(), false) << ");\n";
+      }
+      ++fill_cnt;
     } break;
     case AST::MMAOperation::Load: {
-      auto sym = op.LoadTo();
       auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       auto sty = GetSpannedType(GetSymbolType(sym));
       auto fty = GetSpannedType(GetSymbolType(op.LoadFrom()->RefSymbol()));
@@ -2672,20 +2724,20 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         }
         ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << ", "
-           << wmma_major << "> " << sym << "_frag;\n";
+           << wmma_major << "> " << sym << ";\n";
 
-        ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
+        ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << ", "
            << ValueSTR(TileAddr(op.LoadFrom(), false)) << ", "
            << ValueSTR(fty->GetShape().ValueAt(fty->GetShape().Rank() - 1))
            << ");\n";
-        ssm.MapDeviceSymbol(InScopeName(sym), sym + "_frag");
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
       } else if (ssmi.frag == MMAInfo::FRAG_C) {
         ds << d_indent
            << "nvcuda::wmma::fragment<nvcuda::wmma::" << FragSTR(ssmi.frag)
            << ", ";
         ds << ValueSTR(ssmi.shape) << ", " << NameBaseType(ssmi.ty) << "> "
-           << sym << "_frag;\n";
-        ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << "_frag, "
+           << sym << ";\n";
+        ds << d_indent << "nvcuda::wmma::load_matrix_sync(" << sym << ", "
            << ExprSTR(op.LoadFrom(), false) << ", "
            << ValueSTR(fty->GetShape().ValueAt(fty->GetShape().Rank() - 1))
            << ", nvcuda::wmma::mem_row_major);\n";
@@ -2694,20 +2746,23 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
     } break;
     case AST::MMAOperation::Exec: {
-      ds << d_indent << "nvcuda::wmma::mma_sync(" << op.ExecOperand(0)
-         << "_frag, " << op.ExecOperand(1) << "_frag, " << op.ExecOperand(2)
-         << "_frag, " << op.ExecOperand(0) << "_frag);\n";
+      ds << d_indent << "nvcuda::wmma::mma_sync("
+         << ExprSTR(op.ExecOperand(0), false) << ", "
+         << ExprSTR(op.ExecOperand(1), false) << ", "
+         << ExprSTR(op.ExecOperand(2), false) << ", "
+         << ExprSTR(op.ExecOperand(0), false) << ");\n";
     } break;
     case AST::MMAOperation::Store: {
       auto tty = GetSpannedType(GetSymbolType(op.StoreTo()->RefSymbol()));
       ds << d_indent << "nvcuda::wmma::store_matrix_sync("
-         << ValueSTR(TileAddr(op.StoreTo(), false)) << ", " << op.StoreFrom()
-         << "_frag, " << ValueSTR(tty->GetShape().ValueAt(1))
+         << ValueSTR(TileAddr(op.StoreTo(), false)) << ", "
+         << ExprSTR(op.StoreFrom(), false) << ", "
+         << ValueSTR(tty->GetShape().ValueAt(1))
          << ", nvcuda::wmma::mem_row_major);\n";
     } break;
     default: break;
     }
-  } else if (FCtx(fname).FragIsCTMMA(scoped_frag_name)) {
+  } else if (FCtx(fname).FragIsCTMMA(scoped_frag_sym)) {
     // CUTE MMA api name in choreo
     auto GetMMAAtomName = [](MMAInfo& ssmi) -> std::string {
       std::string CUTE_MMA_ATOM = "CUTE_MMA_M" + STR(ssmi.shape.at(0)) + "N" +
@@ -2736,7 +2791,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     // n is not wmma. Inline PTX.
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: {
-      auto sym = op.FillingSymbol();
       auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       assert(ssmi.ty != BaseType::UNKNOWN);
       auto sty = GetSpannedType(GetSymbolType(sym));
@@ -2746,10 +2800,20 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool use_uint32 = false;
       UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
       RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
-      if (op.FillingIsDecl())
+
+      ptr<ArrayType> aty = nullptr;
+      if (op.FillingArrayDims())
+        aty = cast<ArrayType>(NodeType(*op.FillingArrayDims()));
+
+      if (op.FillingIsDecl()) {
         ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
-           << " " << sym << "_frag[" << reg_num_d << "];\n";
-      static int fill_cnt = 0;
+           << " " << sym;
+        if (aty)
+          for (const auto& dim : aty->Dimensions())
+            ds << "[" << ValueSTR(dim) << "]";
+        ds << "[" << reg_num_d << "];\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
+      }
       // TODO: #pragma unroll
       // if ubound is large, may lead to low performance
       std::string scalar_init_val =
@@ -2757,18 +2821,35 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                       GetBaseType(*op.FillingValue()->GetType()), false);
       std::string frag_iv_str = "__frag_init_val" + std::to_string(fill_cnt);
       if (use_uint32) {
-        std::string temp = "__fiv_temp" + fill_cnt;
+        std::string temp = "__fiv_temp" + std::to_string(fill_cnt);
         ds << d_indent << "uint32_t " << frag_iv_str << " = broadcast_to_u32("
            << scalar_init_val << ");\n";
       } else {
         ds << d_indent << NameBaseType(ssmi.ty) << " " << frag_iv_str << " = "
            << scalar_init_val << ";\n";
       }
-      ds << d_indent << "for (int idx = 0; idx < " << reg_num_d << "; ++idx)\n";
-      IncrDeviceIndent();
-      ds << d_indent << sym << "_frag[idx] = " << frag_iv_str << ";\n";
+
+      if (aty && !AST::FragIsArrayElem(frag)) {
+        // need to fill the whole fragment array
+        std::string indices;
+        TraverseWholeArrayBegin(aty->Dimensions(), indices);
+        // the loop body
+        ds << d_indent << "for (int idx = 0; idx < " << reg_num_d
+           << "; ++idx) {\n";
+        IncrDeviceIndent();
+        ds << d_indent << sym << indices << "[idx] = " << frag_iv_str << ";\n";
+        DecrDeviceIndent();
+        ds << d_indent << "}\n";
+        TraverseWholeArrayEnd(aty->Dimensions());
+      } else {
+        ds << d_indent << "for (int idx = 0; idx < " << reg_num_d
+           << "; ++idx)\n";
+        IncrDeviceIndent();
+        ds << d_indent << ExprSTR(frag, false) << "[idx] = " << frag_iv_str
+           << ";\n";
+        DecrDeviceIndent();
+      }
       ++fill_cnt;
-      DecrDeviceIndent();
     } break;
     case AST::MMAOperation::Load: {
       auto ca = op.LoadFrom();
@@ -2781,7 +2862,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
           ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
-      auto sym = op.LoadTo();
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE") != std::string::npos;
@@ -2814,9 +2894,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           frag_suffix = "e";
 
         std::string CUTE_MMA_ATOM = mma_atom_name();
-        ds << d_indent << "auto " << sym << "_frag = load_fragment_"
-           << frag_suffix << "<" << CUTE_MMA_ATOM << ">(" << f_mds.first
-           << ");\n";
+        ds << d_indent << "auto " << sym << " = load_fragment_" << frag_suffix
+           << "<" << CUTE_MMA_ATOM << ">(" << f_mds.first << ");\n";
 
         if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
           std::string ref_sym = op.LoadFrom()->RefSymbol();
@@ -2848,27 +2927,37 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         UseUint32Reg(use_uint32, reg_num_d, ssmi.ty);
         RegNumOf8x8x4(ssmi.shape, ssmi.ty, MMAInfo::FRAG_C, reg_num_d);
         std::string CUTE_MMA_ATOM = mma_atom_name();
-        ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
-           << " " << sym << "_frag[" << reg_num_d << "] ;\n";
-        ds << d_indent << "load_fragment_d<" << CUTE_MMA_ATOM << ">("
-           << f_mds.first << ", " << "reinterpret_cast<"
-           << NameBaseType(ssmi.ty) << "*> (" << sym << "_frag));\n";
+        // TODO: add more testcases about load mc & fill mc.
+        // TODO: is load mc supported in other xx_mma?
+        if (isa<ArrayType>(GetSymbolType(sym))) {
+          // only load to a single frag. Need `fill` to decl the frag array!
+          ds << d_indent << "load_fragment_d<" << CUTE_MMA_ATOM << ">("
+             << f_mds.first << ", " << "reinterpret_cast<"
+             << NameBaseType(ssmi.ty) << "*> (" << ExprSTR(frag) << "));\n";
+        } else {
+          // decl + load
+          ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
+             << " " << sym << "[" << reg_num_d << "] ;\n";
+          ds << d_indent << "load_fragment_d<" << CUTE_MMA_ATOM << ">("
+             << f_mds.first << ", " << "reinterpret_cast<"
+             << NameBaseType(ssmi.ty) << "*> (" << sym << "));\n";
+        }
       } else {
         choreo_unreachable("unexpect MMA frag");
       }
     } break;
     case AST::MMAOperation::Exec: {
-      auto c_sym = op.ExecOperand(0);
-      auto a_sym = op.ExecOperand(1);
-      auto b_sym = op.ExecOperand(2);
+      auto c_sym = AST::FragName(op.ExecOperand(0));
+      auto a_sym = AST::FragName(op.ExecOperand(1));
+      auto b_sym = AST::FragName(op.ExecOperand(2));
       auto e_sym_provided = op.ExecOperand(3);
 
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(c_sym));
       bool policy_is_sparse = mma_policy.find("SPARSE") != std::string::npos;
       std::string meta_var;
       if (policy_is_sparse) {
-        if (!e_sym_provided.empty()) {
-          meta_var = e_sym_provided + "_frag";
+        if (e_sym_provided) {
+          meta_var = AST::FragName(e_sym_provided);
         } else {
           auto& ssmi_a = cgi.GetSymbolMMA(InScopeName(a_sym));
           meta_var = a_sym + "_meta";
@@ -2910,7 +2999,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
       ds << d_indent << "cute::" << mma_policy << "::fma(";
       for (size_t i = 0; i < reg_num_d; ++i)
-        ds << c_sym << "_frag[" << i << "], ";
+        ds << ExprSTR(frag, false) << "[" << i << "], ";
       // TODO: test with mma config except mma.row.col
       auto shape = cgi.GetSymbolMMA(InScopeName(c_sym)).shape;
       auto m = shape[0], n = shape[1], k = shape[2];
@@ -2927,12 +3016,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // Handle sparse A fragment size (reg_num_a is logically for full K)
       if (policy_is_sparse) { reg_num_a /= 2; }
 
-      for (size_t i = 0; i < reg_num_a; ++i)
-        ds << a_sym << "_frag[" << i << "], ";
-      for (size_t i = 0; i < reg_num_b; ++i)
-        ds << b_sym << "_frag[" << i << "], ";
+      for (size_t i = 0; i < reg_num_a; ++i) ds << a_sym << "[" << i << "], ";
+      for (size_t i = 0; i < reg_num_b; ++i) ds << b_sym << "[" << i << "], ";
       for (size_t i = 0; i < reg_num_d; ++i) {
-        ds << c_sym << "_frag[" << i << "]";
+        ds << ExprSTR(frag, false) << "[" << i << "]";
         if (i != reg_num_d - 1) ds << ", ";
       }
       if (policy_is_sparse) ds << ", " << meta_var << ", 0";
@@ -2951,7 +3038,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                         ca->GetBlockShape(), false, ValueSTR(GenOffset(ca)),
                         ValueSTR(fca_sty->GetStrides(), false, true));
       ds << f_mds.second;
-      auto sym = op.StoreFrom();
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE") != std::string::npos;
@@ -2971,7 +3057,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                                     : GetMMAAtomName(ssmi);
       ds << d_indent << "store_fragment_d<" << CUTE_MMA_ATOM << ">("
          << f_mds.first << ", " << "reinterpret_cast<" << NameBaseType(ssmi.ty)
-         << "*> (" << sym << "_frag));\n";
+         << "*> (" << ExprSTR(frag, false) << "));\n";
     } break;
     default: break;
     }

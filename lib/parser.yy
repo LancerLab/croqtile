@@ -200,6 +200,7 @@ extern int yylex();
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
+%token <std::string> FRAG
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK CONTINUE
 %token <std::string> VECTORIZE
@@ -226,7 +227,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
@@ -1001,7 +1002,7 @@ named_spanned_decls
           decl->type = cast<AST::DataType>($2->Clone());
           if (decl->IsArray()) {
             // uninit array_dims in type
-            decl->type->array_dims = ValxN(sbe::nu(-1), decl->ArrayDimensions()->Count());
+            decl->type->array_dims = GenUninitValueList(decl->ArrayDimensions()->Count());
             decl->type->ReGenSemaType();
           }
           decl->mem = cast<AST::Memory>(mem->Clone());
@@ -1017,7 +1018,7 @@ named_spanned_decls
           decl->type = cast<AST::DataType>($1->Clone());
           if (decl->IsArray()) {
             // uninit array_dims in type
-            decl->type->array_dims = ValxN(sbe::nu(-1), decl->ArrayDimensions()->Count());
+            decl->type->array_dims = GenUninitValueList(decl->ArrayDimensions()->Count());
             decl->type->ReGenSemaType();
           }
           decl->mem = cast<AST::Memory>(mem->Clone());
@@ -1052,8 +1053,10 @@ spanned_decl
 optional_array_dims
     : /*empty*/ {}
     | optional_array_dims LBRAKT s_expr RBRAKT {
-        if ($1 == nullptr)
+        if ($1 == nullptr) {
           $1 = AST::Make<AST::MultiValues>(loc);
+          $1->AddNote("array_dims");
+        }
         $1->Append($3);
         $$ = $1;
       }
@@ -1061,6 +1064,7 @@ optional_array_dims
 
 subscriptions
     : LBRAKT s_expr RBRAKT {
+        // TODO: like `optional_array_dims`, consider adding note to do unified check?
         $$ = AST::Make<AST::MultiValues>(loc);
         $$->Append($2);
       }
@@ -1934,50 +1938,78 @@ subdata_expr
       }
     ;
 
+// check sema later
+frag_expr
+    : subscript_like_expr { $$ = $1; }
+    | IDENTIFIER { 
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+      }
+    ;
+
 mma_stmt
     : IDENTIFIER ASSIGN MMA FILL s_expr {
-        auto op = AST::Make<AST::MMAOperation>($1, $5);
+        // decl
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+        auto op = AST::Make<AST::MMAOperation>(fexpr, $5, true);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA FILL IDENTIFIER COMMA s_expr {
-        if (!symtab.Exists($3))
-          Parser::error(@3, "The symbol `" + $3 + "' has not been defined.");
-        auto op = AST::Make<AST::MMAOperation>($3, $5, BaseType::UNKSCALAR, false);
+    | FRAG IDENTIFIER optional_array_dims LBRACE s_expr RBRACE {
+        // decl
+        auto fexpr = AST::Make<AST::Expr>(@2, AST::Make<AST::Identifier>(@2, $2)); 
+        auto op = AST::Make<AST::MMAOperation>(fexpr, $5, true);
+        op->SetFillingArrayDims($3);
+        symtab.AddSymbol($2, MakeUnknownType());
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | FRAG DOT fundamental_type IDENTIFIER optional_array_dims LBRACE s_expr RBRACE {
+        // decl
+        auto fexpr = AST::Make<AST::Expr>(@4, AST::Make<AST::Identifier>(@4, $4)); 
+        auto op = AST::Make<AST::MMAOperation>(fexpr, $7, true, $3);
+        op->SetFillingArrayDims($5);
+        symtab.AddSymbol($4, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | IDENTIFIER ASSIGN MMA FILL DOT fundamental_type s_expr {
-        auto op = AST::Make<AST::MMAOperation>($1, $7, $6);
+        // decl
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+        auto op = AST::Make<AST::MMAOperation>(fexpr, $7, true, $6);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA FILL frag_expr COMMA s_expr {
+        auto op = AST::Make<AST::MMAOperation>($3, $5, false, BaseType::UNKSCALAR);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | IDENTIFIER ASSIGN MMA LOAD sync_type chunkat_expr {
-        auto op = AST::Make<AST::MMAOperation>($6, $1, $5);
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+        auto op = AST::Make<AST::MMAOperation>($6, fexpr, $5);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | IDENTIFIER ASSIGN MMA LOAD SWIZZLE swiz_mode sync_type chunkat_expr {
-        auto op = AST::Make<AST::MMAOperation>($8, $1, $7, $6);
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+        auto op = AST::Make<AST::MMAOperation>($8, fexpr, $7, $6);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
+    | MMA mma_exec_method frag_expr COMMA frag_expr COMMA frag_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $3, $5, $7);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method SCALE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER COMMA chunkat_expr COMMA s_expr {
+    | MMA mma_exec_method SCALE frag_expr COMMA frag_expr COMMA frag_expr COMMA chunkat_expr COMMA s_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, $12);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method SPARSE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
+    | MMA mma_exec_method SPARSE frag_expr COMMA frag_expr COMMA frag_expr COMMA frag_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, true);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method SPARSE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER {
+    | MMA mma_exec_method SPARSE frag_expr COMMA frag_expr COMMA frag_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, true);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA STORE IDENTIFIER COMMA chunkat_expr {
+    | MMA STORE frag_expr COMMA chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($3, $5);
         $$ = AST::Make<AST::MMA>(@1, op);
       }

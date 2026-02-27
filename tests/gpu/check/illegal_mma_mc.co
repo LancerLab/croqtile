@@ -1,0 +1,51 @@
+// RUN: not choreo -t cute -arch=sm_86 %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+
+#define M 128
+#define N 256
+#define K 64
+
+__co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f16 [M, N] output;
+
+  int MMA_M = 8, MMA_N = 8, MMA_K = 4;
+  parallel {m, n} by [M / MMA_M / 4, N / MMA_N ] : block {
+    parallel {g0, g1} by [4, 1]: group {
+      mc = mma.load output.chunkat(m#g0, n#g1);
+      foreach k in K / MMA_K {
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.chunkat(m#g0, n#g1);
+    };
+  }
+    
+
+  return output;
+}
+
+__co__ auto matmul_err(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f16 [M, N] output;
+
+  int MMA_M = 8, MMA_N = 8, MMA_K = 4;
+  frag mc[1][3] {0};
+  parallel {m, n} by [M / MMA_M / 4, N / MMA_N ] : block {
+    parallel {g0, g1} by [4, 1]: group {
+      foreach k in K / MMA_K {
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc[0][1], output.chunkat(m#g0, n#g1);
+    };
+  }
+    
+
+  return output;
+}
+
+// CHECK: error: Cannot use the whole fragment array in mma exec operation.
+// CHECK: Totally 1 errors have been detected.

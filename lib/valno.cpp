@@ -80,9 +80,7 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
       } else if (op == "cdiv") {
         auto lvi = GenValueItemFromSignature(oprds[0]);
         auto rvi = GenValueItemFromSignature(oprds[1]);
-        if (lvi && rvi)
-          return sbe::bop(OpCode::DIVIDE, lvi + (rvi - sbe::nu(1)), rvi)
-              ->Normalize();
+        if (lvi && rvi) return (lvi + (rvi - sbe::nu(1))) / rvi;
       }
     } else if (oprds.size() == 1) {
       if ((op == "!") || (op == "~")) {

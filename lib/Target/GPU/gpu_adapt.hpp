@@ -745,7 +745,7 @@ public:
     ValueList mma_shape;
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: {
-      auto sym = op.FillingSymbol();
+      auto sym = AST::FragName(op.FillingTo());
       auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       if (ssmi.frag != MMAInfo::FRAG_C && ssmi.frag != MMAInfo::FRAG_UNK)
         Error1(n.LOC(),
@@ -753,9 +753,9 @@ public:
     } break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::Exec: {
-      auto& a_sym = op.ExecOperand(1);
-      auto& b_sym = op.ExecOperand(2);
-      auto& c_sym = op.ExecOperand(0);
+      auto& a_sym = AST::FragName(op.ExecOperand(1));
+      auto& b_sym = AST::FragName(op.ExecOperand(2));
+      auto& c_sym = AST::FragName(op.ExecOperand(0));
       auto a_sty = GetSpannedType(GetSymbolType(a_sym));
       auto b_sty = GetSpannedType(GetSymbolType(b_sym));
       auto c_sty = GetSpannedType(GetSymbolType(c_sym));
@@ -766,9 +766,7 @@ public:
         mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(0));
         if (op.IsSparse())
-          mma_shape.push_back(
-              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(1), sbe::nu(2))
-                  ->Normalize());
+          mma_shape.push_back(a_shape.ValueAt(1) * sbe::nu(2));
         else
           mma_shape.push_back(a_shape.ValueAt(1));
         break;
@@ -776,9 +774,7 @@ public:
         mma_shape.push_back(a_shape.ValueAt(0));
         mma_shape.push_back(b_shape.ValueAt(1));
         if (op.IsSparse())
-          mma_shape.push_back(
-              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(1), sbe::nu(2))
-                  ->Normalize());
+          mma_shape.push_back(a_shape.ValueAt(1) * sbe::nu(2));
         else
           mma_shape.push_back(a_shape.ValueAt(1));
         break;
@@ -786,9 +782,7 @@ public:
         mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(0));
         if (op.IsSparse())
-          mma_shape.push_back(
-              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(0), sbe::nu(2))
-                  ->Normalize());
+          mma_shape.push_back(a_shape.ValueAt(0) * sbe::nu(2));
         else
           mma_shape.push_back(a_shape.ValueAt(0));
         break;
@@ -796,9 +790,7 @@ public:
         mma_shape.push_back(a_shape.ValueAt(1));
         mma_shape.push_back(b_shape.ValueAt(1));
         if (op.IsSparse())
-          mma_shape.push_back(
-              sbe::bop(OpCode::MULTIPLY, a_shape.ValueAt(0), sbe::nu(2))
-                  ->Normalize());
+          mma_shape.push_back(a_shape.ValueAt(0) * sbe::nu(2));
         else
           mma_shape.push_back(a_shape.ValueAt(0));
         break;
@@ -845,9 +837,12 @@ public:
       FCtx(cur_fname).SetFragMMAType(InScopeName(a_sym), mma_ty);
       FCtx(cur_fname).SetFragMMAType(InScopeName(b_sym), mma_ty);
       FCtx(cur_fname).SetFragMMAType(InScopeName(c_sym), mma_ty);
-      if (op.IsSparse() && !op.ExecOperand(3).empty()) {
-        FCtx(cur_fname).SetFragMMAType(InScopeName(op.ExecOperand(3)), mma_ty);
-      }
+
+      std::string e_sym = "";
+      if (op.ExecOperand(3)) e_sym = AST::FragName(op.ExecOperand(3));
+
+      if (op.IsSparse() && !e_sym.empty())
+        FCtx(cur_fname).SetFragMMAType(InScopeName(e_sym), mma_ty);
 
       // TODO: consider to merge predicate
       if (mma_ty == MMAType::CTMMA) {
@@ -855,10 +850,8 @@ public:
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
-        if (op.IsSparse() && !op.ExecOperand(3).empty()) {
-          FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(op.ExecOperand(3)),
-                                             mma_policy);
-        }
+        if (op.IsSparse() && !e_sym.empty())
+          FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       } else if (mma_ty == MMAType::WGMMA) {
         std::string mma_policy = MMALimit::MMAConfig2WGMMAName(mma_config);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
