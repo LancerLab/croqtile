@@ -1,0 +1,3 @@
+# Treat .co source files as the custom Choreo language for GitHub syntax highlighting
+# We supply a TextMate grammar alongside to extend C++ with extra keywords.
+*.co linguist-language=Choreo

@@ -1,0 +1,19 @@
+{
+  "scopeName": "source.choreo",
+  "name": "Choreo",
+  "patterns": [
+    {
+      "include": "source.cpp"
+    },
+    {
+      "match": "\\b(__co__|__cok__|parallel|foreach|with|in|by|call|local|wait|chunkat|span|dma\\.copy\\.async)\\b",
+      "name": "keyword.control.choreo"
+    },
+    {
+      "match": "\\b(s8|s16|s32|s64|u8|u16|u32|u64|f16|f32|f64)\\b",
+      "name": "storage.type.choreo"
+    }
+  ],
+  "repository": {},
+  "uuid": "c7407a7e-9c1b-11ec-b909-0242ac120002"
+}
