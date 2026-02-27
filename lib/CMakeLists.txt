@@ -1,13 +1,13 @@
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/scanner.yy.cc
-  COMMAND ${FLEX_PATH} -o ${CMAKE_BINARY_DIR}/scanner.yy.cc ${CMAKE_SOURCE_DIR}/lib/scanner.l
+  COMMAND ${FLEX_EXECUTABLE} -o ${CMAKE_BINARY_DIR}/scanner.yy.cc ${CMAKE_SOURCE_DIR}/lib/scanner.l
   DEPENDS ${CMAKE_SOURCE_DIR}/lib/scanner.l
   COMMENT "Generating scanner.yy.cc with flex"
 )
 
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/parser.tab.cc ${CMAKE_BINARY_DIR}/parser.tab.hh
-  COMMAND ${BISON_ENV} ${BISON_PATH} -t -d -o ${CMAKE_BINARY_DIR}/parser.tab.cc ${CMAKE_SOURCE_DIR}/lib/parser.yy
+  COMMAND ${BISON_ENV_CMD} ${BISON_EXECUTABLE} -t -d -o ${CMAKE_BINARY_DIR}/parser.tab.cc ${CMAKE_SOURCE_DIR}/lib/parser.yy
   DEPENDS ${CMAKE_SOURCE_DIR}/lib/parser.yy
   COMMENT "Generating parser.tab.cc and parser.tab.hh with bison"
 )
