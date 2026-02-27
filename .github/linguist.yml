@@ -1,0 +1,10 @@
+# Linguist override: define the Choreo language for .co files and associate
+# it with the TextMate grammar we supply.
+
+languages:
+  Choreo:
+    type: programming
+    color: "#4F5D95"  # arbitrary distinctive color
+    tm_scope: source.choreo
+    extensions:
+      - ".co"
