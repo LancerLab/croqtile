@@ -16,8 +16,13 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
       mc = mma.fill 0.0;
       foreach {iv_k} in [cdiv(K, TILE_K)] {
 
-        lhs_load_s = tma.copy lhs.chunkat(block_m, iv_k) => shared;
-        rhs_load_s = tma.copy rhs.chunkat(block_n, iv_k) => shared;
+        shared f16 [lhs.span(0) / #block_m, lhs.span(1) / #iv_k] lhs_load_s;
+        shared f16 [rhs.span(0) / #block_n, rhs.span(1) / #iv_k] rhs_load_s;
+
+        inthreads (iv_warp_m == 0 && iv_warp_n == 0) {
+          tma.copy lhs.chunkat(block_m, iv_k) => lhs_load_s;
+          tma.copy rhs.chunkat(block_n, iv_k) => rhs_load_s;
+        }
 
         foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
           ma = mma.load lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
