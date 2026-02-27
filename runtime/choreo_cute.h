@@ -656,32 +656,6 @@ CUTE_HOST_DEVICE std::uintptr_t aligned_up_ptr(Ptr p) {
 // ------------------- universal copy (any rank, C++17) -------------------
 template <class Src, class Dst>
 CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {
-  #if 0
-  // adjust these two lines if your Engine exposes pointers differently
-  auto src_ptr = std::get<0>(src.data());
-  auto dst_ptr = std::get<0>(dst.data());
-
-  // If all strides are static, we can safely *attempt* wide vectors:
-  if constexpr (all_strides_are_static<Src>::value) {
-    // 128-bit (e.g., 4x int/float) if strides OK at compile time AND pointers aligned at runtime
-    if constexpr (layout_vec_ok_ct<128, Src>::value) {
-      if (aligned_at_least<128>(src_ptr) && aligned_at_least<128>(dst_ptr)) {
-static_assert(false, "path 1\n");
-        copy(cute::AutoVectorizingCopyWithAssumedAlignment<128>{}, src, dst);
-        return;
-      }
-    }
-    // 64-bit next
-    if constexpr (layout_vec_ok_ct<64, Src>::value) {
-static_assert(false, "path 2\n");
-      if (aligned_at_least<64>(src_ptr) && aligned_at_least<64>(dst_ptr)) {
-        copy(cute::AutoVectorizingCopyWithAssumedAlignment<64>{}, src, dst);
-        return;
-      }
-    }
-  }
-  #endif
-
   // Fallback: 32-bit (scalar element width) - always safe for any
   // shape/stride/alignment
   copy(cute::AutoVectorizingCopyWithAssumedAlignment<32>{}, src, dst);
