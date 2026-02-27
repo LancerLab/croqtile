@@ -98,10 +98,8 @@ inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info,
 
 struct OptimizedValues {
 private:
-  std::vector<ValueItem> val_exprs;
-  // TODO: distinguish values and mdspans
-  // std::vector<ValueItem> mds_exprs;
-  std::vector<ValueItem> ub_exprs;
+  ValueList val_exprs;
+  ValueList ub_exprs;
   ValueItem size_expr = GetInvalidValueItem();
 
 public:
@@ -109,7 +107,7 @@ public:
     val_exprs.clear();
     val_exprs.push_back(vi);
   }
-  void SetVals(const std::vector<ValueItem>& vis) {
+  void SetVals(const ValueList& vis) {
     val_exprs.clear();
     for (auto vi : vis) {
       if (!IsValidValueItem(vi))
@@ -128,7 +126,7 @@ public:
     ub_exprs.clear();
     ub_exprs.push_back(vi);
   }
-  void SetUBounds(const std::vector<ValueItem>& vis) {
+  void SetUBounds(const ValueList& vis) {
     ub_exprs.clear();
     for (auto vi : vis) {
       if (IsValidValueItem(vi))

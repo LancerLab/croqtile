@@ -2374,6 +2374,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   if (FCtx(fname).FragIsWGMMA(scoped_frag_sym)) {
     // WGMMA codegen path (128-thread warp group) using PTX inline assembly
     auto& ssmi = cgi.GetSymbolMMA(scoped_frag_sym);
+    if (!sbe::is_pow2(ssmi.shape[1])) extended_mma = true;
     // Determine accumulator type: f32 for f16->f32, f16 for f16->f16
     std::string accum_type = (ssmi.ty == BaseType::F16) ? "f16" : "f32";
     switch (op.Tag()) {
@@ -4194,7 +4195,8 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
+  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
+  if (extended_mma) os << "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED ";
   if (CCtx().GenDebugInfo())
     os << " -O0";
   else

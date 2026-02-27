@@ -281,6 +281,7 @@ private:
 
   ptr<FunctionType> fty = nullptr; // current function type
   bool void_return = false;
+  bool extended_mma = false;
 
   SDimsInfo symbolic_dimensions;
 

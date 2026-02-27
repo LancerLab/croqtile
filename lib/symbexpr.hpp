@@ -1333,6 +1333,14 @@ inline bool is_false(const Operand& oprd) {
   return false;
 }
 
+inline bool is_pow2(const Operand& vi) {
+  if (auto nv = dyn_cast<NumericValue>(vi)) {
+    auto val = nv->Value();
+    return val > 0 && ((val & (val - 1)) == 0);
+  }
+  return false;
+}
+
 template <typename T>
 inline std::basic_ostream<T>& operator<<(std::basic_ostream<T>& os,
                                          const Operand& oprd) {
