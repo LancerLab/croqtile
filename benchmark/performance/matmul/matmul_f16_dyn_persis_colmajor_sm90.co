@@ -4,20 +4,14 @@
 // H800 PCIe (Hopper PCIe class) FP16 Tensor Core peak throughput.
 #define H800_PCIE_PEAK_F16_TFLOPS 1513
 
-// ─── Optimization: Persistent + column-major tile scheduling ───
-// In the baseline persistent kernel, tiles iterate row-major:
-//   tile_id → (tile_id / tiles_n, tile_id % tiles_n)
-// With column-major scheduling, tiles iterate column-first:
-//   tile_id → (tile_id % tiles_m, tile_id / tiles_m)
-// Adjacent tile_ids share the same block_n, so the same B-column stays
-// in L2 cache across consecutive tiles processed by the same SM.
+// Optimization: Persistent + column-major tile scheduling
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 128
 #define MATMUL_TILE_M 64
 #define MATMUL_TILE_K 64
 #define MATMUL_WARP_K 16
 #define MATMUL_SWIZ 128
-#define NUM_SMS 114
+#define NUM_SMS 132
 
 #if MATMUL_SWIZ != (2 * MATMUL_TILE_K)
 #error "MATMUL_SWIZ must equal 2 * MATMUL_TILE_K for f16 kernel"
@@ -61,7 +55,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
       tile_id = tile_iter # block_id;
       if (tile_id < total_tiles) {
         // Column-major: iterate down columns first, then across rows
-        // Adjacent tile_ids share the same block_n → B-column cache reuse
+        // Adjacent tile_ids share the same block_n to B-column cache reuse
         block_m = tile_id % tiles_m;
         block_n = tile_id / tiles_m;
 

@@ -4,19 +4,14 @@
 // H800 PCIe (Hopper PCIe class) FP16 Tensor Core peak throughput.
 #define H800_PCIE_PEAK_F16_TFLOPS 1513
 
-// ─── Optimization: Persistent + diagonal swizzle tile scheduling ───
-// Uses a host-computed diagonal swizzle pattern for tile ordering.
-// Tiles are assigned along anti-diagonals of the (tiles_m × tiles_n) grid,
-// so consecutive tiles share partial rows (A) or columns (B), providing
-// balanced L2 cache reuse for both A and B matrices.
-// This was the best-performing optimization on SM86 (0.156 TFLOPS).
+// Optimization: Persistent + diagonal swizzle tile scheduling
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 128
 #define MATMUL_TILE_M 64
 #define MATMUL_TILE_K 64
 #define MATMUL_WARP_K 16
 #define MATMUL_SWIZ 128
-#define NUM_SMS 114
+#define NUM_SMS 132
 
 #if MATMUL_SWIZ != (2 * MATMUL_TILE_K)
 #error "MATMUL_SWIZ must equal 2 * MATMUL_TILE_K for f16 kernel"
@@ -126,7 +121,7 @@ int main(int argc, char** argv) {
   size_t N = MATMUL_DEFAULT_N;
   size_t K = MATMUL_DEFAULT_K;
 
-  // ── Build swizzle schedule ──
+  // Build swizzle schedule
   int tiles_m = (M + MATMUL_WARP_M - 1) / MATMUL_WARP_M;
   int tiles_n = (N + MATMUL_WARP_N - 1) / MATMUL_WARP_N;
   int total_tiles = tiles_m * tiles_n;
@@ -151,7 +146,7 @@ int main(int argc, char** argv) {
   auto sched_m_view = choreo::make_spanview<choreo::s32, 1>(sched_m_d, {(size_t)total_tiles});
   auto sched_n_view = choreo::make_spanview<choreo::s32, 1>(sched_n_d, {(size_t)total_tiles});
 
-  // ── Allocate matmul data ──
+  // Allocate matmul data
   auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);
   auto res_h = choreo::make_spandata<choreo::f16>(M, N);
