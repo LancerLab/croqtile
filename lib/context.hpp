@@ -3,6 +3,7 @@
 
 // shared global context for a compilation process
 
+#include "assess.hpp"
 #include "loc.hpp"
 #include "symvals.hpp"
 #include "target.hpp"
@@ -10,10 +11,15 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 extern Choreo::location loc;
 
 namespace Choreo {
+
+namespace AST {
+struct Node;
+}
 
 enum class OutputKind {
   PreProcessedCode,
@@ -177,15 +183,6 @@ struct RuntimeCheckEntry {
   std::map<std::string, std::string> notes;
 };
 
-// TODO: use assert experssions to replace string like entry
-struct Assertion {
-  ptr<sbe::SymbolicExpression> expr;
-
-  bool is_host;
-  location loc;
-  std::string message;
-};
-
 enum class MMAType { WMMA, CTMMA, WGMMA, EFMMA };
 // per-function context
 class FunctionContext {
@@ -193,7 +190,7 @@ private:
   FutureBufferInfo fbi;
   std::map<std::string, OptimizedValues> sym_values;
   std::vector<RuntimeCheckEntry> rt_checks;
-  std::vector<Assertion> assertions;
+  Assessor assessor;
   // TODO: consider to merge
   std::map<std::string, MMAType> frag_mma_type;
   std::map<std::string, std::string> MMA_policy_of_frag;
@@ -243,14 +240,18 @@ public:
   void AppendRtCheck(RuntimeCheckEntry rc) { rt_checks.push_back(rc); }
   std::vector<RuntimeCheckEntry>& GetRtChecks() { return rt_checks; }
 
-  void InsertAssertion(const ptr<sbe::SymbolicExpression>& ar,
-                       const location& l, const std::string& s,
-                       bool is_host = true) {
-    // the none computable expressions are ignored. verbose?
-    assert(IsComputable(ar));
-    assertions.push_back({ar, is_host, l, s});
+  const std::vector<Assertion>& GetAssertions() const {
+    return assessor.GetAssertions();
   }
-  const std::vector<Assertion>& GetAssertions() const { return assertions; }
+
+  std::vector<Assertion> GetAssertions(AssessType aty) const {
+    return assessor.GetAssertions(aty);
+  }
+
+  /// Bind a visitor and return the assessor for assessment calls.
+  Assessor& GetAssessor(Visitor& v) { return assessor.Bind(v); }
+  Assessor& GetAssessor() { return assessor; }
+  const Assessor& GetAssessor() const { return assessor; }
 
   // return `nullptr` if no memory reuse info
   ptr<DynMemReuseInfo> GetDynMemReuseInfo(const std::string& dev_func) const {

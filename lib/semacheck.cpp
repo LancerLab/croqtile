@@ -129,7 +129,7 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
     assert(rshape.IsValid());
 
     bool compatible = true;
-    bool warn = false;
+    bool shape_error_reported = false;
     if (lshape.Rank() == rshape.Rank()) {
       if (lshape != rshape) compatible = false;
     } else {
@@ -139,23 +139,29 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
       for (size_t i = 1; i <= min_rank; ++i) {
         auto lidx = lshape.Rank() - i;
         auto ridx = rshape.Rank() - i;
-        if (sbe::must_ne(lshape.ValueAt(lidx), rshape.ValueAt(ridx))) {
+        auto err_message = "inconsistent shapes for spanned-operation `" + n.op +
+                           "`(" + STR(lshape) + " v.s. " + STR(rshape) + ").";
+        auto warn_message = "shapes may be inconsistent for spanned-operation `" +
+                            n.op + "`(" + STR(lshape) + " v.s. " + STR(rshape) +
+                            ").";
+        auto res = FCtx(fname).GetAssessor(*this).Assess(
+          AssessPolicy::ErrWarn, AssessRelation::EQ, lshape.ValueAt(lidx),
+          rshape.ValueAt(ridx), err_message, warn_message,
+          AssessType::GLOBAL, n.LOC(), &n);
+        if (!res.passed) {
           compatible = false;
+          shape_error_reported = true;
           break;
-        } else if (sbe::may_ne(lshape.ValueAt(lidx), rshape.ValueAt(ridx))) {
-          warn = true;
+        }
+        if (res.warned) {
           break;
         }
       }
     }
     if (!compatible) {
-      Error1(n.LOC(), "inconsistent shapes for spanned-operation `" + n.op +
-                          "`(" + STR(lshape) + " v.s. " + STR(rshape) + ").");
-    } else if (warn) {
-      Warning(n.LOC(), "shapes may be inconsistent for spanned-operation `" +
-                           n.op + "`(" + STR(lshape) + " v.s. " + STR(rshape) +
-                           ").");
-      // TODO: emit runtime check
+      if (!shape_error_reported)
+        Error1(n.LOC(), "inconsistent shapes for spanned-operation `" + n.op +
+                            "`(" + STR(lshape) + " v.s. " + STR(rshape) + ").");
     }
   }
 
@@ -1152,23 +1158,18 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
 void SemaChecker::EmitAssertion(const ValueItem& pred,
                                 const std::string& message, const location& l,
                                 const ptr<AST::Node>& n) {
-  if (auto b = VIBool(pred)) {
-    if (b.value() == false) Error1(l, message);
-    // else no assertion is triggered
-  } else {
-    if (local_deps.Contains(n)) {
-      // TODO: emit device check that is related to the local values
-      if (isa<AST::Expr>(n) || isa<AST::NamedVariableDecl>(n) ||
-          isa<AST::Assignment>(n))
-        VST_DEBUG(dbgs() << "failed to generate check for " << STR(n) << ".\n");
-    } else {
-      if (isa<AST::Expr>(n) || isa<AST::NamedVariableDecl>(n) ||
-          isa<AST::Assignment>(n))
-        if (!input_deps.Contains(n))
-          VST_DEBUG(dbgs() << "questionable: check is not related to input: "
-                           << PSTR(n) << ".\n");
+  auto aty = AssessType::GLOBAL;
+  if (local_deps.Contains(n))
+    aty = AssessType::USE_SITE;
 
-      FCtx(fname).InsertAssertion(pred, l, message);
-    }
-  }
+  // Log when the assertion is unrelated to any input — for diagnostic purposes
+  // only; the assertion still gets GLOBAL type to preserve runtime checking.
+  if (aty == AssessType::GLOBAL && !input_deps.Contains(n))
+    if (isa<AST::Expr>(n) || isa<AST::NamedVariableDecl>(n) ||
+        isa<AST::Assignment>(n))
+      VST_DEBUG(dbgs() << "questionable: check is not related to input: "
+                       << PSTR(n) << ".\n");
+
+  FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message,
+                                        aty, l, n.get());
 }

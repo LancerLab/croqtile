@@ -28,6 +28,7 @@ set(PARSER_SOURCES
 )
 
 set(CORE_SOURCES
+  assess.cpp
   ast.cpp
   earlysema.cpp
   semacheck.cpp

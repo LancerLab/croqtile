@@ -4,6 +4,7 @@
 // This apply the GCU target specific check and information annotation
 
 #include "ast.hpp"
+#include "assess.hpp"
 #include "target_utils.hpp"
 #include "visitor.hpp"
 
@@ -25,6 +26,15 @@ private:
   ParallelLevel Level() const {
     assert(levels.size() > 0);
     return levels.top();
+  }
+
+  bool Assess(const ValueItem& pred, const std::string& message,
+              const location& l, AST::Node* node,
+              AssessType aty = AssessType::GLOBAL) {
+    return FCtx(cur_fname)
+        .GetAssessor(*this)
+        .Assess(AssessPolicy::Error, pred, message, aty, l, node)
+        .passed;
   }
 
 private:
@@ -116,10 +126,7 @@ public:
         constexpr size_t limit = 1ULL << 32;
         auto msg = "The size of data transferred by DMA cannot exceed 2^32.";
         auto asrt = sbe::oc_lt(bs, sbe::nu(limit))->Normalize();
-        if (auto b = VIBool(asrt)) {
-          if (b.value() == false) Error1(n.LOC(), msg);
-        } else
-          FCtx(cur_fname).InsertAssertion(asrt, n.LOC(), msg);
+        Assess(asrt, msg, n.LOC(), nullptr);
       } else {
         if (sty->ByteSize() >= (1ULL << 32))
           Error1(n.LOC(), "On " + cur_arch +
@@ -202,9 +209,9 @@ public:
               auto msg = "On GCU300, the config in "
                          "dma.pad must be in range [0, 2^11]";
               auto asrt = sbe::cmp(">=", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+              Assess(asrt, msg, e->LOC(), e.get());
               asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
-              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+              Assess(asrt, msg, e->LOC(), e.get());
             }
           }
         }
@@ -227,19 +234,21 @@ public:
           } else {
             if (idx == f_rank - 1) {
               auto asrt = sbe::cmp("==", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
+              Assess(
+                  asrt,
                   "On " + cur_arch +
                       ", the value of padding_mid[rank-1] in dma.pad must be 0 "
                       "(mid padding of dim[rank-1] is not supported by the "
-                      "hardware)");
+                      "hardware)",
+                  e->LOC(), e.get());
             } else {
               auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
+              Assess(
+                  asrt,
                   "On " + cur_arch +
                       ", the value of padding_mid in dma.pad must be in range "
-                      "[0, 2^10]");
+                      "[0, 2^10]",
+                  e->LOC(), e.get());
             }
           }
         }
@@ -257,11 +266,12 @@ public:
                            "array (if dim is 5, pad_config[0] must be 0).");
             } else {
               auto asrt = sbe::cmp("==", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
+              Assess(
+                  asrt,
                   "On " + cur_arch +
                       ", dma.pad does not support 5-dimensional array (if dim "
-                      "is 5, pad_config[0] must be 0)");
+                      "is 5, pad_config[0] must be 0)",
+                  e->LOC(), e.get());
             }
           }
         }
@@ -419,9 +429,9 @@ public:
               auto msg = "On " + cur_arch +
                          ", the config in dma.pad must be in range [0, 2^11]";
               auto asrt = sbe::cmp(">=", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+              Assess(asrt, msg, e->LOC(), e.get());
               asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
-              FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+              Assess(asrt, msg, e->LOC(), e.get());
             }
           }
         }
@@ -445,19 +455,21 @@ public:
           } else {
             if (idx == f_rank - 1) {
               auto asrt = sbe::cmp("==", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
+              Assess(
+                  asrt,
                   "On " + cur_arch +
                       ", the value of padding_mid[rank-1] in dma.pad must be 0 "
                       "(mid padding of dim[rank-1] is not supported by the "
-                      "hardware)");
+                      "hardware)",
+                  e->LOC(), e.get());
             } else {
               auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
+              Assess(
+                  asrt,
                   "On " + cur_arch +
                       ", the value of padding_mid in dma.pad must be in range "
-                      "[0, 2^10]");
+                      "[0, 2^10]",
+                  e->LOC(), e.get());
             }
           }
         }
@@ -475,11 +487,12 @@ public:
                            "array (if dim is 5, pad_config[0] must be 0).");
             } else {
               auto asrt = sbe::cmp("==", val, sbe::nu(0));
-              FCtx(cur_fname).InsertAssertion(
-                  asrt, e->LOC(),
+              Assess(
+                  asrt,
                   "On " + cur_arch +
                       ", dma.pad does not support 5-dimensional array (if dim "
-                      "is 5, pad_config[0] must be 0)");
+                      "is 5, pad_config[0] must be 0)",
+                  e->LOC(), e.get());
             }
           }
         }
@@ -612,34 +625,8 @@ public:
     }
 
     message = "On " + cur_arch + ", must satisfy: " + message;
-
-    // try to evaluate at compilation time
-    auto cmp = sbe::cmp(op, vi, sbe::nu(limit))->Normalize();
-    if (auto tf = VIBool(cmp)) {
-      if (tf && tf.value() == false) {
-        VST_DEBUG(dbgs() << "[GCUCHECK] Generated check at " << loc << ": "
-                         << vi->ToString() << " " << op << " "
-                         << std::to_string(limit) + "ULL"
-                         << "\n\twith message: " << message << "\n");
-        Error1(loc, message);
-      } else
-        VST_DEBUG(dbgs() << "[GCUCHECK] Check at " << loc
-                         << " is statisfied: " << vi->ToString() << " " << op
-                         << " " << std::to_string(limit) + "ULL"
-                         << "\n\twith message: " << message << "\n");
-      return;
-    }
-
-    // or else, generate the runtime check
-    VST_DEBUG(dbgs() << "[GCUCHECK] Generated runtime check at " << loc << ": "
-                     << vi->ToString("ULL") << " " << op << " "
-                     << std::to_string(limit) + "ULL"
-                     << "\n\twith message: " << message << "\n");
-    auto asrt = sbe::cmp(op, vi, sbe::nu(limit))->Normalize();
-    if (auto b = VIBool(asrt)) {
-      if (b.value() == false) Error1(loc, message);
-    } else
-      FCtx(cur_fname).InsertAssertion(asrt, loc, message);
+    Assess(sbe::cmp(op, vi, sbe::nu(limit)), message, loc, nullptr,
+           AssessType::GLOBAL);
   }
 
 public:

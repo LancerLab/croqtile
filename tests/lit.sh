@@ -352,7 +352,7 @@ export PATH="$script_dir:${script_dir}/../:${script_dir}/../extern/bin/:${script
 FILECHECK=$(which FileCheck \
             FileCheck-18 FileCheck-17 FileCheck-16 \
             FileCheck-15 FileCheck-14 \
-            FileCheck-10)
+            FileCheck-10 2>/dev/null | head -1)
 
 if [ -z "$FILECHECK" ]; then
   echo "-------------------------------------------------------"

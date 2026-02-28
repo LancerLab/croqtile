@@ -3932,7 +3932,7 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
        << rc.message << ", " << rc.loc << "\");\n";
   }
 
-  for (const auto& ar : FCtx(fname).GetAssertions()) {
+  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::GLOBAL)) {
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
