@@ -55,7 +55,7 @@ private:
   AST::ParallelBy* block_pb = nullptr;
   ParallelLevel inner_pb_level = ParallelLevel::BLOCK;
   std::vector<AST::ParallelBy*> pb_stack;
-  AST::InThreadsBlock* in_thr_block = nullptr;
+  std::stack<AST::InThreadsBlock*> in_thr_block_stack;
 
 private:
   auto Level() const {
@@ -107,7 +107,7 @@ private:
     } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
       if (inner_pb_level == ParallelLevel::GROUPx4 ||
           inner_pb_level == ParallelLevel::GROUP)
-        in_thr_block = it;
+        in_thr_block_stack.push(it);
       // todo: predicate of inthreads_block should be analyzed to make sure it
       // is compatible with the inner parallel-by level. For example, if the
       // inner parallel-by is group, the predicate should be "p1 == 0" to make
@@ -199,7 +199,9 @@ private:
         block_pb = nullptr;
       }
     } else if (isa<AST::InThreadsBlock>(&n)) {
-      in_thr_block = nullptr;
+      if (inner_pb_level == ParallelLevel::GROUPx4 ||
+          inner_pb_level == ParallelLevel::GROUP)
+        in_thr_block_stack.pop();
     }
     return true;
   }
@@ -274,6 +276,8 @@ public:
                                 InScopeName(n.GetSrc()->RefSymbol()),
                                 InScopeName(n.GetDst()->RefSymbol()),
                                 n.GetSwizzleMode(), inner_pb_level);
+        auto in_thr_block =
+            (in_thr_block_stack.empty() ? nullptr : in_thr_block_stack.top());
         tma_desc.SetInThreadsBlock(in_thr_block);
         tma_descs.at(block_pb).push_back(tma_desc);
       } else
