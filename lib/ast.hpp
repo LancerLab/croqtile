@@ -2763,6 +2763,7 @@ public:
     if (tag == Load) return LoadTo();
     if (tag == Exec) return ExecOperand(0);
     if (tag == Store) return StoreFrom();
+    if (tag == Commit) return nullptr;
     choreo_unreachable("unexpected mma operation!");
     return nullptr;
   }
