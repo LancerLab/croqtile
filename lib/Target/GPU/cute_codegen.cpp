@@ -1675,15 +1675,14 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       auto tma_barrier_name = cp_atom + "_barrier";
       auto f_sty = GetSpannedType(desc.GetFrom()->GetType());
       auto t_sty = GetSpannedType(desc.GetTo()->GetType());
-      auto io_sty =
-          (t_sty->GetStorage() == Storage::SHARED) ? t_sty : f_sty;
+      auto io_sty = (t_sty->GetStorage() == Storage::SHARED) ? t_sty : f_sty;
       bool rank2_tma = io_sty->GetShape().Rank() == 2;
       bool use_ptx_barrier_for_desc =
           (tma_cluster_aware || ptx_barrier) && rank2_tma;
 
       if (use_ptx_barrier_for_desc) {
-        ds << d_indent << "__shared__ __align__(8) uint64_t " << tma_barrier_name
-           << ";\n";
+        ds << d_indent << "__shared__ __align__(8) uint64_t "
+           << tma_barrier_name << ";\n";
       } else {
         ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
            << tma_barrier_name << ";\n";
@@ -1706,10 +1705,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 
       if (use_ptx_barrier_for_desc) {
         ds << d_indent << "  choreo::tma_mbarrier_init(&" << tma_barrier_name
-          << ", 1);\n";
+           << ", 1);\n";
       } else {
         ds << d_indent << "  init(&" << tma_barrier_name << ", "
-          << threads_waited << ");\n";
+           << threads_waited << ");\n";
         ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
       }
       ds << d_indent << "}\n";
@@ -1717,10 +1716,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       if (use_ptx_barrier_for_desc) {
         ds << d_indent << "TMAAtom " << cp_atom << "{};\n";
         ds << d_indent << cp_atom << ".EnablePTXMBarrier(&" << tma_barrier_name
-          << ");\n\n";
+           << ");\n\n";
       } else {
         ds << d_indent << "TMAAtom " << cp_atom << "{&" << cp_atom
-          << "_barrier};\n\n";
+           << "_barrier};\n\n";
       }
     }
   }
@@ -2315,39 +2314,39 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
       if (use_ptx_tma_sync) {
         ds << d_indent << "  choreo::tma_mbarrier_expect_tx(((TMAAtom*)"
-          << future_name << ".get_atom())->ptx_barrier(), "
-          << ValueSTR(t_sty->ByteSizeValue()) << ");\n";
+           << future_name << ".get_atom())->ptx_barrier(), "
+           << ValueSTR(t_sty->ByteSizeValue()) << ");\n";
         if (tma_cluster_aware) {
           ds << d_indent
-            << "  choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
-            << t_buf_expr << ", (const void*)&" << *tname
-            << "_tensor_map, ((TMAAtom*)" << future_name
-            << ".get_atom())->ptx_barrier(), " << ValueSTR(rev_indices.at(0))
-            << ", " << ValueSTR(rev_indices.at(1)) << ");\n";
+             << "  choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
+             << t_buf_expr << ", (const void*)&" << *tname
+             << "_tensor_map, ((TMAAtom*)" << future_name
+             << ".get_atom())->ptx_barrier(), " << ValueSTR(rev_indices.at(0))
+             << ", " << ValueSTR(rev_indices.at(1)) << ");\n";
         } else {
           ds << d_indent
-            << "  choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
-            << t_buf_expr << ", (const void*)&" << *tname
-            << "_tensor_map, ((TMAAtom*)" << future_name
-            << ".get_atom())->ptx_barrier(), " << ValueSTR(rev_indices.at(0))
-            << ", " << ValueSTR(rev_indices.at(1)) << ");\n";
+             << "  choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
+             << t_buf_expr << ", (const void*)&" << *tname
+             << "_tensor_map, ((TMAAtom*)" << future_name
+             << ".get_atom())->ptx_barrier(), " << ValueSTR(rev_indices.at(0))
+             << ", " << ValueSTR(rev_indices.at(1)) << ");\n";
         }
       } else {
         ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
-          << "d_global_to_shared(" << t_buf_expr << ", &" << *tname
-          << "_tensor_map, " << ValueSTR(rev_indices)
-          << ", ((TMAAtom*)" << future_name << ".get_atom())->barrier());\n";
+           << "d_global_to_shared(" << t_buf_expr << ", &" << *tname
+           << "_tensor_map, " << ValueSTR(rev_indices) << ", ((TMAAtom*)"
+           << future_name << ".get_atom())->barrier());\n";
         ds << d_indent << "  ((TMAAtom*)" << future_name
-          << ".get_atom())->token() = "
-            "cuda::device::barrier_arrive_tx(((TMAAtom*)"
-          << future_name << ".get_atom())->barrier(), 1, "
-          << ValueSTR(t_sty->ByteSizeValue()) << ");\n";
+           << ".get_atom())->token() = "
+              "cuda::device::barrier_arrive_tx(((TMAAtom*)"
+           << future_name << ".get_atom())->barrier(), 1, "
+           << ValueSTR(t_sty->ByteSizeValue()) << ");\n";
       }
       ds << d_indent << "} else {\n";
       if (!use_ptx_tma_sync) {
         ds << d_indent << "  ((TMAAtom*)" << future_name
-          << ".get_atom())->token() = ((TMAAtom*)" << future_name
-          << ".get_atom())->barrier().arrive();\n";
+           << ".get_atom())->token() = ((TMAAtom*)" << future_name
+           << ".get_atom())->barrier().arrive();\n";
       }
       ds << d_indent << "}\n";
 
@@ -2359,17 +2358,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         // Synchronous tma.copy: wait immediately
         // Make sure the future is marked initialized before marking it nowait
         // to avoid runtime diagnostics when the state is still ST_NONE.
-          if (use_ptx_tma_sync) {
-           ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
+        if (use_ptx_tma_sync) {
+          ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
              << future_name << ".get_atom())->ptx_barrier(), ((TMAAtom*)"
              << future_name << ".get_atom())->ptx_phase_bit());\n";
-           ds << d_indent << "((TMAAtom*)" << future_name
+          ds << d_indent << "((TMAAtom*)" << future_name
              << ".get_atom())->toggle_ptx_phase();\n";
-          } else {
-           ds << d_indent << "((TMAAtom*)" << future_name
+        } else {
+          ds << d_indent << "((TMAAtom*)" << future_name
              << ".get_atom())->barrier().wait(std::move(((TMAAtom*)"
              << future_name << ".get_atom())->token()));\n";
-          }
+        }
         ds << d_indent << future_name << ".set_nowait();\n\n";
       }
     } else if ((tsto == Storage::GLOBAL || tsto == Storage::DEFAULT) &&
@@ -2720,13 +2719,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           "CUTE_WGMMA_M" + STR(ssmi.shape.at(0)) + "K" + STR(ssmi.shape.at(2));
 
       if (use_stmatrix) {
-        ds << d_indent << "store_fragment_d_stmatrix<" << CUTE_WGMMA_ATOM << ", " << DIM_N
-           << ">(" << f_mds.first << ", " << "reinterpret_cast<"
-           << NameBaseType(accum_type) << "*>(" << ExprSTR(frag, false)
-           << "));\n";
+        ds << d_indent << "store_fragment_d_stmatrix<" << CUTE_WGMMA_ATOM
+           << ", " << DIM_N << ">(" << f_mds.first << ", "
+           << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
+           << ExprSTR(frag, false) << "));\n";
       } else {
-        ds << d_indent << "store_fragment_d<" << CUTE_WGMMA_ATOM << ", " << DIM_N
-           << ">(" << f_mds.first << ", " << "reinterpret_cast<"
+        ds << d_indent << "store_fragment_d<" << CUTE_WGMMA_ATOM << ", "
+           << DIM_N << ">(" << f_mds.first << ", " << "reinterpret_cast<"
            << NameBaseType(accum_type) << "*>(" << ExprSTR(frag, false)
            << "));\n";
       }

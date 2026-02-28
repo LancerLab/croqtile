@@ -7,111 +7,111 @@
 
 namespace choreo {
 
-#ifndef CHOREO_PTX_BARRIER_MAX_SPINS
-#define CHOREO_PTX_BARRIER_MAX_SPINS (1u << 24)
-#endif
+  #ifndef CHOREO_PTX_BARRIER_MAX_SPINS
+    #define CHOREO_PTX_BARRIER_MAX_SPINS (1u << 24)
+  #endif
 
 __device__ __forceinline__ uint32_t tma_to_shared_u32(const void* p) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   return static_cast<uint32_t>(__cvta_generic_to_shared(p));
-#else
+  #else
   (void)p;
   return 0;
-#endif
+  #endif
 }
 
 __device__ __forceinline__ void tma_mbarrier_init(uint64_t* bar,
                                                   uint32_t thread_count) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint32_t bar_ptr = tma_to_shared_u32(bar);
   asm volatile("mbarrier.init.shared::cta.b64 [%0], %1;\n"
                :
                : "r"(bar_ptr), "r"(thread_count));
-#else
+  #else
   (void)bar;
   (void)thread_count;
-#endif
+  #endif
 }
 
 __device__ __forceinline__ void tma_mbarrier_expect_tx(uint64_t* bar,
                                                        uint32_t bytes) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint32_t bar_ptr = tma_to_shared_u32(bar);
   asm volatile(
       "mbarrier.arrive.expect_tx.release.cta.shared::cta.b64 _, [%0], %1;\n"
       :
       : "r"(bar_ptr), "r"(bytes));
-#else
+  #else
   (void)bar;
   (void)bytes;
-#endif
+  #endif
 }
 
 __device__ __forceinline__ void
 tma_load_2d_shared_cta_global_mbarrier(void* dst, const void* tma_map,
                                        uint64_t* bar, int32_t coord0,
                                        int32_t coord1) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
   uint32_t bar_ptr = tma_to_shared_u32(bar);
   uint32_t dst_ptr = tma_to_shared_u32(dst);
-  asm volatile(
-      "cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes "
-      "[%0], [%1, {%3, %4}], [%2];"
-      :
-      : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
-        "r"(coord1)
-      : "memory");
-#else
+  asm volatile("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::"
+               "complete_tx::bytes "
+               "[%0], [%1, {%3, %4}], [%2];"
+               :
+               : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+                 "r"(coord1)
+               : "memory");
+  #else
   (void)dst;
   (void)tma_map;
   (void)bar;
   (void)coord0;
   (void)coord1;
-#endif
+  #endif
 }
 
 __device__ __forceinline__ void
 tma_load_2d_shared_cluster_global_mbarrier(void* dst, const void* tma_map,
                                            uint64_t* bar, int32_t coord0,
                                            int32_t coord1) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
   uint32_t bar_ptr = tma_to_shared_u32(bar);
   uint32_t dst_ptr = tma_to_shared_u32(dst);
-  asm volatile(
-      "cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes "
-      "[%0], [%1, {%3, %4}], [%2];"
-      :
-      : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
-        "r"(coord1)
-      : "memory");
-#else
+  asm volatile("cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::"
+               "complete_tx::bytes "
+               "[%0], [%1, {%3, %4}], [%2];"
+               :
+               : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+                 "r"(coord1)
+               : "memory");
+  #else
   (void)dst;
   (void)tma_map;
   (void)bar;
   (void)coord0;
   (void)coord1;
-#endif
+  #endif
 }
 
 __device__ __forceinline__ void tma_mbarrier_arrive(uint64_t* bar,
                                                     uint32_t count = 1) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint32_t bar_ptr = tma_to_shared_u32(bar);
   asm volatile("mbarrier.arrive.release.cta.shared::cta.b64 _, [%0], %1;\n"
                :
                : "r"(bar_ptr), "r"(count)
                : "memory");
-#else
+  #else
   (void)bar;
   (void)count;
-#endif
+  #endif
 }
 
 __device__ __forceinline__ void tma_mbarrier_wait_parity(uint64_t* bar,
                                                          int phase_bit) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint32_t bar_ptr = tma_to_shared_u32(bar);
   uint32_t spins = 0;
   while (true) {
@@ -130,17 +130,18 @@ __device__ __forceinline__ void tma_mbarrier_wait_parity(uint64_t* bar,
 
     ++spins;
     if (spins >= CHOREO_PTX_BARRIER_MAX_SPINS) {
-      printf("[choreo-rt] PTX mbarrier wait timeout: bar=%u, phase=%d, spins=%u\\n",
+      printf("[choreo-rt] PTX mbarrier wait timeout: bar=%u, phase=%d, "
+             "spins=%u\\n",
              bar_ptr, phase_bit, spins);
       __trap();
     }
 
     if ((spins & 0x3FFu) == 0u) __nanosleep(64);
   }
-#else
+  #else
   (void)bar;
   (void)phase_bit;
-#endif
+  #endif
 }
 
 // SM90+ (Hopper+) - TMA barrier and token
@@ -309,12 +310,12 @@ struct future {
     if (is_tma) {
       auto* tma_atom = ((TMAAtom*)atom);
       if (tma_atom->IsPTXMBarrier()) {
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
         tma_mbarrier_wait_parity(tma_atom->ptx_barrier(),
                                  tma_atom->ptx_phase_bit());
-  #else
+    #else
         __co_abort__();
-  #endif
+    #endif
       } else {
         auto& barrier = tma_atom->barrier();
         auto& token = tma_atom->token();
@@ -2142,7 +2143,7 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
 
   int tid = threadIdx.x % 128;
   int lane = tid % 32;
-  int warp = tid / 32;            // warp within warp-group (0-3)
+  int warp = tid / 32;             // warp within warp-group (0-3)
   int warp_abs = threadIdx.x / 32; // absolute warp index in block
   constexpr int col_num = N / 8;
 
@@ -2163,20 +2164,18 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
   uint32_t* regs = reinterpret_cast<uint32_t*>(d);
   using VT = typename Tensor::value_type;
 
-#pragma unroll
+  #pragma unroll
   for (int c = 0; c < col_num; c++) {
     // ── First 8 rows: [warp*16 .. warp*16+7] ──
     uint32_t s0 = __shfl_sync(0xFFFFFFFF, regs[c * 2], shfl_src);
-    asm volatile(
-        "stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};\n"
-        :
-        : "r"(smem_addr), "r"(s0));
+    asm volatile("stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};\n"
+                 :
+                 : "r"(smem_addr), "r"(s0));
     // Scatter from temp (stride 8) to D (stride N)
     {
       int r = lane / 4;
       int cb = (lane % 4) * 2;
-      D(warp * 16 + r, c * 8 + cb) =
-          cast_if<VT>(__stm_buf[warp_abs][r][cb]);
+      D(warp * 16 + r, c * 8 + cb) = cast_if<VT>(__stm_buf[warp_abs][r][cb]);
       D(warp * 16 + r, c * 8 + cb + 1) =
           cast_if<VT>(__stm_buf[warp_abs][r][cb + 1]);
     }
@@ -2184,10 +2183,9 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
 
     // ── Second 8 rows: [warp*16+8 .. warp*16+15] ──
     uint32_t s1 = __shfl_sync(0xFFFFFFFF, regs[c * 2 + 1], shfl_src);
-    asm volatile(
-        "stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};\n"
-        :
-        : "r"(smem_addr), "r"(s1));
+    asm volatile("stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};\n"
+                 :
+                 : "r"(smem_addr), "r"(s1));
     {
       int r = lane / 4;
       int cb = (lane % 4) * 2;
