@@ -78,10 +78,9 @@ inline std::string CudaParamStorage(Storage st) {
   return "";
 }
 
-inline const std::string GetCopyAtomName(int idx = -1) {
-  if (idx >= 0) return "choreo_copy_atom" + std::to_string(idx);
-  static unsigned i = 0;
-  return "choreo_copy_atom" + std::to_string(i++);
+inline const std::string GetCopyAtomName(bool is_tma, size_t idx) {
+  std::string res = "choreo_copy_atom";
+  return res + (is_tma ? "_t_" : "_d_") + std::to_string(idx);
 }
 
 inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
@@ -1671,7 +1670,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   if (!tma_descs.empty()) {
     assert(n.GetLevel() == ParallelLevel::BLOCK);
     for (TMADesc& desc : tma_descs) {
-      auto cp_atom = GetCopyAtomName();
+      auto cp_atom = GetCopyAtomName(true, desc.GetIdx());
       auto tma_barrier_name = cp_atom + "_barrier";
       auto f_sty = GetSpannedType(desc.GetFrom()->GetType());
       auto t_sty = GetSpannedType(desc.GetTo()->GetType());
@@ -1745,8 +1744,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     auto future_name = n.future;
     static size_t future_count = 0;
+    static size_t tma_count = 0;
+    static size_t dma_count = 0;
 
-    auto cp_atom = GetCopyAtomName(future_count);
+    auto cp_atom = GetCopyAtomName(is_tma, (is_tma ? tma_count : dma_count));
     // claim the date transfer engine
     if (!is_tma && is_async) {
       ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
@@ -1765,6 +1766,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                             n.future + ".mdata()");
     }
     future_count++;
+    if (is_tma)
+      ++tma_count;
+    else
+      ++dma_count;
+
     ds << d_indent << "future " << future_name << "(\"" << n.future << "\", "
        << n.LOC().begin.line << ", " << n.LOC().begin.column;
     if (!buf_expr.empty()) ds << ", " << buf_expr;

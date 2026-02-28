@@ -194,6 +194,8 @@ public:
   const std::string GetToSymbol() const { return t_sym; }
   SwizMode GetSwizzleMode() const { return swiz_mode; }
 
+  uint16_t GetIdx() const { return idx; }
+
   const std::string GetName() const {
     return "__choreo_tma_" + std::to_string(idx);
   }
