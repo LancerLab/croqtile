@@ -52,6 +52,7 @@ extern Option<bool> verbose;
 extern Option<bool> use_pic;
 extern Option<bool> tma_cluster_aware;
 extern Option<bool> ptx_barrier;
+extern Option<bool> use_stmatrix;
 
 namespace Choreo {
 extern Option<bool> sim_sparse;
@@ -2718,10 +2719,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string CUTE_WGMMA_ATOM =
           "CUTE_WGMMA_M" + STR(ssmi.shape.at(0)) + "K" + STR(ssmi.shape.at(2));
 
-      ds << d_indent << "store_fragment_d<" << CUTE_WGMMA_ATOM << ", " << DIM_N
-         << ">(" << f_mds.first << ", " << "reinterpret_cast<"
-         << NameBaseType(accum_type) << "*>(" << ExprSTR(frag, false)
-         << "));\n";
+      if (use_stmatrix) {
+        ds << d_indent << "store_fragment_d_stmatrix<" << CUTE_WGMMA_ATOM << ", " << DIM_N
+           << ">(" << f_mds.first << ", " << "reinterpret_cast<"
+           << NameBaseType(accum_type) << "*>(" << ExprSTR(frag, false)
+           << "));\n";
+      } else {
+        ds << d_indent << "store_fragment_d<" << CUTE_WGMMA_ATOM << ", " << DIM_N
+           << ">(" << f_mds.first << ", " << "reinterpret_cast<"
+           << NameBaseType(accum_type) << "*>(" << ExprSTR(frag, false)
+           << "));\n";
+      }
     } break;
     default: break;
     }

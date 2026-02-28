@@ -2116,6 +2116,90 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
     MMA_Policy<MMA>::typeD::template store<Tensor, AccumT>(D, d);
 }
 
+// stmatrix-based store for WGMMA accumulators (--stmatrix flag).
+//
+// Uses PTX stmatrix.sync.aligned.m8n8.x1.b16 to write 8×8 sub-tiles of
+// the WGMMA accumulator to shared memory in a bank-conflict-free manner.
+//
+// Because stmatrix stores in dense row-major stride-8 format (128-byte
+// blocks), but the destination tensor D has stride N, we use a per-warp
+// temp buffer in shared memory: stmatrix writes to the temp buffer, then
+// threads scatter to the correct strided locations in D.
+//
+// A register shuffle (__shfl_sync) re-maps the WGMMA accumulator register
+// layout (row=lane/4, col_pair=lane%4) to the stmatrix-expected layout
+// (row=lane%8, col_pair=lane/8) before each stmatrix call.
+//
+// NOTE: This is a demonstrative implementation.  For maximum performance,
+//       the output shared memory layout should be changed to tile-8 format
+//       so that stmatrix can write directly without the scatter step, and
+//       TMA output should use a matching swizzled tensor map.
+template <class MMA, int N, class Tensor, class AccumT>
+__device__ static inline void store_fragment_d_stmatrix(Tensor& D,
+                                                        AccumT* const d) {
+  static_assert(sizeof(AccumT) == 2,
+                "stmatrix store requires 16-bit accumulator type, f16 or bf16");
+
+  int tid = threadIdx.x % 128;
+  int lane = tid % 32;
+  int warp = tid / 32;            // warp within warp-group (0-3)
+  int warp_abs = threadIdx.x / 32; // absolute warp index in block
+  constexpr int col_num = N / 8;
+
+  // Register shuffle: WGMMA accumulator has (row=l/4, col_pair=l%4) but
+  // stmatrix.m8n8 expects (row=l%8, col_pair=l/8).
+  // Source lane for __shfl_sync: l_src = (l_dst%8)*4 + l_dst/8
+  int shfl_src = (lane % 8) * 4 + lane / 8;
+
+  // Per-warp 8×8 temp buffer (128 bytes).  stmatrix stores here in dense
+  // row-major stride-8, then threads scatter to D with stride N.
+  __shared__ alignas(16) f16 __stm_buf[16][8][8]; // up to 16 warps
+
+  uint32_t smem_addr;
+  asm("cvta.to.shared.u32 %0, %1;\n"
+      : "=r"(smem_addr)
+      : "l"(&__stm_buf[warp_abs][0][0]));
+
+  uint32_t* regs = reinterpret_cast<uint32_t*>(d);
+  using VT = typename Tensor::value_type;
+
+#pragma unroll
+  for (int c = 0; c < col_num; c++) {
+    // ── First 8 rows: [warp*16 .. warp*16+7] ──
+    uint32_t s0 = __shfl_sync(0xFFFFFFFF, regs[c * 2], shfl_src);
+    asm volatile(
+        "stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};\n"
+        :
+        : "r"(smem_addr), "r"(s0));
+    // Scatter from temp (stride 8) to D (stride N)
+    {
+      int r = lane / 4;
+      int cb = (lane % 4) * 2;
+      D(warp * 16 + r, c * 8 + cb) =
+          cast_if<VT>(__stm_buf[warp_abs][r][cb]);
+      D(warp * 16 + r, c * 8 + cb + 1) =
+          cast_if<VT>(__stm_buf[warp_abs][r][cb + 1]);
+    }
+    __syncwarp();
+
+    // ── Second 8 rows: [warp*16+8 .. warp*16+15] ──
+    uint32_t s1 = __shfl_sync(0xFFFFFFFF, regs[c * 2 + 1], shfl_src);
+    asm volatile(
+        "stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};\n"
+        :
+        : "r"(smem_addr), "r"(s1));
+    {
+      int r = lane / 4;
+      int cb = (lane % 4) * 2;
+      D(warp * 16 + 8 + r, c * 8 + cb) =
+          cast_if<VT>(__stm_buf[warp_abs][r][cb]);
+      D(warp * 16 + 8 + r, c * 8 + cb + 1) =
+          cast_if<VT>(__stm_buf[warp_abs][r][cb + 1]);
+    }
+    __syncwarp();
+  }
+}
+
 // only for M64N32 WGMMA accumulator scaling
 template <typename AccT, typename ScaleT, int N>
 __device__ static inline void
