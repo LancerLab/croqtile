@@ -1,0 +1,71 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a --stmatrix %s -o - | FileCheck %s --check-prefix=CHECK-ON
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=CHECK-OFF
+
+#define WARP_M 64
+#define WARP_N 64
+#define TILE_K 16
+#define WARP_K 16
+
+__co__ void stmatrix_codegen_case(global f16 [M, K] lhs,
+                                  global f16 [N, K] rhs,
+                                  global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, TILE_K] lhs_s;
+    shared f16 [WARP_N, TILE_K] rhs_s;
+    mc = mma.fill.f16 0.0f;
+
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      tma.copy.swiz<32> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<32> rhs.subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<32> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared f16 [WARP_M, WARP_N] out_s;
+    mma.store mc, out_s;
+    tma.copy out_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+#define WARP_N_FP8 128
+#define TILE_K_FP8 32
+#define WARP_K_FP8 32
+
+__co__ void stmatrix_codegen_case_fp8(global f8_e4m3 [M, K] lhs,
+                                      global f8_e4m3 [N, K] rhs,
+                                      global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N_FP8)] : block {
+    shared f8_e4m3 [WARP_M, TILE_K_FP8] lhs_s;
+    shared f8_e4m3 [WARP_N_FP8, TILE_K_FP8] rhs_s;
+    mc = mma.fill.f16 0.0f;
+
+    foreach {iv_k} in [cdiv(K, TILE_K_FP8)] {
+      tma.copy.swiz<64> lhs.subspan(WARP_M, TILE_K_FP8).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<64> rhs.subspan(WARP_N_FP8, TILE_K_FP8).at(block_n, iv_k) => rhs_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K_FP8, WARP_K_FP8)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<64> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<64> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared f16 [WARP_M, WARP_N_FP8] out_s;
+    mma.store mc, out_s;
+    tma.copy out_s => output.subspan(WARP_M, WARP_N_FP8).at(block_m, block_n);
+  }
+}
+
+// CHECK-ON: {{^[[:space:]]*store_fragment_d_stmatrix<CUTE_WGMMA_M64K16, 64>\(}}
+// CHECK-ON: {{^[[:space:]]*store_fragment_d_stmatrix<CUTE_WGMMA_M64K32, 128>\(}}
+// CHECK-OFF-NOT: {{^[[:space:]]*store_fragment_d_stmatrix<CUTE_WGMMA_M64K16, 64>\(}}
+// CHECK-OFF-NOT: {{^[[:space:]]*store_fragment_d_stmatrix<CUTE_WGMMA_M64K32, 128>\(}}
