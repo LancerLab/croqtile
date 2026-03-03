@@ -3,8 +3,8 @@
 
 // This apply the GPU target specific check and information annotation
 
-#include "ast.hpp"
 #include "assess.hpp"
+#include "ast.hpp"
 #include "codegen.hpp"
 #include "target_utils.hpp"
 
@@ -69,10 +69,11 @@ private:
 private:
   ParallelLevel Level() const { return levels.top(); }
 
-  bool Assess(const ValueItem& pred,
-              const std::string& message, const location& l,
-              AST::Node* node, AssessType aty = AssessType::GLOBAL) {
-    return FCtx(cur_fname).GetAssessor(*this)
+  bool Assess(const ValueItem& pred, const std::string& message,
+              const location& l, AST::Node* node,
+              AssessType aty = AssessType::GLOBAL) {
+    return FCtx(cur_fname)
+        .GetAssessor(*this)
         .Assess(AssessPolicy::Error, pred, message, aty, l, node)
         .passed;
   }
@@ -134,8 +135,8 @@ public:
         auto msg = "The total thread dimension must be a multiple of 32 "
                    "when 'group' exists for " +
                    ToUpper(CCtx().GetArch()) + ".";
-        Assess(sbe::oc_eq(total_threads, sbe::nu(32)), msg,
-               pb->LOC(), pb, AssessType::GLOBAL);
+        Assess(sbe::oc_eq(total_threads, sbe::nu(32)), msg, pb->LOC(), pb,
+               AssessType::GLOBAL);
       }
 
       if (TargetHasLevel(ParallelLevel::GROUPx4)) {
@@ -149,8 +150,8 @@ public:
           auto msg = "The total thread dimension must be a multiple of "
                      "128 when 'group-4' exists for " +
                      ToUpper(CCtx().GetArch()) + ".";
-          Assess(sbe::oc_eq(total_threads, sbe::nu(128)), msg,
-                 pb->LOC(), pb, AssessType::GLOBAL);
+          Assess(sbe::oc_eq(total_threads, sbe::nu(128)), msg, pb->LOC(), pb,
+                 AssessType::GLOBAL);
         }
       }
     }
@@ -297,21 +298,20 @@ public:
         } else {
           if (idx == f_rank - 1) {
             auto asrt = sbe::cmp("==", val, sbe::nu(0));
-          Assess(
-            asrt,
-            "On " + cur_arch +
-              ", the value of padding_mid[rank-1] in dma.pad must be 0 "
-              "(mid padding of dim[rank-1] is not supported by the "
-              "hardware)",
-            e->LOC(), e.get(), AssessType::GLOBAL);
+            Assess(
+                asrt,
+                "On " + cur_arch +
+                    ", the value of padding_mid[rank-1] in dma.pad must be 0 "
+                    "(mid padding of dim[rank-1] is not supported by the "
+                    "hardware)",
+                e->LOC(), e.get(), AssessType::GLOBAL);
           } else {
             auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
-          Assess(
-            asrt,
-            "On " + cur_arch +
-              ", the value of padding_mid in dma.pad must be in range "
-              "[0, 2^10]",
-            e->LOC(), e.get(), AssessType::GLOBAL);
+            Assess(asrt,
+                   "On " + cur_arch +
+                       ", the value of padding_mid in dma.pad must be in range "
+                       "[0, 2^10]",
+                   e->LOC(), e.get(), AssessType::GLOBAL);
           }
         }
       }
@@ -329,12 +329,11 @@ public:
                          "array (if dim is 5, pad_config[0] must be 0).");
           } else {
             auto asrt = sbe::cmp("==", val, sbe::nu(0));
-            Assess(
-                asrt,
-                "On " + cur_arch +
-                    ", dma.pad does not support 5-dimensional array (if dim "
-                    "is 5, pad_config[0] must be 0)",
-                e->LOC(), e.get(), AssessType::GLOBAL);
+            Assess(asrt,
+                   "On " + cur_arch +
+                       ", dma.pad does not support 5-dimensional array (if dim "
+                       "is 5, pad_config[0] must be 0)",
+                   e->LOC(), e.get(), AssessType::GLOBAL);
           }
         }
       }

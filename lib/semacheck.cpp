@@ -139,23 +139,22 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
       for (size_t i = 1; i <= min_rank; ++i) {
         auto lidx = lshape.Rank() - i;
         auto ridx = rshape.Rank() - i;
-        auto err_message = "inconsistent shapes for spanned-operation `" + n.op +
-                           "`(" + STR(lshape) + " v.s. " + STR(rshape) + ").";
-        auto warn_message = "shapes may be inconsistent for spanned-operation `" +
-                            n.op + "`(" + STR(lshape) + " v.s. " + STR(rshape) +
-                            ").";
+        auto err_message = "inconsistent shapes for spanned-operation `" +
+                           n.op + "`(" + STR(lshape) + " v.s. " + STR(rshape) +
+                           ").";
+        auto warn_message =
+            "shapes may be inconsistent for spanned-operation `" + n.op + "`(" +
+            STR(lshape) + " v.s. " + STR(rshape) + ").";
         auto res = FCtx(fname).GetAssessor(*this).Assess(
-          AssessPolicy::ErrWarn, AssessRelation::EQ, lshape.ValueAt(lidx),
-          rshape.ValueAt(ridx), err_message, warn_message,
-          AssessType::GLOBAL, n.LOC(), &n);
+            AssessPolicy::ErrWarn, AssessRelation::EQ, lshape.ValueAt(lidx),
+            rshape.ValueAt(ridx), err_message, warn_message, AssessType::GLOBAL,
+            n.LOC(), &n);
         if (!res.passed) {
           compatible = false;
           shape_error_reported = true;
           break;
         }
-        if (res.warned) {
-          break;
-        }
+        if (res.warned) { break; }
       }
     }
     if (!compatible) {
@@ -1159,8 +1158,7 @@ void SemaChecker::EmitAssertion(const ValueItem& pred,
                                 const std::string& message, const location& l,
                                 const ptr<AST::Node>& n) {
   auto aty = AssessType::GLOBAL;
-  if (local_deps.Contains(n))
-    aty = AssessType::USE_SITE;
+  if (local_deps.Contains(n)) aty = AssessType::USE_SITE;
 
   // Log when the assertion is unrelated to any input — for diagnostic purposes
   // only; the assertion still gets GLOBAL type to preserve runtime checking.
@@ -1170,6 +1168,6 @@ void SemaChecker::EmitAssertion(const ValueItem& pred,
       VST_DEBUG(dbgs() << "questionable: check is not related to input: "
                        << PSTR(n) << ".\n");
 
-  FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message,
-                                        aty, l, n.get());
+  FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message, aty,
+                                        l, n.get());
 }

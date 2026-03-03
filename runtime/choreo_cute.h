@@ -280,10 +280,10 @@ struct future {
              line, column);
       __co_abort__();
     }
+    s = ST_INITED;
   #endif // __CHOREO_DMA_DIAGNOSIS__
 
     atom = a;
-    s = ST_INITED;
   }
 
   // when sync, no wait is required. simply change the status
@@ -367,8 +367,8 @@ struct future {
              line, column);
       __co_abort__();
     }
-  #endif // __CHOREO_DMA_DIAGNOSIS__
     s = ST_TRIGGERED;
+  #endif // __CHOREO_DMA_DIAGNOSIS__
 
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
@@ -2155,28 +2155,28 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
   __shared__ alignas(16)
       AccumT __stm_chunk[MAX_CONSUMER_WARPGROUPS][M_PAD * N_CHUNK];
 
-  uint32_t lane_offset =
-      static_cast<uint32_t>(warp * 16 + (lane % 8) * M_PAD +
-                            (lane / 16) * M_PAD * 8 + (lane & 8));
-  uint32_t base_addr = static_cast<uint32_t>(__cvta_generic_to_shared(__stm_chunk[consumer_wg])) +
+  uint32_t lane_offset = static_cast<uint32_t>(
+      warp * 16 + (lane % 8) * M_PAD + (lane / 16) * M_PAD * 8 + (lane & 8));
+  uint32_t base_addr = static_cast<uint32_t>(
+                           __cvta_generic_to_shared(__stm_chunk[consumer_wg])) +
                        lane_offset * sizeof(AccumT);
 
   constexpr int w_iters = N / 16;
   using VT = typename Tensor::value_type;
 
-#pragma unroll
+  #pragma unroll
   for (int w = 0; w < w_iters; ++w) {
     AccumT d_pack[8];
-#pragma unroll
+  #pragma unroll
     for (int k = 0; k < 8; ++k) d_pack[k] = d[w * 8 + k];
 
     uint32_t* data_ptr = reinterpret_cast<uint32_t*>(d_pack);
     uint32_t addr = base_addr;
-    asm volatile(
-        "stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16 [%0], {%1, %2, %3, %4};\n"
-        :
-        : "r"(addr), "r"(data_ptr[0]), "r"(data_ptr[1]), "r"(data_ptr[2]),
-          "r"(data_ptr[3]));
+    asm volatile("stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16 [%0], "
+                 "{%1, %2, %3, %4};\n"
+                 :
+                 : "r"(addr), "r"(data_ptr[0]), "r"(data_ptr[1]),
+                   "r"(data_ptr[2]), "r"(data_ptr[3]));
 
     __syncwarp();
 
@@ -2187,22 +2187,22 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
     int col_base = w * 16;
 
     D(row0, col_base + col_local0) =
-      cast_if<VT>(__stm_chunk[consumer_wg][col_local0 * M_PAD + row0]);
+        cast_if<VT>(__stm_chunk[consumer_wg][col_local0 * M_PAD + row0]);
     D(row0, col_base + col_local1) =
-      cast_if<VT>(__stm_chunk[consumer_wg][col_local1 * M_PAD + row0]);
+        cast_if<VT>(__stm_chunk[consumer_wg][col_local1 * M_PAD + row0]);
     D(row1, col_base + col_local0) =
-      cast_if<VT>(__stm_chunk[consumer_wg][col_local0 * M_PAD + row1]);
+        cast_if<VT>(__stm_chunk[consumer_wg][col_local0 * M_PAD + row1]);
     D(row1, col_base + col_local1) =
-      cast_if<VT>(__stm_chunk[consumer_wg][col_local1 * M_PAD + row1]);
+        cast_if<VT>(__stm_chunk[consumer_wg][col_local1 * M_PAD + row1]);
 
     D(row0, col_base + 8 + col_local0) =
-      cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local0) * M_PAD + row0]);
+        cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local0) * M_PAD + row0]);
     D(row0, col_base + 8 + col_local1) =
-      cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local1) * M_PAD + row0]);
+        cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local1) * M_PAD + row0]);
     D(row1, col_base + 8 + col_local0) =
-      cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local0) * M_PAD + row1]);
+        cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local0) * M_PAD + row1]);
     D(row1, col_base + 8 + col_local1) =
-      cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local1) * M_PAD + row1]);
+        cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local1) * M_PAD + row1]);
 
     __syncwarp();
   }

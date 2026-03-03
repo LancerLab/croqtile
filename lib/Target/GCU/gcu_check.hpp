@@ -3,8 +3,8 @@
 
 // This apply the GCU target specific check and information annotation
 
-#include "ast.hpp"
 #include "assess.hpp"
+#include "ast.hpp"
 #include "target_utils.hpp"
 #include "visitor.hpp"
 

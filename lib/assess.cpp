@@ -4,11 +4,11 @@
 
 using namespace Choreo;
 
-AssessResult Assessor::Assess(
-    AssessPolicy ap, AssessRelation rel, const ValueItem& lhs,
-    const ValueItem& rhs, const std::string& error_message,
-    const std::string& warn_message, AssessType aty, const location& l,
-    AST::Node* node) {
+AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
+                              const ValueItem& lhs, const ValueItem& rhs,
+                              const std::string& error_message,
+                              const std::string& warn_message, AssessType aty,
+                              const location& l, AST::Node* node) {
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
   auto pred =
       (rel == AssessRelation::EQ) ? sbe::oc_eq(lhs, rhs) : sbe::oc_ne(lhs, rhs);
@@ -62,17 +62,16 @@ AssessResult Assessor::Assess(
   return {true, may_fail, true};
 }
 
-AssessResult Assessor::Assess(
-    AssessPolicy ap, AssessRelation rel, const ValueItem& lhs,
-    const ValueItem& rhs, const std::string& message, AssessType aty,
-    const location& l, AST::Node* node) {
+AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
+                              const ValueItem& lhs, const ValueItem& rhs,
+                              const std::string& message, AssessType aty,
+                              const location& l, AST::Node* node) {
   return Assess(ap, rel, lhs, rhs, message, message, aty, l, node);
 }
 
-AssessResult Assessor::Assess(
-    AssessPolicy ap, const ValueItem& bo,
-    const std::string& message, AssessType aty, const location& l,
-    AST::Node* node) {
+AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
+                              const std::string& message, AssessType aty,
+                              const location& l, AST::Node* node) {
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
   if (ap == AssessPolicy::ErrWarn)
     choreo_unreachable(
