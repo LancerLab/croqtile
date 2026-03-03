@@ -1,6 +1,8 @@
 #include "cute_codegen.hpp"
 #include "codegen_utils.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <iostream>
 #include <numeric>
@@ -52,6 +54,7 @@ extern Option<bool> verbose;
 extern Option<bool> use_pic;
 extern Option<bool> tma_cluster_aware;
 extern Option<bool> ptx_barrier;
+extern Option<bool> mbarrier;
 extern Option<bool> use_stmatrix;
 
 namespace Choreo {
@@ -398,6 +401,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     return_stream.str("");
     stream_name = "";
     tma_count = 0;
+    tma_future_count = 0;
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
     // only on device-side
@@ -437,7 +441,8 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
       ds << d_indent << "}";
-      if (!it->async && it->outer) ds << "\n" << d_indent << "__syncthreads();";
+      if (!it->async && it->outer && !mbarrier)
+        ds << "\n" << d_indent << "__syncthreads();";
       ds << " // end inthreads\n";
     }
   } else if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
@@ -1243,7 +1248,23 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapDeviceSymbol(sym, n.name_str);
       global_buffers.insert(buf_sym);
     } break;
-    case Storage::SHARED:
+    case Storage::SHARED: {
+      assert(!IsHost());
+      ds << d_indent
+         << "__shared__ cuda::barrier<cuda::thread_scope_block> "
+         << n.name_str;
+      ety->PrintAsCArray(ds);
+      ds << "; // shared event barrier\n";
+      ds << d_indent << "// initialize the event barrier\n";
+      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      GenerateSubscriptions(ds,
+                            "  " + d_indent + "init(&" + n.name_str,
+                            ", (blockDim.x - 128) + 1);\n",
+                            ety->Dimensions());
+      ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
+      ds << d_indent << "}\n";
+      ds << d_indent << "__syncthreads();\n";
+    } break;
     case Storage::LOCAL: {
       assert(!IsHost());
       ds << d_indent << CudaDeviceMemory(ety->GetStorage())
@@ -1251,14 +1272,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ety->PrintAsCArray(ds);
       ds << "; // " << STR(ety->GetStorage()) << " event\n";
       ds << d_indent << "// initialize the event\n";
-      if (ety->GetStorage() == Storage::SHARED) {
-        ds << d_indent << LevelPred() << " {\n";
-        GenerateSubscriptions(ds, "  " + d_indent + n.name_str, " = false;\n",
-                              ety->Dimensions());
-        ds << d_indent << "}\n";
-      } else
-        GenerateSubscriptions(ds, d_indent + n.name_str, " = false;\n",
-                              ety->Dimensions());
+      GenerateSubscriptions(ds, d_indent + n.name_str, " = false;\n",
+                            ety->Dimensions());
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
     } break;
     default: break;
@@ -1278,19 +1293,24 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapDeviceSymbol(sym, n.name_str);
       global_buffers.insert(buf_sym);
     } break;
-    case Storage::SHARED:
+    case Storage::SHARED: {
+      assert(!IsHost());
+      ds << d_indent
+         << "__shared__ cuda::barrier<cuda::thread_scope_block> "
+         << n.name_str << "; // shared event barrier\n";
+      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      ds << d_indent << "  init(&" << n.name_str
+         << ", (blockDim.x - 128) + 1);\n";
+      ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
+      ds << d_indent << "}\n";
+      ds << d_indent << "__syncthreads();\n";
+    } break;
     case Storage::LOCAL: {
       assert(!IsHost());
       ds << d_indent << CudaDeviceMemory(ety->GetStorage())
          << " __volatile__ bool " << n.name_str << "; // "
          << STR(ety->GetStorage()) << " event\n";
-      if (ety->GetStorage() == Storage::SHARED) {
-        ds << d_indent << LevelPred() << " {\n";
-        ds << d_indent << "  " << n.name_str
-           << " = false;\n"; // inited as untriggered
-        ds << d_indent << "}\n";
-      } else
-        ds << d_indent << n.name_str << " = false;\n"; // inited as untriggered
+      ds << d_indent << n.name_str << " = false;\n";
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
     } break;
     default: break;
@@ -1473,6 +1493,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 
   // only do the whole codegen when accessing the outer parallel-by
   if (n.IsOuter()) {
+    tma_future_count = 0;
 
     ValueItem cur_spm_size = sbe::nu(0);
     ValueItem ring_start = sbe::nu(0);
@@ -1673,8 +1694,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   auto& tma_descs = cgi.GetTMADescs()[&n];
   if (!tma_descs.empty()) {
     assert(n.GetLevel() == ParallelLevel::BLOCK);
+    int emitted_tma_init_idx = 0;
     for (TMADesc& desc : tma_descs) {
-      auto cp_atom = GetCopyAtomName(true, desc.GetIdx());
+      auto cp_atom = GetCopyAtomName(true, emitted_tma_init_idx);
       auto tma_barrier_name = cp_atom + "_barrier";
       auto f_sty = GetSpannedType(desc.GetFrom()->GetType());
       auto t_sty = GetSpannedType(desc.GetTo()->GetType());
@@ -1682,6 +1704,19 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       bool rank2_tma = io_sty->GetShape().Rank() == 2;
       bool use_ptx_barrier_for_desc =
           (tma_cluster_aware || ptx_barrier) && rank2_tma;
+      auto in_thr_block = desc.GetInThreadsBlock();
+      auto inner_pb_level = desc.GetPBLevel();
+
+      bool skip_load_tma_init_block =
+          mbarrier && desc.IsLoad() && in_thr_block &&
+          inner_pb_level == ParallelLevel::GROUPx4 &&
+          !use_ptx_barrier_for_desc;
+
+      if (skip_load_tma_init_block) {
+        continue;
+      }
+
+      emitted_tma_init_idx++;
 
       if (use_ptx_barrier_for_desc) {
         ds << d_indent << "__shared__ __align__(8) uint64_t "
@@ -1691,8 +1726,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
            << tma_barrier_name << ";\n";
       }
       ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-      auto in_thr_block = desc.GetInThreadsBlock();
-      auto inner_pb_level = desc.GetPBLevel();
       // if in_thr_block is specified, the number of threads is compitable with
       // inner parallel-by the barrier. otherwise, all threads in the CTA will
       // wait.
@@ -1701,9 +1734,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       if (!in_thr_block) {
         threads_waited = "blockDim.x";
       } else if (inner_pb_level == ParallelLevel::GROUP) {
-        threads_waited = "32";
+        threads_waited = mbarrier ? "1" : "32";
       } else if (inner_pb_level == ParallelLevel::GROUPx4) {
-        threads_waited = "128";
+        threads_waited = mbarrier ? "1" : "128";
       }
 
       if (use_ptx_barrier_for_desc) {
@@ -1748,10 +1781,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     auto future_name = n.future;
     static size_t future_count = 0;
-    static size_t tma_count = 0;
     static size_t dma_count = 0;
 
-    auto cp_atom = GetCopyAtomName(is_tma, (is_tma ? tma_count : dma_count));
+    auto cp_atom =
+      GetCopyAtomName(is_tma, (is_tma ? tma_future_count : dma_count));
     // claim the date transfer engine
     if (!is_tma && is_async) {
       ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
@@ -1771,7 +1804,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
     future_count++;
     if (is_tma)
-      ++tma_count;
+      ++tma_future_count;
     else
       ++dma_count;
 
@@ -2037,13 +2070,34 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   bool bind_data = SymbolToSymbol() || TileToSymbol() || TileToTile();
   std::string bound_mdata_expr = (n.IsSparse() && bind_data) ? mdata_expr : "";
   bool use_tma = n.IsTMA();
+  bool suppress_tma_future = false;
+
+  if (use_tma && mbarrier &&
+      (f_sty->GetStorage() == Storage::GLOBAL ||
+       f_sty->GetStorage() == Storage::DEFAULT) &&
+      t_sty->GetStorage() == Storage::SHARED &&
+      bdim_level == ParallelLevel::GROUPx4) {
+    std::string t_mds_offset_probe = "";
+    if (auto idx = t_ca->IndexOfLastSpanAs())
+      t_mds_offset_probe = TileBaseOffset(t_ca);
+    else
+      t_mds_offset_probe = ValueSTR(GenOffset(t_ca));
+
+    bool has_ring_stage_index =
+        t_mds_offset_probe.find("stage") != std::string::npos ||
+        t_mds_offset_probe.find("__iv_iv_k %") != std::string::npos ||
+        t_mds_offset_probe.find("iv_k %") != std::string::npos;
+    suppress_tma_future = has_ring_stage_index;
+  }
 
   // bind the data to the future
-  if (bind_data)
-    future_name =
-        claimFuture(t_buf.second, fty->IsAsync(), use_tma, bound_mdata_expr);
-  else
-    future_name = claimFuture("", fty->IsAsync(), use_tma, "");
+  if (!(use_tma && suppress_tma_future)) {
+    if (bind_data)
+      future_name =
+          claimFuture(t_buf.second, fty->IsAsync(), use_tma, bound_mdata_expr);
+    else
+      future_name = claimFuture("", fty->IsAsync(), use_tma, "");
+  }
 
   auto DMACodeGen = [&]() {
     std::string f_mds_offset = "";
@@ -2300,7 +2354,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       assert(tma_idx < static_cast<int>(tma_descs.size()));
       const TMADesc& tma_desc = tma_descs[tma_idx];
       auto in_thr_block = tma_desc.GetInThreadsBlock();
-      if (in_thr_block) { tma_sync_level = tma_desc.GetPBLevel(); }
+      if (in_thr_block) {
+        tma_sync_level = tma_desc.GetPBLevel();
+      } else if (mbarrier &&
+                 (t_sty->GetStorage() == Storage::GLOBAL ||
+                  t_sty->GetStorage() == Storage::DEFAULT) &&
+                 f_sty->GetStorage() == Storage::SHARED &&
+                 bdim_level == ParallelLevel::GROUPx4) {
+        tma_sync_level = ParallelLevel::GROUPx4;
+      }
     }
 
     auto fsto = f_sty->GetStorage();
@@ -2328,77 +2390,119 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     assert(tname.has_value());
     if ((fsto == Storage::GLOBAL || fsto == Storage::DEFAULT) &&
         tsto == Storage::SHARED) {
+            std::string tma_tx_bytes_expr = std::to_string(
+              t_ca->GetBlockShape().ElementCount() * SizeOf(t_sty->ElementType()));
+      std::string t_buf_expr_with_offset = t_buf_expr;
+      if (!t_mds_offset.empty() && t_mds_offset != "0") {
+        t_buf_expr_with_offset = "(" + t_buf_expr + " + (" + t_mds_offset + "))";
+      }
+      bool has_ring_stage_index =
+          t_mds_offset.find("stage") != std::string::npos ||
+          t_mds_offset.find("__iv_iv_k %") != std::string::npos ||
+          t_mds_offset.find("iv_k %") != std::string::npos;
+      bool full_empty_only_tma_copy =
+          mbarrier && tma_sync_level == ParallelLevel::GROUPx4 &&
+          has_ring_stage_index;
       auto rev_indices = Reverse(GenIndices(f_ca));
       bool use_ptx_tma_sync =
           (tma_cluster_aware || ptx_barrier) && t_shape.Rank() == 2;
-      if (tma_sync_level == ParallelLevel::GROUP)
-        ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
-      else if (tma_sync_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
-      else
-        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      bool emit_tma_single_guard =
+          !(mbarrier && tma_sync_level == ParallelLevel::GROUPx4 &&
+            full_empty_only_tma_copy);
+      std::string tma_issue_prefix = emit_tma_single_guard ? "  " : "";
+      if (emit_tma_single_guard) {
+        if (tma_sync_level == ParallelLevel::GROUP)
+          ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
+        else if (tma_sync_level == ParallelLevel::GROUPx4)
+          ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+        else
+          ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      }
 
       if (use_ptx_tma_sync) {
-        ds << d_indent << "  choreo::tma_mbarrier_expect_tx(((TMAAtom*)"
-           << future_name << ".get_atom())->ptx_barrier(), "
-           << ValueSTR(t_sty->ByteSizeValue()) << ");\n";
+          ds << d_indent << tma_issue_prefix
+            << "choreo::tma_mbarrier_expect_tx(((TMAAtom*)"
+            << future_name << ".get_atom())->ptx_barrier(), "
+            << tma_tx_bytes_expr << ");\n";
         if (tma_cluster_aware) {
-          ds << d_indent
-             << "  choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
-             << t_buf_expr << ", (const void*)&" << *tname
+          ds << d_indent << tma_issue_prefix
+             << "choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
+             << t_buf_expr_with_offset << ", (const void*)&" << *tname
              << "_tensor_map, ((TMAAtom*)" << future_name
              << ".get_atom())->ptx_barrier(), " << ValueSTR(rev_indices.at(0))
              << ", " << ValueSTR(rev_indices.at(1)) << ");\n";
         } else {
-          ds << d_indent
-             << "  choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
-             << t_buf_expr << ", (const void*)&" << *tname
+          ds << d_indent << tma_issue_prefix
+             << "choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
+             << t_buf_expr_with_offset << ", (const void*)&" << *tname
              << "_tensor_map, ((TMAAtom*)" << future_name
              << ".get_atom())->ptx_barrier(), " << ValueSTR(rev_indices.at(0))
              << ", " << ValueSTR(rev_indices.at(1)) << ");\n";
         }
       } else {
-        ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
-           << "d_global_to_shared(" << t_buf_expr << ", &" << *tname
-           << "_tensor_map, " << ValueSTR(rev_indices) << ", ((TMAAtom*)"
-           << future_name << ".get_atom())->barrier());\n";
-        ds << d_indent << "  ((TMAAtom*)" << future_name
-           << ".get_atom())->token() = "
-              "cuda::device::barrier_arrive_tx(((TMAAtom*)"
-           << future_name << ".get_atom())->barrier(), 1, "
-           << ValueSTR(t_sty->ByteSizeValue()) << ");\n";
+        std::string tma_barrier_arg =
+            "((TMAAtom*)" + future_name + ".get_atom())->barrier()";
+        if (full_empty_only_tma_copy) {
+          tma_barrier_arg = "full[stage]";
+        }
+        ds << d_indent << tma_issue_prefix << "cde::cp_async_bulk_tensor_"
+           << t_shape.Rank()
+            << "d_global_to_shared(" << t_buf_expr_with_offset << ", &" << *tname
+          << "_tensor_map, " << ValueSTR(rev_indices) << ", "
+          << tma_barrier_arg << ");\n";
+        if (!full_empty_only_tma_copy) {
+          ds << d_indent << tma_issue_prefix << "((TMAAtom*)" << future_name
+             << ".get_atom())->token() = "
+                "cuda::device::barrier_arrive_tx(((TMAAtom*)"
+             << future_name << ".get_atom())->barrier(), 1, "
+             << tma_tx_bytes_expr << ");\n";
+        }
       }
-      ds << d_indent << "} else {\n";
-      if (!use_ptx_tma_sync) {
-        ds << d_indent << "  ((TMAAtom*)" << future_name
-           << ".get_atom())->token() = ((TMAAtom*)" << future_name
-           << ".get_atom())->barrier().arrive();\n";
+      if (emit_tma_single_guard) {
+        ds << d_indent << "} else {\n";
+        if (!use_ptx_tma_sync) {
+          if (!(mbarrier && tma_sync_level == ParallelLevel::GROUPx4) &&
+              !full_empty_only_tma_copy) {
+            ds << d_indent << "  ((TMAAtom*)" << future_name
+               << ".get_atom())->token() = ((TMAAtom*)" << future_name
+               << ".get_atom())->barrier().arrive();\n";
+          }
+        }
+        ds << d_indent << "}\n";
       }
-      ds << d_indent << "}\n";
+      recent_tma_tx_bytes.push_back(tma_tx_bytes_expr);
+      if (recent_tma_tx_bytes.size() > 8) recent_tma_tx_bytes.pop_front();
 
       // For async tma.copy.async, trigger the future
-      // For sync tma.copy, directly wait and set_nowait
+      // For sync tma.copy, default behavior is immediate wait.
+      // Under --mbarrier, defer this wait to full/empty barrier protocol
+      // so producer-consumer pipelining remains asynchronous like ref kernels.
       if (fty->IsAsync()) {
-        ds << d_indent << future_name << ".trigger();\n";
+        if (!future_name.empty())
+          ds << d_indent << future_name << ".trigger();\n";
       } else {
-        // Synchronous tma.copy: wait immediately
-        // Make sure the future is marked initialized before marking it nowait
-        // to avoid runtime diagnostics when the state is still ST_NONE.
-        if (use_ptx_tma_sync) {
-          ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
-             << future_name << ".get_atom())->ptx_barrier(), ((TMAAtom*)"
-             << future_name << ".get_atom())->ptx_phase_bit());\n";
-          ds << d_indent << "((TMAAtom*)" << future_name
-             << ".get_atom())->toggle_ptx_phase();\n";
-        } else {
-          ds << d_indent << "((TMAAtom*)" << future_name
-             << ".get_atom())->barrier().wait(std::move(((TMAAtom*)"
-             << future_name << ".get_atom())->token()));\n";
+        if (!mbarrier) {
+          // Synchronous tma.copy: wait immediately
+          // Make sure the future is marked initialized before marking it nowait
+          // to avoid runtime diagnostics when the state is still ST_NONE.
+          if (!future_name.empty()) {
+            if (use_ptx_tma_sync) {
+              ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
+                 << future_name << ".get_atom())->ptx_barrier(), ((TMAAtom*)"
+                 << future_name << ".get_atom())->ptx_phase_bit());\n";
+              ds << d_indent << "((TMAAtom*)" << future_name
+                 << ".get_atom())->toggle_ptx_phase();\n";
+            } else {
+              ds << d_indent << "((TMAAtom*)" << future_name
+                 << ".get_atom())->barrier().wait(std::move(((TMAAtom*)"
+                 << future_name << ".get_atom())->token()));\n";
+            }
+          }
         }
-        ds << d_indent << future_name << ".set_nowait();\n\n";
+        if (!future_name.empty()) ds << d_indent << future_name << ".set_nowait();\n\n";
       }
-    } else if ((tsto == Storage::GLOBAL || tsto == Storage::DEFAULT) &&
-               fsto == Storage::SHARED) {
+     } else if ((tsto == Storage::GLOBAL || tsto == Storage::DEFAULT) &&
+            fsto == Storage::SHARED) {
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
 
       if (tma_sync_level == ParallelLevel::GROUP)
@@ -2437,6 +2541,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
 
   if (op.Tag() == AST::MMAOperation::Commit) {
+    saw_explicit_mma_commit = true;
     ds << d_indent << "// Finalize WGMMA operations\n";
     ds << d_indent << "warpgroup_commit_batch();\n";
     ds << d_indent << "warpgroup_wait<0>();\n";
@@ -2539,8 +2644,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         DecrDeviceIndent();
       }
       ++fill_cnt;
-      // Signal warp group that we're about to start WGMMA operations
-      ds << d_indent << "warpgroup_arrive();\n";
     } break;
     case AST::MMAOperation::Load: {
       // For WGMMA, we store the shared memory pointer for later use in Exec
@@ -2621,6 +2724,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto c_sym = AST::FragName(op.ExecOperand(0));
       auto a_sym = AST::FragName(op.ExecOperand(1));
       auto b_sym = AST::FragName(op.ExecOperand(2));
+      if (!(mbarrier && bdim_level == ParallelLevel::GROUPx4))
+        ds << d_indent << "warpgroup_arrive();\n";
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(c_sym));
       std::string cc = SplitStringByDelimiter(mma_policy, "::")[0];
       auto cute_gmma_major_cast = "static_cast<cute::" + cc + "::GMMA::Major>";
@@ -2726,9 +2831,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
     } break;
     case AST::MMAOperation::Store: {
-      ds << d_indent << "// Finalize WGMMA operations\n";
-      ds << d_indent << "warpgroup_commit_batch();\n";
-      ds << d_indent << "warpgroup_wait<0>();\n";
+      if (!saw_explicit_mma_commit) {
+        ds << d_indent << "// Finalize WGMMA operations\n";
+        ds << d_indent << "warpgroup_commit_batch();\n";
+        ds << d_indent << "warpgroup_wait<0>();\n";
+      }
       auto ca = op.StoreTo();
       auto t_sym = ca->data->name;
       auto ty = GetSymbolType(t_sym);
@@ -3219,6 +3326,40 @@ bool CuteCodeGen::Visit(AST::Synchronize& n) {
 bool CuteCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
+  auto BeginEventCritical = [&]() -> bool {
+    if (IsHost()) return false;
+    switch (bdim_level) {
+    case ParallelLevel::GROUPx4:
+      ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+      IncrDeviceIndent();
+      return true;
+    case ParallelLevel::GROUP:
+      ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
+      IncrDeviceIndent();
+      return true;
+    case ParallelLevel::BLOCK:
+      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      IncrDeviceIndent();
+      return true;
+    default: return false;
+    }
+  };
+
+  auto EndEventCritical = [&](bool guarded) {
+    if (!guarded || IsHost()) return;
+    DecrDeviceIndent();
+    ds << d_indent << "}\n";
+    switch (bdim_level) {
+    case ParallelLevel::GROUPx4:
+      ds << d_indent
+         << "cooperative_groups::tiled_partition<128>(cooperative_groups::this_thread_block()).sync();\n";
+      break;
+    case ParallelLevel::GROUP: ds << d_indent << "__syncwarp();\n"; break;
+    case ParallelLevel::BLOCK: ds << d_indent << "__syncthreads();\n"; break;
+    default: break;
+    }
+  };
+
   for (auto& t : n.GetTargets()) {
     auto tty = NodeType(*t);
     auto expr = cast<AST::Expr>(t);
@@ -3245,8 +3386,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         choreo_unreachable("yet to support: wait global event in host.");
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
-      case Storage::SHARED:
       case Storage::LOCAL: {
+        bool guarded = BeginEventCritical();
         ds << d_indent << "// wait event " << PSTR(t) << "\n";
         ds << d_indent << "while (";
         if (is_array_ref) {
@@ -3272,6 +3413,49 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         } else
           GenerateSubscriptions(ds, d_indent + ExprSTR(t, false), " = false;\n",
                                 ety->RemainderDimensions(0));
+        EndEventCritical(guarded);
+      } break;
+      case Storage::SHARED: {
+        std::string base_name;
+        if (is_array_ref) {
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          base_name = UnScopedName(bid->name);
+        } else {
+          base_name = UnScopedName(expr->GetSymbol()->name);
+        }
+        bool is_full = (base_name.find("full") != std::string::npos);
+        bool guarded = false;
+        bool no_post_sync = false;
+        if (!is_full) {
+          if (!(mbarrier && bdim_level == ParallelLevel::GROUPx4)) {
+            guarded = BeginEventCritical();
+          }
+        }
+        ds << d_indent << "// wait event(barrier) " << PSTR(t) << "\n";
+        if (is_array_ref) {
+          size_t lvl = GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(
+              ds,
+              d_indent + ExprSTR(t, false) + ".wait(" + ExprSTR(t, false) + ".arrive())",
+              ";\n", bty->RemainderDimensions(lvl));
+        } else {
+          GenerateSubscriptions(
+              ds,
+              d_indent + ExprSTR(t, false) + ".wait(" + ExprSTR(t, false) + ".arrive())",
+              ";\n", ety->RemainderDimensions(0));
+        }
+        if (is_full && mbarrier && bdim_level == ParallelLevel::GROUPx4) {
+          ds << d_indent << "warpgroup_arrive();\n";
+        }
+        if (guarded && no_post_sync) {
+          DecrDeviceIndent();
+          ds << d_indent << "}\n";
+        } else {
+          EndEventCritical(guarded);
+        }
       } break;
       default:
         choreo_unreachable("unsupported event array storage '" +
@@ -3282,8 +3466,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         choreo_unreachable("yet to support: wait global event in host.");
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
-      case Storage::SHARED:
       case Storage::LOCAL: {
+        bool guarded = BeginEventCritical();
         ds << d_indent << "while (" << ExprSTR(t, false)
            << " == false) continue; // spinlock\n";
         if (is_array_ref) {
@@ -3296,6 +3480,13 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
                                 bty->RemainderDimensions(lvl));
         } else
           ds << d_indent << ExprSTR(t, false) << " = false; // reset event\n";
+        EndEventCritical(guarded);
+      } break;
+      case Storage::SHARED: {
+        bool guarded = BeginEventCritical();
+        ds << d_indent << ExprSTR(t, false) << ".wait(" << ExprSTR(t, false)
+           << ".arrive()); // wait event(barrier)\n";
+        EndEventCritical(guarded);
       } break;
       default:
         choreo_unreachable("unsupported event storage '" +
@@ -3323,6 +3514,52 @@ bool CuteCodeGen::Visit(AST::Continue& n) {
 bool CuteCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 
+  auto SumRecentTMATxBytesExpr = [&]() -> std::string {
+    if (recent_tma_tx_bytes.empty()) return "1";
+    std::ostringstream oss;
+    bool first = true;
+    for (const auto& expr : recent_tma_tx_bytes) {
+      if (!first) oss << " + ";
+      first = false;
+      oss << "(" << expr << ")";
+    }
+    return oss.str();
+  };
+
+  auto BeginEventCritical = [&]() -> bool {
+    if (IsHost()) return false;
+    switch (bdim_level) {
+    case ParallelLevel::GROUPx4:
+      ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+      IncrDeviceIndent();
+      return true;
+    case ParallelLevel::GROUP:
+      ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
+      IncrDeviceIndent();
+      return true;
+    case ParallelLevel::BLOCK:
+      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      IncrDeviceIndent();
+      return true;
+    default: return false;
+    }
+  };
+
+  auto EndEventCritical = [&](bool guarded) {
+    if (!guarded || IsHost()) return;
+    DecrDeviceIndent();
+    ds << d_indent << "}\n";
+    switch (bdim_level) {
+    case ParallelLevel::GROUPx4:
+      ds << d_indent
+         << "cooperative_groups::tiled_partition<128>(cooperative_groups::this_thread_block()).sync();\n";
+      break;
+    case ParallelLevel::GROUP: ds << d_indent << "__syncwarp();\n"; break;
+    case ParallelLevel::BLOCK: ds << d_indent << "__syncthreads();\n"; break;
+    default: break;
+    }
+  };
+
   for (auto& f : n.GetEvents()) {
     auto expr = cast<AST::Expr>(f);
     bool is_array_ref = (expr->op == "elemof");
@@ -3338,8 +3575,9 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
       } else {
         switch (ety->GetStorage()) {
         case Storage::GLOBAL:
-        case Storage::SHARED:
         case Storage::LOCAL:
+          {
+          bool guarded = BeginEventCritical();
           ds << d_indent << "// trigger event " << PSTR(f) << "\n";
           if (is_array_ref) {
             size_t lvl = GetSubScriptLevel(*expr);
@@ -3351,7 +3589,68 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           } else
             GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
                                   " = true;\n", ety->RemainderDimensions(0));
+          EndEventCritical(guarded);
           break;
+          }
+        case Storage::SHARED:
+          {
+          std::string base_name;
+          if (is_array_ref) {
+            auto bid = AST::GetArrayBaseSymbol(*expr);
+            base_name = UnScopedName(bid->name);
+          } else {
+            base_name = UnScopedName(expr->GetSymbol()->name);
+          }
+          bool is_full = (base_name.find("full") != std::string::npos);
+            bool guarded = false;
+            bool no_post_sync = false;
+            if (is_full) {
+              if (!(mbarrier && bdim_level == ParallelLevel::GROUPx4)) {
+                guarded = BeginEventCritical();
+              }
+            }
+          ds << d_indent << "// trigger event(barrier) " << PSTR(f) << "\n";
+          if (is_full) {
+            auto tx_bytes_expr = SumRecentTMATxBytesExpr();
+            if (is_array_ref) {
+              if (mbarrier) {
+                ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
+                   << ExprSTR(f, false) << ", 1, " << tx_bytes_expr
+                   << ");\n";
+              } else {
+                ds << d_indent << "(void)" << ExprSTR(f, false)
+                   << ".arrive();\n";
+              }
+            } else {
+              if (mbarrier) {
+                GenerateSubscriptions(
+                    ds,
+                    d_indent + "(void)cuda::device::barrier_arrive_tx(" +
+                        ExprSTR(f, false) + ", 1, " + tx_bytes_expr + ")",
+                    ";\n", ety->RemainderDimensions(0));
+              } else {
+                GenerateSubscriptions(
+                    ds, d_indent + "(void)" + ExprSTR(f, false),
+                    ".arrive();\n", ety->RemainderDimensions(0));
+              }
+            }
+            recent_tma_tx_bytes.clear();
+          } else {
+            if (is_array_ref) {
+              ds << d_indent << "(void)" << ExprSTR(f, false) << ".arrive();\n";
+            } else {
+              GenerateSubscriptions(ds, d_indent + "(void)" + ExprSTR(f, false),
+                                    ".arrive();\n", ety->RemainderDimensions(0));
+            }
+          }
+          if (guarded && no_post_sync) {
+            DecrDeviceIndent();
+            ds << d_indent << "}\n";
+          } else {
+            EndEventCritical(guarded);
+          }
+          break;
+          }
         default:
           choreo_unreachable("unsupported event array storage '" +
                              STR(ety->GetStorage()) + "' to trigger.");
@@ -3367,8 +3666,9 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
       } else {
         switch (ety->GetStorage()) {
         case Storage::GLOBAL:
-        case Storage::SHARED:
         case Storage::LOCAL:
+          {
+          bool guarded = BeginEventCritical();
           if (is_array_ref) {
             ds << d_indent << "// trigger event " << PSTR(f) << "\n";
             size_t lvl = GetSubScriptLevel(*expr);
@@ -3381,7 +3681,25 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           } else
             ds << d_indent << ExprSTR(f, false)
                << " = true; // trigger event\n";
+          EndEventCritical(guarded);
           break;
+          }
+        case Storage::SHARED:
+          {
+          bool guarded = BeginEventCritical();
+          auto is_full = ExprSTR(f, false).find("full") != std::string::npos;
+          if (is_full && mbarrier) {
+            ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
+               << ExprSTR(f, false) << ", 1, " << SumRecentTMATxBytesExpr()
+               << "); // trigger event(barrier)\n";
+            recent_tma_tx_bytes.clear();
+          } else {
+            ds << d_indent << "(void)" << ExprSTR(f, false)
+               << ".arrive(); // trigger event(barrier)\n";
+          }
+          EndEventCritical(guarded);
+          break;
+          }
         default:
           choreo_unreachable("unsupported event array storage '" +
                              STR(ety->GetStorage()) + "' to trigger.");
@@ -3609,8 +3927,22 @@ bool CuteCodeGen::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
   assert(!IsHost());
   ds << d_indent << "// inthreads: " << n.LOC() << "\n";
-  if (!n.stmts->None())
-    ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+  if (!n.stmts->None()) {
+    auto pred_str = ExprSTR(n.pred, false);
+    bool mbarrier_single_producer = false;
+    if (mbarrier && bdim_level == ParallelLevel::GROUPx4) {
+      auto pred_nospace = pred_str;
+      pred_nospace.erase(
+          std::remove_if(pred_nospace.begin(), pred_nospace.end(),
+                         [](unsigned char ch) { return std::isspace(ch); }),
+          pred_nospace.end());
+      mbarrier_single_producer =
+          pred_nospace.find("__choreo_vg4id_x==0") != std::string::npos;
+    }
+    ds << d_indent << "if (" << pred_str;
+    if (mbarrier_single_producer) ds << " && __CHOREO_GROUPX4_SINGLE__";
+    ds << ") {\n";
+  }
   IncrDeviceIndent();
   return true;
 }

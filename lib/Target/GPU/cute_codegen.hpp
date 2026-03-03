@@ -2,6 +2,7 @@
 #define __CHOREO_CODEGEN_CUTE_HPP__
 
 #include <filesystem>
+#include <deque>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -308,6 +309,10 @@ private:
   // TODO: for now, only support one stream!
   std::string stream_name;
   int tma_count = 0;
+  int tma_future_count = 0;
+  std::deque<std::string> recent_tma_tx_bytes;
+  bool saw_explicit_mma_commit = false;
+  bool wgmma_arrive_state_declared = false;
 
 private:
   void EmitFixedHostHead();
@@ -372,6 +377,9 @@ private:
     emit_call = true;
     parallel_idx = -1;
     site_assertions.clear();
+    recent_tma_tx_bytes.clear();
+    saw_explicit_mma_commit = false;
+    wgmma_arrive_state_declared = false;
   }
 
   std::string GenHostParamName() {

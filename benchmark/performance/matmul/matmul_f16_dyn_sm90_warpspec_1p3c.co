@@ -16,6 +16,7 @@
 #define MATMUL_TILE_K 64
 #define MATMUL_WARP_K 16
 #define MATMUL_SWIZ 128
+#define MATMUL_STAGES 2
 
 #if MATMUL_SWIZ != (2 * MATMUL_TILE_K)
 #error "MATMUL_SWIZ must equal 2 * MATMUL_TILE_K for f16 kernel"
@@ -46,33 +47,42 @@
 #define MATMUL_DEFAULT_K 2048
 
 __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
-
-  // Warp-specialized (1 producer + N consumers):
-  // - producer warpgroup (p1 == 0): issue TMA load for full M-tile
-  // - consumer warpgroups (p1 > 0): each computes one 64xN slice on M dimension
+  // Warp-specialized (1 producer + 3 consumers):
+  // - producer (p1 == 0): TMA load and trigger full[stage]
+  // - consumers (p1 > 0): wait full[stage], compute own 64xN slice, trigger empty[stage]
   parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block {
-    shared f16 [MATMUL_TILE_M, MATMUL_TILE_K] lhs_load_s;
-    shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared event full[MATMUL_STAGES], empty[MATMUL_STAGES];
+    shared f16 [MATMUL_STAGES * MATMUL_TILE_M, MATMUL_TILE_K] lhs_load_s;
+    shared f16 [MATMUL_STAGES * MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
     shared f16 [MATMUL_TILE_M, MATMUL_WARP_N] output_s;
 
     parallel p1 by 4 : group-4 {
-      mc = mma.fill.f16 0.0f;
-      foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-        inthreads (p1 == 0) {
-          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
-          tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
-        }
-
-        inthreads (p1 > 0) {
-          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-            ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(p1 - 1, 0).chunkat(_, iv_warp);
-            mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-            mma.row.row mc, ma, mb;
-          }
+      inthreads.async (p1 == 0) {
+        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+          stage = iv_k % MATMUL_STAGES;
+          wait empty[stage];
+          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(stage, 0);
+          tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0);
+          trigger full[stage];
         }
       }
 
-      inthreads (p1 > 0) {
+      inthreads.async (p1 > 0) {
+        mc = mma.fill.f16 0.0f;
+        foreach {s} in [MATMUL_STAGES] {
+          trigger empty[s];
+        }
+        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+          stage = iv_k % MATMUL_STAGES;
+          wait full[stage];
+          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+            ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(stage, 0).subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(p1 - 1, 0).chunkat(_, iv_warp);
+            mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
+            mma.row.row mc, ma, mb;
+          }
+          mma.commit;
+          trigger empty[stage];
+        }
         mma.store mc, output_s.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(p1 - 1, 0);
       }
     }

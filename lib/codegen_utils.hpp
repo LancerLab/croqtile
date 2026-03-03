@@ -20,6 +20,7 @@ extern Option<bool> dma_opt;
 extern Option<bool> dma_verbose;
 extern Option<bool> tma_cluster_aware;
 extern Option<bool> ptx_barrier;
+extern Option<bool> mbarrier;
 extern Option<bool> use_stmatrix;
 
 inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
