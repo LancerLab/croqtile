@@ -147,7 +147,7 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
             STR(lshape) + " v.s. " + STR(rshape) + ").";
         auto res = FCtx(fname).GetAssessor(*this).Assess(
             AssessPolicy::ErrWarn, AssessRelation::EQ, lshape.ValueAt(lidx),
-            rshape.ValueAt(ridx), err_message, warn_message, AssessType::GLOBAL,
+            rshape.ValueAt(ridx), err_message, warn_message, AssessType::ENTRY,
             n.LOC(), &n);
         if (!res.passed) {
           compatible = false;
@@ -213,8 +213,82 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
       !ReportUnknownSymbol(n.GetDataName(), n.LOC(), __FILE__, __LINE__))
     return false;
 
-  // TODO: static out-of-bound check
-  // data.at(xxx, xxx) or future.data.at(xxx, xxx)
+  // Runtime bound check for element access: data.at(idx0, idx1, ...)
+  // Each index must satisfy 0 <= idx_i < dim_i.
+  if (n.AccessElement()) {
+    auto dty = GetSymbolType(n.GetDataName());
+    auto sty = GetSpannedType(dty);
+    if (sty) {
+      auto shape = sty->GetShape();
+      if (shape.IsValid()) {
+        auto& indices = n.GetIndices();
+        size_t ndims = std::min(indices.size(), shape.Rank());
+        for (size_t d = 0; d < ndims; ++d) {
+          // The index might be wrapped in an IntIndex or be a direct Expr.
+          ptr<AST::Node> val_node;
+          if (auto ii = dyn_cast<AST::IntIndex>(indices[d]))
+            val_node = ii->Val();
+          else
+            val_node = indices[d];
+
+          // Try to get the symbolic value from the index expression.
+          ValueItem index_val;
+          ptr<AST::Node> class_node; // node used for classification
+
+          if (auto expr = dyn_cast<AST::Expr>(val_node)) {
+            if (expr->Opts().HasVal()) index_val = expr->Opts().GetVal();
+            class_node = expr;
+          } else if (auto id = dyn_cast<AST::Identifier>(val_node)) {
+            index_val = sbe::sym(InScopeName(id->name));
+            class_node = id;
+          }
+
+          if (!IsValidValueItem(index_val)) continue;
+          if (!IsComputable(index_val)) continue;
+
+          // Static check for integer literals — no runtime assertion needed.
+          if (auto il = AST::GetIntLiteral(*val_node)) {
+            auto dv = shape.ValueAt(d);
+            if (auto dvi = VIInt(dv)) {
+              if (il->Val() < 0 || il->Val() >= *dvi)
+                Error1(val_node->LOC(), "Index " + std::to_string(il->Val()) +
+                                            " is out of bounds [0, " +
+                                            std::to_string(*dvi) +
+                                            ") for dim " + std::to_string(d) +
+                                            " of '" + n.GetDataName() + "'.");
+            }
+            continue;
+          }
+
+          auto dim_bound = shape.ValueAt(d);
+
+          auto idx_str = PSTR(val_node);
+          auto data_str = n.GetDataName();
+          auto nty = NodeType(*val_node);
+
+          if (auto bty = dyn_cast<BoundedType>(nty)) {
+            EmitAssertion(
+                sbe::oc_le(bty->GetUpperBound(), dim_bound)->Normalize(),
+                "The " + Ordinal(d + 1) + " index `" + idx_str +
+                    "` of element access '" + data_str +
+                    "' should be less than " + STR(dim_bound),
+                val_node->LOC(), class_node, &n);
+          } else {
+            EmitAssertion(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
+                          "The " + Ordinal(d + 1) + " index `" + idx_str +
+                              "` of element access '" + data_str +
+                              "' should be greater than or equal to 0",
+                          val_node->LOC(), class_node, &n);
+            EmitAssertion(sbe::oc_lt(index_val, dim_bound)->Normalize(),
+                          "The " + Ordinal(d + 1) + " index `" + idx_str +
+                              "` of element access '" + data_str +
+                              "' should be less than " + STR(dim_bound),
+                          val_node->LOC(), class_node, &n);
+          }
+        }
+      }
+    }
+  }
 
   return true;
 }
@@ -283,7 +357,11 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
       auto asrt = sbe::cmp(">", dim, sbe::nu(0))->Normalize();
       assert(IsValidValueItem(asrt));
 
-      EmitAssertion(asrt, message, loc, spv);
+      // The assertion "dim > 0" is about the BOUND (a parameter expression),
+      // not the parallel variable itself.  The SubPV has BoundedType, so
+      // EmitAssertion would escalate to USE_SITE — bypass it and force ENTRY.
+      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt, message,
+                                            AssessType::ENTRY, loc, spv.get());
       ++index;
     }
   }
@@ -303,7 +381,13 @@ bool SemaChecker::VisitNode(AST::WithIn& n) {
       auto asrt = sbe::cmp("!=", dim, sbe::nu(0))->Normalize();
       assert(IsValidValueItem(asrt));
 
-      EmitAssertion(asrt, message, n.in->LOC(), n.in);
+      // The assertion "dim != 0" is about the span BOUND (a parameter
+      // expression), not the with-in iterator variable itself.  Since n.in
+      // has BoundedType, EmitAssertion would escalate to USE_SITE — bypass
+      // it and force ENTRY.
+      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt, message,
+                                            AssessType::ENTRY, n.in->LOC(),
+                                            n.in.get());
       ++index;
     }
   }
@@ -1089,16 +1173,23 @@ bool SemaChecker::VisitNode(AST::Select& n) {
   } else {
     if (n.select_factor->Opts().HasVal()) {
       auto v = n.select_factor->Opts().GetVal();
-      EmitAssertion(sbe::oc_ge(v, sbe::nu(0)),
-                    "The select factor `" + PSTR(n.select_factor) +
-                        "` should be greater than or equal to 0",
-                    n.select_factor->LOC(), n.select_factor);
+      // Pass &n (the Select node) as emit_node because Expr::accept does not
+      // call AfterVisit, so the select_factor pointer would never match
+      // in EmitSiteAssertions.  Select::accept does call AfterVisit.
+
+      // For bounded types (loop iteration variables), the lower bound is
+      // always 0, so the ">= 0" assertion is provably true — skip it.
+      if (!isa<BoundedType>(NodeType(*n.select_factor)))
+        EmitAssertion(sbe::oc_ge(v, sbe::nu(0)),
+                      "The select factor `" + PSTR(n.select_factor) +
+                          "` should be greater than or equal to 0",
+                      n.select_factor->LOC(), n.select_factor, &n);
       EmitAssertion(
           sbe::oc_lt(v, sbe::nu(select_value_cnt)),
           "The select factor `" + PSTR(n.select_factor) +
               "` should be less than " + std::to_string(select_value_cnt) +
               ", which is the count of values in the select statement",
-          n.select_factor->LOC(), n.select_factor);
+          n.select_factor->LOC(), n.select_factor, &n);
     }
   }
 
@@ -1156,18 +1247,32 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
 
 void SemaChecker::EmitAssertion(const ValueItem& pred,
                                 const std::string& message, const location& l,
-                                const ptr<AST::Node>& n) {
-  auto aty = AssessType::GLOBAL;
-  if (local_deps.Contains(n)) aty = AssessType::USE_SITE;
+                                const ptr<AST::Node>& n, AST::Node* emit_node) {
+  // Classification lattice: ENTRY < DEF_SITE < USE_SITE.
+  // Start at ENTRY and escalate upward as needed.
+  auto aty = AssessType::ENTRY;
+
+  // When the node references locally-defined names (buffer objects that can be
+  // redefined), the assertion must be placed at the (re-)definition site —
+  // escalate to DEF_SITE.
+  if (local_deps.Contains(n)) aty = AssessType::DEF_SITE;
+
+  // When the node has a BoundedType (loop iteration variable from foreach /
+  // with-in), the value varies between iterations and the assertion must be
+  // checked at each use site — escalate to USE_SITE.
+  // NOTE: Callers whose assertions are about bounds (not the variable itself)
+  // must bypass this function and call Assess directly with ENTRY — see the
+  // ParallelBy and WithIn visitors.
+  if (isa<BoundedType>(NodeType(*n))) aty = AssessType::USE_SITE;
 
   // Log when the assertion is unrelated to any input — for diagnostic purposes
-  // only; the assertion still gets GLOBAL type to preserve runtime checking.
-  if (aty == AssessType::GLOBAL && !input_deps.Contains(n))
+  // only; the assertion still gets ENTRY type to preserve runtime checking.
+  if (aty == AssessType::ENTRY && !input_deps.Contains(n))
     if (isa<AST::Expr>(n) || isa<AST::NamedVariableDecl>(n) ||
         isa<AST::Assignment>(n))
       VST_DEBUG(dbgs() << "questionable: check is not related to input: "
                        << PSTR(n) << ".\n");
 
   FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message, aty,
-                                        l, n.get());
+                                        l, n.get(), emit_node);
 }

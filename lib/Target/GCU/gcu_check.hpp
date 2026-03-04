@@ -30,7 +30,7 @@ private:
 
   bool Assess(const ValueItem& pred, const std::string& message,
               const location& l, AST::Node* node,
-              AssessType aty = AssessType::GLOBAL) {
+              AssessType aty = AssessType::ENTRY) {
     return FCtx(cur_fname)
         .GetAssessor(*this)
         .Assess(AssessPolicy::Error, pred, message, aty, l, node)
@@ -626,7 +626,7 @@ public:
 
     message = "On " + cur_arch + ", must satisfy: " + message;
     Assess(sbe::cmp(op, vi, sbe::nu(limit)), message, loc, nullptr,
-           AssessType::GLOBAL);
+           AssessType::ENTRY);
   }
 
 public:

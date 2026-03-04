@@ -91,6 +91,13 @@ Option<bool> warning_as_error(OptionKind::User, "-Werror", "", false,
                               "Make all warnings into errors.");
 Option<bool> disable_runtime_check(OptionKind::User, "--disable-runtime-check",
                                    "", false, "Disable all runtime checks.");
+Option<std::string> runtime_check_level(
+    OptionKind::User, "--runtime-check", "-rtc", "entry",
+    "Control the granularity of runtime assertion insertion: "
+    "'entry' (default) emits only entry-point assertions, "
+    "'all' also emits def-site and use-site assertions, "
+    "'none' disables all runtime assertions.",
+    "--runtime-check=<entry|all|none>");
 Option<bool> disable_cuda_runtime_env_check(
     OptionKind::User, "--disable-cuda-runtime-env-check", "", false,
     "Do not emit cuda runtime enviroment check.");
@@ -298,7 +305,16 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetMemDefaultAligned(mem_default_aligned.GetValue());
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
-  CCtx().SetDisableRuntimeCheck(disable_runtime_check.GetValue());
+
+  // --runtime-check=<entry|all|none> controls assertion granularity.
+  // --disable-runtime-check overrides to "none" for backward compatibility.
+  {
+    auto rtc = runtime_check_level.GetValue();
+    if (disable_runtime_check.GetValue()) rtc = "none";
+    CCtx().SetRuntimeCheckLevel(rtc);
+    CCtx().SetDisableRuntimeCheck(rtc == "none");
+  }
+
   CCtx().SetDisableCudaRuntimeEnvCheck(
       disable_cuda_runtime_env_check.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());

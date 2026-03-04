@@ -1,14 +1,68 @@
 #include "assess.hpp"
-
 #include "visitor.hpp"
 
 using namespace Choreo;
+
+namespace Choreo {
+
+inline const std::string STR(const AssessType& at) {
+  switch (at) {
+  case AssessType::ENTRY: return "entry";
+  case AssessType::DEF_SITE: return "def";
+  case AssessType::USE_SITE: return "use";
+  default: break;
+  }
+  choreo_unreachable("unsupported assess type.");
+  return "";
+}
+
+inline const std::string STR(const AssessPolicy& ap) {
+  switch (ap) {
+  case AssessPolicy::Error: return "error";
+  case AssessPolicy::Warn: return "warning";
+  case AssessPolicy::ErrWarn: return "error-warning";
+  default: break;
+  }
+  choreo_unreachable("unsupported assess type.");
+  return "";
+}
+
+inline const std::string STR(const AssessRelation& ar) {
+  switch (ar) {
+  case AssessRelation::EQ: return "==";
+  case AssessRelation::NE: return "!=";
+  default: break;
+  }
+  choreo_unreachable("unsupported assess type.");
+  return "";
+}
+} // namespace Choreo
+
+void Assessor::AddAssertion(const ptr<sbe::SymbolicExpression>& ar,
+                            const location& l, const std::string& s,
+                            AssessType aty, AST::Node* n, AST::Node* en) {
+  if (DebugOn())
+    dbgs() << " +- runtime assertion: " << sbe::PSTR(ar)
+           << ", type: " << STR(aty) << "\n";
+
+  assert(IsComputable(ar));
+  assertions.push_back({ar, aty, l, s, n, en});
+}
+
+bool Assessor::DebugOn() const {
+  return (visitor && visitor->DebugIsEnabled());
+}
 
 AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
                               const ValueItem& lhs, const ValueItem& rhs,
                               const std::string& error_message,
                               const std::string& warn_message, AssessType aty,
                               const location& l, AST::Node* node) {
+  if (DebugOn())
+    dbgs() << "[Assess] relation: " << STR(lhs) << STR(rel) << STR(rhs)
+           << ", type: " << STR(aty) << ", policy: " << STR(ap)
+           << ", node: " << PSTR(node) << "\n";
+
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
   auto pred =
       (rel == AssessRelation::EQ) ? sbe::oc_eq(lhs, rhs) : sbe::oc_ne(lhs, rhs);
@@ -71,8 +125,14 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
 
 AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
                               const std::string& message, AssessType aty,
-                              const location& l, AST::Node* node) {
+                              const location& l, AST::Node* node,
+                              AST::Node* emit_node) {
+  if (DebugOn())
+    dbgs() << "[Assess] " << STR(bo) << ", type: " << STR(aty)
+           << ", policy: " << STR(ap) << ", node: " << PSTR(emit_node)
+           << ", node: " << PSTR(emit_node) << "\n";
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
+
   if (ap == AssessPolicy::ErrWarn)
     choreo_unreachable(
         "ErrWarn policy is not allowed for boolean-expression assessment "
@@ -94,6 +154,6 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
 
   if (ap == AssessPolicy::Warn) return {true, false, false};
 
-  AddAssertion(pred, l, message, aty, node);
+  AddAssertion(pred, l, message, aty, node, emit_node);
   return {true, false, true};
 }

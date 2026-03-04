@@ -132,9 +132,6 @@ protected:
 
   static std::unordered_set<std::string> AllVisitors;
 
-  bool DebugIsEnabled() const { return debug_visit; }
-  bool TraceIsEnabled() const { return trace_visit; }
-
 public:
   Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr,
           bool ugs = false)
@@ -152,12 +149,12 @@ public:
 
     if (std::getenv("CHOREO_TRACE_VISITOR")) {
       auto trace = ToUpper(std::string(std::getenv("CHOREO_TRACE_VISITOR")));
-      if (ContainsExact(trace, name)) trace_visit = true;
+      if (ContainsExact(trace, name)) SetTraceVisit(true);
     }
 
     if (std::getenv("CHOREO_DEBUG_VISITOR")) {
       auto debug = ToUpper(std::string(std::getenv("CHOREO_DEBUG_VISITOR")));
-      if (ContainsExact(debug, name)) debug_visit = true;
+      if (ContainsExact(debug, name)) SetDebugVisit(true);
     }
 
     if (std::getenv("CHOREO_PRINT_BEFORE")) {
@@ -195,6 +192,9 @@ public:
   }
 
   virtual ~Visitor() {}
+
+  virtual bool DebugIsEnabled() const { return debug_visit; }
+  virtual bool TraceIsEnabled() const { return trace_visit; }
 
   virtual void SetTraceVisit(bool t) { trace_visit = t; }
   virtual void SetDebugVisit(bool d) { debug_visit = d; }

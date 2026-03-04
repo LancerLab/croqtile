@@ -1,3 +1,4 @@
+#include "assert_site.hpp"
 #include "cute_codegen.hpp"
 #include "dmaconf.hpp"
 #include "gpu_adapt.hpp"
@@ -133,6 +134,7 @@ public:
   bool PlanCodeGenStages(ASTPipeline& p) const override {
     p.AddStage<GPUAdaptor>();
     p.AddStage<MemUsageCheck>();
+    p.AddStage<AssertSite>();
     p.AddStage<Cute::CuteCodeGen>();
     return true;
   }

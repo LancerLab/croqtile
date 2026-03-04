@@ -1,3 +1,4 @@
+#include "assert_site.hpp"
 #include "gcu_check.hpp"
 #include "gcu_target.hpp"
 #include "pipeline.hpp"
@@ -110,6 +111,7 @@ public:
     // apply GCU specific checks
     p.AddStage<GCUCheck>();
     p.AddStage<MemUsageCheck>();
+    p.AddStage<AssertSite>();
     p.AddStage<Topscc::TopsccCodeGen>();
     return true;
   }

@@ -71,7 +71,7 @@ private:
 
   bool Assess(const ValueItem& pred, const std::string& message,
               const location& l, AST::Node* node,
-              AssessType aty = AssessType::GLOBAL) {
+              AssessType aty = AssessType::ENTRY) {
     return FCtx(cur_fname)
         .GetAssessor(*this)
         .Assess(AssessPolicy::Error, pred, message, aty, l, node)
@@ -136,7 +136,7 @@ public:
                    "when 'group' exists for " +
                    ToUpper(CCtx().GetArch()) + ".";
         Assess(sbe::oc_eq(total_threads, sbe::nu(32)), msg, pb->LOC(), pb,
-               AssessType::GLOBAL);
+               AssessType::ENTRY);
       }
 
       if (TargetHasLevel(ParallelLevel::GROUPx4)) {
@@ -151,7 +151,7 @@ public:
                      "128 when 'group-4' exists for " +
                      ToUpper(CCtx().GetArch()) + ".";
           Assess(sbe::oc_eq(total_threads, sbe::nu(128)), msg, pb->LOC(), pb,
-                 AssessType::GLOBAL);
+                 AssessType::ENTRY);
         }
       }
     }
@@ -273,9 +273,9 @@ public:
                        ", the config in "
                        "dma.pad must be in range [0, 2^11]";
             auto asrt = sbe::cmp(">=", val, sbe::nu(0));
-            Assess(asrt, msg, e->LOC(), e.get(), AssessType::GLOBAL);
+            Assess(asrt, msg, e->LOC(), e.get(), AssessType::ENTRY);
             asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
-            Assess(asrt, msg, e->LOC(), e.get(), AssessType::GLOBAL);
+            Assess(asrt, msg, e->LOC(), e.get(), AssessType::ENTRY);
           }
         }
       }
@@ -304,14 +304,14 @@ public:
                     ", the value of padding_mid[rank-1] in dma.pad must be 0 "
                     "(mid padding of dim[rank-1] is not supported by the "
                     "hardware)",
-                e->LOC(), e.get(), AssessType::GLOBAL);
+                e->LOC(), e.get(), AssessType::ENTRY);
           } else {
             auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
             Assess(asrt,
                    "On " + cur_arch +
                        ", the value of padding_mid in dma.pad must be in range "
                        "[0, 2^10]",
-                   e->LOC(), e.get(), AssessType::GLOBAL);
+                   e->LOC(), e.get(), AssessType::ENTRY);
           }
         }
       }
@@ -333,7 +333,7 @@ public:
                    "On " + cur_arch +
                        ", dma.pad does not support 5-dimensional array (if dim "
                        "is 5, pad_config[0] must be 0)",
-                   e->LOC(), e.get(), AssessType::GLOBAL);
+                   e->LOC(), e.get(), AssessType::ENTRY);
           }
         }
       }
@@ -551,7 +551,7 @@ public:
 
     message = "On " + cur_arch + ", must satisfy: " + message;
     Assess(sbe::cmp(op, vi, sbe::nu(limit)), message, loc, nullptr,
-           AssessType::GLOBAL);
+           AssessType::ENTRY);
   }
 
 public:

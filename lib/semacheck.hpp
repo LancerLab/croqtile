@@ -27,7 +27,7 @@ private:
                            int);
 
   void EmitAssertion(const ValueItem&, const std::string&, const location&,
-                     const ptr<AST::Node>&);
+                     const ptr<AST::Node>&, AST::Node* emit_node = nullptr);
 
 public:
   SemaChecker() : TracedVisitorWithSymTab("check") {}

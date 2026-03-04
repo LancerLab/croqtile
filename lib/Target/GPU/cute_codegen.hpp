@@ -328,6 +328,11 @@ private:
   void EmitCudaFree();
   void EmitRuntimeEnvironmentChecker(std::ostream&) const;
 
+  // site-level assertion emission
+  std::unordered_map<AST::Node*, std::vector<Assertion>> site_assertions;
+  void BuildSiteAssertionMap();
+  void EmitSiteAssertions(AST::Node& n);
+
 private:
   void IncrHostIndent() { h_indent += "  "; }
   void IncrDeviceIndent() { d_indent += "  "; }
@@ -366,6 +371,7 @@ private:
     void_return = false;
     emit_call = true;
     parallel_idx = -1;
+    site_assertions.clear();
   }
 
   std::string GenHostParamName() {

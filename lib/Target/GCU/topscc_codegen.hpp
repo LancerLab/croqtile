@@ -284,6 +284,11 @@ private:
   void EmitMemReuse(const std::string& dev_func_name);
   void EmitTopsFree();
 
+  // site-level assertion emission
+  std::unordered_map<AST::Node*, std::vector<Assertion>> site_assertions;
+  void BuildSiteAssertionMap();
+  void EmitSiteAssertions(AST::Node& n);
+
 private:
   void IncrHostIndent() { h_indent += "  "; }
   void IncrDeviceIndent() { d_indent += "  "; }
@@ -321,6 +326,7 @@ private:
     void_return = false;
     emit_call = true;
     parallel_idx = -1;
+    site_assertions.clear();
   }
 
   std::string GenHostParamName() {

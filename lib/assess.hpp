@@ -17,7 +17,7 @@ struct Visitor;
 class FunctionContext;
 
 enum class AssessType {
-  GLOBAL,
+  ENTRY,
   DEF_SITE,
   USE_SITE,
 };
@@ -42,10 +42,19 @@ struct AssessResult {
 struct Assertion {
   ptr<sbe::SymbolicExpression> expr;
 
-  AssessType type = AssessType::GLOBAL;
+  AssessType type = AssessType::ENTRY;
   location loc;
   std::string message;
   AST::Node* node = nullptr;
+  /// Optional override for the emission target node.  When set,
+  /// BuildSiteAssertionMap uses this instead of `node` for mapping.
+  /// This is needed when the classification node (e.g., an Expr whose
+  /// BoundedType determines USE_SITE) does not receive AfterVisit in the AST
+  /// traversal, but its parent (e.g., Select) does.
+  AST::Node* emit_node = nullptr;
+
+  /// Return the node to use for site-assertion emission mapping.
+  AST::Node* EmitTarget() const { return emit_node ? emit_node : node; }
 };
 
 class Assessor {
@@ -56,10 +65,9 @@ private:
   /// Raw assertion insertion (no evaluation, no visitor required).
   void AddAssertion(const ptr<sbe::SymbolicExpression>& ar, const location& l,
                     const std::string& s, AssessType aty,
-                    AST::Node* n = nullptr) {
-    assert(IsComputable(ar));
-    assertions.push_back({ar, aty, l, s, n});
-  }
+                    AST::Node* n = nullptr, AST::Node* en = nullptr);
+
+  bool DebugOn() const;
 
 public:
   /// Bind a visitor for diagnostic emission. Returns *this for chaining.
@@ -94,7 +102,8 @@ public:
   /// needed.
   AssessResult Assess(AssessPolicy ap, const ValueItem& bo,
                       const std::string& message, AssessType aty,
-                      const location& l, AST::Node* node = nullptr);
+                      const location& l, AST::Node* node = nullptr,
+                      AST::Node* emit_node = nullptr);
 };
 
 } // end namespace Choreo

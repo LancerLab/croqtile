@@ -373,6 +373,8 @@ private:
   bool inhibit_warning = false;    // Inhibit all warning messages.
   bool warning_as_error = false;   // Make all warnings into errors.
   bool disable_runtime_check = false; // Disable all runtime checks.
+  // Runtime check assertion level: "entry" (default), "all", or "none".
+  std::string runtime_check_level = "entry";
   bool disable_cuda_runtime_env_check =
       false;                     // Do not emit cuda runtime env check.
   std::string debug_file_dir;    // directory for compiler debug artifacts
@@ -506,6 +508,7 @@ public:
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
   bool DisableRuntimeCheck() const { return disable_runtime_check; }
+  const std::string& RuntimeCheckLevel() const { return runtime_check_level; }
   bool DisableCudaRuntimeEnvCheck() const {
     return disable_cuda_runtime_env_check;
   }
@@ -544,6 +547,9 @@ public:
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
   void SetDisableRuntimeCheck(bool value) { disable_runtime_check = value; }
+  void SetRuntimeCheckLevel(const std::string& level) {
+    runtime_check_level = level;
+  }
   void SetDisableCudaRuntimeEnvCheck(bool value) {
     disable_cuda_runtime_env_check = value;
   }
