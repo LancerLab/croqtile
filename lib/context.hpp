@@ -30,6 +30,11 @@ enum class OutputKind {
   ShellScript,
 };
 
+enum class DebugLinePathMode {
+  WorkspaceRelative,
+  Absolute,
+};
+
 inline bool RequiresE2ECompilation(OutputKind ok) {
   switch (ok) {
   case OutputKind::TargetModule:
@@ -362,7 +367,8 @@ private:
   bool mem_reuse = false;         // reuse the memory of the program
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
-  bool gen_debug_info = false;    // generate debug information
+  bool gen_debug_info = false;    // generate source-level debug information
+  bool target_debug_info = false; // pass debug flags to target compilation
   bool diag_dma = false;          // diagnose DMA at runtime
   bool loop_norm = false;         // enable loop normalization
   bool no_vectorize = false;      // do not vectorize any foreach loop
@@ -379,6 +385,8 @@ private:
       false;                     // Do not emit cuda runtime env check.
   std::string debug_file_dir;    // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
+    DebugLinePathMode debug_line_path_mode =
+      DebugLinePathMode::WorkspaceRelative;
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -499,6 +507,8 @@ public:
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
+  bool TargetDebugInfo() const { return target_debug_info; }
+  DebugLinePathMode GetDebugLinePathMode() const { return debug_line_path_mode; }
   bool DMADiagnosis() const { return diag_dma; }
   bool LoopNorm() const { return loop_norm; }
   bool NoVectorize() const { return no_vectorize; }
@@ -536,6 +546,10 @@ public:
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
+  void SetTargetDebugInfo(bool value) { target_debug_info = value; }
+  void SetDebugLinePathMode(DebugLinePathMode mode) {
+    debug_line_path_mode = mode;
+  }
   void SetDMADiagnosis(bool value) { diag_dma = value; }
   void SetLoopNorm(bool value) { loop_norm = value; }
   void SetNoVectorize(bool value) { no_vectorize = value; }

@@ -1,9 +1,11 @@
 #include "topscc_codegen.hpp"
 #include "codegen_utils.hpp"
 
+#include <cctype>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <system_error>
 
 #include "ast.hpp"
 #include "choreo_header.inc"
@@ -107,6 +109,53 @@ void GenerateSubscriptions(std::ostream& os, const std::string prefix,
 
 } // namespace
 
+bool TopsccCodeGen::ShouldEmitLineDirective(AST::Node& n) const {
+  return isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+         isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
+         isa<AST::WhileBlock>(&n) || isa<AST::Assignment>(&n) ||
+         isa<AST::ParallelBy>(&n) || isa<AST::DMA>(&n) ||
+         isa<AST::Wait>(&n) || isa<AST::Trigger>(&n) || isa<AST::Break>(&n) ||
+         isa<AST::Continue>(&n) || isa<AST::Rotate>(&n) ||
+         isa<AST::Synchronize>(&n) || isa<AST::Call>(&n) ||
+         isa<AST::NamedVariableDecl>(&n) || isa<AST::Return>(&n);
+}
+
+std::string TopsccCodeGen::EscapeLineDirectivePath(const std::string& path) {
+  return EscapeLinePathForDirective(path);
+}
+
+std::string TopsccCodeGen::ResolveLineDirectivePath(const location& loc) const {
+  return ResolveDebugLinePath(loc, CCtx().GetDebugLinePathMode());
+}
+
+void TopsccCodeGen::EmitLineDirective(AST::Node& n) {
+  if (!EnableLineDirective() || !ShouldEmitLineDirective(n)) return;
+
+  auto loc = n.LOC();
+  if (loc.begin.line <= 0) return;
+
+  auto file = ResolveLineDirectivePath(loc);
+  if (file.empty()) return;
+
+  auto& line_state = IsHost() ? host_line_state : device_line_state;
+  if (line_state.valid && line_state.line == loc.begin.line &&
+      line_state.file == file)
+    return;
+
+  auto& os = IsHost() ? hs : ds;
+  os << "#line " << loc.begin.line << " \"" << EscapeLineDirectivePath(file)
+     << "\"\n";
+
+  line_state.line = loc.begin.line;
+  line_state.file = file;
+  line_state.valid = true;
+}
+
+void TopsccCodeGen::ResetLineDirectiveState() {
+  host_line_state = {};
+  device_line_state = {};
+}
+
 inline const std::string
 TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
   auto smi = cur_loop ? cur_loop->GetScopedMaskInfo() : nullptr;
@@ -202,6 +251,8 @@ const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
 
 bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
+
+  EmitLineDirective(n);
 
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << STR(FBInfo()) << "\n");
@@ -2855,7 +2906,12 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
 }
 
 void TopsccCodeGen::EmitSource() {
-  for (auto& code : code_segments) outs() << code << "\n";
+  for (auto& code : code_segments) {
+    if (EnableLineDirective())
+      outs() << PinLineDirectivePerGeneratedLine(code) << "\n";
+    else
+      outs() << code << "\n";
+  }
 }
 
 void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
@@ -2949,7 +3005,12 @@ EOF
 )";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
-  for (auto& code : code_segments) os << code << "\n";
+  for (auto& code : code_segments) {
+    if (EnableLineDirective())
+      os << PinLineDirectivePerGeneratedLine(code) << "\n";
+    else
+      os << code << "\n";
+  }
   os << "\nEOF\n\n";
 
   // JIT: detect the environment
@@ -3021,7 +3082,7 @@ option_detect() {
 )script";
 
   os << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3)";
-  if (CCtx().GenDebugInfo()) os << " -g";
+  if (CCtx().TargetDebugInfo()) os << " -g";
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";

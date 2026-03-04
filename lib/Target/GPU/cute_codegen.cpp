@@ -2,7 +2,6 @@
 #include "codegen_utils.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <filesystem>
 #include <iostream>
 #include <numeric>
@@ -159,6 +158,53 @@ using namespace cute;
 
 const std::string CuteCodeGen::vid_pfx = "__choreo_v";
 
+bool CuteCodeGen::ShouldEmitLineDirective(AST::Node& n) const {
+  return isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+         isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
+         isa<AST::WhileBlock>(&n) || isa<AST::Assignment>(&n) ||
+         isa<AST::ParallelBy>(&n) || isa<AST::DMA>(&n) || isa<AST::MMA>(&n) ||
+         isa<AST::Wait>(&n) || isa<AST::Trigger>(&n) || isa<AST::Break>(&n) ||
+         isa<AST::Continue>(&n) || isa<AST::Rotate>(&n) ||
+         isa<AST::Synchronize>(&n) || isa<AST::Call>(&n) ||
+         isa<AST::NamedVariableDecl>(&n) || isa<AST::Return>(&n);
+}
+
+std::string CuteCodeGen::EscapeLineDirectivePath(const std::string& path) {
+  return EscapeLinePathForDirective(path);
+}
+
+std::string CuteCodeGen::ResolveLineDirectivePath(const location& loc) const {
+  return ResolveDebugLinePath(loc, CCtx().GetDebugLinePathMode());
+}
+
+void CuteCodeGen::EmitLineDirective(AST::Node& n) {
+  if (!EnableLineDirective() || !ShouldEmitLineDirective(n)) return;
+
+  auto loc = n.LOC();
+  if (loc.begin.line <= 0) return;
+
+  auto file = ResolveLineDirectivePath(loc);
+  if (file.empty()) return;
+
+  auto& line_state = IsHost() ? host_line_state : device_line_state;
+  if (line_state.valid && line_state.line == loc.begin.line &&
+      line_state.file == file)
+    return;
+
+  auto& os = IsHost() ? hs : ds;
+  os << "#line " << loc.begin.line << " \"" << EscapeLineDirectivePath(file)
+     << "\"\n";
+
+  line_state.line = loc.begin.line;
+  line_state.file = file;
+  line_state.valid = true;
+}
+
+void CuteCodeGen::ResetLineDirectiveState() {
+  host_line_state = {};
+  device_line_state = {};
+}
+
 const std::optional<std::string> CuteCodeGen::GetTMAName(AST::DMA& n) const {
   if (cur_pb == nullptr) return std::nullopt;
   auto& tma_descs = cgi.GetTMADesc(cur_pb);
@@ -300,6 +346,8 @@ const std::string CuteCodeGen::ReShapeSTR(const Shape& s,
 
 bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
+
+  EmitLineDirective(n);
 
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << STR(FBInfo()) << "\n");
@@ -4596,7 +4644,12 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
 }
 
 void CuteCodeGen::EmitSource() {
-  for (auto& code : code_segments) outs() << code << "\n";
+  for (auto& code : code_segments) {
+    if (EnableLineDirective())
+      outs() << PinLineDirectivePerGeneratedLine(code) << "\n";
+    else
+      outs() << code << "\n";
+  }
 }
 
 void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
@@ -4654,7 +4707,12 @@ NVCC_LIB=${CUDA_LIB}/lib
   os << __choreo_cute_header_as_string << "\nEOF\n\n";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
-  for (auto& code : code_segments) os << code << "\n";
+  for (auto& code : code_segments) {
+    if (EnableLineDirective())
+      os << PinLineDirectivePerGeneratedLine(code) << "\n";
+    else
+      os << code << "\n";
+  }
   os << "\nEOF\n\n";
 
   // the arch type
@@ -4683,7 +4741,7 @@ show_usage() {
 
   os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
   if (extended_mma) os << "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED ";
-  if (CCtx().GenDebugInfo())
+  if (CCtx().TargetDebugInfo())
     os << " -O0";
   else
     os << " -O" << CCtx().GetOptimizationLevel();
@@ -4692,7 +4750,7 @@ show_usage() {
   else
     os << " -D__USE_CUTE_TYPE__";
 
-  if (CCtx().GenDebugInfo()) os << " -g -G";
+  if (CCtx().TargetDebugInfo()) os << " -g -G";
   if (CCtx().DMADiagnosis()) os << " -D__CHOREO_DMA_DIAGNOSIS__";
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();

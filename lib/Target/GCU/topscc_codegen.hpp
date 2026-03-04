@@ -262,6 +262,9 @@ private:
   std::ostringstream hs;            // host stream
   std::ostringstream return_stream; // stream for return node
 
+  LineDirectiveState host_line_state;
+  LineDirectiveState device_line_state;
+
   std::map<std::string, std::string> claimed_dte;
   std::vector<std::string> pld_checklist = {};
 
@@ -271,6 +274,13 @@ private:
 private:
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
+
+  bool EnableLineDirective() const { return CCtx().GenDebugInfo(); }
+  bool ShouldEmitLineDirective(AST::Node& n) const;
+  std::string ResolveLineDirectivePath(const location& loc) const;
+  static std::string EscapeLineDirectivePath(const std::string& path);
+  void EmitLineDirective(AST::Node& n);
+  void ResetLineDirectiveState();
 
   void EmitHostFuncDecl(std::ostringstream&);
   void EmitDeviceFuncDecl(std::ostringstream&);
@@ -327,6 +337,7 @@ private:
     emit_call = true;
     parallel_idx = -1;
     site_assertions.clear();
+    ResetLineDirectiveState();
   }
 
   std::string GenHostParamName() {

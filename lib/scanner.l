@@ -634,7 +634,7 @@ void handle_line_directive(const char* text) {
 	loc.initialize(fname, new_line - 1, 0); // Use correct type
   } else if (sscanf(text, "#line %d", &new_line) == 1) {
     // Update only line number if no filename is provided
-    loc.initialize("", new_line - 1, 0); // Reset to line-1
+    loc.initialize(loc.begin.filename, new_line - 1, 0);
   }
 }
 

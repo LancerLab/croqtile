@@ -46,6 +46,13 @@ Option<bool>
 } // namespace Choreo
 Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
                                  "Generate source-level debug information.");
+Option<bool> target_generate_debug_info(
+  OptionKind::User, "--target-debug", "-tg", false,
+  "Generate target compiler debug information only.");
+Option<std::string> debug_line_path_mode(
+  OptionKind::User, "--debug-line-path", "", "relative",
+  "Set #line file path mode when '-g' is enabled (relative|absolute).",
+  "--debug-line-path=<relative|absolute>");
 
 Option<bool>
     del_comm(OptionKind::User, "--remove-comments", "-n", false,
@@ -257,6 +264,26 @@ bool CommandLine::Parse(int argc, char** argv) {
     CCtx().SetApiMode(api);
   }
 
+  {
+    auto dlpm = ToLower(debug_line_path_mode.GetValue());
+    if (dlpm != "relative" && dlpm != "absolute") {
+      errs() << "Invalid --debug-line-path value: '"
+             << debug_line_path_mode.GetValue()
+             << "'. Supported values: relative, absolute.\n";
+      exit(1);
+    }
+    CCtx().SetDebugLinePathMode(dlpm == "absolute"
+                                    ? DebugLinePathMode::Absolute
+                                    : DebugLinePathMode::WorkspaceRelative);
+  }
+
+  if (generate_debug_info.GetValue() &&
+      target_generate_debug_info.GetValue()) {
+    errs() << "option '-g' cannot be used together with '-tg'. "
+              "Please choose exactly one mode.\n";
+    exit(1);
+  }
+
   if (pp_only) {
     if (no_pp) {
       errs() << "option '-E' can not work with '--no-preprocess'. Compilation "
@@ -279,6 +306,8 @@ bool CommandLine::Parse(int argc, char** argv) {
 
   // save the options to the global context
   CCtx().SetGenDebugInfo(generate_debug_info.GetValue());
+  CCtx().SetTargetDebugInfo(generate_debug_info.GetValue() ||
+                            target_generate_debug_info.GetValue());
   CCtx().SetDumpAst(dump_ast.GetValue());
   CCtx().SetNoCodegen(ncodegen.GetValue());
   CCtx().SetPrintPassNames(prt_pass.GetValue());

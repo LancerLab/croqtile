@@ -1,0 +1,31 @@
+// RUN: choreo -es -t topscc -g %s -o - | FileCheck %s --check-prefix=LINE-ON
+// RUN: choreo -es -t topscc -g --debug-line-path=absolute %s -o - | FileCheck %s --check-prefix=LINE-ABS
+// RUN: choreo -es -t topscc -tg %s -o - | FileCheck %s --check-prefix=LINE-TG
+// RUN: choreo -es -t topscc %s -o - | FileCheck %s --check-prefix=LINE-OFF
+
+__co__ void foo() {
+  global s32 [1,2] g;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+    b = dma.copy g => local;
+    c = select(1, a, b);
+  }
+}
+
+// LINE-ON: int* a__buf__
+// LINE-ON: #line [[#LA:]] "{{[^/].*}}"
+// LINE-ON: tops_dte_ctx_t choreo_topscc_ctx{{[0-9]+}};
+// LINE-ON: #line [[#LA]] "{{[^/].*}}"
+// LINE-ON-NEXT: choreo::future a(choreo_topscc_ctx{{[0-9]+}}, "a", [[#LA]], {{[0-9]+}}, a__buf__);
+// LINE-ON: int* b__buf__
+// LINE-ON: #line [[#LA+1]] "{{[^/].*}}"
+// LINE-ON: tops_dte_ctx_t choreo_topscc_ctx{{[0-9]+}};
+// LINE-ON: #line [[#LA+1]] "{{[^/].*}}"
+// LINE-ON-NEXT: choreo::future b(choreo_topscc_ctx{{[0-9]+}}, "b", [[#LA+1]], {{[0-9]+}}, b__buf__);
+// LINE-ABS: int* a__buf__
+// LINE-ABS: #line [[#LB:]] "/{{.*}}"
+// LINE-ABS: tops_dte_ctx_t choreo_topscc_ctx{{[0-9]+}};
+// LINE-ABS: #line [[#LB]] "/{{.*}}"
+// LINE-ABS-NEXT: choreo::future a(choreo_topscc_ctx{{[0-9]+}}, "a", [[#LB]], {{[0-9]+}}, a__buf__);
+// LINE-TG-NOT: #line
+// LINE-OFF-NOT: #line

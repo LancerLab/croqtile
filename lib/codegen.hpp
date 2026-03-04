@@ -538,6 +538,17 @@ protected:
   }
 };
 
+struct LineDirectiveState {
+  int line = -1;
+  std::string file = "";
+  bool valid = false;
+};
+
+std::string EscapeLinePathForDirective(const std::string& path);
+std::string ResolveDebugLinePath(const location& loc,
+                                 DebugLinePathMode mode);
+std::string PinLineDirectivePerGeneratedLine(const std::string& code);
+
 /////////////////////////////////////////////////////////////
 ///  Util functions shared between targets
 /////////////////////////////////////////////////////////////
