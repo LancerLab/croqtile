@@ -313,6 +313,8 @@ private:
   std::deque<std::string> recent_tma_tx_bytes;
   bool saw_explicit_mma_commit = false;
   bool wgmma_arrive_state_declared = false;
+  bool pending_mbarrier_full_event_array = false;
+  std::string pending_mbarrier_full_event_name;
 
 private:
   void EmitFixedHostHead();

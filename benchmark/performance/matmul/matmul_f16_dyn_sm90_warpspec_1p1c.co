@@ -16,7 +16,7 @@
 #define MATMUL_TILE_K 64
 #define MATMUL_WARP_K 16
 #define MATMUL_SWIZ 128
-#define MATMUL_STAGES 3
+#define MATMUL_STAGES 4
 
 #if MATMUL_SWIZ != (2 * MATMUL_TILE_K)
 #error "MATMUL_SWIZ must equal 2 * MATMUL_TILE_K for f16 kernel"

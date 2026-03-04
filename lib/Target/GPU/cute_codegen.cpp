@@ -402,6 +402,8 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     stream_name = "";
     tma_count = 0;
     tma_future_count = 0;
+    pending_mbarrier_full_event_array = false;
+    pending_mbarrier_full_event_name.clear();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
     // only on device-side
@@ -1255,6 +1257,35 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
          << n.name_str;
       ety->PrintAsCArray(ds);
       ds << "; // shared event barrier\n";
+
+      if (mbarrier && n.name_str == "full") {
+        pending_mbarrier_full_event_array = true;
+        pending_mbarrier_full_event_name = n.name_str;
+        break;
+      }
+
+      if (mbarrier && n.name_str == "empty" &&
+          pending_mbarrier_full_event_array &&
+          !pending_mbarrier_full_event_name.empty()) {
+        ds << d_indent << "// initialize the event barrier\n";
+        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+        GenerateSubscriptions(ds,
+                              "  " + d_indent + "init(&" +
+                                  pending_mbarrier_full_event_name,
+                              ", (blockDim.x - 128) + 1);\n",
+                              ety->Dimensions());
+        GenerateSubscriptions(ds,
+                              "  " + d_indent + "init(&" + n.name_str,
+                              ", (blockDim.x - 128) + 1);\n",
+                              ety->Dimensions());
+        ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
+        ds << d_indent << "}\n";
+        ds << d_indent << "__syncthreads();\n";
+        pending_mbarrier_full_event_array = false;
+        pending_mbarrier_full_event_name.clear();
+        break;
+      }
+
       ds << d_indent << "// initialize the event barrier\n";
       ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       GenerateSubscriptions(ds,
@@ -1685,7 +1716,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     }
   }
 
-  if (n.GetLevel() == ParallelLevel::BLOCK && cgi.HasTMA()) {
+  if (n.GetLevel() == ParallelLevel::BLOCK && cgi.HasTMA() && !mbarrier) {
     ds << d_indent
        << "auto wg = "
           "cooperative_groups::tiled_partition<128>(cooperative_groups::this_"
@@ -2088,6 +2119,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         t_mds_offset_probe.find("__iv_iv_k %") != std::string::npos ||
         t_mds_offset_probe.find("iv_k %") != std::string::npos;
     suppress_tma_future = has_ring_stage_index;
+  }
+
+  if (use_tma && mbarrier &&
+      (t_sty->GetStorage() == Storage::GLOBAL ||
+       t_sty->GetStorage() == Storage::DEFAULT) &&
+      f_sty->GetStorage() == Storage::SHARED &&
+      bdim_level == ParallelLevel::GROUPx4) {
+    suppress_tma_future = true;
   }
 
   // bind the data to the future
@@ -2505,11 +2544,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
             fsto == Storage::SHARED) {
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
 
+      bool ref_like_mbarrier_store =
+          mbarrier && tma_sync_level == ParallelLevel::GROUPx4;
+
       if (tma_sync_level == ParallelLevel::GROUP)
         ds << d_indent << "__syncwarp();\n";
-      else if (tma_sync_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "wg.sync();\n";
-      else
+      else if (tma_sync_level == ParallelLevel::GROUPx4) {
+        if (!ref_like_mbarrier_store)
+          ds << d_indent << "wg.sync();\n";
+      } else
         ds << d_indent << "__syncthreads();\n";
 
       if (tma_sync_level == ParallelLevel::GROUP)
@@ -2523,7 +2566,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
          << "d_shared_to_global(&" << *tname << "_tensor_map, "
          << ValueSTR(Reverse(GenIndices(t_ca))) << ", " << f_buf_expr << ");\n";
       ds << d_indent << "  cde::cp_async_bulk_commit_group();\n";
-      ds << d_indent << "  cde::cp_async_bulk_wait_group_read<0>();\n";
+      if (!ref_like_mbarrier_store)
+        ds << d_indent << "  cde::cp_async_bulk_wait_group_read<0>();\n";
       ds << d_indent << "}\n";
       // DO not check or wait. TMA share=>global is special
     }
