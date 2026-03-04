@@ -479,6 +479,30 @@ scripts/run_co_auto_gpu.sh path/to/file.co --arch sm_90a --disable-timing
 ./choreo -E file.co
 ```
 
+### Debug the Regressions of End-to-End Failures
+It is convenient to build two versions when regressions happen for end-to-end tests:
+
+To build a 'fail' choreo that triggers regressions, which can be done with debug build:
+
+```bash
+make debug
+```
+
+To build a 'pass' choreo without regressions,  which can be done with release build (you can stash changes to get the 'pass' version normally):
+
+```bash
+make release
+```
+
+then generating the CUDA code for both versions:
+
+```
+build-debug/choreo <options> <co_file> -es -o fail.cu
+build-release/choreo <options> <co_file> -es -o pass.cu
+```
+
+A comparison between the two versions helps to identify the root cause.
+
 ### Run Benchmarks
 ```bash
 ./tests/lit.sh benchmark/performance/hgemm_rr/
