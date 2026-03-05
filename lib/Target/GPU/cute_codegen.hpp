@@ -218,7 +218,7 @@ public:
   bool Visit(AST::FloatLiteral&) override { return true; };
   bool Visit(AST::Expr&) override { return true; };
   bool Visit(AST::MultiDimSpans&) override { return true; };
-  bool Visit(AST::NamedTypeDecl&) override { return true; };
+  bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::IntTuple&) override { return true; };
   bool Visit(AST::IntIndex&) override { return true; };
   bool Visit(AST::DataType&) override { return true; };
@@ -324,6 +324,9 @@ private:
   void EmitFixedDeviceHead();
 
   bool EnableLineDirective() const { return CCtx().GenDebugInfo(); }
+  bool EnableDebugTypeRTTI() const {
+    return CCtx().GenDebugInfo() || CCtx().TargetDebugInfo();
+  }
   bool ShouldEmitLineDirective(AST::Node& n) const;
   std::string ResolveLineDirectivePath(const location& loc) const;
   static std::string EscapeLineDirectivePath(const std::string& path);

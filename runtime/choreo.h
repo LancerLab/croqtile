@@ -133,6 +133,32 @@
 
 namespace choreo {
 
+namespace rtti {
+
+template <int N>
+struct mdspan {
+  int data[N];
+  __co_any__ int& operator[](int i) { return data[i]; }
+  __co_any__ const int& operator[](int i) const { return data[i]; }
+};
+
+template <int N>
+struct ituple {
+  int data[N];
+  __co_any__ int& operator[](int i) { return data[i]; }
+  __co_any__ const int& operator[](int i) const { return data[i]; }
+};
+
+template <int N>
+struct bounded_ituple {
+  int data[N];
+  int ub[N];
+  __co_any__ int& operator[](int i) { return data[i]; }
+  __co_any__ const int& operator[](int i) const { return data[i]; }
+};
+
+} // namespace rtti
+
 constexpr size_t __inf__ = (size_t)((1LL << 32) - 1);
 
 inline void __co_any__ choreo_assert(bool p, const char* msg,

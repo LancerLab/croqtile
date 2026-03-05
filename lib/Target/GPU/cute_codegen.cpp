@@ -158,6 +158,9 @@ using namespace cute;
 
 const std::string CuteCodeGen::vid_pfx = "__choreo_v";
 
+static inline std::string
+HostParamTypeStringifyForCute(const Choreo::Type& ty, bool is_ref);
+
 bool CuteCodeGen::ShouldEmitLineDirective(AST::Node& n) const {
   return isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
          isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
@@ -1000,6 +1003,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   auto nty = NodeType(n);
   auto sym = n.name_str;
+  const bool enable_debug_rtti = EnableDebugTypeRTTI();
 
   bool ref = n.HasNote("ref");
   // workaround:
@@ -1044,8 +1048,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   }
   ptr<AST::SpanAs> sa = nullptr;
   if (auto e = dyn_cast<AST::Expr>(n.init_expr)) {
-    sa = dyn_cast<AST::SpanAs>(e->GetReference());
-    if (sa) {
+    if (sa = dyn_cast<AST::SpanAs>(e->GetReference())) {
       // handle span_as of global buffer in `HandleGlobal`
       if (!IsHost()) {
         ds << d_indent << "auto* " << sym << " = ";
@@ -1252,14 +1255,30 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     return true;
   }
 
-  if (auto bty = dyn_cast<BoundedType>(nty)) {
-    // bounded variable is not with a fixed value
-    if (!IsActualBoundedIntegerType(bty))
-      choreo_unreachable(
-          "yet to support: bounded ituple variable code generation.");
-    IndStream() << "int " << sym << " = " << ExprSTR(n.init_expr, false)
-                << ";\n";
-    return true;
+  if (enable_debug_rtti) {
+    if (auto bty = dyn_cast<BoundedType>(nty)) {
+      IndStream() << "choreo::rtti::bounded_ituple<" << bty->Dims() << "> "
+        << sym;
+      if (n.init_expr)
+        Stream() << " = " << ExprSTR(n.init_expr, false) << "";
+      Stream() << ";\n";
+      return true;
+    }
+
+    if (auto mty = dyn_cast<MDSpanType>(nty)) {
+      IndStream() << "choreo::rtti::mdspan<" << mty->Dims() << "> " << sym << " = ";
+      mty->GetShape().PrintAsList(Stream());
+      Stream() << ";\n";
+      return true;
+    }
+
+    if (auto ity = dyn_cast<ITupleType>(nty)) {
+      IndStream() << "choreo::rtti::ituple<" << ity->Dims() << "> " << sym;
+      if (n.init_expr)
+        Stream() << " = " << ExprSTR(n.init_expr, false);
+      Stream() << ";\n";
+      return true;
+    }
   }
 
   // when symbol is not valued
@@ -1399,10 +1418,42 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   return true;
 }
 
+bool CuteCodeGen::Visit(AST::NamedTypeDecl& n) {
+  TraceEachVisit(n);
+
+  auto nty = NodeType(n);
+  auto sym = n.name_str;
+  const bool enable_debug_rtti = EnableDebugTypeRTTI();
+
+  auto sname = InScopeName(sym);
+  if (!FCtx(fname).HasSymbolValues(sname))
+    updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), false});
+
+  if (auto mty = dyn_cast<MDSpanType>(nty)) {
+    if (mty->Dims() <= 1) {
+      if (mty->HasSufficientInfo()) {
+        IndStream() << "int " << sym << " = "
+                    << ValueSTR(mty->GetShape().ValueAt(0)) << ";\n";
+      }
+      return true;
+    }
+
+    if (!enable_debug_rtti) return true;
+
+    IndStream() << "choreo::rtti::mdspan<" << mty->Dims() << "> " << sym << " = ";
+    mty->GetShape().PrintAsList(Stream());
+    Stream() << ";\n";
+    return true;
+  }
+
+  return true;
+}
+
 bool CuteCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
   auto nty = NodeType(n);
+  const bool enable_debug_rtti = EnableDebugTypeRTTI();
 
   // self-updating operation has been generated already
   auto sty = GetSpannedType(nty);
@@ -1481,6 +1532,13 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 
   if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty)) {
     assert(!IsHost() && "bounded/spanned/future should be on device side.");
+    if (auto bit = dyn_cast<BoundedITupleType>(nty);
+        enable_debug_rtti && bit && n.IsDecl() && bit->Dims() > 1) {
+      ds << d_indent << "choreo::rtti::bounded_ituple<" << bit->Dims() << "> "
+         << n.GetName() << " = " << ExprSTR(n.value, false) << ";\n";
+      return true;
+    }
+
     if (!(sty && sty->GetStorage() == Storage::REG && n.HasNote("update")))
       ds << d_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName()
          << " = ";
@@ -3907,8 +3965,15 @@ bool CuteCodeGen::Visit(AST::Call& n) {
           }
           print_format += "}";
           std::string args_str = ExprSTR(arg, IsHost());
-          for (const auto& arg_str : SplitStringByDelimiter(args_str, ", "))
-            print_args += "static_cast<long long>(" + arg_str + "), ";
+          auto arg_items = SplitStringByDelimiter(args_str, ", ");
+          if (arg_items.size() == bit->Dims()) {
+            for (const auto& arg_str : arg_items)
+              print_args += "static_cast<long long>(" + arg_str + "), ";
+          } else {
+            for (size_t i = 0; i < bit->Dims(); ++i)
+              print_args += "static_cast<long long>(" + args_str + "[" +
+                            std::to_string(i) + "]), ";
+          }
         } else if (isa<AddrType>(type)) {
           print_format += "%p";
           print_args += "static_cast<void*>(" + ExprSTR(arg, IsHost()) + "), ";
@@ -3976,6 +4041,31 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
                                     -1, ParamAttr::NONE, "", true});
     } else
       ds << d_indent << "int __iv_" << id->name << " = 0;\n";
+  }
+
+  if (EnableDebugTypeRTTI() && n.with && (n.GetMatchers().size() > 1)) {
+    auto &os = IsHost() ? hs : ds;
+    auto &ind = IsHost() ? h_indent : d_indent;
+    os << ind << "choreo::rtti::bounded_ituple<" << n.GetMatchers().size()
+       << "> __iv_" << n.with->name << " = {{";
+    for (size_t i = 0; i < n.GetMatchers().size(); ++i) {
+      auto id = cast<AST::Identifier>(n.GetMatchers()[i]);
+      os << "__iv_" << id->name;
+      if (i + 1 < n.GetMatchers().size()) os << ", ";
+    }
+    os << "}, {";
+    for (size_t i = 0; i < n.GetMatchers().size(); ++i) {
+      auto id = cast<AST::Identifier>(n.GetMatchers()[i]);
+      auto id_ty = id->GetType();
+      if (auto bty = dyn_cast<BoundedType>(id_ty))
+        os << ValueSTR(bty->GetUpperBound());
+      else
+        os << "0";
+      if (i + 1 < n.GetMatchers().size()) os << ", ";
+    }
+    os << "}};\n";
+    os << ind << "auto " << n.with->name << " = __iv_" << n.with->name
+       << ";\n";
   }
 
   if (n.with && (n.GetMatchers().size() == 1)) {
@@ -4164,7 +4254,8 @@ void CuteCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   for (auto& item : GetChoreoFuncIns(cgi)) {
     if (item.IsParameter()) assert((int)host_pindex == item.p_index);
     oss << ((host_pindex == 0) ? "" : ", ")
-        << HostTypeStringify(*item.type, false, item.IsReference()) << " "
+        << HostParamTypeStringifyForCute(*item.type, item.IsReference())
+        << " "
         << item.host_name;
     ++host_pindex;
   }
@@ -4593,15 +4684,20 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "bool"; // use bool for event
   else if (auto sty = dyn_cast<SpannedType>(&ty))
     return std::string(NameBaseType(sty->ElementType())) + " *";
-  else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
-    // There should have no BoundedIntegerType.
-    // They have been normalized to BoundedITupleType.
-    assert(bitt->Dims() == 1);
-    (void)bitt;
-    return "int";
-  } else
-    choreo_unreachable("unsupported host function type: " + STR(ty) + ".");
+  else 
+    choreo_unreachable("unexpected compile-time type in device parameter: " +
+                       STR(ty) + ".");
+
   return "";
+}
+
+static inline std::string
+HostParamTypeStringifyForCute(const Choreo::Type& ty, bool is_ref) {
+  if (isa<MDSpanType>(&ty) || isa<ITupleType>(&ty) ||
+      isa<BoundedITupleType>(&ty))
+    choreo_unreachable("unexpected compile-time type in host parameter: " +
+                       STR(ty) + ".");
+  return HostTypeStringify(ty, false, is_ref);
 }
 
 void CuteCodeGen::EmitCudaFree() {
@@ -4627,7 +4723,8 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
     if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
     auto dname = (item.need_iv_prefix ? "__iv_" : "") + UnScopedName(item.name);
     if (index++ > 0) oss << ", ";
-    oss << DeviceParamTypeStringify(*item.type) << " " << dname;
+    oss << DeviceParamTypeStringify(*item.type) << " "
+        << dname;
     ssm.MapDeviceSymbolIfNotExist(item.name, dname);
   }
 
@@ -5098,6 +5195,16 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     // currently, value of IntIndex is always IntLiteral or Identifier
     return OpExprSTR(ii->value, parent_op, true, is_host);
+  } else if (auto it = dyn_cast<AST::IntTuple>(e)) {
+    if (EnableDebugTypeRTTI()) {
+      int i = 0;
+      oss << "{";
+      for (auto &v : it->GetValues()->AllValues()) {
+        if (i++ > 0) oss << ", ";
+        oss << ExprSTR(v, is_host);
+      }
+      oss << "}";
+    }
   } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
     if (da->AccessElement()) {
       auto sty = GetSpannedType(GetSymbolType(da->data->name));

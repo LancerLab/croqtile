@@ -354,6 +354,8 @@ FILECHECK=$(which FileCheck \
             FileCheck-15 FileCheck-14 \
             FileCheck-10 2>/dev/null | head -1)
 
+GDB_BIN=$(which gdb gdb-multiarch 2>/dev/null | head -1)
+
 if [ -z "$FILECHECK" ]; then
   echo "-------------------------------------------------------"
   echo "ERROR: FileCheck utility not found!"
@@ -386,7 +388,7 @@ if ! which bc &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.30"
+echo "        Choreo SimpleLit - v0.31"
 echo "---------------------------------------"
 echo ""
 
@@ -403,6 +405,7 @@ is_in_docker=false
 is_in_shell=false
 REQ_TARGETS=()
 requires_dynamic_shape=0
+requires_gdb=0
 expect_fail=
 expect_skip=
 
@@ -465,6 +468,7 @@ prepare() {
 
   # Reset target requirement
   requires_dynamic_shape=0
+  requires_gdb=0
   need_cute=0
   need_cuda=0
   expect_fail=
@@ -524,6 +528,10 @@ prepare() {
   # requires dynamic-shape support (some target only)
   local dynshape=$(grep -q "DYNAMIC-SHAPE" <<< "$requires" && echo "found")
   [ ! -z "${dynshape}" ] && requires_dynamic_shape=1
+
+  # requires gdb in system
+  local gdbreq=$(grep -qE '(^|[[:space:]])(GDB|TOOL-GDB)($|[[:space:]])' <<< "$requires" && echo "found")
+  [ ! -z "${gdbreq}" ] && requires_gdb=1
 }
 
 lock_file="/tmp/test_script_lock_${timestamp}"
@@ -600,6 +608,13 @@ execute_command() {
   command=${command//choreo/"$(which choreo) -n"}
   command=${command//copp/"$(which copp)"}
   command=${command//FileCheck/"${FILECHECK}"}
+  if [[ "$command" == *"gdb"* ]]; then
+    if [ -z "$GDB_BIN" ]; then
+      echo "Error: gdb is required by test but not found in PATH."
+      return 1
+    fi
+    command=${command//gdb/"${GDB_BIN}"}
+  fi
   command=${command//%cuda_arch/"-arch ${cuda_arch}"}
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
@@ -861,6 +876,12 @@ for file in "${files_array[@]}"; do
     else
       run_env="CUDA_HOME=${CUDA_HOME}"
     fi
+  fi
+
+  if [ ${requires_gdb} -eq 1 ] && [ -z "${GDB_BIN}" ]; then
+    echo "SKIP(GDB):  $file"
+    num_skiped=$(($num_skiped + 1));
+    continue;
   fi
 
   exe_env=
