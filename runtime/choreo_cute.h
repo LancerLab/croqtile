@@ -2146,63 +2146,38 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
   int tid = threadIdx.x % 128;
   int lane = tid % 32;
   int warp = tid / 32;
-  int warpgroup = threadIdx.x / 128;
-  int consumer_wg = warpgroup > 0 ? (warpgroup - 1) : 0;
 
-  constexpr int M_PAD = 64 + 8;
-  constexpr int N_CHUNK = 16;
-  constexpr int MAX_CONSUMER_WARPGROUPS = 3;
-  __shared__ alignas(16)
-      AccumT __stm_chunk[MAX_CONSUMER_WARPGROUPS][M_PAD * N_CHUNK];
-
-  uint32_t lane_offset = static_cast<uint32_t>(
-      warp * 16 + (lane % 8) * M_PAD + (lane / 16) * M_PAD * 8 + (lane & 8));
-  uint32_t base_addr = static_cast<uint32_t>(
-                           __cvta_generic_to_shared(__stm_chunk[consumer_wg])) +
-                       lane_offset * sizeof(AccumT);
+  AccumT* d_base_ptr = &D(0, 0);
+  uint32_t d_base_addr =
+    static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
 
   constexpr int w_iters = N / 16;
-  using VT = typename Tensor::value_type;
 
   #pragma unroll
   for (int w = 0; w < w_iters; ++w) {
     AccumT d_pack[8];
-  #pragma unroll
-    for (int k = 0; k < 8; ++k) d_pack[k] = d[w * 8 + k];
+    d_pack[0] = d[w * 8 + 0];
+    d_pack[1] = d[w * 8 + 1];
+    d_pack[2] = d[w * 8 + 4];
+    d_pack[3] = d[w * 8 + 5];
+    d_pack[4] = d[w * 8 + 2];
+    d_pack[5] = d[w * 8 + 3];
+    d_pack[6] = d[w * 8 + 6];
+    d_pack[7] = d[w * 8 + 7];
 
     uint32_t* data_ptr = reinterpret_cast<uint32_t*>(d_pack);
-    uint32_t addr = base_addr;
-    asm volatile("stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16 [%0], "
+  uint32_t tile_base =
+    d_base_addr +
+    static_cast<uint32_t>((warp * 16 * N + w * 16) * sizeof(AccumT));
+  uint32_t lane_offset =
+    static_cast<uint32_t>((lane % 8) * N + (lane / 16) * N * 8 +
+                (lane & 8));
+  uint32_t addr = tile_base + lane_offset * sizeof(AccumT);
+  asm volatile("stmatrix.sync.aligned.m8n8.x4.shared::cta.b16 [%0], "
                  "{%1, %2, %3, %4};\n"
                  :
                  : "r"(addr), "r"(data_ptr[0]), "r"(data_ptr[1]),
                    "r"(data_ptr[2]), "r"(data_ptr[3]));
-
-    __syncwarp();
-
-    int row0 = warp * 16 + lane / 4;
-    int row1 = row0 + 8;
-    int col_local0 = (tid % 4) * 2;
-    int col_local1 = col_local0 + 1;
-    int col_base = w * 16;
-
-    D(row0, col_base + col_local0) =
-        cast_if<VT>(__stm_chunk[consumer_wg][col_local0 * M_PAD + row0]);
-    D(row0, col_base + col_local1) =
-        cast_if<VT>(__stm_chunk[consumer_wg][col_local1 * M_PAD + row0]);
-    D(row1, col_base + col_local0) =
-        cast_if<VT>(__stm_chunk[consumer_wg][col_local0 * M_PAD + row1]);
-    D(row1, col_base + col_local1) =
-        cast_if<VT>(__stm_chunk[consumer_wg][col_local1 * M_PAD + row1]);
-
-    D(row0, col_base + 8 + col_local0) =
-        cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local0) * M_PAD + row0]);
-    D(row0, col_base + 8 + col_local1) =
-        cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local1) * M_PAD + row0]);
-    D(row1, col_base + 8 + col_local0) =
-        cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local0) * M_PAD + row1]);
-    D(row1, col_base + 8 + col_local1) =
-        cast_if<VT>(__stm_chunk[consumer_wg][(8 + col_local1) * M_PAD + row1]);
 
     __syncwarp();
   }
