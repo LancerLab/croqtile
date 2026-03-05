@@ -2598,6 +2598,7 @@ public:
   struct StoreInfo {
     ptr<Expr> buffer;
     ptr<ChunkAt> st_expr;
+    bool transpose;
   };
   using InfoType = std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo>;
 
@@ -2627,8 +2628,8 @@ public:
       : tag(Exec),
         info(ExecInfo{m, o, l, r, nullptr, false, true, scale_a, scale_b}) {}
 
-  MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c)
-      : tag(Store), info(StoreInfo{n, c}) {}
+    MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c, bool trans = false)
+      : tag(Store), info(StoreInfo{n, c, trans}) {}
 
   MMAOperation() : tag(Commit), info() {}
 
@@ -2691,6 +2692,10 @@ public:
   const ptr<Expr> StoreFrom() const {
     if (tag != Store) choreo_unreachable("not a mma store operation.");
     return std::get<3>(info).buffer;
+  }
+  bool StoreIsTranspose() const {
+    if (tag != Store) choreo_unreachable("not a mma store operation.");
+    return std::get<3>(info).transpose;
   }
 
   void SetAsync(bool async = true) {
@@ -2804,7 +2809,8 @@ public:
                                 CloneP(e_info.mdata), e_info.is_sparse);
     }
     case Store:
-      return Make<MMAOperation>(CloneP(StoreFrom()), CloneP(StoreTo()));
+      return Make<MMAOperation>(CloneP(StoreFrom()), CloneP(StoreTo()),
+                                StoreIsTranspose());
     case Commit: return Make<MMAOperation>();
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
@@ -2842,7 +2848,8 @@ public:
          << PSTR(e_info.rhs);
     } break;
     case Store: {
-      os << "MMA.STORE " << PSTR(StoreFrom()) << ", " << PSTR(StoreTo());
+      os << "MMA.STORE" << (StoreIsTranspose() ? ".TRANSP" : "") << " "
+         << PSTR(StoreFrom()) << ", " << PSTR(StoreTo());
     } break;
     default: choreo_unreachable("unsupported MMA operation kind.");
     }

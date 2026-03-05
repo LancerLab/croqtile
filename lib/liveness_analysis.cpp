@@ -727,7 +727,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
            << op->ExecOperand(2);
       } break;
       case AST::MMAOperation::Store: {
-        os << "mma.store " << op->StoreFrom() << ", " << PSTR(op->StoreTo());
+        os << "mma.store" << (op->StoreIsTranspose() ? ".transp" : "")
+           << " " << op->StoreFrom() << ", " << PSTR(op->StoreTo());
       } break;
       case AST::MMAOperation::Commit: {
         os << "mma.commit";

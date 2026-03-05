@@ -1,0 +1,196 @@
+#include <cstring>
+#include <cstdlib>
+
+// SM86 (RTX 3090 / A40) FP16 Tensor Core peak throughput.
+// RTX 3090: ~142 TFLOPS FP16 Tensor
+#define SM86_PEAK_F16_TFLOPS 142
+
+// SM86 mma.sync tile: m16n16k16
+#define MATMUL_MMA_M 16
+#define MATMUL_MMA_N 16
+#define MATMUL_MMA_K 16
+
+// Block tile defaults.
+// NOTE: opt_copy uses 255 regs/thread on SM86, so max 65536/255=256 threads
+// (8 warps) per block. That means (TILE_M/16)*(TILE_N/16) <= 8.
+#define MATMUL_TILE_M 16
+#define MATMUL_TILE_N 16
+#define MATMUL_TILE_K 16
+
+#if MATMUL_TILE_M % MATMUL_MMA_M != 0
+#error "MATMUL_TILE_M must be divisible by MATMUL_MMA_M"
+#endif
+
+#if MATMUL_TILE_N % MATMUL_MMA_N != 0
+#error "MATMUL_TILE_N must be divisible by MATMUL_MMA_N"
+#endif
+
+#if MATMUL_TILE_K % MATMUL_MMA_K != 0
+#error "MATMUL_TILE_K must be divisible by MATMUL_MMA_K"
+#endif
+
+// SM86 register pressure: opt_copy hits 255 regs/thread.
+// 256 threads x 255 regs = 65280 <= 65536 regs/SM -> max 8 warps (256 threads).
+#if (MATMUL_TILE_M / MATMUL_MMA_M) * (MATMUL_TILE_N / MATMUL_MMA_N) > 8
+#error "Too many warps per block: (TILE_M/MMA_M)*(TILE_N/MMA_N) must be <= 8 (256 threads max, 255 regs/thread)"
+#endif
+
+#define MATMUL_DEFAULT_M 2048
+#define MATMUL_DEFAULT_N 2048
+#define MATMUL_DEFAULT_K 2048
+
+__co__ void matmul_trans_sm86(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [N, M] output) {
+
+  // each block handles TILE_M x TILE_N output tile
+  // SM86 mma.sync: 16x16x16 per warp (32 threads)
+  parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_TILE_N)] : block {
+    shared f16 [MATMUL_TILE_N, MATMUL_TILE_M] output_s;
+    parallel {warp_m, warp_n} by [cdiv(MATMUL_TILE_M, MATMUL_MMA_M), cdiv(MATMUL_TILE_N, MATMUL_MMA_N)] : group {
+      mc = mma.fill 0.0;
+      foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+        lhs_load_s = dma.copy.async lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy.async rhs.subspan(MATMUL_TILE_N, MATMUL_TILE_K).at(block_n, iv_k) => shared;
+        wait lhs_load_s, rhs_load_s;
+
+        foreach {iv_warp_k} in [cdiv(MATMUL_TILE_K, MATMUL_MMA_K)] {
+          ma = mma.load lhs_load_s.chunkat(warp_m, iv_warp_k);
+          mb = mma.load rhs_load_s.chunkat(warp_n, iv_warp_k);
+          mma.row.row mc, ma, mb;
+        }
+      }
+      // store accumulator to shared (each warp writes its 16x16 tile)
+      mma.store.transp mc, output_s.chunkat(warp_n, warp_m);
+    }
+    // cooperative dma.copy from shared to global (all threads in block)
+    dma.copy output_s => output.subspan(MATMUL_TILE_N, MATMUL_TILE_M).at(block_n, block_m);
+  }
+}
+
+int main(int argc, char** argv) {
+  bool enable_timing = true;
+  bool skip_verify = false;
+  double user_flops = -1.0;
+  auto is_disable_timing_arg = [](const char* s) {
+    const char* t = "--disable-timing";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  auto is_skip_verify_arg = [](const char* s) {
+    const char* t = "--skip-verify";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  for (int i = 1; i < argc; ++i) {
+    if (is_disable_timing_arg(argv[i])) {
+      enable_timing = false;
+      continue;
+    }
+    if (is_skip_verify_arg(argv[i])) {
+      skip_verify = true;
+    }
+    if (std::strncmp(argv[i], "--flops=", 8) == 0) {
+      user_flops = std::atof(argv[i] + 8);
+      continue;
+    }
+  }
+
+  const char* timing_env = std::getenv("CHOREO_DISABLE_TIMING");
+  if (timing_env && timing_env[0] == '1' && timing_env[1] == '\0') {
+    enable_timing = false;
+  }
+
+  const char* skip_verify_env = std::getenv("CHOREO_SKIP_VERIFY");
+  if (skip_verify_env && skip_verify_env[0] == '1' && skip_verify_env[1] == '\0') {
+    skip_verify = true;
+  }
+
+  size_t M = MATMUL_DEFAULT_M;
+  size_t N = MATMUL_DEFAULT_N;
+  size_t K = MATMUL_DEFAULT_K;
+
+  auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);
+  auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);
+  auto res_h = choreo::make_spandata<choreo::f16>(N, M);
+  lhs_h.fill_random(0, 2);
+  rhs_h.fill_random(0, 2);
+  res_h.fill(0.0f);
+
+  half *a_d = nullptr, *b_d = nullptr, *c_d = nullptr;
+  choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(half)));
+  choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(half)));
+  choreo::abend_true(cudaMalloc(&c_d, N * M * sizeof(half)));
+
+  choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(c_d, res_h.data(), N * M * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaDeviceSynchronize());
+
+  auto lhs_d = choreo::make_spanview<choreo::f16, 2>(a_d, {M, K});
+  auto rhs_d = choreo::make_spanview<choreo::f16, 2>(b_d, {N, K});
+  auto res_d = choreo::make_spanview<choreo::f16, 2>(c_d, {N, M});
+  if (enable_timing) {
+    int warmup = 10;
+    int repeat = 500;
+    const char* warmup_env = std::getenv("CHOREO_TIMING_WARMUP");
+    const char* repeat_env = std::getenv("CHOREO_TIMING_REPEAT");
+    if (warmup_env) {
+      int value = std::atoi(warmup_env);
+      if (value >= 0) warmup = value;
+    }
+    if (repeat_env) {
+      int value = std::atoi(repeat_env);
+      if (value > 0) repeat = value;
+    }
+    choreo::TimerOption topt;
+    topt.warmup = warmup;
+    topt.repeat = repeat;
+    auto avg_ms = choreo::timing([&]() { matmul_trans_sm86(lhs_d, rhs_d, res_d); cudaDeviceSynchronize(); }, topt);
+    std::cout << "Timing avg ms: " << avg_ms << "\n";
+
+    double flops = (user_flops > 0.0) ? user_flops : (2.0 * double(M) * double(N) * double(K));
+    double tflops = (flops / (avg_ms / 1000.0)) / 1e12;
+    std::cout << "TFLOPS: " << tflops << "\n";
+
+    double eff = (tflops / SM86_PEAK_F16_TFLOPS) * 100.0;
+    std::cout << "HW efficiency: " << eff << "%\n";
+  } else {
+    matmul_trans_sm86(lhs_d, rhs_d, res_d);
+  }
+
+  choreo::abend_true(cudaMemcpy(res_h.data(), c_d, N * M * sizeof(half), cudaMemcpyDeviceToHost));
+  choreo::abend_true(cudaDeviceSynchronize());
+
+  if (skip_verify) {
+    std::cout << "Test Passed (verify skipped)\n" << std::endl;
+    return 0;
+  }
+
+  auto lhs_view = lhs_h.view();
+  auto rhs_view = rhs_h.view();
+  auto res_view = res_h.view();
+
+  float tolerance = 0.05f;
+  auto rel_error = [](float ref, float got) {
+    float abs_ref = std::abs(ref);
+    float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
+    return std::abs(ref - got) / denom;
+  };
+  // verfication
+  for (size_t i = 0; i < 128; ++i) {
+    for (size_t j = 0; j < 256; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < lhs_view.shape()[1]; ++k)
+        ref += __half2float(lhs_view[i][k] * rhs_view[j][k]);
+      float got = __half2float(res_view[j][i]);
+      auto delta = rel_error(ref, got);
+      if (delta >= tolerance) {
+        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << got << ", delta: " << delta * 100 << "%\n";
+      }
+      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+    }
+  }
+
+  std::cout << "Test Passed\n" << std::endl;
+}

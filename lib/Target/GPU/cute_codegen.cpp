@@ -2943,14 +2943,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string DIM_N = STR(ssmi.shape.at(1));
       std::string CUTE_WGMMA_ATOM =
           "CUTE_WGMMA_M" + STR(ssmi.shape.at(0)) + "K" + STR(ssmi.shape.at(2));
+      const bool store_trans = op.StoreIsTranspose();
 
       if (use_stmatrix) {
-        ds << d_indent << "store_fragment_d_stmatrix<" << CUTE_WGMMA_ATOM
+        ds << d_indent << (store_trans ? "store_fragment_d_stmatrix_trans<"
+                                       : "store_fragment_d_stmatrix<")
+           << CUTE_WGMMA_ATOM
            << ", " << DIM_N << ">(" << f_mds.first << ", "
            << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
            << ExprSTR(frag, false) << "));\n";
       } else {
-        ds << d_indent << "store_fragment_d<" << CUTE_WGMMA_ATOM << ", "
+        ds << d_indent << (store_trans ? "store_fragment_d_trans<"
+                                       : "store_fragment_d<")
+           << CUTE_WGMMA_ATOM << ", "
            << DIM_N << ">(" << f_mds.first << ", " << "reinterpret_cast<"
            << NameBaseType(accum_type) << "*>(" << ExprSTR(frag, false)
            << "));\n";
@@ -3071,7 +3076,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
          << ValueSTR(TileAddr(op.StoreTo(), false)) << ", "
          << ExprSTR(op.StoreFrom(), false) << ", "
          << ValueSTR(tty->GetShape().ValueAt(1))
-         << ", nvcuda::wmma::mem_row_major);\n";
+          << ", "
+          << (op.StoreIsTranspose() ? "nvcuda::wmma::mem_col_major"
+                  : "nvcuda::wmma::mem_row_major")
+          << ");\n";
     } break;
     default: break;
     }
@@ -3368,7 +3376,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           : (policy_is_sparse && shape_is_m16n8k16) ? "CUTE_MMA_SPARSE_M16N8K16"
           : (policy_is_sparse && shape_is_m16n8k64) ? "CUTE_MMA_SPARSE_M16N8K64"
                                                     : GetMMAAtomName(ssmi);
-      ds << d_indent << "store_fragment_d<" << CUTE_MMA_ATOM << ">("
+      ds << d_indent << (op.StoreIsTranspose() ? "store_fragment_d_trans<"
+                                  : "store_fragment_d<")
+        << CUTE_MMA_ATOM << ">(" 
          << f_mds.first << ", " << "reinterpret_cast<" << NameBaseType(ssmi.ty)
          << "*> (" << ExprSTR(frag, false) << "));\n";
     } break;

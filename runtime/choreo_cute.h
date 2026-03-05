@@ -1546,6 +1546,54 @@ struct Policy_D_M8N8 {
                     "unsupported data type in this MMA policy");
     }
   }
+
+  template <class Tensor, class AccumT>
+  __device__ static void store_trans(Tensor& D, AccumT const* d) {
+    int lane = threadIdx.x & 31;
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, double>::value ||
+                  std::is_same<value_type, s32>::value) {
+      static_assert(std::is_same<AccumT, value_type>::value,
+                    "AccumT must be same as value_type");
+      int gid = lane >> 2;
+      int tid_in_group = lane & 3;
+      int row = gid;
+      int col0 = tid_in_group * 2;
+      int col1 = col0 + 1;
+      auto D_casted = cute::recast<AccumT>(D);
+      D_casted(col0, row) = d[0];
+      D_casted(col1, row) = d[1];
+    } else if constexpr (std::is_same<AccumT, float>::value) {
+      int row = (lane & 1);
+      if (lane >= 16) row += 4;
+      int col = lane & 2;
+      D(col, row) = cast_if<value_type>(d[0]);
+      D(col + 1, row) = cast_if<value_type>(d[1]);
+      D(col, row + 2) = cast_if<value_type>(d[2]);
+      D(col + 1, row + 2) = cast_if<value_type>(d[3]);
+      D(col + 4, row) = cast_if<value_type>(d[4]);
+      D(col + 4 + 1, row) = cast_if<value_type>(d[5]);
+      D(col + 4, row + 2) = cast_if<value_type>(d[6]);
+      D(col + 4 + 1, row + 2) = cast_if<value_type>(d[7]);
+    } else if constexpr (std::is_same<AccumT, f16>::value) {
+      static_assert(std::is_same<AccumT, value_type>::value,
+                    "AccumT must be same as value_type");
+      int row = (lane & 3);
+      if (lane >= 16) row = row + 4;
+      D(0, row) = d[0];
+      D(1, row) = d[1];
+      D(2, row) = d[2];
+      D(3, row) = d[3];
+      D(4, row) = d[4];
+      D(5, row) = d[5];
+      D(6, row) = d[6];
+      D(7, row) = d[7];
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
+  }
+
   template <class Tensor, class AccumT>
   __device__ static void load(Tensor const& D, AccumT* d) {
     int lane = threadIdx.x & 31;
@@ -1624,6 +1672,22 @@ struct Policy_D_M16N8 {
     D(row0, col1) = cast_if<value_type>(d[1]);
     D(row1, col0) = cast_if<value_type>(d[2]);
     D(row1, col1) = cast_if<value_type>(d[3]);
+  }
+
+  template <class Tensor, class AccumT>
+  __device__ static void store_trans(Tensor& D, AccumT const* d) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group * 2;
+    int col1 = tid_in_group * 2 + 1;
+    using value_type = typename Tensor::value_type;
+    D(col0, row0) = cast_if<value_type>(d[0]);
+    D(col1, row0) = cast_if<value_type>(d[1]);
+    D(col0, row1) = cast_if<value_type>(d[2]);
+    D(col1, row1) = cast_if<value_type>(d[3]);
   }
 };
 
@@ -1987,6 +2051,26 @@ struct Policy_WGMMA_D_M64K16 {
       D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
 };
 
 // Store policy for 64x64x8 WGMMA (accumulator layout matches K=16)
@@ -2008,6 +2092,26 @@ struct Policy_WGMMA_D_M64K8 {
       D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
       D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
 };
@@ -2033,6 +2137,26 @@ struct Policy_WGMMA_D_M64K32 {
       D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
 };
 
 // Store policy for 64x64x256 WGMMA (binary accumulator layout matches K=16)
@@ -2054,6 +2178,26 @@ struct Policy_WGMMA_D_M64K256 {
       D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
       D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
 };
@@ -2117,6 +2261,24 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
     MMA_Policy<MMA>::typeD::template store<Tensor, AccumT>(D, d);
 }
 
+template <class MMA, int N = 0, class Tensor, class AccumT>
+__device__ static inline void store_fragment_d_trans(Tensor& D,
+                                                     AccumT* const d) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, double>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "store d only supports float/double/f16/s32 accumulator type");
+  static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
+                    std::is_same<typename Tensor::value_type, AccumT>::value,
+                "store d unsupported type cast");
+  if constexpr (N > 0)
+    MMA_Policy<MMA>::typeD::template store_trans<Tensor, AccumT, N>(D, d);
+  else
+    MMA_Policy<MMA>::typeD::template store_trans<Tensor, AccumT>(D, d);
+}
+
 // stmatrix-based store for WGMMA accumulators (--stmatrix flag).
 //
 // Uses PTX stmatrix.sync.aligned.m8n8.x1.b16 to write 8×8 sub-tiles of
@@ -2169,6 +2331,48 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
     uint32_t r3 = d_u32[w * 4 + 3];
 
     asm volatile("stmatrix.sync.aligned.m8n8.x4.shared::cta.b16 [%0], "
+                 "{%1, %2, %3, %4};\n"
+                 :
+                 : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));
+    addr += kStepBytes;
+  }
+}
+
+template <class MMA, int N, class Tensor, class AccumT>
+__device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
+                                                              AccumT* const d) {
+  static_assert(sizeof(AccumT) == 2,
+                "stmatrix store requires 16-bit accumulator type, f16 or bf16");
+  static_assert((N % 8) == 0,
+                "stmatrix store currently requires N to be divisible by 8");
+
+  int tid = threadIdx.x % 128;
+  int lane = tid % 32;
+  int warp = tid / 32;
+
+  AccumT* d_base_ptr = &D(0, 0);
+  uint32_t d_base_addr =
+      static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
+
+  const uint32_t ld = static_cast<uint32_t>(&D(1, 0) - &D(0, 0));
+  constexpr int w_iters = N / 16;
+  const uint32_t kStepBytes = static_cast<uint32_t>(16 * ld * sizeof(AccumT));
+
+  uint32_t lane_offset = static_cast<uint32_t>(warp * 16) +
+                         static_cast<uint32_t>(lane % 8) * ld +
+                         static_cast<uint32_t>(lane / 16) * ld * 8 +
+                         static_cast<uint32_t>(lane & 8);
+  uint32_t addr = d_base_addr + lane_offset * sizeof(AccumT);
+  auto d_u32 = reinterpret_cast<uint32_t const*>(d);
+
+  #pragma unroll
+  for (int w = 0; w < w_iters; ++w) {
+    uint32_t r0 = d_u32[w * 4 + 0];
+    uint32_t r1 = d_u32[w * 4 + 1];
+    uint32_t r2 = d_u32[w * 4 + 2];
+    uint32_t r3 = d_u32[w * 4 + 3];
+
+    asm volatile("stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16 [%0], "
                  "{%1, %2, %3, %4};\n"
                  :
                  : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));

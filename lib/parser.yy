@@ -2013,6 +2013,10 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($3, $5);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA STORE TRANSPOSE frag_expr COMMA chunkat_expr {
+        auto op = AST::Make<AST::MMAOperation>($4, $6, true);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | MMA COMMIT {
       auto op = AST::Make<AST::MMAOperation>();
       $$ = AST::Make<AST::MMA>(@1, op);
