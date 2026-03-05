@@ -25,6 +25,8 @@ You are a build, test, and debugging expert for the Choreo compiler project. Cho
 - **All build operations must go through the top-level `Makefile` entrypoint**; do not run `cmake` or `ninja` directly.
 - Build artifacts `./choreo` and `./copp` are **symlinks** to binaries in `build/`.
 - The default target is `cute` (CUDA CuTe); in GCU environments, the default is usually `topscc`.
+- **Never write generated/intermediate files to `/tmp`**. Always place temporary outputs under the current build workspace (for example: `build/`).
+- **All execution commands must set an explicit timeout**. Use a conservative timeout by default (at least 30 seconds for single-run validation), and increase timeout for heavier compile/run tasks.
 
 ### Build Command Reference
 

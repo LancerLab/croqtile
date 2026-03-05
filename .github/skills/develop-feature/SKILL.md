@@ -25,6 +25,7 @@ You are a feature-development expert for the Choreo compiler project. Choreo is 
 - Avoid AI-sounding writing/code style; keep output natural and project-consistent.
 - For equal functionality, prefer the simpler and clearer implementation.
 - Keep changes minimal, focused, and strictly scoped to the requested feature.
+- Never use `/tmp` for generated/intermediate outputs; always write temporary artifacts inside the current build workspace directory, (`./build/`).
 
 ---
 
