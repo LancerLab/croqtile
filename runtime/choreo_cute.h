@@ -2152,34 +2152,27 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
     static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
 
   constexpr int w_iters = N / 16;
+  constexpr uint32_t kStepBytes = static_cast<uint32_t>(16 * sizeof(AccumT));
+
+  uint32_t lane_offset =
+    static_cast<uint32_t>((lane % 8) * N + (lane / 16) * N * 8 + (lane & 8));
+  uint32_t addr = d_base_addr +
+                  static_cast<uint32_t>((warp * 16 * N) * sizeof(AccumT)) +
+                  lane_offset * sizeof(AccumT);
+  auto d_u32 = reinterpret_cast<uint32_t const*>(d);
 
   #pragma unroll
   for (int w = 0; w < w_iters; ++w) {
-    AccumT d_pack[8];
-    d_pack[0] = d[w * 8 + 0];
-    d_pack[1] = d[w * 8 + 1];
-    d_pack[2] = d[w * 8 + 4];
-    d_pack[3] = d[w * 8 + 5];
-    d_pack[4] = d[w * 8 + 2];
-    d_pack[5] = d[w * 8 + 3];
-    d_pack[6] = d[w * 8 + 6];
-    d_pack[7] = d[w * 8 + 7];
+    uint32_t r0 = d_u32[w * 4 + 0];
+    uint32_t r1 = d_u32[w * 4 + 2];
+    uint32_t r2 = d_u32[w * 4 + 1];
+    uint32_t r3 = d_u32[w * 4 + 3];
 
-    uint32_t* data_ptr = reinterpret_cast<uint32_t*>(d_pack);
-  uint32_t tile_base =
-    d_base_addr +
-    static_cast<uint32_t>((warp * 16 * N + w * 16) * sizeof(AccumT));
-  uint32_t lane_offset =
-    static_cast<uint32_t>((lane % 8) * N + (lane / 16) * N * 8 +
-                (lane & 8));
-  uint32_t addr = tile_base + lane_offset * sizeof(AccumT);
-  asm volatile("stmatrix.sync.aligned.m8n8.x4.shared::cta.b16 [%0], "
+    asm volatile("stmatrix.sync.aligned.m8n8.x4.shared::cta.b16 [%0], "
                  "{%1, %2, %3, %4};\n"
                  :
-                 : "r"(addr), "r"(data_ptr[0]), "r"(data_ptr[1]),
-                   "r"(data_ptr[2]), "r"(data_ptr[3]));
-
-    __syncwarp();
+                 : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));
+    addr += kStepBytes;
   }
 }
 
