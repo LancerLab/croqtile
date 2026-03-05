@@ -14,6 +14,10 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
 bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     for (auto n : waited_async) pending_async.erase(n);
+    if (!pending_async.empty())
+      Error1(n.LOC(), "some asyncs are not explicitly waited: " +
+             DelimitedString(pending_async) + ".");
+
   }
   return true;
 }

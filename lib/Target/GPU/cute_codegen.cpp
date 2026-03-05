@@ -53,7 +53,7 @@ extern Option<bool> verbose;
 extern Option<bool> use_pic;
 extern Option<bool> tma_cluster_aware;
 extern Option<bool> ptx_barrier;
-extern Option<bool> mbarrier;
+extern Option<bool> use_warpspec;
 extern Option<bool> use_stmatrix;
 
 namespace Choreo {
@@ -491,7 +491,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
       ds << d_indent << "}";
-      if (!it->async && it->outer && !mbarrier)
+      if (!it->async && it->outer && !UseWarpSpecSync())
         ds << "\n" << d_indent << "__syncthreads();";
       ds << " // end inthreads\n";
     }
@@ -1306,13 +1306,13 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ety->PrintAsCArray(ds);
       ds << "; // shared event barrier\n";
 
-      if (mbarrier && n.name_str == "full") {
+      if (UseWarpSpecSync() && n.name_str == "full") {
         pending_mbarrier_full_event_array = true;
         pending_mbarrier_full_event_name = n.name_str;
         break;
       }
 
-      if (mbarrier && n.name_str == "empty" &&
+      if (UseWarpSpecSync() && n.name_str == "empty" &&
           pending_mbarrier_full_event_array &&
           !pending_mbarrier_full_event_name.empty()) {
         ds << d_indent << "// initialize the event barrier\n";
@@ -1764,7 +1764,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     }
   }
 
-  if (n.GetLevel() == ParallelLevel::BLOCK && cgi.HasTMA() && !mbarrier) {
+      if (n.GetLevel() == ParallelLevel::BLOCK && cgi.HasTMA() &&
+        !UseWarpSpecSync()) {
     ds << d_indent
        << "auto wg = "
           "cooperative_groups::tiled_partition<128>(cooperative_groups::this_"
@@ -1786,8 +1787,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       auto in_thr_block = desc.GetInThreadsBlock();
       auto inner_pb_level = desc.GetPBLevel();
 
-      bool skip_load_tma_init_block =
-          mbarrier && desc.IsLoad() && in_thr_block &&
+          bool skip_load_tma_init_block =
+            UseWarpSpecSync() && desc.IsLoad() && in_thr_block &&
           inner_pb_level == ParallelLevel::GROUPx4 &&
           !use_ptx_barrier_for_desc;
 
@@ -1813,9 +1814,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       if (!in_thr_block) {
         threads_waited = "blockDim.x";
       } else if (inner_pb_level == ParallelLevel::GROUP) {
-        threads_waited = mbarrier ? "1" : "32";
+        threads_waited = UseWarpSpecSync() ? "1" : "32";
       } else if (inner_pb_level == ParallelLevel::GROUPx4) {
-        threads_waited = mbarrier ? "1" : "128";
+        threads_waited = UseWarpSpecSync() ? "1" : "128";
       }
 
       if (use_ptx_barrier_for_desc) {
@@ -2151,7 +2152,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   bool use_tma = n.IsTMA();
   bool suppress_tma_future = false;
 
-  if (use_tma && mbarrier &&
+  if (use_tma && UseWarpSpecSync() &&
       (f_sty->GetStorage() == Storage::GLOBAL ||
        f_sty->GetStorage() == Storage::DEFAULT) &&
       t_sty->GetStorage() == Storage::SHARED &&
@@ -2169,7 +2170,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     suppress_tma_future = has_ring_stage_index;
   }
 
-  if (use_tma && mbarrier &&
+  if (use_tma && UseWarpSpecSync() &&
       (t_sty->GetStorage() == Storage::GLOBAL ||
        t_sty->GetStorage() == Storage::DEFAULT) &&
       f_sty->GetStorage() == Storage::SHARED &&
@@ -2443,7 +2444,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       auto in_thr_block = tma_desc.GetInThreadsBlock();
       if (in_thr_block) {
         tma_sync_level = tma_desc.GetPBLevel();
-      } else if (mbarrier &&
+      } else if (UseWarpSpecSync() &&
                  (t_sty->GetStorage() == Storage::GLOBAL ||
                   t_sty->GetStorage() == Storage::DEFAULT) &&
                  f_sty->GetStorage() == Storage::SHARED &&
@@ -2487,14 +2488,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           t_mds_offset.find("stage") != std::string::npos ||
           t_mds_offset.find("__iv_iv_k %") != std::string::npos ||
           t_mds_offset.find("iv_k %") != std::string::npos;
-      bool full_empty_only_tma_copy =
-          mbarrier && tma_sync_level == ParallelLevel::GROUPx4 &&
+          bool full_empty_only_tma_copy =
+            UseWarpSpecSync() && tma_sync_level == ParallelLevel::GROUPx4 &&
           has_ring_stage_index;
       auto rev_indices = Reverse(GenIndices(f_ca));
       bool use_ptx_tma_sync =
           (tma_cluster_aware || ptx_barrier) && t_shape.Rank() == 2;
-      bool emit_tma_single_guard =
-          !(mbarrier && tma_sync_level == ParallelLevel::GROUPx4 &&
+          bool emit_tma_single_guard =
+            !(UseWarpSpecSync() && tma_sync_level == ParallelLevel::GROUPx4 &&
             full_empty_only_tma_copy);
       std::string tma_issue_prefix = emit_tma_single_guard ? "  " : "";
       if (emit_tma_single_guard) {
@@ -2548,7 +2549,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (emit_tma_single_guard) {
         ds << d_indent << "} else {\n";
         if (!use_ptx_tma_sync) {
-          if (!(mbarrier && tma_sync_level == ParallelLevel::GROUPx4) &&
+              if (!(UseWarpSpecSync() && tma_sync_level == ParallelLevel::GROUPx4) &&
               !full_empty_only_tma_copy) {
             ds << d_indent << "  ((TMAAtom*)" << future_name
                << ".get_atom())->token() = ((TMAAtom*)" << future_name
@@ -2562,13 +2563,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
       // For async tma.copy.async, trigger the future
       // For sync tma.copy, default behavior is immediate wait.
-      // Under --mbarrier, defer this wait to full/empty barrier protocol
+      // Under --use-warpspec, defer this wait to full/empty barrier protocol
       // so producer-consumer pipelining remains asynchronous like ref kernels.
       if (fty->IsAsync()) {
         if (!future_name.empty())
           ds << d_indent << future_name << ".trigger();\n";
       } else {
-        if (!mbarrier) {
+        if (!UseWarpSpecSync()) {
           // Synchronous tma.copy: wait immediately
           // Make sure the future is marked initialized before marking it nowait
           // to avoid runtime diagnostics when the state is still ST_NONE.
@@ -2592,8 +2593,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
             fsto == Storage::SHARED) {
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
 
-      bool ref_like_mbarrier_store =
-          mbarrier && tma_sync_level == ParallelLevel::GROUPx4;
+          bool ref_like_mbarrier_store =
+            UseWarpSpecSync() && tma_sync_level == ParallelLevel::GROUPx4;
 
       if (tma_sync_level == ParallelLevel::GROUP)
         ds << d_indent << "__syncwarp();\n";
@@ -2816,7 +2817,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto c_sym = AST::FragName(op.ExecOperand(0));
       auto a_sym = AST::FragName(op.ExecOperand(1));
       auto b_sym = AST::FragName(op.ExecOperand(2));
-      if (!(mbarrier && bdim_level == ParallelLevel::GROUPx4))
+      if (!(UseWarpSpecSync() && bdim_level == ParallelLevel::GROUPx4))
         ds << d_indent << "warpgroup_arrive();\n";
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(c_sym));
       std::string cc = SplitStringByDelimiter(mma_policy, "::")[0];
@@ -3519,7 +3520,7 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         bool guarded = false;
         bool no_post_sync = false;
         if (!is_full) {
-          if (!(mbarrier && bdim_level == ParallelLevel::GROUPx4)) {
+          if (!(UseWarpSpecSync() && bdim_level == ParallelLevel::GROUPx4)) {
             guarded = BeginEventCritical();
           }
         }
@@ -3539,7 +3540,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
               d_indent + ExprSTR(t, false) + ".wait(" + ExprSTR(t, false) + ".arrive())",
               ";\n", ety->RemainderDimensions(0));
         }
-        if (is_full && mbarrier && bdim_level == ParallelLevel::GROUPx4) {
+        if (is_full && UseWarpSpecSync() &&
+            bdim_level == ParallelLevel::GROUPx4) {
           ds << d_indent << "warpgroup_arrive();\n";
         }
         if (guarded && no_post_sync) {
@@ -3697,7 +3699,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             bool guarded = false;
             bool no_post_sync = false;
             if (is_full) {
-              if (!(mbarrier && bdim_level == ParallelLevel::GROUPx4)) {
+              if (!(UseWarpSpecSync() && bdim_level == ParallelLevel::GROUPx4)) {
                 guarded = BeginEventCritical();
               }
             }
@@ -3705,7 +3707,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           if (is_full) {
             auto tx_bytes_expr = SumRecentTMATxBytesExpr();
             if (is_array_ref) {
-              if (mbarrier) {
+              if (UseWarpSpecSync()) {
                 ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
                    << ExprSTR(f, false) << ", 1, " << tx_bytes_expr
                    << ");\n";
@@ -3714,7 +3716,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                    << ".arrive();\n";
               }
             } else {
-              if (mbarrier) {
+              if (UseWarpSpecSync()) {
                 GenerateSubscriptions(
                     ds,
                     d_indent + "(void)cuda::device::barrier_arrive_tx(" +
@@ -3780,7 +3782,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           {
           bool guarded = BeginEventCritical();
           auto is_full = ExprSTR(f, false).find("full") != std::string::npos;
-          if (is_full && mbarrier) {
+          if (is_full && UseWarpSpecSync()) {
             ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
                << ExprSTR(f, false) << ", 1, " << SumRecentTMATxBytesExpr()
                << "); // trigger event(barrier)\n";
@@ -4022,7 +4024,7 @@ bool CuteCodeGen::Visit(AST::InThreadsBlock& n) {
   if (!n.stmts->None()) {
     auto pred_str = ExprSTR(n.pred, false);
     bool mbarrier_single_producer = false;
-    if (mbarrier && bdim_level == ParallelLevel::GROUPx4) {
+    if (UseWarpSpecSync() && bdim_level == ParallelLevel::GROUPx4) {
       auto pred_nospace = pred_str;
       pred_nospace.erase(
           std::remove_if(pred_nospace.begin(), pred_nospace.end(),
