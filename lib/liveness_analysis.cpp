@@ -679,11 +679,14 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       os << (dma->future.empty() ? "?" : dma->future);
       os << " = dma.any";
     } else {
-      if (dma->future.empty())
-        assert(!dma->IsAsync() && "expecting the dma is not async.");
+      if (dma->future.empty() && !dma->HasEvent())
+        assert(!dma->IsAsync() &&
+               "async dma should have a future or event to wait on.");
       else
         os << dma->future << " = ";
-      os << "dma" << dma->operation << (dma->IsAsync() ? ".async" : "");
+      os << "dma" << dma->operation;
+      if (dma->IsAsync()) os << ".async";
+      if (dma->HasEvent()) os << "<" << STR(dma->Event()) << ">";
       os << (dma->config ? " " + PSTR(dma->config) : "") << " ";
       os << STR(dma->from) << " => " << STR(dma->to);
     }
@@ -727,8 +730,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
            << op->ExecOperand(2);
       } break;
       case AST::MMAOperation::Store: {
-        os << "mma.store" << (op->StoreIsTranspose() ? ".transp" : "")
-           << " " << op->StoreFrom() << ", " << PSTR(op->StoreTo());
+        os << "mma.store" << (op->StoreIsTranspose() ? ".transp" : "") << " "
+           << op->StoreFrom() << ", " << PSTR(op->StoreTo());
       } break;
       case AST::MMAOperation::Commit: {
         os << "mma.commit";
@@ -1319,7 +1322,8 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
   waited.
   */
   if (n.future.empty()) {
-    assert(!n.IsAsync() && "async dma should have a future.");
+    assert((!n.IsAsync() || n.HasEvent()) &&
+           "async dma should have a future or a event.");
     AddUse(current_stmt, n.FromSymbol());
     AddUse(current_stmt, n.ToSymbol());
   } else {

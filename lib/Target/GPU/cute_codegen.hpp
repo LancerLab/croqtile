@@ -1,8 +1,8 @@
 #ifndef __CHOREO_CODEGEN_CUTE_HPP__
 #define __CHOREO_CODEGEN_CUTE_HPP__
 
-#include <filesystem>
 #include <deque>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <thread>

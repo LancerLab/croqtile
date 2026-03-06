@@ -208,6 +208,8 @@ void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
 void DMA::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
+  if (HasEvent()) Event()->accept(v);
+
   if (operation == ".pad") {
     auto pc = cast<PadConfig>(config);
     pc->pad_high->accept(v);

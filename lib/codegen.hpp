@@ -545,8 +545,7 @@ struct LineDirectiveState {
 };
 
 std::string EscapeLinePathForDirective(const std::string& path);
-std::string ResolveDebugLinePath(const location& loc,
-                                 DebugLinePathMode mode);
+std::string ResolveDebugLinePath(const location& loc, DebugLinePathMode mode);
 std::string PinLineDirectivePerGeneratedLine(const std::string& code);
 
 /////////////////////////////////////////////////////////////

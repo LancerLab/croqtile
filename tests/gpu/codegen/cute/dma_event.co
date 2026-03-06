@@ -1,0 +1,25 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es --use-warpspec -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+
+__co__ void foo(f32 [128, 128] input) {
+  
+  parallel b by 1 : block {
+    parallel g by 2 : group-4 {
+      shared f32 [128, 128] input_s;
+      shared event full[2];
+      
+      inthreads (g == 0) {
+        foreach {stage} in [2]
+          tma.copy.async<full[stage]> input.chunkat(_, _) => input_s;
+      }
+
+      inthreads (g == 1) {
+        foreach {stage} in [2]
+          wait full[stage];
+      }
+    }
+  }
+}
+
+// CHECK: cde::cp_async_bulk_tensor_2d_global_to_shared(input_s, &__choreo_tma_0_tensor_map, 0, 0, full[__iv_stage]);
+// CHECK: full[__iv_stage].wait(full[__iv_stage].arrive());

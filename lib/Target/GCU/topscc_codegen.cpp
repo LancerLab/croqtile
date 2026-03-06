@@ -113,8 +113,8 @@ bool TopsccCodeGen::ShouldEmitLineDirective(AST::Node& n) const {
   return isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
          isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
          isa<AST::WhileBlock>(&n) || isa<AST::Assignment>(&n) ||
-         isa<AST::ParallelBy>(&n) || isa<AST::DMA>(&n) ||
-         isa<AST::Wait>(&n) || isa<AST::Trigger>(&n) || isa<AST::Break>(&n) ||
+         isa<AST::ParallelBy>(&n) || isa<AST::DMA>(&n) || isa<AST::Wait>(&n) ||
+         isa<AST::Trigger>(&n) || isa<AST::Break>(&n) ||
          isa<AST::Continue>(&n) || isa<AST::Rotate>(&n) ||
          isa<AST::Synchronize>(&n) || isa<AST::Call>(&n) ||
          isa<AST::NamedVariableDecl>(&n) || isa<AST::Return>(&n);

@@ -2436,12 +2436,22 @@ struct DMAAttribute {
         sparse_m(sp_m) {}
 };
 
+struct DMAAsync {
+  bool async;
+  ptr<AST::Expr> event;
+
+  DMAAsync(bool a = true, ptr<AST::Expr> e = nullptr) : async(a), event(e) {}
+  bool Async() const { return async; }
+  bool HasEvent() const { return event != nullptr; }
+  const ptr<AST::Expr>& Event() const { return event; }
+};
+
 struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
   std::string future;
 
 private:
-  bool async;
+  DMAAsync dma_async;
   bool enforce_tma;
 
 public:
@@ -2458,32 +2468,31 @@ public:
 
 public:
   explicit DMA(const location& l, const std::string& o, const std::string& r,
-               const ptr<Node>& f, const ptr<Node>& t, bool a,
+               const ptr<Node>& f, const ptr<Node>& t, const DMAAsync& da,
                const DMAAttribute& at = {}, bool is_tma = false,
                const ptr<DMAConfig>& c = nullptr)
-      : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),
-        enforce_tma(is_tma), from(f), to(t), attr(at), config(c) {
-    chained = false;
-    chain_to = "";
-    chain_from = "";
+      : Node(l, MakeDummyFutureType(da.async)), operation(o), future(r),
+        dma_async(da), enforce_tma(is_tma), chained(false), chain_from(""),
+        chain_to(""), from(f), to(t), attr(at), config(c) {
     if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
   }
 
   explicit DMA(const location& l, const std::string& o, const std::string& r,
                const std::string& chained_from, const ptr<Node>& f,
-               const ptr<Node>& t, bool a, const DMAAttribute& at = {},
-               bool is_tma = false, const ptr<DMAConfig>& c = nullptr)
-      : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),
-        enforce_tma(is_tma), from(f), to(t), attr(at), config(c) {
-    chained = true;
-    chain_from = chained_from;
+               const ptr<Node>& t, const DMAAsync& da,
+               const DMAAttribute& at = {}, bool is_tma = false,
+               const ptr<DMAConfig>& c = nullptr)
+      : Node(l, MakeDummyFutureType(da.async)), operation(o), future(r),
+        dma_async(da), enforce_tma(is_tma), chained(true),
+        chain_from(chained_from), chain_to(""), from(f), to(t), attr(at),
+        config(c) {
     if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
   }
 
   // The dummy dma
   explicit DMA(const location& l, const std::string& f, bool is_tma = false)
       : Node(l, MakePlaceHolderFutureType()), operation(".any"), future(f),
-        async(true), enforce_tma(is_tma) {}
+        enforce_tma(is_tma) {}
 
   bool IsDummy() const { return operation == ".any"; }
   const ptr<Node> GetFrom() const { return from; }
@@ -2511,7 +2520,7 @@ public:
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<DMA>(LOC(), operation, future, CloneP(from), CloneP(to),
-                       async, attr, enforce_tma, config);
+                       dma_async, attr, enforce_tma, config);
     n->chained = chained;
     n->chain_from = chain_from;
     n->chain_to = chain_to;
@@ -2527,7 +2536,9 @@ public:
       return;
     }
 
-    os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
+    os << "\n" << prefix << "`- DMA" << operation;
+    if (IsAsync()) os << ".async";
+    if (HasEvent()) os << "<" << PSTR(dma_async.Event()) << ">";
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (config) os << "\n" << prefix << "  `- config: " << STR(*config);
     if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
@@ -2552,7 +2563,9 @@ public:
     return future + " = dma" + operation + " " + STR(*from) + " => " + STR(*to);
   }
 
-  bool IsAsync() const { return async; }
+  bool IsAsync() const { return dma_async.Async(); }
+  bool HasEvent() const { return dma_async.HasEvent(); }
+  ptr<AST::Node> Event() const { return dma_async.Event(); }
   bool IsTMA() const { return enforce_tma; }
 
   void accept(Visitor&) override;
@@ -2628,7 +2641,7 @@ public:
       : tag(Exec),
         info(ExecInfo{m, o, l, r, nullptr, false, true, scale_a, scale_b}) {}
 
-    MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c, bool trans = false)
+  MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c, bool trans = false)
       : tag(Store), info(StoreInfo{n, c, trans}) {}
 
   MMAOperation() : tag(Commit), info() {}

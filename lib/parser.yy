@@ -223,6 +223,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Call>> call_stmt
+%nterm <AST::DMAAsync> tdma_async
 %nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
@@ -1754,20 +1755,36 @@ dma_attrib
     | /*empty*/ {}
     ;
 
+tdma_async
+    : ASYNC LT IDENTIFIER GT {
+       $$ = AST::DMAAsync(true, AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $3)));
+      }
+    | ASYNC LT IDENTIFIER LBRAKT s_expr RBRAKT GT {
+       auto event_expr = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $3), $5);
+       $$ = AST::DMAAsync(true, event_expr);
+      }
+    | ASYNC {
+      $$ = AST::DMAAsync(true);
+     }
+    | /*empty*/ {
+      $$ = AST::DMAAsync(false);
+     }
+    ;
+
 dma_stmt
-    : IDENTIFIER ASSIGN tdma dma_operation sync_type dma_config dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
-        symtab.AddSymbol($1, MakeDummyFutureType($5));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $8, $10, $5, $7, $3, $6);
+    : IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
+        symtab.AddSymbol($1, MakeDummyFutureType($6.Async()));
+        $$ = AST::Make<AST::DMA>(@3, $4, $1, $8, $10, $6, $7, $3, $5);
       }
-    | IDENTIFIER ASSIGN tdma dma_operation sync_type dma_config dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
-        symtab.AddSymbol($1, MakeDummyFutureType($5));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $12, $8, $10, $5, $7, $3, $6);
+    | IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+        symtab.AddSymbol($1, MakeDummyFutureType($6.Async()));
+        $$ = AST::Make<AST::DMA>(@3, $4, $1, $12, $8, $10, $6, $7, $3, $5);
       }
-    | tdma dma_operation sync_type dma_config dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
-        $$ = AST::Make<AST::DMA>(@1, $2, "", $6, $8, $3, $5, $1, $4);
+    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
+        $$ = AST::Make<AST::DMA>(@1, $2, "", $6, $8, $4, $5, $1, $3);
       }
-    | tdma dma_operation sync_type dma_config dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
-        $$ = AST::Make<AST::DMA>(@1, $2, "", $10, $6, $8, $3, $5, $1, $4);
+    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+        $$ = AST::Make<AST::DMA>(@1, $2, "", $10, $6, $8, $4, $5, $1, $3);
       }
     | IDENTIFIER ASSIGN tdma NONE {
         symtab.AddSymbol($1, MakePlaceHolderFutureType());
@@ -1941,22 +1958,22 @@ subdata_expr
 // check sema later
 frag_expr
     : subscript_like_expr { $$ = $1; }
-    | IDENTIFIER { 
-        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+    | IDENTIFIER {
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
       }
     ;
 
 mma_stmt
     : IDENTIFIER ASSIGN MMA FILL s_expr {
         // decl
-        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
         auto op = AST::Make<AST::MMAOperation>(fexpr, $5, true);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | FRAG IDENTIFIER optional_array_dims LBRACE s_expr RBRACE {
         // decl
-        auto fexpr = AST::Make<AST::Expr>(@2, AST::Make<AST::Identifier>(@2, $2)); 
+        auto fexpr = AST::Make<AST::Expr>(@2, AST::Make<AST::Identifier>(@2, $2));
         auto op = AST::Make<AST::MMAOperation>(fexpr, $5, true);
         op->SetFillingArrayDims($3);
         symtab.AddSymbol($2, MakeUnknownType());
@@ -1964,7 +1981,7 @@ mma_stmt
       }
     | FRAG DOT fundamental_type IDENTIFIER optional_array_dims LBRACE s_expr RBRACE {
         // decl
-        auto fexpr = AST::Make<AST::Expr>(@4, AST::Make<AST::Identifier>(@4, $4)); 
+        auto fexpr = AST::Make<AST::Expr>(@4, AST::Make<AST::Identifier>(@4, $4));
         auto op = AST::Make<AST::MMAOperation>(fexpr, $7, true, $3);
         op->SetFillingArrayDims($5);
         symtab.AddSymbol($4, MakeUnknownType());
@@ -1972,7 +1989,7 @@ mma_stmt
       }
     | IDENTIFIER ASSIGN MMA FILL DOT fundamental_type s_expr {
         // decl
-        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
         auto op = AST::Make<AST::MMAOperation>(fexpr, $7, true, $6);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
@@ -1982,13 +1999,13 @@ mma_stmt
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | IDENTIFIER ASSIGN MMA LOAD sync_type chunkat_expr {
-        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
         auto op = AST::Make<AST::MMAOperation>($6, fexpr, $5);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | IDENTIFIER ASSIGN MMA LOAD SWIZZLE swiz_mode sync_type chunkat_expr {
-        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); 
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
         auto op = AST::Make<AST::MMAOperation>($8, fexpr, $7, $6);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
@@ -2400,7 +2417,7 @@ inline const ptr<AST::MultiValues> DeSugerDimensions(const ptr<AST::MultiValues>
       all_notile = false;
   }
 
-  if (all_notile && ret_null) return nullptr; 
+  if (all_notile && ret_null) return nullptr;
 
   mv->SetDelimiter(", ");
 

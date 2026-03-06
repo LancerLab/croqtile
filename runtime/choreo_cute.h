@@ -2311,13 +2311,13 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
 
   AccumT* d_base_ptr = &D(0, 0);
   uint32_t d_base_addr =
-    static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
+      static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
 
   constexpr int w_iters = N / 16;
   constexpr uint32_t kStepBytes = static_cast<uint32_t>(16 * sizeof(AccumT));
 
   uint32_t lane_offset =
-    static_cast<uint32_t>((lane % 8) * N + (lane / 16) * N * 8 + (lane & 8));
+      static_cast<uint32_t>((lane % 8) * N + (lane / 16) * N * 8 + (lane & 8));
   uint32_t addr = d_base_addr +
                   static_cast<uint32_t>((warp * 16 * N) * sizeof(AccumT)) +
                   lane_offset * sizeof(AccumT);

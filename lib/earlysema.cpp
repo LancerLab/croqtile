@@ -1713,8 +1713,30 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     if (!to_sym.empty()) to_sym = InScopeName(to_sym);
     FCtx(fname).GetFutureBufferInfo().emplace(
         InScopeName(n.future), DMABufferInfo{to_sym, from_kind, to_kind});
-  } else if (n.IsAsync())
-    Error1(n.LOC(), "forbid to associated async dma without a named future.");
+  } else if (n.IsAsync()) {
+    if (n.HasEvent() && CCtx().UseWarpSpec()) {
+      auto event = n.Event();
+      if (!AST::IsSymbolOrArrayRef(*event))
+        Error1(n.LOC(), "expect a symbol/array reference but got '" +
+                            AST::STR(*event) + "'.");
+
+      auto ety = NodeType(*event);
+      if (isa<EventArrayType>(ety)) {
+        if (inthreads_levels[pl_depth] == 0)
+          Warning(event->LOC(),
+                  "Be careful to wait event outside inthreads block, "
+                  "which may lead to parallelism issues.");
+      } else if (!isa<EventType>(ety)) {
+        Error1(event->LOC(),
+               "expect an event or event array but got '" + PSTR(ety) + "'.");
+      }
+    } else if (n.HasEvent() && !CCtx().UseWarpSpec()) {
+      Error1(n.LOC(),
+             "async dma/tma with event is only supported in warpspec mode.");
+    } else
+      Error1(n.LOC(), "forbid to associated async dma without a named future "
+                      "or a named event.");
+  }
 
   if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
     if (cast<AST::ChunkAt>(n.from)->HasTilingOperation() &&

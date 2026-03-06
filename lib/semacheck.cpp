@@ -16,8 +16,7 @@ bool SemaChecker::AfterVisitImpl(AST::Node& n) {
     for (auto n : waited_async) pending_async.erase(n);
     if (!pending_async.empty())
       Error1(n.LOC(), "some asyncs are not explicitly waited: " +
-             DelimitedString(pending_async) + ".");
-
+                          DelimitedString(pending_async) + ".");
   }
   return true;
 }
@@ -491,8 +490,9 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     Error1(n.LOC(), "Expect the DMA to produce a FutureType, but got '" +
                         PSTR(n.GetType()) + "'.");
 
-  if (cast<FutureType>(ty)->IsAsync() && n.future.empty())
-    Error1(n.LOC(), "A dummy/async DMA must be named.");
+  if (cast<FutureType>(ty)->IsAsync() && n.future.empty() && !n.HasEvent())
+    Error1(n.LOC(),
+           "A async DMA must have a named future or an event to wait on.");
 
   if (!n.future.empty() && cast<FutureType>(ty)->IsAsync())
     pending_async.insert(InScopeName(n.future));

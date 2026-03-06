@@ -47,12 +47,12 @@ Option<bool>
 Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
                                  "Generate source-level debug information.");
 Option<bool> target_generate_debug_info(
-  OptionKind::User, "--target-debug", "-tg", false,
-  "Generate target compiler debug information only.");
+    OptionKind::User, "--target-debug", "-tg", false,
+    "Generate target compiler debug information only.");
 Option<std::string> debug_line_path_mode(
-  OptionKind::User, "--debug-line-path", "", "relative",
-  "Set #line file path mode when '-g' is enabled (relative|absolute).",
-  "--debug-line-path=<relative|absolute>");
+    OptionKind::User, "--debug-line-path", "", "relative",
+    "Set #line file path mode when '-g' is enabled (relative|absolute).",
+    "--debug-line-path=<relative|absolute>");
 
 Option<bool>
     del_comm(OptionKind::User, "--remove-comments", "-n", false,
@@ -195,6 +195,9 @@ Option<size_t> max_local_mem_capacity(
 Option<bool> mem_default_aligned(OptionKind::Hidden, "--mem-default-aligned",
                                  "-fmem_aligned", true,
                                  "Use the default alignment in memory reuse.");
+Option<bool> use_warpspec(OptionKind::User, "--use-warpspec", "", false,
+                          "Enable warp-specialized synchronization for shared "
+                          "event/full-empty pipelines.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -277,8 +280,7 @@ bool CommandLine::Parse(int argc, char** argv) {
                                     : DebugLinePathMode::WorkspaceRelative);
   }
 
-  if (generate_debug_info.GetValue() &&
-      target_generate_debug_info.GetValue()) {
+  if (generate_debug_info.GetValue() && target_generate_debug_info.GetValue()) {
     errs() << "option '-g' cannot be used together with '-tg'. "
               "Please choose exactly one mode.\n";
     exit(1);
@@ -332,6 +334,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
   CCtx().SetMemDefaultAligned(mem_default_aligned.GetValue());
+  CCtx().SetUseWarpSpec(use_warpspec.GetValue());
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
 

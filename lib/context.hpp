@@ -382,11 +382,12 @@ private:
   // Runtime check assertion level: "entry" (default), "all", or "none".
   std::string runtime_check_level = "entry";
   bool disable_cuda_runtime_env_check =
-      false;                     // Do not emit cuda runtime env check.
+      false;                 // Do not emit cuda runtime env check.
+  bool use_warpspec = false; // Enable warp-specialized synchronization for
+                             // shared event/full-empty pipelines.
   std::string debug_file_dir;    // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
-    DebugLinePathMode debug_line_path_mode =
-      DebugLinePathMode::WorkspaceRelative;
+  DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -508,7 +509,9 @@ public:
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
   bool TargetDebugInfo() const { return target_debug_info; }
-  DebugLinePathMode GetDebugLinePathMode() const { return debug_line_path_mode; }
+  DebugLinePathMode GetDebugLinePathMode() const {
+    return debug_line_path_mode;
+  }
   bool DMADiagnosis() const { return diag_dma; }
   bool LoopNorm() const { return loop_norm; }
   bool NoVectorize() const { return no_vectorize; }
@@ -522,6 +525,7 @@ public:
   bool DisableCudaRuntimeEnvCheck() const {
     return disable_cuda_runtime_env_check;
   }
+  bool UseWarpSpec() const { return use_warpspec; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -557,6 +561,7 @@ public:
   void SetMaxLocalMemCapacityPerThread(size_t sz) {
     max_local_mem_capacity = sz;
   }
+  void SetUseWarpSpec(bool value) { use_warpspec = value; }
   void SetMemDefaultAligned(bool value) { mem_default_aligned = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
