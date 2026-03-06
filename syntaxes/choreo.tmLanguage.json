@@ -85,7 +85,7 @@
       "name": "storage.modifier.specifier.choreo"
     },
     {
-      "match": "\\b(__co__|__cok__|__real_cok__|if|else|inthreads|parallel|by|with|in|foreach|incr|wait|call|select|return|where|while|break|continue|vectorize|after|cdiv)\\b",
+      "match": "\\b(__co__|__cok__|__real_cok__|if|else|inthreads|parallel|by|with|in|foreach|wait|call|select|return|where|while|break|continue|vectorize|after|cdiv)\\b",
       "name": "keyword.control.choreo"
     },
     {

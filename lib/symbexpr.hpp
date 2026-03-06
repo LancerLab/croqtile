@@ -204,9 +204,7 @@ inline static OpCode ToOpCode(const std::string& op) {
   return OpCode::NONE;
 }
 
-inline static OpCode ToOpCode(const Opcode& op) {
-  return ToOpCode(STR(op));
-}
+inline static OpCode ToOpCode(const Opcode& op) { return ToOpCode(STR(op)); }
 
 namespace sbe {
 

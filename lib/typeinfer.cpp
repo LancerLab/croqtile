@@ -39,7 +39,8 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
           return bty->GetUpperBound();
         if (auto id = dyn_cast<AST::Identifier>(e->GetR())) {
           if (auto ty = ti->SSTab().LookupSymbol(id->name))
-            if (auto bty = dyn_cast<BoundedType>(ty)) return bty->GetUpperBound();
+            if (auto bty = dyn_cast<BoundedType>(ty))
+              return bty->GetUpperBound();
         }
       }
 
@@ -58,9 +59,8 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
           e->op != Op::Div && e->op != Op::Mod && e->op != Op::Eq &&
           e->op != Op::Ne && e->op != Op::Lt && e->op != Op::Gt &&
           e->op != Op::Le && e->op != Op::Ge && e->op != Op::LogicAnd &&
-          e->op != Op::LogicOr && e->op != Op::BitAnd &&
-          e->op != Op::BitOr && e->op != Op::BitXor &&
-          e->op != Op::Shl && e->op != Op::Shr)
+          e->op != Op::LogicOr && e->op != Op::BitAnd && e->op != Op::BitOr &&
+          e->op != Op::BitXor && e->op != Op::Shl && e->op != Op::Shr)
         return GetInvalidValueItem();
       return sbe::bop(ToOpCode(e->op), lhs, rhs)->Normalize();
     }
@@ -93,8 +93,8 @@ ValueItem BuildRangePredicate(TypeInference* ti, AST::LoopRange& n) {
     default_ub = bty->GetUpperBound();
     if (auto bit = dyn_cast<BoundedIntegerType>(bty))
       default_lb = bit->GetLowerBound();
-    else if (auto bitt = dyn_cast<BoundedITupleType>(bty); bitt &&
-             bitt->Dims() == 1)
+    else if (auto bitt = dyn_cast<BoundedITupleType>(bty);
+             bitt && bitt->Dims() == 1)
       default_lb = bitt->GetLowerBound(0);
   }
 
@@ -671,9 +671,9 @@ bool TypeInference::Visit(AST::Expr& n) {
     } else if (n.op == Op::DataOf || n.op == Op::MDataOf) {
       auto ref = cast<AST::Expr>(n.GetR())->GetReference();
       auto id = cast<AST::Identifier>(ref);
-      SetNodeType(n, GetSymbolType(
-                         id->LOC(),
-                         id->name + (n.op == Op::MDataOf ? ".mdata" : ".data")));
+      SetNodeType(n, GetSymbolType(id->LOC(),
+                                   id->name + (n.op == Op::MDataOf ? ".mdata"
+                                                                   : ".data")));
     } else if (n.op == Op::AddrOf) {
       // earlysema has set it already
       assert(isa<AddrType>(NodeType(n)));
@@ -771,8 +771,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         cur_type = n.GetType();
         return true;
       }
-      if (!((n.op == Op::Div) || (n.op == Op::Mod) ||
-        (n.op == Op::CeilDiv))) {
+      if (!((n.op == Op::Div) || (n.op == Op::Mod) || (n.op == Op::CeilDiv))) {
         Error1(n.LOC(),
                "The operands of the div/mod expression cannot undergo '" +
                    n.op + "' operation.");
@@ -1362,7 +1361,7 @@ bool TypeInference::Visit(AST::InThreadsBlock& n) {
 bool TypeInference::Visit(AST::WhileBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside
-  n.SetScopePredicate(BuildPredicate(this, n.pred));
+  n.SetScopePredicate(BuildPredicate(this, n.GetPred()));
   if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
     dbgs() << " |- scope-predicate(while): "
            << n.GetScopePredicate()->ToString() << "\n";
@@ -1370,12 +1369,6 @@ bool TypeInference::Visit(AST::WhileBlock& n) {
 }
 
 bool TypeInference::Visit(AST::IfElseBlock& n) {
-  TraceEachVisit(n);
-  cur_type.reset(); // no current type to annotate the stmts inside
-  return true;
-}
-
-bool TypeInference::Visit(AST::IncrementBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside
   return true;

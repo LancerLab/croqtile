@@ -86,12 +86,8 @@ public:
   constexpr bool operator<(const Opcode& other) const {
     return static_cast<uint8_t>(kind) < static_cast<uint8_t>(other.kind);
   }
-  bool operator==(std::string_view other) const {
-    return kind == Parse(other);
-  }
-  bool operator!=(std::string_view other) const {
-    return kind != Parse(other);
-  }
+  bool operator==(std::string_view other) const { return kind == Parse(other); }
+  bool operator!=(std::string_view other) const { return kind != Parse(other); }
 
   static Kind Parse(std::string_view op) {
     if (op.empty()) return Kind::None;

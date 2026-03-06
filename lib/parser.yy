@@ -202,7 +202,7 @@ extern int yylex();
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
 %token <std::string> FRAG
 // control related
-%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK CONTINUE
+%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE
 %token <std::string> VECTORIZE
 
 // non-terminals
@@ -289,7 +289,7 @@ extern int yylex();
 
 program
     : /* Empty */ {}
-    | program any_code { if ($2 != nullptr) root.nodes->Append($2); }
+  | program any_code { if ($2 != nullptr) root.stmts->Append($2); }
     ;
 
 any_code
@@ -1936,7 +1936,7 @@ spanned_op
       }
     | MODSPAN LPAREN shape_stride RPAREN opt_step_list opt_at_list {
         auto ds = DeSugerDimensions($3.first, false);
-        $$ = AST::Make<AST::SOP::ModSpan>(@1, ds, $6, $5, $3.second);
+        $$ = AST::Make<AST::SOP::SubSpan>(@1, ds, $6, $5, $3.second, true);
       }
     | FNSPANAS LPAREN g_value_list RPAREN {
         $3->SetDelimiter(", ");

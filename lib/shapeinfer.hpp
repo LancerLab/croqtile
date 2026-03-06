@@ -339,7 +339,6 @@ public:
   bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::InThreadsBlock& n) override;
   bool Visit(AST::IfElseBlock& n) override;
-  bool Visit(AST::IncrementBlock& n) override;
   bool Visit(AST::FunctionDecl& n) override;
   bool Visit(AST::ChoreoFunction& n) override;
   bool Visit(AST::CppSourceCode& n) override;

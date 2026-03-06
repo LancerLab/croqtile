@@ -402,7 +402,7 @@ public:
     if (auto id = GetIdentifier(*n.value); id) {
       ret_name = id->name;
     } else {
-        if (auto expr = dyn_cast<AST::Expr>(n.value);
+      if (auto expr = dyn_cast<AST::Expr>(n.value);
           expr && (expr->op == Op::DataOf || expr->op == Op::MDataOf)) {
         id = cast<AST::Expr>(expr->GetR())->GetSymbol().get();
         assert(id && "Expect a symbol.");

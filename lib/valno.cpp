@@ -75,8 +75,7 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
           (op == Op::Lt) || (op == Op::BitOr) || (op == Op::BitAnd) ||
           (op == Op::BitXor) || (op == Op::Ge) || (op == Op::Le) ||
           (op == Op::Eq) || (op == Op::Ne) || (op == Op::Shr) ||
-          (op == Op::Shl) || (op == Op::LogicAnd) ||
-          (op == Op::LogicOr)) {
+          (op == Op::Shl) || (op == Op::LogicAnd) || (op == Op::LogicOr)) {
         auto lvi = GenValueItemFromSignature(oprds[0]);
         auto rvi = GenValueItemFromSignature(oprds[1]);
         if (lvi && rvi) return sbe::bop(ToOpCode(op), lvi, rvi)->Normalize();
@@ -243,14 +242,27 @@ const SignTy ValueNumbering::Simplify(const SignTy& sign) {
   if (auto mss = MSign(sign); mss && mss->Count() == 1) return mss->At(0);
 
   // Applies the algebraic simplification
-    std::set<OpTy> optimizable = {
-      Op::Add, Op::Sub,  Op::Mul,  Op::Div,   Op::Mod,  Op::CeilDiv,
-      Op::UBoundInternal, Op::UBoundAddInternal, Op::UBoundSubInternal,
-      Op::Lt,  Op::Gt,   Op::Le,
-      Op::Ge,  Op::Eq,   Op::Ne,   Op::LogicAnd, Op::LogicOr,
+  std::set<OpTy> optimizable = {
+      Op::Add,
+      Op::Sub,
+      Op::Mul,
+      Op::Div,
+      Op::Mod,
+      Op::CeilDiv,
+      Op::UBoundInternal,
+      Op::UBoundAddInternal,
+      Op::UBoundSubInternal,
+      Op::Lt,
+      Op::Gt,
+      Op::Le,
+      Op::Ge,
+      Op::Eq,
+      Op::Ne,
+      Op::LogicAnd,
+      Op::LogicOr,
   };
 
-    auto HandleMultiSigns = [this](const Opcode& op, const SignTy& lhs,
+  auto HandleMultiSigns = [this](const Opcode& op, const SignTy& lhs,
                                  const SignTy& rhs) {
     // For multiple signatures, it is possible to generate new intermediate
     // value numbers
@@ -321,8 +333,8 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
   if (lvi && rvi &&
       (op == Op::Add || op == Op::Sub || op == Op::Mul || op == Op::Div ||
        op == Op::Mod || op == Op::Lt || op == Op::Gt || op == Op::Le ||
-       op == Op::Ge || op == Op::Eq || op == Op::Ne ||
-       op == Op::LogicAnd || op == Op::LogicOr)) {
+       op == Op::Ge || op == Op::Eq || op == Op::Ne || op == Op::LogicAnd ||
+       op == Op::LogicOr)) {
     auto res_vi = sbe::bop(ToOpCode(op), lvi, rvi);
     auto opt_vi = res_vi->Normalize();
     if (*res_vi != *opt_vi) {

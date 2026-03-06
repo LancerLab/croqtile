@@ -52,7 +52,7 @@ bool ShapeInference::BeforeVisitImpl(AST::Node& n) {
              isa<AST::IfElseBlock>(&n)) {
     vn.EnterScope();
     ast_vn.EnterScope();
-  } else if (isa<AST::ForeachBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
+  } else if (isa<AST::ForeachBlock>(&n)) {
     vn.EnterScope();
     ast_vn.EnterScope();
     gen_values = false; // disable valno on range expressions
@@ -105,7 +105,7 @@ bool ShapeInference::AfterVisitImpl(AST::Node& n) {
     vn.LeaveScope();
     ast_vn.LeaveScope();
   } else if (isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-             isa<AST::IfElseBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
+             isa<AST::IfElseBlock>(&n)) {
     vn.LeaveScope();
     ast_vn.LeaveScope();
   } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
@@ -1068,14 +1068,15 @@ bool ShapeInference::Visit(AST::DMA& n) {
 
     auto mss = m_sn();
     for (size_t i = 0; i < size; ++i) {
-      auto h_l_sig = vn.MakeOpSign(Op::Add, GetSign(*pcfg->pad_high->ValueAt(i)),
-                                   GetSign(*pcfg->pad_low->ValueAt(i)));
+      auto h_l_sig =
+          vn.MakeOpSign(Op::Add, GetSign(*pcfg->pad_high->ValueAt(i)),
+                        GetSign(*pcfg->pad_low->ValueAt(i)));
       // now generate signature for original signature plus padding values
       mss->Append(
           vn.MakeOpSign(Op::Add, h_l_sig, GetSign(*pcfg->pad_mid->ValueAt(i))));
     }
     // update the cur_vn
-        cur_vn = vn.MakeOpNum(Op::Add, from_vn, GetOrGenValNum(mss));
+    cur_vn = vn.MakeOpNum(Op::Add, from_vn, GetOrGenValNum(mss));
   } else if (auto tcfg = dyn_cast<TransposeConfig>(n.config)) {
     auto size = tcfg->dim_values.size();
     auto from_vn = GetValNo(*n.GetFrom(), VNKind::VNK_MDSPAN);
@@ -1372,7 +1373,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         for (size_t index = 0; index < sbs_vns.size(); ++index) {
           auto sbi = vn.GenValueItemFromValueNumber(sbs_vns[index]);
           if (STR(sbi) == "::__choreo_parent_dim__") {
-            if (isa<AST::SOP::ModSpan>(op))
+            if (op->IsModSpan())
               continue;
             else
               sbs_vns[index] = cur_vns[index];
@@ -1502,7 +1503,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         }
       }
       // update shape and value numbers
-      if (auto mop = dyn_cast<AST::SOP::ModSpan>(op)) {
+      if (auto mop = dyn_cast<AST::SOP::SubSpan>(op); mop && mop->IsModSpan()) {
         std::vector<NumTy> mod_vns;
         for (size_t index = 0; index < cur_vns.size(); ++index) {
           auto shi = vn.GenValueItemFromValueNumber(cur_vns[index]);
@@ -1514,7 +1515,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
             mod_vns.push_back(GetOrGenValNum(c_sn(1))); // avoid 0-dim
           else
             mod_vns.push_back(
-              vn.MakeOpNum(Op::Mod, cur_vns[index], sbs_vns[index]));
+                vn.MakeOpNum(Op::Mod, cur_vns[index], sbs_vns[index]));
         }
         // calculate and append the offset when not specified
         if (!mop->GetIndices()) {
@@ -1537,7 +1538,8 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         }
         cur_vns = mod_vns;
       } else {
-        if (auto sop = dyn_cast<AST::SOP::SubSpan>(op)) {
+        if (auto sop = dyn_cast<AST::SOP::SubSpan>(op);
+            sop && !sop->IsModSpan()) {
           if (!sop->GetIndices()) {
             auto mv = AST::Make<AST::MultiValues>(sop->LOC());
             ValueList ovl;
@@ -1834,19 +1836,6 @@ bool ShapeInference::Visit(AST::IfElseBlock& n) {
     if (IsValidValueList(vl) && !IsComputable(vl))
       Error1(n.GetPred()->LOC(), "The if-condition can not be evaluated.");
   }
-
-  // invalidate any current value generated
-  InvalidateVisitorValNOs();
-
-  if (cannot_proceed) return true;
-
-  return true;
-}
-
-bool ShapeInference::Visit(AST::IncrementBlock& n) {
-  TraceEachVisit(n);
-
-  gen_values = true; // allow generate values for statements
 
   // invalidate any current value generated
   InvalidateVisitorValNOs();
@@ -2203,8 +2192,8 @@ ShapeInference::SignBounded(const AST::Node& n) {
             isa<ScalarIntegerType>(rhs.GetType())) {
           auto lsn = GetSign(lhs, VNKind::VNK_UBOUND);
           auto rsn = GetSign(rhs, VNKind::VNK_VALUE);
-          ub_sign = vn.Simplify(o_sn(e->op == Op::UBoundAdd ? Op::Add : Op::Sub,
-                                     lsn, rsn));
+          ub_sign = vn.Simplify(
+              o_sn(e->op == Op::UBoundAdd ? Op::Add : Op::Sub, lsn, rsn));
         } else
           choreo_unreachable("operation is not permitted.");
       } else

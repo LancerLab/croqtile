@@ -515,13 +515,13 @@ inline __device__ int future_ring<N>::discard(future* f) {
       p = (p + 1) % N;
   }
 
-#ifdef __CHOREO_DMA_DIAGNOSIS__
+    #ifdef __CHOREO_DMA_DIAGNOSIS__
   printf("[choreo-rt] Internal error: future %d (defined at line %u:%u) "
          "is not committed.\n",
          f->id, f->line, f->column);
-#else
+    #else
   printf("[choreo-rt] Internal error: future %d is not committed.\n", f->id);
-#endif
+    #endif
 
       //  __co_abort__();
   #else
@@ -2293,7 +2293,7 @@ __device__ static inline void store_fragment_d_trans(Tensor& D,
 
 // stmatrix-based store for WGMMA accumulators (--stmatrix flag).
 //
-// Uses PTX stmatrix.sync.aligned.m8n8.x1.b16 to write 8×8 sub-tiles of
+// Uses PTX stmatrix.sync.aligned.m8n8.x1.b16 to write 8x8 sub-tiles of
 // the WGMMA accumulator to shared memory in a bank-conflict-free manner.
 //
 // Because stmatrix stores in dense row-major stride-8 format (128-byte

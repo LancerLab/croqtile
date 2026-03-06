@@ -262,8 +262,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     SetNodeType(n, ty->Clone());
   } else if ((n.op == Op::Add) || (n.op == Op::Sub) || (n.op == Op::Mul) ||
-             (n.op == Op::Div) || (n.op == Op::Mod) ||
-             (n.op == Op::CeilDiv)) {
+             (n.op == Op::Div) || (n.op == Op::Mod) || (n.op == Op::CeilDiv)) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!lty || !rty)
@@ -362,8 +361,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeITupleType(lty->Dims()));
     } else if (isa<MDSpanType>(lty) && isa<MDSpanType>(rty)) {
       // only allow div/mod operations
-        if ((n.op != Op::Div) && (n.op != Op::Mod) &&
-          (n.op != Op::CeilDiv)) {
+      if ((n.op != Op::Div) && (n.op != Op::Mod) && (n.op != Op::CeilDiv)) {
         Error1(n.LOC(), "in operation \"" + n.op +
                             "\": unable to apply to the types (" + PSTR(lty) +
                             " vs. " + PSTR(rty) + ").");
@@ -2558,26 +2556,6 @@ bool EarlySemantics::Visit(AST::IfElseBlock& n) {
     Error1(n.pred->LOC(), "requires a predication expression but got '" +
                               PSTR(NodeType(*n.pred)) + "'.");
   }
-
-  return true;
-}
-
-bool EarlySemantics::Visit(AST::IncrementBlock& n) {
-  TraceEachVisit(n);
-  for (auto& iv : n.GetIterationVars()) {
-    auto ity = NodeType(*iv);
-    if (!(isa<BoundedType>(ity)))
-      Error1(n.LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
-    if (auto id = AST::GetIdentifier(*iv)) {
-      if (id->name == "_")
-        Error1(n.LOC(), "_ is not allowed as an iteration variable.");
-    }
-  }
-
-  auto pty = NodeType(*n.GetPredicate());
-  if (!isa<BooleanType>(pty))
-    Error1(n.LOC(),
-           "expect the a boolean-typed predicate but got '" + PSTR(pty) + "'.");
 
   return true;
 }

@@ -329,9 +329,6 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
 
   if (isa<AST::IfElseBlock>(&n) || isa<AST::NamedVariableDecl>(&n)) {
     emit_call = false;
-  } else if (isa<AST::IncrementBlock>(&n)) {
-    IndStream() << "// incr: " << n.LOC() << "\n";
-    IncrIndent();
   }
 
 #if 0
@@ -462,9 +459,6 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (auto ie = dyn_cast<AST::WhileBlock>(&n)) {
     DecrIndent();
     IndStream() << "} // end while: " << ie->LOC() << "\n";
-  } else if (isa<AST::IncrementBlock>(&n)) {
-    DecrIndent();
-    IndStream() << "}\n";
   } else if (isa<AST::NamedVariableDecl>(&n)) {
     emit_call = true;
   }
@@ -2620,7 +2614,7 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
         choreo_unreachable("unexpected situation");
       }
     } else if (auto expr = cast<AST::Expr>(n.value);
-           expr && (expr->op == Op::DataOf || expr->op == Op::MDataOf)) {
+               expr && (expr->op == Op::DataOf || expr->op == Op::MDataOf)) {
       // return future.data, must map back
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
@@ -3646,8 +3640,9 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           oss << OpExprSTR(l, parent_op, is_left_child, is_host);
         } else if (op == Op::UBoundDiv || op == Op::UBoundScale ||
                    op == Op::UBoundMod) {
-          choreo_unreachable("unsupported expression op: '" + STR(expr->GetOp()) +
-                             "', expr: " + PSTR(expr) + ".");
+          choreo_unreachable("unsupported expression op: '" +
+                             STR(expr->GetOp()) + "', expr: " + PSTR(expr) +
+                             ".");
         } else {
           std::ostringstream res;
           res << OpExprSTR(l, op_str, true, is_host) << " " << op << " "

@@ -904,7 +904,7 @@ void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
   if (!ie) return;
 
   bb_list.push_back(cur_bb);
-  if (ie->if_stmts) ie_bb_list.top()._then = bb_list.back();
+  if (ie->GetThenBody()) ie_bb_list.top()._then = bb_list.back();
   auto _else = AST::Make<BasicBlock>();
   _else->id = bb_list.back()->id + 1;
   ie_bb_list.top()._else = _else;
@@ -1539,7 +1539,7 @@ bool LivenessAnalyzer::Visit(AST::Return& n) {
     if (auto id = AST::GetIdentifier(*n.value)) {
       AddUse(current_stmt, id->name);
     } else if (auto expr = dyn_cast<AST::Expr>(n.value);
-           expr && expr->op == Op::DataOf) {
+               expr && expr->op == Op::DataOf) {
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       AddUse(current_stmt, id->name);

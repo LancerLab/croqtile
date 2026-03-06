@@ -102,7 +102,7 @@ ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
 bool ScalarEvolutionAnalysis::Visit(AST::Program& n) {
   if (!InAppointedLoop()) return true;
   if (debug_visit) dbgs() << "\n[scev] Initialize scalar evolution analysis.\n";
-  root_ptr = AST::Make<AST::Program>(n.LOC(), n.nodes);
+  root_ptr = AST::Make<AST::Program>(n.LOC(), n.stmts);
   return true;
 }
 

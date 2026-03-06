@@ -930,8 +930,7 @@ public:
     return Simplify(osn);
   }
 
-  const NumTy MakeOpNum(const Opcode& op, const NumTy& lvn,
-                        const NumTy& rvn) {
+  const NumTy MakeOpNum(const Opcode& op, const NumTy& lvn, const NumTy& rvn) {
     return GetOrGenValueNumberFromSignature(MakeOpSign(op, lvn, rvn));
   }
 

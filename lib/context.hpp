@@ -382,9 +382,9 @@ private:
   // Runtime check assertion level: "entry" (default), "all", or "none".
   std::string runtime_check_level = "entry";
   bool disable_cuda_runtime_env_check =
-      false;                 // Do not emit cuda runtime env check.
-  bool use_warpspec = false; // Enable warp-specialized synchronization for
-                             // shared event/full-empty pipelines.
+      false;                     // Do not emit cuda runtime env check.
+  bool use_warpspec = false;     // Enable warp-specialized synchronization for
+                                 // shared event/full-empty pipelines.
   std::string debug_file_dir;    // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;

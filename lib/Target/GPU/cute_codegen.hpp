@@ -348,8 +348,7 @@ private:
   void EmitCudaFree();
   void EmitRuntimeEnvironmentChecker(std::ostream&) const;
   void EmitDebugSpannedRTTI(std::ostringstream& os, const std::string& indent,
-                            const std::string& sym,
-                            const ptr<SpannedType>& sty,
+                            const std::string& sym, const ptr<SpannedType>& sty,
                             const std::string& data_expr,
                             const std::vector<std::string>& shape_exprs,
                             const std::vector<std::string>& stride_exprs) const;

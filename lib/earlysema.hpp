@@ -142,7 +142,6 @@ public:
   bool Visit(AST::InThreadsBlock&) override;
   bool Visit(AST::WhileBlock&) override;
   bool Visit(AST::IfElseBlock&) override;
-  bool Visit(AST::IncrementBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::ChoreoFunction&) override;
   bool Visit(AST::CppSourceCode&) override;

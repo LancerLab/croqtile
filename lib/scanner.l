@@ -342,10 +342,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                    Choreo::Scanner::Error(loc, msg);
                  }
                  if (!is_long_long && val <= std::numeric_limits<uint32_t>::max()) {
-                   // 42U → unsigned int
                    return Choreo::Parser::make_U32_LITERAL(static_cast<uint32_t>(val), loc);
                  } else {
-                   // 42ULL → unsigned long long
                    return Choreo::Parser::make_U64_LITERAL(val, loc);
                  }
                } else {
@@ -355,10 +353,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                    Choreo::Scanner::Error(loc, msg);
                  }
                  if (!is_long_long && val <= std::numeric_limits<int>::max()) {
-                   // 42 → int
                    return Choreo::Parser::make_NUM(static_cast<int>(val), loc);
                  } else {
-                   // 42LL → long long
                    return Choreo::Parser::make_S64_LITERAL(val, loc);
                  }
                }
@@ -547,7 +543,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "with"     return Choreo::Parser::make_WITH(yytext, loc);
   "in"       return Choreo::Parser::make_IN(yytext, loc);
   "foreach"  return Choreo::Parser::make_FOREACH(yytext, loc);
-  "incr"     return Choreo::Parser::make_INCR(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
   "select"   return Choreo::Parser::make_SELECT(yytext, loc);

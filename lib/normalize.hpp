@@ -318,7 +318,7 @@ public:
           if (auto ref = expr->GetReference()) {
             if (isa<AST::IntIndex>(ref.get())) {
               // apply desugaring a {(0), 1} -> {a(0), 1}
-                auto new_expr = AST::Make<AST::Expr>(
+              auto new_expr = AST::Make<AST::Expr>(
                   expr->LOC(), Op::DimOf, list_ref->Clone(), ref->Clone());
               VST_DEBUG(dbgs() << "Desugar ref: " << STR(*expr) << " ---> "
                                << STR(*new_expr) << "\n");
