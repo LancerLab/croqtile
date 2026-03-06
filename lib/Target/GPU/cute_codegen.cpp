@@ -1278,6 +1278,16 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       Stream() << ";\n";
       return true;
     }
+  } else {
+    if (auto bty = dyn_cast<BoundedType>(nty)) {
+      // bounded variable is not with a fixed value
+      if (!IsActualBoundedIntegerType(bty))
+        choreo_unreachable(
+            "yet to support: bounded ituple variable code generation.");
+      IndStream() << "int " << sym << " = " << ExprSTR(n.init_expr, false)
+                  << ";\n";
+      return true;
+    }
   }
 
   // when symbol is not valued
@@ -4659,7 +4669,7 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "bool"; // use bool for event
   else if (auto sty = dyn_cast<SpannedType>(&ty))
     return std::string(NameBaseType(sty->ElementType())) + " *";
-  else 
+  else
     choreo_unreachable("unexpected compile-time type in device parameter: " +
                        STR(ty) + ".");
 
