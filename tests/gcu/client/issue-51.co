@@ -18,15 +18,15 @@ __co__ auto cofoo(f32 [DIM0 * DIM1 * DIM2 * DIM3] input) {
   parallel p by 3 {
     shared f32 [DIM2 / #p, DIM1, DIM0, DIM3] l2_buf;
     shared f32 [DIM2 / #p, DIM1, DIM0, DIM3] l2_res;
-    f = dma.transp.async<2, 1, 0, 3> input.span_as([DIM0, DIM1, DIM2, DIM3]).chunkat(_, _, p, _) => l2_buf;
+    f = dma.transp<2, 1, 0, 3>.async input.span_as([DIM0, DIM1, DIM2, DIM3]).chunkat(_, _, p, _) => l2_buf;
     wait f;
     parallel q by 1 {
-      l1 = dma.transp.async<2, 1, 0, 3> l2_buf.chunkat(q, _, _, _) => local;
+      l1 = dma.transp<2, 1, 0, 3>.async l2_buf.chunkat(q, _, _, _) => local;
       wait l1;
       call inc_f32_arr(l1.data, |l1.span|);
       dma.transp<2, 1, 0, 3> l1 => l2_res;
     }
-    g = dma.transp.async<2, 1, 0, 3> l2_res.chunkat(_,_,_,_) => output.span_as([DIM0, DIM1, DIM2, DIM3]).chunkat(_, _, p, _);
+    g = dma.transp<2, 1, 0, 3>.async l2_res.chunkat(_,_,_,_) => output.span_as([DIM0, DIM1, DIM2, DIM3]).chunkat(_, _, p, _);
     wait g;
   } 
   return output;

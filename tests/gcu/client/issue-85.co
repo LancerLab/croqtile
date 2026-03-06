@@ -18,7 +18,7 @@ __co__ auto indim3_split0_outdim3_split1_perm1302(f16 [A1, A2, A3, B, C, D] inpu
       foreach x {
         in_local_F = dma.copy.async input.span_as([A4, A5, B * C * D]).chunkat(x, _, _) => local;
         wait in_local_F;
-        out_local_F = dma.transp.async<1, 3, 0, 2> in_local_F.span_as([A5, B, C, D]) => local;
+        out_local_F = dma.transp<1, 3, 0, 2>.async in_local_F.span_as([A5, B, C, D]) => local;
         wait out_local_F;
         out_global_F = dma.copy.async out_local_F.span_as([B * D, 1, A5 * C])
                                    => output.span_as([B * D, A4, A5 * C]).chunkat(_, x, _);

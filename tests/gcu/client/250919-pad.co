@@ -44,9 +44,9 @@ __co__ auto matmul(f16[M, K] lhs, f16[K, N] rhs) {
               rhsS = dma.copy.async rhs.subspan(K, nSLen).at(0, ns # p).modspan(kSLen, _).at(ks, 0) => shared;
               wait lhsS, rhsS;
               with kl in [kSRem / kLLen] foreach kl(:1:) {
-                lhsL = dma.pad.async<{0, 0}, {0, kLPad}, {0, 0}, 0> lhsS.chunkat(ml # mq, _).modspan(_, kLLen).at(0, kl) => local;
+                lhsL = dma.pad<{0, 0}, {0, kLPad}, {0, 0}, 0>.async lhsS.chunkat(ml # mq, _).modspan(_, kLLen).at(0, kl) => local;
                 lhsL2 = dma.pad<{0, 0}, {0, kLPad}, {0, 0}, 0> lhsS.chunkat(ml # mq, _).modspan(_, kLLen).at(0, kl) => local;
-                rhsL = dma.pad.async<{0, 0}, {kLPad, 0}, {0, 0}, 0> rhsS.data.chunkat(_, nl # nq).modspan(kLLen, _).at(kl, 0) => local;
+                rhsL = dma.pad<{0, 0}, {kLPad, 0}, {0, 0}, 0>.async rhsS.data.chunkat(_, nl # nq).modspan(kLLen, _).at(kl, 0) => local;
                 wait lhsL, rhsL;
               }
             }

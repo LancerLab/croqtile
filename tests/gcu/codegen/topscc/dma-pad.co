@@ -32,7 +32,7 @@ __co__ auto foo(bf16[2, 3] i) {
 __co__ auto foo1(s32 [N, M] a) {
   global s32[N+1, M] res;
   parallel p by 1, q by 2 {
-    f1 = dma.pad.async<{1,0}, {0,0}, {0,0}, -1> a.chunkat(_, q) => local;
+    f1 = dma.pad<{1,0}, {0,0}, {0,0}, -1>.async a.chunkat(_, q) => local;
     wait f1;
     dma.copy f1.data => res.chunkat(_, q);
   }

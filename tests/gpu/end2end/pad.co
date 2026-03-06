@@ -19,7 +19,7 @@ __co__ auto pad2(s32 [30, 60] input, int V) {
   s32[input.span(0)+2+3, input.span(1)+1+2] output;
 
   parallel p by 1 {
-    f = dma.pad.async<{2, 1}, {3, 2}, {0, 0}, V> input => shared;
+    f = dma.pad<{2, 1}, {3, 2}, {0, 0}, V>.async input => shared;
     wait f;
 
     dma.copy f.data => output;
@@ -37,7 +37,7 @@ __co__ auto pad_chunkat(s32 [32, 1024] input, int V) {
     foreach q in Q {
       // [8, 64] => [13, 67]
       // output: [13*4, 67*16]
-      f = dma.pad.async<{2, 1}, {3, 2}, {0, 0}, V> input.chunkat(p, q) => shared;
+      f = dma.pad<{2, 1}, {3, 2}, {0, 0}, V>.async input.chunkat(p, q) => shared;
       wait f;
       dma.copy f => output.chunkat(p, q);
     }

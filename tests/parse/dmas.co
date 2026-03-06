@@ -6,7 +6,7 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
   parallel p by 6 {
     with index in ndims {
       foreach index {
-        f = dma.pad.async<{1, 1}, {0, 0}, {1, 0}, 1> input.chunkat(p, index) => local;
+        f = dma.pad<{1, 1}, {0, 0}, {1, 0}, 1>.async input.chunkat(p, index) => local;
         f1 = dma.pad<{0, 0, 0}, {0, 1, 2}, {1, 0, 3}, 0> input.chunkat(p, index) => local;
         sum = sum + index(0);
         wait f, f1;
@@ -115,7 +115,7 @@ __co__ void dma_test3(f32 [36, 27, 128] input) {
    with index in [5, 6] {
      foreach index {
         f0 = dma.transp<0, 2, 1> input.chunkat(p, index) => local;
-        f1 = dma.transp.async<1, 2, 0> input.chunkat(p, index) => local;
+        f1 = dma.transp<1, 2, 0>.async input.chunkat(p, index) => local;
         swap f0, f1;
         wait f1;
      }
