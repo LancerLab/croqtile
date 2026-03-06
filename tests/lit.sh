@@ -608,13 +608,7 @@ execute_command() {
   command=${command//choreo/"$(which choreo) -n"}
   command=${command//copp/"$(which copp)"}
   command=${command//FileCheck/"${FILECHECK}"}
-  if [[ "$command" == *"gdb"* ]]; then
-    if [ -z "$GDB_BIN" ]; then
-      echo "Error: gdb is required by test but not found in PATH."
-      return 1
-    fi
-    command=${command//gdb/"${GDB_BIN}"}
-  fi
+  command=${command//gdb/"${GDB_BIN}"}
   command=${command//%cuda_arch/"-arch ${cuda_arch}"}
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")

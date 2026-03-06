@@ -757,6 +757,14 @@ void CuteCodeGen::EmitFixedHostHead() {
     oss << "#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__\n";
   if (native_bf16) oss << "#define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__\n";
   oss << "#include \"choreo.h\"\n";
+  if (EnableDebugTypeRTTI()) {
+    oss << R"(
+
+static __device__ __attribute__((noinline)) void __choreo_cuda_debug_point__() {
+  asm volatile("" ::: "memory");
+}
+)";
+  }
   if (cgi.HasTMA()) oss << "namespace cde = cuda::device::experimental;\n";
   oss << "#include <cooperative_groups.h>";
   oss << "\nusing namespace choreo;\n";
@@ -880,6 +888,31 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
 }
 void CuteCodeGen::EmitFixedDeviceHead() {}
 
+void CuteCodeGen::EmitDebugSpannedRTTI(
+    std::ostringstream& os, const std::string& indent, const std::string& sym,
+    const ptr<SpannedType>& sty, const std::string& data_expr,
+    const std::vector<std::string>& shape_exprs,
+    const std::vector<std::string>& stride_exprs) const {
+  auto rank = sty->Dims();
+  assert(shape_exprs.size() == rank && "spanned debug shape rank mismatch");
+  assert(stride_exprs.size() == rank && "spanned debug stride rank mismatch");
+  os << indent << "choreo::rtti::spanned<" << NameBaseType(sty->ElementType())
+     << ", " << rank << "> " << sym << " = {{";
+
+  for (size_t i = 0; i < shape_exprs.size(); ++i) {
+    if (i > 0) os << ", ";
+    os << shape_exprs[i];
+  }
+
+  os << "}, {";
+  for (size_t i = 0; i < stride_exprs.size(); ++i) {
+    if (i > 0) os << ", ";
+    os << stride_exprs[i];
+  }
+
+  os << "}, " << data_expr << "};\n";
+}
+
 bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
 
@@ -954,6 +987,31 @@ bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
 
   // emit the runtime checks
   EmitHostRuntimeCheck();
+
+  if (EnableDebugTypeRTTI()) {
+    for (auto& item : GetChoreoFuncIns(cgi)) {
+      auto sty = dyn_cast<SpannedType>(item.type);
+      if (!sty || !item.IsParameter()) continue;
+
+      std::vector<std::string> shape_exprs;
+      shape_exprs.reserve(sty->Dims());
+      for (size_t i = 0; i < sty->Dims(); ++i)
+        shape_exprs.push_back(item.host_name + ".shape()[" +
+                              std::to_string(i) + "]");
+
+      std::vector<std::string> stride_exprs;
+      const auto& strides = sty->GetStrides();
+      assert(strides.size() == sty->Dims() && "missing spanned strides");
+      stride_exprs.reserve(sty->Dims());
+      for (auto& vi : strides)
+        stride_exprs.push_back(UnScopedExpr(ValueSTR(vi)));
+
+      EmitDebugSpannedRTTI(hs, h_indent,
+                           "__dbg_" + UnScopedName(item.name), sty,
+                           item.host_name + ".data()", shape_exprs,
+                           stride_exprs);
+    }
+  }
 
   // do not generate device function unless parallel-by exists
   if (NeedDeviceFunc()) {
@@ -1050,7 +1108,14 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     if (sa = dyn_cast<AST::SpanAs>(e->GetReference())) {
       // handle span_as of global buffer in `HandleGlobal`
       if (!IsHost()) {
-        ds << d_indent << "auto* " << sym << " = ";
+        auto sty = dyn_cast<SpannedType>(nty);
+        bool is_internal_spanned = PrefixedWith(sym, "anon_") ||
+                                   PrefixedWith(sym, "__iv_") ||
+                                   SuffixedWith(sym, "__buf__");
+        bool use_user_visible_debug_sym = enable_debug_rtti && !is_internal_spanned;
+        std::string raw_sym = use_user_visible_debug_sym ? "__raw_" + sym : sym;
+
+        ds << d_indent << "auto* " << raw_sym << " = ";
         ds << "static_cast<"
            << NameBaseType(dyn_cast<SpannedType>(nty)->ElementType()) << "*>(";
         auto tty = GetSymbolType(sa->id->name);
@@ -1058,7 +1123,23 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
           ds << sa->id->name << ".data());\n";
         else
           ds << sa->id->name << ");\n";
-        ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        if (use_user_visible_debug_sym) {
+          std::vector<std::string> shape_exprs;
+          shape_exprs.reserve(sty->Dims());
+          for (auto& vi : sty->GetShape().Value())
+            shape_exprs.push_back(UnScopedExpr(ValueSTR(vi)));
+
+          std::vector<std::string> stride_exprs;
+          assert(sty->GetStrides().size() == sty->Dims() &&
+                 "missing spanned strides");
+          stride_exprs.reserve(sty->Dims());
+          for (auto& vi : sty->GetStrides())
+            stride_exprs.push_back(UnScopedExpr(ValueSTR(vi)));
+
+          EmitDebugSpannedRTTI(ds, d_indent, sym, sty, raw_sym,
+                               shape_exprs, stride_exprs);
+        }
+        ssm.MapDeviceSymbol(InScopeName(sym), raw_sym);
         return true;
       }
     }
@@ -1228,6 +1309,40 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       spmem = true;
     } else
       choreo_unreachable("unsupported storage type.");
+
+    bool is_internal_spanned = PrefixedWith(sym, "anon_") ||
+                   PrefixedWith(sym, "__iv_") ||
+                   SuffixedWith(sym, "__buf__");
+    if (enable_debug_rtti && !is_internal_spanned) {
+      auto& os = IsHost() ? hs : ds;
+      auto& ind = IsHost() ? h_indent : d_indent;
+
+      std::vector<std::string> shape_exprs;
+      shape_exprs.reserve(sty->Dims());
+      for (auto& vi : sty->GetShape().Value())
+        shape_exprs.push_back(UnScopedExpr(ValueSTR(vi)));
+
+      std::vector<std::string> stride_exprs;
+      assert(sty->GetStrides().size() == sty->Dims() &&
+             "missing spanned strides");
+      stride_exprs.reserve(sty->Dims());
+      for (auto& vi : sty->GetStrides())
+        stride_exprs.push_back(UnScopedExpr(ValueSTR(vi)));
+
+      std::string data_expr;
+      if (sto == Storage::GLOBAL)
+        data_expr = IsHost() ? buf_sym : sym;
+      else
+        data_expr = sym;
+
+      std::string debug_sym = "__dbg_" + sym;
+      if (IsHost() && sto == Storage::GLOBAL && sa &&
+          !IsChoreoOutput(InScopeName(sym)) && !n.init_value)
+        debug_sym = sym;
+
+      EmitDebugSpannedRTTI(os, ind, debug_sym, sty, data_expr,
+                           shape_exprs, stride_exprs);
+    }
 
     // initialize the spm buffer if needed
     if (spmem && n.init_value) {
@@ -1506,15 +1621,38 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 
   if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
     assert(!IsHost() && "span-as should be on device side.");
-    ds << d_indent << "auto * " << n.GetName() << " = ";
+    bool is_internal_spanned = PrefixedWith(n.GetName(), "anon_") ||
+                               PrefixedWith(n.GetName(), "__iv_") ||
+                               SuffixedWith(n.GetName(), "__buf__");
+    bool use_user_visible_debug_sym = enable_debug_rtti && !is_internal_spanned;
+    std::string raw_sym =
+        use_user_visible_debug_sym ? "__raw_" + n.GetName() : n.GetName();
+    ds << d_indent << "auto * " << raw_sym << " = ";
     auto tty = GetSymbolType(sa->id->name);
+    auto sty = dyn_cast<SpannedType>(nty);
     ds << "static_cast<"
        << NameBaseType(dyn_cast<SpannedType>(nty)->ElementType()) << "*>(";
     if (isa<FutureType>(tty))
       ds << sa->id->name << ".data());\n";
     else
       ds << sa->id->name << ");\n";
-    ssm.MapDeviceSymbol(InScopeName(n.GetName()), n.GetName());
+    if (use_user_visible_debug_sym && sty) {
+      std::vector<std::string> shape_exprs;
+      shape_exprs.reserve(sty->Dims());
+      for (auto& vi : sty->GetShape().Value())
+        shape_exprs.push_back(UnScopedExpr(ValueSTR(vi)));
+
+      std::vector<std::string> stride_exprs;
+      assert(sty->GetStrides().size() == sty->Dims() &&
+             "missing spanned strides");
+      stride_exprs.reserve(sty->Dims());
+      for (auto& vi : sty->GetStrides())
+        stride_exprs.push_back(UnScopedExpr(ValueSTR(vi)));
+
+      EmitDebugSpannedRTTI(ds, d_indent, n.GetName(), sty, raw_sym,
+                           shape_exprs, stride_exprs);
+    }
+    ssm.MapDeviceSymbol(InScopeName(n.GetName()), raw_sym);
     return true;
   }
 
@@ -1815,6 +1953,17 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 
     } else
       ds << d_indent << "auto " << device_fn << "__ring__ = nullptr;\n";
+    if (EnableDebugTypeRTTI()) {
+      if (EnableLineDirective()) {
+        auto loc = n.LOC();
+        auto file = ResolveLineDirectivePath(loc);
+        if (!file.empty() && loc.begin.line > 0)
+          ds << d_indent << "#line " << loc.begin.line << " \"" << file
+             << "\"\n";
+      }
+      ds << d_indent
+         << "if (__CHOREO_BLOCK_SINGLE__) __choreo_cuda_debug_point__();\n";
+    }
     ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
   } else {
     auto& siblings = cgi.GetPBTree(fname).GetSiblings(&n);

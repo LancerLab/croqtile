@@ -157,6 +157,13 @@ struct bounded_ituple {
   __co_any__ const int& operator[](int i) const { return data[i]; }
 };
 
+template <typename T, int N>
+struct spanned {
+  mdspan<N> span;
+  mdspan<N> stride;
+  T* data;
+};
+
 } // namespace rtti
 
 constexpr size_t __inf__ = (size_t)((1LL << 32) - 1);
