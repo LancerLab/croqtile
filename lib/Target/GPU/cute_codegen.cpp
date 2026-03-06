@@ -1936,26 +1936,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ++dma_count;
 
     ds << d_indent << "future " << future_name;
-    if (CCtx().DMADiagnosis() || !buf_expr.empty() || !mdata_expr.empty()) {
-      ds << "(";
-      bool first_arg = true;
-      if (CCtx().DMADiagnosis()) {
-        ds << "\"" << n.future << "\", " << n.LOC().begin.line << ", "
-           << n.LOC().begin.column;
-        first_arg = false;
-      }
-      if (!buf_expr.empty()) {
-        if (!first_arg) ds << ", ";
-        ds << buf_expr;
-        first_arg = false;
-      }
-      if (!mdata_expr.empty()) {
-        if (!first_arg) ds << ", ";
-        ds << mdata_expr;
-      }
-      ds << ")";
+    ds << "(\"" << n.future << "\", " << n.LOC().begin.line << ", "
+       << n.LOC().begin.column;
+    if (!buf_expr.empty()) {
+      ds << ", " << buf_expr;
     }
-    ds << ";\n";
+    if (!mdata_expr.empty()) {
+      ds << ", " << mdata_expr;
+    }
+    ds << ");\n";
     if (is_tma) {
       ds << d_indent << future_name << ".is_tma = true;\n";
       ds << d_indent << future_name << ".set_atom(&" << cp_atom << ");\n";

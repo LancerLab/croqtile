@@ -248,6 +248,14 @@ struct future {
       : d(data), md(mdata ? mdata : data), s(ST_NONE), name(n), line(l),
         column(c) {}
   #else
+  __device__ future(const char* n, unsigned l, unsigned c, void* data = nullptr,
+                    void* mdata = nullptr)
+      : d(data), md(mdata ? mdata : data) {
+    (void)n;
+    (void)l;
+    (void)c;
+  }
+
   __device__ future(void* data = nullptr, void* mdata = nullptr)
       : d(data), md(mdata ? mdata : data) {}
   #endif //__CHOREO_DMA_DIAGNOSIS__
@@ -507,9 +515,13 @@ inline __device__ int future_ring<N>::discard(future* f) {
       p = (p + 1) % N;
   }
 
+#ifdef __CHOREO_DMA_DIAGNOSIS__
   printf("[choreo-rt] Internal error: future %d (defined at line %u:%u) "
          "is not committed.\n",
          f->id, f->line, f->column);
+#else
+  printf("[choreo-rt] Internal error: future %d is not committed.\n", f->id);
+#endif
 
       //  __co_abort__();
   #else
