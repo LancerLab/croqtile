@@ -32,9 +32,9 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
       auto rhs = BuildPredicate(ti, e->GetR());
       if (!IsValidValueItem(rhs)) return GetInvalidValueItem();
 
-      if (e->op == "!" || e->op == "~")
+      if (e->op == Op::LogicNot || e->op == Op::BitNot)
         return sbe::uop(ToOpCode(e->op), rhs)->Normalize();
-      if (e->op == "ubound" || e->op == "#") {
+      if (e->op == Op::GetUBound || e->op == Op::UBound) {
         if (auto bty = dyn_cast<BoundedType>(e->GetR()->GetType()))
           return bty->GetUpperBound();
         if (auto id = dyn_cast<AST::Identifier>(e->GetR())) {
@@ -49,16 +49,18 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
     if (e->GetForm() == AST::Expr::Binary) {
       auto lhs = BuildPredicate(ti, e->GetL());
       auto rhs = BuildPredicate(ti, e->GetR());
-      if (!IsValidValueItem(lhs) || !IsValidValueItem(rhs))
+      if (!IsValidValueItem(lhs) || !IsValidValueItem(rhs)) {
         return GetInvalidValueItem();
+      }
 
-      if (e->op == "cdiv") return (lhs + (rhs - sbe::nu(1))) / rhs;
-      if (e->op != "+" && e->op != "-" && e->op != "*" && e->op != "/" &&
-          e->op != "%" && e->op != "==" && e->op != "!=" &&
-          e->op != "<" && e->op != ">" && e->op != "<=" &&
-          e->op != ">=" && e->op != "&&" && e->op != "||" &&
-          e->op != "&" && e->op != "|" && e->op != "^" &&
-          e->op != "<<" && e->op != ">>")
+      if (e->op == Op::CeilDiv) return (lhs + (rhs - sbe::nu(1))) / rhs;
+      if (e->op != Op::Add && e->op != Op::Sub && e->op != Op::Mul &&
+          e->op != Op::Div && e->op != Op::Mod && e->op != Op::Eq &&
+          e->op != Op::Ne && e->op != Op::Lt && e->op != Op::Gt &&
+          e->op != Op::Le && e->op != Op::Ge && e->op != Op::LogicAnd &&
+          e->op != Op::LogicOr && e->op != Op::BitAnd &&
+          e->op != Op::BitOr && e->op != Op::BitXor &&
+          e->op != Op::Shl && e->op != Op::Shr)
         return GetInvalidValueItem();
       return sbe::bop(ToOpCode(e->op), lhs, rhs)->Normalize();
     }
@@ -654,7 +656,7 @@ bool TypeInference::Visit(AST::Expr& n) {
   }
 
   if (n.GetForm() == AST::Expr::Unary) {
-    if (n.op == "ubound") {
+    if (n.op == Op::GetUBound) {
       auto id = cast<AST::Identifier>(n.GetR());
       if (auto bty =
               dyn_cast<BoundedITupleType>(GetSymbolType(id->LOC(), id->name)))
@@ -664,26 +666,26 @@ bool TypeInference::Visit(AST::Expr& n) {
       else
         choreo_unreachable("ubound type '" + AST::TYPE_STR(n.GetR()) +
                            "' is unexpected.");
-    } else if (n.op == "sizeof") {
+    } else if (n.op == Op::SizeOf) {
       SetNodeType(n, MakeIntegerType());
-    } else if (n.op == "dataof" || n.op == "mdataof") {
+    } else if (n.op == Op::DataOf || n.op == Op::MDataOf) {
       auto ref = cast<AST::Expr>(n.GetR())->GetReference();
       auto id = cast<AST::Identifier>(ref);
       SetNodeType(n, GetSymbolType(
                          id->LOC(),
-                         id->name + (n.op == "mdataof" ? ".mdata" : ".data")));
-    } else if (n.op == "addrof") {
+                         id->name + (n.op == Op::MDataOf ? ".mdata" : ".data")));
+    } else if (n.op == Op::AddrOf) {
       // earlysema has set it already
       assert(isa<AddrType>(NodeType(n)));
       return true;
-    } else if (n.op == "!") {
+    } else if (n.op == Op::LogicNot) {
       SetNodeType(n, MakeBooleanType());
-    } else if (n.op == "++" || n.op == "--") {
+    } else if (n.op == Op::PreInc || n.op == Op::PreDec) {
       SetNodeType(n, NodeType(*n.GetR()));
-    } else if (n.op == "~") {
+    } else if (n.op == Op::BitNot) {
       assert(CanYieldAnInteger(NodeType(*n.GetR())));
       SetNodeType(n, MakeIntegerType(true));
-    } else if (n.op == "cast") {
+    } else if (n.op == Op::Cast) {
       auto cexpr = cast<AST::CastExpr>(&n);
       SetNodeType(n, MakeScalarType(cexpr->ToType(), true));
     } else {
@@ -695,11 +697,11 @@ bool TypeInference::Visit(AST::Expr& n) {
   } // AST::Expr::Unary
 
   if (n.GetForm() == AST::Expr::Binary) {
-    if (n.op == "dimof") {
+    if (n.op == Op::DimOf) {
       SetNodeType(n, MakeIntegerType());
       cur_type = n.GetType();
       return true;
-    } else if (n.op == "elemof") {
+    } else if (n.op == Op::ElemOf) {
       assert(isa<EventType>(NodeType(n)) && "only support elemof event array.");
       cur_type = n.GetType();
       return true;
@@ -737,7 +739,7 @@ bool TypeInference::Visit(AST::Expr& n) {
 
     if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
         (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
-      if (n.op == "concat") {
+      if (n.op == Op::Concat) {
         SetNodeType(n, MakeMDSpanType(n.s));
         cur_type = n.GetType();
         return true;
@@ -764,12 +766,13 @@ bool TypeInference::Visit(AST::Expr& n) {
                  std::to_string(pty_rhs->Dims()));
       return false;
     } else if (isa<MDSpanType>(pty_lhs) && isa<MDSpanType>(pty_rhs)) {
-      if (n.op == "concat") {
+      if (n.op == Op::Concat) {
         SetNodeType(n, MakeMDSpanType(n.s));
         cur_type = n.GetType();
         return true;
       }
-      if (!((n.op == "/") || (n.op == "%") || (n.op == "cdiv"))) {
+      if (!((n.op == Op::Div) || (n.op == Op::Mod) ||
+        (n.op == Op::CeilDiv))) {
         Error1(n.LOC(),
                "The operands of the div/mod expression cannot undergo '" +
                    n.op + "' operation.");
@@ -786,7 +789,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         return false;
       }
     } else if (isa<ITupleType>(pty_rhs) && isa<ITupleType>(pty_lhs)) {
-      if (n.op == "concat") {
+      if (n.op == Op::Concat) {
         if (!cast<ITupleType>(pty_rhs)->IsDimValid() ||
             !cast<ITupleType>(pty_lhs)->IsDimValid())
           SetNodeType(n, MakeUninitITupleType());

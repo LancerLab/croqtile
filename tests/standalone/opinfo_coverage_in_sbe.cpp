@@ -8,7 +8,7 @@
 using namespace Choreo;
 
 bool AlreadyHandled(enum OpCode opc) {
-  if (!Operator::op_table.count(STR(opc))) return false;
+  if (!Operator::op_table.count(Opcode(STR(opc)))) return false;
   return true;
 }
 

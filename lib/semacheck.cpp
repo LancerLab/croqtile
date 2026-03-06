@@ -294,8 +294,8 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
                    PSTR(arr_sym) + "', where the valid range is [0, " +
                    std::to_string(bound) + ")";
 
-    EmitAssertion(asrt0, message, expr->LOC(), expr);
-    EmitAssertion(asrt1, message, expr->LOC(), expr);
+    CreateAssessment(asrt0, message, expr->LOC(), expr);
+    CreateAssessment(asrt1, message, expr->LOC(), expr);
   } else if (n.IsBinary() && n.IsArith()) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
@@ -522,11 +522,11 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
             }
 
             if (!statically_safe) {
-              EmitAssertion(sbe::oc_lt(index_val, dim_bound)->Normalize(),
-                            "The " + Ordinal(d + 1) + " index `" + idx_str +
-                                "` of element access '" + data_str +
-                                "' should be less than " + STR(dim_bound),
-                            val_node->LOC(), class_node, &n);
+                CreateAssessment(sbe::oc_lt(index_val, dim_bound)->Normalize(),
+                         "The " + Ordinal(d + 1) + " index `" + idx_str +
+                           "` of element access '" + data_str +
+                           "' should be less than " + STR(dim_bound),
+                         val_node->LOC(), class_node, &n);
             }
           } else {
             bool guard_proves_ge = false;
@@ -549,17 +549,17 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
             }
 
             if (!guard_proves_ge)
-              EmitAssertion(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
-                            "The " + Ordinal(d + 1) + " index `" + idx_str +
-                                "` of element access '" + data_str +
-                                "' should be greater than or equal to 0",
-                            val_node->LOC(), class_node, &n);
+                CreateAssessment(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
+                         "The " + Ordinal(d + 1) + " index `" + idx_str +
+                           "` of element access '" + data_str +
+                           "' should be greater than or equal to 0",
+                         val_node->LOC(), class_node, &n);
             if (!guard_proves_lt)
-              EmitAssertion(sbe::oc_lt(index_val, dim_bound)->Normalize(),
-                            "The " + Ordinal(d + 1) + " index `" + idx_str +
-                                "` of element access '" + data_str +
-                                "' should be less than " + STR(dim_bound),
-                            val_node->LOC(), class_node, &n);
+                CreateAssessment(sbe::oc_lt(index_val, dim_bound)->Normalize(),
+                         "The " + Ordinal(d + 1) + " index `" + idx_str +
+                           "` of element access '" + data_str +
+                           "' should be less than " + STR(dim_bound),
+                         val_node->LOC(), class_node, &n);
           }
         }
       }
@@ -635,7 +635,7 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
 
       // The assertion "dim > 0" is about the BOUND (a parameter expression),
       // not the parallel variable itself.  The SubPV has BoundedType, so
-      // EmitAssertion would escalate to USE_SITE — bypass it and force ENTRY.
+      // CreateAssessment would escalate to USE_SITE — bypass it and force ENTRY.
       FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt, message,
                                             AssessType::ENTRY, loc, spv.get());
       ++index;
@@ -659,7 +659,7 @@ bool SemaChecker::VisitNode(AST::WithIn& n) {
 
       // The assertion "dim != 0" is about the span BOUND (a parameter
       // expression), not the with-in iterator variable itself.  Since n.in
-      // has BoundedType, EmitAssertion would escalate to USE_SITE — bypass
+      // has BoundedType, CreateAssessment would escalate to USE_SITE — bypass
       // it and force ENTRY.
       FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt, message,
                                             AssessType::ENTRY, n.in->LOC(),
@@ -825,7 +825,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
         auto message = "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                        ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
                        ") at the " + Ordinal(i + 1) + " dim.";
-        EmitAssertion(eq, message, n.from->LOC(), n.from);
+        CreateAssessment(eq, message, n.from->LOC(), n.from);
       }
     }
   } else if (n.operation == ".pad") {
@@ -879,7 +879,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     auto message = "DMA to-buffer is too small (" +
                    STR(f_shape.ElementCountValue()) + " > " +
                    STR(t_shape.ElementCountValue()) + ")";
-    EmitAssertion(asrt, message, n.LOC(), n.from);
+    CreateAssessment(asrt, message, n.LOC(), n.from);
 
     bool emit_error = true;
     std::string msg;
@@ -1191,8 +1191,8 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
                      Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
                      "', where the valid range is [0, " +
                      std::to_string(bound) + ")";
-      EmitAssertion(asrt0, message, expr->LOC(), expr);
-      EmitAssertion(asrt1, message, expr->LOC(), expr);
+      CreateAssessment(asrt0, message, expr->LOC(), expr);
+      CreateAssessment(asrt1, message, expr->LOC(), expr);
     }
   }
 
@@ -1456,15 +1456,15 @@ bool SemaChecker::VisitNode(AST::Select& n) {
                        sbe::clt(bounds.ub, sbe::nu(select_value_cnt));
       // Pass &n (the Select node) as emit_node because Expr::accept does not
       // call AfterVisit, so the select_factor pointer would never match
-      // in EmitSiteAssertions.  Select::accept does call AfterVisit.
+      // in emitted assessments. Select::accept does call AfterVisit.
 
       if (!proven_nonneg)
-        EmitAssertion(sbe::oc_ge(v, sbe::nu(0)),
-                      "The select factor `" + PSTR(n.select_factor) +
-                          "` should be greater than or equal to 0",
-                      n.select_factor->LOC(), n.select_factor, &n);
+        CreateAssessment(sbe::oc_ge(v, sbe::nu(0)),
+                         "The select factor `" + PSTR(n.select_factor) +
+                             "` should be greater than or equal to 0",
+                         n.select_factor->LOC(), n.select_factor, &n);
       if (!proven_lt)
-        EmitAssertion(
+        CreateAssessment(
             sbe::oc_lt(v, sbe::nu(select_value_cnt)),
             "The select factor `" + PSTR(n.select_factor) +
                 "` should be less than " + std::to_string(select_value_cnt) +
@@ -1525,9 +1525,11 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
   return true;
 }
 
-void SemaChecker::EmitAssertion(const ValueItem& pred,
-                                const std::string& message, const location& l,
-                                const ptr<AST::Node>& n, AST::Node* emit_node) {
+void SemaChecker::CreateAssessment(const ValueItem& pred,
+                                   const std::string& message,
+                                   const location& l,
+                                   const ptr<AST::Node>& n,
+                                   AST::Node* emit_node) {
   // Classification lattice: ENTRY < DEF_SITE < USE_SITE.
   // Start at ENTRY and escalate upward as needed.
   auto aty = AssessType::ENTRY;

@@ -10,6 +10,7 @@
 #include "context.hpp"
 #include "dmaconf.hpp"
 #include "loc.hpp"
+#include "opcode.hpp"
 #include "loop_utils.hpp"
 #include "symtab.hpp"
 #include "symvals.hpp"
@@ -36,6 +37,10 @@ inline ptr<T> Make(Args&&... args) {
 
 struct Identifier;
 struct DataType;
+struct MultiNodes;
+struct Node;
+
+using NodeList = std::vector<ptr<Node>>;
 
 // interface class for all AST nodes
 struct Node {
@@ -66,40 +71,61 @@ public:
 
   virtual const NoteMapType& Note() const { return note; }
   virtual bool HasNote(const std::string& k) const { return note.count(k); }
-  virtual std::string GetNote(const std::string& k) const { return note.at(k); }
-  virtual void AddNote(const std::string& k, const std::string& v = "") {
-    note.emplace(k, v);
+  virtual const std::string& GetNote(const std::string& k) const {
+    return note.at(k);
   }
-  virtual void EraseNote(const std::string& k) { note.erase(k); }
+  virtual void AddNote(const std::string& k, const std::string& v = {}) {
+    note[k] = v;
+  }
+  virtual void DelNote(const std::string& k) { note.erase(k); }
+
+  virtual void SetLevel(ParallelLevel l) { level = l; }
+  virtual ParallelLevel GetLevel() const { return level; }
 
   virtual bool IsBlock() const { return false; }
-  virtual ParallelLevel GetLevel() const { return level; }
-  virtual void SetLevel(ParallelLevel l) { level = l; }
-  virtual const ptr<Node> Clone() const {
+  virtual bool HasBody() const { return false; }
+  virtual ptr<MultiNodes> GetBody() const { return nullptr; }
+
+  virtual void OverWrite(const Node& other) {
+    SetType(other.GetType());
+    SetLevel(other.GetLevel());
+    SetDiversityShape(other.GetDiversityShape());
+    note = other.Note();
+  }
+
+  virtual ptr<Node> CloneImpl() const = 0;
+  virtual ptr<Node> Clone() const {
     auto n = CloneImpl();
     n->SetType(GetType());
     n->SetLevel(GetLevel());
     n->SetDiversityShape(GetDiversityShape());
-    if (!note.empty()) n->note = note;
+    for (const auto& kv : note) n->AddNote(kv.first, kv.second);
     return n;
   }
-  virtual ptr<Node> CloneImpl() const = 0;
-
   virtual void Print(std::ostream& os, const std::string& prefix = {},
                      bool with_type = false) const = 0;
+  virtual void accept(Visitor& visitor) = 0;
 
   virtual void InlinePrint(std::ostream& os, const std::string& prefix = {},
                            bool with_type = false) const {
     if (!IsBlock()) Print(os, prefix, with_type);
   }
 
-  virtual void accept(Visitor&) = 0;
-
-  // for runtime type disambiguation
-  __UDT_TYPE_INFO_BASE__(node)
+  __UDT_TYPE_INFO_BASE__(Node)
 };
 
-using NodeList = std::vector<ptr<Node>>;
+struct Block : public Node, public TypeIDProvider<Block> {
+  using Node::Node;
+
+  bool IsBlock() const override { return true; }
+  bool HasBody() const override { return GetBody() != nullptr; }
+  ptr<Node> CloneImpl() const override = 0;
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override = 0;
+  void accept(Visitor& visitor) override = 0;
+
+  __UDT_TYPE_INFO__(Node, Block)
+};
 
 // utility functions
 template <typename T>
@@ -107,10 +133,9 @@ bool istypeof(const Node* n) {
   return isa<T>(n->GetType());
 }
 template <typename T>
-bool istypeof(const ptr<Node>& n) {
-  return isa<T>(n->GetType());
+bool istypeof(const std::shared_ptr<Node>& n) {
+  return n && istypeof<T>(n.get());
 }
-
 inline std::string STR(const Node& n) {
   std::ostringstream oss;
   n.Print(oss);
@@ -554,7 +579,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
   // Different expression type
   enum Form { Unary, Binary, Ternary, Reference };
 
-  std::string op;
+  Opcode op;
 
 private:
   ptr<Expr> value_c = nullptr;
@@ -570,7 +595,7 @@ public:
   const ptr<Node>& GetR() const { return value_r; }
   const ptr<Node>& GetL() const { return value_l; }
   const ptr<Expr>& GetC() const { return value_c; }
-  const std::string GetOp() const { return op; }
+  const Opcode& GetOp() const { return op; }
   Form GetForm() const { return t; }
   void SetForm(const Form& form) {
     // the form must be set after operand
@@ -607,21 +632,26 @@ public:
   Shape s; // to pass information between shape inference & type inference
 
   explicit Expr(const location& l, const ptr<Node>& v)
-      : Node(l), op("ref"), value_r(v), t(Reference) {
+      : Node(l), op(Op::Ref), value_r(v), t(Reference) {
     assert(value_r && "null node is provided.");
     assert(!isa<Expr>(v) && "can not reference an expression.");
   }
-  explicit Expr(const location& l, const std::string& o, const ptr<Node>& v2)
+  explicit Expr(const location& l, const Opcode& o, const ptr<Node>& v2)
       : Node(l), op(o), value_r(v2), t(Unary) {
     assert(value_r && "null node is provided.");
   }
-  explicit Expr(const location& l, const std::string& o, const ptr<Node>& v1,
+  explicit Expr(const location& l, const std::string& o, const ptr<Node>& v2)
+      : Expr(l, Opcode(o), v2) {}
+  explicit Expr(const location& l, const Opcode& o, const ptr<Node>& v1,
                 const ptr<Node>& v2)
       : Node(l), op(o), value_l(v1), value_r(v2), t(Binary) {
     assert(value_l);
     assert(value_r);
   }
-  explicit Expr(const location& l, const std::string& o, const ptr<Expr>& c,
+  explicit Expr(const location& l, const std::string& o, const ptr<Node>& v1,
+                const ptr<Node>& v2)
+      : Expr(l, Opcode(o), v1, v2) {}
+  explicit Expr(const location& l, const Opcode& o, const ptr<Expr>& c,
                 const ptr<Node>& v1, const ptr<Node>& v2)
       : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(Ternary) {
     assert(value_c);
@@ -629,16 +659,23 @@ public:
     assert(value_r);
   }
   explicit Expr(const location& l, const std::string& o, const ptr<Expr>& c,
+                const ptr<Node>& v1, const ptr<Node>& v2)
+      : Expr(l, Opcode(o), c, v1, v2) {}
+  explicit Expr(const location& l, const Opcode& o, const ptr<Expr>& c,
                 const ptr<Node>& v1, const ptr<Node>& v2, Form f,
                 const OptimizedValues& ov, const Shape& sp)
       : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(f),
         opt_vals(ov), s(sp) {}
+  explicit Expr(const location& l, const std::string& o, const ptr<Expr>& c,
+                const ptr<Node>& v1, const ptr<Node>& v2, Form f,
+                const OptimizedValues& ov, const Shape& sp)
+      : Expr(l, Opcode(o), c, v1, v2, f, ov, sp) {}
 
   explicit Expr(const Expr& e) : Node(e.LOC()) { OverWrite(e); }
 
   void OverWrite(const Expr& e) {
     if (e.IsReference()) {
-      op = "ref";
+      op = Op::Ref;
       SetR(e.GetR());
       SetForm(Reference);
     } else if (e.IsUnary()) {
@@ -695,39 +732,16 @@ public:
   bool IsReference() const { return t == Reference; }
 
   bool IsArith() const {
-    if (!IsBinary()) return false;
-    if ((op == "+") || (op == "-") || (op == "*") || (op == "/") ||
-        (op == "%") || (op == "cdiv") || (op == "#") || (op == "#+") ||
-        (op == "#-") || (op == "#*") || (op == "#/") || (op == "#%"))
-      return true;
-    return false;
+    return IsBinary() && Choreo::IsArith(op);
   }
 
-  bool IsLogical() const {
-    if ((op == "||") || (op == "&&") || (op == "!")) return true;
-    return false;
-  }
+  bool IsLogical() const { return Choreo::IsLogical(op); }
 
-  bool IsCompare() const {
-    if ((op == "<") || (op == "<=") || (op == "==") || (op == ">") ||
-        (op == ">=") || (op == "!="))
-      return true;
-    return false;
-  }
+  bool IsCompare() const { return Choreo::IsCompare(op); }
 
-  bool isBitwise() const {
-    if ((op == "&") || (op == "|") || (op == "^") || (op == "~") ||
-        (op == "<<") || (op == ">>"))
-      return true;
-    return false;
-  }
+  bool isBitwise() const { return Choreo::IsBitwise(op); }
 
-  bool IsUBArith() const {
-    if ((op == "#") || (op == "#+") || (op == "#-") || (op == "#*") ||
-        (op == "#/") || (op == "#%"))
-      return true;
-    return false;
-  }
+  bool IsUBArith() const { return Choreo::IsUBArith(op); }
 
 public:
   ptr<Node> CloneImpl() const override;
@@ -779,7 +793,7 @@ private:
   size_t element_count = 1;
 
 public:
-  CastExpr(const location& l, const ptr<Node>& val) : Expr(l, "cast", val) {
+  CastExpr(const location& l, const ptr<Node>& val) : Expr(l, Op::Cast, val) {
     assert(isa<Expr>(val));
   }
 
@@ -836,7 +850,6 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
                          const ptr<Node>& lst, size_t dc)
       : Node(l, MakeRankedMDSpanType(dc)), ref_name(n), list(lst), rank(dc) {
     assert(list && "Unexpected: span list is not provided");
-    // check the consistent between rank and span list in semantic time
   }
 
   // mdspan is unknown - for parameter passing
@@ -872,7 +885,13 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<MultiDimSpans>(LOC(), ref_name, CloneP(list));
+    if (list) {
+      if (HasValidRank()) return Make<MultiDimSpans>(LOC(), ref_name, CloneP(list), rank);
+      return Make<MultiDimSpans>(LOC(), ref_name, CloneP(list));
+    }
+    if (auto mty = dyn_cast<MDSpanType>(GetType()))
+      return Make<MultiDimSpans>(LOC(), ref_name, cast<MDSpanType>(mty->Clone()));
+    return Make<MultiDimSpans>(LOC(), ref_name, rank);
   }
 
   void Print(std::ostream& os, const std::string& = {},
@@ -1570,7 +1589,7 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
   __UDT_TYPE_INFO__(Node, ParamList)
 };
 
-struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
+struct IfElseBlock : public Block, public TypeIDProvider<IfElseBlock> {
   ptr<Node> pred;
   ptr<MultiNodes> if_stmts;
   ptr<MultiNodes> else_stmts; // optional requirements
@@ -1578,13 +1597,14 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
   IfElseBlock(const location& l, const ptr<Node>& c,
               const ptr<MultiNodes>& if_s,
               const ptr<MultiNodes>& else_s = nullptr)
-      : Node(l), pred(c), if_stmts(if_s), else_stmts(else_s) {
+      : Block(l), pred(c), if_stmts(if_s), else_stmts(else_s) {
     assert(if_stmts != nullptr && "must contains the if statements.");
   }
 
-  bool IsBlock() const override { return true; }
-
   const ptr<Node> GetPred() const { return pred; }
+  ptr<MultiNodes> GetBody() const override { return if_stmts; }
+  ptr<MultiNodes> GetThenBody() const { return if_stmts; }
+  ptr<MultiNodes> GetElseBody() const { return else_stmts; }
 
   ptr<Node> CloneImpl() const override {
     return Make<IfElseBlock>(LOC(), CloneP(pred), CloneP(if_stmts),
@@ -1627,10 +1647,10 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, IfElseBlock)
+  __UDT_TYPE_INFO__(Block, IfElseBlock)
 };
 
-struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
+struct ParallelBy : public Block, public TypeIDProvider<ParallelBy> {
 private:
   ptr<Identifier> bpv = nullptr; // bounded parallel variables
   ptr<Expr> bound_expr = nullptr;
@@ -1656,7 +1676,7 @@ public:
              const ptr<MultiValues>& cbs = nullptr,
              const ptr<MultiNodes>& ss = nullptr, bool a = false,
              ParallelLevel s = ParallelLevel::NONE, bool b = false)
-      : Node(l), bpv(pv), bound_expr(pb), cmpt_bpvs(c), cmpt_bounds(cbs),
+      : Block(l), bpv(pv), bound_expr(pb), cmpt_bpvs(c), cmpt_bounds(cbs),
         stmts(ss), async(a), bracketed(b) {
 
     assert(bpv != nullptr && "requires a parallel variable.");
@@ -1680,7 +1700,7 @@ public:
     if (bpv != nullptr && bound_expr == nullptr && cmpt_bounds->Count() > 0) {
       auto e = cast<Expr>(cmpt_bounds->ValueAt(0)->Clone());
       for (size_t i = 1; i < cmpt_bounds->Count(); ++i)
-        e = Make<Expr>(e->LOC(), "*", e, CloneP(cmpt_bounds->ValueAt(i)));
+        e = Make<Expr>(e->LOC(), Op::Mul, e, CloneP(cmpt_bounds->ValueAt(i)));
       bound_expr = e;
     }
   }
@@ -1750,7 +1770,7 @@ public:
   void SetOuter(bool o) { is_outer = o; }
 
 public:
-  bool IsBlock() const override { return true; }
+  ptr<MultiNodes> GetBody() const override { return stmts; }
 
   ptr<Node> CloneImpl() const override {
     auto pb = Make<ParallelBy>(LOC(), CloneP(bpv), CloneP(bound_expr),
@@ -1823,7 +1843,7 @@ public:
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, ParallelBy)
+  __UDT_TYPE_INFO__(Block, ParallelBy)
 };
 
 // `require_bind` parsing "idx_1 <-> idx_2"
@@ -1887,7 +1907,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
   __UDT_TYPE_INFO__(Node, WithIn)
 };
 
-struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
+struct WithBlock : public Block, public TypeIDProvider<WithBlock> {
   ptr<MultiNodes> withins;
   ptr<MultiNodes> reqs;  // optional requirements
   ptr<MultiNodes> stmts; // may be empty
@@ -1895,9 +1915,9 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   explicit WithBlock(const location& l, const ptr<MultiNodes>& w = nullptr,
                      const ptr<MultiNodes>& r = nullptr,
                      const ptr<MultiNodes>&& ss = nullptr)
-      : Node(l), withins(w), reqs(r), stmts(ss) {}
+        : Block(l), withins(w), reqs(r), stmts(ss) {}
 
-  bool IsBlock() const override { return true; }
+      ptr<MultiNodes> GetBody() const override { return stmts; }
 
   ptr<Node> CloneImpl() const override {
     return Make<WithBlock>(LOC(), CloneP(withins), CloneP(reqs), CloneP(stmts));
@@ -1924,7 +1944,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, WithBlock)
+  __UDT_TYPE_INFO__(Block, WithBlock)
 };
 
 // Information about operation on data, including tile/tiling, subscription, or
@@ -2025,7 +2045,7 @@ struct Tiling : public SpannedOperation, public TypeIDProvider<Tiling> {
       if (auto id = GetIdentifier(*v); id && (id->name == "_"))
         res->Append(AST::MakeIntExpr(id->LOC(), 1));
       else
-        res->Append(AST::Make<AST::Expr>(v->LOC(), "ubound", v->Clone()));
+        res->Append(AST::Make<AST::Expr>(v->LOC(), Op::GetUBound, v->Clone()));
     }
     res->SetDelimiter(", ");
     return res;
@@ -3093,7 +3113,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
 };
 
 ptr<Call> GetCall(const ptr<Node>& n);
-struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
+struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ranges;
   ptr<MultiValues> suffixs;
   ptr<MultiNodes> stmts;
@@ -3102,17 +3122,17 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
-      : Node(l), ranges(i), stmts(s), loop(nullptr) {
+      : Block(l), ranges(i), stmts(s), loop(nullptr) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiValues>& se, const ptr<MultiNodes>& s)
-      : Node(l), ranges(i), suffixs(se), stmts(s), loop(nullptr) {
+      : Block(l), ranges(i), suffixs(se), stmts(s), loop(nullptr) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
-  bool IsBlock() const override { return true; }
+  ptr<MultiNodes> GetBody() const override { return stmts; }
 
   ptr<Node> CloneImpl() const override {
     auto copied = Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs),
@@ -3153,26 +3173,26 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     return nullptr;
   }
 
-  __UDT_TYPE_INFO__(Node, ForeachBlock)
+  __UDT_TYPE_INFO__(Block, ForeachBlock)
 };
 
-struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
+struct InThreadsBlock : public Block, public TypeIDProvider<InThreadsBlock> {
   ptr<Expr> pred;
   ptr<MultiNodes> stmts;
   bool async = false;
   bool outer = true;
   ValueItem scope_predicate = GetInvalidValueItem();
 
-  bool IsBlock() const override { return true; }
-
   const ptr<Node> GetPred() const { return pred; }
 
   explicit InThreadsBlock(const location& l, const ptr<Expr> p,
                           const ptr<MultiNodes>& s, bool a = false,
                           bool o = true)
-      : Node(l), pred(p), stmts(s), async(a), outer(o) {
+      : Block(l), pred(p), stmts(s), async(a), outer(o) {
     assert(p != nullptr && "missing predication.");
   }
+
+  ptr<MultiNodes> GetBody() const override { return stmts; }
 
   ptr<Node> CloneImpl() const override {
     auto copied =
@@ -3197,21 +3217,21 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, InThreadsBlock)
+  __UDT_TYPE_INFO__(Block, InThreadsBlock)
 };
 
-struct WhileBlock : public Node, public TypeIDProvider<WhileBlock> {
+struct WhileBlock : public Block, public TypeIDProvider<WhileBlock> {
   ptr<Expr> pred;
   ptr<MultiNodes> stmts;
   ValueItem scope_predicate = GetInvalidValueItem();
 
-  bool IsBlock() const override { return true; }
-
   explicit WhileBlock(const location& l, const ptr<Expr> p,
                       const ptr<MultiNodes>& s)
-      : Node(l), pred(p), stmts(s) {
+      : Block(l), pred(p), stmts(s) {
     assert(p != nullptr && "predication is requried.");
   }
+
+  ptr<MultiNodes> GetBody() const override { return stmts; }
 
   ptr<Node> CloneImpl() const override {
     auto copied = Make<WhileBlock>(LOC(), CloneP(pred), CloneP(stmts));
@@ -3234,22 +3254,22 @@ struct WhileBlock : public Node, public TypeIDProvider<WhileBlock> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, WhileBlock)
+  __UDT_TYPE_INFO__(Block, WhileBlock)
 };
 
-struct IncrementBlock : public Node, public TypeIDProvider<IncrementBlock> {
+struct IncrementBlock : public Block, public TypeIDProvider<IncrementBlock> {
   ptr<MultiValues> bvs;
   ptr<Node> pred;
   ptr<MultiNodes> stmts;
 
   explicit IncrementBlock(const location& l, const ptr<MultiValues>& i,
                           const ptr<Node>& p, const ptr<MultiNodes>& s)
-      : Node(l), bvs(i), pred(p), stmts(s) {
+      : Block(l), bvs(i), pred(p), stmts(s) {
     assert(i != nullptr && "missing iteration variables for the statement.");
     assert(p != nullptr && "missing predication for the increment block.");
   }
 
-  bool IsBlock() const override { return true; }
+  ptr<MultiNodes> GetBody() const override { return stmts; }
 
   ptr<Node> CloneImpl() const override {
     return Make<IncrementBlock>(LOC(), CloneP(bvs), CloneP(pred),
@@ -3270,7 +3290,7 @@ struct IncrementBlock : public Node, public TypeIDProvider<IncrementBlock> {
 
   const ptr<Node>& GetPredicate() const { return pred; }
 
-  __UDT_TYPE_INFO__(Node, IncrementBlock)
+  __UDT_TYPE_INFO__(Block, IncrementBlock)
 };
 
 struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
@@ -3300,14 +3320,14 @@ struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
   __UDT_TYPE_INFO__(Node, FunctionDecl)
 };
 
-struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
+struct ChoreoFunction : public Block, public TypeIDProvider<ChoreoFunction> {
   std::string name;
   FunctionDecl f_decl;
   ptr<MultiNodes> stmts;
 
-  ChoreoFunction(const location& l) : Node(l), f_decl(l) {}
+  ChoreoFunction(const location& l) : Block(l), f_decl(l) {}
 
-  bool IsBlock() const override { return true; }
+  ptr<MultiNodes> GetBody() const override { return stmts; }
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<ChoreoFunction>(LOC());
@@ -3326,7 +3346,7 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
   }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, ChoreoFunction)
+  __UDT_TYPE_INFO__(Block, ChoreoFunction)
 };
 
 struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
@@ -3416,15 +3436,15 @@ struct DeviceFunctionDecl final : public Node,
 };
 
 // Top-level program structure
-struct Program : public Node, public TypeIDProvider<Program> {
+struct Program : public Block, public TypeIDProvider<Program> {
   ptr<MultiNodes> nodes;
 
   Program(const location& l, const ptr<MultiNodes> ss = nullptr)
-      : Node(l), nodes(ss) {
+      : Block(l), nodes(ss) {
     if (!nodes) nodes = Make<MultiNodes>(l);
   }
 
-  bool IsBlock() const override { return true; }
+  ptr<MultiNodes> GetBody() const override { return nodes; }
 
   ptr<Node> CloneImpl() const override {
     return Make<Program>(LOC(), CloneP(nodes));
@@ -3437,11 +3457,11 @@ struct Program : public Node, public TypeIDProvider<Program> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, Program)
+  __UDT_TYPE_INFO__(Block, Program)
 };
 
 inline ptr<Node> Expr::CloneImpl() const {
-  if (op == "cast") {
+  if (op == Op::Cast) {
     auto ce = cast<CastExpr>(this);
     return ce->CloneImpl();
   }
@@ -3460,15 +3480,15 @@ inline void Expr::Print(std::ostream& os, const std::string& prefix,
     return;
   }
 
-  assert(op.size() > 0 && "must have an operand.");
+  assert(op.GetKind() != Op::None && "must have an operand.");
 
-  if (op == "dimof" || op == "getith") {
+  if (op == Op::DimOf || op == Op::GetIth) {
     value_l->Print(os, prefix, with_type);
     value_r->Print(os, "", with_type);
     return;
   }
 
-  if (op == "cast") {
+  if (op == Op::Cast) {
     auto ce = cast<CastExpr>(this);
     os << "(" << ce->ToType() << ")(";
     value_r->Print(os, "", with_type);
@@ -3566,7 +3586,7 @@ inline bool IsSymbolOrArrayRef(const Node& n) {
   auto id = GetName(n);
   if (id.has_value()) return true;
   if (auto e = dyn_cast<Expr>(&n))
-    if (e->op == "elemof") return true;
+    if (e->op == Op::ElemOf) return true;
   return false;
 }
 
@@ -3592,14 +3612,14 @@ inline bool HasVectorizationHint(const ForeachBlock& n) {
 }
 
 inline const ptr<Identifier> GetArrayBaseSymbol(const Expr& n) {
-  assert(n.op == "elemof");
+  assert(n.op == Op::ElemOf);
   if (auto id = dyn_cast<Identifier>(n.GetL())) return id;
   auto expr = cast<Expr>(n.GetL());
   return GetArrayBaseSymbol(*expr);
 }
 
 inline size_t GetSubScriptLevel(const Expr& n) {
-  assert(n.op == "elemof");
+  assert(n.op == Op::ElemOf);
   if (auto id = dyn_cast<Identifier>(n.GetL())) return 1;
   return 1 + GetSubScriptLevel(*cast<Expr>(n.GetL()));
 }
@@ -3670,7 +3690,7 @@ inline const ValueList MakeValueList(const ptr<MultiValues>& mv) {
 }
 
 inline bool FragIsArrayElem(const ptr<AST::Expr>& e) {
-  if (e->op == "elemof") return true;
+  if (e->op == Op::ElemOf) return true;
   return false;
 }
 

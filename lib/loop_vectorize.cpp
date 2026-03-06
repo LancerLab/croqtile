@@ -507,7 +507,8 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
     // process from last index to first index
     auto index = indices[idx];
     offset_shape =
-        ComputeDiversityShape(offset_shape, index->GetDiversityShape(), "+");
+        ComputeDiversityShape(offset_shape, index->GetDiversityShape(),
+                              Op::Add);
   }
 
   if (offset_shape.Varying() && !offset_shape.Stride(1)) {

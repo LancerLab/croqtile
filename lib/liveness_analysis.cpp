@@ -1414,7 +1414,7 @@ bool LivenessAnalyzer::Visit(AST::Wait& n) {
       auto expr = dyn_cast<AST::Expr>(item);
       assert(IsSymbolOrArrayRef(*item) &&
              "expect either symbol or array reference.");
-      bool is_array_ref = (expr->op == "elemof");
+      bool is_array_ref = (expr->op == Op::ElemOf);
       std::string name;
       if (is_array_ref)
         name = AST::GetArrayBaseSymbol(*expr)->name;
@@ -1435,7 +1435,7 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
       if (auto id = AST::GetIdentifier(*arg)) {
         AddUse(current_stmt, id->name);
       } else if (auto expr = dyn_cast<AST::Expr>(arg)) {
-        if (expr->op == "dataof" || expr->op == "mdataof") {
+        if (expr->op == Op::DataOf || expr->op == Op::MDataOf) {
           // TODO: will only the dims of future be used?
           assert(isa<FutureType>(expr->GetR()->GetType()) &&
                  "expect a future operand.");
@@ -1443,7 +1443,7 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
             AddUse(current_stmt, id->name);
           else
             choreo_unreachable("Can not retrieve name of the future.");
-        } else if (expr->op == "addrof") {
+        } else if (expr->op == Op::AddrOf) {
           if (auto id = AST::GetIdentifier(expr->GetR()))
             AddUse(current_stmt, id->name);
           else if (!isa<AST::DataAccess>(expr->GetR()))
@@ -1514,7 +1514,7 @@ bool LivenessAnalyzer::Visit(AST::Trigger& n) {
     auto expr = dyn_cast<AST::Expr>(e);
     assert(IsSymbolOrArrayRef(*e) &&
            "expect either symbol or array reference.");
-    bool is_array_ref = (expr->op == "elemof");
+    bool is_array_ref = (expr->op == Op::ElemOf);
     std::string name;
     if (is_array_ref)
       name = AST::GetArrayBaseSymbol(*expr)->name;
@@ -1539,7 +1539,7 @@ bool LivenessAnalyzer::Visit(AST::Return& n) {
     if (auto id = AST::GetIdentifier(*n.value)) {
       AddUse(current_stmt, id->name);
     } else if (auto expr = dyn_cast<AST::Expr>(n.value);
-               expr && expr->op == "dataof") {
+           expr && expr->op == Op::DataOf) {
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       AddUse(current_stmt, id->name);

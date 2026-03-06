@@ -27,8 +27,9 @@ private:
   bool ReportUnknownSymbol(const std::string&, const location&, const char*,
                            int);
 
-  void EmitAssertion(const ValueItem&, const std::string&, const location&,
-                     const ptr<AST::Node>&, AST::Node* emit_node = nullptr);
+  void CreateAssessment(const ValueItem&, const std::string&,
+                        const location&, const ptr<AST::Node>&,
+                        AST::Node* emit_node = nullptr);
   ValueItem ActiveScopePredicate() const;
   void PushScopePredicate(const ValueItem&);
   void TryPushScopePredicate(AST::Node&);

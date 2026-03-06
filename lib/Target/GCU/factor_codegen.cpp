@@ -1678,12 +1678,12 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else
         choreo_unreachable("Unsupported reference: " + PSTR(expr));
     } else if (expr->IsUnary()) {
-      if (expr->op == "!") {
+      if (expr->op == Op::LogicNot) {
         oss << "!(" << ExprSTR(expr->GetR()) << ")";
-      } else if (expr->op == "ubound") {
+      } else if (expr->op == Op::GetUBound) {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound(), true); }
-      } else if (expr->op == "dataof" || expr->op == "mdataof") {
+      } else if (expr->op == Op::DataOf || expr->op == Op::MDataOf) {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
@@ -1694,7 +1694,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                "' is not associated with a buffer.");
         } else
           choreo_unreachable("Can not retrieve name of the future.");
-      } else if (expr->op == "sizeof") {
+      } else if (expr->op == Op::SizeOf) {
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
         auto shape = GetShape(GetSymbolType(var));
         assert(shape.IsValid() && "Invalid shape is found");
@@ -1702,13 +1702,13 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {
-      if (expr->op == "cdiv") {
+      if (expr->op == Op::CeilDiv) {
         std::string one = "Value(1)";
         if (!factor_value) one = "1";
         oss << "(" << ExprSTR(expr->GetL()) << ")+" << "("
             << ExprSTR(expr->GetR()) << "-" << one << ")/("
             << ExprSTR(expr->GetR()) << ")";
-      } else if (expr->op == "getith") {
+      } else if (expr->op == Op::GetIth) {
         auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
         if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
           oss << "(";
@@ -1721,15 +1721,16 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         auto& r = expr->GetR();
         auto& op = expr->op;
         // handle bounded variable times
-        if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
+        if (op == Op::UBound && IsActualBoundedIntegerType(l->GetType()) &&
             IsActualBoundedIntegerType(r->GetType())) {
           auto rty = cast<BoundedType>(NodeType(*r));
           assert(rty->Dims() == 1);
           oss << "((" << ExprSTR(l) << ")*(" << ValueSTR(rty->GetUpperBound())
               << ")+(" << ExprSTR(r) << "))";
         } else
-          oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
-      } else if (expr->op == "dimof") {
+          oss << "((" << ExprSTR(l) << ")" << STR(op) << "(" << ExprSTR(r)
+              << "))";
+      } else if (expr->op == Op::DimOf) {
         assert(expr->s.Rank() == 1);
         auto val = expr->s.ValueAt(0);
         auto str = val->ToString();
@@ -1740,14 +1741,14 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           oss << WrapWithValue(str);
         }
       } else {
-        choreo_unreachable("The op " + expr->op +
+        choreo_unreachable("The op " + STR(expr->op) +
                            " in codegen(factor) is not supported yet.");
       }
     } else if (expr->IsTernary()) {
       oss << "(" << ExprSTR(expr->GetC()) << ") ? (" << ExprSTR(expr->GetL())
           << ") : (" << ExprSTR(expr->GetR()) << ")";
     } else
-      choreo_unreachable("unsupported expression '" + expr->op +
+      choreo_unreachable("unsupported expression '" + STR(expr->op) +
                          "': " + PSTR(expr) + ".");
   } else if (auto sl = dyn_cast<AST::Select>(e)) {
     size_t val_count = sl->expr_list->Count();

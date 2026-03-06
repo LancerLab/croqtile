@@ -2169,7 +2169,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
 
   for (auto& f : n.GetTargets()) {
     auto expr = cast<AST::Expr>(f);
-    bool is_array_ref = (expr->op == "elemof");
+    bool is_array_ref = (expr->op == Op::ElemOf);
     if (isa<FutureType>(NodeType(*f))) {
       assert(!IsHost());
       ds << d_indent << ExprSTR(f, false) << ".wait();\n";
@@ -2263,7 +2263,7 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
 
   for (auto& f : n.GetEvents()) {
     auto expr = cast<AST::Expr>(f);
-    bool is_array_ref = (expr->op == "elemof");
+    bool is_array_ref = (expr->op == Op::ElemOf);
     assert(IsSymbolOrArrayRef(*f) &&
            "expect either symbol or array reference.");
     if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
@@ -2620,7 +2620,7 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
         choreo_unreachable("unexpected situation");
       }
     } else if (auto expr = cast<AST::Expr>(n.value);
-               expr && (expr->op == "dataof" || expr->op == "mdataof")) {
+           expr && (expr->op == Op::DataOf || expr->op == Op::MDataOf)) {
       // return future.data, must map back
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
@@ -3503,7 +3503,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     }
   } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
     // codegen for scalar type cast
-    assert(ce->GetOp() == "cast");
+    assert(ce->GetOp() == Op::Cast);
     return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
                        is_host, ce->ElementCount());
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
@@ -3548,13 +3548,13 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
                          is_host);
       }
     } else if (expr->IsUnary()) {
-      if (expr->GetOp() == "!") {
+      if (expr->GetOp() == Op::LogicNot) {
         oss << "!"
             << WrapParen(OpExprSTR(expr->GetR(), "!", false, is_host), "!");
-      } else if (expr->GetOp() == "ubound") {
+      } else if (expr->GetOp() == Op::GetUBound) {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
-      } else if (expr->GetOp() == "dataof" || expr->GetOp() == "mdataof") {
+      } else if (expr->GetOp() == Op::DataOf || expr->GetOp() == Op::MDataOf) {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
@@ -3562,10 +3562,10 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             oss << id->name << "__buf__";
           else
             oss << id->name
-                << (expr->GetOp() == "mdataof" ? ".mdata()" : ".data()");
+                << (expr->GetOp() == Op::MDataOf ? ".mdata()" : ".data()");
         } else
           choreo_unreachable("Can not retrieve name of the future.");
-      } else if (expr->GetOp() == "sizeof") {
+      } else if (expr->GetOp() == Op::SizeOf) {
         auto se = expr->Opts().GetSize();
         if (IsValidValueItem(se))
           oss << ValueSTR(se);
@@ -3576,13 +3576,13 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           assert(shape.IsValid() && "Invalid shape is found");
           oss << ValueSTR(shape.ElementCountValue());
         }
-      } else if (expr->GetOp() == "++") {
+      } else if (expr->GetOp() == Op::PreInc) {
         oss << "++"
             << WrapParen(OpExprSTR(expr->GetR(), "++", false, is_host), "++");
-      } else if (expr->GetOp() == "--") {
+      } else if (expr->GetOp() == Op::PreDec) {
         oss << "--"
             << WrapParen(OpExprSTR(expr->GetR(), "--", false, is_host), "--");
-      } else if (expr->GetOp() == "addrof") {
+      } else if (expr->GetOp() == Op::AddrOf) {
         if (auto id = AST::GetIdentifier(expr->GetR()))
           oss << OpExprSTR(id, parent_op, is_left_child, is_host);
         else if (isa<AST::DataAccess>(expr->GetR()))
@@ -3590,14 +3590,14 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
               << WrapParen(OpExprSTR(expr->GetR(), "&", false, is_host), "&");
         else
           choreo_unreachable("Can not retrieve name of the spanned data.");
-      } else if (expr->GetOp() == "~") {
+      } else if (expr->GetOp() == Op::BitNot) {
         oss << "~"
             << WrapParen(OpExprSTR(expr->GetR(), "~", false, is_host), "~");
       } else
-        choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+        choreo_unreachable("unsupported expression op: '" + STR(expr->GetOp()) +
                            "', expr: " + PSTR(expr) + ".");
     } else if (expr->IsBinary()) {
-      if (expr->GetOp() == "cdiv") {
+      if (expr->GetOp() == Op::CeilDiv) {
         std::string one = "1";
         auto L = OpExprSTR(expr->GetL(), "+", true, is_host);
         auto R0 = OpExprSTR(expr->GetR(), "+", false, is_host);
@@ -3606,7 +3606,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         std::ostringstream res;
         res << "(" << L << " + " << R0 << " - " << one << ") / " << R1;
         oss << WrapParen(res.str(), "/");
-      } else if (expr->GetOp() == "getith") {
+      } else if (expr->GetOp() == Op::GetIth) {
         auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
         auto r = expr->GetR();
         if (cast<AST::IntIndex>(r)->IsNegative()) {
@@ -3617,15 +3617,16 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           oss << WrapParen(res.str(), "+");
         } else
           oss << OpExprSTR(r, parent_op, is_left_child, is_host);
-      } else if (expr->GetOp() == "elemof") {
+      } else if (expr->GetOp() == Op::ElemOf) {
         oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
             << OpExprSTR(expr->GetR(), "", true, is_host) << "]";
       } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare() ||
                  expr->isBitwise()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();
-        auto& op = expr->GetOp();
-        if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
+        const auto& op = expr->GetOp();
+        const auto op_str = STR(op);
+        if (op == Op::UBound && IsActualBoundedIntegerType(l->GetType()) &&
             IsActualBoundedIntegerType(r->GetType())) {
           auto rty = cast<BoundedType>(NodeType(*r));
           assert(rty->Dims() == 1);
@@ -3639,18 +3640,19 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           std::ostringstream res;
           res << L << " * " << r_upper_bound << " + " << R;
           oss << WrapParen(res.str(), "+");
-        } else if ((op == "#+" || op == "#-") &&
+        } else if ((op == Op::UBoundAdd || op == Op::UBoundSub) &&
                    IsActualBoundedIntegerType(l->GetType()) &&
                    isa<ScalarIntegerType>(r->GetType())) {
           oss << OpExprSTR(l, parent_op, is_left_child, is_host);
-        } else if (op == "#/" || op == "#*" || op == "#%") {
-          choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+        } else if (op == Op::UBoundDiv || op == Op::UBoundScale ||
+                   op == Op::UBoundMod) {
+          choreo_unreachable("unsupported expression op: '" + STR(expr->GetOp()) +
                              "', expr: " + PSTR(expr) + ".");
         } else {
           std::ostringstream res;
-          res << OpExprSTR(l, op, true, is_host) << " " << op << " "
-              << OpExprSTR(r, op, false, is_host);
-          oss << WrapParen(res.str(), op);
+          res << OpExprSTR(l, op_str, true, is_host) << " " << op << " "
+              << OpExprSTR(r, op_str, false, is_host);
+          oss << WrapParen(res.str(), op_str);
         }
       }
     } else if (expr->IsTernary()) {
@@ -3660,7 +3662,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           << OpExprSTR(expr->GetR(), "?", false, is_host);
       oss << WrapParen(res.str(), "?");
     } else
-      choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+      choreo_unreachable("unsupported expression op: '" + STR(expr->GetOp()) +
                          "', expr: " + PSTR(expr) + ".");
     if (rparen) oss << ")";
   } else if (auto c = dyn_cast<AST::Call>(e)) {
@@ -3706,7 +3708,7 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   for (auto& a : n.GetArguments()) {
     oss << ((i++ == 0) ? "" : ", ");
     if (auto sty = GetSpannedType(NodeType(*a))) {
-      std::string bts{NameBaseType(sty->ElementType(), IsHost())};
+      std::string bts = std::string(NameBaseType(sty->ElementType(), IsHost()));
       auto m_ty = sty->GetStorage();
       auto mem_attr = TopsParamStorage(m_ty);
       if (a->HasNote("annotate_as") && !mem_attr.empty())

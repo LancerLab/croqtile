@@ -174,7 +174,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     assert(!isa<UnknownType>(rty) && "reference type is unknown.");
     SetNodeType(n, rty);
     if (diverges.Contains(dyn_cast<AST::Identifier>(ref))) diverges.Add(n);
-  } else if (n.op == "dataof" || n.op == "mdataof") {
+  } else if (n.op == Op::DataOf || n.op == Op::MDataOf) {
     auto ty = NodeType(*n.GetR());
     if (!isa<FutureType>(ty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -185,10 +185,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     if (auto sym = cast<AST::Expr>(n.GetR())->GetSymbol())
       SetNodeType(n, GetSymbolType(sym->name +
-                                   (n.op == "mdataof" ? ".mdata" : ".data")));
+                                   (n.op == Op::MDataOf ? ".mdata" : ".data")));
     else
       SetNodeType(n, MakeDummySpannedType());
-  } else if (n.op == "addrof") {
+  } else if (n.op == Op::AddrOf) {
     auto ty = NodeType(*n.GetR());
     if (!isa<SpannedType>(ty) && !isa<AST::DataAccess>(n.GetR())) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -197,7 +197,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, MakeAddrType());
-  } else if (n.op == "sizeof") {
+  } else if (n.op == Op::SizeOf) {
     auto ty = NodeType(*n.GetR());
     if (!GetMDSpanType(ty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -207,7 +207,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, MakeIntegerType());
-  } else if (n.op == "dimof") {
+  } else if (n.op == Op::DimOf) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!isa<MDSpanType>(lty) && !isa<ITupleType>(lty) &&
@@ -228,12 +228,12 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     if (isa<BoundedType>(lty)) {
       // disambiguate subscription into bounded ituple and getith of bounded
       // integer
-      n.op = "getith";
+      n.op = Op::GetIth;
       cast<AST::IntIndex>(n.GetR())->UseBracket();
       SetNodeType(n, lty);
     } else
       SetNodeType(n, MakeIntegerType());
-  } else if (n.op == "ubound") {
+  } else if (n.op == Op::GetUBound) {
     auto ty = NodeType(*n.GetR());
     if (!isa<BoundedType>(ty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -261,8 +261,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, ty->Clone());
-  } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
-             (n.op == "%") || (n.op == "cdiv")) {
+  } else if ((n.op == Op::Add) || (n.op == Op::Sub) || (n.op == Op::Mul) ||
+             (n.op == Op::Div) || (n.op == Op::Mod) ||
+             (n.op == Op::CeilDiv)) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!lty || !rty)
@@ -323,7 +324,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                 isa<ScalarIntegerType>(lty))) {
       // this is promissing, simply allow it
       if (IsActualBoundedIntegerType(lty))
-        if (cast<AST::Expr>(n.GetL())->op == "getith") {
+        if (cast<AST::Expr>(n.GetL())->op == Op::GetIth) {
           Error1(n.LOC(),
                  "in operation \"" + n.op +
                      "\": unable to apply to the getith bounded variable (" +
@@ -336,7 +337,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         } else
           SetNodeType(n, lty->Clone());
       else {
-        if (cast<AST::Expr>(n.GetR())->op == "getith") {
+        if (cast<AST::Expr>(n.GetR())->op == Op::GetIth) {
           Error1(n.LOC(),
                  "in operation \"" + n.op +
                      "\": unable to apply to the 'getith' bounded variable (" +
@@ -361,7 +362,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeITupleType(lty->Dims()));
     } else if (isa<MDSpanType>(lty) && isa<MDSpanType>(rty)) {
       // only allow div/mod operations
-      if ((n.op != "/") && (n.op != "%") && (n.op != "cdiv")) {
+        if ((n.op != Op::Div) && (n.op != Op::Mod) &&
+          (n.op != Op::CeilDiv)) {
         Error1(n.LOC(), "in operation \"" + n.op +
                             "\": unable to apply to the types (" + PSTR(lty) +
                             " vs. " + PSTR(rty) + ").");
@@ -616,7 +618,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       }
       SetNodeType(n, lty->Clone());
     }
-  } else if (n.op == "concat") {
+  } else if (n.op == Op::Concat) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!((isa<MDSpanType>(lty) || isa<ITupleType>(lty)) &&
@@ -631,7 +633,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUninitMDSpanType());
     else
       SetNodeType(n, MakeRankedMDSpanType(lty->Dims() + rty->Dims()));
-  } else if (n.op == "elemof") {
+  } else if (n.op == Op::ElemOf) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     auto old_ec = error_count;
@@ -744,7 +746,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
         ptr<AST::Node> last = wl[0];
         for (size_t i = 1; i < wl.size(); ++i) {
           auto concat =
-              AST::Make<AST::Expr>(last->LOC(), "concat", last, wl[i]);
+              AST::Make<AST::Expr>(last->LOC(), Op::Concat, last, wl[i]);
           last = concat;
         }
         if (debug_visit)

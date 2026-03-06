@@ -48,28 +48,28 @@ inline ValueItem GetExprVal(const AST::Expr& expr) {
 // if the op is empty, it means lhs && rhs.
 inline DiversityShape ComputeDiversityShape(const DiversityShape& lhs,
                                             const DiversityShape& rhs,
-                                            std::string op = "") {
+                                            Opcode op = Op::None) {
   using Kind = DiversityShapeKind;
   assert(lhs.shape != Kind::UNKNOWN && rhs.shape != Kind::UNKNOWN &&
          "cannot compute diversity shape with unknown shape.");
   if (lhs.Uniform() && rhs.Uniform()) return DiversityShape(Kind::UNIFORM);
-  if (op.empty()) return lhs < rhs ? rhs : lhs;
+  if (op == Op::None) return lhs < rhs ? rhs : lhs;
 
   if (lhs.Divergent() || rhs.Divergent())
     return DiversityShape(Kind::DIVERGENT);
 
   if (lhs.Stride() && rhs.Uniform()) {
     // e.g., 0,2,4,6 + 1, then it is still stride = 2
-    if (op == "+" || op == "-")
+    if (op == Op::Add || op == Op::Sub)
       return DiversityShape(lhs);
-    else if (op == "*") {
+    else if (op == Op::Mul) {
       // e.g., 0,2,4,6 * 2, then its stride = 4
       if (IsValidValueItem(lhs.stride) && IsValidValueItem(rhs.value)) {
         auto stride = lhs.stride * rhs.value;
         return DiversityShape(Kind::STRIDE, stride);
       } else
         return DiversityShape(Kind::DIVERGENT);
-    } else if (op == "/") {
+    } else if (op == Op::Div) {
       if (rhs.value == 0)
         choreo_unreachable("division by zero in diversity shape.");
       if (IsValidValueItem(lhs.stride) && IsValidValueItem(rhs.value)) {
@@ -80,15 +80,15 @@ inline DiversityShape ComputeDiversityShape(const DiversityShape& lhs,
     } else
       return DiversityShape(Kind::DIVERGENT);
   } else if (lhs.Uniform() && rhs.Stride()) {
-    if (op == "+" || op == "-")
+    if (op == Op::Add || op == Op::Sub)
       return DiversityShape(rhs);
-    else if (op == "*") {
+    else if (op == Op::Mul) {
       if (IsValidValueItem(lhs.value) && IsValidValueItem(rhs.stride)) {
         auto stride = lhs.value * rhs.stride;
         return DiversityShape(Kind::STRIDE, stride);
       } else
         return DiversityShape(Kind::DIVERGENT);
-    } else if (op == "/") {
+    } else if (op == Op::Div) {
       if (lhs.value == 0)
         choreo_unreachable("division by zero in diversity shape.");
       if (IsValidValueItem(lhs.value) && IsValidValueItem(rhs.stride)) {
@@ -101,9 +101,9 @@ inline DiversityShape ComputeDiversityShape(const DiversityShape& lhs,
   } else if (lhs.Stride() && rhs.Stride()) {
     // e.g., 0,2,4,6 + 1,3,5,7 = 1,5,9,13, which is still stride = 2 + 2 = 4
     if (IsValidValueItem(lhs.stride) && IsValidValueItem(rhs.stride)) {
-      if (op == "+")
+      if (op == Op::Add)
         return DiversityShape(Kind::STRIDE, lhs.stride + rhs.stride);
-      else if (op == "-")
+      else if (op == Op::Sub)
         return DiversityShape(Kind::STRIDE, lhs.stride - rhs.stride);
       return DiversityShape(Kind::DIVERGENT);
     } else

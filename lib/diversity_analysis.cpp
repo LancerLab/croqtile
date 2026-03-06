@@ -58,7 +58,7 @@ DiversityShape DiversityAnalysis::ExprDShape(const ptr<AST::Expr> e) {
     shape = e->GetR()->GetDiversityShape();
     if (shape.Uniform()) shape.value = expr_val;
   } else if (e->IsBinary()) {
-    if (e->op == "dimof") {
+    if (e->op == Op::DimOf) {
       shape = DiversityShape(UNIFORM, sbe::nu(0), expr_val);
       return shape;
     }

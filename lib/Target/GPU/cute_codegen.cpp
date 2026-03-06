@@ -3660,7 +3660,7 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
   for (auto& t : n.GetTargets()) {
     auto tty = NodeType(*t);
     auto expr = cast<AST::Expr>(t);
-    bool is_array_ref = (expr->op == "elemof");
+    bool is_array_ref = (expr->op == Op::ElemOf);
 
     if (isa<FutureType>(tty)) {
       assert(expr->GetSymbol());
@@ -3861,7 +3861,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
 
   for (auto& f : n.GetEvents()) {
     auto expr = cast<AST::Expr>(f);
-    bool is_array_ref = (expr->op == "elemof");
+    bool is_array_ref = (expr->op == Op::ElemOf);
     assert(IsSymbolOrArrayRef(*f) &&
            "expect either symbol or array reference.");
     if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
@@ -4327,7 +4327,7 @@ bool CuteCodeGen::Visit(AST::Return& n) {
         choreo_unreachable("unexpected situation");
       }
     } else if (auto expr = cast<AST::Expr>(n.value);
-               expr && (expr->op == "dataof" || expr->op == "mdataof")) {
+               expr && (expr->op == Op::DataOf || expr->op == Op::MDataOf)) {
       // return future.data/mdata, must map back
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
@@ -5389,7 +5389,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     }
   } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
     // codegen for scalar type cast
-    assert(ce->GetOp() == "cast");
+    assert(ce->GetOp() == Op::Cast);
     return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
                        is_host);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
@@ -5409,13 +5409,13 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       if (PSTR(expr) == "_") return "0";
       return OpExprSTR(expr->GetReference(), parent_op, is_left_child, is_host);
     } else if (expr->IsUnary()) {
-      if (expr->GetOp() == "!") {
+      if (expr->GetOp() == Op::LogicNot) {
         oss << "!"
             << WrapParen(OpExprSTR(expr->GetR(), "!", false, is_host), "!");
-      } else if (expr->GetOp() == "ubound") {
+      } else if (expr->GetOp() == Op::GetUBound) {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
-      } else if (expr->GetOp() == "dataof" || expr->GetOp() == "mdataof") {
+      } else if (expr->GetOp() == Op::DataOf || expr->GetOp() == Op::MDataOf) {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
@@ -5423,10 +5423,10 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             oss << id->name << "__buf__";
           else
             oss << id->name
-                << (expr->GetOp() == "mdataof" ? ".mdata()" : ".data()");
+                << (expr->GetOp() == Op::MDataOf ? ".mdata()" : ".data()");
         } else
           choreo_unreachable("Can not retrieve name of the future.");
-      } else if (expr->GetOp() == "sizeof") {
+      } else if (expr->GetOp() == Op::SizeOf) {
         auto se = expr->Opts().GetSize();
         if (IsValidValueItem(se))
           oss << ValueSTR(se);
@@ -5437,13 +5437,13 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           assert(shape.IsValid() && "Invalid shape is found");
           oss << ValueSTR(shape.ElementCountValue());
         }
-      } else if (expr->GetOp() == "++") {
+      } else if (expr->GetOp() == Op::PreInc) {
         oss << "++"
             << WrapParen(OpExprSTR(expr->GetR(), "++", false, is_host), "++");
-      } else if (expr->GetOp() == "--") {
+      } else if (expr->GetOp() == Op::PreDec) {
         oss << "--"
             << WrapParen(OpExprSTR(expr->GetR(), "--", false, is_host), "--");
-      } else if (expr->GetOp() == "addrof") {
+      } else if (expr->GetOp() == Op::AddrOf) {
         if (auto id = AST::GetIdentifier(expr->GetR()))
           oss << OpExprSTR(id, parent_op, is_left_child, is_host);
         else if (isa<AST::DataAccess>(expr->GetR()))
@@ -5451,14 +5451,14 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
               << WrapParen(OpExprSTR(expr->GetR(), "&", false, is_host), "&");
         else
           choreo_unreachable("Can not retrieve name of the spanned data.");
-      } else if (expr->GetOp() == "~") {
+      } else if (expr->GetOp() == Op::BitNot) {
         oss << "~"
             << WrapParen(OpExprSTR(expr->GetR(), "~", false, is_host), "~");
       } else
-        choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+        choreo_unreachable("unsupported expression op: '" + STR(expr->GetOp()) +
                            "', expr: " + PSTR(expr) + ".");
     } else if (expr->IsBinary()) {
-      if (expr->GetOp() == "cdiv") {
+      if (expr->GetOp() == Op::CeilDiv) {
         std::string one = "1";
         auto L = OpExprSTR(expr->GetL(), "+", true, is_host);
         auto R0 = OpExprSTR(expr->GetR(), "+", false, is_host);
@@ -5467,7 +5467,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         std::ostringstream res;
         res << "(" << L << " + " << R0 << " - " << one << ") / " << R1;
         oss << WrapParen(res.str(), "/");
-      } else if (expr->GetOp() == "getith") {
+      } else if (expr->GetOp() == Op::GetIth) {
         auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
         auto r = expr->GetR();
         if (cast<AST::IntIndex>(r)->IsNegative()) {
@@ -5478,7 +5478,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           oss << WrapParen(res.str(), "+");
         } else
           oss << OpExprSTR(r, parent_op, is_left_child, is_host);
-      } else if (expr->GetOp() == "elemof") {
+      } else if (expr->GetOp() == Op::ElemOf) {
         oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
             << OpExprSTR(expr->GetR(), "", true, is_host) << "]";
       } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare() ||
@@ -5488,6 +5488,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         auto lty = NodeType(*l);
         auto rty = NodeType(*r);
         auto& op = expr->GetOp();
+        auto op_str = STR(op);
 
         auto IsFp8Scalar = [](const ptr<Type>& ty) -> bool {
           if (auto sty = dyn_cast<ScalarType>(ty)) {
@@ -5504,7 +5505,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         };
         if (isa<SpannedType>(lty) || isa<SpannedType>(rty)) {
           oss << EmitSpannedArith(*expr);
-        } else if (op == "#" && IsActualBoundedIntegerType(lty) &&
+        } else if (op == Op::UBound && IsActualBoundedIntegerType(lty) &&
                    IsActualBoundedIntegerType(rty)) {
           auto rty = cast<BoundedType>(NodeType(*r));
           assert(rty->Dims() == 1);
@@ -5518,25 +5519,26 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           std::ostringstream res;
           res << L << " * " << r_upper_bound << " + " << R;
           oss << WrapParen(res.str(), "+");
-        } else if ((op == "#+" || op == "#-") &&
+        } else if ((op == Op::UBoundAdd || op == Op::UBoundSub) &&
                    IsActualBoundedIntegerType(lty) &&
                    isa<ScalarIntegerType>(rty)) {
           oss << OpExprSTR(l, parent_op, is_left_child, is_host);
-        } else if (op == "#/" || op == "#*" || op == "#%") {
-          choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+        } else if (op == Op::UBoundDiv || op == Op::UBoundScale ||
+                   op == Op::UBoundMod) {
+          choreo_unreachable("unsupported expression op: '" + STR(expr->GetOp()) +
                              "', expr: " + PSTR(expr) + ".");
         } else {
           std::ostringstream res;
           // FP8 scalar arithmetic: upcast operands to FP32 first.
           // This avoids relying on FP8 operator overloads which may not exist.
           if (expr->IsArith() && (IsFp8Scalar(lty) || IsFp8Scalar(rty))) {
-            res << ToF32(OpExprSTR(l, op, true, is_host)) << " " << op << " "
-                << ToF32(OpExprSTR(r, op, false, is_host));
+            res << ToF32(OpExprSTR(l, op_str, true, is_host)) << " " << op_str
+                << " " << ToF32(OpExprSTR(r, op_str, false, is_host));
           } else {
-            res << OpExprSTR(l, op, true, is_host) << " " << op << " "
-                << OpExprSTR(r, op, false, is_host);
+            res << OpExprSTR(l, op_str, true, is_host) << " " << op_str
+                << " " << OpExprSTR(r, op_str, false, is_host);
           }
-          oss << WrapParen(res.str(), op);
+          oss << WrapParen(res.str(), op_str);
         }
       }
     } else if (expr->IsTernary()) {
@@ -5546,7 +5548,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           << OpExprSTR(expr->GetR(), "?", false, is_host);
       oss << WrapParen(res.str(), "?");
     } else
-      choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+      choreo_unreachable("unsupported expression op: '" + STR(expr->GetOp()) +
                          "', expr: " + PSTR(expr) + ".");
   } else if (auto ca = dyn_cast<AST::ChunkAt>(e)) {
     return ValueSTR(TileAddr(ca, is_host));
@@ -5625,7 +5627,6 @@ const std::string CuteCodeGen::EmitSpannedArith(AST::Expr& e) const {
     auto rty = NodeType(*r);
     auto lsty = GetSpannedType(lty);
     auto rsty = GetSpannedType(rty);
-    auto& op = e.GetOp();
     if (lsty && isa<ScalarType>(rty)) {
       if (lsty->GetStorage() == Storage::REG) {
         assert(l->HasNote("update"));

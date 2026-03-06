@@ -239,7 +239,7 @@ public:
     else if (auto expr = dyn_cast<AST::Expr>(&n)) {
       if (auto id = expr->GetSymbol()) {
         return GetSymbolType(id->name);
-      } else if (expr->op == "dataof" || expr->op == "mdataof") {
+      } else if (expr->op == Op::DataOf || expr->op == Op::MDataOf) {
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
           if (!GetSymbolType(id->name)) {
             // TODO: make NodeType be used properly
@@ -248,15 +248,7 @@ public:
             return nullptr;
           }
           return GetSymbolType(id->name +
-                               (expr->op == "mdataof" ? ".mdata" : ".data"));
-        }
-      } else if (expr->op == "spanof") {
-        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
-          if (!GetSymbolType(id->name)) // make sure the symbol exists
-            choreo_unreachable(
-                "\"spanof\" operation refers undefined symbol '" + id->name +
-                "'.");
-          return GetSymbolType(id->name + ".span");
+                               (expr->op == Op::MDataOf ? ".mdata" : ".data"));
         }
       }
     }

@@ -3,6 +3,7 @@
 
 #include "aux.hpp"
 #include "infra_utils.hpp"
+#include "opcode.hpp"
 #include "options.hpp"
 #include <cmath>
 #include <functional>
@@ -201,6 +202,10 @@ inline static OpCode ToOpCode(const std::string& op) {
   else
     choreo_unreachable("operation '" + op + "' is not supported.");
   return OpCode::NONE;
+}
+
+inline static OpCode ToOpCode(const Opcode& op) {
+  return ToOpCode(STR(op));
 }
 
 namespace sbe {
