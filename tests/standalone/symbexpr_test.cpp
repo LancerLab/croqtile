@@ -203,3 +203,46 @@ TEST_F(ExpressionTest, SubSubAdd) {
   auto norm = SimplifyExpression(r);
   EXPECT_EQ(norm->ToString(), H->ToString());
 }
+
+TEST_F(ExpressionTest, LogicalAndFolding) {
+  auto expr_false = make_operation(OpCode::AND, a, fls);
+  auto norm_false = SimplifyExpression(expr_false);
+  EXPECT_EQ(norm_false->ToString(), "false");
+
+  auto expr_true = make_operation(OpCode::AND, a, tru);
+  auto norm_true = SimplifyExpression(expr_true);
+  EXPECT_EQ(norm_true->ToString(), "a");
+
+  auto expr_const = make_operation(OpCode::AND, tru, fls);
+  auto norm_const = SimplifyExpression(expr_const);
+  EXPECT_EQ(norm_const->ToString(), "false");
+}
+
+TEST_F(ExpressionTest, LogicalOrFolding) {
+  auto expr_true = make_operation(OpCode::OR, a, tru);
+  auto norm_true = SimplifyExpression(expr_true);
+  EXPECT_EQ(norm_true->ToString(), "true");
+
+  auto expr_false = make_operation(OpCode::OR, a, fls);
+  auto norm_false = SimplifyExpression(expr_false);
+  EXPECT_EQ(norm_false->ToString(), "a");
+
+  auto expr_const = make_operation(OpCode::OR, tru, fls);
+  auto norm_const = SimplifyExpression(expr_const);
+  EXPECT_EQ(norm_const->ToString(), "true");
+}
+
+TEST_F(ExpressionTest, LogicalAndOrExpressionStructure) {
+  auto gt_zero = oc_gt(x, nu(0));
+  auto lt_four = oc_lt(x, nu(4));
+  auto eq_two = oc_eq(x, nu(2));
+
+  auto and_expr = make_operation(OpCode::AND, gt_zero, lt_four);
+  auto or_expr = make_operation(OpCode::OR, and_expr, eq_two);
+  auto norm = SimplifyExpression(or_expr);
+
+  auto text = norm->ToString();
+  EXPECT_NE(text.find("&&"), std::string::npos);
+  EXPECT_NE(text.find("||"), std::string::npos);
+  EXPECT_NE(text.find("x"), std::string::npos);
+}

@@ -3052,6 +3052,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ptr<Node> lbound = nullptr;
   ptr<Node> ubound = nullptr;
   int step = GetInvalidStep();
+  ValueItem scope_predicate = GetInvalidValueItem();
 
   LoopRange(const location& l, const ptr<Identifier>& i)
       : Node(l), iv(i) {} // the cmpt_bounds are yet to be inferred
@@ -3063,8 +3064,10 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   const ptr<Identifier> IV() const { return iv; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv), CloneP(lbound),
-                           CloneP(ubound), step);
+    auto copied = Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv),
+                                  CloneP(lbound), CloneP(ubound), step);
+    copied->scope_predicate = scope_predicate;
+    return copied;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -3077,7 +3080,13 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
     os << (lbound ? PSTR(lbound) : std::string("?")) << ":";
     os << (ubound ? PSTR(ubound) : std::string("?")) << ":";
     os << (IsValidStep(step) ? std::to_string(step) : std::string("?")) << ")";
+    if (IsValidValueItem(scope_predicate))
+      os << "\n" << prefix
+         << "`- Scope Predicate: " << scope_predicate->ToString();
   }
+
+  void SetScopePredicate(const ValueItem& p) { scope_predicate = p; }
+  const ValueItem& GetScopePredicate() const { return scope_predicate; }
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, LoopRange)
@@ -3089,6 +3098,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> suffixs;
   ptr<MultiNodes> stmts;
   ptr<Loop> loop;
+  ValueItem scope_predicate = GetInvalidValueItem();
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
@@ -3108,6 +3118,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     auto copied = Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs),
                                      CloneP(stmts));
     copied->loop = loop ? loop : nullptr;
+    copied->scope_predicate = scope_predicate;
     return copied;
   }
 
@@ -3119,11 +3130,16 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
       os << "\n" << prefix << " `- Suffixes: ";
       suffixs->Print(os, prefix + " ", with_type);
     }
+    if (IsValidValueItem(scope_predicate))
+      os << "\n" << prefix
+         << " `- Scope Predicate: " << scope_predicate->ToString();
     if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
 
   ptr<MultiValues> GetRangeNodes() const { return ranges; }
   const NodeList& GetRanges() const { return ranges->AllValues(); }
+  void SetScopePredicate(const ValueItem& p) { scope_predicate = p; }
+  const ValueItem& GetScopePredicate() const { return scope_predicate; }
 
   void accept(Visitor&) override;
 
@@ -3145,6 +3161,7 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
   ptr<MultiNodes> stmts;
   bool async = false;
   bool outer = true;
+  ValueItem scope_predicate = GetInvalidValueItem();
 
   bool IsBlock() const override { return true; }
 
@@ -3158,8 +3175,10 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<InThreadsBlock>(LOC(), CloneP(pred), CloneP(stmts), async,
-                                outer);
+    auto copied =
+        Make<InThreadsBlock>(LOC(), CloneP(pred), CloneP(stmts), async, outer);
+    copied->scope_predicate = scope_predicate;
+    return copied;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -3167,8 +3186,14 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
     os << "\n" << prefix << "`- InThreads Block:";
     if (async) os << " Async";
     os << "\n" << prefix << " `- Predication: " << PSTR(pred);
+    if (IsValidValueItem(scope_predicate))
+      os << "\n" << prefix
+         << " `- Scope Predicate: " << scope_predicate->ToString();
     if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
+
+  void SetScopePredicate(const ValueItem& p) { scope_predicate = p; }
+  const ValueItem& GetScopePredicate() const { return scope_predicate; }
 
   void accept(Visitor&) override;
 
@@ -3178,6 +3203,7 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
 struct WhileBlock : public Node, public TypeIDProvider<WhileBlock> {
   ptr<Expr> pred;
   ptr<MultiNodes> stmts;
+  ValueItem scope_predicate = GetInvalidValueItem();
 
   bool IsBlock() const override { return true; }
 
@@ -3188,15 +3214,23 @@ struct WhileBlock : public Node, public TypeIDProvider<WhileBlock> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<WhileBlock>(LOC(), CloneP(pred), CloneP(stmts));
+    auto copied = Make<WhileBlock>(LOC(), CloneP(pred), CloneP(stmts));
+    copied->scope_predicate = scope_predicate;
+    return copied;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     os << "\n" << prefix << "`- While Block:";
     os << "\n" << prefix << " `- Predication: " << PSTR(pred);
+    if (IsValidValueItem(scope_predicate))
+      os << "\n" << prefix
+         << " `- Scope Predicate: " << scope_predicate->ToString();
     if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
+
+  void SetScopePredicate(const ValueItem& p) { scope_predicate = p; }
+  const ValueItem& GetScopePredicate() const { return scope_predicate; }
 
   void accept(Visitor&) override;
 

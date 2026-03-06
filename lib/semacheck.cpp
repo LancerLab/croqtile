@@ -3,15 +3,203 @@
 
 using namespace Choreo;
 
+namespace {
+
+bool ScopeContainsPredicate(const ValueItem& scope_pred,
+                           const ValueItem& target_pred) {
+  if (!IsValidValueItem(scope_pred) || !IsValidValueItem(target_pred))
+    return false;
+
+  auto scope = scope_pred->Normalize();
+  auto target = target_pred->Normalize();
+  if (*scope == *target) return true;
+  if (auto eq = VIBool(sbe::oc_eq(scope, target)->Normalize());
+      eq && eq.value())
+    return true;
+  if (auto b = VIBool(scope); b && b.value()) return true;
+
+  if (auto bop = dyn_cast<sbe::BinaryOperation>(scope)) {
+    if (bop->GetOpCode() == OpCode::AND)
+      return ScopeContainsPredicate(bop->GetLeft(), target) ||
+             ScopeContainsPredicate(bop->GetRight(), target);
+  }
+  return false;
+}
+
+bool SameSymbolicExpr(const ValueItem& lhs, const ValueItem& rhs) {
+  if (!IsValidValueItem(lhs) || !IsValidValueItem(rhs)) return false;
+  auto l = lhs->Normalize();
+  auto r = rhs->Normalize();
+  if (*l == *r) return true;
+  if (auto lsym = dyn_cast<sbe::SymbolicValue>(l)) {
+    if (auto rsym = dyn_cast<sbe::SymbolicValue>(r)) {
+      auto canon = [](std::string s) {
+        auto pos = s.find("__elem__");
+        if (pos != std::string::npos) s = s.substr(0, pos);
+        return s;
+      };
+      if (canon(lsym->Value()) == canon(rsym->Value())) return true;
+    }
+  }
+  if (auto eq = VIBool(sbe::oc_eq(l, r)->Normalize()); eq && eq.value())
+    return true;
+  return false;
+}
+
+bool ScopeImpliesUpperBound(const ValueItem& scope_pred, const ValueItem& var,
+                           const ValueItem& ub) {
+  if (!IsValidValueItem(scope_pred) || !IsValidValueItem(var) ||
+      !IsValidValueItem(ub))
+    return false;
+
+  auto scope = scope_pred->Normalize();
+  if (auto bop = dyn_cast<sbe::BinaryOperation>(scope)) {
+    auto lhs = bop->GetLeft();
+    auto rhs = bop->GetRight();
+    switch (bop->GetOpCode()) {
+    case OpCode::AND:
+      return ScopeImpliesUpperBound(lhs, var, ub) ||
+             ScopeImpliesUpperBound(rhs, var, ub);
+    case OpCode::LT:
+      if (SameSymbolicExpr(lhs, var) && sbe::cle(rhs, ub)) return true;
+      break;
+    case OpCode::LE:
+      if (SameSymbolicExpr(lhs, var) && sbe::clt(rhs, ub)) return true;
+      break;
+    case OpCode::GT:
+      if (SameSymbolicExpr(rhs, var) && sbe::cle(lhs, ub)) return true;
+      break;
+    case OpCode::GE:
+      if (SameSymbolicExpr(rhs, var) && sbe::clt(lhs, ub)) return true;
+      break;
+    default: break;
+    }
+  }
+  return false;
+}
+
+struct ExprBounds {
+  ValueItem lb = GetInvalidValueItem();
+  ValueItem ub = GetInvalidValueItem();
+
+  bool IsValid() const {
+    return IsValidValueItem(lb) && IsValidValueItem(ub);
+  }
+};
+
+std::string CanonicalScopedSymbol(std::string sym) {
+  auto pos = sym.find("__elem__");
+  if (pos != std::string::npos) sym = sym.substr(0, pos);
+  return sym;
+}
+
+ValueItem ToInclusiveUpperBound(const ValueItem& ub) {
+  if (!IsValidValueItem(ub)) return GetInvalidValueItem();
+  return (ub - sbe::nu(1))->Normalize();
+}
+
+ExprBounds InferExprBounds(SemaChecker* sc, const ValueItem& expr) {
+  if (!IsValidValueItem(expr)) return {};
+
+  auto norm = expr->Normalize();
+  if (auto iv = VIInt(norm)) {
+    auto v = sbe::nu(*iv);
+    return {v, v};
+  }
+
+  if (auto sym = VISym(norm)) {
+    auto scoped = CanonicalScopedSymbol(*sym);
+    if (!PrefixedWith(scoped, "::")) return {};
+
+    auto ty = sc->GetScopedSymbolType(scoped);
+    if (auto bit = dyn_cast<BoundedIntegerType>(ty);
+        bit && bit->HasValidBound()) {
+      return {bit->GetLowerBound(), ToInclusiveUpperBound(bit->GetUpperBound())};
+    }
+    if (auto bitt = dyn_cast<BoundedITupleType>(ty);
+        bitt && bitt->HasValidBound() && bitt->Dims() == 1) {
+      return {bitt->GetLowerBound(0),
+              ToInclusiveUpperBound(bitt->GetUpperBound(0))};
+    }
+    return {};
+  }
+
+  if (auto bop = VIBop(norm)) {
+    auto lhs = InferExprBounds(sc, bop->GetLeft());
+    auto rhs = InferExprBounds(sc, bop->GetRight());
+    if (!lhs.IsValid() || !rhs.IsValid()) return {};
+
+    switch (bop->GetOpCode()) {
+    case OpCode::ADD:
+      return {(lhs.lb + rhs.lb)->Normalize(), (lhs.ub + rhs.ub)->Normalize()};
+    case OpCode::SUBTRACT:
+      return {(lhs.lb - rhs.ub)->Normalize(), (lhs.ub - rhs.lb)->Normalize()};
+    case OpCode::MULTIPLY:
+      if (sbe::cge(lhs.lb, sbe::nu(0)) && sbe::cge(rhs.lb, sbe::nu(0)))
+        return {(lhs.lb * rhs.lb)->Normalize(),
+                (lhs.ub * rhs.ub)->Normalize()};
+      return {};
+    default: break;
+    }
+  }
+
+  return {};
+}
+
+} // namespace
+
+ValueItem SemaChecker::ActiveScopePredicate() const {
+  ValueItem pred = GetInvalidValueItem();
+  for (const auto& p : scope_pred_stack) {
+    if (!IsValidValueItem(p)) continue;
+    pred = IsValidValueItem(pred) ? sbe::bop(OpCode::AND, pred, p)->Normalize()
+                                  : p;
+  }
+  return pred;
+}
+
+void SemaChecker::PushScopePredicate(const ValueItem& p) {
+  if (IsValidValueItem(p)) scope_pred_stack.push_back(p);
+}
+
+void SemaChecker::TryPushScopePredicate(AST::Node& n) {
+  if (auto inthreads = dyn_cast<AST::InThreadsBlock>(&n)) {
+    PushScopePredicate(inthreads->GetScopePredicate());
+  } else if (auto foreachb = dyn_cast<AST::ForeachBlock>(&n)) {
+    PushScopePredicate(foreachb->GetScopePredicate());
+  } else if (auto whileb = dyn_cast<AST::WhileBlock>(&n)) {
+    PushScopePredicate(whileb->GetScopePredicate());
+  }
+}
+
+void SemaChecker::TryPopScopePredicate(AST::Node& n) {
+  if (auto inthreads = dyn_cast<AST::InThreadsBlock>(&n)) {
+    if (IsValidValueItem(inthreads->GetScopePredicate()) &&
+        !scope_pred_stack.empty())
+      scope_pred_stack.pop_back();
+  } else if (auto foreachb = dyn_cast<AST::ForeachBlock>(&n)) {
+    if (IsValidValueItem(foreachb->GetScopePredicate()) &&
+        !scope_pred_stack.empty())
+      scope_pred_stack.pop_back();
+  } else if (auto whileb = dyn_cast<AST::WhileBlock>(&n)) {
+    if (IsValidValueItem(whileb->GetScopePredicate()) &&
+        !scope_pred_stack.empty())
+      scope_pred_stack.pop_back();
+  }
+}
+
 bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     pending_async.clear();
     waited_async.clear();
+    scope_pred_stack.clear();
   }
+  TryPushScopePredicate(n);
   return true;
 }
 
 bool SemaChecker::AfterVisitImpl(AST::Node& n) {
+  TryPopScopePredicate(n);
   if (isa<AST::ChoreoFunction>(&n)) {
     for (auto n : waited_async) pending_async.erase(n);
     if (!pending_async.empty())
@@ -260,29 +448,118 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
           }
 
           auto dim_bound = shape.ValueAt(d);
+          auto expr_bounds = InferExprBounds(this, index_val);
 
           auto idx_str = PSTR(val_node);
           auto data_str = n.GetDataName();
           auto nty = NodeType(*val_node);
 
-          if (auto bty = dyn_cast<BoundedType>(nty)) {
-            EmitAssertion(
-                sbe::oc_le(bty->GetUpperBound(), dim_bound)->Normalize(),
-                "The " + Ordinal(d + 1) + " index `" + idx_str +
-                    "` of element access '" + data_str +
-                    "' should be less than " + STR(dim_bound),
-                val_node->LOC(), class_node, &n);
+          if (isa<BoundedType>(nty)) {
+            bool statically_safe = false;
+            auto lt_pred = sbe::oc_lt(index_val, dim_bound)->Normalize();
+            auto ge_pred = sbe::oc_ge(index_val, sbe::nu(0))->Normalize();
+            bool guard_proves_lt = false;
+            bool guard_proves_ge = false;
+            auto scope_pred = ActiveScopePredicate();
+            if (IsValidValueItem(scope_pred)) {
+              for (const auto& sym_vi : GetSymbols(scope_pred)) {
+                auto sym = VISym(sym_vi);
+                if (!sym || !PrefixedWith(*sym, "::")) {
+                  scope_pred = GetInvalidValueItem();
+                  break;
+                }
+              }
+            }
+            if (IsValidValueItem(scope_pred)) {
+              guard_proves_lt = ScopeContainsPredicate(scope_pred, lt_pred);
+              guard_proves_ge = ScopeContainsPredicate(scope_pred, ge_pred);
+              if (!guard_proves_lt)
+                guard_proves_lt =
+                    ScopeImpliesUpperBound(scope_pred, index_val, dim_bound);
+            }
+            if (expr_bounds.IsValid()) {
+              guard_proves_ge =
+                  guard_proves_ge || sbe::cge(expr_bounds.lb, sbe::nu(0));
+              guard_proves_lt =
+                  guard_proves_lt || sbe::clt(expr_bounds.ub, dim_bound);
+            }
+            if (auto b = VIBool(lt_pred); b && b.value()) guard_proves_lt = true;
+            if (auto bg = VIBool(ge_pred); bg && bg.value())
+              guard_proves_ge = true;
+            if (guard_proves_lt && guard_proves_ge) statically_safe = true;
+
+            ValueItem lb = GetInvalidValueItem();
+            ValueItem ub = GetInvalidValueItem();
+            if (auto bity = dyn_cast<BoundedIntegerType>(nty)) {
+              lb = bity->GetLowerBound();
+              ub = bity->GetUpperBound();
+            } else if (auto btty = dyn_cast<BoundedITupleType>(nty);
+                       btty && btty->Dims() == 1) {
+              lb = btty->GetLowerBound(0);
+              ub = btty->GetUpperBound(0);
+            }
+
+            if (IsValidValueItem(lb) && IsValidValueItem(ub)) {
+              bool lb_nonneg = sbe::cge(lb, sbe::nu(0));
+              bool ub_inbound = sbe::cle(ub, dim_bound);
+              if ((lb_nonneg || guard_proves_ge) &&
+                  (ub_inbound || guard_proves_lt)) {
+                statically_safe = true;
+              } else if (!IsValidValueItem(scope_pred) &&
+                         (sbe::clt(lb, sbe::nu(0)) ||
+                          sbe::cgt(ub, dim_bound))) {
+                std::string details;
+                if (IsValidValueItem(lb) && IsValidValueItem(ub))
+                  details = " bounded range is [" + STR(lb) + ", " +
+                            STR(ub) + ") while the valid range is [0, " +
+                            STR(dim_bound) + ")";
+                Error1(val_node->LOC(), "The " + Ordinal(d + 1) + " index `" +
+                                          idx_str + "` of element access '" +
+                                          data_str + "' is statically out of "
+                                          "bounds:" + details + ".");
+                continue;
+              }
+            }
+
+            if (!statically_safe) {
+              EmitAssertion(sbe::oc_lt(index_val, dim_bound)->Normalize(),
+                            "The " + Ordinal(d + 1) + " index `" + idx_str +
+                                "` of element access '" + data_str +
+                                "' should be less than " + STR(dim_bound),
+                            val_node->LOC(), class_node, &n);
+            }
           } else {
-            EmitAssertion(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
-                          "The " + Ordinal(d + 1) + " index `" + idx_str +
-                              "` of element access '" + data_str +
-                              "' should be greater than or equal to 0",
-                          val_node->LOC(), class_node, &n);
-            EmitAssertion(sbe::oc_lt(index_val, dim_bound)->Normalize(),
-                          "The " + Ordinal(d + 1) + " index `" + idx_str +
-                              "` of element access '" + data_str +
-                              "' should be less than " + STR(dim_bound),
-                          val_node->LOC(), class_node, &n);
+            bool guard_proves_ge = false;
+            bool guard_proves_lt = false;
+            auto scope_pred = ActiveScopePredicate();
+            if (IsValidValueItem(scope_pred)) {
+              guard_proves_ge = ScopeContainsPredicate(
+                  scope_pred, sbe::oc_ge(index_val, sbe::nu(0))->Normalize());
+              guard_proves_lt = ScopeContainsPredicate(
+                  scope_pred, sbe::oc_lt(index_val, dim_bound)->Normalize());
+              if (!guard_proves_lt)
+                guard_proves_lt =
+                    ScopeImpliesUpperBound(scope_pred, index_val, dim_bound);
+            }
+            if (expr_bounds.IsValid()) {
+              guard_proves_ge =
+                  guard_proves_ge || sbe::cge(expr_bounds.lb, sbe::nu(0));
+              guard_proves_lt =
+                  guard_proves_lt || sbe::clt(expr_bounds.ub, dim_bound);
+            }
+
+            if (!guard_proves_ge)
+              EmitAssertion(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
+                            "The " + Ordinal(d + 1) + " index `" + idx_str +
+                                "` of element access '" + data_str +
+                                "' should be greater than or equal to 0",
+                            val_node->LOC(), class_node, &n);
+            if (!guard_proves_lt)
+              EmitAssertion(sbe::oc_lt(index_val, dim_bound)->Normalize(),
+                            "The " + Ordinal(d + 1) + " index `" + idx_str +
+                                "` of element access '" + data_str +
+                                "' should be less than " + STR(dim_bound),
+                            val_node->LOC(), class_node, &n);
           }
         }
       }
@@ -1173,23 +1450,26 @@ bool SemaChecker::VisitNode(AST::Select& n) {
   } else {
     if (n.select_factor->Opts().HasVal()) {
       auto v = n.select_factor->Opts().GetVal();
+      auto bounds = InferExprBounds(this, v);
+      bool proven_nonneg = bounds.IsValid() && sbe::cge(bounds.lb, sbe::nu(0));
+      bool proven_lt = bounds.IsValid() &&
+                       sbe::clt(bounds.ub, sbe::nu(select_value_cnt));
       // Pass &n (the Select node) as emit_node because Expr::accept does not
       // call AfterVisit, so the select_factor pointer would never match
       // in EmitSiteAssertions.  Select::accept does call AfterVisit.
 
-      // For bounded types (loop iteration variables), the lower bound is
-      // always 0, so the ">= 0" assertion is provably true — skip it.
-      if (!isa<BoundedType>(NodeType(*n.select_factor)))
+      if (!proven_nonneg)
         EmitAssertion(sbe::oc_ge(v, sbe::nu(0)),
                       "The select factor `" + PSTR(n.select_factor) +
                           "` should be greater than or equal to 0",
                       n.select_factor->LOC(), n.select_factor, &n);
-      EmitAssertion(
-          sbe::oc_lt(v, sbe::nu(select_value_cnt)),
-          "The select factor `" + PSTR(n.select_factor) +
-              "` should be less than " + std::to_string(select_value_cnt) +
-              ", which is the count of values in the select statement",
-          n.select_factor->LOC(), n.select_factor, &n);
+      if (!proven_lt)
+        EmitAssertion(
+            sbe::oc_lt(v, sbe::nu(select_value_cnt)),
+            "The select factor `" + PSTR(n.select_factor) +
+                "` should be less than " + std::to_string(select_value_cnt) +
+                ", which is the count of values in the select statement",
+            n.select_factor->LOC(), n.select_factor, &n);
     }
   }
 

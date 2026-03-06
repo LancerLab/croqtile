@@ -17,6 +17,7 @@ private:
 
   AttributeDeriver input_deps{this, "input-deps", false};
   AttributeDeriver local_deps{this, "local-deps", false};
+  std::vector<ValueItem> scope_pred_stack;
 
 private:
   bool BeforeVisitImpl(AST::Node&) override;
@@ -28,6 +29,10 @@ private:
 
   void EmitAssertion(const ValueItem&, const std::string&, const location&,
                      const ptr<AST::Node>&, AST::Node* emit_node = nullptr);
+  ValueItem ActiveScopePredicate() const;
+  void PushScopePredicate(const ValueItem&);
+  void TryPushScopePredicate(AST::Node&);
+  void TryPopScopePredicate(AST::Node&);
 
 public:
   SemaChecker() : TracedVisitorWithSymTab("check") {}

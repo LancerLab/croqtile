@@ -6,6 +6,114 @@
 
 using namespace Choreo;
 
+namespace {
+
+ValueItem CombineWithAnd(const ValueItem& lhs, const ValueItem& rhs) {
+  if (!IsValidValueItem(lhs)) return rhs;
+  if (!IsValidValueItem(rhs)) return lhs;
+  return sbe::bop(OpCode::AND, lhs, rhs)->Normalize();
+}
+
+ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
+  if (!n) return GetInvalidValueItem();
+
+  if (auto b = dyn_cast<AST::BoolLiteral>(n)) return sbe::bl(b->Val());
+  if (auto i = dyn_cast<AST::IntLiteral>(n)) return sbe::nu(i->Val());
+  if (auto id = dyn_cast<AST::Identifier>(n))
+    return sbe::sym(ti->InScopeName(id->name));
+  if (auto idx = dyn_cast<AST::IntIndex>(n))
+    return BuildPredicate(ti, idx->Val());
+
+  if (auto e = dyn_cast<AST::Expr>(n)) {
+    if (e->Opts().HasVal()) return e->Opts().GetVal();
+    if (auto ref = e->GetReference()) return BuildPredicate(ti, ref);
+
+    if (e->GetForm() == AST::Expr::Unary) {
+      auto rhs = BuildPredicate(ti, e->GetR());
+      if (!IsValidValueItem(rhs)) return GetInvalidValueItem();
+
+      if (e->op == "!" || e->op == "~")
+        return sbe::uop(ToOpCode(e->op), rhs)->Normalize();
+      if (e->op == "ubound" || e->op == "#") {
+        if (auto bty = dyn_cast<BoundedType>(e->GetR()->GetType()))
+          return bty->GetUpperBound();
+        if (auto id = dyn_cast<AST::Identifier>(e->GetR())) {
+          if (auto ty = ti->SSTab().LookupSymbol(id->name))
+            if (auto bty = dyn_cast<BoundedType>(ty)) return bty->GetUpperBound();
+        }
+      }
+
+      return GetInvalidValueItem();
+    }
+
+    if (e->GetForm() == AST::Expr::Binary) {
+      auto lhs = BuildPredicate(ti, e->GetL());
+      auto rhs = BuildPredicate(ti, e->GetR());
+      if (!IsValidValueItem(lhs) || !IsValidValueItem(rhs))
+        return GetInvalidValueItem();
+
+      if (e->op == "cdiv") return (lhs + (rhs - sbe::nu(1))) / rhs;
+      if (e->op != "+" && e->op != "-" && e->op != "*" && e->op != "/" &&
+          e->op != "%" && e->op != "==" && e->op != "!=" &&
+          e->op != "<" && e->op != ">" && e->op != "<=" &&
+          e->op != ">=" && e->op != "&&" && e->op != "||" &&
+          e->op != "&" && e->op != "|" && e->op != "^" &&
+          e->op != "<<" && e->op != ">>")
+        return GetInvalidValueItem();
+      return sbe::bop(ToOpCode(e->op), lhs, rhs)->Normalize();
+    }
+
+    if (e->GetForm() == AST::Expr::Ternary) {
+      auto pred = BuildPredicate(ti, e->GetC());
+      auto lhs = BuildPredicate(ti, e->GetL());
+      auto rhs = BuildPredicate(ti, e->GetR());
+      if (!IsValidValueItem(pred) || !IsValidValueItem(lhs) ||
+          !IsValidValueItem(rhs))
+        return GetInvalidValueItem();
+      return sbe::sel(pred, lhs, rhs)->Normalize();
+    }
+  }
+
+  return GetInvalidValueItem();
+}
+
+ValueItem BuildRangePredicate(TypeInference* ti, AST::LoopRange& n) {
+  auto iv = sbe::sym(ti->InScopeName(n.IVName()));
+  ValueItem pred = GetInvalidValueItem();
+
+  ValueItem default_lb = sbe::nu(0);
+  ValueItem default_ub = GetInvalidValueItem();
+  ptr<Type> iv_ty = n.IV()->GetType();
+  if (!isa<BoundedType>(iv_ty)) {
+    if (auto ty = ti->SSTab().LookupSymbol(n.IVName())) iv_ty = ty;
+  }
+  if (auto bty = dyn_cast<BoundedType>(iv_ty); bty && bty->HasValidBound()) {
+    default_ub = bty->GetUpperBound();
+    if (auto bit = dyn_cast<BoundedIntegerType>(bty))
+      default_lb = bit->GetLowerBound();
+    else if (auto bitt = dyn_cast<BoundedITupleType>(bty); bitt &&
+             bitt->Dims() == 1)
+      default_lb = bitt->GetLowerBound(0);
+  }
+
+  auto lb = n.lbound ? BuildPredicate(ti, n.lbound) : default_lb;
+  if (IsValidValueItem(lb)) pred = CombineWithAnd(pred, sbe::oc_ge(iv, lb));
+
+  ValueItem ub = default_ub;
+  if (n.ubound) {
+    auto ub_offset = BuildPredicate(ti, n.ubound);
+    if (IsValidValueItem(default_ub) && IsValidValueItem(ub_offset))
+      ub = (default_ub + ub_offset)->Normalize();
+    else
+      ub = ub_offset;
+  }
+  if (IsValidValueItem(ub)) pred = CombineWithAnd(pred, sbe::oc_lt(iv, ub));
+
+  return pred;
+}
+
+} // namespace
+
 bool TypeInference::BeforeBeforeVisit(AST::Node& n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     // the type will be modified after parameters/return are processed
@@ -1013,12 +1121,19 @@ bool TypeInference::Visit(AST::WhereBind& n) {
 
 bool TypeInference::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
-  if (n.with) AssignSymbolWithType(n.LOC(), n.with->name, n.with->GetType());
+  auto upsert_symbol_type = [&](const ptr<AST::Identifier>& id) {
+    if (!id) return true;
+    if (SSTab().DeclaredInScope(id->name))
+      return ModifySymbolType(id->LOC(), id->name, id->GetType());
+    return AssignSymbolWithType(id->LOC(), id->name, id->GetType());
+  };
+
+  if (n.with && !upsert_symbol_type(n.with)) return false;
 
   if (n.with_matchers) {
     for (auto pid : n.with_matchers->values) {
       auto id = cast<AST::Identifier>(pid);
-      AssignSymbolWithType(n.LOC(), id->name, id->GetType());
+      if (!upsert_symbol_type(id)) return false;
     }
   }
 
@@ -1207,18 +1322,47 @@ bool TypeInference::Visit(AST::Return& n) {
 
 bool TypeInference::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
+  n.SetScopePredicate(BuildRangePredicate(this, n));
+  if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
+    dbgs() << " |- scope-predicate(looprange): "
+           << n.GetScopePredicate()->ToString() << "\n";
   return true;
 }
 
 bool TypeInference::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside
+
+  ValueItem pred = GetInvalidValueItem();
+  for (auto& r : n.GetRanges()) {
+    if (auto range = dyn_cast<AST::LoopRange>(r))
+      pred = CombineWithAnd(pred, range->GetScopePredicate());
+  }
+  n.SetScopePredicate(pred);
+  if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
+    dbgs() << " |- scope-predicate(foreach): "
+           << n.GetScopePredicate()->ToString() << "\n";
+
   return true;
 }
 
 bool TypeInference::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside
+  n.SetScopePredicate(BuildPredicate(this, n.GetPred()));
+  if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
+    dbgs() << " |- scope-predicate(inthreads): "
+           << n.GetScopePredicate()->ToString() << "\n";
+  return true;
+}
+
+bool TypeInference::Visit(AST::WhileBlock& n) {
+  TraceEachVisit(n);
+  cur_type.reset(); // no current type to annotate the stmts inside
+  n.SetScopePredicate(BuildPredicate(this, n.pred));
+  if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
+    dbgs() << " |- scope-predicate(while): "
+           << n.GetScopePredicate()->ToString() << "\n";
   return true;
 }
 

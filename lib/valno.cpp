@@ -73,7 +73,8 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
       if ((op == "+") || (op == "-") || (op == "*") || (op == "/") ||
           (op == "%") || (op == ">") || (op == "<") || (op == "|") ||
           (op == "&") || (op == "^") || (op == ">=") || (op == "<=") ||
-          (op == "==") || (op == "!=") || (op == ">>") || (op == "<<")) {
+          (op == "==") || (op == "!=") || (op == ">>") || (op == "<<") ||
+          (op == "&&") || (op == "||")) {
         auto lvi = GenValueItemFromSignature(oprds[0]);
         auto rvi = GenValueItemFromSignature(oprds[1]);
         if (lvi && rvi) return sbe::bop(ToOpCode(op), lvi, rvi)->Normalize();
@@ -117,6 +118,10 @@ const SignTy ValueNumbering::ValueItemToSignature(const ValueItem& vi,
     return non_sn();
   } else if (auto iv = VIInt(vi)) {
     auto sign = c_sn(iv.value());
+    auto vn = GetOrGenValueNumberFromSignature(sign); // always generate
+    return GetSignatureFromValueNumber(vn);
+  } else if (auto bv = VIBool(vi)) {
+    auto sign = c_sn(bv.value());
     auto vn = GetOrGenValueNumberFromSignature(sign); // always generate
     return GetSignatureFromValueNumber(vn);
   } else if (auto sym = VISym(vi)) {
@@ -238,7 +243,8 @@ const SignTy ValueNumbering::Simplify(const SignTy& sign) {
   // Applies the algebraic simplification
   std::set<OpTy> optimizable = {
       "+",  "-", "*", "/",  "%",  "cdiv", "@",  "@+",
-      "@-", "<", ">", "<=", ">=", "==",   "!=",
+      "@-", "<", ">", "<=", ">=", "==",   "!=", "&&",
+      "||",
   };
 
   auto HandleMultiSigns = [this](const std::string& op, const SignTy& lhs,
@@ -310,7 +316,9 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
   auto lvi = GenValueItemFromSignature(lhs);
   auto rvi = GenValueItemFromSignature(rhs);
   if (lvi && rvi &&
-      (op == "+" || op == "-" || op == "*" || op == "/" || op == "%")) {
+      (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" ||
+       op == "<" || op == ">" || op == "<=" || op == ">=" || op == "==" ||
+       op == "!=" || op == "&&" || op == "||")) {
     auto res_vi = sbe::bop(ToOpCode(op), lvi, rvi);
     auto opt_vi = res_vi->Normalize();
     if (*res_vi != *opt_vi) {
