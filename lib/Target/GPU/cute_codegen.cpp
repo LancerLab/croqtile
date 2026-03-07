@@ -2397,14 +2397,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (n.operation == ".transp")
       transp_config = cast<TransposeConfig>(n.GetConfig())->dim_values;
 
-    auto f_stride = GenStrides(f_ca, transp_config);
-    auto t_stride = GenStrides(t_ca);
-
     // Determine if we should use WGMMA layout for destination tensor
     bool use_wgmma_layout_t = HasWGMMAInFunction() &&
                               t_sty->GetStorage() == Storage::SHARED &&
                               (t_sty->ElementType() == BaseType::F16 ||
                                t_sty->ElementType() == BaseType::BF16);
+
+    auto f_stride = GenStrides(f_ca, transp_config);
+    auto t_stride = GenStrides(t_ca);
 
     // Use swizzle value only if explicitly specified, otherwise use 0 (no
     // swizzle)
@@ -2583,7 +2583,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       const auto t_pad_mds = GenTensorDecl(
           RemoveSuffix(t_buf_name, ".data()"), t_buf_name, t_sty->GetStorage(),
           t_sty->ElementType(), f_ca->GetBlockShape(), false, pad_offset,
-          ValueSTR(t_stride, false, true));
+          ValueSTR(t_stride, false, true), {}, use_wgmma_layout_t,
+          swizzle_mode);
       std::string t_pad_mds_name{t_pad_mds.first};
       std::string t_pad_mds_decl{t_pad_mds.second};
       ds << t_pad_mds_decl;
