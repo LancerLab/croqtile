@@ -1,6 +1,6 @@
 ---
 name: compile-and-test
-description: Build, test, run, and debug workflows for the Choreo compiler project. Use this when asked to compile .co files, run tests/benchmarks, troubleshoot build or runtime failures, or choose debug options.
+description: Build, test, run, and debug workflows for the Choreo compiler project. Use this first when asked to compile, run, benchmark, or debug any `.co` file, or when troubleshooting test/runtime failures.
 ---
 
 # Choreo Project Build and Test Skill
@@ -16,6 +16,14 @@ You are a build, test, and debugging expert for the Choreo compiler project. Cho
 - If the user prompt is in Chinese, respond in Chinese.
 - If the user prompt is in English, respond in English.
 - If the prompt is mixed, default to the language of the latest user message.
+
+---
+
+## Trigger Priority
+
+- If the request mentions a `.co` file, this skill should be loaded immediately before other Choreo workflow skills.
+- If the task is "modify compiler code and verify with a `.co` file", use `develop-compiler` for source changes and this skill for build/run validation.
+- Do not skip this skill for benchmark or end-to-end `.co` execution just because the compiler source is also being edited.
 
 ---
 
@@ -273,6 +281,9 @@ This script will:
 - select the least-used GPU via `nvidia-smi` (or use `--gpu`),
 - execute with `CUDA_VISIBLE_DEVICES=<gpu>`.
 
+When validating a `.co` file, prefer this helper unless you are debugging the generated script itself.
+On CUDA OOM or device failures, do not stop after the first failure: inspect `nvidia-smi`, identify a less-busy GPU, and retry.
+
 Use manual commands only when debugging script internals or when a custom flow is required.
 
 ### 1) Files with `RUN:` directives (tests/ and part of benchmark/, samples/)
@@ -368,8 +379,9 @@ CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/output.cute.result --execute
 ### Common Error Handling
 
 1. **CUDA OOM (out of memory)**
-   - Check memory usage via `nvidia-smi`.
-   - Switch to an idle GPU: `CUDA_VISIBLE_DEVICES=X`.
+   - Immediately capture `nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu --format=csv,noheader`.
+   - Retry on the least-used GPU, or a user-requested GPU such as GPU 1 if it is clearly idle.
+   - Prefer `scripts/run_co_auto_gpu.sh ... --gpu X` for the retry so the rerun path matches normal `.co` execution.
 
 2. **CUDA device not available**
    - Ensure CUDA driver is installed: `nvidia-smi`.
@@ -411,8 +423,9 @@ CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/output.cute.result --execute
    └─ uncertain                   → ask user inline
 
 4. During GPU execution
-   ├─ check GPU status
+   ├─ check GPU status with `nvidia-smi`
    ├─ select idle GPU
+   ├─ on OOM/device error, inspect `nvidia-smi` again before concluding
    └─ prefer `scripts/run_co_auto_gpu.sh ...` (manual `CUDA_VISIBLE_DEVICES=X` as fallback)
 ```
 

@@ -1821,23 +1821,24 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
       break;
     }
   } else { // MN_MAJOR
-    // MN-major layout: stride varies by swizzle pattern
+    // MN-major layout: leading offset follows the swizzle width, while the
+    // stride offset is the full 8-row panel span.
     switch (Swizzle) {
     case WGMMA_Swizzle::NS:
-      LBO = 256;
+      LBO = 16;
       SBO = 128;
       break;
     case WGMMA_Swizzle::B32:
-      LBO = 256;
-      SBO = 512;
+      LBO = 32;
+      SBO = 256;
       break;
     case WGMMA_Swizzle::B64:
-      LBO = 512;
-      SBO = 1024;
+      LBO = 64;
+      SBO = 512;
       break;
     case WGMMA_Swizzle::B128:
-      LBO = 1024;
-      SBO = 2048;
+      LBO = 128;
+      SBO = 1024;
       break;
     }
   }

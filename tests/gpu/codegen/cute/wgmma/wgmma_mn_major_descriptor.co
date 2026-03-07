@@ -1,0 +1,63 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=ROW-COL
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=ROW-ROW
+
+#define M 64
+#define N 64
+#define K 64
+
+__co__ auto row_col_case(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
+      rhs_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load lhs_s.chunkat(_, iv_warp);
+          mb = mma.load rhs_s.chunkat(iv_warp, _);
+          mma.row.col mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+__co__ auto row_row_case(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_s = tma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => shared;
+      rhs_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+// ROW-COL: uint64_t desc_ma = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(ma_smem_ptr);
+// ROW-COL: uint64_t desc_mb = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::B128>(mb_smem_ptr);
+// ROW-COL: MMA_64x64x16_F32F16F16_SS<static_cast<cute::SM90::GMMA::Major>(0), static_cast<cute::SM90::GMMA::Major>(1)>::fma
+
+// ROW-ROW: uint64_t desc_ma = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(ma_smem_ptr);
+// ROW-ROW: uint64_t desc_mb = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(mb_smem_ptr);
+// ROW-ROW: MMA_64x64x16_F32F16F16_SS<static_cast<cute::SM90::GMMA::Major>(0), static_cast<cute::SM90::GMMA::Major>(0)>::fma
