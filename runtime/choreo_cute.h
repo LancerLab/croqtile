@@ -1821,23 +1821,25 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
       break;
     }
   } else { // MN_MAJOR
-    // MN-major layout: leading offset follows the swizzle width, while the
-    // stride offset is the full 8-row panel span.
+    // For swizzled MN-major GMMA layouts, the leading-byte offset remains one
+    // 128-bit line (16B for f16/bf16). Only the stride-byte offset scales with
+    // the swizzle width; this matches CuTe's canonical GMMA descriptor
+    // construction.
     switch (Swizzle) {
     case WGMMA_Swizzle::NS:
       LBO = 16;
       SBO = 128;
       break;
     case WGMMA_Swizzle::B32:
-      LBO = 32;
+      LBO = 16;
       SBO = 256;
       break;
     case WGMMA_Swizzle::B64:
-      LBO = 64;
+      LBO = 16;
       SBO = 512;
       break;
     case WGMMA_Swizzle::B128:
-      LBO = 128;
+      LBO = 16;
       SBO = 1024;
       break;
     }
