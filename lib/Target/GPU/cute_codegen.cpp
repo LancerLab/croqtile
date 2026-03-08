@@ -2664,7 +2664,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     assert(tname.has_value());
     if ((fsto == Storage::GLOBAL || fsto == Storage::DEFAULT) &&
         tsto == Storage::SHARED) {
-      std::string tma_tx_bytes_expr = ValueSTR(t_sty->ByteSizeValue());
+      std::string tma_tx_bytes_expr = std::to_string(
+          t_ca->GetBlockShape().ElementCount() * SizeOf(t_sty->ElementType()));
 
       std::string t_buf_expr_with_offset = t_buf_expr;
       if (!t_mds_offset.empty() && t_mds_offset != "0") {
