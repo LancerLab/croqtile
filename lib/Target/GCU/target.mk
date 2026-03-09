@@ -3,7 +3,7 @@ FTP_SERVER ?= 172.16.11.18
 SETUP_TARGET_DEPENDS += setup-choreo-kit
 SETUP_TARGET_DEPENDS += setup-clang-format
 SETUP_TARGET_DEPENDS += setup-git-hooks
-SETUP_TARGET_DEPENDS += setup-gcu-acore
+#SETUP_TARGET_DEPENDS += setup-gcu-acore
 CHOREO_DEFAULT_TARGET = topscc
 CLANG_FORMAT:=$(WORK_DIR)/extern/clang-format-19-1-2
 
