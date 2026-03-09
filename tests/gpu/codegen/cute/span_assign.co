@@ -1,0 +1,15 @@
+// RUN: choreo -t cute -es %s | FileCheck %s
+
+__co__ void foo(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b = a.view(16, 8: 12, 3).from(17, 18); // [16, 8], {12, 3}, offset: 17*32 + 18*1
+    c = b.chunkat(p, p); // [8, 8], {12, 3}, offset: 16 / 2 * 12 * p + 8 / 2 * 3 * p
+    d = dma.copy c => shared;
+  }
+}
+
+// CHECK: auto b = (a + 258);
+// CHECK: auto c = (blockIdx.x * 96 + blockIdx.x * 12 + b);
+// CHECK: auto __shape1_c = cute::make_shape(cute::Int<8>{}, cute::Int<4>{});
+// CHECK: auto __stride1_c = cute::make_stride(cute::Int<12>{}, cute::Int<3>{});
+// CHECK: auto __layout1_c = cute::make_layout(__shape1_c, __stride1_c);

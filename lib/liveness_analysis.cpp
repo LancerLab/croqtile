@@ -79,6 +79,25 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
   } else if (auto call = dyn_cast<AST::Call>(n)) {
     (void)call;
     return {};
+  } else if (auto chunkat = dyn_cast<AST::ChunkAt>(n)) {
+    VarSet res;
+    // Add the base reference symbol (the data being chunked)
+    res.insert(InScopeName(chunkat->RefSymbol()));
+    // Extract operands from all tiling/slicing operations
+    for (auto tsi : chunkat->AllOperations()) {
+      for (const auto& rfn : tsi->ReferredNodes()) {
+        VarSet ops = GetAllSymbolicOperands(rfn.get());
+        res = SetUnion(res, ops);
+      }
+    }
+    // Handle indices if present
+    if (chunkat->indices) {
+      for (const auto& idx : chunkat->indices->AllValues()) {
+        VarSet idx_ops = GetAllSymbolicOperands(idx.get());
+        res = SetUnion(res, idx_ops);
+      }
+    }
+    return res;
   } else {
     choreo_unreachable("expecting node type: " + n->TypeNameString() + ".");
     return {};
@@ -1244,7 +1263,6 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
     AddIsAlias(current_stmt, n.GetName());
     AddAlias(n.GetName(), sa->id->name);
   } else {
-    assert(!IsRef(n) && "expecting the assignment is not a reference.");
     VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n) << ".\n");
     if (n.AssignToDataElement())
       AddUse(current_stmt, n.GetDataArrayName());

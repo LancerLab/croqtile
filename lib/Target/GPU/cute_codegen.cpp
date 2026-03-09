@@ -1672,10 +1672,14 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
          << n.GetName() << " = " << ExprSTR(n.value, false) << ";\n";
       return true;
     }
+    if (isa<SpannedType>(nty)) {
+      ssm.MapDeviceSymbol(InScopeName(n.GetName()), n.GetName());
+    }
 
     if (!(sty && sty->GetStorage() == Storage::REG && n.HasNote("update")))
-      ds << d_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName()
-         << " = ";
+      ds << d_indent
+         << ((IsMutable(*nty) && !isa<SpannedType>(nty)) ? "" : "auto ")
+         << n.GetName() << " = ";
     else
       ds << d_indent;
     ds << ExprSTR(n.value, false) << ";\n";
@@ -2339,27 +2343,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   bool suppress_tma_future = false;
 
   if (use_tma && CCtx().UseWarpSpec() &&
-      (f_sty->GetStorage() == Storage::GLOBAL ||
-       f_sty->GetStorage() == Storage::DEFAULT) &&
-      t_sty->GetStorage() == Storage::SHARED &&
-      bdim_level == ParallelLevel::GROUPx4) {
-    std::string t_mds_offset_probe = "";
-    if (auto idx = t_ca->IndexOfLastSpanAs())
-      t_mds_offset_probe = TileBaseOffset(t_ca);
-    else
-      t_mds_offset_probe = ValueSTR(GenOffset(t_ca));
-
-    bool has_ring_stage_index =
-        t_mds_offset_probe.find("stage") != std::string::npos ||
-        t_mds_offset_probe.find("__iv_iv_k %") != std::string::npos ||
-        t_mds_offset_probe.find("iv_k %") != std::string::npos;
-    suppress_tma_future = has_ring_stage_index;
-  }
-
-  if (use_tma && CCtx().UseWarpSpec() &&
-      (t_sty->GetStorage() == Storage::GLOBAL ||
-       t_sty->GetStorage() == Storage::DEFAULT) &&
-      f_sty->GetStorage() == Storage::SHARED &&
       bdim_level == ParallelLevel::GROUPx4) {
     suppress_tma_future = true;
   }
@@ -4715,7 +4698,6 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
        << ValueSTR(ValxN(sbe::nu(1), t_shape.Rank()))
        << "};\n"; // elements' strides
     std::string g_unscoped = UnScopedName(g_sym);
-    std::string g_scoped = InScopeName(g_unscoped);
 
     // Determine whether this tensor is a true GLOBAL argument.
     // Correct behavior is to consult the parameter attribute

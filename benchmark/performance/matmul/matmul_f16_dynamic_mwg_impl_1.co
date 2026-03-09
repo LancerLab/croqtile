@@ -64,7 +64,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
       }
     }
     parallel p1 by 2 : group-4 {
-      mma.store mc, output_s.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(p1, 0);
+      mma.store mc, output_s.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(p1, 0);
     }
 
     tma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(block_m, block_n);

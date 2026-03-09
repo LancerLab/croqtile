@@ -2890,6 +2890,7 @@ public:
       os << "MMA.STORE" << (StoreIsTranspose() ? ".TRANSP" : "") << " "
          << PSTR(StoreFrom()) << ", " << PSTR(StoreTo());
     } break;
+    case Commit: os << "MMA.COMMIT"; break;
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
   }
