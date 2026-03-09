@@ -49,7 +49,7 @@ POLL_INTERVAL=${POLL_INTERVAL:-120}
 ALERT_EMAIL=${ALERT_EMAIL:-xiaofeng.guan@enflame-tech.com}
 REMOTE_TMP_DIR=${REMOTE_TMP_DIR:-/tmp/choreo-sync}
 LOG_FILE=${LOG_FILE:-}
-EXCLUDE_BRANCHES=${EXCLUDE_BRANCHES:-main}
+EXCLUDE_BRANCHES=${EXCLUDE_BRANCHES:-}
 
 timestamp() {
     date '+%F %T'
@@ -86,7 +86,7 @@ Options:
     --dry-run                  show planned changes without pushing or deleting
     --log                      enable file logging to the default log path
     --log-file PATH            enable file logging to PATH
-    --exclude-branch NAME      exclude a branch from sync/deletion checks (repeatable)
+    --exclude-branch NAME      exclude a branch from deletion sync only (repeatable)
     --local-repo PATH          local repo path (default: $DEFAULT_LOCAL_REPO)
     --mirror-repo PATH         mirror repo path on MIRROR_HOST (default: $DEFAULT_MIRROR_REPO)
     --mirror-host HOST         mirror ssh target (default: $MIRROR_HOST)
@@ -628,7 +628,6 @@ sync_local_remote_from_mirror() {
 
     while IFS= read -r branch; do
         [[ -n "$branch" ]] || continue
-        branch_is_excluded "$branch" && continue
 
         local_ref="refs/remotes/$LOCAL_REMOTE/$branch"
         mirror_ref="refs/sync/mirror/remotes/$MIRROR_REMOTE/$branch"
@@ -692,8 +691,7 @@ sync_mirror_remote_from_local() {
                 "$MIRROR_REMOTE" \
                 "$LOCAL_REMOTE" \
                 "$REMOTE_IN_BUNDLE" \
-                "$DRY_RUN" \
-                "$EXCLUDE_BRANCHES" <<'EOF'
+                "$DRY_RUN" <<'EOF'
 set -euo pipefail
 
 repo_dir="$1"
@@ -701,17 +699,6 @@ mirror_remote="$2"
 local_remote="$3"
 incoming_bundle="$4"
 dry_run="$5"
-exclude_branches="$6"
-
-branch_is_excluded() {
-    local branch="$1"
-    local item
-    for item in $exclude_branches; do
-        [[ -n "$item" ]] || continue
-        [[ "$branch" == "$item" ]] && return 0
-    done
-    return 1
-}
 
 if [[ "$repo_dir" == '~' ]]; then
     repo_dir="$HOME"
@@ -731,7 +718,6 @@ git -C "$repo_dir" fetch --no-tags "$incoming_bundle" \
 
 while IFS= read -r branch; do
     [[ -n "$branch" ]] || continue
-    branch_is_excluded "$branch" && continue
 
     mirror_ref="refs/remotes/$mirror_remote/$branch"
     local_ref="refs/sync/local/remotes/$local_remote/$branch"
@@ -788,25 +774,13 @@ EOF
         "$MIRROR_REPO" \
         "$MIRROR_REMOTE" \
         "$LOCAL_REMOTE" \
-                "$REMOTE_IN_BUNDLE" \
-                "$EXCLUDE_BRANCHES" <<'EOF'
+                "$REMOTE_IN_BUNDLE" <<'EOF'
 set -euo pipefail
 
 repo_dir="$1"
 mirror_remote="$2"
 local_remote="$3"
 incoming_bundle="$4"
-exclude_branches="$5"
-
-branch_is_excluded() {
-    local branch="$1"
-    local item
-    for item in $exclude_branches; do
-        [[ -n "$item" ]] || continue
-        [[ "$branch" == "$item" ]] && return 0
-    done
-    return 1
-}
 
 if [[ "$repo_dir" == '~' ]]; then
     repo_dir="$HOME"
@@ -826,7 +800,6 @@ git -C "$repo_dir" fetch --no-tags "$incoming_bundle" \
 
 while IFS= read -r branch; do
     [[ -n "$branch" ]] || continue
-    branch_is_excluded "$branch" && continue
 
     mirror_ref="refs/remotes/$mirror_remote/$branch"
     local_ref="refs/sync/local/remotes/$local_remote/$branch"
