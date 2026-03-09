@@ -13,6 +13,20 @@ __co__ auto tma_copy_async(f32 [6, 16, 64] input) {
   return output;
 }
 
+__co__ auto tma_copy_multi_subspan(f32 [6, 16, 64] input) {
+  f32 [input.span] output;
+
+  parallel p by 2 : block {
+    foreach {x, y} in [3, 8] {
+      sf = tma.copy input.subspan(input.span(0)/#p,   _, _).at(p, 0, 0)
+                        .subspan(input.span(0)/#p/#x, _, input.span(2)/#y).at(x, 0, y) => shared;
+      tma.copy sf => output.subspan(input.span(0)/#p/#x, _, input.span(2)/#y).at(p#x, 0, y);
+    }
+  }
+
+  return output;
+}
+
 int main() { /// host program
   auto a = choreo::make_spandata<choreo::f32>(6, 16, 64);
   a.fill_random(-10, 10);
@@ -26,7 +40,19 @@ int main() { /// host program
         choreo::choreo_assert(a[i][j][k] == res1[i][j][k], "values are not equal.");
       }
 
-  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Test Passed1\n" << std::endl;
+
+  auto res2 = tma_copy_multi_subspan(a.view());
+
+  // verfication
+  for (size_t i = 0; i < res2.shape()[0]; ++i)
+    for (size_t j = 0; j < res2.shape()[1]; ++j)
+      for (size_t k = 0; k < res2.shape()[2]; ++k) {
+        choreo::choreo_assert(a[i][j][k] == res2[i][j][k], "values are not equal.");
+      }
+
+  std::cout << "Test Passed2\n" << std::endl;
 }
 
-// CHECK: Test Passed
+// CHECK: Test Passed1
+// CHECK: Test Passed2

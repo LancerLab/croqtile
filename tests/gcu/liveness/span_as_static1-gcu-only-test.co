@@ -91,7 +91,7 @@ int main() { /// host program
 }
 
 // CHECK: (  0) transpose(s32 mdspan<6> [8, 2, 3, 2, 4, 2] input) {
-// CHECK{LITERAL}: (  1)   global s32 [[ input(3) input(5) input(0) input(1) input(2) input(4) ] ] output
+// CHECK{LITERAL}: (  1)   global s32 [ input(3) input(5) input(0) input(1) input(2) input(4) ] output
 // CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] : block {
 // CHECK: (  3)     parallel p = {p__elem__x} by [1] : thread {
 // CHECK: (  4)       with index = {a4, a5, b, c, d} in [ 3 1 1 1 1 ] {

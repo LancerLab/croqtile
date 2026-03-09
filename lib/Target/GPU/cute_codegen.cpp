@@ -507,6 +507,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   return true;
 }
 
+// Note: the function is only used for coordinate in TMA
 const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
                                         const ptr<DMAConfig>& config) const {
   ValueList indices;
@@ -528,6 +529,9 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
     for (size_t i = 0; i < sz; ++i) indices.push_back(sbe::nu(0));
     return indices;
   }
+
+  // Generate the initial indices
+  indices = ValxN(sbe::nu(0), ca->GetBlockShape().DimCount());
 
   // handle each chunkat inside a seqeunce like 'chunkat(a, b).chunkat(c)...'
   for (size_t sop_idx = sop_base; sop_idx < sops.size(); ++sop_idx) {
@@ -563,14 +567,10 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
       assert(ca->TilingOperationCount() == 1);
     }
 
-    // Generate the expression for single chunkat
-    // Note that we buffer all expressions of different chunkats by dimensions
-    for (size_t i = 0; i < exprs.size(); ++i) indices.push_back(sbe::nu(1));
-
     for (size_t i = 0; i < exprs.size(); ++i) {
       // combine 'a' and 'c' between expressions like 'chunkat(a, b).chunk(c,
       // d)'
-      indices[i] = indices[i] * exprs[i] * shape.ValueAt(i);
+      indices[i] = indices[i] + exprs[i] * shape.ValueAt(i);
     }
   }
 
@@ -736,8 +736,8 @@ void CuteCodeGen::EmitFixedHostHead() {
   std::ostringstream oss;
   oss <<
       R"(
-#include <fstream>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -1791,7 +1791,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     auto thr_count = inner_thr_count * group_count;
 
     hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
-       << ValueSTR(thr_count) << ", 1, 1" << ");\n";
+       << ValueSTR(thr_count) << ", 1, 1"
+       << ");\n";
 
     // plan the shared memory that is decided at runtime
     if (cgi.HasAsyncDMA(fname)) {
@@ -2578,8 +2579,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
          << ExprSTR(pad_config->GetPadValue(), IsHost()) << ");\n";
       std::string pad_offset = "__pad_offset" + std::to_string(pad_cnt);
       ds << d_indent << "auto " << pad_offset << " = " << t_mds_name
-         << ".layout()(" << "cute::make_coord(" << pcmvSTR(pad_config->pad_low)
-         << "));\n";
+         << ".layout()("
+         << "cute::make_coord(" << pcmvSTR(pad_config->pad_low) << "));\n";
       const auto t_pad_mds = GenTensorDecl(
           RemoveSuffix(t_buf_name, ".data()"), t_buf_name, t_sty->GetStorage(),
           t_sty->ElementType(), f_ca->GetBlockShape(), false, pad_offset,
@@ -2666,7 +2667,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         tsto == Storage::SHARED) {
       std::string tma_tx_bytes_expr = std::to_string(
           t_ca->GetBlockShape().ElementCount() * SizeOf(t_sty->ElementType()));
-
       std::string t_buf_expr_with_offset = t_buf_expr;
       if (!t_mds_offset.empty() && t_mds_offset != "0") {
         t_buf_expr_with_offset =
@@ -3083,7 +3083,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << cute_gmma_major_cast << "(" << trans_a << "), "
            << cute_gmma_major_cast << "(" << trans_b << ")";
       }
-      ds << ">::fma(" << "desc_" << a_sym << ", desc_" << b_sym;
+      ds << ">::fma("
+         << "desc_" << a_sym << ", desc_" << b_sym;
       for (size_t i = 0; i < reg_num_d; ++i) {
         if (op.HasScale())
           ds << ", " << c_sym << "_scale_frag[" << i << "]";
@@ -3438,15 +3439,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (isa<ArrayType>(GetSymbolType(sym))) {
           // only load to a single frag. Need `fill` to decl the frag array!
           ds << d_indent << "load_fragment_d<" << CUTE_MMA_ATOM << ">("
-             << f_mds.first << ", " << "reinterpret_cast<"
-             << NameBaseType(ssmi.ty) << "*> (" << ExprSTR(frag) << "));\n";
+             << f_mds.first << ", "
+             << "reinterpret_cast<" << NameBaseType(ssmi.ty) << "*> ("
+             << ExprSTR(frag) << "));\n";
         } else {
           // decl + load
           ds << d_indent << (use_uint32 ? "uint32_t" : NameBaseType(ssmi.ty))
              << " " << sym << "[" << reg_num_d << "] ;\n";
           ds << d_indent << "load_fragment_d<" << CUTE_MMA_ATOM << ">("
-             << f_mds.first << ", " << "reinterpret_cast<"
-             << NameBaseType(ssmi.ty) << "*> (" << sym << "));\n";
+             << f_mds.first << ", "
+             << "reinterpret_cast<" << NameBaseType(ssmi.ty) << "*> (" << sym
+             << "));\n";
         }
       } else {
         choreo_unreachable("unexpect MMA frag");
@@ -4170,9 +4173,8 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
   }
 
   if (EnableDebugTypeRTTI() && n.with && (n.GetMatchers().size() > 1)) {
-    auto& os = IsHost() ? hs : ds;
-    auto& ind = IsHost() ? h_indent : d_indent;
-    os << ind << "choreo::rtti::bounded_ituple<" << n.GetMatchers().size()
+    auto& os = Stream();
+    os << Indent() << "choreo::rtti::bounded_ituple<" << n.GetMatchers().size()
        << "> __iv_" << n.with->name << " = {{";
     for (size_t i = 0; i < n.GetMatchers().size(); ++i) {
       auto id = cast<AST::Identifier>(n.GetMatchers()[i]);
@@ -4190,7 +4192,8 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
       if (i + 1 < n.GetMatchers().size()) os << ", ";
     }
     os << "}};\n";
-    os << ind << "auto " << n.with->name << " = __iv_" << n.with->name << ";\n";
+    os << Indent() << "auto " << n.with->name << " = __iv_" << n.with->name
+       << ";\n";
   }
 
   if (n.with && (n.GetMatchers().size() == 1)) {
@@ -4617,7 +4620,8 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
 void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
   const auto& mri = FCtx(fname).GetDynMemReuseInfo(df_name);
   if (!mri) return;
-  hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
+  hs << h_indent << R"(// JIT memory reuse begin)"
+     << "\n";
   for (const auto& [sto, ie] : mri->infos) {
     hs << h_indent << "HeapSimulator::Chunks " << ie.chunks_name << ";\n";
     for (const auto& c : ie.chunks)
@@ -4639,7 +4643,8 @@ void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
          << " spm should not exceed the memory usage limit " << mem_capacity
          << " bytes.\");\n";
     hs << h_indent << "unsigned long " << ie.offsets_name << "["
-       << mri->infos[sto].offset_args.size() << "];" << "\n";
+       << mri->infos[sto].offset_args.size() << "];"
+       << "\n";
     std::string idx = ie.chunks_name + "_idx";
     hs << h_indent << "size_t " << idx << " = 0;\n";
     hs << h_indent << "for (const auto& [buffer_id, offset] : " << ie.result
@@ -4647,7 +4652,8 @@ void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
     hs << h_indent << "  " << ie.offsets_name << "[" << idx
        << "++] = offset;\n";
   }
-  hs << h_indent << R"(// JIT memory reuse end)" << "\n";
+  hs << h_indent << R"(// JIT memory reuse end)"
+     << "\n";
 }
 
 void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {

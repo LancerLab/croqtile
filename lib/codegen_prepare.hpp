@@ -381,7 +381,7 @@ public:
         auto e_ty = GetSpannedType(GetSymbolType(e_sym));
         cgi.AddSymbolMMA(InScopeName(e_sym),
                          MMAInfo{e_ty->ElementType(), mma_shape,
-                                  MMAInfo::FRAG_E, op.GetMethod()});
+                                 MMAInfo::FRAG_E, op.GetMethod()});
       }
 
       VST_DEBUG(dbgs() << "mma type: " << STR(a_ety) << ", " << STR(b_ety)
