@@ -1,4 +1,4 @@
-FTP_SERVER:=172.16.11.18
+FTP_SERVER ?= 172.16.11.18
 
 SETUP_TARGET_DEPENDS += setup-choreo-kit
 SETUP_TARGET_DEPENDS += setup-clang-format
