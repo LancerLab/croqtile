@@ -12,13 +12,15 @@
 # High-level workflow per cycle:
 #   1. refresh local repo from LOCAL_REMOTE
 #   2. refresh mirror repo from MIRROR_REMOTE
-#   3. bundle local remote-tracking refs/tags and copy to mirror
-#   4. bundle mirror origin-tracking refs/tags and copy back
-#   5. compare remote histories; fast-forward the older remote when possible
-#   6. refresh both repos again so their visible state tracks the synced remotes
+#   3. optionally propagate proven branch deletions
+#   4. bundle local remote-tracking refs/tags and copy to mirror
+#   5. bundle mirror origin-tracking refs/tags and copy back
+#   6. compare remote histories; fast-forward the older remote when possible
+#   7. refresh both repos again so their visible state tracks the synced remotes
 #
 # Notes:
-#   - branch/tag deletions are NOT propagated automatically
+#   - branch deletions are only propagated with --sync-deletions
+#   - tag deletions are NOT propagated automatically
 #   - diverged refs are reported and left for manual resolution
 
 set -euo pipefail
@@ -32,6 +34,9 @@ DEFAULT_MIRROR_REMOTE_URL="git@10.0.16.44:lancerlab/choreo.git"
 
 RUN_ONCE=0
 INIT_MODE=0
+SYNC_DELETIONS=0
+LOG_ENABLED=0
+DRY_RUN=0
 
 LOCAL_REPO=${LOCAL_REPO:-$DEFAULT_LOCAL_REPO}
 MIRROR_REPO=${MIRROR_REPO:-$DEFAULT_MIRROR_REPO}
@@ -43,6 +48,8 @@ MIRROR_HOST=${MIRROR_HOST:-garfee@10.0.16.52}
 POLL_INTERVAL=${POLL_INTERVAL:-120}
 ALERT_EMAIL=${ALERT_EMAIL:-xiaofeng.guan@enflame-tech.com}
 REMOTE_TMP_DIR=${REMOTE_TMP_DIR:-/tmp/choreo-sync}
+LOG_FILE=${LOG_FILE:-}
+EXCLUDE_BRANCHES=${EXCLUDE_BRANCHES:-main}
 
 timestamp() {
     date '+%F %T'
@@ -52,6 +59,22 @@ log() {
     echo "[$(timestamp)] $*"
 }
 
+setup_logging() {
+    if [[ $LOG_ENABLED -ne 1 ]]; then
+        return 0
+    fi
+
+    if [[ -z "$LOG_FILE" ]]; then
+        LOG_FILE="$STATE_DIR/sync.log"
+    else
+        LOG_FILE=$(resolve_state_path "$LOG_FILE")
+    fi
+
+    mkdir -p "$(dirname "$LOG_FILE")"
+    exec > >(tee -a "$LOG_FILE") 2>&1
+    log "file logging enabled: $LOG_FILE"
+}
+
 usage() {
     cat <<EOF
 Usage: $0 [options]
@@ -59,6 +82,11 @@ Usage: $0 [options]
 Options:
     --once                     run exactly one sync cycle, then exit
     --init                     clone local and/or mirror repos if missing
+    --sync-deletions           propagate branch deletions when safely inferred
+    --dry-run                  show planned changes without pushing or deleting
+    --log                      enable file logging to the default log path
+    --log-file PATH            enable file logging to PATH
+    --exclude-branch NAME      exclude a branch from sync/deletion checks (repeatable)
     --local-repo PATH          local repo path (default: $DEFAULT_LOCAL_REPO)
     --mirror-repo PATH         mirror repo path on MIRROR_HOST (default: $DEFAULT_MIRROR_REPO)
     --mirror-host HOST         mirror ssh target (default: $MIRROR_HOST)
@@ -72,6 +100,9 @@ Options:
 
 Examples:
     $0 --once
+    $0 --once --log
+    $0 --sync-deletions --log-file logs/sync.log
+    $0 --dry-run --exclude-branch main --exclude-branch release/pre-beta
     $0 --local-repo ~/dev/choreo --mirror-host garfee@10.0.16.52 --mirror-repo ~/dev/choreo/
     $0 --init --local-repo ~/work/choreo --mirror-repo ~/dev/choreo/
 EOF
@@ -167,12 +198,102 @@ ensure_state_dirs() {
     STATE_DIR=${STATE_DIR:-$LOCAL_REPO/.git/sync-remotes}
     STATE_DIR=$(resolve_state_path "$STATE_DIR")
     ALERT_STATE_DIR="$STATE_DIR/alerts"
+    SNAPSHOT_LOCAL_BRANCHES="$STATE_DIR/prev-local-branches.txt"
+    SNAPSHOT_MIRROR_BRANCHES="$STATE_DIR/prev-mirror-branches.txt"
+    CURRENT_LOCAL_BRANCHES="$STATE_DIR/current-local-branches.txt"
+    CURRENT_MIRROR_BRANCHES="$STATE_DIR/current-mirror-branches.txt"
     LOCAL_OUT_BUNDLE="$STATE_DIR/local-to-mirror.bundle"
     LOCAL_IN_BUNDLE="$STATE_DIR/mirror-to-local.bundle"
     REMOTE_IN_BUNDLE="$REMOTE_TMP_DIR/local-to-mirror.bundle"
     REMOTE_OUT_BUNDLE="$REMOTE_TMP_DIR/mirror-to-local.bundle"
 
     mkdir -p "$STATE_DIR" "$ALERT_STATE_DIR"
+}
+
+current_local_branch_names() {
+    lgit for-each-ref --format='%(refname:strip=3)' "refs/remotes/$LOCAL_REMOTE" | grep -v '^HEAD$' | sort -u
+}
+
+current_mirror_branch_names() {
+    ssh "$MIRROR_HOST" bash -s -- "$MIRROR_REPO" "$MIRROR_REMOTE" <<'EOF'
+set -euo pipefail
+
+repo_dir="$1"
+remote_name="$2"
+
+if [[ "$repo_dir" == '~' ]]; then
+    repo_dir="$HOME"
+elif [[ "$repo_dir" == ~/* ]]; then
+    repo_dir="$HOME/${repo_dir#~/}"
+elif [[ "$repo_dir" != /* ]]; then
+    repo_dir="$HOME/$repo_dir"
+fi
+
+git -C "$repo_dir" for-each-ref --format='%(refname:strip=3)' "refs/remotes/$remote_name" | grep -v '^HEAD$' | sort -u
+EOF
+}
+
+save_branch_snapshots() {
+    current_local_branch_names > "$SNAPSHOT_LOCAL_BRANCHES"
+    current_mirror_branch_names > "$SNAPSHOT_MIRROR_BRANCHES"
+}
+
+collect_current_branch_views() {
+    current_local_branch_names > "$CURRENT_LOCAL_BRANCHES"
+    current_mirror_branch_names > "$CURRENT_MIRROR_BRANCHES"
+}
+
+snapshot_has_branch() {
+    local file="$1"
+    local branch="$2"
+
+    [[ -f "$file" ]] && grep -Fxq -- "$branch" "$file"
+}
+
+branch_previously_shared() {
+    local branch="$1"
+
+    snapshot_has_branch "$SNAPSHOT_LOCAL_BRANCHES" "$branch" && snapshot_has_branch "$SNAPSHOT_MIRROR_BRANCHES" "$branch"
+}
+
+branch_is_excluded() {
+    local branch="$1"
+    local item
+
+    for item in $EXCLUDE_BRANCHES; do
+        [[ -n "$item" ]] || continue
+        [[ "$branch" == "$item" ]] && return 0
+    done
+
+    return 1
+}
+
+maybe_run_local_push() {
+    local source_ref="$1"
+    local target_ref="$2"
+    local description="$3"
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        log "dry-run: would push $description to local remote '$LOCAL_REMOTE' as '$target_ref'"
+        return 0
+    fi
+
+    if ! lgit push "$LOCAL_REMOTE" "$source_ref:$target_ref"; then
+        warn "git-sync push warning" "Failed to push $description to local remote '$LOCAL_REMOTE'."
+    fi
+}
+
+maybe_run_local_delete() {
+    local branch="$1"
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        log "dry-run: would delete branch '$branch' from local remote '$LOCAL_REMOTE'"
+        return 0
+    fi
+
+    if ! lgit push "$LOCAL_REMOTE" ":refs/heads/$branch"; then
+        warn "git-sync delete warning" "Failed to delete branch '$branch' from local remote '$LOCAL_REMOTE'."
+    fi
 }
 
 ensure_local_repo() {
@@ -404,9 +525,93 @@ push_to_local_remote() {
     local target_ref="$2"
     local description="$3"
 
-    if ! lgit push "$LOCAL_REMOTE" "$source_ref:$target_ref"; then
-        warn "git-sync push warning" "Failed to push $description to local remote '$LOCAL_REMOTE'."
+    maybe_run_local_push "$source_ref" "$target_ref" "$description"
+}
+
+push_delete_local_branch() {
+    local branch="$1"
+
+    maybe_run_local_delete "$branch"
+}
+
+push_delete_mirror_branch() {
+    local branch="$1"
+    local output
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        log "dry-run: would delete branch '$branch' from mirror remote '$MIRROR_REMOTE'"
+        return 0
     fi
+
+    output=$(ssh "$MIRROR_HOST" bash -s -- "$MIRROR_REPO" "$MIRROR_REMOTE" "$branch" <<'EOF'
+set -euo pipefail
+
+repo_dir="$1"
+remote_name="$2"
+branch="$3"
+
+if [[ "$repo_dir" == '~' ]]; then
+    repo_dir="$HOME"
+elif [[ "$repo_dir" == ~/* ]]; then
+    repo_dir="$HOME/${repo_dir#~/}"
+elif [[ "$repo_dir" != /* ]]; then
+    repo_dir="$HOME/$repo_dir"
+fi
+
+if ! git -C "$repo_dir" push "$remote_name" ":refs/heads/$branch"; then
+    echo "WARN::Failed to delete branch '$branch' from mirror remote '$remote_name'."
+fi
+EOF
+    )
+
+    [[ -n "$output" ]] && printf '%s\n' "$output"
+    while IFS= read -r line; do
+        [[ "$line" == WARN::* ]] || continue
+        warn "git-sync delete warning" "${line#WARN::}"
+    done <<< "$output"
+}
+
+sync_branch_deletions() {
+    local branch
+    local local_has
+    local mirror_has
+
+    if [[ $SYNC_DELETIONS -ne 1 ]]; then
+        return 0
+    fi
+
+    if [[ ! -f "$SNAPSHOT_LOCAL_BRANCHES" || ! -f "$SNAPSHOT_MIRROR_BRANCHES" ]]; then
+        log "no prior branch snapshot found; skip branch deletion sync this cycle"
+        return 0
+    fi
+
+    collect_current_branch_views
+
+    while IFS= read -r branch; do
+        [[ -n "$branch" ]] || continue
+        branch_is_excluded "$branch" && continue
+        branch_previously_shared "$branch" || continue
+
+        local_has=0
+        mirror_has=0
+        snapshot_has_branch "$CURRENT_LOCAL_BRANCHES" "$branch" && local_has=1
+        snapshot_has_branch "$CURRENT_MIRROR_BRANCHES" "$branch" && mirror_has=1
+
+        if [[ $local_has -eq 1 && $mirror_has -eq 0 ]]; then
+            log "branch '$branch' was deleted on mirror; deleting it from local remote '$LOCAL_REMOTE'"
+            push_delete_local_branch "$branch"
+        elif [[ $local_has -eq 0 && $mirror_has -eq 1 ]]; then
+            log "branch '$branch' was deleted locally; deleting it from mirror remote '$MIRROR_REMOTE'"
+            push_delete_mirror_branch "$branch"
+        fi
+    done < <(
+        {
+            cat "$CURRENT_LOCAL_BRANCHES"
+            cat "$CURRENT_MIRROR_BRANCHES"
+            cat "$SNAPSHOT_LOCAL_BRANCHES"
+            cat "$SNAPSHOT_MIRROR_BRANCHES"
+        } | sort -u
+    )
 }
 
 sync_local_remote_from_mirror() {
@@ -423,6 +628,7 @@ sync_local_remote_from_mirror() {
 
     while IFS= read -r branch; do
         [[ -n "$branch" ]] || continue
+        branch_is_excluded "$branch" && continue
 
         local_ref="refs/remotes/$LOCAL_REMOTE/$branch"
         mirror_ref="refs/sync/mirror/remotes/$MIRROR_REMOTE/$branch"
@@ -480,17 +686,32 @@ pull_mirror_bundle_to_local() {
 sync_mirror_remote_from_local() {
     local output
 
-    output=$(ssh "$MIRROR_HOST" bash -s -- \
-        "$MIRROR_REPO" \
-        "$MIRROR_REMOTE" \
-        "$LOCAL_REMOTE" \
-        "$REMOTE_IN_BUNDLE" <<'EOF'
+        if [[ $DRY_RUN -eq 1 ]]; then
+                output=$(ssh "$MIRROR_HOST" bash -s -- \
+                "$MIRROR_REPO" \
+                "$MIRROR_REMOTE" \
+                "$LOCAL_REMOTE" \
+                "$REMOTE_IN_BUNDLE" \
+                "$DRY_RUN" \
+                "$EXCLUDE_BRANCHES" <<'EOF'
 set -euo pipefail
 
 repo_dir="$1"
 mirror_remote="$2"
 local_remote="$3"
 incoming_bundle="$4"
+dry_run="$5"
+exclude_branches="$6"
+
+branch_is_excluded() {
+    local branch="$1"
+    local item
+    for item in $exclude_branches; do
+        [[ -n "$item" ]] || continue
+        [[ "$branch" == "$item" ]] && return 0
+    done
+    return 1
+}
 
 if [[ "$repo_dir" == '~' ]]; then
     repo_dir="$HOME"
@@ -510,6 +731,102 @@ git -C "$repo_dir" fetch --no-tags "$incoming_bundle" \
 
 while IFS= read -r branch; do
     [[ -n "$branch" ]] || continue
+    branch_is_excluded "$branch" && continue
+
+    mirror_ref="refs/remotes/$mirror_remote/$branch"
+    local_ref="refs/sync/local/remotes/$local_remote/$branch"
+    mirror_sha=""
+    local_sha=""
+
+    git -C "$repo_dir" show-ref --verify --quiet "$mirror_ref" && mirror_sha=$(git -C "$repo_dir" rev-parse "$mirror_ref")
+    git -C "$repo_dir" show-ref --verify --quiet "$local_ref" && local_sha=$(git -C "$repo_dir" rev-parse "$local_ref")
+
+    if [[ -z "$mirror_sha" && -n "$local_sha" ]]; then
+        echo "dry-run: would push branch '$branch' to mirror remote '$mirror_remote'"
+    elif [[ -n "$mirror_sha" && -n "$local_sha" ]]; then
+        if [[ "$mirror_sha" == "$local_sha" ]]; then
+            continue
+        elif git -C "$repo_dir" merge-base --is-ancestor "$mirror_ref" "$local_ref"; then
+            echo "dry-run: would push branch '$branch' to mirror remote '$mirror_remote'"
+        fi
+    fi
+done < <(
+    {
+        git -C "$repo_dir" for-each-ref --format='%(refname:strip=3)' "refs/remotes/$mirror_remote"
+        git -C "$repo_dir" for-each-ref --format='%(refname:strip=5)' "refs/sync/local/remotes/$local_remote"
+    } | grep -v '^HEAD$' | sort -u
+)
+
+while IFS= read -r tag; do
+    [[ -n "$tag" ]] || continue
+
+    mirror_tag_ref="refs/tags/$tag"
+    local_tag_ref="refs/sync/local/tags/$tag"
+    mirror_tag_sha=""
+    local_tag_sha=""
+
+    git -C "$repo_dir" show-ref --verify --quiet "$mirror_tag_ref" && mirror_tag_sha=$(git -C "$repo_dir" rev-parse "$mirror_tag_ref")
+    git -C "$repo_dir" show-ref --verify --quiet "$local_tag_ref" && local_tag_sha=$(git -C "$repo_dir" rev-parse "$local_tag_ref")
+
+    if [[ -z "$mirror_tag_sha" && -n "$local_tag_sha" ]]; then
+        echo "dry-run: would push tag '$tag' to mirror remote '$mirror_remote'"
+    fi
+done < <(
+    {
+        git -C "$repo_dir" for-each-ref --format='%(refname:strip=2)' refs/tags
+        git -C "$repo_dir" for-each-ref --format='%(refname:strip=4)' refs/sync/local/tags
+    } | sort -u
+)
+EOF
+                )
+
+                printf '%s\n' "$output"
+                return 0
+        fi
+
+    output=$(ssh "$MIRROR_HOST" bash -s -- \
+        "$MIRROR_REPO" \
+        "$MIRROR_REMOTE" \
+        "$LOCAL_REMOTE" \
+                "$REMOTE_IN_BUNDLE" \
+                "$EXCLUDE_BRANCHES" <<'EOF'
+set -euo pipefail
+
+repo_dir="$1"
+mirror_remote="$2"
+local_remote="$3"
+incoming_bundle="$4"
+exclude_branches="$5"
+
+branch_is_excluded() {
+    local branch="$1"
+    local item
+    for item in $exclude_branches; do
+        [[ -n "$item" ]] || continue
+        [[ "$branch" == "$item" ]] && return 0
+    done
+    return 1
+}
+
+if [[ "$repo_dir" == '~' ]]; then
+    repo_dir="$HOME"
+elif [[ "$repo_dir" == ~/* ]]; then
+    repo_dir="$HOME/${repo_dir#~/}"
+elif [[ "$repo_dir" != /* ]]; then
+    repo_dir="$HOME/$repo_dir"
+fi
+
+while IFS= read -r ref; do
+    git -C "$repo_dir" update-ref -d "$ref"
+done < <(git -C "$repo_dir" for-each-ref --format='%(refname)' refs/sync/local)
+
+git -C "$repo_dir" fetch --no-tags "$incoming_bundle" \
+    "refs/remotes/$local_remote/*:refs/sync/local/remotes/$local_remote/*" \
+    "refs/tags/*:refs/sync/local/tags/*"
+
+while IFS= read -r branch; do
+    [[ -n "$branch" ]] || continue
+    branch_is_excluded "$branch" && continue
 
     mirror_ref="refs/remotes/$mirror_remote/$branch"
     local_ref="refs/sync/local/remotes/$local_remote/$branch"
@@ -578,6 +895,10 @@ run_cycle() {
     refresh_local_repo
     refresh_mirror_repo
 
+    sync_branch_deletions
+    refresh_local_repo
+    refresh_mirror_repo
+
     log "creating local bundle from '$LOCAL_REPO'"
     create_local_bundle "$LOCAL_OUT_BUNDLE"
 
@@ -601,6 +922,7 @@ run_cycle() {
 
     refresh_local_repo
     refresh_mirror_repo
+    save_branch_snapshots
 }
 
 parse_args() {
@@ -611,6 +933,28 @@ parse_args() {
                 ;;
             --init)
                 INIT_MODE=1
+                ;;
+            --sync-deletions)
+                SYNC_DELETIONS=1
+                ;;
+            --dry-run)
+                DRY_RUN=1
+                ;;
+            --log)
+                LOG_ENABLED=1
+                ;;
+            --log-file)
+                LOG_ENABLED=1
+                LOG_FILE="$2"
+                shift
+                ;;
+            --exclude-branch)
+                if [[ -n "$EXCLUDE_BRANCHES" ]]; then
+                    EXCLUDE_BRANCHES="$EXCLUDE_BRANCHES $2"
+                else
+                    EXCLUDE_BRANCHES="$2"
+                fi
+                shift
                 ;;
             --local-repo)
                 LOCAL_REPO="$2"
@@ -675,6 +1019,7 @@ main() {
     LOCAL_REPO=$(make_abs_path "$LOCAL_REPO")
     ensure_local_repo
     ensure_state_dirs
+    setup_logging
     ensure_mirror_repo
 
     if [[ $RUN_ONCE -eq 1 ]]; then
