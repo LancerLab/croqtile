@@ -1,0 +1,18 @@
+// RUN: choreo -es -t cute %s -o - | FileCheck %s
+
+__co__ f32 [64] numerics_core6(f32 [64] input) {
+  f32[input.span(0)] output;
+  parallel p by 64 {
+    x = input.at(p);
+    output.at(p) = __sqrt(x + 2.0f) + __rsqrt(x + 2.0f) + __sin(x) +
+                   __sinh(x * 0.25f) + __cos(x) + __cosh(x * 0.25f);
+  }
+  return output;
+}
+
+// CHECK: choreo::nv_cute::numerics::sqrt(x + 2.000000f)
+// CHECK: choreo::nv_cute::numerics::rsqrt(x + 2.000000f)
+// CHECK: choreo::nv_cute::numerics::sin(x)
+// CHECK: choreo::nv_cute::numerics::sinh(x * 0.250000f)
+// CHECK: choreo::nv_cute::numerics::cos(x)
+// CHECK: choreo::nv_cute::numerics::cosh(x * 0.250000f)

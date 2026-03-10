@@ -843,10 +843,6 @@ public:
   }
 
   bool Visit(AST::Call& n) override {
-    if (n.IsArith())
-      Error1(n.LOC(),
-             "Arithmetic built-in function is yet to supported on CUDA.");
-
     return true;
   }
 

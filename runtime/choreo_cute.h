@@ -3016,6 +3016,134 @@ struct SM90_SPARSE_16x8x64_F32E5M2E5M2F32_TN {
 namespace choreo {
 namespace nv_cute {
 
+namespace numerics {
+
+template <typename T>
+using DecayT = std::remove_cv_t<std::remove_reference_t<T>>;
+
+template <typename T>
+CUTE_HOST_DEVICE auto to_math(T value) {
+  using U = DecayT<T>;
+  if constexpr (std::is_same_v<U, f64>) {
+    return static_cast<double>(value);
+  } else {
+    return static_cast<float>(to_f32(value));
+  }
+}
+
+template <typename T, typename U>
+CUTE_HOST_DEVICE T from_math(U value) {
+  if constexpr (std::is_same_v<T, f64>) {
+    return static_cast<f64>(value);
+  } else if constexpr (std::is_same_v<T, f32>) {
+    return static_cast<f32>(value);
+  } else {
+    return utils::from_f32<T>(static_cast<float>(value));
+  }
+}
+
+#define CHOREO_CUTE_UNARY_NUMERIC(NAME, F32, F64)                               \
+  template <typename T>                                                         \
+  CUTE_HOST_DEVICE auto NAME(T value) {                                         \
+    using U = DecayT<T>;                                                        \
+    if constexpr (std::is_same_v<U, f64>) {                                     \
+      return from_math<U>(F64(to_math(value)));                                 \
+    } else {                                                                    \
+      return from_math<U>(F32(to_math(value)));                                 \
+    }                                                                           \
+  }
+
+#define CHOREO_CUTE_BINARY_NUMERIC(NAME, F32, F64)                              \
+  template <typename A, typename B>                                             \
+  CUTE_HOST_DEVICE auto NAME(A lhs, B rhs) {                                    \
+    using R = DecayT<A>;                                                        \
+    if constexpr (std::is_same_v<DecayT<A>, f64> ||                             \
+                  std::is_same_v<DecayT<B>, f64>) {                             \
+      return from_math<R>(F64(to_math(lhs), to_math(rhs)));                     \
+    } else {                                                                    \
+      return from_math<R>(F32(to_math(lhs), to_math(rhs)));                     \
+    }                                                                           \
+  }
+
+CHOREO_CUTE_UNARY_NUMERIC(acos, ::acosf, ::acos);
+CHOREO_CUTE_UNARY_NUMERIC(asin, ::asinf, ::asin);
+CHOREO_CUTE_UNARY_NUMERIC(atan, ::atanf, ::atan);
+CHOREO_CUTE_UNARY_NUMERIC(ceil, ::ceilf, ::ceil);
+CHOREO_CUTE_UNARY_NUMERIC(cos, ::cosf, ::cos);
+CHOREO_CUTE_UNARY_NUMERIC(cosh, ::coshf, ::cosh);
+CHOREO_CUTE_UNARY_NUMERIC(exp, ::expf, ::exp);
+CHOREO_CUTE_UNARY_NUMERIC(expm1, ::expm1f, ::expm1);
+CHOREO_CUTE_UNARY_NUMERIC(floor, ::floorf, ::floor);
+CHOREO_CUTE_UNARY_NUMERIC(log, ::logf, ::log);
+CHOREO_CUTE_UNARY_NUMERIC(log1p, ::log1pf, ::log1p);
+CHOREO_CUTE_UNARY_NUMERIC(round, ::roundf, ::round);
+CHOREO_CUTE_UNARY_NUMERIC(sin, ::sinf, ::sin);
+CHOREO_CUTE_UNARY_NUMERIC(sinh, ::sinhf, ::sinh);
+CHOREO_CUTE_UNARY_NUMERIC(sqrt, ::sqrtf, ::sqrt);
+CHOREO_CUTE_UNARY_NUMERIC(tan, ::tanf, ::tan);
+CHOREO_CUTE_UNARY_NUMERIC(tanh, ::tanhf, ::tanh);
+
+CHOREO_CUTE_BINARY_NUMERIC(atan2, ::atan2f, ::atan2);
+CHOREO_CUTE_BINARY_NUMERIC(pow, ::powf, ::pow);
+
+template <typename T>
+CUTE_HOST_DEVICE auto rsqrt(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  return from_math<U>(decltype(x)(1) / (std::is_same_v<U, f64> ? ::sqrt(x)
+                                                          : ::sqrtf(x)));
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto sigmoid(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  auto one = decltype(x)(1);
+  auto y = one / (one + (std::is_same_v<U, f64> ? ::exp(-x) : ::expf(-x)));
+  return from_math<U>(y);
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto softplus(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  auto y = std::is_same_v<U, f64> ? ::log1p(::exp(x)) : ::log1pf(::expf(x));
+  return from_math<U>(y);
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto gelu(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  auto k0 = std::is_same_v<U, f64> ? 0.044715 : 0.044715f;
+  auto k1 = std::is_same_v<U, f64> ? 0.7978845608028654 : 0.7978845834732056f;
+  auto y = x * (std::is_same_v<U, f64> ? 0.5 : 0.5f) *
+           ((std::is_same_v<U, f64> ? 1.0 : 1.0f) +
+            (std::is_same_v<U, f64>
+                 ? ::tanh(k1 * (x + k0 * x * x * x))
+                 : ::tanhf(k1 * (x + k0 * x * x * x))));
+  return from_math<U>(y);
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto sign(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  return from_math<U>((x > 0) - (x < 0));
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto isfinite(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  return from_math<U>(::isfinite(x) ? 1 : 0);
+}
+
+#undef CHOREO_CUTE_UNARY_NUMERIC
+#undef CHOREO_CUTE_BINARY_NUMERIC
+
+} // namespace numerics
+
 // warp-level operation implementation
 namespace warp_cooperative {
 

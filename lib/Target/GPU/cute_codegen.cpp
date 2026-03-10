@@ -5545,16 +5545,10 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
   std::ostringstream oss;
   auto func_name = [&n](const std::string& name) -> std::string {
     if (!n.IsArith()) return name;
-    if (name == "__log")
-      return "tcle::ln";
-    else if (name == "__pow")
-      return "tcle::power";
-    else {
-      const std::string prefix = "__";
-      std::string func_name = name;
-      if (auto res = RemovePrefixOrNull(prefix, name)) func_name = *res;
-      return "tcle::" + func_name;
-    }
+    const std::string prefix = "__";
+    std::string func_name = name;
+    if (auto res = RemovePrefixOrNull(prefix, name)) func_name = *res;
+    return "choreo::nv_cute::numerics::" + func_name;
   };
 
   oss << func_name(n.function->name);
