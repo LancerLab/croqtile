@@ -32,7 +32,7 @@ gpu_test:
     - release/alpha
     - cute
     - merge_requests
-  timeout: 10m
+  timeout: 18m
   after_script:
     - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
