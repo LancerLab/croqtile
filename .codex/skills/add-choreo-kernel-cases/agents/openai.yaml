@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add Choreo Kernel Cases"
+  short_description: "Generate Choreo matmul kernel case files fast."
+  default_prompt: "Create or update a Choreo benchmark matmul kernel case with selected precision, architecture, and optimization options."

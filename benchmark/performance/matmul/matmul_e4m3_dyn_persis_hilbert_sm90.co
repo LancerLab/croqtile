@@ -1,0 +1,269 @@
+#include <cstring>
+#include <cstdlib>
+
+// H800 PCIe (Hopper PCIe class) Tensor Core peak throughput.
+#define H800_PCIE_PEAK_F16_TFLOPS 1513
+#define H800_PCIE_PEAK_F8_TFLOPS 3026
+
+// Optimization: Persistent + Hilbert curve scheduling
+#define MATMUL_WARP_M 64
+#define MATMUL_WARP_N 128
+#define MATMUL_TILE_M 64
+#define MATMUL_TILE_K 128
+#define MATMUL_WARP_K 32
+#define MATMUL_SWIZ 128
+#define NUM_SMS 132
+
+#if MATMUL_WARP_K != 32
+#error "MATMUL_WARP_K must be 32 for e4m3 WGMMA constraints"
+#endif
+
+#if MATMUL_WARP_M != 64
+#error "MATMUL_WARP_M must be 64 for e4m3 WGMMA constraints"
+#endif
+
+#if MATMUL_TILE_M != MATMUL_WARP_M
+#error "MATMUL_TILE_M must equal MATMUL_WARP_M"
+#endif
+
+#if MATMUL_WARP_N < 8 || MATMUL_WARP_N > 256 || (MATMUL_WARP_N % 8) != 0
+#error "MATMUL_WARP_N must be in [8,256] and divisible by 8 for SM90 WGMMA e4m3"
+#endif
+
+#if MATMUL_SWIZ != MATMUL_TILE_K
+#error "MATMUL_SWIZ must equal MATMUL_TILE_K for e4m3 kernel"
+#endif
+
+#if MATMUL_SWIZ != 32 && MATMUL_SWIZ != 64 && MATMUL_SWIZ != 128
+#error "MATMUL_SWIZ must be one of 32, 64, 128"
+#endif
+
+#define MATMUL_DEFAULT_M 2048
+#define MATMUL_DEFAULT_N 2048
+#define MATMUL_DEFAULT_K 2048
+
+// Persistent kernel with Hilbert curve tile scheduling.
+// schedule_m / schedule_n: device arrays of length total_tiles,
+// giving the (block_m, block_n) for each tile in Hilbert order.
+// SM #k processes tiles at indices k, k+NUM_SMS, k+2*NUM_SMS, ...
+__co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f16 [M, N] output,
+                   global s32 [T] schedule_m, global s32 [T] schedule_n) {
+
+  int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
+
+  parallel block_id by NUM_SMS : block {
+    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        // Hilbert-ordered tile coordinates (precomputed host-side)
+        int block_m = schedule_m.at(tile_id);
+        int block_n = schedule_n.at(tile_id);
+
+        mc = mma.fill.f16 0.0f;
+        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).step(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+          tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
+
+          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+            parallel p by 1 : group-4 {
+              ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
+              mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+              mma.row.row mc, ma, mb;
+            }
+          }
+        }
+        mma.store mc, output_s;
+        tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// ===================================================================
+// Hilbert curve utilities (host-side)
+// ===================================================================
+static void hilbert_rot(int n, int& x, int& y, int rx, int ry) {
+  if (ry == 0) {
+    if (rx == 1) { x = n - 1 - x; y = n - 1 - y; }
+    int t = x; x = y; y = t;
+  }
+}
+
+// Convert Hilbert distance d to (x, y) in an n*n grid (n must be power of 2).
+static void hilbert_d2xy(int n, int d, int& x, int& y) {
+  x = y = 0;
+  for (int s = 1; s < n; s *= 2) {
+    int rx = 1 & (d / 2);
+    int ry = 1 & (d ^ rx);
+    hilbert_rot(s, x, y, rx, ry);
+    x += s * rx;
+    y += s * ry;
+    d /= 4;
+  }
+}
+
+// Next power of 2 >= v.
+static int next_pow2(int v) {
+  int p = 1;
+  while (p < v) p *= 2;
+  return p;
+}
+
+// Build Hilbert-ordered schedule for an (tiles_m * tiles_n) grid.
+// Returns the number of valid tiles written to schedule_m/schedule_n.
+static int build_hilbert_schedule(int tiles_m, int tiles_n,
+                                  int* schedule_m, int* schedule_n) {
+  int n = next_pow2(tiles_m > tiles_n ? tiles_m : tiles_n);
+  int count = 0;
+  for (int d = 0; d < n * n; ++d) {
+    int x, y;
+    hilbert_d2xy(n, d, x, y);
+    if (x < tiles_m && y < tiles_n) {
+      schedule_m[count] = x;
+      schedule_n[count] = y;
+      ++count;
+    }
+  }
+  return count;
+}
+
+int main(int argc, char** argv) {
+  bool enable_timing = true;
+  bool skip_verify = false;
+  double user_flops = -1.0;
+  for (int i = 1; i < argc; ++i) {
+    if (std::strncmp(argv[i], "--flops=", 8) == 0) {
+      user_flops = std::atof(argv[i] + 8);
+      continue;
+    }
+  }
+
+  const char* skip_verify_env = std::getenv("CHOREO_SKIP_VERIFY");
+  if (skip_verify_env && skip_verify_env[0] == '1') {
+    skip_verify = true;
+  }
+
+  size_t M = MATMUL_DEFAULT_M;
+  size_t N = MATMUL_DEFAULT_N;
+  size_t K = MATMUL_DEFAULT_K;
+
+  // Build Hilbert schedule
+  int tiles_m = (M + MATMUL_WARP_M - 1) / MATMUL_WARP_M;
+  int tiles_n = (N + MATMUL_WARP_N - 1) / MATMUL_WARP_N;
+  int total_tiles = tiles_m * tiles_n;
+
+  int* sched_m_h = (int*)std::malloc(total_tiles * sizeof(int));
+  int* sched_n_h = (int*)std::malloc(total_tiles * sizeof(int));
+  int count = build_hilbert_schedule(tiles_m, tiles_n, sched_m_h, sched_n_h);
+  if (count != total_tiles) {
+    std::cerr << "Hilbert schedule mismatch: expected " << total_tiles
+              << " tiles, got " << count << "\n";
+    return 1;
+  }
+
+  int *sched_m_d = nullptr, *sched_n_d = nullptr;
+  choreo::abend_true(cudaMalloc(&sched_m_d, total_tiles * sizeof(int)));
+  choreo::abend_true(cudaMalloc(&sched_n_d, total_tiles * sizeof(int)));
+  choreo::abend_true(cudaMemcpy(sched_m_d, sched_m_h, total_tiles * sizeof(int), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(sched_n_d, sched_n_h, total_tiles * sizeof(int), cudaMemcpyHostToDevice));
+  std::free(sched_m_h);
+  std::free(sched_n_h);
+
+  auto sched_m_view = choreo::make_spanview<choreo::s32, 1>(sched_m_d, {(size_t)total_tiles});
+  auto sched_n_view = choreo::make_spanview<choreo::s32, 1>(sched_n_d, {(size_t)total_tiles});
+
+  // Allocate matmul data
+  auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+  auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+  auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+  lhs_h.fill_random(0, 2);
+  rhs_h.fill_random(0, 2);
+  res_h.fill(0.0f);
+
+  __nv_fp8_e4m3 *a_d = nullptr;
+  __nv_fp8_e4m3 *b_d = nullptr;
+  half *c_d = nullptr;
+  choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3)));
+  choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(__nv_fp8_e4m3)));
+  choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));
+
+  choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaDeviceSynchronize());
+
+  auto lhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K});
+  auto rhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {N, K});
+  auto res_d = choreo::make_spanview<choreo::f16, 2>(c_d, {M, N});
+
+  int warmup = 10;
+  int repeat = 500;
+  const char* warmup_env = std::getenv("CHOREO_TIMING_WARMUP");
+  const char* repeat_env = std::getenv("CHOREO_TIMING_REPEAT");
+  if (warmup_env) {
+    int value = std::atoi(warmup_env);
+    if (value >= 0) warmup = value;
+  }
+  if (repeat_env) {
+    int value = std::atoi(repeat_env);
+    if (value > 0) repeat = value;
+  }
+  choreo::TimerOption topt;
+  topt.warmup = warmup;
+  topt.repeat = repeat;
+  auto avg_ms = choreo::timing([&]() {
+    matmul(lhs_d, rhs_d, res_d, sched_m_view, sched_n_view);
+    cudaDeviceSynchronize();
+  }, topt);
+  std::cout << "Timing avg ms: " << avg_ms << "\n";
+
+  double flops = (user_flops > 0.0) ? user_flops : (2.0 * double(M) * double(N) * double(K));
+  double tflops = (flops / (avg_ms / 1000.0)) / 1e12;
+  std::cout << "TFLOPS: " << tflops << "\n";
+
+  double eff = (tflops / H800_PCIE_PEAK_F8_TFLOPS) * 100.0;
+  std::cout << "HW efficiency: " << eff << "%\n";
+
+  choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+  choreo::abend_true(cudaDeviceSynchronize());
+
+  if (skip_verify) {
+    std::cout << "Test Passed (verify skipped)\n" << std::endl;
+    cudaFree(sched_m_d); cudaFree(sched_n_d);
+    return 0;
+  }
+
+  auto lhs_view = lhs_h.view();
+  auto rhs_view = rhs_h.view();
+  auto res_view = res_h.view();
+
+  float tolerance = 0.08f;
+  auto rel_error = [](float ref, float got) {
+    float abs_ref = std::abs(ref);
+    float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
+    return std::abs(ref - got) / denom;
+  };
+  // verification
+  for (size_t i = 0; i < 256; ++i) {
+    for (size_t j = 0; j < 256; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < lhs_view.shape()[1]; ++k)
+        ref += static_cast<float>(lhs_view[i][k]) * static_cast<float>(rhs_view[j][k]);
+      float got = __half2float(res_view[i][j]);
+      auto delta = rel_error(ref, got);
+      if (delta >= tolerance) {
+        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << got << ", delta: " << delta * 100 << "%\n";
+      }
+      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+    }
+  }
+
+  std::cout << "Test Passed\n" << std::endl;
+
+  cudaFree(sched_m_d);
+  cudaFree(sched_n_d);
+}
