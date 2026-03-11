@@ -2406,35 +2406,51 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
       std::is_same_v<AccT, f16> || std::is_same_v<AccT, float>,
       "scale_accumulator only supports f16 or float accumulator type");
 
-  int itd = threadIdx.x % 128;
-  int lane = itd % 32;
-  int warp = itd / 32;
-  int row0 = warp * 16 + lane / 4;
+  int itd = threadIdx.x & 127;
+  int lane = itd & 31;
+  int warp = itd >> 5;
+  int row0 = warp * 16 + (lane >> 2);
   int row1 = row0 + 8;
-  int col_num = N / 8;
-  float sa0 = scale_a_ptr[row0 * scale_a_ld];
-  float sa1 = scale_a_ptr[row1 * scale_a_ld];
+  constexpr int col_num = N / 8;
+
+  float sa0 = __ldg(scale_a_ptr + row0 * scale_a_ld) * scale_b;
+  float sa1 = __ldg(scale_a_ptr + row1 * scale_a_ld) * scale_b;
+
   if constexpr (std::is_same_v<AccT, f16>) {
+#if defined(__USE_CUDA_TYPE__)
+    auto* d2 = reinterpret_cast<__half2*>(d);
+    auto const* scale_d2 = reinterpret_cast<__half2 const*>(scale_d);
+    __half2 sa0_h2 = __float2half2_rn(sa0);
+    __half2 sa1_h2 = __float2half2_rn(sa1);
+
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int base2 = c * 2;
+      d2[base2 + 0] = __hfma2(scale_d2[base2 + 0], sa0_h2, d2[base2 + 0]);
+      d2[base2 + 1] = __hfma2(scale_d2[base2 + 1], sa1_h2, d2[base2 + 1]);
+    }
+#else
   #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
       d[base + 0] +=
-          utils::from_f32<f16>(to_f32(scale_d[base + 0]) * sa0 * scale_b);
+          utils::from_f32<f16>(to_f32(scale_d[base + 0]) * sa0);
       d[base + 1] +=
-          utils::from_f32<f16>(to_f32(scale_d[base + 1]) * sa0 * scale_b);
+          utils::from_f32<f16>(to_f32(scale_d[base + 1]) * sa0);
       d[base + 2] +=
-          utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1 * scale_b);
+          utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1);
       d[base + 3] +=
-          utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1 * scale_b);
+          utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1);
     }
+#endif
   } else if constexpr (std::is_same_v<AccT, float>) {
   #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
-      d[base + 0] += scale_d[base + 0] * sa0 * scale_b;
-      d[base + 1] += scale_d[base + 1] * sa0 * scale_b;
-      d[base + 2] += scale_d[base + 2] * sa1 * scale_b;
-      d[base + 3] += scale_d[base + 3] * sa1 * scale_b;
+      d[base + 0] = fmaf(scale_d[base + 0], sa0, d[base + 0]);
+      d[base + 1] = fmaf(scale_d[base + 1], sa0, d[base + 1]);
+      d[base + 2] = fmaf(scale_d[base + 2], sa1, d[base + 2]);
+      d[base + 3] = fmaf(scale_d[base + 3], sa1, d[base + 3]);
     }
   }
 }
