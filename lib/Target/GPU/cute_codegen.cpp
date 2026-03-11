@@ -544,33 +544,59 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
     // shape that applied mod (%) operation. Anyway, for offset, we only care
     // about the tiled-block's shape
     auto& shape = sops[sop_idx]->GetBlockShape();
-
-    ValueList exprs;
+    auto op = sops[sop_idx];
+    ValueList coords;
     // For each 'a, b, c, ...' inside 'chunkat(a, b, c, ...)', that 'b' inside
     // 'chunkat(a, b, c, ...)' could be bounded var like b = {b0, b1} Therefore,
     // we collect all the expressions first.
-    for (auto p : sops[sop_idx]->IndexNodes()) {
-      if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
-        const auto& vals = o.GetVals();
-        for (auto& val : vals) {
-          if (sbe::ceq(val, sbe::sym("::__choreo_no_tiling__")))
-            exprs.push_back(sbe::nu(0));
-          else
-            exprs.push_back(val);
+    if (!op->IndexNodes().empty()) {
+      for (auto p : op->IndexNodes()) {
+        if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
+          const auto& vals = o.GetVals();
+          for (auto& val : vals) {
+            if (sbe::ceq(val, sbe::sym("::__choreo_no_tiling__")))
+              coords.push_back(sbe::nu(0));
+            else
+              coords.push_back(val);
+          }
+        } else
+          coords.push_back(sbe::sym(OpExprSTR(p, "*", true, IsHost())));
+      }
+    } else {
+      // View.from contributes the logical origin directly to the TMA
+      // coordinates. Unlike chunk/subspan indices, these offsets are already in
+      // the original tensor's coordinate space and must not be scaled by the
+      // view block shape.
+      if (auto offsets = op->GetOffsets()) {
+        for (auto p : offsets->AllValues()) {
+          if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
+            const auto& vals = o.GetVals();
+            for (auto& val : vals) {
+              if (sbe::ceq(val, sbe::sym("::__choreo_no_tiling__")))
+                coords.push_back(sbe::nu(0));
+              else
+                indices[coords.size()] = indices[coords.size()] + val;
+            }
+          } else {
+            indices[coords.size()] =
+                indices[coords.size()] +
+                sbe::sym(OpExprSTR(p, "*", true, IsHost()));
+          }
         }
-      } else
-        exprs.push_back(sbe::sym(OpExprSTR(p, "*", true, IsHost())));
+      } else {
+        coords = ValxN(sbe::nu(0), shape.DimCount());
+      }
     }
 
     if (auto tc = dyn_cast<TransposeConfig>(config)) {
-      assert(tc->dim_values.size() == exprs.size());
+      assert(tc->dim_values.size() == coords.size());
       assert(ca->TilingOperationCount() == 1);
     }
 
-    for (size_t i = 0; i < exprs.size(); ++i) {
+    for (size_t i = 0; i < coords.size(); ++i) {
       // combine 'a' and 'c' between expressions like 'chunkat(a, b).chunk(c,
       // d)'
-      indices[i] = indices[i] + exprs[i] * shape.ValueAt(i);
+      indices[i] = indices[i] + coords[i] * shape.ValueAt(i);
     }
   }
 
@@ -2342,8 +2368,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   bool use_tma = n.IsTMA();
   bool suppress_tma_future = false;
 
-  if (use_tma && CCtx().UseWarpSpec() &&
-      bdim_level == ParallelLevel::GROUPx4) {
+  if (use_tma && CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4) {
     suppress_tma_future = true;
   }
 
@@ -4948,6 +4973,7 @@ show_usage() {
   echo "   --compile-link,      Compile and link"
   echo "   --compile-module,    Compile and generate the module"
   echo "   --gen-fatbin,        Compile and generate the fatbin"
+  echo "   --lib,               Compile and generate the lib"
   echo ""
   echo "  Environment Variables:"
   echo "   CUDA_HOME:           (Must) Cuda compiler installation path"
@@ -5009,6 +5035,13 @@ show_usage() {
     os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file
        << "\n";
   os << "\n  ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
+  // if --lib is set, os << --lib -Xcompiler
+  os << R"(elif [ "$1" == "--lib" ]; then)";
+  if (verbose)
+    os << "\n  echo ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file
+       << " -o " << exe_file << "\n";
+  os << "\n  ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file << " -o "
+     << exe_file << "\n";
   os << "\nelse show_usage";
   os << "\nfi";
 }
