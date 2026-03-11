@@ -318,6 +318,8 @@ private:
   bool wgmma_arrive_state_declared = false;
   bool pending_mbarrier_full_event_array = false;
   std::string pending_mbarrier_full_event_name;
+  std::vector<std::vector<std::string>> hoisted_scale_decl_scopes;
+  std::unordered_set<std::string> active_hoisted_scale_decls;
 
 private:
   void EmitFixedHostHead();
@@ -400,6 +402,8 @@ private:
     recent_tma_tx_bytes.clear();
     saw_explicit_mma_commit = false;
     wgmma_arrive_state_declared = false;
+    hoisted_scale_decl_scopes.clear();
+    active_hoisted_scale_decls.clear();
     ResetLineDirectiveState();
   }
 
@@ -508,6 +512,8 @@ private:
 
   bool ThreadCooperative(AST::DMA&) const;
   bool HasWGMMAInFunction() const;
+  const AST::MMAOperation*
+  FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
   std::pair<std::string, std::string>
   GenTensorDecl(const std::string& name, const std::string& buf_expr,
                 const Storage sto, BaseType bty, const Shape& shp,

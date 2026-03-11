@@ -21,4 +21,7 @@ Option<bool> ptx_barrier(
 Option<bool> use_stmatrix(OptionKind::User, "--stmatrix", "", false,
                           "Use stmatrix PTX instruction for WGMMA accumulator "
                           "store to shared memory.");
+Option<bool> hoist_offset(
+    OptionKind::User, "--hoist-offset", "", false,
+    "Hoist loop-invariant offset/address calculations in GPU codegen.");
 } // end namespace Choreo

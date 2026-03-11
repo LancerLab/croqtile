@@ -54,6 +54,7 @@ extern Option<bool> use_pic;
 extern Option<bool> tma_cluster_aware;
 extern Option<bool> ptx_barrier;
 extern Option<bool> use_stmatrix;
+extern Option<bool> hoist_offset;
 
 namespace Choreo {
 extern Option<bool> sim_sparse;
@@ -227,6 +228,47 @@ bool CuteCodeGen::HasWGMMAInFunction() const {
     if (mma_type == MMAType::WGMMA) { return true; }
   }
   return false;
+}
+
+const AST::MMAOperation*
+CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
+  if (!n) return nullptr;
+
+  if (auto mma = dyn_cast<AST::MMA>(n)) {
+    auto op = mma->GetOperation();
+    if (!op || op->Tag() != AST::MMAOperation::Exec || !op->HasScale())
+      return nullptr;
+
+    auto c_sym = AST::FragName(op->ExecOperand(0));
+    auto scoped_c_sym = InScopeName(c_sym);
+    if (FCtx(fname).FragHasMMAType(scoped_c_sym) &&
+        FCtx(fname).FragIsWGMMA(scoped_c_sym))
+      return op.get();
+    return nullptr;
+  }
+
+  if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
+    for (auto& item : mn->values)
+      if (auto* op = FindFirstScaledWGMMAExec(item)) return op;
+    return nullptr;
+  }
+
+  if (auto if_else = dyn_cast<AST::IfElseBlock>(n)) {
+    if (if_else->GetThenBody())
+      if (auto* op = FindFirstScaledWGMMAExec(if_else->GetThenBody()))
+        return op;
+    if (if_else->GetElseBody())
+      if (auto* op = FindFirstScaledWGMMAExec(if_else->GetElseBody()))
+        return op;
+    return nullptr;
+  }
+
+  if (auto block = dyn_cast<AST::Block>(n)) {
+    return block->GetBody() ? FindFirstScaledWGMMAExec(block->GetBody())
+                            : nullptr;
+  }
+
+  return nullptr;
 }
 
 // return mds name and the declaration string.
@@ -474,6 +516,11 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     DecrIndent();
     IndStream() << "}\n";
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+    if (!hoisted_scale_decl_scopes.empty()) {
+      for (const auto& name : hoisted_scale_decl_scopes.back())
+        active_hoisted_scale_decls.erase(name);
+      hoisted_scale_decl_scopes.pop_back();
+    }
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
       auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
@@ -2686,6 +2733,28 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           n.HasEvent();
 
       auto rev_indices = Reverse(GenIndices(f_ca));
+      std::vector<std::string> hoisted_rev_indices;
+      if (hoist_offset && t_shape.Rank() == 2 && rev_indices.size() == 2) {
+        auto make_dim_name = [&](size_t dim_index) {
+          auto dim = f_sty->GetShape().ValueAt(f_sty->Dims() - 1 - dim_index);
+          auto dim_name = ToLower(UnScopedExpr(ValueSTR(dim)));
+          if (dim_name.empty()) return std::string("d") + std::to_string(dim_index);
+          bool valid = std::all_of(dim_name.begin(), dim_name.end(),
+                                   [](unsigned char ch) {
+                                     return std::isalnum(ch) || ch == '_';
+                                   });
+          if (!valid) return std::string("d") + std::to_string(dim_index);
+          return dim_name;
+        };
+
+        auto base_name = f_ca->data ? f_ca->data->name : std::string("src");
+        for (size_t idx = 0; idx < rev_indices.size(); ++idx) {
+          auto offset_name = base_name + "_" + make_dim_name(idx) + "_offset";
+          ds << d_indent << "const unsigned " << offset_name << " = "
+             << ValueSTR(rev_indices.at(idx)) << ";\n";
+          hoisted_rev_indices.push_back(offset_name);
+        }
+      }
       bool use_ptx_tma_sync =
           (tma_cluster_aware || ptx_barrier) && t_shape.Rank() == 2;
       bool emit_tma_single_guard =
@@ -2711,15 +2780,25 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
              << "choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
              << t_buf_expr_with_offset << ", (const void*)&" << *tname
              << "_tensor_map, ((TMAAtom*)" << future_name
-             << ".get_atom())->ptx_barrier(), " << ValueSTR(rev_indices.at(0))
-             << ", " << ValueSTR(rev_indices.at(1)) << ");\n";
+             << ".get_atom())->ptx_barrier(), "
+             << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices.at(0))
+                                             : hoisted_rev_indices.at(0))
+             << ", "
+             << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices.at(1))
+                                             : hoisted_rev_indices.at(1))
+             << ");\n";
         } else {
           ds << d_indent << tma_issue_prefix
              << "choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
              << t_buf_expr_with_offset << ", (const void*)&" << *tname
              << "_tensor_map, ((TMAAtom*)" << future_name
-             << ".get_atom())->ptx_barrier(), " << ValueSTR(rev_indices.at(0))
-             << ", " << ValueSTR(rev_indices.at(1)) << ");\n";
+             << ".get_atom())->ptx_barrier(), "
+             << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices.at(0))
+                                             : hoisted_rev_indices.at(0))
+             << ", "
+             << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices.at(1))
+                                             : hoisted_rev_indices.at(1))
+             << ");\n";
         }
       } else {
         std::string tma_barrier_arg =
@@ -2730,7 +2809,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         }
         ds << d_indent << tma_issue_prefix << "cde::cp_async_bulk_tensor_"
            << t_shape.Rank() << "d_global_to_shared(" << t_buf_expr_with_offset
-           << ", &" << *tname << "_tensor_map, " << ValueSTR(rev_indices)
+             << ", &" << *tname << "_tensor_map, "
+             << (hoisted_rev_indices.empty()
+             ? ValueSTR(rev_indices)
+             : hoisted_rev_indices.at(0) + ", " +
+               hoisted_rev_indices.at(1))
            << ", " << tma_barrier_arg << ");\n";
         if (!full_empty_only_tma_copy) {
           ds << d_indent << tma_issue_prefix << "((TMAAtom*)" << future_name
@@ -3106,17 +3189,23 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         std::string dim_n = STR(ssmi_c.shape.at(1));
         auto scale_a_strides = GenStrides(op.ScaleA());
         std::string scale_a_ld = ValueSTR(scale_a_strides.front());
-        ds << d_indent << "float* " << c_sym << "_scale_a_ptr = (float*)("
+        auto scale_a_name = c_sym + "_scale_a_ptr";
+        auto scale_b_name = c_sym + "_scale_b_val";
+        if (!hoist_offset ||
+          !active_hoisted_scale_decls.count(scale_a_name)) {
+         ds << d_indent << "float* " << scale_a_name << " = (float*)("
            << ExprSTR(op.ScaleA(), false) << ");\n";
-        ds << d_indent << "float " << c_sym << "_scale_b_val = "
-           << "static_cast<float>(" << ExprSTR(op.ScaleB(), false) << ");\n";
+         ds << d_indent << "float " << scale_b_name << " = "
+           << "static_cast<float>(" << ExprSTR(op.ScaleB(), false)
+           << ");\n";
+        }
         ds << d_indent << "scale_accumulator<" << acc_ty << ", float, " << dim_n
            << ">("
            << "reinterpret_cast<" << acc_ty << "*>(" << ExprSTR(frag, false)
            << "), "
            << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_scale_frag"
-           << "), " << c_sym << "_scale_a_ptr, " << scale_a_ld << ", " << c_sym
-           << "_scale_b_val);\n";
+          << "), " << scale_a_name << ", " << scale_a_ld << ", "
+          << scale_b_name << ");\n";
       }
     } break;
     case AST::MMAOperation::Store: {
@@ -4230,6 +4319,48 @@ bool CuteCodeGen::Visit(AST::WithBlock& n) {
 
 bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
+
+  hoisted_scale_decl_scopes.push_back({});
+  if (!IsHost() && hoist_offset && n.GetBody()) {
+    if (auto* op = FindFirstScaledWGMMAExec(n.GetBody())) {
+      auto c_sym = AST::FragName(op->ExecOperand(0));
+      auto scale_a_name = c_sym + "_scale_a_ptr";
+      auto scale_b_name = c_sym + "_scale_b_val";
+      auto scale_a_expr = ExprSTR(op->ScaleA(), false);
+      auto scale_b_expr = ExprSTR(op->ScaleB(), false);
+      bool invariant_to_loop = true;
+      for (auto& rn : n.GetRanges()) {
+        auto rng = cast<AST::LoopRange>(rn);
+        auto cname = rng->IVName();
+        auto direct_iv_ref = std::string("__iv_") + cname;
+        if (scale_a_expr.find(direct_iv_ref) != std::string::npos ||
+            scale_b_expr.find(direct_iv_ref) != std::string::npos) {
+          invariant_to_loop = false;
+          break;
+        }
+        for (auto iv_name : within_map.at(InScopeName(cname))) {
+          auto iv_ref = SSMName(iv_name, false);
+          if (scale_a_expr.find(iv_ref) != std::string::npos ||
+              scale_b_expr.find(iv_ref) != std::string::npos) {
+            invariant_to_loop = false;
+            break;
+          }
+        }
+        if (!invariant_to_loop) break;
+      }
+
+      if (invariant_to_loop && !active_hoisted_scale_decls.count(scale_a_name)) {
+        ds << d_indent << "float* " << scale_a_name << " = (float*)("
+           << scale_a_expr << ");\n";
+        ds << d_indent << "float " << scale_b_name << " = static_cast<float>("
+           << scale_b_expr << ");\n";
+        active_hoisted_scale_decls.insert(scale_a_name);
+        active_hoisted_scale_decls.insert(scale_b_name);
+        hoisted_scale_decl_scopes.back().push_back(scale_a_name);
+        hoisted_scale_decl_scopes.back().push_back(scale_b_name);
+      }
+    }
+  }
 
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
