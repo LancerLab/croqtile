@@ -4960,7 +4960,7 @@ show_usage() {
 )script";
 
   os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
-  if (extended_mma) os << "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED ";
+  if (extended_mma) os << " -DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED ";
   if (CCtx().TargetDebugInfo())
     os << " -O0";
   else
