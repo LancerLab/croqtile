@@ -4919,10 +4919,14 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
        << rc.message << ", " << rc.loc << "\");\n";
   }
 
+#if 0 // may cause undefined symbol error if the assertion depends on a value
+      // only defined in device code. We can enable this back
+      // when we have a better way to handle such case.
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
+#endif
 
   // USE_SITE and DEF_SITE assertions are emitted in device code (inside the
   // kernel) via EmitSiteAssertions, which is called from AfterVisitImpl during

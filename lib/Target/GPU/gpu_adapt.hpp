@@ -842,9 +842,7 @@ public:
     return true;
   }
 
-  bool Visit(AST::Call& n) override {
-    return true;
-  }
+  bool Visit(AST::Call& n) override { return true; }
 
   bool Visit(AST::Synchronize& n) override {
     auto pl = Level();
