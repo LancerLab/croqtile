@@ -238,7 +238,6 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
     auto op = mma->GetOperation();
     if (!op || op->Tag() != AST::MMAOperation::Exec || !op->HasScale())
       return nullptr;
-
     auto c_sym = AST::FragName(op->ExecOperand(0));
     auto scoped_c_sym = InScopeName(c_sym);
     if (FCtx(fname).FragHasMMAType(scoped_c_sym) &&
@@ -268,6 +267,144 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
                             : nullptr;
   }
 
+  return nullptr;
+}
+
+std::optional<CuteCodeGen::HoistedScaleAccumInfo>
+CuteCodeGen::AnalyzeHoistableScaledWGMMAAccum(
+    const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const {
+  HoistedScaleAccumInfo info;
+  bool saw_scaled_exec = false;
+  if (!CollectHoistableScaledWGMMAAccum(n, loop_refs, info, saw_scaled_exec) ||
+      !saw_scaled_exec)
+    return std::nullopt;
+  return info;
+}
+
+bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
+    const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs,
+    HoistedScaleAccumInfo& info, bool& saw_scaled_exec) const {
+  if (!n) return true;
+
+  if (auto mma = dyn_cast<AST::MMA>(n)) {
+    auto op = mma->GetOperation();
+    if (!op) return true;
+
+    if (op->Tag() == AST::MMAOperation::Store) {
+      auto store_frag = AST::FragName(op->StoreFrom());
+      if (saw_scaled_exec && store_frag == info.frag_sym) return false;
+      return true;
+    }
+
+    if (op->Tag() != AST::MMAOperation::Exec || !op->HasScale()) return true;
+
+    auto c_sym = AST::FragName(op->ExecOperand(0));
+    auto scoped_c_sym = InScopeName(c_sym);
+    if (!FCtx(fname).FragHasMMAType(scoped_c_sym) ||
+        !FCtx(fname).FragIsWGMMA(scoped_c_sym))
+      return true;
+
+    auto scale_a_expr = ExprSTR(op->ScaleA(), false);
+    auto scale_b_expr = ExprSTR(op->ScaleB(), false);
+    for (const auto& loop_ref : loop_refs) {
+      if ((!loop_ref.empty() &&
+           scale_a_expr.find(loop_ref) != std::string::npos) ||
+          (!loop_ref.empty() &&
+           scale_b_expr.find(loop_ref) != std::string::npos))
+        return false;
+    }
+
+    auto& ssmi_c = cgi.GetSymbolMMA(scoped_c_sym);
+    auto acc_ty = NameBaseType(ssmi_c.ty);
+    auto scale_a_strides = GenStrides(op->ScaleA());
+    std::string scale_a_ld = ValueSTR(scale_a_strides.front());
+    auto scale_a_name = c_sym + "_scale_a_ptr";
+    auto scale_b_name = c_sym + "_scale_b_val";
+    auto scale_frag_name = c_sym + "_scale_frag";
+    auto frag_expr = ExprSTR(op->ExecOperand(0), false);
+    std::string dim_n = STR(ssmi_c.shape.at(1));
+
+    auto acc_dtype = ssmi_c.ty;
+    ValueItem frag_len = ssmi_c.shape[1] / sbe::nu(2);
+    if (ssmi_c.ty == BaseType::F16) {
+      acc_dtype = BaseType::U32;
+      frag_len = frag_len / sbe::nu(2);
+    }
+    auto reg_num = VIInt(frag_len);
+    if (!reg_num)
+      choreo_unreachable("expect scaled WGMMA frag length to be numeric");
+
+    if (!saw_scaled_exec) {
+      info.frag_sym = c_sym;
+      info.frag_expr = frag_expr;
+      info.scale_frag_name = scale_frag_name;
+      info.scale_a_name = scale_a_name;
+      info.scale_b_name = scale_b_name;
+      info.scale_a_expr = scale_a_expr;
+      info.scale_b_expr = scale_b_expr;
+      info.scale_a_ld = scale_a_ld;
+      info.acc_ty = acc_ty;
+      info.scale_frag_ty = NameBaseType(acc_dtype);
+      info.dim_n = dim_n;
+      info.reg_num_d = *reg_num;
+      saw_scaled_exec = true;
+      return true;
+    }
+
+    return info.frag_sym == c_sym && info.frag_expr == frag_expr &&
+           info.scale_a_expr == scale_a_expr &&
+           info.scale_b_expr == scale_b_expr &&
+           info.scale_a_ld == scale_a_ld && info.acc_ty == acc_ty &&
+           info.dim_n == dim_n && info.reg_num_d == *reg_num;
+  }
+
+  if (auto fb = dyn_cast<AST::ForeachBlock>(n)) {
+    return !fb->GetBody() || CollectHoistableScaledWGMMAAccum(
+                                 fb->GetBody(), loop_refs, info,
+                                 saw_scaled_exec);
+  }
+
+  if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
+    for (auto& item : mn->values)
+      if (!CollectHoistableScaledWGMMAAccum(item, loop_refs, info,
+                                            saw_scaled_exec))
+        return false;
+    return true;
+  }
+
+  if (auto if_else = dyn_cast<AST::IfElseBlock>(n)) {
+    if (if_else->GetThenBody() &&
+        !CollectHoistableScaledWGMMAAccum(if_else->GetThenBody(), loop_refs,
+                                          info, saw_scaled_exec))
+      return false;
+    if (if_else->GetElseBody() &&
+        !CollectHoistableScaledWGMMAAccum(if_else->GetElseBody(), loop_refs,
+                                          info, saw_scaled_exec))
+      return false;
+    return true;
+  }
+
+  if (auto block = dyn_cast<AST::Block>(n)) {
+    return !block->GetBody() || CollectHoistableScaledWGMMAAccum(
+                                   block->GetBody(), loop_refs, info,
+                                   saw_scaled_exec);
+  }
+
+  if (auto with_block = dyn_cast<AST::WithBlock>(n)) {
+    return !with_block->GetBody() || CollectHoistableScaledWGMMAAccum(
+                                   with_block->GetBody(), loop_refs, info,
+                                   saw_scaled_exec);
+  }
+
+  return true;
+}
+
+const CuteCodeGen::HoistedScaleAccumInfo*
+CuteCodeGen::CurrentHoistedScaleAccum() const {
+  for (auto it = hoisted_scale_accum_scopes.rbegin();
+       it != hoisted_scale_accum_scopes.rend(); ++it) {
+    if (it->has_value()) return &it->value();
+  }
   return nullptr;
 }
 
@@ -516,11 +653,11 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     DecrIndent();
     IndStream() << "}\n";
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
-    if (!hoisted_scale_decl_scopes.empty()) {
-      for (const auto& name : hoisted_scale_decl_scopes.back())
-        active_hoisted_scale_decls.erase(name);
-      hoisted_scale_decl_scopes.pop_back();
-    }
+    std::optional<HoistedScaleAccumInfo> hoisted_scale_accum_info =
+        (!hoisted_scale_accum_scopes.empty() &&
+         hoisted_scale_accum_scopes.back().has_value())
+            ? hoisted_scale_accum_scopes.back()
+            : std::nullopt;
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
       auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
@@ -531,6 +668,22 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
         IndStream() << "} // " << UnScopedName(*iv_itr) << "\n";
         IndStream() << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
       }
+    }
+    if (hoisted_scale_accum_info.has_value()) {
+      const auto& info = hoisted_scale_accum_info.value();
+      ds << d_indent << "scale_accumulator<" << info.acc_ty << ", float, "
+         << info.dim_n << ">(" << "reinterpret_cast<" << info.acc_ty
+         << "*>(" << info.frag_expr << "), " << "reinterpret_cast<"
+         << info.acc_ty << "*>(" << info.scale_frag_name << "), "
+         << info.scale_a_name << ", " << info.scale_a_ld << ", "
+         << info.scale_b_name << ");\n";
+    }
+    if (!hoisted_scale_accum_scopes.empty())
+      hoisted_scale_accum_scopes.pop_back();
+    if (!hoisted_scale_decl_scopes.empty()) {
+      for (const auto& name : hoisted_scale_decl_scopes.back())
+        active_hoisted_scale_decls.erase(name);
+      hoisted_scale_decl_scopes.pop_back();
     }
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     // only on device-side
@@ -550,7 +703,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::NamedVariableDecl>(&n)) {
     emit_call = true;
   }
-
   return true;
 }
 
@@ -3153,6 +3305,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       auto& ssmi_c = cgi.GetSymbolMMA(InScopeName(c_sym));
       std::string acc_ty = NameBaseType(ssmi_c.ty);
+        auto scale_a_expr = op.HasScale() ? ExprSTR(op.ScaleA(), false) : "";
+        auto scale_b_expr = op.HasScale() ? ExprSTR(op.ScaleB(), false) : "";
+      const auto* hoisted_scale_info = CurrentHoistedScaleAccum();
+          bool use_hoisted_scale_accum = op.HasScale() && hoisted_scale_info;
 
       if (op.HasScale()) {
         // dtype of accu: s32, f16, f32 (f16 => u32)
@@ -3164,10 +3320,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
         reg_num_d = *VIInt(frag_len);
 
-        ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym
-           << "_scale_frag[" << reg_num_d << "];\n";
-        ds << d_indent << "memset(" << c_sym << "_scale_frag, 0, sizeof("
-           << c_sym << "_scale_frag));\n";
+          if (!use_hoisted_scale_accum) {
+           ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym
+             << "_scale_frag[" << reg_num_d << "];\n";
+           ds << d_indent << "memset(" << c_sym << "_scale_frag, 0, sizeof("
+             << c_sym << "_scale_frag));\n";
+          }
       }
       ds << d_indent << "cute::" << mma_policy << "<";
       if (!policy_is_tn) {
@@ -3178,14 +3336,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
          << "desc_" << a_sym << ", desc_" << b_sym;
       for (size_t i = 0; i < reg_num_d; ++i) {
         if (op.HasScale())
-          ds << ", " << c_sym << "_scale_frag[" << i << "]";
+          ds << ", "
+             << (use_hoisted_scale_accum ? hoisted_scale_info->scale_frag_name
+                                         : c_sym + "_scale_frag")
+             << "[" << i << "]";
         else
           ds << ", " << ExprSTR(frag, false) << "[" << i << "]";
       }
       if (policy_is_sparse) ds << ", " << a_sym << "_meta";
       ds << ");\n";
 
-      if (op.HasScale()) {
+      if (op.HasScale() && !use_hoisted_scale_accum) {
         std::string dim_n = STR(ssmi_c.shape.at(1));
         auto scale_a_strides = GenStrides(op.ScaleA());
         std::string scale_a_ld = ValueSTR(scale_a_strides.front());
@@ -3194,9 +3355,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (!hoist_offset ||
           !active_hoisted_scale_decls.count(scale_a_name)) {
          ds << d_indent << "float* " << scale_a_name << " = (float*)("
-           << ExprSTR(op.ScaleA(), false) << ");\n";
+           << scale_a_expr << ");\n";
          ds << d_indent << "float " << scale_b_name << " = "
-           << "static_cast<float>(" << ExprSTR(op.ScaleB(), false)
+           << "static_cast<float>(" << scale_b_expr
            << ");\n";
         }
         ds << d_indent << "scale_accumulator<" << acc_ty << ", float, " << dim_n
@@ -4321,7 +4482,21 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
   hoisted_scale_decl_scopes.push_back({});
-  if (!IsHost() && hoist_offset && n.GetBody()) {
+  hoisted_scale_accum_scopes.push_back(std::nullopt);
+
+  std::vector<std::string> loop_refs;
+  for (auto& rn : n.GetRanges()) {
+    auto rng = cast<AST::LoopRange>(rn);
+    auto cname = rng->IVName();
+    loop_refs.push_back(std::string("__iv_") + cname);
+    for (auto iv_name : within_map.at(InScopeName(cname)))
+      loop_refs.push_back(SSMName(iv_name, false));
+  }
+
+  if (!IsHost() && n.GetBody()) {
+    hoisted_scale_accum_scopes.back() =
+        AnalyzeHoistableScaledWGMMAAccum(n.GetBody(), loop_refs);
+
     if (auto* op = FindFirstScaledWGMMAExec(n.GetBody())) {
       auto c_sym = AST::FragName(op->ExecOperand(0));
       auto scale_a_name = c_sym + "_scale_a_ptr";
@@ -4329,27 +4504,18 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       auto scale_a_expr = ExprSTR(op->ScaleA(), false);
       auto scale_b_expr = ExprSTR(op->ScaleB(), false);
       bool invariant_to_loop = true;
-      for (auto& rn : n.GetRanges()) {
-        auto rng = cast<AST::LoopRange>(rn);
-        auto cname = rng->IVName();
-        auto direct_iv_ref = std::string("__iv_") + cname;
-        if (scale_a_expr.find(direct_iv_ref) != std::string::npos ||
-            scale_b_expr.find(direct_iv_ref) != std::string::npos) {
+      for (const auto& loop_ref : loop_refs) {
+        if (!loop_ref.empty() &&
+            (scale_a_expr.find(loop_ref) != std::string::npos ||
+             scale_b_expr.find(loop_ref) != std::string::npos)) {
           invariant_to_loop = false;
           break;
         }
-        for (auto iv_name : within_map.at(InScopeName(cname))) {
-          auto iv_ref = SSMName(iv_name, false);
-          if (scale_a_expr.find(iv_ref) != std::string::npos ||
-              scale_b_expr.find(iv_ref) != std::string::npos) {
-            invariant_to_loop = false;
-            break;
-          }
-        }
-        if (!invariant_to_loop) break;
       }
 
-      if (invariant_to_loop && !active_hoisted_scale_decls.count(scale_a_name)) {
+      if ((hoist_offset || hoisted_scale_accum_scopes.back().has_value()) &&
+          invariant_to_loop &&
+          !active_hoisted_scale_decls.count(scale_a_name)) {
         ds << d_indent << "float* " << scale_a_name << " = (float*)("
            << scale_a_expr << ");\n";
         ds << d_indent << "float " << scale_b_name << " = static_cast<float>("
@@ -4359,6 +4525,14 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
         hoisted_scale_decl_scopes.back().push_back(scale_a_name);
         hoisted_scale_decl_scopes.back().push_back(scale_b_name);
       }
+    }
+
+    if (hoisted_scale_accum_scopes.back().has_value()) {
+      const auto& info = hoisted_scale_accum_scopes.back().value();
+      ds << d_indent << info.scale_frag_ty << " " << info.scale_frag_name
+         << "[" << info.reg_num_d << "];\n";
+      ds << d_indent << "memset(" << info.scale_frag_name << ", 0, sizeof("
+         << info.scale_frag_name << "));\n";
     }
   }
 

@@ -318,8 +318,23 @@ private:
   bool wgmma_arrive_state_declared = false;
   bool pending_mbarrier_full_event_array = false;
   std::string pending_mbarrier_full_event_name;
+  struct HoistedScaleAccumInfo {
+    std::string frag_sym;
+    std::string frag_expr;
+    std::string scale_frag_name;
+    std::string scale_a_name;
+    std::string scale_b_name;
+    std::string scale_a_expr;
+    std::string scale_b_expr;
+    std::string scale_a_ld;
+    std::string acc_ty;
+    std::string scale_frag_ty;
+    std::string dim_n;
+    size_t reg_num_d = 0;
+  };
   std::vector<std::vector<std::string>> hoisted_scale_decl_scopes;
   std::unordered_set<std::string> active_hoisted_scale_decls;
+  std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
 
 private:
   void EmitFixedHostHead();
@@ -404,6 +419,7 @@ private:
     wgmma_arrive_state_declared = false;
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
+    hoisted_scale_accum_scopes.clear();
     ResetLineDirectiveState();
   }
 
@@ -514,6 +530,13 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
+  std::optional<HoistedScaleAccumInfo>
+  AnalyzeHoistableScaledWGMMAAccum(const ptr<AST::Node>& n,
+                                   const std::vector<std::string>& loop_refs) const;
+  bool CollectHoistableScaledWGMMAAccum(
+      const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs,
+      HoistedScaleAccumInfo& info, bool& saw_scaled_exec) const;
+  const HoistedScaleAccumInfo* CurrentHoistedScaleAccum() const;
   std::pair<std::string, std::string>
   GenTensorDecl(const std::string& name, const std::string& buf_expr,
                 const Storage sto, BaseType bty, const Shape& shp,
