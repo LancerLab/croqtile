@@ -24,4 +24,7 @@ Option<bool> use_stmatrix(OptionKind::User, "--stmatrix", "", false,
 Option<bool> hoist_offset(
     OptionKind::User, "--hoist-offset", "", false,
     "Hoist loop-invariant offset/address calculations in GPU codegen.");
+Option<bool>
+    hoist_scale(OptionKind::User, "--hoist-scale", "", false,
+                "Hoist loop-invariant scale calculations in GPU codegen.");
 } // end namespace Choreo

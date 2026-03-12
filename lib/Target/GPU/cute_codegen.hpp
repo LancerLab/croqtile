@@ -530,9 +530,8 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
-  std::optional<HoistedScaleAccumInfo>
-  AnalyzeHoistableScaledWGMMAAccum(const ptr<AST::Node>& n,
-                                   const std::vector<std::string>& loop_refs) const;
+  std::optional<HoistedScaleAccumInfo> AnalyzeHoistableScaledWGMMAAccum(
+      const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const;
   bool CollectHoistableScaledWGMMAAccum(
       const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs,
       HoistedScaleAccumInfo& info, bool& saw_scaled_exec) const;
