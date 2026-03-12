@@ -2397,7 +2397,7 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
 
 // only for M64N32 WGMMA accumulator scaling
 template <typename AccT, typename ScaleT, int N>
-__device__ static inline void
+__device__ __forceinline__ void
 scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
                   ScaleT scale_b) {
   static_assert(std::is_same_v<ScaleT, f32>,
@@ -2413,8 +2413,27 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
   int row1 = row0 + 8;
   constexpr int col_num = N / 8;
 
-  float sa0 = __ldg(scale_a_ptr + row0 * scale_a_ld) * scale_b;
-  float sa1 = __ldg(scale_a_ptr + row1 * scale_a_ld) * scale_b;
+  auto* scale_a_ptr0 = scale_a_ptr + row0 * scale_a_ld;
+  auto* scale_a_ptr1 = scale_a_ptr + row1 * scale_a_ld;
+  float sa0 = 0.0f;
+  float sa1 = 0.0f;
+  #if defined(__CUDA_ARCH__)
+  if (__isShared(scale_a_ptr0)) {
+    sa0 = *scale_a_ptr0;
+    sa1 = *scale_a_ptr1;
+  } else if (__isGlobal(scale_a_ptr0)) {
+    sa0 = __ldg(scale_a_ptr0);
+    sa1 = __ldg(scale_a_ptr1);
+  } else {
+    sa0 = *scale_a_ptr0;
+    sa1 = *scale_a_ptr1;
+  }
+  #else
+  sa0 = *scale_a_ptr0;
+  sa1 = *scale_a_ptr1;
+  #endif
+  sa0 *= scale_b;
+  sa1 *= scale_b;
 
   if constexpr (std::is_same_v<AccT, f16>) {
 #if defined(__USE_CUDA_TYPE__)
