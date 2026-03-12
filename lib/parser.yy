@@ -1922,8 +1922,10 @@ spanned_op
           Choreo::info(@3, "no tiling is applied.");
           $$ = nullptr;
         }
-        else
+        else {
+          $3->SetDelimiter(", ");
           $$ = AST::Make<AST::SOP::TileAt>(@1, UBoundAll(ds), $3);
+        }
       }
     | CHUNK LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
         auto ds = DeSugerDimensions($3);

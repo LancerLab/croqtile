@@ -125,7 +125,7 @@ public:
 
 public:
   virtual size_t GetMemCapacity(const Storage&, const ArchId&) const = 0;
-  virtual size_t GetMemAlignment(const Storage&, const ArchId&) const = 0;
+  virtual size_t GetMemAlignmentByte(const Storage&, const ArchId&) const = 0;
   virtual size_t GetMinGroupDim(const ArchId& arch) const {
     choreo_unreachable("unsupported target '" + Name() + "(" + arch + ")'.");
   }

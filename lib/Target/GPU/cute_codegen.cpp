@@ -2162,8 +2162,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       hs << h_indent << "cudaFuncSetAttribute(" << device_fn
          << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
          << ValueSTR(cur_spm_size) << " + ("
-         << CCtx().GetMemoryAlignment(CCtx().GetArch(), Storage::SHARED)
-         << " - 1));\n";
+         << CCtx().GetMemoryAlignmentByte(Storage::SHARED) << " - 1));\n";
       set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
     };
 
@@ -2209,7 +2208,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     bool explicit_smem = false;
     if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
       // TODO: conservative padding. To be optimized.
-      auto align = CCtx().GetMemoryAlignment(CCtx().GetArch(), Storage::SHARED);
+      auto align = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
       hs << ", " << ValueSTR(cur_spm_size) << " + (" << align << " - 1)";
       explicit_smem = true;
     }
@@ -2280,8 +2279,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ds << d_indent << "auto " << device_fn
          << "__runtime_shared_buffer__ = "
             "reinterpret_cast<char*>(aligned_up_ptr<"
-         << CCtx().GetMemoryAlignment(CCtx().GetArch(), Storage::SHARED)
-         << " * 8>(" << device_fn << "__runtime_shared_buffer__raw));\n";
+         << CCtx().GetMemoryAlignmentByte(Storage::SHARED) << " * 8>("
+         << device_fn << "__runtime_shared_buffer__raw));\n";
       if (!sbe::ceq(cur_spm_size, sbe::nu(0)) && cgi.HasAsyncDMA(fname)) {
         ds << d_indent << "auto " << device_fn
            << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>("
@@ -2495,7 +2494,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   auto t_idx = t_ca->indices;
   auto f_ty = GetSymbolType(f_sym);
   auto t_ty = GetSymbolType(t_sym);
+  // the spanned type of sym in from chunkat
   auto f_sty = GetSpannedType(f_ty);
+  // the spanned type of sym in to chunkat
   auto t_sty = GetSpannedType(t_ty);
 
   assert(f_sty && "can not retrieve data from 'from'.");
@@ -2699,6 +2700,219 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       future_name = claimFuture("", fty->IsAsync(), use_tma, "");
   }
 
+  // vars to do make_tiled_copy
+  struct TiledCopyEntry {
+    std::pair<size_t, size_t> thr_layout;
+    std::pair<size_t, size_t> val_layout;
+    // if set, use AutoVectorizingCopyWithAssumedAlignment
+    size_t vectorized_align_bits;
+    bool one_row_per_warp;
+  };
+  std::optional<TiledCopyEntry> tiled_copy_entry;
+
+  // used in dma only. Utilize all the threads in block to do DMA.
+  auto TiledCopyPrepare =
+      [&](bool one_row_per_warp, size_t mem_align_byte,
+          const ptr<AST::ChunkAt>& ca) -> std::optional<TiledCopyEntry> {
+    /*
+    for now, `make_tiled_copy` here has some constraints:
+      only support 2D DMA;
+      do not support DMA inside inthreads;
+      do not support dynamic shape;
+      do not support dynamic #thread;
+    */
+
+    const auto& loc = ca->LOC();
+
+    if (auto l = Level(); l != ParallelLevel::BLOCK) {
+      Note(loc, "the DMA is in " + STR(l) +
+                    " level, If possible, move it to block level to implement "
+                    "the make_tiled_copy optimization.");
+      return std::nullopt;
+    }
+    // if the DMA can only be in ParallelLevel::BLOCK
+    // then we won't need to check whether inside inthreads scope.
+
+    auto node_sty = GetSpannedType(ca->GetType());
+
+    const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
+    assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
+    const auto& lconfig = lcs[parallel_idx];
+    auto inner_thr_count = lconfig.thread_count.x * lconfig.thread_count.y *
+                           lconfig.thread_count.z;
+    auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
+                       lconfig.group_count.y * lconfig.group_count.z;
+    auto thr_count_vi = inner_thr_count * group_count;
+    if (!VIIsInt(inner_thr_count)) {
+      Note(loc, "#thread (" + STR(inner_thr_count) +
+                    ") is dynamic, unable to do make_tiled_copy.");
+      return std::nullopt;
+    }
+    size_t thr_count = *VIInt(thr_count_vi);
+
+    auto tile_shape = ca->GetBlockShape();
+    if (tile_shape.Rank() != 2) {
+      Note(loc, "the span (maybe after span_as) is not of rank 2.");
+      return std::nullopt;
+    }
+    if (tile_shape.IsDynamic()) {
+      Note(loc, "the tile is of dynamic shape (" + STR(tile_shape) +
+                    "), unable to do make_tiled_copy.");
+      return std::nullopt;
+    }
+
+    // only handle DMA which is row-major.
+    const ValueList& strd = node_sty->GetStrides();
+    if (!VIIsInt(strd[1])) {
+      Note(loc, "the col stride of span is dynamic (" + STR(strd[1]) +
+                    "). make_tiled_copy can be implemented only when it is "
+                    "integer 1 (row-major).");
+      return std::nullopt;
+    }
+    if (*VIInt(strd[1]) != 1) {
+      Note(loc, "the col stride of span is " + STR(strd[1]) +
+                    ". make_tiled_copy can be implemented only when it is "
+                    "integer 1 (row-major).");
+      return std::nullopt;
+    }
+
+    /*
+    now the following are satisfied:
+      col stride of matrix is integer 1 (row-major);
+      tile shape is static              (able to determine thr_layout);
+    */
+    TiledCopyEntry ret;
+
+    size_t tile_m = *VIInt(tile_shape.ValueAt(0));
+    size_t tile_n = *VIInt(tile_shape.ValueAt(1));
+    ValueList tile_strd = node_sty->GetStrides();
+    auto bty = f_sty->ElementType();
+    size_t elem_byte = SizeOf(bty);
+    size_t row_byte = tile_n * elem_byte;
+
+    // Note: bits_per_thread >= elem_byte*8
+    auto XBitsPerThread = [&](size_t bits_per_thread) -> bool {
+      // one thread load bits_per_thread data once.
+      size_t bytes_per_thread = bits_per_thread / 8;
+      if (row_byte % bytes_per_thread != 0) {
+        Note(loc, "row_byte (" + std::to_string(row_byte) +
+                      ") is not divisible by " +
+                      std::to_string(bytes_per_thread) + ", unable to do " +
+                      std::to_string(bits_per_thread) +
+                      " bits vectorized copy.");
+        return false;
+      }
+      size_t thr_per_row = row_byte / bytes_per_thread;
+      if (thr_count % thr_per_row != 0) {
+        Note(loc, "#thread (" + std::to_string(thr_count) +
+                      ") is not divisible by thr_per_row (" +
+                      std::to_string(thr_per_row) + "), unable to do " +
+                      std::to_string(bits_per_thread) +
+                      " bits vectorized copy.");
+        return false;
+      }
+      size_t thr_per_col = thr_count / thr_per_row;
+      if (tile_m % thr_per_col != 0) {
+        Note(loc, "#row of tile (" + std::to_string(tile_m) +
+                      ") is not divisible by thr_per_col (" +
+                      std::to_string(thr_per_col) + "), unable to do " +
+                      std::to_string(bits_per_thread) +
+                      " bits vectorized copy.");
+        return false;
+      }
+      ret.thr_layout.first = thr_per_col;
+      ret.thr_layout.second = thr_per_row;
+      ret.val_layout.first = tile_m / thr_per_col;
+      ret.val_layout.second = tile_n / thr_per_row;
+      return true;
+    };
+
+    // now only need to consider the stride of tile, not matrix.
+
+    // TODO: check if that best pattern is one warp per row, and 128bit
+    // vectorized load.
+
+    // if the row stride of tile is static and do not require that each row of
+    // tile is handled by a single warp, then check if xxxbit alignment for each
+    // row is satisfied.
+    // If so, try to use AutoVectorizingCopyWithAssumedAlignment<xxx>
+    if (!one_row_per_warp && VIIsInt(tile_strd[0])) {
+      int tile_strd_0 = *VIInt(tile_strd[0]);
+      auto AlignWith = [&](size_t _alignment_bit) -> bool {
+        // alignment of load inst is in bit (e.g., LDG.E.128)
+        if ((mem_align_byte * 8) % _alignment_bit != 0) return false;
+        if ((tile_strd_0 * elem_byte * 8) % _alignment_bit != 0) return false;
+        // each row of tile is aligned with _alignment_bit
+        return true;
+      };
+      for (size_t expect_alignment_bit : {128, 64, 32, 16}) {
+        if (expect_alignment_bit < elem_byte * 8) break;
+        if (!AlignWith(expect_alignment_bit)) {
+          Note(loc,
+               "alignment is not satisfied, unable to utilize vectorized " +
+                   std::to_string(expect_alignment_bit) +
+                   " bit load inst: tensor alignment is " +
+                   std::to_string(mem_align_byte) +
+                   " bytes, stride of first dim of tile is " +
+                   std::to_string(tile_strd_0 * elem_byte) + " bytes.");
+        } else {
+          // the alignment is satisfied. Now check the shape.
+          if (XBitsPerThread(expect_alignment_bit)) {
+            ret.vectorized_align_bits = expect_alignment_bit;
+            ret.one_row_per_warp = false;
+            Note(n.LOC(), "do make_tiled_copy with assumed " +
+                              std::to_string(expect_alignment_bit) +
+                              " bits vectorized copy atom.");
+            return ret;
+          }
+        }
+      }
+    }
+    Note(n.LOC(), "alignment is not satisfied, unable to utilize vectorized "
+                  "load inst. Fallback to UniversalCopy.");
+    // cannot use AutoVectorizingCopyWithAssumedAlignment. Turn to
+    // UniversalCopy. For example, 1 warp (32 threads) to handle one row of
+    // tile.
+    // TODO: confirm that: UniversalCopy is conservative copy, it will try vec.
+    //       UniversalCopy<cutlass::uint128_t> lead to static_assert.
+
+    constexpr size_t thr_per_warp = 32;
+    if (thr_count < 32) {
+      Note(n.LOC(), "#thread in block (" + std::to_string(thr_count) +
+                        ") is less than 32, unable to do warp-per-row "
+                        "make_tiled_copy. Fallback to normal copy.");
+      return std::nullopt;
+    }
+    if (tile_n % 32 != 0) {
+      Note(n.LOC(), "#col of tile is not divisible by 32, unable to do "
+                    "warp-per-row make_tiled_copy. Fallback to normal copy.");
+      return std::nullopt;
+    }
+    constexpr size_t thr_per_row = thr_per_warp;
+    if (thr_count % thr_per_row != 0) {
+      Note(loc, "#thread in block (" + std::to_string(thr_count) +
+                    ") is not divisible by #thread in a warp (" +
+                    std::to_string(thr_per_row) +
+                    "), unable to do make_tiled_copy.");
+      return std::nullopt;
+    }
+    size_t thr_per_col = thr_count / thr_per_row;
+    if (tile_m % thr_per_col != 0) {
+      Note(loc, "#row of tile (" + std::to_string(tile_m) +
+                    ") is not divisible by #thread per col (" +
+                    std::to_string(thr_per_col) +
+                    "), unable to do make_tiled_copy.");
+      return std::nullopt;
+    }
+    ret.thr_layout.first = thr_per_col;
+    ret.thr_layout.second = thr_per_row;
+    ret.val_layout.first = tile_m / thr_per_col;
+    ret.val_layout.second = tile_n / thr_per_row;
+    ret.one_row_per_warp = true;
+    ret.vectorized_align_bits = 0;
+    return ret;
+  };
+
   auto DMACodeGen = [&]() {
     std::string f_mds_offset = "";
     std::string t_mds_offset = "";
@@ -2710,8 +2924,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (auto idx = f_ca->IndexOfLastSpanAs()) {
       f_mds_offset = TileBaseOffset(f_ca);
       f_shape = f_ca->OpAt(*idx)->GetBlockShape();
-    } else
+    } else {
       f_mds_offset = ValueSTR(GenOffset(f_ca));
+    }
 
     if (auto idx = t_ca->IndexOfLastSpanAs()) {
       t_mds_offset = TileBaseOffset(t_ca);
@@ -2765,8 +2980,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                             IsFloatSubByteType(t_sty->ElementType()));
     bool need_subbyte_async_sync = false;
 
-    if (need_single_instance) ds << d_indent << LevelPred() << " {\n";
-    IncrDeviceIndent();
+    if (need_single_instance) {
+      ds << d_indent << LevelPred() << " {\n";
+      IncrDeviceIndent();
+    }
     if (!n.future.empty()) cooperatives.insert(InScopeName(n.future));
 
     if (n.operation == ".copy" || n.operation == ".transp") {
@@ -2883,8 +3100,43 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "cute::cp_async_fence();\n";
         ds << d_indent << future_name << ".trigger();\n";
       } else {
-        ds << d_indent << "opt_copy(" << f_mds_name << ", " << t_mds_name
-           << ");\n";
+        if (tiled_copy_entry.has_value() &&
+            n.GetSwizzleMode() == SwizMode::NONE) {
+          const TiledCopyEntry& entry = tiled_copy_entry.value();
+          IndStream() << "{\n";
+          IncrIndent();
+          IndStream() << "auto tiled_copy = cute::make_tiled_copy(\n";
+          IncrIndent();
+          IndStream() << "cute::Copy_Atom<cute::";
+          if (entry.vectorized_align_bits == 0)
+            Stream() << "UniversalCopy<" << t_sty->ElementType() << ">, ";
+          else
+            Stream() << "AutoVectorizingCopyWithAssumedAlignment<"
+                     << entry.vectorized_align_bits << ">, ";
+          Stream() << t_sty->ElementType() << ">{},\n";
+          IndStream() << "cute::make_layout(cute::make_shape(cute::Int<"
+                      << entry.thr_layout.first << ">{}, cute::Int<"
+                      << entry.thr_layout.second
+                      << ">{}), cute::make_stride(cute::Int<"
+                      << entry.thr_layout.second << ">{}, cute::Int<1>{})),\n";
+          IndStream() << "cute::make_layout(cute::make_shape(cute::Int<"
+                      << entry.val_layout.first << ">{}, cute::Int<"
+                      << entry.val_layout.second << ">{}))\n";
+          DecrIndent();
+          IndStream() << ");\n";
+          IndStream()
+              << "auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);\n";
+          IndStream() << "auto src_thr = thr_copy.partition_S(" << f_mds_name
+                      << ");\n";
+          IndStream() << "auto dst_thr = thr_copy.partition_D(" << t_mds_name
+                      << ");\n";
+          IndStream() << "cute::copy(tiled_copy, src_thr, dst_thr);\n";
+          DecrIndent();
+          IndStream() << "}\n";
+        } else {
+          IndStream() << "opt_copy(" << f_mds_name << ", " << t_mds_name
+                      << ");\n";
+        }
       }
       VerboseDMA(ds, d_indent, t_sym, f_sym, n.operation.substr(1), "", 1,
                  ", line " + std::to_string(n.LOC().begin.line));
@@ -2932,8 +3184,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                  ", line " + std::to_string(n.LOC().begin.line));
     }
 
-    DecrDeviceIndent();
-    if (need_single_instance) ds << d_indent << "} // single instance\n";
+    if (need_single_instance) {
+      DecrDeviceIndent();
+      ds << d_indent << "} // single instance\n";
+    }
 
     if (need_subbyte_async_sync) { ds << d_indent << "__syncthreads();\n"; }
 
@@ -3172,8 +3426,33 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
   if (use_tma)
     TMACodeGen();
-  else
+  else {
+    bool g2s = false, s2g = false;
+    if ((f_sty->GetStorage() == Storage::GLOBAL ||
+         f_sty->GetStorage() == Storage::DEFAULT) &&
+        t_sty->GetStorage() == Storage::SHARED)
+      g2s = true;
+    if (f_sty->GetStorage() == Storage::SHARED &&
+        (t_sty->GetStorage() == Storage::GLOBAL ||
+         t_sty->GetStorage() == Storage::DEFAULT))
+      s2g = true;
+    // AutoVectorizingCopyWithAssumedAlignment check the alignment of both src
+    // and dst. Cuda global buffer is all aligned with 256 bytes
+    size_t mem_align_byte =
+        std::min(static_cast<size_t>(256),
+                 CCtx().GetMemoryAlignmentByte(Storage::SHARED));
+    // TODO: how to determin `one_row_per_warp`? maybe add option for user.
+    if (g2s) {
+      bool one_row_per_warp = false;
+      tiled_copy_entry =
+          TiledCopyPrepare(one_row_per_warp, mem_align_byte, f_ca);
+    } else if (s2g) {
+      bool one_row_per_warp = false;
+      tiled_copy_entry =
+          TiledCopyPrepare(one_row_per_warp, mem_align_byte, t_ca);
+    }
     DMACodeGen();
+  }
 
   return true;
 }

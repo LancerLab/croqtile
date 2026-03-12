@@ -71,7 +71,7 @@ public:
     return 0;
   }
   const ArchId DefaultArch() const override { return "gcu300"; }
-  size_t GetMemAlignment(const Storage& sto, const ArchId&) const override {
+  size_t GetMemAlignmentByte(const Storage& sto, const ArchId&) const override {
     switch (sto) {
     case Storage::LOCAL:
     case Storage::SHARED: return 512;

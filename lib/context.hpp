@@ -375,9 +375,9 @@ private:
   bool vectorize = false;         // enable loop vectorization
   size_t max_local_mem_capacity =
       0; // max local memory capacity per thread (0: use default)
-  bool mem_default_aligned = true; // alignment is set by default in mem reuse.
-  bool inhibit_warning = false;    // Inhibit all warning messages.
-  bool warning_as_error = false;   // Make all warnings into errors.
+  size_t shared_mem_alignment = 0;    // alignment of shared memory set by user
+  bool inhibit_warning = false;       // Inhibit all warning messages.
+  bool warning_as_error = false;      // Make all warnings into errors.
   bool disable_runtime_check = false; // Disable all runtime checks.
   // Runtime check assertion level: "entry" (default), "all", or "none".
   std::string runtime_check_level = "entry";
@@ -471,9 +471,13 @@ public:
   }
 
   // return memory alignment in byte. Used in memory reuse pass.
-  size_t GetMemoryAlignment(const ArchId& arch, Storage sto) const {
-    if (!MemDefaultAligned()) return 1;
-    return GetTarget().GetMemAlignment(sto, arch);
+  size_t GetMemoryAlignmentByte(const ArchId& arch, Storage sto) const {
+    if (sto == Storage::SHARED && SharedMemAlignment() != 0)
+      return SharedMemAlignment();
+    return GetTarget().GetMemAlignmentByte(sto, arch);
+  }
+  size_t GetMemoryAlignmentByte(Storage sto) const {
+    return GetTarget().GetMemAlignmentByte(sto, GetArch());
   }
 
   size_t GetMinGroupDim() const {
@@ -517,7 +521,7 @@ public:
   bool NoVectorize() const { return no_vectorize; }
   bool Vectorize() const { return vectorize; }
   size_t MaxLocalMemCapacity() const { return max_local_mem_capacity; }
-  bool MemDefaultAligned() const { return mem_default_aligned; }
+  size_t SharedMemAlignment() const { return shared_mem_alignment; }
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
   bool DisableRuntimeCheck() const { return disable_runtime_check; }
@@ -562,7 +566,7 @@ public:
     max_local_mem_capacity = sz;
   }
   void SetUseWarpSpec(bool value) { use_warpspec = value; }
-  void SetMemDefaultAligned(bool value) { mem_default_aligned = value; }
+  void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
   void SetDisableRuntimeCheck(bool value) { disable_runtime_check = value; }

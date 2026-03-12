@@ -75,19 +75,22 @@ public:
   }
 
   size_t GetMinGroupDim(const ArchId&) const override { return 32; }
-  size_t GetMemAlignment(const Storage& sto,
-                         const ArchId& arch) const override {
+  size_t GetMemAlignmentByte(const Storage& sto,
+                             const ArchId& arch) const override {
+    // global buffer from cudaMalloc is aligned with 256 bytes by default.
     int arch_num = ArchNum(arch);
     if (arch_num < 90) {
       switch (sto) {
       case Storage::LOCAL: return 16;
       case Storage::SHARED: return 16;
+      case Storage::GLOBAL: return 256;
       default: choreo_unreachable("Unsupported mem level.");
       }
     } else {
       switch (sto) {
       case Storage::LOCAL: return 16;
       case Storage::SHARED: return 128; // req of wgmma and tma
+      case Storage::GLOBAL: return 256;
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
