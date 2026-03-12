@@ -19,15 +19,11 @@ Choreo is a low-level Embedded Domain Specific Language (EDSL) for C++ that prog
 | `make release` | Release build (outputs to `build-release/`) |
 | `make clean` | Clean all build outputs |
 
+### BAD BUILD COMMANDS: AVOID to use cmake directly if make commands can do the thing
+
 ### After Build
 - `./choreo` - Main compiler symlink (points to `build/choreo`)
 - `./copp` - Preprocessor symlink (points to `build/copp`)
-
-### Direct CMake (if needed)
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-ninja -C build
-```
 
 ---
 
@@ -212,6 +208,7 @@ The project includes specialized skills for Claude Code:
 | Skill | Purpose |
 |-------|---------|
 | `/skill-creator` | Create or refine project-specific skills with Choreo conventions |
+| `/choreo-syntax` | Reference `.co` syntax, primitives, and editing patterns before changing `.co` files |
 | `/build-and-install` | Build the Choreo compiler and tools |
 | `/compile-and-test` | Build, test, run, and debug .co files |
 | `/develop-compiler` | Modify and rebuild the Choreo compiler |
