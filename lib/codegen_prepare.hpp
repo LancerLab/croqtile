@@ -390,6 +390,7 @@ public:
                        << (op.IsSparse() ? ", " + PSTR(op.ExecOperand(3)) : "")
                        << "\n");
     } break;
+    case AST::MMAOperation::Scale: break;
     case AST::MMAOperation::Store: break;
     case AST::MMAOperation::Commit: break;
     default: choreo_unreachable("unsupported mma operation.");

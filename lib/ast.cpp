@@ -240,6 +240,9 @@ void MMA::accept(Choreo::Visitor& v) {
       if (operation->ScaleA()) operation->ScaleA()->accept(v);
       if (operation->ScaleB()) operation->ScaleB()->accept(v);
     }
+  } else if (operation->IsKind(MMAOperation::Scale)) {
+    if (operation->ScaleA()) operation->ScaleA()->accept(v);
+    if (operation->ScaleB()) operation->ScaleB()->accept(v);
   } else if (operation->IsKind(MMAOperation::Store))
     operation->StoreTo()->accept(v);
 

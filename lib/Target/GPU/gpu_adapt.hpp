@@ -835,6 +835,12 @@ public:
       VST_DEBUG(dbgs() << STR(n) << ", mma_size: " << MMAShapeSTR(mma_shape)
                        << "\n");
     } break;
+    case AST::MMAOperation::Scale: {
+      auto sym = AST::FragName(op.ScaleAccumulator());
+      auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      if (ssmi.frag != MMAInfo::FRAG_C && ssmi.frag != MMAInfo::FRAG_UNK)
+        Error1(n.LOC(), "Only accumulator fragments can be used in mma.scale.");
+    } break;
     case AST::MMAOperation::Store: break;
     case AST::MMAOperation::Commit: break;
     default: choreo_unreachable("unsupported mma operation.");

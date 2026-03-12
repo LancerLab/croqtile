@@ -755,6 +755,10 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       case AST::MMAOperation::Commit: {
         os << "mma.commit";
       } break;
+      case AST::MMAOperation::Scale: {
+        os << "mma.scale " << PSTR(op->ScaleAccumulator()) << ", "
+           << PSTR(op->ScaleA()) << ", " << PSTR(op->ScaleB());
+      } break;
       default: choreo_unreachable("unexpect MMA operation.");
       }
     }
@@ -1389,6 +1393,7 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
   case AST::MMAOperation::Exec: break;
   case AST::MMAOperation::Store: break;
   case AST::MMAOperation::Commit: break;
+  case AST::MMAOperation::Scale: break;
   default: choreo_unreachable("unexpect MMA operation.");
   }
 

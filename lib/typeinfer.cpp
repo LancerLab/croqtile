@@ -1087,6 +1087,11 @@ bool TypeInference::Visit(AST::MMA& n) {
              << ", Type: " << PSTR(GetSymbolType(acc->LOC(), acc_sym)) << "\n";
     }
   } break;
+  case AST::MMAOperation::Scale:
+    SetNodeType(
+        n,
+        GetSymbolType(n.LOC(), AST::FragName(op.ScaleAccumulator()))->Clone());
+    break;
   case AST::MMAOperation::Store:
   case AST::MMAOperation::Commit:
     // no type inference is necessary

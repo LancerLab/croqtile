@@ -2601,7 +2601,7 @@ public:
 
 struct MMAOperation {
 public:
-  enum Kind { Fill, Load, Exec, Store, Commit };
+  enum Kind { Fill, Load, Exec, Store, Commit, Scale };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
   // NOTE: acc, lhs, rhs are not accepted in ast.cpp.
@@ -2639,7 +2639,13 @@ public:
     ptr<ChunkAt> st_expr;
     bool transpose;
   };
-  using InfoType = std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo>;
+  struct ScaleInfo {
+    ptr<Expr> acc;
+    ptr<ChunkAt> scaleA;
+    ptr<Expr> scaleB;
+  };
+  using InfoType =
+      std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo, ScaleInfo>;
 
 private:
   Kind tag;
@@ -2671,6 +2677,10 @@ public:
       : tag(Store), info(StoreInfo{n, c, trans}) {}
 
   MMAOperation() : tag(Commit), info() {}
+
+  MMAOperation(const ptr<Expr>& acc, const ptr<ChunkAt>& scaleA,
+               const ptr<Expr>& scaleB)
+      : tag(Scale), info(ScaleInfo{acc, scaleA, scaleB}) {}
 
 public:
   bool IsKind(Kind k) const { return k == tag; }
@@ -2783,21 +2793,38 @@ public:
   }
 
   ptr<ChunkAt> ScaleA() const {
-    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
-    auto e_info = std::get<2>(info);
-    return e_info.scale_a;
+    if (tag == Exec) {
+      auto e_info = std::get<2>(info);
+      return e_info.scale_a;
+    }
+    if (tag == Scale) {
+      auto s_info = std::get<4>(info);
+      return s_info.scaleA;
+    }
+    choreo_unreachable("not a mma scale-bearing operation.");
   }
 
   ptr<Expr> ScaleB() const {
-    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
-    auto e_info = std::get<2>(info);
-    return e_info.scale_b;
+    if (tag == Exec) {
+      auto e_info = std::get<2>(info);
+      return e_info.scale_b;
+    }
+    if (tag == Scale) {
+      auto s_info = std::get<4>(info);
+      return s_info.scaleB;
+    }
+    choreo_unreachable("not a mma scale-bearing operation.");
   }
 
   void SetFuture(const ptr<AST::Expr>& fut) {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     l_info.future = fut;
+  }
+
+  const ptr<Expr> ScaleAccumulator() const {
+    if (tag != Scale) choreo_unreachable("not a mma scale operation.");
+    return std::get<4>(info).acc;
   }
 
   const ptr<Expr> GetFuture() const { return LoadTo(); }
@@ -2808,6 +2835,7 @@ public:
     if (tag == Exec) return ExecOperand(0);
     if (tag == Store) return StoreFrom();
     if (tag == Commit) return nullptr;
+    if (tag == Scale) return ScaleAccumulator();
     choreo_unreachable("unexpected mma operation!");
     return nullptr;
   }
@@ -2851,6 +2879,9 @@ public:
       return Make<MMAOperation>(CloneP(StoreFrom()), CloneP(StoreTo()),
                                 StoreIsTranspose());
     case Commit: return Make<MMAOperation>();
+    case Scale:
+      return Make<MMAOperation>(CloneP(ScaleAccumulator()), CloneP(ScaleA()),
+                                CloneP(ScaleB()));
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
     return nullptr;
@@ -2891,6 +2922,10 @@ public:
          << PSTR(StoreFrom()) << ", " << PSTR(StoreTo());
     } break;
     case Commit: os << "MMA.COMMIT"; break;
+    case Scale:
+      os << "MMA.SCALE " << PSTR(ScaleAccumulator()) << ", " << PSTR(ScaleA())
+         << ", " << PSTR(ScaleB());
+      break;
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
   }

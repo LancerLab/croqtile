@@ -1252,6 +1252,10 @@ bool ShapeInference::Visit(AST::MMA& n) {
     // always set the node type to spannedtype in exec.
     SetNodeType(n, GetSpannedType(sym_ty)->Clone());
   } break;
+  case AST::MMAOperation::Scale: {
+    auto acc_sym = AST::FragName(op.ScaleAccumulator());
+    SetNodeType(n, GetSymbolType(acc_sym)->Clone());
+  } break;
   case AST::MMAOperation::Store: {
   } break;
   default: break;

@@ -332,9 +332,25 @@ private:
     std::string dim_n;
     size_t reg_num_d = 0;
   };
+  struct ExplicitScaleAccumInfo {
+    std::string frag_sym;
+    std::string frag_expr;
+    std::string scale_frag_name;
+    std::string scale_a_name;
+    std::string scale_b_name;
+    std::string scale_a_expr;
+    std::string scale_b_expr;
+    std::string scale_a_ld;
+    std::string acc_ty;
+    std::string scale_frag_ty;
+    std::string dim_n;
+    size_t reg_num_d = 0;
+    bool consumed = false;
+  };
   std::vector<std::vector<std::string>> hoisted_scale_decl_scopes;
   std::unordered_set<std::string> active_hoisted_scale_decls;
   std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
+  std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
 
 private:
   void EmitFixedHostHead();
@@ -536,6 +552,12 @@ private:
       const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs,
       HoistedScaleAccumInfo& info, bool& saw_scaled_exec) const;
   const HoistedScaleAccumInfo* CurrentHoistedScaleAccum() const;
+  std::vector<ExplicitScaleAccumInfo>
+  AnalyzeExplicitScaleAccumScope(const ptr<AST::MultiNodes>& body) const;
+  bool HasPlainWGMMAExecForFrag(const ptr<AST::Node>& n,
+                                const std::string& frag_sym) const;
+  ExplicitScaleAccumInfo*
+  CurrentExplicitScaleAccumForFrag(const std::string& frag_sym);
   std::pair<std::string, std::string>
   GenTensorDecl(const std::string& name, const std::string& buf_expr,
                 const Storage sto, BaseType bty, const Shape& shp,

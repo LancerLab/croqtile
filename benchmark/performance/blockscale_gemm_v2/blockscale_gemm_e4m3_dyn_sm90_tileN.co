@@ -64,8 +64,9 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
           ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
           mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(wg, iv_warp);
           // mma.row.row mc, ma, mb;
-          mma.row.row.scale mc, ma, mb, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k), scale_rhs.at(block_n#wg, iv_k);
+          mma.row.row mc, ma, mb;
         }
+        mma.scale mc, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k), scale_rhs.at(block_n#wg, iv_k);
       }
       mma.store mc, output_s.chunkat(_, wg);
     }

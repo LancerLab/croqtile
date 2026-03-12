@@ -1898,6 +1898,15 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     if (!isa<SpannedType>(sty))
       Error1(n.LOC(), "Expected a spanned buffer for MMA store.");
   } break;
+  case AST::MMAOperation::Scale: {
+    std::string acc_sym = AST::FragName(op.ScaleAccumulator());
+    ReportErrorWhenUseBeforeDefine(n.LOC(), acc_sym);
+    auto sty = op.ScaleA()->GetType();
+    if (!isa<SpannedType>(sty))
+      Error1(n.LOC(), "Expected a spanned buffer for MMA scale A.");
+    if (!isa<ScalarType>(op.ScaleB()->GetType()))
+      Error1(n.LOC(), "Expected a scalar value for MMA scale B.");
+  } break;
   default: break;
   }
   return error_count == old_ec;

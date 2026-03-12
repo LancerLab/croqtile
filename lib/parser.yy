@@ -2038,6 +2038,10 @@ mma_stmt
       auto op = AST::Make<AST::MMAOperation>();
       $$ = AST::Make<AST::MMA>(@1, op);
     }
+    | MMA SCALE frag_expr COMMA chunkat_expr COMMA s_expr {
+      auto op = AST::Make<AST::MMAOperation>($3, $5, $7);
+      $$ = AST::Make<AST::MMA>(@1, op);
+    }
     ;
 
 mma_exec_method

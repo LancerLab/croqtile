@@ -413,6 +413,114 @@ CuteCodeGen::CurrentHoistedScaleAccum() const {
   return nullptr;
 }
 
+std::vector<CuteCodeGen::ExplicitScaleAccumInfo>
+CuteCodeGen::AnalyzeExplicitScaleAccumScope(
+    const ptr<AST::MultiNodes>& body) const {
+  std::vector<ExplicitScaleAccumInfo> infos;
+  if (!body) return infos;
+
+  std::unordered_set<std::string> seen_frags;
+  for (size_t idx = 0; idx < body->values.size(); ++idx) {
+    auto mma = dyn_cast<AST::MMA>(body->values[idx]);
+    if (!mma) continue;
+
+    auto op = mma->GetOperation();
+    if (!op || op->Tag() != AST::MMAOperation::Scale) continue;
+
+    auto c_sym = AST::FragName(op->ScaleAccumulator());
+    auto scoped_c_sym = InScopeName(c_sym);
+    if (!FCtx(fname).FragHasMMAType(scoped_c_sym) ||
+        !FCtx(fname).FragIsWGMMA(scoped_c_sym) || seen_frags.count(c_sym))
+      continue;
+
+    bool saw_exec = false;
+    for (size_t prior = 0; prior < idx; ++prior) {
+      if (HasPlainWGMMAExecForFrag(body->values[prior], c_sym)) {
+        saw_exec = true;
+        break;
+      }
+    }
+    if (!saw_exec) continue;
+
+    auto& ssmi_c = cgi.GetSymbolMMA(scoped_c_sym);
+    auto acc_dtype = ssmi_c.ty;
+    ValueItem frag_len = ssmi_c.shape[1] / sbe::nu(2);
+    if (ssmi_c.ty == BaseType::F16) {
+      acc_dtype = BaseType::U32;
+      frag_len = frag_len / sbe::nu(2);
+    }
+    auto reg_num = VIInt(frag_len);
+    if (!reg_num)
+      choreo_unreachable("expect explicit mma.scale frag length to be numeric");
+
+    ExplicitScaleAccumInfo info;
+    info.frag_sym = c_sym;
+    info.frag_expr = ExprSTR(op->ScaleAccumulator(), false);
+    info.scale_frag_name = c_sym + "_scale_frag";
+    info.scale_a_name = c_sym + "_scale_a_ptr";
+    info.scale_b_name = c_sym + "_scale_b_val";
+    info.scale_a_expr = ExprSTR(op->ScaleA(), false);
+    info.scale_b_expr = ExprSTR(op->ScaleB(), false);
+    info.scale_a_ld = ValueSTR(GenStrides(op->ScaleA()).front());
+    info.acc_ty = NameBaseType(ssmi_c.ty);
+    info.scale_frag_ty = NameBaseType(acc_dtype);
+    info.dim_n = STR(ssmi_c.shape.at(1));
+    info.reg_num_d = *reg_num;
+    infos.push_back(info);
+    seen_frags.insert(c_sym);
+  }
+
+  return infos;
+}
+
+bool CuteCodeGen::HasPlainWGMMAExecForFrag(const ptr<AST::Node>& n,
+                                           const std::string& frag_sym) const {
+  if (!n) return false;
+
+  if (auto mma = dyn_cast<AST::MMA>(n)) {
+    auto op = mma->GetOperation();
+    if (!op || op->Tag() != AST::MMAOperation::Exec || op->HasScale())
+      return false;
+    auto c_sym = AST::FragName(op->ExecOperand(0));
+    if (c_sym != frag_sym) return false;
+    auto scoped_c_sym = InScopeName(c_sym);
+    return FCtx(fname).FragHasMMAType(scoped_c_sym) &&
+           FCtx(fname).FragIsWGMMA(scoped_c_sym);
+  }
+
+  if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
+    for (auto& item : mn->values)
+      if (HasPlainWGMMAExecForFrag(item, frag_sym)) return true;
+    return false;
+  }
+
+  if (auto fb = dyn_cast<AST::ForeachBlock>(n))
+    return fb->GetBody() && HasPlainWGMMAExecForFrag(fb->GetBody(), frag_sym);
+
+  if (auto block = dyn_cast<AST::Block>(n))
+    return block->GetBody() &&
+           HasPlainWGMMAExecForFrag(block->GetBody(), frag_sym);
+
+  if (auto if_else = dyn_cast<AST::IfElseBlock>(n))
+    return (if_else->GetThenBody() &&
+            HasPlainWGMMAExecForFrag(if_else->GetThenBody(), frag_sym)) ||
+           (if_else->GetElseBody() &&
+            HasPlainWGMMAExecForFrag(if_else->GetElseBody(), frag_sym));
+
+  return false;
+}
+
+CuteCodeGen::ExplicitScaleAccumInfo*
+CuteCodeGen::CurrentExplicitScaleAccumForFrag(const std::string& frag_sym) {
+  for (auto it = explicit_scale_accum_scopes.rbegin();
+       it != explicit_scale_accum_scopes.rend(); ++it) {
+    for (auto& info : *it) {
+      if (!info.consumed && info.frag_sym == frag_sym) return &info;
+    }
+  }
+  return nullptr;
+}
+
 // return mds name and the declaration string.
 // If offset is not empty, means that need to do memory viewing.
 //   Just add offset to buf_expr, then utilize new_shape.
@@ -655,6 +763,8 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
       bdim_level = ParallelLevel::THREAD;
     }
   } else if (isa<AST::WithBlock>(&n)) {
+    if (!explicit_scale_accum_scopes.empty())
+      explicit_scale_accum_scopes.pop_back();
     DecrIndent();
     IndStream() << "}\n";
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
@@ -689,6 +799,8 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
         active_hoisted_scale_decls.erase(name);
       hoisted_scale_decl_scopes.pop_back();
     }
+    if (!explicit_scale_accum_scopes.empty())
+      explicit_scale_accum_scopes.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     // only on device-side
     DecrDeviceIndent();
@@ -3310,10 +3422,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string acc_ty = NameBaseType(ssmi_c.ty);
       auto scale_a_expr = op.HasScale() ? ExprSTR(op.ScaleA(), false) : "";
       auto scale_b_expr = op.HasScale() ? ExprSTR(op.ScaleB(), false) : "";
+      auto* explicit_scale_info =
+          op.HasScale() ? nullptr : CurrentExplicitScaleAccumForFrag(c_sym);
       const auto* hoisted_scale_info = CurrentHoistedScaleAccum();
       bool use_hoisted_scale_accum = op.HasScale() && hoisted_scale_info;
+      bool use_explicit_scale_accum = explicit_scale_info != nullptr;
 
-      if (op.HasScale()) {
+      if (op.HasScale() || use_explicit_scale_accum) {
         // dtype of accu: s32, f16, f32 (f16 => u32)
         auto acc_dtype = ssmi.ty;
         ValueItem frag_len = ssmi.shape[1] / sbe::nu(2);
@@ -3323,7 +3438,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
         reg_num_d = *VIInt(frag_len);
 
-        if (!use_hoisted_scale_accum) {
+        if (op.HasScale() && !use_hoisted_scale_accum) {
           ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym
              << "_scale_frag[" << reg_num_d << "];\n";
           ds << d_indent << "memset(" << c_sym << "_scale_frag, 0, sizeof("
@@ -3338,7 +3453,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ds << ">::fma("
          << "desc_" << a_sym << ", desc_" << b_sym;
       for (size_t i = 0; i < reg_num_d; ++i) {
-        if (op.HasScale())
+        if (use_explicit_scale_accum)
+          ds << ", " << explicit_scale_info->scale_frag_name << "[" << i << "]";
+        else if (op.HasScale())
           ds << ", "
              << (use_hoisted_scale_accum ? hoisted_scale_info->scale_frag_name
                                          : c_sym + "_scale_frag")
@@ -3369,6 +3486,27 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << "), " << scale_a_name << ", " << scale_a_ld << ", "
            << scale_b_name << ");\n";
       }
+    } break;
+    case AST::MMAOperation::Scale: {
+      auto c_sym = AST::FragName(op.ScaleAccumulator());
+      if (auto* info = CurrentExplicitScaleAccumForFrag(c_sym)) {
+        ds << d_indent << "float* " << info->scale_a_name << " = (float*)("
+           << info->scale_a_expr << ");\n";
+        ds << d_indent << "float " << info->scale_b_name
+           << " = static_cast<float>(" << info->scale_b_expr << ");\n";
+        ds << d_indent << "scale_accumulator<" << info->acc_ty << ", float, "
+           << info->dim_n << ">(reinterpret_cast<" << info->acc_ty << "*>("
+           << ExprSTR(op.ScaleAccumulator(), false) << "), reinterpret_cast<"
+           << info->acc_ty << "*>(" << info->scale_frag_name << "), "
+           << info->scale_a_name << ", " << info->scale_a_ld << ", "
+           << info->scale_b_name << ");\n";
+        info->consumed = true;
+        break;
+      }
+      Error1(
+          n.LOC(),
+          "mma.scale requires a preceding plain WGMMA exec in the same scope.");
+      return false;
     } break;
     case AST::MMAOperation::Store: {
       if (!saw_explicit_mma_commit) {
@@ -3516,6 +3654,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
          << ExprSTR(op.ExecOperand(2), false) << ", "
          << ExprSTR(op.ExecOperand(0), false) << ");\n";
     } break;
+    case AST::MMAOperation::Scale:
+      Error1(n.LOC(),
+             "mma.scale is only supported for WGMMA on the cute target.");
+      return false;
     case AST::MMAOperation::Store: {
       auto tty = GetSpannedType(GetSymbolType(op.StoreTo()->RefSymbol()));
       ds << d_indent << "nvcuda::wmma::store_matrix_sync("
@@ -3793,6 +3935,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       if (policy_is_sparse) ds << ", " << meta_var << ", 0";
       ds << ");\n";
     } break;
+    case AST::MMAOperation::Scale:
+      Error1(n.LOC(),
+             "mma.scale is only supported for WGMMA on the cute target.");
+      return false;
     case AST::MMAOperation::Store: {
       auto ca = op.StoreTo();
       auto f_sym = ca->data->name;
@@ -4475,13 +4621,27 @@ bool CuteCodeGen::Visit(AST::WhereBind& n) {
 
 bool CuteCodeGen::Visit(AST::WithBlock& n) {
   TraceEachVisit(n);
-  // anything required?
+
+  explicit_scale_accum_scopes.push_back(
+      !IsHost() ? AnalyzeExplicitScaleAccumScope(n.GetBody())
+                : std::vector<ExplicitScaleAccumInfo>{});
+  if (!IsHost()) {
+    for (const auto& info : explicit_scale_accum_scopes.back()) {
+      ds << d_indent << info.scale_frag_ty << " " << info.scale_frag_name << "["
+         << info.reg_num_d << "];\n";
+      ds << d_indent << "memset(" << info.scale_frag_name << ", 0, sizeof("
+         << info.scale_frag_name << "));\n";
+    }
+  }
   return true;
 }
 
 bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
+  explicit_scale_accum_scopes.push_back(
+      !IsHost() ? AnalyzeExplicitScaleAccumScope(n.GetBody())
+                : std::vector<ExplicitScaleAccumInfo>{});
   hoisted_scale_decl_scopes.push_back({});
   hoisted_scale_accum_scopes.push_back(std::nullopt);
 
@@ -4553,6 +4713,15 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
                                   : "")
                   << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
       IncrIndent();
+    }
+  }
+
+  if (!IsHost()) {
+    for (const auto& info : explicit_scale_accum_scopes.back()) {
+      ds << d_indent << info.scale_frag_ty << " " << info.scale_frag_name << "["
+         << info.reg_num_d << "];\n";
+      ds << d_indent << "memset(" << info.scale_frag_name << ", 0, sizeof("
+         << info.scale_frag_name << "));\n";
     }
   }
 

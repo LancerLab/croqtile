@@ -55,10 +55,10 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
         foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
           ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
           mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row.scale mc, ma, mb,
-                            scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k),
-                            rhs_scale_s.at(0, 0);
+          mma.row.row mc, ma, mb;
         }
+        mma.scale mc, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k),
+                  rhs_scale_s.at(0, 0);
       }
       shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
       mma.store mc, output_s;

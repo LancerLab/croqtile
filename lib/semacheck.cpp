@@ -1123,6 +1123,38 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
       }
     }
   } break;
+  case AST::MMAOperation::Scale: {
+    auto& c_sym = AST::FragName(op.ScaleAccumulator());
+    auto c_ty = GetSpannedType(GetSymbolType(c_sym));
+    auto a_ty = GetSpannedType(op.ScaleA()->GetType());
+    bool old_ec = error_count;
+    if (c_ty == nullptr)
+      Error1(n.LOC(), "Expect `" + c_sym + "' to contain a spanned data.");
+    if (a_ty == nullptr)
+      Error1(n.LOC(), "Expect MMA scale A to contain a spanned data.");
+    if (!isa<ScalarType>(op.ScaleB()->GetType()))
+      Error1(n.LOC(), "Expect MMA scale B to be a scalar expression.");
+    if (old_ec != error_count) return false;
+
+    auto c_shape = c_ty->GetShape();
+    auto a_shape = a_ty->GetShape();
+    if ((c_shape.Rank() != 2) || c_shape.IsDynamic())
+      Error1(n.LOC(), "Expect `" + c_sym +
+                          "' to be a matrix with fixed size, but got: " +
+                          STR(c_shape) + ".");
+    if ((a_shape.Rank() != 2) || a_shape.IsDynamic())
+      Error1(
+          n.LOC(),
+          "Expect MMA scale A to be a matrix tile with fixed size, but got: " +
+              STR(a_shape) + ".");
+    if (old_ec != error_count) return false;
+
+    if (!sbe::ceq(a_shape.ValueAt(0), c_shape.ValueAt(0)))
+      Error1(n.LOC(),
+             "MMA scale A first dimension must match accumulator M dimension.");
+    if (!sbe::ceq(a_shape.ValueAt(1), sbe::nu(1)))
+      Error1(n.LOC(), "MMA scale A must have shape [M, 1].");
+  } break;
   case AST::MMAOperation::Store: break;
   case AST::MMAOperation::Commit: break;
   default: choreo_unreachable("unsupported mma operation.");
