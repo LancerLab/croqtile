@@ -234,6 +234,7 @@ bool CuteCodeGen::HasWGMMAInFunction() const {
 const AST::MMAOperation*
 CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   if (!n) return nullptr;
+  if (!hoist_scale) return nullptr;
 
   if (auto mma = dyn_cast<AST::MMA>(n)) {
     auto op = mma->GetOperation();
@@ -287,6 +288,7 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
     const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs,
     HoistedScaleAccumInfo& info, bool& saw_scaled_exec) const {
   if (!n) return true;
+  if (!hoist_scale) return true;
 
   if (auto mma = dyn_cast<AST::MMA>(n)) {
     auto op = mma->GetOperation();
@@ -403,6 +405,7 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
 
 const CuteCodeGen::HoistedScaleAccumInfo*
 CuteCodeGen::CurrentHoistedScaleAccum() const {
+  if (!hoist_scale) return nullptr;
   for (auto it = hoisted_scale_accum_scopes.rbegin();
        it != hoisted_scale_accum_scopes.rend(); ++it) {
     if (it->has_value()) return &it->value();
