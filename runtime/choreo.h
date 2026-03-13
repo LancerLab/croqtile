@@ -1892,6 +1892,25 @@ template <>
 struct SparseMetaK<choreo::f8_e5m2, choreo::u32> {
   static constexpr size_t value = 64;
 };
+
+// WGMMA uses u8 metadata (per-byte encoding, different from MMA's u32).
+// For WGMMA sparse: f16/bf16 use K=32, fp8 uses K=64.
+template <>
+struct SparseMetaK<choreo::f16, choreo::u8> {
+  static constexpr size_t value = 32;
+};
+template <>
+struct SparseMetaK<choreo::bf16, choreo::u8> {
+  static constexpr size_t value = 32;
+};
+template <>
+struct SparseMetaK<choreo::f8_e4m3, choreo::u8> {
+  static constexpr size_t value = 64;
+};
+template <>
+struct SparseMetaK<choreo::f8_e5m2, choreo::u8> {
+  static constexpr size_t value = 64;
+};
 #endif
 
 // Convenience forwarding alias (non-breaking):
@@ -1899,8 +1918,13 @@ template <typename ValueT, typename MetaT>
 using SparseHostPolicy =
     Sparse2to4HostPolicy<ValueT, MetaT, SparseMetaK<ValueT, MetaT>::value>;
 
+// MMA sparse policy (uses u32 metadata).
 template <typename ValueT, typename MetaT = choreo::u32>
-using SparsePolicy = SparseHostPolicy<ValueT, MetaT>;
+using SparsePolicyMMA = SparseHostPolicy<ValueT, MetaT>;
+
+// Deprecated alias for backward compatibility.
+template <typename ValueT, typename MetaT = choreo::u32>
+using SparsePolicy = SparsePolicyMMA<ValueT, MetaT>;
 
 // Common fixed META_K aliases (for f16/bf16 sparse MMA variants).
 template <typename ValueT, typename MetaT = choreo::u32>
@@ -1908,6 +1932,92 @@ using SparsePolicyK16 = Sparse2to4HostPolicy<ValueT, MetaT, 16>;
 
 template <typename ValueT, typename MetaT = choreo::u32>
 using SparsePolicyK32 = Sparse2to4HostPolicy<ValueT, MetaT, 32>;
+
+// -----------------------------------------------------------------------------
+// WGMMA-specific sparse policy (uses u8 metadata, per-byte encoding).
+// -----------------------------------------------------------------------------
+
+template <typename ValueT, size_t META_K>
+struct Sparse2to4HostPolicyWGMMA {
+  static_assert(META_K == 32 || META_K == 64, "WGMMA META_K must be 32 or 64.");
+
+  __co_host__ static inline void
+  init_structured_sparse_A(spanned_data<ValueT, 2>& dense, std::mt19937& gen) {
+    const size_t M = dense.shape()[0];
+    const size_t K = dense.shape()[1];
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::uniform_int_distribution<int> pick(0, 3);
+    dense.fill(ValueT(0));
+    for (size_t r = 0; r < M; ++r) {
+      for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+        int idx0 = pick(gen);
+        int idx1 = pick(gen);
+        while (idx1 == idx0) idx1 = pick(gen);
+        if (idx0 > idx1) std::swap(idx0, idx1);
+        float v0 = dist(gen);
+        float v1 = dist(gen);
+        if (v0 == 0.0f) v0 = 1.0f;
+        if (v1 == 0.0f) v1 = -1.0f;
+        size_t base = r * K + c_group * 4;
+        ValueT t0 = from_f32<ValueT>(v0);
+        ValueT t1 = from_f32<ValueT>(v1);
+        if (is_zero(t0)) t0 = from_f32<ValueT>(1.0f);
+        if (is_zero(t1)) t1 = from_f32<ValueT>(-1.0f);
+        dense.data()[base + idx0] = t0;
+        dense.data()[base + idx1] = t1;
+      }
+    }
+  }
+
+  __co_host__ static inline void
+  encode(spanned_data<ValueT, 2>& dense, spanned_data<ValueT, 2>& packed,
+         spanned_data<choreo::u8, 2>& meta) {
+    const size_t M = dense.shape()[0];
+    const size_t K = dense.shape()[1];
+    for (size_t r = 0; r < M; ++r) {
+      for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+        size_t base = r * K + c_group * 4;
+        size_t in_base = r * (K / 2) + c_group * 2;
+        int idxs[2] = {-1, -1};
+        int nz = 0;
+        for (int i = 0; i < 4; ++i) {
+          if (to_f32(dense.data()[base + i]) != 0.0f) {
+            if (nz < 2) idxs[nz] = i;
+            ++nz;
+          }
+        }
+        if (nz != 2) {
+          idxs[0] = 0;
+          idxs[1] = 1;
+        }
+        if (idxs[0] > idxs[1]) std::swap(idxs[0], idxs[1]);
+        ValueT v0 = dense.data()[base + idxs[0]];
+        ValueT v1 = dense.data()[base + idxs[1]];
+        packed.data()[in_base + 0] = v0;
+        packed.data()[in_base + 1] = v1;
+        uint8_t nibble = static_cast<uint8_t>(idxs[0] | (idxs[1] << 2));
+        size_t byte_col = c_group / 2;
+        if ((c_group & 1) == 0) {
+          meta[r][byte_col] = nibble;
+        } else {
+          meta[r][byte_col] |= static_cast<choreo::u8>(nibble << 4);
+        }
+      }
+    }
+  }
+};
+
+// WGMMA convenience aliases.
+template <typename ValueT>
+using SparsePolicyWGMMAK32 = Sparse2to4HostPolicyWGMMA<ValueT, 32>;
+
+template <typename ValueT>
+using SparsePolicyWGMMAK64 = Sparse2to4HostPolicyWGMMA<ValueT, 64>;
+
+// WGMMA sparse policy that infers META_K from dtype (uses u8 metadata).
+template <typename ValueT>
+using SparsePolicyWGMMA =
+    Sparse2to4HostPolicyWGMMA<ValueT, SparseMetaK<ValueT, choreo::u8>::value>;
 
 // --- Compile-time smoke tests to prevent regressions ------------------------
 static_assert(SparseMetaK<choreo::f16, choreo::u32>::value == 16,
@@ -1919,6 +2029,15 @@ static_assert(SparseMetaK<choreo::f8_e4m3, choreo::u32>::value == 64,
               "Regression: SparseMetaK<f8_e4m3,u32> changed");
 static_assert(SparseMetaK<choreo::f8_e5m2, choreo::u32>::value == 64,
               "Regression: SparseMetaK<f8_e5m2,u32> changed");
+// WGMMA u8 metadata regressions.
+static_assert(SparseMetaK<choreo::f16, choreo::u8>::value == 32,
+              "Regression: SparseMetaK<f16,u8> changed");
+static_assert(SparseMetaK<choreo::bf16, choreo::u8>::value == 32,
+              "Regression: SparseMetaK<bf16,u8> changed");
+static_assert(SparseMetaK<choreo::f8_e4m3, choreo::u8>::value == 64,
+              "Regression: SparseMetaK<f8_e4m3,u8> changed");
+static_assert(SparseMetaK<choreo::f8_e5m2, choreo::u8>::value == 64,
+              "Regression: SparseMetaK<f8_e5m2,u8> changed");
 #endif
 
 static_assert(

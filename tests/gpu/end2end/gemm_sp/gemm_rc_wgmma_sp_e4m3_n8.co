@@ -3,28 +3,8 @@
 
 #define M 64
 
-void init_structured_sparse_a(choreo::spanned_data<choreo::f8_e4m3, 2>& lhs_dense,
-                              std::mt19937& gen) {
-  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-  std::uniform_int_distribution<int> pick(0, 3);
-  std::memset(lhs_dense.data(), 0, lhs_dense.bytes());
-  for (size_t row = 0; row < M; ++row)
-    for (size_t group = 0; group < 64 / 4; ++group) {
-      int idx0 = pick(gen);
-      int idx1 = pick(gen);
-      while (idx1 == idx0) idx1 = pick(gen);
-      if (idx0 > idx1) std::swap(idx0, idx1);
-
-      float v0 = dist(gen);
-      float v1 = dist(gen);
-      if (std::fabs(v0) < 0.1f) v0 = (v0 < 0.0f ? -0.5f : 0.5f);
-      if (std::fabs(v1) < 0.1f) v1 = (v1 < 0.0f ? -0.75f : 0.75f);
-
-      size_t base = group * 4;
-      lhs_dense[row][base + idx0] = choreo::utils::from_f32<choreo::f8_e4m3>(v0);
-      lhs_dense[row][base + idx1] = choreo::utils::from_f32<choreo::f8_e4m3>(v1);
-    }
-}
+template <typename T>
+using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
 
 void init_random_b(choreo::spanned_data<choreo::f8_e4m3, 2>& rhs,
                    std::mt19937& gen) {
@@ -34,54 +14,6 @@ void init_random_b(choreo::spanned_data<choreo::f8_e4m3, 2>& rhs,
       float value = dist(gen);
       if (std::fabs(value) < 0.1f) value = (value < 0.0f ? -0.25f : 0.25f);
       rhs[col][kk] = choreo::utils::from_f32<choreo::f8_e4m3>(value);
-    }
-}
-
-void compress_structured_sparse_a(
-    choreo::spanned_data<choreo::f8_e4m3, 2>& lhs_dense,
-    choreo::spanned_data<choreo::f8_e4m3, 2>& lhs_packed,
-    choreo::spanned_data<choreo::u8, 2>& lhs_meta) {
-  std::memset(lhs_packed.data(), 0, lhs_packed.bytes());
-  lhs_meta.fill(0);
-  for (size_t row = 0; row < M; ++row)
-    for (size_t group = 0; group < 64 / 4; ++group) {
-      size_t base = group * 4;
-      int idxs[2] = {-1, -1};
-      int nz = 0;
-      for (int i = 0; i < 4; ++i) {
-        if (choreo::to_f32(lhs_dense[row][base + i]) != 0.0f) {
-          if (nz < 2) idxs[nz] = i;
-          ++nz;
-        }
-      }
-      choreo::choreo_assert(nz == 2, "Invalid 2:4 sparse pattern");
-      if (idxs[0] > idxs[1]) std::swap(idxs[0], idxs[1]);
-
-      size_t sparse_col = group * 2;
-      lhs_packed[row][sparse_col + 0] = lhs_dense[row][base + idxs[0]];
-      lhs_packed[row][sparse_col + 1] = lhs_dense[row][base + idxs[1]];
-
-      choreo::u8 nibble = 0;
-      if (idxs[0] == 0 && idxs[1] == 1)
-        nibble = 0x4;
-      else if (idxs[0] == 1 && idxs[1] == 2)
-        nibble = 0x9;
-      else if (idxs[0] == 2 && idxs[1] == 3)
-        nibble = 0xE;
-      else if (idxs[0] == 0 && idxs[1] == 2)
-        nibble = 0x8;
-      else if (idxs[0] == 1 && idxs[1] == 3)
-        nibble = 0xD;
-      else if (idxs[0] == 0 && idxs[1] == 3)
-        nibble = 0xC;
-      else
-        choreo::choreo_assert(false, "Invalid fp8 2:4 sparse pattern");
-
-      size_t byte_col = group / 2;
-      if ((group & 1) == 0)
-        lhs_meta[row][byte_col] = nibble;
-      else
-        lhs_meta[row][byte_col] |= static_cast<choreo::u8>(nibble << 4);
     }
 }
 
@@ -140,9 +72,9 @@ int main() {
   auto lhs_packed = choreo::make_spandata<choreo::f8_e4m3>(M, 32);
   auto lhs_meta = choreo::make_spandata<choreo::u8>(M, 8);
   auto rhs = choreo::make_spandata<choreo::f8_e4m3>(8, 64);
-  init_structured_sparse_a(lhs_dense, gen);
+  SparsePolicyWGMMA<choreo::f8_e4m3>::init_structured_sparse_A(lhs_dense, gen);
   init_random_b(rhs, gen);
-  compress_structured_sparse_a(lhs_dense, lhs_packed, lhs_meta);
+  SparsePolicyWGMMA<choreo::f8_e4m3>::encode(lhs_dense, lhs_packed, lhs_meta);
   auto res = matmul_sp_fp8_n8(lhs_packed.view(), lhs_meta.view(), rhs.view());
   int errors = verify_result("fp8e4m3_n8_k64", lhs_dense, rhs, res, 0.5f);
   choreo::choreo_assert(errors == 0, "Sparse WGMMA fp8 n8 failed");
