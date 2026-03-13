@@ -574,7 +574,10 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
     case SwizMode::B128:
       swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom";
       break;
-    default: swizzle_layout = "cute::SM90::GMMA::Layout_K_SW128_Atom"; break;
+    case SwizMode::NONE:
+      swizzle_layout = "cute::SM90::GMMA::Layout_K_INTER_Atom";
+      break;
+    default: swizzle_layout = "cute::SM90::GMMA::Layout_K_INTER_Atom"; break;
     }
     tsr_decl << indent << "auto " << lyt_name
              << " = "
@@ -3287,6 +3290,39 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // For WGMMA, we store the shared memory pointer for later use in Exec
       // The actual data should already be in shared memory
       std::string elem_ty = NameBaseType(ssmi.ty);
+      std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
+      bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
+      if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
+        auto tile_addr = TileAddr(op.LoadFrom(), false);
+        auto strides = GenStrides(op.LoadFrom());
+        auto k_val = VIInt(ssmi.shape.at(2));
+        bool meta_64 = k_val && *k_val > 32;
+        std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
+        std::string row_stride = ValueSTR(strides.at(0));
+        std::string col_stride = ValueSTR(strides.at(1));
+        ds << d_indent << meta_ty << " " << sym << " = 0;\n";
+        ds << d_indent << "{\n";
+        ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
+        ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
+        ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
+        ds << d_indent
+           << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
+        ds << d_indent << "  constexpr int __sp_meta_bytes = "
+           << STR(ssmi.shape.at(2)) << " / 8;\n";
+        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)(" << ValueSTR(tile_addr)
+           << ");\n";
+        ds << d_indent << "  #pragma unroll\n";
+        ds << d_indent
+           << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+        ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
+           << row_stride << ") + byte_idx * (" << col_stride << ")];\n";
+        ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
+           << ">(packed) << (8 * byte_idx));\n";
+        ds << d_indent << "  }\n";
+        ds << d_indent << "}\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        break;
+      }
       auto tile_addr = TileAddr(op.LoadFrom(), false);
       ds << d_indent << elem_ty << "* " << sym << "_smem_ptr = (" << elem_ty
          << "*)(" << ValueSTR(tile_addr) << ");\n";
@@ -3294,18 +3330,24 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ssmi.ty == BaseType::F8_E4M3 || ssmi.ty == BaseType::F8_E5M2 ||
           ssmi.ty == BaseType::F8_UE4M3 || ssmi.ty == BaseType::F8_UE8M0;
       std::string major_order = "WGMMA_MajorOrder::MN_MAJOR";
+      std::string cute_major_order = "cute::SM90::GMMA::Major::MN";
       if (ssmi.frag == MMAInfo::FRAG_A) {
         if (ssmi.method == AST::MMAOperation::ROW_ROW ||
-            ssmi.method == AST::MMAOperation::ROW_COL)
+            ssmi.method == AST::MMAOperation::ROW_COL) {
           major_order = "WGMMA_MajorOrder::K_MAJOR";
+          cute_major_order = "cute::SM90::GMMA::Major::K";
+        }
       } else if (ssmi.frag == MMAInfo::FRAG_B) {
         if (ssmi.method == AST::MMAOperation::ROW_ROW ||
-            ssmi.method == AST::MMAOperation::COL_ROW)
+            ssmi.method == AST::MMAOperation::COL_ROW) {
           major_order = "WGMMA_MajorOrder::K_MAJOR";
+          cute_major_order = "cute::SM90::GMMA::Major::K";
+        }
       }
       // Get swizzle value from MMA operation (default 128)
       auto swizzle_val = op.GetSwizzleMode();
       std::string swizzle_enum;
+      std::string sparse_layout_suffix;
       switch (swizzle_val) {
       case SwizMode::NONE: swizzle_enum = "WGMMA_Swizzle::NS"; break;
       case SwizMode::B32: swizzle_enum = "WGMMA_Swizzle::B32"; break;
@@ -3313,10 +3355,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       case SwizMode::B128: swizzle_enum = "WGMMA_Swizzle::B128"; break;
       default: swizzle_enum = "WGMMA_Swizzle::B128"; break;
       }
-      ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
-         << major_order << ", " << swizzle_enum << ">(" << sym
-         << "_smem_ptr);\n";
-      if (ssmi.frag == MMAInfo::FRAG_A) {
+      switch (swizzle_val) {
+      case SwizMode::NONE: sparse_layout_suffix = "INTER"; break;
+      case SwizMode::B32: sparse_layout_suffix = "SW32"; break;
+      case SwizMode::B64: sparse_layout_suffix = "SW64"; break;
+      case SwizMode::B128: sparse_layout_suffix = "SW128"; break;
+      default: sparse_layout_suffix = "INTER"; break;
+      }
+      ds << d_indent << "uint64_t desc_" << sym
+         << " = wgmma_make_smem_desc<" << major_order << ", "
+         << swizzle_enum << ">(" << sym << "_smem_ptr);\n";
+      if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
         std::string ref_sym = op.LoadFrom()->RefSymbol();
         if (!ref_sym.empty()) {
           auto mdata_sym_name = ref_sym + "_mdata";
@@ -3376,47 +3425,40 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
          << "// and warpgroup_wait() should be called once after all WGMMAs\n";
       bool policy_is_tn = mma_policy.rfind("_TN") != std::string::npos;
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
+      std::string meta_var;
       if (policy_is_sparse) {
-        auto& ssmi_a = cgi.GetSymbolMMA(InScopeName(a_sym));
-        std::string meta_var = a_sym + "_meta";
-        std::string meta_ptr = a_sym + "_mdata_ptr";
-        auto k_val = VIInt(ssmi_a.shape.at(2));
-        bool meta_64 = true;
-        if (k_val) meta_64 = (*k_val > 32);
-        std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
-        ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
-        ds << d_indent << "{\n";
-        ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-        ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
-        ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
-        ds << d_indent
-           << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-        ds << d_indent << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2))
-           << ";\n";
-        ds << d_indent << "  constexpr int __sp_chunks = __sp_K / 4;\n";
-        ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
-        ds << d_indent << "  #pragma unroll\n";
-        ds << d_indent << "  for (int k4 = 0; k4 < __sp_chunks; ++k4) {\n";
-        ds << d_indent << "    uint8_t mask = " << meta_ptr
-           << "[__sp_row * __sp_chunks + k4];\n";
-        ds << d_indent << "    int pos0 = 0, pos1 = 0, found = 0;\n";
-        ds << d_indent << "    #pragma unroll\n";
-        ds << d_indent << "    for (int p = 0; p < 4; ++p) {\n";
-        ds << d_indent << "      if (mask & (1 << p)) {\n";
-        ds << d_indent
-           << "        if (found == 0) pos0 = p; else if (found == 1) pos1 = "
-              "p;\n";
-        ds << d_indent << "        ++found;\n";
-        ds << d_indent << "      }\n";
-        ds << d_indent << "    }\n";
-        ds << d_indent << "    if (found < 2) { pos1 = pos0; }\n";
-        ds << d_indent
-           << "    uint32_t nibble = (pos0 & 0x3) | ((pos1 & 0x3) << 2);\n";
-        ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
-           << ">(nibble) << (4 * k4));\n";
-        ds << d_indent << "  }\n";
-        ds << d_indent << "  " << meta_var << " = __sp_meta;\n";
-        ds << d_indent << "}\n";
+        if (op.ExecOperand(3)) {
+          meta_var = AST::FragName(op.ExecOperand(3));
+        } else {
+          auto& ssmi_a = cgi.GetSymbolMMA(InScopeName(a_sym));
+          meta_var = a_sym + "_meta";
+          std::string meta_ptr = a_sym + "_mdata_ptr";
+          auto k_val = VIInt(ssmi_a.shape.at(2));
+          bool meta_64 = true;
+          if (k_val) meta_64 = (*k_val > 32);
+          std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
+          ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
+          ds << d_indent << "{\n";
+          ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
+          ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
+          ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
+          ds << d_indent
+             << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
+          ds << d_indent << "  constexpr int __sp_K = "
+             << STR(ssmi_a.shape.at(2)) << ";\n";
+          ds << d_indent << "  constexpr int __sp_meta_bytes = __sp_K / 8;\n";
+          ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
+          ds << d_indent << "  #pragma unroll\n";
+          ds << d_indent
+             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+          ds << d_indent << "    uint8_t packed = " << meta_ptr
+             << "[__sp_row * __sp_meta_bytes + byte_idx];\n";
+          ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
+             << ">(packed) << (8 * byte_idx));\n";
+          ds << d_indent << "  }\n";
+          ds << d_indent << "  " << meta_var << " = __sp_meta;\n";
+          ds << d_indent << "}\n";
+        }
       }
       auto& ssmi_c = cgi.GetSymbolMMA(InScopeName(c_sym));
       std::string acc_ty = NameBaseType(ssmi_c.ty);
@@ -3463,7 +3505,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         else
           ds << ", " << ExprSTR(frag, false) << "[" << i << "]";
       }
-      if (policy_is_sparse) ds << ", " << a_sym << "_meta";
+      if (policy_is_sparse) ds << ", " << meta_var;
       ds << ");\n";
 
       if (op.HasScale() && !use_hoisted_scale_accum) {

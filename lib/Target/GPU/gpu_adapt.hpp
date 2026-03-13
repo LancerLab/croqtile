@@ -830,7 +830,11 @@ public:
           FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       } else if (mma_ty == MMAType::WGMMA) {
         std::string mma_policy = MMALimit::MMAConfig2WGMMAName(mma_config);
+        FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
+        FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
+        if (op.IsSparse() && !e_sym.empty())
+          FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       }
       VST_DEBUG(dbgs() << STR(n) << ", mma_size: " << MMAShapeSTR(mma_shape)
                        << "\n");
