@@ -3578,6 +3578,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                              mma_policy.find("E5M2") != std::string::npos;
         bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
+        bool sparse_k32_16bit = !policy_is_fp8 && k_val && *k_val == 32;
+        bool sparse_k64_16bit = !policy_is_fp8 && k_val && *k_val == 64;
         bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
         std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
         std::string row_stride = ValueSTR(strides.at(0));
@@ -3601,6 +3603,33 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
              << ">(packed) << (8 * byte_idx));\n";
           ds << d_indent << "  }\n";
+        } else if (sparse_k32_16bit || sparse_k64_16bit) {
+          ds << d_indent
+             << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+          ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
+             << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
+          ds << d_indent << "  uint8_t __sp_b0 = __sp_meta_ptr[__sp_row * ("
+             << row_stride << ") + __sp_byte_col * (" << col_stride
+             << ")];\n";
+          ds << d_indent << "  uint8_t __sp_b1 = __sp_meta_ptr[__sp_row * ("
+             << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
+             << ")];\n";
+          ds << d_indent
+             << "  uint8_t __sp_b2 = __sp_meta_ptr[(__sp_row + 8) * ("
+             << row_stride << ") + __sp_byte_col * (" << col_stride
+             << ")];\n";
+          ds << d_indent
+             << "  uint8_t __sp_b3 = __sp_meta_ptr[(__sp_row + 8) * ("
+             << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
+             << ")];\n";
+          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
+             << ">(__sp_b0) << 0);\n";
+          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
+             << ">(__sp_b1) << 8);\n";
+          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
+             << ">(__sp_b2) << 16);\n";
+          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
+             << ">(__sp_b3) << 24);\n";
         } else {
           ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
           ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
@@ -3760,6 +3789,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                                mma_policy.find("E5M2") != std::string::npos;
           bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
+          bool sparse_k32_16bit = !policy_is_fp8 && k_val && *k_val == 32;
+          bool sparse_k64_16bit = !policy_is_fp8 && k_val && *k_val == 64;
           bool meta_64 = true;
           if (k_val) meta_64 = (*k_val > 32) && !fp8_sparse_k64;
           std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
@@ -3782,6 +3813,27 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
                << ">(packed) << (8 * byte_idx));\n";
             ds << d_indent << "  }\n";
+          } else if (sparse_k32_16bit || sparse_k64_16bit) {
+            ds << d_indent
+               << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+            ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
+               << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
+            ds << d_indent << "  uint8_t __sp_b0 = " << meta_ptr
+               << "[__sp_row * (__sp_K / 8) + __sp_byte_col];\n";
+            ds << d_indent << "  uint8_t __sp_b1 = " << meta_ptr
+               << "[__sp_row * (__sp_K / 8) + (__sp_byte_col + 1)];\n";
+            ds << d_indent << "  uint8_t __sp_b2 = " << meta_ptr
+               << "[(__sp_row + 8) * (__sp_K / 8) + __sp_byte_col];\n";
+            ds << d_indent << "  uint8_t __sp_b3 = " << meta_ptr
+               << "[(__sp_row + 8) * (__sp_K / 8) + (__sp_byte_col + 1)];\n";
+            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
+               << ">(__sp_b0) << 0);\n";
+            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
+               << ">(__sp_b1) << 8);\n";
+            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
+               << ">(__sp_b2) << 16);\n";
+            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
+               << ">(__sp_b3) << 24);\n";
           } else {
             ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
             ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
