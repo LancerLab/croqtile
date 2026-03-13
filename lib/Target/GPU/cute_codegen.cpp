@@ -2017,7 +2017,7 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
       return true;
     }
     if (isa<SpannedType>(nty)) {
-      ssm.MapDeviceSymbol(InScopeName(n.GetName()), n.GetName());
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetName()), n.GetName());
     }
 
     if (!(sty && sty->GetStorage() == Storage::REG && n.HasNote("update")))
@@ -3586,13 +3586,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
         ds << d_indent
            << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-        ds << d_indent << "  constexpr int __sp_meta_bytes = "
-           << STR(ssmi.shape.at(2)) << " / 8;\n";
-        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)(" << ValueSTR(tile_addr)
-           << ");\n";
+        ds << d_indent
+           << "  constexpr int __sp_meta_bytes = " << STR(ssmi.shape.at(2))
+           << " / 8;\n";
+        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
+           << ValueSTR(tile_addr) << ");\n";
         ds << d_indent << "  #pragma unroll\n";
         ds << d_indent
-           << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+           << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
+              "++byte_idx) {\n";
         ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
            << row_stride << ") + byte_idx * (" << col_stride << ")];\n";
         ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
@@ -3641,9 +3643,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       case SwizMode::B128: sparse_layout_suffix = "SW128"; break;
       default: sparse_layout_suffix = "INTER"; break;
       }
-      ds << d_indent << "uint64_t desc_" << sym
-         << " = wgmma_make_smem_desc<" << major_order << ", "
-         << swizzle_enum << ">(" << sym << "_smem_ptr);\n";
+      ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
+         << major_order << ", " << swizzle_enum << ">(" << sym
+         << "_smem_ptr);\n";
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
         std::string ref_sym = op.LoadFrom()->RefSymbol();
         if (!ref_sym.empty()) {
@@ -3723,13 +3725,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
           ds << d_indent
              << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-          ds << d_indent << "  constexpr int __sp_K = "
-             << STR(ssmi_a.shape.at(2)) << ";\n";
+          ds << d_indent
+             << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2)) << ";\n";
           ds << d_indent << "  constexpr int __sp_meta_bytes = __sp_K / 8;\n";
           ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
           ds << d_indent << "  #pragma unroll\n";
           ds << d_indent
-             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
+                "++byte_idx) {\n";
           ds << d_indent << "    uint8_t packed = " << meta_ptr
              << "[__sp_row * __sp_meta_bytes + byte_idx];\n";
           ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty

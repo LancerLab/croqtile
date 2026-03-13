@@ -484,12 +484,13 @@ static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
   m = 64;
   k = 32;
   for (int n : {8, 16, 32, 64, 96, 128, 192, 256}) {
-    out[{SPARSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN,
-         {m, n, k}}] = 90;
-    out[{SPARSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN,
-         {m, n, k}}] = 90;
-    out[{SPARSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN,
-         {m, n, k}}] = 90;
+    out[{SPARSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {m, n, k}}] =
+        90;
+    out[{SPARSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {m, n, k}}] =
+        90;
+    out[{
+        SPARSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {m, n, k}}] =
+        90;
   }
   // integer types
   m = 64, k = 32;
@@ -572,14 +573,12 @@ inline bool IsValidMMAConfig(const MMAConfig& config, MMALimit::CUDA_CC cc) {
   auto lookup = config;
   if (!wmma_configs.count(lookup) && lookup.sparsity == SPARSE)
     lookup.sparsity = DENSE;
-  if (ConfigIsWMMA(config))
-    return wmma_configs.at(lookup) <= cc;
+  if (ConfigIsWMMA(config)) return wmma_configs.at(lookup) <= cc;
 
   lookup = config;
   if (!WGMMAConfigs().count(lookup) && lookup.sparsity == SPARSE)
     lookup.sparsity = DENSE;
-  if (ConfigIsWGMMA(config))
-    return WGMMAConfigs().at(lookup) <= cc;
+  if (ConfigIsWGMMA(config)) return WGMMAConfigs().at(lookup) <= cc;
 
   lookup = config;
   if (!cute_mma_configs.count(lookup) && lookup.sparsity == SPARSE)
