@@ -2174,6 +2174,49 @@ struct Policy_WGMMA_D_M64K32 {
   }
 };
 
+// Store policy for 64x64x64 WGMMA (accumulator layout matches K=32 paths)
+struct Policy_WGMMA_D_M64K64 {
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(row0, col0) = cast_if<value_type>(d[c * 4]);
+      D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+};
+
 // Store policy for 64x64x256 WGMMA (binary accumulator layout matches K=16)
 struct Policy_WGMMA_D_M64K256 {
   template <class Tensor, typename AccumT, int N>
@@ -2585,6 +2628,12 @@ template <>
 struct MMA_Policy<CUTE_WGMMA_M64K32> {
   static constexpr bool supported = true;
   using typeD = Policy_WGMMA_D_M64K32;
+};
+
+template <>
+struct MMA_Policy<CUTE_WGMMA_M64K64> {
+  static constexpr bool supported = true;
+  using typeD = Policy_WGMMA_D_M64K64;
 };
 
 template <>

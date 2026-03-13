@@ -492,6 +492,15 @@ static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
         SPARSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {m, n, k}}] =
         90;
   }
+  // sparse fp8 types (Hopper sparse WGMMA, e4m3 k64 family)
+  m = 64;
+  k = 64;
+  for (int n : {8, 16, 32, 64, 96, 128, 192, 256}) {
+    out[{SPARSE, BT::F8_E4M3, BT::F8_E4M3, BT::F16, BT::F16, BT::UNKNOWN,
+         {m, n, k}}] = 90;
+    out[{SPARSE, BT::F8_E4M3, BT::F8_E4M3, BT::F32, BT::F32, BT::UNKNOWN,
+         {m, n, k}}] = 90;
+  }
   // integer types
   m = 64, k = 32;
   for (int n : {8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192,

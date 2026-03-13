@@ -3575,31 +3575,48 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         auto tile_addr = TileAddr(op.LoadFrom(), false);
         auto strides = GenStrides(op.LoadFrom());
         auto k_val = VIInt(ssmi.shape.at(2));
-        bool meta_64 = k_val && *k_val > 32;
+        bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
+                             mma_policy.find("E5M2") != std::string::npos;
+        bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
+        bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
         std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
         std::string row_stride = ValueSTR(strides.at(0));
         std::string col_stride = ValueSTR(strides.at(1));
         ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-        ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
-        ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
-        ds << d_indent
-           << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-        ds << d_indent
-           << "  constexpr int __sp_meta_bytes = " << STR(ssmi.shape.at(2))
-           << " / 8;\n";
-        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
-           << ValueSTR(tile_addr) << ");\n";
-        ds << d_indent << "  #pragma unroll\n";
-        ds << d_indent
-           << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
-              "++byte_idx) {\n";
-        ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
-           << row_stride << ") + byte_idx * (" << col_stride << ")];\n";
-        ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
-           << ">(packed) << (8 * byte_idx));\n";
-        ds << d_indent << "  }\n";
+        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)(" << ValueSTR(tile_addr)
+           << ");\n";
+        if (fp8_sparse_k64) {
+          ds << d_indent
+             << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << 3) + ((__sp_tid >> 5) << 4);\n";
+          ds << d_indent
+             << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
+          ds << d_indent << "  #pragma unroll\n";
+          ds << d_indent
+             << "  for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {\n";
+          ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
+             << row_stride << ") + (__sp_byte_col + byte_idx) * (" << col_stride
+             << ")];\n";
+          ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
+             << ">(packed) << (8 * byte_idx));\n";
+          ds << d_indent << "  }\n";
+        } else {
+          ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
+          ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
+          ds << d_indent
+             << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
+          ds << d_indent << "  constexpr int __sp_meta_bytes = "
+             << STR(ssmi.shape.at(2)) << " / 8;\n";
+          ds << d_indent << "  #pragma unroll\n";
+          ds << d_indent
+             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+          ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
+             << row_stride << ") + byte_idx * (" << col_stride << ")];\n";
+          ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
+             << ">(packed) << (8 * byte_idx));\n";
+          ds << d_indent << "  }\n";
+        }
         ds << d_indent << "}\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
         break;
@@ -3643,9 +3660,34 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       case SwizMode::B128: sparse_layout_suffix = "SW128"; break;
       default: sparse_layout_suffix = "INTER"; break;
       }
-      ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
-         << major_order << ", " << swizzle_enum << ">(" << sym
-         << "_smem_ptr);\n";
+      bool sparse_a_needs_cute_desc =
+          policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A && frag_is_fp8;
+      if (sparse_a_needs_cute_desc) {
+        auto m_val = STR(ssmi.shape.at(0));
+        auto k_val = STR(ssmi.shape.at(2));
+        std::string sparse_layout_atom =
+            (major_order == "WGMMA_MajorOrder::K_MAJOR")
+                ? ("cute::SM90::GMMA::Layout_K_" + sparse_layout_suffix +
+                   "_SpAtom")
+                : ("cute::SM90::GMMA::Layout_MN_" + sparse_layout_suffix +
+                   "_SpAtom");
+        ds << d_indent << "auto desc_" << sym
+           << "_tensor = cute::make_tensor("
+              "cute::make_smem_ptr(cute::recast_ptr<cute::sparse_elem<2, "
+           << elem_ty << ">>(" << sym << "_smem_ptr)), "
+           << "cute::tile_to_shape(" << sparse_layout_atom << "<" << elem_ty
+           << ", 2>{}, cute::make_shape(cute::Int<" << m_val
+           << ">{}, cute::Int<" << k_val << ">{})));\n";
+        ds << d_indent << "auto desc_" << sym
+           << "_obj = cute::SM90::GMMA::make_gmma_desc<" << cute_major_order
+           << ">(desc_" << sym << "_tensor);\n";
+        ds << d_indent << "uint64_t desc_" << sym << " = desc_" << sym
+           << "_obj.desc_;\n";
+      } else {
+        ds << d_indent << "uint64_t desc_" << sym
+           << " = wgmma_make_smem_desc<" << major_order << ", "
+           << swizzle_enum << ">(" << sym << "_smem_ptr);\n";
+      }
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
         std::string ref_sym = op.LoadFrom()->RefSymbol();
         if (!ref_sym.empty()) {
@@ -3715,29 +3757,46 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           meta_var = a_sym + "_meta";
           std::string meta_ptr = a_sym + "_mdata_ptr";
           auto k_val = VIInt(ssmi_a.shape.at(2));
+          bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
+                               mma_policy.find("E5M2") != std::string::npos;
+          bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
           bool meta_64 = true;
-          if (k_val) meta_64 = (*k_val > 32);
+          if (k_val) meta_64 = (*k_val > 32) && !fp8_sparse_k64;
           std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
           ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
           ds << d_indent << "{\n";
           ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-          ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
-          ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
-          ds << d_indent
-             << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-          ds << d_indent
-             << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2)) << ";\n";
-          ds << d_indent << "  constexpr int __sp_meta_bytes = __sp_K / 8;\n";
+          ds << d_indent << "  constexpr int __sp_K = "
+             << STR(ssmi_a.shape.at(2)) << ";\n";
           ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
-          ds << d_indent << "  #pragma unroll\n";
-          ds << d_indent
-             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
-                "++byte_idx) {\n";
-          ds << d_indent << "    uint8_t packed = " << meta_ptr
-             << "[__sp_row * __sp_meta_bytes + byte_idx];\n";
-          ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
-             << ">(packed) << (8 * byte_idx));\n";
-          ds << d_indent << "  }\n";
+          if (fp8_sparse_k64) {
+            ds << d_indent
+               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << 3) + ((__sp_tid >> 5) << 4);\n";
+            ds << d_indent
+               << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
+            ds << d_indent << "  #pragma unroll\n";
+            ds << d_indent
+               << "  for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {\n";
+            ds << d_indent << "    uint8_t packed = " << meta_ptr
+               << "[__sp_row * (__sp_K / 8) + (__sp_byte_col + byte_idx)];\n";
+            ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
+               << ">(packed) << (8 * byte_idx));\n";
+            ds << d_indent << "  }\n";
+          } else {
+            ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
+            ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
+            ds << d_indent
+               << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
+            ds << d_indent << "  constexpr int __sp_meta_bytes = __sp_K / 8;\n";
+            ds << d_indent << "  #pragma unroll\n";
+            ds << d_indent
+               << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+            ds << d_indent << "    uint8_t packed = " << meta_ptr
+               << "[__sp_row * __sp_meta_bytes + byte_idx];\n";
+            ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
+               << ">(packed) << (8 * byte_idx));\n";
+            ds << d_indent << "  }\n";
+          }
           ds << d_indent << "  " << meta_var << " = __sp_meta;\n";
           ds << d_indent << "}\n";
         }
