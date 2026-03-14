@@ -161,12 +161,25 @@ void SemaChecker::PushScopePredicate(const ValueItem& p) {
 }
 
 void SemaChecker::TryPushScopePredicate(AST::Node& n) {
+  if (auto block = dyn_cast<AST::IfElseBlock>(&n)) {
+    PushScopePredicate(block->GetIfScopePredicate());
+    return;
+  }
   if (auto block = dyn_cast<AST::PredBlock>(&n)) {
     PushScopePredicate(block->GetScopePredicate());
   }
 }
 
 void SemaChecker::TryPopScopePredicate(AST::Node& n) {
+  if (auto block = dyn_cast<AST::IfElseBlock>(&n)) {
+    if (IsValidValueItem(block->GetIfScopePredicate()) &&
+        !scope_pred_stack.empty())
+      scope_pred_stack.pop_back();
+    if (block->HasElse() && IsValidValueItem(block->GetElseScopePredicate()) &&
+        !scope_pred_stack.empty())
+      scope_pred_stack.pop_back();
+    return;
+  }
   if (auto block = dyn_cast<AST::PredBlock>(&n)) {
     if (IsValidValueItem(block->GetScopePredicate()) &&
         !scope_pred_stack.empty())
@@ -191,6 +204,16 @@ bool SemaChecker::AfterVisitImpl(AST::Node& n) {
     if (!pending_async.empty())
       Error1(n.LOC(), "some asyncs are not explicitly waited: " +
                           DelimitedString(pending_async) + ".");
+  }
+  return true;
+}
+
+bool SemaChecker::InMidVisitImpl(AST::Node& n) {
+  if (auto block = dyn_cast<AST::IfElseBlock>(&n)) {
+    if (IsValidValueItem(block->GetIfScopePredicate()) &&
+        !scope_pred_stack.empty())
+      scope_pred_stack.pop_back();
+    if (block->HasElse()) PushScopePredicate(block->GetElseScopePredicate());
   }
   return true;
 }
@@ -602,6 +625,11 @@ bool SemaChecker::VisitNode(AST::Parameter& n) {
 
   if (n.sym) input_deps.Add(InScopeName(n.sym->name));
 
+  return true;
+}
+
+bool SemaChecker::VisitNode(AST::IfElseBlock& n) {
+  (void)n;
   return true;
 }
 
@@ -1551,14 +1579,14 @@ void SemaChecker::CreateAssessment(const ValueItem& pred,
                                    const std::string& message,
                                    const location& l, const ptr<AST::Node>& n,
                                    AST::Node* emit_node) {
-  // Classification lattice: ENTRY < DEF_SITE < USE_SITE.
+  // Classification lattice: ENTRY < HOIST_SITE < USE_SITE.
   // Start at ENTRY and escalate upward as needed.
   auto aty = AssessType::ENTRY;
 
   // When the node references locally-defined names (buffer objects that can be
-  // redefined), the assertion must be placed at the (re-)definition site -
-  // escalate to DEF_SITE.
-  if (local_deps.Contains(n)) aty = AssessType::DEF_SITE;
+  // redefined), the assertion is hoistable but must stay after the latest
+  // relevant definition site.
+  if (local_deps.Contains(n)) aty = AssessType::HOIST_SITE;
 
   // When the node has a BoundedType (loop iteration variable from foreach /
   // with-in), the value varies between iterations and the assertion must be
@@ -1576,6 +1604,21 @@ void SemaChecker::CreateAssessment(const ValueItem& pred,
       VST_DEBUG(dbgs() << "questionable: check is not related to input: "
                        << PSTR(n) << ".\n");
 
+  AST::Node* guard_site = nullptr;
+  auto active_guard = ActiveScopePredicate();
+  if (IsValidValueItem(active_guard)) {
+    if (auto expr = dyn_cast<AST::Expr>(n.get())) {
+      if (expr->GetSymbol() && emit_node)
+        guard_site = emit_node;
+      else
+        guard_site = n.get();
+    } else {
+      guard_site = emit_node ? emit_node : n.get();
+    }
+  }
+
   FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message, aty,
-                                        l, n.get(), emit_node);
+                                        l, n.get(), emit_node, active_guard,
+                                        guard_site,
+                                        AssertionEmitPosition::BEFORE_NODE);
 }

@@ -644,6 +644,8 @@ const std::string CuteCodeGen::ReShapeSTR(const Shape& s,
 bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
+  EmitPreSiteAssertions(n);
+
   EmitLineDirective(n);
 
   if (isa<AST::Program>(&n)) {
@@ -704,8 +706,7 @@ bool CuteCodeGen::InMidVisitImpl(AST::Node& n) {
 bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "After visiting " << n.TypeNameString() << "\n";
 
-  // Emit site-level assertions after the node that defines them.
-  EmitSiteAssertions(n);
+  EmitPostSiteAssertions(n);
 
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
@@ -5528,6 +5529,7 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
       // only defined in device code. We can enable this back
       // when we have a better way to handle such case.
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
+    if (!ar.enabled) continue;
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
@@ -6571,19 +6573,38 @@ void CuteCodeGen::BuildSiteAssertionMap() {
   if (fname.empty()) return;
 
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::USE_SITE)) {
-    if (ar.EmitTarget()) site_assertions[ar.EmitTarget()].push_back(ar);
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
   }
-  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::DEF_SITE)) {
-    if (ar.EmitTarget()) site_assertions[ar.EmitTarget()].push_back(ar);
+  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::HOIST_SITE)) {
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
   }
 }
 
-void CuteCodeGen::EmitSiteAssertions(AST::Node& n) {
+void CuteCodeGen::EmitPreSiteAssertions(AST::Node& n) {
   if (CCtx().DisableRuntimeCheck()) return;
-  auto it = site_assertions.find(&n);
-  if (it == site_assertions.end()) return;
+  auto it = pre_site_assertions.find(&n);
+  if (it == pre_site_assertions.end()) return;
 
-  // DEF_SITE and USE_SITE assertions are emitted in device code using
+  for (const auto& ar : it->second) {
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""
+                << ar.message << ", " << ar.loc << "\");\n";
+  }
+}
+
+void CuteCodeGen::EmitPostSiteAssertions(AST::Node& n) {
+  if (CCtx().DisableRuntimeCheck()) return;
+  auto it = post_site_assertions.find(&n);
+  if (it == post_site_assertions.end()) return;
+
+  // HOIST_SITE and USE_SITE assertions are emitted in device code using
   // choreo_assert (printf-based) because std::cerr is not available on device.
   for (const auto& ar : it->second) {
     IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""

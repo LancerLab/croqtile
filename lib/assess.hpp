@@ -18,8 +18,19 @@ class FunctionContext;
 
 enum class AssessType {
   ENTRY,
-  DEF_SITE,
+  HOIST_SITE,
   USE_SITE,
+};
+
+enum class AssertionEmitPosition {
+  BEFORE_NODE,
+  AFTER_NODE,
+};
+
+enum class AssertionCost {
+  LOW,
+  MEDIUM,
+  HIGH,
 };
 
 enum class AssessPolicy {
@@ -52,6 +63,13 @@ struct Assertion {
   /// BoundedType determines USE_SITE) does not receive AfterVisit in the AST
   /// traversal, but its parent (e.g., Select) does.
   AST::Node* emit_node = nullptr;
+  AssertionEmitPosition emit_position = AssertionEmitPosition::AFTER_NODE;
+  AST::Node* guard_site = nullptr;
+  AssertionEmitPosition guard_site_position =
+      AssertionEmitPosition::BEFORE_NODE;
+  uint64_t estimated_cost = 1;
+  AssertionCost cost = AssertionCost::LOW;
+  bool enabled = true;
 
   /// Return the node to use for site-assertion emission mapping.
   AST::Node* EmitTarget() const { return emit_node ? emit_node : node; }
@@ -65,7 +83,10 @@ private:
   /// Raw assertion insertion (no evaluation, no visitor required).
   void AddAssertion(const ptr<sbe::SymbolicExpression>& ar, const location& l,
                     const std::string& s, AssessType aty,
-                    AST::Node* n = nullptr, AST::Node* en = nullptr);
+            AST::Node* n = nullptr, AST::Node* en = nullptr,
+            AST::Node* guard_site = nullptr,
+            AssertionEmitPosition guard_site_position =
+              AssertionEmitPosition::BEFORE_NODE);
 
   bool DebugOn() const;
 
@@ -103,7 +124,11 @@ public:
   AssessResult Assess(AssessPolicy ap, const ValueItem& bo,
                       const std::string& message, AssessType aty,
                       const location& l, AST::Node* node = nullptr,
-                      AST::Node* emit_node = nullptr);
+              AST::Node* emit_node = nullptr,
+              const ValueItem& guard = GetInvalidValueItem(),
+              AST::Node* guard_site = nullptr,
+              AssertionEmitPosition guard_site_position =
+                AssertionEmitPosition::BEFORE_NODE);
 };
 
 } // end namespace Choreo

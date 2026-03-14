@@ -22,6 +22,7 @@ private:
 private:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
+  bool InMidVisitImpl(AST::Node&) override;
 
   bool ReportUnknown(AST::Node&, const char*, int, bool = false);
   bool ReportUnknownSymbol(const std::string&, const location&, const char*,
@@ -52,6 +53,7 @@ public:
   bool VisitNode(AST::DataType&) override;
   bool VisitNode(AST::Identifier&) override;
   bool VisitNode(AST::Parameter&) override;
+  bool VisitNode(AST::IfElseBlock&) override;
   bool VisitNode(AST::ParallelBy&) override;
   bool VisitNode(AST::WithIn&) override;
   bool VisitNode(AST::SpanAs&) override;

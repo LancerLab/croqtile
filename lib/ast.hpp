@@ -1648,6 +1648,8 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
 
 struct IfElseBlock : public PredBlock, public TypeIDProvider<IfElseBlock> {
   ptr<MultiNodes> else_stmts; // optional requirements
+  ValueItem if_scope_predicate = GetInvalidValueItem();
+  ValueItem else_scope_predicate = GetInvalidValueItem();
 
   IfElseBlock(const location& l, const ptr<Node>& c,
               const ptr<MultiNodes>& if_s,
@@ -1659,10 +1661,16 @@ struct IfElseBlock : public PredBlock, public TypeIDProvider<IfElseBlock> {
   const ptr<Node> GetPred() const { return GetPredicate(); }
   ptr<MultiNodes> GetThenBody() const { return stmts; }
   ptr<MultiNodes> GetElseBody() const { return else_stmts; }
+  void SetIfScopePredicate(const ValueItem& p) { if_scope_predicate = p; }
+  void SetElseScopePredicate(const ValueItem& p) { else_scope_predicate = p; }
+  const ValueItem& GetIfScopePredicate() const { return if_scope_predicate; }
+  const ValueItem& GetElseScopePredicate() const { return else_scope_predicate; }
 
   ptr<Node> CloneImpl() const override {
     auto copied = Make<IfElseBlock>(LOC(), pred, stmts, CloneP(else_stmts));
     ClonePredBlockStateTo(*copied);
+    copied->if_scope_predicate = if_scope_predicate;
+    copied->else_scope_predicate = else_scope_predicate;
     return copied;
   }
 
@@ -1685,6 +1693,14 @@ struct IfElseBlock : public PredBlock, public TypeIDProvider<IfElseBlock> {
       os << "\n" << prefix << " `- Else-Block:";
       else_stmts->Print(os, prefix + "  ", with_type);
     }
+    if (IsValidValueItem(if_scope_predicate))
+      os << "\n"
+         << prefix << " `- If Scope Predicate: "
+         << if_scope_predicate->ToString();
+    if (IsValidValueItem(else_scope_predicate))
+      os << "\n"
+         << prefix << " `- Else Scope Predicate: "
+         << else_scope_predicate->ToString();
   }
 
   bool HasElse() const { return else_stmts && else_stmts->Count(); }

@@ -252,6 +252,8 @@ const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
 bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
+  EmitPreSiteAssertions(n);
+
   EmitLineDirective(n);
 
   if (isa<AST::Program>(&n)) {
@@ -354,9 +356,6 @@ bool TopsccCodeGen::InMidVisitImpl(AST::Node& n) {
 
 bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "After visiting " << n.TypeNameString() << "\n";
-
-  // Emit site-level assertions after the node that defines them.
-  EmitSiteAssertions(n);
 
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
@@ -462,6 +461,8 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::NamedVariableDecl>(&n)) {
     emit_call = true;
   }
+
+  EmitPostSiteAssertions(n);
 
 #if 0
   if (!n.IsBlock() && NeedLevelPred()) {
@@ -2754,6 +2755,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   }
 
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
+    if (!ar.enabled) continue;
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
@@ -3856,19 +3858,38 @@ void TopsccCodeGen::BuildSiteAssertionMap() {
   if (fname.empty()) return;
 
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::USE_SITE)) {
-    if (ar.EmitTarget()) site_assertions[ar.EmitTarget()].push_back(ar);
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
   }
-  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::DEF_SITE)) {
-    if (ar.EmitTarget()) site_assertions[ar.EmitTarget()].push_back(ar);
+  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::HOIST_SITE)) {
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
   }
 }
 
-void TopsccCodeGen::EmitSiteAssertions(AST::Node& n) {
+void TopsccCodeGen::EmitPreSiteAssertions(AST::Node& n) {
   if (CCtx().DisableRuntimeCheck()) return;
-  auto it = site_assertions.find(&n);
-  if (it == site_assertions.end()) return;
+  auto it = pre_site_assertions.find(&n);
+  if (it == pre_site_assertions.end()) return;
 
-  // DEF_SITE and USE_SITE assertions are emitted in device code using
+  for (const auto& ar : it->second) {
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""
+                << ar.message << ", " << ar.loc << "\");\n";
+  }
+}
+
+void TopsccCodeGen::EmitPostSiteAssertions(AST::Node& n) {
+  if (CCtx().DisableRuntimeCheck()) return;
+  auto it = post_site_assertions.find(&n);
+  if (it == post_site_assertions.end()) return;
+
+  // HOIST_SITE and USE_SITE assertions are emitted in device code using
   // choreo_assert (printf-based) because std::cerr is not available on device.
   for (const auto& ar : it->second) {
     IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""

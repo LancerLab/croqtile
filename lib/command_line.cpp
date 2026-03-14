@@ -102,9 +102,14 @@ Option<std::string> runtime_check_level(
     OptionKind::User, "--runtime-check", "-rtc", "entry",
     "Control the granularity of runtime assertion insertion: "
     "'entry' (default) emits only entry-point assertions, "
-    "'all' also emits def-site and use-site assertions, "
+  "'all' also emits hoist-site and use-site assertions, "
     "'none' disables all runtime assertions.",
     "--runtime-check=<entry|all|none>");
+Option<std::string> runtime_check_cost(
+  OptionKind::User, "--runtime-check-cost", "", "high",
+  "Set the maximum estimated runtime-check cost to emit: "
+  "'low', 'medium', or 'high' (default).",
+  "--runtime-check-cost=<low|medium|high>");
 Option<bool> disable_cuda_runtime_env_check(
     OptionKind::User, "--disable-cuda-runtime-env-check", "", false,
     "Do not emit cuda runtime enviroment check.");
@@ -346,6 +351,19 @@ bool CommandLine::Parse(int argc, char** argv) {
     if (disable_runtime_check.GetValue()) rtc = "none";
     CCtx().SetRuntimeCheckLevel(rtc);
     CCtx().SetDisableRuntimeCheck(rtc == "none");
+
+    auto rtc_cost = ToLower(runtime_check_cost.GetValue());
+    if (rtc_cost == "low")
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::LOW);
+    else if (rtc_cost == "medium")
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::MEDIUM);
+    else if (rtc_cost == "high")
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::HIGH);
+    else {
+      errs() << "error: unsupported runtime-check cost level: '" << rtc_cost
+             << "'. Use low, medium, or high.\n";
+      return false;
+    }
   }
 
   CCtx().SetDisableCudaRuntimeEnvCheck(

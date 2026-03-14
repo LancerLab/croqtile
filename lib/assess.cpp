@@ -8,11 +8,21 @@ namespace Choreo {
 inline const std::string STR(const AssessType& at) {
   switch (at) {
   case AssessType::ENTRY: return "entry";
-  case AssessType::DEF_SITE: return "def";
+  case AssessType::HOIST_SITE: return "hoist";
   case AssessType::USE_SITE: return "use";
   default: break;
   }
   choreo_unreachable("unsupported assess type.");
+  return "";
+}
+
+inline const std::string STR(const AssertionEmitPosition& pos) {
+  switch (pos) {
+  case AssertionEmitPosition::BEFORE_NODE: return "before";
+  case AssertionEmitPosition::AFTER_NODE: return "after";
+  default: break;
+  }
+  choreo_unreachable("unsupported assertion emit position.");
   return "";
 }
 
@@ -40,13 +50,21 @@ inline const std::string STR(const AssessRelation& ar) {
 
 void Assessor::AddAssertion(const ptr<sbe::SymbolicExpression>& ar,
                             const location& l, const std::string& s,
-                            AssessType aty, AST::Node* n, AST::Node* en) {
+                            AssessType aty, AST::Node* n, AST::Node* en,
+                            AST::Node* guard_site,
+                            AssertionEmitPosition guard_site_position) {
   if (DebugOn())
     dbgs() << " +- runtime assertion: " << sbe::PSTR(ar)
-           << ", type: " << STR(aty) << "\n";
+           << ", type: " << STR(aty)
+           << (guard_site ? (", guard-site: " + PSTR(guard_site) + " (" +
+                             STR(guard_site_position) + ")")
+                          : std::string())
+           << "\n";
 
   assert(IsComputable(ar));
-  assertions.push_back({ar, aty, l, s, n, en});
+  assertions.push_back(
+      {ar, aty, l, s, n, en, AssertionEmitPosition::AFTER_NODE, guard_site,
+       guard_site_position});
 }
 
 bool Assessor::DebugOn() const {
@@ -126,7 +144,9 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
 AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
                               const std::string& message, AssessType aty,
                               const location& l, AST::Node* node,
-                              AST::Node* emit_node) {
+                              AST::Node* emit_node, const ValueItem& guard,
+                              AST::Node* guard_site,
+                              AssertionEmitPosition guard_site_position) {
   if (DebugOn())
     dbgs() << "[Assess] " << STR(bo) << ", type: " << STR(aty)
            << ", policy: " << STR(ap) << ", node: " << PSTR(emit_node)
@@ -141,8 +161,21 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
   auto pred = bo;
   if (pred) pred = pred->Normalize();
 
+  auto norm_guard = guard;
+  if (norm_guard) norm_guard = norm_guard->Normalize();
+  if (auto gb = VIBool(norm_guard)) {
+    if (gb.value() == false) return {true, false, false};
+    norm_guard = GetInvalidValueItem();
+  }
+
   if (auto b = VIBool(pred)) {
     if (b.value() == false) {
+      if (IsValidValueItem(norm_guard)) {
+        if (ap == AssessPolicy::Warn) return {true, false, false};
+        AddAssertion(pred, l, message, aty, node, emit_node, guard_site,
+                     guard_site_position);
+        return {true, false, true};
+      }
       if (ap == AssessPolicy::Error)
         visitor->Error1(l, message);
       else
@@ -154,6 +187,7 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
 
   if (ap == AssessPolicy::Warn) return {true, false, false};
 
-  AddAssertion(pred, l, message, aty, node, emit_node);
+  AddAssertion(pred, l, message, aty, node, emit_node, guard_site,
+               guard_site_position);
   return {true, false, true};
 }

@@ -381,6 +381,7 @@ private:
   bool disable_runtime_check = false; // Disable all runtime checks.
   // Runtime check assertion level: "entry" (default), "all", or "none".
   std::string runtime_check_level = "entry";
+  AssertionCost runtime_check_cost_threshold = AssertionCost::HIGH;
   bool disable_cuda_runtime_env_check =
       false;                     // Do not emit cuda runtime env check.
   bool use_warpspec = false;     // Enable warp-specialized synchronization for
@@ -526,6 +527,9 @@ public:
   bool WarningAsError() const { return warning_as_error; }
   bool DisableRuntimeCheck() const { return disable_runtime_check; }
   const std::string& RuntimeCheckLevel() const { return runtime_check_level; }
+  AssertionCost RuntimeCheckCostThreshold() const {
+    return runtime_check_cost_threshold;
+  }
   bool DisableCudaRuntimeEnvCheck() const {
     return disable_cuda_runtime_env_check;
   }
@@ -572,6 +576,9 @@ public:
   void SetDisableRuntimeCheck(bool value) { disable_runtime_check = value; }
   void SetRuntimeCheckLevel(const std::string& level) {
     runtime_check_level = level;
+  }
+  void SetRuntimeCheckCostThreshold(AssertionCost cost) {
+    runtime_check_cost_threshold = cost;
   }
   void SetDisableCudaRuntimeEnvCheck(bool value) {
     disable_cuda_runtime_env_check = value;

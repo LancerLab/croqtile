@@ -1376,6 +1376,20 @@ bool TypeInference::Visit(AST::WhileBlock& n) {
 bool TypeInference::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside
+  auto pred = BuildPredicate(this, n.GetPred());
+  n.SetIfScopePredicate(pred);
+  if (IsValidValueItem(pred))
+    n.SetElseScopePredicate(sbe::uop(OpCode::NOT, pred)->Normalize());
+  else
+    n.SetElseScopePredicate(GetInvalidValueItem());
+  if (debug_visit) {
+    if (IsValidValueItem(n.GetIfScopePredicate()))
+      dbgs() << " |- scope-predicate(if): "
+             << n.GetIfScopePredicate()->ToString() << "\n";
+    if (IsValidValueItem(n.GetElseScopePredicate()))
+      dbgs() << " |- scope-predicate(else): "
+             << n.GetElseScopePredicate()->ToString() << "\n";
+  }
   return true;
 }
 

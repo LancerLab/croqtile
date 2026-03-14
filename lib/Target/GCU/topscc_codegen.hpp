@@ -295,9 +295,11 @@ private:
   void EmitTopsFree();
 
   // site-level assertion emission
-  std::unordered_map<AST::Node*, std::vector<Assertion>> site_assertions;
+  std::unordered_map<AST::Node*, std::vector<Assertion>> pre_site_assertions;
+  std::unordered_map<AST::Node*, std::vector<Assertion>> post_site_assertions;
   void BuildSiteAssertionMap();
-  void EmitSiteAssertions(AST::Node& n);
+  void EmitPreSiteAssertions(AST::Node& n);
+  void EmitPostSiteAssertions(AST::Node& n);
 
 private:
   void IncrHostIndent() { h_indent += "  "; }
@@ -336,7 +338,8 @@ private:
     void_return = false;
     emit_call = true;
     parallel_idx = -1;
-    site_assertions.clear();
+    pre_site_assertions.clear();
+    post_site_assertions.clear();
     ResetLineDirectiveState();
   }
 
