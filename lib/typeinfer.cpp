@@ -541,11 +541,11 @@ bool TypeInference::Visit(AST::Assignment& n) {
   SetNodeType(n, ty);
   SetNodeType(*n.da, ty);
 
-  if (auto fty = dyn_cast<FutureType>(ty)) {
+  if (auto fty = dyn_cast<FutureType>(ty))
     AssignSymbolWithType(n.LOC(), n.GetName() + ".data", fty->GetSpannedType());
-    AssignSymbolWithType(n.LOC(), n.GetName() + ".span",
-                         fty->GetSpannedType()->GetMDSpanType());
-  }
+
+  if (auto sty = GetSpannedType(ty))
+    AssignSymbolWithType(n.LOC(), n.GetName() + ".span", sty->GetMDSpanType());
 
   if (CCtx().ShowInferredTypes()) {
     dbgs() << "Symbol:    " << InScopeName(n.GetName())
