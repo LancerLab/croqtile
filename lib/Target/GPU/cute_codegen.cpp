@@ -1138,8 +1138,8 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   cudaError_t err = cudaRuntimeGetVersion(&runtime_ver);
   if (err != cudaSuccess) {
     std::fprintf(stderr,
-		 "[choreo] CUDA runtime not available: %s\n",
-		 cudaGetErrorString(err));
+                "[choreo] CUDA runtime not available: %s\n",
+                cudaGetErrorString(err));
     std::exit(EXIT_FAILURE);
   }
 
@@ -1147,8 +1147,8 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   err = cudaDriverGetVersion(&driver_ver);
   if (err != cudaSuccess) {
     std::fprintf(stderr,
-		 "[choreo] CUDA driver not available: %s\n",
-		 cudaGetErrorString(err));
+                "[choreo] CUDA driver not available: %s\n",
+                cudaGetErrorString(err));
     std::exit(EXIT_FAILURE);
   }
 
@@ -1162,21 +1162,21 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
 
   if (runtime_ver < CUDART_VERSION) {
     std::fprintf(stderr,
-	"[choreo] CUDA runtime too old:\n"
-	"  found runtime %d.%d.%d (encoded=%d)\n"
-	"  required      %d.%d.%d (encoded=%d)\n",
-	rMaj, rMin, rPat, runtime_ver,
-	reqMaj, reqMin, reqPat, CUDART_VERSION);
+       "[choreo] CUDA runtime too old:\n"
+       "  found runtime %d.%d.%d (encoded=%d)\n"
+       "  required      %d.%d.%d (encoded=%d)\n",
+       rMaj, rMin, rPat, runtime_ver,
+       reqMaj, reqMin, reqPat, CUDART_VERSION);
     std::exit(EXIT_FAILURE);
   }
 
   // Optional: check driver vs runtime mismatch
   if (driver_ver < runtime_ver) {
     std::fprintf(stderr,
-	"[choreo] Warning: CUDA driver (%d.%d.%d, encoded=%d) is older than "
-	"the CUDA runtime (%d.%d.%d, encoded=%d). This may cause issues.\n",
-	dMaj, dMin, dPat, driver_ver,
-	rMaj, rMin, rPat, runtime_ver);
+       "[choreo] Warning: CUDA driver (%d.%d.%d, encoded=%d) is older than "
+       "the CUDA runtime (%d.%d.%d, encoded=%d). This may cause issues.\n",
+       dMaj, dMin, dPat, driver_ver,
+       rMaj, rMin, rPat, runtime_ver);
   }
 
   // ----------- Device capability check -----------
@@ -1184,7 +1184,7 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   err = cudaGetDeviceCount(&device_count);
   if (err != cudaSuccess || device_count == 0) {
     std::fprintf(stderr,
-		 "[choreo] No CUDA-capable devices found.\n");
+                "[choreo] No CUDA-capable devices found.\n");
     std::exit(EXIT_FAILURE);
   }
 
@@ -1193,10 +1193,10 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   cudaDeviceProp prop{};
   err = cudaGetDeviceProperties(&prop, device_id);
   if (err != cudaSuccess) {
-      std::fprintf(stderr,
-                   "[choreo] cudaGetDeviceProperties failed: %s\n",
-                   cudaGetErrorString(err));
-      std::exit(EXIT_FAILURE);
+    std::fprintf(stderr,
+                 "[choreo] cudaGetDeviceProperties failed: %s\n",
+                 cudaGetErrorString(err));
+    std::exit(EXIT_FAILURE);
   }
 
   int sm = prop.major * 10 + prop.minor;
@@ -5525,15 +5525,14 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
        << rc.message << ", " << rc.loc << "\");\n";
   }
 
-#if 0 // may cause undefined symbol error if the assertion depends on a value
-      // only defined in device code. We can enable this back
-      // when we have a better way to handle such case.
+  // ENTRY assertions reference only function parameters / host-visible values
+  // — the assertion-hoisting pass guarantees this. Safe to emit in the host
+  // wrapper before the kernel launch.
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
     if (!ar.enabled) continue;
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
-#endif
 
   // USE_SITE and DEF_SITE assertions are emitted in device code (inside the
   // kernel) via EmitSiteAssertions, which is called from AfterVisitImpl during

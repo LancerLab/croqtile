@@ -1,0 +1,57 @@
+// RUN: choreo -es --show-assess %s -o /dev/null 2>&1 | FileCheck %s
+//
+// --show-assess report for HOIST assertions inside if/else branches.
+//
+// When the buffer access lives inside an if-branch and the index is a plain
+// parameter (no local-def barrier), the assertion is hoisted to the first
+// statement of the branch body (before `pre`).  It is NOT moved outside the
+// if/else guard, so no false positives when the branch is not taken.
+//
+// The report must show:
+//   1. Assessment  : message and location for each branch access.
+//   2. State       : type=HOIST, enabled=yes.
+//   3. Cost        : high (inside parallel-by, classified high).
+//   4. Site        : location before the NamedVariableDecl node, emit-position
+//                    "before".  (No guard line -- guard_site was removed.)
+
+__co__ void foo(int j, int k) {
+  parallel p by 8 {
+    shared s32 [4] buf1;
+    shared s32 [8] buf2;
+    if (j < k) {
+      mutable int pre = j * 2;
+      x = buf1.at(j);
+    } else {
+      mutable int pre = j + 1;
+      y = buf2.at(j);
+    }
+  }
+}
+
+// Header.
+// CHECK: [assertions] function: foo  (4 assessed:  0 static-true,  0 static-false,  4 runtime)
+
+// ---- if-branch: buf1 lower-bound ----
+// CHECK: [0] HOIST      enabled=yes  cost=high
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}'buf1'{{.*}}greater than or equal to 0
+// CHECK:      loc     : {{.*}}.co:
+// CHECK:      site    : {{.*}}.co:{{.*}}  (before)  [AST::NamedVariableDecl]
+
+// ---- if-branch: buf1 upper-bound ----
+// CHECK: [1] HOIST      enabled=yes  cost=high
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}'buf1'{{.*}}less than 4
+// CHECK:      site    : {{.*}}.co:{{.*}}  (before)  [AST::NamedVariableDecl]
+
+// ---- else-branch: buf2 lower-bound ----
+// CHECK: [2] HOIST      enabled=yes  cost=high
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}'buf2'{{.*}}greater than or equal to 0
+// CHECK:      site    : {{.*}}.co:{{.*}}  (before)  [AST::NamedVariableDecl]
+
+// ---- else-branch: buf2 upper-bound ----
+// CHECK: [3] HOIST      enabled=yes  cost=high
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}'buf2'{{.*}}less than 8
+// CHECK:      site    : {{.*}}.co:{{.*}}  (before)  [AST::NamedVariableDecl]

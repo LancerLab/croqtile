@@ -104,7 +104,7 @@ class Target {
 public:
   virtual ~Target() {};
 
-  // Target hooks — keep these abstract
+  // Target hooks -- keep these abstract
   virtual const std::string Name() const = 0;
   virtual const std::vector<ArchInfo> SupportedArchs() const { return {}; }
   virtual const std::unordered_map<std::string, std::string>

@@ -61,54 +61,6 @@ AST::Node* AssertSite::NextStatementInBlock(AST::Node* n) const {
   return block->stmts->SubAt(static_cast<size_t>(idx + 1)).get();
 }
 
-AST::Node* AssertSite::GuardBarrierSite(AST::Node* n) const {
-  if (!n) return nullptr;
-  if (auto next = NextStatementInBlock(n)) return next;
-  return n;
-}
-
-AST::Node* AssertSite::EarliestStatementInBlock(AST::Node* start) const {
-  if (!start) return start;
-
-  // Walk up from start until we find a node that is a direct child of a
-  // MultiNodes container.  That MultiNodes is the statement list of the
-  // enclosing block (if-body, else-body, parallel body, etc.).
-  AST::Node* stmt = start;
-  while (stmt) {
-    auto pit = parent_map.find(stmt);
-    if (pit == parent_map.end()) break;
-    auto parent = pit->second;
-    if (!parent) break;
-
-    if (isa<AST::MultiNodes>(parent)) {
-      // `stmt` is a direct child of the MultiNodes.  Find whichever child of
-      // the same MultiNodes has the smallest walk order — that is the first
-      // statement in the block.
-      AST::Node* first = nullptr;
-      size_t min_ord = SIZE_MAX;
-      for (const auto& [n, p] : parent_map) {
-        if (p != parent) continue;
-        auto oit = node_order.find(n);
-        if (oit == node_order.end()) continue;
-        if (oit->second < min_ord) {
-          min_ord = oit->second;
-          first = n;
-        }
-      }
-      return first ? first : stmt;
-    }
-
-    // Stop if we reach a scope-level node — guard_site was a direct child.
-    if (isa<AST::IfElseBlock>(parent) || isa<AST::ChoreoFunction>(parent) ||
-        isa<AST::ParallelBy>(parent) || isa<AST::WithBlock>(parent) ||
-        isa<AST::ForeachBlock>(parent) || isa<AST::WhileBlock>(parent))
-      break;
-
-    stmt = parent;
-  }
-  return start;
-}
-
 AST::MultiNodes* AssertSite::FindStatementContainer(AST::Node* use) const {
   AST::Node* cur = use;
   while (cur) {
@@ -235,7 +187,7 @@ bool AssertSite::Visit(AST::Parameter& n) {
   auto scoped = InScopeName(n.sym->name);
   // The defining "node" for a parameter is the ChoreoFunction itself; however,
   // we do not have direct access to it here.  Instead, record the parameter
-  // node with walk_order 0 — it is guaranteed to precede every statement.
+  // node with walk_order 0 -- it is guaranteed to precede every statement.
   RecordDef(scoped, &n);
   return true;
 }
@@ -249,8 +201,8 @@ bool AssertSite::Visit(AST::NamedVariableDecl& n) {
 bool AssertSite::Visit(AST::Assignment& n) {
   // Record both declarations and mutations as hoist barriers (cases 1 & 2).
   //
-  // Case 1 — declaration:  `mutable int j = 0`  introduces the variable.
-  // Case 2 — mutation:     `j = j + 1`  changes the value after definition;
+  // Case 1 -- declaration:  `mutable int j = 0`  introduces the variable.
+  // Case 2 -- mutation:     `j = j + 1`  changes the value after definition;
   //   any reference to j after this point may observe the mutated value, so
   //   the assertion cannot be hoisted above this assignment either.
   //
@@ -298,40 +250,20 @@ bool AssertSite::Visit(AST::WithBlock& n) {
   return true;
 }
 
+
+
 void AssertSite::HoistAssertions() {
   if (fname.empty()) return;
 
   auto& assessor = FCtx(fname).GetAssessor();
   // We operate by mutating the assertion vector in-place.  The assessor
-  // exposes a const ref, so we const_cast here — the pass owns the mutation
+  // exposes a const ref, so we const_cast here -- the pass owns the mutation
   // semantics and runs in a single-threaded pipeline.
   auto& assertions =
       const_cast<std::vector<Assertion>&>(assessor.GetAssertions());
 
   for (auto& ar : assertions) {
     if (ar.type == AssessType::ENTRY) {
-      // If the assertion was created inside a conditional guard (guard_site is
-      // non-null), emitting it unconditionally at function entry would produce
-      // false positives whenever the guard condition is false.  Hoist it to
-      // the FIRST STATEMENT of the enclosing block — inside the branch but
-      // before any other work — so it runs as early as possible.
-      if (ar.guard_site) {
-        auto first_stmt = EarliestStatementInBlock(ar.guard_site);
-        ar.type = AssessType::HOIST_SITE;
-        ar.node = first_stmt;
-        ar.emit_node = first_stmt;
-        ar.emit_position = AssertionEmitPosition::BEFORE_NODE;
-        ar.estimated_cost = EstimateAssertionCost(ar.guard_site);
-        ar.cost = CategorizeCost(ar.estimated_cost);
-        ar.enabled =
-            IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
-        VST_DEBUG(dbgs() << "[assertsite] assertion \"" << ar.message
-                         << "\" hoisted to block-top (was ENTRY, guard_site "
-                         << ar.guard_site->LOC() << ", first_stmt "
-                         << (first_stmt ? PSTR(first_stmt) : std::string("?"))
-                         << ")\n");
-        continue;
-      }
       ar.estimated_cost = 1;
       ar.cost = AssertionCost::LOW;
       ar.enabled = true;
@@ -341,7 +273,7 @@ void AssertSite::HoistAssertions() {
     // Collect all symbols referenced by the assertion expression.
     auto syms = GetSymbols(ar.expr);
     if (syms.empty()) {
-      // No symbolic references — safe to place at entry.
+      // No symbolic references -- safe to place at entry.
       ar.type = AssessType::ENTRY;
       ar.node = nullptr;
       ar.emit_node = nullptr;
@@ -364,7 +296,7 @@ void AssertSite::HoistAssertions() {
 
       auto it = def_map.find(*sym_name);
       if (it == def_map.end()) {
-        // Symbol not found in the def map — it may be global or otherwise not
+        // Symbol not found in the def map -- it may be global or otherwise not
         // hoistable inside this function.
         all_resolved = false;
         VST_DEBUG(dbgs() << "[assertsite] symbol not found in def_map: "
@@ -391,33 +323,53 @@ void AssertSite::HoistAssertions() {
       continue;
     }
 
-    // Case 3.iii — block-level barrier: if `latest_def` is nested inside a
-    // block statement (while, foreach, if, …) that lives in the same scope as
+    // Case 3.iii -- block-level barrier: if `latest_def` is nested inside a
+    // block statement (while, foreach, if, ...) that lives in the same scope as
     // the access, bubble `latest_def` up to that block statement so the
     // assertion is placed AFTER the block exits, not deep inside it.
     auto use_container = FindStatementContainer(ar.EmitTarget());
     auto bubbled_def = BubbleToSiblingScope(latest_def, use_container);
     bool was_bubbled = (bubbled_def != latest_def);
 
-    // The assertion must also respect the guard constraint (case 3.ii): if
-    // the access is inside a conditional scope, keep the assertion inside it.
     auto hoist_site = bubbled_def;
-    if (ar.guard_site) hoist_site = LaterNode(hoist_site, ar.guard_site);
 
-    // Parameters are available at function entry. Any barrier later than that
-    // still wins through `hoist_site` above.
+    // If the def-site is a PredBlock (foreach, while, if, ...) that contains
+    // the original emit node, keep the assertion at the original emit node.
+    // This ensures loop-body assertions (e.g. BoundedType iteration variables)
+    // fire inside the loop rather than before it.
+    if (!was_bubbled && isa<AST::PredBlock>(latest_def) && ar.emit_node) {
+      auto em_it = node_order.find(ar.emit_node);
+      if (em_it != node_order.end() && em_it->second > latest_order)
+        hoist_site = ar.emit_node;
+    }
+
+    // Conservative hoisting: when the only defining node is a function
+    // parameter and the assertion was not bubbled, it was created inside a
+    // conditional scope (guard escalated its type from ENTRY to HOIST_SITE).
+    // Hoist to the very first statement of the enclosing block -- there is no
+    // local-definition barrier, so the assertion can safely be moved ahead of
+    // any other statements (like `mutable int pre = ...`) in the branch body.
     if (isa<AST::Parameter>(latest_def) && !was_bubbled) {
       if (hoist_site == latest_def) {
-        ar.type = AssessType::ENTRY;
-        ar.node = nullptr;
-        ar.emit_node = nullptr;
-        ar.emit_position = AssertionEmitPosition::AFTER_NODE;
-        ar.estimated_cost = 1;
-        ar.cost = AssertionCost::LOW;
-        ar.enabled = true;
-        VST_DEBUG(dbgs() << "[assertsite] assertion \"" << ar.message
-                         << "\" promoted to ENTRY (parameter-only def).\n");
-        continue;
+        AST::Node* first_stmt =
+            (use_container && use_container->Count() > 0)
+                ? use_container->SubAt(0).get()
+                : nullptr;
+        if (first_stmt) {
+          ar.type = AssessType::HOIST_SITE;
+          ar.node = first_stmt;
+          ar.emit_node = first_stmt;
+          ar.emit_position = AssertionEmitPosition::BEFORE_NODE;
+          ar.estimated_cost = EstimateAssertionCost(first_stmt);
+          ar.cost = CategorizeCost(ar.estimated_cost);
+          ar.enabled =
+              IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
+          VST_DEBUG(dbgs() << "[assertsite] assertion \"" << ar.message
+                           << "\" hoisted to block start (parameter, no "
+                              "barrier)\n");
+          continue;
+        }
+        // No enclosing block found -- fall through to normal HOIST placement.
       }
     }
 
@@ -441,6 +393,131 @@ void AssertSite::HoistAssertions() {
                      << ", cost=" << ar.estimated_cost
                      << ", enabled=" << ar.enabled << ")\n");
   }
+
+  if (CCtx().ShowAssess()) PrintAssertionReport();
+
+  // Always accumulate aggregate statistics (used by --stats).
+  {
+    auto& stats = CCtx().GetAssessmentStats();
+    const auto& log = assessor.GetAssessmentLog();
+    const auto& all = assessor.GetAssertions();
+    for (const auto& ae : log) {
+      ++stats.total;
+      switch (ae.outcome) {
+      case AssessOutcome::STATIC_TRUE:
+        ++stats.static_true;
+        break;
+      case AssessOutcome::STATIC_FALSE:
+        ++stats.static_false;
+        break;
+      case AssessOutcome::RUNTIME: {
+        ++stats.runtime_total;
+        if (ae.assertion_idx < all.size()) {
+          const auto& ar = all[ae.assertion_idx];
+          switch (ar.cost) {
+          case AssertionCost::LOW:    ++stats.runtime_low;    break;
+          case AssertionCost::MEDIUM: ++stats.runtime_medium; break;
+          case AssertionCost::HIGH:   ++stats.runtime_high;   break;
+          }
+          if (ar.enabled) ++stats.runtime_enabled;
+          else            ++stats.runtime_disabled;
+        }
+        break;
+      }
+      }
+    }
+  }
+}
+
+void AssertSite::PrintAssertionReport() const {
+  auto& assessor = FCtx(fname).GetAssessor();
+  const auto& log  = assessor.GetAssessmentLog();
+  const auto& all  = assessor.GetAssertions();
+  if (log.empty()) return;
+
+  // Count outcomes for the header.
+  size_t n_strue = 0, n_sfalse = 0, n_runtime = 0;
+  for (const auto& ae : log) {
+    if (ae.outcome == AssessOutcome::STATIC_TRUE)  ++n_strue;
+    else if (ae.outcome == AssessOutcome::STATIC_FALSE) ++n_sfalse;
+    else ++n_runtime;
+  }
+
+  auto type_str = [](AssessType t) -> const char* {
+    switch (t) {
+    case AssessType::ENTRY:      return "ENTRY    ";
+    case AssessType::HOIST_SITE: return "HOIST    ";
+    case AssessType::USE_SITE:   return "USE_SITE ";
+    }
+    return "?        ";
+  };
+  auto cost_str = [](AssertionCost c) -> const char* {
+    switch (c) {
+    case AssertionCost::LOW:    return "low   ";
+    case AssertionCost::MEDIUM: return "medium";
+    case AssertionCost::HIGH:   return "high  ";
+    }
+    return "?     ";
+  };
+  auto pos_str = [](AssertionEmitPosition p) -> const char* {
+    return p == AssertionEmitPosition::BEFORE_NODE ? "before" : "after ";
+  };
+
+  errs() << "\n[assertions] function: " << fname
+         << "  (" << log.size() << " assessed:"
+         << "  " << n_strue   << " static-true,"
+         << "  " << n_sfalse  << " static-false,"
+         << "  " << n_runtime << " runtime)\n";
+  errs() << "  " << std::string(75, '-') << "\n";
+
+  size_t idx = 0;
+  for (const auto& ae : log) {
+    if (ae.outcome == AssessOutcome::STATIC_TRUE) {
+      // Provably safe at compile time -- no code generated.
+      errs() << "  [" << idx++ << "] static-true   "
+             << "(compile-time: always passes \xe2\x80\x94 no code generated)\n";
+      errs() << "       message : " << ae.message << "\n";
+      errs() << "       loc     : " << ae.loc     << "\n";
+    } else if (ae.outcome == AssessOutcome::STATIC_FALSE) {
+      // Proven unsafe -- compile error/warning already emitted.
+      errs() << "  [" << idx++ << "] static-false  "
+             << "(compile-time: always fails \xe2\x80\x94 compile error/warning)\n";
+      errs() << "       message : " << ae.message << "\n";
+      errs() << "       loc     : " << ae.loc     << "\n";
+    } else {
+      // RUNTIME: look up the matching Assertion for hoist/cost info.
+      const Assertion* ar =
+          (ae.assertion_idx < all.size()) ? &all[ae.assertion_idx] : nullptr;
+
+      if (ar) {
+        auto* site = ar->EmitTarget();
+        errs() << "  [" << idx++ << "] "
+               << type_str(ar->type)
+               << "  enabled=" << (ar->enabled ? "yes" : "no ")
+               << "  cost=" << cost_str(ar->cost)
+               << "  estimated=" << ar->estimated_cost << "\n";
+        errs() << "       assess  : runtime (cannot evaluate at compile time)\n";
+        errs() << "       message : " << ae.message << "\n";
+        errs() << "       loc     : " << ae.loc << "\n";
+
+        if (ar->type == AssessType::ENTRY) {
+          errs() << "       site    : function entry (host runtime_check)\n";
+        } else if (site) {
+          errs() << "       site    : " << site->LOC()
+                 << "  (" << pos_str(ar->emit_position) << ")"
+                 << "  [" << site->TypeNameString() << "]\n";
+        } else {
+          errs() << "       site    : (none)\n";
+        }
+      } else {
+        // Assertion record not yet available (should not happen after hoisting).
+        errs() << "  [" << idx++ << "] runtime      (assertion record unavailable)\n";
+        errs() << "       message : " << ae.message << "\n";
+        errs() << "       loc     : " << ae.loc     << "\n";
+      }
+    }
+  }
+  errs() << "  " << std::string(75, '-') << "\n";
 }
 
 } // end namespace Choreo

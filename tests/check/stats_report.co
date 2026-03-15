@@ -1,0 +1,28 @@
+// RUN: choreo -es --stats %s -o /dev/null 2>&1 | FileCheck %s
+//
+// --stats report: aggregate counts across the whole compilation unit.
+// Same program as pra_report_static_true.co:
+//   4 static-true  (trigger/wait e[0], 2 checks each)
+//   0 static-false
+//   2 runtime      (buf.at(j), ENTRY assertions)
+//
+// CHECK: Assessment Statistics
+// CHECK: {{[ ]*}}6  assess  - Assessments evaluated
+// CHECK: {{[ ]*}}4  assess  - Resolved at compile time (static-true)
+// CHECK: {{[ ]*}}0  assess  - Proven false at compile time (static-false)
+// CHECK: {{[ ]*}}2  assess  - Runtime assertions generated
+// CHECK: {{[ ]*}}2  assess  - Runtime assertions (low cost)
+// CHECK: {{[ ]*}}0  assess  - Runtime assertions (medium cost)
+// CHECK: {{[ ]*}}0  assess  - Runtime assertions (high cost)
+// CHECK: {{[ ]*}}2  assess  - Runtime assertions enabled
+// CHECK: {{[ ]*}}0  assess  - Runtime assertions disabled by cost filter
+
+__co__ void foo(int j) {
+  parallel p by 8 {
+    shared event e[4];
+    trigger e[0];
+    wait e[0];
+    shared s32 [4] buf;
+    x = buf.at(j);
+  }
+}

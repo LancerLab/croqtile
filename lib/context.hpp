@@ -335,11 +335,25 @@ public:
   }
 };
 
+/// Aggregate statistics for assessments and assertions across all functions.
+struct AssessmentStats {
+  size_t total = 0;          // total assessments evaluated
+  size_t static_true = 0;   // resolved at compile time (always passes)
+  size_t static_false = 0;  // proven false at compile time (error/warning)
+  size_t runtime_total = 0; // runtime assertions generated
+  size_t runtime_low = 0;   // runtime assertions with low  estimated cost
+  size_t runtime_medium = 0; // runtime assertions with medium estimated cost
+  size_t runtime_high = 0;  // runtime assertions with high estimated cost
+  size_t runtime_enabled = 0;  // runtime assertions enabled for emission
+  size_t runtime_disabled = 0; // runtime assertions suppressed by cost filter
+};
+
 class SymbolTable;
 // per-compilation context
 class CompilationContext {
 private:
   std::map<std::string, FunctionContext> function_contexts;
+  AssessmentStats assessment_stats; // accumulated across all functions
   std::unique_ptr<Target> compile_target = nullptr;
   std::vector<ArchId> archs;
   std::vector<FeatureToggle> features;
@@ -379,6 +393,8 @@ private:
   bool inhibit_warning = false;       // Inhibit all warning messages.
   bool warning_as_error = false;      // Make all warnings into errors.
   bool disable_runtime_check = false; // Disable all runtime checks.
+  bool show_assess = false;           // Print assessment report after hoisting.
+  bool print_stats = false;            // Print aggregate assessment statistics.
   // Runtime check assertion level: "entry" (default), "all", or "none".
   std::string runtime_check_level = "entry";
   AssertionCost runtime_check_cost_threshold = AssertionCost::HIGH;
@@ -526,6 +542,10 @@ public:
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
   bool DisableRuntimeCheck() const { return disable_runtime_check; }
+  bool ShowAssess() const { return show_assess; }
+  bool PrintStats() const { return print_stats; }
+  const AssessmentStats& GetAssessmentStats() const { return assessment_stats; }
+  AssessmentStats& GetAssessmentStats() { return assessment_stats; }
   const std::string& RuntimeCheckLevel() const { return runtime_check_level; }
   AssertionCost RuntimeCheckCostThreshold() const {
     return runtime_check_cost_threshold;
@@ -574,6 +594,8 @@ public:
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
   void SetDisableRuntimeCheck(bool value) { disable_runtime_check = value; }
+  void SetShowAssess(bool value) { show_assess = value; }
+  void SetPrintStats(bool value) { print_stats = value; }
   void SetRuntimeCheckLevel(const std::string& level) {
     runtime_check_level = level;
   }

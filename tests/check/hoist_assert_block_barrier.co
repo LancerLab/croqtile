@@ -1,6 +1,6 @@
-// RUN: choreo -n -es --runtime-check=all %s -o - | FileCheck %s
+// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
 //
-// Case 3.iii — block-level hoist barrier:
+// Case 3.iii -- block-level hoist barrier:
 // The mutable variable `j` is modified inside a `foreach` loop body.  The
 // buf.at(j) access happens AFTER the foreach exits (outside the loop), yet
 // the accumulation of j inside the loop makes j's value unknwon until the
@@ -20,7 +20,7 @@ __co__ void foo(int n) {
   }
 }
 
-// The foreach loop body should contain only the assignment — no assertion.
+// The foreach loop body should contain only the assignment -- no assertion.
 // CHECK: for (__iv_i__elem__0 = 0;
 // CHECK-NEXT: j = (n + j);
 // CHECK-NEXT: } // i__elem__0

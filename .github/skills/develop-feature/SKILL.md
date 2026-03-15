@@ -627,3 +627,23 @@ set(CORE_SOURCES
   my_new_pass.cpp
 )
 ```
+
+## Code Style Rules (MANDATORY)
+
+### ASCII-only source files
+- ALL source files (`lib/`, `tools/`, `tests/`) must contain only ASCII characters (0x00-0x7F).
+- Do NOT use Unicode in comments, strings, or identifiers: use `--` not em-dash, `->` not right-arrow, `...` not ellipsis.
+- After editing, verify with:
+```bash
+LC_ALL=C grep -Prn '[^\x00-\x7F]' lib/ tools/ tests/check/ --include="*.cpp" --include="*.hpp" --include="*.h" --include="*.co" 2>/dev/null | grep -v '\.swp'
+```
+  This must return no output.
+
+### Diagnostic output: use errs()/dbgs(), never fprintf
+- Use `errs()` for all compiler diagnostic messages, never `std::fprintf(stderr, ...)`.
+- Use `dbgs()` for debug-only output guarded by `VST_DEBUG(...)`.
+- After editing, verify:
+```bash
+grep -rn 'fprintf' lib/ tools/ --include="*.cpp" --include="*.hpp"
+```
+  This must return no output.

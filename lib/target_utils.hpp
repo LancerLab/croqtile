@@ -618,7 +618,7 @@ inline MMAType GetMMAType(const MMAConfig& config) {
         config.shape.k == 64) {
       choreo_unreachable(
           "unsupported MMA config: " + config.ToString() +
-          " — FP8 m16n8k64 requires GPU compute capability >= SM_90");
+          " -- FP8 m16n8k64 requires GPU compute capability >= SM_90");
     }
     choreo_unreachable("unsupported MMA config: " + config.ToString());
   }

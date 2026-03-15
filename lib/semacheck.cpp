@@ -1241,8 +1241,17 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
                      Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
                      "', where the valid range is [0, " +
                      std::to_string(bound) + ")";
-      CreateAssessment(asrt0, message, expr->LOC(), expr);
-      CreateAssessment(asrt1, message, expr->LOC(), expr);
+      // Array subscript index bounds are pre-conditions on the index value,
+      // not the foreach iteration variable itself.  Bypass CreateAssessment
+      // to force ENTRY placement: static violations become compile errors,
+      // and runtime assertions are placed in the host wrapper (not inside the
+      // kernel body).  See similar fix in ParallelBy and WithIn visitors.
+      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt0,
+                                            message, AssessType::ENTRY,
+                                            expr->LOC(), expr.get());
+      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt1,
+                                            message, AssessType::ENTRY,
+                                            expr->LOC(), expr.get());
     }
   }
 
@@ -1604,21 +1613,14 @@ void SemaChecker::CreateAssessment(const ValueItem& pred,
       VST_DEBUG(dbgs() << "questionable: check is not related to input: "
                        << PSTR(n) << ".\n");
 
-  AST::Node* guard_site = nullptr;
   auto active_guard = ActiveScopePredicate();
-  if (IsValidValueItem(active_guard)) {
-    if (auto expr = dyn_cast<AST::Expr>(n.get())) {
-      if (expr->GetSymbol() && emit_node)
-        guard_site = emit_node;
-      else
-        guard_site = n.get();
-    } else {
-      guard_site = emit_node ? emit_node : n.get();
-    }
-  }
+  // Conservative: if we are inside a conditional scope, don't allow this
+  // assertion to be hoisted all the way to function entry.  Escalating from
+  // ENTRY to HOIST_SITE bypasses the early-return in HoistAssertions and lets
+  // the hoisting pass decide the proper placement conservatively.
+  if (IsValidValueItem(active_guard) && aty == AssessType::ENTRY)
+    aty = AssessType::HOIST_SITE;
 
   FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message, aty,
-                                        l, n.get(), emit_node, active_guard,
-                                        guard_site,
-                                        AssertionEmitPosition::BEFORE_NODE);
+                                        l, n.get(), emit_node, active_guard);
 }

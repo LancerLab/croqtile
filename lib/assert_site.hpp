@@ -1,12 +1,14 @@
 #ifndef __CHOREO_ASSERT_SITE_HPP__
 #define __CHOREO_ASSERT_SITE_HPP__
 
-/// AssertSite — hoist runtime assertions to the earliest safe placement site.
+/// AssertSite -- hoist runtime assertions to the earliest safe placement site.
 ///
 /// After SemaChecker produces assertions marked ENTRY, HOIST_SITE, or
 /// USE_SITE, this pass walks each function body and moves every non-entry
 /// assertion to the earliest site that is still after all referenced symbol
-/// definitions and inside all active guard regions.
+/// definitions.  Hoisting is conservative: assertions inside conditional
+/// scopes (if/else, foreach, while) are never promoted past the enclosing
+/// block boundary.
 ///
 /// The pass runs inside PlanCodeGenStages(), after target-specific checks
 /// and before the actual code generator.
@@ -50,15 +52,12 @@ private:
   AssertionCost CategorizeCost(uint64_t cost) const;
   AssertionEmitPosition SiteEmitPosition(AST::Node* n) const;
   AST::Node* NextStatementInBlock(AST::Node* n) const;
-  AST::Node* GuardBarrierSite(AST::Node* n) const;
   AST::Node* LaterNode(AST::Node* lhs, AST::Node* rhs) const;
 
-  /// Walk up the parent chain from `start` until we find a node whose direct
-  /// parent is a MultiNodes statement container, then return the earliest child
-  /// of that container (by walk order).  This gives the first statement in the
-  /// enclosing block, which is the correct hoist target for a guard-constrained
-  /// ENTRY assertion.
-  AST::Node* EarliestStatementInBlock(AST::Node* start) const;
+  /// Return true when `container` (a MultiNodes statement list) is directly
+  /// inside a conditional or iterative scope (IfElseBlock, ForeachBlock, or
+  /// WhileBlock).  Used to prevent parameter-only assertions from being
+  /// promoted to ENTRY when the access lives inside a guarded block.
 
   /// Find the MultiNodes (statement list) that directly contains `use`.
   AST::MultiNodes* FindStatementContainer(AST::Node* use) const;
@@ -76,6 +75,10 @@ private:
 
   /// Record a definition of `scoped_name` at node `n`.
   void RecordDef(const std::string& scoped_name, AST::Node* n);
+
+  /// Print a human-readable assertion report to stderr (used by
+  /// --show-assess).  Called at the end of HoistAssertions().
+  void PrintAssertionReport() const;
 
   bool BeforeVisitImpl(AST::Node& n) override;
   bool AfterVisitImpl(AST::Node& n) override;

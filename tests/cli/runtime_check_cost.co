@@ -1,5 +1,5 @@
-// RUN: choreo -n -es --runtime-check=all %s -o - | FileCheck %s --check-prefix=HIGH
-// RUN: choreo -n -es --runtime-check=all --runtime-check-cost=low %s -o - | FileCheck %s --check-prefix=LOW
+// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s --check-prefix=HIGH
+// RUN: choreo -es --runtime-check=low %s -o - | FileCheck %s --check-prefix=LOW
 
 __co__ void foo(int n) {
   parallel p by 1 {

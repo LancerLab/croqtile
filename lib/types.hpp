@@ -448,9 +448,9 @@ inline static std::ostream& operator<<(std::ostream& os, BaseType bt) {
         E5M2:   <= 57344
     note: f8 may or may not have implicit leading bit!
   f16:  E5M11:  <= 65504
-  bf16: E8M8:   <= 3.38×10^38
-  f32:  E8M24:  <= 3.4×10^38
-  f64:  E11M53: <= 1.79×10^308
+  bf16: E8M8:   <= 3.38x10^38
+  f32:  E8M24:  <= 3.4x10^38
+  f64:  E11M53: <= 1.79x10^308
 
   U8:  [0, 255]
   S8:  [-128, 127]
