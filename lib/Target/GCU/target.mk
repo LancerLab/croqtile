@@ -70,7 +70,7 @@ setup-gcu3: setup-core
 	git submodule update --init --recursive;\
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
 
-setup-gcu4: setup-core
+setup-gcu4: setup-core setup-gcu-acore
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-kit FTP_SERVER=$(FTP_SERVER)
 
 setup-gcu5: setup-core

@@ -337,13 +337,13 @@ public:
 
 /// Aggregate statistics for assessments and assertions across all functions.
 struct AssessmentStats {
-  size_t total = 0;          // total assessments evaluated
-  size_t static_true = 0;   // resolved at compile time (always passes)
-  size_t static_false = 0;  // proven false at compile time (error/warning)
-  size_t runtime_total = 0; // runtime assertions generated
-  size_t runtime_low = 0;   // runtime assertions with low  estimated cost
-  size_t runtime_medium = 0; // runtime assertions with medium estimated cost
-  size_t runtime_high = 0;  // runtime assertions with high estimated cost
+  size_t total = 0;            // total assessments evaluated
+  size_t static_true = 0;      // resolved at compile time (always passes)
+  size_t static_false = 0;     // proven false at compile time (error/warning)
+  size_t runtime_total = 0;    // runtime assertions generated
+  size_t runtime_low = 0;      // runtime assertions with low  estimated cost
+  size_t runtime_medium = 0;   // runtime assertions with medium estimated cost
+  size_t runtime_high = 0;     // runtime assertions with high estimated cost
   size_t runtime_enabled = 0;  // runtime assertions enabled for emission
   size_t runtime_disabled = 0; // runtime assertions suppressed by cost filter
 };
@@ -394,7 +394,7 @@ private:
   bool warning_as_error = false;      // Make all warnings into errors.
   bool disable_runtime_check = false; // Disable all runtime checks.
   bool show_assess = false;           // Print assessment report after hoisting.
-  bool print_stats = false;            // Print aggregate assessment statistics.
+  bool print_stats = false;           // Print aggregate assessment statistics.
   // Runtime check assertion level: "entry" (default), "all", or "none".
   std::string runtime_check_level = "entry";
   AssertionCost runtime_check_cost_threshold = AssertionCost::HIGH;

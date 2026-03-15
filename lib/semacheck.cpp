@@ -1246,12 +1246,12 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
       // to force ENTRY placement: static violations become compile errors,
       // and runtime assertions are placed in the host wrapper (not inside the
       // kernel body).  See similar fix in ParallelBy and WithIn visitors.
-      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt0,
-                                            message, AssessType::ENTRY,
-                                            expr->LOC(), expr.get());
-      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt1,
-                                            message, AssessType::ENTRY,
-                                            expr->LOC(), expr.get());
+      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt0, message,
+                                            AssessType::ENTRY, expr->LOC(),
+                                            expr.get());
+      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt1, message,
+                                            AssessType::ENTRY, expr->LOC(),
+                                            expr.get());
     }
   }
 

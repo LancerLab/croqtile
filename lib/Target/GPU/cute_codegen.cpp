@@ -350,7 +350,7 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
       info.acc_ty = acc_ty;
       info.scale_frag_ty = NameBaseType(acc_dtype);
       info.dim_n = dim_n;
-      info.reg_num_d = *reg_num;
+      info.reg_num_d = (size_t)*reg_num;
       saw_scaled_exec = true;
       return true;
     }
@@ -3588,11 +3588,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)(" << ValueSTR(tile_addr)
-           << ");\n";
+        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
+           << ValueSTR(tile_addr) << ");\n";
         if (fp8_sparse_k64) {
           ds << d_indent
-             << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << 3) + ((__sp_tid >> 5) << 4);\n";
+             << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
+                "3) + ((__sp_tid >> 5) << 4);\n";
           ds << d_indent
              << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
           ds << d_indent << "  #pragma unroll\n";
@@ -3606,19 +3607,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "  }\n";
         } else if (sparse_k32_16bit || sparse_k64_16bit) {
           ds << d_indent
-             << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+             << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & "
+                "7);\n";
           ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
              << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
           ds << d_indent << "  uint8_t __sp_b0 = __sp_meta_ptr[__sp_row * ("
-             << row_stride << ") + __sp_byte_col * (" << col_stride
-             << ")];\n";
+             << row_stride << ") + __sp_byte_col * (" << col_stride << ")];\n";
           ds << d_indent << "  uint8_t __sp_b1 = __sp_meta_ptr[__sp_row * ("
              << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
              << ")];\n";
           ds << d_indent
              << "  uint8_t __sp_b2 = __sp_meta_ptr[(__sp_row + 8) * ("
-             << row_stride << ") + __sp_byte_col * (" << col_stride
-             << ")];\n";
+             << row_stride << ") + __sp_byte_col * (" << col_stride << ")];\n";
           ds << d_indent
              << "  uint8_t __sp_b3 = __sp_meta_ptr[(__sp_row + 8) * ("
              << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
@@ -3636,11 +3636,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
           ds << d_indent
              << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-          ds << d_indent << "  constexpr int __sp_meta_bytes = "
-             << STR(ssmi.shape.at(2)) << " / 8;\n";
+          ds << d_indent
+             << "  constexpr int __sp_meta_bytes = " << STR(ssmi.shape.at(2))
+             << " / 8;\n";
           ds << d_indent << "  #pragma unroll\n";
           ds << d_indent
-             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
+                "++byte_idx) {\n";
           ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
              << row_stride << ") + byte_idx * (" << col_stride << ")];\n";
           ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
@@ -3714,9 +3716,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "uint64_t desc_" << sym << " = desc_" << sym
            << "_obj.desc_;\n";
       } else {
-        ds << d_indent << "uint64_t desc_" << sym
-           << " = wgmma_make_smem_desc<" << major_order << ", "
-           << swizzle_enum << ">(" << sym << "_smem_ptr);\n";
+        ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
+           << major_order << ", " << swizzle_enum << ">(" << sym
+           << "_smem_ptr);\n";
       }
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
         std::string ref_sym = op.LoadFrom()->RefSymbol();
@@ -3798,12 +3800,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
           ds << d_indent << "{\n";
           ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-          ds << d_indent << "  constexpr int __sp_K = "
-             << STR(ssmi_a.shape.at(2)) << ";\n";
+          ds << d_indent
+             << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2)) << ";\n";
           ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
           if (fp8_sparse_k64) {
             ds << d_indent
-               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << 3) + ((__sp_tid >> 5) << 4);\n";
+               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
+                  "3) + ((__sp_tid >> 5) << 4);\n";
             ds << d_indent
                << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
             ds << d_indent << "  #pragma unroll\n";
@@ -3816,7 +3819,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "  }\n";
           } else if (sparse_k32_16bit || sparse_k64_16bit) {
             ds << d_indent
-               << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+               << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) "
+                  "& 7);\n";
             ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
                << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
             ds << d_indent << "  uint8_t __sp_b0 = " << meta_ptr
@@ -3843,7 +3847,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "  constexpr int __sp_meta_bytes = __sp_K / 8;\n";
             ds << d_indent << "  #pragma unroll\n";
             ds << d_indent
-               << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+               << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
+                  "++byte_idx) {\n";
             ds << d_indent << "    uint8_t packed = " << meta_ptr
                << "[__sp_row * __sp_meta_bytes + byte_idx];\n";
             ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty

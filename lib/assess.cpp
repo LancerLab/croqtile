@@ -49,16 +49,16 @@ inline const std::string STR(const AssessRelation& ar) {
 
 inline const std::string STR(const AssessOutcome& o) {
   switch (o) {
-  case AssessOutcome::STATIC_TRUE:  return "static-true";
+  case AssessOutcome::STATIC_TRUE: return "static-true";
   case AssessOutcome::STATIC_FALSE: return "static-false";
-  case AssessOutcome::RUNTIME:      return "runtime";
+  case AssessOutcome::RUNTIME: return "runtime";
   }
   return "?";
 }
 } // namespace Choreo
 
 void Assessor::LogAssessment(const std::string& msg, const location& l,
-                              AssessOutcome outcome, size_t assertion_idx) {
+                             AssessOutcome outcome, size_t assertion_idx) {
   assessment_log.push_back({msg, l, outcome, assertion_idx});
 }
 

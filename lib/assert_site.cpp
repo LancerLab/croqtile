@@ -136,7 +136,8 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
       }
       auto step = range->step == GetInvalidStep() ? 1 : std::abs(range->step);
       auto span = std::max<int64_t>(0, ub.value() - lb.value());
-      trip *= static_cast<size_t>(std::max<int64_t>(1, (span + step - 1) / step));
+      trip *=
+          static_cast<size_t>(std::max<int64_t>(1, (span + step - 1) / step));
     }
     return trip;
   }
@@ -235,8 +236,7 @@ bool AssertSite::Visit(AST::WithBlock& n) {
       auto within = dyn_cast<AST::WithIn>(wi);
       if (!within) continue;
 
-      if (within->with)
-        RecordDef(InScopeName(within->with->name), def_site);
+      if (within->with) RecordDef(InScopeName(within->with->name), def_site);
 
       if (within->with_matchers) {
         for (auto v : within->GetMatchers()) {
@@ -249,8 +249,6 @@ bool AssertSite::Visit(AST::WithBlock& n) {
 
   return true;
 }
-
-
 
 void AssertSite::HoistAssertions() {
   if (fname.empty()) return;
@@ -318,8 +316,8 @@ void AssertSite::HoistAssertions() {
       ar.emit_position = SiteEmitPosition(ar.EmitTarget());
       ar.estimated_cost = EstimateAssertionCost(ar.EmitTarget());
       ar.cost = CategorizeCost(ar.estimated_cost);
-      ar.enabled = IsEnabledAtThreshold(
-          ar.cost, CCtx().RuntimeCheckCostThreshold());
+      ar.enabled =
+          IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
       continue;
     }
 
@@ -351,10 +349,9 @@ void AssertSite::HoistAssertions() {
     // any other statements (like `mutable int pre = ...`) in the branch body.
     if (isa<AST::Parameter>(latest_def) && !was_bubbled) {
       if (hoist_site == latest_def) {
-        AST::Node* first_stmt =
-            (use_container && use_container->Count() > 0)
-                ? use_container->SubAt(0).get()
-                : nullptr;
+        AST::Node* first_stmt = (use_container && use_container->Count() > 0)
+                                    ? use_container->SubAt(0).get()
+                                    : nullptr;
         if (first_stmt) {
           ar.type = AssessType::HOIST_SITE;
           ar.node = first_stmt;
@@ -404,23 +401,21 @@ void AssertSite::HoistAssertions() {
     for (const auto& ae : log) {
       ++stats.total;
       switch (ae.outcome) {
-      case AssessOutcome::STATIC_TRUE:
-        ++stats.static_true;
-        break;
-      case AssessOutcome::STATIC_FALSE:
-        ++stats.static_false;
-        break;
+      case AssessOutcome::STATIC_TRUE: ++stats.static_true; break;
+      case AssessOutcome::STATIC_FALSE: ++stats.static_false; break;
       case AssessOutcome::RUNTIME: {
         ++stats.runtime_total;
         if (ae.assertion_idx < all.size()) {
           const auto& ar = all[ae.assertion_idx];
           switch (ar.cost) {
-          case AssertionCost::LOW:    ++stats.runtime_low;    break;
+          case AssertionCost::LOW: ++stats.runtime_low; break;
           case AssertionCost::MEDIUM: ++stats.runtime_medium; break;
-          case AssertionCost::HIGH:   ++stats.runtime_high;   break;
+          case AssertionCost::HIGH: ++stats.runtime_high; break;
           }
-          if (ar.enabled) ++stats.runtime_enabled;
-          else            ++stats.runtime_disabled;
+          if (ar.enabled)
+            ++stats.runtime_enabled;
+          else
+            ++stats.runtime_disabled;
         }
         break;
       }
@@ -431,31 +426,34 @@ void AssertSite::HoistAssertions() {
 
 void AssertSite::PrintAssertionReport() const {
   auto& assessor = FCtx(fname).GetAssessor();
-  const auto& log  = assessor.GetAssessmentLog();
-  const auto& all  = assessor.GetAssertions();
+  const auto& log = assessor.GetAssessmentLog();
+  const auto& all = assessor.GetAssertions();
   if (log.empty()) return;
 
   // Count outcomes for the header.
   size_t n_strue = 0, n_sfalse = 0, n_runtime = 0;
   for (const auto& ae : log) {
-    if (ae.outcome == AssessOutcome::STATIC_TRUE)  ++n_strue;
-    else if (ae.outcome == AssessOutcome::STATIC_FALSE) ++n_sfalse;
-    else ++n_runtime;
+    if (ae.outcome == AssessOutcome::STATIC_TRUE)
+      ++n_strue;
+    else if (ae.outcome == AssessOutcome::STATIC_FALSE)
+      ++n_sfalse;
+    else
+      ++n_runtime;
   }
 
   auto type_str = [](AssessType t) -> const char* {
     switch (t) {
-    case AssessType::ENTRY:      return "ENTRY    ";
+    case AssessType::ENTRY: return "ENTRY    ";
     case AssessType::HOIST_SITE: return "HOIST    ";
-    case AssessType::USE_SITE:   return "USE_SITE ";
+    case AssessType::USE_SITE: return "USE_SITE ";
     }
     return "?        ";
   };
   auto cost_str = [](AssertionCost c) -> const char* {
     switch (c) {
-    case AssertionCost::LOW:    return "low   ";
+    case AssertionCost::LOW: return "low   ";
     case AssertionCost::MEDIUM: return "medium";
-    case AssertionCost::HIGH:   return "high  ";
+    case AssertionCost::HIGH: return "high  ";
     }
     return "?     ";
   };
@@ -463,10 +461,10 @@ void AssertSite::PrintAssertionReport() const {
     return p == AssertionEmitPosition::BEFORE_NODE ? "before" : "after ";
   };
 
-  errs() << "\n[assertions] function: " << fname
-         << "  (" << log.size() << " assessed:"
-         << "  " << n_strue   << " static-true,"
-         << "  " << n_sfalse  << " static-false,"
+  errs() << "\n[assertions] function: " << fname << "  (" << log.size()
+         << " assessed:"
+         << "  " << n_strue << " static-true,"
+         << "  " << n_sfalse << " static-false,"
          << "  " << n_runtime << " runtime)\n";
   errs() << "  " << std::string(75, '-') << "\n";
 
@@ -474,16 +472,18 @@ void AssertSite::PrintAssertionReport() const {
   for (const auto& ae : log) {
     if (ae.outcome == AssessOutcome::STATIC_TRUE) {
       // Provably safe at compile time -- no code generated.
-      errs() << "  [" << idx++ << "] static-true   "
-             << "(compile-time: always passes \xe2\x80\x94 no code generated)\n";
+      errs()
+          << "  [" << idx++ << "] static-true   "
+          << "(compile-time: always passes \xe2\x80\x94 no code generated)\n";
       errs() << "       message : " << ae.message << "\n";
-      errs() << "       loc     : " << ae.loc     << "\n";
+      errs() << "       loc     : " << ae.loc << "\n";
     } else if (ae.outcome == AssessOutcome::STATIC_FALSE) {
       // Proven unsafe -- compile error/warning already emitted.
       errs() << "  [" << idx++ << "] static-false  "
-             << "(compile-time: always fails \xe2\x80\x94 compile error/warning)\n";
+             << "(compile-time: always fails \xe2\x80\x94 compile "
+                "error/warning)\n";
       errs() << "       message : " << ae.message << "\n";
-      errs() << "       loc     : " << ae.loc     << "\n";
+      errs() << "       loc     : " << ae.loc << "\n";
     } else {
       // RUNTIME: look up the matching Assertion for hoist/cost info.
       const Assertion* ar =
@@ -491,29 +491,31 @@ void AssertSite::PrintAssertionReport() const {
 
       if (ar) {
         auto* site = ar->EmitTarget();
-        errs() << "  [" << idx++ << "] "
-               << type_str(ar->type)
+        errs() << "  [" << idx++ << "] " << type_str(ar->type)
                << "  enabled=" << (ar->enabled ? "yes" : "no ")
                << "  cost=" << cost_str(ar->cost)
                << "  estimated=" << ar->estimated_cost << "\n";
-        errs() << "       assess  : runtime (cannot evaluate at compile time)\n";
+        errs()
+            << "       assess  : runtime (cannot evaluate at compile time)\n";
         errs() << "       message : " << ae.message << "\n";
         errs() << "       loc     : " << ae.loc << "\n";
 
         if (ar->type == AssessType::ENTRY) {
           errs() << "       site    : function entry (host runtime_check)\n";
         } else if (site) {
-          errs() << "       site    : " << site->LOC()
-                 << "  (" << pos_str(ar->emit_position) << ")"
+          errs() << "       site    : " << site->LOC() << "  ("
+                 << pos_str(ar->emit_position) << ")"
                  << "  [" << site->TypeNameString() << "]\n";
         } else {
           errs() << "       site    : (none)\n";
         }
       } else {
-        // Assertion record not yet available (should not happen after hoisting).
-        errs() << "  [" << idx++ << "] runtime      (assertion record unavailable)\n";
+        // Assertion record not yet available (should not happen after
+        // hoisting).
+        errs() << "  [" << idx++
+               << "] runtime      (assertion record unavailable)\n";
         errs() << "       message : " << ae.message << "\n";
-        errs() << "       loc     : " << ae.loc     << "\n";
+        errs() << "       loc     : " << ae.loc << "\n";
       }
     }
   }

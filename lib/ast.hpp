@@ -1664,7 +1664,9 @@ struct IfElseBlock : public PredBlock, public TypeIDProvider<IfElseBlock> {
   void SetIfScopePredicate(const ValueItem& p) { if_scope_predicate = p; }
   void SetElseScopePredicate(const ValueItem& p) { else_scope_predicate = p; }
   const ValueItem& GetIfScopePredicate() const { return if_scope_predicate; }
-  const ValueItem& GetElseScopePredicate() const { return else_scope_predicate; }
+  const ValueItem& GetElseScopePredicate() const {
+    return else_scope_predicate;
+  }
 
   ptr<Node> CloneImpl() const override {
     auto copied = Make<IfElseBlock>(LOC(), pred, stmts, CloneP(else_stmts));
@@ -1695,12 +1697,12 @@ struct IfElseBlock : public PredBlock, public TypeIDProvider<IfElseBlock> {
     }
     if (IsValidValueItem(if_scope_predicate))
       os << "\n"
-         << prefix << " `- If Scope Predicate: "
-         << if_scope_predicate->ToString();
+         << prefix
+         << " `- If Scope Predicate: " << if_scope_predicate->ToString();
     if (IsValidValueItem(else_scope_predicate))
       os << "\n"
-         << prefix << " `- Else Scope Predicate: "
-         << else_scope_predicate->ToString();
+         << prefix
+         << " `- Else Scope Predicate: " << else_scope_predicate->ToString();
   }
 
   bool HasElse() const { return else_stmts && else_stmts->Count(); }

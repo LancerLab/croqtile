@@ -55,21 +55,22 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     const char* sep =
         "===-------------------------------------------------------------------"
         "----===";
-    errs() << "\n" << sep << "\n"
+    errs() << "\n"
+           << sep << "\n"
            << "                      ... Assessment Statistics ...\n"
            << sep << "\n";
     auto row = [&](size_t n, const char* desc) {
-      errs() << std::right << std::setw(6) << n
-             << "  assess  - " << desc << "\n";
+      errs() << std::right << std::setw(6) << n << "  assess  - " << desc
+             << "\n";
     };
-    row(s.total,            "Assessments evaluated");
-    row(s.static_true,      "Resolved at compile time (static-true)");
-    row(s.static_false,     "Proven false at compile time (static-false)");
-    row(s.runtime_total,    "Runtime assertions generated");
-    row(s.runtime_low,      "Runtime assertions (low cost)");
-    row(s.runtime_medium,   "Runtime assertions (medium cost)");
-    row(s.runtime_high,     "Runtime assertions (high cost)");
-    row(s.runtime_enabled,  "Runtime assertions enabled");
+    row(s.total, "Assessments evaluated");
+    row(s.static_true, "Resolved at compile time (static-true)");
+    row(s.static_false, "Proven false at compile time (static-false)");
+    row(s.runtime_total, "Runtime assertions generated");
+    row(s.runtime_low, "Runtime assertions (low cost)");
+    row(s.runtime_medium, "Runtime assertions (medium cost)");
+    row(s.runtime_high, "Runtime assertions (high cost)");
+    row(s.runtime_enabled, "Runtime assertions enabled");
     row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
     errs() << sep << "\n";
   }

@@ -46,9 +46,9 @@ enum class AssessRelation {
 
 /// Compile-time evaluation outcome of a single bounds/safety check.
 enum class AssessOutcome {
-  STATIC_TRUE,   ///< Proven safe at compile time -- no code generated.
-  STATIC_FALSE,  ///< Proven unsafe at compile time -- compile error/warning.
-  RUNTIME,       ///< Cannot evaluate -- runtime assertion emitted.
+  STATIC_TRUE,  ///< Proven safe at compile time -- no code generated.
+  STATIC_FALSE, ///< Proven unsafe at compile time -- compile error/warning.
+  RUNTIME,      ///< Cannot evaluate -- runtime assertion emitted.
 };
 
 /// Record of every assessment evaluation, regardless of outcome.
