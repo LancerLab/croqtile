@@ -6,16 +6,16 @@
 
 #define H800_PCIE_PEAK_F8_TFLOPS 3026
 
-#define MATMUL_DEFAULT_M 2048
-#define MATMUL_DEFAULT_N 2048
-#define MATMUL_DEFAULT_K 2048
+#define MATMUL_DEFAULT_M 4096
+#define MATMUL_DEFAULT_N 4096
+#define MATMUL_DEFAULT_K 4096
 
 #define WARP_M 64
-#define WARP_N 128
-#define WARP_N_256 256
+#define WARP_N 256
 #define TILE_K 64
 #define WARP_K 64
 #define SWIZ 32
+#define SPMM_META_TILE_COLS 8
 
 template <typename T>
 using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
@@ -37,10 +37,11 @@ __co__ void matmul_sp_e4m3(global f8_e4m3 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 
                             global f32 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_N] output) {
   parallel {block_m, block_n} by [cdiv(MATMUL_DEFAULT_M, WARP_M), cdiv(MATMUL_DEFAULT_N, WARP_N)] : block {
     mc = mma.fill.f32 0.0f;
+    shared u8 [WARP_M, SPMM_META_TILE_COLS] lhs_load_s_mdata;
     foreach {iv_k} in [cdiv(MATMUL_DEFAULT_K, TILE_K)] {
       lhs_load_s = tma.copy.swiz<SWIZ> lhs_packed.chunkat(block_m, iv_k) => shared;
       rhs_load_s = tma.copy.swiz<64> rhs.chunkat(block_n, iv_k) => shared;
-      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      dma.copy lhs_meta.chunkat(block_m, iv_k) => lhs_load_s_mdata;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
           ma = mma.load.swiz<SWIZ> lhs_load_s.chunkat(_, iv_warp);
@@ -50,30 +51,9 @@ __co__ void matmul_sp_e4m3(global f8_e4m3 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 
         }
       }
     }
-    mma.store mc, output.chunkat(block_m, block_n);
-  }
-}
-
-__co__ void matmul_sp_e4m3_n256(global f8_e4m3 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 2] lhs_packed, 
-                            global u8 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 8] lhs_meta,
-                            global f8_e4m3 [MATMUL_DEFAULT_N, MATMUL_DEFAULT_K] rhs,
-                            global f32 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_N] output) {
-  parallel {block_m, block_n} by [cdiv(MATMUL_DEFAULT_M, WARP_M), cdiv(MATMUL_DEFAULT_N, WARP_N_256)] : block {
-    mc = mma.fill.f32 0.0f;
-    foreach {iv_k} in [cdiv(MATMUL_DEFAULT_K, TILE_K)] {
-      lhs_load_s = tma.copy.swiz<SWIZ> lhs_packed.chunkat(block_m, iv_k) => shared;
-      rhs_load_s = tma.copy.swiz<64> rhs.chunkat(block_n, iv_k) => shared;
-      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
-      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
-        parallel p by 1 : group-4 {
-          ma = mma.load.swiz<SWIZ> lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swiz<64> rhs_load_s.chunkat(_, iv_warp);
-          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
-          mma.row.row.sp mc, ma, mb, me;
-        }
-      }
-    }
-    mma.store mc, output.chunkat(block_m, block_n);
+    shared f32 [WARP_M, WARP_N] output_s;
+    mma.store mc, output_s;
+    tma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
   }
 }
 
@@ -161,23 +141,13 @@ int main(int argc, char** argv) {
     topt.warmup = warmup;
     topt.repeat = repeat;
 
-    std::cout << "=== N=128 ===\n";
-    auto avg_ms_128 = choreo::timing([&]() { matmul_sp_e4m3(lhs_packed_d, lhs_meta_d, rhs_d, res_d); cudaDeviceSynchronize(); }, topt);
-    double flops_128 = 2.0 * double(M) * double(N) * double(K);
-    double tflops_128 = (flops_128 / (avg_ms_128 / 1000.0)) / 1e12;
-    std::cout << "Timing avg ms: " << avg_ms_128 << "\n";
-    std::cout << "TFLOPS: " << tflops_128 << "\n";
-    double eff_128 = (tflops_128 / H800_PCIE_PEAK_F8_TFLOPS) * 100.0;
-    std::cout << "HW efficiency: " << eff_128 << "%\n";
+    auto avg_ms = choreo::timing([&]() { matmul_sp_e4m3(lhs_packed_d, lhs_meta_d, rhs_d, res_d); }, topt);
+    double flops = 2.0 * double(M) * double(N) * double(K);
+    double tflops = (flops / (avg_ms / 1000.0)) / 1e12;
+    std::cout << "TFLOPS: " << tflops << "\n";
 
-    std::cout << "=== N=256 ===\n";
-    auto avg_ms_256 = choreo::timing([&]() { matmul_sp_e4m3_n256(lhs_packed_d, lhs_meta_d, rhs_d, res_d); cudaDeviceSynchronize(); }, topt);
-    double flops_256 = 2.0 * double(M) * double(N) * double(K);
-    double tflops_256 = (flops_256 / (avg_ms_256 / 1000.0)) / 1e12;
-    std::cout << "Timing avg ms: " << avg_ms_256 << "\n";
-    std::cout << "TFLOPS: " << tflops_256 << "\n";
-    double eff_256 = (tflops_256 / H800_PCIE_PEAK_F8_TFLOPS) * 100.0;
-    std::cout << "HW efficiency: " << eff_256 << "%\n";
+    double eff = (tflops / H800_PCIE_PEAK_F8_TFLOPS) * 100.0;
+    std::cout << "HW efficiency: " << eff << "%\n";
   }
 
   matmul_sp_e4m3(lhs_packed_d, lhs_meta_d, rhs_d, res_d);
@@ -191,7 +161,7 @@ int main(int argc, char** argv) {
   }
 
   int errors = 0;
-  float tolerance = 0.5f;
+  float tolerance = 0.25f;
   for (size_t i = 0; i < 128; ++i) {
     for (size_t j = 0; j < 256; ++j) {
       float ref = 0.0f;
