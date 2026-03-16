@@ -66,11 +66,11 @@ setup-cuda:
 setup-gcu2: setup-core
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)
 
-setup-gcu3: setup-core
+setup-gcu3: setup-core setup-gcu-acore
 	git submodule update --init --recursive;\
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
 
-setup-gcu4: setup-core setup-gcu-acore
+setup-gcu4: setup-core
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-kit FTP_SERVER=$(FTP_SERVER)
 
 setup-gcu5: setup-core
