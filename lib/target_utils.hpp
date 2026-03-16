@@ -496,9 +496,19 @@ static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
   m = 64;
   k = 64;
   for (int n : {8, 16, 32, 64, 96, 128, 192, 256}) {
-    out[{SPARSE, BT::F8_E4M3, BT::F8_E4M3, BT::F16, BT::F16, BT::UNKNOWN,
+    out[{SPARSE,
+         BT::F8_E4M3,
+         BT::F8_E4M3,
+         BT::F16,
+         BT::F16,
+         BT::UNKNOWN,
          {m, n, k}}] = 90;
-    out[{SPARSE, BT::F8_E4M3, BT::F8_E4M3, BT::F32, BT::F32, BT::UNKNOWN,
+    out[{SPARSE,
+         BT::F8_E4M3,
+         BT::F8_E4M3,
+         BT::F32,
+         BT::F32,
+         BT::UNKNOWN,
          {m, n, k}}] = 90;
   }
   // integer types
@@ -618,7 +628,7 @@ inline MMAType GetMMAType(const MMAConfig& config) {
         config.shape.k == 64) {
       choreo_unreachable(
           "unsupported MMA config: " + config.ToString() +
-          " — FP8 m16n8k64 requires GPU compute capability >= SM_90");
+          " -- FP8 m16n8k64 requires GPU compute capability >= SM_90");
     }
     choreo_unreachable("unsupported MMA config: " + config.ToString());
   }

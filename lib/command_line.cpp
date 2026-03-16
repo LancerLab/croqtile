@@ -100,11 +100,23 @@ Option<bool> disable_runtime_check(OptionKind::User, "--disable-runtime-check",
                                    "", false, "Disable all runtime checks.");
 Option<std::string> runtime_check_level(
     OptionKind::User, "--runtime-check", "-rtc", "entry",
-    "Control the granularity of runtime assertion insertion: "
-    "'entry' (default) emits only entry-point assertions, "
-    "'all' also emits def-site and use-site assertions, "
-    "'none' disables all runtime assertions.",
-    "--runtime-check=<entry|all|none>");
+    "Control runtime assertion insertion (each level is a superset of the "
+    "previous). "
+    "'entry' (default): host-side runtime_check at function entry only. "
+    "'low': entry + low-cost device-side hoist/use-site assertions. "
+    "'medium': entry + low/medium-cost device-side assertions. "
+    "'high': entry + all device-side assertions regardless of cost. "
+    "'all': same as 'high'. "
+    "'none': disable all runtime assertions.",
+    "--runtime-check=<none|entry|low|medium|high|all>");
+Option<bool> show_assess(
+    OptionKind::User, "--show-assess", "", false,
+    "Print a report of all generated assessments after the hoisting pass: "
+    "assessment inputs, final assertion sites, hoist locations, and "
+    "runtime cost estimates.");
+Option<bool> print_stats(
+    OptionKind::User, "--stats", "", false,
+    "Print aggregate assertion/assessment statistics after compilation.");
 Option<bool> disable_cuda_runtime_env_check(
     OptionKind::User, "--disable-cuda-runtime-env-check", "", false,
     "Do not emit cuda runtime enviroment check.");
@@ -339,15 +351,44 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
 
-  // --runtime-check=<entry|all|none> controls assertion granularity.
+  // --runtime-check=<none|entry|low|medium|high|all> controls assertion
+  // granularity and cost threshold. Each level is a superset of the previous:
+  //   entry  - host-side ENTRY assertions only (default, cheapest)
+  //   low    - entry + device-side hoist/use-site with LOW cost threshold
+  //   medium - entry + device-side hoist/use-site with MEDIUM cost threshold
+  //   high   - entry + device-side hoist/use-site with HIGH cost threshold
+  //   all    - same as high
+  //   none   - disable all runtime assertions
   // --disable-runtime-check overrides to "none" for backward compatibility.
   {
-    auto rtc = runtime_check_level.GetValue();
+    auto rtc = ToLower(runtime_check_level.GetValue());
     if (disable_runtime_check.GetValue()) rtc = "none";
-    CCtx().SetRuntimeCheckLevel(rtc);
-    CCtx().SetDisableRuntimeCheck(rtc == "none");
+
+    if (rtc == "none") {
+      CCtx().SetRuntimeCheckLevel("none");
+      CCtx().SetDisableRuntimeCheck(true);
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::HIGH);
+    } else if (rtc == "entry") {
+      CCtx().SetRuntimeCheckLevel("entry");
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::HIGH);
+    } else if (rtc == "low") {
+      CCtx().SetRuntimeCheckLevel("all");
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::LOW);
+    } else if (rtc == "medium") {
+      CCtx().SetRuntimeCheckLevel("all");
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::MEDIUM);
+    } else if (rtc == "high" || rtc == "all") {
+      CCtx().SetRuntimeCheckLevel("all");
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::HIGH);
+    } else {
+      errs() << "error: unsupported --runtime-check value: '" << rtc
+             << "'. Use none, entry, low, medium, high, or all.\n";
+      return false;
+    }
   }
 
+  CCtx().SetShowAssess(show_assess.GetValue());
+  CCtx().SetPrintStats(print_stats.GetValue());
   CCtx().SetDisableCudaRuntimeEnvCheck(
       disable_cuda_runtime_env_check.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());

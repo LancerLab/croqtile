@@ -40,3 +40,31 @@ make debug
 ```bash
 make test
 ```
+
+## Code Style Rules (MANDATORY)
+
+### ASCII-only source files
+- ALL source files (`lib/`, `tools/`, `tests/`) must contain only ASCII characters (0x00-0x7F).
+- Do NOT use Unicode in comments, strings, or identifiers: no em-dashes (`--` not `--`), no right arrows (`->` not `-->`), no ellipsis (`...` not `...`), no `x` for multiplication.
+- After editing, verify with:
+```bash
+LC_ALL=C grep -Prn '[^\x00-\x7F]' lib/ tools/ tests/check/ --include="*.cpp" --include="*.hpp" --include="*.h" --include="*.co" 2>/dev/null | grep -v '\.swp'
+```
+  This must return no output.
+
+### Diagnostic output: use errs()/dbgs(), never fprintf
+- Use `errs()` (LLVM raw_ostream) for all compiler diagnostic messages, never `std::fprintf(stderr, ...)`.
+- Use `dbgs()` for debug-only output guarded by `VST_DEBUG(...)`.
+- `errs()` and `dbgs()` are available wherever `ast.hpp` or other Choreo headers are included.
+- Example:
+```cpp
+// WRONG
+std::fprintf(stderr, "[choreo] error: %s\n", msg);
+// RIGHT
+errs() << "[choreo] error: " << msg << "\n";
+```
+- After editing, verify no fprintf remains:
+```bash
+grep -rn 'fprintf' lib/ tools/ --include="*.cpp" --include="*.hpp"
+```
+  This must return no output.

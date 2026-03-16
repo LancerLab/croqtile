@@ -1969,9 +1969,9 @@ struct Sparse2to4HostPolicyWGMMA {
     }
   }
 
-  __co_host__ static inline void
-  encode(spanned_data<ValueT, 2>& dense, spanned_data<ValueT, 2>& packed,
-         spanned_data<choreo::u8, 2>& meta) {
+  __co_host__ static inline void encode(spanned_data<ValueT, 2>& dense,
+                                        spanned_data<ValueT, 2>& packed,
+                                        spanned_data<choreo::u8, 2>& meta) {
     const size_t M = dense.shape()[0];
     const size_t K = dense.shape()[1];
     for (size_t r = 0; r < M; ++r) {

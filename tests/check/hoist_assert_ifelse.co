@@ -1,0 +1,44 @@
+// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+//
+// Verify that runtime assertions are emitted inside their enclosing if/else
+// guards rather than hoisted to function entry.  Hoisting would cause false
+// positives when j is out of bounds for one buffer but the access to that
+// buffer never executes because the guard is false.
+//
+// A `mutable int pre` statement placed immediately after the opening brace
+// of each branch confirms the assertion is emitted BEFORE `pre` -- proving
+// it is hoisted to the top of the branch, not moved outside the if/else.
+
+__co__ void foo(int j, int k) {
+  parallel p by 8 {
+    shared s32 [4] buf1;
+    shared s32 [8] buf2;
+    if (j < k) {
+      mutable int pre = j * 2;
+      x = buf1.at(j);
+    } else {
+      mutable int pre = j + 1;
+      x = buf2.at(j);
+    }
+  }
+}
+
+// --- if-branch ---
+// Assertions are hoisted to the start of the branch (parameter, no local
+// barrier): they appear BEFORE `pre`, proving they are not stuck at USE_SITE
+// and not hoisted outside the if/else guard.
+// CHECK: if ((j < k)) {
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(j) >= 0LL)
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(j) < 4LL)
+// CHECK-NEXT: int pre = (j * 2);
+
+// --- else-branch ---
+// Same ordering applies to the else-branch with its different buffer bound.
+// CHECK: } else {
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(j) >= 0LL)
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(j) < 8LL)
+// CHECK-NEXT: int pre = (j + 1);
+
+// Assertions must NOT be hoisted to the host function entry (would fire even
+// when the guarded branch is never taken, producing false positives).
+// CHECK-NOT: runtime_check{{.*}}"The 1st index `j`

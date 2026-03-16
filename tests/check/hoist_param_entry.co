@@ -1,0 +1,22 @@
+// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+//
+// When a buffer index is a plain function parameter with no enclosing
+// conditional guard, the assertion is classified ENTRY and emitted as a
+// host-side runtime_check before the kernel launch.
+//
+// No device-side choreo_assert should be generated: the check happens on the
+// host where a meaningful error message can be produced before any GPU work.
+
+__co__ void foo(int j) {
+  parallel p by 8 {
+    shared s32 [4] buf;
+    x = buf.at(j);
+  }
+}
+
+// Device code must contain no choreo_assert for j -- the check is at ENTRY.
+// CHECK-NOT: choreo::choreo_assert
+
+// Host code must contain the runtime_check calls before the kernel launch.
+// CHECK: choreo::runtime_check((static_cast<long long>(j) >= 0LL)
+// CHECK: choreo::runtime_check((static_cast<long long>(j) < 4LL)

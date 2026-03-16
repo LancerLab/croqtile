@@ -1525,6 +1525,7 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
     os << ", " << rc.loc << "\");\n";
   }
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
+    if (!ar.enabled) continue;
     os << "  choreo::runtime_check(" << ValueSTR(ar.expr, false) << ", \"";
     if (!ar.message.empty() && ar.message.back() == '.')
       os << ar.message.substr(0, ar.message.size() - 1);

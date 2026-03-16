@@ -18,8 +18,19 @@ class FunctionContext;
 
 enum class AssessType {
   ENTRY,
-  DEF_SITE,
+  HOIST_SITE,
   USE_SITE,
+};
+
+enum class AssertionEmitPosition {
+  BEFORE_NODE,
+  AFTER_NODE,
+};
+
+enum class AssertionCost {
+  LOW,
+  MEDIUM,
+  HIGH,
 };
 
 enum class AssessPolicy {
@@ -31,6 +42,22 @@ enum class AssessPolicy {
 enum class AssessRelation {
   EQ,
   NE,
+};
+
+/// Compile-time evaluation outcome of a single bounds/safety check.
+enum class AssessOutcome {
+  STATIC_TRUE,  ///< Proven safe at compile time -- no code generated.
+  STATIC_FALSE, ///< Proven unsafe at compile time -- compile error/warning.
+  RUNTIME,      ///< Cannot evaluate -- runtime assertion emitted.
+};
+
+/// Record of every assessment evaluation, regardless of outcome.
+struct AssessmentEntry {
+  std::string message;
+  location loc;
+  AssessOutcome outcome;
+  /// Index into Assessor::assertions (RUNTIME only); SIZE_MAX otherwise.
+  size_t assertion_idx = static_cast<size_t>(-1);
 };
 
 struct AssessResult {
@@ -52,6 +79,10 @@ struct Assertion {
   /// BoundedType determines USE_SITE) does not receive AfterVisit in the AST
   /// traversal, but its parent (e.g., Select) does.
   AST::Node* emit_node = nullptr;
+  AssertionEmitPosition emit_position = AssertionEmitPosition::AFTER_NODE;
+  uint64_t estimated_cost = 1;
+  AssertionCost cost = AssertionCost::LOW;
+  bool enabled = true;
 
   /// Return the node to use for site-assertion emission mapping.
   AST::Node* EmitTarget() const { return emit_node ? emit_node : node; }
@@ -67,7 +98,14 @@ private:
                     const std::string& s, AssessType aty,
                     AST::Node* n = nullptr, AST::Node* en = nullptr);
 
+  /// Record a single assessment evaluation to the ordered log.
+  void LogAssessment(const std::string& msg, const location& l,
+                     AssessOutcome outcome,
+                     size_t assertion_idx = static_cast<size_t>(-1));
+
   bool DebugOn() const;
+
+  std::vector<AssessmentEntry> assessment_log;
 
 public:
   /// Bind a visitor for diagnostic emission. Returns *this for chaining.
@@ -77,6 +115,9 @@ public:
   }
 
   const std::vector<Assertion>& GetAssertions() const { return assertions; }
+  const std::vector<AssessmentEntry>& GetAssessmentLog() const {
+    return assessment_log;
+  }
 
   std::vector<Assertion> GetAssertions(AssessType aty) const {
     std::vector<Assertion> output;
@@ -103,7 +144,8 @@ public:
   AssessResult Assess(AssessPolicy ap, const ValueItem& bo,
                       const std::string& message, AssessType aty,
                       const location& l, AST::Node* node = nullptr,
-                      AST::Node* emit_node = nullptr);
+                      AST::Node* emit_node = nullptr,
+                      const ValueItem& guard = GetInvalidValueItem());
 };
 
 } // end namespace Choreo

@@ -350,7 +350,7 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
       info.acc_ty = acc_ty;
       info.scale_frag_ty = NameBaseType(acc_dtype);
       info.dim_n = dim_n;
-      info.reg_num_d = *reg_num;
+      info.reg_num_d = (size_t)*reg_num;
       saw_scaled_exec = true;
       return true;
     }
@@ -644,6 +644,8 @@ const std::string CuteCodeGen::ReShapeSTR(const Shape& s,
 bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
+  EmitPreSiteAssertions(n);
+
   EmitLineDirective(n);
 
   if (isa<AST::Program>(&n)) {
@@ -704,8 +706,7 @@ bool CuteCodeGen::InMidVisitImpl(AST::Node& n) {
 bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "After visiting " << n.TypeNameString() << "\n";
 
-  // Emit site-level assertions after the node that defines them.
-  EmitSiteAssertions(n);
+  EmitPostSiteAssertions(n);
 
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
@@ -1137,8 +1138,8 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   cudaError_t err = cudaRuntimeGetVersion(&runtime_ver);
   if (err != cudaSuccess) {
     std::fprintf(stderr,
-		 "[choreo] CUDA runtime not available: %s\n",
-		 cudaGetErrorString(err));
+                "[choreo] CUDA runtime not available: %s\n",
+                cudaGetErrorString(err));
     std::exit(EXIT_FAILURE);
   }
 
@@ -1146,8 +1147,8 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   err = cudaDriverGetVersion(&driver_ver);
   if (err != cudaSuccess) {
     std::fprintf(stderr,
-		 "[choreo] CUDA driver not available: %s\n",
-		 cudaGetErrorString(err));
+                "[choreo] CUDA driver not available: %s\n",
+                cudaGetErrorString(err));
     std::exit(EXIT_FAILURE);
   }
 
@@ -1161,21 +1162,21 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
 
   if (runtime_ver < CUDART_VERSION) {
     std::fprintf(stderr,
-	"[choreo] CUDA runtime too old:\n"
-	"  found runtime %d.%d.%d (encoded=%d)\n"
-	"  required      %d.%d.%d (encoded=%d)\n",
-	rMaj, rMin, rPat, runtime_ver,
-	reqMaj, reqMin, reqPat, CUDART_VERSION);
+       "[choreo] CUDA runtime too old:\n"
+       "  found runtime %d.%d.%d (encoded=%d)\n"
+       "  required      %d.%d.%d (encoded=%d)\n",
+       rMaj, rMin, rPat, runtime_ver,
+       reqMaj, reqMin, reqPat, CUDART_VERSION);
     std::exit(EXIT_FAILURE);
   }
 
   // Optional: check driver vs runtime mismatch
   if (driver_ver < runtime_ver) {
     std::fprintf(stderr,
-	"[choreo] Warning: CUDA driver (%d.%d.%d, encoded=%d) is older than "
-	"the CUDA runtime (%d.%d.%d, encoded=%d). This may cause issues.\n",
-	dMaj, dMin, dPat, driver_ver,
-	rMaj, rMin, rPat, runtime_ver);
+       "[choreo] Warning: CUDA driver (%d.%d.%d, encoded=%d) is older than "
+       "the CUDA runtime (%d.%d.%d, encoded=%d). This may cause issues.\n",
+       dMaj, dMin, dPat, driver_ver,
+       rMaj, rMin, rPat, runtime_ver);
   }
 
   // ----------- Device capability check -----------
@@ -1183,7 +1184,7 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   err = cudaGetDeviceCount(&device_count);
   if (err != cudaSuccess || device_count == 0) {
     std::fprintf(stderr,
-		 "[choreo] No CUDA-capable devices found.\n");
+                "[choreo] No CUDA-capable devices found.\n");
     std::exit(EXIT_FAILURE);
   }
 
@@ -1192,10 +1193,10 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
   cudaDeviceProp prop{};
   err = cudaGetDeviceProperties(&prop, device_id);
   if (err != cudaSuccess) {
-      std::fprintf(stderr,
-                   "[choreo] cudaGetDeviceProperties failed: %s\n",
-                   cudaGetErrorString(err));
-      std::exit(EXIT_FAILURE);
+    std::fprintf(stderr,
+                 "[choreo] cudaGetDeviceProperties failed: %s\n",
+                 cudaGetErrorString(err));
+    std::exit(EXIT_FAILURE);
   }
 
   int sm = prop.major * 10 + prop.minor;
@@ -3587,11 +3588,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)(" << ValueSTR(tile_addr)
-           << ");\n";
+        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
+           << ValueSTR(tile_addr) << ");\n";
         if (fp8_sparse_k64) {
           ds << d_indent
-             << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << 3) + ((__sp_tid >> 5) << 4);\n";
+             << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
+                "3) + ((__sp_tid >> 5) << 4);\n";
           ds << d_indent
              << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
           ds << d_indent << "  #pragma unroll\n";
@@ -3605,19 +3607,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "  }\n";
         } else if (sparse_k32_16bit || sparse_k64_16bit) {
           ds << d_indent
-             << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+             << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & "
+                "7);\n";
           ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
              << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
           ds << d_indent << "  uint8_t __sp_b0 = __sp_meta_ptr[__sp_row * ("
-             << row_stride << ") + __sp_byte_col * (" << col_stride
-             << ")];\n";
+             << row_stride << ") + __sp_byte_col * (" << col_stride << ")];\n";
           ds << d_indent << "  uint8_t __sp_b1 = __sp_meta_ptr[__sp_row * ("
              << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
              << ")];\n";
           ds << d_indent
              << "  uint8_t __sp_b2 = __sp_meta_ptr[(__sp_row + 8) * ("
-             << row_stride << ") + __sp_byte_col * (" << col_stride
-             << ")];\n";
+             << row_stride << ") + __sp_byte_col * (" << col_stride << ")];\n";
           ds << d_indent
              << "  uint8_t __sp_b3 = __sp_meta_ptr[(__sp_row + 8) * ("
              << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
@@ -3635,11 +3636,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
           ds << d_indent
              << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-          ds << d_indent << "  constexpr int __sp_meta_bytes = "
-             << STR(ssmi.shape.at(2)) << " / 8;\n";
+          ds << d_indent
+             << "  constexpr int __sp_meta_bytes = " << STR(ssmi.shape.at(2))
+             << " / 8;\n";
           ds << d_indent << "  #pragma unroll\n";
           ds << d_indent
-             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
+                "++byte_idx) {\n";
           ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
              << row_stride << ") + byte_idx * (" << col_stride << ")];\n";
           ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
@@ -3713,9 +3716,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "uint64_t desc_" << sym << " = desc_" << sym
            << "_obj.desc_;\n";
       } else {
-        ds << d_indent << "uint64_t desc_" << sym
-           << " = wgmma_make_smem_desc<" << major_order << ", "
-           << swizzle_enum << ">(" << sym << "_smem_ptr);\n";
+        ds << d_indent << "uint64_t desc_" << sym << " = wgmma_make_smem_desc<"
+           << major_order << ", " << swizzle_enum << ">(" << sym
+           << "_smem_ptr);\n";
       }
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
         std::string ref_sym = op.LoadFrom()->RefSymbol();
@@ -3797,12 +3800,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
           ds << d_indent << "{\n";
           ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-          ds << d_indent << "  constexpr int __sp_K = "
-             << STR(ssmi_a.shape.at(2)) << ";\n";
+          ds << d_indent
+             << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2)) << ";\n";
           ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
           if (fp8_sparse_k64) {
             ds << d_indent
-               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << 3) + ((__sp_tid >> 5) << 4);\n";
+               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
+                  "3) + ((__sp_tid >> 5) << 4);\n";
             ds << d_indent
                << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
             ds << d_indent << "  #pragma unroll\n";
@@ -3815,7 +3819,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "  }\n";
           } else if (sparse_k32_16bit || sparse_k64_16bit) {
             ds << d_indent
-               << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+               << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) "
+                  "& 7);\n";
             ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
                << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
             ds << d_indent << "  uint8_t __sp_b0 = " << meta_ptr
@@ -3842,7 +3847,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "  constexpr int __sp_meta_bytes = __sp_K / 8;\n";
             ds << d_indent << "  #pragma unroll\n";
             ds << d_indent
-               << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; ++byte_idx) {\n";
+               << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
+                  "++byte_idx) {\n";
             ds << d_indent << "    uint8_t packed = " << meta_ptr
                << "[__sp_row * __sp_meta_bytes + byte_idx];\n";
             ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
@@ -5524,14 +5530,14 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
        << rc.message << ", " << rc.loc << "\");\n";
   }
 
-#if 0 // may cause undefined symbol error if the assertion depends on a value
-      // only defined in device code. We can enable this back
-      // when we have a better way to handle such case.
+  // ENTRY assertions reference only function parameters / host-visible values
+  // — the assertion-hoisting pass guarantees this. Safe to emit in the host
+  // wrapper before the kernel launch.
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
+    if (!ar.enabled) continue;
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
-#endif
 
   // USE_SITE and DEF_SITE assertions are emitted in device code (inside the
   // kernel) via EmitSiteAssertions, which is called from AfterVisitImpl during
@@ -6571,19 +6577,38 @@ void CuteCodeGen::BuildSiteAssertionMap() {
   if (fname.empty()) return;
 
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::USE_SITE)) {
-    if (ar.EmitTarget()) site_assertions[ar.EmitTarget()].push_back(ar);
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
   }
-  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::DEF_SITE)) {
-    if (ar.EmitTarget()) site_assertions[ar.EmitTarget()].push_back(ar);
+  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::HOIST_SITE)) {
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
   }
 }
 
-void CuteCodeGen::EmitSiteAssertions(AST::Node& n) {
+void CuteCodeGen::EmitPreSiteAssertions(AST::Node& n) {
   if (CCtx().DisableRuntimeCheck()) return;
-  auto it = site_assertions.find(&n);
-  if (it == site_assertions.end()) return;
+  auto it = pre_site_assertions.find(&n);
+  if (it == pre_site_assertions.end()) return;
 
-  // DEF_SITE and USE_SITE assertions are emitted in device code using
+  for (const auto& ar : it->second) {
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""
+                << ar.message << ", " << ar.loc << "\");\n";
+  }
+}
+
+void CuteCodeGen::EmitPostSiteAssertions(AST::Node& n) {
+  if (CCtx().DisableRuntimeCheck()) return;
+  auto it = post_site_assertions.find(&n);
+  if (it == post_site_assertions.end()) return;
+
+  // HOIST_SITE and USE_SITE assertions are emitted in device code using
   // choreo_assert (printf-based) because std::cerr is not available on device.
   for (const auto& ar : it->second) {
     IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""

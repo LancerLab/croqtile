@@ -1,0 +1,31 @@
+// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+//
+// Case 3.iii -- block-level hoist barrier:
+// The mutable variable `j` is modified inside a `foreach` loop body.  The
+// buf.at(j) access happens AFTER the foreach exits (outside the loop), yet
+// the accumulation of j inside the loop makes j's value unknwon until the
+// loop finishes.
+//
+// The bunds assertions for buf.at(j) must therefore be placed AFTER the
+// foreach block closes, not inside the loop body.
+
+__co__ void foo(int n) {
+  parallel p by 8 {
+    shared s32 [16] buf;
+    mutable int j = 0;
+    foreach i in [4] {
+      j = j + n;
+    }
+    x = buf.at(j);
+  }
+}
+
+// The foreach loop body should contain only the assignment -- no assertion.
+// CHECK: for (__iv_i__elem__0 = 0;
+// CHECK-NEXT: j = (n + j);
+// CHECK-NEXT: } // i__elem__0
+
+// Immediately after the loop, the two bounds assertions for j must appear.
+// CHECK-NEXT: __iv_i__elem__0 = 0;
+// CHECK: choreo::choreo_assert({{.*}}j{{.*}}0
+// CHECK: choreo::choreo_assert({{.*}}j{{.*}}16
