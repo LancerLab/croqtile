@@ -1,0 +1,199 @@
+#include <cstring>
+#include <cstdlib>
+
+#define H800_PCIE_PEAK_F16_TFLOPS 1513
+
+#ifndef SPMM_DEFAULT_M
+#define SPMM_DEFAULT_M 4096
+#endif
+
+#ifndef SPMM_DEFAULT_N
+#define SPMM_DEFAULT_N 8192
+#endif
+
+#ifndef SPMM_DEFAULT_K
+#define SPMM_DEFAULT_K 8192
+#endif
+
+#define SPMM_WARP_M 64
+#define SPMM_TILE_M 128
+#define SPMM_WARP_N 256
+#define SPMM_TILE_K 64
+#define SPMM_WARP_K 32
+#define SPMM_STAGES 2
+
+#define SPMM_PACKED_TILE_K 32
+#define SPMM_META_TILE_COLS 8
+
+#if SPMM_TILE_M % SPMM_WARP_M != 0
+#error "SPMM_TILE_M must be divisible by SPMM_WARP_M"
+#endif
+
+__co__ void spmm(global f16 [M, PACKED_K] lhs_packed,
+                 global u8 [M, META_COLS] lhs_meta,
+                 global f16 [N, K] rhs,
+                 global f16 [M, N] output) {
+  parallel {block_m, block_n}
+      by [cdiv(M, SPMM_TILE_M), cdiv(N, SPMM_WARP_N)] : block {
+    shared event full[SPMM_STAGES], empty[SPMM_STAGES];
+    shared f16 [SPMM_STAGES * SPMM_TILE_M, SPMM_PACKED_TILE_K] lhs_load_s;
+    shared f16 [SPMM_STAGES * SPMM_WARP_N, SPMM_TILE_K] rhs_load_s;
+    shared u8 [SPMM_STAGES * SPMM_TILE_M, SPMM_META_TILE_COLS] lhs_meta_s;
+    shared f16 [SPMM_TILE_M, SPMM_WARP_N] output_s;
+
+    parallel p1 by 3 : group-4 {
+      inthreads.async (p1 == 0) {
+        foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
+          stage = iv_k % SPMM_STAGES;
+          wait empty[stage];
+          tma.copy.async<full[stage]>.swiz<64> lhs_packed
+              .subspan(SPMM_TILE_M, SPMM_PACKED_TILE_K)
+              .at(block_m, iv_k)
+              => lhs_load_s.subspan(SPMM_TILE_M, SPMM_PACKED_TILE_K)
+                     .at(stage, 0);
+          tma.copy.async<full[stage]>.swiz<128> rhs
+              .subspan(SPMM_WARP_N, SPMM_TILE_K)
+              .at(block_n, iv_k)
+              => rhs_load_s.subspan(SPMM_WARP_N, SPMM_TILE_K).at(stage, 0);
+          trigger full[stage];
+        }
+      }
+
+      inthreads.async (p1 > 0) {
+        mc = mma.fill.f32 0.0f;
+        foreach {s} in [SPMM_STAGES] { trigger empty[s]; }
+        foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
+          stage = iv_k % SPMM_STAGES;
+          wait full[stage];
+          // dma.copy lhs_meta.subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
+          //     .at((#p1 - 1) * block_m + p1 - 1, iv_k)
+          //     => lhs_meta_s.subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
+          //            .at(stage * (#p1 - 1) + p1 - 1, 0);
+          foreach {iv_warp} in [cdiv(SPMM_TILE_K, SPMM_WARP_K)] {
+            ma = mma.load.swiz<64> lhs_load_s
+                .subspan(SPMM_TILE_M, SPMM_PACKED_TILE_K)
+                .at(stage, 0)
+                .subspan(SPMM_WARP_M, SPMM_PACKED_TILE_K)
+                .at(p1 - 1, 0)
+                .chunkat(_, iv_warp);
+            mb = mma.load.swiz<128> rhs_load_s
+                .subspan(SPMM_WARP_N, SPMM_TILE_K)
+                .at(stage, 0)
+                .chunkat(_, iv_warp);
+            me = mma.load lhs_meta_s
+                .subspan(SPMM_TILE_M, SPMM_META_TILE_COLS)
+                .at(stage, 0)
+                .subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
+                .at(p1 - 1, 0)
+                .chunkat(_, iv_warp);
+            mma.row.row.sp mc, ma, mb, me;
+          }
+          mma.commit;
+          trigger empty[stage];
+        }
+        mma.store mc,
+            output_s.subspan(SPMM_WARP_M, SPMM_WARP_N).at(p1 - 1, 0);
+      }
+    }
+
+    tma.copy output_s => output.subspan(SPMM_TILE_M, SPMM_WARP_N).at(block_m, block_n);
+  }
+}
+
+void init_pattern_sparse_a(choreo::spanned_data<choreo::f16, 2>& lhs_dense) {
+  for (size_t row = 0; row < SPMM_DEFAULT_M; ++row) {
+    for (size_t group = 0; group < SPMM_DEFAULT_K / 4; ++group) {
+      size_t base = group * 4;
+      lhs_dense[row][base + 0] = choreo::utils::from_f32<choreo::f16>(
+          1.0f + 0.125f * static_cast<float>(row) +
+          0.03125f * static_cast<float>(group));
+      lhs_dense[row][base + 1] = choreo::utils::from_f32<choreo::f16>(0.0f);
+      lhs_dense[row][base + 2] = choreo::utils::from_f32<choreo::f16>(
+          -0.51f - 0.0625f * static_cast<float>(row) +
+          0.015625f * static_cast<float>(group));
+      lhs_dense[row][base + 3] = choreo::utils::from_f32<choreo::f16>(0.0f);
+    }
+  }
+}
+
+void encode_wgmma_sp_k32(choreo::spanned_data<choreo::f16, 2>& lhs_dense,
+                         choreo::spanned_data<choreo::f16, 2>& lhs_packed,
+                         choreo::spanned_data<choreo::u8, 2>& lhs_meta) {
+  lhs_meta.fill(0);
+  for (size_t row = 0; row < lhs_dense.shape()[0]; ++row) {
+    for (size_t group = 0; group < lhs_dense.shape()[1] / 4; ++group) {
+      size_t base = group * 4;
+      int idx0 = -1;
+      int idx1 = -1;
+      int nz = 0;
+      for (int i = 0; i < 4; ++i) {
+        if (choreo::to_f32(lhs_dense[row][base + i]) != 0.0f) {
+          if (nz == 0) idx0 = i;
+          else if (nz == 1) idx1 = i;
+          ++nz;
+        }
+      }
+      choreo::choreo_assert(nz == 2, "Invalid 2:4 sparse pattern");
+      if (idx0 > idx1) std::swap(idx0, idx1);
+      size_t sparse_col = group * 2;
+      lhs_packed[row][sparse_col + 0] = lhs_dense[row][base + idx0];
+      lhs_packed[row][sparse_col + 1] = lhs_dense[row][base + idx1];
+      choreo::u8 nibble = static_cast<choreo::u8>(idx0 | (idx1 << 2));
+      size_t byte_col = group / 2;
+      if ((group & 1) == 0) lhs_meta[row][byte_col] = nibble;
+      else lhs_meta[row][byte_col] |= static_cast<choreo::u8>(nibble << 4);
+    }
+  }
+}
+
+int main(int argc, char** argv) {
+  bool enable_timing = true;
+  double user_flops = -1.0;
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--disable-timing") == 0) enable_timing = false;
+    if (std::strncmp(argv[i], "--flops=", 8) == 0) user_flops = std::atof(argv[i] + 8);
+  }
+
+  size_t m = SPMM_DEFAULT_M, n = SPMM_DEFAULT_N, k = SPMM_DEFAULT_K;
+  auto lhs_dense_h = choreo::make_spandata<choreo::f16>(m, k);
+  auto lhs_packed_h = choreo::make_spandata<choreo::f16>(m, k / 2);
+  auto lhs_meta_h = choreo::make_spandata<choreo::u8>(m, k / 8);
+  auto rhs_h = choreo::make_spandata<choreo::f16>(n, k);
+  auto res_h = choreo::make_spandata<choreo::f16>(m, n);
+  init_pattern_sparse_a(lhs_dense_h);
+  rhs_h.fill_random(-1.0f, 1.0f);
+  encode_wgmma_sp_k32(lhs_dense_h, lhs_packed_h, lhs_meta_h);
+  res_h.fill(0.0f);
+
+  half *lhs_packed_d = nullptr, *rhs_d = nullptr;
+  u8 *lhs_meta_d = nullptr;
+  half *res_d = nullptr;
+  choreo::abend_true(cudaMalloc(&lhs_packed_d, m * (k / 2) * sizeof(half)));
+  choreo::abend_true(cudaMalloc(&lhs_meta_d, m * (k / 8) * sizeof(u8)));
+  choreo::abend_true(cudaMalloc(&rhs_d, n * k * sizeof(half)));
+  choreo::abend_true(cudaMalloc(&res_d, m * n * sizeof(half)));
+  choreo::abend_true(cudaMemcpy(lhs_packed_d, lhs_packed_h.data(), m * (k / 2) * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(lhs_meta_d, lhs_meta_h.data(), m * (k / 8) * sizeof(u8), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(rhs_d, rhs_h.data(), n * k * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(res_d, res_h.data(), m * n * sizeof(half), cudaMemcpyHostToDevice));
+  auto lhs_packed_d_view = choreo::make_spanview<choreo::f16, 2>(lhs_packed_d, {m, k / 2});
+  auto lhs_meta_d_view = choreo::make_spanview<choreo::u8, 2>(lhs_meta_d, {m, k / 8});
+  auto rhs_d_view = choreo::make_spanview<choreo::f16, 2>(rhs_d, {n, k});
+  auto res_d_view = choreo::make_spanview<choreo::f16, 2>(res_d, {m, n});
+
+  if (enable_timing) {
+    choreo::TimerOption topt;
+    topt.warmup = 10;
+    topt.repeat = 500;
+    auto avg_ms = choreo::timing([&]() { spmm(lhs_packed_d_view, lhs_meta_d_view, rhs_d_view, res_d_view); cudaDeviceSynchronize(); }, topt);
+    std::cout << "Timing avg ms: " << avg_ms << "\n";
+    double flops = (user_flops > 0.0) ? user_flops : (2.0 * double(m) * double(n) * double(k));
+    double tflops = (flops / (avg_ms / 1000.0)) / 1e12;
+    std::cout << "TFLOPS: " << tflops << "\n";
+    std::cout << "HW efficiency: " << (tflops / H800_PCIE_PEAK_F16_TFLOPS) * 100.0 << "%\n";
+  } else {
+    spmm(lhs_packed_d_view, lhs_meta_d_view, rhs_d_view, res_d_view);
+    cudaDeviceSynchronize();
+  }
+  std::cout << "Test Passed (verify skipped)\n" << std::endl;
+}

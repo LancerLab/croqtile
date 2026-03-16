@@ -33,14 +33,14 @@ using SparsePolicy = choreo::utils::SparsePolicy<T>;
 __co__ void spmm( global f16 [M, PACKED_K] lhs_packed, 
                   global u8 [M, META_COLS] lhs_meta,
                   global f16 [N, K] rhs, 
-                  global f32 [M, N] output
+                  global f16 [M, N] output
                 ) {
   parallel {block_m, block_n}
       by [cdiv(M, SPMM_WARP_M), cdiv(N, SPMM_WARP_N)] : block {
     shared f16 [SPMM_WARP_M, SPMM_PACKED_TILE_K] lhs_load_s;
     shared f16 [SPMM_WARP_N, SPMM_TILE_K] rhs_load_s;
     shared u8 [SPMM_WARP_M, SPMM_META_TILE_COLS] lhs_load_s_mdata;
-    mc = mma.fill.f32 0.0f;
+    mc = mma.fill.f16 0.0f;
     foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
       foreach {iv_tma_lhs} in [cdiv(SPMM_PACKED_TILE_K, TMA_TILE)] {
         tma.copy.swiz<128> lhs_packed.subspan(SPMM_WARP_M, TMA_TILE).at(block_m, iv_k*cdiv(SPMM_PACKED_TILE_K, TMA_TILE)+iv_tma_lhs) => lhs_load_s.chunkat(_, iv_tma_lhs);
@@ -59,7 +59,7 @@ __co__ void spmm( global f16 [M, PACKED_K] lhs_packed,
         }
       }
     }
-    shared f32 [SPMM_WARP_M, SPMM_WARP_N] output_s;
+    shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s;
     mma.store mc, output_s;
     tma.copy output_s => output.subspan(SPMM_WARP_M, SPMM_WARP_N).at(block_m, block_n);
   }
@@ -176,27 +176,27 @@ int main(int argc, char** argv) {
   rhs_h.fill_random(-1.0f, 1.0f);
   encode_wgmma_sp_k32(lhs_dense_h, lhs_packed_h, lhs_meta_h);
 
-  auto res_h = choreo::make_spandata<float>(m, n);
+  auto res_h = choreo::make_spandata<choreo::f16>(m, n);
   res_h.fill(0.0f);
 
   half *lhs_packed_d = nullptr, *rhs_d = nullptr;
   u8 *lhs_meta_d = nullptr;
-  float *res_d = nullptr;
+  half *res_d = nullptr;
   choreo::abend_true(cudaMalloc(&lhs_packed_d, m * (k / 2) * sizeof(half)));
   choreo::abend_true(cudaMalloc(&lhs_meta_d, m * (k / 8) * sizeof(u8)));
   choreo::abend_true(cudaMalloc(&rhs_d, n * k * sizeof(half)));
-  choreo::abend_true(cudaMalloc(&res_d, m * n * sizeof(float)));
+  choreo::abend_true(cudaMalloc(&res_d, m * n * sizeof(half)));
 
   choreo::abend_true(cudaMemcpy(lhs_packed_d, lhs_packed_h.data(), m * (k / 2) * sizeof(half), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaMemcpy(lhs_meta_d, lhs_meta_h.data(), m * (k / 8) * sizeof(u8), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaMemcpy(rhs_d, rhs_h.data(), n * k * sizeof(half), cudaMemcpyHostToDevice));
-  choreo::abend_true(cudaMemcpy(res_d, res_h.data(), m * n * sizeof(float), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(res_d, res_h.data(), m * n * sizeof(half), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaDeviceSynchronize());
 
   auto lhs_packed_d_view = choreo::make_spanview<choreo::f16, 2>(lhs_packed_d, {m, k / 2});
   auto lhs_meta_d_view = choreo::make_spanview<choreo::u8, 2>(lhs_meta_d, {m, k / 8});
   auto rhs_d_view = choreo::make_spanview<choreo::f16, 2>(rhs_d, {n, k});
-  auto res_d_view = choreo::make_spanview<float, 2>(res_d, {m, n});
+  auto res_d_view = choreo::make_spanview<choreo::f16, 2>(res_d, {m, n});
 
   if (enable_timing) {
     int warmup = 10;
@@ -238,7 +238,7 @@ int main(int argc, char** argv) {
 
   spmm(lhs_packed_d_view, lhs_meta_d_view, rhs_d_view, res_d_view);
   choreo::abend_true(cudaDeviceSynchronize());
-  choreo::abend_true(cudaMemcpy(res_h.data(), res_d, m * n * sizeof(float), cudaMemcpyDeviceToHost));
+  choreo::abend_true(cudaMemcpy(res_h.data(), res_d, m * n * sizeof(half), cudaMemcpyDeviceToHost));
   choreo::abend_true(cudaDeviceSynchronize());
 
   auto lhs_dense_v = lhs_dense_h.view();
@@ -251,7 +251,7 @@ int main(int argc, char** argv) {
       float ref = 0.0f;
       for (size_t kk = 0; kk < lhs_dense_v.shape()[1]; ++kk)
         ref += choreo::to_f32(lhs_dense_v[i][kk]) * choreo::to_f32(rhs_v[j][kk]);
-      float got = res_v[i][j];
+      float got = choreo::to_f32(res_v[i][j]);
       float diff = std::abs(got - ref);
       if (diff >= tolerance) {
         std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << got
