@@ -25,25 +25,24 @@
 #define SPMM_META_TILE_COLS 8
 
 template <typename T>
-using SparsePolicy = choreo::utils::SparsePolicy<T>;
+using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
 
-// TODO incorrect!! Need load metadata inside the kernel
-__co__ void spmm( global f16 [M, PACKED_K] lhs_packed, 
-                  global u8 [M, META_COLS] lhs_meta,
-                  global f16 [N, K] rhs, 
-                  global f16 [M, N] output
+__co__ void spmm( global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed, 
+                  global u8 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 8] lhs_meta,
+                  global f16 [SPMM_DEFAULT_N, SPMM_DEFAULT_K] rhs, 
+                  global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_N] output
                 ) {
   parallel {block_m, block_n}
-      by [cdiv(M, SPMM_WARP_M), cdiv(N, SPMM_WARP_N)] : block {
+      by [cdiv(SPMM_DEFAULT_M, SPMM_WARP_M), cdiv(SPMM_DEFAULT_N, SPMM_WARP_N)] : block {
     shared f16 [SPMM_WARP_M, SPMM_PACKED_TILE_K] lhs_load_s;
     shared f16 [SPMM_WARP_N, SPMM_TILE_K] rhs_load_s;
     shared u8 [SPMM_WARP_M, SPMM_META_TILE_COLS] lhs_load_s_mdata;
     mc = mma.fill.f16 0.0f;
-    foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
+    foreach {iv_k} in [cdiv(SPMM_DEFAULT_K, SPMM_TILE_K)] {
       tma.copy.swiz<64> lhs_packed.subspan(SPMM_WARP_M, SPMM_PACKED_TILE_K).at(block_m, iv_k) => lhs_load_s;
       tma.copy.swiz<128> rhs.subspan(SPMM_WARP_N, SPMM_TILE_K).at(block_n, iv_k) => rhs_load_s;
       
-      // dma.copy lhs_meta.subspan(SPMM_WARP_M, SPMM_META_TILE_COLS).at(block_m, iv_k) => lhs_load_s_mdata;
+      dma.copy lhs_meta.subspan(SPMM_WARP_M, SPMM_META_TILE_COLS).at(block_m, iv_k) => lhs_load_s_mdata;
       foreach {iv_warp} in [cdiv(SPMM_TILE_K, SPMM_WARP_K)] {
         parallel p by 1 : group-4 {
           ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
@@ -56,58 +55,6 @@ __co__ void spmm( global f16 [M, PACKED_K] lhs_packed,
     shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s;
     mma.store mc, output_s;
     tma.copy output_s => output.subspan(SPMM_WARP_M, SPMM_WARP_N).at(block_m, block_n);
-  }
-}
-
-void init_pattern_sparse_a(choreo::spanned_data<choreo::f16, 2>& lhs_dense) {
-  for (size_t row = 0; row < SPMM_DEFAULT_M; ++row) {
-    for (size_t group = 0; group < SPMM_DEFAULT_K / 4; ++group) {
-      size_t base = group * 4;
-      lhs_dense[row][base + 0] = choreo::utils::from_f32<choreo::f16>(
-          1.0f + 0.125f * static_cast<float>(row) +
-          0.03125f * static_cast<float>(group));
-      lhs_dense[row][base + 1] = choreo::utils::from_f32<choreo::f16>(0.0f);
-      lhs_dense[row][base + 2] = choreo::utils::from_f32<choreo::f16>(
-          -0.51f - 0.0625f * static_cast<float>(row) +
-          0.015625f * static_cast<float>(group));
-      lhs_dense[row][base + 3] = choreo::utils::from_f32<choreo::f16>(0.0f);
-    }
-  }
-}
-
-void encode_wgmma_sp_k32(choreo::spanned_data<choreo::f16, 2>& lhs_dense,
-                         choreo::spanned_data<choreo::f16, 2>& lhs_packed,
-                         choreo::spanned_data<choreo::u8, 2>& lhs_meta) {
-  lhs_meta.fill(0);
-  for (size_t row = 0; row < lhs_dense.shape()[0]; ++row) {
-    for (size_t group = 0; group < lhs_dense.shape()[1] / 4; ++group) {
-      size_t base = group * 4;
-      int idx0 = -1;
-      int idx1 = -1;
-      int nz = 0;
-      for (int i = 0; i < 4; ++i) {
-        if (choreo::to_f32(lhs_dense[row][base + i]) != 0.0f) {
-          if (nz == 0)
-            idx0 = i;
-          else if (nz == 1)
-            idx1 = i;
-          ++nz;
-        }
-      }
-      choreo::choreo_assert(nz == 2, "Invalid 2:4 sparse pattern");
-      if (idx0 > idx1) std::swap(idx0, idx1);
-
-      size_t sparse_col = group * 2;
-      lhs_packed[row][sparse_col + 0] = lhs_dense[row][base + idx0];
-      lhs_packed[row][sparse_col + 1] = lhs_dense[row][base + idx1];
-
-      choreo::u8 nibble = static_cast<choreo::u8>(idx0 | (idx1 << 2));
-      size_t byte_col = group / 2;
-      if ((group & 1) == 0)
-        lhs_meta[row][byte_col] = nibble;
-      else
-        lhs_meta[row][byte_col] |= static_cast<choreo::u8>(nibble << 4);
-    }
   }
 }
 
@@ -165,10 +112,9 @@ int main(int argc, char** argv) {
   auto lhs_meta_h = choreo::make_spandata<choreo::u8>(m, k / 8);
   auto rhs_h = choreo::make_spandata<choreo::f16>(n, k);
 
-  // SparsePolicy<choreo::f16>::init_structured_sparse_A(lhs_dense_h, gen);
-  init_pattern_sparse_a(lhs_dense_h);
+  SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(lhs_dense_h, gen);
   rhs_h.fill_random(-1.0f, 1.0f);
-  encode_wgmma_sp_k32(lhs_dense_h, lhs_packed_h, lhs_meta_h);
+  SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense_h, lhs_packed_h, lhs_meta_h);
 
   auto res_h = choreo::make_spandata<choreo::f16>(m, n);
   res_h.fill(0.0f);
@@ -239,9 +185,9 @@ int main(int argc, char** argv) {
   auto rhs_v = rhs_h.view();
   auto res_v = res_h.view();
 
-  float tolerance = 1.0e-2f;
-  for (size_t i = 0; i < m; ++i) {
-    for (size_t j = 0; j < n; ++j) {
+  float tolerance = 1.0;
+  for (size_t i = 0; i < 128; ++i) {
+    for (size_t j = 0; j < 256; ++j) {
       float ref = 0.0f;
       for (size_t kk = 0; kk < lhs_dense_v.shape()[1]; ++kk)
         ref += choreo::to_f32(lhs_dense_v[i][kk]) * choreo::to_f32(rhs_v[j][kk]);

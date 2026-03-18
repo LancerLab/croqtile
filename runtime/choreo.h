@@ -2011,36 +2011,46 @@ struct Sparse2to4HostPolicyWGMMA {
     const size_t M = meta_u8.shape()[0];
     const size_t K_meta = meta_u8.shape()[1];
     const size_t K_meta_u32 = meta_u32.shape()[1];
+    const size_t k_fragments = K_meta / 4;
 
-    for (size_t r = 0; r < M; ++r) {
-      size_t r8 = (r + 8) % 16 + (r / 16) * 16;
-      if (r8 >= M) r8 = r;
+    choreo_assert(meta_u32.shape()[0] == M,
+                  "Sparse prepack requires matching M dimensions");
+    choreo_assert((M % 16) == 0,
+                  "Sparse prepack requires M dimension divisible by 16");
+    choreo_assert((K_meta % 4) == 0,
+                  "Sparse prepack requires u8 metadata K dimension divisible "
+                  "by 4");
+    choreo_assert(K_meta_u32 == k_fragments,
+                  "Sparse prepack expects one u32 metadata column per 32-wide "
+                  "K fragment");
 
-      for (size_t iv_k = 0; iv_k < 64; ++iv_k) {
-        for (size_t warp = 0; warp < 2; ++warp) {
-          size_t c = iv_k * 2 + warp;
+    for (size_t block_m = 0; block_m < M; block_m += 16) {
+      for (size_t row = 0; row < 8; ++row) {
+        const size_t row_lo = block_m + row;
+        const size_t row_hi = block_m + row + 8;
+        for (size_t k_frag = 0; k_frag < k_fragments; ++k_frag) {
+          const size_t byte_col_base = k_frag * 4;
+          uint16_t lo16 =
+              uint16_t(meta_u8.data()[row_lo * K_meta + byte_col_base + 0]) |
+              (uint16_t(meta_u8.data()[row_lo * K_meta + byte_col_base + 1])
+               << 8);
+          uint16_t hi16 =
+              uint16_t(meta_u8.data()[row_lo * K_meta + byte_col_base + 2]) |
+              (uint16_t(meta_u8.data()[row_lo * K_meta + byte_col_base + 3])
+               << 8);
+          uint16_t lo16_pair =
+              uint16_t(meta_u8.data()[row_hi * K_meta + byte_col_base + 0]) |
+              (uint16_t(meta_u8.data()[row_hi * K_meta + byte_col_base + 1])
+               << 8);
+          uint16_t hi16_pair =
+              uint16_t(meta_u8.data()[row_hi * K_meta + byte_col_base + 2]) |
+              (uint16_t(meta_u8.data()[row_hi * K_meta + byte_col_base + 3])
+               << 8);
 
-          size_t byte_col_base = (warp + iv_k * 2) * 4;
-
-          uint8_t b0 = meta_u8.data()[r * K_meta + byte_col_base + 0];
-          uint8_t b1 = meta_u8.data()[r * K_meta + byte_col_base + 1];
-          uint8_t b2 = meta_u8.data()[r8 * K_meta + byte_col_base + 0];
-          uint8_t b3 = meta_u8.data()[r8 * K_meta + byte_col_base + 1];
-
-          uint8_t b4 = meta_u8.data()[r * K_meta + byte_col_base + 2];
-          uint8_t b5 = meta_u8.data()[r * K_meta + byte_col_base + 3];
-          uint8_t b6 = meta_u8.data()[r8 * K_meta + byte_col_base + 2];
-          uint8_t b7 = meta_u8.data()[r8 * K_meta + byte_col_base + 3];
-
-          uint32_t val_thread0 = (uint32_t(b0) << 0) | (uint32_t(b1) << 8) |
-                                (uint32_t(b2) << 16) | (uint32_t(b3) << 24);
-
-          uint32_t val_thread1 = (uint32_t(b4) << 0) | (uint32_t(b5) << 8) |
-                                (uint32_t(b6) << 16) | (uint32_t(b7) << 24);
-
-          uint32_t val = (val_thread0 & 0xFFFF) | (val_thread1 << 16);
-
-          meta_u32.data()[r * K_meta_u32 + c] = val;
+          meta_u32.data()[(block_m + 2 * row + 0) * K_meta_u32 + k_frag] =
+              uint32_t(lo16) | (uint32_t(lo16_pair) << 16);
+          meta_u32.data()[(block_m + 2 * row + 1) * K_meta_u32 + k_frag] =
+              uint32_t(hi16) | (uint32_t(hi16_pair) << 16);
         }
       }
     }

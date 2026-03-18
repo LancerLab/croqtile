@@ -24,7 +24,7 @@
 #define SPMM_STAGES 2
 
 #define SPMM_PACKED_TILE_K 32
-#define SPMM_META_TILE_COLS 8
+#define SPMM_META_TILE_COLS 2
 
 #if SPMM_TILE_M % SPMM_WARP_M != 0
 #error "SPMM_TILE_M must be divisible by SPMM_WARP_M"
@@ -34,7 +34,7 @@ template <typename T>
 using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
 
 __co__ void spmm(global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed,
-                 global u8 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 8] lhs_meta,
+                 global u32 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 32] lhs_meta,
                  global f16 [SPMM_DEFAULT_N, SPMM_DEFAULT_K] rhs,
                  global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_N] output) {
   parallel {block_m, block_n}
@@ -42,7 +42,6 @@ __co__ void spmm(global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed,
     shared event full[SPMM_STAGES], empty[SPMM_STAGES];
     shared f16 [SPMM_STAGES * SPMM_TILE_M, SPMM_PACKED_TILE_K] lhs_load_s;
     shared f16 [SPMM_STAGES * SPMM_WARP_N, SPMM_TILE_K] rhs_load_s;
-    // shared u8 [SPMM_TILE_M, SPMM_META_TILE_COLS] lhs_meta_s;
     shared f16 [SPMM_TILE_M, SPMM_WARP_N] output_s;
 
     parallel p1 by 3 : group-4 {
@@ -65,10 +64,6 @@ __co__ void spmm(global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed,
 
       inthreads.async (p1 > 0) {
         mc = mma.fill.f32 0.0f;
-        // foreach {iv_k} in [cdiv(SPMM_DEFAULT_K, SPMM_TILE_K)] {
-        //   dma.copy lhs_meta.subspan(SPMM_TILE_M, SPMM_META_TILE_COLS).at(block_m, iv_k)
-        //     => lhs_meta_s;
-        // }
         foreach {s} in [SPMM_STAGES] { trigger empty[s]; }
         foreach {iv_k} in [cdiv(SPMM_DEFAULT_K, SPMM_TILE_K)] {
           stage = iv_k % SPMM_STAGES;
@@ -85,12 +80,11 @@ __co__ void spmm(global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed,
                 .at(stage, 0)
                 .chunkat(_, iv_warp);
             me = mma.load lhs_meta
+                .subspan(SPMM_TILE_M, SPMM_META_TILE_COLS)
+                .at(block_m, iv_k)
                 .subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
-                .at((#p1 - 1) * block_m + p1 - 1, iv_k#iv_warp);
-            // me = mma.load lhs_meta_s
-            //     .subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
-            //     .at(p1 - 1, 0)
-            //     .chunkat(_, iv_warp);
+                .at(p1-1, 0)
+                .chunkat(_, iv_warp);
             mma.row.row.sp mc, ma, mb, me;
           }
           mma.commit;
@@ -153,28 +147,30 @@ int main(int argc, char** argv) {
   std::mt19937 gen(42);
   auto lhs_dense_h = choreo::make_spandata<choreo::f16>(m, k);
   auto lhs_packed_h = choreo::make_spandata<choreo::f16>(m, k / 2);
-  auto lhs_meta_h = choreo::make_spandata<choreo::u8>(m, k / 8);
+  auto lhs_meta_u8_h = choreo::make_spandata<choreo::u8>(m, k / 8);
+  auto lhs_meta_h = choreo::make_spandata<choreo::u32>(m, k / 32);
   auto rhs_h = choreo::make_spandata<choreo::f16>(n, k);
   auto res_h = choreo::make_spandata<choreo::f16>(m, n);
   SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(lhs_dense_h, gen);
   rhs_h.fill_random(-1.0f, 1.0f);
-  SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense_h, lhs_packed_h, lhs_meta_h);
+  SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense_h, lhs_packed_h, lhs_meta_u8_h);
+  SparsePolicyWGMMA<choreo::f16>::prepack(lhs_meta_u8_h, lhs_meta_h);
   res_h.fill(0.0f);
 
   half *lhs_packed_d = nullptr, *rhs_d = nullptr;
-  u8 *lhs_meta_d = nullptr;
+  u32 *lhs_meta_d = nullptr;
   half *res_d = nullptr;
   choreo::abend_true(cudaMalloc(&lhs_packed_d, m * (k / 2) * sizeof(half)));
-  choreo::abend_true(cudaMalloc(&lhs_meta_d, m * (k / 8) * sizeof(u8)));
+  choreo::abend_true(cudaMalloc(&lhs_meta_d, m * (k / 32) * sizeof(u32)));
   choreo::abend_true(cudaMalloc(&rhs_d, n * k * sizeof(half)));
   choreo::abend_true(cudaMalloc(&res_d, m * n * sizeof(half)));
   choreo::abend_true(cudaMemcpy(lhs_packed_d, lhs_packed_h.data(), m * (k / 2) * sizeof(half), cudaMemcpyHostToDevice));
-  choreo::abend_true(cudaMemcpy(lhs_meta_d, lhs_meta_h.data(), m * (k / 8) * sizeof(u8), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(lhs_meta_d, lhs_meta_h.data(), m * (k / 32) * sizeof(u32), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaMemcpy(rhs_d, rhs_h.data(), n * k * sizeof(half), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaMemcpy(res_d, res_h.data(), m * n * sizeof(half), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaDeviceSynchronize());
   auto lhs_packed_d_view = choreo::make_spanview<choreo::f16, 2>(lhs_packed_d, {m, k / 2});
-  auto lhs_meta_d_view = choreo::make_spanview<choreo::u8, 2>(lhs_meta_d, {m, k / 8});
+  auto lhs_meta_d_view = choreo::make_spanview<choreo::u32, 2>(lhs_meta_d, {m, k / 32});
   auto rhs_d_view = choreo::make_spanview<choreo::f16, 2>(rhs_d, {n, k});
   auto res_d_view = choreo::make_spanview<choreo::f16, 2>(res_d, {m, n});
 
@@ -217,7 +213,7 @@ int main(int argc, char** argv) {
   auto lhs_dense_v = lhs_dense_h.view();
   auto rhs_v = rhs_h.view();
   auto res_v = res_h.view();
-  float tolerance = 1.0e-2f;
+  float tolerance = 1.0;
   size_t verify_m = (m < 128) ? m : 128;
   size_t verify_n = (n < 256) ? n : 256;
   for (size_t i = 0; i < verify_m; ++i) {

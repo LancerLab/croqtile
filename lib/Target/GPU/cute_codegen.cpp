@@ -1295,17 +1295,34 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
 }
 
 void CuteCodeGen::emitPrepackedU32Snippet(const std::string& metaVar,
-                                          const std::string& deviceArray) {
-  ds << d_indent
-     << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
-  ds << d_indent << "  int __sp_m_idx = blockIdx.x * 64 + __sp_row;\n";
+                                          const std::string& deviceArray,
+                                          const std::string& rowStride,
+                                          const std::string& colStride) {
+  ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
+  ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
+  ds << d_indent << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+  ds << d_indent << "  int __sp_packed_row = blockIdx.x * 64 + ((__sp_tid >> 5) * 16) + (((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
   ds << d_indent << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
-  ds << d_indent << "  uint32_t __sp_u32_val = " << deviceArray
-     << "[__sp_m_idx * 128 + __sp_k_idx];\n";
-  ds << d_indent << "  if ((__sp_tid & 1) == 0) " << metaVar
-     << " = static_cast<uint32_t>(__sp_u32_val & 0xFFFF);\n";
-  ds << d_indent << "  else " << metaVar
-     << " = static_cast<uint32_t>(__sp_u32_val >> 16);\n";
+  ds << d_indent << "  if (__sp_active) {\n";
+  ds << d_indent << "    uint32_t __sp_u32_val = " << deviceArray
+     << "[__sp_packed_row * (" << rowStride << ") + __sp_k_idx * (" << colStride
+     << ")];\n";
+  ds << d_indent << "    " << metaVar << " = __sp_u32_val;\n";
+  ds << d_indent << "  }\n";
+}
+
+void CuteCodeGen::emitPrepackedU32TileLoadSnippet(
+    const std::string& metaVar, const std::string& tileAddr,
+    const std::string& rowStride) {
+  ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
+  ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
+  ds << d_indent
+     << "  int __sp_local_row = ((__sp_tid >> 5) * 16) + (((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
+  ds << d_indent << "  if (__sp_active) {\n";
+  ds << d_indent << "    uint32_t __sp_u32_val = (" << tileAddr
+     << ")[__sp_local_row * (" << rowStride << ")];\n";
+  ds << d_indent << "    " << metaVar << " = __sp_u32_val;\n";
+  ds << d_indent << "  }\n";
 }
 
 void CuteCodeGen::EmitDebugSpannedRTTI(
@@ -3657,12 +3674,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
         auto tile_addr = TileAddr(op.LoadFrom(), false);
         auto strides = GenStrides(op.LoadFrom());
+        auto load_from_sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
         auto k_val = VIInt(ssmi.shape.at(2));
         bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                              mma_policy.find("E5M2") != std::string::npos;
         bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
         bool sparse_k32_16bit = !policy_is_fp8 && k_val && *k_val == 32;
         bool sparse_k64_16bit = !policy_is_fp8 && k_val && *k_val == 64;
+        bool prepack_single_col = false;
+        if (load_from_sty && load_from_sty->Dims() >= 2) {
+          if (auto meta_cols = VIInt(load_from_sty->GetShape().ValueAt(1)))
+            prepack_single_col = (*meta_cols == 1);
+        }
         bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
         std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
         std::string row_stride = ValueSTR(strides.at(0));
@@ -3697,7 +3720,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
              << ">(packed) << (8 * byte_idx));\n";
           ds << d_indent << "  }\n";
         } else if (prepackInfo.use_packed_u32) {
-          emitPrepackedU32Snippet(sym, prepackInfo.device_name);
+          if (prepack_single_col)
+            emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr), row_stride);
+          else
+            emitPrepackedU32Snippet(sym, prepackInfo.device_name, row_stride,
+                                    col_stride);
         } else if (sparse_k32_16bit || sparse_k64_16bit) {
           ds << d_indent
              << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & "
@@ -3902,7 +3929,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                << ";\n";
             ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
           } else {
-            emitPrepackedU32Snippet(meta_var, prepackInfo.device_name);
+            emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
+                                    "1");
           }
           if (fp8_sparse_k64) {
             ds << d_indent

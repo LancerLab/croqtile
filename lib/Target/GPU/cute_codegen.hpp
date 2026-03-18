@@ -373,7 +373,12 @@ private:
   PrepackedU32Info resolvePrepackedU32Meta(const std::string& ref_sym,
                                            bool forceFlag);
   void emitPrepackedU32Snippet(const std::string& metaVar,
-                               const std::string& deviceArray);
+                                const std::string& deviceArray,
+                                const std::string& rowStride,
+                                const std::string& colStride);
+  void emitPrepackedU32TileLoadSnippet(const std::string& metaVar,
+                                       const std::string& tileAddr,
+                                       const std::string& rowStride);
   static std::string EscapeLineDirectivePath(const std::string& path);
   void EmitLineDirective(AST::Node& n);
   void ResetLineDirectiveState();

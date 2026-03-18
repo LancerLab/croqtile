@@ -7,15 +7,13 @@
 #define H800_PCIE_PEAK_F16_TFLOPS 1513
 
 #define MATMUL_DEFAULT_M 4096
-#define MATMUL_DEFAULT_N 4096
-#define MATMUL_DEFAULT_K 4096
+#define MATMUL_DEFAULT_N 8192
+#define MATMUL_DEFAULT_K 8192
 
 #define WARP_M 64
 #define WARP_N 256
 #define TILE_K 64
 #define WARP_K 32
-#define SPMM_META_TILE_COLS 8
-
 template <typename T>
 using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
 
@@ -43,7 +41,7 @@ __co__ void matmul_sp_f16(global f16 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 2] lh
         parallel p by 1 : group-4 {
           ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
           mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
-          me = mma.load lhs_meta.chunkat(block_m, iv_k).chunkat(iv_warp, _);
+          me = mma.load lhs_meta.chunkat(block_m, iv_k#iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }
@@ -161,15 +159,25 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "Starting verification..." << std::endl;
-  float tolerance = 0.05f;
-  // Only check first element
-  float ref = 0.0f;
-  for (size_t k = 0; k < K; ++k)
-    ref += choreo::to_f32(lhs_dense[0][k]) * choreo::to_f32(rhs[0][k]);
-  float got = res[0][0];
-  float diff = std::abs(got - ref);
-  std::cout << "ref=" << ref << " got=" << got << " diff=" << diff << std::endl;
-  int errors = (diff > tolerance) ? 1 : 0;
+  float tolerance = 0.5f;
+  size_t verify_m = (M < 128) ? M : 128;
+  size_t verify_n = (N < 256) ? N : 256;
+  int errors = 0;
+  for (size_t i = 0; i < verify_m; ++i) {
+    for (size_t j = 0; j < verify_n; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += choreo::to_f32(lhs_dense[i][k]) * choreo::to_f32(rhs[j][k]);
+      float got = choreo::to_f32(res[i][j]);
+      float diff = std::abs(got - ref);
+      if (diff > tolerance) {
+        if (errors < 8)
+          std::cout << "[" << i << ", " << j << "] ref=" << ref
+                    << " got=" << got << " diff=" << diff << std::endl;
+        ++errors;
+      }
+    }
+  }
   std::cout << "f16_sp: " << errors << " errors\n";
   choreo::choreo_assert(errors == 0, "Sparse WGMMA f16 failed");
   std::cout << "Test Passed\n";
