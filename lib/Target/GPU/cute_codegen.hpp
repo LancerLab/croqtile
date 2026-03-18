@@ -318,6 +318,8 @@ private:
   bool wgmma_arrive_state_declared = false;
   bool pending_mbarrier_full_event_array = false;
   std::string pending_mbarrier_full_event_name;
+  bool in_producer = false; // hack
+  bool in_consumer = false; // hack
   struct HoistedScaleAccumInfo {
     std::string frag_sym;
     std::string frag_expr;
@@ -369,9 +371,9 @@ private:
   };
 
   PrepackedU32Info resolvePrepackedU32Meta(const std::string& ref_sym,
-                                            bool forceFlag);
+                                           bool forceFlag);
   void emitPrepackedU32Snippet(const std::string& metaVar,
-                                const std::string& deviceArray);
+                               const std::string& deviceArray);
   static std::string EscapeLineDirectivePath(const std::string& path);
   void EmitLineDirective(AST::Node& n);
   void ResetLineDirectiveState();
@@ -597,6 +599,16 @@ private:
   }
 
   const std::string EmitSpannedArith(AST::Expr& e) const;
+
+  bool InProducer() {
+    if (!CCtx().UseWarpSpec()) return false;
+    return in_producer;
+  }
+
+  bool InConsumer() {
+    if (!CCtx().UseWarpSpec()) return false;
+    return in_consumer;
+  }
 };
 
 } // namespace Cute

@@ -44,8 +44,9 @@ Option<bool>
     sim_sparse(OptionKind::User, "--sim", "-sim", false,
                "Enable simulated sparse DMA encode/decode (non-production).");
 // Enable host prepacked-u32 metadata path when generating device code.
-Option<bool> use_prepack(OptionKind::User, "--use-prepack", "", false,
-                         "Enable host prepacked-u32 metadata handling (prepack)");
+Option<bool>
+    use_prepack(OptionKind::User, "--use-prepack", "", false,
+                "Enable host prepacked-u32 metadata handling (prepack)");
 } // namespace Choreo
 Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
                                  "Generate source-level debug information.");

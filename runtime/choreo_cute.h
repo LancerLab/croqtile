@@ -2133,6 +2133,38 @@ struct Policy_WGMMA_D_M64K8 {
 
 // Store policy for 64x64x32 WGMMA (accumulator layout matches K=16)
 struct Policy_WGMMA_D_M64K32 {
+  // masked for row < row_guard
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row(Tensor& D, AccumT* d, int row_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;             // 0-31: lane within warp
+    int warp = tid / 32;             // 0-3: which warp in warp group
+    int row0 = warp * 16 + lane / 4; // first row
+    int row1 = row0 + 8;             // second row
+    int col_num = N / 8;             // number of column pairs
+    using value_type = typename Tensor::value_type;
+
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
   template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
@@ -2317,6 +2349,26 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
     MMA_Policy<MMA>::typeD::template store<Tensor, AccumT, N>(D, d);
   else
     MMA_Policy<MMA>::typeD::template store<Tensor, AccumT>(D, d);
+}
+
+template <class MMA, int N = 0, class Tensor, class AccumT>
+__device__ static inline void
+store_fragment_d_mask_row(Tensor& D, AccumT* const d, int row_guard) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, double>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "store d only supports float/double/f16/s32 accumulator type");
+  static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
+                    std::is_same<typename Tensor::value_type, AccumT>::value,
+                "store d unsupported type cast");
+  if constexpr (N > 0)
+    MMA_Policy<MMA>::typeD::template store_mask_row<Tensor, AccumT, N>(
+        D, d, row_guard);
+  else
+    MMA_Policy<MMA>::typeD::template store_mask_row<Tensor, AccumT>(D, d,
+                                                                    row_guard);
 }
 
 template <class MMA, int N = 0, class Tensor, class AccumT>

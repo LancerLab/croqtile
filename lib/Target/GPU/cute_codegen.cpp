@@ -561,8 +561,7 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
            << ");\n";
 
   // For WGMMA with shared memory destination, use swizzled layout
-  if (use_wgmma_layout && sto == Storage::SHARED &&
-      (bty == BaseType::F16 || bty == BaseType::BF16)) {
+  if (use_wgmma_layout && sto == Storage::SHARED) {
     // Select swizzle layout based on swizzle value
     std::string swizzle_layout;
     switch (swizzle_mode) {
@@ -814,6 +813,26 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
       if (!it->async && it->outer && !CCtx().UseWarpSpec())
         ds << "\n" << d_indent << "__syncthreads();";
       ds << " // end inthreads\n";
+    }
+    // reset in_producer exiting producer inthread
+    if (InProducer()) {
+      auto pred_nospace = ExprSTR(it->pred, false);
+      pred_nospace.erase(
+          std::remove_if(pred_nospace.begin(), pred_nospace.end(),
+                         [](unsigned char ch) { return std::isspace(ch); }),
+          pred_nospace.end());
+      if (pred_nospace.find("__choreo_vg4id_x==0") != std::string::npos) {
+        in_producer = false;
+      }
+    } else if (InConsumer()) {
+      auto pred_nospace = ExprSTR(it->pred, false);
+      pred_nospace.erase(
+          std::remove_if(pred_nospace.begin(), pred_nospace.end(),
+                         [](unsigned char ch) { return std::isspace(ch); }),
+          pred_nospace.end());
+      if (pred_nospace.find("__choreo_vg4id_x") != std::string::npos) {
+        in_consumer = false;
+      }
     }
   } else if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
     DecrIndent();
@@ -1228,8 +1247,9 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
 }
 void CuteCodeGen::EmitFixedDeviceHead() {}
 
-CuteCodeGen::PrepackedU32Info CuteCodeGen::resolvePrepackedU32Meta(
-    const std::string& ref_sym, bool forceFlag) {
+CuteCodeGen::PrepackedU32Info
+CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
+                                     bool forceFlag) {
   PrepackedU32Info info;
   if (ref_sym.empty()) return info;
 
@@ -1252,9 +1272,7 @@ CuteCodeGen::PrepackedU32Info CuteCodeGen::resolvePrepackedU32Meta(
     return false;
   };
 
-  if (!tryResolve(ref_sym + "_mdata")) {
-    tryResolve(ref_sym);
-  }
+  if (!tryResolve(ref_sym + "_mdata")) { tryResolve(ref_sym); }
 
   if (!info.use_packed_u32 && forceFlag) {
     if (SSTab().IsDeclared(ref_sym)) {
@@ -1277,15 +1295,17 @@ CuteCodeGen::PrepackedU32Info CuteCodeGen::resolvePrepackedU32Meta(
 }
 
 void CuteCodeGen::emitPrepackedU32Snippet(const std::string& metaVar,
-                                            const std::string& deviceArray) {
-  ds << d_indent << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+                                          const std::string& deviceArray) {
+  ds << d_indent
+     << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
   ds << d_indent << "  int __sp_m_idx = blockIdx.x * 64 + __sp_row;\n";
   ds << d_indent << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
   ds << d_indent << "  uint32_t __sp_u32_val = " << deviceArray
      << "[__sp_m_idx * 128 + __sp_k_idx];\n";
   ds << d_indent << "  if ((__sp_tid & 1) == 0) " << metaVar
      << " = static_cast<uint32_t>(__sp_u32_val & 0xFFFF);\n";
-  ds << d_indent << "  else " << metaVar << " = static_cast<uint32_t>(__sp_u32_val >> 16);\n";
+  ds << d_indent << "  else " << metaVar
+     << " = static_cast<uint32_t>(__sp_u32_val >> 16);\n";
 }
 
 void CuteCodeGen::EmitDebugSpannedRTTI(
@@ -3005,7 +3025,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     bool use_wgmma_layout_t = HasWGMMAInFunction() &&
                               t_sty->GetStorage() == Storage::SHARED &&
                               (t_sty->ElementType() == BaseType::F16 ||
-                               t_sty->ElementType() == BaseType::BF16);
+                               t_sty->ElementType() == BaseType::BF16 ||
+                               t_sty->ElementType() == BaseType::F8_E4M3);
 
     auto f_stride = GenStrides(f_ca, transp_config);
     auto t_stride = GenStrides(t_ca);
@@ -3652,12 +3673,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // to the existing byte-by-byte assembly when detection fails.
         // The --use-prepack flag can be used to force this path.
         std::string ref_sym = op.LoadFrom()->RefSymbol();
-        auto prepackInfo = resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue());
+        auto prepackInfo =
+            resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue());
 
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
         if (!prepackInfo.use_packed_u32)
-          ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)(" << ValueSTR(tile_addr) << ");\n";
+          ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
+             << ValueSTR(tile_addr) << ");\n";
         if (fp8_sparse_k64) {
           ds << d_indent
              << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
@@ -3871,10 +3894,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "{\n";
           ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
           // Detect host prepacked-u32 metadata for the exec site
-          auto prepackInfo = resolvePrepackedU32Meta(a_sym, use_prepack.GetValue());
+          auto prepackInfo =
+              resolvePrepackedU32Meta(a_sym, use_prepack.GetValue());
           if (!prepackInfo.use_packed_u32) {
             ds << d_indent
-               << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2)) << ";\n";
+               << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2))
+               << ";\n";
             ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
           } else {
             emitPrepackedU32Snippet(meta_var, prepackInfo.device_name);
@@ -4042,24 +4067,45 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
           ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
-      std::string DIM_N = STR(ssmi.shape.at(1));
+      std::string DIM_N_STR = STR(ssmi.shape.at(1));
       std::string CUTE_WGMMA_ATOM =
           "CUTE_WGMMA_M" + STR(ssmi.shape.at(0)) + "K" + STR(ssmi.shape.at(2));
       const bool store_trans = op.StoreIsTranspose();
-
+      auto to_shape = ca->GetBlockShape();
+      auto mc_dim_m = ssmi.shape.at(0);
+      auto ca_dim_m = to_shape.ValueAt(0);
+      // if ca block shape is smaller than the MMA shape, or ca block shape is a
+      // runtime value, we need to use the masked store variant to avoid
+      // out-of-bounds memory access
+      bool need_m_mask =
+          !VIIsInt(ca_dim_m) || *VIInt(ca_dim_m) < *VIInt(mc_dim_m);
+      if (need_m_mask)
+        assert(
+            !use_stmatrix && !store_trans &&
+            "currently the masked store only supports non-transpose store to "
+            "global memory. Support for more cases can be added if needed.");
       if (use_stmatrix) {
         ds << d_indent
            << (store_trans ? "store_fragment_d_stmatrix_trans<"
                            : "store_fragment_d_stmatrix<")
-           << CUTE_WGMMA_ATOM << ", " << DIM_N << ">(" << f_mds.first << ", "
+           << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">(" << f_mds.first
+           << ", "
            << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
            << ExprSTR(frag, false) << "));\n";
       } else {
-        ds << d_indent
-           << (store_trans ? "store_fragment_d_trans<" : "store_fragment_d<")
-           << CUTE_WGMMA_ATOM << ", " << DIM_N << ">(" << f_mds.first << ", "
-           << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
-           << ExprSTR(frag, false) << "));\n";
+        if (need_m_mask) {
+          ds << d_indent << "store_fragment_d_mask_row<" << CUTE_WGMMA_ATOM
+             << ", " << DIM_N_STR << ">(" << f_mds.first
+             << ", reinterpret_cast<" << NameBaseType(accum_type) << "*>("
+             << ExprSTR(frag, false) << "), " << ValueSTR(ca_dim_m) << ");\n";
+        } else {
+          ds << d_indent
+             << (store_trans ? "store_fragment_d_trans<" : "store_fragment_d<")
+             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">(" << f_mds.first
+             << ", "
+             << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
+             << ExprSTR(frag, false) << "));\n";
+        }
       }
     } break;
     default: break;
@@ -4541,6 +4587,7 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
 
   auto BeginEventCritical = [&]() -> bool {
     if (IsHost()) return false;
+    if (CCtx().UseWarpSpec()) return false;
     switch (bdim_level) {
     case ParallelLevel::GROUPx4:
       ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
@@ -4562,6 +4609,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
     if (!guarded || IsHost()) return;
     DecrDeviceIndent();
     ds << d_indent << "}\n";
+    if (InProducer() || InConsumer()) return;
+
     switch (bdim_level) {
     case ParallelLevel::GROUPx4:
       ds << d_indent
@@ -4639,12 +4688,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         }
         bool is_full = (base_name.find("full") != std::string::npos);
         bool guarded = false;
-        bool no_post_sync = false;
-        if (!is_full) {
-          if (!(CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4)) {
-            guarded = BeginEventCritical();
-          }
-        }
+        if (!is_full) { guarded = BeginEventCritical(); }
+
         ds << d_indent << "// wait event(barrier) " << PSTR(t) << "\n";
         if (is_array_ref) {
           size_t lvl = GetSubScriptLevel(*expr);
@@ -4661,16 +4706,10 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
                                     ExprSTR(t, false) + ".arrive())",
                                 ";\n", ety->RemainderDimensions(0));
         }
-        if (is_full && CCtx().UseWarpSpec() &&
-            bdim_level == ParallelLevel::GROUPx4) {
+        if (is_full && InConsumer()) {
           ds << d_indent << "warpgroup_arrive();\n";
         }
-        if (guarded && no_post_sync) {
-          DecrDeviceIndent();
-          ds << d_indent << "}\n";
-        } else {
-          EndEventCritical(guarded);
-        }
+        EndEventCritical(guarded);
       } break;
       default:
         choreo_unreachable("unsupported event array storage '" +
@@ -4743,6 +4782,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
 
   auto BeginEventCritical = [&]() -> bool {
     if (IsHost()) return false;
+    if (CCtx().UseWarpSpec()) return false;
     switch (bdim_level) {
     case ParallelLevel::GROUPx4:
       ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
@@ -4764,6 +4804,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
     if (!guarded || IsHost()) return;
     DecrDeviceIndent();
     ds << d_indent << "}\n";
+    if (InProducer() || InConsumer()) return;
     switch (bdim_level) {
     case ParallelLevel::GROUPx4:
       ds << d_indent
@@ -4817,13 +4858,8 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           }
           bool is_full = (base_name.find("full") != std::string::npos);
           bool guarded = false;
-          bool no_post_sync = false;
-          if (is_full) {
-            if (!(CCtx().UseWarpSpec() &&
-                  bdim_level == ParallelLevel::GROUPx4)) {
-              guarded = BeginEventCritical();
-            }
-          }
+          if (!is_full) { guarded = BeginEventCritical(); }
+
           ds << d_indent << "// trigger event(barrier) " << PSTR(f) << "\n";
           if (is_full) {
             auto tx_bytes_expr = SumRecentTMATxBytesExpr();
@@ -4858,12 +4894,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                                     ety->RemainderDimensions(0));
             }
           }
-          if (guarded && no_post_sync) {
-            DecrDeviceIndent();
-            ds << d_indent << "}\n";
-          } else {
-            EndEventCritical(guarded);
-          }
+          EndEventCritical(guarded);
           break;
         }
         default:
@@ -5251,18 +5282,21 @@ bool CuteCodeGen::Visit(AST::InThreadsBlock& n) {
   ds << d_indent << "// inthreads: " << n.LOC() << "\n";
   if (!n.stmts->None()) {
     auto pred_str = ExprSTR(n.pred, false);
-    bool mbarrier_single_producer = false;
     if (CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4) {
       auto pred_nospace = pred_str;
       pred_nospace.erase(
           std::remove_if(pred_nospace.begin(), pred_nospace.end(),
                          [](unsigned char ch) { return std::isspace(ch); }),
           pred_nospace.end());
-      mbarrier_single_producer =
+      in_producer =
           pred_nospace.find("__choreo_vg4id_x==0") != std::string::npos;
+      if (!in_producer) {
+        in_consumer =
+            pred_nospace.find("__choreo_vg4id_x") != std::string::npos;
+      }
     }
     ds << d_indent << "if (" << pred_str;
-    if (mbarrier_single_producer) ds << " && __CHOREO_GROUPX4_SINGLE__";
+    if (in_producer) ds << " && __CHOREO_GROUPX4_SINGLE__";
     ds << ") {\n";
   }
   IncrDeviceIndent();
@@ -6031,7 +6065,6 @@ show_usage() {
     os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file
        << "\n";
   os << "\n  ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
-  // if --lib is set, os << --lib -Xcompiler
   os << R"(elif [ "$1" == "--lib" ]; then)";
   if (verbose)
     os << "\n  echo ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file
