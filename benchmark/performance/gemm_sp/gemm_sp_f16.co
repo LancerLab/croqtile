@@ -36,16 +36,16 @@ __co__ void matmul_sp_f16(global f16 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 2] lh
                            global f16 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_N] output) {
   parallel {block_m, block_n} by [cdiv(MATMUL_DEFAULT_M, WARP_M), cdiv(MATMUL_DEFAULT_N, WARP_N)] : block {
     mc = mma.fill.f16 0.0f;
-    shared u8 [WARP_M, SPMM_META_TILE_COLS] lhs_load_s_mdata;
+    // shared u8 [WARP_M, SPMM_META_TILE_COLS] lhs_load_s_mdata;
     foreach {iv_k} in [cdiv(MATMUL_DEFAULT_K, TILE_K)] {
       lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
       rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
-      dma.copy lhs_meta.chunkat(block_m, iv_k) => lhs_load_s_mdata;
+      // dma.copy lhs_meta.chunkat(block_m, iv_k) => lhs_load_s_mdata;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
           ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
           mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
-          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          // me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           me = mma.load lhs_meta.chunkat(block_m, iv_k#iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }

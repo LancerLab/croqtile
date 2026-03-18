@@ -59,6 +59,7 @@ extern Option<bool> hoist_scale;
 
 namespace Choreo {
 extern Option<bool> sim_sparse;
+extern Option<bool> use_prepack;
 } // namespace Choreo
 Option<bool> use_cuda_type(OptionKind::Hidden, "-use-cuda-type", "", true,
                            "use cuda built-in types.");
@@ -1226,6 +1227,66 @@ void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
 )";
 }
 void CuteCodeGen::EmitFixedDeviceHead() {}
+
+CuteCodeGen::PrepackedU32Info CuteCodeGen::resolvePrepackedU32Meta(
+    const std::string& ref_sym, bool forceFlag) {
+  PrepackedU32Info info;
+  if (ref_sym.empty()) return info;
+
+  auto tryResolve = [&](const std::string& sym) -> bool {
+    if (!SSTab().IsDeclared(sym)) return false;
+    if (auto st = dyn_cast<SpannedType>(GetSymbolType(sym))) {
+      if (st->ElementType() == BaseType::U32) {
+        auto key = InScopeName(sym + ".data");
+        if (ssm.HasDeviceName(key)) {
+          info.device_name = ssm.DeviceName(key);
+        } else if (ssm.HasDeviceName(InScopeName(sym))) {
+          info.device_name = ssm.DeviceName(InScopeName(sym));
+        }
+        if (!info.device_name.empty()) {
+          info.use_packed_u32 = true;
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  if (!tryResolve(ref_sym + "_mdata")) {
+    tryResolve(ref_sym);
+  }
+
+  if (!info.use_packed_u32 && forceFlag) {
+    if (SSTab().IsDeclared(ref_sym)) {
+      if (auto st = dyn_cast<SpannedType>(GetSymbolType(ref_sym))) {
+        if (st->ElementType() == BaseType::U32) {
+          if (ssm.HasDeviceName(InScopeName(ref_sym))) {
+            info.device_name = ssm.DeviceName(InScopeName(ref_sym));
+            info.use_packed_u32 = true;
+          }
+        }
+      }
+    }
+    if (!info.use_packed_u32) {
+      info.device_name = ref_sym;
+      info.use_packed_u32 = true;
+    }
+  }
+
+  return info;
+}
+
+void CuteCodeGen::emitPrepackedU32Snippet(const std::string& metaVar,
+                                            const std::string& deviceArray) {
+  ds << d_indent << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+  ds << d_indent << "  int __sp_m_idx = blockIdx.x * 64 + __sp_row;\n";
+  ds << d_indent << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
+  ds << d_indent << "  uint32_t __sp_u32_val = " << deviceArray
+     << "[__sp_m_idx * 128 + __sp_k_idx];\n";
+  ds << d_indent << "  if ((__sp_tid & 1) == 0) " << metaVar
+     << " = static_cast<uint32_t>(__sp_u32_val & 0xFFFF);\n";
+  ds << d_indent << "  else " << metaVar << " = static_cast<uint32_t>(__sp_u32_val >> 16);\n";
+}
 
 void CuteCodeGen::EmitDebugSpannedRTTI(
     std::ostringstream& os, const std::string& indent, const std::string& sym,
@@ -3586,10 +3647,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         std::string row_stride = ValueSTR(strides.at(0));
         std::string col_stride = ValueSTR(strides.at(1));
         ds << d_indent << meta_ty << " " << sym << " = 0;\n";
+        // Detect host prepacked-u32 metadata and emit device-side indexing
+        // that reads the host-provided prepacked u32 array directly. Fallback
+        // to the existing byte-by-byte assembly when detection fails.
+        // The --use-prepack flag can be used to force this path.
+        std::string ref_sym = op.LoadFrom()->RefSymbol();
+        auto prepackInfo = resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue());
+
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-        ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
-           << ValueSTR(tile_addr) << ");\n";
+        if (!prepackInfo.use_packed_u32)
+          ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)(" << ValueSTR(tile_addr) << ");\n";
         if (fp8_sparse_k64) {
           ds << d_indent
              << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
@@ -3605,6 +3673,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
              << ">(packed) << (8 * byte_idx));\n";
           ds << d_indent << "  }\n";
+        } else if (prepackInfo.use_packed_u32) {
+          emitPrepackedU32Snippet(sym, prepackInfo.device_name);
         } else if (sparse_k32_16bit || sparse_k64_16bit) {
           ds << d_indent
              << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & "
@@ -3800,9 +3870,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
           ds << d_indent << "{\n";
           ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-          ds << d_indent
-             << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2)) << ";\n";
-          ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
+          // Detect host prepacked-u32 metadata for the exec site
+          auto prepackInfo = resolvePrepackedU32Meta(a_sym, use_prepack.GetValue());
+          if (!prepackInfo.use_packed_u32) {
+            ds << d_indent
+               << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2)) << ";\n";
+            ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
+          } else {
+            emitPrepackedU32Snippet(meta_var, prepackInfo.device_name);
+          }
           if (fp8_sparse_k64) {
             ds << d_indent
                << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "

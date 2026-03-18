@@ -362,6 +362,16 @@ private:
   }
   bool ShouldEmitLineDirective(AST::Node& n) const;
   std::string ResolveLineDirectivePath(const location& loc) const;
+
+  struct PrepackedU32Info {
+    std::string device_name;
+    bool use_packed_u32 = false;
+  };
+
+  PrepackedU32Info resolvePrepackedU32Meta(const std::string& ref_sym,
+                                            bool forceFlag);
+  void emitPrepackedU32Snippet(const std::string& metaVar,
+                                const std::string& deviceArray);
   static std::string EscapeLineDirectivePath(const std::string& path);
   void EmitLineDirective(AST::Node& n);
   void ResetLineDirectiveState();
