@@ -400,11 +400,27 @@ void AssertSite::HoistAssertions() {
     const auto& all = assessor.GetAssertions();
     for (const auto& ae : log) {
       ++stats.total;
+      // Per-usage-type total
+      switch (ae.usage_type) {
+      case UsageType::UnClassified:       ++stats.unclassified_total; break;
+      case UsageType::ShapeCompatibility: ++stats.shape_compat_total; break;
+      case UsageType::ElementAccess:      ++stats.elem_access_total; break;
+      case UsageType::LoopBound:          ++stats.loop_bound_total; break;
+      case UsageType::HardwareConstraint: ++stats.hw_constraint_total; break;
+      }
       switch (ae.outcome) {
       case AssessOutcome::STATIC_TRUE: ++stats.static_true; break;
       case AssessOutcome::STATIC_FALSE: ++stats.static_false; break;
       case AssessOutcome::RUNTIME: {
         ++stats.runtime_total;
+        // Per-usage-type runtime
+        switch (ae.usage_type) {
+        case UsageType::UnClassified:       ++stats.unclassified_runtime; break;
+        case UsageType::ShapeCompatibility: ++stats.shape_compat_runtime; break;
+        case UsageType::ElementAccess:      ++stats.elem_access_runtime; break;
+        case UsageType::LoopBound:          ++stats.loop_bound_runtime; break;
+        case UsageType::HardwareConstraint: ++stats.hw_constraint_runtime; break;
+        }
         if (ae.assertion_idx < all.size()) {
           const auto& ar = all[ae.assertion_idx];
           switch (ar.cost) {

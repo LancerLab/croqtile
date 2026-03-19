@@ -3,6 +3,7 @@
 
 #include "symvals.hpp"
 #include "valno.hpp"
+#include "assess.hpp"
 
 namespace Choreo {
 
@@ -361,6 +362,8 @@ private:
     return {result.size(), result};
   }
   const Shape GenShape(const NumTy& v) { return GenShape(vn.SignNum(v)); };
+  bool StaticFail(bool = true, UsageType = UsageType::ShapeCompatibility);
+
 }; // class ShapeInference
 
 } // end namespace Choreo

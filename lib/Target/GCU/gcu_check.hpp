@@ -30,10 +30,11 @@ private:
 
   bool Assess(const ValueItem& pred, const std::string& message,
               const location& l, AST::Node* node,
-              AssessType aty = AssessType::ENTRY) {
+              AssessType aty = AssessType::ENTRY,
+              UsageType uty = UsageType::HardwareConstraint) {
     return FCtx(cur_fname)
         .GetAssessor(*this)
-        .Assess(AssessPolicy::Error, pred, message, aty, l, node)
+        .Assess(AssessPolicy::Error, pred, message, uty, aty, l, node)
         .passed;
   }
 

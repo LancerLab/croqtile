@@ -69,6 +69,7 @@ namespace cute {
 inline const char* CudaDeviceMemory(Storage st) {
   switch (st) {
   case Storage::SHARED: return "__shared__";
+  case Storage::LOCAL: return "";  // local = per-thread stack/register storage
   default: choreo_unreachable("device storage type is not supported.");
   }
   return "";
@@ -5647,6 +5648,7 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
   //   __co__ void foo(f32 [M, N] a, f32 [N, K] b)
   //
   // then a.shape()[1] should be equal to b.shape()[0]
+  auto& stats = CCtx().GetAssessmentStats();
   for (const auto& [_, entries] : ve_entries_map) {
     for (size_t i = 1; i < entries.size(); ++i) {
       auto& entry0 = entries[i - 1];
@@ -5657,6 +5659,11 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
          << " parameter (dim: " << entry0.dim << ") and the "
          << Ordinal(entry1.para_ordinal) << " parameter (dim: " << entry1.dim
          << ") are inconsistent.\");\n";
+      ++stats.total;
+      ++stats.shape_compat_total;
+      ++stats.runtime_total;
+      ++stats.shape_compat_runtime;
+      ++stats.runtime_low;
     }
   }
 

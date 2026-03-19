@@ -346,6 +346,18 @@ struct AssessmentStats {
   size_t runtime_high = 0;     // runtime assertions with high estimated cost
   size_t runtime_enabled = 0;  // runtime assertions enabled for emission
   size_t runtime_disabled = 0; // runtime assertions suppressed by cost filter
+  // Per-usage-type assessment counts (total evaluated, including static)
+  size_t unclassified_total = 0;     // UsageType::ShapeCompatibility
+  size_t shape_compat_total = 0;     // UsageType::ShapeCompatibility
+  size_t elem_access_total = 0;      // UsageType::ElementAccess
+  size_t loop_bound_total = 0;       // UsageType::LoopBound
+  size_t hw_constraint_total = 0;    // UsageType::HardwareConstraint
+  // Per-usage-type runtime assertion counts
+  size_t unclassified_runtime = 0;
+  size_t shape_compat_runtime = 0;
+  size_t elem_access_runtime = 0;
+  size_t loop_bound_runtime = 0;
+  size_t hw_constraint_runtime = 0;
 };
 
 class SymbolTable;

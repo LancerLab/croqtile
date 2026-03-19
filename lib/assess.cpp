@@ -55,23 +55,45 @@ inline const std::string STR(const AssessOutcome& o) {
   }
   return "?";
 }
+
+inline const std::string STR(const UsageType& ut) {
+  switch (ut) {
+  case UsageType::UnClassified:       return "unclassified";
+  case UsageType::ShapeCompatibility: return "shape-compat";
+  case UsageType::ElementAccess:      return "elem-access";
+  case UsageType::LoopBound:          return "loop-bound";
+  case UsageType::HardwareConstraint: return "hw-constraint";
+  }
+  choreo_unreachable("unsupported usage type.");
+  return "";
+}
 } // namespace Choreo
 
 void Assessor::LogAssessment(const std::string& msg, const location& l,
-                             AssessOutcome outcome, size_t assertion_idx) {
-  assessment_log.push_back({msg, l, outcome, assertion_idx});
+                             AssessOutcome outcome, UsageType uty,
+                             size_t assertion_idx) {
+  assessment_log.push_back({msg, l, outcome, uty, assertion_idx});
 }
 
 void Assessor::AddAssertion(const ptr<sbe::SymbolicExpression>& ar,
                             const location& l, const std::string& s,
-                            AssessType aty, AST::Node* n, AST::Node* en) {
+                            AssessType aty, UsageType uty,
+                            AST::Node* n, AST::Node* en) {
   if (DebugOn())
     dbgs() << " +- runtime assertion: " << sbe::PSTR(ar)
-           << ", type: " << STR(aty) << "\n";
+           << ", type: " << STR(aty) << ", usage: " << STR(uty) << "\n";
 
   assert(IsComputable(ar));
-  assertions.push_back(
-      {ar, aty, l, s, n, en, AssertionEmitPosition::AFTER_NODE});
+  Assertion a;
+  a.expr = ar;
+  a.type = aty;
+  a.loc = l;
+  a.message = s;
+  a.node = n;
+  a.emit_node = en;
+  a.emit_position = AssertionEmitPosition::AFTER_NODE;
+  a.usage_type = uty;
+  assertions.push_back(a);
 }
 
 bool Assessor::DebugOn() const {
@@ -81,11 +103,13 @@ bool Assessor::DebugOn() const {
 AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
                               const ValueItem& lhs, const ValueItem& rhs,
                               const std::string& error_message,
-                              const std::string& warn_message, AssessType aty,
-                              const location& l, AST::Node* node) {
+                              const std::string& warn_message, UsageType uty,
+                              AssessType aty, const location& l,
+                              AST::Node* node) {
   if (DebugOn())
     dbgs() << "[Assess] relation: " << STR(lhs) << STR(rel) << STR(rhs)
-           << ", type: " << STR(aty) << ", policy: " << STR(ap)
+           << ", type: " << STR(aty) << ", usage: " << STR(uty)
+           << ", policy: " << STR(ap)
            << ", node: " << PSTR(node) << "\n";
 
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
@@ -99,15 +123,15 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
       case AssessPolicy::Error:
       case AssessPolicy::ErrWarn:
         visitor->Error1(l, error_message);
-        LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE);
+        LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty);
         return {false, false, false};
       case AssessPolicy::Warn:
         visitor->Warning(l, warning_msg);
-        LogAssessment(warning_msg, l, AssessOutcome::STATIC_FALSE);
+        LogAssessment(warning_msg, l, AssessOutcome::STATIC_FALSE, uty);
         return {true, true, false};
       }
     }
-    LogAssessment(error_message, l, AssessOutcome::STATIC_TRUE);
+    LogAssessment(error_message, l, AssessOutcome::STATIC_TRUE, uty);
     return {true, false, false};
   }
 
@@ -125,7 +149,7 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
   case AssessPolicy::Error:
     if (strict_fail) {
       visitor->Error1(l, error_message);
-      LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE);
+      LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty);
       return {false, false, false};
     }
     break;
@@ -136,37 +160,41 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
     // or definitely-safe result is STATIC_TRUE.
     LogAssessment(error_message, l,
                   strict_fail ? AssessOutcome::STATIC_FALSE
-                              : AssessOutcome::STATIC_TRUE);
+                              : AssessOutcome::STATIC_TRUE,
+                  uty);
     return {true, strict_fail || may_fail, false};
   case AssessPolicy::ErrWarn:
     if (strict_fail) {
       visitor->Error1(l, error_message);
-      LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE);
+      LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty);
       return {false, false, false};
     }
     if (may_fail) visitor->Warning(l, warning_msg);
     break;
   }
 
-  LogAssessment(error_message, l, AssessOutcome::RUNTIME, assertions.size());
-  AddAssertion(pred, l, error_message, aty, node);
+  LogAssessment(error_message, l, AssessOutcome::RUNTIME, uty, assertions.size());
+  AddAssertion(pred, l, error_message, aty, uty, node);
   return {true, may_fail, true};
 }
 
 AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
                               const ValueItem& lhs, const ValueItem& rhs,
-                              const std::string& message, AssessType aty,
-                              const location& l, AST::Node* node) {
-  return Assess(ap, rel, lhs, rhs, message, message, aty, l, node);
+                              const std::string& message, UsageType uty,
+                              AssessType aty, const location& l,
+                              AST::Node* node) {
+  return Assess(ap, rel, lhs, rhs, message, message, uty, aty, l, node);
 }
 
 AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
-                              const std::string& message, AssessType aty,
-                              const location& l, AST::Node* node,
-                              AST::Node* emit_node, const ValueItem& guard) {
+                              const std::string& message, UsageType uty,
+                              AssessType aty, const location& l,
+                              AST::Node* node, AST::Node* emit_node,
+                              const ValueItem& guard) {
   if (DebugOn())
     dbgs() << "[Assess] " << STR(bo) << ", type: " << STR(aty)
-           << ", policy: " << STR(ap) << ", node: " << PSTR(emit_node)
+           << ", usage: " << STR(uty) << ", policy: " << STR(ap)
+           << ", node: " << PSTR(emit_node)
            << ", node: " << PSTR(emit_node) << "\n";
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
 
@@ -191,24 +219,24 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
       if (IsValidValueItem(norm_guard)) {
         // Statically false but only reachable under a guard; keep as runtime.
         if (ap == AssessPolicy::Warn) return {true, false, false};
-        LogAssessment(message, l, AssessOutcome::RUNTIME, assertions.size());
-        AddAssertion(pred, l, message, aty, node, emit_node);
+        LogAssessment(message, l, AssessOutcome::RUNTIME, uty, assertions.size());
+        AddAssertion(pred, l, message, aty, uty, node, emit_node);
         return {true, false, true};
       }
       if (ap == AssessPolicy::Error)
         visitor->Error1(l, message);
       else
         visitor->Warning(l, message);
-      LogAssessment(message, l, AssessOutcome::STATIC_FALSE);
+      LogAssessment(message, l, AssessOutcome::STATIC_FALSE, uty);
       return {ap == AssessPolicy::Warn, ap == AssessPolicy::Warn, false};
     }
-    LogAssessment(message, l, AssessOutcome::STATIC_TRUE);
+    LogAssessment(message, l, AssessOutcome::STATIC_TRUE, uty);
     return {true, false, false};
   }
 
   if (ap == AssessPolicy::Warn) return {true, false, false};
 
-  LogAssessment(message, l, AssessOutcome::RUNTIME, assertions.size());
-  AddAssertion(pred, l, message, aty, node, emit_node);
+  LogAssessment(message, l, AssessOutcome::RUNTIME, uty, assertions.size());
+  AddAssertion(pred, l, message, aty, uty, node, emit_node);
   return {true, false, true};
 }

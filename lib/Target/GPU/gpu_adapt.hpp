@@ -71,10 +71,11 @@ private:
 
   bool Assess(const ValueItem& pred, const std::string& message,
               const location& l, AST::Node* node,
-              AssessType aty = AssessType::ENTRY) {
+              AssessType aty = AssessType::ENTRY,
+              UsageType uty = UsageType::HardwareConstraint) {
     return FCtx(cur_fname)
         .GetAssessor(*this)
-        .Assess(AssessPolicy::Error, pred, message, aty, l, node)
+        .Assess(AssessPolicy::Error, pred, message, uty, aty, l, node)
         .passed;
   }
 
@@ -245,7 +246,7 @@ public:
                  "* dim3 * dim4 < 4GB.");
     }
 
-    // pad
+    // pad: pad_mid must be zero (CuTe backend hard constraint, always checked)
     if (n.operation == ".pad") {
       auto pc = cast<PadConfig>(n.config);
       for (const auto& v : pc->pad_mid->AllValues())
@@ -253,6 +254,7 @@ public:
           Error1(v->LOC(), "dma.pad with pad_mid is not supported for CuTe "
                            "backend(must set pad_mid to 0).");
     }
+
     if (n.operation == ".pad" && IsLinearCopy()) {
       RankLE5("dma.pad");
       auto pc = cast<PadConfig>(n.config);
