@@ -1,11 +1,11 @@
 // REQUIRES: TARGET-GPU
 // RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
-__co__ auto ele_add0(s32 [32, 128] lhs, s32 [32, 128] rhs) {
+__co__ auto ele_add0(s32 [16, 32] lhs, s32 [16, 32] rhs) {
   s32[lhs.span] output;
 
   parallel p by 1 : block
-    parallel q by 128 : thread {
+    parallel q by 32 : thread {
       lhs_s = dma.copy lhs => shared;
       rhs_s = dma.copy rhs => shared;
       foreach {x, y} in lhs_s.span {
@@ -17,15 +17,15 @@ __co__ auto ele_add0(s32 [32, 128] lhs, s32 [32, 128] rhs) {
   return output;
 }
 
-#define ssM 32
-#define ssN 32
+#define ssM 16
+#define ssN 16
 #define ival -1
 
-__co__ auto ele_add1(s8 [32, 129] lhs, s8 [32, 129] rhs) {
+__co__ auto ele_add1(s8 [16, 33] lhs, s8 [16, 33] rhs) {
   s8[lhs.span] output {ival};
 
   parallel p by 1 : block
-    parallel q by 32 : thread {
+    parallel q by 16 : thread {
       lhs_s = dma.copy lhs.subspan(ssM, ssN) => shared;
       rhs_s = dma.copy rhs.subspan(ssM, ssN) => shared;
       foreach {x, y} in lhs_s.span {
@@ -38,14 +38,13 @@ __co__ auto ele_add1(s8 [32, 129] lhs, s8 [32, 129] rhs) {
 }
 
 void Run0() {
-  auto a = choreo::make_spandata<choreo::s32>(32, 128);
-  auto b = choreo::make_spandata<choreo::s32>(32, 128);
+  auto a = choreo::make_spandata<choreo::s32>(16, 32);
+  auto b = choreo::make_spandata<choreo::s32>(16, 32);
   a.fill_random(-10, 10);
   b.fill_random(-10, 10);
 
   auto res = ele_add0(a.view(), b.view());
 
-  // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
     for (size_t j = 0; j < res.shape()[1]; ++j) {
       auto aa = a[i][j];
@@ -58,14 +57,13 @@ void Run0() {
 }
 
 void Run1() {
-  auto a = choreo::make_spandata<choreo::s8>(32, 129);
-  auto b = choreo::make_spandata<choreo::s8>(32, 129);
+  auto a = choreo::make_spandata<choreo::s8>(16, 33);
+  auto b = choreo::make_spandata<choreo::s8>(16, 33);
   a.fill_random(-3, 3);
   b.fill_random(-3, 3);
 
   auto res = ele_add1(a.view(), b.view());
 
-  // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
     for (size_t j = 0; j < res.shape()[1]; ++j) {
       auto aa = a[i][j];

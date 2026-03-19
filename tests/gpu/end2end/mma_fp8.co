@@ -12,7 +12,7 @@ __co__ auto matmul_e4m3(f8_e4m3 [M, K] lhs, f8_e4m3 [K, N] rhs) {
 
   parallel {m, n} by [M / MMA_M / 4, N / MMA_N ] : block {
     parallel {g0, g1} by [4, 1]: group {
-      mc = mma.fill.f32 0.0;  // c = {0}
+      mc = mma.fill.f32 0.0;
       with k in K / MMA_K {
         fl0 = dma.copy.async lhs => shared;
         fr0 = dma.copy.async rhs => shared;
@@ -25,7 +25,7 @@ __co__ auto matmul_e4m3(f8_e4m3 [M, K] lhs, f8_e4m3 [K, N] rhs) {
           wait fl0, fr0;
           ma = mma.load fl0.chunkat(m#g0, k - 1);
           mb = mma.load fr0.chunkat(k - 1, n#g1);
-          mma.row.col mc, ma, mb;   // row * col : c += a * b;
+          mma.row.col mc, ma, mb;
 
           swap(fl0, fl1);
           swap(fr0, fr1);
@@ -34,7 +34,7 @@ __co__ auto matmul_e4m3(f8_e4m3 [M, K] lhs, f8_e4m3 [K, N] rhs) {
         wait fl0, fr0;
         ma = mma.load fl0.chunkat(m#g0, k(-1));
         mb = mma.load fr0.chunkat(k(-1), n#g1);
-        mma.row.col mc, ma, mb;   // row * col : c += a * b;
+        mma.row.col mc, ma, mb;
       }
       mma.store mc, output.chunkat(m#g0, n#g1);
     }
@@ -50,7 +50,7 @@ __co__ auto matmul_e5m2(f8_e5m2 [M, K] lhs, f8_e5m2 [K, N] rhs) {
 
   parallel {m, n} by [M / MMA_M / 4, N / MMA_N ] : block {
     parallel {g0, g1} by [4, 1]: group {
-      mc = mma.fill.f32 0.0;  // c = {0}
+      mc = mma.fill.f32 0.0;
       with k in K / MMA_K {
         fl0 = dma.copy.async lhs => shared;
         fr0 = dma.copy.async rhs => shared;
@@ -63,7 +63,7 @@ __co__ auto matmul_e5m2(f8_e5m2 [M, K] lhs, f8_e5m2 [K, N] rhs) {
           wait fl0, fr0;
           ma = mma.load fl0.chunkat(m#g0, k - 1);
           mb = mma.load fr0.chunkat(k - 1, n#g1);
-          mma.row.col mc, ma, mb;   // row * col : c += a * b;
+          mma.row.col mc, ma, mb;
 
           swap(fl0, fl1);
           swap(fr0, fr1);
@@ -72,7 +72,7 @@ __co__ auto matmul_e5m2(f8_e5m2 [M, K] lhs, f8_e5m2 [K, N] rhs) {
         wait fl0, fr0;
         ma = mma.load fl0.chunkat(m#g0, k(-1));
         mb = mma.load fr0.chunkat(k(-1), n#g1);
-        mma.row.col mc, ma, mb;   // row * col : c += a * b;
+        mma.row.col mc, ma, mb;
       }
       mma.store mc, output.chunkat(m#g0, n#g1);
     }

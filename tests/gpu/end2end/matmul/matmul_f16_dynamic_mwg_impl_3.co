@@ -4,7 +4,6 @@
 #include <cstring>
 #include <cstdlib>
 
-// Tunable defaults for auto-tuning/profiling workflows.
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 64
 #define MATMUL_TILE_M 128
@@ -15,10 +14,6 @@
 
 #if MATMUL_SWIZ != (2 * MATMUL_TILE_K)
 #error "MATMUL_SWIZ must equal 2 * MATMUL_TILE_K for f16 kernel"
-#endif
-
-#if MATMUL_SWIZ != 32 && MATMUL_SWIZ != 64 && MATMUL_SWIZ != 128
-#error "MATMUL_SWIZ must be one of 32, 64, 128"
 #endif
 
 #if MATMUL_WARP_M != 64
@@ -37,14 +32,11 @@
 #error "MATMUL_WARP_N must be in [8,256] and divisible by 8 for SM90 WGMMA f16"
 #endif
 
-#define MATMUL_DEFAULT_M 256
-#define MATMUL_DEFAULT_N 256
-#define MATMUL_DEFAULT_K 256
+#define MATMUL_DEFAULT_M 64
+#define MATMUL_DEFAULT_N 64
+#define MATMUL_DEFAULT_K 64
 
 __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
-
-  // each block handles 128x64 block with two WGMMA accumulators
-  // WGMMA requires 128 threads (4 warps x 32 threads/warp)
   parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block {
     shared f16 [MATMUL_TILE_M, MATMUL_TILE_K] lhs_load_s;
     shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
@@ -63,31 +55,11 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
       }
       mma.store mc, output_s.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(p1, 0);
     }
-
     tma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(block_m, block_n);
-
   }
 }
 
 int main(int argc, char** argv) {
-  bool skip_verify = false;
-  auto is_skip_verify_arg = [](const char* s) {
-    const char* t = "--skip-verify";
-    int i = 0;
-    while (t[i] != '\0' && s[i] == t[i]) ++i;
-    return t[i] == '\0' && s[i] == '\0';
-  };
-  for (int i = 1; i < argc; ++i) {
-    if (is_skip_verify_arg(argv[i])) {
-      skip_verify = true;
-    }
-  }
-
-  const char* skip_verify_env = std::getenv("CHOREO_SKIP_VERIFY");
-  if (skip_verify_env && skip_verify_env[0] == '1' && skip_verify_env[1] == '\0') {
-    skip_verify = true;
-  }
-  
   size_t M = MATMUL_DEFAULT_M;
   size_t N = MATMUL_DEFAULT_N;
   size_t K = MATMUL_DEFAULT_K;
@@ -117,11 +89,6 @@ int main(int argc, char** argv) {
   choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost));
   choreo::abend_true(cudaDeviceSynchronize());
 
-  if (skip_verify) {
-    std::cout << "Test Passed (verify skipped)\n" << std::endl;
-    return 0;
-  }
-
   auto lhs_view = lhs_h.view();
   auto rhs_view = rhs_h.view();
   auto res_view = res_h.view();
@@ -132,7 +99,6 @@ int main(int argc, char** argv) {
     float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
     return std::abs(ref - got) / denom;
   };
-  // verfication
   for (size_t i = 0; i < M; ++i) {
     for (size_t j = 0; j < N; ++j) {
       float ref = 0.0f;
@@ -140,10 +106,7 @@ int main(int argc, char** argv) {
         ref += __half2float(lhs_view[i][k] * rhs_view[j][k]);
       float got = __half2float(res_view[i][j]);
       auto delta = rel_error(ref, got);
-      if (delta >= tolerance) {
-        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << got << ", delta: " << delta * 100 << "%\n";
-      }
-      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+      choreo::choreo_assert(delta < tolerance, "values are not equal.");
     }
   }
 

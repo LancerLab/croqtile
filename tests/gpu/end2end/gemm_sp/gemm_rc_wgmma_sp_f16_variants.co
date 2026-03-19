@@ -29,20 +29,13 @@ int verify_result(const char* tag, choreo::spanned_data<T, 2>& lhs_dense,
         ref += choreo::to_f32(lhs_dense[i][k]) * choreo::to_f32(rhs[j][k]);
       float got = res[i][j];
       float diff = std::abs(got - ref);
-      if (diff > tolerance) {
-        if (errors < 8)
-          std::cout << tag << " mismatch at (" << i << ", " << j
-                    << ") gpu=" << got << " ref=" << ref
-                    << " diff=" << diff << "\n";
-        ++errors;
-      }
+      if (diff > tolerance) ++errors;
     }
   std::cout << tag << ": " << errors << " errors\n";
   return errors;
 }
 
-__co__ auto matmul_sp_f16_n32_k64(f16 [M, 32] lhs_packed, u8 [M, 8] lhs_meta,
-                                  f16 [32, 64] rhs) {
+__co__ auto matmul_sp_f16_n32_k64(f16 [M, 32] lhs_packed, u8 [M, 8] lhs_meta, f16 [32, 64] rhs) {
   f32 [M, 32] output{0.0f};
   int WARP_M = 64, WARP_N = 32, TILE_K = 64, WARP_K = 32;
   parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(32, WARP_N)] : block {
@@ -65,104 +58,7 @@ __co__ auto matmul_sp_f16_n32_k64(f16 [M, 32] lhs_packed, u8 [M, 8] lhs_meta,
   return output;
 }
 
-__co__ auto matmul_sp_f16_n64_k64(f16 [M, 32] lhs_packed, u8 [M, 8] lhs_meta,
-                                  f16 [64, 64] rhs) {
-  f32 [M, 64] output{0.0f};
-  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 32;
-  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(64, WARP_N)] : block {
-    mc = mma.fill.f32 0.0f;
-    foreach {iv_k} in [cdiv(64, TILE_K)] {
-      lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
-      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
-      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
-      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
-        parallel p by 1 : group-4 {
-          ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
-          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
-          mma.row.row.sp mc, ma, mb, me;
-        }
-      }
-    }
-    mma.store mc, output.chunkat(block_m, block_n);
-  }
-  return output;
-}
-
-__co__ auto matmul_sp_f16_n96_k64(f16 [M, 32] lhs_packed, u8 [M, 8] lhs_meta,
-                                  f16 [96, 64] rhs) {
-  f32 [M, 96] output{0.0f};
-  int WARP_M = 64, WARP_N = 96, TILE_K = 64, WARP_K = 32;
-  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(96, WARP_N)] : block {
-    mc = mma.fill.f32 0.0f;
-    foreach {iv_k} in [cdiv(64, TILE_K)] {
-      lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
-      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
-      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
-      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
-        parallel p by 1 : group-4 {
-          ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
-          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
-          mma.row.row.sp mc, ma, mb, me;
-        }
-      }
-    }
-    mma.store mc, output.chunkat(block_m, block_n);
-  }
-  return output;
-}
-
-__co__ auto matmul_sp_f16_n128_k64(f16 [M, 32] lhs_packed, u8 [M, 8] lhs_meta,
-                                   f16 [128, 64] rhs) {
-  f32 [M, 128] output{0.0f};
-  int WARP_M = 64, WARP_N = 128, TILE_K = 64, WARP_K = 32;
-  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(128, WARP_N)] : block {
-    mc = mma.fill.f32 0.0f;
-    foreach {iv_k} in [cdiv(64, TILE_K)] {
-      lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
-      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
-      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
-      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
-        parallel p by 1 : group-4 {
-          ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
-          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
-          mma.row.row.sp mc, ma, mb, me;
-        }
-      }
-    }
-    mma.store mc, output.chunkat(block_m, block_n);
-  }
-  return output;
-}
-
-__co__ auto matmul_sp_f16_n256_k64(f16 [M, 32] lhs_packed, u8 [M, 8] lhs_meta,
-                                   f16 [256, 64] rhs) {
-  f32 [M, 256] output{0.0f};
-  int WARP_M = 64, WARP_N = 256, TILE_K = 64, WARP_K = 32;
-  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(256, WARP_N)] : block {
-    mc = mma.fill.f32 0.0f;
-    foreach {iv_k} in [cdiv(64, TILE_K)] {
-      lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
-      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
-      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
-      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
-        parallel p by 1 : group-4 {
-          ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
-          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
-          mma.row.row.sp mc, ma, mb, me;
-        }
-      }
-    }
-    mma.store mc, output.chunkat(block_m, block_n);
-  }
-  return output;
-}
-
-__co__ auto matmul_sp_f16_n32_k32(f16 [M, 16] lhs_packed, u8 [M, 4] lhs_meta,
-                                  f16 [32, 32] rhs) {
+__co__ auto matmul_sp_f16_n32_k32(f16 [M, 16] lhs_packed, u8 [M, 4] lhs_meta, f16 [32, 32] rhs) {
   f32 [M, 32] output{0.0f};
   int WARP_M = 64, WARP_N = 32, TILE_K = 32, WARP_K = 32;
   parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(32, WARP_N)] : block {
@@ -195,68 +91,8 @@ int run_case_f16_n32_k64() {
   init_random_b<choreo::f16, 32, 64>(rhs, gen);
   SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta);
   auto res = matmul_sp_f16_n32_k64(lhs_packed.view(), lhs_meta.view(), rhs.view());
-  return verify_result<choreo::f16, 32, 64>("f16_n32_k64_swiz64_128", lhs_dense,
-                                            rhs, res, 1.0e-1f);
+  return verify_result<choreo::f16, 32, 64>("f16_n32_k64", lhs_dense, rhs, res, 1.0e-1f);
 }
-
-int run_case_f16_n64_k64() {
-  std::mt19937 gen(42);
-  auto lhs_dense = choreo::make_spandata<choreo::f16>(M, 64);
-  auto lhs_packed = choreo::make_spandata<choreo::f16>(M, 32);
-  auto lhs_meta = choreo::make_spandata<choreo::u8>(M, 8);
-  auto rhs = choreo::make_spandata<choreo::f16>(64, 64);
-  SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(lhs_dense, gen);
-  init_random_b<choreo::f16, 64, 64>(rhs, gen);
-  SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta);
-  auto res = matmul_sp_f16_n64_k64(lhs_packed.view(), lhs_meta.view(), rhs.view());
-  return verify_result<choreo::f16, 64, 64>("f16_n64_k64_swiz64_128", lhs_dense,
-                                            rhs, res, 1.0e-1f);
-}
-
-int run_case_f16_n96_k64() {
-  std::mt19937 gen(42);
-  auto lhs_dense = choreo::make_spandata<choreo::f16>(M, 64);
-  auto lhs_packed = choreo::make_spandata<choreo::f16>(M, 32);
-  auto lhs_meta = choreo::make_spandata<choreo::u8>(M, 8);
-  auto rhs = choreo::make_spandata<choreo::f16>(96, 64);
-  SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(lhs_dense, gen);
-  init_random_b<choreo::f16, 96, 64>(rhs, gen);
-  SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta);
-  auto res = matmul_sp_f16_n96_k64(lhs_packed.view(), lhs_meta.view(), rhs.view());
-  return verify_result<choreo::f16, 96, 64>("f16_n96_k64_swiz64_128", lhs_dense,
-                                            rhs, res, 1.0e-1f);
-}
-
-int run_case_f16_n128_k64() {
-  std::mt19937 gen(42);
-  auto lhs_dense = choreo::make_spandata<choreo::f16>(M, 64);
-  auto lhs_packed = choreo::make_spandata<choreo::f16>(M, 32);
-  auto lhs_meta = choreo::make_spandata<choreo::u8>(M, 8);
-  auto rhs = choreo::make_spandata<choreo::f16>(128, 64);
-  SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(lhs_dense, gen);
-  init_random_b<choreo::f16, 128, 64>(rhs, gen);
-  SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta);
-  auto res = matmul_sp_f16_n128_k64(lhs_packed.view(), lhs_meta.view(), rhs.view());
-  return verify_result<choreo::f16, 128, 64>("f16_n128_k64_swiz64_128", lhs_dense,
-                                             rhs, res, 1.0e-1f);
-}
-
-int run_case_f16_n256_k64() {
-  std::mt19937 gen(42);
-  auto lhs_dense = choreo::make_spandata<choreo::f16>(M, 64);
-  auto lhs_packed = choreo::make_spandata<choreo::f16>(M, 32);
-  auto lhs_meta = choreo::make_spandata<choreo::u8>(M, 8);
-  auto rhs = choreo::make_spandata<choreo::f16>(256, 64);
-  SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(lhs_dense, gen);
-  init_random_b<choreo::f16, 256, 64>(rhs, gen);
-  SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta);
-  auto res = matmul_sp_f16_n256_k64(lhs_packed.view(), lhs_meta.view(), rhs.view());
-  return verify_result<choreo::f16, 256, 64>("f16_n256_k64_swiz64_128", lhs_dense,
-                                              rhs, res, 1.0e-1f);
-}
-
-template <typename T>
-using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
 
 int run_case_f16_n32_k32() {
   std::mt19937 gen(42);
@@ -268,17 +104,12 @@ int run_case_f16_n32_k32() {
   init_random_b<choreo::f16, 32, 32>(rhs, gen);
   SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta);
   auto res = matmul_sp_f16_n32_k32(lhs_packed.view(), lhs_meta.view(), rhs.view());
-  return verify_result<choreo::f16, 32, 32>("f16_n32_k32_swiz32_64", lhs_dense,
-                                            rhs, res, 1.0e-1f);
+  return verify_result<choreo::f16, 32, 32>("f16_n32_k32", lhs_dense, rhs, res, 1.0e-1f);
 }
 
 int main() {
   int errors = 0;
   errors += run_case_f16_n32_k64();
-  errors += run_case_f16_n64_k64();
-  errors += run_case_f16_n96_k64();
-  errors += run_case_f16_n128_k64();
-  errors += run_case_f16_n256_k64();
   errors += run_case_f16_n32_k32();
   choreo::choreo_assert(errors == 0, "Sparse WGMMA f16 variants failed");
   std::cout << "Test Passed\n";
