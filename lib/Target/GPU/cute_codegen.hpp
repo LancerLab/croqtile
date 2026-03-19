@@ -199,7 +199,7 @@ private:
   std::string pending_mbarrier_full_event_name;
   bool in_producer = false; // hack
   bool in_consumer = false; // hack
-  struct HoistedScaleAccumInfo {
+  struct BaseScaleAccumInfo {
     std::string frag_sym;
     std::string frag_expr;
     std::string scale_frag_name;
@@ -213,19 +213,8 @@ private:
     std::string dim_n;
     size_t reg_num_d = 0;
   };
-  struct ExplicitScaleAccumInfo {
-    std::string frag_sym;
-    std::string frag_expr;
-    std::string scale_frag_name;
-    std::string scale_a_name;
-    std::string scale_b_name;
-    std::string scale_a_expr;
-    std::string scale_b_expr;
-    std::string scale_a_ld;
-    std::string acc_ty;
-    std::string scale_frag_ty;
-    std::string dim_n;
-    size_t reg_num_d = 0;
+  struct HoistedScaleAccumInfo : BaseScaleAccumInfo {};
+  struct ExplicitScaleAccumInfo : BaseScaleAccumInfo {
     bool consumed = false;
   };
   std::vector<std::vector<std::string>> hoisted_scale_decl_scopes;
