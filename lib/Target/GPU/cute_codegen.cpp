@@ -2,7 +2,6 @@
 #include "codegen_utils.hpp"
 
 #include <algorithm>
-#include <filesystem>
 #include <iostream>
 #include <numeric>
 #include <sstream>
@@ -86,36 +85,6 @@ inline std::string CudaParamStorage(Storage st) {
 inline const std::string GetCopyAtomName(bool is_tma, size_t idx) {
   std::string res = "choreo_copy_atom";
   return res + (is_tma ? "_t_" : "_d_") + std::to_string(idx);
-}
-
-inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
-                               const std::string suffix, const ValueList& dims,
-                               std::vector<size_t>& indices, size_t depth = 0) {
-  if (depth == dims.size()) {
-    os << prefix;
-    for (size_t i : indices) os << "[" << i << "]";
-    os << suffix;
-    return;
-  }
-
-  for (int i = 0; i < *VIInt(dims[depth]); ++i) {
-    indices[depth] = i;
-    PrintSubscriptions(os, prefix, suffix, dims, indices, depth + 1);
-  }
-}
-
-std::string GetAbsPath(const std::filesystem::path& cwd,
-                       const std::string& relative_path) {
-  std::filesystem::path rel_path(relative_path);
-  std::filesystem::path abs_path = cwd / rel_path;
-  abs_path = std::filesystem::weakly_canonical(abs_path).parent_path();
-  return abs_path.string();
-}
-
-void GenerateSubscriptions(std::ostream& os, const std::string prefix,
-                           const std::string suffix, const ValueList& dims) {
-  std::vector<size_t> indices(dims.size());
-  PrintSubscriptions(os, prefix, suffix, dims, indices);
 }
 
 const std::string TMAMapDataType(BaseType bt) {

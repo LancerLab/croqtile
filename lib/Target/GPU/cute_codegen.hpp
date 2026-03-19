@@ -10,6 +10,7 @@
 
 #include "ast.hpp"
 #include "codegen.hpp"
+#include "codegen_utils.hpp"
 #include "operator_info.hpp"
 #include "types.hpp"
 
@@ -72,129 +73,7 @@ inline const char* NameBaseType(BaseType bt) {
   return "";
 }
 
-// map choreo symbols to the generated host, device names
-class ScopedSymbolMap {
-  using SymbolMap = std::unordered_map<std::string, std::string>;
-  std::vector<SymbolMap> host_map;
-  std::vector<SymbolMap> device_map;
-  bool debug;
-
-public:
-  ScopedSymbolMap(bool d = false) : debug(d) {}
-  void EnterScope() {
-    host_map.push_back({});
-    device_map.push_back({});
-  }
-  void LeaveScope() {
-    host_map.pop_back();
-    device_map.pop_back();
-  }
-  void MapHostSymbol(const std::string& csym, const std::string& name) {
-    assert(!host_map.back().count(csym) && "symbol existed");
-    if (debug)
-      dbgs() << "[Host] Map symbol: " << csym << " -> " << name << "\n";
-    host_map.back()[csym] = name;
-  }
-  void MapDeviceSymbol(const std::string& csym, const std::string& name) {
-    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    assert(!device_map.back().count(csym) && "symbol existed");
-    if (debug)
-      dbgs() << "[Device] Map symbol: " << csym << " -> " << name << "\n";
-    device_map.back()[csym] = name;
-  }
-  void MapDeviceSymbolIfNotExist(const std::string& csym,
-                                 const std::string& name) {
-    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    if (!device_map.back().count(csym)) {
-      if (debug)
-        dbgs() << "[Device] Map symbol: " << csym << " -> " << name << "\n";
-      MapDeviceSymbol(csym, name);
-    }
-  }
-
-  void DumpHostMap() {
-    dbgs()
-        << "==================== Host Map Information ====================\n";
-    // Print a formatted table with columns for symbol and buffer name
-    dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Host Name" << "\n";
-    dbgs()
-        << "--------------------------------------------------------------\n";
-
-    for (auto& table : host_map) {
-      if (table.empty()) continue;
-      for (const auto& entry : table) {
-        dbgs() << std::setw(30) << std::left << entry.first // Symbol
-               << " -> " << entry.second << "\n";           // Buffer Name
-      }
-    }
-
-    dbgs() << "================================================================"
-           << "\n";
-  }
-  void DumpDeviceMap() {
-    dbgs()
-        << "==================== Device Map Information ====================\n";
-    // Print a formatted table with columns for symbol and buffer name
-    dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Device Name" << "\n";
-    dbgs()
-        << "----------------------------------------------------------------\n";
-
-    for (auto& table : device_map) {
-      if (table.empty()) continue;
-
-      for (const auto& entry : table) {
-        dbgs() << std::setw(30) << std::left << entry.first // Symbol
-               << " -> " << entry.second << "\n";           // Buffer Name
-      }
-    }
-
-    dbgs() << "================================================================"
-           << "\n";
-  }
-
-  // only for specific purpose
-  void RemapDeviceSymbol(const std::string& csym, const std::string& name) {
-    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    device_map.back()[csym] = name;
-  }
-
-  void RemapHostSymbol(const std::string& csym, const std::string& name) {
-    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    host_map.back()[csym] = name;
-  }
-
-  const std::string HostName(const std::string& csym) const {
-    for (auto mapit = host_map.rbegin(); mapit != host_map.rend(); ++mapit)
-      if (mapit->count(csym)) return (*mapit).at(csym);
-    return csym;
-  }
-
-  bool HasHostName(const std::string& csym) const {
-    for (auto mapit = host_map.rbegin(); mapit != host_map.rend(); ++mapit)
-      if (mapit->count(csym)) return true;
-    return false;
-  }
-
-  const std::string DeviceName(const std::string& csym) const {
-    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
-      if (mapit->count(csym)) return (*mapit).at(csym);
-    return csym;
-  }
-
-  bool HasDeviceName(const std::string& csym) const {
-    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
-      if (mapit->count(csym)) return true;
-    return false;
-  }
-
-  const std::string DeviceNameOrNull(const std::string& csym) const {
-    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
-      if (mapit->count(csym)) return (*mapit).at(csym);
-    return "";
-  }
-};
+using ScopedSymbolMap = ::Choreo::ScopedSymbolMap;
 
 struct CuteCodeGen : public CodeGenerator {
 private:

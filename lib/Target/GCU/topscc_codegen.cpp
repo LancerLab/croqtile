@@ -2,7 +2,6 @@
 #include "codegen_utils.hpp"
 
 #include <cctype>
-#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <system_error>
@@ -75,36 +74,6 @@ inline std::string TopsParamStorage(Storage st) {
 inline const std::string GetDTEContextName() {
   static unsigned i = 0;
   return "choreo_topscc_ctx" + std::to_string(i++);
-}
-
-inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
-                               const std::string suffix, const ValueList& dims,
-                               std::vector<size_t>& indices, size_t depth = 0) {
-  if (depth == dims.size()) {
-    os << prefix;
-    for (size_t i : indices) os << "[" << i << "]";
-    os << suffix;
-    return;
-  }
-
-  for (int i = 0; i < *VIInt(dims[depth]); ++i) {
-    indices[depth] = i;
-    PrintSubscriptions(os, prefix, suffix, dims, indices, depth + 1);
-  }
-}
-
-std::string GetAbsPath(const std::filesystem::path& cwd,
-                       const std::string& relative_path) {
-  std::filesystem::path rel_path(relative_path);
-  std::filesystem::path abs_path = cwd / rel_path;
-  abs_path = std::filesystem::weakly_canonical(abs_path).parent_path();
-  return abs_path.string();
-}
-
-void GenerateSubscriptions(std::ostream& os, const std::string prefix,
-                           const std::string suffix, const ValueList& dims) {
-  std::vector<size_t> indices(dims.size());
-  PrintSubscriptions(os, prefix, suffix, dims, indices);
 }
 
 } // namespace
