@@ -1326,6 +1326,19 @@ void CuteCodeGen::emitPrepackedU32TileLoadSnippet(
   ds << d_indent << "  }\n";
 }
 
+void CuteCodeGen::emitFp8PrepackedU32TileLoadSnippet(
+    const std::string& metaVar, const std::string& tileAddr,
+    const std::string& rowStride, const std::string& colStride) {
+  ds << d_indent << "  auto* __sp_meta_u32_ptr = (uint32_t*)(" << tileAddr
+     << ");\n";
+  ds << d_indent
+     << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << 3) + "
+        "((__sp_tid >> 5) << 4);\n";
+  ds << d_indent << "  int __sp_u32_col = (__sp_tid >> 1) & 1;\n";
+  ds << d_indent << "  " << metaVar << " = __sp_meta_u32_ptr[__sp_row * ("
+     << rowStride << ") + __sp_u32_col * (" << colStride << ")];\n";
+}
+
 void CuteCodeGen::EmitDebugSpannedRTTI(
     std::ostringstream& os, const std::string& indent, const std::string& sym,
     const ptr<SpannedType>& sty, const std::string& data_expr,
@@ -3706,20 +3719,25 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
              << ValueSTR(tile_addr) << ");\n";
         if (fp8_sparse_k64) {
-          ds << d_indent
-             << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
-                "3) + ((__sp_tid >> 5) << 4);\n";
-          ds << d_indent
-             << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
-          ds << d_indent << "  #pragma unroll\n";
-          ds << d_indent
-             << "  for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {\n";
-          ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
-             << row_stride << ") + (__sp_byte_col + byte_idx) * (" << col_stride
-             << ")];\n";
-          ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
-             << ">(packed) << (8 * byte_idx));\n";
-          ds << d_indent << "  }\n";
+          if (prepackInfo.use_packed_u32) {
+            emitFp8PrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
+                                               row_stride, col_stride);
+          } else {
+            ds << d_indent
+               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
+                  "3) + ((__sp_tid >> 5) << 4);\n";
+            ds << d_indent
+               << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
+            ds << d_indent << "  #pragma unroll\n";
+            ds << d_indent
+               << "  for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {\n";
+            ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
+               << row_stride << ") + (__sp_byte_col + byte_idx) * ("
+               << col_stride << ")];\n";
+            ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
+               << ">(packed) << (8 * byte_idx));\n";
+            ds << d_indent << "  }\n";
+          }
         } else if (prepackInfo.use_packed_u32) {
           if (prepack_single_col)
             emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr), row_stride);
