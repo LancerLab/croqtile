@@ -27,12 +27,12 @@
 #error "MATMUL_TILE_M must equal MATMUL_WARP_M"
 #endif
 
-#define MATMUL_DEFAULT_M 2048
-#define MATMUL_DEFAULT_N 2048
+#define MATMUL_DEFAULT_M 384
+#define MATMUL_DEFAULT_N 512
 #define MATMUL_DEFAULT_K 2048
 
 
-#define EXPERTS 4
+#define EXPERTS 256
 __co__ void moe_gemm_kernel_f16(global f8_e4m3 [M, K] lhs,
                    global f32 [M, DIV_BLK_K] scale_a,
                    global f8_e4m3 [EXPERT_N, K] rhs,
@@ -61,13 +61,13 @@ __co__ void moe_gemm_kernel_f16(global f8_e4m3 [M, K] lhs,
         foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
           ma = mma.load.swiz<128> sA.chunkat(_, iv_warp);
           mb = mma.load.swiz<128> sB.chunkat(_, iv_warp);
-          sc_a = scale_a.view(MATMUL_WARP_M, 1).from(seg_start, 0).subspan(MATMUL_WARP_M, 1).at(iv_m, iv_k);
+          sc_a = scale_a.view(MATMUL_WARP_M, 1).from(seg_start + iv_m * MATMUL_WARP_M, iv_k);
           sc_b = scale_b.at(eid # block_n, iv_k);
           mma.row.row.scale mc, ma, mb, sc_a, sc_b;
         }
       }
 
-      mma.store mc, output.view(MATMUL_WARP_M, MATMUL_WARP_N).from(seg_start, 0).subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(iv_m, block_n);
+      mma.store mc, output.view(TILE_M, MATMUL_WARP_N).from(seg_start + iv_m * MATMUL_WARP_M, block_n * MATMUL_WARP_N);    
     }
   }
 }

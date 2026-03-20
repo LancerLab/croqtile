@@ -414,6 +414,10 @@ private:
       false;                     // Do not emit cuda runtime env check.
   bool use_warpspec = false;     // Enable warp-specialized synchronization for
                                  // shared event/full-empty pipelines.
+    bool single_thread_producer =
+      true;                   // In warpspec mode, use a single producer thread
+                  // for producer inthreads; otherwise guard
+                  // producer TMA/event ops individually.
   std::string debug_file_dir;    // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
@@ -566,6 +570,7 @@ public:
     return disable_cuda_runtime_env_check;
   }
   bool UseWarpSpec() const { return use_warpspec; }
+  bool SingleThreadProducer() const { return single_thread_producer; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -602,6 +607,7 @@ public:
     max_local_mem_capacity = sz;
   }
   void SetUseWarpSpec(bool value) { use_warpspec = value; }
+  void SetSingleThreadProducer(bool value) { single_thread_producer = value; }
   void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }

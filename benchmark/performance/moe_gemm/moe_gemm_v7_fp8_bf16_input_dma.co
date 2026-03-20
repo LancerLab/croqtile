@@ -29,10 +29,11 @@
 
 #define MATMUL_DEFAULT_M 384
 #define MATMUL_DEFAULT_N 512
-#define MATMUL_DEFAULT_K 512
+#define MATMUL_DEFAULT_K 2048
 
 
-#define EXPERTS 16
+#define EXPERTS 256
+
 __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
                    global f32 [M, DIV_BLK_K] scale_a,
                    global f8_e4m3 [EXPERT_N, K] rhs,
@@ -40,13 +41,15 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
                    global s32 [EXPERTS1] expert_offsets,
                    global bf16 [M, N] output, stream s) {
 
-  parallel.async {eid, block_n} by [EXPERTS, cdiv(N, MATMUL_WARP_N)] : block {
+  parallel.async {eid, block_n} by [EXPERTS, cdiv(N, MATMUL_WARP_N)] : block
+  parallel by 1 : group-4 
+  parallel t by 128 : thread {
     shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] sA; // 64 * 128 = 8KB, one warp writes
     shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] sB; // 128 * 128 = 16KB, one warp writes
 
     s32 seg_start = expert_offsets.at(eid);
     s32 seg_end = expert_offsets.at(eid + 1);
-    s32 seg_length = seg_end - seg_start;
+    s32 seg_length = seg_end - seg_start;  
     __cpp__("  if (seg_end - seg_start <= 0) return;\n\n");
 
     foreach {iv_m} in [cdiv(seg_length, MATMUL_WARP_M)] {
@@ -54,29 +57,24 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
       mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
         dma.copy.swiz<128>
-          lhs.view(MATMUL_WARP_M, MATMUL_TILE_K).from(seg_start, 0).subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(iv_m, iv_k) => sA;
-        // dma.copy.swiz<128>
-        //   lhs.view(MATMUL_WARP_M, MATMUL_TILE_K).from(seg_start, 0).subspan(TILE_M, MATMUL_TILE_K).at(iv_m, iv_k) => 
-        //   sA.view(TILE_M, MATMUL_TILE_K).from(0, 0);
+          lhs.view(MATMUL_WARP_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K) 
+            => sA.subspan(TILE_M, MATMUL_TILE_K); // [64, 128] => [TILE_M, 128] 
         tma.copy.swiz<128>
           rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(eid # block_n, iv_k) => sB;
 
-        parallel by 1 : group-4 {
-          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-            ma = mma.load.swiz<128> sA.chunkat(_, iv_warp);
-            mb = mma.load.swiz<128> sB.chunkat(_, iv_warp);
-            mma.row.row mc, ma, mb;
-          }
+        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+          ma = mma.load.swiz<128> sA.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> sB.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
         }
 
-        sc_a = scale_a.view(MATMUL_WARP_M, 1).from(seg_start, 0).subspan(MATMUL_WARP_M, 1).at(iv_m, iv_k);
+        sc_a = scale_a.view(MATMUL_WARP_M, 1).from(seg_start + iv_m * MATMUL_WARP_M, iv_k);
         sc_b = scale_b.at(eid # block_n, iv_k);
         mma.scale mc, sc_a, sc_b;
       }
-
-      mma.store mc, output.view(MATMUL_WARP_M, MATMUL_WARP_N).from(seg_start, 0).subspan(TILE_M, MATMUL_WARP_N).at(iv_m, block_n);
-    }
-
+      // masked mma store fragment mc
+      mma.store mc, output.view(TILE_M, MATMUL_WARP_N).from(seg_start + iv_m * MATMUL_WARP_M, block_n * MATMUL_WARP_N);    
+    }  
   }
 }
 
@@ -96,7 +94,7 @@ extern "C" void moe_fp8_grouped_gemm_bf16(
     int sm_version,
     __nv_bfloat16* out,
     cudaStream_t stream) {
-  printf("moe_fp8_grouped_gemm_bf16 called with m=%d, n=%d, k=%d, num_experts=%d\n", m, n, k, num_experts);
+  // printf("moe_fp8_grouped_gemm_bf16 called with m=%d, n=%d, k=%d, num_experts=%d\n", m, n, k, num_experts);
   if (sm_version == 90) {
     int n_blocks = (n + block_size_n - 1) / block_size_n;
     int k_blocks = (k + block_size_k - 1) / block_size_k;
@@ -108,6 +106,8 @@ extern "C" void moe_fp8_grouped_gemm_bf16(
     auto out_ptr = choreo::make_spanview<choreo::bf16, 2>(out, {size_t(m), size_t(n)});
     auto expert_offsets_ptr = choreo::make_spanview<choreo::s32, 1>(expert_offsets, {size_t(num_experts + 1)});
     moe_gemm_kernel_bf16(a_ptr, a_scales_ptr, b_ptr, b_scales_ptr, expert_offsets_ptr, out_ptr, stream);
+  } else {
+     printf("moe_fp8_grouped_gemm_bf16 unsupported sm_version %d\n", sm_version);
   }
 }
 

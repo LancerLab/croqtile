@@ -775,6 +775,50 @@ CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {
   copy(cute::AutoVectorizingCopyWithAssumedAlignment<32>{}, src, dst);
 }
 
+template <class Element, int ThrRows, int ThrCols, int ValRows, int ValCols,
+          class SrcTensor, class DstTensor>
+__device__ static inline void
+copy_swizzled_tail_g2s_128b(const SrcTensor& src, DstTensor& dst,
+                            long long valid_rows) {
+  auto tiled_copy = cute::make_tiled_copy(
+      cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>,
+                      Element>{},
+      cute::make_layout(
+          cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
+          cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
+      cute::make_layout(
+          cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
+  auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
+  auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
+  auto src_thr = thr_copy.partition_S(src);
+  auto dst_thr = thr_copy.partition_D(dst_pi);
+  auto coord_thr =
+      thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
+  auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
+  CUTE_UNROLL
+  for (int i = 0; i < cute::size(pred_thr); ++i) {
+    pred_thr(i) = cute::elem_less(cute::get<0>(coord_thr(i)), valid_rows);
+  }
+  cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
+  cute::cp_async_fence();
+  cute::cp_async_wait<0>();
+}
+
+template <class Element, int ThrRows, int ThrCols, int ValRows, int ValCols,
+          int TileRows, int TileCols, class DstTensor>
+__device__ static inline void
+copy_swizzled_tail_g2s_128b(Element* src_ptr, long long src_row_stride,
+                            DstTensor& dst, long long valid_rows) {
+  auto src_shape =
+      cute::make_shape(cute::Int<TileRows>{}, cute::Int<TileCols>{});
+  auto src = cute::make_tensor(
+      cute::make_gmem_ptr<Element>(src_ptr),
+      cute::make_layout(src_shape,
+                        cute::make_stride(src_row_stride, cute::Int<1>{})));
+  copy_swizzled_tail_g2s_128b<Element, ThrRows, ThrCols, ValRows, ValCols>(
+      src, dst, valid_rows);
+}
+
 // TODO: move to choreo_mma_wrapper.h
 // ------------------- inline mma PTX -------------------
 

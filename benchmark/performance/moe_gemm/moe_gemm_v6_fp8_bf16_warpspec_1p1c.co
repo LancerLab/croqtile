@@ -34,31 +34,6 @@
 
 #define EXPERTS 256
 
-template <typename T, size_t tile_k>
-__device__ __forceinline__ void load_lhs_segment_col_sw128b(
-    T* dst, const T* src, int seg_start, int seg_length,
-  int tile_m_idx, int tile_k_idx, int tid, int k_dim) {
-  static_assert(sizeof(T) == 1, "vectorized lhs loader only supports FP8 types");
-  constexpr int vec_elems = 4;
-  constexpr int vec_cols = tile_k / vec_elems;
-  constexpr int elems_per_16b = 16;
-  int total_vecs = MATMUL_WARP_M * vec_cols;
-#pragma unroll
-  for (int linear_vec = tid; linear_vec < total_vecs; linear_vec += 128) {
-    int row = linear_vec / vec_cols;
-    int vec_col = linear_vec % vec_cols;
-    int col = vec_col * vec_elems;
-    int tile_row = tile_m_idx * MATMUL_WARP_M + row;
-    if (tile_row >= seg_length) return; // out of segment boundary, can return early since threads are ordered by row
-    int src_idx = (seg_start + tile_row) * k_dim + tile_k_idx * tile_k + col;
-  
-    unsigned int packed = *((const unsigned int*)(src + src_idx));
-    int k_swz = ((col / elems_per_16b) ^ ((row + 1) % 8)) & 7;
-    int idx = row * tile_k + k_swz * elems_per_16b + (col % elems_per_16b);
-    *((unsigned int*)(dst + idx)) = packed;
-  }
-}
-
 __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
                    global f32 [M, DIV_BLK_K] scale_a,
                    global f8_e4m3 [EXPERT_N, K] rhs,
@@ -67,8 +42,7 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
                    global bf16 [M, N] output, stream s) {
 
   parallel.async {eid, block_n} by [EXPERTS, cdiv(N, MATMUL_WARP_N)] : block
-  parallel wg by 2 : group-4 
-  parallel t by 128 : thread {
+  parallel wg by 2 : group-4 {
     shared f8_e4m3 [MATMUL_STAGES * MATMUL_WARP_M, MATMUL_TILE_K] sA; // 64 * 128 = 8KB, one warp writes
     shared f8_e4m3 [MATMUL_STAGES * MATMUL_WARP_N, MATMUL_TILE_K] sB; // 128 * 128 = 16KB, one warp writes
     shared event full[MATMUL_STAGES], empty[MATMUL_STAGES];
@@ -84,8 +58,9 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
           wait empty[stage];
-          call load_lhs_segment_col_sw128b<f8_e4m3, MATMUL_TILE_K>(sA.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0), lhs, seg_start, seg_length,
-                                           iv_m, iv_k, t, K);
+          dma.copy.async<full[stage]>.swiz<128>.zfill
+            lhs.view(MATMUL_WARP_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K) 
+              => sA.view(TILE_M, MATMUL_TILE_K).from(stage * MATMUL_WARP_M, 0);
           tma.copy.async<full[stage]>.swiz<128>
             rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(eid # block_n, iv_k) => sB.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0);
           trigger full[stage];
@@ -102,19 +77,19 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
           wait full[stage];
 
           foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-            ma = mma.load.swiz<128> sA.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
-            mb = mma.load.swiz<128> sB.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
+            ma = mma.load.swiz<128> sA.subspan(MATMUL_WARP_M, MATMUL_WARP_K).at(stage, iv_warp);
+            mb = mma.load.swiz<128> sB.subspan(MATMUL_WARP_N, MATMUL_WARP_K).at(stage, iv_warp);
             mma.row.row mc, ma, mb;
           }
 
-          sc_a = scale_a.view(MATMUL_WARP_M, 1).from(seg_start, 0).subspan(MATMUL_WARP_M, 1).at(iv_m, iv_k);
+          sc_a = scale_a.view(MATMUL_WARP_M, 1).from(seg_start + iv_m * MATMUL_WARP_M, iv_k);
           sc_b = scale_b.at(eid # block_n, iv_k);
           mma.scale mc, sc_a, sc_b;
           mma.commit;
           trigger empty[stage];
         }
         // masked mma store fragment mc
-        mma.store mc, output.view(MATMUL_WARP_M, MATMUL_WARP_N).from(seg_start, 0).subspan(TILE_M, MATMUL_WARP_N).at(iv_m, block_n);
+        mma.store mc, output.view(TILE_M, MATMUL_WARP_N).from(seg_start + iv_m * MATMUL_WARP_M, block_n * MATMUL_WARP_N);    
       }
     }
   }

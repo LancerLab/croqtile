@@ -2,6 +2,7 @@
 #include "codegen_utils.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <iostream>
 #include <numeric>
 #include <sstream>
@@ -241,6 +242,288 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   }
 
   return nullptr;
+}
+
+std::pair<std::string, std::string>
+CuteCodeGen::GetDMABufferExpr(const std::string& sym,
+                              const ptr<AST::MultiValues> subscription,
+                              const ptr<Type>& sym_ty) const {
+  std::string buf_expr = "";
+  std::string sname = InScopeName(sym);
+  if (isa<FutureType>(sym_ty) && !IsHostSymbol(sname)) {
+    std::string buf_name = sname + ".data";
+    buf_expr = ssm.DeviceName(buf_name);
+  } else if (isa<FutureType>(sym_ty) && IsHostSymbol(sname) &&
+             !const_cast<CuteCodeGen*>(this)->IsChoreoInput(sname) &&
+             !const_cast<CuteCodeGen*>(this)->IsChoreoOutput(sname)) {
+    buf_expr =
+        UnScopedName(const_cast<FutureBufferInfo&>(FBInfo())[sname].buffer);
+  } else {
+    buf_expr = ssm.DeviceName(sname);
+  }
+
+  std::string buf_name = buf_expr;
+  if (subscription != nullptr) {
+    if (auto array_ty = dyn_cast<ArrayType>(sym_ty);
+        array_ty && CCtx().MemReuse()) {
+      std::string array_idx = "";
+      auto subscriptions = subscription->AllValues();
+      const ValueList& array_sizes = array_ty->Dimensions();
+      for (size_t i = 0; i < subscriptions.size(); ++i) {
+        if (array_idx.empty())
+          array_idx = ExprSTR(subscriptions[i], IsHost());
+        else
+          array_idx = "(" + array_idx + ")*" + ValueSTR(array_sizes[i]) + "+" +
+                      ExprSTR(subscriptions[i], IsHost());
+      }
+      std::string elem_count =
+          ValueSTR(cast<SpannedType>(sym_ty)->GetShape().ElementCountValue());
+      buf_expr += " + (" + array_idx + ")*(" + elem_count + ")";
+    } else {
+      for (auto expr : subscription->AllValues())
+        buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
+    }
+  }
+  return std::make_pair(buf_name, buf_expr);
+}
+
+std::string
+CuteCodeGen::SwizzledTailCopyStateName(const std::string& sym,
+                                       const std::string& offset) const {
+  std::string suffix;
+  for (unsigned char ch : offset) {
+    if (std::isalnum(ch) || ch == '_')
+      suffix.push_back(static_cast<char>(ch));
+    else if (!suffix.empty() && suffix.back() != '_')
+      suffix.push_back('_');
+  }
+  while (!suffix.empty() && suffix.back() == '_') suffix.pop_back();
+  auto name = sym + "__swizzled_tail_copy_dst";
+  if (!suffix.empty() && offset != "0") name += "_" + suffix;
+  return name;
+}
+
+  void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
+                         const std::string& indent) const {
+    os << indent
+      << "cooperative_groups::tiled_partition<128>(cooperative_groups::this_"
+        "thread_block()).sync();\n";
+  }
+
+  void CuteCodeGen::EmitSwizzledTailCopyStateDecl(
+     std::ostringstream& os, const std::string& indent,
+     const HoistedSwizzledTailCopyStateInfo& info) const {
+    os << indent << "auto " << info.state_name << " =\n";
+    os << indent << "    cute::make_tensor(\n";
+    os << indent << "        cute::make_smem_ptr<" << info.element_ty << ">(\n";
+    os << indent << "            " << info.dst_ptr_expr << "),\n";
+    os << indent << "        cute::tile_to_shape(\n";
+    os << indent << "            cute::SM90::GMMA::Layout_K_SW128_Atom<"
+      << info.element_ty << ">{},\n";
+    os << indent << "            cute::make_shape(cute::Int<"
+      << info.tile_rows << ">{}, cute::Int<" << info.tile_cols
+      << ">{})));\n";
+  }
+
+std::optional<CuteCodeGen::HoistedSwizzledTailCopyStateInfo>
+CuteCodeGen::AnalyzeHoistableSwizzledTailCopyState(
+    AST::DMA& n, const std::vector<std::string>& loop_refs) const {
+  if (IsHost()) return std::nullopt;
+
+  auto nty = NodeType(n);
+  auto fty = dyn_cast<FutureType>(nty);
+  if (!fty || n.IsTMA()) return std::nullopt;
+  if (!isa<AST::ChunkAt>(n.from) || !isa<AST::ChunkAt>(n.to))
+    return std::nullopt;
+  if (!n.future.empty()) return std::nullopt; // not supported yet
+
+  auto f_ca = cast<AST::ChunkAt>(n.from);
+  auto t_ca = cast<AST::ChunkAt>(n.to);
+  auto f_sym = f_ca->data->name;
+  auto t_sym = t_ca->data->name;
+
+  auto ResolveDMABaseType = [&](const std::string& sym,
+                                const ptr<AST::ChunkAt>& ca) -> ptr<Type> {
+    auto scoped_sym = InScopeName(sym);
+    if (SymTab()->Exists(scoped_sym)) return GetSymbolType(sym);
+    return NodeType(*ca);
+  };
+
+  auto f_ty = ResolveDMABaseType(f_sym, f_ca);
+  auto t_ty = ResolveDMABaseType(t_sym, t_ca);
+  auto f_sty = dyn_cast<SpannedType>(f_ty);
+  auto t_sty = dyn_cast<SpannedType>(t_ty);
+  if (!f_sty || !t_sty) return std::nullopt;
+
+  std::string f_mds_offset = "";
+  std::string t_mds_offset = "";
+  if (auto idx = f_ca->IndexOfLastSpanAs())
+    f_mds_offset = TileBaseOffset(f_ca);
+  else
+    f_mds_offset = ValueSTR(GenOffset(f_ca));
+
+  if (auto idx = t_ca->IndexOfLastSpanAs())
+    t_mds_offset = TileBaseOffset(t_ca);
+  else
+    t_mds_offset = ValueSTR(GenOffset(t_ca));
+
+  std::vector<size_t> transp_config;
+  if (n.operation == ".transp")
+    transp_config = cast<TransposeConfig>(n.GetConfig())->dim_values;
+
+  bool use_wgmma_layout_t = HasWGMMAInFunction() &&
+                            t_sty->GetStorage() == Storage::SHARED &&
+                            (t_sty->ElementType() == BaseType::F16 ||
+                             t_sty->ElementType() == BaseType::BF16 ||
+                             t_sty->ElementType() == BaseType::F8_E4M3);
+
+  auto f_stride = GenStrides(f_ca, transp_config);
+  auto swizzle_mode = n.GetSwizzleMode();
+  bool use_swizzled_tail_copy =
+      n.operation == ".copy" &&
+      (f_sty->GetStorage() == Storage::GLOBAL ||
+       f_sty->GetStorage() == Storage::DEFAULT) &&
+      t_sty->GetStorage() == Storage::SHARED && use_wgmma_layout_t &&
+      swizzle_mode != SwizMode::NONE && t_sty->GetShape().Rank() == 2 &&
+      fty->GetShape().Rank() == 2 && !t_sty->GetShape().IsDynamic() &&
+      !f_ca->GetBlockShape().IsDynamic() &&
+      VIIsInt(t_sty->GetShape().ValueAt(1)) &&
+      VIIsInt(f_ca->GetBlockShape().ValueAt(1)) &&
+      *VIInt(t_sty->GetShape().ValueAt(1)) ==
+          *VIInt(f_ca->GetBlockShape().ValueAt(1)) && n.future.empty();
+  if (!use_swizzled_tail_copy) return std::nullopt;
+
+  const auto f_buf = GetDMABufferExpr(f_sym, f_ca->indices, f_ty);
+  const auto t_buf = GetDMABufferExpr(t_sym, t_ca->indices, t_ty);
+
+  struct TiledCopyEntry {
+    std::pair<size_t, size_t> thr_layout;
+    std::pair<size_t, size_t> val_layout;
+    size_t vectorized_align_bits;
+  };
+  std::optional<TiledCopyEntry> swizzled_tail_copy_entry;
+  const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
+  assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
+  const auto& lconfig = lcs[parallel_idx];
+  auto inner_thr_count =
+      lconfig.thread_count.x * lconfig.thread_count.y * lconfig.thread_count.z;
+  auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
+                     lconfig.group_count.y * lconfig.group_count.z;
+  auto thr_count_vi = inner_thr_count * group_count;
+  if (VIIsInt(thr_count_vi)) {
+    size_t thr_count = *VIInt(thr_count_vi);
+    size_t elem_byte = SizeOf(f_sty->ElementType());
+    size_t tile_n = *VIInt(t_sty->GetShape().ValueAt(1));
+    constexpr size_t bytes_per_copy = 16;
+    if (bytes_per_copy % elem_byte == 0) {
+      size_t elems_per_copy = bytes_per_copy / elem_byte;
+      if (tile_n % elems_per_copy == 0) {
+        size_t thr_per_row = tile_n / elems_per_copy;
+        if (thr_per_row != 0 && thr_count % thr_per_row == 0) {
+          TiledCopyEntry entry;
+          entry.thr_layout.first = thr_count / thr_per_row;
+          entry.thr_layout.second = thr_per_row;
+          entry.val_layout.first = 1;
+          entry.val_layout.second = elems_per_copy;
+          entry.vectorized_align_bits = 128;
+          swizzled_tail_copy_entry = entry;
+        }
+      }
+    }
+  }
+
+  if (!swizzled_tail_copy_entry.has_value() ||
+      swizzled_tail_copy_entry->vectorized_align_bits != 128)
+    return std::nullopt;
+
+  auto row_dim = VIInt(t_sty->GetShape().ValueAt(0));
+  auto col_dim = VIInt(t_sty->GetShape().ValueAt(1));
+  if (!row_dim || !col_dim) return std::nullopt;
+
+  std::string dst_ptr_expr = std::string("((") +
+                             NameBaseType(t_sty->ElementType()) + "*)" +
+                             t_buf.second;
+  if (!t_mds_offset.empty() && t_mds_offset != "0")
+    dst_ptr_expr += " + (" + t_mds_offset + ")";
+  dst_ptr_expr += ")";
+
+  for (const auto& loop_ref : loop_refs) {
+    if (!loop_ref.empty() && dst_ptr_expr.find(loop_ref) != std::string::npos)
+      return std::nullopt;
+  }
+
+  std::string src_ptr_expr = std::string("((") +
+                             NameBaseType(f_sty->ElementType()) + "*)" +
+                             f_buf.second;
+  if (!f_mds_offset.empty() && f_mds_offset != "0")
+    src_ptr_expr += " + (" + f_mds_offset + ")";
+  src_ptr_expr += ")";
+
+  HoistedSwizzledTailCopyStateInfo info;
+  info.state_name = SwizzledTailCopyStateName(t_sym, t_mds_offset);
+  info.dst_ptr_expr = dst_ptr_expr;
+  info.src_ptr_expr = src_ptr_expr;
+  info.src_row_stride_expr = ValueSTR(f_stride.front());
+  info.row_guard_expr = ValueSTR(fty->GetShape().ValueAt(0), true);
+  info.element_ty = NameBaseType(t_sty->ElementType());
+  info.tile_rows = *row_dim;
+  info.tile_cols = *col_dim;
+  info.thr_rows = swizzled_tail_copy_entry->thr_layout.first;
+  info.thr_cols = swizzled_tail_copy_entry->thr_layout.second;
+  info.val_rows = swizzled_tail_copy_entry->val_layout.first;
+  info.val_cols = swizzled_tail_copy_entry->val_layout.second;
+  return info;
+}
+
+std::vector<CuteCodeGen::HoistedSwizzledTailCopyStateInfo>
+CuteCodeGen::AnalyzeHoistableSwizzledTailCopyStates(
+    const ptr<AST::MultiNodes>& body,
+    const std::vector<std::string>& loop_refs) const {
+  std::vector<HoistedSwizzledTailCopyStateInfo> infos;
+  if (!body || IsHost()) return infos;
+
+  std::function<void(const ptr<AST::Node>&, const std::vector<std::string>&)>
+      collect = [&](const ptr<AST::Node>& node,
+                    const std::vector<std::string>& current_loop_refs) {
+        if (!node) return;
+        if (auto dma = dyn_cast<AST::DMA>(node)) {
+          if (auto info = AnalyzeHoistableSwizzledTailCopyState(*dma,
+                                                                current_loop_refs))
+            infos.push_back(*info);
+          return;
+        }
+        if (auto fb = dyn_cast<AST::ForeachBlock>(node)) {
+          auto nested_loop_refs = current_loop_refs;
+          for (auto& rn : fb->GetRanges()) {
+            auto rng = cast<AST::LoopRange>(rn);
+            auto cname = rng->IVName();
+            nested_loop_refs.push_back(cname);
+            nested_loop_refs.push_back(std::string("__iv_") + cname);
+          }
+          collect(fb->GetBody(), nested_loop_refs);
+          return;
+        }
+        if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
+          for (auto& item : mn->values) collect(item, current_loop_refs);
+          return;
+        }
+        if (auto if_else = dyn_cast<AST::IfElseBlock>(node)) {
+          collect(if_else->GetThenBody(), current_loop_refs);
+          collect(if_else->GetElseBody(), current_loop_refs);
+          return;
+        }
+        if (auto block = dyn_cast<AST::Block>(node)) {
+          collect(block->GetBody(), current_loop_refs);
+          return;
+        }
+        if (auto with_block = dyn_cast<AST::WithBlock>(node)) {
+          collect(with_block->GetBody(), current_loop_refs);
+          return;
+        }
+      };
+
+  collect(body, loop_refs);
+  return infos;
 }
 
 std::optional<CuteCodeGen::HoistedScaleAccumInfo>
@@ -782,6 +1065,11 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
       for (const auto& name : hoisted_scale_decl_scopes.back())
         active_hoisted_scale_decls.erase(name);
       hoisted_scale_decl_scopes.pop_back();
+    }
+    if (!hoisted_swizzled_tail_copy_scopes.empty()) {
+      for (const auto& name : hoisted_swizzled_tail_copy_scopes.back())
+        active_hoisted_swizzled_tail_copy_states.erase(name);
+      hoisted_swizzled_tail_copy_scopes.pop_back();
     }
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
@@ -1702,10 +1990,14 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
              set_cuda_func_attribute_max_dynamic_shared_memory_size))
           ds << d_indent << "auto " << sym << " = (" << bts << "*)" << device_fn
              << "__runtime_shared_buffer__;\n";
-        else
-          ds << d_indent << type_modifiers << "alignas("
-             << n.GetNote("alignment") << ") " << bts << " " << sym << "["
-             << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        else {
+          size_t alignment = std::stoull(n.GetNote("alignment"));
+          if (sto == Storage::SHARED && HasWGMMAInFunction())
+            alignment = std::max(alignment, static_cast<size_t>(1024));
+          ds << d_indent << type_modifiers << "alignas(" << alignment << ") "
+             << bts << " " << sym << "[" << UnScopedExpr(ElemCountExprOf(*sty))
+             << "];\n";
+        }
         return;
       }
 
@@ -2620,6 +2912,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     return true;
   }
 
+  if (UseSingleThreadProducerScope() && InProducer() && !n.IsTMA()) {
+    Error1(n.LOC(),
+           "DMA in the producer inthreads block is unsupported when "
+           "'--single-thread-producer=true' is used with '--use-warpspec'. "
+           "Use '--single-thread-producer=false' for producer DMA emission.");
+    return false;
+  }
+
   assert(isa<AST::ChunkAt>(n.from) && "Unexpected type for DMA's source.");
   assert(isa<AST::ChunkAt>(n.to) && "Unexpected type for DMA's destination.");
 
@@ -2851,30 +3151,19 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   };
   std::optional<TiledCopyEntry> tiled_copy_entry;
 
-  // used in dma only. Utilize all the threads in block to do DMA.
-  auto TiledCopyPrepare =
-      [&](bool one_row_per_warp, size_t mem_align_byte,
-          const ptr<AST::ChunkAt>& ca) -> std::optional<TiledCopyEntry> {
-    /*
-    for now, `make_tiled_copy` here has some constraints:
-      only support 2D DMA;
-      do not support DMA inside inthreads;
-      do not support dynamic shape;
-      do not support dynamic #thread;
-    */
-
-    const auto& loc = ca->LOC();
-
-    if (auto l = Level(); l != ParallelLevel::BLOCK) {
-      Note(loc, "the DMA is in " + STR(l) +
-                    " level, If possible, move it to block level to implement "
-                    "the make_tiled_copy optimization.");
+  auto PrepareTiledCopyEntry =
+      [&](const location& loc, bool one_row_per_warp, size_t mem_align_byte,
+          const Shape& tile_shape, const ValueList& tile_strd,
+          BaseType bty) -> std::optional<TiledCopyEntry> {
+    if (tile_shape.Rank() != 2) {
+      Note(loc, "the span (maybe after span_as) is not of rank 2.");
       return std::nullopt;
     }
-    // if the DMA can only be in ParallelLevel::BLOCK
-    // then we won't need to check whether inside inthreads scope.
-
-    auto node_sty = GetSpannedType(ca->GetType());
+    if (tile_shape.IsDynamic()) {
+      Note(loc, "the tile is of dynamic shape (" + STR(tile_shape) +
+                    "), unable to do make_tiled_copy.");
+      return std::nullopt;
+    }
 
     const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
     assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
@@ -2891,49 +3180,26 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
     size_t thr_count = *VIInt(thr_count_vi);
 
-    auto tile_shape = ca->GetBlockShape();
-    if (tile_shape.Rank() != 2) {
-      Note(loc, "the span (maybe after span_as) is not of rank 2.");
-      return std::nullopt;
-    }
-    if (tile_shape.IsDynamic()) {
-      Note(loc, "the tile is of dynamic shape (" + STR(tile_shape) +
-                    "), unable to do make_tiled_copy.");
-      return std::nullopt;
-    }
-
-    // only handle DMA which is row-major.
-    const ValueList& strd = node_sty->GetStrides();
-    if (!VIIsInt(strd[1])) {
-      Note(loc, "the col stride of span is dynamic (" + STR(strd[1]) +
+    if (!VIIsInt(tile_strd[1])) {
+      Note(loc, "the col stride of span is dynamic (" + STR(tile_strd[1]) +
                     "). make_tiled_copy can be implemented only when it is "
                     "integer 1 (row-major).");
       return std::nullopt;
     }
-    if (*VIInt(strd[1]) != 1) {
-      Note(loc, "the col stride of span is " + STR(strd[1]) +
+    if (*VIInt(tile_strd[1]) != 1) {
+      Note(loc, "the col stride of span is " + STR(tile_strd[1]) +
                     ". make_tiled_copy can be implemented only when it is "
                     "integer 1 (row-major).");
       return std::nullopt;
     }
 
-    /*
-    now the following are satisfied:
-      col stride of matrix is integer 1 (row-major);
-      tile shape is static              (able to determine thr_layout);
-    */
     TiledCopyEntry ret;
-
     size_t tile_m = *VIInt(tile_shape.ValueAt(0));
     size_t tile_n = *VIInt(tile_shape.ValueAt(1));
-    ValueList tile_strd = node_sty->GetStrides();
-    auto bty = f_sty->ElementType();
     size_t elem_byte = SizeOf(bty);
     size_t row_byte = tile_n * elem_byte;
 
-    // Note: bits_per_thread >= elem_byte*8
     auto XBitsPerThread = [&](size_t bits_per_thread) -> bool {
-      // one thread load bits_per_thread data once.
       size_t bytes_per_thread = bits_per_thread / 8;
       if (row_byte % bytes_per_thread != 0) {
         Note(loc, "row_byte (" + std::to_string(row_byte) +
@@ -2968,22 +3234,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       return true;
     };
 
-    // now only need to consider the stride of tile, not matrix.
-
-    // TODO: check if that best pattern is one warp per row, and 128bit
-    // vectorized load.
-
-    // if the row stride of tile is static and do not require that each row of
-    // tile is handled by a single warp, then check if xxxbit alignment for each
-    // row is satisfied.
-    // If so, try to use AutoVectorizingCopyWithAssumedAlignment<xxx>
     if (!one_row_per_warp && VIIsInt(tile_strd[0])) {
       int tile_strd_0 = *VIInt(tile_strd[0]);
       auto AlignWith = [&](size_t _alignment_bit) -> bool {
-        // alignment of load inst is in bit (e.g., LDG.E.128)
         if ((mem_align_byte * 8) % _alignment_bit != 0) return false;
         if ((tile_strd_0 * elem_byte * 8) % _alignment_bit != 0) return false;
-        // each row of tile is aligned with _alignment_bit
         return true;
       };
       for (size_t expect_alignment_bit : {128, 64, 32, 16}) {
@@ -2997,36 +3252,30 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                    " bytes, stride of first dim of tile is " +
                    std::to_string(tile_strd_0 * elem_byte) + " bytes.");
         } else {
-          // the alignment is satisfied. Now check the shape.
           if (XBitsPerThread(expect_alignment_bit)) {
             ret.vectorized_align_bits = expect_alignment_bit;
             ret.one_row_per_warp = false;
-            Note(n.LOC(), "do make_tiled_copy with assumed " +
-                              std::to_string(expect_alignment_bit) +
-                              " bits vectorized copy atom.");
+            Note(loc, "do make_tiled_copy with assumed " +
+                          std::to_string(expect_alignment_bit) +
+                          " bits vectorized copy atom.");
             return ret;
           }
         }
       }
     }
-    Note(n.LOC(), "alignment is not satisfied, unable to utilize vectorized "
-                  "load inst. Fallback to UniversalCopy.");
-    // cannot use AutoVectorizingCopyWithAssumedAlignment. Turn to
-    // UniversalCopy. For example, 1 warp (32 threads) to handle one row of
-    // tile.
-    // TODO: confirm that: UniversalCopy is conservative copy, it will try vec.
-    //       UniversalCopy<cutlass::uint128_t> lead to static_assert.
 
+    Note(loc, "alignment is not satisfied, unable to utilize vectorized "
+              "load inst. Fallback to UniversalCopy.");
     constexpr size_t thr_per_warp = 32;
     if (thr_count < 32) {
-      Note(n.LOC(), "#thread in block (" + std::to_string(thr_count) +
-                        ") is less than 32, unable to do warp-per-row "
-                        "make_tiled_copy. Fallback to normal copy.");
+      Note(loc, "#thread in block (" + std::to_string(thr_count) +
+                    ") is less than 32, unable to do warp-per-row "
+                    "make_tiled_copy. Fallback to normal copy.");
       return std::nullopt;
     }
     if (tile_n % 32 != 0) {
-      Note(n.LOC(), "#col of tile is not divisible by 32, unable to do "
-                    "warp-per-row make_tiled_copy. Fallback to normal copy.");
+      Note(loc, "#col of tile is not divisible by 32, unable to do "
+                "warp-per-row make_tiled_copy. Fallback to normal copy.");
       return std::nullopt;
     }
     constexpr size_t thr_per_row = thr_per_warp;
@@ -3052,6 +3301,37 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     ret.one_row_per_warp = true;
     ret.vectorized_align_bits = 0;
     return ret;
+  };
+
+  // used in dma only. Utilize all the threads in block to do DMA.
+  auto TiledCopyPrepare =
+      [&](bool one_row_per_warp, size_t mem_align_byte,
+          const ptr<AST::ChunkAt>& ca) -> std::optional<TiledCopyEntry> {
+    /*
+    for now, `make_tiled_copy` here has some constraints:
+      only support 2D DMA;
+      do not support DMA inside inthreads;
+      do not support dynamic shape;
+      do not support dynamic #thread;
+    */
+
+    const auto& loc = ca->LOC();
+
+    if (auto l = Level(); l != ParallelLevel::BLOCK) {
+      Note(loc, "the DMA is in " + STR(l) +
+                    " level, If possible, move it to block level to implement "
+                    "the make_tiled_copy optimization.");
+      return std::nullopt;
+    }
+    // if the DMA can only be in ParallelLevel::BLOCK
+    // then we won't need to check whether inside inthreads scope.
+
+    auto node_sty = GetSpannedType(ca->GetType());
+
+    auto tile_shape = ca->GetBlockShape();
+    return PrepareTiledCopyEntry(loc, one_row_per_warp, mem_align_byte,
+                                 tile_shape, node_sty->GetStrides(),
+                                 f_sty->ElementType());
   };
 
   auto DMACodeGen = [&]() {
@@ -3094,23 +3374,82 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // swizzle)
     auto swizzle_mode = n.GetSwizzleMode();
 
-    const auto f_mds = GenTensorDecl(
-        RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
-        f_sty->ElementType(),
-        (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape()),
-        false, f_mds_offset, ValueSTR(f_stride, false, true), {}, false);
-    const auto t_mds = GenTensorDecl(
-        RemoveSuffix(t_buf_name, ".data()"), t_buf_name, t_sty->GetStorage(),
-        t_sty->ElementType(), fty->GetShape(), false, t_mds_offset,
-        ValueSTR(t_stride, false, true), {}, use_wgmma_layout_t, swizzle_mode);
+    bool use_swizzled_tail_copy =
+      n.operation == ".copy" &&
+        (f_sty->GetStorage() == Storage::GLOBAL ||
+         f_sty->GetStorage() == Storage::DEFAULT) &&
+        t_sty->GetStorage() == Storage::SHARED && use_wgmma_layout_t &&
+        swizzle_mode != SwizMode::NONE && t_sty->GetShape().Rank() == 2 &&
+        fty->GetShape().Rank() == 2 && !t_sty->GetShape().IsDynamic() &&
+        !f_ca->GetBlockShape().IsDynamic() &&
+        VIIsInt(t_sty->GetShape().ValueAt(1)) &&
+        VIIsInt(f_ca->GetBlockShape().ValueAt(1)) &&
+        *VIInt(t_sty->GetShape().ValueAt(1)) ==
+            *VIInt(f_ca->GetBlockShape().ValueAt(1)) && n.future.empty();
 
-    std::string f_mds_name{f_mds.first};
-    std::string f_mds_decl{f_mds.second};
-    std::string t_mds_name{t_mds.first};
-    std::string t_mds_decl{t_mds.second};
+    Shape f_mds_shape =
+        (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape());
+    if (use_swizzled_tail_copy) f_mds_shape = f_ca->GetBlockShape();
+    Shape t_mds_shape = fty->GetShape();
+    if (use_swizzled_tail_copy) t_mds_shape = t_sty->GetShape();
 
-    ds << f_mds_decl;
-    ds << t_mds_decl;
+    std::optional<TiledCopyEntry> swizzled_tail_copy_entry = tiled_copy_entry;
+    if (use_swizzled_tail_copy && !swizzled_tail_copy_entry.has_value()) {
+      const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
+      assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
+      const auto& lconfig = lcs[parallel_idx];
+      auto inner_thr_count = lconfig.thread_count.x * lconfig.thread_count.y *
+                             lconfig.thread_count.z;
+      auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
+                         lconfig.group_count.y * lconfig.group_count.z;
+      auto thr_count_vi = inner_thr_count * group_count;
+      if (VIIsInt(thr_count_vi)) {
+        size_t thr_count = *VIInt(thr_count_vi);
+        size_t elem_byte = SizeOf(f_sty->ElementType());
+        size_t tile_n = *VIInt(t_sty->GetShape().ValueAt(1));
+        constexpr size_t bytes_per_copy = 16;
+        if (bytes_per_copy % elem_byte == 0) {
+          size_t elems_per_copy = bytes_per_copy / elem_byte;
+          if (tile_n % elems_per_copy == 0) {
+            size_t thr_per_row = tile_n / elems_per_copy;
+            if (thr_per_row != 0 && thr_count % thr_per_row == 0) {
+              TiledCopyEntry entry;
+              entry.thr_layout.first = thr_count / thr_per_row;
+              entry.thr_layout.second = thr_per_row;
+              entry.val_layout.first = 1;
+              entry.val_layout.second = elems_per_copy;
+              entry.vectorized_align_bits = 128;
+              entry.one_row_per_warp = false;
+              swizzled_tail_copy_entry = entry;
+            }
+          }
+        }
+      }
+    }
+    std::optional<HoistedSwizzledTailCopyStateInfo> swizzled_tail_state_info;
+    if (use_swizzled_tail_copy && swizzled_tail_copy_entry.has_value() &&
+        swizzled_tail_copy_entry->vectorized_align_bits == 128) {
+      swizzled_tail_state_info = AnalyzeHoistableSwizzledTailCopyState(n, {});
+    }
+
+    std::string f_mds_name;
+    std::string t_mds_name;
+    if (!swizzled_tail_state_info.has_value()) {
+      const auto f_mds = GenTensorDecl(
+          RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
+          f_sty->ElementType(), f_mds_shape, false, f_mds_offset,
+          ValueSTR(f_stride, false, true), {}, false);
+      const auto t_mds =
+          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
+                        t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
+                        false, t_mds_offset, ValueSTR(t_stride, false, true),
+                        {}, use_wgmma_layout_t, swizzle_mode);
+
+      f_mds_name = f_mds.first;
+      t_mds_name = t_mds.first;
+      ds << f_mds.second;
+      ds << t_mds.second;
+    }
 
     // handles dma related to shared memory
     // For async cp.async (non-TMA), threads in the warp must participate;
@@ -3121,6 +3460,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                            (IsFloatSubByteType(f_sty->ElementType()) ||
                             IsFloatSubByteType(t_sty->ElementType()));
     bool need_subbyte_async_sync = false;
+    bool emitted_swizzled_tail_copy = false;
 
     if (need_single_instance) {
       ds << d_indent << LevelPred() << " {\n";
@@ -3212,6 +3552,20 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           ds << d_indent << "  }\n";
           ds << d_indent << "}\n";
         }
+      } else if (swizzled_tail_state_info.has_value()) {
+        const auto& info = swizzled_tail_state_info.value();
+        bool state_is_hoisted =
+            active_hoisted_swizzled_tail_copy_states.count(info.state_name);
+        if (!state_is_hoisted)
+          EmitSwizzledTailCopyStateDecl(ds, d_indent, info);
+        IndStream() << "choreo::copy_swizzled_tail_g2s_128b<"
+                    << info.element_ty << ", " << info.thr_rows << ", "
+                    << info.thr_cols << ", " << info.val_rows << ", "
+                    << info.val_cols << ", " << info.tile_rows << ", "
+                    << info.tile_cols << ">(" << info.src_ptr_expr << ", "
+                    << info.src_row_stride_expr << ", " << info.state_name
+                    << ", " << info.row_guard_expr << ");\n";
+        emitted_swizzled_tail_copy = true;
       } else if (is_subbyte_copy) {
         const auto f_byte = GenTensorDecl(
             RemoveSuffix(f_buf_name, ".data()") + "_byte", f_buf_name,
@@ -3243,7 +3597,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << future_name << ".trigger();\n";
       } else {
         if (tiled_copy_entry.has_value() &&
-            n.GetSwizzleMode() == SwizMode::NONE) {
+                   n.GetSwizzleMode() == SwizMode::NONE) {
           const TiledCopyEntry& entry = tiled_copy_entry.value();
           IndStream() << "{\n";
           IncrIndent();
@@ -3336,7 +3690,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
       // else, defer the sync till the wait time
-      ds << d_indent << "__syncthreads();\n";
+      if (NeedWarpSpecGroupX4SyncForCurrentScope())
+        EmitGroupX4Sync(ds, d_indent);
+      else
+        ds << d_indent << "__syncthreads();\n";
+    } else if (emitted_swizzled_tail_copy &&
+               NeedWarpSpecGroupX4SyncForCurrentScope()) {
+      EmitGroupX4Sync(ds, d_indent);
     }
   };
 
@@ -3431,8 +3791,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
            has_cluster) &&
           t_shape.Rank() == 2;
       bool emit_tma_single_guard =
-          !(CCtx().UseWarpSpec() && tma_sync_level == ParallelLevel::GROUPx4 &&
-            full_empty_only_tma_copy);
+          !(UseSingleThreadProducerScope() &&
+        tma_sync_level == ParallelLevel::GROUPx4 && InProducer());
       std::string tma_issue_prefix = emit_tma_single_guard ? "  " : "";
 
       if (emit_tma_single_guard) {
@@ -3568,7 +3928,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       else if (tma_sync_level == ParallelLevel::GROUPx4) {
         if (!ref_like_mbarrier_store) ds << d_indent << "wg.sync();\n";
       } else
-        ds << d_indent << "__syncthreads();\n";
+        if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
+          ds << d_indent << "__syncthreads();\n";
 
       if (tma_sync_level == ParallelLevel::GROUP)
         ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
@@ -4693,7 +5056,15 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
 
   auto BeginEventCritical = [&]() -> bool {
     if (IsHost()) return false;
-    if (CCtx().UseWarpSpec()) return false;
+    if (CCtx().UseWarpSpec()) {
+      if (bdim_level == ParallelLevel::GROUPx4 && InProducer() &&
+          GuardWarpSpecProducerOpsIndividually()) {
+        ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+        IncrDeviceIndent();
+        return true;
+      }
+      return false;
+    }
     switch (bdim_level) {
     case ParallelLevel::GROUPx4:
       ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
@@ -4715,7 +5086,12 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
     if (!guarded || IsHost()) return;
     DecrDeviceIndent();
     ds << d_indent << "}\n";
-    if (InProducer() || InConsumer()) return;
+    if (CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4 &&
+        InProducer() && GuardWarpSpecProducerOpsIndividually()) {
+      EmitGroupX4Sync(ds, d_indent);
+      return;
+    }
+    if (InProducer()) return;
 
     switch (bdim_level) {
     case ParallelLevel::GROUPx4:
@@ -4794,7 +5170,12 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         }
         bool is_full = (base_name.find("full") != std::string::npos);
         bool guarded = false;
-        if (!is_full) { guarded = BeginEventCritical(); }
+        if (CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4) {
+          if (InProducer() && GuardWarpSpecProducerOpsIndividually())
+            guarded = BeginEventCritical();
+        } else if (!is_full) {
+          guarded = BeginEventCritical();
+        }
 
         ds << d_indent << "// wait event(barrier) " << PSTR(t) << "\n";
         if (is_array_ref) {
@@ -4812,10 +5193,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
                                     ExprSTR(t, false) + ".arrive())",
                                 ";\n", ety->RemainderDimensions(0));
         }
-        if (is_full && InConsumer()) {
-          ds << d_indent << "warpgroup_arrive();\n";
-        }
         EndEventCritical(guarded);
+        if (is_full && InConsumer()) ds << d_indent << "warpgroup_arrive();\n";
       } break;
       default:
         choreo_unreachable("unsupported event array storage '" +
@@ -4888,7 +5267,15 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
 
   auto BeginEventCritical = [&]() -> bool {
     if (IsHost()) return false;
-    if (CCtx().UseWarpSpec()) return false;
+    if (CCtx().UseWarpSpec()) {
+      if (bdim_level == ParallelLevel::GROUPx4 && InProducer() &&
+          GuardWarpSpecProducerOpsIndividually()) {
+        ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+        IncrDeviceIndent();
+        return true;
+      }
+      return false;
+    }
     switch (bdim_level) {
     case ParallelLevel::GROUPx4:
       ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
@@ -4910,7 +5297,10 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
     if (!guarded || IsHost()) return;
     DecrDeviceIndent();
     ds << d_indent << "}\n";
-    if (InProducer() || InConsumer()) return;
+    if (CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4 &&
+        InProducer() && GuardWarpSpecProducerOpsIndividually())
+      return;
+    if (InProducer()) return;
     switch (bdim_level) {
     case ParallelLevel::GROUPx4:
       ds << d_indent
@@ -4964,7 +5354,12 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           }
           bool is_full = (base_name.find("full") != std::string::npos);
           bool guarded = false;
-          if (!is_full) { guarded = BeginEventCritical(); }
+          if (CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4) {
+            if (InProducer() && GuardWarpSpecProducerOpsIndividually())
+              guarded = BeginEventCritical();
+          } else if (!is_full) {
+            guarded = BeginEventCritical();
+          }
 
           ds << d_indent << "// trigger event(barrier) " << PSTR(f) << "\n";
           if (is_full) {
@@ -5298,17 +5693,28 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
                 : std::vector<ExplicitScaleAccumInfo>{});
   hoisted_scale_decl_scopes.push_back({});
   hoisted_scale_accum_scopes.push_back(std::nullopt);
+  hoisted_swizzled_tail_copy_scopes.push_back({});
 
   std::vector<std::string> loop_refs;
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
     auto cname = rng->IVName();
+    loop_refs.push_back(cname);
     loop_refs.push_back(std::string("__iv_") + cname);
     for (auto iv_name : within_map.at(InScopeName(cname)))
       loop_refs.push_back(SSMName(iv_name, false));
   }
 
   if (!IsHost() && n.GetBody()) {
+    for (const auto& info :
+         AnalyzeHoistableSwizzledTailCopyStates(n.GetBody(), loop_refs)) {
+      if (active_hoisted_swizzled_tail_copy_states.count(info.state_name))
+        continue;
+      EmitSwizzledTailCopyStateDecl(ds, d_indent, info);
+      active_hoisted_swizzled_tail_copy_states.insert(info.state_name);
+      hoisted_swizzled_tail_copy_scopes.back().push_back(info.state_name);
+    }
+
     hoisted_scale_accum_scopes.back() =
         AnalyzeHoistableScaledWGMMAAccum(n.GetBody(), loop_refs);
 
@@ -5402,7 +5808,8 @@ bool CuteCodeGen::Visit(AST::InThreadsBlock& n) {
       }
     }
     ds << d_indent << "if (" << pred_str;
-    if (in_producer) ds << " && __CHOREO_GROUPX4_SINGLE__";
+    if (in_producer && UseSingleThreadProducerScope())
+      ds << " && __CHOREO_GROUPX4_SINGLE__";
     ds << ") {\n";
   }
   IncrDeviceIndent();
@@ -5755,11 +6162,13 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
   // ENTRY assertions reference only function parameters / host-visible values
   // — the assertion-hoisting pass guarantees this. Safe to emit in the host
   // wrapper before the kernel launch.
+#if 0
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
     if (!ar.enabled) continue;
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
+#endif
 
   // USE_SITE and DEF_SITE assertions are emitted in device code (inside the
   // kernel) via EmitSiteAssertions, which is called from AfterVisitImpl during

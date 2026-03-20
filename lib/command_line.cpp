@@ -215,6 +215,11 @@ Option<size_t> shared_mem_alignment(OptionKind::Hidden,
 Option<bool> use_warpspec(OptionKind::User, "--use-warpspec", "", false,
                           "Enable warp-specialized synchronization for shared "
                           "event/full-empty pipelines.");
+Option<bool> single_thread_producer(
+  OptionKind::User, "--single-thread-producer", "", true,
+  "When used with --use-warpspec, keep the producer inthreads scope single-"
+  "threaded. Set to false to instead single-guard producer TMA/event "
+  "operations individually.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -352,6 +357,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
   CCtx().SetSharedMemAlignment(shared_mem_alignment.GetValue());
   CCtx().SetUseWarpSpec(use_warpspec.GetValue());
+  CCtx().SetSingleThreadProducer(single_thread_producer.GetValue());
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
 

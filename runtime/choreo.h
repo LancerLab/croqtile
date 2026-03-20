@@ -2006,8 +2006,9 @@ struct Sparse2to4HostPolicyWGMMA {
     }
   }
 
-  __co_host__ static inline void prepack(spanned_data<choreo::u8, 2>& meta_u8,
-                                         spanned_data<choreo::u32, 2>& meta_u32) {
+  __co_host__ static inline void
+  prepack(spanned_data<choreo::u8, 2>& meta_u8,
+          spanned_data<choreo::u32, 2>& meta_u32) {
     const size_t M = meta_u8.shape()[0];
     const size_t K_meta = meta_u8.shape()[1];
     const size_t K_meta_u32 = meta_u32.shape()[1];
