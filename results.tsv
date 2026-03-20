@@ -1,0 +1,3 @@
+# Auto-tune experiment log. Columns: iter	kernel	arch	tflops	eff%	bottleneck_before	idea_summary
+# Run tag: <to be filled by agent at start>
+iter	kernel	arch	tflops	eff%	bottleneck_before	idea_summary
