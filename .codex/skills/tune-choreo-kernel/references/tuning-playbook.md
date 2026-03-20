@@ -36,3 +36,10 @@ Use names that exactly match `#define` macros in the kernel source.
 - Candidate files and logs under `build/skill-logs/tune-choreo-kernel/run_<timestamp>/`
 - Ranked table: `results.csv`
 - Best kernel copy: `<input_stem>_m<M>_n<N>_k<K>.co`
+
+## Benchmark Timing
+
+- During tuning, benchmark runs should use the executable's default timing
+  configuration.
+- Do not inject `CHOREO_TIMING_WARMUP` or `CHOREO_TIMING_REPEAT` unless the
+  user explicitly asks for those overrides.

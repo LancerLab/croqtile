@@ -26,6 +26,8 @@ Tune a single `.co` kernel by sweeping compile-time macro definitions (typically
 - The script generates candidate `.co` files, calls:
   `.codex/skills/verify-choreo-kernel/scripts/verify_choreo_kernel.sh`
   then parses `TFLOPS` from benchmark logs.
+- For the benchmark phase, never inject `CHOREO_TIMING_WARMUP` or
+  `CHOREO_TIMING_REPEAT`. Use the kernel/program default timing configuration.
 
 4. Export best kernel.
 - The script writes a ranked CSV and copies the best candidate to:
@@ -50,6 +52,8 @@ Tune a single `.co` kernel by sweeping compile-time macro definitions (typically
 - Prefer small, hardware-safe search spaces first, then expand.
 - For GPU execution in Codex harness, run compile+runtime steps outside sandbox (escalated permissions).
 - If no TFLOPS is parsed for a candidate, treat that candidate as failed and keep logs for debugging.
+- When reporting tune results, treat benchmark numbers as coming from the
+  executable's default warmup/repeat settings.
 
 ## Resources
 

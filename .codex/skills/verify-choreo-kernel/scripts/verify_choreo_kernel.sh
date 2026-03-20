@@ -28,8 +28,6 @@ Environment:
   CHOREO_VERIFY_RUN_BENCH    Run post-verify bench (default: 1)
   CHOREO_VERIFY_BENCH_MNK    Bench shape as M,N,K (default: 2048,2048,2048)
   CHOREO_VERIFY_BENCH_TIMEOUT_SEC  Bench timeout seconds override
-  CHOREO_VERIFY_BENCH_WARMUP Bench timing warmup iterations (default: 10)
-  CHOREO_VERIFY_BENCH_REPEAT Bench timing repeat iterations (default: 100)
 EOF
 }
 
@@ -209,20 +207,22 @@ prepare_input_with_mnk() {
   printf '%s\n' "${out}"
 }
 
-append_warpspec_if_needed() {
-  local has_use_warpspec=0
-  if [[ "${input_path}" != *"warpspec"* ]]; then
+append_flag_if_needed() {
+  local needle="$1"
+  local flag="$2"
+  local present=0
+  if [[ "${input_path}" != *"${needle}"* ]]; then
     return 0
   fi
   for arg in "${compile_cmd[@]}"; do
-    if [[ "${arg}" == "--use-warpspec" ]]; then
-      has_use_warpspec=1
+    if [[ "${arg}" == "${flag}" ]]; then
+      present=1
       break
     fi
   done
-  if [[ ${has_use_warpspec} -eq 0 ]]; then
-    compile_cmd+=(--use-warpspec)
-    echo "Detected warpspec kernel; append compile flag --use-warpspec"
+  if [[ ${present} -eq 0 ]]; then
+    compile_cmd+=("${flag}")
+    echo "Detected ${needle} kernel; append compile flag ${flag}"
   fi
 }
 
@@ -238,7 +238,8 @@ if [[ ${#compile_extra[@]} -gt 0 ]]; then
 elif [[ "${auto_target}" -eq 1 && "${input_path}" == *"sm90"* ]]; then
   compile_cmd+=(-t cute -arch=sm_90a)
 fi
-append_warpspec_if_needed
+append_flag_if_needed "warpspec" "--use-warpspec"
+append_flag_if_needed "prepack" "--use-prepack"
 
 echo "== Compile =="
 printf 'Running:'
@@ -473,7 +474,8 @@ if [[ ${#compile_extra[@]} -gt 0 ]]; then
 elif [[ "${auto_target}" -eq 1 && "${input_path}" == *"sm90"* ]]; then
   compile_cmd+=(-t cute -arch=sm_90a)
 fi
-append_warpspec_if_needed
+append_flag_if_needed "warpspec" "--use-warpspec"
+append_flag_if_needed "prepack" "--use-prepack"
 
 echo "== Compile (bench) =="
 printf 'Running:'
@@ -504,8 +506,6 @@ for kv in "${runtime_env[@]}"; do
   esac
 done
 bench_runtime_env+=("CHOREO_DISABLE_TIMING=0")
-bench_runtime_env+=("CHOREO_TIMING_WARMUP=${CHOREO_VERIFY_BENCH_WARMUP:-10}")
-bench_runtime_env+=("CHOREO_TIMING_REPEAT=${CHOREO_VERIFY_BENCH_REPEAT:-100}")
 
 runtime_env=("${bench_runtime_env[@]}")
 run_cmd=("${bench_output}" "--skip-verify")

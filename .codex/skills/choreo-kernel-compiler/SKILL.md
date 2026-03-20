@@ -18,13 +18,19 @@ Compile Choreo kernel `.co` sources into output artifacts with reproducible comm
 - Prefer this baseline:
   `./build/choreo -c <input.co> -o <output>`
 - Add flags only when requested or clearly required by the task:
-  `-t <platform>`, `-arch=<processor>`, `-g`, `-tg`, `-es`, `-api=<mode>`, `--use-warpspec`.
+  `-t <platform>`, `-arch=<processor>`, `-g`, `-tg`, `-es`, `-api=<mode>`, `--use-warpspec`, `--use-prepack`.
 - For NVIDIA SM90 benchmarks in this repository, prefer `-t cute -arch=sm_90a`.
+- If the input file name contains `warpspec`, append `--use-warpspec` automatically unless already provided.
+- If the input file name contains `prepack`, append `--use-prepack` automatically unless already provided.
 
 3. Verify outputs.
 - Check command exit code.
 - Check that the requested output path exists.
 - When compile fails, report the exact failing command and stderr summary.
+
+4. If the task also includes running benchmark executables after compile:
+- Run with the program's default timing configuration.
+- Never inject `CHOREO_TIMING_WARMUP` or `CHOREO_TIMING_REPEAT` for benchmark runs.
 
 ## Command Templates
 

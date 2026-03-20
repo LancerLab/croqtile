@@ -17,6 +17,7 @@ Compile `.co` to executables, run correctness verification first, then run a lar
 - Use `./build/choreo <input.co> -o <binary>` so output can be executed.
 - If no target is specified and input file name contains `sm90`, default to `-t cute -arch=sm_90a`.
 - If input file name contains `warpspec`, append `--use-warpspec` automatically unless already provided.
+- If input file name contains `prepack`, append `--use-prepack` automatically unless already provided.
 
 2. Run quick verification.
 - Execute with timing disabled by default: `--disable-timing`.
@@ -25,11 +26,14 @@ Compile `.co` to executables, run correctness verification first, then run a lar
 - Select an idle GPU automatically before runtime unless GPU is explicitly pinned.
 - Enforce runtime timeout (`--timeout-sec`, default `120`) with kill grace period to avoid deadlock hangs.
 - Treat output containing `Test Passed` as verification success.
+- This `0/1` timing setup is only for the quick verify step, not for the
+  post-verify benchmark step.
 
 3. Run benchmark after verify.
 - Compile and run a bench binary after verification succeeds.
 - Use bench shape `2048,2048,2048` by default for throughput measurement.
 - Pass `--skip-verify` and keep timing enabled to report `Timing avg ms`, `TFLOPS`, and efficiency.
+- Never override benchmark warmup/repeat counts in this workflow; always let the kernel/program default timing configuration apply.
 - Enforce bench timeout (`--bench-timeout-sec`, default `180`) to avoid deadlock hangs.
 
 4. Debug on failure.
@@ -81,8 +85,6 @@ Environment:
 - `CHOREO_VERIFY_RUN_BENCH`: run post-verify bench (default `1`).
 - `CHOREO_VERIFY_BENCH_MNK`: bench shape as `M,N,K` (default `2048,2048,2048`).
 - `CHOREO_VERIFY_BENCH_TIMEOUT_SEC`: override bench timeout seconds.
-- `CHOREO_VERIFY_BENCH_WARMUP`: bench timing warmup iterations (default `10`).
-- `CHOREO_VERIFY_BENCH_REPEAT`: bench timing repeat iterations (default `100`).
 
 ## Debug Reference
 

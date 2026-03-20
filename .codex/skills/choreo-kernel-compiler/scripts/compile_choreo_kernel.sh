@@ -82,6 +82,25 @@ if [[ $# -gt 0 ]]; then
   extra_args=("$@")
 fi
 
+append_flag_if_needed() {
+  local needle="$1"
+  local flag="$2"
+  local present=0
+  if [[ "${input_path}" != *"${needle}"* ]]; then
+    return 0
+  fi
+  for arg in "${cmd[@]}"; do
+    if [[ "${arg}" == "${flag}" ]]; then
+      present=1
+      break
+    fi
+  done
+  if [[ ${present} -eq 0 ]]; then
+    cmd+=("${flag}")
+    echo "Detected ${needle} kernel; append compile flag ${flag}"
+  fi
+}
+
 cmd=("${CHOREO_BIN}" -c "${input_path}" -o "${output}")
 if [[ ${#extra_args[@]} -gt 0 ]]; then
   cmd+=("${extra_args[@]}")
@@ -89,6 +108,8 @@ elif [[ "${input_path}" == *"sm90"* ]]; then
   # Match common repository naming and avoid defaulting to gcu300 for SM90 kernels.
   cmd+=(-t cute -arch=sm_90a)
 fi
+append_flag_if_needed "warpspec" "--use-warpspec"
+append_flag_if_needed "prepack" "--use-prepack"
 
 printf 'Running:'
 printf ' %q' "${cmd[@]}"
