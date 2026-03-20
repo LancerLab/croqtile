@@ -126,7 +126,8 @@ public:
   const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId& arch) const override {
     if (IsFeatureSupported(arch, STR(ChoreoFeature::WGMMA)))
-      return {ParallelLevel::SEQ, ParallelLevel::BLOCK, ParallelLevel::GROUPx4,
+      return {ParallelLevel::SEQ, ParallelLevel::CLUSTER,
+              ParallelLevel::BLOCK, ParallelLevel::GROUPx4,
               ParallelLevel::GROUP, ParallelLevel::THREAD};
     else
       return {ParallelLevel::SEQ, ParallelLevel::BLOCK, ParallelLevel::GROUP,

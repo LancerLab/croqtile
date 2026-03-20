@@ -1385,6 +1385,7 @@ public:
     bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
 
     switch (level) {
+    case ParallelLevel::CLUSTER: break;
     case ParallelLevel::BLOCK: {
       FillPB(pb, AppendInner, ParallelLevel::THREAD);
       if (support_4x_group) {
@@ -1417,6 +1418,7 @@ public:
     bool support_group = TargetHasLevel(ParallelLevel::GROUP);
     bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
     switch (level) {
+    case ParallelLevel::CLUSTER: break;
     case ParallelLevel::BLOCK: {
     } break;
     case ParallelLevel::GROUPx4: {

@@ -70,9 +70,15 @@ private:
       pb_stack.clear();
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       auto pb_level = pb->GetLevel();
-      if (pb_level == ParallelLevel::BLOCK) {
-        block_pb = pb;
+      if (pb_level == ParallelLevel::CLUSTER) {
         assert(pb_stack.empty());
+        auto& tma_descs = cgi.GetTMADescs();
+        tma_descs.emplace(pb, std::vector<TMADesc>{});
+      } else if (pb_level == ParallelLevel::BLOCK) {
+        block_pb = pb;
+        assert(pb_stack.empty() ||
+               (pb_stack.size() == 1 &&
+                pb_stack.back()->GetLevel() == ParallelLevel::CLUSTER));
         auto& tma_descs = cgi.GetTMADescs();
         tma_descs.emplace(pb, std::vector<TMADesc>{});
       } else {
@@ -91,12 +97,19 @@ private:
 
       auto& lcs = cgi.GetFunctionLaunches(fname);
 
-      // Add a new launch config
-      if (pb_level == ParallelLevel::BLOCK) lcs.push_back({});
+      if (pb_level == ParallelLevel::CLUSTER) {
+        lcs.push_back({});
+      } else if (pb_level == ParallelLevel::BLOCK) {
+        if (lcs.empty() || !lcs.back().HasCluster())
+          lcs.push_back({});
+      }
 
       // Set the launch configure
       auto& lc = lcs.back();
       switch (pb->GetLevel()) {
+      case ParallelLevel::CLUSTER:
+        lc.SetClusterCount(pb->BoundValues());
+        break;
       case ParallelLevel::BLOCK: lc.SetBlockCount(pb->BoundValues()); break;
       case ParallelLevel::GROUP: lc.SetGroupCount(pb->BoundValues()); break;
       case ParallelLevel::GROUPx4: lc.SetGroupx4Count(pb->BoundValues()); break;
@@ -139,7 +152,9 @@ private:
       assert(lvl == Level());
       pb_stack.pop_back();
       if (lvl == ParallelLevel::BLOCK) {
-        assert(pb_stack.empty());
+        assert(pb_stack.empty() ||
+               (pb_stack.size() == 1 &&
+                pb_stack.back()->GetLevel() == ParallelLevel::CLUSTER));
         auto& children = cgi.GetPBTree(fname).GetChildren(pb);
         if (children.size() >= 2) {
           // check if there are multiple compatible branches

@@ -95,6 +95,107 @@ tma_load_2d_shared_cluster_global_mbarrier(void* dst, const void* tma_map,
   #endif
 }
 
+__device__ __forceinline__ void
+tma_load_2d_shared_cluster_global_mbarrier_multicast(
+    void* dst, const void* tma_map, uint64_t* bar, int32_t coord0,
+    int32_t coord1, uint16_t multicast_mask) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t dst_ptr = tma_to_shared_u32(dst);
+  asm volatile(
+      "cp.async.bulk.tensor.2d.shared::cluster.global.tile."
+      "mbarrier::complete_tx::bytes.multicast::cluster"
+      " [%0], [%1, {%3, %4}], [%2], %5;"
+      :
+      : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0), "r"(coord1),
+        "h"(multicast_mask)
+      : "memory");
+  #else
+  (void)dst;
+  (void)tma_map;
+  (void)bar;
+  (void)coord0;
+  (void)coord1;
+  (void)multicast_mask;
+  #endif
+}
+
+__device__ __forceinline__ uint32_t tma_cluster_rank() {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t rank;
+  asm volatile("mov.u32 %0, %cluster_ctarank;\n" : "=r"(rank));
+  return rank;
+  #else
+  return 0;
+  #endif
+}
+
+__device__ __forceinline__ uint32_t tma_cluster_dim() {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t dim;
+  asm volatile("mov.u32 %0, %cluster_nctarank;\n" : "=r"(dim));
+  return dim;
+  #else
+  return 1;
+  #endif
+}
+
+__device__ __forceinline__ void tma_cluster_sync() {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  asm volatile("barrier.cluster.arrive;\n" ::: "memory");
+  asm volatile("barrier.cluster.wait;\n" ::: "memory");
+  #endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_arrive_cluster(
+    uint64_t* bar, uint32_t cta_id, uint32_t count = 1) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t smem_addr = tma_to_shared_u32(bar);
+  asm volatile(
+      "{\n\t"
+      ".reg .b32 remAddr32;\n\t"
+      "mapa.shared::cluster.u32 remAddr32, %0, %1;\n\t"
+      "mbarrier.arrive.shared::cluster.b64 _, [remAddr32], %2;\n\t"
+      "}"
+      :
+      : "r"(smem_addr), "r"(cta_id), "r"(count));
+  #else
+  (void)bar;
+  (void)cta_id;
+  (void)count;
+  #endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_wait_parity_cluster(
+    uint64_t* bar, int phase_bit) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t spins = 0;
+  while (true) {
+    uint32_t ready = 0;
+    asm volatile(
+        "{\n"
+        ".reg .pred P1;\n"
+        "mbarrier.try_wait.parity.acquire.cluster.shared::cta.b64 P1, [%1], "
+        "%2;\n"
+        "selp.b32 %0, 1, 0, P1;\n"
+        "}\n"
+        : "=r"(ready)
+        : "r"(bar_ptr), "r"(phase_bit)
+        : "memory");
+    if (ready) return;
+    if (++spins >= CHOREO_PTX_BARRIER_MAX_SPINS) {
+      printf("WARN: cluster mbarrier wait exceeded max spins\n");
+      return;
+    }
+  }
+  #else
+  (void)bar;
+  (void)phase_bit;
+  #endif
+}
+
 __device__ __forceinline__ void tma_mbarrier_arrive(uint64_t* bar,
                                                     uint32_t count = 1) {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900

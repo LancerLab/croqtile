@@ -192,6 +192,8 @@ private:
   std::string stream_name;
   int tma_count = 0;
   int tma_future_count = 0;
+  bool cluster_defers_launch = false;
+  AST::ParallelBy* deferred_cluster_pb = nullptr;
   std::deque<std::string> recent_tma_tx_bytes;
   bool saw_explicit_mma_commit = false;
   bool wgmma_arrive_state_declared = false;

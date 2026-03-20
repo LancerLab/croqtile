@@ -636,8 +636,11 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.push(pb->GetLevel());
     // only on device-side
-    if (pb->IsOuter()) {
-      parallel_idx += 1;
+    bool is_deferred_block =
+        !pb->IsOuter() && pb->GetLevel() == ParallelLevel::BLOCK &&
+        cluster_defers_launch;
+    if (pb->IsOuter() || is_deferred_block) {
+      if (!is_deferred_block) parallel_idx += 1;
       cur_pb = pb;
       if (cgi.GetFunctionTrait(fname).multiple_parallelby)
         device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
@@ -720,7 +723,14 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
     // only on device-side
-    if (pb->IsOuter()) {
+    bool is_deferred_block =
+        !pb->IsOuter() && pb->GetLevel() == ParallelLevel::BLOCK &&
+        cluster_defers_launch;
+    if (pb->IsOuter() && pb->GetLevel() == ParallelLevel::CLUSTER) {
+      cluster_defers_launch = false;
+      deferred_cluster_pb = nullptr;
+    } else if (pb->IsOuter() || is_deferred_block) {
+      if (is_deferred_block) cluster_defers_launch = false;
       cur_pb = nullptr;
       ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
@@ -2138,6 +2148,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   auto& lconfig = lcs[parallel_idx];
   // Ensure launch config is up-to-date even when earlier passes skipped it.
   switch (n.GetLevel()) {
+  case ParallelLevel::CLUSTER:
+    lconfig.SetClusterCount(n.BoundValues());
+    break;
   case ParallelLevel::BLOCK: lconfig.SetBlockCount(n.BoundValues()); break;
   case ParallelLevel::GROUP: lconfig.SetGroupCount(n.BoundValues()); break;
   case ParallelLevel::GROUPx4: lconfig.SetGroupx4Count(n.BoundValues()); break;
@@ -2148,6 +2161,25 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   // add the device name map
   std::string dname[] = {"x", "y", "z"};
   switch (n.GetLevel()) {
+  case ParallelLevel::CLUSTER: {
+    std::string crank[] = {
+        "choreo::tma_cluster_rank()",
+        "(choreo::tma_cluster_rank() / " +
+            ValueSTR(n.BoundValues().size() > 0 ? n.BoundValues()[0]
+                                                 : sbe::nu(1)) +
+            ")",
+        "(choreo::tma_cluster_rank() / (" +
+            ValueSTR(n.BoundValues().size() > 0 ? n.BoundValues()[0]
+                                                 : sbe::nu(1)) +
+            " * " +
+            ValueSTR(n.BoundValues().size() > 1 ? n.BoundValues()[1]
+                                                 : sbe::nu(1)) +
+            "))"};
+    if (n.AllSubPVs().size() == 1)
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), crank[0]);
+    for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name), crank[i]);
+  } break;
   case ParallelLevel::BLOCK:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
@@ -2192,8 +2224,23 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
                        ".");
   }
 
+  // When CLUSTER is the outer parallel, defer launch codegen to the inner BLOCK.
+  // CLUSTER sets cluster dims and maps cluster rank variables; the actual
+  // kernel launch / device-function declaration is emitted by the BLOCK visit.
+  if (n.IsOuter() && n.GetLevel() == ParallelLevel::CLUSTER) {
+    cluster_defers_launch = true;
+    deferred_cluster_pb = &n;
+    ds << d_indent << "// cluster parallel-by: " << n.LOC() << "\n";
+    return true;
+  }
+
+  bool emit_launch =
+      n.IsOuter() ||
+      (!n.IsOuter() && n.GetLevel() == ParallelLevel::BLOCK &&
+       cluster_defers_launch);
+
   // only do the whole codegen when accessing the outer parallel-by
-  if (n.IsOuter()) {
+  if (emit_launch) {
     tma_future_count = 0;
 
     ValueItem cur_spm_size = sbe::nu(0);
@@ -2388,6 +2435,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ds << d_indent
          << "if (__CHOREO_BLOCK_SINGLE__) __choreo_cuda_debug_point__();\n";
     }
+    if (lconfig.HasCluster()) {
+      ds << d_indent << "choreo::tma_cluster_sync();\n";
+    }
     ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
   } else {
     auto& siblings = cgi.GetPBTree(fname).GetSiblings(&n);
@@ -2405,6 +2455,13 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
           "thread_block());\n";
   }
   auto& tma_descs = cgi.GetTMADescs()[&n];
+  auto* cluster_pb = deferred_cluster_pb;
+  if (tma_descs.empty() && cluster_pb) {
+    auto& cluster_tma = cgi.GetTMADescs()[cluster_pb];
+    if (!cluster_tma.empty()) {
+      tma_descs = cluster_tma;
+    }
+  }
   if (!tma_descs.empty()) {
     assert(n.GetLevel() == ParallelLevel::BLOCK);
     int emitted_tma_init_idx = 0;
@@ -2415,8 +2472,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       auto t_sty = GetSpannedType(desc.GetTo()->GetType());
       auto io_sty = (t_sty->GetStorage() == Storage::SHARED) ? t_sty : f_sty;
       bool rank2_tma = io_sty->GetShape().Rank() == 2;
+      bool has_cluster = !cgi.GetFunctionLaunches(fname).empty() &&
+                         cgi.GetFunctionLaunches(fname)[0].HasCluster();
       bool use_ptx_barrier_for_desc =
-          (tma_cluster_aware || ptx_barrier) && rank2_tma;
+          (tma_cluster_aware || ptx_barrier || has_cluster) && rank2_tma;
       auto in_thr_block = desc.GetInThreadsBlock();
       auto inner_pb_level = desc.GetPBLevel();
 
@@ -3363,8 +3422,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           hoisted_rev_indices.push_back(offset_name);
         }
       }
+      bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
+      bool has_cluster =
+          !cgi.GetFunctionLaunches(fname).empty() &&
+          cgi.GetFunctionLaunches(fname)[0].HasCluster();
       bool use_ptx_tma_sync =
-          (tma_cluster_aware || ptx_barrier) && t_shape.Rank() == 2;
+          (tma_cluster_aware || ptx_barrier || is_multicast_tma ||
+           has_cluster) &&
+          t_shape.Rank() == 2;
       bool emit_tma_single_guard =
           !(CCtx().UseWarpSpec() && tma_sync_level == ParallelLevel::GROUPx4 &&
             full_empty_only_tma_copy);
@@ -3383,30 +3448,46 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << tma_issue_prefix
            << "choreo::tma_mbarrier_expect_tx(((TMAAtom*)" << future_name
            << ".get_atom())->ptx_barrier(), " << tma_tx_bytes_expr << ");\n";
-        if (tma_cluster_aware) {
+        auto coord0_expr = hoisted_rev_indices.empty()
+                               ? ValueSTR(rev_indices.at(0))
+                               : hoisted_rev_indices.at(0);
+        auto coord1_expr = hoisted_rev_indices.empty()
+                               ? ValueSTR(rev_indices.at(1))
+                               : hoisted_rev_indices.at(1);
+        if (is_multicast_tma) {
+          const auto& lcfg = cgi.GetFunctionLaunches(fname);
+          auto cluster_total =
+              lcfg.empty()
+                  ? sbe::nu(1)
+                  : lcfg[0].cluster_count.x * lcfg[0].cluster_count.y *
+                        lcfg[0].cluster_count.z;
+          ds << d_indent << tma_issue_prefix
+             << "if (choreo::tma_cluster_rank() == 0) {\n";
+          ds << d_indent << tma_issue_prefix << "  "
+             << "choreo::tma_load_2d_shared_cluster_global_mbarrier_multicast("
+                "(void*)"
+             << t_buf_expr_with_offset << ", (const void*)&" << *tname
+             << "_tensor_map, ((TMAAtom*)" << future_name
+             << ".get_atom())->ptx_barrier(), " << coord0_expr << ", "
+             << coord1_expr << ", "
+             << "static_cast<uint16_t>((1u << " << ValueSTR(cluster_total)
+             << ") - 1u)"
+             << ");\n";
+          ds << d_indent << tma_issue_prefix << "}\n";
+        } else if (tma_cluster_aware) {
           ds << d_indent << tma_issue_prefix
              << "choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
              << t_buf_expr_with_offset << ", (const void*)&" << *tname
              << "_tensor_map, ((TMAAtom*)" << future_name
-             << ".get_atom())->ptx_barrier(), "
-             << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices.at(0))
-                                             : hoisted_rev_indices.at(0))
-             << ", "
-             << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices.at(1))
-                                             : hoisted_rev_indices.at(1))
-             << ");\n";
+             << ".get_atom())->ptx_barrier(), " << coord0_expr << ", "
+             << coord1_expr << ");\n";
         } else {
           ds << d_indent << tma_issue_prefix
              << "choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
              << t_buf_expr_with_offset << ", (const void*)&" << *tname
              << "_tensor_map, ((TMAAtom*)" << future_name
-             << ".get_atom())->ptx_barrier(), "
-             << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices.at(0))
-                                             : hoisted_rev_indices.at(0))
-             << ", "
-             << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices.at(1))
-                                             : hoisted_rev_indices.at(1))
-             << ");\n";
+             << ".get_atom())->ptx_barrier(), " << coord0_expr << ", "
+             << coord1_expr << ");\n";
         }
       } else {
         std::string tma_barrier_arg =
@@ -5914,7 +5995,15 @@ void CuteCodeGen::EmitCudaFree() {
 void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
                                      AST::ParallelBy* pb,
                                      const ValueItem& ring_start) {
-  oss << "__global__ void " << device_fn << "(";
+  const auto& lcs = cgi.GetFunctionLaunches(fname);
+  if (!lcs.empty() && lcs[0].HasCluster()) {
+    auto& cc = lcs[0].cluster_count;
+    auto cluster_total = cc.x * cc.y * cc.z;
+    oss << "__cluster_dims__(" << ValueSTR(cluster_total)
+        << ", 1, 1) __global__ void " << device_fn << "(";
+  } else {
+    oss << "__global__ void " << device_fn << "(";
+  }
 
   size_t index = 0;
   for (auto& item : GetDeviceFuncIns(updating_cgi)) {

@@ -454,6 +454,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "global"   return Choreo::Parser::make_STORAGE(Storage::GLOBAL, loc);
   "term"     return Choreo::Parser::make_PBLEVEL(ParallelLevel::TERM, loc);
   "device"   return Choreo::Parser::make_PBLEVEL(ParallelLevel::DEVICE, loc);
+  "cluster"  return Choreo::Parser::make_PBLEVEL(ParallelLevel::CLUSTER, loc);
   "block"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::BLOCK, loc);
   "group-4"  return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUPx4, loc);
   "group"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUP, loc);
@@ -506,6 +507,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".swiz"    return Choreo::Parser::make_SWIZZLE(yytext, loc);
   ".sp"      return Choreo::Parser::make_SPARSE(yytext, loc);
   ".zfill"   return Choreo::Parser::make_ZFILL(yytext, loc);
+  ".multicast" return Choreo::Parser::make_MULTICAST(yytext, loc);
   ".any"     return Choreo::Parser::make_NONE(yytext, loc);
   ".async"   return Choreo::Parser::make_ASYNC(yytext, loc);
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);

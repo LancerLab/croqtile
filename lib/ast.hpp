@@ -2472,12 +2472,13 @@ struct DMAAttribute {
   SwizMode sw_mode = SwizMode::NONE;
   bool zfill = false;
   bool is_sparse = false;
+  bool multicast = false;
   int sparse_n = 0;
   int sparse_m = 0;
   DMAAttribute(SwizMode swiz = SwizMode::NONE, bool zf = false, bool sp = false,
-               int sp_n = 0, int sp_m = 0)
-      : sw_mode(swiz), zfill(zf), is_sparse(sp), sparse_n(sp_n),
-        sparse_m(sp_m) {}
+               int sp_n = 0, int sp_m = 0, bool mc = false)
+      : sw_mode(swiz), zfill(zf), is_sparse(sp), multicast(mc),
+        sparse_n(sp_n), sparse_m(sp_m) {}
 };
 
 struct DMAAsync {
@@ -2611,6 +2612,7 @@ public:
   bool HasEvent() const { return dma_async.HasEvent(); }
   ptr<AST::Node> Event() const { return dma_async.Event(); }
   bool IsTMA() const { return enforce_tma; }
+  bool IsMulticast() const { return attr.multicast; }
 
   void accept(Visitor&) override;
 

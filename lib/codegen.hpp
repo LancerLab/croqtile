@@ -57,7 +57,8 @@ struct ParallelCounts {
     x = sbe::nu(1);
   }
   bool EqualsOne() const {
-    return (x == sbe::nu(1)) && (y == sbe::nu(1)) && (z == sbe::nu(1));
+    return sbe::ceq(x, sbe::nu(1)) && sbe::ceq(y, sbe::nu(1)) &&
+           sbe::ceq(z, sbe::nu(1));
   }
 };
 
@@ -67,10 +68,23 @@ inline std::ostream& operator<<(std::ostream& os, ParallelCounts pc) {
 }
 
 struct LaunchConfig {
+  ParallelCounts cluster_count;
   ParallelCounts block_count;
   ParallelCounts group4_count;
   ParallelCounts group_count;
   ParallelCounts thread_count;
+
+  void SetClusterCount(const ValueList& dims) {
+    cluster_count.Reset();
+    switch (dims.size()) {
+    case 3: cluster_count.z = dims[2]; [[fallthrough]];
+    case 2: cluster_count.y = dims[1]; [[fallthrough]];
+    case 1: cluster_count.x = dims[0]; break;
+    default: choreo_unreachable("The number of dimensions is not supported.");
+    }
+  }
+
+  bool HasCluster() const { return !cluster_count.EqualsOne(); }
 
   void SetBlockCount(const ValueList& dims) {
     block_count.Reset();

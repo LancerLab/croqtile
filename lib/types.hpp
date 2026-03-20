@@ -23,6 +23,7 @@ enum class ParallelLevel {
   GROUP,
   GROUPx4,
   BLOCK,
+  CLUSTER, /* thread block cluster (TBC), above block */
   DEVICE,
   TERM /* terminal machine in cluster*/,
   SEQ,
@@ -414,7 +415,8 @@ inline static std::string GetStringFrom(ParallelLevel st) {
   static const std::unordered_map<ParallelLevel, std::string> enumToString = {
       {ParallelLevel::THREAD, "thread"},   {ParallelLevel::GROUP, "group"},
       {ParallelLevel::GROUPx4, "group-4"}, {ParallelLevel::BLOCK, "block"},
-      {ParallelLevel::DEVICE, "device"},   {ParallelLevel::TERM, "term"},
+      {ParallelLevel::CLUSTER, "cluster"}, {ParallelLevel::DEVICE, "device"},
+      {ParallelLevel::TERM, "term"},
       {ParallelLevel::SEQ, "sequential"},  {ParallelLevel::NONE, "none"},
       {ParallelLevel::UNKNOWN, "unknown"},
   };
