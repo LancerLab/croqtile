@@ -56,9 +56,6 @@
 #endif
 
 template <typename T>
-using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
-
-template <typename T>
 using SparsePolicyWGMMAU32 = choreo::utils::SparseHostPolicy<T, choreo::u32>;
 
 template <typename T>
