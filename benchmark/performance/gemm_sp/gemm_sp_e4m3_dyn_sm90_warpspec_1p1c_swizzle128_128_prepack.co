@@ -19,13 +19,33 @@
 #define SPMM_WARP_N 256
 #define SPMM_TILE_K 128
 #define SPMM_WARP_K 64
-#define SPMM_STAGES 3
+#define SPMM_STAGES 2
 
 #define SPMM_PACKED_TILE_K 64
 #define SPMM_META_TILE_COLS 4
 
 #define SPMM_LHS_SWIZ 64
 #define SPMM_RHS_SWIZ 128
+
+#if SPMM_WARP_M != 64
+#error "SPMM_WARP_M must be 64 for SM90 sparse WGMMA constraints"
+#endif
+
+#if SPMM_WARP_N < 8 || SPMM_WARP_N > 256 || (SPMM_WARP_N % 8) != 0
+#error "SPMM_WARP_N must be in [8,256] and divisible by 8 for SM90 sparse WGMMA"
+#endif
+
+#if SPMM_WARP_K != 64
+#error "SPMM_WARP_K must be 64 for e4m3 sparse WGMMA constraints"
+#endif
+
+#if SPMM_TILE_K != (2 * SPMM_PACKED_TILE_K)
+#error "SPMM_TILE_K must equal 2 * SPMM_PACKED_TILE_K"
+#endif
+
+#if SPMM_META_TILE_COLS != (SPMM_TILE_K / 32)
+#error "SPMM_META_TILE_COLS must equal SPMM_TILE_K / 32 for prepacked sparse metadata"
+#endif
 
 template <typename T>
 using SparsePolicyWGMMAU32 = choreo::utils::SparseHostPolicy<T, choreo::u32>;
@@ -51,8 +71,6 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
     shared event full[SPMM_STAGES], empty[SPMM_STAGES];
     shared f8_e4m3 [SPMM_STAGES * SPMM_WARP_M, SPMM_PACKED_TILE_K] lhs_load_s;
     shared f8_e4m3 [SPMM_STAGES * SPMM_WARP_N, SPMM_TILE_K] rhs_load_s;
-    shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s;
-
     parallel p1 by 2 : group-4 {
       inthreads.async (p1 == 0) {
         foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
@@ -72,7 +90,9 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
 
       inthreads.async (p1 == 1) {
         mc = mma.fill.f16 0.0f;
-        foreach {s} in [SPMM_STAGES] { trigger empty[s]; }
+        foreach {s} in [SPMM_STAGES] {
+          trigger empty[s];
+        }
         foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
           stage = iv_k % SPMM_STAGES;
           wait full[stage];
@@ -85,8 +105,7 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
                 .subspan(SPMM_WARP_N, SPMM_TILE_K)
                 .at(stage, 0)
                 .chunkat(_, iv_warp);
-            me = mma.load lhs_meta
-                .subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
+            me = mma.load lhs_meta.subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
                 .at(block_m, iv_k)
                 .chunkat(_, iv_warp);
             mma.row.row.sp mc, ma, mb, me;
@@ -94,11 +113,11 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
           mma.commit;
           trigger empty[stage];
         }
+        shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s;
         mma.store mc, output_s;
+        tma.copy output_s => output.subspan(SPMM_WARP_M, SPMM_WARP_N).at(block_m, block_n);
       }
     }
-
-    tma.copy output_s => output.subspan(SPMM_WARP_M, SPMM_WARP_N).at(block_m, block_n);
   }
 }
 
@@ -235,7 +254,7 @@ int main(int argc, char** argv) {
   auto res_v = res_h.view();
 
   float tolerance = 0.5f;
-  for (size_t i = 0; i < 64; ++i) {
+  for (size_t i = 0; i < 128; ++i) {
     for (size_t j = 0; j < 256; ++j) {
       float ref = 0.0f;
       for (size_t kk = 0; kk < k; ++kk) {
