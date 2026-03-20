@@ -14,8 +14,7 @@
 #define WARP_N 256
 #define TILE_K 128
 #define WARP_K 64
-#define LHS_TMA_K 32
-#define LHS_NUM_TILES 2
+#define PACKED_TILE_K 64
 #define SPMM_META_TILE_COLS 16
 
 template <typename T>
@@ -38,17 +37,19 @@ __co__ void matmul_sp_e4m3(global f8_e4m3 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 
                             global f32 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_N] output) {
   parallel {block_m, block_n} by [cdiv(MATMUL_DEFAULT_M, WARP_M), cdiv(MATMUL_DEFAULT_N, WARP_N)] : block {
     mc = mma.fill.f32 0.0f;
-    shared f8_e4m3 [WARP_M * LHS_NUM_TILES, LHS_TMA_K] lhs_load_s;
+    shared f8_e4m3 [WARP_M, PACKED_TILE_K] lhs_load_s;
     shared u8 [WARP_M, SPMM_META_TILE_COLS] lhs_load_s_mdata;
     foreach {iv_k} in [cdiv(MATMUL_DEFAULT_K, TILE_K)] {
-      foreach {iv_tma_lhs} in [LHS_NUM_TILES] {
-        tma.copy.swiz<32> lhs_packed.subspan(WARP_M, LHS_TMA_K).at(block_m, iv_k * LHS_NUM_TILES + iv_tma_lhs) => lhs_load_s.chunkat(iv_tma_lhs, _);
-      }
+      tma.copy.swiz<64> lhs_packed
+          .subspan(WARP_M, PACKED_TILE_K)
+          .at(block_m, iv_k)
+          => lhs_load_s;
       rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
       dma.copy lhs_meta.chunkat(block_m, iv_k) => lhs_load_s_mdata;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.load.swiz<32> lhs_load_s.chunkat(iv_warp, _);
+          ma = mma.load.swiz<64> lhs_load_s
+              .view(WARP_M, 32).from(0, iv_warp * 32);
           mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
           me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;

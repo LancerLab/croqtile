@@ -3800,8 +3800,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       case SwizMode::B128: sparse_layout_suffix = "SW128"; break;
       default: sparse_layout_suffix = "INTER"; break;
       }
+      // For fp8 sparse FRAG_A, prefer the CUTE SpAtom descriptor path which
+      // handles sparse metadata encoding. However, for swizzle modes where
+      // the SpAtom's minimum K dimension exceeds the MMA K (e.g., B64/B128
+      // with fp8 sparse: SpAtom K=128/256 > MMA K=64), the tile_to_shape
+      // would fail. Fall back to wgmma_make_smem_desc in those cases.
       bool sparse_a_needs_cute_desc =
           policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A && frag_is_fp8;
+      if (sparse_a_needs_cute_desc &&
+          (swizzle_val == SwizMode::B64 || swizzle_val == SwizMode::B128)) {
+        sparse_a_needs_cute_desc = false;
+      }
       if (sparse_a_needs_cute_desc) {
         auto m_val = STR(ssmi.shape.at(0));
         auto k_val = STR(ssmi.shape.at(2));
