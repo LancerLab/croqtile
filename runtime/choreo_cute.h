@@ -47,6 +47,20 @@ __device__ __forceinline__ void tma_mbarrier_expect_tx(uint64_t* bar,
   #endif
 }
 
+__device__ __forceinline__ void tma_mbarrier_expect_tx_noarrive(uint64_t* bar,
+                                                                uint32_t bytes) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  asm volatile(
+      "mbarrier.expect_tx.relaxed.cta.shared::cta.b64 [%0], %1;\n"
+      :
+      : "r"(bar_ptr), "r"(bytes));
+  #else
+  (void)bar;
+  (void)bytes;
+  #endif
+}
+
 __device__ __forceinline__ void
 tma_load_2d_shared_cta_global_mbarrier(void* dst, const void* tma_map,
                                        uint64_t* bar, int32_t coord0,

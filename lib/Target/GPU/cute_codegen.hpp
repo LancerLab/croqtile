@@ -194,11 +194,13 @@ private:
   int tma_future_count = 0;
   bool cluster_defers_launch = false;
   AST::ParallelBy* deferred_cluster_pb = nullptr;
+  std::string deferred_spm_decls;
   std::deque<std::string> recent_tma_tx_bytes;
   bool saw_explicit_mma_commit = false;
   bool wgmma_arrive_state_declared = false;
   bool pending_mbarrier_full_event_array = false;
   std::string pending_mbarrier_full_event_name;
+  std::set<std::string> cluster_trigger_events_;
   bool in_producer = false; // hack
   bool in_consumer = false; // hack
   struct HoistedSwizzledTailCopyStateInfo {
@@ -348,7 +350,35 @@ private:
     hoisted_scale_accum_scopes.clear();
     hoisted_swizzled_tail_copy_scopes.clear();
     active_hoisted_swizzled_tail_copy_states.clear();
+    cluster_trigger_events_.clear();
     ResetLineDirectiveState();
+  }
+
+  static void CollectClusterTriggerEvents(AST::Node* node,
+                                          std::set<std::string>& out) {
+    if (!node) return;
+    if (auto* trigger = dyn_cast<AST::Trigger>(node)) {
+      if (trigger->IsClusterScope()) {
+        for (auto& f : trigger->GetEvents()) {
+          auto expr = cast<AST::Expr>(f);
+          if (expr->op == Op::ElemOf) {
+            auto bid = AST::GetArrayBaseSymbol(*expr);
+            out.insert(bid->name);
+          } else if (auto sym = expr->GetSymbol()) {
+            out.insert(sym->name);
+          }
+        }
+      }
+    }
+    if (node->HasBody()) {
+      if (auto body = node->GetBody()) {
+        for (auto& child : body->values)
+          CollectClusterTriggerEvents(child.get(), out);
+      }
+    } else if (auto* mn = dyn_cast<AST::MultiNodes>(node)) {
+      for (auto& child : mn->values)
+        CollectClusterTriggerEvents(child.get(), out);
+    }
   }
 
   std::string GenHostParamName() {

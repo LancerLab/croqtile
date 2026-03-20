@@ -2244,6 +2244,13 @@ wait_stmt
 
 trigger_stmt
     : TRIGGER ids_list { $$ = AST::Make<AST::Trigger>(@1, $2); }
+    | TRIGGER DOT PBLEVEL ids_list {
+        if ($3 != ParallelLevel::CLUSTER) {
+          error(@3, "only 'cluster' scope is supported for trigger.");
+          YYERROR;
+        }
+        $$ = AST::Make<AST::Trigger>(@1, $4, true);
+      }
     ;
 
 align_func

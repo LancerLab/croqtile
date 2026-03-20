@@ -3002,16 +3002,22 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
 
 struct Trigger : public Node, public TypeIDProvider<Trigger> {
   ptr<MultiValues> targets;
+  bool cluster_scope = false;
 
-  Trigger(const location& l, const ptr<MultiValues>& t) : Node(l), targets(t) {}
+  Trigger(const location& l, const ptr<MultiValues>& t, bool cs = false)
+      : Node(l), targets(t), cluster_scope(cs) {}
+
+  bool IsClusterScope() const { return cluster_scope; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<Trigger>(LOC(), CloneP(targets));
+    return Make<Trigger>(LOC(), CloneP(targets), cluster_scope);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << "\n" << prefix << "`- TRIGGER: ";
+    os << "\n" << prefix << "`- TRIGGER";
+    if (cluster_scope) os << ".CLUSTER";
+    os << ": ";
     targets->Print(os, "", with_type);
   }
 
