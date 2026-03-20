@@ -1,0 +1,443 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+// Merged WGMMA sparse tests (base flags, no --use-prepack or --use-warpspec).
+// Covers: f16 (N=8/16/32, K=32/64), fp8 e4m3 (N=8/32/64, K=64), bf16 (N=8, K=64).
+
+template <typename T>
+using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
+
+// All template helpers MUST be at top level (cannot be inside scoped blocks)
+template <typename T, int NVAL, int KVAL>
+void f16_init_b(choreo::spanned_data<T, 2>& rhs, std::mt19937& gen) {
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for (size_t kk = 0; kk < KVAL; ++kk)
+    for (size_t col = 0; col < NVAL; ++col) {
+      float value = dist(gen);
+      if (std::fabs(value) < 0.1f) value = (value < 0.0f ? -0.25f : 0.25f);
+      rhs[col][kk] = choreo::utils::from_f32<T>(value);
+    }
+}
+
+template <typename T, int NVAL, int KVAL>
+int f16_verify(const char* tag, choreo::spanned_data<T, 2>& lhs_dense,
+               choreo::spanned_data<T, 2>& rhs,
+               choreo::spanned_data<float, 2>& res, float tolerance) {
+  int errors = 0;
+  for (size_t i = 0; i < 64; ++i)
+    for (size_t j = 0; j < NVAL; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < KVAL; ++k)
+        ref += choreo::to_f32(lhs_dense[i][k]) * choreo::to_f32(rhs[j][k]);
+      float got = res[i][j];
+      float diff = std::abs(got - ref);
+      if (diff > tolerance) ++errors;
+    }
+  std::cout << tag << ": " << errors << " errors\n";
+  return errors;
+}
+
+template <int NVAL>
+void fp8_init_b(choreo::spanned_data<choreo::f8_e4m3, 2>& rhs, std::mt19937& gen) {
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for (size_t kk = 0; kk < 64; ++kk)
+    for (size_t col = 0; col < NVAL; ++col) {
+      float value = dist(gen);
+      if (std::fabs(value) < 0.1f) value = (value < 0.0f ? -0.25f : 0.25f);
+      rhs[col][kk] = choreo::utils::from_f32<choreo::f8_e4m3>(value);
+    }
+}
+
+template <int NVAL>
+int fp8_verify(const char* tag, choreo::spanned_data<choreo::f8_e4m3, 2>& lhs_dense,
+               choreo::spanned_data<choreo::f8_e4m3, 2>& rhs,
+               choreo::spanned_data<float, 2>& res, float tolerance) {
+  int errors = 0;
+  for (size_t i = 0; i < 64; ++i)
+    for (size_t j = 0; j < NVAL; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < 64; ++k)
+        ref += choreo::to_f32(lhs_dense[i][k]) * choreo::to_f32(rhs[j][k]);
+      float got = res[i][j];
+      float diff = std::abs(got - ref);
+      if (diff > tolerance) ++errors;
+    }
+  std::cout << tag << ": " << errors << " errors\n";
+  return errors;
+}
+
+void bf16_init_b(choreo::spanned_data<choreo::bf16, 2>& rhs, std::mt19937& gen) {
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for (size_t col = 0; col < 8; ++col)
+    for (size_t kk = 0; kk < 64; ++kk) {
+      float value = dist(gen);
+      if (std::fabs(value) < 0.1f) value = (value < 0.0f ? -0.25f : 0.25f);
+      rhs[col][kk] = choreo::utils::from_f32<choreo::bf16>(value);
+    }
+}
+
+void f16_n8_init_b(choreo::spanned_data<choreo::f16, 2>& rhs, std::mt19937& gen) {
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for (size_t col = 0; col < 8; ++col)
+    for (size_t kk = 0; kk < 64; ++kk) {
+      float value = dist(gen);
+      if (std::fabs(value) < 0.1f) value = (value < 0.0f ? -0.25f : 0.25f);
+      rhs[col][kk] = choreo::utils::from_f32<choreo::f16>(value);
+    }
+}
+
+void f16_n16_init_b(choreo::spanned_data<choreo::f16, 2>& rhs, std::mt19937& gen) {
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for (size_t col = 0; col < 16; ++col)
+    for (size_t kk = 0; kk < 64; ++kk) {
+      float value = dist(gen);
+      if (std::fabs(value) < 0.1f) value = (value < 0.0f ? -0.25f : 0.25f);
+      rhs[col][kk] = choreo::utils::from_f32<choreo::f16>(value);
+    }
+}
+
+// Kernel: f16 N=32 K=64
+__co__ auto matmul_f16_n32_k64(f16 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f16 [32, 64] rhs) {
+  f32 [64, 32] output{0.0f};
+  int WARP_M = 64, WARP_N = 32, TILE_K = 64, WARP_K = 32;
+  parallel {block_m, block_n} by [cdiv(64, WARP_M), cdiv(32, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(64, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
+      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+  return output;
+}
+
+// Kernel: f16 N=32 K=32
+__co__ auto matmul_f16_n32_k32(f16 [64, 16] lhs_packed, u8 [64, 4] lhs_meta, f16 [32, 32] rhs) {
+  f32 [64, 32] output{0.0f};
+  int WARP_M = 64, WARP_N = 32, TILE_K = 32, WARP_K = 32;
+  parallel {block_m, block_n} by [cdiv(64, WARP_M), cdiv(32, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(32, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<32> lhs_packed.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<64> rhs.chunkat(block_n, iv_k) => shared;
+      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<64> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+  return output;
+}
+
+// Kernel: fp8 e4m3 N=32 K=64
+__co__ auto matmul_fp8_n32(f8_e4m3 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f8_e4m3 [32, 64] rhs) {
+  f32 [64, 32] output{0.0f};
+  int WARP_M = 64, WARP_N = 32, TILE_K = 64, WARP_K = 64;
+  parallel {block_m, block_n} by [cdiv(64, WARP_M), cdiv(32, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(64, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<32> lhs_packed.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<64> rhs.chunkat(block_n, iv_k) => shared;
+      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<64> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+  return output;
+}
+
+// Kernel: fp8 e4m3 N=64 K=64
+__co__ auto matmul_fp8_n64(f8_e4m3 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f8_e4m3 [64, 64] rhs) {
+  f32 [64, 64] output{0.0f};
+  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 64;
+  parallel {block_m, block_n} by [cdiv(64, WARP_M), cdiv(64, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(64, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<32> lhs_packed.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<64> rhs.chunkat(block_n, iv_k) => shared;
+      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<64> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+  return output;
+}
+
+// Kernel: fp8 e4m3 N=8 K=64 (minimal)
+__co__ auto matmul_fp8_n8(f8_e4m3 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f8_e4m3 [8, 64] rhs) {
+  f32 [64, 8] output{0.0f};
+  int WARP_M = 64, WARP_N = 8, TILE_K = 64, WARP_K = 64;
+  parallel {block_m, block_n} by [cdiv(64, WARP_M), cdiv(8, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(64, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<32> lhs_packed.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<64> rhs.chunkat(block_n, iv_k) => shared;
+      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<64> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+  return output;
+}
+
+// Kernel: f16 N=8 K=64
+__co__ auto matmul_f16_n8k64(f16 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f16 [8, 64] rhs) {
+  f32 [64, 8] output{0.0f};
+  int WARP_M = 64, WARP_N = 8, TILE_K = 64, WARP_K = 32;
+  parallel {block_m, block_n} by [cdiv(64, WARP_M), cdiv(8, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(64, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
+      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+  return output;
+}
+
+// Kernel: bf16 N=8 K=64
+__co__ auto matmul_bf16_n8k64(bf16 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, bf16 [8, 64] rhs) {
+  f32 [64, 8] output{0.0f};
+  int WARP_M = 64, WARP_N = 8, TILE_K = 64, WARP_K = 32;
+  parallel {block_m, block_n} by [cdiv(64, WARP_M), cdiv(8, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(64, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
+      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+  return output;
+}
+
+// Kernel: f16 N=16 K=64
+__co__ auto matmul_f16_n16_k64(f16 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f16 [16, 64] rhs) {
+  f32 [64, 16] output{0.0f};
+  int WARP_M = 64, WARP_N = 16, TILE_K = 64, WARP_K = 32;
+  parallel {block_m, block_n} by [cdiv(64, WARP_M), cdiv(16, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(64, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<64> lhs_packed.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
+      lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<64> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+  return output;
+}
+
+int main() {
+  int total_errors = 0;
+
+  // f16 N=32 K=64
+  {
+    std::mt19937 gen(42);
+    auto ld = choreo::make_spandata<choreo::f16>(64, 64);
+    auto lp = choreo::make_spandata<choreo::f16>(64, 32);
+    auto lm = choreo::make_spandata<choreo::u8>(64, 8);
+    auto rh = choreo::make_spandata<choreo::f16>(32, 64);
+    SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(ld, gen);
+    f16_init_b<choreo::f16, 32, 64>(rh, gen);
+    SparsePolicyWGMMA<choreo::f16>::encode(ld, lp, lm);
+    auto res = matmul_f16_n32_k64(lp.view(), lm.view(), rh.view());
+    total_errors += f16_verify<choreo::f16, 32, 64>("f16_n32_k64", ld, rh, res, 1.0e-1f);
+  }
+
+  // f16 N=32 K=32
+  {
+    std::mt19937 gen(42);
+    auto ld = choreo::make_spandata<choreo::f16>(64, 32);
+    auto lp = choreo::make_spandata<choreo::f16>(64, 16);
+    auto lm = choreo::make_spandata<choreo::u8>(64, 4);
+    auto rh = choreo::make_spandata<choreo::f16>(32, 32);
+    SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(ld, gen);
+    f16_init_b<choreo::f16, 32, 32>(rh, gen);
+    SparsePolicyWGMMA<choreo::f16>::encode(ld, lp, lm);
+    auto res = matmul_f16_n32_k32(lp.view(), lm.view(), rh.view());
+    total_errors += f16_verify<choreo::f16, 32, 32>("f16_n32_k32", ld, rh, res, 1.0e-1f);
+  }
+
+  // fp8 e4m3 N=32
+  {
+    std::mt19937 gen(42);
+    auto ld = choreo::make_spandata<choreo::f8_e4m3>(64, 64);
+    auto lp = choreo::make_spandata<choreo::f8_e4m3>(64, 32);
+    auto lm = choreo::make_spandata<choreo::u8>(64, 8);
+    auto rh = choreo::make_spandata<choreo::f8_e4m3>(32, 64);
+    SparsePolicyWGMMA<choreo::f8_e4m3>::init_structured_sparse_A(ld, gen);
+    fp8_init_b<32>(rh, gen);
+    SparsePolicyWGMMA<choreo::f8_e4m3>::encode(ld, lp, lm);
+    auto res = matmul_fp8_n32(lp.view(), lm.view(), rh.view());
+    total_errors += fp8_verify<32>("fp8_n32", ld, rh, res, 0.5f);
+  }
+
+  // fp8 e4m3 N=64
+  {
+    std::mt19937 gen(42);
+    auto ld = choreo::make_spandata<choreo::f8_e4m3>(64, 64);
+    auto lp = choreo::make_spandata<choreo::f8_e4m3>(64, 32);
+    auto lm = choreo::make_spandata<choreo::u8>(64, 8);
+    auto rh = choreo::make_spandata<choreo::f8_e4m3>(64, 64);
+    SparsePolicyWGMMA<choreo::f8_e4m3>::init_structured_sparse_A(ld, gen);
+    fp8_init_b<64>(rh, gen);
+    SparsePolicyWGMMA<choreo::f8_e4m3>::encode(ld, lp, lm);
+    auto res = matmul_fp8_n64(lp.view(), lm.view(), rh.view());
+    total_errors += fp8_verify<64>("fp8_n64", ld, rh, res, 0.5f);
+  }
+
+  // fp8 e4m3 N=8
+  {
+    std::mt19937 gen(42);
+    auto ld = choreo::make_spandata<choreo::f8_e4m3>(64, 64);
+    auto lp = choreo::make_spandata<choreo::f8_e4m3>(64, 32);
+    auto lm = choreo::make_spandata<choreo::u8>(64, 8);
+    auto rh = choreo::make_spandata<choreo::f8_e4m3>(8, 64);
+    SparsePolicyWGMMA<choreo::f8_e4m3>::init_structured_sparse_A(ld, gen);
+    fp8_init_b<8>(rh, gen);
+    SparsePolicyWGMMA<choreo::f8_e4m3>::encode(ld, lp, lm);
+    auto res = matmul_fp8_n8(lp.view(), lm.view(), rh.view());
+    total_errors += fp8_verify<8>("fp8_n8", ld, rh, res, 0.5f);
+  }
+
+  // f16 N=8 K=64
+  {
+    std::mt19937 gen(42);
+    auto ld = choreo::make_spandata<choreo::f16>(64, 64);
+    auto lp = choreo::make_spandata<choreo::f16>(64, 32);
+    auto lm = choreo::make_spandata<choreo::u8>(64, 8);
+    auto rh = choreo::make_spandata<choreo::f16>(8, 64);
+    SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(ld, gen);
+    f16_n8_init_b(rh, gen);
+    SparsePolicyWGMMA<choreo::f16>::encode(ld, lp, lm);
+    auto res = matmul_f16_n8k64(lp.view(), lm.view(), rh.view());
+    int errors = 0;
+    for (size_t i = 0; i < 64; ++i)
+      for (size_t j = 0; j < 8; ++j) {
+        float ref = 0.0f;
+        for (size_t k = 0; k < 64; ++k)
+          ref += choreo::to_f32(ld[i][k]) * choreo::to_f32(rh[j][k]);
+        float got = res[i][j];
+        float diff = std::abs(got - ref);
+        if (diff > 1.0e-1f) ++errors;
+      }
+    std::cout << "f16_n8_k64: " << errors << " errors\n";
+    total_errors += errors;
+  }
+
+  // bf16 N=8 K=64
+  {
+    std::mt19937 gen(42);
+    auto ld = choreo::make_spandata<choreo::bf16>(64, 64);
+    auto lp = choreo::make_spandata<choreo::bf16>(64, 32);
+    auto lm = choreo::make_spandata<choreo::u8>(64, 8);
+    auto rh = choreo::make_spandata<choreo::bf16>(8, 64);
+    SparsePolicyWGMMA<choreo::bf16>::init_structured_sparse_A(ld, gen);
+    bf16_init_b(rh, gen);
+    SparsePolicyWGMMA<choreo::bf16>::encode(ld, lp, lm);
+    auto res = matmul_bf16_n8k64(lp.view(), lm.view(), rh.view());
+    int errors = 0;
+    for (size_t i = 0; i < 64; ++i)
+      for (size_t j = 0; j < 8; ++j) {
+        float ref = 0.0f;
+        for (size_t k = 0; k < 64; ++k)
+          ref += choreo::to_f32(ld[i][k]) * choreo::to_f32(rh[j][k]);
+        float got = res[i][j];
+        float diff = std::abs(got - ref);
+        if (diff > 2.0e-1f) ++errors;
+      }
+    std::cout << "bf16_n8_k64: " << errors << " errors\n";
+    total_errors += errors;
+  }
+
+  // f16 N=16 K=64
+  {
+    std::mt19937 gen(42);
+    auto ld = choreo::make_spandata<choreo::f16>(64, 64);
+    auto lp = choreo::make_spandata<choreo::f16>(64, 32);
+    auto lm = choreo::make_spandata<choreo::u8>(64, 8);
+    auto rh = choreo::make_spandata<choreo::f16>(16, 64);
+    SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(ld, gen);
+    f16_n16_init_b(rh, gen);
+    SparsePolicyWGMMA<choreo::f16>::encode(ld, lp, lm);
+    auto res = matmul_f16_n16_k64(lp.view(), lm.view(), rh.view());
+    int errors = 0;
+    for (size_t i = 0; i < 64; ++i)
+      for (size_t j = 0; j < 16; ++j) {
+        float ref = 0.0f;
+        for (size_t k = 0; k < 64; ++k)
+          ref += choreo::to_f32(ld[i][k]) * choreo::to_f32(rh[j][k]);
+        float got = res[i][j];
+        float diff = std::abs(got - ref);
+        if (diff > 1.0e-1f) ++errors;
+      }
+    std::cout << "f16_n16_k64: " << errors << " errors\n";
+    total_errors += errors;
+  }
+
+  choreo::choreo_assert(total_errors == 0, "Sparse WGMMA tests failed");
+  std::cout << "Test Passed\n";
+}
+
+// CHECK: Test Passed
