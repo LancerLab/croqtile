@@ -1,0 +1,220 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a --use-prepack %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#include <cstring>
+#include <cstdlib>
+
+#define H800_PCIE_PEAK_F16_TFLOPS 1513
+
+#define MATMUL_DEFAULT_M 4096
+#define MATMUL_DEFAULT_N 8192
+#define MATMUL_DEFAULT_K 8192
+
+#define WARP_M 64
+#define WARP_N 256
+#define TILE_K 128
+#define WARP_K 32
+#define PACKED_TILE_K 64
+#define RHS_SUB_K 64
+
+template <typename T>
+using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
+
+template <typename T>
+void init_random_b(choreo::spanned_data<T, 2>& rhs, std::mt19937& gen) {
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for (size_t j = 0; j < rhs.shape()[0]; ++j)
+    for (size_t k = 0; k < rhs.shape()[1]; ++k) {
+      float value = dist(gen);
+      if (std::fabs(value) < 0.1f) value = (value < 0.0f ? -0.25f : 0.25f);
+      rhs[j][k] = choreo::utils::from_f32<T>(value);
+    }
+}
+
+__co__ void matmul_sp_f16(global f16 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 2] lhs_packed, 
+                           global u32 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 32] lhs_meta,
+                           global f16 [MATMUL_DEFAULT_N, MATMUL_DEFAULT_K] rhs,
+                           global f16 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_N] output) {
+  parallel {block_m, block_n} by [cdiv(MATMUL_DEFAULT_M, WARP_M), cdiv(MATMUL_DEFAULT_N, WARP_N)] : block {
+    mc = mma.fill.f16 0.0f;
+    shared f16 [WARP_M, PACKED_TILE_K] lhs_load_s;
+    shared f16 [WARP_N, RHS_SUB_K] rhs_load_s;
+    foreach {iv_k} in [cdiv(MATMUL_DEFAULT_K, TILE_K)] {
+      tma.copy.swiz<128> lhs_packed
+          .subspan(WARP_M, PACKED_TILE_K)
+          .at(block_m, iv_k)
+          => lhs_load_s;
+
+      // First RHS sub-tile (dense K [0, RHS_SUB_K))
+      tma.copy.swiz<128> rhs
+          .subspan(WARP_N, RHS_SUB_K)
+          .at(block_n, iv_k * 2)
+          => rhs_load_s;
+      foreach {iv_warp} in [cdiv(RHS_SUB_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_load_s
+              .view(WARP_M, 16).from(0, iv_warp * 16);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_meta
+              .subspan(WARP_M, 1)
+              .at(block_m, iv_k * 4 + iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+
+      // Second RHS sub-tile (dense K [RHS_SUB_K, TILE_K))
+      tma.copy.swiz<128> rhs
+          .subspan(WARP_N, RHS_SUB_K)
+          .at(block_n, iv_k * 2 + 1)
+          => rhs_load_s;
+      foreach {iv_warp} in [cdiv(RHS_SUB_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_load_s
+              .view(WARP_M, 16).from(0, 32 + iv_warp * 16);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_meta
+              .subspan(WARP_M, 1)
+              .at(block_m, iv_k * 4 + 2 + iv_warp);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+    }
+    shared f16 [WARP_M, WARP_N] output_s;
+    mma.store mc, output_s;
+    tma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+int main(int argc, char** argv) {
+  bool enable_timing = true;
+  bool skip_verify = false;
+  auto is_disable_timing_arg = [](const char* s) {
+    const char* t = "--disable-timing";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  auto is_skip_verify_arg = [](const char* s) {
+    const char* t = "--skip-verify";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  for (int i = 1; i < argc; ++i) {
+    if (is_disable_timing_arg(argv[i])) {
+      enable_timing = false;
+      continue;
+    }
+    if (is_skip_verify_arg(argv[i])) {
+      skip_verify = true;
+    }
+  }
+
+  const char* timing_env = std::getenv("CHOREO_DISABLE_TIMING");
+  if (timing_env && timing_env[0] == '1' && timing_env[1] == '\0') {
+    enable_timing = false;
+  }
+
+  const char* skip_verify_env = std::getenv("CHOREO_SKIP_VERIFY");
+  if (skip_verify_env && skip_verify_env[0] == '1' && skip_verify_env[1] == '\0') {
+    skip_verify = true;
+  }
+
+  size_t M = MATMUL_DEFAULT_M;
+  size_t N = MATMUL_DEFAULT_N;
+  size_t K = MATMUL_DEFAULT_K;
+
+  std::mt19937 gen(42);
+  auto lhs_dense = choreo::make_spandata<choreo::f16>(M, K);
+  auto lhs_packed = choreo::make_spandata<choreo::f16>(M, K / 2);
+  auto lhs_meta_u8 = choreo::make_spandata<choreo::u8>(M, K / 8);
+  auto lhs_meta = choreo::make_spandata<choreo::u32>(M, K / 32);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+  auto res = choreo::make_spandata<choreo::f16>(M, N);
+  SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(lhs_dense, gen);
+  init_random_b<choreo::f16>(rhs, gen);
+  SparsePolicyWGMMA<choreo::f16>::encode(lhs_dense, lhs_packed, lhs_meta_u8);
+  SparsePolicyWGMMA<choreo::f16>::prepack(lhs_meta_u8, lhs_meta);
+
+  half *a_d = nullptr, *b_d = nullptr, *c_d = nullptr;
+  size_t meta_u32_bytes = (M * K / 32) * sizeof(u32);
+  size_t packed_bytes = (M * K / 2) * sizeof(half);
+  choreo::abend_true(cudaMalloc(&a_d, packed_bytes + meta_u32_bytes));
+  choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(half)));
+  choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));
+  
+  choreo::abend_true(cudaMemcpy(a_d, lhs_packed.data(), packed_bytes, cudaMemcpyHostToDevice));
+  u32* meta_u32_d = (u32*)((half*)a_d + M * K / 2);
+  choreo::abend_true(cudaMemcpy(meta_u32_d, lhs_meta.data(), meta_u32_bytes, cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(b_d, rhs.data(), N * K * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(c_d, res.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaDeviceSynchronize());
+
+  auto lhs_packed_d = choreo::make_spanview<choreo::f16, 2>(a_d, {M, K / 2});
+  auto lhs_meta_d = choreo::make_spanview<choreo::u32, 2>(meta_u32_d, {M, K / 32});
+  auto rhs_d = choreo::make_spanview<choreo::f16, 2>(b_d, {N, K});
+  auto res_d = choreo::make_spanview<choreo::f16, 2>(c_d, {M, N});
+
+  if (enable_timing) {
+    int warmup = 50;
+    int repeat = 1000;
+    const char* warmup_env = std::getenv("CHOREO_TIMING_WARMUP");
+    const char* repeat_env = std::getenv("CHOREO_TIMING_REPEAT");
+    if (warmup_env) {
+      int value = std::atoi(warmup_env);
+      if (value >= 0) warmup = value;
+    }
+    if (repeat_env) {
+      int value = std::atoi(repeat_env);
+      if (value > 0) repeat = value;
+    }
+    choreo::TimerOption topt;
+    topt.warmup = warmup;
+    topt.repeat = repeat;
+
+    auto avg_ms = choreo::timing([&]() { matmul_sp_f16(lhs_packed_d, lhs_meta_d, rhs_d, res_d); }, topt);
+    double flops = 2.0 * double(M) * double(N) * double(K);
+    double tflops = (flops / (avg_ms / 1000.0)) / 1e12;
+    std::cout << "TFLOPS: " << tflops << "\n";
+
+    double eff = (tflops / H800_PCIE_PEAK_F16_TFLOPS) * 100.0;
+    std::cout << "HW efficiency: " << eff << "%\n";
+  }
+
+  matmul_sp_f16(lhs_packed_d, lhs_meta_d, rhs_d, res_d);
+
+  choreo::abend_true(cudaMemcpy(res.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+  choreo::abend_true(cudaDeviceSynchronize());
+
+  if (skip_verify) {
+    std::cout << "Test Passed (verify skipped)\n" << std::endl;
+    return 0;
+  }
+
+  std::cout << "Starting verification..." << std::endl;
+  float tolerance = 0.5f;
+  size_t verify_m = (M < 128) ? M : 128;
+  size_t verify_n = (N < 256) ? N : 256;
+  int errors = 0;
+  for (size_t i = 0; i < verify_m; ++i) {
+    for (size_t j = 0; j < verify_n; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += choreo::to_f32(lhs_dense[i][k]) * choreo::to_f32(rhs[j][k]);
+      float got = choreo::to_f32(res[i][j]);
+      float diff = std::abs(got - ref);
+      if (diff > tolerance) {
+        if (errors < 8)
+          std::cout << "[" << i << ", " << j << "] ref=" << ref
+                    << " got=" << got << " diff=" << diff << std::endl;
+        ++errors;
+      }
+    }
+  }
+  std::cout << "f16_sp_x128x128: " << errors << " errors\n";
+  choreo::choreo_assert(errors == 0, "Sparse WGMMA f16 x128x128 failed");
+  std::cout << "Test Passed\n";
+}
+
+
+// CHECK: Test Passed
