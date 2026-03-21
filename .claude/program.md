@@ -29,6 +29,9 @@ Work with the user to agree on:
    under `benchmark/performance/matmul/`.
 3. **Target architecture**: the SM (e.g. `sm_90a`, `sm_86`). Affects compile `-arch` flag.
 4. **Iteration cap**: maximum attempts per loop before giving up on a stuck idea.
+5. **Experiment logging contract**: for every measured result, append the exact
+   compile/profile/run command line used for that data point into `results.tsv`
+   (`run_command` column) so the measurement is fully reproducible.
 
 Once confirmed:
 
@@ -144,6 +147,13 @@ subspan(...).step(...).at(...)  # repeated tiles with spacing (for staged/swizzl
 - `benchmark/performance/blockscale_gemm/blockscale_gemm_e4m3_dynamic_sm90.co` — FP8 blockscaled GEMM with scale operands.
 
 ## Build and run workflow
+
+### Prepare — initialize reproducible logging (do once per run tag)
+
+Before baseline measurement, set the run tag in `results.tsv`, ensure the header includes
+the `run_command` column, and log the exact benchmark command used to produce each row.
+Use the literal command line (including env vars and flags) that generated the reported
+TFLOPS so future reruns can reproduce the same numbers.
 
 ### Step 0 — Baseline measurement (do once)
 
@@ -311,8 +321,8 @@ git add benchmark/performance/matmul/<kernel>.co
 git add lib/ ...
 git commit -m "iter <N>: <brief description of change> — TFLOPS: X -> Y"
 
-# Update results.tsv (append one row)
-echo -e "iter<N>\t<KERNEL>\t<ARCH>\t<TFLOPS>\t<EFF%>\t<BOTTLENECK_CATEGORY>\t<IDEA_SUMMARY>" >> results.tsv
+# Update results.tsv (append one row; include reproducible run command)
+echo -e "iter<N>\t<KERNEL>\t<ARCH>\t<TFLOPS>\t<EFF%>\t<BOTTLENECK_CATEGORY>\t<RUN_COMMAND>\t<IDEA_SUMMARY>" >> results.tsv
 ```
 
 Then **repeat from Step 1** using the improved kernel as the new baseline.
@@ -322,7 +332,7 @@ Then **repeat from Step 1** using the improved kernel as the new baseline.
 Create and maintain `results.tsv` in repo root with columns:
 
 ```
-iter	kernel	arch	tflops	eff%	bottleneck_before	idea_summary
+iter	kernel	arch	tflops	eff%	bottleneck_before	run_command	idea_summary
 ```
 
 Append one row per iteration. This is the experiment log — it is the agent's memory.
