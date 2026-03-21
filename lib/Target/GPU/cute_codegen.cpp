@@ -575,7 +575,13 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
     auto& ssmi_c = cgi.GetSymbolMMA(scoped_c_sym);
     auto acc_ty = NameBaseType(ssmi_c.ty);
     auto scale_a_strides = GenStrides(op->ScaleA());
-    std::string scale_a_ld = ValueSTR(scale_a_strides.front());
+    auto scale_a_sty = GetSpannedType(NodeType(*op->ScaleA()));
+    auto scale_a_shape = scale_a_sty->GetShape();
+    bool scale_a_transposed = VIIsInt(scale_a_shape.ValueAt(0)) &&
+                              *VIInt(scale_a_shape.ValueAt(0)) == 1;
+    std::string scale_a_ld = scale_a_transposed
+                                 ? ValueSTR(scale_a_strides.back())
+                                 : ValueSTR(scale_a_strides.front());
     auto scale_a_name = c_sym + "_scale_a_ptr";
     auto scale_b_name = c_sym + "_scale_b_val";
     auto scale_frag_name = c_sym + "_scale_frag";
@@ -715,7 +721,15 @@ CuteCodeGen::AnalyzeExplicitScaleAccumScope(
     info.scale_b_name = c_sym + "_scale_b_val";
     info.scale_a_expr = ExprSTR(op->ScaleA(), false);
     info.scale_b_expr = ExprSTR(op->ScaleB(), false);
-    info.scale_a_ld = ValueSTR(GenStrides(op->ScaleA()).front());
+    {
+      auto sa_strides = GenStrides(op->ScaleA());
+      auto sa_sty = GetSpannedType(NodeType(*op->ScaleA()));
+      auto sa_shape = sa_sty->GetShape();
+      bool sa_transposed = VIIsInt(sa_shape.ValueAt(0)) &&
+                           *VIInt(sa_shape.ValueAt(0)) == 1;
+      info.scale_a_ld = sa_transposed ? ValueSTR(sa_strides.back())
+                                      : ValueSTR(sa_strides.front());
+    }
     info.acc_ty = NameBaseType(ssmi_c.ty);
     info.scale_frag_ty = NameBaseType(acc_dtype);
     info.dim_n = STR(ssmi_c.shape.at(1));
@@ -4560,7 +4574,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       if (op.HasScale() && !use_hoisted_scale_accum) {
         std::string dim_n = STR(ssmi_c.shape.at(1));
         auto scale_a_strides = GenStrides(op.ScaleA());
-        std::string scale_a_ld = ValueSTR(scale_a_strides.front());
+        auto sa_sty3 = GetSpannedType(NodeType(*op.ScaleA()));
+        auto sa_shape3 = sa_sty3->GetShape();
+        bool sa_transposed3 = VIIsInt(sa_shape3.ValueAt(0)) &&
+                              *VIInt(sa_shape3.ValueAt(0)) == 1;
+        std::string scale_a_ld = sa_transposed3
+                                     ? ValueSTR(scale_a_strides.back())
+                                     : ValueSTR(scale_a_strides.front());
         auto scale_a_name = c_sym + "_scale_a_ptr";
         auto scale_b_name = c_sym + "_scale_b_val";
         if (!hoist_offset || !active_hoisted_scale_decls.count(scale_a_name)) {

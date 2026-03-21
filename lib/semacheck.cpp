@@ -1216,11 +1216,12 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
               STR(a_shape) + ".");
     if (old_ec != error_count) return false;
 
-    if (!sbe::ceq(a_shape.ValueAt(0), c_shape.ValueAt(0)))
-      Error1(n.LOC(),
-             "MMA scale A first dimension must match accumulator M dimension.");
-    if (!sbe::ceq(a_shape.ValueAt(1), sbe::nu(1)))
-      Error1(n.LOC(), "MMA scale A must have shape [M, 1].");
+    bool is_standard = sbe::ceq(a_shape.ValueAt(0), c_shape.ValueAt(0)) &&
+                       sbe::ceq(a_shape.ValueAt(1), sbe::nu(1));
+    bool is_transposed = sbe::ceq(a_shape.ValueAt(0), sbe::nu(1)) &&
+                         sbe::ceq(a_shape.ValueAt(1), c_shape.ValueAt(0));
+    if (!is_standard && !is_transposed)
+      Error1(n.LOC(), "MMA scale A must have shape [M, 1] or [1, M].");
   } break;
   case AST::MMAOperation::Store: break;
   case AST::MMAOperation::Commit: break;
