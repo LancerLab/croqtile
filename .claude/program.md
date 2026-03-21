@@ -152,6 +152,7 @@ subspan(...).step(...).at(...)  # repeated tiles with spacing (for staged/swizzl
 
 Before baseline measurement, set the run tag in `results.tsv`, ensure the header includes
 the `run_command` column, and log the exact benchmark command used to produce each row.
+This is mandatory for every iteration and every measured data point (baseline and mutants).
 Use the literal command line (including env vars and flags) that generated the reported
 TFLOPS so future reruns can reproduce the same numbers.
 
@@ -253,7 +254,9 @@ bottleneck by doing Y because Z".
 
 ### Step 3 — Implement and debug
 
-Edit ONLY the `.co` kernel file (or the compiler + the `.co` as one unit).
+For each iteration, create a new versioned candidate `.co` file and edit that candidate only.
+Do not mutate the current best kernel file in place. Keep every tried candidate file for traceability.
+Compiler+kernel ideas still remain one atomic change when required.
 
 ```bash
 # Edit the kernel
