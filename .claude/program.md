@@ -341,6 +341,121 @@ iter	kernel	arch	tflops	eff%	bottleneck_before	run_command	idea_summary
 Append one row per iteration. This is the experiment log — it is the agent's memory.
 Before raising a new idea, consult this file to avoid repeating ideas.
 
+## Mandatory behavioral rules (all models)
+
+These rules are ABSOLUTE. Violating any of them renders the experiment worthless.
+They were derived from analyzing failed tuning runs where agents degenerated into
+blind parameter sweeps instead of performing intelligent optimization.
+
+### Rule 1: PROFILE BEFORE EVERY IDEA — no exceptions
+
+Before proposing ANY optimization idea, you MUST run ncu on the current best kernel
+and read the report. The `bottleneck_before` column in results.tsv MUST contain a
+real bottleneck category (e.g. `wgmma_serialized`, `smem_pressure`, `memory_bound`,
+`l1tex_stall`, `occupancy`). The value `unknown` is FORBIDDEN. If you cannot profile,
+STOP and report the issue — do NOT proceed with a guess.
+
+### Rule 2: ONE current best, hill-climb from it — no random base-hopping
+
+At any point in the experiment there is exactly ONE file designated as the "current
+best". Every new candidate MUST be derived from that file. You are FORBIDDEN from
+randomly picking a different base kernel each iteration. When a candidate beats the
+current best, it becomes the new current best. When it doesn't, you revert to the
+current best — not to some other base file.
+
+### Rule 3: DIVERSE optimizations — macro sweeps alone are not optimization
+
+Changing only `#define` macro values (e.g. WARP_N, STAGES) across iterations is
+a grid search, not optimization. After at most 2 consecutive macro-only changes,
+you MUST try a STRUCTURAL change. Structural changes include but are not limited to:
+- Adding/removing/reordering synchronization fences (wgmma.fence, warpgroup_arrive)
+- Changing register control (setmaxnreg / regctrl)
+- Reordering load/store operations (e.g. RHS before LHS, metadata first)
+- Adding compiler flags (--hoist-offset, --hoist-scale, --stmatrix)
+- Changing output store pattern (shared padding, transpose)
+- Modifying pipeline structure (event placement, commit placement)
+- Switching warp specialization topology (1p1c ↔ 1p2c ↔ 1p3c)
+- Adding explicit inline asm intrinsics (nanosleep, fence_proxy_async)
+- Changing copy-shaping patterns (view().from(), subspan().step().at())
+
+### Rule 4: NEVER repeat a failed combination
+
+Before every iteration, you MUST read results.tsv and check whether the exact
+combination (base kernel × parameter set × structural change) has been tried before.
+If it has, you MUST choose a different idea. Specifically:
+- If a parameter combo (e.g. `wn256_st4` on `1p1c_swizzle128`) already failed,
+  trying the same combo again is FORBIDDEN.
+- If a parameter combo failed with a specific exit code (e.g. exit=12 for smem
+  overflow), you MUST NOT retry it without first addressing the root cause.
+- Keep a mental blacklist of failed combinations and consult it.
+
+### Rule 5: ABANDON stuck ideas after 3 attempts
+
+If an optimization idea fails to compile or pass verification after 3 distinct
+fix attempts, ABANDON it entirely. Do not spend iteration 4, 5, 6... on the same
+idea. Revert to the current best and propose a completely different idea based on
+fresh ncu analysis.
+
+### Rule 6: UNDERSTAND the kernel before mutating it
+
+Before making any change, you MUST read and understand:
+1. The current best `.co` kernel source code (the full kernel function)
+2. The generated `.cute.result` output (at least the kernel launch signature)
+3. The ncu profiling data from Step 1
+
+You are FORBIDDEN from treating the build/verify pipeline as a black box. Each
+mutation must be accompanied by a 1-sentence hypothesis explaining WHY the change
+should improve performance, grounded in specific ncu metrics.
+
+### Rule 7: COMMIT messages must encode the optimization
+
+Every commit message and results.tsv entry MUST include:
+1. What was changed (e.g. "add wgmma.fence before K-loop")
+2. Why it was expected to help (e.g. "to reduce WGMMA serialization")
+3. The measured TFLOPS result
+4. KEEP or DISCARD decision
+
+The idea_summary column MUST be a human-readable description, NOT a raw command line.
+
+### Rule 8: USE the compile+run workflow from this file — not external scripts
+
+Compile and run kernels using the workflow described in this program.md:
+```
+./choreo -gs -t cute -arch=$ARCH $KERNEL -o ${OUT}.cute.result
+bash ${OUT}.cute.result --execute
+```
+Do NOT delegate to external wrapper scripts as black boxes. You need to see and
+understand compiler output, error messages, and timing output directly.
+
+### Rule 9: TRACK your iteration counter monotonically
+
+Each iteration gets a unique, monotonically increasing number. Do not reuse numbers.
+Do not skip large ranges. The iteration number in your commit and in results.tsv
+must match.
+
+### Rule 10: gemm_sp-specific constraints
+
+For gemm_sp (sparse GEMM) f16 kernels on SM90:
+- `SPMM_WARP_M` MUST be 64 (WGMMA constraint — never change)
+- `SPMM_WARP_K` MUST be 32 for f16 (never change)
+- `SPMM_TILE_K` MUST equal `2 * SPMM_PACKED_TILE_K`
+- `SPMM_META_TILE_COLS` MUST equal `SPMM_TILE_K / 32`
+- Changing `SPMM_WARP_N` is allowed but ONLY as part of a broader structural change
+- Compiler flags: `-t cute -arch=sm_90a --use-warpspec --use-prepack`
+- When using 1p2c (2 consumer warpgroups), the `SPMM_TILE_M` must be 
+  `2 * SPMM_WARP_M = 128` and metadata indexing must account for per-consumer
+  row tile addressing
+
+### Anti-pattern checklist (verify before every iteration)
+
+Before submitting each iteration, verify you are NOT doing any of these:
+- [ ] Changing only macros without any structural change (after 2 consecutive)
+- [ ] Using `unknown` as the bottleneck category
+- [ ] Repeating a combination already in results.tsv
+- [ ] Starting from a different base kernel than the current best
+- [ ] Submitting a raw command line as the idea_summary
+- [ ] Skipping ncu profiling
+
 ## Stop conditions
 
 - User manually stops the loop.
