@@ -6668,7 +6668,17 @@ show_usage() {
 # compile, execute
 )script";
 
-  os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
+  bool arch_has_a_suffix =
+      arch_str.size() > 1 && arch_str.back() == 'a';
+  if (arch_has_a_suffix) {
+    auto compute_str = arch_str;
+    compute_str.replace(0, 3, "compute_");
+    os << R"(export CFLAGS="-gencode arch=)" << compute_str << ",code="
+       << arch_str
+       << R"( -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
+  } else {
+    os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
+  }
   if (extended_mma) os << " -DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED ";
   if (CCtx().TargetDebugInfo())
     os << " -O0";
