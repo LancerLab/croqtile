@@ -47,6 +47,9 @@ Option<bool>
 Option<bool>
     use_prepack(OptionKind::User, "--use-prepack", "", false,
                 "Enable host prepacked-u32 metadata handling (prepack)");
+Option<bool>
+    use_prepack_v2(OptionKind::User, "--use-prepack-v2", "", false,
+                   "Enable host prepacked-v2 metadata (fully coalesced loads)");
 } // namespace Choreo
 Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
                                  "Generate source-level debug information.");

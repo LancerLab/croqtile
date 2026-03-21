@@ -60,6 +60,7 @@ extern Option<bool> hoist_scale;
 namespace Choreo {
 extern Option<bool> sim_sparse;
 extern Option<bool> use_prepack;
+extern Option<bool> use_prepack_v2;
 } // namespace Choreo
 Option<bool> use_cuda_type(OptionKind::Hidden, "-use-cuda-type", "", true,
                            "use cuda built-in types.");
@@ -1619,6 +1620,130 @@ void CuteCodeGen::emitFp8PrepackedU32TileLoadSnippet(
   ds << d_indent << "  int __sp_u32_col = (__sp_tid >> 1) & 1;\n";
   ds << d_indent << "  " << metaVar << " = __sp_meta_u32_ptr[__sp_row * ("
      << rowStride << ") + __sp_u32_col * (" << colStride << ")];\n";
+}
+
+void CuteCodeGen::emitPrepackedV2TileLoadSnippet(
+    const std::string& metaVar, const std::string& baseName,
+    const std::string& tileAddr, const std::string& rowStride,
+    const std::string& tileOffset) {
+  int sval = 0, log2s = 0;
+  try {
+    sval = std::stoi(rowStride);
+  } catch (...) {
+  }
+  bool pow2 = sval > 0 && (sval & (sval - 1)) == 0;
+  if (pow2) {
+    int t = sval;
+    while (t > 1) {
+      log2s++;
+      t >>= 1;
+    }
+  }
+  ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
+  ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
+  ds << d_indent
+     << "  int __sp_lr = ((__sp_tid >> 5) * 16) + (((__sp_tid >> 2) "
+        "& 7) << 1) + (__sp_tid & 1);\n";
+  ds << d_indent << "  if (__sp_active) {\n";
+  if (pow2) {
+    int smask = sval - 1;
+    int block_shift = log2s + 4;
+    std::string off_expr;
+    if (!tileOffset.empty())
+      off_expr = tileOffset;
+    else
+      off_expr =
+          std::string("(int)((") + tileAddr + ") - (" + baseName + "))";
+    ds << d_indent << "    int __sp_row = (" << off_expr << " >> "
+       << log2s << ") + __sp_lr;\n";
+    ds << d_indent << "    " << metaVar
+       << " = ((const uint32_t*)(" << baseName
+       << ") + ((__sp_row >> 4) << " << block_shift
+       << ") + (__sp_row & 15))[(" << off_expr << " & " << smask
+       << ") << 4];\n";
+  } else {
+    ds << d_indent << "    int __sp_to = (int)((const uint32_t*)("
+       << tileAddr << ") - (const uint32_t*)(" << baseName << "));\n";
+    ds << d_indent << "    int __sp_br = __sp_to / (" << rowStride
+       << ");\n";
+    ds << d_indent << "    int __sp_r = __sp_br + __sp_lr;\n";
+    ds << d_indent << "    " << metaVar << " = ((const uint32_t*)("
+       << baseName << "))[((__sp_r >> 4) * (" << rowStride
+       << ") + __sp_to - __sp_br * (" << rowStride
+       << ")) * 16 + (__sp_r & 15)];\n";
+  }
+  ds << d_indent << "  }\n";
+}
+
+void CuteCodeGen::emitPrepackedV2Snippet(
+    const std::string& metaVar, const std::string& baseName,
+    const std::string& /*deviceArray*/, const std::string& rowStride,
+    const std::string& /*colStride*/) {
+  ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
+  ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
+  ds << d_indent
+     << "  int __sp_packed_row = blockIdx.x * 64 + ((__sp_tid >> 5) * 16)"
+        " + (((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
+  ds << d_indent
+     << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
+  ds << d_indent << "  if (__sp_active) {\n";
+  ds << d_indent << "    " << metaVar << " = ((const uint32_t*)(" << baseName
+     << "))[((__sp_packed_row >> 4) * (" << rowStride
+     << ") + __sp_k_idx) * 16 + (__sp_packed_row & 15)];\n";
+  ds << d_indent << "  }\n";
+}
+
+void CuteCodeGen::emitFp8PrepackedV2TileLoadSnippet(
+    const std::string& metaVar, const std::string& baseName,
+    const std::string& tileAddr, const std::string& rowStride,
+    const std::string& /*colStride*/) {
+  int sval = 0, log2s = 0;
+  try {
+    sval = std::stoi(rowStride);
+  } catch (...) {
+  }
+  bool pow2 = sval > 0 && (sval & (sval - 1)) == 0;
+  if (pow2) {
+    int t = sval;
+    while (t > 1) {
+      log2s++;
+      t >>= 1;
+    }
+  }
+  ds << d_indent
+     << "  int __sp_lr = ((__sp_tid >> 2) & 7)"
+        " + ((__sp_tid & 1) << 3) + ((__sp_tid >> 5) << 4);\n";
+  ds << d_indent << "  int __sp_uc = (__sp_tid >> 1) & 1;\n";
+  if (pow2) {
+    int smask = sval - 1;
+    int half_s = sval >> 1;
+    ds << d_indent << "  int __sp_v1 = (int)((" << tileAddr << ") - ("
+       << baseName << ")) + (__sp_lr << " << log2s << ") + __sp_uc;\n";
+    ds << d_indent << "  int __sp_r = __sp_v1 >> " << log2s << ";\n";
+    ds << d_indent << "  int __sp_kc = __sp_v1 & " << smask << ";\n";
+    ds << d_indent << "  int __sp_rib = __sp_r & 15;\n";
+    ds << d_indent
+       << "  int __sp_vtid = ((__sp_rib & 7) << 2)"
+          " | ((__sp_kc & 1) << 1) | ((__sp_rib >> 3) & 1);\n";
+    ds << d_indent << "  " << metaVar << " = ((const uint32_t*)("
+       << baseName << "))[((__sp_r >> 4) * " << half_s
+       << " + (__sp_kc >> 1)) * 32 + __sp_vtid];\n";
+  } else {
+    ds << d_indent << "  int __sp_log2s = 31 - __clz((int)("
+       << rowStride << "));\n";
+    ds << d_indent << "  int __sp_v1 = (int)((" << tileAddr << ") - ("
+       << baseName << ")) + (__sp_lr << __sp_log2s) + __sp_uc;\n";
+    ds << d_indent << "  int __sp_r = __sp_v1 >> __sp_log2s;\n";
+    ds << d_indent << "  int __sp_kc = __sp_v1 & ((" << rowStride
+       << ") - 1);\n";
+    ds << d_indent << "  int __sp_rib = __sp_r & 15;\n";
+    ds << d_indent
+       << "  int __sp_vtid = ((__sp_rib & 7) << 2)"
+          " | ((__sp_kc & 1) << 1) | ((__sp_rib >> 3) & 1);\n";
+    ds << d_indent << "  " << metaVar << " = ((const uint32_t*)("
+       << baseName << "))[((__sp_r >> 4) * ((" << rowStride
+       << ") >> 1) + (__sp_kc >> 1)) * 32 + __sp_vtid];\n";
+  }
 }
 
 void CuteCodeGen::EmitDebugSpannedRTTI(
@@ -4215,10 +4340,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // Detect host prepacked-u32 metadata and emit device-side indexing
         // that reads the host-provided prepacked u32 array directly. Fallback
         // to the existing byte-by-byte assembly when detection fails.
-        // The --use-prepack flag can be used to force this path.
+        // The --use-prepack / --use-prepack-v2 flags force this path.
+        bool v2_mode = use_prepack_v2.GetValue();
         std::string ref_sym = op.LoadFrom()->RefSymbol();
         auto prepackInfo =
-            resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue());
+            resolvePrepackedU32Meta(ref_sym,
+                                   use_prepack.GetValue() || v2_mode);
 
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
@@ -4226,7 +4353,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
              << ValueSTR(tile_addr) << ");\n";
         if (fp8_sparse_k64) {
-          if (prepackInfo.use_packed_u32) {
+          if (prepackInfo.use_packed_u32 && v2_mode) {
+            emitFp8PrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
+                                              ValueSTR(tile_addr),
+                                              row_stride, col_stride);
+          } else if (prepackInfo.use_packed_u32) {
             emitFp8PrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
                                                row_stride, col_stride);
           } else {
@@ -4245,6 +4376,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                << ">(packed) << (8 * byte_idx));\n";
             ds << d_indent << "  }\n";
           }
+        } else if (prepackInfo.use_packed_u32 && v2_mode) {
+          if (prepack_single_col) {
+            auto tile_off = GenOffset(op.LoadFrom());
+            emitPrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
+                                           ValueSTR(tile_addr), row_stride,
+                                           ValueSTR(tile_off));
+          } else
+            emitPrepackedV2Snippet(sym, prepackInfo.device_name,
+                                   prepackInfo.device_name, row_stride,
+                                   col_stride);
         } else if (prepackInfo.use_packed_u32) {
           if (prepack_single_col)
             emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr), row_stride);
@@ -4456,13 +4597,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "{\n";
           ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
           // Detect host prepacked-u32 metadata for the exec site
+          bool v2_mode_exec = use_prepack_v2.GetValue();
           auto prepackInfo =
-              resolvePrepackedU32Meta(a_sym, use_prepack.GetValue());
+              resolvePrepackedU32Meta(a_sym,
+                                     use_prepack.GetValue() || v2_mode_exec);
           if (!prepackInfo.use_packed_u32) {
             ds << d_indent
                << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2))
                << ";\n";
             ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
+          } else if (v2_mode_exec) {
+            emitPrepackedV2Snippet(meta_var, prepackInfo.device_name,
+                                   prepackInfo.device_name, "128", "1");
           } else {
             emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
                                     "1");

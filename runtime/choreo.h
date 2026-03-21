@@ -2056,7 +2056,103 @@ struct Sparse2to4HostPolicyWGMMA {
       }
     }
   }
+
+  // prepack_v2: coalesced-access metadata layout.
+  // Rearranges the v1-prepacked u32 metadata so that, for each 16-row block
+  // and k-fragment, the 16 u32 values needed by the 16 active warp lanes are
+  // stored contiguously. Layout: [M/16, K_frags, 16].
+  // Device-side: thread reads meta_v2[(m16 * K_frags + kf) * 16 + pos]
+  //   where all 16 active lanes differ only in pos → single cache-line txn.
+  __co_host__ static inline void
+  prepack_v2(spanned_data<choreo::u8, 2>& meta_u8,
+             spanned_data<choreo::u32, 2>& meta_u32) {
+    const size_t M = meta_u8.shape()[0];
+    const size_t K_meta = meta_u8.shape()[1];
+    const size_t K_meta_u32 = meta_u32.shape()[1];
+    const size_t k_fragments = K_meta / 4;
+
+    choreo_assert(meta_u32.shape()[0] == M,
+                  "Sparse prepack_v2 requires matching M dimensions");
+    choreo_assert((M % 16) == 0,
+                  "Sparse prepack_v2 requires M divisible by 16");
+    choreo_assert((K_meta % 4) == 0,
+                  "Sparse prepack_v2 requires u8 K dim divisible by 4");
+    choreo_assert(K_meta_u32 == k_fragments,
+                  "Sparse prepack_v2 expects K_meta_u32 == k_fragments");
+
+    auto temp = choreo::make_spandata<choreo::u32>(M, k_fragments);
+    prepack(meta_u8, temp);
+
+    for (size_t block_m = 0; block_m < M; block_m += 16) {
+      const size_t m16 = block_m / 16;
+      for (size_t rib = 0; rib < 16; ++rib) {
+        for (size_t kf = 0; kf < k_fragments; ++kf) {
+          size_t v1_idx = (block_m + rib) * k_fragments + kf;
+          size_t v2_idx = (m16 * k_fragments + kf) * 16 + rib;
+          meta_u32.data()[v2_idx] = temp.data()[v1_idx];
+        }
+      }
+    }
+  }
 };
+
+// prepack_v2 reorder for fp8 u32 metadata (already encoded as u32).
+// Rearranges [M, K_meta_cols] u32 to coalesced layout [M/16, K64_frags, 32]
+// where 32 values per (m_block_16, k64_frag) are stored in the thread access
+// order of wgmma.sp fp8, enabling a single 128-byte cache-line transaction.
+__co_host__ inline void
+prepack_v2_fp8_reorder(spanned_data<choreo::u32, 2>& meta_in,
+                       spanned_data<choreo::u32, 2>& meta_out) {
+  const size_t M = meta_in.shape()[0];
+  const size_t K_meta_cols = meta_in.shape()[1];
+  const size_t num_k64_frags = K_meta_cols / 2;
+
+  choreo_assert(meta_out.shape()[0] == M && meta_out.shape()[1] == K_meta_cols,
+                "prepack_v2_fp8_reorder: output shape must match input");
+  choreo_assert((M % 16) == 0,
+                "prepack_v2_fp8_reorder: M must be divisible by 16");
+
+  for (size_t m16 = 0; m16 < M / 16; ++m16) {
+    for (size_t k64 = 0; k64 < num_k64_frags; ++k64) {
+      for (size_t rib = 0; rib < 16; ++rib) {
+        for (size_t col = 0; col < 2; ++col) {
+          size_t global_row = m16 * 16 + rib;
+          size_t global_col = k64 * 2 + col;
+          int low_row = rib & 7;
+          int high_bit = (rib >> 3) & 1;
+          int tid = (low_row << 2) | (col << 1) | high_bit;
+          size_t v2_idx = (m16 * num_k64_frags + k64) * 32 + tid;
+          meta_out.data()[v2_idx] =
+              meta_in.data()[global_row * K_meta_cols + global_col];
+        }
+      }
+    }
+  }
+}
+
+// prepack_v2 reorder for f16/bf16 u32 metadata (16-bit value types).
+// Rearranges [M, K_frags] u32 to coalesced layout [M/16, K_frags, 16].
+__co_host__ inline void
+prepack_v2_16bit_reorder(spanned_data<choreo::u32, 2>& meta_in,
+                         spanned_data<choreo::u32, 2>& meta_out) {
+  const size_t M = meta_in.shape()[0];
+  const size_t K_frags = meta_in.shape()[1];
+
+  choreo_assert(meta_out.shape()[0] == M && meta_out.shape()[1] == K_frags,
+                "prepack_v2_16bit_reorder: output shape must match input");
+  choreo_assert((M % 16) == 0,
+                "prepack_v2_16bit_reorder: M must be divisible by 16");
+
+  for (size_t m16 = 0; m16 < M / 16; ++m16) {
+    for (size_t rib = 0; rib < 16; ++rib) {
+      for (size_t kf = 0; kf < K_frags; ++kf) {
+        size_t v1_idx = (m16 * 16 + rib) * K_frags + kf;
+        size_t v2_idx = (m16 * K_frags + kf) * 16 + rib;
+        meta_out.data()[v2_idx] = meta_in.data()[v1_idx];
+      }
+    }
+  }
+}
 
 // WGMMA convenience aliases.
 template <typename ValueT>

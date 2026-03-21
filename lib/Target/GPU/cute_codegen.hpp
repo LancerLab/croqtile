@@ -271,6 +271,21 @@ private:
                                           const std::string& tileAddr,
                                           const std::string& rowStride,
                                           const std::string& colStride);
+  void emitPrepackedV2TileLoadSnippet(const std::string& metaVar,
+                                      const std::string& baseName,
+                                      const std::string& tileAddr,
+                                      const std::string& rowStride,
+                                      const std::string& tileOffset = "");
+  void emitPrepackedV2Snippet(const std::string& metaVar,
+                              const std::string& baseName,
+                              const std::string& deviceArray,
+                              const std::string& rowStride,
+                              const std::string& colStride);
+  void emitFp8PrepackedV2TileLoadSnippet(const std::string& metaVar,
+                                         const std::string& baseName,
+                                         const std::string& tileAddr,
+                                         const std::string& rowStride,
+                                         const std::string& colStride);
   static std::string EscapeLineDirectivePath(const std::string& path);
   void EmitLineDirective(AST::Node& n);
   void ResetLineDirectiveState();
