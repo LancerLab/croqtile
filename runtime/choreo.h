@@ -967,6 +967,113 @@ verify_matmul_row_row_subset(A& lhs, B& rhs, C& res, float base_tol,
     }
 }
 
+// ---------------------------------------------------------------------------
+// SampledVerifier: stride-based sampling verification for large matmul results.
+//
+// Treats the M*N result as a flat 1D array and samples elements at uniform
+// stride intervals.  For each sampled element, computes a CPU reference dot
+// product.  This gives O(num_samples * K) verification work instead of the
+// full O(M * N * K), keeping verification tractable on CPU even at large
+// problem sizes while covering positions spread across the full output.
+// ---------------------------------------------------------------------------
+struct SampledVerifierConfig {
+  size_t num_samples = 512;
+  float base_tol = 1.0f;
+  float rel_tol = 0.01f;
+  bool verbose = false;
+};
+
+// Pick a prime stride coprime with n so samples spread across both rows and
+// columns.  Falls back to total/num_samples when that already satisfies the
+// coprimality requirement.
+inline size_t pick_coprime_stride(size_t total, size_t n,
+                                  size_t num_samples) {
+  size_t raw = std::max<size_t>(1, total / num_samples);
+  auto gcd = [](size_t a, size_t b) {
+    while (b) { size_t t = b; b = a % b; a = t; }
+    return a;
+  };
+  if (gcd(raw, n) == 1) return raw;
+  for (size_t s = raw + 1; s < total; ++s)
+    if (gcd(s, n) == 1) return s;
+  return raw;
+}
+
+// Row-col layout: lhs[M,K] (row-major) * rhs[K,N] (col-major) => res[M,N]
+template <typename A, typename B, typename C>
+__co_host__ inline void verify_matmul_row_col_sampled(
+    A& lhs, B& rhs, C& res, const SampledVerifierConfig& cfg = {}) {
+  size_t m = res.shape()[0];
+  size_t n = res.shape()[1];
+  size_t k = lhs.shape()[1];
+  size_t total = m * n;
+  size_t stride = pick_coprime_stride(total, n, cfg.num_samples);
+  size_t checked = 0, failed = 0;
+  for (size_t idx = 0; idx < total && checked < cfg.num_samples;
+       idx += stride) {
+    size_t i = idx / n, j = idx % n;
+    float ref = 0.0f;
+    for (size_t kk = 0; kk < k; ++kk)
+      ref += to_f32(lhs[(int)i][(int)kk]) * to_f32(rhs[(int)kk][(int)j]);
+    float got = to_f32(res[(int)i][(int)j]);
+    float tol = cfg.base_tol + cfg.rel_tol * std::abs(ref);
+    float diff = std::abs(got - ref);
+    if (diff > tol) {
+      if (cfg.verbose || failed < 5)
+        std::cout << "mismatch at (" << i << ", " << j << ") gpu=" << got
+                  << " ref=" << ref << " diff=" << diff << "\n";
+      ++failed;
+    }
+    ++checked;
+  }
+  if (failed > 0) {
+    std::cout << "FAILED: " << failed << "/" << checked << " samples\n";
+    choreo_assert(false, "sampled verification failed");
+  }
+}
+
+// Row-row layout: lhs[M,K] * rhs[N,K] (both row-major) => res[M,N]
+template <typename A, typename B, typename C>
+__co_host__ inline void verify_matmul_row_row_sampled(
+    A& lhs, B& rhs, C& res, const SampledVerifierConfig& cfg = {}) {
+  size_t m = res.shape()[0];
+  size_t n = res.shape()[1];
+  size_t k = lhs.shape()[1];
+  size_t total = m * n;
+  size_t stride = pick_coprime_stride(total, n, cfg.num_samples);
+  size_t checked = 0, failed = 0;
+  for (size_t idx = 0; idx < total && checked < cfg.num_samples;
+       idx += stride) {
+    size_t i = idx / n, j = idx % n;
+    float ref = 0.0f;
+    for (size_t kk = 0; kk < k; ++kk)
+      ref += to_f32(lhs[(int)i][(int)kk]) * to_f32(rhs[(int)j][(int)kk]);
+    float got = to_f32(res[(int)i][(int)j]);
+    float tol = cfg.base_tol + cfg.rel_tol * std::abs(ref);
+    float diff = std::abs(got - ref);
+    if (diff > tol) {
+      if (cfg.verbose || failed < 5)
+        std::cout << "mismatch at (" << i << ", " << j << ") gpu=" << got
+                  << " ref=" << ref << " diff=" << diff << "\n";
+      ++failed;
+    }
+    ++checked;
+  }
+  if (failed > 0) {
+    std::cout << "FAILED: " << failed << "/" << checked << " samples\n";
+    choreo_assert(false, "sampled verification failed");
+  }
+}
+
+// Sparse GEMM verification: dense_lhs[M,K] * rhs[N,K] => res[M,N]
+// dense_lhs is the pre-sparsification dense matrix (row-major).
+// rhs is row-major (N,K). Dot product: sum_k dense_lhs[i][k] * rhs[j][k].
+template <typename A, typename B, typename C>
+__co_host__ inline void verify_spmm_sampled(
+    A& dense_lhs, B& rhs, C& res, const SampledVerifierConfig& cfg = {}) {
+  verify_matmul_row_row_sampled(dense_lhs, rhs, res, cfg);
+}
+
 // bitcast to uintx_t.
 // The type in is_same is the underlying type not the type alias.
 #if defined(__USE_CUDA_TYPE__)

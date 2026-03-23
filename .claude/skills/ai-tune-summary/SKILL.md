@@ -54,12 +54,43 @@ The naming must include the kernel family, `aitune` marker, date, and iteration 
   - Folder: `<kernel-folder>/<kernel-family>_aitune_<YYYY-MM-DD>_iter<NNN>/`
   - Contents:
     - The `.cu` source file
-    - A `build.sh` script with the full `nvcc` command
-    - Any additional `.h` files if the kernel has custom headers beyond `runtime/choreo.h` and `extern/cutlass/include/`
-  - The subfolder must be **self-contained and buildable** with:
+    - A `run.sh` script (compile + run in one command)
+    - **NO local `choreo.h` copy** — use `-I"$REPO_ROOT/runtime"` to pick up the canonical header
+  - The subfolder must be **self-contained and runnable** with:
     ```bash
-    cd <subfolder> && bash build.sh
+    bash <subfolder>/run.sh
     ```
+
+#### run.sh Template (for .cu kernels)
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+export PATH=/usr/local/cuda/bin:$PATH
+
+BIN="$SCRIPT_DIR/<kernel-binary-name>"
+
+nvcc -arch sm_90a -std=c++17 \
+  -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ \
+  -D__USE_CUDA_TYPE__ -D__CHOREO_DMA_DIAGNOSIS__ \
+  -Xcompiler -static-libstdc++ -O2 --use_fast_math \
+  -I"$REPO_ROOT/runtime" -I"$REPO_ROOT/extern/cutlass/include" -I"$REPO_ROOT" \
+  -L/usr/local/cuda/lib64 -lcuda \
+  -o "$BIN" \
+  "$SCRIPT_DIR"/<kernel-source>.cu
+
+echo "Built: $BIN"
+"$BIN" "$@"
+```
+
+Key points about `run.sh`:
+- Uses `$REPO_ROOT/runtime` for `choreo.h` — never bundle a local copy
+- Compiles AND runs in one invocation; pass `--skip-verify` or
+  `--disable-timing` as arguments
+- Binary is placed inside the subfolder (not `/tmp`)
+- Must be `chmod +x`
 
 #### Shipping Steps (per winner)
 
@@ -69,37 +100,19 @@ The naming must include the kernel family, `aitune` marker, date, and iteration 
    ```
 2. **For `.co` kernels**:
    - Copy the `.co` file with the aitune naming.
-   - Verify: compile with choreo, run with timing, confirm correctness.
+   - Verify: compile with choreo, run **without** `--skip-verify`, confirm
+     `Test Passed` appears AFTER numerical verification.
 3. **For `.cu` kernels**:
    - Create the subfolder.
    - Copy the `.cu` file.
-   - Create `build.sh` with the full `nvcc` command (all flags, include paths, output path).
-   - Verify: run `bash build.sh`, then run the binary with timing, confirm correctness.
+   - Create `run.sh` using the template above.
+   - `chmod +x run.sh`.
+   - Verify: run `bash run.sh`, confirm `Test Passed` appears AFTER
+     numerical verification.
 4. **If the iteration requires compiler changes**:
    - Cherry-pick or manually apply the compiler changes to main first.
    - Rebuild `./choreo`.
    - Then ship the kernel.
-
-#### build.sh Template (for .cu kernels)
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-
-nvcc -arch sm_90a -std=c++17 \
-  -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ \
-  -D__USE_CUDA_TYPE__ -D__CHOREO_DMA_DIAGNOSIS__ \
-  -Xcompiler -static-libstdc++ -O2 --use_fast_math \
-  -I"$REPO_ROOT/runtime" -I"$REPO_ROOT/extern/cutlass/include" -I"$REPO_ROOT" \
-  -L/usr/local/cuda/lib64 -lcuda \
-  -o "$SCRIPT_DIR/kernel" \
-  "$SCRIPT_DIR"/*.cu
-
-echo "Built: $SCRIPT_DIR/kernel"
-echo "Run:   CUDA_VISIBLE_DEVICES=0 $SCRIPT_DIR/kernel <M> <N> <K>"
-```
 
 ### Phase 4 — Create README
 
@@ -108,7 +121,8 @@ Create or update `README_<kernel-family>_aitune_<date>.md` in the kernel folder 
 1. **Summary table**: All shipped iterations with TFLOPS, efficiency, and key optimization.
 2. **Build & run commands**: For each shipped kernel:
    - `.co` kernels: the choreo compile command + bash execute command.
-   - `.cu` kernels: `cd <subfolder> && bash build.sh` + run command.
+   - `.cu` kernels: `bash <subfolder>/run.sh` (and note that run.sh compiles
+     + runs in one step).
 3. **Environment variables**: Document `CHOREO_TIMING_WARMUP`, `CHOREO_TIMING_REPEAT`, `CHOREO_DISABLE_TIMING`, `CHOREO_SKIP_VERIFY`.
 4. **Optimization history**: Brief description of each shipped optimization.
 5. **Source branch**: Reference the experiment branch for full history.
@@ -128,11 +142,44 @@ git push origin main
 
 ## Verification Protocol
 
-**VERIFY for every step:**
-- Every `.co` kernel: choreo compile succeeds, `--execute` prints `Test Passed`.
-- Every `.cu` kernel: `nvcc` compile succeeds (exit 0), run prints `Test Passed`.
-- After commit: `git status` is clean for the shipped files.
-- After push: `git log --oneline -1` matches the commit.
+**MANDATORY — every shipped kernel must pass sampled verification.**
+
+### Using `choreo::SampledVerifier`
+
+All kernels must use `choreo::verify_spmm_sampled()` (or the equivalent
+`verify_matmul_row_row_sampled` / `verify_matmul_row_col_sampled`) from
+`runtime/choreo.h`. These utilities sample the M×N output at a coprime stride
+and compare each sample against a CPU FP32 reference.
+
+```cpp
+choreo::SampledVerifierConfig vcfg;
+vcfg.num_samples = 512;
+vcfg.base_tol = <see tolerance table>;
+vcfg.rel_tol = <see tolerance table>;
+choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
+```
+
+### Tolerance Guidelines
+
+| Precision | base_tol | rel_tol |
+|-----------|----------|---------|
+| FP16 input, FP32 accum | 1.0 | 0.01 |
+| FP16 input, FP16 accum | 16.0 | 0.05 |
+| FP8 E4M3 input, FP16 accum | 0.5 | 0.01 |
+
+### Verification Checklist
+
+- [ ] Every `.co` kernel: choreo compile succeeds, `--execute` prints `Test Passed` after real numerical comparison
+- [ ] Every `.cu` kernel: `bash run.sh` succeeds (exit 0), prints `Test Passed` after real numerical comparison
+- [ ] **NEVER print "Test Passed" without actual element-wise comparison** — running the kernel twice is not verification
+- [ ] After commit: `git status` is clean for the shipped files
+- [ ] After push: `git log --oneline -1` matches the commit
+
+### What NOT to Ship
+
+- Kernels where verification was removed or always prints "Test Passed"
+- Kernels that bundle a local `choreo.h` copy (stale headers cause subtle bugs)
+- `.cu` subfolders without a `run.sh`
 
 ## Related Skills
 

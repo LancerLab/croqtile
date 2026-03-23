@@ -58,6 +58,70 @@ Follow the loop defined in `.claude/program.md` Steps 1-5:
 
 **Repeat from Step 1. NEVER STOP unless the user interrupts or the network drops.**
 
+## Mandatory Verification (NEVER SKIP)
+
+**Every iteration MUST pass verification before it can be KEPT.** A kernel that
+produces wrong results is worthless regardless of TFLOPS.
+
+### Using `choreo::SampledVerifier` (in `runtime/choreo.h`)
+
+The project provides `choreo::verify_spmm_sampled()` (and
+`verify_matmul_row_row_sampled` / `verify_matmul_row_col_sampled`) which
+sample the M×N output at a coprime stride and verify each sample against a
+CPU FP32 reference.
+
+```cpp
+choreo::SampledVerifierConfig vcfg;
+vcfg.num_samples = 512;    // number of output elements to check
+vcfg.base_tol = 0.5f;     // absolute tolerance (adjust per precision)
+vcfg.rel_tol = 0.01f;     // relative tolerance
+// vcfg.verbose = true;   // print every mismatch (default: first 5)
+choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
+```
+
+### Tolerance Guidelines
+
+| Precision | base_tol | rel_tol | Notes |
+|-----------|----------|---------|-------|
+| FP16 input, FP32 accum | 1.0 | 0.01 | Standard |
+| FP16 input, FP16 accum | 16.0 | 0.05 | Higher error from FP16 accumulation |
+| FP8 E4M3 input, FP16 accum | 0.5 | 0.01 | FP8 inputs are lower magnitude |
+
+### Requirements
+
+- **For `.co` kernels**: The host code MUST include a verification block that
+  calls `verify_spmm_sampled` (or equivalent) when `skip_verify` is false.
+  The kernel must print `Test Passed` only after verification succeeds.
+- **For `.cu` kernels**: Same requirement. The `.cu` host code must compute
+  the CPU reference from `lhs_dense_h` (the pre-sparsification dense matrix)
+  and the result from the GPU.
+- **NEVER print "Test Passed" without actual numerical comparison.** Running
+  the kernel twice and copying the result back is NOT verification.
+- **Keep `lhs_dense_h` alive** in host code — it is needed for the CPU
+  reference dot products. Do not discard it after encoding.
+
+### Verification Pattern for Sparse GEMM
+
+```cpp
+// After kernel execution and D2H copy of result:
+if (skip_verify) {
+  std::cout << "Test Passed (verify skipped)\n" << std::endl;
+  return 0;
+}
+
+auto lhs_dense_v = lhs_dense_h.view();
+auto rhs_v = rhs_h.view();
+auto res_v = res_h.view();
+
+choreo::SampledVerifierConfig vcfg;
+vcfg.num_samples = 512;
+vcfg.base_tol = <see table above>;
+vcfg.rel_tol = <see table above>;
+choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
+
+std::cout << "Test Passed\n" << std::endl;
+```
+
 ## Iteration File Naming
 
 - `.co` iterations: `<kernel-base>_iter<NNN>_<brief-tag>.co` (e.g. `blockscale_gemm_e4m3_iter001_tma_meta.co`)
@@ -79,6 +143,7 @@ Follow the loop defined in `.claude/program.md` Steps 1-5:
 - Never repeat failed combinations (Rule 4)
 - Abandon stuck ideas after 3 attempts (Rule 5)
 - Understand the kernel before mutating (Rule 6)
+- **NEVER SKIP verification** — every KEEP must pass `verify_spmm_sampled` (Rule 7)
 - **NEVER STOP the loop** — run indefinitely until user interrupts
 
 ## Related Skills

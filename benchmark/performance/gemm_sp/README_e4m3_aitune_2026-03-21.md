@@ -6,144 +6,73 @@ H800 PCIe peak F8 TFLOPS: 3026.
 
 ## Summary
 
-| Iter | TFLOPS | HW Eff% | vs Baseline | Type | Key Optimization |
-|------|--------|---------|-------------|------|------------------|
-| baseline | 671 | 22.2% | — | .co | 1p1c, swizzle128/128, prepack, 2-stage |
-| **iter001** | 759 | 25.1% | +13.1% | .co | TMA metadata staging |
-| **iter016** | 772 | 25.5% | +15.1% | .co | early empty signal + merged barrier |
-| **iter023** | 811 | 26.8% | +20.9% | .cu | SW pipelined consumer loop + warpgroup_wait\<1\> |
-| **iter036** | 897 | 29.6% | +33.7% | .cu | 1-producer/2-consumer warp specialization |
-| **iter040** | 1090 | 36.0% | +62.4% | .cu | 3-stage pipeline (from 2-stage), 1p2c |
-| **iter068** | 1127 | 37.2% | +67.9% | .cu | early empty arrive + all prior optimizations (BEST) |
+| Iter | TFLOPS | HW Eff% | vs Baseline | Type | Verification | Key Optimization |
+|------|--------|---------|-------------|------|--------------|------------------|
+| baseline | 671 | 22.2% | — | .co | ✓ | 1p1c, swizzle128/128, prepack, 2-stage |
+| **iter001** | 759 | 25.1% | +13.1% | .co | ✓ | TMA metadata staging |
+| **iter016** | 772 | 25.5% | +15.1% | .co | ✓ | early empty signal + merged barrier |
+| **iter023** | 811 | 26.8% | +20.9% | .cu | ✓ | SW pipelined consumer loop + warpgroup_wait\<1\> |
+| **iter036** | 897 | 29.6% | +33.7% | .cu | ✓ | 1-producer/2-consumer warp specialization |
+| **iter040** | 1090 | 36.0% | +62.4% | .cu | ✓ | 3-stage pipeline (from 2-stage), 1p2c |
+| **iter068** | 1127 | 37.2% | +67.9% | .cu | ✓ | early empty arrive + all prior optimizations (BEST) |
 
-## Build & Run Commands
+All `.cu` kernels verified with `choreo::verify_spmm_sampled()` (512 samples,
+base_tol=0.5, rel_tol=0.01).
 
-All commands run from the repository root. Requires `nvcc` on PATH (`export PATH=/usr/local/cuda/bin:$PATH`).
+## Build & Run
+
+Each `.cu` subfolder has a `run.sh` that compiles and runs in one step:
 
 ### iter001 — TMA metadata staging (.co)
 
 ```bash
-# Compile with choreo
 ./choreo -gs -t cute -arch=sm_90a --use-warpspec --use-prepack \
   benchmark/performance/gemm_sp/gemm_sp_e4m3_aitune_2026-03-21_iter001.co \
   -o /tmp/e4m3_iter001.cute.result
-
-# Run (verify + benchmark)
 CUDA_VISIBLE_DEVICES=0 bash /tmp/e4m3_iter001.cute.result --execute
-
-# Run (verify only, no timing)
-CHOREO_DISABLE_TIMING=1 CUDA_VISIBLE_DEVICES=0 bash /tmp/e4m3_iter001.cute.result --execute
 ```
 
 ### iter016 — early empty + merged barrier (.co)
 
 ```bash
-# Compile with choreo
 ./choreo -gs -t cute -arch=sm_90a --use-warpspec --use-prepack \
   benchmark/performance/gemm_sp/gemm_sp_e4m3_aitune_2026-03-21_iter016.co \
   -o /tmp/e4m3_iter016.cute.result
-
-# Run (verify + benchmark)
 CUDA_VISIBLE_DEVICES=0 bash /tmp/e4m3_iter016.cute.result --execute
-
-# Run (verify only, no timing)
-CHOREO_DISABLE_TIMING=1 CUDA_VISIBLE_DEVICES=0 bash /tmp/e4m3_iter016.cute.result --execute
 ```
 
 ### iter023 — SW pipeline + warpgroup_wait\<1\> (.cu)
 
 ```bash
-# Build with nvcc (from repo root)
-nvcc -arch sm_90a -std=c++17 \
-  -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ \
-  -D__USE_CUDA_TYPE__ -D__CHOREO_DMA_DIAGNOSIS__ \
-  -Xcompiler -static-libstdc++ -O2 --use_fast_math \
-  -Iruntime -Iextern/cutlass/include -I. \
-  -L/usr/local/cuda/lib64 -lcuda \
-  -o benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter023/gemm_sp_e4m3_iter023 \
-  benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter023/gemm_sp_e4m3_aitune_2026-03-21_iter023.cu
-
-# Run (verify + benchmark, M=4096 N=8192 K=8192)
-CUDA_VISIBLE_DEVICES=0 \
-  ./benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter023/gemm_sp_e4m3_iter023 \
-  4096 8192 8192
-
-# Run (verify only)
-CHOREO_DISABLE_TIMING=1 CUDA_VISIBLE_DEVICES=0 \
-  ./benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter023/gemm_sp_e4m3_iter023 \
-  4096 8192 8192
+bash benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter023/run.sh
 ```
 
 ### iter036 — 1-producer/2-consumer warp specialization (.cu)
 
 ```bash
-# Build with nvcc (from repo root)
-nvcc -arch sm_90a -std=c++17 \
-  -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ \
-  -D__USE_CUDA_TYPE__ -D__CHOREO_DMA_DIAGNOSIS__ \
-  -Xcompiler -static-libstdc++ -O2 --use_fast_math \
-  -Iruntime -Iextern/cutlass/include -I. \
-  -L/usr/local/cuda/lib64 -lcuda \
-  -o benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter036/gemm_sp_e4m3_iter036 \
-  benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter036/gemm_sp_e4m3_aitune_2026-03-21_iter036.cu
-
-# Run (verify + benchmark, M=4096 N=8192 K=8192)
-CUDA_VISIBLE_DEVICES=0 \
-  ./benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter036/gemm_sp_e4m3_iter036 \
-  4096 8192 8192
-
-# Run (verify only)
-CHOREO_DISABLE_TIMING=1 CUDA_VISIBLE_DEVICES=0 \
-  ./benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter036/gemm_sp_e4m3_iter036 \
-  4096 8192 8192
+bash benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter036/run.sh
 ```
 
 ### iter040 — 3-stage pipeline breakthrough (.cu)
 
 ```bash
-# Build with nvcc (from repo root)
-nvcc -arch sm_90a -std=c++17 \
-  -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ \
-  -D__USE_CUDA_TYPE__ -D__CHOREO_DMA_DIAGNOSIS__ \
-  -Xcompiler -static-libstdc++ -O2 --use_fast_math \
-  -Iruntime -Iextern/cutlass/include -I. \
-  -L/usr/local/cuda/lib64 -lcuda \
-  -o benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter040/gemm_sp_e4m3_iter040 \
-  benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter040/gemm_sp_e4m3_aitune_2026-03-21_iter040.cu
-
-# Run (verify + benchmark, M=4096 N=8192 K=8192)
-CUDA_VISIBLE_DEVICES=0 \
-  ./benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter040/gemm_sp_e4m3_iter040 \
-  4096 8192 8192
-
-# Run (verify only)
-CHOREO_DISABLE_TIMING=1 CUDA_VISIBLE_DEVICES=0 \
-  ./benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter040/gemm_sp_e4m3_iter040 \
-  4096 8192 8192
+bash benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter040/run.sh
 ```
 
 ### iter068 — final best: early empty arrive (.cu) **WINNER**
 
 ```bash
-# Build with nvcc (from repo root)
-nvcc -arch sm_90a -std=c++17 \
-  -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ \
-  -D__USE_CUDA_TYPE__ -D__CHOREO_DMA_DIAGNOSIS__ \
-  -Xcompiler -static-libstdc++ -O2 --use_fast_math \
-  -Iruntime -Iextern/cutlass/include -I. \
-  -L/usr/local/cuda/lib64 -lcuda \
-  -o benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter068/gemm_sp_e4m3_iter068 \
-  benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter068/gemm_sp_e4m3_aitune_2026-03-21_iter068.cu
+bash benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter068/run.sh
+```
 
-# Run (verify + benchmark, M=4096 N=8192 K=8192)
-CUDA_VISIBLE_DEVICES=0 \
-  ./benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter068/gemm_sp_e4m3_iter068 \
-  4096 8192 8192
+### Common Options
 
-# Run (verify only)
-CHOREO_DISABLE_TIMING=1 CUDA_VISIBLE_DEVICES=0 \
-  ./benchmark/performance/gemm_sp/e4m3_aitune_2026-03-21_iter068/gemm_sp_e4m3_iter068 \
-  4096 8192 8192
+```bash
+# Skip verification (timing only):
+bash <subfolder>/run.sh --skip-verify
+
+# Skip timing (verify only):
+CHOREO_DISABLE_TIMING=1 bash <subfolder>/run.sh
 ```
 
 ## Benchmark Environment Variables

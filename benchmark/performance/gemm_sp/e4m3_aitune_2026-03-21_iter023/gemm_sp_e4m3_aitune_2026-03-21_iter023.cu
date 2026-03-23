@@ -528,23 +528,11 @@ int main(int argc, char** argv) {
   auto rhs_v = rhs_h.view();
   auto res_v = res_h.view();
 
-  float tolerance = 0.5f;
-  for (size_t i = 0; i < 128; ++i) {
-    for (size_t j = 0; j < 256; ++j) {
-      float ref = 0.0f;
-      for (size_t kk = 0; kk < k; ++kk) {
-        ref += choreo::to_f32(lhs_dense_v[i][kk]) *
-               choreo::to_f32(rhs_v[j][kk]);
-      }
-      float got = __half2float(res_v[i][j]);
-      float diff = std::abs(got - ref);
-      if (diff > tolerance) {
-        std::cout << "mismatch at (" << i << ", " << j << ") gpu=" << got
-                  << " ref=" << ref << " diff=" << diff << "\n";
-      }
-      choreo::choreo_assert(diff < tolerance, "Sparse WGMMA e4m3 failed");
-    }
-  }
+  choreo::SampledVerifierConfig vcfg;
+  vcfg.num_samples = 9600;
+  vcfg.base_tol = 0.5f;
+  vcfg.rel_tol = 0.01f;
+  choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
 
   std::cout << "Test Passed\n" << std::endl;
 }

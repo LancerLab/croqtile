@@ -202,16 +202,26 @@ int main(int argc, char** argv) {
     choreo::abend_true(cudaDeviceSynchronize());
   }
 
-  if (skip_verify) {
-    std::cout << "Test Passed (verify skipped)\n" << std::endl;
-    return 0;
-  }
-
   spmm(lhs_packed_d_view, lhs_meta_d_view, rhs_d_view, res_d_view);
   choreo::abend_true(cudaDeviceSynchronize());
   choreo::abend_true(cudaMemcpy(res_h.data(), res_d, m * n * sizeof(half),
                                 cudaMemcpyDeviceToHost));
   choreo::abend_true(cudaDeviceSynchronize());
+
+  if (skip_verify) {
+    std::cout << "Test Passed (verify skipped)\n" << std::endl;
+    return 0;
+  }
+
+  auto lhs_dense_v = lhs_dense_h.view();
+  auto rhs_v = rhs_h.view();
+  auto res_v = res_h.view();
+
+  choreo::SampledVerifierConfig vcfg;
+  vcfg.num_samples = 512;
+  vcfg.base_tol = 1.0f;
+  vcfg.rel_tol = 0.01f;
+  choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
 
   std::cout << "Test Passed\n" << std::endl;
 }
