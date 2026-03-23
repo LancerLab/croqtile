@@ -2477,8 +2477,8 @@ struct DMAAttribute {
   int sparse_m = 0;
   DMAAttribute(SwizMode swiz = SwizMode::NONE, bool zf = false, bool sp = false,
                int sp_n = 0, int sp_m = 0, bool mc = false)
-      : sw_mode(swiz), zfill(zf), is_sparse(sp), multicast(mc),
-        sparse_n(sp_n), sparse_m(sp_m) {}
+      : sw_mode(swiz), zfill(zf), is_sparse(sp), multicast(mc), sparse_n(sp_n),
+        sparse_m(sp_m) {}
 };
 
 struct DMAAsync {

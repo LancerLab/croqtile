@@ -13,16 +13,17 @@ void ShapeInference::InvalidateVisitorValNOs() {
 bool ShapeInference::StaticFail(bool pred_fail, UsageType ut) {
   auto& stats = CCtx().GetAssessmentStats();
   ++stats.total;
-  if (pred_fail) ++stats.static_false;
-  else ++stats.static_true;
+  if (pred_fail)
+    ++stats.static_false;
+  else
+    ++stats.static_true;
   switch (ut) {
-    case UsageType::UnClassified:       ++stats.unclassified_total; break;
-    case UsageType::ShapeCompatibility: ++stats.shape_compat_total; break;
-    case UsageType::ElementAccess:      ++stats.elem_access_total; break;
-    case UsageType::LoopBound:          ++stats.loop_bound_total; break;
-    case UsageType::HardwareConstraint: ++stats.hw_constraint_total; break;
-    default:
-      choreo_unreachable("unsupported usage type.");
+  case UsageType::UnClassified: ++stats.unclassified_total; break;
+  case UsageType::ShapeCompatibility: ++stats.shape_compat_total; break;
+  case UsageType::ElementAccess: ++stats.elem_access_total; break;
+  case UsageType::LoopBound: ++stats.loop_bound_total; break;
+  case UsageType::HardwareConstraint: ++stats.hw_constraint_total; break;
+  default: choreo_unreachable("unsupported usage type.");
   }
   return pred_fail;
 }
@@ -2326,9 +2327,9 @@ const NumTy ShapeInference::GenValNo(const AST::Node& n) {
 
         SignTy msign = GetSign(*e->GetL(), VNKind::VNK_MDSPAN);
 
-        if (StaticFail((size_t)index >= msign->Count(), UsageType::ElementAccess))
+        if (StaticFail((size_t)index >= msign->Count(),
+                       UsageType::ElementAccess))
           Error1(n.LOC(), "out of bound in 'dimof'.");
-
 
         NumTy valno = GetValNum(vn.ToMSign(msign)->At(index));
         ast_vn.Update(e, valno, VNKind::VNK_VALUE);
@@ -2337,7 +2338,8 @@ const NumTy ShapeInference::GenValNo(const AST::Node& n) {
         assert(!ast_vn.Hit(e, VNKind::VNK_VALUE));
         SignTy msign = GetSign(*e->GetL(), VNKind::VNK_VALUE);
 
-        if (StaticFail((size_t)index >= msign->Count(), UsageType::ElementAccess))
+        if (StaticFail((size_t)index >= msign->Count(),
+                       UsageType::ElementAccess))
           Error1(n.LOC(), "out of bound in 'dimof'.");
 
         NumTy valno = GetValNum(vn.ToMSign(msign)->At(index));
@@ -2346,7 +2348,8 @@ const NumTy ShapeInference::GenValNo(const AST::Node& n) {
       } else if (ast_vn.Hit(e->GetL().get(), VNKind::VNK_UBOUND)) {
         SignTy msign = GetSign(*e->GetL(), VNKind::VNK_VALUE);
 
-        if (StaticFail((size_t)index >= msign->Count(), UsageType::ElementAccess))
+        if (StaticFail((size_t)index >= msign->Count(),
+                       UsageType::ElementAccess))
           Error1(n.LOC(), "out of bound in 'dimof'.");
 
         NumTy valno = GetValNum(vn.ToMSign(msign)->At(index));

@@ -70,7 +70,7 @@ namespace cute {
 inline const char* CudaDeviceMemory(Storage st) {
   switch (st) {
   case Storage::SHARED: return "__shared__";
-  case Storage::LOCAL: return "";  // local = per-thread stack/register storage
+  case Storage::LOCAL: return ""; // local = per-thread stack/register storage
   default: choreo_unreachable("device storage type is not supported.");
   }
   return "";
@@ -288,243 +288,9 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
   return std::make_pair(buf_name, buf_expr);
 }
 
-std::string
-CuteCodeGen::SwizzledTailCopyStateName(const std::string& sym,
-                                       const std::string& offset) const {
-  std::string suffix;
-  for (unsigned char ch : offset) {
-    if (std::isalnum(ch) || ch == '_')
-      suffix.push_back(static_cast<char>(ch));
-    else if (!suffix.empty() && suffix.back() != '_')
-      suffix.push_back('_');
-  }
-  while (!suffix.empty() && suffix.back() == '_') suffix.pop_back();
-  auto name = sym + "__swizzled_tail_copy_dst";
-  if (!suffix.empty() && offset != "0") name += "_" + suffix;
-  return name;
-}
-
-  void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
-                         const std::string& indent) const {
-    os << indent
-      << "cooperative_groups::tiled_partition<128>(cooperative_groups::this_"
-        "thread_block()).sync();\n";
-  }
-
-  void CuteCodeGen::EmitSwizzledTailCopyStateDecl(
-     std::ostringstream& os, const std::string& indent,
-     const HoistedSwizzledTailCopyStateInfo& info) const {
-    os << indent << "auto " << info.state_name << " =\n";
-    os << indent << "    cute::make_tensor(\n";
-    os << indent << "        cute::make_smem_ptr<" << info.element_ty << ">(\n";
-    os << indent << "            " << info.dst_ptr_expr << "),\n";
-    os << indent << "        cute::tile_to_shape(\n";
-    os << indent << "            cute::SM90::GMMA::Layout_K_SW128_Atom<"
-      << info.element_ty << ">{},\n";
-    os << indent << "            cute::make_shape(cute::Int<"
-      << info.tile_rows << ">{}, cute::Int<" << info.tile_cols
-      << ">{})));\n";
-  }
-
-std::optional<CuteCodeGen::HoistedSwizzledTailCopyStateInfo>
-CuteCodeGen::AnalyzeHoistableSwizzledTailCopyState(
-    AST::DMA& n, const std::vector<std::string>& loop_refs) const {
-  if (IsHost()) return std::nullopt;
-
-  auto nty = NodeType(n);
-  auto fty = dyn_cast<FutureType>(nty);
-  if (!fty || n.IsTMA()) return std::nullopt;
-  if (!isa<AST::ChunkAt>(n.from) || !isa<AST::ChunkAt>(n.to))
-    return std::nullopt;
-  if (!n.future.empty()) return std::nullopt; // not supported yet
-
-  auto f_ca = cast<AST::ChunkAt>(n.from);
-  auto t_ca = cast<AST::ChunkAt>(n.to);
-  auto f_sym = f_ca->data->name;
-  auto t_sym = t_ca->data->name;
-
-  auto ResolveDMABaseType = [&](const std::string& sym,
-                                const ptr<AST::ChunkAt>& ca) -> ptr<Type> {
-    auto scoped_sym = InScopeName(sym);
-    if (SymTab()->Exists(scoped_sym)) return GetSymbolType(sym);
-    return NodeType(*ca);
-  };
-
-  auto f_ty = ResolveDMABaseType(f_sym, f_ca);
-  auto t_ty = ResolveDMABaseType(t_sym, t_ca);
-  auto f_sty = dyn_cast<SpannedType>(f_ty);
-  auto t_sty = dyn_cast<SpannedType>(t_ty);
-  if (!f_sty || !t_sty) return std::nullopt;
-
-  std::string f_mds_offset = "";
-  std::string t_mds_offset = "";
-  if (auto idx = f_ca->IndexOfLastSpanAs())
-    f_mds_offset = TileBaseOffset(f_ca);
-  else
-    f_mds_offset = ValueSTR(GenOffset(f_ca));
-
-  if (auto idx = t_ca->IndexOfLastSpanAs())
-    t_mds_offset = TileBaseOffset(t_ca);
-  else
-    t_mds_offset = ValueSTR(GenOffset(t_ca));
-
-  std::vector<size_t> transp_config;
-  if (n.operation == ".transp")
-    transp_config = cast<TransposeConfig>(n.GetConfig())->dim_values;
-
-  bool use_wgmma_layout_t = HasWGMMAInFunction() &&
-                            t_sty->GetStorage() == Storage::SHARED &&
-                            (t_sty->ElementType() == BaseType::F16 ||
-                             t_sty->ElementType() == BaseType::BF16 ||
-                             t_sty->ElementType() == BaseType::F8_E4M3);
-
-  auto f_stride = GenStrides(f_ca, transp_config);
-  auto swizzle_mode = n.GetSwizzleMode();
-  bool use_swizzled_tail_copy =
-      n.operation == ".copy" &&
-      (f_sty->GetStorage() == Storage::GLOBAL ||
-       f_sty->GetStorage() == Storage::DEFAULT) &&
-      t_sty->GetStorage() == Storage::SHARED && use_wgmma_layout_t &&
-      swizzle_mode != SwizMode::NONE && t_sty->GetShape().Rank() == 2 &&
-      fty->GetShape().Rank() == 2 && !t_sty->GetShape().IsDynamic() &&
-      !f_ca->GetBlockShape().IsDynamic() &&
-      VIIsInt(t_sty->GetShape().ValueAt(1)) &&
-      VIIsInt(f_ca->GetBlockShape().ValueAt(1)) &&
-      *VIInt(t_sty->GetShape().ValueAt(1)) ==
-          *VIInt(f_ca->GetBlockShape().ValueAt(1)) && n.future.empty();
-  if (!use_swizzled_tail_copy) return std::nullopt;
-
-  const auto f_buf = GetDMABufferExpr(f_sym, f_ca->indices, f_ty);
-  const auto t_buf = GetDMABufferExpr(t_sym, t_ca->indices, t_ty);
-
-  struct TiledCopyEntry {
-    std::pair<size_t, size_t> thr_layout;
-    std::pair<size_t, size_t> val_layout;
-    size_t vectorized_align_bits;
-  };
-  std::optional<TiledCopyEntry> swizzled_tail_copy_entry;
-  const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
-  assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
-  const auto& lconfig = lcs[parallel_idx];
-  auto inner_thr_count =
-      lconfig.thread_count.x * lconfig.thread_count.y * lconfig.thread_count.z;
-  auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
-                     lconfig.group_count.y * lconfig.group_count.z;
-  auto thr_count_vi = inner_thr_count * group_count;
-  if (VIIsInt(thr_count_vi)) {
-    size_t thr_count = *VIInt(thr_count_vi);
-    size_t elem_byte = SizeOf(f_sty->ElementType());
-    size_t tile_n = *VIInt(t_sty->GetShape().ValueAt(1));
-    constexpr size_t bytes_per_copy = 16;
-    if (bytes_per_copy % elem_byte == 0) {
-      size_t elems_per_copy = bytes_per_copy / elem_byte;
-      if (tile_n % elems_per_copy == 0) {
-        size_t thr_per_row = tile_n / elems_per_copy;
-        if (thr_per_row != 0 && thr_count % thr_per_row == 0) {
-          TiledCopyEntry entry;
-          entry.thr_layout.first = thr_count / thr_per_row;
-          entry.thr_layout.second = thr_per_row;
-          entry.val_layout.first = 1;
-          entry.val_layout.second = elems_per_copy;
-          entry.vectorized_align_bits = 128;
-          swizzled_tail_copy_entry = entry;
-        }
-      }
-    }
-  }
-
-  if (!swizzled_tail_copy_entry.has_value() ||
-      swizzled_tail_copy_entry->vectorized_align_bits != 128)
-    return std::nullopt;
-
-  auto row_dim = VIInt(t_sty->GetShape().ValueAt(0));
-  auto col_dim = VIInt(t_sty->GetShape().ValueAt(1));
-  if (!row_dim || !col_dim) return std::nullopt;
-
-  std::string dst_ptr_expr = std::string("((") +
-                             NameBaseType(t_sty->ElementType()) + "*)" +
-                             t_buf.second;
-  if (!t_mds_offset.empty() && t_mds_offset != "0")
-    dst_ptr_expr += " + (" + t_mds_offset + ")";
-  dst_ptr_expr += ")";
-
-  for (const auto& loop_ref : loop_refs) {
-    if (!loop_ref.empty() && dst_ptr_expr.find(loop_ref) != std::string::npos)
-      return std::nullopt;
-  }
-
-  std::string src_ptr_expr = std::string("((") +
-                             NameBaseType(f_sty->ElementType()) + "*)" +
-                             f_buf.second;
-  if (!f_mds_offset.empty() && f_mds_offset != "0")
-    src_ptr_expr += " + (" + f_mds_offset + ")";
-  src_ptr_expr += ")";
-
-  HoistedSwizzledTailCopyStateInfo info;
-  info.state_name = SwizzledTailCopyStateName(t_sym, t_mds_offset);
-  info.dst_ptr_expr = dst_ptr_expr;
-  info.src_ptr_expr = src_ptr_expr;
-  info.src_row_stride_expr = ValueSTR(f_stride.front());
-  info.row_guard_expr = ValueSTR(fty->GetShape().ValueAt(0), true);
-  info.element_ty = NameBaseType(t_sty->ElementType());
-  info.tile_rows = *row_dim;
-  info.tile_cols = *col_dim;
-  info.thr_rows = swizzled_tail_copy_entry->thr_layout.first;
-  info.thr_cols = swizzled_tail_copy_entry->thr_layout.second;
-  info.val_rows = swizzled_tail_copy_entry->val_layout.first;
-  info.val_cols = swizzled_tail_copy_entry->val_layout.second;
-  return info;
-}
-
-std::vector<CuteCodeGen::HoistedSwizzledTailCopyStateInfo>
-CuteCodeGen::AnalyzeHoistableSwizzledTailCopyStates(
-    const ptr<AST::MultiNodes>& body,
-    const std::vector<std::string>& loop_refs) const {
-  std::vector<HoistedSwizzledTailCopyStateInfo> infos;
-  if (!body || IsHost()) return infos;
-
-  std::function<void(const ptr<AST::Node>&, const std::vector<std::string>&)>
-      collect = [&](const ptr<AST::Node>& node,
-                    const std::vector<std::string>& current_loop_refs) {
-        if (!node) return;
-        if (auto dma = dyn_cast<AST::DMA>(node)) {
-          if (auto info = AnalyzeHoistableSwizzledTailCopyState(*dma,
-                                                                current_loop_refs))
-            infos.push_back(*info);
-          return;
-        }
-        if (auto fb = dyn_cast<AST::ForeachBlock>(node)) {
-          auto nested_loop_refs = current_loop_refs;
-          for (auto& rn : fb->GetRanges()) {
-            auto rng = cast<AST::LoopRange>(rn);
-            auto cname = rng->IVName();
-            nested_loop_refs.push_back(cname);
-            nested_loop_refs.push_back(std::string("__iv_") + cname);
-          }
-          collect(fb->GetBody(), nested_loop_refs);
-          return;
-        }
-        if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
-          for (auto& item : mn->values) collect(item, current_loop_refs);
-          return;
-        }
-        if (auto if_else = dyn_cast<AST::IfElseBlock>(node)) {
-          collect(if_else->GetThenBody(), current_loop_refs);
-          collect(if_else->GetElseBody(), current_loop_refs);
-          return;
-        }
-        if (auto block = dyn_cast<AST::Block>(node)) {
-          collect(block->GetBody(), current_loop_refs);
-          return;
-        }
-        if (auto with_block = dyn_cast<AST::WithBlock>(node)) {
-          collect(with_block->GetBody(), current_loop_refs);
-          return;
-        }
-      };
-
-  collect(body, loop_refs);
-  return infos;
+void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
+                                  const std::string& indent) const {
+  os << indent << "wg_barrier.sync();\n";
 }
 
 std::optional<CuteCodeGen::HoistedScaleAccumInfo>
@@ -726,8 +492,8 @@ CuteCodeGen::AnalyzeExplicitScaleAccumScope(
       auto sa_strides = GenStrides(op->ScaleA());
       auto sa_sty = GetSpannedType(NodeType(*op->ScaleA()));
       auto sa_shape = sa_sty->GetShape();
-      bool sa_transposed = VIIsInt(sa_shape.ValueAt(0)) &&
-                           *VIInt(sa_shape.ValueAt(0)) == 1;
+      bool sa_transposed =
+          VIIsInt(sa_shape.ValueAt(0)) && *VIInt(sa_shape.ValueAt(0)) == 1;
       info.scale_a_ld = sa_transposed ? ValueSTR(sa_strides.back())
                                       : ValueSTR(sa_strides.front());
     }
@@ -935,9 +701,9 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.push(pb->GetLevel());
     // only on device-side
-    bool is_deferred_block =
-        !pb->IsOuter() && pb->GetLevel() == ParallelLevel::BLOCK &&
-        cluster_defers_launch;
+    bool is_deferred_block = !pb->IsOuter() &&
+                             pb->GetLevel() == ParallelLevel::BLOCK &&
+                             cluster_defers_launch;
     if (pb->IsOuter() || is_deferred_block) {
       if (!is_deferred_block) parallel_idx += 1;
       cur_pb = pb;
@@ -1022,9 +788,9 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
     // only on device-side
-    bool is_deferred_block =
-        !pb->IsOuter() && pb->GetLevel() == ParallelLevel::BLOCK &&
-        cluster_defers_launch;
+    bool is_deferred_block = !pb->IsOuter() &&
+                             pb->GetLevel() == ParallelLevel::BLOCK &&
+                             cluster_defers_launch;
     if (pb->IsOuter() && pb->GetLevel() == ParallelLevel::CLUSTER) {
       cluster_defers_launch = false;
       deferred_cluster_pb = nullptr;
@@ -1081,11 +847,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
       for (const auto& name : hoisted_scale_decl_scopes.back())
         active_hoisted_scale_decls.erase(name);
       hoisted_scale_decl_scopes.pop_back();
-    }
-    if (!hoisted_swizzled_tail_copy_scopes.empty()) {
-      for (const auto& name : hoisted_swizzled_tail_copy_scopes.back())
-        active_hoisted_swizzled_tail_copy_states.erase(name);
-      hoisted_swizzled_tail_copy_scopes.pop_back();
     }
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
@@ -1584,8 +1345,11 @@ void CuteCodeGen::emitPrepackedU32Snippet(const std::string& metaVar,
                                           const std::string& colStride) {
   ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
   ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
-  ds << d_indent << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
-  ds << d_indent << "  int __sp_packed_row = blockIdx.x * 64 + ((__sp_tid >> 5) * 16) + (((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
+  ds << d_indent
+     << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & 7);\n";
+  ds << d_indent
+     << "  int __sp_packed_row = blockIdx.x * 64 + ((__sp_tid >> 5) * 16) + "
+        "(((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
   ds << d_indent << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
   ds << d_indent << "  if (__sp_active) {\n";
   ds << d_indent << "    uint32_t __sp_u32_val = " << deviceArray
@@ -1601,7 +1365,8 @@ void CuteCodeGen::emitPrepackedU32TileLoadSnippet(
   ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
   ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
   ds << d_indent
-     << "  int __sp_local_row = ((__sp_tid >> 5) * 16) + (((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
+     << "  int __sp_local_row = ((__sp_tid >> 5) * 16) + (((__sp_tid >> 2) & "
+        "7) << 1) + (__sp_tid & 1);\n";
   ds << d_indent << "  if (__sp_active) {\n";
   ds << d_indent << "    uint32_t __sp_u32_val = (" << tileAddr
      << ")[__sp_local_row * (" << rowStride << ")];\n";
@@ -1629,8 +1394,7 @@ void CuteCodeGen::emitPrepackedV2TileLoadSnippet(
   int sval = 0, log2s = 0;
   try {
     sval = std::stoi(rowStride);
-  } catch (...) {
-  }
+  } catch (...) {}
   bool pow2 = sval > 0 && (sval & (sval - 1)) == 0;
   if (pow2) {
     int t = sval;
@@ -1652,40 +1416,35 @@ void CuteCodeGen::emitPrepackedV2TileLoadSnippet(
     if (!tileOffset.empty())
       off_expr = tileOffset;
     else
-      off_expr =
-          std::string("(int)((") + tileAddr + ") - (" + baseName + "))";
-    ds << d_indent << "    int __sp_row = (" << off_expr << " >> "
-       << log2s << ") + __sp_lr;\n";
-    ds << d_indent << "    " << metaVar
-       << " = ((const uint32_t*)(" << baseName
-       << ") + ((__sp_row >> 4) << " << block_shift
-       << ") + (__sp_row & 15))[(" << off_expr << " & " << smask
-       << ") << 4];\n";
+      off_expr = std::string("(int)((") + tileAddr + ") - (" + baseName + "))";
+    ds << d_indent << "    int __sp_row = (" << off_expr << " >> " << log2s
+       << ") + __sp_lr;\n";
+    ds << d_indent << "    " << metaVar << " = ((const uint32_t*)(" << baseName
+       << ") + ((__sp_row >> 4) << " << block_shift << ") + (__sp_row & 15))[("
+       << off_expr << " & " << smask << ") << 4];\n";
   } else {
-    ds << d_indent << "    int __sp_to = (int)((const uint32_t*)("
-       << tileAddr << ") - (const uint32_t*)(" << baseName << "));\n";
-    ds << d_indent << "    int __sp_br = __sp_to / (" << rowStride
-       << ");\n";
+    ds << d_indent << "    int __sp_to = (int)((const uint32_t*)(" << tileAddr
+       << ") - (const uint32_t*)(" << baseName << "));\n";
+    ds << d_indent << "    int __sp_br = __sp_to / (" << rowStride << ");\n";
     ds << d_indent << "    int __sp_r = __sp_br + __sp_lr;\n";
-    ds << d_indent << "    " << metaVar << " = ((const uint32_t*)("
-       << baseName << "))[((__sp_r >> 4) * (" << rowStride
-       << ") + __sp_to - __sp_br * (" << rowStride
-       << ")) * 16 + (__sp_r & 15)];\n";
+    ds << d_indent << "    " << metaVar << " = ((const uint32_t*)(" << baseName
+       << "))[((__sp_r >> 4) * (" << rowStride << ") + __sp_to - __sp_br * ("
+       << rowStride << ")) * 16 + (__sp_r & 15)];\n";
   }
   ds << d_indent << "  }\n";
 }
 
-void CuteCodeGen::emitPrepackedV2Snippet(
-    const std::string& metaVar, const std::string& baseName,
-    const std::string& /*deviceArray*/, const std::string& rowStride,
-    const std::string& /*colStride*/) {
+void CuteCodeGen::emitPrepackedV2Snippet(const std::string& metaVar,
+                                         const std::string& baseName,
+                                         const std::string& /*deviceArray*/,
+                                         const std::string& rowStride,
+                                         const std::string& /*colStride*/) {
   ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
   ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
   ds << d_indent
      << "  int __sp_packed_row = blockIdx.x * 64 + ((__sp_tid >> 5) * 16)"
         " + (((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
-  ds << d_indent
-     << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
+  ds << d_indent << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
   ds << d_indent << "  if (__sp_active) {\n";
   ds << d_indent << "    " << metaVar << " = ((const uint32_t*)(" << baseName
      << "))[((__sp_packed_row >> 4) * (" << rowStride
@@ -1700,8 +1459,7 @@ void CuteCodeGen::emitFp8PrepackedV2TileLoadSnippet(
   int sval = 0, log2s = 0;
   try {
     sval = std::stoi(rowStride);
-  } catch (...) {
-  }
+  } catch (...) {}
   bool pow2 = sval > 0 && (sval & (sval - 1)) == 0;
   if (pow2) {
     int t = sval;
@@ -1725,12 +1483,12 @@ void CuteCodeGen::emitFp8PrepackedV2TileLoadSnippet(
     ds << d_indent
        << "  int __sp_vtid = ((__sp_rib & 7) << 2)"
           " | ((__sp_kc & 1) << 1) | ((__sp_rib >> 3) & 1);\n";
-    ds << d_indent << "  " << metaVar << " = ((const uint32_t*)("
-       << baseName << "))[((__sp_r >> 4) * " << half_s
+    ds << d_indent << "  " << metaVar << " = ((const uint32_t*)(" << baseName
+       << "))[((__sp_r >> 4) * " << half_s
        << " + (__sp_kc >> 1)) * 32 + __sp_vtid];\n";
   } else {
-    ds << d_indent << "  int __sp_log2s = 31 - __clz((int)("
-       << rowStride << "));\n";
+    ds << d_indent << "  int __sp_log2s = 31 - __clz((int)(" << rowStride
+       << "));\n";
     ds << d_indent << "  int __sp_v1 = (int)((" << tileAddr << ") - ("
        << baseName << ")) + (__sp_lr << __sp_log2s) + __sp_uc;\n";
     ds << d_indent << "  int __sp_r = __sp_v1 >> __sp_log2s;\n";
@@ -1740,8 +1498,8 @@ void CuteCodeGen::emitFp8PrepackedV2TileLoadSnippet(
     ds << d_indent
        << "  int __sp_vtid = ((__sp_rib & 7) << 2)"
           " | ((__sp_kc & 1) << 1) | ((__sp_rib >> 3) & 1);\n";
-    ds << d_indent << "  " << metaVar << " = ((const uint32_t*)("
-       << baseName << "))[((__sp_r >> 4) * ((" << rowStride
+    ds << d_indent << "  " << metaVar << " = ((const uint32_t*)(" << baseName
+       << "))[((__sp_r >> 4) * ((" << rowStride
        << ") >> 1) + (__sp_kc >> 1)) * 32 + __sp_vtid];\n";
   }
 }
@@ -2308,8 +2066,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     } break;
     case Storage::SHARED: {
       assert(!IsHost());
-      bool is_cluster_event =
-          cluster_trigger_events_.count(n.name_str) > 0;
+      bool is_cluster_event = cluster_trigger_events_.count(n.name_str) > 0;
 
       if (is_cluster_event) {
         ds << d_indent << "__shared__ __align__(8) uint64_t " << n.name_str;
@@ -2319,8 +2076,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         ety->PrintAsCArray(ds);
         ds << ";\n";
       } else {
-        ds << d_indent
-           << "__shared__ cuda::barrier<cuda::thread_scope_block> "
+        ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
            << n.name_str;
         ety->PrintAsCArray(ds);
         ds << "; // shared event barrier\n";
@@ -2341,22 +2097,20 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         bool full_is_cluster =
             cluster_trigger_events_.count(pending_mbarrier_full_event_name) > 0;
         if (full_is_cluster) {
-          GenerateSubscriptions(
-              ds,
-              "  " + d_indent + "choreo::tma_mbarrier_init(&" +
-                  pending_mbarrier_full_event_name,
-              ", 1);\n", ety->Dimensions());
+          GenerateSubscriptions(ds,
+                                "  " + d_indent +
+                                    "choreo::tma_mbarrier_init(&" +
+                                    pending_mbarrier_full_event_name,
+                                ", 1);\n", ety->Dimensions());
         } else {
           GenerateSubscriptions(
-              ds,
-              "  " + d_indent + "init(&" + pending_mbarrier_full_event_name,
+              ds, "  " + d_indent + "init(&" + pending_mbarrier_full_event_name,
               ", (blockDim.x - 128) + 1);\n", ety->Dimensions());
         }
 
         if (is_cluster_event) {
           GenerateSubscriptions(
-              ds,
-              "  " + d_indent + "choreo::tma_mbarrier_init(&" + n.name_str,
+              ds, "  " + d_indent + "choreo::tma_mbarrier_init(&" + n.name_str,
               ", (blockDim.x / 128 - 1) * choreo::tma_cluster_dim());\n",
               ety->Dimensions());
         } else {
@@ -2381,8 +2135,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       if (is_cluster_event) {
         GenerateSubscriptions(
-            ds,
-            "  " + d_indent + "choreo::tma_mbarrier_init(&" + n.name_str,
+            ds, "  " + d_indent + "choreo::tma_mbarrier_init(&" + n.name_str,
             ", (blockDim.x / 128 - 1) * choreo::tma_cluster_dim());\n",
             ety->Dimensions());
       } else {
@@ -2394,8 +2147,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << "}\n";
       ds << d_indent << "__syncthreads();\n";
       if (is_cluster_event) {
-        GenerateSubscriptions(ds, d_indent + n.name_str + "__phase",
-                              " = 0;\n", ety->Dimensions());
+        GenerateSubscriptions(ds, d_indent + n.name_str + "__phase", " = 0;\n",
+                              ety->Dimensions());
       }
     } break;
     case Storage::LOCAL: {
@@ -2636,9 +2389,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   auto& lconfig = lcs[parallel_idx];
   // Ensure launch config is up-to-date even when earlier passes skipped it.
   switch (n.GetLevel()) {
-  case ParallelLevel::CLUSTER:
-    lconfig.SetClusterCount(n.BoundValues());
-    break;
+  case ParallelLevel::CLUSTER: lconfig.SetClusterCount(n.BoundValues()); break;
   case ParallelLevel::BLOCK: lconfig.SetBlockCount(n.BoundValues()); break;
   case ParallelLevel::GROUP: lconfig.SetGroupCount(n.BoundValues()); break;
   case ParallelLevel::GROUPx4: lconfig.SetGroupx4Count(n.BoundValues()); break;
@@ -2654,14 +2405,14 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         "choreo::tma_cluster_rank()",
         "(choreo::tma_cluster_rank() / " +
             ValueSTR(n.BoundValues().size() > 0 ? n.BoundValues()[0]
-                                                 : sbe::nu(1)) +
+                                                : sbe::nu(1)) +
             ")",
         "(choreo::tma_cluster_rank() / (" +
             ValueSTR(n.BoundValues().size() > 0 ? n.BoundValues()[0]
-                                                 : sbe::nu(1)) +
+                                                : sbe::nu(1)) +
             " * " +
             ValueSTR(n.BoundValues().size() > 1 ? n.BoundValues()[1]
-                                                 : sbe::nu(1)) +
+                                                : sbe::nu(1)) +
             "))"};
     if (n.AllSubPVs().size() == 1)
       ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), crank[0]);
@@ -2712,9 +2463,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
                        ".");
   }
 
-  // When CLUSTER is the outer parallel, defer launch codegen to the inner BLOCK.
-  // CLUSTER sets cluster dims and maps cluster rank variables; the actual
-  // kernel launch / device-function declaration is emitted by the BLOCK visit.
+  // When CLUSTER is the outer parallel, defer launch codegen to the inner
+  // BLOCK. CLUSTER sets cluster dims and maps cluster rank variables; the
+  // actual kernel launch / device-function declaration is emitted by the BLOCK
+  // visit.
   if (n.IsOuter() && n.GetLevel() == ParallelLevel::CLUSTER) {
     cluster_defers_launch = true;
     deferred_cluster_pb = &n;
@@ -2728,9 +2480,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   }
 
   bool emit_launch =
-      n.IsOuter() ||
-      (!n.IsOuter() && n.GetLevel() == ParallelLevel::BLOCK &&
-       cluster_defers_launch);
+      n.IsOuter() || (!n.IsOuter() && n.GetLevel() == ParallelLevel::BLOCK &&
+                      cluster_defers_launch);
 
   // only do the whole codegen when accessing the outer parallel-by
   if (emit_launch) {
@@ -2807,7 +2558,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       // add the size of static shared
       auto mri = FCtx(fname).GetStaticMemReuseInfo(dev_name);
       if (!mri && deferred_cluster_pb) {
-        auto parent = dev_name.substr(0, dev_name.rfind("::", dev_name.size() - 3) + 2);
+        auto parent =
+            dev_name.substr(0, dev_name.rfind("::", dev_name.size() - 3) + 2);
         mri = FCtx(fname).GetStaticMemReuseInfo(parent);
       }
       if (mri) {
@@ -2948,10 +2700,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     }
   }
 
-  if (n.GetLevel() == ParallelLevel::BLOCK && cgi.HasTMA() &&
-      !CCtx().UseWarpSpec()) {
+  if (n.GetLevel() == ParallelLevel::BLOCK &&
+      (cgi.HasTMA() || CCtx().UseWarpSpec())) {
     ds << d_indent
-       << "auto wg = "
+       << "auto wg_barrier = "
           "cooperative_groups::tiled_partition<128>(cooperative_groups::this_"
           "thread_block());\n";
   }
@@ -2959,9 +2711,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   auto* cluster_pb = deferred_cluster_pb;
   if (tma_descs.empty() && cluster_pb) {
     auto& cluster_tma = cgi.GetTMADescs()[cluster_pb];
-    if (!cluster_tma.empty()) {
-      tma_descs = cluster_tma;
-    }
+    if (!cluster_tma.empty()) { tma_descs = cluster_tma; }
   }
   if (!tma_descs.empty()) {
     assert(n.GetLevel() == ParallelLevel::BLOCK);
@@ -2980,9 +2730,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       auto in_thr_block = desc.GetInThreadsBlock();
       auto inner_pb_level = desc.GetPBLevel();
 
-      bool skip_load_tma_init_block =
-          CCtx().UseWarpSpec() && desc.IsLoad() && in_thr_block &&
-          inner_pb_level == ParallelLevel::GROUPx4;
+      bool skip_load_tma_init_block = CCtx().UseWarpSpec() && desc.IsLoad() &&
+                                      in_thr_block &&
+                                      inner_pb_level == ParallelLevel::GROUPx4;
 
       if (skip_load_tma_init_block) { continue; }
 
@@ -3336,13 +3086,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   std::string bound_mdata_expr = (n.IsSparse() && bind_data) ? mdata_expr : "";
   bool use_tma = n.IsTMA();
   bool suppress_tma_future = false;
+  bool supress_dma_future = false;
 
   if (use_tma && CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4) {
     suppress_tma_future = true;
   }
-
+  if (!use_tma && InProducer()) { supress_dma_future = true; }
   // bind the data to the future
-  if (!(use_tma && suppress_tma_future)) {
+  if (!(use_tma && suppress_tma_future) && !supress_dma_future) {
     if (bind_data)
       future_name =
           claimFuture(t_buf.second, fty->IsAsync(), use_tma, bound_mdata_expr);
@@ -3583,27 +3334,27 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // swizzle)
     auto swizzle_mode = n.GetSwizzleMode();
 
-    bool use_swizzled_tail_copy =
-      n.operation == ".copy" &&
+    bool use_tail_copy =
+        n.operation == ".copy" &&
         (f_sty->GetStorage() == Storage::GLOBAL ||
          f_sty->GetStorage() == Storage::DEFAULT) &&
-        t_sty->GetStorage() == Storage::SHARED && use_wgmma_layout_t &&
-        swizzle_mode != SwizMode::NONE && t_sty->GetShape().Rank() == 2 &&
-        fty->GetShape().Rank() == 2 && !t_sty->GetShape().IsDynamic() &&
-        !f_ca->GetBlockShape().IsDynamic() &&
+        t_sty->GetStorage() == Storage::SHARED &&
+        t_sty->GetShape().Rank() == 2 && fty->GetShape().Rank() == 2 &&
+        !t_sty->GetShape().IsDynamic() && !f_ca->GetBlockShape().IsDynamic() &&
         VIIsInt(t_sty->GetShape().ValueAt(1)) &&
         VIIsInt(f_ca->GetBlockShape().ValueAt(1)) &&
         *VIInt(t_sty->GetShape().ValueAt(1)) ==
-            *VIInt(f_ca->GetBlockShape().ValueAt(1)) && n.future.empty();
+            *VIInt(f_ca->GetBlockShape().ValueAt(1)) &&
+        n.future.empty();
 
     Shape f_mds_shape =
         (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape());
-    if (use_swizzled_tail_copy) f_mds_shape = f_ca->GetBlockShape();
+    if (use_tail_copy) f_mds_shape = f_ca->GetBlockShape();
     Shape t_mds_shape = fty->GetShape();
-    if (use_swizzled_tail_copy) t_mds_shape = t_sty->GetShape();
+    if (use_tail_copy) t_mds_shape = f_ca->GetBlockShape();
 
-    std::optional<TiledCopyEntry> swizzled_tail_copy_entry = tiled_copy_entry;
-    if (use_swizzled_tail_copy && !swizzled_tail_copy_entry.has_value()) {
+    std::optional<TiledCopyEntry> tail_copy_entry = tiled_copy_entry;
+    if (use_tail_copy && !tail_copy_entry.has_value()) {
       const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
       assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
       const auto& lconfig = lcs[parallel_idx];
@@ -3611,7 +3362,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                              lconfig.thread_count.z;
       auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
                          lconfig.group_count.y * lconfig.group_count.z;
-      auto thr_count_vi = inner_thr_count * group_count;
+      auto thr_count_vi =
+          InProducer() ? inner_thr_count : inner_thr_count * group_count;
       if (VIIsInt(thr_count_vi)) {
         size_t thr_count = *VIInt(thr_count_vi);
         size_t elem_byte = SizeOf(f_sty->ElementType());
@@ -3629,36 +3381,30 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
               entry.val_layout.second = elems_per_copy;
               entry.vectorized_align_bits = 128;
               entry.one_row_per_warp = false;
-              swizzled_tail_copy_entry = entry;
+              tail_copy_entry = entry;
             }
           }
         }
       }
     }
-    std::optional<HoistedSwizzledTailCopyStateInfo> swizzled_tail_state_info;
-    if (use_swizzled_tail_copy && swizzled_tail_copy_entry.has_value() &&
-        swizzled_tail_copy_entry->vectorized_align_bits == 128) {
-      swizzled_tail_state_info = AnalyzeHoistableSwizzledTailCopyState(n, {});
-    }
+    bool use_tail_copy_helper = use_tail_copy && tail_copy_entry.has_value() &&
+                                tail_copy_entry->vectorized_align_bits == 128;
 
     std::string f_mds_name;
     std::string t_mds_name;
-    if (!swizzled_tail_state_info.has_value()) {
-      const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
-          f_sty->ElementType(), f_mds_shape, false, f_mds_offset,
-          ValueSTR(f_stride, false, true), {}, false);
-      const auto t_mds =
-          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
-                        t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
-                        false, t_mds_offset, ValueSTR(t_stride, false, true),
-                        {}, use_wgmma_layout_t, swizzle_mode);
+    const auto f_mds = GenTensorDecl(
+        RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
+        f_sty->ElementType(), f_mds_shape, false, f_mds_offset,
+        ValueSTR(f_stride, false, true), {}, false);
+    const auto t_mds = GenTensorDecl(
+        RemoveSuffix(t_buf_name, ".data()"), t_buf_name, t_sty->GetStorage(),
+        t_sty->ElementType(), t_mds_shape, false, t_mds_offset,
+        ValueSTR(t_stride, false, true), {}, use_wgmma_layout_t, swizzle_mode);
 
-      f_mds_name = f_mds.first;
-      t_mds_name = t_mds.first;
-      ds << f_mds.second;
-      ds << t_mds.second;
-    }
+    f_mds_name = f_mds.first;
+    t_mds_name = t_mds.first;
+    ds << f_mds.second;
+    ds << t_mds.second;
 
     // handles dma related to shared memory
     // For async cp.async (non-TMA), threads in the warp must participate;
@@ -3669,7 +3415,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                            (IsFloatSubByteType(f_sty->ElementType()) ||
                             IsFloatSubByteType(t_sty->ElementType()));
     bool need_subbyte_async_sync = false;
-    bool emitted_swizzled_tail_copy = false;
 
     if (need_single_instance) {
       ds << d_indent << LevelPred() << " {\n";
@@ -3761,20 +3506,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           ds << d_indent << "  }\n";
           ds << d_indent << "}\n";
         }
-      } else if (swizzled_tail_state_info.has_value()) {
-        const auto& info = swizzled_tail_state_info.value();
-        bool state_is_hoisted =
-            active_hoisted_swizzled_tail_copy_states.count(info.state_name);
-        if (!state_is_hoisted)
-          EmitSwizzledTailCopyStateDecl(ds, d_indent, info);
-        IndStream() << "choreo::copy_swizzled_tail_g2s_128b<"
-                    << info.element_ty << ", " << info.thr_rows << ", "
-                    << info.thr_cols << ", " << info.val_rows << ", "
-                    << info.val_cols << ", " << info.tile_rows << ", "
-                    << info.tile_cols << ">(" << info.src_ptr_expr << ", "
-                    << info.src_row_stride_expr << ", " << info.state_name
-                    << ", " << info.row_guard_expr << ");\n";
-        emitted_swizzled_tail_copy = true;
+      } else if (use_tail_copy_helper) {
+        const auto& entry = tail_copy_entry.value();
+        IndStream() << "choreo::copy_if_g2s<"
+                    << (use_wgmma_layout_t ? "true" : "false") << ", "
+                    << NameBaseType(t_sty->ElementType()) << ", "
+                    << entry.thr_layout.first << ", " << entry.thr_layout.second
+                    << ", " << entry.val_layout.first << ", "
+                    << entry.val_layout.second << ">(" << f_mds_name << ", "
+                    << t_mds_name << ", [&](const auto& __coord) { return "
+                    << "cute::elem_less(__coord, cute::make_shape("
+                    << ShapeSTR(fty->GetShape(), true) << ")); });\n";
       } else if (is_subbyte_copy) {
         const auto f_byte = GenTensorDecl(
             RemoveSuffix(f_buf_name, ".data()") + "_byte", f_buf_name,
@@ -3806,7 +3548,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << future_name << ".trigger();\n";
       } else {
         if (tiled_copy_entry.has_value() &&
-                   n.GetSwizzleMode() == SwizMode::NONE) {
+            n.GetSwizzleMode() == SwizMode::NONE) {
           const TiledCopyEntry& entry = tiled_copy_entry.value();
           IndStream() << "{\n";
           IncrIndent();
@@ -3903,9 +3645,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         EmitGroupX4Sync(ds, d_indent);
       else
         ds << d_indent << "__syncthreads();\n";
-    } else if (emitted_swizzled_tail_copy &&
-               NeedWarpSpecGroupX4SyncForCurrentScope()) {
-      EmitGroupX4Sync(ds, d_indent);
     }
   };
 
@@ -3992,16 +3731,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         }
       }
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
-      bool has_cluster =
-          !cgi.GetFunctionLaunches(fname).empty() &&
-          cgi.GetFunctionLaunches(fname)[0].HasCluster();
-      bool use_ptx_tma_sync =
-          (tma_cluster_aware || ptx_barrier || is_multicast_tma ||
-           has_cluster) &&
-          t_shape.Rank() == 2;
+      bool has_cluster = !cgi.GetFunctionLaunches(fname).empty() &&
+                         cgi.GetFunctionLaunches(fname)[0].HasCluster();
+      bool use_ptx_tma_sync = (tma_cluster_aware || ptx_barrier ||
+                               is_multicast_tma || has_cluster) &&
+                              t_shape.Rank() == 2;
       bool emit_tma_single_guard =
           !(UseSingleThreadProducerScope() &&
-        tma_sync_level == ParallelLevel::GROUPx4 && InProducer());
+            tma_sync_level == ParallelLevel::GROUPx4 && InProducer());
       std::string tma_issue_prefix = emit_tma_single_guard ? "  " : "";
 
       if (emit_tma_single_guard) {
@@ -4016,19 +3753,16 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (use_ptx_tma_sync) {
         std::string ptx_bar_expr;
         if (full_empty_only_tma_copy && n.HasEvent()) {
-          ptx_bar_expr =
-              "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
+          ptx_bar_expr = "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
         } else {
-          ptx_bar_expr = "((TMAAtom*)" + future_name +
-                         ".get_atom())->ptx_barrier()";
+          ptx_bar_expr =
+              "((TMAAtom*)" + future_name + ".get_atom())->ptx_barrier()";
         }
-        bool skip_expect_tx =
-            full_empty_only_tma_copy && n.HasEvent();
+        bool skip_expect_tx = full_empty_only_tma_copy && n.HasEvent();
         if (!skip_expect_tx) {
-          std::string expect_fn =
-              "choreo::tma_mbarrier_expect_tx";
-          ds << d_indent << tma_issue_prefix << expect_fn << "("
-             << ptx_bar_expr << ", " << tma_tx_bytes_expr << ");\n";
+          std::string expect_fn = "choreo::tma_mbarrier_expect_tx";
+          ds << d_indent << tma_issue_prefix << expect_fn << "(" << ptx_bar_expr
+             << ", " << tma_tx_bytes_expr << ");\n";
         }
         auto coord0_expr = hoisted_rev_indices.empty()
                                ? ValueSTR(rev_indices.at(0))
@@ -4038,11 +3772,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                                : hoisted_rev_indices.at(1);
         if (is_multicast_tma) {
           const auto& lcfg = cgi.GetFunctionLaunches(fname);
-          auto cluster_total =
-              lcfg.empty()
-                  ? sbe::nu(1)
-                  : lcfg[0].cluster_count.x * lcfg[0].cluster_count.y *
-                        lcfg[0].cluster_count.z;
+          auto cluster_total = lcfg.empty() ? sbe::nu(1)
+                                            : lcfg[0].cluster_count.x *
+                                                  lcfg[0].cluster_count.y *
+                                                  lcfg[0].cluster_count.z;
           ds << d_indent << tma_issue_prefix
              << "if (choreo::tma_cluster_rank() == 0) {\n";
           ds << d_indent << tma_issue_prefix << "  "
@@ -4091,17 +3824,18 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         }
       }
       if (emit_tma_single_guard) {
-        ds << d_indent << "} else {\n";
-        if (!use_ptx_tma_sync) {
-          if (!(CCtx().UseWarpSpec() &&
-                tma_sync_level == ParallelLevel::GROUPx4) &&
-              !full_empty_only_tma_copy) {
-            ds << d_indent << "  ((TMAAtom*)" << future_name
-               << ".get_atom())->token() = ((TMAAtom*)" << future_name
-               << ".get_atom())->barrier().arrive();\n";
-          }
-        }
-        ds << d_indent << "}\n";
+        ds << d_indent << "}";
+        if (!use_ptx_tma_sync &&
+            !(CCtx().UseWarpSpec() &&
+              tma_sync_level == ParallelLevel::GROUPx4) &&
+            !full_empty_only_tma_copy) {
+          ds << " else {\n";
+          ds << d_indent << "  ((TMAAtom*)" << future_name
+             << ".get_atom())->token() = ((TMAAtom*)" << future_name
+             << ".get_atom())->barrier().arrive();\n";
+          ds << d_indent << "}\n";
+        } else
+          ds << "\n";
       }
       recent_tma_tx_bytes.push_back(tma_tx_bytes_expr);
       if (recent_tma_tx_bytes.size() > 8) recent_tma_tx_bytes.pop_front();
@@ -4146,11 +3880,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "__syncwarp();\n";
       else if (tma_sync_level == ParallelLevel::GROUPx4) {
         if (!ref_like_mbarrier_store) ds << d_indent << "wg.sync();\n";
-      } else
-        if (NeedWarpSpecGroupX4SyncForCurrentScope())
-          EmitGroupX4Sync(ds, d_indent);
-        else
-          ds << d_indent << "__syncthreads();\n";
+      } else if (NeedWarpSpecGroupX4SyncForCurrentScope())
+        EmitGroupX4Sync(ds, d_indent);
+      else
+        ds << d_indent << "__syncthreads();\n";
 
       if (tma_sync_level == ParallelLevel::GROUP)
         ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
@@ -4344,8 +4077,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool v2_mode = use_prepack_v2.GetValue();
         std::string ref_sym = op.LoadFrom()->RefSymbol();
         auto prepackInfo =
-            resolvePrepackedU32Meta(ref_sym,
-                                   use_prepack.GetValue() || v2_mode);
+            resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
 
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
@@ -4355,8 +4087,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (fp8_sparse_k64) {
           if (prepackInfo.use_packed_u32 && v2_mode) {
             emitFp8PrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
-                                              ValueSTR(tile_addr),
-                                              row_stride, col_stride);
+                                              ValueSTR(tile_addr), row_stride,
+                                              col_stride);
           } else if (prepackInfo.use_packed_u32) {
             emitFp8PrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
                                                row_stride, col_stride);
@@ -4388,7 +4120,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                    col_stride);
         } else if (prepackInfo.use_packed_u32) {
           if (prepack_single_col)
-            emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr), row_stride);
+            emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
+                                            row_stride);
           else
             emitPrepackedU32Snippet(sym, prepackInfo.device_name, row_stride,
                                     col_stride);
@@ -4598,9 +4331,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
           // Detect host prepacked-u32 metadata for the exec site
           bool v2_mode_exec = use_prepack_v2.GetValue();
-          auto prepackInfo =
-              resolvePrepackedU32Meta(a_sym,
-                                     use_prepack.GetValue() || v2_mode_exec);
+          auto prepackInfo = resolvePrepackedU32Meta(
+              a_sym, use_prepack.GetValue() || v2_mode_exec);
           if (!prepackInfo.use_packed_u32) {
             ds << d_indent
                << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2))
@@ -4722,8 +4454,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         auto scale_a_strides = GenStrides(op.ScaleA());
         auto sa_sty3 = GetSpannedType(NodeType(*op.ScaleA()));
         auto sa_shape3 = sa_sty3->GetShape();
-        bool sa_transposed3 = VIIsInt(sa_shape3.ValueAt(0)) &&
-                              *VIInt(sa_shape3.ValueAt(0)) == 1;
+        bool sa_transposed3 =
+            VIIsInt(sa_shape3.ValueAt(0)) && *VIInt(sa_shape3.ValueAt(0)) == 1;
         std::string scale_a_ld = sa_transposed3
                                      ? ValueSTR(scale_a_strides.back())
                                      : ValueSTR(scale_a_strides.front());
@@ -5415,8 +5147,7 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           base_name = UnScopedName(expr->GetSymbol()->name);
         }
         bool is_full = (base_name.find("full") != std::string::npos);
-        bool is_cluster_event =
-            cluster_trigger_events_.count(base_name) > 0;
+        bool is_cluster_event = cluster_trigger_events_.count(base_name) > 0;
         bool guarded = false;
         if (CCtx().UseWarpSpec() && bdim_level == ParallelLevel::GROUPx4) {
           if (InProducer() && GuardWarpSpecProducerOpsIndividually())
@@ -5432,24 +5163,23 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             std::string bar_expr = ExprSTR(t, false);
             std::string phase_expr =
                 base_name + "__phase" + bar_expr.substr(base_name.size());
-            ds << d_indent << "choreo::tma_mbarrier_wait_parity(&"
-               << bar_expr << ", " << phase_expr << ");\n";
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity(&" << bar_expr
+               << ", " << phase_expr << ");\n";
             ds << d_indent << phase_expr << " ^= 1;\n";
           } else {
             GenerateSubscriptions(
                 ds,
                 d_indent + "choreo::tma_mbarrier_wait_parity(&" +
                     ExprSTR(t, false),
-                ", " + base_name + "__phase);\n",
-                ety->RemainderDimensions(0));
+                ", " + base_name + "__phase);\n", ety->RemainderDimensions(0));
             GenerateSubscriptions(ds, d_indent + base_name + "__phase",
                                   " ^= 1;\n", ety->RemainderDimensions(0));
           }
         } else {
           ds << d_indent << "// wait event(barrier) " << PSTR(t) << "\n";
           if (is_array_ref) {
-            ds << d_indent << ExprSTR(t, false) << ".wait("
-               << ExprSTR(t, false) << ".arrive());\n";
+            ds << d_indent << ExprSTR(t, false) << ".wait(" << ExprSTR(t, false)
+               << ".arrive());\n";
           } else {
             GenerateSubscriptions(ds,
                                   d_indent + ExprSTR(t, false) + ".wait(" +
@@ -5656,8 +5386,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             if (is_array_ref) {
               if (CCtx().UseWarpSpec()) {
                 ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
-                   << ExprSTR(f, false) << ", 1, " << tx_bytes_expr
-                   << ");\n";
+                   << ExprSTR(f, false) << ", 1, " << tx_bytes_expr << ");\n";
               } else {
                 ds << d_indent << "(void)" << ExprSTR(f, false)
                    << ".arrive();\n";
@@ -5983,7 +5712,6 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
                 : std::vector<ExplicitScaleAccumInfo>{});
   hoisted_scale_decl_scopes.push_back({});
   hoisted_scale_accum_scopes.push_back(std::nullopt);
-  hoisted_swizzled_tail_copy_scopes.push_back({});
 
   std::vector<std::string> loop_refs;
   for (auto& rn : n.GetRanges()) {
@@ -5996,15 +5724,6 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   }
 
   if (!IsHost() && n.GetBody()) {
-    for (const auto& info :
-         AnalyzeHoistableSwizzledTailCopyStates(n.GetBody(), loop_refs)) {
-      if (active_hoisted_swizzled_tail_copy_states.count(info.state_name))
-        continue;
-      EmitSwizzledTailCopyStateDecl(ds, d_indent, info);
-      active_hoisted_swizzled_tail_copy_states.insert(info.state_name);
-      hoisted_swizzled_tail_copy_scopes.back().push_back(info.state_name);
-    }
-
     hoisted_scale_accum_scopes.back() =
         AnalyzeHoistableScaledWGMMAAccum(n.GetBody(), loop_refs);
 
@@ -6834,13 +6553,12 @@ show_usage() {
 # compile, execute
 )script";
 
-  bool arch_has_a_suffix =
-      arch_str.size() > 1 && arch_str.back() == 'a';
+  bool arch_has_a_suffix = arch_str.size() > 1 && arch_str.back() == 'a';
   if (arch_has_a_suffix) {
     auto compute_str = arch_str;
     compute_str.replace(0, 3, "compute_");
-    os << R"(export CFLAGS="-gencode arch=)" << compute_str << ",code="
-       << arch_str
+    os << R"(export CFLAGS="-gencode arch=)" << compute_str
+       << ",code=" << arch_str
        << R"( -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";
   } else {
     os << R"(export CFLAGS="-arch ${nv_arch} -std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ -Xcompiler -static-libstdc++ -lcuda)";

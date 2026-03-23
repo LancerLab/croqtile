@@ -58,10 +58,10 @@ inline const std::string STR(const AssessOutcome& o) {
 
 inline const std::string STR(const UsageType& ut) {
   switch (ut) {
-  case UsageType::UnClassified:       return "unclassified";
+  case UsageType::UnClassified: return "unclassified";
   case UsageType::ShapeCompatibility: return "shape-compat";
-  case UsageType::ElementAccess:      return "elem-access";
-  case UsageType::LoopBound:          return "loop-bound";
+  case UsageType::ElementAccess: return "elem-access";
+  case UsageType::LoopBound: return "loop-bound";
   case UsageType::HardwareConstraint: return "hw-constraint";
   }
   choreo_unreachable("unsupported usage type.");
@@ -77,8 +77,8 @@ void Assessor::LogAssessment(const std::string& msg, const location& l,
 
 void Assessor::AddAssertion(const ptr<sbe::SymbolicExpression>& ar,
                             const location& l, const std::string& s,
-                            AssessType aty, UsageType uty,
-                            AST::Node* n, AST::Node* en) {
+                            AssessType aty, UsageType uty, AST::Node* n,
+                            AST::Node* en) {
   if (DebugOn())
     dbgs() << " +- runtime assertion: " << sbe::PSTR(ar)
            << ", type: " << STR(aty) << ", usage: " << STR(uty) << "\n";
@@ -109,8 +109,7 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
   if (DebugOn())
     dbgs() << "[Assess] relation: " << STR(lhs) << STR(rel) << STR(rhs)
            << ", type: " << STR(aty) << ", usage: " << STR(uty)
-           << ", policy: " << STR(ap)
-           << ", node: " << PSTR(node) << "\n";
+           << ", policy: " << STR(ap) << ", node: " << PSTR(node) << "\n";
 
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
   auto pred =
@@ -173,7 +172,8 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
     break;
   }
 
-  LogAssessment(error_message, l, AssessOutcome::RUNTIME, uty, assertions.size());
+  LogAssessment(error_message, l, AssessOutcome::RUNTIME, uty,
+                assertions.size());
   AddAssertion(pred, l, error_message, aty, uty, node);
   return {true, may_fail, true};
 }
@@ -194,8 +194,8 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
   if (DebugOn())
     dbgs() << "[Assess] " << STR(bo) << ", type: " << STR(aty)
            << ", usage: " << STR(uty) << ", policy: " << STR(ap)
-           << ", node: " << PSTR(emit_node)
-           << ", node: " << PSTR(emit_node) << "\n";
+           << ", node: " << PSTR(emit_node) << ", node: " << PSTR(emit_node)
+           << "\n";
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
 
   if (ap == AssessPolicy::ErrWarn)
@@ -219,7 +219,8 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
       if (IsValidValueItem(norm_guard)) {
         // Statically false but only reachable under a guard; keep as runtime.
         if (ap == AssessPolicy::Warn) return {true, false, false};
-        LogAssessment(message, l, AssessOutcome::RUNTIME, uty, assertions.size());
+        LogAssessment(message, l, AssessOutcome::RUNTIME, uty,
+                      assertions.size());
         AddAssertion(pred, l, message, aty, uty, node, emit_node);
         return {true, false, true};
       }

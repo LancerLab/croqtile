@@ -100,16 +100,13 @@ private:
       if (pb_level == ParallelLevel::CLUSTER) {
         lcs.push_back({});
       } else if (pb_level == ParallelLevel::BLOCK) {
-        if (lcs.empty() || !lcs.back().HasCluster())
-          lcs.push_back({});
+        if (lcs.empty() || !lcs.back().HasCluster()) lcs.push_back({});
       }
 
       // Set the launch configure
       auto& lc = lcs.back();
       switch (pb->GetLevel()) {
-      case ParallelLevel::CLUSTER:
-        lc.SetClusterCount(pb->BoundValues());
-        break;
+      case ParallelLevel::CLUSTER: lc.SetClusterCount(pb->BoundValues()); break;
       case ParallelLevel::BLOCK: lc.SetBlockCount(pb->BoundValues()); break;
       case ParallelLevel::GROUP: lc.SetGroupCount(pb->BoundValues()); break;
       case ParallelLevel::GROUPx4: lc.SetGroupx4Count(pb->BoundValues()); break;

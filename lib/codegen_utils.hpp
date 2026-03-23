@@ -106,12 +106,12 @@ std::string GetAbsPath(const std::filesystem::path& cwd,
                        const std::string& relative_path);
 
 void PrintSubscriptions(std::ostream& os, const std::string& prefix,
-                       const std::string& suffix, const ValueList& dims,
-                       std::vector<size_t>& indices, size_t depth = 0);
+                        const std::string& suffix, const ValueList& dims,
+                        std::vector<size_t>& indices, size_t depth = 0);
 
 inline void GenerateSubscriptions(std::ostream& os, const std::string& prefix,
-                                 const std::string& suffix,
-                                 const ValueList& dims) {
+                                  const std::string& suffix,
+                                  const ValueList& dims) {
   std::vector<size_t> indices(dims.size());
   PrintSubscriptions(os, prefix, suffix, dims, indices);
 }
@@ -165,8 +165,8 @@ public:
     for (auto& table : host_map) {
       if (table.empty()) continue;
       for (const auto& entry : table) {
-        dbgs() << std::setw(30) << std::left << entry.first
-               << " -> " << entry.second << "\n";
+        dbgs() << std::setw(30) << std::left << entry.first << " -> "
+               << entry.second << "\n";
       }
     }
 
@@ -185,8 +185,8 @@ public:
       if (table.empty()) continue;
 
       for (const auto& entry : table) {
-        dbgs() << std::setw(30) << std::left << entry.first
-               << " -> " << entry.second << "\n";
+        dbgs() << std::setw(30) << std::left << entry.first << " -> "
+               << entry.second << "\n";
       }
     }
 

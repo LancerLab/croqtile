@@ -47,14 +47,13 @@ __device__ __forceinline__ void tma_mbarrier_expect_tx(uint64_t* bar,
   #endif
 }
 
-__device__ __forceinline__ void tma_mbarrier_expect_tx_noarrive(uint64_t* bar,
-                                                                uint32_t bytes) {
+__device__ __forceinline__ void
+tma_mbarrier_expect_tx_noarrive(uint64_t* bar, uint32_t bytes) {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint32_t bar_ptr = tma_to_shared_u32(bar);
-  asm volatile(
-      "mbarrier.expect_tx.relaxed.cta.shared::cta.b64 [%0], %1;\n"
-      :
-      : "r"(bar_ptr), "r"(bytes));
+  asm volatile("mbarrier.expect_tx.relaxed.cta.shared::cta.b64 [%0], %1;\n"
+               :
+               : "r"(bar_ptr), "r"(bytes));
   #else
   (void)bar;
   (void)bytes;
@@ -117,14 +116,13 @@ tma_load_2d_shared_cluster_global_mbarrier_multicast(
   uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
   uint32_t bar_ptr = tma_to_shared_u32(bar);
   uint32_t dst_ptr = tma_to_shared_u32(dst);
-  asm volatile(
-      "cp.async.bulk.tensor.2d.shared::cluster.global.tile."
-      "mbarrier::complete_tx::bytes.multicast::cluster"
-      " [%0], [%1, {%3, %4}], [%2], %5;"
-      :
-      : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0), "r"(coord1),
-        "h"(multicast_mask)
-      : "memory");
+  asm volatile("cp.async.bulk.tensor.2d.shared::cluster.global.tile."
+               "mbarrier::complete_tx::bytes.multicast::cluster"
+               " [%0], [%1, {%3, %4}], [%2], %5;"
+               :
+               : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+                 "r"(coord1), "h"(multicast_mask)
+               : "memory");
   #else
   (void)dst;
   (void)tma_map;
@@ -162,18 +160,18 @@ __device__ __forceinline__ void tma_cluster_sync() {
   #endif
 }
 
-__device__ __forceinline__ void tma_mbarrier_arrive_cluster(
-    uint64_t* bar, uint32_t cta_id, uint32_t count = 1) {
+__device__ __forceinline__ void
+tma_mbarrier_arrive_cluster(uint64_t* bar, uint32_t cta_id,
+                            uint32_t count = 1) {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint32_t smem_addr = tma_to_shared_u32(bar);
-  asm volatile(
-      "{\n\t"
-      ".reg .b32 remAddr32;\n\t"
-      "mapa.shared::cluster.u32 remAddr32, %0, %1;\n\t"
-      "mbarrier.arrive.shared::cluster.b64 _, [remAddr32], %2;\n\t"
-      "}"
-      :
-      : "r"(smem_addr), "r"(cta_id), "r"(count));
+  asm volatile("{\n\t"
+               ".reg .b32 remAddr32;\n\t"
+               "mapa.shared::cluster.u32 remAddr32, %0, %1;\n\t"
+               "mbarrier.arrive.shared::cluster.b64 _, [remAddr32], %2;\n\t"
+               "}"
+               :
+               : "r"(smem_addr), "r"(cta_id), "r"(count));
   #else
   (void)bar;
   (void)cta_id;
@@ -181,8 +179,8 @@ __device__ __forceinline__ void tma_mbarrier_arrive_cluster(
   #endif
 }
 
-__device__ __forceinline__ void tma_mbarrier_wait_parity_cluster(
-    uint64_t* bar, int phase_bit) {
+__device__ __forceinline__ void
+tma_mbarrier_wait_parity_cluster(uint64_t* bar, int phase_bit) {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   uint32_t bar_ptr = tma_to_shared_u32(bar);
   uint32_t spins = 0;
@@ -789,11 +787,10 @@ CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {
   copy(cute::AutoVectorizingCopyWithAssumedAlignment<32>{}, src, dst);
 }
 
-template <class Element, int ThrRows, int ThrCols, int ValRows, int ValCols,
-          class SrcTensor, class DstTensor>
-__device__ static inline void
-copy_swizzled_tail_g2s_128b(const SrcTensor& src, DstTensor& dst,
-                            long long valid_rows) {
+template <bool Swizzle, class Element, int ThrRows, int ThrCols, int ValRows,
+          int ValCols, class SrcTensor, class DstTensor, class Pred>
+__device__ static inline void copy_if_g2s(const SrcTensor& src, DstTensor& dst,
+                                          Pred pred) {
   auto tiled_copy = cute::make_tiled_copy(
       cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>,
                       Element>{},
@@ -803,34 +800,25 @@ copy_swizzled_tail_g2s_128b(const SrcTensor& src, DstTensor& dst,
       cute::make_layout(
           cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
   auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
-  auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
   auto src_thr = thr_copy.partition_S(src);
-  auto dst_thr = thr_copy.partition_D(dst_pi);
+  auto dst_thr = [&]() {
+    if constexpr (Swizzle) {
+      auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
+      return thr_copy.partition_D(dst_pi);
+    } else {
+      return thr_copy.partition_D(dst);
+    }
+  }();
   auto coord_thr =
       thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
   auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
   CUTE_UNROLL
   for (int i = 0; i < cute::size(pred_thr); ++i) {
-    pred_thr(i) = cute::elem_less(cute::get<0>(coord_thr(i)), valid_rows);
+    pred_thr(i) = pred(coord_thr(i));
   }
   cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
   cute::cp_async_fence();
   cute::cp_async_wait<0>();
-}
-
-template <class Element, int ThrRows, int ThrCols, int ValRows, int ValCols,
-          int TileRows, int TileCols, class DstTensor>
-__device__ static inline void
-copy_swizzled_tail_g2s_128b(Element* src_ptr, long long src_row_stride,
-                            DstTensor& dst, long long valid_rows) {
-  auto src_shape =
-      cute::make_shape(cute::Int<TileRows>{}, cute::Int<TileCols>{});
-  auto src = cute::make_tensor(
-      cute::make_gmem_ptr<Element>(src_ptr),
-      cute::make_layout(src_shape,
-                        cute::make_stride(src_row_stride, cute::Int<1>{})));
-  copy_swizzled_tail_g2s_128b<Element, ThrRows, ThrCols, ValRows, ValCols>(
-      src, dst, valid_rows);
 }
 
 // TODO: move to choreo_mma_wrapper.h

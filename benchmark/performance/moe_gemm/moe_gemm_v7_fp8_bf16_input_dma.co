@@ -56,7 +56,7 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
       TILE_M = (MATMUL_WARP_M < (seg_length - iv_m * MATMUL_WARP_M) )? MATMUL_WARP_M : seg_length - iv_m * MATMUL_WARP_M;
       mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-        dma.copy.swiz<128>
+        dma.copy.swiz<128>.zfill
           lhs.view(MATMUL_WARP_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K) 
             => sA.subspan(TILE_M, MATMUL_TILE_K); // [64, 128] => [TILE_M, 128] 
         tma.copy.swiz<128>

@@ -37,8 +37,8 @@ std::string GetAbsPath(const std::filesystem::path& cwd,
 }
 
 void PrintSubscriptions(std::ostream& os, const std::string& prefix,
-                       const std::string& suffix, const ValueList& dims,
-                       std::vector<size_t>& indices, size_t depth) {
+                        const std::string& suffix, const ValueList& dims,
+                        std::vector<size_t>& indices, size_t depth) {
   if (depth == dims.size()) {
     os << prefix;
     for (size_t i : indices) os << "[" << i << "]";

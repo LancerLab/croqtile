@@ -203,20 +203,6 @@ private:
   std::set<std::string> cluster_trigger_events_;
   bool in_producer = false; // hack
   bool in_consumer = false; // hack
-  struct HoistedSwizzledTailCopyStateInfo {
-    std::string state_name;
-    std::string dst_ptr_expr;
-    std::string src_ptr_expr;
-    std::string src_row_stride_expr;
-    std::string row_guard_expr;
-    std::string element_ty;
-    size_t tile_rows = 0;
-    size_t tile_cols = 0;
-    size_t thr_rows = 0;
-    size_t thr_cols = 0;
-    size_t val_rows = 0;
-    size_t val_cols = 0;
-  };
   struct BaseScaleAccumInfo {
     std::string frag_sym;
     std::string frag_expr;
@@ -238,8 +224,6 @@ private:
   std::vector<std::vector<std::string>> hoisted_scale_decl_scopes;
   std::unordered_set<std::string> active_hoisted_scale_decls;
   std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
-  std::vector<std::vector<std::string>> hoisted_swizzled_tail_copy_scopes;
-  std::unordered_set<std::string> active_hoisted_swizzled_tail_copy_states;
   std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
 
 private:
@@ -363,8 +347,6 @@ private:
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();
-    hoisted_swizzled_tail_copy_scopes.clear();
-    active_hoisted_swizzled_tail_copy_states.clear();
     cluster_trigger_events_.clear();
     ResetLineDirectiveState();
   }
@@ -507,20 +489,7 @@ private:
   GetDMABufferExpr(const std::string& sym,
                    const ptr<AST::MultiValues> subscription,
                    const ptr<Type>& sym_ty) const;
-  std::string SwizzledTailCopyStateName(const std::string& sym,
-                                        const std::string& offset) const;
-    void EmitGroupX4Sync(std::ostringstream& os,
-               const std::string& indent) const;
-    void EmitSwizzledTailCopyStateDecl(
-      std::ostringstream& os, const std::string& indent,
-      const HoistedSwizzledTailCopyStateInfo& info) const;
-  std::optional<HoistedSwizzledTailCopyStateInfo>
-  AnalyzeHoistableSwizzledTailCopyState(
-      AST::DMA& n, const std::vector<std::string>& loop_refs) const;
-  std::vector<HoistedSwizzledTailCopyStateInfo>
-  AnalyzeHoistableSwizzledTailCopyStates(
-      const ptr<AST::MultiNodes>& body,
-      const std::vector<std::string>& loop_refs) const;
+  void EmitGroupX4Sync(std::ostringstream& os, const std::string& indent) const;
   std::optional<HoistedScaleAccumInfo> AnalyzeHoistableScaledWGMMAAccum(
       const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const;
   bool CollectHoistableScaledWGMMAAccum(

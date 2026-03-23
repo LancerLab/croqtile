@@ -156,9 +156,8 @@ public:
   /// Evaluate a boolean-expression assessment and insert runtime assertion if
   /// needed.
   AssessResult Assess(AssessPolicy ap, const ValueItem& bo,
-                      const std::string& message, UsageType uty,
-                      AssessType aty, const location& l,
-                      AST::Node* node = nullptr,
+                      const std::string& message, UsageType uty, AssessType aty,
+                      const location& l, AST::Node* node = nullptr,
                       AST::Node* emit_node = nullptr,
                       const ValueItem& guard = GetInvalidValueItem());
 };

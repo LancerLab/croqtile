@@ -219,10 +219,10 @@ Option<bool> use_warpspec(OptionKind::User, "--use-warpspec", "", false,
                           "Enable warp-specialized synchronization for shared "
                           "event/full-empty pipelines.");
 Option<bool> single_thread_producer(
-  OptionKind::User, "--single-thread-producer", "", true,
-  "When used with --use-warpspec, keep the producer inthreads scope single-"
-  "threaded. Set to false to instead single-guard producer TMA/event "
-  "operations individually.");
+    OptionKind::User, "--single-thread-producer", "", true,
+    "When used with --use-warpspec, keep the producer inthreads scope single-"
+    "threaded. Set to false to instead single-guard producer TMA/event "
+    "operations individually.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {

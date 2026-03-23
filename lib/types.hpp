@@ -416,9 +416,8 @@ inline static std::string GetStringFrom(ParallelLevel st) {
       {ParallelLevel::THREAD, "thread"},   {ParallelLevel::GROUP, "group"},
       {ParallelLevel::GROUPx4, "group-4"}, {ParallelLevel::BLOCK, "block"},
       {ParallelLevel::CLUSTER, "cluster"}, {ParallelLevel::DEVICE, "device"},
-      {ParallelLevel::TERM, "term"},
-      {ParallelLevel::SEQ, "sequential"},  {ParallelLevel::NONE, "none"},
-      {ParallelLevel::UNKNOWN, "unknown"},
+      {ParallelLevel::TERM, "term"},       {ParallelLevel::SEQ, "sequential"},
+      {ParallelLevel::NONE, "none"},       {ParallelLevel::UNKNOWN, "unknown"},
   };
 
   auto it = enumToString.find(st);

@@ -1,9 +1,9 @@
 #ifndef __CHOREO_SHAPE_INFERENCE_HPP__
 #define __CHOREO_SHAPE_INFERENCE_HPP__
 
+#include "assess.hpp"
 #include "symvals.hpp"
 #include "valno.hpp"
-#include "assess.hpp"
 
 namespace Choreo {
 

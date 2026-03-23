@@ -347,11 +347,11 @@ struct AssessmentStats {
   size_t runtime_enabled = 0;  // runtime assertions enabled for emission
   size_t runtime_disabled = 0; // runtime assertions suppressed by cost filter
   // Per-usage-type assessment counts (total evaluated, including static)
-  size_t unclassified_total = 0;     // UsageType::ShapeCompatibility
-  size_t shape_compat_total = 0;     // UsageType::ShapeCompatibility
-  size_t elem_access_total = 0;      // UsageType::ElementAccess
-  size_t loop_bound_total = 0;       // UsageType::LoopBound
-  size_t hw_constraint_total = 0;    // UsageType::HardwareConstraint
+  size_t unclassified_total = 0;  // UsageType::ShapeCompatibility
+  size_t shape_compat_total = 0;  // UsageType::ShapeCompatibility
+  size_t elem_access_total = 0;   // UsageType::ElementAccess
+  size_t loop_bound_total = 0;    // UsageType::LoopBound
+  size_t hw_constraint_total = 0; // UsageType::HardwareConstraint
   // Per-usage-type runtime assertion counts
   size_t unclassified_runtime = 0;
   size_t shape_compat_runtime = 0;
@@ -411,14 +411,14 @@ private:
   std::string runtime_check_level = "entry";
   AssertionCost runtime_check_cost_threshold = AssertionCost::HIGH;
   bool disable_cuda_runtime_env_check =
-      false;                     // Do not emit cuda runtime env check.
-  bool use_warpspec = false;     // Enable warp-specialized synchronization for
-                                 // shared event/full-empty pipelines.
-    bool single_thread_producer =
+      false;                 // Do not emit cuda runtime env check.
+  bool use_warpspec = false; // Enable warp-specialized synchronization for
+                             // shared event/full-empty pipelines.
+  bool single_thread_producer =
       true;                   // In warpspec mode, use a single producer thread
-                  // for producer inthreads; otherwise guard
-                  // producer TMA/event ops individually.
-  std::string debug_file_dir;    // directory for compiler debug artifacts
+                              // for producer inthreads; otherwise guard
+                              // producer TMA/event ops individually.
+  std::string debug_file_dir; // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
 

@@ -303,8 +303,10 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
                    PSTR(arr_sym) + "', where the valid range is [0, " +
                    std::to_string(bound) + ")";
 
-    CreateAssessment(asrt0, message, expr->LOC(), expr, UsageType::ElementAccess);
-    CreateAssessment(asrt1, message, expr->LOC(), expr, UsageType::ElementAccess);
+    CreateAssessment(asrt0, message, expr->LOC(), expr,
+                     UsageType::ElementAccess);
+    CreateAssessment(asrt1, message, expr->LOC(), expr,
+                     UsageType::ElementAccess);
   } else if (n.IsBinary() && n.IsArith()) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
@@ -344,8 +346,7 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
         auto res = FCtx(fname).GetAssessor(*this).Assess(
             AssessPolicy::ErrWarn, AssessRelation::EQ, lshape.ValueAt(lidx),
             rshape.ValueAt(ridx), err_message, warn_message,
-            UsageType::ShapeCompatibility, AssessType::ENTRY,
-            n.LOC(), &n);
+            UsageType::ShapeCompatibility, AssessType::ENTRY, n.LOC(), &n);
         if (!res.passed) {
           compatible = false;
           shape_error_reported = true;
@@ -468,22 +469,25 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
 
           if (isa<BoundedType>(nty)) {
             if (IsValidValueItem(expr_bounds.ub))
-              CreateAssessment(sbe::oc_lt(expr_bounds.ub, dim_bound)->Normalize(),
-                               "The " + Ordinal(d + 1) + " index `" + idx_str +
-                                   "` of element access '" + data_str +
-                                   "' should be less than " + STR(dim_bound),
-                               val_node->LOC(), class_node, UsageType::ElementAccess, &n);
+              CreateAssessment(
+                  sbe::oc_lt(expr_bounds.ub, dim_bound)->Normalize(),
+                  "The " + Ordinal(d + 1) + " index `" + idx_str +
+                      "` of element access '" + data_str +
+                      "' should be less than " + STR(dim_bound),
+                  val_node->LOC(), class_node, UsageType::ElementAccess, &n);
             else {
               CreateAssessment(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
                                "The " + Ordinal(d + 1) + " index `" + idx_str +
                                    "` of element access '" + data_str +
                                    "' should be greater than or equal to 0",
-                               val_node->LOC(), class_node, UsageType::ElementAccess, &n);
+                               val_node->LOC(), class_node,
+                               UsageType::ElementAccess, &n);
               CreateAssessment(sbe::oc_lt(index_val, dim_bound)->Normalize(),
                                "The " + Ordinal(d + 1) + " index `" + idx_str +
                                    "` of element access '" + data_str +
                                    "' should be less than " + STR(dim_bound),
-                               val_node->LOC(), class_node, UsageType::ElementAccess, &n);
+                               val_node->LOC(), class_node,
+                               UsageType::ElementAccess, &n);
             }
 #if 0
             bool statically_safe = false;
@@ -597,16 +601,18 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
                                    "' should be less than " + STR(dim_bound),
                                val_node->LOC(), class_node, UsageType::ElementAccess, &n);
 #endif
-              CreateAssessment(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
-                               "The " + Ordinal(d + 1) + " index `" + idx_str +
-                                   "` of element access '" + data_str +
-                                   "' should be greater than or equal to 0",
-                               val_node->LOC(), class_node, UsageType::ElementAccess, &n);
-              CreateAssessment(sbe::oc_lt(index_val, dim_bound)->Normalize(),
-                               "The " + Ordinal(d + 1) + " index `" + idx_str +
-                                   "` of element access '" + data_str +
-                                   "' should be less than " + STR(dim_bound),
-                               val_node->LOC(), class_node, UsageType::ElementAccess, &n);
+            CreateAssessment(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
+                             "The " + Ordinal(d + 1) + " index `" + idx_str +
+                                 "` of element access '" + data_str +
+                                 "' should be greater than or equal to 0",
+                             val_node->LOC(), class_node,
+                             UsageType::ElementAccess, &n);
+            CreateAssessment(sbe::oc_lt(index_val, dim_bound)->Normalize(),
+                             "The " + Ordinal(d + 1) + " index `" + idx_str +
+                                 "` of element access '" + data_str +
+                                 "' should be less than " + STR(dim_bound),
+                             val_node->LOC(), class_node,
+                             UsageType::ElementAccess, &n);
           }
         }
       }
@@ -715,10 +721,9 @@ bool SemaChecker::VisitNode(AST::WithIn& n) {
       // expression), not the with-in iterator variable itself.  Since n.in
       // has BoundedType, CreateAssessment would escalate to USE_SITE - bypass
       // it and force ENTRY.
-      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt, message,
-                                            UsageType::LoopBound,
-                                            AssessType::ENTRY, n.in->LOC(),
-                                            n.in.get());
+      FCtx(fname).GetAssessor(*this).Assess(
+          AssessPolicy::Error, asrt, message, UsageType::LoopBound,
+          AssessType::ENTRY, n.in->LOC(), n.in.get());
       ++index;
     }
   }
@@ -961,7 +966,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     if (emit_error) {
       Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                           ") and 'to'(" + PSTR(tty) + ").");
-    } else {
+    } else if (!n.IsOOBZeroFill()) {
       Warning(n.LOC(),
               "Dimensions could be inconsistent between DMA" + msg + ").");
     }
@@ -1286,14 +1291,12 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
       // to force ENTRY placement: static violations become compile errors,
       // and runtime assertions are placed in the host wrapper (not inside the
       // kernel body).  See similar fix in ParallelBy and WithIn visitors.
-      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt0, message,
-                                            UsageType::ElementAccess,
-                                            AssessType::ENTRY, expr->LOC(),
-                                            expr.get());
-      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt1, message,
-                                            UsageType::ElementAccess,
-                                            AssessType::ENTRY, expr->LOC(),
-                                            expr.get());
+      FCtx(fname).GetAssessor(*this).Assess(
+          AssessPolicy::Error, asrt0, message, UsageType::ElementAccess,
+          AssessType::ENTRY, expr->LOC(), expr.get());
+      FCtx(fname).GetAssessor(*this).Assess(
+          AssessPolicy::Error, asrt1, message, UsageType::ElementAccess,
+          AssessType::ENTRY, expr->LOC(), expr.get());
     }
   }
 
@@ -1571,7 +1574,8 @@ bool SemaChecker::VisitNode(AST::Select& n) {
             "The select factor `" + PSTR(n.select_factor) +
                 "` should be less than " + std::to_string(select_value_cnt) +
                 ", which is the count of values in the select statement",
-            n.select_factor->LOC(), n.select_factor, UsageType::ElementAccess, &n);
+            n.select_factor->LOC(), n.select_factor, UsageType::ElementAccess,
+            &n);
     }
   }
 
@@ -1664,6 +1668,7 @@ void SemaChecker::CreateAssessment(const ValueItem& pred,
   if (IsValidValueItem(active_guard) && aty == AssessType::ENTRY)
     aty = AssessType::HOIST_SITE;
 
-  FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message, uty, aty,
-                                        l, n.get(), emit_node, active_guard);
+  FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message, uty,
+                                        aty, l, n.get(), emit_node,
+                                        active_guard);
 }

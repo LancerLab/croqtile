@@ -73,15 +73,15 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     row(s.runtime_enabled, "Runtime assertions enabled");
     row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
     errs() << "  ---\n";
-    row(s.unclassified_total,   "Assessments (unclassified)");
-    row(s.shape_compat_total,   "Assessments (shape-compatibility)");
-    row(s.elem_access_total,    "Assessments (element-access)");
-    row(s.loop_bound_total,     "Assessments (loop-bound)");
-    row(s.hw_constraint_total,  "Assessments (hw-constraint)");
-    row(s.unclassified_runtime,  "Runtime assertions (unclassified)");
-    row(s.shape_compat_runtime,  "Runtime assertions (shape-compatibility)");
-    row(s.elem_access_runtime,   "Runtime assertions (element-access)");
-    row(s.loop_bound_runtime,    "Runtime assertions (loop-bound)");
+    row(s.unclassified_total, "Assessments (unclassified)");
+    row(s.shape_compat_total, "Assessments (shape-compatibility)");
+    row(s.elem_access_total, "Assessments (element-access)");
+    row(s.loop_bound_total, "Assessments (loop-bound)");
+    row(s.hw_constraint_total, "Assessments (hw-constraint)");
+    row(s.unclassified_runtime, "Runtime assertions (unclassified)");
+    row(s.shape_compat_runtime, "Runtime assertions (shape-compatibility)");
+    row(s.elem_access_runtime, "Runtime assertions (element-access)");
+    row(s.loop_bound_runtime, "Runtime assertions (loop-bound)");
     row(s.hw_constraint_runtime, "Runtime assertions (hw-constraint)");
     errs() << sep << "\n";
   }

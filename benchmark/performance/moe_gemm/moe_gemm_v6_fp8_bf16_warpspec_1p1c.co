@@ -53,7 +53,7 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
     __cpp__("  if (seg_end - seg_start <= 0) return;\n\n");
 
     foreach {iv_m} in [cdiv(seg_length, MATMUL_WARP_M)] {
-      TILE_M = (MATMUL_WARP_M < (seg_length - iv_m * MATMUL_WARP_M) )? MATMUL_WARP_M : seg_length - iv_m * MATMUL_WARP_M;
+      TILE_M = (MATMUL_WARP_M < (seg_length - iv_m * MATMUL_WARP_M))? MATMUL_WARP_M : seg_length - iv_m * MATMUL_WARP_M;
       inthreads.async(wg == 0)  {
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
@@ -62,7 +62,8 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
             lhs.view(MATMUL_WARP_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K) 
               => sA.view(TILE_M, MATMUL_TILE_K).from(stage * MATMUL_WARP_M, 0);
           tma.copy.async<full[stage]>.swiz<128>
-            rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(eid # block_n, iv_k) => sB.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0);
+            rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(eid # block_n, iv_k) 
+              => sB.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0);
           trigger full[stage];
         }
       }
