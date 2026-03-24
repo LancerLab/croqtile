@@ -6616,6 +6616,7 @@ show_usage() {
     os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";
   if (verbose) os << " -v"; // if it requires to be verbose
+  os << " --expt-relaxed-constexpr";
   // always enclose
   os << " ${EXTRA_TARGET_CFLAGS}";
   std::filesystem::path cwd = std::filesystem::current_path();

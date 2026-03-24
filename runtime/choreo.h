@@ -200,28 +200,23 @@ inline void runtime_check(bool p, const std::string& msg) {
   return;
 }
 
-#ifdef __CHOREO_PRIVATE_TGT0__
 template <typename T>
-__co_device__ inline void fill(T* begin, T* end, const T& value) {
-  for (size_t idx = 0; idx < end - begin; ++idx) begin[idx] = value;
-  // TODO: OPT
-}
-
-template <typename T>
-__co_device__ inline void fill_n(T* begin, size_t n, const T& value) {
-  for (size_t idx = 0; idx < n; ++idx) begin[idx] = value;
-  // TODO: OPT
-}
-#endif // __CHOREO_PRIVATE_TGT0__
-
-template <typename T>
-__co_host__ inline void fill(T* begin, T* end, const T& value) {
+__co_any__ inline void fill(T* begin, T* end, const T& value) {
+#if defined(__CUDA_ARCH__)
+  for (size_t idx = 0; idx < static_cast<size_t>(end - begin); ++idx)
+    begin[idx] = value;
+#else
   std::fill(begin, end, value);
+#endif
 }
 
 template <typename T>
-__co_host__ inline void fill_n(T* begin, size_t n, const T& value) {
+__co_any__ inline void fill_n(T* begin, size_t n, const T& value) {
+#if defined(__CUDA_ARCH__)
+  for (size_t idx = 0; idx < n; ++idx) begin[idx] = value;
+#else
   std::fill_n(begin, n, value);
+#endif
 }
 
 namespace {
@@ -1467,6 +1462,7 @@ public:
   size_t element_count() const { return span_size(dims); }
   size_t bytes() const { return element_count() * sizeof(T); }
   T* data() { return ptr.get(); }
+  const T* data() const { return ptr.get(); }
 
   // allow multi-dim-style access, be like: a[1][3]
   template <size_t M = Rank>
@@ -1500,12 +1496,12 @@ public:
     return true;
   }
   template <typename U>
-  __co_any__ void fill(U value) {
+  __co_host__ void fill(U value) {
     fill_n(this->data(), this->element_count(), static_cast<T>(value));
   }
 
   // FP8-friendly fill: accepts float and converts for fp8 types.
-  __co_any__ void fill_fp8(float value) {
+  __co_host__ void fill_fp8(float value) {
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
     if constexpr (std::is_same<T, f8_e4m3>::value ||
                   std::is_same<T, f8_e5m2>::value) {
