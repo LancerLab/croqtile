@@ -986,11 +986,14 @@ struct SampledVerifierConfig {
 // Pick a prime stride coprime with n so samples spread across both rows and
 // columns.  Falls back to total/num_samples when that already satisfies the
 // coprimality requirement.
-inline size_t pick_coprime_stride(size_t total, size_t n,
-                                  size_t num_samples) {
+inline size_t pick_coprime_stride(size_t total, size_t n, size_t num_samples) {
   size_t raw = std::max<size_t>(1, total / num_samples);
   auto gcd = [](size_t a, size_t b) {
-    while (b) { size_t t = b; b = a % b; a = t; }
+    while (b) {
+      size_t t = b;
+      b = a % b;
+      a = t;
+    }
     return a;
   };
   if (gcd(raw, n) == 1) return raw;
@@ -1001,8 +1004,9 @@ inline size_t pick_coprime_stride(size_t total, size_t n,
 
 // Row-col layout: lhs[M,K] (row-major) * rhs[K,N] (col-major) => res[M,N]
 template <typename A, typename B, typename C>
-__co_host__ inline void verify_matmul_row_col_sampled(
-    A& lhs, B& rhs, C& res, const SampledVerifierConfig& cfg = {}) {
+__co_host__ inline void
+verify_matmul_row_col_sampled(A& lhs, B& rhs, C& res,
+                              const SampledVerifierConfig& cfg = {}) {
   size_t m = res.shape()[0];
   size_t n = res.shape()[1];
   size_t k = lhs.shape()[1];
@@ -1034,8 +1038,9 @@ __co_host__ inline void verify_matmul_row_col_sampled(
 
 // Row-row layout: lhs[M,K] * rhs[N,K] (both row-major) => res[M,N]
 template <typename A, typename B, typename C>
-__co_host__ inline void verify_matmul_row_row_sampled(
-    A& lhs, B& rhs, C& res, const SampledVerifierConfig& cfg = {}) {
+__co_host__ inline void
+verify_matmul_row_row_sampled(A& lhs, B& rhs, C& res,
+                              const SampledVerifierConfig& cfg = {}) {
   size_t m = res.shape()[0];
   size_t n = res.shape()[1];
   size_t k = lhs.shape()[1];
@@ -1069,8 +1074,9 @@ __co_host__ inline void verify_matmul_row_row_sampled(
 // dense_lhs is the pre-sparsification dense matrix (row-major).
 // rhs is row-major (N,K). Dot product: sum_k dense_lhs[i][k] * rhs[j][k].
 template <typename A, typename B, typename C>
-__co_host__ inline void verify_spmm_sampled(
-    A& dense_lhs, B& rhs, C& res, const SampledVerifierConfig& cfg = {}) {
+__co_host__ inline void
+verify_spmm_sampled(A& dense_lhs, B& rhs, C& res,
+                    const SampledVerifierConfig& cfg = {}) {
   verify_matmul_row_row_sampled(dense_lhs, rhs, res, cfg);
 }
 

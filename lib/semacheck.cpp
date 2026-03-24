@@ -963,10 +963,26 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
         }
       }
     }
+    auto f_sp_ty = cast<SpannedType>(fty);
+    auto t_sp_ty = cast<SpannedType>(tty);
+    bool supported_conditional_dma = false;
+    if (f_shape.Rank() == 2 && t_shape.Rank() == 2 && f_shape.IsValid() &&
+        t_shape.IsValid() && VIIsInt(f_shape.ValueAt(1)) &&
+        VIIsInt(t_shape.ValueAt(1)) &&
+        *VIInt(f_shape.ValueAt(1)) == *VIInt(t_shape.ValueAt(1))) {
+      auto f_sto = f_sp_ty->GetStorage();
+      auto t_sto = t_sp_ty->GetStorage();
+      supported_conditional_dma =
+          ((f_sto == Storage::GLOBAL || f_sto == Storage::DEFAULT) &&
+           t_sto == Storage::SHARED) ||
+          (f_sto == Storage::SHARED &&
+           (t_sto == Storage::GLOBAL || t_sto == Storage::DEFAULT));
+    }
+
     if (emit_error) {
       Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                           ") and 'to'(" + PSTR(tty) + ").");
-    } else if (!n.IsOOBZeroFill()) {
+    } else if (!n.IsOOBZeroFill() && !supported_conditional_dma) {
       Warning(n.LOC(),
               "Dimensions could be inconsistent between DMA" + msg + ").");
     }

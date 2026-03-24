@@ -3109,7 +3109,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     size_t vectorized_align_bits;
     bool one_row_per_warp;
   };
-  std::optional<TiledCopyEntry> tiled_copy_entry;
+  enum class TailCopyKind : uint8_t {
+    None,
+    G2S,
+    S2G,
+  };
+  struct TiledCopyPlan {
+    std::optional<TiledCopyEntry> entry;
+    TailCopyKind tail_copy_kind = TailCopyKind::None;
+    std::optional<TiledCopyEntry> tail_copy_helper_entry;
+  };
+  TiledCopyPlan tiled_copy_plan;
 
   auto PrepareTiledCopyEntry =
       [&](const location& loc, bool one_row_per_warp, size_t mem_align_byte,
@@ -3132,7 +3142,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                            lconfig.thread_count.z;
     auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
                        lconfig.group_count.y * lconfig.group_count.z;
-    auto thr_count_vi = inner_thr_count * group_count;
+    auto thr_count_vi =
+        CCtx().UseWarpSpec() ? inner_thr_count : inner_thr_count * group_count;
     if (!VIIsInt(inner_thr_count)) {
       Note(loc, "#thread (" + STR(inner_thr_count) +
                     ") is dynamic, unable to do make_tiled_copy.");
@@ -3264,34 +3275,87 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   };
 
   // used in dma only. Utilize all the threads in block to do DMA.
-  auto TiledCopyPrepare =
-      [&](bool one_row_per_warp, size_t mem_align_byte,
-          const ptr<AST::ChunkAt>& ca) -> std::optional<TiledCopyEntry> {
+  auto TiledCopyPrepare = [&](bool one_row_per_warp, size_t mem_align_byte,
+                              const ptr<AST::ChunkAt>& ca) -> TiledCopyPlan {
     /*
     for now, `make_tiled_copy` here has some constraints:
       only support 2D DMA;
-      do not support DMA inside inthreads;
-      do not support dynamic shape;
       do not support dynamic #thread;
+    2026/3/24:
+    1. Dynamic shape is supported now, dynamic shape will be
+    lowering into copy_if with predication.
+    2. DMA inside inthreads is supported now, but we only enable it
+    when WarpSpec is used and the parallel level is GROUPx4,
+    which means the DMA is performed by a single warpgroup of 128
+    threads.
     */
-
+    TiledCopyPlan plan;
     const auto& loc = ca->LOC();
 
-    if (auto l = Level(); l != ParallelLevel::BLOCK) {
-      Note(loc, "the DMA is in " + STR(l) +
-                    " level, If possible, move it to block level to implement "
-                    "the make_tiled_copy optimization.");
-      return std::nullopt;
+    bool shape_mismatch_tail_copy =
+        f_ca->GetBlockShape().Rank() == 2 &&
+        t_ca->GetBlockShape().Rank() == 2 &&
+        STR(f_ca->GetBlockShape()) != STR(t_ca->GetBlockShape());
+
+    bool tail_copy_g2s = n.operation == ".copy" && ca == f_ca &&
+                         (f_sty->GetStorage() == Storage::GLOBAL ||
+                          f_sty->GetStorage() == Storage::DEFAULT) &&
+                         t_sty->GetStorage() == Storage::SHARED &&
+                         shape_mismatch_tail_copy;
+    bool tail_copy_s2g = n.operation == ".copy" && ca == t_ca &&
+                         f_sty->GetStorage() == Storage::SHARED &&
+                         (t_sty->GetStorage() == Storage::GLOBAL ||
+                          t_sty->GetStorage() == Storage::DEFAULT) &&
+                         shape_mismatch_tail_copy;
+
+    if (tail_copy_g2s)
+      plan.tail_copy_kind = TailCopyKind::G2S;
+    else if (tail_copy_s2g)
+      plan.tail_copy_kind = TailCopyKind::S2G;
+
+    if (plan.tail_copy_kind != TailCopyKind::None) {
+      const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
+      assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
+      const auto& lconfig = lcs[parallel_idx];
+      auto inner_thr_count = lconfig.thread_count.x * lconfig.thread_count.y *
+                             lconfig.thread_count.z;
+      auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
+                         lconfig.group_count.y * lconfig.group_count.z;
+      auto thr_count_vi =
+          InProducer() ? inner_thr_count : inner_thr_count * group_count;
+      if (VIIsInt(thr_count_vi) && VIIsInt(ca->GetBlockShape().ValueAt(1))) {
+        size_t thr_count = *VIInt(thr_count_vi);
+        BaseType elem_type = plan.tail_copy_kind == TailCopyKind::G2S
+                                 ? f_sty->ElementType()
+                                 : t_sty->ElementType();
+        size_t elem_byte = SizeOf(elem_type);
+        size_t tile_n = *VIInt(ca->GetBlockShape().ValueAt(1));
+        constexpr size_t bytes_per_copy = 16;
+        if (bytes_per_copy % elem_byte == 0) {
+          size_t elems_per_copy = bytes_per_copy / elem_byte;
+          if (tile_n % elems_per_copy == 0) {
+            size_t thr_per_row = tile_n / elems_per_copy;
+            if (thr_per_row != 0 && thr_count % thr_per_row == 0) {
+              TiledCopyEntry entry;
+              entry.thr_layout.first = thr_count / thr_per_row;
+              entry.thr_layout.second = thr_per_row;
+              entry.val_layout.first = 1;
+              entry.val_layout.second = elems_per_copy;
+              entry.vectorized_align_bits = 128;
+              entry.one_row_per_warp = false;
+              plan.tail_copy_helper_entry = entry;
+              return plan;
+            }
+          }
+        }
+      }
     }
-    // if the DMA can only be in ParallelLevel::BLOCK
-    // then we won't need to check whether inside inthreads scope.
 
-    auto node_sty = GetSpannedType(ca->GetType());
+    plan.entry = PrepareTiledCopyEntry(loc, one_row_per_warp, mem_align_byte,
+                                       ca->GetBlockShape(), GenStrides(ca),
+                                       t_sty->ElementType());
 
-    auto tile_shape = ca->GetBlockShape();
-    return PrepareTiledCopyEntry(loc, one_row_per_warp, mem_align_byte,
-                                 tile_shape, node_sty->GetStrides(),
-                                 f_sty->ElementType());
+    return plan;
   };
 
   auto DMACodeGen = [&]() {
@@ -3334,18 +3398,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // swizzle)
     auto swizzle_mode = n.GetSwizzleMode();
 
-    bool use_tail_copy =
-        n.operation == ".copy" &&
-        (f_sty->GetStorage() == Storage::GLOBAL ||
-         f_sty->GetStorage() == Storage::DEFAULT) &&
-        t_sty->GetStorage() == Storage::SHARED &&
-        t_sty->GetShape().Rank() == 2 && fty->GetShape().Rank() == 2 &&
-        !t_sty->GetShape().IsDynamic() && !f_ca->GetBlockShape().IsDynamic() &&
-        VIIsInt(t_sty->GetShape().ValueAt(1)) &&
-        VIIsInt(f_ca->GetBlockShape().ValueAt(1)) &&
-        *VIInt(t_sty->GetShape().ValueAt(1)) ==
-            *VIInt(f_ca->GetBlockShape().ValueAt(1)) &&
-        n.future.empty();
+    bool use_tail_copy_g2s =
+        tiled_copy_plan.tail_copy_kind == TailCopyKind::G2S;
+    bool use_tail_copy = tiled_copy_plan.tail_copy_kind != TailCopyKind::None;
 
     Shape f_mds_shape =
         (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape());
@@ -3353,40 +3408,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     Shape t_mds_shape = fty->GetShape();
     if (use_tail_copy) t_mds_shape = f_ca->GetBlockShape();
 
-    std::optional<TiledCopyEntry> tail_copy_entry = tiled_copy_entry;
-    if (use_tail_copy && !tail_copy_entry.has_value()) {
-      const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
-      assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
-      const auto& lconfig = lcs[parallel_idx];
-      auto inner_thr_count = lconfig.thread_count.x * lconfig.thread_count.y *
-                             lconfig.thread_count.z;
-      auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
-                         lconfig.group_count.y * lconfig.group_count.z;
-      auto thr_count_vi =
-          InProducer() ? inner_thr_count : inner_thr_count * group_count;
-      if (VIIsInt(thr_count_vi)) {
-        size_t thr_count = *VIInt(thr_count_vi);
-        size_t elem_byte = SizeOf(f_sty->ElementType());
-        size_t tile_n = *VIInt(t_sty->GetShape().ValueAt(1));
-        constexpr size_t bytes_per_copy = 16;
-        if (bytes_per_copy % elem_byte == 0) {
-          size_t elems_per_copy = bytes_per_copy / elem_byte;
-          if (tile_n % elems_per_copy == 0) {
-            size_t thr_per_row = tile_n / elems_per_copy;
-            if (thr_per_row != 0 && thr_count % thr_per_row == 0) {
-              TiledCopyEntry entry;
-              entry.thr_layout.first = thr_count / thr_per_row;
-              entry.thr_layout.second = thr_per_row;
-              entry.val_layout.first = 1;
-              entry.val_layout.second = elems_per_copy;
-              entry.vectorized_align_bits = 128;
-              entry.one_row_per_warp = false;
-              tail_copy_entry = entry;
-            }
-          }
-        }
-      }
-    }
+    std::optional<TiledCopyEntry> tail_copy_entry =
+        tiled_copy_plan.tail_copy_helper_entry;
     bool use_tail_copy_helper = use_tail_copy && tail_copy_entry.has_value() &&
                                 tail_copy_entry->vectorized_align_bits == 128;
 
@@ -3508,15 +3531,28 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         }
       } else if (use_tail_copy_helper) {
         const auto& entry = tail_copy_entry.value();
-        IndStream() << "choreo::copy_if_g2s<"
-                    << (use_wgmma_layout_t ? "true" : "false") << ", "
-                    << NameBaseType(t_sty->ElementType()) << ", "
-                    << entry.thr_layout.first << ", " << entry.thr_layout.second
-                    << ", " << entry.val_layout.first << ", "
-                    << entry.val_layout.second << ">(" << f_mds_name << ", "
-                    << t_mds_name << ", [&](const auto& __coord) { return "
-                    << "cute::elem_less(__coord, cute::make_shape("
-                    << ShapeSTR(fty->GetShape(), true) << ")); });\n";
+        if (use_tail_copy_g2s) {
+          IndStream() << "choreo::copy_if_g2s<"
+                      << (use_wgmma_layout_t ? "true" : "false") << ", "
+                      << NameBaseType(t_sty->ElementType()) << ", "
+                      << entry.thr_layout.first << ", "
+                      << entry.thr_layout.second << ", "
+                      << entry.val_layout.first << ", "
+                      << entry.val_layout.second << ">(" << f_mds_name << ", "
+                      << t_mds_name << ", [&](const auto& __coord) { return "
+                      << "cute::elem_less(__coord, cute::make_shape("
+                      << ShapeSTR(fty->GetShape(), true) << ")); });\n";
+        } else {
+          IndStream() << "choreo::copy_if_s2g<"
+                      << NameBaseType(f_sty->ElementType()) << ", "
+                      << entry.thr_layout.first << ", "
+                      << entry.thr_layout.second << ", "
+                      << entry.val_layout.first << ", "
+                      << entry.val_layout.second << ">(" << f_mds_name << ", "
+                      << t_mds_name << ", [&](const auto& __coord) { return "
+                      << "cute::elem_less(__coord, cute::make_shape("
+                      << ShapeSTR(fty->GetShape(), true) << ")); });\n";
+        }
       } else if (is_subbyte_copy) {
         const auto f_byte = GenTensorDecl(
             RemoveSuffix(f_buf_name, ".data()") + "_byte", f_buf_name,
@@ -3547,9 +3583,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "cute::cp_async_fence();\n";
         ds << d_indent << future_name << ".trigger();\n";
       } else {
-        if (tiled_copy_entry.has_value() &&
+        if (tiled_copy_plan.entry.has_value() &&
             n.GetSwizzleMode() == SwizMode::NONE) {
-          const TiledCopyEntry& entry = tiled_copy_entry.value();
+          const TiledCopyEntry& entry = tiled_copy_plan.entry.value();
           IndStream() << "{\n";
           IncrIndent();
           IndStream() << "auto tiled_copy = cute::make_tiled_copy(\n";
@@ -3581,6 +3617,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           DecrIndent();
           IndStream() << "}\n";
         } else {
+          Note(n.LOC(), "DMA is lowered to low-performance opt_copy API.");
           IndStream() << "opt_copy(" << f_mds_name << ", " << t_mds_name
                       << ");\n";
         }
@@ -3923,11 +3960,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // TODO: how to determin `one_row_per_warp`? maybe add option for user.
     if (g2s) {
       bool one_row_per_warp = false;
-      tiled_copy_entry =
+      tiled_copy_plan =
           TiledCopyPrepare(one_row_per_warp, mem_align_byte, f_ca);
     } else if (s2g) {
       bool one_row_per_warp = false;
-      tiled_copy_entry =
+      tiled_copy_plan =
           TiledCopyPrepare(one_row_per_warp, mem_align_byte, t_ca);
     }
     DMACodeGen();

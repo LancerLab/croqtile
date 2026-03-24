@@ -821,6 +821,30 @@ __device__ static inline void copy_if_g2s(const SrcTensor& src, DstTensor& dst,
   cute::cp_async_wait<0>();
 }
 
+template <class Element, int ThrRows, int ThrCols, int ValRows, int ValCols,
+          class SrcTensor, class DstTensor, class Pred>
+__device__ static inline void copy_if_s2g(const SrcTensor& src, DstTensor& dst,
+                                          Pred pred) {
+  auto tiled_copy = cute::make_tiled_copy(
+      cute::Copy_Atom<cute::UniversalCopy<Element>, Element>{},
+      cute::make_layout(
+          cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
+          cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
+      cute::make_layout(
+          cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
+  auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
+  auto src_thr = thr_copy.partition_S(src);
+  auto dst_thr = thr_copy.partition_D(dst);
+  auto coord_thr =
+      thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
+  auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
+  CUTE_UNROLL
+  for (int i = 0; i < cute::size(pred_thr); ++i) {
+    pred_thr(i) = pred(coord_thr(i));
+  }
+  cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
+}
+
 // TODO: move to choreo_mma_wrapper.h
 // ------------------- inline mma PTX -------------------
 
