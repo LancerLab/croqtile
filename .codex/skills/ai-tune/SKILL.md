@@ -127,3 +127,5 @@ verify_matmul_row_row_subset(lhs, rhs, res, base_tol, rel_tol, max_i, max_j);
 - `profiling` - ncu invocation and metric interpretation
 - `performance-bottleneck-analysis` - interpreting ncu reports
 - `ai-tune-summary` - when the user wants to stop and ship results to main
+
+IMPORTANT: DO NOT STOP UNTIL USER MANUALLY DO OR NETWORK ISSUE, KEEP TRYING THE EXPERIMENT LOOP.

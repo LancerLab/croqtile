@@ -351,3 +351,5 @@ Start a new ai-tune experiment:
 ```
 /ai-tune-detail benchmark/performance/gemm_sp/
 ```
+
+IMPORTANT: DO NOT STOP UNTIL USER MANUALLY DO OR NETWORK ISSUE, KEEP TRYING THE EXPERIMENT LOOP.

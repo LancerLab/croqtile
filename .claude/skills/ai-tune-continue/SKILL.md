@@ -212,3 +212,5 @@ Continue a detailed experiment with compact skill:
 Creates `ai-tune-det/2026-03-20/gemm_sp/resume-1`
 
 When on main, the skill asks which experiment to continue.
+
+IMPORTANT: DO NOT STOP UNTIL USER MANUALLY DO OR NETWORK ISSUE, KEEP TRYING THE EXPERIMENT LOOP.
