@@ -2535,7 +2535,7 @@ bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
   IndStream() << "// if-else: " << n.LOC() << "\n";
   auto pred = n.GetPred();
   if (!pred->GetDiversityShape().Varying()) {
-    if (auto c = dyn_cast<AST::Call>(n.pred))
+    if (auto c = dyn_cast<AST::Call>(n.pred->GetReference()))
       IndStream() << "if (" << CallSTR(*c) << ") {\n";
     else
       IndStream() << "if (" << ExprSTR(n.pred, IsHost()) << ") {\n";
@@ -3823,7 +3823,6 @@ const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
 
 void TopsccCodeGen::BuildSiteAssertionMap() {
   if (CCtx().DisableRuntimeCheck()) return;
-  if (CCtx().RuntimeCheckLevel() != "all") return;
   if (fname.empty()) return;
 
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::USE_SITE)) {

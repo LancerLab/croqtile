@@ -84,7 +84,7 @@ public:
 
   virtual bool IsBlock() const { return false; }
   virtual bool HasBody() const { return false; }
-  virtual ptr<MultiNodes> GetBody() const { return nullptr; }
+  virtual const ptr<MultiNodes> GetBody() const { return nullptr; }
 
   virtual void OverWrite(const Node& other) {
     SetType(other.GetType());
@@ -108,12 +108,16 @@ public:
 
   virtual void InlinePrint(std::ostream& os, const std::string& prefix = {},
                            bool with_type = false) const {
-    if (!IsBlock()) Print(os, prefix, with_type);
+    if (!IsBlock())
+      Print(os, prefix, with_type);
+    else
+      os << TypeNameString();
   }
 
   __UDT_TYPE_INFO_BASE__(Node)
 };
 
+struct Expr;
 struct Block : public Node, public TypeIDProvider<Block> {
   ptr<MultiNodes> stmts = nullptr;
 
@@ -122,18 +126,18 @@ struct Block : public Node, public TypeIDProvider<Block> {
 
   bool IsBlock() const override { return true; }
   bool HasBody() const override { return stmts != nullptr; }
-  ptr<MultiNodes> GetBody() const override { return stmts; }
+  const ptr<MultiNodes> GetBody() const override { return stmts; }
   void SetBody(const ptr<MultiNodes>& s) { stmts = s; }
 
+  virtual bool Contains(const ptr<Node>& n) const;
+  virtual bool Contains(Node& n) const;
+
   virtual bool HasPredicate() const { return false; }
-  virtual const ptr<Node> GetPredicate() const { return nullptr; }
-  virtual void SetPredicate(const ptr<Node>&) {}
+  virtual const ptr<Expr> GetPredicate() const { return nullptr; }
+  virtual void SetPredicate(const ptr<Expr>&) {}
 
   virtual void SetScopePredicate(const ValueItem&) {}
-  virtual const ValueItem& GetScopePredicate() const {
-    static ValueItem invalid = GetInvalidValueItem();
-    return invalid;
-  }
+  virtual const ValueItem GetScopePredicate() const { return sbe::bl(true); }
   virtual bool HasScopePredicate() const { return false; }
 
 protected:
@@ -149,21 +153,22 @@ public:
 };
 
 struct PredBlock : public Block, public TypeIDProvider<PredBlock> {
-  ptr<Node> pred = nullptr;
+  ptr<Expr> pred = nullptr;
   ValueItem scope_predicate = GetInvalidValueItem();
 
   explicit PredBlock(const location& l, const ptr<MultiNodes>& s = nullptr,
-                     const ptr<Node>& p = nullptr)
+                     const ptr<Expr>& p = nullptr)
       : Block(l, s), pred(p) {}
 
   bool HasPredicate() const override { return pred != nullptr; }
-  const ptr<Node> GetPredicate() const override { return pred; }
-  void SetPredicate(const ptr<Node>& p) override { pred = p; }
+  const ptr<Expr> GetPredicate() const override { return pred; }
+  void SetPredicate(const ptr<Expr>& p) override { pred = p; }
 
-  void SetScopePredicate(const ValueItem& p) override { scope_predicate = p; }
-  const ValueItem& GetScopePredicate() const override {
-    return scope_predicate;
+  void SetScopePredicate(const ValueItem& p) override {
+    assert(IsValidValueItem(p));
+    scope_predicate = p;
   }
+  const ValueItem GetScopePredicate() const override { return scope_predicate; }
   bool HasScopePredicate() const override {
     return IsValidValueItem(scope_predicate);
   }
@@ -264,7 +269,15 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     return -1;
   }
 
-  bool IsBlock() const override { return true; }
+  bool Contains(const ptr<Node>& n) const {
+    return std::find(values.begin(), values.end(), n) != values.end();
+  }
+
+  bool Contains(Node& n) const {
+    for (auto& p : values)
+      if (p.get() == &n) return true;
+    return false;
+  }
 
   ptr<Node> CloneImpl() const override {
     auto mv = Make<MultiNodes>(LOC(), delimiter);
@@ -292,6 +305,15 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
   __UDT_TYPE_INFO__(Node, MultiNodes)
 };
+
+inline bool Block::Contains(const ptr<Node>& n) const {
+  return stmts->Contains(n);
+}
+inline bool Block::Contains(Node& n) const {
+  for (auto& p : stmts->AllSubs())
+    if (p.get() == &n) return true;
+  return false;
+}
 
 struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
   NodeList values;
@@ -1258,7 +1280,10 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<IntIndex>(LOC(), CloneP(value));
+    auto cloned = Make<IntIndex>(LOC(), CloneP(value));
+    cloned->lb = lb;
+    cloned->rb = rb;
+    return cloned;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1534,6 +1559,7 @@ struct NamedVariableDecl : public Node,
     assert(name_str.size() > 0 && "Invalid name string.");
   }
 
+  const std::string& GetName() const { return name_str; }
   void SetArrayDims(ptr<MultiValues> ad) {
     if (ad == nullptr) return;
     array_dims = ad;
@@ -1648,30 +1674,39 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
 
 struct IfElseBlock : public PredBlock, public TypeIDProvider<IfElseBlock> {
   ptr<MultiNodes> else_stmts; // optional requirements
-  ValueItem if_scope_predicate = GetInvalidValueItem();
+  // else scope predicate must be calculated
   ValueItem else_scope_predicate = GetInvalidValueItem();
 
-  IfElseBlock(const location& l, const ptr<Node>& c,
+  IfElseBlock(const location& l, const ptr<Expr>& c,
               const ptr<MultiNodes>& if_s,
               const ptr<MultiNodes>& else_s = nullptr)
       : PredBlock(l, if_s, c), else_stmts(else_s) {
     assert(stmts != nullptr && "must contains the if statements.");
   }
 
-  const ptr<Node> GetPred() const { return GetPredicate(); }
-  ptr<MultiNodes> GetThenBody() const { return stmts; }
-  ptr<MultiNodes> GetElseBody() const { return else_stmts; }
-  void SetIfScopePredicate(const ValueItem& p) { if_scope_predicate = p; }
-  void SetElseScopePredicate(const ValueItem& p) { else_scope_predicate = p; }
-  const ValueItem& GetIfScopePredicate() const { return if_scope_predicate; }
-  const ValueItem& GetElseScopePredicate() const {
-    return else_scope_predicate;
+  bool Contains(const ptr<Node>& n) const override {
+    return Block::Contains(n) || else_stmts->Contains(n);
+  }
+  bool Contains(Node& n) const override {
+    if (Block::Contains(n)) return true;
+    if (!HasElse()) return false;
+    for (auto& p : else_stmts->AllSubs())
+      if (p.get() == &n) return true;
+    return false;
   }
 
+  const ptr<Node> GetPred() const { return GetPredicate(); }
+  const ptr<MultiNodes> GetThenBody() const { return stmts; }
+  const ptr<MultiNodes> GetElseBody() const { return else_stmts; }
+  void SetIfScopePredicate(const ValueItem& p) { SetScopePredicate(p); }
+  void SetElseScopePredicate(const ValueItem& p) { else_scope_predicate = p; }
+  const ValueItem GetIfScopePredicate() const { return GetScopePredicate(); }
+  const ValueItem GetElseScopePredicate() const { return else_scope_predicate; }
+
   ptr<Node> CloneImpl() const override {
-    auto copied = Make<IfElseBlock>(LOC(), pred, stmts, CloneP(else_stmts));
+    auto copied = Make<IfElseBlock>(LOC(), CloneP(pred), CloneP(stmts),
+                                    CloneP(else_stmts));
     ClonePredBlockStateTo(*copied);
-    copied->if_scope_predicate = if_scope_predicate;
     copied->else_scope_predicate = else_scope_predicate;
     return copied;
   }
@@ -1689,16 +1724,16 @@ struct IfElseBlock : public PredBlock, public TypeIDProvider<IfElseBlock> {
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (stmts->Count()) {
       os << "\n" << prefix << " `- If-Block:";
+      if (IsValidValueItem(GetScopePredicate()))
+        os << "\n"
+           << prefix
+           << " `- If Scope Predicate: " << GetScopePredicate()->ToString();
       stmts->Print(os, prefix + "  ", with_type);
     }
     if (else_stmts && else_stmts->Count()) {
       os << "\n" << prefix << " `- Else-Block:";
       else_stmts->Print(os, prefix + "  ", with_type);
     }
-    if (IsValidValueItem(if_scope_predicate))
-      os << "\n"
-         << prefix
-         << " `- If Scope Predicate: " << if_scope_predicate->ToString();
     if (IsValidValueItem(else_scope_predicate))
       os << "\n"
          << prefix
@@ -2092,7 +2127,7 @@ inline std::string STR(const SpannedOperation& so) {
 }
 
 inline Identifier* GetIdentifier(const Node&);
-inline ptr<Expr> MakeIntExpr(const location&, int);
+inline const ptr<Expr> MakeIntExpr(const location&, int);
 
 namespace SOP {
 struct Tiling : public SpannedOperation, public TypeIDProvider<Tiling> {
@@ -3163,6 +3198,10 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   const std::string IVName() const { return iv->name; }
   const ptr<Identifier> IV() const { return iv; }
 
+  bool BoundIsMutated() const {
+    return (lbound != nullptr) || (ubound != nullptr);
+  }
+
   ptr<Node> CloneImpl() const override {
     auto copied = Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv),
                                   CloneP(lbound), CloneP(ubound), step);
@@ -3186,35 +3225,47 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   }
 
   void SetScopePredicate(const ValueItem& p) { scope_predicate = p; }
-  const ValueItem& GetScopePredicate() const { return scope_predicate; }
+  const ValueItem GetScopePredicate() const { return scope_predicate; }
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, LoopRange)
 };
 
 ptr<Call> GetCall(const ptr<Node>& n);
-struct ForeachBlock : public PredBlock, public TypeIDProvider<ForeachBlock> {
+struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ranges;
   ptr<MultiValues> suffixs;
   ptr<Loop> loop;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
-      : PredBlock(l, s), ranges(i), loop(nullptr) {
+      : Block(l, s), ranges(i), loop(nullptr) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiValues>& se, const ptr<MultiNodes>& s)
-      : PredBlock(l, s), ranges(i), suffixs(se), loop(nullptr) {
+      : Block(l, s), ranges(i), suffixs(se), loop(nullptr) {
     assert(i != nullptr && "missing iteration variables for the statement.");
+  }
+
+  // scope pred is delegating to its subs
+  const ValueItem GetScopePredicate() const override {
+    auto pred = sbe::bl(true);
+    for (auto rng : ranges->AllValues())
+      pred = sbe::bl_and(cast<LoopRange>(rng)->GetScopePredicate(), pred);
+    return pred;
+  }
+
+  // Do not use. Set the loop range instead
+  void SetScopePredicate(const ValueItem&) override {
+    choreo_unreachable("unable to set scope predicate for foreach.");
   }
 
   ptr<Node> CloneImpl() const override {
     auto copied =
         Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs), stmts);
-    ClonePredBlockStateTo(*copied);
-    copied->loop = loop ? loop : nullptr;
+    copied->loop = loop;
     return copied;
   }
 
@@ -3248,7 +3299,7 @@ struct ForeachBlock : public PredBlock, public TypeIDProvider<ForeachBlock> {
     return nullptr;
   }
 
-  __UDT_TYPE_INFO__(PredBlock, ForeachBlock)
+  __UDT_TYPE_INFO__(Block, ForeachBlock)
 };
 
 struct InThreadsBlock : public PredBlock,
@@ -3660,8 +3711,20 @@ inline ptr<Expr> MakeIdExpr(const location& l, const std::string& n) {
 }
 
 // symbol reference specific expr
-inline ptr<Expr> MakeIntExpr(const location& l, int val) {
-  return Make<Expr>(l, Make<IntLiteral>(l, val));
+inline const ptr<Expr> MakeIntExpr(const location& l, int val) {
+  auto e = Make<Expr>(l, Make<IntLiteral>(l, val));
+  e->SetType(MakeIntegerType());
+  return e;
+}
+
+inline const ptr<Expr> MakeExpr(const ptr<Node> n) {
+  if (auto e = dyn_cast<Expr>(n))
+    return e;
+  else {
+    auto expr = Make<Expr>(n->LOC(), n);
+    expr->SetType(n->GetType());
+    return expr;
+  }
 }
 
 inline bool IsLiteral(const Node& n) {

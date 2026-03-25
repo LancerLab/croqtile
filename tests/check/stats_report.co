@@ -11,7 +11,8 @@
 // CHECK: {{[ ]*}}4  assess  - Resolved at compile time (static-true)
 // CHECK: {{[ ]*}}0  assess  - Proven false at compile time (static-false)
 // CHECK: {{[ ]*}}2  assess  - Runtime assertions generated
-// CHECK: {{[ ]*}}2  assess  - Runtime assertions (low cost)
+// CHECK: {{[ ]*}}2  assess  - Runtime assertions (entry cost)
+// CHECK: {{[ ]*}}0  assess  - Runtime assertions (low cost)
 // CHECK: {{[ ]*}}0  assess  - Runtime assertions (medium cost)
 // CHECK: {{[ ]*}}0  assess  - Runtime assertions (high cost)
 // CHECK: {{[ ]*}}2  assess  - Runtime assertions enabled

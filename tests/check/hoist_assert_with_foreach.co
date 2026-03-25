@@ -28,20 +28,15 @@ __co__ void foo(int N) {
 }
 
 // Outside foreach: __iv_j is initialised to 0 and used directly.
-// CHECK-NEXT confirms no assertion line appears between the init and the
-// x access.
 // CHECK: int __iv_j = 0;
 // CHECK-NEXT: int x =
 
-// Inside foreach: __iv_j__elem__0 is the loop variable and may reach N.
-// An upper-bound assertion is required; the >= 0 check is omitted because
-// the loop counter starts from 0.
 // CHECK: for (__iv_j__elem__0 = 0; __iv_j__elem__0 < N; ++__iv_j__elem__0) {
-// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(N) - 1 < 8LL)
+// CHECK-NOT: choreo::assert{{.*}}"The 1st index `j` of element access 'buf'
 
 // After foreach, j reverts to __iv_j (=0); the z access generates no assert.
 // CHECK: int z =
 
-// N is a plain int parameter -- no shaped-input runtime_check for the buf
-// element access should appear in the host function.
-// CHECK-NOT: runtime_check{{.*}}"The 1st index `j` of element access 'buf'
+// The bound check (N) is hoisted to host
+// CHECK: choreo::runtime_check((static_cast<long long>(N) - 1 < 8LL)
+

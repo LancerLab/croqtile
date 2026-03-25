@@ -24,15 +24,15 @@ __co__ void foo(int j) {
 // CHECK: [assertions] function: foo  (2 assessed:  0 static-true,  0 static-false,  2 runtime)
 
 // ---- assertion [0]: lower-bound check ----
-// CHECK: [0] ENTRY      enabled=yes  cost=low     estimated=1
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [0] ENTRY      enabled=yes  cost=entry     estimated=1
+// CHECK:      assess  : runtime
 // CHECK:      message : The 1st index `j`{{.*}}greater than or equal to 0
 // CHECK:      loc     : {{.*}}.co:
 // CHECK:      site    : function entry (host runtime_check)
 
 // ---- assertion [1]: upper-bound check ----
-// CHECK: [1] ENTRY      enabled=yes  cost=low     estimated=1
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [1] ENTRY      enabled=yes  cost=entry     estimated=1
+// CHECK:      assess  : runtime
 // CHECK:      message : The 1st index `j`{{.*}}less than 4
 // CHECK:      loc     : {{.*}}.co:
 // CHECK:      site    : function entry (host runtime_check)

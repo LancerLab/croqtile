@@ -67,6 +67,7 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     row(s.static_true, "Resolved at compile time (static-true)");
     row(s.static_false, "Proven false at compile time (static-false)");
     row(s.runtime_total, "Runtime assertions generated");
+    row(s.runtime_entry, "Runtime assertions (entry cost)");
     row(s.runtime_low, "Runtime assertions (low cost)");
     row(s.runtime_medium, "Runtime assertions (medium cost)");
     row(s.runtime_high, "Runtime assertions (high cost)");

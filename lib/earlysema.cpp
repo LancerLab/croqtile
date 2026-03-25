@@ -171,7 +171,12 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 
   if (auto ref = n.GetReference()) {
     auto rty = NodeType(*ref);
-    assert(!isa<UnknownType>(rty) && "reference type is unknown.");
+    if (isa<UnknownType>(rty)) {
+      if (isa<AST::Call>(ref))
+        return true;
+      else
+        assert(false && "reference type is unknown.");
+    }
     SetNodeType(n, rty);
     if (diverges.Contains(dyn_cast<AST::Identifier>(ref))) diverges.Add(n);
   } else if (n.op == Op::DataOf || n.op == Op::MDataOf) {
@@ -2550,7 +2555,8 @@ bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
 bool EarlySemantics::Visit(AST::WhileBlock& n) {
   TraceEachVisit(n);
 
-  if (!isa<EventType>(NodeType(*n.pred)))
+  auto nty = NodeType(*n.pred);
+  if (!isa<EventType>(nty) && !isa<BooleanType>(nty))
     Error1(n.pred->LOC(), "requires an event predication expression but got '" +
                               PSTR(NodeType(*n.pred)) + "'.");
 
@@ -2559,7 +2565,11 @@ bool EarlySemantics::Visit(AST::WhileBlock& n) {
 
 bool EarlySemantics::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
-  if (isa<AST::Call>(n.pred)) return true; // can not derive function call
+  if (auto ref = n.pred->GetReference(); ref) {
+    if (auto c = dyn_cast<AST::Call>(ref); isa<UnknownType>(c->GetType()))
+      n.pred->SetType(MakeBooleanType()); // assume it derives boolean
+    return true;
+  }
 
   if (!isa<BooleanType>(NodeType(*n.pred))) {
     Error1(n.pred->LOC(), "requires a predication expression but got '" +

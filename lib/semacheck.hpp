@@ -36,9 +36,7 @@ private:
                         UsageType uty = UsageType::ShapeCompatibility,
                         AST::Node* emit_node = nullptr);
   ValueItem ActiveScopePredicate() const;
-  void PushScopePredicate(const ValueItem&);
-  void TryPushScopePredicate(AST::Node&);
-  void TryPopScopePredicate(AST::Node&);
+  bool ExpressionIsConstrained(const ValueItem&) const;
 
 public:
   SemaChecker() : TracedVisitorWithSymTab("check") {}

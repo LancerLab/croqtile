@@ -1473,14 +1473,123 @@ public:
   bool Visit(AST::ParallelBy& pb) override { return NormPB(pb); }
 };
 
+// Hoist any data access out of pred
+struct PredNorm : public NormBase {
+private:
+  bool changed = false;
+
+private:
+  using NodeInsertInfo =
+      std::vector<std::tuple<int, ptr<AST::Node>, std::string>>;
+  std::stack<AST::MultiNodes*> multi_nodes;
+  std::stack<int> cur_node_indices;
+  int GetNodeIndex() const { return cur_node_indices.top(); }
+  int GetValidNodeIndex() const {
+    assert(cur_node_indices.top() != -1 && "invalid node index.");
+    return cur_node_indices.top();
+  }
+  void SetNodeIndex(int i) {
+    cur_node_indices.pop();
+    cur_node_indices.push(i);
+  }
+  void PushNodeIndex(int i) { cur_node_indices.push(i); }
+  void PopNodeIndex() { cur_node_indices.pop(); }
+  std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
+  void InsertNode(int index, const ptr<AST::Node>& n, const std::string& name) {
+    assert(index >= 0);
+    mnodes_insertions[multi_nodes.top()].emplace_back(
+        std::make_tuple(index, n, name));
+  }
+
+public:
+  // it does not require a symbol table
+  PredNorm() : NormBase("pred-norm") {}
+
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
+      multi_nodes.push(m);
+      PushNodeIndex(0);
+    }
+
+    auto block = dyn_cast<AST::Block>(&n);
+    if (!block || !block->HasPredicate()) return true;
+
+    auto idx = multi_nodes.top()->GetIndex(&n);
+    assert(idx != -1 && "unexpected node index.");
+    SetNodeIndex(idx);
+
+    int index =
+        GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
+    NormExpr(block->GetPredicate(), index);
+
+    return true;
+  }
+
+  bool AfterVisitImpl(AST::Node&) override { return true; }
+
+  bool Visit(AST::MultiNodes& n) override {
+    TraceEachVisit(n);
+
+    // insert the node at the given place
+    assert(&n == multi_nodes.top());
+    for (auto item : mnodes_insertions[multi_nodes.top()]) {
+      auto& index = std::get<0>(item);
+      auto& pnode = std::get<1>(item);
+      // auto& name = std::get<2>(item);
+
+      n.values.insert(n.values.begin() + index, pnode);
+      VST_DEBUG(dbgs() << "[PredNorm] Hoisted: " << PSTR(pnode) << "\n");
+    }
+
+    mnodes_insertions.erase(&n);
+    multi_nodes.pop();
+    PopNodeIndex();
+
+    return true;
+  }
+
+  void NormExpr(const ptr<AST::Node>& n, int index) {
+    auto e = dyn_cast<AST::Expr>(n);
+    if (!e) return;
+
+    if (e->IsUnary())
+      NormExpr(e->GetR(), index);
+    else if (e->IsBinary()) {
+      NormExpr(e->GetL(), index);
+      NormExpr(e->GetR(), index);
+    } else if (e->IsTernary()) {
+      NormExpr(e->GetL(), index);
+      NormExpr(e->GetR(), index);
+      NormExpr(e->GetC(), index);
+    } else if (e->IsReference()) {
+      auto ref = e->GetReference();
+      if (auto da = dyn_cast<AST::DataAccess>(ref)) {
+        auto nname = SymbolTable::GetAnonName();
+        auto assign =
+            AST::Make<AST::Assignment>(da->LOC(), nname, AST::MakeExpr(da));
+        auto bty = da->GetType();
+        assign->SetType(bty->Clone());
+        assign->da->SetType(bty->Clone());
+        assign->SetDecl();
+        InsertNode(index, assign, nname);
+        auto id = AST::Make<AST::Identifier>(da->LOC(), nname);
+        id->SetType(bty->Clone());
+        e->SetR(id);
+        changed = true;
+      }
+    }
+  }
+};
+
 class Normalizer : public VisitorGroup {
 private:
   CompoundNorm comp;
   ParaByFiller filler;
   LoopNorm ln;
+  PredNorm pn;
 
 public:
-  Normalizer() : VisitorGroup("norm", comp, filler, ln) {}
+  Normalizer() : VisitorGroup("norm", comp, filler, ln, pn) {}
 };
 
 } // end namespace Choreo

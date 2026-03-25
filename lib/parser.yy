@@ -1619,13 +1619,13 @@ if_else_block
         $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, nullptr);
       }
     | IF LPAREN call_stmt RPAREN stmts_block %prec IF_PREC {
-        $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, nullptr);
+        $$ = AST::Make<AST::IfElseBlock>(@1, MakeExpr($3), $5, nullptr);
       }
     | IF LPAREN s_expr RPAREN stmts_block ELSE stmts_block {
         $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, $7);
       }
     | IF LPAREN call_stmt RPAREN stmts_block ELSE stmts_block {
-        $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, $7);
+        $$ = AST::Make<AST::IfElseBlock>(@1, MakeExpr($3), $5, $7);
       }
     | ELSE {
         Parser::error(@1, "'else' without a previous 'if'.");

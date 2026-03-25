@@ -1,20 +1,21 @@
 // RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s --check-prefix=HIGH
 // RUN: choreo -es --runtime-check=low %s -o - | FileCheck %s --check-prefix=LOW
 
-__co__ void foo(int n) {
-  parallel p by 1 {
-    shared s32 [4] buf;
-    foreach {i} in [n] {
-      x = buf.at(i);
+__co__ void foo() {
+    parallel p by 1 {
+      shared s32 [4] buf;
+      mutable int idx = call kernel();
+      while (idx > 0) {
+        x = buf.at(idx);
+        idx = call kernel();
+      }
     }
   }
 }
 
-// HIGH: for (__iv_i = 0; __iv_i < n; ++__iv_i) {
-// HIGH-NEXT: choreo::choreo_assert((static_cast<long long>(n) - 1 < 4{{(LL)?}}), "The 1st index `i` of element access 'buf' should be less than 4
-// HIGH: choreo::runtime_check((static_cast<long long>(n) != 0{{(LL)?}}), "zero is detected for the 1st dim of the mdspan inside the with-in statement
+// HIGH: int idx = kernel();
+// HIGH-DAG: choreo::choreo_assert((static_cast<long long>(idx) >= 0{{(LL)?}})
+// HIGH-DAG: choreo::choreo_assert((static_cast<long long>(idx) < 4{{(LL)?}})
 
-// LOW: for (__iv_i = 0; __iv_i < n; ++__iv_i) {
-// LOW-NOT: choreo::choreo_assert((static_cast<long long>(n) - 1 < 4{{(LL)?}})
-// LOW: int x = *((int*)buf + __iv_i);
-// LOW: choreo::runtime_check((static_cast<long long>(n) != 0{{(LL)?}}), "zero is detected for the 1st dim of the mdspan inside the with-in statement
+// LOW: int idx = kernel();
+// LOW-NOT: choreo::choreo_assert((static_cast<long long>(idx) < 4{{(LL)?}})

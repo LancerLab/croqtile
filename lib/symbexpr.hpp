@@ -1279,6 +1279,14 @@ inline Operand operator%(const Operand& vi1, const Operand& vi2) {
   return bop(OpCode::IRES, vi1, vi2)->Normalize();
 }
 
+inline Operand bl_or(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::OR, vi1, vi2)->Normalize();
+}
+
+inline Operand bl_and(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::AND, vi1, vi2)->Normalize();
+}
+
 inline void operator+=(Operand& vi1, const Operand& vi2) { vi1 = vi1 + vi2; }
 inline void operator-=(Operand& vi1, const Operand& vi2) { vi1 = vi1 - vi2; }
 inline void operator*=(Operand& vi1, const Operand& vi2) { vi1 = vi1 * vi2; }

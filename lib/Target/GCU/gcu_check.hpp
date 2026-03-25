@@ -18,7 +18,7 @@ inline size_t GCUVLdStAlignment(ptr<VectorType> vt) {
 struct GCUCheck : public VisitorWithSymTab {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
-  std::string cur_fname;
+  AST::Node* cur_fnode;
   std::string cur_arch;
   std::stack<ParallelLevel> levels;
 
@@ -29,12 +29,13 @@ private:
   }
 
   bool Assess(const ValueItem& pred, const std::string& message,
-              const location& l, AST::Node* node,
-              AssessType aty = AssessType::ENTRY,
+              AST::Node& node, AST::Node* emit_node = nullptr,
               UsageType uty = UsageType::HardwareConstraint) {
-    return FCtx(cur_fname)
+    return FCtx(fname)
         .GetAssessor(*this)
-        .Assess(AssessPolicy::Error, pred, message, uty, aty, l, node)
+        .Assess(AssessPolicy::Error, pred, message, uty, AssessType::USE_SITE,
+                node.LOC(), &node,
+                ((emit_node == nullptr) ? cur_fnode : emit_node))
         .passed;
   }
 
@@ -44,9 +45,9 @@ private:
     if (isa<AST::Program>(&n)) {
       if (CCtx().MaxLocalMemCapacity() > 0)
         Error1(n.LOC(), "Local memory capacity cannot be set manually on GCU.");
-    } else if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+    } else if (isa<AST::ChoreoFunction>(&n)) {
       cur_params.clear();
-      cur_fname = cf->name;
+      cur_fnode = &n;
       levels.push(ParallelLevel::SEQ);
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       if (!ValidLevel(*pb, pb->GetLevel())) return false;
@@ -127,7 +128,7 @@ public:
         constexpr size_t limit = 1ULL << 32;
         auto msg = "The size of data transferred by DMA cannot exceed 2^32.";
         auto asrt = sbe::oc_lt(bs, sbe::nu(limit))->Normalize();
-        Assess(asrt, msg, n.LOC(), nullptr);
+        Assess(asrt, msg, n, &n);
       } else {
         if (sty->ByteSize() >= (1ULL << 32))
           Error1(n.LOC(), "On " + cur_arch +
@@ -172,21 +173,21 @@ public:
       if (n.operation == ".transp" && IsLinearCopy()) {
         RankLE5("dma.transp(not slice nor deslice)");
         for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, idx, "<", 1 << 24, *n.GetFrom(), &n);
         for (size_t idx = 1; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+          CheckDimSize(t_shape, idx, "<", 1 << 24, *n.GetTo(), &n);
         auto bpe = sbe::nu((int)(SizeOf(f_sty->e_type)));
         auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                      sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.from->LOC(),
+        CheckValue(value, "<", 1 << 24, *n.GetFrom(), &n,
                    "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
         value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                 sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.to->LOC(),
+        CheckValue(value, "<", 1 << 24, *n.GetTo(), &n,
                    "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
         for (size_t idx = 1; idx < t_rank; ++idx)
           value = value * t_shape.ValueAt(idx);
-        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+        CheckValue(value, "<", 1ULL << 32, *n.GetTo(), &n,
                    "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
                    "* dim3 * dim4 < 4GB.");
       }
@@ -210,9 +211,9 @@ public:
               auto msg = "On GCU300, the config in "
                          "dma.pad must be in range [0, 2^11]";
               auto asrt = sbe::cmp(">=", val, sbe::nu(0));
-              Assess(asrt, msg, e->LOC(), e.get());
+              Assess(asrt, msg, *e, &n);
               asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
-              Assess(asrt, msg, e->LOC(), e.get());
+              Assess(asrt, msg, *e, &n);
             }
           }
         }
@@ -241,7 +242,7 @@ public:
                       ", the value of padding_mid[rank-1] in dma.pad must be 0 "
                       "(mid padding of dim[rank-1] is not supported by the "
                       "hardware)",
-                  e->LOC(), e.get());
+                  *e, &n);
             } else {
               auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
               Assess(
@@ -249,7 +250,7 @@ public:
                   "On " + cur_arch +
                       ", the value of padding_mid in dma.pad must be in range "
                       "[0, 2^10]",
-                  e->LOC(), e.get());
+                  *e, &n);
             }
           }
         }
@@ -272,7 +273,7 @@ public:
                   "On " + cur_arch +
                       ", dma.pad does not support 5-dimensional array (if dim "
                       "is 5, pad_config[0] must be 0)",
-                  e->LOC(), e.get());
+                  *e, &n);
             }
           }
         }
@@ -281,9 +282,9 @@ public:
       if (n.operation == ".copy" && IsSlice()) {
         RankLE5("dma.copy(slice)");
         for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, idx, "<", 1 << 24, *n.GetFrom(), &n);
         for (size_t idx = 0; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+          CheckDimSize(t_shape, idx, "<", 1 << 24, *n.GetTo(), &n);
         // TODO: offset limitation: [0, 2^24)
         if (f_rank == 5) {
           for (auto so : f_ca->AllOperations()) {
@@ -301,9 +302,9 @@ public:
       if (n.operation == ".copy" && IsDeslice()) {
         RankLE5("dma.copy(deslice)");
         for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, idx, "<", 1 << 24, *n.GetFrom(), &n);
         for (size_t idx = 0; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+          CheckDimSize(t_shape, idx, "<", 1 << 24, *n.GetTo(), &n);
         // TODO: offset limitation: [0, 2^24)
         if (t_rank == 5) {
           for (auto so : t_ca->AllOperations()) {
@@ -320,21 +321,21 @@ public:
       if (n.operation == ".transp" && IsSlice()) {
         RankLE5("dma.transp(slice then transpose)");
         for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, idx, "<", 1 << 24, *n.GetFrom(), &n);
         for (size_t idx = 1; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+          CheckDimSize(t_shape, idx, "<", 1 << 24, *n.GetTo(), &n);
         auto bpe = sbe::nu(SizeOf(f_sty->e_type));
         auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                      sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.from->LOC(),
+        CheckValue(value, "<", 1 << 24, *n.GetFrom(), &n,
                    "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
         value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                 sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.to->LOC(),
+        CheckValue(value, "<", 1 << 24, *n.GetTo(), &n,
                    "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
         for (size_t idx = 1; idx < t_rank; ++idx)
           value = value * t_shape.ValueAt(idx);
-        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+        CheckValue(value, "<", 1ULL << 32, *n.GetTo(), &n,
                    "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
                    "* dim3 * dim4 < 4GB.");
       }
@@ -343,21 +344,21 @@ public:
       if (n.operation == ".transp" && IsDeslice()) {
         RankLE5("dma.transp(transpose then deslice)");
         for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, idx, "<", 1 << 24, *n.GetFrom(), &n);
         for (size_t idx = 1; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+          CheckDimSize(t_shape, idx, "<", 1 << 24, *n.GetTo(), &n);
         auto bpe = sbe::nu((int)(SizeOf(f_sty->e_type)));
         auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                      sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.from->LOC(),
+        CheckValue(value, "<", 1 << 24, *n.GetFrom(), &n,
                    "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
         value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                 sbe::nu(128);
-        CheckValue(value, "<", 1 << 24, n.to->LOC(),
+        CheckValue(value, "<", 1 << 24, *n.GetTo(), &n,
                    "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
         for (size_t idx = 1; idx < t_rank; ++idx)
           value = value * t_shape.ValueAt(idx);
-        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+        CheckValue(value, "<", 1ULL << 32, *n.GetTo(), &n,
                    "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
                    "* dim3 * dim4 < 4GB.");
       }
@@ -373,18 +374,18 @@ public:
       if (n.operation == ".transp" && IsLinearCopy()) {
         RankLE5("dma.transp(not slice nor deslice)");
         if (f_rank == 5) {
-          CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, 0, "<", 1 << 24, *n.GetFrom(), &n);
           for (size_t idx = 1; idx < f_rank; ++idx)
-            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+            CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
         } else {
           for (size_t idx = 0; idx < f_rank; ++idx)
-            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+            CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
         }
 
         if (SizeOf(t_sty->e_type) == 4) {
           for (size_t idx = 0; idx < t_rank; ++idx) {
-            CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
-            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
+            CheckDimSize(t_shape, idx, ">", 1, *n.GetTo(), &n);
+            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, *n.GetTo(), &n);
           }
         }
 
@@ -402,12 +403,12 @@ public:
       if (n.operation == ".pad" && IsLinearCopy()) {
         RankLE5("dma.pad");
         if (f_rank == 5) {
-          CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, 0, "<", 1 << 24, *n.GetFrom(), &n);
           for (size_t idx = 1; idx < f_rank; ++idx)
-            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+            CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
         } else {
           for (size_t idx = 0; idx < f_rank; ++idx)
-            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+            CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
         }
 
         // shape of n.to is the same as n.from's
@@ -429,10 +430,8 @@ public:
             } else {
               auto msg = "On " + cur_arch +
                          ", the config in dma.pad must be in range [0, 2^11]";
-              auto asrt = sbe::cmp(">=", val, sbe::nu(0));
-              Assess(asrt, msg, e->LOC(), e.get());
-              asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
-              Assess(asrt, msg, e->LOC(), e.get());
+              Assess(sbe::cmp(">=", val, sbe::nu(0)), msg, *e, &n);
+              Assess(sbe::cmp("<=", val, sbe::nu(1 << 11)), msg, *e, &n);
             }
           }
         }
@@ -462,7 +461,7 @@ public:
                       ", the value of padding_mid[rank-1] in dma.pad must be 0 "
                       "(mid padding of dim[rank-1] is not supported by the "
                       "hardware)",
-                  e->LOC(), e.get());
+                  *e, &n);
             } else {
               auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
               Assess(
@@ -470,7 +469,7 @@ public:
                   "On " + cur_arch +
                       ", the value of padding_mid in dma.pad must be in range "
                       "[0, 2^10]",
-                  e->LOC(), e.get());
+                  *e, &n);
             }
           }
         }
@@ -493,7 +492,7 @@ public:
                   "On " + cur_arch +
                       ", dma.pad does not support 5-dimensional array (if dim "
                       "is 5, pad_config[0] must be 0)",
-                  e->LOC(), e.get());
+                  *e);
             }
           }
         }
@@ -503,10 +502,10 @@ public:
       if (n.operation == ".copy" && IsSlice()) {
         RankLE5("dma.copy(slice)");
         for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, idx, "<", 1 << 24, *n.GetFrom(), &n);
 
         for (size_t idx = 0; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 16, n.to->LOC());
+          CheckDimSize(t_shape, idx, "<", 1 << 16, *n.GetTo(), &n);
         if (f_rank == 5) {
           for (auto so : f_ca->AllOperations()) {
             if (!msb_is_zero(so))
@@ -522,28 +521,28 @@ public:
       if (n.operation == ".copy" && IsDeslice()) {
         RankLE5("dma.copy(deslice)");
         for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+          CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
 
         for (size_t idx = 0; idx < t_rank; ++idx)
-          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+          CheckDimSize(t_shape, idx, "<", 1 << 24, *n.GetTo(), &n);
       }
 
       // slice transpose
       if (n.operation == ".transp" && IsSlice()) {
         RankLE5("dma.transp(slice then transpose)");
         if (f_rank == 5) {
-          CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, 0, "<", 1 << 24, *n.GetFrom(), &n);
           for (size_t idx = 1; idx < f_rank; ++idx)
-            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+            CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
         } else {
           for (size_t idx = 0; idx < f_rank; ++idx)
-            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+            CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
         }
 
         if (SizeOf(t_sty->e_type) == 4) {
           for (size_t idx = 0; idx < t_rank; ++idx) {
-            CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
-            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
+            CheckDimSize(t_shape, idx, ">", 1, *n.GetTo(), &n);
+            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, *n.GetTo(), &n);
           }
         }
 
@@ -569,18 +568,18 @@ public:
       if (n.operation == ".transp" && IsDeslice()) {
         RankLE5("dma.transp(transpose then deslice)");
         if (f_rank == 5) {
-          CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+          CheckDimSize(f_shape, 0, "<", 1 << 24, *n.GetFrom(), &n);
           for (size_t idx = 1; idx < f_rank; ++idx)
-            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+            CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
         } else {
           for (size_t idx = 0; idx < f_rank; ++idx)
-            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+            CheckDimSize(f_shape, idx, "<", 1 << 16, *n.GetFrom(), &n);
         }
 
         if (SizeOf(t_sty->e_type) == 4) {
           for (size_t idx = 0; idx < t_rank; ++idx) {
-            CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
-            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
+            CheckDimSize(t_shape, idx, ">", 1, *n.GetTo(), &n);
+            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, *n.GetTo(), &n);
           }
         }
 
@@ -608,17 +607,17 @@ public:
   }
 
   void CheckDimSize(const Shape& s, size_t idx, const std::string& op,
-                    size_t limit, const location& loc) {
+                    size_t limit, AST::Node& n, AST::Node* en) {
     assert(idx < s.Rank());
     std::string message = "the " + Ordinal(idx + 1) + " dim " +
                           s.ValueAt(idx)->ToString() + " " + op + " " +
                           std::to_string(limit) + ".";
 
-    CheckValue(s.ValueAt(idx), op, limit, loc, message);
+    CheckValue(s.ValueAt(idx), op, limit, n, en, message);
   }
 
   void CheckValue(const ValueItem& vi, const std::string& op, size_t limit,
-                  const location& loc, std::string message = "") {
+                  AST::Node& n, AST::Node* en, std::string message = "") {
     if (!IsComputable(vi)) {
       VST_DEBUG(dbgs() << "[GCUCHECK] Not Checking " << STR(vi) << " " << op
                        << " " << limit << ".\n");
@@ -626,8 +625,7 @@ public:
     }
 
     message = "On " + cur_arch + ", must satisfy: " + message;
-    Assess(sbe::cmp(op, vi, sbe::nu(limit)), message, loc, nullptr,
-           AssessType::ENTRY);
+    Assess(sbe::cmp(op, vi, sbe::nu(limit)), message, n, en);
   }
 
 public:

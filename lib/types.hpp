@@ -1942,7 +1942,9 @@ struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
   }
   virtual bool HasValidBound() const = 0;
   virtual const ValueItem& GetUpperBound() const = 0;
+  virtual const ValueItem& GetLowerBound() const = 0;
   virtual const MultiBounds GetUpperBounds() const = 0;
+  virtual const MultiBounds GetLowerBounds() const = 0;
   virtual int GetStep() const = 0;
   virtual IntegerList GetSteps() const = 0;
   virtual int GetWidth() const = 0;
@@ -1983,8 +1985,11 @@ struct BoundedIntegerType final : public BoundedType,
     return IsValidValueItem(lbound) && IsValidValueItem(ubound) &&
            IsValidStep(step);
   }
-  ValueItem GetLowerBound() const { return lbound; }
+  const ValueItem& GetLowerBound() const override { return lbound; }
   const ValueItem& GetUpperBound() const override { return ubound; }
+  const MultiBounds GetLowerBounds() const override {
+    return MultiBounds(1, lbound);
+  }
   const MultiBounds GetUpperBounds() const override {
     return MultiBounds(1, ubound);
   }
@@ -2072,7 +2077,8 @@ struct BoundedITupleType final : public BoundedType,
   const ValueItem& GetUpperBound(size_t idx) const {
     return ubounds.ValueAt(idx);
   }
-  const ValueItem& GetLowerBound(size_t idx = 0) const {
+  const ValueItem& GetLowerBound() const override { return lbounds.ValueAt(0); }
+  const ValueItem& GetLowerBound(size_t idx) const {
     return lbounds.ValueAt(idx);
   }
   int GetStep(size_t idx) const { return steps[idx]; }

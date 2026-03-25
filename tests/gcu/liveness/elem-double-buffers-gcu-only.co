@@ -73,7 +73,7 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 // CHECK: ( 25)           }
 // CHECK: ( 26)           wait lfA, rfA
 // CHECK: ( 27)           call kernel( (dataof lfA) ,  (dataof rfA) , l_out,  (sizeof lfB.span) )
-// CHECK: ( 28)           dma.copy l_out => output.Chunk( (ubound p) ,  (ubound x) , (ubound y(-1)) ).At(p, x, y(-1))
+// CHECK: ( 28)           dma.copy l_out => output.Chunk( (ubound p) ,  (ubound x) , (ubound y[-1]) ).At(p, x, y[-1])
 // CHECK: ( 29)         }
 // CHECK: ( 30)       }
 // CHECK: ( 31)     }

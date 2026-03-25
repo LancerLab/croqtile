@@ -54,12 +54,12 @@ __co__ void foo(int j) {
 // CHECK:      message : Index 0 is out of bounds of the 1st dimension of array 'e'
 
 // ---- runtime assertions: buf.at(j) -> ENTRY (parameter) ----
-// CHECK: [4] ENTRY      enabled=yes  cost=low     estimated=1
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [4] ENTRY      enabled=yes  cost=entry     estimated=1
+// CHECK:      assess  : runtime
 // CHECK:      message : The 1st index `j`{{.*}}greater than or equal to 0
-// CHECK:      site    : function entry (host runtime_check)
+// CHECK:      site    : function entry
 
-// CHECK: [5] ENTRY      enabled=yes  cost=low     estimated=1
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [5] ENTRY      enabled=yes  cost=entry     estimated=1
+// CHECK:      assess  : runtime
 // CHECK:      message : The 1st index `j`{{.*}}less than 4
-// CHECK:      site    : function entry (host runtime_check)
+// CHECK:      site    : function entry

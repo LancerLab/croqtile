@@ -100,6 +100,7 @@ public:
 
 private:
   bool SetAsCurrentType(AST::Node&, const std::string&);
+  ValueItem BuildRangePredicate(AST::LoopRange& n);
 };
 
 } // end namespace Choreo

@@ -49,7 +49,7 @@ __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
 // CHECK: ( 22)           async=>local f32 mdspan<4> [1, 3, 16, 512] input_L1 = select( ( (ubound w)  % 2) , input_L1_B, input_L1_A)
 // CHECK: ( 23)           wait input_L1
 // CHECK: ( 24)           anon_5 =  (q # n) 
-// CHECK: ( 25)           dma.copy out_L1 => out.Chunk( (ubound (q # n) ) ,  (ubound h) , (ubound w(-1)) ).At(anon_5, h, w(-1))
+// CHECK: ( 25)           dma.copy out_L1 => out.Chunk( (ubound (q # n) ) ,  (ubound h) , (ubound w[-1]) ).At(anon_5, h, w[-1])
 // CHECK: ( 26)         }
 // CHECK: ( 27)       }
 // CHECK: ( 28)     }

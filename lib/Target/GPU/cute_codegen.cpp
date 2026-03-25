@@ -394,7 +394,7 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
            info.scale_a_expr == scale_a_expr &&
            info.scale_b_expr == scale_b_expr && info.scale_a_ld == scale_a_ld &&
            info.acc_ty == acc_ty && info.dim_n == dim_n &&
-           info.reg_num_d == *reg_num;
+           info.reg_num_d == (size_t)*reg_num;
   }
 
   if (auto fb = dyn_cast<AST::ForeachBlock>(n)) {
@@ -5901,7 +5901,7 @@ bool CuteCodeGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
 
   IndStream() << "// if-else: " << n.LOC() << "\n";
-  if (auto c = dyn_cast<AST::Call>(n.pred))
+  if (auto c = dyn_cast<AST::Call>(n.pred->GetReference()))
     IndStream() << "if (" << CallSTR(*c) << ") {\n";
   else
     IndStream() << "if (" << ExprSTR(n.pred, IsHost()) << ") {\n";
@@ -6228,7 +6228,7 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
       ++stats.shape_compat_total;
       ++stats.runtime_total;
       ++stats.shape_compat_runtime;
-      ++stats.runtime_low;
+      ++stats.runtime_entry;
     }
   }
 
@@ -7302,7 +7302,6 @@ const std::string CuteCodeGen::EmitSpannedArith(AST::Expr& e) const {
 
 void CuteCodeGen::BuildSiteAssertionMap() {
   if (CCtx().DisableRuntimeCheck()) return;
-  if (CCtx().RuntimeCheckLevel() != "all") return;
   if (fname.empty()) return;
 
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::USE_SITE)) {
