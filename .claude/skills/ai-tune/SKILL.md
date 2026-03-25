@@ -11,7 +11,7 @@ Kick off an autonomous, ncu-guided optimization experiment on the kernel folder:
 
 ## Pre-flight
 
-1. **Read the program**: Load `.claude/program.md` in full — it defines the loop protocol, mandatory rules, and constraints. Follow it exactly.
+1. **Read the program**: Load `.claude/program.md` in full - it defines the loop protocol, mandatory rules, and constraints. Follow it exactly.
 
 2. **Read the syntax reference**: Load the `choreo-syntax` skill before editing any `.co` file.
 
@@ -47,36 +47,38 @@ Before any optimization, find the current best kernel(s) in the target folder:
 
 Follow the loop defined in `.claude/program.md` Steps 1-5:
 
-1. **Step 1 — Profile**: Run `ncu --set full` on the current best. Identify the dominant bottleneck.
-2. **Step 2 — Raise an idea**: Propose ONE targeted optimization grounded in ncu data.
-3. **Step 3 — Implement**: Create a new versioned `.co` file. Compile and verify correctness.
+1. **Step 1 - Profile**: Run `ncu --set full` on the current best. Identify the dominant bottleneck.
+2. **Step 2 - Raise an idea**: Propose ONE targeted optimization grounded in ncu data.
+3. **Step 3 - Implement**: Create a new versioned `.co` file. Compile and verify correctness.
    - **Prefer `.co` modification + choreo compile**. This is the primary path.
    - If the optimization requires a choreo compiler change, implement it in `lib/` first, rebuild `./choreo`, then use the new feature in the `.co` file. Treat both as ONE atomic change.
    - If the optimization is too complex for `.co` (e.g. inline PTX, manual barrier reordering), modify the generated `.cu` file directly. Track the `.cu` artifact alongside the `.co` base.
-4. **Step 4 — Profile and decide**: Compare TFLOPS. KEEP if better, DISCARD if not.
-5. **Step 5 — Commit**: On KEEP, commit with descriptive message and update `results.tsv`.
+4. **Step 4 - Profile and decide**: Compare TFLOPS. KEEP if better, DISCARD if not.
+5. **Step 5 - Commit**: On KEEP, commit with descriptive message and update `results.tsv`.
 
 **Repeat from Step 1. NEVER STOP unless the user interrupts or the network drops.**
 
 ## Mandatory Verification (NEVER SKIP)
 
-**Every iteration MUST pass verification before it can be KEPT.** A kernel that
-produces wrong results is worthless regardless of TFLOPS.
+**Every iteration MUST pass verification before it can be KEPT.** A kernel that produces wrong results is worthless regardless of TFLOPS.
 
-### Using `choreo::SampledVerifier` (in `runtime/choreo.h`)
-
-The project provides `choreo::verify_spmm_sampled()` (and
-`verify_matmul_row_row_sampled` / `verify_matmul_row_col_sampled`) which
-sample the M×N output at a coprime stride and verify each sample against a
-CPU FP32 reference.
+### Using `verify_matmul_row_row_subset` or `verify_matmul_row_col_subset` (in `runtime/choreo.h`)
 
 ```cpp
-choreo::SampledVerifierConfig vcfg;
-vcfg.num_samples = 512;    // number of output elements to check
-vcfg.base_tol = 0.5f;     // absolute tolerance (adjust per precision)
-vcfg.rel_tol = 0.01f;     // relative tolerance
-// vcfg.verbose = true;   // print every mismatch (default: first 5)
-choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
+size_t M = res.shape()[0];
+size_t N = res.shape()[1];
+
+// Sample rate based on problem size (applied to total MxN output)
+// 4096x4096 @ 1% => 167,772 samples; 2048x2048 @ 2% => 83,886 samples; 1024x1024 @ 4% => 41,943 samples
+float rate = (M >= 4096 && N >= 4096) ? 0.01f :
+             (M >= 2048 && N >= 2048) ? 0.02f :
+             0.04f;
+
+size_t total_samples = static_cast<size_t>(rate * M * N);
+size_t max_i = static_cast<size_t>(std::sqrt(total_samples));
+size_t max_j = max_i;
+
+verify_matmul_row_row_subset(lhs, rhs, res, base_tol, rel_tol, max_i, max_j);
 ```
 
 ### Tolerance Guidelines
@@ -89,38 +91,9 @@ choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
 
 ### Requirements
 
-- **For `.co` kernels**: The host code MUST include a verification block that
-  calls `verify_spmm_sampled` (or equivalent) when `skip_verify` is false.
-  The kernel must print `Test Passed` only after verification succeeds.
-- **For `.cu` kernels**: Same requirement. The `.cu` host code must compute
-  the CPU reference from `lhs_dense_h` (the pre-sparsification dense matrix)
-  and the result from the GPU.
-- **NEVER print "Test Passed" without actual numerical comparison.** Running
-  the kernel twice and copying the result back is NOT verification.
-- **Keep `lhs_dense_h` alive** in host code — it is needed for the CPU
-  reference dot products. Do not discard it after encoding.
-
-### Verification Pattern for Sparse GEMM
-
-```cpp
-// After kernel execution and D2H copy of result:
-if (skip_verify) {
-  std::cout << "Test Passed (verify skipped)\n" << std::endl;
-  return 0;
-}
-
-auto lhs_dense_v = lhs_dense_h.view();
-auto rhs_v = rhs_h.view();
-auto res_v = res_h.view();
-
-choreo::SampledVerifierConfig vcfg;
-vcfg.num_samples = 512;
-vcfg.base_tol = <see table above>;
-vcfg.rel_tol = <see table above>;
-choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
-
-std::cout << "Test Passed\n" << std::endl;
-```
+- Host code MUST include verification block when `skip_verify` is false.
+- **NEVER print "Test Passed" without actual numerical comparison.** Running kernel twice is NOT verification.
+- **Keep `lhs_dense_h` alive** in host code - needed for CPU reference.
 
 ## Iteration File Naming
 
@@ -130,7 +103,7 @@ std::cout << "Test Passed\n" << std::endl;
 
 ## Artifact Management
 
-- **Every KEEP iteration**: `git add` the new `.co` (and `.cu` if applicable), `results.tsv`, and any compiler changes. Commit with: `iter<NNN>: <description> — TFLOPS: X -> Y (KEEP)`
+- **Every KEEP iteration**: `git add` the new `.co` (and `.cu` if applicable), `results.tsv`, and any compiler changes. Commit with: `iter<NNN>: <description> - TFLOPS: X -> Y (KEEP)`
 - **Every DISCARD**: Note in `results.tsv` but do not commit the failed kernel file. Or commit with `(DISCARD)` tag for traceability.
 - **Periodic pushes**: Push to the remote branch every 5-10 iterations or after significant wins.
 - **On context compaction**: Before the context window fills, commit all pending work, push, and note the current state in the commit message. After compaction, re-read `.claude/program.md` and `results.tsv` to resume.
@@ -143,14 +116,14 @@ std::cout << "Test Passed\n" << std::endl;
 - Never repeat failed combinations (Rule 4)
 - Abandon stuck ideas after 3 attempts (Rule 5)
 - Understand the kernel before mutating (Rule 6)
-- **NEVER SKIP verification** — every KEEP must pass `verify_spmm_sampled` (Rule 7)
-- **NEVER STOP the loop** — run indefinitely until user interrupts
+- **NEVER SKIP verification** - every KEEP must pass verification (Rule 7)
+- **NEVER STOP the loop** - run indefinitely until user interrupts
 
 ## Related Skills
 
-- `choreo-syntax` — DSL reference for `.co` editing
-- `compile-and-test` — build/run workflows
-- `develop-compiler` — when compiler changes are needed
-- `profiling` — ncu invocation and metric interpretation
-- `performance-bottleneck-analysis` — interpreting ncu reports
-- `ai-tune-summary` — when the user wants to stop and ship results to main
+- `choreo-syntax` - DSL reference for `.co` editing
+- `compile-and-test` - build/run workflows
+- `develop-compiler` - when compiler changes are needed
+- `profiling` - ncu invocation and metric interpretation
+- `performance-bottleneck-analysis` - interpreting ncu reports
+- `ai-tune-summary` - when the user wants to stop and ship results to main

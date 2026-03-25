@@ -54,7 +54,7 @@ Determine the set of files to modify based on requirement type:
 
 ```
 Does the requirement involve new syntax?
-├─ Yes → modify:
+├─ Yes => modify:
 │   ├── lib/scanner.l          (lexical rules)
 │   ├── lib/parser.yy          (grammar rules + AST building)
 │   ├── lib/ast.hpp            (new AST node definitions)
@@ -63,18 +63,18 @@ Does the requirement involve new syntax?
 │   └── all related pass files (logic for handling new node)
 │
 ├─ Does the requirement involve a new pass?
-│   ├─ Yes → modify:
+│   ├─ Yes => modify:
 │   │   ├── lib/new_pass.hpp       (new pass header)
 │   │   ├── lib/new_pass.cpp       (implementation, optional)
 │   │   ├── lib/pipeline.cpp       (register in pipeline)
 │   │   └── lib/CMakeLists.txt     (add source files)
 │   │
 │   └─ Does it modify an existing pass?
-│       ├─ Yes → directly modify corresponding pass file
-│       └─ No  → continue analysis...
+│       ├─ Yes => directly modify corresponding pass file
+│       └─ No  => continue analysis...
 │
 ├─ Does the requirement involve type system?
-│   ├─ Yes → modify:
+│   ├─ Yes => modify:
 │   │   ├── lib/types.hpp            (type definitions + BaseType enum)
 │   │   ├── lib/types.cpp            (type method implementations)
 │   │   ├── lib/typeinfer.cpp        (type inference logic)
@@ -82,7 +82,7 @@ Does the requirement involve new syntax?
 │   │   └── lib/vector_typeinfer.hpp (vector type inference)
 │   │
 │   └─ Does it involve Target/CodeGen?
-│       └─ GPU → files under lib/Target/GPU/
+│       └─ GPU => files under lib/Target/GPU/
 │           ├── cute_codegen.hpp/cpp
 │           ├── gpu_adapt.hpp
 │           └── cute_target.cpp
@@ -115,11 +115,11 @@ Visitor (base class, ~50 Visit virtual methods)
 #### Compiler Pass Pipeline
 ```
 PlanSemanticRoutine():
-  EarlySemantics → Normalizer → ShapeInference → TypeInference
-  → LateNorm → [LoopVectorizer] (optional) → [MemoryReuse] (optional) → SemaChecker
+  EarlySemantics => Normalizer => ShapeInference => TypeInference
+  => LateNorm => [LoopVectorizer] (optional) => [MemoryReuse] (optional) => SemaChecker
 
 PlanCodeGenRoutine():
-  CodegenPrepare → Target.PlanCodeGenStages()
+  CodegenPrepare => Target.PlanCodeGenStages()
 ```
 
 #### Target Self-Registration
@@ -133,14 +133,14 @@ static bool registered = [] {
 Target hierarchy:
 ```
 Target (abstract)
-└── GPUTarget → CuteTarget (sm_70~sm_120)
+└── GPUTarget => CuteTarget (sm_70~sm_120)
 ```
 
 #### Symbol Table
 - `ScopedSymbolTable`: stack-based scope management.
 - `EnterScope(name)` / `LeaveScope()`.
 - `DefineSymbol(name, info)` / `LookupSymbol(name)`.
-- `InScopeName(name)` → `::scope1::scope2::name`.
+- `InScopeName(name)` => `::scope1::scope2::name`.
 
 #### CMake Build Organization (`lib/CMakeLists.txt`)
 | OBJECT Library | Included Sources |
@@ -507,21 +507,21 @@ timeout 30 ./tests/lit.sh tests/<dir>/your_new_test.co
 Runtime debugging mapping:
 
 ```
-Compiler crash / segfault   → make debug + gdb ./build-debug/choreo
-Error mismatch              → -dv=<pass>
-Wrong generated code        → -es
-Type inference issue        → -i
+Compiler crash / segfault   => make debug + gdb ./build-debug/choreo
+Error mismatch              => -dv=<pass>
+Wrong generated code        => -es
+Type inference issue        => -i
 ```
 
 ### 5.4 Iterative Fix Loop
 
 ```
-Build → Test → Failed?
-├─ Build failed           → fix C++ errors → rerun make build
-├─ CHECK mismatch         → fix CHECK or implementation
-├─ Timeout                → check infinite loop/recursion
-├─ Expected error missing → add/fix validation logic
-└─ Crash                  → debug with make debug + gdb
+Build => Test => Failed?
+├─ Build failed           => fix C++ errors => rerun make build
+├─ CHECK mismatch         => fix CHECK or implementation
+├─ Timeout                => check infinite loop/recursion
+├─ Expected error missing => add/fix validation logic
+└─ Crash                  => debug with make debug + gdb
 ```
 
 ---
@@ -548,13 +548,13 @@ Build → Test → Failed?
 
 ```
 Receive feature request
-→ Analyze requirement category
-→ Search related files and patterns
-→ Draft plan and ask for confirmation
-→ Implement incrementally with build checks
-→ Create tests and refine CHECK lines
-→ Run regression tests
-→ Report completion and ask if adjustment is needed
+=> Analyze requirement category
+=> Search related files and patterns
+=> Draft plan and ask for confirmation
+=> Implement incrementally with build checks
+=> Create tests and refine CHECK lines
+=> Run regression tests
+=> Report completion and ask if adjustment is needed
 ```
 
 ### 6.3 Interaction Policy

@@ -19,9 +19,9 @@ Follow this workflow:
    - Supporting files for detailed reference
 
 2. **Classify the skill type**:
-   - **Reference content** — conventions, patterns, domain knowledge (load automatically)
-   - **Task/workflow content** — build, test, debug, profile actions (often manual-only)
-   - **Hybrid** — reference + task (choose based on primary use)
+   - **Reference content** - conventions, patterns, domain knowledge (load automatically)
+   - **Task/workflow content** - build, test, debug, profile actions (often manual-only)
+   - **Hybrid** - reference + task (choose based on primary use)
 
 3. **Choose frontmatter deliberately**:
    | Field | When to use |

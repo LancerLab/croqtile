@@ -11,7 +11,7 @@ Finalize an AI-tune experiment session and ship winning kernels to the main bran
 
 ## Workflow
 
-### Phase 1 — Finalize Current Branch
+### Phase 1 - Finalize Current Branch
 
 1. **Identify the experiment branch**: Should be on `ai-tune/<date>/<kernel>`. If not, check out the branch specified in `$ARGUMENTS` or ask the user.
 2. **Commit all pending artifacts**:
@@ -25,7 +25,7 @@ Finalize an AI-tune experiment session and ship winning kernels to the main bran
    git push -u origin HEAD
    ```
 
-### Phase 2 — Analyze Results on Main
+### Phase 2 - Analyze Results on Main
 
 1. **Switch to main and sync**:
    ```bash
@@ -37,7 +37,7 @@ Finalize an AI-tune experiment session and ship winning kernels to the main bran
    - The optimization idea behind each KEEP iteration
 3. **Identify winners**: List all iterations that outperform main's current best. These are the candidates to ship.
 
-### Phase 3 — Ship Winners to Main
+### Phase 3 - Ship Winners to Main
 
 For each winning iteration, ship it to main using the naming convention below. Process them **sequentially** (lowest iter first) and **verify each one** before proceeding.
 
@@ -55,7 +55,7 @@ The naming must include the kernel family, `aitune` marker, date, and iteration 
   - Contents:
     - The `.cu` source file
     - A `run.sh` script (compile + run in one command)
-    - **NO local `choreo.h` copy** — use `-I"$REPO_ROOT/runtime"` to pick up the canonical header
+    - **NO local `choreo.h` copy** - use `-I"$REPO_ROOT/runtime"` to pick up the canonical header
   - The subfolder must be **self-contained and runnable** with:
     ```bash
     bash <subfolder>/run.sh
@@ -86,7 +86,7 @@ echo "Built: $BIN"
 ```
 
 Key points about `run.sh`:
-- Uses `$REPO_ROOT/runtime` for `choreo.h` — never bundle a local copy
+- Uses `$REPO_ROOT/runtime` for `choreo.h` - never bundle a local copy
 - Compiles AND runs in one invocation; pass `--skip-verify` or
   `--disable-timing` as arguments
 - Binary is placed inside the subfolder (not `/tmp`)
@@ -114,7 +114,7 @@ Key points about `run.sh`:
    - Rebuild `./choreo`.
    - Then ship the kernel.
 
-### Phase 4 — Create README
+### Phase 4 - Create README
 
 Create or update `README_<kernel-family>_aitune_<date>.md` in the kernel folder with:
 
@@ -127,7 +127,7 @@ Create or update `README_<kernel-family>_aitune_<date>.md` in the kernel folder 
 4. **Optimization history**: Brief description of each shipped optimization.
 5. **Source branch**: Reference the experiment branch for full history.
 
-### Phase 5 — Commit and Push
+### Phase 5 - Commit and Push
 
 ```bash
 git add benchmark/performance/<kernel-folder>/
@@ -142,13 +142,13 @@ git push origin main
 
 ## Verification Protocol
 
-**MANDATORY — every shipped kernel must pass sampled verification.**
+**MANDATORY - every shipped kernel must pass sampled verification.**
 
 ### Using `choreo::SampledVerifier`
 
 All kernels must use `choreo::verify_spmm_sampled()` (or the equivalent
 `verify_matmul_row_row_sampled` / `verify_matmul_row_col_sampled`) from
-`runtime/choreo.h`. These utilities sample the M×N output at a coprime stride
+`runtime/choreo.h`. These utilities sample the MxN output at a coprime stride
 and compare each sample against a CPU FP32 reference.
 
 ```cpp
@@ -171,7 +171,7 @@ choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
 
 - [ ] Every `.co` kernel: choreo compile succeeds, `--execute` prints `Test Passed` after real numerical comparison
 - [ ] Every `.cu` kernel: `bash run.sh` succeeds (exit 0), prints `Test Passed` after real numerical comparison
-- [ ] **NEVER print "Test Passed" without actual element-wise comparison** — running the kernel twice is not verification
+- [ ] **NEVER print "Test Passed" without actual element-wise comparison** - running the kernel twice is not verification
 - [ ] After commit: `git status` is clean for the shipped files
 - [ ] After push: `git log --oneline -1` matches the commit
 
@@ -183,5 +183,5 @@ choreo::verify_spmm_sampled(lhs_dense_v, rhs_v, res_v, vcfg);
 
 ## Related Skills
 
-- `ai-tune` — the optimization loop that produces the results being shipped
-- `compile-and-test` — build/run workflows for verification
+- `ai-tune` - the optimization loop that produces the results being shipped
+- `compile-and-test` - build/run workflows for verification

@@ -62,13 +62,13 @@ Internally, Choreo has two major flows: Semantic analysis and CodeGen. Each pass
 ### Full Pass Pipeline
 
 ```
-Preprocess → Parse → SEMA (Early Semantic) → NORM (Normalization) → VALNO (Value Numbering) → INFER (Type Inference)
+Preprocess => Parse => SEMA (Early Semantic) => NORM (Normalization) => VALNO (Value Numbering) => INFER (Type Inference)
                                       ├ COMP_N
                                       ├ PBFILL
                                       └ HINT-CHECKER
-→ LATENORM (Late Normalization) → BUFGEN → BUFFER-INFO-COLLECT
-→ MEMORYREUSE → LIVENESS → MEMANLZ → MEMREUSE
-→ CHECK (Semantic Check) → CODEGEN → CG_INFO → FUTANLY
+=> LATENORM (Late Normalization) => BUFGEN => BUFFER-INFO-COLLECT
+=> MEMORYREUSE => LIVENESS => MEMANLZ => MEMREUSE
+=> CHECK (Semantic Check) => CODEGEN => CG_INFO => FUTANLY
 ```
 
 ### Pass Quick Reference
@@ -390,7 +390,7 @@ CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/output.cute.result --execute
 3. **nvcc compile failed (arch mismatch)**
    - Check real GPU compute capability: `nvidia-smi --query-gpu=compute_cap --format=csv,noheader`.
    - Ensure `-arch=sm_XX` matches hardware.
-   - RTX 3070 → `sm_86`, H100/H800 → `sm_90a`, A100 → `sm_80`.
+   - RTX 3070 => `sm_86`, H100/H800 => `sm_90a`, A100 => `sm_80`.
 
 ---
 
@@ -399,24 +399,24 @@ CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/output.cute.result --execute
 ### When compiling and testing a `.co` file
 ```
 1. Validate ./choreo
-   ├─ Invalid → make build
-   └─ Valid → continue
+   ├─ Invalid => make build
+   └─ Valid => continue
 
 2. Analyze .co file
    ├─ Contains "// RUN:"?
-   │   ├─ Yes → run with lit.sh (or execute RUN commands manually)
-   │   └─ No  → determine target and build mode manually
+   │   ├─ Yes => run with lit.sh (or execute RUN commands manually)
+   │   └─ No  => determine target and build mode manually
    ├─ Contains "// REQUIRES: TARGET-GPU"?
-   │   ├─ Yes → needs GPU
-   │   └─ No  → likely frontend-only check
+   │   ├─ Yes => needs GPU
+   │   └─ No  => likely frontend-only check
    └─ Content clues:
-├─ has main() / CHECK: → end-to-end test (`-gs + --execute`)
-        └─ only __co__ functions → codegen check or library code
+├─ has main() / CHECK: => end-to-end test (`-gs + --execute`)
+        └─ only __co__ functions => codegen check or library code
 
 3. Determine target
-├─ path contains gpu/cuda/cute → cute
-    ├─ RUN: contains -t XXX        → use XXX
-    └─ uncertain                   → ask user inline
+├─ path contains gpu/cuda/cute => cute
+    ├─ RUN: contains -t XXX        => use XXX
+    └─ uncertain                   => ask user inline
 
 4. During GPU execution
    ├─ check GPU status with `nvidia-smi`
@@ -427,15 +427,15 @@ CUDA_VISIBLE_DEVICES=$FREE_GPU bash /tmp/output.cute.result --execute
 
 ### When debugging compiler issues
 ```
-"syntax error" / "unexpected"            → Scenario 1
-"type inconsistent" / "unable to apply" → Scenario 2
-"invalid span" / "chunkat"               → Scenario 3
-"parallel" / "block" / "thread"        → Scenario 4
-"DMA" / "future" / "wait"               → Scenario 5
-"memory" / "buffer" / "reuse"           → Scenario 6
-nvcc/codegen errors                        → Scenario 7
-unknown pass                               → Scenario 8
-"vectorize" / foreach                     → Scenario 9
+"syntax error" / "unexpected"            => Scenario 1
+"type inconsistent" / "unable to apply" => Scenario 2
+"invalid span" / "chunkat"               => Scenario 3
+"parallel" / "block" / "thread"        => Scenario 4
+"DMA" / "future" / "wait"               => Scenario 5
+"memory" / "buffer" / "reuse"           => Scenario 6
+nvcc/codegen errors                        => Scenario 7
+unknown pass                               => Scenario 8
+"vectorize" / foreach                     => Scenario 9
 
 Default to `-s` (no codegen) in debugging commands unless codegen output is required.
 For long output, use `| head -N` or `2>&1 | grep KEY`.
@@ -447,11 +447,11 @@ For long output, use `| head -N` or `2>&1 | grep KEY`.
 
 For uncertain cases, ask via inline interaction (`ask_questions`) and keep conversation flow:
 
-1. **Unknown target** → ask: "Please choose target: cute"
-2. **No RUN and unclear operation** → ask: "Compile-only / codegen-only / compile-and-run?"
-3. **GPU selection** → show GPU state and ask which GPU to use
-4. **After compile failure** → ask whether to run `make clean` and rebuild
-5. **Unclear debug direction** → ask whether to inspect AST / type inference / codegen / value numbering
+1. **Unknown target** => ask: "Please choose target: cute"
+2. **No RUN and unclear operation** => ask: "Compile-only / codegen-only / compile-and-run?"
+3. **GPU selection** => show GPU state and ask which GPU to use
+4. **After compile failure** => ask whether to run `make clean` and rebuild
+5. **Unclear debug direction** => ask whether to inspect AST / type inference / codegen / value numbering
 
 ---
 
