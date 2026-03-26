@@ -1737,7 +1737,11 @@ tdma
     ;
 
 dma_attrib
-    : dma_attrib SWIZZLE swiz_mode { $1.sw_mode = $3; $$ = $1; }
+    : dma_attrib SWIZZLE swiz_mode {
+        $1.sw_mode = $3;
+        $1.explicit_swizzle = true;
+        $$ = $1;
+      }
     | dma_attrib SPARSE { $1.is_sparse = true; $$ = $1; }
     | dma_attrib SPARSE LT integer_value COL integer_value GT {
         $1.is_sparse = true;
@@ -2009,7 +2013,7 @@ mma_stmt
       }
     | IDENTIFIER ASSIGN MMA LOAD SWIZZLE swiz_mode sync_type chunkat_expr {
         auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
-        auto op = AST::Make<AST::MMAOperation>($8, fexpr, $7, $6);
+        auto op = AST::Make<AST::MMAOperation>($8, fexpr, $7, $6, true);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }

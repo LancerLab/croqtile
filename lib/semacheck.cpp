@@ -192,6 +192,7 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     pending_async.clear();
     waited_async.clear();
     scope_pred_stack.clear();
+    shared_tensor_producers.clear();
   }
   TryPushScopePredicate(n);
   return true;
@@ -1054,6 +1055,16 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   }
 #endif
 
+  if (auto dst = dyn_cast<AST::ChunkAt>(n.GetTo())) {
+    auto fsty = GetSpannedType(n.GetFrom()->GetType());
+    auto tsty = GetSpannedType(dst->GetType());
+    if (fsty && tsty && tsty->GetStorage() == Storage::SHARED &&
+        (fsty->GetStorage() == Storage::GLOBAL ||
+         fsty->GetStorage() == Storage::DEFAULT)) {
+      shared_tensor_producers[InScopeName(dst->RefSymbol())] = &n;
+    }
+  }
+
   return true;
 }
 
@@ -1062,20 +1073,47 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: break;
   case AST::MMAOperation::Load: {
-    // Check swizzle consistency between DMA and MMA load
-    // Find the corresponding DMA operation that loads to shared memory
+    // Keep explicit mma.load swizzles consistent with the DMA/TMA that fills
+    // the referenced shared-memory tensor.
     auto load_from = op.LoadFrom();
     if (load_from && isa<AST::ChunkAt>(load_from)) {
-      auto ref_sym = load_from->RefSymbol();
-      // Try to find a DMA that writes to this symbol
-      // This is a simplified check - in a full implementation, we'd track all
-      // DMAs For now, we just validate that the swizzle value is valid
       auto mma_swizzle = op.GetSwizzleMode();
       auto swiz_set = CCtx().TargetSwizzleModes();
       if (!swiz_set.empty() && !swiz_set.count(mma_swizzle)) {
         Error1(n.LOC(),
                "Invalid swizzle value in MMA load: " + STR(mma_swizzle) + ".");
         return false;
+      }
+
+      if (op.HasExplicitSwizzle()) {
+        auto it =
+            shared_tensor_producers.find(InScopeName(load_from->RefSymbol()));
+        if (it != shared_tensor_producers.end()) {
+          auto* dma = it->second;
+          auto tensor_name = load_from->RefSymbol();
+          auto dma_label = dma->IsTMA() ? "TMA" : "DMA";
+          if (!dma->HasExplicitSwizzle() &&
+              dma->GetSwizzleMode() == SwizMode::NONE) {
+            dma->SetSwizzleMode(mma_swizzle);
+            dma->AddNote("swizzle_inferred_from_mma", STR(mma_swizzle));
+            Note(n.LOC(), std::string("inferred ") + dma_label + " swizzle '" +
+                              STR(mma_swizzle) + "' for tensor '" +
+                              tensor_name +
+                              "' from explicit mma.load swizzle.");
+          } else if (dma->GetSwizzleMode() != mma_swizzle) {
+            auto origin =
+                dma->HasExplicitSwizzle()
+                    ? (std::string("explicit ") + dma_label + " swizzle '")
+                    : (std::string("previously inferred ") + dma_label +
+                       " swizzle '");
+            Warning(n.LOC(), std::string("explicit mma.load swizzle '") +
+                                 STR(mma_swizzle) + "' conflicts with " +
+                                 origin + STR(dma->GetSwizzleMode()) +
+                                 "' for tensor '" + tensor_name + "'.");
+            Note(dma->LOC(), std::string(dma_label) + " affecting tensor '" +
+                                 tensor_name + "' is here.");
+          }
+        }
       }
 
       // Provide guidance on TILE_K constraints

@@ -2470,15 +2470,17 @@ struct Select : public Node, public TypeIDProvider<Select> {
 
 struct DMAAttribute {
   SwizMode sw_mode = SwizMode::NONE;
+  bool explicit_swizzle = false;
   bool zfill = false;
   bool is_sparse = false;
   bool multicast = false;
   int sparse_n = 0;
   int sparse_m = 0;
-  DMAAttribute(SwizMode swiz = SwizMode::NONE, bool zf = false, bool sp = false,
-               int sp_n = 0, int sp_m = 0, bool mc = false)
-      : sw_mode(swiz), zfill(zf), is_sparse(sp), multicast(mc), sparse_n(sp_n),
-        sparse_m(sp_m) {}
+  DMAAttribute(SwizMode swiz = SwizMode::NONE, bool explicit_swiz = false,
+               bool zf = false, bool sp = false, int sp_n = 0, int sp_m = 0,
+               bool mc = false)
+      : sw_mode(swiz), explicit_swizzle(explicit_swiz), zfill(zf),
+        is_sparse(sp), multicast(mc), sparse_n(sp_n), sparse_m(sp_m) {}
 };
 
 struct DMAAsync {
@@ -2557,6 +2559,8 @@ public:
   bool IsSparse() const { return attr.is_sparse; }
   bool IsOOBZeroFill() const { return attr.zfill; }
   SwizMode GetSwizzleMode() const { return attr.sw_mode; }
+  bool HasExplicitSwizzle() const { return attr.explicit_swizzle; }
+  void SetSwizzleMode(SwizMode sm) { attr.sw_mode = sm; }
   const std::pair<int, int> GetSparsePattern() const {
     return {attr.sparse_n, attr.sparse_m};
   }
@@ -2641,7 +2645,8 @@ public:
     ptr<ChunkAt> ld_expr;
     ptr<Expr> future;
     bool async;
-    SwizMode swiz_mode; // 128, 64, or 32; default 128
+    SwizMode swiz_mode; // NONE, 32, 64, or 128; default NONE
+    bool explicit_swizzle;
   };
   struct ExecInfo {
     ExecMethod method;
@@ -2677,8 +2682,8 @@ public:
       : tag(Fill), info(FillInfo{n, e, is_decl, t, nullptr}) {}
 
   MMAOperation(const ptr<ChunkAt>& e, const ptr<Expr>& fu, bool a = false,
-               SwizMode swizzle = SwizMode::B128)
-      : tag(Load), info(LoadInfo{e, fu, a, swizzle}) {}
+               SwizMode swizzle = SwizMode::NONE, bool explicit_swizzle = false)
+      : tag(Load), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
   MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
                const ptr<Expr>& r, bool sp = false)
@@ -2866,6 +2871,12 @@ public:
     return l_info.swiz_mode;
   }
 
+  bool HasExplicitSwizzle() const {
+    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    auto l_info = std::get<1>(info);
+    return l_info.explicit_swizzle;
+  }
+
   void SetSwizzleMode(SwizMode sm) {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
@@ -2883,7 +2894,8 @@ public:
     case Load: {
       auto l_info = std::get<1>(info);
       return Make<MMAOperation>(CloneP(l_info.ld_expr), CloneP(l_info.future),
-                                l_info.async, l_info.swiz_mode);
+                                l_info.async, l_info.swiz_mode,
+                                l_info.explicit_swizzle);
     }
     case Exec: {
       auto e_info = std::get<2>(info);

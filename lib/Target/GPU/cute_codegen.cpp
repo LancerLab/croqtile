@@ -204,6 +204,14 @@ bool CuteCodeGen::HasWGMMAInFunction() const {
   return false;
 }
 
+namespace {
+size_t SharedAlignmentBytes(const Choreo::CompilationContext& ctx,
+                            SwizMode swizzle_mode) {
+  return std::max(ctx.GetMemoryAlignmentByte(Storage::SHARED),
+                  SwizzleAlignmentByte(swizzle_mode));
+}
+} // namespace
+
 const AST::MMAOperation*
 CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   if (!n) return nullptr;
@@ -2487,6 +2495,35 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   if (emit_launch) {
     tma_future_count = 0;
 
+    auto required_shared_align = [&]() -> size_t {
+      size_t alignment = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
+      auto collect = [&](auto&& self, const ptr<AST::Node>& node) -> void {
+        if (!node) return;
+        if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
+          for (auto& item : mn->values) self(self, item);
+          return;
+        }
+        if (auto mma = dyn_cast<AST::MMA>(node)) {
+          auto op = mma->GetOperation();
+          if (!op || op->Tag() != AST::MMAOperation::Load) return;
+          alignment = std::max(
+              alignment, SharedAlignmentBytes(CCtx(), op->GetSwizzleMode()));
+          return;
+        }
+        if (auto block = dyn_cast<AST::Block>(node)) {
+          self(self, block->GetBody());
+          return;
+        }
+        if (auto if_else = dyn_cast<AST::IfElseBlock>(node)) {
+          self(self, if_else->GetThenBody());
+          self(self, if_else->GetElseBody());
+          return;
+        }
+      };
+      collect(collect, n.GetBody());
+      return alignment;
+    }();
+
     ValueItem cur_spm_size = sbe::nu(0);
     ValueItem ring_start = sbe::nu(0);
     ValueItem ring_size = sbe::nu(0);
@@ -2534,8 +2571,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
       hs << h_indent << "cudaFuncSetAttribute(" << device_fn
          << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
-         << ValueSTR(cur_spm_size) << " + ("
-         << CCtx().GetMemoryAlignmentByte(Storage::SHARED) << " - 1));\n";
+         << ValueSTR(cur_spm_size) << " + (" << required_shared_align
+         << " - 1));\n";
       set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
     };
 
@@ -2586,8 +2623,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     bool explicit_smem = false;
     if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
       // TODO: conservative padding. To be optimized.
-      auto align = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
-      hs << ", " << ValueSTR(cur_spm_size) << " + (" << align << " - 1)";
+      hs << ", " << ValueSTR(cur_spm_size) << " + (" << required_shared_align
+         << " - 1)";
       explicit_smem = true;
     }
     if (stream_name != "") {
@@ -2657,8 +2694,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ds << d_indent << "auto " << device_fn
          << "__runtime_shared_buffer__ = "
             "reinterpret_cast<char*>(aligned_up_ptr<"
-         << CCtx().GetMemoryAlignmentByte(Storage::SHARED) << " * 8>("
-         << device_fn << "__runtime_shared_buffer__raw));\n";
+         << required_shared_align << " * 8>(" << device_fn
+         << "__runtime_shared_buffer__raw));\n";
       if (!sbe::ceq(cur_spm_size, sbe::nu(0)) && cgi.HasAsyncDMA(fname)) {
         ds << d_indent << "auto " << device_fn
            << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>("
@@ -3394,8 +3431,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     auto f_stride = GenStrides(f_ca, transp_config);
     auto t_stride = GenStrides(t_ca);
 
-    // Use swizzle value only if explicitly specified, otherwise use 0 (no
-    // swizzle)
     auto swizzle_mode = n.GetSwizzleMode();
 
     bool use_tail_copy_g2s =
@@ -4231,7 +4266,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           cute_major_order = "cute::SM90::GMMA::Major::K";
         }
       }
-      // Get swizzle value from MMA operation (default 128)
+      // Get swizzle value from MMA operation (default NONE / NS)
       auto swizzle_val = op.GetSwizzleMode();
       std::string swizzle_enum;
       std::string sparse_layout_suffix;
@@ -4240,7 +4275,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       case SwizMode::B32: swizzle_enum = "WGMMA_Swizzle::B32"; break;
       case SwizMode::B64: swizzle_enum = "WGMMA_Swizzle::B64"; break;
       case SwizMode::B128: swizzle_enum = "WGMMA_Swizzle::B128"; break;
-      default: swizzle_enum = "WGMMA_Swizzle::B128"; break;
+      default: swizzle_enum = "WGMMA_Swizzle::NS"; break;
       }
       switch (swizzle_val) {
       case SwizMode::NONE: sparse_layout_suffix = "INTER"; break;
