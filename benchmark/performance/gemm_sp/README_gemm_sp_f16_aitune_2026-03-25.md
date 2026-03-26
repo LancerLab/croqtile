@@ -5,25 +5,38 @@ Problem size: M=4096, N=8192, K=8192 (structured 2:4 sparsity).
 
 ## Shipped Kernels
 
-| Kernel | TFLOPS | HW Eff. | Key Optimization |
-|--------|--------|---------|------------------|
-| iter137 | 543 | 35.9% | 1p2c 3-stage + vec2 metadata + hoisted __ldg + unroll24 + ftz |
-| iter143 | 655 | 43.3% | TK128 + TMA metadata staging + split RHS TMA + B128 LHS swizzle + 4 WGMMAs/batch |
+| Kernel | TFLOPS | HW Eff. | Type | Key Optimization |
+|--------|--------|---------|------|------------------|
+| iter120 | 434 | 28.7% | .co | 1p2c + 3-stage pipeline (first structural breakthrough) |
+| iter134 | 490 | 32.4% | .cu | 3-stage + vec2 meta + L2 promo + stmatrix |
+| iter135 | 525 | 34.7% | .cu | + hoisted metadata __ldg (overlap with TMA) |
+| iter137 | 543 | 35.9% | .cu | + unroll24 + ftz (organic best) |
+| iter143 | 655 | 43.3% | .cu | TK128 + TMA metadata + split RHS TMA + B128 swizzle (overall best) |
 
 Baseline on main: **368 TFLOPS** (1p1c, swizzle64, TK64, 2-stage).
 Best result: **655 TFLOPS** (+78% over baseline, 43.3% HW efficiency).
 
 ## Build & Run
 
-Both shipped kernels are `.cu` files with self-contained `run.sh` scripts.
-Each `run.sh` compiles and runs in one step:
+### .cu kernels (iter134, iter135, iter137, iter143)
+
+Self-contained subfolders with `run.sh` scripts that compile and run in one step:
 
 ```bash
-# iter137 (543 TFLOPS) — organic optimization milestone
+bash benchmark/performance/gemm_sp/gemm_sp_f16_aitune_2026-03-25_iter134_base/run.sh
+bash benchmark/performance/gemm_sp/gemm_sp_f16_aitune_2026-03-25_iter135_meta_hoist/run.sh
 bash benchmark/performance/gemm_sp/gemm_sp_f16_aitune_2026-03-25_iter137/run.sh
-
-# iter143 (655 TFLOPS) — best result
 bash benchmark/performance/gemm_sp/gemm_sp_f16_aitune_2026-03-25_iter143/run.sh
+```
+
+### .co kernel (iter120)
+
+Compiled with the Choreo compiler (requires `make build` first):
+
+```bash
+./choreo -gs -t cute -arch=sm_90a --use-warpspec --use-prepack --wgmma-split-batch --wgmma-wait-depth=2 --stmatrix \
+  benchmark/performance/gemm_sp/gemm_sp_f16_aitune_2026-03-25_iter120.co \
+  -o /tmp/iter120.cute.result && bash /tmp/iter120.cute.result --execute
 ```
 
 ### Options
