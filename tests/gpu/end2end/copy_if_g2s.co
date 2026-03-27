@@ -25,7 +25,7 @@ __co__ auto copy_tail_m(f16 [M_TAIL, K_FULL] input) {
     TM = (TILE_M < remain_m) ? TILE_M : remain_m;
 
     dma.copy.swiz<128>
-      input.view(TILE_M, TILE_K).from(base_m, 0) => tile.subspan(TM, TILE_K);
+      input.view(TM, TILE_K).from(base_m, 0) => tile;
     dma.copy tile.subspan(TM, TILE_K) => output.view(TM, TILE_K).from(base_m, 0);
   }
 
@@ -44,7 +44,7 @@ __co__ auto copy_tail_k(f16 [M_FULL, K_TAIL] input) {
     TK = (TILE_K < remain_k) ? TILE_K : remain_k;
 
     dma.copy.swiz<128>
-      input.view(TILE_M, TILE_K).from(0, base_k) => tile.subspan(TILE_M, TK);
+      input.view(TILE_M, TK).from(0, base_k) => tile;
     dma.copy tile.subspan(TILE_M, TK) => output.view(TILE_M, TK).from(0, base_k);
   }
 
@@ -66,7 +66,7 @@ __co__ auto copy_tail_mk(f16 [M_BOTH, K_BOTH] input) {
     TK = (TILE_K < remain_k) ? TILE_K : remain_k;
 
     dma.copy.swiz<128>
-      input.view(TILE_M, TILE_K).from(base_m, base_k) => tile.subspan(TM, TK);
+      input.view(TM, TK).from(base_m, base_k) => tile;
     dma.copy tile.subspan(TM, TK) => output.view(TM, TK).from(base_m, base_k);
   }
 

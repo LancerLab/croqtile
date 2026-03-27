@@ -27,6 +27,7 @@ __co__ auto mem_reuse0(u8 [K, N] i0, u8 [K, N] i1) {
       output_s.at(i, q + 128) += smem2.data.at(i, q + 128);
     }
 
+    sync.shared;
     dma.copy output_s => output.chunkat(p, _);
   }
 

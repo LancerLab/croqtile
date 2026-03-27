@@ -3360,13 +3360,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                          lconfig.group_count.y * lconfig.group_count.z;
       auto thr_count_vi =
           InProducer() ? inner_thr_count : inner_thr_count * group_count;
-      if (VIIsInt(thr_count_vi) && VIIsInt(ca->GetBlockShape().ValueAt(1))) {
+      if (VIIsInt(thr_count_vi) && VIIsInt(fty->GetShape().ValueAt(1))) {
         size_t thr_count = *VIInt(thr_count_vi);
         BaseType elem_type = plan.tail_copy_kind == TailCopyKind::G2S
                                  ? f_sty->ElementType()
                                  : t_sty->ElementType();
         size_t elem_byte = SizeOf(elem_type);
-        size_t tile_n = *VIInt(ca->GetBlockShape().ValueAt(1));
+        size_t tile_n = *VIInt(fty->GetShape().ValueAt(1));
         constexpr size_t bytes_per_copy = 16;
         if (bytes_per_copy % elem_byte == 0) {
           size_t elems_per_copy = bytes_per_copy / elem_byte;
@@ -3439,10 +3439,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     Shape f_mds_shape =
         (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape());
-    if (use_tail_copy) f_mds_shape = f_ca->GetBlockShape();
+    Shape f_ca_shape = f_ca->GetBlockShape();
+    if (use_tail_copy) f_mds_shape = t_ca->GetBlockShape();
     Shape t_mds_shape = fty->GetShape();
-    if (use_tail_copy) t_mds_shape = f_ca->GetBlockShape();
-
+    if (use_tail_copy) t_mds_shape = t_ca->GetBlockShape();
     std::optional<TiledCopyEntry> tail_copy_entry =
         tiled_copy_plan.tail_copy_helper_entry;
     bool use_tail_copy_helper = use_tail_copy && tail_copy_entry.has_value() &&
@@ -3576,7 +3576,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                       << entry.val_layout.second << ">(" << f_mds_name << ", "
                       << t_mds_name << ", [&](const auto& __coord) { return "
                       << "cute::elem_less(__coord, cute::make_shape("
-                      << ShapeSTR(fty->GetShape(), true) << ")); });\n";
+                      << ShapeSTR(f_ca_shape, true) << ")); });\n";
         } else {
           IndStream() << "choreo::copy_if_s2g<"
                       << NameBaseType(f_sty->ElementType()) << ", "
@@ -3586,7 +3586,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                       << entry.val_layout.second << ">(" << f_mds_name << ", "
                       << t_mds_name << ", [&](const auto& __coord) { return "
                       << "cute::elem_less(__coord, cute::make_shape("
-                      << ShapeSTR(fty->GetShape(), true) << ")); });\n";
+                      << ShapeSTR(f_ca_shape, true) << ")); });\n";
         }
       } else if (is_subbyte_copy) {
         const auto f_byte = GenTensorDecl(

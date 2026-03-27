@@ -19,13 +19,13 @@ __co__ void test_copy_if_g2s(f16 [M, K] input) {
     TK = (TILE_K < remain_k) ? TILE_K : remain_k;
 
     dma.copy.swiz<128>.zfill
-      input.view(TILE_M, TILE_K).from(base_m, 0) => s_tail_m.subspan(TM, TILE_K);
+      input.view(TM, TILE_K).from(base_m, 0) => s_tail_m;
 
     dma.copy.swiz<128>.zfill
-      input.view(TILE_M, TILE_K).from(0, base_k) => s_tail_k.subspan(TILE_M, TK);
+      input.view(TILE_M, TK).from(0, base_k) => s_tail_k;
 
     dma.copy.swiz<128>.zfill
-      input.view(TILE_M, TILE_K).from(base_m, base_k) => s_tail_mk.subspan(TM, TK);
+      input.view(TM, TK).from(base_m, base_k) => s_tail_mk;
   }
 }
 

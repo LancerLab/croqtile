@@ -57,8 +57,8 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
       mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
         dma.copy.swiz<128>.zfill
-          lhs.view(MATMUL_WARP_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K)
-            => sA.subspan(TILE_M, MATMUL_TILE_K); // [64, 128] => [TILE_M, 128]
+          lhs.view(TILE_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K)
+            => sA; // [TILE_M, 128] => [64, 128]
         tma.copy.swiz<128>
           rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(eid # block_n, iv_k) => sB;
 
@@ -77,7 +77,7 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
       // masked mma store fragment mc
       // mma.store mc, output.view(TILE_M, MATMUL_WARP_N).from(seg_start + iv_m * MATMUL_WARP_M, block_n * MATMUL_WARP_N);
       mma.store mc, sC;
-      dma.copy sC => output.view(TILE_M, MATMUL_WARP_N).from(seg_start + iv_m * MATMUL_WARP_M, block_n * MATMUL_WARP_N);
+      dma.copy sC.subspan(TILE_M, MATMUL_WARP_N) => output.view(MATMUL_WARP_M, MATMUL_WARP_N).from(seg_start + iv_m * MATMUL_WARP_M, block_n * MATMUL_WARP_N);
     }
   }
 }
