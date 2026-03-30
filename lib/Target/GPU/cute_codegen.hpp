@@ -198,11 +198,10 @@ private:
   std::deque<std::string> recent_tma_tx_bytes;
   bool saw_explicit_mma_commit = false;
   bool wgmma_arrive_state_declared = false;
-  bool pending_mbarrier_full_event_array = false;
-  std::string pending_mbarrier_full_event_name;
   std::set<std::string> cluster_trigger_events_;
-  bool in_producer = false; // hack
-  bool in_consumer = false; // hack
+  bool has_analyzed_warpspec = false;
+  bool warpspec_wgmma_arrived = false;
+  AST::InThreadsBlock* current_inthreads = nullptr;
   struct BaseScaleAccumInfo {
     std::string frag_sym;
     std::string frag_expr;
@@ -529,30 +528,42 @@ private:
 
   const std::string EmitSpannedArith(AST::Expr& e) const;
 
-  bool InProducer() {
-    if (!CCtx().UseWarpSpec()) return false;
-    return in_producer;
+  bool IsWarpSpecActive() const {
+    return CCtx().UseWarpSpec() || has_analyzed_warpspec ||
+           cgi.GetFunctionTrait(fname).has_warpspec_pattern;
   }
 
-  bool InConsumer() {
-    if (!CCtx().UseWarpSpec()) return false;
-    return in_consumer;
+  bool InSpecWarp() const {
+    return IsWarpSpecActive() && current_inthreads &&
+           current_inthreads->HasActiveThreads() &&
+           current_inthreads->inthreads_level == ParallelLevel::GROUPx4;
   }
 
-  bool UseSingleThreadProducerScope() {
-    return CCtx().UseWarpSpec() && CCtx().SingleThreadProducer();
-  }
-
-  bool GuardWarpSpecProducerOpsIndividually() {
-    return CCtx().UseWarpSpec() && !CCtx().SingleThreadProducer();
-  }
-
-  bool NeedWarpSpecGroupX4SyncForCurrentScope() {
-    if (!CCtx().UseWarpSpec() || bdim_level != ParallelLevel::GROUPx4)
+  bool ScopeAlreadySingleThreadForLevel(ParallelLevel level) const {
+    if (!current_inthreads || !current_inthreads->HasScopeThreadMask())
       return false;
-    if (InConsumer()) return true;
-    if (InProducer()) return GuardWarpSpecProducerOpsIndividually();
-    return false;
+    auto& mask = current_inthreads->GetScopeThreadMask();
+    int64_t unit_size;
+    switch (level) {
+    case ParallelLevel::GROUPx4: unit_size = 128; break;
+    case ParallelLevel::GROUP: unit_size = 32; break;
+    default: unit_size = (int64_t)mask.size(); break;
+    }
+    for (int64_t start = 0; start < (int64_t)mask.size(); start += unit_size) {
+      int64_t count = 0;
+      int64_t end = std::min(start + unit_size, (int64_t)mask.size());
+      for (int64_t i = start; i < end; ++i)
+        if (mask[i]) ++count;
+      if (count > 1) return false;
+    }
+    return true;
+  }
+
+  // In warpspec mode, use wg_barrier.sync() instead of __syncthreads()
+  // because __syncthreads() requires all threads in the block, which would
+  // deadlock when only a subset (one warpgroup) is in scope.
+  bool NeedWarpSpecGroupX4SyncForCurrentScope() {
+    return IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4;
   }
 };
 

@@ -959,10 +959,23 @@ named_event_decls
           auto decl = cast<AST::NamedVariableDecl>(sub);
           auto sym_name = decl->name_str;
           symtab.AddSymbol(sym_name, MakeEventType($1->Get()));
-          // override the data type
           decl->mem = cast<AST::Memory>(cast<AST::Memory>($1->Clone()));
         }
         $$ = $3;
+      }
+    | storage_qual EVENT LT num_expr GT event_decls {
+        int64_t tc = static_cast<int64_t>($4->Val());
+        for (auto sub : $6->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(sub);
+          auto sym_name = decl->name_str;
+          symtab.AddSymbol(sym_name, MakeEventType($1->Get(), tc));
+          decl->mem = cast<AST::Memory>(cast<AST::Memory>($1->Clone()));
+          if (auto dt = dyn_cast<AST::DataType>(decl->type)) {
+            dt->event_thread_count = tc;
+            dt->ReGenSemaType();
+          }
+        }
+        $$ = $6;
       }
     ;
 

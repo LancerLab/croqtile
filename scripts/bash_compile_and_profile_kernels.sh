@@ -344,7 +344,7 @@ for kernel_path in "${kernels[@]}"; do
   if [[ -n "${arch}" ]]; then
     compile_cmd+=(-t cute "-arch=${arch}")
   fi
-  append_flag_if_needed "${kernel_path}" "--use-warpspec" "warpspec" compile_cmd
+  # append_flag_if_needed "${kernel_path}" "--use-warpspec" "warpspec" compile_cmd
   append_flag_if_needed "${kernel_path}" "--use-prepack" "prepack" compile_cmd
 
   echo "==> [compile] ${rel_path}"

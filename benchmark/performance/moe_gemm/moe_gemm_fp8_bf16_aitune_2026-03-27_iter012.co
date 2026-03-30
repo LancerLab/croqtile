@@ -182,7 +182,6 @@ int main(int argc, char** argv) {
   auto res_h = choreo::make_spandata<choreo::bf16>(M, N);
   cudaStream_t stream = nullptr;
 
-  // lhs_h.fill(1.0f);
   lhs_h.fill_random(0, 2);
   rhs_h.fill_random(0, 2);
   scale_a_h.fill_random(1, 3);

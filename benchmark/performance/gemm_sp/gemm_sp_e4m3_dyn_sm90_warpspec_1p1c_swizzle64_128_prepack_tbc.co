@@ -76,8 +76,8 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
     shared event full[SPMM_STAGES], empty[SPMM_STAGES];
     shared f8_e4m3 [SPMM_STAGES * SPMM_WARP_M, SPMM_PACKED_TILE_K] lhs_load_s;
     shared f8_e4m3 [SPMM_STAGES * SPMM_WARP_N, SPMM_TILE_K] rhs_load_s;
-    parallel p1 by 2 : group-4 {
-      inthreads.async (p1 == 0) {
+    parallel p1 by 2 : group-4, t by 128 : thread {
+      inthreads.async (p1 == 0 && t == 0) {
         foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
           stage = iv_k % SPMM_STAGES;
           wait empty[stage];

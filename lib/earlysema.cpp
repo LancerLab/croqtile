@@ -930,12 +930,14 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       Error1(n.LOC(),
              "`" + n.name_str + "' must be annotated as a mutable type.");
 
-    // update the scope/storage for event types
+    // update the scope/storage for event types, preserving thread_count
     if (auto evty = dyn_cast<EventArrayType>(tty)) {
-      tty = MakeEventArrayType(n.mem->Get(), evty->Dimensions());
+      auto tc = evty->event->GetThreadCount();
+      tty = MakeEventArrayType(n.mem->Get(), evty->Dimensions(), tc);
       SetNodeType(*n.type, tty);
-    } else if (isa<EventType>(tty)) {
-      tty = MakeEventType(n.mem->Get());
+    } else if (auto et = dyn_cast<EventType>(tty)) {
+      auto tc = et->GetThreadCount();
+      tty = MakeEventType(n.mem->Get(), tc);
       SetNodeType(*n.type, tty);
     }
 
@@ -1762,7 +1764,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     FCtx(fname).GetFutureBufferInfo().emplace(
         InScopeName(n.future), DMABufferInfo{to_sym, from_kind, to_kind});
   } else if (n.IsAsync()) {
-    if (n.HasEvent() && CCtx().UseWarpSpec()) {
+    if (n.HasEvent()) {
       auto event = n.Event();
       if (!AST::IsSymbolOrArrayRef(*event))
         Error1(n.LOC(), "expect a symbol/array reference but got '" +
@@ -1778,9 +1780,6 @@ bool EarlySemantics::Visit(AST::DMA& n) {
         Error1(event->LOC(),
                "expect an event or event array but got '" + PSTR(ety) + "'.");
       }
-    } else if (n.HasEvent() && !CCtx().UseWarpSpec()) {
-      Error1(n.LOC(),
-             "async dma/tma with event is only supported in warpspec mode.");
     } else
       Error1(n.LOC(), "forbid to associated async dma without a named future "
                       "or a named event.");

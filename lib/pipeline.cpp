@@ -1,4 +1,5 @@
 #include "pipeline.hpp"
+#include "active_threads.hpp"
 #include "codegen_prepare.hpp"
 #include "colors.hpp"
 #include "earlysema.hpp"
@@ -132,8 +133,13 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   if (CCtx().TargetSupportMemAlloc() && CCtx().MemReuse())
     AddStage<MemoryReuse>();
 
+  // compute active thread counts for inthreads scopes (before semacheck
+  // so the checker can validate events with thread count info)
+  AddStage<ActiveThreadsAnalysis>();
+
   // apply the semantic check
   AddStage<SemaChecker>();
+
   return *this;
 }
 

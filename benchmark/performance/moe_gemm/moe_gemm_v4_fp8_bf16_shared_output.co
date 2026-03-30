@@ -27,12 +27,13 @@
 #error "MATMUL_TILE_M must equal MATMUL_WARP_M"
 #endif
 
-#define MATMUL_DEFAULT_M 384
+#define MATMUL_DEFAULT_TOKENS 512
+#define TOPK 8
+#define MATMUL_DEFAULT_M (MATMUL_DEFAULT_TOKENS * TOPK)
 #define MATMUL_DEFAULT_N 512
-#define MATMUL_DEFAULT_K 512
+#define MATMUL_DEFAULT_K 2048
 
-
-#define EXPERTS 32
+#define EXPERTS 256
 
 __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
                    global f32 [M, DIV_BLK_K] scale_a,

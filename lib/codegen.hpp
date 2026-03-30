@@ -136,6 +136,43 @@ struct FuncTrait {
   bool multiple_parallelby = false;
   bool has_tma = false;
   bool has_async_dma = false;
+  bool has_warpspec_pattern = false;
+
+  // Per-event participation: OR of active thread vectors from all usage scopes.
+  std::map<std::string, std::vector<bool>> event_participation;
+
+  void RecordEventUsage(const std::string& event_name,
+                        const std::vector<bool>& mask) {
+    auto it = event_participation.find(event_name);
+    if (it == event_participation.end()) {
+      event_participation[event_name] = mask;
+    } else {
+      auto& existing = it->second;
+      for (size_t i = 0; i < std::min(existing.size(), mask.size()); ++i)
+        existing[i] = existing[i] || mask[i];
+    }
+  }
+
+  int64_t GetEventParticipation(const std::string& event_name) const {
+    auto it = event_participation.find(event_name);
+    if (it == event_participation.end()) return -1;
+    int64_t count = 0;
+    for (bool b : it->second)
+      if (b) ++count;
+    return count;
+  }
+
+  struct EventDeclInfo {
+    std::string name;
+    int64_t explicit_tc; // explicit event<N>, -1 if unspecified
+    location loc;
+  };
+  std::vector<EventDeclInfo> event_decls;
+
+  void RecordEventDecl(const std::string& name, int64_t tc,
+                       const location& loc) {
+    event_decls.push_back({name, tc, loc});
+  }
 };
 
 struct MMAInfo {
