@@ -640,6 +640,17 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     auto old_ec = error_count;
+    if (auto spty = dyn_cast<SpannedType>(lty)) {
+      // disambiguite here
+      auto rop = n.GetR();
+      auto index = AST::Make<AST::MultiValues>(rop->LOC(), ", ", MakeExpr(rop));
+      n.SetR(AST::Make<AST::DataAccess>(
+          n.LOC(), cast<AST::Identifier>(n.GetL()), index));
+      n.SetForm(AST::Expr::Reference);
+      n.GetR()->accept(*this);
+      SetNodeType(n, NodeType(*n.GetR()));
+      return true;
+    }
     if (!isa<ArrayType>(lty))
       Error1(n.LOC(), "in operation \"" + n.op +
                           "\": expect an array but got " + PSTR(lty) + ".");
@@ -2566,7 +2577,7 @@ bool EarlySemantics::Visit(AST::WhileBlock& n) {
 bool EarlySemantics::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
   if (auto ref = n.pred->GetReference(); ref) {
-    if (auto c = dyn_cast<AST::Call>(ref); isa<UnknownType>(c->GetType()))
+    if (auto c = dyn_cast<AST::Call>(ref); c && isa<UnknownType>(c->GetType()))
       n.pred->SetType(MakeBooleanType()); // assume it derives boolean
     return true;
   }
