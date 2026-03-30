@@ -678,9 +678,10 @@ public:
   Form GetForm() const { return t; }
   void SetForm(const Form& form) {
     // the form must be set after operand
-    if (form == Reference)
+    if (form == Reference) {
       assert(!isa<Expr>(value_r));
-    else if (form == Unary)
+      op = Op::Ref;
+    } else if (form == Unary)
       assert(value_r);
     else if (form == Binary)
       assert(value_r && value_l);
@@ -3717,7 +3718,7 @@ inline const ptr<Expr> MakeIntExpr(const location& l, int val) {
   return e;
 }
 
-inline const ptr<Expr> MakeExpr(const ptr<Node> n) {
+inline const ptr<Expr> MakeExpr(const ptr<Node>& n) {
   if (auto e = dyn_cast<Expr>(n))
     return e;
   else {

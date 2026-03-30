@@ -1137,12 +1137,21 @@ bool ShapeInference::Visit(AST::DMA& n) {
   }
 
   if (SSTab().IsDeclared(n.future)) {
-    assert(
-        cast<PlaceHolderType>(SSTab().LookupSymbol(n.future))->GetBaseType() ==
-        BaseType::FUTURE);
-    SymbolRebindNum(SSTab().InScopeName(n.future) + ".span", cur_vn);
-    SSTab().ModifySymbolType(n.future, n.GetType());
-    SSTab().ModifySymbolType(n.future + ".span", MakeMDSpanType(s));
+    auto ty = SSTab().LookupSymbol(n.future);
+    if (auto phty = dyn_cast<PlaceHolderType>(ty);
+        phty && phty->GetBaseType() == BaseType::FUTURE) {
+      SymbolRebindNum(SSTab().InScopeName(n.future) + ".span", cur_vn);
+      auto fty = cast<FutureType>(n.GetType());
+      fty->SetPHSet();
+      SSTab().ModifySymbolType(n.future, fty);
+      SSTab().ModifySymbolType(n.future + ".span", MakeMDSpanType(s));
+    } else {
+      auto fty = dyn_cast<FutureType>(ty);
+      if (!fty || !fty->IsPHSet()) {
+        Error1(n.LOC(), "symbol `" + n.future + "' has been declared already.");
+        return false;
+      }
+    }
   } else {
     std::string f_span = n.future + ".span";
     SymbolAliasNum(SSTab().ScopedName(f_span), cur_vn);

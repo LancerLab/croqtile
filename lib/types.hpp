@@ -2191,9 +2191,14 @@ struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
   explicit FutureType(const ptr<SpannedType>& s, bool a)
       : AsyncType(BaseType::FUTURE), psty(s), async(a) {}
   const ptr<Type> CloneImpl() const override {
-    return std::make_shared<FutureType>(cast<SpannedType>(psty->Clone()),
-                                        async);
+    auto fty =
+        std::make_shared<FutureType>(cast<SpannedType>(psty->Clone()), async);
+    return fty;
   }
+  // placeholder set type
+  // TODO: any better design?
+  bool IsPHSet() const { return HasNote("phset"); }
+  void SetPHSet() { AddNote("phset"); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return psty->HasSufficientInfo(); }
   const std::string Name() const override { return "future"; }

@@ -641,7 +641,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto rty = NodeType(*n.GetR());
     auto old_ec = error_count;
     if (auto spty = dyn_cast<SpannedType>(lty)) {
-      // disambiguite here
+      // disambiguite elemof as dataaccess
       auto rop = n.GetR();
       auto index = AST::Make<AST::MultiValues>(rop->LOC(), ", ", MakeExpr(rop));
       n.SetR(AST::Make<AST::DataAccess>(
@@ -1648,11 +1648,16 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     return true;
   }
 
-  auto sty = GetSpannedType(NodeType(*n.from));
+  auto sty = GetSpannedType(NodeType(*n.GetFrom()));
+  if (!sty) {
+    Error1(n.GetFrom()->LOC(), "Expected a spanned or future type, but got " +
+                                   PSTR(NodeType(*n.GetFrom())) + ".");
+    return false;
+  }
 
   ptr<SpannedType> tty = nullptr;
   if (!isa<AST::Memory>(n.to)) {
-    tty = dyn_cast<SpannedType>(NodeType(*n.to));
+    tty = dyn_cast<SpannedType>(NodeType(*n.GetTo()));
     if (!tty) {
       Error1(n.to->LOC(),
              "The DMA destination is neither storage identifier nor span.");
@@ -1688,20 +1693,47 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     // rewrite the placeholder type
     if (SSTab().IsDeclared(n.future)) {
       auto ptype = dyn_cast<PlaceHolderType>(GetSymbolType(n.future));
-      if (!ptype || ptype->GetBaseType() != BaseType::FUTURE) {
+      auto ftype = dyn_cast<FutureType>(GetSymbolType(n.future));
+      if (!ptype || ptype->GetBaseType() == BaseType::FUTURE) {
+        ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".span");
+        ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".data");
+        auto spanned_ty = MakeRankedSpannedType(sty->GetShape().Rank(),
+                                                sty->ElementType(), sto);
+        ModifySymbolType(n.future + ".data", spanned_ty);
+        ModifySymbolType(n.future + ".span",
+                         spanned_ty->GetMDSpanType()->Clone());
+        if (n.IsSparse()) ModifySymbolType(n.future + ".mdata", spanned_ty);
+        auto fty = MakeFutureType(spanned_ty, n.IsAsync());
+        fty->SetPHSet();
+        ModifySymbolType(n.future, fty);
+      } else if (ftype && ftype->IsPHSet()) {
+        auto fsty = GetSpannedType(ftype);
+        if (fsty->GetShape().Rank() != sty->GetShape().Rank()) {
+          Error1(n.LOC(),
+                 "`" + n.future +
+                     "' has been declared with an inconsistant data rank(" +
+                     std::to_string(fsty->GetShape().Rank()) + " vs. " +
+                     std::to_string(sty->GetShape().Rank()) + ").");
+        }
+        if (fsty->ElementType() != sty->ElementType()) {
+          Error1(n.LOC(),
+                 "`" + n.future +
+                     "' has been declared with an inconsistant element type(" +
+                     STR(fsty->ElementType()) + " vs. " +
+                     STR(sty->ElementType()) + ").");
+        }
+        if (fsty->GetStorage() != sty->GetStorage()) {
+          Error1(n.LOC(),
+                 "`" + n.future +
+                     "' has been declared with an inconsistant data storage(" +
+                     STR(fsty->GetStorage()) + " vs. " +
+                     STR(sty->GetStorage()) + ").");
+        }
+      } else {
         Error1(n.LOC(), "symbol `" + n.future + "' has been declared already.");
         VST_DEBUG(dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__
                          << ".\n");
       }
-      ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".span");
-      ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".data");
-      auto spanned_ty = MakeRankedSpannedType(sty->GetShape().Rank(),
-                                              sty->ElementType(), sto);
-      ModifySymbolType(n.future + ".data", spanned_ty);
-      ModifySymbolType(n.future + ".span",
-                       spanned_ty->GetMDSpanType()->Clone());
-      if (n.IsSparse()) ModifySymbolType(n.future + ".mdata", spanned_ty);
-      ModifySymbolType(n.future, MakeFutureType(spanned_ty, n.IsAsync()));
     } else {
       auto spanned_ty = MakeRankedSpannedType(sty->GetShape().Rank(),
                                               sty->ElementType(), sto);
