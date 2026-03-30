@@ -69,8 +69,8 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
       mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
         dma.copy.swiz<128>.zfill
-          lhs.view(MATMUL_WARP_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K)
-            => sA.subspan(TILE_M, MATMUL_TILE_K); // [64, 128] => [TILE_M, 128]
+          lhs.view(TILE_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K)
+            => sA; // [64, 128] => [TILE_M, 128]
         tma.copy.swiz<128>
           rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(eid # block_n, iv_k) => sB;
 
@@ -182,8 +182,8 @@ int main(int argc, char** argv) {
   auto res_h = choreo::make_spandata<choreo::bf16>(M, N);
   cudaStream_t stream = nullptr;
 
-  lhs_h.fill(1.0f);
-  // lhs_h.fill_random(0, 2);
+  // lhs_h.fill(1.0f);
+  lhs_h.fill_random(0, 2);
   rhs_h.fill_random(0, 2);
   scale_a_h.fill_random(1, 3);
   scale_b_h.fill_random(1, 3);
