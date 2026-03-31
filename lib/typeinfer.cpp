@@ -1,6 +1,7 @@
 #include "typeinfer.hpp"
 
 #include "ast.hpp"
+#include "colors.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"
 
@@ -156,8 +157,13 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
       }
     }
     if (CCtx().ShowInferredTypes()) {
-      dbgs() << "Function:  " << SSTab().InScopeName(f->name)
-             << ", Type: " << AST::TYPE_STR(*f) << "\n";
+      dbgs() << color::out(color::kBoldGreen) << "Function:  "
+             << color::out(color::kReset) << SSTab().InScopeName(f->name)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(AST::TYPE_STR(*f),
+                                    color::stdoutHasColor())
+             << "\n";
     }
   } else if (isa<AST::DMA>(&n) || isa<AST::NamedVariableDecl>(&n) ||
              isa<AST::Assignment>(&n)) {
@@ -412,9 +418,15 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   }
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << ((AST::istypeof<FutureType>(&n)) ? "Future" : "Symbol");
-    dbgs() << ":    " << InScopeName(n.name_str) << ", Type: " << PSTR(nty);
-    dbgs() << "\n";
+    bool is_future = AST::istypeof<FutureType>(&n);
+    dbgs() << color::out(is_future ? color::kBoldMagenta : color::kBoldCyan)
+           << (is_future ? "Future" : "Symbol")
+           << ":    " << color::out(color::kReset)
+           << InScopeName(n.name_str)
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(PSTR(nty), color::stdoutHasColor())
+           << "\n";
   }
 
   return true;
@@ -447,8 +459,13 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Partial:   " << InScopeName(n.name_str)
-           << ", Type: " << AST::TYPE_STR(n) << "\n";
+    dbgs() << color::out(color::kBoldYellow) << "Partial:   "
+           << color::out(color::kReset) << InScopeName(n.name_str)
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(AST::TYPE_STR(n),
+                                  color::stdoutHasColor())
+           << "\n";
   }
 
   // The node only occurs when decl named mdspan.
@@ -541,8 +558,12 @@ bool TypeInference::Visit(AST::Assignment& n) {
     AssignSymbolWithType(n.LOC(), n.GetName() + ".span", sty->GetMDSpanType());
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Symbol:    " << InScopeName(n.GetName())
-           << ", Type: " << PSTR(ty) << "\n";
+    dbgs() << color::out(color::kBoldCyan) << "Symbol:    "
+           << color::out(color::kReset) << InScopeName(n.GetName())
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(PSTR(ty), color::stdoutHasColor())
+           << "\n";
   }
 
   cur_type.reset();
@@ -594,12 +615,17 @@ bool TypeInference::Visit(AST::Parameter& p) {
   cur_param_types.push_back(p.GetType());
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Parameter: ";
+    dbgs() << color::out(color::kBoldBlue) << "Parameter: "
+           << color::out(color::kReset);
     if (p.HasSymbol())
       dbgs() << InScopeName(p.sym->name);
     else
       dbgs() << "(unnamed)";
-    dbgs() << ", Type: " << AST::TYPE_STR(p) << "\n";
+    dbgs() << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(AST::TYPE_STR(p),
+                                  color::stdoutHasColor())
+           << "\n";
   }
 
   cur_type.reset();
@@ -993,10 +1019,15 @@ bool TypeInference::Visit(AST::DMA& n) {
   }
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Future:    "
+    dbgs() << color::out(color::kBoldMagenta) << "Future:    "
+           << color::out(color::kReset)
            << ((n.future.empty()) ? SSTab().ScopeName() + "(anon)"
                                   : InScopeName(n.future))
-           << ", Type: " << AST::TYPE_STR(n) << "\n";
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(AST::TYPE_STR(n),
+                                  color::stdoutHasColor())
+           << "\n";
   }
 
   cur_type.reset();
@@ -1035,8 +1066,13 @@ bool TypeInference::Visit(AST::MMA& n) {
     AssignSymbolWithType(n.LOC(), fut_sym + ".span",
                          sty->GetMDSpanType()->Clone());
     if (CCtx().ShowInferredTypes()) {
-      dbgs() << "Future:    " << InScopeName(fut_sym)
-             << ", Type: " << AST::TYPE_STR(n) << "\n";
+      dbgs() << color::out(color::kBoldMagenta) << "Future:    "
+             << color::out(color::kReset) << InScopeName(fut_sym)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(AST::TYPE_STR(n),
+                                    color::stdoutHasColor())
+             << "\n";
     }
   } break;
   case AST::MMAOperation::Exec: {
@@ -1080,8 +1116,14 @@ bool TypeInference::Visit(AST::MMA& n) {
     auto mdspan_ty = res_sty->GetMDSpanType()->Clone();
     ModifySymbolType(acc->LOC(), acc_sym + ".span", mdspan_ty);
     if (CCtx().ShowInferredTypes()) {
-      dbgs() << "Symbol:    " << InScopeName(acc_sym)
-             << ", Type: " << PSTR(GetSymbolType(acc->LOC(), acc_sym)) << "\n";
+      dbgs() << color::out(color::kBoldCyan) << "Symbol:    "
+             << color::out(color::kReset) << InScopeName(acc_sym)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(
+                    PSTR(GetSymbolType(acc->LOC(), acc_sym)),
+                    color::stdoutHasColor())
+             << "\n";
     }
   } break;
   case AST::MMAOperation::Scale:
@@ -1103,16 +1145,26 @@ bool TypeInference::Visit(AST::ParallelBy& n) {
 
   AssignSymbolWithType(n.LOC(), n.BPV()->name, n.BPV()->GetType());
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Bounded:   " << InScopeName(n.BPV()->name)
-           << ", Type: " << AST::TYPE_STR(n.BPV()) << "\n";
+    dbgs() << color::out(color::kGreen) << "Bounded:   "
+           << color::out(color::kReset) << InScopeName(n.BPV()->name)
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(AST::TYPE_STR(n.BPV()),
+                                  color::stdoutHasColor())
+           << "\n";
   }
 
   for (auto sym : n.AllSubPVs()) {
     auto id = cast<AST::Identifier>(sym);
     AssignSymbolWithType(sym->LOC(), id->name, id->GetType());
     if (CCtx().ShowInferredTypes()) {
-      dbgs() << "Bounded:   " << InScopeName(id->name)
-             << ", Type: " << AST::TYPE_STR(sym) << "\n";
+      dbgs() << color::out(color::kGreen) << "Bounded:   "
+             << color::out(color::kReset) << InScopeName(id->name)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(AST::TYPE_STR(sym),
+                                    color::stdoutHasColor())
+             << "\n";
     }
   }
   return true;
@@ -1143,15 +1195,24 @@ bool TypeInference::Visit(AST::WithIn& n) {
 
   if (CCtx().ShowInferredTypes()) {
     if (n.with) {
-      dbgs() << "Bounded:   ";
-      dbgs() << InScopeName(n.with->name)
-             << ", Type: " << AST::TYPE_STR(*n.with) << "\n";
+      dbgs() << color::out(color::kGreen) << "Bounded:   "
+             << color::out(color::kReset) << InScopeName(n.with->name)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(AST::TYPE_STR(*n.with),
+                                    color::stdoutHasColor())
+             << "\n";
     }
     if (n.with_matchers) {
       for (auto pid : n.with_matchers->values) {
         auto id = cast<AST::Identifier>(pid);
-        dbgs() << "Bounded:   " << InScopeName(id->name)
-               << ", Type: " << AST::TYPE_STR(*id) << "\n";
+        dbgs() << color::out(color::kGreen) << "Bounded:   "
+               << color::out(color::kReset) << InScopeName(id->name)
+               << color::out(color::kDim) << ", Type: "
+               << color::out(color::kReset)
+               << color::colorizeType(AST::TYPE_STR(*id),
+                                      color::stdoutHasColor())
+               << "\n";
       }
     }
   }

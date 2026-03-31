@@ -61,7 +61,6 @@ namespace Choreo {
 #include "ast.hpp"
 #include "symtab.hpp"
 #include "scanner.hpp"
-#include <unistd.h>
 
 using namespace Choreo;
 
@@ -71,20 +70,12 @@ extern location loc;
 extern AST::Program root;
 extern Choreo::SymbolTable symtab;
 
-const char* color_red = "\033[31m";
-const char* color_blue = "\033[34m";
-const char* color_reset = "\033[0m";
-const char* color_green = "\033[32m";
-
-static inline bool shell_supports_colors() {
-	const char* term = getenv("TERM");
-	return term && (strcmp(term, "xterm-256color") == 0
-							 || strcmp(term, "xterm") == 0);
-}
-
 static inline bool should_use_colors() {
-  return isatty(fileno(stdout)) && shell_supports_colors();
+  return color::stderrHasColor();
 }
+static const char* color_red = color::kRed;
+static const char* color_blue = color::kBlue;
+static const char* color_reset = color::kReset;
 
 
 static Parser::symbol_type yylex(Scanner &scanner) {

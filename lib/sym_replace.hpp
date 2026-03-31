@@ -21,9 +21,9 @@ namespace Choreo {
 // and shape infering.
 class SymReplace : public VisitorWithScope {
 private:
-  static const char* cyan;
-  static const char* blue;
-  static const char* reset;
+  static constexpr const char* cyan = color::kYellow;
+  static constexpr const char* blue = color::kBlue;
+  static constexpr const char* reset = color::kReset;
   static const char* pass_name;
 
   void TraceEachVisit(const AST::Node& n, bool show_node = false) const {
