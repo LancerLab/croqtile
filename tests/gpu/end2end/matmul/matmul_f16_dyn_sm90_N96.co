@@ -4,9 +4,6 @@
 #include <cstring>
 #include <cstdlib>
 
-#define H800_PCIE_PEAK_F16_TFLOPS 1513
-#define H800_PCIE_PEAK_F8_TFLOPS 3026
-
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 96
 #define MATMUL_TILE_M 64
