@@ -1,0 +1,118 @@
+// RUN: choreo -t topscc %s -es -o - | FileCheck %s
+
+// ====================================================================
+// Test 1: All SOP types individually (matching CUTE sops.co pattern)
+// - View with default strides:  offset = 14*32 + 13*1 = 461
+// - View with custom strides:   offset = 11*7  + 10*2 = 97
+// - SubSpan.at:                  offset = 1*2*32 + 2*11*1 = 86
+// - Chunkat:                     offset = p*32*32 + p*16*1
+// ====================================================================
+__co__ void sops_all_types(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b1 = a.view(16, 4).from(14, 13);
+    b2 = a.view(17, 3 : 7, 2).from(11, 10);
+    b3 = a.subspan(2, 11).at(1, 2);
+    b4 = a.chunkat(p, p);
+  }
+}
+
+// CHECK: b1 = a + 461;
+// CHECK: b2 = a + 97;
+// CHECK: b3 = a + 86;
+// CHECK: b4 = a + (__tops_bid_x() * 1024 + __tops_bid_x() * 16);
+
+// ====================================================================
+// Test 2: Single-expression chain: view().from().chunkat() in DMA
+// View(32,16) from(10,5) → offsets (10, 5).
+// Chunkat by 2 → block_shape [16, 8].
+// MDS offset per dim: {10 + p*16, 5 + p*8}
+// ====================================================================
+__co__ void view_chunkat_dma_chain(f32 [64, 32] a) {
+  parallel p by 2 : block
+  parallel t by 1 {
+    f = dma.copy a.view(32, 16).from(10, 5).chunkat(p, p) => shared;
+  }
+}
+
+// CHECK: int __slice_offset0__a_2_f__buf__[] = {(int)((__tops_bid_x() * 16 + 10)), (int)((__tops_bid_x() * 8 + 5))};
+// CHECK: tops::slice(*f.get_ctx(), __mds1_f__buf__, __mds0_a, __slice_offset0__a_2_f__buf__);
+
+// ====================================================================
+// Test 3: Single-expr chain: view with strides + chunkat in DMA
+// View(16,8:12,3) from(17,18) chunkat by 2 → blk [8, 4].
+// MDS offset per dim: {17 + p*8, 18 + p*4}
+// ====================================================================
+__co__ void view_stride_chunkat_dma_chain(f32 [64, 32] a) {
+  parallel p by 2 : block
+  parallel t by 1 {
+    f = dma.copy a.view(16, 8 : 12, 3).from(17, 18).chunkat(p, p) => shared;
+  }
+}
+
+// CHECK: int __slice_offset1__a_2_f__buf__[] = {(int)((__tops_bid_x() * 8 + 17)), (int)((__tops_bid_x() * 4 + 18))};
+// CHECK: tops::slice(*f.get_ctx(), __mds3_f__buf__, __mds2_a, __slice_offset1__a_2_f__buf__);
+
+// ====================================================================
+// Test 4: Multi-level chaining via assignment: view → chunkat → chunkat
+// b: view(64,32) from(10,5). strides [64,1]. offset = 10*64 + 5 = 645
+// c: chunkat by 4 → blk [16,8], strd [64,1]. offset = p*16*64 + p*8*1
+// d: chunkat by 4 → blk [4,2], strd [64,1]. offset = p*4*64 + p*2*1
+// ====================================================================
+__co__ void view_double_chunkat(f32 [128, 64] a) {
+  parallel p by 4 : block {
+    b = a.view(64, 32).from(10, 5);
+    c = b.chunkat(p, p);
+    d = c.chunkat(p, p);
+  }
+}
+
+// CHECK: b = a + 645;
+// CHECK: c = b + (__tops_bid_x() * 1024 + __tops_bid_x() * 8);
+// CHECK: d = c + (__tops_bid_x() * 256 + __tops_bid_x() * 2);
+
+// ====================================================================
+// Test 5: Subspan.at then view.from (cross-type chaining via assignment)
+// b: subspan(32,16).at(p,0). offset = p*32*32 + 0*16*1 = p*1024
+// c: view(16,8).from(5,3) on b. strides [32,1]. offset = 5*32 + 3 = 163
+// ====================================================================
+__co__ void subspan_then_view(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b = a.subspan(32, 16).at(p, 0);
+    c = b.view(16, 8).from(5, 3);
+  }
+}
+
+// CHECK: b = a + (__tops_bid_x() * 1024);
+// CHECK: c = b + 163;
+
+// ====================================================================
+// Test 6: View DMA in both directions (slice + deslice)
+// ====================================================================
+__co__ void view_dma_both_dirs(f32 [128, 64] inp, f32 [128, 64] outp) {
+  parallel p by 2 : block
+  parallel t by 1 {
+    shared f32 [64, 32] buf;
+    f = dma.copy inp.view(64, 32).from(10, 20) => buf;
+    g = dma.copy buf => outp.view(64, 32).from(30, 15);
+  }
+}
+
+// CHECK: int __slice_offset2__inp_2_buf[] = {(int)(10), (int)(20)};
+// CHECK: tops::slice(*f.get_ctx(), __mds5_buf, __mds4_inp, __slice_offset2__inp_2_buf);
+// CHECK: int __deslice_offset0__outp_2_buf[] = {(int)(30), (int)(15)};
+// CHECK: tops::deslice(*g.get_ctx(), __mds7_outp, __mds6_buf, __deslice_offset0__outp_2_buf);
+
+// ====================================================================
+// Test 7: View without .from() (zero offsets) + chunkat
+// b: view(32,16) no from → offset 0
+// c: chunkat by 2 → blk [16,8], strd [32,1]. offset = p*16*32 + p*8
+// ====================================================================
+__co__ void view_no_from(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b = a.view(32, 16);
+    c = b.chunkat(p, p);
+  }
+}
+
+// CHECK: b = a + 0;
+// CHECK: c = b + (__tops_bid_x() * 512 + __tops_bid_x() * 8);

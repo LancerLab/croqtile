@@ -25,8 +25,8 @@ __co__ auto foo(f32 [8, 8, 24] a) {
 
 // CODEGEN:     tops::mdspan __mds0_a(tops::Global, (float*)a, 8, 8, 24);
 // CODEGEN:     tops::mdspan __mds1_ans(tops::Global, (float*)ans, 8, 8, 24);
-// CODEGEN:     int __slice_offset0__a_2_ans[] = {(int)(__tops_tid_x() * 2), 0, 0};
-// CODEGEN:     int __deslice_offset0__ans_2_a[] = {(int)(__tops_tid_x() * 2), 0, 0};
+// CODEGEN:     int __slice_offset0__a_2_ans[] = {(int)((__tops_tid_x() * 2)), 0, 0};
+// CODEGEN:     int __deslice_offset0__ans_2_a[] = {(int)((__tops_tid_x() * 2)), 0, 0};
 // CODEGEN:     unsigned int __slice_shape1__a_2_ans[] = {2, 8, 24};
 // CODEGEN:     tops::event f__event__ = tops::slice_deslice_async(*f.get_ctx(), __mds1_ans, __mds0_a, __slice_offset0__a_2_ans, __slice_shape1__a_2_ans, __deslice_offset0__ans_2_a);
   
@@ -42,15 +42,15 @@ __co__ auto bar(f32 [8, 8, 24] a) {
 
 // CODEGEN-OPT: tops::mdspan __mds2_a(tops::Global, (float*)a, 8, 8, 24);
 // CODEGEN-OPT: tops::mdspan __mds3_ans(tops::Global, (float*)ans, 8, 8, 24);
-// CODEGEN-OPT: int __slice_offset0__a_2_ans[] = {0, (int)(__tops_tid_x() * 2), 0};
-// CODEGEN-OPT: int __deslice_offset0__ans_2_a[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN-OPT: int __slice_offset0__a_2_ans[] = {0, (int)((__tops_tid_x() * 2)), 0};
+// CODEGEN-OPT: int __deslice_offset0__ans_2_a[] = {0, (int)((__tops_tid_x() * 2)), 0};
 // CODEGEN-OPT: unsigned int __slice_shape1__a_2_ans[] = {8, 2, 24};
 // CODEGEN-OPT: tops::slice_deslice(*__choreo_anon_fut__0.get_ctx(), __mds3_ans, __mds2_a, __slice_offset0__a_2_ans, __slice_shape1__a_2_ans, __deslice_offset0__ans_2_a);
 
 // CODEGEN:     tops::mdspan __mds2_a(tops::Global, (float*)a, 8, 8, 24);
 // CODEGEN:     tops::mdspan __mds3_ans(tops::Global, (float*)ans, 8, 8, 24);
-// CODEGEN:     int __slice_offset1__a_2_ans[] = {0, (int)(__tops_tid_x() * 2), 0};
-// CODEGEN:     int __deslice_offset1__ans_2_a[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN:     int __slice_offset1__a_2_ans[] = {0, (int)((__tops_tid_x() * 2)), 0};
+// CODEGEN:     int __deslice_offset1__ans_2_a[] = {0, (int)((__tops_tid_x() * 2)), 0};
 // CODEGEN:     unsigned int __slice_shape2__a_2_ans[] = {8, 2, 24};
 // CODEGEN:     tops::slice_deslice(*__choreo_anon_fut__0.get_ctx(), __mds3_ans, __mds2_a, __slice_offset1__a_2_ans, __slice_shape2__a_2_ans, __deslice_offset1__ans_2_a);
 
@@ -68,13 +68,13 @@ __co__ auto foo_src(f32 [8, 8, 24] a) {
 }
 // CODEGEN-OPT: tops::mdspan __mds6_f(tops::Shared, (float*)f.data() + (__tops_tid_x() * 384), 2, 8, 24);
 // CODEGEN-OPT: tops::mdspan __mds7_ans(tops::Global, (float*)ans, 2, 8, 96);
-// CODEGEN-OPT: int __deslice_offset0__ans_2_f[] = {0, 0, (int)(__tops_tid_x() * 24)};
+// CODEGEN-OPT: int __deslice_offset0__ans_2_f[] = {0, 0, (int)((__tops_tid_x() * 24))};
 // CODEGEN-OPT: tops::deslice(*__choreo_anon_fut__1.get_ctx(), __mds7_ans, __mds6_f, __deslice_offset0__ans_2_f);
 
 // CODEGEN:     tops::mdspan __mds6_f(tops::Shared, (float*)f.data(), 8, 8, 24);
 // CODEGEN:     tops::mdspan __mds7_ans(tops::Global, (float*)ans, 2, 8, 96);
-// CODEGEN:     int __slice_offset2__f_2_ans[] = {(int)(__tops_tid_x() * 2), 0, 0};
-// CODEGEN:     int __deslice_offset2__ans_2_f[] = {0, 0, (int)(__tops_tid_x() * 24)};
+// CODEGEN:     int __slice_offset2__f_2_ans[] = {(int)((__tops_tid_x() * 2)), 0, 0};
+// CODEGEN:     int __deslice_offset2__ans_2_f[] = {0, 0, (int)((__tops_tid_x() * 24))};
 // CODEGEN:     unsigned int __slice_shape3__f_2_ans[] = {2, 8, 24};
 // CODEGEN:     tops::slice_deslice(*__choreo_anon_fut__1.get_ctx(), __mds7_ans, __mds6_f, __slice_offset2__f_2_ans, __slice_shape3__f_2_ans, __deslice_offset2__ans_2_f);
   
@@ -93,13 +93,13 @@ __co__ auto foo_dst(f32 [8, 8, 24] a) {
 
 // CODEGEN-OPT: tops::mdspan __mds10_f(tops::Shared, (float*)f.data(), 8, 8, 24);
 // CODEGEN-OPT: tops::mdspan __mds11_ans(tops::Global, (float*)ans + (__tops_tid_x() * 384), 8, 2, 24);
-// CODEGEN-OPT: int __slice_offset0__f_2_ans[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN-OPT: int __slice_offset0__f_2_ans[] = {0, (int)((__tops_tid_x() * 2)), 0};
 // CODEGEN-OPT: tops::slice(*__choreo_anon_fut__2.get_ctx(), __mds11_ans, __mds10_f, __slice_offset0__f_2_ans);
 
 // CODEGEN:     tops::mdspan __mds10_f(tops::Shared, (float*)f.data(), 8, 8, 24);
 // CODEGEN:     tops::mdspan __mds11_ans(tops::Global, (float*)ans, 32, 2, 24);
-// CODEGEN:     int __slice_offset3__f_2_ans[] = {0, (int)(__tops_tid_x() * 2), 0};
-// CODEGEN:     int __deslice_offset3__ans_2_f[] = {(int)(__tops_tid_x() * 8), 0, 0};
+// CODEGEN:     int __slice_offset3__f_2_ans[] = {0, (int)((__tops_tid_x() * 2)), 0};
+// CODEGEN:     int __deslice_offset3__ans_2_f[] = {(int)((__tops_tid_x() * 8)), 0, 0};
 // CODEGEN:     unsigned int __slice_shape4__f_2_ans[] = {8, 2, 24};
 // CODEGEN:     tops::slice_deslice(*__choreo_anon_fut__2.get_ctx(), __mds11_ans, __mds10_f, __slice_offset3__f_2_ans, __slice_shape4__f_2_ans, __deslice_offset3__ans_2_f);
 
@@ -122,8 +122,8 @@ __co__ auto fooo(f32 [8, 8, 24] a) {
 // CODEGEN:     auto anon_3 = __tops_tid_x() * 2 + __iv_o__elem__0;
 // CODEGEN:     tops::mdspan __mds12_a(tops::Global, (float*)a, 8, 8, 24);
 // CODEGEN:     tops::mdspan __mds13_ans(tops::Global, (float*)ans, 8, 8, 24);
-// CODEGEN:     int __slice_offset4__a_2_ans[] = {(int)(anon_2 * 1), 0, 0};
-// CODEGEN:     int __deslice_offset4__ans_2_a[] = {(int)(anon_3 * 1), 0, 0};
+// CODEGEN:     int __slice_offset4__a_2_ans[] = {(int)((__tops_tid_x() * 2 + __iv_o__elem__0)), 0, 0};
+// CODEGEN:     int __deslice_offset4__ans_2_a[] = {(int)((__tops_tid_x() * 2 + __iv_o__elem__0)), 0, 0};
 // CODEGEN:     unsigned int __slice_shape5__a_2_ans[] = {1, 8, 24};
 // CODEGEN:     tops::event f__event__ = tops::slice_deslice_async(*f.get_ctx(), __mds13_ans, __mds12_a, __slice_offset4__a_2_ans, __slice_shape5__a_2_ans, __deslice_offset4__ans_2_a);
   

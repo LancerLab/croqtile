@@ -56,7 +56,7 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK:   tops::mdspan __mds0_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
 // CHECK:   tops::mdspan __mds1_a_shared__buf__(tops::Shared, (choreo::half*)a_shared__buf__, 18, 5, 14, 64);
 // CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
-// CHECK:     int __slice_offset0__a_2_a_shared__buf__[] = {(int)(__tops_bid_x() * 18), (int)(__tops_bid_y() * 5), 0, 0};
+// CHECK:     int __slice_offset0__a_2_a_shared__buf__[] = {(int)((__tops_bid_x() * 18)), (int)((__tops_bid_y() * 5)), 0, 0};
 // CHECK:     tops::slice(*a_shared.get_ctx(), __mds1_a_shared__buf__, __mds0_a, __slice_offset0__a_2_a_shared__buf__);
 // CHECK:   } // single instance
 // CHECK:   __syncthreads();
@@ -66,7 +66,7 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK:   tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
 // CHECK:   tops::mdspan __mds3_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 18, 5, 2, 64);
 // CHECK:   if (__CHOREO_GROUP_SINGLE__(32)) {
-// CHECK:     int __slice_offset1__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 18), (int)(__tops_bid_y() * 5), (int)(__tops_tid_x() * 2), 0};
+// CHECK:     int __slice_offset1__a_2_a_local__buf__[] = {(int)((__tops_bid_x() * 18)), (int)((__tops_bid_y() * 5)), (int)((__tops_tid_x() * 2)), 0};
 // CHECK:     tops::slice(*a_local.get_ctx(), __mds3_a_local__buf__, __mds2_a, __slice_offset1__a_2_a_local__buf__);
 // CHECK:   } // single instance
 // CHECK:   __syncsubthreads();

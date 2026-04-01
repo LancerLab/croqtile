@@ -65,7 +65,7 @@ __co__ auto matmul(f16[M, K] lhs, f16[K, N] rhs) {
 // CHECK: unsigned int __pad_low_lhsS1[] = {0, 0};
 // CHECK: unsigned int __pad_high_lhsS1[] = {0, static_cast<unsigned int>((384 - K % 384))};
 // CHECK: unsigned int __pad_mid_lhsS1[] = {0, 0};
-// CHECK: int __slice_offset0__lhsS_2_lhsL__buf__[] = {(int)(anon_6 * 256) + (int)(0 * 256), 0 + (int)(__iv_kl__elem__0 * 384)};
+// CHECK: int __slice_offset0__lhsS_2_lhsL__buf__[] = {(int)(((__tops_tid_x() + __iv_ml__elem__0 * 4) * 256)), (int)((__iv_kl__elem__0 * 384))};
 // CHECK: unsigned int __slice_shape1__lhsS_2_lhsL__buf__[] = {256, static_cast<unsigned int>((K % 4608 % 384))};
 // CHECK: tops::event lhsL__event__ = tops::slice_pad_async(*lhsL.get_ctx(), __mds5_lhsL__buf__, __mds4_lhsS, __slice_offset0__lhsS_2_lhsL__buf__, __slice_shape1__lhsS_2_lhsL__buf__, __pad_low_lhsS1, __pad_high_lhsS1, __pad_mid_lhsS1, f32_to_f16(static_cast<float>(0)));
 // CHECK: lhsL.set_event(lhsL__event__);
@@ -77,7 +77,7 @@ __co__ auto matmul(f16[M, K] lhs, f16[K, N] rhs) {
 // CHECK: unsigned int __pad_low_lhsS2[] = {0, 0};
 // CHECK: unsigned int __pad_high_lhsS2[] = {0, static_cast<unsigned int>((384 - K % 384))};
 // CHECK: unsigned int __pad_mid_lhsS2[] = {0, 0};
-// CHECK: int __slice_offset1__lhsS_2_lhsL2__buf__[] = {(int)(anon_7 * 256) + (int)(0 * 256), 0 + (int)(__iv_kl__elem__0 * 384)};
+// CHECK: int __slice_offset1__lhsS_2_lhsL2__buf__[] = {(int)(((__tops_tid_x() + __iv_ml__elem__0 * 4) * 256)), (int)((__iv_kl__elem__0 * 384))};
 // CHECK: unsigned int __slice_shape2__lhsS_2_lhsL2__buf__[] = {256, static_cast<unsigned int>((K % 4608 % 384))};
 // CHECK: tops::slice_pad(*lhsL2.get_ctx(), __mds7_lhsL2__buf__, __mds6_lhsS, __slice_offset1__lhsS_2_lhsL2__buf__, __slice_shape2__lhsS_2_lhsL2__buf__, __pad_low_lhsS2, __pad_high_lhsS2, __pad_mid_lhsS2, f32_to_f16(static_cast<float>(0)));
 // CHECK: auto anon_8 = __iv_nl__elem__0 * 3 + __tops_tid_y();
@@ -88,7 +88,7 @@ __co__ auto matmul(f16[M, K] lhs, f16[K, N] rhs) {
 // CHECK: unsigned int __pad_low_rhsS3[] = {0, 0};
 // CHECK: unsigned int __pad_high_rhsS3[] = {static_cast<unsigned int>((384 - K % 384)), 0};
 // CHECK: unsigned int __pad_mid_rhsS3[] = {0, 0};
-// CHECK: int __slice_offset2__rhsS_2_rhsL__buf__[] = {0 + (int)(__iv_kl__elem__0 * 384), (int)(anon_8 * 1024) + (int)(0 * 1024)};
+// CHECK: int __slice_offset2__rhsS_2_rhsL__buf__[] = {(int)((__iv_kl__elem__0 * 384)), (int)(((__tops_tid_y() + __iv_nl__elem__0 * 3) * 1024))};
 // CHECK: unsigned int __slice_shape3__rhsS_2_rhsL__buf__[] = {static_cast<unsigned int>((K % 4608 % 384)), 1024};
 // CHECK: tops::event rhsL__event__ = tops::slice_pad_async(*rhsL.get_ctx(), __mds9_rhsL__buf__, __mds8_rhsS, __slice_offset2__rhsS_2_rhsL__buf__, __slice_shape3__rhsS_2_rhsL__buf__, __pad_low_rhsS3, __pad_high_rhsS3, __pad_mid_rhsS3, f32_to_f16(static_cast<float>(0)));
 // CHECK: rhsL.set_event(rhsL__event__);

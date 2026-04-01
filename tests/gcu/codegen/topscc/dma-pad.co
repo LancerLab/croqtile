@@ -58,7 +58,7 @@ __co__ auto foo1(s32 [N, M] a) {
 // CHECK:     unsigned int __pad_low_a3[] = {1, 0};
 // CHECK:     unsigned int __pad_high_a3[] = {0, 0};
 // CHECK:     unsigned int __pad_mid_a3[] = {0, 0};
-// CHECK:     int __slice_offset0__a_2_f1__buf__[] = {0, (int)(__tops_tid_x() * (M / 2))};
+// CHECK:     int __slice_offset0__a_2_f1__buf__[] = {0, (int)((M / 2 * __tops_tid_x()))};
 // CHECK:     unsigned int __slice_shape1__a_2_f1__buf__[] = {static_cast<unsigned int>(N), static_cast<unsigned int>((M / 2))};
 // CHECK:     tops::event f1__event__ = tops::slice_pad_async(*f1.get_ctx(), __mds7_f1__buf__, __mds6_a, __slice_offset0__a_2_f1__buf__, __slice_shape1__a_2_f1__buf__, __pad_low_a3, __pad_high_a3, __pad_mid_a3, -1);
 // CHECK:     f1.set_event(f1__event__);
@@ -73,7 +73,7 @@ __co__ auto foo1(s32 [N, M] a) {
 // CHECK:   } else {
 // CHECK:     tops::mdspan __mds10_f1(tops::Private, (int*)f1.data(), (N + 1), (M / 2));
 // CHECK:     tops::mdspan __mds11_res(tops::Global, (int*)res, (N + 1), M);
-// CHECK:     int __deslice_offset0__res_2_f1[] = {0, (int)(__tops_tid_x() * (M / 2))};
+// CHECK:     int __deslice_offset0__res_2_f1[] = {0, (int)((M / 2 * __tops_tid_x()))};
 // CHECK:     tops::deslice(*__choreo_anon_fut__2.get_ctx(), __mds11_res, __mds10_f1, __deslice_offset0__res_2_f1);
 // CHECK:   } // end DMA opt:
 // CHECK: }

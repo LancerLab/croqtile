@@ -1,0 +1,24 @@
+// RUN: choreo -t topscc %s -es -o - | FileCheck %s
+
+// Test 1: View with custom strides and from offsets
+// Shape [16, 8] with strides [12, 3]. Offset = 17 * 12 + 18 * 3 = 258
+__co__ void view_custom_stride(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b = a.view(16, 8: 12, 3).from(17, 18);
+  }
+}
+
+// CHECK: b = a + 258;
+
+// Test 2: View with custom strides + chained chunkat
+// Block shape = [8, 4], strides = [12, 3].
+// Offset for c = p * 8 * 12 + p * 4 * 3 = p * 96 + p * 12
+__co__ void view_stride_chunkat(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b = a.view(16, 8: 12, 3).from(17, 18);
+    c = b.chunkat(p, p);
+  }
+}
+
+// CHECK: b = a + 258;
+// CHECK: c = b + (__tops_bid_x() * 96 + __tops_bid_x() * 12);

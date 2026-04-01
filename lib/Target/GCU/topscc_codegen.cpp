@@ -450,8 +450,6 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
   auto& sops = ca->AllOperations();
   assert(!sops.empty());
 
-  std::vector<std::ostringstream> offsets;
-
   size_t sop_base = 0;
   if (auto li = ca->IndexOfLastSpanAs()) sop_base = *li + 1;
 
@@ -466,68 +464,79 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
     return {oss.str(), sz};
   }
 
-  // handle each chunkat inside a seqeunce like 'chunkat(a, b).chunkat(c)...'
+  // Handle each SOP in the chain via symbolic algebra.
+  // Dispatch is interface-based:
+  //   GetIndices non-null → index-based (Tiling/SubSpan/TileAt)
+  //   GetOffsets non-null → offset-based (View)
+  ValueList offsets;
+
   for (size_t sop_idx = sop_base; sop_idx < sops.size(); ++sop_idx) {
-    // span_as reshape operation would not affect index generation
     assert(!isa<AST::SOP::Reshape>(sops[sop_idx]));
 
-    // For each chunkat expression, The tiled-block's shape is cooked by shape
-    // inference. The block shape is different with the result shape of chunkat
-    // expression when using 'modspan', where the result shape represents the
-    // shape that applied mod (%) operation. Anyway, for offset, we only care
-    // about the tiled-block's shape
     auto& shape = sops[sop_idx]->GetBlockShape();
+    auto op = sops[sop_idx];
+    ValueList coords;
+    bool scale_by_shape = true;
 
-    std::vector<std::string> exprs;
-    // For each 'a, b, c, ...' inside 'chunkat(a, b, c, ...)', that 'b' inside
-    // 'chunkat(a, b, c, ...)' could be bounded var like b = {b0, b1} Therefore,
-    // we collect all the expressions first.
-    for (size_t pi = 0; pi < sops[sop_idx]->IndexNodes().size(); ++pi) {
-      auto p = sops[sop_idx]->IndexNodes()[pi];
-      // exprs[x] will perform multiplication operations with other values later
-      // thus the parent_op is `*`
-      auto idx_exprs =
-          SplitStringByDelimiter(OpExprSTR(p, "*", true, IsHost()));
-      for (size_t i = 0; i < idx_exprs.size(); ++i)
-        exprs.push_back(idx_exprs[i]);
+    if (op->GetIndices()) {
+      // Index-based SOPs (Tiling, SubSpan, TileAt): idx * block_shape.
+      // Per-node Opts carry pre-expanded bounded vars and preserve the
+      // ::__choreo_no_tiling__ symbol — collect them directly.
+      for (auto p : op->IndexNodes()) {
+        if (auto e = dyn_cast<AST::Expr>(p); e && e->Opts().HasVals()) {
+          for (auto& val : e->Opts().GetVals()) coords.push_back(val);
+        } else {
+          coords.push_back(sbe::sym(OpExprSTR(p, "*", true, IsHost())));
+        }
+      }
+      // Fall back to aggregated Opts when per-node collection doesn't
+      // match the block shape rank (e.g. bounded vars not yet expanded
+      // at the per-node level).
+      if (coords.size() != shape.DimCount()) {
+        if (auto idx_vals = op->GetIndices()->Opts(); idx_vals.HasVals())
+          coords = idx_vals.GetVals();
+      }
+    } else if (auto off = op->GetOffsets()) {
+      // Offset-based SOPs (View): offsets NOT scaled by block_shape
+      scale_by_shape = false;
+      for (auto p : off->AllValues()) {
+        if (auto e = dyn_cast<AST::Expr>(p); e && e->Opts().HasVals()) {
+          for (auto& val : e->Opts().GetVals()) coords.push_back(val);
+        } else {
+          coords.push_back(sbe::sym(OpExprSTR(p, "*", true, IsHost())));
+        }
+      }
+    } else {
+      // No indices or offsets — zero offset per dimension
+      coords = ValxN(sbe::nu(0), shape.DimCount());
     }
 
     if (auto tc = dyn_cast<TransposeConfig>(config)) {
-      assert(tc->dim_values.size() == exprs.size());
+      assert(tc->dim_values.size() == coords.size());
       assert(ca->TilingOperationCount() == 1);
     }
 
-#if 0
-    // the transpose operation requries an index array ???
-    std::vector<size_t> indices;
-    for (size_t i = 0; i < exprs.size(); ++i)
-      if (auto tc = dyn_cast<TransposeConfig>(config))
-        indices.push_back(tc->dim_values[i]);
+    // Accumulate per-dimension symbolic offsets across chained SOPs
+    if (offsets.empty()) offsets = ValxN(sbe::nu(0), coords.size());
+
+    for (size_t i = 0; i < coords.size(); ++i) {
+      if (sbe::ceq(coords[i], sbe::sym("::__choreo_no_tiling__")))
+        continue; // no-tiling dimension contributes zero
+      if (scale_by_shape)
+        offsets[i] = offsets[i] + coords[i] * shape.ValueAt(i);
       else
-        indices.push_back(i);
-#endif
-
-    // Generate the expression for single chunkat
-    // Note that we buffer all expressions of different chunkats by dimensions
-    offsets.resize(exprs.size());
-
-    for (size_t i = 0; i < exprs.size(); ++i) {
-      // combine 'a' and 'c' between expressions like 'chunkat(a, b).chunk(c,
-      // d)'
-      if (sop_idx > sop_base) offsets[i] << " + ";
-
-      if (exprs[i] == "__choreo_no_tiling__")
-        offsets[i] << "0";
-      else
-        offsets[i] << "(int)(" << exprs[i] << " * "
-                   << ValueSTR(shape.ValueAt(i)) << ")";
+        offsets[i] = offsets[i] + coords[i];
     }
   }
 
+  // Materialize symbolic offsets to string via ValueSTR
   std::ostringstream offset;
   for (size_t i = 0; i < offsets.size(); ++i) {
     if (i != 0) offset << ", ";
-    offset << offsets[i].str();
+    if (sbe::ceq(offsets[i], sbe::nu(0)))
+      offset << "0";
+    else
+      offset << "(int)(" << ValueSTR(offsets[i]) << ")";
   }
 
   if (split_8byte_dma_transfer) {
@@ -557,56 +566,42 @@ TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
   return GenOffset(ca, lidx.value());
 }
 
-// given i.sop(...).sop(...)..., generate the offset of the final span in the
-// original span. It is VALID if and only if the final span is
-// address-contiguous within the original span.
-// end_idx: the offset is computed by sop in range [0, end_idx).
+// given i.sop(...).sop(...)..., generate the flat element-offset of the final
+// span in the original span. Each SOP in [0, end_idx) contributes additively.
+//
+// Dispatch is based on the SOP interface, not concrete types:
+//   GetIndices non-null (Tiling/SubSpan/TileAt) → idx * blk * stride
+//   GetOffsets non-null (View)                  → off * stride
+//   Reshape                                     → boundary (skip)
 const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
                                            size_t end_idx) const {
   if (ca->NoOperation()) return "";
 
   end_idx = std::min(end_idx, ca->OpCount());
 
-  Shape outer_shape = GetSpannedType(GetSymbolType(ca->data->name))->GetShape();
-
   auto offset = sbe::nu(0);
 
-  // outer_shape is the shape of original span
-  // new_shape is the shape of tiled span
-  Shape new_shape;
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
-    if (isa<AST::SOP::Reshape>(sop)) {
-      outer_shape = sop->GetBlockShape();
-    } else {
-      new_shape = sop->GetBlockShape();
-      size_t i = 0;
-      for (auto p : sop->IndexNodes()) {
-        if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
-          const auto& vals = o.GetVals();
-          for (auto val : vals) {
-            auto outer_factor = sbe::nu(1);
-            if (outer_shape.Rank() > i + 1)
-              outer_factor = outer_shape.TrimDims(i + 1).ElementCountValue();
-            auto factor = new_shape.ValueAt(i) * outer_factor;
-            offset = offset + val * factor;
-            ++i;
-          }
-        } else {
-          auto idx_exprs =
-              SplitStringByDelimiter(OpExprSTR(p, "*", true, IsHost()));
-          for (auto i_expr : idx_exprs) {
-            ValueItem outer_factor = sbe::nu(1);
-            if (outer_shape.Rank() > i + 1)
-              outer_factor = outer_shape.TrimDims(i + 1).ElementCountValue();
-            auto factor = new_shape.ValueAt(i) * outer_factor;
-            offset = offset + sbe::sym(i_expr) * factor;
-            ++i;
-          }
-        }
-      }
-      outer_shape = new_shape;
+    if (isa<AST::SOP::Reshape>(sop)) continue;
+
+    auto strd = sop->GetBlockStrides();
+
+    if (auto indices = sop->GetIndices()) {
+      // Index-based SOPs (Tiling, SubSpan, TileAt):
+      //   offset += idx[dim] * block_shape[dim] * block_stride[dim]
+      auto& vals = indices->Opts().GetVals();
+      auto blk = sop->GetBlockShape();
+      for (size_t dim = 0; dim < vals.size(); ++dim)
+        offset += vals[dim] * blk.ValueAt(dim) * strd[dim];
+    } else if (auto off_mv = sop->GetOffsets()) {
+      // Offset-based SOPs (View):
+      //   offset += off[dim] * block_stride[dim]  (no block_shape)
+      auto& vals = off_mv->Opts().GetVals();
+      for (size_t dim = 0; dim < vals.size(); ++dim)
+        offset += vals[dim] * strd[dim];
     }
+    // else: SOP with neither indices nor offsets contributes zero.
   }
 
   return ValueSTR(offset);

@@ -1,0 +1,49 @@
+// RUN: choreo -t topscc %s -es -o - | FileCheck %s
+
+// Test 1: Direct assignment with view.from (default row-major strides)
+// For a[64, 32], default strides are [32, 1].
+// Offset = 10 * 32 + 5 * 1 = 325
+__co__ void view_basic(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b = a.view(32, 16).from(10, 5);
+  }
+}
+
+// CHECK: b = a + 325;
+
+// Test 2: DMA copy with view.from as source (generates slice with offset array)
+__co__ void view_dma_src(f32 [128, 64] data) {
+  parallel p by 2 : block
+  parallel t by 1 {
+    f = dma.copy data.view(64, 32).from(10, 20) => shared;
+  }
+}
+
+// CHECK: int __slice_offset0__data_2_f__buf__[] = {(int)(10), (int)(20)};
+// CHECK: tops::slice(*f.get_ctx(), __mds1_f__buf__, __mds0_data, __slice_offset0__data_2_f__buf__);
+
+// Test 3: DMA copy with view.from as destination (generates deslice with offset array)
+__co__ void view_dma_dst(f32 [128, 64] data) {
+  parallel p by 2 : block
+  parallel t by 1 {
+    shared f32 [64, 32] s_buf;
+    f = dma.copy s_buf => data.view(64, 32).from(10, 20);
+  }
+}
+
+// CHECK: int __deslice_offset0__data_2_s_buf[] = {(int)(10), (int)(20)};
+// CHECK: tops::deslice(*f.get_ctx(), __mds3_data, __mds2_s_buf, __deslice_offset0__data_2_s_buf);
+
+// Test 4: Chained view.from + chunkat
+// b has shape [32, 16] with strides [32, 1] from row-major [64, 32].
+// chunkat by 2 => block shape [16, 8], strides [32, 1].
+// Offset for c = p * 16 * 32 + p * 8 * 1 = p * 512 + p * 8
+__co__ void view_chunkat_chain(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b = a.view(32, 16).from(10, 5);
+    c = b.chunkat(p, p);
+  }
+}
+
+// CHECK: b = a + 325;
+// CHECK: c = b + (__tops_bid_x() * 512 + __tops_bid_x() * 8);
