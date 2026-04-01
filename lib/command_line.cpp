@@ -43,9 +43,23 @@ namespace Choreo {
 Option<bool>
     sim_sparse(OptionKind::User, "--sim", "-sim", false,
                "Enable simulated sparse DMA encode/decode (non-production).");
+// Enable host prepacked-u32 metadata path when generating device code.
+Option<bool>
+    use_prepack(OptionKind::User, "--use-prepack", "", false,
+                "Enable host prepacked-u32 metadata handling (prepack)");
+Option<bool>
+    use_prepack_v2(OptionKind::User, "--use-prepack-v2", "", false,
+                   "Enable host prepacked-v2 metadata (fully coalesced loads)");
 } // namespace Choreo
 Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
                                  "Generate source-level debug information.");
+Option<bool> target_generate_debug_info(
+    OptionKind::User, "--target-debug", "-tg", false,
+    "Generate target compiler debug information only.");
+Option<std::string> debug_line_path_mode(
+    OptionKind::User, "--debug-line-path", "", "relative",
+    "Set #line file path mode when '-g' is enabled (relative|absolute).",
+    "--debug-line-path=<relative|absolute>");
 
 Option<bool>
     del_comm(OptionKind::User, "--remove-comments", "-n", false,
@@ -91,6 +105,25 @@ Option<bool> warning_as_error(OptionKind::User, "-Werror", "", false,
                               "Make all warnings into errors.");
 Option<bool> disable_runtime_check(OptionKind::User, "--disable-runtime-check",
                                    "", false, "Disable all runtime checks.");
+Option<std::string> runtime_check_level(
+    OptionKind::User, "--runtime-check", "-rtc", "entry",
+    "Control runtime assertion insertion (each level is a superset of the "
+    "previous). "
+    "'entry' (default): host-side runtime_check at function entry only. "
+    "'low': entry + low-cost device-side hoist/use-site assertions. "
+    "'medium': entry + low/medium-cost device-side assertions. "
+    "'high': entry + all device-side assertions regardless of cost. "
+    "'all': same as 'high'. "
+    "'none': disable all runtime assertions.",
+    "--runtime-check=<none|entry|low|medium|high|all>");
+Option<bool> show_assess(
+    OptionKind::User, "--show-assess", "", false,
+    "Print a report of all generated assessments after the hoisting pass: "
+    "assessment inputs, final assertion sites, hoist locations, and "
+    "runtime cost estimates.");
+Option<bool> print_stats(
+    OptionKind::User, "--stats", "", false,
+    "Print aggregate assertion/assessment statistics after compilation.");
 Option<bool> disable_cuda_runtime_env_check(
     OptionKind::User, "--disable-cuda-runtime-env-check", "", false,
     "Do not emit cuda runtime enviroment check.");
@@ -178,9 +211,18 @@ Option<size_t> max_local_mem_capacity(
     OptionKind::Hidden, "--max-local-mem-capacity", "-fmax-local", 0,
     "Set the max local memory capacity (in bytes) per thread. 0 means use "
     "default value.");
-Option<bool> mem_default_aligned(OptionKind::Hidden, "--mem-default-aligned",
-                                 "-fmem_aligned", true,
-                                 "Use the default alignment in memory reuse.");
+Option<size_t> shared_mem_alignment(OptionKind::Hidden,
+                                    "--shared-mem-alignment", "-fsmem-align",
+                                    true,
+                                    "Set the alignment of shared memory.");
+Option<bool> use_warpspec(OptionKind::User, "--use-warpspec", "", false,
+                          "Enable warp-specialized synchronization for shared "
+                          "event/full-empty pipelines.");
+Option<bool> single_thread_producer(
+    OptionKind::User, "--single-thread-producer", "", true,
+    "When used with --use-warpspec, keep the producer inthreads scope single-"
+    "threaded. Set to false to instead single-guard producer TMA/event "
+    "operations individually.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -250,6 +292,25 @@ bool CommandLine::Parse(int argc, char** argv) {
     CCtx().SetApiMode(api);
   }
 
+  {
+    auto dlpm = ToLower(debug_line_path_mode.GetValue());
+    if (dlpm != "relative" && dlpm != "absolute") {
+      errs() << "Invalid --debug-line-path value: '"
+             << debug_line_path_mode.GetValue()
+             << "'. Supported values: relative, absolute.\n";
+      exit(1);
+    }
+    CCtx().SetDebugLinePathMode(dlpm == "absolute"
+                                    ? DebugLinePathMode::Absolute
+                                    : DebugLinePathMode::WorkspaceRelative);
+  }
+
+  if (generate_debug_info.GetValue() && target_generate_debug_info.GetValue()) {
+    errs() << "option '-g' cannot be used together with '-tg'. "
+              "Please choose exactly one mode.\n";
+    exit(1);
+  }
+
   if (pp_only) {
     if (no_pp) {
       errs() << "option '-E' can not work with '--no-preprocess'. Compilation "
@@ -272,6 +333,8 @@ bool CommandLine::Parse(int argc, char** argv) {
 
   // save the options to the global context
   CCtx().SetGenDebugInfo(generate_debug_info.GetValue());
+  CCtx().SetTargetDebugInfo(generate_debug_info.GetValue() ||
+                            target_generate_debug_info.GetValue());
   CCtx().SetDumpAst(dump_ast.GetValue());
   CCtx().SetNoCodegen(ncodegen.GetValue());
   CCtx().SetPrintPassNames(prt_pass.GetValue());
@@ -295,10 +358,50 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
-  CCtx().SetMemDefaultAligned(mem_default_aligned.GetValue());
+  CCtx().SetSharedMemAlignment(shared_mem_alignment.GetValue());
+  CCtx().SetUseWarpSpec(use_warpspec.GetValue());
+  CCtx().SetSingleThreadProducer(single_thread_producer.GetValue());
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
-  CCtx().SetDisableRuntimeCheck(disable_runtime_check.GetValue());
+
+  // --runtime-check=<none|entry|low|medium|high|all> controls assertion
+  // granularity and cost threshold. Each level is a superset of the previous:
+  //   entry  - host-side ENTRY assertions only (default, cheapest)
+  //   low    - entry + device-side hoist/use-site with LOW cost threshold
+  //   medium - entry + device-side hoist/use-site with MEDIUM cost threshold
+  //   high   - entry + device-side hoist/use-site with HIGH cost threshold
+  //   all    - same as high
+  //   none   - disable all runtime assertions
+  // --disable-runtime-check overrides to "none" for backward compatibility.
+  {
+    auto rtc = ToLower(runtime_check_level.GetValue());
+    if (disable_runtime_check.GetValue()) rtc = "none";
+
+    if (rtc == "none") {
+      CCtx().SetRuntimeCheckLevel("none");
+      CCtx().SetDisableRuntimeCheck(true);
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::HIGH);
+    } else if (rtc == "entry") {
+      CCtx().SetRuntimeCheckLevel("entry");
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::HIGH);
+    } else if (rtc == "low") {
+      CCtx().SetRuntimeCheckLevel("all");
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::LOW);
+    } else if (rtc == "medium") {
+      CCtx().SetRuntimeCheckLevel("all");
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::MEDIUM);
+    } else if (rtc == "high" || rtc == "all") {
+      CCtx().SetRuntimeCheckLevel("all");
+      CCtx().SetRuntimeCheckCostThreshold(AssertionCost::HIGH);
+    } else {
+      errs() << "error: unsupported --runtime-check value: '" << rtc
+             << "'. Use none, entry, low, medium, high, or all.\n";
+      return false;
+    }
+  }
+
+  CCtx().SetShowAssess(show_assess.GetValue());
+  CCtx().SetPrintStats(print_stats.GetValue());
   CCtx().SetDisableCudaRuntimeEnvCheck(
       disable_cuda_runtime_env_check.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());

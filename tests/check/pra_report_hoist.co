@@ -1,0 +1,45 @@
+// RUN: choreo -es --show-assess %s -o /dev/null 2>&1 | FileCheck %s
+//
+// --show-assess report for HOIST assertions (local variable def barrier).
+//
+// When the buffer index `j` is derived from a locally-computed mutable
+// variable, it is not visible at function entry.  The hoisting pass must
+// place the assertion in device code, after the assignment `int j = k + 1;`.
+//
+// The report must show:
+//   1. Assessment  : message and source location of each access.
+//   2. State       : type=HOIST, enabled=yes.
+//   3. Cost        : high / estimated >= 10000 (j is inside nested loops).
+//   4. Site        : location just after the NamedVariableDecl for j,
+//                    with emit-position "after".
+
+__co__ void foo(int k) {
+  parallel p by 8 {
+    shared s32 [4] buf;
+    mutable int j = k + 1;
+    mutable int sum = 0;
+    foreach l in [3]
+      sum = sum + j + l;
+    x = buf.at(j);
+  }
+}
+
+// Header.
+// CHECK: [assertions] function: foo  (2 assessed:  0 static-true,  0 static-false,  2 runtime)
+
+// ---- assertion [0]: lower-bound check ----
+// CHECK: [0] HOIST      enabled=yes  cost=high    estimated=10000
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}greater than or equal to 0
+// CHECK:      loc     : {{.*}}.co:
+// CHECK:      site    : {{.*}}.co:{{.*}}  (after )  [AST::NamedVariableDecl]
+
+// ---- assertion [1]: upper-bound check ----
+// CHECK: [1] HOIST      enabled=yes  cost=high    estimated=10000
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}less than 4
+// CHECK:      loc     : {{.*}}.co:
+// CHECK:      site    : {{.*}}.co:{{.*}}  (after )  [AST::NamedVariableDecl]
+
+// No guard line: j is not inside any if/else guard.
+// CHECK-NOT:      guard   :

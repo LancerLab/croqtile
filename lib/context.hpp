@@ -3,6 +3,7 @@
 
 // shared global context for a compilation process
 
+#include "assess.hpp"
 #include "loc.hpp"
 #include "symvals.hpp"
 #include "target.hpp"
@@ -10,10 +11,15 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 extern Choreo::location loc;
 
 namespace Choreo {
+
+namespace AST {
+struct Node;
+}
 
 enum class OutputKind {
   PreProcessedCode,
@@ -22,6 +28,11 @@ enum class OutputKind {
   TargetAssembly,
   TargetExecutable,
   ShellScript,
+};
+
+enum class DebugLinePathMode {
+  WorkspaceRelative,
+  Absolute,
 };
 
 inline bool RequiresE2ECompilation(OutputKind ok) {
@@ -177,15 +188,6 @@ struct RuntimeCheckEntry {
   std::map<std::string, std::string> notes;
 };
 
-// TODO: use assert experssions to replace string like entry
-struct Assertion {
-  ptr<sbe::SymbolicExpression> expr;
-
-  bool is_host;
-  location loc;
-  std::string message;
-};
-
 enum class MMAType { WMMA, CTMMA, WGMMA, EFMMA };
 // per-function context
 class FunctionContext {
@@ -193,7 +195,7 @@ private:
   FutureBufferInfo fbi;
   std::map<std::string, OptimizedValues> sym_values;
   std::vector<RuntimeCheckEntry> rt_checks;
-  std::vector<Assertion> assertions;
+  Assessor assessor;
   // TODO: consider to merge
   std::map<std::string, MMAType> frag_mma_type;
   std::map<std::string, std::string> MMA_policy_of_frag;
@@ -243,14 +245,18 @@ public:
   void AppendRtCheck(RuntimeCheckEntry rc) { rt_checks.push_back(rc); }
   std::vector<RuntimeCheckEntry>& GetRtChecks() { return rt_checks; }
 
-  void InsertAssertion(const ptr<sbe::SymbolicExpression>& ar,
-                       const location& l, const std::string& s,
-                       bool is_host = true) {
-    // the none computable expressions are ignored. verbose?
-    assert(IsComputable(ar));
-    assertions.push_back({ar, is_host, l, s});
+  const std::vector<Assertion>& GetAssertions() const {
+    return assessor.GetAssertions();
   }
-  const std::vector<Assertion>& GetAssertions() const { return assertions; }
+
+  std::vector<Assertion> GetAssertions(AssessType aty) const {
+    return assessor.GetAssertions(aty);
+  }
+
+  /// Bind a visitor and return the assessor for assessment calls.
+  Assessor& GetAssessor(Visitor& v) { return assessor.Bind(v); }
+  Assessor& GetAssessor() { return assessor; }
+  const Assessor& GetAssessor() const { return assessor; }
 
   // return `nullptr` if no memory reuse info
   ptr<DynMemReuseInfo> GetDynMemReuseInfo(const std::string& dev_func) const {
@@ -329,11 +335,37 @@ public:
   }
 };
 
+/// Aggregate statistics for assessments and assertions across all functions.
+struct AssessmentStats {
+  size_t total = 0;            // total assessments evaluated
+  size_t static_true = 0;      // resolved at compile time (always passes)
+  size_t static_false = 0;     // proven false at compile time (error/warning)
+  size_t runtime_total = 0;    // runtime assertions generated
+  size_t runtime_low = 0;      // runtime assertions with low  estimated cost
+  size_t runtime_medium = 0;   // runtime assertions with medium estimated cost
+  size_t runtime_high = 0;     // runtime assertions with high estimated cost
+  size_t runtime_enabled = 0;  // runtime assertions enabled for emission
+  size_t runtime_disabled = 0; // runtime assertions suppressed by cost filter
+  // Per-usage-type assessment counts (total evaluated, including static)
+  size_t unclassified_total = 0;  // UsageType::ShapeCompatibility
+  size_t shape_compat_total = 0;  // UsageType::ShapeCompatibility
+  size_t elem_access_total = 0;   // UsageType::ElementAccess
+  size_t loop_bound_total = 0;    // UsageType::LoopBound
+  size_t hw_constraint_total = 0; // UsageType::HardwareConstraint
+  // Per-usage-type runtime assertion counts
+  size_t unclassified_runtime = 0;
+  size_t shape_compat_runtime = 0;
+  size_t elem_access_runtime = 0;
+  size_t loop_bound_runtime = 0;
+  size_t hw_constraint_runtime = 0;
+};
+
 class SymbolTable;
 // per-compilation context
 class CompilationContext {
 private:
   std::map<std::string, FunctionContext> function_contexts;
+  AssessmentStats assessment_stats; // accumulated across all functions
   std::unique_ptr<Target> compile_target = nullptr;
   std::vector<ArchId> archs;
   std::vector<FeatureToggle> features;
@@ -361,21 +393,34 @@ private:
   bool mem_reuse = false;         // reuse the memory of the program
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
-  bool gen_debug_info = false;    // generate debug information
+  bool gen_debug_info = false;    // generate source-level debug information
+  bool target_debug_info = false; // pass debug flags to target compilation
   bool diag_dma = false;          // diagnose DMA at runtime
   bool loop_norm = false;         // enable loop normalization
   bool no_vectorize = false;      // do not vectorize any foreach loop
   bool vectorize = false;         // enable loop vectorization
   size_t max_local_mem_capacity =
       0; // max local memory capacity per thread (0: use default)
-  bool mem_default_aligned = true; // alignment is set by default in mem reuse.
-  bool inhibit_warning = false;    // Inhibit all warning messages.
-  bool warning_as_error = false;   // Make all warnings into errors.
+  size_t shared_mem_alignment = 0;    // alignment of shared memory set by user
+  bool inhibit_warning = false;       // Inhibit all warning messages.
+  bool warning_as_error = false;      // Make all warnings into errors.
   bool disable_runtime_check = false; // Disable all runtime checks.
+  bool show_assess = false;           // Print assessment report after hoisting.
+  bool print_stats = false;           // Print aggregate assessment statistics.
+  // Runtime check assertion level: "entry" (default), "all", or "none".
+  std::string runtime_check_level = "entry";
+  AssertionCost runtime_check_cost_threshold = AssertionCost::HIGH;
   bool disable_cuda_runtime_env_check =
-      false;                     // Do not emit cuda runtime env check.
-  std::string debug_file_dir;    // directory for compiler debug artifacts
+      false;                 // Do not emit cuda runtime env check.
+  bool use_warpspec = false; // Enable warp-specialized synchronization for
+                             // shared event/full-empty pipelines.
+  bool single_thread_producer =
+      true;                   // In warpspec mode, use a single producer thread
+                              // for producer inthreads; otherwise guard
+                              // producer TMA/event ops individually.
+  std::string debug_file_dir; // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
+  DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -459,9 +504,13 @@ public:
   }
 
   // return memory alignment in byte. Used in memory reuse pass.
-  size_t GetMemoryAlignment(const ArchId& arch, Storage sto) const {
-    if (!MemDefaultAligned()) return 1;
-    return GetTarget().GetMemAlignment(sto, arch);
+  size_t GetMemoryAlignmentByte(const ArchId& arch, Storage sto) const {
+    if (sto == Storage::SHARED && SharedMemAlignment() != 0)
+      return SharedMemAlignment();
+    return GetTarget().GetMemAlignmentByte(sto, arch);
+  }
+  size_t GetMemoryAlignmentByte(Storage sto) const {
+    return GetTarget().GetMemAlignmentByte(sto, GetArch());
   }
 
   size_t GetMinGroupDim() const {
@@ -496,18 +545,32 @@ public:
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
+  bool TargetDebugInfo() const { return target_debug_info; }
+  DebugLinePathMode GetDebugLinePathMode() const {
+    return debug_line_path_mode;
+  }
   bool DMADiagnosis() const { return diag_dma; }
   bool LoopNorm() const { return loop_norm; }
   bool NoVectorize() const { return no_vectorize; }
   bool Vectorize() const { return vectorize; }
   size_t MaxLocalMemCapacity() const { return max_local_mem_capacity; }
-  bool MemDefaultAligned() const { return mem_default_aligned; }
+  size_t SharedMemAlignment() const { return shared_mem_alignment; }
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
   bool DisableRuntimeCheck() const { return disable_runtime_check; }
+  bool ShowAssess() const { return show_assess; }
+  bool PrintStats() const { return print_stats; }
+  const AssessmentStats& GetAssessmentStats() const { return assessment_stats; }
+  AssessmentStats& GetAssessmentStats() { return assessment_stats; }
+  const std::string& RuntimeCheckLevel() const { return runtime_check_level; }
+  AssertionCost RuntimeCheckCostThreshold() const {
+    return runtime_check_cost_threshold;
+  }
   bool DisableCudaRuntimeEnvCheck() const {
     return disable_cuda_runtime_env_check;
   }
+  bool UseWarpSpec() const { return use_warpspec; }
+  bool SingleThreadProducer() const { return single_thread_producer; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -532,6 +595,10 @@ public:
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
+  void SetTargetDebugInfo(bool value) { target_debug_info = value; }
+  void SetDebugLinePathMode(DebugLinePathMode mode) {
+    debug_line_path_mode = mode;
+  }
   void SetDMADiagnosis(bool value) { diag_dma = value; }
   void SetLoopNorm(bool value) { loop_norm = value; }
   void SetNoVectorize(bool value) { no_vectorize = value; }
@@ -539,10 +606,20 @@ public:
   void SetMaxLocalMemCapacityPerThread(size_t sz) {
     max_local_mem_capacity = sz;
   }
-  void SetMemDefaultAligned(bool value) { mem_default_aligned = value; }
+  void SetUseWarpSpec(bool value) { use_warpspec = value; }
+  void SetSingleThreadProducer(bool value) { single_thread_producer = value; }
+  void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
   void SetDisableRuntimeCheck(bool value) { disable_runtime_check = value; }
+  void SetShowAssess(bool value) { show_assess = value; }
+  void SetPrintStats(bool value) { print_stats = value; }
+  void SetRuntimeCheckLevel(const std::string& level) {
+    runtime_check_level = level;
+  }
+  void SetRuntimeCheckCostThreshold(AssertionCost cost) {
+    runtime_check_cost_threshold = cost;
+  }
   void SetDisableCudaRuntimeEnvCheck(bool value) {
     disable_cuda_runtime_env_check = value;
   }

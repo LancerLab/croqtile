@@ -12,4 +12,44 @@ Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
                                " decay spanview to be pointers.");
 Option<bool> dma_opt(OptionKind::Hidden, "-fopt-dma", "", true,
                      "optimize dma to linear copy.");
+Option<bool> tma_cluster_aware(
+    OptionKind::User, "--tma-cluster-aware", "", false,
+    "Enable cluster-aware PTX mbarrier TMA codegen for global->shared copy.");
+Option<bool> ptx_barrier(
+    OptionKind::User, "--ptx-barrier", "", false,
+    "Enable PTX mbarrier-style synchronization for TMA cluster-aware path.");
+Option<bool> use_stmatrix(OptionKind::User, "--stmatrix", "", false,
+                          "Use stmatrix PTX instruction for WGMMA accumulator "
+                          "store to shared memory.");
+Option<bool> hoist_offset(
+    OptionKind::User, "--hoist-offset", "", false,
+    "Hoist loop-invariant offset/address calculations in GPU codegen.");
+Option<bool>
+    hoist_scale(OptionKind::User, "--hoist-scale", "", false,
+                "Hoist loop-invariant scale calculations in GPU codegen.");
+
+std::string GetAbsPath(const std::filesystem::path& cwd,
+                       const std::string& relative_path) {
+  std::filesystem::path rel_path(relative_path);
+  std::filesystem::path abs_path = cwd / rel_path;
+  abs_path = std::filesystem::weakly_canonical(abs_path).parent_path();
+  return abs_path.string();
+}
+
+void PrintSubscriptions(std::ostream& os, const std::string& prefix,
+                        const std::string& suffix, const ValueList& dims,
+                        std::vector<size_t>& indices, size_t depth) {
+  if (depth == dims.size()) {
+    os << prefix;
+    for (size_t i : indices) os << "[" << i << "]";
+    os << suffix;
+    return;
+  }
+
+  for (int i = 0; i < *VIInt(dims[depth]); ++i) {
+    indices[depth] = i;
+    PrintSubscriptions(os, prefix, suffix, dims, indices, depth + 1);
+  }
+}
+
 } // end namespace Choreo

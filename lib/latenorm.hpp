@@ -182,6 +182,7 @@ public:
             dma->to->LOC(),
             AST::Make<AST::Identifier>(dma->to->LOC(), item.sname));
         dma->to->SetType(ity);
+        cast<AST::ChunkAt>(dma->to)->SetBlockShape(GetShape(ity));
 
         VST_DEBUG(dbgs() << "with: " << PSTR(dma->to) << ".\n");
       }
@@ -599,9 +600,11 @@ public:
       // now replace the 'to' buffer inside DMA
       VST_DEBUG(dbgs() << "Replace: " << STR(n) << "\n");
 
+      auto sty = cast<SpannedType>(NodeType(*n.GetTo()));
       n.to = AST::Make<AST::ChunkAt>(
           n.to->LOC(), AST::Make<AST::Identifier>(n.to->LOC(), to_buffer_name));
       n.to->SetType(GetSymbolType(to_buffer_name));
+      cast<AST::ChunkAt>(n.to)->SetBlockShape(sty->GetShape());
 
       VST_DEBUG(dbgs() << "with: " << STR(n) << ".\n");
     }

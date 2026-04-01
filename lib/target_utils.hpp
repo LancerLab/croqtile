@@ -480,6 +480,37 @@ static std::map<MMAConfig, CUDA_CC> GenerateWGMMAConfigs() {
                            MMAShape{m, n, k});
           out[config] = 90;
         }
+  // sparse floating point types (Hopper sparse WGMMA, k32 family)
+  m = 64;
+  k = 32;
+  for (int n : {8, 16, 32, 64, 96, 128, 192, 256}) {
+    out[{SPARSE, BT::F16, BT::F16, BT::F16, BT::F16, BT::UNKNOWN, {m, n, k}}] =
+        90;
+    out[{SPARSE, BT::F16, BT::F16, BT::F32, BT::F32, BT::UNKNOWN, {m, n, k}}] =
+        90;
+    out[{
+        SPARSE, BT::BF16, BT::BF16, BT::F32, BT::F32, BT::UNKNOWN, {m, n, k}}] =
+        90;
+  }
+  // sparse fp8 types (Hopper sparse WGMMA, e4m3 k64 family)
+  m = 64;
+  k = 64;
+  for (int n : {8, 16, 32, 64, 96, 128, 192, 256}) {
+    out[{SPARSE,
+         BT::F8_E4M3,
+         BT::F8_E4M3,
+         BT::F16,
+         BT::F16,
+         BT::UNKNOWN,
+         {m, n, k}}] = 90;
+    out[{SPARSE,
+         BT::F8_E4M3,
+         BT::F8_E4M3,
+         BT::F32,
+         BT::F32,
+         BT::UNKNOWN,
+         {m, n, k}}] = 90;
+  }
   // integer types
   m = 64, k = 32;
   for (int n : {8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192,
@@ -548,6 +579,7 @@ inline bool ConfigIsWMMA(const MMAConfig& config) {
 }
 
 inline bool ConfigIsWGMMA(const MMAConfig& config) {
+  if (WGMMAConfigs().count(config)) return true;
   if (config.sparsity == SPARSE) {
     auto dense = config;
     dense.sparsity = DENSE;
@@ -557,14 +589,21 @@ inline bool ConfigIsWGMMA(const MMAConfig& config) {
 }
 
 inline bool IsValidMMAConfig(const MMAConfig& config, MMALimit::CUDA_CC cc) {
-  auto dense = config;
-  if (config.sparsity == SPARSE) dense.sparsity = DENSE;
-  if (ConfigIsWMMA(dense))
-    return wmma_configs.at(dense) <= cc;
-  else if (ConfigIsWGMMA(dense))
-    return WGMMAConfigs().at(dense) <= cc;
-  else if (ConfigIsCuteMMA(dense))
-    return cute_mma_configs.at(dense) <= cc;
+  auto lookup = config;
+  if (!wmma_configs.count(lookup) && lookup.sparsity == SPARSE)
+    lookup.sparsity = DENSE;
+  if (ConfigIsWMMA(config)) return wmma_configs.at(lookup) <= cc;
+
+  lookup = config;
+  if (!WGMMAConfigs().count(lookup) && lookup.sparsity == SPARSE)
+    lookup.sparsity = DENSE;
+  if (ConfigIsWGMMA(config)) return WGMMAConfigs().at(lookup) <= cc;
+
+  lookup = config;
+  if (!cute_mma_configs.count(lookup) && lookup.sparsity == SPARSE)
+    lookup.sparsity = DENSE;
+  if (ConfigIsCuteMMA(config))
+    return cute_mma_configs.at(lookup) <= cc;
   else
     return false;
 }
@@ -576,13 +615,11 @@ inline size_t GetThreadGroupSize(const MMAConfig& config) {
 }
 
 inline MMAType GetMMAType(const MMAConfig& config) {
-  auto dense = config;
-  if (config.sparsity == SPARSE) dense.sparsity = DENSE;
-  if (ConfigIsWMMA(dense))
+  if (ConfigIsWMMA(config))
     return MMAType::WMMA;
-  else if (ConfigIsWGMMA(dense))
+  else if (ConfigIsWGMMA(config))
     return MMAType::WGMMA;
-  else if (ConfigIsCuteMMA(dense))
+  else if (ConfigIsCuteMMA(config))
     return MMAType::CTMMA;
   else {
     // Provide clearer guidance for common unsupported FP8+k64 attempts
@@ -591,7 +628,7 @@ inline MMAType GetMMAType(const MMAConfig& config) {
         config.shape.k == 64) {
       choreo_unreachable(
           "unsupported MMA config: " + config.ToString() +
-          " — FP8 m16n8k64 requires GPU compute capability >= SM_90");
+          " -- FP8 m16n8k64 requires GPU compute capability >= SM_90");
     }
     choreo_unreachable("unsupported MMA config: " + config.ToString());
   }
@@ -628,14 +665,17 @@ inline std::string MMAConfig2CuteMMAName(const MMAConfig& mma_config,
 
 inline std::string MMAConfig2WGMMAName(const MMAConfig& mma_config,
                                        const std::string& sep = "_") {
-  // example: SM90::GMMA::MMA_64x96x16_F16F16F16_RS
+  // example dense:  SM90::GMMA::MMA_64x96x16_F16F16F16_SS
+  // example sparse: SM90::GMMA::SPARSE::GMMA_64x8x32_F32F16F16_SS
   // R: A from register, S: B from smem
-  auto dense = mma_config;
-  if (dense.sparsity == SPARSE) dense.sparsity = DENSE;
-  assert(ConfigIsWGMMA(dense));
+  auto lookup = mma_config;
+  if (!WGMMAConfigs().count(lookup) && lookup.sparsity == SPARSE)
+    lookup.sparsity = DENSE;
+  assert(ConfigIsWGMMA(mma_config));
   std::vector<std::string> strs;
-  strs.push_back("SM" + std::to_string(WGMMAConfigs().at(dense)) +
-                 "::GMMA::MMA");
+  bool is_sparse = mma_config.sparsity == SPARSE;
+  strs.push_back("SM" + std::to_string(WGMMAConfigs().at(lookup)) +
+                 (is_sparse ? "::GMMA::SPARSE::GMMA" : "::GMMA::MMA"));
   strs.push_back(std::to_string(mma_config.shape.m) + "x" +
                  std::to_string(mma_config.shape.n) + "x" +
                  std::to_string(mma_config.shape.k));
@@ -651,13 +691,13 @@ inline std::string MMAConfig2WGMMAName(const MMAConfig& mma_config,
   strs.push_back(ToUpper(ty_str(mma_config.d_ty) + ty_str(mma_config.a_ty) +
                          ty_str(mma_config.b_ty)));
   // TODO: both fragments read from smem for now
-  bool is_fp8 = mma_config.a_ty == BaseType::F8_E4M3 ||
-                mma_config.a_ty == BaseType::F8_E5M2 ||
-                mma_config.b_ty == BaseType::F8_E4M3 ||
-                mma_config.b_ty == BaseType::F8_E5M2;
-  // FP8 GMMA kernels in CUTLASS use the "*_TN" naming (layouts are encoded),
-  // other datatypes keep the original layout-parameterized form.
-  strs.push_back(is_fp8 ? "SS_TN" : "SS");
+  bool is_f16_or_bf16 =
+      (mma_config.a_ty == BaseType::F16 || mma_config.a_ty == BaseType::BF16) &&
+      (mma_config.b_ty == BaseType::F16 || mma_config.b_ty == BaseType::BF16);
+  // CUTLASS uses the "*_TN" spelling when the operand layouts are fixed by
+  // the instruction family (TF32 / FP8 / integer / binary sparse GMMA). The
+  // 16-bit floating-point families keep the major-order template parameters.
+  strs.push_back(is_f16_or_bf16 ? "SS" : "SS_TN");
   return DelimitedString(strs, sep);
 }
 

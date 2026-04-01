@@ -6,13 +6,276 @@
 #ifdef __CHOREO_TARGET_CUTE__
 
 namespace choreo {
+
+  #ifndef CHOREO_PTX_BARRIER_MAX_SPINS
+    #define CHOREO_PTX_BARRIER_MAX_SPINS (1u << 24)
+  #endif
+
+__device__ __forceinline__ uint32_t tma_to_shared_u32(const void* p) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  return static_cast<uint32_t>(__cvta_generic_to_shared(p));
+  #else
+  (void)p;
+  return 0;
+  #endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_init(uint64_t* bar,
+                                                  uint32_t thread_count) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  asm volatile("mbarrier.init.shared::cta.b64 [%0], %1;\n"
+               :
+               : "r"(bar_ptr), "r"(thread_count));
+  #else
+  (void)bar;
+  (void)thread_count;
+  #endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_expect_tx(uint64_t* bar,
+                                                       uint32_t bytes) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  asm volatile(
+      "mbarrier.arrive.expect_tx.release.cta.shared::cta.b64 _, [%0], %1;\n"
+      :
+      : "r"(bar_ptr), "r"(bytes));
+  #else
+  (void)bar;
+  (void)bytes;
+  #endif
+}
+
+__device__ __forceinline__ void
+tma_mbarrier_expect_tx_noarrive(uint64_t* bar, uint32_t bytes) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  asm volatile("mbarrier.expect_tx.relaxed.cta.shared::cta.b64 [%0], %1;\n"
+               :
+               : "r"(bar_ptr), "r"(bytes));
+  #else
+  (void)bar;
+  (void)bytes;
+  #endif
+}
+
+__device__ __forceinline__ void
+tma_load_2d_shared_cta_global_mbarrier(void* dst, const void* tma_map,
+                                       uint64_t* bar, int32_t coord0,
+                                       int32_t coord1) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t dst_ptr = tma_to_shared_u32(dst);
+  asm volatile("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::"
+               "complete_tx::bytes "
+               "[%0], [%1, {%3, %4}], [%2];"
+               :
+               : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+                 "r"(coord1)
+               : "memory");
+  #else
+  (void)dst;
+  (void)tma_map;
+  (void)bar;
+  (void)coord0;
+  (void)coord1;
+  #endif
+}
+
+__device__ __forceinline__ void
+tma_load_2d_shared_cluster_global_mbarrier(void* dst, const void* tma_map,
+                                           uint64_t* bar, int32_t coord0,
+                                           int32_t coord1) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t dst_ptr = tma_to_shared_u32(dst);
+  asm volatile("cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::"
+               "complete_tx::bytes "
+               "[%0], [%1, {%3, %4}], [%2];"
+               :
+               : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+                 "r"(coord1)
+               : "memory");
+  #else
+  (void)dst;
+  (void)tma_map;
+  (void)bar;
+  (void)coord0;
+  (void)coord1;
+  #endif
+}
+
+__device__ __forceinline__ void
+tma_load_2d_shared_cluster_global_mbarrier_multicast(
+    void* dst, const void* tma_map, uint64_t* bar, int32_t coord0,
+    int32_t coord1, uint16_t multicast_mask) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t dst_ptr = tma_to_shared_u32(dst);
+  asm volatile("cp.async.bulk.tensor.2d.shared::cluster.global.tile."
+               "mbarrier::complete_tx::bytes.multicast::cluster"
+               " [%0], [%1, {%3, %4}], [%2], %5;"
+               :
+               : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+                 "r"(coord1), "h"(multicast_mask)
+               : "memory");
+  #else
+  (void)dst;
+  (void)tma_map;
+  (void)bar;
+  (void)coord0;
+  (void)coord1;
+  (void)multicast_mask;
+  #endif
+}
+
+__device__ __forceinline__ uint32_t tma_cluster_rank() {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t rank;
+  asm volatile("mov.u32 %0, %cluster_ctarank;\n" : "=r"(rank));
+  return rank;
+  #else
+  return 0;
+  #endif
+}
+
+__device__ __forceinline__ uint32_t tma_cluster_dim() {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t dim;
+  asm volatile("mov.u32 %0, %cluster_nctarank;\n" : "=r"(dim));
+  return dim;
+  #else
+  return 1;
+  #endif
+}
+
+__device__ __forceinline__ void tma_cluster_sync() {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  asm volatile("barrier.cluster.arrive;\n" ::: "memory");
+  asm volatile("barrier.cluster.wait;\n" ::: "memory");
+  #endif
+}
+
+__device__ __forceinline__ void
+tma_mbarrier_arrive_cluster(uint64_t* bar, uint32_t cta_id,
+                            uint32_t count = 1) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t smem_addr = tma_to_shared_u32(bar);
+  asm volatile("{\n\t"
+               ".reg .b32 remAddr32;\n\t"
+               "mapa.shared::cluster.u32 remAddr32, %0, %1;\n\t"
+               "mbarrier.arrive.shared::cluster.b64 _, [remAddr32], %2;\n\t"
+               "}"
+               :
+               : "r"(smem_addr), "r"(cta_id), "r"(count));
+  #else
+  (void)bar;
+  (void)cta_id;
+  (void)count;
+  #endif
+}
+
+__device__ __forceinline__ void
+tma_mbarrier_wait_parity_cluster(uint64_t* bar, int phase_bit) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t spins = 0;
+  while (true) {
+    uint32_t ready = 0;
+    asm volatile(
+        "{\n"
+        ".reg .pred P1;\n"
+        "mbarrier.try_wait.parity.acquire.cluster.shared::cta.b64 P1, [%1], "
+        "%2;\n"
+        "selp.b32 %0, 1, 0, P1;\n"
+        "}\n"
+        : "=r"(ready)
+        : "r"(bar_ptr), "r"(phase_bit)
+        : "memory");
+    if (ready) return;
+    if (++spins >= CHOREO_PTX_BARRIER_MAX_SPINS) {
+      printf("WARN: cluster mbarrier wait exceeded max spins\n");
+      return;
+    }
+  }
+  #else
+  (void)bar;
+  (void)phase_bit;
+  #endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_arrive(uint64_t* bar,
+                                                    uint32_t count = 1) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  asm volatile("mbarrier.arrive.release.cta.shared::cta.b64 _, [%0], %1;\n"
+               :
+               : "r"(bar_ptr), "r"(count)
+               : "memory");
+  #else
+  (void)bar;
+  (void)count;
+  #endif
+}
+
+__device__ __forceinline__ void tma_mbarrier_wait_parity(uint64_t* bar,
+                                                         int phase_bit) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t spins = 0;
+  while (true) {
+    uint32_t ready = 0;
+    asm volatile(
+        "{\n"
+        ".reg .pred P1;\n"
+        "mbarrier.try_wait.parity.acquire.cta.shared::cta.b64 P1, [%1], %2;\n"
+        "selp.b32 %0, 1, 0, P1;\n"
+        "}\n"
+        : "=r"(ready)
+        : "r"(bar_ptr), "r"(phase_bit)
+        : "memory");
+
+    if (ready) return;
+
+    ++spins;
+    if (spins >= CHOREO_PTX_BARRIER_MAX_SPINS) {
+      printf("[choreo-rt] PTX mbarrier wait timeout: bar=%u, phase=%d, "
+             "spins=%u\\n",
+             bar_ptr, phase_bit, spins);
+      __trap();
+    }
+
+    if ((spins & 0x3FFu) == 0u) __nanosleep(64);
+  }
+  #else
+  (void)bar;
+  (void)phase_bit;
+  #endif
+}
+
 // SM90+ (Hopper+) - TMA barrier and token
 struct TMAAtom {
   cuda::barrier<cuda::thread_scope_block>* bar;
   cuda::barrier<cuda::thread_scope_block>::arrival_token tok;
+  uint64_t* ptx_bar = nullptr;
+  int ptx_phase = 0;
+  bool use_ptx_mbarrier = false;
   //  TMAAtom(cuda::barrier<cuda::thread_scope_block> *b): bar(b) {}
   __device__ auto& barrier() { return *bar; }
   __device__ auto& token() { return tok; }
+  __device__ uint64_t* ptx_barrier() { return ptx_bar; }
+  __device__ int ptx_phase_bit() const { return ptx_phase; }
+  __device__ void toggle_ptx_phase() { ptx_phase ^= 1; }
+  __device__ bool IsPTXMBarrier() const { return use_ptx_mbarrier; }
+  __device__ void EnablePTXMBarrier(uint64_t* b) {
+    ptx_bar = b;
+    ptx_phase = 0;
+    use_ptx_mbarrier = true;
+  }
 };
 
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
@@ -98,6 +361,14 @@ struct future {
       : d(data), md(mdata ? mdata : data), s(ST_NONE), name(n), line(l),
         column(c) {}
   #else
+  __device__ future(const char* n, unsigned l, unsigned c, void* data = nullptr,
+                    void* mdata = nullptr)
+      : d(data), md(mdata ? mdata : data) {
+    (void)n;
+    (void)l;
+    (void)c;
+  }
+
   __device__ future(void* data = nullptr, void* mdata = nullptr)
       : d(data), md(mdata ? mdata : data) {}
   #endif //__CHOREO_DMA_DIAGNOSIS__
@@ -130,10 +401,10 @@ struct future {
              line, column);
       __co_abort__();
     }
+    s = ST_INITED;
   #endif // __CHOREO_DMA_DIAGNOSIS__
 
     atom = a;
-    s = ST_INITED;
   }
 
   // when sync, no wait is required. simply change the status
@@ -158,9 +429,19 @@ struct future {
   __device__ void wait_impl() {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     if (is_tma) {
-      auto& barrier = ((TMAAtom*)atom)->barrier();
-      auto& token = ((TMAAtom*)atom)->token();
-      barrier.wait(std::move(token));
+      auto* tma_atom = ((TMAAtom*)atom);
+      if (tma_atom->IsPTXMBarrier()) {
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+        tma_mbarrier_wait_parity(tma_atom->ptx_barrier(),
+                                 tma_atom->ptx_phase_bit());
+    #else
+        __co_abort__();
+    #endif
+      } else {
+        auto& barrier = tma_atom->barrier();
+        auto& token = tma_atom->token();
+        barrier.wait(std::move(token));
+      }
       return;
     }
     // TODO: make shared memory be allocated by host
@@ -207,8 +488,8 @@ struct future {
              line, column);
       __co_abort__();
     }
-  #endif // __CHOREO_DMA_DIAGNOSIS__
     s = ST_TRIGGERED;
+  #endif // __CHOREO_DMA_DIAGNOSIS__
 
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
@@ -347,9 +628,13 @@ inline __device__ int future_ring<N>::discard(future* f) {
       p = (p + 1) % N;
   }
 
+    #ifdef __CHOREO_DMA_DIAGNOSIS__
   printf("[choreo-rt] Internal error: future %d (defined at line %u:%u) "
          "is not committed.\n",
          f->id, f->line, f->column);
+    #else
+  printf("[choreo-rt] Internal error: future %d is not committed.\n", f->id);
+    #endif
 
       //  __co_abort__();
   #else
@@ -497,35 +782,67 @@ CUTE_HOST_DEVICE std::uintptr_t aligned_up_ptr(Ptr p) {
 // ------------------- universal copy (any rank, C++17) -------------------
 template <class Src, class Dst>
 CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {
-  #if 0
-  // adjust these two lines if your Engine exposes pointers differently
-  auto src_ptr = std::get<0>(src.data());
-  auto dst_ptr = std::get<0>(dst.data());
-
-  // If all strides are static, we can safely *attempt* wide vectors:
-  if constexpr (all_strides_are_static<Src>::value) {
-    // 128-bit (e.g., 4x int/float) if strides OK at compile time AND pointers aligned at runtime
-    if constexpr (layout_vec_ok_ct<128, Src>::value) {
-      if (aligned_at_least<128>(src_ptr) && aligned_at_least<128>(dst_ptr)) {
-static_assert(false, "path 1\n");
-        copy(cute::AutoVectorizingCopyWithAssumedAlignment<128>{}, src, dst);
-        return;
-      }
-    }
-    // 64-bit next
-    if constexpr (layout_vec_ok_ct<64, Src>::value) {
-static_assert(false, "path 2\n");
-      if (aligned_at_least<64>(src_ptr) && aligned_at_least<64>(dst_ptr)) {
-        copy(cute::AutoVectorizingCopyWithAssumedAlignment<64>{}, src, dst);
-        return;
-      }
-    }
-  }
-  #endif
-
   // Fallback: 32-bit (scalar element width) - always safe for any
   // shape/stride/alignment
   copy(cute::AutoVectorizingCopyWithAssumedAlignment<32>{}, src, dst);
+}
+
+template <bool Swizzle, class Element, int ThrRows, int ThrCols, int ValRows,
+          int ValCols, class SrcTensor, class DstTensor, class Pred>
+__device__ static inline void copy_if_g2s(const SrcTensor& src, DstTensor& dst,
+                                          Pred pred) {
+  auto tiled_copy = cute::make_tiled_copy(
+      cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>,
+                      Element>{},
+      cute::make_layout(
+          cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
+          cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
+      cute::make_layout(
+          cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
+  auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
+  auto src_thr = thr_copy.partition_S(src);
+  auto dst_thr = [&]() {
+    if constexpr (Swizzle) {
+      auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
+      return thr_copy.partition_D(dst_pi);
+    } else {
+      return thr_copy.partition_D(dst);
+    }
+  }();
+  auto coord_thr =
+      thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
+  auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
+  CUTE_UNROLL
+  for (int i = 0; i < cute::size(pred_thr); ++i) {
+    pred_thr(i) = pred(coord_thr(i));
+  }
+  cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
+  cute::cp_async_fence();
+  cute::cp_async_wait<0>();
+}
+
+template <class Element, int ThrRows, int ThrCols, int ValRows, int ValCols,
+          class SrcTensor, class DstTensor, class Pred>
+__device__ static inline void copy_if_s2g(const SrcTensor& src, DstTensor& dst,
+                                          Pred pred) {
+  auto tiled_copy = cute::make_tiled_copy(
+      cute::Copy_Atom<cute::UniversalCopy<Element>, Element>{},
+      cute::make_layout(
+          cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
+          cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
+      cute::make_layout(
+          cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
+  auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
+  auto src_thr = thr_copy.partition_S(src);
+  auto dst_thr = thr_copy.partition_D(dst);
+  auto coord_thr =
+      thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
+  auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
+  CUTE_UNROLL
+  for (int i = 0; i < cute::size(pred_thr); ++i) {
+    pred_thr(i) = pred(coord_thr(i));
+  }
+  cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
 }
 
 // TODO: move to choreo_mma_wrapper.h
@@ -1412,6 +1729,54 @@ struct Policy_D_M8N8 {
                     "unsupported data type in this MMA policy");
     }
   }
+
+  template <class Tensor, class AccumT>
+  __device__ static void store_trans(Tensor& D, AccumT const* d) {
+    int lane = threadIdx.x & 31;
+    using value_type = typename Tensor::value_type;
+    if constexpr (std::is_same<value_type, double>::value ||
+                  std::is_same<value_type, s32>::value) {
+      static_assert(std::is_same<AccumT, value_type>::value,
+                    "AccumT must be same as value_type");
+      int gid = lane >> 2;
+      int tid_in_group = lane & 3;
+      int row = gid;
+      int col0 = tid_in_group * 2;
+      int col1 = col0 + 1;
+      auto D_casted = cute::recast<AccumT>(D);
+      D_casted(col0, row) = d[0];
+      D_casted(col1, row) = d[1];
+    } else if constexpr (std::is_same<AccumT, float>::value) {
+      int row = (lane & 1);
+      if (lane >= 16) row += 4;
+      int col = lane & 2;
+      D(col, row) = cast_if<value_type>(d[0]);
+      D(col + 1, row) = cast_if<value_type>(d[1]);
+      D(col, row + 2) = cast_if<value_type>(d[2]);
+      D(col + 1, row + 2) = cast_if<value_type>(d[3]);
+      D(col + 4, row) = cast_if<value_type>(d[4]);
+      D(col + 4 + 1, row) = cast_if<value_type>(d[5]);
+      D(col + 4, row + 2) = cast_if<value_type>(d[6]);
+      D(col + 4 + 1, row + 2) = cast_if<value_type>(d[7]);
+    } else if constexpr (std::is_same<AccumT, f16>::value) {
+      static_assert(std::is_same<AccumT, value_type>::value,
+                    "AccumT must be same as value_type");
+      int row = (lane & 3);
+      if (lane >= 16) row = row + 4;
+      D(0, row) = d[0];
+      D(1, row) = d[1];
+      D(2, row) = d[2];
+      D(3, row) = d[3];
+      D(4, row) = d[4];
+      D(5, row) = d[5];
+      D(6, row) = d[6];
+      D(7, row) = d[7];
+    } else {
+      static_assert(sizeof(Tensor) != sizeof(Tensor),
+                    "unsupported data type in this MMA policy");
+    }
+  }
+
   template <class Tensor, class AccumT>
   __device__ static void load(Tensor const& D, AccumT* d) {
     int lane = threadIdx.x & 31;
@@ -1490,6 +1855,22 @@ struct Policy_D_M16N8 {
     D(row0, col1) = cast_if<value_type>(d[1]);
     D(row1, col0) = cast_if<value_type>(d[2]);
     D(row1, col1) = cast_if<value_type>(d[3]);
+  }
+
+  template <class Tensor, class AccumT>
+  __device__ static void store_trans(Tensor& D, AccumT const* d) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group * 2;
+    int col1 = tid_in_group * 2 + 1;
+    using value_type = typename Tensor::value_type;
+    D(col0, row0) = cast_if<value_type>(d[0]);
+    D(col1, row0) = cast_if<value_type>(d[1]);
+    D(col0, row1) = cast_if<value_type>(d[2]);
+    D(col1, row1) = cast_if<value_type>(d[3]);
   }
 };
 
@@ -1611,23 +1992,26 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
       break;
     }
   } else { // MN_MAJOR
-    // MN-major layout: stride varies by swizzle pattern
+    // For swizzled MN-major GMMA layouts, the leading-byte offset remains one
+    // 128-bit line (16B for f16/bf16). Only the stride-byte offset scales with
+    // the swizzle width; this matches CuTe's canonical GMMA descriptor
+    // construction.
     switch (Swizzle) {
     case WGMMA_Swizzle::NS:
-      LBO = 256;
+      LBO = 16;
       SBO = 128;
       break;
     case WGMMA_Swizzle::B32:
-      LBO = 256;
-      SBO = 512;
+      LBO = 16;
+      SBO = 256;
       break;
     case WGMMA_Swizzle::B64:
-      LBO = 512;
-      SBO = 1024;
+      LBO = 16;
+      SBO = 512;
       break;
     case WGMMA_Swizzle::B128:
-      LBO = 1024;
-      SBO = 2048;
+      LBO = 16;
+      SBO = 1024;
       break;
     }
   }
@@ -1853,6 +2237,26 @@ struct Policy_WGMMA_D_M64K16 {
       D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
 };
 
 // Store policy for 64x64x8 WGMMA (accumulator layout matches K=16)
@@ -1876,10 +2280,62 @@ struct Policy_WGMMA_D_M64K8 {
       D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
 };
 
 // Store policy for 64x64x32 WGMMA (accumulator layout matches K=16)
 struct Policy_WGMMA_D_M64K32 {
+  // masked for row < row_guard
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row(Tensor& D, AccumT* d, int row_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;             // 0-31: lane within warp
+    int warp = tid / 32;             // 0-3: which warp in warp group
+    int row0 = warp * 16 + lane / 4; // first row
+    int row1 = row0 + 8;             // second row
+    int col_num = N / 8;             // number of column pairs
+    using value_type = typename Tensor::value_type;
+
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
   template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
@@ -1897,6 +2353,69 @@ struct Policy_WGMMA_D_M64K32 {
       D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
       D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+};
+
+// Store policy for 64x64x64 WGMMA (accumulator layout matches K=32 paths)
+struct Policy_WGMMA_D_M64K64 {
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(row0, col0) = cast_if<value_type>(d[c * 4]);
+      D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
 };
@@ -1920,6 +2439,26 @@ struct Policy_WGMMA_D_M64K256 {
       D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
       D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_trans(Tensor& D, AccumT* d) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      D(col0, row0) = cast_if<value_type>(d[c * 4]);
+      D(col1, row0) = cast_if<value_type>(d[c * 4 + 1]);
+      D(col0, row1) = cast_if<value_type>(d[c * 4 + 2]);
+      D(col1, row1) = cast_if<value_type>(d[c * 4 + 3]);
     }
   }
 };
@@ -1983,9 +2522,148 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
     MMA_Policy<MMA>::typeD::template store<Tensor, AccumT>(D, d);
 }
 
+template <class MMA, int N = 0, class Tensor, class AccumT>
+__device__ static inline void
+store_fragment_d_mask_row(Tensor& D, AccumT* const d, int row_guard) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, double>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "store d only supports float/double/f16/s32 accumulator type");
+  static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
+                    std::is_same<typename Tensor::value_type, AccumT>::value,
+                "store d unsupported type cast");
+  if constexpr (N > 0)
+    MMA_Policy<MMA>::typeD::template store_mask_row<Tensor, AccumT, N>(
+        D, d, row_guard);
+  else
+    MMA_Policy<MMA>::typeD::template store_mask_row<Tensor, AccumT>(D, d,
+                                                                    row_guard);
+}
+
+template <class MMA, int N = 0, class Tensor, class AccumT>
+__device__ static inline void store_fragment_d_trans(Tensor& D,
+                                                     AccumT* const d) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, double>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "store d only supports float/double/f16/s32 accumulator type");
+  static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
+                    std::is_same<typename Tensor::value_type, AccumT>::value,
+                "store d unsupported type cast");
+  if constexpr (N > 0)
+    MMA_Policy<MMA>::typeD::template store_trans<Tensor, AccumT, N>(D, d);
+  else
+    MMA_Policy<MMA>::typeD::template store_trans<Tensor, AccumT>(D, d);
+}
+
+// stmatrix-based store for WGMMA accumulators (--stmatrix flag).
+//
+// Uses PTX stmatrix.sync.aligned.m8n8.x1.b16 to write 8x8 sub-tiles of
+// the WGMMA accumulator to shared memory in a bank-conflict-free manner.
+//
+// Because stmatrix stores in dense row-major stride-8 format (128-byte
+// blocks), but the destination tensor D has stride N, we use a per-warp
+// temp buffer in shared memory: stmatrix writes to the temp buffer, then
+// threads scatter to the correct strided locations in D.
+//
+// A register shuffle (__shfl_sync) re-maps the WGMMA accumulator register
+// layout (row=lane/4, col_pair=lane%4) to the stmatrix-expected layout
+// (row=lane%8, col_pair=lane/8) before each stmatrix call.
+//
+// NOTE: This is a demonstrative implementation.  For maximum performance,
+//       the output shared memory layout should be changed to tile-8 format
+//       so that stmatrix can write directly without the scatter step, and
+//       TMA output should use a matching swizzled tensor map.
+template <class MMA, int N, class Tensor, class AccumT>
+__device__ static inline void store_fragment_d_stmatrix(Tensor& D,
+                                                        AccumT* const d) {
+  static_assert(sizeof(AccumT) == 2,
+                "stmatrix store requires 16-bit accumulator type, f16 or bf16");
+  static_assert((N % 8) == 0,
+                "stmatrix store currently requires N to be divisible by 8");
+
+  int tid = threadIdx.x % 128;
+  int lane = tid % 32;
+  int warp = tid / 32;
+
+  AccumT* d_base_ptr = &D(0, 0);
+  uint32_t d_base_addr =
+      static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
+
+  constexpr int w_iters = N / 16;
+  constexpr uint32_t kStepBytes = static_cast<uint32_t>(16 * sizeof(AccumT));
+
+  uint32_t lane_offset =
+      static_cast<uint32_t>((lane % 8) * N + (lane / 16) * N * 8 + (lane & 8));
+  uint32_t addr = d_base_addr +
+                  static_cast<uint32_t>((warp * 16 * N) * sizeof(AccumT)) +
+                  lane_offset * sizeof(AccumT);
+  auto d_u32 = reinterpret_cast<uint32_t const*>(d);
+
+  #pragma unroll
+  for (int w = 0; w < w_iters; ++w) {
+    uint32_t r0 = d_u32[w * 4 + 0];
+    uint32_t r1 = d_u32[w * 4 + 2];
+    uint32_t r2 = d_u32[w * 4 + 1];
+    uint32_t r3 = d_u32[w * 4 + 3];
+
+    asm volatile("stmatrix.sync.aligned.m8n8.x4.shared::cta.b16 [%0], "
+                 "{%1, %2, %3, %4};\n"
+                 :
+                 : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));
+    addr += kStepBytes;
+  }
+}
+
+template <class MMA, int N, class Tensor, class AccumT>
+__device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
+                                                              AccumT* const d) {
+  static_assert(sizeof(AccumT) == 2,
+                "stmatrix store requires 16-bit accumulator type, f16 or bf16");
+  static_assert((N % 8) == 0,
+                "stmatrix store currently requires N to be divisible by 8");
+
+  int tid = threadIdx.x % 128;
+  int lane = tid % 32;
+  int warp = tid / 32;
+
+  AccumT* d_base_ptr = &D(0, 0);
+  uint32_t d_base_addr =
+      static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
+
+  const uint32_t ld = static_cast<uint32_t>(&D(1, 0) - &D(0, 0));
+  constexpr int w_iters = N / 16;
+  const uint32_t kStepBytes = static_cast<uint32_t>(16 * ld * sizeof(AccumT));
+
+  uint32_t lane_offset = static_cast<uint32_t>(warp * 16) +
+                         static_cast<uint32_t>(lane % 8) * ld +
+                         static_cast<uint32_t>(lane / 16) * ld * 8 +
+                         static_cast<uint32_t>(lane & 8);
+  uint32_t addr = d_base_addr + lane_offset * sizeof(AccumT);
+  auto d_u32 = reinterpret_cast<uint32_t const*>(d);
+
+  #pragma unroll
+  for (int w = 0; w < w_iters; ++w) {
+    uint32_t r0 = d_u32[w * 4 + 0];
+    uint32_t r1 = d_u32[w * 4 + 1];
+    uint32_t r2 = d_u32[w * 4 + 2];
+    uint32_t r3 = d_u32[w * 4 + 3];
+
+    asm volatile("stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16 [%0], "
+                 "{%1, %2, %3, %4};\n"
+                 :
+                 : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));
+    addr += kStepBytes;
+  }
+}
+
 // only for M64N32 WGMMA accumulator scaling
 template <typename AccT, typename ScaleT, int N>
-__device__ static inline void
+__device__ __forceinline__ void
 scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
                   ScaleT scale_b) {
   static_assert(std::is_same_v<ScaleT, f32>,
@@ -1994,35 +2672,66 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
       std::is_same_v<AccT, f16> || std::is_same_v<AccT, float>,
       "scale_accumulator only supports f16 or float accumulator type");
 
-  int itd = threadIdx.x % 128;
-  int lane = itd % 32;
-  int warp = itd / 32;
-  int row0 = warp * 16 + lane / 4;
+  int itd = threadIdx.x & 127;
+  int lane = itd & 31;
+  int warp = itd >> 5;
+  int row0 = warp * 16 + (lane >> 2);
   int row1 = row0 + 8;
-  int col_num = N / 8;
-  float sa0 = scale_a_ptr[row0 * scale_a_ld];
-  float sa1 = scale_a_ptr[row1 * scale_a_ld];
+  constexpr int col_num = N / 8;
+
+  auto* scale_a_ptr0 = scale_a_ptr + row0 * scale_a_ld;
+  auto* scale_a_ptr1 = scale_a_ptr + row1 * scale_a_ld;
+  float sa0 = 0.0f;
+  float sa1 = 0.0f;
+  #if defined(__CUDA_ARCH__)
+  if (__isShared(scale_a_ptr0)) {
+    sa0 = *scale_a_ptr0;
+    sa1 = *scale_a_ptr1;
+  } else if (__isGlobal(scale_a_ptr0)) {
+    sa0 = __ldg(scale_a_ptr0);
+    sa1 = __ldg(scale_a_ptr1);
+  } else {
+    sa0 = *scale_a_ptr0;
+    sa1 = *scale_a_ptr1;
+  }
+  #else
+  sa0 = *scale_a_ptr0;
+  sa1 = *scale_a_ptr1;
+  #endif
+  sa0 *= scale_b;
+  sa1 *= scale_b;
+
   if constexpr (std::is_same_v<AccT, f16>) {
-  #pragma unroll
+  #if defined(__USE_CUDA_TYPE__)
+    auto* d2 = reinterpret_cast<__half2*>(d);
+    auto const* scale_d2 = reinterpret_cast<__half2 const*>(scale_d);
+    __half2 sa0_h2 = __float2half2_rn(sa0);
+    __half2 sa1_h2 = __float2half2_rn(sa1);
+
+    #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int base2 = c * 2;
+      d2[base2 + 0] = __hfma2(scale_d2[base2 + 0], sa0_h2, d2[base2 + 0]);
+      d2[base2 + 1] = __hfma2(scale_d2[base2 + 1], sa1_h2, d2[base2 + 1]);
+    }
+  #else
+    #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
-      d[base + 0] +=
-          utils::from_f32<f16>(to_f32(scale_d[base + 0]) * sa0 * scale_b);
-      d[base + 1] +=
-          utils::from_f32<f16>(to_f32(scale_d[base + 1]) * sa0 * scale_b);
-      d[base + 2] +=
-          utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1 * scale_b);
-      d[base + 3] +=
-          utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1 * scale_b);
+      d[base + 0] += utils::from_f32<f16>(to_f32(scale_d[base + 0]) * sa0);
+      d[base + 1] += utils::from_f32<f16>(to_f32(scale_d[base + 1]) * sa0);
+      d[base + 2] += utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1);
+      d[base + 3] += utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1);
     }
+  #endif
   } else if constexpr (std::is_same_v<AccT, float>) {
   #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
-      d[base + 0] += scale_d[base + 0] * sa0 * scale_b;
-      d[base + 1] += scale_d[base + 1] * sa0 * scale_b;
-      d[base + 2] += scale_d[base + 2] * sa1 * scale_b;
-      d[base + 3] += scale_d[base + 3] * sa1 * scale_b;
+      d[base + 0] = fmaf(scale_d[base + 0], sa0, d[base + 0]);
+      d[base + 1] = fmaf(scale_d[base + 1], sa0, d[base + 1]);
+      d[base + 2] = fmaf(scale_d[base + 2], sa1, d[base + 2]);
+      d[base + 3] = fmaf(scale_d[base + 3], sa1, d[base + 3]);
     }
   }
 }
@@ -2142,6 +2851,12 @@ template <>
 struct MMA_Policy<CUTE_WGMMA_M64K32> {
   static constexpr bool supported = true;
   using typeD = Policy_WGMMA_D_M64K32;
+};
+
+template <>
+struct MMA_Policy<CUTE_WGMMA_M64K64> {
+  static constexpr bool supported = true;
+  using typeD = Policy_WGMMA_D_M64K64;
 };
 
 template <>
@@ -2603,6 +3318,133 @@ struct SM90_SPARSE_16x8x64_F32E5M2E5M2F32_TN {
 
 namespace choreo {
 namespace nv_cute {
+
+namespace numerics {
+
+template <typename T>
+using DecayT = std::remove_cv_t<std::remove_reference_t<T>>;
+
+template <typename T>
+CUTE_HOST_DEVICE auto to_math(T value) {
+  using U = DecayT<T>;
+  if constexpr (std::is_same_v<U, f64>) {
+    return static_cast<double>(value);
+  } else {
+    return static_cast<float>(to_f32(value));
+  }
+}
+
+template <typename T, typename U>
+CUTE_HOST_DEVICE T from_math(U value) {
+  if constexpr (std::is_same_v<T, f64>) {
+    return static_cast<f64>(value);
+  } else if constexpr (std::is_same_v<T, f32>) {
+    return static_cast<f32>(value);
+  } else {
+    return utils::from_f32<T>(static_cast<float>(value));
+  }
+}
+
+  #define CHOREO_CUTE_UNARY_NUMERIC(NAME, F32, F64)                            \
+    template <typename T>                                                      \
+    CUTE_HOST_DEVICE auto NAME(T value) {                                      \
+      using U = DecayT<T>;                                                     \
+      if constexpr (std::is_same_v<U, f64>) {                                  \
+        return from_math<U>(F64(to_math(value)));                              \
+      } else {                                                                 \
+        return from_math<U>(F32(to_math(value)));                              \
+      }                                                                        \
+    }
+
+  #define CHOREO_CUTE_BINARY_NUMERIC(NAME, F32, F64)                           \
+    template <typename A, typename B>                                          \
+    CUTE_HOST_DEVICE auto NAME(A lhs, B rhs) {                                 \
+      using R = DecayT<A>;                                                     \
+      if constexpr (std::is_same_v<DecayT<A>, f64> ||                          \
+                    std::is_same_v<DecayT<B>, f64>) {                          \
+        return from_math<R>(F64(to_math(lhs), to_math(rhs)));                  \
+      } else {                                                                 \
+        return from_math<R>(F32(to_math(lhs), to_math(rhs)));                  \
+      }                                                                        \
+    }
+
+CHOREO_CUTE_UNARY_NUMERIC(acos, ::acosf, ::acos);
+CHOREO_CUTE_UNARY_NUMERIC(asin, ::asinf, ::asin);
+CHOREO_CUTE_UNARY_NUMERIC(atan, ::atanf, ::atan);
+CHOREO_CUTE_UNARY_NUMERIC(ceil, ::ceilf, ::ceil);
+CHOREO_CUTE_UNARY_NUMERIC(cos, ::cosf, ::cos);
+CHOREO_CUTE_UNARY_NUMERIC(cosh, ::coshf, ::cosh);
+CHOREO_CUTE_UNARY_NUMERIC(exp, ::expf, ::exp);
+CHOREO_CUTE_UNARY_NUMERIC(expm1, ::expm1f, ::expm1);
+CHOREO_CUTE_UNARY_NUMERIC(floor, ::floorf, ::floor);
+CHOREO_CUTE_UNARY_NUMERIC(log, ::logf, ::log);
+CHOREO_CUTE_UNARY_NUMERIC(log1p, ::log1pf, ::log1p);
+CHOREO_CUTE_UNARY_NUMERIC(round, ::roundf, ::round);
+CHOREO_CUTE_UNARY_NUMERIC(sin, ::sinf, ::sin);
+CHOREO_CUTE_UNARY_NUMERIC(sinh, ::sinhf, ::sinh);
+CHOREO_CUTE_UNARY_NUMERIC(sqrt, ::sqrtf, ::sqrt);
+CHOREO_CUTE_UNARY_NUMERIC(tan, ::tanf, ::tan);
+CHOREO_CUTE_UNARY_NUMERIC(tanh, ::tanhf, ::tanh);
+
+CHOREO_CUTE_BINARY_NUMERIC(atan2, ::atan2f, ::atan2);
+CHOREO_CUTE_BINARY_NUMERIC(pow, ::powf, ::pow);
+
+template <typename T>
+CUTE_HOST_DEVICE auto rsqrt(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  return from_math<U>(decltype(x)(1) /
+                      (std::is_same_v<U, f64> ? ::sqrt(x) : ::sqrtf(x)));
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto sigmoid(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  auto one = decltype(x)(1);
+  auto y = one / (one + (std::is_same_v<U, f64> ? ::exp(-x) : ::expf(-x)));
+  return from_math<U>(y);
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto softplus(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  auto y = std::is_same_v<U, f64> ? ::log1p(::exp(x)) : ::log1pf(::expf(x));
+  return from_math<U>(y);
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto gelu(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  auto k0 = std::is_same_v<U, f64> ? 0.044715 : 0.044715f;
+  auto k1 = std::is_same_v<U, f64> ? 0.7978845608028654 : 0.7978845834732056f;
+  auto y = x * (std::is_same_v<U, f64> ? 0.5 : 0.5f) *
+           ((std::is_same_v<U, f64> ? 1.0 : 1.0f) +
+            (std::is_same_v<U, f64> ? ::tanh(k1 * (x + k0 * x * x * x))
+                                    : ::tanhf(k1 * (x + k0 * x * x * x))));
+  return from_math<U>(y);
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto sign(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  return from_math<U>((x > 0) - (x < 0));
+}
+
+template <typename T>
+CUTE_HOST_DEVICE auto isfinite(T value) {
+  using U = DecayT<T>;
+  auto x = to_math(value);
+  return from_math<U>(::isfinite(x) ? 1 : 0);
+}
+
+  #undef CHOREO_CUTE_UNARY_NUMERIC
+  #undef CHOREO_CUTE_BINARY_NUMERIC
+
+} // namespace numerics
 
 // warp-level operation implementation
 namespace warp_cooperative {

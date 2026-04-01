@@ -57,7 +57,8 @@ struct ParallelCounts {
     x = sbe::nu(1);
   }
   bool EqualsOne() const {
-    return (x == sbe::nu(1)) && (y == sbe::nu(1)) && (z == sbe::nu(1));
+    return sbe::ceq(x, sbe::nu(1)) && sbe::ceq(y, sbe::nu(1)) &&
+           sbe::ceq(z, sbe::nu(1));
   }
 };
 
@@ -67,10 +68,23 @@ inline std::ostream& operator<<(std::ostream& os, ParallelCounts pc) {
 }
 
 struct LaunchConfig {
+  ParallelCounts cluster_count;
   ParallelCounts block_count;
   ParallelCounts group4_count;
   ParallelCounts group_count;
   ParallelCounts thread_count;
+
+  void SetClusterCount(const ValueList& dims) {
+    cluster_count.Reset();
+    switch (dims.size()) {
+    case 3: cluster_count.z = dims[2]; [[fallthrough]];
+    case 2: cluster_count.y = dims[1]; [[fallthrough]];
+    case 1: cluster_count.x = dims[0]; break;
+    default: choreo_unreachable("The number of dimensions is not supported.");
+    }
+  }
+
+  bool HasCluster() const { return !cluster_count.EqualsOne(); }
 
   void SetBlockCount(const ValueList& dims) {
     block_count.Reset();
@@ -193,6 +207,8 @@ public:
   const std::string GetFromSymbol() const { return f_sym; }
   const std::string GetToSymbol() const { return t_sym; }
   SwizMode GetSwizzleMode() const { return swiz_mode; }
+
+  uint16_t GetIdx() const { return idx; }
 
   const std::string GetName() const {
     return "__choreo_tma_" + std::to_string(idx);
@@ -535,6 +551,16 @@ protected:
     return cgi.GetFunctionLocalFutures(fname).count(n);
   }
 };
+
+struct LineDirectiveState {
+  int line = -1;
+  std::string file = "";
+  bool valid = false;
+};
+
+std::string EscapeLinePathForDirective(const std::string& path);
+std::string ResolveDebugLinePath(const location& loc, DebugLinePathMode mode);
+std::string PinLineDirectivePerGeneratedLine(const std::string& code);
 
 /////////////////////////////////////////////////////////////
 ///  Util functions shared between targets

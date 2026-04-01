@@ -116,7 +116,7 @@ private:
     return nullptr;
   }
 
-  ptr<SCEV> ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs, std::string op);
+  ptr<SCEV> ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs, Opcode op);
 
 public:
   ScalarEvolutionAnalysis(const ptr<SymbolTable> s_tab, ptr<LoopInfo> l)

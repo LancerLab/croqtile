@@ -1,0 +1,27 @@
+// RUN: choreo -es -t cute -g %s -o - | FileCheck %s --check-prefix=RTTI-ON
+// RUN: choreo -es -t cute %s -o - | FileCheck %s --check-prefix=RTTI-OFF
+
+__co__ void debug_builtin_non_scalar_types(s32 [32, 64] lhs, s32 x) {
+  a : [7, 8, 9];
+  ituple<3> b = {1, x, 3};
+  l = lhs.span_as(2048);
+
+  parallel by 1 : block {
+    with idx in [b] {
+      println(a, b);
+    }
+  }
+}
+
+// RTTI-ON: __global__ void __choreo_device_debug_builtin_non_scalar_types(
+// RTTI-ON: if (__CHOREO_BLOCK_SINGLE__) __choreo_cuda_debug_point__();
+// RTTI-ON: choreo::rtti::bounded_ituple<3> __iv_idx =
+// RTTI-ON: choreo::rtti::spanned<int, 2> __dbg_lhs =
+// RTTI-ON: choreo::rtti::mdspan<3> a =
+// RTTI-ON: choreo::rtti::ituple<3> b =
+// RTTI-ON: choreo::rtti::spanned<int, 1> l =
+
+// RTTI-OFF-NOT: choreo::rtti::mdspan<
+// RTTI-OFF-NOT: choreo::rtti::ituple<
+// RTTI-OFF-NOT: choreo::rtti::bounded_ituple<
+// RTTI-OFF-NOT: choreo::rtti::spanned<

@@ -1,0 +1,125 @@
+{
+  "scopeName": "source.choreo",
+  "name": "Choreo",
+  "patterns": [
+    {
+      "name": "meta.clause.parallel.simple.choreo",
+      "match": "\\b(parallel)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+\\b(by)\\b\\s+(\\d+)\\s*(:)\\s*\\b(group-4|group|block|thread|device|term)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.choreo"
+        },
+        "2": {
+          "name": "variable.parameter.choreo"
+        },
+        "3": {
+          "name": "keyword.control.choreo"
+        },
+        "4": {
+          "name": "constant.numeric.integer.choreo"
+        },
+        "5": {
+          "name": "punctuation.separator.colon.choreo"
+        },
+        "6": {
+          "name": "storage.modifier.parallel-level.choreo"
+        }
+      }
+    },
+    {
+      "name": "meta.clause.parallel.choreo",
+      "match": "\\b(parallel)\\b(?:\\s+[A-Za-z_][A-Za-z0-9_]*)?(?:\\s+\\b(by)\\b\\s+[^:;\\n]+)?\\s*(:)\\s*\\b(group-4|group|block|thread|device|term)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.choreo"
+        },
+        "2": {
+          "name": "keyword.control.choreo"
+        },
+        "3": {
+          "name": "punctuation.separator.colon.choreo"
+        },
+        "4": {
+          "name": "storage.modifier.parallel-level.choreo"
+        }
+      }
+    },
+    {
+      "name": "meta.type.shaped.detail.choreo",
+      "match": "\\b(void|bool|int|half|bfp16|float|double|tf32|f64|f32|f16|bf16|f8|f8_e4m3|f8_e5m2|f8_ue4m3|f8_ue8m0|f6_e3m2|f6_e2m3|f4_e2m1|u64|s64|u32|s32|u16|s16|u8|s8|u6|s6|u4|s4|u2|s2|u1|bin1)\\b\\s*(\\[)\\s*([A-Za-z_][A-Za-z0-9_]*|\\d+)(?:\\s*(,)\\s*([A-Za-z_][A-Za-z0-9_]*|\\d+))*\\s*(\\])",
+      "captures": {
+        "1": {
+          "name": "storage.type.choreo"
+        },
+        "2": {
+          "name": "punctuation.definition.bracket.begin.choreo"
+        },
+        "3": {
+          "name": "entity.name.type.dimension.choreo"
+        },
+        "4": {
+          "name": "punctuation.separator.comma.choreo"
+        },
+        "5": {
+          "name": "entity.name.type.dimension.choreo"
+        },
+        "6": {
+          "name": "punctuation.definition.bracket.end.choreo"
+        }
+      }
+    },
+    {
+      "name": "meta.type.shaped.choreo",
+      "match": "\\b(void|bool|int|half|bfp16|float|double|tf32|f64|f32|f16|bf16|f8|f8_e4m3|f8_e5m2|f8_ue4m3|f8_ue8m0|f6_e3m2|f6_e2m3|f4_e2m1|u64|s64|u32|s32|u16|s16|u8|s8|u6|s6|u4|s4|u2|s2|u1|bin1)\\b\\s*(\\[[^\\]\\n]+\\])",
+      "captures": {
+        "1": {
+          "name": "storage.type.choreo"
+        },
+        "2": {
+          "name": "storage.type.shape.choreo"
+        }
+      }
+    },
+    {
+      "match": "\\b(local|shared|global)\\b",
+      "name": "storage.modifier.specifier.choreo"
+    },
+    {
+      "match": "\\b(__co__|__cok__|__real_cok__|if|else|inthreads|parallel|by|with|in|foreach|wait|call|select|return|where|while|break|continue|vectorize|after|cdiv)\\b",
+      "name": "keyword.control.choreo"
+    },
+    {
+      "match": "\\b(dma|tma|mma|sync|trigger|assert|swap|rotate|print|println|frag)\\b",
+      "name": "keyword.other.choreo"
+    },
+    {
+      "match": "\\.(copy|transp|pad|swizzle|swiz|sp|zfill|any|async|span|span_as|mdata|data|view|from|chunkat|chunk|subspan|modspan|step|stride|at|fill|load|store|row|col|scale|commit)\\b",
+      "name": "support.function.choreo"
+    },
+    {
+      "match": "\\b(term|device|block|group(?:-4)?|thread|mutable)\\b",
+      "name": "storage.modifier.choreo"
+    },
+    {
+      "match": "\\b(void|bool|int|half|bfp16|float|double|tf32|f64|f32|f16|bf16|f8|f8_e4m3|f8_e5m2|f8_ue4m3|f8_ue8m0|f6_e3m2|f6_e2m3|f4_e2m1|u64|s64|u32|s32|u16|s16|u8|s8|u6|s6|u4|s4|u2|s2|u1|bin1)\\b",
+      "name": "storage.type.choreo"
+    },
+    {
+      "match": "\\b(__acos|__asin|__atan|__atan2|__ceil|__cos|__cosh|__exp|__expm1|__floor|__gelu|__isfinite|__round|__rsqrt|__sigmoid|__sinh|__softplus|__sqrt|__tan|__log1p|__log|__pow|__sign|__sin|__tanh|__alignup|__aligndown)\\b",
+      "name": "support.function.builtin.choreo"
+    },
+    {
+      "match": "\\b(__cpp__)\\b",
+      "name": "entity.name.function.preprocessor.choreo"
+    },
+    {
+      "match": "\\b(__device__|__co_device__|__attribute__)\\b",
+      "name": "storage.modifier.attribute.choreo"
+    },
+    {
+      "include": "source.cpp"
+    }
+  ],
+  "repository": {},
+  "uuid": "7b7c50dc-c3b0-4b94-a8ef-b2be8f9f61ff"
+}

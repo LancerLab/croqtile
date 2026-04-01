@@ -1,0 +1,47 @@
+// RUN: choreo -es -t cute %s -o - | FileCheck %s
+
+__co__ f32 [64] numerics_codegen(f32 [64] lhs, f32 [64] rhs) {
+  f32[lhs.span(0)] output;
+  parallel p by 64 {
+    x = lhs.at(p);
+    y = rhs.at(p);
+    a = __acos(x * 0.5f);
+    b = __asin(x * 0.5f);
+    c = __atan(x);
+    d = __log(x + 2.5f);
+    e = __log1p(x + 0.5f);
+    f = __expm1(x);
+    g = __sqrt(x + 2.5f);
+    h = __rsqrt(x + 2.5f);
+    i = __sin(x);
+    j = __cos(x);
+    k = __cosh(x * 0.25f);
+    l = __sinh(x * 0.25f);
+    m = __exp(x * 0.25f);
+    n = __tan(x * 0.25f);
+    o = __tanh(x);
+    q = __pow(x + 2.0f, y + 2.0f);
+    r = __atan2(x, y);
+    output.at(p) = a + b + c + d + e + f + g + h + i + j + k + l + m + n +
+                   o + q + r;
+  }
+  return output;
+}
+
+// CHECK: choreo::nv_cute::numerics::acos(x * 0.500000f)
+// CHECK: choreo::nv_cute::numerics::asin(x * 0.500000f)
+// CHECK: choreo::nv_cute::numerics::atan(x)
+// CHECK: choreo::nv_cute::numerics::log(x + 2.500000f)
+// CHECK: choreo::nv_cute::numerics::log1p(x + 0.500000f)
+// CHECK: choreo::nv_cute::numerics::expm1(x)
+// CHECK: choreo::nv_cute::numerics::sqrt(x + 2.500000f)
+// CHECK: choreo::nv_cute::numerics::rsqrt(x + 2.500000f)
+// CHECK: choreo::nv_cute::numerics::sin(x)
+// CHECK: choreo::nv_cute::numerics::cos(x)
+// CHECK: choreo::nv_cute::numerics::cosh(x * 0.250000f)
+// CHECK: choreo::nv_cute::numerics::sinh(x * 0.250000f)
+// CHECK: choreo::nv_cute::numerics::exp(x * 0.250000f)
+// CHECK: choreo::nv_cute::numerics::tan(x * 0.250000f)
+// CHECK: choreo::nv_cute::numerics::tanh(x)
+// CHECK: choreo::nv_cute::numerics::pow(x + 2.000000f, y + 2.000000f)
+// CHECK: choreo::nv_cute::numerics::atan2(x, y)

@@ -55,6 +55,6 @@ __co__ void fail3(f32 [36, 27, 128] input, f32 [18, 9, 128] input1) {
     }
   }
 }
-// CHECK: error: forbid to associated async dma without a named future.
+// CHECK: error: forbid to associated async dma without a named future or a named event.
 
 // CHECK: Totally 4 errors have been detected.

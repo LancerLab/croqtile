@@ -23,6 +23,7 @@ enum class ParallelLevel {
   GROUP,
   GROUPx4,
   BLOCK,
+  CLUSTER, /* thread block cluster (TBC), above block */
   DEVICE,
   TERM /* terminal machine in cluster*/,
   SEQ,
@@ -414,9 +415,9 @@ inline static std::string GetStringFrom(ParallelLevel st) {
   static const std::unordered_map<ParallelLevel, std::string> enumToString = {
       {ParallelLevel::THREAD, "thread"},   {ParallelLevel::GROUP, "group"},
       {ParallelLevel::GROUPx4, "group-4"}, {ParallelLevel::BLOCK, "block"},
-      {ParallelLevel::DEVICE, "device"},   {ParallelLevel::TERM, "term"},
-      {ParallelLevel::SEQ, "sequential"},  {ParallelLevel::NONE, "none"},
-      {ParallelLevel::UNKNOWN, "unknown"},
+      {ParallelLevel::CLUSTER, "cluster"}, {ParallelLevel::DEVICE, "device"},
+      {ParallelLevel::TERM, "term"},       {ParallelLevel::SEQ, "sequential"},
+      {ParallelLevel::NONE, "none"},       {ParallelLevel::UNKNOWN, "unknown"},
   };
 
   auto it = enumToString.find(st);
@@ -448,9 +449,9 @@ inline static std::ostream& operator<<(std::ostream& os, BaseType bt) {
         E5M2:   <= 57344
     note: f8 may or may not have implicit leading bit!
   f16:  E5M11:  <= 65504
-  bf16: E8M8:   <= 3.38×10^38
-  f32:  E8M24:  <= 3.4×10^38
-  f64:  E11M53: <= 1.79×10^308
+  bf16: E8M8:   <= 3.38x10^38
+  f32:  E8M24:  <= 3.4x10^38
+  f64:  E11M53: <= 1.79x10^308
 
   U8:  [0, 255]
   S8:  [-128, 127]

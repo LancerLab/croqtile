@@ -1,0 +1,29 @@
+// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+//
+// When the buffer index `j` is derived from a local mutable variable rather
+// than a function parameter, `j` is only computable inside the device kernel.
+// The assertion must therefore be emitted in device code immediately after the
+// definition of `j` -- it cannot be promoted to a host-side runtime_check.
+//
+// The variable definition acts as a hoisting barrier: the assertion is placed
+// right after `int j = (k + 1);` and before the actual buffer access.
+
+__co__ void foo(int k) {
+  parallel p by 8 {
+    shared s32 [4] buf;
+    mutable int j = k + 1;
+    mutable int sum = 0;
+    foreach l in [3]
+      sum = sum + j + l;
+    x = buf.at(j);
+  }
+}
+
+// Device code: assertion appears immediately after the local definition of j.
+// CHECK: int j = (k + 1);
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(j) >= 0LL)
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(j) < 4LL)
+
+// Host code: no runtime_check for j -- it is a locally computed value and is
+// not observable at host entry.
+// CHECK-NOT: runtime_check{{.*}}"The 1st index `j`

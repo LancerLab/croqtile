@@ -1,0 +1,39 @@
+// RUN: choreo -es --runtime-check=low --show-assess %s -o - 2>&1 | FileCheck %s
+//
+// --show-assess report with --runtime-check=low.
+//
+// When the cost threshold is set to "low", only low-cost assertions are
+// enabled.  High-cost assertions (those inside loops) still appear in the
+// report but with enabled=no, confirming they were analysed but suppressed.
+//
+// This test also verifies that no choreo_assert call appears in the generated
+// source when the assertion has been filtered out by the cost gate.
+//
+// The program has two assertions for buf.at(j):
+//   - j is a locally-computed value inside a parallel block -> HIGH cost.
+//   - With --runtime-check=low both assertions are enabled=no.
+// Because neither assertion is emitted, no choreo_assert should appear in the
+// device code (stdout).
+
+__co__ void foo(int k) {
+  parallel p by 8 {
+    shared s32 [4] buf;
+    mutable int j = k + 1;
+    mutable int sum = 0;
+    foreach l in [3]
+      sum = sum + j + l;
+    x = buf.at(j);
+  }
+}
+
+// Header still appears -- the pass ran and analysed both assertions.
+// CHECK: [assertions] function: foo  (2 assessed:  0 static-true,  0 static-false,  2 runtime)
+
+// Both assertions are present in the report but marked disabled.
+// CHECK: [0] HOIST      enabled=no   cost=high
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [1] HOIST      enabled=no   cost=high
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+
+// No device-side choreo_assert is emitted when all assertions are disabled.
+// CHECK-NOT: choreo::choreo_assert

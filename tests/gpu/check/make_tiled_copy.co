@@ -1,0 +1,101 @@
+// RUN: not choreo -t cute -arch=sm_86 -fsmem-align=128 %s 2>&1 | FileCheck %s --check-prefix=CHECK
+
+#include "choreo.h"
+
+__co__ auto f0(s8[M, N] input) {
+  parallel p by 1 : block {
+    foreach {x, y} in [4, 4] {
+      s = dma.copy input.subspan(128, 128).at(x, y) => shared;
+      parallel q by 16 : thread {}
+    }
+  }
+}
+// CHECK: info: alignment is not satisfied, unable to utilize vectorized load inst. Fallback to UniversalCopy.
+// CHECK: info: #thread in block (16) is less than 32, unable to do warp-per-row make_tiled_copy. Fallback to normal copy.
+
+__co__ auto f1(u8[M, N] input, int thr_cnt) {
+  parallel p by 1 : block
+    foreach {x, y} in [4, 4] {
+      s = dma.copy input.subspan(128, 128).at(x, y) => shared;
+      parallel q by thr_cnt : thread {}
+    }
+}
+// CHECK: info: #thread (::f1::thr_cnt) is dynamic, unable to do make_tiled_copy.
+
+__co__ auto f3(u8[128, 128] input) {
+  parallel p by 1 : block
+    foreach {x, y} in [4, 4] {
+      s = dma.copy input.span_as(4, 32, 128).subspan(1, 8, _).at(x, y, 0) => shared;
+      parallel q by 128 : thread {}
+    }
+}
+// CHECK: info: the span (maybe after span_as) is not of rank 2.
+
+__co__ auto f4(u8[M, N] input) {
+  parallel p by 1 : block
+    foreach {x, y} in [4, 4] {
+      s = dma.copy input.chunkat(x, y) => shared;
+      parallel q by 1 : group {}
+    }
+}
+// CHECK: info: the tile is of dynamic shape ([(::f4::M / 4), (::f4::N / 4)]), unable to do make_tiled_copy.
+
+__co__ auto f5(u8[M, N] input) {
+  parallel p by 1 : block
+    foreach {x, y} in [4, 4] {
+      s = dma.copy input.view(128, 128 : M, 2).from(x, y) => shared;
+      parallel q by 128 : thread {}
+    }
+}
+// CHECK: info: the col stride of span is 2. make_tiled_copy can be implemented only when it is integer 1 (row-major).
+
+__co__ auto f6(u8[M, N] input, int strd) {
+  parallel p by 1 : block
+    foreach {x, y} in [4, 4] {
+      s = dma.copy input.view(128, 128 : M, strd).from(x, y) => shared;
+      parallel q by 128 : thread {}
+    }
+}
+// CHECK: info: the col stride of span is dynamic (::f6::strd). make_tiled_copy can be implemented only when it is integer 1 (row-major).
+
+__co__ auto f7(u8[128, 126] input) {
+  parallel p by 1 : block
+    foreach {x, y} in [4, 2] {
+      s = dma.copy input.subspan(32, 63).at(x, y) => shared;
+      parallel q by 128 : thread {}
+    }
+}
+// CHECK: info: alignment is not satisfied, unable to utilize vectorized 128 bit load inst: tensor alignment is 16 bytes, stride of first dim of tile is 126 bytes.
+// CHECK: info: alignment is not satisfied, unable to utilize vectorized 64 bit load inst: tensor alignment is 16 bytes, stride of first dim of tile is 126 bytes.
+// CHECK: info: alignment is not satisfied, unable to utilize vectorized 32 bit load inst: tensor alignment is 16 bytes, stride of first dim of tile is 126 bytes.
+// CHECK: info: row_byte (63) is not divisible by 2, unable to do 16 bits vectorized copy.
+// CHECK: info: alignment is not satisfied, unable to utilize vectorized load inst. Fallback to UniversalCopy.
+// CHECK: info: #col of tile is not divisible by 32, unable to do warp-per-row make_tiled_copy. Fallback to normal copy.
+
+__co__ auto foo8(u8[128, 128] input) {
+  parallel p by 1 : block
+    foreach {x, y} in [4, 4] {
+      s = dma.copy input.subspan(32, 32).at(x, y) => shared;
+      parallel q by 127 : thread {}
+    }
+}
+// CHECK: info: #thread (127) is not divisible by thr_per_row (2), unable to do 128 bits vectorized copy.
+// CHECK: info: #thread (127) is not divisible by thr_per_row (4), unable to do 64 bits vectorized copy.
+// CHECK: info: #thread (127) is not divisible by thr_per_row (8), unable to do 32 bits vectorized copy.
+// CHECK: info: #thread (127) is not divisible by thr_per_row (16), unable to do 16 bits vectorized copy.
+// CHECK: info: alignment is not satisfied, unable to utilize vectorized load inst. Fallback to UniversalCopy.
+// CHECK: info: #thread in block (127) is not divisible by #thread in a warp (32), unable to do make_tiled_copy.
+
+__co__ auto f9(u8[128, 128] input) {
+  parallel p by 1 : block
+    foreach {x, y} in [4, 4] {
+      s = dma.copy input.subspan(33, 32).at(x, y) => shared;
+      parallel q by 128 : thread {}
+    }
+}
+// CHECK: info: #row of tile (33) is not divisible by thr_per_col (64), unable to do 128 bits vectorized copy.
+// CHECK: info: #row of tile (33) is not divisible by thr_per_col (32), unable to do 64 bits vectorized copy.
+// CHECK: info: #row of tile (33) is not divisible by thr_per_col (16), unable to do 32 bits vectorized copy.
+// CHECK: info: #row of tile (33) is not divisible by thr_per_col (8), unable to do 16 bits vectorized copy.
+// CHECK: info: alignment is not satisfied, unable to utilize vectorized load inst. Fallback to UniversalCopy.
+// CHECK: info: #row of tile (33) is not divisible by #thread per col (4), unable to do make_tiled_copy.

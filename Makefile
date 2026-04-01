@@ -61,7 +61,7 @@ GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 
 # For CMAKE config
 CMAKE_BUILD_DIR = $(BUILD_DIR)
-CMAKE = cmake
+CMAKE = /usr/bin/cmake
 CMAKE_BUILD_TYPE = Release
 STANDALONE = OFF
 

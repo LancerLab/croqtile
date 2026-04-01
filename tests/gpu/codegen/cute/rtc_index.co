@@ -1,0 +1,24 @@
+// RUN: choreo -es --runtime-check=all -t cute %s -o - | FileCheck %s
+
+// DEF_SITE bound checks: data.at(index0) and data.at(index1)
+// The indices are locally defined (let index0 = ...) inside a foreach,
+// so the assertions are classified as DEF_SITE and emitted in device code.
+
+__co__ void foo(s32 [1024] data, s32 [7, 2] indices) {
+  parallel by 1 {
+    foreach {i} in [indices.span(0)] {
+      index0 = indices.at(i, 0); 
+      index1 = indices.at(i, 1); 
+      data.at(index0) += data.at(index1);
+    }
+  }
+}
+
+// Device code: DEF_SITE assertions for index0 appear after its definition.
+// CHECK: int index0 =
+// CHECK: choreo::choreo_assert((static_cast<long long>(index0) >= 0{{(LL)?}}), "The 1st index `index0` of element access 'data' should be greater than or equal to 0, {{.*}}");
+// CHECK: choreo::choreo_assert((static_cast<long long>(index0) < 1024{{(LL)?}}), "The 1st index `index0` of element access 'data' should be less than 1024, {{.*}}");
+// Device code: DEF_SITE assertions for index1 appear after its definition.
+// CHECK: int index1 =
+// CHECK: choreo::choreo_assert((static_cast<long long>(index1) >= 0{{(LL)?}}), "The 1st index `index1` of element access 'data' should be greater than or equal to 0, {{.*}}");
+// CHECK: choreo::choreo_assert((static_cast<long long>(index1) < 1024{{(LL)?}}), "The 1st index `index1` of element access 'data' should be less than 1024, {{.*}}");

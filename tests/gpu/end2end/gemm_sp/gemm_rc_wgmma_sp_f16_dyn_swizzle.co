@@ -1,0 +1,112 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a --use-warpspec %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+// Tests: f16 sparse WGMMA with warpspec 1p1c + swizzle variants.
+// K=64 (single k-step). Tests swizzle<64,128> pattern with persistent TMA async.
+// Note: only ONE warpspec kernel per file (2+ warpspec kernels in one file
+// triggers a runtime assertion in the current compiler).
+
+template <typename T>
+using SparsePolicyWGMMA = choreo::utils::SparsePolicyWGMMA<T>;
+
+template <typename T>
+void init_random_b(choreo::spanned_data<T, 2>& rhs, std::mt19937& gen) {
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for (size_t j = 0; j < rhs.shape()[0]; ++j)
+    for (size_t k = 0; k < rhs.shape()[1]; ++k) {
+      float value = dist(gen);
+      if (std::fabs(value) < 0.1f) value = (value < 0.0f ? -0.25f : 0.25f);
+      rhs[j][k] = choreo::utils::from_f32<T>(value);
+    }
+}
+
+template <typename T>
+int verify_result(const char* tag,
+                  T* lhs_ptr, size_t lhs_M, size_t lhs_K,
+                  T* rhs_ptr, size_t rhs_M, size_t rhs_K,
+                  float* res_ptr, size_t res_M, size_t res_N, float tolerance) {
+  int errors = 0;
+  for (size_t i = 0; i < res_M; ++i)
+    for (size_t j = 0; j < res_N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < lhs_K; ++k)
+        ref += choreo::to_f32(lhs_ptr[i * lhs_K + k]) * choreo::to_f32(rhs_ptr[j * rhs_K + k]);
+      float got = res_ptr[i * res_N + j];
+      float diff = std::abs(got - ref);
+      if (diff > tolerance) ++errors;
+    }
+  std::cout << tag << ": " << errors << " errors\n";
+  return errors;
+}
+
+// =============================================================================
+// Kernel: f16 warpspec + 1p1c + swizzle<64,128>
+// K=64, N=32, TILE_K=64 (single k-step), lhs swiz64, rhs swiz128
+// META_COLS=8, metadata indexed as .at(bm, ik).chunkat(_, iw)
+// =============================================================================
+#define K1_ 64
+#define M1_ 64
+#define LS1_ 64
+#define RS1_ 128
+
+__co__ auto matmul_sp_f16_1p1c_swiz64_128(
+    f16 [M1_, K1_ / 2] lhs_packed, u8 [M1_, K1_ / 8] lhs_meta,
+    f16 [32, K1_] rhs) {
+  f32 [M1_, 32] output{0.0f};
+  int WM = 64, WN = 16, TK = 64, WK = 32, PTK = 32, MC = 8, ST = 2;
+  parallel {bm, bn} by [cdiv(M1_, WM), cdiv(32, WN)] : block {
+    shared event full[ST], empty[ST];
+    shared f16 [ST * WM, PTK] ls;
+    shared f16 [ST * WN, TK] rs;
+    shared f32 [WM, WN] os;
+    parallel p1 by 2 : group-4 {
+      inthreads.async (p1 == 0) {
+        foreach {ik} in [cdiv(K1_, TK)] {
+          stage = ik % ST;
+          wait empty[stage];
+          tma.copy.async<full[stage]>.swiz<LS1_> lhs_packed.subspan(WM, PTK).at(bm, ik) => ls.subspan(WM, PTK).at(stage, 0);
+          tma.copy.async<full[stage]>.swiz<RS1_> rhs.subspan(WN, TK).at(bn, ik) => rs.subspan(WN, TK).at(stage, 0);
+          trigger full[stage];
+        }
+      }
+      inthreads.async (p1 == 1) {
+        mc = mma.fill.f32 0.0f;
+        foreach {s} in [ST] { trigger empty[s]; }
+        foreach {ik} in [cdiv(K1_, TK)] {
+          stage = ik % ST;
+          wait full[stage];
+          foreach {iw} in [cdiv(TK, WK)] {
+            ma = mma.load.swiz<LS1_> ls.subspan(WM, PTK).at(stage, 0).chunkat(_, iw);
+            mb = mma.load.swiz<RS1_> rs.subspan(WN, TK).at(stage, 0).chunkat(_, iw);
+            me = mma.load lhs_meta.subspan(WM, MC).at(bm, ik).chunkat(_, iw);
+            mma.row.row.sp mc, ma, mb, me;
+          }
+          mma.commit;
+          trigger empty[stage];
+        }
+        mma.store mc, os;
+        tma.copy os => output.chunkat(bm, bn);
+      }
+    }
+  }
+  return output;
+}
+
+int main() {
+  std::mt19937 gen(42);
+  int N = 32, K = 64, M = 64;
+  auto ld = choreo::make_spandata<choreo::f16>(M, K);
+  auto lp = choreo::make_spandata<choreo::f16>(M, K / 2);
+  auto lm = choreo::make_spandata<choreo::u8>(M, K / 8);
+  auto rh = choreo::make_spandata<choreo::f16>(N, K);
+  SparsePolicyWGMMA<choreo::f16>::init_structured_sparse_A(ld, gen);
+  init_random_b<choreo::f16>(rh, gen);
+  SparsePolicyWGMMA<choreo::f16>::encode(ld, lp, lm);
+  auto res = matmul_sp_f16_1p1c_swiz64_128(lp.view(), lm.view(), rh.view());
+  int errors = verify_result<choreo::f16>("f16_swiz64_128", ld.data(), ld.shape()[0], ld.shape()[1], rh.data(), rh.shape()[0], rh.shape()[1], res.data(), res.shape()[0], res.shape()[1], 0.5f);
+  choreo::choreo_assert(errors == 0, "Sparse WGMMA f16 swizzle 64 128 failed");
+  std::cout << "Test Passed\n";
+}
+
+// CHECK: f16_swiz64_128: 0 errors
+// CHECK: Test Passed

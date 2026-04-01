@@ -55,7 +55,8 @@ private:
   AST::ParallelBy* block_pb = nullptr;
   ParallelLevel inner_pb_level = ParallelLevel::BLOCK;
   std::vector<AST::ParallelBy*> pb_stack;
-  AST::InThreadsBlock* in_thr_block = nullptr;
+  std::stack<AST::InThreadsBlock*> in_thr_block_stack;
+  std::set<std::string> block_tma_futures;
 
 private:
   auto Level() const {
@@ -69,9 +70,15 @@ private:
       pb_stack.clear();
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       auto pb_level = pb->GetLevel();
-      if (pb_level == ParallelLevel::BLOCK) {
-        block_pb = pb;
+      if (pb_level == ParallelLevel::CLUSTER) {
         assert(pb_stack.empty());
+        auto& tma_descs = cgi.GetTMADescs();
+        tma_descs.emplace(pb, std::vector<TMADesc>{});
+      } else if (pb_level == ParallelLevel::BLOCK) {
+        block_pb = pb;
+        assert(pb_stack.empty() ||
+               (pb_stack.size() == 1 &&
+                pb_stack.back()->GetLevel() == ParallelLevel::CLUSTER));
         auto& tma_descs = cgi.GetTMADescs();
         tma_descs.emplace(pb, std::vector<TMADesc>{});
       } else {
@@ -90,12 +97,16 @@ private:
 
       auto& lcs = cgi.GetFunctionLaunches(fname);
 
-      // Add a new launch config
-      if (pb_level == ParallelLevel::BLOCK) lcs.push_back({});
+      if (pb_level == ParallelLevel::CLUSTER) {
+        lcs.push_back({});
+      } else if (pb_level == ParallelLevel::BLOCK) {
+        if (lcs.empty() || !lcs.back().HasCluster()) lcs.push_back({});
+      }
 
       // Set the launch configure
       auto& lc = lcs.back();
       switch (pb->GetLevel()) {
+      case ParallelLevel::CLUSTER: lc.SetClusterCount(pb->BoundValues()); break;
       case ParallelLevel::BLOCK: lc.SetBlockCount(pb->BoundValues()); break;
       case ParallelLevel::GROUP: lc.SetGroupCount(pb->BoundValues()); break;
       case ParallelLevel::GROUPx4: lc.SetGroupx4Count(pb->BoundValues()); break;
@@ -107,7 +118,7 @@ private:
     } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
       if (inner_pb_level == ParallelLevel::GROUPx4 ||
           inner_pb_level == ParallelLevel::GROUP)
-        in_thr_block = it;
+        in_thr_block_stack.push(it);
       // todo: predicate of inthreads_block should be analyzed to make sure it
       // is compatible with the inner parallel-by level. For example, if the
       // inner parallel-by is group, the predicate should be "p1 == 0" to make
@@ -138,7 +149,9 @@ private:
       assert(lvl == Level());
       pb_stack.pop_back();
       if (lvl == ParallelLevel::BLOCK) {
-        assert(pb_stack.empty());
+        assert(pb_stack.empty() ||
+               (pb_stack.size() == 1 &&
+                pb_stack.back()->GetLevel() == ParallelLevel::CLUSTER));
         auto& children = cgi.GetPBTree(fname).GetChildren(pb);
         if (children.size() >= 2) {
           // check if there are multiple compatible branches
@@ -199,7 +212,9 @@ private:
         block_pb = nullptr;
       }
     } else if (isa<AST::InThreadsBlock>(&n)) {
-      in_thr_block = nullptr;
+      if (inner_pb_level == ParallelLevel::GROUPx4 ||
+          inner_pb_level == ParallelLevel::GROUP)
+        in_thr_block_stack.pop();
     }
     return true;
   }
@@ -246,7 +261,21 @@ public:
   }
 
   bool Visit(AST::DMA& n) override {
-    if (n.IsDummy()) return true;
+    auto future_name = n.future;
+
+    if (n.IsDummy()) {
+      if (n.IsTMA()) {
+        auto in_thr_block =
+            (in_thr_block_stack.empty() ? nullptr : in_thr_block_stack.top());
+        if (!in_thr_block) {
+          // this future of tma is define in block scope, so it is shared among
+          // threads in the block. record it in block_tma_futures to distinguish
+          // with other futures of tma defined in group or warpgroup scope.
+          block_tma_futures.insert(future_name);
+        }
+      }
+      return true;
+    }
 
     if (n.IsTMA()) {
       cgi.GetFunctionTrait(fname).has_tma = true;
@@ -274,6 +303,15 @@ public:
                                 InScopeName(n.GetSrc()->RefSymbol()),
                                 InScopeName(n.GetDst()->RefSymbol()),
                                 n.GetSwizzleMode(), inner_pb_level);
+        auto in_thr_block =
+            (in_thr_block_stack.empty() ? nullptr : in_thr_block_stack.top());
+        bool is_block_scope = block_tma_futures.count(future_name) > 0;
+        if (is_block_scope) {
+          // now this tma may enter a inthreads block, but it is still shared
+          // among threads in the block, so we still treat it as block scope and
+          // set in_thr_block to nullptr.
+          in_thr_block = nullptr;
+        }
         tma_desc.SetInThreadsBlock(in_thr_block);
         tma_descs.at(block_pb).push_back(tma_desc);
       } else
@@ -364,6 +402,7 @@ public:
                        << (op.IsSparse() ? ", " + PSTR(op.ExecOperand(3)) : "")
                        << "\n");
     } break;
+    case AST::MMAOperation::Scale: break;
     case AST::MMAOperation::Store: break;
     case AST::MMAOperation::Commit: break;
     default: choreo_unreachable("unsupported mma operation.");
@@ -377,7 +416,7 @@ public:
       ret_name = id->name;
     } else {
       if (auto expr = dyn_cast<AST::Expr>(n.value);
-          expr && (expr->op == "dataof" || expr->op == "mdataof")) {
+          expr && (expr->op == Op::DataOf || expr->op == Op::MDataOf)) {
         id = cast<AST::Expr>(expr->GetR())->GetSymbol().get();
         assert(id && "Expect a symbol.");
         // `return select.data;` is ignored in cgi.

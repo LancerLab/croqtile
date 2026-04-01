@@ -319,7 +319,7 @@ public:
             if (isa<AST::IntIndex>(ref.get())) {
               // apply desugaring a {(0), 1} -> {a(0), 1}
               auto new_expr = AST::Make<AST::Expr>(
-                  expr->LOC(), "dimof", list_ref->Clone(), ref->Clone());
+                  expr->LOC(), Op::DimOf, list_ref->Clone(), ref->Clone());
               VST_DEBUG(dbgs() << "Desugar ref: " << STR(*expr) << " ---> "
                                << STR(*new_expr) << "\n");
               new_expr->SetType(MakeIntegerType());
@@ -355,7 +355,7 @@ public:
           if (!isa<AST::IntIndex>(ref.get())) return nullptr;
 
           // apply desugaring a {(0), 1} -> {a(0), 1}
-          auto ret = AST::Make<AST::Expr>(expr->LOC(), "dimof",
+          auto ret = AST::Make<AST::Expr>(expr->LOC(), Op::DimOf,
                                           list_ref->Clone(), ref->Clone());
           ret->SetType(MakeIntegerType()); // must be integer
 
@@ -379,7 +379,7 @@ public:
       return true;
     }
 
-    if (n.op == "sizeof" && isa<SpannedType>(n.GetR())) {
+    if (n.op == Op::SizeOf && isa<SpannedType>(n.GetR())) {
       auto id = cast<AST::Expr>(n.GetR())->GetSymbol();
       assert(!SuffixedWith(id->name, ".span"));
       VST_DEBUG(dbgs() << "Desugaring sizeof: " << id->name << " ->");
@@ -400,19 +400,19 @@ public:
             // __alignup(a, b) -> (a + b - 1) / b * b
             auto il = AST::MakeIntExpr(n.LOC(), 1);
             il->SetType(nty);
-            auto add = AST::Make<AST::Expr>(n.LOC(), "+", arg0, arg1);
+            auto add = AST::Make<AST::Expr>(n.LOC(), Op::Add, arg0, arg1);
             add->SetType(nty);
-            auto sub = AST::Make<AST::Expr>(n.LOC(), "-", add, il);
+            auto sub = AST::Make<AST::Expr>(n.LOC(), Op::Sub, add, il);
             sub->SetType(nty);
-            auto div = AST::Make<AST::Expr>(n.LOC(), "/", sub, arg1);
+            auto div = AST::Make<AST::Expr>(n.LOC(), Op::Div, sub, arg1);
             div->SetType(nty);
-            new_expr = AST::Make<AST::Expr>(n.LOC(), "*", div, arg1);
+            new_expr = AST::Make<AST::Expr>(n.LOC(), Op::Mul, div, arg1);
             new_expr->SetType(nty);
           } else if (func_name == "__aligndown") {
             // __aligndown(a, b) -> a / b * b
-            auto div = AST::Make<AST::Expr>(n.LOC(), "/", arg0, arg1);
+            auto div = AST::Make<AST::Expr>(n.LOC(), Op::Div, arg0, arg1);
             div->SetType(nty);
-            new_expr = AST::Make<AST::Expr>(n.LOC(), "*", div, arg1);
+            new_expr = AST::Make<AST::Expr>(n.LOC(), Op::Mul, div, arg1);
             new_expr->SetType(nty);
           }
           VST_DEBUG(dbgs() << "Desugar " << STR(n) << " -> " << PSTR(new_expr)
@@ -514,7 +514,7 @@ public:
               expr->LOC(), AST::Make<AST::IntLiteral>(expr->LOC(), idx));
           ii->SetType(MakeIndexType());
           auto new_expr =
-              AST::Make<AST::Expr>(expr->LOC(), "dimof", expr->Clone(), ii);
+              AST::Make<AST::Expr>(expr->LOC(), Op::DimOf, expr->Clone(), ii);
           new_expr->SetType(MakeIntegerType());
           mv->Append(new_expr);
           VST_DEBUG(dbgs() << "\t" << PSTR(new_expr) << "\n");
@@ -709,7 +709,7 @@ public:
       for (auto& v : tsi->IndexNodes()) {
         ++i;
         auto expr = cast<AST::Expr>(v);
-        if (expr->op == "getith") {
+        if (expr->op == Op::GetIth) {
           // 'getith' must be kept.
           if (auto lexpr = dyn_cast<AST::Expr>(expr->GetL())) {
             if (!lexpr->GetSymbol()) {
@@ -870,7 +870,7 @@ public:
         if (bound_expr->GetSymbol()) {
           repls.emplace_back(i, bound_expr);
           continue;
-        } else if (bound_expr->op == "getith") {
+        } else if (bound_expr->op == Op::GetIth) {
           if (auto lexpr = dyn_cast<AST::Expr>(bound_expr->GetL())) {
             if (!lexpr->GetSymbol()) {
               int index = GetValidNodeIndex() +
@@ -1385,6 +1385,7 @@ public:
     bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
 
     switch (level) {
+    case ParallelLevel::CLUSTER: break;
     case ParallelLevel::BLOCK: {
       FillPB(pb, AppendInner, ParallelLevel::THREAD);
       if (support_4x_group) {
@@ -1417,6 +1418,7 @@ public:
     bool support_group = TargetHasLevel(ParallelLevel::GROUP);
     bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
     switch (level) {
+    case ParallelLevel::CLUSTER: break;
     case ParallelLevel::BLOCK: {
     } break;
     case ParallelLevel::GROUPx4: {

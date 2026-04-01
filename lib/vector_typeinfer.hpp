@@ -190,7 +190,7 @@ public:
       if (IsActualVectorType(ref_ty)) { n.SetType(ref_ty); }
     } else if (n.IsBinary()) {
       auto op = n.GetOp();
-      if (op == "dimof") {
+      if (op == Op::DimOf) {
         choreo_unreachable("dimof expr can not be vectorized.");
       }
       auto lhs = n.GetL();

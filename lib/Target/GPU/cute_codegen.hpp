@@ -1,6 +1,7 @@
 #ifndef __CHOREO_CODEGEN_CUTE_HPP__
 #define __CHOREO_CODEGEN_CUTE_HPP__
 
+#include <deque>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -9,6 +10,7 @@
 
 #include "ast.hpp"
 #include "codegen.hpp"
+#include "codegen_utils.hpp"
 #include "operator_info.hpp"
 #include "types.hpp"
 
@@ -71,129 +73,7 @@ inline const char* NameBaseType(BaseType bt) {
   return "";
 }
 
-// map choreo symbols to the generated host, device names
-class ScopedSymbolMap {
-  using SymbolMap = std::unordered_map<std::string, std::string>;
-  std::vector<SymbolMap> host_map;
-  std::vector<SymbolMap> device_map;
-  bool debug;
-
-public:
-  ScopedSymbolMap(bool d = false) : debug(d) {}
-  void EnterScope() {
-    host_map.push_back({});
-    device_map.push_back({});
-  }
-  void LeaveScope() {
-    host_map.pop_back();
-    device_map.pop_back();
-  }
-  void MapHostSymbol(const std::string& csym, const std::string& name) {
-    assert(!host_map.back().count(csym) && "symbol existed");
-    if (debug)
-      dbgs() << "[Host] Map symbol: " << csym << " -> " << name << "\n";
-    host_map.back()[csym] = name;
-  }
-  void MapDeviceSymbol(const std::string& csym, const std::string& name) {
-    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    assert(!device_map.back().count(csym) && "symbol existed");
-    if (debug)
-      dbgs() << "[Device] Map symbol: " << csym << " -> " << name << "\n";
-    device_map.back()[csym] = name;
-  }
-  void MapDeviceSymbolIfNotExist(const std::string& csym,
-                                 const std::string& name) {
-    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    if (!device_map.back().count(csym)) {
-      if (debug)
-        dbgs() << "[Device] Map symbol: " << csym << " -> " << name << "\n";
-      MapDeviceSymbol(csym, name);
-    }
-  }
-
-  void DumpHostMap() {
-    dbgs()
-        << "==================== Host Map Information ====================\n";
-    // Print a formatted table with columns for symbol and buffer name
-    dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Host Name" << "\n";
-    dbgs()
-        << "--------------------------------------------------------------\n";
-
-    for (auto& table : host_map) {
-      if (table.empty()) continue;
-      for (const auto& entry : table) {
-        dbgs() << std::setw(30) << std::left << entry.first // Symbol
-               << " -> " << entry.second << "\n";           // Buffer Name
-      }
-    }
-
-    dbgs() << "================================================================"
-           << "\n";
-  }
-  void DumpDeviceMap() {
-    dbgs()
-        << "==================== Device Map Information ====================\n";
-    // Print a formatted table with columns for symbol and buffer name
-    dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Device Name" << "\n";
-    dbgs()
-        << "----------------------------------------------------------------\n";
-
-    for (auto& table : device_map) {
-      if (table.empty()) continue;
-
-      for (const auto& entry : table) {
-        dbgs() << std::setw(30) << std::left << entry.first // Symbol
-               << " -> " << entry.second << "\n";           // Buffer Name
-      }
-    }
-
-    dbgs() << "================================================================"
-           << "\n";
-  }
-
-  // only for specific purpose
-  void RemapDeviceSymbol(const std::string& csym, const std::string& name) {
-    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    device_map.back()[csym] = name;
-  }
-
-  void RemapHostSymbol(const std::string& csym, const std::string& name) {
-    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    host_map.back()[csym] = name;
-  }
-
-  const std::string HostName(const std::string& csym) const {
-    for (auto mapit = host_map.rbegin(); mapit != host_map.rend(); ++mapit)
-      if (mapit->count(csym)) return (*mapit).at(csym);
-    return csym;
-  }
-
-  bool HasHostName(const std::string& csym) const {
-    for (auto mapit = host_map.rbegin(); mapit != host_map.rend(); ++mapit)
-      if (mapit->count(csym)) return true;
-    return false;
-  }
-
-  const std::string DeviceName(const std::string& csym) const {
-    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
-      if (mapit->count(csym)) return (*mapit).at(csym);
-    return csym;
-  }
-
-  bool HasDeviceName(const std::string& csym) const {
-    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
-      if (mapit->count(csym)) return true;
-    return false;
-  }
-
-  const std::string DeviceNameOrNull(const std::string& csym) const {
-    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
-      if (mapit->count(csym)) return (*mapit).at(csym);
-    return "";
-  }
-};
+using ScopedSymbolMap = ::Choreo::ScopedSymbolMap;
 
 struct CuteCodeGen : public CodeGenerator {
 private:
@@ -217,7 +97,7 @@ public:
   bool Visit(AST::FloatLiteral&) override { return true; };
   bool Visit(AST::Expr&) override { return true; };
   bool Visit(AST::MultiDimSpans&) override { return true; };
-  bool Visit(AST::NamedTypeDecl&) override { return true; };
+  bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::IntTuple&) override { return true; };
   bool Visit(AST::IntIndex&) override { return true; };
   bool Visit(AST::DataType&) override { return true; };
@@ -289,6 +169,9 @@ private:
   std::ostringstream hs;            // host stream
   std::ostringstream return_stream; // stream for return node
 
+  LineDirectiveState host_line_state;
+  LineDirectiveState device_line_state;
+
   std::map<std::string, std::string> claimed_futs;
   std::vector<std::string> pld_checklist = {};
 
@@ -308,10 +191,88 @@ private:
   // TODO: for now, only support one stream!
   std::string stream_name;
   int tma_count = 0;
+  int tma_future_count = 0;
+  bool cluster_defers_launch = false;
+  AST::ParallelBy* deferred_cluster_pb = nullptr;
+  std::string deferred_spm_decls;
+  std::deque<std::string> recent_tma_tx_bytes;
+  bool saw_explicit_mma_commit = false;
+  bool wgmma_arrive_state_declared = false;
+  bool pending_mbarrier_full_event_array = false;
+  std::string pending_mbarrier_full_event_name;
+  std::set<std::string> cluster_trigger_events_;
+  bool in_producer = false; // hack
+  bool in_consumer = false; // hack
+  struct BaseScaleAccumInfo {
+    std::string frag_sym;
+    std::string frag_expr;
+    std::string scale_frag_name;
+    std::string scale_a_name;
+    std::string scale_b_name;
+    std::string scale_a_expr;
+    std::string scale_b_expr;
+    std::string scale_a_ld;
+    std::string acc_ty;
+    std::string scale_frag_ty;
+    std::string dim_n;
+    size_t reg_num_d = 0;
+  };
+  struct HoistedScaleAccumInfo : BaseScaleAccumInfo {};
+  struct ExplicitScaleAccumInfo : BaseScaleAccumInfo {
+    bool consumed = false;
+  };
+  std::vector<std::vector<std::string>> hoisted_scale_decl_scopes;
+  std::unordered_set<std::string> active_hoisted_scale_decls;
+  std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
+  std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
 
 private:
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
+
+  bool EnableLineDirective() const { return CCtx().GenDebugInfo(); }
+  bool EnableDebugTypeRTTI() const {
+    return CCtx().GenDebugInfo() || CCtx().TargetDebugInfo();
+  }
+  bool ShouldEmitLineDirective(AST::Node& n) const;
+  std::string ResolveLineDirectivePath(const location& loc) const;
+
+  struct PrepackedU32Info {
+    std::string device_name;
+    bool use_packed_u32 = false;
+  };
+
+  PrepackedU32Info resolvePrepackedU32Meta(const std::string& ref_sym,
+                                           bool forceFlag);
+  void emitPrepackedU32Snippet(const std::string& metaVar,
+                               const std::string& deviceArray,
+                               const std::string& rowStride,
+                               const std::string& colStride);
+  void emitPrepackedU32TileLoadSnippet(const std::string& metaVar,
+                                       const std::string& tileAddr,
+                                       const std::string& rowStride);
+  void emitFp8PrepackedU32TileLoadSnippet(const std::string& metaVar,
+                                          const std::string& tileAddr,
+                                          const std::string& rowStride,
+                                          const std::string& colStride);
+  void emitPrepackedV2TileLoadSnippet(const std::string& metaVar,
+                                      const std::string& baseName,
+                                      const std::string& tileAddr,
+                                      const std::string& rowStride,
+                                      const std::string& tileOffset = "");
+  void emitPrepackedV2Snippet(const std::string& metaVar,
+                              const std::string& baseName,
+                              const std::string& deviceArray,
+                              const std::string& rowStride,
+                              const std::string& colStride);
+  void emitFp8PrepackedV2TileLoadSnippet(const std::string& metaVar,
+                                         const std::string& baseName,
+                                         const std::string& tileAddr,
+                                         const std::string& rowStride,
+                                         const std::string& colStride);
+  static std::string EscapeLineDirectivePath(const std::string& path);
+  void EmitLineDirective(AST::Node& n);
+  void ResetLineDirectiveState();
 
   void EmitHostFuncDecl(std::ostringstream&);
   void EmitDeviceFuncDecl(std::ostringstream&, AST::ParallelBy*,
@@ -327,6 +288,18 @@ private:
   void EmitMemReuse(const std::string& dev_func_name);
   void EmitCudaFree();
   void EmitRuntimeEnvironmentChecker(std::ostream&) const;
+  void EmitDebugSpannedRTTI(std::ostringstream& os, const std::string& indent,
+                            const std::string& sym, const ptr<SpannedType>& sty,
+                            const std::string& data_expr,
+                            const std::vector<std::string>& shape_exprs,
+                            const std::vector<std::string>& stride_exprs) const;
+
+  // site-level assertion emission
+  std::unordered_map<AST::Node*, std::vector<Assertion>> pre_site_assertions;
+  std::unordered_map<AST::Node*, std::vector<Assertion>> post_site_assertions;
+  void BuildSiteAssertionMap();
+  void EmitPreSiteAssertions(AST::Node& n);
+  void EmitPostSiteAssertions(AST::Node& n);
 
 private:
   void IncrHostIndent() { h_indent += "  "; }
@@ -366,6 +339,43 @@ private:
     void_return = false;
     emit_call = true;
     parallel_idx = -1;
+    pre_site_assertions.clear();
+    post_site_assertions.clear();
+    recent_tma_tx_bytes.clear();
+    saw_explicit_mma_commit = false;
+    wgmma_arrive_state_declared = false;
+    hoisted_scale_decl_scopes.clear();
+    active_hoisted_scale_decls.clear();
+    hoisted_scale_accum_scopes.clear();
+    cluster_trigger_events_.clear();
+    ResetLineDirectiveState();
+  }
+
+  static void CollectClusterTriggerEvents(AST::Node* node,
+                                          std::set<std::string>& out) {
+    if (!node) return;
+    if (auto* trigger = dyn_cast<AST::Trigger>(node)) {
+      if (trigger->IsClusterScope()) {
+        for (auto& f : trigger->GetEvents()) {
+          auto expr = cast<AST::Expr>(f);
+          if (expr->op == Op::ElemOf) {
+            auto bid = AST::GetArrayBaseSymbol(*expr);
+            out.insert(bid->name);
+          } else if (auto sym = expr->GetSymbol()) {
+            out.insert(sym->name);
+          }
+        }
+      }
+    }
+    if (node->HasBody()) {
+      if (auto body = node->GetBody()) {
+        for (auto& child : body->values)
+          CollectClusterTriggerEvents(child.get(), out);
+      }
+    } else if (auto* mn = dyn_cast<AST::MultiNodes>(node)) {
+      for (auto& child : mn->values)
+        CollectClusterTriggerEvents(child.get(), out);
+    }
   }
 
   std::string GenHostParamName() {
@@ -473,6 +483,25 @@ private:
 
   bool ThreadCooperative(AST::DMA&) const;
   bool HasWGMMAInFunction() const;
+  const AST::MMAOperation*
+  FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
+  std::pair<std::string, std::string>
+  GetDMABufferExpr(const std::string& sym,
+                   const ptr<AST::MultiValues> subscription,
+                   const ptr<Type>& sym_ty) const;
+  void EmitGroupX4Sync(std::ostringstream& os, const std::string& indent) const;
+  std::optional<HoistedScaleAccumInfo> AnalyzeHoistableScaledWGMMAAccum(
+      const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const;
+  bool CollectHoistableScaledWGMMAAccum(
+      const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs,
+      HoistedScaleAccumInfo& info, bool& saw_scaled_exec) const;
+  const HoistedScaleAccumInfo* CurrentHoistedScaleAccum() const;
+  std::vector<ExplicitScaleAccumInfo>
+  AnalyzeExplicitScaleAccumScope(const ptr<AST::MultiNodes>& body) const;
+  bool HasPlainWGMMAExecForFrag(const ptr<AST::Node>& n,
+                                const std::string& frag_sym) const;
+  ExplicitScaleAccumInfo*
+  CurrentExplicitScaleAccumForFrag(const std::string& frag_sym);
   std::pair<std::string, std::string>
   GenTensorDecl(const std::string& name, const std::string& buf_expr,
                 const Storage sto, BaseType bty, const Shape& shp,
@@ -499,6 +528,32 @@ private:
   }
 
   const std::string EmitSpannedArith(AST::Expr& e) const;
+
+  bool InProducer() {
+    if (!CCtx().UseWarpSpec()) return false;
+    return in_producer;
+  }
+
+  bool InConsumer() {
+    if (!CCtx().UseWarpSpec()) return false;
+    return in_consumer;
+  }
+
+  bool UseSingleThreadProducerScope() {
+    return CCtx().UseWarpSpec() && CCtx().SingleThreadProducer();
+  }
+
+  bool GuardWarpSpecProducerOpsIndividually() {
+    return CCtx().UseWarpSpec() && !CCtx().SingleThreadProducer();
+  }
+
+  bool NeedWarpSpecGroupX4SyncForCurrentScope() {
+    if (!CCtx().UseWarpSpec() || bdim_level != ParallelLevel::GROUPx4)
+      return false;
+    if (InConsumer()) return true;
+    if (InProducer()) return GuardWarpSpecProducerOpsIndividually();
+    return false;
+  }
 };
 
 } // namespace Cute

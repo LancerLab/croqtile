@@ -1,0 +1,36 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v "\<CHECK\>" | FileCheck %s
+
+#define TILE_M 64
+#define TILE_K 64
+
+__co__ void test_copy_if_g2s(f16 [M, K] input) {
+  parallel {block_m, block_k} by [cdiv(M, TILE_M), cdiv(K, TILE_K)] : block
+  parallel wg by 1 : group-4 {
+    shared f16 [TILE_M, TILE_K] s_tail_m;
+    shared f16 [TILE_M, TILE_K] s_tail_k;
+    shared f16 [TILE_M, TILE_K] s_tail_mk;
+
+    base_m = block_m * TILE_M;
+    base_k = block_k * TILE_K;
+    remain_m = M - base_m;
+    remain_k = K - base_k;
+    TM = (TILE_M < remain_m) ? TILE_M : remain_m;
+    TK = (TILE_K < remain_k) ? TILE_K : remain_k;
+
+    dma.copy.swiz<128>.zfill
+      input.view(TILE_M, TILE_K).from(base_m, 0) => s_tail_m.subspan(TM, TILE_K);
+
+    dma.copy.swiz<128>.zfill
+      input.view(TILE_M, TILE_K).from(0, base_k) => s_tail_k.subspan(TILE_M, TK);
+
+    dma.copy.swiz<128>.zfill
+      input.view(TILE_M, TILE_K).from(base_m, base_k) => s_tail_mk.subspan(TM, TK);
+  }
+}
+
+int main() { return 0; }
+
+// CHECK: choreo::copy_if_g2s<false, f16, 16, 8, 1, 8>(__tensor1_input, __tensor2_s_tail_m, [&](const auto& __coord) { return cute::elem_less(__coord, cute::make_shape((64 < M - blockIdx.x * 64 ? cute::Int<64>{} : M - blockIdx.x * cute::Int<64>{}), cute::Int<64>{})); });
+// CHECK: choreo::copy_if_g2s<false, f16, 16, 8, 1, 8>(__tensor3_input, __tensor4_s_tail_k, [&](const auto& __coord) { return cute::elem_less(__coord, cute::make_shape(cute::Int<64>{}, (64 < K - blockIdx.y * 64 ? cute::Int<64>{} : K - blockIdx.y * cute::Int<64>{}))); });
+// CHECK: choreo::copy_if_g2s<false, f16, 16, 8, 1, 8>(__tensor5_input, __tensor6_s_tail_mk, [&](const auto& __coord) { return cute::elem_less(__coord, cute::make_shape((64 < M - blockIdx.x * 64 ? cute::Int<64>{} : M - blockIdx.x * cute::Int<64>{}), (64 < K - blockIdx.y * 64 ? cute::Int<64>{} : K - blockIdx.y * cute::Int<64>{}))); });

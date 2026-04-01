@@ -1,0 +1,126 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90 %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define M 64
+#define N 64
+#define K 64
+#define META_K 64
+
+__co__ auto matmul_sp_k64_e4m3(f8_e4m3 [M, K/2] lhs_packed, u32 [M, (K / META_K) * 2] lhs_meta, f8_e4m3 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+  int TILE_M = 64, TILE_N = 64, TILE_K = 64;
+  int WARP_M = 16, WARP_N = 8, WARP_K = 64;
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+        lhs_load_s = dma.copy lhs_packed.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => local;
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          ma = mma.load lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          me = mma.load lhs_load_s_mdata.chunkat(iv_warp_m, iv_warp_k);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+      mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+    }
+  }
+  return output;
+}
+
+__co__ auto matmul_sp_k64_e5m2(f8_e5m2 [M, K/2] lhs_packed, u32 [M, (K / META_K) * 2] lhs_meta, f8_e5m2 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+  int TILE_M = 64, TILE_N = 64, TILE_K = 64;
+  int WARP_M = 16, WARP_N = 8, WARP_K = 64;
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill.f32 0.0f;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+        lhs_load_s = dma.copy lhs_packed.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
+        lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => local;
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          ma = mma.load lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          me = mma.load lhs_load_s_mdata.chunkat(iv_warp_m, iv_warp_k);
+          mma.row.row.sp mc, ma, mb, me;
+        }
+      }
+      mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+    }
+  }
+  return output;
+}
+
+template <typename T>
+using SparsePolicy = choreo::utils::SparsePolicy<T>;
+
+int run_e4m3() {
+  std::mt19937 gen(42);
+  auto lhs_dense = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+  SparsePolicy<choreo::f8_e4m3>::init_structured_sparse_A(lhs_dense, gen);
+  rhs.fill_random(-1.0f, 1.0f);
+
+  auto lhs_packed = choreo::make_spandata<choreo::f8_e4m3>(M, K / 2);
+  auto lhs_meta = choreo::make_spandata<choreo::u32>(M, (K / META_K) * 2);
+  SparsePolicy<choreo::f8_e4m3>::encode(lhs_dense, lhs_packed, lhs_meta);
+
+  auto res = matmul_sp_k64_e4m3(lhs_packed.view(), lhs_meta.view(), rhs.view());
+
+  float tolerance = 0.5f;
+  int errors = 0;
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += choreo::to_f32(lhs_dense[i][k]) * choreo::to_f32(rhs[j][k]);
+      float got = res[i][j];
+      if (std::abs(got - ref) >= tolerance) errors++;
+    }
+  std::cout << "k64_e4m3: " << errors << " errors\n";
+  return errors;
+}
+
+int run_e5m2() {
+  std::mt19937 gen(42);
+  auto lhs_dense = choreo::make_spandata<choreo::f8_e5m2>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f8_e5m2>(N, K);
+  SparsePolicy<choreo::f8_e5m2>::init_structured_sparse_A(lhs_dense, gen);
+  rhs.fill_random(-1.0f, 1.0f);
+
+  auto lhs_packed = choreo::make_spandata<choreo::f8_e5m2>(M, K / 2);
+  auto lhs_meta = choreo::make_spandata<choreo::u32>(M, (K / META_K) * 2);
+  SparsePolicy<choreo::f8_e5m2>::encode(lhs_dense, lhs_packed, lhs_meta);
+
+  auto res = matmul_sp_k64_e5m2(lhs_packed.view(), lhs_meta.view(), rhs.view());
+
+  float tolerance = 0.5f;
+  int errors = 0;
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += choreo::to_f32(lhs_dense[i][k]) * choreo::to_f32(rhs[j][k]);
+      float got = res[i][j];
+      if (std::abs(got - ref) >= tolerance) errors++;
+    }
+  std::cout << "k64_e5m2: " << errors << " errors\n";
+  return errors;
+}
+
+int main() {
+  int errors = 0;
+  errors += run_e4m3();
+  errors += run_e5m2();
+  if (errors > 0) {
+    std::cout << "FAILED: " << errors << " errors\n";
+    return 1;
+  }
+  std::cout << "Test Passed\n";
+  return 0;
+}
+
+// CHECK: Test Passed

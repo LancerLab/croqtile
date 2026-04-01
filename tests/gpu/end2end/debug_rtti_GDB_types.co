@@ -1,0 +1,52 @@
+// REQUIRES: TARGET-GPU LIBRARY-CUTE CUDA-GDB 
+// RUN: choreo -gs -t cute -g -O0 %s -o %s.cute.GDB.sh && bash %s.cute.GDB.sh --compile-link && exe=$(grep -o '/tmp/[^ ]*\.exe' %s.cute.GDB.sh | head -1) && cuda_gdb -q -batch "$exe" -ex "set pagination off" -ex "break debug_builtin_non_scalar_types" -ex "break __choreo_device_debug_builtin_non_scalar_types" -ex "run" -ex "next" -ex "next" -ex "next" -ex "ptype __dbg_lhs" -ex "print __dbg_lhs.span.data[0]" -ex "print __dbg_lhs.span.data[1]" -ex "print __dbg_lhs.stride.data[0]" -ex "print __dbg_lhs.stride.data[1]" -ex "print __dbg_lhs.data != 0" -ex "ptype a" -ex "ptype b" -ex "ptype idx" -ex "print a.data[0]" -ex "print a.data[1]" -ex "print a.data[2]" -ex "print b.data[0]" -ex "print b.data[1]" -ex "print b.data[2]" -ex "print idx.data[0]" -ex "print idx.data[1]" -ex "print idx.data[2]" -ex "print idx.ub[0]" -ex "print idx.ub[1]" -ex "print idx.ub[2]" -ex "continue" -ex "next" -ex "next" -ex "ptype didx" -ex "print didx.data[0]" -ex "print didx.data[1]" -ex "print didx.data[2]" -ex "print didx.ub[0]" -ex "print didx.ub[1]" -ex "print didx.ub[2]" 2>&1 | FileCheck %s --check-prefix=GDB && rm -f %s.cute.GDB.sh
+// RUN: choreo -gs -t cute -g %s -o %s.cute.run.sh && bash %s.cute.run.sh --compile-link && exe=$(grep -o '/tmp/[^ ]*\.exe' %s.cute.run.sh | head -1) && "$exe" 2>&1 | FileCheck %s --check-prefix=PRINT && rm -f %s.cute.run.sh
+
+__co__ void debug_builtin_non_scalar_types(s32 [32, 64] lhs, s32 x) {
+  a : [7, 8, 9];
+  ituple<3> b = {1, x, 3};
+
+  with idx in [b] {
+    println(111, idx);
+  }
+
+  parallel by 1 : block {
+    with didx in [b] {
+      println(222, didx);
+    }
+  }
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::s32>(32, 64);
+  lhs.fill(0);
+  debug_builtin_non_scalar_types(lhs.view(), 1);
+  std::cout << "Run Done\n";
+  return 0;
+}
+
+// GDB: type = {{(struct )?}}choreo::rtti::spanned<int, 2>
+// GDB: ${{[0-9]+}} = 32
+// GDB: ${{[0-9]+}} = 64
+// GDB: ${{[0-9]+}} = 64
+// GDB: ${{[0-9]+}} = 1
+// GDB: ${{[0-9]+}} = {{(true|1)}}
+// GDB: type = {{(struct )?}}choreo::rtti::mdspan<3>
+// GDB: type = {{(struct )?}}choreo::rtti::ituple<3>
+// GDB: type = {{(struct )?}}choreo::rtti::bounded_ituple<3>
+// GDB: ${{[0-9]+}} = 7
+// GDB: ${{[0-9]+}} = 8
+// GDB: ${{[0-9]+}} = 9
+// GDB: ${{[0-9]+}} = 1
+// GDB: ${{[0-9]+}} = 1
+// GDB: ${{[0-9]+}} = 3
+// GDB: type = @local {{(struct )?}}{{.*}}choreo{{.*}}rtti{{.*}}bounded_ituple{{.*}}3{{.*}}
+// GDB: ${{[0-9]+}} = 0
+// GDB: ${{[0-9]+}} = 0
+// GDB: ${{[0-9]+}} = 0
+// GDB: ${{[0-9]+}} = 1
+// GDB: ${{[0-9]+}} = 1
+// GDB: ${{[0-9]+}} = 3
+
+// PRINT: 111{0, 0, 0}
+// PRINT: 222{0, 0, 0}

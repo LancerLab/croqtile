@@ -64,26 +64,28 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
     auto& oprds = osn->OperandSigns();
     if (oprds.size() == 3) {
       // ternary operation
-      assert(op == "?" && "unexpected ternary operation.");
+      assert(op == Op::Select && "unexpected ternary operation.");
       auto pvi = GenValueItemFromSignature(oprds[0]);
       auto lvi = GenValueItemFromSignature(oprds[1]);
       auto rvi = GenValueItemFromSignature(oprds[2]);
       if (pvi && lvi && rvi) return sbe::sel(pvi, lvi, rvi)->Normalize();
     } else if (oprds.size() == 2) {
-      if ((op == "+") || (op == "-") || (op == "*") || (op == "/") ||
-          (op == "%") || (op == ">") || (op == "<") || (op == "|") ||
-          (op == "&") || (op == "^") || (op == ">=") || (op == "<=") ||
-          (op == "==") || (op == "!=") || (op == ">>") || (op == "<<")) {
+      if ((op == Op::Add) || (op == Op::Sub) || (op == Op::Mul) ||
+          (op == Op::Div) || (op == Op::Mod) || (op == Op::Gt) ||
+          (op == Op::Lt) || (op == Op::BitOr) || (op == Op::BitAnd) ||
+          (op == Op::BitXor) || (op == Op::Ge) || (op == Op::Le) ||
+          (op == Op::Eq) || (op == Op::Ne) || (op == Op::Shr) ||
+          (op == Op::Shl) || (op == Op::LogicAnd) || (op == Op::LogicOr)) {
         auto lvi = GenValueItemFromSignature(oprds[0]);
         auto rvi = GenValueItemFromSignature(oprds[1]);
         if (lvi && rvi) return sbe::bop(ToOpCode(op), lvi, rvi)->Normalize();
-      } else if (op == "cdiv") {
+      } else if (op == Op::CeilDiv) {
         auto lvi = GenValueItemFromSignature(oprds[0]);
         auto rvi = GenValueItemFromSignature(oprds[1]);
         if (lvi && rvi) return (lvi + (rvi - sbe::nu(1))) / rvi;
       }
     } else if (oprds.size() == 1) {
-      if ((op == "!") || (op == "~")) {
+      if ((op == Op::LogicNot) || (op == Op::BitNot)) {
         if (auto ovi = GenValueItemFromSignature(oprds[0]))
           return sbe::uop(ToOpCode(op), ovi)->Normalize();
       }
@@ -117,6 +119,10 @@ const SignTy ValueNumbering::ValueItemToSignature(const ValueItem& vi,
     return non_sn();
   } else if (auto iv = VIInt(vi)) {
     auto sign = c_sn(iv.value());
+    auto vn = GetOrGenValueNumberFromSignature(sign); // always generate
+    return GetSignatureFromValueNumber(vn);
+  } else if (auto bv = VIBool(vi)) {
+    auto sign = c_sn(bv.value());
     auto vn = GetOrGenValueNumberFromSignature(sign); // always generate
     return GetSignatureFromValueNumber(vn);
   } else if (auto sym = VISym(vi)) {
@@ -237,11 +243,26 @@ const SignTy ValueNumbering::Simplify(const SignTy& sign) {
 
   // Applies the algebraic simplification
   std::set<OpTy> optimizable = {
-      "+",  "-", "*", "/",  "%",  "cdiv", "@",  "@+",
-      "@-", "<", ">", "<=", ">=", "==",   "!=",
+      Op::Add,
+      Op::Sub,
+      Op::Mul,
+      Op::Div,
+      Op::Mod,
+      Op::CeilDiv,
+      Op::UBoundInternal,
+      Op::UBoundAddInternal,
+      Op::UBoundSubInternal,
+      Op::Lt,
+      Op::Gt,
+      Op::Le,
+      Op::Ge,
+      Op::Eq,
+      Op::Ne,
+      Op::LogicAnd,
+      Op::LogicOr,
   };
 
-  auto HandleMultiSigns = [this](const std::string& op, const SignTy& lhs,
+  auto HandleMultiSigns = [this](const Opcode& op, const SignTy& lhs,
                                  const SignTy& rhs) {
     // For multiple signatures, it is possible to generate new intermediate
     // value numbers
@@ -268,15 +289,15 @@ const SignTy ValueNumbering::Simplify(const SignTy& sign) {
     auto lsign = operands[0];
     auto rsign = operands[1];
 
-    if (op == "concat") {
+    if (op == Op::Concat) {
       return Concat(lsign, rsign);
     } else if (optimizable.count(op)) {
       if (lsign->Count() == rsign->Count()) {
         if (lsign->Count() == 1) {
-          if (op == "#") { // operation '#' is special
-            auto simple_sign = TryToSimplifyBinary("*", lsign, rsign);
+          if (op == Op::UBound) { // operation '#' is special
+            auto simple_sign = TryToSimplifyBinary(Op::Mul, lsign, rsign);
             if (!IsUnknown(simple_sign)) return simple_sign;
-            return o_sn("*", lsign, rsign);
+            return o_sn(Op::Mul, lsign, rsign);
           } else {
             auto simple_sign = TryToSimplifyBinary(op, lsign, rsign);
             if (!IsUnknown(simple_sign)) return simple_sign;
@@ -304,13 +325,16 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
                                                  bool verbose) {
   if (!IsValid(lhs)) choreo_unreachable("signature is invalid.");
   if (!IsValid(rhs)) choreo_unreachable("signature is invalid.");
-  if (op == "concat") return unk_sn();
+  if (op == Op::Concat) return unk_sn();
 
   // try to simplify using symbexpr first
   auto lvi = GenValueItemFromSignature(lhs);
   auto rvi = GenValueItemFromSignature(rhs);
   if (lvi && rvi &&
-      (op == "+" || op == "-" || op == "*" || op == "/" || op == "%")) {
+      (op == Op::Add || op == Op::Sub || op == Op::Mul || op == Op::Div ||
+       op == Op::Mod || op == Op::Lt || op == Op::Gt || op == Op::Le ||
+       op == Op::Ge || op == Op::Eq || op == Op::Ne || op == Op::LogicAnd ||
+       op == Op::LogicOr)) {
     auto res_vi = sbe::bop(ToOpCode(op), lvi, rvi);
     auto opt_vi = res_vi->Normalize();
     if (*res_vi != *opt_vi) {

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.16)
 
 # Read version from VERSION.txt
 file(READ "${CMAKE_SOURCE_DIR}/VERSION.txt" VERSION_FROM_FILE)
@@ -306,8 +306,18 @@ if(BISON_EXECUTABLE)
 endif()
 
 if(BISON_EXECUTABLE AND TOOLCHAIN_DIR)
-# Check if the found bison is inside the toolchain directory
-  cmake_path(IS_PREFIX TOOLCHAIN_DIR "${BISON_EXECUTABLE}" IS_LOCAL_BISON)
+# Check if the found bison is inside the toolchain directory.
+# Use a string-prefix test here so the project stays compatible with CMake 3.16.
+  file(TO_CMAKE_PATH "${TOOLCHAIN_DIR}" _toolchain_dir_norm)
+  file(TO_CMAKE_PATH "${BISON_EXECUTABLE}" _bison_executable_norm)
+  string(LENGTH "${_toolchain_dir_norm}" _toolchain_dir_len)
+  string(SUBSTRING "${_bison_executable_norm}" 0 ${_toolchain_dir_len}
+         _bison_prefix)
+  if(_bison_prefix STREQUAL _toolchain_dir_norm)
+    set(IS_LOCAL_BISON TRUE)
+  else()
+    set(IS_LOCAL_BISON FALSE)
+  endif()
 
   if(IS_LOCAL_BISON AND EXISTS "${TOOLCHAIN_BISON_DATA_DIR}")
     set(BISON_ENV_CMD "BISON_PKGDATADIR=${TOOLCHAIN_BISON_DATA_DIR}")

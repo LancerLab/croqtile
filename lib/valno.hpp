@@ -98,8 +98,7 @@ public:
   const static NumTy Unknown() { return NumTy(unknown_val); }
 };
 
-using OpTy = std::string;
-inline const std::string STR(const OpTy& o) { return o; }
+using OpTy = Opcode;
 
 class UnknownSign;
 class NoneSign;
@@ -263,7 +262,7 @@ public:
                               std::is_same_v<U, int64_t>),
                              int64_t, std::common_type_t<T, U>>>>;
 
-  // Arithmetic visitor with string opcode
+  // Arithmetic visitor with shared opcode
   struct ArithmeticVisitor {
     const OpTy op;
 
@@ -277,24 +276,24 @@ public:
       auto promoted_a = static_cast<ResultType>(a);
       auto promoted_b = static_cast<ResultType>(b);
 
-      if (op == "+")
+      if (op == Op::Add)
         return std::make_shared<ConstSign>(promoted_a + promoted_b);
-      if (op == "-")
+      if (op == Op::Sub)
         return std::make_shared<ConstSign>(promoted_a - promoted_b);
-      if (op == "*")
+      if (op == Op::Mul)
         return std::make_shared<ConstSign>(promoted_a * promoted_b);
-      if (op == "/") {
+      if (op == Op::Div) {
         if (promoted_b == 0) choreo_unreachable("divide by zero is found.");
         return std::make_shared<ConstSign>(promoted_a / promoted_b);
       }
-      if (op == "%") {
+      if (op == Op::Mod) {
         if constexpr (std::is_integral_v<T> && std::is_integral_v<U>) {
           if (promoted_b == 0) choreo_unreachable("divide by zero is found.");
           return std::make_shared<ConstSign>(promoted_a % promoted_b);
         }
         return std::make_shared<UnknownSign>();
       }
-      if (op == "cdiv") {
+      if (op == Op::CeilDiv) {
         if constexpr (std::is_integral_v<T> && std::is_integral_v<U>) {
           if (promoted_b == 0) choreo_unreachable("divide by zero is found.");
           return std::make_shared<ConstSign>((promoted_a + promoted_b - 1) /
@@ -302,34 +301,34 @@ public:
         }
         return std::make_shared<UnknownSign>();
       }
-      if (op == "#") {
+      if (op == Op::UBound || op == Op::UBoundScale) {
         if constexpr (std::is_integral_v<T> && std::is_integral_v<U>)
           return std::make_shared<ConstSign>(promoted_a * promoted_b);
         return std::make_shared<UnknownSign>();
       }
-      if (op == "#+") {
+      if (op == Op::UBoundAdd || op == Op::UBoundAddInternal) {
         if constexpr (std::is_integral_v<T> && std::is_integral_v<U>)
           return std::make_shared<ConstSign>(promoted_a + promoted_b);
         return std::make_shared<UnknownSign>();
       }
-      if (op == "#-") {
+      if (op == Op::UBoundSub || op == Op::UBoundSubInternal) {
         if constexpr (std::is_integral_v<T> && std::is_integral_v<U>)
           return std::make_shared<ConstSign>(promoted_a - promoted_b);
         return std::make_shared<UnknownSign>();
       }
 
       // Comparison operators return bool
-      if (op == "<")
+      if (op == Op::Lt)
         return std::make_shared<ConstSign>(promoted_a < promoted_b);
-      if (op == ">")
+      if (op == Op::Gt)
         return std::make_shared<ConstSign>(promoted_a > promoted_b);
-      if (op == "==")
+      if (op == Op::Eq)
         return std::make_shared<ConstSign>(promoted_a == promoted_b);
-      if (op == "!=")
+      if (op == Op::Ne)
         return std::make_shared<ConstSign>(promoted_a != promoted_b);
-      if (op == "<=")
+      if (op == Op::Le)
         return std::make_shared<ConstSign>(promoted_a <= promoted_b);
-      if (op == ">=")
+      if (op == Op::Ge)
         return std::make_shared<ConstSign>(promoted_a >= promoted_b);
 
       return std::make_shared<UnknownSign>();
@@ -383,6 +382,7 @@ public:
   const std::vector<SignTy>& OperandSigns() const { return operands; }
   const OpTy& Operation() const { return opcode; }
   bool IsOp(const OpTy& o) const { return opcode == o; }
+  bool IsOp(std::string_view o) const { return opcode == o; }
   size_t OpCount() const { return operands.size(); }
   void Append(const SignTy& n) { operands.push_back(n); }
   const SignTy& At(size_t i) const {
@@ -482,8 +482,14 @@ inline const ptr<SymbolSign> s_sn(const std::string& s) {
 template <typename... Args,
           typename = std::enable_if_t<(
               std::conjunction_v<std::is_same<std::decay_t<Args>, SignTy>...>)>>
-inline const ptr<OperationSign> o_sn(const std::string& op, Args... ns) {
+inline const ptr<OperationSign> o_sn(const Opcode& op, Args... ns) {
   return std::make_shared<OperationSign>(op, ns...);
+}
+template <typename... Args,
+          typename = std::enable_if_t<(
+              std::conjunction_v<std::is_same<std::decay_t<Args>, SignTy>...>)>>
+inline const ptr<OperationSign> o_sn(std::string_view op, Args... ns) {
+  return std::make_shared<OperationSign>(Opcode(op), ns...);
 }
 template <typename... Args,
           typename = std::enable_if_t<(
@@ -888,13 +894,13 @@ public:
     return GetOrGenValueNumberFromSignature(MakePluralSign(vns));
   }
 
-  const SignTy MakeOpSign(const std::string& op, const SignTy& lsn,
+  const SignTy MakeOpSign(const Opcode& op, const SignTy& lsn,
                           const SignTy& rsn) {
     auto osn = o_sn(op, lsn, rsn);
     return Simplify(osn);
   }
 
-  const NumTy MakeOpNum(const std::string& op, const SignTy& lsn,
+  const NumTy MakeOpNum(const Opcode& op, const SignTy& lsn,
                         const SignTy& rsn) {
     return GetOrGenValueNumberFromSignature(MakeOpSign(op, lsn, rsn));
   }
@@ -918,14 +924,13 @@ public:
 
   const std::string ToSTR(const NumTy& vn) const { return STR(vn); }
 
-  const SignTy MakeOpSign(const std::string& op, const NumTy& lvn,
+  const SignTy MakeOpSign(const Opcode& op, const NumTy& lvn,
                           const NumTy& rvn) {
     auto osn = o_sn(op, SignNum(lvn), SignNum(rvn));
     return Simplify(osn);
   }
 
-  const NumTy MakeOpNum(const std::string& op, const NumTy& lvn,
-                        const NumTy& rvn) {
+  const NumTy MakeOpNum(const Opcode& op, const NumTy& lvn, const NumTy& rvn) {
     return GetOrGenValueNumberFromSignature(MakeOpSign(op, lvn, rvn));
   }
 

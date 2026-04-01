@@ -1,0 +1,33 @@
+// RUN: choreo -es -t cute -g %s -o - | FileCheck %s --check-prefix=LINE-ON
+// RUN: choreo -es -t cute -g --debug-line-path=absolute %s -o - | FileCheck %s --check-prefix=LINE-ABS
+// RUN: choreo -es -t cute -tg %s -o - | FileCheck %s --check-prefix=LINE-TG
+// RUN: choreo -es -t cute %s -o - | FileCheck %s --check-prefix=LINE-OFF
+// RUN: choreo -t cute -gs -g %s -o - | FileCheck %s --check-prefix=TG-FROM-G
+// RUN: choreo -t cute -gs -tg %s -o - | FileCheck %s --check-prefix=TG-ONLY
+// RUN: choreo -t cute -gs %s -o - | FileCheck %s --check-prefix=TG-OFF
+
+__co__ void foo() {
+  global s32 [1,2] g;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+    b = dma.copy g => local;
+    c = select(1, a, b);
+  }
+}
+
+// LINE-ON: int* a__buf__
+// LINE-ON: #line [[#LA:]] "{{[^/].*}}"
+// LINE-ON-NEXT: future a("a", [[#LA]], {{[0-9]+}}, a__buf__);
+// LINE-ON: int* b__buf__
+// LINE-ON: #line [[#LA+1]] "{{[^/].*}}"
+// LINE-ON-NEXT: future b("b", [[#LA+1]], {{[0-9]+}}, b__buf__);
+// LINE-ABS: int* a__buf__
+// LINE-ABS: #line [[#LB:]] "/{{.*}}"
+// LINE-ABS-NEXT: future a("a", [[#LB]], {{[0-9]+}}, a__buf__);
+// LINE-TG-NOT: #line
+// LINE-OFF-NOT: #line
+
+// TG-FROM-G: export CFLAGS="{{.*}} -O0{{.*}} -g -G{{.*}}"
+// TG-ONLY: export CFLAGS="{{.*}} -O0{{.*}} -g -G{{.*}}"
+// TG-OFF: export CFLAGS="{{.*}} -O{{[0-9]+}}{{.*}}"
+// TG-OFF-NOT: -g -G

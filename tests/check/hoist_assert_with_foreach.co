@@ -1,0 +1,47 @@
+// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+//
+// The with-block iteration variable `j` is a static element accessor that is
+// always initialised to 0 when the with-body starts executing.  A direct
+// buf.at(j) call in the with-body (outside any foreach) uses __iv_j which
+// equals 0 -- the bounds check 0 < 8 is trivially true, so NO assertion is
+// generated.
+//
+// Inside `foreach j in [N]` (N is a runtime value) the compiler introduces a
+// separate iteration variable __iv_j__elem__0 that ranges 0..N-1.  Because N
+// is not known at compile time, j may exceed the buffer bound 8, so an
+// assertion IS generated inside the loop body.
+//
+// After the foreach j reverts to the static accessor (__iv_j = 0) and access
+// again requires no assertion.
+
+__co__ void foo(int N) {
+  parallel p by 8 {
+    shared s32 [8] buf;
+    with {j} in [4] {
+      x = buf.at(j);         // j = __iv_j = 0, trivially safe -- no assertion
+      foreach j in [N] {
+        y = buf.at(j);       // j = __iv_j__elem__0 varies, assertion emitted
+      }
+      z = buf.at(j);         // j = __iv_j = 0 again -- no assertion
+    }
+  }
+}
+
+// Outside foreach: __iv_j is initialised to 0 and used directly.
+// CHECK-NEXT confirms no assertion line appears between the init and the
+// x access.
+// CHECK: int __iv_j = 0;
+// CHECK-NEXT: int x =
+
+// Inside foreach: __iv_j__elem__0 is the loop variable and may reach N.
+// An upper-bound assertion is required; the >= 0 check is omitted because
+// the loop counter starts from 0.
+// CHECK: for (__iv_j__elem__0 = 0; __iv_j__elem__0 < N; ++__iv_j__elem__0) {
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(N) - 1 < 8LL)
+
+// After foreach, j reverts to __iv_j (=0); the z access generates no assert.
+// CHECK: int z =
+
+// N is a plain int parameter -- no shaped-input runtime_check for the buf
+// element access should appear in the host function.
+// CHECK-NOT: runtime_check{{.*}}"The 1st index `j` of element access 'buf'

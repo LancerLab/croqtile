@@ -352,7 +352,10 @@ export PATH="$script_dir:${script_dir}/../:${script_dir}/../extern/bin/:${script
 FILECHECK=$(which FileCheck \
             FileCheck-18 FileCheck-17 FileCheck-16 \
             FileCheck-15 FileCheck-14 \
-            FileCheck-10)
+            FileCheck-10 2>/dev/null | head -1)
+
+GDB_BIN=$(which gdb gdb-multiarch 2>/dev/null | head -1)
+CUDA_GDB_BIN=$(which cuda-gdb 2>/dev/null | head -1)
 
 if [ -z "$FILECHECK" ]; then
   echo "-------------------------------------------------------"
@@ -386,7 +389,7 @@ if ! which bc &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.30"
+echo "        Choreo SimpleLit - v0.31"
 echo "---------------------------------------"
 echo ""
 
@@ -403,6 +406,8 @@ is_in_docker=false
 is_in_shell=false
 REQ_TARGETS=()
 requires_dynamic_shape=0
+requires_gdb=0
+requires_cudagdb=0
 expect_fail=
 expect_skip=
 
@@ -465,6 +470,8 @@ prepare() {
 
   # Reset target requirement
   requires_dynamic_shape=0
+  requires_gdb=0
+  requires_cudagdb=0
   need_cute=0
   need_cuda=0
   expect_fail=
@@ -524,6 +531,13 @@ prepare() {
   # requires dynamic-shape support (some target only)
   local dynshape=$(grep -q "DYNAMIC-SHAPE" <<< "$requires" && echo "found")
   [ ! -z "${dynshape}" ] && requires_dynamic_shape=1
+
+  # requires gdb in system
+  local gdbreq=$(grep -qE '(^|[[:space:]])(GDB|TOOL-GDB)($|[[:space:]])' <<< "$requires" && echo "found")
+  [ ! -z "${gdbreq}" ] && requires_gdb=1
+
+  local cudagdbreq=$(grep -qE '(^|[[:space:]])(CUDA-GDB)($|[[:space:]])' <<< "$requires" && echo "found")
+  [ ! -z "${cudagdbreq}" ] && requires_cudagdb=1
 }
 
 lock_file="/tmp/test_script_lock_${timestamp}"
@@ -597,10 +611,21 @@ execute_command() {
   # Replace 'choreo', 'copp' and 'FileCheck' with their absolute paths
   # Note: It must uses '-n' to remove comments inside host code.
   #       Or else FileCheck will check the line of "// CHECK:"
-  command=${command//choreo/"$(which choreo) -n"}
-  command=${command//copp/"$(which copp)"}
-  command=${command//FileCheck/"${FILECHECK}"}
-  command=${command//%cuda_arch/"-arch ${cuda_arch}"}
+  # workaround: Use cuda_gdb instead of cuda-gdb.
+  #             Or else it will be replaced to cuda-/bin/gdb
+  command=$(echo "$command" | sed \
+    -e "s#\bchoreo\b#$(which choreo) -n#g" \
+    -e "s#\bcopp\b#$(which copp)#g" \
+    -e "s#\bFileCheck\b#${FILECHECK}#g" \
+    -e "s#\bgdb\b#${GDB_BIN}#g" \
+    -e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g" \
+    -e "s#%cuda_arch#-arch ${cuda_arch}#g")
+  # command=${command//choreo/"$(which choreo) -n"}
+  # command=${command//copp/"$(which copp)"}
+  # command=${command//FileCheck/"${FILECHECK}"}
+  # command=${command//gdb/"${GDB_BIN}"}
+  # command=${command//cuda-g/"${CUDA_GDB_BIN}"}
+  # command=${command//%cuda_arch/"-arch ${cuda_arch}"}
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
   run_hooks "target_cmd" "command"
@@ -861,6 +886,18 @@ for file in "${files_array[@]}"; do
     else
       run_env="CUDA_HOME=${CUDA_HOME}"
     fi
+  fi
+
+  if [ ${requires_gdb} -eq 1 ] && [ -z "${GDB_BIN}" ]; then
+    echo "SKIP(GDB):  $file"
+    num_skiped=$(($num_skiped + 1));
+    continue;
+  fi
+
+  if [ ${requires_cudagdb} -eq 1 ] && [ -z "${CUDA_GDB_BIN}" ]; then
+    echo "SKIP(CUDA-GDB):  $file"
+    num_skiped=$(($num_skiped + 1));
+    continue;
   fi
 
   exe_env=

@@ -1,0 +1,18 @@
+// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+
+__co__ void foo(int j, int k) {
+  parallel p by 8 {
+    shared s32 [4] buf;
+    if (j < k) {
+      x = buf.at(j);
+    }
+  }
+}
+
+// Assertions for buf (size 4) must appear inside if (j < k) in device code,
+// not hoisted to the host function where j < k may be false.
+// CHECK: if ((j < k)) {
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(j) >= 0LL)
+// CHECK-NEXT: choreo::choreo_assert((static_cast<long long>(j) < 4LL)
+// No host-side runtime_check for j (would be a false positive).
+// CHECK-NOT: runtime_check

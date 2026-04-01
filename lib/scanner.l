@@ -342,10 +342,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                    Choreo::Scanner::Error(loc, msg);
                  }
                  if (!is_long_long && val <= std::numeric_limits<uint32_t>::max()) {
-                   // 42U → unsigned int
                    return Choreo::Parser::make_U32_LITERAL(static_cast<uint32_t>(val), loc);
                  } else {
-                   // 42ULL → unsigned long long
                    return Choreo::Parser::make_U64_LITERAL(val, loc);
                  }
                } else {
@@ -355,10 +353,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                    Choreo::Scanner::Error(loc, msg);
                  }
                  if (!is_long_long && val <= std::numeric_limits<int>::max()) {
-                   // 42 → int
                    return Choreo::Parser::make_NUM(static_cast<int>(val), loc);
                  } else {
-                   // 42LL → long long
                    return Choreo::Parser::make_S64_LITERAL(val, loc);
                  }
                }
@@ -458,6 +454,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "global"   return Choreo::Parser::make_STORAGE(Storage::GLOBAL, loc);
   "term"     return Choreo::Parser::make_PBLEVEL(ParallelLevel::TERM, loc);
   "device"   return Choreo::Parser::make_PBLEVEL(ParallelLevel::DEVICE, loc);
+  "cluster"  return Choreo::Parser::make_PBLEVEL(ParallelLevel::CLUSTER, loc);
   "block"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::BLOCK, loc);
   "group-4"  return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUPx4, loc);
   "group"    return Choreo::Parser::make_PBLEVEL(ParallelLevel::GROUP, loc);
@@ -510,6 +507,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".swiz"    return Choreo::Parser::make_SWIZZLE(yytext, loc);
   ".sp"      return Choreo::Parser::make_SPARSE(yytext, loc);
   ".zfill"   return Choreo::Parser::make_ZFILL(yytext, loc);
+  ".multicast" return Choreo::Parser::make_MULTICAST(yytext, loc);
   ".any"     return Choreo::Parser::make_NONE(yytext, loc);
   ".async"   return Choreo::Parser::make_ASYNC(yytext, loc);
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
@@ -547,7 +545,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "with"     return Choreo::Parser::make_WITH(yytext, loc);
   "in"       return Choreo::Parser::make_IN(yytext, loc);
   "foreach"  return Choreo::Parser::make_FOREACH(yytext, loc);
-  "incr"     return Choreo::Parser::make_INCR(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
   "select"   return Choreo::Parser::make_SELECT(yytext, loc);
@@ -634,7 +631,7 @@ void handle_line_directive(const char* text) {
 	loc.initialize(fname, new_line - 1, 0); // Use correct type
   } else if (sscanf(text, "#line %d", &new_line) == 1) {
     // Update only line number if no filename is provided
-    loc.initialize("", new_line - 1, 0); // Reset to line-1
+    loc.initialize(loc.begin.filename, new_line - 1, 0);
   }
 }
 

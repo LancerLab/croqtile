@@ -92,7 +92,6 @@ public:
   bool Visit(AST::Rotate& n) override;
   bool Visit(AST::Return& n) override;
   bool Visit(AST::Select& n) override;
-  bool Visit(AST::IncrementBlock& n) override;
   bool Visit(AST::Synchronize& n) override;
   bool Visit(AST::InThreadsBlock& n) override;
   bool Visit(AST::ParallelBy& n) override;

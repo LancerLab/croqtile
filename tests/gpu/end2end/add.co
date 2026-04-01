@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GPU
 // RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute -dd=false %s -o %s.cute.ddfalse.result && bash %s.cute.ddfalse.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.ddfalse.result
 
 __co__ s32 [6, 64] ele_add(s32 [2, 3, 64] lhs, s32 [2, 3, 64] rhs) {
   l = lhs.span_as(6, 64);

@@ -201,14 +201,6 @@ bool LoopVectorizeSimpleChecker::Visit(AST::Select& n) {
   return false;
 }
 
-bool LoopVectorizeSimpleChecker::Visit(AST::IncrementBlock& n) {
-  TraceEachVisit(n);
-  if (!NeedCheck()) return true;
-  Error1(n.LOC(), "increment block is not supported for vectorization.");
-  SetLoopVectorizationFailed();
-  return false;
-}
-
 bool LoopVectorizeSimpleChecker::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
   if (!NeedCheck()) return true;
@@ -506,8 +498,8 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
   for (int idx = indices.size() - 1; idx >= 0; --idx) {
     // process from last index to first index
     auto index = indices[idx];
-    offset_shape =
-        ComputeDiversityShape(offset_shape, index->GetDiversityShape(), "+");
+    offset_shape = ComputeDiversityShape(offset_shape,
+                                         index->GetDiversityShape(), Op::Add);
   }
 
   if (offset_shape.Varying() && !offset_shape.Stride(1)) {
@@ -562,7 +554,7 @@ bool BranchSimplicition::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
   if (n.HasElse()) return true;
 
-  auto if_stmts = n.if_stmts;
+  auto if_stmts = n.GetThenBody();
 
   if (if_stmts && if_stmts->Count() == 1) {
     if (auto single_IF = dyn_cast<AST::IfElseBlock>(if_stmts->values[0])) {
@@ -574,7 +566,7 @@ bool BranchSimplicition::Visit(AST::IfElseBlock& n) {
         new_pred->SetDiversityShape(ComputeDiversityShape(
             pred_a->GetDiversityShape(), pred_b->GetDiversityShape()));
         n.pred = new_pred;
-        n.if_stmts = single_IF->if_stmts;
+        n.stmts = single_IF->GetThenBody();
       }
     }
   }
@@ -665,7 +657,7 @@ bool MaskGen::HasDivergentBranch(AST::MultiNodes& n) {
     if (auto if_block = dyn_cast<AST::IfElseBlock>(n.SubAt(stmt_index))) {
       auto pred_ds = if_block->GetPred()->GetDiversityShape();
       if (pred_ds.Divergent()) return true;
-      auto then_true = HasDivergentBranch(*if_block->if_stmts);
+      auto then_true = HasDivergentBranch(*if_block->GetThenBody());
       if (then_true) return true;
       if (if_block->else_stmts) {
         auto else_true = HasDivergentBranch(*if_block->else_stmts);
@@ -826,7 +818,7 @@ bool MaskGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
   if (!NeedTransform()) return true;
   auto smi = cur_loop->GetScopedMaskInfo();
-  auto loc = n.if_stmts->LOC();
+  auto loc = n.GetThenBody()->LOC();
   auto pred = n.GetPred();
   auto pred_ds = pred->GetDiversityShape();
   if (pred_ds.Uniform()) return true;
@@ -851,7 +843,7 @@ bool MaskGen::Visit(AST::IfElseBlock& n) {
   auto cur_exec =
       MakeMaskAssign(n.LOC(), "exec", MakeMaskIdExpr(loc, cur_mask->name_str));
 
-  auto stmts = n.if_stmts;
+  auto stmts = n.GetThenBody();
   stmts->Insert(cur_mask, 0);
   stmts->Insert(cur_exec, 1);
 

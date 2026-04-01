@@ -3,6 +3,7 @@
 
 // This apply the GPU target specific check and information annotation
 
+#include "assess.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "target_utils.hpp"
@@ -68,6 +69,16 @@ private:
 private:
   ParallelLevel Level() const { return levels.top(); }
 
+  bool Assess(const ValueItem& pred, const std::string& message,
+              const location& l, AST::Node* node,
+              AssessType aty = AssessType::ENTRY,
+              UsageType uty = UsageType::HardwareConstraint) {
+    return FCtx(cur_fname)
+        .GetAssessor(*this)
+        .Assess(AssessPolicy::Error, pred, message, uty, aty, l, node)
+        .passed;
+  }
+
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -122,14 +133,11 @@ public:
       auto ppb = cgi.GetPBTree(fname).GetParent(pb);
       assert(ppb->GetLevel() == ParallelLevel::GROUP);
       if (ppb->IsEnforced()) {
-        auto asrt = sbe::oc_eq(total_threads, sbe::nu(32));
         auto msg = "The total thread dimension must be a multiple of 32 "
                    "when 'group' exists for " +
                    ToUpper(CCtx().GetArch()) + ".";
-        if (auto b = VIBool(asrt)) {
-          if (b.value() == false) Error1(pb->LOC(), msg);
-        } else
-          FCtx(cur_fname).InsertAssertion(asrt, pb->LOC(), msg);
+        Assess(sbe::oc_eq(total_threads, sbe::nu(32)), msg, pb->LOC(), pb,
+               AssessType::ENTRY);
       }
 
       if (TargetHasLevel(ParallelLevel::GROUPx4)) {
@@ -140,14 +148,11 @@ public:
                              "parallel-by is not supported by " +
                                  ToUpper(CCtx().GetArch()) + ".");
         else if (gppb->IsEnforced()) {
-          auto asrt = sbe::oc_eq(total_threads, sbe::nu(128));
           auto msg = "The total thread dimension must be a multiple of "
                      "128 when 'group-4' exists for " +
                      ToUpper(CCtx().GetArch()) + ".";
-          if (auto b = VIBool(asrt)) {
-            if (b.value() == false) Error1(pb->LOC(), msg);
-          } else
-            FCtx(cur_fname).InsertAssertion(asrt, pb->LOC(), msg);
+          Assess(sbe::oc_eq(total_threads, sbe::nu(128)), msg, pb->LOC(), pb,
+                 AssessType::ENTRY);
         }
       }
     }
@@ -188,10 +193,7 @@ public:
         constexpr size_t limit = 1ULL << 32;
         auto msg = "The size of data transferred by DMA cannot exceed 2^32.";
         auto asrt = sbe::oc_lt(bs, sbe::nu(limit))->Normalize();
-        if (auto b = VIBool(asrt)) {
-          if (b.value() == false) Error1(n.LOC(), msg);
-        } else
-          FCtx(cur_fname).InsertAssertion(asrt, n.LOC(), msg);
+        Assess(asrt, msg, n.LOC(), nullptr);
       } else {
         if (sty->ByteSize() >= (1ULL << 32))
           Error1(n.LOC(), "On " + cur_arch +
@@ -244,7 +246,7 @@ public:
                  "* dim3 * dim4 < 4GB.");
     }
 
-    // pad
+    // pad: pad_mid must be zero (CuTe backend hard constraint, always checked)
     if (n.operation == ".pad") {
       auto pc = cast<PadConfig>(n.config);
       for (const auto& v : pc->pad_mid->AllValues())
@@ -252,6 +254,7 @@ public:
           Error1(v->LOC(), "dma.pad with pad_mid is not supported for CuTe "
                            "backend(must set pad_mid to 0).");
     }
+
     if (n.operation == ".pad" && IsLinearCopy()) {
       RankLE5("dma.pad");
       auto pc = cast<PadConfig>(n.config);
@@ -272,9 +275,9 @@ public:
                        ", the config in "
                        "dma.pad must be in range [0, 2^11]";
             auto asrt = sbe::cmp(">=", val, sbe::nu(0));
-            FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+            Assess(asrt, msg, e->LOC(), e.get(), AssessType::ENTRY);
             asrt = sbe::cmp("<=", val, sbe::nu(1 << 11));
-            FCtx(cur_fname).InsertAssertion(asrt, e->LOC(), msg);
+            Assess(asrt, msg, e->LOC(), e.get(), AssessType::ENTRY);
           }
         }
       }
@@ -297,19 +300,20 @@ public:
         } else {
           if (idx == f_rank - 1) {
             auto asrt = sbe::cmp("==", val, sbe::nu(0));
-            FCtx(cur_fname).InsertAssertion(
-                asrt, e->LOC(),
+            Assess(
+                asrt,
                 "On " + cur_arch +
                     ", the value of padding_mid[rank-1] in dma.pad must be 0 "
                     "(mid padding of dim[rank-1] is not supported by the "
-                    "hardware)");
+                    "hardware)",
+                e->LOC(), e.get(), AssessType::ENTRY);
           } else {
             auto asrt = sbe::cmp("<=", val, sbe::nu(1 << 10));
-            FCtx(cur_fname).InsertAssertion(
-                asrt, e->LOC(),
-                "On " + cur_arch +
-                    ", the value of padding_mid in dma.pad must be in range "
-                    "[0, 2^10]");
+            Assess(asrt,
+                   "On " + cur_arch +
+                       ", the value of padding_mid in dma.pad must be in range "
+                       "[0, 2^10]",
+                   e->LOC(), e.get(), AssessType::ENTRY);
           }
         }
       }
@@ -327,11 +331,11 @@ public:
                          "array (if dim is 5, pad_config[0] must be 0).");
           } else {
             auto asrt = sbe::cmp("==", val, sbe::nu(0));
-            FCtx(cur_fname).InsertAssertion(
-                asrt, e->LOC(),
-                "On " + cur_arch +
-                    ", dma.pad does not support 5-dimensional array (if dim "
-                    "is 5, pad_config[0] must be 0)");
+            Assess(asrt,
+                   "On " + cur_arch +
+                       ", dma.pad does not support 5-dimensional array (if dim "
+                       "is 5, pad_config[0] must be 0)",
+                   e->LOC(), e.get(), AssessType::ENTRY);
           }
         }
       }
@@ -548,34 +552,8 @@ public:
     }
 
     message = "On " + cur_arch + ", must satisfy: " + message;
-
-    // try to evaluate at compilation time
-    auto cmp = sbe::cmp(op, vi, sbe::nu(limit))->Normalize();
-    if (auto tf = VIBool(cmp)) {
-      if (tf && tf.value() == false) {
-        VST_DEBUG(dbgs() << "[GPUCHECK] Generated check at " << loc << ": "
-                         << vi->ToString() << " " << op << " "
-                         << std::to_string(limit) + "ULL"
-                         << "\n\twith message: " << message << "\n");
-        Error1(loc, message);
-      } else
-        VST_DEBUG(dbgs() << "[GPUCHECK] Check at " << loc
-                         << " is statisfied: " << vi->ToString() << " " << op
-                         << " " << std::to_string(limit) + "ULL"
-                         << "\n\twith message: " << message << "\n");
-      return;
-    }
-
-    // or else, generate the runtime check
-    VST_DEBUG(dbgs() << "[GPUCHECK] Generated runtime check at " << loc << ": "
-                     << vi->ToString("ULL") << " " << op << " "
-                     << std::to_string(limit) + "ULL"
-                     << "\n\twith message: " << message << "\n");
-    auto asrt = sbe::cmp(op, vi, sbe::nu(limit))->Normalize();
-    if (auto b = VIBool(asrt)) {
-      if (b.value() == false) Error1(loc, message);
-    } else
-      FCtx(cur_fname).InsertAssertion(asrt, loc, message);
+    Assess(sbe::cmp(op, vi, sbe::nu(limit)), message, loc, nullptr,
+           AssessType::ENTRY);
   }
 
 public:
@@ -854,10 +832,20 @@ public:
           FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       } else if (mma_ty == MMAType::WGMMA) {
         std::string mma_policy = MMALimit::MMAConfig2WGMMAName(mma_config);
+        FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
+        FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);
         FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
+        if (op.IsSparse() && !e_sym.empty())
+          FCtx(cur_fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       }
       VST_DEBUG(dbgs() << STR(n) << ", mma_size: " << MMAShapeSTR(mma_shape)
                        << "\n");
+    } break;
+    case AST::MMAOperation::Scale: {
+      auto sym = AST::FragName(op.ScaleAccumulator());
+      auto& ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      if (ssmi.frag != MMAInfo::FRAG_C && ssmi.frag != MMAInfo::FRAG_UNK)
+        Error1(n.LOC(), "Only accumulator fragments can be used in mma.scale.");
     } break;
     case AST::MMAOperation::Store: break;
     case AST::MMAOperation::Commit: break;
@@ -866,13 +854,7 @@ public:
     return true;
   }
 
-  bool Visit(AST::Call& n) override {
-    if (n.IsArith())
-      Error1(n.LOC(),
-             "Arithmetic built-in function is yet to supported on CUDA.");
-
-    return true;
-  }
+  bool Visit(AST::Call&) override { return true; }
 
   bool Visit(AST::Synchronize& n) override {
     auto pl = Level();

@@ -133,6 +133,39 @@
 
 namespace choreo {
 
+namespace rtti {
+
+template <int N>
+struct mdspan {
+  int data[N];
+  __co_any__ int& operator[](int i) { return data[i]; }
+  __co_any__ const int& operator[](int i) const { return data[i]; }
+};
+
+template <int N>
+struct ituple {
+  int data[N];
+  __co_any__ int& operator[](int i) { return data[i]; }
+  __co_any__ const int& operator[](int i) const { return data[i]; }
+};
+
+template <int N>
+struct bounded_ituple {
+  int data[N];
+  int ub[N];
+  __co_any__ int& operator[](int i) { return data[i]; }
+  __co_any__ const int& operator[](int i) const { return data[i]; }
+};
+
+template <typename T, int N>
+struct spanned {
+  mdspan<N> span;
+  mdspan<N> stride;
+  T* data;
+};
+
+} // namespace rtti
+
 constexpr size_t __inf__ = (size_t)((1LL << 32) - 1);
 
 inline void __co_any__ choreo_assert(bool p, const char* msg,
@@ -167,28 +200,23 @@ inline void runtime_check(bool p, const std::string& msg) {
   return;
 }
 
-#ifdef __CHOREO_PRIVATE_TGT0__
 template <typename T>
-__co_device__ inline void fill(T* begin, T* end, const T& value) {
-  for (size_t idx = 0; idx < end - begin; ++idx) begin[idx] = value;
-  // TODO: OPT
-}
-
-template <typename T>
-__co_device__ inline void fill_n(T* begin, size_t n, const T& value) {
-  for (size_t idx = 0; idx < n; ++idx) begin[idx] = value;
-  // TODO: OPT
-}
-#endif // __CHOREO_PRIVATE_TGT0__
-
-template <typename T>
-__co_host__ inline void fill(T* begin, T* end, const T& value) {
+__co_any__ inline void fill(T* begin, T* end, const T& value) {
+#if defined(__CUDA_ARCH__)
+  for (size_t idx = 0; idx < static_cast<size_t>(end - begin); ++idx)
+    begin[idx] = value;
+#else
   std::fill(begin, end, value);
+#endif
 }
 
 template <typename T>
-__co_host__ inline void fill_n(T* begin, size_t n, const T& value) {
+__co_any__ inline void fill_n(T* begin, size_t n, const T& value) {
+#if defined(__CUDA_ARCH__)
+  for (size_t idx = 0; idx < n; ++idx) begin[idx] = value;
+#else
   std::fill_n(begin, n, value);
+#endif
 }
 
 namespace {
@@ -934,6 +962,119 @@ verify_matmul_row_row_subset(A& lhs, B& rhs, C& res, float base_tol,
     }
 }
 
+// ---------------------------------------------------------------------------
+// SampledVerifier: stride-based sampling verification for large matmul results.
+//
+// Treats the M*N result as a flat 1D array and samples elements at uniform
+// stride intervals.  For each sampled element, computes a CPU reference dot
+// product.  This gives O(num_samples * K) verification work instead of the
+// full O(M * N * K), keeping verification tractable on CPU even at large
+// problem sizes while covering positions spread across the full output.
+// ---------------------------------------------------------------------------
+struct SampledVerifierConfig {
+  size_t num_samples = 512;
+  float base_tol = 1.0f;
+  float rel_tol = 0.01f;
+  bool verbose = false;
+};
+
+// Pick a prime stride coprime with n so samples spread across both rows and
+// columns.  Falls back to total/num_samples when that already satisfies the
+// coprimality requirement.
+inline size_t pick_coprime_stride(size_t total, size_t n, size_t num_samples) {
+  size_t raw = std::max<size_t>(1, total / num_samples);
+  auto gcd = [](size_t a, size_t b) {
+    while (b) {
+      size_t t = b;
+      b = a % b;
+      a = t;
+    }
+    return a;
+  };
+  if (gcd(raw, n) == 1) return raw;
+  for (size_t s = raw + 1; s < total; ++s)
+    if (gcd(s, n) == 1) return s;
+  return raw;
+}
+
+// Row-col layout: lhs[M,K] (row-major) * rhs[K,N] (col-major) => res[M,N]
+template <typename A, typename B, typename C>
+__co_host__ inline void
+verify_matmul_row_col_sampled(A& lhs, B& rhs, C& res,
+                              const SampledVerifierConfig& cfg = {}) {
+  size_t m = res.shape()[0];
+  size_t n = res.shape()[1];
+  size_t k = lhs.shape()[1];
+  size_t total = m * n;
+  size_t stride = pick_coprime_stride(total, n, cfg.num_samples);
+  size_t checked = 0, failed = 0;
+  for (size_t idx = 0; idx < total && checked < cfg.num_samples;
+       idx += stride) {
+    size_t i = idx / n, j = idx % n;
+    float ref = 0.0f;
+    for (size_t kk = 0; kk < k; ++kk)
+      ref += to_f32(lhs[(int)i][(int)kk]) * to_f32(rhs[(int)kk][(int)j]);
+    float got = to_f32(res[(int)i][(int)j]);
+    float tol = cfg.base_tol + cfg.rel_tol * std::abs(ref);
+    float diff = std::abs(got - ref);
+    if (diff > tol) {
+      if (cfg.verbose || failed < 5)
+        std::cout << "mismatch at (" << i << ", " << j << ") gpu=" << got
+                  << " ref=" << ref << " diff=" << diff << "\n";
+      ++failed;
+    }
+    ++checked;
+  }
+  if (failed > 0) {
+    std::cout << "FAILED: " << failed << "/" << checked << " samples\n";
+    choreo_assert(false, "sampled verification failed");
+  }
+}
+
+// Row-row layout: lhs[M,K] * rhs[N,K] (both row-major) => res[M,N]
+template <typename A, typename B, typename C>
+__co_host__ inline void
+verify_matmul_row_row_sampled(A& lhs, B& rhs, C& res,
+                              const SampledVerifierConfig& cfg = {}) {
+  size_t m = res.shape()[0];
+  size_t n = res.shape()[1];
+  size_t k = lhs.shape()[1];
+  size_t total = m * n;
+  size_t stride = pick_coprime_stride(total, n, cfg.num_samples);
+  size_t checked = 0, failed = 0;
+  for (size_t idx = 0; idx < total && checked < cfg.num_samples;
+       idx += stride) {
+    size_t i = idx / n, j = idx % n;
+    float ref = 0.0f;
+    for (size_t kk = 0; kk < k; ++kk)
+      ref += to_f32(lhs[(int)i][(int)kk]) * to_f32(rhs[(int)j][(int)kk]);
+    float got = to_f32(res[(int)i][(int)j]);
+    float tol = cfg.base_tol + cfg.rel_tol * std::abs(ref);
+    float diff = std::abs(got - ref);
+    if (diff > tol) {
+      if (cfg.verbose || failed < 5)
+        std::cout << "mismatch at (" << i << ", " << j << ") gpu=" << got
+                  << " ref=" << ref << " diff=" << diff << "\n";
+      ++failed;
+    }
+    ++checked;
+  }
+  if (failed > 0) {
+    std::cout << "FAILED: " << failed << "/" << checked << " samples\n";
+    choreo_assert(false, "sampled verification failed");
+  }
+}
+
+// Sparse GEMM verification: dense_lhs[M,K] * rhs[N,K] => res[M,N]
+// dense_lhs is the pre-sparsification dense matrix (row-major).
+// rhs is row-major (N,K). Dot product: sum_k dense_lhs[i][k] * rhs[j][k].
+template <typename A, typename B, typename C>
+__co_host__ inline void
+verify_spmm_sampled(A& dense_lhs, B& rhs, C& res,
+                    const SampledVerifierConfig& cfg = {}) {
+  verify_matmul_row_row_sampled(dense_lhs, rhs, res, cfg);
+}
+
 // bitcast to uintx_t.
 // The type in is_same is the underlying type not the type alias.
 #if defined(__USE_CUDA_TYPE__)
@@ -1321,6 +1462,7 @@ public:
   size_t element_count() const { return span_size(dims); }
   size_t bytes() const { return element_count() * sizeof(T); }
   T* data() { return ptr.get(); }
+  const T* data() const { return ptr.get(); }
 
   // allow multi-dim-style access, be like: a[1][3]
   template <size_t M = Rank>
@@ -1354,12 +1496,12 @@ public:
     return true;
   }
   template <typename U>
-  __co_any__ void fill(U value) {
+  __co_host__ void fill(U value) {
     fill_n(this->data(), this->element_count(), static_cast<T>(value));
   }
 
   // FP8-friendly fill: accepts float and converts for fp8 types.
-  __co_any__ void fill_fp8(float value) {
+  __co_host__ void fill_fp8(float value) {
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
     if constexpr (std::is_same<T, f8_e4m3>::value ||
                   std::is_same<T, f8_e5m2>::value) {
@@ -1859,6 +2001,25 @@ template <>
 struct SparseMetaK<choreo::f8_e5m2, choreo::u32> {
   static constexpr size_t value = 64;
 };
+
+// WGMMA uses u8 metadata (per-byte encoding, different from MMA's u32).
+// For WGMMA sparse: f16/bf16 use K=32, fp8 uses K=64.
+template <>
+struct SparseMetaK<choreo::f16, choreo::u8> {
+  static constexpr size_t value = 32;
+};
+template <>
+struct SparseMetaK<choreo::bf16, choreo::u8> {
+  static constexpr size_t value = 32;
+};
+template <>
+struct SparseMetaK<choreo::f8_e4m3, choreo::u8> {
+  static constexpr size_t value = 64;
+};
+template <>
+struct SparseMetaK<choreo::f8_e5m2, choreo::u8> {
+  static constexpr size_t value = 64;
+};
 #endif
 
 // Convenience forwarding alias (non-breaking):
@@ -1866,8 +2027,13 @@ template <typename ValueT, typename MetaT>
 using SparseHostPolicy =
     Sparse2to4HostPolicy<ValueT, MetaT, SparseMetaK<ValueT, MetaT>::value>;
 
+// MMA sparse policy (uses u32 metadata).
 template <typename ValueT, typename MetaT = choreo::u32>
-using SparsePolicy = SparseHostPolicy<ValueT, MetaT>;
+using SparsePolicyMMA = SparseHostPolicy<ValueT, MetaT>;
+
+// Deprecated alias for backward compatibility.
+template <typename ValueT, typename MetaT = choreo::u32>
+using SparsePolicy = SparsePolicyMMA<ValueT, MetaT>;
 
 // Common fixed META_K aliases (for f16/bf16 sparse MMA variants).
 template <typename ValueT, typename MetaT = choreo::u32>
@@ -1875,6 +2041,239 @@ using SparsePolicyK16 = Sparse2to4HostPolicy<ValueT, MetaT, 16>;
 
 template <typename ValueT, typename MetaT = choreo::u32>
 using SparsePolicyK32 = Sparse2to4HostPolicy<ValueT, MetaT, 32>;
+
+// -----------------------------------------------------------------------------
+// WGMMA-specific sparse policy (uses u8 metadata, per-byte encoding).
+// -----------------------------------------------------------------------------
+
+template <typename ValueT, size_t META_K>
+struct Sparse2to4HostPolicyWGMMA {
+  static_assert(META_K == 32 || META_K == 64, "WGMMA META_K must be 32 or 64.");
+
+  __co_host__ static inline void
+  init_structured_sparse_A(spanned_data<ValueT, 2>& dense, std::mt19937& gen) {
+    const size_t M = dense.shape()[0];
+    const size_t K = dense.shape()[1];
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::uniform_int_distribution<int> pick(0, 3);
+    dense.fill(ValueT(0));
+    for (size_t r = 0; r < M; ++r) {
+      for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+        int idx0 = pick(gen);
+        int idx1 = pick(gen);
+        while (idx1 == idx0) idx1 = pick(gen);
+        if (idx0 > idx1) std::swap(idx0, idx1);
+        float v0 = dist(gen);
+        float v1 = dist(gen);
+        if (v0 == 0.0f) v0 = 1.0f;
+        if (v1 == 0.0f) v1 = -1.0f;
+        size_t base = r * K + c_group * 4;
+        ValueT t0 = from_f32<ValueT>(v0);
+        ValueT t1 = from_f32<ValueT>(v1);
+        if (is_zero(t0)) t0 = from_f32<ValueT>(1.0f);
+        if (is_zero(t1)) t1 = from_f32<ValueT>(-1.0f);
+        dense.data()[base + idx0] = t0;
+        dense.data()[base + idx1] = t1;
+      }
+    }
+  }
+
+  __co_host__ static inline void encode(spanned_data<ValueT, 2>& dense,
+                                        spanned_data<ValueT, 2>& packed,
+                                        spanned_data<choreo::u8, 2>& meta) {
+    const size_t M = dense.shape()[0];
+    const size_t K = dense.shape()[1];
+    for (size_t r = 0; r < M; ++r) {
+      for (size_t c_group = 0; c_group < K / 4; ++c_group) {
+        size_t base = r * K + c_group * 4;
+        size_t in_base = r * (K / 2) + c_group * 2;
+        int idxs[2] = {-1, -1};
+        int nz = 0;
+        for (int i = 0; i < 4; ++i) {
+          if (to_f32(dense.data()[base + i]) != 0.0f) {
+            if (nz < 2) idxs[nz] = i;
+            ++nz;
+          }
+        }
+        if (nz != 2) {
+          idxs[0] = 0;
+          idxs[1] = 1;
+        }
+        if (idxs[0] > idxs[1]) std::swap(idxs[0], idxs[1]);
+        ValueT v0 = dense.data()[base + idxs[0]];
+        ValueT v1 = dense.data()[base + idxs[1]];
+        packed.data()[in_base + 0] = v0;
+        packed.data()[in_base + 1] = v1;
+        uint8_t nibble = static_cast<uint8_t>(idxs[0] | (idxs[1] << 2));
+        size_t byte_col = c_group / 2;
+        if ((c_group & 1) == 0) {
+          meta[r][byte_col] = nibble;
+        } else {
+          meta[r][byte_col] |= static_cast<choreo::u8>(nibble << 4);
+        }
+      }
+    }
+  }
+
+  __co_host__ static inline void
+  prepack(spanned_data<choreo::u8, 2>& meta_u8,
+          spanned_data<choreo::u32, 2>& meta_u32) {
+    const size_t M = meta_u8.shape()[0];
+    const size_t K_meta = meta_u8.shape()[1];
+    const size_t K_meta_u32 = meta_u32.shape()[1];
+    const size_t k_fragments = K_meta / 4;
+
+    choreo_assert(meta_u32.shape()[0] == M,
+                  "Sparse prepack requires matching M dimensions");
+    choreo_assert((M % 16) == 0,
+                  "Sparse prepack requires M dimension divisible by 16");
+    choreo_assert((K_meta % 4) == 0,
+                  "Sparse prepack requires u8 metadata K dimension divisible "
+                  "by 4");
+    choreo_assert(K_meta_u32 == k_fragments,
+                  "Sparse prepack expects one u32 metadata column per 32-wide "
+                  "K fragment");
+
+    for (size_t block_m = 0; block_m < M; block_m += 16) {
+      for (size_t row = 0; row < 8; ++row) {
+        const size_t row_lo = block_m + row;
+        const size_t row_hi = block_m + row + 8;
+        for (size_t k_frag = 0; k_frag < k_fragments; ++k_frag) {
+          const size_t byte_col_base = k_frag * 4;
+          uint16_t lo16 =
+              uint16_t(meta_u8.data()[row_lo * K_meta + byte_col_base + 0]) |
+              (uint16_t(meta_u8.data()[row_lo * K_meta + byte_col_base + 1])
+               << 8);
+          uint16_t hi16 =
+              uint16_t(meta_u8.data()[row_lo * K_meta + byte_col_base + 2]) |
+              (uint16_t(meta_u8.data()[row_lo * K_meta + byte_col_base + 3])
+               << 8);
+          uint16_t lo16_pair =
+              uint16_t(meta_u8.data()[row_hi * K_meta + byte_col_base + 0]) |
+              (uint16_t(meta_u8.data()[row_hi * K_meta + byte_col_base + 1])
+               << 8);
+          uint16_t hi16_pair =
+              uint16_t(meta_u8.data()[row_hi * K_meta + byte_col_base + 2]) |
+              (uint16_t(meta_u8.data()[row_hi * K_meta + byte_col_base + 3])
+               << 8);
+
+          meta_u32.data()[(block_m + 2 * row + 0) * K_meta_u32 + k_frag] =
+              uint32_t(lo16) | (uint32_t(lo16_pair) << 16);
+          meta_u32.data()[(block_m + 2 * row + 1) * K_meta_u32 + k_frag] =
+              uint32_t(hi16) | (uint32_t(hi16_pair) << 16);
+        }
+      }
+    }
+  }
+
+  // prepack_v2: coalesced-access metadata layout.
+  // Rearranges the v1-prepacked u32 metadata so that, for each 16-row block
+  // and k-fragment, the 16 u32 values needed by the 16 active warp lanes are
+  // stored contiguously. Layout: [M/16, K_frags, 16].
+  // Device-side: thread reads meta_v2[(m16 * K_frags + kf) * 16 + pos]
+  //   where all 16 active lanes differ only in pos → single cache-line txn.
+  __co_host__ static inline void
+  prepack_v2(spanned_data<choreo::u8, 2>& meta_u8,
+             spanned_data<choreo::u32, 2>& meta_u32) {
+    const size_t M = meta_u8.shape()[0];
+    const size_t K_meta = meta_u8.shape()[1];
+    const size_t K_meta_u32 = meta_u32.shape()[1];
+    const size_t k_fragments = K_meta / 4;
+
+    choreo_assert(meta_u32.shape()[0] == M,
+                  "Sparse prepack_v2 requires matching M dimensions");
+    choreo_assert((M % 16) == 0,
+                  "Sparse prepack_v2 requires M divisible by 16");
+    choreo_assert((K_meta % 4) == 0,
+                  "Sparse prepack_v2 requires u8 K dim divisible by 4");
+    choreo_assert(K_meta_u32 == k_fragments,
+                  "Sparse prepack_v2 expects K_meta_u32 == k_fragments");
+
+    auto temp = choreo::make_spandata<choreo::u32>(M, k_fragments);
+    prepack(meta_u8, temp);
+
+    for (size_t block_m = 0; block_m < M; block_m += 16) {
+      const size_t m16 = block_m / 16;
+      for (size_t rib = 0; rib < 16; ++rib) {
+        for (size_t kf = 0; kf < k_fragments; ++kf) {
+          size_t v1_idx = (block_m + rib) * k_fragments + kf;
+          size_t v2_idx = (m16 * k_fragments + kf) * 16 + rib;
+          meta_u32.data()[v2_idx] = temp.data()[v1_idx];
+        }
+      }
+    }
+  }
+};
+
+// prepack_v2 reorder for fp8 u32 metadata (already encoded as u32).
+// Rearranges [M, K_meta_cols] u32 to coalesced layout [M/16, K64_frags, 32]
+// where 32 values per (m_block_16, k64_frag) are stored in the thread access
+// order of wgmma.sp fp8, enabling a single 128-byte cache-line transaction.
+__co_host__ inline void
+prepack_v2_fp8_reorder(spanned_data<choreo::u32, 2>& meta_in,
+                       spanned_data<choreo::u32, 2>& meta_out) {
+  const size_t M = meta_in.shape()[0];
+  const size_t K_meta_cols = meta_in.shape()[1];
+  const size_t num_k64_frags = K_meta_cols / 2;
+
+  choreo_assert(meta_out.shape()[0] == M && meta_out.shape()[1] == K_meta_cols,
+                "prepack_v2_fp8_reorder: output shape must match input");
+  choreo_assert((M % 16) == 0,
+                "prepack_v2_fp8_reorder: M must be divisible by 16");
+
+  for (size_t m16 = 0; m16 < M / 16; ++m16) {
+    for (size_t k64 = 0; k64 < num_k64_frags; ++k64) {
+      for (size_t rib = 0; rib < 16; ++rib) {
+        for (size_t col = 0; col < 2; ++col) {
+          size_t global_row = m16 * 16 + rib;
+          size_t global_col = k64 * 2 + col;
+          int low_row = rib & 7;
+          int high_bit = (rib >> 3) & 1;
+          int tid = (low_row << 2) | (col << 1) | high_bit;
+          size_t v2_idx = (m16 * num_k64_frags + k64) * 32 + tid;
+          meta_out.data()[v2_idx] =
+              meta_in.data()[global_row * K_meta_cols + global_col];
+        }
+      }
+    }
+  }
+}
+
+// prepack_v2 reorder for f16/bf16 u32 metadata (16-bit value types).
+// Rearranges [M, K_frags] u32 to coalesced layout [M/16, K_frags, 16].
+__co_host__ inline void
+prepack_v2_16bit_reorder(spanned_data<choreo::u32, 2>& meta_in,
+                         spanned_data<choreo::u32, 2>& meta_out) {
+  const size_t M = meta_in.shape()[0];
+  const size_t K_frags = meta_in.shape()[1];
+
+  choreo_assert(meta_out.shape()[0] == M && meta_out.shape()[1] == K_frags,
+                "prepack_v2_16bit_reorder: output shape must match input");
+  choreo_assert((M % 16) == 0,
+                "prepack_v2_16bit_reorder: M must be divisible by 16");
+
+  for (size_t m16 = 0; m16 < M / 16; ++m16) {
+    for (size_t rib = 0; rib < 16; ++rib) {
+      for (size_t kf = 0; kf < K_frags; ++kf) {
+        size_t v1_idx = (m16 * 16 + rib) * K_frags + kf;
+        size_t v2_idx = (m16 * K_frags + kf) * 16 + rib;
+        meta_out.data()[v2_idx] = meta_in.data()[v1_idx];
+      }
+    }
+  }
+}
+
+// WGMMA convenience aliases.
+template <typename ValueT>
+using SparsePolicyWGMMAK32 = Sparse2to4HostPolicyWGMMA<ValueT, 32>;
+
+template <typename ValueT>
+using SparsePolicyWGMMAK64 = Sparse2to4HostPolicyWGMMA<ValueT, 64>;
+
+// WGMMA sparse policy that infers META_K from dtype (uses u8 metadata).
+template <typename ValueT>
+using SparsePolicyWGMMA =
+    Sparse2to4HostPolicyWGMMA<ValueT, SparseMetaK<ValueT, choreo::u8>::value>;
 
 // --- Compile-time smoke tests to prevent regressions ------------------------
 static_assert(SparseMetaK<choreo::f16, choreo::u32>::value == 16,
@@ -1886,6 +2285,15 @@ static_assert(SparseMetaK<choreo::f8_e4m3, choreo::u32>::value == 64,
               "Regression: SparseMetaK<f8_e4m3,u32> changed");
 static_assert(SparseMetaK<choreo::f8_e5m2, choreo::u32>::value == 64,
               "Regression: SparseMetaK<f8_e5m2,u32> changed");
+// WGMMA u8 metadata regressions.
+static_assert(SparseMetaK<choreo::f16, choreo::u8>::value == 32,
+              "Regression: SparseMetaK<f16,u8> changed");
+static_assert(SparseMetaK<choreo::bf16, choreo::u8>::value == 32,
+              "Regression: SparseMetaK<bf16,u8> changed");
+static_assert(SparseMetaK<choreo::f8_e4m3, choreo::u8>::value == 64,
+              "Regression: SparseMetaK<f8_e4m3,u8> changed");
+static_assert(SparseMetaK<choreo::f8_e5m2, choreo::u8>::value == 64,
+              "Regression: SparseMetaK<f8_e5m2,u8> changed");
 #endif
 
 static_assert(

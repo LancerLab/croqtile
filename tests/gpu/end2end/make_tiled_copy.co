@@ -1,0 +1,86 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ auto ele_add0(s32 [16, 32] lhs, s32 [16, 32] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      lhs_s = dma.copy lhs => shared;
+      rhs_s = dma.copy rhs => shared;
+      foreach {x, y} in lhs_s.span {
+        lhs_s.data.at(x, y) += rhs_s.data.at(x, y);
+      }
+      dma.copy lhs_s => output;
+    }
+
+  return output;
+}
+
+#define ssM 16
+#define ssN 16
+#define ival -1
+
+__co__ auto ele_add1(s8 [16, 33] lhs, s8 [16, 33] rhs) {
+  s8[lhs.span] output {ival};
+
+  parallel p by 1 : block
+    parallel q by 16 : thread {
+      lhs_s = dma.copy lhs.subspan(ssM, ssN) => shared;
+      rhs_s = dma.copy rhs.subspan(ssM, ssN) => shared;
+      foreach {x, y} in lhs_s.span {
+        lhs_s.data.at(x, y) += rhs_s.data.at(x, y);
+      }
+      dma.copy lhs_s => output.subspan(ssM, ssN);
+    }
+
+  return output;
+}
+
+void Run0() {
+  auto a = choreo::make_spandata<choreo::s32>(16, 32);
+  auto b = choreo::make_spandata<choreo::s32>(16, 32);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = ele_add0(a.view(), b.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      auto aa = a[i][j];
+      auto bb = b[i][j];
+      if (aa + bb != res[i][j])
+        choreo::choreo_assert(aa + bb == res[i][j], "values are not equal.");
+    }
+
+  std::cout << "Test Passed0\n" << std::endl;
+}
+
+void Run1() {
+  auto a = choreo::make_spandata<choreo::s8>(16, 33);
+  auto b = choreo::make_spandata<choreo::s8>(16, 33);
+  a.fill_random(-3, 3);
+  b.fill_random(-3, 3);
+
+  auto res = ele_add1(a.view(), b.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      auto aa = a[i][j];
+      auto bb = b[i][j];
+      auto want = ival;
+      if (i < ssM && j < ssN) want = aa + bb;
+      if (want != res[i][j])
+        choreo::choreo_assert(want == res[i][j], "values are not equal.");
+    }
+
+  std::cout << "Test Passed1\n" << std::endl;
+}
+
+int main() {
+  Run0();
+  Run1();
+}
+
+// CHECK: Test Passed0
+// CHECK: Test Passed1

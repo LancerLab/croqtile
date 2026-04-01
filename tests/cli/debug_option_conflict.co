@@ -1,0 +1,12 @@
+// RUN: not choreo -es -g -tg %s -o - 2>&1 | FileCheck %s --check-prefix=CONFLICT
+// RUN: not choreo -es --debug-line-path=bad %s -o - 2>&1 | FileCheck %s --check-prefix=PATH
+
+__co__ void foo() {
+  global s32 [1,2] g;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+  }
+}
+
+// CONFLICT: option '-g' cannot be used together with '-tg'.
+// PATH: Invalid --debug-line-path value: 'bad'. Supported values: relative, absolute.

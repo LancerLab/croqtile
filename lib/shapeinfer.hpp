@@ -1,6 +1,7 @@
 #ifndef __CHOREO_SHAPE_INFERENCE_HPP__
 #define __CHOREO_SHAPE_INFERENCE_HPP__
 
+#include "assess.hpp"
 #include "symvals.hpp"
 #include "valno.hpp"
 
@@ -339,7 +340,6 @@ public:
   bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::InThreadsBlock& n) override;
   bool Visit(AST::IfElseBlock& n) override;
-  bool Visit(AST::IncrementBlock& n) override;
   bool Visit(AST::FunctionDecl& n) override;
   bool Visit(AST::ChoreoFunction& n) override;
   bool Visit(AST::CppSourceCode& n) override;
@@ -362,6 +362,8 @@ private:
     return {result.size(), result};
   }
   const Shape GenShape(const NumTy& v) { return GenShape(vn.SignNum(v)); };
+  bool StaticFail(bool = true, UsageType = UsageType::ShapeCompatibility);
+
 }; // class ShapeInference
 
 } // end namespace Choreo

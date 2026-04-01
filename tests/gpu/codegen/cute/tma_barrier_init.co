@@ -1,0 +1,34 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+
+#define MATMUL_TILE_K 128
+#define MATMUL_WARP_K 16
+#define MATMUL_TILE_M 64
+#define MATMUL_WARP_M 64
+#define MATMUL_WARP_N 128
+#define MATMUL_SWIZ 128
+
+__co__ void foo(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+
+  parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block
+  parallel p by 2 : group-4
+  {
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+    lhs_f = tma.any;
+    rhs_f = tma.any;
+    inthreads(p == 0) {
+      lhs_f = tma.copy.async lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, 0) => shared; // trigger lhs_f
+      rhs_f = tma.copy.async rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, 0) => shared;
+    }
+
+    inthreads(p == 1) {
+      wait lhs_f, rhs_f;
+      // do math
+      tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+    }
+  }
+}
+
+// CHECK: init(&choreo_copy_atom_t_0_barrier, blockDim.x);
+// CHECK: init(&choreo_copy_atom_t_1_barrier, blockDim.x);
+// CHECK: init(&choreo_copy_atom_t_2_barrier, 128);

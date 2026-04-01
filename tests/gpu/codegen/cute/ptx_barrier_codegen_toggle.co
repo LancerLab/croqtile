@@ -1,0 +1,55 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a --ptx-barrier %s -o - | FileCheck %s --check-prefix=CHECK-ON0
+// RUN: choreo -es -t cute -arch=sm_90a --tma-cluster-aware %s -o - | FileCheck %s --check-prefix=CHECK-ON1
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=CHECK-OFF
+
+#define WARP_M 64
+#define WARP_N 64
+#define TILE_K 64
+#define WARP_K 16
+
+#define M 64
+#define N 64
+#define K 64
+
+__co__ void ptx_barrier_toggle_case(global f16 [M, K] lhs,
+                                    global f16 [N, K] rhs,
+                                    global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_s = tma.copy.swiz<128> lhs.chunkat(block_m, iv_k) => shared;
+      rhs_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
+
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+}
+
+// CHECK-ON0: {{^[[:space:]]*__shared__[[:space:]]+__align__\(8\)[[:space:]]+uint64_t[[:space:]]+choreo_copy_atom_t_0_barrier;}}
+// CHECK-ON0: {{^[[:space:]]*choreo::tma_mbarrier_init\(&choreo_copy_atom_t_0_barrier,[[:space:]]*1\);}}
+// CHECK-ON0: {{^[[:space:]]*choreo_copy_atom_t_0\.EnablePTXMBarrier\(&choreo_copy_atom_t_0_barrier\);}}
+// CHECK-ON0: {{^[[:space:]]*choreo::tma_mbarrier_expect_tx\(}}
+// CHECK-ON0: {{^[[:space:]]*choreo::tma_load_2d_shared_cta_global_mbarrier\(}}
+// CHECK-ON0: {{^[[:space:]]*choreo::tma_mbarrier_wait_parity\(}}
+
+// CHECK-ON1: {{^[[:space:]]*__shared__[[:space:]]+__align__\(8\)[[:space:]]+uint64_t[[:space:]]+choreo_copy_atom_t_0_barrier;}}
+// CHECK-ON1: {{^[[:space:]]*choreo::tma_mbarrier_init\(&choreo_copy_atom_t_0_barrier,[[:space:]]*1\);}}
+// CHECK-ON1: {{^[[:space:]]*choreo_copy_atom_t_0\.EnablePTXMBarrier\(&choreo_copy_atom_t_0_barrier\);}}
+// CHECK-ON1: {{^[[:space:]]*choreo::tma_mbarrier_expect_tx\(}}
+// CHECK-ON1: {{^[[:space:]]*choreo::tma_load_2d_shared_cluster_global_mbarrier\(}}
+// CHECK-ON1: {{^[[:space:]]*choreo::tma_mbarrier_wait_parity\(}}
+
+// CHECK-OFF: {{^[[:space:]]*__shared__[[:space:]]+cuda::barrier<cuda::thread_scope_block>[[:space:]]+choreo_copy_atom_t_0_barrier;}}
+// CHECK-OFF: {{^[[:space:]]*init\(&choreo_copy_atom_t_0_barrier,[[:space:]]*blockDim\.x\);}}
+// CHECK-OFF: {{^[[:space:]]*cde::fence_proxy_async_shared_cta\(\);}}
+// CHECK-OFF: {{^[[:space:]]*TMAAtom[[:space:]]+choreo_copy_atom_t_0\{&choreo_copy_atom_t_0_barrier\};}}
+// CHECK-OFF: {{^[[:space:]]*\(\(TMAAtom\*\)lhs_s\.get_atom\(\)\)->token\(\)[[:space:]]*=[[:space:]]*cuda::device::barrier_arrive_tx\(}}
+// CHECK-OFF-NOT: {{^[[:space:]]*choreo::tma_mbarrier_expect_tx\(}}

@@ -1,0 +1,38 @@
+// RUN: choreo -es --show-assess %s -o /dev/null 2>&1 | FileCheck %s
+//
+// --show-assess report for ENTRY assertions.
+//
+// When the index `j` is a plain function parameter the hoisting pass
+// classifies both bounds checks as ENTRY: they are knowable at function
+// entry and will be emitted as host-side runtime_check calls rather than
+// device-side choreo_assert calls.
+//
+// The report must show:
+//   1. Assessment  : the source location and message for each assertion.
+//   2. State       : type=ENTRY, enabled=yes.
+//   3. Cost        : low / estimated=1  (no enclosing loops at the hoist site).
+//   4. Site        : "function entry (host runtime_check)".
+
+__co__ void foo(int j) {
+  parallel p by 8 {
+    shared s32 [4] buf;
+    x = buf.at(j);
+  }
+}
+
+// Header: function name and total count.
+// CHECK: [assertions] function: foo  (2 assessed:  0 static-true,  0 static-false,  2 runtime)
+
+// ---- assertion [0]: lower-bound check ----
+// CHECK: [0] ENTRY      enabled=yes  cost=low     estimated=1
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}greater than or equal to 0
+// CHECK:      loc     : {{.*}}.co:
+// CHECK:      site    : function entry (host runtime_check)
+
+// ---- assertion [1]: upper-bound check ----
+// CHECK: [1] ENTRY      enabled=yes  cost=low     estimated=1
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}less than 4
+// CHECK:      loc     : {{.*}}.co:
+// CHECK:      site    : function entry (host runtime_check)

@@ -1,3 +1,4 @@
+#include "assert_site.hpp"
 #include "cute_codegen.hpp"
 #include "dmaconf.hpp"
 #include "gpu_adapt.hpp"
@@ -52,7 +53,7 @@ public:
         {80, {2048 /*1KB*/, 164ull * 1024 /* 164KB */}},
         {86, {2048 /*1KB*/, 100ull * 1024 /* 100KB */}},
         {89, {2048 /*1KB*/, 100ull * 1024 /* 100KB */}},
-        {90, {2048 /*1KB*/, 164ull * 1024 /* 164KB */}},
+        {90, {2048 /*1KB*/, 228ull * 1024 /* 228KB */}},
         {100, {2048 /*1KB*/, 228ull * 1024 /* 228KB */}},
         {120, {2048 /*1KB*/, 300ull * 1024 /* 228KB */}},
     };
@@ -74,19 +75,22 @@ public:
   }
 
   size_t GetMinGroupDim(const ArchId&) const override { return 32; }
-  size_t GetMemAlignment(const Storage& sto,
-                         const ArchId& arch) const override {
+  size_t GetMemAlignmentByte(const Storage& sto,
+                             const ArchId& arch) const override {
+    // global buffer from cudaMalloc is aligned with 256 bytes by default.
     int arch_num = ArchNum(arch);
     if (arch_num < 90) {
       switch (sto) {
       case Storage::LOCAL: return 16;
       case Storage::SHARED: return 16;
+      case Storage::GLOBAL: return 256;
       default: choreo_unreachable("Unsupported mem level.");
       }
     } else {
       switch (sto) {
       case Storage::LOCAL: return 16;
       case Storage::SHARED: return 128; // req of wgmma and tma
+      case Storage::GLOBAL: return 256;
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
@@ -122,7 +126,8 @@ public:
   const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId& arch) const override {
     if (IsFeatureSupported(arch, STR(ChoreoFeature::WGMMA)))
-      return {ParallelLevel::SEQ, ParallelLevel::BLOCK, ParallelLevel::GROUPx4,
+      return {ParallelLevel::SEQ,   ParallelLevel::CLUSTER,
+              ParallelLevel::BLOCK, ParallelLevel::GROUPx4,
               ParallelLevel::GROUP, ParallelLevel::THREAD};
     else
       return {ParallelLevel::SEQ, ParallelLevel::BLOCK, ParallelLevel::GROUP,
@@ -133,6 +138,7 @@ public:
   bool PlanCodeGenStages(ASTPipeline& p) const override {
     p.AddStage<GPUAdaptor>();
     p.AddStage<MemUsageCheck>();
+    p.AddStage<AssertSite>();
     p.AddStage<Cute::CuteCodeGen>();
     return true;
   }

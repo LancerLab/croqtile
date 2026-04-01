@@ -108,9 +108,9 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             Storage::SHARED);
         shared_spm->SetType(ssty);
         shared_spm->AddNote("spm");
-        shared_spm->AddNote("alignment",
-                            std::to_string(CCtx().GetMemoryAlignment(
-                                CCtx().GetArch(), Storage::SHARED)));
+        shared_spm->AddNote(
+            "alignment",
+            std::to_string(CCtx().GetMemoryAlignmentByte(Storage::SHARED)));
         pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
         SSTab().DefineSymbol(DFCtx().shared_spm_name, ssty);
         VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
@@ -128,9 +128,9 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             Storage::LOCAL);
         local_spm->SetType(lsty);
         local_spm->AddNote("spm");
-        local_spm->AddNote("alignment",
-                           std::to_string(CCtx().GetMemoryAlignment(
-                               CCtx().GetArch(), Storage::LOCAL)));
+        local_spm->AddNote(
+            "alignment",
+            std::to_string(CCtx().GetMemoryAlignmentByte(Storage::LOCAL)));
         pb->stmts->values.insert(pb->stmts->values.begin(), local_spm);
         SSTab().DefineSymbol(DFCtx().local_spm_name, lsty);
         VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
@@ -250,7 +250,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     if (sto != Storage::LOCAL && sto != Storage::SHARED)
       choreo_unreachable("The storage type: " + STR(sto) +
                          " is not supported yet!");
-    size_t alignment = CCtx().GetMemoryAlignment(CCtx().GetArch(), sto);
+    size_t alignment = CCtx().GetMemoryAlignmentByte(sto);
     if (ma.sto_have_dyn[df_name][sto]) {
       auto mri = FCtx(co_func_name).SetDynMemReuseInfo(df_name);
       std::string simulator =
@@ -394,8 +394,7 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
 
   n.AddNote("reuse", spm_name);
   n.AddNote("offset", offset);
-  n.AddNote("alignment",
-            std::to_string(CCtx().GetMemoryAlignment(CCtx().GetArch(), sto)));
+  n.AddNote("alignment", std::to_string(CCtx().GetMemoryAlignmentByte(sto)));
 }
 
 bool MemReuse::RunOnProgramImpl(AST::Node& root) {

@@ -174,7 +174,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     assert(!isa<UnknownType>(rty) && "reference type is unknown.");
     SetNodeType(n, rty);
     if (diverges.Contains(dyn_cast<AST::Identifier>(ref))) diverges.Add(n);
-  } else if (n.op == "dataof" || n.op == "mdataof") {
+  } else if (n.op == Op::DataOf || n.op == Op::MDataOf) {
     auto ty = NodeType(*n.GetR());
     if (!isa<FutureType>(ty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -185,10 +185,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     if (auto sym = cast<AST::Expr>(n.GetR())->GetSymbol())
       SetNodeType(n, GetSymbolType(sym->name +
-                                   (n.op == "mdataof" ? ".mdata" : ".data")));
+                                   (n.op == Op::MDataOf ? ".mdata" : ".data")));
     else
       SetNodeType(n, MakeDummySpannedType());
-  } else if (n.op == "addrof") {
+  } else if (n.op == Op::AddrOf) {
     auto ty = NodeType(*n.GetR());
     if (!isa<SpannedType>(ty) && !isa<AST::DataAccess>(n.GetR())) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -197,7 +197,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, MakeAddrType());
-  } else if (n.op == "sizeof") {
+  } else if (n.op == Op::SizeOf) {
     auto ty = NodeType(*n.GetR());
     if (!GetMDSpanType(ty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -207,7 +207,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, MakeIntegerType());
-  } else if (n.op == "dimof") {
+  } else if (n.op == Op::DimOf) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!isa<MDSpanType>(lty) && !isa<ITupleType>(lty) &&
@@ -228,12 +228,12 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     if (isa<BoundedType>(lty)) {
       // disambiguate subscription into bounded ituple and getith of bounded
       // integer
-      n.op = "getith";
+      n.op = Op::GetIth;
       cast<AST::IntIndex>(n.GetR())->UseBracket();
       SetNodeType(n, lty);
     } else
       SetNodeType(n, MakeIntegerType());
-  } else if (n.op == "ubound") {
+  } else if (n.op == Op::GetUBound) {
     auto ty = NodeType(*n.GetR());
     if (!isa<BoundedType>(ty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
@@ -261,8 +261,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, ty->Clone());
-  } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
-             (n.op == "%") || (n.op == "cdiv")) {
+  } else if ((n.op == Op::Add) || (n.op == Op::Sub) || (n.op == Op::Mul) ||
+             (n.op == Op::Div) || (n.op == Op::Mod) || (n.op == Op::CeilDiv)) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!lty || !rty)
@@ -323,7 +323,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                 isa<ScalarIntegerType>(lty))) {
       // this is promissing, simply allow it
       if (IsActualBoundedIntegerType(lty))
-        if (cast<AST::Expr>(n.GetL())->op == "getith") {
+        if (cast<AST::Expr>(n.GetL())->op == Op::GetIth) {
           Error1(n.LOC(),
                  "in operation \"" + n.op +
                      "\": unable to apply to the getith bounded variable (" +
@@ -336,7 +336,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         } else
           SetNodeType(n, lty->Clone());
       else {
-        if (cast<AST::Expr>(n.GetR())->op == "getith") {
+        if (cast<AST::Expr>(n.GetR())->op == Op::GetIth) {
           Error1(n.LOC(),
                  "in operation \"" + n.op +
                      "\": unable to apply to the 'getith' bounded variable (" +
@@ -361,7 +361,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeITupleType(lty->Dims()));
     } else if (isa<MDSpanType>(lty) && isa<MDSpanType>(rty)) {
       // only allow div/mod operations
-      if ((n.op != "/") && (n.op != "%") && (n.op != "cdiv")) {
+      if ((n.op != Op::Div) && (n.op != Op::Mod) && (n.op != Op::CeilDiv)) {
         Error1(n.LOC(), "in operation \"" + n.op +
                             "\": unable to apply to the types (" + PSTR(lty) +
                             " vs. " + PSTR(rty) + ").");
@@ -616,7 +616,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       }
       SetNodeType(n, lty->Clone());
     }
-  } else if (n.op == "concat") {
+  } else if (n.op == Op::Concat) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!((isa<MDSpanType>(lty) || isa<ITupleType>(lty)) &&
@@ -631,7 +631,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUninitMDSpanType());
     else
       SetNodeType(n, MakeRankedMDSpanType(lty->Dims() + rty->Dims()));
-  } else if (n.op == "elemof") {
+  } else if (n.op == Op::ElemOf) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     auto old_ec = error_count;
@@ -744,7 +744,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
         ptr<AST::Node> last = wl[0];
         for (size_t i = 1; i < wl.size(); ++i) {
           auto concat =
-              AST::Make<AST::Expr>(last->LOC(), "concat", last, wl[i]);
+              AST::Make<AST::Expr>(last->LOC(), Op::Concat, last, wl[i]);
           last = concat;
         }
         if (debug_visit)
@@ -1713,8 +1713,30 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     if (!to_sym.empty()) to_sym = InScopeName(to_sym);
     FCtx(fname).GetFutureBufferInfo().emplace(
         InScopeName(n.future), DMABufferInfo{to_sym, from_kind, to_kind});
-  } else if (n.IsAsync())
-    Error1(n.LOC(), "forbid to associated async dma without a named future.");
+  } else if (n.IsAsync()) {
+    if (n.HasEvent() && CCtx().UseWarpSpec()) {
+      auto event = n.Event();
+      if (!AST::IsSymbolOrArrayRef(*event))
+        Error1(n.LOC(), "expect a symbol/array reference but got '" +
+                            AST::STR(*event) + "'.");
+
+      auto ety = NodeType(*event);
+      if (isa<EventArrayType>(ety)) {
+        if (inthreads_levels[pl_depth] == 0)
+          Warning(event->LOC(),
+                  "Be careful to wait event outside inthreads block, "
+                  "which may lead to parallelism issues.");
+      } else if (!isa<EventType>(ety)) {
+        Error1(event->LOC(),
+               "expect an event or event array but got '" + PSTR(ety) + "'.");
+      }
+    } else if (n.HasEvent() && !CCtx().UseWarpSpec()) {
+      Error1(n.LOC(),
+             "async dma/tma with event is only supported in warpspec mode.");
+    } else
+      Error1(n.LOC(), "forbid to associated async dma without a named future "
+                      "or a named event.");
+  }
 
   if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
     if (cast<AST::ChunkAt>(n.from)->HasTilingOperation() &&
@@ -1875,6 +1897,15 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     auto sty = op.StoreTo()->GetType();
     if (!isa<SpannedType>(sty))
       Error1(n.LOC(), "Expected a spanned buffer for MMA store.");
+  } break;
+  case AST::MMAOperation::Scale: {
+    std::string acc_sym = AST::FragName(op.ScaleAccumulator());
+    ReportErrorWhenUseBeforeDefine(n.LOC(), acc_sym);
+    auto sty = op.ScaleA()->GetType();
+    if (!isa<SpannedType>(sty))
+      Error1(n.LOC(), "Expected a spanned buffer for MMA scale A.");
+    if (!isa<ScalarType>(op.ScaleB()->GetType()))
+      Error1(n.LOC(), "Expected a scalar value for MMA scale B.");
   } break;
   default: break;
   }
@@ -2534,26 +2565,6 @@ bool EarlySemantics::Visit(AST::IfElseBlock& n) {
     Error1(n.pred->LOC(), "requires a predication expression but got '" +
                               PSTR(NodeType(*n.pred)) + "'.");
   }
-
-  return true;
-}
-
-bool EarlySemantics::Visit(AST::IncrementBlock& n) {
-  TraceEachVisit(n);
-  for (auto& iv : n.GetIterationVars()) {
-    auto ity = NodeType(*iv);
-    if (!(isa<BoundedType>(ity)))
-      Error1(n.LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
-    if (auto id = AST::GetIdentifier(*iv)) {
-      if (id->name == "_")
-        Error1(n.LOC(), "_ is not allowed as an iteration variable.");
-    }
-  }
-
-  auto pty = NodeType(*n.GetPredicate());
-  if (!isa<BooleanType>(pty))
-    Error1(n.LOC(),
-           "expect the a boolean-typed predicate but got '" + PSTR(pty) + "'.");
 
   return true;
 }

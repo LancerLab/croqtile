@@ -102,7 +102,6 @@ struct Visitor {
   virtual bool Visit(AST::InThreadsBlock&) = 0;
   virtual bool Visit(AST::WhileBlock&) = 0;
   virtual bool Visit(AST::IfElseBlock&) = 0;
-  virtual bool Visit(AST::IncrementBlock&) = 0;
   virtual bool Visit(AST::FunctionDecl&) = 0;
   virtual bool Visit(AST::ChoreoFunction&) = 0;
   virtual bool Visit(AST::CppSourceCode&) = 0;
@@ -132,9 +131,6 @@ protected:
 
   static std::unordered_set<std::string> AllVisitors;
 
-  bool DebugIsEnabled() const { return debug_visit; }
-  bool TraceIsEnabled() const { return trace_visit; }
-
 public:
   Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr,
           bool ugs = false)
@@ -152,12 +148,12 @@ public:
 
     if (std::getenv("CHOREO_TRACE_VISITOR")) {
       auto trace = ToUpper(std::string(std::getenv("CHOREO_TRACE_VISITOR")));
-      if (ContainsExact(trace, name)) trace_visit = true;
+      if (ContainsExact(trace, name)) SetTraceVisit(true);
     }
 
     if (std::getenv("CHOREO_DEBUG_VISITOR")) {
       auto debug = ToUpper(std::string(std::getenv("CHOREO_DEBUG_VISITOR")));
-      if (ContainsExact(debug, name)) debug_visit = true;
+      if (ContainsExact(debug, name)) SetDebugVisit(true);
     }
 
     if (std::getenv("CHOREO_PRINT_BEFORE")) {
@@ -195,6 +191,9 @@ public:
   }
 
   virtual ~Visitor() {}
+
+  virtual bool DebugIsEnabled() const { return debug_visit; }
+  virtual bool TraceIsEnabled() const { return trace_visit; }
 
   virtual void SetTraceVisit(bool t) { trace_visit = t; }
   virtual void SetDebugVisit(bool d) { debug_visit = d; }
@@ -239,7 +238,7 @@ public:
     else if (auto expr = dyn_cast<AST::Expr>(&n)) {
       if (auto id = expr->GetSymbol()) {
         return GetSymbolType(id->name);
-      } else if (expr->op == "dataof" || expr->op == "mdataof") {
+      } else if (expr->op == Op::DataOf || expr->op == Op::MDataOf) {
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
           if (!GetSymbolType(id->name)) {
             // TODO: make NodeType be used properly
@@ -248,15 +247,7 @@ public:
             return nullptr;
           }
           return GetSymbolType(id->name +
-                               (expr->op == "mdataof" ? ".mdata" : ".data"));
-        }
-      } else if (expr->op == "spanof") {
-        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
-          if (!GetSymbolType(id->name)) // make sure the symbol exists
-            choreo_unreachable(
-                "\"spanof\" operation refers undefined symbol '" + id->name +
-                "'.");
-          return GetSymbolType(id->name + ".span");
+                               (expr->op == Op::MDataOf ? ".mdata" : ".data"));
         }
       }
     }
@@ -450,8 +441,6 @@ public:
       SSTab().EnterScope("while_" + std::to_string(wl_count++));
     } else if (isa<AST::IfElseBlock>(&n)) {
       SSTab().EnterScope("cond_if_" + std::to_string(ie_count++));
-    } else if (isa<AST::IncrementBlock>(&n)) {
-      SSTab().EnterScope("increment_" + std::to_string(fe_count++));
     } else if (auto w = dyn_cast<AST::WithIn>(&n)) {
       std::string scope_name = scoped_symtab.ScopeName();
       if (w->with) {
@@ -496,8 +485,7 @@ public:
       SSTab().LeaveScope();
     } else if (isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
                isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-               isa<AST::WhileBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
-               isa<AST::IncrementBlock>(&n)) {
+               isa<AST::WhileBlock>(&n) || isa<AST::IfElseBlock>(&n)) {
       SSTab().LeaveScope();
     }
 
@@ -580,7 +568,6 @@ public:
   bool Visit(AST::InThreadsBlock&) override { return true; }
   bool Visit(AST::WhileBlock&) override { return true; }
   bool Visit(AST::IfElseBlock&) override { return true; }
-  bool Visit(AST::IncrementBlock&) override { return true; }
   bool Visit(AST::FunctionDecl&) override { return true; }
   bool Visit(AST::ChoreoFunction&) override { return true; }
   bool Visit(AST::CppSourceCode&) override { return true; }
@@ -835,10 +822,6 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
-  bool Visit(AST::IncrementBlock& n) final {
-    TraceEachVisit(n);
-    return VisitNode(n);
-  }
   bool Visit(AST::FunctionDecl& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -901,7 +884,6 @@ public:
   virtual bool VisitNode(AST::InThreadsBlock&) { return true; }
   virtual bool VisitNode(AST::WhileBlock&) { return true; }
   virtual bool VisitNode(AST::IfElseBlock&) { return true; }
-  virtual bool VisitNode(AST::IncrementBlock&) { return true; }
   virtual bool VisitNode(AST::FunctionDecl&) { return true; }
   virtual bool VisitNode(AST::ChoreoFunction&) { return true; }
   virtual bool VisitNode(AST::CppSourceCode&) { return true; }
@@ -1024,7 +1006,6 @@ private:
   bool Visit(AST::InThreadsBlock&) final { return true; }
   bool Visit(AST::WhileBlock&) final { return true; }
   bool Visit(AST::IfElseBlock&) final { return true; }
-  bool Visit(AST::IncrementBlock&) final { return true; }
   bool Visit(AST::FunctionDecl&) final { return true; }
   bool Visit(AST::ChoreoFunction&) final { return true; }
   bool Visit(AST::CppSourceCode&) final { return true; }
@@ -1065,13 +1046,6 @@ ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
         auto r1 = ReferredSymbols(t->GetIndices().get(), v);
         res.insert(r1.begin(), r1.end());
       } else if (auto t = dyn_cast<AST::SOP::SubSpan>(sop)) {
-        auto r0 = ReferredSymbols(t->GetSubSpan().get(), v);
-        res.insert(r0.begin(), r0.end());
-        auto r1 = ReferredSymbols(t->GetIndices().get(), v);
-        res.insert(r1.begin(), r1.end());
-        auto r2 = ReferredSymbols(t->GetStrides().get(), v);
-        res.insert(r2.begin(), r2.end());
-      } else if (auto t = dyn_cast<AST::SOP::ModSpan>(sop)) {
         auto r0 = ReferredSymbols(t->GetSubSpan().get(), v);
         res.insert(r0.begin(), r0.end());
         auto r1 = ReferredSymbols(t->GetIndices().get(), v);

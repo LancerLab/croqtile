@@ -3,6 +3,7 @@
 
 #include "aux.hpp"
 #include "infra_utils.hpp"
+#include "opcode.hpp"
 #include "options.hpp"
 #include <cmath>
 #include <functional>
@@ -202,6 +203,8 @@ inline static OpCode ToOpCode(const std::string& op) {
     choreo_unreachable("operation '" + op + "' is not supported.");
   return OpCode::NONE;
 }
+
+inline static OpCode ToOpCode(const Opcode& op) { return ToOpCode(STR(op)); }
 
 namespace sbe {
 
@@ -541,7 +544,7 @@ public:
     if (auto nv = dyn_cast<NumericValue>(simplified)) {
       if (op == OpCode::BIT_INV) return nu(~(nv->Value()));
     } else if (auto bv = dyn_cast<BooleanValue>(simplified)) {
-      if (op == OpCode::NOT) return bl(!nv->Value());
+      if (op == OpCode::NOT) return bl(!bv->Value());
     }
     return std::make_shared<UnaryOperation>(op, simplified);
   }
@@ -703,6 +706,8 @@ public:
 
     auto lnv = dyn_cast<NumericValue>(simplifiedLeft);
     auto rnv = dyn_cast<NumericValue>(simplifiedRight);
+    auto lbv = dyn_cast<BooleanValue>(simplifiedLeft);
+    auto rbv = dyn_cast<BooleanValue>(simplifiedRight);
     // Handle special simplification cases
     // x + 0 = x, 0 + x = x
     if (op == OpCode::ADD) {
@@ -738,15 +743,17 @@ public:
       if (rnv && (rnv->Value() == 1)) return simplifiedLeft;
       if (lnv && (lnv->Value() == 1)) return nu(1);
     }
-    // x&0 = 0, 0&x = 0
+    // x&&false = false, false&&x = false, x&&true = x, true&&x = x
     else if (op == OpCode::AND) {
-      if (rnv && (rnv->Value() == 0)) return nu(0);
-      if (lnv && (lnv->Value() == 0)) return nu(0);
+      if ((rbv && !rbv->Value()) || (lbv && !lbv->Value())) return bl(false);
+      if (rbv && rbv->Value()) return simplifiedLeft;
+      if (lbv && lbv->Value()) return simplifiedRight;
     }
-    // x|0 = x, 0|x = x
+    // x||true = true, true||x = true, x||false = x, false||x = x
     else if (op == OpCode::OR) {
-      if (rnv && (rnv->Value() == 0)) return simplifiedLeft;
-      if (lnv && (lnv->Value() == 0)) return simplifiedRight;
+      if ((rbv && rbv->Value()) || (lbv && lbv->Value())) return bl(true);
+      if (rbv && !rbv->Value()) return simplifiedLeft;
+      if (lbv && !lbv->Value()) return simplifiedRight;
     }
 
     // x - x = 0
@@ -988,6 +995,30 @@ public:
         return right->Fold();
     }
 
+    if (nl && nr && (*nl == *nr)) return nl;
+
+    if (auto lbool = dyn_cast<BooleanValue>(nl)) {
+      if (auto rbool = dyn_cast<BooleanValue>(nr)) {
+        if (lbool->IsTrue() && rbool->IsFalse()) return npred;
+        if (lbool->IsFalse() && rbool->IsTrue())
+          return uop(OpCode::NOT, npred)->Normalize();
+      }
+    }
+
+    if (npred && nl && (*npred == *nl)) {
+      if (auto rbool = dyn_cast<BooleanValue>(nr)) {
+        if (rbool->IsTrue()) return bl(true);
+        if (rbool->IsFalse()) return npred;
+      }
+    }
+
+    if (npred && nr && (*npred == *nr)) {
+      if (auto lbool = dyn_cast<BooleanValue>(nl)) {
+        if (lbool->IsTrue()) return bl(true);
+        if (lbool->IsFalse()) return uop(OpCode::NOT, npred)->Normalize();
+      }
+    }
+
     return sel(npred, nl, nr);
   }
 
@@ -1001,6 +1032,31 @@ public:
       else if (p->Value() == false)
         return nright;
     }
+
+    if (nleft && nright && (*nleft == *nright)) return nleft;
+
+    if (auto lbool = dyn_cast<BooleanValue>(nleft)) {
+      if (auto rbool = dyn_cast<BooleanValue>(nright)) {
+        if (lbool->IsTrue() && rbool->IsFalse()) return npred;
+        if (lbool->IsFalse() && rbool->IsTrue())
+          return uop(OpCode::NOT, npred)->Normalize();
+      }
+    }
+
+    if (npred && nleft && (*npred == *nleft)) {
+      if (auto rbool = dyn_cast<BooleanValue>(nright)) {
+        if (rbool->IsTrue()) return bl(true);
+        if (rbool->IsFalse()) return npred;
+      }
+    }
+
+    if (npred && nright && (*npred == *nright)) {
+      if (auto lbool = dyn_cast<BooleanValue>(nleft)) {
+        if (lbool->IsTrue()) return bl(true);
+        if (lbool->IsFalse()) return uop(OpCode::NOT, npred)->Normalize();
+      }
+    }
+
     return sel(npred, nleft, nright);
   }
 

@@ -1,0 +1,43 @@
+// RUN: choreo -es -dv=assertsite %s -o /dev/null 2>&1 | FileCheck %s
+
+// -----------------------------------------------------------------------
+// ENTRY assertion: select(xx, …) where xx is a parameter.
+// Since xx is a parameter (does not change within the function), the
+// assertion is classified directly as ENTRY — no promotion needed.
+// The AssertSite pass only processes DEF_SITE assertions, so no
+// [assertsite] log message is produced for these.
+// -----------------------------------------------------------------------
+
+__co__ void foo(int xx) {
+  global s32[1,2] g;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+    b = dma.copy g => local;
+    c = dma.copy g => local;
+    z = select(xx, a, b, c);
+  }
+}
+
+// (No [assertsite] message for foo — assertions are already ENTRY.)
+
+// -----------------------------------------------------------------------
+// DEF_SITE with local alias: int zz = xx; select(zz, …).
+// The factor `zz` is a local variable, so the assertion is classified as
+// DEF_SITE.  The assertion expression references the underlying parameter
+// symbol `xx`, so the AssertSite pass promotes it to ENTRY.
+// -----------------------------------------------------------------------
+
+__co__ void bar(int xx) {
+  global s32[1,2] g;
+  int zz = xx;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+    b = dma.copy g => local;
+    c = dma.copy g => local;
+    z = select(zz, a, b, c);
+  }
+}
+
+// The assertion for zz's DEF_SITE is also promoted to ENTRY (parameter-only).
+// CHECK: [assertsite] assertion "The select factor `zz` should be greater than or equal to 0" hoisted to block start (parameter, no barrier)
+// CHECK: [assertsite] assertion "The select factor `zz` should be less than 3, which is the count of values in the select statement" hoisted to block start (parameter, no barrier)

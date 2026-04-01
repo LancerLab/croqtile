@@ -79,6 +79,25 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
   } else if (auto call = dyn_cast<AST::Call>(n)) {
     (void)call;
     return {};
+  } else if (auto chunkat = dyn_cast<AST::ChunkAt>(n)) {
+    VarSet res;
+    // Add the base reference symbol (the data being chunked)
+    res.insert(InScopeName(chunkat->RefSymbol()));
+    // Extract operands from all tiling/slicing operations
+    for (auto tsi : chunkat->AllOperations()) {
+      for (const auto& rfn : tsi->ReferredNodes()) {
+        VarSet ops = GetAllSymbolicOperands(rfn.get());
+        res = SetUnion(res, ops);
+      }
+    }
+    // Handle indices if present
+    if (chunkat->indices) {
+      for (const auto& idx : chunkat->indices->AllValues()) {
+        VarSet idx_ops = GetAllSymbolicOperands(idx.get());
+        res = SetUnion(res, idx_ops);
+      }
+    }
+    return res;
   } else {
     choreo_unreachable("expecting node type: " + n->TypeNameString() + ".");
     return {};
@@ -679,11 +698,14 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       os << (dma->future.empty() ? "?" : dma->future);
       os << " = dma.any";
     } else {
-      if (dma->future.empty())
-        assert(!dma->IsAsync() && "expecting the dma is not async.");
+      if (dma->future.empty() && !dma->HasEvent())
+        assert(!dma->IsAsync() &&
+               "async dma should have a future or event to wait on.");
       else
         os << dma->future << " = ";
-      os << "dma" << dma->operation << (dma->IsAsync() ? ".async" : "");
+      os << "dma" << dma->operation;
+      if (dma->IsAsync()) os << ".async";
+      if (dma->HasEvent()) os << "<" << STR(dma->Event()) << ">";
       os << (dma->config ? " " + PSTR(dma->config) : "") << " ";
       os << STR(dma->from) << " => " << STR(dma->to);
     }
@@ -695,43 +717,50 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     // TODO: handel swizzle, scale; use values after typeinfer.
     auto op = mma->GetOperation();
     auto frag = op->GetFrag();
-    auto sym = AST::FragName(frag);
-    switch (op->Tag()) {
-    case AST::MMAOperation::Fill: {
-      if (op->FillingIsDecl()) {
-        os << PSTR(frag) << " = mma.fill." << STR(op->FillingType()) << " "
-           << PSTR(op->FillingValue());
-      } else {
-        os << " = mma.fill." << STR(op->FillingType()) << " " << PSTR(frag)
-           << ", " << PSTR(op->FillingValue());
+    if (auto frag = op->GetFrag()) {
+      auto sym = AST::FragName(frag);
+      switch (op->Tag()) {
+      case AST::MMAOperation::Fill: {
+        if (op->FillingIsDecl()) {
+          os << PSTR(frag) << " = mma.fill." << STR(op->FillingType()) << " "
+             << PSTR(op->FillingValue());
+        } else {
+          os << " = mma.fill." << STR(op->FillingType()) << " " << PSTR(frag)
+             << ", " << PSTR(op->FillingValue());
+        }
+      } break;
+      case AST::MMAOperation::Load: {
+        os << "mma.load " << (op->IsAsync() ? ".async" : "") << " "
+           << PSTR(op->LoadFrom());
+      } break;
+      case AST::MMAOperation::Exec: {
+        os << "mma.exec";
+        switch (op->GetMethod()) {
+        case AST::MMAOperation::ROW_ROW: os << ".ROW.ROW"; break;
+        case AST::MMAOperation::ROW_COL: os << ".ROW.COL"; break;
+        case AST::MMAOperation::COL_COL: os << ".COL.COL"; break;
+        case AST::MMAOperation::COL_ROW: os << ".COL.ROW"; break;
+        default: choreo_unreachable("unsupported dma execution mode."); break;
+        }
+        if (op->IsSparse()) os << ".SP";
+        if (op->HasScale()) os << ".SCALE";
+        // TODO: missing scale
+        os << " " << op->ExecOperand(0) << ", " << op->ExecOperand(1) << ", "
+           << op->ExecOperand(2);
+      } break;
+      case AST::MMAOperation::Store: {
+        os << "mma.store" << (op->StoreIsTranspose() ? ".transp" : "") << " "
+           << op->StoreFrom() << ", " << PSTR(op->StoreTo());
+      } break;
+      case AST::MMAOperation::Commit: {
+        os << "mma.commit";
+      } break;
+      case AST::MMAOperation::Scale: {
+        os << "mma.scale " << PSTR(op->ScaleAccumulator()) << ", "
+           << PSTR(op->ScaleA()) << ", " << PSTR(op->ScaleB());
+      } break;
+      default: choreo_unreachable("unexpect MMA operation.");
       }
-    } break;
-    case AST::MMAOperation::Load: {
-      os << "mma.load " << (op->IsAsync() ? ".async" : "") << " "
-         << PSTR(op->LoadFrom());
-    } break;
-    case AST::MMAOperation::Exec: {
-      os << "mma.exec";
-      switch (op->GetMethod()) {
-      case AST::MMAOperation::ROW_ROW: os << ".ROW.ROW"; break;
-      case AST::MMAOperation::ROW_COL: os << ".ROW.COL"; break;
-      case AST::MMAOperation::COL_COL: os << ".COL.COL"; break;
-      case AST::MMAOperation::COL_ROW: os << ".COL.ROW"; break;
-      default: choreo_unreachable("unsupported dma execution mode."); break;
-      }
-      if (op->IsSparse()) os << ".SP";
-      if (op->HasScale()) os << ".SCALE";
-      // TODO: missing scale
-      os << " " << op->ExecOperand(0) << ", " << op->ExecOperand(1) << ", "
-         << op->ExecOperand(2);
-    } break;
-    case AST::MMAOperation::Store: {
-      os << "mma.store " << op->StoreFrom() << ", " << PSTR(op->StoreTo());
-    } break;
-    case AST::MMAOperation::Commit: {
-      os << "mma.commit";
-    } break;
-    default: choreo_unreachable("unexpect MMA operation.");
     }
   } else if (const auto w = dyn_cast<AST::Wait>(&n)) {
     os << "wait ";
@@ -898,7 +927,7 @@ void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
   if (!ie) return;
 
   bb_list.push_back(cur_bb);
-  if (ie->if_stmts) ie_bb_list.top()._then = bb_list.back();
+  if (ie->GetThenBody()) ie_bb_list.top()._then = bb_list.back();
   auto _else = AST::Make<BasicBlock>();
   _else->id = bb_list.back()->id + 1;
   ie_bb_list.top()._else = _else;
@@ -1238,7 +1267,6 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
     AddIsAlias(current_stmt, n.GetName());
     AddAlias(n.GetName(), sa->id->name);
   } else {
-    assert(!IsRef(n) && "expecting the assignment is not a reference.");
     VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n) << ".\n");
     if (n.AssignToDataElement())
       AddUse(current_stmt, n.GetDataArrayName());
@@ -1316,7 +1344,8 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
   waited.
   */
   if (n.future.empty()) {
-    assert(!n.IsAsync() && "async dma should have a future.");
+    assert((!n.IsAsync() || n.HasEvent()) &&
+           "async dma should have a future or a event.");
     AddUse(current_stmt, n.FromSymbol());
     AddUse(current_stmt, n.ToSymbol());
   } else {
@@ -1364,6 +1393,7 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
   case AST::MMAOperation::Exec: break;
   case AST::MMAOperation::Store: break;
   case AST::MMAOperation::Commit: break;
+  case AST::MMAOperation::Scale: break;
   default: choreo_unreachable("unexpect MMA operation.");
   }
 
@@ -1407,7 +1437,7 @@ bool LivenessAnalyzer::Visit(AST::Wait& n) {
       auto expr = dyn_cast<AST::Expr>(item);
       assert(IsSymbolOrArrayRef(*item) &&
              "expect either symbol or array reference.");
-      bool is_array_ref = (expr->op == "elemof");
+      bool is_array_ref = (expr->op == Op::ElemOf);
       std::string name;
       if (is_array_ref)
         name = AST::GetArrayBaseSymbol(*expr)->name;
@@ -1428,7 +1458,7 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
       if (auto id = AST::GetIdentifier(*arg)) {
         AddUse(current_stmt, id->name);
       } else if (auto expr = dyn_cast<AST::Expr>(arg)) {
-        if (expr->op == "dataof" || expr->op == "mdataof") {
+        if (expr->op == Op::DataOf || expr->op == Op::MDataOf) {
           // TODO: will only the dims of future be used?
           assert(isa<FutureType>(expr->GetR()->GetType()) &&
                  "expect a future operand.");
@@ -1436,7 +1466,7 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
             AddUse(current_stmt, id->name);
           else
             choreo_unreachable("Can not retrieve name of the future.");
-        } else if (expr->op == "addrof") {
+        } else if (expr->op == Op::AddrOf) {
           if (auto id = AST::GetIdentifier(expr->GetR()))
             AddUse(current_stmt, id->name);
           else if (!isa<AST::DataAccess>(expr->GetR()))
@@ -1507,7 +1537,7 @@ bool LivenessAnalyzer::Visit(AST::Trigger& n) {
     auto expr = dyn_cast<AST::Expr>(e);
     assert(IsSymbolOrArrayRef(*e) &&
            "expect either symbol or array reference.");
-    bool is_array_ref = (expr->op == "elemof");
+    bool is_array_ref = (expr->op == Op::ElemOf);
     std::string name;
     if (is_array_ref)
       name = AST::GetArrayBaseSymbol(*expr)->name;
@@ -1532,7 +1562,7 @@ bool LivenessAnalyzer::Visit(AST::Return& n) {
     if (auto id = AST::GetIdentifier(*n.value)) {
       AddUse(current_stmt, id->name);
     } else if (auto expr = dyn_cast<AST::Expr>(n.value);
-               expr && expr->op == "dataof") {
+               expr && expr->op == Op::DataOf) {
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       AddUse(current_stmt, id->name);

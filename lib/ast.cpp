@@ -158,7 +158,7 @@ void IfElseBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   pred->accept(v);
   v.Visit(*this);
-  if (if_stmts) if_stmts->accept(v);
+  if (stmts) stmts->accept(v);
   v.InMidVisit(*this);
   if (else_stmts) else_stmts->accept(v);
   v.AfterVisit(*this);
@@ -208,6 +208,8 @@ void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
 void DMA::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
+  if (HasEvent()) Event()->accept(v);
+
   if (operation == ".pad") {
     auto pc = cast<PadConfig>(config);
     pc->pad_high->accept(v);
@@ -238,6 +240,9 @@ void MMA::accept(Choreo::Visitor& v) {
       if (operation->ScaleA()) operation->ScaleA()->accept(v);
       if (operation->ScaleB()) operation->ScaleB()->accept(v);
     }
+  } else if (operation->IsKind(MMAOperation::Scale)) {
+    if (operation->ScaleA()) operation->ScaleA()->accept(v);
+    if (operation->ScaleB()) operation->ScaleB()->accept(v);
   } else if (operation->IsKind(MMAOperation::Store))
     operation->StoreTo()->accept(v);
 
@@ -256,12 +261,6 @@ void SOP::TileAt::accept(Visitor& v) {
 }
 
 void SOP::SubSpan::accept(Visitor& v) {
-  subspan->accept(v);
-  if (indices) indices->accept(v);
-  if (steps) steps->accept(v);
-}
-
-void SOP::ModSpan::accept(Visitor& v) {
   subspan->accept(v);
   if (indices) indices->accept(v);
   if (steps) steps->accept(v);
@@ -378,15 +377,6 @@ void WhileBlock::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void IncrementBlock::accept(Choreo::Visitor& v) {
-  v.BeforeVisit(*this);
-  bvs->accept(v);
-  pred->accept(v);
-  v.Visit(*this);
-  if (stmts) stmts->accept(v);
-  v.AfterVisit(*this);
-}
-
 void FunctionDecl::accept(Choreo::Visitor& v) {
   params->accept(v);
   ret_type->accept(v);
@@ -416,7 +406,7 @@ void Program::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
   v.Visit(*this);
-  nodes->accept(v);
+  stmts->accept(v);
 
   v.AfterVisit(*this);
 }

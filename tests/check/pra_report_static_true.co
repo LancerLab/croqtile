@@ -1,0 +1,65 @@
+// RUN: choreo -es --show-assess %s -o /dev/null 2>&1 | FileCheck %s
+//
+// --show-assess report showing all three assessment outcomes:
+//   static-true  -- the check was proven safe at compile time; no code emitted.
+//   runtime      -- the check could not be evaluated; assertion code emitted.
+//
+// Program:
+//   trigger e[0]  -- literal index 0 is in-bounds for event[4].
+//                   The elemof subscription path calls CreateAssessment() with
+//                   the predicate (0 < 4) and (0 >= 0).  The symbolic evaluator
+//                   resolves both to "true" inside Assess() -> static-true.
+//                   (Two checks per statement -> 4 entries for trigger + wait.)
+//
+//   buf.at(j)     -- j is a function parameter; both bounds checks go through
+//                   Assess() as RUNTIME and end up as ENTRY assertions emitted
+//                   in host code before the kernel launch.
+//
+// The test also confirms that the "message" text for a static-true entry is
+// written in violation-form ("Index 0 is out of bounds...") even though the
+// check PASSED -- the message describes what WOULD be wrong if the check failed,
+// not the current outcome.
+//
+// Note: trigger/wait outside inthreads emits a warning; the test does not check
+// for that warning, but it must not cause a fatal error or suppress the report.
+
+__co__ void foo(int j) {
+  parallel p by 8 {
+    shared event e[4];
+    trigger e[0];
+    wait e[0];
+    shared s32 [4] buf;
+    x = buf.at(j);
+  }
+}
+
+// Header: 4 static-true (trigger + wait, each checked twice) + 2 runtime.
+// CHECK: [assertions] function: foo  (6 assessed:  4 static-true,  0 static-false,  2 runtime)
+
+// ---- static-true assessments: trigger e[0] ----
+// Two checks per access (ge and lt), listed in assessment order.
+// CHECK: [0] static-true   (compile-time: always passes
+// CHECK:      message : Index 0 is out of bounds of the 1st dimension of array 'e'
+// CHECK:      loc     : {{.*}}.co:{{.*}}
+
+// CHECK: [1] static-true   (compile-time: always passes
+// CHECK:      message : Index 0 is out of bounds of the 1st dimension of array 'e'
+// CHECK:      loc     : {{.*}}.co:{{.*}}
+
+// ---- static-true assessments: wait e[0] ----
+// CHECK: [2] static-true   (compile-time: always passes
+// CHECK:      message : Index 0 is out of bounds of the 1st dimension of array 'e'
+
+// CHECK: [3] static-true   (compile-time: always passes
+// CHECK:      message : Index 0 is out of bounds of the 1st dimension of array 'e'
+
+// ---- runtime assertions: buf.at(j) -> ENTRY (parameter) ----
+// CHECK: [4] ENTRY      enabled=yes  cost=low     estimated=1
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}greater than or equal to 0
+// CHECK:      site    : function entry (host runtime_check)
+
+// CHECK: [5] ENTRY      enabled=yes  cost=low     estimated=1
+// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK:      message : The 1st index `j`{{.*}}less than 4
+// CHECK:      site    : function entry (host runtime_check)

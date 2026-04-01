@@ -16,18 +16,18 @@ bool ScalarEvolutionAnalysis::InAppointedLoop() {
 
 // op is one of "+", "-", "*", "/"
 ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
-                                                 std::string op) {
+                                                 Opcode op) {
   if (isa<SCEVAddRecExpr>(lhs) && isa<SCEVVal>(rhs)) {
     auto lhs_ar = dyn_cast<SCEVAddRecExpr>(lhs);
     auto rhs_val = dyn_cast<SCEVVal>(rhs);
     auto ar_loop = lhs_ar->GetLoop();
-    if (op == "+" || op == "-") {
+    if (op == Op::Add || op == Op::Sub) {
       if (rhs_val->IsLoopInVariant(ar_loop)) {
         auto new_base = ComputeARSCEV(lhs_ar->GetBase(), rhs_val, op);
         return MakeSCEVAddRecExpr(new_base, lhs_ar->GetStep(), ar_loop);
       } else
         return nullptr;
-    } else if (op == "*" || op == "/") {
+    } else if (op == Op::Mul || op == Op::Div) {
       auto new_base = ComputeARSCEV(lhs_ar->GetBase(), rhs_val, op);
       auto new_step = ComputeARSCEV(lhs_ar->GetStep(), rhs_val, op);
       return MakeSCEVAddRecExpr(new_base, new_step, ar_loop);
@@ -37,13 +37,13 @@ ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
     auto lhs_val = dyn_cast<SCEVVal>(lhs);
     auto rhs_ar = dyn_cast<SCEVAddRecExpr>(rhs);
     auto ar_loop = rhs_ar->GetLoop();
-    if (op == "+" || op == "-") {
+    if (op == Op::Add || op == Op::Sub) {
       if (lhs_val->IsLoopInVariant(ar_loop)) {
         auto new_base = ComputeARSCEV(lhs_val, rhs_ar->GetBase(), op);
         return MakeSCEVAddRecExpr(new_base, rhs_ar->GetStep(), ar_loop);
       } else
         return nullptr;
-    } else if (op == "*" || op == "/") {
+    } else if (op == Op::Mul || op == Op::Div) {
       auto new_base = ComputeARSCEV(lhs_val, rhs_ar->GetBase(), op);
       auto new_step = ComputeARSCEV(lhs_val, rhs_ar->GetStep(), op);
       return MakeSCEVAddRecExpr(new_base, new_step, ar_loop);
@@ -52,7 +52,7 @@ ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
   } else if (isa<SCEVAddRecExpr>(lhs) && isa<SCEVAddRecExpr>(rhs)) {
     auto lhs_ar = dyn_cast<SCEVAddRecExpr>(lhs);
     auto rhs_ar = dyn_cast<SCEVAddRecExpr>(rhs);
-    if (op == "+" || op == "-") {
+    if (op == Op::Add || op == Op::Sub) {
       if (lhs_ar->GetLoop() == rhs_ar->GetLoop()) {
         auto new_base = ComputeARSCEV(lhs_ar->GetBase(), rhs_ar->GetBase(), op);
         auto new_step = ComputeARSCEV(lhs_ar->GetStep(), rhs_ar->GetStep(), op);
@@ -75,23 +75,23 @@ ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
       } else {
         choreo_unreachable("invalid AddRecExprs in different loops.");
       }
-    } else if (op == "*" || op == "/") {
+    } else if (op == Op::Mul || op == Op::Div) {
       // we do not support multiply/divide two AddRec right now
       return nullptr;
     } else
       return nullptr;
   } else if (isa<SCEVVal>(lhs) && isa<SCEVVal>(rhs)) {
 
-    if (op == "+") {
+    if (op == Op::Add) {
       auto new_val = lhs->GetValue() + rhs->GetValue();
       return MakeSCEVVal(new_val);
-    } else if (op == "-") {
+    } else if (op == Op::Sub) {
       auto new_val = lhs->GetValue() - rhs->GetValue();
       return MakeSCEVVal(new_val);
-    } else if (op == "*") {
+    } else if (op == Op::Mul) {
       auto new_val = lhs->GetValue() * rhs->GetValue();
       return MakeSCEVVal(new_val);
-    } else if (op == "/") {
+    } else if (op == Op::Div) {
       auto new_val = lhs->GetValue() / rhs->GetValue();
       return MakeSCEVVal(new_val);
     }
@@ -102,7 +102,7 @@ ptr<SCEV> ScalarEvolutionAnalysis::ComputeARSCEV(ptr<SCEV> lhs, ptr<SCEV> rhs,
 bool ScalarEvolutionAnalysis::Visit(AST::Program& n) {
   if (!InAppointedLoop()) return true;
   if (debug_visit) dbgs() << "\n[scev] Initialize scalar evolution analysis.\n";
-  root_ptr = AST::Make<AST::Program>(n.LOC(), n.nodes);
+  root_ptr = AST::Make<AST::Program>(n.LOC(), n.stmts);
   return true;
 }
 
@@ -128,7 +128,7 @@ bool ScalarEvolutionAnalysis::Visit(AST::Expr& n) {
       // for other reference types, we just make it a sym
       n.SetSCEV(scev_val);
     }
-  } else if (op == "dimof") {
+  } else if (op == Op::DimOf) {
     n.SetSCEV(scev_val);
   } else if (n.IsBinary()) {
     auto lhs = cast<AST::Expr>(n.GetL());
@@ -249,8 +249,8 @@ bool ScalarEvolutionAnalysis::Visit(AST::DataAccess& n) {
       if (!ptr_scev) {
         ptr_scev = scev;
       } else {
-        scev = ComputeARSCEV(scev, MakeSCEVVal(stride), "*");
-        ptr_scev = ComputeARSCEV(ptr_scev, scev, "+");
+        scev = ComputeARSCEV(scev, MakeSCEVVal(stride), Op::Mul);
+        ptr_scev = ComputeARSCEV(ptr_scev, scev, Op::Add);
       }
 
       // accumulate the stride
@@ -319,8 +319,8 @@ bool ScalarEvolutionAnalysis::Visit(AST::ForeachBlock& n) {
       if (!with_scev) {
         with_scev = scev_ar;
       } else {
-        scev_ar = ComputeARSCEV(scev_ar, MakeSCEVVal(stride), "*");
-        with_scev = ComputeARSCEV(with_scev, scev_ar, "+");
+        scev_ar = ComputeARSCEV(scev_ar, MakeSCEVVal(stride), Op::Mul);
+        with_scev = ComputeARSCEV(with_scev, scev_ar, Op::Add);
       }
 
       auto iv_ty = loop->GetIVType();

@@ -1,4 +1,4 @@
-// RUN: not choreo -gs %s 2>&1 | FileCheck %s
+// RUN: choreo -es %s 2>&1 | FileCheck %s
 
 __co__ auto check_spanned_arr(f32 [2,4] a, int idx) {
   parallel by 1 {

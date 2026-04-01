@@ -17,17 +17,25 @@ private:
 
   AttributeDeriver input_deps{this, "input-deps", false};
   AttributeDeriver local_deps{this, "local-deps", false};
+  std::vector<ValueItem> scope_pred_stack;
 
 private:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
+  bool InMidVisitImpl(AST::Node&) override;
 
   bool ReportUnknown(AST::Node&, const char*, int, bool = false);
   bool ReportUnknownSymbol(const std::string&, const location&, const char*,
                            int);
 
-  void EmitAssertion(const ValueItem&, const std::string&, const location&,
-                     const ptr<AST::Node>&);
+  void CreateAssessment(const ValueItem&, const std::string&, const location&,
+                        const ptr<AST::Node>&,
+                        UsageType uty = UsageType::ShapeCompatibility,
+                        AST::Node* emit_node = nullptr);
+  ValueItem ActiveScopePredicate() const;
+  void PushScopePredicate(const ValueItem&);
+  void TryPushScopePredicate(AST::Node&);
+  void TryPopScopePredicate(AST::Node&);
 
 public:
   SemaChecker() : TracedVisitorWithSymTab("check") {}
@@ -47,6 +55,7 @@ public:
   bool VisitNode(AST::DataType&) override;
   bool VisitNode(AST::Identifier&) override;
   bool VisitNode(AST::Parameter&) override;
+  bool VisitNode(AST::IfElseBlock&) override;
   bool VisitNode(AST::ParallelBy&) override;
   bool VisitNode(AST::WithIn&) override;
   bool VisitNode(AST::SpanAs&) override;
