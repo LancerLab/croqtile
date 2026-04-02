@@ -434,6 +434,36 @@ simulator="none"
 # some specific features
 is_dynshape_supported=0
 
+# Cache hardware detection results per sourced cfg chain.
+# This avoids repeated detection for many files under the same lit config.
+declare -A HW_DETECT_CACHE=()
+
+# Cache cfg chain and hook registry per test directory.
+declare -A CFG_CHAIN_CACHE=()
+declare -A HOOKS_CACHE=()
+
+make_cfg_cache_key() {
+  local cfgs="$1"
+  if [ -z "$cfgs" ]; then
+    echo "__no_cfg__"
+    return
+  fi
+  # Flatten multi-line cfg list into a stable key.
+  echo "$cfgs" | tr '\n' ';'
+}
+
+save_hw_detect_cache() {
+  local key="$1"
+  HW_DETECT_CACHE["$key"]="${device_type}|${cuda_arch}|${mach}|${simulator}|${is_dynshape_supported}"
+}
+
+restore_hw_detect_cache() {
+  local key="$1"
+  local cached="${HW_DETECT_CACHE["$key"]}"
+
+  IFS='|' read -r device_type cuda_arch mach simulator is_dynshape_supported <<< "$cached"
+}
+
 # Function to fill the target-specific variables
 prepare() {
   local file="$1"
@@ -445,28 +475,45 @@ prepare() {
   fi
 
   local ext="${file##*.}"
-  local comment_pattern
-
-  # Set comment pattern based on file extension
   if [[ "${ext}" == "co" ]]; then
-    comment_pattern="^//"
+    :
   elif [[ "${ext}" == "cmt" ]]; then
-    comment_pattern="^#"
+    :
   else
     echo "Error: Invalid test file: $file" >&2
     return 1
   fi
 
   # now load the configure
-  CFG_SOURCED=""
-  HOOKS=""
-  load_cfg_chain_from_tests "$file"
+  local test_dir
+  test_dir="$(abspath_dir_of "$file")"
+
+  if [[ -n "${CFG_CHAIN_CACHE["$test_dir"]+x}" ]]; then
+    CFG_SOURCED="${CFG_CHAIN_CACHE["$test_dir"]}"
+    HOOKS="${HOOKS_CACHE["$test_dir"]}"
+  else
+    CFG_SOURCED=""
+    HOOKS=""
+    load_cfg_chain_from_tests "$file"
+    CFG_CHAIN_CACHE["$test_dir"]="$CFG_SOURCED"
+    HOOKS_CACHE["$test_dir"]="$HOOKS"
+  fi
+
+  local cfg_cache_key
+  cfg_cache_key="$(make_cfg_cache_key "$CFG_SOURCED")"
 
   # detect the hardware
-  run_hooks "hw_detect";
+  if [[ -n "${HW_DETECT_CACHE["$cfg_cache_key"]+x}" ]]; then
+    restore_hw_detect_cache "$cfg_cache_key"
+  else
+    run_hooks "hw_detect"
 
-  # target-specific preparation
-  run_hooks "target_prepare"
+    # target-specific preparation
+    run_hooks "target_prepare"
+
+    save_hw_detect_cache "$cfg_cache_key"
+  fi
+
 
   # Reset target requirement
   requires_dynamic_shape=0
@@ -477,18 +524,38 @@ prepare() {
   expect_fail=
   expect_skip=
 
-  # Extract expect_fail and expect_skip with proper comment pattern
-  if [[ -n "$comment_pattern" ]]; then
-    expect_fail=$(grep "$comment_pattern" "$file" | grep "XFAIL:" | sed 's/.*XFAIL:[[:blank:]]*//')
-    expect_skip=$(grep "$comment_pattern" "$file" | grep "SKIP:")
-  else
-    # Fallback: search entire file if no specific pattern
-    expect_fail=$(grep "XFAIL:" "$file" | sed 's/.*XFAIL:[[:blank:]]*//')
-    expect_skip=$(grep "SKIP:" "$file")
-  fi
+  local requires=""
+  local line=""
+  local payload=""
 
-  # Extract REQUIRES line from file contents
-  local requires=$(grep "REQUIRES:" "$file")
+  # Parse key directives with builtins to reduce process spawning.
+  while IFS= read -r line; do
+    if [[ "${ext}" == "co" ]]; then
+      [[ "$line" == "//"* ]] || continue
+      payload="${line#//}"
+    else
+      [[ "$line" == "#"* ]] || continue
+      payload="${line#\#}"
+    fi
+
+    if [[ -z "$expect_fail" ]] && [[ "$payload" == *"XFAIL:"* ]]; then
+      expect_fail="${payload#*XFAIL:}"
+      expect_fail="$(trim_spaces "$expect_fail")"
+    fi
+
+    if [[ -z "$expect_skip" ]] && [[ "$payload" == *"SKIP:"* ]]; then
+      expect_skip="$line"
+    fi
+
+    if [[ -z "$requires" ]] && [[ "$payload" == *"REQUIRES:"* ]]; then
+      requires="${payload#*REQUIRES:}"
+      requires="$(trim_spaces "$requires")"
+    fi
+
+    if [[ -n "$expect_skip" ]] && [[ -n "$requires" ]] && [[ -n "$expect_fail" ]]; then
+      break
+    fi
+  done < "$file"
 
   set_clear REQ_TARGETS
 
@@ -497,47 +564,41 @@ prepare() {
     return 0
   fi
 
-  # Early returns for comment-style files that only contain comment markers
-  if [[ "${ext}" == "co" ]] && [[ "${requires}" != "//"* ]]; then
-    return
-  fi
-  if [[ "${ext}" == "cmt" ]] && [[ "${requires}" != "#"* ]]; then
-    return
-  fi
-
-  # Extract the actual requirements part
-  requires=$(echo "${requires}" | sed 's/.*REQUIRES://')
-
   # Extract components
-  local tgts=$(grep -o "TARGET-[^[:space:]]*" <<< "$requires" | sed 's/TARGET-//')
-  local libs=$(grep -o "LIBRARY-[^[:space:]]*" <<< "$requires" | sed 's/LIBRARY-//')
-  local cmps=$(grep -o "COMPILER-[^[:space:]]*" <<< "$requires" | sed 's/COMPILER-//')
+  local tgts=()
+  local libs=()
+  local token
+  for token in $requires; do
+    if [[ "$token" == TARGET-* ]]; then
+      tgts+=("${token#TARGET-}")
+    elif [[ "$token" == LIBRARY-* ]]; then
+      libs+=("${token#LIBRARY-}")
+    elif [[ "$token" == "DYNAMIC-SHAPE" ]]; then
+      requires_dynamic_shape=1
+    elif [[ "$token" == "GDB" ]] || [[ "$token" == "TOOL-GDB" ]]; then
+      requires_gdb=1
+    elif [[ "$token" == "CUDA-GDB" ]]; then
+      requires_cudagdb=1
+    fi
+  done
 
   # Process targets
-  if [ ! -z "${tgts}" ]; then
-    run_hooks "set_archs" ${tgts}
+  if [ ${#tgts[@]} -ne 0 ]; then
+    run_hooks "set_archs" "${tgts[@]}"
   fi
 
-  if set_empty REQ_TARGETS && [ ! -z "${tgts}" ]; then
-    echo "invalid target: ${tgts}" >&2
+  if set_empty REQ_TARGETS && [ ${#tgts[@]} -ne 0 ]; then
+    echo "invalid target: ${tgts[*]}" >&2
   fi
 
   # has library requirement
-  if [[ "${libs}" == *"CUTE"* ]]; then
-    need_cute=1
-    need_cuda=1
-  fi
-
-  # requires dynamic-shape support (some target only)
-  local dynshape=$(grep -q "DYNAMIC-SHAPE" <<< "$requires" && echo "found")
-  [ ! -z "${dynshape}" ] && requires_dynamic_shape=1
-
-  # requires gdb in system
-  local gdbreq=$(grep -qE '(^|[[:space:]])(GDB|TOOL-GDB)($|[[:space:]])' <<< "$requires" && echo "found")
-  [ ! -z "${gdbreq}" ] && requires_gdb=1
-
-  local cudagdbreq=$(grep -qE '(^|[[:space:]])(CUDA-GDB)($|[[:space:]])' <<< "$requires" && echo "found")
-  [ ! -z "${cudagdbreq}" ] && requires_cudagdb=1
+  for token in "${libs[@]}"; do
+    if [[ "$token" == "CUTE" ]]; then
+      need_cute=1
+      need_cuda=1
+      break
+    fi
+  done
 }
 
 lock_file="/tmp/test_script_lock_${timestamp}"
@@ -830,6 +891,13 @@ toupper() {
   echo "$1" | tr '[:lower:]' '[:upper:]'
 }
 
+trim_spaces() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  echo "$s"
+}
+
 retrieve_run_config() {
   local line="$@"
 
@@ -914,6 +982,16 @@ for file in "${files_array[@]}"; do
   if [[ -z "${CHOREO_ENABLE_GPU_MMA_TESTS}" ]] || [[ "${CHOREO_ENABLE_GPU_MMA_TESTS}" != "1" ]]; then
     if [[ "$(dirname ${file})" == *"gpu/end2end/wmma"* ]] || [[ "$(dirname ${file})" == *"gpu/end2end/ptx_mma"* ]]; then
       echo "SKIP(GPU-MMA): ${file} "
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    fi
+  fi
+
+  # Skip whole file early when required targets cannot match current machine/simulator.
+  if ! set_empty REQ_TARGETS; then
+    if [[ $device_type == "none"  ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
+      _all_skipped_targets=$(set_print REQ_TARGETS)
+      echo "SKIP($(toupper "${_all_skipped_targets}")): ${file}"
       num_skiped=$(($num_skiped + 1));
       continue;
     fi
