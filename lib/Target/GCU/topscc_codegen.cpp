@@ -483,28 +483,26 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
       // Per-node Opts carry pre-expanded bounded vars and preserve the
       // ::__choreo_no_tiling__ symbol — collect them directly.
       for (auto p : op->IndexNodes()) {
-        if (auto e = dyn_cast<AST::Expr>(p); e && e->Opts().HasVals()) {
+        if (auto e = dyn_cast<AST::Expr>(p); e && e->Opts().HasVals())
           for (auto& val : e->Opts().GetVals()) coords.push_back(val);
-        } else {
-          coords.push_back(sbe::sym(OpExprSTR(p, "*", true, IsHost())));
-        }
+        // Non-Expr nodes (e.g. raw Identifiers injected by LateNorm) or nodes
+        // without per-node vals defer to the aggregated MultiValues path below.
       }
-      // Fall back to aggregated Opts when per-node collection doesn't
-      // match the block shape rank (e.g. bounded vars not yet expanded
-      // at the per-node level).
+      // Use aggregated Opts when per-node collection doesn't cover all dims
+      // (e.g. bounded vars set on the MultiValues level by HostSliceBufferGen).
       if (coords.size() != shape.DimCount()) {
-        if (auto idx_vals = op->GetIndices()->Opts(); idx_vals.HasVals())
-          coords = idx_vals.GetVals();
+        assert(op->GetIndices()->Opts().HasVals() &&
+               "aggregated index vals missing after per-node collection");
+        coords = op->GetIndices()->Opts().GetVals();
       }
     } else if (auto off = op->GetOffsets()) {
-      // Offset-based SOPs (View): offsets NOT scaled by block_shape
+      // Offset-based SOPs (View): offsets NOT scaled by block_shape.
+      // View offset nodes are always Expr with vals from ShapeInference.
       scale_by_shape = false;
       for (auto p : off->AllValues()) {
-        if (auto e = dyn_cast<AST::Expr>(p); e && e->Opts().HasVals()) {
-          for (auto& val : e->Opts().GetVals()) coords.push_back(val);
-        } else {
-          coords.push_back(sbe::sym(OpExprSTR(p, "*", true, IsHost())));
-        }
+        auto e = dyn_cast<AST::Expr>(p);
+        assert(e && e->Opts().HasVals() && "View offset node missing vals");
+        for (auto& val : e->Opts().GetVals()) coords.push_back(val);
       }
     } else {
       // No indices or offsets — zero offset per dimension
@@ -2380,15 +2378,11 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           choreo_unreachable("All the BoundedIntegerType vars should have been "
                              "normed to BoundedITupleType vars.");
         } else if (isa<BoundedITupleType>(type)) {
-          print_format += "{";
-          for (int i = 0; i < (int)e->s.Rank(); ++i) {
-            if (i != 0) print_format += ", ";
-            print_format += "%lld";
-          }
-          print_format += "}";
-          std::string args_str = ExprSTR(arg, IsHost());
-          for (const auto& arg_str : SplitStringByDelimiter(args_str, ", "))
-            print_args += "static_cast<long long>(" + arg_str + "), ";
+          assert(e->Opts().HasVals() &&
+                 "BoundedITupleType print arg missing symbolic vals");
+          auto [format, args] = GenFormatAndArgsFromValueList(e->Opts().GetVals());
+          print_format += "{" + format + "}";
+          print_args += args + ", ";
         } else if (isa<AddrType>(type)) {
           print_format += "%p";
           print_args += "static_cast<void*>(" + ExprSTR(arg, IsHost()) + "), ";

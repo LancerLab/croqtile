@@ -41,6 +41,40 @@ make debug
 make test
 ```
 
+## Symbolic (sbe) Infrastructure Conventions
+
+### Use sbe for all value/offset computations in codegen
+- `sbe::nu(n)` for integer constants, `sbe::sym("scoped::name")` for symbolic vars.
+- Compose with `+`, `*`; use `sbe::ceq(a, b)` for equality tests; `Normalize()` folds constants.
+- Materialize to C++ strings via `ValueSTR(operand)` — adds parens for binary sub-expressions.
+- Never use `SplitStringByDelimiter` + `OpExprSTR` for offset/index generation; those are legacy patterns predating the sbe library.
+
+### Nodes created in LateNorm must carry sbe vals
+- ShapeInference (`INFER` pass) populates `Opts().SetVals()` on all pre-existing `AST::Expr` nodes and records per-symbol values in `FCtx(fname).GetSymbolValues(scoped_name)`.
+- Any new `AST::MultiValues` or `AST::Expr` node created in `LateNorm` (e.g. `HostSliceBufferGen`) must have `Opts().SetVals()` populated manually using existing sbe operands — ShapeInference does NOT re-run after LateNorm.
+- Preferred pattern in LateNorm for a newly created `MultiValues` wrapping a known bounded variable:
+```cpp
+if (auto tid = AST::GetIdentifier(tiler_node)) {
+  auto sname = InScopeName(tid->name);
+  auto& sv = FCtx(fname).GetSymbolValues(sname);
+  if (sv.HasVals()) {
+    mv_node->Opts().SetVals(sv.GetVals());       // exact sbe operands from ShapeInference
+  } else if (bv_map.count(sname)) {
+    ValueList mv_vals;
+    for (auto& m : bv_map.at(sname))
+      mv_vals.push_back(sbe::sym(m));            // reconstruct from bv_map matcher names
+    mv_node->Opts().SetVals(mv_vals);
+  }
+}
+```
+- `FCtx(fname).GetSymbolValues(sname)` is accessible anywhere `VisitorWithSymTab` (or `LateNormBase`) is in scope.
+- `bv_map` (inherited from `VisitorWithSymTab`) maps scoped var names to their per-dimension matcher names.
+
+### GenMdsOffset dispatch contract
+- Index-based SOPs (`Tiling`, `SubSpan`, `TileAt`): collect vals per child `Expr` node from `Opts().GetVals()`; if count mismatches block-shape rank, fall back to aggregated `op->GetIndices()->Opts().GetVals()` which **must** be present (assert).
+- Offset-based SOPs (`View`): offset child nodes are always `Expr` with vals; assert and use directly.
+- Never add `OpExprSTR` fallbacks to these paths — if vals are missing, fix the upstream pass that creates the node.
+
 ## Code Style Rules (MANDATORY)
 
 ### ASCII-only source files
