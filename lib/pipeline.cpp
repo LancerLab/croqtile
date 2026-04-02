@@ -1,5 +1,6 @@
 #include "pipeline.hpp"
 #include "codegen_prepare.hpp"
+#include "colors.hpp"
 #include "earlysema.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
@@ -56,23 +57,25 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
         "===-------------------------------------------------------------------"
         "----===";
     errs() << "\n"
-           << sep << "\n"
+           << color::err(color::kBold) << sep << "\n"
            << "                      ... Assessment Statistics ...\n"
-           << sep << "\n";
+           << sep << color::err(color::kReset) << "\n";
     auto row = [&](size_t n, const char* desc) {
-      errs() << std::right << std::setw(6) << n << "  assess  - " << desc
-             << "\n";
+      errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+             << color::err(color::kReset) << "  assess  - " << desc << "\n";
     };
     row(s.total, "Assessments evaluated");
     row(s.static_true, "Resolved at compile time (static-true)");
     row(s.static_false, "Proven false at compile time (static-false)");
     row(s.runtime_total, "Runtime assertions generated");
+    row(s.runtime_entry, "Runtime assertions (entry cost)");
     row(s.runtime_low, "Runtime assertions (low cost)");
     row(s.runtime_medium, "Runtime assertions (medium cost)");
     row(s.runtime_high, "Runtime assertions (high cost)");
     row(s.runtime_enabled, "Runtime assertions enabled");
     row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
-    errs() << "  ---\n";
+    errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+           << "\n";
     row(s.unclassified_total, "Assessments (unclassified)");
     row(s.shape_compat_total, "Assessments (shape-compatibility)");
     row(s.elem_access_total, "Assessments (element-access)");
@@ -83,7 +86,8 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     row(s.elem_access_runtime, "Runtime assertions (element-access)");
     row(s.loop_bound_runtime, "Runtime assertions (loop-bound)");
     row(s.hw_constraint_runtime, "Runtime assertions (hw-constraint)");
-    errs() << sep << "\n";
+    errs() << color::err(color::kBold) << sep << color::err(color::kReset)
+           << "\n";
   }
 
   return !abend;

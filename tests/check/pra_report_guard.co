@@ -32,26 +32,26 @@ __co__ void foo(int j, int k) {
 // CHECK: [assertions] function: foo  (4 assessed:  0 static-true,  0 static-false,  4 runtime)
 
 // ---- if-branch: buf1 lower-bound ----
-// CHECK: [0] HOIST      enabled=yes  cost=high
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [0] HOIST      enabled=no   cost=low
+// CHECK:      assess  : runtime
 // CHECK:      message : The 1st index `j`{{.*}}'buf1'{{.*}}greater than or equal to 0
 // CHECK:      loc     : {{.*}}.co:
 // CHECK:      site    : {{.*}}.co:{{.*}}  (before)  [AST::NamedVariableDecl]
 
 // ---- if-branch: buf1 upper-bound ----
-// CHECK: [1] HOIST      enabled=yes  cost=high
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [1] HOIST      enabled=no   cost=low
+// CHECK:      assess  : runtime
 // CHECK:      message : The 1st index `j`{{.*}}'buf1'{{.*}}less than 4
 // CHECK:      site    : {{.*}}.co:{{.*}}  (before)  [AST::NamedVariableDecl]
 
 // ---- else-branch: buf2 lower-bound ----
-// CHECK: [2] HOIST      enabled=yes  cost=high
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [2] HOIST      enabled=no   cost=low
+// CHECK:      assess  : runtime
 // CHECK:      message : The 1st index `j`{{.*}}'buf2'{{.*}}greater than or equal to 0
 // CHECK:      site    : {{.*}}.co:{{.*}}  (before)  [AST::NamedVariableDecl]
 
 // ---- else-branch: buf2 upper-bound ----
-// CHECK: [3] HOIST      enabled=yes  cost=high
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
+// CHECK: [3] HOIST      enabled=no   cost=low
+// CHECK:      assess  : runtime
 // CHECK:      message : The 1st index `j`{{.*}}'buf2'{{.*}}less than 8
 // CHECK:      site    : {{.*}}.co:{{.*}}  (before)  [AST::NamedVariableDecl]

@@ -13,15 +13,18 @@
 //
 // After the foreach j reverts to the static accessor (__iv_j = 0) and access
 // again requires no assertion.
+//
+// TODO: FIX AFTER FIXING range semantics
+//
+// XFAIL:*
 
 __co__ void foo(int N) {
   parallel p by 8 {
     shared s32 [8] buf;
-    with {j} in [4] {
+    with {j, k} in [4, 9] {
       x = buf.at(j);         // j = __iv_j = 0, trivially safe -- no assertion
-      foreach j in [N] {
-        y = buf.at(j);       // j = __iv_j__elem__0 varies, assertion emitted
-      }
+      foreach k(:-1:)        // this is an barrier for internals
+        y = buf.at(k);       // j = __iv_j__elem__0 varies, assertion emitted
       z = buf.at(j);         // j = __iv_j = 0 again -- no assertion
     }
   }

@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "ast.hpp"
+#include "colors.hpp"
 #include "infra_utils.hpp"
 #include "loc.hpp"
 
@@ -277,15 +278,7 @@ protected:
   }
 
 public:
-  static bool shell_supports_colors() {
-    const char* term = getenv("TERM");
-    return term &&
-           (strcmp(term, "xterm-256color") == 0 || strcmp(term, "xterm") == 0);
-  }
-
-  static bool should_use_colors() {
-    return isatty(fileno(stdout)) && shell_supports_colors();
-  }
+  static bool should_use_colors() { return color::stderrHasColor(); }
 
 public:
   virtual const ptr<Type> GetSymbolType(const std::string& n) const {
@@ -293,10 +286,10 @@ public:
   }
 
 private:
-  static constexpr const char* color_red = "\033[31m";
-  static constexpr const char* color_yellow = "\033[33m";
-  static constexpr const char* color_blue = "\033[34m";
-  static constexpr const char* color_reset = "\033[0m";
+  static constexpr const char* color_red = color::kRed;
+  static constexpr const char* color_yellow = color::kYellow;
+  static constexpr const char* color_blue = color::kBlue;
+  static constexpr const char* color_reset = color::kReset;
 
 protected:
   void ShowSourceLocation(const location& l) const {

@@ -154,9 +154,13 @@ void ParamList::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
+void PredBlock::accept(Choreo::Visitor& v) {
+  if (HasPredicate()) pred->accept(v);
+}
+
 void IfElseBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  pred->accept(v);
+  PredBlock::accept(v);
   v.Visit(*this);
   if (stmts) stmts->accept(v);
   v.InMidVisit(*this);
@@ -172,7 +176,6 @@ void ParallelBy::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 
   // handle identifier/matcher inside 'parallelby'
-
   stmts->accept(v);
 
   v.AfterVisit(*this);
@@ -354,7 +357,7 @@ void LoopRange::accept(Choreo::Visitor& v) {
 
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  ranges->accept(v);
+  if (ranges) ranges->accept(v);
   if (suffixs) suffixs->accept(v);
   v.Visit(*this);
   if (stmts) stmts->accept(v);
@@ -363,7 +366,7 @@ void ForeachBlock::accept(Choreo::Visitor& v) {
 
 void InThreadsBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  pred->accept(v);
+  PredBlock::accept(v);
   v.Visit(*this);
   if (stmts) stmts->accept(v);
   v.AfterVisit(*this);
@@ -371,7 +374,7 @@ void InThreadsBlock::accept(Choreo::Visitor& v) {
 
 void WhileBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  pred->accept(v);
+  PredBlock::accept(v);
   v.Visit(*this);
   if (stmts) stmts->accept(v);
   v.AfterVisit(*this);

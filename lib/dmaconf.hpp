@@ -81,6 +81,17 @@ inline const std::string STR(SwizMode sm) {
   return "";
 }
 
+inline size_t SwizzleAlignmentByte(SwizMode sm) {
+  switch (sm) {
+  case SwizMode::NONE: return 16;
+  case SwizMode::B32: return 256;
+  case SwizMode::B64: return 512;
+  case SwizMode::B128: return 1024;
+  default: choreo_unreachable("unsupported swizzle mode.");
+  }
+  return 0;
+}
+
 } // end namespace Choreo
 
 #endif // __CHOREO_DMA_CONFIG__

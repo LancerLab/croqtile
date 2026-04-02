@@ -553,7 +553,4 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
   }
 }
 
-const char* SymReplace::cyan = "\033[33m";
-const char* SymReplace::blue = "\033[34m";
-const char* SymReplace::reset = "\033[0m";
 const char* SymReplace::pass_name = "[SymReplace]";

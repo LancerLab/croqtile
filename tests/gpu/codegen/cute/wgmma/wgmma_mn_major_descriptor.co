@@ -54,8 +54,8 @@ __co__ auto row_row_case(f16 [M, K] lhs, f16 [N, K] rhs) {
   return output;
 }
 
-// ROW-COL: uint64_t desc_ma = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(ma_smem_ptr);
-// ROW-COL: uint64_t desc_mb = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::B128>(mb_smem_ptr);
+// ROW-COL: uint64_t desc_ma = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::NS>(ma_smem_ptr);
+// ROW-COL: uint64_t desc_mb = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::NS>(mb_smem_ptr);
 // ROW-COL: MMA_64x64x16_F32F16F16_SS<static_cast<cute::SM90::GMMA::Major>(0), static_cast<cute::SM90::GMMA::Major>(1)>::fma
 
 // ROW-ROW: uint64_t desc_ma = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(ma_smem_ptr);

@@ -169,10 +169,10 @@ inline T GetValueAt(ValueList vlist, int idx) {
 };
 
 inline const std::set<ValueItem> GetSymbols(const ValueItem& vi) {
-  if (VIIsSym(vi))
+  if (VIIsSym(vi)) {
     return {vi};
-  else if (auto uop = VIUop(vi)) {
-    return GetSymbols(uop);
+  } else if (auto uop = VIUop(vi)) {
+    return GetSymbols(uop->GetOperand());
   } else if (auto bop = VIBop(vi)) {
     auto ls = GetSymbols(bop->GetLeft());
     auto rs = GetSymbols(bop->GetRight());

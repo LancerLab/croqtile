@@ -10,6 +10,7 @@ const char* EmitPositionStr(AssertionEmitPosition pos) {
   switch (pos) {
   case AssertionEmitPosition::BEFORE_NODE: return "before";
   case AssertionEmitPosition::AFTER_NODE: return "after";
+  case AssertionEmitPosition::IN_BLOCK: return "in-block";
   }
   return "unknown";
 }
@@ -22,94 +23,49 @@ bool IsEnabledAtThreshold(AssertionCost cost, AssertionCost threshold) {
 
 void AssertSite::ResetFunction() {
   def_map.clear();
-  parent_map.clear();
+  scope_map.clear();
+  barrier_map.clear();
   node_order.clear();
+  scope_level.clear();
+  block_cost.clear();
+  scopes.clear();
   walk_order = 0;
+  body_order = 0;
 }
 
-void AssertSite::RecordDef(const std::string& scoped_name, AST::Node* n) {
-  def_map[scoped_name] = n;
-  VST_DEBUG(dbgs() << "[assertsite] def: " << scoped_name << " at " << n->LOC()
+void AssertSite::RecordBarrier(const std::string& sym, AST::Node* n) {
+  assert(PrefixedWith(sym, "::") && "requires scoped name.");
+  if (!barrier_map.count(sym))
+    barrier_map.emplace(sym, std::set<AST::Node*>{n});
+  else
+    barrier_map[sym].insert(n);
+  VST_DEBUG(dbgs() << "[assert-site] barrier: " << sym << " at ";
+            if (auto pred = dyn_cast<AST::PredBlock>(n);
+                pred && pred->HasPredicate()) dbgs()
+            << PSTR(pred->GetPredicate());
+            else dbgs() << n->LOC(); dbgs() << "\n");
+}
+
+bool AssertSite::RecordBarrierFromPred(const ptr<sbe::SymbolicExpression>& pred,
+                                       AST::Node* node) {
+  // Conservative: constrained symbols are barriers
+  for (auto& csym : GetSymbols(pred)) {
+    auto sym_name = VISym(csym);
+    if (sym_name) RecordBarrier(*sym_name, node);
+  }
+  return true;
+}
+
+void AssertSite::RecordDef(const std::string& sym, AST::Node* n) {
+  assert(PrefixedWith(sym, "::") && "requires scoped name.");
+  def_map[sym] = n;
+  VST_DEBUG(dbgs() << "[assert-site] def: " << sym << " at " << n->LOC()
                    << "\n");
 }
 
-AST::Node* AssertSite::FirstStmtOf(const ptr<AST::MultiNodes>& stmts) const {
-  if (!stmts || stmts->None()) return nullptr;
-  return stmts->SubAt(0).get();
-}
-
-AssertionEmitPosition AssertSite::SiteEmitPosition(AST::Node* n) const {
-  if (!n) return AssertionEmitPosition::AFTER_NODE;
-  if (isa<AST::ParallelBy>(n) || isa<AST::WithBlock>(n) ||
-      isa<AST::ForeachBlock>(n) || isa<AST::InThreadsBlock>(n) ||
-      isa<AST::IfElseBlock>(n) || isa<AST::WhileBlock>(n))
-    return AssertionEmitPosition::BEFORE_NODE;
-  return AssertionEmitPosition::AFTER_NODE;
-}
-
-AST::Node* AssertSite::NextStatementInBlock(AST::Node* n) const {
-  if (!n) return nullptr;
-
-  auto pit = parent_map.find(n);
-  auto parent = (pit == parent_map.end()) ? nullptr : pit->second;
-  auto block = dyn_cast<AST::Block>(parent);
-  if (!block || !block->stmts) return nullptr;
-
-  auto idx = block->stmts->GetIndex(n);
-  if (idx < 0) return nullptr;
-  if (static_cast<size_t>(idx + 1) >= block->stmts->Count()) return nullptr;
-  return block->stmts->SubAt(static_cast<size_t>(idx + 1)).get();
-}
-
-AST::MultiNodes* AssertSite::FindStatementContainer(AST::Node* use) const {
-  AST::Node* cur = use;
-  while (cur) {
-    auto pit = parent_map.find(cur);
-    if (pit == parent_map.end()) break;
-    if (auto mn = dyn_cast<AST::MultiNodes>(pit->second)) return mn;
-    cur = pit->second;
-  }
-  return nullptr;
-}
-
-AST::Node* AssertSite::BubbleToSiblingScope(AST::Node* def,
-                                            AST::MultiNodes* container) const {
-  if (!def || !container) return def;
-
-  auto def_it = node_order.find(def);
-  if (def_it == node_order.end()) return def;
-  size_t def_ord = def_it->second;
-
-  // Find the direct child of `container` whose subtree contains `def`.
-  // A child's subtree spans node_order values from the child's own order up to
-  // (but not including) the next sibling's order.  We pick the last child
-  // whose order is <= def_ord.
-  AST::Node* enclosing_child = nullptr;
-  size_t enclosing_ord = 0;
-  for (size_t i = 0; i < container->Count(); ++i) {
-    auto child = container->SubAt(i).get();
-    auto child_it = node_order.find(child);
-    if (child_it == node_order.end()) continue;
-    size_t child_ord = child_it->second;
-    if (child_ord <= def_ord) {
-      if (enclosing_child == nullptr || child_ord > enclosing_ord) {
-        enclosing_child = child;
-        enclosing_ord = child_ord;
-      }
-    }
-  }
-  return enclosing_child ? enclosing_child : def;
-}
-
-AST::Node* AssertSite::LaterNode(AST::Node* lhs, AST::Node* rhs) const {
-  if (!lhs) return rhs;
-  if (!rhs) return lhs;
-
-  auto lit = node_order.find(lhs);
-  auto rit = node_order.find(rhs);
-  auto lo = (lit == node_order.end()) ? 0 : lit->second;
-  auto ro = (rit == node_order.end()) ? 0 : rit->second;
-  return (lo >= ro) ? lhs : rhs;
+AST::Node* AssertSite::FirstStmtOf(AST::Block* blk) const {
+  assert(blk->GetBody() && !blk->GetBody()->None());
+  return blk->GetBody()->SubAt(0).get();
 }
 
 size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
@@ -117,67 +73,106 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
     size_t trip = 1;
     for (auto range_node : fb->GetRanges()) {
       auto range = cast<AST::LoopRange>(range_node);
-      if (!range->ubound || !range->lbound) {
-        trip *= 100;
-        continue;
-      }
-      auto ub_expr = dyn_cast<AST::Expr>(range->ubound);
-      auto lb_expr = dyn_cast<AST::Expr>(range->lbound);
-      if (!ub_expr || !lb_expr || !ub_expr->Opts().HasVal() ||
-          !lb_expr->Opts().HasVal()) {
-        trip *= 100;
-        continue;
-      }
-      auto ub = VIInt(ub_expr->Opts().GetVal());
-      auto lb = VIInt(lb_expr->Opts().GetVal());
-      if (!ub || !lb) {
-        trip *= 100;
-        continue;
+      auto sty = GetSymbolType(range->IVName());
+      int64_t span = 100; // default trip count
+      if (IsActualBoundedIntegerType(sty)) {
+        auto ub = GetSingleUpperBound(sty);
+        auto lb = sbe::nu(0);
+        auto ub_addend_expr = dyn_cast<AST::Expr>(range->ubound);
+        auto lb_addend_expr = dyn_cast<AST::Expr>(range->lbound);
+        auto ub_addend = sbe::nu(0);
+        auto lb_addend = sbe::nu(0);
+        if (ub_addend_expr && ub_addend_expr->Opts().HasVal())
+          ub_addend = ub_addend_expr->Opts().GetVal();
+        if (lb_addend_expr && lb_addend_expr->Opts().HasVal())
+          lb_addend = lb_addend_expr->Opts().GetVal();
+        if (auto cval = VIInt(ub + ub_addend - (lb + lb_addend))) span = *cval;
       }
       auto step = range->step == GetInvalidStep() ? 1 : std::abs(range->step);
-      auto span = std::max<int64_t>(0, ub.value() - lb.value());
       trip *=
           static_cast<size_t>(std::max<int64_t>(1, (span + step - 1) / step));
     }
     return trip;
   }
 
-  if (isa<AST::ParallelBy>(n)) return 100;
+  if (auto pb = dyn_cast<AST::ParallelBy>(n)) {
+    switch (pb->GetLevel()) {
+    case ParallelLevel::BLOCK: return 4;
+    default: return 1;
+    }
+  }
   if (isa<AST::WhileBlock>(n)) return 100;
   return 1;
 }
 
 uint64_t AssertSite::EstimateAssertionCost(AST::Node* site) const {
   uint64_t cost = 1;
-  for (auto cur = site; cur;) {
-    if (isa<AST::ForeachBlock>(cur) || isa<AST::ParallelBy>(cur) ||
-        isa<AST::WhileBlock>(cur))
-      cost *= EstimateLoopTripCount(cur);
-    auto pit = parent_map.find(cur);
-    cur = (pit == parent_map.end()) ? nullptr : pit->second;
+  if (scope_map.count(site)) {
+    auto cur_node = scope_map.at(site);
+    while (cur_node) {
+      assert(cur_node->IsBlock());
+      cost *= block_cost.at(cur_node);
+      if (!scope_map.count(cur_node)) break;
+      cur_node = scope_map.at(cur_node);
+    }
   }
   return cost;
 }
 
 AssertionCost AssertSite::CategorizeCost(uint64_t cost) const {
-  if (cost >= 10000) return AssertionCost::HIGH;
-  if (cost >= 100) return AssertionCost::MEDIUM;
-  return AssertionCost::LOW;
+  if (cost >= 500)
+    return AssertionCost::HIGH;
+  else if (cost >= 50)
+    return AssertionCost::MEDIUM;
+  else if (cost == 1)
+    return AssertionCost::ENTRY;
+  else
+    return AssertionCost::LOW;
 }
 
 bool AssertSite::BeforeVisitImpl(AST::Node& n) {
-  parent_map[&n] = parent_stack.empty() ? nullptr : parent_stack.back();
-  parent_stack.push_back(&n);
-  node_order[&n] = walk_order++;
-
   if (isa<AST::ChoreoFunction>(&n)) { ResetFunction(); }
+
+  scope_level[&n] = scopes.size();
+  node_order[&n] = walk_order++;
+  if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    node_order[pb->BPV().get()] = walk_order++;
+    for (auto spv : pb->AllSubPVs()) node_order[spv.get()] = walk_order++;
+  } else if (isa<AST::Parameter>(&n)) {
+    allow_named_dim = true;
+  } else if (auto dma = dyn_cast<AST::DMA>(&n)) {
+    node_order[dma->GetFrom().get()] = walk_order++;
+    node_order[dma->GetTo().get()] = walk_order++;
+  }
+
+  if (n.IsBlock()) {
+    // Record the enclosing block for this block node too, so that
+    // EstimateAssertionCost can traverse the full scope chain through
+    // nested blocks (e.g. if-else inside parallel-by).
+    if (!scopes.empty()) scope_map[&n] = scopes.back();
+    scopes.push_back(&n);
+    block_cost[&n] = EstimateLoopTripCount(&n);
+  } else if (!scopes.empty())
+    scope_map[&n] = scopes.back();
 
   return true;
 }
 
 bool AssertSite::AfterVisitImpl(AST::Node& n) {
-  if (isa<AST::ChoreoFunction>(&n)) { HoistAssertions(); }
-  if (!parent_stack.empty()) parent_stack.pop_back();
+  if (n.IsBlock()) scopes.pop_back();
+
+  if (isa<AST::FunctionDecl>(&n)) {
+    body_order = walk_order + 1;
+  } else if (auto fn = dyn_cast<AST::ChoreoFunction>(&n)) {
+    HoistAssertions(fn);
+    EstimateAssertions();
+  } else if (isa<AST::Parameter>(&n))
+    allow_named_dim = false;
+  return true;
+}
+
+bool AssertSite::Visit(AST::DataType&) {
+  allow_named_dim = false; // no duplicated symbol is allowed except for mdspan
   return true;
 }
 
@@ -185,40 +180,25 @@ bool AssertSite::Visit(AST::Parameter& n) {
   // Function parameters are treated as already defined at the function entry.
   // Use the ChoreoFunction node as the defining node.
   if (!n.HasSymbol()) return true;
-  auto scoped = InScopeName(n.sym->name);
   // The defining "node" for a parameter is the ChoreoFunction itself; however,
   // we do not have direct access to it here.  Instead, record the parameter
   // node with walk_order 0 -- it is guaranteed to precede every statement.
-  RecordDef(scoped, &n);
+  RecordDef(InScopeName(n.sym->name), &n);
   return true;
 }
 
 bool AssertSite::Visit(AST::NamedVariableDecl& n) {
-  auto scoped = InScopeName(n.name_str);
-  RecordDef(scoped, &n);
+  RecordDef(InScopeName(n.GetName()), &n);
   return true;
 }
 
 bool AssertSite::Visit(AST::Assignment& n) {
-  // Record both declarations and mutations as hoist barriers (cases 1 & 2).
-  //
-  // Case 1 -- declaration:  `mutable int j = 0`  introduces the variable.
-  // Case 2 -- mutation:     `j = j + 1`  changes the value after definition;
-  //   any reference to j after this point may observe the mutated value, so
-  //   the assertion cannot be hoisted above this assignment either.
-  //
-  // `AssignToDataElement()` is true for subscript writes (arr[i] = ...); those
-  // do not change the scalar index variable itself and are therefore skipped.
-  if (!n.AssignToDataElement()) {
-    auto scoped = InScopeName(n.GetName());
-    RecordDef(scoped, &n);
-  }
+  if (!n.AssignToDataElement()) RecordDef(InScopeName(n.GetName()), &n);
   return true;
 }
 
 bool AssertSite::Visit(AST::ParallelBy& n) {
-  auto def_site = FirstStmtOf(n.stmts);
-  if (!def_site) def_site = &n;
+  auto def_site = &n;
   RecordDef(InScopeName(n.BPV()->name), def_site);
   for (auto sym : n.AllSubPVs()) {
     auto id = cast<AST::Identifier>(sym);
@@ -228,13 +208,11 @@ bool AssertSite::Visit(AST::ParallelBy& n) {
 }
 
 bool AssertSite::Visit(AST::WithBlock& n) {
-  auto def_site = FirstStmtOf(n.stmts);
-  if (!def_site) def_site = &n;
+  auto def_site = &n;
 
   if (n.withins) {
     for (auto wi : n.withins->AllSubs()) {
-      auto within = dyn_cast<AST::WithIn>(wi);
-      if (!within) continue;
+      auto within = cast<AST::WithIn>(wi);
 
       if (within->with) RecordDef(InScopeName(within->with->name), def_site);
 
@@ -250,8 +228,56 @@ bool AssertSite::Visit(AST::WithBlock& n) {
   return true;
 }
 
-void AssertSite::HoistAssertions() {
-  if (fname.empty()) return;
+bool AssertSite::Visit(AST::LoopRange& n) {
+  if (n.BoundIsMutated() && scope_map.count(&n)) {
+    // Record a barrier only if the IV is findable in the symbol table.
+    // Synthetic iteration variables (e.g. `foreach i in [K]` where `i`
+    // is a fresh name) are not registered and InScopeName would abort.
+    auto iv = n.IVName();
+    std::string scoped_iv;
+    std::string scope_name = scoped_symtab.ScopeName();
+    while (true) {
+      std::string candidate = scope_name + iv;
+      if (SymTab() && SymTab()->Exists(candidate)) {
+        scoped_iv = candidate;
+        break;
+      }
+      size_t last = scope_name.rfind("::");
+      if (last == std::string::npos) break;
+      size_t prev = scope_name.rfind("::", last - 1);
+      if (prev == std::string::npos) break;
+      scope_name = scope_name.substr(0, prev + 2);
+    }
+    if (!scoped_iv.empty()) RecordBarrier(scoped_iv, scope_map[&n]);
+  }
+  return true;
+}
+
+bool AssertSite::Visit(AST::IfElseBlock& n) {
+  if (IsValidValueItem(n.GetIfScopePredicate()))
+    return RecordBarrierFromPred(n.GetIfScopePredicate(), &n);
+  return true;
+}
+
+bool AssertSite::Visit(AST::WhileBlock& n) {
+  if (IsValidValueItem(n.GetScopePredicate()))
+    return RecordBarrierFromPred(n.GetScopePredicate(), &n);
+  return true;
+}
+
+bool AssertSite::Visit(AST::InThreadsBlock& n) {
+  if (IsValidValueItem(n.GetScopePredicate()))
+    return RecordBarrierFromPred(n.GetScopePredicate(), &n);
+  return true;
+}
+
+bool AssertSite::Visit(AST::Identifier& n) {
+  if (allow_named_dim) { RecordDef(InScopeName(n.name), scopes.back()); }
+  return true;
+}
+
+void AssertSite::HoistAssertions(AST::ChoreoFunction* fnode) {
+  assert(fnode);
 
   auto& assessor = FCtx(fname).GetAssessor();
   // We operate by mutating the assertion vector in-place.  The assessor
@@ -261,134 +287,161 @@ void AssertSite::HoistAssertions() {
       const_cast<std::vector<Assertion>&>(assessor.GetAssertions());
 
   for (auto& ar : assertions) {
-    if (ar.type == AssessType::ENTRY) {
-      ar.estimated_cost = 1;
-      ar.cost = AssertionCost::LOW;
-      ar.enabled = true;
-      continue;
-    }
+    assert(ar.node != nullptr);
+    assert(node_order.count(ar.node));
+    auto n_order = node_order[ar.node];
 
     // Collect all symbols referenced by the assertion expression.
     auto syms = GetSymbols(ar.expr);
-    if (syms.empty()) {
-      // No symbolic references -- safe to place at entry.
-      ar.type = AssessType::ENTRY;
-      ar.node = nullptr;
-      ar.emit_node = nullptr;
-      ar.emit_position = AssertionEmitPosition::AFTER_NODE;
-      ar.estimated_cost = 1;
-      ar.cost = AssertionCost::LOW;
-      ar.enabled = true;
-      continue;
-    }
 
-    // Find the latest defining node among all referenced symbols. This keeps
-    // the assertion after every required definition.
-    AST::Node* latest_def = nullptr;
-    size_t latest_order = 0;
-    bool all_resolved = true;
+    struct NodeSite {
+      AST::Node* site = nullptr;
+      size_t order = 0;
+      AssertionEmitPosition ae_pos = AssertionEmitPosition::BEFORE_NODE;
+      NodeSite(AST::Node* s, size_t o,
+               AssertionEmitPosition aep = AssertionEmitPosition::BEFORE_NODE)
+          : site(s), order(o), ae_pos(aep) {}
+      bool operator<(const NodeSite& ns) const { return order < ns.order; }
+      bool operator>(const NodeSite& ns) const { return order > ns.order; }
+    };
 
+    // By default, no hoisting
+    NodeSite hoisted{nullptr, 0};
+
+    // find the latest define sites for all referenced symbol
     for (const auto& vi : syms) {
       auto sym_name = VISym(vi);
       if (!sym_name) continue;
 
-      auto it = def_map.find(*sym_name);
-      if (it == def_map.end()) {
-        // Symbol not found in the def map -- it may be global or otherwise not
-        // hoistable inside this function.
-        all_resolved = false;
-        VST_DEBUG(dbgs() << "[assertsite] symbol not found in def_map: "
-                         << *sym_name << ", keeping use-site.\n");
+      // inspect the def-site
+      assert(def_map.count(*sym_name) && "symbol is not defined.");
+      auto earliest_site = def_map[*sym_name];
+      assert(node_order.count(earliest_site) && "node is not ordered");
+      auto earliest_order = node_order[earliest_site];
+
+      // some mutables can be altered after this check:
+      //   mutable int a = ...;
+      //   while (a > 0) {
+      //     ... = buf.at(a);
+      //     a = ...;
+      //   }
+      // conservative choice: do not hoist
+      if (earliest_order > n_order) {
+        hoisted.site = ar.node;
+        hoisted.order = n_order;
         break;
       }
+      NodeSite earliest(earliest_site, earliest_order,
+                        AssertionEmitPosition::AFTER_NODE);
 
-      auto order_it = node_order.find(it->second);
-      size_t ord = (order_it != node_order.end()) ? order_it->second : 0;
-      if (latest_def == nullptr || ord > latest_order) {
-        latest_def = it->second;
-        latest_order = ord;
-      }
-    }
+      // inspect the barriers between def and current
+      if (auto barrier_sites = barrier_map.find(*sym_name);
+          barrier_sites != barrier_map.end()) {
+        for (auto barrier_site : barrier_sites->second) {
+          assert(node_order.count(barrier_site) && "node is not ordered");
+          auto barrier_order = node_order[barrier_site];
+          // ignore any later barriers
+          if (barrier_order >= n_order) continue;
 
-    if (!all_resolved || latest_def == nullptr) {
-      ar.type = AssessType::USE_SITE;
-      if (!ar.node) ar.node = ar.emit_node;
-      ar.emit_position = SiteEmitPosition(ar.EmitTarget());
-      ar.estimated_cost = EstimateAssertionCost(ar.EmitTarget());
-      ar.cost = CategorizeCost(ar.estimated_cost);
-      ar.enabled =
-          IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
-      continue;
-    }
+          NodeSite barrier{barrier_site, barrier_order,
+                           AssertionEmitPosition::AFTER_NODE};
 
-    // Case 3.iii -- block-level barrier: if `latest_def` is nested inside a
-    // block statement (while, foreach, if, ...) that lives in the same scope as
-    // the access, bubble `latest_def` up to that block statement so the
-    // assertion is placed AFTER the block exits, not deep inside it.
-    auto use_container = FindStatementContainer(ar.EmitTarget());
-    auto bubbled_def = BubbleToSiblingScope(latest_def, use_container);
-    bool was_bubbled = (bubbled_def != latest_def);
+          if (barrier_site->IsBlock() &&
+              (scope_level[ar.node] > scope_level[barrier_site]))
+            barrier.ae_pos = AssertionEmitPosition::IN_BLOCK;
 
-    auto hoist_site = bubbled_def;
-
-    // If the def-site is a PredBlock (foreach, while, if, ...) that contains
-    // the original emit node, keep the assertion at the original emit node.
-    // This ensures loop-body assertions (e.g. BoundedType iteration variables)
-    // fire inside the loop rather than before it.
-    if (!was_bubbled && isa<AST::PredBlock>(latest_def) && ar.emit_node) {
-      auto em_it = node_order.find(ar.emit_node);
-      if (em_it != node_order.end() && em_it->second > latest_order)
-        hoist_site = ar.emit_node;
-    }
-
-    // Conservative hoisting: when the only defining node is a function
-    // parameter and the assertion was not bubbled, it was created inside a
-    // conditional scope (guard escalated its type from ENTRY to HOIST_SITE).
-    // Hoist to the very first statement of the enclosing block -- there is no
-    // local-definition barrier, so the assertion can safely be moved ahead of
-    // any other statements (like `mutable int pre = ...`) in the branch body.
-    if (isa<AST::Parameter>(latest_def) && !was_bubbled) {
-      if (hoist_site == latest_def) {
-        AST::Node* first_stmt = (use_container && use_container->Count() > 0)
-                                    ? use_container->SubAt(0).get()
-                                    : nullptr;
-        if (first_stmt) {
-          ar.type = AssessType::HOIST_SITE;
-          ar.node = first_stmt;
-          ar.emit_node = first_stmt;
-          ar.emit_position = AssertionEmitPosition::BEFORE_NODE;
-          ar.estimated_cost = EstimateAssertionCost(first_stmt);
-          ar.cost = CategorizeCost(ar.estimated_cost);
-          ar.enabled =
-              IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
-          VST_DEBUG(dbgs() << "[assertsite] assertion \"" << ar.message
-                           << "\" hoisted to block start (parameter, no "
-                              "barrier)\n");
-          continue;
+          if (barrier > earliest) earliest = barrier;
         }
-        // No enclosing block found -- fall through to normal HOIST placement.
+      }
+
+      if (earliest > hoisted) hoisted = earliest;
+    }
+
+    // Bubble up: when the hoisted site is nested more deeply than ar.node
+    // (e.g. a mutated variable inside a foreach body while the assertion is
+    // after the loop), pull the hoist point out to the enclosing block.
+    if (hoisted.site && hoisted.ae_pos != AssertionEmitPosition::IN_BLOCK) {
+      auto* target = hoisted.site;
+      while (scope_level.count(target) && scope_level.count(ar.node) &&
+             scope_level[target] > scope_level[ar.node]) {
+        auto it = scope_map.find(target);
+        if (it == scope_map.end()) break;
+        target = it->second;
+      }
+      if (target && target != hoisted.site && scope_level.count(target) &&
+          scope_level[target] >= scope_level[ar.node]) {
+        hoisted.site = target;
+        hoisted.ae_pos = AssertionEmitPosition::AFTER_NODE;
+        hoisted.order =
+            node_order.count(target) ? node_order[target] : hoisted.order;
       }
     }
 
-    // When the def was bubbled out of a nested scope, emit AFTER the scope
-    // so the assertion fires after the scope exits, not inside it.
-    auto emit_pos = was_bubbled ? AssertionEmitPosition::AFTER_NODE
-                                : SiteEmitPosition(hoist_site);
+    // ENTRY check: if every referenced symbol is a function parameter,
+    // elevate to ENTRY so the assertion is emitted as a host runtime_check.
+    bool is_entry =
+        (hoisted.site == nullptr || isa<AST::Parameter>(hoisted.site));
 
-    ar.type = AssessType::HOIST_SITE;
-    ar.node = hoist_site;
-    ar.emit_node = hoist_site;
-    ar.emit_position = emit_pos;
-    ar.estimated_cost = EstimateAssertionCost(hoist_site);
+    if (hoisted.site == nullptr) {
+      hoisted.site = ar.node;
+      hoisted.order = n_order;
+    }
+
+    bool is_hoisted = false;
+    if (is_entry) {
+      // hoisted as parameter reference
+      ar.type = AssessType::ENTRY;
+      ar.emit_node = fnode;
+      ar.emit_position = AssertionEmitPosition::AFTER_NODE;
+      is_hoisted = n_order >= body_order;
+    } else if (hoisted.site == ar.node) {
+      ar.type = AssessType::USE_SITE;
+      ar.emit_node = ar.node;
+      ar.emit_position = AssertionEmitPosition::BEFORE_NODE;
+      is_hoisted = false;
+    } else {
+      // hoisted to non-entry
+      ar.type = AssessType::HOIST_SITE;
+      ar.node = hoisted.site;
+      if (hoisted.ae_pos == AssertionEmitPosition::IN_BLOCK) {
+        if (auto ieblk = dyn_cast<AST::IfElseBlock>(hoisted.site)) {
+          ar.emit_node = FirstStmtOf(ieblk);
+          if (ieblk->HasElse()) {
+            auto else_stmts = ieblk->GetElseBody()->AllSubs();
+            auto efirst = else_stmts[0].get();
+            auto else_order = node_order[efirst];
+            if (n_order >= else_order) ar.emit_node = efirst;
+          }
+          ar.emit_position = AssertionEmitPosition::BEFORE_NODE;
+        } else {
+          auto* hblk = cast<AST::Block>(hoisted.site);
+          ar.emit_node = FirstStmtOf(hblk);
+          ar.emit_position = AssertionEmitPosition::BEFORE_NODE;
+        }
+      } else {
+        ar.emit_node = hoisted.site;
+        ar.emit_position = hoisted.ae_pos;
+      }
+      is_hoisted = true;
+    }
+
+    VST_DEBUG(dbgs() << "[assert-site] " << ((is_hoisted) ? "(hoisted) " : "")
+                     << "assertion \"" << ar.message << "\" placed at "
+                     << ar.emit_node->LOC() << " ("
+                     << EmitPositionStr(ar.emit_position) << ")\n");
+  }
+}
+
+void AssertSite::EstimateAssertions() {
+  auto& assessor = FCtx(fname).GetAssessor();
+  auto& assertions =
+      const_cast<std::vector<Assertion>&>(assessor.GetAssertions());
+
+  for (auto& ar : assertions) {
+    ar.estimated_cost = EstimateAssertionCost(ar.emit_node);
     ar.cost = CategorizeCost(ar.estimated_cost);
     ar.enabled =
         IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
-    VST_DEBUG(dbgs() << "[assertsite] assertion \"" << ar.message
-                     << "\" placed at " << hoist_site->LOC() << " ("
-                     << EmitPositionStr(ar.emit_position)
-                     << (was_bubbled ? ", bubbled" : "")
-                     << ", cost=" << ar.estimated_cost
-                     << ", enabled=" << ar.enabled << ")\n");
   }
 
   if (CCtx().ShowAssess()) PrintAssertionReport();
@@ -426,9 +479,12 @@ void AssertSite::HoistAssertions() {
         if (ae.assertion_idx < all.size()) {
           const auto& ar = all[ae.assertion_idx];
           switch (ar.cost) {
+          case AssertionCost::ENTRY: ++stats.runtime_entry; break;
           case AssertionCost::LOW: ++stats.runtime_low; break;
           case AssertionCost::MEDIUM: ++stats.runtime_medium; break;
           case AssertionCost::HIGH: ++stats.runtime_high; break;
+          case AssertionCost::NONE:
+          default: choreo_unreachable("unsupported assertion cost."); break;
           }
           if (ar.enabled)
             ++stats.runtime_enabled;
@@ -469,9 +525,12 @@ void AssertSite::PrintAssertionReport() const {
   };
   auto cost_str = [](AssertionCost c) -> const char* {
     switch (c) {
+    case AssertionCost::ENTRY: return "entry   ";
     case AssertionCost::LOW: return "low   ";
     case AssertionCost::MEDIUM: return "medium";
     case AssertionCost::HIGH: return "high  ";
+    case AssertionCost::NONE:
+    default: choreo_unreachable("unsupported assertion cost."); break;
     }
     return "?     ";
   };
@@ -508,16 +567,15 @@ void AssertSite::PrintAssertionReport() const {
           (ae.assertion_idx < all.size()) ? &all[ae.assertion_idx] : nullptr;
 
       if (ar) {
-        auto* site = ar->EmitTarget();
         errs() << "  [" << idx++ << "] " << type_str(ar->type)
                << "  enabled=" << (ar->enabled ? "yes" : "no ")
                << "  cost=" << cost_str(ar->cost)
                << "  estimated=" << ar->estimated_cost << "\n";
-        errs()
-            << "       assess  : runtime (cannot evaluate at compile time)\n";
+        errs() << "       assess  : runtime " << STR(ar->expr) << "\n";
         errs() << "       message : " << ae.message << "\n";
         errs() << "       loc     : " << ae.loc << "\n";
 
+        auto* site = ar->EmitTarget();
         if (ar->type == AssessType::ENTRY) {
           errs() << "       site    : function entry (host runtime_check)\n";
         } else if (site) {

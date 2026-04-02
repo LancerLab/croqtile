@@ -97,7 +97,7 @@ void Assessor::AddAssertion(const ptr<sbe::SymbolicExpression>& ar,
 }
 
 bool Assessor::DebugOn() const {
-  return (visitor && visitor->DebugIsEnabled());
+  return CCtx().TraceAssess() || (visitor && visitor->DebugIsEnabled());
 }
 
 AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
@@ -194,8 +194,8 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
   if (DebugOn())
     dbgs() << "[Assess] " << STR(bo) << ", type: " << STR(aty)
            << ", usage: " << STR(uty) << ", policy: " << STR(ap)
-           << ", node: " << PSTR(emit_node) << ", node: " << PSTR(emit_node)
-           << "\n";
+           << ", node: " << PSTR(node) << ", emit: " << PSTR(emit_node)
+           << ", guard: " << STR(guard) << "\n";
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
 
   if (ap == AssessPolicy::ErrWarn)

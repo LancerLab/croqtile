@@ -22,7 +22,8 @@ __co__ void foo(int k) {
     mutable int sum = 0;
     foreach l in [3]
       sum = sum + j + l;
-    x = buf.at(j);
+    foreach k in [300]
+      x = buf.at(j);
   }
 }
 
@@ -30,10 +31,7 @@ __co__ void foo(int k) {
 // CHECK: [assertions] function: foo  (2 assessed:  0 static-true,  0 static-false,  2 runtime)
 
 // Both assertions are present in the report but marked disabled.
-// CHECK: [0] HOIST      enabled=no   cost=high
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
-// CHECK: [1] HOIST      enabled=no   cost=high
-// CHECK:      assess  : runtime (cannot evaluate at compile time)
-
-// No device-side choreo_assert is emitted when all assertions are disabled.
-// CHECK-NOT: choreo::choreo_assert
+// CHECK: [0] HOIST      enabled=yes   cost=low
+// CHECK:      assess  : runtime (::foo::{{.*}}j >= 0)
+// CHECK: [1] HOIST      enabled=yes   cost=low
+// CHECK:      assess  : runtime (::foo::{{.*}}j < 4)

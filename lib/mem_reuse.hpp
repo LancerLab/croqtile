@@ -100,6 +100,7 @@ private:
   }
 
   std::map<std::string, DevFuncMemReuseCtx> df_ctxs;
+  std::map<std::string, size_t> shared_alignment_reqs;
 
   DevFuncMemReuseCtx& DFCtx(std::string dev_func_name = "") {
     if (dev_func_name == "") assert(cur_dev_fname != "");
@@ -120,6 +121,9 @@ private:
   std::string GetDeclDevFuncOfBuffer(std::string buf_name) const {
     return ma.buf_dev_func_name.at(buf_name);
   }
+
+  void CollectSharedAlignmentRequirements(AST::Node& root);
+  size_t SharedAlignmentForDevFunc(const std::string& df_name) const;
 
   struct HeapSimulator {
     using Chunk = Buffer;

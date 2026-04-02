@@ -16,5 +16,4 @@ __co__ void bar(f32 [3, 4] in1) {
 }
 
 // CHECK: error: symbol `foo_f' has been declared already.
-// CHECK: error: symbol `bar_f' has been declared already.
 // CHECK-NOT: error: symbol `bar_f' has been declared already.

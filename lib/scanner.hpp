@@ -54,6 +54,7 @@
 #include <cstring>
 #include <unistd.h>
 
+#include "colors.hpp"
 #include "parser.tab.hh" // this is needed for symbol_type
 
 namespace Choreo {
@@ -79,29 +80,16 @@ public:
 
   void Error(const location& loc, const std::string& error_message) {
     errs() << loc << ": ";
-    errs() << ((should_use_colors()) ? color_red : "")
-           << "error: " << ((should_use_colors()) ? color_reset : "");
+    errs() << color::err(color::kRed)
+           << "error: " << color::err(color::kReset);
     errs() << error_message << std::endl;
-    std::exit(EXIT_FAILURE); // Terminate the program immediately
+    std::exit(EXIT_FAILURE);
   }
 
 private:
   static bool debug;
   static bool keep_comments;
   static bool loc_update;
-
-  const char* color_red = "\033[31m";
-  const char* color_reset = "\033[0m";
-
-  static bool shell_supports_colors() {
-    const char* term = getenv("TERM");
-    return term &&
-           (strcmp(term, "xterm-256color") == 0 || strcmp(term, "xterm") == 0);
-  }
-
-  static bool should_use_colors() {
-    return isatty(fileno(stdout)) && shell_supports_colors();
-  }
 
   // private:
   //    Interpreter &m_driver;

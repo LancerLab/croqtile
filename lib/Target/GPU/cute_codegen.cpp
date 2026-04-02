@@ -204,6 +204,14 @@ bool CuteCodeGen::HasWGMMAInFunction() const {
   return false;
 }
 
+namespace {
+size_t SharedAlignmentBytes(const Choreo::CompilationContext& ctx,
+                            SwizMode swizzle_mode) {
+  return std::max(ctx.GetMemoryAlignmentByte(Storage::SHARED),
+                  SwizzleAlignmentByte(swizzle_mode));
+}
+} // namespace
+
 const AST::MMAOperation*
 CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   if (!n) return nullptr;
@@ -386,7 +394,7 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
            info.scale_a_expr == scale_a_expr &&
            info.scale_b_expr == scale_b_expr && info.scale_a_ld == scale_a_ld &&
            info.acc_ty == acc_ty && info.dim_n == dim_n &&
-           info.reg_num_d == *reg_num;
+           info.reg_num_d == (size_t)*reg_num;
   }
 
   if (auto fb = dyn_cast<AST::ForeachBlock>(n)) {
@@ -2487,6 +2495,35 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   if (emit_launch) {
     tma_future_count = 0;
 
+    auto required_shared_align = [&]() -> size_t {
+      size_t alignment = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
+      auto collect = [&](auto&& self, const ptr<AST::Node>& node) -> void {
+        if (!node) return;
+        if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
+          for (auto& item : mn->values) self(self, item);
+          return;
+        }
+        if (auto mma = dyn_cast<AST::MMA>(node)) {
+          auto op = mma->GetOperation();
+          if (!op || op->Tag() != AST::MMAOperation::Load) return;
+          alignment = std::max(
+              alignment, SharedAlignmentBytes(CCtx(), op->GetSwizzleMode()));
+          return;
+        }
+        if (auto block = dyn_cast<AST::Block>(node)) {
+          self(self, block->GetBody());
+          return;
+        }
+        if (auto if_else = dyn_cast<AST::IfElseBlock>(node)) {
+          self(self, if_else->GetThenBody());
+          self(self, if_else->GetElseBody());
+          return;
+        }
+      };
+      collect(collect, n.GetBody());
+      return alignment;
+    }();
+
     ValueItem cur_spm_size = sbe::nu(0);
     ValueItem ring_start = sbe::nu(0);
     ValueItem ring_size = sbe::nu(0);
@@ -2534,8 +2571,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
       hs << h_indent << "cudaFuncSetAttribute(" << device_fn
          << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
-         << ValueSTR(cur_spm_size) << " + ("
-         << CCtx().GetMemoryAlignmentByte(Storage::SHARED) << " - 1));\n";
+         << ValueSTR(cur_spm_size) << " + (" << required_shared_align
+         << " - 1));\n";
       set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
     };
 
@@ -2586,8 +2623,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     bool explicit_smem = false;
     if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
       // TODO: conservative padding. To be optimized.
-      auto align = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
-      hs << ", " << ValueSTR(cur_spm_size) << " + (" << align << " - 1)";
+      hs << ", " << ValueSTR(cur_spm_size) << " + (" << required_shared_align
+         << " - 1)";
       explicit_smem = true;
     }
     if (stream_name != "") {
@@ -2657,8 +2694,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ds << d_indent << "auto " << device_fn
          << "__runtime_shared_buffer__ = "
             "reinterpret_cast<char*>(aligned_up_ptr<"
-         << CCtx().GetMemoryAlignmentByte(Storage::SHARED) << " * 8>("
-         << device_fn << "__runtime_shared_buffer__raw));\n";
+         << required_shared_align << " * 8>(" << device_fn
+         << "__runtime_shared_buffer__raw));\n";
       if (!sbe::ceq(cur_spm_size, sbe::nu(0)) && cgi.HasAsyncDMA(fname)) {
         ds << d_indent << "auto " << device_fn
            << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>("
@@ -3323,13 +3360,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                          lconfig.group_count.y * lconfig.group_count.z;
       auto thr_count_vi =
           InProducer() ? inner_thr_count : inner_thr_count * group_count;
-      if (VIIsInt(thr_count_vi) && VIIsInt(ca->GetBlockShape().ValueAt(1))) {
+      if (VIIsInt(thr_count_vi) && VIIsInt(fty->GetShape().ValueAt(1))) {
         size_t thr_count = *VIInt(thr_count_vi);
         BaseType elem_type = plan.tail_copy_kind == TailCopyKind::G2S
                                  ? f_sty->ElementType()
                                  : t_sty->ElementType();
         size_t elem_byte = SizeOf(elem_type);
-        size_t tile_n = *VIInt(ca->GetBlockShape().ValueAt(1));
+        size_t tile_n = *VIInt(fty->GetShape().ValueAt(1));
         constexpr size_t bytes_per_copy = 16;
         if (bytes_per_copy % elem_byte == 0) {
           size_t elems_per_copy = bytes_per_copy / elem_byte;
@@ -3394,8 +3431,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     auto f_stride = GenStrides(f_ca, transp_config);
     auto t_stride = GenStrides(t_ca);
 
-    // Use swizzle value only if explicitly specified, otherwise use 0 (no
-    // swizzle)
     auto swizzle_mode = n.GetSwizzleMode();
 
     bool use_tail_copy_g2s =
@@ -3404,10 +3439,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     Shape f_mds_shape =
         (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape());
-    if (use_tail_copy) f_mds_shape = f_ca->GetBlockShape();
+    Shape f_ca_shape = f_ca->GetBlockShape();
+    if (use_tail_copy) f_mds_shape = t_ca->GetBlockShape();
     Shape t_mds_shape = fty->GetShape();
-    if (use_tail_copy) t_mds_shape = f_ca->GetBlockShape();
-
+    if (use_tail_copy) t_mds_shape = t_ca->GetBlockShape();
     std::optional<TiledCopyEntry> tail_copy_entry =
         tiled_copy_plan.tail_copy_helper_entry;
     bool use_tail_copy_helper = use_tail_copy && tail_copy_entry.has_value() &&
@@ -3541,7 +3576,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                       << entry.val_layout.second << ">(" << f_mds_name << ", "
                       << t_mds_name << ", [&](const auto& __coord) { return "
                       << "cute::elem_less(__coord, cute::make_shape("
-                      << ShapeSTR(fty->GetShape(), true) << ")); });\n";
+                      << ShapeSTR(f_ca_shape, true) << ")); });\n";
         } else {
           IndStream() << "choreo::copy_if_s2g<"
                       << NameBaseType(f_sty->ElementType()) << ", "
@@ -3551,7 +3586,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                       << entry.val_layout.second << ">(" << f_mds_name << ", "
                       << t_mds_name << ", [&](const auto& __coord) { return "
                       << "cute::elem_less(__coord, cute::make_shape("
-                      << ShapeSTR(fty->GetShape(), true) << ")); });\n";
+                      << ShapeSTR(f_ca_shape, true) << ")); });\n";
         }
       } else if (is_subbyte_copy) {
         const auto f_byte = GenTensorDecl(
@@ -4231,7 +4266,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           cute_major_order = "cute::SM90::GMMA::Major::K";
         }
       }
-      // Get swizzle value from MMA operation (default 128)
+      // Get swizzle value from MMA operation (default NONE / NS)
       auto swizzle_val = op.GetSwizzleMode();
       std::string swizzle_enum;
       std::string sparse_layout_suffix;
@@ -4240,7 +4275,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       case SwizMode::B32: swizzle_enum = "WGMMA_Swizzle::B32"; break;
       case SwizMode::B64: swizzle_enum = "WGMMA_Swizzle::B64"; break;
       case SwizMode::B128: swizzle_enum = "WGMMA_Swizzle::B128"; break;
-      default: swizzle_enum = "WGMMA_Swizzle::B128"; break;
+      default: swizzle_enum = "WGMMA_Swizzle::NS"; break;
       }
       switch (swizzle_val) {
       case SwizMode::NONE: sparse_layout_suffix = "INTER"; break;
@@ -5866,7 +5901,7 @@ bool CuteCodeGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
 
   IndStream() << "// if-else: " << n.LOC() << "\n";
-  if (auto c = dyn_cast<AST::Call>(n.pred))
+  if (auto c = dyn_cast<AST::Call>(n.pred->GetReference()))
     IndStream() << "if (" << CallSTR(*c) << ") {\n";
   else
     IndStream() << "if (" << ExprSTR(n.pred, IsHost()) << ") {\n";
@@ -6193,7 +6228,7 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
       ++stats.shape_compat_total;
       ++stats.runtime_total;
       ++stats.shape_compat_runtime;
-      ++stats.runtime_low;
+      ++stats.runtime_entry;
     }
   }
 
@@ -6208,13 +6243,11 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
   // ENTRY assertions reference only function parameters / host-visible values
   // — the assertion-hoisting pass guarantees this. Safe to emit in the host
   // wrapper before the kernel launch.
-#if 0
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
     if (!ar.enabled) continue;
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
-#endif
 
   // USE_SITE and DEF_SITE assertions are emitted in device code (inside the
   // kernel) via EmitSiteAssertions, which is called from AfterVisitImpl during
@@ -6746,6 +6779,8 @@ const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
         return PSTR(vi) + "LL";
     } else if (shp_lit)
       return "cute::Int<" + PSTR(vi) + ">{}";
+    else if (LL_suffix)
+      return PSTR(vi) + "LL";
     else
       return PSTR(vi);
   } else if (auto bv = VIBool(vi))
@@ -7267,7 +7302,6 @@ const std::string CuteCodeGen::EmitSpannedArith(AST::Expr& e) const {
 
 void CuteCodeGen::BuildSiteAssertionMap() {
   if (CCtx().DisableRuntimeCheck()) return;
-  if (CCtx().RuntimeCheckLevel() != "all") return;
   if (fname.empty()) return;
 
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::USE_SITE)) {

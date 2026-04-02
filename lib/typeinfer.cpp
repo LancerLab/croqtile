@@ -1,18 +1,13 @@
 #include "typeinfer.hpp"
 
 #include "ast.hpp"
+#include "colors.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
 
 namespace {
-
-ValueItem CombineWithAnd(const ValueItem& lhs, const ValueItem& rhs) {
-  if (!IsValidValueItem(lhs)) return rhs;
-  if (!IsValidValueItem(rhs)) return lhs;
-  return sbe::bop(OpCode::AND, lhs, rhs)->Normalize();
-}
 
 ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
   if (!n) return GetInvalidValueItem();
@@ -55,13 +50,16 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
       }
 
       if (e->op == Op::CeilDiv) return (lhs + (rhs - sbe::nu(1))) / rhs;
+      if (e->op == Op::ElemOf) return GetInvalidValueItem();
       if (e->op != Op::Add && e->op != Op::Sub && e->op != Op::Mul &&
           e->op != Op::Div && e->op != Op::Mod && e->op != Op::Eq &&
           e->op != Op::Ne && e->op != Op::Lt && e->op != Op::Gt &&
           e->op != Op::Le && e->op != Op::Ge && e->op != Op::LogicAnd &&
           e->op != Op::LogicOr && e->op != Op::BitAnd && e->op != Op::BitOr &&
-          e->op != Op::BitXor && e->op != Op::Shl && e->op != Op::Shr)
-        return GetInvalidValueItem();
+          e->op != Op::BitXor && e->op != Op::Shl && e->op != Op::Shr) {
+        // be defensive here
+        choreo_unreachable("unexpected operation: " + STR(e->op) + ".");
+      }
       return sbe::bop(ToOpCode(e->op), lhs, rhs)->Normalize();
     }
 
@@ -76,45 +74,41 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
     }
   }
 
+  // we may not always build predicate sucessfully
   return GetInvalidValueItem();
 }
 
-ValueItem BuildRangePredicate(TypeInference* ti, AST::LoopRange& n) {
-  auto iv = sbe::sym(ti->InScopeName(n.IVName()));
-  ValueItem pred = GetInvalidValueItem();
-
-  ValueItem default_lb = sbe::nu(0);
-  ValueItem default_ub = GetInvalidValueItem();
-  ptr<Type> iv_ty = n.IV()->GetType();
-  if (!isa<BoundedType>(iv_ty)) {
-    if (auto ty = ti->SSTab().LookupSymbol(n.IVName())) iv_ty = ty;
-  }
-  if (auto bty = dyn_cast<BoundedType>(iv_ty); bty && bty->HasValidBound()) {
-    default_ub = bty->GetUpperBound();
-    if (auto bit = dyn_cast<BoundedIntegerType>(bty))
-      default_lb = bit->GetLowerBound();
-    else if (auto bitt = dyn_cast<BoundedITupleType>(bty);
-             bitt && bitt->Dims() == 1)
-      default_lb = bitt->GetLowerBound(0);
-  }
-
-  auto lb = n.lbound ? BuildPredicate(ti, n.lbound) : default_lb;
-  if (IsValidValueItem(lb)) pred = CombineWithAnd(pred, sbe::oc_ge(iv, lb));
-
-  ValueItem ub = default_ub;
-  if (n.ubound) {
-    auto ub_offset = BuildPredicate(ti, n.ubound);
-    if (IsValidValueItem(default_ub) && IsValidValueItem(ub_offset))
-      ub = (default_ub + ub_offset)->Normalize();
-    else
-      ub = ub_offset;
-  }
-  if (IsValidValueItem(ub)) pred = CombineWithAnd(pred, sbe::oc_lt(iv, ub));
-
-  return pred;
-}
-
 } // namespace
+
+ValueItem TypeInference::BuildRangePredicate(AST::LoopRange& n) {
+  auto iv = sbe::sym(InScopeName(n.IVName()));
+
+  auto iv_ty = GetSymbolType(n.LOC(), n.IVName());
+  assert(isa<BoundedType>(iv_ty));
+
+  if (!IsActualBoundedIntegerType(iv_ty)) {
+    // ituple can not be mutated for the range
+    auto ity = cast<BoundedITupleType>(iv_ty);
+    auto ub = MultiplyAll(ity->GetUpperBounds().Value());
+    auto lb = sbe::nu(0);
+    assert(IsValidValueItem(lb));
+    assert(IsValidValueItem(ub));
+    return sbe::bl_and(sbe::oc_ge(iv, lb), sbe::oc_lt(iv, ub));
+  }
+  auto bty = cast<BoundedType>(iv_ty);
+  auto ub = bty->GetUpperBound();
+  auto lb = bty->GetLowerBound();
+
+  auto ub_addend = sbe::nu(0);
+  auto lb_addend = sbe::nu(0);
+  if (n.ubound) ub_addend = BuildPredicate(this, n.ubound);
+  if (n.lbound) lb_addend = BuildPredicate(this, n.lbound);
+  ub += ub_addend;
+  lb += lb_addend;
+  assert(IsValidValueItem(lb));
+  assert(IsValidValueItem(ub));
+  return sbe::bl_and(sbe::oc_ge(iv, lb), sbe::oc_lt(iv, ub));
+}
 
 bool TypeInference::BeforeBeforeVisit(AST::Node& n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -163,8 +157,13 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
       }
     }
     if (CCtx().ShowInferredTypes()) {
-      dbgs() << "Function:  " << SSTab().InScopeName(f->name)
-             << ", Type: " << AST::TYPE_STR(*f) << "\n";
+      dbgs() << color::out(color::kBoldGreen) << "Function:  "
+             << color::out(color::kReset) << SSTab().InScopeName(f->name)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(AST::TYPE_STR(*f),
+                                    color::stdoutHasColor())
+             << "\n";
     }
   } else if (isa<AST::DMA>(&n) || isa<AST::NamedVariableDecl>(&n) ||
              isa<AST::Assignment>(&n)) {
@@ -419,9 +418,15 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   }
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << ((AST::istypeof<FutureType>(&n)) ? "Future" : "Symbol");
-    dbgs() << ":    " << InScopeName(n.name_str) << ", Type: " << PSTR(nty);
-    dbgs() << "\n";
+    bool is_future = AST::istypeof<FutureType>(&n);
+    dbgs() << color::out(is_future ? color::kBoldMagenta : color::kBoldCyan)
+           << (is_future ? "Future" : "Symbol")
+           << ":    " << color::out(color::kReset)
+           << InScopeName(n.name_str)
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(PSTR(nty), color::stdoutHasColor())
+           << "\n";
   }
 
   return true;
@@ -454,8 +459,13 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Partial:   " << InScopeName(n.name_str)
-           << ", Type: " << AST::TYPE_STR(n) << "\n";
+    dbgs() << color::out(color::kBoldYellow) << "Partial:   "
+           << color::out(color::kReset) << InScopeName(n.name_str)
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(AST::TYPE_STR(n),
+                                  color::stdoutHasColor())
+           << "\n";
   }
 
   // The node only occurs when decl named mdspan.
@@ -548,8 +558,12 @@ bool TypeInference::Visit(AST::Assignment& n) {
     AssignSymbolWithType(n.LOC(), n.GetName() + ".span", sty->GetMDSpanType());
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Symbol:    " << InScopeName(n.GetName())
-           << ", Type: " << PSTR(ty) << "\n";
+    dbgs() << color::out(color::kBoldCyan) << "Symbol:    "
+           << color::out(color::kReset) << InScopeName(n.GetName())
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(PSTR(ty), color::stdoutHasColor())
+           << "\n";
   }
 
   cur_type.reset();
@@ -601,12 +615,17 @@ bool TypeInference::Visit(AST::Parameter& p) {
   cur_param_types.push_back(p.GetType());
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Parameter: ";
+    dbgs() << color::out(color::kBoldBlue) << "Parameter: "
+           << color::out(color::kReset);
     if (p.HasSymbol())
       dbgs() << InScopeName(p.sym->name);
     else
       dbgs() << "(unnamed)";
-    dbgs() << ", Type: " << AST::TYPE_STR(p) << "\n";
+    dbgs() << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(AST::TYPE_STR(p),
+                                  color::stdoutHasColor())
+           << "\n";
   }
 
   cur_type.reset();
@@ -646,8 +665,12 @@ bool TypeInference::Visit(AST::Expr& n) {
     assert(!isa<AST::IntIndex>(ref));
 
     if (AST::istypeof<UnknownType>(ref)) {
-      Error1(n.LOC(), "unable to infer the type of expression.");
-      return false;
+      if (isa<AST::Call>(ref))
+        SetNodeType(*ref, MakeBooleanType());
+      else {
+        Error1(n.LOC(), "unable to infer the type of expression.");
+        return false;
+      }
     }
 
     SetNodeType(n, NodeType(*ref));
@@ -996,10 +1019,15 @@ bool TypeInference::Visit(AST::DMA& n) {
   }
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Future:    "
+    dbgs() << color::out(color::kBoldMagenta) << "Future:    "
+           << color::out(color::kReset)
            << ((n.future.empty()) ? SSTab().ScopeName() + "(anon)"
                                   : InScopeName(n.future))
-           << ", Type: " << AST::TYPE_STR(n) << "\n";
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(AST::TYPE_STR(n),
+                                  color::stdoutHasColor())
+           << "\n";
   }
 
   cur_type.reset();
@@ -1038,8 +1066,13 @@ bool TypeInference::Visit(AST::MMA& n) {
     AssignSymbolWithType(n.LOC(), fut_sym + ".span",
                          sty->GetMDSpanType()->Clone());
     if (CCtx().ShowInferredTypes()) {
-      dbgs() << "Future:    " << InScopeName(fut_sym)
-             << ", Type: " << AST::TYPE_STR(n) << "\n";
+      dbgs() << color::out(color::kBoldMagenta) << "Future:    "
+             << color::out(color::kReset) << InScopeName(fut_sym)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(AST::TYPE_STR(n),
+                                    color::stdoutHasColor())
+             << "\n";
     }
   } break;
   case AST::MMAOperation::Exec: {
@@ -1083,8 +1116,14 @@ bool TypeInference::Visit(AST::MMA& n) {
     auto mdspan_ty = res_sty->GetMDSpanType()->Clone();
     ModifySymbolType(acc->LOC(), acc_sym + ".span", mdspan_ty);
     if (CCtx().ShowInferredTypes()) {
-      dbgs() << "Symbol:    " << InScopeName(acc_sym)
-             << ", Type: " << PSTR(GetSymbolType(acc->LOC(), acc_sym)) << "\n";
+      dbgs() << color::out(color::kBoldCyan) << "Symbol:    "
+             << color::out(color::kReset) << InScopeName(acc_sym)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(
+                    PSTR(GetSymbolType(acc->LOC(), acc_sym)),
+                    color::stdoutHasColor())
+             << "\n";
     }
   } break;
   case AST::MMAOperation::Scale:
@@ -1106,16 +1145,26 @@ bool TypeInference::Visit(AST::ParallelBy& n) {
 
   AssignSymbolWithType(n.LOC(), n.BPV()->name, n.BPV()->GetType());
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Bounded:   " << InScopeName(n.BPV()->name)
-           << ", Type: " << AST::TYPE_STR(n.BPV()) << "\n";
+    dbgs() << color::out(color::kGreen) << "Bounded:   "
+           << color::out(color::kReset) << InScopeName(n.BPV()->name)
+           << color::out(color::kDim) << ", Type: "
+           << color::out(color::kReset)
+           << color::colorizeType(AST::TYPE_STR(n.BPV()),
+                                  color::stdoutHasColor())
+           << "\n";
   }
 
   for (auto sym : n.AllSubPVs()) {
     auto id = cast<AST::Identifier>(sym);
     AssignSymbolWithType(sym->LOC(), id->name, id->GetType());
     if (CCtx().ShowInferredTypes()) {
-      dbgs() << "Bounded:   " << InScopeName(id->name)
-             << ", Type: " << AST::TYPE_STR(sym) << "\n";
+      dbgs() << color::out(color::kGreen) << "Bounded:   "
+             << color::out(color::kReset) << InScopeName(id->name)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(AST::TYPE_STR(sym),
+                                    color::stdoutHasColor())
+             << "\n";
     }
   }
   return true;
@@ -1146,15 +1195,24 @@ bool TypeInference::Visit(AST::WithIn& n) {
 
   if (CCtx().ShowInferredTypes()) {
     if (n.with) {
-      dbgs() << "Bounded:   ";
-      dbgs() << InScopeName(n.with->name)
-             << ", Type: " << AST::TYPE_STR(*n.with) << "\n";
+      dbgs() << color::out(color::kGreen) << "Bounded:   "
+             << color::out(color::kReset) << InScopeName(n.with->name)
+             << color::out(color::kDim) << ", Type: "
+             << color::out(color::kReset)
+             << color::colorizeType(AST::TYPE_STR(*n.with),
+                                    color::stdoutHasColor())
+             << "\n";
     }
     if (n.with_matchers) {
       for (auto pid : n.with_matchers->values) {
         auto id = cast<AST::Identifier>(pid);
-        dbgs() << "Bounded:   " << InScopeName(id->name)
-               << ", Type: " << AST::TYPE_STR(*id) << "\n";
+        dbgs() << color::out(color::kGreen) << "Bounded:   "
+               << color::out(color::kReset) << InScopeName(id->name)
+               << color::out(color::kDim) << ", Type: "
+               << color::out(color::kReset)
+               << color::colorizeType(AST::TYPE_STR(*id),
+                                      color::stdoutHasColor())
+               << "\n";
       }
     }
   }
@@ -1329,7 +1387,7 @@ bool TypeInference::Visit(AST::Return& n) {
 
 bool TypeInference::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
-  n.SetScopePredicate(BuildRangePredicate(this, n));
+  n.SetScopePredicate(BuildRangePredicate(n));
   if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
     dbgs() << " |- scope-predicate(looprange): "
            << n.GetScopePredicate()->ToString() << "\n";
@@ -1340,12 +1398,6 @@ bool TypeInference::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside
 
-  ValueItem pred = GetInvalidValueItem();
-  for (auto& r : n.GetRanges()) {
-    if (auto range = dyn_cast<AST::LoopRange>(r))
-      pred = CombineWithAnd(pred, range->GetScopePredicate());
-  }
-  n.SetScopePredicate(pred);
   if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
     dbgs() << " |- scope-predicate(foreach): "
            << n.GetScopePredicate()->ToString() << "\n";
@@ -1366,10 +1418,13 @@ bool TypeInference::Visit(AST::InThreadsBlock& n) {
 bool TypeInference::Visit(AST::WhileBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside
-  n.SetScopePredicate(BuildPredicate(this, n.GetPred()));
-  if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
-    dbgs() << " |- scope-predicate(while): "
-           << n.GetScopePredicate()->ToString() << "\n";
+  auto spred = BuildPredicate(this, n.GetPred());
+  if (IsValidValueItem(spred))
+    n.SetScopePredicate(spred);
+  else
+    n.SetScopePredicate(sbe::bl(true));
+  VST_DEBUG(dbgs() << " |- scope-predicate(while): "
+                   << n.GetScopePredicate()->ToString() << "\n");
   return true;
 }
 
@@ -1377,11 +1432,13 @@ bool TypeInference::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside
   auto pred = BuildPredicate(this, n.GetPred());
-  n.SetIfScopePredicate(pred);
-  if (IsValidValueItem(pred))
+  if (IsValidValueItem(pred)) {
+    n.SetIfScopePredicate(pred);
     n.SetElseScopePredicate(sbe::uop(OpCode::NOT, pred)->Normalize());
-  else
+  } else {
+    n.SetIfScopePredicate(sbe::bl(true));
     n.SetElseScopePredicate(GetInvalidValueItem());
+  }
   if (debug_visit) {
     if (IsValidValueItem(n.GetIfScopePredicate()))
       dbgs() << " |- scope-predicate(if): "

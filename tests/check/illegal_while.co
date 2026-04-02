@@ -9,11 +9,10 @@ __co__ void foo(int aa, bool bb) {
     while (b);
     while (a && b[0]);
     while (a && bb > 0); // illegal
-    while (2 > 1); // illegal
-    while (cc); // illegal
+    while (2 > 1); // legal now
+    while (cc); // legal now
   }
 }
 
 // CHECK: in operation "&&": unable to apply to the types (shared event vs. bool).
 // CHECK: error: requires an event predication expression but got 'unknown'.
-// CHECK-COUNT-2: error: requires an event predication expression but got 'bool'.

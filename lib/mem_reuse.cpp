@@ -2,10 +2,91 @@
 #include "ast.hpp"
 #include "aux.hpp"
 #include "context.hpp"
+#include "dmaconf.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
 
 using namespace Choreo;
+
+namespace {
+
+struct SharedAlignmentCollector : public VisitorWithSymTab {
+  std::map<std::string, size_t>& shared_alignment_reqs;
+  int parallel_level = 0;
+  std::string cur_dev_fname;
+
+  SharedAlignmentCollector(std::map<std::string, size_t>& reqs)
+      : VisitorWithSymTab("swiz_align"), shared_alignment_reqs(reqs) {}
+
+private:
+  static std::string GetCoFuncName(const std::string& scoped_name) {
+    if (!PrefixedWith(scoped_name, "::")) return scoped_name;
+    return SplitStringByDelimiter(scoped_name, "::", true)[0];
+  }
+
+  bool RunOnProgramImpl(AST::Node& root) override {
+    root.accept(*this);
+    return !HasError();
+  }
+
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::ChoreoFunction>(&n)) {
+      parallel_level = 0;
+      cur_dev_fname = CurrentFunctionName();
+    } else if (isa<AST::ParallelBy>(&n)) {
+      ++parallel_level;
+      if (parallel_level == 1) cur_dev_fname = SSTab().ScopeName();
+    }
+    return true;
+  }
+
+  bool AfterVisitImpl(AST::Node& n) override {
+    if (isa<AST::ParallelBy>(&n)) {
+      if (parallel_level == 1) cur_dev_fname = CurrentFunctionName();
+      --parallel_level;
+    }
+    return true;
+  }
+
+  bool Visit(AST::MMA& n) override {
+    auto op = n.GetOperation();
+    if (!op || op->Tag() != AST::MMAOperation::Load) return true;
+
+    auto frag_sym = AST::FragName(op->LoadTo());
+    auto scoped_frag_sym = InScopeName(frag_sym);
+    auto co_func_name = GetCoFuncName(cur_dev_fname);
+    if (!FCtx(co_func_name).FragIsWGMMA(scoped_frag_sym)) return true;
+
+    size_t alignment = std::max(CCtx().GetMemoryAlignmentByte(Storage::SHARED),
+                                SwizzleAlignmentByte(op->GetSwizzleMode()));
+    shared_alignment_reqs[cur_dev_fname] =
+        std::max(shared_alignment_reqs[cur_dev_fname], alignment);
+    shared_alignment_reqs[co_func_name] =
+        std::max(shared_alignment_reqs[co_func_name], alignment);
+    return true;
+  }
+};
+
+} // namespace
+
+void MemReuse::CollectSharedAlignmentRequirements(AST::Node& root) {
+  shared_alignment_reqs.clear();
+  SharedAlignmentCollector collector(shared_alignment_reqs);
+  collector.SSTab().UpdateGlobal(SymTab());
+  collector.RunOnProgram(root);
+}
+
+size_t MemReuse::SharedAlignmentForDevFunc(const std::string& df_name) const {
+  size_t alignment = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
+  if (auto it = shared_alignment_reqs.find(df_name);
+      it != shared_alignment_reqs.end())
+    alignment = std::max(alignment, it->second);
+  std::string co_func_name = GetFuncNameFromScopedName(df_name);
+  if (auto it = shared_alignment_reqs.find(co_func_name);
+      it != shared_alignment_reqs.end())
+    alignment = std::max(alignment, it->second);
+  return alignment;
+}
 
 bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
   if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -86,6 +167,7 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
 
 bool MemReuse::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
+    CollectSharedAlignmentRequirements(n);
     Initialize();
     AnalyzeMemOffset();
   } else if (isa<AST::ChoreoFunction>(&n)) {
@@ -98,6 +180,7 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
     if (parallel_level == 1) {
       cur_dev_fname = SSTab().ScopeName();
       if (DFCtx().shared_spm_size != 0) {
+        size_t shared_alignment = SharedAlignmentForDevFunc(cur_dev_fname);
         DFCtx().shared_spm_name = SymbolTable::GetAnonName();
         auto shared_spm =
             AST::Make<AST::NamedVariableDecl>(n.LOC(), DFCtx().shared_spm_name);
@@ -108,9 +191,7 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             Storage::SHARED);
         shared_spm->SetType(ssty);
         shared_spm->AddNote("spm");
-        shared_spm->AddNote(
-            "alignment",
-            std::to_string(CCtx().GetMemoryAlignmentByte(Storage::SHARED)));
+        shared_spm->AddNote("alignment", std::to_string(shared_alignment));
         pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
         SSTab().DefineSymbol(DFCtx().shared_spm_name, ssty);
         VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
@@ -251,6 +332,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       choreo_unreachable("The storage type: " + STR(sto) +
                          " is not supported yet!");
     size_t alignment = CCtx().GetMemoryAlignmentByte(sto);
+    if (sto == Storage::SHARED) alignment = SharedAlignmentForDevFunc(df_name);
     if (ma.sto_have_dyn[df_name][sto]) {
       auto mri = FCtx(co_func_name).SetDynMemReuseInfo(df_name);
       std::string simulator =
@@ -394,7 +476,10 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
 
   n.AddNote("reuse", spm_name);
   n.AddNote("offset", offset);
-  n.AddNote("alignment", std::to_string(CCtx().GetMemoryAlignmentByte(sto)));
+  size_t alignment = CCtx().GetMemoryAlignmentByte(sto);
+  if (sto == Storage::SHARED)
+    alignment = SharedAlignmentForDevFunc(cur_dev_fname);
+  n.AddNote("alignment", std::to_string(alignment));
 }
 
 bool MemReuse::RunOnProgramImpl(AST::Node& root) {
