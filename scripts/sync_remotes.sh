@@ -28,7 +28,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 DEFAULT_LOCAL_REPO="$SCRIPT_DIR/../"
-DEFAULT_MIRROR_REPO="dev/choreo/"
+DEFAULT_MIRROR_REPO="dev/choreo-sync/"
 DEFAULT_LOCAL_REMOTE_URL="git@git.enflame.cn:xiaofeng.guan/choreo.git"
 DEFAULT_MIRROR_REMOTE_URL="git@10.0.16.44:lancerlab/choreo.git"
 
