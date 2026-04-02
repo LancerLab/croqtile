@@ -6243,13 +6243,11 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
   // ENTRY assertions reference only function parameters / host-visible values
   // — the assertion-hoisting pass guarantees this. Safe to emit in the host
   // wrapper before the kernel launch.
-#if 0
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
     if (!ar.enabled) continue;
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
        << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
-#endif
 
   // USE_SITE and DEF_SITE assertions are emitted in device code (inside the
   // kernel) via EmitSiteAssertions, which is called from AfterVisitImpl during
@@ -6781,6 +6779,8 @@ const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
         return PSTR(vi) + "LL";
     } else if (shp_lit)
       return "cute::Int<" + PSTR(vi) + ">{}";
+    else if (LL_suffix)
+      return PSTR(vi) + "LL";
     else
       return PSTR(vi);
   } else if (auto bv = VIBool(vi))

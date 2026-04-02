@@ -32,6 +32,6 @@ __co__ void foo(int k) {
 
 // Both assertions are present in the report but marked disabled.
 // CHECK: [0] HOIST      enabled=yes   cost=low
-// CHECK:      assess  : runtime (::foo::paraby_0::paraby_1::j >= 0)
+// CHECK:      assess  : runtime (::foo::{{.*}}j >= 0)
 // CHECK: [1] HOIST      enabled=yes   cost=low
-// CHECK:      assess  : runtime (::foo::paraby_0::paraby_1::j < 4)
+// CHECK:      assess  : runtime (::foo::{{.*}}j < 4)

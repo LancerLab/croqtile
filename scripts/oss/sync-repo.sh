@@ -74,7 +74,7 @@ rsync -av --progress ${SYNC_DIR}/ ${OPEN_DIR}/
 
 # Configuration - Use absolute paths or paths relative to script location
 # Exclude list: works for filenames or directory names found anywhere in the tree
-EXCLUDES=("LICENSE.txt")
+EXCLUDES=("LICENSE.TXT" ".git" "extern")
 
 EXCLUDE_ARGS=()
 for i in "${!EXCLUDES[@]}"; do
@@ -84,10 +84,10 @@ for i in "${!EXCLUDES[@]}"; do
 	fi
 done
 
-find "${SYNC_DIR}" -mindepth 1 \( "${EXCLUDE_ARGS[@]}" \) -prune -o -print | sort -r | while read -r entry; do
+find "${OPEN_DIR}" -mindepth 1 \( "${EXCLUDE_ARGS[@]}" \) -prune -o -print | sort -r | while read -r entry; do
 
-	# Get the path relative to SYNC_DIR
-	relative_path="${entry#${SYNC_DIR}/}"
+	# Get the path relative to OPEN_DIR
+	relative_path="${entry#${OPEN_DIR}/}"
 
   # Check if this relative path exists in B
 	if [ ! -e "${ROOT_DIR}/$relative_path" ]; then
