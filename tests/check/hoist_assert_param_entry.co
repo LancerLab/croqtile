@@ -1,4 +1,4 @@
-// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+// RUN: choreo %target -es --runtime-check=all %s -o - | FileCheck %s
 //
 // When a buffer index is a plain function parameter with no enclosing
 // conditional guard, the assertion is classified ENTRY and emitted as a

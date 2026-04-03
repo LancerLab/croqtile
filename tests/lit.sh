@@ -265,6 +265,92 @@ abspath_dir_of() {
   fi
 }
 
+abspath_file() {
+  echo "$(abspath_dir_of "$1")/$(basename "$1")"
+}
+
+# ---- include_dir discovery mechanism ----
+#
+# A lit.cfg may call include_dir("../path") to declare that another
+# directory's tests should run under this cfg's target hooks.
+# During expand_includes() discovery the calls are collected; at
+# runtime (inside prepare()) include_dir() is a no-op.
+_DISCOVERY_MODE=0    # set to 1 only inside expand_includes
+_CURRENT_CFG_DIR=""  # cfg directory being sourced during discovery
+_PENDING_INCLUDES=() # collected "cfg_dir|rel_dir" pairs
+
+# Called from lit.cfg to declare a shared directory.
+# No-op at runtime; recorded during expand_includes() discovery.
+include_dir() {
+  [ $_DISCOVERY_MODE -eq 0 ] && return 0
+  _PENDING_INCLUDES+=("${_CURRENT_CFG_DIR}|$1")
+}
+
+# expand_includes GivenDir
+# Sources every lit.cfg under GivenDir to collect include_dir() calls.
+# For each declared directory, adds its .co/.cmt files to files_array as
+# "abs_file|cfg_dir".  Files claimed by any include are suppressed from
+# their own direct (hookless) run so each file runs exactly once per target.
+expand_includes() {
+  local given_dir="$1"
+  local abs_dir
+  abs_dir="$(abspath_dir_of "$given_dir")" || return 0
+
+  # Source all lit.cfg files in discovery mode to collect include_dir calls.
+  # HOOKS and CFG_SOURCED are reset afterward so per-file prepare() is unaffected.
+  _DISCOVERY_MODE=1
+  _PENDING_INCLUDES=()
+  local cfg_file
+  while IFS= read -r -d '' cfg_file; do
+    _CURRENT_CFG_DIR="$(abspath_dir_of "$cfg_file")"
+    CFG_SOURCED=""
+    HOOKS=""
+    . "$cfg_file" 2>/dev/null || true
+  done < <(find "$abs_dir" -name 'lit.cfg' -print0)
+  _DISCOVERY_MODE=0
+  CFG_SOURCED=""
+  HOOKS=""
+
+  # Nothing to do if no include_dir declarations were found
+  [ ${#_PENDING_INCLUDES[@]} -eq 0 ] && return 0
+
+  local -a target_entries=()
+  local -a suppressed_abs=()
+  local inc_entry cfg_dir rel_dir resolved_dir
+  for inc_entry in "${_PENDING_INCLUDES[@]}"; do
+    cfg_dir="${inc_entry%%|*}"
+    rel_dir="${inc_entry#*|}"
+    resolved_dir="$(cd "$cfg_dir" && cd "$rel_dir" 2>/dev/null && pwd)" || continue
+    while IFS= read -r -d '' f; do
+      local abs_f
+      abs_f="$(abspath_file "$f")"
+      target_entries+=("${abs_f}|${cfg_dir}")
+      suppressed_abs+=("$abs_f")
+    done < <(find "$resolved_dir" -type f \( -name '*.co' -o -name '*.cmt' \) -print0)
+  done
+
+  [ ${#target_entries[@]} -eq 0 ] && return 0
+
+  # Rebuild files_array: drop suppressed entries, then append per-target entries
+  local -a new_array=()
+  local entry abs_entry suppressed s
+  for entry in "${files_array[@]}"; do
+    abs_entry="$(abspath_file "$entry")"
+    suppressed=0
+    for s in "${suppressed_abs[@]}"; do
+      if [ "$abs_entry" = "$s" ]; then
+        suppressed=1
+        break
+      fi
+    done
+    [ $suppressed -eq 0 ] && new_array+=("$entry")
+  done
+  for entry in "${target_entries[@]}"; do
+    new_array+=("$entry")
+  done
+  files_array=("${new_array[@]}")
+}
+
 find_tests_root() {
   # usage: find_tests_root <test_path>
   # returns absolute path to nearest ancestor directory named "tests"
@@ -389,7 +475,7 @@ if ! which bc &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.31"
+echo "        Choreo SimpleLit - v0.33"
 echo "---------------------------------------"
 echo ""
 
@@ -412,6 +498,7 @@ expect_fail=
 expect_skip=
 
 max_jobs=1
+dry_run=0
 
 need_cute=0
 need_cuda=0
@@ -465,8 +552,13 @@ restore_hw_detect_cache() {
 }
 
 # Function to fill the target-specific variables
+# prepare <file> [cfg_override_dir]
+#   cfg_override_dir: when set, load the cfg chain rooted at this directory
+#   instead of the directory that contains <file>.  Used by expand_includes
+#   so that files in tests/check/ are processed with a target's lit.cfg.
 prepare() {
   local file="$1"
+  local cfg_override="${2:-}"
 
   # Validate input
   if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
@@ -485,18 +577,28 @@ prepare() {
   fi
 
   # now load the configure
-  local test_dir
-  test_dir="$(abspath_dir_of "$file")"
+  local cfg_root_dir
+  if [[ -n "$cfg_override" ]]; then
+    cfg_root_dir="$(abspath_dir_of "${cfg_override}/__sentinel__")"
+  else
+    cfg_root_dir="$(abspath_dir_of "$file")"
+  fi
 
-  if [[ -n "${CFG_CHAIN_CACHE["$test_dir"]+x}" ]]; then
-    CFG_SOURCED="${CFG_CHAIN_CACHE["$test_dir"]}"
-    HOOKS="${HOOKS_CACHE["$test_dir"]}"
+  if [[ -n "${CFG_CHAIN_CACHE["$cfg_root_dir"]+x}" ]]; then
+    CFG_SOURCED="${CFG_CHAIN_CACHE["$cfg_root_dir"]}"
+    HOOKS="${HOOKS_CACHE["$cfg_root_dir"]}"
   else
     CFG_SOURCED=""
     HOOKS=""
-    load_cfg_chain_from_tests "$file"
-    CFG_CHAIN_CACHE["$test_dir"]="$CFG_SOURCED"
-    HOOKS_CACHE["$test_dir"]="$HOOKS"
+    if [[ -n "$cfg_override" ]]; then
+      # Load the cfg chain for the override dir by passing a sentinel path
+      # whose dirname resolves to that directory.
+      load_cfg_chain_from_tests "${cfg_override}/__sentinel__"
+    else
+      load_cfg_chain_from_tests "$file"
+    fi
+    CFG_CHAIN_CACHE["$cfg_root_dir"]="$CFG_SOURCED"
+    HOOKS_CACHE["$cfg_root_dir"]="$HOOKS"
   fi
 
   local cfg_cache_key
@@ -666,14 +768,13 @@ execute_command() {
   local env_unset="$6"
   local run_env="$7"
 
-  # Replace %s with the filename
-  command=${command//%s/"$file"}
-
   # Replace 'choreo', 'copp' and 'FileCheck' with their absolute paths
   # Note: It must uses '-n' to remove comments inside host code.
   #       Or else FileCheck will check the line of "// CHECK:"
   # workaround: Use cuda_gdb instead of cuda-gdb.
   #             Or else it will be replaced to cuda-/bin/gdb
+  # IMPORTANT: %s substitution (file path) happens AFTER these sed calls to
+  # avoid the binary names (e.g. 'choreo') being matched inside the file path.
   command=$(echo "$command" | sed \
     -e "s#\bchoreo\b#$(which choreo) -n#g" \
     -e "s#\bcopp\b#$(which copp)#g" \
@@ -681,15 +782,13 @@ execute_command() {
     -e "s#\bgdb\b#${GDB_BIN}#g" \
     -e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g" \
     -e "s#%cuda_arch#-arch ${cuda_arch}#g")
-  # command=${command//choreo/"$(which choreo) -n"}
-  # command=${command//copp/"$(which copp)"}
-  # command=${command//FileCheck/"${FILECHECK}"}
-  # command=${command//gdb/"${GDB_BIN}"}
-  # command=${command//cuda-g/"${CUDA_GDB_BIN}"}
-  # command=${command//%cuda_arch/"-arch ${cuda_arch}"}
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
   run_hooks "target_cmd" "command"
+  # Strip any unresolved %target (e.g. when no target hook was registered)
+  command="${command//%target/}"
+  # Replace %s with the filename (must be after sed so the path isn't mangled)
+  command=${command//%s/"$file"}
 
   # num_tested=$(($num_tested + 1))
   # echo "num_tested before add " $(read_counter "num_tested")
@@ -702,8 +801,13 @@ execute_command() {
   command="${env_set} ${run_env} $command"
   working_command="$command"
 
-  eval "$command" 2>/dev/null
-  local exit_code=$?
+  if [ $dry_run -eq 1 ]; then
+    echo "DRYRUN: $file" >&2
+    local exit_code=0
+  else
+    eval "$command" 2>/dev/null
+    local exit_code=$?
+  fi
 
   if [ ! -z "${env_unset}" ]; then
     eval "$env_unset" 2>/dev/null
@@ -785,7 +889,7 @@ execute_command() {
 #         Handle arguments
 # ---------------------------------------"
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 [-jN] <file_or_directory>"
+    echo "Usage: $0 [-jN] [--dry-run] <file_or_directory>"
     exit 1
 fi
 
@@ -808,6 +912,10 @@ while [[ $# -gt 0 ]]; do
       save_log=true
       shift
       ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
     -*)
       # Handle invalid option
       echo "Unknown option: $1"
@@ -817,7 +925,9 @@ while [[ $# -gt 0 ]]; do
       # Handle the first positional argument (file or directory)
       if [ -d "$1" ]; then
           # If it's a directory, find all .co, .cmt(cmake test) files
-          files_array=($(find "$1" -type f -name '*.co' -o -name '*.cmt'))
+          _given_dir="$1"
+          files_array=($(find "$_given_dir" -type f -name '*.co' -o -name '*.cmt'))
+          expand_includes "$_given_dir"
       elif [ -f "$1" ]; then
           # If it's a file, add it to the array
           files_array=("$1")
@@ -932,9 +1042,14 @@ initialize_counters
 
 trap on_ctrl_c SIGINT
 
-for file in "${files_array[@]}"; do
+for _entry in "${files_array[@]}"; do
+  # Decode optional cfg_override encoded as "file|cfg_dir"
+  _cfg_override="${_entry#*|}"
+  [ "$_cfg_override" = "$_entry" ] && _cfg_override=""
+  file="${_entry%%|*}"
+
   # check requirement specified by the file
-  prepare $file
+  prepare "$file" "$_cfg_override"
 
   if [ ! -z "$expect_skip" ]; then
     echo "SKIP:  $file"

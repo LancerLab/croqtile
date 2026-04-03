@@ -342,7 +342,7 @@ bash /tmp/output.cute.result --compile-link
 
 | Directory | File Traits | Run Method |
 |---|---|---|
-| `tests/check/` | Compiler semantic checks, validated by FileCheck | `lit.sh` or manual `choreo ... \| FileCheck` |
+| `tests/check/` | Compiler semantic checks; **shared** via `include_dir` in target cfgs — run under every target's hooks | `lit.sh tests/check/` (hookless, `%target`→empty) or `lit.sh tests/` |
 | `tests/gpu/codegen/` | Codegen checks, source via `-es` + FileCheck | `lit.sh` or manual |
 | `tests/gpu/end2end/` | Full end-to-end tests, `-gs` + `--execute` | `lit.sh`, requires GPU |
 | `tests/parse/`, `tests/norm/`, etc. | Frontend checks | `lit.sh` |
@@ -350,6 +350,81 @@ bash /tmp/output.cute.result --compile-link
 | `benchmark/shapeinfer/` | Shape-inference benchmarks | `lit.sh` or manual |
 | `samples/cuda/` | CUDA sample code | Manual `-gs -t cute` + `--execute` |
 | `samples/factor/`, `samples/topscc/` | GCU sample code | Manual or `lit.sh`, requires GCU device |
+
+---
+
+## lit.sh Infrastructure Reference
+
+`tests/lit.sh` is a custom LLVM-lit–style runner. When adding tests or a new target, understand these mechanisms.
+
+### `%` Substitutions
+
+| Substitution | Replaced With | Provided By |
+|---|---|---|
+| `%s` | Current test file path | Core (always) |
+| `%cuda_arch` | `-arch <cuda_arch>` | Core (always) |
+| `%target` | `-t <backend>` (e.g. `-t cute`) | Each target's `target_cmd` hook; stripped (→ empty) when no hook registered |
+
+**When to use `%target` in a `RUN:` line:**
+Add `%target` when the test's expected output depends on which codegen backend is active (e.g., the generated runtime-check expressions differ between cute and topscc). Tests in `tests/check/` that are target-agnostic do **not** need `%target`.
+
+### `lit.cfg` — Per-Directory Target Configuration
+
+Each target directory (`tests/gpu/`, `tests/gcu/`, …) has a `lit.cfg` that registers hooks:
+
+| Hook Phase | Purpose | Example |
+|---|---|---|
+| `hw_detect` | Detect available hardware; set `device_type`, `mach`, `cuda_arch`, `gcu_arch` | `gpu_detect`, `gcu_detect` |
+| `set_archs` | Populate `REQ_TARGETS` from `REQUIRES: TARGET-XXX` | `add_gpu_arch`, `add_gcu_arch` |
+| `all_archs` | Add all known archs for a target | `add_all_gpu_archs` |
+| `target_cmd` | Perform per-target `%` substitution on RUN-line command | `gpu_command`, `gcu_command` |
+| `target_noskip` | Target-specific skip logic (e.g. require simulator) | `gcu_noskip` |
+| `target_prepare` | Target-specific setup before test runs | (rarely used) |
+
+**Minimal `lit.cfg` for a new target:**
+```bash
+my_detect() {
+  # detect hardware; set device_type="mytarget" and mach="myarch" when found
+}
+
+my_command() {
+  declare -n cmd_ref="$1"
+  cmd_ref="${cmd_ref//%target/-t mytarget}"
+}
+
+register_hook "hw_detect"  "my_detect"
+register_hook "target_cmd" "my_command"
+```
+
+### `include_dir` — Sharing Tests Across Targets
+
+A `lit.cfg` may call `include_dir("../path")` to declare that another directory's tests should run under *that target's* hooks.
+
+**Example**: `tests/gpu/lit.cfg` contains `include_dir "../check"`, meaning every file in `tests/check/` is run under GPU hooks (so `%target` → `-t cute`).
+
+Rules:
+- Files claimed by at least one `include_dir` are **suppressed** from their own direct run when running a parent directory (e.g. `lit.sh tests/`)
+- When running a subdirectory directly (`lit.sh tests/check/`), discovery mode is not active; `%target` is stripped to empty and the file runs hookless
+- If multiple targets include the same directory, each file runs once per target
+- A shared test with N RUN lines and M including targets runs N×M times total
+
+**Adding a new shared directory for a target:**
+```bash
+# in tests/mytarget/lit.cfg — add at the bottom:
+include_dir "../my_new_shared_dir"
+```
+
+### Dry-Run / Count Verification
+
+Use the `--dry-run` flag to see which files and commands would execute without running them:
+
+```bash
+./tests/lit.sh --dry-run tests/ 2>/tmp/dryrun.txt >/dev/null
+# Count check/ files (should be N× unique count, where N = number of including targets):
+grep "DRYRUN:.*check/" /tmp/dryrun.txt | sed 's|DRYRUN: ||' | sort | uniq -c | sort -rn
+# Verify no raw (hookless) check/ runs:
+grep "DRYRUN: tests/check/" /tmp/dryrun.txt   # should be 0 lines
+```
 
 ---
 

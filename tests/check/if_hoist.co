@@ -1,4 +1,4 @@
-// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+// RUN: choreo %target -es --runtime-check=all %s -o - | FileCheck %s
 
 __co__ void foo(int j, int k) {
   parallel p by 8 {

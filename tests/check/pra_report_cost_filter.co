@@ -1,4 +1,4 @@
-// RUN: choreo -es --runtime-check=low --show-assess %s -o - 2>&1 | FileCheck %s
+// RUN: choreo %target -es --runtime-check=low --show-assess %s -o - 2>&1 | FileCheck %s
 //
 // --show-assess report with --runtime-check=low.
 //

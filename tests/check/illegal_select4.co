@@ -1,4 +1,4 @@
-// RUN: choreo -es --runtime-check=all %s 2>&1 | FileCheck %s
+// RUN: choreo %target -es --runtime-check=all %s 2>&1 | FileCheck %s
 
 __co__ void foo(int xx) {
   global s32[1,2] g;
