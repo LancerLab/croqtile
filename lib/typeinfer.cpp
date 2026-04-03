@@ -717,7 +717,9 @@ bool TypeInference::Visit(AST::Expr& n) {
       cur_type = n.GetType();
       return true;
     } else if (n.op == Op::ElemOf) {
-      assert(isa<EventType>(NodeType(n)) && "only support elemof event array.");
+      auto lty = NodeType(*n.GetL());
+      if (auto aty = dyn_cast<ArrayType>(lty))
+        SetNodeType(n, aty->RemainderType(1));
       cur_type = n.GetType();
       return true;
     }

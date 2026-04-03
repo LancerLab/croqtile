@@ -2336,6 +2336,9 @@ struct ArrayType : public Type, public TypeIDProvider<ArrayType> {
   virtual const ptr<Type> SubScriptType(size_t) {
     return std::make_shared<NoValueType>();
   };
+  virtual const ptr<Type> RemainderType(size_t) {
+    return std::make_shared<NoValueType>();
+  };
 
   size_t ArrayRank() const { return dims.size(); }
 
@@ -2409,6 +2412,13 @@ struct EventArrayType final : public ArrayType,
       return std::make_shared<EventArrayType>(event->GetStorage(), arr,
                                               event->GetThreadCount());
   }
+  const ptr<Type> RemainderType(size_t remainder_count) override {
+    auto arr = RemainderDimensions(remainder_count);
+    if (arr.size() == 0)
+      return std::make_shared<EventType>(event->GetStorage());
+    else
+      return std::make_shared<EventArrayType>(event->GetStorage(), arr);
+  }
 
   size_t Dims() const override { return ArrayType::ArrayRank(); }
 
@@ -2463,6 +2473,17 @@ struct SpannedArrayType final : public ArrayType,
 
   const ptr<Type> SubScriptType(size_t subscription_count) override {
     auto arr = SubScript(subscription_count);
+    if (arr.size() == 0)
+      return std::make_shared<SpannedType>(spty->e_type, spty->GetMDSpanType(),
+                                           spty->GetStrides(),
+                                           spty->GetStorage());
+    else
+      return std::make_shared<SpannedArrayType>(
+          spty->e_type, spty->GetMDSpanType(), spty->GetStrides(),
+          spty->GetStorage(), arr);
+  }
+  const ptr<Type> RemainderType(size_t remainder_count) override {
+    auto arr = RemainderDimensions(remainder_count);
     if (arr.size() == 0)
       return std::make_shared<SpannedType>(spty->e_type, spty->GetMDSpanType(),
                                            spty->GetStrides(),

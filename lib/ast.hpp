@@ -1014,6 +1014,7 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   ptr<Identifier> id = nullptr;
   ptr<Identifier> nid = nullptr;
   ptr<MultiValues> list = nullptr;
+  ptr<MultiValues> subscriptions = nullptr;
 
   explicit SpanAs(const location& l, const ptr<Identifier>& n,
                   const ptr<Identifier>& nn, const ptr<MultiValues>& lst)
@@ -1030,6 +1031,7 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   // allow copy construction
   explicit SpanAs(const SpanAs& sa) : SpanAs(sa.LOC(), sa.id, sa.nid, sa.list) {
     assert(list && "Unexpected: span list is not provided");
+    subscriptions = sa.subscriptions;
   }
 
   void SetTypeDetail(const Shape& s) {
@@ -1043,7 +1045,10 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<SpanAs>(LOC(), id, nid, cast<MultiValues>(CloneP(list)));
+    auto c = Make<SpanAs>(LOC(), id, nid, cast<MultiValues>(CloneP(list)));
+    if (subscriptions)
+      c->subscriptions = cast<MultiValues>(CloneP(subscriptions));
+    return c;
   }
 
   void Print(std::ostream& os, const std::string& = {},
@@ -1052,7 +1057,10 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
     assert(nid && "no new span is specified.");
     assert(list && "no span_as is specified.");
 
-    os << PSTR(id) << ".span_as[";
+    os << PSTR(id);
+    if (subscriptions)
+      for (auto& v : subscriptions->AllValues()) os << "[" << PSTR(v) << "]";
+    os << ".span_as[";
     list->Print(os, " ", with_type);
     os << " ]";
 

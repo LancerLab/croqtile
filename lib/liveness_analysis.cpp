@@ -1227,6 +1227,14 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
           AddUse(current_stmt, sa->id->name);
           AddIsAlias(current_stmt, n.name_str);
           AddAlias(n.name_str, sa->id->name);
+        } else if (e->GetOp() == Op::ElemOf) {
+          // `s0 = s[xxx]`, where s is of spannedarray type
+          // Alias s0 to s conservatively
+          AddDef(current_stmt, n.name_str, true);
+          std::string base_array = AST::GetArrayBaseSymbol(*e)->name;
+          AddUse(current_stmt, base_array);
+          AddIsAlias(current_stmt, n.name_str);
+          AddAlias(n.name_str, base_array);
         } else {
           assert(false && "expecting the init_expr is a span_as.");
         }

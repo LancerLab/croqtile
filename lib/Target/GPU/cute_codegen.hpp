@@ -175,6 +175,9 @@ private:
   std::map<std::string, std::string> claimed_futs;
   std::vector<std::string> pld_checklist = {};
 
+  size_t future_count_ = 0;
+  size_t dma_count_ = 0;
+
   std::set<std::string> global_buffers; // global buffers
   bool emit_call = true;                // emit the call statement
 
@@ -334,6 +337,8 @@ private:
     symbolic_dimensions.clear();
     claimed_futs.clear();
     async_subbyte_futures.clear();
+    future_count_ = 0;
+    dma_count_ = 0;
     fty = nullptr;
     void_return = false;
     emit_call = true;
@@ -484,6 +489,11 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
+  std::string LinearizeArrayOffset(const std::string& base_expr,
+                                   const std::vector<AST::ptr<AST::Node>>& subs,
+                                   const ValueList& array_dims,
+                                   const ValueItem& elem_count,
+                                   bool is_host) const;
   std::pair<std::string, std::string>
   GetDMABufferExpr(const std::string& sym,
                    const ptr<AST::MultiValues> subscription,
