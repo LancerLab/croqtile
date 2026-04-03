@@ -1121,12 +1121,15 @@ bool ShapeInference::Visit(AST::DMA& n) {
 
     auto mss = m_sn();
     for (size_t i = 0; i < size; ++i) {
-      auto h_l_sig =
-          vn.MakeOpSign(Op::Add, GetSign(*pcfg->pad_high->ValueAt(i)),
-                        GetSign(*pcfg->pad_low->ValueAt(i)));
+      // Keep intermediate pad expressions value-numbered so downstream
+      // simplification can safely query NumSign on nested signatures.
+      auto h_l_vn =
+          vn.MakeOpNum(Op::Add, GetSign(*pcfg->pad_high->ValueAt(i)),
+                       GetSign(*pcfg->pad_low->ValueAt(i)));
+      auto pad_vn = vn.MakeOpNum(Op::Add, vn.SignNum(h_l_vn),
+                                 GetSign(*pcfg->pad_mid->ValueAt(i)));
       // now generate signature for original signature plus padding values
-      mss->Append(
-          vn.MakeOpSign(Op::Add, h_l_sig, GetSign(*pcfg->pad_mid->ValueAt(i))));
+      mss->Append(vn.SignNum(pad_vn));
     }
     // update the cur_vn
     cur_vn = vn.MakeOpNum(Op::Add, from_vn, GetOrGenValNum(mss));
