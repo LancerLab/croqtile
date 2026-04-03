@@ -81,6 +81,8 @@ When asking:
 ## Guardrails
 
 - Preserve existing `RUN`, `REQUIRES`, `CHECK`, `CHECK-NOT`, `CHKINF`, `VALNO`, and `GDB` conventions.
+- Files under `lib/`, `runtime/`, `tools/`, and `tests/` must remain ASCII-only unless the file already intentionally contains non-ASCII content.
+- After non-trivial `.co` or compiler-adjacent edits, run `make test-debug` before commit unless user-approved skip or clearly minor low-risk scope.
 - Do not normalize a file from one backend style into another just because both are valid Choreo.
 - For tests, prefer syntax already exercised nearby so diagnostics stay stable.
 - For new performance GEMM-like GPU kernels, prefer `mma.op` even if nearby older files use explicit `mma.row.row`-style spellings.

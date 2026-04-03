@@ -25,6 +25,26 @@ You are a build, test, and debugging expert for the Choreo compiler project. Cho
 - If the task is "modify compiler code and verify with a `.co` file", use `develop-compiler` for source changes and this skill for build/run validation.
 - Do not skip this skill for benchmark or end-to-end `.co` execution just because the compiler source is also being edited.
 
+## Regression Gate Before Commit
+
+- Default pre-commit regression command: `make test-debug`.
+- Treat `make test-debug` as required before committing compiler-facing changes under `lib/`, `tools/`, `runtime/`, or parser files.
+- Exception policy: you may skip `make test-debug` only for clearly minor and low-risk edits (for example docs/comments-only) or when the user explicitly asks to skip.
+- If skipped, state the reason explicitly in the final report.
+
+### Regression Log Triage After `make test-debug`
+
+- At the end of `make test-debug`, capture the emitted `Find the test result: ...` log path.
+- Query that log before summarizing results; do not rely on truncated terminal output alone.
+- Use the log to confirm the failure count from the `Failed:` line and to copy the exact `Commands to reproduce failures:` block.
+- Prefer triaging single failures from the reproduced command in the log, or by running `./tests/lit.sh path/to/test.co` for one lit test.
+- Reading the harness-generated log under `/tmp` is allowed for triage even though your own generated artifacts should stay under the workspace.
+- Example inspection commands:
+```bash
+rg '^Failed:' /tmp/choreo_log_gxf/log_YYYYMMDD_HHMMSS.txt
+sed -n '/^Commands to reproduce failures:/,$p' /tmp/choreo_log_gxf/log_YYYYMMDD_HHMMSS.txt
+```
+
 ---
 
 ## Project Build Modes
@@ -140,8 +160,17 @@ Preprocess → Parse → SEMA (Early Semantic) → NORM (Normalization) → VALN
 | `-tv=<PASS>` / `--trace-visit=<PASS>` | Trace only which nodes were visited by a pass | `AST::Program`, `AST::Parameter`, ... |
 | `-d` / `--debug` | Enable debug for **all** passes (including parser bison debug) | Extremely verbose, starting from parser tokens |
 | `-sp` / `--show-passes` | Show full pass pipeline | Prints pipeline pass list |
+| `-tp` / `--time-passes` | Show per-pass timing summary | Pass-by-pass wall time and percentage |
 | `-sa=<PASS>` / `--stop-after=<PASS>` | Stop compilation after specified pass | No final output; runs until that pass only |
 | `-dp=<PASS>` / `--disable-visit=<PASS>` | Disable one pass | Isolate issues introduced by a specific pass |
+
+#### SBE Profiling Notes
+- SBE instrumentation must be enabled at compile time via macro (for example `CHOREO_ENABLE_SBE_STATS`).
+- Use a profiling build only when needed; keep default builds without the macro for normal regression/runtime checks.
+- Example profiling rebuild:
+```bash
+CXXFLAGS='-DCHOREO_ENABLE_SBE_STATS=1' make debug
+```
 
 #### E. Feature-Specific Debug
 | Option | Description |
@@ -234,7 +263,7 @@ Choose the best compiler-option combination based on the issue type.
 ```bash
 ./choreo -es -t cute file.co -o -
 ./choreo -es -t cute -arch=sm_86 file.co -o -
-./choreo --save-temps -gs -t cute file.co -o /tmp/out.cute.result
+./choreo --save-temps -gs -t cute file.co -o build/out.cute.result
 ./choreo -pa=check -s file.co
 ```
 

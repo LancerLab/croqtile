@@ -41,7 +41,35 @@ make debug
 make test
 ```
 
+## Commit Workflow (Regression First)
+
+- Before committing compiler code changes, run `make test-debug` by default.
+- Consider `make test-debug` mandatory for non-trivial changes in `lib/`, `tools/`, parser/semantic passes, or codegen.
+- You may skip only when change scope is clearly minor/low-risk (for example comments/docs only) or the user explicitly approves skipping.
+- If skipped, call this out in the final summary with a brief justification.
+- After `make test-debug`, read the emitted `Find the test result: ...` log path and use that log to report the exact failure count and reproduction commands.
+- When failures exist, prefer reproducing one failing test from the logged command or with `./tests/lit.sh path/to/test.co` before changing source again.
+
 ## Symbolic (sbe) Infrastructure Conventions
+
+### SBE performance work: preferred architecture
+- For reusable hashing/caching behavior across SBE nodes, prefer an intermediate base class (for example `HashedExpression`) rather than duplicating cache fields in each operation node.
+- Keep hash logic structural (combine opcode and operand hashes), and avoid `ToString()`-based hashing for hot paths.
+- Memoized normalization should live on expression objects and must preserve semantics (never cache partial/intermediate states).
+
+### SBE profiling and instrumentation (compile-time gated)
+- Any SBE profiling counters must be conditionally compiled under a macro gate (for example `CHOREO_ENABLE_SBE_STATS`).
+- The default build must keep profiling off and near-zero overhead.
+- New counters should include at least:
+  - symbolic-expression objects created
+  - normalize call count
+  - normalize iteration count
+  - hash call count
+- Prefer macro wrappers like `CHOREO_SBE_STATS_INC(field)` so instrumentation callsites are easy to audit and can compile out fully.
+- For profiling builds, pass a compile define when rebuilding, for example:
+```bash
+CXXFLAGS='-DCHOREO_ENABLE_SBE_STATS=1' make debug
+```
 
 ### Use sbe for all value/offset computations in codegen
 - `sbe::nu(n)` for integer constants, `sbe::sym("scoped::name")` for symbolic vars.
@@ -78,7 +106,7 @@ if (auto tid = AST::GetIdentifier(tiler_node)) {
 ## Code Style Rules (MANDATORY)
 
 ### ASCII-only source files
-- ALL source files (`lib/`, `tools/`, `tests/`) must contain only ASCII characters (0x00-0x7F).
+- ALL source files (`lib/`, `runtime/`, `tools/`, `tests/`) must contain only ASCII characters (0x00-0x7F).
 - Do NOT use Unicode in comments, strings, or identifiers: no em-dashes (`--` not `--`), no right arrows (`->` not `-->`), no ellipsis (`...` not `...`), no `x` for multiplication.
 - After editing, verify with:
 ```bash

@@ -25,7 +25,16 @@ You are a feature-development expert for the Choreo compiler project. Choreo is 
 - Avoid AI-sounding writing/code style; keep output natural and project-consistent.
 - For equal functionality, prefer the simpler and clearer implementation.
 - Keep changes minimal, focused, and strictly scoped to the requested feature.
+- Keep source files ASCII-only by default, especially under `lib/`, `runtime/`, `tools/`, and `tests/`, unless a file already intentionally requires non-ASCII bytes.
 - Never use `/tmp` for generated/intermediate outputs; always write temporary artifacts inside the current build workspace directory, (`./build/`).
+
+## Regression Gate Before Commit
+
+- Default rule: run `make test-debug` before committing feature changes.
+- Required unless the edit is clearly minor and low-risk (for example docs/comments only) or the user explicitly asks to skip.
+- If skipped, include the explicit reason in the final handoff.
+- After the run, inspect the emitted `Find the test result: ...` log file to confirm the `Failed:` count and extract the `Commands to reproduce failures:` section.
+- Use that log to drive focused follow-up runs instead of rerunning the whole suite for each failure.
 
 ---
 
