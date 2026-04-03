@@ -246,15 +246,14 @@ public:
 
   void ReportSymbolType(const std::string& name, const ptr<Type>& ty) {
     if (isa<SpannedType>(ty))
-      dbgs() << color::out(color::kBoldCyan) << "Symbol:    "
-             << color::out(color::kReset);
+      dbgs() << color::out(color::kBoldCyan)
+             << "Symbol:    " << color::out(color::kReset);
     else if (isa<FutureType>(ty))
-      dbgs() << color::out(color::kBoldMagenta) << "Future:    "
-             << color::out(color::kReset);
-    dbgs() << name << color::out(color::kDim) << ", Type: "
-           << color::out(color::kReset)
-           << color::colorizeType(PSTR(ty), color::stdoutHasColor())
-           << "\n";
+      dbgs() << color::out(color::kBoldMagenta)
+             << "Future:    " << color::out(color::kReset);
+    dbgs() << name << color::out(color::kDim)
+           << ", Type: " << color::out(color::kReset)
+           << color::colorizeType(PSTR(ty), color::stdoutHasColor()) << "\n";
   }
 };
 

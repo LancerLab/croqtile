@@ -3753,7 +3753,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         t_buf_expr_with_offset =
             "(" + t_buf_expr + " + (" + t_mds_offset + "))";
       }
-      // tma copy can be:
+      // async tma copy can be:
       // 1. event only and non-warpspec
       // 2. future only and non-warpspec
       // 3. event only and warpspec
@@ -6287,6 +6287,10 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
 #endif
     auto g_shape = gmem_ty->GetShape();
     auto g_stride = gmem_ty->GetStrides();
+    if (auto idx = g_ca->IndexOfLastSpanAs()) {
+      g_shape = g_ca->OpAt(*idx)->GetBlockShape();
+      g_stride = g_ca->OpAt(*idx)->GetBlockStrides();
+    }
     auto t_shape = g_ca->GetBlockShape();
     auto map_name = desc.GetName() + "_tensor_map";
 

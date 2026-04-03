@@ -80,8 +80,7 @@ public:
 
   void Error(const location& loc, const std::string& error_message) {
     errs() << loc << ": ";
-    errs() << color::err(color::kRed)
-           << "error: " << color::err(color::kReset);
+    errs() << color::err(color::kRed) << "error: " << color::err(color::kReset);
     errs() << error_message << std::endl;
     std::exit(EXIT_FAILURE);
   }

@@ -2380,7 +2380,8 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
         } else if (isa<BoundedITupleType>(type)) {
           assert(e->Opts().HasVals() &&
                  "BoundedITupleType print arg missing symbolic vals");
-          auto [format, args] = GenFormatAndArgsFromValueList(e->Opts().GetVals());
+          auto [format, args] =
+              GenFormatAndArgsFromValueList(e->Opts().GetVals());
           print_format += "{" + format + "}";
           print_args += args + ", ";
         } else if (isa<AddrType>(type)) {

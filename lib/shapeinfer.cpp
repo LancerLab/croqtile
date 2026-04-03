@@ -4,6 +4,25 @@ using namespace Choreo::valno;
 
 namespace Choreo {
 
+static ptr<Type> PreserveDeclaredMutability(const ptr<Type>& inferred,
+                                            const ptr<Type>& declared) {
+  if (!inferred || !declared || !IsMutable(*declared)) return inferred;
+
+  if (auto sty = dyn_cast<ScalarType>(inferred)) return sty->Clone(true);
+  if (IsActualBoundedIntegerType(inferred)) return MakeIntegerType(true);
+
+  return inferred;
+}
+
+static ptr<Type> ProjectSelectStorage(const ptr<Type>& ty) {
+  if (auto sty = dyn_cast<SpannedType>(ty)) {
+    auto nty = sty->Clone();
+    cast<SpannedType>(nty)->SetStorage(ProjectStorage(sty->GetStorage()));
+    return nty;
+  }
+  return ty;
+}
+
 void ShapeInference::InvalidateVisitorValNOs() {
   cur_vn.Invalidate();
   cur_mdspan_vn.Invalidate();
@@ -492,7 +511,10 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
       DefineASymbol(name, NodeType(n));
       return true;
     }
-    nty = NodeType(n);
+    nty = PreserveDeclaredMutability(ShadowTypeStorage(NodeType(*n.init_expr)),
+                                     NodeType(n));
+    if (auto sty = GetSpannedType(nty); sty && sto != Storage::NONE)
+      sty->SetStorage(sto);
     if (GetSpannedType(nty)) {
       cur_mdspan_vn = GetValNo(*n.init_expr, VNKind::VNK_MDSPAN);
       assert(cur_mdspan_vn.IsValid() && "expecting a valid mdspan valno.");
@@ -617,8 +639,8 @@ bool ShapeInference::Visit(AST::Assignment& n) {
   // if assigned to a mutable variable, do not re-define
   if (IsMutable(*NodeType(*n.da->data))) return true;
 
-  // this is the un-type-annotated declaration
-  auto nty = n.value->GetType();
+  // Use the inferred RHS type from this pass so reshaped spans keep strides.
+  auto nty = ShadowTypeStorage(NodeType(*n.value));
   DefineASymbol(n.GetName(), nty);
 
   auto name = n.GetName();
@@ -1762,7 +1784,7 @@ bool ShapeInference::Visit(AST::Select& n) {
     auto s0 = cast<AST::Expr>(n.expr_list->ValueAt(0));
     auto s0ty = NodeType(*s0);
     if (s0ty && s0ty->HasSufficientInfo()) {
-      SetNodeType(n, s0ty);
+      SetNodeType(n, ProjectSelectStorage(s0ty));
     } else {
       cur_mdspan_vn = GetOnlyValueNumber(*n.expr_list, VNKind::VNK_MDSPAN);
       // handle dataof expr (TODO: any better idea?)
@@ -1771,7 +1793,7 @@ bool ShapeInference::Visit(AST::Select& n) {
                             ", type0: " + PSTR(s0ty));
         return false;
       }
-      auto nty = NodeType(*n.expr_list->ValueAt(0))->Clone();
+      auto nty = ProjectSelectStorage(NodeType(*n.expr_list->ValueAt(0)));
       SetNodeType(n, nty);
     }
     ast_vn.Copy(s0.get(), &n, VNKind::VNK_MDSPAN);

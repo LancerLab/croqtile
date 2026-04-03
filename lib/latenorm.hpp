@@ -347,8 +347,7 @@ public:
                 mv_node->Opts().SetVals(sv.GetVals());
               } else if (bv_map.count(sname)) {
                 ValueList mv_vals;
-                for (auto& m : bv_map.at(sname))
-                  mv_vals.push_back(sbe::sym(m));
+                for (auto& m : bv_map.at(sname)) mv_vals.push_back(sbe::sym(m));
                 mv_node->Opts().SetVals(mv_vals);
               }
             }
