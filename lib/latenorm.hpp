@@ -347,8 +347,7 @@ public:
                 mv_node->Opts().SetVals(sv.GetVals());
               } else if (bv_map.count(sname)) {
                 ValueList mv_vals;
-                for (auto& m : bv_map.at(sname))
-                  mv_vals.push_back(sbe::sym(m));
+                for (auto& m : bv_map.at(sname)) mv_vals.push_back(sbe::sym(m));
                 mv_node->Opts().SetVals(mv_vals);
               }
             }
@@ -506,7 +505,11 @@ public:
         // Note: Later passes only cares about the type. So it is possible to
         // ignore the syntax struct 'DataType'.
         auto var = AST::Make<AST::NamedVariableDecl>(n.LOC(), anon_sym);
-        var->SetType(sty);
+        auto v_sty = cast<SpannedType>(sty->CloneImpl());
+        // Note: Only GLOBAL buffer is allowed
+        if (v_sty->GetStorage() == Storage::DEFAULT)
+          v_sty->SetStorage(Storage::GLOBAL);
+        var->SetType(v_sty);
 
         if (sty->GetStorage() == Storage::GLOBAL) {
           // it is a global, must not be inside parallel_by

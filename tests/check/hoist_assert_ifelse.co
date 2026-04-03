@@ -1,4 +1,4 @@
-// RUN: choreo -es --runtime-check=all %s -o - | FileCheck %s
+// RUN: choreo %target -es --runtime-check=all %s -o - | FileCheck %s
 //
 // Verify that runtime assertions are emitted inside their enclosing if/else
 // guards rather than hoisted to function entry.  Hoisting would cause false

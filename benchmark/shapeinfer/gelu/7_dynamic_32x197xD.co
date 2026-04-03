@@ -7,7 +7,7 @@
 
 __co__ auto GELU(f32 [32, 197, embed_dim] i) {
   f32 [i.span] o;
-  parallel p by 8 : local {
+  parallel p by 8 : thread {
     foreach x in [4] {
       if (embed_dim < 512) {
         l = dma.copy i.chunkat(p#x, _, _) => local;

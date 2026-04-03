@@ -1,4 +1,5 @@
 #include "pipeline.hpp"
+#include "symbexpr.hpp"
 #include "active_threads.hpp"
 #include "codegen_prepare.hpp"
 #include "colors.hpp"
@@ -14,6 +15,7 @@
 #include "typeinfer.hpp"
 #include "visualize.hpp"
 #include <iomanip>
+#include <chrono>
 
 using namespace Choreo;
 
@@ -34,12 +36,26 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
   // verify the input
   if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
 
+  const bool do_time = CCtx().TimePasses();
+  std::vector<PassTimingEntry> timings;
+  auto wall_start = std::chrono::steady_clock::now();
+  bool pass_failed = false;
+  if (do_time) sbe_stats().reset();
+
   for (auto& ps : pl) {
     if ((ps.pred && ps.pred()) || !ps.pred) {
       if (ps.v) {
-        if (!ps.v->RunOnProgram(root)) {
+        auto t0 = std::chrono::steady_clock::now();
+        bool pass_ok = ps.v->RunOnProgram(root);
+        if (do_time) {
+          auto t1 = std::chrono::steady_clock::now();
+          double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+          timings.push_back({ps.v->GetName(), ms});
+        }
+        if (!pass_ok) {
           state = ps.v->Status();
-          return false; // abend immediately
+          pass_failed = true;
+          break; // stop pipeline; timing printed below
         }
         symtab = ps.v->SymTab();
         // TODO: force abend when failing on verifiers
@@ -48,9 +64,17 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
       if (ps.cond_action) ps.cond_action(*this);
     }
 
-    if (abend) return false;
+    if (abend) break;
     if (ps.action) ps.action(*this);
   }
+
+  if (do_time) {
+    auto wall_end = std::chrono::steady_clock::now();
+    double total_ms = std::chrono::duration<double, std::milli>(wall_end - wall_start).count();
+    PrintPassTimings(timings, total_ms);
+  }
+
+  if (abend || pass_failed) return false;
 
   if (CCtx().PrintStats()) {
     const auto& s = CCtx().GetAssessmentStats();
@@ -163,4 +187,46 @@ ASTPipeline& ASTPipeline::Get() {
   std::call_once(init_flag,
                  []() { instance = std::make_unique<ASTPipeline>(); });
   return *instance;
+}
+
+void ASTPipeline::PrintPassTimings(
+    const std::vector<PassTimingEntry>& timings, double total_ms) const {
+  const char* sep =
+      "===-------------------------------------------------------------------"
+      "----===";
+  errs() << "\n"
+         << sep << "\n"
+         << "                      ... Pass Execution Timing ...\n"
+         << sep << "\n";
+  errs() << std::right << std::setw(10) << "Time (ms)" << "  " << std::setw(6)
+         << "  %" << "  " << "Pass\n";
+  errs() << std::string(40, '-') << "\n";
+  for (const auto& e : timings) {
+    double pct = total_ms > 0 ? (e.ms / total_ms) * 100.0 : 0.0;
+    errs() << std::right << std::setw(10) << std::fixed << std::setprecision(2)
+           << e.ms << "  " << std::setw(5) << std::fixed
+           << std::setprecision(1) << pct << "%"
+           << "  " << e.name << "\n";
+  }
+  errs() << std::string(40, '-') << "\n";
+  errs() << std::right << std::setw(10) << std::fixed << std::setprecision(2)
+         << total_ms << "  " << std::setw(5) << "100.0"
+         << "%"
+         << "  " << "Total\n";
+  errs() << sep << "\n";
+  // SBE stats
+  const auto& ss = sbe_stats();
+  if (ss.normalize_calls > 0) {
+    errs() << "\n"
+           << sep << "\n"
+           << "                      ... SBE Statistics ...\n"
+           << sep << "\n";
+    errs() << "  Normalize() calls:      " << ss.normalize_calls << "\n";
+    errs() << "  Normalize() iterations:  " << ss.normalize_iterations << "\n";
+    errs() << "  Avg iterations/call:     "
+           << std::fixed << std::setprecision(2)
+           << (double)ss.normalize_iterations / ss.normalize_calls << "\n";
+    errs() << "  BinaryOp Hash() calls:   " << ss.hash_calls << "\n";
+    errs() << sep << "\n";
+  }
 }

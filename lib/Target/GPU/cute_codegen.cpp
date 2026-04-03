@@ -253,6 +253,24 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   return nullptr;
 }
 
+std::string CuteCodeGen::LinearizeArrayOffset(
+    const std::string& base_expr, const std::vector<ptr<AST::Node>>& subs,
+    const ValueList& array_dims, const ValueItem& elem_count,
+    bool is_host) const {
+  assert(subs.size() <= array_dims.size());
+  std::string idx;
+  for (size_t i = 0; i < subs.size(); ++i) {
+    if (idx.empty())
+      idx = ExprSTR(subs[i], is_host);
+    else
+      idx = "(" + idx + ")*" + ValueSTR(array_dims[i]) + "+" +
+            ExprSTR(subs[i], is_host);
+  }
+  for (size_t i = subs.size(); i < array_dims.size(); ++i)
+    idx = "(" + idx + ")*" + ValueSTR(array_dims[i]);
+  return base_expr + " + (" + idx + ")*(" + ValueSTR(elem_count) + ")";
+}
+
 std::pair<std::string, std::string>
 CuteCodeGen::GetDMABufferExpr(const std::string& sym,
                               const ptr<AST::MultiValues> subscription,
@@ -1716,14 +1734,23 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
             enable_debug_rtti && !is_internal_spanned;
         std::string raw_sym = use_user_visible_debug_sym ? "__raw_" + sym : sym;
 
+        auto tty = GetSymbolType(sa->id->name);
+        auto base_dev = ssm.DeviceName(InScopeName(sa->id->name));
+        std::string base_expr =
+            isa<FutureType>(tty) ? base_dev + ".data()" : base_dev;
+        if (sa->subscriptions && sa->subscriptions->Count() > 0) {
+          auto sat = dyn_cast<SpannedArrayType>(tty);
+          assert(sat && "span_as with subscriptions requires array type.");
+          auto subs = sa->subscriptions->AllValues();
+          std::vector<ptr<AST::Node>> sv(subs.begin(), subs.end());
+          base_expr =
+              LinearizeArrayOffset(base_expr, sv, sat->Dimensions(),
+                                   sty->GetShape().ElementCountValue(), false);
+        }
         ds << d_indent << "auto* " << raw_sym << " = ";
         ds << "static_cast<"
-           << NameBaseType(dyn_cast<SpannedType>(nty)->ElementType()) << "*>(";
-        auto tty = GetSymbolType(sa->id->name);
-        if (isa<FutureType>(tty))
-          ds << sa->id->name << ".data());\n";
-        else
-          ds << sa->id->name << ");\n";
+           << NameBaseType(dyn_cast<SpannedType>(nty)->ElementType()) << "*>("
+           << base_expr << ");\n";
         if (use_user_visible_debug_sym) {
           std::vector<std::string> shape_exprs;
           shape_exprs.reserve(sty->Dims());
@@ -1858,6 +1885,10 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       auto type_modifiers = (sto == Storage::SHARED ? "__shared__ " : "");
 
       if (!CCtx().MemReuse()) {
+        if (n.HasNote("ref"))
+          Error1(
+              n.LOC(),
+              "buffer reference is enabled only when memory reuse is enabled.");
         ds << d_indent << type_modifiers << bts << " " << sym;
         for (const auto& dim : GetArrayDimensions(nty))
           ds << "[" << ValueSTR(dim) << "]";
@@ -1896,11 +1927,16 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
            << "(" << reuse << " + " << offset << ");\n";
       } else {
         // the buffer is not reused
-        // which means that it is declared but never used.
-        // TODO: should we DCE the unused buffer?
         assert(!n.HasNote("offset"));
-        ds << d_indent << type_modifiers << bts << " " << sym << "["
-           << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        if (n.HasNote("ref")) {
+          ds << d_indent << bts << "* " << sym << " = (" << bts << "*)("
+             << ExprSTR(n.init_expr, false) << ");\n";
+        } else {
+          // The buffer is declared but never used.
+          // TODO: should we DCE the unused buffer?
+          ds << d_indent << type_modifiers << bts << " " << sym << "["
+             << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        }
       }
     };
 
@@ -2818,18 +2854,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       return n.future;
 
     auto future_name = n.future;
-    static size_t future_count = 0;
-    static size_t dma_count = 0;
 
     auto cp_atom =
-        GetCopyAtomName(is_tma, (is_tma ? tma_future_count : dma_count));
-    // claim the date transfer engine
+        GetCopyAtomName(is_tma, (is_tma ? tma_future_count : dma_count_));
     if (!is_tma && is_async) {
       ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
     }
 
     if (future_name.empty()) {
-      future_name = "__choreo_anon_fut__" + std::to_string(future_count);
+      future_name = "__choreo_anon_fut__" + std::to_string(future_count_);
     } else {
       claimed_futs.emplace(InScopeName(n.future), cp_atom);
       auto fsty = GetSpannedType(GetSymbolType(n.future));
@@ -2840,11 +2873,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ssm.MapDeviceSymbol(InScopeName(n.future) + ".mdata",
                             n.future + ".mdata()");
     }
-    future_count++;
+    future_count_++;
     if (is_tma)
       ++tma_future_count;
     else
-      ++dma_count;
+      ++dma_count_;
 
     ds << d_indent << "future " << future_name;
     ds << "(\"" << n.future << "\", " << n.LOC().begin.line << ", "
@@ -2859,7 +2892,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ds << d_indent << future_name << ".set_atom(&" << cp_atom << ");\n";
       ds << d_indent << future_name << ".set_ring(" << device_fn
          << "__ring__);\n";
-      ds << d_indent << future_name << ".id = " << future_count << ";\n";
+      ds << d_indent << future_name << ".id = " << future_count_ << ";\n";
     }
 
     return future_name;
@@ -3753,7 +3786,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         t_buf_expr_with_offset =
             "(" + t_buf_expr + " + (" + t_mds_offset + "))";
       }
-      // tma copy can be:
+      // async tma copy can be:
       // 1. event only and non-warpspec
       // 2. future only and non-warpspec
       // 3. event only and warpspec
@@ -5059,11 +5092,32 @@ bool CuteCodeGen::Visit(AST::Rotate& n) {
     choreo_unreachable(
         "rotate is only support in device side(inside parallel-by)!");
 
-  ds << d_indent << "choreo::rotate(";
-  int i = 0;
   for (auto& id : n.GetIds()) {
     assert(isa<FutureType>(NodeType(*id)) &&
            "only rotating futures are supported.");
+    auto ident = cast<AST::Identifier>(id);
+    auto scoped_name = InScopeName(ident->name);
+    if (!claimed_futs.count(scoped_name)) {
+      auto cp_atom = GetCopyAtomName(false, dma_count_);
+      ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
+      ds << d_indent << "future " << ident->name << "(\"" << ident->name
+         << "\", " << id->LOC().begin.line << ", " << id->LOC().begin.column
+         << ");\n";
+      ds << d_indent << ident->name << ".set_atom(&" << cp_atom << ");\n";
+      ds << d_indent << ident->name << ".set_ring(" << device_fn
+         << "__ring__);\n";
+      future_count_++;
+      ds << d_indent << ident->name << ".id = " << future_count_ << ";\n";
+      ++dma_count_;
+      claimed_futs.emplace(scoped_name, cp_atom);
+      ssm.MapDeviceSymbol(scoped_name, ident->name);
+      ssm.MapDeviceSymbol(scoped_name + ".data", ident->name + ".data()");
+    }
+  }
+
+  ds << d_indent << "choreo::rotate(";
+  int i = 0;
+  for (auto& id : n.GetIds()) {
     if (i++ > 0) ds << ", ";
     ds << ExprSTR(id, false);
   }
@@ -5131,9 +5185,11 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
   };
 
   for (auto& t : n.GetTargets()) {
-    auto tty = NodeType(*t);
     auto expr = cast<AST::Expr>(t);
     bool is_array_ref = (expr->op == Op::ElemOf);
+    auto tty = is_array_ref
+                   ? GetSymbolType(AST::GetArrayBaseSymbol(*expr)->name)
+                   : NodeType(*t);
 
     if (isa<FutureType>(tty)) {
       assert(expr->GetSymbol());
@@ -5268,10 +5324,45 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         EndEventCritical(guarded);
       } break;
       case Storage::SHARED: {
-        bool guarded = BeginEventCritical();
-        ds << d_indent << ExprSTR(t, false) << ".wait(" << ExprSTR(t, false)
-           << ".arrive()); // wait event(barrier)\n";
-        EndEventCritical(guarded);
+        std::string base_name;
+        if (is_array_ref) {
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          base_name = UnScopedName(bid->name);
+        } else {
+          base_name = UnScopedName(expr->GetSymbol()->name);
+        }
+        bool is_cluster_event = cluster_trigger_events_.count(base_name) > 0;
+
+        if (is_cluster_event) {
+          bool cluster_wait_guarded =
+              IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4 &&
+              !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
+          if (cluster_wait_guarded) {
+            ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+            IncrDeviceIndent();
+          }
+          if (is_array_ref) {
+            std::string bar_expr = ExprSTR(t, false);
+            std::string phase_expr =
+                base_name + "__phase" + bar_expr.substr(base_name.size());
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity(&" << bar_expr
+               << ", " << phase_expr << ");\n";
+            ds << d_indent << phase_expr << " ^= 1;\n";
+          } else {
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity(&"
+               << ExprSTR(t, false) << ", " << base_name << "__phase);\n";
+            ds << d_indent << base_name << "__phase ^= 1;\n";
+          }
+          if (cluster_wait_guarded) {
+            DecrDeviceIndent();
+            ds << d_indent << "}\n";
+          }
+        } else {
+          bool guarded = BeginEventCritical();
+          ds << d_indent << ExprSTR(t, false) << ".wait(" << ExprSTR(t, false)
+             << ".arrive()); // wait event(barrier)\n";
+          EndEventCritical(guarded);
+        }
       } break;
       default:
         choreo_unreachable("unsupported event storage '" +
@@ -5353,7 +5444,10 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
     bool is_array_ref = (expr->op == Op::ElemOf);
     assert(IsSymbolOrArrayRef(*f) &&
            "expect either symbol or array reference.");
-    if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
+    auto fty = is_array_ref
+                   ? GetSymbolType(AST::GetArrayBaseSymbol(*expr)->name)
+                   : NodeType(*f);
+    if (auto ety = dyn_cast<EventArrayType>(fty)) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         // TODO: make & into OpExprSTR?
@@ -5466,7 +5560,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           break;
         }
       }
-    } else if (auto ety = dyn_cast<EventType>(NodeType(*f))) {
+    } else if (auto ety = dyn_cast<EventType>(fty)) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         hs << h_indent << "choreo::abend_true(cudaMemset(&" << ExprSTR(f, true)
@@ -5493,10 +5587,34 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           break;
         }
         case Storage::SHARED: {
-          if (!recent_tma_tx_bytes.empty() && IsWarpSpecActive()) {
-            ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
-               << ExprSTR(f, false) << ", 1, " << SumRecentTMATxBytesExpr()
-               << "); // trigger event(barrier)\n";
+          bool is_cluster_trigger = n.IsClusterScope();
+
+          if (is_cluster_trigger) {
+            ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+            IncrDeviceIndent();
+            ds << d_indent
+               << "for (uint32_t __cta = 0; __cta < "
+                  "choreo::tma_cluster_dim(); ++__cta) {\n";
+            IncrDeviceIndent();
+            ds << d_indent << "choreo::tma_mbarrier_arrive_cluster(&"
+               << ExprSTR(f, false) << ", __cta);\n";
+            DecrDeviceIndent();
+            ds << d_indent << "}\n";
+            DecrDeviceIndent();
+            ds << d_indent << "}\n";
+          } else if (!recent_tma_tx_bytes.empty() && IsWarpSpecActive()) {
+            auto tx_bytes_expr = SumRecentTMATxBytesExpr();
+            bool conditional_tx =
+                !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
+            if (conditional_tx) {
+              ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
+                 << ExprSTR(f, false) << ", 1, __CHOREO_GROUPX4_SINGLE__ ? "
+                 << tx_bytes_expr << " : 0); // trigger event(barrier)\n";
+            } else {
+              ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
+                 << ExprSTR(f, false) << ", 1, " << tx_bytes_expr
+                 << "); // trigger event(barrier)\n";
+            }
             recent_tma_tx_bytes.clear();
           } else {
             ds << d_indent << "(void)" << ExprSTR(f, false)
@@ -5505,7 +5623,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           break;
         }
         default:
-          choreo_unreachable("unsupported event array storage '" +
+          choreo_unreachable("unsupported event storage '" +
                              STR(ety->GetStorage()) + "' to trigger.");
           break;
         }
@@ -6287,6 +6405,10 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
 #endif
     auto g_shape = gmem_ty->GetShape();
     auto g_stride = gmem_ty->GetStrides();
+    if (auto idx = g_ca->IndexOfLastSpanAs()) {
+      g_shape = g_ca->OpAt(*idx)->GetBlockShape();
+      g_stride = g_ca->OpAt(*idx)->GetBlockStrides();
+    }
     auto t_shape = g_ca->GetBlockShape();
     auto map_name = desc.GetName() + "_tensor_map";
 
@@ -7099,8 +7221,26 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         } else
           oss << OpExprSTR(r, parent_op, is_left_child, is_host);
       } else if (expr->GetOp() == Op::ElemOf) {
-        oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
-            << OpExprSTR(expr->GetR(), "", true, is_host) << "]";
+        auto base_id = AST::GetArrayBaseSymbol(*expr);
+        auto base_ty = GetSymbolType(base_id->name);
+        if (auto sat = dyn_cast<SpannedArrayType>(base_ty);
+            sat && CCtx().MemReuse() && !e->HasNote("mma_frag")) {
+          std::vector<ptr<AST::Node>> subscripts;
+          ptr<AST::Expr> cur = expr;
+          while (cur->GetOp() == Op::ElemOf) {
+            subscripts.push_back(cur->GetR());
+            if (isa<AST::Identifier>(cur->GetL())) break;
+            cur = cast<AST::Expr>(cur->GetL());
+          }
+          std::reverse(subscripts.begin(), subscripts.end());
+          auto base_dev = ssm.DeviceName(InScopeName(base_id->name));
+          oss << LinearizeArrayOffset(base_dev, subscripts, sat->Dimensions(),
+                                      sat->spty->GetShape().ElementCountValue(),
+                                      is_host);
+        } else {
+          oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
+              << OpExprSTR(expr->GetR(), "", true, is_host) << "]";
+        }
       } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare() ||
                  expr->isBitwise()) {
         auto& l = expr->GetL();

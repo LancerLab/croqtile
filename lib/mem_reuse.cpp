@@ -235,6 +235,7 @@ bool MemReuse::AfterVisitImpl(AST::Node& n) {
 bool MemReuse::Visit(AST::NamedVariableDecl& n) {
   if (isa<AST::Select>(n.init_expr)) return true;
   if (n.HasNote("spm")) return true;
+  if (n.HasNote("ref")) return true;
   auto ty = GetSymbolType(n.name_str);
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     auto sto = sty->GetStorage();

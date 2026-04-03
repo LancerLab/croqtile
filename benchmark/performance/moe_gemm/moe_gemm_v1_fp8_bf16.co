@@ -6,76 +6,67 @@
 #define H800_PCIE_PEAK_F16_TFLOPS 1513
 #define H800_PCIE_PEAK_F8_TFLOPS 3026
 
-// Tunable defaults for auto-tuning/profiling workflows.
-// NOTE: M64N128K16 can reduce accumulated error, but slower than N256 in tiling.
-// this may suggest we must have multi warpgroups to distribute over M dims
-#define MATMUL_WARP_M 64
-#define MATMUL_WARP_N 128
-#define MATMUL_WARP_K 32
+#define WARP_M 64
+#define WARP_N 128
+#define WARP_K 32
+#define TILE_K 128
 
-#define MATMUL_TILE_M 64
-#define MATMUL_TILE_N 128
-#define MATMUL_TILE_K 128
-
-#define MATMUL_SWIZ 128
-
-#if MATMUL_WARP_K != 32
-#error "MATMUL_WARP_K must be 32 for f8 WGMMA constraints"
+#if WARP_K != 32
+#error "WARP_K must be 32 for f8 WGMMA constraints"
 #endif
 
-#if MATMUL_TILE_M != MATMUL_WARP_M
-#error "MATMUL_TILE_M must equal MATMUL_WARP_M"
-#endif
-
-#define MATMUL_DEFAULT_TOKENS 512
+#define DEFAULT_TOKENS 512
 #define TOPK 8
-#define MATMUL_DEFAULT_M (MATMUL_DEFAULT_TOKENS * TOPK)
-#define MATMUL_DEFAULT_N 512
-#define MATMUL_DEFAULT_K 2048
+#define DEFAULT_M (DEFAULT_TOKENS * TOPK)
+#define DEFAULT_N 512
+#define DEFAULT_K 2048
 
 #define EXPERTS 256
+#define min(a, b) (((a) < (b)) ? (a) : (b))
 
 __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
                    global f32 [M, DIV_BLK_K] scale_a,
-                   global f8_e4m3 [EXPERT_N, K] rhs,
-                   global f32 [EXPERT_DIV_BLK_N, DIV_BLK_K] scale_b,
+                   global f8_e4m3 [EXPERTS, N, K] rhs,
+                   global f32 [EXPERTS, DIV_BLK_N, DIV_BLK_K] scale_b,
                    global s32 [EXPERTS1] expert_offsets,
                    global bf16 [M, N] output, stream s) {
-
-  parallel.async {eid, block_n} by [EXPERTS, cdiv(N, MATMUL_WARP_N)] : block
-  parallel by 1 : group-4
-  parallel t by 128 : thread {
-    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] sA; // 64 * 128 = 8KB, one warp writes
-    shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] sB; // 128 * 128 = 16KB, one warp writes
+  parallel.async {eid, block_n} by [EXPERTS, cdiv(N, WARP_N)] : block
+  parallel by 1 : group-4 {
+    shared f8_e4m3 [WARP_M, TILE_K] sA; // 64 * 128
+    shared f8_e4m3 [WARP_N, TILE_K] sB; // 128 * 128
 
     s32 seg_start = expert_offsets.at(eid);
     s32 seg_end = expert_offsets.at(eid + 1);
     s32 seg_length = seg_end - seg_start;
-    __cpp__("  if (seg_end - seg_start <= 0) return;\n\n");
 
-    foreach {iv_m} in [cdiv(seg_length, MATMUL_WARP_M)] {
-      TILE_M = (MATMUL_WARP_M < (seg_length - iv_m * MATMUL_WARP_M) )? MATMUL_WARP_M : seg_length - iv_m * MATMUL_WARP_M;
+    if (seg_length > 0) {
+    foreach {iv_m} in [cdiv(seg_length, WARP_M)] {
+      ROWS_M = min(WARP_M, seg_length - iv_m * WARP_M);
       mc = mma.fill.f32 0.0f;
-      foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-        dma.copy.swiz<128>.zfill
-          lhs.view(TILE_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K)
-            => sA; // [TILE_M, 128] => [64, 128]
-        tma.copy.swiz<128>
-          rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(eid # block_n, iv_k) => sB;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+        dma.copy.swiz<128>.zfill lhs
+          .view(ROWS_M, TILE_K)
+          .from(seg_start + iv_m * WARP_M, iv_k * TILE_K) 
+          => sA;
+        tma.copy.swiz<128> rhs.span_as(EXPERTS * N, K)
+          .subspan(WARP_N, TILE_K)
+          .at(eid # block_n, iv_k)
+          => sB;
 
-        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+        foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
           ma = mma.load.swiz<128> sA.chunkat(_, iv_warp);
           mb = mma.load.swiz<128> sB.chunkat(_, iv_warp);
           mma.row.row mc, ma, mb;
         }
 
-        sc_a = scale_a.view(MATMUL_WARP_M, 1).from(seg_start + iv_m * MATMUL_WARP_M, iv_k);
-        sc_b = scale_b.at(eid # block_n, iv_k);
+        sc_a = scale_a.view(WARP_M, 1).from(seg_start + iv_m * WARP_M, iv_k);
+        sc_b = scale_b.at(eid, block_n, iv_k);
         mma.scale mc, sc_a, sc_b;
       }
-      // masked mma store fragment mc
-      mma.store mc, output.view(TILE_M, MATMUL_WARP_N).from(seg_start + iv_m * MATMUL_WARP_M, block_n * MATMUL_WARP_N);
+
+      mma.store mc, output.view(ROWS_M, WARP_N).from(seg_start + iv_m * WARP_M, block_n * WARP_N);
     }
+    } // if (seg_length > 0)
   }
 }
 
@@ -101,9 +92,9 @@ extern "C" void moe_fp8_grouped_gemm_bf16(
     int k_blocks = (k + block_size_k - 1) / block_size_k;
 
     auto a_ptr = choreo::make_spanview<choreo::f8_e4m3, 2>(a, {size_t(m), size_t(k)});
-    auto b_ptr = choreo::make_spanview<choreo::f8_e4m3, 2>(b, {size_t(num_experts) * size_t(n), size_t(k)});
+    auto b_ptr = choreo::make_spanview<choreo::f8_e4m3, 3>(b, {size_t(num_experts), size_t(n), size_t(k)});
     auto a_scales_ptr = choreo::make_spanview<choreo::f32, 2>(a_scales, {size_t(m), size_t(k_blocks)});
-    auto b_scales_ptr = choreo::make_spanview<choreo::f32, 2>(b_scales, {size_t(num_experts) * size_t(n_blocks), size_t(k_blocks)});
+    auto b_scales_ptr = choreo::make_spanview<choreo::f32, 3>(b_scales, {size_t(num_experts), size_t(n_blocks), size_t(k_blocks)});
     auto out_ptr = choreo::make_spanview<choreo::bf16, 2>(out, {size_t(m), size_t(n)});
     auto expert_offsets_ptr = choreo::make_spanview<choreo::s32, 1>(expert_offsets, {size_t(num_experts + 1)});
     moe_gemm_kernel_bf16(a_ptr, a_scales_ptr, b_ptr, b_scales_ptr, expert_offsets_ptr, out_ptr, stream);
@@ -112,7 +103,6 @@ extern "C" void moe_fp8_grouped_gemm_bf16(
   }
 }
 
-#if 1
 int main(int argc, char** argv) {
   bool enable_timing = true;
   bool skip_verify = false;
@@ -151,20 +141,20 @@ int main(int argc, char** argv) {
     skip_verify = true;
   }
 
-  size_t M = MATMUL_DEFAULT_M;
-  size_t N = MATMUL_DEFAULT_N;
-  size_t K = MATMUL_DEFAULT_K;
+  size_t M = DEFAULT_M;
+  size_t N = DEFAULT_N;
+  size_t K = DEFAULT_K;
   // expert configuration
   size_t num_experts = EXPERTS;
-  size_t block_size_n = MATMUL_WARP_N;
-  size_t block_size_k = MATMUL_TILE_K;
+  size_t block_size_n = WARP_N;
+  size_t block_size_k = TILE_K;
   size_t n_blocks = (N + block_size_n - 1) / block_size_n;
   size_t k_blocks = (K + block_size_k - 1) / block_size_k;
 
   auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(M, K);
-  auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(num_experts *  N, K);
+  auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(num_experts, N, K);
   auto scale_a_h = choreo::make_spandata<choreo::f32>(M, k_blocks);
-  auto scale_b_h = choreo::make_spandata<choreo::f32>(num_experts * n_blocks, k_blocks);
+  auto scale_b_h = choreo::make_spandata<choreo::f32>(num_experts, n_blocks, k_blocks);
   auto expert_offsets_h = choreo::make_spandata<choreo::s32>(num_experts + 1);
   auto res_h = choreo::make_spandata<choreo::bf16>(M, N);
   cudaStream_t stream = nullptr;
@@ -209,9 +199,9 @@ int main(int argc, char** argv) {
   choreo::abend_true(cudaDeviceSynchronize());
 
   auto lhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K});
-  auto rhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {size_t(num_experts) * N, K});
+  auto rhs_d = choreo::make_spanview<choreo::f8_e4m3, 3>(b_d, {size_t(num_experts), N, K});
   auto scale_a_d = choreo::make_spanview<choreo::f32, 2>(a_scale_d, {M, k_blocks});
-  auto scale_b_d = choreo::make_spanview<choreo::f32, 2>(b_scale_d, {size_t(num_experts) * n_blocks, k_blocks});
+  auto scale_b_d = choreo::make_spanview<choreo::f32, 3>(b_scale_d, {size_t(num_experts), n_blocks, k_blocks});
   auto res_d = choreo::make_spanview<choreo::bf16, 2>(out_d, {M, N});
   auto expert_off_d_v = choreo::make_spanview<choreo::s32, 1>(expert_off_d, {size_t(num_experts + 1)});
 
@@ -278,8 +268,8 @@ int main(int argc, char** argv) {
         float acc = 0.0f;
         for (int k = 0; k < (int)K; ++k) {
           float a_val = to_f32(lhs_view[m][k]);
-          float b_val = to_f32(rhs_view[eid * N + n][k]);
-          acc += a_val * b_val * scale_a_view[m][k / block_size_k] * scale_b_view[eid * n_blocks + n / block_size_n][k / block_size_k];
+          float b_val = to_f32(rhs_view[eid][n][k]);
+          acc += a_val * b_val * scale_a_view[m][k / block_size_k] * scale_b_view[eid][n / block_size_n][k / block_size_k];
         }
         float got = to_f32(res_view[m][n]);
         float abs_error = std::abs(acc - got);
@@ -321,4 +311,3 @@ int main(int argc, char** argv) {
   }
   std::cout << "Test Passed\n" << std::endl;
 }
-#endif

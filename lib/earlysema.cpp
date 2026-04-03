@@ -639,30 +639,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == Op::ElemOf) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    auto old_ec = error_count;
-    if (auto spty = dyn_cast<SpannedType>(lty)) {
-      // disambiguite elemof as dataaccess
-      auto rop = n.GetR();
-      auto index = AST::Make<AST::MultiValues>(rop->LOC(), ", ", MakeExpr(rop));
-      n.SetR(AST::Make<AST::DataAccess>(
-          n.LOC(), cast<AST::Identifier>(n.GetL()), index));
-      n.SetForm(AST::Expr::Reference);
-      n.GetR()->accept(*this);
-      SetNodeType(n, NodeType(*n.GetR()));
-      return true;
-    }
-    if (!isa<ArrayType>(lty))
-      Error1(n.LOC(), "in operation \"" + n.op +
-                          "\": expect an array but got " + PSTR(lty) + ".");
-    if (!CanYieldAnInteger(rty))
-      Error1(n.LOC(), "in operation \"" + n.op +
-                          "\": expect an integer index expression but got " +
-                          PSTR(rty) + ".");
-
-    auto aty = cast<ArrayType>(lty);
-    SetNodeType(n, aty->SubScriptType(1));
-
-    if (error_count != old_ec) return false;
+    if (auto aty = dyn_cast<ArrayType>(lty))
+      SetNodeType(n, aty->RemainderType(1));
+    else
+      SetNodeType(n, lty);
   } else
     choreo_unreachable("operation '" + n.op + "' in expression " + STR(n) +
                        "is not supported yet.");
@@ -1087,6 +1067,13 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   if (auto sty = dyn_cast<ScalarType>(n.GetType()))
     if (sty->IsMutable()) mutables.Add(InScopeName(n.name_str));
 
+  if (isa<SpannedType>(n.GetType()) && n.init_expr) {
+    if (auto e = dyn_cast<AST::Expr>(n.init_expr);
+        e && e->GetOp() == Op::ElemOf) {
+      n.AddNote("ref");
+    }
+  }
+
   return true;
 }
 
@@ -1308,9 +1295,13 @@ bool EarlySemantics::Visit(AST::DataType& n) {
   if (n.infer_span) {
     SetNodeType(n, MakeUnRankedSpannedType(n.getBaseType()));
   } else if (isa<SpannedType>(n.GetType())) {
-    // The sema type has been generated. refine with dims
-    if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType()))
-      SetNodeType(n, MakeRankedSpannedType(sty->Dims(), n.base_type));
+    if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType())) {
+      if (n.IsArrayType())
+        SetNodeType(n, MakeRankedSpannedArrayType(sty->Dims(), n.ArrayDims(),
+                                                  n.base_type));
+      else
+        SetNodeType(n, MakeRankedSpannedType(sty->Dims(), n.base_type));
+    }
   }
   return true;
 }
@@ -1771,7 +1762,8 @@ bool EarlySemantics::Visit(AST::DMA& n) {
                             AST::STR(*event) + "'.");
 
       auto ety = NodeType(*event);
-      if (isa<EventArrayType>(ety)) {
+      if (isa<EventArrayType>(ety) ||
+          (isa<EventType>(ety) && cast<AST::Expr>(event)->op == Op::ElemOf)) {
         if (inthreads_levels[pl_depth] == 0)
           Warning(event->LOC(),
                   "Be careful to wait event outside inthreads block, "
@@ -2062,7 +2054,8 @@ bool EarlySemantics::Visit(AST::Wait& n) {
       if (pty->GetBaseType() != BaseType::FUTURE)
         Error1(n.LOC(), "'" + AST::GetName(*v).value() + "` of type \"" +
                             PSTR(ty) + "\" can not be waited.");
-    } else if (isa<EventArrayType>(ty)) {
+    } else if (isa<EventArrayType>(ty) ||
+               (isa<EventType>(ty) && cast<AST::Expr>(v)->op == Op::ElemOf)) {
       if (inthreads_levels[pl_depth] == 0)
         Warning(v->LOC(), "Be careful to wait event outside inthreads block, "
                           "which may lead to parallelism issues.");
@@ -2082,13 +2075,14 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
       Error1(v->LOC(),
              "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
     auto ty = NodeType(*v);
-    if (isa<EventArrayType>(ty)) {
+    if (isa<EventArrayType>(ty) ||
+        (isa<EventType>(ty) && cast<AST::Expr>(v)->op == Op::ElemOf)) {
       if (inthreads_levels[pl_depth] == 0)
         Warning(v->LOC(),
                 "Be careful to trigger event outside inthreads block, "
                 "which may lead to parallelism issues.");
     }
-    if (!isa<EventType>(ty))
+    if (!isa<EventType>(ty) && !isa<EventArrayType>(ty))
       Error1(v->LOC(),
              "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
   }

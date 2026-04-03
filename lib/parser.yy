@@ -1353,10 +1353,11 @@ assignment
         auto & sops = $3->AllOperations();
         if ((sops.size() == 1) && (isa<AST::SOP::Reshape>($3->FirstOp()))) {
           auto rop = dyn_cast<AST::SOP::Reshape>($3->FirstOp());
-          //auto expr = AST::Make<AST::Expr>(@1, $3);
           auto ref_id = AST::Make<AST::Identifier>(@3, $3->RefSymbol());
-          auto id = AST::Make<AST::Identifier>(@1, $1);
-          auto expr = AST::Make<AST::Expr>(@3, AST::Make<AST::SpanAs>(@1, ref_id, rop->GetNewSpan()));
+          auto sa = AST::Make<AST::SpanAs>(@1, ref_id, rop->GetNewSpan());
+          if ($3->indices && $3->indices->Count() > 0)
+            sa->subscriptions = $3->indices;
+          auto expr = AST::Make<AST::Expr>(@3, sa);
           $$ = AST::Make<AST::NamedVariableDecl>(@1,
                 $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
         } else {
@@ -1968,7 +1969,15 @@ subdata_expr
 
 // check sema later
 frag_expr
-    : subscript_like_expr { $$ = $1; }
+    : subscript_like_expr { 
+        $$ = $1;
+        ptr<AST::Expr> cur = $$;
+        while (cur->GetOp() == Op::ElemOf) {
+          cur->AddNote("mma_frag");
+          if (isa<AST::Identifier>(cur->GetL())) break;
+          cur = cast<AST::Expr>(cur->GetL());
+        }
+      }
     | IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
       }

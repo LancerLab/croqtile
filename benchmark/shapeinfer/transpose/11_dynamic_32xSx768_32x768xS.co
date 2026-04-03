@@ -7,7 +7,7 @@
 
 __co__ auto TRANSPOSE(f32 [32, seq_len, 768] i) {
   f32 [i.span(0), i.span(2), i.span(1)] o;
-  parallel p by 4 : local {
+  parallel p by 4 : thread {
     if (seq_len % 2 == 0) {
       foreach {x, y} in [i.span(0)/#p, 2] {
         l = dma.transp<0, 2, 1> i.chunkat(p#x, y, _) => local;

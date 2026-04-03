@@ -9,7 +9,7 @@
 
 __co__ auto GELU(f32 [batch_size, 1280, height, width] i) {
   f32 [i.span] o;
-  parallel p by 4 : local {
+  parallel p by 4 : thread {
     foreach {b, x} in [batch_size, 16] {
       l = dma.copy i.chunkat(b, p#x, _, _) => local;
       foreach idx in [l.span]

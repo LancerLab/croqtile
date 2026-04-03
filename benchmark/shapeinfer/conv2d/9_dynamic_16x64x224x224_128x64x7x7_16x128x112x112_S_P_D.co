@@ -12,8 +12,8 @@ __co__ auto CONV2D(f32 [16, 64, 224, 224] i, f32 [128, 64, 7, 7] w, int stride, 
 
   f32 [batch_size, channel_out, out_h, out_w] o;
   
-  parallel p by 2 : shared {
-    parallel q by 4 : local {
+  parallel p by 2 : block {
+    parallel q by 4 : thread {
       foreach {co, n} in [channel_out, batch_size / #p / #q] {
         local f32 [out_h, out_w] Y{0.0f};
         foreach ci in [channel_in] {

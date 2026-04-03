@@ -2127,10 +2127,13 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   for (auto& f : n.GetTargets()) {
     auto expr = cast<AST::Expr>(f);
     bool is_array_ref = (expr->op == Op::ElemOf);
-    if (isa<FutureType>(NodeType(*f))) {
+    auto fty = is_array_ref
+                   ? GetSymbolType(AST::GetArrayBaseSymbol(*expr)->name)
+                   : NodeType(*f);
+    if (isa<FutureType>(fty)) {
       assert(!IsHost());
       ds << d_indent << ExprSTR(f, false) << ".wait();\n";
-    } else if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
+    } else if (auto ety = dyn_cast<EventArrayType>(fty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
       switch (ety->GetStorage()) {
@@ -2167,7 +2170,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
         choreo_unreachable("unsupported event array storage '" +
                            STR(ety->GetStorage()) + "'.");
       }
-    } else if (auto ety = dyn_cast<EventType>(NodeType(*f))) {
+    } else if (auto ety = dyn_cast<EventType>(fty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
       switch (ety->GetStorage()) {
@@ -2223,7 +2226,10 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
     bool is_array_ref = (expr->op == Op::ElemOf);
     assert(IsSymbolOrArrayRef(*f) &&
            "expect either symbol or array reference.");
-    if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
+    auto fty = is_array_ref
+                   ? GetSymbolType(AST::GetArrayBaseSymbol(*expr)->name)
+                   : NodeType(*f);
+    if (auto ety = dyn_cast<EventArrayType>(fty)) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         // TODO: make & into OpExprSTR?
@@ -2253,7 +2259,7 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
           break;
         }
       }
-    } else if (auto ety = dyn_cast<EventType>(NodeType(*f))) {
+    } else if (auto ety = dyn_cast<EventType>(fty)) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
@@ -2380,7 +2386,8 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
         } else if (isa<BoundedITupleType>(type)) {
           assert(e->Opts().HasVals() &&
                  "BoundedITupleType print arg missing symbolic vals");
-          auto [format, args] = GenFormatAndArgsFromValueList(e->Opts().GetVals());
+          auto [format, args] =
+              GenFormatAndArgsFromValueList(e->Opts().GetVals());
           print_format += "{" + format + "}";
           print_args += args + ", ";
         } else if (isa<AddrType>(type)) {
