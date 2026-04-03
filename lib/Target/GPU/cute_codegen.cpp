@@ -2380,7 +2380,9 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 
     if (!(sty && sty->GetStorage() == Storage::REG && n.HasNote("update")))
       ds << d_indent
-         << ((IsMutable(*nty) && !isa<SpannedType>(nty)) ? "" : "auto ")
+         << ((!n.IsDecl() || (IsMutable(*nty) && !isa<SpannedType>(nty)))
+                 ? ""
+                 : "auto ")
          << n.GetName() << " = ";
     else
       ds << d_indent;
