@@ -40,7 +40,6 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
   std::vector<PassTimingEntry> timings;
   auto wall_start = std::chrono::steady_clock::now();
   bool pass_failed = false;
-  if (do_time) sbe_stats().reset();
 
   for (auto& ps : pl) {
     if ((ps.pred && ps.pred()) || !ps.pred) {
@@ -214,19 +213,4 @@ void ASTPipeline::PrintPassTimings(
          << "%"
          << "  " << "Total\n";
   errs() << sep << "\n";
-  // SBE stats
-  const auto& ss = sbe_stats();
-  if (ss.normalize_calls > 0) {
-    errs() << "\n"
-           << sep << "\n"
-           << "                      ... SBE Statistics ...\n"
-           << sep << "\n";
-    errs() << "  Normalize() calls:      " << ss.normalize_calls << "\n";
-    errs() << "  Normalize() iterations:  " << ss.normalize_iterations << "\n";
-    errs() << "  Avg iterations/call:     "
-           << std::fixed << std::setprecision(2)
-           << (double)ss.normalize_iterations / ss.normalize_calls << "\n";
-    errs() << "  BinaryOp Hash() calls:   " << ss.hash_calls << "\n";
-    errs() << sep << "\n";
-  }
 }
