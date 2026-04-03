@@ -24,7 +24,7 @@ __co__ auto CONV2D(f32 [32, 128, height, width] i, f32 [256, 128, 3, 3] w, int s
   M = Ho * Wo;
   K = Cin * Kh * Kw;
 
-  parallel p by 2 : shared {
+  parallel p by 2 : block {
     shared f32 [M, K] A;
     B = dma.copy w.span_as(Cout, K) => shared;
     shared f32 [Ho*Wo, Cout] Y;
@@ -38,7 +38,7 @@ __co__ auto CONV2D(f32 [32, 128, height, width] i, f32 [256, 128, 3, 3] w, int s
         }
       }
       // 2. GEMM: C = A x B, result shape: M x Cout
-      parallel q by 9 : local {
+      parallel q by 9 : thread {
         l1_A = dma.copy A.chunkat(q, _) => local;
         foreach {qq} in [32] {
           local f32 [A.span(0)/#q, B.span(0)/#qq] l1_Y{0.0f};

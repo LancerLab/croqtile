@@ -9,9 +9,9 @@ __co__ auto EMBEDDING(s32 [16, 1024] id, f32 [50257, 1024] w) {
 
   f32 [bs, tokens, hidden_size] o;
   
-  parallel p by 2 : shared {
+  parallel p by 2 : block {
     shared f32 [bs / #p, tokens, hidden_size] _o;
-    parallel q by 4 : local {
+    parallel q by 4 : thread {
       foreach {n} in [bs / #p / #q] {
         local s32 [tokens] _id;
         dma.copy id.chunkat(p#q#n, _).span_as(tokens) => _id;

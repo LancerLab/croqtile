@@ -379,6 +379,7 @@ private:
   bool dump_ast = false;            // dump the AST after parsing
   bool no_codegen = false;          // stop before code generation
   bool print_pass_names = false;    // print pass name before pass run
+  bool time_passes = false;         // measure time per compiler pass
   bool no_pre_process = false;      // do not invoke pre-processor
   bool drop_comment = false;        // drop any comments
   bool debug_all = false;           // enable full debug
@@ -530,6 +531,7 @@ public:
   bool DumpAst() const { return dump_ast; }
   bool NoCodegen() const { return no_codegen; }
   bool PrintPassNames() const { return print_pass_names; }
+  bool TimePasses() const { return time_passes; }
   bool NoPreProcess() const { return no_pre_process; }
   bool DropComments() const { return drop_comment; }
   bool DebugAll() const { return debug_all; }
@@ -580,6 +582,7 @@ public:
   void SetDumpAst(bool value) { dump_ast = value; }
   void SetNoCodegen(bool value) { no_codegen = value; }
   void SetPrintPassNames(bool value) { print_pass_names = value; }
+  void SetTimePasses(bool value) { time_passes = value; }
   void SetNoPreProcess(bool value) { no_pre_process = value; }
   void SetDropComments(bool value) { drop_comment = value; }
   void SetDebugAll(bool value) { debug_all = value; }

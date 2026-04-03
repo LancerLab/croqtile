@@ -7,8 +7,8 @@
 
 __co__ auto TRANSPOSE(f32 [128, channels, 112, 112] i) {
   f32 [i.span(0), i.span(2), i.span(3), i.span(1)] o;
-  parallel p by 2 : shared {
-    parallel q by 4 : local {
+  parallel p by 2 : block {
+    parallel q by 4 : thread {
       foreach {x, y} in [i.span(0)/#p/#q, i.span(1)] {
         l = dma.transp<0, 2, 3, 1> i.chunkat(p#q#x, y, _, _) => local;
         dma.copy l.data => o.chunkat(p#q#x, _, _, y);

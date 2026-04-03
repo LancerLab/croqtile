@@ -19,7 +19,7 @@ __co__ auto CONV2D(f32 [64, 3, 224, 224] i, f32 [64, 3, 7, 7] w, int stride, int
   M = Ho * Wo;
   K = Cin * Kh * Kw;
 
-  parallel p by 1 : shared {
+  parallel p by 1 : block {
     shared f32 [M, K] A;
     B = dma.copy w.span_as(Cout, K) => shared;
     shared f32 [Ho*Wo, Cout] Y;
@@ -35,7 +35,7 @@ __co__ auto CONV2D(f32 [64, 3, 224, 224] i, f32 [64, 3, 7, 7] w, int stride, int
         }
       }
       // 2. GEMM: C = A x B, result shape: M x Cout
-      parallel q by 8 : local {
+      parallel q by 8 : thread {
         K_vd = A.span(1) / 32 * 32;
         K_sl = A.span(1) - K_vd;
         l1_A = dma.copy A.subspan(A.span(0)/#q, K_vd).at(q, 0) => local;
