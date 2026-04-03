@@ -1,0 +1,89 @@
+# RUN: bash %s 2>&1 | FileCheck %s
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.."
+ST="$ROOT/.codex/skills/fsm-engine/scripts/state-transition.sh"
+POST="$ROOT/.codex/skills/fsm-engine/scripts/post-step-check.sh"
+DIR="$(mktemp -d)"
+
+trap "rm -rf $DIR" EXIT
+
+echo "=== TEST: Post-step checks ==="
+
+# Test 1: INIT post-check fails without dirs
+bash "$ST" INIT "$DIR" max_iteration=5
+echo "--- INIT without dirs ---"
+if bash "$POST" INIT "$DIR" 2>&1; then
+    echo "POST_INIT_NO_DIRS: SHOULD_FAIL"
+else
+    echo "POST_INIT_NO_DIRS: BLOCKED"
+fi
+
+# Fix INIT
+mkdir -p "$DIR"/{iters,logs,ncu}
+printf "h\n" > "$DIR/results.tsv"
+touch "$DIR/iters/iter000_baseline.co"
+bash "$POST" INIT "$DIR" >/dev/null && echo "POST_INIT_FIXED: OK"
+
+# Test 2: BASELINE post-check fails without timing log
+bash "$ST" BASELINE "$DIR"
+bash "$ST" SET "$DIR" baseline_tflops=350.5
+echo "compile" > "$DIR/logs/iter000_compile.log"
+echo "--- BASELINE without timing log ---"
+if bash "$POST" BASELINE "$DIR" 2>&1; then
+    echo "POST_BASELINE_NO_TIMING: SHOULD_FAIL"
+else
+    echo "POST_BASELINE_NO_TIMING: BLOCKED"
+fi
+echo "350.5" > "$DIR/logs/iter000_timing.log"
+bash "$POST" BASELINE "$DIR" >/dev/null && echo "POST_BASELINE_FIXED: OK"
+
+# Test 3: IMPLEMENT post-check fails without kernel file
+bash "$ST" SET "$DIR" current_best_tflops=350.5 current_best_iter=0
+bash "$ST" PROFILE "$DIR"
+bash "$ST" SET "$DIR" ncu_ran_this_iter=true bottleneck_identified=true last_bottleneck=dram_throughput
+bash "$ST" IDEATE "$DIR"
+bash "$ST" SET "$DIR" idea_is_novel=true idea_logged=true
+touch "$DIR/idea-log.jsonl"
+bash "$ST" IMPLEMENT "$DIR"
+bash "$ST" SET "$DIR" compile_succeeded=true correctness_verified=true
+echo "--- IMPLEMENT without kernel file ---"
+if bash "$POST" IMPLEMENT "$DIR" 2>&1; then
+    echo "POST_IMPL_NO_KERNEL: SHOULD_FAIL"
+else
+    echo "POST_IMPL_NO_KERNEL: BLOCKED"
+fi
+touch "$DIR/iters/iter001_test.co"
+echo "ok" > "$DIR/logs/iter001_compile.log"
+bash "$POST" IMPLEMENT "$DIR" >/dev/null && echo "POST_IMPL_FIXED: OK"
+
+# Test 4: STORE post-check fails without results.tsv entry
+bash "$ST" MEASURE "$DIR"
+bash "$ST" SET "$DIR" timing_captured=true this_iter_tflops=400.0
+echo "400.0" > "$DIR/logs/iter001_timing.log"
+bash "$ST" DECIDE "$DIR"
+bash "$ST" SET "$DIR" decision_made=true this_iter_decision=KEEP
+bash "$ST" STORE "$DIR"
+bash "$ST" SET "$DIR" results_appended=true git_committed=true
+echo "--- STORE without results entry ---"
+if bash "$POST" STORE "$DIR" 2>&1; then
+    echo "POST_STORE_NO_ENTRY: SHOULD_FAIL"
+else
+    echo "POST_STORE_NO_ENTRY: BLOCKED"
+fi
+printf "iter001\ttest\tsm_90a\t400.0\t69.0\tKEEP\tx\ttest\tbash\n" >> "$DIR/results.tsv"
+bash "$POST" STORE "$DIR" >/dev/null && echo "POST_STORE_FIXED: OK"
+
+echo "=== POSTCHECKS PASSED ==="
+
+# CHECK: POST_INIT_NO_DIRS: BLOCKED
+# CHECK: POST_INIT_FIXED: OK
+# CHECK: POST_BASELINE_NO_TIMING: BLOCKED
+# CHECK: POST_BASELINE_FIXED: OK
+# CHECK: POST_IMPL_NO_KERNEL: BLOCKED
+# CHECK: POST_IMPL_FIXED: OK
+# CHECK: POST_STORE_NO_ENTRY: BLOCKED
+# CHECK: POST_STORE_FIXED: OK
+# CHECK: === POSTCHECKS PASSED ===

@@ -1,0 +1,106 @@
+# RUN: bash %s 2>&1 | FileCheck %s
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.."
+ST="$ROOT/.codex/skills/fsm-engine/scripts/state-transition.sh"
+DIR="$(mktemp -d)"
+
+trap "rm -rf $DIR" EXIT
+
+echo "=== TEST: Transition validation ==="
+
+bash "$ST" INIT "$DIR" max_iteration=3
+
+# Test 1: Legal transitions
+echo "--- Legal transitions ---"
+bash "$ST" BASELINE "$DIR" && echo "INIT->BASELINE: OK"
+bash "$ST" SET "$DIR" baseline_tflops=100 current_best_tflops=100 current_best_iter=0
+bash "$ST" PROFILE "$DIR" && echo "BASELINE->PROFILE: OK"
+bash "$ST" SET "$DIR" ncu_ran_this_iter=true bottleneck_identified=true last_bottleneck=x
+bash "$ST" IDEATE "$DIR" && echo "PROFILE->IDEATE: OK"
+bash "$ST" SET "$DIR" idea_is_novel=true idea_logged=true
+bash "$ST" IMPLEMENT "$DIR" && echo "IDEATE->IMPLEMENT: OK"
+bash "$ST" SET "$DIR" compile_succeeded=true correctness_verified=true
+
+# Test 2: Short-circuit IMPLEMENT->STORE (compile failure path)
+echo "--- Short-circuit path ---"
+bash "$ST" STORE "$DIR" && echo "IMPLEMENT->STORE: OK"
+
+# Test 3: Illegal transitions
+echo "--- Illegal transitions ---"
+bash "$ST" SET "$DIR" decision_made=true results_appended=true git_committed=true
+if bash "$ST" IDEATE "$DIR" 2>&1; then
+    echo "STORE->IDEATE: SHOULD_FAIL"
+else
+    echo "STORE->IDEATE: BLOCKED"
+fi
+
+if bash "$ST" BASELINE "$DIR" 2>&1; then
+    echo "STORE->BASELINE: SHOULD_FAIL"
+else
+    echo "STORE->BASELINE: BLOCKED"
+fi
+
+if bash "$ST" INIT "$DIR" 2>&1; then
+    echo "STORE->INIT: SHOULD_FAIL"
+else
+    echo "STORE->INIT: BLOCKED"
+fi
+
+# Test 4: DONE blocks everything
+bash "$ST" PROFILE "$DIR"
+bash "$ST" SET "$DIR" ncu_ran_this_iter=true bottleneck_identified=true last_bottleneck=x
+bash "$ST" IDEATE "$DIR"
+bash "$ST" SET "$DIR" idea_is_novel=true idea_logged=true
+bash "$ST" IMPLEMENT "$DIR"
+bash "$ST" SET "$DIR" compile_succeeded=true correctness_verified=true
+bash "$ST" MEASURE "$DIR"
+bash "$ST" SET "$DIR" timing_captured=true this_iter_tflops=200
+echo "200" > "$DIR/logs/iter002_timing.log" 2>/dev/null || true
+bash "$ST" DECIDE "$DIR"
+bash "$ST" SET "$DIR" decision_made=true this_iter_decision=KEEP
+bash "$ST" STORE "$DIR"
+bash "$ST" SET "$DIR" results_appended=true git_committed=true
+
+bash "$ST" PROFILE "$DIR"
+bash "$ST" SET "$DIR" ncu_ran_this_iter=true bottleneck_identified=true last_bottleneck=x
+bash "$ST" IDEATE "$DIR"
+bash "$ST" SET "$DIR" idea_is_novel=true idea_logged=true
+bash "$ST" IMPLEMENT "$DIR"
+bash "$ST" SET "$DIR" compile_succeeded=true correctness_verified=true
+bash "$ST" MEASURE "$DIR"
+bash "$ST" SET "$DIR" timing_captured=true this_iter_tflops=200
+bash "$ST" DECIDE "$DIR"
+bash "$ST" SET "$DIR" decision_made=true this_iter_decision=DISCARD
+bash "$ST" STORE "$DIR"
+bash "$ST" SET "$DIR" results_appended=true git_committed=true
+bash "$ST" DONE "$DIR" && echo "STORE->DONE: OK"
+
+if bash "$ST" PROFILE "$DIR" 2>&1; then
+    echo "DONE->PROFILE: SHOULD_FAIL"
+else
+    echo "DONE->PROFILE: BLOCKED"
+fi
+
+if bash "$ST" INIT "$DIR" 2>&1; then
+    echo "DONE->INIT: SHOULD_FAIL"
+else
+    echo "DONE->INIT: BLOCKED"
+fi
+
+echo "=== TRANSITIONS PASSED ==="
+
+# CHECK: INIT->BASELINE: OK
+# CHECK: BASELINE->PROFILE: OK
+# CHECK: PROFILE->IDEATE: OK
+# CHECK: IDEATE->IMPLEMENT: OK
+# CHECK: IMPLEMENT->STORE: OK
+# CHECK: STORE->IDEATE: BLOCKED
+# CHECK: STORE->BASELINE: BLOCKED
+# CHECK: STORE->INIT: BLOCKED
+# CHECK: STORE->DONE: OK
+# CHECK: DONE->PROFILE: BLOCKED
+# CHECK: DONE->INIT: BLOCKED
+# CHECK: === TRANSITIONS PASSED ===
