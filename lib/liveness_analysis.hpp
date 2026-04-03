@@ -106,7 +106,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::string GetFuncNameFromScopedName(const std::string& name) const {
     // indicate that it is a co function name
     if (!PrefixedWith(name, "::")) return name;
-    return SplitStringByDelimiter(name, "::", true)[0];
+    return SplitFirst(name, "::");
   }
 
   // one to one. Alias of buffer. Could happen in spanas, etc.

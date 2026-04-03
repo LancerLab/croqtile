@@ -21,7 +21,7 @@ struct SharedAlignmentCollector : public VisitorWithSymTab {
 private:
   static std::string GetCoFuncName(const std::string& scoped_name) {
     if (!PrefixedWith(scoped_name, "::")) return scoped_name;
-    return SplitStringByDelimiter(scoped_name, "::", true)[0];
+    return SplitFirst(scoped_name, "::");
   }
 
   bool RunOnProgramImpl(AST::Node& root) override {

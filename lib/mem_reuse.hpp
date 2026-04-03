@@ -115,7 +115,7 @@ private:
   std::string GetFuncNameFromScopedName(const std::string& name) const {
     // indicate that it is a co function name
     if (!PrefixedWith(name, "::")) return name;
-    return SplitStringByDelimiter(name, "::", true)[0];
+    return SplitFirst(name, "::");
   }
 
   std::string GetDeclDevFuncOfBuffer(std::string buf_name) const {

@@ -2553,11 +2553,11 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
         continue;
       }
       std::string scope_name = GetScope(InScopeName(id->name));
-      auto scopes = SplitStringByDelimiter(scope_name, "::");
-      if (!PrefixedWith(scopes.back(), "within_")) {
+      auto last_scope = SplitLast(scope_name, "::");
+      if (!PrefixedWith(last_scope, "within_")) {
         std::string error_msg = "expect the bounded variable '" + id->name +
                                 "' to be declared by 'within' block";
-        if (PrefixedWith(scopes.back(), "paraby_"))
+        if (PrefixedWith(last_scope, "paraby_"))
           error_msg += " instead of 'parallel-by' block";
         Error1(id->LOC(), error_msg + ".");
       }
