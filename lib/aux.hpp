@@ -95,8 +95,11 @@ SplitStringByDelimiter(std::string input, std::string delimiter = ",",
   }
   if (!input.empty()) tokens.push_back(input);
   if (!trim) return tokens;
-  for (auto& token : tokens)
-    token = std::regex_replace(token, std::regex("^\\s+|\\s+$"), "");
+  for (auto& token : tokens) {
+    size_t start = token.find_first_not_of(" \t\n\r\f\v");
+    size_t end = token.find_last_not_of(" \t\n\r\f\v");
+    token = (start == std::string::npos) ? "" : token.substr(start, end - start + 1);
+  }
   return tokens;
 }
 
