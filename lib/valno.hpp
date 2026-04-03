@@ -100,6 +100,11 @@ public:
 
 using OpTy = Opcode;
 
+inline size_t HashCombine(size_t seed, size_t value) {
+  seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+  return seed;
+}
+
 class UnknownSign;
 class NoneSign;
 class Signature {
@@ -110,6 +115,7 @@ protected:
 public:
   virtual size_t Count() const { return 1; }
   virtual const std::string ToString() const { return ""; }
+  virtual size_t Hash() const = 0;
 
   virtual bool operator==(const Signature&) const = 0;
   virtual bool operator!=(const Signature& s) const { return !operator==(s); }
@@ -129,6 +135,7 @@ class UnknownSign : public Signature, public TypeIDProvider<UnknownSign> {
 public:
   UnknownSign() {}
   const std::string ToString() const override { return "__valno_not_known__"; }
+  size_t Hash() const override { return std::hash<std::string>{}(ToString()); }
 
   bool operator==(const Signature& st) const override {
     return isa<UnknownSign>(&st);
@@ -144,6 +151,7 @@ public:
   const std::string ToString() const override {
     return "__valno_not_specified__";
   }
+  size_t Hash() const override { return std::hash<std::string>{}(ToString()); }
 
   bool operator==(const Signature& st) const override {
     return isa<NoneSign>(&st);
@@ -251,6 +259,24 @@ public:
     return std::visit(ToStringVisitor{}, value);
   }
 
+  size_t Hash() const override {
+    struct HashVisitor {
+      size_t operator()(int64_t v) const {
+        return HashCombine(std::hash<int>{}(0), std::hash<int64_t>{}(v));
+      }
+      size_t operator()(float v) const {
+        return HashCombine(std::hash<int>{}(1), std::hash<float>{}(v));
+      }
+      size_t operator()(double v) const {
+        return HashCombine(std::hash<int>{}(2), std::hash<double>{}(v));
+      }
+      size_t operator()(bool v) const {
+        return HashCombine(std::hash<int>{}(3), std::hash<bool>{}(v));
+      }
+    };
+    return std::visit(HashVisitor{}, value);
+  }
+
 public:
   // Type promotion rules
   template <typename T, typename U>
@@ -354,6 +380,7 @@ public:
   }
   const std::string Value() const { return symbol; }
   const std::string ToString() const override { return symbol; }
+  size_t Hash() const override { return std::hash<std::string>{}(symbol); }
 
   bool operator==(const Signature& st) const override {
     if (auto sign = dyn_cast<SymbolSign>(&st)) return symbol == sign->symbol;
@@ -395,6 +422,15 @@ public:
     std::string res = STR(opcode);
     for (auto& op : operands) res += ":" + op->ToString();
     return res;
+  }
+
+  size_t Hash() const override {
+    size_t seed = std::hash<std::string>{}(STR(opcode));
+    seed = HashCombine(seed, std::hash<size_t>{}(operands.size()));
+    for (const auto& op : operands) {
+      seed = HashCombine(seed, op ? op->Hash() : 0);
+    }
+    return seed;
   }
 
   bool operator==(const Signature& st) const override {
@@ -460,6 +496,14 @@ public:
       res += signs[i]->ToString();
     }
     return res;
+  }
+
+  size_t Hash() const override {
+    size_t seed = std::hash<size_t>{}(signs.size());
+    for (const auto& sign : signs) {
+      seed = HashCombine(seed, sign ? sign->Hash() : 0);
+    }
+    return seed;
   }
 
 public:
@@ -545,7 +589,8 @@ struct hash<Choreo::valno::NumTy> {
 template <>
 struct hash<Choreo::valno::SignTy> {
   size_t operator()(const Choreo::valno::SignTy& k) const {
-    return std::hash<std::string>{}(k->ToString());
+    if (!k) return 0;
+    return k->Hash();
   }
 };
 
@@ -554,9 +599,8 @@ template <>
 struct equal_to<Choreo::valno::SignTy> {
   bool operator()(const Choreo::valno::SignTy& a,
                   const Choreo::valno::SignTy& b) const {
-    // Handle null pointers if applicable
     if (!a || !b) return !a && !b;
-    return a->ToString() == b->ToString();
+    return *a == *b;
   }
 };
 

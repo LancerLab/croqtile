@@ -1,5 +1,4 @@
 #include "pipeline.hpp"
-#include "symbexpr.hpp"
 #include "active_threads.hpp"
 #include "codegen_prepare.hpp"
 #include "colors.hpp"
@@ -12,10 +11,11 @@
 #include "normalize.hpp"
 #include "semacheck.hpp"
 #include "shapeinfer.hpp"
+#include "symbexpr.hpp"
 #include "typeinfer.hpp"
 #include "visualize.hpp"
-#include <iomanip>
 #include <chrono>
+#include <iomanip>
 
 using namespace Choreo;
 
@@ -31,6 +31,33 @@ void ASTPipeline::Dump() const {
   dbgs() << "++ END Pipeline\n";
 }
 
+void ASTPipeline::PrintPassTimings(
+    const std::vector<PassTimingEntry>& timings, double total_ms) const {
+  const char* sep =
+      "===-------------------------------------------------------------------"
+      "----===";
+  errs() << "\n"
+         << sep << "\n"
+         << "                      ... Pass Execution Timing ...\n"
+         << sep << "\n";
+  errs() << std::right << std::setw(10) << "Time (ms)" << "  " << std::setw(6)
+         << "  %" << "  " << "Pass\n";
+  errs() << std::string(40, '-') << "\n";
+  for (const auto& e : timings) {
+    double pct = total_ms > 0 ? (e.ms / total_ms) * 100.0 : 0.0;
+    errs() << std::right << std::setw(10) << std::fixed
+           << std::setprecision(2) << e.ms << "  " << std::setw(5)
+           << std::fixed << std::setprecision(1) << pct << "%"
+           << "  " << e.name << "\n";
+  }
+  errs() << std::string(40, '-') << "\n";
+  errs() << std::right << std::setw(10) << std::fixed << std::setprecision(2)
+         << total_ms << "  " << std::setw(5) << "100.0"
+         << "%"
+         << "  " << "Total\n";
+  errs() << sep << "\n";
+}
+
 bool ASTPipeline::RunOnProgram(AST::Node& root) {
   if (debug) Dump();
   // verify the input
@@ -41,6 +68,12 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
   auto wall_start = std::chrono::steady_clock::now();
   bool pass_failed = false;
 
+#if CHOREO_ENABLE_SBE_STATS
+  // Reset SBE counters only when stats output is requested and profiling is
+  // compiled in.
+  if (CCtx().PrintStats()) sbe::SBEProfiler::Get().Reset();
+#endif
+
   for (auto& ps : pl) {
     if ((ps.pred && ps.pred()) || !ps.pred) {
       if (ps.v) {
@@ -48,13 +81,14 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
         bool pass_ok = ps.v->RunOnProgram(root);
         if (do_time) {
           auto t1 = std::chrono::steady_clock::now();
-          double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+          double ms =
+              std::chrono::duration<double, std::milli>(t1 - t0).count();
           timings.push_back({ps.v->GetName(), ms});
         }
         if (!pass_ok) {
           state = ps.v->Status();
           pass_failed = true;
-          break; // stop pipeline; timing printed below
+          break;
         }
         symtab = ps.v->SymTab();
         // TODO: force abend when failing on verifiers
@@ -69,7 +103,9 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
 
   if (do_time) {
     auto wall_end = std::chrono::steady_clock::now();
-    double total_ms = std::chrono::duration<double, std::milli>(wall_end - wall_start).count();
+    double total_ms =
+        std::chrono::duration<double, std::milli>(wall_end - wall_start)
+            .count();
     PrintPassTimings(timings, total_ms);
   }
 
@@ -81,12 +117,12 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
         "===-------------------------------------------------------------------"
         "----===";
     errs() << "\n"
-           << color::err(color::kBold) << sep << "\n"
+        << color::err(color::kBold) << sep << "\n"
            << "                      ... Assessment Statistics ...\n"
-           << sep << color::err(color::kReset) << "\n";
+        << sep << color::err(color::kReset) << "\n";
     auto row = [&](size_t n, const char* desc) {
-      errs() << color::err(color::kBold) << std::right << std::setw(6) << n
-             << color::err(color::kReset) << "  assess  - " << desc << "\n";
+        errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+          << color::err(color::kReset) << "  assess  - " << desc << "\n";
     };
     row(s.total, "Assessments evaluated");
     row(s.static_true, "Resolved at compile time (static-true)");
@@ -98,8 +134,8 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     row(s.runtime_high, "Runtime assertions (high cost)");
     row(s.runtime_enabled, "Runtime assertions enabled");
     row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
-    errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
-           << "\n";
+        errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+          << "\n";
     row(s.unclassified_total, "Assessments (unclassified)");
     row(s.shape_compat_total, "Assessments (shape-compatibility)");
     row(s.elem_access_total, "Assessments (element-access)");
@@ -110,6 +146,29 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     row(s.elem_access_runtime, "Runtime assertions (element-access)");
     row(s.loop_bound_runtime, "Runtime assertions (loop-bound)");
     row(s.hw_constraint_runtime, "Runtime assertions (hw-constraint)");
+
+#if CHOREO_ENABLE_SBE_STATS
+    // SBE stats live under --stats so they follow the same colored reporting
+    // path as the rest of the assessment summary.
+    errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+      << "\n";
+    auto ss = sbe::SBEProfiler::Get().Snapshot();
+    errs() << color::err(color::kBold) << sep << "\n"
+           << "                          ... SBE Statistics ...\n"
+      << sep << color::err(color::kReset) << "\n";
+    auto sbe_row = [&](uint64_t n, const char* desc) {
+      errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+        << color::err(color::kReset) << "  sbe     - " << desc << "\n";
+    };
+    sbe_row(ss.expression_created, "Symbolic expressions created");
+    sbe_row(ss.symbolic_value_created, "Symbolic values created");
+    sbe_row(ss.unary_operation_created, "Unary operations created");
+    sbe_row(ss.binary_operation_created, "Binary operations created");
+    sbe_row(ss.ternary_operation_created, "Ternary operations created");
+    sbe_row(ss.normalize_calls, "Normalize() calls");
+    sbe_row(ss.normalize_iterations, "Normalize() loop iterations");
+    sbe_row(ss.hash_calls, "Hash() calls");
+#endif
     errs() << color::err(color::kBold) << sep << color::err(color::kReset)
            << "\n";
   }
@@ -118,7 +177,7 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
 }
 
 ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
-  // Initialize the common ast pipeline
+  // Initialize the common ast pipeline.
   // apply early semantics check without knowing type details
   AddStage<EarlySemantics>();
   // minor AST change: desugar for canonicalized AST
@@ -135,11 +194,11 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   AddStage<LateNorm>();
   AddAction([](ASTPipeline& p) {
     CCtx().SetGlobalSymbolTable(p.LastSymTab());
-
     // debug: dump the symbol table
     if (std::getenv("DUMP_SYMTAB") || CCtx().DumpSymtab())
       CCtx().GetGlobalSymbolTable()->Print(dbgs());
   });
+
   // to visualize the dma
   if (std::getenv("VISUALIZE") || CCtx().Visualize())
     AddStageWithPost<Visualizer>([](ASTPipeline& p) { p.SetAbend(); });
@@ -162,14 +221,12 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
 
   // apply the semantic check
   AddStage<SemaChecker>();
-
   return *this;
 }
 
 ASTPipeline& ASTPipeline::PlanCodeGenRoutine() {
-  if (CCtx().NoCodegen()) { // do not generate code
-    AddAction([](ASTPipeline& p) { p.SetAbend(); });
-  }
+  // do not generate code
+  if (CCtx().NoCodegen()) AddAction([](ASTPipeline& p) { p.SetAbend(); });
 
   AddStage<CodegenPrepare>();
 
@@ -186,31 +243,4 @@ ASTPipeline& ASTPipeline::Get() {
   std::call_once(init_flag,
                  []() { instance = std::make_unique<ASTPipeline>(); });
   return *instance;
-}
-
-void ASTPipeline::PrintPassTimings(
-    const std::vector<PassTimingEntry>& timings, double total_ms) const {
-  const char* sep =
-      "===-------------------------------------------------------------------"
-      "----===";
-  errs() << "\n"
-         << sep << "\n"
-         << "                      ... Pass Execution Timing ...\n"
-         << sep << "\n";
-  errs() << std::right << std::setw(10) << "Time (ms)" << "  " << std::setw(6)
-         << "  %" << "  " << "Pass\n";
-  errs() << std::string(40, '-') << "\n";
-  for (const auto& e : timings) {
-    double pct = total_ms > 0 ? (e.ms / total_ms) * 100.0 : 0.0;
-    errs() << std::right << std::setw(10) << std::fixed << std::setprecision(2)
-           << e.ms << "  " << std::setw(5) << std::fixed
-           << std::setprecision(1) << pct << "%"
-           << "  " << e.name << "\n";
-  }
-  errs() << std::string(40, '-') << "\n";
-  errs() << std::right << std::setw(10) << std::fixed << std::setprecision(2)
-         << total_ms << "  " << std::setw(5) << "100.0"
-         << "%"
-         << "  " << "Total\n";
-  errs() << sep << "\n";
 }

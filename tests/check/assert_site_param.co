@@ -1,9 +1,9 @@
 // RUN: choreo -es -dv=assert-site %s -o /dev/null 2>&1 | FileCheck %s
 
 // -----------------------------------------------------------------------
-// ENTRY assertion: select(xx, …) where xx is a parameter.
+// ENTRY assertion: select(xx, ...) where xx is a parameter.
 // Since xx is a parameter (does not change within the function), the
-// assertion is classified directly as ENTRY — no promotion needed.
+// assertion is classified directly as ENTRY -- no promotion needed.
 // The AssertSite pass only processes DEF_SITE assertions, so no
 // [assert-site] log message is produced for these.
 // -----------------------------------------------------------------------
@@ -18,10 +18,10 @@ __co__ void foo(int xx) {
   }
 }
 
-// (No [assert-site] message for foo — assertions are already ENTRY.)
+// (No [assert-site] message for foo -- assertions are already ENTRY.)
 
 // -----------------------------------------------------------------------
-// DEF_SITE with local alias: int zz = xx; select(zz, …).
+// DEF_SITE with local alias: int zz = xx; select(zz, ...).
 // The factor `zz` is a local variable, so the assertion is classified as
 // DEF_SITE.  The assertion expression references the underlying parameter
 // symbol `xx`, so the AssertSite pass promotes it to ENTRY.
