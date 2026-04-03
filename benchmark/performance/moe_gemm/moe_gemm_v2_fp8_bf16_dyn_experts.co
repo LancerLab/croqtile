@@ -37,8 +37,8 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
     s32 seg_start = expert_offsets.at(eid);
     s32 seg_end = expert_offsets.at(eid + 1);
     s32 seg_length = seg_end - seg_start;
-
-    if (seg_length > 0) {
+    if (seg_length <= 0) yield;
+    
     foreach {iv_m} in [cdiv(seg_length, WARP_M)] {
       ROWS_M = min(WARP_M, seg_length - iv_m * WARP_M);
       mc = mma.fill.f32 0.0f;
@@ -65,7 +65,6 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
 
       mma.store mc, output.view(ROWS_M, WARP_N).from(seg_start + iv_m * WARP_M, block_n * WARP_N);
     }
-    } // if (seg_length > 0)
   }
 }
 

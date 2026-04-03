@@ -3138,6 +3138,21 @@ struct Continue : public Node, public TypeIDProvider<Continue> {
   __UDT_TYPE_INFO__(Node, Continue)
 };
 
+struct Yield : public Node, public TypeIDProvider<Yield> {
+  Yield(const location& l) : Node(l) {}
+
+  ptr<Node> CloneImpl() const override { return Make<Yield>(LOC()); }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n" << prefix << "`- Yield";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Yield)
+};
+
 struct Return : public Node, public TypeIDProvider<Return> {
   ptr<Node> value = nullptr;
 

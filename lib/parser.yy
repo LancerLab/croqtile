@@ -193,7 +193,7 @@ extern int yylex();
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
 %token <std::string> FRAG
 // control related
-%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE
+%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD
 %token <std::string> VECTORIZE
 
 // non-terminals
@@ -215,7 +215,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
@@ -712,6 +712,7 @@ statement
     | inlcpp_stmt  SEMCOL        { $$ = $1; }
     | break_stmt   SEMCOL        { $$ = $1; }
     | continue_stmt  SEMCOL      { $$ = $1; }
+    | yield_stmt     SEMCOL      { $$ = $1; }
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
     | inthreads_block            { $$ = $1; }
@@ -2410,6 +2411,8 @@ swap_stmt
 break_stmt : BREAK { $$ = AST::Make<AST::Break>(@1); }
 
 continue_stmt : CONTINUE { $$ = AST::Make<AST::Continue>(@1); }
+
+yield_stmt : YIELD { $$ = AST::Make<AST::Yield>(@1); }
 
 %%
 

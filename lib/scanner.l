@@ -554,6 +554,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "break"    return Choreo::Parser::make_BREAK(yytext, loc);
   "vectorize" return Choreo::Parser::make_VECTORIZE(yytext, loc);
   "continue" return Choreo::Parser::make_CONTINUE(yytext, loc);
+  "yield"    return Choreo::Parser::make_YIELD(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);
   "--"       return Choreo::Parser::make_MMINUS (loc);

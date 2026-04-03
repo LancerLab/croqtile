@@ -2101,6 +2101,17 @@ bool EarlySemantics::Visit(AST::Break& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::Yield& n) {
+  TraceEachVisit(n);
+
+  if (pl_depth == 0) {
+    Error1(n.LOC(), "unable to yield outside the parallel-by block(s).");
+    return false;
+  }
+
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Call& n) {
   TraceEachVisit(n);
 

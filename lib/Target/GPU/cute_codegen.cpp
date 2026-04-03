@@ -5501,6 +5501,12 @@ bool CuteCodeGen::Visit(AST::Continue& n) {
   return true;
 }
 
+bool CuteCodeGen::Visit(AST::Yield& n) {
+  TraceEachVisit(n);
+  IndStream() << "return;\n";
+  return true;
+}
+
 bool CuteCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 

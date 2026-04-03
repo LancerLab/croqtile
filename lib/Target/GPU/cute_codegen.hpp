@@ -125,6 +125,7 @@ public:
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Break&) override;
   bool Visit(AST::Continue&) override;
+  bool Visit(AST::Yield&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
   bool Visit(AST::Call&) override;
