@@ -376,9 +376,12 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
                                  ? ValueSTR(scale_a_strides.back())
                                  : ValueSTR(scale_a_strides.front());
     auto scale_a_name = c_sym + "_scale_a_ptr";
+    auto scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
     auto scale_b_name = c_sym + "_scale_b_val";
     auto scale_frag_name = c_sym + "_scale_frag";
     auto frag_expr = ExprSTR(op->ExecOperand(0), false);
+    auto scale_a_valid_rows_expr = GenScaleValidRowsExpr(op->ScaleA());
+    int scale_a_static_rows = GetScaleStaticRows(op->ScaleA());
     std::string dim_n = STR(ssmi_c.shape.at(1));
 
     auto acc_dtype = ssmi_c.ty;
@@ -396,13 +399,16 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
       info.frag_expr = frag_expr;
       info.scale_frag_name = scale_frag_name;
       info.scale_a_name = scale_a_name;
+      info.scale_a_valid_rows_name = scale_a_valid_rows_name;
       info.scale_b_name = scale_b_name;
       info.scale_a_expr = scale_a_expr;
+      info.scale_a_valid_rows_expr = scale_a_valid_rows_expr;
       info.scale_b_expr = scale_b_expr;
       info.scale_a_ld = scale_a_ld;
       info.acc_ty = acc_ty;
       info.scale_frag_ty = NameBaseType(acc_dtype);
       info.dim_n = dim_n;
+      info.scale_a_static_rows = scale_a_static_rows;
       info.reg_num_d = (size_t)*reg_num;
       saw_scaled_exec = true;
       return true;
@@ -410,6 +416,8 @@ bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
 
     return info.frag_sym == c_sym && info.frag_expr == frag_expr &&
            info.scale_a_expr == scale_a_expr &&
+          info.scale_a_valid_rows_expr == scale_a_valid_rows_expr &&
+          info.scale_a_static_rows == scale_a_static_rows &&
            info.scale_b_expr == scale_b_expr && info.scale_a_ld == scale_a_ld &&
            info.acc_ty == acc_ty && info.dim_n == dim_n &&
            info.reg_num_d == (size_t)*reg_num;
@@ -466,6 +474,68 @@ CuteCodeGen::CurrentHoistedScaleAccum() const {
   return nullptr;
 }
 
+std::string CuteCodeGen::GenScaleValidRowsExpr(
+    const ptr<AST::ChunkAt>& ca) const {
+  if (!ca || ca->NoOperation()) return "0x3fffffff";
+
+  ptr<AST::SpannedOperation> row_op = nullptr;
+  for (auto it = ca->AllOperations().rbegin(); it != ca->AllOperations().rend();
+       ++it) {
+    if (!isa<AST::SOP::Reshape>(*it)) {
+      row_op = *it;
+      break;
+    }
+  }
+  if (!row_op || !row_op->GetIndices()) return "0x3fffffff";
+
+  auto src_ty = GetSpannedType(GetSymbolType(ca->RefSymbol()));
+  auto src_shape = src_ty->GetShape();
+  if (src_shape.Rank() == 0 || row_op->GetBlockShape().Rank() == 0)
+    return "0x3fffffff";
+
+  auto scale_tile_ty = GetSpannedType(NodeType(*ca));
+  auto scale_tile_shape = scale_tile_ty->GetShape();
+  bool transposed = scale_tile_shape.Rank() > 0 &&
+                    VIIsInt(scale_tile_shape.ValueAt(0)) &&
+                    *VIInt(scale_tile_shape.ValueAt(0)) == 1;
+  size_t row_dim = transposed ? row_op->GetBlockShape().Rank() - 1 : 0;
+  if (row_dim >= src_shape.Rank() || row_dim >= row_op->GetIndices()->Count())
+    return "0x3fffffff";
+
+  auto row_extent = ValueSTR(src_shape.ValueAt(row_dim));
+  auto row_block = ValueSTR(row_op->GetBlockShape().ValueAt(row_dim));
+  auto row_index = ExprSTR(row_op->GetIndices()->ValueAt(row_dim), false);
+  auto row_base = "((" + row_index + ") * (" + row_block + "))";
+  return "((" + row_base + " < (" + row_extent + ")) ? static_cast<int>((((" +
+         row_extent + ") - (" + row_base + ")) < (" + row_block + ")) ? ((" +
+         row_extent + ") - (" + row_base + ")) : (" + row_block + ")) : 0)";
+}
+
+int CuteCodeGen::GetScaleStaticRows(const ptr<AST::ChunkAt>& ca) const {
+  if (!ca || ca->NoOperation()) return -1;
+
+  ptr<AST::SpannedOperation> row_op = nullptr;
+  for (auto it = ca->AllOperations().rbegin(); it != ca->AllOperations().rend();
+       ++it) {
+    if (!isa<AST::SOP::Reshape>(*it)) {
+      row_op = *it;
+      break;
+    }
+  }
+  if (!row_op) return -1;
+
+  auto scale_tile_ty = GetSpannedType(NodeType(*ca));
+  auto scale_tile_shape = scale_tile_ty->GetShape();
+  bool transposed = scale_tile_shape.Rank() > 0 &&
+                    VIIsInt(scale_tile_shape.ValueAt(0)) &&
+                    *VIInt(scale_tile_shape.ValueAt(0)) == 1;
+  size_t row_dim = transposed ? row_op->GetBlockShape().Rank() - 1 : 0;
+  if (row_dim >= row_op->GetBlockShape().Rank()) return -1;
+
+  auto row_block = VIInt(row_op->GetBlockShape().ValueAt(row_dim));
+  return row_block ? static_cast<int>(*row_block) : -1;
+}
+
 std::vector<CuteCodeGen::ExplicitScaleAccumInfo>
 CuteCodeGen::AnalyzeExplicitScaleAccumScope(
     const ptr<AST::MultiNodes>& body) const {
@@ -511,8 +581,10 @@ CuteCodeGen::AnalyzeExplicitScaleAccumScope(
     info.frag_expr = ExprSTR(op->ScaleAccumulator(), false);
     info.scale_frag_name = c_sym + "_scale_frag";
     info.scale_a_name = c_sym + "_scale_a_ptr";
+    info.scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
     info.scale_b_name = c_sym + "_scale_b_val";
     info.scale_a_expr = ExprSTR(op->ScaleA(), false);
+    info.scale_a_valid_rows_expr = GenScaleValidRowsExpr(op->ScaleA());
     info.scale_b_expr = ExprSTR(op->ScaleB(), false);
     {
       auto sa_strides = GenStrides(op->ScaleA());
@@ -526,6 +598,7 @@ CuteCodeGen::AnalyzeExplicitScaleAccumScope(
     info.acc_ty = NameBaseType(ssmi_c.ty);
     info.scale_frag_ty = NameBaseType(acc_dtype);
     info.dim_n = STR(ssmi_c.shape.at(1));
+    info.scale_a_static_rows = GetScaleStaticRows(op->ScaleA());
     info.reg_num_d = *reg_num;
     infos.push_back(info);
     seen_frags.insert(c_sym);
@@ -859,11 +932,23 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     }
     if (hoisted_scale_accum_info.has_value()) {
       const auto& info = hoisted_scale_accum_info.value();
-      ds << d_indent << "scale_accumulator<" << info.acc_ty << ", float, "
-         << info.dim_n << ">(" << "reinterpret_cast<" << info.acc_ty << "*>("
-         << info.frag_expr << "), " << "reinterpret_cast<" << info.acc_ty
-         << "*>(" << info.scale_frag_name << "), " << info.scale_a_name << ", "
-         << info.scale_a_ld << ", " << info.scale_b_name << ");\n";
+      if (info.scale_a_static_rows >= 0) {
+        ds << d_indent << "scale_accumulator_dispatch<" << info.acc_ty
+          << ", float, " << info.dim_n << ", " << info.scale_a_static_rows
+          << ">(reinterpret_cast<" << info.acc_ty << "*>(" << info.frag_expr
+          << "), reinterpret_cast<" << info.acc_ty << "*>("
+          << info.scale_frag_name << "), " << info.scale_a_name << ", "
+          << info.scale_a_ld << ", " << info.scale_a_valid_rows_name << ", "
+          << info.scale_b_name << ");\n";
+      } else {
+        ds << d_indent << "scale_accumulator<" << info.acc_ty << ", float, "
+          << info.dim_n << ">(" << "reinterpret_cast<" << info.acc_ty
+          << "*>(" << info.frag_expr << "), " << "reinterpret_cast<"
+          << info.acc_ty << "*>(" << info.scale_frag_name << "), "
+          << info.scale_a_name << ", " << info.scale_a_ld << ", "
+          << info.scale_a_valid_rows_name << ", " << info.scale_b_name
+          << ");\n";
+      }
     }
     if (!hoisted_scale_accum_scopes.empty())
       hoisted_scale_accum_scopes.pop_back();
@@ -4554,20 +4639,33 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                      ? ValueSTR(scale_a_strides.back())
                                      : ValueSTR(scale_a_strides.front());
         auto scale_a_name = c_sym + "_scale_a_ptr";
+          auto scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
         auto scale_b_name = c_sym + "_scale_b_val";
+          auto scale_a_valid_rows_expr = GenScaleValidRowsExpr(op.ScaleA());
         if (!hoist_offset || !active_hoisted_scale_decls.count(scale_a_name)) {
           ds << d_indent << "float* " << scale_a_name << " = (float*)("
              << scale_a_expr << ");\n";
+           ds << d_indent << "int " << scale_a_valid_rows_name << " = "
+             << scale_a_valid_rows_expr << ";\n";
           ds << d_indent << "float " << scale_b_name << " = "
              << "static_cast<float>(" << scale_b_expr << ");\n";
         }
-        ds << d_indent << "scale_accumulator<" << acc_ty << ", float, " << dim_n
-           << ">("
-           << "reinterpret_cast<" << acc_ty << "*>(" << ExprSTR(frag, false)
-           << "), "
-           << "reinterpret_cast<" << acc_ty << "*>(" << c_sym << "_scale_frag"
-           << "), " << scale_a_name << ", " << scale_a_ld << ", "
-           << scale_b_name << ");\n";
+          int scale_a_static_rows = GetScaleStaticRows(op.ScaleA());
+          if (scale_a_static_rows >= 0) {
+           ds << d_indent << "scale_accumulator_dispatch<" << acc_ty
+             << ", float, " << dim_n << ", " << scale_a_static_rows
+             << ">(reinterpret_cast<" << acc_ty << "*>(" << ExprSTR(frag, false)
+             << "), reinterpret_cast<" << acc_ty << "*>(" << c_sym
+             << "_scale_frag), " << scale_a_name << ", " << scale_a_ld << ", "
+             << scale_a_valid_rows_name << ", " << scale_b_name << ");\n";
+          } else {
+           ds << d_indent << "scale_accumulator<" << acc_ty << ", float, "
+             << dim_n << ">(" << "reinterpret_cast<" << acc_ty << "*>("
+             << ExprSTR(frag, false) << "), "
+             << "reinterpret_cast<" << acc_ty << "*>(" << c_sym
+             << "_scale_frag), " << scale_a_name << ", " << scale_a_ld << ", "
+             << scale_a_valid_rows_name << ", " << scale_b_name << ");\n";
+          }
       }
     } break;
     case AST::MMAOperation::Scale: {
@@ -4575,14 +4673,28 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       if (auto* info = CurrentExplicitScaleAccumForFrag(c_sym)) {
         ds << d_indent << "float* " << info->scale_a_name << " = (float*)("
            << info->scale_a_expr << ");\n";
+        ds << d_indent << "int " << info->scale_a_valid_rows_name << " = "
+          << info->scale_a_valid_rows_expr << ";\n";
         ds << d_indent << "float " << info->scale_b_name
            << " = static_cast<float>(" << info->scale_b_expr << ");\n";
-        ds << d_indent << "scale_accumulator<" << info->acc_ty << ", float, "
-           << info->dim_n << ">(reinterpret_cast<" << info->acc_ty << "*>("
-           << ExprSTR(op.ScaleAccumulator(), false) << "), reinterpret_cast<"
-           << info->acc_ty << "*>(" << info->scale_frag_name << "), "
-           << info->scale_a_name << ", " << info->scale_a_ld << ", "
-           << info->scale_b_name << ");\n";
+          if (info->scale_a_static_rows >= 0) {
+           ds << d_indent << "scale_accumulator_dispatch<" << info->acc_ty
+             << ", float, " << info->dim_n << ", "
+             << info->scale_a_static_rows << ">(reinterpret_cast<"
+             << info->acc_ty << "*>(" << ExprSTR(op.ScaleAccumulator(), false)
+             << "), reinterpret_cast<" << info->acc_ty << "*>("
+             << info->scale_frag_name << "), " << info->scale_a_name << ", "
+             << info->scale_a_ld << ", " << info->scale_a_valid_rows_name << ", "
+             << info->scale_b_name << ");\n";
+          } else {
+           ds << d_indent << "scale_accumulator<" << info->acc_ty << ", float, "
+             << info->dim_n << ">(reinterpret_cast<" << info->acc_ty << "*>("
+             << ExprSTR(op.ScaleAccumulator(), false) << "), reinterpret_cast<"
+             << info->acc_ty << "*>(" << info->scale_frag_name << "), "
+             << info->scale_a_name << ", " << info->scale_a_ld << ", "
+             << info->scale_a_valid_rows_name << ", " << info->scale_b_name
+             << ");\n";
+          }
         info->consumed = true;
         break;
       }
@@ -5890,8 +6002,10 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
     if (auto* op = FindFirstScaledWGMMAExec(n.GetBody())) {
       auto c_sym = AST::FragName(op->ExecOperand(0));
       auto scale_a_name = c_sym + "_scale_a_ptr";
+      auto scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
       auto scale_b_name = c_sym + "_scale_b_val";
       auto scale_a_expr = ExprSTR(op->ScaleA(), false);
+      auto scale_a_valid_rows_expr = GenScaleValidRowsExpr(op->ScaleA());
       auto scale_b_expr = ExprSTR(op->ScaleB(), false);
       bool invariant_to_loop = true;
       for (const auto& loop_ref : loop_refs) {
@@ -5908,11 +6022,15 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
           !active_hoisted_scale_decls.count(scale_a_name)) {
         ds << d_indent << "float* " << scale_a_name << " = (float*)("
            << scale_a_expr << ");\n";
+          ds << d_indent << "int " << scale_a_valid_rows_name << " = "
+            << scale_a_valid_rows_expr << ";\n";
         ds << d_indent << "float " << scale_b_name << " = static_cast<float>("
            << scale_b_expr << ");\n";
         active_hoisted_scale_decls.insert(scale_a_name);
+          active_hoisted_scale_decls.insert(scale_a_valid_rows_name);
         active_hoisted_scale_decls.insert(scale_b_name);
         hoisted_scale_decl_scopes.back().push_back(scale_a_name);
+          hoisted_scale_decl_scopes.back().push_back(scale_a_valid_rows_name);
         hoisted_scale_decl_scopes.back().push_back(scale_b_name);
       }
     }

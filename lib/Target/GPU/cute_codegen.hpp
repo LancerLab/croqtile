@@ -210,13 +210,16 @@ private:
     std::string frag_expr;
     std::string scale_frag_name;
     std::string scale_a_name;
+    std::string scale_a_valid_rows_name;
     std::string scale_b_name;
     std::string scale_a_expr;
+    std::string scale_a_valid_rows_expr;
     std::string scale_b_expr;
     std::string scale_a_ld;
     std::string acc_ty;
     std::string scale_frag_ty;
     std::string dim_n;
+    int scale_a_static_rows = -1;
     size_t reg_num_d = 0;
   };
   struct HoistedScaleAccumInfo : BaseScaleAccumInfo {};
@@ -507,6 +510,8 @@ private:
   const HoistedScaleAccumInfo* CurrentHoistedScaleAccum() const;
   std::vector<ExplicitScaleAccumInfo>
   AnalyzeExplicitScaleAccumScope(const ptr<AST::MultiNodes>& body) const;
+  std::string GenScaleValidRowsExpr(const ptr<AST::ChunkAt>& ca) const;
+  int GetScaleStaticRows(const ptr<AST::ChunkAt>& ca) const;
   bool HasPlainWGMMAExecForFrag(const ptr<AST::Node>& n,
                                 const std::string& frag_sym) const;
   ExplicitScaleAccumInfo*
