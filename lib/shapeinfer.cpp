@@ -752,13 +752,12 @@ bool ShapeInference::Visit(AST::Identifier& n) {
     // passed from the symbols
     switch (NodeValNoKind(n)) {
     case VNKind::VNK_UBOUND: {
-      if (!vn.HasValueNumberOfSignature(
-              s_sn(SSTab().InScopeName("@" + n.name))))
+      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName("@" + n.name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(n.name) +
                            "' has not been generated.");
       cur_vn = GetValNum(SSTab().InScopeName("@" + n.name));
       ast_vn.Update(&n, cur_vn, VNKind::VNK_UBOUND);
-      if (!vn.HasValueNumberOfSignature(s_sn(SSTab().InScopeName(n.name))))
+      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName(n.name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(n.name) +
                            "' has not been generated.");
       auto valno = GetValNum(SSTab().InScopeName(n.name));
@@ -767,7 +766,7 @@ bool ShapeInference::Visit(AST::Identifier& n) {
     case VNKind::VNK_MDSPAN: {
       auto name =
           RemoveSuffix(RemoveSuffix(n.name, ".span"), ".data") + ".span";
-      if (!vn.HasValueNumberOfSignature(s_sn(SSTab().InScopeName(name))))
+      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName(name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(name) +
                            "' has not been generated.");
       cur_vn = GetValNum(SSTab().InScopeName(name));
@@ -775,7 +774,7 @@ bool ShapeInference::Visit(AST::Identifier& n) {
     } break;
     case VNKind::VNK_VALUE: {
       // it is a reference
-      if (!vn.HasValueNumberOfSignature(s_sn(SSTab().InScopeName(n.name))))
+      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName(n.name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(n.name) +
                            "' has not been generated.");
       cur_vn = GetValNum(SSTab().InScopeName(n.name));
@@ -1275,7 +1274,7 @@ bool ShapeInference::Visit(AST::MMA& n) {
     }
     cur_vn = GetOrGenValNum(asig);
     auto mdsym = SSTab().InScopeName(op0_sym) + ".span";
-    if (!vn.HasValidValueNumberOfSignature(s_sn(mdsym)))
+    if (!vn.HasValidValueNumberOfSymbol(mdsym))
       SymbolAliasNum(mdsym, cur_vn);
     auto mty = MakeMDSpanType(GenShape(cur_vn));
     auto c_sty = GetSpannedType(GetSymbolType(op0_sym));
@@ -2008,7 +2007,7 @@ void ShapeInference::UpdateValueNumberForMultiValues(const AST::MultiValues& mv,
         auto equals = type_equals.GetEquals(SSTab().InScopeName(id->name));
         for (auto& e : equals.value()) {
           auto asym = e + ".span";
-          if (!vn.HasValidValueNumberOfSignature(s_sn(asym)))
+          if (!vn.HasValidValueNumberOfSymbol(asym))
             SymbolRebindNum(asym, valno);
           else
             assert(valno == GetValNum(asym));

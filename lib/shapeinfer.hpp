@@ -190,10 +190,12 @@ private:
   }
 
   const NumTy GetValNum(const std::string& symbol) const {
+    if (auto found = vn.FindSymbolValueNumber(symbol)) return *found;
     return vn.GetValueNumberOfSignature(s_sn(symbol));
   }
 
   const NumTy GetOrGenValNum(const std::string& symbol) {
+    if (auto found = vn.FindSymbolValueNumber(symbol)) return *found;
     return vn.GetOrGenValueNumberFromSignature(s_sn(symbol));
   }
 
