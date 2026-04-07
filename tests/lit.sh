@@ -525,9 +525,55 @@ is_dynshape_supported=0
 # This avoids repeated detection for many files under the same lit config.
 declare -A HW_DETECT_CACHE=()
 
-# Cache cfg chain and hook registry per test directory.
+# Cache cfg chain and hook registry, keyed by the set of lit.cfg files
+# in the path (chain_key).  Different directories that share the same
+# lit.cfg chain are served from a single cache entry, so each chain is
+# sourced exactly once — preventing side-effect re-initialization of
+# target variables (e.g. gcu_arch="none") on a cache hit.
 declare -A CFG_CHAIN_CACHE=()
 declare -A HOOKS_CACHE=()
+
+# Fast directory → chain_key mapping so compute_cfg_files_key() is
+# called at most once per unique directory.
+declare -A DIR_TO_CHAIN_KEY=()
+
+# Walk the directory ancestors to find tests/benchmark root, then
+# collect the set of lit.cfg files that load_cfg_chain_from_tests
+# would source.  Returns the result via _cfg_files_key (no subshell).
+_cfg_files_key=""
+compute_cfg_files_key() {
+  local dir="$1"
+  local d="$dir" tests_root=""
+  while :; do
+    case "${d##*/}" in
+      tests|benchmark) tests_root="$d"; break ;;
+    esac
+    [[ "$d" == "/" || -z "$d" ]] && break
+    d="${d%/*}"
+  done
+  if [[ -z "$tests_root" ]]; then
+    _cfg_files_key="__no_root__"; return
+  fi
+  local rel
+  case "$dir" in
+    "$tests_root") rel="" ;;
+    "$tests_root"/*) rel="${dir#"$tests_root"/}" ;;
+    *) _cfg_files_key="__bad_path__"; return ;;
+  esac
+  local key=""
+  d="$tests_root"
+  [[ -f "$d/lit.cfg" ]] && key="$d/lit.cfg"
+  if [[ -n "$rel" ]]; then
+    local oldIFS="$IFS" seg
+    IFS="/"
+    for seg in $rel; do
+      d="$d/$seg"
+      [[ -f "$d/lit.cfg" ]] && key="${key}${key:+;}$d/lit.cfg"
+    done
+    IFS="$oldIFS"
+  fi
+  _cfg_files_key="${key:-__no_cfg__}"
+}
 
 make_cfg_cache_key() {
   local cfgs="$1"
@@ -584,9 +630,18 @@ prepare() {
     cfg_root_dir="$(abspath_dir_of "$file")"
   fi
 
-  if [[ -n "${CFG_CHAIN_CACHE["$cfg_root_dir"]+x}" ]]; then
-    CFG_SOURCED="${CFG_CHAIN_CACHE["$cfg_root_dir"]}"
-    HOOKS="${HOOKS_CACHE["$cfg_root_dir"]}"
+  local chain_key
+  if [[ -n "${DIR_TO_CHAIN_KEY["$cfg_root_dir"]+x}" ]]; then
+    chain_key="${DIR_TO_CHAIN_KEY["$cfg_root_dir"]}"
+  else
+    compute_cfg_files_key "$cfg_root_dir"
+    chain_key="$_cfg_files_key"
+    DIR_TO_CHAIN_KEY["$cfg_root_dir"]="$chain_key"
+  fi
+
+  if [[ -n "${CFG_CHAIN_CACHE["$chain_key"]+x}" ]]; then
+    CFG_SOURCED="${CFG_CHAIN_CACHE["$chain_key"]}"
+    HOOKS="${HOOKS_CACHE["$chain_key"]}"
   else
     CFG_SOURCED=""
     HOOKS=""
@@ -597,8 +652,8 @@ prepare() {
     else
       load_cfg_chain_from_tests "$file"
     fi
-    CFG_CHAIN_CACHE["$cfg_root_dir"]="$CFG_SOURCED"
-    HOOKS_CACHE["$cfg_root_dir"]="$HOOKS"
+    CFG_CHAIN_CACHE["$chain_key"]="$CFG_SOURCED"
+    HOOKS_CACHE["$chain_key"]="$HOOKS"
   fi
 
   local cfg_cache_key
