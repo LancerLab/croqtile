@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "ast.hpp"
+#include "fs_utils.hpp"
 #include "options.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"
@@ -101,9 +102,6 @@ inline const char* EmitSync(Storage s) {
   }
   return "";
 }
-
-std::string GetAbsPath(const std::filesystem::path& cwd,
-                       const std::string& relative_path);
 
 void PrintSubscriptions(std::ostream& os, const std::string& prefix,
                         const std::string& suffix, const ValueList& dims,

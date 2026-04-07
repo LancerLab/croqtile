@@ -104,7 +104,7 @@ protected:
   void HandleOneChoreoLine(const std::string& line, bool handle_comment = true);
 
 public:
-  virtual bool ExtractDeviceKernel(std::ostream&) { return true; }
+  virtual bool ExtractDeviceKernel(std::ostream& cok_ss);
   virtual bool Process(std::istream& input);
 }; // class Preprocess
 

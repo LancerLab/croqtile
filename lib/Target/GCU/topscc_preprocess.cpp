@@ -171,7 +171,8 @@ bool TopsccPreprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
   int ret = system(cmd.c_str());
   if (ret != 0) {
     if (debug) dbgs() << "Command failed: " << cmd << "\n";
-    return true;
+    remove(temp_script_file_name);
+    return Preprocess::ExtractDeviceKernel(cok_ss);
   }
 
   if (remove(temp_script_file_name) != 0) {
