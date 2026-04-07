@@ -187,6 +187,11 @@ run_hooks_strict() {
   return 0
 }
 
+# ---- Choreo lit.cfg marker validation ----
+# Only source lit.cfg files whose first line starts with "# co-lit".
+# This prevents accidentally sourcing configs from other tools (e.g. LLVM).
+is_choreo_cfg() { local h; read -r h < "$1" 2>/dev/null && [[ "$h" == "# co-lit"* ]]; }
+
 #===================== utilities =========================
 
 get_terminal_width() {
@@ -351,78 +356,36 @@ expand_includes() {
   files_array=("${new_array[@]}")
 }
 
-find_tests_root() {
-  # usage: find_tests_root <test_path>
-  # returns absolute path to nearest ancestor directory named "tests"
-  d="$(abspath_dir_of "$1")"
-
-  while :; do
-    base="$(basename "$d")"
-    if [ "$base" = "tests" ] || [ "$base" = "benchmark" ]; then
-      printf "%s\n" "$d"
-      return 0
-    fi
-    parent="$(dirname "$d")"
-    [ "$parent" = "$d" ] && break
-    d="$parent"
-  done
-
-  echo "lit.sh: could not find ancestor directory named 'tests' for: $1" >&2
-  return 2
-}
-
-load_cfg_chain_from_tests() {
-  # usage: load_cfg_chain_from_tests <test_path> [cfg_name]
-  test_path="$1"
-  cfg_name="${2:-lit.cfg}"
-
-  tests_root="$(find_tests_root "$test_path")"
+load_cfg_chain() {
+  # Walk UP from the test file's directory, collecting Choreo-marked
+  # lit.cfg files.  Stop at script_dir (inclusive) or /.
+  # Then source in reverse (parent-first) order.
+  local test_path="$1"
+  local cfg_name="${2:-lit.cfg}"
+  local test_dir
   test_dir="$(abspath_dir_of "$test_path")"
 
-  # Build the relative path from tests_root -> test_dir using string stripping
-  # Assumes test_dir is under tests_root.
-  case "$test_dir" in
-    "$tests_root") rel="" ;;
-    "$tests_root"/*) rel="${test_dir#"$tests_root"/}" ;;
-    *)
-      echo "lit.sh: $test_dir is not under $tests_root" >&2
-      return 2
-      ;;
-  esac
+  local -a _chain=()
+  local d="$test_dir"
+  while :; do
+    if [[ -f "$d/$cfg_name" ]] && is_choreo_cfg "$d/$cfg_name"; then
+      _chain+=("$d/$cfg_name")
+    fi
+    [[ "$d" == "$script_dir" ]] && break
+    [[ "$d" == "/" || -z "$d" ]] && break
+    d="${d%/*}"
+    [[ -z "$d" ]] && d="/"
+  done
 
-  # Source tests_root/lit.cfg first (if present)
-  d="$tests_root"
-  cfg="$d/$cfg_name"
-  if [ -f "$cfg" ]; then
-    cfg_abs="$(cd "$(dirname "$cfg")" && pwd)/$(basename "$cfg")"
+  # Source in reverse order (outermost parent first).
+  local _i cfg_abs
+  for (( _i=${#_chain[@]}-1; _i>=0; _i-- )); do
+    cfg_abs="${_chain[$_i]}"
     if ! already_sourced_cfg "$cfg_abs"; then
       mark_sourced_cfg "$cfg_abs"
-       #echo "==> sourcing cfg: $cfg_abs" >&2
       . "$cfg_abs"
     fi
-  fi
-
-  # Then walk rel segments: tests_root/seg1, tests_root/seg1/seg2, ...
-  # and source cfg at each level if present.
-  if [ -n "$rel" ]; then
-    oldIFS="$IFS"
-    IFS="/"
-    set -- $rel
-    IFS="$oldIFS"
-
-    for seg in "$@"; do
-      d="$d/$seg"
-      cfg="$d/$cfg_name"
-      if [ -f "$cfg" ]; then
-        cfg_abs="$(cd "$(dirname "$cfg")" && pwd)/$(basename "$cfg")"
-        if ! already_sourced_cfg "$cfg_abs"; then
-          mark_sourced_cfg "$cfg_abs"
-           #echo "==> sourcing cfg: $cfg_abs" >&2
-          . "$cfg_abs"
-        fi
-      fi
-    done
-  fi
+  done
 }
 
 #=========================================================
@@ -514,12 +477,8 @@ fi
 # Check the hardware device availability and type
 # Note: consider the machine only installed a single target
 device_type="none"
-cuda_arch="none"
 mach=
 simulator="none"
-
-# some specific features
-is_dynshape_supported=0
 
 # Cache hardware detection results per sourced cfg chain.
 # This avoids repeated detection for many files under the same lit config.
@@ -529,7 +488,7 @@ declare -A HW_DETECT_CACHE=()
 # in the path (chain_key).  Different directories that share the same
 # lit.cfg chain are served from a single cache entry, so each chain is
 # sourced exactly once — preventing side-effect re-initialization of
-# target variables (e.g. gcu_arch="none") on a cache hit.
+# target variables on a cache hit.
 declare -A CFG_CHAIN_CACHE=()
 declare -A HOOKS_CACHE=()
 
@@ -537,41 +496,26 @@ declare -A HOOKS_CACHE=()
 # called at most once per unique directory.
 declare -A DIR_TO_CHAIN_KEY=()
 
-# Walk the directory ancestors to find tests/benchmark root, then
-# collect the set of lit.cfg files that load_cfg_chain_from_tests
-# would source.  Returns the result via _cfg_files_key (no subshell).
+# Walk UP from dir to script_dir (or /), collecting Choreo-marked
+# lit.cfg paths.  Returns the result via _cfg_files_key (no subshell).
+# The key is ordered parent-first (reversed from the walk-up order)
+# to match load_cfg_chain's sourcing order.
 _cfg_files_key=""
 compute_cfg_files_key() {
   local dir="$1"
-  local d="$dir" tests_root=""
+  local -a _found=()
+  local d="$dir"
   while :; do
-    case "${d##*/}" in
-      tests|benchmark) tests_root="$d"; break ;;
-    esac
+    [[ -f "$d/lit.cfg" ]] && is_choreo_cfg "$d/lit.cfg" && _found+=("$d/lit.cfg")
+    [[ "$d" == "$script_dir" ]] && break
     [[ "$d" == "/" || -z "$d" ]] && break
     d="${d%/*}"
+    [[ -z "$d" ]] && d="/"
   done
-  if [[ -z "$tests_root" ]]; then
-    _cfg_files_key="__no_root__"; return
-  fi
-  local rel
-  case "$dir" in
-    "$tests_root") rel="" ;;
-    "$tests_root"/*) rel="${dir#"$tests_root"/}" ;;
-    *) _cfg_files_key="__bad_path__"; return ;;
-  esac
-  local key=""
-  d="$tests_root"
-  [[ -f "$d/lit.cfg" ]] && key="$d/lit.cfg"
-  if [[ -n "$rel" ]]; then
-    local oldIFS="$IFS" seg
-    IFS="/"
-    for seg in $rel; do
-      d="$d/$seg"
-      [[ -f "$d/lit.cfg" ]] && key="${key}${key:+;}$d/lit.cfg"
-    done
-    IFS="$oldIFS"
-  fi
+  local key="" _i
+  for (( _i=${#_found[@]}-1; _i>=0; _i-- )); do
+    key="${key}${key:+;}${_found[$_i]}"
+  done
   _cfg_files_key="${key:-__no_cfg__}"
 }
 
@@ -587,14 +531,14 @@ make_cfg_cache_key() {
 
 save_hw_detect_cache() {
   local key="$1"
-  HW_DETECT_CACHE["$key"]="${device_type}|${cuda_arch}|${mach}|${simulator}|${is_dynshape_supported}"
+  HW_DETECT_CACHE["$key"]="${device_type}|${mach}|${simulator}"
 }
 
 restore_hw_detect_cache() {
   local key="$1"
   local cached="${HW_DETECT_CACHE["$key"]}"
 
-  IFS='|' read -r device_type cuda_arch mach simulator is_dynshape_supported <<< "$cached"
+  IFS='|' read -r device_type mach simulator <<< "$cached"
 }
 
 # Function to fill the target-specific variables
@@ -648,9 +592,9 @@ prepare() {
     if [[ -n "$cfg_override" ]]; then
       # Load the cfg chain for the override dir by passing a sentinel path
       # whose dirname resolves to that directory.
-      load_cfg_chain_from_tests "${cfg_override}/__sentinel__"
+      load_cfg_chain "${cfg_override}/__sentinel__"
     else
-      load_cfg_chain_from_tests "$file"
+      load_cfg_chain "$file"
     fi
     CFG_CHAIN_CACHE["$chain_key"]="$CFG_SOURCED"
     HOOKS_CACHE["$chain_key"]="$HOOKS"
@@ -835,8 +779,7 @@ execute_command() {
     -e "s#\bcopp\b#$(which copp)#g" \
     -e "s#\bFileCheck\b#${FILECHECK}#g" \
     -e "s#\bgdb\b#${GDB_BIN}#g" \
-    -e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g" \
-    -e "s#%cuda_arch#-arch ${cuda_arch}#g")
+    -e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g")
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
   run_hooks "target_cmd" "command"

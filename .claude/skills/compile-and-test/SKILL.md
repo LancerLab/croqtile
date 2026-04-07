@@ -525,3 +525,37 @@ scripts/run_co_auto_gpu.sh benchmark/performance/hgemm_rr/hgemm_v1_warptiling.co
 make test
 make JOBS=4 test
 ```
+
+---
+
+## `lit.sh` / `lit.cfg` Design Conventions
+
+### Target-agnostic core
+
+`lit.sh` is the shared test runner framework. It must **never** contain target-specific variable names, `%`-token substitutions, or hardware-detection logic. The only variables `lit.sh` manages are:
+
+| Variable | Purpose |
+|---|---|
+| `device_type` | Generic device kind (set by each target's `hw_detect` hook, or `"none"`) |
+| `mach` | Detected machine arch string (set by each target's `hw_detect` hook) |
+| `simulator` | Simulator identifier (or `"none"`) |
+
+Everything target-specific — arch variables, custom `%`-token expansions, skip conditions, capability flags — belongs **exclusively** in the target's own `lit.cfg` and its registered hooks.
+
+### Where things go
+
+| What | Where | Example |
+|---|---|---|
+| Arch variable init | Target `lit.cfg` top-level | `mytarget_arch="none"` |
+| Hardware detection | `hw_detect` hook in target `lit.cfg` | `mytarget_detect()` sets arch var, `device_type`, `mach` |
+| `%`-token expansion | `target_cmd` hook in target `lit.cfg` | `mytarget_command()` expands `%mytarget_arch` and `%target` |
+| Skip conditions | `target_noskip` hook in target `lit.cfg` | `mytarget_noskip()` checks target-specific capabilities |
+| HW detect cache | `lit.sh` core — only `device_type`, `mach`, `simulator` | Target vars persist as globals; no need to cache them |
+
+### Adding new target tokens
+
+When a new target needs a custom `%`-token (e.g. `%myarch`):
+1. Initialize the variable in the target's `lit.cfg` (e.g. `myarch="none"`)
+2. Set it in the target's `hw_detect` hook
+3. Expand it in the target's `target_cmd` hook
+4. **Do not** add it to `lit.sh`'s `execute_command` or the HW detect cache
