@@ -1,0 +1,17 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+
+__co__ void foo(int x) {
+  parallel by 1 : block {
+    parallel by 256 : thread {
+      if (x == 0) {
+        yield;
+      }
+    }
+  }
+}
+
+// yield compiles to a bare `return;` inside the __global__ device function
+// CHECK: __global__ void __choreo_device_foo
+// CHECK: if ((x == 0)) {
+// CHECK-NEXT: return;
+// CHECK: } // end if-else

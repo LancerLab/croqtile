@@ -122,7 +122,8 @@ const std::string Preprocess::SubStituteMacroFuncs(const std::string& line,
 
 const std::string Preprocess::SubStituteDefines(const std::string& line,
                                                 const DefineMap& defines,
-                                                const FuncMap& funcs) {
+                                                const FuncMap& funcs,
+                                                std::vector<MacroSub>* subs) {
   std::string result;
   std::string current_token;
   bool in_string = false;
@@ -187,9 +188,14 @@ const std::string Preprocess::SubStituteDefines(const std::string& line,
       if (!current_token.empty()) {
         auto it = defines.find(current_token);
         auto func_it = funcs.find(current_token);
-        if (it != defines.end() && func_it == funcs.end())
+        if (it != defines.end() && func_it == funcs.end()) {
+          if (subs && it->second.size() != current_token.size()) {
+            int col = (int)(i - current_token.size()) + 1;
+            subs->push_back(
+                {col, (int)current_token.size(), (int)it->second.size()});
+          }
           result += it->second;
-        else
+        } else
           result += current_token;
         current_token.clear();
       }
@@ -200,9 +206,14 @@ const std::string Preprocess::SubStituteDefines(const std::string& line,
   // last token
   if (!current_token.empty()) {
     auto it = defines.find(current_token);
-    if (it != defines.end())
+    if (it != defines.end()) {
+      if (subs && it->second.size() != current_token.size()) {
+        int col = (int)(line.length() - current_token.size()) + 1;
+        subs->push_back(
+            {col, (int)current_token.size(), (int)it->second.size()});
+      }
       result += it->second;
-    else
+    } else
       result += current_token;
   }
 
@@ -213,8 +224,10 @@ const std::string Preprocess::SubstituteGlobalDefines(const std::string& line) {
   return SubStituteDefines(line, globalDefines, globalDefinedFuncs);
 }
 
-const std::string Preprocess::SubstituteLocalDefines(const std::string& line) {
-  return SubStituteDefines(line, localDefines, localDefinedFuncs);
+const std::string
+Preprocess::SubstituteLocalDefines(const std::string& line,
+                                   std::vector<MacroSub>* subs) {
+  return SubStituteDefines(line, localDefines, localDefinedFuncs, subs);
 }
 
 const std::string
@@ -877,13 +890,19 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
 
     if ((co_end == aline.size()) && (choreo_brace_count == 0)) {
       // has not entered the choreo code region
-      auto sline = SubstituteLocalDefines(aline);
+      std::vector<MacroSub> subs;
+      auto sline = SubstituteLocalDefines(aline, &subs);
+      if (!subs.empty())
+        CCtx().SetLineMacroSubs(line_num, std::move(subs));
       if (!uc_skip_line) output << sline << '\n';
       return;
     }
 
+    std::vector<MacroSub> subs;
     auto co_code = aline.substr(0, co_end);
-    auto sline = SubstituteLocalDefines(co_code);
+    auto sline = SubstituteLocalDefines(co_code, &subs);
+    if (!subs.empty())
+      CCtx().SetLineMacroSubs(line_num, std::move(subs));
     bool changed = true;
     while (changed) { sline = SubstituteLocalMacroFuncs(sline, changed); }
 

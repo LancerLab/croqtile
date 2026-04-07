@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
 #include <utility>
 
 extern Choreo::location loc;
@@ -433,6 +434,8 @@ private:
   std::vector<std::string> libraries;
   std::vector<std::string> source_lines;
 
+  std::unordered_map<int, std::vector<MacroSub>> line_macro_subs;
+
 public:
   bool DebugSymTab() const { return debug_symtab; }
 
@@ -655,6 +658,23 @@ public:
       return source_lines[line_no - 1];
     }
     return "";
+  }
+
+  void SetLineMacroSubs(int line_no, std::vector<Choreo::MacroSub> subs) {
+    line_macro_subs[line_no] = std::move(subs);
+  }
+
+  int MapExpandedColToOriginal(int line_no, int exp_col) const {
+    auto it = line_macro_subs.find(line_no);
+    if (it == line_macro_subs.end()) return exp_col;
+    int offset = 0;
+    for (const auto& s : it->second) {
+      int exp_start = s.orig_col + offset;
+      if (exp_col < exp_start) break;
+      if (exp_col < exp_start + s.repl_len) return s.orig_col;
+      offset += s.repl_len - s.orig_len;
+    }
+    return exp_col - offset;
   }
 
 public:

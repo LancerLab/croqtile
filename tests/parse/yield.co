@@ -1,0 +1,22 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void foo(int x) {
+  parallel by 1 : block {
+    parallel by 256 : thread {
+      if (x == 0) {
+        yield;
+      }
+    }
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: s32, symbol: x
+// CHECK:  `- block Parallelization: index symbol: anon_0, bound [0, 1)
+// CHECK:   `- thread Parallelization: index symbol: anon_1, bound [0, 256)
+// CHECK:    `- Branch On Condition:  (x == 0) 
+// CHECK:     `- If-Block:
+// CHECK:      `- Yield

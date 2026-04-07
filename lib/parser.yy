@@ -2487,16 +2487,13 @@ void Parser::error(const location &loc , const std::string &message) {
 
   if (!CCtx().ShowSourceLocation()) return;
 
-  // Retrieve the line that caused the error
   std::string error_line = CCtx().GetSourceLine(loc.begin.line);
   if (!error_line.empty()) {
-    errs() << "  " << error_line << "\n"; // Print the source line
+    errs() << "  " << error_line << "\n";
 
-    // Print caret (^) under the error position
+    int col = CCtx().MapExpandedColToOriginal(loc.begin.line, loc.begin.column);
     errs() << "  ";
-    for (int i = 1; i < loc.begin.column; ++i)
-      errs() << " "; // Align the caret with the exact error position
-
+    for (int i = 1; i < col; ++i) errs() << " ";
     errs() << "^" << "\n";
   }
 
@@ -2512,16 +2509,13 @@ void Choreo::info(const location &loc , const std::string &message) {
 
   if (!CCtx().ShowSourceLocation()) return;
 
-  // Retrieve the line that caused the error
   std::string error_line = CCtx().GetSourceLine(loc.begin.line);
   if (!error_line.empty()) {
-    errs() << "  " << error_line << "\n"; // Print the source line
+    errs() << "  " << error_line << "\n";
 
-    // Print caret (^) under the error position
+    int col = CCtx().MapExpandedColToOriginal(loc.begin.line, loc.begin.column);
     errs() << "  ";
-    for (int i = 1; i < loc.begin.column; ++i)
-      errs() << " "; // Align the caret with the exact error position
-
+    for (int i = 1; i < col; ++i) errs() << " ";
     errs() << "^" << "\n";
   }
 }
