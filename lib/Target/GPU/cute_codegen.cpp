@@ -4716,11 +4716,35 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(t_sym);
       auto f_sty = GetSpannedType(ty);
       auto accum_type = ssmi.ty;
+      std::string buf_expr =
+          isa<FutureType>(ty) ? t_sym + ".data()" : t_sym;
+      if (ca->indices != nullptr) {
+        if (auto array_ty = dyn_cast<ArrayType>(ty);
+            array_ty && CCtx().MemReuse()) {
+          std::string array_idx;
+          auto subscriptions = ca->indices->AllValues();
+          const ValueList& array_sizes = array_ty->Dimensions();
+          for (size_t i = 0; i < subscriptions.size(); ++i) {
+            if (array_idx.empty())
+              array_idx = ExprSTR(subscriptions[i], IsHost());
+            else
+              array_idx = "(" + array_idx + ")*" +
+                          ValueSTR(array_sizes[i]) + "+" +
+                          ExprSTR(subscriptions[i], IsHost());
+          }
+          std::string elem_count =
+              ValueSTR(f_sty->GetShape().ElementCountValue());
+          buf_expr += " + (" + array_idx + ")*(" + elem_count + ")";
+        } else {
+          for (auto expr : ca->indices->AllValues())
+            buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
+        }
+      }
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(t_sym, ".data()"),
-          (isa<FutureType>(ty) ? t_sym + ".data()" : t_sym),
-          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
-          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
+          RemoveSuffix(t_sym, ".data()"), buf_expr,
+          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(),
+          false, ValueSTR(GenOffset(ca)),
+          ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       std::string DIM_N_STR = STR(ssmi.shape.at(1));
       std::string CUTE_WGMMA_ATOM =
@@ -4982,11 +5006,35 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto f_sym = ca->data->name;
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
+      std::string buf_expr =
+          isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
+      if (ca->indices != nullptr) {
+        if (auto array_ty = dyn_cast<ArrayType>(ty);
+            array_ty && CCtx().MemReuse()) {
+          std::string array_idx;
+          auto subscriptions = ca->indices->AllValues();
+          const ValueList& array_sizes = array_ty->Dimensions();
+          for (size_t i = 0; i < subscriptions.size(); ++i) {
+            if (array_idx.empty())
+              array_idx = ExprSTR(subscriptions[i], IsHost());
+            else
+              array_idx = "(" + array_idx + ")*" +
+                          ValueSTR(array_sizes[i]) + "+" +
+                          ExprSTR(subscriptions[i], IsHost());
+          }
+          std::string elem_count =
+              ValueSTR(f_sty->GetShape().ElementCountValue());
+          buf_expr += " + (" + array_idx + ")*(" + elem_count + ")";
+        } else {
+          for (auto expr : ca->indices->AllValues())
+            buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
+        }
+      }
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_sym, ".data()"),
-          (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
-          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(), false,
-          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
+          RemoveSuffix(f_sym, ".data()"), buf_expr,
+          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(),
+          false, ValueSTR(GenOffset(ca)),
+          ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
@@ -5163,9 +5211,32 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
       auto fca_sty = GetSpannedType(NodeType(*ca));
+      std::string buf_expr =
+          isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
+      if (ca->indices != nullptr) {
+        if (auto array_ty = dyn_cast<ArrayType>(ty);
+            array_ty && CCtx().MemReuse()) {
+          std::string array_idx;
+          auto subscriptions = ca->indices->AllValues();
+          const ValueList& array_sizes = array_ty->Dimensions();
+          for (size_t i = 0; i < subscriptions.size(); ++i) {
+            if (array_idx.empty())
+              array_idx = ExprSTR(subscriptions[i], IsHost());
+            else
+              array_idx = "(" + array_idx + ")*" +
+                          ValueSTR(array_sizes[i]) + "+" +
+                          ExprSTR(subscriptions[i], IsHost());
+          }
+          std::string elem_count =
+              ValueSTR(f_sty->GetShape().ElementCountValue());
+          buf_expr += " + (" + array_idx + ")*(" + elem_count + ")";
+        } else {
+          for (auto expr : ca->indices->AllValues())
+            buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
+        }
+      }
       const auto f_mds =
-          GenTensorDecl(RemoveSuffix(f_sym, ".data()"),
-                        (isa<FutureType>(ty) ? f_sym + ".data()" : f_sym),
+          GenTensorDecl(RemoveSuffix(f_sym, ".data()"), buf_expr,
                         f_sty->GetStorage(), f_sty->ElementType(),
                         ca->GetBlockShape(), false, ValueSTR(GenOffset(ca)),
                         ValueSTR(fca_sty->GetStrides(), false, true));
@@ -7257,6 +7328,29 @@ const ValueItem CuteCodeGen::TileAddr(const ptr<AST::ChunkAt>& ca, bool is_host,
                     ExprSTR(ca->data, is_host) + ".data()");
   } else
     base = sbe::sym(ExprSTR(ca->data, is_host));
+
+  if (ca->indices != nullptr) {
+    auto sym_ty = GetSymbolType(ca->data->name);
+    if (auto array_ty = dyn_cast<ArrayType>(sym_ty);
+        array_ty && CCtx().MemReuse()) {
+      std::string array_idx;
+      auto subscriptions = ca->indices->AllValues();
+      const ValueList& array_sizes = array_ty->Dimensions();
+      for (size_t i = 0; i < subscriptions.size(); ++i) {
+        if (array_idx.empty())
+          array_idx = ExprSTR(subscriptions[i], is_host);
+        else
+          array_idx = "(" + array_idx + ")*" +
+                      ValueSTR(array_sizes[i]) + "+" +
+                      ExprSTR(subscriptions[i], is_host);
+      }
+      auto f_sty = GetSpannedType(sym_ty);
+      std::string elem_count =
+          ValueSTR(f_sty->GetShape().ElementCountValue());
+      offset = offset +
+               sbe::sym("(" + array_idx + ")*(" + elem_count + ")");
+    }
+  }
 
   return base + offset;
 }
