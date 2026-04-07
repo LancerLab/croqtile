@@ -31,8 +31,8 @@ void ASTPipeline::Dump() const {
   dbgs() << "++ END Pipeline\n";
 }
 
-void ASTPipeline::PrintPassTimings(
-    const std::vector<PassTimingEntry>& timings, double total_ms) const {
+void ASTPipeline::PrintPassTimings(const std::vector<PassTimingEntry>& timings,
+                                   double total_ms) const {
   const char* sep =
       "===-------------------------------------------------------------------"
       "----===";
@@ -45,9 +45,9 @@ void ASTPipeline::PrintPassTimings(
   errs() << std::string(40, '-') << "\n";
   for (const auto& e : timings) {
     double pct = total_ms > 0 ? (e.ms / total_ms) * 100.0 : 0.0;
-    errs() << std::right << std::setw(10) << std::fixed
-           << std::setprecision(2) << e.ms << "  " << std::setw(5)
-           << std::fixed << std::setprecision(1) << pct << "%"
+    errs() << std::right << std::setw(10) << std::fixed << std::setprecision(2)
+           << e.ms << "  " << std::setw(5) << std::fixed << std::setprecision(1)
+           << pct << "%"
            << "  " << e.name << "\n";
   }
   errs() << std::string(40, '-') << "\n";
@@ -117,12 +117,12 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
         "===-------------------------------------------------------------------"
         "----===";
     errs() << "\n"
-        << color::err(color::kBold) << sep << "\n"
+           << color::err(color::kBold) << sep << "\n"
            << "                      ... Assessment Statistics ...\n"
-        << sep << color::err(color::kReset) << "\n";
+           << sep << color::err(color::kReset) << "\n";
     auto row = [&](size_t n, const char* desc) {
-        errs() << color::err(color::kBold) << std::right << std::setw(6) << n
-          << color::err(color::kReset) << "  assess  - " << desc << "\n";
+      errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+             << color::err(color::kReset) << "  assess  - " << desc << "\n";
     };
     row(s.total, "Assessments evaluated");
     row(s.static_true, "Resolved at compile time (static-true)");
@@ -134,8 +134,8 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     row(s.runtime_high, "Runtime assertions (high cost)");
     row(s.runtime_enabled, "Runtime assertions enabled");
     row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
-        errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
-          << "\n";
+    errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+           << "\n";
     row(s.unclassified_total, "Assessments (unclassified)");
     row(s.shape_compat_total, "Assessments (shape-compatibility)");
     row(s.elem_access_total, "Assessments (element-access)");
@@ -151,14 +151,14 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     // SBE stats live under --stats so they follow the same colored reporting
     // path as the rest of the assessment summary.
     errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
-      << "\n";
+           << "\n";
     auto ss = sbe::SBEProfiler::Get().Snapshot();
     errs() << color::err(color::kBold) << sep << "\n"
            << "                          ... SBE Statistics ...\n"
-      << sep << color::err(color::kReset) << "\n";
+           << sep << color::err(color::kReset) << "\n";
     auto sbe_row = [&](uint64_t n, const char* desc) {
       errs() << color::err(color::kBold) << std::right << std::setw(6) << n
-        << color::err(color::kReset) << "  sbe     - " << desc << "\n";
+             << color::err(color::kReset) << "  sbe     - " << desc << "\n";
     };
     sbe_row(ss.expression_created, "Symbolic expressions created");
     sbe_row(ss.symbolic_value_created, "Symbolic values created");

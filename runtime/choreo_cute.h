@@ -2694,9 +2694,9 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
 
 // only for M64N32 WGMMA accumulator scaling
 template <typename AccT, typename ScaleT, int N>
-__device__ __forceinline__ void scale_accumulator_full(
-  AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
-  ScaleT scale_b) {
+__device__ __forceinline__ void
+scale_accumulator_full(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
+                       int scale_a_ld, ScaleT scale_b) {
   static_assert(std::is_same_v<ScaleT, f32>,
                 "scale_accumulator only supports f32 scale type");
   static_assert(
@@ -2768,9 +2768,9 @@ __device__ __forceinline__ void scale_accumulator_full(
 }
 
 template <typename AccT, typename ScaleT, int N>
-__device__ __forceinline__ void scale_accumulator_masked(
-  AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
-  int scale_a_rows, ScaleT scale_b) {
+__device__ __forceinline__ void
+scale_accumulator_masked(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
+                         int scale_a_ld, int scale_a_rows, ScaleT scale_b) {
   static_assert(std::is_same_v<ScaleT, f32>,
                 "scale_accumulator only supports f32 scale type");
   static_assert(
@@ -2848,34 +2848,32 @@ template <typename AccT, typename ScaleT, int N>
 __device__ __forceinline__ void
 scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
                   int scale_a_rows, ScaleT scale_b) {
-  scale_accumulator_masked<AccT, ScaleT, N>(d, scale_d, scale_a_ptr,
-                                            scale_a_ld, scale_a_rows,
-                                            scale_b);
+  scale_accumulator_masked<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
+                                            scale_a_rows, scale_b);
 }
 
 template <typename AccT, typename ScaleT, int N, int ScaleARows>
 __device__ __forceinline__ void
 scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
                   ScaleT scale_b) {
-  scale_accumulator_full<AccT, ScaleT, N>(d, scale_d, scale_a_ptr,
-                                          scale_a_ld, scale_b);
+  scale_accumulator_full<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
+                                          scale_b);
 }
 
 template <typename AccT, typename ScaleT, int N, int MaxScaleARows>
-__device__ __forceinline__ void scale_accumulator_dispatch(
-    AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
-    int scale_a_rows, ScaleT scale_b) {
-  scale_accumulator_masked<AccT, ScaleT, N>(d, scale_d, scale_a_ptr,
-                                            scale_a_ld, scale_a_rows,
-                                            scale_b);
+__device__ __forceinline__ void
+scale_accumulator_dispatch(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
+                           int scale_a_ld, int scale_a_rows, ScaleT scale_b) {
+  scale_accumulator_masked<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
+                                            scale_a_rows, scale_b);
 }
 
 template <typename AccT, typename ScaleT, int N>
 __device__ __forceinline__ void
 scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
                   ScaleT scale_b) {
-  scale_accumulator_full<AccT, ScaleT, N>(d, scale_d, scale_a_ptr,
-                                          scale_a_ld, scale_b);
+  scale_accumulator_full<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
+                                          scale_b);
 }
 
 // --------------- MMA policy specializations ---------------

@@ -93,9 +93,8 @@ public:
 
   void Dump() const;
 
-  void PrintPassTimings(
-      const std::vector<struct PassTimingEntry>& timings,
-      double total_ms) const;
+  void PrintPassTimings(const std::vector<struct PassTimingEntry>& timings,
+                        double total_ms) const;
 
   bool RunOnProgram(AST::Node&);
 

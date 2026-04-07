@@ -86,8 +86,7 @@ inline static std::string DelimitedSTR(const Container& container,
 // token (default: true for backward compat, but no callers actually need it).
 inline static std::vector<std::string>
 SplitStringByDelimiter(const std::string& input,
-                       const std::string& delimiter = ",",
-                       bool trim = true) {
+                       const std::string& delimiter = ",", bool trim = true) {
   std::vector<std::string> tokens;
   size_t start = 0;
   size_t pos;
@@ -114,7 +113,8 @@ inline static std::string SplitFirst(const std::string& input,
                                      const std::string& delimiter) {
   size_t start = 0;
   // skip leading delimiter
-  while (start < input.size() && input.compare(start, delimiter.size(), delimiter) == 0)
+  while (start < input.size() &&
+         input.compare(start, delimiter.size(), delimiter) == 0)
     start += delimiter.size();
   auto pos = input.find(delimiter, start);
   if (pos == std::string::npos) return input.substr(start);
@@ -129,7 +129,8 @@ inline static std::string SplitLast(const std::string& input,
   size_t end = input.size();
   // skip trailing delimiter
   while (end >= delimiter.size() &&
-         input.compare(end - delimiter.size(), delimiter.size(), delimiter) == 0)
+         input.compare(end - delimiter.size(), delimiter.size(), delimiter) ==
+             0)
     end -= delimiter.size();
   if (end == 0) return "";
   auto pos = input.rfind(delimiter, end - 1);

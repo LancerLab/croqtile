@@ -6,19 +6,19 @@
 #include "opcode.hpp"
 #include "options.hpp"
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
 
 #ifndef CHOREO_ENABLE_SBE_STATS
-#define CHOREO_ENABLE_SBE_STATS 0
+  #define CHOREO_ENABLE_SBE_STATS 0
 #endif
 
 // This is a light-weight integer library that support both constant and
@@ -239,7 +239,8 @@ public:
   SBEStats stats;
 };
 
-#define CHOREO_SBE_STATS_INC(field) ++::Choreo::sbe::SBEProfiler::Get().stats.field
+  #define CHOREO_SBE_STATS_INC(field)                                          \
+    ++::Choreo::sbe::SBEProfiler::Get().stats.field
 #else
 struct SBEStats {};
 class SBEProfiler {
@@ -251,7 +252,7 @@ public:
   void Reset() {}
   SBEStats Snapshot() const { return {}; }
 };
-#define CHOREO_SBE_STATS_INC(field) ((void)0)
+  #define CHOREO_SBE_STATS_INC(field) ((void)0)
 #endif
 
 inline size_t HashCombine(size_t seed, size_t value) {

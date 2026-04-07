@@ -173,8 +173,9 @@ Option<bool> sym_repl(OptionKind::Hidden, "--print-sym-replace", "-sr", false,
                       "Trace the symbol replace process.");
 Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
-Option<bool> time_passes(OptionKind::User, "--time-passes", "-tp", false,
-                         "Measure and display the time spent in each compiler pass.");
+Option<bool>
+    time_passes(OptionKind::User, "--time-passes", "-tp", false,
+                "Measure and display the time spent in each compiler pass.");
 Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
                         "Save the temporal files.");
 Option<bool> liveness(OptionKind::Hidden, "--liveness", "", true,

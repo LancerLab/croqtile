@@ -892,8 +892,7 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
       // has not entered the choreo code region
       std::vector<MacroSub> subs;
       auto sline = SubstituteLocalDefines(aline, &subs);
-      if (!subs.empty())
-        CCtx().SetLineMacroSubs(line_num, std::move(subs));
+      if (!subs.empty()) CCtx().SetLineMacroSubs(line_num, std::move(subs));
       if (!uc_skip_line) output << sline << '\n';
       return;
     }
@@ -901,8 +900,7 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
     std::vector<MacroSub> subs;
     auto co_code = aline.substr(0, co_end);
     auto sline = SubstituteLocalDefines(co_code, &subs);
-    if (!subs.empty())
-      CCtx().SetLineMacroSubs(line_num, std::move(subs));
+    if (!subs.empty()) CCtx().SetLineMacroSubs(line_num, std::move(subs));
     bool changed = true;
     while (changed) { sline = SubstituteLocalMacroFuncs(sline, changed); }
 
