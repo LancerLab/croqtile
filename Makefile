@@ -66,6 +66,7 @@ CMAKE_BUILD_TYPE = Release
 STANDALONE = OFF
 
 PUBLIC_PACKAGE=OFF
+FAST_COMPILE_DEFAULT=OFF
 
 # Build rules
 # Ensure running `make` with no target invokes the `build` target by default.
@@ -138,7 +139,7 @@ build-with-cmake:
 build-with-cmake-ninja:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) -DSTANDALONE=$(STANDALONE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) -DSTANDALONE=$(STANDALONE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) -DCHOREO_FAST_COMPILE_DEFAULT=$(FAST_COMPILE_DEFAULT)
 	time ninja -C $(CMAKE_BUILD_DIR)
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
@@ -213,6 +214,67 @@ auto_tune:
 	done
 
 # =============================================================================
+# Precompiled CuTe Runtime (for --fast-compile mode)
+# =============================================================================
+# Build a precompiled CuTe runtime object for faster nvcc compilation.
+# Usage:
+#   make precompile-cute ARCH=sm_90a
+#   make precompile-cute ARCH=sm_90a CUTE_HOME=/path/to/cutlass
+#   make precompile-cute-clean   (remove all cached precompiled objects)
+#
+# The precompiled object is cached in ~/.cache/choreo/ and is used
+# automatically when compiling with 'choreo --fast-compile'.
+
+ARCH ?= sm_90a
+CUDA_HOME ?= /usr/local/cuda
+NVCC ?= $(CUDA_HOME)/bin/nvcc
+CHOREO_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/choreo
+
+# Determine compute arch from SM arch (e.g. sm_90a -> compute_90a)
+COMPUTE_ARCH = $(subst sm_,compute_,$(ARCH))
+
+PRECOMPILE_CFLAGS = -gencode arch=$(COMPUTE_ARCH),code=$(ARCH) \
+	-std=c++17 -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 \
+	-D__CHOREO_TARGET_CUTE__ -D__USE_CUDA_TYPE__ \
+	--expt-relaxed-constexpr -O3
+
+.PHONY: precompile-cute precompile-cute-clean
+
+precompile-cute:
+	@if [ -z "$(CUTE_HOME)" ]; then \
+		echo "Error: CUTE_HOME is not set. Set it to the CUTLASS installation directory."; \
+		echo "  Example: make precompile-cute ARCH=$(ARCH) CUTE_HOME=extern/cutlass"; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(NVCC)" ]; then \
+		echo "Error: nvcc not found at $(NVCC). Set CUDA_HOME correctly."; \
+		exit 1; \
+	fi
+	@mkdir -p $(CHOREO_CACHE_DIR)
+	@if [ ! -w "$(CHOREO_CACHE_DIR)" ]; then \
+		echo "Error: cannot write to $(CHOREO_CACHE_DIR)"; \
+		exit 1; \
+	fi
+	$(eval CUDA_VER := $(shell $(NVCC) --version | grep -oP 'release \K[0-9]+\.[0-9]+'))
+	$(eval FP := $(shell cat $(RT_DIR)/precompiled/choreo_precompiled.cu $(RT_DIR)/choreo.h $(RT_DIR)/choreo_cute.h | md5sum | cut -c1-8))
+	$(eval PRECOMP_OUT := $(CHOREO_CACHE_DIR)/choreo_precompiled_$(ARCH)_cuda$(CUDA_VER)_$(FP).o)
+	@echo "[precompile-cute] Building precompiled CuTe runtime for $(ARCH)..."
+	@echo "[precompile-cute] CUDA_HOME=$(CUDA_HOME) (CUDA $(CUDA_VER))"
+	@echo "[precompile-cute] CUTE_HOME=$(CUTE_HOME)"
+	@echo "[precompile-cute] Fingerprint: $(FP)"
+	$(NVCC) -dc $(PRECOMPILE_CFLAGS) \
+		-I$(CUTE_HOME)/include -I$(RT_DIR) -I$(RT_DIR)/precompiled \
+		$(RT_DIR)/precompiled/choreo_precompiled.cu \
+		-o $(PRECOMP_OUT)
+	@echo "[precompile-cute] Cached at $(PRECOMP_OUT)"
+	@ls -lh $(PRECOMP_OUT)
+
+precompile-cute-clean:
+	@echo "Removing precompiled CuTe runtime objects..."
+	@rm -fv $(CHOREO_CACHE_DIR)/choreo_precompiled_*.o
+	@rm -fv $(CHOREO_CACHE_DIR)/.choreo_precompile.lock
+
+# =============================================================================
 # Help and Documentation
 # =============================================================================
 
@@ -232,6 +294,14 @@ help:
 	@echo "  sample-test-operator OPERATOR=name"
 	@echo "                      - Test specific operator"
 	@echo "                        Available operators: $(OPERATOR_NAMES)"
+	@echo ""
+	@echo "Fast-Compile (Precompiled CuTe Runtime):"
+	@echo "  precompile-cute ARCH=sm_90a CUTE_HOME=extern/cutlass"
+	@echo "                      - Build precompiled CuTe runtime for arch"
+	@echo "                        Cached in \$$XDG_CACHE_HOME/choreo/ or ~/.cache/choreo/"
+	@echo "                        Cache key includes arch, CUDA version, and content hash"
+	@echo "  precompile-cute-clean"
+	@echo "                      - Remove cached precompiled objects"
 
 CODE_DIRS := $(SRC_DIR) $(RT_DIR) tools
 TEST_DIRS := tests benchmark samples

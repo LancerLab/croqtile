@@ -1,0 +1,6 @@
+#ifndef __CHOREO_DEVICE_API_HEADER_H__
+#define __CHOREO_DEVICE_API_HEADER_H__
+
+static const char* __choreo_device_api_header_as_string = R"(@CHOREO_DEVICE_API_HEADER_CONTENT@)";
+
+#endif // __CHOREO_DEVICE_API_HEADER_H__

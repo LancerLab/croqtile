@@ -10,7 +10,9 @@
 
 #include "ast.hpp"
 #include "choreo_cute_header.inc"
+#include "choreo_device_api_header.inc"
 #include "choreo_header.inc"
+#include "choreo_precompiled_cu.inc"
 #include "codegen.hpp"
 #include "operator_info.hpp"
 
@@ -6743,6 +6745,73 @@ void CuteCodeGen::EmitSource() {
   }
 }
 
+uint32_t CuteCodeGen::ContentFingerprint() {
+  // FNV-1a hash of embedded precompiled source + runtime headers.
+  // Any change to the precompiled runtime (or the headers it includes)
+  // produces a different fingerprint, invalidating the cache.
+  uint32_t h = 2166136261u;
+  auto feed = [&](const char* s) {
+    for (; *s; ++s) {
+      h ^= static_cast<uint8_t>(*s);
+      h *= 16777619u;
+    }
+  };
+  feed(__choreo_precompiled_cu_as_string);
+  feed(__choreo_header_as_string);
+  feed(__choreo_cute_header_as_string);
+  return h;
+}
+
+void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
+                                       const std::string& precomp_cu) {
+  char fp_hex[12];
+  std::snprintf(fp_hex, sizeof(fp_hex), "%08x", ContentFingerprint());
+
+  // XDG-compliant cache directory
+  os << R"(CHOREO_CACHE_DIR="${CHOREO_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/choreo}")"
+     << "\n";
+
+  // Verify we can create/write the cache directory
+  os << R"(if ! mkdir -p "${CHOREO_CACHE_DIR}" 2>/dev/null || [ ! -w "${CHOREO_CACHE_DIR}" ]; then)"
+     << "\n";
+  os << R"(  echo "[choreo-fc] Warning: cannot write to ${CHOREO_CACHE_DIR}, using temp dir" >&2)"
+     << "\n";
+  os << R"(  CHOREO_CACHE_DIR=$(mktemp -d))" << "\n";
+  os << "fi\n\n";
+
+  // Cache key includes arch, content fingerprint, and CUDA toolkit version.
+  // This ensures different choreo builds, CUDA versions, or architectures
+  // never share a precompiled object.
+  os << "CUDA_VER=$(${NVCC} --version | grep -oP 'release \\K[0-9]+\\.[0-9]+')\n";
+  os << "PRECOMP_CACHED=${CHOREO_CACHE_DIR}/"
+        "choreo_precompiled_${nv_arch}_cuda${CUDA_VER}_"
+     << fp_hex << ".o\n\n";
+
+  // Build with flock to prevent concurrent builds from colliding.
+  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
+  os << R"(  LOCK_FILE="${CHOREO_CACHE_DIR}/.choreo_precompile.lock")" << "\n";
+  os << R"(  ()" << "\n";
+  os << R"(    flock -x 200)" << "\n";
+  os << R"(    if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
+  os << R"(      echo "[choreo-fc] Building precompiled CuTe runtime for ${nv_arch} (one-time)..." >&2)"
+     << "\n";
+  os << "      ${NVCC} -dc ${DCFLAGS} " << precomp_cu
+     << " -o \"${PRECOMP_CACHED}.tmp\" && \\\n";
+  os << R"(      mv "${PRECOMP_CACHED}.tmp" "${PRECOMP_CACHED}")"
+     << "\n";
+  os << R"(      echo "[choreo-fc] Cached at ${PRECOMP_CACHED}" >&2)"
+     << "\n";
+  os << R"(    fi)" << "\n";
+  os << R"(  ) 200>"${LOCK_FILE}")" << "\n";
+  os << "fi\n\n";
+
+  // Final check: the precompiled object must exist
+  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
+  os << R"(  echo "[choreo-fc] Error: failed to build precompiled runtime at ${PRECOMP_CACHED}" >&2)"
+     << "\n";
+  os << "  exit 1\nfi\n\n";
+}
+
 void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   auto filename = RemoveDirectoryPrefix(
       RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
@@ -6783,7 +6852,7 @@ NVCC_LIB=${CUDA_LIB}/lib
 
 )script";
 
-  auto build_path = CreateUniquePath();
+  std::string build_path = CreateUniquePath();
   auto cc_file = build_path + "/__choreo_cute_" + filename + ".cu";
   auto exe_file = exe_fn;
   if (exe_file.empty())
@@ -6792,6 +6861,10 @@ NVCC_LIB=${CUDA_LIB}/lib
   os << "mkdir -p " << build_path << "\n\n";
 
   // place the choreo header
+  if (CCtx().FastCompile()) {
+    os << "cat <<'EOF' > " << build_path << "/choreo_device_api.h\n";
+    os << __choreo_device_api_header_as_string << "\nEOF\n\n";
+  }
   os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
   os << __choreo_header_as_string << "\nEOF\n\n";
   os << "cat <<'EOF' > " << build_path << "/choreo_cute.h\n";
@@ -6875,30 +6948,72 @@ show_usage() {
   os << " -L${CUDA_HOME}/lib64 -lcuda\"";
   os << "\nexport LD_LIBRARY_PATH=${CUDA_LIB}:${LD_LIBRARY_PATH}\n\n";
 
-  os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
-  if (verbose)
-    os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
-  os << "\n  ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
-  if (verbose) os << "\n  echo " << exe_file << "\n";
-  os << "\n  " << exe_file << "\n";
-  os << R"(elif [ "$1" == "--compile-module" ]; then)";
-  if (verbose)
-    os << "\n  echo ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
+  if (CCtx().FastCompile()) {
+    // --- Fast-compile mode: separate compilation + precompiled runtime ---
+    // Compiles kernel with nvcc -dc and links with a cached precompiled
+    // CuTe runtime object. The cache is keyed by arch, CUDA version, and
+    // a content fingerprint so different choreo versions never collide.
+    auto precomp_cu = build_path + "/choreo_precompiled.cu";
+    auto kernel_obj = build_path + "/kernel.o";
+
+    // Compile-only flags: strip -l/-L from CFLAGS for nvcc -dc
+    os << R"(DCFLAGS=$(echo "${CFLAGS}" | sed 's/ -l[^ ]*//g; s/ -L[^ ]*//g'))"
+       << "\n\n";
+
+    // Write the precompiled runtime source
+    os << "cat <<'PRECOMP_EOF' > " << precomp_cu << "\n";
+    os << __choreo_precompiled_cu_as_string << "\nPRECOMP_EOF\n\n";
+
+    // Content fingerprint (computed at choreo build time)
+    EmitFastCompileCache(os, precomp_cu);
+
+    os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)" << "\n";
+    os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << kernel_obj
        << "\n";
-  os << "\n  ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
-  os << R"(elif [ "$1" == "--compile-link" ]; then)";
-  if (verbose)
-    os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file
+    os << "  ${NVCC} ${CFLAGS} " << kernel_obj
+       << " ${PRECOMP_CACHED} -o " << exe_file << "\n";
+    os << "  " << exe_file << "\n";
+    os << R"(elif [ "$1" == "--compile-module" ]; then)" << "\n";
+    os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << exe_file
        << "\n";
-  os << "\n  ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
-  os << R"(elif [ "$1" == "--lib" ]; then)";
-  if (verbose)
-    os << "\n  echo ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file
-       << " -o " << exe_file << "\n";
-  os << "\n  ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file << " -o "
-     << exe_file << "\n";
-  os << "\nelse show_usage";
-  os << "\nfi";
+    os << R"(elif [ "$1" == "--compile-link" ]; then)" << "\n";
+    os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << kernel_obj
+       << "\n";
+    os << "  ${NVCC} ${CFLAGS} " << kernel_obj
+       << " ${PRECOMP_CACHED} -o " << exe_file << "\n";
+    os << R"(elif [ "$1" == "--lib" ]; then)" << "\n";
+    os << "  ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file << " -o "
+       << exe_file << "\n";
+    os << "\nelse show_usage";
+    os << "\nfi";
+  } else {
+    // --- Standard monolithic compilation ---
+    os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
+    if (verbose)
+      os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+    os << "\n  ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+    if (verbose) os << "\n  echo " << exe_file << "\n";
+    os << "\n  " << exe_file << "\n";
+    os << R"(elif [ "$1" == "--compile-module" ]; then)";
+    if (verbose)
+      os << "\n  echo ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
+         << "\n";
+    os << "\n  ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
+       << "\n";
+    os << R"(elif [ "$1" == "--compile-link" ]; then)";
+    if (verbose)
+      os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file
+         << "\n";
+    os << "\n  ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
+    os << R"(elif [ "$1" == "--lib" ]; then)";
+    if (verbose)
+      os << "\n  echo ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file
+         << " -o " << exe_file << "\n";
+    os << "\n  ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file << " -o "
+       << exe_file << "\n";
+    os << "\nelse show_usage";
+    os << "\nfi";
+  }
 }
 
 bool CuteCodeGen::CompileWithScript(const std::string& action) {

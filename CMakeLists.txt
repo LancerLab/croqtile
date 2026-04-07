@@ -90,6 +90,7 @@ endforeach()
 # Public cache options (defaults: CUDA ON, CUTE OFF)
 option(ENABLE_CUDA "Enable CUDA support" ON)
 option(ENABLE_CUTE "Enable CUTE/CUTLASS support (requires CUDA)" ON)
+option(CHOREO_FAST_COMPILE_DEFAULT "Default --fast-compile to ON for faster nvcc builds" OFF)
 
 # Allow users to provide preferred defaults (empty by default)
 #set(DEFAULT_CUDA_HOME "${CMAKE_SOURCE_DIR}/extern/portable_cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
@@ -342,6 +343,10 @@ option(PUBLIC_PACKAGE "Build for Public Release Package")
 
 if (PUBLIC_PACKAGE)
   add_compile_options(-D__CHOREO_INSTALLATION_PACKAGE__)
+endif()
+
+if (CHOREO_FAST_COMPILE_DEFAULT)
+  add_compile_options(-DCHOREO_FAST_COMPILE_DEFAULT=1)
 endif()
 
 # do not warn about strict-aliasing

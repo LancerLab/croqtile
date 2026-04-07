@@ -123,7 +123,18 @@ Option<bool> print_stats(
 Option<bool> disable_cuda_runtime_env_check(
     OptionKind::Hidden, "--disable-cuda-runtime-env-check", "", false,
     "Do not emit cuda runtime enviroment check.");
-
+#ifdef CHOREO_FAST_COMPILE_DEFAULT
+constexpr bool kFastCompileDefault = true;
+#else
+constexpr bool kFastCompileDefault = false;
+#endif
+Option<bool>
+    fast_compile(OptionKind::User, "--fast-compile", "-fc",
+                 kFastCompileDefault,
+                 "Use separate compilation with a cached precompiled CuTe "
+                 "runtime for faster nvcc compilation. The precompiled "
+                 "runtime is built automatically on first use and cached in "
+                 "$XDG_CACHE_HOME/choreo/ (or ~/.cache/choreo/).");
 Option<std::string>
     target_options(OptionKind::Hidden, "--target-options", "-tos", "",
                    "Extra target options used for target compilation.", "");
@@ -399,6 +410,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetPrintStats(print_stats.GetValue());
   CCtx().SetDisableCudaRuntimeEnvCheck(
       disable_cuda_runtime_env_check.GetValue());
+  CCtx().SetFastCompile(fast_compile.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
 
   if (!trace_visit.GetValue().empty())

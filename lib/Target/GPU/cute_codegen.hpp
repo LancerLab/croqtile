@@ -235,6 +235,8 @@ private:
 private:
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
+  void EmitFastCompileCache(std::ostream& os, const std::string& precomp_cu);
+  static uint32_t ContentFingerprint();
 
   bool EnableLineDirective() const { return CCtx().GenDebugInfo(); }
   bool EnableDebugTypeRTTI() const {
