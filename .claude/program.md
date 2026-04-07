@@ -202,7 +202,7 @@ KERNEL_OUT=<path_to_current_best>
 
 # Always recompile first if source changed
 ./choreo -gs -t cute -arch=$ARCH $KERNEL -o ${KERNEL_OUT}.cute.result
-you may need --use-warpspec --use-prepack or other optional switches to enable feature
+you may need --use-prepack or other optional switches to enable features (warpspec is auto-detected)
 
 # ncu profiling
 /usr/local/cuda/bin/ncu --set full --target-processes all \
@@ -441,7 +441,7 @@ For gemm_sp (sparse GEMM) f16 kernels on SM90:
 - `SPMM_TILE_K` MUST equal `2 * SPMM_PACKED_TILE_K`
 - `SPMM_META_TILE_COLS` MUST equal `SPMM_TILE_K / 32`
 - Changing `SPMM_WARP_N` is allowed but ONLY as part of a broader structural change
-- Compiler flags: `-t cute -arch=sm_90a --use-warpspec --use-prepack`
+- Compiler flags: `-t cute -arch=sm_90a --use-prepack` (warpspec is auto-detected)
 - When using 1p2c (2 consumer warpgroups), the `SPMM_TILE_M` must be 
   `2 * SPMM_WARP_M = 128` and metadata indexing must account for per-consumer
   row tile addressing

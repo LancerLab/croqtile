@@ -44,7 +44,7 @@ Tune a single `.co` kernel by sweeping compile-time macro definitions (typically
   --sweep MMA_N=64,128 \
   --sweep PIPE_STAGES=2,3,4 \
   --compile-arg -t --compile-arg cute \
-  --compile-arg -arch=sm_90a --compile-arg --use-warpspec
+  --compile-arg -arch=sm_90a
 ```
 
 ## Notes

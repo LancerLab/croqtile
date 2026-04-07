@@ -16,7 +16,7 @@ Compile `.co` to executables, run correctness verification first, then run a lar
 1. Build executable (not object-only).
 - Use `./build/choreo <input.co> -o <binary>` so output can be executed.
 - If no target is specified and input file name contains `sm90`, default to `-t cute -arch=sm_90a`.
-- If input file name contains `warpspec`, append `--use-warpspec` automatically unless already provided.
+- Warpspec mode is auto-detected by the compiler; do not pass `--use-warpspec` (the flag has been removed).
 - If input file name contains `prepack`, append `--use-prepack` automatically unless already provided.
 
 2. Run quick verification.
@@ -61,7 +61,7 @@ Examples:
 
 .codex/skills/verify-choreo-kernel/scripts/verify_choreo_kernel.sh \
   benchmark/performance/matmul/matmul_e4m3_dyn_persis_sta_sm90.co \
-  build/matmul_e4m3_verify -- --use-warpspec
+  build/matmul_e4m3_verify -- --use-prepack
 ```
 
 Options:

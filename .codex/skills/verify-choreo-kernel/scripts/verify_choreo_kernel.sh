@@ -238,7 +238,6 @@ if [[ ${#compile_extra[@]} -gt 0 ]]; then
 elif [[ "${auto_target}" -eq 1 && "${input_path}" == *"sm90"* ]]; then
   compile_cmd+=(-t cute -arch=sm_90a)
 fi
-append_flag_if_needed "warpspec" "--use-warpspec"
 append_flag_if_needed "prepack" "--use-prepack"
 
 echo "== Compile =="
@@ -474,7 +473,6 @@ if [[ ${#compile_extra[@]} -gt 0 ]]; then
 elif [[ "${auto_target}" -eq 1 && "${input_path}" == *"sm90"* ]]; then
   compile_cmd+=(-t cute -arch=sm_90a)
 fi
-append_flag_if_needed "warpspec" "--use-warpspec"
 append_flag_if_needed "prepack" "--use-prepack"
 
 echo "== Compile (bench) =="

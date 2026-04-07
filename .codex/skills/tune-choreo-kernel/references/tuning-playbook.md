@@ -28,7 +28,7 @@ Use names that exactly match `#define` macros in the kernel source.
   --sweep PIPE_STAGES=2,3,4 \
   --set SPLIT_K=1 \
   --compile-arg -t --compile-arg cute \
-  --compile-arg -arch=sm_90a --compile-arg --use-warpspec
+  --compile-arg -arch=sm_90a
 ```
 
 ## Output

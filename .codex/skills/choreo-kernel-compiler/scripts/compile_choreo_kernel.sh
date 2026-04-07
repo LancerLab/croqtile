@@ -108,7 +108,6 @@ elif [[ "${input_path}" == *"sm90"* ]]; then
   # Match common repository naming and avoid defaulting to gcu300 for SM90 kernels.
   cmd+=(-t cute -arch=sm_90a)
 fi
-append_flag_if_needed "warpspec" "--use-warpspec"
 append_flag_if_needed "prepack" "--use-prepack"
 
 printf 'Running:'

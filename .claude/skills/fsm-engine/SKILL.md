@@ -85,7 +85,8 @@ Then immediately proceed to the next step. Do NOT pause between steps.
 ./choreo -gs -t cute -arch=$ARCH [flags] <kernel>.co -o <output>.cute.result
 bash <output>.cute.result --execute
 ```
-Common flags: `--use-warpspec`, `--use-prepack`
+Common flags: `--use-prepack`
+Note: `--use-warpspec` has been removed; the compiler auto-detects warpspec mode.
 
 ### NVCC-compiled (.cu kernels)
 ```bash
