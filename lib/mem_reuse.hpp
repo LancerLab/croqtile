@@ -58,9 +58,14 @@ private:
     std::vector<Range> ranges;
     std::string buffer_id;
     bool Interfere(const Buffer& other) const {
-      for (const auto& a : this->ranges)
-        for (const auto& b : other.ranges)
-          if (a.Overlaps(b)) return true;
+      size_t i = 0, j = 0;
+      while (i < ranges.size() && j < other.ranges.size()) {
+        if (ranges[i].Overlaps(other.ranges[j])) return true;
+        if (ranges[i].end < other.ranges[j].end)
+          ++i;
+        else
+          ++j;
+      }
       return false;
     }
     void Sort() { std::sort(ranges.begin(), ranges.end()); }
