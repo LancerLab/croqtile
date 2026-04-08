@@ -103,7 +103,7 @@ int main() {
 
 // MEMREUSE: shared buffer: ::bar::paraby_2::paraby_3::ss
 // MEMREUSE: 	using spm:   anon_3
-// MEMREUSE: 	with offset: 512
+// MEMREUSE: 	with offset: 0
 // MEMREUSE: shared buffer: ::bar::paraby_2::paraby_3::cond_if_1::ll
 // MEMREUSE: 	using spm:   anon_3
-// MEMREUSE: 	with offset: 0
+// MEMREUSE: 	with offset: 512

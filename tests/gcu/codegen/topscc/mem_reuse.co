@@ -30,8 +30,8 @@ __co__ void foo(int n, int m) {
 // CHECK:   unsigned char* s = (unsigned char*)(anon_4 + mr_offset_foo_paraby_0_s);
 // CHECK:   unsigned char* ss = (unsigned char*)(anon_4 + mr_offset_foo_paraby_0_ss);
 // CHECK:   kernel((unsigned char*)s, (unsigned char*)ss);
-// CHECK:   unsigned char* l = (unsigned char*)(anon_5 + 0);
-// CHECK:   unsigned char* ll = (unsigned char*)(anon_5 + 512);
+// CHECK:   unsigned char* l = (unsigned char*)(anon_5 + 512);
+// CHECK:   unsigned char* ll = (unsigned char*)(anon_5 + 0);
 // CHECK:   kernel((unsigned char*)l, (unsigned char*)ll);
 // CHECK: }
 
