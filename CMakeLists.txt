@@ -405,7 +405,11 @@ target_link_libraries(copp PRIVATE
   Threads::Threads
 )
 
-# choreo sdk library
+# ============================
+# Choreo SDK library
+# ============================
+set(CHOREO_SDK_VERSION "${VERSION_FROM_FILE}")
+
 add_library(choreo-dev STATIC
   $<TARGET_OBJECTS:parse>
   $<TARGET_OBJECTS:core>
@@ -416,18 +420,31 @@ add_library(choreo-dev STATIC
   tools/sdk/public_api.cpp
 )
 
-# Exclude from default build
-set_target_properties(choreo-dev PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_compile_definitions(choreo-dev PRIVATE
+  CHOREO_SDK_VERSION="${CHOREO_SDK_VERSION}"
+)
 
-# message(STATUS "CHOREO_PACKAGE_VERSION is set to: ${CHOREO_PACKAGE_VERSION}")
+target_include_directories(choreo-dev PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/lib>
+  $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/runtime>
+  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/sdk>
+  $<INSTALL_INTERFACE:include/choreo>
+)
+
+set_target_properties(choreo-dev PROPERTIES
+  EXCLUDE_FROM_ALL TRUE
+  OUTPUT_NAME choreo-dev
+)
 
 # Check if VERSION.txt exists
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/VERSION.txt")
   message(FATAL_ERROR "VERSION.txt not found!")
 endif()
 
-
-# Set the install prefix
+# ============================
+# Install rules
+# ============================
 install(FILES ${CMAKE_SOURCE_DIR}/runtime/choreo.h
   DESTINATION include
   COMPONENT rt_headers
@@ -438,7 +455,7 @@ install(TARGETS choreo copp
   COMPONENT executables
 )
 
-# SDK headers installation - only if SDK exists
+# SDK headers
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/lib/
   DESTINATION include/choreo
   COMPONENT sdk_headers
@@ -457,8 +474,39 @@ install(
   COMPONENT sdk_headers
 )
 
+install(FILES ${CMAKE_SOURCE_DIR}/tools/sdk/choreo_sdk.hpp
+  DESTINATION include/choreo
+  COMPONENT sdk_headers
+)
+
 install(TARGETS choreo-dev ARCHIVE
   DESTINATION lib
+  COMPONENT libraries
+)
+
+# SDK CMake config for find_package(Choreo)
+include(CMakePackageConfigHelpers)
+set(CHOREO_INSTALL_INCLUDEDIR include)
+set(CHOREO_INSTALL_LIBDIR lib)
+
+configure_package_config_file(
+  ${CMAKE_SOURCE_DIR}/cmake/ChoreoConfig.cmake.in
+  ${CMAKE_BINARY_DIR}/ChoreoConfig.cmake
+  INSTALL_DESTINATION lib/cmake/Choreo
+  PATH_VARS CHOREO_INSTALL_INCLUDEDIR CHOREO_INSTALL_LIBDIR
+)
+
+configure_file(
+  ${CMAKE_SOURCE_DIR}/cmake/ChoreoConfigVersion.cmake.in
+  ${CMAKE_BINARY_DIR}/ChoreoConfigVersion.cmake
+  @ONLY
+)
+
+install(
+  FILES
+    ${CMAKE_BINARY_DIR}/ChoreoConfig.cmake
+    ${CMAKE_BINARY_DIR}/ChoreoConfigVersion.cmake
+  DESTINATION lib/cmake/Choreo
   COMPONENT libraries
 )
 

@@ -100,6 +100,21 @@ package-full: release-full
 sdk-package: release
 	@cmake --build $(REL_BUILD_DIR) --target package-sdk
 
+SDK_INSTALL_PREFIX ?= $(WORK_DIR)/sdk-install
+
+sdk: build
+	@ninja -C $(CMAKE_BUILD_DIR) choreo-dev
+	@echo "SDK library built: $(CMAKE_BUILD_DIR)/libchoreo-dev.a"
+
+sdk-install: sdk
+	@cmake --install $(CMAKE_BUILD_DIR) --prefix $(SDK_INSTALL_PREFIX) --component sdk_headers
+	@cmake --install $(CMAKE_BUILD_DIR) --prefix $(SDK_INSTALL_PREFIX) --component libraries
+	@cmake --install $(CMAKE_BUILD_DIR) --prefix $(SDK_INSTALL_PREFIX) --component rt_headers
+	@echo "SDK installed to $(SDK_INSTALL_PREFIX)"
+
+sdk-test: sdk-install
+	@$(MAKE) -C tests/sdk test SDK_PREFIX=$(SDK_INSTALL_PREFIX)
+
 debug: CMAKE_BUILD_TYPE=Debug
 debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
 debug: build-with-cmake-ninja
