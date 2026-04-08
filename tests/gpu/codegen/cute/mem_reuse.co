@@ -33,8 +33,8 @@ __co__ void foo(int n, int m) {
 // CHECK:   unsigned char* ss = (unsigned char*)(anon_4 + mr_offset_foo_paraby_0_ss);
 // CHECK:   kernel((unsigned char*)s, (unsigned char*)ss);
 // CHECK:   auto __choreo_vtid_x = threadIdx.x;
-// CHECK:   unsigned char* l = (unsigned char*)(anon_5 + 16);
-// CHECK:   unsigned char* ll = (unsigned char*)(anon_5 + 0);
+// CHECK:   unsigned char* l = (unsigned char*)(anon_5 + 0);
+// CHECK:   unsigned char* ll = (unsigned char*)(anon_5 + 16);
 // CHECK:   kernel((unsigned char*)l, (unsigned char*)ll);
 // CHECK: }
 
@@ -55,8 +55,8 @@ __co__ void foo(int n, int m) {
 // CHECK: void foo(int n, int m) {
 // CHECK:   __choreo_check_cuda_environment__();
 // CHECK:   HeapSimulator::Chunks __co__shared_chunks0;
-// CHECK{LITERAL}:   __co__shared_chunks0.push_back({static_cast<size_t>((m * n)), {{3,4}}, "_foo_paraby_0_ss"});
 // CHECK{LITERAL}:   __co__shared_chunks0.push_back({static_cast<size_t>((m * n)), {{2,4}}, "_foo_paraby_0_s"});
+// CHECK{LITERAL}:   __co__shared_chunks0.push_back({static_cast<size_t>((m * n)), {{3,4}}, "_foo_paraby_0_ss"});
 // CHECK:   HeapSimulator __co_shared_heap_simulator0;
 // CHECK:   HeapSimulator::Result __co__shared_result0 = __co_shared_heap_simulator0.Allocate(__co__shared_chunks0, 512);
 // CHECK:   unsigned __co__shared_spm_size0 = __co__shared_result0.heap_size;
@@ -73,8 +73,8 @@ __co__ void foo(int n, int m) {
 // CHECK:   choreo::abend_true(cudaDeviceSynchronize());
 // CHECK:   // JIT memory reuse begin
 // CHECK:   HeapSimulator::Chunks __co__local_chunks1;
-// CHECK{LITERAL}:   __co__local_chunks1.push_back({static_cast<size_t>(m), {{20,21}}, "_foo_paraby_3_paraby_4_paraby_5_ll"});
 // CHECK{LITERAL}:   __co__local_chunks1.push_back({static_cast<size_t>(n), {{19,21}}, "_foo_paraby_3_paraby_4_paraby_5_l"});
+// CHECK{LITERAL}:   __co__local_chunks1.push_back({static_cast<size_t>(m), {{20,21}}, "_foo_paraby_3_paraby_4_paraby_5_ll"});
 // CHECK:   HeapSimulator::Chunks __co__shared_chunks1;
 // CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{14,16}}, "_foo_paraby_3_s"});
 // CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{15,16}}, "_foo_paraby_3_ss"});

@@ -30,8 +30,8 @@ __co__ void foo(int n, int m) {
 // CHECK:   unsigned char* s = (unsigned char*)(anon_4 + mr_offset_foo_paraby_0_s);
 // CHECK:   unsigned char* ss = (unsigned char*)(anon_4 + mr_offset_foo_paraby_0_ss);
 // CHECK:   kernel((unsigned char*)s, (unsigned char*)ss);
-// CHECK:   unsigned char* l = (unsigned char*)(anon_5 + 512);
-// CHECK:   unsigned char* ll = (unsigned char*)(anon_5 + 0);
+// CHECK:   unsigned char* l = (unsigned char*)(anon_5 + 0);
+// CHECK:   unsigned char* ll = (unsigned char*)(anon_5 + 512);
 // CHECK:   kernel((unsigned char*)l, (unsigned char*)ll);
 // CHECK: }
 
@@ -49,8 +49,8 @@ __co__ void foo(int n, int m) {
 // CHECK: void foo(int n, int m) {
 // CHECK:   // JIT memory reuse begin
 // CHECK:   HeapSimulator::Chunks __co__shared_chunks0;
-// CHECK{LITERAL}:   __co__shared_chunks0.push_back({static_cast<size_t>((m * n)), {{3,4}}, "_foo_paraby_0_ss"});
 // CHECK{LITERAL}:   __co__shared_chunks0.push_back({static_cast<size_t>((m * n)), {{2,4}}, "_foo_paraby_0_s"});
+// CHECK{LITERAL}:   __co__shared_chunks0.push_back({static_cast<size_t>((m * n)), {{3,4}}, "_foo_paraby_0_ss"});
 // CHECK:   HeapSimulator __co_shared_heap_simulator0;
 // CHECK:   HeapSimulator::Result __co__shared_result0 = __co_shared_heap_simulator0.Allocate(__co__shared_chunks0, 512);
 // CHECK:   unsigned __co__shared_spm_size0 = __co__shared_result0.heap_size;
@@ -69,8 +69,8 @@ __co__ void foo(int n, int m) {
 // CHECK{LITERAL}:   __co__local_chunks1.push_back({static_cast<size_t>(n), {{16,18}}, "_foo_paraby_2_paraby_3_l"});
 // CHECK{LITERAL}:   __co__local_chunks1.push_back({static_cast<size_t>(m), {{17,18}}, "_foo_paraby_2_paraby_3_ll"});
 // CHECK:   HeapSimulator::Chunks __co__shared_chunks1;
-// CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{13,14}}, "_foo_paraby_2_ss"});
 // CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{12,14}}, "_foo_paraby_2_s"});
+// CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{13,14}}, "_foo_paraby_2_ss"});
 // CHECK:   HeapSimulator __co_local_heap_simulator1;
 // CHECK:   HeapSimulator::Result __co__local_result1 = __co_local_heap_simulator1.Allocate(__co__local_chunks1, 512);
 // CHECK:   unsigned __co__local_spm_size1 = __co__local_result1.heap_size;

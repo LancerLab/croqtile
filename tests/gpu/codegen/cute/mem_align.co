@@ -13,9 +13,9 @@ __co__ void foo() {
 }
 
 // CHECK-86:  __shared__ alignas(16) unsigned char anon_1[32];
-// CHECK-86:  float* smem0 = (float*)(anon_1 + 16);
-// CHECK-86:  float* smem1 = (float*)(anon_1 + 0);
+// CHECK-86:  float* smem0 = (float*)(anon_1 + 0);
+// CHECK-86:  float* smem1 = (float*)(anon_1 + 16);
 
 // CHECK-90a:  __shared__ alignas(128) unsigned char anon_1[256];
-// CHECK-90a:  float* smem0 = (float*)(anon_1 + 128);
-// CHECK-90a:  float* smem1 = (float*)(anon_1 + 0);
+// CHECK-90a:  float* smem0 = (float*)(anon_1 + 0);
+// CHECK-90a:  float* smem1 = (float*)(anon_1 + 128);

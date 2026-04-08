@@ -88,6 +88,14 @@ private:
     void SortBuffers() {
       for (auto& b : buffers) b.Sort();
       for (auto& b : dynamic_buffers) b.Sort();
+      std::sort(buffers.begin(), buffers.end(),
+                [](const Buffer& a, const Buffer& b) {
+                  return a.buffer_id < b.buffer_id;
+                });
+      std::sort(dynamic_buffers.begin(), dynamic_buffers.end(),
+                [](const DBuffer& a, const DBuffer& b) {
+                  return a.buffer_id < b.buffer_id;
+                });
     }
   };
 
@@ -150,11 +158,13 @@ private:
 
       size_t length = chunks.size();
 
-      // sort by size in descending order
-      // TODO: use idx or pointer rather than Chunk
+      // sort by size descending, then by buffer_id ascending for stability
       std::vector<Chunk> sorted_chunks = chunks;
       std::sort(sorted_chunks.begin(), sorted_chunks.end(),
-                [](const Chunk& a, const Chunk& b) { return a.size > b.size; });
+                [](const Chunk& a, const Chunk& b) {
+                  if (a.size != b.size) return a.size > b.size;
+                  return a.buffer_id < b.buffer_id;
+                });
 
       // build interference graph - represent which buffers' lifetime overlap
       // TODO: O(n^2) maybe can be optimized

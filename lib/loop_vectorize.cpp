@@ -1,6 +1,9 @@
 #include "loop_vectorize.hpp"
 #include "vector_typeinfer.hpp"
 
+#include <algorithm>
+#include <vector>
+
 namespace Choreo {
 
 // LoopChecker
@@ -1102,7 +1105,13 @@ bool LoopVectorizer::ComputeVectorizationPlan(AST::Node& root) {
   } else {
     if (debug_visit) {
       dbgs() << "\n[plan] Final vectorization plan:\n";
-      for (auto& [loop_name, loop] : li->GetAllLoops()) {
+      auto all_loops = li->GetAllLoops();
+      std::vector<std::string> loop_names;
+      loop_names.reserve(all_loops.size());
+      for (auto& [name, _] : all_loops) loop_names.push_back(name);
+      std::sort(loop_names.begin(), loop_names.end());
+      for (auto& loop_name : loop_names) {
+        auto& loop = all_loops[loop_name];
         if (loop->CanVectorize()) {
           dbgs() << "  - Loop `" << loop_name
                  << "` will be vectorized with factor: "
