@@ -85,6 +85,6 @@ __co__ auto ele_add_u8(u8 [N, M] a, u8 [N, M] b)  {
 // CHECK: }
 
 // VEC-CHECK: data type f64 is not legal for vectorization on target architecture GCU300
-// VEC-CHECK: - Loop `loop8` will be vectorized with factor: 128
 // VEC-CHECK: - Loop `loop4` will be vectorized with factor: 128
 // VEC-CHECK: - Loop `loop6` will be vectorized with factor: 128
+// VEC-CHECK: - Loop `loop8` will be vectorized with factor: 128
