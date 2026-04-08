@@ -1,0 +1,17 @@
+@PACKAGE_INIT@
+
+set(CHOREO_VERSION "@CHOREO_SDK_VERSION@")
+
+set_and_check(CHOREO_INCLUDE_DIR "@PACKAGE_CHOREO_INSTALL_INCLUDEDIR@/choreo")
+set_and_check(CHOREO_LIBRARY_DIR "@PACKAGE_CHOREO_INSTALL_LIBDIR@")
+
+if(NOT TARGET Choreo::choreo-dev)
+  add_library(Choreo::choreo-dev STATIC IMPORTED)
+  set_target_properties(Choreo::choreo-dev PROPERTIES
+    IMPORTED_LOCATION "${CHOREO_LIBRARY_DIR}/libchoreo-dev.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${CHOREO_INCLUDE_DIR}"
+    INTERFACE_LINK_LIBRARIES "stdc++fs;Threads::Threads"
+  )
+endif()
+
+check_required_components(Choreo)
