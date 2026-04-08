@@ -22,12 +22,12 @@ __co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
   }
 }
 
-// CHECK: ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::val : divergent
 // CHECK: ::vecadd::paraby_0::paraby_1::l1_b.data : uniform
-// CHECK: ::vecadd::paraby_0::paraby_1::l1_a.data : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::l1_b__buf__ : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::val : divergent
 // CHECK: ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::index : stride(1)
-// CHECK: ::vecadd::W : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::l1_a__buf__ : uniform
+// CHECK: ::vecadd::paraby_0::paraby_1::l1_a.data : uniform
 // CHECK: ::vecadd::paraby_0::paraby_1::within_0::i : uniform
 // CHECK: ::vecadd::paraby_0::paraby_1::within_0::j : stride(1)
-// CHECK: ::vecadd::paraby_0::paraby_1::l1_b__buf__ : uniform
-// CHECK: ::vecadd::paraby_0::paraby_1::l1_a__buf__ : uniform
+// CHECK: ::vecadd::W : uniform

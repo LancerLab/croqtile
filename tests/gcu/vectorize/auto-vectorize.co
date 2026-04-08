@@ -43,7 +43,7 @@ __co__ void func() {
 // NO-VEC: } // index__elem__0
 
 // VEC-CHECK: [plan] Final vectorization plan:
-// VEC-CHECK:   - Loop `loop4` cannot be vectorized.
 // VEC-CHECK:   - Loop `loop3` cannot be vectorized.
-// VEC-CHECK:   - Loop `loop2` will be vectorized with factor: 128
+// VEC-CHECK:   - Loop `loop4` cannot be vectorized.
 // VEC-CHECK:   - Loop `loop1` cannot be vectorized.
+// VEC-CHECK:   - Loop `loop2` will be vectorized with factor: 128
