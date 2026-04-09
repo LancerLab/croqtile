@@ -48,7 +48,7 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global 
   // and warp_k==32 are fixed by the ISA; warp_n is the only
   // degree of freedom in the N dimension and can be any supported
   // width (multiples of 8 up to 256).  the tuner now sweeps the
-  // full range rather than the coarse 64‑grain values used before.
+  // full range rather than the coarse 64-grain values used before.
   // WGMMA requires 128 threads (4 warps x 32 threads/warp)
   parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block {
     shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;

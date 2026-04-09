@@ -1,6 +1,6 @@
-# Choreo Test Runner (`lit.sh`) — User and Developer Guide
+# Choreo Test Runner (`lit.sh`) -- User and Developer Guide
 
-`tests/lit.sh` is Choreo's lightweight test runner, named and designed after LLVM's internal `lit` (LLVM Integrated Tester).  Like LLVM lit, it discovers test files, reads embedded `RUN:` directives, substitutes `%`-tokens with real paths and flags, then executes the resulting shell commands.  The output follows the same style: each test is reported as `PASS`, `FAIL`, `XFAIL` (expected failure), or `SKIP`, with a timing column, finishing with a summary line.  Where a `RUN:` command pipes through `FileCheck`, the runner emits the diff on mismatch exactly as LLVM lit does.  The key restriction compared to full LLVM lit is that `lit.sh` is a self-contained Bash script—no Python runtime required—and its hook system is tailored to Choreo's multi-target requirements.
+`tests/lit.sh` is Choreo's lightweight test runner, named and designed after LLVM's internal `lit` (LLVM Integrated Tester).  Like LLVM lit, it discovers test files, reads embedded `RUN:` directives, substitutes `%`-tokens with real paths and flags, then executes the resulting shell commands.  The output follows the same style: each test is reported as `PASS`, `FAIL`, `XFAIL` (expected failure), or `SKIP`, with a timing column, finishing with a summary line.  Where a `RUN:` command pipes through `FileCheck`, the runner emits the diff on mismatch exactly as LLVM lit does.  The key restriction compared to full LLVM lit is that `lit.sh` is a self-contained Bash script--no Python runtime required--and its hook system is tailored to Choreo's multi-target requirements.
 
 ---
 
@@ -50,9 +50,9 @@ A `.cmt` file uses `#` as the comment marker:
 
 | Directive | Executes when |
 |-----------|---------------|
-| `// RUN: …` | Always (shell environment) |
-| `// RUN-DOCKER: …` | Inside Docker only |
-| `// RUN-<mach>: …` | Only when `mach` matches (e.g. `// RUN-mt100: …`) |
+| `// RUN: ...` | Always (shell environment) |
+| `// RUN-DOCKER: ...` | Inside Docker only |
+| `// RUN-<mach>: ...` | Only when `mach` matches (e.g. `// RUN-mt100: ...`) |
 
 ### `REQUIRES:` directive
 
@@ -91,7 +91,7 @@ Unconditionally skips the test (useful for temporarily disabling):
 |-------|--------------|--------|
 | `%s` | Absolute path to the test file | Core (always) |
 | `%target` | Target flag (e.g. `-t mytarget`) | Each target's `target_cmd` hook; stripped to empty string when no hook is active |
-| `%<name>` | Target-defined value | Target's `target_cmd` hook (e.g. `%mytarget_arch` → `-arch mt100`) |
+| `%<name>` | Target-defined value | Target's `target_cmd` hook (e.g. `%mytarget_arch` -> `-arch mt100`) |
 
 ### When to use `%target`
 
@@ -125,7 +125,7 @@ Every `lit.cfg` **must** start with a `# co-lit` first line.  `lit.sh` uses this
 | Phase | Signature | Purpose |
 |-------|-----------|---------|
 | `hw_detect` | `my_fn()` | Detect hardware; set `device_type`, `mach`, target-specific arch vars |
-| `set_archs` `[TARGET …]` | `my_fn TARGET-FOO` | Translate `REQUIRES: TARGET-XXX` tokens into entries in `REQ_TARGETS` |
+| `set_archs` `[TARGET ...]` | `my_fn TARGET-FOO` | Translate `REQUIRES: TARGET-XXX` tokens into entries in `REQ_TARGETS` |
 | `all_archs` | `my_fn()` | Populate `REQ_TARGETS` with all known archs (used by `--all-archs`) |
 | `target_cmd` `name_of_cmd_var` | `my_fn cmd_ref` | Substitute `%target` and other target-specific tokens in the command string; receives the name of the nameref variable |
 | `target_noskip` | `my_fn()` | Return non-zero to skip a test for a target-specific reason (e.g. simulator not present) |
@@ -142,7 +142,7 @@ Multiple hooks for the same phase are called in registration order.
 
 ### Design principle: target-agnostic core
 
-`lit.sh` itself must not contain any target-specific variable names, token substitutions, or detection logic.  The only variables `lit.sh` manages are the framework-level ones: `device_type`, `mach`, and `simulator`.  Everything target-specific — arch variables, `%`-token expansions, skip conditions — belongs in the target's own `lit.cfg` and its hooks.  This keeps the core runner extensible without modification.
+`lit.sh` itself must not contain any target-specific variable names, token substitutions, or detection logic.  The only variables `lit.sh` manages are the framework-level ones: `device_type`, `mach`, and `simulator`.  Everything target-specific -- arch variables, `%`-token expansions, skip conditions -- belongs in the target's own `lit.cfg` and its hooks.  This keeps the core runner extensible without modification.
 
 ---
 
@@ -228,15 +228,15 @@ If a check test's expected output differs by target, add `%target` to its `RUN:`
 // RUN: choreo %target -es --runtime-check=all %s -o - | FileCheck %s
 ```
 
-Tests without `%target` will simply run the same command for every target that includes them — which is fine if the expected output is target-agnostic.
+Tests without `%target` will simply run the same command for every target that includes them -- which is fine if the expected output is target-agnostic.
 
 ---
 
-## `include_dir` — Sharing Tests Across Targets
+## `include_dir` -- Sharing Tests Across Targets
 
 A `lit.cfg` may call `include_dir("../path")` to declare that another directory's tests should run under **that target's** hooks.  This removes the need to copy tests or maintain per-target symlinks.
 
-**Declaration** — one call per shared directory, placed at the bottom of `lit.cfg`:
+**Declaration** -- one call per shared directory, placed at the bottom of `lit.cfg`:
 ```bash
 # in tests/mytarget/lit.cfg
 include_dir "../check"   # run tests/check/ under mytarget hooks
@@ -246,8 +246,8 @@ include_dir "../norm"    # also run tests/norm/ under mytarget hooks
 **Behaviour when running `lit.sh tests/` (a parent directory):**
 1. `lit.sh` sources every `lit.cfg` found under the given directory in *discovery mode*, collecting all `include_dir` calls.
 2. For each declared directory, every `.co` / `.cmt` file is added to the test list with the declaring target's cfg context.
-3. Files claimed by at least one `include_dir` are **suppressed** from their own direct (hookless) run — each file runs exactly once per including target.
-4. A file with N `RUN:` lines included by M targets executes N×M times total.
+3. Files claimed by at least one `include_dir` are **suppressed** from their own direct (hookless) run -- each file runs exactly once per including target.
+4. A file with N `RUN:` lines included by M targets executes NxM times total.
 
 **Behaviour when running a shared directory directly** (e.g. `lit.sh tests/check/`):
 - Discovery mode is not active; `include_dir` calls are collected but no files are re-routed.
@@ -262,11 +262,11 @@ When running the full suite (`lit.sh tests/`) with targets that use `include_dir
 
 | Test category | Run count |
 |---------------|-----------|
-| `tests/check/*.co` (shared via `include_dir`) | 1× per including target per file |
-| Target-specific files (e.g. `tests/mytarget/**/*.co`) | 1× per file |
-| Other directories (parse/, norm/, …) | 1× per file |
+| `tests/check/*.co` (shared via `include_dir`) | 1x per including target per file |
+| Target-specific files (e.g. `tests/mytarget/**/*.co`) | 1x per file |
+| Other directories (parse/, norm/, ...) | 1x per file |
 
-A file with 2 `RUN:` lines included by 2 targets executes **4 times** total — this is expected and correct.
+A file with 2 `RUN:` lines included by 2 targets executes **4 times** total -- this is expected and correct.
 
 ## Dry Run
 
@@ -302,7 +302,7 @@ other/deep/nested/file.co
   source order:  other/deep/lit.cfg
 ```
 
-The walk-up uses the `# co-lit` marker to skip non-Choreo configs, so there are no hardcoded directory names — any directory tree works.
+The walk-up uses the `# co-lit` marker to skip non-Choreo configs, so there are no hardcoded directory names -- any directory tree works.
 
 When a file is processed via `include_dir` (cfg override), the walk starts from the **declaring** directory, not the file's own directory.  This is what gives files in `tests/check/` access to the hooks defined in the declaring target's `lit.cfg`.
 
@@ -310,5 +310,5 @@ When a file is processed via `include_dir` (cfg override), the walk starts from 
 
 ## See Also
 
-- [AGENTS.md](../../AGENTS.md) — Build commands, pass names, compiler options
-- [`tests/lit.sh`](../../tests/lit.sh) — Runner source (v0.33+)
+- [AGENTS.md](../../AGENTS.md) -- Build commands, pass names, compiler options
+- [`tests/lit.sh`](../../tests/lit.sh) -- Runner source (v0.33+)

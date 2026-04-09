@@ -1,0 +1,130 @@
+# Extended keyword candidates for OSS scan.
+# Review this file and move confirmed patterns to os_kw.txt.
+#
+# Format: each line is an ERE pattern. Lines starting with # are comments.
+# Prefix with (?i) for case-insensitive matching (handled by oss-scan.sh).
+#
+# STATUS KEY:
+#   [CURRENT]   - already in os_kw.txt
+#   [RECOMMEND] - high confidence: should block
+#   [REVIEW]    - needs your decision
+#   [MAYBE]     - could be too broad, needs thought
+
+# ============================================================
+# [CURRENT] Already in os_kw.txt
+# ============================================================
+# (?i)gcu
+# (?i)dtu
+# (?i)efrt
+# (?i)efvm
+# (?i)eflame
+# (?i)tops
+# (?i)dorado
+# (?i)scorpio
+# (?i)libra
+# (?i)draco
+
+# ============================================================
+# [RECOMMEND] Internal domains and network infrastructure
+# ============================================================
+# These are internal-only and should never appear in public code.
+#
+# Internal GitLab domain
+(?i)enflame\.cn
+# Internal artifact server
+(?i)artifact\.enflame
+# Internal FTP server IP
+172\.16\.11\.18
+# FTP credentials (should NEVER leak)
+(?i)ftp_era
+# Internal email domain
+(?i)enflame-tech\.com
+# Chinese company name
+燧原
+
+# ============================================================
+# [RECOMMEND] Internal project paths and identifiers
+# ============================================================
+# Internal GitLab group
+(?i)era-dev
+# Internal toolchain path
+(?i)choreo-toolchain
+# Internal SDK path
+(?i)choreo-sdk
+
+# ============================================================
+# [REVIEW] Proprietary tool and product names
+# ============================================================
+# These are Enflame-specific product names. Some may appear
+# in generic contexts (e.g. "tops" already catches many).
+# Review each for false-positive risk.
+#
+# Enflame driver platform
+(?i)topsrider
+# Enflame toolkit
+(?i)topskit
+# Enflame platform installer
+(?i)topsplatform
+# Factor compiler frontend
+(?i)topsfactor
+# Acore runtime
+(?i)topsacore
+# Factor compiler
+(?i)topsfc
+# Tops compiler
+(?i)topscc
+# Factor binary format
+(?i)topsfb
+# Tops operations
+(?i)topsop
+# GCU simulator library
+(?i)libgcusim
+(?i)gcusim
+# Acore bitcode library
+(?i)acoreop
+# Tops runtime library
+(?i)topsrt
+# System management interface
+(?i)efsmi
+# Virtual GPU
+(?i)topsvirt
+# Peer memory
+(?i)topspeermemory
+# TCLE API (tops compute library)
+(?i)tcle
+# Tops profiler
+(?i)topsprof
+# Tops inference
+(?i)topsinference
+# Tops collective communication
+(?i)\beccl\b
+
+# ============================================================
+# [REVIEW] Hardware codenames and PCI identifiers
+# ============================================================
+# GCU generation identifiers (already partially caught by (?i)gcu)
+(?i)gcu2
+(?i)gcu3
+(?i)gcu4
+(?i)gcu4sim
+(?i)gcu500
+# PCI device substring used in device detection
+(?i)\bS60G\b
+(?i)\bS60\b
+(?i)\bI20\b
+(?i)\bc035\b
+
+# ============================================================
+# [MAYBE] Potentially too broad - needs careful review
+# ============================================================
+# "Tencent" appears in lspci device detection for cloud VMs.
+# Blocking it could cause false positives in general GPU code.
+# (?i)tencent
+#
+# "apex" is used for Enflame's Apex integration but is also a
+# common English word and NVIDIA's Apex library name.
+# (?i)\bapex\b
+#
+# "factor" is an internal backend name but is also a common word.
+# Already excluded by path (lib/Target/GCU/factor_*), not by keyword.
+# (?i)\bfactor\b

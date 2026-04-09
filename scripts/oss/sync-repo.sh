@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
+# DEPRECATED: This script is for the legacy two-repo sync workflow.
+# Use the new single-repo tools instead:
+#   oss-setup.sh  - one-time remote/branch setup
+#   oss-push.sh   - cherry-pick commits to the oss/main branch
+#   oss-pull.sh   - cherry-pick commits back from oss/main
+#   oss-scan.sh   - keyword/path violation scanner
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
 Usage:
   sync_all.sh <path-to-opensource-repo>
+
+DEPRECATED: prefer oss-push.sh for the new branch-based workflow.
 EOF
 }
 

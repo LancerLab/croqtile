@@ -2,7 +2,7 @@
 In Choreo, shape is a first-class citizen. In this section, you will learn how to program shapes in Choreo code.
 
 ## First-Class Citizen: Shape
-Choreo's primary function is to manage data movements, which are crucial for efficiently organizing and processing large datasets, especially in machine learning and high-performance computing scenarios. However, most C++ programming environments handle data in a casual manner —either as flat (pointers) or hierarchical structures (arrays), without a native representation of associated shapes.
+Choreo's primary function is to manage data movements, which are crucial for efficiently organizing and processing large datasets, especially in machine learning and high-performance computing scenarios. However, most C++ programming environments handle data in a casual manner --either as flat (pointers) or hierarchical structures (arrays), without a native representation of associated shapes.
 
 In contrast, Choreo enforces code safety and simplifies the programming of shaped data by requiring that **any data declared or used must be associated with a shape**. This motivates Choreo to treat shape as a first-class citizen.
 

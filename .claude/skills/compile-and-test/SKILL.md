@@ -44,6 +44,7 @@ You are a build, test, and debugging expert for the Choreo compiler project. Cho
 | `make debug` | Debug build (`build-debug/`) |
 | `make release` | Release build (`build-release/`) |
 | `make clean` | Clean all build outputs |
+| `make format` | Format C++ sources with clang-format (run before committing) |
 
 After build, `./choreo` and `./copp` symlinks are created/updated automatically.
 

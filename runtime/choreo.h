@@ -2171,7 +2171,7 @@ struct Sparse2to4HostPolicyWGMMA {
   // and k-fragment, the 16 u32 values needed by the 16 active warp lanes are
   // stored contiguously. Layout: [M/16, K_frags, 16].
   // Device-side: thread reads meta_v2[(m16 * K_frags + kf) * 16 + pos]
-  //   where all 16 active lanes differ only in pos → single cache-line txn.
+  //   where all 16 active lanes differ only in pos -> single cache-line txn.
   __co_host__ static inline void
   prepack_v2(spanned_data<choreo::u8, 2>& meta_u8,
              spanned_data<choreo::u32, 2>& meta_u32) {

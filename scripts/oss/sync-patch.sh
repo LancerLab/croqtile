@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
+# DEPRECATED: This script is for the legacy two-repo patch workflow.
+# Use the new single-repo tools instead:
+#   oss-push.sh   - cherry-pick commits to the oss/main branch
+#   oss-scan.sh   - keyword/path violation scanner
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
 Usage:
   sync_patch.sh [options] <path-to-repo-A>
+
+DEPRECATED: prefer oss-push.sh for the new branch-based workflow.
 
 Options:
   -r <rev>     Commit-ish in repo B to sync (default: HEAD)

@@ -38,13 +38,13 @@
 #define MATMUL_DEFAULT_N 256
 #define MATMUL_DEFAULT_K 256
 
-// ───────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------
 // Persistent kernel with Hilbert curve tile scheduling.
 //
 // schedule_m / schedule_n: device arrays of length total_tiles,
 // giving the (block_m, block_n) for each tile in Hilbert order.
 // SM #k processes tiles at indices k, k+NUM_SMS, k+2*NUM_SMS, ...
-// ───────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------
 __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
                    global s32 [T] schedule_m, global s32 [T] schedule_n) {
 
@@ -91,7 +91,7 @@ static void hilbert_rot(int n, int& x, int& y, int rx, int ry) {
   }
 }
 
-// Convert Hilbert distance d to (x, y) in an n×n grid (n must be power of 2).
+// Convert Hilbert distance d to (x, y) in an nxn grid (n must be power of 2).
 static void hilbert_d2xy(int n, int d, int& x, int& y) {
   x = y = 0;
   for (int s = 1; s < n; s *= 2) {
@@ -111,7 +111,7 @@ static int next_pow2(int v) {
   return p;
 }
 
-// Build Hilbert-ordered schedule for an (tiles_m × tiles_n) grid.
+// Build Hilbert-ordered schedule for an (tiles_m x tiles_n) grid.
 // Returns the number of valid tiles written to schedule_m/schedule_n.
 static int build_hilbert_schedule(int tiles_m, int tiles_n,
                                   int* schedule_m, int* schedule_n) {
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
   size_t N = MATMUL_DEFAULT_N;
   size_t K = MATMUL_DEFAULT_K;
 
-  // ── Build Hilbert schedule ──
+  // -- Build Hilbert schedule --
   int tiles_m = (M + MATMUL_TILE_M - 1) / MATMUL_TILE_M;
   int tiles_n = (N + MATMUL_TILE_N - 1) / MATMUL_TILE_N;
   int total_tiles = tiles_m * tiles_n;
@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
   auto sched_m_view = choreo::make_spanview<choreo::s32, 1>(sched_m_d, {(size_t)total_tiles});
   auto sched_n_view = choreo::make_spanview<choreo::s32, 1>(sched_n_d, {(size_t)total_tiles});
 
-  // ── Allocate matmul data ──
+  // -- Allocate matmul data --
   auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);
   auto res_h = choreo::make_spandata<choreo::f16>(M, N);

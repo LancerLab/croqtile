@@ -26,6 +26,10 @@ make
 make debug
 ```
 
+## Pre-Commit Checklist
+- **Format code before committing**: always run `make format` after editing C++ sources.
+- If the change may be synced to the public repo, run `make oss-scan-staged` to check for violations.
+
 ## Validation
 - For a quick compiler sanity check, compile `wip_code.co`:
 
@@ -40,3 +44,7 @@ make debug
 ```bash
 make test
 ```
+
+## Code Style
+- Follow the conventions in `Documents/Documentation/coding-style.md`.
+- Run `make format` before every commit to ensure clang-format compliance.

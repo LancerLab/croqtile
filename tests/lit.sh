@@ -487,12 +487,12 @@ declare -A HW_DETECT_CACHE=()
 # Cache cfg chain and hook registry, keyed by the set of lit.cfg files
 # in the path (chain_key).  Different directories that share the same
 # lit.cfg chain are served from a single cache entry, so each chain is
-# sourced exactly once — preventing side-effect re-initialization of
+# sourced exactly once -- preventing side-effect re-initialization of
 # target variables on a cache hit.
 declare -A CFG_CHAIN_CACHE=()
 declare -A HOOKS_CACHE=()
 
-# Fast directory → chain_key mapping so compute_cfg_files_key() is
+# Fast directory -> chain_key mapping so compute_cfg_files_key() is
 # called at most once per unique directory.
 declare -A DIR_TO_CHAIN_KEY=()
 
@@ -823,7 +823,7 @@ execute_command() {
   elif [[ $elapsed_ns -ge 1000000 ]]; then
       elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000") ms"
   else
-      elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") µs"
+      elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") us"
   fi
 
   local term_width=$(get_terminal_width)

@@ -117,7 +117,7 @@ inline std::string colorizeType(const std::string& s, bool use_color) {
       continue;
     }
 
-    // Storage qualifiers → yellow
+    // Storage qualifiers -> yellow
     using detail::matchKeyword;
     if (matchKeyword(s, i, "global", 6)) {
       emit(kYellow, 6);
@@ -140,7 +140,7 @@ inline std::string colorizeType(const std::string& s, bool use_color) {
       continue;
     }
 
-    // Element types → green
+    // Element types -> green
     if (matchKeyword(s, i, "f8_ue8m0", 8)) {
       emit(kGreen, 8);
       continue;
@@ -262,7 +262,7 @@ inline std::string colorizeType(const std::string& s, bool use_color) {
       continue;
     }
 
-    // Bracket extents [...] → dim (handles nesting)
+    // Bracket extents [...] -> dim (handles nesting)
     if (s[i] == '[') {
       int depth = 1;
       r += kDim;

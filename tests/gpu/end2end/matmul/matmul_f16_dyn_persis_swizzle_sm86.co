@@ -37,10 +37,10 @@
 #define MATMUL_DEFAULT_N 256
 #define MATMUL_DEFAULT_K 256
 
-// ─── Optimization: Swizzle tile scheduling (persistent) ───
+// --- Optimization: Swizzle tile scheduling (persistent) ---
 // Uses a host-computed diagonal swizzle pattern for tile ordering.
 // The idea (from kebab V6 tile scheduler concept): tiles are assigned
-// along diagonals of the (tiles_m × tiles_n) grid, so consecutive tiles
+// along diagonals of the (tiles_m x tiles_n) grid, so consecutive tiles
 // processed by an SM share partial rows (A) or columns (B), providing
 // balanced L2 cache reuse for both A and B matrices.
 //
@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
   size_t N = MATMUL_DEFAULT_N;
   size_t K = MATMUL_DEFAULT_K;
 
-  // ── Build swizzle schedule ──
+  // -- Build swizzle schedule --
   int tiles_m = (M + MATMUL_TILE_M - 1) / MATMUL_TILE_M;
   int tiles_n = (N + MATMUL_TILE_N - 1) / MATMUL_TILE_N;
   int total_tiles = tiles_m * tiles_n;
@@ -153,7 +153,7 @@ int main(int argc, char** argv) {
   auto sched_m_view = choreo::make_spanview<choreo::s32, 1>(sched_m_d, {(size_t)total_tiles});
   auto sched_n_view = choreo::make_spanview<choreo::s32, 1>(sched_n_d, {(size_t)total_tiles});
 
-  // ── Allocate matmul data ──
+  // -- Allocate matmul data --
   auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);
   auto res_h = choreo::make_spandata<choreo::f16>(M, N);

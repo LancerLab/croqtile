@@ -193,3 +193,102 @@ sample-test-operator:
 	exit $$ret
 
 run-samples: $(OPERATOR_NAMES:%=test-%)
+
+# =============================================================================
+# Open-Source Sync (oss/main <-> main)
+# =============================================================================
+# Internal workflow for syncing code to the public croqtile repository.
+# Full guide: Documents/internal/oss-sync-developer-guide.md
+
+OSS_SCRIPTS := $(SCRIPT_DIR)/oss
+OSS_PUSH    := bash $(OSS_SCRIPTS)/oss-push.sh
+OSS_PULL    := bash $(OSS_SCRIPTS)/oss-pull.sh
+OSS_SCAN    := bash $(OSS_SCRIPTS)/oss-scan.sh
+OSS_SETUP   := bash $(OSS_SCRIPTS)/oss-setup.sh
+COMMIT     ?=
+RANGE      ?=
+
+.PHONY: oss-scan oss-scan-staged oss-scan-diff oss-push oss-push-last \
+        oss-push-range oss-push-dry oss-pull oss-setup oss-status oss-help
+
+oss-scan:
+	@$(OSS_SCAN) --tree oss/main
+
+oss-scan-staged:
+	@$(OSS_SCAN) --staged
+
+oss-scan-diff:
+	@if [ -z "$(COMMIT)" ]; then echo "Usage: make oss-scan-diff COMMIT=<sha>"; exit 1; fi
+	@$(OSS_SCAN) --diff $(COMMIT)
+
+oss-push:
+	@if [ -z "$(COMMIT)" ]; then \
+		echo "Usage:"; \
+		echo "  make oss-push COMMIT=<sha>          # single commit"; \
+		echo "  make oss-push-last                   # last commit on main"; \
+		echo "  make oss-push-range RANGE=a..b       # range of commits"; \
+		echo ""; \
+		echo "See: Documents/internal/oss-sync-developer-guide.md"; \
+		exit 1; \
+	fi
+	@$(OSS_PUSH) $(COMMIT)
+
+oss-push-last:
+	@echo "Pushing last commit on main to oss/main..."
+	@$(OSS_PUSH) HEAD
+
+oss-push-range:
+	@if [ -z "$(RANGE)" ]; then echo "Usage: make oss-push-range RANGE=<from>..<to>"; exit 1; fi
+	@$(OSS_PUSH) --range $(RANGE)
+
+oss-push-dry:
+	@if [ -z "$(COMMIT)" ] && [ -z "$(RANGE)" ]; then \
+		echo "Usage:"; \
+		echo "  make oss-push-dry COMMIT=<sha>"; \
+		echo "  make oss-push-dry RANGE=a..b"; \
+		exit 1; \
+	fi
+	@if [ -n "$(RANGE)" ]; then \
+		$(OSS_PUSH) -n --range $(RANGE); \
+	else \
+		$(OSS_PUSH) -n $(COMMIT); \
+	fi
+
+oss-pull:
+	@if [ -z "$(COMMIT)" ]; then \
+		echo "Usage: make oss-pull COMMIT=<sha>"; \
+		echo ""; \
+		echo "See: Documents/internal/oss-sync-developer-guide.md"; \
+		exit 1; \
+	fi
+	@$(OSS_PULL) $(COMMIT)
+
+oss-setup:
+	@$(OSS_SETUP)
+
+oss-status:
+	@echo "=== OSS Branch Status ==="
+	@echo "oss/main tip:"; git log oss/main --oneline -3 2>/dev/null || echo "  (branch not found -- run: make oss-setup)"
+	@echo ""; echo "main tip:"; git log main --oneline -3
+	@echo ""; echo "Remotes:"
+	@git remote -v | grep -E '(oss-shadow|public)' || echo "  (no oss remote -- run: make oss-setup)"
+
+oss-help:
+	@echo "Open-Source Sync Commands"
+	@echo "========================="
+	@echo ""
+	@echo "  make oss-scan                   Scan oss/main branch for violations"
+	@echo "  make oss-scan-staged            Scan staged changes for violations"
+	@echo "  make oss-scan-diff COMMIT=sha   Scan a single commit"
+	@echo ""
+	@echo "  make oss-push COMMIT=sha        Push one commit to oss/main"
+	@echo "  make oss-push-last              Push HEAD to oss/main"
+	@echo "  make oss-push-range RANGE=a..b  Push a range of commits"
+	@echo "  make oss-push-dry COMMIT=sha    Dry-run (preview only)"
+	@echo "  make oss-push-dry RANGE=a..b    Dry-run a range"
+	@echo ""
+	@echo "  make oss-pull COMMIT=sha        Pull from oss/main to main"
+	@echo "  make oss-setup                  Initialize oss remote + branch"
+	@echo "  make oss-status                 Show sync status"
+	@echo ""
+	@echo "Full guide: Documents/internal/oss-sync-developer-guide.md"

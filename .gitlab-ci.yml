@@ -2,6 +2,7 @@ stages:
   - check-in-tests
   - pre-release-tests
   - docgen
+  - oss-validation
 
 # TODO: make package release work
 #  - artifacts
@@ -18,6 +19,7 @@ gpu_test:
         $CI_COMMIT_BRANCH == "main" || 
         $CI_COMMIT_BRANCH == "cute" || 
         $CI_COMMIT_BRANCH =~ /^release\// ||
+        $CI_COMMIT_BRANCH =~ /^oss\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
@@ -275,4 +277,21 @@ generate_docs:
     - python3.8 -m pip install mkdocs mkdocs-material mkdocs-markdownextradata-plugin
     - make serve-doc
   timeout: 10m
+
+# OSS keyword/path validation for oss/* branches and MRs targeting them.
+# Runs oss-scan.sh to ensure no sensitive keywords leak into the public tree.
+oss_scan:
+  stage: oss-validation
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^oss\//
+      when: on_success
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^oss\//
+      when: on_success
+  script:
+    - echo "Running OSS keyword and path scan on branch $CI_COMMIT_BRANCH..."
+    - bash scripts/oss/oss-scan.sh --tree HEAD -k scripts/oss/os_kw.txt -v
+  tags:
+    - GPU
+  allow_failure: false
+  timeout: 5m
 
