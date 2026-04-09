@@ -737,38 +737,39 @@ inline int MemLevel(Storage s) {
 namespace {
 
 inline const std::string UnScopedExpr(const std::string& input) {
-  // Regular expression to match scoped names
-  std::regex scopedNameRegex(
-      R"((::[a-zA-Z_][a-zA-Z0-9_]*|::\$[0-9]+)(::[a-zA-Z_][a-zA-Z0-9_]*|::\$[0-9]+)*)");
+  // Fast path: no scope separators at all.
+  if (input.find("::") == std::string::npos) return input;
 
-  // Output string
   std::string output;
-  std::sregex_iterator it(input.begin(), input.end(), scopedNameRegex);
-  std::sregex_iterator end;
+  output.reserve(input.size());
+  size_t i = 0;
+  size_t len = input.size();
 
-  size_t lastPos = 0;
-
-  // Iterate through all matches
-  for (; it != end; ++it) {
-    const std::smatch& match = *it;
-    size_t matchPos = match.position();
-    size_t matchLen = match.length();
-
-    // Append the part of the input before the current match
-    output += input.substr(lastPos, matchPos - lastPos);
-
-    // Extract the last part of the scoped name
-    std::string scopedName = match.str();
-    size_t lastColon = scopedName.find_last_of("::");
-    output += scopedName.substr(lastColon + 1);
-
-    // Update the last processed position
-    lastPos = matchPos + matchLen;
+  while (i < len) {
+    // Look for the start of a scoped name chain (::identifier or ::$digit).
+    if (i + 1 < len && input[i] == ':' && input[i + 1] == ':') {
+      char next = (i + 2 < len) ? input[i + 2] : '\0';
+      bool is_scoped = (next == '_' || std::isalpha((unsigned char)next) ||
+                        next == '$');
+      if (is_scoped) {
+        size_t last_seg_start = 0;
+        while (i + 1 < len && input[i] == ':' && input[i + 1] == ':') {
+          i += 2; // skip ::
+          last_seg_start = i;
+          // consume identifier or $digits
+          if (i < len && input[i] == '$') ++i;
+          while (i < len &&
+                 (std::isalnum((unsigned char)input[i]) || input[i] == '_'))
+            ++i;
+        }
+        // Emit only the last segment.
+        output.append(input, last_seg_start, i - last_seg_start);
+        continue;
+      }
+    }
+    output.push_back(input[i]);
+    ++i;
   }
-
-  // Append the remaining part of the input after the last match
-  output += input.substr(lastPos);
-
   return output;
 }
 

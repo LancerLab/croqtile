@@ -623,11 +623,19 @@ public:
   bool Visit(AST::DMA& n) override {
 #if CHOREO_CUDA_VERSION < 12040
     if (n.IsTMA()) {
-      Error1(n.LOC(),
-             "TMA is not supported by current CUDA. "
-             "(Version " STRINGIFY(CHOREO_CUDA_VERSION_MAJOR) "." STRINGIFY(
-                 CHOREO_CUDA_VERSION_MINOR) " < 12.9+).");
-      return false;
+      if (CCtx().GetOutputKind() == OutputKind::TargetSourceCode) {
+        Warning(n.LOC(),
+                "TMA requires CUDA 12.4+, current CUDA is " STRINGIFY(
+                    CHOREO_CUDA_VERSION_MAJOR) "." STRINGIFY(
+                    CHOREO_CUDA_VERSION_MINOR)
+                ". Source will be generated but may not compile.");
+      } else {
+        Error1(n.LOC(),
+               "TMA is not supported by current CUDA. "
+               "(Version " STRINGIFY(CHOREO_CUDA_VERSION_MAJOR) "." STRINGIFY(
+                   CHOREO_CUDA_VERSION_MINOR) " < 12.4+).");
+        return false;
+      }
     }
 #endif
 

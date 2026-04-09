@@ -1186,7 +1186,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
 
   end_idx = std::min(end_idx, ca->OpCount());
 
-  auto offset = sbe::nu(0);
+  sbe::ExprSum offset;
 
   // assert(ca->OpCount() == 1 &&
   //        "count of spanned operations in CuTe DMA should be 1.");
@@ -1215,7 +1215,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
       choreo_unreachable("unsupported spanned operation.");
   }
 
-  return offset;
+  return offset.Get();
 }
 
 const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,

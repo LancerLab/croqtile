@@ -1313,6 +1313,24 @@ inline Operand SimplifyExpression(const Operand& expr) {
   return expr->Normalize();
 }
 
+// Additive accumulator that defers normalization to a single final pass.
+// Use in loops that build up a sum across iterations -- avoids O(N^2)
+// repeated normalization from operator+=.
+//
+//   ExprSum offset;
+//   for (...) offset += vals[d] * blk[d] * strd[d];
+//   auto result = offset.Get();   // normalized once
+//
+class ExprSum {
+  Operand acc_ = nu(0);
+
+public:
+  void operator+=(const Operand& term) {
+    acc_ = bop(OpCode::ADD, acc_, term);
+  }
+  Operand Get() const { return acc_->Normalize(); }
+};
+
 // Function to simplify an expression and return the result as a string
 inline std::string
 SimplifyAndPrint(const std::shared_ptr<SymbolicExpression>& expr) {
