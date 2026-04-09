@@ -2828,7 +2828,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // - not support tiling.
   // - not support async.
 
-  // Generate tops dte and choreo::future in device-side
+  // Generate DMA transfer and choreo::future in device-side
   auto claimFuture = [this,
                       &n](const std::string& buf_expr, bool is_async,
                           bool is_tma = false,
