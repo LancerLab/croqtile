@@ -45,9 +45,9 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
   } else if (auto expr = dyn_cast<AST::Expr>(n)) {
     VarSet res;
     if (auto c = expr->GetC())
-      res = SetUnion(res, GetAllSymbolicOperands(c.get()));
+      SetUnionInPlace(res, GetAllSymbolicOperands(c.get()));
     for (const auto& e : {expr->GetL(), expr->GetR()})
-      if (e) res = SetUnion(res, GetAllSymbolicOperands(e.get()));
+      if (e) SetUnionInPlace(res, GetAllSymbolicOperands(e.get()));
     return res;
   } else if (isa<AST::IntLiteral>(n) || isa<AST::FloatLiteral>(n) ||
              isa<AST::StringLiteral>(n) || isa<AST::BoolLiteral>(n)) {
@@ -66,7 +66,7 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
       }
       VarSet res;
       for (const auto& v : mv->AllValues())
-        res = SetUnion(res, GetAllSymbolicOperands(v.get()));
+        SetUnionInPlace(res, GetAllSymbolicOperands(v.get()));
       return res;
     }
   } else if (auto da = dyn_cast<AST::DataAccess>(n)) {
@@ -74,29 +74,20 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
   } else if (auto it = dyn_cast<AST::IntTuple>(n)) {
     VarSet res;
     for (const auto& v : it->GetValues()->AllValues())
-      res = SetUnion(res, GetAllSymbolicOperands(v.get()));
+      SetUnionInPlace(res, GetAllSymbolicOperands(v.get()));
     return res;
   } else if (auto call = dyn_cast<AST::Call>(n)) {
     (void)call;
     return {};
   } else if (auto chunkat = dyn_cast<AST::ChunkAt>(n)) {
     VarSet res;
-    // Add the base reference symbol (the data being chunked)
     res.insert(InScopeName(chunkat->RefSymbol()));
-    // Extract operands from all tiling/slicing operations
-    for (auto tsi : chunkat->AllOperations()) {
-      for (const auto& rfn : tsi->ReferredNodes()) {
-        VarSet ops = GetAllSymbolicOperands(rfn.get());
-        res = SetUnion(res, ops);
-      }
-    }
-    // Handle indices if present
-    if (chunkat->indices) {
-      for (const auto& idx : chunkat->indices->AllValues()) {
-        VarSet idx_ops = GetAllSymbolicOperands(idx.get());
-        res = SetUnion(res, idx_ops);
-      }
-    }
+    for (auto tsi : chunkat->AllOperations())
+      for (const auto& rfn : tsi->ReferredNodes())
+        SetUnionInPlace(res, GetAllSymbolicOperands(rfn.get()));
+    if (chunkat->indices)
+      for (const auto& idx : chunkat->indices->AllValues())
+        SetUnionInPlace(res, GetAllSymbolicOperands(idx.get()));
     return res;
   } else {
     choreo_unreachable("expecting node type: " + n->TypeNameString() + ".");
@@ -470,9 +461,9 @@ void LivenessAnalyzer::ComputeLiveRange() {
         // Restore binding relationship deleted by AST::Wait
         if (stmt2binding_restore.count(s)) {
           assert(isa<AST::Wait>(s));
-          std::string fut_name = stmt2binding_restore[s];
-          for (const auto& [src, dst] : fut2buffers[fut_name])
-            AddBinding(fut_name, src);
+          for (const auto& fut_name : stmt2binding_restore[s])
+            for (const auto& [src, dst] : fut2buffers[fut_name])
+              AddBinding(fut_name, src);
         }
         size_t id = stmt2id[s];
         for (auto var : linfo[s].live_in) {
@@ -576,15 +567,13 @@ void LivenessAnalyzer::ComputeLiveRange() {
   VST_DEBUG({
     if (!linfo[preorder_stmts[0]].live_in.empty()) {
       std::set<std::string> li_set;
-      for (const auto& item : linfo[preorder_stmts[0]].live_in) {
+      for (const auto& item : linfo[preorder_stmts[0]].live_in)
         if (!IsGlobalOrBuiltIn(item)) li_set.insert(item);
-        if (!li_set.empty()) {
-          errs() << SSTR(preorder_stmts[0]);
-          errs() << "live_in of the first stmt is not empty, including:\n";
-          for (const auto& item : li_set) errs() << "\t" << item << "\n";
-          choreo_unreachable(
-              "expecting the live_in of the first stmt is empty.");
-        }
+      if (!li_set.empty()) {
+        errs() << SSTR(preorder_stmts[0]);
+        errs() << "live_in of the first stmt is not empty, including:\n";
+        for (const auto& item : li_set) errs() << "\t" << item << "\n";
+        choreo_unreachable("expecting the live_in of the first stmt is empty.");
       }
     }
   });
@@ -902,7 +891,7 @@ void LivenessAnalyzer::HandleStmtInBefore(AST::Node& n) {
     cur_bb = AST::Make<BasicBlock>();
     if (!bb_list.empty()) {
       cur_bb->id = bb_list.back()->id + 1;
-      ConnnectBB(bb_list.back(), cur_bb);
+      ConnectBB(bb_list.back(), cur_bb);
     }
   }
   cur_bb->stmt_ids.push_back(stmt_id);
@@ -932,7 +921,7 @@ void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
   _else->id = bb_list.back()->id + 1;
   ie_bb_list.top()._else = _else;
   assert(!ie_bb_list.empty());
-  ConnnectBB(ie_bb_list.top()._if, _else);
+  ConnectBB(ie_bb_list.top()._if, _else);
   cur_bb = _else;
 
   // if there is no else block,
@@ -1002,9 +991,9 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
     auto _end = AST::Make<BasicBlock>();
     _end->is_end = true;
     _end->id = bb_list.back()->id + 1;
-    ConnnectBB(it_bb_list.top()._then, _end);
+    ConnectBB(it_bb_list.top()._then, _end);
     // seems that there is no need to add the edge
-    // ConnnectBB(it_bb_list.top()._it, _end);
+    // ConnectBB(it_bb_list.top()._it, _end);
     end2cond.emplace(_end, it_bb_list.top()._it);
     it_bb_list.pop();
     cur_bb = _end;
@@ -1023,8 +1012,8 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
     auto _end = AST::Make<BasicBlock>();
     _end->is_end = true;
     _end->id = bb_list.back()->id + 1;
-    ConnnectBB(ie_bb_list.top()._then, _end);
-    ConnnectBB(ie_bb_list.top()._else, _end);
+    ConnectBB(ie_bb_list.top()._then, _end);
+    ConnectBB(ie_bb_list.top()._else, _end);
     end2cond.emplace(_end, ie_bb_list.top()._if);
     ie_bb_list.pop();
     cur_bb = _end;
@@ -1177,10 +1166,10 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
       // since we will calculate live_in and live_out after visiting all the
       // nodes, we should record the binding info to do restoration in
       // ComputeLiveRange().
-      stmt2binding_restore[&n] = fut_name;
+      stmt2binding_restore[&n].push_back(fut_name);
     }
-  } else if (isa<AST::InThreadsBlock>(&n)) {
-    --inthreads_async_level;
+  } else if (auto ib = dyn_cast<AST::InThreadsBlock>(&n)) {
+    if (ib->async) --inthreads_async_level;
   }
 
   return true;
@@ -1227,6 +1216,14 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
           AddUse(current_stmt, sa->id->name);
           AddIsAlias(current_stmt, n.name_str);
           AddAlias(n.name_str, sa->id->name);
+        } else if (e->GetOp() == Op::ElemOf) {
+          // `s0 = s[xxx]`, where s is of spannedarray type
+          // Alias s0 to s conservatively
+          AddDef(current_stmt, n.name_str, true);
+          std::string base_array = AST::GetArrayBaseSymbol(*e)->name;
+          AddUse(current_stmt, base_array);
+          AddIsAlias(current_stmt, n.name_str);
+          AddAlias(n.name_str, base_array);
         } else {
           assert(false && "expecting the init_expr is a span_as.");
         }
@@ -1604,7 +1601,7 @@ bool LivenessAnalyzer::Visit(AST::InThreadsBlock& n) {
   bb_list.push_back(cur_bb);
   auto _then = AST::Make<BasicBlock>();
   _then->id = cur_bb->id + 1;
-  ConnnectBB(cur_bb, _then);
+  ConnectBB(cur_bb, _then);
   it_bb_list.top()._then = _then;
   cur_bb = _then;
 
@@ -1620,7 +1617,7 @@ bool LivenessAnalyzer::Visit(AST::IfElseBlock& n) {
   bb_list.push_back(cur_bb);
   auto _then = AST::Make<BasicBlock>();
   _then->id = bb_list.back()->id + 1;
-  ConnnectBB(bb_list.back(), _then);
+  ConnectBB(bb_list.back(), _then);
   ie_bb_list.top()._then = _then;
   cur_bb = _then;
 

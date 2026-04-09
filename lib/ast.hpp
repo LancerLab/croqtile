@@ -140,8 +140,28 @@ struct Block : public Node, public TypeIDProvider<Block> {
   virtual const ValueItem GetScopePredicate() const { return sbe::bl(true); }
   virtual bool HasScopePredicate() const { return false; }
 
+  // Thread mask: scope_thread_mask[tid] = true iff thread tid is active.
+  // Empty vector means not computed or unpredictable.
+  std::vector<bool> scope_thread_mask;
+
+  bool HasScopeThreadMask() const { return !scope_thread_mask.empty(); }
+  int64_t ScopeThreadDim() const { return (int64_t)scope_thread_mask.size(); }
+  int64_t ScopeActiveThreadCount() const {
+    int64_t c = 0;
+    for (bool b : scope_thread_mask)
+      if (b) ++c;
+    return c;
+  }
+  const std::vector<bool>& GetScopeThreadMask() const {
+    return scope_thread_mask;
+  }
+  void SetScopeThreadMask(const std::vector<bool>& m) { scope_thread_mask = m; }
+
 protected:
-  void CloneBlockStateTo(Block& copied) const { copied.stmts = CloneP(stmts); }
+  void CloneBlockStateTo(Block& copied) const {
+    copied.stmts = CloneP(stmts);
+    copied.scope_thread_mask = scope_thread_mask;
+  }
 
 public:
   ptr<Node> CloneImpl() const override = 0;
@@ -994,6 +1014,7 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   ptr<Identifier> id = nullptr;
   ptr<Identifier> nid = nullptr;
   ptr<MultiValues> list = nullptr;
+  ptr<MultiValues> subscriptions = nullptr;
 
   explicit SpanAs(const location& l, const ptr<Identifier>& n,
                   const ptr<Identifier>& nn, const ptr<MultiValues>& lst)
@@ -1010,6 +1031,7 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   // allow copy construction
   explicit SpanAs(const SpanAs& sa) : SpanAs(sa.LOC(), sa.id, sa.nid, sa.list) {
     assert(list && "Unexpected: span list is not provided");
+    subscriptions = sa.subscriptions;
   }
 
   void SetTypeDetail(const Shape& s) {
@@ -1023,7 +1045,10 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<SpanAs>(LOC(), id, nid, cast<MultiValues>(CloneP(list)));
+    auto c = Make<SpanAs>(LOC(), id, nid, cast<MultiValues>(CloneP(list)));
+    if (subscriptions)
+      c->subscriptions = cast<MultiValues>(CloneP(subscriptions));
+    return c;
   }
 
   void Print(std::ostream& os, const std::string& = {},
@@ -1032,7 +1057,10 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
     assert(nid && "no new span is specified.");
     assert(list && "no span_as is specified.");
 
-    os << PSTR(id) << ".span_as[";
+    os << PSTR(id);
+    if (subscriptions)
+      for (auto& v : subscriptions->AllValues()) os << "[" << PSTR(v) << "]";
+    os << ".span_as[";
     list->Print(os, " ", with_type);
     os << " ]";
 
@@ -1312,6 +1340,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   ValueList array_dims;
   bool is_mutable = false;
   bool infer_span = false; // the span must be inferenced
+  int64_t event_thread_count = -1;
 
 public:
   explicit DataType(const location& l, BaseType t, bool m = false)
@@ -1374,8 +1403,10 @@ public:
   void ReGenSemaType() { InitSemaType(); }
 
   ptr<Node> CloneImpl() const override {
-    return Make<DataType>(LOC(), base_type, rank, CloneP(mdspan_type),
-                          array_dims, is_mutable, infer_span);
+    auto cloned = Make<DataType>(LOC(), base_type, rank, CloneP(mdspan_type),
+                                 array_dims, is_mutable, infer_span);
+    cloned->event_thread_count = event_thread_count;
+    return cloned;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1410,9 +1441,10 @@ private:
         SetType(MakeScalarType(base_type, is_mutable));
       } else if (base_type == BaseType::EVENT) {
         if (!IsArrayType())
-          SetType(MakeEventType(Storage::DEFAULT));
+          SetType(MakeEventType(Storage::DEFAULT, event_thread_count));
         else
-          SetType(MakeEventArrayType(Storage::DEFAULT, ArrayDims()));
+          SetType(MakeEventArrayType(Storage::DEFAULT, ArrayDims(),
+                                     event_thread_count));
       } else if (base_type == BaseType::ITUPLE) {
         if (!IsValidRank(rank))
           // type inference to deduce the dim count
@@ -3106,6 +3138,21 @@ struct Continue : public Node, public TypeIDProvider<Continue> {
   __UDT_TYPE_INFO__(Node, Continue)
 };
 
+struct Yield : public Node, public TypeIDProvider<Yield> {
+  Yield(const location& l) : Node(l) {}
+
+  ptr<Node> CloneImpl() const override { return Make<Yield>(LOC()); }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n" << prefix << "`- Yield";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Yield)
+};
+
 struct Return : public Node, public TypeIDProvider<Return> {
   ptr<Node> value = nullptr;
 
@@ -3308,7 +3355,55 @@ struct InThreadsBlock : public PredBlock,
   bool async = false;
   bool outer = true;
 
+  // Active thread count, computed by ActiveThreadsAnalysis from thread mask.
+  ValueItem active_threads = GetInvalidValueItem();
+
+  // The parallel level at which inthreads partitions threads (GROUP, GROUPx4).
+  ParallelLevel inthreads_level = ParallelLevel::NONE;
+
+  // For simple predicates like `pv == C`, the selected unit index.
+  // -1 means not a simple single-unit selection.
+  int64_t selected_unit_index = -1;
+
   const ptr<Expr> GetPred() const { return cast<Expr>(GetPredicate()); }
+
+  bool HasActiveThreads() const { return IsValidValueItem(active_threads); }
+
+  // Returns true when exactly one warpgroup (or warp) is selected,
+  // meaning all 128 (or 32) consecutive threads in one unit are active.
+  bool IsSingleUnit() const {
+    if (!HasScopeThreadMask()) return false;
+    auto dim = ScopeThreadDim();
+    auto count = ScopeActiveThreadCount();
+    if (inthreads_level == ParallelLevel::GROUPx4)
+      return count == 128 && dim >= 128;
+    if (inthreads_level == ParallelLevel::GROUP)
+      return count == 32 && dim >= 32;
+    return false;
+  }
+
+  // Returns the single warpgroup index that ALL active threads belong to,
+  // or -1 if active threads span multiple warpgroups.
+  int64_t ActiveWarpGroup() const {
+    if (!HasScopeThreadMask()) return -1;
+    int64_t wg_size = 128;
+    int64_t num_wg = (ScopeThreadDim() + wg_size - 1) / wg_size;
+    int64_t active_wg = -1;
+    for (int64_t wg = 0; wg < num_wg; ++wg) {
+      int64_t start = wg * wg_size;
+      int64_t end = std::min(start + wg_size, ScopeThreadDim());
+      for (int64_t i = start; i < end; ++i) {
+        if (scope_thread_mask[i]) {
+          if (active_wg < 0)
+            active_wg = wg;
+          else if (active_wg != wg)
+            return -1;
+          break;
+        }
+      }
+    }
+    return active_wg;
+  }
 
   explicit InThreadsBlock(const location& l, const ptr<Expr> p,
                           const ptr<MultiNodes>& s, bool a = false,
@@ -3321,6 +3416,9 @@ struct InThreadsBlock : public PredBlock,
     auto copied =
         Make<InThreadsBlock>(LOC(), cast<Expr>(pred), stmts, async, outer);
     ClonePredBlockStateTo(*copied);
+    copied->active_threads = active_threads;
+    copied->inthreads_level = inthreads_level;
+    copied->selected_unit_index = selected_unit_index;
     return copied;
   }
 
@@ -3333,6 +3431,21 @@ struct InThreadsBlock : public PredBlock,
       os << "\n"
          << prefix
          << " `- Scope Predicate: " << GetScopePredicate()->ToString();
+    if (HasScopeThreadMask()) {
+      os << "\n"
+         << prefix << " `- Active Threads: " << ScopeActiveThreadCount()
+         << " / " << ScopeThreadDim();
+      os << " [";
+      bool first = true;
+      for (int64_t i = 0; i < ScopeThreadDim(); ++i) {
+        if (scope_thread_mask[i]) {
+          if (!first) os << ",";
+          first = false;
+          os << i;
+        }
+      }
+      os << "]";
+    }
     if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
 

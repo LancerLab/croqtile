@@ -2219,6 +2219,37 @@ __device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
 // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-shape
 struct Policy_WGMMA_D_M64K16 {
   template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row(Tensor& D, AccumT* d, int row_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;             // 0-31: lane within warp
+    int warp = tid / 32;             // 0-3: which warp in warp group
+    int row0 = warp * 16 + lane / 4; // first row
+    int row1 = row0 + 8;             // second row
+    int col_num = N / 8;             // number of column pairs
+    using value_type = typename Tensor::value_type;
+
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
     int lane = tid % 32;             // 0-31: lane within warp
@@ -2664,8 +2695,8 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
 // only for M64N32 WGMMA accumulator scaling
 template <typename AccT, typename ScaleT, int N>
 __device__ __forceinline__ void
-scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
-                  ScaleT scale_b) {
+scale_accumulator_full(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
+                       int scale_a_ld, ScaleT scale_b) {
   static_assert(std::is_same_v<ScaleT, f32>,
                 "scale_accumulator only supports f32 scale type");
   static_assert(
@@ -2734,6 +2765,115 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
       d[base + 3] = fmaf(scale_d[base + 3], sa1, d[base + 3]);
     }
   }
+}
+
+template <typename AccT, typename ScaleT, int N>
+__device__ __forceinline__ void
+scale_accumulator_masked(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
+                         int scale_a_ld, int scale_a_rows, ScaleT scale_b) {
+  static_assert(std::is_same_v<ScaleT, f32>,
+                "scale_accumulator only supports f32 scale type");
+  static_assert(
+      std::is_same_v<AccT, f16> || std::is_same_v<AccT, float>,
+      "scale_accumulator only supports f16 or float accumulator type");
+
+  int itd = threadIdx.x & 127;
+  int lane = itd & 31;
+  int warp = itd >> 5;
+  int row0 = warp * 16 + (lane >> 2);
+  int row1 = row0 + 8;
+  constexpr int col_num = N / 8;
+
+  int row0_valid = row0 < scale_a_rows;
+  int row1_valid = row1 < scale_a_rows;
+  auto* scale_a_ptr0 = scale_a_ptr + (row0_valid ? row0 : 0) * scale_a_ld;
+  auto* scale_a_ptr1 = scale_a_ptr + (row1_valid ? row1 : 0) * scale_a_ld;
+  float sa0 = 0.0f;
+  float sa1 = 0.0f;
+
+  #if defined(__CUDA_ARCH__)
+  if (__isShared(scale_a_ptr)) {
+    sa0 = *scale_a_ptr0;
+    sa1 = *scale_a_ptr1;
+  } else if (__isGlobal(scale_a_ptr)) {
+    sa0 = __ldg(scale_a_ptr0);
+    sa1 = __ldg(scale_a_ptr1);
+  } else {
+    sa0 = *scale_a_ptr0;
+    sa1 = *scale_a_ptr1;
+  }
+  #else
+  sa0 = *scale_a_ptr0;
+  sa1 = *scale_a_ptr1;
+  #endif
+  sa0 *= scale_b * static_cast<float>(row0_valid);
+  sa1 *= scale_b * static_cast<float>(row1_valid);
+
+  if constexpr (std::is_same_v<AccT, f16>) {
+  #if defined(__USE_CUDA_TYPE__)
+    auto* d2 = reinterpret_cast<__half2*>(d);
+    auto const* scale_d2 = reinterpret_cast<__half2 const*>(scale_d);
+    __half2 sa0_h2 = __float2half2_rn(sa0);
+    __half2 sa1_h2 = __float2half2_rn(sa1);
+
+    #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int base2 = c * 2;
+      d2[base2 + 0] = __hfma2(scale_d2[base2 + 0], sa0_h2, d2[base2 + 0]);
+      d2[base2 + 1] = __hfma2(scale_d2[base2 + 1], sa1_h2, d2[base2 + 1]);
+    }
+  #else
+    #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int base = c * 4;
+      d[base + 0] += utils::from_f32<f16>(to_f32(scale_d[base + 0]) * sa0);
+      d[base + 1] += utils::from_f32<f16>(to_f32(scale_d[base + 1]) * sa0);
+      d[base + 2] += utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1);
+      d[base + 3] += utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1);
+    }
+  #endif
+  } else if constexpr (std::is_same_v<AccT, float>) {
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int base = c * 4;
+      d[base + 0] = fmaf(scale_d[base + 0], sa0, d[base + 0]);
+      d[base + 1] = fmaf(scale_d[base + 1], sa0, d[base + 1]);
+      d[base + 2] = fmaf(scale_d[base + 2], sa1, d[base + 2]);
+      d[base + 3] = fmaf(scale_d[base + 3], sa1, d[base + 3]);
+    }
+  }
+}
+
+template <typename AccT, typename ScaleT, int N>
+__device__ __forceinline__ void
+scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
+                  int scale_a_rows, ScaleT scale_b) {
+  scale_accumulator_masked<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
+                                            scale_a_rows, scale_b);
+}
+
+template <typename AccT, typename ScaleT, int N, int ScaleARows>
+__device__ __forceinline__ void
+scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
+                  ScaleT scale_b) {
+  scale_accumulator_full<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
+                                          scale_b);
+}
+
+template <typename AccT, typename ScaleT, int N, int MaxScaleARows>
+__device__ __forceinline__ void
+scale_accumulator_dispatch(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
+                           int scale_a_ld, int scale_a_rows, ScaleT scale_b) {
+  scale_accumulator_masked<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
+                                            scale_a_rows, scale_b);
+}
+
+template <typename AccT, typename ScaleT, int N>
+__device__ __forceinline__ void
+scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
+                  ScaleT scale_b) {
+  scale_accumulator_full<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
+                                          scale_b);
 }
 
 // --------------- MMA policy specializations ---------------

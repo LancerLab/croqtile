@@ -20,7 +20,7 @@ __co__ void foo(f32 [128, 128] input) {
   }
 }
 
-// CHECK-OFF: error: async dma/tma with event is only supported in warpspec mode.
 // CHECK-OFF: error: forbid to associated async dma without a named future or a named event.
+// CHECK-OFF: warning: Be careful to wait event outside inthreads block
 
 // CHECK: warning: Be careful to wait event outside inthreads block, which may lead to parallelism issues.

@@ -61,9 +61,9 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
         block_m = tile_id / tiles_n;
         block_n = tile_id % tiles_n;
 
-        parallel p1 by 4 : group-4 {
+        parallel p1 by 4 : group-4, t by 128 : thread {
 
-          inthreads.async (p1 == 0) {
+          inthreads.async (p1 == 0 && t == 0) {
             foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
               stage = iv_k % MATMUL_STAGES;
               wait empty[stage];

@@ -58,9 +58,14 @@ private:
     std::vector<Range> ranges;
     std::string buffer_id;
     bool Interfere(const Buffer& other) const {
-      for (const auto& a : this->ranges)
-        for (const auto& b : other.ranges)
-          if (a.Overlaps(b)) return true;
+      size_t i = 0, j = 0;
+      while (i < ranges.size() && j < other.ranges.size()) {
+        if (ranges[i].Overlaps(other.ranges[j])) return true;
+        if (ranges[i].end < other.ranges[j].end)
+          ++i;
+        else
+          ++j;
+      }
       return false;
     }
     void Sort() { std::sort(ranges.begin(), ranges.end()); }
@@ -83,6 +88,14 @@ private:
     void SortBuffers() {
       for (auto& b : buffers) b.Sort();
       for (auto& b : dynamic_buffers) b.Sort();
+      std::sort(buffers.begin(), buffers.end(),
+                [](const Buffer& a, const Buffer& b) {
+                  return a.buffer_id < b.buffer_id;
+                });
+      std::sort(dynamic_buffers.begin(), dynamic_buffers.end(),
+                [](const DBuffer& a, const DBuffer& b) {
+                  return a.buffer_id < b.buffer_id;
+                });
     }
   };
 
@@ -115,7 +128,7 @@ private:
   std::string GetFuncNameFromScopedName(const std::string& name) const {
     // indicate that it is a co function name
     if (!PrefixedWith(name, "::")) return name;
-    return SplitStringByDelimiter(name, "::", true)[0];
+    return SplitFirst(name, "::");
   }
 
   std::string GetDeclDevFuncOfBuffer(std::string buf_name) const {
@@ -145,11 +158,13 @@ private:
 
       size_t length = chunks.size();
 
-      // sort by size in descending order
-      // TODO: use idx or pointer rather than Chunk
+      // sort by size descending, then by buffer_id ascending for stability
       std::vector<Chunk> sorted_chunks = chunks;
       std::sort(sorted_chunks.begin(), sorted_chunks.end(),
-                [](const Chunk& a, const Chunk& b) { return a.size > b.size; });
+                [](const Chunk& a, const Chunk& b) {
+                  if (a.size != b.size) return a.size > b.size;
+                  return a.buffer_id < b.buffer_id;
+                });
 
       // build interference graph - represent which buffers' lifetime overlap
       // TODO: O(n^2) maybe can be optimized

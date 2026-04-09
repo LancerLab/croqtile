@@ -1,9 +1,15 @@
 #include "diversity_analysis.hpp"
 
+#include <algorithm>
+#include <vector>
+
 using namespace Choreo;
 void DiversityInfo::Dump(std::ostream& os) const {
   os << "[diversity] Diversity Shape:\n";
-  for (auto& item : shapes)
+  std::vector<std::pair<std::string, DiversityShape>> sorted(shapes.begin(),
+                                                             shapes.end());
+  std::sort(sorted.begin(), sorted.end());
+  for (auto& item : sorted)
     os << "    " << item.first << " : " << STR(item.second) << "\n";
 }
 

@@ -123,7 +123,18 @@ Option<bool> print_stats(
 Option<bool> disable_cuda_runtime_env_check(
     OptionKind::Hidden, "--disable-cuda-runtime-env-check", "", false,
     "Do not emit cuda runtime enviroment check.");
-
+#ifdef CHOREO_FAST_COMPILE_DEFAULT
+constexpr bool kFastCompileDefault = true;
+#else
+constexpr bool kFastCompileDefault = false;
+#endif
+Option<bool>
+    fast_compile(OptionKind::User, "--fast-compile", "-fc",
+                 kFastCompileDefault,
+                 "Use separate compilation with a cached precompiled CuTe "
+                 "runtime for faster nvcc compilation. The precompiled "
+                 "runtime is built automatically on first use and cached in "
+                 "$XDG_CACHE_HOME/choreo/ (or ~/.cache/choreo/).");
 Option<std::string>
     target_options(OptionKind::Hidden, "--target-options", "-tos", "",
                    "Extra target options used for target compilation.", "");
@@ -173,6 +184,9 @@ Option<bool> sym_repl(OptionKind::Hidden, "--print-sym-replace", "-sr", false,
                       "Trace the symbol replace process.");
 Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
+Option<bool>
+    time_passes(OptionKind::User, "--time-passes", "-tp", false,
+                "Measure and display the time spent in each compiler pass.");
 Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
                         "Save the temporal files.");
 Option<bool> liveness(OptionKind::Hidden, "--liveness", "", true,
@@ -334,6 +348,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetDumpAst(dump_ast.GetValue());
   CCtx().SetNoCodegen(ncodegen.GetValue());
   CCtx().SetPrintPassNames(prt_pass.GetValue());
+  CCtx().SetTimePasses(time_passes.GetValue());
   CCtx().SetNoPreProcess(no_pp.GetValue());
   CCtx().SetDropComments(del_comm.GetValue());
   CCtx().SetDebugAll(debug_on.GetValue());
@@ -395,6 +410,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetPrintStats(print_stats.GetValue());
   CCtx().SetDisableCudaRuntimeEnvCheck(
       disable_cuda_runtime_env_check.GetValue());
+  CCtx().SetFastCompile(fast_compile.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
 
   if (!trace_visit.GetValue().empty())
@@ -423,6 +439,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   if (print_node_type) setenv("CHOREO_PRINT_NODETYPE", "", 1);
 
   if (prt_pass) setenv("CHOREO_PRINT_PASSES", "", 1);
+  if (time_passes) setenv("CHOREO_TIME_PASSES", "1", 1);
 
   if (!abend_after.GetValue().empty())
     setenv("CHOREO_STOP_AFTER_PASS", ToUpper(abend_after.GetValue()).c_str(),

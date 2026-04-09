@@ -37,11 +37,11 @@
 #define MATMUL_DEFAULT_N 256
 #define MATMUL_DEFAULT_K 256
 
-// ─── Optimization: Column-major tile scheduling (persistent) ───
+// --- Optimization: Column-major tile scheduling (persistent) ---
 // In the baseline persistent kernel, tiles are iterated row-major:
-//   tile_id → (tile_id / tiles_n, tile_id % tiles_n)
+//   tile_id -> (tile_id / tiles_n, tile_id % tiles_n)
 // With column-major scheduling, tiles iterate column-first:
-//   tile_id → (tile_id % tiles_m, tile_id / tiles_m)
+//   tile_id -> (tile_id % tiles_m, tile_id / tiles_m)
 // This means tiles sharing the same B-column are processed consecutively
 // by the same SM, improving L2 cache reuse for the B (rhs) matrix.
 __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {

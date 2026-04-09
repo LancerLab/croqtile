@@ -21,7 +21,7 @@ struct SharedAlignmentCollector : public VisitorWithSymTab {
 private:
   static std::string GetCoFuncName(const std::string& scoped_name) {
     if (!PrefixedWith(scoped_name, "::")) return scoped_name;
-    return SplitStringByDelimiter(scoped_name, "::", true)[0];
+    return SplitFirst(scoped_name, "::");
   }
 
   bool RunOnProgramImpl(AST::Node& root) override {
@@ -235,6 +235,7 @@ bool MemReuse::AfterVisitImpl(AST::Node& n) {
 bool MemReuse::Visit(AST::NamedVariableDecl& n) {
   if (isa<AST::Select>(n.init_expr)) return true;
   if (n.HasNote("spm")) return true;
+  if (n.HasNote("ref")) return true;
   auto ty = GetSymbolType(n.name_str);
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     auto sto = sty->GetStorage();
@@ -434,8 +435,7 @@ bool MemReuse::ValidateResult(const HeapSimulator::Result& res,
                               const HeapSimulator::Chunks& chunks) {
   size_t size = chunks.size();
   for (size_t i = 0; i < size; ++i) {
-    for (size_t j = 0; j < size; ++j) {
-      if (i == j) continue;
+    for (size_t j = i + 1; j < size; ++j) {
       const auto& c1 = chunks[i];
       const auto& c2 = chunks[j];
       if (c1.Interfere(c2)) {
@@ -443,7 +443,7 @@ bool MemReuse::ValidateResult(const HeapSimulator::Result& res,
         auto o2 = res.chunk_offsets.at(c2.buffer_id);
         if ((o1 <= o2 && o1 + c1.size > o2) ||
             (o2 <= o1 && o2 + c2.size > o1)) {
-          dbgs() << "Error: unexpect memory overlap detected between buffers "
+          dbgs() << "Error: unexpected memory overlap detected between buffers "
                  << c1.buffer_id << " and " << c2.buffer_id
                  << " after applying memory reuse.\n";
           return false;

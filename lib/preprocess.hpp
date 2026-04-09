@@ -9,6 +9,12 @@
 
 namespace Choreo {
 
+struct MacroSub {
+  int orig_col; // 1-based column of macro name in original line
+  int orig_len; // length of macro name
+  int repl_len; // length of replacement text
+};
+
 struct Bundle {
   size_t start;
   size_t end;
@@ -75,9 +81,12 @@ protected:
 
   const std::string SubStituteDefines(const std::string& line,
                                       const DefineMap& defines,
-                                      const FuncMap& funcs);
+                                      const FuncMap& funcs,
+                                      std::vector<MacroSub>* subs = nullptr);
   const std::string SubstituteGlobalDefines(const std::string& line);
-  const std::string SubstituteLocalDefines(const std::string& line);
+  const std::string
+  SubstituteLocalDefines(const std::string& line,
+                         std::vector<MacroSub>* subs = nullptr);
   const std::string SubstituteGlobalMacroFuncs(const std::string& line,
                                                bool& changed);
   const std::string SubstituteLocalMacroFuncs(const std::string& line,
@@ -95,7 +104,7 @@ protected:
   void HandleOneChoreoLine(const std::string& line, bool handle_comment = true);
 
 public:
-  virtual bool ExtractDeviceKernel(std::ostream&) { return true; }
+  virtual bool ExtractDeviceKernel(std::ostream& cok_ss);
   virtual bool Process(std::istream& input);
 }; // class Preprocess
 

@@ -3,7 +3,7 @@
 In this section, we will extend our discussion on tiling optimization in Choreo by examining some practical examples.
 
 ## Example 1: `matmul`
-The first example is matrix multiplication on a device program. This example demonstrates how Choreo’s tiling and memory management mechanisms work together to optimize matrix operations, including how DMA (Direct Memory Access) is leveraged for efficient data movement.
+The first example is matrix multiplication on a device program. This example demonstrates how Choreo's tiling and memory management mechanisms work together to optimize matrix operations, including how DMA (Direct Memory Access) is leveraged for efficient data movement.
 
 ---
 
@@ -111,7 +111,7 @@ In the example above, there is a need to tile the matrices in a manner that invo
 
 - The combination of `q` and `n` ensures that physical and virtual parallelism can work together efficiently.
 - This helps optimize **memory access patterns**, especially when working with large matrices, where efficient memory use is crucial.
-- Choreo’s approach here is more aligned with **physical memory hierarchies** (e.g., local/shared memory on GPUs or accelerators). Unlike higher-level loop scheduling techniques like in TVM, which abstract away the actual data movement, Choreo explicitly links **virtual loops** to **physical DMA operations**. This results in more efficient data movement and computation.
+- Choreo's approach here is more aligned with **physical memory hierarchies** (e.g., local/shared memory on GPUs or accelerators). Unlike higher-level loop scheduling techniques like in TVM, which abstract away the actual data movement, Choreo explicitly links **virtual loops** to **physical DMA operations**. This results in more efficient data movement and computation.
 
 
 ## Virtual Parallelism and Physical DMA Mapping
@@ -132,7 +132,7 @@ s[A].bind(yi, tvm.thread_axis("threadIdx.y"))
 Here, the computation of a matrix A is split into multiple loops with the axis split by some factor (e.g., 64). The bind method binds loop variables to hardware threads, providing an abstraction of parallelism. This approach works well in a variety of cases, but it comes with some limitations when dealing with specific memory hierarchies or when performance is tightly coupled with the underlying hardware behaviour.
 
 #### The Limitation of Virtual Parallelism in TVM-style Schedules
-In TVM’s loop schedule, virtual parallelism is represented via abstraction layers like threadIdx and blockIdx, which map high-level parallelism to physical hardware threads. However, the physical behavior of data movement, particularly in the case of complex memory hierarchies (e.g., local, shared, or global memory), is not explicitly represented. TVM abstracts away the details of data movement, leaving some of these behaviors to be automatically determined by the system, either through rules or optimizations.
+In TVM's loop schedule, virtual parallelism is represented via abstraction layers like threadIdx and blockIdx, which map high-level parallelism to physical hardware threads. However, the physical behavior of data movement, particularly in the case of complex memory hierarchies (e.g., local, shared, or global memory), is not explicitly represented. TVM abstracts away the details of data movement, leaving some of these behaviors to be automatically determined by the system, either through rules or optimizations.
 
 The main limitation here is that the physical behavior and memory access patterns may not be fully optimized because they are hidden behind the abstraction. As a result, the system may perform well in general cases, but it may not always exploit the full potential of the hardware, especially when fine-grained control over memory access is required (e.g., in high-performance computing scenarios).
 

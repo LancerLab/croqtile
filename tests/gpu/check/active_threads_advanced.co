@@ -1,0 +1,63 @@
+// RUN: not choreo -gs -pa=active-threads -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Test modulo predicate: inthreads(t % 2 == 0) selects even threads
+__co__ void test_modulo(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    shared f16 [64, 64] s;
+    parallel p1 by 2 : group-4
+    parallel t by 128 : thread {
+      // CHECK: Active Threads: 128 / 256 [0,2,4,6,8,10,
+      inthreads (t % 2 == 0) {
+        dma.copy a.subspan(64, 64).at(p0, 0) => s;
+      }
+    }
+  }
+}
+
+// Test inequality: inthreads(t < 4) selects first 4 threads per warpgroup
+__co__ void test_lt(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    shared f16 [64, 64] s;
+    parallel p1 by 2 : group-4
+    parallel t by 128 : thread {
+      // CHECK: Active Threads: 8 / 256 [0,1,2,3,128,129,130,131]
+      inthreads (t < 4) {
+        dma.copy a.subspan(64, 64).at(p0, 0) => s;
+      }
+    }
+  }
+}
+
+// Test inequality: inthreads(t < 4 || t >= 124) selects first 4 and last 4 threads per warpgroup
+__co__ void test_lt_or_ge(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    shared f16 [64, 64] s;
+    parallel p1 by 2 : group-4
+    parallel t by 128 : thread {
+      // CHECK: Active Threads: 16 / 256 [0,1,2,3,124,125,126,127,128,129,130,131,252,253,254,255]
+      inthreads (t < 4 || t >= 124) {
+        dma.copy a.subspan(64, 64).at(p0, 0) => s;
+      }
+    }
+  }
+}
+
+// Test warp-level: inthreads(w == 0) with 4 warps selects first 32 threads
+// No DMA thread count warning expected -- 32 active matches GROUP unit size
+__co__ void test_warp(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    shared f16 [64, 64] s;
+    parallel w by 4 : group {
+      // CHECK: Active Threads: 32 / 128 [0,1,2,3,4,5,6,7,8,9,
+      inthreads (w == 0) {
+        dma.copy a.subspan(64, 64).at(p0, 0) => s;
+      }
+    }
+  }
+}
+
+// Warnings from CodegenInfoCollect -- checked after AST dumps
+// CHECK: warning: DMA inside inthreads has 64 active threads in a unit, but tiled copy assumes 128 threads
+// CHECK: warning: DMA inside inthreads has 4 active threads in a unit, but tiled copy assumes 128 threads
+// CHECK: warning: DMA inside inthreads has 8 active threads in a unit, but tiled copy assumes 128 threads
+// CHECK-NOT: warning: DMA inside inthreads{{.*}}test_warp

@@ -187,6 +187,11 @@ run_hooks_strict() {
   return 0
 }
 
+# ---- Choreo lit.cfg marker validation ----
+# Only source lit.cfg files whose first line starts with "# co-lit".
+# This prevents accidentally sourcing configs from other tools (e.g. LLVM).
+is_choreo_cfg() { local h; read -r h < "$1" 2>/dev/null && [[ "$h" == "# co-lit"* ]]; }
+
 #===================== utilities =========================
 
 get_terminal_width() {
@@ -265,78 +270,122 @@ abspath_dir_of() {
   fi
 }
 
-find_tests_root() {
-  # usage: find_tests_root <test_path>
-  # returns absolute path to nearest ancestor directory named "tests"
-  d="$(abspath_dir_of "$1")"
-
-  while :; do
-    base="$(basename "$d")"
-    if [ "$base" = "tests" ] || [ "$base" = "benchmark" ]; then
-      printf "%s\n" "$d"
-      return 0
-    fi
-    parent="$(dirname "$d")"
-    [ "$parent" = "$d" ] && break
-    d="$parent"
-  done
-
-  echo "lit.sh: could not find ancestor directory named 'tests' for: $1" >&2
-  return 2
+abspath_file() {
+  echo "$(abspath_dir_of "$1")/$(basename "$1")"
 }
 
-load_cfg_chain_from_tests() {
-  # usage: load_cfg_chain_from_tests <test_path> [cfg_name]
-  test_path="$1"
-  cfg_name="${2:-lit.cfg}"
+# ---- include_dir discovery mechanism ----
+#
+# A lit.cfg may call include_dir("../path") to declare that another
+# directory's tests should run under this cfg's target hooks.
+# During expand_includes() discovery the calls are collected; at
+# runtime (inside prepare()) include_dir() is a no-op.
+_DISCOVERY_MODE=0    # set to 1 only inside expand_includes
+_CURRENT_CFG_DIR=""  # cfg directory being sourced during discovery
+_PENDING_INCLUDES=() # collected "cfg_dir|rel_dir" pairs
 
-  tests_root="$(find_tests_root "$test_path")"
-  test_dir="$(abspath_dir_of "$test_path")"
+# Called from lit.cfg to declare a shared directory.
+# No-op at runtime; recorded during expand_includes() discovery.
+include_dir() {
+  [ $_DISCOVERY_MODE -eq 0 ] && return 0
+  _PENDING_INCLUDES+=("${_CURRENT_CFG_DIR}|$1")
+}
 
-  # Build the relative path from tests_root -> test_dir using string stripping
-  # Assumes test_dir is under tests_root.
-  case "$test_dir" in
-    "$tests_root") rel="" ;;
-    "$tests_root"/*) rel="${test_dir#"$tests_root"/}" ;;
-    *)
-      echo "lit.sh: $test_dir is not under $tests_root" >&2
-      return 2
-      ;;
-  esac
+# expand_includes GivenDir
+# Sources every lit.cfg under GivenDir to collect include_dir() calls.
+# For each declared directory, adds its .co/.cmt files to files_array as
+# "abs_file|cfg_dir".  Files claimed by any include are suppressed from
+# their own direct (hookless) run so each file runs exactly once per target.
+expand_includes() {
+  local given_dir="$1"
+  local abs_dir
+  abs_dir="$(abspath_dir_of "$given_dir")" || return 0
 
-  # Source tests_root/lit.cfg first (if present)
-  d="$tests_root"
-  cfg="$d/$cfg_name"
-  if [ -f "$cfg" ]; then
-    cfg_abs="$(cd "$(dirname "$cfg")" && pwd)/$(basename "$cfg")"
-    if ! already_sourced_cfg "$cfg_abs"; then
-      mark_sourced_cfg "$cfg_abs"
-       #echo "==> sourcing cfg: $cfg_abs" >&2
-      . "$cfg_abs"
-    fi
-  fi
+  # Source all lit.cfg files in discovery mode to collect include_dir calls.
+  # HOOKS and CFG_SOURCED are reset afterward so per-file prepare() is unaffected.
+  _DISCOVERY_MODE=1
+  _PENDING_INCLUDES=()
+  local cfg_file
+  while IFS= read -r -d '' cfg_file; do
+    _CURRENT_CFG_DIR="$(abspath_dir_of "$cfg_file")"
+    CFG_SOURCED=""
+    HOOKS=""
+    . "$cfg_file" 2>/dev/null || true
+  done < <(find "$abs_dir" -name 'lit.cfg' -print0)
+  _DISCOVERY_MODE=0
+  CFG_SOURCED=""
+  HOOKS=""
 
-  # Then walk rel segments: tests_root/seg1, tests_root/seg1/seg2, ...
-  # and source cfg at each level if present.
-  if [ -n "$rel" ]; then
-    oldIFS="$IFS"
-    IFS="/"
-    set -- $rel
-    IFS="$oldIFS"
+  # Nothing to do if no include_dir declarations were found
+  [ ${#_PENDING_INCLUDES[@]} -eq 0 ] && return 0
 
-    for seg in "$@"; do
-      d="$d/$seg"
-      cfg="$d/$cfg_name"
-      if [ -f "$cfg" ]; then
-        cfg_abs="$(cd "$(dirname "$cfg")" && pwd)/$(basename "$cfg")"
-        if ! already_sourced_cfg "$cfg_abs"; then
-          mark_sourced_cfg "$cfg_abs"
-           #echo "==> sourcing cfg: $cfg_abs" >&2
-          . "$cfg_abs"
-        fi
+  local -a target_entries=()
+  local -a suppressed_abs=()
+  local inc_entry cfg_dir rel_dir resolved_dir
+  for inc_entry in "${_PENDING_INCLUDES[@]}"; do
+    cfg_dir="${inc_entry%%|*}"
+    rel_dir="${inc_entry#*|}"
+    resolved_dir="$(cd "$cfg_dir" && cd "$rel_dir" 2>/dev/null && pwd)" || continue
+    while IFS= read -r -d '' f; do
+      local abs_f
+      abs_f="$(abspath_file "$f")"
+      target_entries+=("${abs_f}|${cfg_dir}")
+      suppressed_abs+=("$abs_f")
+    done < <(find "$resolved_dir" -type f \( -name '*.co' -o -name '*.cmt' \) -print0)
+  done
+
+  [ ${#target_entries[@]} -eq 0 ] && return 0
+
+  # Rebuild files_array: drop suppressed entries, then append per-target entries
+  local -a new_array=()
+  local entry abs_entry suppressed s
+  for entry in "${files_array[@]}"; do
+    abs_entry="$(abspath_file "$entry")"
+    suppressed=0
+    for s in "${suppressed_abs[@]}"; do
+      if [ "$abs_entry" = "$s" ]; then
+        suppressed=1
+        break
       fi
     done
-  fi
+    [ $suppressed -eq 0 ] && new_array+=("$entry")
+  done
+  for entry in "${target_entries[@]}"; do
+    new_array+=("$entry")
+  done
+  files_array=("${new_array[@]}")
+}
+
+load_cfg_chain() {
+  # Walk UP from the test file's directory, collecting Choreo-marked
+  # lit.cfg files.  Stop at script_dir (inclusive) or /.
+  # Then source in reverse (parent-first) order.
+  local test_path="$1"
+  local cfg_name="${2:-lit.cfg}"
+  local test_dir
+  test_dir="$(abspath_dir_of "$test_path")"
+
+  local -a _chain=()
+  local d="$test_dir"
+  while :; do
+    if [[ -f "$d/$cfg_name" ]] && is_choreo_cfg "$d/$cfg_name"; then
+      _chain+=("$d/$cfg_name")
+    fi
+    [[ "$d" == "$script_dir" ]] && break
+    [[ "$d" == "/" || -z "$d" ]] && break
+    d="${d%/*}"
+    [[ -z "$d" ]] && d="/"
+  done
+
+  # Source in reverse order (outermost parent first).
+  local _i cfg_abs
+  for (( _i=${#_chain[@]}-1; _i>=0; _i-- )); do
+    cfg_abs="${_chain[$_i]}"
+    if ! already_sourced_cfg "$cfg_abs"; then
+      mark_sourced_cfg "$cfg_abs"
+      . "$cfg_abs"
+    fi
+  done
 }
 
 #=========================================================
@@ -389,7 +438,7 @@ if ! which bc &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.31"
+echo "        Choreo SimpleLit - v0.33"
 echo "---------------------------------------"
 echo ""
 
@@ -412,6 +461,7 @@ expect_fail=
 expect_skip=
 
 max_jobs=1
+dry_run=0
 
 need_cute=0
 need_cuda=0
@@ -427,16 +477,78 @@ fi
 # Check the hardware device availability and type
 # Note: consider the machine only installed a single target
 device_type="none"
-cuda_arch="none"
 mach=
 simulator="none"
 
-# some specific features
-is_dynshape_supported=0
+# Cache hardware detection results per sourced cfg chain.
+# This avoids repeated detection for many files under the same lit config.
+declare -A HW_DETECT_CACHE=()
+
+# Cache cfg chain and hook registry, keyed by the set of lit.cfg files
+# in the path (chain_key).  Different directories that share the same
+# lit.cfg chain are served from a single cache entry, so each chain is
+# sourced exactly once -- preventing side-effect re-initialization of
+# target variables on a cache hit.
+declare -A CFG_CHAIN_CACHE=()
+declare -A HOOKS_CACHE=()
+
+# Fast directory -> chain_key mapping so compute_cfg_files_key() is
+# called at most once per unique directory.
+declare -A DIR_TO_CHAIN_KEY=()
+
+# Walk UP from dir to script_dir (or /), collecting Choreo-marked
+# lit.cfg paths.  Returns the result via _cfg_files_key (no subshell).
+# The key is ordered parent-first (reversed from the walk-up order)
+# to match load_cfg_chain's sourcing order.
+_cfg_files_key=""
+compute_cfg_files_key() {
+  local dir="$1"
+  local -a _found=()
+  local d="$dir"
+  while :; do
+    [[ -f "$d/lit.cfg" ]] && is_choreo_cfg "$d/lit.cfg" && _found+=("$d/lit.cfg")
+    [[ "$d" == "$script_dir" ]] && break
+    [[ "$d" == "/" || -z "$d" ]] && break
+    d="${d%/*}"
+    [[ -z "$d" ]] && d="/"
+  done
+  local key="" _i
+  for (( _i=${#_found[@]}-1; _i>=0; _i-- )); do
+    key="${key}${key:+;}${_found[$_i]}"
+  done
+  _cfg_files_key="${key:-__no_cfg__}"
+}
+
+make_cfg_cache_key() {
+  local cfgs="$1"
+  if [ -z "$cfgs" ]; then
+    echo "__no_cfg__"
+    return
+  fi
+  # Flatten multi-line cfg list into a stable key.
+  echo "$cfgs" | tr '\n' ';'
+}
+
+save_hw_detect_cache() {
+  local key="$1"
+  HW_DETECT_CACHE["$key"]="${device_type}|${mach}|${simulator}"
+}
+
+restore_hw_detect_cache() {
+  local key="$1"
+  local cached="${HW_DETECT_CACHE["$key"]}"
+
+  IFS='|' read -r device_type mach simulator <<< "$cached"
+}
 
 # Function to fill the target-specific variables
+# prepare <file> [cfg_override_dir]
+#   cfg_override_dir: when set, load the cfg chain rooted at this directory
+#   instead of the directory that contains <file>.  Used by expand_includes
+#   so that files in tests/check/ are processed with a target's lit.cfg.
 prepare() {
   local file="$1"
+  local cfg_override="${2:-}"
 
   # Validate input
   if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
@@ -445,28 +557,64 @@ prepare() {
   fi
 
   local ext="${file##*.}"
-  local comment_pattern
-
-  # Set comment pattern based on file extension
   if [[ "${ext}" == "co" ]]; then
-    comment_pattern="^//"
+    :
   elif [[ "${ext}" == "cmt" ]]; then
-    comment_pattern="^#"
+    :
   else
     echo "Error: Invalid test file: $file" >&2
     return 1
   fi
 
   # now load the configure
-  CFG_SOURCED=""
-  HOOKS=""
-  load_cfg_chain_from_tests "$file"
+  local cfg_root_dir
+  if [[ -n "$cfg_override" ]]; then
+    cfg_root_dir="$(abspath_dir_of "${cfg_override}/__sentinel__")"
+  else
+    cfg_root_dir="$(abspath_dir_of "$file")"
+  fi
+
+  local chain_key
+  if [[ -n "${DIR_TO_CHAIN_KEY["$cfg_root_dir"]+x}" ]]; then
+    chain_key="${DIR_TO_CHAIN_KEY["$cfg_root_dir"]}"
+  else
+    compute_cfg_files_key "$cfg_root_dir"
+    chain_key="$_cfg_files_key"
+    DIR_TO_CHAIN_KEY["$cfg_root_dir"]="$chain_key"
+  fi
+
+  if [[ -n "${CFG_CHAIN_CACHE["$chain_key"]+x}" ]]; then
+    CFG_SOURCED="${CFG_CHAIN_CACHE["$chain_key"]}"
+    HOOKS="${HOOKS_CACHE["$chain_key"]}"
+  else
+    CFG_SOURCED=""
+    HOOKS=""
+    if [[ -n "$cfg_override" ]]; then
+      # Load the cfg chain for the override dir by passing a sentinel path
+      # whose dirname resolves to that directory.
+      load_cfg_chain "${cfg_override}/__sentinel__"
+    else
+      load_cfg_chain "$file"
+    fi
+    CFG_CHAIN_CACHE["$chain_key"]="$CFG_SOURCED"
+    HOOKS_CACHE["$chain_key"]="$HOOKS"
+  fi
+
+  local cfg_cache_key
+  cfg_cache_key="$(make_cfg_cache_key "$CFG_SOURCED")"
 
   # detect the hardware
-  run_hooks "hw_detect";
+  if [[ -n "${HW_DETECT_CACHE["$cfg_cache_key"]+x}" ]]; then
+    restore_hw_detect_cache "$cfg_cache_key"
+  else
+    run_hooks "hw_detect"
 
-  # target-specific preparation
-  run_hooks "target_prepare"
+    # target-specific preparation
+    run_hooks "target_prepare"
+
+    save_hw_detect_cache "$cfg_cache_key"
+  fi
+
 
   # Reset target requirement
   requires_dynamic_shape=0
@@ -477,18 +625,38 @@ prepare() {
   expect_fail=
   expect_skip=
 
-  # Extract expect_fail and expect_skip with proper comment pattern
-  if [[ -n "$comment_pattern" ]]; then
-    expect_fail=$(grep "$comment_pattern" "$file" | grep "XFAIL:" | sed 's/.*XFAIL:[[:blank:]]*//')
-    expect_skip=$(grep "$comment_pattern" "$file" | grep "SKIP:")
-  else
-    # Fallback: search entire file if no specific pattern
-    expect_fail=$(grep "XFAIL:" "$file" | sed 's/.*XFAIL:[[:blank:]]*//')
-    expect_skip=$(grep "SKIP:" "$file")
-  fi
+  local requires=""
+  local line=""
+  local payload=""
 
-  # Extract REQUIRES line from file contents
-  local requires=$(grep "REQUIRES:" "$file")
+  # Parse key directives with builtins to reduce process spawning.
+  while IFS= read -r line; do
+    if [[ "${ext}" == "co" ]]; then
+      [[ "$line" == "//"* ]] || continue
+      payload="${line#//}"
+    else
+      [[ "$line" == "#"* ]] || continue
+      payload="${line#\#}"
+    fi
+
+    if [[ -z "$expect_fail" ]] && [[ "$payload" == *"XFAIL:"* ]]; then
+      expect_fail="${payload#*XFAIL:}"
+      expect_fail="$(trim_spaces "$expect_fail")"
+    fi
+
+    if [[ -z "$expect_skip" ]] && [[ "$payload" == *"SKIP:"* ]]; then
+      expect_skip="$line"
+    fi
+
+    if [[ -z "$requires" ]] && [[ "$payload" == *"REQUIRES:"* ]]; then
+      requires="${payload#*REQUIRES:}"
+      requires="$(trim_spaces "$requires")"
+    fi
+
+    if [[ -n "$expect_skip" ]] && [[ -n "$requires" ]] && [[ -n "$expect_fail" ]]; then
+      break
+    fi
+  done < "$file"
 
   set_clear REQ_TARGETS
 
@@ -497,47 +665,41 @@ prepare() {
     return 0
   fi
 
-  # Early returns for comment-style files that only contain comment markers
-  if [[ "${ext}" == "co" ]] && [[ "${requires}" != "//"* ]]; then
-    return
-  fi
-  if [[ "${ext}" == "cmt" ]] && [[ "${requires}" != "#"* ]]; then
-    return
-  fi
-
-  # Extract the actual requirements part
-  requires=$(echo "${requires}" | sed 's/.*REQUIRES://')
-
   # Extract components
-  local tgts=$(grep -o "TARGET-[^[:space:]]*" <<< "$requires" | sed 's/TARGET-//')
-  local libs=$(grep -o "LIBRARY-[^[:space:]]*" <<< "$requires" | sed 's/LIBRARY-//')
-  local cmps=$(grep -o "COMPILER-[^[:space:]]*" <<< "$requires" | sed 's/COMPILER-//')
+  local tgts=()
+  local libs=()
+  local token
+  for token in $requires; do
+    if [[ "$token" == TARGET-* ]]; then
+      tgts+=("${token#TARGET-}")
+    elif [[ "$token" == LIBRARY-* ]]; then
+      libs+=("${token#LIBRARY-}")
+    elif [[ "$token" == "DYNAMIC-SHAPE" ]]; then
+      requires_dynamic_shape=1
+    elif [[ "$token" == "GDB" ]] || [[ "$token" == "TOOL-GDB" ]]; then
+      requires_gdb=1
+    elif [[ "$token" == "CUDA-GDB" ]]; then
+      requires_cudagdb=1
+    fi
+  done
 
   # Process targets
-  if [ ! -z "${tgts}" ]; then
-    run_hooks "set_archs" ${tgts}
+  if [ ${#tgts[@]} -ne 0 ]; then
+    run_hooks "set_archs" "${tgts[@]}"
   fi
 
-  if set_empty REQ_TARGETS && [ ! -z "${tgts}" ]; then
-    echo "invalid target: ${tgts}" >&2
+  if set_empty REQ_TARGETS && [ ${#tgts[@]} -ne 0 ]; then
+    echo "invalid target: ${tgts[*]}" >&2
   fi
 
   # has library requirement
-  if [[ "${libs}" == *"CUTE"* ]]; then
-    need_cute=1
-    need_cuda=1
-  fi
-
-  # requires dynamic-shape support (some target only)
-  local dynshape=$(grep -q "DYNAMIC-SHAPE" <<< "$requires" && echo "found")
-  [ ! -z "${dynshape}" ] && requires_dynamic_shape=1
-
-  # requires gdb in system
-  local gdbreq=$(grep -qE '(^|[[:space:]])(GDB|TOOL-GDB)($|[[:space:]])' <<< "$requires" && echo "found")
-  [ ! -z "${gdbreq}" ] && requires_gdb=1
-
-  local cudagdbreq=$(grep -qE '(^|[[:space:]])(CUDA-GDB)($|[[:space:]])' <<< "$requires" && echo "found")
-  [ ! -z "${cudagdbreq}" ] && requires_cudagdb=1
+  for token in "${libs[@]}"; do
+    if [[ "$token" == "CUTE" ]]; then
+      need_cute=1
+      need_cuda=1
+      break
+    fi
+  done
 }
 
 lock_file="/tmp/test_script_lock_${timestamp}"
@@ -605,30 +767,26 @@ execute_command() {
   local env_unset="$6"
   local run_env="$7"
 
-  # Replace %s with the filename
-  command=${command//%s/"$file"}
-
   # Replace 'choreo', 'copp' and 'FileCheck' with their absolute paths
   # Note: It must uses '-n' to remove comments inside host code.
   #       Or else FileCheck will check the line of "// CHECK:"
   # workaround: Use cuda_gdb instead of cuda-gdb.
   #             Or else it will be replaced to cuda-/bin/gdb
+  # IMPORTANT: %s substitution (file path) happens AFTER these sed calls to
+  # avoid the binary names (e.g. 'choreo') being matched inside the file path.
   command=$(echo "$command" | sed \
     -e "s#\bchoreo\b#$(which choreo) -n#g" \
     -e "s#\bcopp\b#$(which copp)#g" \
     -e "s#\bFileCheck\b#${FILECHECK}#g" \
     -e "s#\bgdb\b#${GDB_BIN}#g" \
-    -e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g" \
-    -e "s#%cuda_arch#-arch ${cuda_arch}#g")
-  # command=${command//choreo/"$(which choreo) -n"}
-  # command=${command//copp/"$(which copp)"}
-  # command=${command//FileCheck/"${FILECHECK}"}
-  # command=${command//gdb/"${GDB_BIN}"}
-  # command=${command//cuda-g/"${CUDA_GDB_BIN}"}
-  # command=${command//%cuda_arch/"-arch ${cuda_arch}"}
+    -e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g")
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
   run_hooks "target_cmd" "command"
+  # Strip any unresolved %target (e.g. when no target hook was registered)
+  command="${command//%target/}"
+  # Replace %s with the filename (must be after sed so the path isn't mangled)
+  command=${command//%s/"$file"}
 
   # num_tested=$(($num_tested + 1))
   # echo "num_tested before add " $(read_counter "num_tested")
@@ -641,8 +799,13 @@ execute_command() {
   command="${env_set} ${run_env} $command"
   working_command="$command"
 
-  eval "$command" 2>/dev/null
-  local exit_code=$?
+  if [ $dry_run -eq 1 ]; then
+    echo "DRYRUN: $file" >&2
+    local exit_code=0
+  else
+    eval "$command" 2>/dev/null
+    local exit_code=$?
+  fi
 
   if [ ! -z "${env_unset}" ]; then
     eval "$env_unset" 2>/dev/null
@@ -660,7 +823,7 @@ execute_command() {
   elif [[ $elapsed_ns -ge 1000000 ]]; then
       elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000") ms"
   else
-      elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") µs"
+      elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") us"
   fi
 
   local term_width=$(get_terminal_width)
@@ -724,7 +887,7 @@ execute_command() {
 #         Handle arguments
 # ---------------------------------------"
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 [-jN] <file_or_directory>"
+    echo "Usage: $0 [-jN] [--dry-run] <file_or_directory>"
     exit 1
 fi
 
@@ -747,6 +910,10 @@ while [[ $# -gt 0 ]]; do
       save_log=true
       shift
       ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
     -*)
       # Handle invalid option
       echo "Unknown option: $1"
@@ -756,7 +923,9 @@ while [[ $# -gt 0 ]]; do
       # Handle the first positional argument (file or directory)
       if [ -d "$1" ]; then
           # If it's a directory, find all .co, .cmt(cmake test) files
-          files_array=($(find "$1" -type f -name '*.co' -o -name '*.cmt'))
+          _given_dir="$1"
+          files_array=($(find "$_given_dir" -type f -name '*.co' -o -name '*.cmt'))
+          expand_includes "$_given_dir"
       elif [ -f "$1" ]; then
           # If it's a file, add it to the array
           files_array=("$1")
@@ -830,6 +999,13 @@ toupper() {
   echo "$1" | tr '[:lower:]' '[:upper:]'
 }
 
+trim_spaces() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  echo "$s"
+}
+
 retrieve_run_config() {
   local line="$@"
 
@@ -864,9 +1040,14 @@ initialize_counters
 
 trap on_ctrl_c SIGINT
 
-for file in "${files_array[@]}"; do
+for _entry in "${files_array[@]}"; do
+  # Decode optional cfg_override encoded as "file|cfg_dir"
+  _cfg_override="${_entry#*|}"
+  [ "$_cfg_override" = "$_entry" ] && _cfg_override=""
+  file="${_entry%%|*}"
+
   # check requirement specified by the file
-  prepare $file
+  prepare "$file" "$_cfg_override"
 
   if [ ! -z "$expect_skip" ]; then
     echo "SKIP:  $file"
@@ -914,6 +1095,16 @@ for file in "${files_array[@]}"; do
   if [[ -z "${CHOREO_ENABLE_GPU_MMA_TESTS}" ]] || [[ "${CHOREO_ENABLE_GPU_MMA_TESTS}" != "1" ]]; then
     if [[ "$(dirname ${file})" == *"gpu/end2end/wmma"* ]] || [[ "$(dirname ${file})" == *"gpu/end2end/ptx_mma"* ]]; then
       echo "SKIP(GPU-MMA): ${file} "
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    fi
+  fi
+
+  # Skip whole file early when required targets cannot match current machine/simulator.
+  if ! set_empty REQ_TARGETS; then
+    if [[ $device_type == "none"  ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
+      _all_skipped_targets=$(set_print REQ_TARGETS)
+      echo "SKIP($(toupper "${_all_skipped_targets}")): ${file}"
       num_skiped=$(($num_skiped + 1));
       continue;
     fi

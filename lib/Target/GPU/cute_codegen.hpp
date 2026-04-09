@@ -125,6 +125,7 @@ public:
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Break&) override;
   bool Visit(AST::Continue&) override;
+  bool Visit(AST::Yield&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
   bool Visit(AST::Call&) override;
@@ -175,6 +176,9 @@ private:
   std::map<std::string, std::string> claimed_futs;
   std::vector<std::string> pld_checklist = {};
 
+  size_t future_count_ = 0;
+  size_t dma_count_ = 0;
+
   std::set<std::string> global_buffers; // global buffers
   bool emit_call = true;                // emit the call statement
 
@@ -198,23 +202,25 @@ private:
   std::deque<std::string> recent_tma_tx_bytes;
   bool saw_explicit_mma_commit = false;
   bool wgmma_arrive_state_declared = false;
-  bool pending_mbarrier_full_event_array = false;
-  std::string pending_mbarrier_full_event_name;
   std::set<std::string> cluster_trigger_events_;
-  bool in_producer = false; // hack
-  bool in_consumer = false; // hack
+  bool has_analyzed_warpspec = false;
+  bool warpspec_wgmma_arrived = false;
+  AST::InThreadsBlock* current_inthreads = nullptr;
   struct BaseScaleAccumInfo {
     std::string frag_sym;
     std::string frag_expr;
     std::string scale_frag_name;
     std::string scale_a_name;
+    std::string scale_a_valid_rows_name;
     std::string scale_b_name;
     std::string scale_a_expr;
+    std::string scale_a_valid_rows_expr;
     std::string scale_b_expr;
     std::string scale_a_ld;
     std::string acc_ty;
     std::string scale_frag_ty;
     std::string dim_n;
+    int scale_a_static_rows = -1;
     size_t reg_num_d = 0;
   };
   struct HoistedScaleAccumInfo : BaseScaleAccumInfo {};
@@ -229,6 +235,8 @@ private:
 private:
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
+  void EmitFastCompileCache(std::ostream& os, const std::string& precomp_cu);
+  static uint32_t ContentFingerprint();
 
   bool EnableLineDirective() const { return CCtx().GenDebugInfo(); }
   bool EnableDebugTypeRTTI() const {
@@ -335,6 +343,8 @@ private:
     symbolic_dimensions.clear();
     claimed_futs.clear();
     async_subbyte_futures.clear();
+    future_count_ = 0;
+    dma_count_ = 0;
     fty = nullptr;
     void_return = false;
     emit_call = true;
@@ -485,6 +495,11 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
+  std::string LinearizeArrayOffset(const std::string& base_expr,
+                                   const std::vector<AST::ptr<AST::Node>>& subs,
+                                   const ValueList& array_dims,
+                                   const ValueItem& elem_count,
+                                   bool is_host) const;
   std::pair<std::string, std::string>
   GetDMABufferExpr(const std::string& sym,
                    const ptr<AST::MultiValues> subscription,
@@ -498,6 +513,8 @@ private:
   const HoistedScaleAccumInfo* CurrentHoistedScaleAccum() const;
   std::vector<ExplicitScaleAccumInfo>
   AnalyzeExplicitScaleAccumScope(const ptr<AST::MultiNodes>& body) const;
+  std::string GenScaleValidRowsExpr(const ptr<AST::ChunkAt>& ca) const;
+  int GetScaleStaticRows(const ptr<AST::ChunkAt>& ca) const;
   bool HasPlainWGMMAExecForFrag(const ptr<AST::Node>& n,
                                 const std::string& frag_sym) const;
   ExplicitScaleAccumInfo*
@@ -529,30 +546,42 @@ private:
 
   const std::string EmitSpannedArith(AST::Expr& e) const;
 
-  bool InProducer() {
-    if (!CCtx().UseWarpSpec()) return false;
-    return in_producer;
+  bool IsWarpSpecActive() const {
+    return CCtx().UseWarpSpec() || has_analyzed_warpspec ||
+           cgi.GetFunctionTrait(fname).has_warpspec_pattern;
   }
 
-  bool InConsumer() {
-    if (!CCtx().UseWarpSpec()) return false;
-    return in_consumer;
+  bool InSpecWarp() const {
+    return IsWarpSpecActive() && current_inthreads &&
+           current_inthreads->HasActiveThreads() &&
+           current_inthreads->inthreads_level == ParallelLevel::GROUPx4;
   }
 
-  bool UseSingleThreadProducerScope() {
-    return CCtx().UseWarpSpec() && CCtx().SingleThreadProducer();
-  }
-
-  bool GuardWarpSpecProducerOpsIndividually() {
-    return CCtx().UseWarpSpec() && !CCtx().SingleThreadProducer();
-  }
-
-  bool NeedWarpSpecGroupX4SyncForCurrentScope() {
-    if (!CCtx().UseWarpSpec() || bdim_level != ParallelLevel::GROUPx4)
+  bool ScopeAlreadySingleThreadForLevel(ParallelLevel level) const {
+    if (!current_inthreads || !current_inthreads->HasScopeThreadMask())
       return false;
-    if (InConsumer()) return true;
-    if (InProducer()) return GuardWarpSpecProducerOpsIndividually();
-    return false;
+    auto& mask = current_inthreads->GetScopeThreadMask();
+    int64_t unit_size;
+    switch (level) {
+    case ParallelLevel::GROUPx4: unit_size = 128; break;
+    case ParallelLevel::GROUP: unit_size = 32; break;
+    default: unit_size = (int64_t)mask.size(); break;
+    }
+    for (int64_t start = 0; start < (int64_t)mask.size(); start += unit_size) {
+      int64_t count = 0;
+      int64_t end = std::min(start + unit_size, (int64_t)mask.size());
+      for (int64_t i = start; i < end; ++i)
+        if (mask[i]) ++count;
+      if (count > 1) return false;
+    }
+    return true;
+  }
+
+  // In warpspec mode, use wg_barrier.sync() instead of __syncthreads()
+  // because __syncthreads() requires all threads in the block, which would
+  // deadlock when only a subset (one warpgroup) is in scope.
+  bool NeedWarpSpecGroupX4SyncForCurrentScope() {
+    return IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4;
   }
 };
 

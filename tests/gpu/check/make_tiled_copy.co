@@ -1,4 +1,4 @@
-// RUN: not choreo -t cute -arch=sm_86 -fsmem-align=128 %s 2>&1 | FileCheck %s --check-prefix=CHECK
+// RUN: not choreo -gs -t cute -arch=sm_86 -fsmem-align=128 %s 2>&1 | FileCheck %s --check-prefix=CHECK
 
 #include "choreo.h"
 

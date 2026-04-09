@@ -18,7 +18,7 @@ function(check_compiler_compatibility)
 
     if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "9.0")
       set(COMPATIBLE_COMPILER TRUE PARENT_SCOPE)
-      message(STATUS "✓ GCC 9.0+ with C++17 support confirmed")
+      message(STATUS "OK: GCC 9.0+ with C++17 support confirmed")
     else()
       message(FATAL_ERROR "GCC ${CMAKE_CXX_COMPILER_VERSION} is too old. GCC 9.0+ required for full C++17 support.")
     endif()
@@ -30,7 +30,7 @@ function(check_compiler_compatibility)
     # Clang has good C++17 support since version 5.0, but we'll be conservative
     if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "5.0")
       set(COMPATIBLE_COMPILER TRUE PARENT_SCOPE)
-      message(STATUS "✓ Clang 5.0+ with C++17 support confirmed")
+      message(STATUS "OK: Clang 5.0+ with C++17 support confirmed")
     else()
       message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} is too old. Clang 5.0+ recommended for C++17 support.")
     endif()
@@ -90,6 +90,7 @@ endforeach()
 # Public cache options (defaults: CUDA ON, CUTE OFF)
 option(ENABLE_CUDA "Enable CUDA support" ON)
 option(ENABLE_CUTE "Enable CUTE/CUTLASS support (requires CUDA)" ON)
+option(CHOREO_FAST_COMPILE_DEFAULT "Default --fast-compile to ON for faster nvcc builds" OFF)
 
 # Allow users to provide preferred defaults (empty by default)
 #set(DEFAULT_CUDA_HOME "${CMAKE_SOURCE_DIR}/extern/portable_cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
@@ -342,6 +343,10 @@ option(PUBLIC_PACKAGE "Build for Public Release Package")
 
 if (PUBLIC_PACKAGE)
   add_compile_options(-D__CHOREO_INSTALLATION_PACKAGE__)
+endif()
+
+if (CHOREO_FAST_COMPILE_DEFAULT)
+  add_compile_options(-DCHOREO_FAST_COMPILE_DEFAULT=1)
 endif()
 
 # do not warn about strict-aliasing

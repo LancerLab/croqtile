@@ -100,6 +100,11 @@ public:
 
 using OpTy = Opcode;
 
+inline size_t HashCombine(size_t seed, size_t value) {
+  seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+  return seed;
+}
+
 class UnknownSign;
 class NoneSign;
 class Signature {
@@ -110,6 +115,7 @@ protected:
 public:
   virtual size_t Count() const { return 1; }
   virtual const std::string ToString() const { return ""; }
+  virtual size_t Hash() const = 0;
 
   virtual bool operator==(const Signature&) const = 0;
   virtual bool operator!=(const Signature& s) const { return !operator==(s); }
@@ -123,12 +129,21 @@ public:
   __UDT_TYPE_INFO_BASE__(notype)
 };
 
+class CachedSign : public Signature {
+protected:
+  mutable size_t cached_hash = 0;
+  mutable bool hash_valid = false;
+
+  void InvalidateHash() { hash_valid = false; }
+};
+
 using SignTy = std::shared_ptr<Signature>;
 
 class UnknownSign : public Signature, public TypeIDProvider<UnknownSign> {
 public:
   UnknownSign() {}
   const std::string ToString() const override { return "__valno_not_known__"; }
+  size_t Hash() const override { return 0xDEAD'BEEF'0000'0001ULL; }
 
   bool operator==(const Signature& st) const override {
     return isa<UnknownSign>(&st);
@@ -144,6 +159,7 @@ public:
   const std::string ToString() const override {
     return "__valno_not_specified__";
   }
+  size_t Hash() const override { return 0xDEAD'BEEF'0000'0002ULL; }
 
   bool operator==(const Signature& st) const override {
     return isa<NoneSign>(&st);
@@ -153,7 +169,7 @@ public:
   __UDT_TYPE_INFO__(Signature, NoneSign)
 };
 
-class ConstSign : public Signature, public TypeIDProvider<ConstSign> {
+class ConstSign : public CachedSign, public TypeIDProvider<ConstSign> {
 private:
   using Var = std::variant<int64_t, float, double, bool>;
   Var value;
@@ -251,6 +267,27 @@ public:
     return std::visit(ToStringVisitor{}, value);
   }
 
+  size_t Hash() const override {
+    if (hash_valid) return cached_hash;
+    struct HashVisitor {
+      size_t operator()(int64_t v) const {
+        return HashCombine(std::hash<int>{}(0), std::hash<int64_t>{}(v));
+      }
+      size_t operator()(float v) const {
+        return HashCombine(std::hash<int>{}(1), std::hash<float>{}(v));
+      }
+      size_t operator()(double v) const {
+        return HashCombine(std::hash<int>{}(2), std::hash<double>{}(v));
+      }
+      size_t operator()(bool v) const {
+        return HashCombine(std::hash<int>{}(3), std::hash<bool>{}(v));
+      }
+    };
+    cached_hash = std::visit(HashVisitor{}, value);
+    hash_valid = true;
+    return cached_hash;
+  }
+
 public:
   // Type promotion rules
   template <typename T, typename U>
@@ -344,16 +381,19 @@ public:
   __UDT_TYPE_INFO__(Signature, ConstSign)
 };
 
-class SymbolSign : public Signature, public TypeIDProvider<SymbolSign> {
+class SymbolSign : public CachedSign, public TypeIDProvider<SymbolSign> {
 private:
   const std::string symbol;
 
 public:
   SymbolSign(const std::string& s) : symbol(s) {
     assert(PrefixedWith(s, "::"));
+    cached_hash = std::hash<std::string>{}(s);
+    hash_valid = true;
   }
   const std::string Value() const { return symbol; }
   const std::string ToString() const override { return symbol; }
+  size_t Hash() const override { return cached_hash; }
 
   bool operator==(const Signature& st) const override {
     if (auto sign = dyn_cast<SymbolSign>(&st)) return symbol == sign->symbol;
@@ -364,7 +404,7 @@ public:
   __UDT_TYPE_INFO__(Signature, SymbolSign)
 };
 
-class OperationSign : public Signature, public TypeIDProvider<OperationSign> {
+class OperationSign : public CachedSign, public TypeIDProvider<OperationSign> {
 private:
   const OpTy opcode;
   std::vector<SignTy> operands;
@@ -384,7 +424,10 @@ public:
   bool IsOp(const OpTy& o) const { return opcode == o; }
   bool IsOp(std::string_view o) const { return opcode == o; }
   size_t OpCount() const { return operands.size(); }
-  void Append(const SignTy& n) { operands.push_back(n); }
+  void Append(const SignTy& n) {
+    operands.push_back(n);
+    InvalidateHash();
+  }
   const SignTy& At(size_t i) const {
     if (i > OpCount())
       choreo_unreachable("out of bound for an operation signature.");
@@ -397,11 +440,24 @@ public:
     return res;
   }
 
+  size_t Hash() const override {
+    if (hash_valid) return cached_hash;
+    size_t seed = std::hash<Choreo::Opcode>{}(opcode);
+    seed = HashCombine(seed, std::hash<size_t>{}(operands.size()));
+    for (const auto& op : operands) {
+      seed = HashCombine(seed, op ? op->Hash() : 0);
+    }
+    cached_hash = seed;
+    hash_valid = true;
+    return cached_hash;
+  }
+
   bool operator==(const Signature& st) const override {
     auto sign = dyn_cast<OperationSign>(&st);
     if (!sign) return false;
     if (!IsOp(sign->opcode)) return false;
     if (OpCount() != sign->OpCount()) return false;
+    if (Hash() != sign->Hash()) return false;
     for (size_t i = 0; i < OpCount(); ++i)
       if (At(i) != sign->At(i)) return false;
     return true;
@@ -412,7 +468,7 @@ public:
 };
 
 // plural
-class MultiSigns : public Signature, public TypeIDProvider<MultiSigns> {
+class MultiSigns : public CachedSign, public TypeIDProvider<MultiSigns> {
 private:
   std::vector<SignTy> signs;
 
@@ -439,15 +495,20 @@ public:
   const SignTy& At(size_t i) const { return signs.at(i); }
   const SignTy& At(const NumTy& n) const { return signs.at(n.Value()); }
 
-  void Append(const SignTy& n) { signs.push_back(n); }
+  void Append(const SignTy& n) {
+    signs.push_back(n);
+    InvalidateHash();
+  }
   void Append(const SignTy& n, size_t count) {
     for (size_t i = 0; i < count; ++i) signs.push_back(n);
+    InvalidateHash();
   }
 
   bool operator==(const Signature& st) const override {
     auto sign = dyn_cast<MultiSigns>(&st);
     if (!sign) return false;
     if (Count() != sign->Count()) return false;
+    if (Hash() != sign->Hash()) return false;
     for (size_t i = 0; i < Count(); ++i)
       if (At(i) != sign->At(i)) return false;
     return true;
@@ -462,14 +523,29 @@ public:
     return res;
   }
 
+  size_t Hash() const override {
+    if (hash_valid) return cached_hash;
+    size_t seed = std::hash<size_t>{}(signs.size());
+    for (const auto& sign : signs) {
+      seed = HashCombine(seed, sign ? sign->Hash() : 0);
+    }
+    cached_hash = seed;
+    hash_valid = true;
+    return cached_hash;
+  }
+
 public:
   __UDT_TYPE_INFO__(Signature, MultiSigns)
 };
 
-inline const ptr<UnknownSign> unk_sn() {
-  return std::make_shared<UnknownSign>();
+inline const ptr<UnknownSign>& unk_sn() {
+  static const auto instance = std::make_shared<UnknownSign>();
+  return instance;
 }
-inline const ptr<NoneSign> non_sn() { return std::make_shared<NoneSign>(); }
+inline const ptr<NoneSign>& non_sn() {
+  static const auto instance = std::make_shared<NoneSign>();
+  return instance;
+}
 
 // short-hands
 template <typename T>
@@ -545,7 +621,8 @@ struct hash<Choreo::valno::NumTy> {
 template <>
 struct hash<Choreo::valno::SignTy> {
   size_t operator()(const Choreo::valno::SignTy& k) const {
-    return std::hash<std::string>{}(k->ToString());
+    if (!k) return 0;
+    return k->Hash();
   }
 };
 
@@ -554,9 +631,9 @@ template <>
 struct equal_to<Choreo::valno::SignTy> {
   bool operator()(const Choreo::valno::SignTy& a,
                   const Choreo::valno::SignTy& b) const {
-    // Handle null pointers if applicable
     if (!a || !b) return !a && !b;
-    return a->ToString() == b->ToString();
+    if (a.get() == b.get()) return true;
+    return *a == *b;
   }
 };
 
@@ -564,11 +641,13 @@ struct equal_to<Choreo::valno::SignTy> {
 
 inline bool operator==(const Choreo::valno::SignTy& lhs,
                        const Choreo::valno::SignTy& rhs) {
+  if (lhs.get() == rhs.get()) return true;
   return lhs->operator==(*rhs);
 }
 
 inline bool operator!=(const Choreo::valno::SignTy& lhs,
                        const Choreo::valno::SignTy& rhs) {
+  if (lhs.get() == rhs.get()) return false;
   return !lhs->operator==(*rhs);
 }
 
@@ -592,6 +671,8 @@ private:
   std::unordered_map<SignTy, NumTy> const_pool;
   std::unordered_map<NumTy, std::vector<SignTy>> value_nums;
 
+  std::unordered_map<std::string, NumTy> symbol_index;
+
 private:
   int next_valno = 0;
   bool trace = false;
@@ -602,8 +683,8 @@ private:
   bool IsConstant(const SignTy& s) const { return isa<ConstSign>(s); }
 
   bool ValueNumExists(const SignTy& expr) const {
-    if (sign_pool.count(expr)) return true;
-    return const_pool.count(expr) != 0;
+    return sign_pool.find(expr) != sign_pool.end() ||
+           const_pool.find(expr) != const_pool.end();
   }
 
   bool SignatureExists(NumTy vn) const { return value_nums.count(vn) != 0; }
@@ -621,11 +702,29 @@ public:
   bool Exists(NumTy vn) const { return SignatureExists(vn); }
 
   NumTy GetValueNum(const SignTy& expr) const {
-    if (sign_pool.count(expr)) return sign_pool.at(expr);
-    if (const_pool.count(expr) == 0)
-      choreo_unreachable("can not find valno of expression : " + STR(expr) +
-                         ".");
-    return const_pool.at(expr);
+    auto it = sign_pool.find(expr);
+    if (it != sign_pool.end()) return it->second;
+    auto cit = const_pool.find(expr);
+    if (cit != const_pool.end()) return cit->second;
+    choreo_unreachable("can not find valno of expression : " + STR(expr) + ".");
+  }
+
+  std::optional<NumTy> FindValueNum(const SignTy& expr) const {
+    auto it = sign_pool.find(expr);
+    if (it != sign_pool.end()) return it->second;
+    auto cit = const_pool.find(expr);
+    if (cit != const_pool.end()) return cit->second;
+    return std::nullopt;
+  }
+
+  std::optional<NumTy> FindSymbolValueNum(const std::string& symbol) const {
+    auto it = symbol_index.find(symbol);
+    if (it != symbol_index.end()) return it->second;
+    return std::nullopt;
+  }
+
+  bool SymbolExists(const std::string& symbol) const {
+    return symbol_index.find(symbol) != symbol_index.end();
   }
 
   const SignTy& GetSignature(const NumTy& vn) const {
@@ -646,8 +745,11 @@ public:
 
     if (IsConstant(s))
       const_pool.emplace(s, vn);
-    else
+    else {
       sign_pool.emplace(s, vn);
+      if (auto ssn = dyn_cast<SymbolSign>(s))
+        symbol_index.emplace(ssn->Value(), vn);
+    }
 
     value_nums.at(vn).push_back(s);
   }
@@ -662,6 +764,7 @@ public:
     if (IsConstant(s)) choreo_unreachable("ReAlias fails: constant.");
 
     sign_pool[s] = vn;
+    if (auto ssn = dyn_cast<SymbolSign>(s)) symbol_index[ssn->Value()] = vn;
     auto& signs = value_nums[vn];
     signs.erase(std::remove(signs.begin(), signs.end(), s), signs.end());
   }
@@ -673,6 +776,8 @@ public:
     if (Exists(s)) choreo_unreachable("signature: " + STR(s) + " exists.");
 
     sign_pool.emplace(s, GetInvalidValueNumber());
+    if (auto ssn = dyn_cast<SymbolSign>(s))
+      symbol_index.emplace(ssn->Value(), GetInvalidValueNumber());
   }
 
   // Generate a valno for the new signature
@@ -689,8 +794,11 @@ public:
 
     if (IsConstant(s))
       const_pool.emplace(s, valno);
-    else
-      sign_pool.emplace(s, valno);
+    else {
+      sign_pool[s] = valno;
+      if (auto ssn = dyn_cast<SymbolSign>(s))
+        symbol_index[ssn->Value()] = valno;
+    }
 
     value_nums.emplace(valno, std::vector<SignTy>{});
     value_nums[valno].push_back(s);
@@ -712,6 +820,7 @@ public:
       choreo_unreachable("signature: " + STR(s) + " has a valid valno.");
 
     sign_pool[s] = v;
+    if (auto ssn = dyn_cast<SymbolSign>(s)) symbol_index[ssn->Value()] = v;
 
     value_nums[v].push_back(s);
   }
@@ -775,6 +884,18 @@ public:
 
   // Check if the value number exists for the signature
   bool HasValueNumberOfSignature(const SignTy&) const;
+
+  // Fast path for symbol lookups (avoids SymbolSign heap allocation)
+  bool HasValueNumberOfSymbol(const std::string& symbol) const {
+    return vntbl.SymbolExists(symbol);
+  }
+  std::optional<NumTy> FindSymbolValueNumber(const std::string& sym) const {
+    return vntbl.FindSymbolValueNum(sym);
+  }
+  bool HasValidValueNumberOfSymbol(const std::string& symbol) const {
+    auto found = vntbl.FindSymbolValueNum(symbol);
+    return found.has_value() && found->IsValid();
+  }
 
   // Check if the value number exists and is valid for the signature
   bool HasValidValueNumberOfSignature(const SignTy&);

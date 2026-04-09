@@ -2164,13 +2164,25 @@ inline EventType* dyn_cast<EventType>(const Type*);
 
 struct EventType : public AsyncType, public TypeIDProvider<EventType> {
   Storage scope;
-  explicit EventType(Storage s) : AsyncType(BaseType::EVENT), scope(s) {}
+  // Thread participation count: how many threads must participate in each
+  // barrier operation. -1 means unspecified (use scope-level active threads).
+  int64_t thread_count = -1;
+
+  explicit EventType(Storage s, int64_t tc = -1)
+      : AsyncType(BaseType::EVENT), scope(s), thread_count(tc) {}
   const ptr<Type> CloneImpl() const override {
-    return std::make_shared<EventType>(scope);
+    return std::make_shared<EventType>(scope, thread_count);
   }
   bool HasSufficientInfo() const override { return true; }
-  void Print(std::ostream& os) const override { os << STR(scope) << " event"; }
-  const std::string Name() const override { return STR(scope) + " event"; }
+  void Print(std::ostream& os) const override {
+    os << STR(scope) << " event";
+    if (thread_count > 0) os << "<" << thread_count << ">";
+  }
+  const std::string Name() const override {
+    auto n = STR(scope) + " event";
+    if (thread_count > 0) n += "<" + std::to_string(thread_count) + ">";
+    return n;
+  }
 
   bool operator==(const Type& ty) const override {
     if (auto ety = dyn_cast<EventType>(&ty)) return scope == ety->scope;
@@ -2179,6 +2191,9 @@ struct EventType : public AsyncType, public TypeIDProvider<EventType> {
   bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
   Storage GetStorage() const { return scope; }
   void SetStorage(Storage s) { scope = s; }
+  bool HasThreadCount() const { return thread_count > 0; }
+  int64_t GetThreadCount() const { return thread_count; }
+  void SetThreadCount(int64_t tc) { thread_count = tc; }
 
   __UDT_TYPE_INFO__(AsyncType, EventType)
 };
@@ -2321,6 +2336,9 @@ struct ArrayType : public Type, public TypeIDProvider<ArrayType> {
   virtual const ptr<Type> SubScriptType(size_t) {
     return std::make_shared<NoValueType>();
   };
+  virtual const ptr<Type> RemainderType(size_t) {
+    return std::make_shared<NoValueType>();
+  };
 
   size_t ArrayRank() const { return dims.size(); }
 
@@ -2371,14 +2389,14 @@ struct ArrayType : public Type, public TypeIDProvider<ArrayType> {
 struct EventArrayType final : public ArrayType,
                               public TypeIDProvider<EventArrayType> {
   ptr<EventType> event;
-  explicit EventArrayType(Storage s, const ValueList& ec)
-      : ArrayType(ec), event(std::make_shared<EventType>(s)) {}
-  explicit EventArrayType(Storage s, size_t rank)
-      : ArrayType(rank), event(std::make_shared<EventType>(s)) {}
+  explicit EventArrayType(Storage s, const ValueList& ec, int64_t tc = -1)
+      : ArrayType(ec), event(std::make_shared<EventType>(s, tc)) {}
+  explicit EventArrayType(Storage s, size_t rank, int64_t tc = -1)
+      : ArrayType(rank), event(std::make_shared<EventType>(s, tc)) {}
 
   const ptr<Type> CloneImpl() const override {
-    return std::make_shared<EventArrayType>(event->GetStorage(),
-                                            ArrayType::Dimensions());
+    return std::make_shared<EventArrayType>(
+        event->GetStorage(), ArrayType::Dimensions(), event->GetThreadCount());
   }
 
   const ptr<Type> ArrayElementType() const override {
@@ -2387,6 +2405,15 @@ struct EventArrayType final : public ArrayType,
   }
   const ptr<Type> SubScriptType(size_t subscription_count) override {
     auto arr = SubScript(subscription_count);
+    if (arr.size() == 0)
+      return std::make_shared<EventType>(event->GetStorage(),
+                                         event->GetThreadCount());
+    else
+      return std::make_shared<EventArrayType>(event->GetStorage(), arr,
+                                              event->GetThreadCount());
+  }
+  const ptr<Type> RemainderType(size_t remainder_count) override {
+    auto arr = RemainderDimensions(remainder_count);
     if (arr.size() == 0)
       return std::make_shared<EventType>(event->GetStorage());
     else
@@ -2446,6 +2473,17 @@ struct SpannedArrayType final : public ArrayType,
 
   const ptr<Type> SubScriptType(size_t subscription_count) override {
     auto arr = SubScript(subscription_count);
+    if (arr.size() == 0)
+      return std::make_shared<SpannedType>(spty->e_type, spty->GetMDSpanType(),
+                                           spty->GetStrides(),
+                                           spty->GetStorage());
+    else
+      return std::make_shared<SpannedArrayType>(
+          spty->e_type, spty->GetMDSpanType(), spty->GetStrides(),
+          spty->GetStorage(), arr);
+  }
+  const ptr<Type> RemainderType(size_t remainder_count) override {
+    auto arr = RemainderDimensions(remainder_count);
     if (arr.size() == 0)
       return std::make_shared<SpannedType>(spty->e_type, spty->GetMDSpanType(),
                                            spty->GetStrides(),
@@ -2950,12 +2988,13 @@ inline ptr<ArrayType> MakeRankedArrayType(size_t rank) {
   return std::make_shared<ArrayType>(rank);
 }
 
-inline ptr<EventType> MakeEventType(Storage s) {
-  return std::make_shared<EventType>(s);
+inline ptr<EventType> MakeEventType(Storage s, int64_t tc = -1) {
+  return std::make_shared<EventType>(s, tc);
 }
 
-inline ptr<EventArrayType> MakeEventArrayType(Storage s, const ValueList& ad) {
-  return std::make_shared<EventArrayType>(s, ad);
+inline ptr<EventArrayType> MakeEventArrayType(Storage s, const ValueList& ad,
+                                              int64_t tc = -1) {
+  return std::make_shared<EventArrayType>(s, ad, tc);
 }
 
 inline ptr<SpannedArrayType>

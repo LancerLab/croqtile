@@ -218,13 +218,13 @@ Here, the `extern "C"` annotation replaces the `__device__` keyword used in *CUD
 
 Choreo's device programming model varies depending on the target hardware and its supported features. For example, some private targets allows the use of vectorizing programming interfaces, or *intrinsic function* to fully leverage the computational power of the parallel target hardware.
 
-Programmers must be aware that the device program follows the *Single-Program-Multiple-Data (SPMD)* paradigm. In this paradigm, multiple instances of the same device program are executed in parallel, making it highly efficient for exploiting data-level parallelism on target hardware. However, unlike traditional *CUDA/Cute* programs, the device program does not manage data movement —whether between the host and device or across multiple storage levels within the device. Instead, the *tileflow program* orchestrates these tasks in a much simpler and safer manner.
+Programmers must be aware that the device program follows the *Single-Program-Multiple-Data (SPMD)* paradigm. In this paradigm, multiple instances of the same device program are executed in parallel, making it highly efficient for exploiting data-level parallelism on target hardware. However, unlike traditional *CUDA/Cute* programs, the device program does not manage data movement --whether between the host and device or across multiple storage levels within the device. Instead, the *tileflow program* orchestrates these tasks in a much simpler and safer manner.
 
 ### Tileflow Program: Orchestrating the Data Movement
 
 The *Tileflow Program* consists of *Choreo functions*. As described earlier, it manages the movement of data between the host and the target device, ensuring that data is copied correctly across different storage locations.
 
-For convenience, let’s revisit the code:
+For convenience, let's revisit the code:
 
 ```choreo
 __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {

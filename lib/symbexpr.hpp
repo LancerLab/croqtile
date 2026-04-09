@@ -6,6 +6,7 @@
 #include "opcode.hpp"
 #include "options.hpp"
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -15,6 +16,10 @@
 #include <unordered_set>
 #include <variant>
 #include <vector>
+
+#ifndef CHOREO_ENABLE_SBE_STATS
+  #define CHOREO_ENABLE_SBE_STATS 0
+#endif
 
 // This is a light-weight integer library that support both constant and
 // symbolic values. It applies:
@@ -208,6 +213,53 @@ inline static OpCode ToOpCode(const Opcode& op) { return ToOpCode(STR(op)); }
 
 namespace sbe {
 
+#if CHOREO_ENABLE_SBE_STATS
+struct SBEStats {
+  uint64_t expression_created = 0;
+  uint64_t symbolic_value_created = 0;
+  uint64_t unary_operation_created = 0;
+  uint64_t binary_operation_created = 0;
+  uint64_t ternary_operation_created = 0;
+  uint64_t normalize_calls = 0;
+  uint64_t normalize_iterations = 0;
+  uint64_t hash_calls = 0;
+};
+
+class SBEProfiler {
+public:
+  static SBEProfiler& Get() {
+    static SBEProfiler profiler;
+    return profiler;
+  }
+
+  void Reset() { stats = {}; }
+  SBEStats Snapshot() const { return stats; }
+
+public:
+  SBEStats stats;
+};
+
+  #define CHOREO_SBE_STATS_INC(field)                                          \
+    ++::Choreo::sbe::SBEProfiler::Get().stats.field
+#else
+struct SBEStats {};
+class SBEProfiler {
+public:
+  static SBEProfiler& Get() {
+    static SBEProfiler profiler;
+    return profiler;
+  }
+  void Reset() {}
+  SBEStats Snapshot() const { return {}; }
+};
+  #define CHOREO_SBE_STATS_INC(field) ((void)0)
+#endif
+
+inline size_t HashCombine(size_t seed, size_t value) {
+  seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+  return seed;
+}
+
 inline static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
     int64_t temp = b;
@@ -337,6 +389,21 @@ public:
   __UDT_TYPE_INFO_BASE__(notype)
 };
 
+class HashedExpression : public SymbolicExpression {
+protected:
+  template <typename Fn>
+  size_t GetOrComputeHash(Fn&& fn) const {
+    if (hash_cached) return hash_value;
+    hash_value = fn();
+    hash_cached = true;
+    return hash_value;
+  }
+
+private:
+  mutable bool hash_cached = false;
+  mutable size_t hash_value = 0;
+};
+
 inline static std::string STR(const SymbolicExpression& se) {
   return se.ToString();
 }
@@ -352,6 +419,7 @@ inline static std::string PSTR(const ptr<SymbolicExpression>& pse) {
 class InvalidValue : public SymbolicExpression,
                      public TypeIDProvider<InvalidValue> {
 public:
+  InvalidValue() { CHOREO_SBE_STATS_INC(expression_created); }
   const std::string ToString(const std::string& = "") const override {
     return "nil";
   }
@@ -381,7 +449,9 @@ public:
 class NumericValue : public SymbolicExpression,
                      public TypeIDProvider<NumericValue> {
 public:
-  NumericValue(int64_t value) : value(value) {}
+  NumericValue(int64_t value) : value(value) {
+    CHOREO_SBE_STATS_INC(expression_created);
+  }
 
   const std::string ToString(const std::string& suffix = "") const override {
     return std::to_string(value) + suffix;
@@ -418,7 +488,9 @@ public:
 class BooleanValue : public SymbolicExpression,
                      public TypeIDProvider<BooleanValue> {
 public:
-  BooleanValue(bool value) : value(value) {}
+  BooleanValue(bool value) : value(value) {
+    CHOREO_SBE_STATS_INC(expression_created);
+  }
 
   const std::string ToString(const std::string& = "") const override {
     return (value) ? "true" : "false";
@@ -457,7 +529,10 @@ public:
 class SymbolicValue : public SymbolicExpression,
                       public TypeIDProvider<SymbolicValue> {
 public:
-  SymbolicValue(const std::string& name) : symbol(name) {}
+  SymbolicValue(const std::string& name) : symbol(name) {
+    CHOREO_SBE_STATS_INC(expression_created);
+    CHOREO_SBE_STATS_INC(symbolic_value_created);
+  }
 
   const std::string ToString(const std::string& = "") const override {
     return symbol;
@@ -491,14 +566,17 @@ public:
   __UDT_TYPE_INFO__(SymbolicExpression, SymbolicValue)
 };
 
-class UnaryOperation : public SymbolicExpression,
+class UnaryOperation : public HashedExpression,
                        public TypeIDProvider<UnaryOperation> {
 private:
   OpCode op;
   Operand oprd;
 
 public:
-  UnaryOperation(OpCode op, const Operand& o) : op(op), oprd(o) {}
+  UnaryOperation(OpCode op, const Operand& o) : op(op), oprd(o) {
+    CHOREO_SBE_STATS_INC(expression_created);
+    CHOREO_SBE_STATS_INC(unary_operation_created);
+  }
 
   const std::string ToString(const std::string& suffix = "") const override {
     return STR(op) + oprd->ToString(suffix);
@@ -515,7 +593,14 @@ public:
     return false;
   }
 
-  size_t Hash() const override { return std::hash<std::string>{}(ToString()); }
+  size_t Hash() const override {
+    CHOREO_SBE_STATS_INC(hash_calls);
+    return GetOrComputeHash([&]() {
+      size_t seed = std::hash<int>{}(static_cast<int>(op));
+      seed = HashCombine(seed, oprd->Hash());
+      return seed;
+    });
+  }
 
 public:
   bool IsLeaf() const override { return false; }
@@ -556,16 +641,19 @@ public:
   __UDT_TYPE_INFO__(SymbolicExpression, UnaryOperation)
 };
 
-class BinaryOperation : public SymbolicExpression,
+class BinaryOperation : public HashedExpression,
                         public TypeIDProvider<BinaryOperation> {
 private:
   OpCode op;
   Operand left;
   Operand right;
+  mutable Operand normalized_cache = nullptr;
 
 public:
   BinaryOperation(OpCode o, const Operand& l, const Operand& r)
       : op(o), left(l), right(r) {
+    CHOREO_SBE_STATS_INC(expression_created);
+    CHOREO_SBE_STATS_INC(binary_operation_created);
     // always turn subtract to add to enable association
     if (op == OpCode::SUBTRACT && right->IsNumeric()) {
       // simplify single value
@@ -608,7 +696,15 @@ public:
     return false;
   }
 
-  size_t Hash() const override { return std::hash<std::string>{}(ToString()); }
+  size_t Hash() const override {
+    CHOREO_SBE_STATS_INC(hash_calls);
+    return GetOrComputeHash([&]() {
+      size_t seed = std::hash<int>{}(static_cast<int>(op));
+      seed = HashCombine(seed, left->Hash());
+      seed = HashCombine(seed, right->Hash());
+      return seed;
+    });
+  }
 
 public:
   bool IsLeaf() const override { return false; }
@@ -766,13 +862,18 @@ public:
   }
 
   Operand Normalize() const override {
+    CHOREO_SBE_STATS_INC(normalize_calls);
+    if (normalized_cache) return normalized_cache;
+
     Operand expr = std::make_shared<BinaryOperation>(op, left, right);
     while (true) {
+      CHOREO_SBE_STATS_INC(normalize_iterations);
       auto new_expr = expr->Reorder()->Fold()->Reassociate()->Fold();
       if (*new_expr == *expr) {
-        return new_expr;
-      } else
-        expr = new_expr;
+        normalized_cache = new_expr;
+        return normalized_cache;
+      }
+      expr = new_expr;
     }
     choreo_unreachable("unexpected flow.");
     return nullptr;
@@ -929,7 +1030,7 @@ public:
   __UDT_TYPE_INFO__(SymbolicExpression, BinaryOperation)
 };
 
-class TernaryOperation : public SymbolicExpression,
+class TernaryOperation : public HashedExpression,
                          public TypeIDProvider<TernaryOperation> {
 private:
   OpCode op;
@@ -941,6 +1042,8 @@ public:
   TernaryOperation(OpCode op, const Operand& p, const Operand& l,
                    const Operand& r)
       : op(op), pred(p), left(l), right(r) {
+    CHOREO_SBE_STATS_INC(expression_created);
+    CHOREO_SBE_STATS_INC(ternary_operation_created);
     // currently only support select
     assert(op == OpCode::SELECT);
   }
@@ -970,7 +1073,16 @@ public:
     return false;
   }
 
-  size_t Hash() const override { return std::hash<std::string>{}(ToString()); }
+  size_t Hash() const override {
+    CHOREO_SBE_STATS_INC(hash_calls);
+    return GetOrComputeHash([&]() {
+      size_t seed = std::hash<int>{}(static_cast<int>(op));
+      seed = HashCombine(seed, pred->Hash());
+      seed = HashCombine(seed, left->Hash());
+      seed = HashCombine(seed, right->Hash());
+      return seed;
+    });
+  }
 
 public:
   bool IsLeaf() const override { return false; }

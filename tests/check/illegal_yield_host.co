@@ -1,0 +1,8 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void bar(int a) {
+  yield;
+  if (a > 0) yield;
+}
+
+// CHECK-COUNT-2: error: unable to yield outside the parallel-by block(s).

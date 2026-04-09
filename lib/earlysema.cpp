@@ -639,30 +639,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == Op::ElemOf) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    auto old_ec = error_count;
-    if (auto spty = dyn_cast<SpannedType>(lty)) {
-      // disambiguite elemof as dataaccess
-      auto rop = n.GetR();
-      auto index = AST::Make<AST::MultiValues>(rop->LOC(), ", ", MakeExpr(rop));
-      n.SetR(AST::Make<AST::DataAccess>(
-          n.LOC(), cast<AST::Identifier>(n.GetL()), index));
-      n.SetForm(AST::Expr::Reference);
-      n.GetR()->accept(*this);
-      SetNodeType(n, NodeType(*n.GetR()));
-      return true;
-    }
-    if (!isa<ArrayType>(lty))
-      Error1(n.LOC(), "in operation \"" + n.op +
-                          "\": expect an array but got " + PSTR(lty) + ".");
-    if (!CanYieldAnInteger(rty))
-      Error1(n.LOC(), "in operation \"" + n.op +
-                          "\": expect an integer index expression but got " +
-                          PSTR(rty) + ".");
-
-    auto aty = cast<ArrayType>(lty);
-    SetNodeType(n, aty->SubScriptType(1));
-
-    if (error_count != old_ec) return false;
+    if (auto aty = dyn_cast<ArrayType>(lty))
+      SetNodeType(n, aty->RemainderType(1));
+    else
+      SetNodeType(n, lty);
   } else
     choreo_unreachable("operation '" + n.op + "' in expression " + STR(n) +
                        "is not supported yet.");
@@ -930,12 +910,14 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       Error1(n.LOC(),
              "`" + n.name_str + "' must be annotated as a mutable type.");
 
-    // update the scope/storage for event types
+    // update the scope/storage for event types, preserving thread_count
     if (auto evty = dyn_cast<EventArrayType>(tty)) {
-      tty = MakeEventArrayType(n.mem->Get(), evty->Dimensions());
+      auto tc = evty->event->GetThreadCount();
+      tty = MakeEventArrayType(n.mem->Get(), evty->Dimensions(), tc);
       SetNodeType(*n.type, tty);
-    } else if (isa<EventType>(tty)) {
-      tty = MakeEventType(n.mem->Get());
+    } else if (auto et = dyn_cast<EventType>(tty)) {
+      auto tc = et->GetThreadCount();
+      tty = MakeEventType(n.mem->Get(), tc);
       SetNodeType(*n.type, tty);
     }
 
@@ -1084,6 +1066,13 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
   if (auto sty = dyn_cast<ScalarType>(n.GetType()))
     if (sty->IsMutable()) mutables.Add(InScopeName(n.name_str));
+
+  if (isa<SpannedType>(n.GetType()) && n.init_expr) {
+    if (auto e = dyn_cast<AST::Expr>(n.init_expr);
+        e && e->GetOp() == Op::ElemOf) {
+      n.AddNote("ref");
+    }
+  }
 
   return true;
 }
@@ -1306,9 +1295,13 @@ bool EarlySemantics::Visit(AST::DataType& n) {
   if (n.infer_span) {
     SetNodeType(n, MakeUnRankedSpannedType(n.getBaseType()));
   } else if (isa<SpannedType>(n.GetType())) {
-    // The sema type has been generated. refine with dims
-    if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType()))
-      SetNodeType(n, MakeRankedSpannedType(sty->Dims(), n.base_type));
+    if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType())) {
+      if (n.IsArrayType())
+        SetNodeType(n, MakeRankedSpannedArrayType(sty->Dims(), n.ArrayDims(),
+                                                  n.base_type));
+      else
+        SetNodeType(n, MakeRankedSpannedType(sty->Dims(), n.base_type));
+    }
   }
   return true;
 }
@@ -1762,14 +1755,15 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     FCtx(fname).GetFutureBufferInfo().emplace(
         InScopeName(n.future), DMABufferInfo{to_sym, from_kind, to_kind});
   } else if (n.IsAsync()) {
-    if (n.HasEvent() && CCtx().UseWarpSpec()) {
+    if (n.HasEvent()) {
       auto event = n.Event();
       if (!AST::IsSymbolOrArrayRef(*event))
         Error1(n.LOC(), "expect a symbol/array reference but got '" +
                             AST::STR(*event) + "'.");
 
       auto ety = NodeType(*event);
-      if (isa<EventArrayType>(ety)) {
+      if (isa<EventArrayType>(ety) ||
+          (isa<EventType>(ety) && cast<AST::Expr>(event)->op == Op::ElemOf)) {
         if (inthreads_levels[pl_depth] == 0)
           Warning(event->LOC(),
                   "Be careful to wait event outside inthreads block, "
@@ -1778,9 +1772,6 @@ bool EarlySemantics::Visit(AST::DMA& n) {
         Error1(event->LOC(),
                "expect an event or event array but got '" + PSTR(ety) + "'.");
       }
-    } else if (n.HasEvent() && !CCtx().UseWarpSpec()) {
-      Error1(n.LOC(),
-             "async dma/tma with event is only supported in warpspec mode.");
     } else
       Error1(n.LOC(), "forbid to associated async dma without a named future "
                       "or a named event.");
@@ -2063,7 +2054,8 @@ bool EarlySemantics::Visit(AST::Wait& n) {
       if (pty->GetBaseType() != BaseType::FUTURE)
         Error1(n.LOC(), "'" + AST::GetName(*v).value() + "` of type \"" +
                             PSTR(ty) + "\" can not be waited.");
-    } else if (isa<EventArrayType>(ty)) {
+    } else if (isa<EventArrayType>(ty) ||
+               (isa<EventType>(ty) && cast<AST::Expr>(v)->op == Op::ElemOf)) {
       if (inthreads_levels[pl_depth] == 0)
         Warning(v->LOC(), "Be careful to wait event outside inthreads block, "
                           "which may lead to parallelism issues.");
@@ -2083,13 +2075,14 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
       Error1(v->LOC(),
              "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
     auto ty = NodeType(*v);
-    if (isa<EventArrayType>(ty)) {
+    if (isa<EventArrayType>(ty) ||
+        (isa<EventType>(ty) && cast<AST::Expr>(v)->op == Op::ElemOf)) {
       if (inthreads_levels[pl_depth] == 0)
         Warning(v->LOC(),
                 "Be careful to trigger event outside inthreads block, "
                 "which may lead to parallelism issues.");
     }
-    if (!isa<EventType>(ty))
+    if (!isa<EventType>(ty) && !isa<EventArrayType>(ty))
       Error1(v->LOC(),
              "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
   }
@@ -2102,6 +2095,17 @@ bool EarlySemantics::Visit(AST::Break& n) {
 
   if (!inside_loop) {
     Error1(n.LOC(), "unable to break outside a loop.");
+    return false;
+  }
+
+  return true;
+}
+
+bool EarlySemantics::Visit(AST::Yield& n) {
+  TraceEachVisit(n);
+
+  if (pl_depth == 0) {
+    Error1(n.LOC(), "unable to yield outside the parallel-by block(s).");
     return false;
   }
 
@@ -2560,11 +2564,11 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
         continue;
       }
       std::string scope_name = GetScope(InScopeName(id->name));
-      auto scopes = SplitStringByDelimiter(scope_name, "::");
-      if (!PrefixedWith(scopes.back(), "within_")) {
+      auto last_scope = SplitLast(scope_name, "::");
+      if (!PrefixedWith(last_scope, "within_")) {
         std::string error_msg = "expect the bounded variable '" + id->name +
                                 "' to be declared by 'within' block";
-        if (PrefixedWith(scopes.back(), "paraby_"))
+        if (PrefixedWith(last_scope, "paraby_"))
           error_msg += " instead of 'parallel-by' block";
         Error1(id->LOC(), error_msg + ".");
       }

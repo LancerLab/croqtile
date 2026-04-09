@@ -25,6 +25,11 @@ struct PipelineStage {
         action(a_lambda) {};
 };
 
+struct PassTimingEntry {
+  std::string name;
+  double ms;
+};
+
 class ASTPipeline {
 private:
   ASTVerify vf;
@@ -87,6 +92,9 @@ public:
   }
 
   void Dump() const;
+
+  void PrintPassTimings(const std::vector<struct PassTimingEntry>& timings,
+                        double total_ms) const;
 
   bool RunOnProgram(AST::Node&);
 

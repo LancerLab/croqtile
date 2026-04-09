@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
 #include <utility>
 
 extern Choreo::location loc;
@@ -379,6 +380,7 @@ private:
   bool dump_ast = false;            // dump the AST after parsing
   bool no_codegen = false;          // stop before code generation
   bool print_pass_names = false;    // print pass name before pass run
+  bool time_passes = false;         // measure time per compiler pass
   bool no_pre_process = false;      // do not invoke pre-processor
   bool drop_comment = false;        // drop any comments
   bool debug_all = false;           // enable full debug
@@ -418,6 +420,8 @@ private:
       true;                   // In warpspec mode, use a single producer thread
                               // for producer inthreads; otherwise guard
                               // producer TMA/event ops individually.
+  bool fast_compile = false;  // Use precompiled CuTe runtime for faster nvcc
+                              // compilation via separate compilation + linking.
   std::string debug_file_dir; // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
@@ -431,6 +435,8 @@ private:
   std::vector<std::string> library_paths;
   std::vector<std::string> libraries;
   std::vector<std::string> source_lines;
+
+  std::unordered_map<int, std::vector<MacroSub>> line_macro_subs;
 
 public:
   bool DebugSymTab() const { return debug_symtab; }
@@ -530,6 +536,7 @@ public:
   bool DumpAst() const { return dump_ast; }
   bool NoCodegen() const { return no_codegen; }
   bool PrintPassNames() const { return print_pass_names; }
+  bool TimePasses() const { return time_passes; }
   bool NoPreProcess() const { return no_pre_process; }
   bool DropComments() const { return drop_comment; }
   bool DebugAll() const { return debug_all; }
@@ -571,6 +578,7 @@ public:
   }
   bool UseWarpSpec() const { return use_warpspec; }
   bool SingleThreadProducer() const { return single_thread_producer; }
+  bool FastCompile() const { return fast_compile; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -580,6 +588,7 @@ public:
   void SetDumpAst(bool value) { dump_ast = value; }
   void SetNoCodegen(bool value) { no_codegen = value; }
   void SetPrintPassNames(bool value) { print_pass_names = value; }
+  void SetTimePasses(bool value) { time_passes = value; }
   void SetNoPreProcess(bool value) { no_pre_process = value; }
   void SetDropComments(bool value) { drop_comment = value; }
   void SetDebugAll(bool value) { debug_all = value; }
@@ -608,6 +617,7 @@ public:
   }
   void SetUseWarpSpec(bool value) { use_warpspec = value; }
   void SetSingleThreadProducer(bool value) { single_thread_producer = value; }
+  void SetFastCompile(bool value) { fast_compile = value; }
   void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
@@ -652,6 +662,23 @@ public:
       return source_lines[line_no - 1];
     }
     return "";
+  }
+
+  void SetLineMacroSubs(int line_no, std::vector<Choreo::MacroSub> subs) {
+    line_macro_subs[line_no] = std::move(subs);
+  }
+
+  int MapExpandedColToOriginal(int line_no, int exp_col) const {
+    auto it = line_macro_subs.find(line_no);
+    if (it == line_macro_subs.end()) return exp_col;
+    int offset = 0;
+    for (const auto& s : it->second) {
+      int exp_start = s.orig_col + offset;
+      if (exp_col < exp_start) break;
+      if (exp_col < exp_start + s.repl_len) return s.orig_col;
+      offset += s.repl_len - s.orig_len;
+    }
+    return exp_col - offset;
   }
 
 public:

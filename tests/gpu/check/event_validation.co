@@ -1,0 +1,57 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Test: explicit event<128> but participation spans 256 threads -> warning
+__co__ void test_event_count_conflict(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    // CHECK: warning: event 'full' has explicit thread count 256 but computed participation from usage scopes is 129
+    shared event<256> full[4], empty[4];
+    shared f16 [64, 64] s;
+
+    parallel p1 by 2 : group-4, t by 128 : thread {
+      inthreads.async (p1 == 0 && t == 0) {
+        foreach iv in [4] {
+          stage = iv % 4;
+          wait empty[stage];
+          tma.copy.async<full[stage]>.swiz<128>
+            a.subspan(64, 64).at(p0, iv) => s;
+          trigger full[stage];
+        }
+      }
+      inthreads.async (p1 == 1) {
+        foreach iv in [4] {
+          stage = iv % 4;
+          wait full[stage];
+          trigger empty[stage];
+        }
+      }
+    }
+  }
+}
+
+// Test: event with matching explicit count -> no warning
+__co__ void test_event_count_matching(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    // CHECK-NOT: warning:{{.*}}full2
+    shared event<256> full2[4], empty2[4];
+    shared f16 [64, 64] s;
+
+    parallel p1 by 2 : group-4, t by 128 : thread {
+      inthreads.async (p1 == 0) {
+        foreach iv in [4] {
+          stage = iv % 4;
+          wait empty2[stage];
+          tma.copy.async<full2[stage]>.swiz<128>
+            a.subspan(64, 64).at(p0, iv) => s;
+          trigger full2[stage];
+        }
+      }
+      inthreads.async (p1 == 1) {
+        foreach iv in [4] {
+          stage = iv % 4;
+          wait full2[stage];
+          trigger empty2[stage];
+        }
+      }
+    }
+  }
+}

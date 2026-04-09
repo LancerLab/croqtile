@@ -40,7 +40,8 @@ ValueItem ValueNumbering::GenValueItemFromValueNumber(const NumTy& valno) {
 }
 
 ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
-  auto sign = Simplify(input);
+  auto sign = input;
+  if (auto mss = MSign(sign); mss && mss->Count() == 1) sign = mss->At(0);
   if (!IsValid(sign)) choreo_unreachable("signature is invalid.");
   if (isa<MultiSigns>(sign)) {
     choreo_unreachable(
@@ -241,25 +242,27 @@ const SignTy ValueNumbering::Simplify(const SignTy& sign) {
   if (!IsValid(sign)) choreo_unreachable("signature is invalid.");
   if (auto mss = MSign(sign); mss && mss->Count() == 1) return mss->At(0);
 
-  // Applies the algebraic simplification
-  std::set<OpTy> optimizable = {
-      Op::Add,
-      Op::Sub,
-      Op::Mul,
-      Op::Div,
-      Op::Mod,
-      Op::CeilDiv,
-      Op::UBoundInternal,
-      Op::UBoundAddInternal,
-      Op::UBoundSubInternal,
-      Op::Lt,
-      Op::Gt,
-      Op::Le,
-      Op::Ge,
-      Op::Eq,
-      Op::Ne,
-      Op::LogicAnd,
-      Op::LogicOr,
+  auto IsOptimizable = [](Op k) -> bool {
+    switch (k) {
+    case Op::Add:
+    case Op::Sub:
+    case Op::Mul:
+    case Op::Div:
+    case Op::Mod:
+    case Op::CeilDiv:
+    case Op::UBoundInternal:
+    case Op::UBoundAddInternal:
+    case Op::UBoundSubInternal:
+    case Op::Lt:
+    case Op::Gt:
+    case Op::Le:
+    case Op::Ge:
+    case Op::Eq:
+    case Op::Ne:
+    case Op::LogicAnd:
+    case Op::LogicOr: return true;
+    default: return false;
+    }
   };
 
   auto HandleMultiSigns = [this](const Opcode& op, const SignTy& lhs,
@@ -291,7 +294,7 @@ const SignTy ValueNumbering::Simplify(const SignTy& sign) {
 
     if (op == Op::Concat) {
       return Concat(lsign, rsign);
-    } else if (optimizable.count(op)) {
+    } else if (IsOptimizable(op.GetKind())) {
       if (lsign->Count() == rsign->Count()) {
         if (lsign->Count() == 1) {
           if (op == Op::UBound) { // operation '#' is special
@@ -367,13 +370,14 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
     }
   }
   // or else, apply optimization for the symbolic expression
-  else if (op == "/") {
+  else if (op == Op::Div) {
     // a/a == 1
     if (NumSign(lhs) == NumSign(rhs)) {
       return Report(c_sn(1));
     }
     // a/1 = a
-    else if (rhs == c_sn(1))
+    else if (auto rc = CSign(rhs);
+             rc && rc->Holds<int64_t>() && rc->GetInt() == 1)
       return Report(lhs);
     // useful simplification: a/(a/b) = b
     else if (lhs->Count() == 1 /*not multiple values*/) {
@@ -382,16 +386,16 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
       bind_set.insert(rvn); // always add self
       for (auto div_vn : bind_set) {
         auto osn = OpSign(SignNum(div_vn));
-        if (!osn || !osn->IsOp("/")) continue;
+        if (!osn || !osn->IsOp(Op::Div)) continue;
         auto& div = osn->OperandSigns();
         assert(div.size() == 2);
         if (NumSign(lhs) == NumSign(div[0])) return Report(div[1]);
       }
     }
-  } else if (op == "-") {
-    // a-a == 1
+  } else if (op == Op::Sub) {
+    // a-a == 0
     if (NumSign(lhs) == NumSign(rhs)) return Report(c_sn(0));
-  } else if (op == "+") {
+  } else if (op == Op::Add) {
     // useful simplification: a-b+b = a
     if (rhs->Count() == 1 /*not multiple values*/) {
       NumTy lvn = NumSign(lhs);
@@ -399,13 +403,13 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
       bind_set.insert(lvn); // always add self
       for (auto minus_vn : bind_set) {
         auto osn = OpSign(SignNum(minus_vn));
-        if (!osn || !osn->IsOp("-")) continue;
+        if (!osn || !osn->IsOp(Op::Sub)) continue;
         auto& minus = osn->OperandSigns();
         assert(minus.size() == 2);
         if (NumSign(rhs) == NumSign(minus[1])) return Report(minus[0]);
       }
     }
-  } else if (op == "#") {
+  } else if (op == Op::UBound) {
     // suppose `a` and `b` are bounded vars
     // `#a` is 4, `#b` is `N/#a` where `N` is dynamic dim
     // if `xx.chunkat(a#b)`, then the result shape should be 1
@@ -417,7 +421,7 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
       bind_set.insert(rvn); // always add self
       for (auto div_vn : bind_set) {
         auto osn = OpSign(SignNum(div_vn));
-        if (!osn || !osn->IsOp("/")) continue;
+        if (!osn || !osn->IsOp(Op::Div)) continue;
         auto& div = osn->OperandSigns();
         assert(div.size() == 2);
         if (NumSign(lhs) == NumSign(div[1])) return Report(div[0]);
@@ -431,7 +435,7 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
       bind_set.insert(lvn); // always add self
       for (auto div_vn : bind_set) {
         auto osn = OpSign(SignNum(div_vn));
-        if (!osn || !osn->IsOp("/")) continue;
+        if (!osn || !osn->IsOp(Op::Div)) continue;
         auto& div = osn->OperandSigns();
         assert(div.size() == 2);
         if (NumSign(rhs) == NumSign(div[1])) return Report(div[0]);
@@ -448,9 +452,7 @@ ValueNumbering::GetValueNumberOfSignature(const SignTy& signature) const {
   if (IsUnknown(signature)) return NumTy::Unknown();
   if (IsNone(signature)) return NumTy::None();
 
-  // Check if this expression has been encountered before
-  if (vntbl.Exists(signature))
-    return vntbl.GetValueNum(signature); // Return existing value number
+  if (auto found = vntbl.FindValueNum(signature)) return *found;
 
   choreo_unreachable("failed to get value number of signature \"" +
                      STR(signature) + "\".");
@@ -467,7 +469,7 @@ bool ValueNumbering::HasValueNumberOfSignature(const SignTy& signature) const {
 bool ValueNumbering::HasValidValueNumberOfSignature(const SignTy& signature) {
   if (!IsValid(signature)) choreo_unreachable("signature is invalid.");
   if (IsNone(signature)) return true;
-  if (vntbl.Exists(signature)) return vntbl.GetValueNum(signature).IsValid();
+  if (auto found = vntbl.FindValueNum(signature)) return found->IsValid();
 
   return false;
 }
@@ -475,8 +477,10 @@ bool ValueNumbering::HasValidValueNumberOfSignature(const SignTy& signature) {
 const NumTy
 ValueNumbering::GetOrGenValueNumberFromSignature(const SignTy& signature) {
   if (!IsValid(signature)) choreo_unreachable("signature is invalid.");
-  if (HasValueNumberOfSignature(signature))
-    return GetValueNumberOfSignature(signature);
+  if (IsUnknown(signature)) return NumTy::Unknown();
+  if (IsNone(signature)) return NumTy::None();
+
+  if (auto found = vntbl.FindValueNum(signature)) return *found;
   return GenerateValueNumberFromSignature(signature);
 }
 

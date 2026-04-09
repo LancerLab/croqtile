@@ -8,7 +8,7 @@ The data movement is essential for *tileflow programs*. In this section, you wil
 ### Dimension Composition inside `chunkat`
 
 ### Full Non-Blocking DMA Mode (Chain Mode in Choreo)
-In Choreo, it's possible to perform a full non-blocking DMA by chaining multiple asynchronous DMA operations and using event-based notifications with after. This enables complete non-blocking execution, where one DMA operation is triggered only after the completion of a prior one. Here’s an example of such a setup:
+In Choreo, it's possible to perform a full non-blocking DMA by chaining multiple asynchronous DMA operations and using event-based notifications with after. This enables complete non-blocking execution, where one DMA operation is triggered only after the completion of a prior one. Here's an example of such a setup:
 
 ```choreo
 out_store = dma.copy.async l2_out => output.chunkat(m_tile, n_tile) after out_store_s;

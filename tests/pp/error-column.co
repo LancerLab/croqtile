@@ -1,0 +1,18 @@
+// RUN: choreo %s 2>&1 |FileCheck %s
+
+#define M 128
+#define N 256
+#define K 64
+
+__co__ void matmul() {
+  int X = 2, Y = 4;
+
+  parallel p by 1 : block {
+    local u8[M,N] smem[p][Y-1];
+  }
+}
+
+// CHECK: error: Dimension of array can only be const integer value, but got value of type BoundedIntegerType: int->[0,p].
+// CHECK:       local u8[M,N] smem[p][Y-1];
+// CHECK:                          ^
+// CHECK: Totally 1 errors have been detected.

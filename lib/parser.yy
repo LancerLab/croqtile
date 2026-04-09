@@ -193,7 +193,7 @@ extern int yylex();
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
 %token <std::string> FRAG
 // control related
-%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE
+%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD
 %token <std::string> VECTORIZE
 
 // non-terminals
@@ -215,7 +215,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
@@ -712,6 +712,7 @@ statement
     | inlcpp_stmt  SEMCOL        { $$ = $1; }
     | break_stmt   SEMCOL        { $$ = $1; }
     | continue_stmt  SEMCOL      { $$ = $1; }
+    | yield_stmt     SEMCOL      { $$ = $1; }
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
     | inthreads_block            { $$ = $1; }
@@ -959,10 +960,23 @@ named_event_decls
           auto decl = cast<AST::NamedVariableDecl>(sub);
           auto sym_name = decl->name_str;
           symtab.AddSymbol(sym_name, MakeEventType($1->Get()));
-          // override the data type
           decl->mem = cast<AST::Memory>(cast<AST::Memory>($1->Clone()));
         }
         $$ = $3;
+      }
+    | storage_qual EVENT LT num_expr GT event_decls {
+        int64_t tc = static_cast<int64_t>($4->Val());
+        for (auto sub : $6->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(sub);
+          auto sym_name = decl->name_str;
+          symtab.AddSymbol(sym_name, MakeEventType($1->Get(), tc));
+          decl->mem = cast<AST::Memory>(cast<AST::Memory>($1->Clone()));
+          if (auto dt = dyn_cast<AST::DataType>(decl->type)) {
+            dt->event_thread_count = tc;
+            dt->ReGenSemaType();
+          }
+        }
+        $$ = $6;
       }
     ;
 
@@ -1340,10 +1354,11 @@ assignment
         auto & sops = $3->AllOperations();
         if ((sops.size() == 1) && (isa<AST::SOP::Reshape>($3->FirstOp()))) {
           auto rop = dyn_cast<AST::SOP::Reshape>($3->FirstOp());
-          //auto expr = AST::Make<AST::Expr>(@1, $3);
           auto ref_id = AST::Make<AST::Identifier>(@3, $3->RefSymbol());
-          auto id = AST::Make<AST::Identifier>(@1, $1);
-          auto expr = AST::Make<AST::Expr>(@3, AST::Make<AST::SpanAs>(@1, ref_id, rop->GetNewSpan()));
+          auto sa = AST::Make<AST::SpanAs>(@1, ref_id, rop->GetNewSpan());
+          if ($3->indices && $3->indices->Count() > 0)
+            sa->subscriptions = $3->indices;
+          auto expr = AST::Make<AST::Expr>(@3, sa);
           $$ = AST::Make<AST::NamedVariableDecl>(@1,
                 $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
         } else {
@@ -1955,7 +1970,15 @@ subdata_expr
 
 // check sema later
 frag_expr
-    : subscript_like_expr { $$ = $1; }
+    : subscript_like_expr { 
+        $$ = $1;
+        ptr<AST::Expr> cur = $$;
+        while (cur->GetOp() == Op::ElemOf) {
+          cur->AddNote("mma_frag");
+          if (isa<AST::Identifier>(cur->GetL())) break;
+          cur = cast<AST::Expr>(cur->GetL());
+        }
+      }
     | IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
       }
@@ -2389,6 +2412,8 @@ break_stmt : BREAK { $$ = AST::Make<AST::Break>(@1); }
 
 continue_stmt : CONTINUE { $$ = AST::Make<AST::Continue>(@1); }
 
+yield_stmt : YIELD { $$ = AST::Make<AST::Yield>(@1); }
+
 %%
 
 std::pair<ptr<AST::Identifier>, ptr<AST::MultiValues>>
@@ -2462,16 +2487,13 @@ void Parser::error(const location &loc , const std::string &message) {
 
   if (!CCtx().ShowSourceLocation()) return;
 
-  // Retrieve the line that caused the error
   std::string error_line = CCtx().GetSourceLine(loc.begin.line);
   if (!error_line.empty()) {
-    errs() << "  " << error_line << "\n"; // Print the source line
+    errs() << "  " << error_line << "\n";
 
-    // Print caret (^) under the error position
+    int col = CCtx().MapExpandedColToOriginal(loc.begin.line, loc.begin.column);
     errs() << "  ";
-    for (int i = 1; i < loc.begin.column; ++i)
-      errs() << " "; // Align the caret with the exact error position
-
+    for (int i = 1; i < col; ++i) errs() << " ";
     errs() << "^" << "\n";
   }
 
@@ -2487,16 +2509,13 @@ void Choreo::info(const location &loc , const std::string &message) {
 
   if (!CCtx().ShowSourceLocation()) return;
 
-  // Retrieve the line that caused the error
   std::string error_line = CCtx().GetSourceLine(loc.begin.line);
   if (!error_line.empty()) {
-    errs() << "  " << error_line << "\n"; // Print the source line
+    errs() << "  " << error_line << "\n";
 
-    // Print caret (^) under the error position
+    int col = CCtx().MapExpandedColToOriginal(loc.begin.line, loc.begin.column);
     errs() << "  ";
-    for (int i = 1; i < loc.begin.column; ++i)
-      errs() << " "; // Align the caret with the exact error position
-
+    for (int i = 1; i < col; ++i) errs() << " ";
     errs() << "^" << "\n";
   }
 }

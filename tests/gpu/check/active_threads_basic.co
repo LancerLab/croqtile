@@ -1,0 +1,48 @@
+// RUN: not choreo -gs -pa=active-threads -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Test 1: inthreads(p1 == 0) with group-4 level selects one warpgroup (128 threads)
+// Test 2: inthreads(p1 == 1) selects the other warpgroup
+// Test 3: inthreads(t == 0) at thread level inside group-4 selects thread 0
+//         of EACH warpgroup (2 active threads)
+// Test 4: inthreads(p1 < 2) selects all threads (256)
+
+__co__ void test_wg_select(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    shared f16 [64, 64] s;
+    parallel p1 by 2 : group-4 {
+      // CHECK: Active Threads: 128 / 256 [0,1,2,3,4,5,6,7,8,9,
+      inthreads (p1 == 0) {
+        dma.copy a.subspan(64, 64).at(p0, 0) => s;
+      }
+      // CHECK: Active Threads: 128 / 256 [128,129,130,131,132,
+      inthreads (p1 == 1) {
+        dma.copy b.subspan(64, 64).at(p0, 0) => s;
+      }
+    }
+  }
+}
+
+__co__ void test_thread_select(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    shared f16 [64, 64] s;
+    parallel p1 by 2 : group-4
+    parallel t by 128 : thread {
+      // CHECK: Active Threads: 2 / 256 [0,128]
+      inthreads (t == 0) {
+        dma.copy a.subspan(64, 64).at(p0, 0) => s;
+      }
+    }
+  }
+}
+
+__co__ void test_all_threads(global f16 [M, K] a, global f16 [M, K] b) {
+  parallel p0 by cdiv(M, 64) : block {
+    shared f16 [64, 64] s;
+    parallel p1 by 2 : group-4 {
+      // CHECK: Active Threads: 256 / 256 [0,1,2,3,4,5,6,7,8,9,
+      inthreads (p1 < 2) {
+        dma.copy a.subspan(64, 64).at(p0, 0) => s;
+      }
+    }
+  }
+}

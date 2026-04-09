@@ -93,6 +93,7 @@ struct Visitor {
   virtual bool Visit(AST::Trigger&) = 0;
   virtual bool Visit(AST::Break&) = 0;
   virtual bool Visit(AST::Continue&) = 0;
+  virtual bool Visit(AST::Yield&) = 0;
   virtual bool Visit(AST::Call&) = 0;
   virtual bool Visit(AST::Rotate&) = 0;
   virtual bool Visit(AST::Synchronize&) = 0;
@@ -295,16 +296,13 @@ protected:
   void ShowSourceLocation(const location& l) const {
     if (!CCtx().ShowSourceLocation()) return;
 
-    // Retrieve the line that caused the error
     std::string error_line = CCtx().GetSourceLine(l.begin.line);
     if (!error_line.empty()) {
-      errs() << "  " << error_line << "\n"; // Print the source line
+      errs() << "  " << error_line << "\n";
 
-      // Print caret (^) under the error position
+      int col = CCtx().MapExpandedColToOriginal(l.begin.line, l.begin.column);
       errs() << "  ";
-      for (int i = 1; i < l.begin.column; ++i)
-        errs() << " "; // Align the caret with the exact error position
-
+      for (int i = 1; i < col; ++i) errs() << " ";
       errs() << "^" << "\n";
     }
   }
@@ -551,6 +549,7 @@ public:
   bool Visit(AST::Trigger&) override { return true; }
   bool Visit(AST::Break&) override { return true; }
   bool Visit(AST::Continue&) override { return true; }
+  bool Visit(AST::Yield&) override { return true; }
   bool Visit(AST::Call&) override { return true; }
   bool Visit(AST::Rotate&) override { return true; }
   bool Visit(AST::Synchronize&) override { return true; }
@@ -775,6 +774,10 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
+  bool Visit(AST::Yield& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
   bool Visit(AST::Call& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -867,6 +870,7 @@ public:
   virtual bool VisitNode(AST::Wait&) { return true; }
   virtual bool VisitNode(AST::Trigger&) { return true; }
   virtual bool VisitNode(AST::Break&) { return true; }
+  virtual bool VisitNode(AST::Yield&) { return true; }
   virtual bool VisitNode(AST::Call&) { return true; }
   virtual bool VisitNode(AST::Rotate&) { return true; }
   virtual bool VisitNode(AST::Synchronize&) { return true; }
@@ -989,6 +993,7 @@ private:
   bool Visit(AST::Trigger&) final { return true; }
   bool Visit(AST::Break&) final { return true; }
   bool Visit(AST::Continue&) final { return true; }
+  bool Visit(AST::Yield&) final { return true; }
   bool Visit(AST::Call&) final { return true; }
   bool Visit(AST::Rotate&) final { return true; }
   bool Visit(AST::Synchronize&) final { return true; }

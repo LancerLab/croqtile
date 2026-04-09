@@ -1,0 +1,14 @@
+// Test fast-compile generates versioned cache with flock protection.
+//
+// RUN: choreo --fast-compile -gs -t cute -arch=sm_90a %s -o %s.result && FileCheck %s --check-prefix=FC --input-file=%s.result && rm -f %s.result
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.result && FileCheck %s --check-prefix=NORMAL --input-file=%s.result && rm -f %s.result
+//
+// FC: CHOREO_CACHE_DIR=
+// FC: choreo_precompiled_${nv_arch}_cuda${CUDA_VER}_
+// FC: flock -x 200
+//
+// Normal mode: no separate compilation, no cache
+// NORMAL-NOT: flock
+// NORMAL-NOT: CHOREO_CACHE_DIR="${CHOREO_CACHE_DIR
+
+__co__ void nil() {}

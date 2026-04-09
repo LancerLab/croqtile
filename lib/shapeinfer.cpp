@@ -4,6 +4,25 @@ using namespace Choreo::valno;
 
 namespace Choreo {
 
+static ptr<Type> PreserveDeclaredMutability(const ptr<Type>& inferred,
+                                            const ptr<Type>& declared) {
+  if (!inferred || !declared || !IsMutable(*declared)) return inferred;
+
+  if (auto sty = dyn_cast<ScalarType>(inferred)) return sty->Clone(true);
+  if (IsActualBoundedIntegerType(inferred)) return MakeIntegerType(true);
+
+  return inferred;
+}
+
+static ptr<Type> ProjectSelectStorage(const ptr<Type>& ty) {
+  if (auto sty = dyn_cast<SpannedType>(ty)) {
+    auto nty = sty->Clone();
+    cast<SpannedType>(nty)->SetStorage(ProjectStorage(sty->GetStorage()));
+    return nty;
+  }
+  return ty;
+}
+
 void ShapeInference::InvalidateVisitorValNOs() {
   cur_vn.Invalidate();
   cur_mdspan_vn.Invalidate();
@@ -489,10 +508,26 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   if (n.init_expr && !isa<AST::Call>(n.init_expr)) {
     if (!CanBeValueNumbered(n.init_expr.get())) {
       GenValNum(SSTab().ScopedName(name));
-      DefineASymbol(name, NodeType(n));
+      auto nty0 = NodeType(n);
+      DefineASymbol(name, nty0);
+      if (auto sty = GetSpannedType(nty0)) {
+        if (auto expr = dyn_cast<AST::Expr>(n.init_expr);
+            expr && expr->op == Op::ElemOf) {
+          if (auto src_id = AST::GetArrayBaseSymbol(*expr)) {
+            auto src_sty = GetSpannedType(GetSymbolType(src_id->name));
+            DefineASymbol(name + ".span", src_sty->GetMDSpanType());
+            auto src_span = SSTab().InScopeName(src_id->name + ".span");
+            SymbolAliasNum(SSTab().ScopedName(name + ".span"),
+                           GetValNum(src_span));
+          }
+        }
+      }
       return true;
     }
-    nty = NodeType(n);
+    nty = PreserveDeclaredMutability(ShadowTypeStorage(NodeType(*n.init_expr)),
+                                     NodeType(n));
+    if (auto sty = GetSpannedType(nty); sty && sto != Storage::NONE)
+      sty->SetStorage(sto);
     if (GetSpannedType(nty)) {
       cur_mdspan_vn = GetValNo(*n.init_expr, VNKind::VNK_MDSPAN);
       assert(cur_mdspan_vn.IsValid() && "expecting a valid mdspan valno.");
@@ -617,8 +652,8 @@ bool ShapeInference::Visit(AST::Assignment& n) {
   // if assigned to a mutable variable, do not re-define
   if (IsMutable(*NodeType(*n.da->data))) return true;
 
-  // this is the un-type-annotated declaration
-  auto nty = n.value->GetType();
+  // Use the inferred RHS type from this pass so reshaped spans keep strides.
+  auto nty = ShadowTypeStorage(NodeType(*n.value));
   DefineASymbol(n.GetName(), nty);
 
   auto name = n.GetName();
@@ -717,13 +752,12 @@ bool ShapeInference::Visit(AST::Identifier& n) {
     // passed from the symbols
     switch (NodeValNoKind(n)) {
     case VNKind::VNK_UBOUND: {
-      if (!vn.HasValueNumberOfSignature(
-              s_sn(SSTab().InScopeName("@" + n.name))))
+      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName("@" + n.name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(n.name) +
                            "' has not been generated.");
       cur_vn = GetValNum(SSTab().InScopeName("@" + n.name));
       ast_vn.Update(&n, cur_vn, VNKind::VNK_UBOUND);
-      if (!vn.HasValueNumberOfSignature(s_sn(SSTab().InScopeName(n.name))))
+      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName(n.name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(n.name) +
                            "' has not been generated.");
       auto valno = GetValNum(SSTab().InScopeName(n.name));
@@ -732,7 +766,7 @@ bool ShapeInference::Visit(AST::Identifier& n) {
     case VNKind::VNK_MDSPAN: {
       auto name =
           RemoveSuffix(RemoveSuffix(n.name, ".span"), ".data") + ".span";
-      if (!vn.HasValueNumberOfSignature(s_sn(SSTab().InScopeName(name))))
+      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName(name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(name) +
                            "' has not been generated.");
       cur_vn = GetValNum(SSTab().InScopeName(name));
@@ -740,7 +774,7 @@ bool ShapeInference::Visit(AST::Identifier& n) {
     } break;
     case VNKind::VNK_VALUE: {
       // it is a reference
-      if (!vn.HasValueNumberOfSignature(s_sn(SSTab().InScopeName(n.name))))
+      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName(n.name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(n.name) +
                            "' has not been generated.");
       cur_vn = GetValNum(SSTab().InScopeName(n.name));
@@ -1086,12 +1120,14 @@ bool ShapeInference::Visit(AST::DMA& n) {
 
     auto mss = m_sn();
     for (size_t i = 0; i < size; ++i) {
-      auto h_l_sig =
-          vn.MakeOpSign(Op::Add, GetSign(*pcfg->pad_high->ValueAt(i)),
-                        GetSign(*pcfg->pad_low->ValueAt(i)));
+      // Keep intermediate pad expressions value-numbered so downstream
+      // simplification can safely query NumSign on nested signatures.
+      auto h_l_vn = vn.MakeOpNum(Op::Add, GetSign(*pcfg->pad_high->ValueAt(i)),
+                                 GetSign(*pcfg->pad_low->ValueAt(i)));
+      auto pad_vn = vn.MakeOpNum(Op::Add, vn.SignNum(h_l_vn),
+                                 GetSign(*pcfg->pad_mid->ValueAt(i)));
       // now generate signature for original signature plus padding values
-      mss->Append(
-          vn.MakeOpSign(Op::Add, h_l_sig, GetSign(*pcfg->pad_mid->ValueAt(i))));
+      mss->Append(vn.SignNum(pad_vn));
     }
     // update the cur_vn
     cur_vn = vn.MakeOpNum(Op::Add, from_vn, GetOrGenValNum(mss));
@@ -1238,7 +1274,7 @@ bool ShapeInference::Visit(AST::MMA& n) {
     }
     cur_vn = GetOrGenValNum(asig);
     auto mdsym = SSTab().InScopeName(op0_sym) + ".span";
-    if (!vn.HasValidValueNumberOfSignature(s_sn(mdsym)))
+    if (!vn.HasValidValueNumberOfSymbol(mdsym))
       SymbolAliasNum(mdsym, cur_vn);
     auto mty = MakeMDSpanType(GenShape(cur_vn));
     auto c_sty = GetSpannedType(GetSymbolType(op0_sym));
@@ -1273,7 +1309,8 @@ bool ShapeInference::Visit(AST::MMA& n) {
       auto mdata_span =
           RemoveSuffix(SSTab().InScopeName(mdata_sym), ".data") + ".span";
       // We don't necessarily update the result shape based on E,
-      // but we ensure it's visited and registered in the valno table if needed.
+      // but we ensure it's visited and registered in the valno table if
+      // needed.
     }
     auto sym_ty = GetSymbolType(op0_sym);
     // always set the node type to spannedtype in exec.
@@ -1762,7 +1799,7 @@ bool ShapeInference::Visit(AST::Select& n) {
     auto s0 = cast<AST::Expr>(n.expr_list->ValueAt(0));
     auto s0ty = NodeType(*s0);
     if (s0ty && s0ty->HasSufficientInfo()) {
-      SetNodeType(n, s0ty);
+      SetNodeType(n, ProjectSelectStorage(s0ty));
     } else {
       cur_mdspan_vn = GetOnlyValueNumber(*n.expr_list, VNKind::VNK_MDSPAN);
       // handle dataof expr (TODO: any better idea?)
@@ -1771,7 +1808,7 @@ bool ShapeInference::Visit(AST::Select& n) {
                             ", type0: " + PSTR(s0ty));
         return false;
       }
-      auto nty = NodeType(*n.expr_list->ValueAt(0))->Clone();
+      auto nty = ProjectSelectStorage(NodeType(*n.expr_list->ValueAt(0)));
       SetNodeType(n, nty);
     }
     ast_vn.Copy(s0.get(), &n, VNKind::VNK_MDSPAN);
@@ -1970,7 +2007,7 @@ void ShapeInference::UpdateValueNumberForMultiValues(const AST::MultiValues& mv,
         auto equals = type_equals.GetEquals(SSTab().InScopeName(id->name));
         for (auto& e : equals.value()) {
           auto asym = e + ".span";
-          if (!vn.HasValidValueNumberOfSignature(s_sn(asym)))
+          if (!vn.HasValidValueNumberOfSymbol(asym))
             SymbolRebindNum(asym, valno);
           else
             assert(valno == GetValNum(asym));

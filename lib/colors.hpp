@@ -46,14 +46,13 @@ inline bool matchKeyword(const std::string& s, size_t i, const char* kw,
   if (s.compare(i, kwlen, kw) != 0) return false;
   if (i > 0) {
     char prev = s[i - 1];
-    if (prev != '>' && prev != ' ' && prev != '(' && prev != ',')
-      return false;
+    if (prev != '>' && prev != ' ' && prev != '(' && prev != ',') return false;
   }
   size_t end = i + kwlen;
   if (end < s.size()) {
     char next = s[end];
-    if (next != ' ' && next != '<' && next != ')' && next != ','
-        && next != '\0')
+    if (next != ' ' && next != '<' && next != ')' && next != ',' &&
+        next != '\0')
       return false;
   }
   return true;
@@ -66,7 +65,8 @@ inline bool matchKeyword(const std::string& s, size_t i, const char* kw,
 #if defined(__GNUC__) && !defined(__clang__)
 __attribute__((noinline))
 #endif
-inline bool stdoutHasColor() {
+inline bool
+stdoutHasColor() {
   static bool enabled = detail::computeColorEnabled(STDOUT_FILENO);
   return enabled;
 }
@@ -74,7 +74,8 @@ inline bool stdoutHasColor() {
 #if defined(__GNUC__) && !defined(__clang__)
 __attribute__((noinline))
 #endif
-inline bool stderrHasColor() {
+inline bool
+stderrHasColor() {
   static bool enabled = detail::computeColorEnabled(STDERR_FILENO);
   return enabled;
 }
@@ -107,50 +108,161 @@ inline std::string colorizeType(const std::string& s, bool use_color) {
 
   while (i < n) {
     // async=> / sync=> prefixes
-    if (s.compare(i, 7, "async=>") == 0) { emit(kYellow, 7); continue; }
-    if (s.compare(i, 6, "sync=>") == 0)  { emit(kYellow, 6); continue; }
+    if (s.compare(i, 7, "async=>") == 0) {
+      emit(kYellow, 7);
+      continue;
+    }
+    if (s.compare(i, 6, "sync=>") == 0) {
+      emit(kYellow, 6);
+      continue;
+    }
 
-    // Storage qualifiers → yellow
+    // Storage qualifiers -> yellow
     using detail::matchKeyword;
-    if (matchKeyword(s, i, "global", 6))   { emit(kYellow, 6); continue; }
-    if (matchKeyword(s, i, "shared", 6))   { emit(kYellow, 6); continue; }
-    if (matchKeyword(s, i, "local", 5))    { emit(kYellow, 5); continue; }
-    if (matchKeyword(s, i, "register", 8)) { emit(kYellow, 8); continue; }
-    if (matchKeyword(s, i, "node", 4))     { emit(kYellow, 4); continue; }
+    if (matchKeyword(s, i, "global", 6)) {
+      emit(kYellow, 6);
+      continue;
+    }
+    if (matchKeyword(s, i, "shared", 6)) {
+      emit(kYellow, 6);
+      continue;
+    }
+    if (matchKeyword(s, i, "local", 5)) {
+      emit(kYellow, 5);
+      continue;
+    }
+    if (matchKeyword(s, i, "register", 8)) {
+      emit(kYellow, 8);
+      continue;
+    }
+    if (matchKeyword(s, i, "node", 4)) {
+      emit(kYellow, 4);
+      continue;
+    }
 
-    // Element types → green
-    if (matchKeyword(s, i, "f8_ue8m0", 8)){ emit(kGreen, 8); continue; }
-    if (matchKeyword(s, i, "f8_ue4m3", 8)){ emit(kGreen, 8); continue; }
-    if (matchKeyword(s, i, "f8_e4m3", 7)) { emit(kGreen, 7); continue; }
-    if (matchKeyword(s, i, "f8_e5m2", 7)) { emit(kGreen, 7); continue; }
-    if (matchKeyword(s, i, "f6_e2m3", 7)) { emit(kGreen, 7); continue; }
-    if (matchKeyword(s, i, "f6_e3m2", 7)) { emit(kGreen, 7); continue; }
-    if (matchKeyword(s, i, "f4_e2m1", 7)) { emit(kGreen, 7); continue; }
-    if (matchKeyword(s, i, "bf16", 4))     { emit(kGreen, 4); continue; }
-    if (matchKeyword(s, i, "tf32", 4))     { emit(kGreen, 4); continue; }
-    if (matchKeyword(s, i, "bin1", 4))     { emit(kGreen, 4); continue; }
-    if (matchKeyword(s, i, "bool", 4))     { emit(kGreen, 4); continue; }
-    if (matchKeyword(s, i, "void", 4))     { emit(kGreen, 4); continue; }
-    if (matchKeyword(s, i, "f64", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "f32", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "f16", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "s64", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "s32", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "s16", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "u64", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "u32", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "u16", 3))      { emit(kGreen, 3); continue; }
-    if (matchKeyword(s, i, "s8", 2))       { emit(kGreen, 2); continue; }
-    if (matchKeyword(s, i, "s6", 2))       { emit(kGreen, 2); continue; }
-    if (matchKeyword(s, i, "s4", 2))       { emit(kGreen, 2); continue; }
-    if (matchKeyword(s, i, "s2", 2))       { emit(kGreen, 2); continue; }
-    if (matchKeyword(s, i, "u8", 2))       { emit(kGreen, 2); continue; }
-    if (matchKeyword(s, i, "u6", 2))       { emit(kGreen, 2); continue; }
-    if (matchKeyword(s, i, "u4", 2))       { emit(kGreen, 2); continue; }
-    if (matchKeyword(s, i, "u2", 2))       { emit(kGreen, 2); continue; }
-    if (matchKeyword(s, i, "u1", 2))       { emit(kGreen, 2); continue; }
+    // Element types -> green
+    if (matchKeyword(s, i, "f8_ue8m0", 8)) {
+      emit(kGreen, 8);
+      continue;
+    }
+    if (matchKeyword(s, i, "f8_ue4m3", 8)) {
+      emit(kGreen, 8);
+      continue;
+    }
+    if (matchKeyword(s, i, "f8_e4m3", 7)) {
+      emit(kGreen, 7);
+      continue;
+    }
+    if (matchKeyword(s, i, "f8_e5m2", 7)) {
+      emit(kGreen, 7);
+      continue;
+    }
+    if (matchKeyword(s, i, "f6_e2m3", 7)) {
+      emit(kGreen, 7);
+      continue;
+    }
+    if (matchKeyword(s, i, "f6_e3m2", 7)) {
+      emit(kGreen, 7);
+      continue;
+    }
+    if (matchKeyword(s, i, "f4_e2m1", 7)) {
+      emit(kGreen, 7);
+      continue;
+    }
+    if (matchKeyword(s, i, "bf16", 4)) {
+      emit(kGreen, 4);
+      continue;
+    }
+    if (matchKeyword(s, i, "tf32", 4)) {
+      emit(kGreen, 4);
+      continue;
+    }
+    if (matchKeyword(s, i, "bin1", 4)) {
+      emit(kGreen, 4);
+      continue;
+    }
+    if (matchKeyword(s, i, "bool", 4)) {
+      emit(kGreen, 4);
+      continue;
+    }
+    if (matchKeyword(s, i, "void", 4)) {
+      emit(kGreen, 4);
+      continue;
+    }
+    if (matchKeyword(s, i, "f64", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "f32", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "f16", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "s64", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "s32", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "s16", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "u64", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "u32", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "u16", 3)) {
+      emit(kGreen, 3);
+      continue;
+    }
+    if (matchKeyword(s, i, "s8", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
+    if (matchKeyword(s, i, "s6", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
+    if (matchKeyword(s, i, "s4", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
+    if (matchKeyword(s, i, "s2", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
+    if (matchKeyword(s, i, "u8", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
+    if (matchKeyword(s, i, "u6", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
+    if (matchKeyword(s, i, "u4", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
+    if (matchKeyword(s, i, "u2", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
+    if (matchKeyword(s, i, "u1", 2)) {
+      emit(kGreen, 2);
+      continue;
+    }
 
-    // Bracket extents [...] → dim (handles nesting)
+    // Bracket extents [...] -> dim (handles nesting)
     if (s[i] == '[') {
       int depth = 1;
       r += kDim;

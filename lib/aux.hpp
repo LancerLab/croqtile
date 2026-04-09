@@ -81,23 +81,61 @@ inline static std::string DelimitedSTR(const Container& container,
   return oss.str();
 }
 
-// split `input` to a vector
+// Split `input` by `delimiter` into non-empty tokens.
+// `trim` controls whether leading/trailing whitespace is stripped from each
+// token (default: true for backward compat, but no callers actually need it).
 inline static std::vector<std::string>
-SplitStringByDelimiter(std::string input, std::string delimiter = ",",
-                       bool trim = true) {
+SplitStringByDelimiter(const std::string& input,
+                       const std::string& delimiter = ",", bool trim = true) {
   std::vector<std::string> tokens;
-  size_t pos = 0;
-  std::string token;
-  while ((pos = input.find(delimiter)) != std::string::npos) {
-    token = input.substr(0, pos);
-    if (!token.empty()) tokens.push_back(token);
-    input.erase(0, pos + delimiter.length());
+  size_t start = 0;
+  size_t pos;
+  while ((pos = input.find(delimiter, start)) != std::string::npos) {
+    if (pos > start) tokens.emplace_back(input, start, pos - start);
+    start = pos + delimiter.length();
   }
-  if (!input.empty()) tokens.push_back(input);
+  if (start < input.size()) tokens.emplace_back(input, start);
   if (!trim) return tokens;
-  for (auto& token : tokens)
-    token = std::regex_replace(token, std::regex("^\\s+|\\s+$"), "");
+  for (auto& t : tokens) {
+    size_t a = t.find_first_not_of(" \t\n\r\f\v");
+    size_t b = t.find_last_not_of(" \t\n\r\f\v");
+    if (a == std::string::npos)
+      t.clear();
+    else if (a > 0 || b + 1 < t.size())
+      t = t.substr(a, b - a + 1);
+  }
   return tokens;
+}
+
+// Return the first non-empty token before `delimiter`, or the whole string.
+// Skips leading delimiter matches (consistent with SplitStringByDelimiter).
+inline static std::string SplitFirst(const std::string& input,
+                                     const std::string& delimiter) {
+  size_t start = 0;
+  // skip leading delimiter
+  while (start < input.size() &&
+         input.compare(start, delimiter.size(), delimiter) == 0)
+    start += delimiter.size();
+  auto pos = input.find(delimiter, start);
+  if (pos == std::string::npos) return input.substr(start);
+  return input.substr(start, pos - start);
+}
+
+// Return the last non-empty token after the final `delimiter`, or the whole
+// string. Skips trailing delimiter matches.
+inline static std::string SplitLast(const std::string& input,
+                                    const std::string& delimiter) {
+  if (input.empty()) return input;
+  size_t end = input.size();
+  // skip trailing delimiter
+  while (end >= delimiter.size() &&
+         input.compare(end - delimiter.size(), delimiter.size(), delimiter) ==
+             0)
+    end -= delimiter.size();
+  if (end == 0) return "";
+  auto pos = input.rfind(delimiter, end - 1);
+  if (pos == std::string::npos) return input.substr(0, end);
+  return input.substr(pos + delimiter.size(), end - pos - delimiter.size());
 }
 
 // Function to check if 'str' starts with 'prefix'

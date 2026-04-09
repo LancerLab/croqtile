@@ -119,14 +119,14 @@ private:
       if (inner_pb_level == ParallelLevel::GROUPx4 ||
           inner_pb_level == ParallelLevel::GROUP)
         in_thr_block_stack.push(it);
-      // todo: predicate of inthreads_block should be analyzed to make sure it
-      // is compatible with the inner parallel-by level. For example, if the
-      // inner parallel-by is group, the predicate should be "p1 == 0" to make
-      // sure only one warp participates in the TMA copy. if the inner
-      // parallel-by is group4, the predicate should be "p1 == 0 || p1 == 2"
-      //  to make sure two warpgroup participate in the TMA copy.
-      // There may exist complex expressions for the predicate, such as "p1 % 2
-      // && p1 < 4".
+      // Mark warpspec pattern when inthreads.async selects threads from
+      // a single warpgroup. Uses ActiveWarpGroup() to handle compound
+      // predicates like (p1 == 0 && t == 0).
+      if (it->async && it->HasScopeThreadMask() &&
+          it->inthreads_level == ParallelLevel::GROUPx4) {
+        auto wg = it->ActiveWarpGroup();
+        if (wg >= 0) cgi.GetFunctionTrait(fname).has_warpspec_pattern = true;
+      }
     }
     return true;
   }
@@ -137,6 +137,7 @@ private:
           !cgi.GetPBTree(fname).IsEmpty();
       cgi.GetFunctionTrait(fname).multiple_parallelby =
           (cgi.GetPBTree(fname).GetRootCount() > 1);
+      ValidateEventDecls();
       VST_DEBUG(dbgs() << "Symbols in " << fname << ":\n");
       VST_DEBUG(for (auto& item : cgi.GetFunctionSymbols(fname)) {
         dbgs() << " |- " << item.name << ", ty: " << PSTR(item.type)
@@ -222,6 +223,51 @@ private:
 private:
   bool IsHost() const { return Level() == ParallelLevel::SEQ; }
 
+  void ValidateEventDecls() {
+    auto& ft = cgi.GetFunctionTrait(fname);
+    for (auto& decl : ft.event_decls) {
+      auto ep = ft.GetEventParticipation(decl.name);
+      if (decl.explicit_tc > 0 && ep > 0 && decl.explicit_tc != ep) {
+        Warning(decl.loc,
+                "event '" + decl.name + "' has explicit thread count " +
+                    std::to_string(decl.explicit_tc) +
+                    " but computed participation from usage scopes is " +
+                    std::to_string(ep) +
+                    "; the explicit count takes precedence.");
+      }
+      if (ep == 0) {
+        Note(decl.loc, "event '" + decl.name +
+                           "' has no recorded thread participation; "
+                           "it may not be used in any inthreads scope.");
+      }
+    }
+  }
+
+  std::string ExtractEventName(AST::Node& node) const {
+    auto expr = dyn_cast<AST::Expr>(&node);
+    if (!expr) return "";
+    if (expr->op == Op::ElemOf) {
+      auto bid = AST::GetArrayBaseSymbol(*expr);
+      return bid ? bid->name : "";
+    }
+    auto sym = expr->GetSymbol();
+    return sym ? sym->name : "";
+  }
+
+  void RecordEventRef(const std::string& event_name, const location& loc) {
+    if (in_thr_block_stack.empty()) return;
+    auto* it = in_thr_block_stack.top();
+    if (!it->HasScopeThreadMask()) {
+      Note(loc, "event '" + event_name +
+                    "' is used in a scope with dynamic thread predicate; "
+                    "participation count cannot be determined at compile "
+                    "time, runtime default will be used for initialization.");
+      return;
+    }
+    cgi.GetFunctionTrait(fname).RecordEventUsage(event_name,
+                                                 it->GetScopeThreadMask());
+  }
+
 public:
   CodegenInfoCollect() : CodeGenerator("cg_info") {}
   ~CodegenInfoCollect() {}
@@ -231,6 +277,14 @@ public:
     bool ref = n.HasNote("ref");
     cgi.AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name), ref});
     if (isa<AST::Select>(n.init_expr)) select_syms.insert(InScopeName(name));
+
+    auto sty = GetSymbolType(name);
+    if (auto ety = dyn_cast<EventArrayType>(sty))
+      cgi.GetFunctionTrait(fname).RecordEventDecl(
+          name, ety->event->GetThreadCount(), n.LOC());
+    else if (auto ety = dyn_cast<EventType>(sty))
+      cgi.GetFunctionTrait(fname).RecordEventDecl(name, ety->GetThreadCount(),
+                                                  n.LOC());
     return true;
   }
 
@@ -285,6 +339,40 @@ public:
     if (n.IsAsync() && !n.IsTMA())
       cgi.GetFunctionTrait(fname).has_async_dma = true;
 
+    if (n.HasEvent()) {
+      auto name = ExtractEventName(*n.Event());
+      if (!name.empty()) RecordEventRef(name, n.LOC());
+    }
+
+    if (!n.IsTMA() && !in_thr_block_stack.empty()) {
+      auto* itb = in_thr_block_stack.top();
+      if (itb->HasScopeThreadMask()) {
+        int64_t unit_size = -1;
+        if (inner_pb_level == ParallelLevel::GROUPx4)
+          unit_size = 128;
+        else if (inner_pb_level == ParallelLevel::GROUP)
+          unit_size = 32;
+        if (unit_size > 0) {
+          auto& mask = itb->GetScopeThreadMask();
+          for (int64_t s = 0; s < (int64_t)mask.size(); s += unit_size) {
+            int64_t cnt = 0;
+            auto e = std::min(s + unit_size, (int64_t)mask.size());
+            for (int64_t i = s; i < e; ++i)
+              if (mask[i]) ++cnt;
+            if (cnt > 0 && cnt != unit_size) {
+              Warning(n.LOC(), "DMA inside inthreads has " +
+                                   std::to_string(cnt) +
+                                   " active threads in a unit, but tiled copy "
+                                   "assumes " +
+                                   std::to_string(unit_size) +
+                                   " threads; data layout may be incorrect.");
+              break;
+            }
+          }
+        }
+      }
+    }
+
     if (!CCtx().TargetSupportTMA()) return true;
     if (!block_pb) return true; // not device dma
 
@@ -320,6 +408,22 @@ public:
             STR(tsty->GetStorage()) + ".");
     }
 
+    return true;
+  }
+
+  bool Visit(AST::Trigger& n) override {
+    for (auto& f : n.GetEvents()) {
+      auto name = ExtractEventName(*f);
+      if (!name.empty()) RecordEventRef(name, n.LOC());
+    }
+    return true;
+  }
+
+  bool Visit(AST::Wait& n) override {
+    for (auto& t : n.GetTargets()) {
+      auto name = ExtractEventName(*t);
+      if (!name.empty()) RecordEventRef(name, n.LOC());
+    }
     return true;
   }
 

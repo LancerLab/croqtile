@@ -1,7 +1,11 @@
 #include "preprocess.hpp"
 #include "aux.hpp"
 #include "context.hpp"
+#include "fs_utils.hpp"
 #include "io.hpp"
+#include "options.hpp"
+#include <filesystem>
+#include <fstream>
 #include <istream>
 #include <regex>
 #include <sstream>
@@ -122,7 +126,8 @@ const std::string Preprocess::SubStituteMacroFuncs(const std::string& line,
 
 const std::string Preprocess::SubStituteDefines(const std::string& line,
                                                 const DefineMap& defines,
-                                                const FuncMap& funcs) {
+                                                const FuncMap& funcs,
+                                                std::vector<MacroSub>* subs) {
   std::string result;
   std::string current_token;
   bool in_string = false;
@@ -187,9 +192,14 @@ const std::string Preprocess::SubStituteDefines(const std::string& line,
       if (!current_token.empty()) {
         auto it = defines.find(current_token);
         auto func_it = funcs.find(current_token);
-        if (it != defines.end() && func_it == funcs.end())
+        if (it != defines.end() && func_it == funcs.end()) {
+          if (subs && it->second.size() != current_token.size()) {
+            int col = (int)(i - current_token.size()) + 1;
+            subs->push_back(
+                {col, (int)current_token.size(), (int)it->second.size()});
+          }
           result += it->second;
-        else
+        } else
           result += current_token;
         current_token.clear();
       }
@@ -200,9 +210,14 @@ const std::string Preprocess::SubStituteDefines(const std::string& line,
   // last token
   if (!current_token.empty()) {
     auto it = defines.find(current_token);
-    if (it != defines.end())
+    if (it != defines.end()) {
+      if (subs && it->second.size() != current_token.size()) {
+        int col = (int)(line.length() - current_token.size()) + 1;
+        subs->push_back(
+            {col, (int)current_token.size(), (int)it->second.size()});
+      }
       result += it->second;
-    else
+    } else
       result += current_token;
   }
 
@@ -213,8 +228,10 @@ const std::string Preprocess::SubstituteGlobalDefines(const std::string& line) {
   return SubStituteDefines(line, globalDefines, globalDefinedFuncs);
 }
 
-const std::string Preprocess::SubstituteLocalDefines(const std::string& line) {
-  return SubStituteDefines(line, localDefines, localDefinedFuncs);
+const std::string
+Preprocess::SubstituteLocalDefines(const std::string& line,
+                                   std::vector<MacroSub>* subs) {
+  return SubStituteDefines(line, localDefines, localDefinedFuncs, subs);
 }
 
 const std::string
@@ -877,13 +894,17 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
 
     if ((co_end == aline.size()) && (choreo_brace_count == 0)) {
       // has not entered the choreo code region
-      auto sline = SubstituteLocalDefines(aline);
+      std::vector<MacroSub> subs;
+      auto sline = SubstituteLocalDefines(aline, &subs);
+      if (!subs.empty()) CCtx().SetLineMacroSubs(line_num, std::move(subs));
       if (!uc_skip_line) output << sline << '\n';
       return;
     }
 
+    std::vector<MacroSub> subs;
     auto co_code = aline.substr(0, co_end);
-    auto sline = SubstituteLocalDefines(co_code);
+    auto sline = SubstituteLocalDefines(co_code, &subs);
+    if (!subs.empty()) CCtx().SetLineMacroSubs(line_num, std::move(subs));
     bool changed = true;
     while (changed) { sline = SubstituteLocalMacroFuncs(sline, changed); }
 
@@ -905,6 +926,95 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
   } else {
     // skip the line
   }
+}
+
+namespace {
+
+// Line-based extraction of __cok__ block contents from a raw source file.
+// Unlike the target preprocess extract_cok_sections (which operates on
+// preprocessed strings and returns Range pairs), this reads an unprocessed
+// source file and returns the lines inside __cok__ { ... } blocks.
+std::vector<std::string> CollectCokLines(const std::string& filepath) {
+  std::vector<std::string> result;
+  std::ifstream ifs(filepath);
+  if (!ifs.is_open()) return result;
+
+  std::string line;
+  int depth = 0;
+  bool in_cok = false;
+  while (std::getline(ifs, line)) {
+    auto trimmed = line;
+    size_t first = trimmed.find_first_not_of(" \t");
+    if (first != std::string::npos) trimmed = trimmed.substr(first);
+
+    if (!in_cok && trimmed.find("__cok__") == 0) {
+      auto brace_pos = line.find('{');
+      if (brace_pos != std::string::npos) {
+        in_cok = true;
+        depth = 1;
+        auto after = line.substr(brace_pos + 1);
+        if (after.find_first_not_of(" \t\r\n") != std::string::npos)
+          result.push_back(after);
+      }
+      continue;
+    }
+    if (in_cok) {
+      for (char c : line) {
+        if (c == '{') depth++;
+        else if (c == '}') depth--;
+      }
+      if (depth <= 0) {
+        in_cok = false;
+        auto close_pos = line.rfind('}');
+        if (close_pos > 0) result.push_back(line.substr(0, close_pos));
+      } else {
+        result.push_back(line);
+      }
+    }
+  }
+  return result;
+}
+
+std::string ResolveInclude(const std::string& filename,
+                           const std::string& input_dir) {
+  namespace fs = std::filesystem;
+  auto candidate = fs::path(input_dir) / filename;
+  if (fs::exists(candidate)) return candidate.string();
+  for (auto& inc_path : CCtx().GetIncPaths()) {
+    candidate = fs::path(inc_path) / filename;
+    if (fs::exists(candidate)) return candidate.string();
+  }
+  return "";
+}
+
+} // anonymous namespace
+
+bool Preprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
+  std::vector<std::string> all_cok;
+
+  auto input_file = OptionRegistry::GetInstance().GetInputFileName();
+  auto input_dir =
+      GetAbsPath(std::filesystem::current_path(), input_file);
+
+  std::regex inc_re("#include\\s+\"(.*)\"");
+  for (auto& inc_line : include_lines) {
+    std::smatch m;
+    if (std::regex_match(inc_line, m, inc_re)) {
+      auto resolved = ResolveInclude(m[1].str(), input_dir);
+      if (!resolved.empty()) {
+        auto inc_cok = CollectCokLines(resolved);
+        all_cok.insert(all_cok.end(), inc_cok.begin(), inc_cok.end());
+      }
+    }
+  }
+
+  all_cok.insert(all_cok.end(), cok_codes.begin(), cok_codes.end());
+
+  if (all_cok.empty()) return true;
+  cok_ss << "__real_cok__ {\n";
+  for (auto& c : all_cok) cok_ss << c << "\n";
+  cok_ss << "}\n\n";
+  return true;
 }
 
 bool Preprocess::Process(std::istream& input) {

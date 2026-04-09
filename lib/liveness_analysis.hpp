@@ -106,7 +106,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::string GetFuncNameFromScopedName(const std::string& name) const {
     // indicate that it is a co function name
     if (!PrefixedWith(name, "::")) return name;
-    return SplitStringByDelimiter(name, "::", true)[0];
+    return SplitFirst(name, "::");
   }
 
   // one to one. Alias of buffer. Could happen in spanas, etc.
@@ -116,7 +116,8 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::unordered_map<std::string, VarSet> Bindings;
 
   // record the binding info to do restoration in ComputeLiveInOut().
-  std::unordered_map<const Stmt*, std::string> stmt2binding_restore;
+  std::unordered_map<const Stmt*, std::vector<std::string>>
+      stmt2binding_restore;
 
   std::unordered_set<std::string> paraby_bounded_vars;
 
@@ -149,12 +150,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
       return start <= other.end && end >= other.start;
     }
 
-    // [1,3] vs [4,8], same mask
-    bool BeforeAdjacent(const Range& other) const {
-      assert(start <= other.start);
-      return end + 1 == other.start;
-    }
-
     bool operator<(const Range& other) const {
       return std::tie(start, end) < std::tie(other.start, other.end);
     }
@@ -174,7 +169,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
       merged.push_back(ranges[0]);
       for (size_t i = 1; i < ranges.size(); ++i) {
         Range& back = merged.back();
-        if (back.BeforeAdjacent(ranges[i]))
+        if (back.end + 1 >= ranges[i].start)
           back.end = std::max(back.end, ranges[i].end);
         else
           merged.push_back(ranges[i]);
@@ -210,16 +205,16 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     size_t id = 0;
     std::vector<size_t> stmt_ids;
     std::vector<ptr<BasicBlock>> succs;
-    std::vector<ptr<BasicBlock>> preds;
+    std::vector<BasicBlock*> preds;
     bool is_sync_point = false;
     bool is_condition = false;
     bool is_inthreads = false;
     bool is_end = false;
   };
   using BB = BasicBlock;
-  inline void ConnnectBB(ptr<BB> x, ptr<BB> y) {
+  inline void ConnectBB(ptr<BB> x, ptr<BB> y) {
     x->succs.push_back(y);
-    y->preds.push_back(x);
+    y->preds.push_back(x.get());
   }
   std::vector<ptr<BB>> bb_list;
   std::unordered_map<const Stmt*, ptr<BB>> stmt2bb;
