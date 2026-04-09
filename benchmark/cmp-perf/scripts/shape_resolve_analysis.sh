@@ -3,9 +3,9 @@
 set -e
 
 CHOREO_BIN="./choreo"
-BENCHMARK_DIR="benchmark"
-RESULTS_DIR="benchmark/scripts/results"
-TEMP_DIR="benchmark/scripts/temp"
+BENCHMARK_DIR="benchmark/cmp-perf"
+RESULTS_DIR="benchmark/cmp-perf/scripts/results"
+TEMP_DIR="benchmark/cmp-perf/scripts/temp"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

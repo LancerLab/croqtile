@@ -1186,7 +1186,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
 
   end_idx = std::min(end_idx, ca->OpCount());
 
-  auto offset = sbe::nu(0);
+  sbe::ExprSum offset;
 
   // assert(ca->OpCount() == 1 &&
   //        "count of spanned operations in CuTe DMA should be 1.");
@@ -1215,7 +1215,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
       choreo_unreachable("unsupported spanned operation.");
   }
 
-  return offset;
+  return offset.Get();
 }
 
 const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,
@@ -5695,7 +5695,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             auto tx_bytes_expr = SumRecentTMATxBytesExpr();
             // In a multi-threaded warpspec scope where TMA is
             // single-thread guarded, only the TMA-issuing thread
-            // reports expected bytes — others arrive with 0 bytes.
+            // reports expected bytes -- others arrive with 0 bytes.
             bool conditional_tx =
                 IsWarpSpecActive() &&
                 !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
@@ -6516,7 +6516,7 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
   }
 
   // ENTRY assertions reference only function parameters / host-visible values
-  // — the assertion-hoisting pass guarantees this. Safe to emit in the host
+  // -- the assertion-hoisting pass guarantees this. Safe to emit in the host
   // wrapper before the kernel launch.
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
     if (!ar.enabled) continue;

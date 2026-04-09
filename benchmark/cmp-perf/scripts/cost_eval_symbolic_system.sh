@@ -3,9 +3,9 @@
 set -e
 
 CHOREO_BIN="./choreo"
-BENCHMARK_DIR="benchmark"
-RESULTS_DIR="benchmark/scripts/results"
-TEMP_DIR="benchmark/scripts/temp"
+BENCHMARK_DIR="benchmark/cmp-perf"
+RESULTS_DIR="benchmark/cmp-perf/scripts/results"
+TEMP_DIR="benchmark/cmp-perf/scripts/temp"
 SAMPLES=3
 MEASURES=9
 
@@ -24,16 +24,12 @@ print_msg() {
 }
 
 measure_compile_time() {
-    local src=$1 bin=$2 env_vars=$3
+    local src=$1 bin=$2 extra_flags=$3
     local total=0 times=()
 
     for i in $(seq 1 $MEASURES); do
         local start=$(date +%s%N)
-        if [ -n "$env_vars" ]; then
-            env $env_vars $CHOREO_BIN "$src" -o "$bin" >/dev/null 2>&1
-        else
-            $CHOREO_BIN "$src" -o "$bin" >/dev/null 2>&1
-        fi
+        $CHOREO_BIN $extra_flags "$src" -o "$bin" >/dev/null 2>&1
         local end=$(date +%s%N)
         local dur=$(( (end - start) / 1000000 ))
         times+=($dur)
@@ -94,7 +90,7 @@ process_file() {
     print_msg $BLUE "Processing: $name"
 
     local static_bin="$TEMP_DIR/${name}_static"
-    local static_comp=$(measure_compile_time "$file" "$static_bin" "__STATIC_SHAPE__=1")
+    local static_comp=$(measure_compile_time "$file" "$static_bin" "-D__STATIC_SHAPE__=1")
     local static_comp_time=$(echo $static_comp | cut -d' ' -f1)
     local static_comp_std=$(echo $static_comp | cut -d' ' -f2)
 
@@ -103,7 +99,7 @@ process_file() {
     local static_exec_std=$(echo $static_exec | cut -d' ' -f2)
 
     local dynamic_bin="$TEMP_DIR/${name}_dynamic"
-    local dynamic_comp=$(measure_compile_time "$file" "$dynamic_bin" "")
+    local dynamic_comp=$(measure_compile_time "$file" "$dynamic_bin")
     local dynamic_comp_time=$(echo $dynamic_comp | cut -d' ' -f1)
     local dynamic_comp_std=$(echo $dynamic_comp | cut -d' ' -f2)
 

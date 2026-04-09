@@ -466,9 +466,9 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
 
   // Handle each SOP in the chain via symbolic algebra.
   // Dispatch is interface-based:
-  //   GetIndices non-null → index-based (Tiling/SubSpan/TileAt)
-  //   GetOffsets non-null → offset-based (View)
-  ValueList offsets;
+  //   GetIndices non-null -- index-based (Tiling/SubSpan/TileAt)
+  //   GetOffsets non-null -- offset-based (View)
+  std::vector<sbe::ExprSum> offsets;
 
   for (size_t sop_idx = sop_base; sop_idx < sops.size(); ++sop_idx) {
     assert(!isa<AST::SOP::Reshape>(sops[sop_idx]));
@@ -481,7 +481,7 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
     if (op->GetIndices()) {
       // Index-based SOPs (Tiling, SubSpan, TileAt): idx * block_shape.
       // Per-node Opts carry pre-expanded bounded vars and preserve the
-      // ::__choreo_no_tiling__ symbol — collect them directly.
+      // ::__choreo_no_tiling__ symbol -- collect them directly.
       for (auto p : op->IndexNodes()) {
         if (auto e = dyn_cast<AST::Expr>(p); e && e->Opts().HasVals())
           for (auto& val : e->Opts().GetVals()) coords.push_back(val);
@@ -505,7 +505,7 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
         for (auto& val : e->Opts().GetVals()) coords.push_back(val);
       }
     } else {
-      // No indices or offsets — zero offset per dimension
+      // No indices or offsets -- zero offset per dimension
       coords = ValxN(sbe::nu(0), shape.DimCount());
     }
 
@@ -514,27 +514,27 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
       assert(ca->TilingOperationCount() == 1);
     }
 
-    // Accumulate per-dimension symbolic offsets across chained SOPs
-    if (offsets.empty()) offsets = ValxN(sbe::nu(0), coords.size());
+    // Accumulate per-dimension symbolic offsets across chained SOPs.
+    if (offsets.empty()) offsets.resize(coords.size());
 
     for (size_t i = 0; i < coords.size(); ++i) {
       if (sbe::ceq(coords[i], sbe::sym("::__choreo_no_tiling__")))
-        continue; // no-tiling dimension contributes zero
+        continue;
       if (scale_by_shape)
-        offsets[i] = offsets[i] + coords[i] * shape.ValueAt(i);
+        offsets[i] += coords[i] * shape.ValueAt(i);
       else
-        offsets[i] = offsets[i] + coords[i];
+        offsets[i] += coords[i];
     }
   }
 
-  // Materialize symbolic offsets to string via ValueSTR
   std::ostringstream offset;
   for (size_t i = 0; i < offsets.size(); ++i) {
     if (i != 0) offset << ", ";
-    if (sbe::ceq(offsets[i], sbe::nu(0)))
+    auto norm = offsets[i].Get();
+    if (sbe::ceq(norm, sbe::nu(0)))
       offset << "0";
     else
-      offset << "(int)(" << ValueSTR(offsets[i]) << ")";
+      offset << "(int)(" << ValueSTR(norm) << ")";
   }
 
   if (split_8byte_dma_transfer) {
@@ -568,16 +568,16 @@ TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
 // span in the original span. Each SOP in [0, end_idx) contributes additively.
 //
 // Dispatch is based on the SOP interface, not concrete types:
-//   GetIndices non-null (Tiling/SubSpan/TileAt) → idx * blk * stride
-//   GetOffsets non-null (View)                  → off * stride
-//   Reshape                                     → boundary (skip)
+//   GetIndices non-null (Tiling/SubSpan/TileAt) -> idx * blk * stride
+//   GetOffsets non-null (View)                  -> off * stride
+//   Reshape                                     -> boundary (skip)
 const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
                                            size_t end_idx) const {
   if (ca->NoOperation()) return "";
 
   end_idx = std::min(end_idx, ca->OpCount());
 
-  auto offset = sbe::nu(0);
+  sbe::ExprSum offset;
 
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
@@ -586,23 +586,18 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
     auto strd = sop->GetBlockStrides();
 
     if (auto indices = sop->GetIndices()) {
-      // Index-based SOPs (Tiling, SubSpan, TileAt):
-      //   offset += idx[dim] * block_shape[dim] * block_stride[dim]
       auto& vals = indices->Opts().GetVals();
       auto blk = sop->GetBlockShape();
       for (size_t dim = 0; dim < vals.size(); ++dim)
         offset += vals[dim] * blk.ValueAt(dim) * strd[dim];
     } else if (auto off_mv = sop->GetOffsets()) {
-      // Offset-based SOPs (View):
-      //   offset += off[dim] * block_stride[dim]  (no block_shape)
       auto& vals = off_mv->Opts().GetVals();
       for (size_t dim = 0; dim < vals.size(); ++dim)
         offset += vals[dim] * strd[dim];
     }
-    // else: SOP with neither indices nor offsets contributes zero.
   }
 
-  return ValueSTR(offset);
+  return ValueSTR(offset.Get());
 }
 
 void TopsccCodeGen::EmitFixedHostHead() {
@@ -3356,7 +3351,7 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
     assert(shape.Rank() >= idx + 1);
     if (shape.Rank() > idx + 1)
       offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
-    SimplifyExpression(offset);
+    offset = SimplifyExpression(offset);
     if (!sbe::ceq(offset, sbe::nu(0))) {
       if (operand_cnt > 0) oss << " + ";
       oss << ValueSTR(offset);

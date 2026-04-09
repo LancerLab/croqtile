@@ -7,9 +7,9 @@ set -e
 
 # Configuration
 CHOREO_BIN="./choreo"
-BENCHMARK_DIR="benchmark"
-RESULTS_DIR="benchmark/scripts/results"
-TEMP_DIR="benchmark/scripts/temp"
+BENCHMARK_DIR="benchmark/cmp-perf"
+RESULTS_DIR="benchmark/cmp-perf/scripts/results"
+TEMP_DIR="benchmark/cmp-perf/scripts/temp"
 
 # Colors for output
 RED='\033[0;31m'
@@ -153,9 +153,9 @@ main() {
     
     # Test with a few specific files
     local test_files=(
-        "benchmark/reduce_mean/10_dynamic_32xSx768_32x768.co"
-        "benchmark/elemwise_add/11_dynamic_32xSx768_32xSx768_32xSx768.co"
-        "benchmark/matmul/11_dynamic_32xSx768_768x768_32xSx768.co"
+        "benchmark/cmp-perf/reduce_mean/10_dynamic_32xSx768_32x768.co"
+        "benchmark/cmp-perf/elemwise_add/11_dynamic_32xSx768_32xSx768_32xSx768.co"
+        "benchmark/cmp-perf/matmul/11_dynamic_32xSx768_768x768_32xSx768.co"
     )
     
     for file in "${test_files[@]}"; do

@@ -7,9 +7,9 @@ set -e
 
 # Configuration
 CHOREO_BIN="./choreo"
-BENCHMARK_DIR="benchmark"
-RESULTS_DIR="benchmark/scripts/results"
-TEMP_DIR="benchmark/scripts/temp"
+BENCHMARK_DIR="benchmark/cmp-perf"
+RESULTS_DIR="benchmark/cmp-perf/scripts/results"
+TEMP_DIR="benchmark/cmp-perf/scripts/temp"
 
 # Statistical Configuration
 # SAMPLES: Number of independent benchmark runs per configuration (for statistical confidence)
@@ -40,18 +40,14 @@ print_colored() {
 measure_compilation_time() {
     local source_file=$1
     local output_binary=$2
-    local env_vars=$3
+    local extra_flags=$3
     
     local total_time=0
     local times=()
     
     for i in $(seq 1 $MEASURES); do
         local start_time=$(date +%s%N)
-        if [ -n "$env_vars" ]; then
-            env $env_vars $CHOREO_BIN "$source_file" -o "$output_binary" >/dev/null 2>&1
-        else
-            $CHOREO_BIN "$source_file" -o "$output_binary" >/dev/null 2>&1
-        fi
+        $CHOREO_BIN $extra_flags "$source_file" -o "$output_binary" >/dev/null 2>&1
         local end_time=$(date +%s%N)
         local duration=$(( (end_time - start_time) / 1000000 )) # Convert to milliseconds
         times+=($duration)
@@ -125,7 +121,7 @@ process_benchmark_file() {
     
     # Compile in static mode
     local static_binary="$TEMP_DIR/${filename}_static"
-    local static_comp_result=$(measure_compilation_time "$file_path" "$static_binary" "__STATIC_SHAPE__=1")
+    local static_comp_result=$(measure_compilation_time "$file_path" "$static_binary" "-D__STATIC_SHAPE__=1")
     local static_comp_time=$(echo $static_comp_result | cut -d' ' -f1)
     local static_comp_std=$(echo $static_comp_result | cut -d' ' -f2)
     
@@ -136,7 +132,7 @@ process_benchmark_file() {
     
     # Compile in dynamic mode
     local dynamic_binary="$TEMP_DIR/${filename}_dynamic"
-    local dynamic_comp_result=$(measure_compilation_time "$file_path" "$dynamic_binary" "")
+    local dynamic_comp_result=$(measure_compilation_time "$file_path" "$dynamic_binary")
     local dynamic_comp_time=$(echo $dynamic_comp_result | cut -d' ' -f1)
     local dynamic_comp_std=$(echo $dynamic_comp_result | cut -d' ' -f2)
     
@@ -193,9 +189,9 @@ main() {
     
     # Test with a few specific files
     local test_files=(
-        "benchmark/reduce_mean/10_dynamic_32xSx768_32x768.co"
-        "benchmark/elemwise_add/11_dynamic_32xSx768_32xSx768_32xSx768.co"
-        "benchmark/matmul/11_dynamic_32xSx768_768x768_32xSx768.co"
+        "benchmark/cmp-perf/reduce_mean/10_dynamic_32xSx768_32x768.co"
+        "benchmark/cmp-perf/elemwise_add/11_dynamic_32xSx768_32xSx768_32xSx768.co"
+        "benchmark/cmp-perf/matmul/11_dynamic_32xSx768_768x768_32xSx768.co"
     )
     
     for file in "${test_files[@]}"; do
