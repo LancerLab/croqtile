@@ -251,10 +251,10 @@ public:
       PushNodeIndex(0);
     } else if (isa<AST::DMA>(&n) || isa<AST::NamedVariableDecl>(&n) ||
                isa<AST::Assignment>(&n) || isa<AST::Return>(&n) ||
-               isa<AST::ForeachBlock>(&n) || isa<AST::ChunkAt>(&n)) {
+               isa<AST::ForeachBlock>(&n) || isa<AST::ChunkAt>(&n) ||
+               isa<AST::MMA>(&n)) {
       auto idx = multi_nodes.top()->GetIndex(&n);
-      assert(idx != -1 && "unexpected node index.");
-      SetNodeIndex(idx);
+      if (idx != -1) SetNodeIndex(idx);
     }
     return true;
   }
