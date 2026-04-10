@@ -960,8 +960,10 @@ std::vector<std::string> CollectCokLines(const std::string& filepath) {
     }
     if (in_cok) {
       for (char c : line) {
-        if (c == '{') depth++;
-        else if (c == '}') depth--;
+        if (c == '{')
+          depth++;
+        else if (c == '}')
+          depth--;
       }
       if (depth <= 0) {
         in_cok = false;
@@ -993,8 +995,7 @@ bool Preprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
   std::vector<std::string> all_cok;
 
   auto input_file = OptionRegistry::GetInstance().GetInputFileName();
-  auto input_dir =
-      GetAbsPath(std::filesystem::current_path(), input_file);
+  auto input_dir = GetAbsPath(std::filesystem::current_path(), input_file);
 
   std::regex inc_re("#include\\s+\"(.*)\"");
   for (auto& inc_line : include_lines) {

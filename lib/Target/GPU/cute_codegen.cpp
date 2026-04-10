@@ -4714,8 +4714,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(t_sym);
       auto f_sty = GetSpannedType(ty);
       auto accum_type = ssmi.ty;
-      std::string buf_expr =
-          isa<FutureType>(ty) ? t_sym + ".data()" : t_sym;
+      std::string buf_expr = isa<FutureType>(ty) ? t_sym + ".data()" : t_sym;
       if (ca->indices != nullptr) {
         if (auto array_ty = dyn_cast<ArrayType>(ty);
             array_ty && CCtx().MemReuse()) {
@@ -4726,9 +4725,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             if (array_idx.empty())
               array_idx = ExprSTR(subscriptions[i], IsHost());
             else
-              array_idx = "(" + array_idx + ")*" +
-                          ValueSTR(array_sizes[i]) + "+" +
-                          ExprSTR(subscriptions[i], IsHost());
+              array_idx = "(" + array_idx + ")*" + ValueSTR(array_sizes[i]) +
+                          "+" + ExprSTR(subscriptions[i], IsHost());
           }
           std::string elem_count =
               ValueSTR(f_sty->GetShape().ElementCountValue());
@@ -4739,10 +4737,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
       }
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(t_sym, ".data()"), buf_expr,
-          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(),
-          false, ValueSTR(GenOffset(ca)),
-          ValueSTR(GenStrides(ca), false, true));
+          RemoveSuffix(t_sym, ".data()"), buf_expr, f_sty->GetStorage(),
+          f_sty->ElementType(), ca->GetBlockShape(), false,
+          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       std::string DIM_N_STR = STR(ssmi.shape.at(1));
       std::string CUTE_WGMMA_ATOM =
@@ -5004,8 +5001,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto f_sym = ca->data->name;
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
-      std::string buf_expr =
-          isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
+      std::string buf_expr = isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
       if (ca->indices != nullptr) {
         if (auto array_ty = dyn_cast<ArrayType>(ty);
             array_ty && CCtx().MemReuse()) {
@@ -5016,9 +5012,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             if (array_idx.empty())
               array_idx = ExprSTR(subscriptions[i], IsHost());
             else
-              array_idx = "(" + array_idx + ")*" +
-                          ValueSTR(array_sizes[i]) + "+" +
-                          ExprSTR(subscriptions[i], IsHost());
+              array_idx = "(" + array_idx + ")*" + ValueSTR(array_sizes[i]) +
+                          "+" + ExprSTR(subscriptions[i], IsHost());
           }
           std::string elem_count =
               ValueSTR(f_sty->GetShape().ElementCountValue());
@@ -5029,10 +5024,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
       }
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_sym, ".data()"), buf_expr,
-          f_sty->GetStorage(), f_sty->ElementType(), ca->GetBlockShape(),
-          false, ValueSTR(GenOffset(ca)),
-          ValueSTR(GenStrides(ca), false, true));
+          RemoveSuffix(f_sym, ".data()"), buf_expr, f_sty->GetStorage(),
+          f_sty->ElementType(), ca->GetBlockShape(), false,
+          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
@@ -5209,8 +5203,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
       auto fca_sty = GetSpannedType(NodeType(*ca));
-      std::string buf_expr =
-          isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
+      std::string buf_expr = isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
       if (ca->indices != nullptr) {
         if (auto array_ty = dyn_cast<ArrayType>(ty);
             array_ty && CCtx().MemReuse()) {
@@ -5221,9 +5214,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             if (array_idx.empty())
               array_idx = ExprSTR(subscriptions[i], IsHost());
             else
-              array_idx = "(" + array_idx + ")*" +
-                          ValueSTR(array_sizes[i]) + "+" +
-                          ExprSTR(subscriptions[i], IsHost());
+              array_idx = "(" + array_idx + ")*" + ValueSTR(array_sizes[i]) +
+                          "+" + ExprSTR(subscriptions[i], IsHost());
           }
           std::string elem_count =
               ValueSTR(f_sty->GetShape().ElementCountValue());
@@ -6851,7 +6843,8 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
   // Cache key includes arch, content fingerprint, and CUDA toolkit version.
   // This ensures different choreo builds, CUDA versions, or architectures
   // never share a precompiled object.
-  os << "CUDA_VER=$(${NVCC} --version | grep -oP 'release \\K[0-9]+\\.[0-9]+')\n";
+  os << "CUDA_VER=$(${NVCC} --version | grep -oP 'release "
+        "\\K[0-9]+\\.[0-9]+')\n";
   os << "PRECOMP_CACHED=${CHOREO_CACHE_DIR}/"
         "choreo_precompiled_${nv_arch}_cuda${CUDA_VER}_"
      << fp_hex << ".o\n\n";
@@ -7039,17 +7032,16 @@ show_usage() {
     os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)" << "\n";
     os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << kernel_obj
        << "\n";
-    os << "  ${NVCC} ${CFLAGS} " << kernel_obj
-       << " ${PRECOMP_CACHED} -o " << exe_file << "\n";
+    os << "  ${NVCC} ${CFLAGS} " << kernel_obj << " ${PRECOMP_CACHED} -o "
+       << exe_file << "\n";
     os << "  " << exe_file << "\n";
     os << R"(elif [ "$1" == "--compile-module" ]; then)" << "\n";
-    os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << exe_file
-       << "\n";
+    os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << exe_file << "\n";
     os << R"(elif [ "$1" == "--compile-link" ]; then)" << "\n";
     os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << kernel_obj
        << "\n";
-    os << "  ${NVCC} ${CFLAGS} " << kernel_obj
-       << " ${PRECOMP_CACHED} -o " << exe_file << "\n";
+    os << "  ${NVCC} ${CFLAGS} " << kernel_obj << " ${PRECOMP_CACHED} -o "
+       << exe_file << "\n";
     os << R"(elif [ "$1" == "--lib" ]; then)" << "\n";
     os << "  ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file << " -o "
        << exe_file << "\n";
@@ -7067,8 +7059,7 @@ show_usage() {
     if (verbose)
       os << "\n  echo ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
          << "\n";
-    os << "\n  ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
-       << "\n";
+    os << "\n  ${NVCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
     os << R"(elif [ "$1" == "--compile-link" ]; then)";
     if (verbose)
       os << "\n  echo ${NVCC} ${CFLAGS} " << cc_file << " -o " << exe_file
@@ -7338,15 +7329,12 @@ const ValueItem CuteCodeGen::TileAddr(const ptr<AST::ChunkAt>& ca, bool is_host,
         if (array_idx.empty())
           array_idx = ExprSTR(subscriptions[i], is_host);
         else
-          array_idx = "(" + array_idx + ")*" +
-                      ValueSTR(array_sizes[i]) + "+" +
+          array_idx = "(" + array_idx + ")*" + ValueSTR(array_sizes[i]) + "+" +
                       ExprSTR(subscriptions[i], is_host);
       }
       auto f_sty = GetSpannedType(sym_ty);
-      std::string elem_count =
-          ValueSTR(f_sty->GetShape().ElementCountValue());
-      offset = offset +
-               sbe::sym("(" + array_idx + ")*(" + elem_count + ")");
+      std::string elem_count = ValueSTR(f_sty->GetShape().ElementCountValue());
+      offset = offset + sbe::sym("(" + array_idx + ")*(" + elem_count + ")");
     }
   }
 

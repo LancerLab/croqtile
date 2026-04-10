@@ -1274,8 +1274,7 @@ bool ShapeInference::Visit(AST::MMA& n) {
     }
     cur_vn = GetOrGenValNum(asig);
     auto mdsym = SSTab().InScopeName(op0_sym) + ".span";
-    if (!vn.HasValidValueNumberOfSymbol(mdsym))
-      SymbolAliasNum(mdsym, cur_vn);
+    if (!vn.HasValidValueNumberOfSymbol(mdsym)) SymbolAliasNum(mdsym, cur_vn);
     auto mty = MakeMDSpanType(GenShape(cur_vn));
     auto c_sty = GetSpannedType(GetSymbolType(op0_sym));
     auto c_elem = (c_sty && c_sty->ElementType() != BaseType::UNKSCALAR)

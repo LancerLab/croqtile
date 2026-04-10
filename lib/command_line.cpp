@@ -129,8 +129,7 @@ constexpr bool kFastCompileDefault = true;
 constexpr bool kFastCompileDefault = false;
 #endif
 Option<bool>
-    fast_compile(OptionKind::User, "--fast-compile", "-fc",
-                 kFastCompileDefault,
+    fast_compile(OptionKind::User, "--fast-compile", "-fc", kFastCompileDefault,
                  "Use separate compilation with a cached precompiled CuTe "
                  "runtime for faster nvcc compilation. The precompiled "
                  "runtime is built automatically on first use and cached in "

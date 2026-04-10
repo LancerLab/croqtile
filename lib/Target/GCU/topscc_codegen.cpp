@@ -518,8 +518,7 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
     if (offsets.empty()) offsets.resize(coords.size());
 
     for (size_t i = 0; i < coords.size(); ++i) {
-      if (sbe::ceq(coords[i], sbe::sym("::__choreo_no_tiling__")))
-        continue;
+      if (sbe::ceq(coords[i], sbe::sym("::__choreo_no_tiling__"))) continue;
       if (scale_by_shape)
         offsets[i] += coords[i] * shape.ValueAt(i);
       else
