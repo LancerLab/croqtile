@@ -2752,4 +2752,12 @@ __device__ inline void rotate(Futures&... f) {
 
 } // end namespace choreo
 
+namespace croq = choreo;
+
+inline void __co_any__ croq_assert(bool p, const char* msg,
+                                   const char* file = __FILE__,
+                                   int line = __LINE__) {
+  choreo::choreo_assert(p, msg, file, line);
+}
+
 #endif // __CHOREO_H__

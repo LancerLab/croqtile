@@ -1,6 +1,6 @@
-# Choreo C++ Coding Style Guide
+# Croqtile C++ Coding Style Guide
 
-This document defines the coding conventions for the Choreo compiler and
+This document defines the coding conventions for the Croqtile compiler and
 runtime. All contributors must follow these rules. Run `make format` before
 every commit.
 
@@ -81,7 +81,7 @@ auto GetAlignedSize() const { return align_up(size_, alignment_); }
 | Directory | Purpose |
 |-----------|---------|
 | `lib/` | Compiler source code (passes, AST, codegen) |
-| `lib/Target/GPU/` | GPU (CUDA/CuTe) backend |
+| `lib/Target/` | Target-specific backends |
 | `runtime/` | Runtime headers shipped with compiled programs |
 | `tools/` | Main binary entry points (`choreo`, `copp`) |
 | `tests/` | Test files (`.co` files with `RUN:` directives) |
@@ -146,7 +146,7 @@ class MultiNodes {
 
 ### Visitor pattern
 
-Choreo's AST uses the visitor pattern extensively:
+Croqtile's AST uses the visitor pattern extensively:
 
 ```cpp
 void MultiNodes::accept(Choreo::Visitor& v) {

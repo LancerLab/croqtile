@@ -1,91 +1,134 @@
-## Overview
-Choreo *tileflow program* describes how to move data around. Therefore, declaring or defining the data or buffer are fundamental. In this section, you will learn related syntax.
+# Spanned Data and Memory
 
-## *Spanned*: Data and Buffers
-The primary focus of a Tileflow program is to manipulate large datasets by moving them around. In some terminology, the input and output of a Choreo function are classified as "input data" and "output data," respectively. Meanwhile, any other storage is referred to as "buffers." This conceptually distinguishes between "external" and "internal" memory from a function's perspective. However, both "data" and "buffer" refer to storage positions. In Choreo, both are typed as **spanned**, reflecting that they are data/buffers associated with an
-*mdspan*-represented shape. And in the following context, we call it *spanned data*, or simply *spanned*.
+## What is Spanned Data?
 
-## Defining a *Spanned Data*
-Defining a *spanned data* requires both the element type and its shape. For example,
+In Croqtile, the primary objects of data movement are **spanned data** -- multi-dimensional arrays associated with a shape (mdspan) and element type. Both input/output parameters and internal buffers are spanned data. The term "spanned" reflects that every piece of data carries its shape information.
 
+## Declaring Spanned Data
+
+A declaration requires a fundamental type and a shape:
+
+```choreo
+f32 [32, 16] data;              // 32x16 buffer of f32
 ```
-f32 [32, 16] data;
-```
 
-This defines a buffer with a shape of `[32, 16]`, where the element type is `f32`, which is the *IEEE-754* single-precision float. It is also possible to use a named `mdspan` to define the buffer:
+The shape can come from a named mdspan or be derived:
 
-```
+```choreo
 shape : [72, 14];
-s32 [shape] data0;              // using the named mdspan `shape`
-u32 [shape(0), shape(1)] data1; // same shape as the above
-u16 [shape + 6] data2;          // shaped as [78, 20]
-s16 [shape, 8] data3;           // shaped as [72, 14, 8]
+s32 [shape] data0;              // [72, 14]
+u32 [shape(0), shape(1)] data1; // same shape
+u16 [shape + 6] data2;          // [78, 20]
+s16 [shape, 8] data3;           // [72, 14, 8]
 ```
 
-Here we used the named *mdspan* `shape` to define a 2D buffer named `data0`, where the elements are 32-bit integers. Note that the named *mdspan* `shape` is placed inside `[]`. Additionally, it is allowed to use *element-of*, arithmetics, or concatenation on *mdspan*s to specify the buffer's shape.
+## Fundamental Types
 
-In Choreo terminology, the element type is referred to as the **fundamental type**. Choreo supports multiple fundamental types, including:
+The element type of spanned data is called the **fundamental type**:
 
-- **Unsigned Integers**: `u8`, `u16`, `u32`
-- **Signed Integers**: `s8`, `s16`, `s32`
-- **Floating Points**: `f16`, `bf16`, `f32`
+| Category | Types |
+|----------|-------|
+| Unsigned integers | `u8`, `u16`, `u32` |
+| Signed integers | `s8`, `s16`, `s32`, `s64` |
+| Floating-point | `f16`, `bf16`, `f32`, `f64` |
+| FP8 variants | `f8_e4m3`, `f8_e5m2` |
 
-The prefixes `u` and `s` stand for "unsigned" and "signed", respectively, while the number suffix indicates the bit width of the type. `f16` refers to the *IEEE-754* standard *half-float*, and `bf16` refers to the 16-bit *binary float*, commonly used in machine learning scenario.
-
-Note `s32` is different from `int`. Although they occupy the same amount of storage, in Choreo, `s32` can not be used alone to define programming entities. For example:
+Fundamental types can declare scalar variables (mutable by default) or be paired with a shape to form spanned data. They cannot carry a storage qualifier.
 
 ```choreo
-s32 a;  // error: the fundamental type can not be used for variable definition alone
+s32 a;          // OK: scalar variable (mutable, equivalent to `mutable int a`)
+s32 [10] buf;   // OK: spanned data with shape [10]
+shared s32 a;   // error: storage qualifier not allowed on scalar
 ```
-This results in a compile-time failure. Consequently, `s32` cannot be used for program control like `int`, and type conversion between them is not possible.
 
-## Storage Specifier
-In practical code, some buffer declarations must specify a **storage specifier**, like so:
+Note: `s32` (fundamental type for data) and `int` (scalar type for control) are distinct and non-interconvertible.
+
+## Storage Qualifiers
+
+Spanned data can be placed in different memory hierarchy levels using **storage qualifiers**:
+
+| Qualifier | Description | Typical Use |
+|-----------|-------------|-------------|
+| (none) / `global` | Host or device global memory, largest capacity, highest latency | Large inputs/outputs |
+| `shared` | Shared memory within a compute unit (e.g., GPU block) | Intermediate tiles, reused across threads |
+| `local` | Thread-private memory, smallest, fastest | Per-thread scratch buffers |
 
 ```choreo
-global f32 [32, 7, 2] a;
-shared u8 [512, 144] b;
-local u8 [72, 1024] c;
+global f32 [100, 200] matrix;    // explicit global
+shared f32 [10, 10] tile_data;   // shared within a block (typical GPU tile)
+shared f16 [5] stage;            // another shared buffer (common for DMA staging)
+local f16 [4] thread_scratch;    // per-thread scratch (still supported)
+f32 [100, 100] d0;               // implicit global (default)
 ```
 
-Since Choreo handles storage in a heterogenous context, a buffer definition without a storage specifier defaults to the storage type of the host program, i.e., CPU memory. Other storage specifiers are defined by the target. For example, *Cuda/Cute* (for GPU hardware) supports:
+### Platform-Specific Semantics
 
-- *global*: Refers to the device's global storage.
-- *shared*: Refers to the device block's shared storage
-- *local*: Refers to the thread-private storage.
+Storage qualifier semantics depend on the target platform. For CUDA/CuTe:
 
-Other targets may have different definitions. Furthermore, buffers with different storage types have limitations in their declarations. We will explore this in later chapters.
+- `global` maps to device global memory.
+- `shared` maps to `__shared__` memory (per-block).
+- `local` maps to thread-private registers or local memory.
+
+Other targets may define these differently. The Croqtile compiler enforces placement rules: `shared` and `local` buffers can only be declared inside `parallel-by` blocks (device code), while `global` buffers can be declared anywhere.
 
 ## Initialization
-It is possible to initialize a buffer at the declaration site. For example:
+
+Buffers can be initialized at declaration with a uniform value:
 
 ```choreo
-local s32 [17, 6] b1 {0};       // elements are initialized to 0
-shared f32 [128, 16] b2 {3.14f}; // elements are initialized to 3.14f
+shared s32 [17, 6] b1 {0};         // all elements 0
+shared f32 [128, 16] b2 {3.14f};  // all elements 3.14
 ```
 
-The syntax for the *initialization expression* of a *spanned data* is straightforward: it encloses an initial value inside brackets following the variable name. However, its functionality is limited - it always set all elements to a fixed value.
+The `{value}` syntax after the variable name sets every element to the given constant.
 
-## Declaring the Parameters and Return Values
-A *spanned data* is passed between host and tileflow programs. Therefore, a choreo function can have *spanned data*s as its parameters. The following code showcases an example:
+## Parameters and Return Values
+
+Spanned data is how the host program communicates with tileflow functions:
 
 ```choreo
-__co__ f16 [7, 8] foo(f32 [16, 17, 5] input) {...}
+__co__ f16 [7, 8] foo(f32 [16, 17, 5] input) { ... }
 ```
 
-The syntax is similar to variable definitions, except that operations on an existing *mdspan* is not possible. Additionally, no storage specifier is allowed or initialization is allowed.
+Parameters cannot have storage qualifiers or initializers. The return type specifies the shape and element type of the output.
 
-One useful built-in member function for the *spanned* parameters is `.span`, which provides the associated *mdspan* of the *spanned data*. The following code demonstrates how to use it for a buffer declaration:
+### The `.span` Member
+
+The `.span` member returns the mdspan of a spanned parameter, enabling shape-relative buffer declarations:
 
 ```choreo
 __co__ auto foo(f32 [16, 17, 5] input) {
-  f32 [input.span / {4, 1, 5} ] buffer;  // declare a buffer with tiled shape
-  // ...
+  f32 [input.span] same_shape;
+  f32 [input.span / {4, 1, 5}] tiled;
 }
 ```
 
-## Buffer Lifetime Management
-The lifetime of storage allocated inside a *choreo function* is managed by the Choreo compiler for efficient use. The compiler attempts to reuse buffers as much as possible if their lifetimes do not overlap. Therefore users of Choreo are not necessary to do buffer management.
+### Host-Side API
 
-## Quick Summary
-This section covered defining and managing data/buffers in Choreo tileflow programs, including declaration syntax, initialization, storage specifiers, and efficient buffer lifetime management by the compiler. This enables us to step further to the next essential topic: the dynamic shape support.
+From C++ host code, raw pointers are wrapped with shape information using the Croqtile runtime:
+
+```cpp
+#include "choreo.h"
+auto view = choreo::make_spanview<3>(ptr, {6, 17, 128});
+auto result = choreo_function(view);  // returns spanned_data (owning)
+```
+
+- `choreo::spanned_view` -- non-owning reference for passing input data.
+- `choreo::spanned_data` -- owning buffer returned from Croqtile functions.
+
+Both support C-style array indexing and `.shape()` for querying dimensions.
+
+## Buffer Lifetime Management
+
+The Croqtile compiler manages buffer lifetimes automatically. It reuses storage when lifetimes do not overlap, minimizing memory footprint. Programmers do not need to manually free buffers.
+
+## The `.data` Accessor
+
+Futures from DMA operations provide `.data` to access the destination buffer as spanned data:
+
+```choreo
+f = dma.copy input.chunkat(p) => shared;
+call kernel(f.data, |f.span|);
+```
+
+See [DMA Basics](dma-basics.md) for the full future interface.

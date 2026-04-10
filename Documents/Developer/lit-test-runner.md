@@ -1,6 +1,6 @@
-# Choreo Test Runner (`lit.sh`) -- User and Developer Guide
+# Croqtile Test Runner (`lit.sh`) -- User and Developer Guide
 
-`tests/lit.sh` is Choreo's lightweight test runner, named and designed after LLVM's internal `lit` (LLVM Integrated Tester).  Like LLVM lit, it discovers test files, reads embedded `RUN:` directives, substitutes `%`-tokens with real paths and flags, then executes the resulting shell commands.  The output follows the same style: each test is reported as `PASS`, `FAIL`, `XFAIL` (expected failure), or `SKIP`, with a timing column, finishing with a summary line.  Where a `RUN:` command pipes through `FileCheck`, the runner emits the diff on mismatch exactly as LLVM lit does.  The key restriction compared to full LLVM lit is that `lit.sh` is a self-contained Bash script--no Python runtime required--and its hook system is tailored to Choreo's multi-target requirements.
+`tests/lit.sh` is Croqtile's lightweight test runner, named and designed after LLVM's internal `lit` (LLVM Integrated Tester).  Like LLVM lit, it discovers test files, reads embedded `RUN:` directives, substitutes `%`-tokens with real paths and flags, then executes the resulting shell commands.  The output follows the same style: each test is reported as `PASS`, `FAIL`, `XFAIL` (expected failure), or `SKIP`, with a timing column, finishing with a summary line.  Where a `RUN:` command pipes through `FileCheck`, the runner emits the diff on mismatch exactly as LLVM lit does.  The key restriction compared to full LLVM lit is that `lit.sh` is a self-contained Bash script--no Python runtime required--and its hook system is tailored to Croqtile's multi-target requirements.
 
 ---
 
@@ -113,7 +113,7 @@ Each test directory may contain a `lit.cfg` bash file sourced by `lit.sh` when p
 
 ### The `# co-lit` marker
 
-Every `lit.cfg` **must** start with a `# co-lit` first line.  `lit.sh` uses this marker to distinguish Choreo configs from configs belonging to other tools (e.g. LLVM `lit.cfg` files are Python, not bash).  A file without the marker is silently skipped.
+Every `lit.cfg` **must** start with a `# co-lit` first line.  `lit.sh` uses this marker to distinguish Croqtile configs from configs belonging to other tools (e.g. LLVM `lit.cfg` files are Python, not bash).  A file without the marker is silently skipped.
 
 ```bash
 # co-lit
@@ -302,7 +302,7 @@ other/deep/nested/file.co
   source order:  other/deep/lit.cfg
 ```
 
-The walk-up uses the `# co-lit` marker to skip non-Choreo configs, so there are no hardcoded directory names -- any directory tree works.
+The walk-up uses the `# co-lit` marker to skip non-Croqtile configs, so there are no hardcoded directory names -- any directory tree works.
 
 When a file is processed via `include_dir` (cfg override), the walk starts from the **declaring** directory, not the file's own directory.  This is what gives files in `tests/check/` access to the hooks defined in the declaring target's `lit.cfg`.
 
