@@ -798,9 +798,8 @@ __device__ static inline void copy_if_g2s(const SrcTensor& src, DstTensor& dst,
                                           Pred pred) {
   if constexpr (CopyBits == 128) {
     auto tiled_copy = cute::make_tiled_copy(
-        cute::Copy_Atom<
-            cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>,
-            Element>{},
+        cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>,
+                        Element>{},
         cute::make_layout(
             cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
             cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
@@ -3200,8 +3199,8 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
 // that would increase register pressure in the calling kernel.
 template <typename AccT, typename ScaleT, int N>
 __device__ __forceinline__ void
-scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
-                  int scale_a_ld, int valid_rows, ScaleT scale_b) {
+scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
+                  int valid_rows, ScaleT scale_b) {
   static_assert(std::is_same_v<ScaleT, f32>,
                 "scale_accumulator: ScaleT must be f32");
   static_assert(std::is_same_v<AccT, f16> || std::is_same_v<AccT, float>,
@@ -3216,13 +3215,11 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
 
   int row0_valid = row0 < valid_rows;
   int row1_valid = row1 < valid_rows;
-  auto* sa_ptr0 =
-      scale_a_ptr + (row0_valid ? row0 : 0) * scale_a_ld;
-  auto* sa_ptr1 =
-      scale_a_ptr + (row1_valid ? row1 : 0) * scale_a_ld;
+  auto* sa_ptr0 = scale_a_ptr + (row0_valid ? row0 : 0) * scale_a_ld;
+  auto* sa_ptr1 = scale_a_ptr + (row1_valid ? row1 : 0) * scale_a_ld;
 
   float sa0 = 0.0f, sa1 = 0.0f;
-#if defined(__CUDA_ARCH__)
+  #if defined(__CUDA_ARCH__)
   if (__isShared(scale_a_ptr)) {
     sa0 = *sa_ptr0;
     sa1 = *sa_ptr1;
@@ -3233,15 +3230,15 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
     sa0 = *sa_ptr0;
     sa1 = *sa_ptr1;
   }
-#else
+  #else
   sa0 = *sa_ptr0;
   sa1 = *sa_ptr1;
-#endif
+  #endif
   sa0 *= scale_b * static_cast<float>(row0_valid);
   sa1 *= scale_b * static_cast<float>(row1_valid);
 
   if constexpr (std::is_same_v<AccT, f16>) {
-#if defined(__USE_CUDA_TYPE__)
+  #if defined(__USE_CUDA_TYPE__)
     auto* d2 = reinterpret_cast<__half2*>(d);
     auto const* scale_d2 = reinterpret_cast<__half2 const*>(scale_d);
     __half2 sa0_h2 = __float2half2_rn(sa0);
@@ -3252,7 +3249,7 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
       d2[base2 + 0] = __hfma2(scale_d2[base2 + 0], sa0_h2, d2[base2 + 0]);
       d2[base2 + 1] = __hfma2(scale_d2[base2 + 1], sa1_h2, d2[base2 + 1]);
     }
-#else
+  #else
     #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
@@ -3261,9 +3258,9 @@ scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
       d[base + 2] += utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1);
       d[base + 3] += utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1);
     }
-#endif
+  #endif
   } else if constexpr (std::is_same_v<AccT, float>) {
-    #pragma unroll
+  #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
       d[base + 0] = fmaf(scale_d[base + 0], sa0, d[base + 0]);

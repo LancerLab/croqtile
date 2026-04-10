@@ -3669,11 +3669,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         // Check 128-bit alignment for the async copy atom. Both
         // the global stride AND the chunk column offset must be
         // 16-byte aligned (otherwise cp.async 128b will fault).
-        const auto& tc_global_stride =
-            use_tail_copy_g2s ? f_stride : t_stride;
-        BaseType tc_elem_type = use_tail_copy_g2s
-                                    ? t_sty->ElementType()
-                                    : f_sty->ElementType();
+        const auto& tc_global_stride = use_tail_copy_g2s ? f_stride : t_stride;
+        BaseType tc_elem_type =
+            use_tail_copy_g2s ? t_sty->ElementType() : f_sty->ElementType();
         size_t tc_elem_byte = SizeOf(tc_elem_type);
         // Chunk column dim for the global side.
         auto tc_chunk_col = use_tail_copy_g2s
@@ -3685,10 +3683,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           if (VIIsInt(tc_global_stride[0]) && VIIsInt(tc_chunk_col)) {
             int64_t sb = *VIInt(tc_global_stride[0]) *
                          static_cast<int64_t>(tc_elem_byte);
-            int64_t cb = *VIInt(tc_chunk_col) *
-                         static_cast<int64_t>(tc_elem_byte);
-            tc_stride_static_aligned =
-                (sb % 16 == 0) && (cb % 16 == 0);
+            int64_t cb =
+                *VIInt(tc_chunk_col) * static_cast<int64_t>(tc_elem_byte);
+            tc_stride_static_aligned = (sb % 16 == 0) && (cb % 16 == 0);
           } else {
             tc_need_runtime_check = true;
           }
@@ -3708,26 +3705,22 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         };
         auto EmitCopyIfG2S32 = [&]() {
           size_t epc32 = 4 / tc_elem_byte;
-          size_t tile_n = entry.thr_layout.second *
-                          entry.val_layout.second;
-          size_t thr_count = entry.thr_layout.first *
-                             entry.thr_layout.second;
+          size_t tile_n = entry.thr_layout.second * entry.val_layout.second;
+          size_t thr_count = entry.thr_layout.first * entry.thr_layout.second;
           size_t tpr32 = tile_n / epc32;
           size_t tr32 = thr_count / tpr32;
           IndStream() << "choreo::copy_if_g2s<"
                       << (use_wgmma_layout_t ? "true" : "false") << ", "
-                      << NameBaseType(tc_elem_type) << ", "
-                      << tr32 << ", " << tpr32 << ", "
-                      << 1 << ", " << epc32 << ", 32>(" << f_mds_name
-                      << ", " << t_mds_name
+                      << NameBaseType(tc_elem_type) << ", " << tr32 << ", "
+                      << tpr32 << ", " << 1 << ", " << epc32 << ", 32>("
+                      << f_mds_name << ", " << t_mds_name
                       << ", [&](const auto& __coord) { return "
                       << "cute::elem_less(__coord, cute::make_shape("
                       << ShapeSTR(f_ca_shape, true) << ")); });\n";
         };
         auto EmitCopyIfS2G = [&]() {
-          IndStream() << "choreo::copy_if_s2g<"
-                      << NameBaseType(tc_elem_type) << ", "
-                      << entry.thr_layout.first << ", "
+          IndStream() << "choreo::copy_if_s2g<" << NameBaseType(tc_elem_type)
+                      << ", " << entry.thr_layout.first << ", "
                       << entry.thr_layout.second << ", "
                       << entry.val_layout.first << ", "
                       << entry.val_layout.second << ">(" << f_mds_name << ", "
@@ -3740,11 +3733,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           if (tc_stride_static_aligned) {
             EmitCopyIfG2S128();
           } else if (tc_need_runtime_check) {
-            IndStream() << "if (("
-                        << ValueSTR(tc_global_stride[0]) << " * "
+            IndStream() << "if ((" << ValueSTR(tc_global_stride[0]) << " * "
                         << tc_elem_byte << ") % 16 == 0 && ("
-                        << ValueSTR(tc_chunk_col) << " * "
-                        << tc_elem_byte << ") % 16 == 0) {\n";
+                        << ValueSTR(tc_chunk_col) << " * " << tc_elem_byte
+                        << ") % 16 == 0) {\n";
             IncrIndent();
             EmitCopyIfG2S128();
             DecrIndent();
@@ -3825,14 +3817,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         } else {
           // Try copy_if_g2s/copy_if_s2g as a general fallback before
           // resorting to the low-performance opt_copy.
-          bool is_dma_g2s =
-              (f_sty->GetStorage() == Storage::GLOBAL ||
-               f_sty->GetStorage() == Storage::DEFAULT) &&
-              t_sty->GetStorage() == Storage::SHARED;
-          bool is_dma_s2g =
-              f_sty->GetStorage() == Storage::SHARED &&
-              (t_sty->GetStorage() == Storage::GLOBAL ||
-               t_sty->GetStorage() == Storage::DEFAULT);
+          bool is_dma_g2s = (f_sty->GetStorage() == Storage::GLOBAL ||
+                             f_sty->GetStorage() == Storage::DEFAULT) &&
+                            t_sty->GetStorage() == Storage::SHARED;
+          bool is_dma_s2g = f_sty->GetStorage() == Storage::SHARED &&
+                            (t_sty->GetStorage() == Storage::GLOBAL ||
+                             t_sty->GetStorage() == Storage::DEFAULT);
 
           bool used_copy_if = false;
 
@@ -3842,16 +3832,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
             Shape box_shape;
             bool has_static_box = false;
 
-            Shape shared_block = is_dma_g2s ? t_ca->GetBlockShape()
-                                            : f_ca->GetBlockShape();
-            Shape other_block = is_dma_g2s ? f_ca->GetBlockShape()
-                                           : t_ca->GetBlockShape();
+            Shape shared_block =
+                is_dma_g2s ? t_ca->GetBlockShape() : f_ca->GetBlockShape();
+            Shape other_block =
+                is_dma_g2s ? f_ca->GetBlockShape() : t_ca->GetBlockShape();
 
             if (shared_block.Rank() == 2 && !shared_block.IsDynamic()) {
               box_shape = shared_block;
               has_static_box = true;
-            } else if (other_block.Rank() == 2 &&
-                       !other_block.IsDynamic()) {
+            } else if (other_block.Rank() == 2 && !other_block.IsDynamic()) {
               box_shape = other_block;
               has_static_box = true;
             }
@@ -3859,8 +3848,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
             if (has_static_box) {
               size_t box_m = *VIInt(box_shape.ValueAt(0));
               size_t box_n = *VIInt(box_shape.ValueAt(1));
-              BaseType elem_type = is_dma_g2s ? t_sty->ElementType()
-                                              : f_sty->ElementType();
+              BaseType elem_type =
+                  is_dma_g2s ? t_sty->ElementType() : f_sty->ElementType();
               size_t elem_byte = SizeOf(elem_type);
               constexpr size_t kBytesPerCopy = 16; // 128 bits
 
@@ -3868,44 +3857,38 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
               // <uint128_t> which requires 16-byte aligned source
               // addresses. Both the row stride AND the chunk column
               // offset must be 16-byte aligned.
-              const auto& global_stride =
-                  is_dma_g2s ? f_stride : t_stride;
+              const auto& global_stride = is_dma_g2s ? f_stride : t_stride;
               auto global_chunk_col = is_dma_g2s
-                  ? f_ca->GetBlockShape().ValueAt(1)
-                  : t_ca->GetBlockShape().ValueAt(1);
+                                          ? f_ca->GetBlockShape().ValueAt(1)
+                                          : t_ca->GetBlockShape().ValueAt(1);
               bool stride_static_128 = false;
               bool stride_need_rtcheck = false;
               if (global_stride.size() >= 1) {
-                if (VIIsInt(global_stride[0]) &&
-                    VIIsInt(global_chunk_col)) {
+                if (VIIsInt(global_stride[0]) && VIIsInt(global_chunk_col)) {
                   int64_t sb = *VIInt(global_stride[0]) *
                                static_cast<int64_t>(elem_byte);
                   int64_t cb = *VIInt(global_chunk_col) *
                                static_cast<int64_t>(elem_byte);
-                  stride_static_128 =
-                      (sb % 16 == 0) && (cb % 16 == 0);
+                  stride_static_128 = (sb % 16 == 0) && (cb % 16 == 0);
                 } else {
                   stride_need_rtcheck = true;
                 }
               }
 
-              const auto& lcs =
-                  cgi.GetFunctionLaunches(CurrentFunctionName());
-              bool have_launch =
-                  parallel_idx != -1 &&
-                  parallel_idx < static_cast<int>(lcs.size());
+              const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
+              bool have_launch = parallel_idx != -1 &&
+                                 parallel_idx < static_cast<int>(lcs.size());
 
               if (have_launch) {
                 const auto& lconfig = lcs[parallel_idx];
                 auto inner_thr = lconfig.thread_count.x *
                                  lconfig.thread_count.y *
                                  lconfig.thread_count.z;
-                auto group_cnt =
-                    lconfig.group_count.x * lconfig.group4_count.x *
-                    lconfig.group_count.y * lconfig.group_count.z;
+                auto group_cnt = lconfig.group_count.x *
+                                 lconfig.group4_count.x *
+                                 lconfig.group_count.y * lconfig.group_count.z;
                 auto thr_count_vi =
-                    (IsWarpSpecActive() &&
-                     bdim_level == ParallelLevel::GROUPx4)
+                    (IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4)
                         ? inner_thr
                         : inner_thr * group_cnt;
 
@@ -3944,32 +3927,26 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                   bool can_emit =
                       (stride_static_128 && has_128) ||
                       (stride_need_rtcheck && has_128 && has_32) ||
-                      (!stride_static_128 && !stride_need_rtcheck &&
-                       has_32);
+                      (!stride_static_128 && !stride_need_rtcheck && has_32);
 
                   if (can_emit) {
                     std::string src_name, dst_name;
-                    bool shapes_match =
-                        STR(f_ca->GetBlockShape()) ==
-                        STR(t_ca->GetBlockShape());
+                    bool shapes_match = STR(f_ca->GetBlockShape()) ==
+                                        STR(t_ca->GetBlockShape());
 
                     if (shapes_match && !f_mds_shape.IsDynamic()) {
                       src_name = f_mds_name;
                       dst_name = t_mds_name;
                     } else {
                       const auto f_box = GenTensorDecl(
-                          RemoveSuffix(f_buf_name, ".data()") +
-                              "_cif",
-                          f_buf_name, f_sty->GetStorage(),
-                          f_sty->ElementType(), box_shape, false,
-                          f_mds_offset,
+                          RemoveSuffix(f_buf_name, ".data()") + "_cif",
+                          f_buf_name, f_sty->GetStorage(), f_sty->ElementType(),
+                          box_shape, false, f_mds_offset,
                           ValueSTR(f_stride, false, true));
                       const auto t_box = GenTensorDecl(
-                          RemoveSuffix(t_buf_name, ".data()") +
-                              "_cif",
-                          t_buf_name, t_sty->GetStorage(),
-                          t_sty->ElementType(), box_shape, false,
-                          t_mds_offset,
+                          RemoveSuffix(t_buf_name, ".data()") + "_cif",
+                          t_buf_name, t_sty->GetStorage(), t_sty->ElementType(),
+                          box_shape, false, t_mds_offset,
                           ValueSTR(t_stride, false, true), {},
                           use_wgmma_layout_t, swizzle_mode);
                       ds << f_box.second;
@@ -3978,50 +3955,39 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                       dst_name = t_box.first;
                     }
 
-                    Shape pred_shape = is_dma_g2s
-                                           ? f_ca->GetBlockShape()
-                                           : t_ca->GetBlockShape();
+                    Shape pred_shape = is_dma_g2s ? f_ca->GetBlockShape()
+                                                  : t_ca->GetBlockShape();
                     std::string pred_str;
                     if (!pred_shape.IsDynamic() &&
                         STR(pred_shape) == STR(box_shape)) {
-                      pred_str =
-                          "[](const auto&) { return true; }";
+                      pred_str = "[](const auto&) { return true; }";
                     } else {
-                      pred_str =
-                          "[&](const auto& __coord) { return "
-                          "cute::elem_less(__coord, "
-                          "cute::make_shape(" +
-                          ShapeSTR(pred_shape, true) + ")); }";
+                      pred_str = "[&](const auto& __coord) { return "
+                                 "cute::elem_less(__coord, "
+                                 "cute::make_shape(" +
+                                 ShapeSTR(pred_shape, true) + ")); }";
                     }
 
-                    auto EmitG2S = [&](size_t tr, size_t tpr,
-                                       size_t epc, int bits) {
+                    auto EmitG2S = [&](size_t tr, size_t tpr, size_t epc,
+                                       int bits) {
                       IndStream()
                           << "choreo::copy_if_g2s<"
-                          << (use_wgmma_layout_t ? "true" : "false")
-                          << ", "
-                          << NameBaseType(t_sty->ElementType())
-                          << ", " << tr << ", " << tpr << ", " << 1
-                          << ", " << epc;
-                      if (bits != 128)
-                        IndStream() << ", " << bits;
-                      IndStream() << ">(" << src_name << ", "
-                                  << dst_name << ", " << pred_str
-                                  << ");\n";
+                          << (use_wgmma_layout_t ? "true" : "false") << ", "
+                          << NameBaseType(t_sty->ElementType()) << ", " << tr
+                          << ", " << tpr << ", " << 1 << ", " << epc;
+                      if (bits != 128) IndStream() << ", " << bits;
+                      IndStream() << ">(" << src_name << ", " << dst_name
+                                  << ", " << pred_str << ");\n";
                     };
 
                     if (is_dma_g2s) {
                       if (stride_static_128) {
                         EmitG2S(tr128, tpr128, epc128, 128);
                       } else if (stride_need_rtcheck) {
-                        IndStream()
-                            << "if (("
-                            << ValueSTR(global_stride[0]) << " * "
-                            << elem_byte
-                            << ") % 16 == 0 && ("
-                            << ValueSTR(global_chunk_col) << " * "
-                            << elem_byte
-                            << ") % 16 == 0) {\n";
+                        IndStream() << "if ((" << ValueSTR(global_stride[0])
+                                    << " * " << elem_byte << ") % 16 == 0 && ("
+                                    << ValueSTR(global_chunk_col) << " * "
+                                    << elem_byte << ") % 16 == 0) {\n";
                         IncrIndent();
                         EmitG2S(tr128, tpr128, epc128, 128);
                         DecrIndent();
@@ -4034,13 +4000,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                         EmitG2S(tr32, tpr32, epc32, 32);
                       }
                     } else {
-                      IndStream()
-                          << "choreo::copy_if_s2g<"
-                          << NameBaseType(f_sty->ElementType())
-                          << ", " << tr128 << ", " << tpr128 << ", "
-                          << 1 << ", " << epc128 << ">(" << src_name
-                          << ", " << dst_name << ", " << pred_str
-                          << ");\n";
+                      IndStream() << "choreo::copy_if_s2g<"
+                                  << NameBaseType(f_sty->ElementType()) << ", "
+                                  << tr128 << ", " << tpr128 << ", " << 1
+                                  << ", " << epc128 << ">(" << src_name << ", "
+                                  << dst_name << ", " << pred_str << ");\n";
                     }
                     used_copy_if = true;
                   }
@@ -4050,20 +4014,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           }
 
           if (!used_copy_if) {
-            bool both_dynamic =
-                (is_dma_g2s || is_dma_s2g) &&
-                f_ca->GetBlockShape().IsDynamic() &&
-                t_ca->GetBlockShape().IsDynamic();
+            bool both_dynamic = (is_dma_g2s || is_dma_s2g) &&
+                                f_ca->GetBlockShape().IsDynamic() &&
+                                t_ca->GetBlockShape().IsDynamic();
             if (both_dynamic) {
-              Warning(n.LOC(),
-                      "DMA: both source and destination have "
-                      "dynamic shapes; falling back to basic "
-                      "copy (performance loss expected).");
+              Warning(n.LOC(), "DMA: both source and destination have "
+                               "dynamic shapes; falling back to basic "
+                               "copy (performance loss expected).");
             }
-            Note(n.LOC(),
-                 "DMA is lowered to low-performance opt_copy API.");
-            IndStream() << "opt_copy(" << f_mds_name << ", "
-                        << t_mds_name << ");\n";
+            Note(n.LOC(), "DMA is lowered to low-performance opt_copy API.");
+            IndStream() << "opt_copy(" << f_mds_name << ", " << t_mds_name
+                        << ");\n";
           }
         }
       }
