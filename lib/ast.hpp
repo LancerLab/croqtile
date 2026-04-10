@@ -3038,12 +3038,10 @@ public:
     } break;
     case Store: {
       os << "MMA.STORE" << (StoreIsTranspose() ? ".TRANSP" : "")
-         << (StoreHasExplicitMask() ? ".MASK" : "") << " "
-         << PSTR(StoreFrom()) << ", " << PSTR(StoreTo());
-      if (StoreRowMask())
-        os << ", " << PSTR(StoreRowMask());
-      if (StoreColMask())
-        os << ", " << PSTR(StoreColMask());
+         << (StoreHasExplicitMask() ? ".MASK" : "") << " " << PSTR(StoreFrom())
+         << ", " << PSTR(StoreTo());
+      if (StoreRowMask()) os << ", " << PSTR(StoreRowMask());
+      if (StoreColMask()) os << ", " << PSTR(StoreColMask());
     } break;
     case Commit: os << "MMA.COMMIT"; break;
     case Scale:
