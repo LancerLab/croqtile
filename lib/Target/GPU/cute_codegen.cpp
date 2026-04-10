@@ -657,6 +657,18 @@ CuteCodeGen::CurrentExplicitScaleAccumForFrag(const std::string& frag_sym) {
   return nullptr;
 }
 
+void CuteCodeGen::EmitScaleAccumCall(
+    const std::string& acc_ty, const std::string& dim_n,
+    const std::string& d_expr, const std::string& scale_d_expr,
+    const std::string& sa_name, const std::string& sa_ld,
+    const std::string& valid_rows_name, const std::string& sb_name) {
+  ds << d_indent << "scale_accumulator<" << acc_ty << ", float, " << dim_n
+     << ">(reinterpret_cast<" << acc_ty << "*>(" << d_expr
+     << "), reinterpret_cast<" << acc_ty << "*>(" << scale_d_expr << "), "
+     << sa_name << ", " << sa_ld << ", " << valid_rows_name << ", " << sb_name
+     << ");\n";
+}
+
 // return mds name and the declaration string.
 // If offset is not empty, means that need to do memory viewing.
 //   Just add offset to buf_expr, then utilize new_shape.
@@ -934,22 +946,10 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     }
     if (hoisted_scale_accum_info.has_value()) {
       const auto& info = hoisted_scale_accum_info.value();
-      if (info.scale_a_static_rows >= 0) {
-        ds << d_indent << "scale_accumulator_dispatch<" << info.acc_ty
-           << ", float, " << info.dim_n << ", " << info.scale_a_static_rows
-           << ">(reinterpret_cast<" << info.acc_ty << "*>(" << info.frag_expr
-           << "), reinterpret_cast<" << info.acc_ty << "*>("
-           << info.scale_frag_name << "), " << info.scale_a_name << ", "
-           << info.scale_a_ld << ", " << info.scale_a_valid_rows_name << ", "
-           << info.scale_b_name << ");\n";
-      } else {
-        ds << d_indent << "scale_accumulator<" << info.acc_ty << ", float, "
-           << info.dim_n << ">(" << "reinterpret_cast<" << info.acc_ty << "*>("
-           << info.frag_expr << "), " << "reinterpret_cast<" << info.acc_ty
-           << "*>(" << info.scale_frag_name << "), " << info.scale_a_name
-           << ", " << info.scale_a_ld << ", " << info.scale_a_valid_rows_name
-           << ", " << info.scale_b_name << ");\n";
-      }
+      EmitScaleAccumCall(info.acc_ty, info.dim_n, info.frag_expr,
+                         info.scale_frag_name, info.scale_a_name,
+                         info.scale_a_ld, info.scale_a_valid_rows_name,
+                         info.scale_b_name);
     }
     if (!hoisted_scale_accum_scopes.empty())
       hoisted_scale_accum_scopes.pop_back();
@@ -4233,26 +4233,24 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           auto mma_m = ssmi.shape.at(0);
           auto mma_k = ssmi.shape.at(2);
           auto src_dim0 = parent_ty->GetShape().ValueAt(0);
-          auto src_dim1 = parent_ty->GetShape().ValueAt(
-              parent_ty->GetShape().Rank() - 1);
+          auto src_dim1 =
+              parent_ty->GetShape().ValueAt(parent_ty->GetShape().Rank() - 1);
           bool dim0_ok = VIIsInt(src_dim0) && VIIsInt(mma_m) &&
                          (*VIInt(src_dim0) % *VIInt(mma_m) == 0);
           bool dim1_ok = VIIsInt(src_dim1) && VIIsInt(mma_k) &&
                          (*VIInt(src_dim1) % *VIInt(mma_k) == 0);
           if (!VIIsInt(src_dim0) || !VIIsInt(src_dim1)) {
-            Warning(
-                n.LOC(),
-                "mma.load source buffer '" + parent_sym +
-                    "' has dynamic shape; ensure its dimensions are "
-                    "divisible by the MMA atom shape to avoid "
-                    "out-of-bounds access.");
+            Warning(n.LOC(),
+                    "mma.load source buffer '" + parent_sym +
+                        "' has dynamic shape; ensure its dimensions are "
+                        "divisible by the MMA atom shape to avoid "
+                        "out-of-bounds access.");
           } else if (!dim0_ok || !dim1_ok) {
-            Warning(
-                n.LOC(),
-                "mma.load source buffer '" + parent_sym +
-                    "' has shape that does not evenly divide the MMA "
-                    "atom; this may cause out-of-bounds shared memory "
-                    "access.");
+            Warning(n.LOC(),
+                    "mma.load source buffer '" + parent_sym +
+                        "' has shape that does not evenly divide the MMA "
+                        "atom; this may cause out-of-bounds shared memory "
+                        "access.");
           }
         }
       }
@@ -4684,33 +4682,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "float " << scale_b_name << " = "
              << "static_cast<float>(" << scale_b_expr << ");\n";
         }
-        int scale_a_static_rows = GetScaleStaticRows(op.ScaleA());
-        if (scale_a_static_rows >= 0) {
-          ds << d_indent << "scale_accumulator_dispatch<" << acc_ty
-             << ", float, " << dim_n << ", " << scale_a_static_rows
-             << ">(reinterpret_cast<" << acc_ty << "*>(" << ExprSTR(frag, false)
-             << "), reinterpret_cast<" << acc_ty << "*>(" << c_sym
-             << "_scale_frag), " << scale_a_name << ", " << scale_a_ld << ", "
-             << scale_a_valid_rows_name << ", " << scale_b_name << ");\n";
-        } else {
-          ds << d_indent << "scale_accumulator<" << acc_ty << ", float, "
-             << dim_n << ">(" << "reinterpret_cast<" << acc_ty << "*>("
-             << ExprSTR(frag, false) << "), "
-             << "reinterpret_cast<" << acc_ty << "*>(" << c_sym
-             << "_scale_frag), " << scale_a_name << ", " << scale_a_ld << ", "
-             << scale_a_valid_rows_name << ", " << scale_b_name << ");\n";
-        }
+        EmitScaleAccumCall(acc_ty, dim_n, ExprSTR(frag, false),
+                           c_sym + "_scale_frag", scale_a_name, scale_a_ld,
+                           scale_a_valid_rows_name, scale_b_name);
       }
     } break;
     case AST::MMAOperation::Scale: {
       auto c_sym = AST::FragName(op.ScaleAccumulator());
       if (auto* info = CurrentExplicitScaleAccumForFrag(c_sym)) {
         if (info->scale_a_valid_rows_expr == "0x3fffffff") {
-          Warning(n.LOC(),
-                  "mma.scale could not determine valid row count for "
-                  "scale_a; assuming all rows are valid. If the scale "
-                  "buffer has fewer rows than the MMA fragment, this "
-                  "may cause out-of-bounds access.");
+          Warning(n.LOC(), "mma.scale could not determine valid row count for "
+                           "scale_a; assuming all rows are valid. If the scale "
+                           "buffer has fewer rows than the MMA fragment, this "
+                           "may cause out-of-bounds access.");
         }
         ds << d_indent << "float* " << info->scale_a_name << " = (float*)("
            << info->scale_a_expr << ");\n";
@@ -4718,24 +4702,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << info->scale_a_valid_rows_expr << ";\n";
         ds << d_indent << "float " << info->scale_b_name
            << " = static_cast<float>(" << info->scale_b_expr << ");\n";
-        if (info->scale_a_static_rows >= 0) {
-          ds << d_indent << "scale_accumulator_dispatch<" << info->acc_ty
-             << ", float, " << info->dim_n << ", " << info->scale_a_static_rows
-             << ">(reinterpret_cast<" << info->acc_ty << "*>("
-             << ExprSTR(op.ScaleAccumulator(), false) << "), reinterpret_cast<"
-             << info->acc_ty << "*>(" << info->scale_frag_name << "), "
-             << info->scale_a_name << ", " << info->scale_a_ld << ", "
-             << info->scale_a_valid_rows_name << ", " << info->scale_b_name
-             << ");\n";
-        } else {
-          ds << d_indent << "scale_accumulator<" << info->acc_ty << ", float, "
-             << info->dim_n << ">(reinterpret_cast<" << info->acc_ty << "*>("
-             << ExprSTR(op.ScaleAccumulator(), false) << "), reinterpret_cast<"
-             << info->acc_ty << "*>(" << info->scale_frag_name << "), "
-             << info->scale_a_name << ", " << info->scale_a_ld << ", "
-             << info->scale_a_valid_rows_name << ", " << info->scale_b_name
-             << ");\n";
-        }
+        EmitScaleAccumCall(
+            info->acc_ty, info->dim_n, ExprSTR(op.ScaleAccumulator(), false),
+            info->scale_frag_name, info->scale_a_name, info->scale_a_ld,
+            info->scale_a_valid_rows_name, info->scale_b_name);
         info->consumed = true;
         break;
       }
@@ -4804,20 +4774,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           need_n_mask = true;
           col_guard_expr = ExprSTR(op.StoreColMask(), IsHost());
         }
-        Note(n.LOC(),
-             "mma.store uses explicit mask guard for boundary store.");
+        Note(n.LOC(), "mma.store uses explicit mask guard for boundary store.");
       } else {
         // Auto-detection: infer mask from tensor shapes and access patterns
 
         // Row (M) mask - Source 1: block shape < MMA shape or runtime
-        need_m_mask =
-            !VIIsInt(ca_dim_m) || *VIInt(ca_dim_m) < *VIInt(mc_dim_m);
+        need_m_mask = !VIIsInt(ca_dim_m) || *VIInt(ca_dim_m) < *VIInt(mc_dim_m);
         if (need_m_mask) {
           row_guard_expr = ValueSTR(ca_dim_m);
           Warning(
               n.LOC(),
-              "mma.store destination block shape (row=" +
-                  ValueSTR(ca_dim_m) +
+              "mma.store destination block shape (row=" + ValueSTR(ca_dim_m) +
                   ") is smaller than the MMA fragment; implicit row masking "
                   "is applied. Consider using 'mma.store.mask' with an "
                   "explicit guard instead.");
@@ -4833,8 +4800,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             auto tile_m = to_shape.ValueAt(0);
             if (VIIsInt(tile_m)) {
               auto tile_m_val = *VIInt(tile_m);
-              bool m_aligned = VIIsInt(parent_m) &&
-                               (*VIInt(parent_m) % tile_m_val == 0);
+              bool m_aligned =
+                  VIIsInt(parent_m) && (*VIInt(parent_m) % tile_m_val == 0);
               if (!m_aligned) {
                 std::string row_idx_str;
                 for (size_t i = 0; i < ca->OpCount(); ++i) {
@@ -4844,23 +4811,20 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                       isa<AST::SOP::SubSpan>(sop)) {
                     auto idx = sop->GetIndices();
                     if (idx && idx->Count() >= 2) {
-                      row_idx_str =
-                          ExprSTR(idx->ValueAt(0), IsHost());
+                      row_idx_str = ExprSTR(idx->ValueAt(0), IsHost());
                     }
                   }
                 }
                 if (!row_idx_str.empty()) {
                   need_m_mask = true;
-                  row_guard_expr = "((int)" + ValueSTR(parent_m) +
-                                   " - (int)(" + row_idx_str + ") * " +
-                                   STR(tile_m_val) + ")";
-                  VST_DEBUG(
-                      dbgs() << n.LOC()
-                             << ": auto-detected row masking for "
-                                "mma.store: parent M dimension ("
-                             << ValueSTR(parent_m)
-                             << ") may not be aligned with tile M ("
-                             << STR(tile_m_val) << ").\n");
+                  row_guard_expr = "((int)" + ValueSTR(parent_m) + " - (int)(" +
+                                   row_idx_str + ") * " + STR(tile_m_val) + ")";
+                  VST_DEBUG(dbgs() << n.LOC()
+                                   << ": auto-detected row masking for "
+                                      "mma.store: parent M dimension ("
+                                   << ValueSTR(parent_m)
+                                   << ") may not be aligned with tile M ("
+                                   << STR(tile_m_val) << ").\n");
                 }
               }
             }
@@ -4873,13 +4837,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           auto parent_sym = ca->RefSymbol();
           auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
           if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
-            auto parent_n = parent_ty->GetShape().ValueAt(
-                parent_ty->GetShape().Rank() - 1);
+            auto parent_n =
+                parent_ty->GetShape().ValueAt(parent_ty->GetShape().Rank() - 1);
             auto tile_n = to_shape.ValueAt(to_shape.Rank() - 1);
             if (VIIsInt(tile_n)) {
               auto tile_n_val = *VIInt(tile_n);
-              bool n_aligned = VIIsInt(parent_n) &&
-                               (*VIInt(parent_n) % tile_n_val == 0);
+              bool n_aligned =
+                  VIIsInt(parent_n) && (*VIInt(parent_n) % tile_n_val == 0);
               if (!n_aligned) {
                 need_n_mask = true;
                 std::string col_idx_str;
@@ -4891,22 +4855,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                     auto idx = sop->GetIndices();
                     if (idx && idx->Count() >= 2) {
                       size_t col_dim = idx->Count() - 1;
-                      col_idx_str =
-                          ExprSTR(idx->ValueAt(col_dim), IsHost());
+                      col_idx_str = ExprSTR(idx->ValueAt(col_dim), IsHost());
                     }
                   }
                 }
                 if (!col_idx_str.empty()) {
-                  col_guard_expr = "((int)" + ValueSTR(parent_n) +
-                                   " - (int)(" + col_idx_str + ") * " +
-                                   STR(tile_n_val) + ")";
-                  VST_DEBUG(
-                      dbgs() << n.LOC()
-                             << ": auto-detected column masking for "
-                                "mma.store: parent N dimension ("
-                             << ValueSTR(parent_n)
-                             << ") may not be aligned with tile N ("
-                             << STR(tile_n_val) << ").\n");
+                  col_guard_expr = "((int)" + ValueSTR(parent_n) + " - (int)(" +
+                                   col_idx_str + ") * " + STR(tile_n_val) + ")";
+                  VST_DEBUG(dbgs() << n.LOC()
+                                   << ": auto-detected column masking for "
+                                      "mma.store: parent N dimension ("
+                                   << ValueSTR(parent_n)
+                                   << ") may not be aligned with tile N ("
+                                   << STR(tile_n_val) << ").\n");
                 } else {
                   need_n_mask = false;
                 }
@@ -4917,10 +4878,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
 
       if (need_m_mask)
-        assert(
-            !use_stmatrix && !store_trans &&
-            "masked store only supports non-transpose store to "
-            "global memory. Support for more cases can be added if needed.");
+        assert(!use_stmatrix && !store_trans &&
+               "masked store only supports non-transpose store to "
+               "global memory. Support for more cases can be added if needed.");
 
       // --- Emit store ---
       if (use_stmatrix) {
@@ -4937,8 +4897,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                 ExprSTR(frag, false) + ")";
         std::string full_call =
             (store_trans ? "store_fragment_d_trans<" : "store_fragment_d<") +
-            CUTE_WGMMA_ATOM + ", " + DIM_N_STR + ">(" + f_mds.first +
-            ", " + frag_cast + ");\n";
+            CUTE_WGMMA_ATOM + ", " + DIM_N_STR + ">(" + f_mds.first + ", " +
+            frag_cast + ");\n";
         std::string mma_m_str = ValueSTR(mc_dim_m);
 
         if (need_m_mask && need_n_mask) {
@@ -4949,26 +4909,26 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "    " << full_call;
           ds << d_indent << "  else\n";
           ds << d_indent << "    store_fragment_d_mask_row_col<"
-             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">("
-             << f_mds.first << ", " << frag_cast << ", __rg, __cg);\n";
+             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">(" << f_mds.first
+             << ", " << frag_cast << ", __rg, __cg);\n";
           ds << d_indent << "}\n";
         } else if (need_m_mask) {
           ds << d_indent << "{ int __rg = " << row_guard_expr << ";\n";
           ds << d_indent << "  if (__rg >= " << mma_m_str << ")\n";
           ds << d_indent << "    " << full_call;
           ds << d_indent << "  else\n";
-          ds << d_indent << "    store_fragment_d_mask_row<"
-             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">("
-             << f_mds.first << ", " << frag_cast << ", __rg);\n";
+          ds << d_indent << "    store_fragment_d_mask_row<" << CUTE_WGMMA_ATOM
+             << ", " << DIM_N_STR << ">(" << f_mds.first << ", " << frag_cast
+             << ", __rg);\n";
           ds << d_indent << "}\n";
         } else if (need_n_mask) {
           ds << d_indent << "{ int __cg = " << col_guard_expr << ";\n";
           ds << d_indent << "  if (__cg >= " << DIM_N_STR << ")\n";
           ds << d_indent << "    " << full_call;
           ds << d_indent << "  else\n";
-          ds << d_indent << "    store_fragment_d_mask_col<"
-             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">("
-             << f_mds.first << ", " << frag_cast << ", __cg);\n";
+          ds << d_indent << "    store_fragment_d_mask_col<" << CUTE_WGMMA_ATOM
+             << ", " << DIM_N_STR << ">(" << f_mds.first << ", " << frag_cast
+             << ", __cg);\n";
           ds << d_indent << "}\n";
         } else {
           ds << d_indent << full_call;
@@ -5230,26 +5190,24 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           auto mma_m = ssmi.shape.at(0);
           auto mma_k = ssmi.shape.at(2);
           auto src_dim0 = parent_ty->GetShape().ValueAt(0);
-          auto src_dim1 = parent_ty->GetShape().ValueAt(
-              parent_ty->GetShape().Rank() - 1);
+          auto src_dim1 =
+              parent_ty->GetShape().ValueAt(parent_ty->GetShape().Rank() - 1);
           bool dim0_ok = VIIsInt(src_dim0) && VIIsInt(mma_m) &&
                          (*VIInt(src_dim0) % *VIInt(mma_m) == 0);
           bool dim1_ok = VIIsInt(src_dim1) && VIIsInt(mma_k) &&
                          (*VIInt(src_dim1) % *VIInt(mma_k) == 0);
           if (!VIIsInt(src_dim0) || !VIIsInt(src_dim1)) {
-            Warning(
-                n.LOC(),
-                "mma.load source buffer '" + parent_sym +
-                    "' has dynamic shape; ensure its dimensions are "
-                    "divisible by the MMA atom shape to avoid "
-                    "out-of-bounds access.");
+            Warning(n.LOC(),
+                    "mma.load source buffer '" + parent_sym +
+                        "' has dynamic shape; ensure its dimensions are "
+                        "divisible by the MMA atom shape to avoid "
+                        "out-of-bounds access.");
           } else if (!dim0_ok || !dim1_ok) {
-            Warning(
-                n.LOC(),
-                "mma.load source buffer '" + parent_sym +
-                    "' has shape that does not evenly divide the MMA "
-                    "atom; this may cause out-of-bounds shared memory "
-                    "access.");
+            Warning(n.LOC(),
+                    "mma.load source buffer '" + parent_sym +
+                        "' has shape that does not evenly divide the MMA "
+                        "atom; this may cause out-of-bounds shared memory "
+                        "access.");
           }
         }
       }
@@ -5478,8 +5436,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                    ExprSTR(frag, false) + ")";
       std::string full_call_sync =
           (store_trans_sync ? "store_fragment_d_trans<" : "store_fragment_d<") +
-          CUTE_MMA_ATOM + ">(" + f_mds.first + ", " + frag_cast_sync +
-          ");\n";
+          CUTE_MMA_ATOM + ">(" + f_mds.first + ", " + frag_cast_sync + ");\n";
 
       // Mask determination for mma.sync stores
       bool sync_need_m = false, sync_need_n = false;
@@ -5492,25 +5449,22 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           sync_need_n = true;
           sync_cg = ExprSTR(op.StoreColMask(), IsHost());
         }
-        Note(n.LOC(),
-             "mma.store uses explicit mask guard for boundary store.");
-      } else if (f_sty->GetStorage() == Storage::GLOBAL &&
-                 !store_trans_sync) {
+        Note(n.LOC(), "mma.store uses explicit mask guard for boundary store.");
+      } else if (f_sty->GetStorage() == Storage::GLOBAL && !store_trans_sync) {
         auto parent_sym = ca->RefSymbol();
         auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
         auto to_shape_sync = ca->GetBlockShape();
         if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
           auto parent_m = parent_ty->GetShape().ValueAt(0);
           auto tile_m = to_shape_sync.ValueAt(0);
-          auto parent_n = parent_ty->GetShape().ValueAt(
-              parent_ty->GetShape().Rank() - 1);
+          auto parent_n =
+              parent_ty->GetShape().ValueAt(parent_ty->GetShape().Rank() - 1);
           auto tile_n = to_shape_sync.ValueAt(to_shape_sync.Rank() - 1);
 
           auto extract_idx = [&](size_t dim) -> std::string {
             for (size_t i = 0; i < ca->OpCount(); ++i) {
               const auto& sop = ca->OpAt(i);
-              if (isa<AST::SOP::Tiling>(sop) ||
-                  isa<AST::SOP::TileAt>(sop) ||
+              if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
                   isa<AST::SOP::SubSpan>(sop)) {
                 auto idx = sop->GetIndices();
                 if (idx && idx->Count() >= 2)
@@ -5527,15 +5481,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               auto ri = extract_idx(0);
               if (!ri.empty()) {
                 sync_need_m = true;
-                sync_rg = "((int)" + ValueSTR(parent_m) + " - (int)(" +
-                           ri + ") * " + STR(tm) + ")";
-                VST_DEBUG(
-                    dbgs() << n.LOC()
-                           << ": auto-detected row masking for "
-                              "mma.store: parent M dimension ("
-                           << ValueSTR(parent_m)
-                           << ") may not be aligned with tile M ("
-                           << STR(tm) << ").\n");
+                sync_rg = "((int)" + ValueSTR(parent_m) + " - (int)(" + ri +
+                          ") * " + STR(tm) + ")";
+                VST_DEBUG(dbgs() << n.LOC()
+                                 << ": auto-detected row masking for "
+                                    "mma.store: parent M dimension ("
+                                 << ValueSTR(parent_m)
+                                 << ") may not be aligned with tile M ("
+                                 << STR(tm) << ").\n");
               }
             }
           }
@@ -5546,15 +5499,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               auto ci = extract_idx(to_shape_sync.Rank() - 1);
               if (!ci.empty()) {
                 sync_need_n = true;
-                sync_cg = "((int)" + ValueSTR(parent_n) + " - (int)(" +
-                           ci + ") * " + STR(tn) + ")";
-                VST_DEBUG(
-                    dbgs() << n.LOC()
-                           << ": auto-detected column masking for "
-                              "mma.store: parent N dimension ("
-                           << ValueSTR(parent_n)
-                           << ") may not be aligned with tile N ("
-                           << STR(tn) << ").\n");
+                sync_cg = "((int)" + ValueSTR(parent_n) + " - (int)(" + ci +
+                          ") * " + STR(tn) + ")";
+                VST_DEBUG(dbgs() << n.LOC()
+                                 << ": auto-detected column masking for "
+                                    "mma.store: parent N dimension ("
+                                 << ValueSTR(parent_n)
+                                 << ") may not be aligned with tile N ("
+                                 << STR(tn) << ").\n");
               }
             }
           }
@@ -5569,28 +5521,25 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << " && __cg >= 8)\n";
         ds << d_indent << "    " << full_call_sync;
         ds << d_indent << "  else\n";
-        ds << d_indent << "    store_fragment_d_mask_row_col<"
-           << CUTE_MMA_ATOM << ">(" << f_mds.first << ", "
-           << frag_cast_sync << ", __rg, __cg);\n";
+        ds << d_indent << "    store_fragment_d_mask_row_col<" << CUTE_MMA_ATOM
+           << ">(" << f_mds.first << ", " << frag_cast_sync
+           << ", __rg, __cg);\n";
         ds << d_indent << "}\n";
       } else if (sync_need_m) {
         ds << d_indent << "{ int __rg = " << sync_rg << ";\n";
-        ds << d_indent << "  if (__rg >= " << ValueSTR(mma_m_sync)
-           << ")\n";
+        ds << d_indent << "  if (__rg >= " << ValueSTR(mma_m_sync) << ")\n";
         ds << d_indent << "    " << full_call_sync;
         ds << d_indent << "  else\n";
-        ds << d_indent << "    store_fragment_d_mask_row<"
-           << CUTE_MMA_ATOM << ">(" << f_mds.first << ", "
-           << frag_cast_sync << ", __rg);\n";
+        ds << d_indent << "    store_fragment_d_mask_row<" << CUTE_MMA_ATOM
+           << ">(" << f_mds.first << ", " << frag_cast_sync << ", __rg);\n";
         ds << d_indent << "}\n";
       } else if (sync_need_n) {
         ds << d_indent << "{ int __cg = " << sync_cg << ";\n";
         ds << d_indent << "  if (__cg >= 8)\n";
         ds << d_indent << "    " << full_call_sync;
         ds << d_indent << "  else\n";
-        ds << d_indent << "    store_fragment_d_mask_col<"
-           << CUTE_MMA_ATOM << ">(" << f_mds.first << ", "
-           << frag_cast_sync << ", __cg);\n";
+        ds << d_indent << "    store_fragment_d_mask_col<" << CUTE_MMA_ATOM
+           << ">(" << f_mds.first << ", " << frag_cast_sync << ", __cg);\n";
         ds << d_indent << "}\n";
       } else {
         ds << d_indent << full_call_sync;

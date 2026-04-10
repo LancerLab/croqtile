@@ -519,6 +519,12 @@ private:
                                 const std::string& frag_sym) const;
   ExplicitScaleAccumInfo*
   CurrentExplicitScaleAccumForFrag(const std::string& frag_sym);
+  void EmitScaleAccumCall(const std::string& acc_ty, const std::string& dim_n,
+                          const std::string& d_expr,
+                          const std::string& scale_d_expr,
+                          const std::string& sa_name, const std::string& sa_ld,
+                          const std::string& valid_rows_name,
+                          const std::string& sb_name);
   std::pair<std::string, std::string>
   GenTensorDecl(const std::string& name, const std::string& buf_expr,
                 const Storage sto, BaseType bty, const Shape& shp,

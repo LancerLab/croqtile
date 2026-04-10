@@ -2339,8 +2339,8 @@ struct Policy_WGMMA_D_M64K16 {
   }
 
   template <class Tensor, typename AccumT, int N>
-  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
-                                            int row_guard, int col_guard) {
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d, int row_guard,
+                                            int col_guard) {
     int tid = threadIdx.x % 128;
     int lane = tid % 32;
     int warp = tid / 32;
@@ -2353,10 +2353,8 @@ struct Policy_WGMMA_D_M64K16 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row0, col0) = cast_if<value_type>(d[c * 4]);
-        if (col1 < col_guard)
-          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        if (col0 < col_guard) D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard) D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       }
     }
     if (row1 < row_guard) {
@@ -2364,10 +2362,8 @@ struct Policy_WGMMA_D_M64K16 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
-        if (col1 < col_guard)
-          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+        if (col0 < col_guard) D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard) D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
       }
     }
   }
@@ -2469,8 +2465,8 @@ struct Policy_WGMMA_D_M64K8 {
   }
 
   template <class Tensor, typename AccumT, int N>
-  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
-                                            int row_guard, int col_guard) {
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d, int row_guard,
+                                            int col_guard) {
     int tid = threadIdx.x % 128;
     int lane = tid % 32;
     int warp = tid / 32;
@@ -2483,10 +2479,8 @@ struct Policy_WGMMA_D_M64K8 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row0, col0) = cast_if<value_type>(d[c * 4]);
-        if (col1 < col_guard)
-          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        if (col0 < col_guard) D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard) D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       }
     }
     if (row1 < row_guard) {
@@ -2494,10 +2488,8 @@ struct Policy_WGMMA_D_M64K8 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
-        if (col1 < col_guard)
-          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+        if (col0 < col_guard) D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard) D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
       }
     }
   }
@@ -2576,7 +2568,7 @@ struct Policy_WGMMA_D_M64K32 {
     int warp = tid / 32;
     int row0 = warp * 16 + lane / 4;
     int row1 = row0 + 8;
-    int col_num = N / 8;             // number of column pairs
+    int col_num = N / 8; // number of column pairs
     using value_type = typename Tensor::value_type;
 
     if (row0 < row_guard) {
@@ -2601,8 +2593,8 @@ struct Policy_WGMMA_D_M64K32 {
   }
 
   template <class Tensor, typename AccumT, int N>
-  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
-                                            int row_guard, int col_guard) {
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d, int row_guard,
+                                            int col_guard) {
     int tid = threadIdx.x % 128;
     int lane = tid % 32;
     int warp = tid / 32;
@@ -2615,10 +2607,8 @@ struct Policy_WGMMA_D_M64K32 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row0, col0) = cast_if<value_type>(d[c * 4]);
-        if (col1 < col_guard)
-          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        if (col0 < col_guard) D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard) D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       }
     }
     if (row1 < row_guard) {
@@ -2626,10 +2616,8 @@ struct Policy_WGMMA_D_M64K32 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
-        if (col1 < col_guard)
-          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+        if (col0 < col_guard) D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard) D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
       }
     }
   }
@@ -2731,8 +2719,8 @@ struct Policy_WGMMA_D_M64K64 {
   }
 
   template <class Tensor, typename AccumT, int N>
-  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
-                                            int row_guard, int col_guard) {
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d, int row_guard,
+                                            int col_guard) {
     int tid = threadIdx.x % 128;
     int lane = tid % 32;
     int warp = tid / 32;
@@ -2745,10 +2733,8 @@ struct Policy_WGMMA_D_M64K64 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row0, col0) = cast_if<value_type>(d[c * 4]);
-        if (col1 < col_guard)
-          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        if (col0 < col_guard) D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard) D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       }
     }
     if (row1 < row_guard) {
@@ -2756,10 +2742,8 @@ struct Policy_WGMMA_D_M64K64 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
-        if (col1 < col_guard)
-          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+        if (col0 < col_guard) D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard) D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
       }
     }
   }
@@ -2861,8 +2845,8 @@ struct Policy_WGMMA_D_M64K256 {
   }
 
   template <class Tensor, typename AccumT, int N>
-  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
-                                            int row_guard, int col_guard) {
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d, int row_guard,
+                                            int col_guard) {
     int tid = threadIdx.x % 128;
     int lane = tid % 32;
     int warp = tid / 32;
@@ -2875,10 +2859,8 @@ struct Policy_WGMMA_D_M64K256 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row0, col0) = cast_if<value_type>(d[c * 4]);
-        if (col1 < col_guard)
-          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        if (col0 < col_guard) D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard) D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       }
     }
     if (row1 < row_guard) {
@@ -2886,10 +2868,8 @@ struct Policy_WGMMA_D_M64K256 {
       for (int c = 0; c < col_num; c++) {
         int col0 = c * 8 + (tid % 4) * 2;
         int col1 = col0 + 1;
-        if (col0 < col_guard)
-          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
-        if (col1 < col_guard)
-          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+        if (col0 < col_guard) D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard) D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
       }
     }
   }
@@ -3174,16 +3154,27 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
   }
 }
 
-// only for M64N32 WGMMA accumulator scaling
+// M64 WGMMA accumulator scaling.
+//
+// d[i] += scale_d[i] * scale_a[row] * scale_b
+//
+// Thread->row mapping (M64 WGMMA layout, warpgroup of 128 threads):
+//   row0 = warp*16 + (lane>>2)       in [0..55]
+//   row1 = row0 + 8                  in [8..63]
+//
+// valid_rows: number of valid rows in scale_a. Threads whose rows
+// exceed this are zeroed. When valid_rows >= 64 (the full M64 tile),
+// the masking comparisons always pass and the cost is negligible.
+// A single implementation avoids duplicate template instantiations
+// that would increase register pressure in the calling kernel.
 template <typename AccT, typename ScaleT, int N>
 __device__ __forceinline__ void
-scale_accumulator_full(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
-                       int scale_a_ld, ScaleT scale_b) {
+scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
+                  int scale_a_ld, int valid_rows, ScaleT scale_b) {
   static_assert(std::is_same_v<ScaleT, f32>,
-                "scale_accumulator only supports f32 scale type");
-  static_assert(
-      std::is_same_v<AccT, f16> || std::is_same_v<AccT, float>,
-      "scale_accumulator only supports f16 or float accumulator type");
+                "scale_accumulator: ScaleT must be f32");
+  static_assert(std::is_same_v<AccT, f16> || std::is_same_v<AccT, float>,
+                "scale_accumulator: AccT must be f16 or float");
 
   int itd = threadIdx.x & 127;
   int lane = itd & 31;
@@ -3192,119 +3183,45 @@ scale_accumulator_full(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
   int row1 = row0 + 8;
   constexpr int col_num = N / 8;
 
-  auto* scale_a_ptr0 = scale_a_ptr + row0 * scale_a_ld;
-  auto* scale_a_ptr1 = scale_a_ptr + row1 * scale_a_ld;
-  float sa0 = 0.0f;
-  float sa1 = 0.0f;
-  #if defined(__CUDA_ARCH__)
-  if (__isShared(scale_a_ptr0)) {
-    sa0 = *scale_a_ptr0;
-    sa1 = *scale_a_ptr1;
-  } else if (__isGlobal(scale_a_ptr0)) {
-    sa0 = __ldg(scale_a_ptr0);
-    sa1 = __ldg(scale_a_ptr1);
-  } else {
-    sa0 = *scale_a_ptr0;
-    sa1 = *scale_a_ptr1;
-  }
-  #else
-  sa0 = *scale_a_ptr0;
-  sa1 = *scale_a_ptr1;
-  #endif
-  sa0 *= scale_b;
-  sa1 *= scale_b;
+  int row0_valid = row0 < valid_rows;
+  int row1_valid = row1 < valid_rows;
+  auto* sa_ptr0 =
+      scale_a_ptr + (row0_valid ? row0 : 0) * scale_a_ld;
+  auto* sa_ptr1 =
+      scale_a_ptr + (row1_valid ? row1 : 0) * scale_a_ld;
 
-  if constexpr (std::is_same_v<AccT, f16>) {
-  #if defined(__USE_CUDA_TYPE__)
-    auto* d2 = reinterpret_cast<__half2*>(d);
-    auto const* scale_d2 = reinterpret_cast<__half2 const*>(scale_d);
-    __half2 sa0_h2 = __float2half2_rn(sa0);
-    __half2 sa1_h2 = __float2half2_rn(sa1);
-
-    #pragma unroll
-    for (int c = 0; c < col_num; c++) {
-      int base2 = c * 2;
-      d2[base2 + 0] = __hfma2(scale_d2[base2 + 0], sa0_h2, d2[base2 + 0]);
-      d2[base2 + 1] = __hfma2(scale_d2[base2 + 1], sa1_h2, d2[base2 + 1]);
-    }
-  #else
-    #pragma unroll
-    for (int c = 0; c < col_num; c++) {
-      int base = c * 4;
-      d[base + 0] += utils::from_f32<f16>(to_f32(scale_d[base + 0]) * sa0);
-      d[base + 1] += utils::from_f32<f16>(to_f32(scale_d[base + 1]) * sa0);
-      d[base + 2] += utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1);
-      d[base + 3] += utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1);
-    }
-  #endif
-  } else if constexpr (std::is_same_v<AccT, float>) {
-  #pragma unroll
-    for (int c = 0; c < col_num; c++) {
-      int base = c * 4;
-      d[base + 0] = fmaf(scale_d[base + 0], sa0, d[base + 0]);
-      d[base + 1] = fmaf(scale_d[base + 1], sa0, d[base + 1]);
-      d[base + 2] = fmaf(scale_d[base + 2], sa1, d[base + 2]);
-      d[base + 3] = fmaf(scale_d[base + 3], sa1, d[base + 3]);
-    }
-  }
-}
-
-template <typename AccT, typename ScaleT, int N>
-__device__ __forceinline__ void
-scale_accumulator_masked(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
-                         int scale_a_ld, int scale_a_rows, ScaleT scale_b) {
-  static_assert(std::is_same_v<ScaleT, f32>,
-                "scale_accumulator only supports f32 scale type");
-  static_assert(
-      std::is_same_v<AccT, f16> || std::is_same_v<AccT, float>,
-      "scale_accumulator only supports f16 or float accumulator type");
-
-  int itd = threadIdx.x & 127;
-  int lane = itd & 31;
-  int warp = itd >> 5;
-  int row0 = warp * 16 + (lane >> 2);
-  int row1 = row0 + 8;
-  constexpr int col_num = N / 8;
-
-  int row0_valid = row0 < scale_a_rows;
-  int row1_valid = row1 < scale_a_rows;
-  auto* scale_a_ptr0 = scale_a_ptr + (row0_valid ? row0 : 0) * scale_a_ld;
-  auto* scale_a_ptr1 = scale_a_ptr + (row1_valid ? row1 : 0) * scale_a_ld;
-  float sa0 = 0.0f;
-  float sa1 = 0.0f;
-
-  #if defined(__CUDA_ARCH__)
+  float sa0 = 0.0f, sa1 = 0.0f;
+#if defined(__CUDA_ARCH__)
   if (__isShared(scale_a_ptr)) {
-    sa0 = *scale_a_ptr0;
-    sa1 = *scale_a_ptr1;
+    sa0 = *sa_ptr0;
+    sa1 = *sa_ptr1;
   } else if (__isGlobal(scale_a_ptr)) {
-    sa0 = __ldg(scale_a_ptr0);
-    sa1 = __ldg(scale_a_ptr1);
+    sa0 = __ldg(sa_ptr0);
+    sa1 = __ldg(sa_ptr1);
   } else {
-    sa0 = *scale_a_ptr0;
-    sa1 = *scale_a_ptr1;
+    sa0 = *sa_ptr0;
+    sa1 = *sa_ptr1;
   }
-  #else
-  sa0 = *scale_a_ptr0;
-  sa1 = *scale_a_ptr1;
-  #endif
+#else
+  sa0 = *sa_ptr0;
+  sa1 = *sa_ptr1;
+#endif
   sa0 *= scale_b * static_cast<float>(row0_valid);
   sa1 *= scale_b * static_cast<float>(row1_valid);
 
   if constexpr (std::is_same_v<AccT, f16>) {
-  #if defined(__USE_CUDA_TYPE__)
+#if defined(__USE_CUDA_TYPE__)
     auto* d2 = reinterpret_cast<__half2*>(d);
     auto const* scale_d2 = reinterpret_cast<__half2 const*>(scale_d);
     __half2 sa0_h2 = __float2half2_rn(sa0);
     __half2 sa1_h2 = __float2half2_rn(sa1);
-
     #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base2 = c * 2;
       d2[base2 + 0] = __hfma2(scale_d2[base2 + 0], sa0_h2, d2[base2 + 0]);
       d2[base2 + 1] = __hfma2(scale_d2[base2 + 1], sa1_h2, d2[base2 + 1]);
     }
-  #else
+#else
     #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
@@ -3313,9 +3230,9 @@ scale_accumulator_masked(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
       d[base + 2] += utils::from_f32<f16>(to_f32(scale_d[base + 2]) * sa1);
       d[base + 3] += utils::from_f32<f16>(to_f32(scale_d[base + 3]) * sa1);
     }
-  #endif
+#endif
   } else if constexpr (std::is_same_v<AccT, float>) {
-  #pragma unroll
+    #pragma unroll
     for (int c = 0; c < col_num; c++) {
       int base = c * 4;
       d[base + 0] = fmaf(scale_d[base + 0], sa0, d[base + 0]);
@@ -3324,38 +3241,6 @@ scale_accumulator_masked(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
       d[base + 3] = fmaf(scale_d[base + 3], sa1, d[base + 3]);
     }
   }
-}
-
-template <typename AccT, typename ScaleT, int N>
-__device__ __forceinline__ void
-scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
-                  int scale_a_rows, ScaleT scale_b) {
-  scale_accumulator_masked<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
-                                            scale_a_rows, scale_b);
-}
-
-template <typename AccT, typename ScaleT, int N, int ScaleARows>
-__device__ __forceinline__ void
-scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
-                  ScaleT scale_b) {
-  scale_accumulator_full<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
-                                          scale_b);
-}
-
-template <typename AccT, typename ScaleT, int N, int MaxScaleARows>
-__device__ __forceinline__ void
-scale_accumulator_dispatch(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr,
-                           int scale_a_ld, int scale_a_rows, ScaleT scale_b) {
-  scale_accumulator_masked<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
-                                            scale_a_rows, scale_b);
-}
-
-template <typename AccT, typename ScaleT, int N>
-__device__ __forceinline__ void
-scale_accumulator(AccT* d, AccT* scale_d, ScaleT* scale_a_ptr, int scale_a_ld,
-                  ScaleT scale_b) {
-  scale_accumulator_full<AccT, ScaleT, N>(d, scale_d, scale_a_ptr, scale_a_ld,
-                                          scale_b);
 }
 
 // --------------- MMA policy specializations ---------------
