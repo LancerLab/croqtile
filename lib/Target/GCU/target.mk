@@ -204,12 +204,15 @@ OSS_SCRIPTS := $(SCRIPT_DIR)/oss
 OSS_PUSH    := bash $(OSS_SCRIPTS)/oss-push.sh
 OSS_PULL    := bash $(OSS_SCRIPTS)/oss-pull.sh
 OSS_SCAN    := bash $(OSS_SCRIPTS)/oss-scan.sh
+OSS_PSCAN   := bash $(OSS_SCRIPTS)/oss-pull-scan.sh
+OSS_WATCH   := bash $(OSS_SCRIPTS)/oss-watch.sh
 OSS_SETUP   := bash $(OSS_SCRIPTS)/oss-setup.sh
 COMMIT     ?=
 RANGE      ?=
 
 .PHONY: oss-scan oss-scan-staged oss-scan-diff oss-push oss-push-last \
-        oss-push-range oss-push-dry oss-pull oss-setup oss-status oss-help
+        oss-push-range oss-push-dry oss-pull oss-pull-scan oss-watch \
+        oss-setup oss-status oss-help
 
 oss-scan:
 	@$(OSS_SCAN) --tree oss/main
@@ -263,6 +266,12 @@ oss-pull:
 	fi
 	@$(OSS_PULL) $(COMMIT)
 
+oss-pull-scan:
+	@$(OSS_PSCAN) --fetch
+
+oss-watch:
+	@$(OSS_WATCH)
+
 oss-setup:
 	@$(OSS_SETUP)
 
@@ -288,6 +297,9 @@ oss-help:
 	@echo "  make oss-push-dry RANGE=a..b    Dry-run a range"
 	@echo ""
 	@echo "  make oss-pull COMMIT=sha        Pull from oss/main to main"
+	@echo "  make oss-pull-scan              Fetch public + scan for conflicts"
+	@echo "  make oss-watch                  Start periodic sync watcher (WSL)"
+	@echo ""
 	@echo "  make oss-setup                  Initialize oss remote + branch"
 	@echo "  make oss-status                 Show sync status"
 	@echo ""

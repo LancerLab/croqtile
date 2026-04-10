@@ -39,6 +39,12 @@ make oss-push-range RANGE=<from>..<to>
 # Pull a community contribution from oss/main to main
 make oss-pull COMMIT=<sha>
 
+# Scan incoming public commits for conflicts before pulling
+make oss-pull-scan
+
+# Start periodic sync watcher (WSL toast notifications)
+make oss-watch
+
 # Check sync status
 make oss-status
 ```

@@ -299,6 +299,60 @@ The `.gitlab-ci.yml` includes:
 
 ---
 
+## Incoming (Pull) Scan
+
+Before pulling public contributions into main, run the pull-scan
+to detect file conflicts:
+
+```bash
+# Fetch public remote and scan all new commits
+make oss-pull-scan
+# or directly:
+bash scripts/oss/oss-pull-scan.sh --fetch
+
+# Scan specific commits
+bash scripts/oss/oss-pull-scan.sh <sha1> <sha2>
+```
+
+The pull-scan detects:
+- **PRIVATE-PATH**: public commit touches files in our exclude list
+- **DIVERGED**: public commit modifies a file that differs between main and oss/main
+  (merge conflict risk)
+- **CONFIG-ZONE**: public commit touches repo-config files (Makefile, CMakeLists.txt,
+  .gitignore, etc.) that are typically managed separately
+
+---
+
+## Periodic Sync Watcher
+
+Use `oss-watch.sh` to automatically monitor the public repo for new commits:
+
+```bash
+# Run once (check + notify)
+make oss-watch
+
+# Poll every 5 minutes (foreground)
+bash scripts/oss/oss-watch.sh --loop
+
+# Poll every 10 minutes (background daemon)
+bash scripts/oss/oss-watch.sh --daemon 600
+
+# Stop the daemon
+kill $(cat /tmp/oss-watch.pid)
+```
+
+On WSL, the watcher sends Windows toast notifications when violations are found.
+On Linux, it uses `notify-send`. You can also set a custom hook:
+
+```bash
+export OSS_WATCH_HOOK=/path/to/my-notifier.sh
+bash scripts/oss/oss-watch.sh --daemon
+```
+
+The hook script receives `$1` = title, `$2` = body.
+
+---
+
 ## Quick Reference
 
 | Task | Command |
@@ -308,6 +362,8 @@ The `.gitlab-ci.yml` includes:
 | Push commits | `bash scripts/oss/oss-push.sh <commit> ...` |
 | Push range | `bash scripts/oss/oss-push.sh --range A..B` |
 | Pull from OSS | `bash scripts/oss/oss-pull.sh <commit>` |
+| Pull-scan | `bash scripts/oss/oss-pull-scan.sh --fetch` |
+| Sync watcher | `bash scripts/oss/oss-watch.sh --daemon` |
 | Scan branch | `bash scripts/oss/oss-scan.sh --tree oss/main` |
 | Scan staged | `bash scripts/oss/oss-scan.sh --staged` |
 | Scan commit | `bash scripts/oss/oss-scan.sh --diff <sha>` |

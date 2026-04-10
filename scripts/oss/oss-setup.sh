@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 PUBLIC_REMOTE="public"
-PUBLIC_URL="git@github.com:LancerLab/choreo.git"
+PUBLIC_URL="git@github.com:LancerLab/croqtile.git"
 OSS_BRANCH="oss/main"
 
 usage() {
