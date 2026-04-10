@@ -411,10 +411,18 @@ struct future {
   __device__ void set_nowait() {
   #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s != ST_INITED && s != ST_WAITED) {
-      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
-             "is used incorrectly.\n",
-             line, column);
-      __co_abort__();
+      if (s == ST_NONE)
+        printf("[choreo-rt] WARN: future (defined at line %u:%u) maybe in none "
+               "state when setting nowait.\n",
+               line, column);
+      else if (s == ST_TRIGGERED)
+        printf("[choreo-rt] WARN: future (defined at line %u:%u) maybe in "
+               "triggered state when setting nowait.\n",
+               line, column);
+      else
+        printf("[choreo-rt] WARN: future (defined at line %u:%u) maybe in an "
+               "invalid state when setting nowait.\n",
+               line, column);
     }
     s = ST_WAITED;
   #endif // __CHOREO_DMA_DIAGNOSIS__
@@ -513,10 +521,9 @@ struct future {
              line, column);
       __co_abort__();
     } else if (s == ST_INITED) {
-      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
-             "is used incorrectly.\n",
+      printf("[choreo-rt] WARN: maybe wait the future (defined at line %u:%u) "
+             "before trigger it.\n",
              line, column);
-      __co_abort__();
     } else
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
   #endif                    // __CHOREO_DMA_DIAGNOSIS__
@@ -564,13 +571,10 @@ struct future {
 
   __device__ ~future() {
   #ifdef __CHOREO_DMA_DIAGNOSIS__
-    if (s == ST_TRIGGERED) {
-      // TODO: requires krt %s support to print future name
-      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
-             "has never been waited.\n",
+    if (s == ST_TRIGGERED)
+      printf("[choreo-rt] WARN: the future (defined at line %u:%u) may never "
+             "have been waited.\n",
              line, column);
-      __co_abort__();
-    }
     if (s >= ST_INITED) destroy();
   #else
     destroy();

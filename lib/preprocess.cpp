@@ -931,7 +931,7 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
 namespace {
 
 // Line-based extraction of __cok__ block contents from a raw source file.
-// Unlike the target preprocess extract_cok_sections (which operates on
+// Unlike the host-compiler's extract_cok_sections (which operates on
 // preprocessed strings and returns Range pairs), this reads an unprocessed
 // source file and returns the lines inside __cok__ { ... } blocks.
 std::vector<std::string> CollectCokLines(const std::string& filepath) {
@@ -960,8 +960,10 @@ std::vector<std::string> CollectCokLines(const std::string& filepath) {
     }
     if (in_cok) {
       for (char c : line) {
-        if (c == '{') depth++;
-        else if (c == '}') depth--;
+        if (c == '{')
+          depth++;
+        else if (c == '}')
+          depth--;
       }
       if (depth <= 0) {
         in_cok = false;
@@ -993,8 +995,7 @@ bool Preprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
   std::vector<std::string> all_cok;
 
   auto input_file = OptionRegistry::GetInstance().GetInputFileName();
-  auto input_dir =
-      GetAbsPath(std::filesystem::current_path(), input_file);
+  auto input_dir = GetAbsPath(std::filesystem::current_path(), input_file);
 
   std::regex inc_re("#include\\s+\"(.*)\"");
   for (auto& inc_line : include_lines) {

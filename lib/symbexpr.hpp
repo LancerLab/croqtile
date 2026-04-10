@@ -1325,9 +1325,7 @@ class ExprSum {
   Operand acc_ = nu(0);
 
 public:
-  void operator+=(const Operand& term) {
-    acc_ = bop(OpCode::ADD, acc_, term);
-  }
+  void operator+=(const Operand& term) { acc_ = bop(OpCode::ADD, acc_, term); }
   Operand Get() const { return acc_->Normalize(); }
 };
 

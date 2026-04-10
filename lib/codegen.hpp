@@ -749,8 +749,8 @@ inline const std::string UnScopedExpr(const std::string& input) {
     // Look for the start of a scoped name chain (::identifier or ::$digit).
     if (i + 1 < len && input[i] == ':' && input[i + 1] == ':') {
       char next = (i + 2 < len) ? input[i + 2] : '\0';
-      bool is_scoped = (next == '_' || std::isalpha((unsigned char)next) ||
-                        next == '$');
+      bool is_scoped =
+          (next == '_' || std::isalpha((unsigned char)next) || next == '$');
       if (is_scoped) {
         size_t last_seg_start = 0;
         while (i + 1 < len && input[i] == ':' && input[i + 1] == ':') {
