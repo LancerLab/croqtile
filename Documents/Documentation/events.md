@@ -1,105 +1,104 @@
+# Events
+
 ## Overview
-As `inthreads` introduce MPMD programming pattern in Choreo, it is necessary to synchornize between different asynchronous code. We can use event in Choreo to achieve that.
+
+Events provide communication between asynchronous code blocks in Croqtile. They are the primary mechanism for ordering execution across `inthreads` paths and between different parallel levels.
 
 ## Event Basics
-There are different definitions of `event` in different programming language. In Choreo, the **Event** is used to handle communication and interaction between asynchronous code blocks at different level.
 
-An event in Choreo is either *SET* or *UNSET*. When declaring an event, it is initialized with the *UNSET* state. For example, the following code initialize a `shared` event:
+An event is a binary state variable: either **SET** or **UNSET**. Events are declared with a storage qualifier:
 
-```
-shared event e;
-```
-
-Note that since it is a `shared` event, it can only be declared inside `parallel-by` block and used for parallel threads. Similarly, `global` and `local` events can be defined as well. There is normally restrictions syntactially for either the declarations and value references according to the target platforms.
-
-In addition, you may declare an event array following C-style syntax:
-
-```
-shared event e[4], e1;
+```choreo
+shared event e;           // single event
+shared event e[4], e1;    // event array + single event
 ```
 
-Note it is allowed to use comma-separated expression to define either event and event array in a single line.
+Events follow the same storage rules as spanned data -- `shared` events live inside `parallel-by` blocks, `global` events at the tileflow level.
 
-In Choreo, the `trigger` statements changes the `event` from *UNSET* to *SET* state:
+## `trigger` and `wait`
 
+**`trigger`** changes an event from UNSET to SET:
+
+```choreo
+trigger e, e1;    // trigger multiple events
 ```
-shared event e[4], e1;
 
-trigger e, e1;
+**`wait`** blocks until the event is SET, then **auto-resets** the event to UNSET:
+
+```choreo
+wait e;           // blocks if UNSET, then resets to UNSET
 ```
 
-The `trigger` statement triggers each event in an event array `e`, as well as the single event `e1`, as showed in the comma-separated list.
+The auto-reset behavior means each `trigger` unblocks exactly one `wait`.
 
-Similarly, the `wait` statement can wait for an event in a blocking mannar. The wait statement blocks currentthreads for execution if the event is *UNSET*, until the event state is changed to *SET*.
+## Chaining Asynchronous Code
 
-Therefore, triggering an event is used to unblocking code for the *wait statement*. For example,
+Events chain the execution order of async `inthreads` blocks:
 
-```
+```choreo
 parallel p by 2 {
-  shared event e;                          // init 'e' to 'UNSET'
-  inthreads.async (p == 1) { wait e; }     // wait-thread
-                                           // once unblocked, change 'e' to 'UNSET'
-  inthreads.async (p == 0) { trigger e; }  // trigger-thread
-                                           // convert 'e' to 'SET'
-  sync.shared;                             // sync point
+  shared event e;
+  inthreads.async (p == 1) { wait e; }      // waits for trigger
+  inthreads.async (p == 0) { trigger e; }   // triggers e
+  sync.shared;
 }
 ```
 
-We have observed similar code in last section, except for that there are `wait` and `trigger` statements. In this code snippet, once the event `e` is triggered by the *trigger-thread*, the *wait-thread* is no longer blocking. As a consequent, the two asynchronous threads followed an order to reach the synchronization point defined by `sync.shared`, where thread `0` completes its `inthreads` block before thread `1`. From another perspective, the events here **chains the asynchronous `inthreads`**. This is useful in many scenarios.
-
-Note that, in Choreo semantics, **an event is always auto-reset by its `wait` statement**. That means when a `wait` statement is unblocked, the events that are waited are changed to *UNSET* state.
+Thread 0 triggers `e`, which unblocks thread 1's `wait`. This ensures thread 0's `inthreads` completes before thread 1 proceeds.
 
 ## Event Instances
-In Choreo, events are associated with the storage specifier, either `global`, `shared`, and `local`. Such storage specifier specifies the event instances.
 
-```
+The number of event instances depends on the storage qualifier and parallel structure:
+
+```choreo
 __co__ void foo() {
-  global event ge;     // single instance in the tileflow program
+  global event ge;          // 1 instance
 
-  parallel p by 2 {    // shared level
-    shared event se;   // two instances, 1 for each shared instance
-    parallel q by 6 {  // local level
-      local event le;  // 12 instances in total, 6 for each shared instance
+  parallel p by 2 {
+    shared event se;        // 2 instances (1 per block)
+    parallel q by 6 {
+      local event le;       // 12 instances (6 per block)
     }
   }
 }
 ```
 
-The comments in the above code explain the event instances. The mechanism is same to the spanned data declarations, where storage specifier is also required. From implementation perspective, event can be implement as the leveled boolean data within the specified storage. Therefore, it also takes the storage of this level. However, in concept, the event belongs to a specific level. Therefore, its instance count coresponds to its parallel level.
+Each parallel group at the storage's level gets its own event instance.
 
-## DeadLocks
-By default, the event is lock-free for high-performance synchoronization between different asynchronous blocks. That implies it is risky when multiple threads try to update the event, especially for `wait`.
+## Deadlock Avoidance
 
-For example,
+Since `wait` auto-resets the event, multiple threads waiting on the same event can cause deadlocks:
 
-```
+```choreo
+// DANGEROUS: deadlock possible
 parallel p by 1 {
   shared event e;
-  trigger e;   // one thread set e;
+  trigger e;
   parallel q by 2 {
-    wait e;    // two threads can reset e;
+    wait e;      // thread 0 may reset before thread 1 sees SET
   }
 }
 ```
 
-In this code, two threads wait a single event `e`. However, since `wait` resets the event `e`, it is possible that `thread-0` resets the event before `thread-1` find the `e` has been triggered. As a result, `thread-1` is never unblocked and deadlocking happens.
+Use event arrays to give each thread its own event:
 
-Though such deadlocks are less possible for GPU-like SIMT hardware, where both threads execute in lock-step, it is not safe code for highly asynchronous executing like threading in CPUs. Since Choreo supports multiple levels of asynchronous execution, including different hardware/software, a more robust way is to assign each thread an event for `wait` statements.
-
-```
+```choreo
 qc = 2;
 parallel p by 1 {
   shared event e[qc];
-  trigger e;   // one thread set e[0] and e[1];
+  trigger e;              // triggers e[0] and e[1]
   parallel q by qc {
-    wait e[q]; // no dead lock
+    wait e[q];            // each thread waits its own event
   }
 }
 ```
 
-In this code, we utilize an event array to guarantee each event is waited and reset by a single thread.
+## Events in Practice
 
-## Quick Summary
-In this section, we learnt 'event' that can ochestrate asynchronous `inthreads` blocks. The `trigger` statements can set events and event arrays to *SET* state, while `wait` statements block execution, and reset events to *UNSET* until they are triggered.
+Events are most commonly used in:
 
-Programmers must be careful to use Choreo events, or else it is possible to result in deadlocks, which is hard to debug.
+- **Warp specialization**: Ordering producer and consumer warp groups.
+- **Software pipelining**: Signaling that a buffer is ready for consumption.
+- **Multi-stage pipelines**: Coordinating stages that overlap DMA and compute.
+
+*(Reference: `tests/parse/events.co`, `tests/infer/events.co`, `tests/gpu/check/event_validation.co`)*

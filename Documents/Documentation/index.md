@@ -1,18 +1,66 @@
-# Choreo: A ease-to-use DSL for DMA Orchestration in High-Performance Kernel Programming
+# Croqtile Language Reference
 
-Welcome to the Choreo tutorial! In this guide, we will introduce you to **Choreo**, a specialised C++ **Embedded Domain-Specific Language (eDSL)** designed to simplify the orchestration of **DMA (Direct Memory Access) data transfers** incorporating seamlessly with other heterogeneous programming models, such as **CUDA/Cute**, and more. Whether you're a developer looking to accelerate data movement within your system, or a researcher exploring efficient memory management techniques, this tutorial will help you understand the core features of Choreo and how to use it in your high-performance kernel programming projects.
+Welcome to the **Croqtile Language Reference** -- the comprehensive syntax and semantics guide for Croqtile, a C++ embedded domain-specific language (eDSL) for orchestrating DMA data movement in heterogeneous hardware.
 
+**For a hands-on tutorial and performance tuning guide, see the [Croqtile Tutorial](https://codes1gn.github.io/croktile-tutorial/) (level-0).**
 
-## What You Can Get From This Tutorial
+**For compiler development (building, testing, adding targets), see the [Developer Guide](../Developer/index.md).**
 
-This tutorial is structured to guide you through the essential aspects of working with Choreo:
+This reference (level-2) is for readers who want to understand the language in depth -- its type system, semantic rules, and advanced features.
 
-1. **Walkthrough over several typical high-performance kernel programs**: We will explore common use cases where Choreo simplifies the orchestration of data movement. Through hands-on examples, you'll see how to define and optimize various operators tailored for DMA data transfers.
+---
 
-2. **Walkthrough over some typical optimization patterns**: You'll be introduced to proven optimization strategies to improve performance when using Choreo. We will cover patterns that enhance memory utilization, reduce latency, and increase throughput in your high-performance kernel programming tasks.
+## Table of Contents
 
-3. **Advanced topics on Choreo's design, type systems, syntax, and more**: For those looking to dive deeper into Choreo, we'll explore the underlying design principles, its powerful type system, and the syntax that makes it a flexible tool for kernel developers. Additionally, we will discuss advanced features and techniques to extend Choreo's capabilities to meet the needs of complex projects.
+### Part A -- Foundations
 
-By the end of this tutorial, you'll have a solid understanding of how to leverage Choreo in your own projects, from basic operations to more advanced optimizations and design patterns. Let's get started!
+1. [Introduction](intro.md) -- Audience, relationship to level-0, how to read
+2. [Program Structure](program-structure.md) -- Host/device/tileflow model, function markers, compilation pipeline
+3. [Type System](type-system.md) -- Scalar types, fundamental types, mdspan, spanned, bounded, futures, immutability
+4. [Shapes and mdspan](shapes-and-mdspan.md) -- Defining shapes, derivation, arithmetic, concatenation
+5. [Integers and I-Tuples](integers-and-ituples.md) -- Integer variables, i-tuples, operations, bounded preview
 
-Now, enjoy your time with Choreo!
+### Part B -- Data and Memory
+
+6. [Spanned Data](spanned-data.md) -- Declaring buffers, fundamental types, storage qualifiers, initialization, parameters
+7. [Symbolic and Dynamic Shapes](symbolic-and-dynamic.md) -- Anonymous `?`, symbolic dimensions, runtime checks, limitations
+8. [View Operations](view-operations.md) -- `chunkat`, `span_as`, `view.from`, `subspan.at`, `subspan.step.at`
+
+### Part C -- Control Flow and Parallelism
+
+9. [Parallel-By](parallel-by.md) -- SPMD parallelism, multi-level, sub-levels, annotations, host/device boundary
+10. [Iteration](iteration.md) -- `with-in`, `foreach`, `while`, `break`/`continue`, range expressions
+11. [Thread Masking](thread-masking.md) -- `inthreads`, async masking, multi-level, implicit masking
+
+### Part D -- Data Movement
+
+12. [DMA Basics](dma-basics.md) -- Sync/async, operation types, futures, `wait`
+13. [DMA Tiling](dma-tiling.md) -- View operations in DMA, ubound operator, multi-variable tiling
+14. [DMA Advanced](dma-advanced.md) -- `dma.any`, `swap`/`select`, multi-buffering, swizzle
+15. [TMA](tma.md) -- Tensor Memory Accelerator, bulk copy, SM90+
+
+### Part E -- Compute Primitives
+
+16. [MMA](mma.md) -- Matrix multiply-accumulate: `fill`, `load`, `row.col`, `op`, `store`
+17. [Numerics](numerics.md) -- Builtin functions, transcendentals, type promotion, float variants
+
+### Part F -- Synchronization and Async
+
+18. [Events](events.md) -- `event`, `trigger`, `wait`, deadlock avoidance
+19. [Futures and Async](futures-and-async.md) -- Future semantics, async model, non-blocking chains
+
+### Part G -- C++ Interop
+
+20. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls
+21. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
+22. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
+
+### Part H -- Advanced Topics
+
+23. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
+
+### Appendix
+
+24. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
+25. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
+26. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies

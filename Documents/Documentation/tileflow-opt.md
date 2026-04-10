@@ -1,9 +1,9 @@
-# Tiling Optimisation in Choreo
+# Tiling Optimisation in Croqtile
 
-In this section, we will extend our discussion on tiling optimization in Choreo by examining some practical examples.
+In this section, we will extend our discussion on tiling optimization in Croqtile by examining some practical examples.
 
 ## Example 1: `matmul`
-The first example is matrix multiplication on a device program. This example demonstrates how Choreo's tiling and memory management mechanisms work together to optimize matrix operations, including how DMA (Direct Memory Access) is leveraged for efficient data movement.
+The first example is matrix multiplication on a device program. This example demonstrates how Croqtile's tiling and memory management mechanisms work together to optimize matrix operations, including how DMA (Direct Memory Access) is leveraged for efficient data movement.
 
 ---
 
@@ -26,13 +26,13 @@ __co__ s32 [512, 1024] matmul(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) {
           parallel q by 1 {
             with index = {m_tile_s, k_tile_s, n_tile_s} in [4, 4, 8] {
               // Local buffers for tiling
-              local s32 [128, 256] lhs_load_s_buffer_0 {0}, lhs_load_s_buffer_1 {0};
-              local s32 [256, 128] rhs_load_s_buffer_0 {0}, rhs_load_s_buffer_1 {0};
+              shared s32 [128, 256] lhs_load_s_buffer_0 {0}, lhs_load_s_buffer_1 {0};
+              shared s32 [256, 128] rhs_load_s_buffer_0 {0}, rhs_load_s_buffer_1 {0};
               foreach index {
                 // Add "after" primitive to chain up paired DMA operations
                 lhs_load_s = dma.copy.async lhs_load.data.chunkat(m_tile_s, k_tile_s) => select(k_tile_s % 2, lhs_load_s_buffer_0, lhs_load_s_buffer_1) after lhs_load;
                 rhs_load_s = dma.copy.async rhs_load.data.chunkat(k_tile_s, n_tile_s) => select(k_tile_s % 2, rhs_load_s_buffer_0, rhs_load_s_buffer_1) after rhs_load;
-                out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
+                out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => shared;
                 wait out_load_s;
 
                 // Perform the matrix multiplication (dot product) operation
@@ -83,9 +83,9 @@ __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
     with index={n, h, w} in [N, H, W]/{#q, 16, 512} {
       foreach n, h, w {
         // _ means no tiling
-        input_L1_A = dma.copy input.chunkat(q#n, _, h, w) => local;
+        input_L1_A = dma.copy input.chunkat(q#n, _, h, w) => shared;
         dims : input_L1_A.span[(0), (2), (3)];
-        local f32 [dims] out_L1;
+        shared f32 [dims] out_L1;
         call rgb2gray_kernel_fp32_fp32(input_L1_A.data, out_L1, |out_L1|, 1);
         dma.copy out_L1 => out.chunkat(q#n, h, w);
       }
@@ -111,7 +111,7 @@ In the example above, there is a need to tile the matrices in a manner that invo
 
 - The combination of `q` and `n` ensures that physical and virtual parallelism can work together efficiently.
 - This helps optimize **memory access patterns**, especially when working with large matrices, where efficient memory use is crucial.
-- Choreo's approach here is more aligned with **physical memory hierarchies** (e.g., local/shared memory on GPUs or accelerators). Unlike higher-level loop scheduling techniques like in TVM, which abstract away the actual data movement, Choreo explicitly links **virtual loops** to **physical DMA operations**. This results in more efficient data movement and computation.
+- Croqtile's approach here is more aligned with **physical memory hierarchies** (e.g., local/shared memory on GPUs or accelerators). Unlike higher-level loop scheduling techniques like in TVM, which abstract away the actual data movement, Croqtile explicitly links **virtual loops** to **physical DMA operations**. This results in more efficient data movement and computation.
 
 
 ## Virtual Parallelism and Physical DMA Mapping
@@ -148,22 +148,22 @@ While this freedom allows for a broad set of optimizations, it hides some of the
 - Strength: The system can automatically make optimizations based on heuristics or rules, allowing it to adapt to different hardware architectures or runtime conditions.
 - Weakness: The user has less control over how parallelism is mapped to hardware, which may lead to suboptimal performance in certain cases, especially for complex memory and data movement patterns.
 
-#### The Importance of Explicit Physical Mapping in Choreo
-In contrast to the abstracted approach in TVM, Choreo explicitly represents both virtual parallelism (e.g., through parallel-by, with-in, and foreach constructs) and physical memory operations (e.g., using DMA operations, chunkat, and memory qualifiers).
+#### The Importance of Explicit Physical Mapping in Croqtile
+In contrast to the abstracted approach in TVM, Croqtile explicitly represents both virtual parallelism (e.g., through parallel-by, with-in, and foreach constructs) and physical memory operations (e.g., using DMA operations, chunkat, and memory qualifiers).
 
-By explicitly modeling the mapping of virtual loops to physical DMA operations and memory hierarchies, Choreo ensures that memory access patterns are optimized for the underlying hardware. This allows for fine-grained control over memory management, which can lead to better performance, especially on hardware accelerators like GPUs or custom accelerators.
+By explicitly modeling the mapping of virtual loops to physical DMA operations and memory hierarchies, Croqtile ensures that memory access patterns are optimized for the underlying hardware. This allows for fine-grained control over memory management, which can lead to better performance, especially on hardware accelerators like GPUs or custom accelerators.
 
-#### How Choreo Works to address this limitation?
-In Choreo, the virtual parallelism is clearly defined through bounded variables and loops (e.g., parallel by, foreach).
+#### How Croqtile Works to address this limitation?
+In Croqtile, the virtual parallelism is clearly defined through bounded variables and loops (e.g., parallel by, foreach).
 The physical behavior (e.g., data transfer between memory hierarchies via DMA) is directly controlled and mapped.
 This explicit coupling between virtual parallelism and physical data movement gives users more control over performance optimizations, especially in complex scenarios where manual tuning is required to exploit specific hardware features like memory hierarchies, cache optimizations, and data locality.
 
-In **Choreo**, **DMA operations** explicitly represent data movement between different memory levels, such as from **DRAM** (main memory) to **SRAM** (on-chip memory) and from **SRAM** to **registers**. This explicit control over data movement is crucial for optimizing memory access patterns, particularly on hardware accelerators like GPUs. When performing **tiling**, the **# operator** is used to calculate the **Cartesian product** of bounded variables, which enables the tiling of multiple loop dimensions and directly binds them to **DMA operations**. This provides a tight coupling between **virtual loop dimensions** (e.g., m_tile, k_tile, n_tile) and the actual **physical memory transactions** involved in data movement. 
+In **Croqtile**, **DMA operations** explicitly represent data movement between different memory levels, such as from **DRAM** (main memory) to **SRAM** (on-chip memory) and from **SRAM** to **registers**. This explicit control over data movement is crucial for optimizing memory access patterns, particularly on hardware accelerators like GPUs. When performing **tiling**, the **# operator** is used to calculate the **Cartesian product** of bounded variables, which enables the tiling of multiple loop dimensions and directly binds them to **DMA operations**. This provides a tight coupling between **virtual loop dimensions** (e.g., m_tile, k_tile, n_tile) and the actual **physical memory transactions** involved in data movement. 
 
 The **# operator** combines multiple bounded variables into a **composite variable**, defining a tiling pattern for the data. The resulting tiling improves cache locality and reduces memory access latency by optimizing the movement of data across memory spaces. Once the tiling is defined, **DMA operations** move data from **DRAM** to **SRAM** and from **SRAM** to **local registers** at the correct times. In matrix multiplication, for instance, **dma.copy.async** is used to load chunks of the matrix into **shared memory (SRAM)**, and later from **SRAM** into **registers** for computation. Each **DMA operation** is tied to the tiling pattern defined by the **bounded variables**, ensuring efficient memory access during computation.
 
 The **# operator** for tiling allows multiple **virtual loop dimensions** to be mapped directly to **memory operations**, offering a clear advantage over systems like **TVM**, which abstract away the details of memory operations and parallelism. This explicit mapping of **virtual parallelism** to **physical DMA operations** ensures that data is moved efficiently across the memory hierarchy, improving performance. 
 
-By using the **# operator** to define **multi-dimensional tiling** and explicitly mapping it to **DMA operations**, Choreo gives programmers **fine-grained control** over memory access, leading to improved cache locality and reduced latency. It aligns virtual parallelism with the physical hardware memory hierarchy, providing **better performance** on accelerators by optimizing data movement. This approach of **explicit memory tiling** and **DMA control** ensures that Choreo can leverage the full potential of the hardware, unlike higher-level abstractions that may limit the ability to directly control data movement.
+By using the **# operator** to define **multi-dimensional tiling** and explicitly mapping it to **DMA operations**, Croqtile gives programmers **fine-grained control** over memory access, leading to improved cache locality and reduced latency. It aligns virtual parallelism with the physical hardware memory hierarchy, providing **better performance** on accelerators by optimizing data movement. This approach of **explicit memory tiling** and **DMA control** ensures that Croqtile can leverage the full potential of the hardware, unlike higher-level abstractions that may limit the ability to directly control data movement.
 
 This compact version integrates all the important points without using subheadings, maintaining a more concise, flow-like structure for easier reading.
