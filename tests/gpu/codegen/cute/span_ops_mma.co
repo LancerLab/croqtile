@@ -1,0 +1,160 @@
+// RUN: choreo -es -t cute %s -o - | FileCheck %s
+//
+// Codegen tests for span operations interacting with MMA (mma.load, mma.store).
+// Covers both the span_as offset fix (6484aa31) and the array subscription
+// linearization fix (c262ea58) in the MMA codegen path.
+
+// ---------------------------------------------------------------------------
+// 1. mma.load with span_as (reshape source before loading MMA fragment)
+// ---------------------------------------------------------------------------
+__co__ void test_mma_load_span_as(
+  f16 [8, 16, 64] lhs, f16 [64, 128] rhs, f16 [8, 16, 128] output
+) {
+  parallel {m, n} by [8, 8] : block {
+    mc = mma.fill 0.0;
+    parallel {g0, g1} by [1, 1] : group {
+      mma.fill mc, 0.0f;
+      foreach k in [4] {
+        ma = mma.load lhs.span_as([128, 64]).chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.span_as([128, 128]).chunkat(m#g0, n#g1);
+    }
+  }
+}
+// lhs after span_as: [128,64] chunked by [8,4] => block [16,16]
+// lhs offset = m * (128/8)*64 + k*16 = m*1024 + k*16
+// rhs offset = n*16 + k*(64/4)*128 = n*16 + k*2048
+// output after span_as: [128,128] chunked by [8,8] => block [16,16]
+// output offset = m*2048 + n*16
+// CHECK-LABEL: __global__{{.*}}test_mma_load_span_as
+// CHECK: load_matrix_sync(ma, ((blockIdx.x + __choreo_vgid_x) * 1024 + __iv_k__elem__0 * 16 + lhs), 64)
+// CHECK: load_matrix_sync(mb, ((blockIdx.y + __choreo_vgid_y) * 16 + __iv_k__elem__0 * 2048 + rhs), 128)
+// CHECK: store_matrix_sync(((blockIdx.x + __choreo_vgid_x) * 2048 + (blockIdx.y + __choreo_vgid_y) * 16 + output)
+
+// ---------------------------------------------------------------------------
+// 2. mma.store to shared array  (c262ea58 array subscription)
+// ---------------------------------------------------------------------------
+__co__ void test_mma_store_shared_array(
+  f16 [128, 64] lhs, f16 [64, 128] rhs, f16 [128, 128] output
+) {
+  parallel {m, n} by [2, 8] : block {
+    shared f16 [16, 16] out_s[4];
+    mc = mma.fill 0.0;
+    parallel {g0, g1} by [4, 1] : group {
+      mma.fill mc, 0.0f;
+      foreach k in [4] {
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, out_s[g0];
+    }
+  }
+}
+// out_s[g0]: linearized array offset = g0 * 256  (16*16 = 256 elements)
+// CHECK-LABEL: __global__{{.*}}test_mma_store_shared_array
+// CHECK: store_matrix_sync(((__choreo_vgid_x)*(256) + out_s)
+
+// ---------------------------------------------------------------------------
+// 3. mma.store to 2D shared array  (multi-dimensional array subscription)
+// ---------------------------------------------------------------------------
+__co__ void test_mma_store_2d_array(
+  f16 [128, 64] lhs, f16 [64, 128] rhs, f16 [128, 128] output
+) {
+  parallel {m, n} by [2, 8] : block {
+    shared f16 [16, 16] out_s[4][1];
+    mc = mma.fill 0.0;
+    parallel {g0, g1} by [4, 1] : group {
+      mma.fill mc, 0.0f;
+      foreach k in [4] {
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, out_s[g0][g1];
+    }
+  }
+}
+// out_s[g0][g1]: linearized = (g0*1+g1) * 256
+// CHECK-LABEL: __global__{{.*}}test_mma_store_2d_array
+// CHECK: store_matrix_sync((((__choreo_vgid_x)*1+__choreo_vgid_y)*(256) + out_s)
+
+// ---------------------------------------------------------------------------
+// 4. mma.load from shared array  (array subscription on load side)
+// ---------------------------------------------------------------------------
+__co__ void test_mma_load_shared_array(
+  f16 [128, 64] lhs, f16 [64, 128] rhs, f16 [128, 128] output
+) {
+  parallel {m, n} by [2, 8] : block {
+    shared f16 [16, 16] lhs_s[4];
+    shared f16 [16, 16] rhs_s;
+    mc = mma.fill 0.0;
+    parallel {g0, g1} by [4, 1] : group {
+      mma.fill mc, 0.0f;
+      foreach k in [4] {
+        dma.copy lhs.chunkat(m#g0, k) => lhs_s[g0];
+        dma.copy rhs.chunkat(k, n#g1) => rhs_s;
+        ma = mma.load lhs_s[g0].chunkat(_, _);
+        mb = mma.load rhs_s.chunkat(_, _);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.chunkat(m#g0, n#g1);
+    }
+  }
+}
+// lhs_s[g0]: linearized array offset = g0 * 256
+// CHECK-LABEL: __global__{{.*}}test_mma_load_shared_array
+// CHECK: load_matrix_sync(ma, ((__choreo_vgid_x)*(256) + lhs_s), 16)
+// CHECK: store_matrix_sync(((blockIdx.x * 4 + __choreo_vgid_x) * 2048 + (blockIdx.y + __choreo_vgid_y) * 16 + output)
+
+// ---------------------------------------------------------------------------
+// 5. mma.store with span_as on global output  (offset through reshape)
+// ---------------------------------------------------------------------------
+__co__ void test_mma_store_span_as_global(
+  f16 [128, 64] lhs, f16 [64, 128] rhs, f16 [128, 128] output
+) {
+  parallel {m, n} by [2, 8] : block {
+    mc = mma.fill 0.0;
+    parallel {g0, g1} by [4, 1] : group {
+      mma.fill mc, 0.0f;
+      foreach k in [4] {
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.span_as([128, 128]).chunkat(m#g0, n#g1);
+    }
+  }
+}
+// output.span_as([128,128]) doesn't change anything since it's already [128,128].
+// offset = m*4*128*16 + g0*128*16 + n*16 + g1*16
+// = (m*4+g0)*2048 + (n+g1)*16
+// CHECK-LABEL: __global__{{.*}}test_mma_store_span_as_global
+// CHECK: store_matrix_sync(((blockIdx.x * 4 + __choreo_vgid_x) * 2048 + (blockIdx.y + __choreo_vgid_y) * 16 + output)
+
+// ---------------------------------------------------------------------------
+// 6. mma.load with span_as (reshape 3->2D before mma.load)
+// ---------------------------------------------------------------------------
+__co__ void test_mma_load_span_as_reshape(
+  f16 [4, 32, 64] lhs, f16 [64, 128] rhs, f16 [128, 128] output
+) {
+  parallel {m, n} by [8, 8] : block {
+    mc = mma.fill 0.0;
+    parallel {g0, g1} by [1, 1] : group {
+      mma.fill mc, 0.0f;
+      foreach k in [4] {
+        ma = mma.load lhs.span_as([128, 64]).chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.chunkat(m#g0, n#g1);
+    }
+  }
+}
+// lhs.span_as([128,64]): 3D [4,32,64] -> 2D [128,64], same total size
+// offset = m*1024 + k*16
+// CHECK-LABEL: __global__{{.*}}test_mma_load_span_as_reshape
+// CHECK: load_matrix_sync(ma, ((blockIdx.x + __choreo_vgid_x) * 1024 + __iv_k__elem__0 * 16 + lhs), 64)
+// CHECK: store_matrix_sync(((blockIdx.x + __choreo_vgid_x) * 2048 + (blockIdx.y + __choreo_vgid_y) * 16 + output)

@@ -1305,20 +1305,31 @@ CuteCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
   return {offset.str(), offsets.size()};
 }
 
-// Example:
+// Compute the full flat element-offset for a ChunkAt that contains span_as.
+// All spanned operations (view.from, chunkat, subspan.at, etc.) contribute
+// additively; Reshape (span_as) nodes are boundary markers and are skipped by
+// GenOffset, so the offset accumulates across the reshape boundary.
+//
+// Example 1 - span_as after tiling:
 //
 //   f32 [10, 9, 8] a;
 //   ... a.subspan(2, 9, 8).at(p, _, _).span_as(...);
 //
-// The "Tile Base Offset" (offset ahead of last span_as) is:
+//    offset = p * 2 * (9 * 8)
 //
-//    tbo = p * 2 * (9 * 8)
+// Example 2 - span_as before view/chunkat:
+//
+//   bf16 [B, T, H, K] q;
+//   ... q.span_as([B*T, H, K]).view(LEN, H, K).from(bos, 0, 0)
+//        .chunkat(i_l, i_h, i_k);
+//
+//    offset = bos * H * K + i_l * BL * H * K + i_h * BH * K + i_k * BK
 //
 const std::string
 CuteCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
   auto lidx = ca->IndexOfLastSpanAs();
   if (!lidx.has_value()) choreo_unreachable("unexpect");
-  return ValueSTR(GenOffset(ca, lidx.value()));
+  return ValueSTR(GenOffset(ca));
 }
 
 // given i.sop(...).sop(...)..., generate the offset of the final span in the
@@ -1338,7 +1349,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
     if (isa<AST::SOP::Reshape>(sop)) {
-      return sbe::nu(0);
+      continue;
     } else if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
                isa<AST::SOP::SubSpan>(sop)) {
       auto idx = sop->GetIndices()->Opts();
