@@ -1,0 +1,328 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s
+//
+// Comprehensive codegen tests for span operations (span_as, view.from,
+// subspan.at, chunkat) and their interactions.  Motivated by the fix in
+// 6484aa31 which corrected offset accumulation across span_as boundaries:
+//   - GenOffset must 'continue' past Reshape nodes, not reset to zero.
+//   - TileBaseOffset must call GenOffset(ca) over the full op chain.
+
+// ---------------------------------------------------------------------------
+// 1. span_as before chunkat  (basic reshape + tiling)
+// ---------------------------------------------------------------------------
+__co__ void test_span_as_chunkat(f32 [32, 18, 9] a) {
+  parallel p by 3 : block {
+    with index = {x, y} in [4, 4] {
+      foreach index {
+        dma.copy a.span_as([16, 9, 36]).chunkat(x, p, y) => local;
+      }
+    }
+  }
+}
+// Shape [16,9,36] chunked by [4,3,4] => block [4,3,9].
+// offset = x * (16/4)*(9*36) + p * (9/3)*36 + y * (36/4)
+//        = x * 1296  + p * 108  + y * 9
+// CHECK-LABEL: __global__{{.*}}test_span_as_chunkat
+// CHECK: (float*)a + (blockIdx.x * 108 + __iv_x * 1296 + __iv_y * 9)
+
+// ---------------------------------------------------------------------------
+// 2. span_as before view.from before chunkat  (the commit-fix pattern)
+//    offset must accumulate across the reshape boundary.
+// ---------------------------------------------------------------------------
+__co__ void test_span_as_view_from_chunkat(bf16 [2, 16, 4, 8] q) {
+  parallel i_n by 2 : block {
+    with i_l in [4] {
+      foreach i_l {
+        dma.copy q.span_as([32, 4, 8])
+                  .view(16, 4, 8).from(i_n * 16, 0, 0)
+                  .chunkat(i_l, _, _) => local;
+      }
+    }
+  }
+}
+// view.from offset = i_n * 16 * (4*8) = i_n * 512
+// chunkat offset   = i_l * (16/4) * (4*8) = i_l * 128
+// total            = i_n * 512 + i_l * 128
+// CHECK-LABEL: __global__{{.*}}test_span_as_view_from_chunkat
+// CHECK: (bf16*)q + (blockIdx.x * 512 + __iv_i_l__elem__0 * 128)
+
+// ---------------------------------------------------------------------------
+// 3. view.from then span_as  (reshape after view offset)
+// ---------------------------------------------------------------------------
+__co__ void test_view_from_span_as(f32 [64, 32] a) {
+  // the span_as is valid only when the view window is contiguous!
+  parallel p by 4 : block {
+    dma.copy a.view(16, 32).from(p * 16, 0)
+              .span_as([4, 128]) => shared;
+  }
+}
+// view.from offset = p * 16 * 32 = p * 512
+// span_as reshapes the view window - offset must persist.
+// CHECK-LABEL: __global__{{.*}}test_view_from_span_as
+// CHECK: (float*)a + (blockIdx.x * 512)
+
+// ---------------------------------------------------------------------------
+// 4. subspan.at then span_as  (tiling then reshape)
+// ---------------------------------------------------------------------------
+__co__ void test_subspan_at_span_as(f32 [10, 9, 8] a) {
+  parallel p by 5 : block {
+    with index = {x} in [1] {
+      foreach index {
+        // the span_as is valid only when the tile is contiguous!
+        dma.copy a.subspan(2, 9, 8).at(p, 0, 0).span_as([16, 9]) => local;
+      }
+    }
+  }
+}
+// subspan offset = p * 2 * (9*8) = p * 144
+// CHECK-LABEL: __global__{{.*}}test_subspan_at_span_as
+// CHECK: (float*)a + (blockIdx.x * 144)
+
+// ---------------------------------------------------------------------------
+// 5. span_as on both source and destination
+// ---------------------------------------------------------------------------
+__co__ void test_span_as_src_and_dst(
+  f32 [4, 8, 16] a, f32 [4, 8, 16] b
+) {
+  parallel p by 4 : block {
+    f = dma.copy a.span_as([32, 16]).chunkat(p, _) => shared;
+    dma.copy f => b.span_as([32, 16]).chunkat(p, _);
+  }
+}
+// Both sides: p * (32/4) * 16 = p * 128
+// CHECK-LABEL: __global__{{.*}}test_span_as_src_and_dst
+// CHECK: (float*)a + (blockIdx.x * 128)
+// CHECK: (float*)b + (blockIdx.x * 128)
+
+// ---------------------------------------------------------------------------
+// 6. chunkat then span_as  (span_as as tail operation)
+// ---------------------------------------------------------------------------
+__co__ void test_chunkat_span_as_tail(f32 [16, 8] a) {
+  parallel p by 2 : block {
+    f = dma.copy a.chunkat(p, _).span_as([4, 16]) => shared;
+  }
+}
+// chunkat offset = p * (16/2) * 8 = p * 64
+// span_as reshapes [8,8]->[4,16], offset preserved
+// CHECK-LABEL: __global__{{.*}}test_chunkat_span_as_tail
+// CHECK: (float*)a + (blockIdx.x * 64)
+// CHECK: cute::make_shape(cute::Int<4>{}, cute::Int<16>{})
+
+// ---------------------------------------------------------------------------
+// 7. double span_as  (two reshapes in one chain)
+// ---------------------------------------------------------------------------
+__co__ void test_double_span_as(f32 [8, 4, 16] a) {
+  parallel p by 4 : block {
+    dma.copy a.span_as([32, 16]).chunkat(p, _)
+              .span_as([4, 2, 16]) => shared;
+  }
+}
+// offset = p * (32/4) * 16 = p * 128
+// final shape = [4, 2, 16]
+// CHECK-LABEL: __global__{{.*}}test_double_span_as
+// CHECK: (float*)a + (blockIdx.x * 128)
+// CHECK: cute::make_shape(cute::Int<4>{}, cute::Int<2>{}, cute::Int<16>{})
+
+// ---------------------------------------------------------------------------
+// 8. span_as with dynamic dimensions
+// ---------------------------------------------------------------------------
+__co__ void test_span_as_dynamic(bf16 [B, T, H] q) {
+  parallel i_b by B : block {
+    dma.copy q.span_as([B * T, H]).chunkat(i_b, _) => shared;
+  }
+}
+// offset = i_b * (B*T/B) * H = i_b * T * H
+// CHECK-LABEL: __global__{{.*}}test_span_as_dynamic
+// CHECK: (bf16*)q + (B * T / B * (H * blockIdx.x))
+
+// ---------------------------------------------------------------------------
+// 9. span_as + view.from + chunkat with dynamic dims  (full commit-fix case)
+// ---------------------------------------------------------------------------
+__co__ void test_span_as_dyn_view_chunkat(bf16 [B, T, H, K] q) {
+  int BL = 8;
+  parallel i_n by B : block {
+    with i_l in [cdiv(T, BL)] {
+      foreach i_l {
+        dma.copy q.span_as([B * T, H, K])
+                  .view(T, H, K).from(i_n * T, 0, 0)
+                  .chunkat(i_l, _, _) => local;
+      }
+    }
+  }
+}
+// offset = i_n * T * H * K + i_l * (T / cdiv(T, BL)) * H * K
+// CHECK-LABEL: __global__{{.*}}test_span_as_dyn_view_chunkat
+// CHECK: (bf16*)q + (H * K * (T * blockIdx.x) + T / ((T + 7) / 8) * (H * K * __iv_i_l__elem__0))
+
+// ---------------------------------------------------------------------------
+// 10. subspan.at + span_as + chunkat  (compound chain)
+// ---------------------------------------------------------------------------
+__co__ void test_subspan_span_as_chunkat(f32 [32, 8, 4] a) {
+  parallel p by 4 : block {
+    with index = {x} in [2] {
+      foreach index {
+        dma.copy a.subspan(4, 8, 4).at(p, 0, 0)
+                  .span_as([16, 8]).chunkat(x, _) => local;
+      }
+    }
+  }
+}
+// subspan offset = p * 4 * (8*4) = p * 128
+// chunkat offset = x * (16/2) * 8 = x * 64
+// total          = p * 128 + x * 64
+// CHECK-LABEL: __global__{{.*}}test_subspan_span_as_chunkat
+// CHECK: (float*)a + (blockIdx.x * 128 + __iv_x * 64)
+
+// ---------------------------------------------------------------------------
+// 11. span_as before view.from with multiple chunkat indices
+// ---------------------------------------------------------------------------
+__co__ void test_span_as_view_multi_chunk(bf16 [4, 8, 16, 32] q) {
+  parallel {i_b, i_h} by [4, 2] : block {
+    dma.copy q.span_as([32, 16, 32])
+              .view(8, 16, 32).from(i_b * 8, 0, 0)
+              .chunkat(_, i_h, _) => shared;
+  }
+}
+// view.from offset = i_b * 8 * 16 * 32 = i_b * 4096
+// chunkat offset   = i_h * (16/2) * 32 = i_h * 256
+// total            = i_b * 4096 + i_h * 256
+// CHECK-LABEL: __global__{{.*}}test_span_as_view_multi_chunk
+// CHECK: (bf16*)q + (blockIdx.x * 4096 + blockIdx.y * 256)
+
+// ---------------------------------------------------------------------------
+// 13. destination: chunkat then span_as  (writeback path)
+// ---------------------------------------------------------------------------
+__co__ void test_dst_chunkat_span_as(f32 [64, 32] a, f32 [64, 32] b) {
+  parallel p by 8 : block {
+    f = dma.copy a.chunkat(p, _) => shared;
+    dma.copy f => b.chunkat(p, _).span_as([8, 32]);
+  }
+}
+// Both sides: p * (64/8) * 32 = p * 256
+// CHECK-LABEL: __global__{{.*}}test_dst_chunkat_span_as
+// CHECK: (float*)a + (blockIdx.x * 256)
+// CHECK: (float*)b + (blockIdx.x * 256)
+
+// ---------------------------------------------------------------------------
+// 14. future.span_as  (reshape future result before writeback)
+// ---------------------------------------------------------------------------
+__co__ void test_future_span_as(f32 [32, 18, 9] a, f32 [48, 36] output) {
+  parallel p by 3 : block {
+    with index = {x, y} in [4, 4] {
+      foreach index {
+        f = dma.copy a.span_as([16, 9, 36]).chunkat(x, p, y) => local;
+        dma.copy f.span_as([12, 9]) => output.chunkat(x, y);
+      }
+    }
+  }
+}
+// source offset = p*108 + x*1296 + y*9
+// dest   offset = x * (48/4)*9 + y * (36/4) = x*108 + y*9
+// CHECK-LABEL: __global__{{.*}}test_future_span_as
+// CHECK: (float*)a + (blockIdx.x * 108 + __iv_x * 1296 + __iv_y * 9)
+// CHECK: (float*)output + (__iv_x * 432 + __iv_y * 9)
+
+// ---------------------------------------------------------------------------
+// 15. future.data.span_as  (reshape future data before writeback)
+// ---------------------------------------------------------------------------
+__co__ void test_future_data_span_as(f32 [32, 18, 9] a, f32 [48, 36] output2) {
+  parallel p by 3 : block {
+    with index = {x, y} in [4, 4] {
+      foreach index {
+        f = dma.copy a.span_as([16, 9, 36]).chunkat(x, p, y) => local;
+        dma.copy f.data.span_as([12, 9]) => output2.chunkat(x, y);
+      }
+    }
+  }
+}
+// Same offsets as test 14
+// CHECK-LABEL: __global__{{.*}}test_future_data_span_as
+// CHECK: (float*)a + (blockIdx.x * 108 + __iv_x * 1296 + __iv_y * 9)
+// CHECK: (float*)output2 + (__iv_x * 432 + __iv_y * 9)
+
+// ---------------------------------------------------------------------------
+// 16. view.from with explicit stride
+// ---------------------------------------------------------------------------
+__co__ void test_view_stride(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    dma.copy a.view(16, 8: 12, 3).from(p * 16, 0)
+              .chunkat(_, _) => shared;
+  }
+}
+// view.from offset = p * 16 * 12 = p * 192  (stride 12, not 32)
+// CHECK-LABEL: __global__{{.*}}test_view_stride
+// CHECK: (float*)a + (blockIdx.x * 192)
+
+// ---------------------------------------------------------------------------
+// 17. dma.copy.async with span_as + view.from + chunkat
+// ---------------------------------------------------------------------------
+__co__ void test_async_span_as_view_chunkat(bf16 [4, 8, 4, 8] q) {
+  parallel i_n by 4 : block {
+    with i_l in [4] {
+      foreach i_l {
+        f = dma.copy.async q.span_as([32, 4, 8])
+                            .view(8, 4, 8).from(i_n * 8, 0, 0)
+                            .chunkat(i_l, _, _) => shared;
+        wait f;
+      }
+    }
+  }
+}
+// view.from offset = i_n * 8 * (4*8) = i_n * 256
+// chunkat offset   = i_l * (8/4) * (4*8) = i_l * 64
+// CHECK-LABEL: __global__{{.*}}test_async_span_as_view_chunkat
+// CHECK: (bf16*)q + (blockIdx.x * 256 + __iv_i_l__elem__0 * 64)
+// CHECK: cute::copy(*(AsyncCopyAtom*)f.get_atom()
+
+// ---------------------------------------------------------------------------
+// 18. dma.copy.async span_as on both source and destination
+// ---------------------------------------------------------------------------
+__co__ void test_async_span_as_both(
+  bf16 [4, 8, 4, 8] q, bf16 [4, 8, 4, 8] out
+) {
+  parallel i_n by 4 : block {
+    with i_l in [4] {
+      foreach i_l {
+        f = dma.copy.async q.span_as([32, 4, 8])
+                            .view(8, 4, 8).from(i_n * 8, 0, 0)
+                            .chunkat(i_l, _, _) => shared;
+        wait f;
+        dma.copy f => out.span_as([32, 4, 8])
+                         .view(8, 4, 8).from(i_n * 8, 0, 0)
+                         .chunkat(i_l, _, _);
+      }
+    }
+  }
+}
+// CHECK-LABEL: __global__{{.*}}test_async_span_as_both
+// CHECK: (bf16*)q + (blockIdx.x * 256 + __iv_i_l__elem__0 * 64)
+// CHECK: (bf16*)out + (blockIdx.x * 256 + __iv_i_l__elem__0 * 64)
+
+// ---------------------------------------------------------------------------
+// 19. span_as with concatenated index (x#y)
+// ---------------------------------------------------------------------------
+__co__ void test_span_as_concat_index(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    with index = {x, y} in [4, 2] {
+      foreach index {
+        dma.copy a.span_as([32, 64]).chunkat(x#y, _) => local;
+      }
+    }
+  }
+}
+// concat index: (x*2+y), chunk size = 32/8 = 4, stride = 64
+// offset = (x*2+y) * 4 * 64 = (x*2+y) * 256
+// CHECK-LABEL: __global__{{.*}}test_span_as_concat_index
+// CHECK: (float*)a + ((__iv_x * 2 + __iv_y) * 256)
+
+// ---------------------------------------------------------------------------
+// 21. spanned array element + span_as  (array subscription)
+// ---------------------------------------------------------------------------
+__co__ void test_array_span_as_2(f32 [8, 16] a) {
+  parallel p by 1 : block {
+    shared f32[32] s[4][2];
+    s0 = s[1][1].span_as(4, 8);
+  }
+}
+// Array offset = ((1)*2+1)*32 = 96 elements
+// CHECK-LABEL: __global__{{.*}}test_array_span_as_2
+// CHECK: auto* s0 = static_cast<float*>(s + ((1)*2+1)*(32))

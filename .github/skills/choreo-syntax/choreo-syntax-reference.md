@@ -46,7 +46,7 @@ This inventory is derived from observed `.co` files in `tests/`, `samples/`, and
 - `foreach index { ... }`
 - `foreach idx, m { ... }`
 - Slice controls: `foreach m(1:-1)`, `foreach m(2:)`, `foreach m(:-2)`, `foreach m(:)`
-- `yield;`: make the device (kernel) function return (without any safety check!)
+- `yield;`: make the device function return (without any safety check!)
 
 ## Shapes and bounded expressions
 
