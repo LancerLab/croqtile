@@ -1862,6 +1862,69 @@ struct Policy_D_M16N8 {
   }
 
   template <class Tensor, class AccumT>
+  __device__ static void store_mask_row(Tensor& D, AccumT const* d,
+                                        int row_guard) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group * 2;
+    int col1 = tid_in_group * 2 + 1;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+      D(row0, col0) = cast_if<value_type>(d[0]);
+      D(row0, col1) = cast_if<value_type>(d[1]);
+    }
+    if (row1 < row_guard) {
+      D(row1, col0) = cast_if<value_type>(d[2]);
+      D(row1, col1) = cast_if<value_type>(d[3]);
+    }
+  }
+
+  template <class Tensor, class AccumT>
+  __device__ static void store_mask_col(Tensor& D, AccumT const* d,
+                                        int col_guard) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group * 2;
+    int col1 = tid_in_group * 2 + 1;
+    using value_type = typename Tensor::value_type;
+    if (col0 < col_guard) {
+      D(row0, col0) = cast_if<value_type>(d[0]);
+      D(row1, col0) = cast_if<value_type>(d[2]);
+    }
+    if (col1 < col_guard) {
+      D(row0, col1) = cast_if<value_type>(d[1]);
+      D(row1, col1) = cast_if<value_type>(d[3]);
+    }
+  }
+
+  template <class Tensor, class AccumT>
+  __device__ static void store_mask_row_col(Tensor& D, AccumT const* d,
+                                            int row_guard, int col_guard) {
+    int lane = threadIdx.x & 31;
+    int gid = lane >> 2;
+    int tid_in_group = lane & 3;
+    int row0 = gid;
+    int row1 = gid + 8;
+    int col0 = tid_in_group * 2;
+    int col1 = tid_in_group * 2 + 1;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+      if (col0 < col_guard) D(row0, col0) = cast_if<value_type>(d[0]);
+      if (col1 < col_guard) D(row0, col1) = cast_if<value_type>(d[1]);
+    }
+    if (row1 < row_guard) {
+      if (col0 < col_guard) D(row1, col0) = cast_if<value_type>(d[2]);
+      if (col1 < col_guard) D(row1, col1) = cast_if<value_type>(d[3]);
+    }
+  }
+
+  template <class Tensor, class AccumT>
   __device__ static void store_trans(Tensor& D, AccumT const* d) {
     int lane = threadIdx.x & 31;
     int gid = lane >> 2;
@@ -2225,13 +2288,12 @@ struct Policy_WGMMA_D_M64K16 {
   template <class Tensor, typename AccumT, int N>
   __device__ static void store_mask_row(Tensor& D, AccumT* d, int row_guard) {
     int tid = threadIdx.x % 128;
-    int lane = tid % 32;             // 0-31: lane within warp
-    int warp = tid / 32;             // 0-3: which warp in warp group
-    int row0 = warp * 16 + lane / 4; // first row
-    int row1 = row0 + 8;             // second row
-    int col_num = N / 8;             // number of column pairs
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
     using value_type = typename Tensor::value_type;
-
     if (row0 < row_guard) {
   #pragma unroll
       for (int c = 0; c < col_num; c++) {
@@ -2241,7 +2303,6 @@ struct Policy_WGMMA_D_M64K16 {
         D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
       }
     }
-
     if (row1 < row_guard) {
   #pragma unroll
       for (int c = 0; c < col_num; c++) {
@@ -2254,13 +2315,71 @@ struct Policy_WGMMA_D_M64K16 {
   }
 
   template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_col(Tensor& D, AccumT* d, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      if (col0 < col_guard) {
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      }
+      if (col1 < col_guard) {
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
+                                            int row_guard, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard)
+          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard)
+          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
-    int lane = tid % 32;             // 0-31: lane within warp
-    int warp = tid / 32;             // 0-3: which warp in warp group
-    int row0 = warp * 16 + lane / 4; // fisrt row
-    int row1 = row0 + 8;             // second row
-    int col_num = N / 8;             // number of column pairs
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
     using value_type = typename Tensor::value_type;
   #pragma unroll
     for (int c = 0; c < col_num; c++) {
@@ -2296,6 +2415,93 @@ struct Policy_WGMMA_D_M64K16 {
 
 // Store policy for 64x64x8 WGMMA (accumulator layout matches K=16)
 struct Policy_WGMMA_D_M64K8 {
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row(Tensor& D, AccumT* d, int row_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_col(Tensor& D, AccumT* d, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      if (col0 < col_guard) {
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      }
+      if (col1 < col_guard) {
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
+                                            int row_guard, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard)
+          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard)
+          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
   template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
@@ -2339,14 +2545,37 @@ struct Policy_WGMMA_D_M64K8 {
 
 // Store policy for 64x64x32 WGMMA (accumulator layout matches K=16)
 struct Policy_WGMMA_D_M64K32 {
-  // masked for row < row_guard
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_col(Tensor& D, AccumT* d, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      if (col0 < col_guard) {
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      }
+      if (col1 < col_guard) {
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
   template <class Tensor, typename AccumT, int N>
   __device__ static void store_mask_row(Tensor& D, AccumT* d, int row_guard) {
     int tid = threadIdx.x % 128;
-    int lane = tid % 32;             // 0-31: lane within warp
-    int warp = tid / 32;             // 0-3: which warp in warp group
-    int row0 = warp * 16 + lane / 4; // first row
-    int row1 = row0 + 8;             // second row
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
     int col_num = N / 8;             // number of column pairs
     using value_type = typename Tensor::value_type;
 
@@ -2372,13 +2601,47 @@ struct Policy_WGMMA_D_M64K32 {
   }
 
   template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
+                                            int row_guard, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard)
+          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard)
+          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
-    int lane = tid % 32;             // 0-31: lane within warp
-    int warp = tid / 32;             // 0-3: which warp in warp group
-    int row0 = warp * 16 + lane / 4; // first row
-    int row1 = row0 + 8;             // second row
-    int col_num = N / 8;             // number of column pairs
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
     using value_type = typename Tensor::value_type;
   #pragma unroll
     for (int c = 0; c < col_num; c++) {
@@ -2414,6 +2677,93 @@ struct Policy_WGMMA_D_M64K32 {
 
 // Store policy for 64x64x64 WGMMA (accumulator layout matches K=32 paths)
 struct Policy_WGMMA_D_M64K64 {
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row(Tensor& D, AccumT* d, int row_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_col(Tensor& D, AccumT* d, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      if (col0 < col_guard) {
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      }
+      if (col1 < col_guard) {
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
+                                            int row_guard, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard)
+          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard)
+          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
   template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
@@ -2458,13 +2808,100 @@ struct Policy_WGMMA_D_M64K64 {
 // Store policy for 64x64x256 WGMMA (binary accumulator layout matches K=16)
 struct Policy_WGMMA_D_M64K256 {
   template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row(Tensor& D, AccumT* d, int row_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_col(Tensor& D, AccumT* d, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+  #pragma unroll
+    for (int c = 0; c < col_num; c++) {
+      int col0 = c * 8 + (tid % 4) * 2;
+      int col1 = col0 + 1;
+      if (col0 < col_guard) {
+        D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+      }
+      if (col1 < col_guard) {
+        D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+        D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
+  __device__ static void store_mask_row_col(Tensor& D, AccumT* d,
+                                            int row_guard, int col_guard) {
+    int tid = threadIdx.x % 128;
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
+    using value_type = typename Tensor::value_type;
+    if (row0 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row0, col0) = cast_if<value_type>(d[c * 4]);
+        if (col1 < col_guard)
+          D(row0, col1) = cast_if<value_type>(d[c * 4 + 1]);
+      }
+    }
+    if (row1 < row_guard) {
+  #pragma unroll
+      for (int c = 0; c < col_num; c++) {
+        int col0 = c * 8 + (tid % 4) * 2;
+        int col1 = col0 + 1;
+        if (col0 < col_guard)
+          D(row1, col0) = cast_if<value_type>(d[c * 4 + 2]);
+        if (col1 < col_guard)
+          D(row1, col1) = cast_if<value_type>(d[c * 4 + 3]);
+      }
+    }
+  }
+
+  template <class Tensor, typename AccumT, int N>
   __device__ static void store(Tensor& D, AccumT* d) {
     int tid = threadIdx.x % 128;
-    int lane = tid % 32;             // 0-31: lane within warp
-    int warp = tid / 32;             // 0-3: which warp in warp group
-    int row0 = warp * 16 + lane / 4; // first row
-    int row1 = row0 + 8;             // second row
-    int col_num = N / 8;             // number of column pairs
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col_num = N / 8;
     using value_type = typename Tensor::value_type;
   #pragma unroll
     for (int c = 0; c < col_num; c++) {
@@ -2575,6 +3012,47 @@ store_fragment_d_mask_row(Tensor& D, AccumT* const d, int row_guard) {
   else
     MMA_Policy<MMA>::typeD::template store_mask_row<Tensor, AccumT>(D, d,
                                                                     row_guard);
+}
+
+template <class MMA, int N = 0, class Tensor, class AccumT>
+__device__ static inline void
+store_fragment_d_mask_col(Tensor& D, AccumT* const d, int col_guard) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, double>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "store d only supports float/double/f16/s32 accumulator type");
+  static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
+                    std::is_same<typename Tensor::value_type, AccumT>::value,
+                "store d unsupported type cast");
+  if constexpr (N > 0)
+    MMA_Policy<MMA>::typeD::template store_mask_col<Tensor, AccumT, N>(
+        D, d, col_guard);
+  else
+    MMA_Policy<MMA>::typeD::template store_mask_col<Tensor, AccumT>(D, d,
+                                                                    col_guard);
+}
+
+template <class MMA, int N = 0, class Tensor, class AccumT>
+__device__ static inline void
+store_fragment_d_mask_row_col(Tensor& D, AccumT* const d, int row_guard,
+                              int col_guard) {
+  static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
+  static_assert(std::is_same<AccumT, float>::value ||
+                    std::is_same<AccumT, double>::value ||
+                    std::is_same<AccumT, f16>::value ||
+                    std::is_same<AccumT, s32>::value,
+                "store d only supports float/double/f16/s32 accumulator type");
+  static_assert(AccumTCast<typename Tensor::value_type, AccumT>::supported ||
+                    std::is_same<typename Tensor::value_type, AccumT>::value,
+                "store d unsupported type cast");
+  if constexpr (N > 0)
+    MMA_Policy<MMA>::typeD::template store_mask_row_col<Tensor, AccumT, N>(
+        D, d, row_guard, col_guard);
+  else
+    MMA_Policy<MMA>::typeD::template store_mask_row_col<Tensor, AccumT>(
+        D, d, row_guard, col_guard);
 }
 
 template <class MMA, int N = 0, class Tensor, class AccumT>

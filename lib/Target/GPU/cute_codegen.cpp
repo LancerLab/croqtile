@@ -4221,8 +4221,41 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ++fill_cnt;
     } break;
     case AST::MMAOperation::Load: {
-      // For WGMMA, we store the shared memory pointer for later use in Exec
-      // The actual data should already be in shared memory
+      // Check if loading from a buffer whose shape may not evenly divide
+      // the MMA fragment. Static shared buffers are always tile-sized, but
+      // dynamic-shaped buffers (e.g., global or runtime-sized) may have
+      // dimensions that don't divide evenly by the MMA atom shape.
+      {
+        auto ca = op.LoadFrom();
+        auto parent_sym = ca->RefSymbol();
+        auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
+        if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
+          auto mma_m = ssmi.shape.at(0);
+          auto mma_k = ssmi.shape.at(2);
+          auto src_dim0 = parent_ty->GetShape().ValueAt(0);
+          auto src_dim1 = parent_ty->GetShape().ValueAt(
+              parent_ty->GetShape().Rank() - 1);
+          bool dim0_ok = VIIsInt(src_dim0) && VIIsInt(mma_m) &&
+                         (*VIInt(src_dim0) % *VIInt(mma_m) == 0);
+          bool dim1_ok = VIIsInt(src_dim1) && VIIsInt(mma_k) &&
+                         (*VIInt(src_dim1) % *VIInt(mma_k) == 0);
+          if (!VIIsInt(src_dim0) || !VIIsInt(src_dim1)) {
+            Warning(
+                n.LOC(),
+                "mma.load source buffer '" + parent_sym +
+                    "' has dynamic shape; ensure its dimensions are "
+                    "divisible by the MMA atom shape to avoid "
+                    "out-of-bounds access.");
+          } else if (!dim0_ok || !dim1_ok) {
+            Warning(
+                n.LOC(),
+                "mma.load source buffer '" + parent_sym +
+                    "' has shape that does not evenly divide the MMA "
+                    "atom; this may cause out-of-bounds shared memory "
+                    "access.");
+          }
+        }
+      }
       std::string elem_ty = NameBaseType(ssmi.ty);
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
@@ -4672,6 +4705,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     case AST::MMAOperation::Scale: {
       auto c_sym = AST::FragName(op.ScaleAccumulator());
       if (auto* info = CurrentExplicitScaleAccumForFrag(c_sym)) {
+        if (info->scale_a_valid_rows_expr == "0x3fffffff") {
+          Warning(n.LOC(),
+                  "mma.scale could not determine valid row count for "
+                  "scale_a; assuming all rows are valid. If the scale "
+                  "buffer has fewer rows than the MMA fragment, this "
+                  "may cause out-of-bounds access.");
+        }
         ds << d_indent << "float* " << info->scale_a_name << " = (float*)("
            << info->scale_a_expr << ");\n";
         ds << d_indent << "int " << info->scale_a_valid_rows_name << " = "
@@ -4750,16 +4790,139 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto to_shape = ca->GetBlockShape();
       auto mc_dim_m = ssmi.shape.at(0);
       auto ca_dim_m = to_shape.ValueAt(0);
-      // if ca block shape is smaller than the MMA shape, or ca block shape is a
-      // runtime value, we need to use the masked store variant to avoid
-      // out-of-bounds memory access
-      bool need_m_mask =
-          !VIIsInt(ca_dim_m) || *VIInt(ca_dim_m) < *VIInt(mc_dim_m);
+
+      // --- Mask determination ---
+      bool need_m_mask = false;
+      bool need_n_mask = false;
+      std::string row_guard_expr;
+      std::string col_guard_expr;
+
+      if (op.StoreHasExplicitMask()) {
+        need_m_mask = true;
+        row_guard_expr = ExprSTR(op.StoreRowMask(), IsHost());
+        if (op.StoreColMask()) {
+          need_n_mask = true;
+          col_guard_expr = ExprSTR(op.StoreColMask(), IsHost());
+        }
+        Note(n.LOC(),
+             "mma.store uses explicit mask guard for boundary store.");
+      } else {
+        // Auto-detection: infer mask from tensor shapes and access patterns
+
+        // Row (M) mask - Source 1: block shape < MMA shape or runtime
+        need_m_mask =
+            !VIIsInt(ca_dim_m) || *VIInt(ca_dim_m) < *VIInt(mc_dim_m);
+        if (need_m_mask) {
+          row_guard_expr = ValueSTR(ca_dim_m);
+          Warning(
+              n.LOC(),
+              "mma.store destination block shape (row=" +
+                  ValueSTR(ca_dim_m) +
+                  ") is smaller than the MMA fragment; implicit row masking "
+                  "is applied. Consider using 'mma.store.mask' with an "
+                  "explicit guard instead.");
+        }
+
+        // Row (M) mask - Source 2: parent M not aligned with tile M
+        if (!need_m_mask && f_sty->GetStorage() == Storage::GLOBAL &&
+            !store_trans && !use_stmatrix) {
+          auto parent_sym = ca->RefSymbol();
+          auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
+          if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
+            auto parent_m = parent_ty->GetShape().ValueAt(0);
+            auto tile_m = to_shape.ValueAt(0);
+            if (VIIsInt(tile_m)) {
+              auto tile_m_val = *VIInt(tile_m);
+              bool m_aligned = VIIsInt(parent_m) &&
+                               (*VIInt(parent_m) % tile_m_val == 0);
+              if (!m_aligned) {
+                std::string row_idx_str;
+                for (size_t i = 0; i < ca->OpCount(); ++i) {
+                  const auto& sop = ca->OpAt(i);
+                  if (isa<AST::SOP::Tiling>(sop) ||
+                      isa<AST::SOP::TileAt>(sop) ||
+                      isa<AST::SOP::SubSpan>(sop)) {
+                    auto idx = sop->GetIndices();
+                    if (idx && idx->Count() >= 2) {
+                      row_idx_str =
+                          ExprSTR(idx->ValueAt(0), IsHost());
+                    }
+                  }
+                }
+                if (!row_idx_str.empty()) {
+                  need_m_mask = true;
+                  row_guard_expr = "((int)" + ValueSTR(parent_m) +
+                                   " - (int)(" + row_idx_str + ") * " +
+                                   STR(tile_m_val) + ")";
+                  VST_DEBUG(
+                      dbgs() << n.LOC()
+                             << ": auto-detected row masking for "
+                                "mma.store: parent M dimension ("
+                             << ValueSTR(parent_m)
+                             << ") may not be aligned with tile M ("
+                             << STR(tile_m_val) << ").\n");
+                }
+              }
+            }
+          }
+        }
+
+        // Column (N) mask: parent N not aligned with tile N
+        if (f_sty->GetStorage() == Storage::GLOBAL && !store_trans &&
+            !use_stmatrix) {
+          auto parent_sym = ca->RefSymbol();
+          auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
+          if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
+            auto parent_n = parent_ty->GetShape().ValueAt(
+                parent_ty->GetShape().Rank() - 1);
+            auto tile_n = to_shape.ValueAt(to_shape.Rank() - 1);
+            if (VIIsInt(tile_n)) {
+              auto tile_n_val = *VIInt(tile_n);
+              bool n_aligned = VIIsInt(parent_n) &&
+                               (*VIInt(parent_n) % tile_n_val == 0);
+              if (!n_aligned) {
+                need_n_mask = true;
+                std::string col_idx_str;
+                for (size_t i = 0; i < ca->OpCount(); ++i) {
+                  const auto& sop = ca->OpAt(i);
+                  if (isa<AST::SOP::Tiling>(sop) ||
+                      isa<AST::SOP::TileAt>(sop) ||
+                      isa<AST::SOP::SubSpan>(sop)) {
+                    auto idx = sop->GetIndices();
+                    if (idx && idx->Count() >= 2) {
+                      size_t col_dim = idx->Count() - 1;
+                      col_idx_str =
+                          ExprSTR(idx->ValueAt(col_dim), IsHost());
+                    }
+                  }
+                }
+                if (!col_idx_str.empty()) {
+                  col_guard_expr = "((int)" + ValueSTR(parent_n) +
+                                   " - (int)(" + col_idx_str + ") * " +
+                                   STR(tile_n_val) + ")";
+                  VST_DEBUG(
+                      dbgs() << n.LOC()
+                             << ": auto-detected column masking for "
+                                "mma.store: parent N dimension ("
+                             << ValueSTR(parent_n)
+                             << ") may not be aligned with tile N ("
+                             << STR(tile_n_val) << ").\n");
+                } else {
+                  need_n_mask = false;
+                }
+              }
+            }
+          }
+        }
+      }
+
       if (need_m_mask)
         assert(
             !use_stmatrix && !store_trans &&
-            "currently the masked store only supports non-transpose store to "
+            "masked store only supports non-transpose store to "
             "global memory. Support for more cases can be added if needed.");
+
+      // --- Emit store ---
       if (use_stmatrix) {
         ds << d_indent
            << (store_trans ? "store_fragment_d_stmatrix_trans<"
@@ -4769,18 +4932,46 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
            << ExprSTR(frag, false) << "));\n";
       } else {
-        if (need_m_mask) {
-          ds << d_indent << "store_fragment_d_mask_row<" << CUTE_WGMMA_ATOM
-             << ", " << DIM_N_STR << ">(" << f_mds.first
-             << ", reinterpret_cast<" << NameBaseType(accum_type) << "*>("
-             << ExprSTR(frag, false) << "), " << ValueSTR(ca_dim_m) << ");\n";
+        std::string frag_cast = std::string("reinterpret_cast<") +
+                                NameBaseType(accum_type) + "*>(" +
+                                ExprSTR(frag, false) + ")";
+        std::string full_call =
+            (store_trans ? "store_fragment_d_trans<" : "store_fragment_d<") +
+            CUTE_WGMMA_ATOM + ", " + DIM_N_STR + ">(" + f_mds.first +
+            ", " + frag_cast + ");\n";
+        std::string mma_m_str = ValueSTR(mc_dim_m);
+
+        if (need_m_mask && need_n_mask) {
+          ds << d_indent << "{ int __rg = " << row_guard_expr
+             << "; int __cg = " << col_guard_expr << ";\n";
+          ds << d_indent << "  if (__rg >= " << mma_m_str
+             << " && __cg >= " << DIM_N_STR << ")\n";
+          ds << d_indent << "    " << full_call;
+          ds << d_indent << "  else\n";
+          ds << d_indent << "    store_fragment_d_mask_row_col<"
+             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">("
+             << f_mds.first << ", " << frag_cast << ", __rg, __cg);\n";
+          ds << d_indent << "}\n";
+        } else if (need_m_mask) {
+          ds << d_indent << "{ int __rg = " << row_guard_expr << ";\n";
+          ds << d_indent << "  if (__rg >= " << mma_m_str << ")\n";
+          ds << d_indent << "    " << full_call;
+          ds << d_indent << "  else\n";
+          ds << d_indent << "    store_fragment_d_mask_row<"
+             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">("
+             << f_mds.first << ", " << frag_cast << ", __rg);\n";
+          ds << d_indent << "}\n";
+        } else if (need_n_mask) {
+          ds << d_indent << "{ int __cg = " << col_guard_expr << ";\n";
+          ds << d_indent << "  if (__cg >= " << DIM_N_STR << ")\n";
+          ds << d_indent << "    " << full_call;
+          ds << d_indent << "  else\n";
+          ds << d_indent << "    store_fragment_d_mask_col<"
+             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">("
+             << f_mds.first << ", " << frag_cast << ", __cg);\n";
+          ds << d_indent << "}\n";
         } else {
-          ds << d_indent
-             << (store_trans ? "store_fragment_d_trans<" : "store_fragment_d<")
-             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">(" << f_mds.first
-             << ", "
-             << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
-             << ExprSTR(frag, false) << "));\n";
+          ds << d_indent << full_call;
         }
       }
     } break;
@@ -5031,6 +5222,37 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       auto ssmi = cgi.GetSymbolMMA(InScopeName(sym));
+      // Check for dynamic-shaped or misaligned source buffer
+      {
+        auto parent_sym = ca->RefSymbol();
+        auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
+        if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
+          auto mma_m = ssmi.shape.at(0);
+          auto mma_k = ssmi.shape.at(2);
+          auto src_dim0 = parent_ty->GetShape().ValueAt(0);
+          auto src_dim1 = parent_ty->GetShape().ValueAt(
+              parent_ty->GetShape().Rank() - 1);
+          bool dim0_ok = VIIsInt(src_dim0) && VIIsInt(mma_m) &&
+                         (*VIInt(src_dim0) % *VIInt(mma_m) == 0);
+          bool dim1_ok = VIIsInt(src_dim1) && VIIsInt(mma_k) &&
+                         (*VIInt(src_dim1) % *VIInt(mma_k) == 0);
+          if (!VIIsInt(src_dim0) || !VIIsInt(src_dim1)) {
+            Warning(
+                n.LOC(),
+                "mma.load source buffer '" + parent_sym +
+                    "' has dynamic shape; ensure its dimensions are "
+                    "divisible by the MMA atom shape to avoid "
+                    "out-of-bounds access.");
+          } else if (!dim0_ok || !dim1_ok) {
+            Warning(
+                n.LOC(),
+                "mma.load source buffer '" + parent_sym +
+                    "' has shape that does not evenly divide the MMA "
+                    "atom; this may cause out-of-bounds shared memory "
+                    "access.");
+          }
+        }
+      }
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE") != std::string::npos;
       auto m_val = VIInt(ssmi.shape.at(0));
@@ -5250,11 +5472,129 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           : (policy_is_sparse && shape_is_m16n8k16) ? "CUTE_MMA_SPARSE_M16N8K16"
           : (policy_is_sparse && shape_is_m16n8k64) ? "CUTE_MMA_SPARSE_M16N8K64"
                                                     : GetMMAAtomName(ssmi);
-      ds << d_indent
-         << (op.StoreIsTranspose() ? "store_fragment_d_trans<"
-                                   : "store_fragment_d<")
-         << CUTE_MMA_ATOM << ">(" << f_mds.first << ", " << "reinterpret_cast<"
-         << NameBaseType(ssmi.ty) << "*> (" << ExprSTR(frag, false) << "));\n";
+      const bool store_trans_sync = op.StoreIsTranspose();
+      std::string frag_cast_sync = std::string("reinterpret_cast<") +
+                                   NameBaseType(ssmi.ty) + "*> (" +
+                                   ExprSTR(frag, false) + ")";
+      std::string full_call_sync =
+          (store_trans_sync ? "store_fragment_d_trans<" : "store_fragment_d<") +
+          CUTE_MMA_ATOM + ">(" + f_mds.first + ", " + frag_cast_sync +
+          ");\n";
+
+      // Mask determination for mma.sync stores
+      bool sync_need_m = false, sync_need_n = false;
+      std::string sync_rg, sync_cg;
+
+      if (op.StoreHasExplicitMask()) {
+        sync_need_m = true;
+        sync_rg = ExprSTR(op.StoreRowMask(), IsHost());
+        if (op.StoreColMask()) {
+          sync_need_n = true;
+          sync_cg = ExprSTR(op.StoreColMask(), IsHost());
+        }
+        Note(n.LOC(),
+             "mma.store uses explicit mask guard for boundary store.");
+      } else if (f_sty->GetStorage() == Storage::GLOBAL &&
+                 !store_trans_sync) {
+        auto parent_sym = ca->RefSymbol();
+        auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
+        auto to_shape_sync = ca->GetBlockShape();
+        if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
+          auto parent_m = parent_ty->GetShape().ValueAt(0);
+          auto tile_m = to_shape_sync.ValueAt(0);
+          auto parent_n = parent_ty->GetShape().ValueAt(
+              parent_ty->GetShape().Rank() - 1);
+          auto tile_n = to_shape_sync.ValueAt(to_shape_sync.Rank() - 1);
+
+          auto extract_idx = [&](size_t dim) -> std::string {
+            for (size_t i = 0; i < ca->OpCount(); ++i) {
+              const auto& sop = ca->OpAt(i);
+              if (isa<AST::SOP::Tiling>(sop) ||
+                  isa<AST::SOP::TileAt>(sop) ||
+                  isa<AST::SOP::SubSpan>(sop)) {
+                auto idx = sop->GetIndices();
+                if (idx && idx->Count() >= 2)
+                  return ExprSTR(idx->ValueAt(dim), IsHost());
+              }
+            }
+            return "";
+          };
+
+          if (VIIsInt(tile_m)) {
+            auto tm = *VIInt(tile_m);
+            bool ma = VIIsInt(parent_m) && (*VIInt(parent_m) % tm == 0);
+            if (!ma) {
+              auto ri = extract_idx(0);
+              if (!ri.empty()) {
+                sync_need_m = true;
+                sync_rg = "((int)" + ValueSTR(parent_m) + " - (int)(" +
+                           ri + ") * " + STR(tm) + ")";
+                VST_DEBUG(
+                    dbgs() << n.LOC()
+                           << ": auto-detected row masking for "
+                              "mma.store: parent M dimension ("
+                           << ValueSTR(parent_m)
+                           << ") may not be aligned with tile M ("
+                           << STR(tm) << ").\n");
+              }
+            }
+          }
+          if (VIIsInt(tile_n)) {
+            auto tn = *VIInt(tile_n);
+            bool na = VIIsInt(parent_n) && (*VIInt(parent_n) % tn == 0);
+            if (!na) {
+              auto ci = extract_idx(to_shape_sync.Rank() - 1);
+              if (!ci.empty()) {
+                sync_need_n = true;
+                sync_cg = "((int)" + ValueSTR(parent_n) + " - (int)(" +
+                           ci + ") * " + STR(tn) + ")";
+                VST_DEBUG(
+                    dbgs() << n.LOC()
+                           << ": auto-detected column masking for "
+                              "mma.store: parent N dimension ("
+                           << ValueSTR(parent_n)
+                           << ") may not be aligned with tile N ("
+                           << STR(tn) << ").\n");
+              }
+            }
+          }
+        }
+      }
+
+      auto mma_m_sync = ssmi.shape.at(0);
+      if (sync_need_m && sync_need_n) {
+        ds << d_indent << "{ int __rg = " << sync_rg
+           << "; int __cg = " << sync_cg << ";\n";
+        ds << d_indent << "  if (__rg >= " << ValueSTR(mma_m_sync)
+           << " && __cg >= 8)\n";
+        ds << d_indent << "    " << full_call_sync;
+        ds << d_indent << "  else\n";
+        ds << d_indent << "    store_fragment_d_mask_row_col<"
+           << CUTE_MMA_ATOM << ">(" << f_mds.first << ", "
+           << frag_cast_sync << ", __rg, __cg);\n";
+        ds << d_indent << "}\n";
+      } else if (sync_need_m) {
+        ds << d_indent << "{ int __rg = " << sync_rg << ";\n";
+        ds << d_indent << "  if (__rg >= " << ValueSTR(mma_m_sync)
+           << ")\n";
+        ds << d_indent << "    " << full_call_sync;
+        ds << d_indent << "  else\n";
+        ds << d_indent << "    store_fragment_d_mask_row<"
+           << CUTE_MMA_ATOM << ">(" << f_mds.first << ", "
+           << frag_cast_sync << ", __rg);\n";
+        ds << d_indent << "}\n";
+      } else if (sync_need_n) {
+        ds << d_indent << "{ int __cg = " << sync_cg << ";\n";
+        ds << d_indent << "  if (__cg >= 8)\n";
+        ds << d_indent << "    " << full_call_sync;
+        ds << d_indent << "  else\n";
+        ds << d_indent << "    store_fragment_d_mask_col<"
+           << CUTE_MMA_ATOM << ">(" << f_mds.first << ", "
+           << frag_cast_sync << ", __cg);\n";
+        ds << d_indent << "}\n";
+      } else {
+        ds << d_indent << full_call_sync;
+      }
     } break;
     default: break;
     }

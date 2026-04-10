@@ -189,7 +189,7 @@ extern int yylex();
 // builtin operations
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN
 // MMA related builtin operations
-%token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE
+%token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA
 %token <std::string> FRAG
 // control related
@@ -2053,6 +2053,14 @@ mma_stmt
       }
     | MMA STORE TRANSPOSE frag_expr COMMA chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($4, $6, true);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | MMA STORE MASK frag_expr COMMA chunkat_expr COMMA s_expr COMMA s_expr {
+        auto op = AST::Make<AST::MMAOperation>($4, $6, false, $8, $10);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | MMA STORE MASK frag_expr COMMA chunkat_expr COMMA s_expr {
+        auto op = AST::Make<AST::MMAOperation>($4, $6, false, $8, nullptr);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | MMA COMMIT {

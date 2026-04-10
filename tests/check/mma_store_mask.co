@@ -1,0 +1,137 @@
+// RUN: choreo -gs -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Comprehensive mma.store masking diagnostics test.
+// Tests 4 scenarios in separate kernel functions:
+//   1. Deprecation warning: view().from() with block < MMA fragment
+//   2. Auto-detected row+col masking from unaligned parent tensor
+//   3. Explicit mma.store.mask with row+col guards
+//   4. Explicit mma.store.mask with row guard only
+//   5. Aligned store: no masking diagnostics expected (smoke test)
+
+#define WARP_M 64
+#define WARP_N 128
+#define WARP_K 16
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+
+// --- 1. Deprecation warning: implicit row mask via view(ROWS_M, N) ---
+__co__ void test_deprecated(global f16 [M, K] lhs, global f16 [N, K] rhs,
+                            global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block
+  parallel p by 1 : group-4 {
+    shared f16 [WARP_M, WARP_K] lhs_s;
+    shared f16 [WARP_N, WARP_K] rhs_s;
+    mc = mma.fill.f16 0.0f;
+    ROWS_M = min(WARP_M, M - block_m * WARP_M);
+    foreach {iv_k} in [cdiv(K, WARP_K)] {
+      tma.copy.swiz<128> lhs
+        .subspan(WARP_M, WARP_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs
+        .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
+      ma = mma.load.swiz<128> lhs_s.chunkat(_, _);
+      mb = mma.load.swiz<128> rhs_s.chunkat(_, _);
+      mma.row.row mc, ma, mb;
+    }
+    mma.store mc, output.view(ROWS_M, WARP_N).from(block_m * WARP_M, block_n * WARP_N);
+  }
+}
+
+// --- 2. Auto-detected row + column masking ---
+__co__ void test_auto_detect(global f16 [M, K] lhs, global f16 [N, K] rhs,
+                             global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, WARP_K] lhs_s;
+    shared f16 [WARP_N, WARP_K] rhs_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, WARP_K)] {
+      tma.copy.swiz<128> lhs
+        .subspan(WARP_M, WARP_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs
+        .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load.swiz<128> lhs_s.chunkat(_, _);
+        mb = mma.load.swiz<128> rhs_s.chunkat(_, _);
+        mma.row.row mc, ma, mb;
+      }
+    }
+    mma.store mc, output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+// --- 3. Explicit mask with row + column guards ---
+__co__ void test_explicit_row_col(global f16 [M, K] lhs, global f16 [N, K] rhs,
+                                  global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, WARP_K] lhs_s;
+    shared f16 [WARP_N, WARP_K] rhs_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, WARP_K)] {
+      tma.copy.swiz<128> lhs
+        .subspan(WARP_M, WARP_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs
+        .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load.swiz<128> lhs_s.chunkat(_, _);
+        mb = mma.load.swiz<128> rhs_s.chunkat(_, _);
+        mma.row.row mc, ma, mb;
+      }
+    }
+    row_guard = M - block_m * WARP_M;
+    col_guard = N - block_n * WARP_N;
+    mma.store.mask mc, output.subspan(WARP_M, WARP_N).at(block_m, block_n), row_guard, col_guard;
+  }
+}
+
+// --- 4. Explicit mask with row guard only ---
+__co__ void test_explicit_row(global f16 [M, K] lhs, global f16 [N, K] rhs,
+                              global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, WARP_K] lhs_s;
+    shared f16 [WARP_N, WARP_K] rhs_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, WARP_K)] {
+      tma.copy.swiz<128> lhs
+        .subspan(WARP_M, WARP_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs
+        .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load.swiz<128> lhs_s.chunkat(_, _);
+        mb = mma.load.swiz<128> rhs_s.chunkat(_, _);
+        mma.row.row mc, ma, mb;
+      }
+    }
+    row_guard = M - block_m * WARP_M;
+    mma.store.mask mc, output.subspan(WARP_M, WARP_N).at(block_m, block_n), row_guard;
+  }
+}
+
+// --- 5. Aligned store: no mask diagnostics (smoke test) ---
+#define AM 128
+#define AN 128
+#define AK 16
+
+__co__ void test_aligned(global f16 [AM, AK] lhs, global f16 [AN, AK] rhs,
+                         global f16 [AM, AN] output) {
+  parallel {block_m, block_n} by [cdiv(AM, WARP_M), cdiv(AN, WARP_N)] : block {
+    shared f16 [WARP_M, WARP_K] lhs_s;
+    shared f16 [WARP_N, WARP_K] rhs_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(AK, WARP_K)] {
+      tma.copy.swiz<128> lhs
+        .subspan(WARP_M, WARP_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs
+        .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load.swiz<128> lhs_s.chunkat(_, _);
+        mb = mma.load.swiz<128> rhs_s.chunkat(_, _);
+        mma.row.row mc, ma, mb;
+      }
+    }
+    mma.store mc, output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+// CHECK: warning: mma.store destination block shape {{.*}} is smaller than the MMA fragment; implicit row masking is applied. Consider using 'mma.store.mask' with an explicit guard instead.
+// Auto-detected masking is debug-only output, not shown by default
+// CHECK-NOT: info: auto-detected
+// CHECK: info: mma.store uses explicit mask guard for boundary store.
+// CHECK: info: mma.store uses explicit mask guard for boundary store.
