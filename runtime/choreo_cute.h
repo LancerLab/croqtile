@@ -792,37 +792,68 @@ CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {
 }
 
 template <bool Swizzle, class Element, int ThrRows, int ThrCols, int ValRows,
-          int ValCols, class SrcTensor, class DstTensor, class Pred>
+          int ValCols, int CopyBits = 128, class SrcTensor, class DstTensor,
+          class Pred>
 __device__ static inline void copy_if_g2s(const SrcTensor& src, DstTensor& dst,
                                           Pred pred) {
-  auto tiled_copy = cute::make_tiled_copy(
-      cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>,
-                      Element>{},
-      cute::make_layout(
-          cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
-          cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
-      cute::make_layout(
-          cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
-  auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
-  auto src_thr = thr_copy.partition_S(src);
-  auto dst_thr = [&]() {
-    if constexpr (Swizzle) {
-      auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
-      return thr_copy.partition_D(dst_pi);
-    } else {
-      return thr_copy.partition_D(dst);
+  if constexpr (CopyBits == 128) {
+    auto tiled_copy = cute::make_tiled_copy(
+        cute::Copy_Atom<
+            cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>,
+            Element>{},
+        cute::make_layout(
+            cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
+            cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
+        cute::make_layout(
+            cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
+    auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
+    auto src_thr = thr_copy.partition_S(src);
+    auto dst_thr = [&]() {
+      if constexpr (Swizzle) {
+        auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
+        return thr_copy.partition_D(dst_pi);
+      } else {
+        return thr_copy.partition_D(dst);
+      }
+    }();
+    auto coord_thr =
+        thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
+    auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
+    CUTE_UNROLL
+    for (int i = 0; i < cute::size(pred_thr); ++i) {
+      pred_thr(i) = pred(coord_thr(i));
     }
-  }();
-  auto coord_thr =
-      thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
-  auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
-  CUTE_UNROLL
-  for (int i = 0; i < cute::size(pred_thr); ++i) {
-    pred_thr(i) = pred(coord_thr(i));
+    cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
+    cute::cp_async_fence();
+    cute::cp_async_wait<0>();
+  } else {
+    // Synchronous fallback for non-aligned strides: element-wise
+    // copy with zero-fill for predicated-out elements.
+    auto tiled_copy = cute::make_tiled_copy(
+        cute::Copy_Atom<cute::UniversalCopy<Element>, Element>{},
+        cute::make_layout(
+            cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
+            cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
+        cute::make_layout(
+            cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
+    auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
+    auto src_thr = thr_copy.partition_S(src);
+    auto dst_thr = [&]() {
+      if constexpr (Swizzle) {
+        auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
+        return thr_copy.partition_D(dst_pi);
+      } else {
+        return thr_copy.partition_D(dst);
+      }
+    }();
+    auto coord_thr =
+        thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
+    CUTE_UNROLL
+    for (int i = 0; i < cute::size(dst_thr); ++i) {
+      bool valid = pred(coord_thr(i));
+      dst_thr(i) = valid ? src_thr(i) : Element(0);
+    }
   }
-  cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
-  cute::cp_async_fence();
-  cute::cp_async_wait<0>();
 }
 
 template <class Element, int ThrRows, int ThrCols, int ValRows, int ValCols,
