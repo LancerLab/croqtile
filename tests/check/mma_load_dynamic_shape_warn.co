@@ -1,0 +1,57 @@
+// RUN: choreo -gs -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Test: mma.load warnings for dynamic-shaped source buffers.
+// Static shared buffers always divide the MMA atom, so no warning.
+// Dynamic-shaped buffers (e.g., global) cannot be verified at compile time.
+
+#define WARP_M 64
+#define WARP_N 128
+#define WARP_K 16
+
+// --- 1. Static shared buffer: no warning expected ---
+__co__ void test_static_shared(global f16 [M, K] lhs, global f16 [N, K] rhs,
+                               global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, WARP_K] lhs_s;
+    shared f16 [WARP_N, WARP_K] rhs_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, WARP_K)] {
+      tma.copy.swiz<128> lhs
+        .subspan(WARP_M, WARP_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs
+        .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load.swiz<128> lhs_s;
+        mb = mma.load.swiz<128> rhs_s;
+        mma.row.row mc, ma, mb;
+      }
+    }
+    mma.store mc, output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+// --- 2. mma.load from global buffer (dynamic shape): warning expected ---
+__co__ void test_load_from_global(global f16 [M, K] lhs, global f16 [N, K] rhs,
+                                  global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_N, WARP_K] rhs_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, WARP_K)] {
+      tma.copy.swiz<128> rhs
+        .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load lhs.subspan(WARP_M, WARP_K).at(block_m, iv_k);
+        mb = mma.load.swiz<128> rhs_s;
+        mma.row.row mc, ma, mb;
+      }
+    }
+    mma.store mc, output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+// Static shared buffers should NOT trigger mma.load warning:
+// CHECK-NOT: warning: mma.load source buffer 'lhs_s'
+// CHECK-NOT: warning: mma.load source buffer 'rhs_s'
+
+// Global dynamic buffer should trigger warning:
+// CHECK: warning: mma.load source buffer 'lhs' has dynamic shape

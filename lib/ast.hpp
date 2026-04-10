@@ -2731,6 +2731,8 @@ public:
     ptr<Expr> buffer;
     ptr<ChunkAt> st_expr;
     bool transpose;
+    ptr<Expr> row_mask;
+    ptr<Expr> col_mask;
   };
   struct ScaleInfo {
     ptr<Expr> acc;
@@ -2767,7 +2769,11 @@ public:
         info(ExecInfo{m, o, l, r, nullptr, false, true, scale_a, scale_b}) {}
 
   MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c, bool trans = false)
-      : tag(Store), info(StoreInfo{n, c, trans}) {}
+      : tag(Store), info(StoreInfo{n, c, trans, nullptr, nullptr}) {}
+
+  MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c, bool trans,
+               const ptr<Expr>& row_mask, const ptr<Expr>& col_mask)
+      : tag(Store), info(StoreInfo{n, c, trans, row_mask, col_mask}) {}
 
   MMAOperation() : tag(Commit), info() {}
 
@@ -2838,6 +2844,18 @@ public:
   bool StoreIsTranspose() const {
     if (tag != Store) choreo_unreachable("not a mma store operation.");
     return std::get<3>(info).transpose;
+  }
+  bool StoreHasExplicitMask() const {
+    if (tag != Store) return false;
+    return std::get<3>(info).row_mask != nullptr;
+  }
+  const ptr<Expr> StoreRowMask() const {
+    if (tag != Store) choreo_unreachable("not a mma store operation.");
+    return std::get<3>(info).row_mask;
+  }
+  const ptr<Expr> StoreColMask() const {
+    if (tag != Store) choreo_unreachable("not a mma store operation.");
+    return std::get<3>(info).col_mask;
   }
 
   void SetAsync(bool async = true) {
@@ -2977,7 +2995,8 @@ public:
     }
     case Store:
       return Make<MMAOperation>(CloneP(StoreFrom()), CloneP(StoreTo()),
-                                StoreIsTranspose());
+                                StoreIsTranspose(), CloneP(StoreRowMask()),
+                                CloneP(StoreColMask()));
     case Commit: return Make<MMAOperation>();
     case Scale:
       return Make<MMAOperation>(CloneP(ScaleAccumulator()), CloneP(ScaleA()),
@@ -3018,8 +3037,13 @@ public:
          << PSTR(e_info.rhs);
     } break;
     case Store: {
-      os << "MMA.STORE" << (StoreIsTranspose() ? ".TRANSP" : "") << " "
+      os << "MMA.STORE" << (StoreIsTranspose() ? ".TRANSP" : "")
+         << (StoreHasExplicitMask() ? ".MASK" : "") << " "
          << PSTR(StoreFrom()) << ", " << PSTR(StoreTo());
+      if (StoreRowMask())
+        os << ", " << PSTR(StoreRowMask());
+      if (StoreColMask())
+        os << ", " << PSTR(StoreColMask());
     } break;
     case Commit: os << "MMA.COMMIT"; break;
     case Scale:
