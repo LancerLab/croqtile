@@ -21,7 +21,6 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
     shared event full[STAGES], empty[STAGES];
     shared f16 [TILE_M, TILE_K] lhs_s[STAGES];
     shared f16 [WARP_N, TILE_K] rhs_s[STAGES];
-    shared f16 [WARP_M, WARP_N] output_s[CONSUMERS];
 
     parallel wg by 3 : group-4, t by 128 : thread {
       inthreads.async (wg == 0 && t == 0) {
@@ -52,7 +51,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
           }
           trigger empty[stage];
         }
-
+        shared f16 [WARP_M, WARP_N] output_s[CONSUMERS];
         mma.store mc, output_s[cidx];
         tma.copy output_s[cidx] => output.subspan(WARP_M, WARP_N)
           .at(block_m * CONSUMERS + cidx, block_n);

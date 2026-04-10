@@ -4115,6 +4115,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
 
   if (op.Tag() == AST::MMAOperation::Commit) {
+    saw_explicit_mma_commit = true;
     ds << d_indent << "// Finalize WGMMA operations\n";
     ds << d_indent << "warpgroup_commit_batch();\n";
     ds << d_indent << "warpgroup_wait<0>();\n";
@@ -4704,11 +4705,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       return false;
     } break;
     case AST::MMAOperation::Store: {
-      ds << d_indent << "// Finalize WGMMA operations\n";
-      ds << d_indent << "warpgroup_commit_batch();\n";
-      ds << d_indent << "warpgroup_wait<0>();\n";
-      warpspec_wgmma_arrived = false;
-
+      if (!saw_explicit_mma_commit) {
+        ds << d_indent << "// Finalize WGMMA operations\n";
+        ds << d_indent << "warpgroup_commit_batch();\n";
+        ds << d_indent << "warpgroup_wait<0>();\n";
+        warpspec_wgmma_arrived = false;
+      }
       auto ca = op.StoreTo();
       auto t_sym = ca->data->name;
       auto ty = GetSymbolType(t_sym);
