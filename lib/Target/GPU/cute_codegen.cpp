@@ -321,6 +321,15 @@ void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
   os << indent << "wg_barrier.sync();\n";
 }
 
+void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
+                                    const std::string& indent) {
+  os << indent << "// Finalize WGMMA operations\n";
+  os << indent << "warpgroup_commit_batch();\n";
+  os << indent << "warpgroup_wait<0>();\n";
+  has_pending_wgmma_finalize = false;
+  warpspec_wgmma_arrived = false;
+}
+
 std::optional<CuteCodeGen::HoistedScaleAccumInfo>
 CuteCodeGen::AnalyzeHoistableScaledWGMMAAccum(
     const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const {
@@ -1833,6 +1842,9 @@ bool CuteCodeGen::Visit(AST::ChoreoFunction& n) {
 
   // If there is no AST::Return
   if (return_stream.str().empty() && NeedDeviceFunc()) EmitCudaFree();
+
+  has_pending_wgmma_finalize = false;
+  warpspec_wgmma_arrived = false;
 
   DecrHostIndent();
   hs << "}\n\n";
@@ -4439,14 +4451,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                fsto == Storage::SHARED) {
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
 
-      bool ref_like_mbarrier_store =
-          IsWarpSpecActive() && tma_sync_level == ParallelLevel::GROUPx4;
-
       if (tma_sync_level == ParallelLevel::GROUP)
         ds << d_indent << "__syncwarp();\n";
-      else if (tma_sync_level == ParallelLevel::GROUPx4) {
-        if (!ref_like_mbarrier_store) ds << d_indent << "wg.sync();\n";
-      } else if (NeedWarpSpecGroupX4SyncForCurrentScope())
+      else if (tma_sync_level == ParallelLevel::GROUPx4)
+        EmitGroupX4Sync(ds, d_indent);
+      else if (NeedWarpSpecGroupX4SyncForCurrentScope())
         EmitGroupX4Sync(ds, d_indent);
       else
         ds << d_indent << "__syncthreads();\n";
@@ -4462,8 +4471,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
          << "d_shared_to_global(&" << *tname << "_tensor_map, "
          << ValueSTR(Reverse(GenIndices(t_ca))) << ", " << f_buf_expr << ");\n";
       ds << d_indent << "  cde::cp_async_bulk_commit_group();\n";
-      if (!ref_like_mbarrier_store)
-        ds << d_indent << "  cde::cp_async_bulk_wait_group_read<0>();\n";
       ds << d_indent << "}\n";
       // DO not check or wait. TMA share=>global is special
     }
@@ -4506,11 +4513,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
 
   if (op.Tag() == AST::MMAOperation::Commit) {
-    saw_explicit_mma_commit = true;
-    ds << d_indent << "// Finalize WGMMA operations\n";
-    ds << d_indent << "warpgroup_commit_batch();\n";
-    ds << d_indent << "warpgroup_wait<0>();\n";
-    warpspec_wgmma_arrived = false;
+    EmitWGMMAFinalize(ds, d_indent);
     return true;
   }
 
@@ -4893,6 +4896,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto c_sym = AST::FragName(op.ExecOperand(0));
       auto a_sym = AST::FragName(op.ExecOperand(1));
       auto b_sym = AST::FragName(op.ExecOperand(2));
+      has_pending_wgmma_finalize = true;
       if (!(IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4 &&
             warpspec_wgmma_arrived)) {
         ds << d_indent << "warpgroup_arrive();\n";
@@ -5119,12 +5123,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       return false;
     } break;
     case AST::MMAOperation::Store: {
-      if (!saw_explicit_mma_commit) {
-        ds << d_indent << "// Finalize WGMMA operations\n";
-        ds << d_indent << "warpgroup_commit_batch();\n";
-        ds << d_indent << "warpgroup_wait<0>();\n";
-        warpspec_wgmma_arrived = false;
-      }
+      if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent);
       auto ca = op.StoreTo();
       auto t_sym = ca->data->name;
       auto ty = GetSymbolType(t_sym);

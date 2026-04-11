@@ -200,7 +200,7 @@ private:
   AST::ParallelBy* deferred_cluster_pb = nullptr;
   std::string deferred_spm_decls;
   std::deque<std::string> recent_tma_tx_bytes;
-  bool saw_explicit_mma_commit = false;
+  bool has_pending_wgmma_finalize = false;
   bool wgmma_arrive_state_declared = false;
   std::set<std::string> cluster_trigger_events_;
   bool has_analyzed_warpspec = false;
@@ -353,7 +353,7 @@ private:
     pre_site_assertions.clear();
     post_site_assertions.clear();
     recent_tma_tx_bytes.clear();
-    saw_explicit_mma_commit = false;
+    has_pending_wgmma_finalize = false;
     wgmma_arrive_state_declared = false;
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
@@ -497,6 +497,7 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
+  void EmitWGMMAFinalize(std::ostringstream& os, const std::string& indent);
   std::string LinearizeArrayOffset(const std::string& base_expr,
                                    const std::vector<AST::ptr<AST::Node>>& subs,
                                    const ValueList& array_dims,
