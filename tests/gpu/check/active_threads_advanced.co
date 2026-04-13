@@ -43,7 +43,7 @@ __co__ void test_lt_or_ge(global f16 [M, K] a, global f16 [M, K] b) {
 }
 
 // Test warp-level: inthreads(w == 0) with 4 warps selects first 32 threads
-// No DMA thread count warning expected — 32 active matches GROUP unit size
+// No DMA thread count warning expected -- 32 active matches GROUP unit size
 __co__ void test_warp(global f16 [M, K] a, global f16 [M, K] b) {
   parallel p0 by cdiv(M, 64) : block {
     shared f16 [64, 64] s;
@@ -56,7 +56,7 @@ __co__ void test_warp(global f16 [M, K] a, global f16 [M, K] b) {
   }
 }
 
-// Warnings from CodegenInfoCollect — checked after AST dumps
+// Warnings from CodegenInfoCollect -- checked after AST dumps
 // CHECK: warning: DMA inside inthreads has 64 active threads in a unit, but tiled copy assumes 128 threads
 // CHECK: warning: DMA inside inthreads has 4 active threads in a unit, but tiled copy assumes 128 threads
 // CHECK: warning: DMA inside inthreads has 8 active threads in a unit, but tiled copy assumes 128 threads

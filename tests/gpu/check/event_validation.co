@@ -1,6 +1,6 @@
 // RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
 
-// Test: explicit event<128> but participation spans 256 threads → warning
+// Test: explicit event<128> but participation spans 256 threads -> warning
 __co__ void test_event_count_conflict(global f16 [M, K] a, global f16 [M, K] b) {
   parallel p0 by cdiv(M, 64) : block {
     // CHECK: warning: event 'full' has explicit thread count 256 but computed participation from usage scopes is 129
@@ -28,7 +28,7 @@ __co__ void test_event_count_conflict(global f16 [M, K] a, global f16 [M, K] b) 
   }
 }
 
-// Test: event with matching explicit count → no warning
+// Test: event with matching explicit count -> no warning
 __co__ void test_event_count_matching(global f16 [M, K] a, global f16 [M, K] b) {
   parallel p0 by cdiv(M, 64) : block {
     // CHECK-NOT: warning:{{.*}}full2
