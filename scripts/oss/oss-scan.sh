@@ -112,7 +112,7 @@ scan_content_via_git_grep() {
   local treeish="$1"
   local ctx="$2"
   local matches
-  matches="$(git -C "$REPO_ROOT" grep -nE $CASE_FLAG -- "$COMBINED_PATTERN" "$treeish" 2>/dev/null || true)"
+  matches="$(git -C "$REPO_ROOT" grep -I -nE $CASE_FLAG -- "$COMBINED_PATTERN" "$treeish" 2>/dev/null || true)"
   if [[ -n "$matches" ]]; then
     local count
     count="$(echo "$matches" | wc -l)"
@@ -165,7 +165,7 @@ scan_nonascii_via_git_grep() {
   local treeish="$1"
   local ctx="$2"
   local matches
-  matches="$(git -C "$REPO_ROOT" grep -nP -- "$NON_ASCII_RE" "$treeish" 2>/dev/null || true)"
+  matches="$(git -C "$REPO_ROOT" grep -I -nP -- "$NON_ASCII_RE" "$treeish" 2>/dev/null || true)"
   if [[ -n "$matches" ]]; then
     local count
     count="$(echo "$matches" | wc -l)"
@@ -392,7 +392,7 @@ mode_worktree() {
 
   # Scan contents using git grep on working tree
   local matches
-  matches="$(git -C "$REPO_ROOT" grep -nE $CASE_FLAG -- "$COMBINED_PATTERN" 2>/dev/null || true)"
+  matches="$(git -C "$REPO_ROOT" grep -I -nE $CASE_FLAG -- "$COMBINED_PATTERN" 2>/dev/null || true)"
   if [[ -n "$matches" ]]; then
     local count
     count="$(echo "$matches" | wc -l)"
@@ -405,7 +405,7 @@ mode_worktree() {
 
   # Strict non-ASCII check on worktree
   local na_matches
-  na_matches="$(git -C "$REPO_ROOT" grep -nP -- "$NON_ASCII_RE" 2>/dev/null || true)"
+  na_matches="$(git -C "$REPO_ROOT" grep -I -nP -- "$NON_ASCII_RE" 2>/dev/null || true)"
   if [[ -n "$na_matches" ]]; then
     local na_count
     na_count="$(echo "$na_matches" | wc -l)"
