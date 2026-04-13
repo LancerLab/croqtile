@@ -203,26 +203,52 @@ for commit in "${COMMITS[@]}"; do
     continue
   fi
 
-  # Generate patch for only the included files
-  patch_file="$(mktemp)"
-  git diff --binary "$parent" "$commit" -- "${included[@]}" > "$patch_file"
+  # Cherry-pick with --no-commit so we can strip excluded files.
+  # This uses git's 3-way merge (parent as base), which handles divergent
+  # file content between main and oss/main far better than raw diff+apply.
+  cherry_ok=0
+  git cherry-pick --no-commit "$commit" 2>/dev/null && cherry_ok=1 || cherry_ok=0
 
-  if [[ ! -s "$patch_file" ]]; then
-    echo "SKIP $short: no effective changes for included files"
-    rm -f "$patch_file"
-    SKIPPED=$((SKIPPED+1))
-    continue
+  # Regardless of cherry-pick exit code (conflicts are expected for excluded
+  # files), unstage all excluded files and resolve their conflicts.
+  mapfile -t staged_files < <(git diff --cached --name-only HEAD 2>/dev/null)
+  mapfile -t conflict_files < <(git diff --name-only --diff-filter=U 2>/dev/null)
+
+  # Combine both lists for exclusion processing
+  declare -A seen_excl=()
+  for f in "${staged_files[@]}" "${conflict_files[@]}"; do
+    [[ -z "$f" ]] && continue
+    if is_excluded "$f"; then
+      seen_excl["$f"]=1
+    fi
+  done
+
+  if [[ ${#seen_excl[@]} -gt 0 ]]; then
+    for f in "${!seen_excl[@]}"; do
+      # Restore to oss/main HEAD state (unstage + revert worktree)
+      git reset HEAD -- "$f" >/dev/null 2>&1 || true
+      git checkout HEAD -- "$f" 2>/dev/null || rm -f "$f" 2>/dev/null || true
+    done
   fi
 
-  # Apply the filtered patch
-  if ! git apply --index --3way "$patch_file" 2>&1; then
-    echo "ERROR $short: patch failed to apply."
+  # Check for remaining conflicts on INCLUDED files
+  mapfile -t remaining_conflicts < <(git diff --name-only --diff-filter=U 2>/dev/null)
+  if [[ ${#remaining_conflicts[@]} -gt 0 && -n "${remaining_conflicts[0]}" ]]; then
+    echo "ERROR $short: merge conflicts in included files:"
+    printf '    %s\n' "${remaining_conflicts[@]}"
     echo "  Resolve conflicts manually on '$OSS_BRANCH', then commit."
-    echo "  Patch saved: $patch_file"
+    git cherry-pick --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
     FAILED=$((FAILED+1))
     continue
   fi
-  rm -f "$patch_file"
+
+  # Verify there are actually staged changes for included files
+  if git diff --cached --quiet HEAD 2>/dev/null; then
+    echo "SKIP $short: no effective changes for included files after filtering"
+    git reset --hard HEAD >/dev/null 2>&1
+    SKIPPED=$((SKIPPED+1))
+    continue
+  fi
 
   # ---- GATE 1: scan staged changes for keyword/non-ASCII violations ----
   if [[ $SKIP_SCAN -eq 0 && -f "$KW_FILE" ]]; then
