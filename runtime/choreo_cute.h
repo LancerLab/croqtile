@@ -3188,9 +3188,9 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
 //
 // d[i] += scale_d[i] * scale_a[row] * scale_b
 //
-// Thread→row mapping (M64 WGMMA layout, warpgroup of 128 threads):
-//   row0 = warp*16 + (lane>>2)       ∈ [0..55]
-//   row1 = row0 + 8                  ∈ [8..63]
+// Thread->row mapping (M64 WGMMA layout, warpgroup of 128 threads):
+//   row0 = warp*16 + (lane>>2)       in [0..55]
+//   row1 = row0 + 8                  in [8..63]
 //
 // valid_rows: number of valid rows in scale_a. Threads whose rows
 // exceed this are zeroed. When valid_rows >= 64 (the full M64 tile),
