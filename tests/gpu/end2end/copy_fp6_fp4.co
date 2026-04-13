@@ -47,7 +47,7 @@ int main() {
           choreo::choreo_assert(float(a[i][j][k]) == float(res0[i][j][k]),
                                 "values are not equal.");
 
-    std::cout << "Test 0 Passed\n" << std::endl;
+    std::cout << "pass sync_f6_e3m2" << std::endl;
   }
 
   {
@@ -62,7 +62,7 @@ int main() {
           choreo::choreo_assert(float(a[i][j][k]) == float(res1[i][j][k]),
                                 "values are not equal.");
 
-    std::cout << "Test 1 Passed\n" << std::endl;
+    std::cout << "pass sync_f6_e2m3" << std::endl;
   }
 
   {
@@ -77,10 +77,10 @@ int main() {
           choreo::choreo_assert(float(a[i][j][k]) == float(res2[i][j][k]),
                                 "values are not equal.");
 
-    std::cout << "Test 2 Passed\n" << std::endl;
+    std::cout << "pass sync_f4_e2m1" << std::endl;
   }
 }
 
-// CHECK: Test 0 Passed
-// CHECK: Test 1 Passed
-// CHECK: Test 2 Passed
+// CHECK: pass sync_f6_e3m2
+// CHECK: pass sync_f6_e2m3
+// CHECK: pass sync_f4_e2m1

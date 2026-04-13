@@ -1,0 +1,140 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+// Consolidated from: tma.co, tma_v1.co, tma_fp8.co
+
+// --- tma.co: async copy and multi-subspan ---
+__co__ auto tma_copy_async(f32 [6, 16, 64] input) {
+  f32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = tma.copy.async input => shared;
+    wait f;
+    tma.copy f.data => output;
+  }
+
+  return output;
+}
+
+__co__ auto tma_copy_multi_subspan(f32 [6, 16, 64] input) {
+  f32 [input.span] output;
+
+  parallel p by 2 : block {
+    foreach {x, y} in [3, 8] {
+      sf = tma.copy input.subspan(input.span(0)/#p,   _, _).at(p, 0, 0)
+                        .subspan(input.span(0)/#p/#x, _, input.span(2)/#y).at(x, 0, y) => shared;
+      tma.copy sf => output.subspan(input.span(0)/#p/#x, _, input.span(2)/#y).at(p#x, 0, y);
+    }
+  }
+
+  return output;
+}
+
+// --- tma_fp8.co: double-buffered TMA with f8_e4m3 ---
+__co__ auto tma_ab_buffer_fp8(f8_e4m3 [16, 16, 128] l, f8_e4m3 [16, 16, 128] r) {
+  f32 [l.span] output;
+
+  parallel p by 8 : block {
+    with k in [8] {
+      l0 = tma.copy.async l.chunkat(_,k,p) => shared;
+      r0 = tma.copy.async r.chunkat(_,k,p) => shared;
+      l1 = tma.any;
+      r1 = tma.any;
+      shared f32 [l0.span] out;
+      foreach k(1:) {
+        l1 = tma.copy.async l.chunkat(_,k,p) => shared;
+        r1 = tma.copy.async r.chunkat(_,k,p) => shared;
+        wait l0, r0;
+        foreach index in [l0.span]
+          out.at(index) = l0.data.at(index) + r0.data.at(index);
+        tma.copy out => output.chunkat(_,k-1,p);
+        swap l0, l1;
+        swap r0, r1;
+      }
+      wait l0, r0;
+      foreach index in [l0.span]
+        out.at(index) = l0.data.at(index) + r0.data.at(index);
+      tma.copy out => output.chunkat(_,k(-1),p);
+    }
+  }
+
+  return output;
+}
+
+// --- tma_v1.co: tiled copy across chunked dimension ---
+__co__ auto tma_copy_tiled(f32 [6, 16, 128] input) {
+  f32 [input.span] output;
+
+  parallel p by 32 : block {
+    f = tma.copy.async input.chunkat(_,_,p) => shared;
+    wait f;
+    tma.copy f.data => output.chunkat(_,_,p);
+  }
+
+  return output;
+}
+
+int main() { /// host program
+  {
+    auto a = choreo::make_spandata<choreo::f32>(6, 16, 64);
+    a.fill_random(-10, 10);
+
+    auto res1 = tma_copy_async(a.view());
+
+    for (size_t i = 0; i < res1.shape()[0]; ++i)
+      for (size_t j = 0; j < res1.shape()[1]; ++j)
+        for (size_t k = 0; k < res1.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] == res1[i][j][k], "values are not equal.");
+
+    std::cout << "Test Passed1\n" << std::endl;
+
+    auto res2 = tma_copy_multi_subspan(a.view());
+
+    for (size_t i = 0; i < res2.shape()[0]; ++i)
+      for (size_t j = 0; j < res2.shape()[1]; ++j)
+        for (size_t k = 0; k < res2.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] == res2[i][j][k], "values are not equal.");
+
+    std::cout << "Test Passed2\n" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::f32>(6, 16, 128);
+    a.fill_random(-10.0f, 10.0f);
+
+    auto res1 = tma_copy_tiled(a.view());
+
+    for (size_t i = 0; i < res1.shape()[0]; ++i)
+      for (size_t j = 0; j < res1.shape()[1]; ++j)
+        for (size_t k = 0; k < res1.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] == res1[i][j][k], "values are not equal.");
+
+    std::cout << "Test Passed3\n" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::f8_e4m3>(16, 16, 128);
+    auto b = choreo::make_spandata<choreo::f8_e4m3>(16, 16, 128);
+    a.fill_random(-2.0f, 2.0f);
+    b.fill_random(-2.0f, 2.0f);
+
+    auto res1 = tma_ab_buffer_fp8(a.view(), b.view());
+
+    float tolerance = 0.2f;
+    for (size_t i = 0; i < res1.shape()[0]; ++i)
+      for (size_t j = 0; j < res1.shape()[1]; ++j)
+        for (size_t k = 0; k < res1.shape()[2]; ++k) {
+          float ref = float(a[i][j][k]) + float(b[i][j][k]);
+          float got = float(res1[i][j][k]);
+          choreo::choreo_assert(std::abs(got - ref) <= tolerance,
+                                "values are not equal.");
+        }
+
+    std::cout << "Test Passed4\n" << std::endl;
+  }
+}
+
+// CHECK: Test Passed1
+// CHECK: Test Passed2
+// CHECK: Test Passed3
+// CHECK: Test Passed4

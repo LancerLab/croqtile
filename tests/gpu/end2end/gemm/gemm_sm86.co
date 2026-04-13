@@ -1,0 +1,237 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute -arch=sm_86 %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+// ============ gemm_rc_mma_sync: row*col mma.sync (M=N=K=256) ============
+#define M 256
+#define N 256
+#define K 256
+
+__co__ auto matmul_rc_mma_sync(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int TILE_M = 32, TILE_N = 32, TILE_K = 16;
+  int WARP_M = 16, WARP_N = 16, WARP_K = 16;
+
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill 0.0;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+
+        lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
+
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          ma = mma.load lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load rhs_load_s.chunkat(iv_warp_n, iv_warp_k);
+          mma.row.row mc, ma, mb;
+        }
+      }
+      mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+    }
+  }
+
+  return output;
+}
+
+// ============ gemm_rr_mma_sync: row*row mma.sync (M=N=K=256) ============
+__co__ auto matmul_rr_mma_sync(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int TILE_M = 32, TILE_N = 32, TILE_K = 16;
+  int WARP_M = 16, WARP_N = 16, WARP_K = 16;
+
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+      mc = mma.fill 0.0;
+      foreach {iv_k} in [cdiv(K, TILE_K)] {
+
+        lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
+        rhs_load_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
+
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          ma = mma.load lhs_load_s.chunkat(iv_warp_m, iv_warp_k);
+          mb = mma.load rhs_load_s.chunkat(iv_warp_k, iv_warp_n);
+          mma.row.col mc, ma, mb;
+        }
+      }
+      mma.store mc, output.chunkat(block_m#iv_warp_m, block_n#iv_warp_n);
+    }
+  }
+
+  return output;
+}
+
+#undef M
+#undef N
+#undef K
+
+// ============ gemm_rc_warptiling: row*col warp tiling (M=N=K=128) ============
+#define M 128
+#define N 128
+#define K 128
+
+__co__ auto matmul_rc_warptiling(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int TILE_M = 16, TILE_N = 16, TILE_K = 16;
+  int WARP_M = 16, WARP_N = 16, WARP_K = 16;
+  int THR_M = 8, THR_N = 4;
+
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = dma.copy rhs.chunkat(block_n, iv_k) => shared;
+
+      parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          lhs_load_w = dma.copy lhs_load_s.chunkat(iv_warp_m, iv_warp_k) => local;
+          rhs_load_w = dma.copy rhs_load_s.chunkat(iv_warp_n, iv_warp_k) => local;
+
+          foreach {iv_thr_m, iv_thr_n, iv_thr_k} in [cdiv(WARP_M, THR_M), cdiv(WARP_N, THR_N), WARP_K] {
+            parallel {thr_m, thr_n} by [THR_M, THR_N] : thread {
+              output.at(block_m#iv_warp_m#iv_thr_m#thr_m, block_n#iv_warp_n#iv_thr_n#thr_n) += lhs_load_w.data.at(iv_thr_m#thr_m, iv_thr_k) * rhs_load_w.data.at(iv_thr_n#thr_n, iv_thr_k);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return output;
+}
+
+// ============ gemm_rr_warptiling: row*row warp tiling (M=N=K=128) ============
+__co__ auto matmul_rr_warptiling(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int TILE_M = 32, TILE_N = 32, TILE_K = 16;
+  int WARP_M = 16, WARP_N = 16, WARP_K = 16;
+  int THR_M = 8, THR_N = 4;
+
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block {
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_load_s = dma.copy lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
+
+      parallel {iv_warp_m, iv_warp_n} by [cdiv(TILE_M, WARP_M), cdiv(TILE_N, WARP_N)] : group {
+        foreach iv_warp_k in [cdiv(TILE_K, WARP_K)] {
+          lhs_load_w = dma.copy lhs_load_s.chunkat(iv_warp_m, iv_warp_k) => local;
+          rhs_load_w = dma.copy rhs_load_s.chunkat(iv_warp_k, iv_warp_n) => local;
+
+          foreach {iv_thr_m, iv_thr_n, iv_thr_k} in [cdiv(WARP_M, THR_M), cdiv(WARP_N, THR_N), WARP_K] {
+            parallel {thr_m, thr_n} by [THR_M, THR_N] : thread {
+              output.at(block_m#iv_warp_m#iv_thr_m#thr_m, block_n#iv_warp_n#iv_thr_n#thr_n) += lhs_load_w.data.at(iv_thr_m#thr_m, iv_thr_k) * rhs_load_w.data.at(iv_thr_k, iv_thr_n#thr_n);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return output;
+}
+
+#undef M
+#undef N
+#undef K
+
+static bool check_timing_disabled(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    const char* s = argv[i];
+    const char* t = "--disable-timing";
+    int j = 0;
+    while (t[j] != '\0' && s[j] == t[j]) ++j;
+    if (t[j] == '\0' && s[j] == '\0') return true;
+  }
+  const char* env = std::getenv("CHOREO_DISABLE_TIMING");
+  return env && env[0] == '1' && env[1] == '\0';
+}
+
+int main(int argc, char** argv) {
+  bool disable_timing = check_timing_disabled(argc, argv);
+  float tolerance = 0.005f;
+
+  // --- rc_mma_sync (256x256x256) ---
+  {
+    const int M = 256, N = 256, K = 256;
+    auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+    lhs.fill_random(1.0, 10.0);
+    rhs.fill_random(1.0, 10.0);
+    auto res = matmul_rc_mma_sync(lhs.view(), rhs.view());
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        auto ref = 0.0f;
+        for (size_t k = 0; k < (size_t)K; ++k)
+          ref += __half2float(lhs[i][k] * rhs[j][k]);
+        auto delta = std::abs((ref - __half2float(res[i][j])) / ref);
+        choreo::choreo_assert((delta < tolerance), "values are not equal.");
+      }
+    std::cout << "Test rc_mma_sync Passed\n";
+  }
+
+  // --- rr_mma_sync (256x256x256) ---
+  {
+    const int M = 256, N = 256, K = 256;
+    auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f16>(K, N);
+    lhs.fill_random(1.0, 10.0);
+    rhs.fill_random(1.0, 10.0);
+    auto res = matmul_rr_mma_sync(lhs.view(), rhs.view());
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        auto ref = 0.0f;
+        for (size_t k = 0; k < (size_t)K; ++k)
+          ref += __half2float(lhs[i][k] * rhs[k][j]);
+        auto delta = std::abs((ref - __half2float(res[i][j])) / ref);
+        choreo::choreo_assert((delta < tolerance), "values are not equal.");
+      }
+    std::cout << "Test rr_mma_sync Passed\n";
+  }
+
+  // --- rc_warptiling (128x128x128) ---
+  {
+    const int M = 128, N = 128, K = 128;
+    auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+    lhs.fill_random(1, 10);
+    rhs.fill_random(1, 10);
+    auto res = matmul_rc_warptiling(lhs.view(), rhs.view());
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        __half ref = 0.0f;
+        for (size_t k = 0; k < (size_t)K; ++k)
+          ref += lhs[i][k] * rhs[j][k];
+        auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
+        choreo::choreo_assert((delta < tolerance), "values are not equal.");
+      }
+    std::cout << "Test rc_warptiling Passed\n";
+  }
+
+  // --- rr_warptiling (128x128x128) ---
+  {
+    const int M = 128, N = 128, K = 128;
+    auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f16>(K, N);
+    lhs.fill_random(1, 10);
+    rhs.fill_random(1, 10);
+    auto res = matmul_rr_warptiling(lhs.view(), rhs.view());
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        __half ref = 0.0f;
+        for (size_t k = 0; k < (size_t)K; ++k)
+          ref += lhs[i][k] * rhs[k][j];
+        auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
+        choreo::choreo_assert((delta < tolerance), "values are not equal.");
+      }
+    std::cout << "Test rr_warptiling Passed\n";
+  }
+
+  std::cout << "All Tests Passed\n" << std::endl;
+}
+
+// CHECK: Test rc_mma_sync Passed
+// CHECK: Test rr_mma_sync Passed
+// CHECK: Test rc_warptiling Passed
+// CHECK: Test rr_warptiling Passed
+// CHECK: All Tests Passed

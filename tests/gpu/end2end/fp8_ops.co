@@ -1,0 +1,227 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
+
+// Consolidated from: add_fp8_e4m3_to_f16.co, add_fp8_e5m2_to_f16.co, copy_fp8.co, async_copy_fp8.co
+
+// --- add_fp8_e4m3_to_f16.co: element-wise add f8_e4m3 -> f16 ---
+__co__ auto ele_add_fp8_e4m3(f8_e4m3 [6, 64] lhs, f8_e4m3 [6, 64] rhs) {
+  f16[lhs.span] output;
+
+  parallel p by 6, q by 64
+    output.at(p, q) = lhs.at(p, q) + rhs.at(p, q);
+
+  return output;
+}
+
+// --- add_fp8_e5m2_to_f16.co: element-wise add f8_e5m2 -> f16 ---
+__co__ auto ele_add_fp8_e5m2(f8_e5m2 [6, 64] lhs, f8_e5m2 [6, 64] rhs) {
+  f16[lhs.span] output;
+
+  parallel p by 6, q by 64
+    output.at(p, q) = lhs.at(p, q) + rhs.at(p, q);
+
+  return output;
+}
+
+// --- copy_fp8.co: sync and async DMA round-trip for FP8 types ---
+__co__ auto fp8_dma_copy_sync(f8_e4m3 [6, 17, 64] input) {
+  f8_e4m3 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+__co__ auto fp8_dma_copy_async(f8_e5m2 [6, 17, 64] input) {
+  f8_e5m2 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy.async input => shared;
+    wait f;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+// --- async_copy_fp8.co: group-scope DMA, add with wait ordering ---
+__co__ auto fp8_dma_copy_group(f8_e5m2 [M, 17, 32] input) {
+  f8_e5m2 [input.span] output;
+
+  parallel by 1 : group {
+    f = dma.copy.async input => shared;
+    wait f;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+__co__ auto fp8_dma_add(f8_e5m2 [M, 17, 32] in0, f8_e5m2 [6, N, 32] in1) {
+  f16 [in0.span] output;
+
+  parallel q0 by in1.span(1) : group {
+    f0 = dma.copy.async in0 => shared;
+    f1 = dma.copy.async in1 => shared;
+    wait f0, f1;
+    shared f16 [f0.span] out;
+    foreach x in [in1.span(0)]
+      parallel {q1} by [in1.span(2)]
+        out.at(x, q0, q1) = f0.data.at(x, q0, q1) + f1.data.at(x, q0, q1);
+    dma.copy out => output;
+  }
+
+  return output;
+}
+
+__co__ auto fp8_dma_add1(f8_e5m2 [M, 17, 32] in0, f8_e5m2 [6, N, 32] in1) {
+  f16 [in0.span] output;
+
+  parallel q0 by in1.span(1) : group {
+    f0 = dma.copy.async in0 => shared;
+    f1 = dma.copy.async in1 => shared;
+    wait f1, f0;
+    shared f16 [f0.span] out;
+    foreach x in [in1.span(0)]
+      parallel {q1} by [in1.span(2)]
+        out.at(x, q0, q1) = f0.data.at(x, q0, q1) + f1.data.at(x, q0, q1);
+    dma.copy out => output;
+  }
+
+  return output;
+}
+
+int main() {
+  {
+    using t = choreo::f8_e4m3;
+    auto a = choreo::make_spandata<t>(6, 64);
+    auto b = choreo::make_spandata<t>(6, 64);
+    a.fill_random(-2.0f, 2.0f);
+    b.fill_random(-2.0f, 2.0f);
+
+    auto res = ele_add_fp8_e4m3(a.view(), b.view());
+
+    float tolerance = 0.35f;
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        float ref = float(a[i][j]) + float(b[i][j]);
+        float got = float(res[i][j]);
+        float diff = std::abs(got - ref);
+        if (diff > tolerance)
+          std::cout << "[" << i << ", " << j << "] ref=" << ref << " got=" << got << " diff=" << diff << "\n";
+        choreo::choreo_assert(diff <= tolerance, "values are not equal.");
+      }
+
+    std::cout << "Test add_e4m3 Passed\n" << std::endl;
+  }
+
+  {
+    using t = choreo::f8_e5m2;
+    auto a = choreo::make_spandata<t>(6, 64);
+    auto b = choreo::make_spandata<t>(6, 64);
+    a.fill_random(-2.0f, 2.0f);
+    b.fill_random(-2.0f, 2.0f);
+
+    auto res = ele_add_fp8_e5m2(a.view(), b.view());
+
+    float tolerance = 0.5f;
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        float ref = float(a[i][j]) + float(b[i][j]);
+        float got = float(res[i][j]);
+        float diff = std::abs(got - ref);
+        if (diff > tolerance)
+          std::cout << "[" << i << ", " << j << "] ref=" << ref << " got=" << got << " diff=" << diff << "\n";
+        choreo::choreo_assert(diff <= tolerance, "values are not equal.");
+      }
+
+    std::cout << "Test add_e5m2 Passed\n" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::f8_e4m3>(6, 17, 64);
+    a.fill_random(-2.0f, 2.0f);
+
+    auto res0 = fp8_dma_copy_sync(a.view());
+
+    for (size_t i = 0; i < res0.shape()[0]; ++i)
+      for (size_t j = 0; j < res0.shape()[1]; ++j)
+        for (size_t k = 0; k < res0.shape()[2]; ++k)
+          choreo::choreo_assert(float(a[i][j][k]) == float(res0[i][j][k]), "values are not equal.");
+
+    std::cout << "Test copy_sync Passed\n" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::f8_e5m2>(6, 17, 64);
+    a.fill_random(-2.0f, 2.0f);
+
+    auto res1 = fp8_dma_copy_async(a.view());
+
+    for (size_t i = 0; i < res1.shape()[0]; ++i)
+      for (size_t j = 0; j < res1.shape()[1]; ++j)
+        for (size_t k = 0; k < res1.shape()[2]; ++k)
+          choreo::choreo_assert(float(a[i][j][k]) == float(res1[i][j][k]), "values are not equal.");
+
+    std::cout << "Test copy_async Passed\n" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::f8_e5m2>(6, 17, 32);
+    auto b = choreo::make_spandata<choreo::f8_e5m2>(6, 17, 32);
+    a.fill_random(-2.0f, 2.0f);
+    b.fill_random(-2.0f, 2.0f);
+
+    auto res = fp8_dma_copy_group(a.view());
+
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        for (size_t k = 0; k < res.shape()[2]; ++k)
+          choreo::choreo_assert(float(a[i][j][k]) == float(res[i][j][k]), "values are not equal.");
+
+    std::cout << "Test copy_group Passed\n" << std::endl;
+
+    auto sum = fp8_dma_add(a.view(), b.view());
+
+    float tolerance = 0.35f;
+    for (size_t i = 0; i < sum.shape()[0]; ++i)
+      for (size_t j = 0; j < sum.shape()[1]; ++j)
+        for (size_t k = 0; k < sum.shape()[2]; ++k) {
+          float ref = float(a[i][j][k]) + float(b[i][j][k]);
+          float got = float(sum[i][j][k]);
+          choreo::choreo_assert(std::abs(got - ref) <= tolerance, "values are not equal.");
+        }
+
+    std::cout << "Test dma_add Passed\n" << std::endl;
+
+    auto sum1 = fp8_dma_add1(a.view(), b.view());
+
+    for (size_t i = 0; i < sum1.shape()[0]; ++i)
+      for (size_t j = 0; j < sum1.shape()[1]; ++j)
+        for (size_t k = 0; k < sum1.shape()[2]; ++k) {
+          float ref = float(a[i][j][k]) + float(b[i][j][k]);
+          float got = float(sum1[i][j][k]);
+          choreo::choreo_assert(std::abs(got - ref) <= tolerance, "values are not equal.");
+        }
+
+    std::cout << "Test dma_add1 Passed\n" << std::endl;
+  }
+}
+
+// CHECK-NOT: choreo-rt
+// CHECK: Test add_e4m3 Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test add_e5m2 Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test copy_sync Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test copy_async Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test copy_group Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test dma_add Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test dma_add1 Passed

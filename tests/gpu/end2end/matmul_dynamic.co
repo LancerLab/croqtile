@@ -1,0 +1,176 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CUDA_VISIBLE_DEVICES=1 CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+// Consolidated from: matmul_e4m3_dynamic.co, matmul_f16_dynamic.co
+
+// --- matmul_e4m3_dynamic.co: WGMMA f8_e4m3 row.row ---
+__co__ void matmul_e4m3(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f32 [M, N] output) {
+  int WARP_M = 64, WARP_N = 64, TILE_K = 32, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f8_e4m3 [WARP_M, TILE_K] lhs_load_s;
+    shared f8_e4m3 [WARP_N, TILE_K] rhs_load_s;
+
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      tma.copy.swiz<32>.zfill lhs.subspan(WARP_M, TILE_K).step(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
+
+      tma.copy.swiz<32>.zfill rhs.chunkat(block_n, iv_k) => rhs_load_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<32> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared f32 [WARP_M, WARP_N] output_s;
+    mma.store mc, output_s;
+    
+    tma.copy output_s => output.subspan(WARP_M, WARP_N).step(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+// --- matmul_f16_dynamic.co: WGMMA f16 row.row ---
+__co__ void matmul_f16(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, TILE_K] lhs_load_s;
+    shared f16 [WARP_N, TILE_K] rhs_load_s;
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      tma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
+      tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared f16 [WARP_M, WARP_N] output_s;
+    mma.store mc, output_s;
+
+    tma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+  }
+}
+
+static bool check_timing_disabled(int argc, char** argv) {
+  auto is_disable_timing_arg = [](const char* s) {
+    const char* t = "--disable-timing";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  for (int i = 1; i < argc; ++i)
+    if (is_disable_timing_arg(argv[i])) return true;
+  const char* env = std::getenv("CHOREO_DISABLE_TIMING");
+  return env && env[0] == '1' && env[1] == '\0';
+}
+
+int main(int argc, char** argv) {
+  bool enable_timing = !check_timing_disabled(argc, argv);
+
+  size_t M = 768, N = 512, K = 512;
+
+  {
+    auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    auto res_h = choreo::make_spandata<float>(M, N);
+    lhs_h.fill_random(0, 2);
+    rhs_h.fill_random(0, 2);
+    res_h.fill(0.0f);
+
+    __nv_fp8_e4m3 *a_d = nullptr, *b_d = nullptr;
+    float *c_d = nullptr;
+    cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3));
+    cudaMalloc(&b_d, N * K * sizeof(__nv_fp8_e4m3));
+    cudaMalloc(&c_d, M * N * sizeof(float));
+    cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice);
+    cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice);
+    cudaMemcpy(c_d, res_h.data(), M * N * sizeof(float), cudaMemcpyHostToDevice);
+
+    auto lhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K});
+    auto rhs_d = choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {N, K});
+    auto res_d = choreo::make_spanview<float, 2>(c_d, {M, N});
+
+    if (enable_timing) {
+      choreo::TimerOption topt;
+      topt.warmup = 10;
+      topt.repeat = 50;
+      auto avg_ms = choreo::timing([&]() { matmul_e4m3(lhs_d, rhs_d, res_d); cudaDeviceSynchronize(); }, topt);
+      std::cout << "Timing avg ms: " << avg_ms << "\n";
+    } else {
+      matmul_e4m3(lhs_d, rhs_d, res_d);
+    }
+
+    cudaMemcpy(res_h.data(), c_d, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+
+    float base_tol = 0.3f;
+    float rel_tol = 0.05f;
+    choreo::verify_matmul_row_row_subset(lhs_h, rhs_h, res_h, base_tol, rel_tol, 8, 8);
+    std::cout << "Test e4m3 Passed\n" << std::endl;
+
+    cudaFree(a_d); cudaFree(b_d); cudaFree(c_d);
+  }
+
+  {
+    auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);
+    auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);
+    auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+    lhs_h.fill_random(0, 2);
+    rhs_h.fill_random(0, 2);
+    res_h.fill(0.0f);
+
+    half *a_d = nullptr, *b_d = nullptr, *c_d = nullptr;
+    cudaMalloc(&a_d, M * K * sizeof(half));
+    cudaMalloc(&b_d, N * K * sizeof(half));
+    cudaMalloc(&c_d, M * N * sizeof(half));
+    cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(half), cudaMemcpyHostToDevice);
+    cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(half), cudaMemcpyHostToDevice);
+    cudaMemcpy(c_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
+
+    auto lhs_d = choreo::make_spanview<choreo::f16, 2>(a_d, {M, K});
+    auto rhs_d = choreo::make_spanview<choreo::f16, 2>(b_d, {N, K});
+    auto res_d = choreo::make_spanview<choreo::f16, 2>(c_d, {M, N});
+
+    if (enable_timing) {
+      choreo::TimerOption topt;
+      topt.warmup = 10;
+      topt.repeat = 50;
+      auto avg_ms = choreo::timing([&]() { matmul_f16(lhs_d, rhs_d, res_d); cudaDeviceSynchronize(); }, topt);
+      std::cout << "Timing avg ms: " << avg_ms << "\n";
+    } else {
+      matmul_f16(lhs_d, rhs_d, res_d);
+    }
+
+    cudaMemcpy(res_h.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+
+    float tolerance = 0.005f;
+    for (size_t i = 0; i < M; ++i)
+      for (size_t j = 0; j < N; ++j) {
+        auto ref = 0.0f;
+        for (size_t k = 0; k < lhs_h.shape()[1]; ++k)
+          ref += __half2float(lhs_h[i][k] * rhs_h[j][k]);
+        auto delta = std::abs((ref - __half2float(res_h[i][j])) / ref);
+        if (delta >= tolerance)
+          std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << __half2float(res_h[i][j]) << ", delta: " << delta * 100 << "%\n";
+        choreo::choreo_assert((delta < tolerance), "values are not equal.");
+      }
+
+    std::cout << "Test f16 Passed\n" << std::endl;
+
+    cudaFree(a_d); cudaFree(b_d); cudaFree(c_d);
+  }
+}
+
+// CHECK: Test e4m3 Passed
+// CHECK: Test f16 Passed

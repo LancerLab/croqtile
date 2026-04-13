@@ -1,6 +1,11 @@
 // REQUIRES: TARGET-GPU
 // RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
+// Consolidated from: make_tiled_copy.co, transpose.co, pad.co
+
+#include "choreo.h"
+
+// --- make_tiled_copy.co: tiled shared-mem copy with subspan ---
 __co__ auto ele_add0(s32 [16, 32] lhs, s32 [16, 32] rhs) {
   s32[lhs.span] output;
 
@@ -33,6 +38,58 @@ __co__ auto ele_add1(s8 [16, 33] lhs, s8 [16, 33] rhs) {
       }
       dma.copy lhs_s => output.subspan(ssM, ssN);
     }
+
+  return output;
+}
+
+// --- transpose.co: DMA transpose permutation ---
+__co__ auto do_transpose(s32 [3, 4, 5] a) {
+  s32 [4, 3, 5] o;
+  parallel p by 1 {
+    fa = dma.transp<1,0,2> a => local;
+    dma.copy fa.data => o;
+  }
+  return o;
+}
+
+// --- pad.co: DMA padding ---
+__co__ auto pad(s32 [30, 60] input, int L1, int L2, int H1, int H2, int V) {
+  s32[input.span(0)+L1+H1, input.span(1)+L2+H2] output;
+
+  parallel p by 1 {
+    input_s = dma.copy.async input => shared;
+    wait input_s;
+
+    dma.pad<{L1, L2}, {H1, H2}, {0, 0}, V> input_s.data => output;
+  }
+  return output;
+}
+
+__co__ auto pad2(s32 [30, 60] input, int V) {
+  s32[input.span(0)+2+3, input.span(1)+1+2] output;
+
+  parallel p by 1 {
+    f = dma.pad<{2, 1}, {3, 2}, {0, 0}, V>.async input => shared;
+    wait f;
+
+    dma.copy f.data => output;
+  }
+  return output;
+}
+
+#define PAD_P 4
+#define PAD_Q 16
+
+__co__ auto pad_chunkat(s32 [32, 1024] input, int V) {
+  s32[(input.span(0)/PAD_P+2+3)*PAD_P, (input.span(1)/PAD_Q+1+2)*PAD_Q] output;
+
+  parallel p by PAD_P, t by 1 {
+    foreach q in PAD_Q {
+      f = dma.pad<{2, 1}, {3, 2}, {0, 0}, V>.async input.chunkat(p, q) => shared;
+      wait f;
+      dma.copy f => output.chunkat(p, q);
+    }
+  }
 
   return output;
 }
@@ -77,10 +134,85 @@ void Run1() {
   std::cout << "Test Passed1\n" << std::endl;
 }
 
+void RunTranspose() {
+  auto a = choreo::make_spandata<choreo::s32>(3, 4, 5);
+  a.fill_random(-10, 10);
+
+  auto res = do_transpose(a.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k)
+        choreo::choreo_assert(res[i][j][k] == a[j][i][k], "values are not equal.");
+
+  std::cout << "Test Passed2\n" << std::endl;
+}
+
+void RunPad() {
+  int L1 = 2, L2 = 1;
+  int H1 = 3, H2 = 2;
+  int V = 11;
+
+  auto a = choreo::make_spandata<choreo::s32>(30, 60);
+  a.fill_random(-10, 10);
+
+  auto res = pad(a.view(), L1, L2, H1, H2, V);
+
+  choreo::choreo_assert(
+    res.shape()[0] == a.shape()[0] + L1 + H1 && res.shape()[1] == a.shape()[1] + L2 + H2,
+    "padding shape is wrong."
+  );
+
+  int x1 = L1, y1 = L2;
+  int x2 = x1 + (int)a.shape()[0] - 1;
+  int y2 = y1 + (int)a.shape()[1] - 1;
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      if ((int)i>=x1 && (int)i<=x2 && (int)j>=y1 && (int)j<=y2)
+        choreo::choreo_assert(a[i-x1][j-y1] == res[i][j], "values are not equal.");
+      else
+        choreo::choreo_assert(res[i][j] == V, "values are not equal.");
+    }
+
+  auto res2 = pad2(a.view(), V);
+
+  for (size_t i = 0; i < res2.shape()[0]; ++i)
+    for (size_t j = 0; j < res2.shape()[1]; ++j) {
+      if ((int)i>=x1 && (int)i<=x2 && (int)j>=y1 && (int)j<=y2)
+        choreo::choreo_assert(a[i-x1][j-y1] == res2[i][j], "values are not equal.");
+      else
+        choreo::choreo_assert(res2[i][j] == V, "values are not equal.");
+    }
+
+  auto b = choreo::make_spandata<choreo::s32>(32, 1024);
+  b.fill_random(-10, 10);
+  auto r = pad_chunkat(b.view(), V);
+
+  x2 = x1 + (int)b.shape()[0] / PAD_P - 1;
+  y2 = y1 + (int)b.shape()[1] / PAD_Q - 1;
+
+  for (size_t i = 0; i*13 < r.shape()[0]; ++i)
+    for (size_t j = 0; j*67 < r.shape()[1]; ++j)
+      for (size_t x = 0; x < 13; ++x)
+        for (size_t y = 0; y < 67; ++y) {
+          if ((int)x>=x1 && (int)x<=x2 && (int)y>=y1 && (int)y<=y2)
+            choreo::choreo_assert(b[i*8+x-L1][j*64+y-L2] == r[i*13+x][j*67+y], "values are not equal.");
+          else
+            choreo::choreo_assert(r[i*13+x][j*67+y] == V, "values are not equal.");
+        }
+
+  std::cout << "Test Passed3\n" << std::endl;
+}
+
 int main() {
   Run0();
   Run1();
+  RunTranspose();
+  RunPad();
 }
 
 // CHECK: Test Passed0
 // CHECK: Test Passed1
+// CHECK: Test Passed2
+// CHECK: Test Passed3

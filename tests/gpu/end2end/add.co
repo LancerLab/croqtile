@@ -2,7 +2,10 @@
 // RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 // RUN: choreo -gs -t cute -dd=false %s -o %s.cute.ddfalse.result && bash %s.cute.ddfalse.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.ddfalse.result
 
-__co__ s32 [6, 64] ele_add(s32 [2, 3, 64] lhs, s32 [2, 3, 64] rhs) {
+// Consolidated from: add.co, add-local.co
+
+// --- add.co: element-wise add via span_as reshape ---
+__co__ s32 [6, 64] ele_add_span_as(s32 [2, 3, 64] lhs, s32 [2, 3, 64] rhs) {
   l = lhs.span_as(6, 64);
   r = rhs.span_as(6, 64);
   s32[l.span] output;
@@ -13,24 +16,61 @@ __co__ s32 [6, 64] ele_add(s32 [2, 3, 64] lhs, s32 [2, 3, 64] rhs) {
   return output;
 }
 
-int main() { /// host program
-  auto a = choreo::make_spandata<choreo::s32>(2, 3, 64);
-  auto b = choreo::make_spandata<choreo::s32>(2, 3, 64);
-  a.fill_random(-10, 10);
-  b.fill_random(-10, 10);
+// --- add-local.co: element-wise add with local DMA chunking ---
+__co__ s32 [6, 17, 64] ele_add_local_dma(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
+  s32[lhs.span] output;
 
-  auto res = ele_add(a.view(), b.view());
+  parallel p by 6, q by 64 {
+    lhs_load = dma.copy lhs.chunkat(p, _, q) => local;
+    rhs_load = dma.copy rhs.chunkat(p, _, q) => local;
 
-  // verfication
-  for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; j < res.shape()[1]; ++j) {
-      auto aa = a[i/3][i%3][j];
-      auto bb = b[i/3][i%3][j];
-      if (aa + bb != res[i][j])
-        choreo::choreo_assert(aa + bb == res[i][j], "values are not equal.");
-    }
+    local s32 [lhs_load.span] buffer;
+    foreach x in lhs_load.span
+      buffer.at(x) = lhs_load.data.at(x) + rhs_load.data.at(x);
 
-  std::cout << "Test Passed\n" << std::endl;
+    dma.copy buffer => output.chunkat(p, _, q);
+  }
+  return output;
 }
 
-// CHECK: Test Passed
+int main() { /// host program
+  {
+    auto a = choreo::make_spandata<choreo::s32>(2, 3, 64);
+    auto b = choreo::make_spandata<choreo::s32>(2, 3, 64);
+    a.fill_random(-10, 10);
+    b.fill_random(-10, 10);
+
+    auto res = ele_add_span_as(a.view(), b.view());
+
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        auto aa = a[i/3][i%3][j];
+        auto bb = b[i/3][i%3][j];
+        if (aa + bb != res[i][j])
+          choreo::choreo_assert(aa + bb == res[i][j], "values are not equal.");
+      }
+
+    std::cout << "Test span_as Passed\n" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+    auto b = choreo::make_spandata<choreo::s32>(6, 17, 64);
+    a.fill_random(-10, 10);
+    b.fill_random(-10, 10);
+
+    auto res = ele_add_local_dma(a.view(), b.view());
+
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        for (size_t k = 0; k < res.shape()[2]; ++k) {
+          if (a[i][j][k] + b[i][j][k] != res[i][j][k])
+            choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+
+    std::cout << "Test local_dma Passed\n" << std::endl;
+  }
+}
+
+// CHECK: Test span_as Passed
+// CHECK: Test local_dma Passed

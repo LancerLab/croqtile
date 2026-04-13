@@ -1,0 +1,111 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+// Consolidated from: numerics_core6.co, numerics_transcendental.co
+
+#include <cmath>
+
+// --- numerics_core6.co: sqrt, rsqrt, sin, sinh, cos, cosh ---
+__co__ f32 [512] numerics_core6(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 512 {
+    x = input.at(p);
+    output.at(p) = __sqrt(x + 2.0f) + __rsqrt(x + 2.0f) + __sin(x) +
+                   __sinh(x * 0.25f) + __cos(x) + __cosh(x * 0.25f);
+  }
+  return output;
+}
+
+static float ref_core6(float x) {
+  return std::sqrt(x + 2.0f) + 1.0f / std::sqrt(x + 2.0f) + std::sin(x) +
+         std::sinh(x * 0.25f) + std::cos(x) + std::cosh(x * 0.25f);
+}
+
+// --- numerics_transcendental.co: full transcendental mix + binary ops ---
+__co__ f32 [512] unary_mix(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 512 {
+    x = input.at(p);
+    output.at(p) = __acos(x * 0.5f) + __asin(x * 0.5f) + __atan(x) +
+                   __sin(x) + __cos(x) + __cosh(x * 0.25f) +
+                   __sinh(x * 0.25f) + __exp(x * 0.25f) +
+                   __log(x + 2.5f) + __log1p(x * 0.25f + 0.5f) +
+                   __expm1(x * 0.25f) + __sqrt(x + 2.5f) +
+                   __rsqrt(x + 2.5f) + __tan(x * 0.25f) + __tanh(x);
+  }
+  return output;
+}
+
+__co__ f32 [512] binary_mix(f32 [512] lhs, f32 [512] rhs) {
+  f32[lhs.span(0)] output;
+  parallel p by 512 {
+    x = lhs.at(p);
+    y = rhs.at(p);
+    output.at(p) = __pow(x + 1.5f, y + 1.5f) + __atan2(x, y);
+  }
+  return output;
+}
+
+static float unary_ref(float x) {
+  return std::acos(x * 0.5f) + std::asin(x * 0.5f) + std::atan(x) +
+         std::sin(x) + std::cos(x) + std::cosh(x * 0.25f) +
+         std::sinh(x * 0.25f) + std::exp(x * 0.25f) +
+         std::log(x + 2.5f) + std::log1p(x * 0.25f + 0.5f) +
+         std::expm1(x * 0.25f) + std::sqrt(x + 2.5f) +
+         1.0f / std::sqrt(x + 2.5f) + std::tan(x * 0.25f) + std::tanh(x);
+}
+
+static float binary_ref(float x, float y) {
+  return std::pow(x + 1.5f, y + 1.5f) + std::atan2(x, y);
+}
+
+int main() {
+  {
+    auto input = choreo::make_spandata<choreo::f32>(512);
+    input.fill_random(-0.5f, 1.0f);
+    auto res = numerics_core6(input.view());
+
+    for (size_t i = 0; i < 512; ++i) {
+      float ref = ref_core6(input[i]);
+      float got = res[i];
+      float tol = 2e-4f + 2e-4f * std::abs(ref);
+      choreo::choreo_assert(std::abs(got - ref) <= tol,
+                            "core6 numerics mismatch.");
+    }
+
+    std::cout << "Test core6 Passed\n" << std::endl;
+  }
+
+  {
+    auto input = choreo::make_spandata<choreo::f32>(512);
+    input.fill_random(-0.5f, 1.0f);
+    auto res = unary_mix(input.view());
+
+    for (size_t i = 0; i < 512; ++i) {
+      float ref = unary_ref(input[i]);
+      float got = res[i];
+      float tol = 2e-4f + 2e-4f * std::abs(ref);
+      choreo::choreo_assert(std::abs(got - ref) <= tol,
+                            "unary numerics mismatch.");
+    }
+
+    auto lhs = choreo::make_spandata<choreo::f32>(512);
+    auto rhs = choreo::make_spandata<choreo::f32>(512);
+    lhs.fill_random(-0.5f, 1.0f);
+    rhs.fill_random(-0.5f, 1.0f);
+    auto res2 = binary_mix(lhs.view(), rhs.view());
+
+    for (size_t i = 0; i < 512; ++i) {
+      float ref = binary_ref(lhs[i], rhs[i]);
+      float got = res2[i];
+      float tol = 2e-4f + 2e-4f * std::abs(ref);
+      choreo::choreo_assert(std::abs(got - ref) <= tol,
+                            "binary numerics mismatch.");
+    }
+
+    std::cout << "Test transcendental Passed\n" << std::endl;
+  }
+}
+
+// CHECK: Test core6 Passed
+// CHECK: Test transcendental Passed
