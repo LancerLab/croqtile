@@ -22,6 +22,7 @@ usage() {
   cat <<'EOF'
 Usage: oss-push.sh [options] <commit> [<commit>...]
        oss-push.sh [options] --range <from>..<to>
+       oss-push.sh [options] --catchup
 
 Cherry-pick commits to the local oss/ branch, filtering excluded paths
 and running a full oss-scan gate before each commit.
@@ -34,17 +35,20 @@ Options:
   -k <file>       Keyword file
   -n              Dry run: show what would happen without committing
   --no-scan       Skip keyword scan (use with caution)
+  --catchup       Auto-detect unsynced commits on main and push them all
   --push [remote] After all commits, push oss/main to remote (default: origin)
   --range <r>     Expand a revision range via git rev-list --reverse
   -h              Show help
 
 Workflow:
-  1. Cherry-pick each commit (path-filtered)
-  2. Run oss-scan on staged changes (keyword, non-ASCII, ghost-ref)
-  3. Run oss-scan --tree on the full oss/main tree after commit
-  4. If scan fails -> reset and report error
-  5. After all commits, show summary
-  6. Only push if --push is given; otherwise prompt
+  1. Build set of already-synced SHAs from oss/main cherry-pick trailers
+  2. Skip commits already synced (avoids duplicate/conflict errors)
+  3. Cherry-pick each new commit (path-filtered)
+  4. Run oss-scan on staged changes (keyword, non-ASCII, ghost-ref)
+  5. Run oss-scan --tree on the full oss/main tree after commit
+  6. If scan fails -> reset and report error
+  7. After all commits, show summary
+  8. Only push if --push is given; otherwise prompt
 
 Each commit's original author, date, and message are preserved, with a
 trailer noting the source SHA. Made-with:/Generated-by: trailers are
@@ -52,6 +56,7 @@ stripped automatically.
 EOF
 }
 
+CATCHUP=0
 COMMITS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -60,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     -k)        KW_FILE="$2"; shift 2 ;;
     -n)        DRY_RUN=1; shift ;;
     --no-scan) SKIP_SCAN=1; shift ;;
+    --catchup) CATCHUP=1; shift ;;
     --push)
       DO_PUSH=1
       if [[ "${2:-}" != "" && "${2:-}" != -* && "${2:-}" != "" ]]; then
@@ -76,8 +82,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ${#COMMITS[@]} -eq 0 ]]; then
-  echo "Error: no commits specified" >&2
+if [[ $CATCHUP -eq 0 && ${#COMMITS[@]} -eq 0 ]]; then
+  echo "Error: no commits specified (or use --catchup)" >&2
   usage
   exit 2
 fi
@@ -156,16 +162,98 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# -------- build set of already-synced main SHAs from oss/main trailers --------
+
+declare -A SYNCED_SHAS=()
+LATEST_SYNCED_SHA=""
+
+build_synced_set() {
+  local found_latest=0
+  while IFS= read -r line; do
+    local sha
+    sha="$(echo "$line" | grep -oP '(?<=cherry picked from )\w+' || true)"
+    if [[ -n "$sha" ]]; then
+      local full
+      full="$(git rev-parse "$sha" 2>/dev/null || true)"
+      if [[ -n "$full" ]]; then
+        SYNCED_SHAS["$full"]=1
+        if [[ $found_latest -eq 0 ]]; then
+          LATEST_SYNCED_SHA="$full"
+          found_latest=1
+        fi
+      fi
+      SYNCED_SHAS["$sha"]=1
+    fi
+  done < <(git log "$OSS_BRANCH" --format=%B)
+}
+
+echo "Building synced-commit index from $OSS_BRANCH trailers..."
+build_synced_set
+echo "  ${#SYNCED_SHAS[@]} main commit(s) already synced."
+if [[ -n "$LATEST_SYNCED_SHA" ]]; then
+  echo "  Latest sync point: $(git rev-parse --short "$LATEST_SYNCED_SHA") ($(git log -1 --format='%s' "$LATEST_SYNCED_SHA" | head -c 60))"
+fi
+
+# -------- catchup mode: find unsynced commits since last sync point --------
+
+if [[ $CATCHUP -eq 1 ]]; then
+  echo ""
+
+  if [[ -z "$LATEST_SYNCED_SHA" ]]; then
+    # Check .git/sync-all state file as fallback
+    local_state="$REPO_ROOT/.git/sync-all/last-oss-push-sha"
+    if [[ -f "$local_state" ]]; then
+      LATEST_SYNCED_SHA="$(cat "$local_state")"
+      echo "Using sync-all state file: $(git rev-parse --short "$LATEST_SYNCED_SHA")"
+    else
+      echo "ERROR: cannot determine last sync point."
+      echo "  No cherry-pick trailers found on $OSS_BRANCH and no state file."
+      echo "  Use explicit commits or --range instead, or set the state file:"
+      echo "    echo <sha> > $local_state"
+      exit 1
+    fi
+  fi
+
+  echo "Catchup mode: scanning main since $(git rev-parse --short "$LATEST_SYNCED_SHA")..."
+
+  mapfile -t catchup_commits < <(git rev-list --reverse "$LATEST_SYNCED_SHA..main")
+
+  # Filter out already-synced ones (there may be a few between sync point
+  # and HEAD that were synced via different paths)
+  for sha in "${catchup_commits[@]}"; do
+    if [[ -z "${SYNCED_SHAS[$sha]:-}" ]]; then
+      COMMITS+=("$sha")
+    fi
+  done
+
+  echo "  ${#catchup_commits[@]} commit(s) since sync point, ${#COMMITS[@]} unsynced."
+  echo ""
+
+  if [[ ${#COMMITS[@]} -eq 0 ]]; then
+    echo "oss/main is fully caught up with main. Nothing to do."
+    exit 0
+  fi
+fi
+
 TOTAL=${#COMMITS[@]}
 PUSHED=0
 SKIPPED=0
 FAILED=0
+ALREADY=0
 
 for commit in "${COMMITS[@]}"; do
   git rev-parse --verify "$commit^{commit}" >/dev/null 2>&1 \
     || { echo "ERROR: cannot resolve '$commit'" >&2; FAILED=$((FAILED+1)); continue; }
 
+  full_sha="$(git rev-parse "$commit")"
   short="$(git rev-parse --short "$commit")"
+
+  # Skip already-synced commits
+  if [[ -n "${SYNCED_SHAS[$full_sha]:-}" ]]; then
+    ALREADY=$((ALREADY+1))
+    continue
+  fi
+
   orig_msg="$(git -C "$REPO_ROOT" log -1 --format=%B "$commit")"
   orig_author="$(git -C "$REPO_ROOT" log -1 --format='%an <%ae>' "$commit")"
   orig_date="$(git -C "$REPO_ROOT" log -1 --format='%ai' "$commit")"
@@ -193,12 +281,28 @@ for commit in "${COMMITS[@]}"; do
   echo "---- $short: ${#included[@]} included, ${#excluded[@]} excluded ----"
 
   if [[ $DRY_RUN -eq 1 ]]; then
-    echo "  [dry-run] would include:"
-    printf '    %s\n' "${included[@]}"
-    if [[ ${#excluded[@]} -gt 0 ]]; then
-      echo "  [dry-run] would exclude:"
-      printf '    %s\n' "${excluded[@]}"
+    # Actually simulate the cherry-pick to detect already-reflected commits
+    git cherry-pick --no-commit "$commit" 2>/dev/null || true
+    # Strip excluded files from staging
+    for f in $(git diff --cached --name-only HEAD 2>/dev/null) \
+             $(git diff --name-only --diff-filter=U 2>/dev/null); do
+      [[ -z "$f" ]] && continue
+      if is_excluded "$f"; then
+        git reset HEAD -- "$f" >/dev/null 2>&1 || true
+        git checkout HEAD -- "$f" 2>/dev/null || rm -f "$f" 2>/dev/null || true
+      fi
+    done
+    if git diff --cached --quiet HEAD 2>/dev/null; then
+      echo "  [dry-run] already reflected on $OSS_BRANCH (no net changes)"
+      git reset --hard HEAD >/dev/null 2>&1
+      SKIPPED=$((SKIPPED+1))
+      continue
     fi
+    echo "  [dry-run] would include:"
+    git diff --cached --name-only HEAD 2>/dev/null | while read -r f; do
+      echo "    $f"
+    done
+    git reset --hard HEAD >/dev/null 2>&1
     PUSHED=$((PUSHED+1))
     continue
   fi
@@ -244,7 +348,7 @@ for commit in "${COMMITS[@]}"; do
 
   # Verify there are actually staged changes for included files
   if git diff --cached --quiet HEAD 2>/dev/null; then
-    echo "SKIP $short: no effective changes for included files after filtering"
+    echo "SKIP $short: already reflected on $OSS_BRANCH (changes produce no net diff)"
     git reset --hard HEAD >/dev/null 2>&1
     SKIPPED=$((SKIPPED+1))
     continue
@@ -290,7 +394,7 @@ done
 
 echo ""
 echo "========================================"
-echo "Summary: $PUSHED committed, $SKIPPED skipped, $FAILED failed (of $TOTAL)"
+echo "Summary: $PUSHED committed, $SKIPPED skipped, $FAILED failed, $ALREADY already-synced (of $TOTAL)"
 
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "(dry-run mode -- nothing was committed)"

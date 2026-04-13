@@ -213,7 +213,8 @@ RANGE      ?=
 SYNC_ALL    := bash $(SCRIPT_DIR)/sync_all.sh
 
 .PHONY: oss-scan oss-scan-staged oss-scan-diff oss-push oss-push-last \
-        oss-push-range oss-push-dry oss-pull oss-pull-scan oss-watch \
+        oss-push-range oss-push-dry oss-catchup oss-catchup-dry \
+        oss-pull oss-pull-scan oss-watch \
         oss-setup oss-status oss-help sync-all sync-all-once
 
 oss-scan:
@@ -259,6 +260,14 @@ oss-push-dry:
 		$(OSS_PUSH) -n $(COMMIT); \
 	fi
 
+oss-catchup:
+	@echo "Catching up oss/main with all unsynced main commits..."
+	@$(OSS_PUSH) --catchup
+
+oss-catchup-dry:
+	@echo "Preview: catching up oss/main with all unsynced main commits..."
+	@$(OSS_PUSH) -n --catchup
+
 oss-pull:
 	@if [ -z "$(COMMIT)" ]; then \
 		echo "Usage: make oss-pull COMMIT=<sha>"; \
@@ -297,6 +306,8 @@ oss-help:
 	@echo "  make oss-push-range RANGE=a..b  Push a range of commits"
 	@echo "  make oss-push-dry COMMIT=sha    Dry-run (preview only)"
 	@echo "  make oss-push-dry RANGE=a..b    Dry-run a range"
+	@echo "  make oss-catchup                Auto-sync all new main commits to oss/main"
+	@echo "  make oss-catchup-dry            Preview what oss-catchup would do"
 	@echo ""
 	@echo "  make oss-pull COMMIT=sha        Pull from oss/main to main"
 	@echo "  make oss-pull-scan              Fetch public + scan for conflicts"

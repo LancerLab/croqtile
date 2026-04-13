@@ -96,10 +96,32 @@ Ask the developer which commit(s) they want to push to oss/main. Accept:
 - A single SHA or `HEAD`
 - A range `<from>..<to>`
 - "last N commits"
+- "catch up" / "sync everything" -- use `--catchup` mode
 
 ---
 
 ## Phase 2: Cook the OSS Patch
+
+### 2.0 Catchup Mode (Recommended for "sync everything")
+
+If the developer wants to catch up oss/main with all unsynced main commits:
+
+```bash
+# Preview first
+make oss-catchup-dry
+
+# Then apply
+make oss-catchup
+```
+
+This automatically:
+1. Scans oss/main cherry-pick trailers to find the last sync point
+2. Lists all main commits since that point
+3. Skips commits already synced (by trailer) or already reflected (content match)
+4. Cherry-picks only genuinely new commits
+
+The output shows "already-synced" (tracked via trailers), "already reflected"
+(content matches but no trailer), and "would include" (new changes).
 
 ### 2.1 Dry-Run Preview
 
@@ -114,6 +136,7 @@ make oss-push-dry RANGE=<from>..<to>
 Show the developer the output. Highlight:
 - Included files (will appear on oss/main)
 - Excluded files (internal-only, will be stripped)
+- "already reflected" means the changes are already on oss/main
 - If ALL files are excluded, the commit will be skipped entirely
 
 ### 2.2 Apply the Cherry-Pick
