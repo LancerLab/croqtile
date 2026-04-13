@@ -931,7 +931,7 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
 namespace {
 
 // Line-based extraction of __cok__ block contents from a raw source file.
-// Unlike TopsccPreprocess::extract_cok_sections (which operates on
+// Unlike the host-compiler's extract_cok_sections (which operates on
 // preprocessed strings and returns Range pairs), this reads an unprocessed
 // source file and returns the lines inside __cok__ { ... } blocks.
 std::vector<std::string> CollectCokLines(const std::string& filepath) {
