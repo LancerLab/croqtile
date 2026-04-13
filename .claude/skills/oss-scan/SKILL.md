@@ -121,9 +121,17 @@ make oss-push COMMIT=<sha>          # cherry-pick to local oss/main (no remote p
 
 If the user asks you to push to the public remote, **warn them and refuse**. Instead, provide the command they should run manually after their own review.
 
+## Related Skills
+
+- **`/oss-merge`** -- full developer workflow for pushing code to both `main` and
+  `oss/main`, including violation fix loops, CI failure handling, and paired MRs.
+  Use when a developer asks to sync their commits to the open-source branch.
+
 ## Other Reminders
 
 - **Always run `make format` before committing** to ensure consistent code style.
 - **Always run `make oss-scan` before pushing to the public remote** as a final safety gate.
 - OSS Makefile targets live in `lib/Target/GCU/target.mk` (not the root Makefile).
+- The unified sync daemon (`make sync-all`) handles automated syncing on
+  dedicated machines. See `scripts/sync_all.sh`.
 - Full documentation: `Documents/internal/oss-sync-developer-guide.md`

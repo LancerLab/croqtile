@@ -353,6 +353,68 @@ The hook script receives `$1` = title, `$2` = body.
 
 ---
 
+## Unified Sync Daemon
+
+For dedicated sync machines (no local development), the `sync_all.sh` script
+combines mirror sync (`sync_remotes.sh`) and oss sync into one ordered loop:
+
+```
+  GitHub (oss-shadow) <-> local:oss/main | local:main <-> origin <-> mirror
+```
+
+Each 2-minute cycle:
+
+1. **sync_remotes**: origin <-> mirror (all branches, bundle-based)
+2. **main -> oss/main**: cherry-pick new commits with scan gate
+3. **oss/main -> oss-shadow**: push to GitHub if ahead
+4. **public -> main**: scan + auto-pull clean incoming commits
+5. **main -> origin**: push if ahead from pull
+
+```bash
+# Start the daemon (foreground, logs to .git/sync-all/)
+make sync-all
+
+# Run one cycle
+make sync-all-once
+
+# Or directly:
+bash scripts/sync_all.sh --log             # daemon mode
+bash scripts/sync_all.sh --once            # single cycle
+bash scripts/sync_all.sh --once --dry-run  # preview only
+bash scripts/sync_all.sh --skip-mirror     # skip mirror, oss only
+```
+
+State is stored in `.git/sync-all/`:
+- `last-oss-push-sha` -- last main commit cherry-picked to oss/main
+- `sync-all.log` -- cycle log (when `--log` is enabled)
+
+### Bootstrapping
+
+On a fresh sync machine, initialize the state file:
+
+```bash
+# Set the last synced SHA to the current tip
+echo $(git rev-parse main) > .git/sync-all/last-oss-push-sha
+```
+
+---
+
+## AI-Assisted Developer Workflow (/oss-merge)
+
+Internal developers can use the `/oss-merge` AI skill to push their commits
+to both `main` and `oss/main` with guided violation fixing. The skill:
+
+1. Previews what will be included/excluded
+2. Runs oss-push and catches violations
+3. Helps fix keyword/non-ASCII issues interactively
+4. Pushes both branches to the developer's fork (never to origin or public)
+5. Guides creation of paired merge requests
+6. Handles CI failures and commit drops
+
+See `.claude/skills/oss-merge/SKILL.md` for the full workflow.
+
+---
+
 ## Quick Reference
 
 | Task | Command |
@@ -364,6 +426,8 @@ The hook script receives `$1` = title, `$2` = body.
 | Pull from OSS | `bash scripts/oss/oss-pull.sh <commit>` |
 | Pull-scan | `bash scripts/oss/oss-pull-scan.sh --fetch` |
 | Sync watcher | `bash scripts/oss/oss-watch.sh --daemon` |
+| Sync daemon | `bash scripts/sync_all.sh --log` |
+| Single sync cycle | `bash scripts/sync_all.sh --once` |
 | Scan branch | `bash scripts/oss/oss-scan.sh --tree oss/main` |
 | Scan staged | `bash scripts/oss/oss-scan.sh --staged` |
 | Scan commit | `bash scripts/oss/oss-scan.sh --diff <sha>` |

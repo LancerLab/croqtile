@@ -210,9 +210,11 @@ OSS_SETUP   := bash $(OSS_SCRIPTS)/oss-setup.sh
 COMMIT     ?=
 RANGE      ?=
 
+SYNC_ALL    := bash $(SCRIPT_DIR)/sync_all.sh
+
 .PHONY: oss-scan oss-scan-staged oss-scan-diff oss-push oss-push-last \
         oss-push-range oss-push-dry oss-pull oss-pull-scan oss-watch \
-        oss-setup oss-status oss-help
+        oss-setup oss-status oss-help sync-all sync-all-once
 
 oss-scan:
 	@$(OSS_SCAN) --tree oss/main
@@ -303,4 +305,19 @@ oss-help:
 	@echo "  make oss-setup                  Initialize oss remote + branch"
 	@echo "  make oss-status                 Show sync status"
 	@echo ""
+	@echo "  make sync-all                   Start unified sync daemon (2-min loop)"
+	@echo "  make sync-all-once              Run one unified sync cycle"
+	@echo ""
 	@echo "Full guide: Documents/internal/oss-sync-developer-guide.md"
+
+# =============================================================================
+# Unified Sync Daemon (origin <-> mirror + main <-> oss/main <-> GitHub)
+# =============================================================================
+
+sync-all:
+	@echo "Starting unified sync daemon (origin <-> mirror + oss)..."
+	@echo "Press Ctrl-C to stop."
+	@$(SYNC_ALL) --log
+
+sync-all-once:
+	@$(SYNC_ALL) --once
