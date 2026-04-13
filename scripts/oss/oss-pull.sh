@@ -125,6 +125,8 @@ KW_PATTERNS=()
 if [[ -f "$KW_FILE" ]]; then
   while IFS= read -r line; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    # Strip (?i) prefix -- we use grep -i for case-insensitive matching
+    line="${line#'(?i)'}"
     KW_PATTERNS+=("$line")
   done < "$KW_FILE"
 fi
