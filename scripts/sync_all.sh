@@ -8,7 +8,7 @@
 # Each cycle (strict order):
 #   1. sync_remotes --once  (origin <-> mirror, all branches)
 #   2. main -> oss/main     (cherry-pick new commits, scan gated)
-#   3. oss/main -> oss-shadow  (push if ahead)
+#   3. oss/main -> origin + oss-shadow + public  (push if ahead)
 #   4. public -> main       (scan + auto-pull clean commits)
 #   5. main -> origin       (push if ahead from pull)
 #
@@ -336,51 +336,72 @@ step_push_to_oss() {
   return 0
 }
 
-# -------- Step 3: oss/main -> oss-shadow (push to GitHub) --------
+# -------- Step 3: push oss/main to all remotes (origin + oss-shadow) --------
 
-step_push_oss_to_remote() {
-  log_section "Step 3: oss/main -> oss-shadow (push to GitHub)"
+push_oss_to_one_remote() {
+  local remote="$1" remote_branch="$2"
 
-  ensure_oss_branch || return 1
-
-  local oss_remote_ref="$OSS_REMOTE/main"
-  if ! lgit show-ref --verify --quiet "refs/remotes/$oss_remote_ref" 2>/dev/null; then
-    log "Remote tracking ref '$oss_remote_ref' not found; trying fetch..."
-    lgit fetch "$OSS_REMOTE" 2>/dev/null || {
-      log "WARNING: cannot fetch from '$OSS_REMOTE'; skipping push"
+  local remote_ref="$remote/$remote_branch"
+  if ! lgit show-ref --verify --quiet "refs/remotes/$remote_ref" 2>/dev/null; then
+    lgit fetch "$remote" 2>/dev/null || {
+      log "  WARNING: cannot fetch from '$remote'; skipping"
       return 0
     }
   fi
 
   local local_sha remote_sha
   local_sha="$(lgit rev-parse "$OSS_BRANCH")"
-  remote_sha="$(lgit rev-parse "$oss_remote_ref" 2>/dev/null || echo "")"
+  remote_sha="$(lgit rev-parse "$remote_ref" 2>/dev/null || echo "")"
 
   if [[ "$local_sha" == "$remote_sha" ]]; then
-    log "oss/main is up-to-date with $OSS_REMOTE"
+    log "  $remote: up-to-date"
     return 0
   fi
 
   if [[ -z "$remote_sha" ]]; then
-    log "No remote ref yet; will push"
+    log "  $remote: no remote ref yet; will push"
   elif ! lgit merge-base --is-ancestor "$remote_sha" "$local_sha"; then
-    log "WARNING: oss/main has diverged from $OSS_REMOTE/main; manual resolution needed"
-    alert "sync-all: oss diverged" "oss/main and $OSS_REMOTE/main have diverged"
+    log "  $remote: WARNING diverged -- manual resolution needed"
+    alert "sync-all: oss diverged from $remote" \
+      "oss/main and $remote_ref have diverged"
     return 1
   fi
 
   if [[ $DRY_RUN -eq 1 ]]; then
-    log "[dry-run] would push oss/main to $OSS_REMOTE"
+    log "  $remote: [dry-run] would push"
     return 0
   fi
 
-  log "Pushing oss/main to $OSS_REMOTE..."
-  if lgit push "$OSS_REMOTE" "$OSS_BRANCH:main" 2>&1; then
-    log "Pushed successfully."
+  log "  $remote: pushing oss/main -> $remote_branch..."
+  if lgit push "$remote" "$OSS_BRANCH:$remote_branch" 2>&1; then
+    log "  $remote: pushed successfully."
   else
-    alert "sync-all: oss push failed" "Failed to push oss/main to $OSS_REMOTE"
+    alert "sync-all: oss push to $remote failed" \
+      "Failed to push oss/main to $remote"
     return 1
   fi
+}
+
+step_push_oss_to_remotes() {
+  log_section "Step 3: push oss/main to origin + oss-shadow + public"
+
+  ensure_oss_branch || return 1
+
+  local errors=0
+
+  # Push to origin (internal GitLab) -- oss/main -> oss/main
+  push_oss_to_one_remote origin "$OSS_BRANCH" || errors=$((errors + 1))
+
+  # Push to oss-shadow (internal mirror of public) -- oss/main -> main
+  push_oss_to_one_remote "$OSS_REMOTE" main || errors=$((errors + 1))
+
+  # Push to public (GitHub) -- oss/main -> main
+  if [[ "$PUBLIC_REMOTE" != "$OSS_REMOTE" ]]; then
+    push_oss_to_one_remote "$PUBLIC_REMOTE" main || errors=$((errors + 1))
+  fi
+
+  [[ $errors -gt 0 ]] && return 1
+  return 0
 }
 
 # -------- Step 4: public -> main (scan + auto-pull) --------
@@ -608,8 +629,8 @@ run_cycle() {
 
   step_sync_remotes || cycle_errors=$((cycle_errors + 1))
   step_push_to_oss  || cycle_errors=$((cycle_errors + 1))
-  step_push_oss_to_remote || cycle_errors=$((cycle_errors + 1))
-  step_pull_from_public   || cycle_errors=$((cycle_errors + 1))
+  step_push_oss_to_remotes || cycle_errors=$((cycle_errors + 1))
+  step_pull_from_public    || cycle_errors=$((cycle_errors + 1))
   step_push_main_to_origin || cycle_errors=$((cycle_errors + 1))
 
   local elapsed=$(( $(date +%s) - cycle_start ))

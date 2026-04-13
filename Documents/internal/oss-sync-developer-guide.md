@@ -366,7 +366,7 @@ Each 2-minute cycle:
 
 1. **sync_remotes**: origin <-> mirror (all branches, bundle-based)
 2. **main -> oss/main**: cherry-pick new commits with scan gate
-3. **oss/main -> oss-shadow**: push to GitHub if ahead
+3. **oss/main -> origin + oss-shadow + public**: push to all remotes if ahead
 4. **public -> main**: scan + auto-pull clean incoming commits
 5. **main -> origin**: push if ahead from pull
 

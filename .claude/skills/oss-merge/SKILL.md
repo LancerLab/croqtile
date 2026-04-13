@@ -205,9 +205,13 @@ git push <developer-remote> oss/main
 ```
 
 **Safety rules:**
-- NEVER push to `origin` without explicit permission
 - NEVER push to `oss-shadow`, `public`, or any GitHub URL
+- NEVER push to `origin` without explicit permission
 - Only push to the developer's personal fork remote
+
+**Note:** The unified sync daemon (`make sync-all`) automatically pushes
+`oss/main` to all three remotes (origin, oss-shadow, public). Developers
+only need to push to their fork for merge requests.
 
 If the developer does not have a fork remote, guide them:
 
