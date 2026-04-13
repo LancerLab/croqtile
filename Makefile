@@ -312,6 +312,7 @@ help:
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  format              - Format C++ code with clang-format"
+	@echo "  oss-help            - Show open-source sync commands"
 	@echo ""
 	@echo "Fast-Compile (Precompiled CuTe Runtime):"
 	@echo "  precompile-cute ARCH=sm_90a CUTE_HOME=extern/cutlass"

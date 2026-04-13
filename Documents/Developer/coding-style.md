@@ -214,7 +214,7 @@ additional rules:
    blacklist. Avoid hardware codenames, internal tool names, and company
    identifiers.
 3. **No references to excluded paths** -- do not `#include` files from
-   excluded directories (see `oss_exclude_paths.txt`).
+   excluded directories.
 
 Verify compliance before committing:
 
