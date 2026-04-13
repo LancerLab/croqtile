@@ -307,12 +307,17 @@ oss-help:
 	@echo ""
 	@echo "  make sync-all                   Start unified sync daemon (2-min loop)"
 	@echo "  make sync-all-once              Run one unified sync cycle"
+	@echo "  make force-sync BRANCH=oss/main Force-sync branch to all remotes"
 	@echo ""
 	@echo "Full guide: Documents/internal/oss-sync-developer-guide.md"
 
 # =============================================================================
 # Unified Sync Daemon (origin <-> mirror + main <-> oss/main <-> GitHub)
 # =============================================================================
+
+FORCE_SYNC := bash $(SCRIPT_DIR)/force_sync_branch.sh
+
+.PHONY: sync-all sync-all-once force-sync force-sync-dry
 
 sync-all:
 	@echo "Starting unified sync daemon (origin <-> mirror + oss)..."
@@ -321,3 +326,27 @@ sync-all:
 
 sync-all-once:
 	@$(SYNC_ALL) --once
+
+force-sync:
+	@if [ -z "$(BRANCH)" ]; then \
+		echo "Usage: make force-sync BRANCH=<branch> [REMOTE=<remote>]"; \
+		echo "       make force-sync BRANCH=oss/main              (all remotes)"; \
+		echo "       make force-sync BRANCH=oss/main REMOTE=origin"; \
+		exit 1; \
+	fi
+	@if [ -z "$(REMOTE)" ]; then \
+		$(FORCE_SYNC) --all-remotes $(BRANCH); \
+	else \
+		$(FORCE_SYNC) $(BRANCH) $(REMOTE); \
+	fi
+
+force-sync-dry:
+	@if [ -z "$(BRANCH)" ]; then \
+		echo "Usage: make force-sync-dry BRANCH=<branch>"; \
+		exit 1; \
+	fi
+	@if [ -z "$(REMOTE)" ]; then \
+		$(FORCE_SYNC) -n --all-remotes $(BRANCH); \
+	else \
+		$(FORCE_SYNC) -n $(BRANCH) $(REMOTE); \
+	fi
