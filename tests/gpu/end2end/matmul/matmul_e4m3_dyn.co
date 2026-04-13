@@ -1,0 +1,391 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CUDA_VISIBLE_DEVICES=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#include <cstring>
+#include <cstdlib>
+
+// ============ matmul_e4m3_dynamic_sm90: basic e4m3 WGMMA+TMA ============
+#define MATMUL_WARP_M 64
+#define MATMUL_WARP_N 128
+#define MATMUL_TILE_K 128
+#define MATMUL_WARP_K 32
+#define MATMUL_SWIZ 128
+
+#if MATMUL_WARP_K != 32
+#error "MATMUL_WARP_K must be 32 for e4m3 WGMMA constraints"
+#endif
+#if MATMUL_WARP_M != 64
+#error "MATMUL_WARP_M must be 64 for e4m3 WGMMA constraints"
+#endif
+#if (MATMUL_WARP_N % 8) != 0 || MATMUL_WARP_N > 256
+#error "MATMUL_WARP_N must be a multiple of 8 and <=256 for e4m3 WGMMA"
+#endif
+#if MATMUL_SWIZ != MATMUL_TILE_K
+#error "MATMUL_SWIZ must equal MATMUL_TILE_K"
+#endif
+#if MATMUL_SWIZ != 32 && MATMUL_SWIZ != 64 && MATMUL_SWIZ != 128
+#error "MATMUL_SWIZ must be one of 32, 64, 128"
+#endif
+
+__co__ void matmul_e4m3_sm90(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block {
+    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+      tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+    mma.store mc, output_s;
+    tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+  }
+}
+
+#undef MATMUL_WARP_N
+
+// ============ matmul_e4m3_dynamic_mwg_sm90: MWG e4m3 (TILE_M=128) ============
+#define MATMUL_WARP_N 64
+#define MATMUL_TILE_M 128
+
+#if (MATMUL_WARP_N % 8) != 0 || MATMUL_WARP_N > 256
+#error "MATMUL_WARP_N must be a multiple of 8 and <=256 for e4m3 WGMMA"
+#endif
+
+__co__ void matmul_e4m3_mwg_sm90(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block {
+    shared f8_e4m3 [MATMUL_TILE_M, MATMUL_TILE_K] lhs_load_s;
+    shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f16 [MATMUL_TILE_M, MATMUL_WARP_N] output_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+      tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      parallel p1 by 2 : group-4 {
+        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(p1, iv_warp);
+          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+        if (iv_k == cdiv(K, MATMUL_TILE_K) - 1)
+          mma.store mc, output_s.chunkat(p1, _);
+      }
+    }
+    tma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(block_m, block_n);
+  }
+}
+
+// ============ matmul_e4m3_dyn_mwg_sm90_tbc: MWG+TBC e4m3 (CLUSTER_M=4) ============
+#define CLUSTER_M 4
+
+__co__ void matmul_e4m3_mwg_tbc_sm90(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f16 [M, N] output) {
+  parallel {cm} by [CLUSTER_M] : cluster {
+    parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block {
+      shared f8_e4m3 [MATMUL_TILE_M, MATMUL_TILE_K] lhs_load_s;
+      shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+      shared f16 [MATMUL_TILE_M, MATMUL_WARP_N] output_s;
+      mc = mma.fill.f16 0.0f;
+      foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+        tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+        tma.copy.multicast.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+        parallel p1 by 2 : group-4 {
+          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+            ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(p1, iv_warp);
+            mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+            mma.row.row mc, ma, mb;
+          }
+          if (iv_k == cdiv(K, MATMUL_TILE_K) - 1)
+            mma.store mc, output_s.chunkat(p1, _);
+        }
+      }
+      tma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(block_m, block_n);
+    }
+  }
+}
+
+#undef CLUSTER_M
+#undef MATMUL_TILE_M
+#undef MATMUL_WARP_N
+
+// ============ matmul_e4m3_dyn_persis_sta_sm90: persistent e4m3 ============
+#define MATMUL_WARP_N 128
+#define MATMUL_TILE_M 64
+#define NUM_SMS 132
+
+#if MATMUL_TILE_M != MATMUL_WARP_M
+#error "MATMUL_TILE_M must equal MATMUL_WARP_M"
+#endif
+#if MATMUL_WARP_N < 8 || MATMUL_WARP_N > 256 || (MATMUL_WARP_N % 8) != 0
+#error "MATMUL_WARP_N must be in [8,256] and divisible by 8 for SM90 WGMMA e4m3"
+#endif
+
+__co__ void matmul_e4m3_persis_sm90(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f16 [M, N] output) {
+  int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
+  parallel block_id by NUM_SMS : block {
+    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        block_m = tile_id / cdiv(N, MATMUL_WARP_N);
+        block_n = tile_id % cdiv(N, MATMUL_WARP_N);
+        mc = mma.fill.f16 0.0f;
+        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).step(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+          tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
+          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+            parallel p by 1 : group-4 {
+              ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
+              mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+              mma.row.row mc, ma, mb;
+            }
+          }
+        }
+        mma.store mc, output_s;
+        tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).step(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+#undef NUM_SMS
+#undef MATMUL_TILE_M
+
+// ============ blockscale_gemm_e4m3_dyn_sm90_N48: blockscale GEMM with mma.row.row.scale ============
+#undef MATMUL_WARP_N
+#define MATMUL_WARP_N 48
+
+#if MATMUL_TILE_K != 128
+#error "MATMUL_TILE_K must be 128"
+#endif
+
+__co__ void blockscale_gemm_e4m3_n48(global f8_e4m3 [M, K] lhs,
+                                      global f32 [M, DIV_BLK_K] scale_lhs,
+                                      global f8_e4m3 [N, K] rhs,
+                                      global f32 [DIV_BLK_N, DIV_BLK_K] scale_rhs,
+                                      global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block {
+    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    parallel p by 1 : group-4 {
+      mc = mma.fill.f16 0.0f;
+      foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+        tma.copy.swiz<MATMUL_SWIZ>.zfill lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+        tma.copy.swiz<MATMUL_SWIZ>.zfill rhs.chunkat(block_n, iv_k) => rhs_load_s;
+        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row.scale mc, ma, mb, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k), scale_rhs.at(block_n, iv_k);
+        }
+      }
+      shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+      mma.store mc, output_s;
+      tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+    }
+  }
+}
+
+#undef MATMUL_WARP_M
+#undef MATMUL_WARP_N
+#undef MATMUL_TILE_K
+#undef MATMUL_WARP_K
+#undef MATMUL_SWIZ
+
+static void verify_e4m3_matmul(choreo::spanned_data<choreo::f8_e4m3, 2>& lhs_h,
+                                choreo::spanned_data<choreo::f8_e4m3, 2>& rhs_h,
+                                choreo::spanned_data<choreo::f16, 2>& res_h,
+                                size_t M, size_t N, size_t K, float tolerance) {
+  auto lhs_view = lhs_h.view();
+  auto rhs_view = rhs_h.view();
+  auto res_view = res_h.view();
+  auto rel_error = [](float ref, float got) {
+    float abs_ref = std::abs(ref);
+    float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
+    return std::abs(ref - got) / denom;
+  };
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += static_cast<float>(lhs_view[i][k]) * static_cast<float>(rhs_view[j][k]);
+      float got = __half2float(res_view[i][j]);
+      auto delta = rel_error(ref, got);
+      if (delta >= tolerance)
+        std::cout << "[" << i << ", " << j << "] ref=" << ref << " got=" << got << " delta=" << delta * 100 << "%\n";
+      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+    }
+}
+
+int main(int argc, char** argv) {
+  bool skip_verify = false;
+  auto is_skip_verify_arg = [](const char* s) {
+    const char* t = "--skip-verify";
+    int i = 0;
+    while (t[i] != '\0' && s[i] == t[i]) ++i;
+    return t[i] == '\0' && s[i] == '\0';
+  };
+  for (int i = 1; i < argc; ++i) {
+    if (is_skip_verify_arg(argv[i])) skip_verify = true;
+  }
+  const char* skip_verify_env = std::getenv("CHOREO_SKIP_VERIFY");
+  if (skip_verify_env && skip_verify_env[0] == '1') skip_verify = true;
+  (void)skip_verify;
+
+  // --- matmul_e4m3_sm90 (256x256x256) ---
+  {
+    size_t M = 256, N = 256, K = 256;
+    auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+    lhs_h.fill_random(0, 2); rhs_h.fill_random(0, 2); res_h.fill(0.0f);
+    __nv_fp8_e4m3 *a_d = nullptr, *b_d = nullptr; half *c_d = nullptr;
+    choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));
+    choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaDeviceSynchronize());
+    matmul_e4m3_sm90(choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K}),
+                     choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {N, K}),
+                     choreo::make_spanview<choreo::f16, 2>(c_d, {M, N}));
+    choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+    choreo::abend_true(cudaDeviceSynchronize());
+    verify_e4m3_matmul(lhs_h, rhs_h, res_h, M, N, K, 0.08f);
+    cudaFree(a_d); cudaFree(b_d); cudaFree(c_d);
+    std::cout << "Test e4m3_sm90 Passed\n";
+  }
+
+  // --- matmul_e4m3_mwg_sm90 (256x256x256) ---
+  {
+    size_t M = 256, N = 256, K = 256;
+    auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+    lhs_h.fill_random(0, 2); rhs_h.fill_random(0, 2); res_h.fill(0.0f);
+    __nv_fp8_e4m3 *a_d = nullptr, *b_d = nullptr; half *c_d = nullptr;
+    choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));
+    choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaDeviceSynchronize());
+    matmul_e4m3_mwg_sm90(choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K}),
+                          choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {N, K}),
+                          choreo::make_spanview<choreo::f16, 2>(c_d, {M, N}));
+    choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+    choreo::abend_true(cudaDeviceSynchronize());
+    verify_e4m3_matmul(lhs_h, rhs_h, res_h, M, N, K, 0.05f);
+    cudaFree(a_d); cudaFree(b_d); cudaFree(c_d);
+    std::cout << "Test e4m3_mwg_sm90 Passed\n";
+  }
+
+  // --- matmul_e4m3_mwg_tbc_sm90 (512x256x128, CLUSTER_M=4) ---
+  {
+    size_t M = 512, N = 256, K = 128;
+    auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+    lhs_h.fill_random(0, 2); rhs_h.fill_random(0, 2); res_h.fill(0.0f);
+    __nv_fp8_e4m3 *a_d = nullptr, *b_d = nullptr; half *c_d = nullptr;
+    choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));
+    choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaDeviceSynchronize());
+    matmul_e4m3_mwg_tbc_sm90(choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K}),
+                               choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {N, K}),
+                               choreo::make_spanview<choreo::f16, 2>(c_d, {M, N}));
+    choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+    choreo::abend_true(cudaDeviceSynchronize());
+    verify_e4m3_matmul(lhs_h, rhs_h, res_h, M, N, K, 0.05f);
+    cudaFree(a_d); cudaFree(b_d); cudaFree(c_d);
+    std::cout << "Test e4m3_mwg_tbc_sm90 Passed\n";
+  }
+
+  // --- matmul_e4m3_persis_sm90 (256x256x256) ---
+  {
+    size_t M = 256, N = 256, K = 256;
+    auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+    lhs_h.fill_random(0, 2); rhs_h.fill_random(0, 2); res_h.fill(0.0f);
+    __nv_fp8_e4m3 *a_d = nullptr, *b_d = nullptr; half *c_d = nullptr;
+    choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));
+    choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaDeviceSynchronize());
+    matmul_e4m3_persis_sm90(choreo::make_spanview<choreo::f8_e4m3, 2>(a_d, {M, K}),
+                             choreo::make_spanview<choreo::f8_e4m3, 2>(b_d, {N, K}),
+                             choreo::make_spanview<choreo::f16, 2>(c_d, {M, N}));
+    choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+    choreo::abend_true(cudaDeviceSynchronize());
+    verify_e4m3_matmul(lhs_h, rhs_h, res_h, M, N, K, 0.08f);
+    cudaFree(a_d); cudaFree(b_d); cudaFree(c_d);
+    std::cout << "Test e4m3_persis_sm90 Passed\n";
+  }
+
+  // --- blockscale_gemm_e4m3_n48 (64x48x128, with block scaling) ---
+  {
+    const size_t M = 64, N = 48, K = 128;
+    const size_t TILE_K = 128, WARP_N = 48;
+    auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto scale_lhs_h = choreo::make_spandata<choreo::f32>(M, K / TILE_K);
+    auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    auto scale_rhs_h = choreo::make_spandata<choreo::f32>(N / WARP_N, K / TILE_K);
+    auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+    lhs_h.fill_random(0, 2); rhs_h.fill_random(0, 2);
+    scale_lhs_h.fill_random(1, 3); scale_rhs_h.fill_random(1, 3);
+    res_h.fill(0.0f);
+
+    __nv_fp8_e4m3 *lhs_d = nullptr, *rhs_d = nullptr;
+    float *s_lhs_d = nullptr, *s_rhs_d = nullptr;
+    half *res_d = nullptr;
+    choreo::abend_true(cudaMalloc(&lhs_d, M * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&s_lhs_d, M * (K / TILE_K) * sizeof(float)));
+    choreo::abend_true(cudaMalloc(&rhs_d, N * K * sizeof(__nv_fp8_e4m3)));
+    choreo::abend_true(cudaMalloc(&s_rhs_d, (N / WARP_N) * (K / TILE_K) * sizeof(float)));
+    choreo::abend_true(cudaMalloc(&res_d, M * N * sizeof(half)));
+    choreo::abend_true(cudaMemcpy(lhs_d, lhs_h.data(), M * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(s_lhs_d, scale_lhs_h.data(), M * (K / TILE_K) * sizeof(float), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(rhs_d, rhs_h.data(), N * K * sizeof(__nv_fp8_e4m3), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(s_rhs_d, scale_rhs_h.data(), (N / WARP_N) * (K / TILE_K) * sizeof(float), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaMemcpy(res_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
+    choreo::abend_true(cudaDeviceSynchronize());
+
+    blockscale_gemm_e4m3_n48(
+        choreo::make_spanview<choreo::f8_e4m3, 2>(lhs_d, {M, K}),
+        choreo::make_spanview<choreo::f32, 2>(s_lhs_d, {M, K / TILE_K}),
+        choreo::make_spanview<choreo::f8_e4m3, 2>(rhs_d, {N, K}),
+        choreo::make_spanview<choreo::f32, 2>(s_rhs_d, {N / WARP_N, K / TILE_K}),
+        choreo::make_spanview<choreo::f16, 2>(res_d, {M, N}));
+
+    cudaMemcpy(res_h.data(), res_d, M * N * sizeof(half), cudaMemcpyDeviceToHost);
+    choreo::abend_true(cudaDeviceSynchronize());
+    cudaFree(lhs_d); cudaFree(s_lhs_d); cudaFree(rhs_d); cudaFree(s_rhs_d); cudaFree(res_d);
+    std::cout << "Test blockscale_e4m3_n48 Passed\n";
+  }
+
+  std::cout << "All Tests Passed\n" << std::endl;
+}
+
+// CHECK: Test e4m3_sm90 Passed
+// CHECK: Test e4m3_mwg_sm90 Passed
+// CHECK: Test e4m3_mwg_tbc_sm90 Passed
+// CHECK: Test e4m3_persis_sm90 Passed
+// CHECK: Test blockscale_e4m3_n48 Passed
+// CHECK: All Tests Passed

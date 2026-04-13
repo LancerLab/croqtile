@@ -1,6 +1,9 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
 
+// Consolidated from: copy.co, async_copy.co
+
+// --- copy.co: sync and async DMA round-trip ---
 __co__ auto dma_copy_sync(s32 [6, 17, 64] input) {
   s32 [input.span] output;
 
@@ -24,30 +27,119 @@ __co__ auto dma_copy_async(s32 [6, 17, 64] input) {
   return output;
 }
 
-int main() { /// host program
-  auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
-  a.fill_random(-10, 10);
+// --- async_copy.co: group-scope DMA, add with wait ordering ---
+__co__ auto dma_copy_group(s32 [M, 17, 32] input) {
+  s32 [input.span] output;
 
-  auto res0 = dma_copy_sync(a.view());
+  parallel by 1 : group {
+    f = dma.copy.async input => shared;
+    wait f;
+    dma.copy f.data => output;
+  }
 
-  // verfication
-  for (size_t i = 0; i < res0.shape()[0]; ++i)
-    for (size_t j = 0; j < res0.shape()[1]; ++j)
-      for (size_t k = 0; k < res0.shape()[2]; ++k)
-        choreo::choreo_assert(a[i][j][k] == res0[i][j][k], "values are not equal.");
-
-  std::cout << "Test 0 Passed\n" << std::endl;
-
-  auto res1 = dma_copy_async(a.view());
-
-  // verfication
-  for (size_t i = 0; i < res1.shape()[0]; ++i)
-    for (size_t j = 0; j < res1.shape()[1]; ++j)
-      for (size_t k = 0; k < res1.shape()[2]; ++k)
-        choreo::choreo_assert(a[i][j][k] == res1[i][j][k], "values are not equal.");
-
-  std::cout << "Test 1 Passed\n" << std::endl;
+  return output;
 }
 
-// CHECK: Test 0 Passed
-// CHECK: Test 1 Passed
+__co__ auto dma_add(s32 [M, 17, 32] in0, s32 [6, N, 32] in1) {
+  s32 [in0.span] output;
+
+  parallel q0 by in1.span(1) : group {
+    f0 = dma.copy.async in0 => shared;
+    f1 = dma.copy.async in1 => shared;
+    wait f0, f1;
+    shared s32 [f0.span] out;
+    foreach x in [in1.span(0)]
+      parallel {q1} by [in1.span(2)]
+        out.at(x, q0, q1) = f0.data.at(x, q0, q1) + f1.data.at(x, q0, q1);
+    dma.copy out => output;
+  }
+
+  return output;
+}
+
+__co__ auto dma_add1(s32 [M, 17, 32] in0, s32 [6, N, 32] in1) {
+  s32 [in0.span] output;
+
+  parallel q0 by in1.span(1) : group {
+    f0 = dma.copy.async in0 => shared;
+    f1 = dma.copy.async in1 => shared;
+    wait f1, f0; // wait f1 first
+    shared s32 [f0.span] out;
+    foreach x in [in1.span(0)]
+      parallel {q1} by [in1.span(2)]
+        out.at(x, q0, q1) = f0.data.at(x, q0, q1) + f1.data.at(x, q0, q1);
+    dma.copy out => output;
+  }
+
+  return output;
+}
+
+int main() { /// host program
+  {
+    auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+    a.fill_random(-10, 10);
+
+    auto res0 = dma_copy_sync(a.view());
+
+    for (size_t i = 0; i < res0.shape()[0]; ++i)
+      for (size_t j = 0; j < res0.shape()[1]; ++j)
+        for (size_t k = 0; k < res0.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] == res0[i][j][k], "values are not equal.");
+
+    std::cout << "Test copy_sync Passed\n" << std::endl;
+
+    auto res1 = dma_copy_async(a.view());
+
+    for (size_t i = 0; i < res1.shape()[0]; ++i)
+      for (size_t j = 0; j < res1.shape()[1]; ++j)
+        for (size_t k = 0; k < res1.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] == res1[i][j][k], "values are not equal.");
+
+    std::cout << "Test copy_async Passed\n" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::s32>(6, 17, 32);
+    auto b = choreo::make_spandata<choreo::s32>(6, 17, 32);
+    a.fill_random(-10, 10);
+    b.fill_random(-10, 10);
+
+    auto res = dma_copy_group(a.view());
+
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        for (size_t k = 0; k < res.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] == res[i][j][k], "values are not equal.");
+
+    std::cout << "Test copy_group Passed\n" << std::endl;
+
+    auto sum = dma_add(a.view(), b.view());
+
+    for (size_t i = 0; i < sum.shape()[0]; ++i)
+      for (size_t j = 0; j < sum.shape()[1]; ++j)
+        for (size_t k = 0; k < sum.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == sum[i][j][k], "values are not equal.");
+
+    std::cout << "Test dma_add Passed\n" << std::endl;
+
+    auto sum1 = dma_add1(a.view(), b.view());
+
+    for (size_t i = 0; i < sum1.shape()[0]; ++i)
+      for (size_t j = 0; j < sum1.shape()[1]; ++j)
+        for (size_t k = 0; k < sum1.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == sum1[i][j][k], "values are not equal.");
+
+    std::cout << "Test dma_add1 Passed\n" << std::endl;
+  }
+}
+
+// CHECK-NOT: choreo-rt
+// CHECK: Test copy_sync Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test copy_async Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test copy_group Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test dma_add Passed
+// CHECK-NOT: choreo-rt
+// CHECK: Test dma_add1 Passed

@@ -1,0 +1,247 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+// ============ gemm_rc_wgmma_tma: f16 WGMMA+TMA (M=N=K=256) ============
+#define M 256
+#define N 256
+#define K 256
+
+__co__ auto matmul_f16_wgmma_tma(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 64, WARP_K = 16;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<128> lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+#undef M
+#undef N
+#undef K
+
+// ============ gemm_rc_wgmma_tma_fp8: f8_e4m3 WGMMA+TMA N=64 ============
+#define M 64
+#define N 64
+#define K 32
+
+__co__ auto matmul_fp8_e4m3_n64(f8_e4m3 [M, K] lhs, f8_e4m3 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 32, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<32> lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<32> rhs.chunkat(block_n, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<32> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+#undef N
+
+// ============ gemm_rc_wgmma_tma_fp8_e4m3_n96: f8_e4m3 WGMMA+TMA N=192 ============
+#define N 192
+
+__co__ auto matmul_fp8_e4m3_n192(f8_e4m3 [M, K] lhs, f8_e4m3 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 32, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<32> lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<32> rhs.chunkat(block_n, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<32> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+#undef N
+
+// ============ gemm_rc_wgmma_tma_fp8_e5m2_n128: f8_e5m2 WGMMA+TMA N=128 ============
+#define N 128
+
+__co__ auto matmul_fp8_e5m2_n128(f8_e5m2 [M, K] lhs, f8_e5m2 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 32, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<32> lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<32> rhs.chunkat(block_n, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<32> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+// ============ gemm_rc_wgmma_tma_fp8_n128: f8_e4m3 WGMMA+TMA N=128 ============
+__co__ auto matmul_fp8_e4m3_n128(f8_e4m3 [M, K] lhs, f8_e4m3 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+
+  int WARP_M = 64, WARP_N = 64, TILE_K = 32, WARP_K = 32;
+
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      lhs_load_s = tma.copy.swiz<32> lhs.chunkat(block_m, iv_k) => shared;
+      rhs_load_s = tma.copy.swiz<32> rhs.chunkat(block_n, iv_k) => shared;
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<32> rhs_load_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+    mma.store mc, output.chunkat(block_m, block_n);
+  }
+
+  return output;
+}
+
+#undef M
+#undef N
+#undef K
+
+static bool check_timing_disabled(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    const char* s = argv[i];
+    const char* t = "--disable-timing";
+    int j = 0;
+    while (t[j] != '\0' && s[j] == t[j]) ++j;
+    if (t[j] == '\0' && s[j] == '\0') return true;
+  }
+  const char* env = std::getenv("CHOREO_DISABLE_TIMING");
+  return env && env[0] == '1' && env[1] == '\0';
+}
+
+int main(int argc, char** argv) {
+  bool disable_timing = check_timing_disabled(argc, argv);
+  (void)disable_timing;
+
+  // --- f16 WGMMA+TMA (256x256x256) ---
+  {
+    const int M = 256, N = 256, K = 256;
+    auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+    lhs.fill_random(0, 2);
+    rhs.fill_random(0, 2);
+    auto res = matmul_f16_wgmma_tma(lhs.view(), rhs.view());
+    float tolerance = 0.01f;
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j) {
+        __half ref = 0.0f;
+        for (size_t k = 0; k < (size_t)K; ++k)
+          ref += __half2float(lhs[i][k]) * __half2float(rhs[j][k]);
+        auto delta = std::abs((__half2float(ref) - __half2float(res[i][j])) / __half2float(ref));
+        if (delta >= tolerance)
+          std::cout << "[" << i << ", " << j << "] " << __half2float(ref) << " <-> " << __half2float(res[i][j]) << ", delta: " << delta * 100 << "%\n";
+        choreo::choreo_assert((delta < tolerance), "values are not equal.");
+      }
+    std::cout << "Test f16_wgmma_tma Passed\n";
+  }
+
+  // --- f8_e4m3 WGMMA+TMA N=64 ---
+  {
+    const int M = 64, N = 64, K = 32;
+    auto lhs = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    lhs.fill_random(-2.0f, 2.0f);
+    rhs.fill_random(-2.0f, 2.0f);
+    auto res = matmul_fp8_e4m3_n64(lhs.view(), rhs.view());
+    choreo::verify_matmul_row_row_subset(lhs, rhs, res, 0.3f, 0.05f, 8, 8);
+    std::cout << "Test fp8_e4m3_n64 Passed\n";
+  }
+
+  // --- f8_e4m3 WGMMA+TMA N=192 ---
+  {
+    const int M = 64, N = 192, K = 32;
+    auto lhs = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    lhs.fill_random(-2.0f, 2.0f);
+    rhs.fill_random(-2.0f, 2.0f);
+    auto res = matmul_fp8_e4m3_n192(lhs.view(), rhs.view());
+    choreo::verify_matmul_row_row_subset(lhs, rhs, res, 0.3f, 0.05f, 8, 8);
+    std::cout << "Test fp8_e4m3_n192 Passed\n";
+  }
+
+  // --- f8_e5m2 WGMMA+TMA N=128 ---
+  {
+    const int M = 64, N = 128, K = 32;
+    auto lhs = choreo::make_spandata<choreo::f8_e5m2>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f8_e5m2>(N, K);
+    lhs.fill_random(-2.0f, 2.0f);
+    rhs.fill_random(-2.0f, 2.0f);
+    auto res = matmul_fp8_e5m2_n128(lhs.view(), rhs.view());
+    choreo::verify_matmul_row_row_subset(lhs, rhs, res, 0.35f, 0.06f, 8, 8);
+    std::cout << "Test fp8_e5m2_n128 Passed\n";
+  }
+
+  // --- f8_e4m3 WGMMA+TMA N=128 ---
+  {
+    const int M = 64, N = 128, K = 32;
+    auto lhs = choreo::make_spandata<choreo::f8_e4m3>(M, K);
+    auto rhs = choreo::make_spandata<choreo::f8_e4m3>(N, K);
+    lhs.fill_random(-2.0f, 2.0f);
+    rhs.fill_random(-2.0f, 2.0f);
+    auto res = matmul_fp8_e4m3_n128(lhs.view(), rhs.view());
+    choreo::verify_matmul_row_row_subset(lhs, rhs, res, 0.3f, 0.05f, 8, 8);
+    std::cout << "Test fp8_e4m3_n128 Passed\n";
+  }
+
+  std::cout << "All Tests Passed\n" << std::endl;
+}
+
+// CHECK: Test f16_wgmma_tma Passed
+// CHECK: Test fp8_e4m3_n64 Passed
+// CHECK: Test fp8_e4m3_n192 Passed
+// CHECK: Test fp8_e5m2_n128 Passed
+// CHECK: Test fp8_e4m3_n128 Passed
+// CHECK: All Tests Passed

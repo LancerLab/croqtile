@@ -1,0 +1,539 @@
+// REQUIRES: TARGET-SM_90
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CUDA_VISIBLE_DEVICES=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#include <cstring>
+#include <cstdlib>
+
+// ============ matmul_f16_dyn_persis_sta_sm86: SM86 mma.sync persistent ============
+#define MATMUL_MMA_M 16
+#define MATMUL_MMA_N 16
+#define MATMUL_MMA_K 16
+#define MATMUL_TILE_M 16
+#define MATMUL_TILE_N 16
+#define MATMUL_TILE_K 16
+#define NUM_SMS 82
+
+#if MATMUL_TILE_M % MATMUL_MMA_M != 0
+#error "MATMUL_TILE_M must be divisible by MATMUL_MMA_M"
+#endif
+#if MATMUL_TILE_N % MATMUL_MMA_N != 0
+#error "MATMUL_TILE_N must be divisible by MATMUL_MMA_N"
+#endif
+#if MATMUL_TILE_K % MATMUL_MMA_K != 0
+#error "MATMUL_TILE_K must be divisible by MATMUL_MMA_K"
+#endif
+#if (MATMUL_TILE_M / MATMUL_MMA_M) * (MATMUL_TILE_N / MATMUL_MMA_N) > 8
+#error "Too many warps"
+#endif
+
+__co__ void matmul_persis_sta_sm86(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+  int total_tiles = cdiv(M, MATMUL_TILE_M) * cdiv(N, MATMUL_TILE_N);
+  int tiles_n = cdiv(N, MATMUL_TILE_N);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_TILE_M, MATMUL_TILE_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        block_m = tile_id / tiles_n;
+        block_n = tile_id % tiles_n;
+        parallel {warp_m, warp_n} by [cdiv(MATMUL_TILE_M, MATMUL_MMA_M), cdiv(MATMUL_TILE_N, MATMUL_MMA_N)] : group {
+          mc = mma.fill 0.0;
+          foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+            lhs_load_s = dma.copy.async lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => shared;
+            rhs_load_s = dma.copy.async rhs.subspan(MATMUL_TILE_N, MATMUL_TILE_K).at(block_n, iv_k) => shared;
+            wait lhs_load_s, rhs_load_s;
+            foreach {iv_warp_k} in [cdiv(MATMUL_TILE_K, MATMUL_MMA_K)] {
+              ma = mma.load lhs_load_s.chunkat(warp_m, iv_warp_k);
+              mb = mma.load rhs_load_s.chunkat(warp_n, iv_warp_k);
+              mma.row.row mc, ma, mb;
+            }
+          }
+          mma.store mc, output_s.chunkat(warp_m, warp_n);
+        }
+        dma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_TILE_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// ============ matmul_f16_dyn_persis_colmajor_sm86: SM86 persistent colmajor ============
+__co__ void matmul_persis_colmajor_sm86(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+  int total_tiles = cdiv(M, MATMUL_TILE_M) * cdiv(N, MATMUL_TILE_N);
+  int tiles_m = cdiv(M, MATMUL_TILE_M);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_TILE_M, MATMUL_TILE_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        block_m = tile_id % tiles_m;
+        block_n = tile_id / tiles_m;
+        parallel {warp_m, warp_n} by [cdiv(MATMUL_TILE_M, MATMUL_MMA_M), cdiv(MATMUL_TILE_N, MATMUL_MMA_N)] : group {
+          mc = mma.fill 0.0;
+          foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+            lhs_load_s = dma.copy.async lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => shared;
+            rhs_load_s = dma.copy.async rhs.subspan(MATMUL_TILE_N, MATMUL_TILE_K).at(block_n, iv_k) => shared;
+            wait lhs_load_s, rhs_load_s;
+            foreach {iv_warp_k} in [cdiv(MATMUL_TILE_K, MATMUL_MMA_K)] {
+              ma = mma.load lhs_load_s.chunkat(warp_m, iv_warp_k);
+              mb = mma.load rhs_load_s.chunkat(warp_n, iv_warp_k);
+              mma.row.row mc, ma, mb;
+            }
+          }
+          mma.store mc, output_s.chunkat(warp_m, warp_n);
+        }
+        dma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_TILE_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// ============ matmul_f16_dyn_persis_swizzle_sm86: SM86 persistent diagonal swizzle ============
+__co__ void matmul_persis_swizzle_sm86(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
+                                        global s32 [T] schedule_m, global s32 [T] schedule_n) {
+  int total_tiles = cdiv(M, MATMUL_TILE_M) * cdiv(N, MATMUL_TILE_N);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_TILE_M, MATMUL_TILE_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        int block_m = schedule_m.at(tile_id);
+        int block_n = schedule_n.at(tile_id);
+        parallel {warp_m, warp_n} by [cdiv(MATMUL_TILE_M, MATMUL_MMA_M), cdiv(MATMUL_TILE_N, MATMUL_MMA_N)] : group {
+          mc = mma.fill 0.0;
+          foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+            lhs_load_s = dma.copy.async lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => shared;
+            rhs_load_s = dma.copy.async rhs.subspan(MATMUL_TILE_N, MATMUL_TILE_K).at(block_n, iv_k) => shared;
+            wait lhs_load_s, rhs_load_s;
+            foreach {iv_warp_k} in [cdiv(MATMUL_TILE_K, MATMUL_MMA_K)] {
+              ma = mma.load lhs_load_s.chunkat(warp_m, iv_warp_k);
+              mb = mma.load rhs_load_s.chunkat(warp_n, iv_warp_k);
+              mma.row.row mc, ma, mb;
+            }
+          }
+          mma.store mc, output_s.chunkat(warp_m, warp_n);
+        }
+        dma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_TILE_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// ============ matmul_f16_dyn_persis_hilbert_sm86: SM86 persistent Hilbert curve ============
+__co__ void matmul_persis_hilbert_sm86(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
+                                        global s32 [T] schedule_m, global s32 [T] schedule_n) {
+  int total_tiles = cdiv(M, MATMUL_TILE_M) * cdiv(N, MATMUL_TILE_N);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_TILE_M, MATMUL_TILE_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        int block_m = schedule_m.at(tile_id);
+        int block_n = schedule_n.at(tile_id);
+        parallel {warp_m, warp_n} by [cdiv(MATMUL_TILE_M, MATMUL_MMA_M), cdiv(MATMUL_TILE_N, MATMUL_MMA_N)] : group {
+          mc = mma.fill 0.0;
+          foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+            lhs_load_s = dma.copy.async lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => shared;
+            rhs_load_s = dma.copy.async rhs.subspan(MATMUL_TILE_N, MATMUL_TILE_K).at(block_n, iv_k) => shared;
+            wait lhs_load_s, rhs_load_s;
+            foreach {iv_warp_k} in [cdiv(MATMUL_TILE_K, MATMUL_MMA_K)] {
+              ma = mma.load lhs_load_s.chunkat(warp_m, iv_warp_k);
+              mb = mma.load rhs_load_s.chunkat(warp_n, iv_warp_k);
+              mma.row.row mc, ma, mb;
+            }
+          }
+          mma.store mc, output_s.chunkat(warp_m, warp_n);
+        }
+        dma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_TILE_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+#undef MATMUL_MMA_M
+#undef MATMUL_MMA_N
+#undef MATMUL_MMA_K
+#undef MATMUL_TILE_M
+#undef MATMUL_TILE_N
+#undef MATMUL_TILE_K
+#undef NUM_SMS
+
+// ============ matmul_f16_dyn_persis_sta_sm90: WGMMA+TMA persistent ============
+#define MATMUL_WARP_M 64
+#define MATMUL_WARP_N 128
+#define MATMUL_TILE_M 64
+#define MATMUL_TILE_K 64
+#define MATMUL_WARP_K 16
+#define MATMUL_SWIZ 128
+#define NUM_SMS 114
+
+#if MATMUL_SWIZ != (2 * MATMUL_TILE_K)
+#error "MATMUL_SWIZ must equal 2 * MATMUL_TILE_K for f16 kernel"
+#endif
+#if MATMUL_WARP_M != 64
+#error "MATMUL_WARP_M must be 64 for f16 WGMMA constraints"
+#endif
+#if MATMUL_WARP_K != 16
+#error "MATMUL_WARP_K must be 16 for f16 WGMMA constraints"
+#endif
+#if MATMUL_TILE_M != MATMUL_WARP_M
+#error "MATMUL_TILE_M must equal MATMUL_WARP_M"
+#endif
+#if MATMUL_WARP_N < 8 || MATMUL_WARP_N > 256 || (MATMUL_WARP_N % 8) != 0
+#error "MATMUL_WARP_N must be in [8,256] and divisible by 8 for SM90 WGMMA f16"
+#endif
+
+__co__ void matmul_persis_sta_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+  int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        block_m = tile_id / cdiv(N, MATMUL_WARP_N);
+        block_n = tile_id % cdiv(N, MATMUL_WARP_N);
+        mc = mma.fill.f16 0.0f;
+        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).step(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+          tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
+          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+            parallel p by 1 : group-4 {
+              ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
+              mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+              mma.row.row mc, ma, mb;
+            }
+          }
+        }
+        mma.store mc, output_s;
+        tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// ============ matmul_f16_dyn_persis_colmajor_sm90: WGMMA+TMA persistent colmajor ============
+__co__ void matmul_persis_colmajor_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+  int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
+  int tiles_m = cdiv(M, MATMUL_WARP_M);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        block_m = tile_id % tiles_m;
+        block_n = tile_id / tiles_m;
+        mc = mma.fill.f16 0.0f;
+        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).step(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+          tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
+          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+            parallel p by 1 : group-4 {
+              ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
+              mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+              mma.row.row mc, ma, mb;
+            }
+          }
+        }
+        mma.store mc, output_s;
+        tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// ============ matmul_f16_dyn_persis_swizzle_sm90: WGMMA+TMA persistent diagonal swizzle ============
+__co__ void matmul_persis_swizzle_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
+                                        global s32 [T] schedule_m, global s32 [T] schedule_n) {
+  int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        int block_m = schedule_m.at(tile_id);
+        int block_n = schedule_n.at(tile_id);
+        mc = mma.fill.f16 0.0f;
+        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).step(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+          tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
+          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+            parallel p by 1 : group-4 {
+              ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
+              mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+              mma.row.row mc, ma, mb;
+            }
+          }
+        }
+        mma.store mc, output_s;
+        tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// ============ matmul_f16_dyn_persis_hilbert_sm90: WGMMA+TMA persistent Hilbert ============
+__co__ void matmul_persis_hilbert_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
+                                        global s32 [T] schedule_m, global s32 [T] schedule_n) {
+  int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        int block_m = schedule_m.at(tile_id);
+        int block_n = schedule_n.at(tile_id);
+        mc = mma.fill.f16 0.0f;
+        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).step(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+          tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
+          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+            parallel p by 1 : group-4 {
+              ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
+              mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+              mma.row.row mc, ma, mb;
+            }
+          }
+        }
+        mma.store mc, output_s;
+        tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+#undef NUM_SMS
+
+// ============ matmul_f16_dyn_persis_1p3c_sm90: WGMMA+TMA 1-producer 3-consumer ============
+#define MATMUL_TILE_M_1P3C 192
+#define NUM_SMS 132
+
+__co__ void matmul_persis_1p3c_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
+  int total_tiles = cdiv(M, MATMUL_TILE_M_1P3C) * cdiv(N, MATMUL_WARP_N);
+  parallel block_id by NUM_SMS : block {
+    shared f16 [MATMUL_TILE_M_1P3C, MATMUL_TILE_K] lhs_load_s;
+    shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f16 [MATMUL_TILE_M_1P3C, MATMUL_WARP_N] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        block_m = tile_id / cdiv(N, MATMUL_WARP_N);
+        block_n = tile_id % cdiv(N, MATMUL_WARP_N);
+        parallel p1 by 4 : group-4 {
+          mc = mma.fill.f16 0.0f;
+          foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+            inthreads (p1 == 0) {
+              tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M_1P3C, MATMUL_TILE_K).step(MATMUL_TILE_M_1P3C, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+              tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
+            }
+            inthreads (p1 > 0) {
+              foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
+                ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(p1 - 1, 0).chunkat(_, iv_warp);
+                mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
+                mma.row.row mc, ma, mb;
+              }
+            }
+          }
+          inthreads (p1 > 0) {
+            mma.store mc, output_s.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(p1 - 1, 0);
+          }
+        }
+        tma.copy output_s => output.subspan(MATMUL_TILE_M_1P3C, MATMUL_WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+#undef MATMUL_TILE_M_1P3C
+#undef MATMUL_WARP_M
+#undef MATMUL_WARP_N
+#undef MATMUL_TILE_M
+#undef MATMUL_TILE_K
+#undef MATMUL_WARP_K
+#undef MATMUL_SWIZ
+#undef NUM_SMS
+
+// ============ host-side schedule builders and utilities ============
+
+static int build_swizzle_schedule(int tiles_m, int tiles_n,
+                                  int* schedule_m, int* schedule_n) {
+  int count = 0;
+  int num_diags = tiles_m + tiles_n - 1;
+  for (int d = 0; d < num_diags; ++d) {
+    int i_start = (d < tiles_n) ? 0 : (d - tiles_n + 1);
+    int i_end   = (d < tiles_m) ? d : (tiles_m - 1);
+    for (int i = i_start; i <= i_end; ++i) {
+      int j = d - i;
+      schedule_m[count] = i;
+      schedule_n[count] = j;
+      ++count;
+    }
+  }
+  return count;
+}
+
+static void hilbert_rot(int n, int& x, int& y, int rx, int ry) {
+  if (ry == 0) {
+    if (rx == 1) { x = n - 1 - x; y = n - 1 - y; }
+    int t = x; x = y; y = t;
+  }
+}
+
+static void hilbert_d2xy(int n, int d, int& x, int& y) {
+  x = y = 0;
+  for (int s = 1; s < n; s *= 2) {
+    int rx = 1 & (d / 2);
+    int ry = 1 & (d ^ rx);
+    hilbert_rot(s, x, y, rx, ry);
+    x += s * rx;
+    y += s * ry;
+    d /= 4;
+  }
+}
+
+static int next_pow2(int v) {
+  int p = 1;
+  while (p < v) p *= 2;
+  return p;
+}
+
+static int build_hilbert_schedule(int tiles_m, int tiles_n,
+                                  int* schedule_m, int* schedule_n) {
+  int n = next_pow2(tiles_m > tiles_n ? tiles_m : tiles_n);
+  int count = 0;
+  for (int d = 0; d < n * n; ++d) {
+    int x, y;
+    hilbert_d2xy(n, d, x, y);
+    if (x < tiles_m && y < tiles_n) {
+      schedule_m[count] = x;
+      schedule_n[count] = y;
+      ++count;
+    }
+  }
+  return count;
+}
+
+static void verify_f16_matmul(choreo::spanned_view<choreo::f16, 2> lhs_v,
+                               choreo::spanned_view<choreo::f16, 2> rhs_v,
+                               choreo::spanned_view<choreo::f16, 2> res_v,
+                               size_t M, size_t N, size_t K, float tolerance) {
+  auto rel_error = [](float ref, float got) {
+    float abs_ref = std::abs(ref);
+    float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
+    return std::abs(ref - got) / denom;
+  };
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += __half2float(lhs_v[i][k] * rhs_v[j][k]);
+      float got = __half2float(res_v[i][j]);
+      auto delta = rel_error(ref, got);
+      if (delta >= tolerance)
+        std::cout << "[" << i << ", " << j << "] ref=" << ref << " got=" << got << " delta=" << delta * 100 << "%\n";
+      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+    }
+}
+
+// Macro to set up host/device buffers, run kernel, readback, verify, and clean up
+#define RUN_PERSIS_TEST(KERNEL_CALL, LABEL)                                   \
+  {                                                                           \
+    auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);                   \
+    auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);                   \
+    auto res_h = choreo::make_spandata<choreo::f16>(M, N);                   \
+    lhs_h.fill_random(0, 2); rhs_h.fill_random(0, 2); res_h.fill(0.0f);     \
+    half *a_d, *b_d, *c_d;                                                   \
+    choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(half)));              \
+    choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(half)));              \
+    choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));              \
+    choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M*K*sizeof(half), cudaMemcpyHostToDevice)); \
+    choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N*K*sizeof(half), cudaMemcpyHostToDevice)); \
+    choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M*N*sizeof(half), cudaMemcpyHostToDevice)); \
+    choreo::abend_true(cudaDeviceSynchronize());                             \
+    KERNEL_CALL;                                                              \
+    choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M*N*sizeof(half), cudaMemcpyDeviceToHost)); \
+    choreo::abend_true(cudaDeviceSynchronize());                             \
+    verify_f16_matmul(lhs_h.view(), rhs_h.view(), res_h.view(), M, N, K, tolerance); \
+    cudaFree(a_d); cudaFree(b_d); cudaFree(c_d);                            \
+    std::cout << "Test " LABEL " Passed\n";                                  \
+  }
+
+#define SCHED_PERSIS_TEST(KERNEL_CALL, LABEL, TILE_M_S, TILE_N_S, BUILD_SCHED) \
+  {                                                                           \
+    int tiles_m = (M + TILE_M_S - 1) / TILE_M_S;                             \
+    int tiles_n = (N + TILE_N_S - 1) / TILE_N_S;                             \
+    int total_tiles = tiles_m * tiles_n;                                      \
+    int* sm_h = (int*)std::malloc(total_tiles * sizeof(int));                 \
+    int* sn_h = (int*)std::malloc(total_tiles * sizeof(int));                 \
+    int count = BUILD_SCHED(tiles_m, tiles_n, sm_h, sn_h);                   \
+    choreo::choreo_assert(count == total_tiles, "schedule mismatch");         \
+    int *sm_d = nullptr, *sn_d = nullptr;                                     \
+    choreo::abend_true(cudaMalloc(&sm_d, total_tiles * sizeof(int)));         \
+    choreo::abend_true(cudaMalloc(&sn_d, total_tiles * sizeof(int)));         \
+    choreo::abend_true(cudaMemcpy(sm_d, sm_h, total_tiles*sizeof(int), cudaMemcpyHostToDevice)); \
+    choreo::abend_true(cudaMemcpy(sn_d, sn_h, total_tiles*sizeof(int), cudaMemcpyHostToDevice)); \
+    std::free(sm_h); std::free(sn_h);                                        \
+    auto sm_v = choreo::make_spanview<choreo::s32, 1>(sm_d, {(size_t)total_tiles}); \
+    auto sn_v = choreo::make_spanview<choreo::s32, 1>(sn_d, {(size_t)total_tiles}); \
+    auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);                   \
+    auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);                   \
+    auto res_h = choreo::make_spandata<choreo::f16>(M, N);                   \
+    lhs_h.fill_random(0, 2); rhs_h.fill_random(0, 2); res_h.fill(0.0f);     \
+    half *a_d, *b_d, *c_d;                                                   \
+    choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(half)));              \
+    choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(half)));              \
+    choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));              \
+    choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M*K*sizeof(half), cudaMemcpyHostToDevice)); \
+    choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N*K*sizeof(half), cudaMemcpyHostToDevice)); \
+    choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M*N*sizeof(half), cudaMemcpyHostToDevice)); \
+    choreo::abend_true(cudaDeviceSynchronize());                             \
+    KERNEL_CALL;                                                              \
+    choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M*N*sizeof(half), cudaMemcpyDeviceToHost)); \
+    choreo::abend_true(cudaDeviceSynchronize());                             \
+    verify_f16_matmul(lhs_h.view(), rhs_h.view(), res_h.view(), M, N, K, tolerance); \
+    cudaFree(a_d); cudaFree(b_d); cudaFree(c_d);                            \
+    cudaFree(sm_d); cudaFree(sn_d);                                          \
+    std::cout << "Test " LABEL " Passed\n";                                  \
+  }
+
+int main(int argc, char** argv) {
+  const size_t M = 256, N = 256, K = 256;
+  float tolerance = 0.05f;
+
+#define LHS_V choreo::make_spanview<choreo::f16, 2>(a_d, {M, K})
+#define RHS_V choreo::make_spanview<choreo::f16, 2>(b_d, {N, K})
+#define OUT_V choreo::make_spanview<choreo::f16, 2>(c_d, {M, N})
+
+  RUN_PERSIS_TEST(matmul_persis_sta_sm86(LHS_V, RHS_V, OUT_V), "persis_sta_sm86")
+  RUN_PERSIS_TEST(matmul_persis_colmajor_sm86(LHS_V, RHS_V, OUT_V), "persis_colmajor_sm86")
+  SCHED_PERSIS_TEST(matmul_persis_swizzle_sm86(LHS_V, RHS_V, OUT_V, sm_v, sn_v), "persis_swizzle_sm86", 16, 16, build_swizzle_schedule)
+  SCHED_PERSIS_TEST(matmul_persis_hilbert_sm86(LHS_V, RHS_V, OUT_V, sm_v, sn_v), "persis_hilbert_sm86", 16, 16, build_hilbert_schedule)
+  RUN_PERSIS_TEST(matmul_persis_sta_sm90(LHS_V, RHS_V, OUT_V), "persis_sta_sm90")
+  RUN_PERSIS_TEST(matmul_persis_colmajor_sm90(LHS_V, RHS_V, OUT_V), "persis_colmajor_sm90")
+  SCHED_PERSIS_TEST(matmul_persis_swizzle_sm90(LHS_V, RHS_V, OUT_V, sm_v, sn_v), "persis_swizzle_sm90", 64, 128, build_swizzle_schedule)
+  SCHED_PERSIS_TEST(matmul_persis_hilbert_sm90(LHS_V, RHS_V, OUT_V, sm_v, sn_v), "persis_hilbert_sm90", 64, 128, build_hilbert_schedule)
+  RUN_PERSIS_TEST(matmul_persis_1p3c_sm90(LHS_V, RHS_V, OUT_V), "persis_1p3c_sm90")
+
+#undef LHS_V
+#undef RHS_V
+#undef OUT_V
+
+  std::cout << "All Tests Passed\n" << std::endl;
+}
+
+// CHECK: Test persis_sta_sm86 Passed
+// CHECK: Test persis_colmajor_sm86 Passed
+// CHECK: Test persis_swizzle_sm86 Passed
+// CHECK: Test persis_hilbert_sm86 Passed
+// CHECK: Test persis_sta_sm90 Passed
+// CHECK: Test persis_colmajor_sm90 Passed
+// CHECK: Test persis_swizzle_sm90 Passed
+// CHECK: Test persis_hilbert_sm90 Passed
+// CHECK: Test persis_1p3c_sm90 Passed
+// CHECK: All Tests Passed
