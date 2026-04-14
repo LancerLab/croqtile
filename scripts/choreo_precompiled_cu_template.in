@@ -1,0 +1,6 @@
+#ifndef __CHOREO_PRECOMPILED_CU_HEADER_H__
+#define __CHOREO_PRECOMPILED_CU_HEADER_H__
+
+static const char* __choreo_precompiled_cu_as_string = R"(@CHOREO_PRECOMPILED_CU_CONTENT@)";
+
+#endif // __CHOREO_PRECOMPILED_CU_HEADER_H__
