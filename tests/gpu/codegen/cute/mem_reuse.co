@@ -37,7 +37,7 @@ __co__ void foo(int n, int m) {
 // CHECK:   kernel((unsigned char*)l, (unsigned char*)ll);
 // CHECK: }
 
-// CHECK: __global__ void __choreo_device_foo1(int n, int m, unsigned long mr_offset_foo_paraby_3_s, unsigned long mr_offset_foo_paraby_3_ss, unsigned __co__shared_spm_size1) {
+// CHECK: __global__ void __choreo_device_foo1(int n, int m, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_l, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_ll, unsigned long mr_offset_foo_paraby_3_s, unsigned long mr_offset_foo_paraby_3_ss, unsigned __co__shared_spm_size1) {
 // CHECK:   extern __shared__ char __choreo_device_foo1__runtime_shared_buffer__raw[];
 // CHECK:   auto __choreo_device_foo1__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo1__runtime_shared_buffer__raw));
 // CHECK:   auto anon_5 = (unsigned char*)__choreo_device_foo1__runtime_shared_buffer__;
@@ -45,8 +45,8 @@ __co__ void foo(int n, int m) {
 // CHECK:   unsigned char* ss = (unsigned char*)(anon_5 + mr_offset_foo_paraby_3_ss);
 // CHECK:   kernel((unsigned char*)s, (unsigned char*)ss);
 // CHECK:   auto __choreo_vtid_x = threadIdx.x;
-// CHECK:   unsigned char l[n];
-// CHECK:   unsigned char ll[m];
+// CHECK:   unsigned char* l = (unsigned char*)(anon_6 + mr_offset_foo_paraby_3_paraby_4_paraby_5_l);
+// CHECK:   unsigned char* ll = (unsigned char*)(anon_6 + mr_offset_foo_paraby_3_paraby_4_paraby_5_ll);
 // CHECK:   kernel((unsigned char*)l, (unsigned char*)ll);
 // CHECK: }
 
@@ -70,9 +70,20 @@ __co__ void foo(int n, int m) {
 // CHECK:   __choreo_device_foo0<<<__foo_gdims0, __foo_bdims0, __co__shared_spm_size0 + (16 - 1)>>>(n, m, __co__shared_chunk_offsets0[0], __co__shared_chunk_offsets0[1], __co__shared_spm_size0);
 // CHECK:   choreo::abend_true(cudaDeviceSynchronize());
 // CHECK:   // JIT memory reuse begin
+// CHECK:   HeapSimulator::Chunks __co__local_chunks1;
+// CHECK{LITERAL}:   __co__local_chunks1.push_back({static_cast<size_t>(n), {{19,21}}, "_foo_paraby_3_paraby_4_paraby_5_l"});
+// CHECK{LITERAL}:   __co__local_chunks1.push_back({static_cast<size_t>(m), {{20,21}}, "_foo_paraby_3_paraby_4_paraby_5_ll"});
 // CHECK:   HeapSimulator::Chunks __co__shared_chunks1;
 // CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{14,16}}, "_foo_paraby_3_s"});
 // CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{15,16}}, "_foo_paraby_3_ss"});
+// CHECK:   HeapSimulator __co_local_heap_simulator1;
+// CHECK:   HeapSimulator::Result __co__local_result1 = __co_local_heap_simulator1.Allocate(__co__local_chunks1, 512);
+// CHECK:   unsigned __co__local_spm_size1 = __co__local_result1.heap_size;
+// CHECK:   choreo::runtime_check(__co__local_spm_size1 <= (size_t)2048, "In the memory reuse of dynamic shapes, the size of the initial local spm should not exceed the memory usage limit 2048 bytes.");
+// CHECK:   unsigned long __co__local_chunk_offsets1[2];
+// CHECK:   size_t __co__local_chunks1_idx = 0;
+// CHECK:   for (const auto& [buffer_id, offset] : __co__local_result1.chunk_offsets)
+// CHECK:     __co__local_chunk_offsets1[__co__local_chunks1_idx++] = offset;
 // CHECK:   HeapSimulator __co_shared_heap_simulator1;
 // CHECK:   HeapSimulator::Result __co__shared_result1 = __co_shared_heap_simulator1.Allocate(__co__shared_chunks1, 512);
 // CHECK:   unsigned __co__shared_spm_size1 = __co__shared_result1.heap_size;
@@ -85,6 +96,6 @@ __co__ void foo(int n, int m) {
 // CHECK:   dim3 __foo_gdims1(2, 1, 1);
 // CHECK:   dim3 __foo_bdims1(16, 1, 1);
 // CHECK:   cudaFuncSetAttribute(__choreo_device_foo1, cudaFuncAttributeMaxDynamicSharedMemorySize, __co__shared_spm_size1 + (16 - 1));
-// CHECK:   __choreo_device_foo1<<<__foo_gdims1, __foo_bdims1, __co__shared_spm_size1 + (16 - 1)>>>(n, m, __co__shared_chunk_offsets1[0], __co__shared_chunk_offsets1[1], __co__shared_spm_size1);
+// CHECK:   __choreo_device_foo1<<<__foo_gdims1, __foo_bdims1, __co__shared_spm_size1 + (16 - 1)>>>(n, m, __co__local_chunk_offsets1[0], __co__local_chunk_offsets1[1], __co__shared_chunk_offsets1[0], __co__shared_chunk_offsets1[1], __co__shared_spm_size1);
 // CHECK:   choreo::abend_true(cudaDeviceSynchronize());
 // CHECK: }

@@ -2198,8 +2198,12 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         } else {
           // The buffer is declared but never used.
           // TODO: should we DCE the unused buffer?
+          std::string total_elem_expr = UnScopedExpr(ElemCountExprOf(*sty));
+          for (const auto& dim : GetArrayDimensions(nty))
+            total_elem_expr =
+                "(" + ValueSTR(dim) + ")*(" + total_elem_expr + ")";
           ds << d_indent << type_modifiers << bts << " " << sym << "["
-             << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+             << total_elem_expr << "];\n";
         }
       }
     };

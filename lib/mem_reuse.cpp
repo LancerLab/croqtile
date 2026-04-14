@@ -239,19 +239,34 @@ bool MemReuse::Visit(AST::NamedVariableDecl& n) {
   auto ty = GetSymbolType(n.name_str);
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     auto sto = sty->GetStorage();
-    if (ShouldReuseStorage(sto)) ApplyMemOffset(n, sto);
+    if (ShouldReuseStorage(sto, cur_dev_fname)) ApplyMemOffset(n, sto);
   }
   return true;
 }
 
-bool MemReuse::ShouldReuseStorage(Storage sto) const {
+bool MemReuse::ShouldReuseStorage(Storage sto,
+                                  const std::string& dev_func_name) const {
   if (sto == Storage::SHARED) return true;
-  if (sto == Storage::LOCAL) {
-    // CUTE local buffers can be promoted to registers/scalars in CUDA.
-    // Skip local memory reuse so this optimization opportunity is preserved.
-    return CCtx().TargetName() != "cute";
-  }
-  return false;
+  if (sto != Storage::LOCAL) return false;
+  if (CCtx().TargetName() != "cute") return true;
+
+  // For CUTE local buffers:
+  // - static shape: skip reuse to preserve register/scalar promotion chances.
+  // - dynamic shape: keep reuse because VLA-style local arrays cannot be
+  //   reliably registerized and need runtime-managed storage.
+  if (dev_func_name == "") return false;
+  if (!ma.sto_have_dyn.count(dev_func_name)) return false;
+  auto& dyn_flags = ma.sto_have_dyn.at(dev_func_name);
+  if (!dyn_flags.count(Storage::LOCAL)) return false;
+  return dyn_flags.at(Storage::LOCAL);
+}
+
+bool MemReuse::ShouldReuseBuffer(const std::string& buffer_id, Storage sto,
+                                 const std::string& dev_func_name) const {
+  if (!ShouldReuseStorage(sto, dev_func_name)) return false;
+  if (sto != Storage::LOCAL || CCtx().TargetName() != "cute") return true;
+  // In CUTE local storage, keep reuse only for dynamic-shape buffers.
+  return !VIIsInt(ma.buf_size.at(buffer_id));
 }
 
 void MemReuse::Initialize() {
@@ -308,7 +323,7 @@ void MemReuse::AnalyzeMemOffset() {
   std::map<std::string, size_t> idx_count;
   for (const auto& [df_name, _] : DFCtxs()) {
     for (auto sto : {Storage::LOCAL, Storage::SHARED}) {
-      if (!ShouldReuseStorage(sto)) continue;
+      if (!ShouldReuseStorage(sto, df_name)) continue;
       if (ma.sto_have_dyn[df_name][sto]) {
         std::string co_func_name = GetFuncNameFromScopedName(df_name);
         // TODO: check that no pb, but dynamic
@@ -325,7 +340,7 @@ void MemReuse::AnalyzeMemOffset() {
   }
   for (auto& [df_name, ctx] : DFCtxs()) {
     for (auto sto : {Storage::LOCAL, Storage::SHARED}) {
-      if (!ShouldReuseStorage(sto)) continue;
+      if (!ShouldReuseStorage(sto, df_name)) continue;
       if (ma.sto_have_dyn[df_name][sto]) {
         std::string co_func_name = GetFuncNameFromScopedName(df_name);
         if (idx_count[co_func_name] == 0) df_name_idx[df_name] = "";
@@ -391,7 +406,10 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
         return total_event_size;
       };
 
-      SetChunkInfo(ctx.buffers);
+      // For CUTE local dynamic reuse, only keep dynamic local buffers in the
+      // runtime heap simulator so static locals can still be plain arrays.
+      if (!(sto == Storage::LOCAL && CCtx().TargetName() == "cute"))
+        SetChunkInfo(ctx.buffers);
       SetChunkInfo(ctx.dynamic_buffers);
 
       std::string stos = STR(sto);
@@ -408,6 +426,19 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       auto& ctx_spm_size =
           (sto == Storage::LOCAL ? ctx.local_spm_size : ctx.shared_spm_size);
       ctx_spm_size = mem_capacity - AlignUp(total_event_size, alignment);
+      if (sto == Storage::LOCAL && CCtx().TargetName() == "cute") {
+        size_t static_local_no_reuse_size = 0;
+        for (const auto& buffer : ctx.buffers) {
+          if (ma.buf_sto.at(buffer.buffer_id) != Storage::LOCAL) continue;
+          if (ShouldReuseBuffer(buffer.buffer_id, Storage::LOCAL, df_name))
+            continue;
+          static_local_no_reuse_size += buffer.size;
+        }
+        if (ctx_spm_size >= static_local_no_reuse_size)
+          ctx_spm_size -= static_local_no_reuse_size;
+        else
+          ctx_spm_size = 0;
+      }
 
       // record the offset args in sorted order
       std::sort(infos[sto].offset_args.begin(), infos[sto].offset_args.end());
@@ -419,7 +450,9 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     HeapSimulator::Chunks chunks;
 
     for (const auto& buffer : ctx.buffers) {
-      if (ma.buf_sto.at(buffer.buffer_id) == sto) chunks.push_back(buffer);
+      if (ma.buf_sto.at(buffer.buffer_id) != sto) continue;
+      if (!ShouldReuseBuffer(buffer.buffer_id, sto, df_name)) continue;
+      chunks.push_back(buffer);
     }
 
     HeapSimulator simulator;
@@ -440,7 +473,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
   };
 
   for (auto sto : {Storage::LOCAL, Storage::SHARED})
-    if (ShouldReuseStorage(sto)) DoMemReuse(sto);
+    if (ShouldReuseStorage(sto, df_name)) DoMemReuse(sto);
 }
 
 bool MemReuse::ValidateResult(const HeapSimulator::Result& res,
@@ -469,9 +502,23 @@ bool MemReuse::ValidateResult(const HeapSimulator::Result& res,
 void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
   assert(sto == Storage::LOCAL || sto == Storage::SHARED);
   auto sname = InScopeName(n.name_str);
+  if (!ShouldReuseBuffer(sname, sto, cur_dev_fname)) {
+    VST_DEBUG(dbgs() << STR(sto) << " buffer: " << sname
+                     << "\n\tis not selected for memory reuse.\n";);
+    return;
+  }
   VST_DEBUG(dbgs() << STR(sto) << " buffer: " << sname << "\n\t";);
 
   bool dynamic = ma.sto_have_dyn[cur_dev_fname][sto];
+  if (dynamic && sto == Storage::LOCAL && CCtx().TargetName() == "cute") {
+    std::string co_func_name = GetFuncNameFromScopedName(cur_dev_fname);
+    auto mri = FCtx(co_func_name).GetDynMemReuseInfo(cur_dev_fname);
+    if (!mri || !mri->infos.count(Storage::LOCAL)) return;
+    auto off_arg = "mr_offset" + sname;
+    auto& off_args = mri->infos.at(Storage::LOCAL).offset_args;
+    if (std::find(off_args.begin(), off_args.end(), off_arg) == off_args.end())
+      return;
+  }
   if (!DFCtx().mem_offset.count(sname) && !dynamic) {
     VST_DEBUG(dbgs() << "has no valid reuse offset!\n");
     return;

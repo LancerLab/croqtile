@@ -103,7 +103,7 @@ __co__ void test_triple_rotate(
 // CHECK: bf16* v_s2__buf__ = (bf16*)(anon_{{[0-9]+}} + mr_offset_{{.*}}v_s2__buf__);
 
 // -- local output staging array --
-// CHECK: bf16* o_l = (bf16*)(anon_{{[0-9]+}} + 0);
+// CHECK: bf16 o_l[(3)*(32)];
 
 // -- prologue: rotate shared and output futures --
 // CHECK: choreo::rotate(q_s0, q_s1, q_s2);

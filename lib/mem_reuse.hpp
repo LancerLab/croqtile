@@ -296,7 +296,10 @@ private:
   }
 
   bool Visit(AST::NamedVariableDecl&) override;
-  bool ShouldReuseStorage(Storage sto) const;
+  bool ShouldReuseStorage(Storage sto,
+                          const std::string& dev_func_name = "") const;
+  bool ShouldReuseBuffer(const std::string& buffer_id, Storage sto,
+                         const std::string& dev_func_name) const;
   void Initialize();
   void AnalyzeMemOffset();
   void ProtoType(const std::string& dev_fname, DevFuncMemReuseCtx& ctx,
