@@ -272,63 +272,8 @@ set(BUILD_DIR ${CMAKE_BINARY_DIR}/build)
 
 set(TOOLCHAIN_DIR "${CMAKE_SOURCE_DIR}/extern")
 
-# flex and bison are required
-set(TOOLCHAIN_BIN_DIR "${TOOLCHAIN_DIR}/bin/")
-set(TOOLCHAIN_BISON_DATA_DIR "${TOOLCHAIN_DIR}/shared/bison/")
-
-find_program(BISON_EXECUTABLE
-  NAMES bison
-  HINTS "${TOOLCHAIN_BIN_DIR}"
-)
-
-find_program(FLEX_EXECUTABLE
-  NAMES flex
-  HINTS "${TOOLCHAIN_BIN_DIR}"
-)
-
-if(NOT FLEX_EXECUTABLE OR NOT BISON_EXECUTABLE)
-  message(FATAL_ERROR "Missing build tools! Bison: ${BISON_EXECUTABLE}, Flex: ${FLEX_EXECUTABLE}")
-endif()
-
-if(BISON_EXECUTABLE)
-  execute_process(
-    COMMAND ${BISON_EXECUTABLE} --version
-    OUTPUT_VARIABLE BISON_VER_OUTPUT
-  )
-# Extract version string (e.g., "3.8.2")
-  if(BISON_VER_OUTPUT MATCHES "bison.* ([0-9]+\\.[0-9]+(\\.[0-9]+)?)")
-    set(BISON_VERSION_FOUND ${CMAKE_MATCH_1})
-    if(BISON_VERSION_FOUND VERSION_LESS "3.8")
-        message(FATAL_ERROR "Bison 3.8 or higher is required. Found version: ${BISON_VERSION_FOUND} at ${BISON_EXECUTABLE}")
-    endif()
-  else()
-    message(WARNING "Could not determine Bison version. Build may fail.")
-  endif()
-endif()
-
-if(BISON_EXECUTABLE AND TOOLCHAIN_DIR)
-# Check if the found bison is inside the toolchain directory.
-# Use a string-prefix test here so the project stays compatible with CMake 3.16.
-  file(TO_CMAKE_PATH "${TOOLCHAIN_DIR}" _toolchain_dir_norm)
-  file(TO_CMAKE_PATH "${BISON_EXECUTABLE}" _bison_executable_norm)
-  string(LENGTH "${_toolchain_dir_norm}" _toolchain_dir_len)
-  string(SUBSTRING "${_bison_executable_norm}" 0 ${_toolchain_dir_len}
-         _bison_prefix)
-  if(_bison_prefix STREQUAL _toolchain_dir_norm)
-    set(IS_LOCAL_BISON TRUE)
-  else()
-    set(IS_LOCAL_BISON FALSE)
-  endif()
-
-  if(IS_LOCAL_BISON AND EXISTS "${TOOLCHAIN_BISON_DATA_DIR}")
-    set(BISON_ENV_CMD "BISON_PKGDATADIR=${TOOLCHAIN_BISON_DATA_DIR}")
-    message(STATUS "Using local Bison environment with PKGDATADIR")
-  endif()
-endif()
-
-if(NOT BISON_EXECUTABLE OR NOT FLEX_EXECUTABLE)
-	message(FATAL_ERROR "Bison or Flex not found! Please check TOOLCHAIN_DIR or install them.")
-endif()
+# Flex and Bison: find in toolchain/system, or auto-build from source
+include(${CMAKE_SOURCE_DIR}/cmake/FlexBisonBootstrap.cmake)
 
 # CUDA_HOME as a cache variable with environment fallback
 if(DEFINED ENV{CUDA_HOME})
