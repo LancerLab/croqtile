@@ -4190,14 +4190,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
                     auto EmitG2S = [&](size_t tr, size_t tpr, size_t epc,
                                        int bits) {
-                      IndStream()
-                          << "choreo::copy_if_g2s<"
-                          << (use_wgmma_layout_t ? "true" : "false") << ", "
-                          << NameBaseType(t_sty->ElementType()) << ", " << tr
-                          << ", " << tpr << ", " << 1 << ", " << epc;
-                      if (bits != 128) IndStream() << ", " << bits;
-                      IndStream() << ">(" << src_name << ", " << dst_name
-                                  << ", " << pred_str << ");\n";
+                      auto& os = IndStream();
+                      os << "choreo::copy_if_g2s<"
+                         << (use_wgmma_layout_t ? "true" : "false") << ", "
+                         << NameBaseType(t_sty->ElementType()) << ", " << tr
+                         << ", " << tpr << ", " << 1 << ", " << epc;
+                      if (bits != 128) os << ", " << bits;
+                      os << ">(" << src_name << ", " << dst_name << ", "
+                         << pred_str << ");\n";
                     };
 
                     if (is_dma_g2s) {
