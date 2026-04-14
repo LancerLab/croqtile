@@ -65,7 +65,99 @@ __co__ void stmatrix_codegen_case_fp8(global f8_e4m3 [M, K] lhs,
   }
 }
 
+#define WARP_N_BF16 160
+#define TILE_K_BF16 64
+
+#define WARP_N_BF16_TAIL 152
+
+__co__ void stmatrix_codegen_case_bf16_f32(global bf16 [M, K] lhs,
+                                           global bf16 [N, K] rhs,
+                                           global bf16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N_BF16)] : block {
+    shared bf16 [WARP_M, TILE_K_BF16] lhs_s;
+    shared bf16 [WARP_N_BF16, TILE_K_BF16] rhs_s;
+    mc = mma.fill.f32 0.0f;
+
+    foreach {iv_k} in [cdiv(K, TILE_K_BF16)] {
+      tma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K_BF16).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs.subspan(WARP_N_BF16, TILE_K_BF16).at(block_n, iv_k) => rhs_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K_BF16, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared bf16 [WARP_M, WARP_N_BF16] out_s;
+    mma.store mc, out_s;
+    tma.copy out_s => output.subspan(WARP_M, WARP_N_BF16).at(block_m, block_n);
+  }
+}
+
+__co__ void stmatrix_codegen_case_bf16_f32_tail(global bf16 [M, K] lhs,
+                                                global bf16 [N, K] rhs,
+                                                global bf16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N_BF16_TAIL)] : block {
+    shared bf16 [WARP_M, TILE_K_BF16] lhs_s;
+    shared bf16 [WARP_N_BF16_TAIL, TILE_K_BF16] rhs_s;
+    mc = mma.fill.f32 0.0f;
+
+    foreach {iv_k} in [cdiv(K, TILE_K_BF16)] {
+      tma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K_BF16).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs.subspan(WARP_N_BF16_TAIL, TILE_K_BF16).at(block_n, iv_k) => rhs_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K_BF16, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared bf16 [WARP_M, WARP_N_BF16_TAIL] out_s;
+    mma.store mc, out_s;
+    tma.copy out_s => output.subspan(WARP_M, WARP_N_BF16_TAIL).at(block_m, block_n);
+  }
+}
+
+__co__ void stmatrix_codegen_case_bf16_f32_trans(global bf16 [M, K] lhs,
+                                                 global bf16 [N, K] rhs,
+                                                 global bf16 [N, M] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N_BF16)] : block {
+    shared bf16 [WARP_M, TILE_K_BF16] lhs_s;
+    shared bf16 [WARP_N_BF16, TILE_K_BF16] rhs_s;
+    mc = mma.fill.f32 0.0f;
+
+    foreach {iv_k} in [cdiv(K, TILE_K_BF16)] {
+      tma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K_BF16).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<128> rhs.subspan(WARP_N_BF16, TILE_K_BF16).at(block_n, iv_k) => rhs_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K_BF16, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<128> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<128> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared bf16 [WARP_N_BF16, WARP_M] out_s;
+    mma.store.transp mc, out_s;
+    tma.copy out_s => output.subspan(WARP_N_BF16, WARP_M).at(block_n, block_m);
+  }
+}
+
 // CHECK-ON: {{^[[:space:]]*store_fragment_d_stmatrix<CUTE_WGMMA_M64K16, 64>\(}}
 // CHECK-ON: {{^[[:space:]]*store_fragment_d_stmatrix<CUTE_WGMMA_M64K32, 128>\(}}
+// CHECK-ON: {{^[[:space:]]*store_fragment_d_stmatrix_f32_bf16<CUTE_WGMMA_M64K16, 160>\(}}
+// CHECK-ON: {{^[[:space:]]*store_fragment_d_stmatrix_f32_bf16<CUTE_WGMMA_M64K16, 152>\(}}
+// CHECK-ON: {{^[[:space:]]*store_fragment_d_stmatrix_trans_f32_bf16<CUTE_WGMMA_M64K16, 160>\(}}
 // CHECK-OFF-NOT: {{^[[:space:]]*store_fragment_d_stmatrix<CUTE_WGMMA_M64K16, 64>\(}}
 // CHECK-OFF-NOT: {{^[[:space:]]*store_fragment_d_stmatrix<CUTE_WGMMA_M64K32, 128>\(}}
+// CHECK-OFF-NOT: {{^[[:space:]]*store_fragment_d_stmatrix_f32_bf16<CUTE_WGMMA_M64K16, 160>\(}}
+// CHECK-OFF-NOT: {{^[[:space:]]*store_fragment_d_stmatrix_f32_bf16<CUTE_WGMMA_M64K16, 152>\(}}
+// CHECK-OFF-NOT: {{^[[:space:]]*store_fragment_d_stmatrix_trans_f32_bf16<CUTE_WGMMA_M64K16, 160>\(}}

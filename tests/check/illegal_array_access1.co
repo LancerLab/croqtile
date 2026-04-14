@@ -47,8 +47,10 @@ __co__ void check_array_access_with_bounded_var(f32 [2,4] a, int idx0, int idx1)
     shared f32[2, 8] b[2][3];
 
     foreach q in idx1 {
-      dma.copy b[p][q].chunkat(_, _) => local;  // both ok. Currently, no check for bounded vars as index.
+      dma.copy b[p][q].chunkat(_, _) => local;  // p bounded by idx0, q bounded by idx1: runtime checks emitted
     }
   }
 }
+// CHECK: choreo::runtime_check({{.*}}idx0{{.*}} < 2{{(LL)?}}), "Index {{.*}}p is out of bounds of the 1st dimension of array 'b', where the valid range is [0, 2)
+// CHECK: choreo::runtime_check({{.*}}idx1{{.*}} < 3{{(LL)?}}), "Index {{.*}}q{{.*}} is out of bounds of the 2nd dimension of array 'b', where the valid range is [0, 3)
 // CHECK-NOT: choreo::runtime_check{{.*}}out of bounds{{.*}}where the valid range

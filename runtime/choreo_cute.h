@@ -3083,6 +3083,135 @@ __device__ static inline void store_fragment_d_trans(Tensor& D,
     MMA_Policy<MMA>::typeD::template store_trans<Tensor, AccumT>(D, d);
 }
 
+template <class MMA, int N, class Tensor>
+__device__ static inline void
+store_fragment_d_stmatrix_f32_bf16(Tensor& D, float* const d) {
+  static_assert(std::is_same<typename Tensor::value_type, bf16>::value,
+                "stmatrix f32->bf16 store requires bf16 output tensor");
+  static_assert(
+      (N % 8) == 0,
+      "stmatrix f32->bf16 store currently requires N to be divisible by 8");
+
+  int tid = threadIdx.x % 128;
+  int lane = tid % 32;
+  int warp = tid / 32;
+
+  bf16* d_base_ptr = &D(0, 0);
+  uint32_t d_base_addr =
+      static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
+
+  constexpr int w_iters = N / 16;
+  constexpr int tail_cols = N % 16;
+  constexpr int full_cols = w_iters * 16;
+  constexpr uint32_t kStepBytes = static_cast<uint32_t>(16 * sizeof(bf16));
+
+  uint32_t lane_offset =
+      static_cast<uint32_t>((lane % 8) * N + (lane / 16) * N * 8 + (lane & 8));
+  uint32_t addr = d_base_addr +
+                  static_cast<uint32_t>((warp * 16 * N) * sizeof(bf16)) +
+                  lane_offset * sizeof(bf16);
+
+  #pragma unroll
+  for (int w = 0; w < w_iters; ++w) {
+    int base = w * 8;
+    bf16 v0 = utils::from_f32<bf16>(d[base + 0]);
+    bf16 v1 = utils::from_f32<bf16>(d[base + 1]);
+    bf16 v2 = utils::from_f32<bf16>(d[base + 2]);
+    bf16 v3 = utils::from_f32<bf16>(d[base + 3]);
+    bf16 v4 = utils::from_f32<bf16>(d[base + 4]);
+    bf16 v5 = utils::from_f32<bf16>(d[base + 5]);
+    bf16 v6 = utils::from_f32<bf16>(d[base + 6]);
+    bf16 v7 = utils::from_f32<bf16>(d[base + 7]);
+
+    uint32_t r0 = static_cast<uint32_t>(bitcast_uint(v0)) |
+                  (static_cast<uint32_t>(bitcast_uint(v1)) << 16);
+    uint32_t r1 = static_cast<uint32_t>(bitcast_uint(v4)) |
+                  (static_cast<uint32_t>(bitcast_uint(v5)) << 16);
+    uint32_t r2 = static_cast<uint32_t>(bitcast_uint(v2)) |
+                  (static_cast<uint32_t>(bitcast_uint(v3)) << 16);
+    uint32_t r3 = static_cast<uint32_t>(bitcast_uint(v6)) |
+                  (static_cast<uint32_t>(bitcast_uint(v7)) << 16);
+
+    asm volatile("stmatrix.sync.aligned.m8n8.x4.shared::cta.b16 [%0], "
+                 "{%1, %2, %3, %4};\n"
+                 :
+                 : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));
+    addr += kStepBytes;
+  }
+
+  if constexpr (tail_cols != 0) {
+    static_assert(
+        tail_cols == 8,
+        "stmatrix f32->bf16 tail path only supports one 8-column remainder");
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col0 = full_cols + (tid % 4) * 2;
+    int col1 = col0 + 1;
+    int base = w_iters * 8;
+
+    D(row0, col0) = utils::from_f32<bf16>(d[base + 0]);
+    D(row0, col1) = utils::from_f32<bf16>(d[base + 1]);
+    D(row1, col0) = utils::from_f32<bf16>(d[base + 2]);
+    D(row1, col1) = utils::from_f32<bf16>(d[base + 3]);
+  }
+}
+
+template <class MMA, int N, class Tensor>
+__device__ static inline void
+store_fragment_d_stmatrix_trans_f32_bf16(Tensor& D, float* const d) {
+  static_assert(
+      std::is_same<typename Tensor::value_type, bf16>::value,
+      "transposed stmatrix f32->bf16 store requires bf16 output tensor");
+  static_assert((N % 8) == 0, "transposed stmatrix f32->bf16 store currently "
+                              "requires N to be divisible by 8");
+
+  int tid = threadIdx.x % 128;
+  int lane = tid % 32;
+  int warp = tid / 32;
+
+  bf16* d_base_ptr = &D(0, 0);
+  uint32_t d_base_addr =
+      static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
+
+  const uint32_t ld = static_cast<uint32_t>(&D(1, 0) - &D(0, 0));
+  constexpr int w_iters = N / 16;
+  const uint32_t kStepBytes = static_cast<uint32_t>(16 * ld * sizeof(bf16));
+
+  uint32_t lane_offset = static_cast<uint32_t>(warp * 16) +
+                         static_cast<uint32_t>(lane % 8) * ld +
+                         static_cast<uint32_t>(lane / 16) * ld * 8 +
+                         static_cast<uint32_t>(lane & 8);
+  uint32_t addr = d_base_addr + lane_offset * sizeof(bf16);
+
+  #pragma unroll
+  for (int w = 0; w < w_iters; ++w) {
+    int base = w * 8;
+    bf16 v0 = utils::from_f32<bf16>(d[base + 0]);
+    bf16 v1 = utils::from_f32<bf16>(d[base + 1]);
+    bf16 v2 = utils::from_f32<bf16>(d[base + 2]);
+    bf16 v3 = utils::from_f32<bf16>(d[base + 3]);
+    bf16 v4 = utils::from_f32<bf16>(d[base + 4]);
+    bf16 v5 = utils::from_f32<bf16>(d[base + 5]);
+    bf16 v6 = utils::from_f32<bf16>(d[base + 6]);
+    bf16 v7 = utils::from_f32<bf16>(d[base + 7]);
+
+    uint32_t r0 = static_cast<uint32_t>(bitcast_uint(v0)) |
+                  (static_cast<uint32_t>(bitcast_uint(v1)) << 16);
+    uint32_t r1 = static_cast<uint32_t>(bitcast_uint(v2)) |
+                  (static_cast<uint32_t>(bitcast_uint(v3)) << 16);
+    uint32_t r2 = static_cast<uint32_t>(bitcast_uint(v4)) |
+                  (static_cast<uint32_t>(bitcast_uint(v5)) << 16);
+    uint32_t r3 = static_cast<uint32_t>(bitcast_uint(v6)) |
+                  (static_cast<uint32_t>(bitcast_uint(v7)) << 16);
+
+    asm volatile("stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16 [%0], "
+                 "{%1, %2, %3, %4};\n"
+                 :
+                 : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));
+    addr += kStepBytes;
+  }
+}
+
 // stmatrix-based store for WGMMA accumulators (--stmatrix flag).
 //
 // Uses PTX stmatrix.sync.aligned.m8n8.x1.b16 to write 8x8 sub-tiles of

@@ -257,7 +257,7 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
     int bound = *VIInt(bound_vi);
     auto idx = n.GetR();
 
-    // TODO: parallel p by 2 { xxx; dma arr[p] => local; }
+    // parallel p by 2 { xxx; dma arr[p] => local; }
     // if the index is a bounded var, hard to determine if it is out of bound
     if (isa<BoundedType>(NodeType(*idx))) return true;
 
@@ -1166,31 +1166,53 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
     // check if any indices are out of bound
     for (size_t i = 0; i < rank; ++i) {
       int bound = *VIInt(arr_ty->Dimension(i));
+      auto dim_bound = arr_ty->Dimension(i);
 
       auto expr = n.indices->ValueAt(i);
-      // TODO: improve the out-of-bound check for bounded vars
-      if (isa<BoundedType>(NodeType(*expr))) continue;
-
-      auto e = cast<AST::Expr>(expr);
-      if (!e->Opts().HasVal()) {
-        VST_DEBUG(dbgs() << "Expression: " << PSTR(expr)
-                         << " does not have a value!\n");
-        return false;
+      ValueItem index = GetInvalidValueItem();
+      if (auto e = dyn_cast<AST::Expr>(expr)) {
+        if (!e->Opts().HasVal()) {
+          VST_DEBUG(dbgs() << "Expression: " << PSTR(expr)
+                           << " does not have a value!\n");
+          return false;
+        }
+        index = e->Opts().GetVal();
+      } else if (auto id = dyn_cast<AST::Identifier>(expr)) {
+        index = sbe::sym(InScopeName(id->name));
+      } else if (auto lit = dyn_cast<AST::IntLiteral>(expr)) {
+        index = sbe::nu(lit->Val());
       }
-      auto index = e->Opts().GetVal();
 
-      // skip checking the one with 'nil' value though
-      if (!IsComputable(index)) {
-        Error1(expr->LOC(), "The " + Ordinal(i) +
+      if (!IsValidValueItem(index)) {
+        Error1(expr->LOC(), "The " + Ordinal(i + 1) +
                                 " subscription index can not be evaluated.");
         return true;
       }
 
-      // 0 <= index < bound
-      auto asrt0 =
-          sbe::bop(OpCode::LT, index, arr_ty->Dimension(i))->Normalize();
+      auto asrt0 = sbe::bop(OpCode::LT, index, dim_bound)->Normalize();
       auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
       assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
+
+      auto expr_bounds = InferExprBounds(this, index);
+      auto active_guard = ActiveScopePredicate();
+      auto constrained = ExpressionIsConstrained(index);
+      bool upper_safe = IsValidValueItem(expr_bounds.ub) &&
+                        sbe::clt(expr_bounds.ub, dim_bound);
+      bool lower_safe = IsValidValueItem(expr_bounds.lb) &&
+                        sbe::cge(expr_bounds.lb, sbe::nu(0));
+      if (!upper_safe)
+        upper_safe = ScopeContainsPredicate(active_guard, asrt0) ||
+                     ScopeImpliesUpperBound(active_guard, index, dim_bound);
+      if (!lower_safe) lower_safe = ScopeContainsPredicate(active_guard, asrt1);
+
+      if (lower_safe && upper_safe) continue;
+
+      // skip checking the one with 'nil' value though
+      if (!expr_bounds.IsValid() && !IsComputable(index)) {
+        Error1(expr->LOC(), "The " + Ordinal(i + 1) +
+                                " subscription index can not be evaluated.");
+        return true;
+      }
 
       auto message = "Index " + STR(index) + " is out of bounds of the " +
                      Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
@@ -1201,12 +1223,21 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
       // to force ENTRY placement: static violations become compile errors,
       // and runtime assertions are placed in the host wrapper (not inside the
       // kernel body).  See similar fix in ParallelBy and WithIn visitors.
-      FCtx(fname).GetAssessor(*this).Assess(
-          AssessPolicy::Error, asrt0, message, UsageType::ElementAccess,
-          AssessType::ENTRY, expr->LOC(), expr.get());
-      FCtx(fname).GetAssessor(*this).Assess(
-          AssessPolicy::Error, asrt1, message, UsageType::ElementAccess,
-          AssessType::ENTRY, expr->LOC(), expr.get());
+      auto upper_pred = expr_bounds.IsValid()
+                            ? sbe::oc_lt(expr_bounds.ub, dim_bound)->Normalize()
+                            : asrt0;
+      auto lower_pred =
+          expr_bounds.IsValid() && !constrained
+              ? sbe::oc_ge(expr_bounds.lb, sbe::nu(0))->Normalize()
+              : asrt1;
+      if (!upper_safe)
+        FCtx(fname).GetAssessor(*this).Assess(
+            AssessPolicy::Error, upper_pred, message, UsageType::ElementAccess,
+            AssessType::ENTRY, expr->LOC(), expr.get());
+      if (!lower_safe)
+        FCtx(fname).GetAssessor(*this).Assess(
+            AssessPolicy::Error, lower_pred, message, UsageType::ElementAccess,
+            AssessType::ENTRY, expr->LOC(), expr.get());
     }
   }
 
