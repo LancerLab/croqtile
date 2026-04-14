@@ -212,6 +212,60 @@ size_t SharedAlignmentBytes(const Choreo::CompilationContext& ctx,
   return std::max(ctx.GetMemoryAlignmentByte(Storage::SHARED),
                   SwizzleAlignmentByte(swizzle_mode));
 }
+
+enum class MmaLoadShapeWarningKind { None, Dynamic, Misaligned };
+
+std::pair<ValueItem, ValueItem> GetMmaLoadExpectedDims(const MMAInfo& ssmi) {
+  auto mma_m = ssmi.shape.at(0);
+  auto mma_n = ssmi.shape.at(1);
+  auto mma_k = ssmi.shape.at(2);
+
+  switch (ssmi.frag) {
+  case MMAInfo::FRAG_A:
+    switch (ssmi.method) {
+    case AST::MMAOperation::ROW_ROW:
+    case AST::MMAOperation::ROW_COL: return {mma_m, mma_k};
+    case AST::MMAOperation::COL_ROW:
+    case AST::MMAOperation::COL_COL: return {mma_k, mma_m};
+    }
+    break;
+  case MMAInfo::FRAG_B:
+    switch (ssmi.method) {
+    case AST::MMAOperation::ROW_ROW:
+    case AST::MMAOperation::COL_ROW: return {mma_n, mma_k};
+    case AST::MMAOperation::ROW_COL:
+    case AST::MMAOperation::COL_COL: return {mma_k, mma_n};
+    }
+    break;
+  default: break;
+  }
+
+  return {mma_m, mma_k};
+}
+
+MmaLoadShapeWarningKind
+GetMmaLoadShapeWarningKind(const MMAInfo& ssmi,
+                           const ptr<SpannedType>& parent_ty) {
+  if (!parent_ty || parent_ty->GetShape().Rank() < 2)
+    return MmaLoadShapeWarningKind::None;
+
+  auto [expected_dim0, expected_dim1] = GetMmaLoadExpectedDims(ssmi);
+  if (!VIIsInt(expected_dim0) || !VIIsInt(expected_dim1))
+    return MmaLoadShapeWarningKind::None;
+
+  auto src_dim0 = parent_ty->GetShape().ValueAt(0);
+  auto src_dim1 =
+      parent_ty->GetShape().ValueAt(parent_ty->GetShape().Rank() - 1);
+  bool dim0_ok =
+      VIIsInt(src_dim0) && (*VIInt(src_dim0) % *VIInt(expected_dim0) == 0);
+  bool dim1_ok =
+      VIIsInt(src_dim1) && (*VIInt(src_dim1) % *VIInt(expected_dim1) == 0);
+
+  if (!VIIsInt(src_dim0) || !VIIsInt(src_dim1))
+    return MmaLoadShapeWarningKind::Dynamic;
+  if (!dim0_ok || !dim1_ok) return MmaLoadShapeWarningKind::Misaligned;
+  return MmaLoadShapeWarningKind::None;
+}
 } // namespace
 
 const AST::MMAOperation*
@@ -4623,29 +4677,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         auto ca = op.LoadFrom();
         auto parent_sym = ca->RefSymbol();
         auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
-        if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
-          auto mma_m = ssmi.shape.at(0);
-          auto mma_k = ssmi.shape.at(2);
-          auto src_dim0 = parent_ty->GetShape().ValueAt(0);
-          auto src_dim1 =
-              parent_ty->GetShape().ValueAt(parent_ty->GetShape().Rank() - 1);
-          bool dim0_ok = VIIsInt(src_dim0) && VIIsInt(mma_m) &&
-                         (*VIInt(src_dim0) % *VIInt(mma_m) == 0);
-          bool dim1_ok = VIIsInt(src_dim1) && VIIsInt(mma_k) &&
-                         (*VIInt(src_dim1) % *VIInt(mma_k) == 0);
-          if (!VIIsInt(src_dim0) || !VIIsInt(src_dim1)) {
-            Warning(n.LOC(),
-                    "mma.load source buffer '" + parent_sym +
-                        "' has dynamic shape; ensure its dimensions are "
-                        "divisible by the MMA atom shape to avoid "
-                        "out-of-bounds access.");
-          } else if (!dim0_ok || !dim1_ok) {
-            Warning(n.LOC(),
-                    "mma.load source buffer '" + parent_sym +
-                        "' has shape that does not evenly divide the MMA "
-                        "atom; this may cause out-of-bounds shared memory "
-                        "access.");
-          }
+        switch (GetMmaLoadShapeWarningKind(ssmi, parent_ty)) {
+        case MmaLoadShapeWarningKind::Dynamic:
+          Warning(n.LOC(), "mma.load source buffer '" + parent_sym +
+                               "' has dynamic shape; ensure its dimensions are "
+                               "divisible by the MMA atom shape to avoid "
+                               "out-of-bounds access.");
+          break;
+        case MmaLoadShapeWarningKind::Misaligned:
+          Warning(n.LOC(),
+                  "mma.load source buffer '" + parent_sym +
+                      "' has shape that does not evenly divide the MMA "
+                      "atom; this may cause out-of-bounds shared memory "
+                      "access.");
+          break;
+        case MmaLoadShapeWarningKind::None: break;
         }
       }
       std::string elem_ty = NameBaseType(ssmi.ty);
@@ -5242,37 +5288,34 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             auto parent_n =
                 parent_ty->GetShape().ValueAt(parent_ty->GetShape().Rank() - 1);
             auto tile_n = to_shape.ValueAt(to_shape.Rank() - 1);
-            if (VIIsInt(tile_n)) {
-              auto tile_n_val = *VIInt(tile_n);
-              bool n_aligned =
-                  VIIsInt(parent_n) && (*VIInt(parent_n) % tile_n_val == 0);
-              if (!n_aligned) {
-                need_n_mask = true;
-                std::string col_idx_str;
-                for (size_t i = 0; i < ca->OpCount(); ++i) {
-                  const auto& sop = ca->OpAt(i);
-                  if (isa<AST::SOP::Tiling>(sop) ||
-                      isa<AST::SOP::TileAt>(sop) ||
-                      isa<AST::SOP::SubSpan>(sop)) {
-                    auto idx = sop->GetIndices();
-                    if (idx && idx->Count() >= 2) {
-                      size_t col_dim = idx->Count() - 1;
-                      col_idx_str = ExprSTR(idx->ValueAt(col_dim), IsHost());
-                    }
+            auto tile_n_val = *VIInt(tile_n);
+            bool n_aligned =
+                VIIsInt(parent_n) && (*VIInt(parent_n) % tile_n_val == 0);
+            if (!n_aligned) {
+              need_n_mask = true;
+              std::string col_idx_str;
+              for (size_t i = 0; i < ca->OpCount(); ++i) {
+                const auto& sop = ca->OpAt(i);
+                if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
+                    isa<AST::SOP::SubSpan>(sop)) {
+                  auto idx = sop->GetIndices();
+                  if (idx && idx->Count() >= 2) {
+                    size_t col_dim = idx->Count() - 1;
+                    col_idx_str = ExprSTR(idx->ValueAt(col_dim), IsHost());
                   }
                 }
-                if (!col_idx_str.empty()) {
-                  col_guard_expr = "((int)" + ValueSTR(parent_n) + " - (int)(" +
-                                   col_idx_str + ") * " + STR(tile_n_val) + ")";
-                  VST_DEBUG(dbgs() << n.LOC()
-                                   << ": auto-detected column masking for "
-                                      "mma.store: parent N dimension ("
-                                   << ValueSTR(parent_n)
-                                   << ") may not be aligned with tile N ("
-                                   << STR(tile_n_val) << ").\n");
-                } else {
-                  need_n_mask = false;
-                }
+              }
+              if (!col_idx_str.empty()) {
+                col_guard_expr = "((int)" + ValueSTR(parent_n) + " - (int)(" +
+                                 col_idx_str + ") * " + STR(tile_n_val) + ")";
+                VST_DEBUG(dbgs() << n.LOC()
+                                 << ": auto-detected column masking for "
+                                    "mma.store: parent N dimension ("
+                                 << ValueSTR(parent_n)
+                                 << ") may not be aligned with tile N ("
+                                 << STR(tile_n_val) << ").\n");
+              } else {
+                need_n_mask = false;
               }
             }
           }
@@ -5286,9 +5329,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
       // --- Emit store ---
       if (use_stmatrix) {
+        bool use_stmatrix_f32_bf16 = accum_type == BaseType::F32 &&
+                                     f_sty->ElementType() == BaseType::BF16 &&
+                                     !store_trans;
+        bool use_stmatrix_f32_bf16_trans =
+            accum_type == BaseType::F32 &&
+            f_sty->ElementType() == BaseType::BF16 && store_trans;
         ds << d_indent
-           << (store_trans ? "store_fragment_d_stmatrix_trans<"
-                           : "store_fragment_d_stmatrix<")
+           << (use_stmatrix_f32_bf16
+                   ? "store_fragment_d_stmatrix_f32_bf16<"
+                   : (use_stmatrix_f32_bf16_trans
+                          ? "store_fragment_d_stmatrix_trans_f32_bf16<"
+                          : (store_trans ? "store_fragment_d_stmatrix_trans<"
+                                         : "store_fragment_d_stmatrix<")))
            << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">(" << f_mds.first
            << ", "
            << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
@@ -5588,29 +5641,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       {
         auto parent_sym = ca->RefSymbol();
         auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
-        if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
-          auto mma_m = ssmi.shape.at(0);
-          auto mma_k = ssmi.shape.at(2);
-          auto src_dim0 = parent_ty->GetShape().ValueAt(0);
-          auto src_dim1 =
-              parent_ty->GetShape().ValueAt(parent_ty->GetShape().Rank() - 1);
-          bool dim0_ok = VIIsInt(src_dim0) && VIIsInt(mma_m) &&
-                         (*VIInt(src_dim0) % *VIInt(mma_m) == 0);
-          bool dim1_ok = VIIsInt(src_dim1) && VIIsInt(mma_k) &&
-                         (*VIInt(src_dim1) % *VIInt(mma_k) == 0);
-          if (!VIIsInt(src_dim0) || !VIIsInt(src_dim1)) {
-            Warning(n.LOC(),
-                    "mma.load source buffer '" + parent_sym +
-                        "' has dynamic shape; ensure its dimensions are "
-                        "divisible by the MMA atom shape to avoid "
-                        "out-of-bounds access.");
-          } else if (!dim0_ok || !dim1_ok) {
-            Warning(n.LOC(),
-                    "mma.load source buffer '" + parent_sym +
-                        "' has shape that does not evenly divide the MMA "
-                        "atom; this may cause out-of-bounds shared memory "
-                        "access.");
-          }
+        switch (GetMmaLoadShapeWarningKind(ssmi, parent_ty)) {
+        case MmaLoadShapeWarningKind::Dynamic:
+          Warning(n.LOC(), "mma.load source buffer '" + parent_sym +
+                               "' has dynamic shape; ensure its dimensions are "
+                               "divisible by the MMA atom shape to avoid "
+                               "out-of-bounds access.");
+          break;
+        case MmaLoadShapeWarningKind::Misaligned:
+          Warning(n.LOC(),
+                  "mma.load source buffer '" + parent_sym +
+                      "' has shape that does not evenly divide the MMA "
+                      "atom; this may cause out-of-bounds shared memory "
+                      "access.");
+          break;
+        case MmaLoadShapeWarningKind::None: break;
         }
       }
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));

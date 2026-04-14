@@ -67,11 +67,13 @@ __co__ void check_array_access_with_bounded_var(f32 [2,4] a) {
     local f32[2, 8] b[2][3];
 
     foreach q in 2 {
-      dma.copy a => b[p][q].chunkat(_, q);  // both ok. Currently, no check for bounded vars as index.
-      dma.copy b[q][p].chunkat(_, q) => a;
+      dma.copy a => b[p][q].chunkat(_, q);  // p from 'parallel by 3' can reach 2, which is OOB for dim 0 (size 2)
+      dma.copy b[q][p].chunkat(_, q) => a;  // q in [0,1] and p in [0,2]: both dims safe here
     }
   }
 }
-// CHECK-NOT: error:
+// CHECK: error: Index {{.*}}p is out of bounds of the 1st dimension of array 'b', where the valid range is [0, 2)
+// CHECK:         dma.copy a => b[p][q].chunkat(_, q);
+// CHECK:                         ^
 
-// CHECK: Totally 10 errors have been detected.
+// CHECK: Totally 11 errors have been detected.

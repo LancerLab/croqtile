@@ -6,6 +6,7 @@
 
 #define WARP_M 64
 #define WARP_N 128
+#define WARP_N_ASYM 160
 #define WARP_K 16
 
 // --- 1. Static shared buffer: no warning expected ---
@@ -16,9 +17,9 @@ __co__ void test_static_shared(global f16 [M, K] lhs, global f16 [N, K] rhs,
     shared f16 [WARP_N, WARP_K] rhs_s;
     mc = mma.fill.f16 0.0f;
     foreach {iv_k} in [cdiv(K, WARP_K)] {
-      tma.copy.swiz<128> lhs
+      dma.copy.swiz<128> lhs
         .subspan(WARP_M, WARP_K).at(block_m, iv_k) => lhs_s;
-      tma.copy.swiz<128> rhs
+      dma.copy.swiz<128> rhs
         .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
       parallel p by 1 : group-4 {
         ma = mma.load.swiz<128> lhs_s;
@@ -30,14 +31,37 @@ __co__ void test_static_shared(global f16 [M, K] lhs, global f16 [N, K] rhs,
   }
 }
 
-// --- 2. mma.load from global buffer (dynamic shape): warning expected ---
+// --- 2. Static shared buffer with asymmetric N: no warning expected ---
+__co__ void test_static_shared_asym(global f16 [M, K] lhs,
+                                    global f16 [N, K] rhs,
+                                    global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N_ASYM)] : block {
+    shared f16 [WARP_M, WARP_K] lhs_s;
+    shared f16 [WARP_N_ASYM, WARP_K] rhs_s;
+    mc = mma.fill.f32 0.0f;
+    foreach {iv_k} in [cdiv(K, WARP_K)] {
+      dma.copy.swiz<128> lhs
+        .subspan(WARP_M, WARP_K).at(block_m, iv_k) => lhs_s;
+      dma.copy.swiz<128> rhs
+        .subspan(WARP_N_ASYM, WARP_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load.swiz<128> lhs_s;
+        mb = mma.load.swiz<128> rhs_s;
+        mma.row.row mc, ma, mb;
+      }
+    }
+    mma.store mc, output.subspan(WARP_M, WARP_N_ASYM).at(block_m, block_n);
+  }
+}
+
+// --- 3. mma.load from global buffer (dynamic shape): warning expected ---
 __co__ void test_load_from_global(global f16 [M, K] lhs, global f16 [N, K] rhs,
                                   global f16 [M, N] output) {
   parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
     shared f16 [WARP_N, WARP_K] rhs_s;
     mc = mma.fill.f16 0.0f;
     foreach {iv_k} in [cdiv(K, WARP_K)] {
-      tma.copy.swiz<128> rhs
+      dma.copy.swiz<128> rhs
         .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
       parallel p by 1 : group-4 {
         ma = mma.load lhs.subspan(WARP_M, WARP_K).at(block_m, iv_k);
