@@ -116,7 +116,7 @@ serve-doc: stop-doc start-doc
 
 stop-doc:
 	@echo "Stopping existing mkdocs serve processes..."
-	@ps aux | grep 'mkdocs serve' | grep -v grep | awk '{print $$2}' | xargs -r kill
+	@ps aux | grep 'mkdocs serve' | grep -v grep | awk '{print $$2}' | xargs -r kill 2>/dev/null || true
 	@echo "Old mkdocs serve processes stopped."
 
 start-doc: docs
@@ -212,20 +212,11 @@ RANGE      ?=
 
 SYNC_ALL    := bash $(SCRIPT_DIR)/sync_all.sh
 
-.PHONY: oss-scan oss-scan-staged oss-scan-diff oss-push oss-push-last \
+# oss-scan targets are defined in lib/Target/GPU/target.mk (shared by both branches)
+.PHONY: oss-push oss-push-last \
         oss-push-range oss-push-dry oss-catchup oss-catchup-dry \
         oss-pull oss-pull-scan oss-watch \
         oss-setup oss-status oss-help sync-all sync-all-once
-
-oss-scan:
-	@$(OSS_SCAN) --tree oss/main
-
-oss-scan-staged:
-	@$(OSS_SCAN) --staged
-
-oss-scan-diff:
-	@if [ -z "$(COMMIT)" ]; then echo "Usage: make oss-scan-diff COMMIT=<sha>"; exit 1; fi
-	@$(OSS_SCAN) --diff $(COMMIT)
 
 oss-push:
 	@if [ -z "$(COMMIT)" ]; then \

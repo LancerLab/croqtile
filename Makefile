@@ -325,16 +325,13 @@ help:
 CODE_DIRS := $(SRC_DIR) $(RT_DIR) tools
 TEST_DIRS := tests benchmark samples
 
-DOC_DIR := Documents/Documentation/
-DOC_FILES := $(DOC_DIR)/getting-started-with-choreo.md \
-						 $(DOC_DIR)/call-in-choreo.md
+DOC_DIR := Documents/Documentation
 
 .PHONY: docs
 
-docs: $(DOC_FILES)
-
-Documents/Documentation/%.md: Documents/Documentation/%.src.md
-	@base="$(@D)"; gawk -v base="$$base" -f $(MDPP) $< > $@
+docs:
+	@test -f $(DOC_DIR)/index.md || { echo "ERROR: $(DOC_DIR)/index.md not found"; exit 1; }
+	@echo "Docs directory OK ($(DOC_DIR))"
 
 lines:
 	@source_files="$$(find $(CODE_DIRS) -type f \( \
