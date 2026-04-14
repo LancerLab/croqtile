@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 # Scan for sensitive/forbidden keywords and non-ASCII characters in
 # paths and file contents. Exit 0 = clean, 1 = violations, 2 = usage error.
@@ -108,11 +108,34 @@ scan_paths() {
   done
 }
 
+FILTER_TREEISH_PREFIX=""
+
+filter_excluded_lines() {
+  # Input: lines from git grep.
+  # With treeish: "main:path:lineno:content" or "oss/main:path:lineno:content"
+  # Without:      "path:lineno:content"
+  # FILTER_TREEISH_PREFIX should be set to "main:" or "oss/main:" etc. when
+  # scanning a branch, or "" for working tree scans.
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local stripped="$line"
+    if [[ -n "$FILTER_TREEISH_PREFIX" && "$stripped" == "$FILTER_TREEISH_PREFIX"* ]]; then
+      stripped="${stripped#"$FILTER_TREEISH_PREFIX"}"
+    fi
+    local fpath="${stripped%%:*}"
+    is_excluded_path "$fpath" && continue
+    echo "$line"
+  done
+}
+
 scan_content_via_git_grep() {
   local treeish="$1"
   local ctx="$2"
+  local raw_matches
+  raw_matches="$(git -C "$REPO_ROOT" grep -I -nE $CASE_FLAG -- "$COMBINED_PATTERN" "$treeish" 2>/dev/null || true)"
+  [[ -z "$raw_matches" ]] && return
   local matches
-  matches="$(git -C "$REPO_ROOT" grep -I -nE $CASE_FLAG -- "$COMBINED_PATTERN" "$treeish" 2>/dev/null || true)"
+  matches="$(echo "$raw_matches" | filter_excluded_lines)"
   if [[ -n "$matches" ]]; then
     local count
     count="$(echo "$matches" | wc -l)"
@@ -164,8 +187,11 @@ NON_ASCII_RE='[^\x00-\x7F]'
 scan_nonascii_via_git_grep() {
   local treeish="$1"
   local ctx="$2"
+  local raw_matches
+  raw_matches="$(git -C "$REPO_ROOT" grep -I -nP -- "$NON_ASCII_RE" "$treeish" 2>/dev/null || true)"
+  [[ -z "$raw_matches" ]] && return
   local matches
-  matches="$(git -C "$REPO_ROOT" grep -I -nP -- "$NON_ASCII_RE" "$treeish" 2>/dev/null || true)"
+  matches="$(echo "$raw_matches" | filter_excluded_lines)"
   if [[ -n "$matches" ]]; then
     local count
     count="$(echo "$matches" | wc -l)"
@@ -210,21 +236,48 @@ scan_nonascii_on_disk() {
 # Detects references to excluded paths/content in non-excluded files.
 # This catches structural dependencies that keyword scanning misses.
 
-EXCLUDE_FILE="$SCRIPT_DIR/oss_exclude_paths.txt"
+EXCLUDE_FILE="${OSS_SCAN_EXCLUDE_FILE:-$SCRIPT_DIR/oss_exclude_paths.txt}"
+
+# Load exclude patterns from the shared file into arrays for matching.
+EXCL_DIRS=()
+EXCL_GLOBS=()
+EXCL_EXACT=()
+
+if [[ -f "$EXCLUDE_FILE" ]]; then
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    line="${line%"${line##*[![:space:]]}"}"  # trim trailing whitespace
+    if [[ "$line" == */ || "$line" == */* && "$line" == *\* ]]; then
+      # Directory prefix: strip trailing / or /*
+      _d="${line%/}"
+      _d="${_d%/\*}"
+      EXCL_DIRS+=("$_d/")
+    elif [[ "$line" == *'*'* || "$line" == *'?'* ]]; then
+      EXCL_GLOBS+=("$line")
+    else
+      EXCL_EXACT+=("$line")
+    fi
+  done < "$EXCLUDE_FILE"
+fi
 
 is_excluded_path() {
   local fpath="$1"
-  case "$fpath" in
-    lib/Target/GCU/*|tests/gcu/*|benchmark/*|Documents/internal/*|\
-Documents/Documentation/target/*|Documents/GPU-Examples/*|extern/*|\
-scripts/*.sh|scripts/*.md|scripts/hooks/*|scripts/oss/*|samples/*|\
-.gitlab-ci.yml|.gitlab/*|runtime/catz/*|.gitignore|.gitmodules|\
-.gitattributes|.vscode/*|results.tsv|.claude/*|.codex/*|\
-.github/skills/*|.cursor/*|performance/*|tests/fsm_engine/*|\
-AGENTS.md|.clang-format)
-      return 0 ;;
-    *) return 1 ;;
-  esac
+  # Directory prefix match
+  for d in "${EXCL_DIRS[@]}"; do
+    [[ "$fpath" == "$d"* ]] && return 0
+  done
+  # Glob match (fnmatch-style, no /)
+  for g in "${EXCL_GLOBS[@]}"; do
+    # shellcheck disable=SC2254
+    case "$fpath" in
+      $g) return 0 ;;
+    esac
+  done
+  # Exact match
+  for e in "${EXCL_EXACT[@]}"; do
+    [[ "$fpath" == "$e" ]] && return 0
+  done
+  return 1
 }
 
 scan_ghost_refs_from_diff() {
@@ -278,20 +331,30 @@ scan_coupled_changes() {
 
 # -------- mode implementations --------
 
+filter_excluded_paths() {
+  while IFS= read -r fpath; do
+    [[ -z "$fpath" ]] && continue
+    is_excluded_path "$fpath" && continue
+    echo "$fpath"
+  done
+}
+
 mode_tree() {
   local branch="$1"
   git -C "$REPO_ROOT" rev-parse --verify "$branch^{commit}" >/dev/null 2>&1 \
     || { echo "Error: cannot resolve '$branch'" >&2; exit 2; }
 
-  echo "Scanning tree: $branch"
+  echo "Scanning tree: $branch (excluding ${#EXCL_DIRS[@]} dir rules, ${#EXCL_GLOBS[@]} glob rules)"
 
-  # Scan paths (process substitution to avoid subshell)
-  scan_paths "tree" < <(git -C "$REPO_ROOT" ls-tree -r --name-only "$branch")
+  FILTER_TREEISH_PREFIX="$branch:"
 
-  # Scan file contents using git grep (fast)
+  # Scan paths, filtering out excluded ones
+  scan_paths "tree" < <(git -C "$REPO_ROOT" ls-tree -r --name-only "$branch" | filter_excluded_paths)
+
+  # Scan file contents using git grep (filter_excluded_lines handles exclusion)
   scan_content_via_git_grep "$branch" "tree"
 
-  # Strict non-ASCII check
+  # Strict non-ASCII check (filter_excluded_lines handles exclusion)
   scan_nonascii_via_git_grep "$branch" "tree"
 }
 
@@ -385,34 +448,43 @@ mode_dir() {
 }
 
 mode_worktree() {
-  echo "Scanning worktree tracked files..."
+  echo "Scanning worktree tracked files (excluding ${#EXCL_DIRS[@]} dir rules, ${#EXCL_GLOBS[@]} glob rules)..."
+  FILTER_TREEISH_PREFIX=""
 
-  # Scan paths (process substitution to avoid subshell)
-  scan_paths "worktree" < <(git -C "$REPO_ROOT" ls-files)
+  # Scan paths, filtering excluded
+  scan_paths "worktree" < <(git -C "$REPO_ROOT" ls-files | filter_excluded_paths)
 
-  # Scan contents using git grep on working tree
-  local matches
-  matches="$(git -C "$REPO_ROOT" grep -I -nE $CASE_FLAG -- "$COMBINED_PATTERN" 2>/dev/null || true)"
-  if [[ -n "$matches" ]]; then
-    local count
-    count="$(echo "$matches" | wc -l)"
-    record "worktree/content" "$count match(es) in working tree"
-    VIOLATION_LOG+="$(echo "$matches" | head -40 | sed 's/^/    /')"$'\n'
-    if [[ $count -gt 40 ]]; then
-      VIOLATION_LOG+="    ... and $((count - 40)) more"$'\n'
+  # Scan contents using git grep, filtering excluded
+  local raw_matches
+  raw_matches="$(git -C "$REPO_ROOT" grep -I -nE $CASE_FLAG -- "$COMBINED_PATTERN" 2>/dev/null || true)"
+  if [[ -n "$raw_matches" ]]; then
+    local matches
+    matches="$(echo "$raw_matches" | filter_excluded_lines)"
+    if [[ -n "$matches" ]]; then
+      local count
+      count="$(echo "$matches" | wc -l)"
+      record "worktree/content" "$count match(es) in working tree"
+      VIOLATION_LOG+="$(echo "$matches" | head -40 | sed 's/^/    /')"$'\n'
+      if [[ $count -gt 40 ]]; then
+        VIOLATION_LOG+="    ... and $((count - 40)) more"$'\n'
+      fi
     fi
   fi
 
-  # Strict non-ASCII check on worktree
-  local na_matches
-  na_matches="$(git -C "$REPO_ROOT" grep -I -nP -- "$NON_ASCII_RE" 2>/dev/null || true)"
-  if [[ -n "$na_matches" ]]; then
-    local na_count
-    na_count="$(echo "$na_matches" | wc -l)"
-    record "worktree/non-ascii" "$na_count line(s) contain non-ASCII characters"
-    VIOLATION_LOG+="$(echo "$na_matches" | head -20 | sed 's/^/    /')"$'\n'
-    if [[ $na_count -gt 20 ]]; then
-      VIOLATION_LOG+="    ... and $((na_count - 20)) more"$'\n'
+  # Strict non-ASCII check on worktree, filtering excluded
+  local raw_na
+  raw_na="$(git -C "$REPO_ROOT" grep -I -nP -- "$NON_ASCII_RE" 2>/dev/null || true)"
+  if [[ -n "$raw_na" ]]; then
+    local na_matches
+    na_matches="$(echo "$raw_na" | filter_excluded_lines)"
+    if [[ -n "$na_matches" ]]; then
+      local na_count
+      na_count="$(echo "$na_matches" | wc -l)"
+      record "worktree/non-ascii" "$na_count line(s) contain non-ASCII characters"
+      VIOLATION_LOG+="$(echo "$na_matches" | head -20 | sed 's/^/    /')"$'\n'
+      if [[ $na_count -gt 20 ]]; then
+        VIOLATION_LOG+="    ... and $((na_count - 20)) more"$'\n'
+      fi
     fi
   fi
 }

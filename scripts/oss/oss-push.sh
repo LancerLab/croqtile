@@ -387,6 +387,30 @@ for commit in "${COMMITS[@]}"; do
     fi
   fi
 
+  # ---- GATE 3: verify CMake configure_file inputs exist ----
+  local cmake_ok=1
+  while IFS= read -r cmake_file; do
+    [[ -z "$cmake_file" ]] && continue
+    while IFS= read -r input_path; do
+      [[ -z "$input_path" ]] && continue
+      # Resolve ${CMAKE_SOURCE_DIR} to repo root
+      local resolved="${input_path/\$\{CMAKE_SOURCE_DIR\}\//}"
+      resolved="${resolved/\$\{CMAKE_SOURCE_DIR\}/}"
+      if [[ "$resolved" != "$input_path" ]] && ! git cat-file -e "HEAD:$resolved" 2>/dev/null; then
+        echo "  WARNING: CMake configure_file input missing: $resolved"
+        cmake_ok=0
+      fi
+    done < <(git show HEAD:"$cmake_file" 2>/dev/null | grep -oP 'configure_file\(\s*\K\$\{CMAKE_SOURCE_DIR\}/[^\s]+' || true)
+  done < <(git ls-tree -r --name-only HEAD | grep 'CMakeLists.txt$')
+
+  if [[ $cmake_ok -eq 0 ]]; then
+    echo "ERROR $short: oss/main build would fail (missing CMake inputs)."
+    echo "  Reverting commit..."
+    git reset --hard HEAD~1 >/dev/null 2>&1
+    FAILED=$((FAILED+1))
+    continue
+  fi
+
   new_sha="$(git rev-parse --short HEAD)"
   echo "OK $short -> $new_sha"
   PUSHED=$((PUSHED+1))
