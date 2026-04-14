@@ -478,7 +478,21 @@ CuteCodeGen::CurrentHoistedScaleAccum() const {
 
 std::string
 CuteCodeGen::GenScaleValidRowsExpr(const ptr<AST::ChunkAt>& ca) const {
-  if (!ca || ca->NoOperation()) return "0x3fffffff";
+  if (!ca) return "0x3fffffff";
+
+  auto scale_tile_ty = GetSpannedType(NodeType(*ca));
+  auto scale_tile_shape = scale_tile_ty->GetShape();
+  bool transposed = scale_tile_shape.Rank() > 0 &&
+                    VIIsInt(scale_tile_shape.ValueAt(0)) &&
+                    *VIInt(scale_tile_shape.ValueAt(0)) == 1;
+  size_t row_dim = transposed ? scale_tile_shape.Rank() - 1 : 0;
+
+  if (ca->NoOperation()) {
+    if (scale_tile_shape.Rank() == 0 || row_dim >= scale_tile_shape.Rank())
+      return "0x3fffffff";
+    return "static_cast<int>(" + ValueSTR(scale_tile_shape.ValueAt(row_dim)) +
+           ")";
+  }
 
   ptr<AST::SpannedOperation> row_op = nullptr;
   for (auto it = ca->AllOperations().rbegin(); it != ca->AllOperations().rend();
@@ -488,33 +502,52 @@ CuteCodeGen::GenScaleValidRowsExpr(const ptr<AST::ChunkAt>& ca) const {
       break;
     }
   }
-  if (!row_op || !row_op->GetIndices()) return "0x3fffffff";
+  if (!row_op) return "0x3fffffff";
 
   auto src_ty = GetSpannedType(GetSymbolType(ca->RefSymbol()));
   auto src_shape = src_ty->GetShape();
   if (src_shape.Rank() == 0 || row_op->GetBlockShape().Rank() == 0)
     return "0x3fffffff";
 
-  auto scale_tile_ty = GetSpannedType(NodeType(*ca));
-  auto scale_tile_shape = scale_tile_ty->GetShape();
-  bool transposed = scale_tile_shape.Rank() > 0 &&
-                    VIIsInt(scale_tile_shape.ValueAt(0)) &&
-                    *VIInt(scale_tile_shape.ValueAt(0)) == 1;
-  size_t row_dim = transposed ? row_op->GetBlockShape().Rank() - 1 : 0;
-  if (row_dim >= src_shape.Rank() || row_dim >= row_op->GetIndices()->Count())
+  row_dim = transposed ? row_op->GetBlockShape().Rank() - 1 : 0;
+  if (row_dim >= src_shape.Rank() || row_dim >= row_op->GetBlockShape().Rank())
     return "0x3fffffff";
 
   auto row_extent = ValueSTR(src_shape.ValueAt(row_dim));
   auto row_block = ValueSTR(row_op->GetBlockShape().ValueAt(row_dim));
-  auto row_index = ExprSTR(row_op->GetIndices()->ValueAt(row_dim), false);
-  auto row_base = "((" + row_index + ") * (" + row_block + "))";
+  std::string row_base;
+  if (auto indices = row_op->GetIndices();
+      indices && row_dim < indices->Count()) {
+    auto row_index = ExprSTR(indices->ValueAt(row_dim), false);
+    row_base = "((" + row_index + ") * (" + row_block + "))";
+  } else if (auto offsets = row_op->GetOffsets();
+             offsets && row_dim < offsets->Count()) {
+    // View(...).From(...) uses absolute offsets rather than tile indices.
+    row_base = "(" + ExprSTR(offsets->ValueAt(row_dim), false) + ")";
+  } else {
+    return "0x3fffffff";
+  }
+
   return "((" + row_base + " < (" + row_extent + ")) ? static_cast<int>((((" +
          row_extent + ") - (" + row_base + ")) < (" + row_block + ")) ? ((" +
          row_extent + ") - (" + row_base + ")) : (" + row_block + ")) : 0)";
 }
 
 int CuteCodeGen::GetScaleStaticRows(const ptr<AST::ChunkAt>& ca) const {
-  if (!ca || ca->NoOperation()) return -1;
+  if (!ca) return -1;
+
+  auto scale_tile_ty = GetSpannedType(NodeType(*ca));
+  auto scale_tile_shape = scale_tile_ty->GetShape();
+  bool transposed = scale_tile_shape.Rank() > 0 &&
+                    VIIsInt(scale_tile_shape.ValueAt(0)) &&
+                    *VIInt(scale_tile_shape.ValueAt(0)) == 1;
+  size_t row_dim = transposed ? scale_tile_shape.Rank() - 1 : 0;
+  if (ca->NoOperation()) {
+    if (scale_tile_shape.Rank() == 0 || row_dim >= scale_tile_shape.Rank())
+      return -1;
+    auto row_extent = VIInt(scale_tile_shape.ValueAt(row_dim));
+    return row_extent ? static_cast<int>(*row_extent) : -1;
+  }
 
   ptr<AST::SpannedOperation> row_op = nullptr;
   for (auto it = ca->AllOperations().rbegin(); it != ca->AllOperations().rend();
@@ -526,12 +559,7 @@ int CuteCodeGen::GetScaleStaticRows(const ptr<AST::ChunkAt>& ca) const {
   }
   if (!row_op) return -1;
 
-  auto scale_tile_ty = GetSpannedType(NodeType(*ca));
-  auto scale_tile_shape = scale_tile_ty->GetShape();
-  bool transposed = scale_tile_shape.Rank() > 0 &&
-                    VIIsInt(scale_tile_shape.ValueAt(0)) &&
-                    *VIInt(scale_tile_shape.ValueAt(0)) == 1;
-  size_t row_dim = transposed ? row_op->GetBlockShape().Rank() - 1 : 0;
+  row_dim = transposed ? row_op->GetBlockShape().Rank() - 1 : 0;
   if (row_dim >= row_op->GetBlockShape().Rank()) return -1;
 
   auto row_block = VIInt(row_op->GetBlockShape().ValueAt(row_dim));
@@ -544,8 +572,48 @@ CuteCodeGen::AnalyzeExplicitScaleAccumScope(
   std::vector<ExplicitScaleAccumInfo> infos;
   if (!body) return infos;
 
+  auto extract_chunk_alias = [](const ptr<AST::Node>& n) -> ptr<AST::ChunkAt> {
+    if (!n) return nullptr;
+    if (auto ca = dyn_cast<AST::ChunkAt>(n)) return ca;
+    if (auto expr = dyn_cast<AST::Expr>(n)) {
+      if (auto ref = expr->GetReference()) return dyn_cast<AST::ChunkAt>(ref);
+    }
+    return nullptr;
+  };
+
   std::unordered_set<std::string> seen_frags;
+  std::unordered_map<std::string, ptr<AST::ChunkAt>> chunk_aliases;
   for (size_t idx = 0; idx < body->values.size(); ++idx) {
+    if (auto decl = dyn_cast<AST::NamedVariableDecl>(body->values[idx])) {
+      auto rhs_ca = extract_chunk_alias(decl->init_expr);
+      auto name = decl->GetName();
+      auto scoped_name = InScopeName(name);
+      if (rhs_ca) {
+        chunk_aliases[name] = rhs_ca;
+        chunk_aliases[scoped_name] = rhs_ca;
+      } else {
+        chunk_aliases.erase(name);
+        chunk_aliases.erase(scoped_name);
+      }
+      continue;
+    }
+
+    if (auto assign = dyn_cast<AST::Assignment>(body->values[idx])) {
+      if (!assign->AssignToDataElement()) {
+        auto rhs_ca = extract_chunk_alias(assign->value);
+        auto name = assign->GetName();
+        auto scoped_name = InScopeName(name);
+        if (rhs_ca) {
+          chunk_aliases[name] = rhs_ca;
+          chunk_aliases[scoped_name] = rhs_ca;
+        } else {
+          chunk_aliases.erase(name);
+          chunk_aliases.erase(scoped_name);
+        }
+      }
+      continue;
+    }
+
     auto mma = dyn_cast<AST::MMA>(body->values[idx]);
     if (!mma) continue;
 
@@ -585,12 +653,25 @@ CuteCodeGen::AnalyzeExplicitScaleAccumScope(
     info.scale_a_name = c_sym + "_scale_a_ptr";
     info.scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
     info.scale_b_name = c_sym + "_scale_b_val";
+    auto resolved_scale_a = op->ScaleA();
+    if (resolved_scale_a && resolved_scale_a->NoOperation()) {
+      auto ref_sym = resolved_scale_a->RefSymbol();
+      auto it = chunk_aliases.find(ref_sym);
+      if (it == chunk_aliases.end())
+        it = chunk_aliases.find(UnScopedName(ref_sym));
+      if (it == chunk_aliases.end()) {
+        auto expr_sym = ExprSTR(op->ScaleA(), false);
+        it = chunk_aliases.find(expr_sym);
+      }
+      if (it != chunk_aliases.end()) resolved_scale_a = it->second;
+    }
+
     info.scale_a_expr = ExprSTR(op->ScaleA(), false);
-    info.scale_a_valid_rows_expr = GenScaleValidRowsExpr(op->ScaleA());
+    info.scale_a_valid_rows_expr = GenScaleValidRowsExpr(resolved_scale_a);
     info.scale_b_expr = ExprSTR(op->ScaleB(), false);
     {
-      auto sa_strides = GenStrides(op->ScaleA());
-      auto sa_sty = GetSpannedType(NodeType(*op->ScaleA()));
+      auto sa_strides = GenStrides(resolved_scale_a);
+      auto sa_sty = GetSpannedType(NodeType(*resolved_scale_a));
       auto sa_shape = sa_sty->GetShape();
       bool sa_transposed =
           VIIsInt(sa_shape.ValueAt(0)) && *VIInt(sa_shape.ValueAt(0)) == 1;
@@ -600,7 +681,7 @@ CuteCodeGen::AnalyzeExplicitScaleAccumScope(
     info.acc_ty = NameBaseType(ssmi_c.ty);
     info.scale_frag_ty = NameBaseType(acc_dtype);
     info.dim_n = STR(ssmi_c.shape.at(1));
-    info.scale_a_static_rows = GetScaleStaticRows(op->ScaleA());
+    info.scale_a_static_rows = GetScaleStaticRows(resolved_scale_a);
     info.reg_num_d = *reg_num;
     infos.push_back(info);
     seen_frags.insert(c_sym);
@@ -1762,6 +1843,16 @@ bool CuteCodeGen::Visit(AST::ChoreoFunction& n) {
 bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
 
+  auto extract_chunk_alias =
+      [](const ptr<AST::Node>& node) -> ptr<AST::ChunkAt> {
+    if (!node) return nullptr;
+    if (auto ca = dyn_cast<AST::ChunkAt>(node)) return ca;
+    if (auto expr = dyn_cast<AST::Expr>(node)) {
+      if (auto ref = expr->GetReference()) return dyn_cast<AST::ChunkAt>(ref);
+    }
+    return nullptr;
+  };
+
   auto nty = NodeType(n);
   auto sym = n.name_str;
   const bool enable_debug_rtti = EnableDebugTypeRTTI();
@@ -1780,6 +1871,16 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         VIIsSym(sv.GetVal()))
       ref = true;
     updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), ref});
+  }
+
+  if (!IsHost()) {
+    if (auto rhs_ca = extract_chunk_alias(n.init_expr)) {
+      live_chunk_aliases[sym] = rhs_ca;
+      live_chunk_aliases[sname] = rhs_ca;
+    } else {
+      live_chunk_aliases.erase(sym);
+      live_chunk_aliases.erase(sname);
+    }
   }
 
   // The type is determined first, and then
@@ -2351,6 +2452,16 @@ bool CuteCodeGen::Visit(AST::NamedTypeDecl& n) {
 bool CuteCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
+  auto extract_chunk_alias =
+      [](const ptr<AST::Node>& node) -> ptr<AST::ChunkAt> {
+    if (!node) return nullptr;
+    if (auto ca = dyn_cast<AST::ChunkAt>(node)) return ca;
+    if (auto expr = dyn_cast<AST::Expr>(node)) {
+      if (auto ref = expr->GetReference()) return dyn_cast<AST::ChunkAt>(ref);
+    }
+    return nullptr;
+  };
+
   auto nty = NodeType(n);
   const bool enable_debug_rtti = EnableDebugTypeRTTI();
 
@@ -2365,6 +2476,15 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value))
       updating_cgi.AddSymbolDetail(
           fname, {InScopeName(name), GetSymbolType(name), ref});
+
+    auto scoped_name = InScopeName(name);
+    if (auto rhs_ca = extract_chunk_alias(n.value)) {
+      live_chunk_aliases[name] = rhs_ca;
+      live_chunk_aliases[scoped_name] = rhs_ca;
+    } else {
+      live_chunk_aliases.erase(name);
+      live_chunk_aliases.erase(scoped_name);
+    }
   }
 
   if (auto s = dyn_cast<AST::Select>(n.value)) {
@@ -4961,7 +5081,20 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     case AST::MMAOperation::Scale: {
       auto c_sym = AST::FragName(op.ScaleAccumulator());
       if (auto* info = CurrentExplicitScaleAccumForFrag(c_sym)) {
-        if (info->scale_a_valid_rows_expr == "0x3fffffff") {
+        auto resolved_scale_a = op.ScaleA();
+        if (resolved_scale_a && resolved_scale_a->NoOperation()) {
+          auto ref_sym = resolved_scale_a->RefSymbol();
+          auto it = live_chunk_aliases.find(ref_sym);
+          if (it == live_chunk_aliases.end())
+            it = live_chunk_aliases.find(UnScopedName(ref_sym));
+          if (it == live_chunk_aliases.end()) {
+            auto expr_sym = ExprSTR(op.ScaleA(), false);
+            it = live_chunk_aliases.find(expr_sym);
+          }
+          if (it != live_chunk_aliases.end()) resolved_scale_a = it->second;
+        }
+        auto scale_a_valid_rows_expr = GenScaleValidRowsExpr(resolved_scale_a);
+        if (scale_a_valid_rows_expr == "0x3fffffff") {
           Warning(n.LOC(), "mma.scale could not determine valid row count for "
                            "scale_a; assuming all rows are valid. If the scale "
                            "buffer has fewer rows than the MMA fragment, this "
@@ -4970,7 +5103,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "float* " << info->scale_a_name << " = (float*)("
            << info->scale_a_expr << ");\n";
         ds << d_indent << "int " << info->scale_a_valid_rows_name << " = "
-           << info->scale_a_valid_rows_expr << ";\n";
+           << scale_a_valid_rows_expr << ";\n";
         ds << d_indent << "float " << info->scale_b_name
            << " = static_cast<float>(" << info->scale_b_expr << ");\n";
         EmitScaleAccumCall(
@@ -5045,7 +5178,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           need_n_mask = true;
           col_guard_expr = ExprSTR(op.StoreColMask(), IsHost());
         }
-        Note(n.LOC(), "mma.store uses explicit mask guard for boundary store.");
       } else {
         // Auto-detection: infer mask from tensor shapes and access patterns
 
