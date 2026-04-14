@@ -231,6 +231,7 @@ private:
   std::unordered_set<std::string> active_hoisted_scale_decls;
   std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
   std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
+  std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
 
 private:
   void EmitFixedHostHead();
@@ -357,6 +358,7 @@ private:
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();
+    live_chunk_aliases.clear();
     cluster_trigger_events_.clear();
     ResetLineDirectiveState();
   }
