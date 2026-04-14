@@ -63,7 +63,9 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
         mma.scale mc, sc_a, sc_b;
       }
 
-      mma.store mc, output.view(ROWS_M, WARP_N).from(seg_start + iv_m * WARP_M, block_n * WARP_N);
+      mma.store.mask mc, 
+        output.view(WARP_M, WARP_N)
+              .from(seg_start + iv_m * WARP_M, block_n * WARP_N), ROWS_M;
     }
   }
 }
