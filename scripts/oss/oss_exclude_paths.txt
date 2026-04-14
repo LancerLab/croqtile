@@ -29,7 +29,20 @@ extern/Makefile
 scripts/*.sh
 scripts/*.md
 scripts/hooks/
-scripts/oss/
+
+# Internal oss sync tools (push, pull, setup, watch -- NOT scan)
+scripts/oss/oss-push.sh
+scripts/oss/oss-pull.sh
+scripts/oss/oss-pull-scan.sh
+scripts/oss/oss-setup.sh
+scripts/oss/oss-watch.sh
+scripts/oss/sync-repo.sh
+scripts/oss/test-oss-workflow.sh
+
+# Scan infrastructure files (contain keywords by definition, must not trigger scan)
+scripts/oss/os_kw.txt
+scripts/oss/os_kw_candidates.txt
+scripts/oss/oss_exclude_paths.txt
 
 # Samples (internal)
 samples/

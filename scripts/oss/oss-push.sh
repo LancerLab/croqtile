@@ -388,13 +388,13 @@ for commit in "${COMMITS[@]}"; do
   fi
 
   # ---- GATE 3: verify CMake configure_file inputs exist ----
-  local cmake_ok=1
+  cmake_ok=1
   while IFS= read -r cmake_file; do
     [[ -z "$cmake_file" ]] && continue
     while IFS= read -r input_path; do
       [[ -z "$input_path" ]] && continue
       # Resolve ${CMAKE_SOURCE_DIR} to repo root
-      local resolved="${input_path/\$\{CMAKE_SOURCE_DIR\}\//}"
+      resolved="${input_path/\$\{CMAKE_SOURCE_DIR\}\//}"
       resolved="${resolved/\$\{CMAKE_SOURCE_DIR\}/}"
       if [[ "$resolved" != "$input_path" ]] && ! git cat-file -e "HEAD:$resolved" 2>/dev/null; then
         echo "  WARNING: CMake configure_file input missing: $resolved"

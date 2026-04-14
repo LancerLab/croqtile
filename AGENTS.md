@@ -181,6 +181,46 @@ public:
 
 ---
 
+## Git Push and OSS Sync Rules (MANDATORY)
+
+### Never push without explicit instruction
+
+**Do NOT run `git push` to any remote unless the user explicitly asks.**
+`git commit` (local) is fine when the user asks to commit. `git push` requires
+the user to say "push", "push to origin", "push to remote", etc.
+
+### Every main commit needs an oss/main counterpart
+
+This repo maintains an `oss/main` branch for open-source sync. When you commit
+on `main`, you MUST also run `bash scripts/oss/oss-push.sh <sha>` to create a
+corresponding oss/main commit. If all files in the commit are excluded (internal-
+only), the script skips automatically -- but you must still run it.
+
+See the `/oss-merge` skill for the full workflow.
+
+### OSS Violation Awareness (MANDATORY when developing on main)
+
+All code committed to `main` that is NOT excluded in `scripts/oss/oss_exclude_paths.txt`
+will be synced to the public `oss/main` branch. Before committing, you MUST ensure:
+
+1. **No forbidden keywords**: Run `make oss-scan` (or `bash scripts/oss/oss-scan.sh --staged`)
+   to verify no internal company names, product codenames, or internal URLs leak into
+   non-excluded files. The keyword list is in `scripts/oss/os_kw.txt`.
+
+2. **No non-ASCII in synced files**: The scan also flags non-ASCII characters in files
+   that will reach oss/main.
+
+3. **Exclude-aware development**: If you are adding a new file or directory that should
+   remain internal, add it to `scripts/oss/oss_exclude_paths.txt` FIRST.
+
+4. **Build integrity**: All `configure_file()` inputs referenced in `CMakeLists.txt`
+   must exist on oss/main. The `oss-push.sh` script verifies this automatically.
+
+5. **Quick check**: `make oss-scan` runs the full tree scan. Use `make oss-scan-staged`
+   to scan only staged changes before committing.
+
+---
+
 ## Project-Specific Conventions
 
 ### .co Files (Choreo Source)

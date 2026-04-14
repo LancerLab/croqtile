@@ -5,6 +5,39 @@ description: Help internal developers push code to both main and oss/main. Use w
 
 # OSS Merge Skill -- Developer Workflow for Open-Source Sync
 
+## MANDATORY RULES (all agents MUST follow)
+
+### Rule 1: NEVER push without explicit instruction
+
+**Do NOT push to `origin/main`, `origin/oss/main`, `oss-shadow`, or `public`
+unless the user explicitly asks you to push.** Commits are LOCAL only until
+the user says "push", "push to origin", "push to remote", etc.
+
+- `git commit` = OK (local, always allowed when asked to commit)
+- `git push` = FORBIDDEN unless the user explicitly requests it
+- This applies to ALL remotes, not just oss-shadow/public
+
+When in doubt, show the user what you committed and ask if they want it pushed.
+
+### Rule 2: Every main commit MUST have an oss/main counterpart
+
+When the user asks you to **commit** changes on `main`, you MUST also produce
+a corresponding commit on `oss/main`:
+
+1. Commit on `main` first
+2. Run `make oss-catchup-dry` (or `oss-push -n <sha>`) to preview
+3. If the commit has non-excluded files, cherry-pick to `oss/main` using
+   `bash scripts/oss/oss-push.sh <sha>`
+4. Verify the oss/main commit passes scan (`oss-scan --tree HEAD`)
+5. Verify CMake inputs exist (the script's Gate 3 does this automatically)
+6. If ALL files in the commit are excluded, skip the oss/main step (the
+   script handles this) -- but still RUN the script so the user sees the skip
+
+**Never leave main ahead of oss/main without the user knowing.**
+If oss-push fails or has violations, report them to the user and help fix.
+
+---
+
 ## When to Use
 
 - Developer wants to push a commit to both `main` and `oss/main`
@@ -12,6 +45,7 @@ description: Help internal developers push code to both main and oss/main. Use w
 - CI on an `oss/main` merge request fails and needs fixing
 - Developer wants to drop/revert a commit from both branches consistently
 - Any request involving `/oss-merge`, "push to oss", "sync to open source"
+- **Automatically**: whenever you commit on `main` (Rule 2 above)
 
 ## Prerequisites
 
@@ -215,22 +249,25 @@ git commit -m "fix: remove proprietary reference in <file>"
 
 ---
 
-## Phase 4: Push to Developer's Remote
+## Phase 4: Push (ONLY when explicitly asked)
 
-After the oss commit is clean, push BOTH branches to the developer's fork:
+**Do NOT push unless the user explicitly asks.** When they do, push BOTH
+branches to the remote they specify:
 
 ```bash
 # Push main branch (original commit)
-git push <developer-remote> main
+git push <remote> main
 
 # Push oss/main branch
-git push <developer-remote> oss/main
+git push <remote> oss/main
 ```
 
-**Safety rules:**
-- NEVER push to `oss-shadow`, `public`, or any GitHub URL
-- NEVER push to `origin` without explicit permission
-- Only push to the developer's personal fork remote
+**Push target rules:**
+- If user says "push" without specifying a remote, ASK which remote
+- NEVER push to `oss-shadow`, `public`, or any GitHub URL (the sync
+  daemon handles those)
+- NEVER push to `origin` unless the user explicitly says "push to origin"
+- When pushing to the developer's fork, use their fork remote name
 
 **Note:** The unified sync daemon (`make sync-all`) automatically pushes
 `oss/main` to all three remotes (origin, oss-shadow, public). Developers
@@ -382,11 +419,13 @@ git push --force-with-lease <developer-remote> main
 
 ## Safety Rules
 
-1. **NEVER push to the public remote** (`oss-shadow`, `public`, GitHub URLs).
-   The sync daemon handles GitHub pushes automatically.
+1. **NEVER push to ANY remote** without the user's explicit instruction.
+   This includes `origin`, `oss-shadow`, `public`, and GitHub URLs.
+   Local commits are always safe; pushes require explicit permission.
 
-2. **NEVER push to `origin`** without the developer's explicit permission.
-   Always push to the developer's fork remote.
+2. **NEVER leave main ahead without an oss/main counterpart.**
+   Every commit on main must be followed by running oss-push to produce
+   a corresponding oss/main commit (or confirm the commit is all-excluded).
 
 3. **ALWAYS strip AI tool trailers** from commit messages on oss/main:
    ```bash
@@ -404,6 +443,8 @@ git push --force-with-lease <developer-remote> main
 
 | Task | Command |
 |------|---------|
+| Catch up oss/main | `make oss-catchup` |
+| Preview catchup | `make oss-catchup-dry` |
 | Preview oss push | `make oss-push-dry COMMIT=<sha>` |
 | Push to oss/main | `make oss-push COMMIT=<sha>` |
 | Scan oss branch | `make oss-scan` |
