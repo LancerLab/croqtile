@@ -239,9 +239,19 @@ bool MemReuse::Visit(AST::NamedVariableDecl& n) {
   auto ty = GetSymbolType(n.name_str);
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     auto sto = sty->GetStorage();
-    if (sto == Storage::LOCAL || sto == Storage::SHARED) ApplyMemOffset(n, sto);
+    if (ShouldReuseStorage(sto)) ApplyMemOffset(n, sto);
   }
   return true;
+}
+
+bool MemReuse::ShouldReuseStorage(Storage sto) const {
+  if (sto == Storage::SHARED) return true;
+  if (sto == Storage::LOCAL) {
+    // CUTE local buffers can be promoted to registers/scalars in CUDA.
+    // Skip local memory reuse so this optimization opportunity is preserved.
+    return CCtx().TargetName() != "cute";
+  }
+  return false;
 }
 
 void MemReuse::Initialize() {
@@ -298,6 +308,7 @@ void MemReuse::AnalyzeMemOffset() {
   std::map<std::string, size_t> idx_count;
   for (const auto& [df_name, _] : DFCtxs()) {
     for (auto sto : {Storage::LOCAL, Storage::SHARED}) {
+      if (!ShouldReuseStorage(sto)) continue;
       if (ma.sto_have_dyn[df_name][sto]) {
         std::string co_func_name = GetFuncNameFromScopedName(df_name);
         // TODO: check that no pb, but dynamic
@@ -314,6 +325,7 @@ void MemReuse::AnalyzeMemOffset() {
   }
   for (auto& [df_name, ctx] : DFCtxs()) {
     for (auto sto : {Storage::LOCAL, Storage::SHARED}) {
+      if (!ShouldReuseStorage(sto)) continue;
       if (ma.sto_have_dyn[df_name][sto]) {
         std::string co_func_name = GetFuncNameFromScopedName(df_name);
         if (idx_count[co_func_name] == 0) df_name_idx[df_name] = "";
@@ -427,8 +439,8 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     }
   };
 
-  DoMemReuse(Storage::LOCAL);
-  DoMemReuse(Storage::SHARED);
+  for (auto sto : {Storage::LOCAL, Storage::SHARED})
+    if (ShouldReuseStorage(sto)) DoMemReuse(sto);
 }
 
 bool MemReuse::ValidateResult(const HeapSimulator::Result& res,

@@ -296,6 +296,7 @@ private:
   }
 
   bool Visit(AST::NamedVariableDecl&) override;
+  bool ShouldReuseStorage(Storage sto) const;
   void Initialize();
   void AnalyzeMemOffset();
   void ProtoType(const std::string& dev_fname, DevFuncMemReuseCtx& ctx,
