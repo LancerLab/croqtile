@@ -33,33 +33,22 @@ __co__ auto matmul(f32 [M, K] lhs, f32 [N, K] rhs) { ... }
 ```
 'M', 'N' and 'K' are the symbolic shape dimensions. Programs program shaped inputs, such as tensors, in such a natural way. Such a design priors any existing systems (late 2024). Additionally, symbolic dimensions are also checked to ensure safety. As it is automatic, and systematic, it eliminates the need for non-systematic, explicitly programmed assertions by the users, thereby reducing boilerplate code.
 
-### Visualization
-**Analytic and visualization** is another compelling feature of Croqtile, designed to help programmers understand tiling behaviors. For instance, consider the following data movement statement:
-
-`f1 = dma.copy a.chunkat(p, x, y) => shared;`
-
-With Croqtile's visualization capability, it renders figures like:
-
-![visualizing the DMA statement](./images/simple_dma.png)
-
-Programmers is easy to find the projection of the tiling and data movement behavior from this visualization. Such assistance can significantly reduce user erorrs when being properly used.
-
 ## Documentation
 
 Croqtile documentation is organized into three levels:
 
 | Level | Audience | Link |
 |-------|----------|------|
-| **Level 0 -- Tutorial** | New users, hands-on learning | [Croqtile Tutorial](https://codes1gn.github.io/croktile-tutorial/) |
+| **Level 0 -- Tutorial** | New users, hands-on learning | [Croqtile Tutorial](https://lancerlab.github.io/croqtile-tutorial/) |
 | **Level 2 -- Language Reference** | PL/compiler-savvy readers, syntax & semantics | [Language Reference](./Documents/Documentation/index.md) |
 | **Developer Guide** | Compiler contributors, target developers | [Developer Guide](./Documents/Developer/index.md) |
 
 ### Quick Start
 
 ```bash
-make setup   # fetch prerequisites
-make         # build compiler
-make test    # run test suite
+make setup-core   # fetch prerequisites
+make              # build compiler
+make test         # run test suite
 ./choreo -t cute your_program.co   # compile a .co file
 ```
 
