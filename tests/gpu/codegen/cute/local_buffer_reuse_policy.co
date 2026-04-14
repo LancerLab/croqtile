@@ -1,0 +1,57 @@
+// RUN: choreo -es -t cute -arch=sm_86 --max-local-mem-capacity=4096 %s -o - | FileCheck %s
+//
+// Ensure CUTE local-buffer reuse policy:
+// 1) static local buffers do not use memory reuse
+// 2) dynamic local buffers do use memory reuse
+// 3) mixed static+dynamic local only reuses the dynamic ones
+
+__co__ void static_local_only() {
+  parallel by 1 : block {
+    parallel by 8 : thread {
+      local u8 [16] a;
+      local u8 [16] b;
+      call kernel(a, b);
+    }
+  }
+}
+// CHECK-LABEL: __global__ void __choreo_device_static_local_only
+// CHECK: unsigned char a[16];
+// CHECK: unsigned char b[16];
+
+__co__ void dynamic_local_only(int n, int m) {
+  parallel by 1 : block {
+    parallel by 8 : thread {
+      local u8 [n] a;
+      local u8 [m] b;
+      call kernel(a, b);
+    }
+  }
+}
+// CHECK-LABEL: __global__ void __choreo_device_dynamic_local_only
+// CHECK: mr_offset_dynamic_local_only
+// CHECK: unsigned char* a = (unsigned char*)(
+// CHECK: unsigned char* b = (unsigned char*)(
+
+// CHECK-LABEL: void dynamic_local_only(int n, int m) {
+// CHECK: HeapSimulator::Chunks __co__local_chunks
+// CHECK: push_back({static_cast<size_t>(n)
+// CHECK: push_back({static_cast<size_t>(m)
+
+__co__ void mixed_local_reuse(int n) {
+  parallel by 1 : block {
+    parallel by 8 : thread {
+      local u8 [16] s;
+      local u8 [n] d;
+      call kernel(s, d);
+    }
+  }
+}
+// CHECK-LABEL: __global__ void __choreo_device_mixed_local_reuse
+// CHECK: unsigned char s[16];
+// CHECK: unsigned char* d = (unsigned char*)(
+// CHECK: mr_offset_mixed_local_reuse
+
+// CHECK-LABEL: void mixed_local_reuse(int n) {
+// CHECK: HeapSimulator::Chunks __co__local_chunks
+// CHECK: push_back({static_cast<size_t>(n)
+// CHECK-NOT: push_back({static_cast<size_t>(16)

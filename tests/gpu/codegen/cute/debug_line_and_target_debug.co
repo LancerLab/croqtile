@@ -15,13 +15,13 @@ __co__ void foo() {
   }
 }
 
-// LINE-ON: int* a__buf__
+// LINE-ON: int a__buf__[2]
 // LINE-ON: #line [[#LA:]] "{{[^/].*}}"
 // LINE-ON-NEXT: future a("a", [[#LA]], {{[0-9]+}}, a__buf__);
-// LINE-ON: int* b__buf__
+// LINE-ON: int b__buf__[2];
 // LINE-ON: #line [[#LA+1]] "{{[^/].*}}"
 // LINE-ON-NEXT: future b("b", [[#LA+1]], {{[0-9]+}}, b__buf__);
-// LINE-ABS: int* a__buf__
+// LINE-ABS: int a__buf__[2]
 // LINE-ABS: #line [[#LB:]] "/{{.*}}"
 // LINE-ABS-NEXT: future a("a", [[#LB]], {{[0-9]+}}, a__buf__);
 // LINE-TG-NOT: #line
