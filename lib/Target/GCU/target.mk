@@ -215,7 +215,7 @@ SYNC_ALL    := bash $(SCRIPT_DIR)/sync_all.sh
 # oss-scan targets are defined in lib/Target/GPU/target.mk (shared by both branches)
 .PHONY: oss-push oss-push-last \
         oss-push-range oss-push-dry oss-catchup oss-catchup-dry \
-        oss-pull oss-pull-scan oss-watch \
+        oss-pull oss-pull-last oss-pull-scan oss-watch \
         oss-setup oss-status oss-help sync-all sync-all-once
 
 oss-push:
@@ -261,12 +261,18 @@ oss-catchup-dry:
 
 oss-pull:
 	@if [ -z "$(COMMIT)" ]; then \
-		echo "Usage: make oss-pull COMMIT=<sha>"; \
+		echo "Usage:"; \
+		echo "  make oss-pull COMMIT=<sha>     # pull specific commit"; \
+		echo "  make oss-pull-last             # pull last unpulled commit"; \
 		echo ""; \
 		echo "See: Documents/internal/oss-sync-developer-guide.md"; \
 		exit 1; \
 	fi
 	@$(OSS_PULL) $(COMMIT)
+
+oss-pull-last:
+	@echo "Pulling last unpulled commit from oss/main..."
+	@$(OSS_PULL) --last
 
 oss-pull-scan:
 	@$(OSS_PSCAN) --fetch
@@ -301,6 +307,7 @@ oss-help:
 	@echo "  make oss-catchup-dry            Preview what oss-catchup would do"
 	@echo ""
 	@echo "  make oss-pull COMMIT=sha        Pull from oss/main to main"
+	@echo "  make oss-pull-last              Pull last unpulled oss/main commit"
 	@echo "  make oss-pull-scan              Fetch public + scan for conflicts"
 	@echo "  make oss-watch                  Start periodic sync watcher (WSL)"
 	@echo ""

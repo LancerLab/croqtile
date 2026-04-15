@@ -88,6 +88,19 @@ if [[ $CATCHUP -eq 0 && ${#COMMITS[@]} -eq 0 ]]; then
   exit 2
 fi
 
+# Resolve symbolic refs (HEAD, branch names) to full SHAs while still on
+# the current branch.  Without this, "HEAD" would resolve against the
+# target branch after the checkout below.
+if [[ ${#COMMITS[@]} -gt 0 ]]; then
+  RESOLVED=()
+  for c in "${COMMITS[@]}"; do
+    full="$(git rev-parse --verify "$c^{commit}" 2>/dev/null)" \
+      || { echo "Error: cannot resolve commit '$c'" >&2; exit 2; }
+    RESOLVED+=("$full")
+  done
+  COMMITS=("${RESOLVED[@]}")
+fi
+
 [[ -f "$EXCLUDE_FILE" ]] || { echo "Error: exclude file not found: $EXCLUDE_FILE" >&2; exit 2; }
 
 # -------- load exclude patterns --------
@@ -174,7 +187,11 @@ build_synced_set() {
     sha="$(echo "$line" | grep -oP '(?<=cherry picked from )\w+' || true)"
     if [[ -n "$sha" ]]; then
       local full
-      full="$(git rev-parse "$sha" 2>/dev/null || true)"
+      # Use --verify to ensure the object actually exists in the repo;
+      # without it, git rev-parse accepts any 40-hex string even if the
+      # commit was rebased away or GC'd, leading to "bad object" errors
+      # in downstream rev-list / rev-parse --short calls.
+      full="$(git rev-parse --verify "$sha^{commit}" 2>/dev/null || true)"
       if [[ -n "$full" ]]; then
         SYNCED_SHAS["$full"]=1
         if [[ $found_latest -eq 0 ]]; then

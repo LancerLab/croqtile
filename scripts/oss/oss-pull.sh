@@ -25,6 +25,11 @@ TARGET_BRANCH="main"
 FORCE=0
 SCAN_ONLY=0
 
+PUBLIC_REMOTE="public"
+PUBLIC_URL="git@github.com:LancerLab/croqtile.git"
+OSS_SHADOW_REMOTE="oss-shadow"
+OSS_SHADOW_URL="git@git.enflame.cn:era-dev/choreo-open.git"
+
 # Files that are managed separately per repo -- incoming changes to
 # these must be reviewed, not blindly cherry-picked.
 CONFLICT_FILES=(.gitignore .gitmodules .gitattributes .clang-format
@@ -34,16 +39,22 @@ usage() {
   cat <<'EOF'
 Usage: oss-pull.sh [options] <commit> [<commit>...]
        oss-pull.sh [options] --range <from>..<to>
+       oss-pull.sh [options] --last
 
 Cherry-pick commits from the oss/ branch back to main, with violation
 scanning. Halts on any issue that could break the private repo.
 
+If the public remote or oss/main branch is missing, the script will
+set them up automatically (equivalent to running oss-setup.sh).
+
 Options:
   -b <branch>   Source branch (default: oss/main)
   -t <branch>   Target branch (default: main)
+  --last        Pull the most recent oss/main commit not yet on target
   --scan-only   Scan commits but do not cherry-pick (report only)
   --force       Apply even if violations are found (use with caution)
   --range <r>   Expand a revision range via git rev-list --reverse
+  -n            Dry run: scan only, do not apply
   -h            Show help
 
 Violations detected:
@@ -59,12 +70,16 @@ EOF
 }
 
 COMMITS=()
+PULL_LAST=0
+DRY_RUN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -b)          OSS_BRANCH="$2"; shift 2 ;;
     -t)          TARGET_BRANCH="$2"; shift 2 ;;
+    --last)      PULL_LAST=1; shift ;;
     --scan-only) SCAN_ONLY=1; shift ;;
     --force)     FORCE=1; shift ;;
+    -n)          DRY_RUN=1; SCAN_ONLY=1; shift ;;
     --range)
       mapfile -t range_commits < <(git -C "$REPO_ROOT" rev-list --reverse "$2")
       COMMITS+=("${range_commits[@]}")
@@ -75,13 +90,116 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ${#COMMITS[@]} -eq 0 ]]; then
-  echo "Error: no commits specified" >&2
+if [[ $PULL_LAST -eq 0 && ${#COMMITS[@]} -eq 0 ]]; then
+  echo "Error: no commits specified (or use --last)" >&2
   usage
   exit 2
 fi
 
 cd "$REPO_ROOT"
+
+# -------- auto-setup: ensure oss/main branch and remotes exist --------
+
+ensure_remote() {
+  local name="$1" url="$2"
+  if ! git remote get-url "$name" >/dev/null 2>&1; then
+    echo "Remote '$name' not found -- adding -> $url"
+    git remote add "$name" "$url"
+    git fetch "$name" 2>/dev/null || echo "  Warning: fetch from '$name' failed (network issue?)"
+  fi
+}
+
+ensure_oss_branch() {
+  if git show-ref --verify --quiet "refs/heads/$OSS_BRANCH"; then
+    return 0
+  fi
+
+  echo "Branch '$OSS_BRANCH' not found -- setting up..."
+  ensure_remote "$OSS_SHADOW_REMOTE" "$OSS_SHADOW_URL"
+  ensure_remote "$PUBLIC_REMOTE" "$PUBLIC_URL"
+
+  if git show-ref --verify --quiet "refs/remotes/$OSS_SHADOW_REMOTE/main"; then
+    git fetch "$OSS_SHADOW_REMOTE"
+    git branch "$OSS_BRANCH" "$OSS_SHADOW_REMOTE/main"
+    git branch -u "$OSS_SHADOW_REMOTE/main" "$OSS_BRANCH"
+    echo "  Created '$OSS_BRANCH' tracking $OSS_SHADOW_REMOTE/main"
+  elif git show-ref --verify --quiet "refs/remotes/$PUBLIC_REMOTE/main"; then
+    git branch "$OSS_BRANCH" "$PUBLIC_REMOTE/main"
+    echo "  Created '$OSS_BRANCH' from $PUBLIC_REMOTE/main"
+  else
+    echo "Error: cannot find a remote oss branch to create '$OSS_BRANCH' from." >&2
+    echo "  Tried: $OSS_SHADOW_REMOTE/main, $PUBLIC_REMOTE/main" >&2
+    echo "  Check network connectivity or run: make oss-setup" >&2
+    exit 1
+  fi
+}
+
+ensure_oss_branch
+
+# -------- --last mode: find the newest unpulled oss/main commit --------
+
+if [[ $PULL_LAST -eq 1 ]]; then
+  # Build set of oss/main SHAs already cherry-picked to main
+  # (detected via cherry-pick trailers in main's commit messages).
+  declare -A PULLED_SHAS=()
+  while IFS= read -r trailer_sha; do
+    [[ -z "$trailer_sha" ]] && continue
+    full="$(git rev-parse --verify "$trailer_sha^{commit}" 2>/dev/null || true)"
+    [[ -n "$full" ]] && PULLED_SHAS["$full"]=1
+    PULLED_SHAS["$trailer_sha"]=1
+  done < <(git log "$TARGET_BRANCH" --format=%B 2>/dev/null \
+           | grep -oP '(?<=cherry picked from )\w+' || true)
+
+  # Stash working tree so trial cherry-picks don't clobber local changes
+  stash_needed=0
+  if ! git diff --quiet HEAD 2>/dev/null || ! git diff --cached --quiet HEAD 2>/dev/null; then
+    git stash push -q -m "oss-pull-last: save working tree"
+    stash_needed=1
+  fi
+
+  # Walk oss/main from newest to oldest.  Skip:
+  #   - commits that are cherry-picks FROM main (oss-push generated)
+  #   - commits already pulled to main (by trailer)
+  #   - commits whose content is already reflected on main (no net diff)
+  found_last=""
+  while IFS= read -r oss_sha; do
+    # Skip oss-push-generated cherry-picks (trailer: "on main")
+    if git log -1 --format=%B "$oss_sha" 2>/dev/null \
+       | grep -qP 'cherry picked from \w+ on main'; then
+      continue
+    fi
+    # Skip if already pulled
+    [[ -n "${PULLED_SHAS[$oss_sha]:-}" ]] && continue
+    # Skip if content already reflected (trial cherry-pick produces no diff)
+    if git cherry-pick --no-commit "$oss_sha" 2>/dev/null; then
+      if git diff --cached --quiet HEAD 2>/dev/null; then
+        git reset --hard HEAD >/dev/null 2>&1
+        continue
+      fi
+      git reset --hard HEAD >/dev/null 2>&1
+    else
+      git cherry-pick --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
+    fi
+    found_last="$oss_sha"
+    break
+  done < <(git rev-list "$OSS_BRANCH")
+
+  # Restore working tree
+  if [[ $stash_needed -eq 1 ]]; then
+    git stash pop -q 2>/dev/null || true
+  fi
+
+  if [[ -z "$found_last" ]]; then
+    echo "main is fully caught up with $OSS_BRANCH. Nothing to pull."
+    exit 0
+  fi
+
+  short="$(git rev-parse --short "$found_last")"
+  msg="$(git log -1 --format='%s' "$found_last" | head -c 60)"
+  echo "Last unpulled commit: $short $msg"
+  echo ""
+  COMMITS+=("$found_last")
+fi
 
 # -------- load exclude patterns for private-path detection --------
 
