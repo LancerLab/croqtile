@@ -1,4 +1,4 @@
-# Croqtile - The C++ DSL for TileFlow Programming
+# Croqtile - The Next-Gen Kernel Programming Language to achieve 5x Productivity
 Croqtile (formerly Choreo) is a low-level Embedded Domain Specific Language (**EDSL**) for C++ specifically engineered to program data movement entities like Direct-Memory-Accesses (DMA). 
 
 Traditionally, programming DMA has focused on hardware configuration rather than the data itself. In modern heterogeneous hardware like GPUs, programmers often need to move smaller chunks of data to faster memory to enhance performance. This requirement can make programming more complex and sometimes results in hard-to-maintain code.
