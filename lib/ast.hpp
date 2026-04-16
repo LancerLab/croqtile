@@ -889,6 +889,7 @@ private:
   BaseType from;
   BaseType to;
   size_t element_count = 1;
+  bool is_explicit = false;
 
 public:
   CastExpr(const location& l, const ptr<Node>& val) : Expr(l, Op::Cast, val) {
@@ -899,6 +900,7 @@ public:
   BaseType ToType() const { return to; }
   bool IsVectorType() const { return element_count > 1; }
   size_t ElementCount() const { return element_count; }
+  bool IsExplicit() const { return is_explicit; }
 
   void SetFrom(BaseType bty, size_t ec = 1) {
     from = bty;
@@ -908,18 +910,21 @@ public:
     to = bty;
     if (ec > 1) element_count = ec;
   }
+  void SetExplicit(bool v = true) { is_explicit = v; }
 
 public:
   ptr<Node> CloneImpl() const override {
     auto n = Make<CastExpr>(LOC(), CloneP(GetR()));
     n->from = from;
     n->to = to;
+    n->is_explicit = is_explicit;
     return n;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << "CAST(" << FromType() << "=>" << ToType() << ": '";
+    os << prefix << (is_explicit ? "EXPLICIT_CAST(" : "CAST(") << FromType()
+       << "=>" << ToType() << ": '";
     GetR()->Print(os, {}, with_type);
     os << "') ";
   }

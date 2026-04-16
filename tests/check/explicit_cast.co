@@ -1,0 +1,34 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s --check-prefix=NOWARN
+
+__co__ auto test_explicit_cast(int i, float f) {
+  f32 x = __to<f32>(i);
+  s32 y = __to<s32>(f);
+  bf16 z = __to<bf16>(f);
+  f32 w = __to<f32>(z);
+  f16 h = __to<f16>(f);
+  u8 b = __to<u8>(i);
+  s16 s = __to<s16>(i);
+  u32 u = __to<u32>(y);
+  u64 wide = __to<u64>(i);
+  s64 swide = __to<s64>(i);
+  f32 back = __to<f32>(wide);
+  s32 narrow = __to<s32>(swide);
+  return w;
+}
+
+// CHECK: float x = static_cast<float>(i);
+// CHECK: int y = static_cast<int>(f);
+// CHECK: bf16 z = choreo::bf16(f);
+// CHECK: float w = static_cast<float>(z);
+// CHECK: f16 h = choreo::f32_to_f16(f);
+// CHECK: unsigned char b = static_cast<unsigned char>(i);
+// CHECK: short s = static_cast<short>(i);
+// CHECK: unsigned int u = static_cast<unsigned int>(y);
+// CHECK: unsigned long long wide = static_cast<unsigned long long>(i);
+// CHECK: long long swide = static_cast<long long>(i);
+// CHECK: float back = static_cast<float>(wide);
+// CHECK: int narrow = static_cast<int>(swide);
+
+// Verify no warnings for explicit casts
+// NOWARN-NOT: warning:{{.*}}explicit

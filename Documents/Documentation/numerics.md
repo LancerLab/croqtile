@@ -99,3 +99,7 @@ Croqtile supports multiple floating-point formats for AI workloads:
 | `f8_e5m2` | 8 | 5 | 2 | Training (Hopper+) |
 
 *(Reference: `tests/gpu/end2end/float_types.co`, `tests/gpu/end2end/add_fp8_e4m3_to_f16.co`)*
+
+## Explicit Type Conversion
+
+Use `__to<T>(expr)` to explicitly convert between fundamental types. This suppresses precision-loss warnings that implicit conversions would trigger. See [Type System -- Explicit Type Conversion](type-system.md#explicit-type-conversion-with-__to) for details and examples.

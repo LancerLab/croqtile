@@ -1,0 +1,48 @@
+// Test 1: explicit casts never produce warnings
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s --check-prefix=IMPL
+// Test 2: verify explicit casts have no warnings (grep for absence)
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | grep -c "warning:" | FileCheck %s --check-prefix=WCOUNT
+
+// --- explicit casts across all three categories: no warnings ---
+__co__ auto test_explicit_no_warn(int i, float f) {
+  // value-preserving
+  f64 vp = __to<f64>(f);          // f32 -> f64
+
+  // lossy (would warn if implicit)
+  s32 lo1 = __to<s32>(f);         // f32 -> s32
+  bf16 lo2 = __to<bf16>(f);       // f32 -> bf16
+  f16 lo3 = __to<f16>(f);         // f32 -> f16
+  u8 lo4 = __to<u8>(i);           // s32 -> u8
+  s16 lo5 = __to<s16>(i);         // s32 -> s16
+  f32 lo6 = __to<f32>(i);         // s32 -> f32
+
+  // reinterpretive (would warn if implicit)
+  u32 re = __to<u32>(i);          // s32 -> u32
+
+  return lo1;
+}
+
+// --- implicit lossy: MUST warn ---
+__co__ auto test_implicit_lossy(float f) {
+  mutable s32 a = f;
+  return a;
+}
+// IMPL: warning: The implicit type conversion may lose precision: 'f32' to 's32'
+// IMPL:   mutable s32 a = f;
+
+// --- implicit reinterpretive: MUST warn ---
+__co__ auto test_implicit_reinterpret(int i) {
+  mutable u32 a = i;
+  return a;
+}
+// IMPL: warning: The implicit type conversion may lead to semantic error(without data loss): 's32' to 'u32'
+// IMPL:   mutable u32 a = i;
+
+// --- implicit value-preserving: NO warn ---
+__co__ auto test_implicit_preserving(int i) {
+  mutable f64 a = i;
+  return a;
+}
+
+// Exactly 2 warnings total (one lossy, one reinterpretive -- both from implicit)
+// WCOUNT: 2

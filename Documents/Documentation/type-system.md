@@ -123,6 +123,55 @@ f = dma.copy x => shared;  // inferred as future
 
 The compiler also infers shapes through DMA operations, `chunkat` expressions, and arithmetic on mdspans. The [Value Numbering](../Developer/value-numbering.md) chapter in the Developer Guide explains the inference pipeline.
 
+## Explicit Type Conversion with `__to`
+
+When working with different fundamental types, you often need to convert between them explicitly. Croqtile provides the `__to` builtin:
+
+```choreo
+__to<target_type>(expression)
+```
+
+The target type inside `<...>` can be any fundamental type supported by the current compilation target (e.g. `f32`, `f16`, `bf16`, `s8`, `s16`, `s32`, `u8`, `u16`, `u32`). The source expression type is inferred automatically.
+
+```choreo
+__co__ auto example(int i, float f) {
+  f32 x = __to<f32>(i);      // int -> f32
+  bf16 y = __to<bf16>(f);    // f32 -> bf16
+  s32 z = __to<s32>(f);      // f32 -> s32
+  u8 b = __to<u8>(i);        // int -> u8
+}
+```
+
+### Why Use `__to` Instead of Implicit Conversion?
+
+Croqtile inserts implicit conversions automatically when types mismatch. However, implicit conversions that lose precision emit compiler **warnings**:
+
+```choreo
+mutable s32 a = 3.14f;   // warning: implicit conversion may lose precision
+```
+
+Use `__to` to suppress the warning and make the intent explicit:
+
+```choreo
+s32 a = __to<s32>(3.14f);  // no warning -- conversion is deliberate
+```
+
+| Scenario | Implicit (assignment) | Explicit (`__to`) |
+|----------|----------------------|--------------------|
+| Value-preserving (e.g. `s16` -> `s32`) | No warning | No warning |
+| Lossy (e.g. `f32` -> `bf16`) | Warning emitted | No warning |
+| Reinterpretive (e.g. `s32` -> `u32`) | Warning emitted | No warning |
+
+### Target-Specific Type Support
+
+Not all targets support all types. For instance, `u64`/`s64` may not be available on every architecture. If you attempt an unsupported conversion, the compiler reports an error during semantic analysis:
+
+```
+error: the target type 'u64' is not supported by the current target ...
+```
+
+Consult your target's documentation for the set of supported scalar types.
+
 ## Immutability as Default
 
 All Croqtile variables are immutable by default. This is a deliberate design choice:

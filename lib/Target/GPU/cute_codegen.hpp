@@ -454,8 +454,8 @@ private:
 
   const std::string ExprCastSTR(AST::ptr<AST::Node> n,
                                 std::optional<std::variant<int, float>> val,
-                                BaseType to, BaseType from,
-                                bool is_host = true) const;
+                                BaseType to, BaseType from, bool is_host = true,
+                                bool is_explicit = false) const;
 
   const std::string ValueSTR(const ValueItem& vi, bool = false,
                              bool = false) const;

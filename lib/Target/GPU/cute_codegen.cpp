@@ -7957,10 +7957,9 @@ const std::string CuteCodeGen::OpValueSTR(const ValueItem& vi,
 
 // input is a `node` or `std::variant<int, float>`.
 // If `val` is existed, use it first.
-const std::string
-CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
-                         std::optional<std::variant<int, float>> val,
-                         BaseType t, BaseType f, bool is_host) const {
+const std::string CuteCodeGen::ExprCastSTR(
+    AST::ptr<AST::Node> n, std::optional<std::variant<int, float>> val,
+    BaseType t, BaseType f, bool is_host, bool is_explicit) const {
   std::ostringstream res;
   std::string value;
 
@@ -7983,7 +7982,7 @@ CuteCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   using BT = BaseType;
 
   // need to do casting or converting.
-  if (!IsValuePreservingCast(f, t)) {
+  if (!IsValuePreservingCast(f, t) && !is_explicit) {
     if (IsReinterpretiveCast(f, t))
       Warning(n->LOC(), "The implicit type conversion may lead to semantic "
                         "error(without data loss): '" +
@@ -8202,7 +8201,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     // codegen for scalar type cast
     assert(ce->GetOp() == Op::Cast);
     return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
-                       is_host);
+                       is_host, ce->IsExplicit());
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {
