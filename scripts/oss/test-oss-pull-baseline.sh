@@ -1,20 +1,31 @@
 #!/usr/bin/env bash
 # Integration tests for oss-pull.sh --baseline / --catchup / --last
-# Operates on temporary test branches in the CURRENT repo.
-# Safe: cleans up all test branches on exit.
+# Runs in a temporary sandbox clone (never mutates the caller's repo).
 #
 # Usage: bash scripts/oss/test-oss-pull-baseline.sh
+#        bash scripts/oss/test-oss-pull-baseline.sh --quick
 
-set -uo pipefail
+set -euo pipefail
 
-CHOREO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCRIPTS="$CHOREO_ROOT/scripts/oss"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CHOREO_ROOT=""
+SCRIPTS=""
 PID=$$
 TEST_MAIN="test-pull-main-$PID"
 TEST_OSS="test-pull-oss-$PID"
 TEST_BL="$(mktemp)"
+SANDBOX_DIR="$(mktemp -d)"
 PASS=0
 FAIL=0
+QUICK=0
+
+if [[ "${1:-}" == "--quick" ]]; then
+  QUICK=1
+elif [[ $# -gt 0 ]]; then
+  echo "Unknown option: $1" >&2
+  echo "Usage: $0 [--quick]" >&2
+  exit 2
+fi
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,9 +35,57 @@ log()   { printf "\033[0;36m[TEST] %s\033[0m\n" "$*"; }
 ok()    { printf "\033[0;32m  OK : %s\033[0m\n" "$*"; PASS=$((PASS+1)); }
 fail()  { printf "\033[1;31m  FAIL: %s\033[0m\n" "$*"; FAIL=$((FAIL+1)); }
 assert_contains() { local out="$1" pat="$2"
-  if echo "$out" | grep -q "$pat"; then ok "$pat"; else fail "expected '$pat' in: $out"; fi; }
+  if grep -Fq "$pat" <<<"$out"; then ok "$pat"; else fail "expected '$pat' in: $out"; fi; }
 assert_not_contains() { local out="$1" pat="$2"
-  if ! echo "$out" | grep -q "$pat"; then ok "absent '$pat'"; else fail "unexpected '$pat' in: $out"; fi; }
+  if ! grep -Fq "$pat" <<<"$out"; then ok "absent '$pat'"; else fail "unexpected '$pat' in: $out"; fi; }
+
+create_sandbox() {
+  local sandbox_repo="$SANDBOX_DIR/repo"
+  local rel=""
+  local source_path=""
+  local target_path=""
+  declare -A overlay_seen=()
+
+  # Shared-object clone is fast and keeps source repo untouched.
+  git clone --quiet --shared "$SOURCE_ROOT" "$sandbox_repo"
+
+  # Overlay only source-side edits under scripts/oss so we test current
+  # in-progress work without copying unrelated files.
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] && overlay_seen["$rel"]=1
+  done < <(git -C "$SOURCE_ROOT" diff --name-only -- scripts/oss)
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] && overlay_seen["$rel"]=1
+  done < <(git -C "$SOURCE_ROOT" ls-files --others --exclude-standard -- scripts/oss)
+
+  # Always overlay this test file itself.
+  overlay_seen["scripts/oss/test-oss-pull-baseline.sh"]=1
+
+  git -C "$sandbox_repo" config user.name "OSS Pull Test"
+  git -C "$sandbox_repo" config user.email "oss-pull-test@example.com"
+
+  # Apply overlay file-by-file and keep sandbox clean so oss-pull.sh does not
+  # need stash/pop during scenarios.
+  for rel in "${!overlay_seen[@]}"; do
+    source_path="$SOURCE_ROOT/$rel"
+    target_path="$sandbox_repo/$rel"
+    if [[ -f "$source_path" ]]; then
+      mkdir -p "$(dirname "$target_path")"
+      cp -a "$source_path" "$target_path"
+      git -C "$sandbox_repo" add "$rel"
+    else
+      rm -f "$target_path"
+      git -C "$sandbox_repo" add -A "$rel"
+    fi
+  done
+
+  if ! git -C "$sandbox_repo" diff --cached --quiet; then
+    git -C "$sandbox_repo" commit -q -m "test: overlay local scripts/oss edits"
+  fi
+
+  CHOREO_ROOT="$sandbox_repo"
+  SCRIPTS="$CHOREO_ROOT/scripts/oss"
+}
 
 run_pull() {
   BASELINE_FILE="$TEST_BL" \
@@ -61,11 +120,9 @@ branch_has() { local br="$1" pat="$2"
 
 cleanup() {
   echo ""
-  log "Cleaning up test branches..."
-  git checkout -q main 2>/dev/null || true
-  git branch -D "$TEST_MAIN" 2>/dev/null || true
-  git branch -D "$TEST_OSS"  2>/dev/null || true
+  log "Cleaning up sandbox..."
   rm -f "$TEST_BL"
+  rm -rf "$SANDBOX_DIR"
   echo ""
   if [[ $FAIL -eq 0 ]]; then
     printf "\033[0;32m=== ALL %d CHECKS PASSED ===\033[0m\n" "$PASS"
@@ -76,14 +133,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+create_sandbox
+
 cd "$CHOREO_ROOT"
 # Both test branches start from current main HEAD
 git checkout -q main
 git branch "$TEST_MAIN" main
 git branch "$TEST_OSS"  main
 
+log "Sandbox repo: $CHOREO_ROOT"
 log "Test branches created: $TEST_MAIN (main-equiv), $TEST_OSS (oss-equiv)"
 log "Baseline file: $TEST_BL (empty / temp)"
+[[ $QUICK -eq 1 ]] && log "Quick mode enabled: running core regression scenarios only"
 
 # Count commits on $TEST_MAIN added since the test started (main HEAD)
 counts_ahead() { git rev-list --count "$TEST_MAIN" ^main 2>/dev/null; }
@@ -94,6 +155,7 @@ has_file() { git cat-file -e "$TEST_MAIN:$1" 2>/dev/null; }
 # ============================================================
 # A: --show-baseline with no baseline file → merge-base fallback
 # ============================================================
+if [[ $QUICK -eq 0 ]]; then
 log ""
 log "=== SCENARIO A: show-baseline with no file ==="
 > "$TEST_BL"   # empty
@@ -101,6 +163,7 @@ OUT="$(run_pull --show-baseline)"
 log "Output: $OUT"
 # merge-base of TEST_MAIN and TEST_OSS equals main (same SHA)
 assert_contains "$OUT" "Baseline:"
+fi
 
 # ============================================================
 # B: --set-baseline writes oss HEAD; subsequent --catchup empty
@@ -125,6 +188,7 @@ has_file "public-B.txt" && ok "public-B.txt cherry-picked to $TEST_MAIN" || fail
 # ============================================================
 # C: oss-push marker is skipped; only public-native landed
 # ============================================================
+if [[ $QUICK -eq 0 ]]; then
 log ""
 log "=== SCENARIO C: oss-push marker filtering ==="
 # Re-set baseline to current TEST_OSS tip so we start fresh for this scenario
@@ -149,6 +213,7 @@ assert_contains "$OUT" "fix: public fix typo in CONTRIBUTING"
 assert_contains "$OUT" "1 pulled"
 has_file "public-C-fix.txt" && ok "public-C-fix.txt on $TEST_MAIN" || fail "public-C-fix.txt missing"
 ! has_file "public-C-internal.txt" && ok "oss-push marker commit correctly skipped" || fail "internal commit should not be on $TEST_MAIN"
+fi
 
 # ============================================================
 # D: --max cap + re-run gets next batch
@@ -161,29 +226,42 @@ log "re-set baseline: $OUT"
 
 CNT_BEFORE="$(counts_ahead)"
 
-# Add 4 public commits, each touching its own file to avoid context issues
-for i in 1 2 3 4; do
+# Add public commits, each touching its own file to avoid context issues.
+# Quick mode uses fewer commits for faster regression checks.
+FEATURE_COUNT=4
+CATCHUP_MAX=2
+if [[ $QUICK -eq 1 ]]; then
+  FEATURE_COUNT=2
+  CATCHUP_MAX=1
+fi
+
+for ((i=1; i<=FEATURE_COUNT; i++)); do
   add_commit "$TEST_OSS" "public: feature-$i" "public-D-$i.txt" "feature $i"
 done
 
-OUT="$(run_pull --catchup --max 2)"
-log "1st run (--max 2): $OUT"
-assert_contains "$OUT" "Catchup: 2 commit"
-assert_contains "$OUT" "re-run --catchup for more"
-assert_contains "$OUT" "2 pulled"
+OUT="$(run_pull --catchup --max "$CATCHUP_MAX")"
+log "1st run (--max $CATCHUP_MAX): $OUT"
+assert_contains "$OUT" "Catchup: $CATCHUP_MAX commit"
+if [[ $FEATURE_COUNT -gt $CATCHUP_MAX ]]; then
+  assert_contains "$OUT" "re-run --catchup for more"
+fi
+assert_contains "$OUT" "$CATCHUP_MAX pulled"
 CNT_AFTER="$(counts_ahead)"
-[[ $((CNT_AFTER - CNT_BEFORE)) -eq 2 ]] && ok "2 commits added to $TEST_MAIN" || fail "Expected 2 new commits, got $((CNT_AFTER - CNT_BEFORE))"
+[[ $((CNT_AFTER - CNT_BEFORE)) -eq $CATCHUP_MAX ]] && ok "$CATCHUP_MAX commits added to $TEST_MAIN" || fail "Expected $CATCHUP_MAX new commits, got $((CNT_AFTER - CNT_BEFORE))"
 
-OUT2="$(run_pull --catchup --max 2)"
-log "2nd run: $OUT2"
-assert_contains "$OUT2" "Catchup: 2 commit"
-assert_contains "$OUT2" "2 pulled"
-CNT_FINAL="$(counts_ahead)"
-[[ $((CNT_FINAL - CNT_BEFORE)) -eq 4 ]] && ok "4 total commits on $TEST_MAIN" || fail "Expected 4 total, got $((CNT_FINAL - CNT_BEFORE))"
+if [[ $QUICK -eq 0 ]]; then
+  OUT2="$(run_pull --catchup --max "$CATCHUP_MAX")"
+  log "2nd run: $OUT2"
+  assert_contains "$OUT2" "Catchup: $CATCHUP_MAX commit"
+  assert_contains "$OUT2" "$CATCHUP_MAX pulled"
+  CNT_FINAL="$(counts_ahead)"
+  [[ $((CNT_FINAL - CNT_BEFORE)) -eq $FEATURE_COUNT ]] && ok "$FEATURE_COUNT total commits on $TEST_MAIN" || fail "Expected $FEATURE_COUNT total, got $((CNT_FINAL - CNT_BEFORE))"
+fi
 
 # ============================================================
 # E: --last mode finds newest unpulled commit
 # ============================================================
+if [[ $QUICK -eq 0 ]]; then
 log ""
 log "=== SCENARIO E: --last finds newest unpulled ==="
 OUT="$(run_pull --set-baseline "$(git rev-parse "$TEST_OSS")")"
@@ -201,6 +279,7 @@ assert_contains "$OUT" "Last unpulled:"
 assert_contains "$OUT" "$NEWEST_OF_2"
 assert_not_contains "$OUT" "$NEWEST "
 ok "--last returned newest (latest) unpulled commit"
+fi
 
 # ============================================================
 # F: --catchup properly excludes private-only commits
