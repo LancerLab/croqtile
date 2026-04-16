@@ -1,0 +1,20 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_convert builtin.
+
+__co__ void test_convert(f16 [128] input) {
+  parallel p by 4 {
+    in_tile = dma.copy.async input.chunkat(p) => local;
+    wait in_tile;
+    local f32[in_tile.span] dst;
+
+    __lib_convert(dst, in_tile.data, |in_tile.span|);
+  }
+}
+
+// ACORE: acore::convert(
+// ACORE-NOT: choreo::lib_convert
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_convert<float, choreo::half>(

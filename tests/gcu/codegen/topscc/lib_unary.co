@@ -1,0 +1,124 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_* unary/activation builtins with target lib on (acore) and off.
+
+__co__ void test_unary(f32 [128] input) {
+  parallel p by 4 {
+    in_tile = dma.copy.async input.chunkat(p) => local;
+    wait in_tile;
+    local f32[in_tile.span] dst;
+
+    // Elementwise math
+    __lib_abs(dst, in_tile.data, |in_tile.span|);
+    __lib_neg(dst, in_tile.data, |in_tile.span|);
+    __lib_sign(dst, in_tile.data, |in_tile.span|);
+    __lib_sqrt(dst, in_tile.data, |in_tile.span|);
+    __lib_rsqrt(dst, in_tile.data, |in_tile.span|);
+    __lib_cbrt(dst, in_tile.data, |in_tile.span|);
+    __lib_reciprocal(dst, in_tile.data, |in_tile.span|);
+    __lib_exp(dst, in_tile.data, |in_tile.span|);
+    __lib_log(dst, in_tile.data, |in_tile.span|);
+    __lib_erf(dst, in_tile.data, |in_tile.span|);
+    __lib_erfc(dst, in_tile.data, |in_tile.span|);
+    __lib_ceil(dst, in_tile.data, |in_tile.span|);
+    __lib_floor(dst, in_tile.data, |in_tile.span|);
+    __lib_trunc(dst, in_tile.data, |in_tile.span|);
+    __lib_round(dst, in_tile.data, |in_tile.span|);
+    __lib_sin(dst, in_tile.data, |in_tile.span|);
+    __lib_cos(dst, in_tile.data, |in_tile.span|);
+    __lib_tan(dst, in_tile.data, |in_tile.span|);
+    __lib_asin(dst, in_tile.data, |in_tile.span|);
+    __lib_acos(dst, in_tile.data, |in_tile.span|);
+    __lib_atan(dst, in_tile.data, |in_tile.span|);
+    __lib_sinh(dst, in_tile.data, |in_tile.span|);
+    __lib_cosh(dst, in_tile.data, |in_tile.span|);
+    __lib_tanh(dst, in_tile.data, |in_tile.span|);
+
+    // Unary activations (no extra params)
+    __lib_relu(dst, in_tile.data, |in_tile.span|);
+    __lib_gelu(dst, in_tile.data, |in_tile.span|);
+    __lib_selu(dst, in_tile.data, |in_tile.span|);
+    __lib_sigmoid(dst, in_tile.data, |in_tile.span|);
+    __lib_silu(dst, in_tile.data, |in_tile.span|);
+    __lib_swish(dst, in_tile.data, |in_tile.span|);
+    __lib_softplus(dst, in_tile.data, |in_tile.span|);
+    __lib_hard_swish(dst, in_tile.data, |in_tile.span|);
+    __lib_mish(dst, in_tile.data, |in_tile.span|);
+    __lib_quick_gelu(dst, in_tile.data, |in_tile.span|);
+    __lib_log_sigmoid(dst, in_tile.data, |in_tile.span|);
+  }
+}
+
+// ACORE: acore::abs(
+// ACORE: acore::neg(
+// ACORE: acore::sign(
+// ACORE: acore::sqrt(
+// ACORE: acore::rsqrt(
+// ACORE: acore::cbrt(
+// ACORE: acore::reciprocal(
+// ACORE: acore::exp(
+// ACORE: acore::log(
+// ACORE: acore::erf(
+// ACORE: acore::erfc(
+// ACORE: acore::ceil(
+// ACORE: acore::floor(
+// ACORE: acore::trunc(
+// ACORE: acore::round_ne(
+// ACORE: acore::sin(
+// ACORE: acore::cos(
+// ACORE: acore::tan(
+// ACORE: acore::asin(
+// ACORE: acore::acos(
+// ACORE: acore::atan(
+// ACORE: acore::sinh(
+// ACORE: acore::cosh(
+// ACORE: acore::tanh(
+// ACORE: acore::relu(
+// ACORE: acore::gelu_erf(
+// ACORE: acore::selu(
+// ACORE: acore::sigmoid(
+// ACORE: acore::silu(
+// ACORE: acore::swish(
+// ACORE: acore::softplus(
+// ACORE: acore::hard_swish(
+// ACORE: acore::mish(
+// ACORE: acore::quick_gelu(
+// ACORE: acore::log_sigmoid(
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_abs<float>(
+// FALLBACK: choreo::lib_neg<float>(
+// FALLBACK: choreo::lib_sign<float>(
+// FALLBACK: choreo::lib_sqrt<float>(
+// FALLBACK: choreo::lib_rsqrt<float>(
+// FALLBACK: choreo::lib_cbrt<float>(
+// FALLBACK: choreo::lib_reciprocal<float>(
+// FALLBACK: choreo::lib_exp<float>(
+// FALLBACK: choreo::lib_log<float>(
+// FALLBACK: choreo::lib_erf<float>(
+// FALLBACK: choreo::lib_erfc<float>(
+// FALLBACK: choreo::lib_ceil<float>(
+// FALLBACK: choreo::lib_floor<float>(
+// FALLBACK: choreo::lib_trunc<float>(
+// FALLBACK: choreo::lib_round_ne<float>(
+// FALLBACK: choreo::lib_sin<float>(
+// FALLBACK: choreo::lib_cos<float>(
+// FALLBACK: choreo::lib_tan<float>(
+// FALLBACK: choreo::lib_asin<float>(
+// FALLBACK: choreo::lib_acos<float>(
+// FALLBACK: choreo::lib_atan<float>(
+// FALLBACK: choreo::lib_sinh<float>(
+// FALLBACK: choreo::lib_cosh<float>(
+// FALLBACK: choreo::lib_tanh<float>(
+// FALLBACK: choreo::lib_relu<float>(
+// FALLBACK: choreo::lib_gelu_erf<float>(
+// FALLBACK: choreo::lib_selu<float>(
+// FALLBACK: choreo::lib_sigmoid<float>(
+// FALLBACK: choreo::lib_silu<float>(
+// FALLBACK: choreo::lib_swish<float>(
+// FALLBACK: choreo::lib_softplus<float>(
+// FALLBACK: choreo::lib_hard_swish<float>(
+// FALLBACK: choreo::lib_mish<float>(
+// FALLBACK: choreo::lib_quick_gelu<float>(
+// FALLBACK: choreo::lib_log_sigmoid<float>(

@@ -1,0 +1,14 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s 2>&1 | FileCheck %s
+
+// Test that unsupported __lib_* builtins are rejected by early sema.
+
+__co__ void test_unsupported(f32 [128] A) {
+  parallel p by 4 {
+    in_tile = dma.copy.async A.chunkat(p) => local;
+    wait in_tile;
+    local f32[in_tile.span] dst;
+    __lib_foobar(dst, in_tile.data, |in_tile.span|);
+  }
+}
+
+// CHECK: error: '__lib_foobar' is not supported by the current target 'topscc'

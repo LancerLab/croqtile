@@ -1,0 +1,6 @@
+#ifndef __CHOREO_ACORE_RUNTIME_HEADER_H__
+#define __CHOREO_ACORE_RUNTIME_HEADER_H__
+
+static const char* __lib_fallback_header_as_string = R"_co_lfb_(@LIB_FALLBACK_HEADER_CONTENT@)_co_lfb_";
+
+#endif // __CHOREO_ACORE_RUNTIME_HEADER_H__

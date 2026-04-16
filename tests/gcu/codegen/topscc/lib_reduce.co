@@ -1,0 +1,31 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_* reduce builtins.
+
+__co__ void test_reduce(f32 [128] input) {
+  parallel p by 4 {
+    in_tile = dma.copy.async input.chunkat(p) => local;
+    wait in_tile;
+    local f32[1] dst;
+
+    __lib_reduce_sum(dst, in_tile.data, |in_tile.span|, 32, 1);
+    __lib_reduce_max(dst, in_tile.data, |in_tile.span|, 32, 1);
+    __lib_reduce_min(dst, in_tile.data, |in_tile.span|, 32, 1);
+    __lib_reduce_prod(dst, in_tile.data, |in_tile.span|, 32, 1);
+    __lib_reduce_mean(dst, in_tile.data, |in_tile.span|, 32, 1);
+  }
+}
+
+// ACORE: acore::reduce_sum<0,
+// ACORE: acore::reduce_max<0,
+// ACORE: acore::reduce_min<0,
+// ACORE: acore::reduce_prod<0,
+// ACORE: acore::reduce_mean<0,
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_reduce_sum<float>(
+// FALLBACK: choreo::lib_reduce_max<float>(
+// FALLBACK: choreo::lib_reduce_min<float>(
+// FALLBACK: choreo::lib_reduce_prod<float>(
+// FALLBACK: choreo::lib_reduce_mean<float>(

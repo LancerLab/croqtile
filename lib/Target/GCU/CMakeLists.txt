@@ -14,6 +14,15 @@ configure_file(
   @ONLY
 )
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/runtime/gcu/lib_fallback.h")
+  file(READ ${CMAKE_SOURCE_DIR}/runtime/gcu/lib_fallback.h LIB_FALLBACK_HEADER_CONTENT)
+  configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/acore_runtime_template.in
+    ${CMAKE_BINARY_DIR}/acore_runtime.inc
+    @ONLY
+  )
+endif()
+
 add_custom_target(
   gcu_deps ALL
   DEPENDS
@@ -26,6 +35,7 @@ set(GCU_TARGET_SOURCES
   topscc_target.cpp
   topscc_preprocess.cpp
   topscc_codegen.cpp
+  lower_libcall.cpp
   factor_target.cpp
   factor_codegen.cpp
   factor_codegen_types.cpp

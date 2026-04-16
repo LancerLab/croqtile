@@ -149,6 +149,9 @@ private:
 
   std::set<std::string> global_buffers; // global buffers
   bool emit_call = true;                // emit the call statement
+  bool has_acore_call = false;          // track acore:: library usage
+  bool has_lib_gemm_general = false;    // track general gemm fallback usage
+  bool has_lib_fallback = false;        // track non-gemm lib fallback usage
 
 private:
   void EmitFixedHostHead();
@@ -179,6 +182,9 @@ private:
   void BuildSiteAssertionMap();
   void EmitPreSiteAssertions(AST::Node& n);
   void EmitPostSiteAssertions(AST::Node& n);
+
+  void EmitLibCall(AST::Call& n, const std::string& func_name,
+                   std::ostringstream& os, const std::string& indent);
 
 private:
   void IncrHostIndent() { h_indent += "  "; }

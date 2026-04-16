@@ -1,0 +1,46 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_* parameterised activation builtins.
+
+__co__ void test_param_act(f32 [128] input) {
+  parallel p by 4 {
+    in_tile = dma.copy.async input.chunkat(p) => local;
+    wait in_tile;
+    local f32[in_tile.span] dst;
+
+    __lib_leaky_relu(dst, in_tile.data, |in_tile.span|, 0.01);
+    __lib_elu(dst, in_tile.data, |in_tile.span|, 1.0);
+    __lib_celu(dst, in_tile.data, |in_tile.span|, 1.0);
+    __lib_hard_shrink(dst, in_tile.data, |in_tile.span|, 0.5);
+    __lib_soft_shrink(dst, in_tile.data, |in_tile.span|, 0.5);
+    __lib_logit(dst, in_tile.data, |in_tile.span|, 0.000001);
+    __lib_threshold(dst, in_tile.data, |in_tile.span|, 0.1, 0.0);
+    __lib_hard_sigmoid(dst, in_tile.data, |in_tile.span|, 0.2, 0.5);
+    __lib_hard_tanh(dst, in_tile.data, |in_tile.span|, -1.0, 1.0);
+    __lib_clipped_relu(dst, in_tile.data, |in_tile.span|, 0.0, 6.0);
+  }
+}
+
+// ACORE: acore::leaky_relu(
+// ACORE: acore::elu(
+// ACORE: acore::celu(
+// ACORE: acore::hard_shrink(
+// ACORE: acore::soft_shrink(
+// ACORE: acore::logit(
+// ACORE: acore::threshold(
+// ACORE: acore::hard_sigmoid(
+// ACORE: acore::hard_tanh(
+// ACORE: acore::clipped_relu(
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_leaky_relu<float>(
+// FALLBACK: choreo::lib_elu<float>(
+// FALLBACK: choreo::lib_celu<float>(
+// FALLBACK: choreo::lib_hard_shrink<float>(
+// FALLBACK: choreo::lib_soft_shrink<float>(
+// FALLBACK: choreo::lib_logit<float>(
+// FALLBACK: choreo::lib_threshold<float>(
+// FALLBACK: choreo::lib_hard_sigmoid<float>(
+// FALLBACK: choreo::lib_hard_tanh<float>(
+// FALLBACK: choreo::lib_clipped_relu<float>(

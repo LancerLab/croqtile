@@ -1,0 +1,26 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_layer_norm builtin.
+
+__co__ void test_layer_norm(f32 [8192] input, f32 [64] weight,
+                            f32 [64] bias) {
+  parallel p by 4 {
+    in_tile = dma.copy.async input.chunkat(p) => local;
+    w_tile = dma.copy.async weight.chunkat(p) => local;
+    b_tile = dma.copy.async bias.chunkat(p) => local;
+    wait in_tile;
+    wait w_tile;
+    wait b_tile;
+    local f32[in_tile.span] dst;
+
+    __lib_layer_norm(dst, in_tile.data, w_tile.data, b_tile.data,
+                     32, 64, 0.00001);
+  }
+}
+
+// ACORE: acore::layer_norm(
+// ACORE-NOT: choreo::lib_layer_norm
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_layer_norm<float>(

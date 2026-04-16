@@ -459,6 +459,11 @@ requires_gdb=0
 requires_cudagdb=0
 expect_fail=
 expect_skip=
+req_features=()
+
+choreo_target=""
+choreo_arch=""
+declare -A FEATURE_CACHE=()
 
 max_jobs=1
 dry_run=0
@@ -668,6 +673,7 @@ prepare() {
   # Extract components
   local tgts=()
   local libs=()
+  req_features=()
   local token
   for token in $requires; do
     if [[ "$token" == TARGET-* ]]; then
@@ -680,6 +686,8 @@ prepare() {
       requires_gdb=1
     elif [[ "$token" == "CUDA-GDB" ]]; then
       requires_cudagdb=1
+    else
+      req_features+=("$(toupper "$token")")
     fi
   done
 
@@ -1105,6 +1113,29 @@ for _entry in "${files_array[@]}"; do
     if [[ $device_type == "none"  ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
       _all_skipped_targets=$(set_print REQ_TARGETS)
       echo "SKIP($(toupper "${_all_skipped_targets}")): ${file}"
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    fi
+  fi
+
+  # Skip when the test requires compiler features not supported by the target.
+  if [ ${#req_features[@]} -ne 0 ] && [ -n "$choreo_target" ]; then
+    _feat_key="${choreo_target}:${choreo_arch}"
+    if [[ -z "${FEATURE_CACHE["$_feat_key"]+x}" ]]; then
+      _feat_args=("-t" "$choreo_target" "--print-features")
+      [[ -n "$choreo_arch" ]] && _feat_args+=("-arch=$choreo_arch")
+      FEATURE_CACHE["$_feat_key"]="$(choreo "${_feat_args[@]}" 2>/dev/null || true)"
+    fi
+    _avail="${FEATURE_CACHE["$_feat_key"]}"
+    _feat_missing=""
+    for _rf in "${req_features[@]}"; do
+      if ! echo "$_avail" | grep -qxF "$_rf"; then
+        _feat_missing="$_rf"
+        break
+      fi
+    done
+    if [[ -n "$_feat_missing" ]]; then
+      echo "SKIP($_feat_missing): ${file}"
       num_skiped=$(($num_skiped + 1));
       continue;
     fi

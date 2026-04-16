@@ -45,6 +45,7 @@ public:
           {STR(ChoreoFeature::HDRPARSE), Description(ChoreoFeature::HDRPARSE)},
           {STR(ChoreoFeature::VECTORIZE),
            Description(ChoreoFeature::VECTORIZE)},
+          {STR(ChoreoFeature::LIBCALL), Description(ChoreoFeature::LIBCALL)},
       };
     else if (ArchNum(arch) >= 300)
       return {
@@ -55,6 +56,7 @@ public:
           {STR(ChoreoFeature::HDRPARSE), Description(ChoreoFeature::HDRPARSE)},
           {STR(ChoreoFeature::VECTORIZE),
            Description(ChoreoFeature::VECTORIZE)},
+          {STR(ChoreoFeature::LIBCALL), Description(ChoreoFeature::LIBCALL)},
       };
     return {
         {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},

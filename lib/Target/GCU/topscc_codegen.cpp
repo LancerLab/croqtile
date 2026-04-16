@@ -12,8 +12,14 @@
 #include "io.hpp"
 #include "operator_info.hpp"
 #include "target_utils.hpp"
+#include "lower_libcall.hpp"
 #include "topscc_header.inc"
 #include "types.hpp"
+
+#ifdef __CHOREO_GCU_ACORE_DIR__
+#include "acore_runtime.inc"
+#define __CHOREO_ACORE_RUNTIME_AVAILABLE__
+#endif
 
 #ifndef __CHOREO_TOPSCC_DIR__
   #error "missing macro definition of __CHOREO_TOPSCC_DIR__"
@@ -329,6 +335,17 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
 
+    // Auto-include acore_op.h when acore:: calls are detected
+#ifdef __CHOREO_GCU_ACORE_DIR__
+    if (has_acore_call && !code_segments.empty()) {
+      code_segments[0] += "#ifdef __ACORE_OP__\n"
+                          "#include <common/acore_op.h>\n"
+                          "#endif // __ACORE_OP__\n\n";
+    }
+#endif
+    if ((has_lib_gemm_general || has_lib_fallback) && !code_segments.empty())
+      code_segments[0] += "#include \"gcu/lib_fallback.h\"\n\n";
+
     // internal functionality: fatbin generation
     if (emit_fatbin) {
       if (!CompileWithScript("--gen-fatbin")) {
@@ -627,6 +644,7 @@ void TopsccCodeGen::EmitFixedHostHead() {
 using namespace choreo;
 
 )";
+
   code_segments.push_back(oss.str()); // reset the host code
 }
 
@@ -2296,6 +2314,10 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
   auto& os = (IsHost()) ? hs : ds;
   auto& indent = (IsHost()) ? h_indent : d_indent;
 
+  // Track acore:: library usage for auto-include
+  if (!n.IsBIF() && PrefixedWith(n.function->name, "acore::"))
+    has_acore_call = true;
+
   // generate the built-in functions
   if (n.IsBIF()) {
     const auto func_name = n.function->name;
@@ -2403,6 +2425,9 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
       os << ");\n";
       return true;
     } else if (n.IsArith()) {
+    } else if (n.IsLibCall()) {
+      EmitLibCall(n, func_name, os, indent);
+      return true;
     } else
       choreo_unreachable("the bif '" + n.function->name +
                          "' is not supported by this target.");
@@ -2860,6 +2885,8 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
   VST_DEBUG(dbgs() << "Device function prototype:\n" << oss.str() << "\n");
 }
 
+// EmitLibCall is defined in lower_libcall.cpp for maintainability.
+
 void TopsccCodeGen::EmitSource() {
   for (auto& code : code_segments) {
     if (EnableLineDirective())
@@ -2945,6 +2972,15 @@ fi
   // place the topscc header
   os << "cat <<'EOF' > " << build_path << "/private_target0_runtime.h\n";
   os << __topscc_header_as_string << "\nEOF\n";
+
+  // place the library fallback runtime header (unified)
+#ifdef __CHOREO_ACORE_RUNTIME_AVAILABLE__
+  {
+    os << "mkdir -p " << build_path << "/gcu\n";
+    os << "cat <<'EOF' > " << build_path << "/gcu/lib_fallback.h\n";
+    os << __lib_fallback_header_as_string << "\nEOF\n\n";
+  }
+#endif
 
   // place the target hack.
   // TODO: move all the target-specific to target runtime header
@@ -3047,6 +3083,8 @@ option_detect() {
   os << R"( --tops-device-lib=${GCU_ACORE_LIB})";
   os << R"( -I${GCU_ACORE_INCLUDE})";
   os << R"( -D__ACORE_OP__ -fPIC)";
+  if (has_acore_call || has_lib_gemm_general || has_lib_fallback)
+    os << " -I" << build_path;
 #endif
   if (CCtx().GetArch() == "gcu500") { // enable gcusim5
     os << R"( -Wl,--disable-new-dtags -rpath "${TOPSCC_LIB}")";

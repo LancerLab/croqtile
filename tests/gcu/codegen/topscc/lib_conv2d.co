@@ -1,0 +1,29 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_conv2d builtin.
+// __lib_conv2d(out, input, weight, bias,
+//              batch, hi, wi, ci, co, kh, kw,
+//              stride_h, stride_w, pad_h, pad_w)
+
+__co__ void test_conv2d(f32 [1024] input, f32 [1024] weight,
+                        f32 [64] bias) {
+  parallel p by 4 {
+    in_tile = dma.copy.async input.chunkat(p) => local;
+    w_tile = dma.copy.async weight.chunkat(p) => local;
+    b_tile = dma.copy.async bias.chunkat(p) => local;
+    wait in_tile;
+    wait w_tile;
+    wait b_tile;
+    local f32[256] out;
+
+    __lib_conv2d(out, in_tile.data, w_tile.data, b_tile.data,
+                 1, 8, 8, 3, 16, 3, 3, 1, 1, 1, 1);
+  }
+}
+
+// ACORE: acore::conv2d<
+// ACORE-NOT: choreo::lib_conv2d
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_conv2d<float>(

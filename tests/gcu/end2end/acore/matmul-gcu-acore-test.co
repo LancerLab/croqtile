@@ -1,0 +1,60 @@
+// REQUIRES: TARGET-GCU300 LIBCALL
+// XFAIL: *
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// __lib_gemm end-to-end test on GCU3.
+// XFAIL: acore::matmul hits toolchain relocation error (R_DTU_ADDR16_LO_ICALL).
+// Computes C[128, 128] = A[128, 32] * B[32, 128]
+
+__co__ f32 [128, 128] lib_matmul(f16 [128, 32] A, f16 [32, 128] B) {
+  f32[128, 128] output;
+
+  parallel p by 4 {
+    with tilings = {m_tile, k_tile, n_tile} in [128/32, 32/32, 128/128] {
+      foreach m_tile, n_tile {
+        local f32[32, 128] l1_out;
+        foreach k_tile {
+          lhs = dma.copy A.chunkat(m_tile, k_tile) => local;
+          rhs = dma.copy B.chunkat(k_tile, n_tile) => local;
+          __lib_gemm(l1_out, lhs.data, rhs.data, 32, 128);
+        }
+        dma.copy l1_out => output.chunkat(m_tile, n_tile);
+      }
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f16>(128, 32);
+  auto b = choreo::make_spandata<choreo::f16>(32, 128);
+  a.fill_random(-1, 1);
+  b.fill_random(-1, 1);
+
+  auto res = lib_matmul(a.view(), b.view());
+
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  bool passed = true;
+  for (size_t i = 0; i < 128 && passed; ++i)
+    for (size_t j = 0; j < 128 && passed; ++j) {
+      float expected = 0.0f;
+      for (size_t k = 0; k < 32; ++k)
+        expected += (float)a[i][k] * (float)b[k][j];
+      if (std::abs(res[i][j] - expected) > 1.0f) {
+        std::cerr << "Mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        passed = false;
+      }
+    }
+
+  if (passed)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << "Test Failed" << std::endl;
+}
+
+// CHECK: 128
+// CHECK-NEXT: 128
+// CHECK-NEXT: Test Passed

@@ -42,6 +42,7 @@ samples/
 
 # Internal runtime module
 runtime/catz/
+runtime/gcu/
 
 # Git metadata (managed separately per repo)
 .gitignore

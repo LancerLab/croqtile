@@ -51,6 +51,7 @@ private:
   std::string description;   // explanation of this option
   std::string option_desc;   // for describing the option, if needed
   bool requires_arg = false; // if it requires extra argument
+  bool was_set_ = false;     // true if Parse() was called for this option
 
 public:
   Option(OptionKind, const std::string&, const std::string&, const T&,
@@ -60,6 +61,7 @@ public:
   bool Parse(int argc, char** argv, int& currentArg) override;
 
   T GetValue() const { return value; }
+  bool WasExplicitlySet() const { return was_set_; }
 
   // sugar: conversion and assignment operations
   operator T() const { return value; }
@@ -303,6 +305,7 @@ inline Option<T>::~Option() {
 
 template <typename T>
 inline bool Option<T>::Parse(int argc, char** argv, int& currentArg) {
+  was_set_ = true;
   // be like: -o ab.o, requires an extra parameter
   if (requires_arg) {
     std::string arg = argv[currentArg];
@@ -344,6 +347,7 @@ inline bool Option<T>::Parse(int argc, char** argv, int& currentArg) {
 // Specialization for boolean type to handle "true" and "false" strings
 template <>
 inline bool Option<bool>::Parse(int argc, char** argv, int& currentArg) {
+  was_set_ = true;
   assert(currentArg < argc &&
          "current argument index exceeds the total count.");
   (void)argc;

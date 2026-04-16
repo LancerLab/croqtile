@@ -191,6 +191,7 @@ extern int yylex();
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
+%token <std::string> LIB_CALL
 %token <std::string> FRAG
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD
@@ -2396,6 +2397,11 @@ call_stmt
         $4->SetDelimiter(", ");
         $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $4,
                                   AST::Call::BIF | AST::Call::COMPTIME);
+      }
+    | LIB_CALL LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
+                                  AST::Call::BIF | AST::Call::LIBCALL);
       }
     ;
 

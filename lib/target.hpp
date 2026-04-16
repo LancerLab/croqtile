@@ -29,6 +29,7 @@ enum class ChoreoFeature {
   VECTORIZE,
   RSTM0,
   HDRPARSE,
+  LIBCALL,
 };
 
 inline static const std::string STR(ChoreoFeature cf) {
@@ -46,6 +47,7 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::VECTORIZE: return "vectorize";
   case ChoreoFeature::RSTM0: return "rstm0";
   case ChoreoFeature::HDRPARSE: return "hdrparse";
+  case ChoreoFeature::LIBCALL: return "libcall";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -70,6 +72,8 @@ inline static const std::string Description(ChoreoFeature cf) {
   case ChoreoFeature::RSTM0: return "Choreo Target Restricted Mode 0.";
   case ChoreoFeature::HDRPARSE:
     return "Parse C++ Header Files Included by Choreo Source.";
+  case ChoreoFeature::LIBCALL:
+    return "Target Library (__lib_*) Builtin Support.";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -181,6 +185,20 @@ public:
   }
 
   virtual bool EnforceVectorAlignment(const ArchId&) const { return false; }
+
+  // Library call support -- targets override to declare which __lib_* builtins
+  // they support and the expected argument counts for early sema validation.
+  // name is the full builtin name, e.g. "__lib_gemm".
+  virtual bool IsLibCallSupported(const std::string& /*name*/) const {
+    return false;
+  }
+  // Returns {min_args, max_args} for the given lib call.  {-1,-1} = unknown.
+  virtual std::pair<int, int>
+  LibCallArgRange(const std::string& /*name*/) const {
+    return {-1, -1};
+  }
+  // Whether this target enables target-library lowering by default.
+  virtual bool DefaultUseTargetLib() const { return false; }
 
   virtual bool PlanCodeGenStages(ASTPipeline&) const = 0;
 

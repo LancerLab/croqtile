@@ -1,0 +1,25 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_addmm builtin: out = alpha * (A @ B) + beta * bias
+
+__co__ void test_addmm(f32 [8192] A, f32 [32768] B, f32 [256] bias) {
+  parallel p by 4 {
+    a_tile = dma.copy.async A.chunkat(p) => local;
+    b_tile = dma.copy.async B.chunkat(p) => local;
+    bias_tile = dma.copy.async bias.chunkat(p) => local;
+    wait a_tile;
+    wait b_tile;
+    wait bias_tile;
+    local f32[4096] out;
+
+    __lib_addmm(out, bias_tile.data, a_tile.data, b_tile.data,
+                16, 128, 256, 1.0, 1.0);
+  }
+}
+
+// ACORE: acore::addmm<acore::MK_KN>(
+// ACORE-NOT: choreo::lib_addmm
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_addmm<float>(

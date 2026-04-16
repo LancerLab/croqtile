@@ -1,0 +1,66 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_* binary elementwise builtins.
+
+__co__ void test_binary(f32 [128] A, f32 [128] B) {
+  parallel p by 4 {
+    a_tile = dma.copy.async A.chunkat(p) => local;
+    b_tile = dma.copy.async B.chunkat(p) => local;
+    wait a_tile;
+    wait b_tile;
+    local f32[a_tile.span] dst;
+
+    __lib_add(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_sub(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_mul(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_div(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_max(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_min(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_pow(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_atan2(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_fmod(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_remainder(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_gt(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_ge(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_lt(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_le(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_eq(dst, a_tile.data, b_tile.data, |a_tile.span|);
+    __lib_ne(dst, a_tile.data, b_tile.data, |a_tile.span|);
+  }
+}
+
+// ACORE: acore::add(
+// ACORE: acore::sub(
+// ACORE: acore::mul(
+// ACORE: acore::div(
+// ACORE: acore::max(
+// ACORE: acore::min(
+// ACORE: acore::pow(
+// ACORE: acore::atan2(
+// ACORE: acore::fmod(
+// ACORE: acore::remainder(
+// ACORE: acore::gt(
+// ACORE: acore::ge(
+// ACORE: acore::lt(
+// ACORE: acore::le(
+// ACORE: acore::eq(
+// ACORE: acore::ne(
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_add<float>(
+// FALLBACK: choreo::lib_sub<float>(
+// FALLBACK: choreo::lib_mul<float>(
+// FALLBACK: choreo::lib_div<float>(
+// FALLBACK: choreo::lib_max<float>(
+// FALLBACK: choreo::lib_min<float>(
+// FALLBACK: choreo::lib_pow<float>(
+// FALLBACK: choreo::lib_atan2<float>(
+// FALLBACK: choreo::lib_fmod<float>(
+// FALLBACK: choreo::lib_remainder<float>(
+// FALLBACK: choreo::lib_gt<float>(
+// FALLBACK: choreo::lib_ge<float>(
+// FALLBACK: choreo::lib_lt<float>(
+// FALLBACK: choreo::lib_le<float>(
+// FALLBACK: choreo::lib_eq<float>(
+// FALLBACK: choreo::lib_ne<float>(

@@ -1,0 +1,57 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck %s
+
+// Test __lib_gemm with various M tile sizes that acore supports.
+
+// M=64, K=32, N=128 -- static-M acore path
+__co__ void gemm_m64(f16 [128, 32] A, f16 [32, 128] B) {
+  parallel p by 2 {
+    with tilings = {m_tile, k_tile, n_tile} in [128/64, 32/32, 128/128] {
+      foreach m_tile, n_tile {
+        local f16[64, 128] out;
+        foreach k_tile {
+          lhs = dma.copy A.chunkat(m_tile, k_tile) => local;
+          rhs = dma.copy B.chunkat(k_tile, n_tile) => local;
+          __lib_gemm(out, lhs.data, rhs.data, 32, 128);
+        }
+      }
+    }
+  }
+}
+// CHECK: acore::matmul<64, acore::MK_KN>
+
+// M=128, K=64, N=64 -- static-M acore path
+__co__ void gemm_m128(f16 [256, 64] A, f16 [64, 64] B) {
+  parallel p by 2 {
+    with tilings = {m_tile, k_tile, n_tile} in [256/128, 64/64, 64/64] {
+      foreach m_tile, n_tile {
+        local f16[128, 64] out;
+        foreach k_tile {
+          lhs = dma.copy A.chunkat(m_tile, k_tile) => local;
+          rhs = dma.copy B.chunkat(k_tile, n_tile) => local;
+          __lib_gemm(out, lhs.data, rhs.data, 64, 64);
+        }
+      }
+    }
+  }
+}
+// CHECK: acore::matmul<128, acore::MK_KN>
+
+// M=32 with bias -- acore path with bias_flag=1
+__co__ void gemm_m32_bias(f16 [128, 32] A, f16 [32, 128] B, f16 [128] bias) {
+  parallel p by 4 {
+    with tilings = {m_tile, k_tile, n_tile} in [128/32, 32/32, 128/128] {
+      foreach m_tile, n_tile {
+        local f16[32, 128] out;
+        local f16[128] lb;
+        foreach k_tile {
+          lhs = dma.copy A.chunkat(m_tile, k_tile) => local;
+          rhs = dma.copy B.chunkat(k_tile, n_tile) => local;
+          dma.copy bias => lb;
+          __lib_gemm(out, lhs.data, rhs.data, lb, 32, 128);
+        }
+      }
+    }
+  }
+}
+// CHECK: acore::matmul<32, acore::MK_KN>
+// CHECK: , 0, 1, 1, 0, 0)

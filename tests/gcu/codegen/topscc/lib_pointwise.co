@@ -1,0 +1,26 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_where and __lib_lerp builtins.
+
+__co__ void test_pointwise(f32 [128] A, f32 [128] B, f32 [128] C) {
+  parallel p by 4 {
+    a_tile = dma.copy.async A.chunkat(p) => local;
+    b_tile = dma.copy.async B.chunkat(p) => local;
+    c_tile = dma.copy.async C.chunkat(p) => local;
+    wait a_tile;
+    wait b_tile;
+    wait c_tile;
+    local f32[a_tile.span] dst;
+
+    __lib_where(dst, a_tile.data, b_tile.data, c_tile.data, |a_tile.span|);
+    __lib_lerp(dst, a_tile.data, b_tile.data, c_tile.data, |a_tile.span|);
+  }
+}
+
+// ACORE: acore::where(
+// ACORE: acore::lerp(
+
+// FALLBACK-NOT: acore::
+// FALLBACK: choreo::lib_where<float>(
+// FALLBACK: choreo::lib_lerp<float>(

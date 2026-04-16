@@ -3,6 +3,7 @@
 
 // This apply the GCU target specific check and information annotation
 
+#include "lower_libcall.hpp"
 #include "assess.hpp"
 #include "ast.hpp"
 #include "target_utils.hpp"
@@ -807,6 +808,31 @@ public:
                                 "` is not allowed.");
       }
     }
+
+    // Validate acore:: library calls
+    if (!n.IsBIF() && PrefixedWith(n.function->name, "acore::")) {
+      auto error_fn = [this](const auto& loc, const std::string& msg) {
+        Error1(loc, msg);
+      };
+      CheckAcoreCall(n, error_fn, CCtx().GetArch());
+    }
+
+    // Validate __lib_* calls through the target interface
+    if (n.IsLibCall()) {
+      auto error_fn = [this](const auto& loc, const std::string& msg) {
+        Error1(loc, msg);
+      };
+      auto warn_fn = [this](const auto& loc, const std::string& msg) {
+        Warning(loc, msg);
+      };
+      auto assess_fn = [this](auto expr, const std::string& msg,
+                              AST::Node& node) {
+        Assess(expr, msg, node);
+      };
+      ValidateLibCall(n, error_fn, warn_fn, assess_fn,
+                      CCtx().UseTargetLib());
+    }
+
     return true;
   }
 

@@ -1,0 +1,25 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=ACORE %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-target-lib=false %s -o - 2>&1 | FileCheck --check-prefix=FALLBACK %s
+
+// Test __lib_gemm with target-lib (GCU default on): lowers to acore::matmul
+// Test __lib_gemm with --use-target-lib=false: general runtime fallback
+
+__co__ void gemm_static_m(f16 [128, 32] A, f16 [32, 128] B) {
+  parallel p by 4 {
+    with tilings = {m_tile, k_tile, n_tile} in [128/32, 32/32, 128/128] {
+      foreach m_tile, n_tile {
+        local f16[32, 128] out;
+        foreach k_tile {
+          lhs = dma.copy A.chunkat(m_tile, k_tile) => local;
+          rhs = dma.copy B.chunkat(k_tile, n_tile) => local;
+          __lib_gemm(out, lhs.data, rhs.data, 32, 128);
+        }
+      }
+    }
+  }
+}
+
+// ACORE: acore::matmul<32, acore::MK_KN>
+// ACORE: __lib_gemm_ws__
+
+// FALLBACK: lib_gemm_general
