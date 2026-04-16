@@ -505,9 +505,13 @@ for commit in "${COMMITS[@]}"; do
   orig_date="$(git log -1 --format='%ai' "$commit")"
   orig_msg="$(git log -1 --format=%B "$commit")"
   clean_msg="$(echo "$orig_msg" | sed '/^Made-with:/d; /^Generated-by:/d')"
+  # Append provenance so subsequent --catchup runs can detect this commit
+  # was already pulled (build_pulled_sha_set looks for this pattern).
+  full_msg="${clean_msg}
+(cherry picked from $commit on $OSS_BRANCH)"
   GIT_AUTHOR_DATE="$orig_date" git commit \
   --author="$orig_author" \
-  -m "$clean_msg"
+  -m "$full_msg"
   new_sha="$(git rev-parse --short HEAD)"
   echo "OK $short -> $new_sha (author: $orig_author)"
   PULLED=$((PULLED+1))

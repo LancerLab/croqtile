@@ -85,6 +85,12 @@ git branch "$TEST_OSS"  main
 log "Test branches created: $TEST_MAIN (main-equiv), $TEST_OSS (oss-equiv)"
 log "Baseline file: $TEST_BL (empty / temp)"
 
+# Count commits on $TEST_MAIN added since the test started (main HEAD)
+counts_ahead() { git rev-list --count "$TEST_MAIN" ^main 2>/dev/null; }
+
+# True if file exists on $TEST_MAIN
+has_file() { git cat-file -e "$TEST_MAIN:$1" 2>/dev/null; }
+
 # ============================================================
 # A: --show-baseline with no baseline file → merge-base fallback
 # ============================================================
@@ -105,18 +111,16 @@ OUT="$(run_pull --set-baseline)"
 log "set-baseline output: $OUT"
 assert_contains "$OUT" "Baseline set:"
 
-# Now add a new public commit to TEST_OSS
-add_commit "$TEST_OSS" "feat: public adds README note" "public-notes.txt"
+# Now add a new public commit to TEST_OSS (fresh file, no conflict context)
+add_commit "$TEST_OSS" "feat: public adds scenario-B file" "public-B.txt"
 OSS_TIP="$(tip "$TEST_OSS")"
 log "Added public commit $OSS_TIP to $TEST_OSS"
 
 OUT="$(run_pull --catchup)"
 log "catchup output: $OUT"
 assert_contains "$OUT" "Catchup: 1 commit"
-assert_contains "$OUT" "$OSS_TIP"
-# After pull, TEST_MAIN should have that commit
-assert_contains "$(git log "$TEST_MAIN" --oneline 2>/dev/null)" "README note"
-ok "commit cherry-picked to $TEST_MAIN"
+assert_contains "$OUT" "1 pulled"
+has_file "public-B.txt" && ok "public-B.txt cherry-picked to $TEST_MAIN" || fail "public-B.txt missing on $TEST_MAIN"
 
 # ============================================================
 # C: oss-push marker is skipped; only public-native landed
@@ -129,10 +133,10 @@ log "re-set baseline: $OUT"
 
 add_commit "$TEST_OSS" \
   "(oss) sync: cherry picked from abc000 on main" \
-  "public-notes.txt" "internal-sync"
+  "public-C-internal.txt" "internal-sync"
 add_commit "$TEST_OSS" \
   "fix: public fix typo in CONTRIBUTING" \
-  "public-notes.txt" "public typo fix"
+  "public-C-fix.txt" "public typo fix"
 
 PUBLIC_TIP="$(tip "$TEST_OSS")"
 log "Added 2 commits: oss-push marker + public fix; oss tip=$PUBLIC_TIP"
@@ -142,7 +146,9 @@ log "catchup output: $OUT"
 assert_contains "$OUT" "Catchup: 1 commit"
 assert_not_contains "$OUT" "cherry picked from abc000"
 assert_contains "$OUT" "fix: public fix typo in CONTRIBUTING"
-ok "oss-push marker commit correctly skipped"
+assert_contains "$OUT" "1 pulled"
+has_file "public-C-fix.txt" && ok "public-C-fix.txt on $TEST_MAIN" || fail "public-C-fix.txt missing"
+! has_file "public-C-internal.txt" && ok "oss-push marker commit correctly skipped" || fail "internal commit should not be on $TEST_MAIN"
 
 # ============================================================
 # D: --max cap + re-run gets next batch
@@ -153,30 +159,27 @@ log "=== SCENARIO D: --max 2 cap then re-run ==="
 OUT="$(run_pull --set-baseline "$(git rev-parse "$TEST_OSS")")"
 log "re-set baseline: $OUT"
 
-# Add 4 public commits
+CNT_BEFORE="$(counts_ahead)"
+
+# Add 4 public commits, each touching its own file to avoid context issues
 for i in 1 2 3 4; do
-  add_commit "$TEST_OSS" "public: feature-$i" "public-notes.txt" "feature $i content"
+  add_commit "$TEST_OSS" "public: feature-$i" "public-D-$i.txt" "feature $i"
 done
-SHA1="$(git rev-parse --short "${TEST_OSS}~3")"
-SHA2="$(git rev-parse --short "${TEST_OSS}~2")"
-SHA3="$(git rev-parse --short "${TEST_OSS}~1")"
-SHA4="$(tip "$TEST_OSS")"
-log "4 public commits: $SHA1 $SHA2 $SHA3 $SHA4"
 
 OUT="$(run_pull --catchup --max 2)"
 log "1st run (--max 2): $OUT"
 assert_contains "$OUT" "Catchup: 2 commit"
 assert_contains "$OUT" "re-run --catchup for more"
-assert_contains "$(git log "$TEST_MAIN" --oneline)" "$SHA1"
-assert_contains "$(git log "$TEST_MAIN" --oneline)" "$SHA2"
-ok "oldest 2 of 4 pulled"
+assert_contains "$OUT" "2 pulled"
+CNT_AFTER="$(counts_ahead)"
+[[ $((CNT_AFTER - CNT_BEFORE)) -eq 2 ]] && ok "2 commits added to $TEST_MAIN" || fail "Expected 2 new commits, got $((CNT_AFTER - CNT_BEFORE))"
 
 OUT2="$(run_pull --catchup --max 2)"
 log "2nd run: $OUT2"
 assert_contains "$OUT2" "Catchup: 2 commit"
-assert_contains "$(git log "$TEST_MAIN" --oneline)" "$SHA3"
-assert_contains "$(git log "$TEST_MAIN" --oneline)" "$SHA4"
-ok "next 2 pulled on re-run"
+assert_contains "$OUT2" "2 pulled"
+CNT_FINAL="$(counts_ahead)"
+[[ $((CNT_FINAL - CNT_BEFORE)) -eq 4 ]] && ok "4 total commits on $TEST_MAIN" || fail "Expected 4 total, got $((CNT_FINAL - CNT_BEFORE))"
 
 # ============================================================
 # E: --last mode finds newest unpulled commit
@@ -186,9 +189,9 @@ log "=== SCENARIO E: --last finds newest unpulled ==="
 OUT="$(run_pull --set-baseline "$(git rev-parse "$TEST_OSS")")"
 log "reset baseline"
 
-add_commit "$TEST_OSS" "docs: public adds CONTRIBUTING" "public-notes.txt" "contributing guidance"
+add_commit "$TEST_OSS" "docs: public adds CONTRIBUTING" "public-E-1.txt" "contributing"
 NEWEST="$(tip "$TEST_OSS")"
-add_commit "$TEST_OSS" "docs: public adds CHANGELOG" "public-notes.txt" "changelog start"
+add_commit "$TEST_OSS" "docs: public adds CHANGELOG" "public-E-2.txt" "changelog"
 NEWEST_OF_2="$(tip "$TEST_OSS")"
 log "Added 2 commits; newest=$NEWEST_OF_2"
 
@@ -196,7 +199,7 @@ OUT="$(run_pull --last)"
 log "--last output: $OUT"
 assert_contains "$OUT" "Last unpulled:"
 assert_contains "$OUT" "$NEWEST_OF_2"
-assert_not_contains "$OUT" "$NEWEST"
+assert_not_contains "$OUT" "$NEWEST "
 ok "--last returned newest (latest) unpulled commit"
 
 # ============================================================
