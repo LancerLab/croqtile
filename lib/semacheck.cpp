@@ -1,4 +1,5 @@
 #include "semacheck.hpp"
+#include "interval.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -142,6 +143,56 @@ ExprBounds InferExprBounds(SemaChecker* sc, const ValueItem& expr) {
   }
 
   return {};
+}
+
+// Build an interval constraint environment from BoundedType information
+// and scope predicates, then evaluate whether a predicate is provably
+// true or false using interval analysis.
+std::optional<bool> TryProveWithIntervals(SemaChecker* sc,
+                                          const ValueItem& pred,
+                                          const ValueItem& scope_pred) {
+  if (!IsValidValueItem(pred)) return std::nullopt;
+
+  auto symbols = GetSymbols(pred);
+  if (symbols.empty()) return std::nullopt;
+
+  sbe::ConstraintEnv env;
+
+  for (auto& sym_vi : symbols) {
+    auto sym_name = VISym(sym_vi);
+    if (!sym_name.has_value()) continue;
+
+    auto scoped = CanonicalScopedSymbol(*sym_name);
+    if (!PrefixedWith(scoped, "::")) continue;
+
+    // Start with the type-declared bounds.
+    sbe::IntervalSet iv = sbe::IntervalSet::MakeUniverse();
+    auto ty = sc->GetScopedSymbolType(scoped);
+    if (auto bit = dyn_cast<BoundedIntegerType>(ty);
+        bit && bit->HasValidBound()) {
+      auto lb = VIInt(bit->GetLowerBound());
+      auto ub = VIInt(bit->GetUpperBound());
+      if (lb.has_value() && ub.has_value())
+        iv = sbe::IntervalSet(sbe::Interval::HalfOpen(*lb, *ub));
+    } else if (auto bitt = dyn_cast<BoundedITupleType>(ty);
+               bitt && bitt->HasValidBound() && bitt->Dims() == 1) {
+      auto lb = VIInt(bitt->GetLowerBound(0));
+      auto ub = VIInt(bitt->GetUpperBound(0));
+      if (lb.has_value() && ub.has_value())
+        iv = sbe::IntervalSet(sbe::Interval::HalfOpen(*lb, *ub));
+    }
+
+    // Narrow by scope predicates.
+    if (IsValidValueItem(scope_pred)) {
+      auto scope_iv = sbe::ProjectConstraint(scope_pred, *sym_name, env);
+      iv = Intersect(iv, scope_iv);
+    }
+
+    env[*sym_name] = iv;
+  }
+
+  if (env.empty()) return std::nullopt;
+  return sbe::EvalPredInterval(pred, env);
 }
 
 } // namespace
@@ -1603,7 +1654,15 @@ void SemaChecker::CreateAssessment(const ValueItem& pred,
   if (IsValidValueItem(active_guard) && aty == AssessType::ENTRY)
     aty = AssessType::HOIST_SITE;
 
-  FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, pred, message, uty,
-                                        aty, l, n.get(), emit_node,
-                                        active_guard);
+  // Try to prove the predicate using interval analysis on variable ranges
+  // narrowed by both BoundedType declarations and active scope predicates.
+  auto effective_pred = pred;
+  if (!VIBool(pred) && IsValidValueItem(active_guard)) {
+    auto proven = TryProveWithIntervals(this, pred, active_guard);
+    if (proven.has_value()) effective_pred = sbe::bl(*proven);
+  }
+
+  FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, effective_pred,
+                                        message, uty, aty, l, n.get(),
+                                        emit_node, active_guard);
 }
