@@ -34,6 +34,7 @@ Usage: oss-pull.sh [options] <commit> [<commit>...]
      oss-pull.sh [options] --range <from>..<to>
      oss-pull.sh [options] --last
      oss-pull.sh [options] --catchup
+     oss-pull.sh --set-baseline [<sha>]
 
 Cherry-pick commits from the oss/ branch back to main, with violation
 scanning. Halts on any issue that could break the private repo.
@@ -45,10 +46,17 @@ Options:
   -b <branch>   Source branch (default: oss/main)
   -t <branch>   Target branch (default: main)
   --last        Pull the most recent oss/main commit not yet on target
-  --catchup     Pull ALL unpulled oss/main commits to target (oldest first)
+  --catchup     Pull unpulled oss/main commits to target (oldest first)
+  --max N       Max commits per --catchup run (default: 5)
   --scan-only   Scan commits but do not cherry-pick (report only)
   --force       Apply even if violations are found (use with caution)
   --range <r>   Expand a revision range via git rev-list --reverse
+  --set-baseline [sha]
+                Record sha (default: oss/main HEAD) as the oldest commit
+                --catchup/--last will consider. Commits before this are
+                treated as already synced. Stored in oss-pull-baseline.txt.
+  --show-baseline
+                Show current baseline and exit.
   -n            Dry run: scan only, do not apply
   -h            Show help
 
@@ -67,28 +75,39 @@ EOF
 COMMITS=()
 PULL_LAST=0
 PULL_CATCHUP=0
+SET_BASELINE=0
+SHOW_BASELINE=0
 DRY_RUN=0
+MAX_CATCHUP=5     # max commits per --catchup run
+SCAN_WINDOW=100   # max oss/main commits to inspect
+BASELINE_FILE="$SCRIPT_DIR/oss-pull-baseline.txt"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  -b)          OSS_BRANCH="$2"; shift 2 ;;
-  -t)          TARGET_BRANCH="$2"; shift 2 ;;
-  --last)      PULL_LAST=1; shift ;;
-  --catchup)   PULL_CATCHUP=1; shift ;;
-  --scan-only) SCAN_ONLY=1; shift ;;
-  --force)     FORCE=1; shift ;;
-  -n)          DRY_RUN=1; SCAN_ONLY=1; shift ;;
+  -b)              OSS_BRANCH="$2"; shift 2 ;;
+  -t)              TARGET_BRANCH="$2"; shift 2 ;;
+  --last)          PULL_LAST=1; shift ;;
+  --catchup)       PULL_CATCHUP=1; shift ;;
+  --max)           MAX_CATCHUP="$2"; shift 2 ;;
+  --scan-only)     SCAN_ONLY=1; shift ;;
+  --force)         FORCE=1; shift ;;
+  --set-baseline)  SET_BASELINE=1
+                   [[ $# -gt 1 && "$2" != --* ]] && { COMMITS+=("$2"); shift; }
+                   shift ;;
+  --show-baseline) SHOW_BASELINE=1; shift ;;
+  -n)              DRY_RUN=1; SCAN_ONLY=1; shift ;;
   --range)
     mapfile -t range_commits < <(git -C "$REPO_ROOT" rev-list --reverse "$2")
     COMMITS+=("${range_commits[@]}")
     shift 2 ;;
-  -h)          usage; exit 0 ;;
-  -*)          echo "Error: unknown option $1" >&2; usage; exit 2 ;;
-  *)           COMMITS+=("$1"); shift ;;
+  -h)              usage; exit 0 ;;
+  -*)              echo "Error: unknown option $1" >&2; usage; exit 2 ;;
+  *)               COMMITS+=("$1"); shift ;;
   esac
 done
 
-if [[ $PULL_LAST -eq 0 && $PULL_CATCHUP -eq 0 && ${#COMMITS[@]} -eq 0 ]]; then
-  echo "Error: no commits specified (or use --last)" >&2
+if [[ $PULL_LAST -eq 0 && $PULL_CATCHUP -eq 0 && $SET_BASELINE -eq 0 && \
+      $SHOW_BASELINE -eq 0 && ${#COMMITS[@]} -eq 0 ]]; then
+  echo "Error: no commits specified (or use --last / --set-baseline)" >&2
   usage
   exit 2
 fi
@@ -133,130 +152,73 @@ ensure_oss_branch() {
 
 ensure_oss_branch
 
-# -------- --last mode: find the newest unpulled oss/main commit --------
+# -------- --set-baseline / --show-baseline --------
 
-if [[ $PULL_LAST -eq 1 ]]; then
-  # Build set of oss/main SHAs already cherry-picked to main
-  # (detected via cherry-pick trailers in main's commit messages).
-  declare -A PULLED_SHAS=()
-  while IFS= read -r trailer_sha; do
-  [[ -z "$trailer_sha" ]] && continue
-  full="$(git rev-parse --verify "$trailer_sha^{commit}" 2>/dev/null || true)"
-  [[ -n "$full" ]] && PULLED_SHAS["$full"]=1
-  PULLED_SHAS["$trailer_sha"]=1
-  done < <(git log "$TARGET_BRANCH" --format=%B 2>/dev/null \
-       | grep -oP '(?<=cherry picked from )\w+' || true)
-
-  # Stash working tree so trial cherry-picks don't clobber local changes
-  stash_needed=0
-  if ! git diff --quiet HEAD 2>/dev/null || ! git diff --cached --quiet HEAD 2>/dev/null; then
-  git stash push -q -m "oss-pull-last: save working tree"
-  stash_needed=1
-  fi
-
-  # Walk oss/main from newest to oldest.  Skip:
-  #   - commits that are cherry-picks FROM main (oss-push generated)
-  #   - commits already pulled to main (by trailer)
-  #   - commits whose content is already reflected on main (no net diff)
-  found_last=""
-  while IFS= read -r oss_sha; do
-  # Skip oss-push-generated cherry-picks (trailer: "on main")
-  if git log -1 --format=%B "$oss_sha" 2>/dev/null \
-     | grep -qP 'cherry picked from \w+ on main'; then
-    continue
-  fi
-  # Skip if already pulled
-  [[ -n "${PULLED_SHAS[$oss_sha]:-}" ]] && continue
-  # Skip if content already reflected (trial cherry-pick produces no diff)
-  if git cherry-pick --no-commit "$oss_sha" 2>/dev/null; then
-    if git diff --cached --quiet HEAD 2>/dev/null; then
-    git reset --hard HEAD >/dev/null 2>&1
-    continue
+# Determine the active pull baseline (exclusive lower bound for rev-list).
+# Resolution order:
+#   1. oss-pull-baseline.txt in SCRIPT_DIR (committed, shared among devs)
+#   2. merge-base(TARGET_BRANCH, OSS_BRANCH) -- the natural divergence point
+#   3. empty string -- walk entire history (fallback)
+load_pull_baseline() {
+  local stored=""
+  if [[ -f "$BASELINE_FILE" ]]; then
+  stored="$(tr -d '[:space:]' < "$BASELINE_FILE" 2>/dev/null || true)"
+  if [[ -n "$stored" ]]; then
+    if git rev-parse --verify "$stored^{commit}" >/dev/null 2>&1; then
+    echo "$stored"; return
+    else
+    echo "Warning: baseline SHA $stored not found in repo, ignoring" >&2
     fi
-    git reset --hard HEAD >/dev/null 2>&1
+  fi
+  fi
+  # Fallback: merge-base
+  local mb
+  mb="$(git merge-base "$TARGET_BRANCH" "$OSS_BRANCH" 2>/dev/null || true)"
+  echo "${mb:-}"
+}
+
+if [[ $SHOW_BASELINE -eq 1 ]]; then
+  bl="$(load_pull_baseline)"
+  if [[ -z "$bl" ]]; then
+  echo "No baseline set. --catchup walks entire oss/main history."
   else
-    git cherry-pick --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
+  short_bl="$(git rev-parse --short "$bl" 2>/dev/null || echo "$bl")"
+  msg_bl="$(git log -1 --format='%s' "$bl" 2>/dev/null | head -c 60 || true)"
+  echo "Baseline: $short_bl $msg_bl"
+  [[ -f "$BASELINE_FILE" ]] && echo "(from $BASELINE_FILE)" || echo "(from merge-base fallback)"
   fi
-  found_last="$oss_sha"
-  break
-  done < <(git rev-list "$OSS_BRANCH")
-
-  # Restore working tree
-  if [[ $stash_needed -eq 1 ]]; then
-  git stash pop -q 2>/dev/null || true
-  fi
-
-  if [[ -z "$found_last" ]]; then
-  echo "main is fully caught up with $OSS_BRANCH. Nothing to pull."
   exit 0
-  fi
-
-  short="$(git rev-parse --short "$found_last")"
-  msg="$(git log -1 --format='%s' "$found_last" | head -c 60)"
-  echo "Last unpulled commit: $short $msg"
-  echo ""
-  COMMITS+=("$found_last")
 fi
 
-# -------- --catchup mode: find ALL unpulled oss/main commits --------
-
-if [[ $PULL_CATCHUP -eq 1 ]]; then
-  declare -A PULLED_SHAS=()
-  while IFS= read -r trailer_sha; do
-  [[ -z "$trailer_sha" ]] && continue
-  full="$(git rev-parse --verify "$trailer_sha^{commit}" 2>/dev/null || true)"
-  [[ -n "$full" ]] && PULLED_SHAS["$full"]=1
-  PULLED_SHAS["$trailer_sha"]=1
-  done < <(git log "$TARGET_BRANCH" --format=%B 2>/dev/null \
-       | grep -oP '(?<=cherry picked from )\w+' || true)
-
-  stash_needed=0
-  if ! git diff --quiet HEAD 2>/dev/null || ! git diff --cached --quiet HEAD 2>/dev/null; then
-  git stash push -q -m "oss-pull-catchup: save working tree"
-  stash_needed=1
-  fi
-
-  found_all=()
-  while IFS= read -r oss_sha; do
-  if git log -1 --format=%B "$oss_sha" 2>/dev/null \
-     | grep -qP 'cherry picked from \w+ on main'; then
-    continue
-  fi
-  [[ -n "${PULLED_SHAS[$oss_sha]:-}" ]] && continue
-  if git cherry-pick --no-commit "$oss_sha" 2>/dev/null; then
-    if git diff --cached --quiet HEAD 2>/dev/null; then
-    git reset --hard HEAD >/dev/null 2>&1
-    continue
-    fi
-    git reset --hard HEAD >/dev/null 2>&1
+if [[ $SET_BASELINE -eq 1 ]]; then
+  if [[ ${#COMMITS[@]} -gt 0 ]]; then
+  target_sha="$(git rev-parse --verify "${COMMITS[0]}^{commit}" 2>/dev/null)" || {
+    echo "Error: cannot resolve '${COMMITS[0]}'" >&2; exit 1; }
   else
-    git cherry-pick --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
+  target_sha="$(git rev-parse "$OSS_BRANCH")"
   fi
-  found_all+=("$oss_sha")
-  done < <(git rev-list "$OSS_BRANCH")
-
-  if [[ $stash_needed -eq 1 ]]; then
-  git stash pop -q 2>/dev/null || true
-  fi
-
-  if [[ ${#found_all[@]} -eq 0 ]]; then
-  echo "main is fully caught up with $OSS_BRANCH. Nothing to pull."
+  echo "$target_sha" > "$BASELINE_FILE"
+  short_t="$(git rev-parse --short "$target_sha")"
+  msg_t="$(git log -1 --format='%s' "$target_sha" | head -c 60)"
+  echo "Baseline set: $short_t $msg_t"
+  echo "  (stored in $BASELINE_FILE)"
+  echo "  --catchup/--last will only consider commits AFTER this point."
   exit 0
-  fi
-
-  # Reverse to oldest-first for correct cherry-pick ordering
-  for ((i=${#found_all[@]}-1; i>=0; i--)); do
-  COMMITS+=("${found_all[$i]}")
-  done
-
-  echo "Catchup: ${#COMMITS[@]} unpulled commit(s) from $OSS_BRANCH (oldest first)."
-  for c in "${COMMITS[@]}"; do
-  echo "  $(git rev-parse --short "$c") $(git log -1 --format='%s' "$c" | head -c 60)"
-  done
-  echo ""
 fi
 
-# -------- load exclude patterns for private-path detection --------
+# -------- --last mode / --catchup: shared baseline --------
+
+# Load baseline and build shared helpers used by both modes
+PULL_BASELINE="$(load_pull_baseline)"
+if [[ -n "$PULL_BASELINE" ]]; then
+  bl_short="$(git rev-parse --short "$PULL_BASELINE" 2>/dev/null || echo "${PULL_BASELINE:0:8}")"
+  REV_RANGE="${PULL_BASELINE}..${OSS_BRANCH}"
+else
+  bl_short="(none)"
+  REV_RANGE="${OSS_BRANCH}"
+fi
+
+# -------- exclude/conflict pattern loading --------
 
 PRIVATE_PREFIXES=()
 PRIVATE_EXACT=()
@@ -287,7 +249,7 @@ if [[ -f "$CONFLICT_FILE" ]]; then
   elif [[ "$pat" != *'*'* && "$pat" != *'?'* ]]; then
     CONFLICT_EXACT+=("$pat")
   fi
-  done < "$EXCLUDE_FILE"
+  done < "$CONFLICT_FILE"
 fi
 
 is_private() {
@@ -311,6 +273,120 @@ is_conflict_file() {
   done
   return 1
 }
+
+# Populate PULLED_SHAS with oss SHAs seen in cherry-pick trailers of main.
+build_pulled_sha_set() {
+  while IFS= read -r trailer_sha; do
+  [[ -z "$trailer_sha" ]] && continue
+  local full
+  full="$(git rev-parse --verify "$trailer_sha^{commit}" 2>/dev/null || true)"
+  [[ -n "$full" ]] && PULLED_SHAS["$full"]=1
+  PULLED_SHAS["$trailer_sha"]=1
+  done < <(git log "$TARGET_BRANCH" --max-count=200 --format=%B 2>/dev/null \
+           | grep -oP '(?<=cherry picked from )\w+' || true)
+}
+
+# Set global pub_files to public files touched by commit $1.
+get_public_files() {
+  local sha="$1" f
+  pub_files=()
+  while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  is_private "$f" && continue
+  is_conflict_file "$f" && continue
+  pub_files+=("$f")
+  done < <(git diff-tree --no-commit-id -r --name-only --diff-filter=d "$sha" 2>/dev/null)
+}
+
+# -------- --last mode: find newest unpulled oss/main commit --------
+
+if [[ $PULL_LAST -eq 1 ]]; then
+  declare -A PULLED_SHAS=()
+  build_pulled_sha_set
+
+  [[ -n "$PULL_BASELINE" ]] && echo "Baseline: $bl_short (commits after this are considered)"
+  found_last=""
+  scan_count=0
+  while IFS= read -r oss_sha; do
+  [[ $scan_count -ge $SCAN_WINDOW ]] && break
+  scan_count=$((scan_count + 1))
+  if git log -1 --format=%B "$oss_sha" 2>/dev/null \
+     | grep -qP 'cherry picked from \w+ on main'; then
+    continue
+  fi
+  [[ -n "${PULLED_SHAS[$oss_sha]:-}" ]] && continue
+  get_public_files "$oss_sha"
+  [[ ${#pub_files[@]} -eq 0 ]] && continue
+  git diff --quiet HEAD "$OSS_BRANCH" -- "${pub_files[@]}" 2>/dev/null && continue
+  found_last="$oss_sha"
+  break
+  done < <(git rev-list "$REV_RANGE")
+
+  if [[ -z "$found_last" ]]; then
+  echo "main is fully caught up with $OSS_BRANCH. Nothing to pull."
+  exit 0
+  fi
+  short="$(git rev-parse --short "$found_last")"
+  msg="$(git log -1 --format='%s' "$found_last" | head -c 60)"
+  echo "Last unpulled: $short $msg"
+  echo ""
+  COMMITS+=("$found_last")
+fi
+
+# -------- --catchup mode: find unpulled commits oldest-first (max N) --------
+#
+# Skips a commit if ANY of:
+#   1. Message has oss-push marker  (main-to-oss, never pull back)
+#   2. SHA in recent cherry-pick trailers on main  (already pulled)
+#   3. No public files (all private/excluded)
+#   4. All touched public files identical on main and oss/main
+
+if [[ $PULL_CATCHUP -eq 1 ]]; then
+  declare -A PULLED_SHAS=()
+  build_pulled_sha_set
+
+  [[ -n "$PULL_BASELINE" ]] && echo "Baseline: $bl_short (scanning commits after this)"
+
+  found_all=()
+  scan_count=0
+  while IFS= read -r oss_sha; do
+  [[ $scan_count -ge $SCAN_WINDOW ]] && break
+  scan_count=$((scan_count + 1))
+  if git log -1 --format=%B "$oss_sha" 2>/dev/null \
+     | grep -qP 'cherry picked from \w+ on main'; then
+    continue
+  fi
+  [[ -n "${PULLED_SHAS[$oss_sha]:-}" ]] && continue
+  get_public_files "$oss_sha"
+  [[ ${#pub_files[@]} -eq 0 ]] && continue
+  git diff --quiet HEAD "$OSS_BRANCH" -- "${pub_files[@]}" 2>/dev/null && continue
+  found_all+=("$oss_sha")
+  done < <(git rev-list "$REV_RANGE")
+
+  if [[ ${#found_all[@]} -eq 0 ]]; then
+  echo "main is fully caught up with $OSS_BRANCH. Nothing to pull."
+  exit 0
+  fi
+
+  # Reverse to oldest-first; cap at MAX_CATCHUP
+  reversed=()
+  for ((i=${#found_all[@]}-1; i>=0; i--)); do
+  reversed+=("${found_all[$i]}")
+  done
+  for ((i=0; i<${#reversed[@]} && i<MAX_CATCHUP; i++)); do
+  COMMITS+=("${reversed[$i]}")
+  done
+
+  total_found="${#found_all[@]}"
+  capped_note=""
+  [[ $total_found -gt $MAX_CATCHUP ]] && \
+  capped_note=" (showing oldest $MAX_CATCHUP of $total_found; re-run --catchup for more)"
+  echo "Catchup: ${#COMMITS[@]} commit(s) from $OSS_BRANCH (oldest first)${capped_note}."
+  for c in "${COMMITS[@]}"; do
+  echo "  $(git rev-parse --short "$c") $(git log -1 --format='%s' "$c" | head -c 60)"
+  done
+  echo ""
+fi
 
 # -------- pre-scan: delegate to oss-pull-scan.sh --------
 PULL_SCAN_CMD="$SCRIPT_DIR/oss-pull-scan.sh"

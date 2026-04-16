@@ -232,7 +232,7 @@ stage_oss_tools() {
   for f in oss-push.sh oss-pull.sh oss-scan.sh oss-pull-scan.sh; do
     [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$TOOL_TMPDIR/" && chmod +x "$TOOL_TMPDIR/$f"
   done
-  for f in os_kw.txt oss_exclude_paths.txt; do
+  for f in os_kw.txt oss_exclude_paths.txt oss-pull-baseline.txt; do
     [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$TOOL_TMPDIR/"
   done
 }
@@ -438,7 +438,14 @@ phase2_pull_to_main() {
   local pre_sha
   pre_sha="$(lgit rev-parse HEAD)"
 
-  local pull_args=(-b "$OSS_BRANCH" -t "$MAIN_BRANCH" --catchup)
+  # Auto-init baseline on first sync (skips all pre-existing oss/main history)
+  local baseline_file="$SCRIPT_DIR/oss-pull-baseline.txt"
+  if [[ ! -f "$baseline_file" ]]; then
+    log "No pull baseline found -- setting baseline to current oss/main HEAD..."
+    bash "$oss_pull" --set-baseline 2>&1 | while IFS= read -r line; do log "  $line"; done || true
+  fi
+
+  local pull_args=(-b "$OSS_BRANCH" -t "$MAIN_BRANCH" --catchup --max 5)
   [[ $DRY_RUN -eq 1 ]] && pull_args+=(-n)
 
   local output rc=0
