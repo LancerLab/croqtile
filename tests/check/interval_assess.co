@@ -1,0 +1,83 @@
+// RUN: choreo -es --show-assess %s -o /dev/null 2>&1 | FileCheck %s
+//
+// Interval analysis: scope predicates narrow bounded-variable ranges so that
+// array-bounds checks become static-true instead of runtime assertions.
+//
+// Case 1: parallel p by 5, if (p < 4), data[p] with data size 4.
+//   p in [0, 5) narrowed to [0, 4) inside the if.
+//   Both p >= 0 and p < 4 are provably true.
+//
+// Case 2: parallel p by 8, no if, buf.at(p) with buf size 8.
+//   p in [0, 8), buf size 8.  The existing InferExprBounds path proves
+//   the upper bound check (inclusive_ub=7 < 8) statically.
+
+__co__ void interval_basic(f32 [8] a) {
+  parallel p by 5 {
+    shared s32 [4] data;
+    if (p < 4) {
+      x = data.at(p);
+    }
+  }
+}
+
+// CHECK: [assertions] function: interval_basic  (2 assessed:  2 static-true,  0 static-false,  0 runtime)
+// CHECK: [0] static-true
+// CHECK:      message : The 1st index `p`{{.*}}greater than or equal to 0
+// CHECK: [1] static-true
+// CHECK:      message : The 1st index `p`{{.*}}less than 4
+
+__co__ void interval_type_only() {
+  parallel p by 8 {
+    shared s32 [8] buf;
+    x = buf.at(p);
+  }
+}
+
+// CHECK: [assertions] function: interval_type_only  (1 assessed:  1 static-true,  0 static-false,  0 runtime)
+// CHECK: [0] static-true
+// CHECK:      message : The 1st index `p`{{.*}}less than 8
+
+// Case 3: Nested if narrowing.
+//   parallel p by 5, if (p < 6) if (p > 2), buf.at(p - 2) with buf size 3.
+//   p in [0, 5) narrowed by (p < 6) => [0, 5) then by (p > 2) => [3, 5).
+//   p-2 in [1, 3), so p-2 >= 0 and p-2 < 3 both provably true.
+
+__co__ void interval_nested_if() {
+  parallel p by 5 {
+    shared s32 [3] buf;
+    if (p < 6) {
+      if (p > 2) {
+        x = buf.at(p - 2);
+      }
+    }
+  }
+}
+
+// CHECK: [assertions] function: interval_nested_if  (2 assessed:  2 static-true,  0 static-false,  0 runtime)
+// CHECK: [0] static-true
+// CHECK:      message : The 1st index {{.*}}greater than or equal to 0
+// CHECK: [1] static-true
+// CHECK:      message : The 1st index {{.*}}less than 3
+
+// Case 4: Symbolic transitive constraints.
+//   parallel p by 5, if (p < a && a < b) if (b <= 5), buf.at(p) with buf size 5.
+//   From b <= 5 we get b in (-inf, 6). From a < b we get a < 6.
+//   From p < a we get p < 6. Combined with type bound [0, 5) => p in [0, 5).
+//   Both p >= 0 and p < 5 provably true.
+
+__co__ void interval_transitive(s32 a, s32 b) {
+  parallel p by 5 {
+    shared s32 [5] buf;
+    if (p < a && a < b) {
+      if (b <= 5) {
+        x = buf.at(p);
+      }
+    }
+  }
+}
+
+// CHECK: [assertions] function: interval_transitive  (2 assessed:  2 static-true,  0 static-false,  0 runtime)
+// CHECK: [0] static-true
+// CHECK:      message : The 1st index `p`{{.*}}greater than or equal to 0
+// CHECK: [1] static-true
+// CHECK:      message : The 1st index `p`{{.*}}less than 5

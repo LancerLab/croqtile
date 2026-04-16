@@ -3,6 +3,7 @@
 #include "codegen_prepare.hpp"
 #include "colors.hpp"
 #include "earlysema.hpp"
+#include "interval.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
 #include "loop_vectorize.hpp"
@@ -73,6 +74,7 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
   // compiled in.
   if (CCtx().PrintStats()) sbe::SBEProfiler::Get().Reset();
 #endif
+  if (CCtx().PrintStats()) sbe::IntervalProfiler::Get().Reset();
 
   for (auto& ps : pl) {
     if ((ps.pred && ps.pred()) || !ps.pred) {
@@ -169,6 +171,25 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     sbe_row(ss.normalize_iterations, "Normalize() loop iterations");
     sbe_row(ss.hash_calls, "Hash() calls");
 #endif
+
+    {
+      errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+             << "\n";
+      auto is = sbe::IntervalProfiler::Get().Snapshot();
+      errs() << color::err(color::kBold) << sep << "\n"
+             << "                    ... Interval Analysis Statistics ...\n"
+             << sep << color::err(color::kReset) << "\n";
+      auto iv_row = [&](uint64_t n, const char* desc) {
+        errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+               << color::err(color::kReset) << "  intval  - " << desc << "\n";
+      };
+      iv_row(is.project_calls, "ProjectConstraint() calls");
+      iv_row(is.eval_pred_calls, "EvalPredInterval() calls");
+      iv_row(is.proven_true, "Predicates proven true");
+      iv_row(is.proven_false, "Predicates proven false");
+      iv_row(is.unknown, "Predicates with unknown result");
+    }
+
     errs() << color::err(color::kBold) << sep << color::err(color::kReset)
            << "\n";
   }
