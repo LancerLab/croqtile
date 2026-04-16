@@ -53,6 +53,7 @@ SCAN_NEW=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
   -b)       OSS_BRANCH="$2"; shift 2 ;;
+  -t)       MAIN_BRANCH="$2"; shift 2 ;;
   -r)       PUBLIC_REMOTE="$2"; shift 2 ;;
   -e)       EXCLUDE_FILE="$2"; shift 2 ;;
   -q)       QUIET=1; shift ;;
@@ -184,13 +185,27 @@ for commit in "${COMMITS[@]}"; do
   fi
 
   if is_conflict_zone "$f"; then
-    # Check if the file has diverged between main and oss/main
-    main_hash="$(git rev-parse "main:$f" 2>/dev/null || echo "MISSING")"
-    oss_hash="$(git rev-parse "$OSS_BRANCH:$f" 2>/dev/null || echo "MISSING")"
-    if [[ "$main_hash" != "$oss_hash" ]]; then
-    diverged_hits+=("$f (main≠oss)")
+    # DIVERGED: main has independently changed this file since the
+    # common ancestor with oss/main.  That means cherry-picking the
+    # public commit risks a content conflict and needs human review.
+    # If main has NOT touched the file since divergence, the cherry-pick
+    # is clean (oss/main simply has a newer version of the file).
+    local_mb="$(git merge-base "$MAIN_BRANCH" "$OSS_BRANCH" 2>/dev/null || true)"
+    if [[ -n "$local_mb" ]]; then
+    base_hash="$(git rev-parse "$local_mb:$f" 2>/dev/null || echo "MISSING")"
+    target_hash="$(git rev-parse "$MAIN_BRANCH:$f" 2>/dev/null || echo "MISSING")"
+    if [[ "$base_hash" != "$target_hash" ]]; then
+      diverged_hits+=("$f (main has independent changes since merge-base)")
     else
-    conflict_zone_hits+=("$f")
+      conflict_zone_hits+=("$f")
+    fi
+    else
+    # No common ancestor: fall back to direct comparison
+    main_hash="$(git rev-parse "$MAIN_BRANCH:$f" 2>/dev/null || echo "MISSING")"
+    oss_hash="$(git rev-parse "$OSS_BRANCH:$f" 2>/dev/null || echo "MISSING")"
+    [[ "$main_hash" != "$oss_hash" ]] && \
+      diverged_hits+=("$f (main≠oss, no common ancestor)") || \
+      conflict_zone_hits+=("$f")
     fi
   fi
   done
@@ -214,7 +229,7 @@ for commit in "${COMMITS[@]}"; do
   if [[ ${#diverged_hits[@]} -gt 0 ]]; then
   issues=$((issues + ${#diverged_hits[@]}))
   if [[ $QUIET -eq 0 && $JSON -eq 0 ]]; then
-    echo "DIVERGED     $short: ${#diverged_hits[@]} file(s) diverged between main and oss"
+    echo "DIVERGED     $short: ${#diverged_hits[@]} file(s) -- main has independent changes"
     printf '  %s\n' "${diverged_hits[@]}"
   fi
   fi

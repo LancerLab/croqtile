@@ -80,7 +80,8 @@ SHOW_BASELINE=0
 DRY_RUN=0
 MAX_CATCHUP=5     # max commits per --catchup run
 SCAN_WINDOW=100   # max oss/main commits to inspect
-BASELINE_FILE="$SCRIPT_DIR/oss-pull-baseline.txt"
+# Allow override via env for testing
+BASELINE_FILE="${BASELINE_FILE:-$SCRIPT_DIR/oss-pull-baseline.txt}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
   -b)              OSS_BRANCH="$2"; shift 2 ;;
@@ -393,7 +394,7 @@ PULL_SCAN_CMD="$SCRIPT_DIR/oss-pull-scan.sh"
 TOTAL=${#COMMITS[@]}
 
 scan_rc=0
-"$PULL_SCAN_CMD" -b "$OSS_BRANCH" -e "$EXCLUDE_FILE" "${COMMITS[@]}" || scan_rc=$?
+"$PULL_SCAN_CMD" -b "$OSS_BRANCH" -t "$TARGET_BRANCH" -e "$EXCLUDE_FILE" "${COMMITS[@]}" || scan_rc=$?
 
 if [[ $SCAN_ONLY -eq 1 ]]; then
   exit $scan_rc
