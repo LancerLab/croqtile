@@ -35,6 +35,7 @@ ALERT_EMAIL="${ALERT_EMAIL:-}"
 
 # -------- data files (relative to SCRIPT_DIR) --------
 EXCLUDE_FILE="${EXCLUDE_FILE:-$SCRIPT_DIR/oss_exclude_paths.txt}"
+CONFLICT_FILE="${CONFLICT_FILE:-$SCRIPT_DIR/oss_conflict_paths.txt}"
 KW_FILE="${KW_FILE:-$SCRIPT_DIR/os_kw.txt}"
 
 # -------- terminal helpers --------

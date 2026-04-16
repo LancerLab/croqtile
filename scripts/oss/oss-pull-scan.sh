@@ -170,7 +170,7 @@ for commit in "${COMMITS[@]}"; do
 
   short="$(git rev-parse --short "$commit")"
   msg="$(git log -1 --format='%s' "$commit" | head -c 60)"
-  mapfile -t files < <(git diff-tree --no-commit-id -r --name-only "$commit")
+  mapfile -t files < <(git diff-tree --diff-filter=d --no-commit-id -r --name-only "$commit")
 
   private_hits=()
   conflict_zone_hits=()

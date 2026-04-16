@@ -1,0 +1,14 @@
+# Tolarable path conflict rules for open-source sync.
+#
+# Format:
+#   - Lines ending with / are directory prefixes (anything under them).
+#   - Lines ending with /* are also directory prefixes (everything inside).
+#   - Lines containing * or ? (not trailing /*) are shell-glob patterns
+#     where * matches anything EXCEPT /  (single path component).
+#   - All other lines are exact path matches.
+#   - Empty lines and lines starting with # are ignored.
+
+.gitignore
+.gitmodules
+.gitattributes
+.clang-format
