@@ -126,11 +126,55 @@ git log oss/main --oneline -3
 git log main --oneline -5
 ```
 
+### Phase 1.1: Rebase Local Branches to Latest (MANDATORY)
+
+Before any oss push/pull operation, make sure both local branches are rebased
+to latest remote heads. This prevents stale local state from creating missed
+syncs or duplicate cherry-picks.
+
+```bash
+# Update remote refs
+git fetch --all --prune
+
+# Rebase local main
+git checkout main
+git rebase origin/main
+
+# Rebase local oss/main (or your configured oss branch)
+git checkout oss/main
+git rebase origin/oss/main
+
+# Return to main for normal workflow
+git checkout main
+```
+
+If `origin/oss/main` is missing, create or track it first (see Phase 0).
+If either rebase conflicts, resolve conflict first, then continue OSS sync.
+
 Ask the developer which commit(s) they want to push to oss/main. Accept:
 - A single SHA or `HEAD`
 - A range `<from>..<to>`
 - "last N commits"
 - "catch up" / "sync everything" -- use `--catchup` mode
+
+### OSS Script Regression Gate (mandatory when editing sync scripts)
+
+If your changes touch any file under `scripts/oss/*.sh`, run:
+
+```bash
+bash scripts/oss/test-oss-pull-baseline.sh --quick
+```
+
+If changes modify pull/catchup/baseline discovery logic, run full suite too:
+
+```bash
+bash scripts/oss/test-oss-pull-baseline.sh
+```
+
+Notes:
+- The test runs in a temporary sandbox clone and cleans itself up.
+- It validates baseline behavior, catchup batching, last-commit discovery,
+  marker filtering, and private-path skipping.
 
 ---
 
@@ -183,8 +227,9 @@ This runs `oss-push.sh` which:
 1. Switches to `oss/main`
 2. Cherry-picks with path filtering
 3. Runs keyword + non-ASCII scan on staged changes
-4. Runs full tree scan after commit
-5. Returns to `main`
+4. Appends cherry-pick provenance tag at commit message end
+5. Runs full tree scan after commit
+6. Returns to `main`
 
 **The script does NOT push to any remote by default.**
 
@@ -221,9 +266,11 @@ git cherry-pick --no-commit <sha>
 make oss-scan-staged
 
 # 5. If clean, commit with preserved authorship
+clean_msg="$(git log -1 --format=%B <sha> | sed '/^Made-with:/d; /^Generated-by:/d')"
 GIT_AUTHOR_DATE="$(git log -1 --format='%ai' <sha>)" \
   git commit --author="$(git log -1 --format='%an <%ae>' <sha>)" \
-  -m "$(git log -1 --format=%B <sha> | sed '/^Made-with:/d; /^Generated-by:/d')"
+  -m "${clean_msg}
+(cherry picked from <sha> on main)"
 
 # 6. Run full tree scan
 make oss-scan
@@ -231,6 +278,26 @@ make oss-scan
 # 7. Return to main
 git checkout main
 ```
+
+### Provenance Tag Requirement (MANDATORY)
+
+Every sync commit created for OSS flow must end with a canonical cherry-pick
+provenance line so `oss-pull --catchup` can reliably detect already-synced
+commits.
+
+Required footer format:
+
+```text
+(cherry picked from <sha> on main)
+```
+
+For pulls back to main, required footer is:
+
+```text
+(cherry picked from <sha> on oss/main)
+```
+
+Do not change this pattern to custom wording; detection logic parses this text.
 
 If the fix requires changes to main as well (e.g., renaming a keyword in
 shared code), commit the fix on main FIRST, then redo the oss-push.
@@ -417,6 +484,343 @@ git push --force-with-lease <developer-remote> main
 
 ---
 
+## Unit Testing OSS Scripts (MANDATORY when editing sync scripts)
+
+The project includes comprehensive unit tests for `oss-push.sh`, `oss-pull.sh`,
+and `sync_all.sh` to prevent regressions when script logic is modified.
+
+### Two Test Suites
+
+#### 1. Baseline Regression Tests (test-oss-pull-baseline.sh)
+
+Tests the core pull/catchup/baseline logic:
+- `--set-baseline` records sync points correctly
+- `--catchup` detects and pulls unpulled commits
+- `--last` identifies the newest unpulled commit
+- `--max N` limits commits per run
+- OSS-push marker filtering works correctly
+- Private-only commits are skipped
+
+**When to use:**
+- Any change to `oss-pull.sh` baseline/catchup logic
+- Any change to `oss-push.sh` marker or filtering logic
+- When adding new filtering rules
+
+**Run:**
+```bash
+# Quick regression (core scenarios): ~47 seconds
+bash scripts/oss/test-oss-pull-baseline.sh --quick
+
+# Full suite (all scenarios): ~56 seconds
+bash scripts/oss/test-oss-pull-baseline.sh
+```
+
+#### 2. Comprehensive Script Tests (test-oss-scripts.sh)
+
+Unit-style tests for individual script options and workflows:
+- `oss-push.sh` options: `--catchup`, `--range`, `--dry-run`, `--no-scan`
+- `oss-pull.sh` options: `--catchup`, `--last`, `--max N`, `--set-baseline`, `--show-baseline`, `--scan-only`
+- `sync_all.sh` modes: `--once`, `--dry-run`, `--skip-mirror`
+- Integration scenarios: push->pull roundtrip, baseline->catchup loops
+
+**When to use:**
+- Any change to oss-push/pull/sync script options parsing
+- When adding new filtering rules or scan checks
+- For comprehensive pre-merge validation
+- When troubleshooting option combinations
+
+**Run:**
+```bash
+# Core tests only (~2 minutes):
+bash scripts/oss/test-oss-scripts.sh --quick
+
+# Full suite with integration tests (~4 minutes):
+bash scripts/oss/test-oss-scripts.sh
+
+# Test one script type:
+bash scripts/oss/test-oss-scripts.sh --suite push
+bash scripts/oss/test-oss-scripts.sh --suite pull
+bash scripts/oss/test-oss-scripts.sh --suite sync
+
+# Verbose output (show git commands):
+bash scripts/oss/test-oss-scripts.sh --verbose
+```
+
+### Gate: Mandatory Testing When Editing scripts/oss/*.sh
+
+Before committing ANY changes to OSS sync scripts, verify with:
+
+```bash
+# During development (quick smoke test):
+make oss-test-pull-quick  # or scripts/oss/test-oss-pull-baseline.sh --quick
+
+# Before pushing (comprehensive validation):
+make oss-test-pull        # Full baseline suite
+bash scripts/oss/test-oss-scripts.sh --quick  # Option validation
+```
+
+If you modify:
+- `oss-pull.sh` baselinelogic -> required: full `test-oss-pull-baseline.sh`
+- `oss-push.sh` filtering -> required: full `test-oss-pull-baseline.sh`
+- `oss-push/pull` option parsing -> required: `test-oss-scripts.sh --suite <push|pull>`
+- `sync_all.sh` -> required: `test-oss-scripts.sh --suite sync`
+
+All tests run in an isolated sandbox clone and clean up automatically.
+
+---
+
+## Compliance and Scanning
+
+OSS sync scripts enforce strict scanning gates before commits are applied.
+
+### What Gets Scanned
+
+1. **Proprietary keywords** -- hardware names, internal tools, company identifiers
+   (defined in `scripts/oss/os_kw.txt`)
+2. **Non-ASCII characters** -- strict ASCII-only policy for public code
+3. **Ghost references** -- `#include` directives pointing to excluded paths
+4. **Coupled changes** -- commits that modify both public and excluded files
+   (may indicate structural dependencies)
+
+### Violation Types and Fixes
+
+| Violation | Example | Fix |
+|-----------|---------|-----|
+| `content` | `gcu_target` in code or string | Remove or generalize: `target_backend` |
+| `path` | File path contains keyword | Rename the file/directory |
+| `message` | Commit message contains keyword | Reword: `git commit --amend` |
+| `non-ascii` | Unicode char like `->` or `--` | Replace with ASCII: `->` or `--` |
+| `ghost-include` | `#include "Target/GCU/..."` | Remove or conditionally guard |
+| `coupled` | Both public and private files changed | Review: are they interdependent? If yes, refactor to decouple |
+
+### Keyword Examples
+
+Examples of keywords that trigger violations:
+- Hardware: `gcu`, `tpu`, `cuda_target`, `sm_90a` (when internal-use only)
+- Tools: `enflame`, `internal_ci`, `era_build`
+- URLs: `git.enflame.cn`, `era-dev` (when revealing internal infra)
+- Company: Internal company names or product codenames
+
+**Policy:** If a term is used internally but NOT a trademark or revealing
+internal infrastructure, you can add it to `scripts/oss/oss_kw.txt.`
+
+### Scanning Commands
+
+```bash
+# Scan oss/main tree (full check)
+make oss-scan
+
+# Scan staged changes only
+make oss-scan-staged
+
+# Scan a specific commit
+make oss-scan-diff COMMIT=<sha>
+
+# Dry-run a push (preview without committing)
+make oss-push-dry COMMIT=<sha>
+```
+
+### Handling Manual Commits on oss/main
+
+When you commit directly to `oss/main` and need to fix violations:
+
+```bash
+git checkout oss/main
+git cherry-pick --no-commit <bad-commit-sha>
+
+# Fix the violations in the working tree
+# (edit files, remove keywords, replace non-ASCII)
+
+make oss-scan-staged  # Verify the fix
+
+# Commit with original author preserved
+GIT_AUTHOR_DATE="$(git log -1 --format='%ai' <bad-commit-sha>)" \
+  git commit --author="$(git log -1 --format='%an <%ae>' <bad-commit-sha>)" \
+  -m "$(git log -1 --format=%B <bad-commit-sha> | sed '/^Made-with:/d; /^Generated-by:/d')"
+
+make oss-scan  # Full tree check
+```
+
+### Critical: Strip AI Tool Trailers
+
+When committing on `oss/main`, **always remove** AI-tool trailers from the
+message (e.g., `Made-with: Cursor`, `Generated-by: Claude`). The project
+credits contributors in `Authors:` lines; tool markers are not welcome.
+
+The `oss-push.sh` script strips these automatically, but when committing
+manually, use:
+
+```bash
+git commit -m "$(git log -1 --format=%B | sed '/^Made-with:/d; /^Generated-by:/d')"
+```
+
+---
+
+## Troubleshooting
+
+### Test Failures
+
+#### "FAIL: expected X in output"
+
+**Cause:** A script option or behavior changed; test assertion failed.
+
+**Fix:**
+1. Run test with `--verbose`: `bash scripts/oss/test-oss-scripts.sh --verbose`
+2. Look for command output that doesn't match expected pattern
+3. If the script changed intentionally, update the test assertion
+4. Otherwise, revert the recent change that broke the test
+
+#### "Sandbox cleanup failed: Permission denied"
+
+**Cause:** A subprocess or service held an open file in the sandbox.
+
+**Fix:**
+```bash
+# Manual cleanup:
+rm -rf /tmp/tmp.* /tmp/oss_* /tmp/test-* 2>/dev/null || sudo rm -rf ...
+
+# Restart with fresh sandbox:
+bash scripts/oss/test-oss-pull-baseline.sh --quick
+```
+
+#### "Cannot resolve commit X"
+
+**Cause:** Commit SHA not found; usually a typo or range syntax error.
+
+**Fix:**
+```bash
+# Verify commit exists
+git log --oneline -5
+git rev-parse <sha>
+
+# Check range syntax
+git rev-list HEAD~5..HEAD  # should list 5 commits
+```
+
+### oss-push Failures
+
+#### "Scan failed: keyword 'X' in Y"
+
+**Cause:** Commit contains a proprietary keyword.
+
+**Fix:**
+```bash
+git checkout oss/main
+git cherry-pick --no-commit <sha>
+# Edit the offending file(s) to remove or generalize the keyword
+make oss-scan-staged
+# If clean:
+git commit --amend --no-edit
+make oss-scan
+git checkout main
+```
+
+#### "Already synced" (commit skipped)
+
+**Cause:** Commit is already on oss/main (detected via cherry-pick trailer).
+
+**Fix:** No action needed; the script correctly skipped it.
+
+### oss-pull Failures
+
+#### "Conflict file: Makefile modified"
+
+**Cause:** Incoming commit modifies a file managed separately per repo
+(Makefile, CMakeLists.txt, README, etc.).
+
+**Fix:**
+```bash
+# Review the change on oss/main
+git log oss/main --oneline -3
+git show <oss-commit>:Makefile
+
+# Decide:
+# 1. If the change is valid for main too:
+#    - Apply it manually on main
+#    - Commit separately
+# 2. If it's oss-only:
+#    - Let the oss/main version stay as-is
+#    - The pull scan will continue to reject it (blocks accidental overwrites)
+```
+
+#### "Private-only commit pulled (PRIVATE-PATH violation)"
+
+**Cause:** Commit tries to add/modify a file in a private-only path.
+
+**Fix:**
+```bash
+# Update oss_exclude_paths.txt to include new exclusions
+# Then retry oss-pull
+bash scripts/oss/oss-pull.sh --catchup
+```
+
+#### "Baseline not set"
+
+**Cause:** `--set-baseline` was never run; `--catchup` doesn't know where to start.
+
+**Fix:**
+```bash
+bash scripts/oss/oss-pull.sh --set-baseline
+# Then:
+bash scripts/oss/oss-pull.sh --catchup
+```
+
+### sync_all Failures
+
+#### "Mirror sync failed"
+
+**Cause:** Bundle mirror is offline or SSH key missing.
+
+**Fix:**
+```bash
+# Skip mirror phase for this run:
+bash scripts/oss/sync_all.sh --skip-mirror --once
+
+# Or configure mirror overrides:
+bash scripts/oss/sync_all.sh --mirror-host <new-host> --once
+```
+
+#### "Divergence detected on oss/main"
+
+**Cause:** `oss/main` has commits not in public branch; sync daemon needs resolution.
+
+**Fix:**
+```bash
+# Check what's ahead
+git log public/main..oss/main --oneline
+
+# Option 1: Force-push oss/main (if confident)
+git push --force-with-lease origin oss/main
+
+# Option 2: Rebase (preserve your commits)
+git checkout oss/main
+git rebase origin/oss/main
+git push origin oss/main
+
+# Then retry
+bash scripts/oss/sync_all.sh --once
+```
+
+### General Debugging
+
+Enable verbose logging:
+
+```bash
+# bash scripts with set -x for tracing
+bash -x scripts/oss/oss-pull.sh --catchup
+
+# Or export debug flag if scripts support it
+export DEBUG=1
+bash scripts/oss/test-oss-pull-baseline.sh --verbose
+
+# Check git operations in detail
+git config core.commentChar '#'  # avoid conflicts with special chars
+git reflog  # trace branch movements
+git log --oneline --graph -10  # visualize branch state
+```
+
+---
+
 ## Safety Rules
 
 1. **NEVER push to ANY remote** without the user's explicit instruction.
@@ -443,17 +847,28 @@ git push --force-with-lease <developer-remote> main
 
 | Task | Command |
 |------|---------|
+| **TESTING** | |
+| Test baseline/catchup logic (quick) | `bash scripts/oss/test-oss-pull-baseline.sh --quick` |
+| Test baseline/catchup logic (full) | `bash scripts/oss/test-oss-pull-baseline.sh` |
+| Test all script options (quick) | `bash scripts/oss/test-oss-scripts.sh --quick` |
+| Test all script options (full) | `bash scripts/oss/test-oss-scripts.sh` |
+| Test push script only | `bash scripts/oss/test-oss-scripts.sh --suite push` |
+| Test pull script only | `bash scripts/oss/test-oss-scripts.sh --suite pull` |
+| **SYNC OPERATIONS** | |
 | Catch up oss/main | `make oss-catchup` |
 | Preview catchup | `make oss-catchup-dry` |
 | Preview oss push | `make oss-push-dry COMMIT=<sha>` |
 | Push to oss/main | `make oss-push COMMIT=<sha>` |
+| **SCANNING** | |
 | Scan oss branch | `make oss-scan` |
 | Scan staged | `make oss-scan-staged` |
+| Scan specific commit | `make oss-scan-diff COMMIT=<sha>` |
 | Check sync status | `make oss-status` |
+| **HELP** | |
 | Full guide | `Documents/internal/oss-sync-developer-guide.md` |
 
 ## Related Skills
 
-- **`/oss-scan`** -- compliance scanning details, violation types, manual fix patterns
 - **`/compile-and-test`** -- build and test the compiler after changes
 - **`/develop-feature`** -- full feature development workflow
+- **`/oss-scan`** -- (LEGACY) compliance scanning reference (merged into this skill)

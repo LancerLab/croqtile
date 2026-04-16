@@ -1,18 +1,32 @@
 ---
 name: oss-scan
-description: Scan code for open-source compliance before pushing to the public repository. Use when preparing commits for oss/main, reviewing code for proprietary leaks, or when asked about OSS sync.
+description: |
+  **LEGACY (merged into oss-merge)** - This skill is now thin reference layer.
+  All compliance scanning documentation has been merged into the oss-merge skill
+  for unified OSS workflow guidance. Use /oss-merge for comprehensive details.
+  
+  Retained here for quick command reference only.
 ---
 
-# OSS Compliance Scan Skill
+# OSS Compliance Scan (LEGACY - Use /oss-merge instead)
 
-## When to Use
+## DEPRECATION NOTICE
 
-- Before pushing any commit to `oss/main`
-- When reviewing code changes that may be synced publicly
-- When asked about OSS sync, keyword violations, or non-ASCII issues
-- When a `make oss-push` or `make oss-scan` fails
+**This skill has been merged into [`/oss-merge`].**
 
-## Quick Reference
+All content, violation types, scanning procedures, and troubleshooting have been
+consolidated into the unified OSS merge workflow skill. This page now serves as
+a **quick reference only**.
+
+**For comprehensive guidance**, use `/oss-merge` which includes:
+- Full scanning documentation
+- Violation types and fixes
+- Troubleshooting guide
+- Unit testing requirements
+
+---
+
+## Quick Reference (Commands Only)
 
 ```bash
 # Scan the oss/main branch tree (full check)
@@ -42,62 +56,39 @@ make oss-pull COMMIT=<sha>
 # Scan incoming public commits for conflicts before pulling
 make oss-pull-scan
 
-# Start periodic sync watcher (WSL toast notifications)
-make oss-watch
-
 # Check sync status
 make oss-status
+
+# Test OSS scripts (new)
+bash scripts/oss/test-oss-pull-baseline.sh --quick
+bash scripts/oss/test-oss-scripts.sh --quick
 ```
 
 ## What Gets Scanned
 
-The scanner (`scripts/oss/oss-scan.sh`) checks for:
+1. **Proprietary keywords** (scripts/oss/os_kw.txt)
+2. **Non-ASCII characters**
+3. **Ghost includes** (references to excluded paths)
+4. **Coupled changes** (commits touching both public and private files)
 
-1. **Proprietary keywords** -- hardware names, internal tools, company identifiers
-   (defined in `scripts/oss/os_kw.txt`)
-2. **Non-ASCII characters** -- strict ASCII-only policy for public code
-3. **Ghost references** -- `#include` directives pointing to excluded paths
-4. **Coupled changes** -- commits that modify both public and excluded files
-   (may indicate structural dependencies)
+## Violation Quick Fixes
 
-## Violation Types and Fixes
+| Violation | Example -> Fix |
+|-----------|---------------|
+| Keyword in code | `gcu_target` -> `target_backend` |
+| Keyword in message | `fix gcu ci` -> `fix CI failures` |
+| Non-ASCII | `->` -> `->` or `--` -> `--` |
+| Ghost include | Remove `#include "Target/GCU/..."` |
+| Coupled file | Review if files are interdependent |
 
-| Violation | Meaning | Fix |
-|-----------|---------|-----|
-| `content` | Keyword found in file content | Remove or generalize the term |
-| `path` | File path contains a keyword | Rename the file/directory |
-| `message` | Commit message contains a keyword | Reword the commit message |
-| `non-ascii` | Non-ASCII bytes in file | Replace: `--` for em-dash, `->` for arrow, English for CJK |
-| `ghost-include` | `#include` references excluded path | Remove or guard the include |
-| `coupled` | Commit touches both public and excluded files | Review for hidden dependencies |
+---
 
-## Handling Manual Commits
+## See Also
 
-When `oss-push` fails due to violations:
+- **[`/oss-merge`](./SKILL.md)** - Complete OSS workflow (scanning, testing, merging)
+- **`/oss-merge` Section: Compliance and Scanning** - Detailed scanning procedures
+- **`/oss-merge` Section: Troubleshooting** - Common scan failures and fixes
 
-```bash
-git checkout oss/main
-git cherry-pick --no-commit <sha>
-# Fix the violations in staged files
-make oss-scan-staged
-# Commit with original author
-GIT_AUTHOR_DATE='<date>' git commit --author='Name <email>' -m '<sanitized msg>'
-git checkout main
-```
-
-## Critical Safety Rules
-
-### ALWAYS strip AI tool markers from commit messages
-
-When creating or amending commits on `oss/main`, **always remove** any
-`Made-with:`, `Generated-by:`, or similar AI-tool trailer lines (e.g.
-`Made-with: Cursor`, `Generated-by: Claude`). The contributors get proper
-credit in `Authors:` lines; tool markers are not welcome.
-
-The `oss-push.sh` script strips these automatically, but when committing
-manually on `oss/main`, pipe the message through:
-```bash
-sed '/^Made-with:/d; /^Generated-by:/d'
 ```
 
 ### NEVER push to the public remote

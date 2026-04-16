@@ -79,6 +79,13 @@ AllowShortIfStatementsOnASingleLine: true
 make format
 ```
 
+### Text Content Style (MANDATORY)
+
+- Use ASCII-only characters in scripts, skills, and docs unless there is a
+   strong reason not to.
+- Do not use decorative separator-only lines (for example, lines made only of
+   box-drawing characters). Use plain ASCII separators if needed.
+
 ### C++ Standard
 
 - **C++17** is required
@@ -219,6 +226,41 @@ will be synced to the public `oss/main` branch. Before committing, you MUST ensu
 5. **Quick check**: `make oss-scan` runs the full tree scan. Use `make oss-scan-staged`
    to scan only staged changes before committing.
 
+6. **OSS script regression gate** (MANDATORY when editing `scripts/oss/*.sh`):
+   - For any change to OSS sync scripts, run regression tests to prevent breakage:
+   
+   ```bash
+   # Quick smoke test (baseline/catchup logic):
+   bash scripts/oss/test-oss-pull-baseline.sh --quick
+   
+   # For option parsing or filtering changes:
+   bash scripts/oss/test-oss-scripts.sh --quick
+   
+   # Full validation before merge (if modifying core logic):
+   bash scripts/oss/test-oss-pull-baseline.sh
+   bash scripts/oss/test-oss-scripts.sh
+   ```
+   
+   Tests run in isolated sandboxes and clean up automatically (~47s quick, ~120s full).
+   See `/oss-merge` skill "Unit Testing OSS Scripts" for detailed guidance.
+
+---
+
+## OSS Test Suites
+
+Two comprehensive test suites validate OSS script functionality:
+
+| Test File | Purpose | Coverage | Runtime |
+|-----------|---------|----------|---------|
+| `scripts/oss/test-oss-pull-baseline.sh` | Core pull/catchup logic | Baseline, catchup, filtering, commit detection | ~56s (full), ~47s (quick) |
+| `scripts/oss/test-oss-scripts.sh` | Individual script options | push, pull, sync options; roundtrip workflows | ~4min (full), ~2min (quick) |
+
+**When to run:**
+- Before ANY commit touching `scripts/oss/*.sh`
+- When troubleshooting sync behavior
+- When validating option changes or fixes
+- Required gate for merge requests on OSS sync scripts
+
 ---
 
 ## Project-Specific Conventions
@@ -231,8 +273,8 @@ will be synced to the public `oss/main` branch. Before committing, you MUST ensu
 
 ### Generated Files
 
-- Parser: `lib/parser.yy` (Bison) → `build/parser.tab.cc`
-- Scanner: `lib/scanner.l` (Flex) → `build/scanner.yy.cc`
+- Parser: `lib/parser.yy` (Bison) -> `build/parser.tab.cc`
+- Scanner: `lib/scanner.l` (Flex) -> `build/scanner.yy.cc`
 
 ### Build Outputs
 
@@ -260,6 +302,8 @@ The project includes specialized skills for Claude Code:
 | `/profiling` | Profile kernels and runtime behavior |
 | `/debugging` | Debug generated executables |
 | `/performance-bottleneck-analysis` | Analyze bottlenecks from profiling reports |
+| `/oss-merge` | Unified OSS sync workflow: push/pull, compliance scanning, testing, troubleshooting |
+| `/oss-scan` | (LEGACY) OSS compliance scanning reference (merged into oss-merge) |
 
 ---
 
