@@ -241,6 +241,33 @@ cleanup_oss_tools() {
   TOOL_TMPDIR=""
 }
 
+sync_origin_oss_branch() {
+  local local_tip origin_tip
+  local_tip="$(lgit rev-parse "$OSS_BRANCH" 2>/dev/null || echo "")"
+  [[ -z "$local_tip" ]] && { log "Local $OSS_BRANCH not found. Skipping origin sync."; return 0; }
+
+  if ! lgit show-ref --verify --quiet "refs/remotes/origin/$OSS_BRANCH"; then
+    log "origin/$OSS_BRANCH missing. Publishing local $OSS_BRANCH to origin..."
+    safe_push origin "$OSS_BRANCH:$OSS_BRANCH" "Publish $OSS_BRANCH to origin" || return 1
+    return 0
+  fi
+
+  origin_tip="$(lgit rev-parse "origin/$OSS_BRANCH" 2>/dev/null || echo "")"
+  if [[ "$origin_tip" == "$local_tip" ]]; then
+    log "origin/$OSS_BRANCH already up to date."
+    return 0
+  fi
+
+  if lgit merge-base --is-ancestor "$origin_tip" "$local_tip"; then
+    log "Updating origin/$OSS_BRANCH to latest public-aligned tip..."
+    safe_push origin "$OSS_BRANCH:$OSS_BRANCH" "Push updated $OSS_BRANCH to origin" || return 1
+    return 0
+  fi
+
+  log "origin/$OSS_BRANCH diverged. Forcing to public-aligned local $OSS_BRANCH (public > origin)."
+  safe_force_push origin "$OSS_BRANCH:$OSS_BRANCH" "Force-sync $OSS_BRANCH to origin" || return 1
+}
+
 # ======================================================================
 # PHASE 0: Ensure remotes and oss/main branch
 # ======================================================================
@@ -322,9 +349,10 @@ phase1_public_ingest() {
     else
       stage_oss_tools
       local scan_rc=0
-      "$TOOL_TMPDIR/oss-pull-scan.sh" -b "$OSS_BRANCH" -r "$PUBLIC_REMOTE" \
-        "${new_commits[@]}" >/dev/null 2>&1 || scan_rc=$?
-      if [[ $scan_rc -ne 0 ]]; then
+      local scan_out=""
+      scan_out="$(REPO_ROOT="$REPO_ROOT" "$TOOL_TMPDIR/oss-pull-scan.sh" -b "$OSS_BRANCH" -r "$PUBLIC_REMOTE" \
+        "${new_commits[@]}" 2>&1)" || scan_rc=$?
+      if [[ $scan_rc -eq 1 ]]; then
         local summary=""
         for c in "${new_commits[@]}"; do
           summary+="  $(lgit log -1 --oneline "$c")"$'\n'
@@ -334,6 +362,14 @@ phase1_public_ingest() {
             "${#new_commits[@]}" "$summary")"
         alert "sync-all: scan violations" \
           "${#new_commits[@]} commit(s) from public triggered scan warnings."
+      elif [[ $scan_rc -ne 0 ]]; then
+        warn_highlighted "Public scan failed (tooling/infrastructure)" \
+          "$(printf 'oss-pull-scan exited %d. Sync proceeds, but review scanner health.\n%s' \
+            "$scan_rc" "${scan_out:-<no output>}")"
+      elif [[ -n "$scan_out" ]]; then
+        echo "$scan_out" | while IFS= read -r line; do
+          [[ -n "$line" ]] && log "  [pull-scan] $line"
+        done
       fi
     fi
   else
@@ -345,12 +381,17 @@ phase1_public_ingest() {
   oss_tip="$(lgit rev-parse "$OSS_BRANCH")"
   public_tip="$(lgit rev-parse "$PUBLIC_REMOTE/main")"
 
-  [[ "$oss_tip" == "$public_tip" ]] && { log "oss/main matches public. OK."; return 0; }
+  if [[ "$oss_tip" == "$public_tip" ]]; then
+    log "oss/main matches public. OK."
+    sync_origin_oss_branch || return 1
+    return 0
+  fi
 
   if lgit merge-base --is-ancestor "$public_tip" "$oss_tip"; then
     # Local is ahead of public: normal push (NEVER force-push to public)
     log "oss/main ahead of public. Pushing to public..."
     safe_push "$PUBLIC_REMOTE" "$OSS_BRANCH:main" "Push oss/main to public" || return 1
+    sync_origin_oss_branch || return 1
     return 0
   fi
 
@@ -361,6 +402,7 @@ phase1_public_ingest() {
     ensure_on_branch "$OSS_BRANCH" || return 1
     lgit merge --ff-only "$PUBLIC_REMOTE/main" 2>/dev/null || lgit reset --hard "$PUBLIC_REMOTE/main"
     ensure_on_branch "$saved" || return 1
+    sync_origin_oss_branch || return 1
     return 0
   fi
 
@@ -508,12 +550,14 @@ phase3_sync_mirror() {
   local sr_args=(--once --local-wins)
   [[ $DRY_RUN -eq 1 ]] && sr_args+=(--dry-run)
   log "Running sync_remotes.sh ${sr_args[*]}..."
-  local sr_output sr_rc=0
-  sr_output="$(bash "$SYNC_REMOTES_SCRIPT" "${sr_args[@]}" 2>&1)" || sr_rc=$?
-  echo "$sr_output" | while IFS= read -r line; do [[ -n "$line" ]] && log "  [sync_remotes] $line"; done
+  local sr_rc=0
+  bash "$SYNC_REMOTES_SCRIPT" "${sr_args[@]}" 2>&1 | while IFS= read -r line; do
+    [[ -n "$line" ]] && log "  [sync_remotes] $line"
+  done
+  sr_rc=${PIPESTATUS[0]}
   if [[ $sr_rc -ne 0 ]]; then
     if [[ $sr_rc -eq 128 ]]; then
-      fatal_error "sync_remotes.sh fatal" "$(echo "$sr_output" | grep -i 'fatal:\|error:' | head -3)"
+      fatal_error "sync_remotes.sh fatal" "sync_remotes exited 128. Check the [sync_remotes] log lines above for the first fatal/error details."
       return 1
     fi
     log "  WARNING: sync_remotes.sh exited $sr_rc"
