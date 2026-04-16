@@ -239,6 +239,10 @@ will be synced to the public `oss/main` branch. Before committing, you MUST ensu
 - Never write generated files to `/tmp`; use `build/` directory
 - Build artifacts are symlinked to repo root
 
+### Target Development: Supporting Explicit Type Conversions
+
+When implementing a new `Target` subclass, override `SupportedScalarTypes(arch)` to declare which scalar types your target supports for explicit `__to<type>(expr)` conversions. Return the set of `BaseType` values valid for the given architecture. The compiler validates both source and target types in early semantic analysis. Optionally override `IsCastSupported(arch, from, to)` to restrict specific conversion pairs; the default allows all conversions between supported types. See `lib/target.hpp` for the interface and existing targets for reference.
+
 ---
 
 ## Skills

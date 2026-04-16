@@ -1,0 +1,18 @@
+// RUN: choreo -es -t topscc -arch=gcu400 %s 2>&1 | FileCheck %s
+
+__co__ auto test_u64_s64_cast(int i, float f) {
+  u64 a = __to<u64>(i);
+  s64 b = __to<s64>(i);
+  f32 c = __to<f32>(a);
+  s32 d = __to<s32>(b);
+  u64 e = __to<u64>(b);
+  s64 g = __to<s64>(a);
+  return d;
+}
+
+// CHECK: unsigned long long a = static_cast<unsigned long long>(i);
+// CHECK: long long b = static_cast<long long>(i);
+// CHECK: float c = static_cast<float>(a);
+// CHECK: int d = static_cast<int>(b);
+// CHECK: unsigned long long e = static_cast<unsigned long long>(b);
+// CHECK: long long g = static_cast<long long>(a);

@@ -3233,9 +3233,11 @@ const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
 
 // input is a `node` or `std::variant<int, float>`.
 // If `val` is existed, use it first.
-const std::string TopsccCodeGen::ExprCastSTR(
-    AST::ptr<AST::Node> n, std::optional<std::variant<int, float>> val,
-    BaseType t, BaseType f, bool is_host, size_t element_count) const {
+const std::string
+TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
+                           std::optional<std::variant<int, float>> val,
+                           BaseType t, BaseType f, bool is_host,
+                           size_t element_count, bool is_explicit) const {
   std::ostringstream res;
   std::string value;
 
@@ -3257,7 +3259,7 @@ const std::string TopsccCodeGen::ExprCastSTR(
 
   using BT = BaseType;
   // need to do casting or converting.
-  if (!IsValuePreservingCast(f, t)) {
+  if (!IsValuePreservingCast(f, t) && !is_explicit) {
     if (IsReinterpretiveCast(f, t))
       Warning(n->LOC(), "The implicit type conversion may lead to semantic "
                         "error(without data loss): '" +
@@ -3460,7 +3462,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     // codegen for scalar type cast
     assert(ce->GetOp() == Op::Cast);
     return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
-                       is_host, ce->ElementCount());
+                       is_host, ce->ElementCount(), ce->IsExplicit());
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
     // if this expr needs broadcasting
     bool rparen = false;

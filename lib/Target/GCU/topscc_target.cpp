@@ -103,6 +103,23 @@ public:
       return {};
   }
 
+  const std::set<BaseType>
+  SupportedScalarTypes(const ArchId& arch) const override {
+    std::set<BaseType> types = {
+        BaseType::F32, BaseType::F16, BaseType::BF16,
+        BaseType::S32, BaseType::U32, BaseType::S16,
+        BaseType::U16, BaseType::S8,  BaseType::U8,
+    };
+    int arch_num = ArchNum(arch);
+    if (arch_num >= 400) {
+      types.insert(BaseType::S64);
+      types.insert(BaseType::U64);
+      types.insert(BaseType::F8_E4M3);
+      types.insert(BaseType::F8_E5M2);
+    }
+    return types;
+  }
+
   bool EnforceVectorAlignment(const ArchId& arch) const override {
     return ArchNum(arch) < 400;
   }

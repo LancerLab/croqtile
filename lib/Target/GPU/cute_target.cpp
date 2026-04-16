@@ -123,6 +123,25 @@ public:
     };
   }
 
+  const std::set<BaseType>
+  SupportedScalarTypes(const ArchId& arch) const override {
+    std::set<BaseType> types = {
+        BaseType::F64,  BaseType::F32,     BaseType::TF32,    BaseType::F16,
+        BaseType::BF16, BaseType::F8_E4M3, BaseType::F8_E5M2, BaseType::S64,
+        BaseType::U64,  BaseType::S32,     BaseType::U32,     BaseType::S16,
+        BaseType::U16,  BaseType::S8,      BaseType::U8,
+    };
+    int arch_num = ArchNum(arch);
+    if (arch_num >= 90) {
+      types.insert(BaseType::F8_UE8M0);
+      types.insert(BaseType::F8_UE4M3);
+      types.insert(BaseType::F6_E2M3);
+      types.insert(BaseType::F6_E3M2);
+      types.insert(BaseType::F4_E2M1);
+    }
+    return types;
+  }
+
   const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId& arch) const override {
     if (IsFeatureSupported(arch, STR(ChoreoFeature::WGMMA)))

@@ -656,8 +656,39 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 
 bool EarlySemantics::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
-  choreo_unreachable("AST::CastExpr should not appear at EarlySemantics.");
-  return true;
+  if (!n.IsExplicit())
+    choreo_unreachable("implicit AST::CastExpr should not appear at "
+                       "EarlySemantics.");
+
+  size_t ec = error_count;
+  auto to_type = n.ToType();
+  auto& target = CCtx().GetTarget();
+  auto arch = CCtx().GetArch();
+  auto supported = target.SupportedScalarTypes(arch);
+
+  if (!supported.empty() && !supported.count(to_type))
+    Error1(n.LOC(), "the target type '" + STR(to_type) +
+                        "' is not supported by the current target '" +
+                        target.Name() + "' (arch: " + arch + ").");
+
+  // Derive the from-type from the child expression and validate.
+  auto r_type = NodeType(*n.GetR());
+  if (auto sty = dyn_cast<ScalarType>(r_type)) {
+    auto from_type = sty->GetBaseType();
+    n.SetFrom(from_type);
+    if (!supported.empty() && !supported.count(from_type))
+      Error1(n.LOC(), "the source type '" + STR(from_type) +
+                          "' is not supported by the current target '" +
+                          target.Name() + "' (arch: " + arch + ").");
+    if (!supported.empty() && !target.IsCastSupported(arch, from_type, to_type))
+      Error1(n.LOC(), "the conversion from '" + STR(from_type) + "' to '" +
+                          STR(to_type) +
+                          "' is not supported by the current target '" +
+                          target.Name() + "' (arch: " + arch + ").");
+  }
+
+  SetNodeType(n, MakeScalarType(to_type, true));
+  return ec == error_count;
 }
 
 bool EarlySemantics::Visit(AST::AttributeExpr& n) {

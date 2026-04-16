@@ -162,6 +162,20 @@ public:
     return {};
   }
 
+  // Scalar types supported by the target for explicit type conversions.
+  // An empty set means no restriction (all types allowed).
+  virtual const std::set<BaseType> SupportedScalarTypes(const ArchId&) const {
+    return {};
+  }
+
+  // Whether an explicit cast from `from` to `to` is supported.
+  // Default: allowed if both types are in SupportedScalarTypes.
+  virtual bool IsCastSupported(const ArchId& arch, BaseType from,
+                               BaseType to) const {
+    auto types = SupportedScalarTypes(arch);
+    return types.count(from) && types.count(to);
+  }
+
   virtual const std::set<SwizMode> SupportedSwizzleModes(const ArchId&) const {
     return {};
   }
