@@ -1069,6 +1069,8 @@ bool Preprocess::Process(std::istream& input) {
       line_num++;
     } else if (code_partition == CP_CHOREO) {
       HandleOneChoreoLine(line_to_handle);
+      if (code_partition != CP_KERNEL && !cok_codes.empty())
+        cok_codes.pop_back();
       line_num++;
     } else if (code_partition == CP_KERNEL) {
       HandleOneKernelLine(line_to_handle);
