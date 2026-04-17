@@ -3044,6 +3044,7 @@ show_usage() {
   echo "  Options:"
   echo "   -st,                 Use default system path for target compilation"
   echo "   --execute,           Compile and execute"
+  echo "   --profile,           Compile and execute with profiling"
   echo "   --compile-link,      Compile and link"
   echo "   --compile-module,    Compile and generate the module"
   echo "   --gen-fatbin,        Compile and generate the fatbin"
@@ -3118,6 +3119,17 @@ option_detect() {
   os << "\n  ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
   if (verbose) os << "\n  echo " << exe_file << "\n";
   os << "\n  " << exe_file << "\n";
+  os << R"(elif [ "$1" == "--profile" ]; then)";
+  os << "\n  TOPSPROF=$(which topsprof)";
+  os << "\n  if [ -z \"${TOPSPROF}\" ]; then ";
+  os << "\n    echo \"topsprof is not installed\" && exit 77";
+  os << "\n  else";
+  if (verbose)
+    os << "\n    echo ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+  os << "\n    ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+  os << "\n  fi\n";
+  if (verbose) os << "\n  echo  ${TOPSPROF} " << exe_file << "\n";
+  os << "\n  ${TOPSPROF} " << exe_file << "\n";
   os << R"(elif [ "$1" == "--compile-module" ]; then)";
   if (verbose)
     os << "\n  echo ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
