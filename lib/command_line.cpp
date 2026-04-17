@@ -97,6 +97,10 @@ Option<bool>
     native_bf16(OptionKind::User, "--native-bf16", "-bf16n", false,
                 "Utilize native bf16 type when target platform support.");
 
+Option<bool>
+    print_features(OptionKind::User, "--print-features", "", false,
+                   "Print the supported features for the selected target "
+                   "and exit. One feature per line (upper-cased).");
 Option<bool> verbose(OptionKind::User, "--verbose", "-v", false,
                      "Display the programs invoked by the compiler.");
 Option<bool> inhibit_warning(OptionKind::User, "-w", "", false,
@@ -232,6 +236,10 @@ Option<bool> single_thread_producer(
     "When used with --use-warpspec, keep the producer inthreads scope single-"
     "threaded. Set to false to instead single-guard producer TMA/event "
     "operations individually.");
+Option<bool>
+    use_target_lib(OptionKind::User, "--use-target-lib", "-utl", false,
+                   "Lower __lib_* builtins to target-specific library calls. "
+                   "Overrides the target's default when explicitly set.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -274,7 +282,8 @@ bool CommandLine::Parse(int argc, char** argv) {
     }
   }
 
-  if (!r.StdinAsInput() && r.GetInputFileName().empty()) {
+  if (!print_features.GetValue() && !r.StdinAsInput() &&
+      r.GetInputFileName().empty()) {
     std::cerr << "error: no input file.\n";
     ret_code = 1;
     return false;
@@ -289,6 +298,15 @@ bool CommandLine::Parse(int argc, char** argv) {
 
   // set the arch to compile
   if (!arch.GetValue().empty()) CCtx().AddArch(ToLower(arch.GetValue()));
+
+  if (print_features.GetValue()) {
+    auto& tgt = CCtx().GetTarget();
+    auto arch_id =
+        arch.GetValue().empty() ? tgt.DefaultArch() : ToLower(arch.GetValue());
+    for (auto& ft : tgt.SupportedFeatures(arch_id))
+      std::cout << ToUpper(ft.name) << "\n";
+    exit(0);
+  }
 
   // set API mode
   {
@@ -371,6 +389,10 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetSharedMemAlignment(shared_mem_alignment.GetValue());
   CCtx().SetUseWarpSpec(use_warpspec.GetValue());
   CCtx().SetSingleThreadProducer(single_thread_producer.GetValue());
+  if (use_target_lib.WasExplicitlySet())
+    CCtx().SetUseTargetLib(use_target_lib.GetValue());
+  else
+    CCtx().SetUseTargetLib(CCtx().GetTarget().DefaultUseTargetLib());
   CCtx().SetInhibitWarning(inhibit_warning.GetValue());
   CCtx().SetWarningAsError(warning_as_error.GetValue());
 

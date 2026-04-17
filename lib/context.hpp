@@ -422,6 +422,8 @@ private:
                               // producer TMA/event ops individually.
   bool fast_compile = false;  // Use precompiled CuTe runtime for faster nvcc
                               // compilation via separate compilation + linking.
+  bool use_target_lib = false; // Lower __lib_* builtins to target library calls
+                               // (e.g. native hardware library calls).
   std::string debug_file_dir; // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
@@ -579,6 +581,7 @@ public:
   bool UseWarpSpec() const { return use_warpspec; }
   bool SingleThreadProducer() const { return single_thread_producer; }
   bool FastCompile() const { return fast_compile; }
+  bool UseTargetLib() const { return use_target_lib; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -618,6 +621,7 @@ public:
   void SetUseWarpSpec(bool value) { use_warpspec = value; }
   void SetSingleThreadProducer(bool value) { single_thread_producer = value; }
   void SetFastCompile(bool value) { fast_compile = value; }
+  void SetUseTargetLib(bool value) { use_target_lib = value; }
   void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }

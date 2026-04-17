@@ -450,6 +450,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "__alignup"  return Choreo::Parser::make_ALIGNUP(yytext, loc);
   "__aligndown" return Choreo::Parser::make_ALIGNDOWN(yytext, loc);
   "__to"       return Choreo::Parser::make_TOCAST(yytext, loc);
+  "__lib_"{id}   return Choreo::Parser::make_LIB_CALL(yytext, loc);
   "local"    return Choreo::Parser::make_STORAGE(Storage::LOCAL, loc);
   "shared"   return Choreo::Parser::make_STORAGE(Storage::SHARED, loc);
   "global"   return Choreo::Parser::make_STORAGE(Storage::GLOBAL, loc);

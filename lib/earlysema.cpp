@@ -2211,6 +2211,26 @@ bool EarlySemantics::Visit(AST::Call& n) {
       }
       auto pty = NodeType(*n.arguments->ValueAt(0));
       SetNodeType(n, pty);
+    } else if (n.IsLibCall()) {
+      auto& tgt = CCtx().GetTarget();
+      if (!tgt.IsLibCallSupported(func_name))
+        Error1(n.LOC(), "'" + func_name +
+                            "' is not supported by the current target '" +
+                            tgt.Name() + "'.");
+      auto [min_a, max_a] = tgt.LibCallArgRange(func_name);
+      auto argc = (int)n.arguments->Count();
+      if (min_a >= 0 && max_a >= 0 && (argc < min_a || argc > max_a)) {
+        if (min_a == max_a)
+          Error1(n.LOC(), "'" + func_name + "' expects " +
+                              std::to_string(min_a) + " arguments, but got " +
+                              std::to_string(argc) + ".");
+        else
+          Error1(n.LOC(), "'" + func_name + "' expects " +
+                              std::to_string(min_a) + "-" +
+                              std::to_string(max_a) +
+                              " arguments, but got " +
+                              std::to_string(argc) + ".");
+      }
     } else
       choreo_unreachable("unsupported bif '" + func_name + "'.");
 

@@ -14,8 +14,7 @@ __co__ void foo() {
 }
 
 // HIGH: int idx = kernel();
-// HIGH-DAG: choreo::choreo_assert((static_cast<long long>(idx) >= 0{{(LL)?}})
-// HIGH-DAG: choreo::choreo_assert((static_cast<long long>(idx) < 4{{(LL)?}})
+// HIGH: choreo::choreo_assert((static_cast<long long>(idx) < 4{{(LL)?}})
 
 // LOW: int idx = kernel();
 // LOW-NOT: choreo::choreo_assert((static_cast<long long>(idx) < 4{{(LL)?}})

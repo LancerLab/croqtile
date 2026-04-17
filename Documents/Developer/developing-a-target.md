@@ -230,6 +230,102 @@ Add corresponding Makefile targets for environment setup if needed.
 
 ---
 
+## Step 7: Declare Library Call Support (Optional)
+
+Choreo provides a generic `__lib_*` builtin mechanism that lets `.co` programs
+call abstract library operations (GEMM, element-wise ops, reductions, etc.)
+without knowing the target's API. The compiler lowers these to target-specific
+library calls at codegen time.
+
+### How It Works
+
+1. **Scanner/Parser** -- The scanner matches any `__lib_<id>` token generically
+   as `LIB_CALL`. No per-operation token is needed.
+2. **Early Sema** -- Validates the call against the target's
+   `IsLibCallSupported()` and `LibCallArgRange()` methods. If the target
+   doesn't support a given name, early sema rejects it with a clear error.
+3. **Target Check** -- Optional per-target checks (alignment, storage, etc.)
+   in the target check pass.
+4. **Codegen** -- The target's codegen dispatches on `func_name` and emits
+   either the target-library call or a general fallback.
+
+### Declaring Support
+
+Override these methods in your `Target` subclass:
+
+```cpp
+class NewTarget : public Target {
+public:
+  // Declare which __lib_* names this target supports
+  bool IsLibCallSupported(const std::string& name) const override {
+    static const std::set<std::string> supported = {
+        "__lib_gemm", "__lib_add", "__lib_relu",
+    };
+    return supported.count(name) > 0;
+  }
+
+  // Declare expected argument counts {min, max} for early sema
+  std::pair<int, int>
+  LibCallArgRange(const std::string& name) const override {
+    if (name == "__lib_gemm") return {5, 6};  // out, A, B, [bias,] K, N
+    if (name == "__lib_add") return {4, 4};   // dst, lhs, rhs, num
+    if (name == "__lib_relu") return {3, 3};  // dst, src, num
+    return {-1, -1};
+  }
+
+  // Whether target-library lowering is enabled by default
+  // (user can override with --use-target-lib / --use-target-lib=false)
+  bool DefaultUseTargetLib() const override { return true; }
+};
+```
+
+### Handling in Codegen
+
+In your codegen visitor's `Visit(AST::Call&)`, add dispatch for `__lib_*`
+builtins:
+
+```cpp
+if (PrefixedWith(func_name, "__lib_")) {
+  if (func_name == "__lib_gemm") {
+    EmitLibGemm(n, os, indent);
+  } else if (func_name == "__lib_add") {
+    // When --use-target-lib is on: emit target library call
+    if (CCtx().UseTargetLib()) {
+      os << indent << "my_accel::add(dst, lhs, rhs, num);\n";
+    } else {
+      // General fallback
+      os << indent << "for (int i = 0; i < num; ++i)\n";
+      os << indent << "  dst[i] = lhs[i] + rhs[i];\n";
+    }
+  }
+  return true;
+}
+```
+
+### Standard Interface Conventions
+
+| Pattern | Arguments | Examples |
+|---------|-----------|---------|
+| Unary   | `(dst, src, num)` | `__lib_relu`, `__lib_abs`, `__lib_sigmoid` |
+| Binary  | `(dst, lhs, rhs, num)` | `__lib_add`, `__lib_mul`, `__lib_max` |
+| GEMM    | `(out, A, B, K, N)` or `(out, A, B, bias, K, N)` | `__lib_gemm` |
+| Reduce  | `(dst, src, num, rdim, nred)` | `__lib_reduce_sum` |
+
+Following these conventions ensures portability across targets.
+
+### Adding a New Library Operation
+
+To add a new `__lib_*` operation:
+
+1. **No scanner/parser changes needed** -- the `__lib_<id>` pattern is matched
+   generically
+2. Add the name to your target's `IsLibCallSupported()` and `LibCallArgRange()`
+3. Add the codegen dispatch in your target's `Visit(AST::Call&)` handler
+4. Add a test in `tests/<target>/codegen/` that verifies both the library path
+   and the fallback path
+
+---
+
 ## Checklist
 
 - [ ] `lib/Target/NewTarget/` directory with codegen and target descriptor
