@@ -286,6 +286,7 @@ private:
   void EmitHostFuncDecl(std::ostringstream&);
   void EmitDeviceFuncDecl(std::ostringstream&, AST::ParallelBy*,
                           const ValueItem&);
+  std::optional<int64_t> GetSetRegLimit(AST::ParallelBy* pb) const;
 
   void EmitSource();
   void EmitScript(std::ostream& os, const std::string& exe_fn = "");

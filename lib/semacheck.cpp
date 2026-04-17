@@ -610,6 +610,25 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
     }
   }
 
+  int setreg_count = 0;
+  if (auto body = n.GetBody()) {
+    for (const auto& stmt : body->values) {
+      auto call = dyn_cast<AST::Call>(stmt);
+      if (!call || !call->IsBIF() || call->function->name != "setreg") continue;
+      setreg_count++;
+    }
+  }
+
+  if (setreg_count > 0 && n.GetLevel() != ParallelLevel::BLOCK) {
+    Error1(n.LOC(),
+           "setreg is only allowed in parallel-by blocks lowered to CUDA "
+           "kernels (level : block).");
+  }
+  if (setreg_count > 1) {
+    Error1(n.LOC(), "multiple setreg directives are not allowed in the same "
+                    "parallel-by block.");
+  }
+
   return true;
 }
 
@@ -1382,6 +1401,28 @@ bool SemaChecker::VisitNode(AST::Call& n) {
             choreo_unreachable(
                 "choreo assertion requires a string message as the second.");
           Error1(n.LOC(), "choreo assertion abort: " + msg);
+        }
+      }
+    } else if (func_name == "setreg") {
+      if (n.arguments->Count() != 1) {
+        Error1(n.LOC(), "setreg expects exactly one argument.");
+      } else {
+        auto arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(0));
+        if (!arg) {
+          Error1(n.LOC(), "setreg expects an integer expression argument.");
+        } else {
+          auto aty = NodeType(*arg);
+          if (!isa<ScalarIntegerType>(aty)) {
+            Error1(n.LOC(), "setreg expects an integer argument but got '" +
+                                PSTR(aty) + "'.");
+          } else if (!arg->Opts().HasVal() ||
+                     !arg->Opts().GetVal()->IsNumeric()) {
+            Error1(n.LOC(),
+                   "setreg argument must be a compile-time integer constant.");
+          } else if (auto reg_limit = VIInt(arg->Opts().GetVal());
+                     !reg_limit || reg_limit.value() <= 0) {
+            Error1(n.LOC(), "setreg argument must be a positive integer.");
+          }
         }
       }
     }

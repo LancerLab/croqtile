@@ -6613,6 +6613,17 @@ bool CuteCodeGen::Visit(AST::Call& n) {
         os << indent << "}\n";
       }
       return true;
+    } else if (func_name == "setreg") {
+      if (IsHost()) return true;
+      auto arg = cast<AST::Expr>(n.arguments->ValueAt(0));
+      auto reg_limit = VIInt(arg->Opts().GetVal());
+      if (!reg_limit || reg_limit.value() <= 0)
+        choreo_unreachable("setreg expects a positive integer constant.");
+      if (CCtx().ArchNum() >= 90) {
+        os << indent << "asm volatile(\"setmaxnreg.dec.sync.aligned.u32 "
+           << reg_limit.value() << ";\");\n";
+      }
+      return true;
     } else if (func_name == "print" || func_name == "println") {
       std::string print_format;
       print_format += "\"";
@@ -7521,6 +7532,24 @@ static inline std::string HostParamTypeStringifyForCute(const Choreo::Type& ty,
   return HostTypeStringify(ty, false, is_ref);
 }
 
+std::optional<int64_t> CuteCodeGen::GetSetRegLimit(AST::ParallelBy* pb) const {
+  if (!pb || !pb->GetBody()) return std::nullopt;
+
+  for (const auto& stmt : pb->GetBody()->values) {
+    auto call = dyn_cast<AST::Call>(stmt);
+    if (!call || !call->IsBIF() || call->function->name != "setreg") continue;
+    if (!call->arguments || call->arguments->Count() != 1) return std::nullopt;
+    auto arg = dyn_cast<AST::Expr>(call->arguments->ValueAt(0));
+    if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric())
+      return std::nullopt;
+    auto reg_limit = VIInt(arg->Opts().GetVal());
+    if (!reg_limit || reg_limit.value() <= 0) return std::nullopt;
+    return reg_limit.value();
+  }
+
+  return std::nullopt;
+}
+
 void CuteCodeGen::EmitCudaFree() {
   assert(IsHost());
   for (const auto& item : GetDeviceFuncIns(updating_cgi)) {
@@ -7538,13 +7567,19 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
                                      AST::ParallelBy* pb,
                                      const ValueItem& ring_start) {
   const auto& lcs = cgi.GetFunctionLaunches(fname);
+  auto setreg_limit = GetSetRegLimit(pb);
+  bool use_maxnreg_attr = setreg_limit.has_value() && CCtx().ArchNum() < 90;
   if (!lcs.empty() && lcs[0].HasCluster()) {
     auto& cc = lcs[0].cluster_count;
     auto cluster_total = cc.x * cc.y * cc.z;
-    oss << "__cluster_dims__(" << ValueSTR(cluster_total)
-        << ", 1, 1) __global__ void " << device_fn << "(";
+    oss << "__cluster_dims__(" << ValueSTR(cluster_total) << ", 1, 1) ";
+    oss << "__global__ ";
+    if (use_maxnreg_attr) oss << "__maxnreg__(" << setreg_limit.value() << ") ";
+    oss << "void " << device_fn << "(";
   } else {
-    oss << "__global__ void " << device_fn << "(";
+    oss << "__global__ ";
+    if (use_maxnreg_attr) oss << "__maxnreg__(" << setreg_limit.value() << ") ";
+    oss << "void " << device_fn << "(";
   }
 
   size_t index = 0;
