@@ -1,0 +1,27 @@
+// RUN: choreo -es --stats %s -o /dev/null 2>&1 | FileCheck %s
+//
+// --stats report: memory reuse statistics for shared buffers.
+// Two shared buffers with non-overlapping lifetimes inside one parallel block:
+//   shared s32 [256] a  (1024 bytes)
+//   shared s32 [256] b  (1024 bytes)
+// Both are static-size, one device function.
+//
+// CHECK: Memory Reuse Statistics
+// CHECK: {{[ ]*}}2  mreuse  - Buffers analyzed
+// CHECK: {{[ ]*}}2  mreuse  - Static-size buffers
+// CHECK: {{[ ]*}}0  mreuse  - Dynamic-size buffers (JIT heap sim)
+// CHECK: {{[ ]*}}1  mreuse  - Device functions with reuse
+
+__co__ void mem_reuse_stats_test(int j) {
+  parallel p by 8 {
+    shared s32 [256] a;
+    a.at(j) = j;
+    sync.shared;
+    x = a.at(j);
+
+    shared s32 [256] b;
+    b.at(j) = x + 1;
+    sync.shared;
+    y = b.at(j);
+  }
+}

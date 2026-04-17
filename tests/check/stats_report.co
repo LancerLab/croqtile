@@ -17,6 +17,13 @@
 // CHECK: {{[ ]*}}0  assess  - Runtime assertions (high cost)
 // CHECK: {{[ ]*}}2  assess  - Runtime assertions enabled
 // CHECK: {{[ ]*}}0  assess  - Runtime assertions disabled by cost filter
+//
+// Memory reuse: 1 shared buffer (buf), events excluded.
+// CHECK: Memory Reuse Statistics
+// CHECK: {{[ ]*}}1  mreuse  - Buffers analyzed
+// CHECK: {{[ ]*}}1  mreuse  - Static-size buffers
+// CHECK: {{[ ]*}}0  mreuse  - Dynamic-size buffers (JIT heap sim)
+// CHECK: {{[ ]*}}1  mreuse  - Device functions with reuse
 
 __co__ void foo(int j) {
   parallel p by 8 {

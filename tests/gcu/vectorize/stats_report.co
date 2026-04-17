@@ -1,0 +1,34 @@
+// RUN: choreo %s --vectorize --stats -es -o /dev/null 2>&1 | FileCheck %s
+//
+// --stats report: vectorizer statistics for GCU auto-vectorization.
+// Program has two loops from `foreach index in a.span` over [128, 512]:
+//   loop1 (outer, index__elem__0): rejected (not innermost)
+//   loop2 (inner, index__elem__1): vectorized with factor 128
+//
+// CHECK: Vectorizer Statistics
+// CHECK: {{[ ]*}}2  vec     - Loops analyzed
+// CHECK: {{[ ]*}}1  vec     - Loops vectorized
+// CHECK: {{[ ]*}}1  vec     - Loops rejected
+// CHECK: {{[ ]*}}0  vec     - Loops with vectorize() hints
+// CHECK: {{[ ]*}}128  vec     - Max vector factor chosen
+// CHECK: {{[ ]*}}1  vec     - Masks generated
+//
+// Memory reuse also runs (local buffers on GCU).
+// CHECK: Memory Reuse Statistics
+// CHECK: {{[ ]*}}2  mreuse  - Buffers analyzed
+// CHECK: {{[ ]*}}2  mreuse  - Static-size buffers
+// CHECK: {{[ ]*}}0  mreuse  - Dynamic-size buffers (JIT heap sim)
+// CHECK: {{[ ]*}}1  mreuse  - Device functions with reuse
+
+#define M 128
+#define N 512
+
+__co__ void vec_stats_test() {
+  parallel p by 1 {
+    local s32 [M, N] a;
+    local s32 [M, N] b;
+    foreach index in a.span {
+      a.at(index) = b.at(index);
+    }
+  }
+}

@@ -190,6 +190,40 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
       iv_row(is.unknown, "Predicates with unknown result");
     }
 
+    const auto& vs = CCtx().GetVectorizerStats();
+    if (vs.loops_analyzed > 0) {
+      errs() << color::err(color::kBold) << sep << "\n"
+             << "                      ... Vectorizer Statistics ...\n"
+             << sep << color::err(color::kReset) << "\n";
+      auto vec_row = [&](size_t n, const char* desc) {
+        errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+               << color::err(color::kReset) << "  vec     - " << desc << "\n";
+      };
+      vec_row(vs.loops_analyzed, "Loops analyzed");
+      vec_row(vs.loops_vectorized, "Loops vectorized");
+      vec_row(vs.loops_rejected, "Loops rejected");
+      vec_row(vs.loops_hinted, "Loops with vectorize() hints");
+      vec_row(vs.max_vector_factor, "Max vector factor chosen");
+      vec_row(vs.masks_generated, "Masks generated");
+    }
+
+    const auto& ms = CCtx().GetMemReuseStats();
+    if (ms.buffers_analyzed > 0) {
+      errs() << color::err(color::kBold) << sep << "\n"
+             << "                    ... Memory Reuse Statistics ...\n"
+             << sep << color::err(color::kReset) << "\n";
+      auto mr_row = [&](size_t n, const char* desc) {
+        errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+               << color::err(color::kReset) << "  mreuse  - " << desc << "\n";
+      };
+      mr_row(ms.buffers_analyzed, "Buffers analyzed");
+      mr_row(ms.static_buffers, "Static-size buffers");
+      mr_row(ms.dynamic_buffers, "Dynamic-size buffers (JIT heap sim)");
+      mr_row(ms.device_functions, "Device functions with reuse");
+      mr_row(ms.total_buffer_bytes, "Total buffer bytes (before reuse)");
+      mr_row(ms.total_static_heap_bytes, "Static heap bytes (after reuse)");
+    }
+
     errs() << color::err(color::kBold) << sep << color::err(color::kReset)
            << "\n";
   }

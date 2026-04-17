@@ -646,6 +646,7 @@ MaskGen::MaskGen(const ptr<SymbolTable> s_tab, ptr<LoopInfo> l,
 
 std::string MaskGen::MaskName() {
   static int mask_count = 0;
+  ++CCtx().GetVectorizerStats().masks_generated;
   return "mask" + std::to_string(mask_count++);
 }
 
@@ -1197,6 +1198,14 @@ bool LoopVectorizer::RunOnProgramImpl(AST::Node& root) {
     return true;
   }
 
+  {
+    auto& vs = CCtx().GetVectorizerStats();
+    for (auto& [_, loop] : li->GetAllLoops()) {
+      ++vs.loops_analyzed;
+      if (loop->HasVectorizationHint()) ++vs.loops_hinted;
+    }
+  }
+
   if (!AnalyzeDiversityShape(root)) {
     if (HasError() || abend_after) return false;
     return true;
@@ -1210,6 +1219,19 @@ bool LoopVectorizer::RunOnProgramImpl(AST::Node& root) {
   if (!ComputeVectorizationPlan(root)) {
     if (HasError() || abend_after) return false;
     return true;
+  }
+
+  {
+    auto& vs = CCtx().GetVectorizerStats();
+    for (auto& [_, loop] : li->GetAllLoops()) {
+      if (loop->CanVectorize()) {
+        ++vs.loops_vectorized;
+        vs.max_vector_factor =
+            std::max(vs.max_vector_factor, (size_t)loop->GetVectorFactor());
+      } else {
+        ++vs.loops_rejected;
+      }
+    }
   }
 
   if (!InferenceType(root)) {
