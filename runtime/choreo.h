@@ -311,7 +311,7 @@ inline std::ostream& operator<<(std::ostream& os, const mdspan<N>& s) {
 }
 
 template <size_t Rank>
-inline size_t span_size(const mdspan<Rank>& s) {
+__co_any__ inline size_t span_size(const mdspan<Rank>& s) {
   size_t sz = 1;
   for (size_t i = 0; i < Rank; ++i) sz *= s[i];
   return sz;

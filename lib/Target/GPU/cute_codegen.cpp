@@ -1400,6 +1400,11 @@ void CuteCodeGen::EmitFixedHostHead() {
 #include "cutlass/cutlass.h"
 )";
 
+  oss << R"(
+#ifdef __CUDACC__
+#pragma nv_diag_suppress 20054
+#endif
+)";
   oss << "// include the choreo header;\n";
   if (native_f16)
     oss << "#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__\n";
@@ -2665,25 +2670,37 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
       ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetName()), n.GetName());
     }
 
-    if (!(sty && sty->GetStorage() == Storage::REG && n.HasNote("update")))
-      ds << d_indent
-         << ((!n.IsDecl() || (IsMutable(*nty) && !isa<SpannedType>(nty)))
-                 ? ""
-                 : "auto ")
-         << n.GetName() << " = ";
-    else
+    bool anon_bounded = n.IsDecl() && isa<BoundedType>(nty) &&
+                        PrefixedWith(n.GetName(), "anon_");
+    if (!(sty && sty->GetStorage() == Storage::REG && n.HasNote("update"))) {
+      ds << d_indent;
+      if (!n.IsDecl() || (IsMutable(*nty) && !isa<SpannedType>(nty)))
+        ds << n.GetName() << " = ";
+      else {
+        if (anon_bounded) ds << "[[maybe_unused]] ";
+        ds << "auto " << n.GetName() << " = ";
+      }
+    } else
       ds << d_indent;
     ds << ExprSTR(n.value, false) << ";\n";
     return true;
   }
 
   if (isa<ScalarType>(nty)) {
+    bool anon_scalar = n.IsDecl() && PrefixedWith(n.GetName(), "anon_");
     if (IsHost())
       hs << h_indent << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = "
          << ExprSTR(n.value, true) << ";\n";
-    else
-      ds << d_indent << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = "
-         << ExprSTR(n.value, false) << ";\n";
+    else {
+      ds << d_indent;
+      if (!n.IsDecl())
+        ds << n.GetName() << " = ";
+      else {
+        if (anon_scalar) ds << "[[maybe_unused]] ";
+        ds << "auto " << n.GetName() << " = ";
+      }
+      ds << ExprSTR(n.value, false) << ";\n";
+    }
     return true;
   }
 
@@ -3014,8 +3031,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         ds << d_indent << "__syncthreads();  // must sync\n";
       }
 
-    } else
-      ds << d_indent << "auto " << device_fn << "__ring__ = nullptr;\n";
+    } else {
+      ds << d_indent << "[[maybe_unused]] auto " << device_fn
+         << "__ring__ = nullptr;\n";
+    }
     if (EnableDebugTypeRTTI()) {
       if (EnableLineDirective()) {
         auto loc = n.LOC();
@@ -7077,6 +7096,10 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
   sbe::Operand pv_y = bvs.size() > 1 ? bvs.at(1) : sbe::nu(1);
   sbe::Operand pv_z = bvs.size() > 2 ? bvs.at(2) : sbe::nu(1);
 
+  // Use [[maybe_unused]] to suppress NVCC warnings for virtual indices
+  // that may not be referenced in every kernel.
+  const char* mu = "[[maybe_unused]] ";
+
   switch (pb->GetLevel()) {
   case ParallelLevel::GROUPx4: {
     assert(pb->AllSubPVs().size() > 0);
@@ -7085,20 +7108,20 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
     std::string vid_y = vid_pfx + "g4id_y";
     std::string vid_z = vid_pfx + "g4id_z";
     if (pb->AllSubPVs().size() == 1) {
-      ds << d_indent << "auto " << vid_x << " = threadIdx.x / 128;\n";
+      ds << d_indent << mu << "auto " << vid_x << " = threadIdx.x / 128;\n";
     } else if (pb->AllSubPVs().size() == 2) {
-      ds << d_indent << "auto " << g4id << " = threadIdx.x / 128;\n";
-      ds << d_indent << "auto " << vid_x << " = " << g4id << " / "
-         << ValueSTR(pv_y);
-      ds << d_indent << "auto " << vid_y << " = " << g4id << " % "
+      ds << d_indent << mu << "auto " << g4id << " = threadIdx.x / 128;\n";
+      ds << d_indent << mu << "auto " << vid_x << " = " << g4id << " / "
+         << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << mu << "auto " << vid_y << " = " << g4id << " % "
          << ValueSTR(pv_y) << ";\n";
     } else if (pb->AllSubPVs().size() == 3) {
-      ds << d_indent << "auto " << g4id << "g4id = threadIdx.x / 128;\n";
-      ds << d_indent << "auto " << vid_x << " = " << g4id << " / "
+      ds << d_indent << mu << "auto " << g4id << " = threadIdx.x / 128;\n";
+      ds << d_indent << mu << "auto " << vid_x << " = " << g4id << " / "
          << ValueSTR(pv_y) << " / " << ValueSTR(pv_z) << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << g4id << " / "
+      ds << d_indent << mu << "auto " << vid_y << " = " << g4id << " / "
          << ValueSTR(pv_z) << " % " << ValueSTR(pv_y) << ";\n";
-      ds << d_indent << "auto " << vid_z << " = " << g4id << " % "
+      ds << d_indent << mu << "auto " << vid_z << " = " << g4id << " % "
          << ValueSTR(pv_z) << ";\n";
     }
   } break;
@@ -7113,20 +7136,20 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
     std::string vid_y = vid_pfx + "gid_y";
     std::string vid_z = vid_pfx + "gid_z";
     if (pb->AllSubPVs().size() == 1) {
-      ds << d_indent << "auto " << vid_x << " = threadIdx.x / 32;\n";
+      ds << d_indent << mu << "auto " << vid_x << " = threadIdx.x / 32;\n";
     } else if (pb->AllSubPVs().size() == 2) {
-      ds << d_indent << "auto " << gid << " = threadIdx.x / 32;\n";
-      ds << d_indent << "auto " << vid_x << " = " << gid << " / "
+      ds << d_indent << mu << "auto " << gid << " = threadIdx.x / 32;\n";
+      ds << d_indent << mu << "auto " << vid_x << " = " << gid << " / "
          << ValueSTR(pv_y) << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << gid << " % "
+      ds << d_indent << mu << "auto " << vid_y << " = " << gid << " % "
          << ValueSTR(pv_y) << ";\n";
     } else if (pb->AllSubPVs().size() == 3) {
-      ds << d_indent << "auto " << gid << " = threadIdx.x / 32;\n";
-      ds << d_indent << "auto " << vid_x << " = " << gid << " / "
+      ds << d_indent << mu << "auto " << gid << " = threadIdx.x / 32;\n";
+      ds << d_indent << mu << "auto " << vid_x << " = " << gid << " / "
          << ValueSTR(pv_y) << " / " << ValueSTR(pv_z) << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << gid << " / "
+      ds << d_indent << mu << "auto " << vid_y << " = " << gid << " / "
          << ValueSTR(pv_z) << " % " << ValueSTR(pv_y) << ";\n";
-      ds << d_indent << "auto " << vid_z << " = " << gid << " % "
+      ds << d_indent << mu << "auto " << vid_z << " = " << gid << " % "
          << ValueSTR(pv_z) << ";\n";
     }
   } break;
@@ -7142,42 +7165,42 @@ void CuteCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
     std::string vid_z = vid_pfx + "tid_z";
     if (pb->AllSubPVs().size() == 1) {
       if (bdim_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "auto " << vid_x << " = threadIdx.x % 128;\n";
+        ds << d_indent << mu << "auto " << vid_x << " = threadIdx.x % 128;\n";
       else if (bdim_level == ParallelLevel::GROUP)
-        ds << d_indent << "auto " << vid_x << " = threadIdx.x % 32;\n";
+        ds << d_indent << mu << "auto " << vid_x << " = threadIdx.x % 32;\n";
       else if (bdim_level == ParallelLevel::THREAD)
-        ds << d_indent << "auto " << vid_x << " = threadIdx.x;\n";
+        ds << d_indent << mu << "auto " << vid_x << " = threadIdx.x;\n";
       else
         choreo_unreachable("invalid bdim level.");
     } else if (pb->AllSubPVs().size() == 2) {
       if (bdim_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "auto " << tid << " = threadIdx.x % 128;\n";
+        ds << d_indent << mu << "auto " << tid << " = threadIdx.x % 128;\n";
       else if (bdim_level == ParallelLevel::GROUP)
-        ds << d_indent << "auto " << tid << " = threadIdx.x % 32;\n";
+        ds << d_indent << mu << "auto " << tid << " = threadIdx.x % 32;\n";
       else if (bdim_level == ParallelLevel::THREAD)
-        ds << d_indent << "auto " << tid << " = threadIdx.x;\n";
+        ds << d_indent << mu << "auto " << tid << " = threadIdx.x;\n";
       else
         choreo_unreachable("invalid bdim level.");
 
-      ds << d_indent << "auto " << vid_x << " = " << tid << " / "
+      ds << d_indent << mu << "auto " << vid_x << " = " << tid << " / "
          << ValueSTR(pv_y) << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << tid << " % "
+      ds << d_indent << mu << "auto " << vid_y << " = " << tid << " % "
          << ValueSTR(pv_y) << ";\n";
     } else if (pb->AllSubPVs().size() == 3) {
       if (bdim_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "auto " << tid << " = threadIdx.x % 128;\n";
+        ds << d_indent << mu << "auto " << tid << " = threadIdx.x % 128;\n";
       else if (bdim_level == ParallelLevel::GROUP)
-        ds << d_indent << "auto " << tid << " = threadIdx.x % 32;\n";
+        ds << d_indent << mu << "auto " << tid << " = threadIdx.x % 32;\n";
       else if (bdim_level == ParallelLevel::THREAD)
-        ds << d_indent << "auto " << tid << " = threadIdx.x;\n";
+        ds << d_indent << mu << "auto " << tid << " = threadIdx.x;\n";
       else
         choreo_unreachable("invalid bdim level.");
 
-      ds << d_indent << "auto " << vid_x << " = " << tid << " / "
+      ds << d_indent << mu << "auto " << vid_x << " = " << tid << " / "
          << ValueSTR(pv_y) << " / " << ValueSTR(pv_z) << ";\n";
-      ds << d_indent << "auto " << vid_y << " = " << tid << " / "
+      ds << d_indent << mu << "auto " << vid_y << " = " << tid << " / "
          << ValueSTR(pv_z) << " % " << ValueSTR(pv_y) << ";\n";
-      ds << d_indent << "auto " << vid_z << " = " << tid << " % "
+      ds << d_indent << mu << "auto " << vid_z << " = " << tid << " % "
          << ValueSTR(pv_z) << ";\n";
     }
   } break;
@@ -7371,8 +7394,15 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent << "uint64_t " << desc.GetName() << "_strides[] = {"
        << ValueSTR(Trim(Reverse(g_stride * gmem_ty->ElementSizeValue())))
        << "};\n"; // strides of shape
-    hs << h_indent << "uint32_t " << desc.GetName() << "_box_shape[] = {"
-       << ValueSTR(Reverse(t_shape.Value())) << "};\n"; // shape of tile block
+    {
+      auto box_vals = Reverse(t_shape.Value());
+      hs << h_indent << "uint32_t " << desc.GetName() << "_box_shape[] = {";
+      for (size_t i = 0; i < box_vals.size(); ++i) {
+        if (i > 0) hs << ", ";
+        hs << "(uint32_t)(" << ValueSTR(box_vals[i]) << ")";
+      }
+      hs << "};\n";
+    }
     hs << h_indent << "uint32_t " << desc.GetName() << "_elem_strides[] = {"
        << ValueSTR(ValxN(sbe::nu(1), t_shape.Rank()))
        << "};\n"; // elements' strides
