@@ -1,0 +1,15 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s --check-prefix=SM86
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=SM90
+
+__co__ void setreg_demo() {
+  parallel by 1 : block {
+    setreg 40;
+  }
+}
+
+// SM86: __global__ __maxnreg__(40) void __choreo_device_setreg_demo(
+// SM86-NOT: setmaxnreg.dec.sync.aligned.u32
+
+// SM90: __global__ void __choreo_device_setreg_demo(
+// SM90-NOT: __maxnreg__(40)
+// SM90: asm volatile("setmaxnreg.dec.sync.aligned.u32 40;");
