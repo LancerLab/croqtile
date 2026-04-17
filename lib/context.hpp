@@ -336,6 +336,26 @@ public:
   }
 };
 
+/// Aggregate statistics for the loop auto-vectorizer across all functions.
+struct VectorizerStats {
+  size_t loops_analyzed = 0;   // total foreach loops seen by the vectorizer
+  size_t loops_vectorized = 0; // loops successfully vectorized
+  size_t loops_rejected = 0;   // loops rejected by legality checks
+  size_t loops_hinted = 0;     // loops with explicit vectorize() hints
+  size_t max_vector_factor = 0; // largest vector factor chosen
+  size_t masks_generated = 0;  // masks inserted for divergent control flow
+};
+
+/// Aggregate statistics for the memory reuse pass across all functions.
+struct MemReuseStats {
+  size_t buffers_analyzed = 0;       // total buffers considered for reuse
+  size_t static_buffers = 0;         // buffers with compile-time-known sizes
+  size_t dynamic_buffers = 0;        // buffers requiring JIT heap simulation
+  size_t device_functions = 0;       // device functions with reuse contexts
+  size_t total_buffer_bytes = 0;     // sum of individual buffer sizes before reuse
+  size_t total_static_heap_bytes = 0; // sum of heap_size from static allocations
+};
+
 /// Aggregate statistics for assessments and assertions across all functions.
 struct AssessmentStats {
   size_t total = 0;            // total assessments evaluated
@@ -368,6 +388,8 @@ class CompilationContext {
 private:
   std::map<std::string, FunctionContext> function_contexts;
   AssessmentStats assessment_stats; // accumulated across all functions
+  VectorizerStats vectorizer_stats; // accumulated across all functions
+  MemReuseStats mem_reuse_stats;    // accumulated across all functions
   std::unique_ptr<Target> compile_target = nullptr;
   std::vector<ArchId> archs;
   std::vector<FeatureToggle> features;
@@ -571,6 +593,10 @@ public:
   bool PrintStats() const { return print_stats; }
   const AssessmentStats& GetAssessmentStats() const { return assessment_stats; }
   AssessmentStats& GetAssessmentStats() { return assessment_stats; }
+  const VectorizerStats& GetVectorizerStats() const { return vectorizer_stats; }
+  VectorizerStats& GetVectorizerStats() { return vectorizer_stats; }
+  const MemReuseStats& GetMemReuseStats() const { return mem_reuse_stats; }
+  MemReuseStats& GetMemReuseStats() { return mem_reuse_stats; }
   AssertionCost RuntimeCheckCostThreshold() const { return rtc_cost_threshold; }
   bool DisableRuntimeCheck() const {
     return rtc_cost_threshold == AssertionCost::NONE;

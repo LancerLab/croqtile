@@ -299,6 +299,19 @@ void MemReuse::Initialize() {
                                              .buffer_id = sname});
   }
   for (auto& [df_name, ctx] : DFCtxs()) ctx.SortBuffers();
+
+  {
+    auto& ms = CCtx().GetMemReuseStats();
+    for (const auto& [df_name, ctx] : DFCtxs()) {
+      ++ms.device_functions;
+      ms.static_buffers += ctx.buffers.size();
+      ms.dynamic_buffers += ctx.dynamic_buffers.size();
+      ms.buffers_analyzed += ctx.buffers.size() + ctx.dynamic_buffers.size();
+      for (const auto& buffer : ctx.buffers)
+        ms.total_buffer_bytes += buffer.size;
+    }
+  }
+
   VST_DEBUG({
     for (auto& [df_name, ctx] : DFCtxs()) {
       dbgs() << "For '" << df_name << "'\n";
@@ -465,6 +478,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
           (sto == Storage::LOCAL ? ctx.local_spm_size : ctx.shared_spm_size);
       ctx_spm_size = result.heap_size;
       mri->infos[sto].spm_size = result.heap_size;
+      CCtx().GetMemReuseStats().total_static_heap_bytes += result.heap_size;
       for (const auto& [buffer_id, offset] : result.chunk_offsets)
         ctx.mem_offset.emplace(buffer_id, offset);
       VST_DEBUG(dbgs() << "For '" << df_name << "'\n\t" << STR(sto)
