@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -gs -t cute -arch=sm_90a --use-prepack %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute %cuda_arch --use-prepack %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 // Tests: WGMMA sparse with prepack u32 metadata (--use-prepack flag).
 // The prepack kernel requires K >= 4096 (tile column = iv_k * 128, needs K/32 >= 128).

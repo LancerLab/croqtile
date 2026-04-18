@@ -214,6 +214,153 @@ get_terminal_width() {
     echo "$width"
 }
 
+supports_color_output() {
+  [ -t 1 ] || return 1
+  [ -n "${NO_COLOR:-}" ] && return 1
+  [ "${TERM:-dumb}" = "dumb" ] && return 1
+
+  if command -v tput >/dev/null 2>&1; then
+    local colors
+    colors=$(tput colors 2>/dev/null || echo 0)
+    [[ "$colors" =~ ^[0-9]+$ ]] || colors=0
+    [ "$colors" -ge 8 ] || return 1
+  fi
+
+  return 0
+}
+
+color_enabled=0
+color_reset=""
+color_bold=""
+color_green=""
+color_red=""
+color_yellow=""
+color_cyan=""
+
+init_output_styles() {
+  if ! supports_color_output; then
+    return 0
+  fi
+
+  color_enabled=1
+  color_reset=$'\033[0m'
+  color_bold=$'\033[1m'
+  color_green=$'\033[32m'
+  color_red=$'\033[31m'
+  color_yellow=$'\033[33m'
+  color_cyan=$'\033[36m'
+}
+
+style_text() {
+  local kind="$1"
+  local text="$2"
+
+  if [ "$color_enabled" -ne 1 ]; then
+    printf '%s' "$text"
+    return 0
+  fi
+
+  case "$kind" in
+    PASS)
+      printf '%b%s%b' "${color_bold}${color_green}" "$text" "$color_reset"
+      ;;
+    FAIL|UNEXPECTED*)
+      printf '%b%s%b' "${color_bold}${color_red}" "$text" "$color_reset"
+      ;;
+    XFAIL)
+      printf '%b%s%b' "${color_bold}${color_cyan}" "$text" "$color_reset"
+      ;;
+    SKIP*)
+      printf '%b%s%b' "${color_bold}${color_yellow}" "$text" "$color_reset"
+      ;;
+    SUMMARY)
+      printf '%b%s%b' "$color_bold" "$text" "$color_reset"
+      ;;
+    *)
+      printf '%s' "$text"
+      ;;
+  esac
+}
+
+print_status_line() {
+  local label="$1"
+  shift
+
+  printf '%s %s\n' "$(style_text "$label" "$label")" "$*"
+}
+
+print_timed_status_line() {
+  local kind="$1"
+  local file="$2"
+  local count="$3"
+  local total="$4"
+  local elapsed_time="$5"
+  local plain_label="${kind}:"
+  local plain_rest=" $file ($count of $total)"
+  local label_width=${#plain_label}
+  local rest_width=$((max_text_width - label_width))
+
+  [ "$rest_width" -lt 1 ] && rest_width=1
+  printf '%s%-*s %s\n' \
+    "$(style_text "$kind" "$plain_label")" \
+    "$rest_width" \
+    "$plain_rest" \
+    "| Time: $elapsed_time"
+}
+
+expand_target_specs() {
+  local out_name="$1"
+  shift
+
+  local -a saved_req_targets=("${REQ_TARGETS[@]}")
+  local -a normalized_specs=()
+  local spec
+  for spec in "$@"; do
+    normalized_specs+=("$(toupper "$spec")")
+  done
+
+  set_clear REQ_TARGETS
+  if [ ${#normalized_specs[@]} -ne 0 ]; then
+    run_hooks "set_archs" "${normalized_specs[@]}"
+  fi
+
+  eval "$out_name=(\"\${REQ_TARGETS[@]}\")"
+  REQ_TARGETS=("${saved_req_targets[@]}")
+}
+
+target_specs_match_candidate() {
+  local candidate="$1"
+  shift
+
+  local -a expanded_targets=()
+  local expanded_target
+
+  expand_target_specs expanded_targets "$@"
+  for expanded_target in "${expanded_targets[@]}"; do
+    if [[ "$expanded_target" == "$candidate" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+target_specs_are_required() {
+  local -a expanded_targets=()
+  local expanded_target
+
+  expand_target_specs expanded_targets "$@"
+  [ ${#expanded_targets[@]} -ne 0 ] || return 1
+
+  for expanded_target in "${expanded_targets[@]}"; do
+    if ! set_contains REQ_TARGETS "$expanded_target"; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
 
 validate_cuda_home() {
   # Check if CUDA_HOME is set
@@ -438,9 +585,11 @@ if ! which bc &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.33"
+echo "        Choreo SimpleLit - v0.34"
 echo "---------------------------------------"
 echo ""
+
+init_output_styles
 
 reproduce_commands=()
 working_command=""
@@ -841,52 +990,28 @@ execute_command() {
     if [[ "$expect_fail" == "*"* ]]; then
       increment_counter num_uepass 1
       append_reproduce_command "$command"
-      if [[ ${#test_info} -gt $max_text_width ]]; then
-        printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-      else
-        printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-      fi
+      print_timed_status_line "UNEXPECTED PASS" "$file" "$count" "$total" "$elapsed_time"
     elif [[ ! -z "${expect_fail}" ]] &&
          [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${mach})"* ]]; then
       increment_counter num_uepass 1
       append_reproduce_command "$command"
-      if [[ ${#test_info} -gt $max_text_width ]]; then
-        printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-      else
-        printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-      fi
+      print_timed_status_line "UNEXPECTED PASS" "$file" "$count" "$total" "$elapsed_time"
     else
       increment_counter num_passed 1
-      if [[ ${#test_info} -gt $max_text_width ]]; then
-        printf "%*s %s\n" $((max_text_width)) "PASS: $file ($count of $total)" "| Time: $elapsed_time"
-      else
-        printf "%-*s %s\n" "$max_text_width" "PASS: $file ($count of $total)" "| Time: $elapsed_time"
-      fi
+      print_timed_status_line "PASS" "$file" "$count" "$total" "$elapsed_time"
     fi
   else
     if [[ "${expect_fail}" == "*"* ]]; then
       increment_counter num_xfails 1
-      if [[ ${#test_info} -gt $max_text_width ]]; then
-        printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-      else
-        printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-      fi
+      print_timed_status_line "XFAIL" "$file" "$count" "$total" "$elapsed_time"
     elif [[ ! -z "${expect_fail}" ]] &&
          [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${mach})"* ]]; then
       increment_counter num_xfails 1
-      if [[ ${#test_info} -gt $max_text_width ]]; then
-        printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-      else
-        printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-      fi
+      print_timed_status_line "XFAIL" "$file" "$count" "$total" "$elapsed_time"
     else
       increment_counter num_failed 1
       append_reproduce_command "$command"
-      if [[ ${#test_info} -gt $max_text_width ]]; then
-        printf "%*s %s\n" $((max_text_width)) "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
-      else
-        printf "%-*s %s\n" "$max_text_width" "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
-      fi
+      print_timed_status_line "FAIL" "$file" "$count" "$total" "$elapsed_time"
     fi
   fi
 }
@@ -955,14 +1080,14 @@ cleantmplocks() {
 
 showresult() {
   echo ""
-  echo "------ Lit Test summary ------"
+  echo "$(style_text "SUMMARY" "------ Lit Test summary ------")"
   echo "Tested:  $(read_counter 'num_tested')"
-  echo "Passed:  $(read_counter 'num_passed')"
+  echo "$(style_text "PASS" "Passed:")  $(read_counter 'num_passed')"
 
-  [ $num_skiped -ne 0 ] && echo Skipped: $num_skiped
-  [ $(read_counter 'num_failed') -ne 0 ] && echo "Failed:  $(read_counter 'num_failed')"
-  [ $(read_counter 'num_xfails') -ne 0 ] && echo "Expected Failures: $(read_counter 'num_xfails')"
-  [ $(read_counter 'num_uepass') -ne 0 ] && echo "Unexpected Passes: $(read_counter 'num_uepass')"
+  [ $num_skiped -ne 0 ] && echo "$(style_text "SKIP" "Skipped:") $num_skiped"
+  [ $(read_counter 'num_failed') -ne 0 ] && echo "$(style_text "FAIL" "Failed:")  $(read_counter 'num_failed')"
+  [ $(read_counter 'num_xfails') -ne 0 ] && echo "$(style_text "XFAIL" "Expected Failures:") $(read_counter 'num_xfails')"
+  [ $(read_counter 'num_uepass') -ne 0 ] && echo "$(style_text "UNEXPECTED PASS" "Unexpected Passes:") $(read_counter 'num_uepass')"
 
   local succed=$(($(read_counter 'num_passed') + $(read_counter 'num_xfails')))
   local failed=$(($(read_counter 'num_failed') + $(read_counter 'num_uepass')))
@@ -1028,11 +1153,12 @@ retrieve_run_config() {
     run_environ="shell"
   elif [[ $line =~ [[:blank:]]*RUN-([^-]+):[[:blank:]]*(.+) ]]; then
     run_target=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
-    if [[ "${run_target}" == "$mach" ]]; then
-      run_command="${BASH_REMATCH[2]}"
+    local matched_command="${BASH_REMATCH[2]}"
+    if target_specs_match_candidate "$mach" "$run_target"; then
+      run_command="${matched_command}"
       run_environ="shell"
     elif [[ "${run_target}" == "docker" ]]; then
-      run_command="${BASH_REMATCH[2]}"
+      run_command="${matched_command}"
       run_environ="docker"
       run_target=
     fi
@@ -1058,18 +1184,18 @@ for _entry in "${files_array[@]}"; do
   prepare "$file" "$_cfg_override"
 
   if [ ! -z "$expect_skip" ]; then
-    echo "SKIP:  $file"
+    print_status_line "SKIP:" "$file"
     num_skiped=$(($num_skiped + 1));
     continue;
   fi
 
   if [ ${need_cuda} -eq 1 ]; then
     if ! validate_cuda_home; then
-      echo "SKIP(CUDA):  $file"
+      print_status_line "SKIP(CUDA):" "$file"
       num_skiped=$(($num_skiped + 1));
       continue;
     elif [ "$device_type" != "gpu" ]; then
-      echo "SKIP(GPU):  $file"
+      print_status_line "SKIP(GPU):" "$file"
       num_skiped=$(($num_skiped + 1));
       continue;
     else
@@ -1078,13 +1204,13 @@ for _entry in "${files_array[@]}"; do
   fi
 
   if [ ${requires_gdb} -eq 1 ] && [ -z "${GDB_BIN}" ]; then
-    echo "SKIP(GDB):  $file"
+    print_status_line "SKIP(GDB):" "$file"
     num_skiped=$(($num_skiped + 1));
     continue;
   fi
 
   if [ ${requires_cudagdb} -eq 1 ] && [ -z "${CUDA_GDB_BIN}" ]; then
-    echo "SKIP(CUDA-GDB):  $file"
+    print_status_line "SKIP(CUDA-GDB):" "$file"
     num_skiped=$(($num_skiped + 1));
     continue;
   fi
@@ -1102,7 +1228,7 @@ for _entry in "${files_array[@]}"; do
 
   if [[ -z "${CHOREO_ENABLE_GPU_MMA_TESTS}" ]] || [[ "${CHOREO_ENABLE_GPU_MMA_TESTS}" != "1" ]]; then
     if [[ "$(dirname ${file})" == *"gpu/end2end/wmma"* ]] || [[ "$(dirname ${file})" == *"gpu/end2end/ptx_mma"* ]]; then
-      echo "SKIP(GPU-MMA): ${file} "
+      print_status_line "SKIP(GPU-MMA):" "${file}"
       num_skiped=$(($num_skiped + 1));
       continue;
     fi
@@ -1112,7 +1238,7 @@ for _entry in "${files_array[@]}"; do
   if ! set_empty REQ_TARGETS; then
     if [[ $device_type == "none"  ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
       _all_skipped_targets=$(set_print REQ_TARGETS)
-      echo "SKIP($(toupper "${_all_skipped_targets}")): ${file}"
+      print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file}"
       num_skiped=$(($num_skiped + 1));
       continue;
     fi
@@ -1173,7 +1299,7 @@ for _entry in "${files_array[@]}"; do
     if [[ ("$run_environ" == "docker" && "$is_in_docker" == false) ||
           ("$run_environ" == "shell" && "$is_in_shell" == false) ]]; then
       # Skip when the environment does not match
-      echo "SKIP(${run_environ}): ${file} ($run_count of $run_num)"
+      print_status_line "SKIP(${run_environ}):" "${file} ($run_count of $run_num)"
       num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
       continue;
     fi
@@ -1181,7 +1307,7 @@ for _entry in "${files_array[@]}"; do
     # There is a RUN-TARGET
     if [[ ! -z "$run_target" ]]; then
       # check if run-target violates the REQUIRES
-      if ! set_contains REQ_TARGETS "$run_target"; then
+      if ! target_specs_are_required "$run_target"; then
         echo "ERROR($file): run target ($run_target) is not listed as a test targets ($run_target)."
         exit 1
       fi
@@ -1193,7 +1319,7 @@ for _entry in "${files_array[@]}"; do
       if [[ $device_type == "none"  ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
         # Not matched, skip
         _all_skipped_targets=$(set_print REQ_TARGETS)
-        echo "SKIP($(toupper "${_all_skipped_targets}")): ${file} ($run_count of $run_num)"
+        print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file} ($run_count of $run_num)"
         num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
         continue;
       fi

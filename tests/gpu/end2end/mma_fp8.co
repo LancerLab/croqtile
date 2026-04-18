@@ -1,5 +1,5 @@
-// REQUIRES: TARGET-SM_90
-// RUN: choreo -gs -t cute -arch=sm_90 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// REQUIRES: TARGET-SM_90+
+// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 // Consolidated from: mma_fp8.co, wmma_fp8_rr.co
 

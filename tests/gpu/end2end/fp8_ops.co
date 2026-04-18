@@ -1,5 +1,5 @@
-// REQUIRES: TARGET-SM_90
-// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
+// REQUIRES: TARGET-SM_90+
+// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
 
 // Consolidated from: add_fp8_e4m3_to_f16.co, add_fp8_e5m2_to_f16.co, copy_fp8.co, async_copy_fp8.co
 
