@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-SM_90
-// RUN: choreo -gs -t cute -arch=sm_90a --use-warpspec %s -o %s.cute.result && CUDA_VISIBLE_DEVICES=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute %cuda_arch --use-warpspec %s -o %s.cute.result && CUDA_VISIBLE_DEVICES=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 #include <cstring>
 #include <cstdlib>

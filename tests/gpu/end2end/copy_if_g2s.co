@@ -1,5 +1,5 @@
-// REQUIRES: TARGET-SM_90A
-// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// REQUIRES: TARGET-SM_90+
+// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 #define TILE_M 64
 #define TILE_K 64

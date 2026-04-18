@@ -1,5 +1,5 @@
-// REQUIRES: TARGET-SM_90A
-// RUN: choreo -gs -t cute -arch=sm_90a -sim %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// REQUIRES: TARGET-SM_90+
+// RUN: choreo -gs -t cute %cuda_arch -sim %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
 __co__ auto dma_copy_sparse(s32 [6, 17, 64] input) {
   s32 [input.span] output;
