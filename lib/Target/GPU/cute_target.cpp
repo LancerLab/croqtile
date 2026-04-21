@@ -142,6 +142,50 @@ public:
     return types;
   }
 
+  std::vector<AtomicCapability>
+  SupportedAtomicOps(const ArchId&) const override {
+    // Choreo only targets SM70+; all types below are available on SM70+.
+    std::vector<AtomicCapability> caps;
+
+    caps.push_back({AtomicOp::ADD,
+                    {BaseType::S32, BaseType::U32, BaseType::U64,
+                     BaseType::F32, BaseType::F64, BaseType::F16}});
+
+    caps.push_back({AtomicOp::SUB, {BaseType::S32, BaseType::U32}});
+
+    caps.push_back(
+        {AtomicOp::EXCH,
+         {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32}});
+
+    caps.push_back({AtomicOp::MIN,
+                    {BaseType::S32, BaseType::U32, BaseType::S64,
+                     BaseType::U64}});
+    caps.push_back({AtomicOp::MAX,
+                    {BaseType::S32, BaseType::U32, BaseType::S64,
+                     BaseType::U64}});
+
+    caps.push_back({AtomicOp::AND,
+                    {BaseType::S32, BaseType::U32, BaseType::S64,
+                     BaseType::U64}});
+    caps.push_back({AtomicOp::OR,
+                    {BaseType::S32, BaseType::U32, BaseType::S64,
+                     BaseType::U64}});
+    caps.push_back({AtomicOp::XOR,
+                    {BaseType::S32, BaseType::U32, BaseType::S64,
+                     BaseType::U64}});
+
+    caps.push_back({AtomicOp::CAS,
+                    {BaseType::S32, BaseType::U32, BaseType::U64,
+                     BaseType::U16}});
+
+    return caps;
+  }
+
+  std::set<Storage>
+  SupportedAtomicStorages(const ArchId&) const override {
+    return {Storage::SHARED, Storage::GLOBAL};
+  }
+
   const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId& arch) const override {
     if (IsFeatureSupported(arch, STR(ChoreoFeature::WGMMA)))

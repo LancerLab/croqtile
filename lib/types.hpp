@@ -1065,6 +1065,7 @@ struct PlaceHolderType final : public Type,
 
 struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   bool is_mutable = false;
+  Storage sto = Storage::NONE;
   ScalarType(BaseType t, bool m) : Type(t), is_mutable(m) {
     assert(IsScalarType(t));
   }
@@ -1075,8 +1076,15 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   virtual void SetBaseType(BaseType t) { bt = t; }
   virtual bool IsMutable() const { return is_mutable; }
   virtual void SetMutable(bool m) { is_mutable = m; }
-  virtual ptr<ScalarType> Clone(bool m) const = 0;
-  // virtual const ptr<Type> CloneImpl() const override = 0;
+  virtual const ptr<Type> Clone() const override {
+    auto sty = cast<ScalarType>(CloneImpl());
+    sty->SetMutable(is_mutable);
+    sty->SetStorage(sto);
+    return sty;
+  }
+  virtual Storage GetStorage() const { return sto; }
+  virtual void SetStorage(Storage s = Storage::NONE) { sto = s; }
+  virtual const ptr<Type> CloneImpl() const override = 0;
 
   bool operator==(const Type& ty) const override {
     if (auto sty = dyn_cast<ScalarType>(&ty)) {
@@ -1161,9 +1169,6 @@ struct Bin1Type final : public ScalarIntegerType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<Bin1Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<Bin1Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, Bin1Type)
 };
@@ -1173,9 +1178,6 @@ struct U1Type final : public ScalarIntegerType, public TypeIDProvider<U1Type> {
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<U1Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<U1Type>(m);
   }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, U1Type)
@@ -1187,9 +1189,6 @@ struct S2Type final : public ScalarIntegerType, public TypeIDProvider<S2Type> {
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<S2Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<S2Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, S2Type)
 };
@@ -1199,9 +1198,6 @@ struct U2Type final : public ScalarIntegerType, public TypeIDProvider<U2Type> {
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<U2Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<U2Type>(m);
   }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, U2Type)
@@ -1213,9 +1209,6 @@ struct S4Type final : public ScalarIntegerType, public TypeIDProvider<S4Type> {
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<S4Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<S4Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, S4Type)
 };
@@ -1225,9 +1218,6 @@ struct U4Type final : public ScalarIntegerType, public TypeIDProvider<U4Type> {
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<U4Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<U4Type>(m);
   }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, U4Type)
@@ -1239,9 +1229,6 @@ struct S6Type final : public ScalarIntegerType, public TypeIDProvider<S6Type> {
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<S6Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<S6Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, S6Type)
 };
@@ -1251,9 +1238,6 @@ struct U6Type final : public ScalarIntegerType, public TypeIDProvider<U6Type> {
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<U6Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<U6Type>(m);
   }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, U6Type)
@@ -1265,9 +1249,6 @@ struct S8Type final : public ScalarIntegerType, public TypeIDProvider<S8Type> {
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<S8Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<S8Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, S8Type)
 };
@@ -1277,9 +1258,6 @@ struct U8Type final : public ScalarIntegerType, public TypeIDProvider<U8Type> {
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<U8Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<U8Type>(m);
   }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, U8Type)
@@ -1292,9 +1270,6 @@ struct S16Type final : public ScalarIntegerType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<S16Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<S16Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, S16Type)
 };
@@ -1306,9 +1281,6 @@ struct U16Type final : public ScalarIntegerType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<U16Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<U16Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, U16Type)
 };
@@ -1319,9 +1291,6 @@ struct S32Type final : public ScalarIntegerType,
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<S32Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<S32Type>(m);
   }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, S32Type)
@@ -1336,9 +1305,6 @@ struct U32Type final : public ScalarIntegerType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<U32Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<U32Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, U32Type)
 };
@@ -1350,9 +1316,6 @@ struct S64Type final : public ScalarIntegerType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<S64Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<S64Type>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, S64Type)
 };
@@ -1363,9 +1326,6 @@ struct U64Type final : public ScalarIntegerType,
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<U64Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<U64Type>(m);
   }
 
   __UDT_TYPE_INFO__(ScalarIntegerType, U64Type)
@@ -1388,9 +1348,6 @@ struct FloatE2M1Type final : public ScalarFloatType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatE2M1Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<FloatE2M1Type>(m);
-  }
   __UDT_TYPE_INFO__(ScalarFloatType, FloatE2M1Type)
 };
 
@@ -1399,9 +1356,6 @@ struct FloatE3M2Type final : public ScalarFloatType,
   FloatE3M2Type(bool m) : ScalarFloatType(BaseType::F6_E3M2, m) {}
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatE3M2Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<FloatE3M2Type>(m);
   }
   __UDT_TYPE_INFO__(ScalarFloatType, FloatE3M2Type)
 };
@@ -1412,9 +1366,6 @@ struct FloatE2M3Type final : public ScalarFloatType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatE2M3Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<FloatE2M3Type>(m);
-  }
   __UDT_TYPE_INFO__(ScalarFloatType, FloatE2M3Type)
 };
 
@@ -1423,9 +1374,6 @@ struct FloatUE8M0Type final : public ScalarFloatType,
   FloatUE8M0Type(bool m) : ScalarFloatType(BaseType::F8_UE8M0, m) {}
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatUE8M0Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<FloatUE8M0Type>(m);
   }
   __UDT_TYPE_INFO__(ScalarFloatType, FloatUE8M0Type)
 };
@@ -1436,9 +1384,6 @@ struct FloatUE4M3Type final : public ScalarFloatType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatUE4M3Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<FloatUE4M3Type>(m);
-  }
   __UDT_TYPE_INFO__(ScalarFloatType, FloatUE4M3Type)
 };
 
@@ -1447,9 +1392,6 @@ struct FloatE4M3Type final : public ScalarFloatType,
   FloatE4M3Type(bool m) : ScalarFloatType(BaseType::F8_E4M3, m) {}
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatE4M3Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<FloatE4M3Type>(m);
   }
   __UDT_TYPE_INFO__(ScalarFloatType, FloatE4M3Type)
 };
@@ -1460,9 +1402,6 @@ struct FloatE5M2Type final : public ScalarFloatType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<FloatE5M2Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<FloatE5M2Type>(m);
-  }
   __UDT_TYPE_INFO__(ScalarFloatType, FloatE5M2Type)
 };
 
@@ -1470,9 +1409,6 @@ struct F16Type final : public ScalarFloatType, public TypeIDProvider<F16Type> {
   F16Type(bool m) : ScalarFloatType(BaseType::F16, m) {}
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<F16Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<F16Type>(m);
   }
   __UDT_TYPE_INFO__(ScalarFloatType, F16Type)
 };
@@ -1483,9 +1419,6 @@ struct BF16Type final : public ScalarFloatType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<BF16Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<BF16Type>(m);
-  }
   __UDT_TYPE_INFO__(ScalarFloatType, BF16Type)
 };
 
@@ -1495,9 +1428,6 @@ struct TF32Type final : public ScalarFloatType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<TF32Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<TF32Type>(m);
-  }
   __UDT_TYPE_INFO__(ScalarFloatType, TF32Type)
 };
 
@@ -1506,9 +1436,6 @@ struct F32Type final : public ScalarFloatType, public TypeIDProvider<F32Type> {
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<F32Type>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<F32Type>(m);
-  }
   __UDT_TYPE_INFO__(ScalarFloatType, F32Type)
 };
 
@@ -1516,9 +1443,6 @@ struct F64Type final : public ScalarFloatType, public TypeIDProvider<F64Type> {
   F64Type(bool m) : ScalarFloatType(BaseType::F64, m) {}
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<F64Type>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<F64Type>(m);
   }
   __UDT_TYPE_INFO__(ScalarFloatType, F64Type)
 };
@@ -1529,9 +1453,6 @@ struct BooleanType final : public ScalarType,
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<BooleanType>(IsMutable());
   }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<BooleanType>(m);
-  }
 
   __UDT_TYPE_INFO__(ScalarType, BooleanType)
 };
@@ -1541,9 +1462,6 @@ struct UnknownScalarType final : public ScalarType,
   UnknownScalarType(bool m) : ScalarType(BaseType::UNKSCALAR, m) {}
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<UnknownScalarType>(IsMutable());
-  }
-  ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<UnknownScalarType>(m);
   }
 
   bool operator==(const Type&) const override {
@@ -2829,19 +2747,23 @@ inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt, bool m = false) {
   return nullptr;
 }
 
-inline static ptr<Type> MakeScalarType(BaseType bt, bool m = false) {
+inline static ptr<Type> MakeScalarType(BaseType bt, bool m = false,
+                                       Storage s = Storage::NONE) {
+  ptr<Type> ty;
   if (IsIntegerType(bt))
-    return MakeScalarIntegerType(bt, m);
+    ty = MakeScalarIntegerType(bt, m);
   else if (IsFloatType(bt))
-    return MakeScalarFloatType(bt, m);
+    ty = MakeScalarFloatType(bt, m);
   else if (bt == BaseType::BOOL)
-    return MakeBooleanType(m);
+    ty = MakeBooleanType(m);
   else if (bt == BaseType::UNKSCALAR)
-    return MakeUnknownScalarType(m);
+    ty = MakeUnknownScalarType(m);
   else {
     choreo_unreachable("unsupported base type for scalar type.");
     return nullptr;
   }
+  if (s != Storage::NONE) cast<ScalarType>(ty)->SetStorage(s);
+  return ty;
 }
 
 inline ptr<ScalarFloatType> MakeF32Type(bool m = false) {

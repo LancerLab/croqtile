@@ -1442,6 +1442,7 @@ bool SemaChecker::VisitNode(AST::Call& n) {
                      "th argument to be the same type as the first one.");
       }
     }
+    // Atomic op/type/storage validation is handled in earlysema.
   }
 
   if (n.IsBIF()) return true;

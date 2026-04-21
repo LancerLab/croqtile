@@ -43,24 +43,25 @@ This reference (level-2) is for readers who want to understand the language in d
 
 16. [MMA](mma.md) -- Matrix multiply-accumulate: `fill`, `load`, `row.col`, `op`, `store`
 17. [Numerics](numerics.md) -- Builtin functions, transcendentals, type promotion, float variants
+18. [Atomic Operations](atomic-operations.md) -- `__atomic_add`, `__atomic_cas`, etc., per-arch type support
 
 ### Part F -- Synchronization and Async
 
-18. [Events](events.md) -- `event`, `trigger`, `wait`, deadlock avoidance
-19. [Futures and Async](futures-and-async.md) -- Future semantics, async model, non-blocking chains
+19. [Events](events.md) -- `event`, `trigger`, `wait`, deadlock avoidance
+20. [Futures and Async](futures-and-async.md) -- Future semantics, async model, non-blocking chains
 
 ### Part G -- C++ Interop
 
-20. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls
-21. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
-22. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
+21. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls
+22. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
+23. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
 
 ### Part H -- Advanced Topics
 
-23. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
+24. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
 
 ### Appendix
 
-24. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
-25. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
-26. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies
+25. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
+26. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
+27. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies

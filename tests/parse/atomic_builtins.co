@@ -1,0 +1,30 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void atomic_parse_test(s32 [64] a, s32 [64] b) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.shared;
+    __atomic_add(s.at(p), 1);
+    __atomic_sub(s.at(p), 2);
+    __atomic_exch(s.at(p), 0);
+    __atomic_min(s.at(p), b.at(p));
+    __atomic_max(s.at(p), b.at(p));
+    __atomic_and(s.at(p), 0xFF);
+    __atomic_or(s.at(p), 0x01);
+    __atomic_xor(s.at(p), 0x0F);
+    __atomic_cas(s.at(p), 0, 1);
+    mutable s32 old = __atomic_add(s.at(p), 10);
+  }
+}
+
+// CHECK: Call: __atomic_add (built-in)
+// CHECK: Call: __atomic_sub (built-in)
+// CHECK: Call: __atomic_exch (built-in)
+// CHECK: Call: __atomic_min (built-in)
+// CHECK: Call: __atomic_max (built-in)
+// CHECK: Call: __atomic_and (built-in)
+// CHECK: Call: __atomic_or (built-in)
+// CHECK: Call: __atomic_xor (built-in)
+// CHECK: Call: __atomic_cas (built-in)
+// CHECK: Var Decl (mutable s32): old = call __atomic_add

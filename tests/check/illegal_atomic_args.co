@@ -1,0 +1,20 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void atomic_wrong_arg_count(s32 [64] a) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    __atomic_add(s.at(p));
+    __atomic_cas(s.at(p), 1);
+  }
+}
+// CHECK: error: '__atomic_add' expects 2 arguments but got 1.
+// CHECK: error: '__atomic_cas' expects 3 arguments but got 2.
+
+__co__ void atomic_plain_scalar(s32 [64] a) {
+  parallel p by 64 : thread {
+    mutable s32 x = 0;
+    __atomic_add(x, 1);
+  }
+}
+// CHECK: error: '__atomic_add' is not supported on
