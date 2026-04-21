@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute 2>&1 | FileCheck %s && rm -f %s.topscc.result
 
 #include "choreo.h"
 
@@ -91,40 +91,44 @@ int main()
   return 0;
 }
 
-// ================((x = 11))==============
+// x=11: parallel by 2 output appears first (stderr), then host+sequential (stdout)
+// CHECK-DAG: call kernel0
+// CHECK-DAG: call kernel0
+// CHECK: ================((x = 11))==============
 // CHECK: co begin
-// CHECK-DAG: call kernel0
-// CHECK-DAG: call kernel0
 // CHECK: return value: 0
 // CHECK-NOT: co end
-// ================((x =  6))==============
+// x=6: parallel (p by 1, q by 2 = 2 threads) output first
+// CHECK-DAG: call kernel1
+// CHECK-DAG: call kernel1
+// CHECK: ================((x =  6))==============
 // CHECK: co begin
-// CHECK-DAG: call kernel1
-// CHECK-DAG: call kernel1
 // CHECK: return value: 1
 // CHECK-NOT: co end
-// ================((x =  3))==============
+// x=3: parallel by 1 then parallel by 2, interleaved with stdout
+// CHECK: after calling kernel2
+// CHECK: iv: {0}
+// CHECK: res: 0
+// CHECK: ================((x =  3))==============
 // CHECK: co begin
-// CHECK: after calling kernel2
-// CHECK: 	iv: {0}
-// CHECK: 	res: 0
 // CHECK-DAG: call kernel3
 // CHECK-DAG: call kernel3
 // CHECK-DAG: ans: 2
 // CHECK-DAG: ans: 2
 // CHECK: after calling kernel2
-// CHECK: 	iv: {1}
-// CHECK: 	res: 1
+// CHECK: iv: {1}
+// CHECK: res: 1
 // CHECK-DAG: call kernel3
 // CHECK-DAG: call kernel3
 // CHECK-DAG: ans: 2
 // CHECK-DAG: ans: 2
 // CHECK: return value: 2
-// ================((x = -3))==============
+// x=-3: no parallel, all sequential
+// CHECK: ================((x = -3))==============
 // CHECK: co begin
 // CHECK: in host!
-// CHECK: 	in host within!
-// CHECK: 	in host foreach!
-// CHECK: 	in host foreach!
+// CHECK: in host within!
+// CHECK: in host foreach!
+// CHECK: in host foreach!
 // CHECK: return value: 3
 // CHECK: passed

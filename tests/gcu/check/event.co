@@ -1,7 +1,6 @@
 // RUN: choreo -gs -t topscc -arch=gcu210 %s 2>&1 | FileCheck %s --check-prefix=CHECK210
 // RUN: choreo -gs -t topscc -arch=gcu200 %s 2>&1 | FileCheck %s --check-prefix=CHECK200
 // RUN: choreo -gs -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK300
-// RUN: choreo -gs -t factor -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECKfactor
 
 
 __co__ void foo() {
@@ -51,10 +50,3 @@ __co__ void foo() {
 // CHECK200: error: Event is not supported on GCU200.
 // CHECK200: Totally 6 errors have been detected.
 
-// CHECKfactor: error: Event is not supported on GCU300.
-// CHECKfactor: error: Event is not supported on GCU300.
-// CHECKfactor: error: Event is not supported on GCU300.
-// CHECKfactor: error: Event is not supported on GCU300.
-// CHECKfactor: error: Event is not supported on GCU300.
-// CHECKfactor: error: Event is not supported on GCU300.
-// CHECKfactor: Totally 6 errors have been detected.

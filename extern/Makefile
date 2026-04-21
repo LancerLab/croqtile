@@ -57,39 +57,11 @@ setup-gcu-platform-kit: check-gcu-platform-kit
 	    $(MAKE) install-gcu-platform-kit; \
 	fi
 
-GCU_FACTOR_NAME=topsfactor_3.0.1-1_amd64.deb
-GCU_FACTOR_PKG = $(TOOLCHAIN_DIR)/$(GCU_FACTOR_NAME)
-GCU_FACTOR_PKG_MD5:=03a257e7069cc4bb42270103e3616438
-CUR_GCU_FACTOR_PKG_MD5:=$(shell md5sum $(GCU_FACTOR_PKG) 2>/dev/null| cut -d ' ' -f 1)
-
-check-gcu-factor-kit:
-	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
-		$(MAKE) download-gcu-factor-kit; \
-	else \
-		echo "$(GCU_FACTOR_PKG) MD5 hash matches. No need to download."; \
-	fi
-
-download-gcu-factor-kit:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
-
-install-gcu-factor-kit:
-	dpkg-deb -x $(GCU_FACTOR_PKG) $(TOOLCHAIN_DIR)/; \
-	rsync -av $(TOOLCHAIN_DIR)/usr/* $(TOOLCHAIN_DIR); \
-	rsync -av $(TOOLCHAIN_DIR)/local/* $(TOOLCHAIN_DIR); \
-	rm -fr $(TOOLCHAIN_DIR)/usr/;
-	rm -fr $(TOOLCHAIN_DIR)/local/;
-
-setup-gcu-factor-kit: check-gcu-factor-kit
-	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
-	    $(MAKE) install-gcu-factor-kit; \
-	fi
-
 #------------------------- GCU-3.x -------------------------#
-GCU3_REL_PATH=250508/gcu30
-GCU3_PLATFORM_NAME=TopsPlatform_1.4.20250310-18636a_deb_amd64.run
+GCU3_REL_PATH=260420/gcu30
+GCU3_PLATFORM_NAME=TopsPlatform_1.8.20260319.113917_tmp-20260319113917-32db2a_deb_amd64.run
 GCU3_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU3_PLATFORM_NAME)
-GCU3_PLATFORM_PKG_MD5:=4220f099f1c50313ccd82823aaf34683
+GCU3_PLATFORM_PKG_MD5:=bf1ac35b2d6d05cfe0f1254597c4fca9
 CUR_GCU3_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU3_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
 check-gcu3-platform-kit:
@@ -118,38 +90,6 @@ install-gcu3-topscc: check-gcu3-platform-kit
 setup-gcu3-platform-kit: check-gcu3-platform-kit
 	@if [ "$(CUR_GCU3_PLATFORM_PKG_MD5)" != "$(GCU3_PLATFORM_PKG_MD5)"  ]; then \
 	    $(MAKE) install-gcu3-platform-kit; \
-	fi
-
-GCU3_FACTOR_REL_PATH=241230/gcu30
-GCU3_FACTOR_NAME=topsfactor_3.3.20241230-1_amd64.deb
-GCU3_FACTOR_PKG = $(TOOLCHAIN_DIR)/$(GCU3_FACTOR_NAME)
-GCU3_FACTOR_PKG_MD5:=a6e2e54a421a15a8b732fa7a24aa69b9
-CUR_GCU3_FACTOR_PKG_MD5:=$(shell md5sum $(GCU3_FACTOR_PKG) 2>/dev/null| cut -d ' ' -f 1)
-
-check-gcu3-factor-kit:
-	@if [ "$(CUR_GCU3_FACTOR_PKG_MD5)" != "$(GCU3_FACTOR_PKG_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
-		$(MAKE) download-gcu3-factor-kit; \
-	else \
-		echo "$(GCU3_FACTOR_PKG) MD5 hash matches. No need to download."; \
-	fi
-
-download-gcu3-factor-kit:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU3_FACTOR_REL_PATH)/$(GCU3_FACTOR_NAME) -o $(GCU3_FACTOR_PKG);\
-
-install-gcu3-factor-kit:
-	dpkg-deb -x $(GCU3_FACTOR_PKG) $(TOOLCHAIN_DIR)/; \
-	rsync -av $(TOOLCHAIN_DIR)/usr/* $(TOOLCHAIN_DIR); \
-	rsync -av $(TOOLCHAIN_DIR)/local/* $(TOOLCHAIN_DIR); \
-	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
-	ln -sf `pwd`/bin `pwd`/bin/clang11; \
-	rm -fr $(TOOLCHAIN_DIR)/usr/; \
-	rm -fr $(TOOLCHAIN_DIR)/local/; \
-	rm -fr $(TOOLCHAIN_DIR)/opt;
-
-setup-gcu3-factor-kit: check-gcu3-factor-kit
-	@if [ "$(CUR_GCU3_FACTOR_PKG_MD5)" != "$(GCU3_FACTOR_PKG_MD5)"  ]; then \
-	    $(MAKE) install-gcu3-factor-kit; \
 	fi
 
 #------------------------- GCU-4.x -------------------------#
@@ -226,11 +166,10 @@ install-gcu-sim5:
 	fi;
 
 #-----------------------------------------------------------#
-ACORE_PATH=9dca97c
-ACORE_NAME=topsacore_3.3.20250822-9dca97c.tar.gz
-ACORE_URL=http://artifact.enflame.cn/artifactory/module_package/acore/
+ACORE_REL_PATH=260420/gcu30
+ACORE_NAME=topsacore_3.3.20260414-e362563.tar.gz
 ACORE_PKG=$(TOOLCHAIN_DIR)/$(ACORE_NAME)
-ACORE_PKG_MD5=06b0bb09ae0670ba8caf99f146a9b00c
+ACORE_PKG_MD5=525b4b6cddbc21b8e8ef376418e641d9
 CUR_ACORE_PKG_MD5:=$(shell md5sum $(ACORE_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
 check-acore:
@@ -242,7 +181,7 @@ check-acore:
 	fi
 
 download-acore:
-	wget -P $(TOOLCHAIN_DIR) $(ACORE_URL)/$(ACORE_PATH)/$(ACORE_NAME)
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(ACORE_REL_PATH)/$(ACORE_NAME) -o $(ACORE_PKG)
 
 install-acore:
 	tar -zvxf $(TOOLCHAIN_DIR)/$(ACORE_NAME) -C $(TOOLCHAIN_DIR)/
@@ -289,13 +228,13 @@ gcu3-kmd: check-gcu3-platform-kit
 gcu4-kmd: check-gcu4-platform-kit
 	sudo $(GCU4_PLATFORM_PKG) -y -C enflame --force-asic
 
-gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit setup-gcu-factor-kit
-gcu3-kit: setup-gcu3-platform-kit setup-gcu3-factor-kit
+gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit
+gcu3-kit: setup-gcu3-platform-kit
 gcu4-kit: setup-gcu4-platform-kit install-gcu-sim
 gcu-sim4: install-gcu-sim
 gcu5-kit: setup-gcu5-tops-kit install-gcu-sim5
 gcu-sim5: install-gcu-sim5
 
-gcu2-install: install-gcu-sfc-kit install-gcu-platform-kit install-gcu-factor-kit
-gcu3-install: install-gcu3-platform-kit install-gcu3-factor-kit
+gcu2-install: install-gcu-sfc-kit install-gcu-platform-kit
+gcu3-install: install-gcu3-platform-kit
 gcu4-install: install-gcu4-platform-kit

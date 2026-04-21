@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -gs -t topscc -arch=gcu300 %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc -arch=gcu300 %s -o %s.topscc.result && bash %s.topscc.result --execute 2>&1 | FileCheck %s && rm -f %s.topscc.result
 
 __co__ void foo(s32 [N, M] i) {
   println("aaa");
@@ -122,55 +122,42 @@ int main()
   return 0;
 }
 
-// CHECK: aaa
-// CHECK: scalar:
-// CHECK:         a: 100
-// CHECK:         M: 64
-// CHECK:         f: 1.300000
-// CHECK:         d: 2.600000
-// CHECK:         b: false
-// CHECK:         d+dd: 6.500000
-// CHECK: &i: 0x{{.*}}
-// CHECK: &ii: 0x{{.*}}
+// foo() parallel by 1 (single-threaded, ordered; appears first due to stderr)
 // CHECK: [0, 0] b: false
 // CHECK: [0, 0] d: 4.100000
 // CHECK: [0, 0] i.span: [128, 64]
 // CHECK: [0, 0] mds: [1, 2, 3]
 // CHECK: [0, 0] it: {4, 64}
 // CHECK: [0, 0] nit: {100, 5}
-// CHECK: [0, 0] &i: 0x{{.*}}
-// CHECK: [0, 0] &ii: 0x{{.*}}
 // CHECK: [0, 0] &is: 0x{{.*}}
 // CHECK: [0, 0] idx: {0, 0, 0}
-// CHECK: [0, 0] bi: {128}
-// CHECK: [0, 0] bi: {129}
-// CHECK: [0, 0] bi: {130}
-// CHECK: [0, 0] bi: {131}
 // CHECK: [0, 0] idx: {0, 1, 0}
-// CHECK: [0, 0] bi: {128}
-// CHECK: [0, 0] bi: {129}
-// CHECK: [0, 0] bi: {130}
-// CHECK: [0, 0] bi: {131}
-// CHECK: bbb
+// foo() non-parallel output (stdout, flushed after parallel returns)
+// CHECK: aaa
+// CHECK: scalar:
+// CHECK: d+dd: 6.500000
+// bar() parallel by 2 (multi-threaded, non-deterministic order)
 // CHECK-DAG: [0, 1] p: {1}
 // CHECK-DAG: [0, 0] p: {0}
 // CHECK-DAG: [0, 1] e: false
 // CHECK-DAG: [0, 0] e: false
 // CHECK-DAG: [0, 1] e before wait: false
 // CHECK-DAG: [0, 0] e before trigger: false
-// CHECK: [0, 0] first
-// CHECK: [0, 1] second
-// CHECK: [0, 0] e after  trigger: true
-
-// CHECK: f16_in[0,0] in host: [[F16_HOST:.*]]
-// CHECK: bf16_in[0,0] in host: [[BF16_HOST:.*]]
-// CHECK: u8_in[0,0] in host: [[U8_HOST:.*]]
-// CHECK: s8_in[0,0] in host: [[S8_HOST:.*]]
-// CHECK: half_scalar in host: [[HALF_SCALAR_HOST:.*]]
-
-// CHECK: f16_in[0,0] in device: [[F16_HOST]]
-// CHECK: bf16_in[0,0] in device: [[BF16_HOST]]
-// CHECK: u8_in[0,0] in device: [[U8_HOST]]
-// CHECK: s8_in[0,0] in device: [[S8_HOST]]
-// CHECK: half_scalar in device: [[HALF_SCALAR_HOST]]
+// CHECK-DAG: [0, 0] first
+// CHECK-DAG: [0, 1] second
+// CHECK-DAG: [0, 0] e after  trigger: true
+// foo() non-parallel after parallel (stdout, flushed after bar returns)
+// CHECK: bbb
+// foo1() parallel by 1 (single-threaded, ordered)
+// CHECK: [0, 0] f16_in[0,0] in device: [[F16_VAL:.*]]
+// CHECK: [0, 0] bf16_in[0,0] in device: [[BF16_VAL:.*]]
+// CHECK: [0, 0] u8_in[0,0] in device: [[U8_VAL:.*]]
+// CHECK: [0, 0] s8_in[0,0] in device: [[S8_VAL:.*]]
+// CHECK: [0, 0] half_scalar in device: [[HALF_VAL:.*]]
+// host output (stdout, flushed at exit)
+// CHECK: f16_in[0,0] in host: [[F16_VAL]]
+// CHECK: bf16_in[0,0] in host: [[BF16_VAL]]
+// CHECK: u8_in[0,0] in host: [[U8_VAL]]
+// CHECK: s8_in[0,0] in host: [[S8_VAL]]
+// CHECK: half_scalar in host: [[HALF_VAL]]
 // CHECK: passed

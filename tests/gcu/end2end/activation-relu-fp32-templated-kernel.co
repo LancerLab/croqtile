@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor -kt %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 // RUN: choreo -gs -t topscc -kt %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 // RUN-DOCKER: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s
 

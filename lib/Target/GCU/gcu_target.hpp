@@ -30,20 +30,10 @@ public:
       */
       switch (sto) {
       case Storage::LOCAL: {
-        if (Name() == "factor")
-          return 1.5 * 1024 * 1024; // 1.5MB
-        else if (Name() == "topscc")
-          return 1.5 * 1024 * 1024 - 512; // special case
-        else
-          choreo_unreachable("Unhandled target.");
+        return 1.5 * 1024 * 1024 - 512; // 1.5MB minus reserved
       } break;
       case Storage::SHARED: {
-        if (Name() == "factor")
-          return 24ull * 1024 * 1024; // 24MB
-        else if (Name() == "topscc")
-          return 64ull * 1024 * 1024; // 64MB
-        else
-          choreo_unreachable("Unhandled target.");
+        return 64ull * 1024 * 1024; // 64MB
       } break;
       case Storage::GLOBAL: return 40.75 * 1024 * 1024 * 1024; // 40.75GB
       default: choreo_unreachable("unsupported storage level.");

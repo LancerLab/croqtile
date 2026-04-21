@@ -673,35 +673,6 @@ public:
       n.sa.reset();
     }
 
-    if (CCtx().HasFeature(ChoreoFeature::RSTM0) && n.OpCount() > 0 &&
-        // special mode: requires to generate 'bitcast' for a reshape
-        isa<AST::SOP::Reshape>(n.FirstOp())) {
-      int index =
-          GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
-      auto nname = SymbolTable::GetAnonName();
-      auto so = cast<AST::SOP::Reshape>(n.FirstOp());
-      auto id = AST::Make<AST::Identifier>(so->LOC(), nname);
-      auto mv = cast<AST::MultiValues>(so->GetNewSpan()->Clone());
-      mv->SetDelimiter(", ");
-      auto sa = AST::Make<AST::SpanAs>(
-          id->LOC(), cast<AST::Identifier>(n.data->Clone()), id, mv);
-      auto assign = AST::Make<AST::Assignment>(id->LOC(), nname, sa);
-      assign->SetDecl();
-      auto sty = cast<SpannedType>(n.GetType());
-      auto nty = MakeUnRankedSpannedType(sty->ElementType(), sty->GetStorage());
-      sa->SetType(nty);
-      assign->SetType(nty);
-      InsertNode(index, assign, nname);
-      VST_DEBUG(dbgs() << n.TypeNameString() << ": convert " << STR(n)
-                       << " as:";
-                assign->Print(dbgs(), "   ");
-                dbgs() << " (" << PSTR(assign->GetType()) << ")\n");
-      n.RemoveOperation(0);
-      n.data = cast<AST::Identifier>(id->Clone());
-      VST_DEBUG(dbgs() << "   `- " << STR(n) << " (" << PSTR(n.GetType())
-                       << ")\n");
-    }
-
     // hoist any arith inside of chunkat positions
     for (auto tsi : n.AllOperations()) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
@@ -813,46 +784,6 @@ public:
 
   bool Visit(AST::Return& n) override {
     TraceEachVisit(n);
-
-    if (AST::GetIdentifier(*n.value)) return true;
-
-    if (!CCtx().HasFeature(ChoreoFeature::RSTM0)) return true;
-
-    // non-identifier may be normalized
-    auto vty = NodeType(*n.value);
-
-    // tricky: we must convert a integer to be 's32 [1] ...' for a specific
-    // return value;
-    if (CCtx().HasFeature(ChoreoFeature::RSTM0) &&
-        isa<ScalarIntegerType>(vty)) {
-      auto expr = cast<AST::Expr>(n.value);
-      if (auto il = expr->GetInt()) {
-        auto& loc = n.value->LOC();
-        auto anon_sym = SymbolTable::GetAnonName();
-
-        // compose the named variable decl with initial value
-        auto mv = AST::Make<AST::MultiValues>(loc, ",");
-        mv->Append(AST::MakeIntExpr(loc, 1));
-        auto mds = AST::Make<AST::MultiDimSpans>(loc, "", mv, 1);
-        auto dt = AST::Make<AST::DataType>(loc, BaseType::S32, mds);
-        auto sto = AST::Make<AST::Memory>(loc, Storage::GLOBAL);
-        auto nv = AST::Make<AST::NamedVariableDecl>(loc, anon_sym, dt, sto,
-                                                    nullptr, il);
-        nv->SetType(vty);
-
-        int index =
-            GetValidNodeIndex() + mnodes_insertions[multi_nodes.top()].size();
-        InsertNode(index, nv, anon_sym);
-
-        // replace return value now
-        VST_DEBUG(dbgs() << "[Norm] Replace " << STR(n) << "\n to be:\n");
-        n.value = AST::MakeIdExpr(n.value->LOC(), anon_sym);
-        VST_DEBUG(dbgs() << STR(n) << "\n");
-
-        // In host, its return type is still 'int'
-        n.AddNote("host-type", "int");
-      }
-    }
 
     return true;
   }

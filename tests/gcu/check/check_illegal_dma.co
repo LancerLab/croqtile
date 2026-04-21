@@ -1,5 +1,3 @@
-// RUN: not choreo -gs -t factor -arch=gcu210 %s 2>&1 | FileCheck %s --check-prefix=CHECK2
-// RUN: not choreo -gs -t factor -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK3
 // RUN: not choreo -gs -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK3
 
 // transpose
@@ -13,13 +11,6 @@ __co__ auto foo0(f32 [2,2,3,4,5,6] i, u8 [1024*1024*16,2,2,2,2] i1, f32 [1,1024*
   }
   return o;
 }
-// CHECK2: error: On GCU210, the rank in dma.transp(not slice nor deslice) must be in range [1, 5], but got 6.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 16777216 < 16777216.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 16777216 < 16777216.
-// CHECK2: error: On GCU210, dma.transp(not slice nor deslice) does not support 5-dimensional array (if dim is 5, layout[0] must be 0).
-// CHECK2: error: On GCU210, must satisfy: the 2nd dim 65536 < 65536.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 65536 < 65504.
-// CHECK2: error: On GCU210, must satisfy: the 2nd dim 1 > 1.
 
 // CHECK3: error: On GCU300, the rank in dma.transp(not slice nor deslice) must be in range [1, 5], but got 6.
 // CHECK3: error: On GCU300, must satisfy: CeilTo128Byte(src_dim0_size * bpe) < 2^24.
@@ -42,26 +33,16 @@ __co__ auto foo1(s32 [2,2,3,4,5,6] i, s32 [10] i1, s32 [1,1024*64] i2, s32[1024,
   }
   return o;
 }
-// CHECK2: error: On GCU210, the rank in dma.pad must be in range [1, 5], but got 6.
-// CHECK2: error: On GCU210, the value of padding_mid[rank-1] in dma.pad must be 0 (mid padding of dim[rank-1] is not supported by the hardware).
-// CHECK2: error: On GCU210, must satisfy: the 2nd dim 65536 < 65536.
-// CHECK2: error: On GCU210, the config in dma.pad must be in range [0, 2^11].
-// CHECK2: error: On GCU210, the config in dma.pad must be in range [0, 2^11].
-// CHECK2: error: On GCU210, the value of padding_mid in dma.pad must be in range [0, 2^10].
-// CHECK2: error: On GCU210, the value of padding_mid[rank-1] in dma.pad must be 0 (mid padding of dim[rank-1] is not supported by the hardware).
-// CHECK2: error: On GCU210, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0).
-// CHECK2: error: On GCU210, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0).
-// CHECK2: error: On GCU210, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0).
 
 // CHECK3: error: On GCU300, the rank in dma.pad must be in range [1, 5], but got 6.
-// CHECK3: error: On GCU300, the value of padding_mid[rank-1] in dma.pad must be 0 (mid padding of dim[rank-1] is not supported by the hardware).
-// CHECK3: error: On GCU300, the config in dma.pad must be in range [0, 2^11].
-// CHECK3: error: On GCU300, the config in dma.pad must be in range [0, 2^11].
-// CHECK3: error: On GCU300, the value of padding_mid in dma.pad must be in range [0, 2^10].
-// CHECK3: error: On GCU300, the value of padding_mid[rank-1] in dma.pad must be 0 (mid padding of dim[rank-1] is not supported by the hardware).
-// CHECK3: error: On GCU300, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0).
-// CHECK3: error: On GCU300, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0).
-// CHECK3: error: On GCU300, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0).
+// CHECK3: error: On GCU300, the value of padding_mid[rank-1] in dma.pad must be 0 (mid padding of dim[rank-1] is not supported by the hardware)
+// CHECK3: error: On GCU300, the config in dma.pad must be in range [0, 2^11]
+// CHECK3: error: On GCU300, the config in dma.pad must be in range [0, 2^11]
+// CHECK3: error: On GCU300, the value of padding_mid in dma.pad must be in range [0, 2^10]
+// CHECK3: error: On GCU300, the value of padding_mid[rank-1] in dma.pad must be 0 (mid padding of dim[rank-1] is not supported by the hardware)
+// CHECK3: error: On GCU300, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0)
+// CHECK3: error: On GCU300, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0)
+// CHECK3: error: On GCU300, dma.pad does not support 5-dimensional array (if dim is 5, pad_config[0] must be 0)
 
 // slice
 __co__ auto foo2(s32 [2,2,3,4,5,6] i, s8 [1024*1024*24*2] i1, s32 [2,3,4,5,6] i2) {
@@ -77,14 +58,10 @@ __co__ auto foo2(s32 [2,2,3,4,5,6] i, s8 [1024*1024*24*2] i1, s32 [2,3,4,5,6] i2
   }
   return o;
 }
-// CHECK2: error: On GCU210, the rank in dma.copy(slice) must be in range [1, 5], but got 6.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 25165824 < 16777216.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 25165824 < 65536.
-// CHECK2: error: On GCU210, dma.copy(slice) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0).
 
 // CHECK3: error: On GCU300, the rank in dma.copy(slice) must be in range [1, 5], but got 6.
 // CHECK3: error: On GCU300, must satisfy: the 1st dim 25165824 < 16777216.
-// CHECK3: error: On GCU300, dma.copy(slice) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0).
+// CHECK3: error: On GCU300, dma.copy(slice) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0)
 
 
 // deslice
@@ -106,13 +83,10 @@ __co__ auto foo3() {
   }
   return o;
 }
-// CHECK2: error: On GCU210, the rank in dma.copy(deslice) must be in range [1, 5], but got 6.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 25165824 < 65536.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 25165824 < 16777216.
 
 // CHECK3: error: On GCU300, the rank in dma.copy(deslice) must be in range [1, 5], but got 6.
 // CHECK3: error: On GCU300, must satisfy: the 1st dim 25165824 < 16777216.
-// CHECK3: error: On GCU300, dma.copy(deslice) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0).
+// CHECK3: error: On GCU300, dma.copy(deslice) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0)
 
 // slice transpose
 __co__ auto foo4(s32 [4,2,3,4,5,2] i, s32 [4*(1024*64-32), 2] i1, s32 [4,3,4,5,6] i2) {
@@ -128,11 +102,6 @@ __co__ auto foo4(s32 [4,2,3,4,5,2] i, s32 [4*(1024*64-32), 2] i1, s32 [4,3,4,5,6
   }
   return o;
 }
-// CHECK2: error: On GCU210, the rank in dma.transp(slice then transpose) must be in range [1, 5], but got 6.
-// CHECK2: error: On GCU210, must satisfy: the 6th dim 1 > 1.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 131008 < 65536.
-// CHECK2: error: On GCU210, dma.transp(slice then transpose) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0).
-// CHECK2: error: On GCU210, dma.transp(slice then transpose) does not support 5-dimensional array (if dim is 5, layout[0] must be 0).
 
 // CHECK3: error: On GCU300, the rank in dma.transp(slice then transpose) must be in range [1, 5], but got 6.
 
@@ -155,14 +124,8 @@ __co__ auto foo5() {
   }
   return o;
 }
-// CHECK2: error: On GCU210, the rank in dma.transp(transpose then deslice) must be in range [1, 5], but got 6.
-// CHECK2: error: On GCU210, must satisfy: the 1st dim 65504 < 65504.
-// CHECK2: error: On GCU210, must satisfy: the 2nd dim 1 > 1.
-// CHECK2: error: On GCU210, dma.transp(transpose then deslice) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0).
-// CHECK2: error: On GCU210, dma.transp(transpose then deslice) does not support 5-dimensional array (if dim is 5, layout[0] must be 0).
 
 // CHECK3: On GCU300, the rank in dma.transp(transpose then deslice) must be in range [1, 5], but got 6.
 
-// CHECK2: Totally 37 errors have been detected.
 
 // CHECK3: Totally 25 errors have been detected.

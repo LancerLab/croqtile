@@ -65,8 +65,6 @@
 (?i)topskit
 # Enflame platform installer
 (?i)topsplatform
-# Factor compiler frontend
-(?i)topsfactor
 # Acore runtime
 (?i)topsacore
 # Factor compiler

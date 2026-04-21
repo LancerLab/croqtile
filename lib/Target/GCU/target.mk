@@ -14,19 +14,9 @@ PACKAGE_MD5:=a4297fca634dcdda3d08c467550d4b22
 CUR_PKG_MD5:=$(shell md5sum $(SUPPORT_PKG) 2>/dev/null| cut -d ' ' -f 1)
 BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
-CFLAGS += -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)"
+CFLAGS += -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
 
 .PHONY: setup-gcu2 setup-gcu3 setup-git-hooks
-
-$(LGY_BUILD_DIR)/factor_script.inc: lib/Target/GCU/factor_script.sh
-	echo "#ifndef __CHOREO_FACTOR_SCRIPT_HEADER_H__" > $@
-	echo "#define __CHOREO_FACTOR_SCRIPT_HEADER_H__" >> $@
-	echo -n "static const char* __factor_script_as_string = R\"__factor_script(" >> $@
-	cat $< >> $@
-	echo ")__factor_script\";" >> $@
-	echo "#endif // __CHOREO_FACTOR_SCRIPT_HEADER_H__" >> $@
-
-HEADER_FILES += $(LGY_BUILD_DIR)/factor_script.inc
 
 check-choreo-kit:
 	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
@@ -58,7 +48,7 @@ setup-git-hooks:
 	chmod +x .git/hooks/pre-commit
 
 setup-gcu-acore:
-	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore
+	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore FTP_SERVER=$(FTP_SERVER)
 
 setup-cuda:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-cuda FTP_SERVER=$(FTP_SERVER)

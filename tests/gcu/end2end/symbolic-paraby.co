@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor %s 2>&1 | FileCheck --check-prefix=CHECKF %s
 // RUN: choreo -gs -t topscc %gcu_arch %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 #include "choreo.h"
 
@@ -73,4 +72,3 @@ int main() {
 // CHECK: Test Passed with PF: 6
 // CHECK: Test Passed with PF: 2
 
-// CHECKF: error: symbolic bound value is not supported for Factor backend yet.

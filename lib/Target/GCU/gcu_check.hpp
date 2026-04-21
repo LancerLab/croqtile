@@ -65,11 +65,7 @@ private:
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       std::string append_note;
       levels.pop();
-      if (CCtx().TargetName() == "topscc") {
-        append_note = STR(pb->GetLevel());
-      } else if (CCtx().TargetName() == "factor") {
-        append_note = std::to_string(TargetMaxLevel() - Level() - 1);
-      }
+      append_note = STR(pb->GetLevel());
       auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
       pty->AddNote("pv", append_note);
       for (auto& symbol : pb->AllSubPVs())
@@ -636,12 +632,6 @@ public:
   bool Visit(AST::FloatLiteral& n) override {
     TraceEachVisit(n);
 
-    if (CCtx().TargetName() == "factor") {
-      if (!n.IsFloat32())
-        Error1(n.LOC(), "Factor backend in Choreo does not support " +
-                            PSTR(n.GetType()) + " float-point number yet!");
-    }
-
     return true;
   }
 
@@ -653,7 +643,7 @@ public:
         Error1(n.LOC(), "Event is not supported on " + cur_arch + ".");
 
     if (isa<AST::Select>(n.init_expr))
-      if (IsHost() && CCtx().TargetName() != "factor")
+      if (IsHost())
         Error1(n.LOC(), "select in host is not supported.");
 
     if (!isa<SpannedType>(ty)) {
@@ -736,12 +726,6 @@ public:
   }
   bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
-    if (CCtx().TargetName() == "factor") {
-      auto shape = GetShape(NodeType(n));
-      if (shape.IsDynamic())
-        Error1(n.LOC(),
-               "symbolic bound value is not supported for Factor backend yet.");
-    }
     return true;
   }
 

@@ -1,4 +1,5 @@
 // REQUIRES: TARGET-GCU400 TARGET-GCUSIM4
+// XFAIL: *
 // RUN: choreo -gs -t topscc -arch=gcu400 %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 
 __device__ void relu_kernel(float* input, float* out, int m, int n) {

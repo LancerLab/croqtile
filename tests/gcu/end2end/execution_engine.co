@@ -71,22 +71,20 @@ int main() {
   return 0;
 }
 
+// Device output appears before host printf in v1.8+
+// CHECK-DAG: in dispatcher, K: 11
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 0
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 2
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 3
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 4
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 6
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 7
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 9
 // CHECK: inputs0
-// CHECK: in dispatcher, K: 11
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 0
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 4
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 3
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 2
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 6
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 7
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 9
-
+// CHECK-DAG: in dispatcher, K: 7
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 4
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 5
 // CHECK: inputs1
-// CHECK: in dispatcher, K: 7
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 4
-// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 5
-
-// CHECK: inputs2
 // CHECK-DAG: in dispatcher, K: 3
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 1
-// CHECK-EMPTY:
+// CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 1
+// CHECK: inputs2
