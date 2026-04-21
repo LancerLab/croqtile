@@ -328,9 +328,6 @@ bool ShapeInference::Visit(AST::Expr& n) {
 
   auto ShouldOpt = [](const ValueList& vl) -> bool {
     if (!IsValidValueList(vl)) return false;
-    // restricted mode: should always use expression when symbolic
-    if (CCtx().HasFeature(ChoreoFeature::RSTM0))
-      return IsValueListNumericOrBool(vl);
     return true;
   };
   // decide the optimized values

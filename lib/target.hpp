@@ -27,7 +27,6 @@ enum class ChoreoFeature {
   SLML,
   MGM,
   VECTORIZE,
-  RSTM0,
   HDRPARSE,
   LIBCALL,
 };
@@ -45,7 +44,6 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::SLML: return "slml";
   case ChoreoFeature::MGM: return "mgm";
   case ChoreoFeature::VECTORIZE: return "vectorize";
-  case ChoreoFeature::RSTM0: return "rstm0";
   case ChoreoFeature::HDRPARSE: return "hdrparse";
   case ChoreoFeature::LIBCALL: return "libcall";
   default: choreo_unreachable("unsupported feature kind.");
@@ -69,7 +67,6 @@ inline static const std::string Description(ChoreoFeature cf) {
   case ChoreoFeature::SLML: return "Allow User to Set Local Memory Limit.";
   case ChoreoFeature::MGM: return "Choreo to Manage Global Memory.";
   case ChoreoFeature::VECTORIZE: return "Choreo Scalar Code Vectorization.";
-  case ChoreoFeature::RSTM0: return "Choreo Target Restricted Mode 0.";
   case ChoreoFeature::HDRPARSE:
     return "Parse C++ Header Files Included by Choreo Source.";
   case ChoreoFeature::LIBCALL:
