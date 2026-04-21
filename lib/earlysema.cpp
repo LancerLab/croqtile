@@ -1009,7 +1009,9 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     if (n.IsMutable()) {
       // update with the mutable attributes
       if (auto sty = dyn_cast<ScalarType>(ety)) {
-        ety = sty->Clone(n.IsMutable());
+        auto pty = CloneP(sty);
+        pty->SetMutable(n.IsMutable());
+        ety = pty;
       } else if (IsActualBoundedIntegerType(ety)) {
         // decay a bounded integer to be integer when it is mutable
         ety = MakeIntegerType(true);
@@ -1084,8 +1086,14 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     }
   }
 
-  // now handle the associated symbol
+  // Propagate declared storage into the SpannedType early so that downstream
+  // visitors (e.g. DataAccess, atomic checks) can query it directly.
   if (auto ty = dyn_cast<SpannedType>(n.GetType())) {
+    if (n.GetMemory()) {
+      ty->SetStorage(n.GetMemory()->Get());
+      auto sym_ty = dyn_cast<SpannedType>(GetSymbolType(n.name_str));
+      if (sym_ty) sym_ty->SetStorage(n.GetMemory()->Get());
+    }
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
                               ty->GetMDSpanType());
   } else if (auto ty = dyn_cast<FutureType>(n.GetType())) {
@@ -1172,8 +1180,7 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
                ") with " + std::to_string(idx_count) + " indices.");
   }
 
-  // data element is considered as mutable
-  SetNodeType(n, MakeScalarType(sty->ElementType(), true));
+  SetNodeType(n, MakeScalarType(sty->ElementType(), true, sty->GetStorage()));
 
   return true;
 }
@@ -2228,6 +2235,55 @@ bool EarlySemantics::Visit(AST::Call& n) {
       }
       auto pty = NodeType(*n.arguments->ValueAt(0));
       SetNodeType(n, pty);
+    } else if (n.IsAtomic()) {
+      bool is_cas = (func_name == "__atomic_cas");
+      size_t expected_args = is_cas ? 3 : 2;
+      if (n.arguments->Count() != expected_args) {
+        Error1(n.LOC(), "'" + func_name + "' expects " +
+                            std::to_string(expected_args) +
+                            " arguments but got " +
+                            std::to_string(n.arguments->Count()) + ".");
+        return false;
+      }
+
+      // First argument: must be a mutable scalar with storage -- i.e. an
+      // element access like s.at(p) whose ScalarType carries the parent
+      // span's storage.  Bare data symbols (SpannedType) are not accepted.
+      auto first_arg = n.arguments->ValueAt(0);
+      auto first_ty = NodeType(*first_arg);
+      auto sty = dyn_cast<ScalarType>(first_ty);
+
+      if (!sty || !sty->IsMutable()) {
+        Error1(first_arg->LOC(),
+               "'" + func_name +
+                   "' requires mutable scalar data "
+                   "as the first argument, but got '" + PSTR(first_ty) +
+                   "'.");
+      } else {
+        auto elem_bt = sty->GetBaseType();
+        auto storage = ProjectStorage(sty->GetStorage());
+        auto atomic_op = Target::ParseAtomicOp(func_name);
+        auto& tgt = CCtx().GetTarget();
+        auto arch = CCtx().GetArch();
+        if (!tgt.IsAtomicSupported(arch, atomic_op, elem_bt, storage))
+          Error1(first_arg->LOC(),
+                 "'" + func_name + "' is not supported on '" +
+                     STR(elem_bt) + "' with '" + STR(storage) +
+                     "' storage.");
+
+        auto ret_ty = MakeScalarType(elem_bt, /*mutable=*/true);
+        SetNodeType(n, ret_ty);
+
+        for (size_t i = 1; i < n.arguments->Count(); ++i) {
+          auto arg_ty = NodeType(*n.arguments->ValueAt(i));
+          auto arg_sty = dyn_cast<ScalarType>(arg_ty);
+          if (!arg_sty || arg_sty->GetBaseType() != elem_bt)
+            Error1(n.arguments->ValueAt(i)->LOC(),
+                   "'" + func_name + "' expects '" + STR(elem_bt) +
+                       "' for argument " + std::to_string(i + 1) +
+                       " but got '" + PSTR(arg_ty) + "'.");
+        }
+      }
     } else if (n.IsLibCall()) {
       auto& tgt = CCtx().GetTarget();
       if (!tgt.IsLibCallSupported(func_name))

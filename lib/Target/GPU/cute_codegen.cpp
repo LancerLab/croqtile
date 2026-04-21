@@ -6718,6 +6718,7 @@ bool CuteCodeGen::Visit(AST::Call& n) {
       os << ");\n";
       return true;
     } else if (n.IsArith()) {
+    } else if (n.IsAtomic()) {
     } else
       choreo_unreachable("the bif '" + n.function->name +
                          "' is not supported by this target.");
@@ -8463,6 +8464,30 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
 
 const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
   std::ostringstream oss;
+
+  if (n.IsAtomic()) {
+    static const std::unordered_map<std::string, std::string> atomic_name_map =
+        {{"__atomic_add", "atomicAdd"},   {"__atomic_sub", "atomicSub"},
+         {"__atomic_exch", "atomicExch"}, {"__atomic_min", "atomicMin"},
+         {"__atomic_max", "atomicMax"},   {"__atomic_and", "atomicAnd"},
+         {"__atomic_or", "atomicOr"},     {"__atomic_xor", "atomicXor"},
+         {"__atomic_cas", "atomicCAS"}};
+    auto it = atomic_name_map.find(n.function->name);
+    assert(it != atomic_name_map.end());
+    oss << it->second << "(";
+    size_t i = 0;
+    for (auto& a : n.GetArguments()) {
+      if (i > 0) oss << ", ";
+      if (i == 0)
+        oss << "&(" << OpExprSTR(a, "", true, IsHost()) << ")";
+      else
+        oss << OpExprSTR(a, "", true, IsHost());
+      ++i;
+    }
+    oss << ")";
+    return oss.str();
+  }
+
   auto func_name = [&n](const std::string& name) -> std::string {
     if (!n.IsArith()) return name;
     const std::string prefix = "__";

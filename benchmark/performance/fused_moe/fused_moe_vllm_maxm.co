@@ -111,11 +111,6 @@ __device__ __forceinline__ T SHFL_XOR(T var, int lane_mask, int width) {
   return __shfl_xor_sync(uint32_t(-1), var, lane_mask, width);
 }
 
-template <typename T, typename C>
-__device__ __forceinline__ T ATOMIC_ADD(T* a, C b) {
-  return atomicAdd(a, b);
-}
-
 __device__ __forceinline__ float ABS_F32(float value) {
   return value < 0.0f ? -value : value;
 }
@@ -320,7 +315,7 @@ static void fusedMoeCpuReferenceFp8(
 // fused_moe_route — unchanged from baseline routing logic.
 // Optimized separately on the E2E path (iter010-style: count fused into route). The
 // signature takes expert_counts so launch_end_to_end can accumulate per-expert counts
-// alongside top-k (see ATOMIC_ADD to expert_counts when routing).
+// alongside top-k (see __atomic_add to expert_counts when routing).
 
 __co__ void fused_moe_route(global f32 [M, QWEN35_DEFAULT_NUM_EXPERTS] gating_output,
                             global s32 [M, QWEN35_TOPK] topk_ids,
@@ -401,7 +396,7 @@ __co__ void fused_moe_route(global f32 [M, QWEN35_DEFAULT_NUM_EXPERTS] gating_ou
         inthreads (tid == 0) {
           topk_ids.at(token, selected) = expert;
           topk_weights.at(token, selected) = max_val;
-          call ATOMIC_ADD(&expert_counts.at(expert), 1);
+          __atomic_add(expert_counts.at(expert), 1);
           selected_sum += max_val;
         }
 
@@ -436,7 +431,7 @@ __co__ void fused_moe_count_experts(global s32 [M, QWEN35_TOPK] topk_ids,
   parallel token by M : block {
     parallel selected by QWEN35_TOPK : thread {
       expert = topk_ids.at(token, selected);
-      call ATOMIC_ADD(&expert_counts.at(expert), 1);
+      __atomic_add(expert_counts.at(expert), 1);
     }
   }
 }
@@ -583,7 +578,7 @@ __co__ void fused_moe_sort_and_gather_quant_input(
       foreach selected in [QWEN35_TOPK] {
         inthreads (lane == 0) {
           expert = topk_ids.at(token, selected);
-          s32 slot = call ATOMIC_ADD(&expert_write_offsets.at(expert), 1);
+          mutable s32 slot = __atomic_add(expert_write_offsets.at(expert), 1);
           route_slots.at(selected) = slot;
           sorted_route_ids.at(slot) = token # selected;
         }
@@ -683,7 +678,7 @@ __co__ void fused_moe_quant_sort_gather(
       inthreads (lane == 0) {
         foreach selected in [QWEN35_TOPK] {
           expert = topk_ids.at(token, selected);
-          s32 slot = call ATOMIC_ADD(&expert_write_offsets.at(expert), 1);
+          mutable s32 slot = __atomic_add(expert_write_offsets.at(expert), 1);
           route_slots.at(selected) = slot;
           sorted_route_ids.at(slot) = token # selected;
         }
@@ -811,7 +806,7 @@ __co__ void fused_moe_scatter_rows_to_output(
           out_col = block_n * QWEN35_WARP_N + col;
           if (out_col < N) {
             val = rep_out.at(sorted_row, out_col) * weight;
-            call ATOMIC_ADD(&output.at(token, out_col), val);
+            __atomic_add(output.at(token, out_col), val);
           }
         }
       }
@@ -968,7 +963,7 @@ __co__ void fused_moe_quant_sort_gather_k512(
       inthreads (lane == 0) {
         foreach selected in [QWEN35_TOPK] {
           expert = topk_ids.at(token, selected);
-          s32 slot = call ATOMIC_ADD(&expert_write_offsets.at(expert), 1);
+          mutable s32 slot = __atomic_add(expert_write_offsets.at(expert), 1);
           route_slots.at(selected) = slot;
           sorted_route_ids.at(slot) = token # selected;
         }

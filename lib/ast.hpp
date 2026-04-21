@@ -1482,7 +1482,8 @@ struct Call : public Node, public TypeIDProvider<Call> {
     ARITH = 0x4,
     EXPR = 0x8,
     ANNO = 0x10,
-    LIBCALL = 0x20
+    LIBCALL = 0x20,
+    ATOMIC = 0x40
   };
   // Overload bitwise OR
   friend constexpr CallAttr operator|(CallAttr lhs, CallAttr rhs) {
@@ -1519,6 +1520,7 @@ public:
   bool IsArith() const { return (bool)(attr & ARITH); }
   bool IsExpr() const { return (bool)(attr & EXPR); }
   bool IsAnno() const { return (bool)(attr & ANNO); }
+  bool IsAtomic() const { return (bool)(attr & ATOMIC); }
   bool IsLibCall() const { return (bool)(attr & LIBCALL); }
 
   void SetBIF() { attr = attr | BIF; }

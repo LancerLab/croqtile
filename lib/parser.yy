@@ -191,6 +191,7 @@ extern int yylex();
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
+%token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
 %token <std::string> LIB_CALL
 %token <std::string> FRAG
 // control related
@@ -198,7 +199,7 @@ extern int yylex();
 %token <std::string> VECTORIZE
 
 // non-terminals
-%nterm <std::string> builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func id_with_namespace
+%nterm <std::string> builtin_print_func arith_operation spanid cstrings arith_builtin_func atomic_builtin_func align_func id_with_namespace
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <Choreo::SwizMode> swiz_mode swiz_value
 %nterm <std::string> dma_operation
@@ -2319,6 +2320,18 @@ arith_builtin_func
     | SIGN     { $$ = $1; }
     ;
 
+atomic_builtin_func
+    : ATOMIC_ADD  { $$ = $1; }
+    | ATOMIC_SUB  { $$ = $1; }
+    | ATOMIC_EXCH { $$ = $1; }
+    | ATOMIC_MIN  { $$ = $1; }
+    | ATOMIC_MAX  { $$ = $1; }
+    | ATOMIC_AND  { $$ = $1; }
+    | ATOMIC_OR   { $$ = $1; }
+    | ATOMIC_XOR  { $$ = $1; }
+    | ATOMIC_CAS  { $$ = $1; }
+    ;
+
 suffix_exprs
     : suffix_exprs COMMA suffix_expr {
         $1->Append($3);
@@ -2403,6 +2416,10 @@ call_stmt
         $3->SetDelimiter(", ");
         $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
                                   AST::Call::BIF | AST::Call::LIBCALL);
+      }
+    | atomic_builtin_func LPAREN value_list RPAREN {
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
+                                  AST::Call::BIF | AST::Call::ATOMIC);
       }
     ;
 

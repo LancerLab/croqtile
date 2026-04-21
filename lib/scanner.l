@@ -449,6 +449,15 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "__tanh"     return Choreo::Parser::make_TANH(yytext, loc);
   "__alignup"  return Choreo::Parser::make_ALIGNUP(yytext, loc);
   "__aligndown" return Choreo::Parser::make_ALIGNDOWN(yytext, loc);
+  "__atomic_add"  return Choreo::Parser::make_ATOMIC_ADD(yytext, loc);
+  "__atomic_sub"  return Choreo::Parser::make_ATOMIC_SUB(yytext, loc);
+  "__atomic_exch" return Choreo::Parser::make_ATOMIC_EXCH(yytext, loc);
+  "__atomic_min"  return Choreo::Parser::make_ATOMIC_MIN(yytext, loc);
+  "__atomic_max"  return Choreo::Parser::make_ATOMIC_MAX(yytext, loc);
+  "__atomic_and"  return Choreo::Parser::make_ATOMIC_AND(yytext, loc);
+  "__atomic_or"   return Choreo::Parser::make_ATOMIC_OR(yytext, loc);
+  "__atomic_xor"  return Choreo::Parser::make_ATOMIC_XOR(yytext, loc);
+  "__atomic_cas"  return Choreo::Parser::make_ATOMIC_CAS(yytext, loc);
   "__to"       return Choreo::Parser::make_TOCAST(yytext, loc);
   "__lib_"{id}   return Choreo::Parser::make_LIB_CALL(yytext, loc);
   "local"    return Choreo::Parser::make_STORAGE(Storage::LOCAL, loc);

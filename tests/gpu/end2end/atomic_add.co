@@ -1,0 +1,38 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+__co__ s32 [16] histogram_shared(s32 [256] input) {
+  s32 [16] output;
+  parallel p by 256 : thread {
+    shared s32 [16] counts;
+    if (p < 16) {
+      counts.at(p) = 0;
+    }
+    sync.shared;
+    mutable s32 bin = input.at(p) % 16;
+    __atomic_add(counts.at(bin), 1);
+    sync.shared;
+    if (p < 16) {
+      output.at(p) = counts.at(p);
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s32>(256);
+  for (int i = 0; i < 256; ++i) input[i] = i;
+
+  auto output = histogram_shared(input.view());
+
+  int expected[16] = {};
+  for (int i = 0; i < 256; ++i) expected[i % 16]++;
+  bool pass = true;
+  for (int i = 0; i < 16; ++i) {
+    if (output[i] != expected[i]) { pass = false; break; }
+  }
+  if (pass) std::cout << "Histogram test passed" << std::endl;
+  else std::cout << "Histogram test FAILED" << std::endl;
+}
+
+// CHECK: Histogram test passed

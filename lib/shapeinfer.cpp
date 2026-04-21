@@ -8,7 +8,11 @@ static ptr<Type> PreserveDeclaredMutability(const ptr<Type>& inferred,
                                             const ptr<Type>& declared) {
   if (!inferred || !declared || !IsMutable(*declared)) return inferred;
 
-  if (auto sty = dyn_cast<ScalarType>(inferred)) return sty->Clone(true);
+  if (auto sty = dyn_cast<ScalarType>(inferred)) {
+    auto pty = CloneP(sty);
+    pty->SetMutable(true);
+    return pty;
+  }
   if (IsActualBoundedIntegerType(inferred)) return MakeIntegerType(true);
 
   return inferred;

@@ -183,6 +183,58 @@ public:
 
   virtual bool EnforceVectorAlignment(const ArchId&) const { return false; }
 
+  // Atomic operation support -- targets override to declare which atomic ops
+  // they support for each data type and storage level on each architecture.
+  enum class AtomicOp { ADD, SUB, EXCH, MIN, MAX, AND, OR, XOR, CAS };
+
+  struct AtomicCapability {
+    AtomicOp op;
+    std::set<BaseType> supported_types;
+  };
+
+  virtual std::vector<AtomicCapability>
+  SupportedAtomicOps(const ArchId&) const {
+    return {};
+  }
+
+  // Storage levels where atomics are available (e.g. shared, global).
+  // Targets with cluster-scoped or other storage may restrict this.
+  virtual std::set<Storage>
+  SupportedAtomicStorages(const ArchId&) const {
+    return {};
+  }
+
+  virtual bool IsAtomicSupported(const ArchId& arch, AtomicOp op,
+                                 BaseType ty) const {
+    for (auto& cap : SupportedAtomicOps(arch))
+      if (cap.op == op && cap.supported_types.count(ty)) return true;
+    return false;
+  }
+
+  virtual bool IsAtomicStorageSupported(const ArchId& arch,
+                                        Storage sto) const {
+    return SupportedAtomicStorages(arch).count(sto) > 0;
+  }
+
+  virtual bool IsAtomicSupported(const ArchId& arch, AtomicOp op,
+                                 BaseType ty, Storage sto) const {
+    return IsAtomicSupported(arch, op, ty) &&
+           IsAtomicStorageSupported(arch, sto);
+  }
+
+  static AtomicOp ParseAtomicOp(const std::string& name) {
+    if (name == "__atomic_add") return AtomicOp::ADD;
+    if (name == "__atomic_sub") return AtomicOp::SUB;
+    if (name == "__atomic_exch") return AtomicOp::EXCH;
+    if (name == "__atomic_min") return AtomicOp::MIN;
+    if (name == "__atomic_max") return AtomicOp::MAX;
+    if (name == "__atomic_and") return AtomicOp::AND;
+    if (name == "__atomic_or") return AtomicOp::OR;
+    if (name == "__atomic_xor") return AtomicOp::XOR;
+    if (name == "__atomic_cas") return AtomicOp::CAS;
+    choreo_unreachable("unknown atomic op: " + name);
+  }
+
   // Library call support -- targets override to declare which __lib_* builtins
   // they support and the expected argument counts for early sema validation.
   // name is the full builtin name, e.g. "__lib_gemm".
