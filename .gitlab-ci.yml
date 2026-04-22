@@ -271,6 +271,8 @@ generate_docs:
   rules:
     - if: $NO_PACK == "true"
       when: never
+    - if: $CI_COMMIT_BRANCH =~ /^oss\//
+      when: never
     - when: on_success
   script:
     - echo "Setting up environment for documentation generation ..."
