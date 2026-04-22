@@ -1909,13 +1909,17 @@ struct DeviceDataType final : public Type,
 
   bool Initized() const { return !init_expr.empty(); }
 
-  // used to march with choreo type including scalar type and spanned type.
+  // used to match with choreo type including scalar type and spanned type.
   bool ApprxEqual(const Type& ty) const override {
     if (data_type == BaseType::UNKNOWN) return false;
     if (ty.GetBaseType() == BaseType::UNKNOWN) return false;
     if (isa<ScalarType>(&ty)) {
       return ty.GetBaseType() == data_type ||
              IsValuePreservingCast(ty.GetBaseType(), data_type);
+    }
+    if (ty.GetBaseType() == BaseType::BOUNDED_INT ||
+        (ty.GetBaseType() == BaseType::BOUNDED_ITUPLE && ty.Dims() == 1)) {
+      return IsIntegerType(data_type);
     }
     // spanned type with the same element type
     if (SpannedType* spanned_ty = dyn_cast<SpannedType>(&ty);
