@@ -110,8 +110,19 @@ stop-doc:
 	@echo "Old mkdocs serve processes stopped."
 
 start-doc: docs
+	@command -v mkdocs >/dev/null 2>&1 || { echo "ERROR: mkdocs not found. Install with: pip install --user mkdocs mkdocs-material"; exit 1; }
+	@mkdocs --version >/dev/null 2>&1 || { echo "ERROR: mkdocs is installed but broken (check Python environment)."; echo "  Try: pip install --user --force-reinstall mkdocs mkdocs-material"; exit 1; }
 	@echo "Starting mkdocs serve in the background..."
-	nohup $(MKDOCS_CMD) &>/dev/null &
+	@nohup $(MKDOCS_CMD) > /tmp/mkdocs-serve.log 2>&1 & \
+	sleep 1; \
+	if ps -p $$! >/dev/null 2>&1; then \
+		echo "mkdocs serve started (pid $$!, log: /tmp/mkdocs-serve.log)"; \
+		echo "  -> http://0.0.0.0:8000"; \
+	else \
+		echo "ERROR: mkdocs serve failed to start. Check /tmp/mkdocs-serve.log:"; \
+		tail -5 /tmp/mkdocs-serve.log; \
+		exit 1; \
+	fi
 
 status-doc:
 	@echo "Checking mkdocs serve process..."

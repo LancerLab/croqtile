@@ -1489,11 +1489,11 @@ bool SemaChecker::VisitNode(AST::Call& n) {
           break;
         }
       }
+    }
 
-      if (arg_match) {
-        matched_function = device_function;
-        function_found = true;
-      }
+    if (arg_match) {
+      matched_function = device_function;
+      function_found = true;
     }
   } // end of device function loop
 
