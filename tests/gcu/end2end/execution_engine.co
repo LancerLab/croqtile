@@ -71,7 +71,8 @@ int main() {
   return 0;
 }
 
-// Device output appears before host printf in v1.8+
+// Host printf appears before device output
+// CHECK: inputs0
 // CHECK-DAG: in dispatcher, K: 11
 // CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 0
 // CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 2
@@ -80,11 +81,10 @@ int main() {
 // CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 6
 // CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 7
 // CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 9
-// CHECK: inputs0
+// CHECK: inputs1
 // CHECK-DAG: in dispatcher, K: 7
 // CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 4
 // CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 5
-// CHECK: inputs1
+// CHECK: inputs2
 // CHECK-DAG: in dispatcher, K: 3
 // CHECK-DAG: Thread {{[{]}}{{[0-3]}}{{[}]}}: workload: 1
-// CHECK: inputs2

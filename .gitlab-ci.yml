@@ -282,6 +282,8 @@ generate_docs:
 
 # OSS keyword/path validation for oss/* branches and MRs targeting them.
 # Runs oss-scan.sh to ensure no sensitive keywords leak into the public tree.
+# When the CI config is sourced from main but the checkout is oss/*, the scan
+# script may not exist in the checked-out tree.  Fall back to main's copy.
 oss_scan:
   stage: oss-validation
   rules:
@@ -291,6 +293,15 @@ oss_scan:
       when: on_success
   script:
     - echo "Running OSS keyword and path scan on branch $CI_COMMIT_BRANCH..."
+    - |
+      if [ ! -f scripts/oss/oss-scan.sh ]; then
+        echo "oss-scan.sh not found in working tree; fetching from main..."
+        git fetch origin main --depth=1
+        mkdir -p scripts/oss
+        git show origin/main:scripts/oss/oss-scan.sh > scripts/oss/oss-scan.sh
+        git show origin/main:scripts/oss/os_kw.txt  > scripts/oss/os_kw.txt 2>/dev/null || true
+        chmod +x scripts/oss/oss-scan.sh
+      fi
     - bash scripts/oss/oss-scan.sh --tree HEAD -k scripts/oss/os_kw.txt -v
   tags:
     - GPU

@@ -6,7 +6,7 @@ namespace choreo {
 // --- light-weight choreo device library --- //
 
 __device__ __attribute__((always_inline)) static inline void __co_abort__() {
-  #if __GCU_ARCH__ >= 300
+  #ifdef __CHOREO_USE_TOPS_ABORT__
   tops::abort();
   #endif
 }

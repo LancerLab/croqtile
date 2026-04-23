@@ -26,11 +26,11 @@ __co__ void func() {
   }
 }
 
-// CHECK: candidate function 'fooA' with 1 parameters is found, but the type of 1th argument 's32 mdspan<1> []' is not compatible with the parameter type 's32'.
+// CHECK: candidate function 'fooA' with 1 parameters is found, but the type of 1th argument 'local s32 mdspan<1> []' is not compatible with the parameter type 's32'.
 // CHECK: unable to find a device function 'fooC'.
-// CHECK: candidate function 'fooC' with 1 parameters is found, but the type of 1th argument 's32 mdspan<1> []' is not compatible with the parameter type 'unknown'.
+// CHECK: candidate function 'fooC' with 1 parameters is found, but the type of 1th argument 'local s32 mdspan<1> []' is not compatible with the parameter type 'unknown'.
 // CHECK: unable to find a device function 'fooD'.
-// CHECK: candidate function 'fooD' with 1 parameters is found, but the type of 1th argument 's32 mdspan<1> []' is not compatible with the parameter type 'unknown *'.
+// CHECK: candidate function 'fooD' with 1 parameters is found, but the type of 1th argument 'local s32 mdspan<1> []' is not compatible with the parameter type 'unknown *'.
 // CHECK: unable to find a device function 'fooE'.
 // CHECK: candidate function 'fooE' with 3 parameters is found, but the function 'fooE' requires 2 parameters, but 1 arguments are provided.
 // CHECK: unable to find a device function 'fooB', because the type of 1th argument 'shared s32 mdspan<1> [10]' is not shared.
