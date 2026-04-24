@@ -2940,6 +2940,7 @@ if [[ -z "${TOPSCC_INSTALL}" ]]; then
 fi
 
 TOPSCC=${TOPSCC_INSTALL}/bin/topscc
+TOPSPROF=${TOPSCC_INSTALL}/bin/topsprof
 TOPSCC_LIB=${TOPSCC_INSTALL}/lib
 
 )script";
@@ -3120,16 +3121,17 @@ option_detect() {
   if (verbose) os << "\n  echo " << exe_file << "\n";
   os << "\n  " << exe_file << "\n";
   os << R"(elif [ "$1" == "--profile" ]; then)";
-  os << "\n  TOPSPROF=$(which topsprof)";
-  os << "\n  if [ -z \"${TOPSPROF}\" ]; then ";
-  os << "\n    echo \"topsprof is not installed\" && exit 77";
-  os << "\n  else";
+  os << "\n  if [ ! -f \"${TOPSPROF}\" ]; then";
+  os << "\n    TOPSPROF=$(which topsprof)";
+  os << "\n    if [ -z \"${TOPSPROF}\" ]; then";
+  os << "\n      echo \"topsprof is not installed\" && exit 77";
+  os << "\n    fi";
+  os << "\n  fi";
   if (verbose)
     os << "\n    echo ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
   os << "\n    ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
-  os << "\n  fi\n";
-  if (verbose) os << "\n  echo  ${TOPSPROF} " << exe_file << "\n";
-  os << "\n  ${TOPSPROF} " << exe_file << "\n";
+  if (verbose) os << "\n  echo sudo ${TOPSPROF} " << exe_file << "\n";
+  os << "\n  sudo ${TOPSPROF} " << exe_file << "\n";
   os << R"(elif [ "$1" == "--compile-module" ]; then)";
   if (verbose)
     os << "\n  echo ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file

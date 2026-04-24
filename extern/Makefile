@@ -79,7 +79,7 @@ download-gcu3-platform-kit:
 
 install-gcu3-platform-kit:
 	mkdir -p $(TOOLCHAIN_DIR) ;\
-	$(GCU3_PLATFORM_PKG) -y -C topsruntime,topscc --install-dir $(TOOLCHAIN_DIR); \
+	$(GCU3_PLATFORM_PKG) -y -C topsruntime,topscc,topsprof --install-dir $(TOOLCHAIN_DIR); \
 	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
 	rm -fr $(TOOLCHAIN_DIR)/opt;
 
