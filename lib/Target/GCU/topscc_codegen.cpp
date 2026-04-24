@@ -3474,6 +3474,8 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             << UnScopedName(ssm.DeviceName(iv_name));
     } else
       oss << UnScopedName(SSMName(InScopeName(id->name), is_host));
+  } else if (auto np = dyn_cast<AST::Nullptr>(e)) {
+    oss << "nullptr";
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {

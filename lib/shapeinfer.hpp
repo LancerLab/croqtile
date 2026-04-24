@@ -318,6 +318,7 @@ public:
   bool Visit(AST::Assignment& n) override;
   bool Visit(AST::IntIndex& n) override;
   bool Visit(AST::DataType& n) override;
+  bool Visit(AST::Nullptr& n) override;
   bool Visit(AST::NoValue& n) override;
   bool Visit(AST::Identifier& n) override;
   bool Visit(AST::Parameter& n) override;

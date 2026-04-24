@@ -89,6 +89,8 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
       for (const auto& idx : chunkat->indices->AllValues())
         SetUnionInPlace(res, GetAllSymbolicOperands(idx.get()));
     return res;
+  } else if (isa<AST::Nullptr>(n)) {
+    return {};
   } else {
     choreo_unreachable("expecting node type: " + n->TypeNameString() + ".");
     return {};

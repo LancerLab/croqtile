@@ -509,6 +509,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "void"     return Choreo::Parser::make_VOID(BaseType::VOID, loc);
   "true"     return Choreo::Parser::make_TRUE(yytext, loc);
   "false"    return Choreo::Parser::make_FALSE(yytext, loc);
+  "nullptr"  return Choreo::Parser::make_NULLPTR(yytext, loc);
   "dma"      return Choreo::Parser::make_DMA(yytext, loc);
   "tma"      return Choreo::Parser::make_TMA(yytext, loc);
   ".copy"    return Choreo::Parser::make_COPY(yytext, loc);

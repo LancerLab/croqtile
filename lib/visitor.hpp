@@ -61,6 +61,7 @@ struct Visitor {
   // For any visitor, it should implement all the necessary steps
   virtual bool Visit(AST::MultiNodes&) = 0;
   virtual bool Visit(AST::MultiValues&) = 0;
+  virtual bool Visit(AST::Nullptr&) = 0;
   virtual bool Visit(AST::NoValue&) = 0;
   virtual bool Visit(AST::IntLiteral&) = 0;
   virtual bool Visit(AST::FloatLiteral&) = 0;
@@ -517,6 +518,7 @@ public:
   // provide the defaults
   bool Visit(AST::MultiNodes&) override { return true; }
   bool Visit(AST::MultiValues&) override { return true; }
+  bool Visit(AST::Nullptr&) override { return true; }
   bool Visit(AST::NoValue&) override { return true; }
   bool Visit(AST::IntLiteral&) override { return true; }
   bool Visit(AST::FloatLiteral&) override { return true; }
@@ -647,6 +649,10 @@ public:
     return VisitNode(n);
   }
   bool Visit(AST::MultiValues& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Nullptr& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
   }
@@ -839,6 +845,7 @@ public:
   // provide default
   virtual bool VisitNode(AST::MultiNodes&) { return true; }
   virtual bool VisitNode(AST::MultiValues&) { return true; }
+  virtual bool VisitNode(AST::Nullptr&) { return true; }
   virtual bool VisitNode(AST::NoValue&) { return true; }
   virtual bool VisitNode(AST::IntLiteral&) { return true; }
   virtual bool VisitNode(AST::FloatLiteral&) { return true; }
@@ -961,6 +968,7 @@ private:
   bool InMidVisit(AST::Node&) final { return true; }
   bool Visit(AST::MultiNodes&) final { return true; }
   bool Visit(AST::MultiValues&) final { return true; }
+  bool Visit(AST::Nullptr&) final { return true; }
   bool Visit(AST::NoValue&) final { return true; }
   bool Visit(AST::IntLiteral&) final { return true; }
   bool Visit(AST::FloatLiteral&) final { return true; }

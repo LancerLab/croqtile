@@ -175,6 +175,7 @@ extern int yylex();
 %token <int64_t>  S64_LITERAL
 %token <float> FPVAL
 %token <double> DFPVAL
+%token <char*> NULLPTR
 %token <std::string> TRUE FALSE
 %token <std::string> STRING VAL
 %token <std::string> HOST_CODE DEVICE_CODE
@@ -2152,6 +2153,7 @@ device_passables
 device_passable
     : s_expr { $$ = $1; }
     | subdata_expr { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | NULLPTR { $$ = AST::Make<AST::Nullptr>(@1); }
     ;
 
 returnable
