@@ -727,6 +727,12 @@ bool ShapeInference::Visit(AST::DataType& n) {
   return true;
 }
 
+bool ShapeInference::Visit(AST::Nullptr& n) {
+  TraceEachVisit(n);
+  ast_vn.Update(&n, NumTy::None(), VNKind::VNK_VALUE);
+  return true;
+}
+
 bool ShapeInference::Visit(AST::NoValue& n) {
   TraceEachVisit(n);
   ast_vn.Update(&n, NumTy::None(), VNKind::VNK_VALUE);

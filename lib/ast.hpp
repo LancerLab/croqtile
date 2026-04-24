@@ -480,6 +480,21 @@ struct NoValue : public Node, public TypeIDProvider<NoValue> {
   __UDT_TYPE_INFO__(Node, NoValue)
 };
 
+struct Nullptr: public Node, public TypeIDProvider<Nullptr> {
+  explicit Nullptr(const location& l) : Node(l, MakeAddrType()) {}
+
+  ptr<Node> CloneImpl() const override { return Make<Nullptr>(LOC()); }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << prefix << "nullptr";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Nullptr)
+};
+
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   std::variant<int, uint32_t, int64_t, uint64_t> value;
 
@@ -3874,7 +3889,7 @@ inline const ptr<Expr> MakeExpr(const ptr<Node>& n) {
 
 inline bool IsLiteral(const Node& n) {
   return isa<IntLiteral>(&n) || isa<FloatLiteral>(&n) || isa<BoolLiteral>(&n) ||
-         isa<StringLiteral>(&n);
+         isa<StringLiteral>(&n) || isa<Nullptr>(&n);
 }
 
 inline ptr<ParallelBy>

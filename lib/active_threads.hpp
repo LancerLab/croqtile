@@ -377,6 +377,7 @@ public:
   bool Visit(AST::InThreadsBlock&) override { return true; }
   bool Visit(AST::MultiNodes&) override { return true; }
   bool Visit(AST::MultiValues&) override { return true; }
+  bool Visit(AST::Nullptr&) override { return true; }
   bool Visit(AST::NoValue&) override { return true; }
   bool Visit(AST::IntLiteral&) override { return true; }
   bool Visit(AST::FloatLiteral&) override { return true; }
