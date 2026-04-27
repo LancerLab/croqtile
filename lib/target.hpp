@@ -130,6 +130,19 @@ public:
   virtual size_t GetMinGroupDim(const ArchId& arch) const {
     choreo_unreachable("unsupported target '" + Name() + "(" + arch + ")'.");
   }
+  // Max total count for a parallel-by at the given level.  Returns 0 if the
+  // level is unconstrained for this target/arch. Implemented by targets to
+  // enforce per-arch parallel-by count limits.
+  virtual size_t GetMaxParallelByCount(ParallelLevel /*pl*/,
+                                       const ArchId& /*arch*/) const {
+    return 0;
+  }
+  // Max physical threads per block for GPU targets.  Returns 0 if
+  // unconstrained.  For GPU, the real thread count is thread x group x
+  // group-4 dims; this value bounds that product.
+  virtual size_t GetMaxThreadsPerBlock(const ArchId& /*arch*/) const {
+    return 0;
+  }
   virtual size_t GetVectorLength(const ArchId& arch) const {
     choreo_unreachable("unsupported target '" + Name() + "(" + arch + ")'.");
     return 0;

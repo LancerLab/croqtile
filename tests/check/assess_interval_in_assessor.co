@@ -1,0 +1,42 @@
+// RUN: choreo -es --show-assess %s -o /dev/null 2>&1 | FileCheck %s
+//
+// Tests that interval reasoning embedded in the Assessor proves
+// assessments statically when BoundedType + scope predicates constrain
+// symbolic values.  This specifically validates the ConstraintEnv
+// built in SemaChecker::CreateAssessment and consumed by
+// Assessor::TryIntervalProof.
+//
+// Case: parallel p by 4, buf.at(p) with buf size 5.
+//   p in [0, 4).  p >= 0 is trivially true from type bounds.
+//   p < 5 is provably true because [0,4) subset of (-inf,5).
+//   Both checks should be static-true.
+
+__co__ void interval_assessor_basic() {
+  parallel p by 4 {
+    shared s32 [5] buf;
+    x = buf.at(p);
+  }
+}
+
+// CHECK: [assertions] function: interval_assessor_basic  (1 assessed:  1 static-true,  0 static-false,  0 runtime)
+// CHECK: [0] static-true
+// CHECK:      message : The 1st index `p`{{.*}}less than 5
+
+// Case: parallel p by 10, if (p >= 2 && p < 7), buf.at(p - 2) with buf size 5.
+//   p narrowed to [2, 7), p-2 in [0, 5).
+//   p-2 >= 0 and p-2 < 5 are both provably true.
+
+__co__ void interval_assessor_scope() {
+  parallel p by 10 {
+    shared s32 [5] buf;
+    if (p >= 2 && p < 7) {
+      x = buf.at(p - 2);
+    }
+  }
+}
+
+// CHECK: [assertions] function: interval_assessor_scope  (2 assessed:  2 static-true,  0 static-false,  0 runtime)
+// CHECK: [0] static-true
+// CHECK:      message : The 1st index {{.*}}greater than or equal to 0
+// CHECK: [1] static-true
+// CHECK:      message : The 1st index {{.*}}less than 5

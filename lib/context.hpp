@@ -547,6 +547,14 @@ public:
     return GetTarget().GetMinGroupDim(GetArch());
   }
 
+  size_t GetMaxParallelByCount(ParallelLevel pl) const {
+    return GetTarget().GetMaxParallelByCount(pl, GetArch());
+  }
+
+  size_t GetMaxThreadsPerBlock() const {
+    return GetTarget().GetMaxThreadsPerBlock(GetArch());
+  }
+
   size_t GetVectorLength() const {
     return GetTarget().GetVectorLength(GetArch());
   }
