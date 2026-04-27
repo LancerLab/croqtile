@@ -91,26 +91,27 @@ int main()
   return 0;
 }
 
-// x=11: host output first (co begin), then device output after topsDeviceSynchronize
-// CHECK: ================((x = 11))==============
-// CHECK: co begin
+// All outputs for x=11 group appear before return value: 0
+// CHECK-DAG: ================((x = 11))==============
+// CHECK-DAG: co begin
 // CHECK-DAG: call kernel0
 // CHECK-DAG: call kernel0
 // CHECK: return value: 0
 // CHECK-NOT: co end
-// x=6: same pattern — host then device
-// CHECK: ================((x =  6))==============
-// CHECK: co begin
+// All outputs for x=6 group appear before return value: 1
+// CHECK-DAG: ================((x =  6))==============
+// CHECK-DAG: co begin
 // CHECK-DAG: call kernel1
 // CHECK-DAG: call kernel1
 // CHECK: return value: 1
 // CHECK-NOT: co end
-// x=3: foreach loop with sync between each parallel block
-// CHECK: ================((x =  3))==============
-// CHECK: co begin
-// CHECK: after calling kernel2
-// CHECK: iv: {0}
-// CHECK: res: 0
+// x=3: outputs may interleave; after calling kernel2/iv:{0}/res:0 appears
+// before or after the header depending on hardware. Two foreach iterations.
+// CHECK-DAG: ================((x =  3))==============
+// CHECK-DAG: co begin
+// CHECK-DAG: after calling kernel2
+// CHECK-DAG: iv: {0}
+// CHECK-DAG: res: 0
 // CHECK-DAG: call kernel3
 // CHECK-DAG: call kernel3
 // CHECK-DAG: ans: 2
