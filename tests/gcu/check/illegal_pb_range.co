@@ -1,0 +1,54 @@
+// RUN: not choreo -t topscc -arch=gcu200 %s 2>&1 | FileCheck %s --check-prefix=GCU2
+// RUN: not choreo -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=GCU3
+// RUN: choreo -sa=CHECK -t topscc -arch=gcu400 %s
+
+// GCU parallel-by count range checking.
+// gcu200/210: block <= 4, thread <= 8
+// gcu300:     block <= 2, thread <= 12
+// gcu400+:    unconstrained (no errors expected)
+
+// --- block count too large ---
+__co__ void too_many_blocks() {
+  parallel by 5 : block {   // gcu2: 5 > 4; gcu3: 5 > 2
+    parallel by 4 : thread {
+    }
+  }
+}
+
+// --- thread count too large ---
+__co__ void too_many_threads() {
+  parallel by 1 : block {
+    parallel by 9 : thread {  // gcu2: 9 > 8; gcu3: ok (9 <= 12)
+    }
+  }
+}
+
+// --- thread count too large for gcu3 ---
+__co__ void too_many_threads_gcu3() {
+  parallel by 1 : block {
+    parallel by 13 : thread {  // gcu2: 13 > 8; gcu3: 13 > 12
+    }
+  }
+}
+
+// --- multi-dim block: product exceeds limit ---
+__co__ void too_many_blocks_multi() {
+  parallel {bx, gy} by [2, 3] : block {  // product=6; gcu2: 6>4; gcu3: 6>2
+    parallel by 1 : thread {
+    }
+  }
+}
+
+// gcu200/210: block<=4 and thread<=8 checks
+// GCU2: error: On GCU200, the total block parallel-by count must not exceed 4.
+// GCU2: error: On GCU200, the total thread parallel-by count must not exceed 8.
+// GCU2: error: On GCU200, the total thread parallel-by count must not exceed 8.
+// GCU2: error: On GCU200, the total block parallel-by count must not exceed 4.
+
+// gcu300: block<=2 and thread<=12 checks (9 <= 12 so only 13 fires)
+// GCU3: error: On GCU300, the total block parallel-by count must not exceed 2.
+// GCU3: error: On GCU300, the total thread parallel-by count must not exceed 12.
+// GCU3: error: On GCU300, the total block parallel-by count must not exceed 2.
+
+// gcu400+: no constraint -- compilation should succeed with no errors
+// (RUN line above verifies exit code 0, no FileCheck needed)

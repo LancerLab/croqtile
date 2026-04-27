@@ -6,7 +6,7 @@
 
 __co__ auto ele_add_f32(f32 [N, M] a, f32 [N, M] b)  {
   f32 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 
@@ -20,7 +20,7 @@ __co__ auto ele_add_f32(f32 [N, M] a, f32 [N, M] b)  {
 }
 __co__ auto ele_add_f16(f16 [N, M] a, f16 [N, M] b)  {
   f16 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 
@@ -34,7 +34,7 @@ __co__ auto ele_add_f16(f16 [N, M] a, f16 [N, M] b)  {
 }
 __co__ auto ele_add_bf16(bf16 [N, M] a, bf16 [N, M] b)  {
   bf16 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 
@@ -48,7 +48,7 @@ __co__ auto ele_add_bf16(bf16 [N, M] a, bf16 [N, M] b)  {
 }
 __co__ auto ele_add_s32(s32 [N, M] a, s32 [N, M] b)  {
   s32 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 
@@ -62,7 +62,7 @@ __co__ auto ele_add_s32(s32 [N, M] a, s32 [N, M] b)  {
 }
 __co__ auto ele_add_u32(u32 [N, M] a, u32 [N, M] b)  {
   u32 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 
@@ -76,7 +76,7 @@ __co__ auto ele_add_u32(u32 [N, M] a, u32 [N, M] b)  {
 }
 __co__ auto ele_add_s16(s16 [N, M] a, s16 [N, M] b)  {
   s16 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 
@@ -90,7 +90,7 @@ __co__ auto ele_add_s16(s16 [N, M] a, s16 [N, M] b)  {
 }
 __co__ auto ele_add_u16(u16 [N, M] a, u16 [N, M] b)  {
   u16 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 
@@ -104,7 +104,7 @@ __co__ auto ele_add_u16(u16 [N, M] a, u16 [N, M] b)  {
 }
 __co__ auto ele_add_s8(s8 [N, M] a, s8 [N, M] b)  {
   s8 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 
@@ -118,7 +118,7 @@ __co__ auto ele_add_s8(s8 [N, M] a, s8 [N, M] b)  {
 }
 __co__ auto ele_add_u8(u8 [N, M] a, u8 [N, M] b)  {
   u8 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 

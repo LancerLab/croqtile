@@ -75,6 +75,10 @@ public:
   }
 
   size_t GetMinGroupDim(const ArchId&) const override { return 32; }
+  // CUDA constraint: all SM70+ architectures allow at most 1024 threads per
+  // CTA.  The GPU adaptor checks the product of thread x group x group-4
+  // dimensions against this value.
+  size_t GetMaxThreadsPerBlock(const ArchId&) const override { return 1024; }
   size_t GetMemAlignmentByte(const Storage& sto,
                              const ArchId& arch) const override {
     // global buffer from cudaMalloc is aligned with 256 bytes by default.

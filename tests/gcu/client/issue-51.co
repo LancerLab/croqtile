@@ -15,7 +15,7 @@ __device__ void inc_f32_arr(choreo::f32* ptr, int size) {
 
 __co__ auto cofoo(f32 [DIM0 * DIM1 * DIM2 * DIM3] input) {
   f32 [DIM0 * DIM1 * DIM2 * DIM3] output{1.5f};
-  parallel p by 3 {
+  parallel p by 2 {
     shared f32 [DIM2 / #p, DIM1, DIM0, DIM3] l2_buf;
     shared f32 [DIM2 / #p, DIM1, DIM0, DIM3] l2_res;
     f = dma.transp<2, 1, 0, 3>.async input.span_as([DIM0, DIM1, DIM2, DIM3]).chunkat(_, _, p, _) => l2_buf;

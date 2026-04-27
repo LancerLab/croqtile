@@ -1,0 +1,55 @@
+// RUN: choreo %s -t cute -arch=sm_86 2>&1 | FileCheck %s
+
+// Tests that the total physical threads per block (thread x group x group-4
+// dims) does not exceed the CUDA limit of 1024.
+
+// Valid: 1024 threads exactly (thread only, no group).
+__co__ void valid_thread_only() {
+  parallel by 1 : block {
+    parallel by 1024 : thread {
+    }
+  }
+}
+
+// Valid: group 4, thread 256 => 4 * 256 = 1024.
+__co__ void valid_group_thread() {
+  parallel by 1 : block {
+    parallel by 4 : group {
+      parallel by 256 : thread {
+      }
+    }
+  }
+}
+
+// Invalid: 1025 threads (no group, just over the limit).
+__co__ void invalid_thread_only() {
+  parallel by 1 : block {
+    parallel by 1025 : thread {
+    }
+  }
+}
+
+// Invalid: group 2, thread 512 => 2 * 512 = 1024 is fine -- but
+// group 4, thread 512 => 4 * 512 = 2048 which exceeds 1024.
+__co__ void invalid_group_thread() {
+  parallel by 1 : block {
+    parallel by 4 : group {
+      parallel by 512 : thread {
+      }
+    }
+  }
+}
+
+// Invalid: multi-dim thread: 32 * 32 = 1024 is fine; 32 * 33 = 1056 > 1024.
+__co__ void invalid_multi_dim_thread() {
+  parallel by 1 : block {
+    parallel by 1 : group {
+      parallel {x, y} by [32, 33] : thread {
+      }
+    }
+  }
+}
+
+// CHECK: error: Total physical threads per block (thread x group x group-4 dims) must not exceed 1024 on SM_86.
+// CHECK: error: Total physical threads per block (thread x group x group-4 dims) must not exceed 1024 on SM_86.
+// CHECK: error: Total physical threads per block (thread x group x group-4 dims) must not exceed 1024 on SM_86.

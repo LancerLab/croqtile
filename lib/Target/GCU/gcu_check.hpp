@@ -625,6 +625,41 @@ public:
     Assess(sbe::cmp(op, vi, sbe::nu(limit)), message, n, en);
   }
 
+  // Check that the total bound of a parallel-by node at a given level does
+  // not exceed the architecture limit (from GetMaxParallelByCount).  If the
+  // bound is a compile-time constant the check is static; if it is symbolic a
+  // runtime assertion is emitted.
+  void CheckPBRange(AST::ParallelBy& pb) {
+    auto lvl = pb.GetLevel();
+    auto max_count = CCtx().GetMaxParallelByCount(lvl);
+    if (max_count == 0) return; // level unconstrained on this architecture
+
+    // Compute total bound as product of all component bounds.
+    // For a simple `parallel p by N`, cmpt_bounds is empty and we fall back
+    // to BoundValue() which holds the merged expression directly.
+    // For `parallel {x,y} by [M,N]`, cmpt_bounds has the originals with
+    // Opts set; BoundValue() would use a synthetic clone without Opts.
+    ValueItem total;
+    auto bvs = pb.BoundValues();
+    if (!bvs.empty()) {
+      total = sbe::nu(1);
+      for (auto bv : bvs)
+        total = (total * bv)->Normalize();
+    } else {
+      total = pb.BoundValue();
+    }
+    if (!IsValidValueItem(total)) return; // bound not yet inferred
+
+    auto pred =
+        sbe::cmp("<=", total, sbe::nu((int64_t)max_count))->Normalize();
+    // Skip if trivially safe -- avoids cluttering --show-assess report.
+    if (auto bv = VIBool(pred); bv && bv.value()) return;
+    auto msg = "On " + cur_arch + ", the total " + STR(lvl) +
+               " parallel-by count must not exceed " +
+               std::to_string(max_count) + ".";
+    Assess(pred, msg, pb, &pb);
+  }
+
 public:
   GCUCheck() : VisitorWithSymTab("gcu"), cur_arch(ToUpper(CCtx().GetArch())) {}
   ~GCUCheck() {}
@@ -726,6 +761,7 @@ public:
   }
   bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
+    CheckPBRange(n);
     return true;
   }
 

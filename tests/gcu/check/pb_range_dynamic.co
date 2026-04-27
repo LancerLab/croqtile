@@ -1,0 +1,14 @@
+// RUN: choreo --show-assess -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s
+
+// GCU parallel-by count range check: dynamic (symbolic) bounds should produce
+// a runtime assertion rather than a compile-time error.
+
+__co__ void dynamic_blocks(int N) {
+  parallel by N : block {   // N is symbolic -> runtime assertion N <= 2
+    parallel by 1 : thread {
+    }
+  }
+}
+
+// CHECK: runtime ({{.*}}dynamic_blocks{{.*}}N <= 2)
+// CHECK: On GCU300, the total block parallel-by count must not exceed 2.

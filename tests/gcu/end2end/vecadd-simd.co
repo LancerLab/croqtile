@@ -6,7 +6,7 @@
 
 __co__ auto vecadd(f32 [N, M] a, f32 [N, M] b)  {
   f32 [a.span] c;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     l1_a = dma.copy a.chunkat(p, q) => local;
     l1_b = dma.copy b.chunkat(p, q) => local;
 

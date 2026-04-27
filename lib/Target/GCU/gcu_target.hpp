@@ -77,6 +77,23 @@ public:
     return 1;
   }
 
+  // Per-architecture limits for parallel-by levels.
+  size_t GetMaxParallelByCount(ParallelLevel pl,
+                               const ArchId& arch) const override {
+    int arch_num = ArchNum(arch);
+    if (arch_num >= 200) {
+      if (pl == ParallelLevel::BLOCK) return 4;
+      if (pl == ParallelLevel::THREAD) return 8;
+    } else if (arch_num >= 300) {
+      if (pl == ParallelLevel::BLOCK) return 2;
+      if (pl == ParallelLevel::THREAD) return 12;
+    } else if (arch_num >= 400) {
+      if (pl == ParallelLevel::BLOCK) return 4;
+      if (pl == ParallelLevel::THREAD) return 6;
+    }
+    return 0;
+  }
+
   const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId& arch) const override {
     auto arch_num = ArchNum(arch);

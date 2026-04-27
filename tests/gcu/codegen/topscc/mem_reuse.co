@@ -5,7 +5,7 @@ __co__ void foo(int n, int m) {
     shared u8 [n, m] s;
     shared u8 [n, m] ss;
     call kernel(s, ss);
-    parallel by 16 : thread {
+    parallel by 12 : thread {
       local u8 [16] l;
       local u8 [16] ll;
       call kernel(l, ll);
@@ -16,7 +16,7 @@ __co__ void foo(int n, int m) {
     shared u8 [n, m] s;
     shared u8 [n, m] ss;
     call kernel(s, ss);
-    parallel by 16 : thread {
+    parallel by 12 : thread {
       local u8 [n] l;
       local u8 [m] ll;
       call kernel(l, ll);
@@ -61,7 +61,7 @@ __co__ void foo(int n, int m) {
 // CHECK:     __co__shared_chunk_offsets0[__co__shared_chunks0_idx++] = offset;
 // CHECK:   // JIT memory reuse end
 // CHECK:   dim3 __foo_gdims0(2, 1, 1);
-// CHECK:   dim3 __foo_bdims0(16, 1, 1);
+// CHECK:   dim3 __foo_bdims0(12, 1, 1);
 // CHECK:   __choreo_device_foo0<<<__foo_gdims0, __foo_bdims0>>>(n, m, __co__shared_chunk_offsets0[0], __co__shared_chunk_offsets0[1]);
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());
 // CHECK:   // JIT memory reuse begin
@@ -89,7 +89,7 @@ __co__ void foo(int n, int m) {
 // CHECK:     __co__shared_chunk_offsets1[__co__shared_chunks1_idx++] = offset;
 // CHECK:   // JIT memory reuse end
 // CHECK:   dim3 __foo_gdims1(2, 1, 1);
-// CHECK:   dim3 __foo_bdims1(16, 1, 1);
+// CHECK:   dim3 __foo_bdims1(12, 1, 1);
 // CHECK:   __choreo_device_foo1<<<__foo_gdims1, __foo_bdims1>>>(n, m, __co__local_chunk_offsets1[0], __co__local_chunk_offsets1[1], __co__shared_chunk_offsets1[0], __co__shared_chunk_offsets1[1]);
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());
 // CHECK: }

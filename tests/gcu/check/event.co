@@ -6,7 +6,7 @@
 __co__ void foo() {
   global event a;
   global event aa[2];
-  parallel by 3 {
+  parallel by 2 {
     shared event b;
     shared event bb[3];
     parallel by 2 {

@@ -11,7 +11,7 @@ __co__ auto foo(f32 [32, 4, 27] a) {
 }
 
 __co__ auto bar(f16 [128, 4, 14, 69] a) {
-  parallel p by 7 {
+  parallel p by 2 {
     parallel q by 3 {
       with index in [2, 4] {
         foreach index {
@@ -76,12 +76,12 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:     int __iv_index__elem__1 = 0;
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
 // CHECK:       for (__iv_index__elem__1 = 0; __iv_index__elem__1 < 4; ++__iv_index__elem__1) {
-// CHECK:         __local__ __valigned__ choreo::half anon_1[2944];
+// CHECK:         __local__ __valigned__ choreo::half anon_1[10304];
 // CHECK:         tops_dte_ctx_t choreo_topscc_ctx1;
 // CHECK:         choreo::future __choreo_anon_fut__1(choreo_topscc_ctx1, "", {{[0-9]+}}, {{[0-9]+}}, anon_1);
 // CHECK:         tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 128, 4, 14, 69);
-// CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (choreo::half*)anon_1, 64, 1, 2, 23);
-// CHECK:         int __slice_offset1__a_2_anon_1[] = {(int)((__iv_index__elem__0 * 64)), (int)(__iv_index__elem__1), (int)((__tops_bid_x() * 2)), (int)((__tops_tid_x() * 23))};
+// CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (choreo::half*)anon_1, 64, 1, 7, 23);
+// CHECK:         int __slice_offset1__a_2_anon_1[] = {(int)((__iv_index__elem__0 * 64)), (int)(__iv_index__elem__1), (int)((__tops_bid_x() * 7)), (int)((__tops_tid_x() * 23))};
 // CHECK:         tops::slice(*__choreo_anon_fut__1.get_ctx(), __mds3_anon_1, __mds2_a, __slice_offset1__a_2_anon_1);
 // CHECK:       } // index__elem__1
 // CHECK:       __iv_index__elem__1 = 0;
@@ -94,7 +94,7 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:   choreo::f16 * a__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&a__device, 989184ULL));
 // CHECK:   choreo::abend_true(topsMemcpy(a__device, a.data(), 989184ULL, topsMemcpyHostToDevice));
-// CHECK:   dim3 __bar_gdims0(7, 1, 1);
+// CHECK:   dim3 __bar_gdims0(2, 1, 1);
 // CHECK:   dim3 __bar_bdims0(3, 1, 1);
 // CHECK:   __choreo_device_bar<<<__bar_gdims0, __bar_bdims0>>>(a__device);
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());

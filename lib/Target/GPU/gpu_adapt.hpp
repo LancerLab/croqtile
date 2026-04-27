@@ -154,6 +154,54 @@ public:
           Assess(sbe::oc_eq(total_threads, sbe::nu(128)), msg, *pb, pb);
         }
       }
+
+      // Check total physical threads per block does not exceed target limit.
+      // Physical threads = thread dims x group dims x group-4 dims, since
+      // group and group-4 are virtual and all map to real threadIdx.x lanes.
+      auto max_thr = CCtx().GetMaxThreadsPerBlock();
+      if (max_thr > 0) {
+        // Helper: compute total bound of a pb node.
+        // For simple pbs (no cmpt_bounds), BoundValue() is authoritative.
+        // For multi-dim pbs, cmpt_bounds holds the originals (Opts set by
+        // type inference); BoundValue() uses clones without Opts.
+        auto GetPBTotal = [](AST::ParallelBy* n) -> ValueItem {
+          auto bvs = n->BoundValues();
+          if (!bvs.empty()) {
+            ValueItem t = sbe::nu(1);
+            for (auto bv : bvs) t = (t * bv)->Normalize();
+            return t;
+          }
+          return n->BoundValue();
+        };
+
+        auto physical = total_threads;
+
+        // Multiply by group bound (GROUP is always the direct parent of
+        // THREAD after normalization).
+        auto group_bv = GetPBTotal(ppb);
+        if (IsValidValueItem(group_bv))
+          physical = (physical * group_bv)->Normalize();
+
+        if (TargetHasLevel(ParallelLevel::GROUPx4)) {
+          auto gppb = cgi.GetPBTree(fname).GetParent(ppb);
+          if (gppb && gppb->GetLevel() == ParallelLevel::GROUPx4) {
+            auto g4_bv = GetPBTotal(gppb);
+            if (IsValidValueItem(g4_bv))
+              physical = (physical * g4_bv)->Normalize();
+          }
+        }
+
+        auto pred =
+            sbe::cmp("<=", physical, sbe::nu((int64_t)max_thr))->Normalize();
+        // Skip if trivially safe -- avoids cluttering --show-assess report.
+        if (auto bv = VIBool(pred); !bv || !bv.value()) {
+          auto msg =
+              "Total physical threads per block (thread x group x group-4 "
+              "dims) must not exceed " +
+              std::to_string(max_thr) + " on " + cur_arch + ".";
+          Assess(pred, msg, *pb, pb);
+        }
+      }
     }
   }
 
