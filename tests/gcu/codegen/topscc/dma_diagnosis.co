@@ -1,0 +1,23 @@
+// RUN: choreo -es --diag-dma=false -t topscc %s -o - | FileCheck %s
+// RUN: choreo -es --diag-dma=true -t topscc %s -o - | FileCheck %s --check-prefix=CHECK-DD
+// RUN: choreo -es --diag-dma=true -t topscc -arch=gcu300 %s -o - | FileCheck %s --check-prefix=CHECK-GCU300
+// RUN: choreo -es --diag-dma=true -t topscc -arch=gcu200 %s -o - | FileCheck %s --check-prefix=CHECK-GCU200
+
+__co__ void foo(global f16 [32] in_buf) {
+  parallel p by 1 {
+    shared_buf = dma.copy in_buf => shared;
+    out_buf = dma.copy shared_buf => global;
+  }
+}
+
+// CHECK: choreo::future shared_buf(choreo_topscc_ctx{{[0-9]+}}, "shared_buf", {{[0-9]+}}, {{[0-9]+}}, shared_buf__buf__);
+// CHECK: choreo::future out_buf(choreo_topscc_ctx{{[0-9]+}}, "out_buf", {{[0-9]+}}, {{[0-9]+}}, out_buf__buf__);
+
+// CHECK-DD: choreo::future shared_buf(choreo_topscc_ctx{{[0-9]+}}, "shared_buf", {{[0-9]+}}, {{[0-9]+}}, shared_buf__buf__);
+// CHECK-DD: choreo::future out_buf(choreo_topscc_ctx{{[0-9]+}}, "out_buf", {{[0-9]+}}, {{[0-9]+}}, out_buf__buf__);
+
+// CHECK-GCU300: tops::shared_dte choreo_topscc_ctx0;
+// CHECK-GCU300: tops::shared_dte choreo_topscc_ctx1;
+
+// CHECK-GCU200: __shared_dte__ tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK-GCU200: __shared_dte__ tops_dte_ctx_t choreo_topscc_ctx1;
