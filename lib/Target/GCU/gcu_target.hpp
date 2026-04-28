@@ -81,19 +81,19 @@ public:
   size_t GetMaxParallelByCount(ParallelLevel pl,
                                const ArchId& arch) const override {
     int arch_num = ArchNum(arch);
-    if (arch_num >= 500) {
-      // TODO
-      return 0;
-    } else if (arch_num >= 400) {
-      if (pl == ParallelLevel::BLOCK) return 4;
-      if (pl == ParallelLevel::THREAD) return 6;
-    } else if (arch_num >= 300) {
-      if (pl == ParallelLevel::BLOCK) return 2;
-      if (pl == ParallelLevel::THREAD) return 12;
-    } else if (arch_num >= 200) {
+    // gcu200/210: block <= 4, thread <= 8
+    if (arch_num >= 200 && arch_num < 300) {
       if (pl == ParallelLevel::BLOCK) return 4;
       if (pl == ParallelLevel::THREAD) return 8;
     }
+
+    // gcu300: block <= 2, thread <= 12
+    if (arch_num >= 300 && arch_num < 400) {
+      if (pl == ParallelLevel::BLOCK) return 2;
+      if (pl == ParallelLevel::THREAD) return 12;
+    }
+
+    // gcu400+: unconstrained for now.
     return 0;
   }
 
