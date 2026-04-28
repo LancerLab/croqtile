@@ -356,6 +356,7 @@ private:
     recent_tma_tx_bytes.clear();
     has_pending_wgmma_finalize = false;
     wgmma_arrive_state_declared = false;
+    set_cuda_func_attribute_max_dynamic_shared_memory_size = false;
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();

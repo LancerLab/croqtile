@@ -1,0 +1,24 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+// TMA descriptor box shape must be host-computable (from function parameters).
+// Using kernel-runtime values (blockIdx, loop indices, computed variables)
+// in TMA box dimensions is invalid.
+
+__co__ auto tma_runtime_box(f16 [M, K] input) {
+  f16 [128, 64] output;
+
+  parallel b by cdiv(M, 128) : block
+    parallel g by 1 : group-4 {
+      shared f16 [128, 64] s;
+      TM = (128 < M - b * 128) ? 128 : M - b * 128;
+      tma.copy input.view(TM, 64).from(b * 128, 0) => s;
+      dma.copy s => output;
+    }
+
+  return output;
+}
+
+// CHECK: error: TMA box shape must be host-computable

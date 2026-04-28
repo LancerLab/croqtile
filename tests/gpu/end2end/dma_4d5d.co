@@ -1,0 +1,283 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t cute %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#include "choreo.h"
+
+// ================================================================
+// Category A: 4D contiguous -- inner dims flatten to 2D
+// ================================================================
+
+// A1: s32 [2, 3, 4, 8] -- inner 3 dims contiguous -> [2, 96]
+__co__ auto test_4d_flat_s32(s32 [2, 3, 4, 8] input) {
+  s32[2, 3, 4, 8] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(2, 3, 4, 8) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// A2: f16 [2, 2, 4, 16] -- inner 3 dims contiguous -> [2, 128]
+__co__ auto test_4d_flat_f16(f16 [2, 2, 4, 16] input) {
+  f16[2, 2, 4, 16] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(2, 2, 4, 16) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Category B: 4D unflattenable -- outer dims become batch loops
+// ================================================================
+
+// B1: s32 [M, N, K, L] -- all dynamic -> 2 batch loops + dyn_box
+__co__ auto test_4d_dyn_s32(s32 [M, N, K, L] input) {
+  s32[M, N, K, L] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(M, N, K, L) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// B2: s32 [2, 3, K, L] -- static outer, dynamic inner -> 1 batch loop + dyn_box
+__co__ auto test_4d_mixed(s32 [2, 3, K, L] input) {
+  s32[2, 3, K, L] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(2, 3, K, L) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// B3: s32 [M, 3, 4, 8] -- dynamic outer, static inner contiguous -> 1 batch loop + tiled
+__co__ auto test_4d_dyn_outer(s32 [M, 3, 4, 8] input) {
+  s32[M, 3, 4, 8] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(M, 3, 4, 8) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Category C: 5D tests
+// ================================================================
+
+// C1: s32 [2, 2, 3, 4, 8] -- inner 4 dims contiguous -> [2, 192]
+__co__ auto test_5d_flat_s32(s32 [2, 2, 3, 4, 8] input) {
+  s32[2, 2, 3, 4, 8] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(2, 2, 3, 4, 8) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// C2: s32 [A, B, C, D, E] -- all dynamic -> 3 batch loops + dyn_box
+__co__ auto test_5d_dyn(s32 [A, B, C, D, E] input) {
+  s32[A, B, C, D, E] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(A, B, C, D, E) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// C3: s32 [2, B, 3, 4, 8] -- mixed: outer dynamic, inner 3 contiguous
+__co__ auto test_5d_mixed(s32 [2, B, 3, 4, 8] input) {
+  s32[2, B, 3, 4, 8] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(2, B, 3, 4, 8) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Host helpers
+// ================================================================
+
+void FillS32_4D(choreo::spanned_data<choreo::s32, 4>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    for (size_t j = 0; j < data.shape()[1]; ++j)
+      for (size_t k = 0; k < data.shape()[2]; ++k)
+        for (size_t l = 0; l < data.shape()[3]; ++l)
+          data[i][j][k][l] = static_cast<choreo::s32>(
+              (i * 31 + j * 17 + k * 5 + l * 3) % 41 - 20);
+}
+
+void FillF16_4D(choreo::spanned_data<choreo::f16, 4>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    for (size_t j = 0; j < data.shape()[1]; ++j)
+      for (size_t k = 0; k < data.shape()[2]; ++k)
+        for (size_t l = 0; l < data.shape()[3]; ++l)
+          data[i][j][k][l] = choreo::f32_to_f16(
+              static_cast<float>(((i * 11) + j * 7 + k * 3 + l) % 19 - 9));
+}
+
+template <typename T>
+void CheckEqual4D(choreo::spanned_data<T, 4>& output,
+                  choreo::spanned_data<T, 4>& input,
+                  const char* name) {
+  for (size_t i = 0; i < input.shape()[0]; ++i)
+    for (size_t j = 0; j < input.shape()[1]; ++j)
+      for (size_t k = 0; k < input.shape()[2]; ++k)
+        for (size_t l = 0; l < input.shape()[3]; ++l)
+          choreo::choreo_assert(output[i][j][k][l] == input[i][j][k][l], name);
+}
+
+void CheckEqual4D_F16(choreo::spanned_data<choreo::f16, 4>& output,
+                      choreo::spanned_data<choreo::f16, 4>& input,
+                      const char* name) {
+  for (size_t i = 0; i < input.shape()[0]; ++i)
+    for (size_t j = 0; j < input.shape()[1]; ++j)
+      for (size_t k = 0; k < input.shape()[2]; ++k)
+        for (size_t l = 0; l < input.shape()[3]; ++l)
+          choreo::choreo_assert(
+              choreo::f16_to_f32(output[i][j][k][l]) == choreo::f16_to_f32(input[i][j][k][l]),
+              name);
+}
+
+void FillS32_5D(choreo::spanned_data<choreo::s32, 5>& data) {
+  for (size_t a = 0; a < data.shape()[0]; ++a)
+    for (size_t b = 0; b < data.shape()[1]; ++b)
+      for (size_t c = 0; c < data.shape()[2]; ++c)
+        for (size_t d = 0; d < data.shape()[3]; ++d)
+          for (size_t e = 0; e < data.shape()[4]; ++e)
+            data[a][b][c][d][e] = static_cast<choreo::s32>(
+                (a * 31 + b * 17 + c * 13 + d * 5 + e * 3) % 41 - 20);
+}
+
+template <typename T>
+void CheckEqual5D(choreo::spanned_data<T, 5>& output,
+                  choreo::spanned_data<T, 5>& input,
+                  const char* name) {
+  for (size_t a = 0; a < input.shape()[0]; ++a)
+    for (size_t b = 0; b < input.shape()[1]; ++b)
+      for (size_t c = 0; c < input.shape()[2]; ++c)
+        for (size_t d = 0; d < input.shape()[3]; ++d)
+          for (size_t e = 0; e < input.shape()[4]; ++e)
+            choreo::choreo_assert(output[a][b][c][d][e] == input[a][b][c][d][e], name);
+}
+
+// ================================================================
+// Category A: 4D contiguous flatten
+// ================================================================
+
+void RunA1() {
+  auto input = choreo::make_spandata<choreo::s32>(2, 3, 4, 8);
+  FillS32_4D(input);
+  auto output = test_4d_flat_s32(input.view());
+  CheckEqual4D(output, input, "A1 mismatch");
+  std::cout << "Test A1 Passed\n" << std::endl;
+}
+
+void RunA2() {
+  auto input = choreo::make_spandata<choreo::f16>(2, 2, 4, 16);
+  FillF16_4D(input);
+  auto output = test_4d_flat_f16(input.view());
+  CheckEqual4D_F16(output, input, "A2 mismatch");
+  std::cout << "Test A2 Passed\n" << std::endl;
+}
+
+// ================================================================
+// Category B: 4D batch loops
+// ================================================================
+
+void RunB1() {
+  auto input = choreo::make_spandata<choreo::s32>(2, 3, 4, 8);
+  FillS32_4D(input);
+  auto output = test_4d_dyn_s32(input.view());
+  CheckEqual4D(output, input, "B1 mismatch");
+  std::cout << "Test B1 Passed\n" << std::endl;
+}
+
+void RunB2() {
+  auto input = choreo::make_spandata<choreo::s32>(2, 3, 5, 7);
+  FillS32_4D(input);
+  auto output = test_4d_mixed(input.view());
+  CheckEqual4D(output, input, "B2 mismatch");
+  std::cout << "Test B2 Passed\n" << std::endl;
+}
+
+void RunB3() {
+  auto input = choreo::make_spandata<choreo::s32>(3, 3, 4, 8);
+  FillS32_4D(input);
+  auto output = test_4d_dyn_outer(input.view());
+  CheckEqual4D(output, input, "B3 mismatch");
+  std::cout << "Test B3 Passed\n" << std::endl;
+}
+
+// ================================================================
+// Category C: 5D
+// ================================================================
+
+void RunC1() {
+  auto input = choreo::make_spandata<choreo::s32>(2, 2, 3, 4, 8);
+  FillS32_5D(input);
+  auto output = test_5d_flat_s32(input.view());
+  CheckEqual5D(output, input, "C1 mismatch");
+  std::cout << "Test C1 Passed\n" << std::endl;
+}
+
+void RunC2() {
+  auto input = choreo::make_spandata<choreo::s32>(2, 2, 3, 4, 5);
+  FillS32_5D(input);
+  auto output = test_5d_dyn(input.view());
+  CheckEqual5D(output, input, "C2 mismatch");
+  std::cout << "Test C2 Passed\n" << std::endl;
+}
+
+void RunC3() {
+  auto input = choreo::make_spandata<choreo::s32>(2, 3, 3, 4, 8);
+  FillS32_5D(input);
+  auto output = test_5d_mixed(input.view());
+  CheckEqual5D(output, input, "C3 mismatch");
+  std::cout << "Test C3 Passed\n" << std::endl;
+}
+
+int main() {
+  RunA1();
+  RunA2();
+  RunB1();
+  RunB2();
+  RunB3();
+  RunC1();
+  RunC2();
+  RunC3();
+}
+
+// CHECK: Test A1 Passed
+// CHECK: Test A2 Passed
+// CHECK: Test B1 Passed
+// CHECK: Test B2 Passed
+// CHECK: Test B3 Passed
+// CHECK: Test C1 Passed
+// CHECK: Test C2 Passed
+// CHECK: Test C3 Passed

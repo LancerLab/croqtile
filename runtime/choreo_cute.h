@@ -499,8 +499,8 @@ struct future {
     s = ST_TRIGGERED;
   #endif // __CHOREO_DMA_DIAGNOSIS__
 
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-  #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    if (is_tma) return; // TMA uses event barriers, not cp.async rings
     // cautious: must be warp based
     if (__CHOREO_GROUP_SINGLE__) {
       assert(ring && "ring is invalid.");
@@ -587,8 +587,7 @@ struct future {
 
 template <int N>
 inline __device__ void future_ring<N>::commit(future* f) {
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-  #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   // the uniqueness of id is guaranteed by choreo
   ring[head] = f->id;
   head = (head + 1) % N;
@@ -604,8 +603,7 @@ inline __device__ void future_ring<N>::commit(future* f) {
 
 template <int N>
 inline __device__ int future_ring<N>::discard(future* f) {
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-  #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 
     #ifdef __CHOREO_DEBUG_FUTURE_RING__
   printf("discarding feature: %d, [%d, %d)\n", f->id, tail, head);
@@ -784,99 +782,84 @@ CUTE_HOST_DEVICE std::uintptr_t aligned_up_ptr(Ptr p) {
 }
 
 // ------------------- universal copy (any rank, C++17) -------------------
-template <class Src, class Dst>
-CUTE_HOST_DEVICE void opt_copy(const Src& src, Dst& dst) {
-  // Fallback: 32-bit (scalar element width) - always safe for any
-  // shape/stride/alignment
-  copy(cute::AutoVectorizingCopyWithAssumedAlignment<32>{}, src, dst);
+template <class ATOM, class Src, class Dst>
+CUTE_HOST_DEVICE void naive_copy(ATOM& atom, const Src& src, Dst& dst) {
+  cute::copy(atom, src, dst);
 }
 
-template <bool Swizzle, class Element, int ThrRows, int ThrCols, int ValRows,
-          int ValCols, int CopyBits = 128, class SrcTensor, class DstTensor,
-          class Pred>
-__device__ static inline void copy_if_g2s(const SrcTensor& src, DstTensor& dst,
-                                          Pred pred) {
-  if constexpr (CopyBits == 128) {
-    auto tiled_copy = cute::make_tiled_copy(
-        cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>,
-                        Element>{},
-        cute::make_layout(
-            cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
-            cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
-        cute::make_layout(
-            cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
-    auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
-    auto src_thr = thr_copy.partition_S(src);
-    auto dst_thr = [&]() {
-      if constexpr (Swizzle) {
-        auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
-        return thr_copy.partition_D(dst_pi);
-      } else {
-        return thr_copy.partition_D(dst);
-      }
-    }();
-    auto coord_thr =
-        thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
-    auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
+template <class Src, class Dst>
+CUTE_HOST_DEVICE void naive_copy(const Src& src, Dst& dst) {
+  using SrcVal = typename Src::value_type;
+  using DstVal = typename Dst::value_type;
+  CUTE_UNROLL
+  for (int i = 0; i < cute::size(src); ++i) {
+    if constexpr (std::is_same<SrcVal, uint8_t>::value &&
+                  cutlass::sizeof_bits<DstVal>::value < 8) {
+      dst(i) = DstVal::bitcast(src(i));
+    } else if constexpr (std::is_same<DstVal, uint8_t>::value &&
+                         cutlass::sizeof_bits<SrcVal>::value < 8) {
+      SrcVal tmp = src(i);
+      dst(i) = tmp.raw();
+    } else {
+      dst(i) = src(i);
+    }
+  }
+}
+
+// COPY ATOM:
+// SM80_CP_ASYNC_CACHEGLOBAL_ZFILL used for cp.async
+// AutoVectorizingCopyWithAssumedAlignment for auto-vectorized copy with assumed
+// alignment (e.g. 128-bit for global memory) UniversalCopy for general-purpose
+// copy with any shape/stride
+
+// ------------------- threads-collective tiled copy -------------------
+template <class ATOM, int ThrRows, int ThrCols, int ValRows, int ValCols,
+          bool Swizzle, bool Pred, bool ZFill = false, class SrcTensor,
+          class DstTensor, class PredFn>
+__device__ static inline void tiled_copy(const SrcTensor& src, DstTensor& dst,
+                                         PredFn pred) {
+  using namespace cute;
+  auto tc =
+      make_tiled_copy(ATOM{},
+                      make_layout(make_shape(Int<ThrRows>{}, Int<ThrCols>{}),
+                                  make_stride(Int<ThrCols>{}, Int<1>{})),
+                      make_layout(make_shape(Int<ValRows>{}, Int<ValCols>{})));
+  auto thr_copy = tc.get_thread_slice(threadIdx.x);
+  auto src_thr = thr_copy.partition_S(src);
+  auto dst_thr = [&]() {
+    if constexpr (Swizzle) {
+      auto dst_pi = as_position_independent_swizzle_tensor(dst);
+      return thr_copy.partition_D(dst_pi);
+    } else {
+      return thr_copy.partition_D(dst);
+    }
+  }();
+  if constexpr (Pred) {
+    auto coord_thr = thr_copy.partition_S(make_identity_tensor(shape(src)));
+    auto pred_thr = make_tensor<bool>(shape(src_thr));
     CUTE_UNROLL
-    for (int i = 0; i < cute::size(pred_thr); ++i) {
+    for (int i = 0; i < size(pred_thr); ++i) {
       pred_thr(i) = pred(coord_thr(i));
     }
-    cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
-    cute::cp_async_fence();
-    cute::cp_async_wait<0>();
-  } else {
-    // Synchronous fallback for non-aligned strides: element-wise
-    // copy with zero-fill for predicated-out elements.
-    auto tiled_copy = cute::make_tiled_copy(
-        cute::Copy_Atom<cute::UniversalCopy<Element>, Element>{},
-        cute::make_layout(
-            cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
-            cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
-        cute::make_layout(
-            cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
-    auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
-    auto src_thr = thr_copy.partition_S(src);
-    auto dst_thr = [&]() {
-      if constexpr (Swizzle) {
-        auto dst_pi = cute::as_position_independent_swizzle_tensor(dst);
-        return thr_copy.partition_D(dst_pi);
-      } else {
-        return thr_copy.partition_D(dst);
+    copy_if(tc, pred_thr, src_thr, dst_thr);
+    if constexpr (ZFill) {
+      using DstValT = typename DstTensor::value_type;
+      CUTE_UNROLL
+      for (int i = 0; i < size(pred_thr); ++i) {
+        if (!pred_thr(i)) { dst_thr(i) = DstValT{}; }
       }
-    }();
-    auto coord_thr =
-        thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
-    CUTE_UNROLL
-    for (int i = 0; i < cute::size(dst_thr); ++i) {
-      bool valid = pred(coord_thr(i));
-      dst_thr(i) = valid ? src_thr(i) : Element(0);
     }
+  } else {
+    copy(tc, src_thr, dst_thr);
   }
 }
 
-template <class Element, int ThrRows, int ThrCols, int ValRows, int ValCols,
-          class SrcTensor, class DstTensor, class Pred>
-__device__ static inline void copy_if_s2g(const SrcTensor& src, DstTensor& dst,
-                                          Pred pred) {
-  auto tiled_copy = cute::make_tiled_copy(
-      cute::Copy_Atom<cute::UniversalCopy<Element>, Element>{},
-      cute::make_layout(
-          cute::make_shape(cute::Int<ThrRows>{}, cute::Int<ThrCols>{}),
-          cute::make_stride(cute::Int<ThrCols>{}, cute::Int<1>{})),
-      cute::make_layout(
-          cute::make_shape(cute::Int<ValRows>{}, cute::Int<ValCols>{})));
-  auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);
-  auto src_thr = thr_copy.partition_S(src);
-  auto dst_thr = thr_copy.partition_D(dst);
-  auto coord_thr =
-      thr_copy.partition_S(cute::make_identity_tensor(cute::shape(src)));
-  auto pred_thr = cute::make_tensor<bool>(cute::shape(src_thr));
-  CUTE_UNROLL
-  for (int i = 0; i < cute::size(pred_thr); ++i) {
-    pred_thr(i) = pred(coord_thr(i));
-  }
-  cute::copy_if(tiled_copy, pred_thr, src_thr, dst_thr);
+// ------------------- threads-collective fill -------------------
+template <class Tensor, class T>
+__device__ static inline void cooperative_fill(Tensor& dst, T val) {
+  auto n = cute::size(dst);
+  for (int i = threadIdx.x; i < n; i += blockDim.x) { dst(i) = val; }
+  __syncthreads();
 }
 
 // TODO: move to choreo_mma_wrapper.h

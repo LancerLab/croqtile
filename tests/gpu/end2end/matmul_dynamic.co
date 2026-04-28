@@ -13,9 +13,9 @@ __co__ void matmul_e4m3(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, gl
 
     mc = mma.fill.f32 0.0f;
     foreach {iv_k} in [cdiv(K, TILE_K)] {
-      tma.copy.swiz<32>.zfill lhs.subspan(WARP_M, TILE_K).step(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
+      dma.copy.swiz<32>.zfill lhs.subspan(WARP_M, TILE_K).step(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
 
-      tma.copy.swiz<32>.zfill rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      dma.copy.swiz<32>.zfill rhs.chunkat(block_n, iv_k) => rhs_load_s;
 
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
@@ -29,7 +29,7 @@ __co__ void matmul_e4m3(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, gl
     shared f32 [WARP_M, WARP_N] output_s;
     mma.store mc, output_s;
     
-    tma.copy output_s => output.subspan(WARP_M, WARP_N).step(WARP_M, WARP_N).at(block_m, block_n);
+    dma.copy output_s => output.subspan(WARP_M, WARP_N).step(WARP_M, WARP_N).at(block_m, block_n);
   }
 }
 
@@ -42,8 +42,8 @@ __co__ void matmul_f16(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 
     shared f16 [WARP_N, TILE_K] rhs_load_s;
     mc = mma.fill.f32 0.0f;
     foreach {iv_k} in [cdiv(K, TILE_K)] {
-      tma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
-      tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      dma.copy.swiz<128> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
+      dma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => rhs_load_s;
 
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
@@ -57,7 +57,7 @@ __co__ void matmul_f16(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 
     shared f16 [WARP_M, WARP_N] output_s;
     mma.store mc, output_s;
 
-    tma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+    dma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
   }
 }
 

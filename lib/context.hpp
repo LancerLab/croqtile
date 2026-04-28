@@ -338,22 +338,23 @@ public:
 
 /// Aggregate statistics for the loop auto-vectorizer across all functions.
 struct VectorizerStats {
-  size_t loops_analyzed = 0;   // total foreach loops seen by the vectorizer
-  size_t loops_vectorized = 0; // loops successfully vectorized
-  size_t loops_rejected = 0;   // loops rejected by legality checks
-  size_t loops_hinted = 0;     // loops with explicit vectorize() hints
+  size_t loops_analyzed = 0;    // total foreach loops seen by the vectorizer
+  size_t loops_vectorized = 0;  // loops successfully vectorized
+  size_t loops_rejected = 0;    // loops rejected by legality checks
+  size_t loops_hinted = 0;      // loops with explicit vectorize() hints
   size_t max_vector_factor = 0; // largest vector factor chosen
-  size_t masks_generated = 0;  // masks inserted for divergent control flow
+  size_t masks_generated = 0;   // masks inserted for divergent control flow
 };
 
 /// Aggregate statistics for the memory reuse pass across all functions.
 struct MemReuseStats {
-  size_t buffers_analyzed = 0;       // total buffers considered for reuse
-  size_t static_buffers = 0;         // buffers with compile-time-known sizes
-  size_t dynamic_buffers = 0;        // buffers requiring JIT heap simulation
-  size_t device_functions = 0;       // device functions with reuse contexts
-  size_t total_buffer_bytes = 0;     // sum of individual buffer sizes before reuse
-  size_t total_static_heap_bytes = 0; // sum of heap_size from static allocations
+  size_t buffers_analyzed = 0;   // total buffers considered for reuse
+  size_t static_buffers = 0;     // buffers with compile-time-known sizes
+  size_t dynamic_buffers = 0;    // buffers requiring JIT heap simulation
+  size_t device_functions = 0;   // device functions with reuse contexts
+  size_t total_buffer_bytes = 0; // sum of individual buffer sizes before reuse
+  size_t total_static_heap_bytes =
+      0; // sum of heap_size from static allocations
 };
 
 /// Aggregate statistics for assessments and assertions across all functions.
@@ -439,14 +440,14 @@ private:
   bool use_warpspec = false; // Enable warp-specialized synchronization for
                              // shared event/full-empty pipelines.
   bool single_thread_producer =
-      true;                   // In warpspec mode, use a single producer thread
-                              // for producer inthreads; otherwise guard
-                              // producer TMA/event ops individually.
-  bool fast_compile = false;  // Use precompiled CuTe runtime for faster nvcc
-                              // compilation via separate compilation + linking.
+      true;                  // In warpspec mode, use a single producer thread
+                             // for producer inthreads; otherwise guard
+                             // producer TMA/event ops individually.
+  bool fast_compile = false; // Use precompiled CuTe runtime for faster nvcc
+                             // compilation via separate compilation + linking.
   bool use_target_lib = false; // Lower __lib_* builtins to target library calls
                                // (e.g. native hardware library calls).
-  std::string debug_file_dir; // directory for compiler debug artifacts
+  std::string debug_file_dir;  // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
 

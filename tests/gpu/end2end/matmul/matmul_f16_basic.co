@@ -101,7 +101,9 @@ __co__ void matmul_f16_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global
 
 #undef MATMUL_WARP_N
 
-// ============ matmul_f16_dyn_sm90_N96: WGMMA+TMA N=96 (non-power-of-2) ============
+// ============ matmul_f16_dyn_sm90_N96: WGMMA+DMA N=96 (non-power-of-2) ============
+// Uses dma.copy.swiz instead of tma.copy.swiz because TMA with swizzle
+// requires power-of-2 box dimensions, and N=96 is not a power of 2.
 #define MATMUL_WARP_N 96
 
 #if MATMUL_WARP_N < 8 || MATMUL_WARP_N > 256 || (MATMUL_WARP_N % 8) != 0
@@ -112,21 +114,21 @@ __co__ void matmul_f16_sm90_n96(global f16 [M, K] lhs, global f16 [N, K] rhs, gl
   parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block {
     shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
     shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
-    mc = mma.fill.f16 0.0f;
-    foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
-      tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
-      foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-        parallel p by 1 : group-4 {
+    parallel p by 1 : group-4 {
+      mc = mma.fill.f16 0.0f;
+      foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+        dma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+        dma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
           ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
           mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
           mma.row.row mc, ma, mb;
         }
       }
+      shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
+      mma.store mc, output_s;
+      dma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
     }
-    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
-    mma.store mc, output_s;
-    tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
   }
 }
 

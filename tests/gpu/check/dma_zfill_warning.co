@@ -1,0 +1,113 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o /dev/null 2>&1 | FileCheck %s
+// Verify exact count: 2 DMA + 2 TMA = 4 shape-mismatch/zfill warnings (pad/transp/correct produce none)
+// RUN: choreo -es -t cute -arch=sm_90a %s -o /dev/null 2>&1 | grep -c "implicitly enabling zfill\|zfill is redundant\|consider adding .zfill\|\.zfill is redundant" | FileCheck %s --check-prefix=COUNT
+
+#include "choreo.h"
+
+// --- DMA shape-mismatch warnings ---
+
+// Case 1: dma.copy with dynamic chunk (chunkat) -- shape mismatch, no zfill
+// Should warn about implicit zfill.
+__co__ auto dma_implicit_zfill(s32 [M, N] input) {
+  s32 [64, 64] output;
+  parallel p by 1 : block
+    foreach {x, y} in [cdiv(M, 64), cdiv(N, 64)] {
+      parallel q by 128 : thread {
+        shared s32 [64, 64] s;
+        dma.copy input.chunkat(x, y) => s;
+        dma.copy s => output;
+      }
+    }
+  return output;
+}
+// CHECK: warning: DMA source and destination tiles have different shapes; implicitly enabling zfill
+
+// Case 2: dma.copy.zfill with static matching shapes -- zfill is redundant
+// Should warn about redundant zfill.
+__co__ auto dma_redundant_zfill(s32 [64, 64] input) {
+  s32 [64, 64] output;
+  parallel p by 1 : block
+    parallel q by 128 : thread {
+      shared s32 [64, 64] s;
+      dma.copy.zfill input.subspan(64, 64).at(0, 0) => s;
+      dma.copy s => output;
+    }
+  return output;
+}
+// CHECK: warning: DMA zfill is redundant because source and destination tiles have the same shape
+
+// Case 3: dma.pad -- NO shape mismatch warning expected
+// Padding inherently changes shapes; warning should be suppressed.
+__co__ auto dma_pad_no_warn(s32 [60, 60] input) {
+  s32 [64, 64] output;
+  parallel p by 1 : block
+    parallel q by 128 : thread {
+      shared s32 [64, 64] s;
+      dma.pad<{2, 2}, {2, 2}, {0, 0}, 0> input.subspan(60, 60).at(0, 0) => s;
+      dma.copy s => output;
+    }
+  return output;
+}
+
+// Case 4: dma.transp with correct transposed shapes -- NO warning expected
+// from[64,128] transposed <1,0> matches to[128,64].
+__co__ auto dma_transp_no_warn(s32 [64, 128] input) {
+  s32 [128, 64] output;
+  parallel p by 1 : block, by 1 : group {
+    tile = dma.transp<1, 0> input => shared;
+    dma.copy tile => output;
+  }
+  return output;
+}
+
+// --- TMA shape-mismatch warnings ---
+
+// Case 5: tma.copy with chunkat (dynamic shapes) -- no zfill
+// Should warn about missing zfill on TMA.
+__co__ auto tma_missing_zfill(f16 [M, K] input) {
+  f16 [128, 64] output;
+  parallel b by 1 : block
+    foreach {iv_m, iv_k} in [cdiv(M, 128), cdiv(K, 64)] {
+      parallel g by 1 : group-4 {
+        shared f16 [128, 64] s;
+        tma.copy.swiz<128> input.chunkat(iv_m, iv_k) => s;
+        dma.copy s => output;
+      }
+    }
+  return output;
+}
+// CHECK: warning: TMA source and destination tiles have different shapes; consider adding .zfill
+
+// Case 6: tma.copy.zfill with static matching shapes -- redundant zfill
+// Should warn about redundant zfill on TMA.
+__co__ auto tma_redundant_zfill(f16 [128, 64] input) {
+  f16 [128, 64] output;
+  parallel b by 1 : block
+    parallel g by 1 : group-4 {
+      shared f16 [128, 64] s;
+      tma.copy.swiz<128>.zfill input.subspan(128, 64).at(0, 0) => s;
+      dma.copy s => output;
+    }
+  return output;
+}
+// CHECK: warning: TMA .zfill is redundant because source and destination tiles have the same shape
+
+// Case 7: tma.copy.zfill with chunkat (correct usage) -- NO warning expected
+// zfill with dynamic shapes is the correct usage.
+__co__ auto tma_correct_zfill(f16 [M, K] input) {
+  f16 [128, 64] output;
+  parallel b by 1 : block
+    foreach {iv_m, iv_k} in [cdiv(M, 128), cdiv(K, 64)] {
+      parallel g by 1 : group-4 {
+        shared f16 [128, 64] s;
+        tma.copy.swiz<128>.zfill input.chunkat(iv_m, iv_k) => s;
+        dma.copy s => output;
+      }
+    }
+  return output;
+}
+
+int main() { return 0; }
+
+// COUNT: 4

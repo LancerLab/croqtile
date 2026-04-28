@@ -14,6 +14,7 @@
 #include "choreo_header.inc"
 #include "choreo_precompiled_cu.inc"
 #include "codegen.hpp"
+#include "dma_plan.hpp"
 #include "operator_info.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
@@ -211,6 +212,60 @@ size_t SharedAlignmentBytes(const Choreo::CompilationContext& ctx,
                             SwizMode swizzle_mode) {
   return std::max(ctx.GetMemoryAlignmentByte(Storage::SHARED),
                   SwizzleAlignmentByte(swizzle_mode));
+}
+
+static inline std::string GetCopyAtomType(CUDA_COPY_ATOM atom,
+                                          BaseType elem_type) {
+  std::string elem_name = NameBaseType(elem_type);
+  switch (atom) {
+  case CUDA_COPY_ATOM::TMA_ATOM: return std::string("choreo::TMAAtom");
+  case CUDA_COPY_ATOM::CP_ASYNC_128B:
+    return std::string("cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<"
+                       "cute::uint128_t>, ") +
+           elem_name + ">";
+  case CUDA_COPY_ATOM::CP_ASYNC_64B:
+    return std::string("cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEALWAYS_ZFILL<"
+                       "cute::uint64_t>, ") +
+           elem_name + ">";
+  case CUDA_COPY_ATOM::CP_ASYNC_32B:
+    return std::string("cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEALWAYS_ZFILL<"
+                       "cute::uint32_t>, ") +
+           elem_name + ">";
+  case CUDA_COPY_ATOM::ASYNC_COPY: {
+    std::string copy_elem =
+        IsFloatSubByteType(elem_type) ? "uint8_t" : elem_name;
+    return std::string("cute::Copy_Atom<cute::UniversalCopy<") + copy_elem +
+           ">, " + copy_elem + ">";
+  }
+  case CUDA_COPY_ATOM::VEC_128B:
+    return std::string(
+               "cute::Copy_Atom<cute::AutoVectorizingCopyWithAssumedAlignment<"
+               "128>, ") +
+           elem_name + ">";
+  case CUDA_COPY_ATOM::VEC_64B:
+    return std::string(
+               "cute::Copy_Atom<cute::AutoVectorizingCopyWithAssumedAlignment<"
+               "64>, ") +
+           elem_name + ">";
+  case CUDA_COPY_ATOM::VEC_32B:
+    return std::string(
+               "cute::Copy_Atom<cute::AutoVectorizingCopyWithAssumedAlignment<"
+               "32>, ") +
+           elem_name + ">";
+  case CUDA_COPY_ATOM::VEC_16B:
+    return std::string(
+               "cute::Copy_Atom<cute::AutoVectorizingCopyWithAssumedAlignment<"
+               "16>, ") +
+           elem_name + ">";
+  case CUDA_COPY_ATOM::UNIVERSAL_COPY: {
+    std::string copy_elem =
+        IsFloatSubByteType(elem_type) ? "uint8_t" : elem_name;
+    return std::string("cute::Copy_Atom<cute::UniversalCopy<") + copy_elem +
+           ">, " + copy_elem + ">";
+  }
+  case CUDA_COPY_ATOM::UNKNOWN: return "unknown";
+  }
+  return "unknown";
 }
 
 enum class MmaLoadShapeWarningKind { None, Dynamic, Misaligned };
@@ -885,10 +940,14 @@ std::pair<std::string, std::string> CuteCodeGen::GenTensorDecl(
     tsr_decl << ");\n";
   }
 
+  bool use_byte_ptr = (sto == Storage::GLOBAL || sto == Storage::DEFAULT ||
+                       sto == Storage::SHARED) &&
+                      IsSubByteType(bty);
+  std::string ptr_elem = use_byte_ptr ? "uint8_t" : bts;
   tsr_decl << indent << "auto " << tsr_name << " = cute::make_tensor(";
   if (!mem_ty.empty())
-    tsr_decl << "cute::make_" << mem_ty << "_ptr<" << bts << ">";
-  tsr_decl << "((" << bts << "*)" << buf_expr
+    tsr_decl << "cute::make_" << mem_ty << "_ptr<" << ptr_elem << ">";
+  tsr_decl << "((" << ptr_elem << "*)" << buf_expr
            << ((!offset.empty()) ? (" + " + offset) : "") << ")";
   tsr_decl << ", " << lyt_name << ");\n";
 
@@ -1359,8 +1418,16 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
       assert(idx.GetVals().size() == strd.size());
       assert(blk.Rank() == strd.size());
 
-      for (size_t ith = 0; ith < idx.GetVals().size(); ++ith)
-        offset += idx.GetVals()[ith] * strd[ith] * blk.ValueAt(ith);
+      // When SubSpan has explicit steps, block_strides already incorporate
+      // the step factor (shapeinfer multiplies cur_strd by step values),
+      // so multiplying by block_shape would double-count.
+      bool has_step = isa<AST::SOP::SubSpan>(sop) && sop->GetSteps();
+      for (size_t ith = 0; ith < idx.GetVals().size(); ++ith) {
+        if (has_step)
+          offset += idx.GetVals()[ith] * strd[ith];
+        else
+          offset += idx.GetVals()[ith] * strd[ith] * blk.ValueAt(ith);
+      }
     } else if (isa<AST::SOP::View>(sop)) {
       auto off = sop->GetOffsets()->Opts();
       auto strd = sop->GetBlockStrides();
@@ -3079,8 +3146,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     assert(n.GetLevel() == ParallelLevel::BLOCK);
     int emitted_tma_init_idx = 0;
     for (TMADesc& desc : tma_descs) {
-      auto cp_atom = GetCopyAtomName(true, emitted_tma_init_idx);
-      auto tma_barrier_name = cp_atom + "_barrier";
+      auto cp_atom_name = GetCopyAtomName(true, emitted_tma_init_idx);
+      auto tma_barrier_name = cp_atom_name + "_barrier";
       auto f_sty = GetSpannedType(desc.GetFrom()->GetType());
       auto t_sty = GetSpannedType(desc.GetTo()->GetType());
       auto io_sty = (t_sty->GetStorage() == Storage::SHARED) ? t_sty : f_sty;
@@ -3099,6 +3166,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       if (skip_load_tma_init_block) { continue; }
 
       emitted_tma_init_idx++;
+
+      // TMA stores (S2G) still need a barrier/TMAAtom for proper
+      // synchronization with the consuming warpgroups.
 
       if (use_ptx_barrier_for_desc) {
         ds << d_indent << "__shared__ __align__(8) uint64_t "
@@ -3132,11 +3202,11 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       ds << d_indent << "}\n";
       ds << d_indent << "__syncthreads();\n";
       if (use_ptx_barrier_for_desc) {
-        ds << d_indent << "TMAAtom " << cp_atom << "{};\n";
-        ds << d_indent << cp_atom << ".EnablePTXMBarrier(&" << tma_barrier_name
-           << ");\n\n";
+        ds << d_indent << "TMAAtom " << cp_atom_name << "{};\n";
+        ds << d_indent << cp_atom_name << ".EnablePTXMBarrier(&"
+           << tma_barrier_name << ");\n\n";
       } else {
-        ds << d_indent << "TMAAtom " << cp_atom << "{&" << cp_atom
+        ds << d_indent << "TMAAtom " << cp_atom_name << "{&" << cp_atom_name
            << "_barrier};\n\n";
       }
     }
@@ -3154,88 +3224,57 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // - not support async.
 
   // Generate DMA transfer and choreo::future in device-side
-  auto claimFuture = [this,
-                      &n](const std::string& buf_expr, bool is_async,
-                          bool is_tma = false,
-                          const std::string& mdata_expr = "") -> std::string {
-    if (!n.future.empty() && claimed_futs.count(InScopeName(n.future)))
-      return n.future;
-
-    auto future_name = n.future;
-
-    auto cp_atom =
-        GetCopyAtomName(is_tma, (is_tma ? tma_future_count : dma_count_));
-    if (!is_tma && is_async) {
-      ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
-    }
-
-    if (future_name.empty()) {
-      future_name = "__choreo_anon_fut__" + std::to_string(future_count_);
-    } else {
-      claimed_futs.emplace(InScopeName(n.future), cp_atom);
-      auto fsty = GetSpannedType(GetSymbolType(n.future));
-      ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
-      ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
-                          n.future + ".data()");
-      if (n.IsSparse())
-        ssm.MapDeviceSymbol(InScopeName(n.future) + ".mdata",
-                            n.future + ".mdata()");
-    }
-    future_count_++;
-    if (is_tma)
-      ++tma_future_count;
-    else
-      ++dma_count_;
-
-    ds << d_indent << "future " << future_name;
-    ds << "(\"" << n.future << "\", " << n.LOC().begin.line << ", "
-       << n.LOC().begin.column;
-    if (!buf_expr.empty()) { ds << ", " << buf_expr; }
-    if (!mdata_expr.empty()) { ds << ", " << mdata_expr; }
-    ds << ");\n";
-    if (is_tma) {
-      ds << d_indent << future_name << ".is_tma = true;\n";
-      ds << d_indent << future_name << ".set_atom(&" << cp_atom << ");\n";
-    } else if (is_async) {
-      ds << d_indent << future_name << ".set_atom(&" << cp_atom << ");\n";
-      ds << d_indent << future_name << ".set_ring(" << device_fn
-         << "__ring__);\n";
-      ds << d_indent << future_name << ".id = " << future_count_ << ";\n";
-    }
-
-    return future_name;
-  };
-
   auto nty = NodeType(n);
   if (auto ph = dyn_cast<PlaceHolderType>(nty)) {
     assert(ph->GetBaseType() == BaseType::FUTURE);
-    // must set the buffer
-    auto buf_name = FBInfo().at(InScopeName(n.future)).buffer;
-
-    // Handle placeholder checks that need to postpone after all lv processed
-    // Currently, the only case is the plder tied to global buffer
-
-    // assert(ssm.HasDeviceName(buf_name) && "buffer has been defined");
-    if (!ssm.HasDeviceName(buf_name)) pld_checklist.push_back(buf_name);
-
-    // dma.any in host-side is of no practical use.
-    // It should not be claimed. And there is no future to remap to.
-    if (IsHost()) return true;
-
-    claimFuture(UnScopedName(buf_name), true, n.IsTMA());
-    // make following buffer reference all be indirect
-    // TODO: any better idea than this
-    auto fsty = GetSpannedType(GetSymbolType(n.future));
-    ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
+    if (!IsHost() && !n.future.empty()) {
+      std::string buf_name =
+          const_cast<FutureBufferInfo&>(FBInfo())[InScopeName(n.future)].buffer;
+      auto cp_atom_name =
+          GetCopyAtomName(n.IsTMA(), n.IsTMA() ? tma_future_count : dma_count_);
+      if (!claimed_futs.count(InScopeName(n.future))) {
+        claimed_futs.emplace(InScopeName(n.future), cp_atom_name);
+        ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
+        ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
+                            n.future + ".data()");
+        future_count_++;
+        if (n.IsTMA())
+          ++tma_future_count;
+        else
+          ++dma_count_;
+        std::string buf_expr;
+        if (ssm.HasDeviceName(buf_name))
+          buf_expr = ssm.DeviceName(buf_name);
+        else
+          buf_expr = UnScopedName(buf_name);
+        ds << d_indent << "future " << n.future << "(\"" << n.future << "\", "
+           << n.LOC().begin.line << ", " << n.LOC().begin.column;
+        if (!buf_expr.empty()) ds << ", " << buf_expr;
+        ds << ");\n";
+        if (n.IsTMA()) {
+          ds << d_indent << n.future << ".is_tma = true;\n";
+          ds << d_indent << n.future << ".set_atom(&" << cp_atom_name << ");\n";
+        }
+      }
+      ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
+    }
     return true;
   }
+
+  const DMALoweringDecision* dma_plan = DMAPlan::Lookup(&n);
+  assert(dma_plan && "DMA plan must exist before CuteCodeGen emission");
+  auto future_only = !n.future.empty();
+  auto event_only = dma_plan->is_async && n.HasEvent();
+  assert(!(event_only && future_only) &&
+         "event and future cannot be both present");
+  bool is_tma = dma_plan->use_tma;
+  bool is_async = dma_plan->is_async;
 
   assert(isa<AST::ChunkAt>(n.from) && "Unexpected type for DMA's source.");
   assert(isa<AST::ChunkAt>(n.to) && "Unexpected type for DMA's destination.");
 
   auto fty = dyn_cast<FutureType>(nty);
   assert(fty && "Invalid type of DMA statement!");
-  if (fty->IsAsync()) assert(!n.future.empty() || n.HasEvent());
 
   auto f_ca = cast<AST::ChunkAt>(n.from);
   auto t_ca = cast<AST::ChunkAt>(n.to);
@@ -3253,6 +3292,53 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
+  auto claimFuture = [&](const std::string& buf_expr,
+                         const DMALoweringDecision* plan) -> std::string {
+    if (!is_tma && !future_only) return "";
+    // Event-only TMAs use event barriers and don't need futures
+    if (is_tma && !future_only && event_only) return "";
+    auto future_name = n.future;
+
+    auto cp_atom_name =
+        GetCopyAtomName(is_tma, (is_tma ? tma_future_count : dma_count_));
+    if (future_name.empty()) {
+      future_name = "__choreo_anon_fut__" + std::to_string(future_count_);
+    } else {
+      // if the future has already been claimed, return the future name
+      if (claimed_futs.count(InScopeName(future_name))) return future_name;
+      // claim the future
+      claimed_futs.emplace(InScopeName(future_name), cp_atom_name);
+      ssm.MapDeviceSymbol(InScopeName(future_name), future_name);
+      ssm.MapDeviceSymbol(InScopeName(future_name) + ".data",
+                          future_name + ".data()");
+    }
+
+    future_count_++;
+    if (is_tma)
+      ++tma_future_count;
+    else
+      ++dma_count_;
+
+    ds << d_indent << "future " << future_name;
+    ds << "(\"" << n.future << "\", " << n.LOC().begin.line << ", "
+       << n.LOC().begin.column;
+    if (!buf_expr.empty()) { ds << ", " << buf_expr; }
+    ds << ");\n";
+    if (is_tma) {
+      ds << d_indent << future_name << ".is_tma = true;\n";
+      ds << d_indent << future_name << ".set_atom(&" << cp_atom_name << ");\n";
+    } else if (is_async) {
+      auto cp_atom_type = GetCopyAtomType(plan->atom, t_sty->ElementType());
+      ds << d_indent << cp_atom_type << " " << cp_atom_name << "{};\n";
+      ds << d_indent << future_name << ".set_atom(&" << cp_atom_name << ");\n";
+      ds << d_indent << future_name << ".set_ring(" << device_fn
+         << "__ring__);\n";
+      ds << d_indent << future_name << ".id = " << future_count_ << ";\n";
+    }
+
+    return future_name;
+  };
+
   auto SymbolToSymbol = [f_ca, t_ca]() -> bool {
     return f_ca->NoTilingOperation() && t_ca->NoTilingOperation();
   };
@@ -3265,92 +3351,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   auto TileToTile = [f_ca, t_ca]() -> bool {
     return f_ca->HasTilingOperation() && t_ca->HasTilingOperation();
   };
-  auto HasReshape = [f_ca, t_ca]() -> bool {
-    return f_ca->HasReshape() || t_ca->HasReshape();
-  };
 
-  if (t_sty->GetStorage() == Storage::GLOBAL && use_hetero_tileflow &&
-      IsHost()) {
-    std::string bts = NameBaseType(t_sty->ElementType());
-    auto buf_sym = t_sym + "__device";
-    auto buf_sym_from = f_sym + "__device";
-    static int s_cnt = 0;
-    if (n.operation == ".copy") {
-      if (SymbolToSymbol()) {
-        // direct copy
-        hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
-           << ";\n";
-      } else if (SymbolToTile()) {
-        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                        f_sym + "_2_" + t_sym;
-        auto [offset, offcnt] = GenMdsOffset(t_ca);
-        hs << h_indent << "int " << off_name << " = " << offset << ";\n";
-        hs << h_indent << bts << " * " << buf_sym << " + " << off_name << " = "
-           << buf_sym_from << ";\n";
-      } else if (TileToSymbol()) {
-        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                        f_sym + "_2_" + t_sym;
-        auto [offset, offcnt] = GenMdsOffset(f_ca);
-        hs << h_indent << "int " << off_name << " = " << offset << ";\n";
-        hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
-           << " + " << off_name << ""
-           << ";\n";
-      } else
-        choreo_unreachable("not support dual-side chunkat in dma copy");
-    } else
-      choreo_unreachable("not support host-side dma other than copy");
-
-    return true;
-  }
-
-  // TODO: how to do tiling in host-side?
-  if ((t_sty->GetStorage() == Storage::GLOBAL ||
-       IsChoreoInput(InScopeName(t_sym))) &&
-      IsHost()) {
-    if (n.IsAsync()) choreo_unreachable("not support host-side async dma yet");
-    std::string bts = NameBaseType(t_sty->ElementType());
-    std::string buf_sym_from;
-    std::string buf_sym;
-    std::string cuda_dma_kind = "cudaMemcpy";
-    if (global_buffers.count(f_sym + "__device")) {
-      buf_sym_from = f_sym + "__device";
-      cuda_dma_kind.append("Device");
-    } else {
-      buf_sym_from = f_sym + ".data()";
-      if (f_sty->GetStorage() == Storage::GLOBAL)
-        cuda_dma_kind.append("Device");
-      else
-        cuda_dma_kind.append("Host");
-    }
-
-    if (global_buffers.count(t_sym + "__device")) {
-      buf_sym = t_sym + "__device";
-      cuda_dma_kind.append("ToDevice");
-    } else {
-      buf_sym = t_sym + ".data()";
-      if (f_sty->GetStorage() == Storage::GLOBAL)
-        cuda_dma_kind.append("ToDevice");
-      else
-        cuda_dma_kind.append("ToHost");
-    }
-
-    if (n.operation == ".copy") {
-      if (SymbolToSymbol()) {
-        // direct copy
-        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
-           << buf_sym_from << ", " << UnScopedSizeExpr(*f_sty) << ", "
-           << cuda_dma_kind << "));\n";
-      } else
-        choreo_unreachable(
-            "not support tiling chunkat in dma copy at host side for now");
-    } else
-      choreo_unreachable("not support host-side dma other than copy");
-
-    return true;
-  }
-
-  // TODO: correct?
-  if (IsHost()) choreo_unreachable("the dma is not supported in host side!");
+  assert(!IsHost() && "DMA is not supported on host-side currently");
 
   auto GetBufferExpr = [this](const std::string& sym,
                               const ptr<AST::MultiValues> subscription,
@@ -3402,318 +3404,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     return std::make_pair(buf_name, buf_expr);
   };
 
-  // if the value is dst, means MAY do optimization on dst
-  enum DMA_OP : uint8_t {
-    none = 0,
-    dst = 1 << 0,
-    src = 1 << 1,
-    both = src | dst
-  };
-
   const auto f_buf = GetBufferExpr(f_sym, f_idx, f_ty);
   const auto t_buf = GetBufferExpr(t_sym, t_idx, t_ty);
 
-  std::string mdata_expr = "";
-  if (n.IsSparse() && !n.future.empty()) {
-    static size_t mdata_count = 0;
-    auto mdata_sym = "__choreo_mdata__" + std::to_string(mdata_count++);
-    auto m = ValueSTR(f_sty->GetShape().ValueAt(0));
-    auto nval = ValueSTR(f_sty->GetShape().ValueAt(1));
-    auto k = ValueSTR(f_sty->GetShape().ValueAt(2));
-    ds << d_indent << "constexpr int " << mdata_sym << "_M = " << m << ";\n";
-    ds << d_indent << "constexpr int " << mdata_sym << "_N = " << nval << ";\n";
-    ds << d_indent << "constexpr int " << mdata_sym << "_K = " << k << ";\n";
-    if (t_sty->GetStorage() == Storage::SHARED)
-      ds << d_indent << "__shared__ uint8_t " << mdata_sym << "[" << mdata_sym
-         << "_M * " << mdata_sym << "_N * (" << mdata_sym << "_K / 4)];\n";
-    else
-      ds << d_indent << "uint8_t " << mdata_sym << "[" << mdata_sym << "_M * "
-         << mdata_sym << "_N * (" << mdata_sym << "_K / 4)];\n";
-    mdata_expr = mdata_sym;
-  }
-
-  auto future_name = n.future;
-  bool bind_data = SymbolToSymbol() || TileToSymbol() || TileToTile();
-  std::string bound_mdata_expr = (n.IsSparse() && bind_data) ? mdata_expr : "";
-  bool use_tma = n.IsTMA();
-  bool suppress_tma_future = false;
-  bool suppress_dma_future = false;
-
-  if (use_tma && IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4 &&
-      n.IsAsync()) {
-    suppress_tma_future = true;
-  }
-  if (!use_tma && IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4 &&
-      n.IsAsync()) {
-    suppress_dma_future = true;
-  }
-  // bind the data to the future
-  if (!suppress_tma_future && !suppress_dma_future) {
-    if (bind_data)
-      future_name =
-          claimFuture(t_buf.second, fty->IsAsync(), use_tma, bound_mdata_expr);
-    else
-      future_name = claimFuture("", fty->IsAsync(), use_tma, "");
-  }
-
-  // vars to do make_tiled_copy
-  struct TiledCopyEntry {
-    std::pair<size_t, size_t> thr_layout;
-    std::pair<size_t, size_t> val_layout;
-    // if set, use AutoVectorizingCopyWithAssumedAlignment
-    size_t vectorized_align_bits;
-    bool one_row_per_warp;
-  };
-  enum class TailCopyKind : uint8_t {
-    None,
-    G2S,
-    S2G,
-  };
-  struct TiledCopyPlan {
-    std::optional<TiledCopyEntry> entry;
-    TailCopyKind tail_copy_kind = TailCopyKind::None;
-    std::optional<TiledCopyEntry> tail_copy_helper_entry;
-  };
-  TiledCopyPlan tiled_copy_plan;
-
-  auto PrepareTiledCopyEntry =
-      [&](const location& loc, bool one_row_per_warp, size_t mem_align_byte,
-          const Shape& tile_shape, const ValueList& tile_strd,
-          BaseType bty) -> std::optional<TiledCopyEntry> {
-    if (tile_shape.Rank() != 2) {
-      Note(loc, "the span (maybe after span_as) is not of rank 2.");
-      return std::nullopt;
-    }
-    if (tile_shape.IsDynamic()) {
-      Note(loc, "the tile is of dynamic shape (" + STR(tile_shape) +
-                    "), unable to do make_tiled_copy.");
-      return std::nullopt;
-    }
-
-    const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
-    assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
-    const auto& lconfig = lcs[parallel_idx];
-    auto inner_thr_count = lconfig.thread_count.x * lconfig.thread_count.y *
-                           lconfig.thread_count.z;
-    auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
-                       lconfig.group_count.y * lconfig.group_count.z;
-    auto thr_count_vi =
-        IsWarpSpecActive() ? inner_thr_count : inner_thr_count * group_count;
-    if (!VIIsInt(inner_thr_count)) {
-      Note(loc, "#thread (" + STR(inner_thr_count) +
-                    ") is dynamic, unable to do make_tiled_copy.");
-      return std::nullopt;
-    }
-    size_t thr_count = *VIInt(thr_count_vi);
-
-    if (!VIIsInt(tile_strd[1])) {
-      Note(loc, "the col stride of span is dynamic (" + STR(tile_strd[1]) +
-                    "). make_tiled_copy can be implemented only when it is "
-                    "integer 1 (row-major).");
-      return std::nullopt;
-    }
-    if (*VIInt(tile_strd[1]) != 1) {
-      Note(loc, "the col stride of span is " + STR(tile_strd[1]) +
-                    ". make_tiled_copy can be implemented only when it is "
-                    "integer 1 (row-major).");
-      return std::nullopt;
-    }
-
-    TiledCopyEntry ret;
-    size_t tile_m = *VIInt(tile_shape.ValueAt(0));
-    size_t tile_n = *VIInt(tile_shape.ValueAt(1));
-    size_t elem_byte = SizeOf(bty);
-    size_t row_byte = tile_n * elem_byte;
-
-    auto XBitsPerThread = [&](size_t bits_per_thread) -> bool {
-      size_t bytes_per_thread = bits_per_thread / 8;
-      if (row_byte % bytes_per_thread != 0) {
-        Note(loc, "row_byte (" + std::to_string(row_byte) +
-                      ") is not divisible by " +
-                      std::to_string(bytes_per_thread) + ", unable to do " +
-                      std::to_string(bits_per_thread) +
-                      " bits vectorized copy.");
-        return false;
-      }
-      size_t thr_per_row = row_byte / bytes_per_thread;
-      if (thr_count % thr_per_row != 0) {
-        Note(loc, "#thread (" + std::to_string(thr_count) +
-                      ") is not divisible by thr_per_row (" +
-                      std::to_string(thr_per_row) + "), unable to do " +
-                      std::to_string(bits_per_thread) +
-                      " bits vectorized copy.");
-        return false;
-      }
-      size_t thr_per_col = thr_count / thr_per_row;
-      if (tile_m % thr_per_col != 0) {
-        Note(loc, "#row of tile (" + std::to_string(tile_m) +
-                      ") is not divisible by thr_per_col (" +
-                      std::to_string(thr_per_col) + "), unable to do " +
-                      std::to_string(bits_per_thread) +
-                      " bits vectorized copy.");
-        return false;
-      }
-      ret.thr_layout.first = thr_per_col;
-      ret.thr_layout.second = thr_per_row;
-      ret.val_layout.first = tile_m / thr_per_col;
-      ret.val_layout.second = tile_n / thr_per_row;
-      return true;
-    };
-
-    if (!one_row_per_warp && VIIsInt(tile_strd[0])) {
-      int tile_strd_0 = *VIInt(tile_strd[0]);
-      auto AlignWith = [&](size_t _alignment_bit) -> bool {
-        if ((mem_align_byte * 8) % _alignment_bit != 0) return false;
-        if ((tile_strd_0 * elem_byte * 8) % _alignment_bit != 0) return false;
-        return true;
-      };
-      for (size_t expect_alignment_bit : {128, 64, 32, 16}) {
-        if (expect_alignment_bit < elem_byte * 8) break;
-        if (!AlignWith(expect_alignment_bit)) {
-          Note(loc,
-               "alignment is not satisfied, unable to utilize vectorized " +
-                   std::to_string(expect_alignment_bit) +
-                   " bit load inst: tensor alignment is " +
-                   std::to_string(mem_align_byte) +
-                   " bytes, stride of first dim of tile is " +
-                   std::to_string(tile_strd_0 * elem_byte) + " bytes.");
-        } else {
-          if (XBitsPerThread(expect_alignment_bit)) {
-            ret.vectorized_align_bits = expect_alignment_bit;
-            ret.one_row_per_warp = false;
-            Note(loc, "do make_tiled_copy with assumed " +
-                          std::to_string(expect_alignment_bit) +
-                          " bits vectorized copy atom.");
-            return ret;
-          }
-        }
-      }
-    }
-
-    Note(loc, "alignment is not satisfied, unable to utilize vectorized "
-              "load inst. Fallback to UniversalCopy.");
-    constexpr size_t thr_per_warp = 32;
-    if (thr_count < 32) {
-      Note(loc, "#thread in block (" + std::to_string(thr_count) +
-                    ") is less than 32, unable to do warp-per-row "
-                    "make_tiled_copy. Fallback to normal copy.");
-      return std::nullopt;
-    }
-    if (tile_n % 32 != 0) {
-      Note(loc, "#col of tile is not divisible by 32, unable to do "
-                "warp-per-row make_tiled_copy. Fallback to normal copy.");
-      return std::nullopt;
-    }
-    constexpr size_t thr_per_row = thr_per_warp;
-    if (thr_count % thr_per_row != 0) {
-      Note(loc, "#thread in block (" + std::to_string(thr_count) +
-                    ") is not divisible by #thread in a warp (" +
-                    std::to_string(thr_per_row) +
-                    "), unable to do make_tiled_copy.");
-      return std::nullopt;
-    }
-    size_t thr_per_col = thr_count / thr_per_row;
-    if (tile_m % thr_per_col != 0) {
-      Note(loc, "#row of tile (" + std::to_string(tile_m) +
-                    ") is not divisible by #thread per col (" +
-                    std::to_string(thr_per_col) +
-                    "), unable to do make_tiled_copy.");
-      return std::nullopt;
-    }
-    ret.thr_layout.first = thr_per_col;
-    ret.thr_layout.second = thr_per_row;
-    ret.val_layout.first = tile_m / thr_per_col;
-    ret.val_layout.second = tile_n / thr_per_row;
-    ret.one_row_per_warp = true;
-    ret.vectorized_align_bits = 0;
-    return ret;
-  };
-
-  // used in dma only. Utilize all the threads in block to do DMA.
-  auto TiledCopyPrepare = [&](bool one_row_per_warp, size_t mem_align_byte,
-                              const ptr<AST::ChunkAt>& ca) -> TiledCopyPlan {
-    /*
-    for now, `make_tiled_copy` here has some constraints:
-      only support 2D DMA;
-      do not support dynamic #thread;
-    2026/3/24:
-    1. Dynamic shape is supported now, dynamic shape will be
-    lowering into copy_if with predication.
-    2. DMA inside inthreads is supported now, but we only enable it
-    when WarpSpec is used and the parallel level is GROUPx4,
-    which means the DMA is performed by a single warpgroup of 128
-    threads.
-    */
-    TiledCopyPlan plan;
-    const auto& loc = ca->LOC();
-
-    bool shape_mismatch_tail_copy =
-        f_ca->GetBlockShape().Rank() == 2 &&
-        t_ca->GetBlockShape().Rank() == 2 &&
-        STR(f_ca->GetBlockShape()) != STR(t_ca->GetBlockShape());
-
-    bool tail_copy_g2s = n.operation == ".copy" && ca == f_ca &&
-                         (f_sty->GetStorage() == Storage::GLOBAL ||
-                          f_sty->GetStorage() == Storage::DEFAULT) &&
-                         t_sty->GetStorage() == Storage::SHARED &&
-                         shape_mismatch_tail_copy;
-    bool tail_copy_s2g = n.operation == ".copy" && ca == t_ca &&
-                         f_sty->GetStorage() == Storage::SHARED &&
-                         (t_sty->GetStorage() == Storage::GLOBAL ||
-                          t_sty->GetStorage() == Storage::DEFAULT) &&
-                         shape_mismatch_tail_copy;
-
-    if (tail_copy_g2s)
-      plan.tail_copy_kind = TailCopyKind::G2S;
-    else if (tail_copy_s2g)
-      plan.tail_copy_kind = TailCopyKind::S2G;
-
-    if (plan.tail_copy_kind != TailCopyKind::None) {
-      const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
-      assert(parallel_idx != -1 && parallel_idx < static_cast<int>(lcs.size()));
-      const auto& lconfig = lcs[parallel_idx];
-      auto inner_thr_count = lconfig.thread_count.x * lconfig.thread_count.y *
-                             lconfig.thread_count.z;
-      auto group_count = lconfig.group_count.x * lconfig.group4_count.x *
-                         lconfig.group_count.y * lconfig.group_count.z;
-      auto thr_count_vi =
-          (IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4)
-              ? inner_thr_count
-              : inner_thr_count * group_count;
-      if (VIIsInt(thr_count_vi) && VIIsInt(fty->GetShape().ValueAt(1))) {
-        size_t thr_count = *VIInt(thr_count_vi);
-        BaseType elem_type = plan.tail_copy_kind == TailCopyKind::G2S
-                                 ? f_sty->ElementType()
-                                 : t_sty->ElementType();
-        size_t elem_byte = SizeOf(elem_type);
-        size_t tile_n = *VIInt(fty->GetShape().ValueAt(1));
-        constexpr size_t bytes_per_copy = 16;
-        if (bytes_per_copy % elem_byte == 0) {
-          size_t elems_per_copy = bytes_per_copy / elem_byte;
-          if (tile_n % elems_per_copy == 0) {
-            size_t thr_per_row = tile_n / elems_per_copy;
-            if (thr_per_row != 0 && thr_count % thr_per_row == 0) {
-              TiledCopyEntry entry;
-              entry.thr_layout.first = thr_count / thr_per_row;
-              entry.thr_layout.second = thr_per_row;
-              entry.val_layout.first = 1;
-              entry.val_layout.second = elems_per_copy;
-              entry.vectorized_align_bits = 128;
-              entry.one_row_per_warp = false;
-              plan.tail_copy_helper_entry = entry;
-              return plan;
-            }
-          }
-        }
-      }
-    }
-
-    plan.entry = PrepareTiledCopyEntry(loc, one_row_per_warp, mem_align_byte,
-                                       ca->GetBlockShape(), GenStrides(ca),
-                                       t_sty->ElementType());
-
-    return plan;
-  };
+  // Only create a future variable when DMA has an explicit future name,
+  // or always for TMA (which creates anonymous futures when unnamed).
+  std::string future_name = claimFuture(t_buf.second, dma_plan);
+  bool has_future = !future_name.empty();
 
   auto DMACodeGen = [&]() {
     std::string f_mds_offset = "";
@@ -3722,7 +3419,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     Shape t_shape = t_sty->GetShape();
     const auto& f_buf_name = f_buf.first;
     const auto& t_buf_name = t_buf.first;
-
+    // currently, span_as should not be the last operation
     if (auto idx = f_ca->IndexOfLastSpanAs()) {
       f_mds_offset = TileBaseOffset(f_ca);
       f_shape = f_ca->OpAt(*idx)->GetBlockShape();
@@ -3741,6 +3438,22 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (n.operation == ".transp")
       transp_config = cast<TransposeConfig>(n.GetConfig())->dim_values;
 
+    // For .pad with naive copy, the source tensor covers the unpadded
+    // input region.  For tiled pad, the source needs the full box shape
+    // so the tiled_copy partitioning works (predicate handles OOB).
+    auto f_mds_shape = (n.operation == ".pad" && !dma_plan->IsTiledDMA())
+                           ? dma_plan->from_ca_shape
+                           : dma_plan->GetBoxOfFrom();
+    // For .pad the destination tensor is the full padded allocation; the
+    // tiled copy only covers the inner data region (box_shape = FROM shape).
+    auto t_mds_shape = (n.operation == ".pad" && dma_plan->IsTiledDMA())
+                           ? t_ca->GetBlockShape()
+                           : dma_plan->GetBoxOfTo();
+    auto f_stride = dma_plan->from_strides;
+    auto t_stride = dma_plan->to_strides;
+    auto swizzle_mode = dma_plan->swizzle_mode;
+    auto elem_type = dma_plan->elem_type;
+
     // Determine if we should use WGMMA layout for destination tensor
     bool use_wgmma_layout_t = HasWGMMAInFunction() &&
                               t_sty->GetStorage() == Storage::SHARED &&
@@ -3748,509 +3461,137 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                                t_sty->ElementType() == BaseType::BF16 ||
                                t_sty->ElementType() == BaseType::F8_E4M3);
 
-    auto f_stride = GenStrides(f_ca, transp_config);
-    auto t_stride = GenStrides(t_ca);
-
-    auto swizzle_mode = n.GetSwizzleMode();
-
-    bool use_tail_copy_g2s =
-        tiled_copy_plan.tail_copy_kind == TailCopyKind::G2S;
-    bool use_tail_copy = tiled_copy_plan.tail_copy_kind != TailCopyKind::None;
-
-    Shape f_mds_shape =
-        (n.operation == ".pad" ? f_ca->GetBlockShape() : fty->GetShape());
-    Shape f_ca_shape = f_ca->GetBlockShape();
-    if (use_tail_copy) f_mds_shape = t_ca->GetBlockShape();
-    Shape t_mds_shape = fty->GetShape();
-    if (use_tail_copy) t_mds_shape = t_ca->GetBlockShape();
-    std::optional<TiledCopyEntry> tail_copy_entry =
-        tiled_copy_plan.tail_copy_helper_entry;
-    bool use_tail_copy_helper = use_tail_copy && tail_copy_entry.has_value() &&
-                                tail_copy_entry->vectorized_align_bits == 128;
-
-    std::string f_mds_name;
-    std::string t_mds_name;
-    const auto f_mds = GenTensorDecl(
-        RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
-        f_sty->ElementType(), f_mds_shape, false, f_mds_offset,
-        ValueSTR(f_stride, false, true), {}, false);
-    const auto t_mds = GenTensorDecl(
-        RemoveSuffix(t_buf_name, ".data()"), t_buf_name, t_sty->GetStorage(),
-        t_sty->ElementType(), t_mds_shape, false, t_mds_offset,
-        ValueSTR(t_stride, false, true), {}, use_wgmma_layout_t, swizzle_mode);
-
-    f_mds_name = f_mds.first;
-    t_mds_name = t_mds.first;
-    ds << f_mds.second;
-    ds << t_mds.second;
-
-    // handles dma related to shared memory
-    // For async cp.async (non-TMA), threads in the warp must participate;
-    // avoid the block-single guard so every lane issues copy/trigger.
-    bool need_single_instance = !ThreadCooperative(n);
-    if (fty->IsAsync() && !n.IsTMA()) need_single_instance = false;
-    bool is_subbyte_copy = (n.operation == ".copy") && !n.IsSparse() &&
-                           (IsFloatSubByteType(f_sty->ElementType()) ||
-                            IsFloatSubByteType(t_sty->ElementType()));
-    bool need_subbyte_async_sync = false;
-
-    if (need_single_instance) {
-      ds << d_indent << LevelPred() << " {\n";
-      IncrDeviceIndent();
+    // For .transp the DMA plan already produces box_shape and from_strides
+    // in the destination (transposed) coordinate space, so we must NOT
+    // re-permute the shape here -- that would double-transpose it.
+    //
+    // When batch_dims is set the outer tensors are unused -- the batch loop
+    // creates its own sub-tensors with per-iteration pointer offsets.
+    std::string f_mds_name, t_mds_name;
+    if (dma_plan->batch_dims.empty() && !dma_plan->dyn_box) {
+      // Skip outer tensor decls when batch_dims or dyn_box is set -- those
+      // paths create their own sub-tensors with per-iteration offsets.
+      const auto f_mds = GenTensorDecl(
+          RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
+          f_sty->ElementType(), f_mds_shape, false, f_mds_offset,
+          ValueSTR(f_stride, false, true), {}, false);
+      const auto t_mds =
+          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
+                        t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
+                        false, t_mds_offset, ValueSTR(t_stride, false, true),
+                        {}, use_wgmma_layout_t, swizzle_mode);
+      f_mds_name = f_mds.first;
+      t_mds_name = t_mds.first;
+      ds << f_mds.second;
+      ds << t_mds.second;
     }
-    if (!n.future.empty()) cooperatives.insert(InScopeName(n.future));
 
-    if (n.operation == ".copy" || n.operation == ".transp") {
-      if (n.IsSparse() && n.operation == ".copy" && SymbolToSymbol() &&
-          !fty->IsAsync()) {
-        std::string meta_ptr;
-        if (isa<FutureType>(f_ty))
-          meta_ptr = "((uint8_t*)" + f_sym + ".mdata())";
-        else
-          meta_ptr = "((uint8_t*)" + mdata_expr + ")";
+    if (future_only) cooperatives.insert(InScopeName(n.future));
+    if (n.operation != ".copy" && n.operation != ".transp" &&
+        n.operation != ".pad")
+      choreo_unreachable("unsupported dma operation: " + n.operation + ".");
 
-        auto M = ValueSTR(f_shape.ValueAt(0));
-        auto N = ValueSTR(f_shape.ValueAt(1));
-        auto K = ValueSTR(f_shape.ValueAt(2));
-        ds << d_indent << "constexpr int __sp_M = " << M << ";\n";
-        ds << d_indent << "constexpr int __sp_N = " << N << ";\n";
-        ds << d_indent << "constexpr int __sp_K = " << K << ";\n";
+    // --- Shared emit helpers for .copy, .transp, and .pad ---
+    auto emit_naive_copy = [&](const std::string& src, const std::string& dst,
+                               const CUDA_COPY_ATOM&) {
+      bool to_or_from_shared = dma_plan->direction == DMADirection::G2S ||
+                               dma_plan->direction == DMADirection::S2G ||
+                               dma_plan->direction == DMADirection::S2S;
+      if (to_or_from_shared) {
         ds << d_indent
-           << "static_assert(__sp_K % 4 == 0, \"sparse K must be multiple of "
-              "4\");\n";
-
-        auto f_ptr = std::string("((") + NameBaseType(f_sty->ElementType()) +
-                     "*)" + f_buf.second + ")";
-        auto t_ptr = std::string("((") + NameBaseType(t_sty->ElementType()) +
-                     "*)" + t_buf.second + ")";
-        if (t_sty->GetStorage() == Storage::SHARED) {
-          ds << d_indent << "// sparse encode (2:4)\n";
-          ds << d_indent << "for (int i = 0; i < __sp_M; ++i) {\n";
-          ds << d_indent << "  for (int j = 0; j < __sp_N; ++j) {\n";
-          ds << d_indent << "    for (int k4 = 0; k4 < __sp_K / 4; ++k4) {\n";
-          ds << d_indent
-             << "      int base = (i * __sp_N + j) * __sp_K + k4 * 4;\n";
-          ds << d_indent
-             << "      int out_base = (i * __sp_N + j) * (__sp_K / 2) + k4 * "
-                "2;\n";
-          ds << d_indent << "      auto a0 = " << f_ptr << "[base + 0];\n";
-          ds << d_indent << "      auto a1 = " << f_ptr << "[base + 1];\n";
-          ds << d_indent << "      auto a2 = " << f_ptr << "[base + 2];\n";
-          ds << d_indent << "      auto a3 = " << f_ptr << "[base + 3];\n";
-          ds << d_indent << "      uint8_t mask = 0;\n";
-          ds << d_indent << "      int count = 0;\n";
-          ds << d_indent << "      if (a0 != 0 && count < 2) { " << t_ptr
-             << "[out_base + count] = a0; mask |= 1; ++count; }\n";
-          ds << d_indent << "      if (a1 != 0 && count < 2) { " << t_ptr
-             << "[out_base + count] = a1; mask |= 2; ++count; }\n";
-          ds << d_indent << "      if (a2 != 0 && count < 2) { " << t_ptr
-             << "[out_base + count] = a2; mask |= 4; ++count; }\n";
-          ds << d_indent << "      if (a3 != 0 && count < 2) { " << t_ptr
-             << "[out_base + count] = a3; mask |= 8; ++count; }\n";
-          ds << d_indent
-             << "      if (count < 2) { for (int t = count; t < 2; ++t) "
-             << t_ptr << "[out_base + t] = 0; }\n";
-          ds << d_indent << "      " << meta_ptr
-             << "[(i * __sp_N + j) * (__sp_K / 4) + k4] = mask;\n";
-          ds << d_indent << "    }\n";
-          ds << d_indent << "  }\n";
-          ds << d_indent << "}\n";
-        } else {
-          ds << d_indent << "// sparse decode (2:4)\n";
-          ds << d_indent << "for (int i = 0; i < __sp_M; ++i) {\n";
-          ds << d_indent << "  for (int j = 0; j < __sp_N; ++j) {\n";
-          ds << d_indent << "    for (int k4 = 0; k4 < __sp_K / 4; ++k4) {\n";
-          ds << d_indent
-             << "      int out_base = (i * __sp_N + j) * __sp_K + k4 * 4;\n";
-          ds << d_indent
-             << "      int in_base = (i * __sp_N + j) * (__sp_K / 2) + k4 * "
-                "2;\n";
-          ds << d_indent << "      uint8_t mask = " << meta_ptr
-             << "[(i * __sp_N + j) * (__sp_K / 4) + k4];\n";
-          ds << d_indent << "      int idx = 0;\n";
-          ds << d_indent << "      " << t_ptr
-             << "[out_base + 0] = (mask & 1) ? " << f_ptr
-             << "[in_base + idx++] : 0;\n";
-          ds << d_indent << "      " << t_ptr
-             << "[out_base + 1] = (mask & 2) ? " << f_ptr
-             << "[in_base + idx++] : 0;\n";
-          ds << d_indent << "      " << t_ptr
-             << "[out_base + 2] = (mask & 4) ? " << f_ptr
-             << "[in_base + idx++] : 0;\n";
-          ds << d_indent << "      " << t_ptr
-             << "[out_base + 3] = (mask & 8) ? " << f_ptr
-             << "[in_base + idx++] : 0;\n";
-          ds << d_indent << "    }\n";
-          ds << d_indent << "  }\n";
-          ds << d_indent << "}\n";
-        }
-      } else if (use_tail_copy_helper) {
-        const auto& entry = tail_copy_entry.value();
-        // Check 128-bit alignment for the async copy atom. Both
-        // the global stride AND the chunk column offset must be
-        // 16-byte aligned (otherwise cp.async 128b will fault).
-        const auto& tc_global_stride = use_tail_copy_g2s ? f_stride : t_stride;
-        BaseType tc_elem_type =
-            use_tail_copy_g2s ? t_sty->ElementType() : f_sty->ElementType();
-        size_t tc_elem_byte = SizeOf(tc_elem_type);
-        // Chunk column dim for the global side.
-        auto tc_chunk_col = use_tail_copy_g2s
-                                ? f_ca_shape.ValueAt(1)
-                                : t_ca->GetBlockShape().ValueAt(1);
-        bool tc_stride_static_aligned = false;
-        bool tc_need_runtime_check = false;
-        if (tc_global_stride.size() >= 1) {
-          if (VIIsInt(tc_global_stride[0]) && VIIsInt(tc_chunk_col)) {
-            int64_t sb = *VIInt(tc_global_stride[0]) *
-                         static_cast<int64_t>(tc_elem_byte);
-            int64_t cb =
-                *VIInt(tc_chunk_col) * static_cast<int64_t>(tc_elem_byte);
-            tc_stride_static_aligned = (sb % 16 == 0) && (cb % 16 == 0);
-          } else {
-            tc_need_runtime_check = true;
-          }
-        }
-
-        auto EmitCopyIfG2S128 = [&]() {
-          IndStream() << "choreo::copy_if_g2s<"
-                      << (use_wgmma_layout_t ? "true" : "false") << ", "
-                      << NameBaseType(tc_elem_type) << ", "
-                      << entry.thr_layout.first << ", "
-                      << entry.thr_layout.second << ", "
-                      << entry.val_layout.first << ", "
-                      << entry.val_layout.second << ">(" << f_mds_name << ", "
-                      << t_mds_name << ", [&](const auto& __coord) { return "
-                      << "cute::elem_less(__coord, cute::make_shape("
-                      << ShapeSTR(f_ca_shape, true) << ")); });\n";
-        };
-        auto EmitCopyIfG2S32 = [&]() {
-          size_t epc32 = 4 / tc_elem_byte;
-          size_t tile_n = entry.thr_layout.second * entry.val_layout.second;
-          size_t thr_count = entry.thr_layout.first * entry.thr_layout.second;
-          size_t tpr32 = tile_n / epc32;
-          size_t tr32 = thr_count / tpr32;
-          IndStream() << "choreo::copy_if_g2s<"
-                      << (use_wgmma_layout_t ? "true" : "false") << ", "
-                      << NameBaseType(tc_elem_type) << ", " << tr32 << ", "
-                      << tpr32 << ", " << 1 << ", " << epc32 << ", 32>("
-                      << f_mds_name << ", " << t_mds_name
-                      << ", [&](const auto& __coord) { return "
-                      << "cute::elem_less(__coord, cute::make_shape("
-                      << ShapeSTR(f_ca_shape, true) << ")); });\n";
-        };
-        auto EmitCopyIfS2G = [&]() {
-          IndStream() << "choreo::copy_if_s2g<" << NameBaseType(tc_elem_type)
-                      << ", " << entry.thr_layout.first << ", "
-                      << entry.thr_layout.second << ", "
-                      << entry.val_layout.first << ", "
-                      << entry.val_layout.second << ">(" << f_mds_name << ", "
-                      << t_mds_name << ", [&](const auto& __coord) { return "
-                      << "cute::elem_less(__coord, cute::make_shape("
-                      << ShapeSTR(f_ca_shape, true) << ")); });\n";
-        };
-
-        if (use_tail_copy_g2s) {
-          if (tc_stride_static_aligned) {
-            EmitCopyIfG2S128();
-          } else if (tc_need_runtime_check) {
-            IndStream() << "if ((" << ValueSTR(tc_global_stride[0]) << " * "
-                        << tc_elem_byte << ") % 16 == 0 && ("
-                        << ValueSTR(tc_chunk_col) << " * " << tc_elem_byte
-                        << ") % 16 == 0) {\n";
-            IncrIndent();
-            EmitCopyIfG2S128();
-            DecrIndent();
-            IndStream() << "} else {\n";
-            IncrIndent();
-            EmitCopyIfG2S32();
-            DecrIndent();
-            IndStream() << "}\n";
-          } else {
-            EmitCopyIfG2S32();
-          }
-        } else {
-          EmitCopyIfS2G();
-        }
-      } else if (is_subbyte_copy) {
-        const auto f_byte = GenTensorDecl(
-            RemoveSuffix(f_buf_name, ".data()") + "_byte", f_buf_name,
-            f_sty->GetStorage(), BaseType::U8, fty->GetShape(), false,
-            f_mds_offset, ValueSTR(f_stride, false, true));
-        const auto t_byte = GenTensorDecl(
-            RemoveSuffix(t_buf_name, ".data()") + "_byte", t_buf_name,
-            t_sty->GetStorage(), BaseType::U8, fty->GetShape(), false,
-            t_mds_offset, ValueSTR(t_stride, false, true));
-        ds << f_byte.second;
-        ds << t_byte.second;
-        if (fty->IsAsync()) {
-          if (!n.future.empty())
-            async_subbyte_futures.insert(InScopeName(n.future));
-          ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
-             << ".get_atom(), " << f_byte.first << ", " << t_byte.first
-             << ");\n";
-          ds << d_indent << "cute::cp_async_fence();\n";
-          ds << d_indent << future_name << ".trigger();\n";
-          if (need_single_instance) need_subbyte_async_sync = true;
-        } else {
-          ds << d_indent << "cute::copy(" << f_byte.first << ", "
-             << t_byte.first << ");\n";
-        }
-      } else if (fty->IsAsync()) {
-        ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
-           << ".get_atom(), " << f_mds_name << ", " << t_mds_name << ");\n";
-        ds << d_indent << "cute::cp_async_fence();\n";
-        ds << d_indent << future_name << ".trigger();\n";
+           << "if (threadIdx.x == 0 && threadIdx.y == 0 && "
+              "threadIdx.z == 0) {\n";
+        ds << d_indent << "  choreo::naive_copy(" << src << ", " << dst
+           << ");\n";
+        ds << d_indent << "}\n";
+        ds << d_indent << "__syncthreads();\n";
       } else {
-        if (tiled_copy_plan.entry.has_value() &&
-            n.GetSwizzleMode() == SwizMode::NONE) {
-          const TiledCopyEntry& entry = tiled_copy_plan.entry.value();
-          IndStream() << "{\n";
-          IncrIndent();
-          IndStream() << "auto tiled_copy = cute::make_tiled_copy(\n";
-          IncrIndent();
-          IndStream() << "cute::Copy_Atom<cute::";
-          if (entry.vectorized_align_bits == 0)
-            Stream() << "UniversalCopy<" << t_sty->ElementType() << ">, ";
-          else
-            Stream() << "AutoVectorizingCopyWithAssumedAlignment<"
-                     << entry.vectorized_align_bits << ">, ";
-          Stream() << t_sty->ElementType() << ">{},\n";
-          IndStream() << "cute::make_layout(cute::make_shape(cute::Int<"
-                      << entry.thr_layout.first << ">{}, cute::Int<"
-                      << entry.thr_layout.second
-                      << ">{}), cute::make_stride(cute::Int<"
-                      << entry.thr_layout.second << ">{}, cute::Int<1>{})),\n";
-          IndStream() << "cute::make_layout(cute::make_shape(cute::Int<"
-                      << entry.val_layout.first << ">{}, cute::Int<"
-                      << entry.val_layout.second << ">{}))\n";
-          DecrIndent();
-          IndStream() << ");\n";
-          IndStream()
-              << "auto thr_copy = tiled_copy.get_thread_slice(threadIdx.x);\n";
-          IndStream() << "auto src_thr = thr_copy.partition_S(" << f_mds_name
-                      << ");\n";
-          IndStream() << "auto dst_thr = thr_copy.partition_D(" << t_mds_name
-                      << ");\n";
-          IndStream() << "cute::copy(tiled_copy, src_thr, dst_thr);\n";
-          DecrIndent();
-          IndStream() << "}\n";
-        } else {
-          // Try copy_if_g2s/copy_if_s2g as a general fallback before
-          // resorting to the low-performance opt_copy.
-          bool is_dma_g2s = (f_sty->GetStorage() == Storage::GLOBAL ||
-                             f_sty->GetStorage() == Storage::DEFAULT) &&
-                            t_sty->GetStorage() == Storage::SHARED;
-          bool is_dma_s2g = f_sty->GetStorage() == Storage::SHARED &&
-                            (t_sty->GetStorage() == Storage::GLOBAL ||
-                             t_sty->GetStorage() == Storage::DEFAULT);
-
-          bool used_copy_if = false;
-
-          if (is_dma_g2s || is_dma_s2g) {
-            // Determine a static box shape from either side (prefer the
-            // shared side, which is almost always statically shaped).
-            Shape box_shape;
-            bool has_static_box = false;
-
-            Shape shared_block =
-                is_dma_g2s ? t_ca->GetBlockShape() : f_ca->GetBlockShape();
-            Shape other_block =
-                is_dma_g2s ? f_ca->GetBlockShape() : t_ca->GetBlockShape();
-
-            if (shared_block.Rank() == 2 && !shared_block.IsDynamic()) {
-              box_shape = shared_block;
-              has_static_box = true;
-            } else if (other_block.Rank() == 2 && !other_block.IsDynamic()) {
-              box_shape = other_block;
-              has_static_box = true;
-            }
-
-            if (has_static_box) {
-              size_t box_m = *VIInt(box_shape.ValueAt(0));
-              size_t box_n = *VIInt(box_shape.ValueAt(1));
-              BaseType elem_type =
-                  is_dma_g2s ? t_sty->ElementType() : f_sty->ElementType();
-              size_t elem_byte = SizeOf(elem_type);
-              constexpr size_t kBytesPerCopy = 16; // 128 bits
-
-              // copy_if_g2s uses SM80_CP_ASYNC_CACHEGLOBAL_ZFILL
-              // <uint128_t> which requires 16-byte aligned source
-              // addresses. Both the row stride AND the chunk column
-              // offset must be 16-byte aligned.
-              const auto& global_stride = is_dma_g2s ? f_stride : t_stride;
-              auto global_chunk_col = is_dma_g2s
-                                          ? f_ca->GetBlockShape().ValueAt(1)
-                                          : t_ca->GetBlockShape().ValueAt(1);
-              bool stride_static_128 = false;
-              bool stride_need_rtcheck = false;
-              if (global_stride.size() >= 1) {
-                if (VIIsInt(global_stride[0]) && VIIsInt(global_chunk_col)) {
-                  int64_t sb = *VIInt(global_stride[0]) *
-                               static_cast<int64_t>(elem_byte);
-                  int64_t cb = *VIInt(global_chunk_col) *
-                               static_cast<int64_t>(elem_byte);
-                  stride_static_128 = (sb % 16 == 0) && (cb % 16 == 0);
-                } else {
-                  stride_need_rtcheck = true;
-                }
-              }
-
-              const auto& lcs = cgi.GetFunctionLaunches(CurrentFunctionName());
-              bool have_launch = parallel_idx != -1 &&
-                                 parallel_idx < static_cast<int>(lcs.size());
-
-              if (have_launch) {
-                const auto& lconfig = lcs[parallel_idx];
-                auto inner_thr = lconfig.thread_count.x *
-                                 lconfig.thread_count.y *
-                                 lconfig.thread_count.z;
-                auto group_cnt = lconfig.group_count.x *
-                                 lconfig.group4_count.x *
-                                 lconfig.group_count.y * lconfig.group_count.z;
-                auto thr_count_vi =
-                    (IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4)
-                        ? inner_thr
-                        : inner_thr * group_cnt;
-
-                if (VIIsInt(thr_count_vi)) {
-                  size_t thr_count = *VIInt(thr_count_vi);
-
-                  // Compute 128-bit thread layout.
-                  bool has_128 = false;
-                  size_t epc128 = 0, tpr128 = 0, tr128 = 0;
-                  if (kBytesPerCopy % elem_byte == 0) {
-                    epc128 = kBytesPerCopy / elem_byte;
-                    if (box_n % epc128 == 0) {
-                      tpr128 = box_n / epc128;
-                      if (tpr128 && thr_count % tpr128 == 0) {
-                        tr128 = thr_count / tpr128;
-                        has_128 = tr128 && box_m % tr128 == 0;
-                      }
-                    }
-                  }
-
-                  // Compute 32-bit thread layout.
-                  constexpr size_t kBytesPerCopy32 = 4;
-                  bool has_32 = false;
-                  size_t epc32 = 0, tpr32 = 0, tr32 = 0;
-                  if (kBytesPerCopy32 % elem_byte == 0) {
-                    epc32 = kBytesPerCopy32 / elem_byte;
-                    if (box_n % epc32 == 0) {
-                      tpr32 = box_n / epc32;
-                      if (tpr32 && thr_count % tpr32 == 0) {
-                        tr32 = thr_count / tpr32;
-                        has_32 = tr32 && box_m % tr32 == 0;
-                      }
-                    }
-                  }
-
-                  bool can_emit =
-                      (stride_static_128 && has_128) ||
-                      (stride_need_rtcheck && has_128 && has_32) ||
-                      (!stride_static_128 && !stride_need_rtcheck && has_32);
-
-                  if (can_emit) {
-                    std::string src_name, dst_name;
-                    bool shapes_match = STR(f_ca->GetBlockShape()) ==
-                                        STR(t_ca->GetBlockShape());
-
-                    if (shapes_match && !f_mds_shape.IsDynamic()) {
-                      src_name = f_mds_name;
-                      dst_name = t_mds_name;
-                    } else {
-                      const auto f_box = GenTensorDecl(
-                          RemoveSuffix(f_buf_name, ".data()") + "_cif",
-                          f_buf_name, f_sty->GetStorage(), f_sty->ElementType(),
-                          box_shape, false, f_mds_offset,
-                          ValueSTR(f_stride, false, true));
-                      const auto t_box = GenTensorDecl(
-                          RemoveSuffix(t_buf_name, ".data()") + "_cif",
-                          t_buf_name, t_sty->GetStorage(), t_sty->ElementType(),
-                          box_shape, false, t_mds_offset,
-                          ValueSTR(t_stride, false, true), {},
-                          use_wgmma_layout_t, swizzle_mode);
-                      ds << f_box.second;
-                      ds << t_box.second;
-                      src_name = f_box.first;
-                      dst_name = t_box.first;
-                    }
-
-                    Shape pred_shape = is_dma_g2s ? f_ca->GetBlockShape()
-                                                  : t_ca->GetBlockShape();
-                    std::string pred_str;
-                    if (!pred_shape.IsDynamic() &&
-                        STR(pred_shape) == STR(box_shape)) {
-                      pred_str = "[](const auto&) { return true; }";
-                    } else {
-                      pred_str = "[&](const auto& __coord) { return "
-                                 "cute::elem_less(__coord, "
-                                 "cute::make_shape(" +
-                                 ShapeSTR(pred_shape, true) + ")); }";
-                    }
-
-                    auto EmitG2S = [&](size_t tr, size_t tpr, size_t epc,
-                                       int bits) {
-                      auto& os = IndStream();
-                      os << "choreo::copy_if_g2s<"
-                         << (use_wgmma_layout_t ? "true" : "false") << ", "
-                         << NameBaseType(t_sty->ElementType()) << ", " << tr
-                         << ", " << tpr << ", " << 1 << ", " << epc;
-                      if (bits != 128) os << ", " << bits;
-                      os << ">(" << src_name << ", " << dst_name << ", "
-                         << pred_str << ");\n";
-                    };
-
-                    if (is_dma_g2s) {
-                      if (stride_static_128) {
-                        EmitG2S(tr128, tpr128, epc128, 128);
-                      } else if (stride_need_rtcheck) {
-                        IndStream() << "if ((" << ValueSTR(global_stride[0])
-                                    << " * " << elem_byte << ") % 16 == 0 && ("
-                                    << ValueSTR(global_chunk_col) << " * "
-                                    << elem_byte << ") % 16 == 0) {\n";
-                        IncrIndent();
-                        EmitG2S(tr128, tpr128, epc128, 128);
-                        DecrIndent();
-                        IndStream() << "} else {\n";
-                        IncrIndent();
-                        EmitG2S(tr32, tpr32, epc32, 32);
-                        DecrIndent();
-                        IndStream() << "}\n";
-                      } else {
-                        EmitG2S(tr32, tpr32, epc32, 32);
-                      }
-                    } else {
-                      IndStream() << "choreo::copy_if_s2g<"
-                                  << NameBaseType(f_sty->ElementType()) << ", "
-                                  << tr128 << ", " << tpr128 << ", " << 1
-                                  << ", " << epc128 << ">(" << src_name << ", "
-                                  << dst_name << ", " << pred_str << ");\n";
-                    }
-                    used_copy_if = true;
-                  }
-                }
-              }
-            }
-          }
-
-          if (!used_copy_if) {
-            bool both_dynamic = (is_dma_g2s || is_dma_s2g) &&
-                                f_ca->GetBlockShape().IsDynamic() &&
-                                t_ca->GetBlockShape().IsDynamic();
-            if (both_dynamic) {
-              Warning(n.LOC(), "DMA: both source and destination have "
-                               "dynamic shapes; falling back to basic "
-                               "copy (performance loss expected).");
-            }
-            Note(n.LOC(), "DMA is lowered to low-performance opt_copy API.");
-            IndStream() << "opt_copy(" << f_mds_name << ", " << t_mds_name
-                        << ");\n";
-          }
-        }
+        ds << d_indent << "choreo::naive_copy(" << src << ", " << dst << ");\n";
       }
-      VerboseDMA(ds, d_indent, t_sym, f_sym, n.operation.substr(1), "", 1,
-                 ", line " + std::to_string(n.LOC().begin.line));
-    } else if (n.operation == ".pad") {
+    };
+
+    auto emit_tiled_copy = [&](const TiledCopyParams& params,
+                               const std::string& src, const std::string& dst,
+                               CUDA_COPY_ATOM copy_atom,
+                               const std::string& indent_prefix = "",
+                               bool emit_fence = true) {
+      assert(params.box_shape.size() == 2 && params.thr_layout.size() == 2 &&
+             params.val_layout.size() == 2 &&
+             "tiled copy expects 2D static layouts");
+
+      auto ind = indent_prefix + d_indent;
+      bool use_swizzle = swizzle_mode != SwizMode::NONE;
+      bool need_zfill = params.need_pred && dma_plan->is_zfill;
+      ds << ind << "choreo::tiled_copy<"
+         << GetCopyAtomType(copy_atom, elem_type) << ", "
+         << ValueSTR(params.thr_layout[0]) << ", "
+         << ValueSTR(params.thr_layout[1]) << ", "
+         << ValueSTR(params.val_layout[0]) << ", "
+         << ValueSTR(params.val_layout[1]) << ", "
+         << (use_swizzle ? "true" : "false") << ", "
+         << (params.need_pred ? "true" : "false") << ", "
+         << (need_zfill ? "true" : "false") << ">(" << src << ", " << dst
+         << ", ";
+      if (params.need_pred) {
+        auto pred_shape = Shape(params.prediction);
+        ds << "[&](const auto& __coord) { return cute::elem_less(__coord, "
+              "cute::make_shape("
+           << ShapeSTR(pred_shape, true) << ")); }";
+      } else {
+        ds << "[](const auto&) { return true; }";
+      }
+      ds << ");\n";
+
+      if (!emit_fence) return;
+
+      switch (copy_atom) {
+      case CUDA_COPY_ATOM::CP_ASYNC_128B:
+      case CUDA_COPY_ATOM::CP_ASYNC_64B:
+      case CUDA_COPY_ATOM::CP_ASYNC_32B:
+        if (fty->IsAsync()) {
+          ds << ind << "cute::cp_async_fence();\n";
+          if (future_only) ds << ind << future_name << ".trigger();\n";
+        } else {
+          ds << ind << "cute::cp_async_fence();\n";
+          ds << ind << "cute::cp_async_wait<0>();\n";
+        }
+        break;
+      default:
+        if (fty->IsAsync() && future_only)
+          ds << ind << future_name << ".trigger();\n";
+        break;
+      }
+    };
+
+    // Emit fence/trigger/wait for a copy atom (used after batch loops).
+    auto emit_copy_fence = [&](CUDA_COPY_ATOM copy_atom,
+                               const std::string& indent_prefix = "") {
+      auto ind = indent_prefix + d_indent;
+      switch (copy_atom) {
+      case CUDA_COPY_ATOM::CP_ASYNC_128B:
+      case CUDA_COPY_ATOM::CP_ASYNC_64B:
+      case CUDA_COPY_ATOM::CP_ASYNC_32B:
+        if (fty->IsAsync()) {
+          ds << ind << "cute::cp_async_fence();\n";
+          if (future_only) ds << ind << future_name << ".trigger();\n";
+        } else {
+          ds << ind << "cute::cp_async_fence();\n";
+          ds << ind << "cute::cp_async_wait<0>();\n";
+        }
+        break;
+      default:
+        if (fty->IsAsync() && future_only)
+          ds << ind << future_name << ".trigger();\n";
+        break;
+      }
+    };
+
+    // --- Determine actual copy source and destination ---
+    // For .pad, the destination is a sub-tensor at pad_low offset inside
+    // the full padded tensor.  For .copy/.transp, it is t_mds directly.
+    std::string copy_src = f_mds_name;
+    std::string copy_dst = t_mds_name;
+    if (n.operation == ".pad") {
       static int pad_cnt = 0;
       auto pad_config = cast<PadConfig>(n.GetConfig());
 
@@ -4263,43 +3604,257 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         return res;
       };
 
-      ds << d_indent << "cute::fill(" << t_mds_name << ", "
-         << ExprSTR(pad_config->GetPadValue(), IsHost()) << ");\n";
+      std::string pad_val_expr = ExprSTR(pad_config->GetPadValue(), IsHost());
+
+      // Fill the full destination tensor with the pad value.
+      if (dma_plan->IsTiledDMA())
+        ds << d_indent << "choreo::cooperative_fill(" << t_mds_name << ", "
+           << pad_val_expr << ");\n";
+      else
+        ds << d_indent << "cute::fill(" << t_mds_name << ", " << pad_val_expr
+           << ");\n";
+
+      // Compute pad_low offset and declare the inner data sub-tensor.
       std::string pad_offset = "__pad_offset" + std::to_string(pad_cnt);
       ds << d_indent << "auto " << pad_offset << " = " << t_mds_name
          << ".layout()("
          << "cute::make_coord(" << pcmvSTR(pad_config->pad_low) << "));\n";
-      const auto t_pad_mds = GenTensorDecl(
-          RemoveSuffix(t_buf_name, ".data()"), t_buf_name, t_sty->GetStorage(),
-          t_sty->ElementType(), f_ca->GetBlockShape(), false, pad_offset,
-          ValueSTR(t_stride, false, true), {}, use_wgmma_layout_t,
-          swizzle_mode);
-      std::string t_pad_mds_name{t_pad_mds.first};
-      std::string t_pad_mds_decl{t_pad_mds.second};
-      ds << t_pad_mds_decl;
 
-      if (fty->IsAsync()) {
-        ds << d_indent << "cute::copy(*(AsyncCopyAtom*)" << future_name
-           << ".get_atom(), " << f_mds_name << ", " << t_pad_mds_name << ");\n";
-        ds << d_indent << "cute::cp_async_fence();\n";
-        ds << d_indent << future_name << ".trigger();\n";
-      } else {
-        ds << d_indent << "opt_copy(" << f_mds_name << ", " << t_pad_mds_name
-           << ");\n";
+      auto f_data_shape = dma_plan->IsTiledDMA() ? dma_plan->GetBoxOfFrom()
+                                                 : dma_plan->from_ca_shape;
+      const auto t_pad_mds =
+          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
+                        t_sty->GetStorage(), t_sty->ElementType(), f_data_shape,
+                        false, pad_offset, ValueSTR(t_stride, false, true), {},
+                        use_wgmma_layout_t, swizzle_mode);
+      ds << t_pad_mds.second;
+      copy_dst = t_pad_mds.first;
+      ++pad_cnt;
+    }
+
+    // --- Batch loops for high-rank DMA (outer dims peeled into loops) ---
+    bool has_batch_loop = !dma_plan->batch_dims.empty();
+    std::string batch_f_off, batch_t_off; // accumulated offsets for dyn_box use
+    int batch_loop_depth = 0;
+    if (has_batch_loop) {
+      static int batch_cnt = 0;
+
+      auto mk_off = [](const std::string& base, const std::string& bv,
+                       const std::string& stride) -> std::string {
+        auto batch = bv + " * " + stride;
+        if (base.empty() || base == "0") return batch;
+        return "(" + base + ") + " + batch;
+      };
+
+      std::string f_off = f_mds_offset;
+      std::string t_off = t_mds_offset;
+      for (auto& bd : dma_plan->batch_dims) {
+        auto bv = "__batch_i" + std::to_string(batch_cnt++);
+        ds << d_indent << "for (int " << bv << " = 0; " << bv << " < "
+           << ValueSTR(bd.size) << "; ++" << bv << ") {\n";
+        IncrDeviceIndent();
+        ++batch_loop_depth;
+        f_off = mk_off(f_off, bv, ValueSTR(bd.from_stride));
+        t_off = mk_off(t_off, bv, ValueSTR(bd.to_stride));
       }
 
-      ++pad_cnt;
-
-      VerboseDMA(ds, d_indent, t_sym, f_sym, n.operation.substr(1), "", 1,
-                 ", line " + std::to_string(n.LOC().begin.line));
+      if (dma_plan->dyn_box) {
+        // When dyn_box is set, skip creating sub-tensors here -- the dyn_box
+        // loop below creates its own sub-tensors with per-tile offsets.
+        batch_f_off = f_off;
+        batch_t_off = t_off;
+      } else {
+        const auto f_sub = GenTensorDecl(
+            RemoveSuffix(f_buf_name, ".data()"), f_buf_name,
+            f_sty->GetStorage(), f_sty->ElementType(), dma_plan->GetBoxOfFrom(),
+            false, f_off, ValueSTR(f_stride, false, true), {}, false);
+        const auto t_sub = GenTensorDecl(
+            RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
+            t_sty->GetStorage(), t_sty->ElementType(), dma_plan->GetBoxOfTo(),
+            false, t_off, ValueSTR(t_stride, false, true), {},
+            use_wgmma_layout_t, swizzle_mode);
+        ds << f_sub.second;
+        ds << t_sub.second;
+        copy_src = f_sub.first;
+        copy_dst = t_sub.first;
+      }
     }
 
-    if (need_single_instance) {
+    // --- Emit the actual copy (shared for .copy, .transp, and .pad) ---
+    bool suppress_fence = has_batch_loop;
+
+    if (dma_plan->dyn_box && dma_plan->IsTiledDMA()) {
+      // Dynamic box: emit explicit tiling loop over runtime extents.
+      // The inner 2D shape is [dyn_m, dyn_n].  We tile it with a fixed
+      // [1, TILE_N] tile using an explicit double-loop.  Full tiles use the
+      // fast (vectorized, no-pred) atom; the last partial tile uses the slow
+      // (element-level, predicated) atom.
+      suppress_fence = true; // fence emitted after all loops
+      auto& db = *dma_plan->dyn_box;
+      std::string dyn_m_str = ValueSTR(db.dyn_extent_m);
+      std::string dyn_n_str = ValueSTR(db.dyn_extent_n);
+      std::string tile_n_str = std::to_string(db.tile_n);
+
+      // Row strides for the inner 2D shape.
+      std::string f_row_stride = dma_plan->from_strides.empty()
+                                     ? dyn_n_str
+                                     : ValueSTR(dma_plan->from_strides[0]);
+      std::string t_row_stride = dma_plan->to_strides.empty()
+                                     ? dyn_n_str
+                                     : ValueSTR(dma_plan->to_strides[0]);
+
+      // Base offsets (may include batch loop offset).
+      std::string f_base_off = has_batch_loop ? batch_f_off : f_mds_offset;
+      std::string t_base_off = has_batch_loop ? batch_t_off : t_mds_offset;
+
+      static int dyn_cnt = 0;
+      std::string rm = "__dyn_rm" + std::to_string(dyn_cnt);
+      std::string rn = "__dyn_rn" + std::to_string(dyn_cnt);
+      std::string pred_n = "__dyn_pn" + std::to_string(dyn_cnt);
+      ++dyn_cnt;
+
+      auto emit_dyn_sub_tensor = [&](const std::string& buf_name, Storage sto,
+                                     BaseType bty, const std::string& base_off,
+                                     const std::string& row_stride,
+                                     const std::string& rm_v,
+                                     const std::string& rn_v) {
+        static int sub_cnt = 0;
+        std::string sn = "__dyn_sub" + std::to_string(sub_cnt++);
+        std::string st = NameBaseType(bty);
+        auto ptr_kind = (sto == Storage::SHARED) ? "smem_ptr" : "gmem_ptr";
+        // offset = base_off + rm * row_stride + rn
+        std::string off_expr;
+        if (!base_off.empty() && base_off != "0")
+          off_expr = "(" + base_off + ") + ";
+        off_expr += rm_v + " * " + row_stride + " + " + rn_v;
+        ds << d_indent << "auto " << sn << " = cute::make_tensor("
+           << "cute::make_" << ptr_kind << "<" << st << ">((" << st << "*)"
+           << buf_name << " + " << off_expr << "), "
+           << "cute::make_layout(cute::make_shape(cute::Int<1>{}, cute::Int<"
+           << tile_n_str << ">{}), "
+           << "cute::make_stride(cute::Int<" << tile_n_str
+           << ">{}, cute::Int<1>{})));\n";
+        return sn;
+      };
+
+      auto f_sto = f_sty->GetStorage();
+      auto t_sto = t_sty->GetStorage();
+
+      ds << d_indent << "for (unsigned " << rm << " = 0; " << rm << " < "
+         << "(unsigned)" << dyn_m_str << "; ++" << rm << ") {\n";
+      IncrDeviceIndent();
+      ds << d_indent << "for (unsigned " << rn << " = 0; " << rn << " < "
+         << "(unsigned)" << dyn_n_str << "; " << rn << " += " << tile_n_str
+         << ") {\n";
+      IncrDeviceIndent();
+      ds << d_indent << "unsigned " << pred_n << " = "
+         << "(unsigned)" << dyn_n_str << " - " << rn << " < " << tile_n_str
+         << " ? (unsigned)" << dyn_n_str << " - " << rn << " : " << tile_n_str
+         << ";\n";
+
+      auto f_sub = emit_dyn_sub_tensor(f_buf_name, f_sto, elem_type, f_base_off,
+                                       f_row_stride, rm, rn);
+      auto t_sub = emit_dyn_sub_tensor(t_buf_name, t_sto, elem_type, t_base_off,
+                                       t_row_stride, rm, rn);
+
+      // Full tile -> fast path (vectorized, Pred=false).
+      ds << d_indent << "if (" << pred_n << " == " << tile_n_str << ") {\n";
+      if (dma_plan->tiled_params_fast) {
+        auto fast_p = *dma_plan->tiled_params_fast;
+        fast_p.need_pred = false;
+        emit_tiled_copy(fast_p, f_sub, t_sub, dma_plan->atom_fast, "  ", false);
+      } else {
+        auto full_p = *dma_plan->tiled_params;
+        full_p.need_pred = false;
+        emit_tiled_copy(full_p, f_sub, t_sub, dma_plan->atom, "  ", false);
+      }
+      ds << d_indent << "} else {\n";
+      // Partial tile -> slow path (element-level, Pred=true with runtime bound).
+      {
+        auto ind = "  " + d_indent;
+        bool need_zfill = dma_plan->is_zfill;
+        ds << ind << "choreo::tiled_copy<"
+           << GetCopyAtomType(dma_plan->atom, elem_type) << ", "
+           << ValueSTR(dma_plan->tiled_params->thr_layout[0]) << ", "
+           << ValueSTR(dma_plan->tiled_params->thr_layout[1]) << ", "
+           << ValueSTR(dma_plan->tiled_params->val_layout[0]) << ", "
+           << ValueSTR(dma_plan->tiled_params->val_layout[1]) << ", "
+           << "false, true, " << (need_zfill ? "true" : "false") << ">("
+           << f_sub << ", " << t_sub << ", "
+           << "[&](const auto& __coord) { return cute::elem_less(__coord, "
+           << "cute::make_shape(cute::Int<1>{}, " << pred_n << ")); });\n";
+      }
+      ds << d_indent << "}\n";
       DecrDeviceIndent();
-      ds << d_indent << "} // single instance\n";
+      ds << d_indent << "}\n"; // rn loop
+      DecrDeviceIndent();
+      ds << d_indent << "}\n"; // rm loop
+      if (!has_batch_loop) {
+        // No enclosing batch loop -> emit fence here after all dyn_box loops.
+        CUDA_COPY_ATOM fence_atom =
+            dma_plan->tiled_params_fast ? dma_plan->atom_fast : dma_plan->atom;
+        emit_copy_fence(fence_atom);
+      }
+    } else if (dma_plan->IsTiledDMA() && dma_plan->tiled_params_fast) {
+      size_t fast_align = dma_plan->tiled_params_fast->align_bits;
+      size_t elems_per_fast = fast_align / (SizeOf(dma_plan->elem_type) * 8);
+      bool f_dyn = !dma_plan->from_strides.empty() &&
+                   !VIIsInt(dma_plan->from_strides[0]);
+      bool t_dyn =
+          !dma_plan->to_strides.empty() && !VIIsInt(dma_plan->to_strides[0]);
+      std::string cond;
+      if (f_dyn) {
+        cond = ValueSTR(dma_plan->from_strides[0]) + " % " +
+               std::to_string(elems_per_fast) + " == 0";
+        auto inner_dim =
+            dma_plan->from_ca_shape.ValueAt(dma_plan->from_ca_shape.Rank() - 1);
+        if (!VIIsInt(inner_dim)) {
+          cond = cond + " && " + ValueSTR(inner_dim) + " % " +
+                 std::to_string(elems_per_fast) + " == 0";
+        }
+      }
+      if (t_dyn) {
+        std::string t_cond = ValueSTR(dma_plan->to_strides[0]) + " % " +
+                             std::to_string(elems_per_fast) + " == 0";
+        cond = cond.empty() ? t_cond : cond + " && " + t_cond;
+        auto inner_dim =
+            dma_plan->to_ca_shape.ValueAt(dma_plan->to_ca_shape.Rank() - 1);
+        if (!VIIsInt(inner_dim)) {
+          cond = cond + " && " + ValueSTR(inner_dim) + " % " +
+                 std::to_string(elems_per_fast) + " == 0";
+        }
+      }
+
+      ds << d_indent << "if (" << cond << ") {\n";
+      emit_tiled_copy(*dma_plan->tiled_params_fast, copy_src, copy_dst,
+                      dma_plan->atom_fast, "  ", !suppress_fence);
+      ds << d_indent << "} else {\n";
+      emit_tiled_copy(*dma_plan->tiled_params, copy_src, copy_dst,
+                      dma_plan->atom, "  ", !suppress_fence);
+      ds << d_indent << "}\n";
+    } else if (dma_plan->IsTiledDMA()) {
+      emit_tiled_copy(*dma_plan->tiled_params, copy_src, copy_dst,
+                      dma_plan->atom, "", !suppress_fence);
+    } else {
+      emit_naive_copy(copy_src, copy_dst, dma_plan->atom);
+      if (has_future && fty->IsAsync())
+        ds << d_indent << future_name << ".trigger();\n";
     }
 
-    if (need_subbyte_async_sync) { ds << d_indent << "__syncthreads();\n"; }
+    if (has_batch_loop) {
+      for (int i = 0; i < batch_loop_depth; ++i) {
+        DecrDeviceIndent();
+        ds << d_indent << "}\n";
+      }
+      if (dma_plan->IsTiledDMA()) {
+        CUDA_COPY_ATOM fence_atom =
+            dma_plan->tiled_params_fast ? dma_plan->atom_fast : dma_plan->atom;
+        emit_copy_fence(fence_atom);
+      }
+    }
+
+    VerboseDMA(ds, d_indent, t_sym, f_sym, n.operation.substr(1), "", 1,
+               ", line " + std::to_string(n.LOC().begin.line));
 
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
@@ -4317,18 +3872,18 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     const auto& tma_descs = cgi.GetTMADescs()[cur_pb];
     ParallelLevel tma_sync_level = ParallelLevel::BLOCK;
+    int tma_idx = -1;
     if (n.IsTMA() && !isa<PlaceHolderType>(NodeType(n))) {
-      int tma_idx = tma_count++;
+      tma_idx = tma_count++;
       assert(tma_idx < static_cast<int>(tma_descs.size()));
       const TMADesc& tma_desc = tma_descs[tma_idx];
       auto in_thr_block = tma_desc.GetInThreadsBlock();
       if (in_thr_block) {
         tma_sync_level = tma_desc.GetPBLevel();
-      } else if (IsWarpSpecActive() &&
-                 (t_sty->GetStorage() == Storage::GLOBAL ||
-                  t_sty->GetStorage() == Storage::DEFAULT) &&
-                 f_sty->GetStorage() == Storage::SHARED &&
-                 bdim_level == ParallelLevel::GROUPx4) {
+      } else if (InSpecWarp() &&
+                 dma_plan->direction == DMADirection::S2G) {
+        // Inside a warp-spec inthreads block, __syncthreads would deadlock;
+        // use GROUPx4-level sync for the S2G store guard.
         tma_sync_level = ParallelLevel::GROUPx4;
       }
     }
@@ -4365,17 +3920,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         t_buf_expr_with_offset =
             "(" + t_buf_expr + " + (" + t_mds_offset + "))";
       }
-      // async tma copy can be:
-      // 1. event only and non-warpspec
-      // 2. future only and non-warpspec
-      // 3. event only and warpspec
-      // 4. future only and warpspec
-      bool event_only = n.HasEvent();
-      bool warpspec_only = InSpecWarp();
-      bool future_only = !future_name.empty();
 
-      assert(!(event_only && future_only) &&
-             "event and future cannot be both present");
+      bool warpspec_only = InSpecWarp();
       if (warpspec_only && event_only) {
         assert(n.IsAsync() && "warpspec event-only tma copy must be async");
       }
@@ -4476,10 +4022,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
              << coord1_expr << ");\n";
         }
       } else {
-        std::string tma_barrier_arg =
-            future_only
-                ? "((TMAAtom*)" + future_name + ".get_atom())->barrier()"
-                : ExprSTR(n.Event(), IsHost());
+        auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
+        std::string tma_barrier_arg;
+        if (has_future)
+          tma_barrier_arg =
+              "((TMAAtom*)" + future_name + ".get_atom())->barrier()";
+        else if (event_only)
+          tma_barrier_arg = ExprSTR(n.Event(), IsHost());
+        else
+          tma_barrier_arg = tma_atom_ref + ".barrier()";
 
         ds << d_indent << tma_issue_prefix << "cde::cp_async_bulk_tensor_"
            << t_shape.Rank() << "d_global_to_shared(" << t_buf_expr_with_offset
@@ -4488,21 +4039,33 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                                            : hoisted_rev_indices.at(0) + ", " +
                                                  hoisted_rev_indices.at(1))
            << ", " << tma_barrier_arg << ");\n";
-        if (future_only) {
+        if (has_future) {
           ds << d_indent << tma_issue_prefix << "((TMAAtom*)" << future_name
              << ".get_atom())->token() = "
                 "cuda::device::barrier_arrive_tx(((TMAAtom*)"
              << future_name << ".get_atom())->barrier(), 1, "
              << tma_tx_bytes_expr << ");\n";
+        } else if (!event_only) {
+          ds << d_indent << tma_issue_prefix << tma_atom_ref
+             << ".token() = "
+                "cuda::device::barrier_arrive_tx("
+             << tma_atom_ref << ".barrier(), 1, " << tma_tx_bytes_expr
+             << ");\n";
         }
       }
       if (emit_tma_single_guard) {
         ds << d_indent << "}";
-        if (future_only && !use_ptx_tma_sync) {
+        if ((has_future || !event_only) && !use_ptx_tma_sync) {
           ds << " else {\n";
-          ds << d_indent << "  ((TMAAtom*)" << future_name
-             << ".get_atom())->token() = ((TMAAtom*)" << future_name
-             << ".get_atom())->barrier().arrive();\n";
+          if (has_future) {
+            ds << d_indent << "  ((TMAAtom*)" << future_name
+               << ".get_atom())->token() = ((TMAAtom*)" << future_name
+               << ".get_atom())->barrier().arrive();\n";
+          } else {
+            auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
+            ds << d_indent << "  " << tma_atom_ref
+               << ".token() = " << tma_atom_ref << ".barrier().arrive();\n";
+          }
           ds << d_indent << "}\n";
         } else
           ds << "\n";
@@ -4515,12 +4078,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // Under --use-warpspec, defer this wait to event barrier protocol
       // so producer-consumer pipelining remains asynchronous like ref kernels.
       if (fty->IsAsync()) {
-        if (future_only) ds << d_indent << future_name << ".trigger();\n";
+        if (has_future) ds << d_indent << future_name << ".trigger();\n";
       } else {
         // Synchronous tma.copy: wait immediately
-        // Make sure the future is marked initialized before marking it nowait
-        // to avoid runtime diagnostics when the state is still ST_NONE.
-        if (future_only) {
+        auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
+        if (has_future) {
           if (use_ptx_tma_sync) {
             ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
                << future_name << ".get_atom())->ptx_barrier(), ((TMAAtom*)"
@@ -4533,6 +4095,16 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                << future_name << ".get_atom())->token()));\n";
           }
           ds << d_indent << future_name << ".set_nowait();\n\n";
+        } else if (!event_only) {
+          if (use_ptx_tma_sync) {
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity("
+               << tma_atom_ref << ".ptx_barrier(), " << tma_atom_ref
+               << ".ptx_phase_bit());\n";
+            ds << d_indent << tma_atom_ref << ".toggle_ptx_phase();\n";
+          } else {
+            ds << d_indent << tma_atom_ref << ".barrier().wait(std::move("
+               << tma_atom_ref << ".token()));\n";
+          }
         }
       }
     } else if ((tsto == Storage::GLOBAL || tsto == Storage::DEFAULT) &&
@@ -4548,12 +4120,26 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       else
         ds << d_indent << "__syncthreads();\n";
 
-      if (tma_sync_level == ParallelLevel::GROUP)
+      if (tma_sync_level == ParallelLevel::GROUP) {
         ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
-      else if (tma_sync_level == ParallelLevel::GROUPx4)
-        ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
-      else
+      } else if (tma_sync_level == ParallelLevel::GROUPx4) {
+        // TMA S2G needs exactly 1 thread. When multiple warpgroups are
+        // active, restrict to the first active warpgroup's leader thread.
+        if (InSpecWarp() && current_inthreads->ActiveWarpGroup() < 0) {
+          auto& mask = current_inthreads->GetScopeThreadMask();
+          int64_t first_wg = 0;
+          for (size_t i = 0; i < mask.size(); i += 128)
+            for (size_t j = i; j < std::min(i + 128, mask.size()); ++j)
+              if (mask[j]) { first_wg = i / 128; goto found_s2g_wg; }
+          found_s2g_wg:
+          ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__ && __choreo_vg4id_x == "
+             << first_wg << ") {\n";
+        } else {
+          ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
+        }
+      } else {
         ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      }
 
       ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
          << "d_shared_to_global(&" << *tname << "_tensor_map, "
@@ -4564,35 +4150,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
   };
 
-  if (use_tma)
+  if (n.IsTMA())
     TMACodeGen();
-  else {
-    bool g2s = false, s2g = false;
-    if ((f_sty->GetStorage() == Storage::GLOBAL ||
-         f_sty->GetStorage() == Storage::DEFAULT) &&
-        t_sty->GetStorage() == Storage::SHARED)
-      g2s = true;
-    if (f_sty->GetStorage() == Storage::SHARED &&
-        (t_sty->GetStorage() == Storage::GLOBAL ||
-         t_sty->GetStorage() == Storage::DEFAULT))
-      s2g = true;
-    // AutoVectorizingCopyWithAssumedAlignment check the alignment of both src
-    // and dst. Cuda global buffer is all aligned with 256 bytes
-    size_t mem_align_byte =
-        std::min(static_cast<size_t>(256),
-                 CCtx().GetMemoryAlignmentByte(Storage::SHARED));
-    // TODO: how to determin `one_row_per_warp`? maybe add option for user.
-    if (g2s) {
-      bool one_row_per_warp = false;
-      tiled_copy_plan =
-          TiledCopyPrepare(one_row_per_warp, mem_align_byte, f_ca);
-    } else if (s2g) {
-      bool one_row_per_warp = false;
-      tiled_copy_plan =
-          TiledCopyPrepare(one_row_per_warp, mem_align_byte, t_ca);
-    }
+  else
     DMACodeGen();
-  }
 
   return true;
 }
@@ -6046,18 +5607,18 @@ bool CuteCodeGen::Visit(AST::Rotate& n) {
     auto ident = cast<AST::Identifier>(id);
     auto scoped_name = InScopeName(ident->name);
     if (!claimed_futs.count(scoped_name)) {
-      auto cp_atom = GetCopyAtomName(false, dma_count_);
-      ds << d_indent << "AsyncCopyAtom " << cp_atom << "{};\n";
+      auto cp_atom_name = GetCopyAtomName(false, dma_count_);
+      ds << d_indent << "AsyncCopyAtom " << cp_atom_name << "{};\n";
       ds << d_indent << "future " << ident->name << "(\"" << ident->name
          << "\", " << id->LOC().begin.line << ", " << id->LOC().begin.column
          << ");\n";
-      ds << d_indent << ident->name << ".set_atom(&" << cp_atom << ");\n";
+      ds << d_indent << ident->name << ".set_atom(&" << cp_atom_name << ");\n";
       ds << d_indent << ident->name << ".set_ring(" << device_fn
          << "__ring__);\n";
       future_count_++;
       ds << d_indent << ident->name << ".id = " << future_count_ << ";\n";
       ++dma_count_;
-      claimed_futs.emplace(scoped_name, cp_atom);
+      claimed_futs.emplace(scoped_name, cp_atom_name);
       ssm.MapDeviceSymbol(scoped_name, ident->name);
       ssm.MapDeviceSymbol(scoped_name + ".data", ident->name + ".data()");
     }
@@ -6142,18 +5703,24 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
     if (isa<FutureType>(tty)) {
       assert(expr->GetSymbol());
       auto name = expr->GetSymbol()->name;
-      bool shared_in_block = (IsFutureBlockShared(InScopeName(name)) &&
-                              !cooperatives.count(InScopeName(name)));
-      if (shared_in_block) {
+      bool is_block_shared = IsFutureBlockShared(InScopeName(name));
+      bool is_cooperative = cooperatives.count(InScopeName(name));
+      bool single_thread_wait = is_block_shared && !is_cooperative;
+      if (single_thread_wait) {
         ds << d_indent << LevelPred() << " {\n";
         IncrDeviceIndent();
       }
       assert(!IsHost());
       ds << d_indent << ExprSTR(t, false) << ".wait();\n";
-      if (shared_in_block) {
+      if (single_thread_wait) {
         DecrDeviceIndent();
         ds << d_indent << "}\n";
-        ds << d_indent << "__syncthreads();\n";
+      }
+      if (is_block_shared) {
+        if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
+          ds << d_indent << "__syncthreads();\n";
       }
     } else if (auto ety = dyn_cast<EventArrayType>(tty)) {
       if (IsHost())

@@ -2254,11 +2254,10 @@ bool EarlySemantics::Visit(AST::Call& n) {
       auto sty = dyn_cast<ScalarType>(first_ty);
 
       if (!sty || !sty->IsMutable()) {
-        Error1(first_arg->LOC(),
-               "'" + func_name +
-                   "' requires mutable scalar data "
-                   "as the first argument, but got '" + PSTR(first_ty) +
-                   "'.");
+        Error1(first_arg->LOC(), "'" + func_name +
+                                     "' requires mutable scalar data "
+                                     "as the first argument, but got '" +
+                                     PSTR(first_ty) + "'.");
       } else {
         auto elem_bt = sty->GetBaseType();
         auto storage = ProjectStorage(sty->GetStorage());
@@ -2266,10 +2265,9 @@ bool EarlySemantics::Visit(AST::Call& n) {
         auto& tgt = CCtx().GetTarget();
         auto arch = CCtx().GetArch();
         if (!tgt.IsAtomicSupported(arch, atomic_op, elem_bt, storage))
-          Error1(first_arg->LOC(),
-                 "'" + func_name + "' is not supported on '" +
-                     STR(elem_bt) + "' with '" + STR(storage) +
-                     "' storage.");
+          Error1(first_arg->LOC(), "'" + func_name + "' is not supported on '" +
+                                       STR(elem_bt) + "' with '" +
+                                       STR(storage) + "' storage.");
 
         auto ret_ty = MakeScalarType(elem_bt, /*mutable=*/true);
         SetNodeType(n, ret_ty);
@@ -2300,8 +2298,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
         else
           Error1(n.LOC(), "'" + func_name + "' expects " +
                               std::to_string(min_a) + "-" +
-                              std::to_string(max_a) +
-                              " arguments, but got " +
+                              std::to_string(max_a) + " arguments, but got " +
                               std::to_string(argc) + ".");
       }
     } else

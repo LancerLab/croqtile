@@ -27,6 +27,9 @@ Option<bool> hoist_offset(
 Option<bool>
     hoist_scale(OptionKind::User, "--hoist-scale", "", false,
                 "Hoist loop-invariant scale calculations in GPU codegen.");
+Option<bool> assume_aligned_global(
+    OptionKind::User, "--assume-aligned-global", "", false,
+    "Assume global memory pointers are 128-bit aligned for DMA.");
 
 void PrintSubscriptions(std::ostream& os, const std::string& prefix,
                         const std::string& suffix, const ValueList& dims,

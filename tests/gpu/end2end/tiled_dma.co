@@ -1,0 +1,895 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#include "choreo.h"
+
+__co__ auto foo1(s32 [32, 32] input) {
+  s32[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(32, 32) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+__co__ auto foo2(f16 [31, 32] input) {
+  f16[32, 32] output {0.0f};
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared f16 [32, 32] buf;
+      dma.copy.zfill input.subspan(31, 32) => buf.subspan(32, 32);
+      dma.copy buf => output;
+    }
+
+  return output;
+}
+
+__co__ auto foo3(f16 [32, 1024] input) {
+  f16[7, 32] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(7, 32) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+__co__ auto foo4(s32 [32, 64] input) {
+  s32[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [32, 64] buf;
+      fut = dma.copy.async input.subspan(32, 64) => buf.subspan(32, 64);
+      wait fut;
+      dma.copy buf.subspan(32, 64) => output;
+    }
+
+  return output;
+}
+
+__co__ auto foo5(f16 [31, 64] input) {
+  f16[32, 64] output {0.0f};
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared f16 [32, 64] buf;
+      dma.copy.zfill input.subspan(31, 64) => buf.subspan(32, 64);
+      dma.copy buf => output;
+    }
+
+  return output;
+}
+
+__co__ auto foo6(f32 [128, 128] input) {
+  f32[32, 32] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared f32 [32, 32] buf;
+      dma.copy input.subspan(32, 32).at(1, 2) => buf;
+      dma.copy buf => output;
+    }
+
+  return output;
+}
+
+__co__ auto foo7(s32 [64, 32] input) {
+  s32[input.span] output;
+
+  parallel p by 1 : block {
+    parallel g by 1 : group-4 {
+      shared s32 [64, 32] buf;
+      dma.copy input.subspan(64, 32) => buf;
+      dma.copy buf => output;
+    }
+  }
+
+  return output;
+}
+
+// ================================================================
+// Category A: Copy Atom -- VEC atom for G2S
+// ================================================================
+
+// foo8: 16 threads -> cp.async disabled (non-warp-multiple), uses VEC_128B atom
+//       Also exercises non-power-of-2 inner dimension (N=48)
+__co__ auto foo8(s32 [16, 48] input) {
+  s32[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 16 : thread {
+      tile = dma.copy input.subspan(16, 48) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Category B: Element Type -- s8 (8-bit integer)
+// ================================================================
+
+// foo9: s8 with 128-bit vectorization -- vector_factor=16, val_layout=(1,16)
+__co__ auto foo9(s8 [32, 128] input) {
+  s8[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(32, 128) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Category C: Predication Variants
+// ================================================================
+
+// foo10: source-extent predication with s32 -- from (13,32) padded into (16,32) shared
+//        Tests predicated tiled copy with integer type (distinct from f16 in foo2/foo5)
+__co__ auto foo10(s32 [13, 32] input) {
+  s32[13, 32] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [16, 32] buf;
+      dma.copy.zfill input.subspan(13, 32) => buf.subspan(16, 32);
+      dma.copy buf.subspan(13, 32) => output;
+    }
+
+  return output;
+}
+
+// foo11: async G2S + source-extent predication -- from (13,64) into (16,64) shared
+//        Tests CP_ASYNC atom combined with predicated tail handling
+__co__ auto foo11(s32 [13, 64] input) {
+  s32[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [16, 64] buf;
+      fut = dma.copy.async.zfill input.subspan(13, 64) => buf.subspan(16, 64);
+      wait fut;
+      dma.copy buf.subspan(13, 64) => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Category D: Thread Count Variants
+// ================================================================
+
+// foo12: 64 participating threads -- different thread decomposition than 32
+__co__ auto foo12(f16 [64, 64] input) {
+  f16[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 64 : thread {
+      tile = dma.copy input.subspan(64, 64) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// foo13: 256 participating threads -- large (16,16) thread layout
+__co__ auto foo13(f16 [128, 128] input) {
+  f16[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 256 : thread {
+      tile = dma.copy input.subspan(128, 128) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Category E: Tile Shape Variants
+// ================================================================
+
+// foo14: wide tile (M << N) -- thread layout where thr_n >> thr_m
+__co__ auto foo14(f16 [4, 128] input) {
+  f16[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(4, 128) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// foo15: tall tile (M >> N) -- thread layout where thr_m >> thr_n
+__co__ auto foo15(s32 [128, 16] input) {
+  s32[input.span] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(128, 16) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Category F: Dynamic Strides (runtime dimensions)
+//   When the outer dimension is dynamic, the compiler cannot statically
+//   determine row-stride alignment.  detect_align_bits sees a non-integer
+//   stride and returns 1, forcing vector_factor=1.
+//   - s8  (8-bit)  -> param.align_bits=8  -> DEFAULT -> UniversalCopy atom
+//   - f16 (16-bit) -> param.align_bits=16 -> VEC_16B (degraded vectorization)
+//   - s32 (32-bit) -> param.align_bits=32 -> VEC_32B (degraded vectorization)
+// ================================================================
+
+// foo16: s8 dynamic stride -> UniversalCopy atom for G2S tiled copy
+//        The only element width where dynamic stride triggers DEFAULT atom
+__co__ auto foo16(s8 [M, N] input) {
+  s8[32, 64] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(32, 64) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// foo17: s32 dynamic stride -> VEC_32B atom (degraded from VEC_128B)
+//        Verifies tiled copy still functions with reduced vectorization
+__co__ auto foo17(s32 [M, N] input) {
+  s32[16, 32] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(16, 32) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// foo18: s8 dynamic stride + zfill predication -> UniversalCopy + pred
+//        from (13, 64) into (16, 64) shared, source extent < tile -> predication
+__co__ auto foo18(s8 [M, N] input) {
+  s8[13, 64] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s8 [16, 64] buf;
+      dma.copy.zfill input.subspan(13, 64) => buf.subspan(16, 64);
+      dma.copy buf.subspan(13, 64) => output;
+    }
+
+  return output;
+}
+
+// foo19: s32 dynamic stride + subspan.step.at -> VEC_32B + offset computation
+//        Exercises the GenOffset fix for SubSpan with explicit steps and
+//        dynamic input strides; selects tile at (1, 2)
+__co__ auto foo19(s32 [M, N] input) {
+  s32[32, 32] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(32, 32).step(32, 32).at(1, 2) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// ================================================================
+// Category G: Transpose DMA (dma.transp)
+// ================================================================
+
+// foo20: dma.transp<1,0> with static shapes -- basic G2S transpose
+//        Source [64, 128] transposed into [128, 64] shared
+__co__ auto foo20(s32 [64, 128] input) {
+  s32 [128, 64] output;
+
+  parallel p by 1 : block, by 1 : group {
+    tile = dma.transp<1, 0> input => shared;
+    dma.copy tile => output;
+  }
+
+  return output;
+}
+
+// foo21: dma.transp<1,0> with dynamic stride -- transpose + UniversalCopy/degraded atom
+//        Tests transpose combined with dynamic-stride alignment fallback
+__co__ auto foo21(s32 [M, N] input) {
+  s32 [32, 16] output;
+
+  parallel p by 1 : block, by 1 : group {
+    tile = dma.transp<1, 0> input.subspan(16, 32) => shared;
+    dma.copy tile => output;
+  }
+
+  return output;
+}
+
+// ================================================================
+// Category H: 1D Tensor DMA (rank-1 reshaped to [1, N])
+// ================================================================
+
+// foo25: basic 1D s32 copy -- 128 elements, 32 threads, CP_ASYNC_128B
+__co__ auto foo25(s32 [128] input) {
+  s32[128] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(128) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// foo26: 1D f16 copy -- 256 elements, 32 threads
+__co__ auto foo26(f16 [256] input) {
+  f16[256] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(256) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+// foo27: 1D s32 async copy -- tests cp.async with 1D
+__co__ auto foo27(s32 [64] input) {
+  s32[64] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [64] buf;
+      fut = dma.copy.async input.subspan(64) => buf.subspan(64);
+      wait fut;
+      dma.copy buf.subspan(64) => output;
+    }
+
+  return output;
+}
+
+// foo28: 1D s8 copy -- small element type, 128 elements, 32 threads
+__co__ auto foo28(s8 [512] input) {
+  s8[512] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(512) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+void FillS32(choreo::spanned_data<choreo::s32, 2>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    for (size_t j = 0; j < data.shape()[1]; ++j)
+      data[i][j] = static_cast<choreo::s32>((i * 17 + j * 5) % 41 - 20);
+}
+
+void FillF16(choreo::spanned_data<choreo::f16, 2>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    for (size_t j = 0; j < data.shape()[1]; ++j)
+      data[i][j] = choreo::f32_to_f16(static_cast<float>(((i * 7) + j) % 19 - 9));
+}
+
+void FillF32(choreo::spanned_data<choreo::f32, 2>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    for (size_t j = 0; j < data.shape()[1]; ++j)
+      data[i][j] = static_cast<choreo::f32>((i * 13 + j * 3) % 37 - 18);
+}
+
+void FillS8(choreo::spanned_data<choreo::s8, 2>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    for (size_t j = 0; j < data.shape()[1]; ++j)
+      data[i][j] = static_cast<choreo::s8>((i * 7 + j * 3) % 127 - 63);
+}
+
+void FillS32_1D(choreo::spanned_data<choreo::s32, 1>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    data[i] = static_cast<choreo::s32>((i * 17 + 5) % 41 - 20);
+}
+
+void FillF16_1D(choreo::spanned_data<choreo::f16, 1>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    data[i] = choreo::f32_to_f16(static_cast<float>((i * 7 + 3) % 19 - 9));
+}
+
+void FillS8_1D(choreo::spanned_data<choreo::s8, 1>& data) {
+  for (size_t i = 0; i < data.shape()[0]; ++i)
+    data[i] = static_cast<choreo::s8>((i * 7 + 3) % 127 - 63);
+}
+
+void Run1() {
+  auto input = choreo::make_spandata<choreo::s32>(32, 32);
+  FillS32(input);
+
+  auto output = foo1(input.view());
+  for (size_t i = 0; i < 32; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo1 mismatch");
+
+  std::cout << "Test Foo1 Passed\n" << std::endl;
+}
+
+void Run2() {
+  auto input = choreo::make_spandata<choreo::f16>(31, 32);
+  FillF16(input);
+
+  auto output = foo2(input.view());
+  for (size_t i = 0; i < 31; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      choreo::choreo_assert(
+          choreo::f16_to_f32(output[i][j]) == choreo::f16_to_f32(input[i][j]),
+          "foo2 copied region mismatch");
+  for (size_t j = 0; j < 32; ++j)
+    choreo::choreo_assert(choreo::f16_to_f32(output[31][j]) == 0.0f,
+                          "foo2 zfill row mismatch");
+
+  std::cout << "Test Foo2 Passed\n" << std::endl;
+}
+
+void Run3() {
+  auto input = choreo::make_spandata<choreo::f16>(32, 1024);
+  FillF16(input);
+
+  auto output = foo3(input.view());
+  for (size_t i = 0; i < 7; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      choreo::choreo_assert(
+          choreo::f16_to_f32(output[i][j]) == choreo::f16_to_f32(input[i][j]),
+          "foo3 mismatch");
+
+  std::cout << "Test Foo3 Passed\n" << std::endl;
+}
+
+void Run4() {
+  auto input = choreo::make_spandata<choreo::s32>(32, 64);
+  FillS32(input);
+
+  auto output = foo4(input.view());
+  for (size_t i = 0; i < 32; ++i)
+    for (size_t j = 0; j < 64; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo4 mismatch");
+
+  std::cout << "Test Foo4 Passed\n" << std::endl;
+}
+
+void Run5() {
+  auto input = choreo::make_spandata<choreo::f16>(31, 64);
+  FillF16(input);
+
+  auto output = foo5(input.view());
+  for (size_t i = 0; i < 31; ++i)
+    for (size_t j = 0; j < 64; ++j)
+      choreo::choreo_assert(
+          choreo::f16_to_f32(output[i][j]) == choreo::f16_to_f32(input[i][j]),
+          "foo5 copied region mismatch");
+  for (size_t j = 0; j < 64; ++j)
+    choreo::choreo_assert(choreo::f16_to_f32(output[31][j]) == 0.0f,
+                          "foo5 zfill row mismatch");
+
+  std::cout << "Test Foo5 Passed\n" << std::endl;
+}
+
+void Run6() {
+  auto input = choreo::make_spandata<choreo::f32>(128, 128);
+  FillF32(input);
+
+  auto output = foo6(input.view());
+  for (size_t i = 0; i < 32; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      choreo::choreo_assert(output[i][j] == input[32 + i][64 + j],
+                            "foo6 mismatch");
+
+  std::cout << "Test Foo6 Passed\n" << std::endl;
+}
+
+void Run7() {
+  auto input = choreo::make_spandata<choreo::s32>(64, 32);
+  FillS32(input);
+
+  auto output = foo7(input.view());
+  for (size_t i = 0; i < 64; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo7 mismatch");
+
+  std::cout << "Test Foo7 Passed\n" << std::endl;
+}
+
+void Run8() {
+  auto input = choreo::make_spandata<choreo::s32>(16, 48);
+  FillS32(input);
+
+  auto output = foo8(input.view());
+  for (size_t i = 0; i < 16; ++i)
+    for (size_t j = 0; j < 48; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo8 mismatch");
+
+  std::cout << "Test Foo8 Passed\n" << std::endl;
+}
+
+void Run9() {
+  auto input = choreo::make_spandata<choreo::s8>(32, 128);
+  FillS8(input);
+
+  auto output = foo9(input.view());
+  for (size_t i = 0; i < 32; ++i)
+    for (size_t j = 0; j < 128; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo9 mismatch");
+
+  std::cout << "Test Foo9 Passed\n" << std::endl;
+}
+
+void Run10() {
+  auto input = choreo::make_spandata<choreo::s32>(13, 32);
+  FillS32(input);
+
+  auto output = foo10(input.view());
+  for (size_t i = 0; i < 13; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo10 mismatch");
+
+  std::cout << "Test Foo10 Passed\n" << std::endl;
+}
+
+void Run11() {
+  auto input = choreo::make_spandata<choreo::s32>(13, 64);
+  FillS32(input);
+
+  auto output = foo11(input.view());
+  for (size_t i = 0; i < 13; ++i)
+    for (size_t j = 0; j < 64; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo11 mismatch");
+
+  std::cout << "Test Foo11 Passed\n" << std::endl;
+}
+
+void Run12() {
+  auto input = choreo::make_spandata<choreo::f16>(64, 64);
+  FillF16(input);
+
+  auto output = foo12(input.view());
+  for (size_t i = 0; i < 64; ++i)
+    for (size_t j = 0; j < 64; ++j)
+      choreo::choreo_assert(
+          choreo::f16_to_f32(output[i][j]) == choreo::f16_to_f32(input[i][j]),
+          "foo12 mismatch");
+
+  std::cout << "Test Foo12 Passed\n" << std::endl;
+}
+
+void Run13() {
+  auto input = choreo::make_spandata<choreo::f16>(128, 128);
+  FillF16(input);
+
+  auto output = foo13(input.view());
+  for (size_t i = 0; i < 128; ++i)
+    for (size_t j = 0; j < 128; ++j)
+      choreo::choreo_assert(
+          choreo::f16_to_f32(output[i][j]) == choreo::f16_to_f32(input[i][j]),
+          "foo13 mismatch");
+
+  std::cout << "Test Foo13 Passed\n" << std::endl;
+}
+
+void Run14() {
+  auto input = choreo::make_spandata<choreo::f16>(4, 128);
+  FillF16(input);
+
+  auto output = foo14(input.view());
+  for (size_t i = 0; i < 4; ++i)
+    for (size_t j = 0; j < 128; ++j)
+      choreo::choreo_assert(
+          choreo::f16_to_f32(output[i][j]) == choreo::f16_to_f32(input[i][j]),
+          "foo14 mismatch");
+
+  std::cout << "Test Foo14 Passed\n" << std::endl;
+}
+
+void Run15() {
+  auto input = choreo::make_spandata<choreo::s32>(128, 16);
+  FillS32(input);
+
+  auto output = foo15(input.view());
+  for (size_t i = 0; i < 128; ++i)
+    for (size_t j = 0; j < 16; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo15 mismatch");
+
+  std::cout << "Test Foo15 Passed\n" << std::endl;
+}
+
+void Run16() {
+  auto input = choreo::make_spandata<choreo::s8>(64, 128);
+  FillS8(input);
+
+  auto output = foo16(input.view());
+  for (size_t i = 0; i < 32; ++i)
+    for (size_t j = 0; j < 64; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo16 mismatch");
+
+  std::cout << "Test Foo16 Passed\n" << std::endl;
+}
+
+void Run17() {
+  auto input = choreo::make_spandata<choreo::s32>(48, 64);
+  FillS32(input);
+
+  auto output = foo17(input.view());
+  for (size_t i = 0; i < 16; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo17 mismatch");
+
+  std::cout << "Test Foo17 Passed\n" << std::endl;
+}
+
+void Run18() {
+  auto input = choreo::make_spandata<choreo::s8>(64, 128);
+  FillS8(input);
+
+  auto output = foo18(input.view());
+  for (size_t i = 0; i < 13; ++i)
+    for (size_t j = 0; j < 64; ++j)
+      choreo::choreo_assert(output[i][j] == input[i][j], "foo18 mismatch");
+
+  std::cout << "Test Foo18 Passed\n" << std::endl;
+}
+
+void Run19() {
+  auto input = choreo::make_spandata<choreo::s32>(128, 128);
+  FillS32(input);
+
+  auto output = foo19(input.view());
+  for (size_t i = 0; i < 32; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      choreo::choreo_assert(output[i][j] == input[32 + i][64 + j],
+                            "foo19 mismatch");
+
+  std::cout << "Test Foo19 Passed\n" << std::endl;
+}
+
+void Run20() {
+  auto input = choreo::make_spandata<choreo::s32>(64, 128);
+  FillS32(input);
+
+  auto output = foo20(input.view());
+  for (size_t i = 0; i < 128; ++i)
+    for (size_t j = 0; j < 64; ++j)
+      choreo::choreo_assert(output[i][j] == input[j][i], "foo20 mismatch");
+
+  std::cout << "Test Foo20 Passed\n" << std::endl;
+}
+
+void Run21() {
+  auto input = choreo::make_spandata<choreo::s32>(64, 64);
+  FillS32(input);
+
+  auto output = foo21(input.view());
+  for (size_t i = 0; i < 32; ++i)
+    for (size_t j = 0; j < 16; ++j)
+      choreo::choreo_assert(output[i][j] == input[j][i], "foo21 mismatch");
+
+  std::cout << "Test Foo21 Passed\n" << std::endl;
+}
+
+// ===== Category 6: dma.pad with tiled copy =====
+
+// foo22: S2G pad, static shape, power-of-2 aligned (tiled VEC)
+__co__ auto foo22(s32 [32, 64] input) {
+  s32[32+2+2, 64+4+4] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [32, 64] buf;
+      dma.copy input.subspan(32, 64) => buf;
+      dma.pad<{2, 4}, {2, 4}, {0, 0}, 99> buf => output;
+    }
+
+  return output;
+}
+
+// foo23: G2S async pad, static shape (tiled CP_ASYNC)
+__co__ auto foo23(s32 [32, 64] input) {
+  s32[32+2+2, 64+4+4] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      f = dma.pad<{2, 4}, {2, 4}, {0, 0}, 99>.async input.subspan(32, 64) => shared;
+      wait f;
+      dma.copy f.data => output;
+    }
+
+  return output;
+}
+
+// foo24: S2G pad, non-aligned shape with predication
+// Note: shared buffer is [32, 60] (ceiled from [30, 60]) to provide
+// enough space for the tiled copy box which pads M for thread divisibility.
+__co__ auto foo24(s32 [30, 60] input) {
+  s32[30+2+3, 60+1+2] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [32, 60] buf;
+      dma.copy.zfill input.subspan(30, 60) => buf.subspan(32, 60);
+      dma.pad<{2, 1}, {3, 2}, {0, 0}, -1> buf.subspan(30, 60) => output;
+    }
+
+  return output;
+}
+
+void Run22() {
+  auto input = choreo::make_spandata<choreo::s32>(32, 64);
+  FillS32(input);
+
+  auto output = foo22(input.view());
+  for (size_t i = 0; i < 36; ++i)
+    for (size_t j = 0; j < 72; ++j) {
+      if (i >= 2 && i < 34 && j >= 4 && j < 68)
+        choreo::choreo_assert(output[i][j] == input[i - 2][j - 4],
+                              "foo22 data mismatch");
+      else
+        choreo::choreo_assert(output[i][j] == 99, "foo22 pad mismatch");
+    }
+
+  std::cout << "Test Foo22 Passed\n" << std::endl;
+}
+
+void Run23() {
+  auto input = choreo::make_spandata<choreo::s32>(32, 64);
+  FillS32(input);
+
+  auto output = foo23(input.view());
+  for (size_t i = 0; i < 36; ++i)
+    for (size_t j = 0; j < 72; ++j) {
+      if (i >= 2 && i < 34 && j >= 4 && j < 68)
+        choreo::choreo_assert(output[i][j] == input[i - 2][j - 4],
+                              "foo23 data mismatch");
+      else
+        choreo::choreo_assert(output[i][j] == 99, "foo23 pad mismatch");
+    }
+
+  std::cout << "Test Foo23 Passed\n" << std::endl;
+}
+
+void Run24() {
+  auto input = choreo::make_spandata<choreo::s32>(30, 60);
+  FillS32(input);
+
+  auto output = foo24(input.view());
+  for (size_t i = 0; i < 35; ++i)
+    for (size_t j = 0; j < 63; ++j) {
+      if (i >= 2 && i < 32 && j >= 1 && j < 61)
+        choreo::choreo_assert(output[i][j] == input[i - 2][j - 1],
+                              "foo24 data mismatch");
+      else
+        choreo::choreo_assert(output[i][j] == -1, "foo24 pad mismatch");
+    }
+
+  std::cout << "Test Foo24 Passed\n" << std::endl;
+}
+
+void Run25() {
+  auto input = choreo::make_spandata<choreo::s32>(128);
+  FillS32_1D(input);
+
+  auto output = foo25(input.view());
+  for (size_t i = 0; i < 128; ++i)
+    choreo::choreo_assert(output[i] == input[i], "foo25 mismatch");
+
+  std::cout << "Test Foo25 Passed\n" << std::endl;
+}
+
+void Run26() {
+  auto input = choreo::make_spandata<choreo::f16>(256);
+  FillF16_1D(input);
+
+  auto output = foo26(input.view());
+  for (size_t i = 0; i < 256; ++i)
+    choreo::choreo_assert(
+        choreo::f16_to_f32(output[i]) == choreo::f16_to_f32(input[i]),
+        "foo26 mismatch");
+
+  std::cout << "Test Foo26 Passed\n" << std::endl;
+}
+
+void Run27() {
+  auto input = choreo::make_spandata<choreo::s32>(64);
+  FillS32_1D(input);
+
+  auto output = foo27(input.view());
+  for (size_t i = 0; i < 64; ++i)
+    choreo::choreo_assert(output[i] == input[i], "foo27 mismatch");
+
+  std::cout << "Test Foo27 Passed\n" << std::endl;
+}
+
+void Run28() {
+  auto input = choreo::make_spandata<choreo::s8>(512);
+  FillS8_1D(input);
+
+  auto output = foo28(input.view());
+  for (size_t i = 0; i < 512; ++i)
+    choreo::choreo_assert(output[i] == input[i], "foo28 mismatch");
+
+  std::cout << "Test Foo28 Passed\n" << std::endl;
+}
+
+int main() {
+  Run1();
+  Run2();
+  Run3();
+  Run4();
+  Run5();
+  Run6();
+  Run7();
+  Run8();
+  Run9();
+  Run10();
+  Run11();
+  Run12();
+  Run13();
+  Run14();
+  Run15();
+  Run16();
+  Run17();
+  Run18();
+  Run19();
+  Run20();
+  Run21();
+  Run22();
+  Run23();
+  Run24();
+  Run25();
+  Run26();
+  Run27();
+  Run28();
+}
+
+// CHECK: Test Foo1 Passed
+// CHECK: Test Foo2 Passed
+// CHECK: Test Foo3 Passed
+// CHECK: Test Foo4 Passed
+// CHECK: Test Foo5 Passed
+// CHECK: Test Foo6 Passed
+// CHECK: Test Foo7 Passed
+// CHECK: Test Foo8 Passed
+// CHECK: Test Foo9 Passed
+// CHECK: Test Foo10 Passed
+// CHECK: Test Foo11 Passed
+// CHECK: Test Foo12 Passed
+// CHECK: Test Foo13 Passed
+// CHECK: Test Foo14 Passed
+// CHECK: Test Foo15 Passed
+// CHECK: Test Foo16 Passed
+// CHECK: Test Foo17 Passed
+// CHECK: Test Foo18 Passed
+// CHECK: Test Foo19 Passed
+// CHECK: Test Foo20 Passed
+// CHECK: Test Foo21 Passed
+// CHECK: Test Foo22 Passed
+// CHECK: Test Foo23 Passed
+// CHECK: Test Foo24 Passed
+// CHECK: Test Foo25 Passed
+// CHECK: Test Foo26 Passed
+// CHECK: Test Foo27 Passed
+// CHECK: Test Foo28 Passed

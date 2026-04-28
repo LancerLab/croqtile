@@ -480,7 +480,7 @@ struct NoValue : public Node, public TypeIDProvider<NoValue> {
   __UDT_TYPE_INFO__(Node, NoValue)
 };
 
-struct Nullptr: public Node, public TypeIDProvider<Nullptr> {
+struct Nullptr : public Node, public TypeIDProvider<Nullptr> {
   explicit Nullptr(const location& l) : Node(l, MakeAddrType()) {}
 
   ptr<Node> CloneImpl() const override { return Make<Nullptr>(LOC()); }

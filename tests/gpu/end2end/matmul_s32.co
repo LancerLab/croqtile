@@ -3,7 +3,7 @@
 
 // Consolidated from: matmul.co, matmul-dma.co, matmul-pipelined-2.co
 
-// --- matmul.co: scalar loop, s32 ---
+// --- matmul.co: scalar loop, s32 ---sm
 __co__ s32 [128, 256] matmul_basic(s32 [128, 256] lhs, s32 [256, 256] rhs) {
   s32[lhs.span(0), rhs.span(1)] output;
 

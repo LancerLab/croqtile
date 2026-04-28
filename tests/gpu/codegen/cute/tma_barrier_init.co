@@ -9,7 +9,7 @@
 #define MATMUL_SWIZ 128
 
 __co__ void foo(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
-
+  
   parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block
   parallel p by 2 : group-4
   {
@@ -31,4 +31,3 @@ __co__ void foo(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] 
 
 // CHECK: init(&choreo_copy_atom_t_0_barrier, blockDim.x);
 // CHECK: init(&choreo_copy_atom_t_1_barrier, blockDim.x);
-// CHECK: init(&choreo_copy_atom_t_2_barrier, 128);
