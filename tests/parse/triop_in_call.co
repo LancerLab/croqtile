@@ -1,0 +1,12 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ auto test(int a, int b, int c) {
+  parallel by 1 {
+    call foo(a > 0 ? a : b, c == 0 ? 1 : 0);
+    mutable int x = call bar(a != b ? a + 1 : b - 1);
+  }
+}
+
+// CHECK: `- Call: foo
+// CHECK:   `- with arguments:  ( (a > 0)  ? a : b) ,  ( (c == 0)  ? 1 : 0)
+// CHECK: `- Var Decl (mutable s32): x = call bar( ( (a != b)  ?  (a + 1)  :  (b - 1) ) )

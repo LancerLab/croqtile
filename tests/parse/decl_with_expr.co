@@ -30,7 +30,7 @@ __co__ u8 mdspan<1> scalar_decls(int a, int b) {
 // CHECK:  `- Assign: f =  ( (c < d)  ? c : d)
 // CHECK:  `- Assign: f =  (f + (a + 2) )
 // CHECK:  `- Var Decl (bool): x =  ( (d > c)  ?  (d > e)  :  (d <= e) )
-// CHECK:  `- Assign: x = (d !=  (c  ?  (d > c)  :  (d <= c) ) )
+// CHECK:  `- Assign: x =  ( (d != c)  ?  (d > c)  :  (d <= c) )
 
 // host program
 int host(int a, int b) {

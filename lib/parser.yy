@@ -256,7 +256,8 @@ extern int yylex();
 
 // precedence (low to high) and associativity
 %right ASSIGN
-%right QES COL
+%right COL
+%right QES
 %left OR
 %left AND
 %left EQ NE
@@ -1424,8 +1425,8 @@ s_expr
         // or else, it is arithmetical
         $$ = $2;
       }
-    | LPAREN s_expr RPAREN QES s_expr COL s_expr {
-        $$ = AST::Make<AST::Expr>(@1, "?", $2, $5, $7);
+    | s_expr QES s_expr COL s_expr %prec QES {
+        $$ = AST::Make<AST::Expr>(@1, "?", $1, $3, $5);
       }
     | s_expr LT s_expr { $$ = AST::Make<AST::Expr>(@1, "<", $1, $3); }
     | s_expr GT s_expr { $$ = AST::Make<AST::Expr>(@1, ">", $1, $3); }
