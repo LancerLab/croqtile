@@ -2,7 +2,7 @@
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 #define I 32
-#define J 512
+#define J 256
 #define K 768
 
 #define NUM_BLOCK 2

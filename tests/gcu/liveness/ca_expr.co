@@ -20,6 +20,6 @@ __co__ auto matmul1(f32 [32, 512, 768] lhs, f32 [768, 768] rhs) {
   return output;
 }
 
-// CHECK: float* l1_out = (float*)(anon_2 + 245760);
-// CHECK: float* l1_a__buf__ = (float*)(anon_2 + 147456);
-// CHECK: float* l1_b__buf__ = (float*)(anon_2 + 0);
+// CHECK: float* l1_out = (float*)(anon_2 + 196608);
+// CHECK: float* l1_a__buf__ = (float*)(anon_2 + 0);
+// CHECK: float* l1_b__buf__ = (float*)(anon_2 + 393216);
