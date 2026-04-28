@@ -3,9 +3,9 @@
 
 // This apply the GCU target specific check and information annotation
 
-#include "lower_libcall.hpp"
 #include "assess.hpp"
 #include "ast.hpp"
+#include "lower_libcall.hpp"
 #include "target_utils.hpp"
 #include "visitor.hpp"
 
@@ -678,8 +678,7 @@ public:
         Error1(n.LOC(), "Event is not supported on " + cur_arch + ".");
 
     if (isa<AST::Select>(n.init_expr))
-      if (IsHost())
-        Error1(n.LOC(), "select in host is not supported.");
+      if (IsHost()) Error1(n.LOC(), "select in host is not supported.");
 
     if (!isa<SpannedType>(ty)) {
       auto mem = n.GetMemory();
@@ -846,11 +845,8 @@ public:
         Warning(loc, msg);
       };
       auto assess_fn = [this](auto expr, const std::string& msg,
-                              AST::Node& node) {
-        Assess(expr, msg, node);
-      };
-      ValidateLibCall(n, error_fn, warn_fn, assess_fn,
-                      CCtx().UseTargetLib());
+                              AST::Node& node) { Assess(expr, msg, node); };
+      ValidateLibCall(n, error_fn, warn_fn, assess_fn, CCtx().UseTargetLib());
     }
 
     return true;

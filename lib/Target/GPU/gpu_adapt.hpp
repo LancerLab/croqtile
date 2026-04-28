@@ -392,19 +392,6 @@ public:
         CheckDimSize(f_shape, idx, "<", 1 << 24, *n.GetFrom(), &n);
       for (size_t idx = 0; idx < t_rank; ++idx)
         CheckDimSize(t_shape, idx, "<", 1 << 24, *n.GetTo(), &n);
-      // TODO: offset limitation: [0, 2^24)
-      if (f_rank == 5) {
-        for (auto tsi : f_ca->AllOperations()) {
-          if (auto indices = tsi->GetIndices()) {
-            auto val = indices->Opts().GetVals()[0];
-            if (VIIsInt(val) && !IsValueItemEqual(1, val))
-              Error1(n.LOC(), "On " + cur_arch +
-                                  ", dma.copy(slice) does not "
-                                  "support 5-dimensional "
-                                  "array (if dim is 5, offsets[0] must be 0).");
-          }
-        }
-      }
       // TODO: check for auto padding
     }
 
@@ -415,19 +402,6 @@ public:
         CheckDimSize(f_shape, idx, "<", 1 << 24, *n.GetFrom(), &n);
       for (size_t idx = 0; idx < t_rank; ++idx)
         CheckDimSize(t_shape, idx, "<", 1 << 24, *n.GetTo(), &n);
-      // TODO: offset limitation: [0, 2^24)
-      if (t_rank == 5) {
-        for (auto tsi : t_ca->AllOperations()) {
-          if (auto indices = tsi->GetIndices()) {
-            auto val = indices->Opts().GetVals()[0];
-            if (VIIsInt(val) && !IsValueItemEqual(1, val))
-              Error1(n.LOC(), "On " + cur_arch +
-                                  ", dma.copy(deslice) does not "
-                                  "support 5-dimensional "
-                                  "array (if dim is 5, offsets[0] must be 0).");
-          }
-        }
-      }
     }
 
     // slice transpose
@@ -475,6 +449,66 @@ public:
                  "CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
                  "* dim3 * dim4 < 4GB.");
     }
+
+    // // When thread-level PVs appear in a DMA chunkat and the other side is
+    // // shared, every thread redundantly copies to/from the same shared
+    // buffer.
+    // // Warn the user to guard with 'inthreads' or use per-thread local
+    // storage.
+    // {
+    //   auto set_intersect = [](const std::set<std::string>& set1,
+    //                           const std::set<std::string>& set2) {
+    //     std::set<std::string> result;
+    //     std::set_intersection(set1.begin(), set1.end(), set2.begin(),
+    //                           set2.end(),
+    //                           std::inserter(result, result.begin()));
+    //     return result;
+    //   };
+
+    //   auto inner_pvs = ps.GetInnerPVs(ParallelLevel::BLOCK);
+
+    //   auto collect_syms = [this](AST::ChunkAt* ca) {
+    //     std::set<std::string> syms;
+    //     if (ca->indices) {
+    //       auto s = ReferredSymbols(ca->indices.get(), this);
+    //       syms.insert(s.begin(), s.end());
+    //     }
+    //     auto s = ReferredSymbols(ca, this);
+    //     syms.insert(s.begin(), s.end());
+    //     syms.erase(InScopeName(ca->RefSymbol()));
+    //     return syms;
+    //   };
+
+    //   auto format_pv = [&](const std::set<std::string>& syms) {
+    //     std::ostringstream oss;
+    //     int i = 0;
+    //     for (auto& sym : syms) {
+    //       if (i++ != 0) oss << ", ";
+    //       oss << "`" << UnScopedName(sym) << "'("
+    //           << STR(ps.GetPVLevel(sym)) << ")";
+    //     }
+    //     return oss.str();
+    //   };
+
+    //   auto f_syms = collect_syms(f_ca.get());
+    //   auto t_syms = collect_syms(t_ca.get());
+    //   auto f_inner = set_intersect(f_syms, inner_pvs);
+    //   auto t_inner = set_intersect(t_syms, inner_pvs);
+    //   auto fst = f_sty->GetStorage();
+    //   auto tst = t_sty->GetStorage();
+
+    //   if (!f_inner.empty() && tst == Storage::SHARED)
+    //     Warning(f_ca->LOC(),
+    //             "dma." + n.operation.substr(1) +
+    //                 " source references thread-level parallel variable " +
+    //                 format_pv(f_inner) +".");
+    //   if (!t_inner.empty() && fst == Storage::SHARED)
+    //     Warning(t_ca->LOC(),
+    //             "dma." + n.operation.substr(1) +
+    //                 " destination references thread-level parallel "
+    //                 "variable " + format_pv(t_inner) +".");
+
+    // }
 
     return;
 #endif

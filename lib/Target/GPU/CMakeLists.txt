@@ -8,6 +8,7 @@ add_custom_target(
 set(GPU_TARGET_SOURCES
   cute_codegen.cpp
   cute_target.cpp
+  dma_plan.cpp
 )
 
 add_library(GPUTarget OBJECT ${GPU_TARGET_SOURCES})

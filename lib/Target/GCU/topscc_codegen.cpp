@@ -10,15 +10,15 @@
 #include "choreo_header.inc"
 #include "codegen.hpp"
 #include "io.hpp"
+#include "lower_libcall.hpp"
 #include "operator_info.hpp"
 #include "target_utils.hpp"
-#include "lower_libcall.hpp"
 #include "topscc_header.inc"
 #include "types.hpp"
 
 #ifdef __CHOREO_GCU_ACORE_DIR__
-#include "acore_runtime.inc"
-#define __CHOREO_ACORE_RUNTIME_AVAILABLE__
+  #include "acore_runtime.inc"
+  #define __CHOREO_ACORE_RUNTIME_AVAILABLE__
 #endif
 
 #ifndef __CHOREO_TOPSCC_DIR__

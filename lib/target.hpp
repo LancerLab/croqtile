@@ -212,8 +212,7 @@ public:
 
   // Storage levels where atomics are available (e.g. shared, global).
   // Targets with cluster-scoped or other storage may restrict this.
-  virtual std::set<Storage>
-  SupportedAtomicStorages(const ArchId&) const {
+  virtual std::set<Storage> SupportedAtomicStorages(const ArchId&) const {
     return {};
   }
 
@@ -224,13 +223,12 @@ public:
     return false;
   }
 
-  virtual bool IsAtomicStorageSupported(const ArchId& arch,
-                                        Storage sto) const {
+  virtual bool IsAtomicStorageSupported(const ArchId& arch, Storage sto) const {
     return SupportedAtomicStorages(arch).count(sto) > 0;
   }
 
-  virtual bool IsAtomicSupported(const ArchId& arch, AtomicOp op,
-                                 BaseType ty, Storage sto) const {
+  virtual bool IsAtomicSupported(const ArchId& arch, AtomicOp op, BaseType ty,
+                                 Storage sto) const {
     return IsAtomicSupported(arch, op, ty) &&
            IsAtomicStorageSupported(arch, sto);
   }

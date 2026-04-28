@@ -19,26 +19,24 @@ namespace choreo {
 // =====================================================================
 
 template <typename T>
-inline void lib_gemm_general(T* out, const T* A, const T* B,
-                             int M, int K, int N) {
+inline void lib_gemm_general(T* out, const T* A, const T* B, int M, int K,
+                             int N) {
   for (int m = 0; m < M; ++m) {
     for (int n = 0; n < N; ++n) {
       T acc = 0;
-      for (int k = 0; k < K; ++k)
-        acc += (T)(A[m * K + k] * B[k * N + n]);
+      for (int k = 0; k < K; ++k) acc += (T)(A[m * K + k] * B[k * N + n]);
       out[m * N + n] = acc;
     }
   }
 }
 
 template <typename T>
-inline void lib_gemm_bias_general(T* out, const T* A, const T* B,
-                                  const T* bias, int M, int K, int N) {
+inline void lib_gemm_bias_general(T* out, const T* A, const T* B, const T* bias,
+                                  int M, int K, int N) {
   for (int m = 0; m < M; ++m) {
     for (int n = 0; n < N; ++n) {
       T acc = 0;
-      for (int k = 0; k < K; ++k)
-        acc += (T)(A[m * K + k] * B[k * N + n]);
+      for (int k = 0; k < K; ++k) acc += (T)(A[m * K + k] * B[k * N + n]);
       out[m * N + n] = acc + bias[n];
     }
   }
@@ -50,14 +48,12 @@ inline void lib_gemm_bias_general(T* out, const T* A, const T* B,
 
 template <typename T>
 inline void lib_abs(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (src[i] >= 0) ? src[i] : -src[i];
+  for (int i = 0; i < num; ++i) dst[i] = (src[i] >= 0) ? src[i] : -src[i];
 }
 
 template <typename T>
 inline void lib_neg(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = -src[i];
+  for (int i = 0; i < num; ++i) dst[i] = -src[i];
 }
 
 template <typename T>
@@ -68,128 +64,107 @@ inline void lib_sign(T* dst, const T* src, int num) {
 
 template <typename T>
 inline void lib_sqrt(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::sqrt((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::sqrt((float)src[i]);
 }
 
 template <typename T>
 inline void lib_rsqrt(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)(1.0f / std::sqrt((float)src[i]));
+  for (int i = 0; i < num; ++i) dst[i] = (T)(1.0f / std::sqrt((float)src[i]));
 }
 
 template <typename T>
 inline void lib_cbrt(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::cbrt((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::cbrt((float)src[i]);
 }
 
 template <typename T>
 inline void lib_reciprocal(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)(1.0f / (float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)(1.0f / (float)src[i]);
 }
 
 template <typename T>
 inline void lib_exp(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::exp((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::exp((float)src[i]);
 }
 
 template <typename T>
 inline void lib_log(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::log((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::log((float)src[i]);
 }
 
 template <typename T>
 inline void lib_erf(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::erf((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::erf((float)src[i]);
 }
 
 template <typename T>
 inline void lib_erfc(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::erfc((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::erfc((float)src[i]);
 }
 
 template <typename T>
 inline void lib_ceil(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::ceil((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::ceil((float)src[i]);
 }
 
 template <typename T>
 inline void lib_floor(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::floor((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::floor((float)src[i]);
 }
 
 template <typename T>
 inline void lib_trunc(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::trunc((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::trunc((float)src[i]);
 }
 
 template <typename T>
 inline void lib_round_ne(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::nearbyint((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::nearbyint((float)src[i]);
 }
 
 template <typename T>
 inline void lib_sin(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::sin((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::sin((float)src[i]);
 }
 
 template <typename T>
 inline void lib_cos(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::cos((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::cos((float)src[i]);
 }
 
 template <typename T>
 inline void lib_tan(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::tan((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::tan((float)src[i]);
 }
 
 template <typename T>
 inline void lib_asin(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::asin((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::asin((float)src[i]);
 }
 
 template <typename T>
 inline void lib_acos(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::acos((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::acos((float)src[i]);
 }
 
 template <typename T>
 inline void lib_atan(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::atan((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::atan((float)src[i]);
 }
 
 template <typename T>
 inline void lib_sinh(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::sinh((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::sinh((float)src[i]);
 }
 
 template <typename T>
 inline void lib_cosh(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::cosh((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::cosh((float)src[i]);
 }
 
 template <typename T>
 inline void lib_tanh(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)std::tanh((float)src[i]);
+  for (int i = 0; i < num; ++i) dst[i] = (T)std::tanh((float)src[i]);
 }
 
 // =====================================================================
@@ -198,8 +173,7 @@ inline void lib_tanh(T* dst, const T* src, int num) {
 
 template <typename T>
 inline void lib_relu(T* dst, const T* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (src[i] > (T)0) ? src[i] : (T)0;
+  for (int i = 0; i < num; ++i) dst[i] = (src[i] > (T)0) ? src[i] : (T)0;
 }
 
 template <typename T>
@@ -420,38 +394,32 @@ inline void lib_reglu(T* dst, const T* lhs, const T* rhs, int num) {
 
 template <typename T>
 inline void lib_add(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = lhs[i] + rhs[i];
+  for (int i = 0; i < num; ++i) dst[i] = lhs[i] + rhs[i];
 }
 
 template <typename T>
 inline void lib_sub(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = lhs[i] - rhs[i];
+  for (int i = 0; i < num; ++i) dst[i] = lhs[i] - rhs[i];
 }
 
 template <typename T>
 inline void lib_mul(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = lhs[i] * rhs[i];
+  for (int i = 0; i < num; ++i) dst[i] = lhs[i] * rhs[i];
 }
 
 template <typename T>
 inline void lib_div(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = lhs[i] / rhs[i];
+  for (int i = 0; i < num; ++i) dst[i] = lhs[i] / rhs[i];
 }
 
 template <typename T>
 inline void lib_max(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (lhs[i] > rhs[i]) ? lhs[i] : rhs[i];
+  for (int i = 0; i < num; ++i) dst[i] = (lhs[i] > rhs[i]) ? lhs[i] : rhs[i];
 }
 
 template <typename T>
 inline void lib_min(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (lhs[i] < rhs[i]) ? lhs[i] : rhs[i];
+  for (int i = 0; i < num; ++i) dst[i] = (lhs[i] < rhs[i]) ? lhs[i] : rhs[i];
 }
 
 template <typename T>
@@ -480,38 +448,32 @@ inline void lib_remainder(T* dst, const T* lhs, const T* rhs, int num) {
 
 template <typename T>
 inline void lib_gt(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)(lhs[i] > rhs[i] ? 1 : 0);
+  for (int i = 0; i < num; ++i) dst[i] = (T)(lhs[i] > rhs[i] ? 1 : 0);
 }
 
 template <typename T>
 inline void lib_ge(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)(lhs[i] >= rhs[i] ? 1 : 0);
+  for (int i = 0; i < num; ++i) dst[i] = (T)(lhs[i] >= rhs[i] ? 1 : 0);
 }
 
 template <typename T>
 inline void lib_lt(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)(lhs[i] < rhs[i] ? 1 : 0);
+  for (int i = 0; i < num; ++i) dst[i] = (T)(lhs[i] < rhs[i] ? 1 : 0);
 }
 
 template <typename T>
 inline void lib_le(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)(lhs[i] <= rhs[i] ? 1 : 0);
+  for (int i = 0; i < num; ++i) dst[i] = (T)(lhs[i] <= rhs[i] ? 1 : 0);
 }
 
 template <typename T>
 inline void lib_eq(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)(lhs[i] == rhs[i] ? 1 : 0);
+  for (int i = 0; i < num; ++i) dst[i] = (T)(lhs[i] == rhs[i] ? 1 : 0);
 }
 
 template <typename T>
 inline void lib_ne(T* dst, const T* lhs, const T* rhs, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (T)(lhs[i] != rhs[i] ? 1 : 0);
+  for (int i = 0; i < num; ++i) dst[i] = (T)(lhs[i] != rhs[i] ? 1 : 0);
 }
 
 // =====================================================================
@@ -519,20 +481,17 @@ inline void lib_ne(T* dst, const T* lhs, const T* rhs, int num) {
 // =====================================================================
 
 template <typename T>
-inline void lib_reduce_sum(T* dst, const T* src, int num, int rdim,
-                           int nred) {
+inline void lib_reduce_sum(T* dst, const T* src, int num, int rdim, int nred) {
   int out_count = num / nred;
   for (int i = 0; i < out_count; ++i) {
     T acc = (T)0;
-    for (int j = 0; j < nred; ++j)
-      acc += src[i * nred + j];
+    for (int j = 0; j < nred; ++j) acc += src[i * nred + j];
     dst[i] = acc;
   }
 }
 
 template <typename T>
-inline void lib_reduce_max(T* dst, const T* src, int num, int rdim,
-                           int nred) {
+inline void lib_reduce_max(T* dst, const T* src, int num, int rdim, int nred) {
   int out_count = num / nred;
   for (int i = 0; i < out_count; ++i) {
     T val = src[i * nred];
@@ -543,8 +502,7 @@ inline void lib_reduce_max(T* dst, const T* src, int num, int rdim,
 }
 
 template <typename T>
-inline void lib_reduce_min(T* dst, const T* src, int num, int rdim,
-                           int nred) {
+inline void lib_reduce_min(T* dst, const T* src, int num, int rdim, int nred) {
   int out_count = num / nred;
   for (int i = 0; i < out_count; ++i) {
     T val = src[i * nred];
@@ -555,25 +513,21 @@ inline void lib_reduce_min(T* dst, const T* src, int num, int rdim,
 }
 
 template <typename T>
-inline void lib_reduce_prod(T* dst, const T* src, int num, int rdim,
-                            int nred) {
+inline void lib_reduce_prod(T* dst, const T* src, int num, int rdim, int nred) {
   int out_count = num / nred;
   for (int i = 0; i < out_count; ++i) {
     T acc = (T)1;
-    for (int j = 0; j < nred; ++j)
-      acc *= src[i * nred + j];
+    for (int j = 0; j < nred; ++j) acc *= src[i * nred + j];
     dst[i] = acc;
   }
 }
 
 template <typename T>
-inline void lib_reduce_mean(T* dst, const T* src, int num, int rdim,
-                            int nred) {
+inline void lib_reduce_mean(T* dst, const T* src, int num, int rdim, int nred) {
   int out_count = num / nred;
   for (int i = 0; i < out_count; ++i) {
     T acc = (T)0;
-    for (int j = 0; j < nred; ++j)
-      acc += src[i * nred + j];
+    for (int j = 0; j < nred; ++j) acc += src[i * nred + j];
     dst[i] = (T)((float)acc / nred);
   }
 }
@@ -584,8 +538,8 @@ inline void lib_reduce_mean(T* dst, const T* src, int num, int rdim,
 // =====================================================================
 
 template <typename T>
-inline void lib_addmm(T* out, const T* bias, const T* A, const T* B,
-                       int M, int K, int N, float alpha, float beta) {
+inline void lib_addmm(T* out, const T* bias, const T* A, const T* B, int M,
+                      int K, int N, float alpha, float beta) {
   for (int m = 0; m < M; ++m) {
     for (int n = 0; n < N; ++n) {
       float acc = 0.0f;
@@ -602,16 +556,14 @@ inline void lib_addmm(T* out, const T* bias, const T* A, const T* B,
 // =====================================================================
 
 template <typename T>
-inline void lib_layer_norm(T* dst, const T* src, const T* weight,
-                           const T* bias, int batch, int norm_size,
-                           float eps) {
+inline void lib_layer_norm(T* dst, const T* src, const T* weight, const T* bias,
+                           int batch, int norm_size, float eps) {
   for (int b = 0; b < batch; ++b) {
     const T* in = src + b * norm_size;
     T* out = dst + b * norm_size;
 
     float mean = 0.0f;
-    for (int i = 0; i < norm_size; ++i)
-      mean += (float)in[i];
+    for (int i = 0; i < norm_size; ++i) mean += (float)in[i];
     mean /= norm_size;
 
     float var = 0.0f;
@@ -624,7 +576,7 @@ inline void lib_layer_norm(T* dst, const T* src, const T* weight,
 
     for (int i = 0; i < norm_size; ++i)
       out[i] = (T)(((float)in[i] - mean) * inv_std * (float)weight[i] +
-                    (float)bias[i]);
+                   (float)bias[i]);
   }
 }
 
@@ -635,10 +587,10 @@ inline void lib_layer_norm(T* dst, const T* src, const T* weight,
 // =====================================================================
 
 template <typename T>
-inline void lib_conv2d(T* out, const T* input, const T* weight,
-                       const T* bias, int batch, int hi, int wi, int ci,
-                       int co, int kh, int kw, int stride_h, int stride_w,
-                       int pad_h, int pad_w) {
+inline void lib_conv2d(T* out, const T* input, const T* weight, const T* bias,
+                       int batch, int hi, int wi, int ci, int co, int kh,
+                       int kw, int stride_h, int stride_w, int pad_h,
+                       int pad_w) {
   int ho = (hi + 2 * pad_h - kh) / stride_h + 1;
   int wo = (wi + 2 * pad_w - kw) / stride_w + 1;
   for (int n = 0; n < batch; ++n) {
@@ -672,8 +624,7 @@ inline void lib_conv2d(T* out, const T* input, const T* weight,
 
 template <typename DstT, typename SrcT>
 inline void lib_convert(DstT* dst, const SrcT* src, int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = (DstT)src[i];
+  for (int i = 0; i < num; ++i) dst[i] = (DstT)src[i];
 }
 
 // =====================================================================
@@ -683,10 +634,8 @@ inline void lib_convert(DstT* dst, const SrcT* src, int num) {
 // =====================================================================
 
 template <typename T>
-inline void lib_where(T* dst, const T* cond, const T* x, const T* y,
-                      int num) {
-  for (int i = 0; i < num; ++i)
-    dst[i] = ((float)cond[i] != 0.0f) ? x[i] : y[i];
+inline void lib_where(T* dst, const T* cond, const T* x, const T* y, int num) {
+  for (int i = 0; i < num; ++i) dst[i] = ((float)cond[i] != 0.0f) ? x[i] : y[i];
 }
 
 template <typename T>

@@ -11,7 +11,7 @@
 #define MATMUL_MMA_K 16
 
 // Block tile defaults.
-// NOTE: opt_copy uses 255 regs/thread on SM86, so max 65536/255=256 threads
+// NOTE: naive_copy uses 255 regs/thread on SM86, so max 65536/255=256 threads
 // (8 warps) per block. That means (TILE_M/16)*(TILE_N/16) <= 8.
 #define MATMUL_TILE_M 16
 #define MATMUL_TILE_N 16
@@ -29,7 +29,7 @@
 #error "MATMUL_TILE_K must be divisible by MATMUL_MMA_K"
 #endif
 
-// SM86 register pressure: opt_copy hits 255 regs/thread.
+// SM86 register pressure: naive_copy hits 255 regs/thread.
 // 256 threads x 255 regs = 65280 <= 65536 regs/SM -> max 8 warps (256 threads).
 #if (MATMUL_TILE_M / MATMUL_MMA_M) * (MATMUL_TILE_N / MATMUL_MMA_N) > 8
 #error "Too many warps per block: (TILE_M/MMA_M)*(TILE_N/MMA_N) must be <= 8 (256 threads max, 255 regs/thread)"

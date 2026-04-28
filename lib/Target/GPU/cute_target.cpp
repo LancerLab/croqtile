@@ -1,5 +1,6 @@
 #include "assert_site.hpp"
 #include "cute_codegen.hpp"
+#include "dma_plan.hpp"
 #include "dmaconf.hpp"
 #include "gpu_adapt.hpp"
 #include "gpu_target.hpp"
@@ -152,8 +153,8 @@ public:
     std::vector<AtomicCapability> caps;
 
     caps.push_back({AtomicOp::ADD,
-                    {BaseType::S32, BaseType::U32, BaseType::U64,
-                     BaseType::F32, BaseType::F64, BaseType::F16}});
+                    {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32,
+                     BaseType::F64, BaseType::F16}});
 
     caps.push_back({AtomicOp::SUB, {BaseType::S32, BaseType::U32}});
 
@@ -161,32 +162,31 @@ public:
         {AtomicOp::EXCH,
          {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32}});
 
-    caps.push_back({AtomicOp::MIN,
-                    {BaseType::S32, BaseType::U32, BaseType::S64,
-                     BaseType::U64}});
-    caps.push_back({AtomicOp::MAX,
-                    {BaseType::S32, BaseType::U32, BaseType::S64,
-                     BaseType::U64}});
+    caps.push_back(
+        {AtomicOp::MIN,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
+    caps.push_back(
+        {AtomicOp::MAX,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
 
-    caps.push_back({AtomicOp::AND,
-                    {BaseType::S32, BaseType::U32, BaseType::S64,
-                     BaseType::U64}});
-    caps.push_back({AtomicOp::OR,
-                    {BaseType::S32, BaseType::U32, BaseType::S64,
-                     BaseType::U64}});
-    caps.push_back({AtomicOp::XOR,
-                    {BaseType::S32, BaseType::U32, BaseType::S64,
-                     BaseType::U64}});
+    caps.push_back(
+        {AtomicOp::AND,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
+    caps.push_back(
+        {AtomicOp::OR,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
+    caps.push_back(
+        {AtomicOp::XOR,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
 
-    caps.push_back({AtomicOp::CAS,
-                    {BaseType::S32, BaseType::U32, BaseType::U64,
-                     BaseType::U16}});
+    caps.push_back(
+        {AtomicOp::CAS,
+         {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::U16}});
 
     return caps;
   }
 
-  std::set<Storage>
-  SupportedAtomicStorages(const ArchId&) const override {
+  std::set<Storage> SupportedAtomicStorages(const ArchId&) const override {
     return {Storage::SHARED, Storage::GLOBAL};
   }
 
@@ -204,6 +204,9 @@ public:
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {
     p.AddStage<GPUAdaptor>();
+    // Pre-compute all DMA lowering decisions before any codegen pass
+    // inspects DMA nodes. This separates strategy analysis from emission.
+    p.AddStage<DMAPlan>();
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();
     p.AddStage<Cute::CuteCodeGen>();

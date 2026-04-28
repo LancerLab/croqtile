@@ -271,7 +271,7 @@ __co__ void test_async_span_as_view_chunkat(bf16 [4, 8, 4, 8] q) {
 // chunkat offset   = i_l * (8/4) * (4*8) = i_l * 64
 // CHECK-LABEL: __global__{{.*}}test_async_span_as_view_chunkat
 // CHECK: (bf16*)q + (blockIdx.x * 256 + __iv_i_l__elem__0 * 64)
-// CHECK: cute::copy(*(AsyncCopyAtom*)f.get_atom()
+// CHECK: choreo::naive_copy(
 
 // ---------------------------------------------------------------------------
 // 18. dma.copy.async span_as on both source and destination

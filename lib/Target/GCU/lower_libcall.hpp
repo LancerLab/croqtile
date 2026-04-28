@@ -33,8 +33,8 @@ inline AcoreOpCategory ClassifyAcoreOp(const std::string& name) {
   if (name == "addmm") return AcoreOpCategory::ADDMM;
   if (name == "dot_bias_quant") return AcoreOpCategory::DOT_BIAS_QUANT;
 
-  if (name == "add" || name == "add_relu" || name == "sub" ||
-      name == "rsub" || name == "mul" || name == "div" || name == "rdiv" ||
+  if (name == "add" || name == "add_relu" || name == "sub" || name == "rsub" ||
+      name == "mul" || name == "div" || name == "rdiv" ||
       name == "floor_divide" || name == "trunc_divide" || name == "max" ||
       name == "min" || name == "clamp" || name == "pow" || name == "atan2" ||
       name == "fmod" || name == "remainder" || name == "gt" || name == "ge" ||
@@ -51,10 +51,9 @@ inline AcoreOpCategory ClassifyAcoreOp(const std::string& name) {
       name == "cbrt" || name == "reciprocal" || name == "exp" ||
       name == "log" || name == "erf" || name == "erfinv" || name == "erfc" ||
       name == "gelu_erf" || name == "acos" || name == "acosh" ||
-      name == "asin" || name == "asinh" || name == "atan" ||
-      name == "atanh" || name == "cos" || name == "cosh" || name == "sin" ||
-      name == "sinh" || name == "tan" || name == "frac" || name == "popcnt" ||
-      name == "sinc")
+      name == "asin" || name == "asinh" || name == "atan" || name == "atanh" ||
+      name == "cos" || name == "cosh" || name == "sin" || name == "sinh" ||
+      name == "tan" || name == "frac" || name == "popcnt" || name == "sinc")
     return AcoreOpCategory::UNARY;
 
   if (name == "relu" || name == "gelu" || name == "selu" ||
@@ -66,13 +65,11 @@ inline AcoreOpCategory ClassifyAcoreOp(const std::string& name) {
       name == "hard_tanh" || name == "leaky_relu" || name == "soft_shrink" ||
       name == "logit" || name == "glu" || name == "gtu" || name == "geglu" ||
       name == "reglu" || name == "swiglu" || name == "glu_jvp" ||
-      name == "log_softmax" || name == "prelu" ||
-      name == "rrelu_with_noise")
+      name == "log_softmax" || name == "prelu" || name == "rrelu_with_noise")
     return AcoreOpCategory::ACTIVATION;
 
-  if (name == "reduce_sum" || name == "reduce_prod" ||
-      name == "reduce_mean" || name == "reduce_max" ||
-      name == "reduce_min" || name == "reduce_argmax" ||
+  if (name == "reduce_sum" || name == "reduce_prod" || name == "reduce_mean" ||
+      name == "reduce_max" || name == "reduce_min" || name == "reduce_argmax" ||
       name == "reduce_argmin" || name == "reduce_aminmax" ||
       name == "reduce_any" || name == "reduce_all" ||
       name == "reduce_sum_clamp" || name == "reduce_prod_clamp" ||
@@ -115,8 +112,7 @@ struct AcoreMatmulPattern {
 
 // Supported static-M values for the template overload (from matmul.h).
 inline bool IsAcoreSupportedStaticM(int M) {
-  static const int supported[] = {1,  16,  32,  49,  64,
-                                  96, 128, 256, 512, 1024};
+  static const int supported[] = {1, 16, 32, 49, 64, 96, 128, 256, 512, 1024};
   for (int v : supported)
     if (v == M) return true;
   return false;
@@ -134,10 +130,10 @@ inline std::pair<int, int> GetAcoreAlignments(int M, BaseType lhs_type,
                                               bool is_MK_KN) {
   if (lhs_type == BaseType::F16 || lhs_type == BaseType::BF16) {
     if (M == 1) return {32, 128};
-    if (M == 32) return is_MK_KN ? std::make_pair(32, 128) :
-                                    std::make_pair(32, 128);
-    if (M == 64) return is_MK_KN ? std::make_pair(32, 128) :
-                                    std::make_pair(32, 128);
+    if (M == 32)
+      return is_MK_KN ? std::make_pair(32, 128) : std::make_pair(32, 128);
+    if (M == 64)
+      return is_MK_KN ? std::make_pair(32, 128) : std::make_pair(32, 128);
     if (M == 96 && is_MK_KN) return {32, 128};
     if (M == 128) return {32, 64};
     if (M == 256 && is_MK_KN) return {32, 64};
@@ -147,12 +143,12 @@ inline std::pair<int, int> GetAcoreAlignments(int M, BaseType lhs_type,
     return {0, 0};
   }
   if (lhs_type == BaseType::F32) {
-    if (M == 1) return is_MK_KN ? std::make_pair(16, 64) :
-                                   std::make_pair(16, 64);
+    if (M == 1)
+      return is_MK_KN ? std::make_pair(16, 64) : std::make_pair(16, 64);
     if (M == 16) return {16, 64};
     if (M == 32) return {16, 32};
-    if (M == 64) return is_MK_KN ? std::make_pair(16, 64) :
-                                    std::make_pair(16, 64);
+    if (M == 64)
+      return is_MK_KN ? std::make_pair(16, 64) : std::make_pair(16, 64);
     if (M == 128) return {16, 32};
     if (M == 0) return {16, 64}; // dynamic-M
     return {0, 0};
@@ -178,13 +174,12 @@ bool CheckAcoreCallStorage(AST::Call& n, const std::string& func_name,
     if (auto sty = dyn_cast<SpannedType>(ty)) {
       auto storage = sty->GetStorage();
       if (storage != Storage::LOCAL && storage != Storage::NONE) {
-        error_fn(n.LOC(),
-                 "acore::" + func_name +
-                     " requires all buffer arguments "
-                     "to be in LOCAL (L1) storage, but '" +
-                     STR(arg) + "' is in " + STR(storage) +
-                     " storage. "
-                     "Use dma.copy to move data to local first.");
+        error_fn(n.LOC(), "acore::" + func_name +
+                              " requires all buffer arguments "
+                              "to be in LOCAL (L1) storage, but '" +
+                              STR(arg) + "' is in " + STR(storage) +
+                              " storage. "
+                              "Use dma.copy to move data to local first.");
         return false;
       }
     }
@@ -273,9 +268,9 @@ bool CheckAcoreActivationArgs(AST::Call& n, const std::string& func_name,
     return true;
   }
   if (func_name == "clipped_relu" || func_name == "threshold" ||
-      func_name == "elu" || func_name == "celu" ||
-      func_name == "hard_shrink" || func_name == "soft_shrink" ||
-      func_name == "leaky_relu" || func_name == "logit") {
+      func_name == "elu" || func_name == "celu" || func_name == "hard_shrink" ||
+      func_name == "soft_shrink" || func_name == "leaky_relu" ||
+      func_name == "logit") {
     if (argc < 4 || argc > 6) {
       error_fn(n.LOC(), "acore::" + func_name +
                             " requires 4-6 arguments, but got " +
@@ -343,8 +338,7 @@ bool CheckAcoreCall(AST::Call& n, ErrorFn error_fn,
     return CheckAcoreActivationArgs(n, func_name, error_fn);
   case AcoreOpCategory::REDUCE:
     return CheckAcoreReduceArgs(n, func_name, error_fn);
-  default:
-    break;
+  default: break;
   }
   return true;
 }
@@ -427,10 +421,9 @@ LibGemmLoweringInfo AnalyzeLibGemm(AST::Call& n, AssessFn /* assess_fn */,
     info.N_align = na;
     if (ka == 0) {
       info.use_acore = false;
-      info.fallback_reason =
-          "M=" + std::to_string(static_M) +
-          " is not supported for type " + STR(lhs_bt) +
-          " with MK_KN format in acore matmul";
+      info.fallback_reason = "M=" + std::to_string(static_M) +
+                             " is not supported for type " + STR(lhs_bt) +
+                             " with MK_KN format in acore matmul";
     }
   } else if (static_M > 0 && (static_M % 64 == 0) &&
              IsAcoreSupportedDynamicM(lhs_bt)) {
@@ -496,26 +489,25 @@ LibGemmLoweringInfo AnalyzeLibGemm(AST::Call& n, AssessFn /* assess_fn */,
 // ============================================================================
 
 // Return the number of leading buffer (pointer) arguments for a __lib_ call.
-inline size_t LibCallBufferArgCount(const std::string& func_name,
-                                    size_t argc) {
+inline size_t LibCallBufferArgCount(const std::string& func_name, size_t argc) {
   if (func_name == "__lib_gemm") return (argc == 6) ? 4 : 3;
-  if (func_name == "__lib_addmm") return 4; // out, bias, A, B
+  if (func_name == "__lib_addmm") return 4;      // out, bias, A, B
   if (func_name == "__lib_layer_norm") return 4; // dst, src, weight, bias
-  if (func_name == "__lib_conv2d") return 4; // out, input, weight, bias
-  if (func_name == "__lib_where") return 4; // dst, cond, x, y
-  if (func_name == "__lib_lerp") return 4; // dst, start, end, weight
+  if (func_name == "__lib_conv2d") return 4;     // out, input, weight, bias
+  if (func_name == "__lib_where") return 4;      // dst, cond, x, y
+  if (func_name == "__lib_lerp") return 4;       // dst, start, end, weight
 
   auto base = func_name.substr(6);
   auto cat = ClassifyAcoreOp(base);
   switch (cat) {
-  case AcoreOpCategory::BINARY: return 3; // dst, lhs, rhs
+  case AcoreOpCategory::BINARY: return 3;  // dst, lhs, rhs
   case AcoreOpCategory::CONVERT: return 2; // dst, src
-  case AcoreOpCategory::UNARY: return 2; // dst, src
-  case AcoreOpCategory::REDUCE: return 2; // dst, src
+  case AcoreOpCategory::UNARY: return 2;   // dst, src
+  case AcoreOpCategory::REDUCE: return 2;  // dst, src
   case AcoreOpCategory::ACTIVATION: {
     // GLU-family are binary-style: dst, lhs, rhs
-    if (base == "glu" || base == "gtu" || base == "geglu" ||
-        base == "reglu" || base == "swiglu")
+    if (base == "glu" || base == "gtu" || base == "geglu" || base == "reglu" ||
+        base == "swiglu")
       return 3;
     return 2; // dst, src (parameterised extras are scalars)
   }
@@ -538,11 +530,11 @@ void ValidateLibCall(AST::Call& n, ErrorFn error_fn, WarnFn warn_fn,
     if (auto sty = dyn_cast<SpannedType>(ty)) {
       auto storage = sty->GetStorage();
       if (storage != Storage::LOCAL && storage != Storage::NONE)
-        error_fn(n.LOC(),
-                 func_name +
-                     " requires all buffer arguments to be in LOCAL "
-                     "(L1) storage, but '" +
-                     STR(arg) + "' is in " + STR(storage) + " storage.");
+        error_fn(n.LOC(), func_name +
+                              " requires all buffer arguments to be in LOCAL "
+                              "(L1) storage, but '" +
+                              STR(arg) + "' is in " + STR(storage) +
+                              " storage.");
     }
   }
 
@@ -566,12 +558,11 @@ void ValidateLibCall(AST::Call& n, ErrorFn error_fn, WarnFn warn_fn,
     }
 
     if (use_target_lib) {
-      auto info = AnalyzeLibGemm(
-          n, [](const std::string&, AST::Node*) {}, warn_fn);
+      auto info =
+          AnalyzeLibGemm(n, [](const std::string&, AST::Node*) {}, warn_fn);
       if (!info.use_acore && !info.fallback_reason.empty())
-        warn_fn(n.LOC(),
-                "__lib_gemm will use general (non-acore) fallback: " +
-                    info.fallback_reason);
+        warn_fn(n.LOC(), "__lib_gemm will use general (non-acore) fallback: " +
+                             info.fallback_reason);
     }
   }
 
@@ -593,8 +584,7 @@ void ValidateLibCall(AST::Call& n, ErrorFn error_fn, WarnFn warn_fn,
       if (auto e = dyn_cast<AST::Expr>(n.arguments->ValueAt(idx)))
         if (e->Opts().HasVal())
           assess_fn(sbe::cmp(">", e->Opts().GetVal(), sbe::nu(0)),
-                    func_name + ": batch and norm_size must be positive.",
-                    n);
+                    func_name + ": batch and norm_size must be positive.", n);
     }
   }
 
@@ -604,8 +594,7 @@ void ValidateLibCall(AST::Call& n, ErrorFn error_fn, WarnFn warn_fn,
       if (auto e = dyn_cast<AST::Expr>(n.arguments->ValueAt(idx)))
         if (e->Opts().HasVal())
           assess_fn(sbe::cmp(">", e->Opts().GetVal(), sbe::nu(0)),
-                    func_name + ": spatial/channel dims must be positive.",
-                    n);
+                    func_name + ": spatial/channel dims must be positive.", n);
     }
   }
 }
@@ -633,34 +622,36 @@ inline LibCallKind ClassifyLibCall(const std::string& func_name) {
   if (func_name == "__lib_addmm") return LibCallKind::ADDMM;
 
   static const std::set<std::string> binary = {
-      "__lib_add",  "__lib_sub",  "__lib_mul",       "__lib_div",
-      "__lib_max",  "__lib_min",  "__lib_pow",       "__lib_atan2",
-      "__lib_fmod", "__lib_remainder",
-      "__lib_gt",   "__lib_ge",   "__lib_lt",        "__lib_le",
-      "__lib_eq",   "__lib_ne",
+      "__lib_add",  "__lib_sub",       "__lib_mul", "__lib_div",
+      "__lib_max",  "__lib_min",       "__lib_pow", "__lib_atan2",
+      "__lib_fmod", "__lib_remainder", "__lib_gt",  "__lib_ge",
+      "__lib_lt",   "__lib_le",        "__lib_eq",  "__lib_ne",
   };
   static const std::set<std::string> unary = {
-      "__lib_abs",     "__lib_neg",      "__lib_sign",
-      "__lib_sqrt",    "__lib_rsqrt",    "__lib_cbrt",
-      "__lib_reciprocal",
-      "__lib_exp",     "__lib_log",      "__lib_erf",      "__lib_erfc",
-      "__lib_ceil",    "__lib_floor",    "__lib_trunc",    "__lib_round",
-      "__lib_sin",     "__lib_cos",      "__lib_tan",
-      "__lib_asin",    "__lib_acos",     "__lib_atan",
-      "__lib_sinh",    "__lib_cosh",     "__lib_tanh",
-      "__lib_relu",    "__lib_gelu",     "__lib_selu",
-      "__lib_sigmoid", "__lib_silu",     "__lib_swish",
-      "__lib_softplus", "__lib_hard_swish", "__lib_mish",
+      "__lib_abs",        "__lib_neg",         "__lib_sign",
+      "__lib_sqrt",       "__lib_rsqrt",       "__lib_cbrt",
+      "__lib_reciprocal", "__lib_exp",         "__lib_log",
+      "__lib_erf",        "__lib_erfc",        "__lib_ceil",
+      "__lib_floor",      "__lib_trunc",       "__lib_round",
+      "__lib_sin",        "__lib_cos",         "__lib_tan",
+      "__lib_asin",       "__lib_acos",        "__lib_atan",
+      "__lib_sinh",       "__lib_cosh",        "__lib_tanh",
+      "__lib_relu",       "__lib_gelu",        "__lib_selu",
+      "__lib_sigmoid",    "__lib_silu",        "__lib_swish",
+      "__lib_softplus",   "__lib_hard_swish",  "__lib_mish",
       "__lib_quick_gelu", "__lib_log_sigmoid",
   };
   static const std::set<std::string> activation_param = {
       "__lib_leaky_relu",   "__lib_elu",          "__lib_celu",
       "__lib_hard_shrink",  "__lib_soft_shrink",  "__lib_logit",
-      "__lib_threshold",    "__lib_hard_sigmoid",
-      "__lib_hard_tanh",    "__lib_clipped_relu",
+      "__lib_threshold",    "__lib_hard_sigmoid", "__lib_hard_tanh",
+      "__lib_clipped_relu",
   };
   static const std::set<std::string> activation_bin = {
-      "__lib_glu", "__lib_swiglu", "__lib_geglu", "__lib_reglu",
+      "__lib_glu",
+      "__lib_swiglu",
+      "__lib_geglu",
+      "__lib_reglu",
   };
   static const std::set<std::string> reduce = {
       "__lib_reduce_sum",  "__lib_reduce_max",  "__lib_reduce_min",

@@ -906,9 +906,30 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
            (t_sto == Storage::GLOBAL || t_sto == Storage::DEFAULT));
     }
 
-    if (emit_error) {
+    bool smaller_source_dma = false;
+    if (supported_conditional_dma && sfty->e_type == stty->e_type &&
+        f_shape.SameRankAs(t_shape)) {
+      smaller_source_dma = true;
+      for (size_t i = 0; i < f_shape.Rank(); ++i) {
+        auto dim_le =
+            sbe::bop(OpCode::LE, f_shape.ValueAt(i), t_shape.ValueAt(i))
+                ->Normalize();
+        assert(IsValidValueItem(dim_le));
+        auto dim_le_bool = VIBool(dim_le);
+        if (!dim_le_bool || !dim_le_bool.value()) {
+          smaller_source_dma = false;
+          break;
+        }
+      }
+    }
+
+    if (emit_error && !smaller_source_dma) {
       Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                           ") and 'to'(" + PSTR(tty) + ").");
+    } else if (smaller_source_dma && !n.IsOOBZeroFill()) {
+      Warning(n.LOC(),
+              "DMA 'from' shape is smaller than 'to'; add '.zfill' to make "
+              "the tail-fill behavior explicit.");
     } else if (!n.IsOOBZeroFill() && !supported_conditional_dma) {
       Warning(n.LOC(),
               "Dimensions could be inconsistent between DMA" + msg + ").");

@@ -115,25 +115,21 @@ public:
         "__lib_addmm",
 
         // Binary elementwise: (dst, lhs, rhs, num)
-        "__lib_add", "__lib_sub", "__lib_mul", "__lib_div",
-        "__lib_max", "__lib_min", "__lib_pow", "__lib_atan2",
-        "__lib_fmod", "__lib_remainder",
-        "__lib_gt", "__lib_ge", "__lib_lt", "__lib_le",
+        "__lib_add", "__lib_sub", "__lib_mul", "__lib_div", "__lib_max",
+        "__lib_min", "__lib_pow", "__lib_atan2", "__lib_fmod",
+        "__lib_remainder", "__lib_gt", "__lib_ge", "__lib_lt", "__lib_le",
         "__lib_eq", "__lib_ne",
 
         // Unary elementwise: (dst, src, num)
-        "__lib_abs", "__lib_neg", "__lib_sign", "__lib_sqrt",
-        "__lib_rsqrt", "__lib_cbrt", "__lib_reciprocal",
-        "__lib_exp", "__lib_log", "__lib_erf", "__lib_erfc",
-        "__lib_ceil", "__lib_floor", "__lib_trunc", "__lib_round",
-        "__lib_sin", "__lib_cos", "__lib_tan",
-        "__lib_asin", "__lib_acos", "__lib_atan",
-        "__lib_sinh", "__lib_cosh", "__lib_tanh",
+        "__lib_abs", "__lib_neg", "__lib_sign", "__lib_sqrt", "__lib_rsqrt",
+        "__lib_cbrt", "__lib_reciprocal", "__lib_exp", "__lib_log", "__lib_erf",
+        "__lib_erfc", "__lib_ceil", "__lib_floor", "__lib_trunc", "__lib_round",
+        "__lib_sin", "__lib_cos", "__lib_tan", "__lib_asin", "__lib_acos",
+        "__lib_atan", "__lib_sinh", "__lib_cosh", "__lib_tanh",
 
         // Unary activations (no extra params): (dst, src, num)
-        "__lib_relu", "__lib_gelu", "__lib_selu",
-        "__lib_sigmoid", "__lib_silu", "__lib_swish",
-        "__lib_softplus", "__lib_hard_swish", "__lib_mish",
+        "__lib_relu", "__lib_gelu", "__lib_selu", "__lib_sigmoid", "__lib_silu",
+        "__lib_swish", "__lib_softplus", "__lib_hard_swish", "__lib_mish",
         "__lib_quick_gelu", "__lib_log_sigmoid",
 
         // Parameterised activations: (dst, src, num, ...)
@@ -167,26 +163,23 @@ public:
         "__lib_convert",
 
         // Pointwise:
-        "__lib_where",  // (dst, cond, x, y, num)
-        "__lib_lerp",   // (dst, start, end, weight, num)
+        "__lib_where", // (dst, cond, x, y, num)
+        "__lib_lerp",  // (dst, start, end, weight, num)
     };
     return supported.count(name) > 0;
   }
 
-  std::pair<int, int>
-  LibCallArgRange(const std::string& name) const override {
+  std::pair<int, int> LibCallArgRange(const std::string& name) const override {
     if (name == "__lib_gemm") return {5, 6};
     if (name == "__lib_addmm") return {9, 9};
 
     // Binary: (dst, lhs, rhs, num)
-    if (name == "__lib_add" || name == "__lib_sub" ||
-        name == "__lib_mul" || name == "__lib_div" ||
-        name == "__lib_max" || name == "__lib_min" ||
-        name == "__lib_pow" || name == "__lib_atan2" ||
-        name == "__lib_fmod" || name == "__lib_remainder" ||
-        name == "__lib_gt" || name == "__lib_ge" ||
-        name == "__lib_lt" || name == "__lib_le" ||
-        name == "__lib_eq" || name == "__lib_ne")
+    if (name == "__lib_add" || name == "__lib_sub" || name == "__lib_mul" ||
+        name == "__lib_div" || name == "__lib_max" || name == "__lib_min" ||
+        name == "__lib_pow" || name == "__lib_atan2" || name == "__lib_fmod" ||
+        name == "__lib_remainder" || name == "__lib_gt" || name == "__lib_ge" ||
+        name == "__lib_lt" || name == "__lib_le" || name == "__lib_eq" ||
+        name == "__lib_ne")
       return {4, 4};
 
     // Binary activations (GLU family): (dst, lhs, rhs, num)
@@ -195,25 +188,20 @@ public:
       return {4, 4};
 
     // Unary / unary-activation: (dst, src, num)
-    if (name == "__lib_abs" || name == "__lib_neg" ||
-        name == "__lib_sign" || name == "__lib_sqrt" ||
-        name == "__lib_rsqrt" || name == "__lib_cbrt" ||
-        name == "__lib_reciprocal" ||
-        name == "__lib_exp" || name == "__lib_log" ||
-        name == "__lib_erf" || name == "__lib_erfc" ||
+    if (name == "__lib_abs" || name == "__lib_neg" || name == "__lib_sign" ||
+        name == "__lib_sqrt" || name == "__lib_rsqrt" || name == "__lib_cbrt" ||
+        name == "__lib_reciprocal" || name == "__lib_exp" ||
+        name == "__lib_log" || name == "__lib_erf" || name == "__lib_erfc" ||
         name == "__lib_ceil" || name == "__lib_floor" ||
-        name == "__lib_trunc" || name == "__lib_round" ||
-        name == "__lib_sin" || name == "__lib_cos" ||
-        name == "__lib_tan" || name == "__lib_asin" ||
-        name == "__lib_acos" || name == "__lib_atan" ||
-        name == "__lib_sinh" || name == "__lib_cosh" ||
-        name == "__lib_tanh" ||
-        name == "__lib_relu" || name == "__lib_gelu" ||
-        name == "__lib_selu" || name == "__lib_sigmoid" ||
-        name == "__lib_silu" || name == "__lib_swish" ||
-        name == "__lib_softplus" || name == "__lib_hard_swish" ||
-        name == "__lib_mish" || name == "__lib_quick_gelu" ||
-        name == "__lib_log_sigmoid")
+        name == "__lib_trunc" || name == "__lib_round" || name == "__lib_sin" ||
+        name == "__lib_cos" || name == "__lib_tan" || name == "__lib_asin" ||
+        name == "__lib_acos" || name == "__lib_atan" || name == "__lib_sinh" ||
+        name == "__lib_cosh" || name == "__lib_tanh" || name == "__lib_relu" ||
+        name == "__lib_gelu" || name == "__lib_selu" ||
+        name == "__lib_sigmoid" || name == "__lib_silu" ||
+        name == "__lib_swish" || name == "__lib_softplus" ||
+        name == "__lib_hard_swish" || name == "__lib_mish" ||
+        name == "__lib_quick_gelu" || name == "__lib_log_sigmoid")
       return {3, 3};
 
     // Parameterised activations with 1 extra param: (dst, src, num, param)

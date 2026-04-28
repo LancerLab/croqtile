@@ -11,7 +11,7 @@
 #define MATMUL_MMA_K 16
 
 // Block tile defaults (must satisfy: (TILE_M/16)*(TILE_N/16) <= 8 warps)
-// NOTE: opt_copy uses 255 regs/thread on SM86, max 256 threads per block.
+// NOTE: naive_copy uses 255 regs/thread on SM86, max 256 threads per block.
 #define MATMUL_TILE_M 16
 #define MATMUL_TILE_N 16
 #define MATMUL_TILE_K 16

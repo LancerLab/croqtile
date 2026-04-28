@@ -1,0 +1,29 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -es -t cute %s -o /dev/null 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+// Case 1: single thread (thread count < 2) -- falls back to naive copy
+__co__ auto naive_single_thread(s32 [16, 32] input) {
+  s32 [input.span] output;
+  parallel by 1, by 1 {
+    s = dma.copy input => shared;
+    dma.copy s => output;
+  }
+  return output;
+}
+// CHECK: warning: dma.copy falls back to naive copy (participating thread count is unknown or invalid)
+// CHECK: warning: dma.copy falls back to naive copy (participating thread count is unknown or invalid)
+
+// Case 2: G2L (global to local) direction -- not eligible for tiled lowering
+__co__ auto naive_g2l(s32 [16, 32] input) {
+  s32 [input.span] output;
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      local_copy = dma.copy input => local;
+      dma.copy local_copy.data => output;
+    }
+  return output;
+}
+// CHECK: warning: dma.copy falls back to naive copy (only g2s and s2g are eligible for tiled lowering)
+// CHECK: warning: dma.copy falls back to naive copy (only g2s and s2g are eligible for tiled lowering)
