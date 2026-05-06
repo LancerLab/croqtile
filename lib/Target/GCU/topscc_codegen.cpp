@@ -203,20 +203,6 @@ const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
       return "tops::local_dte";
     else
       choreo_unreachable("unsupported storage for DMA context.");
-  } else if (CCtx().GetArch() == "gcu300") {
-    if (sto == Storage::GLOBAL || sto == Storage::SHARED)
-      return "tops::shared_dte";
-    else if (sto == Storage::LOCAL)
-      return "tops::private_dte";
-    else
-      choreo_unreachable("unsupported storage for DMA context.");
-  } else if (CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210") {
-    if (sto == Storage::GLOBAL || sto == Storage::SHARED)
-      return "__shared_dte__ tops_dte_ctx_t";
-    else if (sto == Storage::LOCAL)
-      return "tops_dte_ctx_t";
-    else
-      choreo_unreachable("unsupported storage for DMA context.");
   } else
     return "tops_dte_ctx_t";
 }

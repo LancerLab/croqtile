@@ -1,8 +1,5 @@
 #ifdef __TOPSCC__
   #include <krt/builtins.h>
-  #if __GCU_ARCH__ >= 300 && __GCU_ARCH__ < 500
-  #include <tops/topscc_types.h>
-  #endif
 
 namespace choreo {
 
@@ -39,7 +36,7 @@ struct choreo_event {
 };
 
   #else
-using choreo_dte_ctx_t = tops_dte_ctx_base_s;
+using choreo_dte_ctx_t = tops_dte_ctx_t;
 using choreo_event = tops::event;
   #endif
 
@@ -49,15 +46,6 @@ struct future {
   choreo_event e;
   void* d = nullptr;  // data: future's user must guarantee it is valid
   void* md = nullptr; // metadata: optional structured sparsity metadata
-  #if __GCU_ARCH__ < 400
-  enum DteKind {
-    DK_GENERIC = 0,
-    DK_SHARED = 1,
-    DK_PRIVATE = 2,
-    DK_PRIVATE_CDTE = 3,
-  };
-  DteKind kind = DK_GENERIC;
-  #endif
 
   // for runtime check purpose
   //
@@ -80,22 +68,7 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
         line(l), column(c) {}
-  #if __GCU_ARCH__ < 400
-    #if __GCU_ARCH__ == 300
-  __device__ future(tops::shared_dte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr, void* mdata = nullptr)
-      : ctx(&dte), e(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE),
-        name(n), line(l), column(c), kind(DK_SHARED) {}
-  __device__ future(tops::private_dte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr, void* mdata = nullptr)
-      : ctx(&dte), e(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE),
-        name(n), line(l), column(c), kind(DK_PRIVATE) {}
-  __device__ future(tops::private_cdte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr, void* mdata = nullptr)
-      : ctx(&dte), e(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE),
-        name(n), line(l), column(c), kind(DK_PRIVATE_CDTE) {}
-    #endif
-  #elif __GCU_ARCH__ == 400
+  #if __GCU_ARCH__ == 400
   __device__ future(tops::local_dte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
@@ -113,27 +86,7 @@ struct future {
   // context is retrieved to invoke data operations
   __device__ auto get_ctx() {
     if (s == ST_NONE) {
-  #if __GCU_ARCH__ < 400
-      switch (kind) {
-  #if __GCU_ARCH__ == 300
-      case DK_SHARED:
-        reinterpret_cast<tops::shared_dte*>(ctx)->init();
-        break;
-      case DK_PRIVATE:
-        reinterpret_cast<tops::private_dte*>(ctx)->init();
-        break;
-      case DK_PRIVATE_CDTE:
-        reinterpret_cast<tops::private_cdte*>(ctx)->init();
-        break;
-  #endif
-      case DK_GENERIC:
-        tops_init_dte(reinterpret_cast<tops_dte_ctx_t*>(ctx));
-        break;
-      default: break;
-      }
-  #else
       tops_init_dte(ctx);
-  #endif
       s = ST_INITED;
     }
     if (s != ST_INITED && s != ST_WAITED) {
@@ -259,29 +212,7 @@ struct future {
              line, column);
       __co_abort__();
     }
-    if (s >= ST_INITED) {
-  #if __GCU_ARCH__ < 400
-      switch (kind) {
-  #if __GCU_ARCH__ == 300
-      case DK_SHARED:
-        reinterpret_cast<tops::shared_dte*>(ctx)->destroy();
-        break;
-      case DK_PRIVATE:
-        reinterpret_cast<tops::private_dte*>(ctx)->destroy();
-        break;
-      case DK_PRIVATE_CDTE:
-        reinterpret_cast<tops::private_cdte*>(ctx)->destroy();
-        break;
-  #endif
-      case DK_GENERIC:
-        tops_destroy_dte(reinterpret_cast<tops_dte_ctx_t*>(ctx));
-        break;
-      default: break;
-      }
-  #else
-      tops_destroy_dte(ctx);
-  #endif
-    }
+    if (s >= ST_INITED) tops_destroy_dte(ctx);
   }
   __device__ future(const future& f) = delete;
   __device__ future(future&& f) = delete;
@@ -295,9 +226,6 @@ __device__ static inline void swap(future& a, future& b) {
   auto s = a.s;
   auto l = a.line;
   auto c = a.column;
-  #if __GCU_ARCH__ < 400
-  auto k = a.kind;
-  #endif
 
   a.ctx = b.ctx;
   a.e = b.e;
@@ -305,9 +233,6 @@ __device__ static inline void swap(future& a, future& b) {
   a.s = b.s;
   a.line = b.line;
   a.column = b.column;
-  #if __GCU_ARCH__ < 400
-  a.kind = b.kind;
-  #endif
 
   b.ctx = ctx;
   b.e = e;
@@ -315,9 +240,6 @@ __device__ static inline void swap(future& a, future& b) {
   b.s = s;
   b.line = l;
   b.column = c;
-  #if __GCU_ARCH__ < 400
-  b.kind = k;
-  #endif
 }
 
 } // end namespace choreo
