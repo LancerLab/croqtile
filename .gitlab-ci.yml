@@ -54,6 +54,10 @@ gcu2_test:
     - if: $NO_GCU == "true"
       when: never
     - if: >
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
+      when: never
+    - if: >
         $CI_COMMIT_BRANCH == "main" || 
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -86,6 +90,10 @@ gcu3_test:
   stage: check-in-tests
   rules:
     - if: $NO_GCU == "true"
+      when: never
+    - if: >
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" || 
@@ -125,6 +133,10 @@ gcu4_test:
     - if: $NO_GCU == "true"
       when: never
     - if: >
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
+      when: never
+    - if: >
         $CI_COMMIT_BRANCH == "main" || 
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -159,6 +171,10 @@ gcu3_debug_test:
     - if: $NO_GCU == "true"
       when: never
     - if: >
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
+      when: never
+    - if: >
         $CI_COMMIT_BRANCH == "main" || 
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -190,6 +206,10 @@ gcu3_docker_test:
   stage: pre-release-tests
   rules:
     - if: $NO_GCU == "true"
+      when: never
+    - if: >
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" || 
@@ -229,6 +249,10 @@ package_test:
   stage: pre-release-tests
   rules:
     - if: $NO_PACK == "true"
+      when: never
+    - if: >
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" || 
