@@ -350,6 +350,9 @@ private:
                                   bool) const;
   const std::string VectorTypeSTR(const ptr<Type>& vt) const;
   const std::string DMATypeSTR(Storage) const;
+  void EmitDTEDecl(std::ostringstream& os, const std::string& indent,
+                   Storage sto, const std::string& varname,
+                   bool with_scope = false) const;
 };
 
 } // namespace Topscc

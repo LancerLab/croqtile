@@ -15,10 +15,9 @@ __co__ f32 [2] func() {
 
 // CHECK: __global__ void __choreo_device_func(float * out) {
 // CHECK:   __local__ __valigned__ float buf[2];
-// CHECK:   tops_dte_ctx_t buf__init;
-// CHECK:   tops::dte_scope s_buf__init(buf__init);
+// CHECK:   tops::private_dte buf__init;
 // CHECK:   tops::memset(buf__init, tops::mdspan(tops::Private, (float*)buf, 2), -11.000000f);
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   tops::private_dte choreo_topscc_ctx0;
 // CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]+}}, {{[0-9]+}}, out);
 // CHECK:   tops::mdspan __mds0_buf(tops::Private, (float*)buf, 2);
 // CHECK:   tops::mdspan __mds1_out(tops::Global, (float*)out, 2);

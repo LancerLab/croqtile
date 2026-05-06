@@ -88,7 +88,7 @@ int main() { /// host program
 // CHECK-TOPSCC:     for (__iv_n_tile = 0; __iv_n_tile < 1; ++__iv_n_tile) {
 // CHECK-TOPSCC:       __shared__ int l2_out[262144];
 // CHECK-TOPSCC:       __shared__ int input_load__buf__[262144];
-// CHECK-TOPSCC:       tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK-TOPSCC:       tops::private_cdte choreo_topscc_ctx0;
 // CHECK-TOPSCC:       tops::mdspan __mds0_input(tops::Global, (int*)input + (__tops_bid_x() * 262144 + __iv_n_tile * 1024), 256, 1024);
 // CHECK-TOPSCC:       tops::mdspan __mds1_input_load__buf__(tops::Shared, (int*)input_load__buf__, 256, 1024);
 // CHECK-TOPSCC:       if (__CHOREO_BLOCK_SINGLE__) {
@@ -105,14 +105,14 @@ int main() { /// host program
 // CHECK-TOPSCC:         for (__iv_m_tile_s = 0; __iv_m_tile_s < 2; ++__iv_m_tile_s) {
 // CHECK-TOPSCC:           for (__iv_n_tile_s = 0; __iv_n_tile_s < 4; ++__iv_n_tile_s) {
 // CHECK-TOPSCC:             __local__ __valigned__ int input_load_s__buf__[32768];
-// CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK-TOPSCC:             tops::private_dte choreo_topscc_ctx1;
 // CHECK-TOPSCC:             tops::mdspan __mds2_input_load(tops::Shared, (int*)input_load.data(), 256, 1024);
 // CHECK-TOPSCC:             tops::mdspan __mds3_input_load_s__buf__(tops::Private, (int*)input_load_s__buf__, 128, 256);
 // CHECK-TOPSCC:             int __slice_offset0__input_load_2_input_load_s__buf__[] = {(int)((__iv_m_tile_s * 128)), (int)((__iv_n_tile_s * 256))};
 // CHECK-TOPSCC:             tops::event input_load_s__event__ = tops::slice_async(*input_load_s.get_ctx(), __mds3_input_load_s__buf__, __mds2_input_load, __slice_offset0__input_load_2_input_load_s__buf__);
 // CHECK-TOPSCC:             input_load_s.set_event(input_load_s__event__);
 // CHECK-TOPSCC:             __local__ __valigned__ int out_load_s__buf__[32768];
-// CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx2;
+// CHECK-TOPSCC:             tops::private_dte choreo_topscc_ctx2;
 // CHECK-TOPSCC:             tops::mdspan __mds4_l2_out(tops::Shared, (int*)l2_out, 256, 1024);
 // CHECK-TOPSCC:             tops::mdspan __mds5_out_load_s__buf__(tops::Private, (int*)out_load_s__buf__, 128, 256);
 // CHECK-TOPSCC:             int __slice_offset1__l2_out_2_out_load_s__buf__[] = {(int)((__iv_m_tile_s * 128)), (int)((__iv_n_tile_s * 256))};
@@ -121,7 +121,7 @@ int main() { /// host program
 // CHECK-TOPSCC:             input_load_s.wait();
 // CHECK-TOPSCC:             out_load_s.wait();
 // CHECK-TOPSCC:             relu_kernel((int*)input_load_s.data(), (int*)out_load_s.data());
-// CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx3;
+// CHECK-TOPSCC:             tops::private_dte choreo_topscc_ctx3;
 // CHECK-TOPSCC:             tops::mdspan __mds6_out_load_s(tops::Private, (int*)out_load_s.data(), 128, 256);
 // CHECK-TOPSCC:             tops::mdspan __mds7_l2_out(tops::Shared, (int*)l2_out, 256, 1024);
 // CHECK-TOPSCC:             int __deslice_offset0__l2_out_2_out_load_s[] = {(int)((__iv_m_tile_s * 128)), (int)((__iv_n_tile_s * 256))};
@@ -133,7 +133,7 @@ int main() { /// host program
 // CHECK-TOPSCC:         } // m_tile_s
 // CHECK-TOPSCC:         __iv_m_tile_s = 0;
 // CHECK-TOPSCC:       }
-// CHECK-TOPSCC:       tops_dte_ctx_t choreo_topscc_ctx4;
+// CHECK-TOPSCC:       tops::private_cdte choreo_topscc_ctx4;
 // CHECK-TOPSCC:       tops::mdspan __mds8_l2_out(tops::Shared, (int*)l2_out, 256, 1024);
 // CHECK-TOPSCC:       tops::mdspan __mds9_output(tops::Global, (int*)output + (__tops_bid_x() * 262144 + __iv_n_tile * 1024), 256, 1024);
 // CHECK-TOPSCC:       if (__CHOREO_BLOCK_SINGLE__) {

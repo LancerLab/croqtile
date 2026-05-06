@@ -17,12 +17,12 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   __shared__ float b[128];
 // CHECK:   __local__ __valigned__ float c[128];
 // CHECK:   __local__ __valigned__ int c_s32[128];
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   tops::private_cdte choreo_topscc_ctx0;
 // CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]+}}, {{[0-9]+}}, b);
 // CHECK:   tops::mdspan __mds0_a(tops::Global, (float*)a, 32, 4);
 // CHECK:   tops::mdspan __mds1_b(tops::Shared, (float*)b, 32, 4);
 // CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_b, __mds0_a);
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK:   tops::private_dte choreo_topscc_ctx1;
 // CHECK:   choreo::future f0(choreo_topscc_ctx1, "f0", {{[0-9]+}}, {{[0-9]+}}, c);
 // CHECK:   tops::mdspan __mds2_b(tops::Shared, (float*)b, 32, 4);
 // CHECK:   tops::mdspan __mds3_c(tops::Private, (float*)c, 32, 4);
@@ -30,7 +30,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   f0.set_event(f0__event__);
 // CHECK:   f0.wait();
 // CHECK:   __local__ __valigned__ float anon_0[128];
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;
+// CHECK:   tops::private_dte choreo_topscc_ctx2;
 // CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx2, "", {{[0-9]*}}, {{[0-9]*}}, anon_0);
 // CHECK:   tops::mdspan __mds4_c(tops::Private, (float*)c, 32, 4);
 // CHECK:   tops::mdspan __mds5_anon_0(tops::Private, (float*)anon_0, 4, 32);

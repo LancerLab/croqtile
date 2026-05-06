@@ -203,8 +203,37 @@ const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
       return "tops::local_dte";
     else
       choreo_unreachable("unsupported storage for DMA context.");
+  } else if (CCtx().GetArch() == "gcu300") {
+    if (sto == Storage::SHARED)
+      return "tops::private_cdte";
+    else
+      return "tops::private_dte";
   } else
     return "tops_dte_ctx_t";
+}
+
+void TopsccCodeGen::EmitDTEDecl(std::ostringstream& os,
+                                const std::string& indent, Storage sto,
+                                const std::string& varname,
+                                bool with_scope) const {
+  if (CCtx().GetArch() == "gcu300") {
+    auto gcu300_type = DMATypeSTR(sto);
+    os << "#if __GCU_ARCH__ == 300\n";
+    os << indent << gcu300_type << " " << varname << ";\n";
+    os << "#else\n";
+    os << indent << "tops_dte_ctx_t " << varname << ";\n";
+    if (with_scope)
+      os << indent << "tops::dte_scope s_" << varname << "(" << varname
+         << ");\n";
+    os << "#endif\n";
+  } else if (CCtx().GetArch() == "gcu400") {
+    os << indent << DMATypeSTR(sto) << " " << varname << ";\n";
+  } else {
+    os << indent << DMATypeSTR(sto) << " " << varname << ";\n";
+    if (with_scope)
+      os << indent << "tops::dte_scope s_" << varname << "(" << varname
+         << ");\n";
+  }
 }
 
 const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
@@ -966,9 +995,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
             "error: unexpected storage type in spm initialization.");
       ds << d_indent << BufferInitPred(sto) << "{\n";
       IncrDeviceIndent();
-      ds << d_indent << DMATypeSTR(sto) << " " << sym__init << ";\n";
-      ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
-         << ");\n";
+      EmitDTEDecl(ds, d_indent, sto, sym__init, true);
       ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
          << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
          << "*)" << sym << ", " << ShapeSTR(sty->GetShape()) << "), "
@@ -1362,7 +1389,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
     // claim the date transfer engine
     auto dte_ctx = GetDTEContextName();
-    ds << d_indent << DMATypeSTR(sto) << " " << dte_ctx << ";\n";
+    EmitDTEDecl(ds, d_indent, sto, dte_ctx, false);
     auto future_name = n.future;
     if (future_name.empty()) {
       static size_t future_count = 0;
@@ -3087,7 +3114,7 @@ option_detect() {
   os << R"( --tops-device-lib-path=${GCU_ACORE_LIB_PATH})";
   os << R"( --tops-device-lib=${GCU_ACORE_LIB})";
   os << R"( -I${GCU_ACORE_INCLUDE})";
-  os << R"( -D__ACORE_OP__ -fPIC)";
+  os << R"( -D__ACORE_OP__ -DTOPSCC_PRIVATE_DTE_AUTO_INIT -fPIC)";
   if (has_acore_call || has_lib_gemm_general || has_lib_fallback)
     os << " -I" << build_path;
 #endif

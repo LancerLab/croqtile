@@ -1,5 +1,8 @@
 #ifdef __TOPSCC__
   #include <krt/builtins.h>
+  #if __GCU_ARCH__ >= 300 && __GCU_ARCH__ < 500
+  #include <tops/topscc_types.h>
+  #endif
 
 namespace choreo {
 
@@ -35,6 +38,18 @@ struct choreo_event {
   choreo_dte_ctx_t* ctx;
 };
 
+  #elif __GCU_ARCH__ == 300
+// GCU300 uses tops::private_cdte (CDTE) for Global<->Shared DMA and
+// tops::private_dte (dynamic SDTE) for transfers involving Private memory.
+// TOPSCC_PRIVATE_DTE_AUTO_INIT enables RAII lifecycle management.
+using choreo_dte_ctx_t = tops_dte_ctx_base_s;
+using choreo_event = tops::event;
+__device__ __forceinline__ void tops_init_dte(tops_dte_ctx_base_s* ctx) {
+  // no-op: TOPSCC_PRIVATE_DTE_AUTO_INIT handles init in DTE constructor
+}
+__device__ __forceinline__ void tops_destroy_dte(tops_dte_ctx_base_s* ctx) {
+  // no-op: TOPSCC_PRIVATE_DTE_AUTO_INIT handles destroy in DTE destructor
+}
   #else
 using choreo_dte_ctx_t = tops_dte_ctx_t;
 using choreo_event = tops::event;
@@ -81,6 +96,15 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
         line(l), column(c) {}
+  #elif __GCU_ARCH__ == 300
+  __device__ future(tops::private_dte& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
+        md(mdata ? mdata : data), s(ST_NONE), name(n), line(l), column(c) {}
+  __device__ future(tops::private_cdte& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
+        md(mdata ? mdata : data), s(ST_NONE), name(n), line(l), column(c) {}
   #endif
 
   // context is retrieved to invoke data operations

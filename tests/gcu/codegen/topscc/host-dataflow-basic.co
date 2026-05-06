@@ -66,7 +66,7 @@ __co__ f32 [10240] identity(f32 [10240] input) { /// device program
 //       __shared__ float input_load__buf__[1024];
 //       tops::mdspan __mds0_input(tops::Global, (float*)input, 10240);
 //       tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
-//       tops_dte_ctx_t choreo_topscc_ctx0;
+//       tops::private_dte choreo_topscc_ctx0;
 //       choreo::future input_load(choreo_topscc_ctx0, "input_load", 34, 1, input_load__buf__);
 
 // TODO: remove input, replace input into f__buf__
@@ -76,7 +76,7 @@ __co__ f32 [10240] identity(f32 [10240] input) { /// device program
 // __global__ void __choreo_device_identity(float * input, float * output, float * f__buf__) {
 //   tops::mdspan __mds0_input(tops::Global, (float*)input, 10240);
 //   tops::mdspan __mds1_f__buf__(tops::Global, (float*)f__buf__, 10240);
-//   tops_dte_ctx_t choreo_topscc_ctx0;
+//   tops::private_dte choreo_topscc_ctx0;
 //   choreo::future f(choreo_topscc_ctx0, "f", 28, 1, f__buf__);
 //   tops::memcpy(*f.get_ctx(), __mds1_f__buf__, __mds0_input);
 //   // parallel-by: example.co:29.1-14
@@ -90,7 +90,7 @@ __co__ f32 [10240] identity(f32 [10240] input) { /// device program
 //       __shared__ float input_load__buf__[1024];
 //       tops::mdspan __mds2_f(tops::Global, (float*)f.data(), 10240);
 //       tops::mdspan __mds3_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
-//       tops_dte_ctx_t choreo_topscc_ctx1;
+//       tops::private_dte choreo_topscc_ctx1;
 //       choreo::future input_load(choreo_topscc_ctx1, "input_load", 33, 1, input_load__buf__);
 
 // Rationale:
@@ -144,7 +144,7 @@ int main() { /// host program
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
-// CHECK-TOPSCC:      tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK-TOPSCC:      tops::private_cdte choreo_topscc_ctx0;
 // CHECK-TOPSCC:      choreo::future input_load(choreo_topscc_ctx0, "input_load", 32, 26, input_load__buf__);
 // CHECK-TOPSCC:      tops::mdspan __mds0_f__buf__(tops::Global, (float*)f__buf__ + ((__tops_bid_x() * 5 + __iv_l_tile) * 1024), 1024);
 // CHECK-TOPSCC:      tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);

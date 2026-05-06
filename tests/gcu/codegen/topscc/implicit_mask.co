@@ -30,19 +30,16 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK:   __shared__ float s_A[30];
 // CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
 // CHECK:     tops::shared_dte s_A__init;
-// CHECK:     tops::dte_scope s_s_A__init(s_A__init);
 // CHECK:     tops::memset(s_A__init, tops::mdspan(tops::Shared, (float*)s_A, 5, 6), static_cast<float>(0));
 // CHECK:   } // single instance
 // CHECK:   __shared__ float s_B[30];
 // CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
 // CHECK:     tops::shared_dte s_B__init;
-// CHECK:     tops::dte_scope s_s_B__init(s_B__init);
 // CHECK:     tops::memset(s_B__init, tops::mdspan(tops::Shared, (float*)s_B, 5, 6), static_cast<float>(0));
 // CHECK:   } // single instance
 // CHECK:   __local__ __valigned__ float l_C[30];
 // CHECK:   if (__CHOREO_GROUP_SINGLE__(32)) {
 // CHECK:     tops::local_dte l_C__init;
-// CHECK:     tops::dte_scope s_l_C__init(l_C__init);
 // CHECK:     tops::memset(l_C__init, tops::mdspan(tops::Private, (float*)l_C, 5, 6), static_cast<float>(0));
 // CHECK:   } // single instance
 // CHECK: }

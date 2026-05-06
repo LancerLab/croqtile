@@ -9,13 +9,13 @@ __co__  void foo(f32 [24] a) {
 }
 // CHECK:   __shared__ float sa[3][8];
 // CHECK:   auto anon_0 = __tops_tid_x() - 3;
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   tops::private_cdte choreo_topscc_ctx0;
 // CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", 6, 5, sa[__tops_tid_x()]);
 // CHECK:   tops::mdspan __mds0_a(tops::Global, (float*)a + ((__tops_tid_x() - 3) * 8), 8);
 // CHECK:   tops::mdspan __mds1_sa(tops::Shared, (float*)sa[__tops_tid_x()], 8);
 // CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_sa, __mds0_a);
 // CHECK:   __local__ __valigned__ float anon_1[8];
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK:   tops::private_dte choreo_topscc_ctx1;
 // CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx1, "", 7, 5, anon_1);
 // CHECK:   tops::mdspan __mds2_sa(tops::Shared, (float*)sa[__tops_tid_x()], 8);
 // CHECK:   tops::mdspan __mds3_anon_1(tops::Private, (float*)anon_1, 8);
