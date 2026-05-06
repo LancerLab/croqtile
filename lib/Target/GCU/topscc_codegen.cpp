@@ -3130,8 +3130,8 @@ option_detect() {
   if (verbose)
     os << "\n    echo ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
   os << "\n    ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
-  if (verbose) os << "\n  echo sudo ${TOPSPROF} " << exe_file << "\n";
-  os << "\n  sudo ${TOPSPROF} " << exe_file << "\n";
+  if (verbose) os << "\n  echo sudo ${TOPSPROF} ${PROF_OPTIONS} " << exe_file << "\n";
+  os << "\n  sudo ${TOPSPROF} ${PROF_OPTIONS} " << exe_file << "\n";
   os << R"(elif [ "$1" == "--compile-module" ]; then)";
   if (verbose)
     os << "\n  echo ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
