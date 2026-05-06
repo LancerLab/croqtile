@@ -8,6 +8,7 @@
 
 #include "ast.hpp"
 #include "choreo_header.inc"
+#include "choreo_types_header.inc"
 #include "codegen.hpp"
 #include "io.hpp"
 #include "lower_libcall.hpp"
@@ -2969,6 +2970,8 @@ fi
   // place the choreo header
   os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
   os << __choreo_header_as_string << "\nEOF\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
+  os << __choreo_types_header_as_string << "\nEOF\n";
 
   // place the topscc header
   os << "cat <<'EOF' > " << build_path << "/private_target0_runtime.h\n";

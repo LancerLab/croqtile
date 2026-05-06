@@ -19,6 +19,7 @@ add_custom_target(
   gcu_deps ALL
   DEPENDS
   ${CMAKE_BINARY_DIR}/choreo_header.inc
+  ${CMAKE_BINARY_DIR}/choreo_types_header.inc
   ${CMAKE_BINARY_DIR}/topscc_header.inc
 )
 

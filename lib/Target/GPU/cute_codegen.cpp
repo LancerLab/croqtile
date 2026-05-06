@@ -13,6 +13,8 @@
 #include "choreo_device_api_header.inc"
 #include "choreo_header.inc"
 #include "choreo_precompiled_cu.inc"
+#include "choreo_types_cute_header.inc"
+#include "choreo_types_header.inc"
 #include "codegen.hpp"
 #include "dma_plan.hpp"
 #include "operator_info.hpp"
@@ -7205,6 +7207,8 @@ uint32_t CuteCodeGen::ContentFingerprint() {
   };
   feed(__choreo_precompiled_cu_as_string);
   feed(__choreo_header_as_string);
+  feed(__choreo_types_header_as_string);
+  feed(__choreo_types_cute_header_as_string);
   feed(__choreo_cute_header_as_string);
   return h;
 }
@@ -7315,6 +7319,10 @@ NVCC_LIB=${CUDA_LIB}/lib
   }
   os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
   os << __choreo_header_as_string << "\nEOF\n\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
+  os << __choreo_types_header_as_string << "\nEOF\n\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo_types_cute.h\n";
+  os << __choreo_types_cute_header_as_string << "\nEOF\n\n";
   os << "cat <<'EOF' > " << build_path << "/choreo_cute.h\n";
   os << __choreo_cute_header_as_string << "\nEOF\n\n";
 
