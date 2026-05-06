@@ -1,5 +1,6 @@
 #include "topscc_preprocess.hpp"
 #include "choreo_header.inc"
+#include "choreo_types_header.inc"
 #include "context.hpp"
 #include <filesystem>
 
@@ -261,6 +262,8 @@ TOPSCC_LIB=${TOPSCC_INSTALL}/lib
   os << "mkdir -p " << build_path << "\n\n";
   os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
   os << __choreo_header_as_string << "\nEOF\n\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
+  os << __choreo_types_header_as_string << "\nEOF\n\n";
   os << "cat <<'EOF' > " << cc_file << "\n";
   for (auto& line : include_lines) { os << line << "\n"; }
   if (!cok_codes.empty()) {

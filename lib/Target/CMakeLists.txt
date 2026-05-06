@@ -1,4 +1,6 @@
 file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo.h CHOREO_HEADER_CONTENT)
+file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo_types.h CHOREO_TYPES_HEADER_CONTENT)
+file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo_types_cute.h CHOREO_TYPES_CUTE_HEADER_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/runtime/choreo_cute.h CHOREO_CUTE_HEADER_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/runtime/precompiled/choreo_device_api.h CHOREO_DEVICE_API_HEADER_CONTENT)
 file(READ ${CMAKE_SOURCE_DIR}/runtime/precompiled/choreo_precompiled.cu CHOREO_PRECOMPILED_CU_CONTENT)
@@ -6,6 +8,18 @@ file(READ ${CMAKE_SOURCE_DIR}/runtime/precompiled/choreo_precompiled.cu CHOREO_P
 configure_file(
   ${CMAKE_SOURCE_DIR}/scripts/choreo_header_template.in
   ${CMAKE_BINARY_DIR}/choreo_header.inc
+  @ONLY
+)
+
+configure_file(
+  ${CMAKE_SOURCE_DIR}/scripts/choreo_types_header_template.in
+  ${CMAKE_BINARY_DIR}/choreo_types_header.inc
+  @ONLY
+)
+
+configure_file(
+  ${CMAKE_SOURCE_DIR}/scripts/choreo_types_cute_header_template.in
+  ${CMAKE_BINARY_DIR}/choreo_types_cute_header.inc
   @ONLY
 )
 
