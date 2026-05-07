@@ -3771,7 +3771,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         emit_tiled_copy(full_p, f_sub, t_sub, dma_plan->atom, "  ", false);
       }
       ds << d_indent << "} else {\n";
-      // Partial tile -> slow path (element-level, Pred=true with runtime bound).
+      // Partial tile -> slow path (element-level, Pred=true with runtime
+      // bound).
       {
         auto ind = "  " + d_indent;
         bool need_zfill = dma_plan->is_zfill;
@@ -3882,8 +3883,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       auto in_thr_block = tma_desc.GetInThreadsBlock();
       if (in_thr_block) {
         tma_sync_level = tma_desc.GetPBLevel();
-      } else if (InSpecWarp() &&
-                 dma_plan->direction == DMADirection::S2G) {
+      } else if (InSpecWarp() && dma_plan->direction == DMADirection::S2G) {
         // Inside a warp-spec inthreads block, __syncthreads would deadlock;
         // use GROUPx4-level sync for the S2G store guard.
         tma_sync_level = ParallelLevel::GROUPx4;
@@ -4132,9 +4132,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           int64_t first_wg = 0;
           for (size_t i = 0; i < mask.size(); i += 128)
             for (size_t j = i; j < std::min(i + 128, mask.size()); ++j)
-              if (mask[j]) { first_wg = i / 128; goto found_s2g_wg; }
-          found_s2g_wg:
-          ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__ && __choreo_vg4id_x == "
+              if (mask[j]) {
+                first_wg = i / 128;
+                goto found_s2g_wg;
+              }
+        found_s2g_wg:
+          ds << d_indent
+             << "if (__CHOREO_GROUPX4_SINGLE__ && __choreo_vg4id_x == "
              << first_wg << ") {\n";
         } else {
           ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";

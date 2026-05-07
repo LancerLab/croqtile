@@ -643,15 +643,13 @@ public:
     auto bvs = pb.BoundValues();
     if (!bvs.empty()) {
       total = sbe::nu(1);
-      for (auto bv : bvs)
-        total = (total * bv)->Normalize();
+      for (auto bv : bvs) total = (total * bv)->Normalize();
     } else {
       total = pb.BoundValue();
     }
     if (!IsValidValueItem(total)) return; // bound not yet inferred
 
-    auto pred =
-        sbe::cmp("<=", total, sbe::nu((int64_t)max_count))->Normalize();
+    auto pred = sbe::cmp("<=", total, sbe::nu((int64_t)max_count))->Normalize();
     // Skip if trivially safe -- avoids cluttering --show-assess report.
     if (auto bv = VIBool(pred); bv && bv.value()) return;
     auto msg = "On " + cur_arch + ", the total " + STR(lvl) +
