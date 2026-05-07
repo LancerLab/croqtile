@@ -319,17 +319,29 @@ inline std::ostream& operator<<(std::ostream& os, const bf16& v) {
 }
 
 #else // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
-  #ifdef __CHOREO_TARGET_CUTE__
-    #ifdef __USE_CUTE_TYPE__
+
+  #ifndef __CHOREO_BF16_DEFINED__
+    #ifdef __CHOREO_TARGET_CUTE__
+      #ifdef __USE_CUTE_TYPE__
 using __bf16 = cute::bfloat16_t;
-    #else
+      #else
 using __bf16 = __nv_bfloat16;
+      #endif
     #endif
-  #endif
 using bf16 = __bf16;
 using bfp16 = __bf16;
 using bfloat16 = __bf16;
+  #endif // __CHOREO_BF16_DEFINED__
 
+  #if !defined(__CHOREO_PRIVATE_TGT0__) && !defined(__clang__) &&              \
+      !defined(__GNUC__) && !defined(__CUDACC__)
+    #error                                                                     \
+        "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
+  #endif
+
+#endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+
+#ifndef __CHOREO_BF16_CONVERT_DEFINED__
 __co_any__ inline static bf16 f32_to_bf16(f32 value) {
   #ifdef __USE_CUDA_TYPE__
   return __float2bfloat16(value);
@@ -339,25 +351,13 @@ __co_any__ inline static bf16 f32_to_bf16(f32 value) {
 }
 
 __co_any__ inline static f32 bf16_to_f32(bf16 value) {
-  #ifdef __CHOREO_TARGET_CUTE__
-    #ifdef __USE_CUDA_TYPE__
+  #ifdef __USE_CUDA_TYPE__
   return __bfloat162float(value);
-    #else
-  return f32(value);
-    #endif
   #else
-  return 1.0f;
+  return static_cast<f32>(value);
   #endif
 }
-
-  // Check for __bf16 support
-  #if !defined(__CHOREO_PRIVATE_TGT0__) && !defined(__clang__) &&              \
-      !defined(__GNUC__) && !defined(__CUDACC__)
-    #error                                                                     \
-        "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
-  #endif // defined...
-
-#endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+#endif // __CHOREO_BF16_CONVERT_DEFINED__
 
 #ifndef BF16_SUPPORTED
 //#error \
@@ -478,25 +478,9 @@ __co_any__ inline float to_f32(T value) {
   } else if constexpr (std::is_same<T, f32>::value) {
     return value;
   } else if constexpr (std::is_same<T, f16>::value) {
-#ifndef __CHOREO_TARGET_NATIVE_F16_SUPPORT__
-    return __f16_to_f32<float>(value);
-#else
-  #ifdef __USE_CUDA_TYPE__
-    return __half2float(value);
-  #else
-    return static_cast<float>(value);
-  #endif
-#endif
+    return f16_to_f32(value);
   } else if constexpr (std::is_same<T, bf16>::value) {
-#ifndef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
-    return bf16::halfBitsToFloat(value);
-#else
-  #ifdef __USE_CUDA_TYPE__
-    return __bfloat162float(value);
-  #else
-    return static_cast<float>(value);
-  #endif
-#endif
+    return bf16_to_f32(value);
   } else if constexpr (
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
       std::is_same<T, f8_e4m3>::value || std::is_same<T, f8_e5m2>::value ||
@@ -524,7 +508,6 @@ __co_any__ inline float to_f32(T value) {
     return static_cast<float>(static_cast<int>(value));
 #endif
   } else {
-    // todo: support more types
     static_assert(sizeof(T) == 0, "Unsupported type for to_f32 conversion.");
   }
 }
@@ -533,22 +516,14 @@ namespace utils {
 template <typename U>
 __co_any__ inline U from_f32(float v) {
   if constexpr (std::is_same<U, f16>::value) {
-    return f16(v);
+    return f32_to_f16(v);
   } else if constexpr (std::is_same<U, bf16>::value) {
-    return bf16(v);
+    return f32_to_bf16(v);
 #ifdef __CHOREO_TARGET_NATIVE_FP8_SUPPORT__
   } else if constexpr (std::is_same<U, f8_e4m3>::value) {
-  #ifdef __USE_CUDA_TYPE__
     return f8_e4m3(v);
-  #else
-    return f8_e4m3(v);
-  #endif
   } else if constexpr (std::is_same<U, f8_e5m2>::value) {
-  #ifdef __USE_CUDA_TYPE__
     return f8_e5m2(v);
-  #else
-    return f8_e5m2(v);
-  #endif
 #endif
   } else {
     return static_cast<U>(v);

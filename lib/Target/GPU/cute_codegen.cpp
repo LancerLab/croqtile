@@ -7673,8 +7673,18 @@ const std::string CuteCodeGen::ExprCastSTR(
     break;
   }
   case BT::F32: {
-    res << (is_host ? "choreo::to_f32(" : "static_cast<float>(") << value
-        << ")";
+    if (IsIntegralType(f))
+      res << "static_cast<float>(" << value << ")";
+    else {
+      if (f == BT::F16)
+        res << "choreo::f16_to_f32(" << value << ")";
+      else if (f == BT::BF16)
+        res << "choreo::bf16_to_f32(" << value << ")";
+      else if (f == BT::F64)
+        res << "static_cast<float>(" << value << ")";
+      else
+        res << "static_cast<float>(" << value << ")";
+    }
     break;
   }
   case BT::F16:
@@ -7682,7 +7692,8 @@ const std::string CuteCodeGen::ExprCastSTR(
         << ")";
     break;
   case BT::BF16:
-    res << "choreo::bf16(" << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
+    res << "choreo::f32_to_bf16(" << ExprCastSTR(n, val, BT::F32, f, is_host)
+        << ")";
     break;
   case BT::F8_E4M3:
   case BT::F8_E5M2:

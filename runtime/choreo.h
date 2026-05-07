@@ -25,7 +25,7 @@
 #ifdef __CHOREO_PRIVATE_TGT0__
 
   #define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
-  // #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+  #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
   #define __co_device__ __device__
   #define __co_host__ __host__
   #define __co_any__ __device__ __host__
@@ -361,6 +361,12 @@ public:
 } // end anonymous namespace
 
 } // namespace choreo
+
+// Target-specific runtime (includes type overrides that must precede
+// choreo_types.h)
+#if __has_include("private_target0_runtime.h")
+  #include "private_target0_runtime.h"
+#endif
 
 // Scalar type definitions, fallback classes, and conversion utilities.
 #include "choreo_types.h"
@@ -2041,10 +2047,6 @@ using choreo::f4_e2m1;
 // target specific libraries (non-shared)
 #if __has_include("choreo_cute.h")
   #include "choreo_cute.h"
-#endif
-
-#if __has_include("private_target0_runtime.h")
-  #include "private_target0_runtime.h"
 #endif
 
 namespace choreo {
