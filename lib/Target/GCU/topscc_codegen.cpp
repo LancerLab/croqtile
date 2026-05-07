@@ -3402,7 +3402,7 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
       if (f == BT::F16)
         res << "f16_to_f32(" << value << ")";
       else if (f == BT::BF16)
-        res << "(float)(" << value << ")";
+        res << "bf16_to_f32(" << value << ")";
       else if (f == BT::F64)
         res << "static_cast<float>(" << value << ")";
       else
@@ -3415,7 +3415,7 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
     res << "f32_to_f16(" << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
     break;
   case BT::BF16:
-    res << "choreo::bf16(" << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
+    res << "f32_to_bf16(" << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
     break;
   default:
     choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");

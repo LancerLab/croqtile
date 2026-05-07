@@ -1,8 +1,79 @@
 #ifdef __TOPSCC__
   #include <krt/builtins.h>
   #if __GCU_ARCH__ >= 300 && __GCU_ARCH__ < 500
-  #include <tops/topscc_types.h>
+    #include <tops/topscc_types.h>
   #endif
+
+  #ifdef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+    #include <tops/tops_bf16.h>
+
+namespace choreo {
+
+class bf16 {
+  tops::__ef_bfloat16 val_;
+
+public:
+  __co_any__ bf16() = default;
+  __co_any__ bf16(float f) : val_(f) {}
+  __co_any__ bf16(double f) : val_(static_cast<float>(f)) {}
+  __co_any__ bf16& operator=(float f) {
+    val_ = f;
+    return *this;
+  }
+  __co_any__ bf16& operator=(double f) {
+    val_ = static_cast<float>(f);
+    return *this;
+  }
+  __co_any__ operator float() const { return tops::__bfloat162float(val_); }
+
+  __co_any__ bool operator==(double value) {
+    auto vf = static_cast<float>(value);
+    if (std::isnan(vf)) return std::isnan(float(*this));
+    return float(*this) == vf;
+  }
+  template <typename T>
+  __co_any__ bool operator==(T value) {
+    if constexpr (std::is_same<T, bf16>::value) {
+      auto vf = float(value);
+      if (std::isnan(vf)) return std::isnan(float(*this));
+      return float(*this) == vf;
+    } else {
+      auto vf = static_cast<float>(value);
+      if (std::isnan(vf)) return std::isnan(float(*this));
+      return float(*this) == vf;
+    }
+  }
+  template <typename T>
+  __co_any__ bool operator>(T value) {
+    if constexpr (std::is_same<T, bf16>::value)
+      return float(*this) > float(value);
+    else
+      return float(*this) > static_cast<float>(value);
+  }
+  template <typename T>
+  __co_any__ bool operator<(T value) {
+    if constexpr (std::is_same<T, bf16>::value)
+      return float(*this) < float(value);
+    else
+      return float(*this) < static_cast<float>(value);
+  }
+};
+
+using bfloat16 = bf16;
+using bfp16 = bf16;
+
+__co_any__ inline static bf16 f32_to_bf16(float value) { return bf16(value); }
+
+__co_any__ inline static float bf16_to_f32(bf16 value) {
+  return static_cast<float>(value);
+}
+
+    #define __CHOREO_BF16_DEFINED__
+    #define __CHOREO_BF16_CONVERT_DEFINED__
+
+} // namespace choreo
+
+  #endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 
 namespace choreo {
 
@@ -317,4 +388,4 @@ __device__ static inline void swap(future& a, future& b) {
 
 } // end namespace choreo
 
-#endif
+#endif // __TOPSCC__

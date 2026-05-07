@@ -23,10 +23,10 @@ __co__ auto foo(s8[4,8] i, float x, int y) {
 
 // CHECK:    tops::memset(smem0__init, tops::mdspan(tops::Shared, (char*)smem0, 4, 8), static_cast<char>((y + 5)));
 // CHECK:    tops::memset(smem1__init, tops::mdspan(tops::Shared, (choreo::half*)smem1, 4, 8), f32_to_f16(x + 1.300000f));
-// CHECK:    tops::memset(smem2__init, tops::mdspan(tops::Shared, (choreo::bfloat16*)smem2, 4, 8), choreo::bf16(x * 2.000000f));
+// CHECK:    tops::memset(smem2__init, tops::mdspan(tops::Shared, (choreo::bfloat16*)smem2, 4, 8), f32_to_bf16(x * 2.000000f));
 // CHECK:        tops::memset(l0__init, tops::mdspan(tops::Private, (choreo::bfloat16*)l0, 4, 8), *((choreo::bfloat16*)smem2 + (__iv_z__elem__0 * 8) + __iv_z__elem__0));
 
-// CHECK:  std::fill(o.data(), o.data()+o.element_count(), choreo::bf16(static_cast<float>(11)));
+// CHECK:  std::fill(o.data(), o.data()+o.element_count(), f32_to_bf16(static_cast<float>(11)));
 
 
 int main() {

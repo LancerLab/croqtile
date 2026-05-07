@@ -26,7 +26,7 @@ __co__ auto foo(bf16[2, 3] i) {
 // CHECK:   unsigned int __pad_low_i1[] = {0, 0};
 // CHECK:   unsigned int __pad_high_i1[] = {0, 2};
 // CHECK:   unsigned int __pad_mid_i1[] = {0, 0};
-// CHECK:   tops::pad(*__choreo_anon_fut__1.get_ctx(), __mds3_res, __mds2_i, __pad_low_i1, __pad_high_i1, __pad_mid_i1, choreo::bf16(1.200000f));
+// CHECK:   tops::pad(*__choreo_anon_fut__1.get_ctx(), __mds3_res, __mds2_i, __pad_low_i1, __pad_high_i1, __pad_mid_i1, f32_to_bf16(1.200000f));
 // CHECK: }
 
 __co__ auto foo1(s32 [N, M] a) {

@@ -21,6 +21,8 @@ void TopsccCodeGen::EmitLibCall(AST::Call& n, const std::string& func_name,
     else
       bt = ty->GetBaseType();
     if (bt == BaseType::UNKNOWN) return "";
+    if (bt == BaseType::BF16) return "(__bf16*)";
+    if (bt == BaseType::F16) return "(__fp16*)";
     return std::string("(") + NameBaseType(bt, false) + "*)";
   };
 

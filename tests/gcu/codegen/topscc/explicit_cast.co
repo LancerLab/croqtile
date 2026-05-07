@@ -15,8 +15,8 @@ __co__ auto test_topscc_cast(int i, float f) {
 
 // CHECK: float x = static_cast<float>(i);
 // CHECK: int y = static_cast<int>(f);
-// CHECK: choreo::bf16 z = choreo::bf16(f);
-// CHECK: float w = (float)(z);
+// CHECK: choreo::bf16 z = f32_to_bf16(f);
+// CHECK: float w = bf16_to_f32(z);
 // CHECK: choreo::f16 h = f32_to_f16(f);
 // CHECK: unsigned char b = static_cast<unsigned char>(i);
 // CHECK: short s = static_cast<short>(i);
