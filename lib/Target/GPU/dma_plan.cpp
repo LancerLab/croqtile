@@ -186,9 +186,8 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
                      << "  from: " << PSTR(n.GetFrom()) << "\n"
                      << "  to: " << PSTR(n.GetTo()) << "\n"
                      << "  dir: " << STR(dec.direction) << "\n";);
-    Warning(n.LOC(),
-            std::string("dma") + n.operation +
-                " falls back to naive copy (" + reason + ").");
+    Warning(n.LOC(), std::string("dma") + n.operation +
+                         " falls back to naive copy (" + reason + ").");
   };
 
   // basic attributes
@@ -261,11 +260,13 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
     Shape tma_effective_from = f_ca_shape;
     if (n.operation == ".transp") {
       auto tc = cast<TransposeConfig>(n.GetConfig())->dim_values;
-      tma_effective_from = Shape(PermuteValueList(ShapeToValueList(f_ca_shape), tc));
+      tma_effective_from =
+          Shape(PermuteValueList(ShapeToValueList(f_ca_shape), tc));
     }
     const bool tma_is_pad = (n.operation == ".pad");
     const bool tma_mismatch =
-        tma_is_pad ? false : StaticShapeMismatch(tma_effective_from, t_ca_shape);
+        tma_is_pad ? false
+                   : StaticShapeMismatch(tma_effective_from, t_ca_shape);
     const bool tma_explicit_zfill = n.IsOOBZeroFill();
 
     if (tma_mismatch && !tma_explicit_zfill) {
