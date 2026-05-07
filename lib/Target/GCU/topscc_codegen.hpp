@@ -134,6 +134,8 @@ private:
   size_t host_param_count = 0;     // host parameter count
   ptr<FunctionType> fty = nullptr; // current function type
   bool void_return = false;
+  // TODO: for now, only support one stream!
+  std::string stream_name;
 
   SDimsInfo symbolic_dimensions;
 
@@ -223,6 +225,7 @@ private:
     void_return = false;
     emit_call = true;
     parallel_idx = -1;
+    stream_name = "";
     pre_site_assertions.clear();
     post_site_assertions.clear();
     ResetLineDirectiveState();

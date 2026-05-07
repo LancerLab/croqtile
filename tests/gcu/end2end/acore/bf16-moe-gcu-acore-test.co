@@ -1,0 +1,383 @@
+// REQUIRES: TARGET-GCU300 LIBCALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Binary __lib_mul end-to-end test on GCU3.
+
+#include <common/acore_op.h>
+// #include "utils/utils.h"
+#include "choreo.h"
+#include <tops.h>
+#include <tops/tops_runtime.h>
+
+template <int M, typename out_t, typename lhs_t, typename rhs_t,
+          typename bias_t>
+__device__ void _matmul(out_t* out_ptr, lhs_t* lhs_ptr, rhs_t* rhs_ptr,
+                        bias_t* bias_ptr, int* workspace, int K, int N,
+                        int acc_flag, int store_flag, int bias_flag,
+                        int vab_off, int launch_times = 0) {
+  acore::matmul<M, acore::MK_NK>(out_ptr, lhs_ptr, rhs_ptr, bias_ptr, workspace,
+                                 K, N, acc_flag, store_flag, bias_flag, vab_off,
+                                 launch_times);
+}
+
+#define MAX_M_DIM 1024 * 8
+#define MAX_IDX_DIM 1024 * 4
+
+#define BLK_NUM 2
+#define THR_NUM 12
+
+
+#define MAX_TOP_K 128
+#define K_TILE 128
+#define N_TILE 128
+#define MAX_K 4096
+#define MAX_N 4096
+#define TEMPLATE_ALIGN_UP(a, b) (((a + b - 1) / b) * b)
+#define L1_ALIGN_SIZE (128)
+
+#if 1
+#define htype croq::bf16
+#define dtype bf16
+#else
+#define htype croq::f16
+#define dtype f16
+#endif
+
+// clang-format off
+
+__co__ void indexed_moe_kernel(global dtype [batch, M, K]       input,
+                               global dtype [num_experts, N, K] w,
+                               global dtype [batch, topk, N]    out,
+                               global u32  [batch, topk]       indices,
+                               stream _s
+                            ) {
+  bool enable_quant = false;
+  int vab_offset = (enable_quant) ? 512 : 0;
+
+  println("batch: ", batch);
+  println("M: ", M);
+  println("K: ", K);
+  println("N: ", N);
+  println("num_experts: ", num_experts);
+  println("topk: ", topk);
+
+  parallel.async bid by BLK_NUM : block
+    parallel tid by THR_NUM : thread {
+      local s32 [2048/4] local_workspace;
+      local dtype [K]    l1_in;
+      local u32 [topk] l1_idx;
+      local dtype [N]    l1_out{1.0f};
+      local dtype [N_TILE, K] l1_w;
+
+      s32 launch_times = 0;
+      
+      STEP = batch / BLK_NUM / THR_NUM + 1;
+      foreach {step} in [STEP] {
+        idx = bid # tid # step;
+        if (idx >= batch) break;
+        dma.copy indices.subspan(1, _).at(idx, 0).span_as(indices.span(1)) => l1_idx;
+
+        s32 i = 0;
+        // s32 i = bid;
+        while(i < topk) {
+          s32 expert_id = l1_idx.at(i);
+          if ((M==1 && i==0) || M>1) {
+            dma.copy input.subspan(1, 1, _).at(idx, ((M == 1) ? 0 : i), 0) => l1_in.span_as(1, 1, |l1_in.span|);
+          }
+          foreach {n_idx} in [N/N_TILE] {
+            if (expert_id < num_experts) {
+              dma.copy w.subspan(1, N_TILE, _).at(expert_id, n_idx, 0)
+                        .span_as(N_TILE, w.span(2)) => l1_w;
+              call _matmul<1>(l1_out.chunkat(n_idx), l1_in, l1_w, l1_w, 
+                             local_workspace,
+                             K, N_TILE, 0, 1, false,
+                             vab_offset, launch_times);
+              launch_times += 1;
+            }
+          } // foreach n_idx
+          // __cpp__("__dtu_movs_barrier_all();\n");
+          // __cpp__("#if __GCU_ARCH__ == 400\n");
+          // __cpp__("  tcle::fence<0xd2>();\n");
+          // __cpp__("#elif __GCU_ARCH__ == 300\n");
+          // __cpp__("  tcle::fence<0x3>();\n");
+          // __cpp__("#endif\n");
+          dma.copy l1_out => out.subspan(1, 1, _).at(idx, i, 0)
+                                .span_as(out.span(2));
+
+          i += 1;
+          // i += #bid;
+        } // while
+      } // foreach step
+    } // parallel : thread
+}
+
+// clang-format on
+
+#define KERNEL_TEST
+
+#ifdef KERNEL_TEST
+  #include <chrono>
+  #include <cmath>
+  #include <cstdint>
+  #include <cstdlib>
+  #include <cstring>
+  #include <iostream>
+  #include <type_traits>
+
+template <typename T>
+inline float load_as_float(const T* ptr, size_t idx);
+
+template <>
+inline float load_as_float<htype>(const htype* ptr, size_t idx) {
+  return (float)(ptr[idx]);
+}
+
+template <typename T>
+inline void store_from_float(T* ptr, size_t idx, float val);
+
+template <>
+inline void store_from_float<htype>(htype* ptr, size_t idx, float val) {
+  ptr[idx] = (htype)(val);
+}
+
+// Core MoE compute
+template <typename T>
+void moe_matmul(const T* input,           // [batch, M, k]
+                const T* weight,          // [num_experts, n, k]
+                const u_int32_t* indices, // [batch, topk]
+                T* output,                // [batch, topk, n]
+                int batch, int M, int topk, int k, int n, int num_experts) {
+  for (int b = 0; b < batch; ++b) {
+    for (int t = 0; t < topk; ++t) {
+      int expert_id = (int)indices[b * topk + t];
+      const T* expert_w = weight + expert_id * n * k;
+
+      int m = (M == 1 ? 0 : t);
+      const T* input_vec = input + (b * M + m) * k;
+
+      for (int ni = 0; ni < n; ++ni) {
+        float acc = 0.0f;
+        const T* wrow = expert_w + ni * k;
+        for (int ki = 0; ki < k; ++ki) {
+          float in_val = (float)input_vec[ki];
+          float w_val = (float)wrow[ki];
+          acc += in_val * w_val;
+        }
+        output[(b * topk + t) * n + ni] = (T)acc;
+        // store_from_float(output, (b * topk + t) * n + ni, acc);
+      }
+    }
+  }
+}
+
+htype get_rand_value(int num_experts) {
+  int r = rand() % num_experts;
+  if (r < num_experts / 5) {
+    return 0.25;
+  }
+
+  else if (r < num_experts / 4) {
+    return 0.78;
+  } else if (r < num_experts / 3) {
+    return 0.95;
+  } else if (r < num_experts / 2) {
+    return 0.16;
+  }
+
+  else {
+    return 0.3;
+  }
+}
+// example:
+// input [3355, 1, 2048]
+// weight [128, 768, 2048]
+// indices [3355, 8]
+// output [3355, 8, 768]
+int main(int argc, char* argv[]) {
+  int batch = 32; // default value
+
+  topsError_t err = topsSuccess;
+  int M = 8;
+  int K = 2048;
+  int N = 384;
+  int topk = 8;
+  int num_experts = 128;
+
+  for (int i = 1; i < argc; i++) {
+    std::string arg = argv[i];
+    if (arg == "--batch" && i + 1 < argc) {
+      batch = std::stoi(argv[i + 1]); // convert string to int
+      i++;                            // skip the value
+    }
+
+    if (arg == "--m" && i + 1 < argc) {
+      M = std::stoi(argv[i + 1]); // convert string to int
+      i++;                        // skip the value
+    }
+
+    if (arg == "--k" && i + 1 < argc) {
+      K = std::stoi(argv[i + 1]); // convert string to int
+      i++;                        // skip the value
+    }
+
+    if (arg == "--n" && i + 1 < argc) {
+      N = std::stoi(argv[i + 1]); // convert string to int
+      i++;                        // skip the value
+    }
+  }
+  int in_euem = batch * M * K;
+  int out_euem = batch * topk * N;
+  int weight_euem = num_experts * K * N;
+  int indices_euem = batch * topk;
+
+  int in_size = in_euem * sizeof(htype);
+  int out_size = out_euem * sizeof(htype);
+  int weight_size = weight_euem * sizeof(htype);
+  int indices_size = indices_euem * sizeof(u_int32_t);
+  std::cout << "Prepare data.. " << std::endl;
+
+  htype* host_in = reinterpret_cast<htype*>(aligned_alloc(128, in_size));
+  htype* host_weight =
+      reinterpret_cast<htype*>(aligned_alloc(128, weight_size));
+  u_int32_t* host_indices =
+      reinterpret_cast<u_int32_t*>(aligned_alloc(128, indices_size));
+
+  for (int i = 0; i < batch * M * K; i++) {
+    host_in[i] = (htype)(get_rand_value(num_experts));
+  }
+
+  for (int i = 0; i < num_experts * K * N; i++) {
+    host_weight[i] = (htype)(get_rand_value(num_experts));
+  }
+
+  for (int i = 0; i < batch; i++) {
+    for (int k = 0; k < topk; k++) {
+      host_indices[i * topk + k] = rand() % num_experts;
+    }
+  }
+  htype* host_out = reinterpret_cast<htype*>(aligned_alloc(128, out_size));
+  htype* host_out_cpu =
+      reinterpret_cast<htype*>(aligned_alloc(128, out_size));
+
+  htype* dev_in = NULL;
+  htype* dev_weight = NULL;
+  u_int32_t* dev_indices = NULL;
+
+  croq::abend_true(topsMalloc(reinterpret_cast<void**>(&dev_in), in_size));
+  croq::abend_true(
+      topsMalloc(reinterpret_cast<void**>(&dev_weight), weight_size));
+  croq::abend_true(
+      topsMalloc(reinterpret_cast<void**>(&dev_indices), indices_size));
+
+  htype* dev_out = NULL;
+  croq::abend_true(topsMalloc(reinterpret_cast<void**>(&dev_out), out_size));
+
+  croq::abend_true(
+      topsMemcpy(dev_in, host_in, in_size, topsMemcpyHostToDevice));
+  croq::abend_true(
+      topsMemcpy(dev_weight, host_weight, weight_size, topsMemcpyHostToDevice));
+  croq::abend_true(topsMemcpy(dev_indices, host_indices, indices_size,
+                                topsMemcpyHostToDevice));
+
+  croq::abend_true(topsMemset(dev_out, 0, out_size));
+
+  printf("call indexed moe kernel!!!!!!!!!!!!!\n");
+  topsStream_t stream;
+  topsStreamCreate(&stream);
+  topsEvent_t start, stop;
+  topsEventCreate(&start);
+  topsEventCreate(&stop);
+
+  topsEventRecord(start, stream);
+
+  auto start_t = std::chrono::system_clock::now();
+  // three indexed_moe call per layer, 48 layers: one forward pass
+  //  for (int i=0; i< 3 * 48; i++)
+
+  // ==================
+  assert(batch >= 0);
+  assert(M >= 0);
+  assert(K >= 0);
+  assert(N >= 0);
+  assert(topk >= 0);
+  assert(num_experts >= 0);
+  auto _batch = static_cast<unsigned long>(batch);
+  auto _M = static_cast<unsigned long>(M);
+  auto _K = static_cast<unsigned long>(K);
+  auto _N = static_cast<unsigned long>(N);
+  auto _num_experts = static_cast<unsigned long>(num_experts);
+  auto _topk = static_cast<unsigned long>(topk);
+  auto in_sv = croq::make_spanview<3, htype>(dev_in, {_batch, _M, _K});
+  auto weight_sv =
+      croq::make_spanview<3, htype>(dev_weight, {_num_experts, _N, _K});
+  auto out_sv =
+      croq::make_spanview<3, htype>(dev_out, {_batch, _topk, _N});
+  auto indices_sv =
+      croq::make_spanview<2, croq::u32>(dev_indices, {_batch, _topk});
+
+  indexed_moe_kernel(in_sv, weight_sv, out_sv, indices_sv, stream);
+  // ==================
+
+  // indexed_moe_kernel<__fp16, u_int32_t>
+  //     <<<2, 12, 0, stream>>>(dev_in, dev_weight, dev_out, dev_indices, N, K,
+  //     M,
+  //                            batch, topk, num_experts);
+  topsEventRecord(stop, stream);
+  topsEventSynchronize(stop);
+  auto end_t = std::chrono::system_clock::now();
+
+  float ms = 0.0f;
+  topsEventElapsedTime(&ms, start, stop);
+  std::cout << "Kernel execution time: " << ms << " ms\n";
+
+  auto elapsed =
+      std::chrono::duration_cast<std::chrono::milliseconds>(end_t - start_t);
+  std::cout << elapsed.count() << "ms" << std::endl;
+
+  if (topsGetLastError() != topsSuccess) {
+    fprintf(stderr, "Failed to launch indexed moe kernel (error code %s)!\n",
+            topsGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+  topsStreamSynchronize(stream);
+
+  croq::abend_true(
+      topsMemcpy(host_out, dev_out, out_size, topsMemcpyDeviceToHost));
+  printf("Checking results...\n");
+  bool passed = true;
+  moe_matmul<htype>(host_in, host_weight, host_indices, host_out_cpu, batch, M,
+                     topk, K, N, num_experts);
+  for (int i = 0; i < batch; i++) {
+    for (int k = 0; k < topk; k++) {
+      for (int n = 0; n < N; n++) {
+        float a = (float)host_out_cpu[i * topk * N + k * N + k];
+        float b = (float)host_out[i * topk * N + k * N + k];
+        if (abs(a - b) > 0.00001) {
+          // printf("[%d, %d, %d] cpu %.6f gcu %.6f\n", i, k, n, a, b);
+          passed = false;
+        } else if (n == 0) {
+          // printf("OK [%d, %d, %d] cpu %.6f gcu %.6f\n", i, k, n, a, b);
+        }
+      }
+    }
+  }
+  if (passed) {
+    printf("Test PASSED\n");
+  } else {
+    printf("Test Faild\n");
+  }
+
+  croq::abend_true(topsFree(dev_in));
+  croq::abend_true(topsFree(dev_weight));
+  croq::abend_true(topsFree(dev_indices));
+  croq::abend_true(topsFree(dev_out));
+  free(host_in);
+  free(host_weight);
+  free(host_indices);
+  free(host_out);
+  return 0;
+}
+#endif
+
+
+// CHECK: Test PASSED

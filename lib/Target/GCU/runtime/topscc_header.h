@@ -4,7 +4,7 @@
     #include <tops/topscc_types.h>
   #endif
 
-  #ifdef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+  #if defined(__CHOREO_TARGET_NATIVE_BF16_SUPPORT__) && __GCU_ARCH__ >= 300
     #include <tops/tops_bf16.h>
 
 namespace choreo {
@@ -73,9 +73,13 @@ __co_any__ inline static float bf16_to_f32(bf16 value) {
 
 } // namespace choreo
 
-  #endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+  #elif defined(__CHOREO_TARGET_NATIVE_BF16_SUPPORT__)
+    #undef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+  #endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__ && __GCU_ARCH__
 
 namespace choreo {
+
+using stream_t = topsStream_t;
 
 // --- light-weight choreo device library --- //
 
@@ -172,7 +176,7 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
         line(l), column(c) {}
-  #elif __GCU_ARCH__ == 300
+    #elif __GCU_ARCH__ == 300
   __device__ future(tops::private_dte& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
@@ -181,44 +185,56 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
         md(mdata ? mdata : data), s(ST_NONE), name(n), line(l), column(c) {}
-  #endif // __GCU_ARCH__
-  #else // !__CHOREO_DMA_DIAGNOSIS__
+    #endif // __GCU_ARCH__
+  #else    // !__CHOREO_DMA_DIAGNOSIS__
   __device__ future(choreo_dte_ctx_t& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE) {
-    (void)n; (void)l; (void)c;
+    (void)n;
+    (void)l;
+    (void)c;
   }
     #if __GCU_ARCH__ == 400
   __device__ future(tops::local_dte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE) {
-    (void)n; (void)l; (void)c;
+    (void)n;
+    (void)l;
+    (void)c;
   }
   __device__ future(tops::shared_dte& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE) {
-    (void)n; (void)l; (void)c;
+    (void)n;
+    (void)l;
+    (void)c;
   }
   __device__ future(tops::private_dte& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE) {
-    (void)n; (void)l; (void)c;
+    (void)n;
+    (void)l;
+    (void)c;
   }
-  #elif __GCU_ARCH__ == 300
+    #elif __GCU_ARCH__ == 300
   __device__ future(tops::private_dte& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
         md(mdata ? mdata : data), s(ST_NONE) {
-    (void)n; (void)l; (void)c;
+    (void)n;
+    (void)l;
+    (void)c;
   }
   __device__ future(tops::private_cdte& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
         md(mdata ? mdata : data), s(ST_NONE) {
-    (void)n; (void)l; (void)c;
+    (void)n;
+    (void)l;
+    (void)c;
   }
-  #endif // __GCU_ARCH__
-  #endif // __CHOREO_DMA_DIAGNOSIS__
+    #endif // __GCU_ARCH__
+  #endif   // __CHOREO_DMA_DIAGNOSIS__
 
   // context is retrieved to invoke data operations
   __device__ auto get_ctx() {
@@ -300,8 +316,9 @@ struct future {
              "is used incorrectly.\n",
              line, column);
       __co_abort__();
-    } else
+    } else {
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
+    }
   #endif // __CHOREO_DMA_DIAGNOSIS__
   }
 

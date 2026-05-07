@@ -1329,7 +1329,14 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
        << ValueSTR(lconfig.thread_count.y) << ", "
        << ValueSTR(lconfig.thread_count.z) << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
-     << ", __" << fname << "_bdims" << parallel_idx << ">>>(";
+     << ", __" << fname << "_bdims" << parallel_idx;
+  // TODO: support dynamic shared memory size parameter
+  // bool spm_not_zero = !sbe::ceq(cur_spm_size, sbe::nu(0));
+  bool spm_not_zero = false;
+  // if (spm_not_zero) hs << ", " << ValueSTR(cur_spm_size);
+  if (stream_name != "")
+    hs << (spm_not_zero ? "" : ", 0") << ", " << stream_name;
+  hs << ">>>(";
 
   size_t i = 0;
   for (auto& item : GetDeviceFuncIns(updating_cgi)) {
@@ -1354,8 +1361,13 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   hs << ");\n";
 
-  if (!n.IsAsync())
-    hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
+  if (!n.IsAsync()) {
+    if (stream_name != "")
+      hs << h_indent << "choreo::abend_true(topsStreamSynchronize("
+         << stream_name << "));\n";
+    else
+      hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
+  }
 
   // copy the span passed by ref back to host
   for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
@@ -2468,10 +2480,18 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
 
 bool TopsccCodeGen::Visit(AST::ParamList& n) {
   int index = 0;
-  for (auto param : n.values)
+  for (auto param : n.values) {
+    auto ty = GetSymbolType(param->sym->name);
+    if (isa<StreamType>(ty)) {
+      if (stream_name != "")
+        choreo_unreachable("Unexpect: only one stream supported now!");
+      stream_name = param->sym->name;
+      continue;
+    }
     updating_cgi.AddSymbolDetail(fname, {InScopeName(param->sym->name),
                                          param->GetType(), param->pass_by_ref,
                                          index++, param->GetAttr()});
+  }
   return true;
 }
 
@@ -3752,7 +3772,12 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   for (auto& a : n.GetArguments()) {
     oss << ((i++ == 0) ? "" : ", ");
     if (auto sty = GetSpannedType(NodeType(*a))) {
-      std::string bts = std::string(NameBaseType(sty->ElementType(), IsHost()));
+      auto elem = sty->ElementType();
+      std::string bts = std::string(NameBaseType(elem, IsHost()));
+      // show the detail type name to avoid link error
+      if (!IsHost() && n.template_args && elem == BaseType::BF16 &&
+          CCtx().ArchNum() >= 300)
+        bts = "__bf16";
       auto m_ty = sty->GetStorage();
       auto mem_attr = TopsParamStorage(m_ty);
       if (a->HasNote("annotate_as") && !mem_attr.empty())

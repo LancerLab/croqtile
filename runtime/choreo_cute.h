@@ -7,6 +7,8 @@
 
 namespace choreo {
 
+using stream_t = cudaStream_t;
+
   #ifndef CHOREO_PTX_BARRIER_MAX_SPINS
     #define CHOREO_PTX_BARRIER_MAX_SPINS (1u << 24)
   #endif
