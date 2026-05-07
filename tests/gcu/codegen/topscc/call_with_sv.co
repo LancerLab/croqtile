@@ -14,7 +14,7 @@ __co__ void pass_sv(f32 [7, 8] input) {
 // CHECK: __global__ void __choreo_device_pass_sv(float * input) {
 // CHECK:   __local__ __valigned__ int b[1];
 // CHECK:   __local__ __valigned__ float l1_input__buf__[56];
-// CHECK:   tops::private_dte choreo_topscc_ctx0;
+// CHECK:   choreo::choreo_sdte choreo_topscc_ctx0;
 // CHECK:   choreo::future l1_input(choreo_topscc_ctx0, "l1_input", 9, 16, l1_input__buf__);
 // CHECK:   tops::mdspan __mds0_input(tops::Global, (float*)input, 7, 8);
 // CHECK:   tops::mdspan __mds1_l1_input__buf__(tops::Private, (float*)l1_input__buf__, 7, 8);

@@ -204,10 +204,13 @@ const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
     else
       choreo_unreachable("unsupported storage for DMA context.");
   } else if (CCtx().GetArch() == "gcu300") {
+    // choreo_cdte/choreo_sdte are defined in topscc_header.h per arch:
+    //   GCU300: choreo_cdte = tops::private_cdte, choreo_sdte = tops::private_dte
+    //   Other:  both fall back to tops_dte_ctx_t
     if (sto == Storage::SHARED)
-      return "tops::private_cdte";
+      return "choreo::choreo_cdte";
     else
-      return "tops::private_dte";
+      return "choreo::choreo_sdte";
   } else
     return "tops_dte_ctx_t";
 }
@@ -216,24 +219,12 @@ void TopsccCodeGen::EmitDTEDecl(std::ostringstream& os,
                                 const std::string& indent, Storage sto,
                                 const std::string& varname,
                                 bool with_scope) const {
-  if (CCtx().GetArch() == "gcu300") {
-    auto gcu300_type = DMATypeSTR(sto);
-    os << "#if __GCU_ARCH__ == 300\n";
-    os << indent << gcu300_type << " " << varname << ";\n";
-    os << "#else\n";
-    os << indent << "tops_dte_ctx_t " << varname << ";\n";
-    if (with_scope)
-      os << indent << "tops::dte_scope s_" << varname << "(" << varname
-         << ");\n";
-    os << "#endif\n";
-  } else if (CCtx().GetArch() == "gcu400") {
-    os << indent << DMATypeSTR(sto) << " " << varname << ";\n";
-  } else {
-    os << indent << DMATypeSTR(sto) << " " << varname << ";\n";
-    if (with_scope)
-      os << indent << "tops::dte_scope s_" << varname << "(" << varname
-         << ");\n";
-  }
+  auto type = DMATypeSTR(sto);
+  os << indent << type << " " << varname << ";\n";
+  if (with_scope && CCtx().GetArch() != "gcu300" &&
+      CCtx().GetArch() != "gcu400")
+    os << indent << "tops::dte_scope s_" << varname << "(" << varname
+       << ");\n";
 }
 
 const std::string TopsccCodeGen::ShapeSTR(const Shape& s,

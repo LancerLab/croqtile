@@ -118,6 +118,8 @@ struct choreo_event {
 // tops::private_dte (dynamic SDTE) for transfers involving Private memory.
 // TOPSCC_PRIVATE_DTE_AUTO_INIT enables RAII lifecycle management.
 using choreo_dte_ctx_t = tops_dte_ctx_base_s;
+using choreo_cdte = tops::private_cdte;
+using choreo_sdte = tops::private_dte;
 using choreo_event = tops::event;
 __device__ __forceinline__ void tops_init_dte(tops_dte_ctx_base_s* ctx) {
   // no-op: TOPSCC_PRIVATE_DTE_AUTO_INIT handles init in DTE constructor
@@ -127,6 +129,8 @@ __device__ __forceinline__ void tops_destroy_dte(tops_dte_ctx_base_s* ctx) {
 }
   #else
 using choreo_dte_ctx_t = tops_dte_ctx_t;
+using choreo_cdte = tops_dte_ctx_t;
+using choreo_sdte = tops_dte_ctx_t;
 using choreo_event = tops::event;
   #endif
 
@@ -176,13 +180,13 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
         line(l), column(c) {}
-    #elif __GCU_ARCH__ == 300
-  __device__ future(tops::private_dte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+  #elif __GCU_ARCH__ == 300
+  __device__ future(choreo_sdte& dte, const char* n, unsigned l, unsigned c,
+                    void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
         md(mdata ? mdata : data), s(ST_NONE), name(n), line(l), column(c) {}
-  __device__ future(tops::private_cdte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+  __device__ future(choreo_cdte& dte, const char* n, unsigned l, unsigned c,
+                    void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
         md(mdata ? mdata : data), s(ST_NONE), name(n), line(l), column(c) {}
     #endif // __GCU_ARCH__
