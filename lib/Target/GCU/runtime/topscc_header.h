@@ -62,7 +62,8 @@ struct future {
   void* d = nullptr;  // data: future's user must guarantee it is valid
   void* md = nullptr; // metadata: optional structured sparsity metadata
 
-  // for runtime check purpose
+  // DTE lifecycle state (functional) -- also used for diagnosis checks when
+  // __CHOREO_DMA_DIAGNOSIS__ is defined:
   //
   // ST_NONE -> ST_INITED -> ST_TRIGGERED -> ST_WAITED
   //                              ^              |
@@ -74,16 +75,20 @@ struct future {
     ST_WAITED = 3,
   };
   Status s = ST_NONE;
+
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
+  // diagnosis-only fields: source location for runtime error messages
   const char* name = nullptr;
-  // source code locations
   unsigned line = 0;
   unsigned column = 0;
+  #endif // __CHOREO_DMA_DIAGNOSIS__
 
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
   __device__ future(choreo_dte_ctx_t& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
         line(l), column(c) {}
-  #if __GCU_ARCH__ == 400
+    #if __GCU_ARCH__ == 400
   __device__ future(tops::local_dte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
@@ -105,7 +110,44 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
         md(mdata ? mdata : data), s(ST_NONE), name(n), line(l), column(c) {}
-  #endif
+  #endif // __GCU_ARCH__
+  #else // !__CHOREO_DMA_DIAGNOSIS__
+  __device__ future(choreo_dte_ctx_t& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE) {
+    (void)n; (void)l; (void)c;
+  }
+    #if __GCU_ARCH__ == 400
+  __device__ future(tops::local_dte& dte, const char* n, unsigned l, unsigned c,
+                    void* data = nullptr, void* mdata = nullptr)
+      : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE) {
+    (void)n; (void)l; (void)c;
+  }
+  __device__ future(tops::shared_dte& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE) {
+    (void)n; (void)l; (void)c;
+  }
+  __device__ future(tops::private_dte& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE) {
+    (void)n; (void)l; (void)c;
+  }
+  #elif __GCU_ARCH__ == 300
+  __device__ future(tops::private_dte& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
+        md(mdata ? mdata : data), s(ST_NONE) {
+    (void)n; (void)l; (void)c;
+  }
+  __device__ future(tops::private_cdte& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
+        md(mdata ? mdata : data), s(ST_NONE) {
+    (void)n; (void)l; (void)c;
+  }
+  #endif // __GCU_ARCH__
+  #endif // __CHOREO_DMA_DIAGNOSIS__
 
   // context is retrieved to invoke data operations
   __device__ auto get_ctx() {
@@ -113,17 +155,20 @@ struct future {
       tops_init_dte(ctx);
       s = ST_INITED;
     }
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s != ST_INITED && s != ST_WAITED) {
       printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
              "is not initialized.\n",
              line, column);
       __co_abort__();
     }
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     return ctx;
   }
 
   // when async, an event is obtained for later waiting
   __device__ void set_event(choreo_event& ev) {
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s == ST_TRIGGERED) {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
              "is triggered on an in-flight event.\n",
@@ -141,19 +186,21 @@ struct future {
              line, column);
       __co_abort__();
     }
-
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     e = ev;
     s = ST_TRIGGERED;
   }
 
   // when sync, no wait is required. simply change the status
   __device__ void set_nowait() {
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s != ST_INITED && s != ST_WAITED) {
       printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
              "is used incorrectly.\n",
              line, column);
       __co_abort__();
     }
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     s = ST_WAITED;
   }
 
@@ -170,7 +217,9 @@ struct future {
   #elif __GCU_ARCH__ == 500
   #endif
       s = ST_WAITED;
-    } else if (s == ST_WAITED) {
+    }
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
+    else if (s == ST_WAITED) {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
              "has been waited multiple times.\n",
              line, column);
@@ -182,20 +231,11 @@ struct future {
       __co_abort__();
     } else
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
+  #endif // __CHOREO_DMA_DIAGNOSIS__
   }
-
-  #if 0
-  __device__ choreo_event& event() {
-    if (s == ST_TRIGGERED) {
-      printf("[choreo-rt] internal error: future (defined at line %u:%u) is not associated with an event.\n",
-             line, column);
-      __co_abort__();
-    }
-    return e;
-  }
-  #endif
 
   __device__ void* data() {
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (!d) {
       printf("[choreo-rt] internal error: future (defined at line %u:%u) is "
              "not associated with a data.\n",
@@ -203,16 +243,17 @@ struct future {
       __co_abort__();
     }
     if (s == ST_TRIGGERED) {
-      // TODO: requires krt %s support to print future name
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) is "
              "not waited before using.\n",
              line, column);
       __co_abort__();
     }
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     return d;
   }
 
   __device__ void* mdata() {
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (!md) {
       printf("[choreo-rt] internal error: future (defined at line %u:%u) is "
              "not associated with a metadata.\n",
@@ -225,17 +266,19 @@ struct future {
              line, column);
       __co_abort__();
     }
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     return md;
   }
 
   __device__ ~future() {
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
     if (s == ST_TRIGGERED) {
-      // TODO: requires krt %s support to print future name
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
              "has never been waited.\n",
              line, column);
       __co_abort__();
     }
+  #endif // __CHOREO_DMA_DIAGNOSIS__
     if (s >= ST_INITED) tops_destroy_dte(ctx);
   }
   __device__ future(const future& f) = delete;
@@ -248,22 +291,28 @@ __device__ static inline void swap(future& a, future& b) {
   auto e = a.e;
   auto d = a.d;
   auto s = a.s;
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
   auto l = a.line;
   auto c = a.column;
+  #endif // __CHOREO_DMA_DIAGNOSIS__
 
   a.ctx = b.ctx;
   a.e = b.e;
   a.d = b.d;
   a.s = b.s;
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
   a.line = b.line;
   a.column = b.column;
+  #endif // __CHOREO_DMA_DIAGNOSIS__
 
   b.ctx = ctx;
   b.e = e;
   b.d = d;
   b.s = s;
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
   b.line = l;
   b.column = c;
+  #endif // __CHOREO_DMA_DIAGNOSIS__
 }
 
 } // end namespace choreo

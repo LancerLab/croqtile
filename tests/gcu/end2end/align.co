@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCUALL
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc -dd=false %s -o %s.topscc.ddfalse.result && bash %s.topscc.ddfalse.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.ddfalse.result
 __co__ auto vecadd(s32 [512] a)  {
   s32 [a.span] c;
   parallel p by 4 {

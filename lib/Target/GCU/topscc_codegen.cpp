@@ -3121,6 +3121,7 @@ option_detect() {
   if (CCtx().GetArch() == "gcu500") { // enable gcusim5
     os << R"( -Wl,--disable-new-dtags -rpath "${TOPSCC_LIB}")";
   }
+  if (CCtx().DMADiagnosis()) os << " -D__CHOREO_DMA_DIAGNOSIS__";
   // always enclose
   os << " ${EXTRA_TARGET_CFLAGS}";
   std::filesystem::path cwd = std::filesystem::current_path();
