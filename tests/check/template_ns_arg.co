@@ -1,0 +1,15 @@
+// RUN: choreo -es %s -o - 2>&1 | FileCheck %s
+// Test that namespace-qualified identifiers are accepted as template arguments.
+// Regression test for: error: syntax error, unexpected ::, expecting "," or >
+//   when using `call ns::func<M, ns::ENUM>(...)` form.
+
+__co__ void test_ns_template_arg(f32 [128, 256] a, f32 [128] b) {
+  parallel p by 4 {
+    local f32[b.span] tmp{0.0f};
+    call mylib::myfunc<f32, mylib::MY_ENUM>(tmp, a.data, b.data, |tmp.span|);
+  }
+}
+
+// Parsing must succeed: no "syntax error" may appear.
+// (Semantic errors about undefined symbols are acceptable here.)
+// CHECK-NOT: syntax error
