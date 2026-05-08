@@ -1123,7 +1123,8 @@ g_value_list /* contains at least two value */
 template_val
     : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | MINUS NUM { $$ = AST::Make<AST::IntLiteral>(@1, -$2); }
-    | spanid { $$ = AST::Make<AST::Identifier>(@1, $1); }
+    | id_with_namespace { $$ = AST::Make<AST::Identifier>(@1, $1); }
+    | id_with_namespace FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
     | scalar_type { $$ = $1; }
     ;
 
