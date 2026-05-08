@@ -12,6 +12,7 @@ REPO_ROOT="${OSS_SCAN_REPO_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --show-topleve
 KW_FILE="$SCRIPT_DIR/os_kw.txt"
 MODE="worktree"
 TARGET=""
+MSG_FILE=""
 VERBOSE=0
 
 usage() {
@@ -29,9 +30,10 @@ Modes (pick one):
   (default)          Scan current worktree tracked files
 
 Options:
-  -k <file>    Keyword file (default: scripts/oss/os_kw.txt)
-  -v           Verbose: print each violation immediately
-  -h           Show help
+  -k <file>        Keyword file (default: scripts/oss/os_kw.txt)
+  --msg-file <f>   Also scan the given file as a pending commit message
+  -v               Verbose: print each violation immediately
+  -h               Show help
 
 Exit codes:
   0  Clean (no violations found)
@@ -48,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --range)  MODE="range";  TARGET="${2:-}"; shift 2 || { echo "Error: --range needs <a>..<b>"; exit 2; } ;;
     --dir)    MODE="dir";    TARGET="${2:-}"; shift 2 || { echo "Error: --dir needs <path>"; exit 2; } ;;
     -k)       KW_FILE="${2:-}"; shift 2 || { echo "Error: -k needs <file>"; exit 2; } ;;
+    --msg-file) MSG_FILE="${2:-}"; shift 2 || { echo "Error: --msg-file needs <path>"; exit 2; } ;;
     -v)       VERBOSE=1; shift ;;
     -h)       usage; exit 0 ;;
     -*)       echo "Error: unknown option $1" >&2; usage; exit 2 ;;
@@ -374,6 +377,16 @@ mode_staged() {
 
   # Ghost-reference detection
   scan_ghost_refs_from_diff "$diff_text" "staged"
+
+  # Scan pending commit message if provided via --msg-file
+  if [[ -n "$MSG_FILE" && -f "$MSG_FILE" ]]; then
+    local msg
+    msg="$(cat "$MSG_FILE")"
+    if echo "$msg" | grep -qE $CASE_FLAG -- "$COMBINED_PATTERN"; then
+      record "staged/message" "pending commit message"
+      VIOLATION_LOG+="$(echo "$msg" | grep -nE $CASE_FLAG -- "$COMBINED_PATTERN" | head -5 | sed 's/^/    /')"$'\n'
+    fi
+  fi
 }
 
 mode_diff() {

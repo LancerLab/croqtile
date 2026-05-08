@@ -370,18 +370,21 @@ for commit in "${COMMITS[@]}"; do
   fi
 
   # ---- GATE 1: scan staged changes for keyword/non-ASCII violations ----
+  # Strip AI-tool trailers early so the message scan sees the final text.
+  clean_msg="$(echo "$orig_msg" | sed '/^Made-with:/d; /^Generated-by:/d')"
   if [[ $SKIP_SCAN -eq 0 && -f "$KW_FILE" ]]; then
   echo "  Scanning staged changes..."
-  if ! OSS_SCAN_REPO_ROOT="$REPO_ROOT" "$SCAN_CMD" --staged -k "$KW_FILE"; then
+  _msg_tmp="$(mktemp)"
+  printf '%s\n(cherry picked from %s on main)' "$clean_msg" "$commit" > "$_msg_tmp"
+  if ! OSS_SCAN_REPO_ROOT="$REPO_ROOT" "$SCAN_CMD" --staged --msg-file "$_msg_tmp" -k "$KW_FILE"; then
+    rm -f "$_msg_tmp"
     echo "ERROR $short: keyword/non-ASCII violation in staged changes. Resetting."
     git reset --hard HEAD >/dev/null
     FAILED=$((FAILED+1))
     continue
   fi
+  rm -f "$_msg_tmp"
   fi
-
-  # Strip AI-tool trailers
-  clean_msg="$(echo "$orig_msg" | sed '/^Made-with:/d; /^Generated-by:/d')"
 
   # Commit preserving original author, date, and message
   GIT_AUTHOR_DATE="$orig_date" git commit \
