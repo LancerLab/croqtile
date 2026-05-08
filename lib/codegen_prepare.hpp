@@ -509,6 +509,7 @@ public:
     case AST::MMAOperation::Scale: break;
     case AST::MMAOperation::Store: break;
     case AST::MMAOperation::Commit: break;
+    case AST::MMAOperation::Wait: break;
     default: choreo_unreachable("unsupported mma operation.");
     }
     return true;

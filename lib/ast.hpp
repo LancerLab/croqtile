@@ -2717,7 +2717,7 @@ public:
 
 struct MMAOperation {
 public:
-  enum Kind { Fill, Load, Exec, Store, Commit, Scale };
+  enum Kind { Fill, Load, Exec, Store, Commit, Scale, Wait };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
   // NOTE: acc, lhs, rhs are not accepted in ast.cpp.
@@ -2763,8 +2763,11 @@ public:
     ptr<ChunkAt> scaleA;
     ptr<Expr> scaleB;
   };
+  struct WaitInfo {
+    int wait_depth;
+  };
   using InfoType =
-      std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo, ScaleInfo>;
+      std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo, ScaleInfo, WaitInfo>;
 
 private:
   Kind tag;
@@ -2800,6 +2803,10 @@ public:
       : tag(Store), info(StoreInfo{n, c, trans, row_mask, col_mask}) {}
 
   MMAOperation() : tag(Commit), info() {}
+
+  struct WaitTag {};
+  explicit MMAOperation(WaitTag, int depth)
+      : tag(Wait), info(WaitInfo{depth}) {}
 
   MMAOperation(const ptr<Expr>& acc, const ptr<ChunkAt>& scaleA,
                const ptr<Expr>& scaleB)
@@ -2951,6 +2958,11 @@ public:
     choreo_unreachable("not a mma scale-bearing operation.");
   }
 
+  int WaitDepth() const {
+    if (tag != Wait) choreo_unreachable("not a mma wait operation.");
+    return std::get<5>(info).wait_depth;
+  }
+
   void SetFuture(const ptr<AST::Expr>& fut) {
     if (tag != Load) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
@@ -2971,6 +2983,7 @@ public:
     if (tag == Store) return StoreFrom();
     if (tag == Commit) return nullptr;
     if (tag == Scale) return ScaleAccumulator();
+    if (tag == Wait) return nullptr;
     choreo_unreachable("unexpected mma operation!");
     return nullptr;
   }
@@ -3025,6 +3038,7 @@ public:
     case Scale:
       return Make<MMAOperation>(CloneP(ScaleAccumulator()), CloneP(ScaleA()),
                                 CloneP(ScaleB()));
+    case Wait: return Make<MMAOperation>(WaitTag{}, WaitDepth());
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
     return nullptr;
@@ -3068,6 +3082,7 @@ public:
       if (StoreColMask()) os << ", " << PSTR(StoreColMask());
     } break;
     case Commit: os << "MMA.COMMIT"; break;
+    case Wait: os << "MMA.WAIT<" << WaitDepth() << ">"; break;
     case Scale:
       os << "MMA.SCALE " << PSTR(ScaleAccumulator()) << ", " << PSTR(ScaleA())
          << ", " << PSTR(ScaleB());
@@ -3813,6 +3828,21 @@ inline bool AllConstant(const ptr<MultiValues>& mv) {
     if (!GetIntLiteral(il)) return false;
 
   return true;
+}
+
+inline bool HasUnrollHint(const ForeachBlock& n, int& factor) {
+  factor = 0;
+  if (!n.suffixs) return false;
+  for (auto& v : n.suffixs->AllValues()) {
+    auto attr = dyn_cast<AttributeExpr>(v);
+    if (!attr || attr->AttrName() != "unroll") continue;
+    if (attr->AttrValueCount() == 1) {
+      auto il = GetIntLiteral(attr->AttrValueAt(0));
+      if (il) factor = static_cast<int>(il->Val());
+    }
+    return true;
+  }
+  return false;
 }
 
 inline bool IsSymbolOrArrayRef(const Node& n) {

@@ -4172,6 +4172,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     return true;
   }
 
+  if (op.Tag() == AST::MMAOperation::Wait) {
+    int depth = op.WaitDepth();
+    ds << d_indent << "warpgroup_wait<" << depth << ">();\n";
+    return true;
+  }
+
   const ptr<AST::Expr>& frag = op.GetFrag(); // the primary frag node
   std::string sym = AST::FragName(frag);     // the primary symbol
   std::string scoped_frag_sym = InScopeName(sym);
@@ -6467,6 +6473,14 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       ds << d_indent << "memset(" << info.scale_frag_name << ", 0, sizeof("
          << info.scale_frag_name << "));\n";
     }
+  }
+
+  int unroll_factor = 0;
+  if (AST::HasUnrollHint(n, unroll_factor)) {
+    if (unroll_factor > 0)
+      IndStream() << "#pragma unroll " << unroll_factor << "\n";
+    else
+      IndStream() << "#pragma unroll\n";
   }
 
   for (auto& rn : n.GetRanges()) {

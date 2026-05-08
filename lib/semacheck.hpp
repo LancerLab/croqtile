@@ -20,6 +20,7 @@ private:
   AttributeDeriver input_deps{this, "input-deps", false};
   AttributeDeriver local_deps{this, "local-deps", false};
   std::vector<ValueItem> scope_pred_stack;
+  std::vector<AST::ForeachBlock*> foreach_stack;
   std::map<std::string, AST::DMA*> shared_tensor_producers;
 
 private:
