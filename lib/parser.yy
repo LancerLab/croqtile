@@ -190,7 +190,8 @@ extern int yylex();
 // builtin operations
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG
 // MMA related builtin operations
-%token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK
+%token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK MMAWAIT
+%token <std::string> UNROLL
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
 %token <std::string> LIB_CALL
@@ -2073,6 +2074,15 @@ mma_stmt
       auto op = AST::Make<AST::MMAOperation>();
       $$ = AST::Make<AST::MMA>(@1, op);
     }
+    | MMA MMAWAIT LT NUM GT {
+      if ($4 < 0 || $4 > 7) {
+        error(@4, "mma.wait depth must be in range [0, 7]");
+        YYABORT;
+      }
+      auto op = AST::Make<AST::MMAOperation>(
+          AST::MMAOperation::WaitTag{}, $4);
+      $$ = AST::Make<AST::MMA>(@1, op);
+    }
     | MMA SCALE frag_expr COMMA chunkat_expr COMMA s_expr {
       auto op = AST::Make<AST::MMAOperation>($3, $5, $7);
       $$ = AST::Make<AST::MMA>(@1, op);
@@ -2352,6 +2362,19 @@ suffix_expr
         auto mv = AST::Make<AST::MultiValues>(@1, ", ");
         mv->Append(AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@3, $3)));
         mv->Append($5);
+        $$ = AST::Make<AST::AttributeExpr>(@1, $1, mv);
+    }
+    | UNROLL LPAREN NUM RPAREN {
+        if ($3 <= 0) {
+          error(@3, "unroll factor must be a positive integer");
+          YYABORT;
+        }
+        auto mv = AST::Make<AST::MultiValues>(@1, ", ");
+        mv->Append(AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@3, $3)));
+        $$ = AST::Make<AST::AttributeExpr>(@1, $1, mv);
+    }
+    | UNROLL {
+        auto mv = AST::Make<AST::MultiValues>(@1, ", ");
         $$ = AST::Make<AST::AttributeExpr>(@1, $1, mv);
     }
   ;

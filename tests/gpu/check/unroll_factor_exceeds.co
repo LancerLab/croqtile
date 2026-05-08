@@ -1,0 +1,12 @@
+// RUN: not choreo -t cute -arch=sm_86 %s 2>&1 | FileCheck %s
+// CHECK: unroll factor (8) exceeds the loop extent (4)
+
+__co__ void foo(f32 [32, 18, 9] a) {
+  parallel p by 3 : block {
+    with index = {x, y} in [4, 4] {
+      foreach index : unroll(8) {
+        dma.copy a.span_as([16, 9, 36]).chunkat(x, p, y) => local;
+      }
+    }
+  }
+}

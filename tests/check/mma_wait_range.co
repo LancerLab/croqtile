@@ -1,0 +1,6 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+// CHECK: mma.wait depth must be in range [0, 7]
+
+__co__ void foo() {
+  mma.wait<8>;
+}

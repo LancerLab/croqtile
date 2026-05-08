@@ -1,0 +1,7 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+// CHECK: unroll factor must be a positive integer
+
+__co__ void foo() {
+  foreach {i} in [4] : unroll(0) {
+  }
+}

@@ -1123,7 +1123,7 @@ bool TypeInference::Visit(AST::MMA& n) {
     break;
   case AST::MMAOperation::Store:
   case AST::MMAOperation::Commit:
-    // no type inference is necessary
+  case AST::MMAOperation::Wait:
     break;
   default: break;
   }

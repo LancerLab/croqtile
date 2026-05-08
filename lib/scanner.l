@@ -547,6 +547,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".scale"   return Choreo::Parser::make_SCALE(yytext, loc);
   ".mask"    return Choreo::Parser::make_MASK(yytext, loc);
   ".commit"  return Choreo::Parser::make_COMMIT(yytext, loc);
+  ".wait"    return Choreo::Parser::make_MMAWAIT(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT(yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);
@@ -567,6 +568,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "while"    return Choreo::Parser::make_WHILE(yytext, loc);
   "break"    return Choreo::Parser::make_BREAK(yytext, loc);
   "vectorize" return Choreo::Parser::make_VECTORIZE(yytext, loc);
+  "unroll"   return Choreo::Parser::make_UNROLL(yytext, loc);
   "continue" return Choreo::Parser::make_CONTINUE(yytext, loc);
   "yield"    return Choreo::Parser::make_YIELD(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);

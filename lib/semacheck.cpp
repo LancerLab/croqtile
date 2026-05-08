@@ -215,6 +215,28 @@ bool SemaChecker::ExpressionIsConstrained(const ValueItem& expr) const {
   return false;
 }
 
+static int64_t GetForeachStaticExtent(const AST::ForeachBlock& fe) {
+  auto& ranges = fe.GetRanges();
+  if (ranges.empty()) return -1;
+  auto rng = dyn_cast<AST::LoopRange>(ranges.front());
+  if (!rng || !rng->IV()) return -1;
+  auto iv_ty = dyn_cast<BoundedType>(rng->IV()->GetType());
+  if (!iv_ty) return -1;
+  auto ub = iv_ty->GetUpperBound();
+  if (!ub || !ub->IsNumeric()) return -1;
+  return dyn_cast<sbe::NumericValue>(ub.get())->Value();
+}
+
+static ValueItem GetForeachDynamicExtent(const AST::ForeachBlock& fe) {
+  auto& ranges = fe.GetRanges();
+  if (ranges.empty()) return nullptr;
+  auto rng = dyn_cast<AST::LoopRange>(ranges.front());
+  if (!rng || !rng->IV()) return nullptr;
+  auto iv_ty = dyn_cast<BoundedType>(rng->IV()->GetType());
+  if (!iv_ty) return nullptr;
+  return iv_ty->GetUpperBound();
+}
+
 bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     pending_async.clear();
@@ -224,14 +246,27 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
   }
   if (auto block = dyn_cast<AST::PredBlock>(&n))
     scope_pred_stack.push_back(block->GetScopePredicate());
-  else if (auto fe = dyn_cast<AST::ForeachBlock>(&n))
+  else if (auto fe = dyn_cast<AST::ForeachBlock>(&n)) {
     scope_pred_stack.push_back(fe->GetScopePredicate());
+    foreach_stack.push_back(fe);
+    int unroll_factor = 0;
+    if (AST::HasUnrollHint(*fe, unroll_factor) && unroll_factor > 0) {
+      int64_t extent = GetForeachStaticExtent(*fe);
+      if (extent > 0 && unroll_factor > extent)
+        Error1(n.LOC(),
+               "unroll factor (" + std::to_string(unroll_factor) +
+                   ") exceeds the loop extent (" +
+                   std::to_string(extent) + ").");
+    }
+  }
   return true;
 }
 
 bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n))
     scope_pred_stack.pop_back();
+  if (isa<AST::ForeachBlock>(&n))
+    foreach_stack.pop_back();
 
   if (isa<AST::ChoreoFunction>(&n)) {
     for (auto n : waited_async) pending_async.erase(n);
@@ -1231,6 +1266,29 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
   } break;
   case AST::MMAOperation::Store: break;
   case AST::MMAOperation::Commit: break;
+  case AST::MMAOperation::Wait: {
+    int depth = op.WaitDepth();
+    if (depth > 0 && !foreach_stack.empty()) {
+      auto* fe = foreach_stack.back();
+      int64_t extent = GetForeachStaticExtent(*fe);
+      if (extent > 0 && depth >= extent) {
+        Error1(n.LOC(),
+               "mma.wait<" + std::to_string(depth) +
+                   "> depth must be less than the enclosing loop "
+                   "extent (" + std::to_string(extent) + ").");
+      } else if (extent < 0) {
+        auto ub = GetForeachDynamicExtent(*fe);
+        if (ub) {
+          auto cond = sbe::oc_lt(sbe::nu(depth), ub);
+          FCtx(fname).GetAssessor(*this).Assess(
+              AssessPolicy::Error, cond,
+              "mma.wait<" + std::to_string(depth) +
+                  "> depth must be less than the enclosing loop extent.",
+              UsageType::ShapeCompatibility, AssessType::ENTRY, n.LOC(), &n);
+        }
+      }
+    }
+  } break;
   default: choreo_unreachable("unsupported mma operation.");
   }
   return true;

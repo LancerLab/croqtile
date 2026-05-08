@@ -1,0 +1,14 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s
+
+__co__ void test_unroll_factor(f32 [32, 18, 9] a) {
+  parallel p by 3 : block {
+    with index = {x, y} in [4, 4] {
+      foreach index : unroll(2) {
+        dma.copy a.span_as([16, 9, 36]).chunkat(x, p, y) => local;
+      }
+    }
+  }
+}
+// CHECK-LABEL: __global__{{.*}}test_unroll_factor
+// CHECK: #pragma unroll 2
+// CHECK-NEXT: for
