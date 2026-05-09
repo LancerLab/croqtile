@@ -155,6 +155,26 @@ private:
   bool has_lib_gemm_general = false;    // track general gemm fallback usage
   bool has_lib_fallback = false;        // track non-gemm lib fallback usage
 
+  std::unordered_map<std::string, int> emitted_device_names_;
+  std::vector<std::unordered_map<std::string, int>> emitted_names_stack_;
+  std::string UniqueDeviceName(const std::string& name) {
+    auto it = emitted_device_names_.find(name);
+    if (it == emitted_device_names_.end()) {
+      emitted_device_names_[name] = 0;
+      return name;
+    }
+    return name + "__" + std::to_string(++it->second);
+  }
+  void PushEmittedNames() {
+    emitted_names_stack_.push_back(emitted_device_names_);
+  }
+  void PopEmittedNames() {
+    if (!emitted_names_stack_.empty()) {
+      emitted_device_names_ = emitted_names_stack_.back();
+      emitted_names_stack_.pop_back();
+    }
+  }
+
 private:
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
@@ -228,6 +248,7 @@ private:
     stream_name = "";
     pre_site_assertions.clear();
     post_site_assertions.clear();
+    emitted_device_names_.clear();
     ResetLineDirectiveState();
   }
 

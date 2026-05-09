@@ -281,6 +281,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     // only on device-side
     if (pb->IsOuter()) {
       parallel_idx += 1;
+      emitted_device_names_.clear();
       if (cgi.GetFunctionTrait(fname).multiple_parallelby)
         device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
       EmitDeviceFuncDecl(ds);
@@ -352,6 +353,8 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
 bool TopsccCodeGen::InMidVisitImpl(AST::Node& n) {
   if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
     if (!ie->HasElse()) return true;
+    PopEmittedNames();
+    PushEmittedNames();
     DecrIndent();
     IndStream() << "} else {\n";
     IncrIndent();
@@ -463,6 +466,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       if (!it->async && it->outer) ds << "\n" << d_indent << "__syncthreads();";
       ds << " // end inthreads\n";
     }
+    PopEmittedNames();
   } else if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
     auto pred = ie->GetPred();
     if (!pred->GetDiversityShape().Varying()) {
@@ -471,6 +475,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     } else {
       IndStream() << "// end if-else: " << ie->LOC() << "\n";
     }
+    PopEmittedNames();
   } else if (auto ie = dyn_cast<AST::WhileBlock>(&n)) {
     DecrIndent();
     IndStream() << "} // end while: " << ie->LOC() << "\n";
@@ -799,6 +804,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   auto nty = NodeType(n);
   auto sym = n.name_str;
 
+  SSTab().DefineSymbol(sym, nty);
+
   bool ref = n.HasNote("ref");
   // workaround:
   // if a symbol is declared but have no symbol value(optimized value)
@@ -934,7 +941,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     };
 
     auto HandleSharedLocal = [&]() -> void {
-      if (IsChoreoOutput(InScopeName(sym)))
+      if (IsChoreoOutput(InScopeName(n.name_str)))
         choreo_unreachable(
             "error: shared/local buffer cannot be Choreo output.");
 
@@ -982,8 +989,9 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       global_buffers.insert(buf_sym);
     } else if (sto == Storage::SHARED || sto == Storage::LOCAL) {
       if (IsHost()) choreo_unreachable("error: shared/local var decl in host.");
+      sym = UniqueDeviceName(n.name_str);
       HandleSharedLocal();
-      ssm.MapDeviceSymbol(InScopeName(sym), sym);
+      ssm.MapDeviceSymbol(InScopeName(n.name_str), sym);
       spmem = true;
     } else
       choreo_unreachable("unsupported storage type.");
@@ -1108,31 +1116,32 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     default: break;
     }
   } else if (auto ety = dyn_cast<EventType>(nty)) {
+    auto ename = UniqueDeviceName(n.name_str);
     switch (ety->GetStorage()) {
     case Storage::GLOBAL: {
       assert(IsHost());
       auto sym = InScopeName(n.name_str);
-      auto buf_sym = n.name_str + "__device";
+      auto buf_sym = ename + "__device";
       hs << h_indent << "bool * " << buf_sym << " = nullptr; // global event\n";
       hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym
          << ", 1));\n";
       hs << h_indent << "choreo::abend_true(topsMemset(&" << buf_sym
          << ", 0, 1));\n";
       ssm.MapHostSymbol(sym, buf_sym);
-      ssm.MapDeviceSymbol(sym, n.name_str);
+      ssm.MapDeviceSymbol(sym, ename);
       global_buffers.insert(buf_sym);
     } break;
     case Storage::SHARED:
     case Storage::LOCAL: {
       assert(!IsHost());
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
-         << " __volatile__ bool " << n.name_str << "; // "
-         << STR(ety->GetStorage()) << " event\n";
+         << " __volatile__ bool " << ename << "; // " << STR(ety->GetStorage())
+         << " event\n";
       ds << d_indent << BufferInitPred(ety->GetStorage()) << " {\n";
-      ds << d_indent << "  " << n.name_str
-         << " = false;\n"; // inited as untriggered
+      ds << d_indent << "  " << ename << " = false;\n"; // inited as untriggered
       ds << d_indent << "}\n";
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
+      ssm.MapDeviceSymbol(InScopeName(n.name_str), ename);
     } break;
     default: break;
     }
@@ -2377,6 +2386,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
       }
       return true;
     } else if (func_name == "print" || func_name == "println") {
+      if (n.CompileTimeEval()) return true;
       std::string print_format;
       print_format += "\"";
       std::string print_args;
@@ -2488,6 +2498,7 @@ bool TopsccCodeGen::Visit(AST::ParamList& n) {
       stream_name = param->sym->name;
       continue;
     }
+    SSTab().DefineSymbol(param->sym->name, ty);
     updating_cgi.AddSymbolDetail(fname, {InScopeName(param->sym->name),
                                          param->GetType(), param->pass_by_ref,
                                          index++, param->GetAttr()});
@@ -2586,6 +2597,7 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
 bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
   assert(!IsHost());
+  PushEmittedNames();
   ds << d_indent << "// inthreads: " << n.LOC() << "\n";
   if (!n.stmts->None())
     ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
@@ -2595,6 +2607,7 @@ bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
 
 bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
+  PushEmittedNames();
   IndStream() << "// if-else: " << n.LOC() << "\n";
   auto pred = n.GetPred();
   if (!pred->GetDiversityShape().Varying()) {
@@ -3467,12 +3480,12 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
   for (auto item : da.GetIndices()) {
     auto item_ty = item->GetType();
     if (auto id = AST::GetIdentifier(item)) {
-      if (bv_map.count(InScopeName(id->name))) {
-        auto ivs = bv_map.at(InScopeName(id->name));
+      if (bv_map.count(InScopeNameForRef(id->name))) {
+        auto ivs = bv_map.at(InScopeNameForRef(id->name));
         for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
           AppendOffset(sbe::sym(*iv_itr));
       } else
-        AppendOffset(sbe::sym(InScopeName(id->name)));
+        AppendOffset(sbe::sym(InScopeNameForRef(id->name)));
     } else if (auto il = AST::GetIntLiteral(*item)) {
       AppendOffset(sbe::nu(il->Val()));
     } else {
@@ -3519,13 +3532,13 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       assert(!is_host);
       return id->name;
     }
-    if (bv_map.count(InScopeName(id->name)) && !is_host) {
+    if (bv_map.count(InScopeNameForRef(id->name)) && !is_host) {
       size_t i = 0;
-      for (auto iv_name : bv_map.at(InScopeName(id->name)))
+      for (auto iv_name : bv_map.at(InScopeNameForRef(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
             << UnScopedName(ssm.DeviceName(iv_name));
     } else
-      oss << UnScopedName(SSMName(InScopeName(id->name), is_host));
+      oss << UnScopedName(SSMName(InScopeNameForRef(id->name), is_host));
   } else if (auto np = dyn_cast<AST::Nullptr>(e)) {
     oss << "nullptr";
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
@@ -3561,8 +3574,8 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       }
     } else {
       assert(!da->AccessElement());
-      assert(!bv_map.count(InScopeName(da->data->name)));
-      oss << UnScopedName(SSMName(InScopeName(da->data->name), is_host));
+      assert(!bv_map.count(InScopeNameForRef(da->data->name)));
+      oss << UnScopedName(SSMName(InScopeNameForRef(da->data->name), is_host));
     }
   } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
     // codegen for scalar type cast
@@ -3585,7 +3598,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
 
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {
-      auto sname = InScopeName(sym->name);
+      auto sname = InScopeNameForRef(sym->name);
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
         if (svs.HasVal()) return ValueSTR(svs.GetVal());

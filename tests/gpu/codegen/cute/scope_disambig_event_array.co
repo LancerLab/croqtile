@@ -1,0 +1,18 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -n -es --use-warpspec -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+//
+// Test: EventArrayType disambiguation - nested parallel blocks with
+// same-named event arrays get distinct emitted names.
+
+__co__ void foo(f32 [128, 128] input) {
+  parallel b by 1 : block {
+    shared event ev[2];
+    parallel g by 2 : group-4 {
+      shared event ev[2];
+    }
+  }
+}
+
+// First `ev` keeps its name, nested `ev` gets a suffix.
+// CHECK: cuda::barrier<cuda::thread_scope_block> ev[2]
+// CHECK: cuda::barrier<cuda::thread_scope_block> ev__1[2]
