@@ -241,6 +241,24 @@ cleanup_oss_tools() {
   TOOL_TMPDIR=""
 }
 
+# Fetch a remote with up to MAX_FETCH_ATTEMPTS retries and exponential
+# backoff. Shows the actual error on each failure instead of suppressing
+# it, so transient SSH/network glitches can be diagnosed and retried.
+MAX_FETCH_ATTEMPTS=${MAX_FETCH_ATTEMPTS:-3}
+FETCH_RETRY_BASE_SECS=${FETCH_RETRY_BASE_SECS:-5}
+
+fetch_with_retry() {
+  local remote="$1" attempt=0 out rc=0
+  while [[ $attempt -lt $MAX_FETCH_ATTEMPTS ]]; do
+    attempt=$((attempt + 1))
+    out="$(timeout 30 git -C "$REPO_ROOT" fetch "$remote" --prune 2>&1)" && return 0
+    rc=$?
+    log "  Attempt $attempt/$MAX_FETCH_ATTEMPTS failed (exit $rc): $(echo "$out" | head -2)"
+    [[ $attempt -lt $MAX_FETCH_ATTEMPTS ]] && sleep $((attempt * FETCH_RETRY_BASE_SECS))
+  done
+  return $rc
+}
+
 sync_origin_oss_branch() {
   local local_tip origin_tip
   local_tip="$(lgit rev-parse "$OSS_BRANCH" 2>/dev/null || echo "")"
@@ -299,7 +317,14 @@ phase0_setup() {
   for r in origin "$PUBLIC_REMOTE" "$OSS_SHADOW_REMOTE"; do
     if lgit remote get-url "$r" >/dev/null 2>&1; then
       log "Fetching $r..."
-      timeout 30 lgit fetch "$r" --prune 2>/dev/null || log "  WARNING: fetch $r failed"
+      if fetch_with_retry "$r"; then
+        log "  $r OK"
+      elif [[ "$r" == "$PUBLIC_REMOTE" ]]; then
+        warn_highlighted "fetch $PUBLIC_REMOTE failed" \
+          "Could not reach $PUBLIC_REMOTE after $MAX_FETCH_ATTEMPTS attempts.\nNew commits pushed to public will NOT be ingested this cycle."
+      else
+        log "  WARNING: fetch $r failed -- continuing with stale refs"
+      fi
     fi
   done
 
