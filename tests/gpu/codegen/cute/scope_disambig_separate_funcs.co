@@ -1,0 +1,27 @@
+// RUN: choreo -n -es -t cute -arch=sm_86 %s -o - 2>&1 | FileCheck %s
+//
+// Test: Variables with the same name in separate device functions (from
+// multiple outermost parallel blocks) should NOT be disambiguated -- they
+// are in different C++ function bodies.
+
+__co__ auto foo(f16 [128] input, f16 [128] temp) {
+  f16 [128] output;
+
+  parallel m by [128 / 16] : block {
+    shared f16[128] s;
+    parallel by 128: thread {}
+  }
+
+  parallel n by [128 / 16] : block {
+    shared f16[128] s;
+    parallel by 128: thread {}
+  }
+  return output;
+}
+
+// Both device functions should declare `s` without any suffix.
+// CHECK: __choreo_device_foo0
+// CHECK: f16* s =
+// CHECK: __choreo_device_foo1
+// CHECK: f16* s =
+// CHECK-NOT: s__1

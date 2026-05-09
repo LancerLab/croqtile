@@ -1,0 +1,17 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - 2>&1 | FileCheck %s
+//
+// Test: Variable reference resolves to the correct scope when a later
+// declaration shadows the name.  `println(a)` should emit the function
+// parameter `a`, not the later-declared local `a`.
+
+__co__ void foo(int a) {
+  parallel p by 1 {
+    println(a);
+    int a = a + 5;
+    int b = a;
+  }
+}
+
+// The printf should reference `a` directly (the parameter), not `(a + 5)`.
+// CHECK: printf("%lld\n", static_cast<long long>(a));
+// CHECK-NOT: printf("%lld\n", static_cast<long long>((a + 5)));

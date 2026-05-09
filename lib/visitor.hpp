@@ -605,6 +605,16 @@ protected:
     return scoped_symtab.UnScopedName(name);
   }
 
+  // Declaration-order-aware name resolution for identifier references.
+  // Checks the live scoped table first (only contains symbols whose
+  // declarations have been visited so far), then falls back to the
+  // global symbol table walk.
+  const std::string InScopeNameForRef(const std::string& sym) const {
+    auto scoped = scoped_symtab.NameInScopeOrNull(sym);
+    if (scoped) return *scoped;
+    return InScopeName(sym);
+  }
+
 public:
   // use the immutable symbol table directly
   const ptr<Type> GetSymbolType(const std::string& n) const override {

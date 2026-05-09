@@ -1,0 +1,21 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - 2>&1 | FileCheck %s
+//
+// Test: Multi-level shadowing. A parameter `x` is referenced via println
+// inside a nested parallel, then shadowed by a later local declaration.
+// The println should still reference the parameter.
+
+__co__ void foo(int x) {
+  parallel p by 1 {
+    println(x);
+    parallel q by 1 {
+      println(x);
+      int x = x + 10;
+    }
+  }
+}
+
+// Both printfs should reference `x` (the parameter), not `(x + 10)`.
+// CHECK: __global__ void __choreo_device_foo
+// CHECK: printf("%lld\n", static_cast<long long>(x));
+// CHECK: printf("%lld\n", static_cast<long long>(x));
+// CHECK-NOT: (x + 10)

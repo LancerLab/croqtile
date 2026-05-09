@@ -182,6 +182,28 @@ private:
   std::set<std::string> global_buffers; // global buffers
   bool emit_call = true;                // emit the call statement
 
+  // Tracks emitted device variable names per device function to detect
+  // collisions when nested scopes declare variables with the same short name.
+  std::unordered_map<std::string, int> emitted_device_names_;
+  std::vector<std::unordered_map<std::string, int>> emitted_names_stack_;
+  std::string UniqueDeviceName(const std::string& name) {
+    auto it = emitted_device_names_.find(name);
+    if (it == emitted_device_names_.end()) {
+      emitted_device_names_[name] = 0;
+      return name;
+    }
+    return name + "__" + std::to_string(++it->second);
+  }
+  void PushEmittedNames() {
+    emitted_names_stack_.push_back(emitted_device_names_);
+  }
+  void PopEmittedNames() {
+    if (!emitted_names_stack_.empty()) {
+      emitted_device_names_ = emitted_names_stack_.back();
+      emitted_names_stack_.pop_back();
+    }
+  }
+
   std::set<std::string> cooperatives; // futures with cooperative-dma
   std::unordered_set<std::string> async_subbyte_futures;
 
@@ -364,6 +386,7 @@ private:
     hoisted_scale_accum_scopes.clear();
     live_chunk_aliases.clear();
     cluster_trigger_events_.clear();
+    emitted_device_names_.clear();
     ResetLineDirectiveState();
   }
 

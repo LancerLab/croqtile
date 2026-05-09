@@ -1,0 +1,16 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - 2>&1 | FileCheck %s
+//
+// Test: A println AFTER a shadowing declaration should use the
+// INNER variable's optimized value (not the parameter).
+
+__co__ void baz(int a) {
+  parallel p by 1 {
+    int a = a + 7;
+    println(a);
+  }
+}
+
+// After the declaration, println(a) should reference the inner `a`.
+// FCtx optimizes it to (a + 7) where `a` is the parameter.
+// CHECK: __global__ void __choreo_device_baz
+// CHECK: printf("%lld\n", static_cast<long long>((a + 7)));

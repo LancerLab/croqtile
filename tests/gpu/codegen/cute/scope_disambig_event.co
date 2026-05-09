@@ -1,0 +1,22 @@
+// RUN: choreo -n -es -t cute -arch=sm_86 %s -o - 2>&1 | FileCheck %s
+//
+// Test: Nested parallel blocks declaring shared events with the same name
+// produce distinct names in generated code (no C++ redefinition).
+
+__co__ auto foo(f16 [128, 128] lhs, f16 [128, 128] rhs) {
+  f16 [128, 128] output;
+
+  int MMA_M = 16, MMA_N = 16, MMA_K = 16;
+
+  parallel {m, n} by [128 / MMA_M / 4, 128 / MMA_N] : block {
+    shared event e;
+    parallel {g0, g1} by [4, 1]: group {
+      shared event e;
+    }
+  }
+  return output;
+}
+
+// First `e` keeps original name, nested `e` gets a suffix.
+// CHECK: cuda::barrier<cuda::thread_scope_block> e;
+// CHECK: cuda::barrier<cuda::thread_scope_block> e__1;
