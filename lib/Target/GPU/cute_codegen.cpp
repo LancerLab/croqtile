@@ -433,10 +433,11 @@ void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
 }
 
 void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
-                                    const std::string& indent) {
-  os << indent << "// Finalize WGMMA operations\n";
+                                    const std::string& indent,
+                                    bool force_wait) {
   os << indent << "warpgroup_commit_batch();\n";
-  os << indent << "warpgroup_wait<0>();\n";
+  if (!has_explicit_mma_wait || force_wait)
+    os << indent << "warpgroup_wait<0>();\n";
   has_pending_wgmma_finalize = false;
   warpspec_wgmma_arrived = false;
 }
@@ -1010,6 +1011,7 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     levels.push(ParallelLevel::NONE);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
+    has_explicit_mma_wait = AST::ContainsMMAWait(n);
     CollectClusterTriggerEvents(&n, cluster_trigger_events_);
     BuildSiteAssertionMap();
     device_fn = "__choreo_device_" + fname;
@@ -4776,7 +4778,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       return false;
     } break;
     case AST::MMAOperation::Store: {
-      if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent);
+      if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
       auto ca = op.StoreTo();
       auto t_sym = ca->data->name;
       auto ty = GetSymbolType(t_sym);

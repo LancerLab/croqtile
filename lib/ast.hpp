@@ -3845,6 +3845,22 @@ inline bool HasUnrollHint(const ForeachBlock& n, int& factor) {
   return false;
 }
 
+inline bool ContainsMMAWait(const Node& n) {
+  if (auto* mma = dyn_cast<MMA>(&n)) {
+    if (mma->GetOperation()->Tag() == MMAOperation::Wait) return true;
+  }
+  if (n.HasBody()) {
+    if (auto body = n.GetBody()) {
+      for (auto& child : body->values)
+        if (ContainsMMAWait(*child)) return true;
+    }
+  } else if (auto* mn = dyn_cast<MultiNodes>(&n)) {
+    for (auto& child : mn->values)
+      if (ContainsMMAWait(*child)) return true;
+  }
+  return false;
+}
+
 inline bool IsSymbolOrArrayRef(const Node& n) {
   auto id = GetName(n);
   if (id.has_value()) return true;

@@ -201,6 +201,7 @@ private:
   std::string deferred_spm_decls;
   std::deque<std::string> recent_tma_tx_bytes;
   bool has_pending_wgmma_finalize = false;
+  bool has_explicit_mma_wait = false;
   bool wgmma_arrive_state_declared = false;
   std::set<std::string> cluster_trigger_events_;
   bool has_analyzed_warpspec = false;
@@ -355,6 +356,7 @@ private:
     post_site_assertions.clear();
     recent_tma_tx_bytes.clear();
     has_pending_wgmma_finalize = false;
+    has_explicit_mma_wait = false;
     wgmma_arrive_state_declared = false;
     set_cuda_func_attribute_max_dynamic_shared_memory_size = false;
     hoisted_scale_decl_scopes.clear();
@@ -499,7 +501,8 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
-  void EmitWGMMAFinalize(std::ostringstream& os, const std::string& indent);
+  void EmitWGMMAFinalize(std::ostringstream& os, const std::string& indent,
+                         bool force_wait = false);
   std::string LinearizeArrayOffset(const std::string& base_expr,
                                    const std::vector<AST::ptr<AST::Node>>& subs,
                                    const ValueList& array_dims,

@@ -51,5 +51,5 @@ __co__ void test_wait_depth(global f16 [M, K] lhs,
 }
 
 // CHECK: warpgroup_commit_batch();
-// CHECK-NEXT: warpgroup_wait<0>();
+// CHECK-NOT: warpgroup_wait<0>();
 // CHECK: warpgroup_wait<3>();
