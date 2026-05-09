@@ -1,0 +1,12 @@
+// RUN: choreo -es -t cute -arch=sm_80 %s -o - | FileCheck %s
+// Regression test: namespace-qualified identifiers used as template arguments
+// must be emitted verbatim (with namespace prefix) in device kernel code.
+
+__co__ void test_ns_tmpl_codegen(f32 [64, 64] a, f32 [64] b) {
+  parallel p by 1 {
+    local f32[b.span] tmp{0.0f};
+    call mylib::compute<64, mylib::MY_CONST>(tmp, |tmp.span|);
+  }
+}
+
+// CHECK: mylib::compute<64, mylib::MY_CONST>(

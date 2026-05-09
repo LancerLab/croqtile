@@ -8223,8 +8223,18 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
   if (n.template_args) {
     oss << "<";
     size_t i = 0;
-    for (auto& ta : n.template_args->AllValues())
-      oss << ((i++ == 0) ? "" : ", ") << OpExprSTR(ta, "", true, IsHost());
+    for (auto& ta : n.template_args->AllValues()) {
+      // Namespace-qualified C++ name: emit verbatim; VALNO strips the prefix.
+      std::string ta_str;
+      if (auto id = dyn_cast<AST::Identifier>(ta))
+        if (id->name.find("::") != std::string::npos) ta_str = id->name;
+      if (ta_str.empty())
+        if (auto expr = dyn_cast<AST::Expr>(ta))
+          if (auto sym = expr->GetSymbol())
+            if (sym->name.find("::") != std::string::npos) ta_str = sym->name;
+      oss << ((i++ == 0) ? "" : ", ")
+          << (ta_str.empty() ? OpExprSTR(ta, "", true, IsHost()) : ta_str);
+    }
     oss << ">";
   }
 
