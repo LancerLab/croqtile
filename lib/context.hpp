@@ -439,10 +439,14 @@ private:
       false;                 // Do not emit cuda runtime env check.
   bool use_warpspec = false; // Enable warp-specialized synchronization for
                              // shared event/full-empty pipelines.
+  bool hoist_wgmma_arrive = false; // Hoist warpgroup_arrive before unrolled
+                                   // foreach with WGMMA exec but no commit.
   bool single_thread_producer =
       true;                  // In warpspec mode, use a single producer thread
                              // for producer inthreads; otherwise guard
                              // producer TMA/event ops individually.
+  // Skip wg_barrier.sync() before shared-to-global TMA copies when set via CLI.
+  bool skip_epilogue_group_sync = false;
   bool fast_compile = false; // Use precompiled CuTe runtime for faster nvcc
                              // compilation via separate compilation + linking.
   bool use_target_lib = false; // Lower __lib_* builtins to target library calls
@@ -614,7 +618,9 @@ public:
     return disable_cuda_runtime_env_check;
   }
   bool UseWarpSpec() const { return use_warpspec; }
+  bool HoistWGMMAArrive() const { return hoist_wgmma_arrive; }
   bool SingleThreadProducer() const { return single_thread_producer; }
+  bool SkipEpilogueGroupSync() const { return skip_epilogue_group_sync; }
   bool FastCompile() const { return fast_compile; }
   bool UseTargetLib() const { return use_target_lib; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
@@ -654,7 +660,11 @@ public:
     max_local_mem_capacity = sz;
   }
   void SetUseWarpSpec(bool value) { use_warpspec = value; }
+  void SetHoistWGMMAArrive(bool value) { hoist_wgmma_arrive = value; }
   void SetSingleThreadProducer(bool value) { single_thread_producer = value; }
+  void SetSkipEpilogueGroupSync(bool value) {
+    skip_epilogue_group_sync = value;
+  }
   void SetFastCompile(bool value) { fast_compile = value; }
   void SetUseTargetLib(bool value) { use_target_lib = value; }
   void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
