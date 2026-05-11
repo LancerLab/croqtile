@@ -4134,14 +4134,16 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                fsto == Storage::SHARED) {
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
 
-      if (tma_sync_level == ParallelLevel::GROUP)
-        ds << d_indent << "__syncwarp();\n";
-      else if (tma_sync_level == ParallelLevel::GROUPx4)
-        EmitGroupX4Sync(ds, d_indent);
-      else if (NeedWarpSpecGroupX4SyncForCurrentScope())
-        EmitGroupX4Sync(ds, d_indent);
-      else
-        ds << d_indent << "__syncthreads();\n";
+      if (!CCtx().SkipEpilogueGroupSync()) {
+        if (tma_sync_level == ParallelLevel::GROUP)
+          ds << d_indent << "__syncwarp();\n";
+        else if (tma_sync_level == ParallelLevel::GROUPx4)
+          EmitGroupX4Sync(ds, d_indent);
+        else if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
+          ds << d_indent << "__syncthreads();\n";
+      }
 
       if (tma_sync_level == ParallelLevel::GROUP) {
         ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
@@ -6430,6 +6432,38 @@ bool CuteCodeGen::Visit(AST::WithBlock& n) {
   return true;
 }
 
+// True when the subtree has an MMA Exec but no MMA Commit (batched WGMMA).
+static bool ForeachHasMMAExecWithoutCommit(const ptr<AST::Node>& node) {
+  if (!node) return false;
+  bool has_exec = false;
+  bool has_commit = false;
+  auto walk = [&](auto&& self, const ptr<AST::Node>& n) -> void {
+    if (!n) return;
+    if (auto mma = dyn_cast<AST::MMA>(n)) {
+      if (auto op = mma->GetOperation()) {
+        if (op->Tag() == AST::MMAOperation::Exec) has_exec = true;
+        if (op->Tag() == AST::MMAOperation::Commit) has_commit = true;
+      }
+      return;
+    }
+    if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
+      for (auto& item : mn->values) self(self, item);
+      return;
+    }
+    if (auto ie = dyn_cast<AST::IfElseBlock>(n)) {
+      self(self, ie->GetBody());
+      if (ie->HasElse()) self(self, ie->GetElseBody());
+      return;
+    }
+    if (auto block = dyn_cast<AST::Block>(n)) {
+      self(self, block->GetBody());
+      return;
+    }
+  };
+  walk(walk, node);
+  return has_exec && !has_commit;
+}
+
 bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
@@ -6499,11 +6533,19 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   }
 
   int unroll_factor = 0;
-  if (AST::HasUnrollHint(n, unroll_factor)) {
+  const bool has_unroll = AST::HasUnrollHint(n, unroll_factor);
+  if (has_unroll) {
     if (unroll_factor > 0)
       IndStream() << "#pragma unroll " << unroll_factor << "\n";
     else
       IndStream() << "#pragma unroll\n";
+  }
+
+  if (!IsHost() && CCtx().HoistWGMMAArrive() && IsWarpSpecActive() &&
+      bdim_level == ParallelLevel::GROUPx4 && !warpspec_wgmma_arrived &&
+      has_unroll && ForeachHasMMAExecWithoutCommit(n.GetBody())) {
+    ds << d_indent << "warpgroup_arrive();\n";
+    warpspec_wgmma_arrived = true;
   }
 
   for (auto& rn : n.GetRanges()) {
