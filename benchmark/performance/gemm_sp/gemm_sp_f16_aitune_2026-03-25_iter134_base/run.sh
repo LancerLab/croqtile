@@ -5,15 +5,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 export PATH=/usr/local/cuda/bin:$PATH
 
 BIN="$SCRIPT_DIR/gemm_sp_f16_iter134"
+CHOREO="$REPO_ROOT/build/choreo"
 
-nvcc -gencode arch=compute_90a,code=sm_90a -std=c++17 \
-  -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__ \
-  -D__USE_CUDA_TYPE__ -D__CHOREO_DMA_DIAGNOSIS__ \
-  -Xcompiler -static-libstdc++ -O3 --use_fast_math -ftz=true \
-  -I"$REPO_ROOT/runtime" -I"$REPO_ROOT/extern/cutlass/include" \
-  -L/usr/local/cuda/lib64 -lcuda \
+"$CHOREO" -t cute -arch=sm_90a --use-warpspec --use-prepack --stmatrix \
   -o "$BIN" \
-  "$SCRIPT_DIR/gemm_sp_f16_iter134_base.cu"
+  "$SCRIPT_DIR/gemm_sp_f16_aitune_2026-03-25_iter134_base.co"
 
 echo "Built: $BIN"
 "$BIN" "$@"
