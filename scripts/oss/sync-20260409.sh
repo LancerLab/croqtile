@@ -110,7 +110,7 @@ fi
 is_excluded() {
   local fpath="$1"
   case "$fpath" in
-    lib/Target/GCU/*|tests/gcu/*|benchmark/*|Documents/internal/*|Documents/Documentation/target/*|Documents/GPU-Examples/*|extern/*|scripts/*.sh|scripts/*.md|scripts/hooks/*|scripts/oss/*|samples/*|.gitlab-ci.yml|.gitlab/*|runtime/catz/*|.gitignore|.gitmodules|.gitattributes|.vscode/*|results.tsv|.claude/*|.codex/*|.github/skills/*|.cursor/*|performance/*|tests/fsm_engine/*|AGENTS.md|.clang-format)
+    lib/Target/GCU/*|tests/gcu/*|benchmark/*|Documents/internal/*|Documents/Documentation/target/*|Documents/GPU-Examples/*|extern/*|scripts/*.sh|scripts/*.md|scripts/hooks/*|scripts/oss/*|samples/*|.gitlab-ci.yml|.gitlab/*|runtime/catz/*|.gitignore|.gitmodules|.gitattributes|.vscode/*|results.tsv|.claude/*|.codex/*|.github/skills/*|.cursor/*|performance/*|AGENTS.md|.clang-format)
       return 0 ;;
     *) return 1 ;;
   esac

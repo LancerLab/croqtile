@@ -58,9 +58,6 @@ runtime/gcu/
 # Internal performance results
 performance/
 
-# Internal test infra (AI tuning FSM tests)
-tests/fsm_engine/
-
 # Project meta (managed separately per repo)
 AGENTS.md
 .clang-format
