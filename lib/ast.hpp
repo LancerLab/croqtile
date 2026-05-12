@@ -2568,11 +2568,14 @@ struct DMAAttribute {
   bool multicast = false;
   int sparse_n = 0;
   int sparse_m = 0;
+  // L2 TMA promotion: 0 = none; else 64/128/256 (CUDA CUtensorMapL2promotion).
+  int l2_promote_bytes = 0;
   DMAAttribute(SwizMode swiz = SwizMode::NONE, bool explicit_swiz = false,
                bool zf = false, bool sp = false, int sp_n = 0, int sp_m = 0,
-               bool mc = false)
+               bool mc = false, int l2_promote_bytes = 0)
       : sw_mode(swiz), explicit_swizzle(explicit_swiz), zfill(zf),
-        is_sparse(sp), multicast(mc), sparse_n(sp_n), sparse_m(sp_m) {}
+        is_sparse(sp), multicast(mc), sparse_n(sp_n), sparse_m(sp_m),
+        l2_promote_bytes(l2_promote_bytes) {}
 };
 
 struct DMAAsync {
@@ -2653,6 +2656,7 @@ public:
   SwizMode GetSwizzleMode() const { return attr.sw_mode; }
   bool HasExplicitSwizzle() const { return attr.explicit_swizzle; }
   void SetSwizzleMode(SwizMode sm) { attr.sw_mode = sm; }
+  int GetL2PromoteBytes() const { return attr.l2_promote_bytes; }
   const std::pair<int, int> GetSparsePattern() const {
     return {attr.sparse_n, attr.sparse_m};
   }

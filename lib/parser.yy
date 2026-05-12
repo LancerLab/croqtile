@@ -188,7 +188,7 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK MMAWAIT
 %token <std::string> UNROLL
@@ -204,6 +204,7 @@ extern int yylex();
 %nterm <std::string> builtin_print_func arith_operation spanid cstrings arith_builtin_func atomic_builtin_func align_func id_with_namespace
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <Choreo::SwizMode> swiz_mode swiz_value
+%nterm <int> promote_value
 %nterm <std::string> dma_operation
 %nterm <AST::DMAAttribute> dma_attrib
 %nterm <bool> bool_value sync_type pass_by_ref tdma
@@ -1769,6 +1770,10 @@ dma_attrib
         $$ = $1;
       }
     | dma_attrib ZFILL { $1.zfill = true; $$ = $1; }
+    | dma_attrib PROMOTE LT promote_value GT {
+        $1.l2_promote_bytes = $4;
+        $$ = $1;
+      }
     | dma_attrib MULTICAST { $1.multicast = true; $$ = $1; }
     | /*empty*/ {}
     ;
@@ -1847,6 +1852,19 @@ swiz_value
           Parser::error(@1, "swizzle value must be 128, 64, or 32");
           YYERROR;
         }
+        }
+      }
+    ;
+
+promote_value
+    : NUM {
+        switch ($1) {
+        case 64:
+        case 128:
+        case 256: $$ = $1; break;
+        default:
+          Parser::error(@1, "L2 promote size must be 64, 128, or 256");
+          YYERROR;
         }
       }
     ;

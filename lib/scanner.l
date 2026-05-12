@@ -519,6 +519,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".swiz"    return Choreo::Parser::make_SWIZZLE(yytext, loc);
   ".sp"      return Choreo::Parser::make_SPARSE(yytext, loc);
   ".zfill"   return Choreo::Parser::make_ZFILL(yytext, loc);
+  ".promote" return Choreo::Parser::make_PROMOTE(yytext, loc);
   ".multicast" return Choreo::Parser::make_MULTICAST(yytext, loc);
   ".any"     return Choreo::Parser::make_NONE(yytext, loc);
   ".async"   return Choreo::Parser::make_ASYNC(yytext, loc);
