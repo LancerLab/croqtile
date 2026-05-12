@@ -1,4 +1,0 @@
-interface:
-  display_name: "Verify Choreo Kernel"
-  short_description: "Run and verify choreo kernel correctness"
-  default_prompt: "Use $verify-choreo-kernel to compile a .co kernel into an executable, run correctness verification, and collect debug info on failures."

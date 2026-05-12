@@ -1,4 +1,0 @@
-interface:
-  display_name: "Tune Choreo Kernel"
-  short_description: "Auto-tune kernel macros for best TFLOPS."
-  default_prompt: "Use $tune-choreo-kernel to sweep macro-defined kernel parameters for a target problem size and keep the best TFLOPS variant."

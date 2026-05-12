@@ -34,3 +34,7 @@ extern/clang-format*
 
 !extern/Makefile
 !extern/cutlass
+
+.claude**
+.codex**
+.github/**

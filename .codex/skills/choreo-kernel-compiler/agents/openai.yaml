@@ -1,4 +1,0 @@
-interface:
-  display_name: "Choreo Kernel Compiler"
-  short_description: "Compile .co kernels with choreo fast"
-  default_prompt: "Use $choreo-kernel-compiler to compile a .co kernel with ./build/choreo and verify the output artifact."
