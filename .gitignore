@@ -29,3 +29,7 @@ extern/clang-format*
 !extern/gtest
 
 benchmark/**
+
+.claude**
+.codex**
+.github/**
