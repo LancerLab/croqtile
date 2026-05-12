@@ -118,7 +118,8 @@ struct choreo_event {
 // tops::private_dte (dynamic SDTE) for transfers involving Private memory.
 // TOPSCC_PRIVATE_DTE_AUTO_INIT enables RAII lifecycle management.
 using choreo_dte_ctx_t = tops_dte_ctx_base_s;
-using choreo_cdte = tops::private_cdte;
+using choreo_cdte = tops::shared_dte;
+using choreo_cdte_priv = tops::private_cdte;
 using choreo_sdte = tops::private_dte;
 using choreo_event = tops::event;
 __device__ __forceinline__ void tops_init_dte(tops_dte_ctx_base_s* ctx) {
@@ -130,6 +131,7 @@ __device__ __forceinline__ void tops_destroy_dte(tops_dte_ctx_base_s* ctx) {
   #else
 using choreo_dte_ctx_t = tops_dte_ctx_t;
 using choreo_cdte = tops_dte_ctx_t;
+using choreo_cdte_priv = tops_dte_ctx_t;
 using choreo_sdte = tops_dte_ctx_t;
 using choreo_event = tops::event;
   #endif
@@ -154,6 +156,9 @@ struct future {
     ST_WAITED = 3,
   };
   Status s = ST_NONE;
+#if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
+  bool explicit_init = false;
+#endif
 
   #ifdef __CHOREO_DMA_DIAGNOSIS__
   // diagnosis-only fields: source location for runtime error messages
@@ -184,11 +189,18 @@ struct future {
   __device__ future(choreo_sdte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
-        md(mdata ? mdata : data), s(ST_NONE), name(n), line(l), column(c) {}
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(false),
+        name(n), line(l), column(c) {}
   __device__ future(choreo_cdte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
-        md(mdata ? mdata : data), s(ST_NONE), name(n), line(l), column(c) {}
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(true),
+        name(n), line(l), column(c) {}
+  __device__ future(choreo_cdte_priv& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(false),
+        name(n), line(l), column(c) {}
     #endif // __GCU_ARCH__
   #else    // !__CHOREO_DMA_DIAGNOSIS__
   __device__ future(choreo_dte_ctx_t& dte, const char* n, unsigned l,
@@ -221,18 +233,26 @@ struct future {
     (void)c;
   }
     #elif __GCU_ARCH__ == 300
-  __device__ future(tops::private_dte& dte, const char* n, unsigned l,
+  __device__ future(choreo_sdte& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
-        md(mdata ? mdata : data), s(ST_NONE) {
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(false) {
     (void)n;
     (void)l;
     (void)c;
   }
-  __device__ future(tops::private_cdte& dte, const char* n, unsigned l,
+  __device__ future(choreo_cdte& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
-        md(mdata ? mdata : data), s(ST_NONE) {
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(true) {
+    (void)n;
+    (void)l;
+    (void)c;
+  }
+  __device__ future(choreo_cdte_priv& dte, const char* n, unsigned l,
+                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+      : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(false) {
     (void)n;
     (void)l;
     (void)c;
@@ -243,7 +263,11 @@ struct future {
   // context is retrieved to invoke data operations
   __device__ auto get_ctx() {
     if (s == ST_NONE) {
+  #if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
+      if (explicit_init) ctx->init_comm();
+  #else
       tops_init_dte(ctx);
+  #endif
       s = ST_INITED;
     }
   #ifdef __CHOREO_DMA_DIAGNOSIS__
@@ -371,7 +395,11 @@ struct future {
       __co_abort__();
     }
   #endif // __CHOREO_DMA_DIAGNOSIS__
+  #if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
+    if (s >= ST_INITED && explicit_init) ctx->destroy_comm();
+  #else
     if (s >= ST_INITED) tops_destroy_dte(ctx);
+  #endif
   }
   __device__ future(const future& f) = delete;
   __device__ future(future&& f) = delete;

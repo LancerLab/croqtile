@@ -193,7 +193,8 @@ TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
   return vty_str;
 }
 
-const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
+const std::string TopsccCodeGen::DMATypeSTR(Storage sto,
+                                            bool block_level) const {
   if (CCtx().GetArch() == "gcu400") {
     if (sto == Storage::GLOBAL)
       return "tops::shared_dte"; // to confirm
@@ -204,11 +205,12 @@ const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
     else
       choreo_unreachable("unsupported storage for DMA context.");
   } else if (CCtx().GetArch() == "gcu300") {
-    // choreo_cdte/choreo_sdte are defined in topscc_header.h per arch:
-    //   GCU300: choreo_cdte = tops::private_cdte, choreo_sdte = tops::private_dte
-    //   Other:  both fall back to tops_dte_ctx_t
+    // GCU300 CDTE type selection:
+    //   block_level=true  -> choreo_cdte (shared_dte): block-shared, single-thread init
+    //   block_level=false -> choreo_cdte_priv (private_cdte): per-thread, RAII init
+    // SDTE always uses choreo_sdte (private_dte)
     if (sto == Storage::SHARED)
-      return "choreo::choreo_cdte";
+      return block_level ? "choreo::choreo_cdte" : "choreo::choreo_cdte_priv";
     else
       return "choreo::choreo_sdte";
   } else
@@ -217,9 +219,9 @@ const std::string TopsccCodeGen::DMATypeSTR(Storage sto) const {
 
 void TopsccCodeGen::EmitDTEDecl(std::ostringstream& os,
                                 const std::string& indent, Storage sto,
-                                const std::string& varname,
-                                bool with_scope) const {
-  auto type = DMATypeSTR(sto);
+                                const std::string& varname, bool with_scope,
+                                bool block_level) const {
+  auto type = DMATypeSTR(sto, block_level);
   os << indent << type << " " << varname << ";\n";
   if (with_scope && CCtx().GetArch() != "gcu300" &&
       CCtx().GetArch() != "gcu400")
@@ -994,7 +996,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
             "error: unexpected storage type in spm initialization.");
       ds << d_indent << BufferInitPred(sto) << "{\n";
       IncrDeviceIndent();
-      EmitDTEDecl(ds, d_indent, sto, sym__init, true);
+      EmitDTEDecl(ds, d_indent, sto, sym__init, true, false);
       ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
          << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
          << "*)" << sym << ", " << ShapeSTR(sty->GetShape()) << "), "
@@ -1401,7 +1403,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
     // claim the date transfer engine
     auto dte_ctx = GetDTEContextName();
-    EmitDTEDecl(ds, d_indent, sto, dte_ctx, false);
+    EmitDTEDecl(ds, d_indent, sto, dte_ctx, false, NeedLevelPred());
     auto future_name = n.future;
     if (future_name.empty()) {
       static size_t future_count = 0;

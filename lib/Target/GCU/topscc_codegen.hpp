@@ -373,10 +373,11 @@ private:
   const std::string AddressOffset(const Shape&, const AST::DataAccess&,
                                   bool) const;
   const std::string VectorTypeSTR(const ptr<Type>& vt) const;
-  const std::string DMATypeSTR(Storage) const;
+  const std::string DMATypeSTR(Storage, bool block_level = true) const;
   void EmitDTEDecl(std::ostringstream& os, const std::string& indent,
                    Storage sto, const std::string& varname,
-                   bool with_scope = false) const;
+                   bool with_scope = false,
+                   bool block_level = true) const;
 };
 
 } // namespace Topscc
