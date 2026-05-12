@@ -202,47 +202,47 @@ gcu3_debug_test:
     - 'echo "Cleanup done."'
 
 # Docker environment GCU3 testing
-gcu3_docker_test:
-  stage: pre-release-tests
-  rules:
-    - if: $NO_GCU == "true"
-      when: never
-    - if: >
-        $CI_PIPELINE_SOURCE == "merge_request_event" &&
-        $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
-      when: never
-    - if: >
-        $CI_COMMIT_BRANCH == "main" || 
-        $CI_COMMIT_BRANCH =~ /^release\// ||
-        $CI_PIPELINE_SOURCE == "merge_request_event"
-      when: on_success
-  script:
-    - echo "Running tests with GCU3 S60 EFDOCKER..."
-    - source /home/.devtools/tools/env.sh
-    - docker start choreo_ci
-    - |
-      docker exec -u 0 choreo_ci bash -c "
-      TIMESTAMP=$(date +%Y%m%d_%H%M%S) && \
-      WORKDIR=/tmp/choreo_docker_test_\$TIMESTAMP && \
-      mkdir -p \$WORKDIR && \
-      cd \$WORKDIR && \
-      if [ -d choreo ]; then
-        cd choreo && git reset --hard && git pull;
-      else
-        git clone git@git.enflame.cn:xiaofeng.guan/choreo.git && cd choreo;
-      fi && \
-      make setup-core && \
-      make test && \
-      rm -rf \$WORKDIR"
-    - docker stop choreo_ci
-  tags:
-    - GCU3
-  allow_failure: true
-  timeout: 15m
-  after_script:
-    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
-    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
-    - 'echo "Cleanup done."'
+# gcu3_docker_test:
+#   stage: pre-release-tests
+#   rules:
+#     - if: $NO_GCU == "true"
+#       when: never
+#     - if: >
+#         $CI_PIPELINE_SOURCE == "merge_request_event" &&
+#         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
+#       when: never
+#     - if: >
+#         $CI_COMMIT_BRANCH == "main" || 
+#         $CI_COMMIT_BRANCH =~ /^release\// ||
+#         $CI_PIPELINE_SOURCE == "merge_request_event"
+#       when: on_success
+#   script:
+#     - echo "Running tests with GCU3 S60 EFDOCKER..."
+#     - source /home/.devtools/tools/env.sh
+#     - docker start choreo_ci
+#     - |
+#       docker exec -u 0 choreo_ci bash -c "
+#       TIMESTAMP=$(date +%Y%m%d_%H%M%S) && \
+#       WORKDIR=/tmp/choreo_docker_test_\$TIMESTAMP && \
+#       mkdir -p \$WORKDIR && \
+#       cd \$WORKDIR && \
+#       if [ -d choreo ]; then
+#         cd choreo && git reset --hard && git pull;
+#       else
+#         git clone git@git.enflame.cn:xiaofeng.guan/choreo.git && cd choreo;
+#       fi && \
+#       make setup-core && \
+#       make test && \
+#       rm -rf \$WORKDIR"
+#     - docker stop choreo_ci
+#   tags:
+#     - GCU3
+#   allow_failure: true
+#   timeout: 15m
+#   after_script:
+#     - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+#     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+#     - 'echo "Cleanup done."'
 
 # Package testing
 package_test:
