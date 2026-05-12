@@ -7003,6 +7003,19 @@ void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
      << "\n";
 }
 
+static const char* CuTensorMapL2PromotionExpr(int l2_promote_bytes) {
+  switch (l2_promote_bytes) {
+  case 64:
+    return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_64B";
+  case 128:
+    return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B";
+  case 256:
+    return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_256B";
+  default:
+    return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE";
+  }
+}
+
 void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
   for (auto desc : cgi.GetTMADesc(pb)) {
     ptr<AST::ChunkAt> g_ca = nullptr;
@@ -7115,8 +7128,8 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent
        << "        CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE,\n";
     hs << h_indent << "        " << cu_swizzle_str << ",\n";
-    hs << h_indent
-       << "        CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE,\n";
+    hs << h_indent << "        " << CuTensorMapL2PromotionExpr(desc.GetPromoteBytes())
+       << ",\n";
     hs << h_indent
        << "        "
           "CUtensorMapFloatOOBfill::CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);\n";
