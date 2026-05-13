@@ -1,0 +1,24 @@
+// RUN: choreo -E %s | FileCheck --match-full-lines %s
+
+#define TILE_M 128
+#define TILE_N 64
+
+__co__ int test_host_if(f32 d[]) {
+#if TILE_M == 128
+   tile_m_128
+#endif
+#if TILE_N > 32
+   tile_n_large
+#endif
+#if TILE_M * TILE_N == 8192
+   product_match
+#endif
+#if (TILE_M / TILE_N) == 2
+   ratio_match
+#endif
+}
+
+// CHECK: tile_m_128
+// CHECK: tile_n_large
+// CHECK: product_match
+// CHECK: ratio_match

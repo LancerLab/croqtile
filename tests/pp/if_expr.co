@@ -1,0 +1,69 @@
+// RUN: copp %s -o - | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
+
+#define MY_MACRO 3
+#define BIG 3000
+#define SMALL 1
+
+__co__ int test_if_expr(f32 d[]) {
+#if MY_MACRO == 3
+   eq_match
+#endif
+#if MY_MACRO != 3
+   ne_nomatch
+#endif
+#if MY_MACRO != 5
+   ne_match
+#endif
+#if BIG > 2000
+   gt_match
+#endif
+#if BIG >= 3000
+   ge_match
+#endif
+#if SMALL < 5
+   lt_match
+#endif
+#if SMALL <= 1
+   le_match
+#endif
+#if (MY_MACRO * 2) == 6
+   arith_mul_match
+#endif
+#if (BIG / 1000) == 3
+   arith_div_match
+#endif
+#if (MY_MACRO + 2) == 5
+   arith_add_match
+#endif
+#if (MY_MACRO - 1) == 2
+   arith_sub_match
+#endif
+#if MY_MACRO > 5
+   gt_nomatch
+#endif
+#if defined(MY_MACRO) && MY_MACRO == 3
+   defined_and_compare
+#endif
+#if !defined(UNDEF_MACRO)
+   not_defined_match
+#endif
+#if defined(UNDEF_MACRO) || BIG > 1000
+   or_match
+#endif
+}
+
+// CHECK: eq_match
+// CHECK-NOT: ne_nomatch
+// CHECK: ne_match
+// CHECK: gt_match
+// CHECK: ge_match
+// CHECK: lt_match
+// CHECK: le_match
+// CHECK: arith_mul_match
+// CHECK: arith_div_match
+// CHECK: arith_add_match
+// CHECK: arith_sub_match
+// CHECK-NOT: gt_nomatch
+// CHECK: defined_and_compare
+// CHECK: not_defined_match
+// CHECK: or_match

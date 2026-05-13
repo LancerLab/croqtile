@@ -1,0 +1,30 @@
+// RUN: copp %s -o - | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
+
+#define MODE 2
+
+__co__ int test_elif(f32 d[]) {
+#if MODE == 1
+   mode_one
+#elif MODE == 2
+   mode_two
+#elif MODE == 3
+   mode_three
+#else
+   mode_default
+#endif
+#if MODE > 10
+   too_big
+#elif MODE < 0
+   too_small
+#elif MODE >= 2
+   just_right
+#endif
+}
+
+// CHECK-NOT: mode_one
+// CHECK: mode_two
+// CHECK-NOT: mode_three
+// CHECK-NOT: mode_default
+// CHECK-NOT: too_big
+// CHECK-NOT: too_small
+// CHECK: just_right

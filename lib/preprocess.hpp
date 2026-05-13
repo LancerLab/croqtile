@@ -27,11 +27,11 @@ struct Range {
 class Preprocess {
 public:
   Preprocess(std::ostream& o);
-
-protected:
   using DefineMap = std::unordered_map<std::string, std::string>;
   using FuncMap =
       std::unordered_map<std::string, std::tuple<std::string, std::string>>;
+
+protected:
   std::ostream& output;
   DefineMap globalDefines;
   DefineMap localDefines;
@@ -98,6 +98,8 @@ protected:
                               std::unordered_map<std::string, bool>& macroMap);
   bool EvaluateBooleanExpression(const std::string& condition_expr,
                                  const DefineMap& defines);
+  bool EvaluateIfExpression(const std::string& raw_expr,
+                            const DefineMap& defines, const FuncMap& funcs);
   const std::string HandleCComments(const std::string& line);
   void HandleOneUserLine(const std::string& line);
   void HandleOneKernelLine(const std::string& line, bool handle_comment = true);
