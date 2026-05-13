@@ -406,6 +406,353 @@ bool Preprocess::EvaluateBooleanExpression(const std::string& condition_expr,
   return values.top();
 }
 
+namespace {
+
+void skipWhitespace(const std::string& s, size_t& pos) {
+  while (pos < s.size() && isspace(s[pos])) ++pos;
+}
+
+int64_t parseExpr(const std::string& s, size_t& pos, int minPrec);
+int64_t parseUnary(const std::string& s, size_t& pos);
+int64_t parsePrimary(const std::string& s, size_t& pos);
+
+struct OpInfo {
+  int prec;
+  bool leftAssoc;
+};
+
+OpInfo getBinOpInfo(const std::string& s, size_t pos, std::string& op) {
+  skipWhitespace(s, pos);
+  if (pos >= s.size()) return {-1, true};
+
+  char c = s[pos];
+  char c2 = (pos + 1 < s.size()) ? s[pos + 1] : '\0';
+
+  if (c == '|' && c2 == '|') {
+    op = "||";
+    return {1, true};
+  }
+  if (c == '&' && c2 == '&') {
+    op = "&&";
+    return {2, true};
+  }
+  if (c == '|' && c2 != '|') {
+    op = "|";
+    return {3, true};
+  }
+  if (c == '^') {
+    op = "^";
+    return {4, true};
+  }
+  if (c == '&' && c2 != '&') {
+    op = "&";
+    return {5, true};
+  }
+  if (c == '=' && c2 == '=') {
+    op = "==";
+    return {6, true};
+  }
+  if (c == '!' && c2 == '=') {
+    op = "!=";
+    return {6, true};
+  }
+  if (c == '<' && c2 == '=') {
+    op = "<=";
+    return {7, true};
+  }
+  if (c == '>' && c2 == '=') {
+    op = ">=";
+    return {7, true};
+  }
+  if (c == '<' && c2 != '<') {
+    op = "<";
+    return {7, true};
+  }
+  if (c == '>' && c2 != '>') {
+    op = ">";
+    return {7, true};
+  }
+  if (c == '<' && c2 == '<') {
+    op = "<<";
+    return {8, true};
+  }
+  if (c == '>' && c2 == '>') {
+    op = ">>";
+    return {8, true};
+  }
+  if (c == '+') {
+    op = "+";
+    return {9, true};
+  }
+  if (c == '-') {
+    op = "-";
+    return {9, true};
+  }
+  if (c == '*') {
+    op = "*";
+    return {10, true};
+  }
+  if (c == '/') {
+    op = "/";
+    return {10, true};
+  }
+  if (c == '%') {
+    op = "%";
+    return {10, true};
+  }
+
+  return {-1, true};
+}
+
+int64_t applyBinOp(const std::string& op, int64_t lhs, int64_t rhs) {
+  if (op == "||") return (lhs || rhs) ? 1 : 0;
+  if (op == "&&") return (lhs && rhs) ? 1 : 0;
+  if (op == "|") return lhs | rhs;
+  if (op == "^") return lhs ^ rhs;
+  if (op == "&") return lhs & rhs;
+  if (op == "==") return (lhs == rhs) ? 1 : 0;
+  if (op == "!=") return (lhs != rhs) ? 1 : 0;
+  if (op == "<") return (lhs < rhs) ? 1 : 0;
+  if (op == ">") return (lhs > rhs) ? 1 : 0;
+  if (op == "<=") return (lhs <= rhs) ? 1 : 0;
+  if (op == ">=") return (lhs >= rhs) ? 1 : 0;
+  if (op == "<<") return lhs << rhs;
+  if (op == ">>") return lhs >> rhs;
+  if (op == "+") return lhs + rhs;
+  if (op == "-") return lhs - rhs;
+  if (op == "*") return lhs * rhs;
+  if (op == "/") return rhs != 0 ? lhs / rhs : 0;
+  if (op == "%") return rhs != 0 ? lhs % rhs : 0;
+  return 0;
+}
+
+int64_t parsePrimary(const std::string& s, size_t& pos) {
+  skipWhitespace(s, pos);
+  if (pos >= s.size()) return 0;
+
+  if (s[pos] == '(') {
+    ++pos;
+    int64_t val = parseExpr(s, pos, 0);
+    skipWhitespace(s, pos);
+    if (pos < s.size() && s[pos] == ')') ++pos;
+    return val;
+  }
+
+  if (isdigit(s[pos])) {
+    int64_t val = 0;
+    int base = 10;
+    if (s[pos] == '0' && pos + 1 < s.size()) {
+      char nc = s[pos + 1];
+      if (nc == 'x' || nc == 'X') {
+        base = 16;
+        pos += 2;
+      } else if (nc == 'b' || nc == 'B') {
+        base = 2;
+        pos += 2;
+      } else if (isdigit(nc)) {
+        base = 8;
+        ++pos;
+      }
+    }
+    while (pos < s.size()) {
+      char c = s[pos];
+      int digit = -1;
+      if (c >= '0' && c <= '9')
+        digit = c - '0';
+      else if (c >= 'a' && c <= 'f')
+        digit = c - 'a' + 10;
+      else if (c >= 'A' && c <= 'F')
+        digit = c - 'A' + 10;
+      if (digit < 0 || digit >= base) break;
+      val = val * base + digit;
+      ++pos;
+    }
+    while (pos < s.size() &&
+           (s[pos] == 'u' || s[pos] == 'U' || s[pos] == 'l' || s[pos] == 'L'))
+      ++pos;
+    return val;
+  }
+
+  if (isalpha(s[pos]) || s[pos] == '_') {
+    size_t start = pos;
+    while (pos < s.size() && (isalnum(s[pos]) || s[pos] == '_')) ++pos;
+    return 0;
+  }
+
+  return 0;
+}
+
+int64_t parseUnary(const std::string& s, size_t& pos) {
+  skipWhitespace(s, pos);
+  if (pos >= s.size()) return 0;
+
+  if (s[pos] == '!') {
+    ++pos;
+    return parseUnary(s, pos) ? 0 : 1;
+  }
+  if (s[pos] == '~') {
+    ++pos;
+    return ~parseUnary(s, pos);
+  }
+  if (s[pos] == '-') {
+    ++pos;
+    return -parseUnary(s, pos);
+  }
+  if (s[pos] == '+') {
+    ++pos;
+    return parseUnary(s, pos);
+  }
+
+  return parsePrimary(s, pos);
+}
+
+int64_t parseExpr(const std::string& s, size_t& pos, int minPrec) {
+  int64_t lhs = parseUnary(s, pos);
+
+  while (true) {
+    skipWhitespace(s, pos);
+    if (pos >= s.size()) break;
+
+    std::string op;
+    size_t savedPos = pos;
+    OpInfo info = getBinOpInfo(s, pos, op);
+    if (info.prec < minPrec) break;
+
+    pos = savedPos + op.size();
+    int nextMinPrec = info.leftAssoc ? info.prec + 1 : info.prec;
+    int64_t rhs = parseExpr(s, pos, nextMinPrec);
+    lhs = applyBinOp(op, lhs, rhs);
+  }
+
+  skipWhitespace(s, pos);
+  if (pos < s.size() && s[pos] == '?') {
+    ++pos;
+    int64_t trueVal = parseExpr(s, pos, 0);
+    skipWhitespace(s, pos);
+    if (pos < s.size() && s[pos] == ':') ++pos;
+    int64_t falseVal = parseExpr(s, pos, 0);
+    lhs = lhs ? trueVal : falseVal;
+  }
+
+  return lhs;
+}
+
+std::string replaceDefinedOperator(const std::string& expr,
+                                   const Preprocess::DefineMap& defines) {
+  std::string result;
+  size_t i = 0;
+  while (i < expr.size()) {
+    if (i + 7 <= expr.size() && expr.substr(i, 7) == "defined") {
+      size_t start = i;
+      size_t j = i + 7;
+      while (j < expr.size() && isspace(expr[j])) ++j;
+      std::string macroName;
+      if (j < expr.size() && expr[j] == '(') {
+        ++j;
+        while (j < expr.size() && isspace(expr[j])) ++j;
+        size_t nameStart = j;
+        while (j < expr.size() && (isalnum(expr[j]) || expr[j] == '_')) ++j;
+        macroName = expr.substr(nameStart, j - nameStart);
+        while (j < expr.size() && isspace(expr[j])) ++j;
+        if (j < expr.size() && expr[j] == ')') ++j;
+      } else {
+        size_t nameStart = j;
+        while (j < expr.size() && (isalnum(expr[j]) || expr[j] == '_')) ++j;
+        macroName = expr.substr(nameStart, j - nameStart);
+      }
+      if (!macroName.empty()) {
+        bool isDefined = defines.find(macroName) != defines.end();
+        result += isDefined ? "1" : "0";
+        i = j;
+      } else {
+        result += expr[i++];
+      }
+    } else if (isalpha(expr[i]) || expr[i] == '_') {
+      size_t start = i;
+      while (i < expr.size() && (isalnum(expr[i]) || expr[i] == '_')) ++i;
+      std::string word = expr.substr(start, i - start);
+      if (word == "defined") {
+        result += word;
+      } else {
+        result += word;
+      }
+    } else {
+      result += expr[i++];
+    }
+  }
+  return result;
+}
+
+std::string substituteAndReplace(const std::string& raw_expr,
+                                 const Preprocess::DefineMap& defines,
+                                 const Preprocess::FuncMap& funcs) {
+  std::string expr = replaceDefinedOperator(raw_expr, defines);
+
+  std::string prev;
+  int iterations = 0;
+  while (expr != prev && iterations < 32) {
+    prev = expr;
+    std::string result;
+    std::string token;
+    for (size_t i = 0; i <= expr.size(); ++i) {
+      char c = (i < expr.size()) ? expr[i] : '\0';
+      if (isalnum(c) || c == '_') {
+        token += c;
+      } else {
+        if (!token.empty()) {
+          auto it = defines.find(token);
+          auto fit = funcs.find(token);
+          if (it != defines.end() && fit == funcs.end())
+            result += it->second;
+          else
+            result += token;
+          token.clear();
+        }
+        if (i < expr.size()) result += c;
+      }
+    }
+    expr = result;
+    ++iterations;
+  }
+
+  std::string final_result;
+  std::string token;
+  for (size_t i = 0; i <= expr.size(); ++i) {
+    char c = (i < expr.size()) ? expr[i] : '\0';
+    if (isalnum(c) || c == '_') {
+      token += c;
+    } else {
+      if (!token.empty()) {
+        bool allDigit = true;
+        for (char tc : token)
+          if (!isdigit(tc) &&
+              !((tc >= 'a' && tc <= 'f') || (tc >= 'A' && tc <= 'F') ||
+                tc == 'x' || tc == 'X'))
+            allDigit = false;
+        if (allDigit)
+          final_result += token;
+        else
+          final_result += "0";
+        token.clear();
+      }
+      if (i < expr.size()) final_result += c;
+    }
+  }
+
+  return final_result;
+}
+
+} // anonymous namespace
+
+bool Preprocess::EvaluateIfExpression(const std::string& raw_expr,
+                                      const DefineMap& defines,
+                                      const FuncMap& funcs) {
+  std::string expr = substituteAndReplace(raw_expr, defines, funcs);
+  size_t pos = 0;
+  int64_t result = parseExpr(expr, pos, 0);
+  return result != 0;
+}
+
 const std::string Preprocess::HandleCComments(const std::string& line) {
   std::string work_string = line;
   std::string result_line;
@@ -522,27 +869,11 @@ void Preprocess::HandleOneUserLine(const std::string& line) {
     std::smatch match;
     uc_if_count++;
     if (std::regex_match(bline, match, ifRegex)) {
-      auto uc_code = match[1].str();
-      std::smatch uc_code_match;
-
-      std::regex uc_code_regex(R"(!?defined\s*(?:\(\w+\)|\w+)\s*.*)");
-      if (std::regex_match(uc_code, uc_code_match, uc_code_regex)) {
-        bool condition = EvaluateBooleanExpression(uc_code, globalDefines);
-        uc_condition_stack.push(condition);
-        uc_skip_stack.push(uc_skip_line);
-        uc_skip_line = uc_skip_line || !condition;
-      } else {
-        try {
-          bool condition = std::stoi(match[1].str()) != 0;
-          uc_condition_stack.push(condition);
-          uc_skip_stack.push(uc_skip_line);
-          uc_skip_line = uc_skip_line || !condition;
-        } catch (...) {
-          uc_condition_stack.push(false);
-          uc_skip_stack.push(uc_skip_line);
-          uc_skip_line = true;
-        }
-      }
+      bool condition = EvaluateIfExpression(match[1].str(), globalDefines,
+                                            globalDefinedFuncs);
+      uc_condition_stack.push(condition);
+      uc_skip_stack.push(uc_skip_line);
+      uc_skip_line = uc_skip_line || !condition;
     }
 
     output << line << '\n';
@@ -554,27 +885,11 @@ void Preprocess::HandleOneUserLine(const std::string& line) {
     std::regex ifRegex("#elif\\s+(.*)");
     std::smatch match;
     if (std::regex_match(bline, match, ifRegex)) {
-      auto uc_code = match[1].str();
-      std::smatch uc_code_match;
-
-      std::regex uc_code_regex(R"(!?defined\s*(?:\(\w+\)|\w+)\s*.*)");
-      if (std::regex_match(uc_code, uc_code_match, uc_code_regex)) {
-        bool condition = EvaluateBooleanExpression(uc_code, globalDefines);
-        uc_condition_stack.push(condition);
-        uc_skip_stack.push(uc_skip_line);
-        uc_skip_line = uc_skip_line || !condition;
-      } else {
-        try {
-          bool condition = std::stoi(match[1].str()) != 0;
-          uc_condition_stack.push(condition);
-          uc_skip_stack.push(uc_skip_line);
-          uc_skip_line = uc_skip_line || !condition;
-        } catch (...) {
-          uc_condition_stack.push(false);
-          uc_skip_stack.push(uc_skip_line);
-          uc_skip_line = true;
-        }
-      }
+      bool condition = EvaluateIfExpression(match[1].str(), globalDefines,
+                                            globalDefinedFuncs);
+      uc_condition_stack.push(condition);
+      uc_skip_stack.push(uc_skip_line);
+      uc_skip_line = uc_skip_line || !condition;
     }
     output << line << '\n';
     return;
@@ -806,26 +1121,11 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
     std::regex ifRegex("#if\\s+(.*)");
     std::smatch match;
     if (std::regex_match(bline, match, ifRegex)) {
-      auto co_code = match[1].str();
-      std::smatch co_code_match;
-      std::regex co_code_regex(R"(!?defined\s*(?:\(\w+\)|\w+)\s*.*)");
-      if (std::regex_match(co_code, co_code_match, co_code_regex)) {
-        bool condition = EvaluateBooleanExpression(co_code, localDefines);
-        co_condition_stack.push(condition);
-        co_skip_stack.push(co_skip_line);
-        co_skip_line = co_skip_line || !condition;
-      } else {
-        try {
-          bool condition = std::stoi(match[1].str()) != 0;
-          co_condition_stack.push(condition);
-          co_skip_stack.push(co_skip_line);
-          co_skip_line = co_skip_line || !condition;
-        } catch (...) {
-          co_condition_stack.push(false);
-          co_skip_stack.push(co_skip_line);
-          co_skip_line = true;
-        }
-      }
+      bool condition =
+          EvaluateIfExpression(match[1].str(), localDefines, localDefinedFuncs);
+      co_condition_stack.push(condition);
+      co_skip_stack.push(co_skip_line);
+      co_skip_line = co_skip_line || !condition;
       co_if_count++;
     }
     if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
@@ -836,26 +1136,11 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
     std::regex elifRegex("#elif\\s+(.*)");
     std::smatch match;
     if (std::regex_match(bline, match, elifRegex) && !co_skip_line) {
-      auto co_code = match[1].str();
-      std::regex co_code_regex(R"(!?defined\s*(?:\(\w+\)|\w+)\s*.*)");
-      std::smatch co_code_match;
-      if (std::regex_match(co_code, co_code_match, co_code_regex)) {
-        bool condition = EvaluateBooleanExpression(co_code, localDefines);
-        co_condition_stack.push(condition);
-        co_skip_stack.push(co_skip_line);
-        co_skip_line = co_skip_line || !condition;
-      } else {
-        try {
-          bool condition = std::stoi(match[1].str()) != 0;
-          co_condition_stack.push(condition);
-          co_skip_stack.push(co_skip_line);
-          co_skip_line = co_skip_line || !condition;
-        } catch (...) {
-          co_condition_stack.push(false);
-          co_skip_stack.push(co_skip_line);
-          co_skip_line = true;
-        }
-      }
+      bool condition =
+          EvaluateIfExpression(match[1].str(), localDefines, localDefinedFuncs);
+      co_condition_stack.push(condition);
+      co_skip_stack.push(co_skip_line);
+      co_skip_line = co_skip_line || !condition;
     }
     if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
   } else if (isDirective(bline, "#else")) {
