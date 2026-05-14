@@ -188,7 +188,7 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG LAUNCHBOUNDS
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK MMAWAIT
 %token <std::string> UNROLL
@@ -218,7 +218,7 @@ extern int yylex();
 %nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type_list device_nested_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Call>> call_stmt setreg_stmt
+%nterm <AST::ptr<AST::Call>> call_stmt setreg_stmt launch_bounds_stmt
 %nterm <AST::DMAAsync> tdma_async
 %nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
@@ -713,6 +713,7 @@ statement
     | trigger_stmt SEMCOL        { $$ = $1; }
     | call_stmt    SEMCOL        { $$ = $1; }
     | setreg_stmt  SEMCOL        { $$ = $1; }
+    | launch_bounds_stmt SEMCOL  { $$ = $1; }
     | swap_stmt    SEMCOL        { $$ = $1; }
     | return_stmt  SEMCOL        { $$ = $1; }
     | sync_stmt    SEMCOL        { $$ = $1; }
@@ -2477,6 +2478,16 @@ setreg_stmt
             AST::Call::BIF | AST::Call::ANNO);
       }
     ;
+
+launch_bounds_stmt
+  : LAUNCHBOUNDS LPAREN s_expr RPAREN {
+    auto args = AST::Make<AST::MultiValues>(@1, ", ");
+    args->Append($3);
+    $$ = AST::Make<AST::Call>(
+      @1, AST::Make<AST::Identifier>(@1, $1), args,
+      AST::Call::BIF | AST::Call::ANNO);
+    }
+  ;
 
 swap_stmt
     : SWAP LPAREN id_list RPAREN {

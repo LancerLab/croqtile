@@ -4858,14 +4858,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // --- Mask determination ---
       bool need_m_mask = false;
       bool need_n_mask = false;
+      bool explicit_m_mask = false;
+      bool explicit_n_mask = false;
       std::string row_guard_expr;
       std::string col_guard_expr;
 
       if (op.StoreHasExplicitMask()) {
         need_m_mask = true;
+        explicit_m_mask = true;
         row_guard_expr = ExprSTR(op.StoreRowMask(), IsHost());
         if (op.StoreColMask()) {
           need_n_mask = true;
+          explicit_n_mask = true;
           col_guard_expr = ExprSTR(op.StoreColMask(), IsHost());
         }
       } else {
@@ -5001,7 +5005,20 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             frag_cast + ");\n";
         std::string mma_m_str = ValueSTR(mc_dim_m);
 
-        if (need_m_mask && need_n_mask) {
+          if (explicit_m_mask && explicit_n_mask) {
+           ds << d_indent << "store_fragment_d_mask_row_col<"
+             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">(" << f_mds.first
+             << ", " << frag_cast << ", " << row_guard_expr << ", "
+             << col_guard_expr << ");\n";
+          } else if (explicit_m_mask) {
+           ds << d_indent << "store_fragment_d_mask_row<" << CUTE_WGMMA_ATOM
+             << ", " << DIM_N_STR << ">(" << f_mds.first << ", "
+             << frag_cast << ", " << row_guard_expr << ");\n";
+          } else if (explicit_n_mask) {
+           ds << d_indent << "store_fragment_d_mask_col<" << CUTE_WGMMA_ATOM
+             << ", " << DIM_N_STR << ">(" << f_mds.first << ", "
+             << frag_cast << ", " << col_guard_expr << ");\n";
+          } else if (need_m_mask && need_n_mask) {
           ds << d_indent << "{ int __rg = " << row_guard_expr
              << "; int __cg = " << col_guard_expr << ";\n";
           ds << d_indent << "  if (__rg >= " << mma_m_str
@@ -5532,13 +5549,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
       // Mask determination for mma.sync stores
       bool sync_need_m = false, sync_need_n = false;
+      bool sync_explicit_m = false, sync_explicit_n = false;
       std::string sync_rg, sync_cg;
 
       if (op.StoreHasExplicitMask()) {
         sync_need_m = true;
+        sync_explicit_m = true;
         sync_rg = ExprSTR(op.StoreRowMask(), IsHost());
         if (op.StoreColMask()) {
           sync_need_n = true;
+          sync_explicit_n = true;
           sync_cg = ExprSTR(op.StoreColMask(), IsHost());
         }
         Note(n.LOC(), "mma.store uses explicit mask guard for boundary store.");
@@ -5606,7 +5626,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
 
       auto mma_m_sync = ssmi.shape.at(0);
-      if (sync_need_m && sync_need_n) {
+      if (sync_explicit_m && sync_explicit_n) {
+        ds << d_indent << "store_fragment_d_mask_row_col<" << CUTE_MMA_ATOM
+          << ">(" << f_mds.first << ", " << frag_cast_sync << ", "
+          << sync_rg << ", " << sync_cg << ");\n";
+      } else if (sync_explicit_m) {
+        ds << d_indent << "store_fragment_d_mask_row<" << CUTE_MMA_ATOM
+          << ">(" << f_mds.first << ", " << frag_cast_sync << ", "
+          << sync_rg << ");\n";
+      } else if (sync_explicit_n) {
+        ds << d_indent << "store_fragment_d_mask_col<" << CUTE_MMA_ATOM
+          << ">(" << f_mds.first << ", " << frag_cast_sync << ", "
+          << sync_cg << ");\n";
+      } else if (sync_need_m && sync_need_n) {
         ds << d_indent << "{ int __rg = " << sync_rg
            << "; int __cg = " << sync_cg << ";\n";
         ds << d_indent << "  if (__rg >= " << ValueSTR(mma_m_sync)
@@ -6259,6 +6291,8 @@ bool CuteCodeGen::Visit(AST::Call& n) {
         os << indent << "asm volatile(\"setmaxnreg.dec.sync.aligned.u32 "
            << reg_limit.value() << ";\");\n";
       }
+      return true;
+    } else if (func_name == "launch_bounds") {
       return true;
     } else if (func_name == "print" || func_name == "println") {
       if (n.CompileTimeEval()) return true;
@@ -7249,6 +7283,26 @@ std::optional<int64_t> CuteCodeGen::GetSetRegLimit(AST::ParallelBy* pb) const {
   return std::nullopt;
 }
 
+std::optional<int64_t>
+CuteCodeGen::GetLaunchBoundsMinBlocks(AST::ParallelBy* pb) const {
+  if (!pb || !pb->GetBody()) return std::nullopt;
+
+  for (const auto& stmt : pb->GetBody()->values) {
+    auto call = dyn_cast<AST::Call>(stmt);
+    if (!call || !call->IsBIF() || call->function->name != "launch_bounds")
+      continue;
+    if (!call->arguments || call->arguments->Count() != 1) return std::nullopt;
+    auto arg = dyn_cast<AST::Expr>(call->arguments->ValueAt(0));
+    if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric())
+      return std::nullopt;
+    auto min_blocks = VIInt(arg->Opts().GetVal());
+    if (!min_blocks || min_blocks.value() <= 0) return std::nullopt;
+    return min_blocks.value();
+  }
+
+  return std::nullopt;
+}
+
 void CuteCodeGen::EmitCudaFree() {
   assert(IsHost());
   for (const auto& item : GetDeviceFuncIns(updating_cgi)) {
@@ -7267,16 +7321,29 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
                                      const ValueItem& ring_start) {
   const auto& lcs = cgi.GetFunctionLaunches(fname);
   auto setreg_limit = GetSetRegLimit(pb);
+  auto launch_bounds_min_blocks = GetLaunchBoundsMinBlocks(pb);
   bool use_maxnreg_attr = setreg_limit.has_value() && CCtx().ArchNum() < 90;
+  std::optional<std::string> launch_bounds_attr;
+  if (launch_bounds_min_blocks.has_value() && !lcs.empty()) {
+    auto inner_thr_count = lcs[0].thread_count.x * lcs[0].thread_count.y *
+                           lcs[0].thread_count.z;
+    auto group_count = lcs[0].group_count.x * lcs[0].group4_count.x *
+                       lcs[0].group_count.y * lcs[0].group_count.z;
+    auto thr_count = inner_thr_count * group_count;
+    launch_bounds_attr = "__launch_bounds__(" + ValueSTR(thr_count) + ", " +
+                         std::to_string(*launch_bounds_min_blocks) + ") ";
+  }
   if (!lcs.empty() && lcs[0].HasCluster()) {
     auto& cc = lcs[0].cluster_count;
     auto cluster_total = cc.x * cc.y * cc.z;
     oss << "__cluster_dims__(" << ValueSTR(cluster_total) << ", 1, 1) ";
     oss << "__global__ ";
+    if (launch_bounds_attr) oss << *launch_bounds_attr;
     if (use_maxnreg_attr) oss << "__maxnreg__(" << setreg_limit.value() << ") ";
     oss << "void " << device_fn << "(";
   } else {
     oss << "__global__ ";
+    if (launch_bounds_attr) oss << *launch_bounds_attr;
     if (use_maxnreg_attr) oss << "__maxnreg__(" << setreg_limit.value() << ") ";
     oss << "void " << device_fn << "(";
   }

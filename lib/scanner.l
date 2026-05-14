@@ -563,6 +563,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
   "setreg"   return Choreo::Parser::make_SETREG(yytext, loc);
+  "launch_bounds" return Choreo::Parser::make_LAUNCHBOUNDS(yytext, loc);
   "select"   return Choreo::Parser::make_SELECT(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "where"    return Choreo::Parser::make_WHERE(yytext, loc);

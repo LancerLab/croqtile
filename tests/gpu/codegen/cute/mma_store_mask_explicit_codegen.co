@@ -1,0 +1,65 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v "\<CHECK\>" | FileCheck %s
+
+#define WARP_M 64
+#define WARP_N 128
+#define WARP_K 16
+#define TILE_K 16
+#define SWIZ 128
+
+__co__ void mask_row_only(global f16 [M, K] lhs,
+                          global f16 [N, K] rhs,
+                          global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, TILE_K] lhs_s;
+    shared f16 [WARP_N, TILE_K] rhs_s;
+    mc = mma.fill.f16 0;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      tma.copy.swiz<SWIZ> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<SWIZ> rhs.subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load.swiz<SWIZ> lhs_s;
+        mb = mma.load.swiz<SWIZ> rhs_s;
+        mma.row.row mc, ma, mb;
+      }
+    }
+    row_guard = M - block_m * WARP_M;
+    mma.store.mask mc,
+      output.subspan(WARP_M, WARP_N).at(block_m, block_n),
+      row_guard;
+  }
+}
+
+__co__ void mask_row_col(global f16 [M, K] lhs,
+                         global f16 [N, K] rhs,
+                         global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared f16 [WARP_M, TILE_K] lhs_s;
+    shared f16 [WARP_N, TILE_K] rhs_s;
+    mc = mma.fill.f16 0;
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      tma.copy.swiz<SWIZ> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<SWIZ> rhs.subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s;
+      parallel p by 1 : group-4 {
+        ma = mma.load.swiz<SWIZ> lhs_s;
+        mb = mma.load.swiz<SWIZ> rhs_s;
+        mma.row.row mc, ma, mb;
+      }
+    }
+    row_guard = M - block_m * WARP_M;
+    col_guard = N - block_n * WARP_N;
+    mma.store.mask mc,
+      output.subspan(WARP_M, WARP_N).at(block_m, block_n),
+      row_guard, col_guard;
+  }
+}
+
+int main() { return 0; }
+
+// CHECK-LABEL: __choreo_device_mask_row_only
+// CHECK: store_fragment_d_mask_row<
+// CHECK-NOT: if (__rg >=
+
+// CHECK-LABEL: __choreo_device_mask_row_col
+// CHECK: store_fragment_d_mask_row_col<
+// CHECK-NOT: if (__rg >=
