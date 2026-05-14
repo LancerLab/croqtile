@@ -1772,7 +1772,27 @@ bound_expr
     ;
 
 range_expr
-    : IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    /* explicit local name: foreach c=b, foreach c=b(lb:ub), foreach c=b(lb:ub:step) */
+    : IDENTIFIER ASSIGN IDENTIFIER {
+        $$ = AST::Make<AST::LoopRange>(@1,
+               AST::Make<AST::Identifier>(@1, $1),
+               AST::Make<AST::Identifier>(@3, $3),
+               nullptr, nullptr);
+      }
+    | IDENTIFIER ASSIGN IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
+        $$ = AST::Make<AST::LoopRange>(@1,
+               AST::Make<AST::Identifier>(@1, $1),
+               AST::Make<AST::Identifier>(@3, $3),
+               $5, $7);
+      }
+    | IDENTIFIER ASSIGN IDENTIFIER LPAREN bound_expr COL bound_expr COL index_or_none RPAREN {
+        $$ = AST::Make<AST::LoopRange>(@1,
+               AST::Make<AST::Identifier>(@1, $1),
+               AST::Make<AST::Identifier>(@3, $3),
+               $5, $7, $9);
+      }
+    /* existing forms (sugar: iv == range_var) */
+    | IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
     | IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
         $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
       }

@@ -81,9 +81,9 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
 } // namespace
 
 ValueItem TypeInference::BuildRangePredicate(AST::LoopRange& n) {
-  auto iv = sbe::sym(InScopeName(n.IVName()));
+  auto iv = sbe::sym(InScopeName(n.RangeVarName()));
 
-  auto iv_ty = GetSymbolType(n.LOC(), n.IVName());
+  auto iv_ty = GetSymbolType(n.LOC(), n.RangeVarName());
   assert(isa<BoundedType>(iv_ty));
 
   if (!IsActualBoundedIntegerType(iv_ty)) {
@@ -173,8 +173,8 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     for (auto& rn : fb->GetRanges()) {
       auto range = cast<AST::LoopRange>(rn);
-      auto sym_ty = GetSymbolType(n.LOC(), range->IVName());
-      SetNodeType(*range->iv, sym_ty);
+      auto sym_ty = GetSymbolType(n.LOC(), range->RangeVarName());
+      SetNodeType(*range->range_var, sym_ty);
     }
   }
 

@@ -359,7 +359,7 @@ void Synchronize::accept(Choreo::Visitor& v) {
 void LoopRange::accept(Choreo::Visitor& v) {
   if (lbound) lbound->accept(v);
   if (ubound) ubound->accept(v);
-  iv->accept(v);
+  range_var->accept(v);
   v.Visit(*this);
 }
 
