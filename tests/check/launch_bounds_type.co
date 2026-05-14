@@ -1,0 +1,11 @@
+// RUN: not choreo -t cute %s 2>&1 | FileCheck %s
+// CHECK: error: launch_bounds expects an integer argument but got 'f64'.
+// CHECK: Totally 1 errors have been detected.
+
+__co__ void bad_type() {
+  parallel by 1 : block {
+    launch_bounds(1.5);
+  }
+}
+
+int main() { return 0; }

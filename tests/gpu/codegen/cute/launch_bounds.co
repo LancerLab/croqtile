@@ -1,0 +1,16 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v "\<CHECK\>" | FileCheck %s
+
+__co__ void launch_bounds_demo(global f16 [M, K] input,
+                               global f16 [M, K] output) {
+  parallel by 1 : block {
+    launch_bounds(7);
+    parallel t by 128 : thread {
+      output.at(t, 0) = input.at(t, 0);
+    }
+  }
+}
+
+int main() { return 0; }
+
+// CHECK: __global__ __launch_bounds__(128, 7) void __choreo_device_launch_bounds_demo(

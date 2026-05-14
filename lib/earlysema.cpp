@@ -2189,6 +2189,25 @@ bool EarlySemantics::Visit(AST::Call& n) {
           Error1(n.LOC(), "setreg expects an integer argument but got '" +
                               PSTR(aty) + "'.");
       }
+    } else if (func_name == "launch_bounds") {
+      if (CCtx().TargetName() != "cute") {
+        Error1(n.LOC(), "launch_bounds is only supported for the cute target.");
+      }
+      if (pl_depth == 0) {
+        Error1(n.LOC(),
+               "launch_bounds can only be used inside parallel-by blocks.");
+      }
+      if (n.arguments->Count() != 1) {
+        Error1(n.LOC(),
+               "launch_bounds expects exactly one integer argument, but got " +
+                   std::to_string(n.arguments->Count()) + ".");
+      } else {
+        auto aty = NodeType(*n.arguments->ValueAt(0));
+        if (!isa<ScalarIntegerType>(aty))
+          Error1(n.LOC(),
+                 "launch_bounds expects an integer argument but got '" +
+                     PSTR(aty) + "'.");
+      }
     } else if (func_name == "print" || func_name == "println") {
       auto Printable = [](ptr<Type> ty) -> bool {
         if (isa<StringType>(ty) || isa<ScalarIntegerType>(ty) ||
