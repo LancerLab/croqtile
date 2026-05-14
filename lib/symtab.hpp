@@ -221,6 +221,15 @@ public:
     return false;
   }
 
+  // Register a name in the current scope for declaration-order resolution.
+  // Unlike DefineSymbol, does not require a type and does not sync with
+  // the global symbol table. Used by late passes that only need
+  // NameInScopeOrNull to respect traversal order.
+  void DeclareSymbolName(const std::string& n) {
+    if (scoped_symtab.empty() || scoped_symtab.back().count(n)) return;
+    scoped_symtab.back().emplace(n, nullptr);
+  }
+
   const ptr<Type> LookupSymbol(const std::string& n) const {
     for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
       if (it->count(n)) return it->at(n);

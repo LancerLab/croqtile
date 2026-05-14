@@ -3494,6 +3494,7 @@ const std::string TopsccCodeGen::AddressOffset(const Shape& shape,
     }
     if (IsActualVectorType(item_ty) && da.HasNote("VLDST")) { oss << "[0]"; }
   }
+  if (operand_cnt == 0 && idx > 0) return "0";
   return oss.str();
 }
 

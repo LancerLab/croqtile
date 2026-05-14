@@ -452,19 +452,19 @@ private:
         auto new_host_iv_ty =
             MakeBoundedITupleType(Shape(1, top_iv_ubs / host_iv_ubs));
 
-        auto new_node = AST::MakeIdExpr(expr_ptr->GetR()->loc, "_");
-        new_node->Opts().SetVal(sbe::nu(0));
-        auto unit_bound_ty = MakeBoundedITupleType(Shape(1, 1));
+        // auto new_node = AST::MakeIdExpr(expr_ptr->GetR()->loc, "_");
+        // new_node->Opts().SetVal(sbe::nu(0));
+        // auto unit_bound_ty = MakeBoundedITupleType(Shape(1, 1));
 
-        new_node->SetType(unit_bound_ty);
+        // new_node->SetType(unit_bound_ty);
         top_node.value->SetType(new_host_iv_ty);
         top_node.SetType(new_host_iv_ty);
 
-        SymTab()->AddSymbol(SSTab().ScopeName() + "_", unit_bound_ty);
+        // SymTab()->AddSymbol(SSTab().ScopeName() + "_", unit_bound_ty);
         SymTab()
             ->GetSymbol(InScopeName(top_node.GetName()))
             ->SetType(new_host_iv_ty);
-        expr_ptr->SetR(new_node); // Replace GetR with a new node
+        // expr_ptr->SetR(new_node); // Replace GetR with a new node
       }
     } else if (expr_ptr->IsUnary()) {
       processHostIVForExpr(expr_ptr->GetR(), current_iv_name, top_node);

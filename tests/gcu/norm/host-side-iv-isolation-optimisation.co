@@ -87,7 +87,7 @@ int main() { /// host program
 // CHECK:       `- future: output__future__
 // CHECK:       `- from: output.ChunkAt(tile0)
 // CHECK:       `- to: output__future____buf__
-// CHECK:         `- Assign: anon_3 =  ( (p # l_tile)  # _)
+// CHECK:         `- Assign: anon_3 =  ( (p # l_tile)  # tile0)
 // CHECK:         `- DMA.copy.async
 // CHECK:           `- future: out_store
 // CHECK:           `- from: l2_out
