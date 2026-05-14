@@ -56,8 +56,8 @@ This repository targets **GPU (CUDA/CuTe) only**. The codebase uses **C++17**, *
 |---|---|
 | `make` | Default build (Release, cmake+ninja) |
 | `make -jN` | Parallel build (N = core count) |
-| `make debug` | Debug build → `build-debug/` |
-| `make release` | Release build → `build-release/` |
+| `make debug` | Debug build -> `build-debug/` |
+| `make release` | Release build -> `build-release/` |
 | `make clean` | Clean all build artifacts |
 | `make test` | Run full test suite |
 | `make test-debug` | Test against debug build |
@@ -73,8 +73,8 @@ After a successful build, `./choreo` and `./copp` symlinks are created/updated a
 ### Rebuild decision
 
 - If `./choreo` exists and points at a valid binary, you often do not need to rebuild.
-- If `.cpp`/`.hpp` files under `lib/` or `tools/` changed → run `make`.
-- On compile errors or broken symlinks → `make clean && make`.
+- If `.cpp`/`.hpp` files under `lib/` or `tools/` changed -> run `make`.
+- On compile errors or broken symlinks -> `make clean && make`.
 
 ---
 
