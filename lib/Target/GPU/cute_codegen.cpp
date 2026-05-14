@@ -61,6 +61,7 @@ extern Option<bool> ptx_barrier;
 extern Option<bool> use_stmatrix;
 extern Option<bool> hoist_offset;
 extern Option<bool> hoist_scale;
+extern Option<bool> event_arrive_tx;
 
 namespace Choreo {
 extern Option<bool> sim_sparse;
@@ -2563,6 +2564,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         std::string ic;
         if (etc > 0)
           ic = std::to_string(etc);
+        else if (event_arrive_tx && !IsWarpSpecActive())
+          ic = "blockDim.x";
         else {
           auto ep =
               cgi.GetFunctionTrait(fname).GetEventParticipation(n.name_str);
@@ -2573,6 +2576,11 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
       ds << d_indent << "}\n";
       ds << d_indent << "__syncthreads();\n";
+      if (event_arrive_tx) {
+        ds << d_indent
+           << "cuda::barrier<cuda::thread_scope_block>::arrival_token " << ename
+           << "__tok;\n";
+      }
       ssm.MapDeviceSymbol(InScopeName(n.name_str), ename);
     } break;
     case Storage::LOCAL: {
@@ -3188,6 +3196,10 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 
       if (skip_load_tma_init_block) { continue; }
 
+      if (event_arrive_tx && desc.IsEventManaged()) { continue; }
+
+      if (event_arrive_tx && desc.IsStore()) { continue; }
+
       emitted_tma_init_idx++;
 
       // TMA stores (S2G) still need a barrier/TMAAtom for proper
@@ -3320,6 +3332,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!is_tma && !future_only) return "";
     // Event-only TMAs use event barriers and don't need futures
     if (is_tma && !future_only && event_only) return "";
+    if (is_tma && !future_only && event_arrive_tx && dma_plan &&
+        dma_plan->direction == DMADirection::S2G)
+      return "";
     auto future_name = n.future;
 
     auto cp_atom_name =
@@ -4174,8 +4189,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
          << "d_shared_to_global(&" << *tname << "_tensor_map, "
          << ValueSTR(Reverse(GenIndices(t_ca))) << ", " << f_buf_expr << ");\n";
       ds << d_indent << "  cde::cp_async_bulk_commit_group();\n";
+      ds << d_indent << "  cde::cp_async_bulk_wait_group_read<0>();\n";
       ds << d_indent << "}\n";
-      // DO not check or wait. TMA share=>global is special
+      // DO not check or wait beyond bulk wait (matches tuned CUDA kernels).
     }
   };
 
@@ -4573,8 +4589,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto a_sym = AST::FragName(op.ExecOperand(1));
       auto b_sym = AST::FragName(op.ExecOperand(2));
       has_pending_wgmma_finalize = true;
-      if (!(IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4 &&
-            warpspec_wgmma_arrived)) {
+      if (!(bdim_level == ParallelLevel::GROUPx4 && warpspec_wgmma_arrived)) {
         ds << d_indent << "warpgroup_arrive();\n";
         if (IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4)
           warpspec_wgmma_arrived = true;
@@ -5908,10 +5923,16 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             ds << d_indent << "}\n";
           }
         } else {
-          bool guarded = BeginEventCritical();
-          ds << d_indent << ExprSTR(t, false) << ".wait(" << ExprSTR(t, false)
-             << ".arrive()); // wait event(barrier)\n";
-          EndEventCritical(guarded);
+          auto bar_name = ExprSTR(t, false);
+          if (event_arrive_tx && event_arrive_tx_events_.count(bar_name) > 0) {
+            ds << d_indent << bar_name << ".wait(std::move(" << bar_name
+               << "__tok)); // wait event(barrier)\n";
+          } else {
+            bool guarded = BeginEventCritical();
+            ds << d_indent << bar_name << ".wait(" << bar_name
+               << ".arrive()); // wait event(barrier)\n";
+            EndEventCritical(guarded);
+          }
         }
       } break;
       default:
@@ -6171,6 +6192,19 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                  << ExprSTR(f, false) << ", 1, " << tx_bytes_expr
                  << "); // trigger event(barrier)\n";
             }
+            recent_tma_tx_bytes.clear();
+          } else if (!recent_tma_tx_bytes.empty() && event_arrive_tx) {
+            auto tx_bytes_expr = SumRecentTMATxBytesExpr();
+            auto bar_name = ExprSTR(f, false);
+            ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+            ds << d_indent << "  " << bar_name << "__tok = "
+               << "cuda::device::barrier_arrive_tx(" << bar_name << ", 1, "
+               << tx_bytes_expr << ");\n";
+            ds << d_indent << "} else {\n";
+            ds << d_indent << "  " << bar_name << "__tok = " << bar_name
+               << ".arrive();\n";
+            ds << d_indent << "}\n";
+            event_arrive_tx_events_.insert(bar_name);
             recent_tma_tx_bytes.clear();
           } else {
             ds << d_indent << "(void)" << ExprSTR(f, false)
@@ -6534,18 +6568,19 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
 
   int unroll_factor = 0;
   const bool has_unroll = AST::HasUnrollHint(n, unroll_factor);
+
+  if (!IsHost() && CCtx().HoistWGMMAArrive() &&
+      bdim_level == ParallelLevel::GROUPx4 && !warpspec_wgmma_arrived &&
+      has_unroll && ForeachHasMMAExecWithoutCommit(n.GetBody())) {
+    ds << d_indent << "warpgroup_arrive();\n";
+    warpspec_wgmma_arrived = true;
+  }
+
   if (has_unroll) {
     if (unroll_factor > 0)
       IndStream() << "#pragma unroll " << unroll_factor << "\n";
     else
       IndStream() << "#pragma unroll\n";
-  }
-
-  if (!IsHost() && CCtx().HoistWGMMAArrive() && IsWarpSpecActive() &&
-      bdim_level == ParallelLevel::GROUPx4 && !warpspec_wgmma_arrived &&
-      has_unroll && ForeachHasMMAExecWithoutCommit(n.GetBody())) {
-    ds << d_indent << "warpgroup_arrive();\n";
-    warpspec_wgmma_arrived = true;
   }
 
   for (auto& rn : n.GetRanges()) {
@@ -7128,8 +7163,8 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent
        << "        CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE,\n";
     hs << h_indent << "        " << cu_swizzle_str << ",\n";
-    hs << h_indent << "        " << CuTensorMapL2PromotionExpr(desc.GetPromoteBytes())
-       << ",\n";
+    hs << h_indent << "        "
+       << CuTensorMapL2PromotionExpr(desc.GetPromoteBytes()) << ",\n";
     hs << h_indent
        << "        "
           "CUtensorMapFloatOOBfill::CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);\n";

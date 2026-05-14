@@ -206,6 +206,7 @@ private:
   ParallelLevel pb_level = ParallelLevel::BLOCK;
   AST::InThreadsBlock* in_thr_block =
       nullptr; // if the TMA is within an inthreads, record it here
+  bool event_managed = false;
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
@@ -257,6 +258,9 @@ public:
 
   void SetInThreadsBlock(AST::InThreadsBlock* in) { in_thr_block = in; }
   AST::InThreadsBlock* GetInThreadsBlock() const { return in_thr_block; }
+
+  void SetEventManaged(bool em) { event_managed = em; }
+  bool IsEventManaged() const { return event_managed; }
 
 private:
   static int index;
