@@ -442,9 +442,9 @@ private:
   bool hoist_wgmma_arrive = false; // Hoist warpgroup_arrive before unrolled
                                    // foreach with WGMMA exec but no commit.
   bool single_thread_producer =
-      true;                  // In warpspec mode, use a single producer thread
-                             // for producer inthreads; otherwise guard
-                             // producer TMA/event ops individually.
+      true; // In warpspec mode, use a single producer thread
+            // for producer inthreads; otherwise guard
+            // producer TMA/event ops individually.
   // Skip wg_barrier.sync() before shared-to-global TMA copies when set via CLI.
   bool skip_epilogue_group_sync = false;
   bool fast_compile = false; // Use precompiled CuTe runtime for faster nvcc

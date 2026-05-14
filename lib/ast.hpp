@@ -2770,8 +2770,8 @@ public:
   struct WaitInfo {
     int wait_depth;
   };
-  using InfoType =
-      std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo, ScaleInfo, WaitInfo>;
+  using InfoType = std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo,
+                                ScaleInfo, WaitInfo>;
 
 private:
   Kind tag;
