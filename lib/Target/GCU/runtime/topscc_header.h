@@ -156,9 +156,9 @@ struct future {
     ST_WAITED = 3,
   };
   Status s = ST_NONE;
-#if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
+  #if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
   bool explicit_init = false;
-#endif
+  #endif
 
   #ifdef __CHOREO_DMA_DIAGNOSIS__
   // diagnosis-only fields: source location for runtime error messages
@@ -185,22 +185,22 @@ struct future {
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(&dte), d(data), md(mdata ? mdata : data), s(ST_NONE), name(n),
         line(l), column(c) {}
-  #elif __GCU_ARCH__ == 300
+    #elif __GCU_ARCH__ == 300
   __device__ future(choreo_sdte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
-        md(mdata ? mdata : data), s(ST_NONE), explicit_init(false),
-        name(n), line(l), column(c) {}
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(false), name(n),
+        line(l), column(c) {}
   __device__ future(choreo_cdte& dte, const char* n, unsigned l, unsigned c,
                     void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
-        md(mdata ? mdata : data), s(ST_NONE), explicit_init(true),
-        name(n), line(l), column(c) {}
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(true), name(n),
+        line(l), column(c) {}
   __device__ future(choreo_cdte_priv& dte, const char* n, unsigned l,
                     unsigned c, void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
-        md(mdata ? mdata : data), s(ST_NONE), explicit_init(false),
-        name(n), line(l), column(c) {}
+        md(mdata ? mdata : data), s(ST_NONE), explicit_init(false), name(n),
+        line(l), column(c) {}
     #endif // __GCU_ARCH__
   #else    // !__CHOREO_DMA_DIAGNOSIS__
   __device__ future(choreo_dte_ctx_t& dte, const char* n, unsigned l,
@@ -233,16 +233,16 @@ struct future {
     (void)c;
   }
     #elif __GCU_ARCH__ == 300
-  __device__ future(choreo_sdte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+  __device__ future(choreo_sdte& dte, const char* n, unsigned l, unsigned c,
+                    void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
         md(mdata ? mdata : data), s(ST_NONE), explicit_init(false) {
     (void)n;
     (void)l;
     (void)c;
   }
-  __device__ future(choreo_cdte& dte, const char* n, unsigned l,
-                    unsigned c, void* data = nullptr, void* mdata = nullptr)
+  __device__ future(choreo_cdte& dte, const char* n, unsigned l, unsigned c,
+                    void* data = nullptr, void* mdata = nullptr)
       : ctx(reinterpret_cast<choreo_dte_ctx_t*>(&dte)), d(data),
         md(mdata ? mdata : data), s(ST_NONE), explicit_init(true) {
     (void)n;

@@ -387,11 +387,10 @@ public:
            (tsty->GetStorage() == Storage::GLOBAL ||
             tsty->GetStorage() == Storage::DEFAULT))) {
         auto& tma_descs = cgi.GetTMADescs();
-        auto tma_desc = TMADesc(n.GetSrc(), n.GetDst(),
-                                InScopeName(n.GetSrc()->RefSymbol()),
-                                InScopeName(n.GetDst()->RefSymbol()),
-                                n.GetSwizzleMode(), inner_pb_level,
-                                n.GetL2PromoteBytes());
+        auto tma_desc = TMADesc(
+            n.GetSrc(), n.GetDst(), InScopeName(n.GetSrc()->RefSymbol()),
+            InScopeName(n.GetDst()->RefSymbol()), n.GetSwizzleMode(),
+            inner_pb_level, n.GetL2PromoteBytes());
         auto in_thr_block =
             (in_thr_block_stack.empty() ? nullptr : in_thr_block_stack.top());
         bool is_block_scope = block_tma_futures.count(future_name) > 0;

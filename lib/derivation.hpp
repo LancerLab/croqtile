@@ -60,8 +60,7 @@ public:
       return nodes.count(sl.get());
     else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
              isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n) ||
-             isa<AST::NoValue>(n) || isa<AST::DataType>(n) ||
-             isa<AST::MMA>(n))
+             isa<AST::NoValue>(n) || isa<AST::DataType>(n) || isa<AST::MMA>(n))
       return false;
     else if (auto c = dyn_cast<AST::Call>(n))
       return nodes.count(c.get());

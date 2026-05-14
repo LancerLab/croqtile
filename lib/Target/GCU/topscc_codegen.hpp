@@ -376,8 +376,7 @@ private:
   const std::string DMATypeSTR(Storage, bool block_level = true) const;
   void EmitDTEDecl(std::ostringstream& os, const std::string& indent,
                    Storage sto, const std::string& varname,
-                   bool with_scope = false,
-                   bool block_level = true) const;
+                   bool with_scope = false, bool block_level = true) const;
 };
 
 } // namespace Topscc

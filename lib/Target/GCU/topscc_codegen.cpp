@@ -206,8 +206,9 @@ const std::string TopsccCodeGen::DMATypeSTR(Storage sto,
       choreo_unreachable("unsupported storage for DMA context.");
   } else if (CCtx().GetArch() == "gcu300") {
     // GCU300 CDTE type selection:
-    //   block_level=true  -> choreo_cdte (shared_dte): block-shared, single-thread init
-    //   block_level=false -> choreo_cdte_priv (private_cdte): per-thread, RAII init
+    //   block_level=true  -> choreo_cdte (shared_dte): block-shared,
+    //   single-thread init block_level=false -> choreo_cdte_priv
+    //   (private_cdte): per-thread, RAII init
     // SDTE always uses choreo_sdte (private_dte)
     if (sto == Storage::SHARED)
       return block_level ? "choreo::choreo_cdte" : "choreo::choreo_cdte_priv";
@@ -225,8 +226,7 @@ void TopsccCodeGen::EmitDTEDecl(std::ostringstream& os,
   os << indent << type << " " << varname << ";\n";
   if (with_scope && CCtx().GetArch() != "gcu300" &&
       CCtx().GetArch() != "gcu400")
-    os << indent << "tops::dte_scope s_" << varname << "(" << varname
-       << ");\n";
+    os << indent << "tops::dte_scope s_" << varname << "(" << varname << ");\n";
 }
 
 const std::string TopsccCodeGen::ShapeSTR(const Shape& s,

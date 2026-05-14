@@ -574,7 +574,7 @@ int64_t parsePrimary(const std::string& s, size_t& pos) {
   }
 
   if (isalpha(s[pos]) || s[pos] == '_') {
-    size_t start = pos;
+    [[maybe_unused]] size_t start = pos;
     while (pos < s.size() && (isalnum(s[pos]) || s[pos] == '_')) ++pos;
     return 0;
   }
@@ -643,7 +643,7 @@ std::string replaceDefinedOperator(const std::string& expr,
   size_t i = 0;
   while (i < expr.size()) {
     if (i + 7 <= expr.size() && expr.substr(i, 7) == "defined") {
-      size_t start = i;
+      [[maybe_unused]] size_t start = i;
       size_t j = i + 7;
       while (j < expr.size() && isspace(expr[j])) ++j;
       std::string macroName;

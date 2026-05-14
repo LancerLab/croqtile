@@ -7040,14 +7040,10 @@ void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
 
 static const char* CuTensorMapL2PromotionExpr(int l2_promote_bytes) {
   switch (l2_promote_bytes) {
-  case 64:
-    return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_64B";
-  case 128:
-    return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B";
-  case 256:
-    return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_256B";
-  default:
-    return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE";
+  case 64: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_64B";
+  case 128: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B";
+  case 256: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_256B";
+  default: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE";
   }
 }
 
