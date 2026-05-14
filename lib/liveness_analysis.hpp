@@ -52,9 +52,12 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   so the live range is still [def point, the second use]
   */
 
-  // Certain types of nodes are treated as statements.
+  // ---- Public types ----
+
   using Stmt = AST::Node;
-  Stmt* current_stmt = nullptr;
+  using BufSet = std::set<std::string>;
+  using VarSet = std::set<std::string>;
+  using DMABufInfo = std::pair<std::string, std::string>;
 
   struct ScopeEnd : public Stmt {
     ScopeEnd(const location& loc, AST::Node* s = nullptr)
@@ -75,72 +78,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
       return;
     }
   };
-  std::vector<ptr<ScopeEnd>> scope_ends;
-  using Event = std::pair<std::string, std::string>;
-  std::unordered_map<const Stmt*, std::set<Event>> events_to_add;
-  std::unordered_map<std::string, const Stmt*> scope2stmt;
-
-  std::unordered_map<std::string, std::vector<Event>> var_events;
-
-  size_t stmt_id = 0; // only preorder.
-  // map from stmt to its index in preorder_stmts.
-  std::unordered_map<const Stmt*, size_t> stmt2id;
-  std::vector<const Stmt*> preorder_stmts;
-  std::unordered_map<const Stmt*, std::string> stmt2str;
-
-  std::stringstream stmts_with_indent;
-
-  using BufSet = std::set<std::string>;
-  using VarSet = std::set<std::string>;
-  BufSet buffers, lbuffers, sbuffers, gbuffers;
-  void AddBuffer(const std::string& sname, Storage sto) {
-    buffers.insert(sname);
-    switch (sto) {
-    case Storage::LOCAL: lbuffers.insert(sname); break;
-    case Storage::SHARED: sbuffers.insert(sname); break;
-    case Storage::GLOBAL: [[fallthrough]];
-    case Storage::DEFAULT: gbuffers.insert(sname); break;
-    default: choreo_unreachable("unexpect storage: " + STR(sto));
-    }
-  }
-  std::string GetFuncNameFromScopedName(const std::string& name) const {
-    // indicate that it is a co function name
-    if (!PrefixedWith(name, "::")) return name;
-    return SplitFirst(name, "::");
-  }
-
-  // one to one. Alias of buffer. Could happen in spanas, etc.
-  std::unordered_map<std::string, std::string> Alias;
-
-  // one to many. Bind var to other vars. Could happen in select, dma, etc.
-  std::unordered_map<std::string, VarSet> Bindings;
-
-  // record the binding info to do restoration in ComputeLiveInOut().
-  std::unordered_map<const Stmt*, std::vector<std::string>>
-      stmt2binding_restore;
-
-  std::unordered_set<std::string> paraby_bounded_vars;
-
-  size_t inthreads_async_level = 0;
-  std::unordered_map<std::string, VarSet> async_inthreads_vars;
-  bool visiting_synchronize = false;
-
-  struct LivenessInfo {
-    VarSet use;
-    VarSet def;
-    VarSet live_in;
-    VarSet live_out;
-    std::string name_if_alias = "";
-    std::string name_if_binding = "";
-    bool buffer_related = false;
-  };
-  std::unordered_map<const Stmt*, LivenessInfo> linfo;
-
-  using DMABufInfo = std::pair<std::string, std::string>;
-  std::unordered_map<std::string, std::set<DMABufInfo>> fut2buffers;
-  using StrUintMap = std::unordered_map<std::string, size_t>;
-
-  VarSet dma_any;
 
   struct Range {
     size_t start;
@@ -198,9 +135,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     }
   };
 
-  std::unordered_map<std::string, Ranges> var_ranges;
-
-  // BB graph related begin
   struct BasicBlock {
     size_t id = 0;
     std::vector<size_t> stmt_ids;
@@ -212,6 +146,143 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     bool is_end = false;
   };
   using BB = BasicBlock;
+
+  struct LivenessInfo {
+    VarSet use;
+    VarSet def;
+    VarSet live_in;
+    VarSet live_out;
+    std::string name_if_alias;
+    std::string name_if_binding;
+    bool buffer_related = false;
+  };
+
+  // ---- Construction ----
+
+  LivenessAnalyzer() : VisitorWithSymTab("liveness") {
+    auto_declare_symbols = true;
+    if (trace_visit) debug_visit = true; // force debug when tracing
+    if (disabled) CCtx().SetLivenessAnalysis(false);
+  }
+  ~LivenessAnalyzer() {}
+
+  // ---- Public static methods ----
+
+  // When adding a new statement node type to HasStmt(), also add a Visit()
+  // override and DumpStmtBriefly() case, then update this count.
+  static constexpr size_t NumVisitOverrides() { return 18; }
+
+  static VarSet& SetUnionInPlace(VarSet& a, const VarSet& b);
+  static VarSet& SetDiffInPlace(VarSet& a, const VarSet& b);
+  static bool IsRef(const AST::Node& n);
+
+  // ---- Public accessors ----
+
+  const std::string STMTS_STR() const { return stmts_with_indent.str(); }
+  const std::unordered_map<std::string, Ranges>& VarRanges() const {
+    return var_ranges;
+  }
+
+  // ---- Visitor overrides ----
+
+public:
+  void TraceEachVisit(AST::Node& n, bool detail = false,
+                      const std::string& m = "") const {
+    if (!trace_visit) return;
+    if (detail)
+      dbgs() << m << STR(n) << "\n";
+    else
+      dbgs() << m << n.TypeNameString() << "\n";
+  }
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool InMidVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
+
+  bool Visit(AST::NamedTypeDecl&) override;
+  bool Visit(AST::NamedVariableDecl&) override;
+  bool Visit(AST::Assignment&) override;
+  bool Visit(AST::ParallelBy&) override;
+  bool Visit(AST::WithBlock&) override;
+  bool Visit(AST::DMA&) override;
+  bool Visit(AST::MMA&) override;
+  bool Visit(AST::ChunkAt&) override;
+  bool Visit(AST::Wait&) override;
+  bool Visit(AST::Call&) override;
+  bool Visit(AST::Rotate&) override;
+  bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Trigger&) override;
+  bool Visit(AST::Select&) override;
+  bool Visit(AST::Return&) override;
+  bool Visit(AST::ForeachBlock&) override;
+  bool Visit(AST::WhileBlock&) override;
+  bool Visit(AST::InThreadsBlock&) override;
+  bool Visit(AST::IfElseBlock&) override;
+  bool Visit(AST::FunctionDecl&) override;
+  bool Visit(AST::ChoreoFunction&) override;
+
+  // ---- Private implementation ----
+
+private:
+  // -- Statement tracking --
+  Stmt* current_stmt = nullptr;
+  size_t stmt_id = 0;
+  std::unordered_map<const Stmt*, size_t> stmt2id;
+  std::vector<const Stmt*> preorder_stmts;
+  std::unordered_map<const Stmt*, std::string> stmt2str;
+  std::vector<ptr<ScopeEnd>> scope_ends;
+
+  // -- Scope and event tracking --
+  enum class EventKind { Def, Use };
+  using Event = std::pair<EventKind, std::string>;
+  std::unordered_map<const Stmt*, std::set<Event>> events_to_add;
+  std::unordered_map<std::string, const Stmt*> scope2stmt;
+  std::unordered_map<std::string, std::vector<Event>> var_events;
+
+  // -- Dump/indent state --
+  std::stringstream stmts_with_indent;
+  std::string dump_indent_;
+  void IncrDumpIndent() { dump_indent_ += "  "; }
+  void DecrDumpIndent() {
+    assert(dump_indent_.size() >= 2 && "the indent can not be decreased.");
+    dump_indent_.erase(0, 2);
+  }
+
+  // -- Buffer tracking --
+  BufSet buffers, lbuffers, sbuffers, gbuffers;
+  void AddBuffer(const std::string& sname, Storage sto) {
+    buffers.insert(sname);
+    switch (sto) {
+    case Storage::LOCAL: lbuffers.insert(sname); break;
+    case Storage::SHARED: sbuffers.insert(sname); break;
+    case Storage::GLOBAL: [[fallthrough]];
+    case Storage::DEFAULT: gbuffers.insert(sname); break;
+    default: choreo_unreachable("unexpect storage: " + STR(sto));
+    }
+  }
+
+  // -- Alias and binding tracking --
+  // one to one. Alias of buffer. Could happen in spanas, etc.
+  std::unordered_map<std::string, std::string> alias_;
+  // one to many. Bind var to other vars. Could happen in select, dma, etc.
+  std::unordered_map<std::string, VarSet> bindings_;
+  // record the binding info to do restoration in ComputeLiveInOut().
+  std::unordered_map<const Stmt*, std::vector<std::string>>
+      stmt2binding_restore;
+
+  // -- Async inthreads tracking --
+  std::unordered_set<std::string> paraby_bounded_vars;
+  size_t inthreads_async_level = 0;
+  std::unordered_map<std::string, VarSet> async_inthreads_vars;
+  bool visiting_synchronize = false;
+
+  // -- Liveness info per statement --
+  std::unordered_map<const Stmt*, LivenessInfo> stmt_linfo;
+  std::unordered_map<std::string, std::set<DMABufInfo>> future_buffers;
+  using StrUintMap = std::unordered_map<std::string, size_t>;
+  VarSet dma_any_futures;
+  std::unordered_map<std::string, Ranges> var_ranges;
+
+  // -- CFG / basic block state --
   inline void ConnectBB(ptr<BB> x, ptr<BB> y) {
     x->succs.push_back(y);
     y->preds.push_back(x.get());
@@ -243,24 +314,26 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::stack<InThreadsBBs> it_bb_list;
   std::map<ptr<BB>, ptr<BB>> end2cond;
 
-  // BB graph related end
-  LivenessAnalyzer() : VisitorWithSymTab("liveness") {
-    if (trace_visit) debug_visit = true; // force debug when tracing
-    if (disabled) CCtx().SetLivenessAnalysis(false);
+  // -- Private helper methods --
+  std::string GetFuncNameFromScopedName(const std::string& name) const {
+    if (!PrefixedWith(name, "::")) return name;
+    return SplitFirst(name, "::");
   }
-  ~LivenessAnalyzer() {}
 
-public:
-  static VarSet SetUnion(const VarSet& a, const VarSet& b);
-  static VarSet SetDiff(const VarSet& a, const VarSet& b);
-  static VarSet& SetUnionInPlace(VarSet& a, const VarSet& b);
-  static VarSet& SetDiffInPlace(VarSet& a, const VarSet& b);
-  static bool IsRef(const AST::Node& n);
+  static std::string RemoveWithin(const std::string& s);
+  static int ScopeCompare(const std::string& s1, const std::string& s2);
+  static std::string ExactFirstLoopScope(const std::string& outer_scope,
+                                         const std::string& inner_scope);
+  static bool IsLoopBlock(const AST::Node& n);
+  static bool IsSyncPoint(const AST::Node& n);
+  static bool ShouldIndent(const AST::Node& n);
 
-private:
   VarSet GetAllSymbolicOperands(const AST::Node* n) const;
   void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent,
                        bool only_else = false);
+  void DumpNVD(const AST::NamedVariableDecl& nvd, std::ostream& os);
+  void DumpDMA(const AST::DMA& dma, std::ostream& os);
+  void DumpMMA(const AST::MMA& mma, std::ostream& os);
   bool HasStmt(const AST::Node& n) const;
   std::string GetScopedName(const std::string& name) const;
   void AddUse(const Stmt* s, const std::string& var, bool add_extra_use = true);
@@ -269,63 +342,37 @@ private:
               bool is_buffer_or_future = false);
   void AddIsAlias(const Stmt* s, const std::string& alias_var);
   void AddAlias(const std::string& alias_var, const std::string& original_var);
-  void RemoveAlias(const std::string& alias_var);
   void AddIsBinding(const Stmt* s, const std::string& bind_res);
   void AddBinding(const std::string& bind_res, const std::string& bind_src);
   void RemoveBinding(const std::string& bind_res, const std::string& bind_src);
   void AddFut2Buffers(const std::string& fut, const DMABufInfo& buf_info);
   void AddAsyncInthreadsVar(const std::string& scope_name,
                             const std::string& var);
+
+  struct BlockInfo {
+    VarSet in;
+    VarSet out;
+  };
   void ComputeLiveRange();
+  void VerifyLiveRanges() const;
+  void UpdateVarRange(const std::string& var, size_t id);
+  void DumpLivenessResults(
+      const std::vector<std::pair<std::string, Ranges>>& var_live_ranges,
+      const std::map<std::string, std::map<size_t, BlockInfo>>& bb_infos);
   void HandleSelect(AST::Node& n, ptr<AST::Select> sel);
+  void RecordStmt(const Stmt& s, bool dump_brace, bool only_else = false);
+  ptr<ScopeEnd> RegisterScopeEnd(AST::Node& origin, ptr<BasicBlock> bb,
+                                 bool dump_brace, bool only_else = false);
   // handle stmt in Before/Mid/After VisitImpl
   void HandleStmtInBefore(AST::Node& n);
   void HandleStmtInMid(AST::Node& n);
   void HandleStmtInAfter(AST::Node& n);
-  std::string SSTR(const Stmt* stmt) const;
+  ptr<BB> StartChildBB();
+  static std::string GetEventName(const AST::Node& node);
+  std::string StmtStr(const Stmt* stmt) const;
 
   template <typename... MapTypes>
   VarSet TransitiveClosure(const VarSet& vars, const MapTypes&... maps);
-
-public:
-  const std::string STMTS_STR() const { return stmts_with_indent.str(); }
-  const std::unordered_map<std::string, Ranges>& VarRanges() const {
-    return var_ranges;
-  }
-
-public:
-  void TraceEachVisit(AST::Node& n, bool detail = false,
-                      const std::string& m = "") const {
-    if (!trace_visit) return;
-    if (detail)
-      dbgs() << m << STR(n) << "\n";
-    else
-      dbgs() << m << n.TypeNameString() << "\n";
-  }
-  bool BeforeVisitImpl(AST::Node&) override;
-  bool InMidVisitImpl(AST::Node&) override;
-  bool AfterVisitImpl(AST::Node&) override;
-
-  bool Visit(AST::NamedTypeDecl&) override;
-  bool Visit(AST::NamedVariableDecl&) override;
-  bool Visit(AST::Assignment&) override;
-  bool Visit(AST::ParallelBy&) override;
-  bool Visit(AST::WithBlock&) override;
-  bool Visit(AST::DMA&) override;
-  bool Visit(AST::MMA&) override;
-  bool Visit(AST::ChunkAt&) override;
-  bool Visit(AST::Wait&) override;
-  bool Visit(AST::Call&) override;
-  bool Visit(AST::Rotate&) override;
-  bool Visit(AST::Synchronize&) override;
-  bool Visit(AST::Trigger&) override;
-  bool Visit(AST::Select&) override;
-  bool Visit(AST::Return&) override;
-  bool Visit(AST::ForeachBlock&) override;
-  bool Visit(AST::InThreadsBlock&) override;
-  bool Visit(AST::IfElseBlock&) override;
-  bool Visit(AST::FunctionDecl&) override;
-  bool Visit(AST::ChoreoFunction&) override;
 };
 
 } // end namespace Choreo

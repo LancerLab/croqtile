@@ -363,6 +363,13 @@ protected:
   // Tricky: sometimes it requires action before entering the scope
   virtual bool BeforeBeforeVisit(AST::Node&) { return true; }
 
+  // When true, the visitor progressively registers symbol names into the
+  // scoped symtab as they are encountered during traversal. This enables
+  // InScopeNameForRef to correctly resolve declaration order (a variable
+  // is not visible to its own initializer). Late passes that use an
+  // immutable global symtab should set this to true.
+  bool auto_declare_symbols = false;
+
   // special to within: map 'with' to its 'with-matchers'
   std::unordered_map<std::string, std::vector<std::string>> within_map;
   // similar for parallel-by
@@ -403,6 +410,9 @@ public:
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
       fname = f->name;
+      if (auto_declare_symbols)
+        for (const auto& param : f->f_decl.params->values)
+          if (param->HasSymbol()) SSTab().DeclareSymbolName(param->sym->name);
     } else if (auto p = dyn_cast<AST::ParallelBy>(&n)) {
       SSTab().EnterScope("paraby_" + std::to_string(pb_count++));
       std::string scope_name = scoped_symtab.ScopeName();
@@ -423,8 +433,25 @@ public:
         pb_map.emplace(name, matchers);
         bv_map.emplace(name, matchers);
       }
-    } else if (isa<AST::WithBlock>(&n)) {
+      if (auto_declare_symbols) {
+        SSTab().DeclareSymbolName(p->BPV()->name);
+        for (auto v : p->AllSubPVs())
+          SSTab().DeclareSymbolName(cast<AST::Identifier>(v)->name);
+      }
+    } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
       SSTab().EnterScope("within_" + std::to_string(wi_count++));
+      if (auto_declare_symbols)
+        for (const auto& item : wb->withins->values) {
+          auto w = cast<AST::WithIn>(item);
+          // errs() << "Processing at scope: " << SSTab().ScopeName() << "\n";
+          if (w->with) {
+            // errs() << "Declaring with symbol: " << w->with->name << "\n";
+            SSTab().DeclareSymbolName(w->with->name);
+          }
+          if (w->with_matchers)
+            for (auto v : w->GetMatchers())
+              SSTab().DeclareSymbolName(cast<AST::Identifier>(v)->name);
+        }
     } else if (isa<AST::ForeachBlock>(&n)) {
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
     } else if (isa<AST::InThreadsBlock>(&n)) {
@@ -444,6 +471,7 @@ public:
           matchers.push_back(scope_name + w->with->name); // only map to itself
         within_map.emplace(scope_name + w->with->name, matchers);
         bv_map.emplace(scope_name + w->with->name, matchers);
+        if (auto_declare_symbols) SSTab().DeclareSymbolName(w->with->name);
       }
       if (w->with_matchers) {
         for (auto v : w->GetMatchers()) {
@@ -451,6 +479,8 @@ public:
           within_map.emplace(
               sname, std::vector<std::string>{sname}); // always map to itself
           bv_map.emplace(sname, std::vector<std::string>{sname});
+          if (auto_declare_symbols)
+            SSTab().DeclareSymbolName(cast<AST::Identifier>(v)->name);
         }
       }
     }
@@ -468,6 +498,17 @@ public:
 
   bool AfterVisit(AST::Node& n) final {
     AfterVisitImpl(n); // derived class to customize
+
+    // Register variable/type names after their Visit completes, so that
+    // InScopeNameForRef respects declaration order (the name is not
+    // visible to its own initializer, preventing self-shadowing).
+    if (auto_declare_symbols) {
+      if (auto nvd = dyn_cast<AST::NamedVariableDecl>(&n))
+        SSTab().DeclareSymbolName(nvd->name_str);
+      else if (auto ntd = dyn_cast<AST::NamedTypeDecl>(&n))
+        SSTab().DeclareSymbolName(ntd->name_str);
+    }
+
     if (isa<AST::Program>(&n)) {
       Reset();
       SSTab().LeaveScope();
@@ -610,9 +651,11 @@ protected:
   // declarations have been visited so far), then falls back to the
   // global symbol table walk.
   const std::string InScopeNameForRef(const std::string& sym) const {
-    auto scoped = scoped_symtab.NameInScopeOrNull(sym);
+    if (PrefixedWith(sym, "::")) return sym; // already fully scoped
+    auto usname = UnScopedName(sym);
+    auto scoped = scoped_symtab.NameInScopeOrNull(usname);
     if (scoped) return *scoped;
-    return InScopeName(sym);
+    return InScopeName(usname);
   }
 
 public:
