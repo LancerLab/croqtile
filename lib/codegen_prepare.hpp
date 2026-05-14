@@ -402,6 +402,7 @@ public:
           in_thr_block = nullptr;
         }
         tma_desc.SetInThreadsBlock(in_thr_block);
+        tma_desc.SetEventManaged(n.HasEvent());
         tma_descs.at(block_pb).push_back(tma_desc);
       } else
         choreo_unreachable(

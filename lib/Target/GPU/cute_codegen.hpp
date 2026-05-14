@@ -226,6 +226,7 @@ private:
   bool has_explicit_mma_wait = false;
   bool wgmma_arrive_state_declared = false;
   std::set<std::string> cluster_trigger_events_;
+  std::set<std::string> event_arrive_tx_events_;
   bool has_analyzed_warpspec = false;
   bool warpspec_wgmma_arrived = false;
   AST::InThreadsBlock* current_inthreads = nullptr;

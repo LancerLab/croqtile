@@ -36,6 +36,7 @@ extern Option<bool> use_stmatrix;
 extern Option<bool> hoist_offset;
 extern Option<bool> hoist_scale;
 extern Option<bool> assume_aligned_global;
+extern Option<bool> event_arrive_tx;
 
 inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
                        const std::string& from, const std::string& to,

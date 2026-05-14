@@ -30,6 +30,10 @@ Option<bool>
 Option<bool> assume_aligned_global(
     OptionKind::User, "--assume-aligned-global", "", false,
     "Assume global memory pointers are 128-bit aligned for DMA.");
+Option<bool> event_arrive_tx(
+    OptionKind::User, "--event-arrive-tx", "", false,
+    "Enable barrier_arrive_tx for shared event triggers in non-warpspec TMA "
+    "paths.");
 
 void PrintSubscriptions(std::ostream& os, const std::string& prefix,
                         const std::string& suffix, const ValueList& dims,
