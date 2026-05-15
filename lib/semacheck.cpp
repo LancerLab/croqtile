@@ -667,13 +667,15 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
                     "parallel-by block.");
   }
   if (launch_bounds_count > 0 && n.GetLevel() != ParallelLevel::BLOCK) {
-    Error1(n.LOC(),
-           "launch_bounds is only allowed in parallel-by blocks lowered to CUDA "
-           "kernels (level : block).");
+    Error1(
+        n.LOC(),
+        "launch_bounds is only allowed in parallel-by blocks lowered to CUDA "
+        "kernels (level : block).");
   }
   if (launch_bounds_count > 1) {
-    Error1(n.LOC(), "multiple launch_bounds directives are not allowed in the same "
-                    "parallel-by block.");
+    Error1(n.LOC(),
+           "multiple launch_bounds directives are not allowed in the same "
+           "parallel-by block.");
   }
 
   return true;
@@ -1532,8 +1534,8 @@ bool SemaChecker::VisitNode(AST::Call& n) {
                        PSTR(aty) + "'.");
           } else if (!arg->Opts().HasVal() ||
                      !arg->Opts().GetVal()->IsNumeric()) {
-            Error1(n.LOC(),
-                   "launch_bounds argument must be a compile-time integer constant.");
+            Error1(n.LOC(), "launch_bounds argument must be a compile-time "
+                            "integer constant.");
           } else if (auto min_blocks = VIInt(arg->Opts().GetVal());
                      !min_blocks || min_blocks.value() <= 0) {
             Error1(n.LOC(),
