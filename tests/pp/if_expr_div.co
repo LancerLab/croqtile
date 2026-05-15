@@ -1,0 +1,35 @@
+// RUN: copp %s -o - | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
+
+#define N 4096
+#define TILE_N 512
+#define M 1024
+#define K 128
+
+__co__ int test_if_div(f32 d[]) {
+#if (N / TILE_N >= 8)
+  use_gs_lhs
+#define USE_GS_LHS 1
+#else
+  use_direct_gl
+#define USE_GS_LHS 0
+#endif
+
+#if (N / TILE_N <= 4)
+#define TILE_N_EFF 256
+  tile_n_eff_256
+#else
+#define TILE_N_EFF 512
+  tile_n_eff_512
+#endif
+
+#define RATIO (M/K)
+  ratio_is RATIO
+  gs USE_GS_LHS eff TILE_N_EFF
+}
+
+// CHECK: use_gs_lhs
+// CHECK-NOT: use_direct_gl
+// CHECK-NOT: tile_n_eff_256
+// CHECK: tile_n_eff_512
+// CHECK: ratio_is (1024/128)
+// CHECK: gs 1 eff 512

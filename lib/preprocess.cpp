@@ -574,7 +574,6 @@ int64_t parsePrimary(const std::string& s, size_t& pos) {
   }
 
   if (isalpha(s[pos]) || s[pos] == '_') {
-    [[maybe_unused]] size_t start = pos;
     while (pos < s.size() && (isalnum(s[pos]) || s[pos] == '_')) ++pos;
     return 0;
   }
@@ -643,7 +642,6 @@ std::string replaceDefinedOperator(const std::string& expr,
   size_t i = 0;
   while (i < expr.size()) {
     if (i + 7 <= expr.size() && expr.substr(i, 7) == "defined") {
-      [[maybe_unused]] size_t start = i;
       size_t j = i + 7;
       while (j < expr.size() && isspace(expr[j])) ++j;
       std::string macroName;
@@ -826,11 +824,14 @@ void Preprocess::HandleOneUserLine(const std::string& line) {
   } else if (isDirective(bline, "#define")) {
     if (cur_cond && !cur_skip) {
       std::regex defineRegex(
-          R"(^\s*#define\s+(\w+)(?:\s+([^/]*?))?\s*(?://.*|/\*.*\*/)?\s*$)");
+          R"(^\s*#define\s+(\w+)(?:\s+((?:[^/]|/(?![/*]))*))?\s*(?://.*|/\*.*\*/)?\s*$)");
       std::smatch match;
-      if (std::regex_match(bline, match, defineRegex))
-        globalDefines[match[1]] = match[2].matched ? match[2].str() : "1";
-      else {
+      if (std::regex_match(bline, match, defineRegex)) {
+        std::string val = match[2].matched ? match[2].str() : "1";
+        while (!val.empty() && (val.back() == ' ' || val.back() == '\t'))
+          val.pop_back();
+        globalDefines[match[1]] = val.empty() ? "1" : val;
+      } else {
         defineRegex = std::regex(R"(#define\s+(\w+)\(([^)]*)\)\s+(.*))");
         if (std::regex_match(bline, match, defineRegex)) {
           assert(match[2].matched && match[3].matched &&
@@ -1080,10 +1081,13 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
   } else if (isDirective(bline, "#define", false)) {
     if (cur_cond && !cur_skip) {
       std::regex defineRegex(
-          R"(^\s*#define\s+(\w+)(?:\s+([^/]*?))?\s*(?://.*|/\*.*\*/)?\s*$)");
+          R"(^\s*#define\s+(\w+)(?:\s+((?:[^/]|/(?![/*]))*))?\s*(?://.*|/\*.*\*/)?\s*$)");
       std::smatch match;
       if (std::regex_match(bline, match, defineRegex)) {
-        localDefines[match[1]] = match[2].matched ? match[2].str() : "1";
+        std::string val = match[2].matched ? match[2].str() : "1";
+        while (!val.empty() && (val.back() == ' ' || val.back() == '\t'))
+          val.pop_back();
+        localDefines[match[1]] = val.empty() ? "1" : val;
       } else {
         defineRegex = std::regex(R"(#define\s+(\w+)\(([^)]*)\)\s+(.*))");
         if (std::regex_match(bline, match, defineRegex)) {
@@ -1182,6 +1186,11 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
       std::vector<MacroSub> subs;
       auto sline = SubstituteLocalDefines(aline, &subs);
       if (!subs.empty()) CCtx().SetLineMacroSubs(line_num, std::move(subs));
+      for (int iter = 0; iter < 32; ++iter) {
+        auto prev = sline;
+        sline = SubstituteLocalDefines(sline);
+        if (sline == prev) break;
+      }
       if (!uc_skip_line) output << sline << '\n';
       return;
     }
@@ -1190,6 +1199,11 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
     auto co_code = aline.substr(0, co_end);
     auto sline = SubstituteLocalDefines(co_code, &subs);
     if (!subs.empty()) CCtx().SetLineMacroSubs(line_num, std::move(subs));
+    for (int iter = 0; iter < 32; ++iter) {
+      auto prev = sline;
+      sline = SubstituteLocalDefines(sline);
+      if (sline == prev) break;
+    }
     bool changed = true;
     while (changed) { sline = SubstituteLocalMacroFuncs(sline, changed); }
 
