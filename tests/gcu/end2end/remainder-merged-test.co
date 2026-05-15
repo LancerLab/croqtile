@@ -1,0 +1,155 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Merged from: remainder_iterate.co, remainder_parallel.co
+
+__cok__ {
+__co_device__ extern "C" void kernel_add(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+}
+
+#define pf0 6
+
+// ---------------------------------------------------------------------------
+// Remainder handling via single-thread iteration (from remainder_iterate.co)
+// ---------------------------------------------------------------------------
+
+__co__ s32 [N, 17, 128] remainder_iterate(s32 [N, 17, 128] lhs, s32 [N, 17, 128] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by pf0 {
+    with index = {n, x, y} in [N/#p, 17, 4], nr in [N % #p] {
+      foreach index {
+        lhs_load = dma.copy.async lhs.chunkat(p#n, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(p#n, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32[lhs_load.span] l1_out;
+
+        call kernel_add(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        dma.copy l1_out => output.chunkat(p#n, x, y);
+      }
+
+      inthreads (p == 0) foreach nr, x, y {
+        lhs_load = dma.copy.async lhs.chunk(N, #x, #y).at(#n * #p + nr, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunk(N, #x, #y).at(#n * #p + nr, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32[lhs_load.span] l1_out;
+
+        call kernel_add(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        dma.copy l1_out => output.chunk(N, #x, #y).at(#n * #p + nr, x, y);
+      }
+    }
+  }
+
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Remainder handling via parallel threads (from remainder_parallel.co)
+// ---------------------------------------------------------------------------
+
+__co__ s32 [N, 17, 128] remainder_parallel(s32 [N, 17, 128] lhs, s32 [N, 17, 128] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by pf0 {
+    with index = {n, x, y} in [N/#p, 17, 4] {
+      foreach index {
+        lhs_load = dma.copy.async lhs.chunkat(p#n, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(p#n, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32[lhs_load.span] l1_out;
+
+        call kernel_add(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        dma.copy l1_out => output.chunkat(p#n, x, y);
+      }
+
+      inthreads (p < N % #p) foreach x, y {
+        lhs_load = dma.copy.async lhs.chunk(N, #x, #y).at(p + #n * #p, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunk(N, #x, #y).at(p + #n * #p, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32[lhs_load.span] l1_out;
+
+        call kernel_add(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        dma.copy l1_out => output.chunk(N, #x, #y).at(#n * #p + p, x, y);
+      }
+    }
+  }
+
+  return output;
+}
+
+// ===========================================================================
+// Host verification
+// ===========================================================================
+
+#define NN 15
+
+bool test_remainder_iterate() {
+  choreo::s32 a[NN][17][128] = {0};
+  choreo::s32 b[NN][17][128] = {0};
+
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {NN, 17, 128});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {NN, 17, 128});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+
+  auto res = remainder_iterate(a_data, b_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cerr << "remainder_iterate mismatch at [" << i << "][" << j
+                    << "][" << k << "]\n";
+          return false;
+        }
+      }
+  return true;
+}
+
+bool test_remainder_parallel() {
+  choreo::s32 a[NN][17][128] = {0};
+  choreo::s32 b[NN][17][128] = {0};
+
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {NN, 17, 128});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {NN, 17, 128});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+
+  auto res = remainder_parallel(a_data, b_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cerr << "remainder_parallel mismatch at [" << i << "][" << j
+                    << "][" << k << "]\n";
+          return false;
+        }
+      }
+  return true;
+}
+
+int main() {
+  int failures = 0;
+
+  if (!test_remainder_iterate()) { std::cerr << "FAIL: remainder_iterate\n"; ++failures; }
+  if (!test_remainder_parallel()) { std::cerr << "FAIL: remainder_parallel\n"; ++failures; }
+
+  if (failures == 0)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << failures << " test(s) failed" << std::endl;
+}
+
+// CHECK: Test Passed

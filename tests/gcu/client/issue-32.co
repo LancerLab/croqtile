@@ -1,3 +1,5 @@
+// RUN: not choreo -es %s 2>&1 | FileCheck %s
+
 __co__ void foo(int i) {
   parallel p by 6, {qx,qy} by [2,4] {
     with index = {x, y} in [17, 4] {
@@ -12,6 +14,6 @@ __co__ void foo(int i) {
 }
 
 // CHECK: error: expect the bounded variable 'p' to be declared by 'within' block instead of 'parallel-by' block.
-// CHECK: error: expect a bounded type for iteration variable 'x' but got 'int'.
-// CHECK: error: expect a bounded type for iteration variable 'i' but got 'int'.
+// CHECK: error: expect a bounded type for iteration variable 'x' but got 's32'.
+// CHECK: error: expect a bounded type for iteration variable 'i' but got 's32'.
 // CHECK: error: expect the bounded variable 'qx' to be declared by 'within' block instead of 'parallel-by' block.

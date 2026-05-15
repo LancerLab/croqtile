@@ -1,0 +1,112 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Merged from: nil.co, elemwise-no-device.co, init_output.co
+
+// ---------------------------------------------------------------------------
+// Nil kernel - empty device program (from nil.co)
+// ---------------------------------------------------------------------------
+
+__co__ void nil() {}
+
+// ---------------------------------------------------------------------------
+// Elementwise add without device kernel (from elemwise-no-device.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto elemwise_no_device(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
+  s32 [lhs.span] output;
+
+  parallel p by 6
+    foreach index in [17, 4] {
+      lf = dma.copy.async lhs.chunkat(p, index) => local;
+      rf = dma.copy.async rhs.chunkat(p, index) => local;
+      wait lf, rf;
+
+      local s32 [lf.span] l1_out;
+
+      foreach i in [l1_out.span]
+        l1_out.at(i) = lf.data.at(i) + rf.data.at(i);
+
+      dma.copy l1_out => output.chunkat(p, index);
+    }
+
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Output initialization test (from init_output.co)
+// ---------------------------------------------------------------------------
+
+#define INIT_K (1024+1-1)
+
+__co__ auto init_output_test(int x) {
+  u8 [INIT_K] ans{x};
+  parallel p by 1 {
+    with idx in [1] {
+      foreach idx {
+        local u8 [1] a{32};
+      }
+    }
+  }
+
+  return ans;
+}
+
+// ===========================================================================
+// Host verification
+// ===========================================================================
+
+bool test_nil() {
+  nil();
+  return true;
+}
+
+bool test_elemwise_no_device() {
+  choreo::s32 a[6][17][64] = {0};
+  choreo::s32 b[6][17][64] = {0};
+
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 64});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 64});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+
+  auto res = elemwise_no_device(a_data, b_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cerr << "elemwise_no_device mismatch at [" << i << "][" << j
+                    << "][" << k << "]\n";
+          return false;
+        }
+      }
+  return true;
+}
+
+bool test_init_output() {
+  int init_val = 11;
+  auto res = init_output_test(init_val);
+
+  for (size_t i = 0; i < INIT_K; i++)
+    if (res[i] != init_val) {
+      std::cerr << "init_output mismatch at [" << i << "]\n";
+      return false;
+    }
+  return true;
+}
+
+int main() {
+  int failures = 0;
+
+  if (!test_nil()) { std::cerr << "FAIL: nil\n"; ++failures; }
+  if (!test_elemwise_no_device()) { std::cerr << "FAIL: elemwise_no_device\n"; ++failures; }
+  if (!test_init_output()) { std::cerr << "FAIL: init_output\n"; ++failures; }
+
+  if (failures == 0)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << failures << " test(s) failed" << std::endl;
+}
+
+// CHECK: Test Passed

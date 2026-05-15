@@ -1,0 +1,142 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Merged from: vecadd-simd.co, vecadd-if.co, vector_call.co
+
+// ---------------------------------------------------------------------------
+// vecadd with SIMD vectorization (from vecadd-simd.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto vecadd_simd(f32 [128, 512] a, f32 [128, 512] b) {
+  f32 [a.span] c;
+  parallel p by 2, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f32[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach {i, j} in [l1_a.span(0), l1_a.span(1)]: vectorize(j, 32) {
+      val = l1_a.data.at(i, j) + l1_b.data.at(i, j);
+      l1_c.at(i, j) = val;
+    }
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+
+// ---------------------------------------------------------------------------
+// vecadd with conditional (from vecadd-if.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto vecadd_if(f32 [4, 512] a, f32 [4, 512] b) {
+  f32 [a.span] c;
+  parallel p by 1, q by 1 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f32[l1_a.span(0), l1_a.span(1)] l1_c;
+    foreach {i, j} in [l1_a.span(0), l1_a.span(1)]: vectorize(j, 32) {
+      f32 val = 0.0f;
+      if (i * 512 + j < 2000)
+        val = l1_a.data.at(i, j) + l1_b.data.at(i, j);
+      l1_c.at(i, j) = val;
+    }
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+
+// ---------------------------------------------------------------------------
+// vectorized sigmoid (from vector_call.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto sigmoid_vcall(f32 [32, 256, 768] lhs) {
+  f32 [lhs.span] out;
+  parallel p by 2, q by 8 {
+    foreach r in [4] {
+      lfl = dma.copy lhs.chunkat(p,q,r) => local;
+      local f32 [lfl.span] lout;
+      foreach index = {i, j, k} in lfl.span: vectorize(k, 32)
+        lout.at(index) = 1.0f / (1.0f + __exp(0.0f - lfl.data.at(index)));
+      dma.copy lout => out.chunkat(p,q,r);
+    }
+  }
+  return out;
+}
+
+// ===========================================================================
+// Host verification
+// ===========================================================================
+
+bool test_vecadd_simd() {
+  auto a = choreo::make_spandata<choreo::f32>(128, 512);
+  auto b = choreo::make_spandata<choreo::f32>(128, 512);
+  a.fill_random(-10.0f, 10.0f);
+  b.fill_random(-10.0f, 10.0f);
+
+  auto res = vecadd_simd(a.view(), b.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      if (a[i][j] + b[i][j] != res[i][j]) {
+        std::cerr << "vecadd_simd mismatch at [" << i << "][" << j << "]\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_vecadd_if() {
+  auto a = choreo::make_spandata<choreo::f32>(4, 512);
+  auto b = choreo::make_spandata<choreo::f32>(4, 512);
+  a.fill_random(-10.0f, 10.0f);
+  b.fill_random(-10.0f, 10.0f);
+
+  auto res = vecadd_if(a.view(), b.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      auto index = i * 512 + j;
+      auto ref = index < 2000 ? (a[i][j] + b[i][j]) : 0.0f;
+      if (ref != res[i][j]) {
+        std::cerr << "vecadd_if mismatch at [" << i << "][" << j << "]\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_sigmoid_vcall() {
+  auto a = choreo::make_spandata<choreo::f32>(32, 256, 768);
+  a.fill_random(-1.0, 1.0);
+
+  auto res = sigmoid_vcall(a.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        auto sm = 1.0f / (1.0f + expf(-a[i][j][k]));
+        if (fabs(sm - res[i][j][k]) > 0.001f) {
+          std::cerr << "sigmoid_vcall mismatch at [" << i << "][" << j << "]["
+                    << k << "]: " << sm << " vs " << res[i][j][k] << "\n";
+          return false;
+        }
+      }
+  return true;
+}
+
+int main() {
+  int failures = 0;
+
+  if (!test_vecadd_simd()) { std::cerr << "FAIL: vecadd_simd\n"; ++failures; }
+  if (!test_vecadd_if()) { std::cerr << "FAIL: vecadd_if\n"; ++failures; }
+  if (!test_sigmoid_vcall()) { std::cerr << "FAIL: sigmoid_vcall\n"; ++failures; }
+
+  if (failures == 0)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << failures << " test(s) failed" << std::endl;
+}
+
+// CHECK: Test Passed

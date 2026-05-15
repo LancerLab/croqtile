@@ -1,0 +1,207 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Merged from: elemwise-gcu-only-test-multi-launch-gcu3.co, elemwise-opt.co
+
+#include <iostream>
+
+// ---------------------------------------------------------------------------
+// Multi-launch elementwise add (from elemwise-gcu-only-test-multi-launch-gcu3.co)
+// ---------------------------------------------------------------------------
+
+__cok__ {
+__co_device__ extern "C" void kernel_elemwise(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+}
+
+#define pf0 6
+__co__ s32 [N, 17, 128] ele_add_multi_launch(s32 [N, 17, 128] lhs, s32 [N, 17, 128] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by pf0 {
+    with index = {n, x, y} in [N/#p, 17, 4] {
+      foreach index {
+        lhs_load = dma.copy.async lhs.chunkat(p#n, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(p#n, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32[lhs_load.span] l1_out;
+
+        call kernel_elemwise(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        out_store = dma.copy.async l1_out => output.chunkat(p#n, x, y);
+        wait out_store;
+      }
+    }
+  }
+
+  parallel p by 1 {
+    with index = {rm, x, y} in [N, 17, 4] {
+      foreach rm(N/pf0*pf0:) {
+        foreach x, y {
+          lhs_load = dma.copy.async lhs.chunkat(rm, x, y) => local;
+          rhs_load = dma.copy.async rhs.chunkat(rm, x, y) => local;
+          wait lhs_load, rhs_load;
+
+          local s32[lhs_load.span] l1_out;
+
+          call kernel_elemwise(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+          out_store = dma.copy.async l1_out => output.chunkat(rm, x, y);
+          wait out_store;
+        }
+      }
+    }
+  }
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Optimized elementwise add with subspan/modspan (from elemwise-opt.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto ele_add_opt(s32 [M] lhs, s32 [M] rhs) {
+  s32 [lhs.span] output;
+
+  gpl = 2, bpl = 12;
+  max_pl = gpl * bpl;
+
+  l1_limit = (1 << 20) + (1 << 19) - 512;
+  l2_limit = 64 * (1 << 20);
+
+  padding = 128 * bpl;
+
+  l1_max_count = (l1_limit / |s32| / 3 / padding) * padding;
+
+  l2_mtp = l1_max_count * bpl;
+
+  l2_elem_count = l2_mtp;
+
+  if (M > (l2_elem_count * gpl)) {
+    parallel p by gpl, q by bpl {
+
+      with x in [M / (l2_elem_count * #p)] foreach x(:1:) {
+
+        inthreads (x # p * l2_elem_count + l2_elem_count <= M) {
+          lfs = dma.copy.async lhs.subspan(l2_elem_count).at(x # p) => shared;
+          rfs = dma.copy.async rhs.subspan(l2_elem_count).at(x # p) => shared;
+          wait lfs, rfs;
+
+          assert(|lfs.span| % padding == 0, "the data can not be divided evenly.");
+
+          lfl = dma.copy.async lfs.chunkat(q) => local;
+          rfl = dma.copy.async rfs.chunkat(q) => local;
+          wait lfl, rfl;
+
+          local s32 [lfl.span] l1_out;
+          foreach i in [l1_out.span]
+            l1_out.at(i) = lfl.data.at(i) + rfl.data.at(i);
+
+          dma.copy l1_out => output.subspan(lfl.span).at(x # p # q);
+        }
+
+        inthreads ((x # p * l2_elem_count + l2_elem_count > M) &&
+            (x # p * l2_elem_count < M)) {
+          rem_count = M % l2_elem_count;
+          lfs = dma.copy.async lhs.modspan(l2_elem_count).at(x # p) => shared;
+          rfs = dma.copy.async rhs.modspan(l2_elem_count).at(x # p) => shared;
+          wait lfs, rfs;
+
+          l1_min = 512;
+          l1_count = (|lfs.span| / bpl + padding - 1) / padding * padding;
+          last_count = (l1_min > l1_count) ? l1_min : l1_count;
+
+          inthreads ((q + 1) * last_count <= rem_count) {
+            lfl = dma.copy.async lfs.subspan(last_count).at(q) => local;
+            rfl = dma.copy.async rfs.subspan(last_count).at(q) => local;
+            wait lfl, rfl;
+
+            local s32 [lfl.span] l1_out;
+
+            foreach i in [l1_out.span]
+              l1_out.at(i) = lfl.data.at(i) + rfl.data.at(i);
+
+            dma.copy l1_out => output.modspan(l2_elem_count).at(x # p).subspan(last_count).at(q);
+          }
+
+          inthreads ((q * last_count < rem_count) && ((q + 1) * last_count > rem_count)) {
+            lfl = dma.copy.async lfs.modspan(last_count).at(q) => local;
+            rfl = dma.copy.async rfs.modspan(last_count).at(q) => local;
+            wait lfl, rfl;
+
+            local s32 [lfl.span] l1_out;
+
+            foreach i in [l1_out.span]
+              l1_out.at(i) = lfl.data.at(i) + rfl.data.at(i);
+
+            dma.copy l1_out => output.modspan(l2_elem_count).at(x # p).modspan(last_count).at(q);
+          }
+        }
+      }
+    }
+  }
+
+  return output;
+}
+
+// ===========================================================================
+// Host verification
+// ===========================================================================
+
+#define NN 15
+
+bool test_multi_launch() {
+  choreo::s32 a[NN][17][128] = {0};
+  choreo::s32 b[NN][17][128] = {0};
+
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {NN, 17, 128});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {NN, 17, 128});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+
+  auto res = ele_add_multi_launch(a_data, b_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cerr << "multi_launch mismatch at [" << i << "][" << j << "]["
+                    << k << "]\n";
+          return false;
+        }
+      }
+  return true;
+}
+
+bool test_opt() {
+  auto a = choreo::make_spandata<choreo::s32>(1 << 23);
+  auto b = choreo::make_spandata<choreo::s32>(1 << 23);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = ele_add_opt(a.view(), b.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i) {
+    if (a[i] + b[i] != res[i]) {
+      std::cerr << "opt mismatch at [" << i << "]\n";
+      return false;
+    }
+  }
+  return true;
+}
+
+int main() {
+  int failures = 0;
+
+  if (!test_multi_launch()) { std::cerr << "FAIL: multi_launch\n"; ++failures; }
+  if (!test_opt()) { std::cerr << "FAIL: opt\n"; ++failures; }
+
+  if (failures == 0)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << failures << " test(s) failed" << std::endl;
+}
+
+// CHECK: Test Passed

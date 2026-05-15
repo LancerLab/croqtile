@@ -1,0 +1,474 @@
+// REQUIRES: TARGET-GCU300 LIBCALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include <common/binary.h>
+
+// ---------------------------------------------------------------------------
+// Unary kernels (f32 [6, 128])
+// ---------------------------------------------------------------------------
+
+__co__ f32 [6, 128] acore_relu(f32 [6, 128] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_relu(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+__co__ f32 [6, 128] lib_exp_test(f32 [6, 128] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_exp(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+__co__ f32 [6, 128] lib_silu_test(f32 [6, 128] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_silu(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+__co__ f32 [6, 128] lib_sigmoid_test(f32 [6, 128] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_sigmoid(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+__co__ f32 [6, 128] lib_gelu_test(f32 [6, 128] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_gelu(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+__co__ f32 [6, 128] lib_tanh_test(f32 [6, 128] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_tanh(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Unary kernels (f32 [6, 256])
+// ---------------------------------------------------------------------------
+
+__co__ f32 [6, 256] lib_abs_test(f32 [6, 256] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_abs(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+__co__ f32 [6, 256] lib_neg_test(f32 [6, 256] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_neg(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+__co__ f32 [6, 256] lib_sqrt_test(f32 [6, 256] input) {
+  f32[input.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[in_tile.span] l1_out;
+      __lib_sqrt(l1_out, in_tile.data, |in_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Binary kernels (f32 [6, 128])
+// ---------------------------------------------------------------------------
+
+__co__ f32 [6, 128] lib_add_test(f32 [6, 128] A, f32 [6, 128] B) {
+  f32[A.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      a_tile = dma.copy.async A.chunkat(p, x) => local;
+      b_tile = dma.copy.async B.chunkat(p, x) => local;
+      wait a_tile;
+      wait b_tile;
+      local f32[a_tile.span] l1_out;
+      __lib_add(l1_out, a_tile.data, b_tile.data, |a_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+__co__ f32 [6, 128] lib_mul_test(f32 [6, 128] A, f32 [6, 128] B) {
+  f32[A.span] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      a_tile = dma.copy.async A.chunkat(p, x) => local;
+      b_tile = dma.copy.async B.chunkat(p, x) => local;
+      wait a_tile;
+      wait b_tile;
+      local f32[a_tile.span] l1_out;
+      __lib_mul(l1_out, a_tile.data, b_tile.data, |a_tile.span|);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Reduce kernel (f32 [6, 128] -> f32 [6, 1])
+// ---------------------------------------------------------------------------
+
+__co__ f32 [6, 1] lib_reduce_sum_test(f32 [6, 128] input) {
+  f32[6, 1] output;
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+      local f32[1, 1] l1_out;
+      __lib_reduce_sum(l1_out, in_tile.data, |in_tile.span|, 128, 128);
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Binary kernel with acore::add_relu (s32 [6, 17, 64])
+// ---------------------------------------------------------------------------
+
+__co__ s32 [6, 17, 64] add_relu(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
+  s32[lhs.span] output;
+  parallel p by 6 {
+    foreach x in 17
+      foreach y in 4 {
+        lhs_load = dma.copy.async lhs.chunkat(p, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(p, x, y) => local;
+        wait lhs_load, rhs_load;
+        local s32[lhs_load.span] l1_out;
+        call acore::add_relu(l1_out, lhs_load.data, rhs_load.data, |l1_out.span|, 1);
+        out_store = dma.copy.async l1_out => output.chunkat(p, x, y);
+        wait out_store;
+      }
+  }
+  return output;
+}
+
+// ===========================================================================
+// Host verification
+// ===========================================================================
+
+bool test_relu() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 128);
+  inp.fill_random(-10, 10);
+  auto res = acore_relu(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float expected = (inp[i][j] > 0) ? inp[i][j] : 0.0f;
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "relu mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_exp() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 128);
+  inp.fill_random(-3, 3);
+  auto res = lib_exp_test(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float expected = std::exp((float)inp[i][j]);
+      if (std::abs(res[i][j] - expected) > 0.01f * std::abs(expected)) {
+        std::cerr << "exp mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_silu() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 128);
+  inp.fill_random(-5, 5);
+  auto res = lib_silu_test(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float x = (float)inp[i][j];
+      float expected = x / (1.0f + std::exp(-x));
+      if (std::abs(res[i][j] - expected) > 0.02f) {
+        std::cerr << "silu mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_sigmoid() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 128);
+  inp.fill_random(-5, 5);
+  auto res = lib_sigmoid_test(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float x = (float)inp[i][j];
+      float expected = 1.0f / (1.0f + std::exp(-x));
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "sigmoid mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_gelu() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 128);
+  inp.fill_random(-3, 3);
+  auto res = lib_gelu_test(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float x = (float)inp[i][j];
+      float expected = 0.5f * x * (1.0f + std::erf(x * 0.7071067811865476f));
+      if (std::abs(res[i][j] - expected) > 0.02f) {
+        std::cerr << "gelu mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_tanh() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 128);
+  inp.fill_random(-3, 3);
+  auto res = lib_tanh_test(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float expected = std::tanh((float)inp[i][j]);
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "tanh mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_abs() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 256);
+  inp.fill_random(-10, 10);
+  auto res = lib_abs_test(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 256; ++j) {
+      float expected = std::abs((float)inp[i][j]);
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "abs mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_neg() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 256);
+  inp.fill_random(-10, 10);
+  auto res = lib_neg_test(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 256; ++j) {
+      float expected = -(float)inp[i][j];
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "neg mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_sqrt() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 256);
+  inp.fill_random(1, 100);
+  auto res = lib_sqrt_test(inp.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 256; ++j) {
+      float expected = std::sqrt((float)inp[i][j]);
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "sqrt mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_add() {
+  auto a = choreo::make_spandata<choreo::f32>(6, 128);
+  auto b = choreo::make_spandata<choreo::f32>(6, 128);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+  auto res = lib_add_test(a.view(), b.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float expected = (float)a[i][j] + (float)b[i][j];
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "add mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_mul() {
+  auto a = choreo::make_spandata<choreo::f32>(6, 128);
+  auto b = choreo::make_spandata<choreo::f32>(6, 128);
+  a.fill_random(-5, 5);
+  b.fill_random(-5, 5);
+  auto res = lib_mul_test(a.view(), b.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float expected = (float)a[i][j] * (float)b[i][j];
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "mul mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_reduce_sum() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 128);
+  inp.fill_random(-5, 5);
+  auto res = lib_reduce_sum_test(inp.view());
+  for (size_t i = 0; i < 6; ++i) {
+    float expected = 0.0f;
+    for (size_t j = 0; j < 128; ++j)
+      expected += (float)inp[i][j];
+    if (std::abs(res[i][0] - expected) > 1.0f) {
+      std::cerr << "reduce_sum mismatch at [" << i << "]: "
+                << res[i][0] << " vs " << expected << std::endl;
+      return false;
+    }
+  }
+  return true;
+}
+
+bool test_add_relu() {
+  auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  auto b = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+  auto res = add_relu(a.view(), b.view());
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 17; ++j)
+      for (size_t k = 0; k < 64; ++k) {
+        int value = a[i][j][k] + b[i][j][k];
+        value = (value > 0) ? value : 0;
+        if (value != res[i][j][k]) {
+          std::cerr << "add_relu mismatch at [" << i << "][" << j << "][" << k
+                    << "]: " << res[i][j][k] << " vs " << value << std::endl;
+          return false;
+        }
+      }
+  return true;
+}
+
+int main() {
+  int failures = 0;
+
+  if (!test_relu()) { std::cerr << "FAIL: relu\n"; ++failures; }
+  if (!test_exp()) { std::cerr << "FAIL: exp\n"; ++failures; }
+  if (!test_silu()) { std::cerr << "FAIL: silu\n"; ++failures; }
+  if (!test_sigmoid()) { std::cerr << "FAIL: sigmoid\n"; ++failures; }
+  if (!test_gelu()) { std::cerr << "FAIL: gelu\n"; ++failures; }
+  if (!test_tanh()) { std::cerr << "FAIL: tanh\n"; ++failures; }
+  if (!test_abs()) { std::cerr << "FAIL: abs\n"; ++failures; }
+  if (!test_neg()) { std::cerr << "FAIL: neg\n"; ++failures; }
+  if (!test_sqrt()) { std::cerr << "FAIL: sqrt\n"; ++failures; }
+  if (!test_add()) { std::cerr << "FAIL: add\n"; ++failures; }
+  if (!test_mul()) { std::cerr << "FAIL: mul\n"; ++failures; }
+  if (!test_reduce_sum()) { std::cerr << "FAIL: reduce_sum\n"; ++failures; }
+  if (!test_add_relu()) { std::cerr << "FAIL: add_relu\n"; ++failures; }
+
+  if (failures == 0)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << failures << " test(s) failed" << std::endl;
+}
+
+// CHECK: Test Passed

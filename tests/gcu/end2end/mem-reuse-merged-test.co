@@ -1,0 +1,386 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -arch=gcu300 --liveness --mem-reuse %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Merged from: mem_reuse.co, mem_reuse_dynamic.co, mem_reuse_dynamic_ifelse.co,
+//              spanned_array_memreuse.co
+
+#include "choreo.h"
+
+__cok__{
+
+__co_device__ void foo0(u8* a, u8* b, int n) {
+  for (int i = 0; i < n; ++i)
+    b[i] = a[i];
+}
+
+__co_device__ void foo1(u8* a, u8* b, int n) {
+  for (int i = 0; i < n; ++i)
+    b[i] += a[i];
+}
+
+__co_device__ void foo2(u8* a, u8* b, int n) {
+  for (int i = 0; i < n; ++i)
+    b[i] *= a[i];
+}
+
+__co_device__ void kernel_spanned(int* i, int* o, int chunk_size, int chunk_number) {
+  int total = chunk_size*chunk_number;
+  for (size_t idx = 0; idx < total; ++idx) {
+    *(o + (idx % chunk_size)) += *(i + idx);
+  }
+}
+
+}
+
+// ---------------------------------------------------------------------------
+// Static-shape mem reuse (from mem_reuse.co): K=1024, N=2
+// ---------------------------------------------------------------------------
+
+#define K 1024
+#define N 2
+
+__co__ auto mem_reuse_static_add(u8 [K, K, N] i0, u8 [K, K, N] i1) {
+  u8 [i0.span] output;
+
+  parallel p by 1 {
+    foreach idx in [2, 1, N] {
+      shared u8 [i0.span / #idx] s0;
+      smem1 = dma.copy.async i0.chunkat(idx) => shared;
+      smem2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait smem1, smem2;
+      parallel q by 1 {
+        l1 = dma.copy smem1 => local;
+        local u8 [l1.span] l0;
+        call foo0(l1.data, l0, |l0|);
+        
+        l2 = dma.copy smem2 => local;
+        call foo1(l2.data, l0, |l0|);
+        
+        dma.copy l0 => s0;
+      }
+      dma.copy s0 => output.chunkat(idx);
+    }
+  }
+  
+  return output;
+}
+
+__co__ auto mem_reuse_static_mul(u8 [K, K, N] i0, u8 [K, K, N] i1) {
+  u8 [i0.span] output;
+
+  parallel p by 1 {
+    foreach idx in [2, 1, N] {
+      shared u8 [i0.span / #idx] s0;
+      smem1 = dma.copy.async i0.chunkat(idx) => shared;
+      smem2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait smem1, smem2;
+      parallel q by 1 {
+        l1 = dma.copy smem1 => local;
+        local u8 [l1.span] l0;
+        call foo0(l1.data, l0, |l0|);
+        
+        l2 = dma.copy smem2 => local;
+        call foo2(l2.data, l0, |l0|);
+        
+        dma.copy l0 => s0;
+      }
+      dma.copy s0 => output.chunkat(idx);
+    }
+  }
+  
+  return output;
+}
+
+#undef K
+#undef N
+
+// ---------------------------------------------------------------------------
+// Dynamic-shape mem reuse (from mem_reuse_dynamic.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto mem_reuse_dyn(u8 [K, K, N] i0, u8 [K, K, N] i1) {
+  u8 [i0.span] output;
+
+  parallel p by 1 {
+    foreach idx in [2, 1, N] {
+      shared u8 [i0.span / #idx] s0;
+      smem1 = dma.copy.async i0.chunkat(idx) => shared;
+      smem2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait smem1, smem2;
+      parallel q by 1 {
+        l1 = dma.copy smem1 => local;
+        local u8 [l1.span] l0;
+        call foo0(l1.data, l0, |l0|);
+        
+        l2 = dma.copy smem2 => local;
+        call foo1(l2.data, l0, |l0|);
+        
+        dma.copy l0 => s0;
+      }
+      dma.copy s0 => output.chunkat(idx);
+    }
+  }
+  
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic-shape mem reuse with if/else (from mem_reuse_dynamic_ifelse.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto mem_reuse_dyn_ifelse(u8 [K, K, N] i0, u8 [K, K, N] i1, int x) {
+  u8 [i0.span] output;
+
+  parallel p by 1 {
+    foreach idx in [2, 1, N] {
+      shared u8 [i0.span / #idx] s0;
+      smem1 = dma.copy.async i0.chunkat(idx) => shared;
+      smem2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait smem1, smem2;
+      parallel q by 1 {
+        local u8 [smem1.span] l0;
+        if (x > 50) {
+          l1 = dma.copy smem1 => local;
+          call foo0(l1.data, l0, |l0|);
+        } else {
+          l2 = dma.copy smem2 => local;
+          call foo0(l2.data, l0, |l0|);
+        }
+        dma.copy l0 => s0;
+      }
+      dma.copy s0 => output.chunkat(idx);
+    }
+  }
+  
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Spanned local array mem reuse (from spanned_array_memreuse.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto spanned_array_test() {
+  s32 [32, 64] o;
+  parallel by 1 {
+    local s32[32, 64] oo{0};
+
+    local s32[32, 64] l[2][3];
+
+    local s32[32, 64] l0{1};
+    dma.copy l0 => l[0][0];
+
+    local s32[32, 64] l1{3};
+    dma.copy l1 => l[0][1];
+
+    local s32[32, 64] l2{5};
+    dma.copy l2 => l[0][2];
+
+    local s32[32, 64] l3{7};
+    dma.copy l3 => l[1][0];
+
+    local s32[32, 64] l4{9};
+    dma.copy l4 => l[1][1];
+
+    local s32[32, 64] l5{11};
+    dma.copy l5 => l[1][2];
+
+    call kernel_spanned(l, oo, |oo.span|, 6);
+
+    dma.copy oo => o;
+  }
+
+  return o;
+}
+
+// ===========================================================================
+// Host verification
+// ===========================================================================
+
+bool test_static_add() {
+  #define K 1024
+  #define N 2
+  choreo::u8 a[K][K][N] = {0};
+  choreo::u8 b[K][K][N] = {0};
+  auto a_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)a, {K, K, N});
+  auto b_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)b, {K, K, N});
+  a_data.fill_random(0, 10);
+  b_data.fill_random(0, 10);
+
+  auto res = mem_reuse_static_add(a_data, b_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cerr << "static_add mismatch at [" << i << "][" << j << "]["
+                    << k << "]\n";
+          return false;
+        }
+      }
+  #undef K
+  #undef N
+  return true;
+}
+
+bool test_static_mul() {
+  #define K 1024
+  #define N 2
+  choreo::u8 a[K][K][N] = {0};
+  choreo::u8 b[K][K][N] = {0};
+  auto a_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)a, {K, K, N});
+  auto b_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)b, {K, K, N});
+  a_data.fill_random(0, 10);
+  b_data.fill_random(0, 10);
+
+  auto res = mem_reuse_static_mul(a_data, b_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] * b[i][j][k] != res[i][j][k]) {
+          std::cerr << "static_mul mismatch at [" << i << "][" << j << "]["
+                    << k << "]\n";
+          return false;
+        }
+      }
+  #undef K
+  #undef N
+  return true;
+}
+
+bool test_dyn_1024x2() {
+  #define K 1024
+  #define N 2
+  choreo::u8 a[K][K][N] = {0};
+  choreo::u8 b[K][K][N] = {0};
+  auto a_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)a, {K, K, N});
+  auto b_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)b, {K, K, N});
+  a_data.fill_random(0, 10);
+  b_data.fill_random(0, 10);
+
+  auto res = mem_reuse_dyn(a_data, b_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cerr << "dyn_1024x2 mismatch at [" << i << "][" << j << "]["
+                    << k << "]\n";
+          return false;
+        }
+      }
+  #undef K
+  #undef N
+  return true;
+}
+
+bool test_dyn_256x7() {
+  #define K 256
+  #define N 7
+  choreo::u8 a[K][K][N] = {0};
+  choreo::u8 b[K][K][N] = {0};
+  auto a_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)a, {K, K, N});
+  auto b_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)b, {K, K, N});
+  a_data.fill_random(0, 10);
+  b_data.fill_random(0, 10);
+
+  auto res = mem_reuse_dyn(a_data, b_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cerr << "dyn_256x7 mismatch at [" << i << "][" << j << "]["
+                    << k << "]\n";
+          return false;
+        }
+      }
+  #undef K
+  #undef N
+  return true;
+}
+
+bool test_dyn_ifelse_a() {
+  #define K 1024
+  #define N 2
+  choreo::u8 a[K][K][N] = {0};
+  choreo::u8 b[K][K][N] = {0};
+  auto a_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)a, {K, K, N});
+  auto b_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)b, {K, K, N});
+  a_data.fill_random(0, 10);
+  b_data.fill_random(0, 10);
+
+  auto res = mem_reuse_dyn_ifelse(a_data, b_data, 55);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] != res[i][j][k]) {
+          std::cerr << "dyn_ifelse_a mismatch at [" << i << "][" << j << "]["
+                    << k << "]\n";
+          return false;
+        }
+      }
+  #undef K
+  #undef N
+  return true;
+}
+
+bool test_dyn_ifelse_b() {
+  #define K 256
+  #define N 7
+  choreo::u8 a[K][K][N] = {0};
+  choreo::u8 b[K][K][N] = {0};
+  auto a_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)a, {K, K, N});
+  auto b_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)b, {K, K, N});
+  a_data.fill_random(0, 10);
+  b_data.fill_random(0, 10);
+
+  auto res = mem_reuse_dyn_ifelse(a_data, b_data, 5);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (b[i][j][k] != res[i][j][k]) {
+          std::cerr << "dyn_ifelse_b mismatch at [" << i << "][" << j << "]["
+                    << k << "]\n";
+          return false;
+        }
+      }
+  #undef K
+  #undef N
+  return true;
+}
+
+bool test_spanned_array() {
+  auto res = spanned_array_test();
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      if (res[i][j] != 36) {
+        std::cerr << "spanned_array mismatch at [" << i << "][" << j
+                  << "]: " << res[i][j] << " vs 36\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+int main() {
+  int failures = 0;
+
+  if (!test_static_add()) { std::cerr << "FAIL: static_add\n"; ++failures; }
+  if (!test_static_mul()) { std::cerr << "FAIL: static_mul\n"; ++failures; }
+  if (!test_dyn_1024x2()) { std::cerr << "FAIL: dyn_1024x2\n"; ++failures; }
+  if (!test_dyn_256x7()) { std::cerr << "FAIL: dyn_256x7\n"; ++failures; }
+  if (!test_dyn_ifelse_a()) { std::cerr << "FAIL: dyn_ifelse_a\n"; ++failures; }
+  if (!test_dyn_ifelse_b()) { std::cerr << "FAIL: dyn_ifelse_b\n"; ++failures; }
+  if (!test_spanned_array()) { std::cerr << "FAIL: spanned_array\n"; ++failures; }
+
+  if (failures == 0)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << failures << " test(s) failed" << std::endl;
+}
+
+// CHECK: Test Passed

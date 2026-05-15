@@ -1,0 +1,53 @@
+// SKIP: merged into acore-lib-merged-test.co
+// REQUIRES: TARGET-GCU300 LIBCALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Binary __lib_add end-to-end test on GCU3.
+
+__co__ f32 [6, 128] lib_add_test(f32 [6, 128] A, f32 [6, 128] B) {
+  f32[A.span] output;
+
+  parallel p by 6 {
+    foreach x in 1 {
+      a_tile = dma.copy.async A.chunkat(p, x) => local;
+      b_tile = dma.copy.async B.chunkat(p, x) => local;
+      wait a_tile;
+      wait b_tile;
+
+      local f32[a_tile.span] l1_out;
+
+      __lib_add(l1_out, a_tile.data, b_tile.data, |a_tile.span|);
+
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(6, 128);
+  auto b = choreo::make_spandata<choreo::f32>(6, 128);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = lib_add_test(a.view(), b.view());
+
+  bool passed = true;
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float expected = (float)a[i][j] + (float)b[i][j];
+      if (std::abs(res[i][j] - expected) > 0.01f) {
+        std::cerr << "Mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        passed = false;
+      }
+    }
+
+  if (passed)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << "Test Failed" << std::endl;
+}
+
+// CHECK: Test Passed

@@ -1,0 +1,43 @@
+// SKIP: merged into *-merged-test.co
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-DOCKER: choreo -st -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#define K (1024+1-1)
+#define M (1024*1024)
+#define G (1024*1024*1024)
+
+__co__ auto foo(int x) {
+  u8 [K] ans{x};
+  parallel p by 1 {
+    with idx in [1] {
+      foreach idx {
+        local u8 [1] a{32};
+      }
+    }
+  }
+
+  return ans;
+}
+
+int main()
+{
+  bool passed = true;
+
+  int init_val = 11;
+
+  auto res = foo(init_val);
+  
+  for (size_t i=0; i<K; i++)
+    if (res[i] != init_val) {
+      std::cout << "error!\n";
+      passed = false;
+      break;
+    }
+
+  if (passed) std::cout << "passed!\n";
+
+  return 0;
+}
+
+// CHECK: passed!

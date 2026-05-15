@@ -1,0 +1,228 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Merged from: softmax-gcu-only-test.co, softmaxbw-gcu-only-test.co,
+//              online-softmax-gcu-only-test.co
+
+#include "choreo.h"
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <vector>
+
+__cok__ {
+__co_device__ extern "C" void softmax_fwd_kernel(float *input, float *output, int m, int n) {
+  for (int i = 0; i < m; ++i) {
+    float max_val = input[i * n];
+    for (int j = 0; j < n; ++j)
+      max_val = (max_val > input[i * n + j]) ? max_val : input[i * n + j];
+
+    float sum = 0.0f;
+    for (int j = 0; j < n; ++j) {
+      output[i * n + j] = expf(input[i * n + j] - max_val);
+      sum += output[i * n + j];
+    }
+
+    for (int j = 0; j < n; ++j)
+      output[i * n + j] /= sum;
+  }
+}
+
+__co_device__ extern "C" void softmax_bwd_kernel(float *output, float *d_output, float *d_input, int m, int n) {
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      float grad_sum = 0.0f;
+      for (int k = 0; k < n; ++k) {
+        float delta = (j == k) ? 1.0f : 0.0f;
+        grad_sum += d_output[i * n + k] * output[i * n + j] * (delta - output[i * n + k]);
+      }
+      d_input[i * n + j] = grad_sum;
+    }
+  }
+}
+
+__co_device__ extern "C" void softmax_online_kernel(float *input, float *output, int m, int n) {
+  for (int i = 0; i < m; ++i) {
+    float max_val = input[i * n];
+    float pre_max_val = input[i * n];
+    float sum = 0.0f;
+    for (int j = 0; j < n; ++j) {
+      pre_max_val = max_val;
+      max_val = (max_val > input[i * n + j]) ? max_val : input[i * n + j];
+      sum = sum*expf(pre_max_val-max_val)+expf(input[i * n + j]-max_val);
+    }
+    for (int j = 0; j < n; ++j) {
+      output[i * n + j] = expf(input[i * n + j] - max_val)/sum;
+    }
+  }
+}
+}
+
+// ---------------------------------------------------------------------------
+// Forward softmax (from softmax-gcu-only-test.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto softmax_fwd(f32[256, 512] input) {
+  f32[input.span(0), input.span(1)] output;
+
+  parallel p by 1 {
+    with index = {m_tile, n_tile} in[256 / 64, 1] {
+      foreach m_tile {
+        local f32[64, 512] local_output;
+        local_input = dma.copy input.chunkat(m_tile, n_tile) => local;
+        call softmax_fwd_kernel(local_input.data, local_output, 64, 512);
+        dma.copy local_output => output.chunkat(m_tile, n_tile);
+      }
+    }
+  }
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Backward softmax (from softmaxbw-gcu-only-test.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto softmax_bwd(f32[16, 128] _output, f32[16, 128] d_output) {
+  f32[_output.span(0), _output.span(1)] d_input;
+  parallel p by 1 {
+    with index = {m_tile, n_tile} in[1 , 1] {
+      foreach m_tile {
+        local f32[16, 128] local_d_input;
+        local_output = dma.copy _output.chunkat(m_tile, n_tile) => local;
+        local_d_output = dma.copy d_output.chunkat(m_tile, n_tile) => local;
+        call softmax_bwd_kernel(local_output.data, local_d_output.data, local_d_input, 16, 128);
+        dma.copy local_d_input => d_input.chunkat(m_tile, n_tile);
+      }
+    }
+  }
+  return d_input;
+}
+
+// ---------------------------------------------------------------------------
+// Online softmax (from online-softmax-gcu-only-test.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto softmax_online(f32[256, 512] input) {
+  f32[input.span(0), input.span(1)] output;
+
+  parallel p by 1 {
+    with index = {m_tile, n_tile} in[256 / 64, 1] {
+      foreach m_tile {
+        local f32[64, 512] local_output;
+        local_input = dma.copy input.chunkat(m_tile, n_tile) => local;
+        call softmax_online_kernel(local_input.data, local_output, 64, 512);
+        dma.copy local_output => output.chunkat(m_tile, n_tile);
+      }
+    }
+  }
+  return output;
+}
+
+// ===========================================================================
+// Host verification
+// ===========================================================================
+
+extern "C" void cpu_softmax(choreo::f32 *input, choreo::f32 *output, int m, int n) {
+  for (int i = 0; i < m; ++i) {
+    float max_val = input[i * n];
+    for (int j = 0; j < n; ++j)
+      max_val = (max_val > input[i * n + j]) ? max_val : input[i * n + j];
+
+    float sum = 0.0f;
+    for (int j = 0; j < n; ++j) {
+      output[i * n + j] = exp(input[i * n + j] - max_val);
+      sum += output[i * n + j];
+    }
+    for (int j = 0; j < n; ++j)
+      output[i * n + j] /= sum;
+  }
+}
+
+extern "C" void cpu_softmax_backward(choreo::f32 *output, choreo::f32 *d_output, choreo::f32 *d_input, int m, int n) {
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      float grad_sum = 0.0f;
+      for (int k = 0; k < n; ++k) {
+        float delta = (j == k) ? 1.0f : 0.0f;
+        grad_sum += d_output[i * n + k] * output[i * n + j] * (delta - output[i * n + k]);
+      }
+      d_input[i * n + j] = grad_sum;
+    }
+  }
+}
+
+bool test_softmax_fwd() {
+  choreo::f32 input[256][512] = {0};
+  std::fill_n(&input[0][0], sizeof(input) / sizeof(input[0][0]), 1.0f);
+
+  auto input_data = choreo::make_spanview<2, choreo::f32>((float *)input, {256, 512});
+  auto result = softmax_fwd(input_data);
+  choreo::f32 result_cpu[256][512];
+  cpu_softmax((choreo::f32 *)input, (choreo::f32 *)result_cpu, 256, 512);
+
+  for (int i = 0; i < 256; ++i)
+    for (int j = 0; j < 512; ++j) {
+      if (std::abs(result[i][j] - result_cpu[i][j]) > 1e-6) {
+        std::cerr << "softmax_fwd mismatch at [" << i << "][" << j << "]\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_softmax_bwd() {
+  choreo::f32 output[16][128] = {0};
+  choreo::f32 d_output[16][128] = {0};
+  std::fill_n(&output[0][0], sizeof(output) / sizeof(output[0][0]), 0.5f);
+  std::fill_n(&d_output[0][0], sizeof(d_output) / sizeof(d_output[0][0]), 1.0f);
+
+  auto output_data = choreo::make_spanview<2, choreo::f32>((float *)output, {16, 128});
+  auto d_output_data = choreo::make_spanview<2, choreo::f32>((float *)d_output, {16, 128});
+
+  auto d_input = softmax_bwd(output_data, d_output_data);
+  choreo::f32 d_input_cpu[16][128];
+  cpu_softmax_backward((choreo::f32 *)output, (choreo::f32 *)d_output, (choreo::f32 *)d_input_cpu, 16, 128);
+
+  for (int i = 0; i < 16; ++i)
+    for (int j = 0; j < 128; ++j) {
+      if (std::abs(d_input[i][j] - d_input_cpu[i][j]) > 1e-6) {
+        std::cerr << "softmax_bwd mismatch at [" << i << "][" << j << "]\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_softmax_online() {
+  choreo::f32 input[256][512] = {0};
+  std::fill_n(&input[0][0], sizeof(input) / sizeof(input[0][0]), 1.0f);
+
+  auto input_data = choreo::make_spanview<2, choreo::f32>((float *)input, {256, 512});
+  auto result = softmax_online(input_data);
+  choreo::f32 result_cpu[256][512];
+  cpu_softmax((choreo::f32 *)input, (choreo::f32 *)result_cpu, 256, 512);
+
+  for (int i = 0; i < 256; ++i)
+    for (int j = 0; j < 512; ++j) {
+      if (std::abs(result[i][j] - result_cpu[i][j]) > 1e-6) {
+        std::cerr << "softmax_online mismatch at [" << i << "][" << j << "]\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+int main() {
+  int failures = 0;
+
+  if (!test_softmax_fwd()) { std::cerr << "FAIL: softmax_fwd\n"; ++failures; }
+  if (!test_softmax_bwd()) { std::cerr << "FAIL: softmax_bwd\n"; ++failures; }
+  if (!test_softmax_online()) { std::cerr << "FAIL: softmax_online\n"; ++failures; }
+
+  if (failures == 0)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << failures << " test(s) failed" << std::endl;
+}
+
+// CHECK: Test Passed

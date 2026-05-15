@@ -1,0 +1,183 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Merged from: matmul-direct.co, matmul-dyn-direct.co, matmul-gcu-only-test.co
+
+// ---------------------------------------------------------------------------
+// Matmul with transpose (from matmul-direct.co)
+// ---------------------------------------------------------------------------
+
+__co__ s32 [128, 256] matmul_transp(s32 [128, 256] lhs, s32 [256, 256] rhs) {
+  s32[lhs.span(0), rhs.span(1)] output;
+
+  parallel p by 1 {
+    with index = {m_tile, k_tile, n_tile} in [32, 16, 4] {
+      foreach m_tile, n_tile {
+        local s32[4, 64] l1_out {0};
+        foreach k_tile {
+          lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+          rhs_load = dma.transp<1,0> rhs.chunkat(k_tile, n_tile) => local;
+
+          foreach {m, n, k} in [lhs_load.span(0), rhs_load.span(0), lhs_load.span(1)]
+            l1_out.at(m, n) += lhs_load.data.at(m, k) * rhs_load.data.at(n, k);
+        }
+        dma.copy l1_out => output.chunkat(m_tile, n_tile);
+      }
+    }
+  }
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Matmul with dynamic shapes (from matmul-dyn-direct.co)
+// ---------------------------------------------------------------------------
+
+__co__ auto matmul_dyn(s32 [M, K] lhs, s32 [K, N] rhs) {
+ s32 [M, N] output;
+
+ block_m = 4, block_k = 256, block_n = 64;
+
+ parallel p by 1
+  with {m_tile, k_tile, n_tile}
+   in [M/block_m, K/block_k, N/block_n]
+
+   foreach m_tile, n_tile {
+     local s32 [block_m, block_n] l1_out {0};
+
+     foreach k_tile {
+       lf = dma.copy.async lhs.chunkat(m_tile, k_tile) => local;
+       rf = dma.copy.async rhs.chunkat(k_tile, n_tile) => local;
+       wait lf , rf;
+
+       foreach {m, n, k} in [block_m, block_n, block_k]
+         l1_out.at(m, n) +=
+            lf.data.at(m, k) * rf.data.at(k, n);
+
+       dma.copy l1_out => output.chunkat(m_tile, n_tile);
+     }
+   }
+
+ return output;
+}
+
+// ---------------------------------------------------------------------------
+// Matmul with device kernel (from matmul-gcu-only-test.co)
+// ---------------------------------------------------------------------------
+
+__cok__ {
+__co_device__ extern "C" void matmul_kernel(int * lhs, int * rhs, int * out) {
+  int m = 4;
+  int k = 128;
+  int n = 64;
+  for (int i = 0; i < m; ++i)
+    for (int j = 0; j < n; ++j)
+      for (int z = 0; z < k; ++z)
+        out[i*n + j] += lhs[i*k+z]*rhs[z*n+j];
+}
+}
+
+__co__ s32 [128, 256] matmul_devkernel(s32 [128, 256] lhs, s32 [256, 256] rhs) {
+  s32[lhs.span(0), rhs.span(1)] output;
+
+  parallel p by 1 {
+    with index = {m_tile, k_tile, n_tile} in [32, 2, 4] {
+      foreach m_tile, n_tile {
+        local s32[4, 64] l1_out {0};
+        foreach k_tile {
+          lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+          rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
+
+          call matmul_kernel(lhs_load.data, rhs_load.data, l1_out);
+        }
+        dma.copy l1_out => output.chunkat(m_tile, n_tile);
+      }
+    }
+  }
+  return output;
+}
+
+// ===========================================================================
+// Host verification
+// ===========================================================================
+
+bool test_matmul_transp() {
+  choreo::s32 a[128][256] = {0};
+  choreo::s32 b[256][256] = {0};
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {128, 256});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {256, 256});
+  lhs_data.fill_random(-10, 10);
+  rhs_data.fill_random(-10, 10);
+
+  auto res = matmul_transp(lhs_data, rhs_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+      for (size_t k = 0; k < lhs_data.shape()[1]; ++k)
+        ref += a[i][k]*b[k][j];
+      if (ref != res[i][j]) {
+        std::cerr << "matmul_transp mismatch at [" << i << "][" << j << "]\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_matmul_dyn() {
+  auto lhs = choreo::make_spandata<choreo::s32>(128, 256);
+  auto rhs = choreo::make_spandata<choreo::s32>(256, 256);
+  lhs.fill_random(-10, 10);
+  rhs.fill_random(-10, 10);
+
+  auto res = matmul_dyn(lhs.view(), rhs.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+      for (size_t k = 0; k < lhs.shape()[1]; ++k)
+        ref += lhs[i][k]*rhs[k][j];
+      if (ref != res[i][j]) {
+        std::cerr << "matmul_dyn mismatch at [" << i << "][" << j << "]\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+bool test_matmul_devkernel() {
+  choreo::s32 a[128][256] = {0};
+  choreo::s32 b[256][256] = {0};
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {128, 256});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {256, 256});
+  lhs_data.fill_random(-10, 10);
+  rhs_data.fill_random(-10, 10);
+
+  auto res = matmul_devkernel(lhs_data, rhs_data);
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+      for (size_t k = 0; k < lhs_data.shape()[1]; ++k)
+        ref += a[i][k]*b[k][j];
+      if (ref != res[i][j]) {
+        std::cerr << "matmul_devkernel mismatch at [" << i << "][" << j << "]\n";
+        return false;
+      }
+    }
+  return true;
+}
+
+int main() {
+  int failures = 0;
+
+  if (!test_matmul_transp()) { std::cerr << "FAIL: matmul_transp\n"; ++failures; }
+  if (!test_matmul_dyn()) { std::cerr << "FAIL: matmul_dyn\n"; ++failures; }
+  if (!test_matmul_devkernel()) { std::cerr << "FAIL: matmul_devkernel\n"; ++failures; }
+
+  if (failures == 0)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << failures << " test(s) failed" << std::endl;
+}
+
+// CHECK: Test Passed

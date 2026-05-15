@@ -1,0 +1,56 @@
+// SKIP: merged into acore-lib-merged-test.co
+// REQUIRES: TARGET-GCU300 LIBCALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include <common/binary.h>
+
+__co__ s32 [6, 17, 64] add_relu(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) { /// device program
+  s32[lhs.span] output; // use same shape as lhs
+
+  parallel p by 6 {  // p is sip_index
+    foreach x in 17
+      foreach y in 4 {
+        lhs_load = dma.copy.async lhs.chunkat(p, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(p, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32[lhs_load.span] l1_out;
+
+        call acore::add_relu(l1_out, lhs_load.data, rhs_load.data, |l1_out.span|, 1);
+
+        out_store = dma.copy.async l1_out => output.chunkat(p, x, y); // can use defined vars
+        wait out_store;
+      }
+  } // can use python styling
+  return output;
+}
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  auto b = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = add_relu(a.view(), b.view());
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+  std::cout << res.shape()[2] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
+        // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
+        int value = a[i][j][k] + b[i][j][k]; 
+        value = (value > 0) ? value : 0;
+        if (value != res[i][j][k]) {
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
+// CHKNO: 3

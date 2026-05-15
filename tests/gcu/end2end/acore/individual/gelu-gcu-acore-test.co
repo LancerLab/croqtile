@@ -1,0 +1,50 @@
+// SKIP: merged into acore-lib-merged-test.co
+// REQUIRES: TARGET-GCU300 LIBCALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+// Activation __lib_gelu end-to-end test on GCU3.
+
+__co__ f32 [6, 128] lib_gelu_test(f32 [6, 128] input) {
+  f32[input.span] output;
+
+  parallel p by 6 {
+    foreach x in 1 {
+      in_tile = dma.copy.async input.chunkat(p, x) => local;
+      wait in_tile;
+
+      local f32[in_tile.span] l1_out;
+
+      __lib_gelu(l1_out, in_tile.data, |in_tile.span|);
+
+      out_store = dma.copy.async l1_out => output.chunkat(p, x);
+      wait out_store;
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto inp = choreo::make_spandata<choreo::f32>(6, 128);
+  inp.fill_random(-3, 3);
+
+  auto res = lib_gelu_test(inp.view());
+
+  bool passed = true;
+  for (size_t i = 0; i < 6; ++i)
+    for (size_t j = 0; j < 128; ++j) {
+      float x = (float)inp[i][j];
+      float expected = 0.5f * x * (1.0f + std::erf(x * 0.7071067811865476f));
+      if (std::abs(res[i][j] - expected) > 0.02f) {
+        std::cerr << "Mismatch at [" << i << "][" << j << "]: "
+                  << res[i][j] << " vs " << expected << std::endl;
+        passed = false;
+      }
+    }
+
+  if (passed)
+    std::cout << "Test Passed" << std::endl;
+  else
+    std::cout << "Test Failed" << std::endl;
+}
+
+// CHECK: Test Passed
