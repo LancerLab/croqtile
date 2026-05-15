@@ -174,7 +174,7 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
     for (auto& rn : fb->GetRanges()) {
       auto range = cast<AST::LoopRange>(rn);
       auto sym_ty = GetSymbolType(n.LOC(), range->RangeVarName());
-      SetNodeType(*range->range_var, sym_ty);
+      SetNodeType(*range->GetRV(), sym_ty);
     }
   }
 

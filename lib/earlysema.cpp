@@ -2742,8 +2742,8 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
     auto rng = dyn_cast<AST::LoopRange>(i);
 
     // Validate explicit local name (the iteration variable "c" in c=b(...)).
-    if (rng->HasExplicitRangeVar()) {
-      auto lid = rng->iv;
+    if (rng->HasExplicitIV()) {
+      auto lid = rng->GetIV();
       if (lid->name == "_")
         Error1(lid->LOC(), "_ is not allowed as a local iteration variable.");
 
@@ -2758,7 +2758,7 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
       ReportErrorWhenViolateODR(lid->LOC(), lid->name, __FILE__, __LINE__);
     }
 
-    if (auto id = rng->range_var) {
+    if (auto id = rng->GetRV()) {
       if (id->name == "_") {
         Error1(id->LOC(), "_ is not allowed as an iteration variable.");
         continue;

@@ -777,7 +777,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     for (size_t i = 0; i < fb->ranges->Count(); ++i) {
       if (i > 0) os << ", ";
       auto lr = cast<AST::LoopRange>(fb->ranges->values[i]);
-      os << lr->range_var->name << "(";
+      os << lr->GetRV()->name << "(";
       os << (lr->lbound ? PSTR(lr->lbound) : "") << ":";
       os << (lr->ubound ? PSTR(lr->ubound) : "") << ":";
       os << (IsValidStep(lr->step) ? std::to_string(lr->step) : "") << ")";
