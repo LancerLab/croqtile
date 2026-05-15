@@ -1580,7 +1580,7 @@ bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
   for (const auto& item : n.GetRanges()) {
     auto range = cast<AST::LoopRange>(item);
     // Although the range var is reset to zero, still treat it as a use.
-    AddUse(current_stmt, range->RangeVarName());
+    AddUse(current_stmt, range->GetRVName());
     for (const auto& offset : {range->lbound, range->ubound}) {
       if (!offset) continue;
       if (auto id = AST::GetIdentifier(*offset))

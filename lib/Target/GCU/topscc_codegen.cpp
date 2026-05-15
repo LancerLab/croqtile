@@ -474,7 +474,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
       auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
-      auto cname = rng->RangeVarName();
+      auto cname = rng->GetRVName();
 
       auto ivs = within_map.at(InScopeName(cname));
       auto loop = fb->loop;
@@ -2669,7 +2669,7 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
   cur_loop = n.loop;
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
-    auto cname = rng->RangeVarName();
+    auto cname = rng->GetRVName();
     for (auto iv_name : within_map.at(InScopeName(cname))) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));

@@ -3393,28 +3393,17 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   // True when an explicit local name was written: foreach local=source(...)
   bool HasExplicitIV() const { return iv && iv.get() != rv.get(); }
 
-  // Backwards-compatible aliases.
-  const std::string RangeVarName() const { return GetRVName(); }
-  const ptr<Identifier> RangeVar() const { return GetRV(); }
-  const std::string IVName() const { return GetIVName(); }
-  const ptr<Identifier> IV() const { return GetIV(); }
-  bool HasExplicitRangeVar() const { return HasExplicitIV(); }
 
   bool BoundIsMutated() const {
     return (lbound != nullptr) || (ubound != nullptr);
   }
 
   ptr<Node> CloneImpl() const override {
-    // When iv and rv are the same node (simple foreach, no explicit
-    // local name), preserve that identity in the clone so that visitors
-    // that track nodes by pointer remain consistent.
     auto cloned_rv = (!rv) ? nullptr : CloneP(rv);
-    auto cloned_iv = (!iv || iv.get() == rv.get()) ? cloned_rv : CloneP(iv);
-    auto copied = (!iv || iv.get() == rv.get())
-                      ? Make<LoopRange>(LOC(), cloned_rv, CloneP(lbound),
-                                        CloneP(ubound), step)
-                      : Make<LoopRange>(LOC(), cloned_iv, cloned_rv,
-                                        CloneP(lbound), CloneP(ubound), step);
+    auto cloned_iv = (!iv) ? nullptr : CloneP(iv);
+    auto copied = Make<LoopRange>(LOC(), cloned_rv, CloneP(lbound),
+                                  CloneP(ubound), step);
+    copied->iv = cloned_iv;
     copied->scope_predicate = scope_predicate;
     return copied;
   }
@@ -3505,10 +3494,10 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
 
   bool IsNorm() const { return loop != nullptr; }
 
-  ptr<Identifier> GetRangeVar() const {
+  ptr<Identifier> GetRV() const {
     if (ranges->Count() == 1) {
       auto range = dyn_cast<AST::LoopRange>(ranges->ValueAt(0));
-      return range->RangeVar();
+      return range->GetRV();
     }
     return nullptr;
   }
