@@ -98,6 +98,8 @@ public:
 
   bool RunOnProgram(AST::Node&);
 
+  void ValidatePassNames() const;
+
   // contains normal visitors
   ASTPipeline& PlanSemanticRoutine();
   ASTPipeline& PlanCodeGenRoutine();

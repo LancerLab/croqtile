@@ -332,4 +332,18 @@ inline bool Contains(const std::vector<T>& vec, const T& value) {
   return std::find(vec.begin(), vec.end(), value) != vec.end();
 }
 
+inline static size_t EditDistance(const std::string& a, const std::string& b) {
+  size_t m = a.size(), n = b.size();
+  std::vector<std::vector<size_t>> dp(m + 1, std::vector<size_t>(n + 1));
+  for (size_t i = 0; i <= m; ++i) dp[i][0] = i;
+  for (size_t j = 0; j <= n; ++j) dp[0][j] = j;
+  for (size_t i = 1; i <= m; ++i)
+    for (size_t j = 1; j <= n; ++j) {
+      size_t cost = (::tolower(a[i - 1]) != ::tolower(b[j - 1])) ? 1 : 0;
+      dp[i][j] = std::min(
+          {dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost});
+    }
+  return dp[m][n];
+}
+
 #endif // __CHOREO_AUX_HPP__

@@ -1,0 +1,18 @@
+// Test that unknown/misspelled command-line options produce helpful errors.
+//
+// RUN: not choreo --stop-aftr=check %s 2>&1 | FileCheck %s --check-prefix=TYPO-OPT
+// RUN: not choreo --targt=cute %s 2>&1 | FileCheck %s --check-prefix=TYPO-TARGET
+// RUN: not choreo --dumpp-ast %s 2>&1 | FileCheck %s --check-prefix=TYPO-DUMP
+// RUN: not choreo --unknownflag %s 2>&1 | FileCheck %s --check-prefix=UNKNOWN
+
+__co__ void foo() {
+  global s32 [1,2] g;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+  }
+}
+
+// TYPO-OPT: error: unknown option '--stop-aftr=check'. Did you mean '--stop-after'?
+// TYPO-TARGET: error: unknown option '--targt=cute'. Did you mean '--target'?
+// TYPO-DUMP: error: unknown option '--dumpp-ast'. Did you mean '--dump-ast'?
+// UNKNOWN: error: unknown option '--unknownflag'.

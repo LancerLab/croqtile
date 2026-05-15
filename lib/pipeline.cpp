@@ -59,6 +59,8 @@ void ASTPipeline::PrintPassTimings(const std::vector<PassTimingEntry>& timings,
   errs() << sep << "\n";
 }
 
+void ASTPipeline::ValidatePassNames() const { Visitor::ValidatePassEnvVars(); }
+
 bool ASTPipeline::RunOnProgram(AST::Node& root) {
   if (debug) Dump();
   // verify the input

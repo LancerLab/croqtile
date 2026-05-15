@@ -1,0 +1,19 @@
+// Test that misspelled pass names in debug/stop options produce warnings.
+//
+// RUN: choreo -sa=livenss %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=TYPO-SA
+// RUN: choreo -pa=normm %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=TYPO-PA
+// RUN: choreo -dv=seema %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=TYPO-DV
+
+__co__ void foo() {
+  global s32 [1,2] g;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+  }
+}
+
+// TYPO-SA: warning: unknown pass name 'livenss' for --stop-after. Did you mean 'liveness'?
+// TYPO-SA: Known passes:
+// TYPO-PA: warning: unknown pass name 'normm' for --print-after. Did you mean 'norm'?
+// TYPO-PA: Known passes:
+// TYPO-DV: warning: unknown pass name 'seema' for --debug-visit. Did you mean 'sema'?
+// TYPO-DV: Known passes:
