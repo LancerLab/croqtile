@@ -43,7 +43,7 @@ setup-clang-format: check-clang-format
 	chmod +x $(CLANG_FORMAT)
 
 setup-git-hooks:
-	@mkdir .git/hooks; \
+	@mkdir -p .git/hooks; \
 	cp ./scripts/hooks/pre-commit-check.sh .git/hooks/pre-commit; \
 	chmod +x .git/hooks/pre-commit
 

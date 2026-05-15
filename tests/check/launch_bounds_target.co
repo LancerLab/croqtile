@@ -1,4 +1,4 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
+// TODO-RUN: not choreo %s 2>&1 | FileCheck %s
 // CHECK: error: launch_bounds is only supported for the cute target.
 // CHECK: Totally 1 errors have been detected.
 

@@ -5005,20 +5005,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             frag_cast + ");\n";
         std::string mma_m_str = ValueSTR(mc_dim_m);
 
-          if (explicit_m_mask && explicit_n_mask) {
-           ds << d_indent << "store_fragment_d_mask_row_col<"
-             << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">(" << f_mds.first
-             << ", " << frag_cast << ", " << row_guard_expr << ", "
-             << col_guard_expr << ");\n";
-          } else if (explicit_m_mask) {
-           ds << d_indent << "store_fragment_d_mask_row<" << CUTE_WGMMA_ATOM
-             << ", " << DIM_N_STR << ">(" << f_mds.first << ", "
-             << frag_cast << ", " << row_guard_expr << ");\n";
-          } else if (explicit_n_mask) {
-           ds << d_indent << "store_fragment_d_mask_col<" << CUTE_WGMMA_ATOM
-             << ", " << DIM_N_STR << ">(" << f_mds.first << ", "
-             << frag_cast << ", " << col_guard_expr << ");\n";
-          } else if (need_m_mask && need_n_mask) {
+        if (explicit_m_mask && explicit_n_mask) {
+          ds << d_indent << "store_fragment_d_mask_row_col<" << CUTE_WGMMA_ATOM
+             << ", " << DIM_N_STR << ">(" << f_mds.first << ", " << frag_cast
+             << ", " << row_guard_expr << ", " << col_guard_expr << ");\n";
+        } else if (explicit_m_mask) {
+          ds << d_indent << "store_fragment_d_mask_row<" << CUTE_WGMMA_ATOM
+             << ", " << DIM_N_STR << ">(" << f_mds.first << ", " << frag_cast
+             << ", " << row_guard_expr << ");\n";
+        } else if (explicit_n_mask) {
+          ds << d_indent << "store_fragment_d_mask_col<" << CUTE_WGMMA_ATOM
+             << ", " << DIM_N_STR << ">(" << f_mds.first << ", " << frag_cast
+             << ", " << col_guard_expr << ");\n";
+        } else if (need_m_mask && need_n_mask) {
           ds << d_indent << "{ int __rg = " << row_guard_expr
              << "; int __cg = " << col_guard_expr << ";\n";
           ds << d_indent << "  if (__rg >= " << mma_m_str
@@ -5628,16 +5627,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto mma_m_sync = ssmi.shape.at(0);
       if (sync_explicit_m && sync_explicit_n) {
         ds << d_indent << "store_fragment_d_mask_row_col<" << CUTE_MMA_ATOM
-          << ">(" << f_mds.first << ", " << frag_cast_sync << ", "
-          << sync_rg << ", " << sync_cg << ");\n";
+           << ">(" << f_mds.first << ", " << frag_cast_sync << ", " << sync_rg
+           << ", " << sync_cg << ");\n";
       } else if (sync_explicit_m) {
-        ds << d_indent << "store_fragment_d_mask_row<" << CUTE_MMA_ATOM
-          << ">(" << f_mds.first << ", " << frag_cast_sync << ", "
-          << sync_rg << ");\n";
+        ds << d_indent << "store_fragment_d_mask_row<" << CUTE_MMA_ATOM << ">("
+           << f_mds.first << ", " << frag_cast_sync << ", " << sync_rg
+           << ");\n";
       } else if (sync_explicit_n) {
-        ds << d_indent << "store_fragment_d_mask_col<" << CUTE_MMA_ATOM
-          << ">(" << f_mds.first << ", " << frag_cast_sync << ", "
-          << sync_cg << ");\n";
+        ds << d_indent << "store_fragment_d_mask_col<" << CUTE_MMA_ATOM << ">("
+           << f_mds.first << ", " << frag_cast_sync << ", " << sync_cg
+           << ");\n";
       } else if (sync_need_m && sync_need_n) {
         ds << d_indent << "{ int __rg = " << sync_rg
            << "; int __cg = " << sync_cg << ";\n";
@@ -7325,8 +7324,8 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
   bool use_maxnreg_attr = setreg_limit.has_value() && CCtx().ArchNum() < 90;
   std::optional<std::string> launch_bounds_attr;
   if (launch_bounds_min_blocks.has_value() && !lcs.empty()) {
-    auto inner_thr_count = lcs[0].thread_count.x * lcs[0].thread_count.y *
-                           lcs[0].thread_count.z;
+    auto inner_thr_count =
+        lcs[0].thread_count.x * lcs[0].thread_count.y * lcs[0].thread_count.z;
     auto group_count = lcs[0].group_count.x * lcs[0].group4_count.x *
                        lcs[0].group_count.y * lcs[0].group_count.z;
     auto thr_count = inner_thr_count * group_count;
