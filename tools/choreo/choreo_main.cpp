@@ -82,6 +82,7 @@ int main(int argc, char* argv[]) {
   }
 
   auto& pl = ASTPipeline::Get().PlanAllRoutines();
+  pl.ValidatePassNames();
 
   if (!pl.RunOnProgram(root)) return pl.Status();
 

@@ -1,0 +1,14 @@
+// Test that valid pass names do NOT produce warnings.
+//
+// RUN: choreo -sa=check %s -o /dev/null 2>&1 | FileCheck %s --allow-empty --check-prefix=VALID
+// RUN: choreo -sa=sema %s -o /dev/null 2>&1 | FileCheck %s --allow-empty --check-prefix=VALID
+// RUN: choreo -dv=liveness %s -o /dev/null 2>&1 | FileCheck %s --allow-empty --check-prefix=VALID
+
+__co__ void foo() {
+  global s32 [1,2] g;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+  }
+}
+
+// VALID-NOT: warning: unknown pass name

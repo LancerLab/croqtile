@@ -133,6 +133,8 @@ protected:
   mutable size_t error_count = 0;
 
   static std::unordered_set<std::string> AllVisitors;
+  static std::unordered_set<std::string> MatchedEnvPasses;
+  static std::unordered_set<std::string> KnownPassNames;
 
 public:
   Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr,
@@ -140,8 +142,7 @@ public:
       : scoped_symtab(s_tab), use_global_symtab(ugs), name(ToUpper(n)) {
     if (name.empty()) choreo_unreachable("a visitor must be named.");
 
-    if (AllVisitors.count(name))
-      choreo_unreachable("found visitor with same name: \"" + n + "\".");
+    KnownPassNames.insert(name);
 
     // to be deprecated. currently it is only used for quick debug
     if (std::getenv("TRACE")) {
@@ -151,39 +152,60 @@ public:
 
     if (std::getenv("CHOREO_TRACE_VISITOR")) {
       auto trace = ToUpper(std::string(std::getenv("CHOREO_TRACE_VISITOR")));
-      if (ContainsExact(trace, name)) SetTraceVisit(true);
+      if (ContainsExact(trace, name)) {
+        SetTraceVisit(true);
+        MatchedEnvPasses.insert("CHOREO_TRACE_VISITOR:" + name);
+      }
     }
 
     if (std::getenv("CHOREO_DEBUG_VISITOR")) {
       auto debug = ToUpper(std::string(std::getenv("CHOREO_DEBUG_VISITOR")));
-      if (ContainsExact(debug, name)) SetDebugVisit(true);
+      if (ContainsExact(debug, name)) {
+        SetDebugVisit(true);
+        MatchedEnvPasses.insert("CHOREO_DEBUG_VISITOR:" + name);
+      }
     }
 
     if (std::getenv("CHOREO_PRINT_BEFORE")) {
       auto before = ToUpper(std::string(std::getenv("CHOREO_PRINT_BEFORE")));
       if (ContainsExact(before, "ALLPASSES")) print_ahead = true;
-      if (ContainsExact(before, name)) print_ahead = true;
+      if (ContainsExact(before, name)) {
+        print_ahead = true;
+        MatchedEnvPasses.insert("CHOREO_PRINT_BEFORE:" + name);
+      }
     }
 
     if (std::getenv("CHOREO_PRINT_AFTER")) {
       auto after = ToUpper(std::string(std::getenv("CHOREO_PRINT_AFTER")));
       if (ContainsExact(after, "ALLPASSES")) print_after = true;
-      if (ContainsExact(after, name)) print_after = true;
+      if (ContainsExact(after, name)) {
+        print_after = true;
+        MatchedEnvPasses.insert("CHOREO_PRINT_AFTER:" + name);
+      }
     }
 
     if (std::getenv("CHOREO_DUMP_SYMTAB_AFTER")) {
       auto dump = ToUpper(std::string(std::getenv("CHOREO_DUMP_SYMTAB_AFTER")));
-      if (ContainsExact(dump, name)) dsyms_after = true;
+      if (ContainsExact(dump, name)) {
+        dsyms_after = true;
+        MatchedEnvPasses.insert("CHOREO_DUMP_SYMTAB_AFTER:" + name);
+      }
     }
 
     if (std::getenv("CHOREO_STOP_AFTER_PASS")) {
       auto abend = ToUpper(std::string(std::getenv("CHOREO_STOP_AFTER_PASS")));
-      if (ContainsExact(abend, name)) abend_after = true;
+      if (ContainsExact(abend, name)) {
+        abend_after = true;
+        MatchedEnvPasses.insert("CHOREO_STOP_AFTER_PASS:" + name);
+      }
     }
 
     if (std::getenv("CHOREO_DISABLE_VISIT")) {
       auto disable = ToUpper(std::string(std::getenv("CHOREO_DISABLE_VISIT")));
-      if (ContainsExact(disable, name)) disabled = true;
+      if (ContainsExact(disable, name)) {
+        disabled = true;
+        MatchedEnvPasses.insert("CHOREO_DISABLE_VISIT:" + name);
+      }
     }
 
     if (std::getenv("CHOREO_PRINT_PASSES")) prt_visitor = true;
@@ -192,6 +214,8 @@ public:
 
     if (std::getenv("CHOREO_ANALYZE_DEVICE_FUNCTIONS")) resolve_fns = true;
   }
+
+  static void ValidatePassEnvVars();
 
   virtual ~Visitor() {}
 
@@ -212,6 +236,11 @@ public:
   }
 
   virtual const std::string& GetName() { return name; }
+  const std::string& GetNameConst() const { return name; }
+
+  virtual void CollectNames(std::vector<std::string>& names) const {
+    names.push_back(name);
+  }
 
   virtual void SetLevelPrefix(const std::string& pfx) { lvl_pfx = pfx; }
   const std::string LevelPrefix() const { return lvl_pfx; }
@@ -998,7 +1027,11 @@ public:
     (members.push_back(&visitors), ...); // C++17 fold expression
   }
 
-  //  VisitorGroup(const std::string& n) :  Visitor(n, nullptr, false) {}
+  void CollectNames(std::vector<std::string>& names) const override {
+    names.push_back(GetNameConst());
+    for (auto* v : members) v->CollectNames(names);
+  }
+
   bool RunOnProgram(AST::Node& root) final {
     if (!IsAllowed(root) || disabled) return true;
     if (prt_visitor) dbgs() << LevelPrefix() << "|-+- " << GetName() << NewL;

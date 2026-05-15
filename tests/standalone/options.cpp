@@ -81,3 +81,40 @@ TEST_F(OptionTest, DescriptionPrint) {
   ASSERT_EQ(registry.Message(), std::string(""));
   ASSERT_EQ(registry.ReturnCode(), 0);
 }
+
+TEST_F(OptionTest, RejectsUnknownDashOption) {
+  OptionRegistry& registry = OptionRegistry::GetInstance();
+  Option<bool> knownOpt(OptionKind::User, "--known", "-k", false,
+                        "A known opt.");
+
+  const char* argv[] = {"program", "--unknown-opt", "-"};
+  int argc = sizeof(argv) / sizeof(argv[0]);
+
+  ASSERT_FALSE(registry.Parse(argc, const_cast<char**>(argv)));
+  ASSERT_EQ(registry.ReturnCode(), 1);
+  ASSERT_TRUE(registry.Message().find("unknown option") != std::string::npos);
+}
+
+TEST_F(OptionTest, SuggestsClosestOption) {
+  OptionRegistry& registry = OptionRegistry::GetInstance();
+  Option<std::string> stopAfter(OptionKind::User, "--stop-after", "-sa", "",
+                                "Stop after pass.", "", true);
+
+  const char* argv[] = {"program", "--stop-aftr=check", "-"};
+  int argc = sizeof(argv) / sizeof(argv[0]);
+
+  ASSERT_FALSE(registry.Parse(argc, const_cast<char**>(argv)));
+  ASSERT_TRUE(registry.Message().find("Did you mean") != std::string::npos);
+  ASSERT_TRUE(registry.Message().find("--stop-after") != std::string::npos);
+}
+
+TEST_F(OptionTest, AcceptsStdinDash) {
+  OptionRegistry& registry = OptionRegistry::GetInstance();
+  Option<bool> someOpt(OptionKind::User, "--flag", "-f", false, "A flag.");
+
+  const char* argv[] = {"program", "-"};
+  int argc = sizeof(argv) / sizeof(argv[0]);
+
+  ASSERT_TRUE(registry.Parse(argc, const_cast<char**>(argv)));
+  ASSERT_TRUE(registry.StdinAsInput());
+}

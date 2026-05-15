@@ -262,21 +262,65 @@ bool CommandLine::Parse(int argc, char** argv) {
   // parse all the options
   auto& r = OptionRegistry::GetInstance();
   r.Reset();
+  bool end_of_options = false;
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
+
+    if (end_of_options) {
+      // After '--', treat everything as positional (input file)
+      if (!r.GetInputFileName().empty()) {
+        errs() << "error: set input file twice: '" << r.GetInputFileName()
+               << "' and '" << arg << "'.\n";
+        ret_code = 1;
+        return false;
+      }
+      r.SetInputFileDirect(arg);
+      continue;
+    }
+
+    if (arg == "--") {
+      end_of_options = true;
+      continue;
+    }
+
     if (arg.substr(0, 2) == "-D") { // macros definitions
+      if (arg.size() == 2) {
+        std::cerr << "error: missing macro name after '-D'.\n";
+        ret_code = 1;
+        return false;
+      }
       auto pos = arg.find('=');
       if (pos != std::string::npos) {
         auto name = arg.substr(2, pos - 2);
+        if (name.empty()) {
+          std::cerr << "error: missing macro name in '" << arg << "'.\n";
+          ret_code = 1;
+          return false;
+        }
         auto val = arg.substr(pos + 1);
         CCtx().GetCLMacros()[name] = val;
       } else
         CCtx().GetCLMacros()[arg.substr(2)] = "";
     } else if (arg.substr(0, 2) == "-I") { // include path
+      if (arg.size() == 2) {
+        std::cerr << "error: missing path after '-I'.\n";
+        ret_code = 1;
+        return false;
+      }
       CCtx().GetIncPaths().push_back(arg.substr(2));
     } else if (arg.substr(0, 2) == "-L") { // library path
+      if (arg.size() == 2) {
+        std::cerr << "error: missing path after '-L'.\n";
+        ret_code = 1;
+        return false;
+      }
       CCtx().GetLibPaths().push_back(arg.substr(2));
-    } else if (arg.substr(0, 2) == "-l") { // library path
+    } else if (arg.substr(0, 2) == "-l") { // library
+      if (arg.size() == 2) {
+        std::cerr << "error: missing library name after '-l'.\n";
+        ret_code = 1;
+        return false;
+      }
       CCtx().GetLibs().push_back(arg.substr(2));
     } else if (arg.substr(0, 2) == "-O") { // optimization level
       int level = arg[2] - '0';

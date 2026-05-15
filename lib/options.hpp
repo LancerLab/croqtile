@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "aux.hpp"
 #include "target_registry.hpp"
@@ -110,6 +111,11 @@ public:
   bool StdoutAsOutput() const { return stdout_as_output; }
   bool StdinAsInput() const { return stdin_as_input; }
 
+  void SetInputFileDirect(const std::string& f) {
+    input_filename = f;
+    if (f == "-") stdin_as_input = true;
+  }
+
   static OptionRegistry& GetInstance() {
     static OptionRegistry instance;
     return instance;
@@ -137,6 +143,21 @@ public:
       abort();
     }
     options[name] = option;
+  }
+
+  std::string SuggestOption(const std::string& unknown) const {
+    std::string best;
+    size_t best_dist = (size_t)-1;
+    for (auto& [name, _] : options) {
+      size_t d = EditDistance(unknown, name);
+      if (d < best_dist) {
+        best_dist = d;
+        best = name;
+      }
+    }
+    size_t threshold = std::max((size_t)2, unknown.size() / 3);
+    if (best_dist <= threshold) return best;
+    return "";
   }
 
   void UnRegisterOption(const std::string& name) {
@@ -189,6 +210,12 @@ public:
         ess << options[option]->GetError();
         return false;
       }
+    } else if (arg[0] == '-' && arg != "-") {
+      ess << "error: unknown option '" << arg << "'.";
+      auto suggest = SuggestOption(option);
+      if (!suggest.empty()) ess << " Did you mean '" << suggest << "'?";
+      ret_code = 1;
+      return false;
     } else {
       if (!input_filename.empty()) {
         ess << "error: set input file twice: '" << input_filename << "' and '"
@@ -364,7 +391,8 @@ inline bool Option<bool>::Parse(int argc, char** argv, int& currentArg) {
       value = false;
     else {
       std::ostringstream es;
-      es << "Invalid value for boolean option: " << value << ".";
+      es << "Invalid value for boolean option '" << arg.substr(0, pos) << "': '"
+         << arg.substr(pos + 1) << "'. Use 'true' or 'false'.";
       SetError(es.str());
       return false;
     }
