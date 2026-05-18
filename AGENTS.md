@@ -285,6 +285,14 @@ Two comprehensive test suites validate OSS script functionality:
 
 When implementing a new `Target` subclass, override `SupportedScalarTypes(arch)` to declare which scalar types your target supports for explicit `__to<type>(expr)` conversions. Return the set of `BaseType` values valid for the given architecture. The compiler validates both source and target types in early semantic analysis. Optionally override `IsCastSupported(arch, from, to)` to restrict specific conversion pairs; the default allows all conversions between supported types. See `lib/target.hpp` for the interface and existing targets for reference.
 
+### Foreign Type Casts (`__to<"type">`)
+
+For casting to types not recognized by Choreo (compiler extensions, library types), use
+`__to<"type_string">(expr)`. The quoted type string is emitted verbatim as a C-style cast
+in generated code. Choreo skips type validation and assigns `AddrType` to the result,
+which passes the `call` argument whitelist. This is useful when C++ template argument
+deduction requires a concrete pointer type instead of `nullptr_t`.
+
 ---
 
 ## Skills

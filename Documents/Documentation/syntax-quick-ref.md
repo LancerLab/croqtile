@@ -146,6 +146,9 @@
 |--------|-------------|
 | `call func(args)` | Call device function |
 | `call func<T>(args)` | Template call |
+| `nullptr` | Null pointer argument |
+| `__to<type>(expr)` | Explicit type conversion (validated) |
+| `__to<"type">(expr)` | Foreign type cast (verbatim) |
 | `#define NAME value` | Object-like macro |
 | `#ifdef NAME ... #endif` | Conditional compilation |
 

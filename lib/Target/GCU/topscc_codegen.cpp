@@ -3646,8 +3646,10 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       oss << UnScopedName(SSMName(InScopeNameForRef(da->data->name), is_host));
     }
   } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
-    // codegen for scalar type cast
     assert(ce->GetOp() == Op::Cast);
+    if (ce->IsForeignCast())
+      return "((" + ce->ForeignType() + ")" +
+             OpExprSTR(ce->GetR(), "", true, is_host) + ")";
     return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
                        is_host, ce->ElementCount(), ce->IsExplicit());
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {

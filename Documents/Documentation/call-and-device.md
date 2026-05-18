@@ -53,8 +53,25 @@ The following types can be passed through `call`:
 | `int` variable | Integer value |
 | `\|f.span\|` (element count) | Integer value |
 | Compile-time constant | Literal value |
+| `nullptr` | Null pointer literal |
+| `__to<type>(expr)` | Explicit type conversion (validated) |
+| `__to<"type">(expr)` | Foreign type cast (verbatim, unvalidated) |
 
 Spanned data is **decayed to a typed pointer** when passed to device functions. The device function sees it as a flat pointer without shape information.
+
+### Foreign Type Casts
+
+When a C++ template function requires a concrete pointer type for template argument deduction, bare `nullptr` may cause deduction failures. Use `__to<"type">` with a quoted string to provide the expected type:
+
+```choreo
+// Without cast: template deduction fails on nullptr_t
+call my_lib::matmul<TM, my_lib::MK_NK>(data, nullptr, nullptr);
+
+// With __to<"type">: provides concrete __fp16* for deduction
+call my_lib::matmul<TM, my_lib::MK_NK>(data, __to<"__fp16*">(nullptr), __to<"__fp16*">(nullptr));
+```
+
+See [Type System - Foreign Type Cast](type-system.md#foreign-type-cast-with-__to%22type%22) for full details.
 
 ## Template Calls
 

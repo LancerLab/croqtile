@@ -1,0 +1,14 @@
+// RUN: choreo -e %s 2>&1 | FileCheck %s --check-prefix=AST
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s --check-prefix=CODE
+
+__co__ auto test_foreign_cast(f16 [128] input) {
+  parallel by 1 {
+    call foo(__to<"__fp16*">(nullptr), __to<"const float*">(nullptr));
+  }
+}
+
+// AST: FOREIGN_CAST(__fp16*: 'nullptr')
+// AST: FOREIGN_CAST(const float*: 'nullptr')
+
+// CODE: ((__fp16*)nullptr)
+// CODE: ((const float*)nullptr)

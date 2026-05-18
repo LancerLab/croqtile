@@ -660,6 +660,13 @@ bool EarlySemantics::Visit(AST::CastExpr& n) {
     choreo_unreachable("implicit AST::CastExpr should not appear at "
                        "EarlySemantics.");
 
+  // Foreign casts (__cast<"type">(expr)) bypass type validation; the type
+  // string is opaque and will be emitted verbatim by codegen.
+  if (n.IsForeignCast()) {
+    SetNodeType(n, MakeAddrType());
+    return true;
+  }
+
   size_t ec = error_count;
   auto to_type = n.ToType();
   auto& target = CCtx().GetTarget();

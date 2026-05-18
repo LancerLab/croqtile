@@ -2418,6 +2418,19 @@ call_expr
         ce->SetExplicit(true);
         $$ = ce;
       }
+    | TOCAST LT cstrings GT LPAREN s_expr RPAREN {
+        auto ce = AST::Make<AST::CastExpr>(@1, $6);
+        ce->SetForeignType($3);
+        ce->SetExplicit(true);
+        $$ = ce;
+      }
+    | TOCAST LT cstrings GT LPAREN NULLPTR RPAREN {
+        auto np = AST::Make<AST::Expr>(@6, AST::Make<AST::Nullptr>(@6));
+        auto ce = AST::Make<AST::CastExpr>(@1, np);
+        ce->SetForeignType($3);
+        ce->SetExplicit(true);
+        $$ = ce;
+      }
     ;
 
 cstrings /* concatenate strings */

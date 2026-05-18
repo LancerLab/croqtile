@@ -904,6 +904,14 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     }
     return base;
   }
+  if (auto np = dyn_cast<AST::Nullptr>(n)) return "nullptr";
+  if (auto ce = dyn_cast<AST::CastExpr>(n)) {
+    if (ce->IsForeignCast())
+      return "((" + ce->ForeignType() + ")" + ExprSTR(ce->GetR(), is_host) +
+             ")";
+    return std::string("static_cast<") + HIPNameBaseType(ce->ToType()) + ">(" +
+           ExprSTR(ce->GetR(), is_host) + ")";
+  }
   if (auto call = dyn_cast<AST::Call>(n)) return CallSTR(*call);
   if (auto mv = dyn_cast<AST::MultiValues>(n)) {
     if (mv->Count() == 1) return ExprSTR(mv->ValueAt(0), is_host);
