@@ -263,6 +263,63 @@ if(ENABLE_CUTE)
   message(STATUS "Using CUTE/CUTLASS from: ${_cute_root}")
 endif()
 
+# ============================
+# HIP/ROCm: cascade & validate
+# ============================
+option(ENABLE_HIP "Enable HIP/ROCm support for AMD GPUs" ON)
+
+set(DEFAULT_ROCM_HOME "/opt/rocm" CACHE PATH "Optional default ROCm path")
+
+function(_looks_like_valid_rocm ROOT OUT_VALID)
+  set(ok FALSE)
+  if(ROOT AND EXISTS "${ROOT}")
+    if(EXISTS "${ROOT}/bin/hipcc" AND
+       EXISTS "${ROOT}/include/hip/hip_runtime.h")
+      set(ok TRUE)
+    endif()
+  endif()
+  set(${OUT_VALID} ${ok} PARENT_SCOPE)
+endfunction()
+
+set(_rocm_candidates "")
+if(DEFINED ENV{ROCM_HOME} AND NOT "$ENV{ROCM_HOME}" STREQUAL "")
+  set(_rocm_candidates "$ENV{ROCM_HOME}")
+elseif(NOT "${DEFAULT_ROCM_HOME}" STREQUAL "")
+  set(_rocm_candidates "${DEFAULT_ROCM_HOME}")
+endif()
+
+set(_rocm_root "")
+set(_rocm_root_valid FALSE)
+if(NOT "${_rocm_candidates}" STREQUAL "")
+  _looks_like_valid_rocm("${_rocm_candidates}" _ok)
+  if(_ok)
+    set(_rocm_root "${_rocm_candidates}")
+    set(_rocm_root_valid TRUE)
+  endif()
+endif()
+
+if(NOT _rocm_root_valid)
+  if(ENABLE_HIP)
+    message(STATUS "No valid ROCm found. Auto-disabling ENABLE_HIP.")
+    set(ENABLE_HIP OFF CACHE BOOL "Enable HIP/ROCm support" FORCE)
+  endif()
+endif()
+
+message(STATUS "ENABLE_HIP = ${ENABLE_HIP}")
+if(ENABLE_HIP)
+  message(STATUS "Using ROCm from: ${_rocm_root}")
+  find_program(HIPCC hipcc HINTS ${_rocm_root}/bin)
+  execute_process(
+    COMMAND ${HIPCC} --version
+    OUTPUT_VARIABLE HIPCC_OUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  string(REGEX MATCH "HIP version: ([0-9]+)\\.([0-9]+)" _ "${HIPCC_OUT}")
+  set(HIP_VERSION_MAJOR "${CMAKE_MATCH_1}")
+  set(HIP_VERSION_MINOR "${CMAKE_MATCH_2}")
+  message(STATUS "HIP version: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
+endif()
+
 # Dummy target to make configuration succeed when appropriate
 add_library(dummy INTERFACE)
 
@@ -324,6 +381,16 @@ if(ENABLE_CUDA)
     list(APPEND EXTERN_LIBS ${CUDART_LIB})
   else()
     message(WARNING "CUDA runtime library (libcudart) not found. Auto-detection may not work.")
+  endif()
+endif()
+
+# Add HIP runtime library if HIP is enabled
+if(ENABLE_HIP)
+  find_library(AMDHIP64_LIB amdhip64 HINTS ${_rocm_root}/lib ${_rocm_root}/lib64)
+  if(AMDHIP64_LIB)
+    list(APPEND EXTERN_LIBS ${AMDHIP64_LIB})
+  else()
+    message(WARNING "HIP runtime library (libamdhip64) not found.")
   endif()
 endif()
 

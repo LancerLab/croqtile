@@ -1,0 +1,11 @@
+// RUN: choreo -es -t amdgpu -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
+
+__co__ void ele_add(s32 [6, 64] lhs, s32 [6, 64] rhs, s32 [6, 64] output) {
+  parallel p by 6, q by 64
+    output.at(p, q) = lhs.at(p, q) + rhs.at(p, q);
+}
+
+// CHECK: __global__ void __choreo_device_ele_add
+// CHECK: hipMalloc
+// CHECK: hipMemcpy
+// CHECK: <<<__grid, __block>>>

@@ -1,0 +1,11 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo %target %amdgpu_arch %s -o %s.hip.result && %s.hip.result | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+__co__ void nil() {}
+
+int main() {
+  nil();
+  std::cout << "Run Complete.\n";
+}
+
+// CHECK: Run Complete.

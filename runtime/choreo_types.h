@@ -196,6 +196,9 @@ using half = __half;
   #elif defined(__CHOREO_PRIVATE_TGT0__)
 using f16 = __fp16;
 using half = __fp16;
+  #elif defined(__CHOREO_TARGET_AMDGPU__)
+using f16 = ::__half;
+using half = ::__half;
   #else
     #error "half float is not supported on this target."
   #endif
@@ -327,10 +330,18 @@ using __bf16 = cute::bfloat16_t;
       #else
 using __bf16 = __nv_bfloat16;
       #endif
-    #endif
 using bf16 = __bf16;
 using bfp16 = __bf16;
 using bfloat16 = __bf16;
+    #elif defined(__CHOREO_TARGET_AMDGPU__)
+using bf16 = ::hip_bfloat16;
+using bfp16 = ::hip_bfloat16;
+using bfloat16 = ::hip_bfloat16;
+    #else
+using bf16 = __bf16;
+using bfp16 = __bf16;
+using bfloat16 = __bf16;
+    #endif
   #endif // __CHOREO_BF16_DEFINED__
 
   #if !defined(__CHOREO_PRIVATE_TGT0__) && !defined(__clang__) &&              \

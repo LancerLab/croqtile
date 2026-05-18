@@ -30,6 +30,16 @@
   #define __co_host__ __host__
   #define __co_any__ __device__ __host__
 
+#elif defined(__CHOREO_TARGET_AMDGPU__)
+  #include <hip/hip_runtime.h>
+  #include <hip/hip_fp16.h>
+  #include <hip/hip_bfloat16.h>
+  #define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
+  #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+  #define __co_device__ __device__
+  #define __co_host__ __host__
+  #define __co_any__ __device__ __host__
+
 #elif defined(__CHOREO_TARGET_CUTE__)
   #include <cuda_runtime.h>
   #include <filesystem>
@@ -114,6 +124,14 @@
         subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
   #define __CHOREO_GROUP_SINGLE__(GSIZE)                                       \
     subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
+#elif defined(__CHOREO_TARGET_AMDGPU__)
+  #define __CHOREO_BLOCK_SINGLE__                                              \
+    threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
+  #define __CHOREO_GROUP_SINGLE__ threadIdx.x % 32 == 0
+  #define __CHOREO_GROUP_ID__                                                  \
+    (threadIdx.x + threadIdx.y * blockDim.x +                                  \
+     threadIdx.z * blockDim.x * blockDim.y) /                                  \
+        32
 #elif defined(__CHOREO_TARGET_CUTE__)
   #define __CHOREO_BLOCK_SINGLE__                                              \
     threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
@@ -1815,6 +1833,9 @@ static __attribute__((always_inline)) inline void abend_true(int p) {
 #if defined(__CUDACC__) || defined(__CUDA__)
     auto err = static_cast<cudaError_t>(p);
     fprintf(stderr, "CUDA failure: %d (%s)\n", err, cudaGetErrorString(err));
+#elif defined(__CHOREO_TARGET_AMDGPU__)
+    auto err = static_cast<hipError_t>(p);
+    fprintf(stderr, "HIP failure: %d (%s)\n", (int)err, hipGetErrorString(err));
 #else
     fprintf(stderr, "Runtime failure (abend_true triggered)\n");
 #endif
@@ -1827,6 +1848,12 @@ static __attribute__((always_inline)) inline void verify_device_status() {
   cudaError_t err = cudaGetLastError();
   if (err != cudaSuccess) {
     printf("CUDA error after kernel: %s\n", cudaGetErrorString(err));
+    std::abort();
+  }
+#elif defined(__CHOREO_TARGET_AMDGPU__)
+  hipError_t err = hipGetLastError();
+  if (err != hipSuccess) {
+    fprintf(stderr, "HIP error after kernel: %s\n", hipGetErrorString(err));
     std::abort();
   }
 #endif
