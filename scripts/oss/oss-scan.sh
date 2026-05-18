@@ -184,8 +184,12 @@ scan_file_on_disk() {
 
 # -------- non-ASCII scan helpers --------
 # Strict rule: no non-ASCII bytes allowed in public code.
+# Exception: documentation/text files (markdown, plain text, etc.)
 
 NON_ASCII_RE='[^\x00-\x7F]'
+# Pattern for grep -vE to skip git-grep output lines from non-ASCII-exempt files.
+# git grep format: [treeish:]path:lineno:content  -- extension appears before :N:
+NON_ASCII_EXEMPT_GREP_RE='\.(md|txt|rst|adoc|tex|html|htm|xml|json|yaml|yml|toml|ini|cfg|conf|properties):[0-9]|(^|[/:])(LICENSE|COPYING|AUTHORS|CONTRIBUTORS|CHANGELOG|NEWS|HISTORY):[0-9]'
 
 scan_nonascii_via_git_grep() {
   local treeish="$1"
@@ -194,7 +198,7 @@ scan_nonascii_via_git_grep() {
   raw_matches="$(git -C "$REPO_ROOT" grep -I -nP -- "$NON_ASCII_RE" "$treeish" 2>/dev/null || true)"
   [[ -z "$raw_matches" ]] && return
   local matches
-  matches="$(echo "$raw_matches" | filter_excluded_lines)"
+  matches="$(echo "$raw_matches" | filter_excluded_lines | grep -vE -- "$NON_ASCII_EXEMPT_GREP_RE" || true)"
   if [[ -n "$matches" ]]; then
     local count
     count="$(echo "$matches" | wc -l)"
@@ -209,11 +213,18 @@ scan_nonascii_via_git_grep() {
 scan_nonascii_from_diff() {
   local diff_text="$1"
   local ctx="$2"
-  local added_lines
-  added_lines="$(echo "$diff_text" | grep -E '^\+' | grep -v '^+++' || true)"
-  [[ -z "$added_lines" ]] && return
+  # Use awk to track current file from +++ b/<path> headers, skip exempt extensions,
+  # and collect non-ASCII lines from non-exempt additions.
   local matches
-  matches="$(echo "$added_lines" | grep -nP -- "$NON_ASCII_RE" 2>/dev/null || true)"
+  matches="$(echo "$diff_text" | awk '
+    /^\+\+\+ b\//{
+      fname = substr($0, 7)
+      exempt = (fname ~ /\.(md|txt|rst|adoc|tex|html|htm|xml|json|yaml|yml|toml|ini|cfg|conf|properties)$/)
+      if (!exempt) exempt = (fname ~ /(^|\/)( LICENSE|COPYING|AUTHORS|CONTRIBUTORS|CHANGELOG|NEWS|HISTORY)$/)
+      next
+    }
+    /^\+[^+]/ && !exempt { print substr($0,2) }
+  ' | grep -nP -- "$NON_ASCII_RE" 2>/dev/null || true)"
   if [[ -n "$matches" ]]; then
     local count
     count="$(echo "$matches" | wc -l)"
@@ -226,7 +237,8 @@ scan_nonascii_on_disk() {
   local dir="$1"
   local ctx="$2"
   local matches
-  matches="$(grep -rnP -- "$NON_ASCII_RE" "$dir" 2>/dev/null || true)"
+  # grep output: /path/to/file:lineno:content -- same extension pattern works
+  matches="$(grep -rnP -- "$NON_ASCII_RE" "$dir" 2>/dev/null | grep -vE -- "$NON_ASCII_EXEMPT_GREP_RE" || true)"
   if [[ -n "$matches" ]]; then
     local count
     count="$(echo "$matches" | wc -l)"
@@ -484,12 +496,12 @@ mode_worktree() {
     fi
   fi
 
-  # Strict non-ASCII check on worktree, filtering excluded
+  # Strict non-ASCII check on worktree, filtering excluded and exempt files
   local raw_na
   raw_na="$(git -C "$REPO_ROOT" grep -I -nP -- "$NON_ASCII_RE" 2>/dev/null || true)"
   if [[ -n "$raw_na" ]]; then
     local na_matches
-    na_matches="$(echo "$raw_na" | filter_excluded_lines)"
+    na_matches="$(echo "$raw_na" | filter_excluded_lines | grep -vE -- "$NON_ASCII_EXEMPT_GREP_RE" || true)"
     if [[ -n "$na_matches" ]]; then
       local na_count
       na_count="$(echo "$na_matches" | wc -l)"
