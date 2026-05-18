@@ -70,15 +70,20 @@ private:
       pb_stack.clear();
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       auto pb_level = pb->GetLevel();
-      if (pb_level == ParallelLevel::CLUSTER) {
-        assert(pb_stack.empty());
+      if (pb_level == ParallelLevel::DEVICE) {
+        // DEVICE is a host-only wrapper; no kernel launch config.
+      } else if (pb_level == ParallelLevel::CLUSTER) {
+        assert(pb_stack.empty() ||
+               (pb_stack.size() == 1 &&
+                pb_stack.back()->GetLevel() == ParallelLevel::DEVICE));
         auto& tma_descs = cgi.GetTMADescs();
         tma_descs.emplace(pb, std::vector<TMADesc>{});
       } else if (pb_level == ParallelLevel::BLOCK) {
         block_pb = pb;
         assert(pb_stack.empty() ||
                (pb_stack.size() == 1 &&
-                pb_stack.back()->GetLevel() == ParallelLevel::CLUSTER));
+                (pb_stack.back()->GetLevel() == ParallelLevel::CLUSTER ||
+                 pb_stack.back()->GetLevel() == ParallelLevel::DEVICE)));
         auto& tma_descs = cgi.GetTMADescs();
         tma_descs.emplace(pb, std::vector<TMADesc>{});
       } else {
@@ -103,17 +108,23 @@ private:
         if (lcs.empty() || !lcs.back().HasCluster()) lcs.push_back({});
       }
 
-      // Set the launch configure
-      auto& lc = lcs.back();
-      switch (pb->GetLevel()) {
-      case ParallelLevel::CLUSTER: lc.SetClusterCount(pb->BoundValues()); break;
-      case ParallelLevel::BLOCK: lc.SetBlockCount(pb->BoundValues()); break;
-      case ParallelLevel::GROUP: lc.SetGroupCount(pb->BoundValues()); break;
-      case ParallelLevel::GROUPx4: lc.SetGroupx4Count(pb->BoundValues()); break;
-      case ParallelLevel::THREAD: lc.SetThreadCount(pb->BoundValues()); break;
-      default:
-        choreo_unreachable("The explicit parallel-by level " +
-                           STR(pb->GetLevel()) + " is not supported.");
+      // Set the launch configure (DEVICE skipped: host-only wrapper)
+      if (pb_level != ParallelLevel::DEVICE) {
+        auto& lc = lcs.back();
+        switch (pb->GetLevel()) {
+        case ParallelLevel::CLUSTER:
+          lc.SetClusterCount(pb->BoundValues());
+          break;
+        case ParallelLevel::BLOCK: lc.SetBlockCount(pb->BoundValues()); break;
+        case ParallelLevel::GROUP: lc.SetGroupCount(pb->BoundValues()); break;
+        case ParallelLevel::GROUPx4:
+          lc.SetGroupx4Count(pb->BoundValues());
+          break;
+        case ParallelLevel::THREAD: lc.SetThreadCount(pb->BoundValues()); break;
+        default:
+          choreo_unreachable("The explicit parallel-by level " +
+                             STR(pb->GetLevel()) + " is not supported.");
+        }
       }
     } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
       if (inner_pb_level == ParallelLevel::GROUPx4 ||
@@ -152,7 +163,8 @@ private:
       if (lvl == ParallelLevel::BLOCK) {
         assert(pb_stack.empty() ||
                (pb_stack.size() == 1 &&
-                pb_stack.back()->GetLevel() == ParallelLevel::CLUSTER));
+                (pb_stack.back()->GetLevel() == ParallelLevel::CLUSTER ||
+                 pb_stack.back()->GetLevel() == ParallelLevel::DEVICE)));
         auto& children = cgi.GetPBTree(fname).GetChildren(pb);
         if (children.size() >= 2) {
           // check if there are multiple compatible branches
