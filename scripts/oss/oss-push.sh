@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/oss-config.sh"
 DRY_RUN=0
 SKIP_SCAN=0
 DO_PUSH=0
+INTERACTIVE=0
 PUSH_REMOTE="origin"
 
 usage() {
@@ -33,6 +34,8 @@ Options:
   -k <file>       Keyword file
   -n              Dry run: show what would happen without committing
   --no-scan       Skip keyword scan (use with caution)
+  --interactive   When code is clean but commit message has violations,
+                  open an editor to fix the message instead of failing
   --catchup       Auto-detect unsynced commits on main and push them all
   --push [remote] After all commits, push oss/main to remote (default: origin)
   --range <r>     Expand a revision range via git rev-list --reverse
@@ -63,6 +66,7 @@ while [[ $# -gt 0 ]]; do
   -k)        KW_FILE="$2"; shift 2 ;;
   -n)        DRY_RUN=1; shift ;;
   --no-scan) SKIP_SCAN=1; shift ;;
+  --interactive) INTERACTIVE=1; shift ;;
   --catchup) CATCHUP=1; shift ;;
   --push)
     DO_PUSH=1
@@ -373,17 +377,67 @@ for commit in "${COMMITS[@]}"; do
   # Strip AI-tool trailers early so the message scan sees the final text.
   clean_msg="$(echo "$orig_msg" | sed '/^Made-with:/d; /^Generated-by:/d')"
   if [[ $SKIP_SCAN -eq 0 && -f "$KW_FILE" ]]; then
-  echo "  Scanning staged changes..."
-  _msg_tmp="$(mktemp)"
-  printf '%s\n(cherry picked from %s on main)' "$clean_msg" "$commit" > "$_msg_tmp"
-  if ! OSS_SCAN_REPO_ROOT="$REPO_ROOT" "$SCAN_CMD" --staged --msg-file "$_msg_tmp" -k "$KW_FILE"; then
-    rm -f "$_msg_tmp"
-    echo "ERROR $short: keyword/non-ASCII violation in staged changes. Resetting."
+  # Step A: scan staged code files only (no --msg-file)
+  echo "  Scanning staged code files..."
+  if ! OSS_SCAN_REPO_ROOT="$REPO_ROOT" "$SCAN_CMD" --staged -k "$KW_FILE"; then
+    echo "ERROR $short: keyword/non-ASCII violation in staged code. Resetting."
     git reset --hard HEAD >/dev/null
     FAILED=$((FAILED+1))
     continue
   fi
-  rm -f "$_msg_tmp"
+
+  # Step B: scan commit message (with cherry-pick trailer appended)
+  _msg_tmp="$(mktemp)"
+  _full_msg_tmp="$(mktemp)"
+  printf '%s' "$clean_msg" > "$_msg_tmp"
+  printf '%s\n(cherry picked from %s on main)' "$clean_msg" "$commit" > "$_full_msg_tmp"
+
+  _msg_ok=0
+  if OSS_SCAN_REPO_ROOT="$REPO_ROOT" "$SCAN_CMD" --msg-only --msg-file "$_full_msg_tmp" -k "$KW_FILE" 2>&1; then
+    _msg_ok=1
+  fi
+
+  if [[ $_msg_ok -eq 0 ]]; then
+    if [[ $INTERACTIVE -eq 1 ]]; then
+    echo ""
+    echo "  Commit message has keyword violations (code files are clean)."
+    echo "  Edit the message to remove forbidden keywords. Save and quit to continue."
+    _max_edits=2
+    _edit=0
+    _msg_fixed=0
+    while [[ $_edit -lt $_max_edits ]]; do
+      _edit=$((_edit + 1))
+      echo "  Opening \${EDITOR:-vi} (attempt $_edit of $_max_edits)..."
+      ${EDITOR:-vi} "$_msg_tmp"
+      printf '%s\n(cherry picked from %s on main)' "$(cat "$_msg_tmp")" "$commit" > "$_full_msg_tmp"
+      echo "  Re-scanning commit message..."
+      if OSS_SCAN_REPO_ROOT="$REPO_ROOT" "$SCAN_CMD" --msg-only --msg-file "$_full_msg_tmp" -k "$KW_FILE" 2>&1; then
+      echo "  Message is clean."
+      _msg_fixed=1
+      break
+      fi
+      echo "  Message still has violations."
+      if [[ $_edit -lt $_max_edits ]]; then
+      echo "  (attempt $_edit of $_max_edits -- one more chance)"
+      fi
+    done
+    if [[ $_msg_fixed -eq 0 ]]; then
+      echo "ERROR $short: commit message still has violations after $_max_edits edit(s). Resetting."
+      rm -f "$_msg_tmp" "$_full_msg_tmp"
+      git reset --hard HEAD >/dev/null 2>&1
+      FAILED=$((FAILED+1))
+      continue
+    fi
+    clean_msg="$(cat "$_msg_tmp")"
+    else
+    rm -f "$_msg_tmp" "$_full_msg_tmp"
+    echo "ERROR $short: keyword violation in commit message. Resetting."
+    git reset --hard HEAD >/dev/null
+    FAILED=$((FAILED+1))
+    continue
+    fi
+  fi
+  rm -f "$_msg_tmp" "$_full_msg_tmp"
   fi
 
   # Commit preserving original author, date, and message

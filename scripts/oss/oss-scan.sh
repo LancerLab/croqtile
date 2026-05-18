@@ -27,6 +27,7 @@ Modes (pick one):
   --diff <rev>       Scan a single commit's diff (git diff-tree)
   --range <a>..<b>   Scan commit messages in a range
   --dir <path>       Scan a directory on disk
+  --msg-only         Scan only the --msg-file (no code); requires --msg-file
   (default)          Scan current worktree tracked files
 
 Options:
@@ -44,11 +45,12 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --tree)   MODE="tree";   TARGET="${2:-}"; shift 2 || { echo "Error: --tree needs <branch>"; exit 2; } ;;
-    --staged) MODE="staged"; shift ;;
-    --diff)   MODE="diff";   TARGET="${2:-}"; shift 2 || { echo "Error: --diff needs <rev>"; exit 2; } ;;
-    --range)  MODE="range";  TARGET="${2:-}"; shift 2 || { echo "Error: --range needs <a>..<b>"; exit 2; } ;;
-    --dir)    MODE="dir";    TARGET="${2:-}"; shift 2 || { echo "Error: --dir needs <path>"; exit 2; } ;;
+    --tree)     MODE="tree";     TARGET="${2:-}"; shift 2 || { echo "Error: --tree needs <branch>"; exit 2; } ;;
+    --staged)   MODE="staged";   shift ;;
+    --diff)     MODE="diff";     TARGET="${2:-}"; shift 2 || { echo "Error: --diff needs <rev>"; exit 2; } ;;
+    --range)    MODE="range";    TARGET="${2:-}"; shift 2 || { echo "Error: --range needs <a>..<b>"; exit 2; } ;;
+    --dir)      MODE="dir";      TARGET="${2:-}"; shift 2 || { echo "Error: --dir needs <path>"; exit 2; } ;;
+    --msg-only) MODE="msg_only"; shift ;;
     -k)       KW_FILE="${2:-}"; shift 2 || { echo "Error: -k needs <file>"; exit 2; } ;;
     --msg-file) MSG_FILE="${2:-}"; shift 2 || { echo "Error: --msg-file needs <path>"; exit 2; } ;;
     -v)       VERBOSE=1; shift ;;
@@ -472,6 +474,20 @@ mode_dir() {
   scan_nonascii_on_disk "$dir" "dir"
 }
 
+mode_msg_only() {
+  if [[ -z "$MSG_FILE" || ! -f "$MSG_FILE" ]]; then
+    echo "Error: --msg-only requires --msg-file <path>" >&2
+    exit 2
+  fi
+  echo "Scanning commit message..."
+  local msg
+  msg="$(cat "$MSG_FILE")"
+  if echo "$msg" | grep -qE $CASE_FLAG -- "$COMBINED_PATTERN"; then
+    record "message" "commit message contains forbidden keywords"
+    VIOLATION_LOG+="$(echo "$msg" | grep -nE $CASE_FLAG -- "$COMBINED_PATTERN" | head -5 | sed 's/^/    /')"$'\n'
+  fi
+}
+
 mode_worktree() {
   echo "Scanning worktree tracked files (excluding ${#EXCL_DIRS[@]} dir rules, ${#EXCL_GLOBS[@]} glob rules)..."
   FILTER_TREEISH_PREFIX=""
@@ -522,6 +538,7 @@ case "$MODE" in
   diff)     mode_diff "$TARGET" ;;
   range)    mode_range "$TARGET" ;;
   dir)      mode_dir "$TARGET" ;;
+  msg_only) mode_msg_only ;;
   worktree) mode_worktree ;;
 esac
 

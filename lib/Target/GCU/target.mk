@@ -243,7 +243,7 @@ oss-push:
 
 oss-push-last:
 	@echo "Pushing last commit on main to oss/main..."
-	@$(OSS_PUSH) HEAD
+	@$(OSS_PUSH) --interactive HEAD
 
 oss-push-range:
 	@if [ -z "$(RANGE)" ]; then echo "Usage: make oss-push-range RANGE=<from>..<to>"; exit 1; fi
