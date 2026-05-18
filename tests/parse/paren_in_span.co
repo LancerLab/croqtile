@@ -1,0 +1,29 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+__co__ void paren_in_span(f32[M, N] input) {
+  // Parenthesized integers in span shapes should be plain values, not IntIndex.
+  mds : [(1)];
+  s32 [(1024)] out;
+  f16 [(32), (64)] matrix;
+
+  // Named derivation: parenthesized integers ARE IntIndex (span reorder).
+  reordered : input.span[(1), (0)];
+  reordered2 : input[(1), (0)];
+
+  // Ituple derivation: parenthesized integers ARE IntIndex.
+  ituple vals = {100, 200, 300};
+  picked = vals {(2), (0)};
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: paren_in_span
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: f32 [ M N ], symbol: input
+// CHECK:  `- Type Decl: mds - [ 1 ]
+// CHECK:  `- Var Decl (s32 [ 1024 ], default): out
+// CHECK:  `- Var Decl (f16 [ 32 64 ], default): matrix
+// CHECK:  `- Type Decl: reordered - [ input(1) input(0) ]
+// CHECK:  `- Type Decl: reordered2 - [ input(1) input(0) ]
+// CHECK:  `- Var Decl (ituple): vals = {100, 200, 300}
+// CHECK:  `- Var Decl (ituple): picked = vals {(2), (0)}
