@@ -706,7 +706,7 @@ public:
 
     switch (st) {
     case Storage::GLOBAL:
-      if (Level() != ParallelLevel::SEQ)
+      if (Level() != ParallelLevel::SEQ && Level() != ParallelLevel::DEVICE)
         Error1(n.LOC(), "global variable '" + n.name_str +
                             "` mustn't be declared inside parallel-by.");
       break;
@@ -714,6 +714,10 @@ public:
       if (Level() == ParallelLevel::SEQ)
         Error1(n.LOC(), "shared variable '" + n.name_str +
                             "` must be declared inside parallel-by.");
+      else if (Level() == ParallelLevel::DEVICE)
+        Error1(n.LOC(), "shared variable '" + n.name_str +
+                            "` must be declared inside a kernel parallel-by "
+                            "(': block' or inner), not at device scope.");
       if (sty->RuntimeShaped() && !CCtx().MemReuse())
         Error1(n.LOC(), "GCU forbids shared variable '" + n.name_str +
                             "` to be dynamically shaped (by " +
@@ -723,6 +727,10 @@ public:
       if (Level() == ParallelLevel::SEQ)
         Error1(n.LOC(), "local variable '" + n.name_str +
                             "` must be declared inside parallel-by.");
+      else if (Level() == ParallelLevel::DEVICE)
+        Error1(n.LOC(), "local variable '" + n.name_str +
+                            "` must be declared inside a kernel parallel-by "
+                            "(': block' or inner), not at device scope.");
       if (sty->RuntimeShaped() && !CCtx().MemReuse())
         Error1(n.LOC(), "GCU forbids local variable '" + n.name_str +
                             "` to be dynamically shaped (by " +
@@ -853,12 +861,12 @@ public:
 
     switch (n.Resource()) {
     case Storage::GLOBAL:
-      if (Level() != ParallelLevel::SEQ)
+      if (Level() != ParallelLevel::SEQ && Level() != ParallelLevel::DEVICE)
         Error1(n.LOC(), "unsupported: " + STR(n.Resource()) +
                             " synchronization in " + STR(Level()) + " scope.");
       break;
     case Storage::SHARED:
-      if (Level() == ParallelLevel::SEQ)
+      if (Level() == ParallelLevel::SEQ || Level() == ParallelLevel::DEVICE)
         Error1(n.LOC(), "unsupported: " + STR(n.Resource()) +
                             " synchronization in " + STR(Level()) + " scope.");
       break;
@@ -866,7 +874,9 @@ public:
       if (!TargetHasLevel(ParallelLevel::GROUP))
         Error1(n.LOC(), ToUpper(CCtx().GetArch()) + " does not support " +
                             STR(n.Resource()) + " synchronization.");
-      else if (Level() == ParallelLevel::SEQ || Level() == ParallelLevel::BLOCK)
+      else if (Level() == ParallelLevel::SEQ ||
+               Level() == ParallelLevel::DEVICE ||
+               Level() == ParallelLevel::BLOCK)
         Error1(n.LOC(), "unsupported: " + STR(n.Resource()) +
                             " synchronization in " + STR(Level()) + " scope.");
       break;

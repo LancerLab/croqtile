@@ -1,0 +1,16 @@
+// RUN: choreo -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s
+
+__co__ void sync_in_device() {
+  parallel d by 2 : device {
+    sync.global;   // valid at device scope
+    sync.shared;   // error: shared sync at device scope
+    parallel p by 2 : block {
+      parallel t by 6 : thread {
+        sync.shared;  // valid inside kernel
+      }
+    }
+  }
+}
+
+// CHECK: error: unsupported: shared synchronization in device scope
+// CHECK-NOT: error: unsupported: shared synchronization in thread scope

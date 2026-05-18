@@ -101,10 +101,11 @@ public:
   GetParallelLevels(const ArchId& arch) const override {
     auto arch_num = ArchNum(arch);
     if (arch_num < 400)
-      return {ParallelLevel::SEQ, ParallelLevel::BLOCK, ParallelLevel::THREAD};
-    else
-      return {ParallelLevel::SEQ, ParallelLevel::BLOCK, ParallelLevel::GROUP,
+      return {ParallelLevel::SEQ, ParallelLevel::DEVICE, ParallelLevel::BLOCK,
               ParallelLevel::THREAD};
+    else
+      return {ParallelLevel::SEQ, ParallelLevel::DEVICE, ParallelLevel::BLOCK,
+              ParallelLevel::GROUP, ParallelLevel::THREAD};
   }
 
   bool IsLibCallSupported(const std::string& name) const override {

@@ -1,0 +1,23 @@
+// REQUIRES: TARGET-GCUx2
+// RUN: choreo -gs %target %gcu_arch %s -o %s.topscc.result && bash %s.topscc.result --execute 2>&1 | FileCheck %s && rm -f %s.topscc.result
+
+// Each device receives its parallel variable 'd' as a kernel parameter,
+// allowing the kernel to identify which device partition it runs on.
+__co__ void device_test() {
+  parallel d by 2 : device {
+    parallel p by 1 : block {
+      parallel t by 1 : thread {
+        println("device ", d);
+      }
+    }
+  }
+}
+
+int main() {
+  device_test();
+  std::cout << "Test Passed" << std::endl;
+}
+
+// CHECK-DAG: device {0}
+// CHECK-DAG: device {1}
+// CHECK: Test Passed

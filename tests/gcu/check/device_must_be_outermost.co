@@ -1,0 +1,11 @@
+// RUN: choreo -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s
+
+__co__ void bad_nesting() {
+  parallel p by 4 : block {
+    parallel d by 2 : device {
+      parallel t by 32 : thread { }
+    }
+  }
+}
+
+// CHECK: error: the 'device' parallel-by level must be the outermost parallel scope

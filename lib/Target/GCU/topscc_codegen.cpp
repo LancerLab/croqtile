@@ -271,9 +271,19 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     levels.push(ParallelLevel::SEQ);
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.push(pb->GetLevel());
-    // only on device-side
-    if (pb->IsOuter()) {
+    if (pb->IsOuter() && pb->GetLevel() == ParallelLevel::DEVICE) {
+      device_defers_launch = true;
+      deferred_device_pb = pb;
       parallel_idx += 1;
+      hs << h_indent << "// device parallel-by: " << n.LOC() << "\n";
+    } else if (pb->IsOuter() ||
+               (!pb->IsOuter() && pb->GetLevel() == ParallelLevel::BLOCK &&
+                device_defers_launch)) {
+      if (!pb->IsOuter()) {
+        // BLOCK under deferred DEVICE -- treat as the actual outer for codegen
+      } else {
+        parallel_idx += 1;
+      }
       emitted_device_names_.clear();
       if (cgi.GetFunctionTrait(fname).multiple_parallelby)
         device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
@@ -413,9 +423,17 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     hs.str("");
     return_stream.str("");
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    bool was_device_deferred_block =
+        !pb->IsOuter() && pb->GetLevel() == ParallelLevel::BLOCK &&
+        device_defers_launch;
     levels.pop();
-    // only on device-side
-    if (pb->IsOuter()) {
+    if (pb->IsOuter() && pb->GetLevel() == ParallelLevel::DEVICE) {
+      if (h_indent.size() >= 2)
+        h_indent.resize(h_indent.size() - 2);
+      hs << h_indent << "} // end device parallel-by\n";
+      device_defers_launch = false;
+      deferred_device_pb = nullptr;
+    } else if (pb->IsOuter() || was_device_deferred_block) {
       ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
       ds << "}\n\n";
@@ -1282,6 +1300,16 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   // add the device name map
   std::string dname[] = {"x", "y", "z"};
   switch (n.GetLevel()) {
+  case ParallelLevel::DEVICE: {
+    auto pv_name = n.BPV()->name;
+    ssm.MapHostSymbol(InScopeName(pv_name), pv_name);
+    ssm.MapDeviceSymbol(InScopeName(pv_name), "__device_id_" + pv_name);
+    for (size_t i = 0; i < n.AllSubPVs().size(); ++i) {
+      ssm.MapHostSymbol(InScopeName(n.GetSubPV(i)->name), pv_name);
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
+                          "__device_id_" + pv_name);
+    }
+  } break;
   case ParallelLevel::BLOCK:
     for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
       ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
@@ -1310,8 +1338,41 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
                        ".");
   }
 
+  // DEVICE level: emit host-side topsSetDevice loop with runtime guard
+  if (n.IsOuter() && n.GetLevel() == ParallelLevel::DEVICE) {
+    auto pv_name = n.BPV()->name;
+    auto bound = ValueSTR(n.BoundValue());
+
+    if (!CCtx().DisableRuntimeCheck()) {
+      hs << h_indent << "{\n";
+      hs << h_indent << "  int __choreo_device_count = 0;\n";
+      hs << h_indent
+         << "  choreo::abend_true(topsGetDeviceCount(&__choreo_device_count));"
+            "\n";
+      hs << h_indent << "  choreo::runtime_check(__choreo_device_count >= "
+         << bound
+         << ", \"device parallelism requires " << bound
+         << " device(s), but only \""
+            "\n"
+         << h_indent
+         << "    + std::to_string(__choreo_device_count) + \" available.\");\n";
+      hs << h_indent << "}\n";
+    }
+
+    hs << h_indent << "for (int " << pv_name << " = 0; " << pv_name << " < "
+       << bound << "; ++" << pv_name << ") {\n";
+    h_indent += "  ";
+    hs << h_indent << "choreo::abend_true(topsSetDevice(" << pv_name
+       << "));\n";
+    return true;
+  }
+
+  bool emit_launch =
+      n.IsOuter() || (!n.IsOuter() && n.GetLevel() == ParallelLevel::BLOCK &&
+                      device_defers_launch);
+
   // only do the whole codegen when accessing the outer parallel-by
-  if (!n.IsOuter()) return true;
+  if (!emit_launch) return true;
 
   EmitMemReuse(SSTab().ScopeName());
 
@@ -1360,6 +1421,11 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     for (const auto& [sto, ie] : mri->infos)
       for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
         hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
+
+  if (deferred_device_pb) {
+    auto dpv = deferred_device_pb->BPV()->name;
+    hs << ((i++ > 0) ? ", " : "") << dpv;
+  }
 
   hs << ");\n";
 
@@ -2933,6 +2999,14 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
         auto dname = RegexReplaceAll(ie.offset_args[idx], "::", "_");
         oss << ((index++ > 0) ? ", " : "") << "unsigned long " << dname;
       }
+
+  // Pass device parallel variable as a kernel parameter so the kernel
+  // knows which device partition it is operating on.
+  if (deferred_device_pb) {
+    auto dpv = deferred_device_pb->BPV()->name;
+    auto dev_param = "__device_id_" + dpv;
+    oss << ((index++ > 0) ? ", " : "") << "int " << dev_param;
+  }
 
   oss << ")";
 

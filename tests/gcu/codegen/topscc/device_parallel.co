@@ -1,0 +1,23 @@
+// RUN: choreo -t topscc -es -dp=memreuse -arch=gcu300 %s -o - | FileCheck %s
+
+__co__ void foo(f32 [48] A) {
+  parallel d by 2 : device {
+    parallel p by 2 : block {
+      parallel t by 6 : thread {
+      }
+    }
+  }
+}
+
+// CHECK: __global__ void __choreo_device_foo({{.*}}, int __device_id_d)
+// CHECK: void foo(
+// CHECK:   topsGetDeviceCount(&__choreo_device_count)
+// CHECK:   runtime_check(__choreo_device_count >= 2
+// CHECK:   for (int d = 0; d < 2; ++d) {
+// CHECK:     choreo::abend_true(topsSetDevice(d));
+// CHECK:     dim3 __foo_gdims
+// CHECK:     dim3 __foo_bdims
+// CHECK:     __choreo_device_foo<<<{{.*}}>>>({{.*}}, d);
+// CHECK:     choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   } // end device parallel-by
+// CHECK: }

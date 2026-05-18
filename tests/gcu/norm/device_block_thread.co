@@ -1,0 +1,14 @@
+// RUN: choreo -t topscc -es -arch=gcu300 %s -o - | FileCheck %s
+
+__co__ void valid_device_nesting(f32 [24] A) {
+  parallel d by 2 : device {
+    parallel p by 2 : block {
+      parallel t by 6 : thread {
+      }
+    }
+  }
+}
+
+// CHECK: __global__ void __choreo_device_valid_device_nesting
+// CHECK: topsSetDevice
+// CHECK-NOT: error

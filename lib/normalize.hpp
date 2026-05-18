@@ -1036,6 +1036,17 @@ public:
     return true;
   }
 
+  // When DEVICE is in the target's levels but not explicitly used in the
+  // current parallel tree, implicit inference and depth checks should behave
+  // as if DEVICE doesn't exist.  Returns the effective max depth for inference.
+  int EffectiveMaxDepth(AST::ParallelBy* pb) const {
+    if (!TargetHasLevel(ParallelLevel::DEVICE)) return TargetMaxDepth();
+    auto* cur = pb;
+    while (!pb_tree.IsRoot(cur)) cur = pb_tree.GetParent(cur);
+    if (cur && cur->GetLevel() == ParallelLevel::DEVICE) return TargetMaxDepth();
+    return TargetMaxDepth() - 1;
+  }
+
   bool AfterVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
       for (auto fi : fill_info) {
@@ -1063,26 +1074,42 @@ public:
                  " level is not supported by the target architecture: " +
                  CCtx().GetArch() + ".");
 
+    auto eff_max = EffectiveMaxDepth(pb);
     auto literal_depth = pb_tree.GetDepth(pb) + 1;
-    if (literal_depth > (size_t)TargetMaxDepth()) {
+    if (literal_depth > (size_t)eff_max) {
       Error1(pb->LOC(),
              "too many parallel-by levels: " + std::to_string(literal_depth) +
-                 " > " + std::to_string(TargetMaxDepth()) + ".");
+                 " > " + std::to_string(eff_max) + ".");
+      return true;
     }
 
-    if (!ExplicitLevel(pb)) InferImplicitLevel(pb);
+    if (!ExplicitLevel(pb)) InferImplicitLevel(pb, eff_max);
 
     FillMissingLevels(pb);
 
     return true;
   }
 
-  bool InferImplicitLevel(AST::ParallelBy* pb) const {
+  bool InferImplicitLevel(AST::ParallelBy* pb, int eff_max) const {
     auto InferAs = [this, &pb](ParallelLevel pl) {
       VST_DEBUG(dbgs() << "[PB-Infer] " << STR(pl) << ": ";
                 pb->InlinePrint(dbgs()); dbgs() << "\n";);
       pb->SetLevel(pl);
     };
+
+    // When any ancestor pb has DEVICE level, all levels must be explicit --
+    // implicit inference is not supported for device parallelism.
+    {
+      auto* cur = pb;
+      while (!pb_tree.IsRoot(cur)) cur = pb_tree.GetParent(cur);
+      if (cur && cur->GetLevel() == ParallelLevel::DEVICE) {
+        Error1(pb->LOC(),
+               "all parallel-by levels must be explicitly annotated when "
+               "the 'device' level is used (e.g. ': device', "
+               "': block', ': thread').");
+        return true;
+      }
+    }
 
     if (pb_tree.IsLeaf(pb)) {
       // if not annotated, the inner-most is always thread level
@@ -1090,7 +1117,7 @@ public:
       return true;
     }
 
-    assert(pb_tree.GetDepth(pb) < (size_t)TargetMaxDepth());
+    assert(pb_tree.GetDepth(pb) < (size_t)eff_max);
     auto literal_depth = pb_tree.GetDepth(pb) + 1;
 
     auto& children = pb_tree.GetChildren(pb);
@@ -1098,7 +1125,7 @@ public:
 
     auto child_level = child->GetLevel();
     assert(child_level != ParallelLevel::UNKNOWN);
-    assert(child_level != ParallelLevel::NONE);
+    if (child_level == ParallelLevel::NONE) return true;
 
     auto max_literal_depth = pb_tree.GetDepth(pb) + pb_tree.GetHeight(pb);
 
@@ -1146,13 +1173,13 @@ public:
         InferAs(ParallelLevel::BLOCK);
       } break;
       case ParallelLevel::GROUP: {
-        if (TargetMaxDepth() == 2)
+        if (eff_max == 2)
           Error1(pb->LOC(), "the parallel level can not be inferred.");
         else
           InferAs(ParallelLevel::BLOCK);
       } break;
       case ParallelLevel::GROUPx4: {
-        if (TargetMaxDepth() == 2)
+        if (eff_max == 2)
           Error1(pb->LOC(), "the parallel level can not be inferred.");
         else
           InferAs(ParallelLevel::BLOCK);
@@ -1166,7 +1193,7 @@ public:
       if (literal_depth == 1) {
         switch (child_level) {
         case ParallelLevel::THREAD: {
-          if (TargetMaxDepth() == 3 || TargetMaxDepth() == 4)
+          if (eff_max == 3 || eff_max == 4)
             Error1(pb->LOC(), "the parallel level can not be inferred.");
           else
             InferAs(ParallelLevel::BLOCK);
@@ -1185,13 +1212,13 @@ public:
       } else if (literal_depth == 2) {
         switch (child_level) {
         case ParallelLevel::THREAD: {
-          if (TargetMaxDepth() == 2)
+          if (eff_max == 2)
             Error1(pb->LOC(), "the parallel level can not be inferred.");
           else
             InferAs(ParallelLevel::GROUP);
         } break;
         case ParallelLevel::GROUP: {
-          if (TargetMaxDepth() <= 3)
+          if (eff_max <= 3)
             Error1(pb->LOC(), "the parallel level can not be inferred.");
           else
             InferAs(ParallelLevel::GROUPx4);
@@ -1253,6 +1280,11 @@ public:
     switch (cl) {
     case ParallelLevel::THREAD: {
       switch (pl) {
+      case ParallelLevel::DEVICE: {
+        FillPB(child, Outer, ParallelLevel::BLOCK);
+        if (support_group) FillPB(child, Outer, ParallelLevel::GROUP);
+        if (support_4x_group) FillPB(child, Outer, ParallelLevel::GROUPx4);
+      } break;
       case ParallelLevel::BLOCK: {
         if (support_group) FillPB(child, Outer, ParallelLevel::GROUP);
         if (support_4x_group) FillPB(child, Outer, ParallelLevel::GROUPx4);
@@ -1261,7 +1293,6 @@ public:
         if (support_group) FillPB(child, Outer, ParallelLevel::GROUP);
       } break;
       case ParallelLevel::GROUP:
-        // no-fill
         break;
       case ParallelLevel::THREAD:
       default:
@@ -1272,11 +1303,14 @@ public:
     } break;
     case ParallelLevel::GROUP: {
       switch (pl) {
+      case ParallelLevel::DEVICE: {
+        FillPB(child, Outer, ParallelLevel::BLOCK);
+        if (support_4x_group) FillPB(child, Outer, ParallelLevel::GROUPx4);
+      } break;
       case ParallelLevel::BLOCK: {
         if (support_4x_group) FillPB(child, Outer, ParallelLevel::GROUPx4);
       } break;
       case ParallelLevel::GROUPx4: {
-        // no-fill
       } break;
       case ParallelLevel::GROUP:
       case ParallelLevel::THREAD:
@@ -1300,7 +1334,17 @@ public:
         break;
       }
     } break;
-    case ParallelLevel::BLOCK:
+    case ParallelLevel::BLOCK: {
+      switch (pl) {
+      case ParallelLevel::DEVICE:
+        break;
+      default:
+        Error1(pb->LOC(),
+               "unable to infer the parallel-by level(s) between  " + STR(pl) +
+                   " and " + STR(cl) + ".");
+        break;
+      }
+    } break;
     default:
       Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
                             STR(pl) + " and " + STR(cl) + ".");
@@ -1316,6 +1360,7 @@ public:
     bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
 
     switch (level) {
+    case ParallelLevel::DEVICE:
     case ParallelLevel::CLUSTER: break;
     case ParallelLevel::BLOCK: {
       FillPB(pb, AppendInner, ParallelLevel::THREAD);
@@ -1349,6 +1394,7 @@ public:
     bool support_group = TargetHasLevel(ParallelLevel::GROUP);
     bool support_4x_group = TargetHasLevel(ParallelLevel::GROUPx4);
     switch (level) {
+    case ParallelLevel::DEVICE: break;
     case ParallelLevel::CLUSTER: break;
     case ParallelLevel::BLOCK: {
     } break;

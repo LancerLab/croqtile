@@ -1,0 +1,11 @@
+// RUN: choreo -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s
+
+__co__ void bad_implicit() {
+  parallel d by 2 : device {
+    parallel p by 4 {
+      // missing explicit level annotation -- error expected
+    }
+  }
+}
+
+// CHECK: error: all parallel-by levels must be explicitly annotated when the 'device' level is used

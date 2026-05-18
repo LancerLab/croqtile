@@ -1429,6 +1429,7 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
   const std::string pl_anno_msg =
       "For nested parallel-by, it is better to either explicitly specify all "
       "parallelism levels, or none (Choreo to automatically infer the levels).";
+
   // The pb is specified with parallel level explicitly.
   if (n.GetLevel() != ParallelLevel::NONE) {
     // current is specified, but outer not.
@@ -1438,6 +1439,10 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     // outer is specified, but current not.
     if (explicit_pl) Warning(n.LOC(), pl_anno_msg);
   }
+
+  if (n.GetLevel() == ParallelLevel::DEVICE && pl_depth != 1)
+    Error1(n.LOC(), "the 'device' parallel-by level must be the outermost "
+                    "parallel scope.");
 
   if (pl_depth > 1 && n.IsAsync())
     Error1(n.LOC(), "inner parallel-by level can not be asynchronous.");

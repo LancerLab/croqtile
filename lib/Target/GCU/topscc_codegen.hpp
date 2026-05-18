@@ -131,6 +131,9 @@ private:
   // idx of the most outer pb
   int parallel_idx = -1;
 
+  bool device_defers_launch = false;
+  AST::ParallelBy* deferred_device_pb = nullptr;
+
   size_t host_param_count = 0;     // host parameter count
   ptr<FunctionType> fty = nullptr; // current function type
   bool void_return = false;
