@@ -1,4 +1,4 @@
-// RUN: not choreo -t cute -arch=sm_86 %s 2>&1 | FileCheck %s --check-prefix=CHECK
+// RUN: choreo -e -t cute -arch=sm_86 %s 2>&1 | FileCheck %s --check-prefix=CHECK
 
 #include "choreo.h"
 
@@ -20,4 +20,10 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs, stream s0, stream s1) {
   return output;
 }
 
-// CHECK: error: Only one stream supported now!
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: matmul
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: f16 [ 128 64 ], symbol: lhs
+// CHECK:    `-  type: f16 [ 64 256 ], symbol: rhs
+// CHECK:    `-  type: stream, symbol: s0
+// CHECK:    `-  type: stream, symbol: s1

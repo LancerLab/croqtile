@@ -1,0 +1,14 @@
+// RUN: not choreo -t cute -arch=sm_86 %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+#define M 128
+
+// Using a non-stream variable in parallel(...) should error
+__co__ void bad_stream_binding(int x, f32[M] a) {
+  parallel(x) p by M : block {
+    a.at(p) = 1.0f;
+  }
+}
+
+// CHECK: error: 'x' is not a stream type; parallel(...) requires a stream variable.

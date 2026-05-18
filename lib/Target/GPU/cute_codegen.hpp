@@ -214,8 +214,7 @@ private:
   static const std::string vid_pfx;
   // block dim enforcement level, default to thread level
   ParallelLevel bdim_level = ParallelLevel::THREAD;
-  // TODO: for now, only support one stream!
-  std::string stream_name;
+  std::string stream_name; // deprecated: kept for ABI, no longer populated
   int tma_count = 0;
   int tma_future_count = 0;
   bool cluster_defers_launch = false;

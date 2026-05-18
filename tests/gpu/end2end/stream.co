@@ -2,7 +2,7 @@
 // RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
 
 __co__ void foo(int a, stream _s) {
-  parallel p by 6 : block {
+  parallel(_s) p by 6 : block {
     println(a + p);
   }
 }

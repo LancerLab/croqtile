@@ -1,0 +1,49 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+#define M 128
+#define N 64
+
+// Two parallel blocks bound to different streams
+__co__ void multi_stream_kernel(stream s0, stream s1, f32[M] a, f32[N] b) {
+  parallel(s0) p by M : block {
+    a.at(p) = 1.0f;
+  }
+  parallel(s1) q by N : block {
+    b.at(q) = 2.0f;
+  }
+}
+
+// CHECK: __choreo_device_multi_stream_kernel0<<<{{.*}}, 0, s0>>>(
+// CHECK: cudaStreamSynchronize(s0)
+// CHECK: __choreo_device_multi_stream_kernel1<<<{{.*}}, 0, s1>>>(
+// CHECK: cudaStreamSynchronize(s1)
+
+// Async launches: streams but no synchronize
+__co__ void async_multi_stream(stream s0, stream s1, f32[M] a, f32[N] b) {
+  parallel.async(s0) p by M : block {
+    a.at(p) = 1.0f;
+  }
+  parallel.async(s1) q by N : block {
+    b.at(q) = 2.0f;
+  }
+}
+
+// CHECK: __choreo_device_async_multi_stream0<<<{{.*}}, 0, s0>>>(
+// CHECK-NOT: cudaStreamSynchronize(s0)
+// CHECK: __choreo_device_async_multi_stream1<<<{{.*}}, 0, s1>>>(
+// CHECK-NOT: cudaStreamSynchronize(s1)
+
+// No stream: parallel without stream binding uses DeviceSynchronize
+__co__ void no_stream_kernel(f32[M] a) {
+  parallel p by M : block {
+    a.at(p) = 1.0f;
+  }
+}
+
+// CHECK: __choreo_device_no_stream_kernel<<<
+// CHECK-NOT: cudaStreamSynchronize
+// CHECK: cudaDeviceSynchronize
+
+int main() { return 0; }

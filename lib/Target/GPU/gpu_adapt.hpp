@@ -100,6 +100,7 @@ private:
 
       VST_DEBUG(ps.Show(dbgs(), lvl); dbgs() << "\n";);
       CheckPBSettings(pb);
+      CheckStreamBinding(pb);
     }
     return true;
   }
@@ -203,6 +204,35 @@ public:
         }
       }
     }
+  }
+
+  void CheckStreamBinding(AST::ParallelBy* pb) {
+    if (!pb->HasStream()) return;
+    auto lvl = pb->GetLevel();
+    if (lvl != ParallelLevel::BLOCK) {
+      Error1(pb->StreamExpr()->LOC(),
+             "stream binding is only allowed on block-level parallel; "
+             "'" +
+                 STR(lvl) + "' level cannot have its own stream.");
+      return;
+    }
+    auto se = pb->StreamExpr();
+    if (!se->IsReference()) {
+      Error1(se->LOC(),
+             "stream binding in parallel(...) must be a stream variable.");
+      return;
+    }
+    auto id = dyn_cast<AST::Identifier>(se->GetR().get());
+    if (!id) {
+      Error1(se->LOC(),
+             "stream binding in parallel(...) must be a stream variable.");
+      return;
+    }
+    auto ty = GetSymbolType(id->name);
+    if (!isa<StreamType>(ty))
+      Error1(se->LOC(), "'" + id->name +
+                            "' is not a stream type; parallel(...) requires "
+                            "a stream variable.");
   }
 
   void CheckDMA(AST::DMA& n) {
@@ -694,10 +724,7 @@ public:
 
   bool Visit(AST::Parameter& n) override {
     auto ty = GetSymbolType(n.sym->name);
-    if (isa<StreamType>(ty)) {
-      if (has_stream_param) Error1(n.LOC(), "Only one stream supported now!");
-      has_stream_param = true;
-    }
+    if (isa<StreamType>(ty)) has_stream_param = true;
     if (n.sym) cur_params.emplace(InScopeName(n.sym->name), &n);
     return true;
   }
