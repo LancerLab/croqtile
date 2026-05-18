@@ -905,6 +905,7 @@ private:
   BaseType to;
   size_t element_count = 1;
   bool is_explicit = false;
+  std::string foreign_type;
 
 public:
   CastExpr(const location& l, const ptr<Node>& val) : Expr(l, Op::Cast, val) {
@@ -916,6 +917,8 @@ public:
   bool IsVectorType() const { return element_count > 1; }
   size_t ElementCount() const { return element_count; }
   bool IsExplicit() const { return is_explicit; }
+  bool IsForeignCast() const { return !foreign_type.empty(); }
+  const std::string& ForeignType() const { return foreign_type; }
 
   void SetFrom(BaseType bty, size_t ec = 1) {
     from = bty;
@@ -926,6 +929,7 @@ public:
     if (ec > 1) element_count = ec;
   }
   void SetExplicit(bool v = true) { is_explicit = v; }
+  void SetForeignType(const std::string& ty) { foreign_type = ty; }
 
 public:
   ptr<Node> CloneImpl() const override {
@@ -933,15 +937,22 @@ public:
     n->from = from;
     n->to = to;
     n->is_explicit = is_explicit;
+    n->foreign_type = foreign_type;
     return n;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << (is_explicit ? "EXPLICIT_CAST(" : "CAST(") << FromType()
-       << "=>" << ToType() << ": '";
-    GetR()->Print(os, {}, with_type);
-    os << "') ";
+    if (IsForeignCast()) {
+      os << prefix << "FOREIGN_CAST(" << foreign_type << ": '";
+      GetR()->Print(os, {}, with_type);
+      os << "') ";
+    } else {
+      os << prefix << (is_explicit ? "EXPLICIT_CAST(" : "CAST(") << FromType()
+         << "=>" << ToType() << ": '";
+      GetR()->Print(os, {}, with_type);
+      os << "') ";
+    }
   }
 
   void accept(Visitor&) override;

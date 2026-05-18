@@ -235,6 +235,7 @@ public:
 
   bool Visit(AST::CastExpr& n) {
     TraceEachVisit(n);
+    if (n.IsForeignCast()) return true;
     auto nty = n.GetType();
     auto nds = n.GetDiversityShape();
     if (Skip(nty, nds)) return true;

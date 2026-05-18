@@ -172,6 +172,50 @@ error: the target type 'u64' is not supported by the current target ...
 
 Consult your target's documentation for the set of supported scalar types.
 
+## Foreign Type Cast with `__to<"type">`
+
+The `__to` syntax also supports casting to types that Croqtile does not recognize (compiler extensions like `__fp16`, `__nv_bfloat16*`, or library-defined types). Pass the target type as a **quoted string** instead of a fundamental type keyword:
+
+```choreo
+__to<"target_type_string">(expression)
+```
+
+The type string inside `<"...">` is passed **verbatim** to the generated C++ code. Croqtile performs no validation on the type name -- it is the programmer's responsibility to ensure the type is valid in the target compiler.
+
+```choreo
+__co__ auto example(f16 [128] input) {
+  parallel by 1 {
+    // Cast nullptr to a concrete pointer type for template deduction
+    call my_lib::matmul<16, my_lib::MK_NK>(
+        input.data,
+        __to<"__fp16*">(nullptr),
+        __to<"__fp16*">(nullptr)
+    );
+  }
+}
+```
+
+This generates:
+
+```cpp
+my_lib::matmul<16, my_lib::MK_NK>(input, ((__fp16*)nullptr), ((__fp16*)nullptr));
+```
+
+### When to Use `__to<"type">`
+
+| Scenario | Use |
+|----------|-----|
+| Template argument deduction needs a concrete pointer type | `__to<"__fp16*">(nullptr)` |
+| Passing data to a function expecting a non-Croqtile type | `__to<"const float*">(ptr)` |
+| Compiler extension types (`__fp16`, `__nv_bfloat16`, etc.) | `__to<"__nv_bfloat16*">(expr)` |
+
+### Summary: `__to` with Fundamental Type vs String
+
+- `__to<type>(expr)` -- converts between Croqtile **fundamental types** (e.g., `f32`, `bf16`). The compiler validates both source and target types.
+- `__to<"type">(expr)` -- emits a C-style cast to an **arbitrary C++ type string**. No type validation is performed by the compiler.
+
+*(Reference: `tests/check/foreign_cast.co`, `tests/check/explicit_cast.co`)*
+
 ## Immutability as Default
 
 All Croqtile variables are immutable by default. This is a deliberate design choice:

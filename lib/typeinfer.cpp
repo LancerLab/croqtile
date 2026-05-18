@@ -928,6 +928,11 @@ bool TypeInference::Visit(AST::Expr& n) {
 
 bool TypeInference::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
+  if (n.IsForeignCast()) {
+    SetNodeType(n, MakeAddrType());
+    cur_type = n.GetType();
+    return true;
+  }
   auto cast_from = NodeType(*n.GetR());
   SetNodeType(n, MakeScalarType(n.ToType(), true));
   VST_DEBUG(dbgs() << " |- type node cast: `" << PSTR(n.GetR()) << "`:\n\t`"
