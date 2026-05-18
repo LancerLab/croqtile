@@ -91,6 +91,7 @@ static Parser::symbol_type yylex(Scanner &scanner) {
 //   {(0), (1), 3} represents {0, 1, 3}
 //
 static bool parsing_derivation_decl = false;
+static bool parsing_paren_as_index = false;
 static bool ignore_fndata = false;
 
 std::pair<ptr<AST::Identifier>, ptr<AST::MultiValues>> ElementMultiValues(const ptr<AST::Expr>&);
@@ -1174,13 +1175,15 @@ spanid
     ;
 
 mdspan_derivation
-    : IDENTIFIER LBRAKT { parsing_derivation_decl = true; } value_list RBRAKT {
+    : IDENTIFIER LBRAKT { parsing_derivation_decl = true; parsing_paren_as_index = true; } value_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $4);
         parsing_derivation_decl = false;
+        parsing_paren_as_index = false;
       }
-    | IDENTIFIER FNSPAN LBRAKT { parsing_derivation_decl = true; } value_list RBRAKT {
+    | IDENTIFIER FNSPAN LBRAKT { parsing_derivation_decl = true; parsing_paren_as_index = true; } value_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $5);
         parsing_derivation_decl = false;
+        parsing_paren_as_index = false;
       }
     ;
 
@@ -1407,7 +1410,7 @@ s_expr
     | TILDE s_expr { $$ = AST::Make<AST::Expr>(@1, "~", $2); }
     | LPAREN s_expr RPAREN {
         // Does String "(0)" represent an indexing operation or an arithmetic operation
-        if (!parsing_derivation_decl) {
+        if (!parsing_paren_as_index) {
           $$ = $2;
           break;
         }
@@ -1667,10 +1670,12 @@ within
         symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $7, $4);
         parsing_derivation_decl = false;
+        parsing_paren_as_index = false;
       }
     | LBRACE with_matchers RBRACE IN mdspan_expr {
         $$ = AST::Make<AST::WithIn>(@1, $5, $2); // no identifier
         parsing_derivation_decl = false;
+        parsing_paren_as_index = false;
       }
     ;
 
@@ -2235,22 +2240,30 @@ ids_expr /* enforce: either a ref to id or a subscription */
       }
     ;
 
+maybe_paren_as_index
+    : %empty {
+        if (parsing_derivation_decl) parsing_paren_as_index = true;
+      }
+    ;
+
 subscript_like_expr /* for multi-dim element accesses and also mdspan derivations */
-    : IDENTIFIER LBRAKT s_expr RBRAKT {
+    : IDENTIFIER LBRAKT maybe_paren_as_index s_expr RBRAKT {
+        parsing_paren_as_index = false;
         if (parsing_derivation_decl) {  /* mdspan */
-          $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $3));
+          $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $4));
         } else {
-          $$ = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), $3);
+          $$ = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), $4);
         }
       }
-    | IDENTIFIER LBRAKT s_expr RBRAKT subscriptions {
+    | IDENTIFIER LBRAKT maybe_paren_as_index s_expr RBRAKT subscriptions {
+        parsing_paren_as_index = false;
         if (parsing_derivation_decl)
-          Parser::error(@3, "must use 'a[(1), (2), ...]' for mdspan derivations.");
+          Parser::error(@4, "must use 'a[(1), (2), ...]' for mdspan derivations.");
 
-        assert ($5->Count() > 0);
-        $5->Insert($3, 0);
+        assert ($6->Count() > 0);
+        $6->Insert($4, 0);
         AST::ptr<AST::Expr> expr = nullptr;
-        for (auto e : $5->AllValues()) {
+        for (auto e : $6->AllValues()) {
           if (expr == nullptr)
             expr = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), e);
           else
@@ -2258,21 +2271,24 @@ subscript_like_expr /* for multi-dim element accesses and also mdspan derivation
         }
         $$ = expr;
       }
-    | IDENTIFIER FNSPAN LBRAKT s_expr RBRAKT subscriptions {
+    | IDENTIFIER FNSPAN LBRAKT maybe_paren_as_index s_expr RBRAKT subscriptions {
+        parsing_paren_as_index = false;
         Parser::error(@3, "must use 'a.span[(1), (2), ...]' for mdspan derivations.");
         YYERROR;
       }
-    | IDENTIFIER LBRAKT s_expr COMMA value_list RBRAKT {
+    | IDENTIFIER LBRAKT maybe_paren_as_index s_expr COMMA value_list RBRAKT {
+        parsing_paren_as_index = false;
         if (!parsing_derivation_decl)
-          Parser::error(@3, "must use '[a][2]...' for multi-dimensional array access.");
-        $5->Insert($3, 0);
-        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $5));
-      }
-    | IDENTIFIER FNSPAN LBRAKT s_expr COMMA value_list RBRAKT {
-        if (!parsing_derivation_decl)
-          Parser::error(@3, "must use '[a][2]...' for multi-dimensional array access.");
+          Parser::error(@4, "must use '[a][2]...' for multi-dimensional array access.");
         $6->Insert($4, 0);
         $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $6));
+      }
+    | IDENTIFIER FNSPAN LBRAKT maybe_paren_as_index s_expr COMMA value_list RBRAKT {
+        parsing_paren_as_index = false;
+        if (!parsing_derivation_decl)
+          Parser::error(@3, "must use '[a][2]...' for multi-dimensional array access.");
+        $7->Insert($5, 0);
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $7));
       }
 /*
     | IDENTIFIER LBRACE s_expr RBRACE {
@@ -2283,9 +2299,10 @@ subscript_like_expr /* for multi-dim element accesses and also mdspan derivation
 */
 
 ituple_derivation
-    : IDENTIFIER LBRACE g_value_list RBRACE {
-        $3->SetDelimiter(", ");
-        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntTuple>(@1, $1, $3));
+    : IDENTIFIER LBRACE { parsing_paren_as_index = true; } g_value_list RBRACE {
+        parsing_paren_as_index = false;
+        $4->SetDelimiter(", ");
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntTuple>(@1, $1, $4));
       }
     ;
 
