@@ -3,6 +3,7 @@ FTP_SERVER ?= 172.16.11.18
 SETUP_TARGET_DEPENDS += setup-choreo-kit
 SETUP_TARGET_DEPENDS += setup-clang-format
 SETUP_TARGET_DEPENDS += setup-git-hooks
+SETUP_TARGET_DEPENDS += setup-skills
 #SETUP_TARGET_DEPENDS += setup-gcu-acore
 CHOREO_DEFAULT_TARGET = topscc
 CLANG_FORMAT:=$(WORK_DIR)/extern/clang-format-19-1-2
@@ -41,6 +42,13 @@ setup-choreo-kit: check-choreo-kit
 
 setup-clang-format: check-clang-format
 	chmod +x $(CLANG_FORMAT)
+
+setup-skills:
+	@if [ ! -d $(TOOLCHAIN_DIR)/croqtile-skills ]; then cd $(TOOLCHAIN_DIR); git clone git@git.enflame.cn:era-dev/croqtile-skills.git; else cd $(TOOLCHAIN_DIR)/croqtile-skills; git fetch --all; git rebase origin/main; fi; \
+	echo "Installing the skills for agents..."; \
+	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.claude $(WORK_DIR); \
+	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.github $(WORK_DIR); \
+	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.codex $(WORK_DIR)
 
 setup-git-hooks:
 	@mkdir -p .git/hooks; \
@@ -83,6 +91,7 @@ gcu2-kmd:
 
 gcu3-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
+
 
 CFORMAT_MD5=6ee59eba63782b362bc9ba1138911f3a
 CFORMAT_NAME=clang-format-19-1-2
