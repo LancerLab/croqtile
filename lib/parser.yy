@@ -225,7 +225,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr opt_stream_bind
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
@@ -750,18 +750,24 @@ stmts_block
     | SEMCOL { $$ = AST::Make<AST::MultiNodes>(@1); }
     ;
 
+opt_stream_bind
+    : LPAREN s_expr RPAREN { $$ = $2; }
+    | %empty { $$ = nullptr; }
+    ;
+
 paraby_block
-    : PARA sync_type {
+    : PARA sync_type opt_stream_bind {
         paraby_symbols.clear();
       } parabys stmts_block {
-        $4->SetAsync($2);
+        $5->SetAsync($2);
+        if ($3) $5->SetStream($3);
         // attach statement to the inner-most pb
-        auto pb = $4;
+        auto pb = $5;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
         assert(pb->stmts->None() && "expect no statement.");
-        pb->stmts = $5;
-        $$ = $4;
+        pb->stmts = $6;
+        $$ = $5;
       }
     ;
 

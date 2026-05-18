@@ -765,7 +765,36 @@ public:
   bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
     CheckPBRange(n);
+    CheckStreamBinding(&n);
     return true;
+  }
+
+  void CheckStreamBinding(AST::ParallelBy* pb) {
+    if (!pb->HasStream()) return;
+    auto lvl = pb->GetLevel();
+    if (lvl != ParallelLevel::BLOCK) {
+      Error1(pb->StreamExpr()->LOC(),
+             "stream binding is only allowed on block-level parallel; '" +
+                 STR(lvl) + "' level cannot have its own stream.");
+      return;
+    }
+    auto se = pb->StreamExpr();
+    if (!se->IsReference()) {
+      Error1(se->LOC(),
+             "stream binding in parallel(...) must be a stream variable.");
+      return;
+    }
+    auto id = dyn_cast<AST::Identifier>(se->GetR().get());
+    if (!id) {
+      Error1(se->LOC(),
+             "stream binding in parallel(...) must be a stream variable.");
+      return;
+    }
+    auto ty = GetSymbolType(id->name);
+    if (!isa<StreamType>(ty))
+      Error1(se->LOC(), "'" + id->name +
+                            "' is not a stream type; parallel(...) requires "
+                            "a stream variable.");
   }
 
   bool Visit(AST::DMA& n) override {

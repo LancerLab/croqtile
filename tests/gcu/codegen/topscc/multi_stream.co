@@ -1,0 +1,52 @@
+// RUN: choreo -es -t topscc -arch=gcu200 %s -o - | FileCheck %s
+
+#include "choreo.h"
+
+#define M 4
+#define N 2
+
+// Two parallel blocks bound to different streams
+__co__ void multi_stream_topscc(stream s0, stream s1, f32[M] a, f32[N] b) {
+  parallel(s0) p by M : block {
+    parallel t by 1 : thread {
+    }
+  }
+  parallel(s1) q by N : block {
+    parallel t by 1 : thread {
+    }
+  }
+}
+
+// CHECK: __choreo_device_multi_stream_topscc0<<<{{.*}}, 0, s0>>>(
+// CHECK: topsStreamSynchronize(s0)
+// CHECK: __choreo_device_multi_stream_topscc1<<<{{.*}}, 0, s1>>>(
+// CHECK: topsStreamSynchronize(s1)
+
+// Async launches: streams but no synchronize
+__co__ void async_multi_stream_topscc(stream s0, stream s1, f32[M] a) {
+  parallel.async(s0) p by M : block {
+    parallel t by 1 : thread {
+    }
+  }
+  parallel.async(s1) q by N : block {
+    parallel t by 1 : thread {
+    }
+  }
+}
+
+// CHECK: __choreo_device_async_multi_stream_topscc0<<<{{.*}}, 0, s0>>>(
+// CHECK-NOT: topsStreamSynchronize(s0)
+// CHECK: __choreo_device_async_multi_stream_topscc1<<<{{.*}}, 0, s1>>>(
+// CHECK-NOT: topsStreamSynchronize(s1)
+
+// No stream: parallel without stream binding uses DeviceSynchronize
+__co__ void no_stream_topscc(f32[M] a) {
+  parallel p by M : block {
+    parallel t by 1 : thread {
+    }
+  }
+}
+
+// CHECK: __choreo_device_no_stream_topscc<<<
+// CHECK-NOT: topsStreamSynchronize
+// CHECK: topsDeviceSynchronize

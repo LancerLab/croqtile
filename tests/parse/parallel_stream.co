@@ -1,0 +1,71 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+// No stream (backward compatibility)
+__co__ void no_stream(f32[M] a) {
+  parallel p by M : block {
+    a.at(p) = 1.0f;
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: no_stream
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: f32 [ M ], symbol: a
+// CHECK:  `- block Parallelization: index symbol: p, bound [0, M)
+
+// Single stream binding
+__co__ void single_stream(stream s, f32[M] a) {
+  parallel(s) p by M : block {
+    a.at(p) = 1.0f;
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: single_stream
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: stream, symbol: s
+// CHECK:    `-  type: f32 [ M ], symbol: a
+// CHECK:  `- block Parallelization: stream(s) index symbol: p, bound [0, M)
+
+// Multiple streams bound to different parallel blocks
+__co__ void multi_stream(stream s0, stream s1, f32[M] a, f32[M] b) {
+  parallel(s0) p by M : block {
+    b.at(p) = a.at(p) + 1.0f;
+  }
+  parallel(s1) q by M : block {
+    a.at(q) = b.at(q) * 2.0f;
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: multi_stream
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: stream, symbol: s0
+// CHECK:    `-  type: stream, symbol: s1
+// CHECK:    `-  type: f32 [ M ], symbol: a
+// CHECK:    `-  type: f32 [ M ], symbol: b
+// CHECK:  `- block Parallelization: stream(s0) index symbol: p, bound [0, M)
+// CHECK:  `- block Parallelization: stream(s1) index symbol: q, bound [0, M)
+
+// Async with stream
+__co__ void async_with_stream(stream s0, stream s1, f32[M] a) {
+  parallel.async(s0) p by M : block {
+    a.at(p) = 1.0f;
+  }
+  parallel.async(s1) q by M : block {
+    a.at(q) = 2.0f;
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: async_with_stream
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: stream, symbol: s0
+// CHECK:    `-  type: stream, symbol: s1
+// CHECK:    `-  type: f32 [ M ], symbol: a
+// CHECK:  `- block Parallelization: stream(s0) index symbol: p, bound [0, M)
+// CHECK:  `- block Parallelization: stream(s1) index symbol: q, bound [0, M)

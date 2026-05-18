@@ -1842,6 +1842,7 @@ private:
   ParallelLevel max_lvl = ParallelLevel::NONE;
   bool is_outer = false; // if it is the outer-most pb
   bool enforced = false;
+  ptr<Expr> stream_expr = nullptr;
 
 public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
@@ -1888,6 +1889,10 @@ public:
 
   bool IsAsync() const { return async; }
   void SetAsync(bool a) { async = a; }
+
+  bool HasStream() const { return stream_expr != nullptr; }
+  ptr<Expr> StreamExpr() const { return stream_expr; }
+  void SetStream(const ptr<Expr>& s) { stream_expr = s; }
   //  size_t SubCount() const { return cmpt_bpvs->Count(); }
 
   const ptr<Identifier> BPV() const { return bpv; }
@@ -1951,12 +1956,19 @@ public:
     pb->SetMaxLevel(GetMaxLevel());
     pb->SetOuter(IsOuter());
     pb->SetEnforced(IsEnforced());
+    if (stream_expr) pb->SetStream(CloneP(stream_expr));
     return pb;
   }
 
   void InlinePrint(std::ostream& os, const std::string& prefix = {},
                    bool with_type = false) const override {
-    os << prefix << "parallel ";
+    os << prefix << "parallel";
+    if (stream_expr) {
+      os << "(";
+      stream_expr->InlinePrint(os);
+      os << ")";
+    }
+    os << " ";
     if (bpv) bpv->Print(os, "", with_type);
     if (bpv && cmpt_bpvs) os << " = ";
     if (cmpt_bpvs) {
@@ -1987,8 +1999,13 @@ public:
                          bool = false) const {
     os << "\n" << prefix << "`- ";
     if (GetLevel() != ParallelLevel::NONE) os << STR(GetLevel()) << " ";
-    os << "Parallelization" << (IsOuter() ? "(o)" : "") << ":"
-       << " index symbol: " << bpv->name << ", bound [0, ";
+    os << "Parallelization" << (IsOuter() ? "(o)" : "") << ":";
+    if (stream_expr) {
+      os << " stream(";
+      stream_expr->InlinePrint(os);
+      os << ")";
+    }
+    os << " index symbol: " << bpv->name << ", bound [0, ";
     PrintBound(os);
     os << ")";
     if (HasSubPVs()) {

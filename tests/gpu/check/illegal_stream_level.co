@@ -1,0 +1,15 @@
+// RUN: not choreo -t cute -arch=sm_86 %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+#define M 128
+
+// Stream binding on thread-level should be rejected
+__co__ void stream_on_thread(stream s0, stream s1, f32[M] a) {
+  parallel(s0) p by M : block {
+    parallel(s1) q by 1 : thread {
+    }
+  }
+}
+
+// CHECK: error: stream binding is only allowed on block-level parallel; 'thread' level cannot have its own stream.

@@ -1397,8 +1397,11 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   // bool spm_not_zero = !sbe::ceq(cur_spm_size, sbe::nu(0));
   bool spm_not_zero = false;
   // if (spm_not_zero) hs << ", " << ValueSTR(cur_spm_size);
-  if (stream_name != "")
-    hs << (spm_not_zero ? "" : ", 0") << ", " << stream_name;
+  std::string effective_stream;
+  if (n.HasStream()) effective_stream = STR(n.StreamExpr());
+
+  if (effective_stream != "")
+    hs << (spm_not_zero ? "" : ", 0") << ", " << effective_stream;
   hs << ">>>(";
 
   size_t i = 0;
@@ -1430,9 +1433,9 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   hs << ");\n";
 
   if (!n.IsAsync()) {
-    if (stream_name != "")
+    if (effective_stream != "")
       hs << h_indent << "choreo::abend_true(topsStreamSynchronize("
-         << stream_name << "));\n";
+         << effective_stream << "));\n";
     else
       hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
   }
@@ -2551,12 +2554,7 @@ bool TopsccCodeGen::Visit(AST::ParamList& n) {
   int index = 0;
   for (auto param : n.values) {
     auto ty = GetSymbolType(param->sym->name);
-    if (isa<StreamType>(ty)) {
-      if (stream_name != "")
-        choreo_unreachable("Unexpect: only one stream supported now!");
-      stream_name = param->sym->name;
-      continue;
-    }
+    if (isa<StreamType>(ty)) continue;
     SSTab().DefineSymbol(param->sym->name, ty);
     updating_cgi.AddSymbolDetail(fname, {InScopeName(param->sym->name),
                                          param->GetType(), param->pass_by_ref,

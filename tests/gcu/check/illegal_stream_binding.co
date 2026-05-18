@@ -1,0 +1,15 @@
+// RUN: not choreo -t topscc -arch=gcu200 %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+#define M 4
+
+// Using a non-stream variable in parallel(...) should error
+__co__ void bad_stream_binding(int x, f32[M] a) {
+  parallel(x) p by M : block {
+    parallel q by 1 : thread {
+    }
+  }
+}
+
+// CHECK: error: 'x' is not a stream type; parallel(...) requires a stream variable.

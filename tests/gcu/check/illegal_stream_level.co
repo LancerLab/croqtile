@@ -1,0 +1,13 @@
+// RUN: not choreo -t topscc -arch=gcu200 %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+// Stream binding on device-level should be rejected (codegen incomplete)
+__co__ void stream_on_device(stream s0, stream s1) {
+  parallel(s0) d by 2 : device {
+    parallel(s1) p by 2 : block {
+    }
+  }
+}
+
+// CHECK: error: stream binding is only allowed on block-level parallel; 'device' level cannot have its own stream.

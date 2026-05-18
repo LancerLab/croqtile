@@ -42,7 +42,7 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
                    global s32 [EXPERTS1] expert_offsets,
                    global bf16 [M, N] output, stream s) {
 
-  parallel.async {eid, block_n} by [EXPERTS, cdiv(N, MATMUL_WARP_N)] : block
+  parallel.async(s) {eid, block_n} by [EXPERTS, cdiv(N, MATMUL_WARP_N)] : block
   {
     shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] sA; // 64 * 128 = 8KB, one warp writes
     shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] sB; // 128 * 128 = 16KB, one warp writes

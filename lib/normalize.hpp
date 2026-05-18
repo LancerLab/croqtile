@@ -980,6 +980,7 @@ public:
     // pb is now the outer level
     pb.SetLevel(pl);
     pb.SetEnforced(false);
+    pb.SetStream(nullptr);
 
     // convert current pb to be simple
     auto anon_sym = SymbolTable::GetAnonPBName();
@@ -1043,7 +1044,8 @@ public:
     if (!TargetHasLevel(ParallelLevel::DEVICE)) return TargetMaxDepth();
     auto* cur = pb;
     while (!pb_tree.IsRoot(cur)) cur = pb_tree.GetParent(cur);
-    if (cur && cur->GetLevel() == ParallelLevel::DEVICE) return TargetMaxDepth();
+    if (cur && cur->GetLevel() == ParallelLevel::DEVICE)
+      return TargetMaxDepth();
     return TargetMaxDepth() - 1;
   }
 
@@ -1292,8 +1294,7 @@ public:
       case ParallelLevel::GROUPx4: {
         if (support_group) FillPB(child, Outer, ParallelLevel::GROUP);
       } break;
-      case ParallelLevel::GROUP:
-        break;
+      case ParallelLevel::GROUP: break;
       case ParallelLevel::THREAD:
       default:
         Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
@@ -1336,12 +1337,10 @@ public:
     } break;
     case ParallelLevel::BLOCK: {
       switch (pl) {
-      case ParallelLevel::DEVICE:
-        break;
+      case ParallelLevel::DEVICE: break;
       default:
-        Error1(pb->LOC(),
-               "unable to infer the parallel-by level(s) between  " + STR(pl) +
-                   " and " + STR(cl) + ".");
+        Error1(pb->LOC(), "unable to infer the parallel-by level(s) between  " +
+                              STR(pl) + " and " + STR(cl) + ".");
         break;
       }
     } break;

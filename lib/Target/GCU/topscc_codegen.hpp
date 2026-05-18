@@ -137,8 +137,7 @@ private:
   size_t host_param_count = 0;     // host parameter count
   ptr<FunctionType> fty = nullptr; // current function type
   bool void_return = false;
-  // TODO: for now, only support one stream!
-  std::string stream_name;
+  std::string stream_name; // deprecated: kept for ABI, no longer populated
 
   SDimsInfo symbolic_dimensions;
 
