@@ -1,0 +1,28 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+__co__ s32 [128] identity(s32 [128] input) {
+  s32[input.span] output;
+
+  parallel i by 128
+    output.at(i) = input.at(i);
+
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(128);
+  for (size_t i = 0; i < 128; ++i)
+    a[i] = (int)i * 3;
+
+  auto res = identity(a.view());
+
+  for (size_t i = 0; i < 128; ++i)
+    choreo::choreo_assert(
+        res[i] == (int)i * 3,
+        "identity: values are not equal.");
+
+  std::cout << "Test identity Passed" << std::endl;
+}
+
+// CHECK: Test identity Passed

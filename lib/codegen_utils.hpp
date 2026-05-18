@@ -238,6 +238,37 @@ struct UniqueNamer {
   }
 };
 
+// Convert OpCode to its C++ operator string representation.
+// This is a standalone helper to avoid name-resolution ambiguity with
+// sbe::STR(OpCode) when `using namespace Choreo` is in effect.
+inline std::string OpCodeToStr(OpCode tc) {
+  switch (tc) {
+  case OpCode::ADD: return "+";
+  case OpCode::SUBTRACT: return "-";
+  case OpCode::MULTIPLY: return "*";
+  case OpCode::DIVIDE: return "/";
+  case OpCode::IRES: return "%";
+  case OpCode::POWER: return "^";
+  case OpCode::NOT: return "!";
+  case OpCode::AND: return "&&";
+  case OpCode::OR: return "||";
+  case OpCode::GT: return ">";
+  case OpCode::LT: return "<";
+  case OpCode::EQ: return "==";
+  case OpCode::GE: return ">=";
+  case OpCode::LE: return "<=";
+  case OpCode::NE: return "!=";
+  case OpCode::LSHIFT: return "<<";
+  case OpCode::RSHIFT: return ">>";
+  case OpCode::BIT_OR: return "|";
+  case OpCode::BIT_AND: return "&";
+  case OpCode::BIT_XOR: return "^";
+  case OpCode::BIT_INV: return "~";
+  case OpCode::SELECT: return "?";
+  default: return "?";
+  }
+}
+
 } // end namespace Choreo
 
 #endif // __CHOREO_CODEGEN_COMMON_H__

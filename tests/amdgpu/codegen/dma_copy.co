@@ -1,0 +1,11 @@
+// RUN: choreo -es -t amdgpu -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
+
+__co__ void dma_copy_basic(s32 [6, 64] input, s32 [6, 64] output) {
+  parallel p by 6, q by 64
+    output.at(p, q) = input.at(p, q) + 1;
+}
+
+// CHECK: __global__ void __choreo_device_dma_copy_basic
+// CHECK: hipMalloc
+// CHECK: hipMemcpy
+// CHECK: <<<__grid, __block>>>

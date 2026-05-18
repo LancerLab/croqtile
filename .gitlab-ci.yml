@@ -44,6 +44,34 @@ gpu_test:
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
     - 'echo "Cleanup done."'
 
+# AMDGPU Testing
+amdgpu_test:
+  variables:
+   GIT_SUBMODULE_STRATEGY: recursive
+  stage: check-in-tests
+  rules:
+    - if: $NO_AMDGPU == "true"
+      when: never
+    - if: >
+        $CI_COMMIT_BRANCH == "main" || 
+        $CI_COMMIT_BRANCH =~ /^release\// ||
+        $CI_COMMIT_BRANCH =~ /^oss\// ||
+        $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: on_success
+  script:
+    - echo "Running tests with AMDGPU..."
+    - make setup-core
+    - make debug
+    - ./tests/lit.sh tests/amdgpu/
+  tags:
+    - AMDGPU
+  allow_failure: true
+  timeout: 15m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
+
 # GCU2 Testing
 gcu2_test:
   variables:
