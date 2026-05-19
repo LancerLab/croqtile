@@ -1,0 +1,148 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+// === Test 1: foreach (double each element) ===
+__co__ auto test_foreach(s32 [64] input) {
+  s32[64] output;
+  parallel p by 1 : block
+    parallel q by 64 : thread
+      foreach {q} in [64]
+        output.at(q) = input.at(q) * 2;
+  return output;
+}
+
+// === Test 2: if-else (add 1 to first half, subtract 1 from second) ===
+__co__ auto test_ifelse(s32 [64] input) {
+  s32[64] output;
+  parallel p by 1 : block
+    parallel q by 64 : thread {
+      if (q < 32)
+        output.at(q) = input.at(q) + 1;
+      else
+        output.at(q) = input.at(q) - 1;
+    }
+  return output;
+}
+
+// === Test 3: inthreads (only first 64 threads do work) ===
+__co__ auto test_inthreads(s32 [128] input) {
+  s32[128] output;
+  parallel p by 1 : block
+    parallel q by 128 : thread {
+      shared s32[128] buf;
+      dma.copy input => buf;
+      inthreads (q < 64) {
+        buf.at(q) = buf.at(q) * 3;
+      }
+      dma.copy buf => output;
+    }
+  return output;
+}
+
+// === Test 4: while loop (accumulate until > 50) ===
+__co__ auto test_while(s32 [64] input) {
+  s32[64] output;
+  parallel p by 1 : block
+    parallel q by 64 : thread {
+      s32 acc = 0;
+      s32 i = 0;
+      while (i < 10) {
+        acc = acc + input.at(q);
+        if (acc > 50)
+          break;
+        i = i + 1;
+      }
+      output.at(q) = acc;
+    }
+  return output;
+}
+
+// === Test 5: foreach with unroll hint ===
+__co__ auto test_unroll(s32 [64] input) {
+  s32[64] output;
+  parallel p by 1 : block
+    parallel q by 64 : thread {
+      s32 sum = 0;
+      foreach {q} in [64] :unroll(4)
+        sum = sum + input.at(q);
+      output.at(q) = sum;
+    }
+  return output;
+}
+
+// ===========================================================================
+// Host test harness
+// ===========================================================================
+int main() {
+  // Test 1: foreach
+  {
+    auto a = choreo::make_spandata<choreo::s32>(64);
+    for (size_t i = 0; i < 64; ++i) a[i] = static_cast<choreo::s32>(i);
+    auto res = test_foreach(a.view());
+    bool ok = true;
+    for (size_t i = 0; i < 64; ++i)
+      if (res[i] != static_cast<choreo::s32>(i * 2)) ok = false;
+    std::cout << "Test foreach " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+
+  // Test 2: if-else
+  {
+    auto a = choreo::make_spandata<choreo::s32>(64);
+    for (size_t i = 0; i < 64; ++i) a[i] = static_cast<choreo::s32>(i * 10);
+    auto res = test_ifelse(a.view());
+    bool ok = true;
+    for (size_t i = 0; i < 32; ++i)
+      if (res[i] != static_cast<choreo::s32>(i * 10 + 1)) ok = false;
+    for (size_t i = 32; i < 64; ++i)
+      if (res[i] != static_cast<choreo::s32>(i * 10 - 1)) ok = false;
+    std::cout << "Test ifelse " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+
+  // Test 3: inthreads (first 64 tripled, rest unchanged)
+  {
+    auto a = choreo::make_spandata<choreo::s32>(128);
+    for (size_t i = 0; i < 128; ++i) a[i] = static_cast<choreo::s32>(i + 1);
+    auto res = test_inthreads(a.view());
+    bool ok = true;
+    for (size_t i = 0; i < 64; ++i)
+      if (res[i] != static_cast<choreo::s32>((i + 1) * 3)) ok = false;
+    for (size_t i = 64; i < 128; ++i)
+      if (res[i] != static_cast<choreo::s32>(i + 1)) ok = false;
+    std::cout << "Test inthreads " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+
+  // Test 4: while with break
+  {
+    auto a = choreo::make_spandata<choreo::s32>(64);
+    for (size_t i = 0; i < 64; ++i) a[i] = static_cast<choreo::s32>(i + 1);
+    auto res = test_while(a.view());
+    bool ok = true;
+    for (size_t i = 0; i < 64; ++i) {
+      int val = static_cast<int>(i + 1);
+      int expected = 0;
+      for (int j = 0; j < 10; ++j) {
+        expected += val;
+        if (expected > 50) break;
+      }
+      if (res[i] != static_cast<choreo::s32>(expected)) ok = false;
+    }
+    std::cout << "Test while " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+
+  // Test 5: foreach with unroll (sum of all elements)
+  {
+    auto a = choreo::make_spandata<choreo::s32>(64);
+    for (size_t i = 0; i < 64; ++i) a[i] = 1;
+    auto res = test_unroll(a.view());
+    bool ok = true;
+    for (size_t i = 0; i < 64; ++i)
+      if (res[i] != 64) ok = false;
+    std::cout << "Test unroll " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+}
+
+// CHECK: Test foreach Passed
+// CHECK: Test ifelse Passed
+// CHECK: Test inthreads Passed
+// CHECK: Test while Passed
+// CHECK: Test unroll Passed

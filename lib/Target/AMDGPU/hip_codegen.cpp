@@ -109,15 +109,28 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
     emit_call = true;
   } else if (isa<AST::NamedVariableDecl>(&n)) {
     emit_call = true;
-  } else if (isa<AST::ForeachBlock>(&n)) {
-    DecrIndent();
-    IndStream() << "}\n";
+  } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+    const auto& ranges = fb->GetRangeNodes();
+    for (int j = ranges->Count() - 1; j >= 0; --j) {
+      auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
+      auto cname = rng->IVName();
+      auto ivs = within_map.at(InScopeName(cname));
+      for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
+        DecrIndent();
+        IndStream() << "}\n";
+        IndStream() << SSMName(*iv_itr, IsHost()) << " = 0;\n";
+      }
+    }
   } else if (isa<AST::WhileBlock>(&n)) {
     DecrIndent();
     IndStream() << "}\n";
-  } else if (isa<AST::InThreadsBlock>(&n)) {
+  } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
-    ds << d_indent << "}\n";
+    if (!it->stmts->None()) {
+      ds << d_indent << "}";
+      if (!it->async && it->outer) ds << "\n" << d_indent << "__syncthreads();";
+      ds << "\n";
+    }
   }
   return true;
 }
@@ -127,7 +140,27 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
 // ============================================================================
 
 bool HIPCodeGen::Visit(AST::ParamList&) { return true; }
-bool HIPCodeGen::Visit(AST::WithIn&) { return true; }
+bool HIPCodeGen::Visit(AST::WithIn& n) {
+  TraceEachVisit(n);
+  if (n.with)
+    ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
+
+  for (auto& v : n.GetMatchers()) {
+    auto id = cast<AST::Identifier>(v);
+    ssm.RemapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
+    ssm.RemapHostSymbol(InScopeName(id->name), "__iv_" + id->name);
+    if (IsHost())
+      hs << h_indent << "int __iv_" << id->name << " = 0;\n";
+    else
+      ds << d_indent << "int __iv_" << id->name << " = 0;\n";
+  }
+  if (n.with && (n.GetMatchers().size() == 1)) {
+    auto id = cast<AST::Identifier>(n.GetMatchers()[0]);
+    ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + id->name);
+    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + id->name);
+  }
+  return true;
+}
 bool HIPCodeGen::Visit(AST::WhereBind&) { return true; }
 bool HIPCodeGen::Visit(AST::WithBlock&) { return true; }
 
@@ -742,6 +775,15 @@ bool HIPCodeGen::Visit(AST::Assignment& n) {
   auto name = n.GetName();
   auto scoped_name = InScopeName(name);
 
+  bool already_declared = (IsHost() ? ssm.HasHostName(scoped_name)
+                                     : ssm.HasDeviceName(scoped_name));
+
+  if (already_declared) {
+    os << indent << SSMName(scoped_name, IsHost()) << " = "
+       << ExprSTR(n.value, IsHost()) << ";\n";
+    return true;
+  }
+
   if (CanYieldAnInteger(nty)) {
     os << indent << "int " << name << " = " << ExprSTR(n.value, IsHost())
        << ";\n";
@@ -879,45 +921,56 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
 
 bool HIPCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
-  auto& os = Stream();
-  auto& indent = Indent();
+
+  int unroll_factor = 0;
+  const bool has_unroll = AST::HasUnrollHint(n, unroll_factor);
+  if (has_unroll) {
+    if (unroll_factor > 0)
+      IndStream() << "#pragma unroll " << unroll_factor << "\n";
+    else
+      IndStream() << "#pragma unroll\n";
+  }
 
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
-    auto loop_var = rng->IVName();
-    os << indent << "for (int " << loop_var << " = "
-       << ExprSTR(rng->lbound, IsHost()) << "; " << loop_var << " < "
-       << ExprSTR(rng->ubound, IsHost()) << "; " << loop_var << " += "
-       << std::to_string(rng->step) << ") {\n";
-    IncrIndent();
-    auto sname = InScopeName(loop_var);
-    if (IsHost())
-      ssm.MapHostSymbol(sname, loop_var);
-    else
-      ssm.MapDeviceSymbolIfNotExist(sname, loop_var);
+    auto cname = rng->IVName();
+    for (auto iv_name : within_map.at(InScopeName(cname))) {
+      auto iv_ty = GetSymbolType(UnScopedName(iv_name));
+      assert(IsActualBoundedIntegerType(iv_ty));
+      auto iv_bty = cast<BoundedType>(iv_ty);
+      IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
+                  << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
+                                  : "0")
+                  << "; " << SSMName(iv_name, IsHost()) << " < "
+                  << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
+                  << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
+                                  : "")
+                  << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
+      IncrIndent();
+    }
   }
   return true;
 }
 
 bool HIPCodeGen::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
-  if (n.HasActiveThreads()) {
-    ds << d_indent << "if (threadIdx.x < " << ValueSTR(n.active_threads)
-       << ") {\n";
-    IncrDeviceIndent();
-  } else {
-    ds << d_indent << "{\n";
-    IncrDeviceIndent();
+  assert(!IsHost());
+  if (!n.stmts->None()) {
+    auto pred_str = ExprSTR(n.pred, false);
+    ds << d_indent << "if (" << pred_str << ") {\n";
   }
+  IncrDeviceIndent();
   return true;
 }
 
 bool HIPCodeGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
-  auto& os = Stream();
-  auto& indent = Indent();
-  os << indent << "if (" << ExprSTR(n.GetPredicate(), IsHost()) << ") {\n";
+  if (auto c = dyn_cast<AST::Call>(n.pred->GetReference()))
+    IndStream() << "if (" << CallSTR(*c) << ") {\n";
+  else
+    IndStream() << "if (" << ExprSTR(n.pred, IsHost()) << ") {\n";
   IncrIndent();
+  emit_call = true;
   return true;
 }
 
