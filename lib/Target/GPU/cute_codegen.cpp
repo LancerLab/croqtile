@@ -3048,12 +3048,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
          << " - 1)";
       explicit_smem = true;
     }
-    std::string effective_stream;
-    if (n.HasStream()) effective_stream = STR(n.StreamExpr());
-
-    if (effective_stream != "") {
+    if (stream_name != "") {
       if (!explicit_smem) hs << ", 0";
-      hs << ", " << effective_stream;
+      hs << ", " << stream_name;
     }
     hs << ">>>(";
 
@@ -3086,9 +3083,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     hs << ");\n";
 
     if (!n.IsAsync()) {
-      if (effective_stream != "")
+      if (stream_name != "")
         hs << h_indent << "choreo::abend_true(cudaStreamSynchronize("
-           << effective_stream << "));\n";
+           << stream_name << "));\n";
       else
         hs << h_indent << "choreo::abend_true(cudaDeviceSynchronize());\n";
     }
@@ -6406,7 +6403,12 @@ bool CuteCodeGen::Visit(AST::ParamList& n) {
   int index = 0;
   for (auto param : n.values) {
     auto ty = GetSymbolType(param->sym->name);
-    if (isa<StreamType>(ty)) continue;
+    if (isa<StreamType>(ty)) {
+      if (stream_name != "")
+        choreo_unreachable("Unexpect: only one stream supported now!");
+      stream_name = param->sym->name;
+      continue;
+    }
     SSTab().DefineSymbol(param->sym->name, ty);
     updating_cgi.AddSymbolDetail(fname, {InScopeName(param->sym->name),
                                          param->GetType(), param->pass_by_ref,

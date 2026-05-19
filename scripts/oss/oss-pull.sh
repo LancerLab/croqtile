@@ -482,11 +482,25 @@ for commit in "${COMMITS[@]}"; do
   fi
   done
 
-  # Fail if any conflicts remain on included (public) files
+  # Fail if any conflicts remain on included (public) files.
+  # Binary conflicts (e.g. *.co test artifacts) cannot be merged by git;
+  # auto-resolve them by taking the incoming oss/main version (--theirs).
   mapfile -t remaining_conflicts < <(git diff --name-only --diff-filter=U 2>/dev/null)
-  if [[ ${#remaining_conflicts[@]} -gt 0 && -n "${remaining_conflicts[0]}" ]]; then
+  text_conflicts=()
+  for f in "${remaining_conflicts[@]}"; do
+  [[ -z "$f" ]] && continue
+  # git outputs "Binary files ... differ" for binary conflicts between stages 2 and 3
+  if git diff ":2:$f" ":3:$f" 2>/dev/null | head -1 | grep -q '^Binary files'; then
+    git checkout --theirs -- "$f" 2>/dev/null || true
+    git add -- "$f" 2>/dev/null || true
+    echo "  NOTE: auto-resolved binary conflict in $f (took oss/main version)"
+  else
+    text_conflicts+=("$f")
+  fi
+  done
+  if [[ ${#text_conflicts[@]} -gt 0 && -n "${text_conflicts[0]}" ]]; then
   echo "ERROR $short: conflicts in public files:"
-  printf '    %s\n' "${remaining_conflicts[@]}"
+  printf '    %s\n' "${text_conflicts[@]}"
   echo "  Resolve manually, then: git add <files> && git cherry-pick --continue"
   git cherry-pick --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
   FAILED=$((FAILED+1))

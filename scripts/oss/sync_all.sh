@@ -443,39 +443,14 @@ phase1_public_ingest() {
     log "  Rebase successful."
     rebase_ok=1
   else
+    # rebase --abort fully restores oss/main to its pre-rebase state.
+    # Do NOT fall back to reset --hard + cherry-pick: that would discard
+    # oss/main's commits before we know all cherry-picks will succeed.
     lgit rebase --abort 2>/dev/null || true
-    log "  Rebase conflict -- cherry-pick fallback"
-    local oss_only=()
-    mapfile -t oss_only < <(lgit rev-list --reverse "$merge_base..$oss_tip")
-    lgit reset --hard "$PUBLIC_REMOTE/main"
-    local applied=0
-    for oc in "${oss_only[@]}"; do
-      if lgit cherry-pick --no-commit "$oc" 2>/dev/null; then
-        if ! lgit diff --cached --quiet HEAD 2>/dev/null; then
-          local oa oad om
-          oa="$(lgit log -1 --format='%an <%ae>' "$oc")"
-          oad="$(lgit log -1 --format='%ai' "$oc")"
-          om="$(lgit log -1 --format=%B "$oc")"
-          GIT_AUTHOR_DATE="$oad" lgit commit --author="$oa" -m "$om" 2>/dev/null || true
-          applied=$((applied + 1))
-        else
-          lgit reset --hard HEAD >/dev/null 2>&1
-        fi
-      else
-        lgit cherry-pick --abort 2>/dev/null || lgit reset --hard HEAD 2>/dev/null || true
-        # Restore oss/main to its pre-attempt state so no commits are lost.
-        # The caller can inspect reflog to understand what happened, but the
-        # branch itself is left intact.
-        lgit reset --hard "$oss_tip" 2>/dev/null || true
-        local oc_short
-        oc_short="$(lgit rev-parse --short "$oc" 2>/dev/null || echo "$oc")"
-        fatal_error "Cherry-pick conflict: $oc_short" \
-          "Cannot replay $oc_short onto $PUBLIC_REMOTE/main after rebase failed.\nManual resolution required:\n  git -C $REPO_ROOT checkout $OSS_BRANCH\n  git cherry-pick $oc"
-        ensure_on_branch "$saved" 2>/dev/null || true
-        return 1
-      fi
-    done
-    rebase_ok=1
+    ensure_on_branch "$saved" 2>/dev/null || true
+    fatal_error "Rebase conflict: $OSS_BRANCH vs $PUBLIC_REMOTE/main" \
+      "Cannot rebase $OSS_BRANCH onto $PUBLIC_REMOTE/main. Manual resolution required:\n  git -C \"$REPO_ROOT\" checkout $OSS_BRANCH\n  git rebase $PUBLIC_REMOTE/main"
+    return 1
   fi
 
   if [[ $rebase_ok -eq 1 ]]; then

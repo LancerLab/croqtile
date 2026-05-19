@@ -686,6 +686,103 @@ test_sync_diverged_cp_conflict_is_fatal() {
     "$oss_expected_sha" "$oss_actual_sha"
 }
 
+# -------- Test: diverged rebase succeeds, oss/main commit preserved --------
+# When oss/main has a non-conflicting commit that diverges from public,
+# sync_all.sh must: (a) exit 0, (b) rebase and push oss/main so the commit
+# is on top of public (not dropped).
+
+test_sync_diverged_rebase_succeeds() {
+  local sandbox
+  sandbox="$(mktemp -d /tmp/oss_sync_test.XXXXXX)"
+
+  git init --bare "$sandbox/origin.git" >/dev/null 2>&1
+  git -C "$sandbox/origin.git" symbolic-ref HEAD refs/heads/main
+  git init --bare "$sandbox/public.git" >/dev/null 2>&1
+  git -C "$sandbox/public.git" symbolic-ref HEAD refs/heads/main
+  git init --bare "$sandbox/shadow.git" >/dev/null 2>&1
+  git -C "$sandbox/shadow.git" symbolic-ref HEAD refs/heads/main
+
+  local work="$sandbox/work"
+  git clone "$sandbox/origin.git" "$work" >/dev/null 2>&1
+  git -C "$work" checkout -b main 2>/dev/null || true
+  git -C "$work" config user.name "Test"
+  git -C "$work" config user.email "test@test.com"
+  git -C "$work" remote add public "$sandbox/public.git"
+  git -C "$work" remote add oss-shadow "$sandbox/shadow.git"
+
+  # Common ancestor
+  echo "# initial" > "$work/README.md"
+  echo "# initial" > "$work/lib.co"
+  git -C "$work" add README.md lib.co
+  git -C "$work" commit -m "init" >/dev/null 2>&1
+  git -C "$work" push -q origin main
+  git -C "$work" checkout -b oss/main >/dev/null 2>&1
+  git -C "$work" push -q origin oss/main
+  git -C "$work" push -q public oss/main:main
+  git -C "$work" push -q oss-shadow oss/main:main
+  git -C "$work" checkout main >/dev/null 2>&1
+
+  # oss/main gets a commit on lib.co (does NOT touch README.md)
+  git -C "$work" checkout oss/main >/dev/null 2>&1
+  echo "oss-only content" > "$work/lib.co"
+  git -C "$work" add lib.co
+  git -C "$work" commit -m "oss: add lib content" >/dev/null 2>&1
+  local oss_commit_msg="oss: add lib content"
+  local oss_commit_content
+  oss_commit_content="$(cat "$work/lib.co")"
+  git -C "$work" checkout main >/dev/null 2>&1
+
+  # public gets a commit on README.md (does NOT touch lib.co) → no conflict
+  local pub_work="$sandbox/pub_work"
+  git clone "$sandbox/public.git" "$pub_work" >/dev/null 2>&1
+  git -C "$pub_work" config user.name "Public"
+  git -C "$pub_work" config user.email "pub@test.com"
+  echo "public new line" > "$pub_work/README.md"
+  git -C "$pub_work" add README.md
+  git -C "$pub_work" commit -m "public: update readme" >/dev/null 2>&1
+  git -C "$pub_work" push -q origin main
+  git -C "$work" fetch -q public 2>/dev/null || true
+
+  mkdir -p "$work/scripts/oss"
+  for f in oss-push.sh oss-pull.sh oss-scan.sh oss-pull-scan.sh \
+            oss-config.sh sync_all.sh oss-pull-baseline.sh; do
+    [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$work/scripts/oss/"
+  done
+  for f in os_kw.txt oss_exclude_paths.txt; do
+    [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$work/scripts/oss/"
+  done
+  git -C "$work" rev-parse oss/main > "$work/scripts/oss/oss-pull-baseline.txt" 2>/dev/null || true
+  chmod +x "$work/scripts/oss/"*.sh
+
+  # Run sync_all; expect SUCCESS
+  local rc=0
+  REPO_ROOT="$work" OSS_BRANCH=oss/main MAIN_BRANCH=main \
+  PUBLIC_REMOTE=public OSS_SHADOW_REMOTE=oss-shadow \
+    bash "$work/scripts/oss/sync_all.sh" --once --skip-mirror >/dev/null 2>&1 || rc=$?
+
+  # After rebase, oss/main should be rebased on top of public/main:
+  #   (a) lib.co content preserved
+  #   (b) README.md from public present
+  #   (c) commit message from oss/main's commit present in log
+  local actual_lib_co actual_readme last_msg
+  actual_lib_co="$(git -C "$work" show oss/main:lib.co 2>/dev/null || echo MISSING)"
+  actual_readme="$(git -C "$work" show oss/main:README.md 2>/dev/null || echo MISSING)"
+  last_msg="$(git -C "$work" log oss/main -1 --format=%s 2>/dev/null || echo MISSING)"
+
+  rm -rf "$sandbox"
+
+  if [[ $rc -ne 0 ]]; then
+    echo "  ASSERT FAILED (rebase success): sync_all exited $rc, expected 0"
+    return 1
+  fi
+  assert_eq "oss/main: lib.co content preserved after rebase" \
+    "$oss_commit_content" "$actual_lib_co"
+  assert_eq "oss/main: README.md from public present after rebase" \
+    "public new line" "$actual_readme"
+  assert_eq "oss/main: oss commit replayed on top" \
+    "$oss_commit_msg" "$last_msg"
+}
+
 # -------- main --------
 
 echo "OSS Workflow Integration Tests"
@@ -715,6 +812,7 @@ run_test test_push_preserves_author
 run_test test_pull_scan_no_false_positive_when_synced
 run_test test_pull_scan_real_divergence_detected
 run_test test_sync_diverged_cp_conflict_is_fatal
+run_test test_sync_diverged_rebase_succeeds
 
 echo ""
 echo "=============================="
