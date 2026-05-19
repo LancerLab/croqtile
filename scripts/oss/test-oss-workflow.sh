@@ -87,8 +87,10 @@ create_test_repos() {
   local public_bare="$TMPBASE/public.git"
   WORK="$TMPBASE/work"
 
-  git init --bare -b main "$main_bare" >/dev/null 2>&1
-  git init --bare -b main "$public_bare" >/dev/null 2>&1
+  git init --bare "$main_bare" >/dev/null 2>&1
+  git -C "$main_bare" symbolic-ref HEAD refs/heads/main
+  git init --bare "$public_bare" >/dev/null 2>&1
+  git -C "$public_bare" symbolic-ref HEAD refs/heads/main
 
   git clone "$main_bare" "$WORK" >/dev/null 2>&1
   cd "$WORK"
@@ -123,6 +125,8 @@ create_test_repos() {
   cp "$SCRIPT_DIR/oss-push.sh" scripts/oss/
   cp "$SCRIPT_DIR/oss-pull.sh" scripts/oss/
   cp "$SCRIPT_DIR/oss-scan.sh" scripts/oss/
+  cp "$SCRIPT_DIR/oss-pull-scan.sh" scripts/oss/
+  cp "$SCRIPT_DIR/oss-config.sh" scripts/oss/
   cp "$SCRIPT_DIR/oss_exclude_paths.txt" scripts/oss/
   cp "$SCRIPT_DIR/os_kw.txt" scripts/oss/
   chmod +x scripts/oss/*.sh
@@ -498,6 +502,190 @@ test_pull_preserves_author() {
   assert_eq "pull author preserved" "External Dev <ext@community.org>" "$author"
 }
 
+# -------- Tests for oss-pull-scan.sh false-positive fix --------
+# Verifies that the DIVERGED check compares main vs oss/main directly,
+# not main vs merge-base.  The old logic gave false positives whenever
+# main had any commit since the last common ancestor with oss/main.
+
+test_pull_scan_no_false_positive_when_synced() {
+  local sandbox
+  sandbox="$(mktemp -d /tmp/oss_ps_test.XXXXXX)"
+  git init "$sandbox/repo" >/dev/null 2>&1
+  git -C "$sandbox/repo" symbolic-ref HEAD refs/heads/main
+  git -C "$sandbox/repo" config user.name "Test"
+  git -C "$sandbox/repo" config user.email "test@test.com"
+
+  # Initial commit: CMakeLists.txt at v1
+  echo "cmake_minimum_required(VERSION 3.15)" > "$sandbox/repo/CMakeLists.txt"
+  git -C "$sandbox/repo" add CMakeLists.txt
+  git -C "$sandbox/repo" commit -m "init" >/dev/null 2>&1
+
+  # oss/main branches off here (at v1)
+  git -C "$sandbox/repo" branch oss/main >/dev/null 2>&1
+
+  # main advances to v2 (simulates internal work)
+  echo "cmake_minimum_required(VERSION 3.16)" > "$sandbox/repo/CMakeLists.txt"
+  git -C "$sandbox/repo" add CMakeLists.txt
+  git -C "$sandbox/repo" commit -m "main: private cmake bump" >/dev/null 2>&1
+
+  # oss/main also gets v2 (cherry-picked from main) -- they are in sync
+  git -C "$sandbox/repo" checkout oss/main >/dev/null 2>&1
+  echo "cmake_minimum_required(VERSION 3.16)" > "$sandbox/repo/CMakeLists.txt"
+  git -C "$sandbox/repo" add CMakeLists.txt
+  git -C "$sandbox/repo" commit -m "oss: sync cmake bump" >/dev/null 2>&1
+  git -C "$sandbox/repo" checkout main >/dev/null 2>&1
+
+  # A "public" commit also changes CMakeLists.txt (from a temp branch)
+  git -C "$sandbox/repo" checkout -b tmp_pub >/dev/null 2>&1
+  echo "cmake_minimum_required(VERSION 3.17)" > "$sandbox/repo/CMakeLists.txt"
+  git -C "$sandbox/repo" add CMakeLists.txt
+  git -C "$sandbox/repo" commit -m "public: bump cmake again" >/dev/null 2>&1
+  local pub_sha
+  pub_sha="$(git -C "$sandbox/repo" rev-parse HEAD)"
+  git -C "$sandbox/repo" checkout main >/dev/null 2>&1
+
+  # main == oss/main for CMakeLists.txt → should be CLEAN (exit 0), not DIVERGED
+  local rc=0
+  REPO_ROOT="$sandbox/repo" \
+    "$SCRIPT_DIR/oss-pull-scan.sh" -b oss/main -t main "$pub_sha" >/dev/null 2>&1 || rc=$?
+
+  rm -rf "$sandbox"
+  assert_exit_code "no false positive: CMakeLists.txt synced → CLEAN" "0" "$rc"
+}
+
+test_pull_scan_real_divergence_detected() {
+  local sandbox
+  sandbox="$(mktemp -d /tmp/oss_ps_test.XXXXXX)"
+  git init "$sandbox/repo" >/dev/null 2>&1
+  git -C "$sandbox/repo" symbolic-ref HEAD refs/heads/main
+  git -C "$sandbox/repo" config user.name "Test"
+  git -C "$sandbox/repo" config user.email "test@test.com"
+
+  # Initial commit
+  echo "cmake_minimum_required(VERSION 3.15)" > "$sandbox/repo/CMakeLists.txt"
+  git -C "$sandbox/repo" add CMakeLists.txt
+  git -C "$sandbox/repo" commit -m "init" >/dev/null 2>&1
+
+  # oss/main branches off here
+  git -C "$sandbox/repo" branch oss/main >/dev/null 2>&1
+
+  # main adds PRIVATE content to CMakeLists.txt that is NOT synced to oss/main
+  printf 'cmake_minimum_required(VERSION 3.15)\n# private-internal-config\n' \
+    > "$sandbox/repo/CMakeLists.txt"
+  git -C "$sandbox/repo" add CMakeLists.txt
+  git -C "$sandbox/repo" commit -m "main: private cmake config" >/dev/null 2>&1
+
+  # A "public" commit also touches CMakeLists.txt
+  git -C "$sandbox/repo" checkout -b tmp_pub >/dev/null 2>&1
+  echo "cmake_minimum_required(VERSION 3.16)" > "$sandbox/repo/CMakeLists.txt"
+  git -C "$sandbox/repo" add CMakeLists.txt
+  git -C "$sandbox/repo" commit -m "public: cmake update" >/dev/null 2>&1
+  local pub_sha
+  pub_sha="$(git -C "$sandbox/repo" rev-parse HEAD)"
+  git -C "$sandbox/repo" checkout main >/dev/null 2>&1
+
+  # main != oss/main for CMakeLists.txt → should be DIVERGED (exit 1)
+  local rc=0
+  REPO_ROOT="$sandbox/repo" \
+    "$SCRIPT_DIR/oss-pull-scan.sh" -b oss/main -t main "$pub_sha" >/dev/null 2>&1 || rc=$?
+
+  rm -rf "$sandbox"
+  assert_exit_code "real divergence detected: CMakeLists.txt unsynced → DIVERGED" "1" "$rc"
+}
+
+# -------- Test for sync_all.sh cherry-pick data-loss fix --------
+# When oss/main has commits that conflict with incoming public commits,
+# sync_all.sh must: (a) exit non-zero (FATAL), and (b) leave oss/main
+# at its original position (not clobber it with public/main).
+
+test_sync_diverged_cp_conflict_is_fatal() {
+  local sandbox
+  sandbox="$(mktemp -d /tmp/oss_sync_test.XXXXXX)"
+
+  # Bare remotes
+  git init --bare "$sandbox/origin.git" >/dev/null 2>&1
+  git -C "$sandbox/origin.git" symbolic-ref HEAD refs/heads/main
+  git init --bare "$sandbox/public.git" >/dev/null 2>&1
+  git -C "$sandbox/public.git" symbolic-ref HEAD refs/heads/main
+  git init --bare "$sandbox/shadow.git" >/dev/null 2>&1
+  git -C "$sandbox/shadow.git" symbolic-ref HEAD refs/heads/main
+
+  # Work repo cloned from origin
+  local work="$sandbox/work"
+  git clone "$sandbox/origin.git" "$work" >/dev/null 2>&1
+  git -C "$work" config user.name "Test"
+  git -C "$work" config user.email "test@test.com"
+  git -C "$work" remote add public "$sandbox/public.git"
+  git -C "$work" remote add oss-shadow "$sandbox/shadow.git"
+
+  # Common ancestor commit
+  echo "# initial" > "$work/README.md"
+  git -C "$work" add README.md
+  git -C "$work" commit -m "init" >/dev/null 2>&1
+  git -C "$work" push -q origin main
+
+  # Create oss/main at the common ancestor
+  git -C "$work" checkout -b oss/main >/dev/null 2>&1
+  git -C "$work" push -q origin oss/main
+  git -C "$work" push -q public oss/main:main
+  git -C "$work" push -q oss-shadow oss/main:main
+  git -C "$work" checkout main >/dev/null 2>&1
+
+  # oss/main gets a local commit (changes README.md → conflict with public)
+  git -C "$work" checkout oss/main >/dev/null 2>&1
+  echo "oss private line" > "$work/README.md"
+  git -C "$work" add README.md
+  git -C "$work" commit -m "oss: local change" >/dev/null 2>&1
+  local oss_expected_sha
+  oss_expected_sha="$(git -C "$work" rev-parse HEAD)"
+  git -C "$work" checkout main >/dev/null 2>&1
+
+  # public gets a conflicting commit (also changes README.md)
+  local pub_work="$sandbox/pub_work"
+  git clone "$sandbox/public.git" "$pub_work" >/dev/null 2>&1
+  git -C "$pub_work" config user.name "Public"
+  git -C "$pub_work" config user.email "pub@test.com"
+  echo "public new line" > "$pub_work/README.md"
+  git -C "$pub_work" add README.md
+  git -C "$pub_work" commit -m "public: new line" >/dev/null 2>&1
+  git -C "$pub_work" push -q origin main
+  git -C "$work" fetch -q public 2>/dev/null || true
+
+  # Copy all oss scripts into the sandbox so sync_all.sh uses local copies
+  # (avoids side-effects on the real repo's baseline file etc.)
+  mkdir -p "$work/scripts/oss"
+  for f in oss-push.sh oss-pull.sh oss-scan.sh oss-pull-scan.sh \
+            oss-config.sh sync_all.sh oss-pull-baseline.sh; do
+    [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$work/scripts/oss/"
+  done
+  for f in os_kw.txt oss_exclude_paths.txt; do
+    [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$work/scripts/oss/"
+  done
+  # Pre-create a baseline so phase2 does not set-baseline against real repo
+  git -C "$work" rev-parse oss/main > "$work/scripts/oss/oss-pull-baseline.txt" 2>/dev/null || true
+  chmod +x "$work/scripts/oss/"*.sh
+
+  # Run sync_all.sh in the sandbox; expect FATAL (non-zero exit)
+  local rc=0
+  REPO_ROOT="$work" OSS_BRANCH=oss/main MAIN_BRANCH=main \
+  PUBLIC_REMOTE=public OSS_SHADOW_REMOTE=oss-shadow \
+    bash "$work/scripts/oss/sync_all.sh" --once --skip-mirror >/dev/null 2>&1 || rc=$?
+
+  # Verify: oss/main must NOT have been clobbered (still at our commit)
+  local oss_actual_sha
+  oss_actual_sha="$(git -C "$work" rev-parse oss/main 2>/dev/null || echo "MISSING")"
+
+  rm -rf "$sandbox"
+
+  if [[ $rc -eq 0 ]]; then
+    echo "  ASSERT FAILED (cp conflict is fatal): sync_all exited 0, expected non-zero"
+    return 1
+  fi
+
+  assert_eq "oss/main preserved after fatal cp conflict" \
+    "$oss_expected_sha" "$oss_actual_sha"
+}
+
 # -------- main --------
 
 echo "OSS Workflow Integration Tests"
@@ -524,6 +712,9 @@ run_test test_pull_preserves_author
 run_test test_push_range
 run_test test_scan_range_messages
 run_test test_push_preserves_author
+run_test test_pull_scan_no_false_positive_when_synced
+run_test test_pull_scan_real_divergence_detected
+run_test test_sync_diverged_cp_conflict_is_fatal
 
 echo ""
 echo "=============================="

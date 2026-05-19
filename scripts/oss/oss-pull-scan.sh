@@ -185,27 +185,19 @@ for commit in "${COMMITS[@]}"; do
   fi
 
   if is_conflict_zone "$f"; then
-    # DIVERGED: main has independently changed this file since the
-    # common ancestor with oss/main.  That means cherry-picking the
-    # public commit risks a content conflict and needs human review.
-    # If main has NOT touched the file since divergence, the cherry-pick
-    # is clean (oss/main simply has a newer version of the file).
-    local_mb="$(git merge-base "$MAIN_BRANCH" "$OSS_BRANCH" 2>/dev/null || true)"
-    if [[ -n "$local_mb" ]]; then
-    base_hash="$(git rev-parse "$local_mb:$f" 2>/dev/null || echo "MISSING")"
-    target_hash="$(git rev-parse "$MAIN_BRANCH:$f" 2>/dev/null || echo "MISSING")"
-    if [[ "$base_hash" != "$target_hash" ]]; then
-      diverged_hits+=("$f (main has independent changes since merge-base)")
-    else
-      conflict_zone_hits+=("$f")
-    fi
-    else
-    # No common ancestor: fall back to direct comparison
+    # DIVERGED: main has private (unsynced) changes to this file that
+    # are not yet in oss/main.  Pulling a public commit that also
+    # touches the file risks a conflict and needs human review.
+    # Compare main vs oss/main directly — if they match, oss/main
+    # already has all of main's changes for this file (cherry-picked),
+    # so the incoming public commit applies cleanly regardless of how
+    # old the merge-base is.
     main_hash="$(git rev-parse "$MAIN_BRANCH:$f" 2>/dev/null || echo "MISSING")"
     oss_hash="$(git rev-parse "$OSS_BRANCH:$f" 2>/dev/null || echo "MISSING")"
-    [[ "$main_hash" != "$oss_hash" ]] && \
-      diverged_hits+=("$f (main≠oss, no common ancestor)") || \
-      conflict_zone_hits+=("$f")
+    if [[ "$main_hash" != "$oss_hash" ]]; then
+    diverged_hits+=("$f (main has unsynced private changes vs oss/main)")
+    else
+    conflict_zone_hits+=("$f")
     fi
   fi
   done

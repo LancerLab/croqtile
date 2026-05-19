@@ -463,15 +463,18 @@ phase1_public_ingest() {
         fi
       else
         lgit cherry-pick --abort 2>/dev/null || lgit reset --hard HEAD 2>/dev/null || true
-        log "    Dropped $(lgit rev-parse --short "$oc") (conflict)"
+        # Restore oss/main to its pre-attempt state so no commits are lost.
+        # The caller can inspect reflog to understand what happened, but the
+        # branch itself is left intact.
+        lgit reset --hard "$oss_tip" 2>/dev/null || true
+        local oc_short
+        oc_short="$(lgit rev-parse --short "$oc" 2>/dev/null || echo "$oc")"
+        fatal_error "Cherry-pick conflict: $oc_short" \
+          "Cannot replay $oc_short onto $PUBLIC_REMOTE/main after rebase failed.\nManual resolution required:\n  git -C $REPO_ROOT checkout $OSS_BRANCH\n  git cherry-pick $oc"
+        ensure_on_branch "$saved" 2>/dev/null || true
+        return 1
       fi
     done
-    if [[ $applied -eq 0 && ${#oss_only[@]} -gt 0 ]]; then
-      fatal_error "Rebase + cherry-pick both failed" \
-        "All ${#oss_only[@]} origin-unique commit(s) conflicted.\nManual resolution required."
-      ensure_on_branch "$saved" 2>/dev/null || true
-      return 1
-    fi
     rebase_ok=1
   fi
 
