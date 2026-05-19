@@ -1,0 +1,56 @@
+// RUN: choreo -es -t hip -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
+
+// --- Test 1: basic 2D transpose <1,0> ---
+__co__ auto transp_basic(s32 [8, 16] input) {
+  s32[16, 8] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      dma.transp<1,0> input => output;
+    }
+
+  return output;
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_transp_basic
+// CHECK:         for (size_t __i = threadIdx.x; __i < {{.*}}; __i += blockDim.x)
+// CHECK:           __d0 = __rem / (16)
+// CHECK:           __d1 = __rem
+// perm<1,0>: dst[d1][d0]
+// CHECK:           __dst_idx = __d1 * (8) + __d0
+// CHECK:         __syncthreads()
+
+// --- Test 2: 3D transpose <2,0,1> ---
+__co__ auto transp_3d(s32 [3, 4, 5] input) {
+  s32[5, 3, 4] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      dma.transp<2,0,1> input => output;
+    }
+
+  return output;
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_transp_3d
+// CHECK:         __d0 = __rem / ((4 * 5))
+// CHECK:         __d1 = __rem / (5)
+// CHECK:         __d2 = __rem
+// perm<2,0,1>: dst[d2][d0][d1]
+// CHECK:         __dst_idx = __d2 * ((3 * 4)) + __d0 * (4) + __d1
+
+// --- Test 3: transpose with chunkat on source ---
+__co__ auto transp_chunkat(s32 [32, 16] input) {
+  s32[16, 16] output;
+
+  parallel p by 2 : block
+    parallel q by 32 : thread {
+      dma.transp<1,0> input.chunkat(p, _) => output;
+    }
+
+  return output;
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_transp_chunkat
+// chunkat offset = p * 16 * 16 = p * 256
+// CHECK:         ((int*)(input) + (blockIdx.x * 256))

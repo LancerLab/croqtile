@@ -23,6 +23,7 @@ enum class ChoreoFeature {
   MEMALLOC,
   DGMA,
   DSDMA,
+  ASYNC_DMA,
   NSVR,
   SLML,
   MGM,
@@ -40,6 +41,7 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::MEMALLOC: return "memalloc";
   case ChoreoFeature::DGMA: return "dgma";
   case ChoreoFeature::DSDMA: return "dsdma";
+  case ChoreoFeature::ASYNC_DMA: return "async_dma";
   case ChoreoFeature::NSVR: return "nsvr";
   case ChoreoFeature::SLML: return "slml";
   case ChoreoFeature::MGM: return "mgm";
@@ -63,6 +65,8 @@ inline static const std::string Description(ChoreoFeature cf) {
   case ChoreoFeature::DGMA: return "Hardware with Direct Global Memory Access.";
   case ChoreoFeature::DSDMA:
     return "Single DMA/TMA with Both Slice and DeSlice.";
+  case ChoreoFeature::ASYNC_DMA:
+    return "Hardware-accelerated async DMA (e.g. cp.async).";
   case ChoreoFeature::NSVR: return "No Scalar Value Return Support.";
   case ChoreoFeature::SLML: return "Allow User to Set Local Memory Limit.";
   case ChoreoFeature::MGM: return "Choreo to Manage Global Memory.";

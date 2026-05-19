@@ -1,4 +1,4 @@
-// RUN: choreo -es -t amdgpu -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
+// RUN: choreo -es -t hip -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
 
 __co__ void ele_add(s32 [6, 64] lhs, s32 [6, 64] rhs, s32 [6, 64] output) {
   parallel p by 6, q by 64

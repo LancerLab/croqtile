@@ -472,11 +472,16 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
 }
 
 // ============================================================================
-// DMA -- emit memory copies
+// DMA -- emit memory copies (copy / pad / transpose, sync / async)
 // ============================================================================
 
 bool HIPCodeGen::Visit(AST::DMA& n) {
   TraceEachVisit(n);
+
+  auto nty = NodeType(n);
+
+  // PlaceHolderType: bare future declarations (e.g. "f = dma;") -- no copy.
+  if (isa<PlaceHolderType>(nty)) return true;
 
   const HIPDMALoweringDecision* dec = HIPDMAPlan::Lookup(&n);
   if (!dec) {
@@ -484,48 +489,221 @@ bool HIPCodeGen::Visit(AST::DMA& n) {
     return false;
   }
 
-  auto from_ca = dyn_cast<AST::ChunkAt>(n.GetFrom());
-  auto to_ca = dyn_cast<AST::ChunkAt>(n.GetTo());
-
   auto from_expr = ExprSTR(n.GetFrom(), IsHost());
   auto to_expr = ExprSTR(n.GetTo(), IsHost());
 
-  if (dec->IsNaive()) {
-    if (IsHost()) {
-      auto from_sty = GetSpannedType(NodeType(*n.GetFrom()));
-      auto to_sty = GetSpannedType(NodeType(*n.GetTo()));
-      if (from_sty && to_sty) {
-        hs << h_indent << "hipMemcpy(" << to_expr << ", " << from_expr << ", "
-           << UnScopedSizeExpr(*to_sty) << ", hipMemcpyDefault);\n";
-      }
-    } else {
-      auto to_sty = GetSpannedType(NodeType(*n.GetTo()));
-      if (to_sty) {
-        auto size_expr = UnScopedSizeExpr(*to_sty);
-        ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
-           << size_expr << " / sizeof(" << HIPNameBaseType(dec->elem_type)
-           << "); __i += blockDim.x) {\n";
-        ds << d_indent << "  " << to_expr << "[__i] = " << from_expr
-           << "[__i];\n";
-        ds << d_indent << "}\n";
-        ds << d_indent << "__syncthreads();\n";
-      }
-    }
-  } else if (dec->IsTiled()) {
+  // If this DMA has a future name, map the future symbol to the destination
+  // address (including any ChunkAt subview offset) so later "f.data"
+  // references resolve correctly.
+  if (!IsHost() && !n.future.empty() && isa<AST::ChunkAt>(n.GetTo())) {
+    auto future_name = InScopeName(n.future);
+    ssm.MapDeviceSymbolIfNotExist(future_name, to_expr);
+    ssm.MapDeviceSymbolIfNotExist(future_name + ".data", to_expr);
+  }
+
+  bool is_async = dec->is_async;
+
+  // Host-side DMA: hipMemcpy
+  if (IsHost()) {
     auto to_sty = GetSpannedType(NodeType(*n.GetTo()));
     if (to_sty) {
-      auto size_expr = UnScopedSizeExpr(*to_sty);
-      ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
-         << size_expr << " / sizeof(" << HIPNameBaseType(dec->elem_type)
-         << "); __i += blockDim.x) {\n";
-      ds << d_indent << "  " << to_expr << "[__i] = " << from_expr
-         << "[__i];\n";
-      ds << d_indent << "}\n";
-      ds << d_indent << "__syncthreads();\n";
+      hs << h_indent << "hipMemcpy(" << to_expr << ", " << from_expr << ", "
+         << UnScopedSizeExpr(*to_sty) << ", hipMemcpyDefault);\n";
+    }
+    return true;
+  }
+
+  auto from_sty = GetSpannedType(NodeType(*n.GetFrom()));
+  auto to_sty = GetSpannedType(NodeType(*n.GetTo()));
+  if (!to_sty) return true;
+
+  if (dec->IsPad()) {
+    EmitDMAPad(n, *dec, from_expr, to_expr, from_sty, to_sty);
+  } else if (dec->IsTranspose()) {
+    EmitDMATranspose(n, *dec, from_expr, to_expr, from_sty, to_sty);
+  } else {
+    EmitDMACopy(*dec, from_expr, to_expr, to_sty);
+  }
+
+  if (!is_async)
+    ds << d_indent << "__syncthreads();\n";
+
+  return true;
+}
+
+void HIPCodeGen::EmitDMACopy(const HIPDMALoweringDecision& dec,
+                             const std::string& from_expr,
+                             const std::string& to_expr,
+                             const ptr<SpannedType>& to_sty) {
+  auto bt_name = HIPNameBaseType(dec.elem_type);
+  auto size_expr = UnScopedSizeExpr(*to_sty);
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
+     << size_expr << " / sizeof(" << bt_name
+     << "); __i += blockDim.x) {\n";
+  ds << d_indent << "  ((" << bt_name << "*)" << to_expr << ")[__i] = "
+     << "((" << bt_name << "*)" << from_expr << ")[__i];\n";
+  ds << d_indent << "}\n";
+}
+
+void HIPCodeGen::EmitDMAPad(AST::DMA& n,
+                            const HIPDMALoweringDecision& dec,
+                            const std::string& from_expr,
+                            const std::string& to_expr,
+                            const ptr<SpannedType>& from_sty,
+                            const ptr<SpannedType>& to_sty) {
+  auto bt_name = HIPNameBaseType(dec.elem_type);
+  auto pad_cfg = dyn_cast<PadConfig>(n.config);
+  assert(pad_cfg && "pad DMA must have PadConfig");
+
+  auto to_size_expr = UnScopedSizeExpr(*to_sty);
+
+  std::string pad_val = "0";
+  if (pad_cfg->GetPadValue())
+    pad_val = ExprSTR(pad_cfg->GetPadValue(), false);
+
+  // Step 1: fill entire destination with pad value
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
+     << to_size_expr << " / sizeof(" << bt_name
+     << "); __i += blockDim.x) {\n";
+  ds << d_indent << "  ((" << bt_name << "*)" << to_expr
+     << ")[__i] = (" << bt_name << ")" << pad_val << ";\n";
+  ds << d_indent << "}\n";
+  ds << d_indent << "__syncthreads();\n";
+
+  // Step 2: copy source data into the padded inner region
+  if (!from_sty) return;
+
+  auto from_shape = from_sty->GetShape();
+  auto to_shape = to_sty->GetShape();
+  int rank = from_shape.Rank();
+
+  std::vector<std::string> pad_low_vals;
+  if (pad_cfg->pad_low) {
+    for (size_t i = 0; i < pad_cfg->pad_low->Count(); ++i)
+      pad_low_vals.push_back(ExprSTR(pad_cfg->pad_low->ValueAt(i), false));
+  }
+  while ((int)pad_low_vals.size() < rank) pad_low_vals.push_back("0");
+
+  auto from_size_expr = UnScopedSizeExpr(*from_sty);
+  auto from_elem_count = from_size_expr + " / sizeof(" + bt_name + ")";
+
+  auto from_vals = from_shape.Value();
+  auto to_vals = to_shape.Value();
+  std::vector<std::string> from_dim_strs, to_dim_strs;
+  for (int i = 0; i < rank; ++i) {
+    from_dim_strs.push_back(ValueSTR(from_vals[i]));
+    to_dim_strs.push_back(ValueSTR(to_vals[i]));
+  }
+
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
+     << from_elem_count << "; __i += blockDim.x) {\n";
+
+  // Decompose flat index __i into multi-dim coords using from_shape
+  ds << d_indent << "  size_t __rem = __i;\n";
+  for (int d = 0; d < rank; ++d) {
+    std::string dim_name = "__d" + std::to_string(d);
+    if (d < rank - 1) {
+      // stride = product of remaining dimensions
+      std::string stride_expr = from_dim_strs[d + 1];
+      for (int k = d + 2; k < rank; ++k)
+        stride_expr = "(" + stride_expr + " * " + from_dim_strs[k] + ")";
+      ds << d_indent << "  size_t " << dim_name << " = __rem / ("
+         << stride_expr << ");\n";
+      ds << d_indent << "  __rem = __rem % (" << stride_expr << ");\n";
+    } else {
+      ds << d_indent << "  size_t " << dim_name << " = __rem;\n";
     }
   }
 
-  return true;
+  // Compute destination flat index with pad_low offsets
+  ds << d_indent << "  size_t __dst_idx = ";
+  for (int d = 0; d < rank; ++d) {
+    if (d > 0) ds << " + ";
+    std::string coord = "(__d" + std::to_string(d) + " + " + pad_low_vals[d] + ")";
+    if (d < rank - 1) {
+      std::string stride_expr = to_dim_strs[d + 1];
+      for (int k = d + 2; k < rank; ++k)
+        stride_expr = "(" + stride_expr + " * " + to_dim_strs[k] + ")";
+      ds << coord << " * (" << stride_expr << ")";
+    } else {
+      ds << coord;
+    }
+  }
+  ds << ";\n";
+
+  ds << d_indent << "  ((" << bt_name << "*)" << to_expr
+     << ")[__dst_idx] = ((" << bt_name << "*)" << from_expr << ")[__i];\n";
+  ds << d_indent << "}\n";
+}
+
+void HIPCodeGen::EmitDMATranspose(AST::DMA&,
+                                  const HIPDMALoweringDecision& dec,
+                                  const std::string& from_expr,
+                                  const std::string& to_expr,
+                                  const ptr<SpannedType>& from_sty,
+                                  const ptr<SpannedType>& to_sty) {
+  auto bt_name = HIPNameBaseType(dec.elem_type);
+  if (!from_sty) return;
+
+  auto from_shape = from_sty->GetShape();
+  auto to_shape = to_sty->GetShape();
+  int rank = from_shape.Rank();
+
+  auto perm = dec.transpose_perm;
+  if (perm.empty()) {
+    for (int i = rank - 1; i >= 0; --i)
+      perm.push_back(i);
+  }
+
+  auto from_size_expr = UnScopedSizeExpr(*from_sty);
+  auto from_elem_count = from_size_expr + " / sizeof(" + bt_name + ")";
+
+  auto from_vals = from_shape.Value();
+  auto to_vals = to_shape.Value();
+  std::vector<std::string> from_dim_strs, to_dim_strs;
+  for (int i = 0; i < rank; ++i) {
+    from_dim_strs.push_back(ValueSTR(from_vals[i]));
+    to_dim_strs.push_back(ValueSTR(to_vals[i]));
+  }
+
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
+     << from_elem_count << "; __i += blockDim.x) {\n";
+
+  // Decompose flat index into source multi-dim coords
+  ds << d_indent << "  size_t __rem = __i;\n";
+  for (int d = 0; d < rank; ++d) {
+    std::string dim_name = "__d" + std::to_string(d);
+    if (d < rank - 1) {
+      std::string stride_expr = from_dim_strs[d + 1];
+      for (int k = d + 2; k < rank; ++k)
+        stride_expr = "(" + stride_expr + " * " + from_dim_strs[k] + ")";
+      ds << d_indent << "  size_t " << dim_name << " = __rem / ("
+         << stride_expr << ");\n";
+      ds << d_indent << "  __rem = __rem % (" << stride_expr << ");\n";
+    } else {
+      ds << d_indent << "  size_t " << dim_name << " = __rem;\n";
+    }
+  }
+
+  // Compute transposed destination flat index
+  ds << d_indent << "  size_t __dst_idx = ";
+  for (int d = 0; d < rank; ++d) {
+    if (d > 0) ds << " + ";
+    std::string coord = "__d" + std::to_string(perm[d]);
+    if (d < rank - 1) {
+      std::string stride_expr = to_dim_strs[d + 1];
+      for (int k = d + 2; k < rank; ++k)
+        stride_expr = "(" + stride_expr + " * " + to_dim_strs[k] + ")";
+      ds << coord << " * (" << stride_expr << ")";
+    } else {
+      ds << coord;
+    }
+  }
+  ds << ";\n";
+
+  ds << d_indent << "  ((" << bt_name << "*)" << to_expr
+     << ")[__dst_idx] = ((" << bt_name << "*)" << from_expr << ")[__i];\n";
+  ds << d_indent << "}\n";
 }
 
 // ============================================================================
@@ -799,7 +977,6 @@ bool HIPCodeGen::Visit(AST::Return& n) {
   TraceEachVisit(n);
 
   if (!void_return && NeedDeviceFunc()) {
-    auto ret_sym = cgi.GetReturnSymbol(fname);
     if (auto id = AST::GetIdentifier(*n.value)) {
       auto sym = id->name;
       auto vty = NodeType(*n.value);
@@ -810,6 +987,20 @@ bool HIPCodeGen::Visit(AST::Return& n) {
            << sym << ".data(), "
            << ssm.HostName(sname + "__device") << ", "
            << UnScopedSizeExpr(*sty) << ", hipMemcpyDeviceToHost));\n";
+      }
+    } else if (auto expr = dyn_cast<AST::Expr>(n.value);
+               expr && (expr->GetOp() == Op::DataOf ||
+                        expr->GetOp() == Op::MDataOf)) {
+      if (auto fid = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
+        auto vty = GetSymbolType(fid->name);
+        auto sty = GetSpannedType(vty);
+        if (sty) {
+          auto buf_sym = fid->name + "__buf__";
+          hs << h_indent << "choreo::abend_true(hipMemcpy("
+             << buf_sym << ".data(), "
+             << buf_sym << "__device, "
+             << UnScopedSizeExpr(*sty) << ", hipMemcpyDeviceToHost));\n";
+        }
       }
     }
     EmitHipFree();
@@ -832,6 +1023,48 @@ void HIPCodeGen::EmitHipFree() {
       hs << h_indent << "hipFree(" << sym << "__device);\n";
     }
   }
+}
+
+// ============================================================================
+// ChunkAt subview element offset (linear index into base span)
+// ============================================================================
+
+std::string HIPCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
+  if (!ca || ca->NoOperation()) return "0";
+
+  sbe::ExprSum offset;
+
+  for (size_t i = 0; i < ca->OpCount(); ++i) {
+    const auto& sop = ca->OpAt(i);
+    if (isa<AST::SOP::Reshape>(sop)) continue;
+
+    if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
+        isa<AST::SOP::SubSpan>(sop)) {
+      auto idx = sop->GetIndices()->Opts();
+      auto strd = sop->GetBlockStrides();
+      auto blk = sop->GetBlockShape();
+      assert(idx.HasVals());
+      assert(idx.GetVals().size() == strd.size());
+      assert((size_t)blk.Rank() == strd.size());
+
+      bool has_step = isa<AST::SOP::SubSpan>(sop) && sop->GetSteps();
+      for (size_t dim = 0; dim < idx.GetVals().size(); ++dim) {
+        if (has_step)
+          offset += idx.GetVals()[dim] * strd[dim];
+        else
+          offset += idx.GetVals()[dim] * strd[dim] * blk.ValueAt(dim);
+      }
+    } else if (isa<AST::SOP::View>(sop)) {
+      auto off = sop->GetOffsets()->Opts();
+      auto strd = sop->GetBlockStrides();
+      for (size_t dim = 0; dim < off.GetVals().size(); ++dim)
+        offset += off.GetVals()[dim] * strd[dim];
+    } else {
+      choreo_unreachable("unsupported spanned operation in HIP GenOffset.");
+    }
+  }
+
+  return ValueSTR(offset.Get());
 }
 
 // ============================================================================
@@ -868,15 +1101,38 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
       return ExprSTR(expr->GetL(), is_host) + "[" +
              ExprSTR(expr->GetR(), is_host) + "]";
     }
+    if (expr->GetOp() == Op::DataOf || expr->GetOp() == Op::MDataOf) {
+      if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
+        auto sname = InScopeName(id->name) + ".data";
+        if (!is_host && ssm.HasDeviceName(sname))
+          return ssm.DeviceName(sname);
+        return id->name;
+      }
+    }
     if (auto ref = expr->GetReference())
       return ExprSTR(ref, is_host);
   }
   if (auto ca = dyn_cast<AST::ChunkAt>(n)) {
     auto sym_name = ca->RefSymbol();
     auto sname = InScopeName(sym_name);
-    if (is_host && ssm.HasHostName(sname)) return ssm.HostName(sname);
-    if (!is_host && ssm.HasDeviceName(sname)) return ssm.DeviceName(sname);
-    return sym_name;
+    std::string base_expr;
+    if (is_host && ssm.HasHostName(sname))
+      base_expr = ssm.HostName(sname);
+    else if (!is_host && ssm.HasDeviceName(sname))
+      base_expr = ssm.DeviceName(sname);
+    else
+      base_expr = sym_name;
+
+    if (ca->NoOperation()) return base_expr;
+
+    auto offset_str = GenOffset(ca);
+    if (offset_str == "0") return base_expr;
+
+    auto sty = GetSpannedType(NodeType(*ca));
+    assert(sty && "ChunkAt with span operations expects a SpannedType.");
+    auto bt_name = HIPNameBaseType(sty->ElementType());
+    return std::string("((") + bt_name + "*)(" + base_expr + ") + " + offset_str +
+           ")";
   }
   if (auto da = dyn_cast<AST::DataAccess>(n)) {
     auto sym = da->GetDataName();
@@ -1010,6 +1266,8 @@ void HIPCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   os << R"script(#!/usr/bin/env bash
 
 # Choreo-generated bash script to compile HIP code for AMD GPU
+# ROCm/HSA requires sufficient locked memory; raise if permitted.
+ulimit -l unlimited 2>/dev/null || true
 )script";
 
   if (RequiresE2ECompilation(CCtx().GetOutputKind())) {

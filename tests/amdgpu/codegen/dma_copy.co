@@ -1,11 +1,113 @@
-// RUN: choreo -es -t amdgpu -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
+// RUN: choreo -es -t hip -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
 
-__co__ void dma_copy_basic(s32 [6, 64] input, s32 [6, 64] output) {
-  parallel p by 6, q by 64
-    output.at(p, q) = input.at(p, q) + 1;
+// --- Test 1: basic round-trip with future ---
+__co__ auto dma_copy_basic(s32 [32, 32] input) {
+  s32[input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
 }
 
-// CHECK: __global__ void __choreo_device_dma_copy_basic
-// CHECK: hipMalloc
-// CHECK: hipMemcpy
-// CHECK: <<<__grid, __block>>>
+// Device code: kernel with thread-cooperative loops
+// CHECK-LABEL: __global__ void __choreo_device_dma_copy_basic
+// CHECK:         for (size_t __i = threadIdx.x; __i < {{.*}} / sizeof(int); __i += blockDim.x)
+// CHECK-NEXT:      ((int*){{.*}})[__i] = ((int*)input)[__i]
+// CHECK:         __syncthreads()
+// CHECK:         for (size_t __i = threadIdx.x; __i < {{.*}} / sizeof(int); __i += blockDim.x)
+// CHECK:         __syncthreads()
+// Host code: device memory allocation, H2D transfer, kernel launch, D2H transfer
+// CHECK-LABEL: dma_copy_basic(
+// CHECK:       hipMalloc(&input__device
+// CHECK:       hipMemcpy(input__device, input.data()
+// CHECK:       hipMalloc(&output__device
+// CHECK:       __choreo_device_dma_copy_basic<<<
+// CHECK:       hipDeviceSynchronize()
+// CHECK:       hipMemcpy(output.data(), output__device
+// CHECK:       hipFree(input__device)
+
+// --- Test 2: chunkat on from and to with parallel index ---
+__co__ auto dma_copy_chunkat(s32 [128, 64] input) {
+  s32[input.span] output;
+
+  parallel p by 4 : block
+    parallel q by 64 : thread {
+      shared s32 [32, 64] tile;
+      dma.copy input.chunkat(p, _) => tile;
+      dma.copy tile => output.chunkat(p, _);
+    }
+
+  return output;
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_dma_copy_chunkat
+// CHECK:         ((int*)(input) + (blockIdx.x * 2048))
+// CHECK:         ((int*)(output) + (blockIdx.x * 2048))
+// Host code: grid dimension matches tiling factor
+// CHECK-LABEL: dma_copy_chunkat(
+// CHECK:       dim3 __grid(4,
+// CHECK:       dim3 __block(64,
+// CHECK:       __choreo_device_dma_copy_chunkat<<<__grid, __block>>>
+
+// --- Test 3: subspan.at on both sides ---
+__co__ auto dma_copy_subspan_at(s32 [64, 64] input) {
+  s32[64, 64] output;
+
+  parallel p by 4 : block
+    parallel q by 32 : thread {
+      shared s32 [16, 16] tile;
+      dma.copy input.subspan(16, 16).at(p, 0) => tile;
+      dma.copy tile => output.subspan(16, 16).at(p, 0);
+    }
+
+  return output;
+}
+
+// subspan(16,16) over [64,64]: tile block = [16,16], stride_dim0 = 64
+// offset = p * 64 * 16 = p * 1024
+// CHECK-LABEL: __global__ void __choreo_device_dma_copy_subspan_at
+// CHECK:         ((int*)(input) + (blockIdx.x * 1024))
+// CHECK:         ((int*)(output) + (blockIdx.x * 1024))
+
+// --- Test 4: view.from on both sides ---
+__co__ auto dma_copy_view_from(s32 [64, 32] input) {
+  s32[input.span] output {0};
+
+  parallel p by 4 : block
+    parallel q by 32 : thread {
+      shared s32 [16, 32] tile;
+      dma.copy input.view(16, 32).from(p * 16, 0) => tile;
+      dma.copy tile => output.view(16, 32).from(p * 16, 0);
+    }
+
+  return output;
+}
+
+// view(16,32).from(p*16, 0): stride_dim0 = 32
+// offset = p * 16 * 32 = p * 512
+// CHECK-LABEL: __global__ void __choreo_device_dma_copy_view_from
+// CHECK:         ((int*)(input) + (blockIdx.x * 512))
+// CHECK:         ((int*)(output) + (blockIdx.x * 512))
+
+// --- Test 5: mixed -- view.from on source, chunkat on dest ---
+__co__ auto dma_copy_mixed(s32 [64, 32] input) {
+  s32[input.span] output;
+
+  parallel p by 4 : block
+    parallel q by 32 : thread {
+      shared s32 [16, 32] tile;
+      dma.copy input.view(16, 32).from(p * 16, 0) => tile;
+      dma.copy tile => output.chunkat(p, _);
+    }
+
+  return output;
+}
+
+// source: view.from offset = p * 512
+// dest:   chunkat offset   = p * 512  (same for [64,32] / 4 tiles of [16,32])
+// CHECK-LABEL: __global__ void __choreo_device_dma_copy_mixed
+// CHECK:         ((int*)(input) + (blockIdx.x * 512))
+// CHECK:         ((int*)(output) + (blockIdx.x * 512))
