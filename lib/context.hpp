@@ -756,6 +756,9 @@ public:
   bool TargetSupportVectorize() const {
     return HasFeature(ChoreoFeature::VECTORIZE, GetArch());
   }
+  bool TargetSupportAsyncDMA() const {
+    return HasFeature(ChoreoFeature::ASYNC_DMA, GetArch());
+  }
 
   size_t TargetVectorizeLimit() const {
     return GetTarget().VectorizeLimit(GetArch());

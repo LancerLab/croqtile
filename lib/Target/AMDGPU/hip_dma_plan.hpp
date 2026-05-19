@@ -7,7 +7,9 @@
 #include "types.hpp"
 
 #include <cstddef>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace Choreo {
 namespace HIP {
@@ -54,6 +56,10 @@ struct HIPDMALoweringDecision {
   HIPDMAStrategy strategy = HIPDMAStrategy::UNKNOWN;
   HIPDMADirection direction = HIPDMADirection::UNKNOWN;
 
+  std::string operation;
+  bool is_async = false;
+  bool has_future = false;
+
   BaseType elem_type = BaseType::UNKNOWN;
   int rank = -1;
 
@@ -61,15 +67,15 @@ struct HIPDMALoweringDecision {
   Shape to_ca_shape;
   Shape from_parent_shape;
   Shape to_parent_shape;
-  ValueList from_strides;
-  ValueList to_strides;
 
-  size_t threads_count = 0;
-  size_t vec_width = 1;
+  std::vector<size_t> transpose_perm;
 
   bool IsResolved() const { return strategy != HIPDMAStrategy::UNKNOWN; }
   bool IsNaive() const { return strategy == HIPDMAStrategy::NAIVE_COPY; }
   bool IsTiled() const { return strategy == HIPDMAStrategy::TILED_COPY; }
+  bool IsCopy() const { return operation == ".copy"; }
+  bool IsPad() const { return operation == ".pad"; }
+  bool IsTranspose() const { return operation == ".transp"; }
 };
 
 struct HIPDMAPlan : public CodeGenerator {

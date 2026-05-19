@@ -1,0 +1,51 @@
+// RUN: choreo -es -t hip -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
+
+// --- Test 1: basic pad with fill + copy loops ---
+__co__ auto pad_basic(s32 [16, 32] input) {
+  s32[16+2+2, 32+4+4] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [16, 32] buf;
+      dma.copy input => buf;
+      dma.pad<{2, 4}, {2, 4}, {0, 0}, 99> buf => output;
+    }
+
+  return output;
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_pad_basic
+// copy input => buf (thread-cooperative loop)
+// CHECK:         for (size_t __i = threadIdx.x; __i < {{.*}}; __i += blockDim.x)
+// CHECK:         __syncthreads()
+// fill output with pad value 99
+// CHECK:         for (size_t __i = threadIdx.x; __i < {{.*}}; __i += blockDim.x)
+// CHECK:           = (int)99
+// CHECK:         __syncthreads()
+// copy inner region with pad_low offsets
+// CHECK:         for (size_t __i = threadIdx.x; __i < {{.*}}; __i += blockDim.x)
+// CHECK:           size_t __d0 = __rem / (32)
+// CHECK:           size_t __dst_idx = (__d0 + 2) * (40) + (__d1 + 4)
+// CHECK:         __syncthreads()
+
+// --- Test 2: pad with chunkat on source ---
+__co__ auto pad_chunkat_src(s32 [64, 32] input) {
+  s32[32+2+3, 32+1+2] output;
+
+  parallel p by 2 : block
+    parallel q by 32 : thread {
+      shared s32 [32, 32] buf;
+      dma.copy input.chunkat(p, _) => buf;
+      dma.pad<{2, 1}, {3, 2}, {0, 0}, -1> buf => output;
+    }
+
+  return output;
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_pad_chunkat_src
+// source chunkat: offset = p * 32 * 32 = p * 1024
+// CHECK:         ((int*)(input) + (blockIdx.x * 1024))
+// fill dest with -1
+// CHECK:         = (int)-1
+// pad_low offsets [2, 1]
+// CHECK:         (__d0 + 2) * (35) + (__d1 + 1)

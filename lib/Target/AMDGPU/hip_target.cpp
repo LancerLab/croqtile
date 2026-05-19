@@ -16,7 +16,7 @@ namespace {
 class AMDGPUTarget : public GPUTarget {
 public:
   ~AMDGPUTarget() {}
-  const std::string Name() const override { return "amdgpu"; }
+  const std::string Name() const override { return "hip"; }
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
 
   int DefaultOptLevel(const ArchId&) const override { return 3; }
@@ -162,7 +162,7 @@ std::unique_ptr<Target> CreateAMDGPU() {
 } // end anonymous namespace
 
 static bool registered = [] {
-  TargetRegistry::Register(AMDGPUTarget::Id(), "amdgpu",
+  TargetRegistry::Register(AMDGPUTarget::Id(), "hip",
                            "HIP target for AMD GPUs (RDNA 2+).",
                            &CreateAMDGPU);
   return true;

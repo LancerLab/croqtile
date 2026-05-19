@@ -1,4 +1,4 @@
-// RUN: choreo -gs -t amdgpu -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
+// RUN: choreo -gs -t hip -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
 
 __co__ s32 [64] simple_add(s32 [64] a, s32 [64] b) {
   s32[a.span] out;

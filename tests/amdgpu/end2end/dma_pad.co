@@ -1,0 +1,72 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+// --- Test 1: S2G pad with static shape ---
+__co__ auto pad_s2g(s32 [32, 64] input) {
+  s32[32+2+2, 64+4+4] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [32, 64] buf;
+      dma.copy input.subspan(32, 64) => buf;
+      dma.pad<{2, 4}, {2, 4}, {0, 0}, 99> buf => output;
+    }
+
+  return output;
+}
+
+// --- Test 2: G2S sync pad ---
+__co__ auto pad_g2s(s32 [32, 64] input) {
+  s32[32+2+2, 64+4+4] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      f = dma.pad<{2, 4}, {2, 4}, {0, 0}, 99> input.subspan(32, 64) => shared;
+      dma.copy f.data => output;
+    }
+
+  return output;
+}
+
+int main() {
+  {
+    auto input = choreo::make_spandata<choreo::s32>(32, 64);
+    for (size_t i = 0; i < 32; ++i)
+      for (size_t j = 0; j < 64; ++j)
+        input[i][j] = static_cast<choreo::s32>((i * 17 + j * 5) % 41 - 20);
+
+    auto output = pad_s2g(input.view());
+    for (size_t i = 0; i < 36; ++i)
+      for (size_t j = 0; j < 72; ++j) {
+        if (i >= 2 && i < 34 && j >= 4 && j < 68)
+          choreo::choreo_assert(output[i][j] == input[i - 2][j - 4],
+                                "pad_s2g data mismatch");
+        else
+          choreo::choreo_assert(output[i][j] == 99, "pad_s2g pad mismatch");
+      }
+
+    std::cout << "Test pad_s2g Passed" << std::endl;
+  }
+
+  {
+    auto input = choreo::make_spandata<choreo::s32>(32, 64);
+    for (size_t i = 0; i < 32; ++i)
+      for (size_t j = 0; j < 64; ++j)
+        input[i][j] = static_cast<choreo::s32>((i * 17 + j * 5) % 41 - 20);
+
+    auto output = pad_g2s(input.view());
+    for (size_t i = 0; i < 36; ++i)
+      for (size_t j = 0; j < 72; ++j) {
+        if (i >= 2 && i < 34 && j >= 4 && j < 68)
+          choreo::choreo_assert(output[i][j] == input[i - 2][j - 4],
+                                "pad_g2s data mismatch");
+        else
+          choreo::choreo_assert(output[i][j] == 99, "pad_g2s pad mismatch");
+      }
+
+    std::cout << "Test pad_g2s Passed" << std::endl;
+  }
+}
+
+// CHECK: Test pad_s2g Passed
+// CHECK: Test pad_g2s Passed

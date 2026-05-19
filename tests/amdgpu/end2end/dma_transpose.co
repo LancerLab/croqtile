@@ -1,0 +1,33 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+// --- Test 1: basic 2D transpose <1,0> ---
+__co__ auto transp_2d(s32 [64, 128] input) {
+  s32 [128, 64] output;
+
+  parallel p by 1 : block, by 1 : group {
+    tile = dma.transp<1, 0> input => shared;
+    dma.copy tile => output;
+  }
+
+  return output;
+}
+
+int main() {
+  {
+    auto input = choreo::make_spandata<choreo::s32>(64, 128);
+    for (size_t i = 0; i < 64; ++i)
+      for (size_t j = 0; j < 128; ++j)
+        input[i][j] = static_cast<choreo::s32>((i * 17 + j * 5) % 41 - 20);
+
+    auto output = transp_2d(input.view());
+    for (size_t i = 0; i < 128; ++i)
+      for (size_t j = 0; j < 64; ++j)
+        choreo::choreo_assert(output[i][j] == input[j][i],
+                              "transp_2d mismatch");
+
+    std::cout << "Test transp_2d Passed" << std::endl;
+  }
+}
+
+// CHECK: Test transp_2d Passed

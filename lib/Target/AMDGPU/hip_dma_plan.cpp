@@ -9,6 +9,9 @@ bool HIPDMAPlan::Visit(AST::DMA& n) {
 
   HIPDMALoweringDecision dec;
   dec.direction = ResolveDirection(n);
+  dec.operation = n.operation;
+  dec.is_async = n.IsAsync();
+  dec.has_future = !n.future.empty();
 
   auto from_sty = GetSpannedType(NodeType(*n.GetFrom()));
   auto to_sty = GetSpannedType(NodeType(*n.GetTo()));
@@ -36,22 +39,19 @@ bool HIPDMAPlan::Visit(AST::DMA& n) {
     if (sty_p) dec.to_parent_shape = sty_p->GetShape();
   }
 
+  if (auto tc = dyn_cast<TransposeConfig>(n.config)) {
+    dec.transpose_perm = tc->dim_values;
+  }
+
   bool has_shared = (dec.direction == HIPDMADirection::G2S ||
                      dec.direction == HIPDMADirection::S2G ||
                      dec.direction == HIPDMADirection::S2S);
 
-  if (has_shared && dec.rank >= 1 && dec.rank <= 2) {
+  if (has_shared && dec.rank >= 1 && dec.rank <= 5 &&
+      (dec.IsCopy() || dec.IsTranspose() || dec.IsPad())) {
     dec.strategy = HIPDMAStrategy::TILED_COPY;
-    size_t elem_bytes = SizeOf(dec.elem_type);
-    if (elem_bytes >= 4)
-      dec.vec_width = 4;
-    else if (elem_bytes == 2)
-      dec.vec_width = 8;
-    else
-      dec.vec_width = 16;
   } else {
     dec.strategy = HIPDMAStrategy::NAIVE_COPY;
-    dec.vec_width = 1;
   }
 
   decisions()[&n] = std::move(dec);

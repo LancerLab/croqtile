@@ -1,0 +1,109 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+// --- Test 1: sync DMA copy round-trip (G2S + S2G) ---
+__co__ auto dma_copy_sync(s32 [6, 17, 64] input) {
+  s32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+// --- Test 2: sync DMA copy (separate future) ---
+__co__ auto dma_copy_future(s32 [6, 17, 64] input) {
+  s32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+// --- Test 3: 2D sync DMA copy ---
+__co__ auto dma_copy_2d(s32 [32, 64] input) {
+  s32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+// --- Test 4: 1D DMA copy ---
+__co__ auto dma_copy_1d(s32 [128] input) {
+  s32 [128] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+int main() {
+  {
+    auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+    a.fill_random(-10, 10);
+
+    auto res = dma_copy_sync(a.view());
+    for (size_t i = 0; i < 6; ++i)
+      for (size_t j = 0; j < 17; ++j)
+        for (size_t k = 0; k < 64; ++k)
+          choreo::choreo_assert(a[i][j][k] == res[i][j][k], "copy_sync mismatch");
+
+    std::cout << "Test copy_sync Passed" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+    a.fill_random(-10, 10);
+
+    auto res = dma_copy_future(a.view());
+    for (size_t i = 0; i < 6; ++i)
+      for (size_t j = 0; j < 17; ++j)
+        for (size_t k = 0; k < 64; ++k)
+          choreo::choreo_assert(a[i][j][k] == res[i][j][k], "copy_future mismatch");
+
+    std::cout << "Test copy_future Passed" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::s32>(32, 64);
+    for (size_t i = 0; i < 32; ++i)
+      for (size_t j = 0; j < 64; ++j)
+        a[i][j] = static_cast<choreo::s32>(i * 64 + j);
+
+    auto res = dma_copy_2d(a.view());
+    for (size_t i = 0; i < 32; ++i)
+      for (size_t j = 0; j < 64; ++j)
+        choreo::choreo_assert(a[i][j] == res[i][j], "copy_2d mismatch");
+
+    std::cout << "Test copy_2d Passed" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::s32>(128);
+    for (size_t i = 0; i < 128; ++i)
+      a[i] = static_cast<choreo::s32>(i * 7 + 3);
+
+    auto res = dma_copy_1d(a.view());
+    for (size_t i = 0; i < 128; ++i)
+      choreo::choreo_assert(a[i] == res[i], "copy_1d mismatch");
+
+    std::cout << "Test copy_1d Passed" << std::endl;
+  }
+}
+
+// CHECK: Test copy_sync Passed
+// CHECK: Test copy_future Passed
+// CHECK: Test copy_2d Passed
+// CHECK: Test copy_1d Passed

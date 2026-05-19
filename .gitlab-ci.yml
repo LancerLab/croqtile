@@ -48,6 +48,7 @@ gpu_test:
 amdgpu_test:
   variables:
    GIT_SUBMODULE_STRATEGY: recursive
+   GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   rules:
     - if: $NO_AMDGPU == "true"
@@ -58,6 +59,8 @@ amdgpu_test:
         $CI_COMMIT_BRANCH =~ /^oss\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
+  before_script:
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
   script:
     - echo "Running tests with AMDGPU..."
     - make setup-core

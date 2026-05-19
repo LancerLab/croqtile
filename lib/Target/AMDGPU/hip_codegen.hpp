@@ -8,6 +8,7 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "codegen_utils.hpp"
+#include "hip_dma_plan.hpp"
 #include "operator_info.hpp"
 #include "types.hpp"
 
@@ -178,6 +179,8 @@ private:
                              const std::string& = ", ",
                              BaseType = BaseType::UNKNOWN) const;
 
+  std::string GenOffset(const AST::ptr<AST::ChunkAt>& ca) const;
+
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
   void EmitSource();
@@ -189,6 +192,23 @@ private:
                           const ValueItem&);
   void EmitDeviceVirtualIndices(AST::ParallelBy*);
   void EmitHipFree();
+
+  void EmitDMACopy(const HIPDMALoweringDecision& dec,
+                   const std::string& from_expr,
+                   const std::string& to_expr,
+                   const ptr<SpannedType>& to_sty);
+  void EmitDMAPad(AST::DMA& n,
+                  const HIPDMALoweringDecision& dec,
+                  const std::string& from_expr,
+                  const std::string& to_expr,
+                  const ptr<SpannedType>& from_sty,
+                  const ptr<SpannedType>& to_sty);
+  void EmitDMATranspose(AST::DMA& n,
+                        const HIPDMALoweringDecision& dec,
+                        const std::string& from_expr,
+                        const std::string& to_expr,
+                        const ptr<SpannedType>& from_sty,
+                        const ptr<SpannedType>& to_sty);
 
   void ResetChoreoFunctionStates() {
     host_param_count = 0;

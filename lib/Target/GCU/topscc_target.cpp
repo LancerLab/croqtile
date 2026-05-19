@@ -39,6 +39,8 @@ public:
       return {
           {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},
           {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
+          {STR(ChoreoFeature::ASYNC_DMA),
+           Description(ChoreoFeature::ASYNC_DMA)},
           {STR(ChoreoFeature::EVENT), Description(ChoreoFeature::EVENT)},
           {STR(ChoreoFeature::DGMA), Description(ChoreoFeature::DGMA)},
           {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
@@ -51,6 +53,8 @@ public:
       return {
           {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},
           {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
+          {STR(ChoreoFeature::ASYNC_DMA),
+           Description(ChoreoFeature::ASYNC_DMA)},
           {STR(ChoreoFeature::EVENT), Description(ChoreoFeature::EVENT)},
           {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
           {STR(ChoreoFeature::HDRPARSE), Description(ChoreoFeature::HDRPARSE)},
@@ -60,6 +64,8 @@ public:
       };
     return {
         {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},
+        {STR(ChoreoFeature::ASYNC_DMA),
+         Description(ChoreoFeature::ASYNC_DMA)},
         {STR(ChoreoFeature::HDRPARSE), Description(ChoreoFeature::HDRPARSE)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
     };
