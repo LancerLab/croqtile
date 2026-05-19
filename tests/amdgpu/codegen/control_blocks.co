@@ -1,0 +1,65 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// === foreach with unroll ===
+__co__ auto test_foreach(s32 [64] input) {
+  s32[64] output;
+  parallel p by 1 : block
+    parallel q by 64 : thread
+      foreach {q} in [64] :unroll
+        output.at(q) = input.at(q) * 2;
+  return output;
+}
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (__iv_q = 0; __iv_q < 64; ++__iv_q)
+
+// === if-else ===
+__co__ auto test_ifelse(s32 [64] input) {
+  s32[64] output;
+  parallel p by 1 : block
+    parallel q by 64 : thread {
+      if (q < 32)
+        output.at(q) = input.at(q) + 1;
+      else
+        output.at(q) = input.at(q) - 1;
+    }
+  return output;
+}
+// CHECK: if ((__vid_tid_x < 32))
+// CHECK: } else {
+
+// === inthreads with syncthreads ===
+__co__ auto test_inthreads(s32 [128] input) {
+  s32[128] output;
+  parallel p by 1 : block
+    parallel q by 128 : thread {
+      shared s32[128] buf;
+      dma.copy input => buf;
+      inthreads (q < 64) {
+        buf.at(q) = buf.at(q) * 2;
+      }
+      dma.copy buf => output;
+    }
+  return output;
+}
+// CHECK: if ((__vid_tid_x < 64))
+// CHECK: __syncthreads();
+
+// === while with break ===
+__co__ auto test_while(s32 [64] input) {
+  s32[64] output;
+  parallel p by 1 : block
+    parallel q by 64 : thread {
+      s32 acc = 0;
+      s32 i = 0;
+      while (i < 10) {
+        acc = acc + input.at(q);
+        if (acc > 100)
+          break;
+        i = i + 1;
+      }
+      output.at(q) = acc;
+    }
+  return output;
+}
+// CHECK: while ((i < 10))
+// CHECK: break;
