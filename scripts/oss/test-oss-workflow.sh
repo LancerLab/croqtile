@@ -783,6 +783,95 @@ test_sync_diverged_rebase_succeeds() {
     "$oss_commit_msg" "$last_msg"
 }
 
+# Test: origin/oss/main has new commits that local oss/main hasn't fetched yet;
+# public is behind.  sync_all must fast-forward local from origin, then push
+# oss/main to public — not wipe origin's commits.
+test_sync_origin_ahead_of_local_pushes_to_public() {
+  local sandbox
+  sandbox="$(mktemp -d /tmp/oss_sync_test.XXXXXX)"
+
+  git init --bare "$sandbox/origin.git" >/dev/null 2>&1
+  git -C "$sandbox/origin.git" symbolic-ref HEAD refs/heads/main
+  git init --bare "$sandbox/public.git" >/dev/null 2>&1
+  git -C "$sandbox/public.git" symbolic-ref HEAD refs/heads/main
+  git init --bare "$sandbox/shadow.git" >/dev/null 2>&1
+  git -C "$sandbox/shadow.git" symbolic-ref HEAD refs/heads/main
+
+  local work="$sandbox/work"
+  git clone "$sandbox/origin.git" "$work" >/dev/null 2>&1
+  git -C "$work" checkout -b main 2>/dev/null || true
+  git -C "$work" config user.name "Test"
+  git -C "$work" config user.email "test@test.com"
+  git -C "$work" remote add public "$sandbox/public.git"
+  git -C "$work" remote add oss-shadow "$sandbox/shadow.git"
+
+  # Common base: both origin/oss/main and public/main start here
+  echo "# initial" > "$work/README.md"
+  git -C "$work" add README.md
+  git -C "$work" commit -m "init" >/dev/null 2>&1
+  git -C "$work" push -q origin main
+  git -C "$work" checkout -b oss/main >/dev/null 2>&1
+  git -C "$work" push -q origin oss/main
+  git -C "$work" push -q public oss/main:main
+  git -C "$work" push -q oss-shadow oss/main:main
+  git -C "$work" checkout main >/dev/null 2>&1
+
+  # Simulate: someone pushes 2 commits to origin/oss/main (e.g. from a different
+  # machine), but local oss/main branch was NOT updated (it stays at the base).
+  local pusher="$sandbox/pusher"
+  git clone "$sandbox/origin.git" "$pusher" >/dev/null 2>&1
+  git -C "$pusher" checkout -b oss/main "origin/oss/main" >/dev/null 2>&1
+  git -C "$pusher" config user.name "Pusher"
+  git -C "$pusher" config user.email "pusher@test.com"
+  echo "patch1" >> "$pusher/README.md"
+  git -C "$pusher" add README.md
+  git -C "$pusher" commit -m "oss: patch1" >/dev/null 2>&1
+  echo "patch2" >> "$pusher/README.md"
+  git -C "$pusher" add README.md
+  git -C "$pusher" commit -m "oss: patch2" >/dev/null 2>&1
+  git -C "$pusher" push -q origin oss/main  # origin/oss/main now has 2 extra commits
+
+  # Local oss/main is intentionally stale (still at the base; no fetch done)
+  local stale_sha
+  stale_sha="$(git -C "$work" rev-parse oss/main)"
+
+  mkdir -p "$work/scripts/oss"
+  for f in oss-push.sh oss-pull.sh oss-scan.sh oss-pull-scan.sh \
+            oss-config.sh sync_all.sh oss-pull-baseline.sh; do
+    [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$work/scripts/oss/"
+  done
+  for f in os_kw.txt oss_exclude_paths.txt; do
+    [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$work/scripts/oss/"
+  done
+  git -C "$work" rev-parse oss/main > "$work/scripts/oss/oss-pull-baseline.txt" 2>/dev/null || true
+  chmod +x "$work/scripts/oss/"*.sh
+
+  local rc=0
+  REPO_ROOT="$work" OSS_BRANCH=oss/main MAIN_BRANCH=main \
+  PUBLIC_REMOTE=public OSS_SHADOW_REMOTE=oss-shadow \
+    bash "$work/scripts/oss/sync_all.sh" --once --skip-mirror >/dev/null 2>&1 || rc=$?
+
+  local local_tip public_tip origin_tip last_msg
+  local_tip="$(git -C "$work" rev-parse oss/main 2>/dev/null || echo MISSING)"
+  public_tip="$(git -C "$sandbox/public.git" rev-parse main 2>/dev/null || echo MISSING)"
+  origin_tip="$(git -C "$sandbox/origin.git" rev-parse oss/main 2>/dev/null || echo MISSING)"
+  last_msg="$(git -C "$work" log oss/main -1 --format=%s 2>/dev/null || echo MISSING)"
+
+  rm -rf "$sandbox"
+
+  if [[ $rc -ne 0 ]]; then
+    echo "  ASSERT FAILED: sync_all exited $rc, expected 0"
+    return 1
+  fi
+  assert_eq "oss/main: local fast-forwarded from origin" "$origin_tip" "$local_tip"
+  assert_eq "public/main: received origin's commits" "$origin_tip" "$public_tip"
+  assert_eq "oss/main: last commit is patch2" "oss: patch2" "$last_msg"
+  if [[ "$local_tip" == "$stale_sha" ]]; then
+    echo "  ASSERT FAILED: local oss/main was NOT fast-forwarded (still at stale base)"
+    return 1
+  fi
+}
+
 # -------- main --------
 
 echo "OSS Workflow Integration Tests"
@@ -813,6 +902,7 @@ run_test test_pull_scan_no_false_positive_when_synced
 run_test test_pull_scan_real_divergence_detected
 run_test test_sync_diverged_cp_conflict_is_fatal
 run_test test_sync_diverged_rebase_succeeds
+run_test test_sync_origin_ahead_of_local_pushes_to_public
 
 echo ""
 echo "=============================="

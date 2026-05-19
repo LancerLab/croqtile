@@ -142,7 +142,6 @@ warn_highlighted() {
     echo "${_C_YELLOW}  $line${_C_RESET}" >&2
   done <<< "$body"
   echo "" >&2
-  notify "$title" "$body"
 }
 
 alert() {
@@ -282,6 +281,13 @@ sync_origin_oss_branch() {
     return 0
   fi
 
+  if lgit merge-base --is-ancestor "$local_tip" "$origin_tip"; then
+    # origin is still ahead of local -- phase0 should have FF'd but didn't
+    # (e.g. dry-run mode). Do not force-push stale local over origin.
+    log "origin/$OSS_BRANCH is ahead of local; nothing to sync back."
+    return 0
+  fi
+
   log "origin/$OSS_BRANCH diverged. Forcing to public-aligned local $OSS_BRANCH (public > origin)."
   safe_force_push origin "$OSS_BRANCH:$OSS_BRANCH" "Force-sync $OSS_BRANCH to origin" || return 1
 }
@@ -330,6 +336,19 @@ phase0_setup() {
 
   if lgit show-ref --verify --quiet "refs/heads/$OSS_BRANCH"; then
     log "Branch '$OSS_BRANCH' OK -> $(lgit log -1 --oneline "$OSS_BRANCH")"
+    # Fast-forward local oss/main from origin when origin is strictly ahead.
+    # Without this, phase1 would see a stale local==public and then
+    # sync_origin_oss_branch would force-push the stale tip to origin,
+    # wiping any commits that were pushed to origin but not yet local.
+    if lgit show-ref --verify --quiet "refs/remotes/origin/$OSS_BRANCH"; then
+      local _lsha _osha
+      _lsha="$(lgit rev-parse "$OSS_BRANCH")"
+      _osha="$(lgit rev-parse "origin/$OSS_BRANCH")"
+      if [[ "$_lsha" != "$_osha" ]] && lgit merge-base --is-ancestor "$_lsha" "$_osha"; then
+        log "  Fast-forwarding local $OSS_BRANCH -> origin/$OSS_BRANCH"
+        lgit branch -f "$OSS_BRANCH" "origin/$OSS_BRANCH"
+      fi
+    fi
     return 0
   fi
 
