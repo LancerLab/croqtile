@@ -1,0 +1,13 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void yield_test(s32 [64] a) {
+  s32 [64] output;
+  parallel p by 64 : thread {
+    if (a.at(p) < 0) {
+      yield;
+    }
+    output.at(p) = a.at(p) + 1;
+  }
+}
+
+// CHECK: return;

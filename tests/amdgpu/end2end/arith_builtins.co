@@ -1,0 +1,53 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+__co__ auto sqrt_test(f32 [64] a) {
+  f32 [64] output;
+  parallel p by 64 : thread {
+    output.at(p) = __sqrt(a.at(p));
+  }
+  return output;
+}
+
+__co__ auto yield_test(s32 [128] a) {
+  s32 [128] output;
+  parallel p by 128 : thread {
+    output.at(p) = 0;
+    if (a.at(p) < 0) {
+      yield;
+    }
+    output.at(p) = a.at(p) * 2;
+  }
+  return output;
+}
+
+int main() {
+  // Test 1: sqrt
+  {
+    auto a = choreo::make_spandata<choreo::f32>(64);
+    for (int i = 0; i < 64; ++i) a[i] = (float)((i + 1) * (i + 1));
+    auto result = sqrt_test(a.view());
+    bool ok = true;
+    for (int i = 0; i < 64; ++i) {
+      float expected = (float)(i + 1);
+      if (std::abs(result[i] - expected) > 0.01f) ok = false;
+    }
+    std::cout << "Test sqrt " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+
+  // Test 2: yield (early return from kernel thread)
+  {
+    auto a = choreo::make_spandata<choreo::s32>(128);
+    for (int i = 0; i < 128; ++i) a[i] = (i < 64) ? i : -1;
+    auto result = yield_test(a.view());
+    bool ok = true;
+    for (int i = 0; i < 64; ++i)
+      if (result[i] != i * 2) ok = false;
+    for (int i = 64; i < 128; ++i)
+      if (result[i] != 0) ok = false;
+    std::cout << "Test yield " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+}
+
+// CHECK: Test sqrt Passed
+// CHECK: Test yield Passed
