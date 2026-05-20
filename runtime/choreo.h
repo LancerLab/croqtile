@@ -100,13 +100,19 @@
   #define __co_host__ __host__
   #define __co_any__ __device__ __host__
 
+#elif defined(__CHOREO_TARGET_CC__)
+
+  #define __co_device__
+  #define __co_host__
+  #define __co_any__
+
 #else
 
   #define __co_device__
   #define __co_host__
   #define __co_any__
 
-#endif // PRIVATE_TGT0 and CUTE
+#endif // PRIVATE_TGT0, CUTE, CC
 
 // private target must not enable native FP8 support
 #if defined(__CHOREO_PRIVATE_TGT0__)
@@ -141,6 +147,9 @@
     (threadIdx.x + threadIdx.y * blockDim.x +                                  \
      threadIdx.z * blockDim.x * blockDim.y) /                                  \
         32
+#elif defined(__CHOREO_TARGET_CC__)
+  #define __CHOREO_BLOCK_SINGLE__ true
+  #define __CHOREO_GROUP_SINGLE__ true
 #else
   #define __CHOREO_BLOCK_SINGLE__                                              \
     threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0

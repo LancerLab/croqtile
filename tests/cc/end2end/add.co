@@ -1,0 +1,10 @@
+// REQUIRES: TARGET-CC
+// RUN: choreo -t cc -es %s | FileCheck %s
+
+__co__ void ele_add(s32 [64] a, s32 [64] b, s32 [64] c) {
+  parallel p by 64
+    c.at(p) = a.at(p) + b.at(p);
+}
+
+// CHECK: void ele_add
+// CHECK: for (int p__elem__x = 0; p__elem__x < 64; ++p__elem__x)
