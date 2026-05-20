@@ -286,7 +286,7 @@ extern int yylex();
 %%
 
 program
-    : /* Empty */ {}
+    : %empty {}
   | program any_code { if ($2 != nullptr) root.stmts->Append($2); }
     ;
 
@@ -348,7 +348,7 @@ device_nested_type
     ;
 
 device_nested_type_list
-    : /* Empty */ { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
+    : %empty { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
     | device_nested_type_list COMMA device_complex_type {
         auto type_str = $3->GetTypeStr() + ", " + $3->GetTypeStr();
         $3->SetTypeStr(type_str);
@@ -414,7 +414,7 @@ device_type
     ;
 
 device_params
-    : /* Empty */  { $$ = std::vector<AST::ptr<Choreo::DeviceDataType>>(); }
+    : %empty { $$ = std::vector<AST::ptr<Choreo::DeviceDataType>>(); }
     | device_param { $$ = std::vector<AST::ptr<Choreo::DeviceDataType>>({$1}); }
     | device_params COMMA device_param { $1.push_back($3); $$ = $1; }
     ;
@@ -644,7 +644,7 @@ bool_value
     ;
 
 parameter_list
-    : /* Empty */ {
+    : %empty {
         $$ = AST::Make<AST::ParamList>(loc);
       }
     | parameter_list COMMA parameter {
@@ -687,12 +687,12 @@ parameter
     ;
 
 pass_by_ref
-    : /* Empty */ { $$ = false; }
+    : %empty { $$ = false; }
     | AMP { $$ = true; }
     ;
 
 statements
-    : /* no statement */ { $$ = AST::Make<AST::MultiNodes>(loc); }
+    : %empty { $$ = AST::Make<AST::MultiNodes>(loc); }
     | statements statement {
         if (auto mstmts = dyn_cast<AST::MultiNodes>($2)) {
           for (auto stmt : mstmts->AllSubs())
@@ -1072,7 +1072,7 @@ spanned_decl
     ;
 
 optional_array_dims
-    : /*empty*/ {}
+    : %empty {}
     | optional_array_dims LBRAKT s_expr RBRAKT {
         if ($1 == nullptr) {
           $1 = AST::Make<AST::MultiValues>(loc);
@@ -1156,7 +1156,7 @@ template_value_expr
     ;
 
 template_value_list
-    : /* Empty list */ {
+    : %empty {
         $$ = AST::Make<AST::MultiValues>(loc);
       }
     | template_value_list COMMA template_value_expr {
@@ -1276,11 +1276,11 @@ spanas_spanned_decl
 
 note_pl
     : COL PBLEVEL { $$ = $2; }
-    | /* empty */ { $$ = ParallelLevel::NONE; }
+    | %empty { $$ = ParallelLevel::NONE; }
     ;
 
 storage_qual
-    : /* Empty */ { $$ = AST::Make<AST::Memory>(loc); }
+    : %empty { $$ = AST::Make<AST::Memory>(loc); }
     | STORAGE { $$ = AST::Make<AST::Memory>(@1, $1); }
     ;
 
@@ -1739,12 +1739,12 @@ integer_value
 
 index_or_none
     : integer_value { $$ = $1; }
-    | /*nothing*/ { $$ = GetInvalidBound(); }
+    | %empty { $$ = GetInvalidBound(); }
     ;
 
 bound_expr
     : s_expr { $$ = $1; }
-    | /*nothing*/ { $$ = nullptr; }
+    | %empty { $$ = nullptr; }
     ;
 
 range_expr
@@ -1787,7 +1787,7 @@ dma_attrib
         $$ = $1;
       }
     | dma_attrib MULTICAST { $1.multicast = true; $$ = $1; }
-    | /*empty*/ {}
+    | %empty {}
     ;
 
 tdma_async
@@ -1801,7 +1801,7 @@ tdma_async
     | ASYNC {
       $$ = AST::DMAAsync(true);
      }
-    | /*empty*/ {
+    | %empty {
       $$ = AST::DMAAsync(false);
      }
     ;
@@ -1851,7 +1851,7 @@ dma_config
           tc->dim_values.push_back(cast<AST::IntLiteral>(value)->Val());
         $$ = tc;
     }
-    | /* Empty for no config */ { $$ = nullptr; }
+    | %empty { $$ = nullptr; }
     ;
 
 swiz_value
@@ -1883,11 +1883,11 @@ promote_value
 
 swiz_mode
     : LT swiz_value GT { $$ = $2; }
-    | /* Empty for no swizzle config */ { $$ = SwizMode::NONE; }
+    | %empty { $$ = SwizMode::NONE; }
     ;
 
 sync_type
-    : { $$ = false; }
+    : %empty { $$ = false; }
     | ASYNC { $$ = true; }
     ;
 
@@ -1925,7 +1925,7 @@ step_list
 
 opt_step_list
     : step_list { $$ = $1; }
-    | /*empty*/ { $$ = nullptr; }
+    | %empty { $$ = nullptr; }
     ;
 
 opt_stride_list
@@ -1933,7 +1933,7 @@ opt_stride_list
         $2->SetDelimiter(", ");
         $$ = $2;
       }
-    | /*empty*/ { $$ = nullptr; }
+    | %empty { $$ = nullptr; }
     ;
 
 shape_stride
@@ -1952,7 +1952,7 @@ at_list
 
 opt_at_list
     : at_list { $$ = $1; }
-    | /*empty*/ { $$ = nullptr; }
+    | %empty { $$ = nullptr; }
     ;
 
 opt_from_list
@@ -1960,7 +1960,7 @@ opt_from_list
         $3->SetDelimiter(", ");
         $$ = $3;
       }
-    | /*empty*/ { $$ = nullptr; }
+    | %empty { $$ = nullptr; }
     ;
 
 spanned_op
@@ -2179,7 +2179,7 @@ id_list
     ;
 
 device_passables
-    : /* Empty */ {
+    : %empty {
         $$ = AST::Make<AST::MultiValues>(loc, ", ");
       }
     | device_passable {
