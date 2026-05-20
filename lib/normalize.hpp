@@ -981,6 +981,8 @@ public:
     pb.SetLevel(pl);
     pb.SetEnforced(false);
     pb.SetStream(nullptr);
+    pb.SetDeviceEntry(pl == ParallelLevel::BLOCK ||
+                      pl == ParallelLevel::CLUSTER);
 
     // convert current pb to be simple
     auto anon_sym = SymbolTable::GetAnonPBName();
@@ -1028,6 +1030,8 @@ public:
     if (isa<AST::ChoreoFunction>(&n)) {
       Reset();
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      if (pb->GetLevel() == ParallelLevel::DEVICE)
+        FCtx(fname).SetHasDeviceParallel(true);
       pb_stack.push_back(pb);
       if (pb_stack.size() > 1)
         pb_tree.AddChild(*(pb_stack.rbegin() + 1), pb_stack.back());
@@ -1086,6 +1090,14 @@ public:
     }
 
     if (!ExplicitLevel(pb)) InferImplicitLevel(pb, eff_max);
+
+    auto pl = pb->GetLevel();
+    if (pl == ParallelLevel::BLOCK || pl == ParallelLevel::CLUSTER) {
+      auto parent_level = pb_tree.IsRoot(pb)
+                              ? ParallelLevel::SEQ
+                              : pb_tree.GetParent(pb)->GetLevel();
+      if (parent_level != ParallelLevel::CLUSTER) pb->SetDeviceEntry();
+    }
 
     FillMissingLevels(pb);
 

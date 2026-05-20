@@ -71,7 +71,7 @@ private:
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       auto pb_level = pb->GetLevel();
       if (pb_level == ParallelLevel::DEVICE) {
-        // DEVICE is a host-only wrapper; no kernel launch config.
+        // handled by ParaByFiller in normalize
       } else if (pb_level == ParallelLevel::CLUSTER) {
         assert(pb_stack.empty() ||
                (pb_stack.size() == 1 &&
