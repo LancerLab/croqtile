@@ -220,6 +220,9 @@ bool HIPCodeGen::Visit(AST::Synchronize& n) {
   case Storage::SHARED:
     ds << d_indent << "__syncthreads();\n";
     break;
+  case Storage::LOCAL:
+    ds << d_indent << "__threadfence_block();\n";
+    break;
   default:
     choreo_unreachable("unsupported synchronization type: " +
                        STR(n.Resource()) + ".");
