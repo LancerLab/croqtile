@@ -1014,8 +1014,8 @@ bool HIPCodeGen::Visit(AST::Call& n) {
       return true;
     }
     if (n.IsArith()) { return true; }
-    if (n.IsAtomic()) { return true; }
-    choreo_unreachable("builtin '" + func_name + "' not supported by amdgpu.");
+    if (n.IsAtomic()) { /* fall through to CallSTR emission below */ }
+    else choreo_unreachable("builtin '" + func_name + "' not supported by amdgpu.");
   }
 
   if (!n.IsExpr()) os << indent << CallSTR(n) << ";\n";
@@ -1236,6 +1236,29 @@ const std::string HIPCodeGen::OpExprSTR(AST::ptr<AST::Node> n,
 }
 
 const std::string HIPCodeGen::CallSTR(AST::Call& n) const {
+  if (n.IsAtomic()) {
+    static const std::unordered_map<std::string, std::string> atomic_map = {
+        {"__atomic_add", "atomicAdd"},   {"__atomic_sub", "atomicSub"},
+        {"__atomic_exch", "atomicExch"}, {"__atomic_min", "atomicMin"},
+        {"__atomic_max", "atomicMax"},   {"__atomic_and", "atomicAnd"},
+        {"__atomic_or", "atomicOr"},     {"__atomic_xor", "atomicXor"},
+        {"__atomic_cas", "atomicCAS"}};
+    auto it = atomic_map.find(n.function->name);
+    assert(it != atomic_map.end());
+    std::string result = it->second + "(";
+    size_t i = 0;
+    for (auto& a : n.GetArguments()) {
+      if (i > 0) result += ", ";
+      if (i == 0)
+        result += "&(" + OpExprSTR(a, "", true, IsHost()) + ")";
+      else
+        result += OpExprSTR(a, "", true, IsHost());
+      ++i;
+    }
+    result += ")";
+    return result;
+  }
+
   std::string result = n.function->name + "(";
   if (n.arguments) {
     for (size_t i = 0; i < n.arguments->Count(); i++) {

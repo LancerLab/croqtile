@@ -1,0 +1,37 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// === Test 1: all atomic ops on shared memory ===
+__co__ void atomic_shared(s32 [64] a) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.shared;
+    __atomic_add(s.at(p), 1);
+    __atomic_exch(s.at(p), 0);
+    __atomic_min(s.at(p), a.at(p));
+    __atomic_max(s.at(p), a.at(p));
+    __atomic_and(s.at(p), 0xFF);
+    __atomic_or(s.at(p), 0x01);
+    __atomic_xor(s.at(p), 0x0F);
+    __atomic_cas(s.at(p), 0, 1);
+  }
+}
+// CHECK: atomicAdd(&(
+// CHECK: atomicExch(&(
+// CHECK: atomicMin(&(
+// CHECK: atomicMax(&(
+// CHECK: atomicAnd(&(
+// CHECK: atomicOr(&(
+// CHECK: atomicXor(&(
+// CHECK: atomicCAS(&(
+
+// === Test 2: return value capture ===
+__co__ void atomic_capture(s32 [64] a) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.shared;
+    mutable s32 old = __atomic_add(s.at(p), 10);
+  }
+}
+// CHECK: int old = atomicAdd(&(
