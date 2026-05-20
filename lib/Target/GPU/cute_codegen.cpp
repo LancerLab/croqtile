@@ -1155,6 +1155,8 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
         IndStream() << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
       }
     }
+    if (!IsHost() && has_pending_wgmma_finalize && !IsWarpSpecActive())
+      EmitWGMMAFinalize(ds, d_indent);
     if (hoisted_scale_accum_info.has_value()) {
       const auto& info = hoisted_scale_accum_info.value();
       EmitScaleAccumCall(info.acc_ty, info.dim_n, info.frag_expr,
@@ -6621,6 +6623,8 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
+      // if (!IsHost())
+      //   IndStream() << "#pragma unroll\n";
       IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
                   << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
                                   : "0")
