@@ -1,0 +1,920 @@
+#include "cc_codegen.hpp"
+#include "codegen_utils.hpp"
+
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+
+#include "ast.hpp"
+#include "choreo_header.inc"
+#include "choreo_types_header.inc"
+#include "codegen.hpp"
+#include "types.hpp"
+
+using namespace Choreo;
+using namespace Choreo::CC;
+
+const std::string CCCodeGen::TypeSTR(const Type& ty) const {
+  if (isa<VoidType>(&ty)) return "void";
+  if (isa<S8Type>(&ty)) return "char";
+  if (isa<U8Type>(&ty)) return "unsigned char";
+  if (isa<S16Type>(&ty)) return "short";
+  if (isa<U16Type>(&ty)) return "unsigned short";
+  if (isa<S32Type>(&ty)) return "int";
+  if (isa<U32Type>(&ty)) return "unsigned int";
+  if (isa<S64Type>(&ty)) return "long long";
+  if (isa<U64Type>(&ty)) return "unsigned long long";
+  if (isa<BooleanType>(&ty)) return "bool";
+  if (isa<F16Type>(&ty)) return "choreo::f16";
+  if (isa<BF16Type>(&ty)) return "choreo::bf16";
+  if (isa<F32Type>(&ty)) return "float";
+  if (isa<F64Type>(&ty)) return "double";
+  if (auto sty = dyn_cast<SpannedType>(&ty))
+    return "choreo::spanned_view<choreo::" + STR(sty->e_type) + ", " +
+           std::to_string(sty->Dims()) + ">";
+  if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
+    (void)bitt;
+    return "int";
+  }
+  choreo_unreachable("unsupported CC type: " + STR(ty) + ".");
+  return "";
+}
+
+static const char* CCBaseTypeName(BaseType bt) {
+  switch (bt) {
+  case BaseType::F64: return "double";
+  case BaseType::F32: return "float";
+  case BaseType::F16: return "choreo::f16";
+  case BaseType::BF16: return "choreo::bf16";
+  case BaseType::U64: return "unsigned long long";
+  case BaseType::U32: return "unsigned int";
+  case BaseType::U16: return "unsigned short";
+  case BaseType::U8: return "unsigned char";
+  case BaseType::S64: return "long long";
+  case BaseType::S32: return "int";
+  case BaseType::S16: return "short";
+  case BaseType::S8: return "signed char";
+  case BaseType::BOOL: return "bool";
+  default: choreo_unreachable("unsupported CC base-type: " + STR(bt) + ".");
+  }
+  return "";
+}
+
+const std::string CCCodeGen::ValueSTR(const ValueItem& vi) const {
+  if (auto iv = VIInt(vi)) return std::to_string(*iv);
+  if (auto sv = VISym(vi)) return UnScopedExpr(ssm.HostName(sv.value()));
+  if (auto bo = VIBop(vi)) {
+    auto l = ValueSTR(bo->GetLeft());
+    auto r = ValueSTR(bo->GetRight());
+    return "(" + l + " " + STR(bo->GetOpCode()) + " " + r + ")";
+  }
+  if (auto uo = VIUop(vi)) {
+    return "(" + STR(uo->GetOpCode()) + ValueSTR(uo->GetOperand()) + ")";
+  }
+  choreo_unreachable("unsupported ValueItem in CC codegen.");
+  return "";
+}
+
+const std::string CCCodeGen::ValueSTR(const ValueList& vl,
+                                      const std::string& sep) const {
+  std::string res;
+  for (size_t i = 0; i < vl.size(); ++i) {
+    if (i > 0) res += sep;
+    res += ValueSTR(vl[i]);
+  }
+  return res;
+}
+
+const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
+  std::ostringstream oss;
+
+  if (auto id = dyn_cast<AST::Identifier>(e)) {
+    if (within_map.count(InScopeNameForRef(id->name))) {
+      size_t i = 0;
+      for (auto iv_name : within_map.at(InScopeNameForRef(id->name)))
+        oss << ((i++ == 0) ? "" : ", ") << UnScopedName(ssm.HostName(iv_name));
+    } else {
+      oss << UnScopedName(ssm.HostName(InScopeNameForRef(id->name)));
+    }
+  } else if (auto np = dyn_cast<AST::Nullptr>(e)) {
+    (void)np;
+    oss << "nullptr";
+  } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
+    oss << il->ValAsString();
+  } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
+    std::ostringstream fp_val;
+    if (fl->IsFloat32())
+      fp_val << std::fixed << fl->Val_f32() << "f";
+    else if (fl->IsFloat64())
+      fp_val << std::fixed << fl->Val_f64();
+    else
+      choreo_unreachable("unsupported float literal.");
+    oss << fp_val.str();
+  } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
+    oss << sl->EscapedVal();
+  } else if (auto b = dyn_cast<AST::BoolLiteral>(e)) {
+    oss << b->value;
+  } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
+    return ExprSTR(ii->value);
+  } else if (auto it = dyn_cast<AST::IntTuple>(e)) {
+    int i = 0;
+    oss << "{";
+    for (auto& v : it->GetValues()->AllValues()) {
+      if (i++ > 0) oss << ", ";
+      oss << ExprSTR(v);
+    }
+    oss << "}";
+  } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
+    if (da->AccessElement()) {
+      auto sty = GetSpannedType(GetSymbolType(da->data->name));
+      assert(sty && "can only access the element of a spanned type.");
+      oss << "*((" << CCBaseTypeName(sty->ElementType()) << "*)"
+          << ExprSTR(da->data);
+      size_t idx = 0;
+      auto shape = sty->GetShape();
+      for (auto item : da->GetIndices()) {
+        auto offset_vi = sbe::nu(0);
+        if (auto id_node = AST::GetIdentifier(item)) {
+          if (within_map.count(InScopeNameForRef(id_node->name))) {
+            auto ivs = within_map.at(InScopeNameForRef(id_node->name));
+            for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
+              offset_vi = sbe::sym(*iv_itr);
+              if (shape.Rank() > idx + 1)
+                offset_vi =
+                    offset_vi * shape.TrimDims(idx + 1).ElementCountValue();
+              SimplifyExpression(offset_vi);
+              if (!sbe::ceq(offset_vi, sbe::nu(0)))
+                oss << " + " << ValueSTR(offset_vi);
+              ++idx;
+            }
+          } else {
+            offset_vi = sbe::sym(InScopeNameForRef(id_node->name));
+            if (shape.Rank() > idx + 1)
+              offset_vi =
+                  offset_vi * shape.TrimDims(idx + 1).ElementCountValue();
+            SimplifyExpression(offset_vi);
+            if (!sbe::ceq(offset_vi, sbe::nu(0)))
+              oss << " + " << ValueSTR(offset_vi);
+            ++idx;
+          }
+        } else if (auto int_lit = AST::GetIntLiteral(*item)) {
+          offset_vi = sbe::nu(int_lit->Val());
+          if (shape.Rank() > idx + 1)
+            offset_vi = offset_vi * shape.TrimDims(idx + 1).ElementCountValue();
+          SimplifyExpression(offset_vi);
+          if (!sbe::ceq(offset_vi, sbe::nu(0)))
+            oss << " + " << ValueSTR(offset_vi);
+          ++idx;
+        } else {
+          oss << " + " << ExprSTR(item);
+          ++idx;
+        }
+      }
+      oss << ")";
+    } else {
+      oss << ExprSTR(da->data) << ".data()";
+    }
+  } else if (auto ca = dyn_cast<AST::ChunkAt>(e)) {
+    oss << ExprSTR(ca->data);
+  } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
+    if (ce->IsForeignCast()) {
+      oss << "static_cast<" << ce->ForeignType() << ">(" << ExprSTR(ce->GetR())
+          << ")";
+    } else {
+      oss << "static_cast<" << CCBaseTypeName(ce->ToType()) << ">("
+          << ExprSTR(ce->GetR()) << ")";
+    }
+  } else if (auto expr = dyn_cast<AST::Expr>(e)) {
+    if (expr->IsReference()) {
+      if (PSTR(expr) == "_") return "0";
+      return ExprSTR(expr->GetReference());
+    } else if (expr->IsUnary()) {
+      auto& op = expr->GetOp();
+      if (op == Op::LogicNot) {
+        oss << "(!" << ExprSTR(expr->GetR()) << ")";
+      } else if (op == Op::BitNot) {
+        oss << "(~" << ExprSTR(expr->GetR()) << ")";
+      } else if (op == Op::SizeOf) {
+        auto se = expr->Opts().GetSize();
+        if (IsValidValueItem(se))
+          oss << ValueSTR(se);
+        else {
+          auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
+          auto shape = GetShape(GetSymbolType(var));
+          oss << ValueSTR(shape.ElementCountValue());
+        }
+      } else if (op == Op::DataOf || op == Op::MDataOf) {
+        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol())
+          oss << id->name << ".data()";
+        else
+          oss << ExprSTR(expr->GetR()) << ".data()";
+      } else if (op == Op::GetUBound) {
+        auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
+        if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
+      } else if (op == Op::PreInc) {
+        oss << "++" << ExprSTR(expr->GetR());
+      } else if (op == Op::PreDec) {
+        oss << "--" << ExprSTR(expr->GetR());
+      } else if (op == Op::AddrOf) {
+        if (auto id = AST::GetIdentifier(expr->GetR()))
+          oss << ExprSTR(id);
+        else
+          oss << "&(" << ExprSTR(expr->GetR()) << ")";
+      } else {
+        choreo_unreachable("unsupported CC unary op: " + STR(op));
+      }
+    } else if (expr->IsBinary()) {
+      auto& op = expr->GetOp();
+      if (op == Op::ElemOf) {
+        oss << ExprSTR(expr->GetL()) << "[" << ExprSTR(expr->GetR()) << "]";
+      } else if (op == Op::GetIth) {
+        oss << ExprSTR(expr->GetR());
+      } else if (op == Op::Select) {
+        oss << "(" << ExprSTR(expr->GetL()) << " ? " << ExprSTR(expr->GetR())
+            << " : " << ExprSTR(expr->GetR()) << ")";
+      } else if (op == Op::CeilDiv) {
+        oss << "((" << ExprSTR(expr->GetL()) << " + " << ExprSTR(expr->GetR())
+            << " - 1) / " << ExprSTR(expr->GetR()) << ")";
+      } else if (op == Op::UBound) {
+        auto lty = NodeType(*expr->GetL());
+        auto rty_n = NodeType(*expr->GetR());
+        if (IsActualBoundedIntegerType(lty) &&
+            IsActualBoundedIntegerType(rty_n)) {
+          auto rty = cast<BoundedType>(rty_n);
+          oss << "(" << ExprSTR(expr->GetL()) << " * "
+              << ValueSTR(rty->GetUpperBound()) << " + "
+              << ExprSTR(expr->GetR()) << ")";
+        } else {
+          oss << "(" << ExprSTR(expr->GetL()) << " * " << ExprSTR(expr->GetR())
+              << ")";
+        }
+      } else if (op == Op::UBoundAdd || op == Op::UBoundSub) {
+        oss << ExprSTR(expr->GetL());
+      } else {
+        auto op_str = STR(op);
+        oss << "(" << ExprSTR(expr->GetL()) << " " << op_str << " "
+            << ExprSTR(expr->GetR()) << ")";
+      }
+    } else if (expr->GetOp() == Op::None && expr->GetR()) {
+      oss << ExprSTR(expr->GetR());
+    } else {
+      choreo_unreachable("unsupported CC expr: " + PSTR(expr));
+    }
+  } else if (auto sa = dyn_cast<AST::SpanAs>(e)) {
+    auto base_name = ssm.HostName(InScopeNameForRef(sa->id->name));
+    oss << "static_cast<void*>(" << base_name << ")";
+  } else {
+    choreo_unreachable("unsupported CC ExprSTR node: " +
+                       std::string(e->TypeNameString()));
+  }
+
+  return oss.str();
+}
+
+// ---- Preamble Emission ----
+
+void CCCodeGen::EmitPreamble() {
+  os << "#define __CHOREO_TARGET_CC__\n";
+  os << "#include \"choreo.h\"\n";
+  os << "#include <cstring>\n";
+  os << "#include <cstdlib>\n";
+  os << "#include <future>\n\n";
+}
+
+// ---- BeforeVisitImpl / InMidVisitImpl / AfterVisitImpl ----
+
+bool CCCodeGen::BeforeVisitImpl(AST::Node& n) {
+  if (isa<AST::Program>(&n)) {
+    EmitPreamble();
+    ssm.EnterScope();
+    levels.push(ParallelLevel::NONE);
+  } else if (isa<AST::ChoreoFunction>(&n)) {
+    ResetFunctionStates();
+    fty = cast<FunctionType>(GetSymbolType(fname));
+    ssm.EnterScope();
+    levels.push(ParallelLevel::SEQ);
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    levels.push(pb->GetLevel());
+  } else if (isa<AST::WithBlock>(&n)) {
+    IndStream() << "{\n";
+    IncrIndent();
+  } else if (isa<AST::ForeachBlock>(&n)) {
+  }
+  return true;
+}
+
+bool CCCodeGen::InMidVisitImpl(AST::Node& n) {
+  if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
+    if (!ie->HasElse()) return true;
+    DecrIndent();
+    IndStream() << "} else {\n";
+    IncrIndent();
+  }
+  return true;
+}
+
+bool CCCodeGen::AfterVisitImpl(AST::Node& n) {
+  if (isa<AST::Program>(&n)) {
+    ssm.LeaveScope();
+
+    switch (CCtx().GetOutputKind()) {
+    case OutputKind::TargetSourceCode: EmitSource(); break;
+    case OutputKind::TargetModule:
+    case OutputKind::TargetExecutable: {
+      if (!CompileWithScript("--compile-link")) {
+        error_count++;
+        return false;
+      }
+      break;
+    }
+    case OutputKind::ShellScript: {
+      EmitScript(outs());
+      break;
+    }
+    default:
+      choreo_unreachable("outputkind: " + STR(CCtx().GetOutputKind()) +
+                         " is not supported by the CC target.");
+    }
+  } else if (isa<AST::ChoreoFunction>(&n)) {
+    ssm.LeaveScope();
+    code_segments.back() += os.str();
+    os.str("");
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    levels.pop();
+    auto pvs = pb->AllSubPVs();
+    for (int i = pvs.size() - 1; i >= 0; --i) {
+      DecrIndent();
+      IndStream() << "}\n";
+    }
+  } else if (isa<AST::WithBlock>(&n)) {
+    DecrIndent();
+    IndStream() << "}\n";
+  } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+    const auto& ranges = fb->GetRangeNodes();
+    for (int j = ranges->Count() - 1; j >= 0; --j) {
+      auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
+      auto cname = rng->IVName();
+      auto ivs = within_map.at(InScopeName(cname));
+      for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
+        DecrIndent();
+        IndStream() << "}\n";
+        os << indent << ssm.HostName(*iv_itr) << " = 0;\n";
+      }
+    }
+  } else if (isa<AST::InThreadsBlock>(&n)) {
+  } else if (isa<AST::IfElseBlock>(&n)) {
+    DecrIndent();
+    IndStream() << "}\n";
+  } else if (isa<AST::WhileBlock>(&n)) {
+    DecrIndent();
+    IndStream() << "}\n";
+  }
+  return true;
+}
+
+// ---- Visit methods ----
+
+bool CCCodeGen::Visit(AST::ParamList& n) {
+  for (auto param : n.values) {
+    auto ty = GetSymbolType(param->sym->name);
+    SSTab().DefineSymbol(param->sym->name, ty);
+  }
+  return true;
+}
+
+void CCCodeGen::EmitFuncDecl() {
+  if (!void_return) {
+    if (cgi.HasReturnSymbol(fname)) {
+      auto& item = cgi.GetReturnDetail(fname);
+      if (item.rty_str != "$")
+        os << item.rty_str;
+      else
+        os << HostTypeStringify(*fty->out_ty, true);
+    } else {
+      os << HostTypeStringify(*fty->out_ty, true);
+    }
+  } else
+    os << "void";
+  os << " " << fname << "(";
+
+  size_t pindex = 0;
+  for (auto& item : cgi.GetParameters(fname)) {
+    if (item.IsParameter()) assert((int)pindex == item.p_index);
+    os << ((pindex == 0) ? "" : ", ")
+       << HostTypeStringify(*item.type, false, item.IsReference()) << " "
+       << item.host_name;
+    ++pindex;
+  }
+  os << ")";
+}
+
+bool CCCodeGen::Visit(AST::FunctionDecl& n) {
+  TraceEachVisit(n);
+
+  assert(n.name == fname && "inconsistent in function names.");
+
+  size_t pindex = 0;
+  for (auto& item : cgi.GetParameters(fname)) {
+    if (item.IsParameter()) {
+      assert((int)pindex == item.p_index);
+      item.host_name = UnScopedName(item.name);
+      if (auto sty = dyn_cast<SpannedType>(item.type))
+        ssm.MapHostSymbol(item.name, item.host_name + ".data()");
+      else
+        ssm.MapHostSymbol(item.name, item.host_name);
+    } else
+      item.host_name = UnScopedName(item.name);
+    pindex++;
+  }
+
+  if (isa<VoidType>(fty->out_ty)) void_return = true;
+
+  EmitFuncDecl();
+  os << " {\n";
+  IncrIndent();
+
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::ChoreoFunction& n) {
+  TraceEachVisit(n);
+  DecrIndent();
+  os << "}\n\n";
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::WithIn& n) {
+  TraceEachVisit(n);
+
+  if (n.with)
+    ssm.MapHostSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
+
+  assert(n.with_matchers && "expected matchers exist.");
+
+  for (auto& v : n.GetMatchers()) {
+    auto id = cast<AST::Identifier>(v);
+    ssm.RemapHostSymbol(InScopeName(id->name), "__iv_" + id->name);
+    os << indent << "int __iv_" << id->name << " = 0;\n";
+  }
+
+  if (n.with && (n.GetMatchers().size() == 1)) {
+    auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
+    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
+  }
+
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::WhereBind& n) {
+  TraceEachVisit(n);
+  choreo_unreachable("where bind is not supported on the CC target.");
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::WithBlock& n) {
+  TraceEachVisit(n);
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::ForeachBlock& n) {
+  TraceEachVisit(n);
+
+  for (auto& rn : n.GetRanges()) {
+    auto rng = cast<AST::LoopRange>(rn);
+    auto cname = rng->IVName();
+    for (auto iv_name : within_map.at(InScopeName(cname))) {
+      auto iv_ty = GetSymbolType(UnScopedName(iv_name));
+      auto iv_bty = dyn_cast<BoundedType>(iv_ty);
+      assert(iv_bty && "foreach IV should have bounded type.");
+      auto mapped = ssm.HostName(iv_name);
+      IndStream() << "for (" << mapped << " = "
+                  << (rng->lbound ? ("(" + ExprSTR(rng->lbound) + ")")
+                                  : std::string("0"))
+                  << "; " << mapped << " < "
+                  << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
+                  << (rng->ubound ? (" + " + ExprSTR(rng->ubound))
+                                  : std::string(""))
+                  << "; ++" << mapped << ") {\n";
+      IncrIndent();
+    }
+  }
+
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::InThreadsBlock& n) {
+  TraceEachVisit(n);
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::IfElseBlock& n) {
+  TraceEachVisit(n);
+  IndStream() << "if (" << ExprSTR(n.pred) << ") {\n";
+  IncrIndent();
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::WhileBlock& n) {
+  TraceEachVisit(n);
+  IndStream() << "while (" << ExprSTR(n.pred) << ") {\n";
+  IncrIndent();
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::ParallelBy& n) {
+  TraceEachVisit(n);
+
+  auto pvs = n.AllSubPVs();
+  auto bvs = n.BoundValues();
+
+  auto bpv_name = n.BPV()->name;
+
+  for (size_t i = 0; i < pvs.size(); ++i) {
+    auto pv_id = cast<AST::Identifier>(pvs[i]);
+    auto pv_name = pv_id->name;
+    auto bound = (i < bvs.size()) ? ValueSTR(bvs[i]) : std::string("1");
+    ssm.MapHostSymbol(InScopeName(pv_name), pv_name);
+    IndStream() << "for (int " << pv_name << " = 0; " << pv_name << " < "
+                << bound << "; ++" << pv_name << ") {\n";
+    IncrIndent();
+  }
+
+  if (pvs.size() == 1) {
+    auto pv_name = cast<AST::Identifier>(pvs[0])->name;
+    ssm.MapHostSymbol(InScopeName(bpv_name), pv_name);
+  }
+
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::DMA& n) {
+  TraceEachVisit(n);
+
+  assert(isa<AST::ChunkAt>(n.from) && "DMA source must be ChunkAt.");
+  assert(isa<AST::ChunkAt>(n.to) && "DMA destination must be ChunkAt.");
+
+  auto from_ca = cast<AST::ChunkAt>(n.from);
+  auto to_ca = cast<AST::ChunkAt>(n.to);
+  auto from_sty = cast<SpannedType>(from_ca->GetType());
+
+  auto size_expr = UnScopedExpr(SizeExprOf(*from_sty, true));
+
+  std::string from_expr = ExprSTR(n.from);
+  std::string to_expr = ExprSTR(n.to);
+
+  bool is_async = n.IsAsync();
+
+  if (is_async && !n.future.empty()) {
+    IndStream() << "auto " << n.future
+                << " = std::async(std::launch::async, [=]() {\n";
+    IncrIndent();
+    IndStream() << "std::memcpy((void*)(" << to_expr << "), (const void*)("
+                << from_expr << "), " << size_expr << ");\n";
+    DecrIndent();
+    IndStream() << "});\n";
+  } else {
+    IndStream() << "std::memcpy((void*)(" << to_expr << "), (const void*)("
+                << from_expr << "), " << size_expr << ");\n";
+  }
+
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::MMA& n) {
+  TraceEachVisit(n);
+  errs() << "error: MMA is not supported on the CC target.\n";
+  error_count++;
+  return false;
+}
+
+bool CCCodeGen::Visit(AST::Wait& n) {
+  TraceEachVisit(n);
+
+  for (auto& t : n.GetTargets()) {
+    if (auto id = AST::GetIdentifier(t)) {
+      auto fty_w = NodeType(*t);
+      if (isa<FutureType>(fty_w)) { IndStream() << id->name << ".get();\n"; }
+    }
+  }
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::Trigger& n) {
+  TraceEachVisit(n);
+  errs() << "error: event trigger is not supported on the CC target.\n";
+  error_count++;
+  return false;
+}
+
+bool CCCodeGen::Visit(AST::Break& n) {
+  TraceEachVisit(n);
+  IndStream() << "break;\n";
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::Continue& n) {
+  TraceEachVisit(n);
+  IndStream() << "continue;\n";
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::Yield& n) {
+  TraceEachVisit(n);
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::Rotate& n) {
+  TraceEachVisit(n);
+  errs() << "error: rotate is not supported on the CC target.\n";
+  error_count++;
+  return false;
+}
+
+bool CCCodeGen::Visit(AST::Synchronize& n) {
+  TraceEachVisit(n);
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::Assignment& n) {
+  TraceEachVisit(n);
+
+  auto nty = NodeType(n);
+
+  if (n.AssignToDataElement()) {
+    os << indent << ExprSTR(n.da) << " = " << ExprSTR(n.value) << ";\n";
+    return true;
+  }
+
+  if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
+    auto name = n.GetName();
+    auto sname = InScopeName(name);
+    auto base_name = ssm.HostName(InScopeNameForRef(sa->id->name));
+    auto nty_s = dyn_cast<SpannedType>(nty);
+    std::string cast_expr = "static_cast<" +
+                            std::string(CCBaseTypeName(nty_s->ElementType())) +
+                            "*>(" + base_name + ")";
+    ssm.MapHostSymbol(sname, cast_expr);
+    os << indent << "auto* " << name << " = " << cast_expr << ";\n";
+    return true;
+  }
+
+  if (isa<ScalarType>(nty) || isa<BoundedType>(nty)) {
+    auto name = n.GetName();
+    os << indent << ((!n.IsDecl()) ? "" : "auto ") << name << " = "
+       << ExprSTR(n.value) << ";\n";
+    return true;
+  }
+
+  if (isa<SpannedType>(nty)) {
+    auto name = n.GetName();
+    if (!ssm.HasHostName(InScopeName(name)))
+      ssm.MapHostSymbol(InScopeName(name), name);
+    os << indent;
+    if (!n.IsDecl())
+      os << name << " = ";
+    else
+      os << "auto " << name << " = ";
+    os << ExprSTR(n.value) << ";\n";
+    return true;
+  }
+
+  if (isa<FutureType>(nty)) { return true; }
+
+  errs() << "CC codegen: unprocessed assignment type " << PSTR(nty) << "\n";
+  return false;
+}
+
+bool CCCodeGen::Visit(AST::Call& n) {
+  TraceEachVisit(n);
+
+  if (n.IsBIF()) {
+    const auto func_name = n.function->name;
+    if (func_name == "assert") {
+      if (n.arguments && n.arguments->Count() > 0)
+        os << indent << "assert(" << ExprSTR(n.arguments->ValueAt(0)) << ");\n";
+      return true;
+    }
+    if (func_name == "print" || func_name == "println") {
+      os << indent << "std::cout";
+      if (n.arguments) {
+        for (auto& arg : n.arguments->AllValues()) os << " << " << ExprSTR(arg);
+      }
+      if (func_name == "println") os << " << \"\\n\"";
+      os << ";\n";
+      return true;
+    }
+    if (func_name == "launch_bounds" || func_name == "setreg") return true;
+    if (n.IsArith()) {}
+  }
+
+  if (!n.IsExpr()) {
+    os << indent << n.function->name << "(";
+    if (n.arguments) {
+      size_t i = 0;
+      for (auto& arg : n.arguments->AllValues()) {
+        if (i++ > 0) os << ", ";
+        os << ExprSTR(arg);
+      }
+    }
+    os << ");\n";
+  }
+
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
+  TraceEachVisit(n);
+
+  auto nty = NodeType(n);
+  auto sym = n.name_str;
+  SSTab().DefineSymbol(sym, nty);
+  auto sname = InScopeName(sym);
+
+  if (isa<FutureType>(nty)) {
+    os << indent << "std::future<void> " << sym << ";\n";
+    ssm.MapHostSymbol(sname, sym);
+    return true;
+  }
+
+  if (isa<EventType>(nty) || isa<EventArrayType>(nty)) { return true; }
+
+  if (auto sty = dyn_cast<SpannedType>(nty)) {
+    ssm.MapHostSymbol(sname, sym);
+    auto elem_ty = CCBaseTypeName(sty->ElementType());
+    auto size = UnScopedExpr(SizeExprOf(*sty, true));
+    if (sty->GetStorage() == Storage::LOCAL ||
+        sty->GetStorage() == Storage::SHARED) {
+      os << indent << "alignas(64) " << elem_ty << " " << sym << "["
+         << UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()))
+         << "];\n";
+    } else {
+      os << indent << elem_ty << "* " << sym << " = static_cast<" << elem_ty
+         << "*>(std::aligned_alloc(64, " << size << "));\n";
+    }
+    return true;
+  }
+
+  if (isa<ScalarType>(nty)) {
+    if (n.init_expr) {
+      os << indent << "auto " << sym << " = " << ExprSTR(n.init_expr) << ";\n";
+    } else {
+      os << indent << TypeSTR(*nty) << " " << sym << " = {};\n";
+    }
+    ssm.MapHostSymbol(sname, sym);
+    return true;
+  }
+
+  if (isa<BoundedType>(nty)) {
+    if (n.init_expr)
+      os << indent << "auto " << sym << " = " << ExprSTR(n.init_expr) << ";\n";
+    else
+      os << indent << "int " << sym << " = 0;\n";
+    ssm.MapHostSymbol(sname, sym);
+    return true;
+  }
+
+  if (auto bitt = dyn_cast<BoundedITupleType>(nty)) {
+    (void)bitt;
+    os << indent << "int " << sym << " = 0;\n";
+    ssm.MapHostSymbol(sname, sym);
+    return true;
+  }
+
+  errs() << "CC codegen: unprocessed variable decl type " << PSTR(nty)
+         << " for " << sym << "\n";
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::CppSourceCode& n) {
+  TraceEachVisit(n);
+
+  if (n.kind == AST::CppSourceCode::Inline) {
+    os << n.GetCode();
+  } else {
+    if (code_segments.empty() || n.kind != AST::CppSourceCode::Host)
+      code_segments.push_back("");
+    code_segments.back() += n.GetCode();
+  }
+
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::Return& n) {
+  TraceEachVisit(n);
+
+  auto vty = NodeType(*n.value);
+
+  if (isa<ScalarType>(vty)) {
+    os << indent << "return " << ExprSTR(n.value) << ";\n";
+  } else if (auto sty = dyn_cast<SpannedType>(vty)) {
+    if (auto id = AST::GetIdentifier(*n.value)) {
+      os << indent << "return choreo::copy_as_spanned(" << id->name << ", "
+         << id->name << ".shape());\n";
+    } else {
+      os << indent << "return " << ExprSTR(n.value) << ";\n";
+    }
+  } else {
+    os << indent << "return " << ExprSTR(n.value) << ";\n";
+  }
+
+  return true;
+}
+
+// ---- Output Emission ----
+
+void CCCodeGen::EmitSource() {
+  for (auto& code : code_segments) outs() << code << "\n";
+}
+
+void CCCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
+  auto filename = RemoveDirectoryPrefix(
+      RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
+  out << "#!/usr/bin/env bash\n\n";
+  out << "# Choreo CC target compile script\n\n";
+
+  std::string build_path = CreateUniquePath();
+  auto cc_file = build_path + "/__choreo_cc_" + filename + ".cpp";
+  auto exe_file = exe_fn;
+  if (exe_file.empty())
+    exe_file = build_path + "/__choreo_cc_" + filename + ".exe";
+
+  out << "rm -fr " << build_path << "\n";
+  out << "mkdir -p " << build_path << "\n\n";
+
+  out << "cat <<'EOF' > " << build_path << "/choreo.h\n";
+  out << __choreo_header_as_string << "\nEOF\n\n";
+  out << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
+  out << __choreo_types_header_as_string << "\nEOF\n\n";
+
+  out << "cat <<'EOF' > " << cc_file << "\n";
+  for (auto& code : code_segments) out << code << "\n";
+  out << "\nEOF\n\n";
+
+  out << R"script(
+CXX="${CXX:-g++}"
+CFLAGS="-std=c++17 -O2 -pthread -I)script"
+      << build_path << R"script("
+
+show_usage() {
+  echo "  Usage: $0 <actions>"
+  echo ""
+  echo "  Options:"
+  echo "   --compile-link,     Compile and link to an executable"
+  echo "   --compile-module,   Compile to an object file"
+  echo "   --execute,          Compile and execute"
+}
+
+do_compile() {
+  ${CXX} ${CFLAGS} -o )script"
+      << exe_file << " " << cc_file << R"script(
+  if [ $? -ne 0 ]; then
+    echo "Compilation failed."
+    exit 1
+  fi
+}
+
+if [ "$1" = "--compile-link" ] || [ "$1" = "--compile-module" ]; then
+  do_compile
+elif [ "$1" = "--execute" ]; then
+  do_compile && )script"
+      << exe_file << R"script(
+else
+  show_usage
+fi
+)script";
+}
+
+bool CCCodeGen::CompileWithScript(const std::string& action) {
+  assert(!action.empty() && "no action is specified.");
+
+  char tempFileName[] = "/tmp/choreo_cc_script_XXXXXX";
+  int fd = mkstemp(tempFileName);
+  if (fd == -1) {
+    errs() << "Failed to create temporary file.\n";
+    return false;
+  }
+  close(fd);
+
+  std::ofstream tempFile(tempFileName);
+  if (!tempFile) {
+    errs() << "Failed to open temporary file for writing.\n";
+    return false;
+  }
+
+  auto outfile = OptionRegistry::GetInstance().GetOutputFileName();
+  EmitScript(tempFile, outfile);
+  tempFile.close();
+
+  std::string command = "bash " + std::string(tempFileName) + " " + action;
+  int result = system(command.c_str());
+  if (result == -1) {
+    errs() << "Failed to execute the compile script.\n";
+    return false;
+  }
+
+  if (remove(tempFileName) != 0)
+    errs() << "Warning: failed to remove temporary script file.\n";
+
+  return result == 0;
+}
