@@ -231,7 +231,11 @@ private:
   std::map<std::string, ptr<DynMemReuseInfo>> dyn_mr_infos;
   std::map<std::string, ptr<StaticMemReuseInfo>> static_mr_infos;
 
+  bool has_device_parallel = false;
+
 public:
+  bool HasDeviceParallel() const { return has_device_parallel; }
+  void SetHasDeviceParallel(bool v) { has_device_parallel = v; }
   FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
   OptimizedValues& GetSymbolValues(const std::string& sym) {
     return sym_values[sym];

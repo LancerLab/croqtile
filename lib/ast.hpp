@@ -1843,6 +1843,7 @@ private:
   bool is_outer = false; // if it is the outer-most pb
   bool enforced = false;
   ptr<Expr> stream_expr = nullptr;
+  bool device_entry = false;
 
 public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
@@ -1947,6 +1948,9 @@ public:
   bool IsOuter() const { return is_outer; }
   void SetOuter(bool o) { is_outer = o; }
 
+  bool IsDeviceEntry() const { return device_entry; }
+  void SetDeviceEntry(bool v = true) { device_entry = v; }
+
   ptr<Node> CloneImpl() const override {
     auto pb = Make<ParallelBy>(LOC(), CloneP(bpv), CloneP(bound_expr),
                                CloneP(cmpt_bpvs), CloneP(cmpt_bounds),
@@ -1957,6 +1961,7 @@ public:
     pb->SetOuter(IsOuter());
     pb->SetEnforced(IsEnforced());
     if (stream_expr) pb->SetStream(CloneP(stream_expr));
+    pb->SetDeviceEntry(IsDeviceEntry());
     return pb;
   }
 

@@ -12,7 +12,6 @@ namespace {
 
 struct SharedAlignmentCollector : public VisitorWithSymTab {
   std::map<std::string, size_t>& shared_alignment_reqs;
-  int parallel_level = 0;
   std::string cur_dev_fname;
 
   SharedAlignmentCollector(std::map<std::string, size_t>& reqs)
@@ -31,19 +30,18 @@ private:
 
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
-      parallel_level = 0;
       cur_dev_fname = CurrentFunctionName();
-    } else if (isa<AST::ParallelBy>(&n)) {
-      ++parallel_level;
-      if (parallel_level == 1) cur_dev_fname = SSTab().ScopeName();
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      if (pb->IsDeviceEntry())
+        cur_dev_fname = SSTab().ScopeName();
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
-    if (isa<AST::ParallelBy>(&n)) {
-      if (parallel_level == 1) cur_dev_fname = CurrentFunctionName();
-      --parallel_level;
+    if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      if (pb->IsDeviceEntry())
+        cur_dev_fname = CurrentFunctionName();
     }
     return true;
   }
@@ -109,17 +107,16 @@ bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
       buf_dev_func_name.emplace(sname, cur_dev_fname);
       VST_DEBUG(dbgs() << "\tdecl in dev func: " << cur_dev_fname << "\n";);
     }
-  } else if (isa<AST::ParallelBy>(&n)) {
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     ++parallel_level;
-    if (parallel_level == 1) cur_dev_fname = SSTab().ScopeName();
+    if (pb->IsDeviceEntry()) cur_dev_fname = SSTab().ScopeName();
   }
   return true;
 }
 
 bool MemAnalyzer::AfterVisitImpl(AST::Node& n) {
-  if (isa<AST::ParallelBy>(&n)) {
-    // exiting the outer pb, set to co func name.
-    if (parallel_level == 1) cur_dev_fname = CurrentFunctionName();
+  if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    if (pb->IsDeviceEntry()) cur_dev_fname = CurrentFunctionName();
     --parallel_level;
   }
   return true;
@@ -175,9 +172,7 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
     cur_dev_fname = CurrentFunctionName();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     parallel_level++;
-    // for now, we are allowed to decl different memory inside paraby level 1.
-    // so generate all kinds of spm at level 1.
-    if (parallel_level == 1) {
+    if (pb->IsDeviceEntry()) {
       cur_dev_fname = SSTab().ScopeName();
       if (DFCtx().shared_spm_size != 0) {
         size_t shared_alignment = SharedAlignmentForDevFunc(cur_dev_fname);
@@ -225,8 +220,8 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
 }
 
 bool MemReuse::AfterVisitImpl(AST::Node& n) {
-  if (isa<AST::ParallelBy>(&n)) {
-    if (parallel_level == 1) { cur_dev_fname = CurrentFunctionName(); }
+  if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    if (pb->IsDeviceEntry()) cur_dev_fname = CurrentFunctionName();
     parallel_level--;
   }
   return true;
