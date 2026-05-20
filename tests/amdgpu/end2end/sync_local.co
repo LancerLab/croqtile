@@ -1,0 +1,26 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+__co__ auto sync_local_test(s32 [64] a) {
+  s32 [64] output;
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.shared;
+    sync.local;
+    output.at(p) = s.at(p) + 1;
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(64);
+  for (int i = 0; i < 64; ++i) a[i] = i * 10;
+  auto result = sync_local_test(a.view());
+  bool ok = true;
+  for (int i = 0; i < 64; ++i)
+    if (result[i] != i * 10 + 1) ok = false;
+  std::cout << "Test sync_local " << (ok ? "Passed" : "Failed") << std::endl;
+}
+
+// CHECK: Test sync_local Passed

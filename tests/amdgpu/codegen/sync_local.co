@@ -1,0 +1,14 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void sync_levels(s32 [64] a) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.shared;
+    sync.local;
+    s.at(p) = s.at(p) + 1;
+  }
+}
+
+// CHECK: __syncthreads()
+// CHECK: __threadfence_block()
