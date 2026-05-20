@@ -79,7 +79,7 @@ struct TiledCopySearchResult {
 static TiledCopySearchResult SearchTiledConfig(size_t box_m, size_t box_n,
                                                size_t threads_count,
                                                size_t max_vf, size_t elem_bits,
-                                               bool cp_async, bool allow_pred);
+                                               bool allow_pred);
 
 // Compare two shapes, returning true if they might differ at runtime.
 // Conservative: returns true (potential mismatch) if any dimension is dynamic.
@@ -516,7 +516,7 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
 
     size_t slow_vf = slow_align / elem_bits;
     auto slow_cfg = SearchTiledConfig(1, tile_n, threads_count, slow_vf,
-                                      elem_bits, enable_cp_async, false);
+                                      elem_bits, false);
     if (!slow_cfg.found) {
       dec.strategy = DMAStrategy::NAIVE_COPY;
       dec.atom = dec.is_async ? CUDA_COPY_ATOM::ASYNC_COPY
@@ -556,7 +556,7 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
         dec.direction == DMADirection::G2S && threads_count % 32 == 0;
     size_t fast_max_vf = 128 / elem_bits;
     auto fast_cfg = SearchTiledConfig(1, tile_n, threads_count, fast_max_vf,
-                                      elem_bits, fast_cp_async, false);
+                                      elem_bits, false);
     if (fast_cfg.found && fast_cfg.vf * elem_bits > param.align_bits) {
       TiledCopyParams fast_param;
       fast_param.box_shape = param.box_shape;
@@ -661,7 +661,13 @@ static CUDA_COPY_ATOM SelectCopyAtom(size_t align_bits, bool cp_async) {
 /// Search for the best 2D thread-layout configuration for a tiled copy.
 ///
 /// Iterates vector factors from \p max_vf down to 1, trying thread layouts
-/// with increasing thr_n (column threads) for better coalescing.
+/// and scoring them by effective vectorization width (val_n * elem_bits,
+/// capped at 128 bits) then by thread-count in the N (contiguous) dimension
+/// for warp coalescing.
+///
+/// val_m is capped to approximately one 128-bit vector width per thread
+/// regardless of cp_async, preventing fat val_m x tiny val_n layouts that
+/// result in scalar stores for non-cp.async paths.
 ///
 /// \param allow_pred  When true, box_m may be ceiled to satisfy thr_m
 ///                    divisibility (slow-path predication).  When false,
@@ -670,7 +676,7 @@ static CUDA_COPY_ATOM SelectCopyAtom(size_t align_bits, bool cp_async) {
 static TiledCopySearchResult SearchTiledConfig(size_t box_m, size_t box_n,
                                                size_t threads_count,
                                                size_t max_vf, size_t elem_bits,
-                                               bool cp_async, bool allow_pred) {
+                                               bool allow_pred) {
   TiledCopySearchResult result;
 
   for (size_t vf = max_vf; vf >= 1; vf /= 2) {
@@ -680,6 +686,8 @@ static TiledCopySearchResult SearchTiledConfig(size_t box_m, size_t box_n,
     ValueList best_thr, best_val;
     bool cfg_found = false;
     bool cfg_pred = false;
+    size_t best_eff_vec = 0;
+    size_t best_thr_n = 0;
 
     for (size_t thr_n = 1; thr_n <= threads_count && thr_n * vf <= box_n;
          thr_n *= 2) {
@@ -700,23 +708,38 @@ static TiledCopySearchResult SearchTiledConfig(size_t box_m, size_t box_n,
       }
 
       auto val_n = sbe::nu(val_n_i);
-      ValueList val;
-      if (cp_async) {
-        size_t max_vm = std::max(
-            size_t{1}, (128 / elem_bits) / static_cast<size_t>(*VIInt(val_n)));
-        size_t vm = max_vm;
-        while (vm > 1 && eff_box_m % (thr_m * vm) != 0) vm /= 2;
-        if (eff_box_m % (thr_m * vm) != 0) continue;
-        val = {sbe::nu(vm), val_n};
-      } else {
-        val = {sbe::nu(eff_box_m / thr_m), val_n};
-      }
+      size_t max_vm = std::max(
+          size_t{1}, (128 / elem_bits) / static_cast<size_t>(*VIInt(val_n)));
+      size_t vm = max_vm;
+      while (vm > 1 && eff_box_m % (thr_m * vm) != 0) vm /= 2;
+      if (eff_box_m % (thr_m * vm) != 0) continue;
+      ValueList val = {sbe::nu(vm), val_n};
 
-      best_box = {sbe::nu(eff_box_m), sbe::nu(box_n)};
-      best_thr = {sbe::nu(thr_m), sbe::nu(thr_n)};
-      best_val = val;
-      cfg_found = true;
-      cfg_pred = this_pred;
+      // Effective vectorization is capped by the atom width (max_vf *
+      // elem_bits).  When the atom is narrow (e.g. 16-bit because the
+      // stride alignment is unknown), grouping val_n elements doesn't
+      // increase the actual store width -- it only helps SMEM reads.
+      // Capping eff_vec at the atom width lets the thr_n tiebreaker
+      // select coalescing-friendly layouts (large thr_n) for narrow atoms.
+      size_t eff_vec = std::min({static_cast<size_t>(val_n_i) * elem_bits,
+                                 max_vf * elem_bits, size_t{128}});
+      // Predication requires ceiling box_m which can cause OOB reads from
+      // the source buffer; always prefer unpredicated configs.  Among
+      // configs with equal predication status, maximize vectorization
+      // width, then thread count in N for warp coalescing.
+      bool better = !cfg_found || (!this_pred && cfg_pred) ||
+                    (this_pred == cfg_pred && eff_vec > best_eff_vec) ||
+                    (this_pred == cfg_pred && eff_vec == best_eff_vec &&
+                     thr_n > best_thr_n);
+      if (better) {
+        best_box = {sbe::nu(eff_box_m), sbe::nu(box_n)};
+        best_thr = {sbe::nu(thr_m), sbe::nu(thr_n)};
+        best_val = val;
+        cfg_found = true;
+        cfg_pred = this_pred;
+        best_eff_vec = eff_vec;
+        best_thr_n = thr_n;
+      }
     }
 
     if (!cfg_found) continue;
@@ -921,7 +944,7 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
   // 3. Search for the best tiled copy configuration (slow path).
   size_t max_vf = (align_bits >= elem_bits) ? align_bits / elem_bits : 1;
   auto cfg = SearchTiledConfig(box_m, box_n, threads_count, max_vf, elem_bits,
-                               enable_cp_async, /*allow_pred=*/true);
+                               /*allow_pred=*/true);
   if (!cfg.found) {
     dec.strategy = DMAStrategy::NAIVE_COPY;
     dec.atom = dec.is_async ? CUDA_COPY_ATOM::ASYNC_COPY
@@ -954,16 +977,10 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
   dec.strategy = dec.has_pred ? DMAStrategy::TILED_COPY_PRED
                               : DMAStrategy::TILED_COPY_UNPRED;
 
-  // CuTe's copy_if dispatches per-element through copy_atom.call(), which
-  // invokes UniversalCopy<VecType>::operator() on each element.  For atoms
-  // wider than the element type (e.g. AutoVectorizingCopy<128> =
-  // UniversalCopy<uint128_t>), copy_unpack does a 128-bit store at per-
-  // element addresses, causing misaligned-access errors.
-  // Fix: when predication is needed and cp.async is NOT used (so no hardware
-  // predication), cap the atom alignment to element width.
-  if (dec.has_pred && !enable_cp_async) {
-    param.align_bits = std::min(param.align_bits, elem_bits);
-  }
+  // NOTE: The runtime's choreo::tiled_copy uses atom-group-aware predicated
+  // copy that vectorizes full atom groups and scalar-copies boundary elements.
+  // This avoids CuTe's copy_if misalignment bug (which applies wide atoms at
+  // per-element addresses).  No alignment cap needed here.
 
   dec.atom = SelectCopyAtom(param.align_bits, enable_cp_async);
 
@@ -991,12 +1008,22 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
       !dec.to_strides.empty() && !VIIsInt(dec.to_strides[0]);
   bool any_stride_unknown = from_stride_unknown || to_stride_unknown;
 
-  // Compute the fast-path stride-alignment optimization only when it's safe.
-  // For predicated non-cp.async paths (S2G), vectorized atoms cause
-  // misaligned stores in copy_if, so skip the wide fast path entirely.
+  // Compute the fast-path stride-alignment optimization when:
+  //  - G2S: always safe (cp.async handles predication in hardware).
+  //  - Unpredicated paths: always safe (no copy_if).
+  //
+  // TODO: S2G with predication could benefit from a fast path (wide atom for
+  // full tiles, narrow atom + predication for boundary tiles), but having two
+  // tiled_copy template instantiations in the same kernel causes severe
+  // register pressure -- measured 2.4x slowdown from spilling on H800.
+  // CuTe's AutoVectorizingCopy already performs runtime auto-vectorization
+  // for aligned strides, so the single-path approach is faster in practice.
+  // Revisit if we can isolate fast/slow paths into separate device functions
+  // or if CuTe gains lighter-weight predication.
   bool fast_path_would_cp_async =
       dec.direction == DMADirection::G2S && threads_count % 32 == 0;
-  bool fast_path_safe = !dec.has_pred || fast_path_would_cp_async;
+  bool fast_path_safe =
+      !dec.has_pred || fast_path_would_cp_async;
   if (any_stride_unknown && !assume_aligned_global && param.align_bits < 128 &&
       fast_path_safe) {
     size_t fast_align;
@@ -1016,16 +1043,26 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
 
     auto fast_cfg =
         SearchTiledConfig(slow_box_m, slow_box_n, threads_count, fast_max_vf,
-                          elem_bits, fast_cp_async, /*allow_pred=*/false);
+                          elem_bits, /*allow_pred=*/false);
 
-    if (fast_cfg.found && fast_cfg.vf * elem_bits > param.align_bits) {
+    // CuTe's wide-atom address computation (to_mixed_bits) requires
+    // power-of-2 val dimensions; skip the fast path when they aren't.
+    bool fast_val_pow2 = true;
+    for (auto& v : fast_cfg.val_layout) {
+      auto vi = VIInt(v);
+      if (vi && *vi > 0 && (*vi & (*vi - 1)) != 0) fast_val_pow2 = false;
+    }
+
+    if (fast_cfg.found && fast_val_pow2 &&
+        fast_cfg.vf * elem_bits > param.align_bits) {
       TiledCopyParams fast_param;
       fast_param.box_shape = param.box_shape;
-      fast_param.need_pred = param.need_pred;
-      fast_param.prediction = param.prediction;
       fast_param.align_bits = fast_cfg.vf * elem_bits;
       fast_param.thr_layout = fast_cfg.thr_layout;
       fast_param.val_layout = fast_cfg.val_layout;
+
+      fast_param.need_pred = param.need_pred;
+      fast_param.prediction = param.prediction;
 
       CUDA_COPY_ATOM fast_atom =
           SelectCopyAtom(fast_param.align_bits, fast_cp_async);
@@ -1040,10 +1077,20 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
         size_t fast_thr_n =
             static_cast<size_t>(*VIInt(fast_param.thr_layout[1]));
         if (slow_box_m % fast_thr_m == 0 && slow_box_n % fast_thr_n == 0) {
-          param.thr_layout = fast_param.thr_layout;
-          param.val_layout = {sbe::nu(slow_box_m / fast_thr_m),
-                              sbe::nu(slow_box_n / fast_thr_n)};
-          dec.tiled_params = param;
+          size_t new_vm = slow_box_m / fast_thr_m;
+          size_t new_vn = slow_box_n / fast_thr_n;
+          bool rewrite_ok = true;
+          if (dec.swizzle_mode != SwizMode::NONE) {
+            auto is_p2 = [](size_t v) {
+              return v != 0 && (v & (v - 1)) == 0;
+            };
+            if (!is_p2(new_vm) || !is_p2(new_vn)) rewrite_ok = false;
+          }
+          if (rewrite_ok) {
+            param.thr_layout = fast_param.thr_layout;
+            param.val_layout = {sbe::nu(new_vm), sbe::nu(new_vn)};
+            dec.tiled_params = param;
+          }
         }
       }
     }

@@ -430,7 +430,8 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
 
 void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
                                   const std::string& indent) const {
-  os << indent << "wg_barrier.sync();\n";
+  os << indent
+     << "asm volatile(\"bar.sync 15, 128;\\n\" ::: \"memory\");\n";
 }
 
 void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
@@ -3165,13 +3166,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     }
   }
 
-  if (n.GetLevel() == ParallelLevel::BLOCK &&
-      (cgi.HasTMA() || IsWarpSpecActive())) {
-    ds << d_indent
-       << "auto wg_barrier = "
-          "cooperative_groups::tiled_partition<128>(cooperative_groups::this_"
-          "thread_block());\n";
-  }
   auto& tma_descs = cgi.GetTMADescs()[&n];
   auto* cluster_pb = deferred_cluster_pb;
   if (tma_descs.empty() && cluster_pb) {
@@ -5055,6 +5049,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << full_call;
         }
       }
+      if (f_sty->GetStorage() == Storage::SHARED) {
+        if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
+          ds << d_indent << "__syncthreads();\n";
+      }
     } break;
     default: break;
     }
@@ -5671,6 +5671,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "}\n";
       } else {
         ds << d_indent << full_call_sync;
+      }
+      if (f_sty->GetStorage() == Storage::SHARED) {
+        if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
+          ds << d_indent << "__syncthreads();\n";
       }
     } break;
     default: break;

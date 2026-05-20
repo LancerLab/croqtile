@@ -14,6 +14,16 @@ target_include_directories(AMDGPUTarget
 
 add_dependencies(AMDGPUTarget gpu_deps)
 
+if(ENABLE_CUDA AND DEFINED CUDA_VERSION_MAJOR)
+  math(EXPR _amdgpu_cuda_ver
+       "${CUDA_VERSION_MAJOR} * 1000 + ${CUDA_VERSION_MINOR} * 10")
+  target_compile_definitions(AMDGPUTarget PRIVATE
+    CHOREO_CUDA_VERSION_MAJOR=${CUDA_VERSION_MAJOR}
+    CHOREO_CUDA_VERSION_MINOR=${CUDA_VERSION_MINOR}
+    CHOREO_CUDA_VERSION=${_amdgpu_cuda_ver}
+  )
+endif()
+
 if(ENABLE_HIP)
   target_include_directories(AMDGPUTarget PRIVATE ${_rocm_root}/include)
 
