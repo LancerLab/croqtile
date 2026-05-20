@@ -781,11 +781,24 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
   dec.is_zfill = explicit_zfill || implicit_zfill;
   if (explicit_zfill && !shape_mismatch) dec.is_zfill = false;
 
-  auto outer_bounds = ShapeToValueList(dec.from_parent_shape);
-  auto inner_bounds = ShapeToValueList(dec.from_ca_shape);
-  auto offsets = ResolveTileCoordOffsets(*from_ca);
+  // For G2S the guard protects reads from the source (global) side.
+  // For S2G the guard protects writes to the destination (global) side.
+  // Exception: .pad always guards on the source (the pad fill handles the
+  // extra destination space, and the tiled copy must respect source bounds).
+  auto to_ca = dyn_cast<AST::ChunkAt>(n.GetTo().get());
+  assert(to_ca && "ResolvePrediction requires a dest ChunkAt");
 
-  if (n.operation == ".transp") {
+  const bool guard_on_dest =
+      (dec.direction == DMADirection::S2G) && !is_pad;
+  auto outer_bounds = guard_on_dest
+                          ? ShapeToValueList(dec.to_parent_shape)
+                          : ShapeToValueList(dec.from_parent_shape);
+  auto inner_bounds = guard_on_dest ? ShapeToValueList(dec.to_ca_shape)
+                                    : ShapeToValueList(dec.from_ca_shape);
+  auto offsets = guard_on_dest ? ResolveTileCoordOffsets(*to_ca)
+                               : ResolveTileCoordOffsets(*from_ca);
+
+  if (!guard_on_dest && n.operation == ".transp") {
     auto tc = cast<TransposeConfig>(n.GetConfig())->dim_values;
     outer_bounds = PermuteValueList(outer_bounds, tc);
     inner_bounds = PermuteValueList(inner_bounds, tc);
@@ -940,6 +953,18 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
 
   dec.strategy = dec.has_pred ? DMAStrategy::TILED_COPY_PRED
                               : DMAStrategy::TILED_COPY_UNPRED;
+
+  // CuTe's copy_if dispatches per-element through copy_atom.call(), which
+  // invokes UniversalCopy<VecType>::operator() on each element.  For atoms
+  // wider than the element type (e.g. AutoVectorizingCopy<128> =
+  // UniversalCopy<uint128_t>), copy_unpack does a 128-bit store at per-
+  // element addresses, causing misaligned-access errors.
+  // Fix: when predication is needed and cp.async is NOT used (so no hardware
+  // predication), cap the atom alignment to element width.
+  if (dec.has_pred && !enable_cp_async) {
+    param.align_bits = std::min(param.align_bits, elem_bits);
+  }
+
   dec.atom = SelectCopyAtom(param.align_bits, enable_cp_async);
 
   // If cp_async was enabled but the chosen alignment is too small for any
@@ -966,7 +991,14 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
       !dec.to_strides.empty() && !VIIsInt(dec.to_strides[0]);
   bool any_stride_unknown = from_stride_unknown || to_stride_unknown;
 
-  if (any_stride_unknown && !assume_aligned_global && param.align_bits < 128) {
+  // Compute the fast-path stride-alignment optimization only when it's safe.
+  // For predicated non-cp.async paths (S2G), vectorized atoms cause
+  // misaligned stores in copy_if, so skip the wide fast path entirely.
+  bool fast_path_would_cp_async =
+      dec.direction == DMADirection::G2S && threads_count % 32 == 0;
+  bool fast_path_safe = !dec.has_pred || fast_path_would_cp_async;
+  if (any_stride_unknown && !assume_aligned_global && param.align_bits < 128 &&
+      fast_path_safe) {
     size_t fast_align;
     if (from_stride_unknown && to_stride_unknown) {
       fast_align = 128; // both checked at runtime
