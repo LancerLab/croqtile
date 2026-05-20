@@ -1,0 +1,173 @@
+// REQUIRES: TARGET-GCUx2
+// RUN: choreo -gs %target %gcu_arch %s -o %s.topscc.result && bash %s.topscc.result --execute 2>&1 | FileCheck %s && rm -f %s.topscc.result
+
+#define N (1024 * 1024)
+
+// Single-device elementwise add
+__co__ void elemwise_single(s32[N] A, s32[N] B, s32[N] &C) {
+  parallel p by 1 : block {
+    foreach tile in [N / 64] {
+      la = dma.copy A.chunkat(tile) => local;
+      lb = dma.copy B.chunkat(tile) => local;
+      local s32[la.span] lc;
+      foreach i in [la.span]
+        lc.at(i) = la.data.at(i) + lb.data.at(i);
+      dma.copy lc => C.chunkat(tile);
+    }
+  }
+}
+
+// Dual-device elementwise add
+__co__ void elemwise_dual(s32[N] A, s32[N] B, s32[N] &C) {
+  parallel d by 2 : device {
+    parallel p by 1 : block {
+      foreach tile in [N / 64] {
+        la = dma.copy A.chunkat(tile) => local;
+        lb = dma.copy B.chunkat(tile) => local;
+        local s32[la.span] lc;
+        foreach i in [la.span]
+          lc.at(i) = la.data.at(i) + lb.data.at(i);
+        dma.copy lc => C.chunkat(tile);
+      }
+    }
+  }
+}
+
+#define MM 512
+#define MK 512
+#define MN 512
+
+// Single-device matmul
+__co__ void matmul_single(s32[MM, MK] A, s32[MK, MN] B, s32[MM, MN] &C) {
+  parallel p by 1 : block {
+    with index = {m_tile, k_tile, n_tile}
+      in [MM / 4, MK / 16, MN / 64] {
+      foreach m_tile, n_tile {
+        local s32[4, 64] acc {0};
+        foreach k_tile {
+          lhs = dma.copy A.chunkat(m_tile, k_tile) => local;
+          rhs = dma.transp<1,0> B.chunkat(k_tile, n_tile) => local;
+          foreach {m, n, k} in [lhs.span(0), rhs.span(0), lhs.span(1)]
+            acc.at(m, n) += lhs.data.at(m, k) * rhs.data.at(n, k);
+        }
+        dma.copy acc => C.chunkat(m_tile, n_tile);
+      }
+    }
+  }
+}
+
+// Dual-device matmul
+__co__ void matmul_dual(s32[MM, MK] A, s32[MK, MN] B, s32[MM, MN] &C) {
+  parallel d by 2 : device {
+    parallel p by 1 : block {
+      with index = {m_tile, k_tile, n_tile}
+        in [MM / 4, MK / 16, MN / 64] {
+        foreach m_tile, n_tile {
+          local s32[4, 64] acc {0};
+          foreach k_tile {
+            lhs = dma.copy A.chunkat(m_tile, k_tile) => local;
+            rhs = dma.transp<1,0> B.chunkat(k_tile, n_tile) => local;
+            foreach {m, n, k} in [lhs.span(0), rhs.span(0), lhs.span(1)]
+              acc.at(m, n) += lhs.data.at(m, k) * rhs.data.at(n, k);
+          }
+          dma.copy acc => C.chunkat(m_tile, n_tile);
+        }
+      }
+    }
+  }
+}
+
+#include <chrono>
+
+template <typename F>
+double bench(F fn, int warmup = 3, int repeat = 10) {
+  for (int i = 0; i < warmup; ++i) fn();
+  auto t0 = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < repeat; ++i) fn();
+  auto t1 = std::chrono::high_resolution_clock::now();
+  return std::chrono::duration<double, std::milli>(t1 - t0).count() / repeat;
+}
+
+int main() {
+  const size_t n = N;
+  int* h_a = new int[n];
+  int* h_b = new int[n];
+  int* h_ref = new int[n];
+  int* h_c1 = new int[n];
+  int* h_c2 = new int[n];
+  for (size_t i = 0; i < n; ++i) {
+    h_a[i] = (int)(i % 1000);
+    h_b[i] = (int)(i % 500);
+    h_ref[i] = h_a[i] + h_b[i];
+  }
+
+  auto av = choreo::make_spanview<1, choreo::s32>(h_a, {n});
+  auto bv = choreo::make_spanview<1, choreo::s32>(h_b, {n});
+  auto cv1 = choreo::make_spanview<1, choreo::s32>(h_c1, {n});
+  auto cv2 = choreo::make_spanview<1, choreo::s32>(h_c2, {n});
+
+  double t_single = bench([&]() { elemwise_single(av, bv, cv1); });
+  double t_dual   = bench([&]() { elemwise_dual(av, bv, cv2); });
+
+  bool ok = true;
+  for (size_t i = 0; i < n; ++i) {
+    if (h_c1[i] != h_ref[i]) {
+      std::cerr << "single elemwise mismatch at " << i << "\n";
+      ok = false; break;
+    }
+    if (h_c2[i] != h_ref[i]) {
+      std::cerr << "dual elemwise mismatch at " << i << "\n";
+      ok = false; break;
+    }
+  }
+  std::cout << "[Elemwise] single: " << t_single << " ms, dual: " << t_dual
+            << " ms, speedup: " << (t_single / t_dual) << "x" << std::endl;
+
+  const size_t mm = MM, mk = MK, mn = MN;
+  int* ma = new int[mm * mk];
+  int* mb = new int[mk * mn];
+  int* mc_ref = new int[mm * mn];
+  int* mc1 = new int[mm * mn];
+  int* mc2 = new int[mm * mn];
+  for (size_t i = 0; i < mm * mk; ++i) ma[i] = (int)(i % 7) - 3;
+  for (size_t i = 0; i < mk * mn; ++i) mb[i] = (int)(i % 5) - 2;
+  for (size_t i = 0; i < mm; ++i)
+    for (size_t j = 0; j < mn; ++j) {
+      int s = 0;
+      for (size_t k = 0; k < mk; ++k) s += ma[i*mk+k] * mb[k*mn+j];
+      mc_ref[i*mn+j] = s;
+    }
+
+  auto mav = choreo::make_spanview<2, choreo::s32>(ma, {mm, mk});
+  auto mbv = choreo::make_spanview<2, choreo::s32>(mb, {mk, mn});
+  auto mcv1 = choreo::make_spanview<2, choreo::s32>(mc1, {mm, mn});
+  auto mcv2 = choreo::make_spanview<2, choreo::s32>(mc2, {mm, mn});
+
+  double mt_single = bench([&]() { matmul_single(mav, mbv, mcv1); });
+  double mt_dual   = bench([&]() { matmul_dual(mav, mbv, mcv2); });
+
+  for (size_t i = 0; i < mm * mn; ++i) {
+    if (mc1[i] != mc_ref[i]) {
+      std::cerr << "single matmul mismatch at " << i
+                << ": got " << mc1[i] << " expected " << mc_ref[i] << "\n";
+      ok = false; break;
+    }
+    if (mc2[i] != mc_ref[i]) {
+      std::cerr << "dual matmul mismatch at " << i
+                << ": got " << mc2[i] << " expected " << mc_ref[i] << "\n";
+      ok = false; break;
+    }
+  }
+  std::cout << "[Matmul] single: " << mt_single << " ms, dual: " << mt_dual
+            << " ms, speedup: " << (mt_single / mt_dual) << "x" << std::endl;
+
+  if (ok) std::cout << "Test Passed" << std::endl;
+  else    std::cout << "Test Failed" << std::endl;
+
+  delete[] h_a; delete[] h_b; delete[] h_ref; delete[] h_c1; delete[] h_c2;
+  delete[] ma; delete[] mb; delete[] mc_ref; delete[] mc1; delete[] mc2;
+}
+
+// CHECK: [Elemwise] single:
+// CHECK: [Matmul] single:
+// CHECK: Test Passed

@@ -1,4 +1,5 @@
 // RUN: choreo -t topscc -es -dp=memreuse -arch=gcu300 %s -o - | FileCheck %s
+// RUN: choreo -t topscc -es -dp=memreuse -arch=gcu300 -rtc=none %s -o - | FileCheck %s --check-prefix=NORTC
 
 __co__ void foo(f32 [48] A) {
   parallel d by 2 : device {
@@ -13,11 +14,24 @@ __co__ void foo(f32 [48] A) {
 // CHECK: void foo(
 // CHECK:   topsGetDeviceCount(&__choreo_device_count)
 // CHECK:   runtime_check(__choreo_device_count >= 2
+// CHECK:   std::vector<float*> A__device_vec(2, nullptr)
 // CHECK:   for (int d = 0; d < 2; ++d) {
 // CHECK:     choreo::abend_true(topsSetDevice(d));
-// CHECK:     dim3 __foo_gdims
-// CHECK:     dim3 __foo_bdims
+// CHECK:     topsMalloc(&A__device_vec[d]
+// CHECK:     topsMemcpy(A__device_vec[d], A.data()
+// CHECK:     A__device = A__device_vec[d]
 // CHECK:     __choreo_device_foo<<<{{.*}}>>>({{.*}}, d);
-// CHECK:     choreo::abend_true(topsDeviceSynchronize());
 // CHECK:   } // end device parallel-by
+// CHECK:   for (int __sync_d = 0; __sync_d < 2; ++__sync_d) {
+// CHECK:     choreo::abend_true(topsSetDevice(__sync_d));
+// CHECK:     choreo::abend_true(topsDeviceSynchronize());
+// CHECK:     topsFree(A__device_vec[__sync_d]
+// CHECK:   }
 // CHECK: }
+
+// NORTC: void foo(
+// NORTC-NOT: topsGetDeviceCount
+// NORTC-NOT: runtime_check
+// NORTC: for (int d = 0; d < 2; ++d) {
+// NORTC:   choreo::abend_true(topsSetDevice(d));
+// NORTC: }

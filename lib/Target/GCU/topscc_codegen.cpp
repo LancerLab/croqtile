@@ -431,6 +431,30 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       if (h_indent.size() >= 2)
         h_indent.resize(h_indent.size() - 2);
       hs << h_indent << "} // end device parallel-by\n";
+      auto pv_name = pb->BPV()->name;
+      auto bound = ValueSTR(pb->BoundValue());
+      hs << h_indent << "for (int __sync_" << pv_name << " = 0; __sync_"
+         << pv_name << " < " << bound << "; ++__sync_" << pv_name << ") {\n";
+      hs << h_indent << "  choreo::abend_true(topsSetDevice(__sync_"
+         << pv_name << "));\n";
+      hs << h_indent
+         << "  choreo::abend_true(topsDeviceSynchronize());\n";
+
+      for (auto& item : GetChoreoFuncIns(cgi)) {
+        auto sty = dyn_cast<SpannedType>(item.type);
+        if (!sty || item.attr == ParamAttr::GLOBAL_INPUT) continue;
+        auto oname = UnScopedName(item.name);
+        auto buf_sym = oname + "__device";
+        if (item.IsReference()) {
+          hs << h_indent << "  choreo::abend_true(topsMemcpy(" << oname
+             << ".data(), " << buf_sym << "_vec[__sync_" << pv_name << "], "
+             << UnScopedSizeExpr(*sty) << ", topsMemcpyDeviceToHost));\n";
+        }
+        hs << h_indent << "  choreo::abend_true(topsFree(" << buf_sym
+           << "_vec[__sync_" << pv_name << "]));\n";
+      }
+
+      hs << h_indent << "}\n";
       device_defers_launch = false;
       deferred_device_pb = nullptr;
     } else if (pb->IsOuter() || was_device_deferred_block) {
@@ -777,17 +801,17 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
                             UnScopedName(item.name) + ".data()");
           continue;
         }
-        // Only the globals are declared in host.
-        // The shareds/locals are declared in device.
         auto sym = UnScopedName(item.name);
         std::string bts = NameBaseType(sty->ElementType(), false);
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
-           << UnScopedSizeExpr(*sty) << "));\n";
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
-           << ssm.HostName(item.name) << ", " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyHostToDevice));\n";
+        if (!FCtx(fname).HasDeviceParallel()) {
+          hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym
+             << ", " << UnScopedSizeExpr(*sty) << "));\n";
+          hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+             << ssm.HostName(item.name) << ", " << UnScopedSizeExpr(*sty)
+             << ", topsMemcpyHostToDevice));\n";
+        }
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
         global_buffers.insert(buf_sym);
       }
@@ -1359,11 +1383,36 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
       hs << h_indent << "}\n";
     }
 
+    for (auto& item : GetChoreoFuncIns(cgi)) {
+      auto sty = dyn_cast<SpannedType>(item.type);
+      if (!sty || item.attr == ParamAttr::GLOBAL_INPUT) continue;
+      auto sym = UnScopedName(item.name);
+      auto buf_sym = sym + "__device";
+      std::string bts = NameBaseType(sty->ElementType(), false);
+      hs << h_indent << "std::vector<" << bts << "*> " << buf_sym << "_vec("
+         << bound << ", nullptr);\n";
+    }
+
     hs << h_indent << "for (int " << pv_name << " = 0; " << pv_name << " < "
        << bound << "; ++" << pv_name << ") {\n";
     h_indent += "  ";
     hs << h_indent << "choreo::abend_true(topsSetDevice(" << pv_name
        << "));\n";
+
+    for (auto& item : GetChoreoFuncIns(cgi)) {
+      auto sty = dyn_cast<SpannedType>(item.type);
+      if (!sty || item.attr == ParamAttr::GLOBAL_INPUT) continue;
+      auto sym = UnScopedName(item.name);
+      auto buf_sym = sym + "__device";
+      hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << "_vec["
+         << pv_name << "], " << UnScopedSizeExpr(*sty) << "));\n";
+      hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << "_vec["
+         << pv_name << "], " << ssm.HostName(item.name) << ", "
+         << UnScopedSizeExpr(*sty) << ", topsMemcpyHostToDevice));\n";
+      hs << h_indent << buf_sym << " = " << buf_sym << "_vec[" << pv_name
+         << "];\n";
+    }
+
     return true;
   }
 
@@ -1432,7 +1481,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   hs << ");\n";
 
-  if (!n.IsAsync()) {
+  if (!n.IsAsync() && !device_defers_launch) {
     if (effective_stream != "")
       hs << h_indent << "choreo::abend_true(topsStreamSynchronize("
          << effective_stream << "));\n";
@@ -1440,14 +1489,16 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
       hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
   }
 
-  // copy the span passed by ref back to host
-  for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
-    if (isa<SpannedType>(item.type)) {
-      auto oname = UnScopedName(item.name);
-      if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname
-           << ".data(), " << oname + "__device" << ", "
-           << UnScopedSizeExpr(*item.type) << ", topsMemcpyDeviceToHost));\n";
+  if (!device_defers_launch) {
+    for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
+      if (isa<SpannedType>(item.type)) {
+        auto oname = UnScopedName(item.name);
+        if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
+          hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname
+             << ".data(), " << oname + "__device" << ", "
+             << UnScopedSizeExpr(*item.type)
+             << ", topsMemcpyDeviceToHost));\n";
+      }
     }
   }
 
@@ -2957,6 +3008,7 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
 
 void TopsccCodeGen::EmitTopsFree() {
   assert(IsHost());
+  if (FCtx(fname).HasDeviceParallel()) return;
   for (const auto& item : GetDeviceFuncIns(updating_cgi)) {
     if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
     if (!isa<SpannedType>(item.type)) continue;
