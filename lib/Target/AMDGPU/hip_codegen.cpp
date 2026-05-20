@@ -772,6 +772,20 @@ bool HIPCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
+  if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
+    assert(!IsHost() && "span-as should be on device side.");
+    auto name = n.GetName();
+    auto scoped_name = InScopeName(name);
+    ds << d_indent << "auto* " << name << " = ";
+    auto tty = GetSymbolType(sa->id->name);
+    if (isa<FutureType>(tty))
+      ds << SSMName(InScopeNameForRef(sa->id->name), false) << ".data();\n";
+    else
+      ds << SSMName(InScopeNameForRef(sa->id->name), false) << ";\n";
+    ssm.MapDeviceSymbolIfNotExist(scoped_name, name);
+    return true;
+  }
+
   auto name = n.GetName();
   auto scoped_name = InScopeName(name);
 
@@ -826,6 +840,10 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   SSTab().DefineSymbol(sym, nty);
 
+  ptr<AST::SpanAs> sa = nullptr;
+  if (auto e = dyn_cast<AST::Expr>(n.init_expr))
+    sa = dyn_cast<AST::SpanAs>(e->GetReference());
+
   bool ref = n.HasNote("ref");
   auto sname = InScopeName(sym);
   if (!FCtx(fname).HasSymbolValues(sname))
@@ -841,7 +859,10 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
       auto buf_sym = sym + "__device";
       auto shape = sty->GetShape();
 
-      if (IsChoreoOutput(sname)) {
+      if (sa) {
+        auto src_buf = ssm.HostName(InScopeName(sa->id->name) + "__device");
+        hs << h_indent << bts << " * " << buf_sym << " = " << src_buf << ";\n";
+      } else if (IsChoreoOutput(sname)) {
         hs << h_indent << "auto " << sym
            << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
            << shape.Rank() << ">({"
@@ -862,6 +883,12 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
     }
 
     if (!IsHost()) {
+      if (sa) {
+        auto base_dev = ssm.DeviceName(InScopeName(sa->id->name));
+        ds << d_indent << "auto* " << sym << " = " << base_dev << ";\n";
+        ssm.MapDeviceSymbolIfNotExist(sname, sym);
+        return true;
+      }
       if (sto == Storage::SHARED) {
         ds << d_indent << "__shared__ " << HIPNameBaseType(sty->ElementType())
            << " " << sym << "[" << UnScopedSizeExpr(*sty) << " / sizeof("

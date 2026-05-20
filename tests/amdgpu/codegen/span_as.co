@@ -1,0 +1,15 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// span_as should alias the source pointer, not allocate new memory
+__co__ auto span_as_alias(s32 [2, 3, 64] src) {
+  reshaped = src.span_as(6, 64);
+  s32 [6, 64] output;
+  parallel p by 6, q by 64 {
+    output.at(p, q) = reshaped.at(p, q);
+  }
+  return output;
+}
+
+// Host side: device pointer alias (no hipMalloc for reshaped)
+// CHECK: reshaped__device = src__device
+// CHECK-NOT: hipMalloc(&reshaped__device

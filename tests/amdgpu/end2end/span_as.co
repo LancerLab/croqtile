@@ -1,0 +1,54 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+// === Test 1: basic span_as reshape 3D -> 2D + elementwise ===
+__co__ auto ele_add_span_as(s32 [2, 3, 64] lhs, s32 [2, 3, 64] rhs) {
+  l = lhs.span_as(6, 64);
+  r = rhs.span_as(6, 64);
+  s32 [6, 64] output;
+  parallel p by 6, q by 64 {
+    output.at(p, q) = l.at(p, q) + r.at(p, q);
+  }
+  return output;
+}
+
+// === Test 2: span_as flatten to 1D ===
+__co__ auto span_as_flatten(s32 [4, 8] a) {
+  flat = a.span_as(32);
+  s32 [32] output;
+  parallel p by 32 : thread {
+    output.at(p) = flat.at(p) * 2;
+  }
+  return output;
+}
+
+int main() {
+  // Test 1
+  {
+    auto lhs = choreo::make_spandata<choreo::s32, 3>({2, 3, 64});
+    auto rhs = choreo::make_spandata<choreo::s32, 3>({2, 3, 64});
+    for (int i = 0; i < 384; ++i) {
+      lhs.data()[i] = i;
+      rhs.data()[i] = 384 - i;
+    }
+    auto result = ele_add_span_as(lhs.view(), rhs.view());
+    bool ok = true;
+    for (int i = 0; i < 384; ++i)
+      if (result.data()[i] != 384) ok = false;
+    std::cout << "Test span_as_add " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+
+  // Test 2
+  {
+    auto a = choreo::make_spandata<choreo::s32, 2>({4, 8});
+    for (int i = 0; i < 32; ++i) a.data()[i] = i + 5;
+    auto result = span_as_flatten(a.view());
+    bool ok = true;
+    for (int i = 0; i < 32; ++i)
+      if (result[i] != (i + 5) * 2) ok = false;
+    std::cout << "Test span_as_flatten " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+}
+
+// CHECK: Test span_as_add Passed
+// CHECK: Test span_as_flatten Passed
