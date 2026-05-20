@@ -1,0 +1,20 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void arith_test(f32 [64] a) {
+  f32 [64] output;
+  parallel p by 64 : thread {
+    output.at(p) = __sqrt(a.at(p));
+  }
+}
+
+// CHECK: sqrtf(
+
+__co__ void trig_test(f32 [64] a) {
+  f32 [64] output;
+  parallel p by 64 : thread {
+    output.at(p) = __sin(a.at(p)) + __cos(a.at(p));
+  }
+}
+
+// CHECK: sinf(
+// CHECK: cosf(

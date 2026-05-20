@@ -179,9 +179,10 @@ bool HIPCodeGen::Visit(AST::Rotate&) {
   return false;
 }
 
-bool HIPCodeGen::Visit(AST::Yield&) {
-  choreo_unreachable("Yield is not supported by AMDGPU target.");
-  return false;
+bool HIPCodeGen::Visit(AST::Yield& n) {
+  TraceEachVisit(n);
+  IndStream() << "return;\n";
+  return true;
 }
 
 bool HIPCodeGen::Visit(AST::Break& n) {
@@ -1043,8 +1044,11 @@ bool HIPCodeGen::Visit(AST::Call& n) {
       if (func_name == "println") os << indent << "printf(\"\\n\");\n";
       return true;
     }
-    if (n.IsArith()) { return true; }
-    if (n.IsAtomic()) { /* fall through to CallSTR emission below */ }
+    if (func_name == "setreg" || func_name == "launch_bounds") {
+      return true;
+    }
+    if (n.IsArith()) { /* fall through to CallSTR emission below */ }
+    else if (n.IsAtomic()) { /* fall through to CallSTR emission below */ }
     else choreo_unreachable("builtin '" + func_name + "' not supported by amdgpu.");
   }
 
@@ -1173,6 +1177,9 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     return id->name;
   }
   if (auto expr = dyn_cast<AST::Expr>(n)) {
+    if (expr->IsUnary() && expr->op == Op::Cast) {
+      return ExprSTR(expr->GetR(), is_host);
+    }
     if (expr->IsUnary()) {
       return Choreo::STR(expr->op) + "(" + ExprSTR(expr->GetR(), is_host) + ")";
     }
@@ -1284,6 +1291,37 @@ const std::string HIPCodeGen::CallSTR(AST::Call& n) const {
       else
         result += OpExprSTR(a, "", true, IsHost());
       ++i;
+    }
+    result += ")";
+    return result;
+  }
+
+  if (n.IsArith()) {
+    static const std::unordered_map<std::string, std::string> arith_map = {
+        {"__sqrt", "sqrtf"},     {"__rsqrt", "rsqrtf"},
+        {"__exp", "expf"},       {"__expm1", "expm1f"},
+        {"__log", "logf"},       {"__log1p", "log1pf"},
+        {"__pow", "powf"},       {"__sin", "sinf"},
+        {"__cos", "cosf"},       {"__tan", "tanf"},
+        {"__asin", "asinf"},     {"__acos", "acosf"},
+        {"__atan", "atanf"},     {"__atan2", "atan2f"},
+        {"__sinh", "sinhf"},     {"__cosh", "coshf"},
+        {"__tanh", "tanhf"},     {"__ceil", "ceilf"},
+        {"__floor", "floorf"},   {"__round", "roundf"},
+        {"__isfinite", "isfinite"},
+        {"__sign", "__fsignbit"},
+        {"__gelu", "__gelu"},
+        {"__sigmoid", "__sigmoid"},
+        {"__softplus", "__softplus"},
+    };
+    auto it = arith_map.find(n.function->name);
+    std::string func = (it != arith_map.end()) ? it->second : n.function->name;
+    std::string result = func + "(";
+    if (n.arguments) {
+      for (size_t i = 0; i < n.arguments->Count(); i++) {
+        if (i > 0) result += ", ";
+        result += OpExprSTR(n.arguments->ValueAt(i), "", true, IsHost());
+      }
     }
     result += ")";
     return result;
