@@ -127,6 +127,10 @@ Option<bool> print_stats(
 Option<bool> disable_cuda_runtime_env_check(
     OptionKind::Hidden, "--disable-cuda-runtime-env-check", "", false,
     "Do not emit cuda runtime enviroment check.");
+Option<bool> zero_cost(OptionKind::User, "--zero-cost", "-zero-cost", false,
+                       "Zero-overhead mode: disable all runtime checks "
+                       "(-rtc=none), DMA diagnosis (-dd=false), and CUDA "
+                       "runtime environment check.");
 #ifdef CHOREO_FAST_COMPILE_DEFAULT
 constexpr bool kFastCompileDefault = true;
 #else
@@ -482,11 +486,18 @@ bool CommandLine::Parse(int argc, char** argv) {
     }
   }
 
+  if (zero_cost.GetValue()) {
+    CCtx().SetRuntimeCheckCostThreshold(AssertionCost::NONE);
+    CCtx().SetDMADiagnosis(false);
+    CCtx().SetDisableCudaRuntimeEnvCheck(true);
+  }
+
   CCtx().SetShowAssess(show_assess.GetValue());
   CCtx().SetTraceAssess(trace_assess.GetValue());
   CCtx().SetPrintStats(print_stats.GetValue());
-  CCtx().SetDisableCudaRuntimeEnvCheck(
-      disable_cuda_runtime_env_check.GetValue());
+  if (!zero_cost.GetValue())
+    CCtx().SetDisableCudaRuntimeEnvCheck(
+        disable_cuda_runtime_env_check.GetValue());
   CCtx().SetFastCompile(fast_compile.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
 
