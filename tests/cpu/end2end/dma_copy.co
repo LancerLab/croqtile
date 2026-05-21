@@ -1,0 +1,112 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -gs %target %s -o %s.cc.result && bash %s.cc.result --execute | FileCheck --match-full-lines %s && rm -f %s.cc.result
+
+// --- Test 1: sync DMA copy round-trip 1D ---
+__co__ auto dma_copy_sync_1d(s32 [128] input) {
+  s32 [128] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+// --- Test 2: async DMA copy with wait ---
+__co__ auto dma_copy_async(s32 [128] input) {
+  s32 [128] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy.async input => shared;
+    wait f;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+// --- Test 3: sync DMA copy 2D ---
+__co__ auto dma_copy_2d(s32 [32, 64] input) {
+  s32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+// --- Test 4: sync DMA copy 3D ---
+__co__ auto dma_copy_3d(s32 [4, 8, 16] input) {
+  s32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = dma.copy input => shared;
+    dma.copy f.data => output;
+  }
+
+  return output;
+}
+
+int main() {
+  {
+    auto a = choreo::make_spandata<choreo::s32>(128);
+    for (size_t i = 0; i < 128; ++i)
+      a[i] = static_cast<choreo::s32>(i * 7 + 3);
+
+    auto res = dma_copy_sync_1d(a.view());
+    for (size_t i = 0; i < 128; ++i)
+      choreo::choreo_assert(a[i] == res[i], "copy_sync_1d mismatch");
+
+    std::cout << "Test copy_sync_1d Passed" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::s32>(128);
+    for (size_t i = 0; i < 128; ++i)
+      a[i] = static_cast<choreo::s32>(i * 3 + 1);
+
+    auto res = dma_copy_async(a.view());
+    for (size_t i = 0; i < 128; ++i)
+      choreo::choreo_assert(a[i] == res[i], "copy_async mismatch");
+
+    std::cout << "Test copy_async Passed" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::s32>(32, 64);
+    for (size_t i = 0; i < 32; ++i)
+      for (size_t j = 0; j < 64; ++j)
+        a[i][j] = static_cast<choreo::s32>(i * 64 + j);
+
+    auto res = dma_copy_2d(a.view());
+    for (size_t i = 0; i < 32; ++i)
+      for (size_t j = 0; j < 64; ++j)
+        choreo::choreo_assert(a[i][j] == res[i][j], "copy_2d mismatch");
+
+    std::cout << "Test copy_2d Passed" << std::endl;
+  }
+
+  {
+    auto a = choreo::make_spandata<choreo::s32>(4, 8, 16);
+    for (size_t i = 0; i < 4; ++i)
+      for (size_t j = 0; j < 8; ++j)
+        for (size_t k = 0; k < 16; ++k)
+          a[i][j][k] = static_cast<choreo::s32>(i * 128 + j * 16 + k);
+
+    auto res = dma_copy_3d(a.view());
+    for (size_t i = 0; i < 4; ++i)
+      for (size_t j = 0; j < 8; ++j)
+        for (size_t k = 0; k < 16; ++k)
+          choreo::choreo_assert(a[i][j][k] == res[i][j][k], "copy_3d mismatch");
+
+    std::cout << "Test copy_3d Passed" << std::endl;
+  }
+}
+
+// CHECK: Test copy_sync_1d Passed
+// CHECK: Test copy_async Passed
+// CHECK: Test copy_2d Passed
+// CHECK: Test copy_3d Passed
