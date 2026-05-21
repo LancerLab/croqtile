@@ -1,4 +1,5 @@
 // RUN: choreo %target -es --runtime-check=all %s -o - | FileCheck %s
+// RUN: choreo %target -es --runtime-check=all %s -o - | FileCheck %s --check-prefix=HOIST
 //
 // The with-block iteration variable `j` is a static element accessor that is
 // always initialised to 0 when the with-body starts executing.  A direct
@@ -37,6 +38,6 @@ __co__ void foo(int N) {
 // After foreach, j reverts to __iv_j (=0); the z access generates no assert.
 // CHECK: int z =
 
-// The bound check (N) is hoisted to host
-// CHECK: choreo::runtime_check((static_cast<long long>(N) - 1 < 8LL)
+// The bound check (N) is hoisted (position varies by target).
+// HOIST: choreo::runtime_check((static_cast<long long>(N) - 1 < 8LL)
 
