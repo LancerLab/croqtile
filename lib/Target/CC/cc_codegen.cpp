@@ -6,10 +6,12 @@
 #include <iostream>
 #include <sstream>
 
+#include "assert_site.hpp"
 #include "ast.hpp"
 #include "choreo_header.inc"
 #include "choreo_types_header.inc"
 #include "codegen.hpp"
+#include "context.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -61,19 +63,61 @@ static const char* CCBaseTypeName(BaseType bt) {
   return "";
 }
 
-const std::string CCCodeGen::ValueSTR(const ValueItem& vi) const {
-  if (auto iv = VIInt(vi)) return std::to_string(*iv);
-  if (auto sv = VISym(vi)) return UnScopedExpr(ssm.HostName(sv.value()));
+const std::string CCCodeGen::OpValueSTR(const ValueItem& vi,
+                                        const std::string& parent_op,
+                                        bool is_left_child,
+                                        bool ll_suffix) const {
+  auto WrapParen = [&](const std::string& s, const std::string& cur_op) {
+    if (Operator::NeedParen(cur_op, parent_op, is_left_child))
+      return "(" + s + ")";
+    if (parent_op.empty()) return "(" + s + ")";
+    return s;
+  };
+
+  if (auto iv = VIInt(vi)) {
+    auto s = std::to_string(*iv);
+    return ll_suffix ? s + "LL" : s;
+  }
+  if (auto bv = VIBool(vi)) return PSTR(vi);
+  if (auto sv = VISym(vi)) {
+    auto res = UnScopedExpr(ssm.HostName(sv.value()));
+    if (ll_suffix) return "static_cast<long long>(" + res + ")";
+    return res;
+  }
   if (auto bo = VIBop(vi)) {
-    auto l = ValueSTR(bo->GetLeft());
-    auto r = ValueSTR(bo->GetRight());
-    return "(" + l + " " + STR(bo->GetOpCode()) + " " + r + ")";
+    if (bo->GetOpCode() == OpCode::ADD) {
+      if (auto rv = VIInt(bo->GetRight()); rv && rv.value() < 0) {
+        std::string res =
+            OpValueSTR(bo->GetLeft(), "-", true, ll_suffix) + " - " +
+            std::to_string(-rv.value());
+        return WrapParen(res, "-");
+      }
+    }
+    std::string op = STR(bo->GetOpCode());
+    std::string res =
+        OpValueSTR(bo->GetLeft(), op, true, ll_suffix) + " " + op + " " +
+        OpValueSTR(bo->GetRight(), op, false, ll_suffix);
+    return WrapParen(res, op);
   }
   if (auto uo = VIUop(vi)) {
-    return "(" + STR(uo->GetOpCode()) + ValueSTR(uo->GetOperand()) + ")";
+    std::string op = STR(uo->GetOpCode());
+    std::string res = op + OpValueSTR(uo->GetOperand(), op, false, ll_suffix);
+    return WrapParen(res, op);
+  }
+  if (auto to = VITop(vi)) {
+    std::string op = "?";
+    std::string res = OpValueSTR(to->GetPred(), op, true) + " ? " +
+                      OpValueSTR(to->GetLeft(), op, true, ll_suffix) + " : " +
+                      OpValueSTR(to->GetRight(), op, false, ll_suffix);
+    return WrapParen(res, op);
   }
   choreo_unreachable("unsupported ValueItem in CC codegen.");
   return "";
+}
+
+const std::string CCCodeGen::ValueSTR(const ValueItem& vi,
+                                      bool ll_suffix) const {
+  return OpValueSTR(vi, "", true, ll_suffix);
 }
 
 const std::string CCCodeGen::ValueSTR(const ValueList& vl,
@@ -285,12 +329,17 @@ void CCCodeGen::EmitPreamble() {
 // ---- BeforeVisitImpl / InMidVisitImpl / AfterVisitImpl ----
 
 bool CCCodeGen::BeforeVisitImpl(AST::Node& n) {
+  EmitPreSiteAssertions(n);
+
   if (isa<AST::Program>(&n)) {
     EmitPreamble();
+    code_segments.push_back(os.str());
+    os.str("");
     ssm.EnterScope();
     levels.push(ParallelLevel::NONE);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetFunctionStates();
+    BuildSiteAssertionMap();
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
     levels.push(ParallelLevel::SEQ);
@@ -315,6 +364,8 @@ bool CCCodeGen::InMidVisitImpl(AST::Node& n) {
 }
 
 bool CCCodeGen::AfterVisitImpl(AST::Node& n) {
+  EmitPostSiteAssertions(n);
+
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
 
@@ -409,6 +460,62 @@ void CCCodeGen::EmitFuncDecl() {
   os << ")";
 }
 
+void CCCodeGen::EmitEntryAssertions() {
+  if (CCtx().DisableRuntimeCheck()) return;
+
+  for (const auto& rc : FCtx(fname).GetRtChecks()) {
+    IndStream() << "choreo::runtime_check(" << ValueSTR(sbe::sym(rc.lhs))
+                << " " << rc.op << " " << ValueSTR(sbe::sym(rc.rhs)) << ", \""
+                << rc.message << ", " << rc.loc << "\");\n";
+  }
+
+  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
+    if (!ar.enabled) continue;
+    IndStream() << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
+                << ", \"" << ar.message << ", " << ar.loc << "\");\n";
+  }
+}
+
+void CCCodeGen::BuildSiteAssertionMap() {
+  if (CCtx().DisableRuntimeCheck()) return;
+  if (fname.empty()) return;
+
+  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::USE_SITE)) {
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
+  }
+  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::HOIST_SITE)) {
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
+  }
+}
+
+void CCCodeGen::EmitPreSiteAssertions(AST::Node& n) {
+  auto it = pre_site_assertions.find(&n);
+  if (it == pre_site_assertions.end()) return;
+
+  for (const auto& ar : it->second) {
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true)
+                << ", \"" << ar.message << ", " << ar.loc << "\");\n";
+  }
+}
+
+void CCCodeGen::EmitPostSiteAssertions(AST::Node& n) {
+  auto it = post_site_assertions.find(&n);
+  if (it == post_site_assertions.end()) return;
+
+  for (const auto& ar : it->second) {
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true)
+                << ", \"" << ar.message << ", " << ar.loc << "\");\n";
+  }
+}
+
 bool CCCodeGen::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
 
@@ -433,6 +540,8 @@ bool CCCodeGen::Visit(AST::FunctionDecl& n) {
   EmitFuncDecl();
   os << " {\n";
   IncrIndent();
+
+  EmitEntryAssertions();
 
   return true;
 }
@@ -563,11 +672,18 @@ bool CCCodeGen::Visit(AST::DMA& n) {
   std::string from_expr = ExprSTR(n.from);
   std::string to_expr = ExprSTR(n.to);
 
+  if (!n.future.empty()) {
+    auto buf_name = to_ca->RefSymbol();
+    auto host_buf = ssm.HostName(InScopeNameForRef(buf_name));
+    ssm.MapHostSymbol(InScopeNameForRef(n.future), host_buf);
+    ssm.MapHostSymbol(InScopeName(n.future + ".data"), host_buf);
+  }
+
   bool is_async = n.IsAsync();
 
   if (is_async && !n.future.empty()) {
     IndStream() << "auto " << n.future
-                << " = std::async(std::launch::async, [=]() {\n";
+                << " = std::async(std::launch::async, [&]() {\n";
     IncrIndent();
     IndStream() << "std::memcpy((void*)(" << to_expr << "), (const void*)("
                 << from_expr << "), " << size_expr << ");\n";
@@ -757,7 +873,8 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   if (isa<ScalarType>(nty)) {
     if (n.init_expr) {
-      os << indent << "auto " << sym << " = " << ExprSTR(n.init_expr) << ";\n";
+      os << indent << TypeSTR(*nty) << " " << sym << " = "
+         << ExprSTR(n.init_expr) << ";\n";
     } else {
       os << indent << TypeSTR(*nty) << " " << sym << " = {};\n";
     }
@@ -767,7 +884,8 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   if (isa<BoundedType>(nty)) {
     if (n.init_expr)
-      os << indent << "auto " << sym << " = " << ExprSTR(n.init_expr) << ";\n";
+      os << indent << TypeSTR(*nty) << " " << sym << " = "
+         << ExprSTR(n.init_expr) << ";\n";
     else
       os << indent << "int " << sym << " = 0;\n";
     ssm.MapHostSymbol(sname, sym);
@@ -809,8 +927,21 @@ bool CCCodeGen::Visit(AST::Return& n) {
     os << indent << "return " << ExprSTR(n.value) << ";\n";
   } else if (auto sty = dyn_cast<SpannedType>(vty)) {
     if (auto id = AST::GetIdentifier(*n.value)) {
-      os << indent << "return choreo::copy_as_spanned(" << id->name << ", "
-         << id->name << ".shape());\n";
+      auto sym_ty = GetSymbolType(id->name);
+      auto sym_sty = dyn_cast<SpannedType>(sym_ty);
+      if (sym_sty && sym_sty->GetStorage() == Storage::GLOBAL) {
+        auto shape = sym_sty->GetShape();
+        os << indent << "return choreo::copy_as_spanned<"
+           << shape.Rank() << ">(" << id->name << ", {";
+        for (size_t d = 0; d < shape.Rank(); ++d) {
+          if (d > 0) os << ", ";
+          os << "(size_t)" << ValueSTR(shape.ValueAt(d));
+        }
+        os << "});\n";
+      } else {
+        os << indent << "return choreo::copy_as_spanned(" << id->name << ", "
+           << id->name << ".shape());\n";
+      }
     } else {
       os << indent << "return " << ExprSTR(n.value) << ";\n";
     }

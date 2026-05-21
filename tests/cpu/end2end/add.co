@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-CC
+// REQUIRES: TARGET-CPU
 // RUN: choreo -t cc -es %s | FileCheck %s
 
 __co__ void ele_add(s32 [64] a, s32 [64] b, s32 [64] c) {

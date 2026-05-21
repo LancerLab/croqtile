@@ -5,9 +5,12 @@
 #include <sstream>
 #include <stack>
 
+#include "assess.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "codegen_utils.hpp"
+#include "context.hpp"
+#include "operator_info.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -107,9 +110,20 @@ private:
   bool CompileWithScript(const std::string& action);
 
   void EmitFuncDecl();
+  void EmitEntryAssertions();
+  void BuildSiteAssertionMap();
+  void EmitPreSiteAssertions(AST::Node& n);
+  void EmitPostSiteAssertions(AST::Node& n);
+
+  std::unordered_map<AST::Node*, std::vector<Assertion>> pre_site_assertions;
+  std::unordered_map<AST::Node*, std::vector<Assertion>> post_site_assertions;
 
   const std::string ExprSTR(AST::ptr<AST::Node> n) const;
-  const std::string ValueSTR(const ValueItem& vi) const;
+  const std::string OpValueSTR(const ValueItem& vi,
+                               const std::string& parent_op,
+                               bool is_left_child, bool ll_suffix = false) const;
+  const std::string ValueSTR(const ValueItem& vi,
+                             bool ll_suffix = false) const;
   const std::string ValueSTR(const ValueList& vl,
                              const std::string& sep = ", ") const;
   const std::string TypeSTR(const Type& ty) const;
@@ -118,6 +132,8 @@ private:
     fty = nullptr;
     void_return = false;
     indent = "";
+    pre_site_assertions.clear();
+    post_site_assertions.clear();
   }
 };
 
