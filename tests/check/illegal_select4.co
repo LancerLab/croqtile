@@ -12,11 +12,11 @@ __co__ void foo(int xx) {
   }
 }
 
-// USE_SITE assertions (idx+1) are emitted in device code using choreo_assert,
+// USE_SITE assertions (idx+1) are emitted using choreo_assert,
 // with the iteration variable renamed to __iv_idx.
 // The ">= 0" check is skipped because idx is a bounded loop variable (always >= 0).
-// ENTRY assertions (xx -- parameter) are emitted in host code using runtime_check.
-// Device code appears before host code in the output.
-// CHECK: choreo::choreo_assert((static_cast<long long>(__iv_idx) + 1{{(LL)?}} < 3{{(LL)?}}), "The select factor ` (idx + 1) ` should be less than 3, which is the count of values in the select statement, {{.*}}");
-// CHECK: choreo::runtime_check((static_cast<long long>(xx) >= 0{{(LL)?}}), "The select factor `xx` should be greater than or equal to 0, {{.*}}");
-// CHECK: choreo::runtime_check((static_cast<long long>(xx) < 3{{(LL)?}}), "The select factor `xx` should be less than 3, which is the count of values in the select statement, {{.*}}");
+// ENTRY assertions (xx -- parameter) are emitted using runtime_check.
+// The relative order of choreo_assert vs runtime_check varies by target.
+// CHECK-DAG: choreo::choreo_assert((static_cast<long long>(__iv_idx) + 1{{(LL)?}} < 3{{(LL)?}}), "The select factor ` (idx + 1) ` should be less than 3, which is the count of values in the select statement, {{.*}}");
+// CHECK-DAG: choreo::runtime_check((static_cast<long long>(xx) >= 0{{(LL)?}}), "The select factor `xx` should be greater than or equal to 0, {{.*}}");
+// CHECK-DAG: choreo::runtime_check((static_cast<long long>(xx) < 3{{(LL)?}}), "The select factor `xx` should be less than 3, which is the count of values in the select statement, {{.*}}");
