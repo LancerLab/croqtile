@@ -505,7 +505,7 @@ expand_includes() {
 
 load_cfg_chain() {
   # Walk UP from the test file's directory, collecting Choreo-marked
-  # lit.cfg files.  Stop at script_dir (inclusive) or /.
+  # lit.cfg files.  Stop at repo_root (inclusive) or /.
   # Then source in reverse (parent-first) order.
   local test_path="$1"
   local cfg_name="${2:-lit.cfg}"
@@ -518,7 +518,7 @@ load_cfg_chain() {
     if [[ -f "$d/$cfg_name" ]] && is_choreo_cfg "$d/$cfg_name"; then
       _chain+=("$d/$cfg_name")
     fi
-    [[ "$d" == "$script_dir" ]] && break
+    [[ "$d" == "$repo_root" ]] && break
     [[ "$d" == "/" || -z "$d" ]] && break
     d="${d%/*}"
     [[ -z "$d" ]] && d="/"
@@ -539,10 +539,19 @@ load_cfg_chain() {
 
 # Get the directory where the script is located
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# Repo root is the cfg-chain walk-up boundary.  Prefer git; fall back to
+# the script's parent directory so lit.sh works for tests anywhere in the
+# repository (e.g. tools/co-mock/tests/).
+repo_root="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$repo_root" ]]; then
+  repo_root="$(cd "${script_dir}/.." && pwd)"
+  echo "Warning: not inside a git repository; assuming repo root = $repo_root" >&2
+fi
+repo_root="$(cd "$repo_root" && pwd)"
 timestamp=$(date +%Y%m%d%H%M%S)
 
-# Add the script's parent directory to PATH
-export PATH="$script_dir:${script_dir}/../:${script_dir}/../extern/bin/:${script_dir}/../extern/:$PATH"
+# Add repo root and its tooling directories to PATH
+export PATH="$script_dir:${repo_root}:${repo_root}/extern/bin/:${repo_root}/extern/:$PATH"
 
 # Check if FileCheck exists in the PATH
 FILECHECK=$(which FileCheck \
@@ -564,15 +573,11 @@ if [ -z "$FILECHECK" ]; then
   exit 1
 fi
 
-if ! which choreo &>/dev/null; then
-  echo "Error: choreo is not found in PATH."
-  exit 1
-fi
-
-if ! which copp &>/dev/null; then
-  echo "Error: copp is not found in PATH."
-  exit 1
-fi
+# choreo and copp are optional -- tests that don't use them (e.g. co-mock
+# tests) can run without them.  The sed substitution in execute_command()
+# handles missing binaries gracefully.
+_choreo_bin="$(which choreo 2>/dev/null || true)"
+_copp_bin="$(which copp 2>/dev/null || true)"
 
 if ! which not.sh &>/dev/null; then
   echo "Error: not.sh is not found in PATH."
@@ -650,7 +655,7 @@ declare -A HOOKS_CACHE=()
 # called at most once per unique directory.
 declare -A DIR_TO_CHAIN_KEY=()
 
-# Walk UP from dir to script_dir (or /), collecting Choreo-marked
+# Walk UP from dir to repo_root (or /), collecting Choreo-marked
 # lit.cfg paths.  Returns the result via _cfg_files_key (no subshell).
 # The key is ordered parent-first (reversed from the walk-up order)
 # to match load_cfg_chain's sourcing order.
@@ -661,7 +666,7 @@ compute_cfg_files_key() {
   local d="$dir"
   while :; do
     [[ -f "$d/lit.cfg" ]] && is_choreo_cfg "$d/lit.cfg" && _found+=("$d/lit.cfg")
-    [[ "$d" == "$script_dir" ]] && break
+    [[ "$d" == "$repo_root" ]] && break
     [[ "$d" == "/" || -z "$d" ]] && break
     d="${d%/*}"
     [[ -z "$d" ]] && d="/"
@@ -931,12 +936,16 @@ execute_command() {
   #             Or else it will be replaced to cuda-/bin/gdb
   # IMPORTANT: %s substitution (file path) happens AFTER these sed calls to
   # avoid the binary names (e.g. 'choreo') being matched inside the file path.
-  command=$(echo "$command" | sed \
-    -e "s#\bchoreo\b#$(which choreo) -n#g" \
-    -e "s#\bcopp\b#$(which copp)#g" \
-    -e "s#\bFileCheck\b#${FILECHECK}#g" \
-    -e "s#\bgdb\b#${GDB_BIN}#g" \
-    -e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g")
+  local _co_mock_bin; _co_mock_bin="$(which co-mock 2>/dev/null || echo co-mock)"
+  local _sed_args=()
+  _sed_args+=(-e "s#\bco-mock\b#__CO_MOCK_PLACEHOLDER__#g")
+  [[ -n "$_choreo_bin" ]] && _sed_args+=(-e "s#\bchoreo\b#${_choreo_bin} -n#g")
+  [[ -n "$_copp_bin" ]]   && _sed_args+=(-e "s#\bcopp\b#${_copp_bin}#g")
+  _sed_args+=(-e "s#\bFileCheck\b#${FILECHECK}#g")
+  _sed_args+=(-e "s#\bgdb\b#${GDB_BIN}#g")
+  _sed_args+=(-e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g")
+  _sed_args+=(-e "s#__CO_MOCK_PLACEHOLDER__#${_co_mock_bin}#g")
+  command=$(echo "$command" | sed "${_sed_args[@]}")
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
   run_hooks "target_cmd" "command"

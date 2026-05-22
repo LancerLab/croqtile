@@ -1,0 +1,21 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void dma_test() {
+  s32[4] src;
+  s32[4] dst;
+
+  parallel p by 4
+    src.at(p) = (p + 1) * 100;
+
+  f = dma.copy src => dst;
+
+  println(dst.at(0));
+  println(dst.at(1));
+  println(dst.at(2));
+  println(dst.at(3));
+}
+
+// CHECK: 100
+// CHECK: 200
+// CHECK: 300
+// CHECK: 400

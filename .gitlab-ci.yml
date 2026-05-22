@@ -6,6 +6,32 @@ stages:
 
 # TODO: make package release work
 #  - artifacts
+
+# Mock interpreter testing (no hardware required)
+mock_test:
+  variables:
+   GIT_SUBMODULE_STRATEGY: recursive
+   GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
+  stage: check-in-tests
+  rules:
+    - if: >
+        $CI_COMMIT_BRANCH == "main" || 
+        $CI_COMMIT_BRANCH =~ /^release\// ||
+        $CI_COMMIT_BRANCH =~ /^oss\// ||
+        $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: on_success
+  script:
+    - echo "Running co-mock tests..."
+    - make setup-core
+    - make co-mock-test
+  tags:
+    - GPU
+  timeout: 5m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
+
 # GPU Testing
 gpu_test:
   variables:

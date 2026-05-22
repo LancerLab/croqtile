@@ -10,6 +10,7 @@ tests/*co.test
 extern/*
 choreo
 copp
+/co-mock
 build/
 build-release/
 build-debug/

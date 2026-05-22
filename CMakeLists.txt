@@ -364,6 +364,9 @@ include_directories(${CMAKE_SOURCE_DIR}/runtime)
 # add code sources and rules
 add_subdirectory(lib)
 
+# additional tools (co-mock, etc.)
+add_subdirectory(tools)
+
 # preprocessor executable
 add_executable(copp tools/copp/choreo_preprocess.cpp)
 # choreo compiler executable
@@ -466,6 +469,13 @@ install(TARGETS choreo copp
   RUNTIME DESTINATION bin
   COMPONENT executables
 )
+
+if(CHOREO_BUILD_CO_MOCK)
+  install(TARGETS co-mock
+    RUNTIME DESTINATION bin
+    COMPONENT executables
+  )
+endif()
 
 # SDK headers
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/lib/
