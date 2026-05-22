@@ -1,0 +1,8 @@
+// RUN: echo "c" > %t.script && co-mock -s %t.script %s 2>&1 | FileCheck %s
+
+__co__ void script_test() {
+  s32 x = 42;
+  println(x);
+}
+
+// CHECK: 42

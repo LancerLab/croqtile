@@ -1,0 +1,19 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void parallel_thread_test() {
+  s32[8] data;
+
+  parallel p by 8
+    data.at(p) = p * p;
+
+  // verify all elements were written by threads
+  println(data.at(0));
+  println(data.at(1));
+  println(data.at(4));
+  println(data.at(7));
+}
+
+// CHECK: 0
+// CHECK: 1
+// CHECK: 16
+// CHECK: 49

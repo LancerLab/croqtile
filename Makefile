@@ -154,7 +154,7 @@ build-co-mock-with-cmake-ninja:
 	ninja -C $(CMAKE_BUILD_DIR) co-mock
 	@ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock
 
-co-mock-test: co-mock
+mock-test: co-mock
 	$(LIT) tools/co-mock/tests/
 
 standalone-test-with-cmake: build-with-cmake-ninja
@@ -327,7 +327,7 @@ help:
 	@echo "Test Targets:"
 	@echo "  test                - Run choreo compiler tests"
 	@echo "  test-all            - Run all tests (choreo + co-mock)"
-	@echo "  co-mock-test        - Run co-mock tests only"
+	@echo "  mock-test           - Run co-mock tests only"
 	@echo "  sample-test         - Test all elementwise operators"
 	@echo "  sample-test-operator OPERATOR=name"
 	@echo "                      - Test specific operator"
@@ -399,7 +399,7 @@ standalone_test: $(TARGET)
 	filecheck $< > $@.result
 	@echo "Tested $<"
 
-.PHONY: all clean lines test test-all co-mock co-mock-test
+.PHONY: all clean lines test test-all co-mock mock-test
 
 setup-core: $(SETUP_TARGET_DEPENDS)
 	git submodule update --init --recursive;

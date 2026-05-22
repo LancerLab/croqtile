@@ -318,7 +318,10 @@ Value Value::ReadFromAlloc(size_t byte_offset, BaseType ty) const {
 
 // MockMemory implementation
 
-MockMemory::MockMemory() { scopes.emplace_back(); }
+MockMemory::MockMemory()
+    : alloc_mutex_(std::make_unique<std::mutex>()) {
+  scopes.emplace_back();
+}
 
 void MockMemory::EnterScope() { scopes.emplace_back(); }
 
@@ -358,6 +361,7 @@ bool MockMemory::Exists(const std::string& name) const {
 std::shared_ptr<Allocation>
 MockMemory::Allocate(BaseType elem_type, const std::vector<size_t>& shape,
                      Storage storage) {
+  std::lock_guard<std::mutex> lock(*alloc_mutex_);
   auto alloc = std::make_shared<Allocation>();
   alloc->elem_type = elem_type;
   alloc->shape = shape;
@@ -367,6 +371,21 @@ MockMemory::Allocate(BaseType elem_type, const std::vector<size_t>& shape,
   for (auto s : shape) total *= s;
   alloc->data.resize(total * alloc->ElemSize(), 0);
   return alloc;
+}
+
+MockMemory MockMemory::Fork() const {
+  MockMemory child;
+  child.scopes = scopes;
+  child.thread_stack_ = thread_stack_;
+  return child;
+}
+
+void MockMemory::PushThread(const std::string& pv_name, int64_t index) {
+  thread_stack_.push_back({pv_name, index});
+}
+
+void MockMemory::PopThread() {
+  if (!thread_stack_.empty()) thread_stack_.pop_back();
 }
 
 } // namespace Mock

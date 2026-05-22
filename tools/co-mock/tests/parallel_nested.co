@@ -1,0 +1,20 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void nested_parallel_test() {
+  s32[12] result;
+
+  parallel p by 3 {
+    parallel q by 4 {
+      s32 idx = p * 4 + q;
+      result.at(idx) = idx * 10;
+    }
+  }
+
+  println(result.at(0));
+  println(result.at(5));
+  println(result.at(11));
+}
+
+// CHECK: 0
+// CHECK: 50
+// CHECK: 110

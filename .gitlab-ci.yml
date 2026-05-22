@@ -23,7 +23,7 @@ mock_test:
   script:
     - echo "Running co-mock tests..."
     - make setup-core
-    - make co-mock-test
+    - make mock-test
   tags:
     - GPU
   timeout: 5m

@@ -1,0 +1,17 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void chunk_at_test() {
+  s32[4] arr;
+
+  parallel p by 4
+    arr.at(p) = (p + 1) * 100;
+
+  // .at should return scalar value, not the whole array
+  s32 elem0 = arr.at(0);
+  s32 elem2 = arr.at(2);
+  println(elem0);
+  println(elem2);
+}
+
+// CHECK: 100
+// CHECK: 300

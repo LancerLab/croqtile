@@ -5,6 +5,7 @@
 #include "visitor.hpp"
 
 #include <functional>
+#include <mutex>
 
 namespace Choreo {
 namespace Mock {
@@ -64,11 +65,17 @@ private:
 
   Value CastValue(const Value& v, BaseType target_type) const;
 
+  void ExecParallelByBody(AST::ParallelBy& n, int64_t i, int64_t bound,
+                          const std::string& pv_name, bool has_sub,
+                          const std::vector<std::string>& sub_names,
+                          const std::vector<int64_t>& sub_bounds);
+
   MockMemory mem;
   ControlFlow cf;
   std::map<std::string, AST::ChoreoFunction*> functions;
   Debugger* debugger_ = nullptr;
   bool quit_requested_ = false;
+  std::mutex* print_mutex_ = nullptr;
 };
 
 } // namespace Mock

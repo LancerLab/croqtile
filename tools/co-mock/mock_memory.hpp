@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <stack>
 #include <string>
 #include <unordered_map>
@@ -67,8 +68,15 @@ struct Value {
   Value ReadFromAlloc(size_t byte_offset, BaseType ty) const;
 };
 
+struct ThreadInfo {
+  std::string pv_name;
+  int64_t index;
+};
+
 class MockMemory {
   std::vector<std::unordered_map<std::string, Value>> scopes;
+  std::vector<ThreadInfo> thread_stack_;
+  std::unique_ptr<std::mutex> alloc_mutex_;
 
 public:
   MockMemory();
@@ -84,6 +92,14 @@ public:
   std::shared_ptr<Allocation> Allocate(BaseType elem_type,
                                        const std::vector<size_t>& shape,
                                        Storage storage);
+
+  // Fork a child memory for parallel threads: inherits all current scopes
+  // (snapshot) but shares Allocation objects via shared_ptr.
+  MockMemory Fork() const;
+
+  void PushThread(const std::string& pv_name, int64_t index);
+  void PopThread();
+  const std::vector<ThreadInfo>& ThreadStack() const { return thread_stack_; }
 
   const std::unordered_map<std::string, Value>& CurrentScope() const {
     return scopes.back();
