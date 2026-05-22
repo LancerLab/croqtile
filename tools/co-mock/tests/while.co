@@ -1,0 +1,18 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void while_test() {
+  s32[1] counter;
+  s32[1] result;
+  counter.at(0) = 1;
+  result.at(0) = 1;
+
+  // Compute 5 factorial: 1 * 2 * 3 * 4 * 5 = 120
+  while (counter.at(0) <= 5) {
+    result.at(0) = result.at(0) * counter.at(0);
+    counter.at(0) = counter.at(0) + 1;
+  }
+
+  println(result.at(0));
+}
+
+// CHECK: 120

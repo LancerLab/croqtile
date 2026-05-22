@@ -129,6 +129,10 @@ test-legacy: legacy
 test: build
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
+test-all: build
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
+	$(LIT) tools/co-mock/tests/
+
 test-debug: debug
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
@@ -137,6 +141,19 @@ test-release: release
 
 ci-test:
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+
+# ---- co-mock (standalone mock interpreter) ----
+co-mock: build-co-mock-with-cmake-ninja
+
+build-co-mock-with-cmake-ninja:
+	@echo "Building co-mock..."
+	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
+	ninja -C $(CMAKE_BUILD_DIR) co-mock
+	@ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock
+
+co-mock-test: co-mock
+	$(LIT) tools/co-mock/tests/
 
 standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
@@ -158,6 +175,7 @@ build-with-cmake-ninja:
 	time ninja -C $(CMAKE_BUILD_DIR)
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
+	@test -f $(CMAKE_BUILD_DIR)/co-mock && ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock || true
 
 config-with-cmake-ninja:
 	@echo "Starting build with CMake..."
@@ -298,13 +316,16 @@ help:
 	@echo "==================="
 	@echo ""
 	@echo "Build Targets:"
-	@echo "  all, build          - Build choreo and copp"
+	@echo "  all, build          - Build choreo, copp, and co-mock"
+	@echo "  co-mock             - Build co-mock standalone (no choreo/copp)"
 	@echo "  release             - Build release version"
 	@echo "  debug               - Build debug version"
 	@echo "  clean               - Clean build artifacts"
 	@echo ""
 	@echo "Test Targets:"
-	@echo "  test                - Run all tests"
+	@echo "  test                - Run choreo compiler tests"
+	@echo "  test-all            - Run all tests (choreo + co-mock)"
+	@echo "  co-mock-test        - Run co-mock tests only"
 	@echo "  sample-test         - Test all elementwise operators"
 	@echo "  sample-test-operator OPERATOR=name"
 	@echo "                      - Test specific operator"
@@ -376,7 +397,7 @@ standalone_test: $(TARGET)
 	filecheck $< > $@.result
 	@echo "Tested $<"
 
-.PHONY: all clean lines test
+.PHONY: all clean lines test test-all co-mock co-mock-test
 
 setup-core: $(SETUP_TARGET_DEPENDS)
 	git submodule update --init --recursive;

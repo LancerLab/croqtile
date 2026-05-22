@@ -1,0 +1,22 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void ifelse_test() {
+  s32[8] arr;
+
+  parallel p by 8 {
+    if (p < 4)
+      arr.at(p) = 0;
+    else
+      arr.at(p) = 1;
+  }
+
+  println(arr.at(0));
+  println(arr.at(3));
+  println(arr.at(4));
+  println(arr.at(7));
+}
+
+// CHECK: 0
+// CHECK: 0
+// CHECK: 1
+// CHECK: 1

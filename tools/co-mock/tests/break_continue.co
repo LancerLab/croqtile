@@ -1,0 +1,23 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void break_continue_test() {
+  s32[1] sum;
+  s32[1] i;
+  sum.at(0) = 0;
+  i.at(0) = 0;
+
+  while (i.at(0) < 20) {
+    i.at(0) = i.at(0) + 1;
+    if (i.at(0) > 10)
+      break;
+    if (i.at(0) % 2 == 0)
+      continue;
+    sum.at(0) = sum.at(0) + i.at(0);
+  }
+
+  println(sum.at(0));
+  println(i.at(0));
+}
+
+// CHECK: 25
+// CHECK: 11

@@ -1,0 +1,25 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void add_test() {
+  s32[4] a;
+  s32[4] b;
+  s32[4] c;
+
+  parallel p by 4 {
+    a.at(p) = p + 1;
+    b.at(p) = (p + 1) * 10;
+  }
+
+  parallel q by 4
+    c.at(q) = a.at(q) + b.at(q);
+
+  println(c.at(0));
+  println(c.at(1));
+  println(c.at(2));
+  println(c.at(3));
+}
+
+// CHECK: 11
+// CHECK: 22
+// CHECK: 33
+// CHECK: 44

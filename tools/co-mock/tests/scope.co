@@ -1,0 +1,16 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void scope_test() {
+  int x = 10;
+  s32[4] result;
+
+  parallel p by 4 {
+    result.at(p) = p * 2;
+  }
+
+  println(result.at(2));
+  println(x);
+}
+
+// CHECK: 4
+// CHECK: 10

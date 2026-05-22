@@ -1,0 +1,16 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void foreach_test() {
+  s32[10] arr;
+
+  foreach i in 10
+    arr.at(i) = i * i;
+
+  println(arr.at(0));
+  println(arr.at(3));
+  println(arr.at(9));
+}
+
+// CHECK: 0
+// CHECK: 9
+// CHECK: 81

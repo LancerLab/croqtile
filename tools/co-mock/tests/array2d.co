@@ -1,0 +1,20 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void array2d_test() {
+  s32[3, 4] mat;
+
+  foreach i in 3 {
+    foreach j in 4
+      mat.at(i, j) = i * 4 + j;
+  }
+
+  println(mat.at(0, 0));
+  println(mat.at(0, 3));
+  println(mat.at(1, 0));
+  println(mat.at(2, 3));
+}
+
+// CHECK: 0
+// CHECK: 3
+// CHECK: 4
+// CHECK: 11

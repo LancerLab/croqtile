@@ -1,0 +1,54 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void expr_test() {
+  s32[1] a;
+  s32[1] b;
+  a.at(0) = 7;
+  b.at(0) = 3;
+
+  println(a.at(0) + b.at(0));
+  println(a.at(0) - b.at(0));
+  println(a.at(0) * b.at(0));
+  println(a.at(0) / b.at(0));
+  println(a.at(0) % b.at(0));
+
+  println(a.at(0) > b.at(0));
+  println(a.at(0) < b.at(0));
+  println(a.at(0) == b.at(0));
+  println(a.at(0) != b.at(0));
+
+  s32[1] c;
+  c.at(0) = (a.at(0) > 5) ? 100 : 200;
+  println(c.at(0));
+
+  s32[1] d;
+  d.at(0) = (b.at(0) > 5) ? 100 : 200;
+  println(d.at(0));
+
+  s32[1] e;
+  e.at(0) = a.at(0) & 3;
+  println(e.at(0));
+
+  s32[1] f;
+  f.at(0) = a.at(0) | 8;
+  println(f.at(0));
+
+  s32[1] g;
+  g.at(0) = a.at(0) ^ b.at(0);
+  println(g.at(0));
+}
+
+// CHECK: 10
+// CHECK: 4
+// CHECK: 21
+// CHECK: 2
+// CHECK: 1
+// CHECK: true
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// CHECK: 100
+// CHECK: 200
+// CHECK: 3
+// CHECK: 15
+// CHECK: 4
