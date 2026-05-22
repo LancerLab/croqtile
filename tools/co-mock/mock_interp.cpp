@@ -10,6 +10,7 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <thread>
 
 namespace Choreo {
 namespace Mock {
@@ -122,8 +123,30 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
 }
 
 // -----------------------------------------------------------------------
-// ParallelBy -- serial for-loop over bound range
+// ParallelBy -- threaded execution over bound range
 // -----------------------------------------------------------------------
+void MockInterpreter::ExecParallelByBody(
+    AST::ParallelBy& n, int64_t i, int64_t /*bound*/,
+    const std::string& pv_name, bool has_sub,
+    const std::vector<std::string>& sub_names,
+    const std::vector<int64_t>& sub_bounds) {
+  mem.EnterScope();
+  mem.PushThread(pv_name, i);
+  mem.Define(pv_name, Value::MakeInt(i));
+
+  if (has_sub) {
+    int64_t remaining = i;
+    for (int j = (int)sub_names.size() - 1; j >= 0; --j) {
+      mem.Define(sub_names[j], Value::MakeInt(remaining % sub_bounds[j]));
+      remaining /= sub_bounds[j];
+    }
+  }
+
+  ExecBlock(n.stmts);
+  mem.PopThread();
+  mem.LeaveScope();
+}
+
 void MockInterpreter::ExecParallelBy(AST::ParallelBy& n) {
   auto bound_val = ExprEval(n.BoundExpr());
   int64_t bound = bound_val.AsInt();
@@ -143,28 +166,30 @@ void MockInterpreter::ExecParallelBy(AST::ParallelBy& n) {
     }
   }
 
+  // Shared mutex for serializing print output across threads
+  std::mutex pm;
+  bool own_mutex = (print_mutex_ == nullptr);
+  if (own_mutex) print_mutex_ = &pm;
+
+  std::vector<std::thread> threads;
+  threads.reserve(bound);
+
   for (int64_t i = 0; i < bound; ++i) {
-    mem.EnterScope();
-    mem.Define(pv_name, Value::MakeInt(i));
+    threads.emplace_back([this, &n, i, bound, &pv_name, has_sub, &sub_names,
+                          &sub_bounds, &pm]() {
+      MockInterpreter child;
+      child.mem = mem.Fork();
+      child.functions = functions;
+      child.print_mutex_ = &pm;
 
-    if (has_sub) {
-      int64_t remaining = i;
-      for (int j = (int)sub_names.size() - 1; j >= 0; --j) {
-        mem.Define(sub_names[j], Value::MakeInt(remaining % sub_bounds[j]));
-        remaining /= sub_bounds[j];
-      }
-    }
-
-    ExecBlock(n.stmts);
-    mem.LeaveScope();
-
-    if (cf.kind == ControlFlow::Return) return;
-    if (cf.kind == ControlFlow::Break) {
-      cf.kind = ControlFlow::None;
-      break;
-    }
-    if (cf.kind == ControlFlow::Continue) cf.kind = ControlFlow::None;
+      child.ExecParallelByBody(n, i, bound, pv_name, has_sub, sub_names,
+                               sub_bounds);
+    });
   }
+
+  for (auto& t : threads) t.join();
+
+  if (own_mutex) print_mutex_ = nullptr;
 }
 
 // -----------------------------------------------------------------------
@@ -591,8 +616,29 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
     std::string base_name = chunk->data->name;
     auto dot = base_name.rfind(".data");
     if (dot != std::string::npos) base_name = base_name.substr(0, dot);
-    if (mem.Exists(base_name)) return mem.Lookup(base_name);
-    return Value::MakeInt(0);
+    if (!mem.Exists(base_name)) return Value::MakeInt(0);
+
+    auto& base_val = mem.Lookup(base_name);
+
+    if (chunk->HasOperation() && base_val.kind == Value::Pointer &&
+        base_val.alloc) {
+      for (auto& op : chunk->AllOperations()) {
+        auto indices_mv = op->GetIndices();
+        if (!indices_mv || indices_mv->Count() == 0) continue;
+
+        std::vector<size_t> idx_vals;
+        for (auto& idx_node : indices_mv->AllValues())
+          idx_vals.push_back((size_t)ExprEval(idx_node).AsInt());
+
+        size_t linear =
+            ComputeLinearIndex(idx_vals, base_val.alloc->shape);
+        size_t byte_offset =
+            linear * base_val.alloc->ElemSize() + base_val.offset;
+        return base_val.ReadFromAlloc(byte_offset, base_val.base_type);
+      }
+    }
+
+    return base_val;
   }
 
   if (auto sel = dyn_cast<AST::Select>(e)) {
@@ -683,6 +729,8 @@ Value MockInterpreter::CallBIF(const std::string& name,
                                const std::vector<Value>& args,
                                const AST::Call& node) {
   if (name == "print" || name == "println") {
+    std::unique_lock<std::mutex> lock;
+    if (print_mutex_) lock = std::unique_lock<std::mutex>(*print_mutex_);
     for (size_t i = 0; i < args.size(); ++i) {
       if (i > 0) std::cout << " ";
       std::cout << args[i].ToString();

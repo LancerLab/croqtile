@@ -3,6 +3,7 @@
 
 #include "mock_memory.hpp"
 #include <functional>
+#include <iostream>
 #include <set>
 #include <string>
 
@@ -25,6 +26,8 @@ public:
 
   bool IsActive() const { return active_; }
   void SetActive(bool v) { active_ = v; }
+
+  void SetInputStream(std::istream* is) { input_ = is; }
 
 private:
   enum StopReason { Step, Next, Breakpoint, Initial };
@@ -52,6 +55,7 @@ private:
   int step_depth_ = 0;
   int current_depth_ = 0;
   std::set<int> breakpoints_;
+  std::istream* input_ = &std::cin;
 };
 
 } // namespace Mock

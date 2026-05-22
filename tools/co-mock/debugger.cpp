@@ -42,10 +42,18 @@ void Debugger::ShowLocation(AST::Node& stmt) {
 bool Debugger::CommandLoop(AST::Node& stmt) {
   ShowLocation(stmt);
 
+  bool scripted = (input_ != &std::cin);
+
   while (true) {
-    std::cout << "(co-mock) " << std::flush;
+    if (!scripted) std::cout << "(co-mock) " << std::flush;
     std::string input;
-    if (!std::getline(std::cin, input)) {
+    if (!std::getline(*input_, input)) {
+      if (scripted) {
+        // Script exhausted: switch to stdin for remaining execution
+        input_ = &std::cin;
+        mode_ = Run;
+        return true;
+      }
       std::cout << "\n";
       return false;
     }
@@ -53,7 +61,6 @@ bool Debugger::CommandLoop(AST::Node& stmt) {
     // Trim whitespace
     auto start = input.find_first_not_of(" \t");
     if (start == std::string::npos) {
-      // Empty line repeats last step action
       mode_ = StepInto;
       step_depth_ = current_depth_;
       return true;
@@ -62,9 +69,10 @@ bool Debugger::CommandLoop(AST::Node& stmt) {
     auto end = input.find_last_not_of(" \t");
     if (end != std::string::npos) input = input.substr(0, end + 1);
 
+    if (scripted) std::cout << "(co-mock) " << input << "\n";
+
     if (!ProcessCommand(input, stmt)) return false;
 
-    // If mode changed from the command, resume execution
     if (mode_ == Run || mode_ == StepInto || mode_ == StepOver) return true;
   }
 }

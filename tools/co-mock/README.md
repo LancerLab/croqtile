@@ -33,6 +33,7 @@ co-mock [options] <input.co>
 |--------------------|------------------------------------------|
 | `-e, --dump-ast`   | Dump the AST after semantic analysis     |
 | `-i, --interactive`| Start in interactive debugger mode       |
+| `-s, --script <f>` | Run debugger commands from script file   |
 | `-h, --help`       | Show help message                        |
 
 ### Run a program
@@ -49,6 +50,16 @@ co-mock -i test.co
 
 This drops you into a pdb-style debugger that stops before the first
 statement:
+
+### Script mode
+
+```bash
+co-mock -s commands.txt test.co
+```
+
+Script mode feeds debugger commands from a file. When the script is
+exhausted, execution continues to completion. This enables automated
+debugger testing:
 
 ```
 co-mock debugger -- type 'h' for help
@@ -127,7 +138,9 @@ c[2] = 33
 
 The interpreter supports:
 - Scalar and array variables with full type system
-- `parallel p by N` blocks (sequential iteration)
+- `parallel p by N` blocks with threaded execution
+- Nested `parallel-by` with correct thread-to-index mapping
+- `.at(idx)` element access returning scalar values
 - `foreach` loops, `while` loops, `if-else` blocks
 - `break`, `continue`, and `return` control flow
 - Synchronous DMA copy operations

@@ -23,6 +23,7 @@ namespace {
 
 struct MockOptions {
   std::string input_file;
+  std::string script_file;
   bool dump_ast = false;
   bool interactive = false;
   bool show_help = false;
@@ -38,6 +39,7 @@ void PrintUsage(const char* prog) {
             << "Options:\n"
             << "  -e, --dump-ast      Dump the AST after semantic analysis\n"
             << "  -i, --interactive   Start in interactive debugger mode\n"
+            << "  -s, --script <file> Run debugger commands from a script\n"
             << "  -h, --help          Show this help message\n"
             << "\n"
             << "Interactive debugger commands:\n"
@@ -53,9 +55,10 @@ void PrintUsage(const char* prog) {
             << "  q, quit             Exit\n"
             << "\n"
             << "Examples:\n"
-            << "  " << prog << " test.co          # run directly\n"
-            << "  " << prog << " -i test.co       # interactive debug\n"
-            << "  " << prog << " -e test.co       # dump AST only\n";
+            << "  " << prog << " test.co            # run directly\n"
+            << "  " << prog << " -i test.co         # interactive debug\n"
+            << "  " << prog << " -s cmds.txt test.co  # scripted debug\n"
+            << "  " << prog << " -e test.co         # dump AST only\n";
 }
 
 bool ParseArgs(int argc, char* argv[], MockOptions& opts) {
@@ -67,6 +70,14 @@ bool ParseArgs(int argc, char* argv[], MockOptions& opts) {
     } else if (arg == "-e" || arg == "--dump-ast") {
       opts.dump_ast = true;
     } else if (arg == "-i" || arg == "--interactive") {
+      opts.interactive = true;
+    } else if (arg == "-s" || arg == "--script") {
+      if (i + 1 < argc)
+        opts.script_file = argv[++i];
+      else {
+        std::cerr << "co-mock: -s requires a script file argument\n";
+        return false;
+      }
       opts.interactive = true;
     } else if (arg[0] == '-' && arg != "-") {
       std::cerr << "co-mock: unknown option '" << arg << "'\n";
@@ -166,10 +177,22 @@ int main(int argc, char* argv[]) {
   Mock::MockInterpreter interp;
 
   Mock::Debugger dbg(interp.GetMemory(), interp);
+  std::ifstream script_stream;
   if (opts.interactive) {
     dbg.SetActive(true);
     interp.SetDebugger(&dbg);
-    std::cout << "co-mock debugger -- type 'h' for help\n";
+    if (!opts.script_file.empty()) {
+      script_stream.open(opts.script_file);
+      if (!script_stream.good()) {
+        std::cerr << "co-mock: cannot open script '" << opts.script_file
+                  << "'\n";
+        return 1;
+      }
+      dbg.SetInputStream(&script_stream);
+      std::cout << "co-mock script mode: " << opts.script_file << "\n";
+    } else {
+      std::cout << "co-mock debugger -- type 'h' for help\n";
+    }
     std::cout << "Debugging: " << opts.input_file << "\n\n";
   }
 
