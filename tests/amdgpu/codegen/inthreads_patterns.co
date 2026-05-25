@@ -1,0 +1,40 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// --- Basic inthreads.async with annotation ---
+__co__ void inthreads_async_test(f32 [64] a) {
+  parallel p by 64 : thread {
+    inthreads.async (p < 32) {
+      a.at(p) = 1.0;
+    };
+    inthreads.async (p >= 32) {
+      a.at(p) = 2.0;
+    };
+    sync.shared;
+  }
+}
+
+// CHECK: if ((__vid_tid_x < 32)) { // inthreads.async
+// CHECK: } // end inthreads
+// CHECK: if ((__vid_tid_x >= 32)) { // inthreads.async
+// CHECK: } // end inthreads
+// CHECK: __syncthreads();
+
+// --- Sync inthreads with barrier ---
+__co__ void inthreads_sync_test(f32 [64] a) {
+  parallel p by 64 : thread {
+    inthreads (p < 32) {
+      a.at(p) = 1.0;
+    };
+    inthreads (p >= 32) {
+      a.at(p) = 2.0;
+    };
+  }
+}
+
+// CHECK: if ((__vid_tid_x < 32)) {
+// CHECK-NOT: inthreads.async
+// CHECK: } // end inthreads
+// CHECK: __syncthreads();
+// CHECK: if ((__vid_tid_x >= 32)) {
+// CHECK: } // end inthreads
+// CHECK: __syncthreads();

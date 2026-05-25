@@ -1,0 +1,43 @@
+// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// Event E2E: verify event declaration and codegen compiles with HIP.
+// 256 threads = 4 wavefronts on gfx1030.
+// Producer wavefronts (0-1, threads 0-127): write shared buf, trigger event.
+// Consumer wavefronts (2-3, threads 128-255): wait event, read buf.
+// No intra-wavefront deadlock since producers and consumers are in separate wavefronts.
+__co__ auto event_cross_wf(s32 [256] a) {
+  s32 [256] output;
+  parallel p by 256 : thread {
+    shared s32 [256] buf;
+    shared event ready;
+    buf.at(p) = a.at(p) + 10;
+    sync.shared;
+    pred = p < 128;
+    inthreads.async (pred) {
+      trigger ready;
+    };
+    inthreads.async (!pred) {
+      wait ready;
+    };
+    sync.shared;
+    output.at(p) = buf.at(p);
+  }
+  return output;
+}
+// CHECK: PASSED
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(256);
+  for (int i = 0; i < 256; ++i) a[i] = i;
+  auto out = event_cross_wf(a.view());
+  bool ok = true;
+  for (int i = 0; i < 256; ++i) {
+    if (out[i] != i + 10) {
+      std::cerr << "FAIL at " << i << ": got " << out[i]
+                << " expected " << (i + 10) << "\n";
+      ok = false;
+    }
+  }
+  std::cout << "event_cross_wf: " << (ok ? "PASSED" : "FAILED") << "\n";
+  return 0;
+}

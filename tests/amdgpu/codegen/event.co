@@ -1,0 +1,67 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// --- Scalar shared event: declare, trigger, wait ---
+__co__ void event_scalar_shared(f32 [64] a) {
+  parallel p by 64 : thread {
+    shared event ep, ec;
+    trigger ec;
+    pred = p >= 32;
+    inthreads.async (pred) { wait ec; trigger ep; };
+    inthreads.async (!pred) { wait ep; trigger ec; };
+    sync.shared;
+  }
+}
+
+// CHECK: __shared__ __volatile__ bool ep; // shared event
+// CHECK: ep = false;
+// CHECK: __shared__ __volatile__ bool ec; // shared event
+// CHECK: ec = false;
+// CHECK: ec = true;
+// CHECK: while (ec == false) continue;
+// CHECK: ec = false;
+// CHECK: ep = true;
+// CHECK: while (ep == false) continue;
+// CHECK: ep = false;
+// CHECK: ec = true;
+// CHECK: __syncthreads()
+
+// --- Event array: declare, trigger, wait ---
+__co__ void event_array_shared(f32 [64] a) {
+  parallel p by 64 : thread {
+    shared event e[2];
+    trigger e;
+    wait e[0];
+    trigger e[1];
+  }
+}
+
+// --- Global event: threadfence before trigger on device ---
+__co__ void event_global(f32 [64] a) {
+  global event ge;
+  parallel p by 64 : thread {
+    trigger ge;
+    wait ge;
+  }
+}
+
+// --- Event array: declare, trigger, wait ---
+// device kernels appear before host functions, so check array kernel first
+// CHECK: __shared__ __volatile__ bool e[2]; // shared event
+// CHECK: e[0] = false;
+// CHECK: e[1] = false;
+// CHECK: e[0] = true;
+// CHECK: e[1] = true;
+// CHECK: while (!e[0] || false) continue;
+// CHECK: e[0] = false;
+// CHECK: e[1] = true;
+
+// global event device code
+// CHECK: __threadfence();
+// CHECK: (*ge) = true;
+// CHECK: while ((*ge) == false) continue;
+// CHECK: (*ge) = false;
+
+// global event host code: alloc, free
+// CHECK: hipMalloc
+// CHECK: hipMemset
+// CHECK: hipFree(ge__device)

@@ -1,8 +1,8 @@
-#include "hip_codegen.hpp"
-#include "hip_dma_plan.hpp"
 #include "assert_site.hpp"
 #include "gpu_adapt.hpp"
 #include "gpu_target.hpp"
+#include "hip_codegen.hpp"
+#include "hip_dma_plan.hpp"
 #include "io.hpp"
 #include "memcheck.hpp"
 #include "pipeline.hpp"
@@ -21,8 +21,7 @@ public:
 
   int DefaultOptLevel(const ArchId&) const override { return 3; }
 
-  const std::set<SwizMode>
-  SupportedSwizzleModes(const ArchId&) const override {
+  const std::set<SwizMode> SupportedSwizzleModes(const ArchId&) const override {
     return {};
   }
 
@@ -35,8 +34,7 @@ public:
 
   const ArchId DefaultArch() const override { return "gfx1030"; }
 
-  size_t GetMemCapacity(const Storage& sto,
-                        const ArchId&) const override {
+  size_t GetMemCapacity(const Storage& sto, const ArchId&) const override {
     if (sto == Storage::LOCAL)
       return 1024;
     else if (sto == Storage::SHARED)
@@ -50,8 +48,7 @@ public:
   size_t GetMinGroupDim(const ArchId&) const override { return 32; }
   size_t GetMaxThreadsPerBlock(const ArchId&) const override { return 1024; }
 
-  size_t GetMemAlignmentByte(const Storage& sto,
-                             const ArchId&) const override {
+  size_t GetMemAlignmentByte(const Storage& sto, const ArchId&) const override {
     switch (sto) {
     case Storage::LOCAL: return 16;
     case Storage::SHARED: return 16;
@@ -66,17 +63,16 @@ public:
     return {
         {STR(ChoreoFeature::DGMA), Description(ChoreoFeature::DGMA)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
-        {STR(ChoreoFeature::VECTORIZE), Description(ChoreoFeature::VECTORIZE)},
         {STR(ChoreoFeature::SLML), Description(ChoreoFeature::SLML)},
+        {STR(ChoreoFeature::EVENT), Description(ChoreoFeature::EVENT)},
     };
   }
 
-  const std::set<BaseType>
-  SupportedScalarTypes(const ArchId&) const override {
+  const std::set<BaseType> SupportedScalarTypes(const ArchId&) const override {
     return {
-        BaseType::F64,  BaseType::F32,  BaseType::F16,  BaseType::BF16,
-        BaseType::S64,  BaseType::U64,  BaseType::S32,  BaseType::U32,
-        BaseType::S16,  BaseType::U16,  BaseType::S8,   BaseType::U8,
+        BaseType::F64, BaseType::F32, BaseType::F16, BaseType::BF16,
+        BaseType::S64, BaseType::U64, BaseType::S32, BaseType::U32,
+        BaseType::S16, BaseType::U16, BaseType::S8,  BaseType::U8,
     };
   }
 
@@ -104,8 +100,7 @@ public:
         {AtomicOp::XOR,
          {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
     caps.push_back(
-        {AtomicOp::CAS,
-         {BaseType::S32, BaseType::U32, BaseType::U64}});
+        {AtomicOp::CAS, {BaseType::S32, BaseType::U32, BaseType::U64}});
     return caps;
   }
 
@@ -117,10 +112,9 @@ public:
 
   size_t VectorizeLimit(const ArchId&) const override { return 128; }
 
-  const std::set<BaseType>
-  VectorizableTypes(const ArchId&) const override {
-    return {BaseType::F32, BaseType::F16, BaseType::BF16,
-            BaseType::S32, BaseType::U32};
+  const std::set<BaseType> VectorizableTypes(const ArchId&) const override {
+    return {BaseType::F32, BaseType::F16, BaseType::BF16, BaseType::S32,
+            BaseType::U32};
   }
 
   bool EnforceVectorAlignment(const ArchId&) const override { return false; }
@@ -163,7 +157,6 @@ std::unique_ptr<Target> CreateAMDGPU() {
 
 static bool registered = [] {
   TargetRegistry::Register(AMDGPUTarget::Id(), "hip",
-                           "HIP target for AMD GPUs (RDNA 2+).",
-                           &CreateAMDGPU);
+                           "HIP target for AMD GPUs (RDNA 2+).", &CreateAMDGPU);
   return true;
 }();

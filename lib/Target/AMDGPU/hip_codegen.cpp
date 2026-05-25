@@ -1,8 +1,8 @@
 #include "hip_codegen.hpp"
-#include "hip_dma_plan.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "context.hpp"
+#include "hip_dma_plan.hpp"
 #include "options.hpp"
 #include "types.hpp"
 
@@ -70,10 +70,9 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
     case OutputKind::TargetSourceCode: EmitSource(); break;
     case OutputKind::TargetModule:
     case OutputKind::TargetExecutable:
-      if (!CompileWithScript(
-              CCtx().GetOutputKind() == OutputKind::TargetModule
-                  ? "--compile-module"
-                  : "--compile-link")) {
+      if (!CompileWithScript(CCtx().GetOutputKind() == OutputKind::TargetModule
+                                 ? "--compile-module"
+                                 : "--compile-link")) {
         error_count++;
         return false;
       }
@@ -127,7 +126,7 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
-      ds << d_indent << "}";
+      ds << d_indent << "} // end inthreads";
       if (!it->async && it->outer) ds << "\n" << d_indent << "__syncthreads();";
       ds << "\n";
     }
@@ -165,17 +164,86 @@ bool HIPCodeGen::Visit(AST::WhereBind&) { return true; }
 bool HIPCodeGen::Visit(AST::WithBlock&) { return true; }
 
 bool HIPCodeGen::Visit(AST::MMA&) {
-  choreo_unreachable("MMA is not supported by AMDGPU target.");
+  choreo_unreachable("MMA is not yet supported by the HIP target.");
   return false;
 }
 
-bool HIPCodeGen::Visit(AST::Trigger&) {
-  choreo_unreachable("Trigger is not supported by AMDGPU target.");
-  return false;
+bool HIPCodeGen::Visit(AST::Trigger& n) {
+  TraceEachVisit(n);
+
+  auto EmitDeviceEventTrigger = [&](auto fty, auto f, auto expr,
+                                    bool is_array_ref) {
+    auto ety_sto = [&]() {
+      if (auto ea = dyn_cast<EventArrayType>(fty)) return ea->GetStorage();
+      return cast<EventType>(fty)->GetStorage();
+    }();
+    switch (ety_sto) {
+    case Storage::GLOBAL:
+      ds << d_indent << "__threadfence();\n";
+      [[fallthrough]];
+    case Storage::SHARED:
+    case Storage::LOCAL:
+      if (auto ea = dyn_cast<EventArrayType>(fty)) {
+        if (is_array_ref) {
+          size_t lvl = AST::GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = true;\n",
+                                bty->RemainderDimensions(lvl));
+        } else
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = true;\n",
+                                ea->RemainderDimensions(0));
+      } else {
+        if (is_array_ref) {
+          size_t lvl = AST::GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = true;\n",
+                                bty->RemainderDimensions(lvl));
+        } else
+          ds << d_indent << ExprSTR(f, false) << " = true;\n";
+      }
+      break;
+    default:
+      choreo_unreachable("unsupported event storage '" + STR(ety_sto) +
+                         "' to trigger.");
+    }
+  };
+
+  for (auto& f : n.GetEvents()) {
+    auto expr = cast<AST::Expr>(f);
+    bool is_array_ref = (expr->op == Op::ElemOf);
+    assert(IsSymbolOrArrayRef(*f) &&
+           "expect either symbol or array reference.");
+    auto fty = is_array_ref
+                   ? GetSymbolType(AST::GetArrayBaseSymbol(*expr)->name)
+                   : NodeType(*f);
+    if (auto ety = dyn_cast<EventArrayType>(fty)) {
+      if (IsHost()) {
+        assert(ety->GetStorage() == Storage::GLOBAL);
+        hs << h_indent << "choreo::abend_true(hipMemset(&" << ExprSTR(f, true)
+           << ", 1, " << ety->ElemCount() << "));\n";
+      } else {
+        EmitDeviceEventTrigger(fty, f, expr, is_array_ref);
+      }
+    } else if (auto ety = dyn_cast<EventType>(fty)) {
+      if (IsHost()) {
+        assert(ety->GetStorage() == Storage::GLOBAL);
+        hs << h_indent << "choreo::abend_true(hipMemset(&" << ExprSTR(f, true)
+           << ", 1, 1));\n";
+      } else {
+        EmitDeviceEventTrigger(fty, f, expr, is_array_ref);
+      }
+    }
+  }
+  return true;
 }
 
 bool HIPCodeGen::Visit(AST::Rotate&) {
-  choreo_unreachable("Rotate is not supported by AMDGPU target.");
+  choreo_unreachable("Rotate (future ring) is not yet supported by the HIP "
+                     "target.");
   return false;
 }
 
@@ -218,22 +286,98 @@ bool HIPCodeGen::Visit(AST::Synchronize& n) {
     hs << h_indent << "hipDeviceSynchronize();\n";
     hs << h_indent << "choreo::verify_device_status();\n";
     break;
-  case Storage::SHARED:
-    ds << d_indent << "__syncthreads();\n";
-    break;
-  case Storage::LOCAL:
-    ds << d_indent << "__threadfence_block();\n";
-    break;
+  case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
+  case Storage::LOCAL: ds << d_indent << "__threadfence_block();\n"; break;
   default:
-    choreo_unreachable("unsupported synchronization type: " +
-                       STR(n.Resource()) + ".");
+    choreo_unreachable(
+        "unsupported synchronization type: " + STR(n.Resource()) + ".");
   }
   return true;
 }
 
 bool HIPCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
-  ds << d_indent << "__syncthreads();\n";
+
+  if (NeedLevelPred()) {
+    ds << d_indent << LevelPred(Level()) << "{\n";
+    IncrDeviceIndent();
+  }
+
+  for (auto& f : n.GetTargets()) {
+    auto expr = cast<AST::Expr>(f);
+    bool is_array_ref = (expr->op == Op::ElemOf);
+    auto fty = is_array_ref
+                   ? GetSymbolType(AST::GetArrayBaseSymbol(*expr)->name)
+                   : NodeType(*f);
+    if (isa<FutureType>(fty)) {
+      assert(!IsHost());
+      ds << d_indent << ExprSTR(f, false) << ".wait();\n";
+    } else if (auto ety = dyn_cast<EventArrayType>(fty)) {
+      if (IsHost())
+        choreo_unreachable("yet to support: wait global event in host.");
+      switch (ety->GetStorage()) {
+      case Storage::GLOBAL:
+      case Storage::SHARED:
+      case Storage::LOCAL: {
+        ds << d_indent << "while (";
+        if (is_array_ref) {
+          size_t lvl = AST::GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(ds, "!" + ExprSTR(f, false), " || ",
+                                bty->RemainderDimensions(lvl));
+        } else
+          GenerateSubscriptions(ds, "!" + ExprSTR(f, false), " || ",
+                                ety->RemainderDimensions(0));
+        ds << "false) continue;\n";
+        if (is_array_ref) {
+          size_t lvl = AST::GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+                                bty->RemainderDimensions(lvl));
+        } else
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+                                ety->RemainderDimensions(0));
+      } break;
+      default:
+        choreo_unreachable("unsupported event array storage '" +
+                           STR(ety->GetStorage()) + "'.");
+      }
+    } else if (auto ety = dyn_cast<EventType>(fty)) {
+      if (IsHost())
+        choreo_unreachable("yet to support: wait global event in host.");
+      switch (ety->GetStorage()) {
+      case Storage::GLOBAL:
+      case Storage::SHARED:
+      case Storage::LOCAL: {
+        ds << d_indent << "while (" << ExprSTR(f, false)
+           << " == false) continue; // spinlock\n";
+        if (is_array_ref) {
+          size_t lvl = AST::GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+                                bty->RemainderDimensions(lvl));
+        } else
+          ds << d_indent << ExprSTR(f, false) << " = false; // reset event\n";
+      } break;
+      default:
+        choreo_unreachable("unsupported event storage '" +
+                           STR(ety->GetStorage()) + "'.");
+      }
+    }
+  }
+
+  if (NeedLevelPred()) {
+    DecrDeviceIndent();
+    ds << d_indent << "}\n";
+    ds << d_indent << "__syncthreads();\n";
+  }
+
   return true;
 }
 
@@ -329,6 +473,7 @@ bool HIPCodeGen::Visit(AST::FunctionDecl& n) {
 
 bool HIPCodeGen::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
+  if (void_return) EmitHipFree();
   DecrHostIndent();
   hs << "}\n\n";
   return true;
@@ -355,24 +500,32 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
   case ParallelLevel::GROUP: {
     std::string vid_pfx = "__vid_";
     if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.BPV()->name), vid_pfx + "gid_x");
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.BPV()->name),
+                                    vid_pfx + "gid_x");
     if (n.AllSubPVs().size() > 0)
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(0)->name), vid_pfx + "gid_x");
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(0)->name),
+                                    vid_pfx + "gid_x");
     if (n.AllSubPVs().size() > 1)
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(1)->name), vid_pfx + "gid_y");
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(1)->name),
+                                    vid_pfx + "gid_y");
     if (n.AllSubPVs().size() > 2)
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(2)->name), vid_pfx + "gid_z");
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(2)->name),
+                                    vid_pfx + "gid_z");
   } break;
   case ParallelLevel::THREAD: {
     std::string vid_pfx = "__vid_";
     if (n.AllSubPVs().size() == 1)
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.BPV()->name), vid_pfx + "tid_x");
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.BPV()->name),
+                                    vid_pfx + "tid_x");
     if (n.AllSubPVs().size() > 0)
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(0)->name), vid_pfx + "tid_x");
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(0)->name),
+                                    vid_pfx + "tid_x");
     if (n.AllSubPVs().size() > 1)
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(1)->name), vid_pfx + "tid_y");
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(1)->name),
+                                    vid_pfx + "tid_y");
     if (n.AllSubPVs().size() > 2)
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(2)->name), vid_pfx + "tid_z");
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetSubPV(2)->name),
+                                    vid_pfx + "tid_z");
   } break;
   default: break;
   }
@@ -390,7 +543,8 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     return ValueSTR(vi);
   };
   auto block_str = [&vi_str](const ParallelCounts& pc) -> std::string {
-    return "dim3(" + vi_str(pc.x) + ", " + vi_str(pc.y) + ", " + vi_str(pc.z) + ")";
+    return "dim3(" + vi_str(pc.x) + ", " + vi_str(pc.y) + ", " + vi_str(pc.z) +
+           ")";
   };
 
   auto grid_str = block_str(lc.block_count);
@@ -400,7 +554,8 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     auto prod_x = gc.x * tc.x;
     auto prod_y = gc.y * tc.y;
     auto prod_z = gc.z * tc.z;
-    return "dim3(" + vi_str(prod_x) + ", " + vi_str(prod_y) + ", " + vi_str(prod_z) + ")";
+    return "dim3(" + vi_str(prod_x) + ", " + vi_str(prod_y) + ", " +
+           vi_str(prod_z) + ")";
   }();
 
   ds << "\n__global__ void " << device_fn << "(";
@@ -414,9 +569,16 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     } else if (CanYieldAnInteger(item.type)) {
       ds << "int " << UnScopedName(item.name);
       ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
-    } else if (auto ety = dyn_cast<EventType>(item.type)) {
-      (void)ety;
-      continue;
+    } else if (isa<EventArrayType>(item.type)) {
+      ds << "bool * " << UnScopedName(item.name);
+      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
+    } else if (auto et = dyn_cast<EventType>(item.type)) {
+      if (et->GetStorage() == Storage::GLOBAL) {
+        ds << "bool * " << UnScopedName(item.name);
+      } else {
+        ds << "bool " << UnScopedName(item.name);
+      }
+      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
     } else {
       ds << HostTypeStringify(*item.type) << " " << UnScopedName(item.name);
       ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
@@ -434,13 +596,11 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
   hs << h_indent << device_fn << "<<<__grid, __block>>>(";
   first = true;
   for (auto& item : cgi.GetDeviceAllIns(fname)) {
-    if (auto ety = dyn_cast<EventType>(item.type)) {
-      (void)ety;
-      continue;
-    }
     if (!first) hs << ", ";
     if (dyn_cast<SpannedType>(item.type)) {
       hs << ssm.HostName(item.name + "__device");
+    } else if (isa<EventArrayType>(item.type) || isa<EventType>(item.type)) {
+      hs << ssm.HostName(item.name);
     } else {
       hs << ssm.HostName(item.name);
     }
@@ -468,8 +628,10 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       auto name_x = cast<AST::Identifier>(sub_pvs[0])->name;
       auto name_y = cast<AST::Identifier>(sub_pvs[1])->name;
       ds << d_indent << "int __vid_bid = blockIdx.x;\n";
-      ds << d_indent << "int __vid_bid_x = __vid_bid / " << ValueSTR(pv_y) << ";\n";
-      ds << d_indent << "int __vid_bid_y = __vid_bid % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "int __vid_bid_x = __vid_bid / " << ValueSTR(pv_y)
+         << ";\n";
+      ds << d_indent << "int __vid_bid_y = __vid_bid % " << ValueSTR(pv_y)
+         << ";\n";
       ssm.MapDeviceSymbolIfNotExist(InScopeName(name_x), "__vid_bid_x");
       ssm.MapDeviceSymbolIfNotExist(InScopeName(name_y), "__vid_bid_y");
     }
@@ -483,7 +645,8 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
     }
     if (sub_pvs.size() >= 2) {
       auto name = cast<AST::Identifier>(sub_pvs[1])->name;
-      ds << d_indent << "int __vid_gid_y = (threadIdx.x / 32) % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "int __vid_gid_y = (threadIdx.x / 32) % "
+         << ValueSTR(pv_y) << ";\n";
       ssm.MapDeviceSymbolIfNotExist(InScopeName(name), "__vid_gid_y");
     }
     break;
@@ -497,8 +660,10 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       auto name_x = cast<AST::Identifier>(sub_pvs[0])->name;
       auto name_y = cast<AST::Identifier>(sub_pvs[1])->name;
       ds << d_indent << "int __vid_tid = threadIdx.x;\n";
-      ds << d_indent << "int __vid_tid_x = __vid_tid / " << ValueSTR(pv_y) << ";\n";
-      ds << d_indent << "int __vid_tid_y = __vid_tid % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "int __vid_tid_x = __vid_tid / " << ValueSTR(pv_y)
+         << ";\n";
+      ds << d_indent << "int __vid_tid_y = __vid_tid % " << ValueSTR(pv_y)
+         << ";\n";
       ssm.MapDeviceSymbolIfNotExist(InScopeName(name_x), "__vid_tid_x");
       ssm.MapDeviceSymbolIfNotExist(InScopeName(name_y), "__vid_tid_y");
     }
@@ -554,6 +719,8 @@ bool HIPCodeGen::Visit(AST::DMA& n) {
   auto to_sty = GetSpannedType(NodeType(*n.GetTo()));
   if (!to_sty) return true;
 
+  ds << d_indent << "// DMA " << dec->operation << " [" << STR(dec->strategy)
+     << ", " << STR(dec->direction) << "]\n";
   if (dec->IsPad()) {
     EmitDMAPad(n, *dec, from_expr, to_expr, from_sty, to_sty);
   } else if (dec->IsTranspose()) {
@@ -562,8 +729,7 @@ bool HIPCodeGen::Visit(AST::DMA& n) {
     EmitDMACopy(*dec, from_expr, to_expr, to_sty);
   }
 
-  if (!is_async)
-    ds << d_indent << "__syncthreads();\n";
+  if (!is_async) ds << d_indent << "__syncthreads();\n";
 
   return true;
 }
@@ -574,16 +740,14 @@ void HIPCodeGen::EmitDMACopy(const HIPDMALoweringDecision& dec,
                              const ptr<SpannedType>& to_sty) {
   auto bt_name = HIPNameBaseType(dec.elem_type);
   auto size_expr = UnScopedSizeExpr(*to_sty);
-  ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
-     << size_expr << " / sizeof(" << bt_name
-     << "); __i += blockDim.x) {\n";
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < " << size_expr
+     << " / sizeof(" << bt_name << "); __i += blockDim.x) {\n";
   ds << d_indent << "  ((" << bt_name << "*)" << to_expr << ")[__i] = "
      << "((" << bt_name << "*)" << from_expr << ")[__i];\n";
   ds << d_indent << "}\n";
 }
 
-void HIPCodeGen::EmitDMAPad(AST::DMA& n,
-                            const HIPDMALoweringDecision& dec,
+void HIPCodeGen::EmitDMAPad(AST::DMA& n, const HIPDMALoweringDecision& dec,
                             const std::string& from_expr,
                             const std::string& to_expr,
                             const ptr<SpannedType>& from_sty,
@@ -595,15 +759,13 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n,
   auto to_size_expr = UnScopedSizeExpr(*to_sty);
 
   std::string pad_val = "0";
-  if (pad_cfg->GetPadValue())
-    pad_val = ExprSTR(pad_cfg->GetPadValue(), false);
+  if (pad_cfg->GetPadValue()) pad_val = ExprSTR(pad_cfg->GetPadValue(), false);
 
   // Step 1: fill entire destination with pad value
-  ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
-     << to_size_expr << " / sizeof(" << bt_name
-     << "); __i += blockDim.x) {\n";
-  ds << d_indent << "  ((" << bt_name << "*)" << to_expr
-     << ")[__i] = (" << bt_name << ")" << pad_val << ";\n";
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < " << to_size_expr
+     << " / sizeof(" << bt_name << "); __i += blockDim.x) {\n";
+  ds << d_indent << "  ((" << bt_name << "*)" << to_expr << ")[__i] = ("
+     << bt_name << ")" << pad_val << ";\n";
   ds << d_indent << "}\n";
   ds << d_indent << "__syncthreads();\n";
 
@@ -632,8 +794,8 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n,
     to_dim_strs.push_back(ValueSTR(to_vals[i]));
   }
 
-  ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
-     << from_elem_count << "; __i += blockDim.x) {\n";
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < " << from_elem_count
+     << "; __i += blockDim.x) {\n";
 
   // Decompose flat index __i into multi-dim coords using from_shape
   ds << d_indent << "  size_t __rem = __i;\n";
@@ -644,8 +806,8 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n,
       std::string stride_expr = from_dim_strs[d + 1];
       for (int k = d + 2; k < rank; ++k)
         stride_expr = "(" + stride_expr + " * " + from_dim_strs[k] + ")";
-      ds << d_indent << "  size_t " << dim_name << " = __rem / ("
-         << stride_expr << ");\n";
+      ds << d_indent << "  size_t " << dim_name << " = __rem / (" << stride_expr
+         << ");\n";
       ds << d_indent << "  __rem = __rem % (" << stride_expr << ");\n";
     } else {
       ds << d_indent << "  size_t " << dim_name << " = __rem;\n";
@@ -656,7 +818,8 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n,
   ds << d_indent << "  size_t __dst_idx = ";
   for (int d = 0; d < rank; ++d) {
     if (d > 0) ds << " + ";
-    std::string coord = "(__d" + std::to_string(d) + " + " + pad_low_vals[d] + ")";
+    std::string coord =
+        "(__d" + std::to_string(d) + " + " + pad_low_vals[d] + ")";
     if (d < rank - 1) {
       std::string stride_expr = to_dim_strs[d + 1];
       for (int k = d + 2; k < rank; ++k)
@@ -668,13 +831,12 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n,
   }
   ds << ";\n";
 
-  ds << d_indent << "  ((" << bt_name << "*)" << to_expr
-     << ")[__dst_idx] = ((" << bt_name << "*)" << from_expr << ")[__i];\n";
+  ds << d_indent << "  ((" << bt_name << "*)" << to_expr << ")[__dst_idx] = (("
+     << bt_name << "*)" << from_expr << ")[__i];\n";
   ds << d_indent << "}\n";
 }
 
-void HIPCodeGen::EmitDMATranspose(AST::DMA&,
-                                  const HIPDMALoweringDecision& dec,
+void HIPCodeGen::EmitDMATranspose(AST::DMA&, const HIPDMALoweringDecision& dec,
                                   const std::string& from_expr,
                                   const std::string& to_expr,
                                   const ptr<SpannedType>& from_sty,
@@ -688,8 +850,7 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&,
 
   auto perm = dec.transpose_perm;
   if (perm.empty()) {
-    for (int i = rank - 1; i >= 0; --i)
-      perm.push_back(i);
+    for (int i = rank - 1; i >= 0; --i) perm.push_back(i);
   }
 
   auto from_size_expr = UnScopedSizeExpr(*from_sty);
@@ -703,8 +864,8 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&,
     to_dim_strs.push_back(ValueSTR(to_vals[i]));
   }
 
-  ds << d_indent << "for (size_t __i = threadIdx.x; __i < "
-     << from_elem_count << "; __i += blockDim.x) {\n";
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < " << from_elem_count
+     << "; __i += blockDim.x) {\n";
 
   // Decompose flat index into source multi-dim coords
   ds << d_indent << "  size_t __rem = __i;\n";
@@ -714,8 +875,8 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&,
       std::string stride_expr = from_dim_strs[d + 1];
       for (int k = d + 2; k < rank; ++k)
         stride_expr = "(" + stride_expr + " * " + from_dim_strs[k] + ")";
-      ds << d_indent << "  size_t " << dim_name << " = __rem / ("
-         << stride_expr << ");\n";
+      ds << d_indent << "  size_t " << dim_name << " = __rem / (" << stride_expr
+         << ");\n";
       ds << d_indent << "  __rem = __rem % (" << stride_expr << ");\n";
     } else {
       ds << d_indent << "  size_t " << dim_name << " = __rem;\n";
@@ -738,8 +899,8 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&,
   }
   ds << ";\n";
 
-  ds << d_indent << "  ((" << bt_name << "*)" << to_expr
-     << ")[__dst_idx] = ((" << bt_name << "*)" << from_expr << ")[__i];\n";
+  ds << d_indent << "  ((" << bt_name << "*)" << to_expr << ")[__dst_idx] = (("
+     << bt_name << "*)" << from_expr << ")[__i];\n";
   ds << d_indent << "}\n";
 }
 
@@ -794,7 +955,7 @@ bool HIPCodeGen::Visit(AST::Assignment& n) {
   auto scoped_name = InScopeName(name);
 
   bool already_declared = (IsHost() ? ssm.HasHostName(scoped_name)
-                                     : ssm.HasDeviceName(scoped_name));
+                                    : ssm.HasDeviceName(scoped_name));
 
   if (already_declared) {
     os << indent << SSMName(scoped_name, IsHost()) << " = "
@@ -813,8 +974,8 @@ bool HIPCodeGen::Visit(AST::Assignment& n) {
   }
 
   if (auto scalar = dyn_cast<ScalarType>(nty)) {
-    os << indent << HIPNameBaseType(scalar->GetBaseType()) << " " << name << " = "
-       << ExprSTR(n.value, IsHost()) << ";\n";
+    os << indent << HIPNameBaseType(scalar->GetBaseType()) << " " << name
+       << " = " << ExprSTR(n.value, IsHost()) << ";\n";
     if (IsHost())
       ssm.MapHostSymbol(scoped_name, name);
     else
@@ -943,6 +1104,83 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
     return true;
   }
 
+  if (auto ety = dyn_cast<EventArrayType>(nty)) {
+    auto eaname = UniqueDeviceName(n.name_str);
+    switch (ety->GetStorage()) {
+    case Storage::GLOBAL: {
+      assert(IsHost());
+      auto buf_sym = eaname + "__device";
+      hs << h_indent << "bool * " << buf_sym << " = nullptr;\n";
+      hs << h_indent << "choreo::abend_true(hipMalloc(&" << buf_sym << ", "
+         << ety->ElemCount() << "));\n";
+      hs << h_indent << "choreo::abend_true(hipMemset(" << buf_sym << ", 0, "
+         << ety->ElemCount() << "));\n";
+      ssm.MapHostSymbol(sname, buf_sym);
+      ssm.MapDeviceSymbol(sname, eaname);
+      global_buffers.insert(buf_sym);
+      event_global_buffers.push_back(buf_sym);
+    } break;
+    case Storage::SHARED:
+    case Storage::LOCAL: {
+      assert(!IsHost());
+      auto mem_qual =
+          (ety->GetStorage() == Storage::SHARED) ? "__shared__ " : "";
+      ds << d_indent << mem_qual << "__volatile__ bool " << eaname;
+      ety->PrintAsCArray(ds);
+      ds << "; // " << STR(ety->GetStorage()) << " event\n";
+      if (ety->GetStorage() == Storage::SHARED)
+        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      GenerateSubscriptions(ds, "  " + d_indent + eaname, " = false;\n",
+                            ety->Dimensions());
+      if (ety->GetStorage() == Storage::SHARED) {
+        ds << d_indent << "}\n";
+        ds << d_indent << "__syncthreads();\n";
+      }
+      ssm.MapDeviceSymbolIfNotExist(sname, eaname);
+    } break;
+    default: break;
+    }
+    return true;
+  }
+
+  if (auto ety = dyn_cast<EventType>(nty)) {
+    auto ename = UniqueDeviceName(n.name_str);
+    switch (ety->GetStorage()) {
+    case Storage::GLOBAL: {
+      assert(IsHost());
+      auto buf_sym = ename + "__device";
+      hs << h_indent << "bool * " << buf_sym << " = nullptr;\n";
+      hs << h_indent << "choreo::abend_true(hipMalloc(&" << buf_sym
+         << ", 1));\n";
+      hs << h_indent << "choreo::abend_true(hipMemset(" << buf_sym
+         << ", 0, 1));\n";
+      ssm.MapHostSymbol(sname, buf_sym);
+      ssm.MapDeviceSymbol(sname, "(*" + ename + ")");
+      global_buffers.insert(buf_sym);
+      event_global_buffers.push_back(buf_sym);
+    } break;
+    case Storage::SHARED:
+    case Storage::LOCAL: {
+      assert(!IsHost());
+      auto mem_qual =
+          (ety->GetStorage() == Storage::SHARED) ? "__shared__ " : "";
+      ds << d_indent << mem_qual << "__volatile__ bool " << ename << "; // "
+         << STR(ety->GetStorage()) << " event\n";
+      if (ety->GetStorage() == Storage::SHARED)
+        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      ds << d_indent << (ety->GetStorage() == Storage::SHARED ? "  " : "")
+         << ename << " = false;\n";
+      if (ety->GetStorage() == Storage::SHARED) {
+        ds << d_indent << "}\n";
+        ds << d_indent << "__syncthreads();\n";
+      }
+      ssm.MapDeviceSymbolIfNotExist(sname, ename);
+    } break;
+    default: break;
+    }
+    return true;
+  }
+
   return true;
 }
 
@@ -988,7 +1226,8 @@ bool HIPCodeGen::Visit(AST::InThreadsBlock& n) {
   assert(!IsHost());
   if (!n.stmts->None()) {
     auto pred_str = ExprSTR(n.pred, false);
-    ds << d_indent << "if (" << pred_str << ") {\n";
+    ds << d_indent << "if (" << pred_str << ") {"
+       << (n.async ? " // inthreads.async" : "") << "\n";
   }
   IncrDeviceIndent();
   return true;
@@ -1029,8 +1268,8 @@ bool HIPCodeGen::Visit(AST::Call& n) {
     const auto func_name = n.function->name;
     if (func_name == "assert") {
       auto args = n.arguments;
-      os << indent << "choreo::choreo_assert(" << ExprSTR(args->ValueAt(0), IsHost())
-         << ", \"assertion failed\");\n";
+      os << indent << "choreo::choreo_assert("
+         << ExprSTR(args->ValueAt(0), IsHost()) << ", \"assertion failed\");\n";
       return true;
     }
     if (func_name == "print" || func_name == "println") {
@@ -1044,12 +1283,12 @@ bool HIPCodeGen::Visit(AST::Call& n) {
       if (func_name == "println") os << indent << "printf(\"\\n\");\n";
       return true;
     }
-    if (func_name == "setreg" || func_name == "launch_bounds") {
-      return true;
-    }
-    if (n.IsArith()) { /* fall through to CallSTR emission below */ }
-    else if (n.IsAtomic()) { /* fall through to CallSTR emission below */ }
-    else choreo_unreachable("builtin '" + func_name + "' not supported by amdgpu.");
+    if (func_name == "setreg" || func_name == "launch_bounds") { return true; }
+    if (n.IsArith()) {         /* fall through to CallSTR emission below */
+    } else if (n.IsAtomic()) { /* fall through to CallSTR emission below */
+    } else
+      choreo_unreachable("builtin '" + func_name +
+                         "' not supported by amdgpu.");
   }
 
   if (!n.IsExpr()) os << indent << CallSTR(n) << ";\n";
@@ -1070,23 +1309,21 @@ bool HIPCodeGen::Visit(AST::Return& n) {
       auto sty = dyn_cast<SpannedType>(vty);
       if (sty) {
         auto sname = InScopeName(sym);
-        hs << h_indent << "choreo::abend_true(hipMemcpy("
-           << sym << ".data(), "
-           << ssm.HostName(sname + "__device") << ", "
-           << UnScopedSizeExpr(*sty) << ", hipMemcpyDeviceToHost));\n";
+        hs << h_indent << "choreo::abend_true(hipMemcpy(" << sym << ".data(), "
+           << ssm.HostName(sname + "__device") << ", " << UnScopedSizeExpr(*sty)
+           << ", hipMemcpyDeviceToHost));\n";
       }
     } else if (auto expr = dyn_cast<AST::Expr>(n.value);
-               expr && (expr->GetOp() == Op::DataOf ||
-                        expr->GetOp() == Op::MDataOf)) {
+               expr &&
+               (expr->GetOp() == Op::DataOf || expr->GetOp() == Op::MDataOf)) {
       if (auto fid = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
         auto vty = GetSymbolType(fid->name);
         auto sty = GetSpannedType(vty);
         if (sty) {
           auto buf_sym = fid->name + "__buf__";
-          hs << h_indent << "choreo::abend_true(hipMemcpy("
-             << buf_sym << ".data(), "
-             << buf_sym << "__device, "
-             << UnScopedSizeExpr(*sty) << ", hipMemcpyDeviceToHost));\n";
+          hs << h_indent << "choreo::abend_true(hipMemcpy(" << buf_sym
+             << ".data(), " << buf_sym << "__device, " << UnScopedSizeExpr(*sty)
+             << ", hipMemcpyDeviceToHost));\n";
         }
       }
     }
@@ -1110,6 +1347,8 @@ void HIPCodeGen::EmitHipFree() {
       hs << h_indent << "hipFree(" << sym << "__device);\n";
     }
   }
+  for (auto& buf : event_global_buffers)
+    hs << h_indent << "hipFree(" << buf << ");\n";
 }
 
 // ============================================================================
@@ -1159,7 +1398,7 @@ std::string HIPCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
 // ============================================================================
 
 const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
-                                         bool is_host) const {
+                                      bool is_host) const {
   if (!n) return "";
 
   if (auto lit = dyn_cast<AST::IntLiteral>(n))
@@ -1183,24 +1422,22 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     if (expr->IsUnary()) {
       return Choreo::STR(expr->op) + "(" + ExprSTR(expr->GetR(), is_host) + ")";
     }
-    if (expr->IsBinary()) {
-      return "(" + ExprSTR(expr->GetL(), is_host) + " " + Choreo::STR(expr->op) +
-             " " + ExprSTR(expr->GetR(), is_host) + ")";
-    }
     if (expr->op == Op::ElemOf) {
       return ExprSTR(expr->GetL(), is_host) + "[" +
              ExprSTR(expr->GetR(), is_host) + "]";
     }
+    if (expr->IsBinary()) {
+      return "(" + ExprSTR(expr->GetL(), is_host) + " " +
+             Choreo::STR(expr->op) + " " + ExprSTR(expr->GetR(), is_host) + ")";
+    }
     if (expr->GetOp() == Op::DataOf || expr->GetOp() == Op::MDataOf) {
       if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
         auto sname = InScopeName(id->name) + ".data";
-        if (!is_host && ssm.HasDeviceName(sname))
-          return ssm.DeviceName(sname);
+        if (!is_host && ssm.HasDeviceName(sname)) return ssm.DeviceName(sname);
         return id->name;
       }
     }
-    if (auto ref = expr->GetReference())
-      return ExprSTR(ref, is_host);
+    if (auto ref = expr->GetReference()) return ExprSTR(ref, is_host);
   }
   if (auto ca = dyn_cast<AST::ChunkAt>(n)) {
     auto sym_name = ca->RefSymbol();
@@ -1221,8 +1458,8 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     auto sty = GetSpannedType(NodeType(*ca));
     assert(sty && "ChunkAt with span operations expects a SpannedType.");
     auto bt_name = HIPNameBaseType(sty->ElementType());
-    return std::string("((") + bt_name + "*)(" + base_expr + ") + " + offset_str +
-           ")";
+    return std::string("((") + bt_name + "*)(" + base_expr + ") + " +
+           offset_str + ")";
   }
   if (auto da = dyn_cast<AST::DataAccess>(n)) {
     auto sym = da->GetDataName();
@@ -1251,6 +1488,19 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     return base;
   }
   if (auto np = dyn_cast<AST::Nullptr>(n)) return "nullptr";
+  if (auto bl = dyn_cast<AST::BoolLiteral>(n))
+    return bl->value ? "true" : "false";
+  if (auto sl = dyn_cast<AST::StringLiteral>(n)) return sl->EscapedVal();
+  if (auto ii = dyn_cast<AST::IntIndex>(n)) return ExprSTR(ii->value, is_host);
+  if (auto it = dyn_cast<AST::IntTuple>(n)) {
+    std::string r = "{";
+    int i = 0;
+    for (auto& v : it->GetValues()->AllValues()) {
+      if (i++ > 0) r += ", ";
+      r += ExprSTR(v, is_host);
+    }
+    return r + "}";
+  }
   if (auto ce = dyn_cast<AST::CastExpr>(n)) {
     if (ce->IsForeignCast())
       return "((" + ce->ForeignType() + ")" + ExprSTR(ce->GetR(), is_host) +
@@ -1263,12 +1513,12 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     if (mv->Count() == 1) return ExprSTR(mv->ValueAt(0), is_host);
   }
 
-  return "/* unsupported expr */";
+  choreo_unreachable("unsupported expression in HIP codegen: " + PSTR(n));
 }
 
 const std::string HIPCodeGen::OpExprSTR(AST::ptr<AST::Node> n,
-                                           const std::string&,
-                                           bool, bool is_host) const {
+                                        const std::string&, bool,
+                                        bool is_host) const {
   return ExprSTR(n, is_host);
 }
 
@@ -1298,16 +1548,26 @@ const std::string HIPCodeGen::CallSTR(AST::Call& n) const {
 
   if (n.IsArith()) {
     static const std::unordered_map<std::string, std::string> arith_map = {
-        {"__sqrt", "sqrtf"},     {"__rsqrt", "rsqrtf"},
-        {"__exp", "expf"},       {"__expm1", "expm1f"},
-        {"__log", "logf"},       {"__log1p", "log1pf"},
-        {"__pow", "powf"},       {"__sin", "sinf"},
-        {"__cos", "cosf"},       {"__tan", "tanf"},
-        {"__asin", "asinf"},     {"__acos", "acosf"},
-        {"__atan", "atanf"},     {"__atan2", "atan2f"},
-        {"__sinh", "sinhf"},     {"__cosh", "coshf"},
-        {"__tanh", "tanhf"},     {"__ceil", "ceilf"},
-        {"__floor", "floorf"},   {"__round", "roundf"},
+        {"__sqrt", "sqrtf"},
+        {"__rsqrt", "rsqrtf"},
+        {"__exp", "expf"},
+        {"__expm1", "expm1f"},
+        {"__log", "logf"},
+        {"__log1p", "log1pf"},
+        {"__pow", "powf"},
+        {"__sin", "sinf"},
+        {"__cos", "cosf"},
+        {"__tan", "tanf"},
+        {"__asin", "asinf"},
+        {"__acos", "acosf"},
+        {"__atan", "atanf"},
+        {"__atan2", "atan2f"},
+        {"__sinh", "sinhf"},
+        {"__cosh", "coshf"},
+        {"__tanh", "tanhf"},
+        {"__ceil", "ceilf"},
+        {"__floor", "floorf"},
+        {"__round", "roundf"},
         {"__isfinite", "isfinite"},
         {"__sign", "__fsignbit"},
         {"__gelu", "__gelu"},
@@ -1338,8 +1598,7 @@ const std::string HIPCodeGen::CallSTR(AST::Call& n) const {
   return result;
 }
 
-const std::string HIPCodeGen::ValueSTR(const ValueItem& vi, bool,
-                                          bool) const {
+const std::string HIPCodeGen::ValueSTR(const ValueItem& vi, bool, bool) const {
   if (!IsValidValueItem(vi)) choreo_unreachable("invalid value item.");
   if (auto iv = VIInt(vi))
     return std::to_string(*iv);
@@ -1348,7 +1607,8 @@ const std::string HIPCodeGen::ValueSTR(const ValueItem& vi, bool,
     return res;
   } else if (auto bo = VIBop(vi)) {
     std::string op = OpCodeToStr(bo->GetOpCode());
-    return "(" + ValueSTR(bo->GetLeft()) + " " + op + " " + ValueSTR(bo->GetRight()) + ")";
+    return "(" + ValueSTR(bo->GetLeft()) + " " + op + " " +
+           ValueSTR(bo->GetRight()) + ")";
   } else if (auto uo = VIUop(vi)) {
     std::string op = OpCodeToStr(uo->GetOpCode());
     return op + "(" + ValueSTR(uo->GetOperand()) + ")";
@@ -1356,9 +1616,8 @@ const std::string HIPCodeGen::ValueSTR(const ValueItem& vi, bool,
   return PSTR(vi);
 }
 
-const std::string HIPCodeGen::ValueSTR(const ValueList& vl, bool ll,
-                                          bool shp,
-                                          const std::string& sep) const {
+const std::string HIPCodeGen::ValueSTR(const ValueList& vl, bool ll, bool shp,
+                                       const std::string& sep) const {
   std::string result;
   for (size_t i = 0; i < vl.size(); i++) {
     if (i > 0) result += sep;
@@ -1368,8 +1627,7 @@ const std::string HIPCodeGen::ValueSTR(const ValueList& vl, bool ll,
 }
 
 const std::string HIPCodeGen::ShapeSTR(const Shape& s, bool ll,
-                                          const std::string& sep,
-                                          BaseType) const {
+                                       const std::string& sep, BaseType) const {
   return ValueSTR(s.Value(), ll, false, sep);
 }
 
@@ -1399,8 +1657,7 @@ void HIPCodeGen::EmitFixedDeviceHead() {
 }
 
 void HIPCodeGen::EmitSource() {
-  for (auto& code : code_segments)
-    outs() << code << "\n";
+  for (auto& code : code_segments) outs() << code << "\n";
 }
 
 void HIPCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
@@ -1456,8 +1713,7 @@ HIPCC=${ROCM_HOME}/bin/hipcc
   os << __choreo_types_header_as_string << "\nEOF\n\n";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
-  for (auto& code : code_segments)
-    os << code << "\n";
+  for (auto& code : code_segments) os << code << "\n";
   os << "\nEOF\n\n";
 
   auto arch_str = ToLower(CCtx().GetArch());
@@ -1477,8 +1733,8 @@ show_usage() {
 action_compile_module() {
 )script";
   os << "  ${HIPCC} -c --offload-arch=${amdgpu_arch} -std=c++17 -I"
-     << build_path << " " << cc_file << " -o " << build_path
-     << "/__choreo_hip_" << filename << ".o\n";
+     << build_path << " " << cc_file << " -o " << build_path << "/__choreo_hip_"
+     << filename << ".o\n";
   os << "}\n\n";
 
   os << "action_compile_link() {\n";
