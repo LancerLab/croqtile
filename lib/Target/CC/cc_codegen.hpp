@@ -119,11 +119,11 @@ private:
   std::unordered_map<AST::Node*, std::vector<Assertion>> post_site_assertions;
 
   const std::string ExprSTR(AST::ptr<AST::Node> n) const;
+  const std::string CallSTR(AST::Call& n) const;
   const std::string OpValueSTR(const ValueItem& vi,
-                               const std::string& parent_op,
-                               bool is_left_child, bool ll_suffix = false) const;
-  const std::string ValueSTR(const ValueItem& vi,
-                             bool ll_suffix = false) const;
+                               const std::string& parent_op, bool is_left_child,
+                               bool ll_suffix = false) const;
+  const std::string ValueSTR(const ValueItem& vi, bool ll_suffix = false) const;
   const std::string ValueSTR(const ValueList& vl,
                              const std::string& sep = ", ") const;
   const std::string TypeSTR(const Type& ty) const;

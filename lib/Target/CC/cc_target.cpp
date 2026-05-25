@@ -64,6 +64,26 @@ public:
     return 0;
   }
 
+  std::vector<AtomicCapability>
+  SupportedAtomicOps(const ArchId&) const override {
+    std::set<BaseType> int_types = {BaseType::S32, BaseType::U32, BaseType::S64,
+                                    BaseType::U64};
+    std::set<BaseType> add_types = {BaseType::S32, BaseType::U32,
+                                    BaseType::S64, BaseType::U64,
+                                    BaseType::F32, BaseType::F64};
+    return {
+        {AtomicOp::ADD, add_types},  {AtomicOp::SUB, add_types},
+        {AtomicOp::EXCH, int_types}, {AtomicOp::MIN, int_types},
+        {AtomicOp::MAX, int_types},  {AtomicOp::AND, int_types},
+        {AtomicOp::OR, int_types},   {AtomicOp::XOR, int_types},
+        {AtomicOp::CAS, int_types},
+    };
+  }
+
+  std::set<Storage> SupportedAtomicStorages(const ArchId&) const override {
+    return {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
+  }
+
   bool PlanCodeGenStages(ASTPipeline& p) const override {
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();
