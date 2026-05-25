@@ -87,16 +87,15 @@ const std::string CCCodeGen::OpValueSTR(const ValueItem& vi,
   if (auto bo = VIBop(vi)) {
     if (bo->GetOpCode() == OpCode::ADD) {
       if (auto rv = VIInt(bo->GetRight()); rv && rv.value() < 0) {
-        std::string res =
-            OpValueSTR(bo->GetLeft(), "-", true, ll_suffix) + " - " +
-            std::to_string(-rv.value());
+        std::string res = OpValueSTR(bo->GetLeft(), "-", true, ll_suffix) +
+                          " - " + std::to_string(-rv.value());
         return WrapParen(res, "-");
       }
     }
     std::string op = STR(bo->GetOpCode());
-    std::string res =
-        OpValueSTR(bo->GetLeft(), op, true, ll_suffix) + " " + op + " " +
-        OpValueSTR(bo->GetRight(), op, false, ll_suffix);
+    std::string res = OpValueSTR(bo->GetLeft(), op, true, ll_suffix) + " " +
+                      op + " " +
+                      OpValueSTR(bo->GetRight(), op, false, ll_suffix);
     return WrapParen(res, op);
   }
   if (auto uo = VIUop(vi)) {
@@ -308,6 +307,8 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
   } else if (auto sa = dyn_cast<AST::SpanAs>(e)) {
     auto base_name = ssm.HostName(InScopeNameForRef(sa->id->name));
     oss << "static_cast<void*>(" << base_name << ")";
+  } else if (auto call = dyn_cast<AST::Call>(e)) {
+    oss << CallSTR(*call);
   } else {
     choreo_unreachable("unsupported CC ExprSTR node: " +
                        std::string(e->TypeNameString()));
@@ -316,11 +317,114 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
   return oss.str();
 }
 
+const std::string CCCodeGen::CallSTR(AST::Call& n) const {
+  if (n.IsAtomic()) {
+    static const std::unordered_map<std::string, std::string> atomic_map = {
+        {"__atomic_add", "__atomic_fetch_add"},
+        {"__atomic_sub", "__atomic_fetch_sub"},
+        {"__atomic_exch", "__atomic_exchange_n"},
+        {"__atomic_min", "__atomic_fetch_min"},
+        {"__atomic_max", "__atomic_fetch_max"},
+        {"__atomic_and", "__atomic_fetch_and"},
+        {"__atomic_or", "__atomic_fetch_or"},
+        {"__atomic_xor", "__atomic_fetch_xor"},
+    };
+    auto it = atomic_map.find(n.function->name);
+    if (it != atomic_map.end()) {
+      std::string result = it->second + "(";
+      size_t i = 0;
+      for (auto& a : n.GetArguments()) {
+        if (i > 0) result += ", ";
+        if (i == 0)
+          result += "&(" + ExprSTR(a) + ")";
+        else
+          result += ExprSTR(a);
+        ++i;
+      }
+      if (n.function->name == "__atomic_exch")
+        result += ", __ATOMIC_SEQ_CST)";
+      else
+        result += ", __ATOMIC_RELAXED)";
+      return result;
+    }
+    if (n.function->name == "__atomic_cas") {
+      auto args = n.GetArguments();
+      std::string result = "({ auto __cmp = " + ExprSTR(args[1]) +
+                           "; __atomic_compare_exchange_n(&(" +
+                           ExprSTR(args[0]) + "), &__cmp, " + ExprSTR(args[2]) +
+                           ", false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)"
+                           " ? __cmp : __cmp; })";
+      return result;
+    }
+  }
+
+  if (n.IsArith()) {
+    static const std::unordered_map<std::string, std::string> arith_map = {
+        {"__sqrt", "std::sqrt"},   {"__rsqrt", ""},
+        {"__exp", "std::exp"},     {"__expm1", "std::expm1"},
+        {"__log", "std::log"},     {"__log1p", "std::log1p"},
+        {"__pow", "std::pow"},     {"__sin", "std::sin"},
+        {"__cos", "std::cos"},     {"__tan", "std::tan"},
+        {"__asin", "std::asin"},   {"__acos", "std::acos"},
+        {"__atan", "std::atan"},   {"__atan2", "std::atan2"},
+        {"__sinh", "std::sinh"},   {"__cosh", "std::cosh"},
+        {"__tanh", "std::tanh"},   {"__ceil", "std::ceil"},
+        {"__floor", "std::floor"}, {"__round", "std::round"},
+        {"__abs", "std::abs"},     {"__fabs", "std::fabs"},
+        {"__fmod", "std::fmod"},   {"__fmax", "std::fmax"},
+        {"__fmin", "std::fmin"},   {"__isfinite", "std::isfinite"},
+    };
+    auto it = arith_map.find(n.function->name);
+    std::string func;
+    if (it != arith_map.end() && !it->second.empty()) {
+      func = it->second;
+    } else if (n.function->name == "__rsqrt") {
+      std::string arg = ExprSTR(n.arguments->ValueAt(0));
+      return "(1.0 / std::sqrt(" + arg + "))";
+    } else if (n.function->name == "__sign") {
+      std::string arg = ExprSTR(n.arguments->ValueAt(0));
+      return "std::signbit(" + arg + ")";
+    } else if (n.function->name == "__gelu") {
+      std::string x = ExprSTR(n.arguments->ValueAt(0));
+      return "(" + x + " * 0.5 * (1.0 + std::erf(" + x +
+             " * 0.7071067811865476)))";
+    } else if (n.function->name == "__sigmoid") {
+      std::string x = ExprSTR(n.arguments->ValueAt(0));
+      return "(1.0 / (1.0 + std::exp(-(" + x + "))))";
+    } else if (n.function->name == "__softplus") {
+      std::string x = ExprSTR(n.arguments->ValueAt(0));
+      return "std::log(1.0 + std::exp(" + x + "))";
+    } else {
+      func = n.function->name;
+    }
+    std::string result = func + "(";
+    if (n.arguments) {
+      for (size_t i = 0; i < n.arguments->Count(); i++) {
+        if (i > 0) result += ", ";
+        result += ExprSTR(n.arguments->ValueAt(i));
+      }
+    }
+    result += ")";
+    return result;
+  }
+
+  std::string result = n.function->name + "(";
+  if (n.arguments) {
+    for (size_t i = 0; i < n.arguments->Count(); i++) {
+      if (i > 0) result += ", ";
+      result += ExprSTR(n.arguments->ValueAt(i));
+    }
+  }
+  result += ")";
+  return result;
+}
+
 // ---- Preamble Emission ----
 
 void CCCodeGen::EmitPreamble() {
   os << "#define __CHOREO_TARGET_CC__\n";
   os << "#include \"choreo.h\"\n";
+  os << "#include <cmath>\n";
   os << "#include <cstring>\n";
   os << "#include <cstdlib>\n";
   os << "#include <future>\n\n";
@@ -413,7 +517,11 @@ bool CCCodeGen::AfterVisitImpl(AST::Node& n) {
         os << indent << ssm.HostName(*iv_itr) << " = 0;\n";
       }
     }
-  } else if (isa<AST::InThreadsBlock>(&n)) {
+  } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
+    if (!it->stmts->None()) {
+      DecrIndent();
+      IndStream() << "}\n";
+    }
   } else if (isa<AST::IfElseBlock>(&n)) {
     DecrIndent();
     IndStream() << "}\n";
@@ -464,15 +572,15 @@ void CCCodeGen::EmitEntryAssertions() {
   if (CCtx().DisableRuntimeCheck()) return;
 
   for (const auto& rc : FCtx(fname).GetRtChecks()) {
-    IndStream() << "choreo::runtime_check(" << ValueSTR(sbe::sym(rc.lhs))
-                << " " << rc.op << " " << ValueSTR(sbe::sym(rc.rhs)) << ", \""
+    IndStream() << "choreo::runtime_check(" << ValueSTR(sbe::sym(rc.lhs)) << " "
+                << rc.op << " " << ValueSTR(sbe::sym(rc.rhs)) << ", \""
                 << rc.message << ", " << rc.loc << "\");\n";
   }
 
   for (const auto& ar : FCtx(fname).GetAssertions(AssessType::ENTRY)) {
     if (!ar.enabled) continue;
-    IndStream() << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
-                << ", \"" << ar.message << ", " << ar.loc << "\");\n";
+    IndStream() << "choreo::runtime_check(" << ValueSTR(ar.expr, true) << ", \""
+                << ar.message << ", " << ar.loc << "\");\n";
   }
 }
 
@@ -501,8 +609,8 @@ void CCCodeGen::EmitPreSiteAssertions(AST::Node& n) {
   if (it == pre_site_assertions.end()) return;
 
   for (const auto& ar : it->second) {
-    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true)
-                << ", \"" << ar.message << ", " << ar.loc << "\");\n";
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""
+                << ar.message << ", " << ar.loc << "\");\n";
   }
 }
 
@@ -511,8 +619,8 @@ void CCCodeGen::EmitPostSiteAssertions(AST::Node& n) {
   if (it == post_site_assertions.end()) return;
 
   for (const auto& ar : it->second) {
-    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true)
-                << ", \"" << ar.message << ", " << ar.loc << "\");\n";
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""
+                << ar.message << ", " << ar.loc << "\");\n";
   }
 }
 
@@ -577,7 +685,6 @@ bool CCCodeGen::Visit(AST::WithIn& n) {
 
 bool CCCodeGen::Visit(AST::WhereBind& n) {
   TraceEachVisit(n);
-  choreo_unreachable("where bind is not supported on the CC target.");
   return true;
 }
 
@@ -614,6 +721,10 @@ bool CCCodeGen::Visit(AST::ForeachBlock& n) {
 
 bool CCCodeGen::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
+  if (!n.stmts->None()) {
+    IndStream() << "if (" << ExprSTR(n.pred) << ") {\n";
+    IncrIndent();
+  }
   return true;
 }
 
@@ -659,6 +770,19 @@ bool CCCodeGen::Visit(AST::ParallelBy& n) {
 
 bool CCCodeGen::Visit(AST::DMA& n) {
   TraceEachVisit(n);
+
+  if (n.IsDummy() || isa<PlaceHolderType>(NodeType(n))) {
+    if (!n.future.empty()) {
+      auto& fbi = FCtx(fname).GetFutureBufferInfo();
+      auto it = fbi.find(InScopeName(n.future));
+      if (it != fbi.end() && !it->second.buffer.empty()) {
+        auto host_buf = ssm.HostName(it->second.buffer);
+        ssm.MapHostSymbol(InScopeNameForRef(n.future), host_buf);
+        ssm.MapHostSymbol(InScopeName(n.future + ".data"), host_buf);
+      }
+    }
+    return true;
+  }
 
   assert(isa<AST::ChunkAt>(n.from) && "DMA source must be ChunkAt.");
   assert(isa<AST::ChunkAt>(n.to) && "DMA destination must be ChunkAt.");
@@ -821,20 +945,13 @@ bool CCCodeGen::Visit(AST::Call& n) {
       return true;
     }
     if (func_name == "launch_bounds" || func_name == "setreg") return true;
-    if (n.IsArith()) {}
+    if (n.IsArith() || n.IsAtomic()) {
+      if (!n.IsExpr()) os << indent << CallSTR(n) << ";\n";
+      return true;
+    }
   }
 
-  if (!n.IsExpr()) {
-    os << indent << n.function->name << "(";
-    if (n.arguments) {
-      size_t i = 0;
-      for (auto& arg : n.arguments->AllValues()) {
-        if (i++ > 0) os << ", ";
-        os << ExprSTR(arg);
-      }
-    }
-    os << ");\n";
-  }
+  if (!n.IsExpr()) { os << indent << CallSTR(n) << ";\n"; }
 
   return true;
 }
@@ -931,8 +1048,8 @@ bool CCCodeGen::Visit(AST::Return& n) {
       auto sym_sty = dyn_cast<SpannedType>(sym_ty);
       if (sym_sty && sym_sty->GetStorage() == Storage::GLOBAL) {
         auto shape = sym_sty->GetShape();
-        os << indent << "return choreo::copy_as_spanned<"
-           << shape.Rank() << ">(" << id->name << ", {";
+        os << indent << "return choreo::copy_as_spanned<" << shape.Rank()
+           << ">(" << id->name << ", {";
         for (size_t d = 0; d < shape.Rank(); ++d) {
           if (d > 0) os << ", ";
           os << "(size_t)" << ValueSTR(shape.ValueAt(d));
