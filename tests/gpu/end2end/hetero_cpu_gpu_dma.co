@@ -1,0 +1,66 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t hetero %s -o %s.hetero.result && bash %s.hetero.result --execute && rm -f %s.hetero.result
+
+#include "choreo.h"
+#include <cmath>
+
+__co__ void hetero_dma_roundtrip(f32 [128] A, f32 [128] &B) {
+  // CPU: A[i] = A[i] * 2
+  parallel.async by 1 : device(cpu) {
+    foreach i in [128] {
+      A.at(i) = A.at(i) * 2.0;
+    }
+  }
+
+  // GPU: DMA round-trip B through shared memory (identity)
+  parallel.async by 1 : device(gpu) {
+    parallel p by 1 : block {
+      parallel q by 128 : thread {
+        shared f32[128] sbuf;
+        sbuf.at(q) = B.at(q);
+        sbuf.at(q) = sbuf.at(q);
+        B.at(q) = sbuf.at(q);
+      }
+    }
+  }
+
+  sync.global;
+}
+
+int main() {
+  choreo::f32 a_buf[128], b_buf[128];
+  auto A = choreo::make_spanview<1, choreo::f32>(a_buf, {128});
+  auto B = choreo::make_spanview<1, choreo::f32>(b_buf, {128});
+
+  for (int i = 0; i < 128; ++i) {
+    A[i] = static_cast<float>(i);
+    B[i] = static_cast<float>(i + 100);
+  }
+
+  hetero_dma_roundtrip(A, B);
+
+  bool pass = true;
+  for (int i = 0; i < 128; ++i) {
+    float expected_a = static_cast<float>(i) * 2.0f;
+    if (std::fabs(A[i] - expected_a) > 1e-5f) {
+      std::cerr << "CPU FAIL at " << i << ": expected " << expected_a
+                << " got " << A[i] << "\n";
+      pass = false;
+      break;
+    }
+  }
+
+  for (int i = 0; i < 128; ++i) {
+    float expected_b = static_cast<float>(i + 100);
+    if (std::fabs(B[i] - expected_b) > 1e-5f) {
+      std::cerr << "GPU FAIL at " << i << ": expected " << expected_b
+                << " got " << B[i] << "\n";
+      pass = false;
+      break;
+    }
+  }
+
+  if (pass) std::cout << "Test Passed\n";
+  else std::cerr << "Test Failed\n";
+  return pass ? 0 : 1;
+}

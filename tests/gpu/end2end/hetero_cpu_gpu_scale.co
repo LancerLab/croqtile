@@ -1,0 +1,88 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -gs -t hetero %s -o %s.hetero.result && bash %s.hetero.result --execute && rm -f %s.hetero.result
+
+#include "choreo.h"
+#include <cmath>
+
+__co__ void hetero_parallel_scale(
+    f32 [4096] A, f32 [4096] &B, f32 [4096] &C, f32 [4096] &D) {
+  // All four arrays processed concurrently: 2 on CPU, 2 on GPU
+  parallel.async by 1 : device(cpu) {
+    foreach i in [4096] {
+      A.at(i) = A.at(i) + 10.0;
+    }
+  }
+
+  parallel.async by 1 : device(gpu) {
+    parallel p by 4 : block {
+      parallel q by 1024 : thread {
+        s32 idx = p * 1024 + q;
+        B.at(idx) = B.at(idx) * 3.0;
+      }
+    }
+  }
+
+  parallel.async by 1 : device(cpu) {
+    foreach i in [4096] {
+      C.at(i) = C.at(i) - 5.0;
+    }
+  }
+
+  parallel.async by 1 : device(gpu) {
+    parallel p by 4 : block {
+      parallel q by 1024 : thread {
+        s32 idx = p * 1024 + q;
+        D.at(idx) = D.at(idx) + 100.0;
+      }
+    }
+  }
+
+  sync.global;
+}
+
+int main() {
+  const int N = 4096;
+  choreo::f32 a_buf[N], b_buf[N], c_buf[N], d_buf[N];
+  auto A = choreo::make_spanview<1, choreo::f32>(a_buf, {N});
+  auto B = choreo::make_spanview<1, choreo::f32>(b_buf, {N});
+  auto C = choreo::make_spanview<1, choreo::f32>(c_buf, {N});
+  auto D = choreo::make_spanview<1, choreo::f32>(d_buf, {N});
+
+  for (int i = 0; i < N; ++i) {
+    A[i] = static_cast<float>(i % 100);
+    B[i] = static_cast<float>(i % 50);
+    C[i] = static_cast<float>(i % 200);
+    D[i] = static_cast<float>(i % 75);
+  }
+
+  hetero_parallel_scale(A, B, C, D);
+
+  bool pass = true;
+  for (int i = 0; i < N; ++i) {
+    float ea = static_cast<float>(i % 100) + 10.0f;
+    float eb = static_cast<float>(i % 50) * 3.0f;
+    float ec = static_cast<float>(i % 200) - 5.0f;
+    float ed = static_cast<float>(i % 75) + 100.0f;
+
+    if (std::fabs(A[i] - ea) > 1e-4f) {
+      std::cerr << "A FAIL at " << i << ": expected " << ea << " got " << A[i] << "\n";
+      pass = false; break;
+    }
+    if (std::fabs(B[i] - eb) > 1e-4f) {
+      std::cerr << "B FAIL at " << i << ": expected " << eb << " got " << B[i] << "\n";
+      pass = false; break;
+    }
+    if (std::fabs(C[i] - ec) > 1e-4f) {
+      std::cerr << "C FAIL at " << i << ": expected " << ec << " got " << C[i] << "\n";
+      pass = false; break;
+    }
+    if (std::fabs(D[i] - ed) > 1e-4f) {
+      std::cerr << "D FAIL at " << i << ": expected " << ed << " got " << D[i] << "\n";
+      pass = false; break;
+    }
+  }
+
+  if (pass) std::cout << "Test Passed\n";
+  else std::cerr << "Test Failed\n";
+  return pass ? 0 : 1;
+}
