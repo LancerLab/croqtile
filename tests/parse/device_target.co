@@ -1,0 +1,13 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+__co__ void foo() {
+  parallel.async by 1: device(cpu) {
+    parallel by 1: block
+    parallel by 1: thread {}
+  }
+  sync.global;
+}
+
+// CHECK:  `- device(cpu) Parallelization: index symbol: anon_0, bound [0, 1)
+// CHECK:   `- block Parallelization: index symbol: anon_1, bound [0, 1)
+// CHECK:    `- thread Parallelization: index symbol: anon_2, bound [0, 1)

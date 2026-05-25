@@ -1,5 +1,6 @@
 #include "assert_site.hpp"
 #include "cc_codegen.hpp"
+#include "cc_device_codegen.hpp"
 #include "memcheck.hpp"
 #include "pipeline.hpp"
 #include "target_registry.hpp"
@@ -13,6 +14,7 @@ class CCTarget : public Target {
 public:
   ~CCTarget() {}
   const std::string Name() const override { return "cc"; }
+  const std::string DeviceName() const override { return "cpu"; }
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
 
   int DefaultOptLevel(const ArchId&) const override { return 2; }
@@ -89,6 +91,10 @@ public:
     p.AddStage<AssertSite>();
     p.AddStage<CC::CCCodeGen>();
     return true;
+  }
+
+  std::unique_ptr<DeviceCodeGen> MakeDeviceCodeGen() const override {
+    return std::make_unique<CCDeviceCodeGen>();
   }
 
 private:

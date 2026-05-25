@@ -396,6 +396,7 @@ private:
   VectorizerStats vectorizer_stats; // accumulated across all functions
   MemReuseStats mem_reuse_stats;    // accumulated across all functions
   std::unique_ptr<Target> compile_target = nullptr;
+  std::map<std::string, std::unique_ptr<Target>> device_targets;
   std::vector<ArchId> archs;
   std::vector<FeatureToggle> features;
   OutputKind out_kind = OutputKind::TargetExecutable;
@@ -499,6 +500,22 @@ public:
   }
 
   const std::string TargetName() const { return compile_target->Name(); }
+
+  bool HasDeviceTargets() const { return !device_targets.empty(); }
+
+  void AddDeviceTarget(const std::string& device_name,
+                       std::unique_ptr<Target>&& t) {
+    device_targets[device_name] = std::move(t);
+  }
+
+  const Target* GetDeviceTarget(const std::string& device_name) const {
+    auto it = device_targets.find(device_name);
+    return it != device_targets.end() ? it->second.get() : nullptr;
+  }
+
+  const std::map<std::string, std::unique_ptr<Target>>& DeviceTargets() const {
+    return device_targets;
+  }
 #if 0
   // useful for MPI
   std::string GetSubTarget() const { return compile_sub_target; }

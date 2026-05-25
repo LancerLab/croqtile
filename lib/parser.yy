@@ -46,6 +46,20 @@ namespace Choreo {
 
 } // %code requires
 
+%code requires {
+#include "types.hpp"
+
+struct PLAnnotation {
+  Choreo::ParallelLevel level;
+  std::string device_target;
+  PLAnnotation() : level(Choreo::ParallelLevel::NONE) {}
+  PLAnnotation(Choreo::ParallelLevel l) : level(l) {}
+  PLAnnotation(Choreo::ParallelLevel l, const std::string& dt)
+      : level(l), device_target(dt) {}
+};
+
+} // %code requires
+
 // inject into Parser class
 %code provides {
 } // %code provide
@@ -251,7 +265,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::Select>> select_expr
 %nterm <AST::MMAOperation::ExecMethod> mma_exec_method
 %nterm <Choreo::Storage> param_storage
-%nterm <Choreo::ParallelLevel> note_pl
+%nterm <PLAnnotation> note_pl
 
 // resolving the ambiguity of dangling ELSE
 %nonassoc IF_PREC
@@ -773,8 +787,9 @@ paraby_block
 
 parabys
     : parabys COMMA paraby note_pl {
-        // add the paraby as the first stmt of inner-most parallel-by
-        $3->SetLevel($4);
+        $3->SetLevel($4.level);
+        if (!$4.device_target.empty())
+          $3->SetDeviceTargetName($4.device_target);
         auto pb = $1;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
@@ -782,7 +797,9 @@ parabys
         $$ = $1;
       }
     | paraby note_pl {
-        $1->SetLevel($2);
+        $1->SetLevel($2.level);
+        if (!$2.device_target.empty())
+          $1->SetDeviceTargetName($2.device_target);
         $$ = $1;
       }
     ; /* do not allow empty paraby */
@@ -1275,8 +1292,15 @@ spanas_spanned_decl
 */
 
 note_pl
-    : COL PBLEVEL { $$ = $2; }
-    | %empty { $$ = ParallelLevel::NONE; }
+    : COL PBLEVEL { $$ = PLAnnotation($2); }
+    | COL PBLEVEL LPAREN IDENTIFIER RPAREN {
+        if ($2 != ParallelLevel::DEVICE) {
+          Parser::error(@2, "parameterized level annotation is only valid for 'device'.");
+          YYERROR;
+        }
+        $$ = PLAnnotation($2, $4);
+      }
+    | %empty { $$ = PLAnnotation(); }
     ;
 
 storage_qual

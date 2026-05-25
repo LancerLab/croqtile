@@ -554,6 +554,69 @@ public:
   static std::unique_ptr<CodeGenInfo> instance;
 };
 
+// Interface for device-specific code generation in heterogeneous compilation.
+// HeteroCodeGen delegates to DeviceCodeGen implementations for each device type.
+struct DeviceCodeGen {
+  virtual ~DeviceCodeGen() = default;
+
+  virtual std::string DeviceName() const = 0;
+
+  // The choreo target name (e.g. "cc", "cute", "hip") used for
+  // `choreo -t <name>` when delegating device block compilation.
+  virtual std::string TargetName() const = 0;
+
+  // Host devices run code inline on the host (e.g. CPU via thread pool).
+  // Offload devices require two-step compilation (source extraction +
+  // delegation to the device target's standalone pipeline).
+  virtual bool IsHostDevice() const = 0;
+
+  // Emit #include directives needed by this device in the host source.
+  virtual void EmitHostIncludes(std::ostream&) const {}
+
+  // Emit host-level preamble (e.g. thread pool declaration).
+  virtual void EmitHostPreamble(std::ostream&) const {}
+
+  // Emit synchronization for all pending dispatches on this device.
+  virtual void EmitSync(std::ostream& os, const std::string& indent) = 0;
+
+  // Shell compile command for the device source file.
+  virtual std::string CompileCommand(const std::string& src_file,
+                                     const std::string& obj_file) const = 0;
+
+  // Linker flags needed to link this device's objects.
+  virtual std::string LinkFlags() const = 0;
+
+  // Emit shell script setup for the build environment (e.g. toolchain
+  // discovery, arch detection). Default is no-op.
+  virtual void SetupBuildEnv(std::ostream&) const {}
+
+  // Emit host-side compile command for source that includes this device's
+  // headers (e.g. offload devices may need their toolchain for host code).
+  // Default uses g++.
+  virtual void EmitHostCompileCommand(std::ostream& out,
+                                      const std::string& build_path,
+                                      const std::string& src,
+                                      const std::string& obj) const {
+    out << "  ${CXX:-g++} -std=c++17 -O2 -pthread -c -I" << build_path
+        << " " << src << " -o " << obj
+        << " || { echo 'Host compilation failed'; exit 1; }\n";
+  }
+
+  // Emit link command for all objects. Default uses g++.
+  virtual void EmitLinkCommand(std::ostream& out,
+                               const std::vector<std::string>& obj_files,
+                               const std::string& exe_file) const {
+    out << "  ${CXX:-g++} -std=c++17 -O2";
+    for (auto& o : obj_files) out << " " << o;
+    out << " " << LinkFlags() << " -lm -lpthread -o " << exe_file
+        << " || { echo 'Linking failed'; exit 1; }\n";
+  }
+
+  // Track async dispatch futures (host devices).
+  virtual void AddPendingFuture(const std::string&) {}
+  virtual void Reset() {}
+};
+
 // Codegenerators for targets
 struct CodeGenerator : public VisitorWithSymTab {
   // some default method for the derived classes that do not want to override.

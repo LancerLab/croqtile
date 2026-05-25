@@ -10,13 +10,20 @@
 #include <cmath>   // For fp16
 #include <cstdint> // For fixed-width integer types
 #include <cstdlib>
+#include <condition_variable>
+#include <functional>
+#include <future>
 #include <initializer_list> // for std::initializer_list
 #include <iostream>         // report error
 #include <map>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <random>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
 
 #if __has_include("private_target0_defines.h")
   #include "private_target0_defines.h"
@@ -1851,6 +1858,74 @@ static __attribute__((always_inline)) inline void abend_true(int p) {
     std::abort();
   }
 }
+
+class thread_pool {
+  std::vector<std::thread> workers;
+  std::queue<std::function<void()>> tasks;
+  std::mutex mtx;
+  std::condition_variable cv;
+  bool stopped = false;
+
+public:
+  explicit thread_pool(size_t n) {
+    for (size_t i = 0; i < n; ++i)
+      workers.emplace_back([this] {
+        for (;;) {
+          std::function<void()> task;
+          {
+            std::unique_lock<std::mutex> lk(mtx);
+            cv.wait(lk, [this] { return stopped || !tasks.empty(); });
+            if (stopped && tasks.empty()) return;
+            task = std::move(tasks.front());
+            tasks.pop();
+          }
+          task();
+        }
+      });
+  }
+
+  ~thread_pool() {
+    {
+      std::lock_guard<std::mutex> lk(mtx);
+      stopped = true;
+    }
+    cv.notify_all();
+    for (auto& w : workers) w.join();
+  }
+
+  template <typename F>
+  std::future<void> submit(F&& f) {
+    auto task =
+        std::make_shared<std::packaged_task<void()>>(std::forward<F>(f));
+    auto fut = task->get_future();
+    {
+      std::lock_guard<std::mutex> lk(mtx);
+      tasks.push([task] { (*task)(); });
+    }
+    cv.notify_one();
+    return fut;
+  }
+
+  template <typename F>
+  void parallel_for(int begin, int end, F&& body) {
+    int n = static_cast<int>(workers.size());
+    if (n == 0 || begin >= end) {
+      for (int i = begin; i < end; ++i) body(i);
+      return;
+    }
+    int total = end - begin;
+    int chunk = (total + n - 1) / n;
+    std::vector<std::future<void>> futs;
+    for (int t = 0; t < n && begin + t * chunk < end; ++t) {
+      int lo = begin + t * chunk;
+      int hi = std::min(lo + chunk, end);
+      futs.push_back(submit([lo, hi, &body] {
+        for (int i = lo; i < hi; ++i) body(i);
+      }));
+    }
+    for (auto& f : futs) f.get();
+  }
+};
 
 static __attribute__((always_inline)) inline void verify_device_status() {
 #ifdef __CUDA__

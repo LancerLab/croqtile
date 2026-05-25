@@ -16,6 +16,7 @@ public:
                        const std::string& desc, TargetCreateFn fn);
 
   static std::unique_ptr<Target> Create(const std::string&);
+  static std::unique_ptr<Target> CreateByDeviceName(const std::string&);
   static std::vector<TargetInfo> List();
 }; // TargetRegistry
 

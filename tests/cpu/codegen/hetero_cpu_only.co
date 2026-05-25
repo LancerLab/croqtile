@@ -1,0 +1,26 @@
+// RUN: choreo -t hetero -es %s -o - | FileCheck %s
+
+__co__ void cpu_only_demo(f32 [512] A, f32 [512] B) {
+  parallel.async by 1 : device(cpu) {
+    foreach i in [512] {
+      A.at(i) = A.at(i) + 1.0;
+    }
+  }
+
+  parallel.async by 1 : device(cpu) {
+    foreach j in [512] {
+      B.at(j) = B.at(j) * 2.0;
+    }
+  }
+
+  sync.global;
+}
+
+// CPU-only: should use g++ (no offload device includes)
+// CHECK-NOT: tops_ext.h
+// CHECK-NOT: tops_runtime.h
+// CHECK: __choreo_cpu_pool
+// CHECK: __host_future_0 = __choreo_cpu_pool.submit
+// CHECK: __host_future_1 = __choreo_cpu_pool.submit
+// CHECK: __host_future_0.get()
+// CHECK: __host_future_1.get()

@@ -17,6 +17,7 @@ class CuteTarget : public GPUTarget {
 public:
   ~CuteTarget() {}
   const std::string Name() const override { return "cute"; }
+  const std::string DeviceName() const override { return "gpu"; }
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
 
   int DefaultOptLevel(const ArchId&) const override { return 3; }

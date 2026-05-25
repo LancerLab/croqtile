@@ -1,0 +1,38 @@
+// RUN: choreo -t hetero -es %s -o - | FileCheck %s
+
+__co__ void hetero_demo(f32 [1024] A, f32 [1024] B) {
+  parallel.async by 1 : device(cpu) {
+    foreach i in [1024] {
+      A.at(i) = A.at(i) + 1.0;
+    }
+  }
+
+  parallel.async by 1 : device(gcu) {
+    parallel p by 2 : block {
+      foreach j in [512] {
+        B.at(j) = B.at(j) * 2.0;
+      }
+    }
+  }
+
+  sync.global;
+}
+
+// Preamble includes
+// CHECK: #include "choreo.h"
+
+// Forward declaration for topscc-compiled GCU function (after includes)
+// CHECK: extern void __hetero_gcu_hetero_demo_0(
+
+// CPU async dispatch via thread pool
+// CHECK: __choreo_cpu_pool.submit([&]()
+
+// GCU function call (delegated to topscc-compiled object)
+// CHECK: __hetero_gcu_hetero_demo_0(
+
+// CPU future sync
+// CHECK: .get()
+
+// GCU .co source should contain the body
+// CHECK: __co__ void __hetero_gcu_hetero_demo_0(
+// CHECK: parallel p by 2 : block

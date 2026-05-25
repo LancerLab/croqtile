@@ -4,6 +4,7 @@
 #include "pipeline.hpp"
 #include "target_registry.hpp"
 #include "topscc_codegen.hpp"
+#include "topscc_device_codegen.hpp"
 #include "topscc_preprocess.hpp"
 #include "topscc_transform.hpp"
 #include "types.hpp"
@@ -133,12 +134,15 @@ public:
   }
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {
-    // apply GCU specific checks
     p.AddStage<GCUCheck>();
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();
     p.AddStage<Topscc::TopsccCodeGen>();
     return true;
+  }
+
+  std::unique_ptr<DeviceCodeGen> MakeDeviceCodeGen() const override {
+    return std::make_unique<TopsccDeviceCodeGen>();
   }
 
   const std::unique_ptr<Preprocess> MakePP(std::ostream& os) const override {

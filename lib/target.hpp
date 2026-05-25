@@ -3,6 +3,7 @@
 
 #include "aux.hpp"
 #include "preprocess.hpp"
+#include <memory>
 #include <set>
 
 namespace Choreo {
@@ -13,6 +14,7 @@ enum class ParallelLevel;
 enum class SwizMode;
 class ASTPipeline;
 class Preprocess;
+struct DeviceCodeGen;
 
 // see the Description
 enum class ChoreoFeature {
@@ -111,6 +113,7 @@ public:
 
   // Target hooks -- keep these abstract
   virtual const std::string Name() const = 0;
+  virtual const std::string DeviceName() const { return Name(); }
   virtual const std::vector<ArchInfo> SupportedArchs() const { return {}; }
   virtual const std::unordered_map<std::string, std::string>
   ChoreoMacros(const ArchId&) const {
@@ -265,6 +268,10 @@ public:
   virtual bool DefaultUseTargetLib() const { return false; }
 
   virtual bool PlanCodeGenStages(ASTPipeline&) const = 0;
+
+  // Factory for DeviceCodeGen used by HeteroCodeGen. Returns nullptr if
+  // the target does not support heterogeneous device code generation.
+  virtual std::unique_ptr<DeviceCodeGen> MakeDeviceCodeGen() const;
 
   virtual const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId&) const = 0;
