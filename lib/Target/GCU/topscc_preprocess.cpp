@@ -128,6 +128,9 @@ static void skip_string_literal(const std::string& s, size_t& i) {
 }
 
 bool TopsccPreprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
+#ifdef __EMSCRIPTEN__
+  return Preprocess::ExtractDeviceKernel(cok_ss);
+#else
   char temp_script_file_name[] = "/tmp/choreo_topscc_script_XXXXXX";
 
   int script_fd = mkstemp(temp_script_file_name);
@@ -207,6 +210,7 @@ bool TopsccPreprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
   for (auto& c : device_codes) { cok_ss << c << "\n"; }
   cok_ss << "}\n\n";
   return true;
+#endif
 }
 
 std::vector<Bundle> TopsccPreprocess::find_bundles(const std::string& code) {

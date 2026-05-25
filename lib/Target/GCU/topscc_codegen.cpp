@@ -3344,6 +3344,11 @@ option_detect() {
 }
 
 bool TopsccCodeGen::CompileWithScript(const std::string& action) {
+#ifdef __EMSCRIPTEN__
+  (void)action;
+  errs() << "CompileWithScript is not available in WebAssembly builds.\n";
+  return false;
+#else
   assert(!action.empty() && "no action is specified.");
 
   char tempFileName[] = "/tmp/choreo_topscc_script_XXXXXX";
@@ -3381,6 +3386,7 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
   }
 
   return true;
+#endif
 }
 
 // TODO: eliminate the need of the value replacement?

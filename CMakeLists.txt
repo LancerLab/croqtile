@@ -52,8 +52,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Find threads package
-find_package(Threads REQUIRED)
+# Find threads package (not needed for Emscripten)
+if(NOT EMSCRIPTEN)
+  find_package(Threads REQUIRED)
+endif()
 
 # use ccache if exists
 find_program(CCACHE_PROGRAM ccache)
@@ -74,6 +76,13 @@ endif()
 # ============================
 # Cascading selection + validation
 # ============================
+
+if(EMSCRIPTEN)
+  set(ENABLE_CUDA OFF CACHE BOOL "" FORCE)
+  set(ENABLE_CUTE OFF CACHE BOOL "" FORCE)
+  set(ENABLE_HIP OFF CACHE BOOL "" FORCE)
+  set(CHOREO_DEFAULT_TARGET "mock" CACHE STRING "" FORCE)
+endif()
 
 # Track if user explicitly set via -D before we create cache entries
 set(_enable_cuda_user_set FALSE)
@@ -97,7 +106,9 @@ option(CHOREO_FAST_COMPILE_DEFAULT "Default --fast-compile to ON for faster nvcc
 set(DEFAULT_CUDA_HOME "/usr/local/cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
 
 # Find CUDA package to get version info
-find_package(CUDAToolkit)
+if(NOT EMSCRIPTEN)
+  find_package(CUDAToolkit)
+endif()
 
 if(CUDAToolkit_FOUND)
   set(_cuda_with_cute4_support TRUE)
@@ -330,7 +341,11 @@ set(BUILD_DIR ${CMAKE_BINARY_DIR}/build)
 set(TOOLCHAIN_DIR "${CMAKE_SOURCE_DIR}/extern")
 
 # Flex and Bison: find in toolchain/system, or auto-build from source
-include(${CMAKE_SOURCE_DIR}/cmake/FlexBisonBootstrap.cmake)
+if(NOT EMSCRIPTEN)
+  include(${CMAKE_SOURCE_DIR}/cmake/FlexBisonBootstrap.cmake)
+else()
+  include(${CMAKE_SOURCE_DIR}/cmake/EmscriptenBootstrap.cmake)
+endif()
 
 # CUDA_HOME as a cache variable with environment fallback
 if(DEFINED ENV{CUDA_HOME})
@@ -340,6 +355,25 @@ else()
 endif()
 
 add_compile_options(-Wall -Wextra -g)
+
+if(EMSCRIPTEN)
+  # Choreo is developed against GCC; suppress Clang-specific pedantic warnings
+  # that do not indicate actual bugs when cross-compiling to WASM.
+  add_compile_options(
+    -Wno-delete-non-virtual-dtor
+    -Wno-unused-private-field
+    -Wno-constant-conversion
+    -Wno-overloaded-virtual
+    -Wno-unused-lambda-capture
+    -Wno-inconsistent-missing-override
+    -Wno-mismatched-tags
+    -Wno-tautological-constant-out-of-range-compare
+    -Wno-unused-but-set-variable
+    -Wno-unused-function
+    -Wno-parentheses
+    "-Wno-#warnings"
+  )
+endif()
 
 option(PUBLIC_PACKAGE "Build for Public Release Package")
 
@@ -366,6 +400,8 @@ add_subdirectory(lib)
 
 # additional tools (co-mock, etc.)
 add_subdirectory(tools)
+
+if(NOT EMSCRIPTEN)
 
 # preprocessor executable
 add_executable(copp tools/copp/choreo_preprocess.cpp)
@@ -420,6 +456,9 @@ target_link_libraries(copp PRIVATE
   Threads::Threads
 )
 
+endif() # NOT EMSCRIPTEN
+
+if(NOT EMSCRIPTEN)
 # ============================
 # Choreo SDK library
 # ============================
@@ -604,3 +643,5 @@ add_custom_target(package-sdk
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   COMMENT "Building SDK package (headers + static lib)"
 )
+
+endif() # NOT EMSCRIPTEN (SDK, install, packaging)

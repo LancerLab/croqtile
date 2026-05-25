@@ -44,12 +44,14 @@ CFLAGS += -MMD -MP -std=c++17 -Wall -Wextra -g
 
 TARGET_DIRS := $(sort $(wildcard lib/Target/*/))
 TARGET_MK   := $(addsuffix target.mk,$(TARGET_DIRS))
+TOOLS_MK    := $(sort $(wildcard tools/*/target.mk))
 
 all: build docs
 
 build: build-with-cmake-ninja
 
 -include $(TARGET_MK)
+-include $(TOOLS_MK)
 -include .local.mk
 
 CC = g++
@@ -159,7 +161,7 @@ standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
 
 clean:
-	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(LGY_BUILD_DIR) $(TEST_TARGETS) tests/*.result
+	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(LGY_BUILD_DIR) $(WASM_BUILD_DIR) $(TEST_TARGETS) tests/*.result
 	@cd tests/standalone/ && $(MAKE) clean
 
 build-with-cmake:

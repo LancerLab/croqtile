@@ -1,0 +1,8 @@
+// RUN: choreo -t mock -es %s 2>&1 | FileCheck %s
+// Verify that the programs used in co-web examples compile cleanly.
+
+__co__ void hello() {
+  println("Hello from Choreo!");
+}
+
+// CHECK: Choreo Mock IR
