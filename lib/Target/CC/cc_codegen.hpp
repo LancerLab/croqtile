@@ -120,6 +120,7 @@ protected:
 
   const std::string ExprSTR(AST::ptr<AST::Node> n) const;
   const std::string CallSTR(AST::Call& n) const;
+  const ValueItem GenOffset(const AST::ptr<AST::ChunkAt>& ca) const;
   const std::string OpValueSTR(const ValueItem& vi,
                                const std::string& parent_op, bool is_left_child,
                                bool ll_suffix = false) const;

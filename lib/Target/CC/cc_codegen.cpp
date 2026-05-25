@@ -219,7 +219,12 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       oss << ExprSTR(da->data) << ".data()";
     }
   } else if (auto ca = dyn_cast<AST::ChunkAt>(e)) {
-    oss << ExprSTR(ca->data);
+    auto base = ExprSTR(ca->data);
+    auto off_vi = GenOffset(ca);
+    if (sbe::ceq(off_vi, sbe::nu(0)))
+      oss << base;
+    else
+      oss << "(" << base << " + " << ValueSTR(off_vi) << ")";
   } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
     if (ce->IsForeignCast()) {
       oss << "static_cast<" << ce->ForeignType() << ">(" << ExprSTR(ce->GetR())
@@ -419,15 +424,52 @@ const std::string CCCodeGen::CallSTR(AST::Call& n) const {
   return result;
 }
 
+const ValueItem CCCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
+  if (ca->NoOperation()) return sbe::nu(0);
+
+  sbe::ExprSum offset;
+
+  for (size_t i = 0; i < ca->OpCount(); ++i) {
+    const auto& sop = ca->OpAt(i);
+    if (isa<AST::SOP::Reshape>(sop)) {
+      continue;
+    } else if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
+               isa<AST::SOP::SubSpan>(sop)) {
+      auto idx = sop->GetIndices()->Opts();
+      auto strd = sop->GetBlockStrides();
+      auto blk = sop->GetBlockShape();
+      assert(idx.HasVals());
+      assert(idx.GetVals().size() == strd.size());
+      assert(blk.Rank() == strd.size());
+      bool has_step = isa<AST::SOP::SubSpan>(sop) && sop->GetSteps();
+      for (size_t ith = 0; ith < idx.GetVals().size(); ++ith) {
+        if (has_step)
+          offset += idx.GetVals()[ith] * strd[ith];
+        else
+          offset += idx.GetVals()[ith] * strd[ith] * blk.ValueAt(ith);
+      }
+    } else if (isa<AST::SOP::View>(sop)) {
+      auto off = sop->GetOffsets()->Opts();
+      auto strd = sop->GetBlockStrides();
+      for (size_t ith = 0; ith < off.GetVals().size(); ++ith)
+        offset += off.GetVals()[ith] * strd[ith];
+    }
+  }
+
+  return offset.Get();
+}
+
 // ---- Preamble Emission ----
 
 void CCCodeGen::EmitPreamble() {
   os << "#define __CHOREO_TARGET_CC__\n";
   os << "#include \"choreo.h\"\n";
+  os << "#include <algorithm>\n";
   os << "#include <cmath>\n";
   os << "#include <cstring>\n";
   os << "#include <cstdlib>\n";
-  os << "#include <future>\n\n";
+  os << "#include <future>\n";
+  os << "#include <utility>\n\n";
 }
 
 // ---- BeforeVisitImpl / InMidVisitImpl / AfterVisitImpl ----
@@ -897,9 +939,26 @@ bool CCCodeGen::Visit(AST::Yield& n) {
 
 bool CCCodeGen::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
-  errs() << "error: rotate is not supported on the CC target.\n";
-  error_count++;
-  return false;
+  auto& ids = n.GetIds();
+  if (ids.size() == 2) {
+    auto a = cast<AST::Identifier>(ids[0])->name;
+    auto b = cast<AST::Identifier>(ids[1])->name;
+    IndStream() << "std::swap(" << a << ", " << b << ");\n";
+  } else {
+    auto first = cast<AST::Identifier>(ids[0])->name;
+    IndStream() << "{ auto __tmp = std::move(" << first << ");\n";
+    IncrIndent();
+    for (size_t i = 0; i + 1 < ids.size(); ++i) {
+      auto cur = cast<AST::Identifier>(ids[i])->name;
+      auto nxt = cast<AST::Identifier>(ids[i + 1])->name;
+      IndStream() << cur << " = std::move(" << nxt << ");\n";
+    }
+    auto last = cast<AST::Identifier>(ids.back())->name;
+    IndStream() << last << " = std::move(__tmp);\n";
+    DecrIndent();
+    IndStream() << "}\n";
+  }
+  return true;
 }
 
 bool CCCodeGen::Visit(AST::Synchronize& n) {
@@ -932,6 +991,34 @@ bool CCCodeGen::Visit(AST::Assignment& n) {
                             "*>(" + base_name + ")";
     ssm.MapHostSymbol(sname, cast_expr);
     os << indent << "auto* " << name << " = " << cast_expr << ";\n";
+    return true;
+  }
+
+  if (auto s = dyn_cast<AST::Select>(n.value)) {
+    auto name = n.GetName();
+    size_t val_count = s->expr_list->Count();
+    std::string arr = name + "_select_array__";
+    if (isa<FutureType>(nty)) {
+      os << indent << "std::future<void>* " << arr << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) os << ", ";
+        os << "&" << ExprSTR(s->expr_list->ValueAt(i));
+      }
+      os << "};\n";
+      os << indent << "std::future<void>& " << name << " = *" << arr << "["
+         << ExprSTR(s->select_factor) << "];\n";
+    } else if (auto sty = dyn_cast<SpannedType>(nty)) {
+      auto bts = CCBaseTypeName(sty->ElementType());
+      os << indent << bts << "* " << arr << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) os << ", ";
+        os << ExprSTR(s->expr_list->ValueAt(i));
+      }
+      os << "};\n";
+      os << indent << bts << "* " << name << " = " << arr << "["
+         << ExprSTR(s->select_factor) << "];\n";
+      ssm.MapHostSymbol(InScopeName(name), name);
+    }
     return true;
   }
 
@@ -1001,7 +1088,20 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
   auto sname = InScopeName(sym);
 
   if (isa<FutureType>(nty)) {
-    os << indent << "std::future<void> " << sym << ";\n";
+    if (auto s = dyn_cast<AST::Select>(n.init_expr)) {
+      size_t val_count = s->expr_list->Count();
+      std::string arr = sym + "_select_array__";
+      os << indent << "std::future<void>* " << arr << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) os << ", ";
+        os << "&" << ExprSTR(s->expr_list->ValueAt(i));
+      }
+      os << "};\n";
+      os << indent << "std::future<void>& " << sym << " = *" << arr << "["
+         << ExprSTR(s->select_factor) << "];\n";
+    } else {
+      os << indent << "std::future<void> " << sym << ";\n";
+    }
     ssm.MapHostSymbol(sname, sym);
     return true;
   }
