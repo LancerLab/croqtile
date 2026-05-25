@@ -50,7 +50,7 @@ private:
   std::string active_device_target;
 
   // Device codegen delegates, keyed by device name.
-  // Created via Target::MakeDeviceCodeGen() — no hardcoded types.
+  // Created via Target::MakeDeviceCodeGen() -- no hardcoded types.
   std::map<std::string, std::unique_ptr<DeviceCodeGen>> device_codegens;
 
   // Returns the DeviceCodeGen for the active device, or nullptr.

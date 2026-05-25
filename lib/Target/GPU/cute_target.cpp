@@ -1,5 +1,6 @@
 #include "assert_site.hpp"
 #include "cute_codegen.hpp"
+#include "cute_device_codegen.hpp"
 #include "dma_plan.hpp"
 #include "dmaconf.hpp"
 #include "gpu_adapt.hpp"
@@ -209,13 +210,15 @@ public:
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {
     p.AddStage<GPUAdaptor>();
-    // Pre-compute all DMA lowering decisions before any codegen pass
-    // inspects DMA nodes. This separates strategy analysis from emission.
     p.AddStage<DMAPlan>();
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();
     p.AddStage<Cute::CuteCodeGen>();
     return true;
+  }
+
+  std::unique_ptr<DeviceCodeGen> MakeDeviceCodeGen() const override {
+    return std::make_unique<CuteDeviceCodeGen>();
   }
 
 private:
