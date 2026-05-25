@@ -493,6 +493,7 @@ bool CCCodeGen::AfterVisitImpl(AST::Node& n) {
     }
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ssm.LeaveScope();
+    if (code_segments.empty()) code_segments.push_back("");
     code_segments.back() += os.str();
     os.str("");
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
@@ -501,6 +502,10 @@ bool CCCodeGen::AfterVisitImpl(AST::Node& n) {
     for (int i = pvs.size() - 1; i >= 0; --i) {
       DecrIndent();
       IndStream() << "}\n";
+    }
+    if (pb->HasDeviceTarget() && pb->GetLevel() == ParallelLevel::DEVICE) {
+      DecrIndent();
+      IndStream() << "});\n";
     }
   } else if (isa<AST::WithBlock>(&n)) {
     DecrIndent();
@@ -745,6 +750,32 @@ bool CCCodeGen::Visit(AST::WhileBlock& n) {
 bool CCCodeGen::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
+  if (n.HasDeviceTarget() && n.GetLevel() == ParallelLevel::DEVICE) {
+    auto future_name =
+        "__dev_future_" + std::to_string(device_future_counter++);
+    pending_device_futures.push_back(future_name);
+    IndStream() << "auto " << future_name
+                << " = std::async(std::launch::async, [&]() {\n";
+    IncrIndent();
+    auto pvs = n.AllSubPVs();
+    auto bvs = n.BoundValues();
+    auto bpv_name = n.BPV()->name;
+    for (size_t i = 0; i < pvs.size(); ++i) {
+      auto pv_id = cast<AST::Identifier>(pvs[i]);
+      auto pv_name = pv_id->name;
+      auto bound = (i < bvs.size()) ? ValueSTR(bvs[i]) : std::string("1");
+      ssm.MapHostSymbol(InScopeName(pv_name), pv_name);
+      IndStream() << "for (int " << pv_name << " = 0; " << pv_name << " < "
+                  << bound << "; ++" << pv_name << ") {\n";
+      IncrIndent();
+    }
+    if (pvs.size() == 1) {
+      auto pv_name = cast<AST::Identifier>(pvs[0])->name;
+      ssm.MapHostSymbol(InScopeName(bpv_name), pv_name);
+    }
+    return true;
+  }
+
   auto pvs = n.AllSubPVs();
   auto bvs = n.BoundValues();
 
@@ -873,6 +904,11 @@ bool CCCodeGen::Visit(AST::Rotate& n) {
 
 bool CCCodeGen::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
+  if (n.Resource() == Storage::GLOBAL && !pending_device_futures.empty()) {
+    for (auto& f : pending_device_futures)
+      IndStream() << f << ".get();\n";
+    pending_device_futures.clear();
+  }
   return true;
 }
 

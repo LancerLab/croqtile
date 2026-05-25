@@ -1,0 +1,23 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -t cc -es %s | FileCheck %s
+
+__co__ void foo(s32 [64] a, s32 [64] b) {
+  parallel.async by 1: device(cpu) {
+    parallel p by 64: block
+      a.at(p) = a.at(p) + 1;
+  }
+  parallel.async by 1: device(cpu) {
+    parallel q by 64: block
+      b.at(q) = b.at(q) + 2;
+  }
+  sync.global;
+}
+
+// CHECK: auto __dev_future_0 = std::async(std::launch::async, [&]() {
+// CHECK:   for (int p__elem__x = 0; p__elem__x < 64; ++p__elem__x)
+// CHECK: });
+// CHECK: auto __dev_future_1 = std::async(std::launch::async, [&]() {
+// CHECK:   for (int q__elem__x = 0; q__elem__x < 64; ++q__elem__x)
+// CHECK: });
+// CHECK: __dev_future_0.get();
+// CHECK: __dev_future_1.get();

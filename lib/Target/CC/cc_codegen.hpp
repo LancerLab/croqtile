@@ -22,7 +22,7 @@ namespace CC {
 using ScopedSymbolMap = ::Choreo::ScopedSymbolMap;
 
 struct CCCodeGen : public CodeGenerator {
-private:
+protected:
   ScopedSymbolMap ssm;
 
 public:
@@ -79,7 +79,7 @@ public:
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::Return&) override;
 
-private:
+protected:
   std::string cmp_dir;
   std::string cpp_name;
 
@@ -91,7 +91,7 @@ private:
   ptr<FunctionType> fty = nullptr;
   bool void_return = false;
 
-  std::ostringstream os; // single output stream
+  std::ostringstream os;
   std::vector<std::string> code_segments;
 
   void IncrIndent() { indent += "  "; }
@@ -104,10 +104,10 @@ private:
     return os;
   }
 
-  void EmitPreamble();
+  virtual void EmitPreamble();
   void EmitSource();
-  void EmitScript(std::ostream& out, const std::string& exe_fn = "");
-  bool CompileWithScript(const std::string& action);
+  virtual void EmitScript(std::ostream& out, const std::string& exe_fn = "");
+  virtual bool CompileWithScript(const std::string& action);
 
   void EmitFuncDecl();
   void EmitEntryAssertions();
@@ -128,12 +128,17 @@ private:
                              const std::string& sep = ", ") const;
   const std::string TypeSTR(const Type& ty) const;
 
-  void ResetFunctionStates() {
+  int device_future_counter = 0;
+  std::vector<std::string> pending_device_futures;
+
+  virtual void ResetFunctionStates() {
     fty = nullptr;
     void_return = false;
     indent = "";
     pre_site_assertions.clear();
     post_site_assertions.clear();
+    device_future_counter = 0;
+    pending_device_futures.clear();
   }
 };
 

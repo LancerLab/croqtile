@@ -1844,6 +1844,7 @@ private:
   bool enforced = false;
   ptr<Expr> stream_expr = nullptr;
   bool device_entry = false;
+  std::string device_target_name;
 
 public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
@@ -1951,6 +1952,10 @@ public:
   bool IsDeviceEntry() const { return device_entry; }
   void SetDeviceEntry(bool v = true) { device_entry = v; }
 
+  bool HasDeviceTarget() const { return !device_target_name.empty(); }
+  const std::string& DeviceTargetName() const { return device_target_name; }
+  void SetDeviceTargetName(const std::string& n) { device_target_name = n; }
+
   ptr<Node> CloneImpl() const override {
     auto pb = Make<ParallelBy>(LOC(), CloneP(bpv), CloneP(bound_expr),
                                CloneP(cmpt_bpvs), CloneP(cmpt_bounds),
@@ -1962,6 +1967,7 @@ public:
     pb->SetEnforced(IsEnforced());
     if (stream_expr) pb->SetStream(CloneP(stream_expr));
     pb->SetDeviceEntry(IsDeviceEntry());
+    if (HasDeviceTarget()) pb->SetDeviceTargetName(DeviceTargetName());
     return pb;
   }
 
@@ -1984,7 +1990,10 @@ public:
     os << " by [";
     PrintBounds(os);
     os << "]";
-    if (GetLevel() != ParallelLevel::NONE) os << " : " << STR(GetLevel());
+    if (GetLevel() != ParallelLevel::NONE) {
+      os << " : " << STR(GetLevel());
+      if (HasDeviceTarget()) os << "(" << DeviceTargetName() << ")";
+    }
   }
 
   void PrintBound(std::ostream& os) const {
@@ -2003,7 +2012,11 @@ public:
   void PrintWithoutStmts(std::ostream& os, const std::string& prefix,
                          bool = false) const {
     os << "\n" << prefix << "`- ";
-    if (GetLevel() != ParallelLevel::NONE) os << STR(GetLevel()) << " ";
+    if (GetLevel() != ParallelLevel::NONE) {
+      os << STR(GetLevel());
+      if (HasDeviceTarget()) os << "(" << DeviceTargetName() << ")";
+      os << " ";
+    }
     os << "Parallelization" << (IsOuter() ? "(o)" : "") << ":";
     if (stream_expr) {
       os << " stream(";

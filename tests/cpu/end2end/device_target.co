@@ -1,0 +1,40 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -gs %target %s -o %s.cc.result && bash %s.cc.result --execute | FileCheck --match-full-lines %s && rm -f %s.cc.result
+
+__co__ void parallel_add(s32 [8] a, s32 [8] b) {
+  parallel.async by 1: device(cpu) {
+    parallel p by 8: block
+      a.at(p) = a.at(p) + 10;
+  }
+  parallel.async by 1: device(cpu) {
+    parallel q by 8: block
+      b.at(q) = b.at(q) + 20;
+  }
+  sync.global;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(8);
+  auto b = choreo::make_spandata<choreo::s32>(8);
+  for (int i = 0; i < 8; i++) {
+    a[i] = i;
+    b[i] = i + 10;
+  }
+
+  parallel_add(a.view(), b.view());
+
+  for (int i = 0; i < 8; i++)
+    std::cout << "a[" << i << "]=" << a[i]
+              << " b[" << i << "]=" << b[i] << std::endl;
+
+  return 0;
+}
+
+// CHECK: a[0]=10 b[0]=30
+// CHECK: a[1]=11 b[1]=31
+// CHECK: a[2]=12 b[2]=32
+// CHECK: a[3]=13 b[3]=33
+// CHECK: a[4]=14 b[4]=34
+// CHECK: a[5]=15 b[5]=35
+// CHECK: a[6]=16 b[6]=36
+// CHECK: a[7]=17 b[7]=37

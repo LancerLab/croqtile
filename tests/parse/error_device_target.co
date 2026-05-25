@@ -1,0 +1,11 @@
+// RUN: not choreo -t cc -es %s 2>&1 | FileCheck %s
+
+__co__ void foo() {
+  parallel.async by 1: device(unknown_target) {
+    parallel by 1: block
+    parallel by 1: thread {}
+  }
+  sync.global;
+}
+
+// CHECK: error: unknown device target 'unknown_target'

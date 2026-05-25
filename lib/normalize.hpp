@@ -9,6 +9,7 @@
 #include "loop_vectorize.hpp"
 #include "pbtree.hpp"
 #include "symtab.hpp"
+#include "target_registry.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
@@ -875,6 +876,9 @@ private:
   std::vector<AST::ParallelBy*> pb_stack;
   PBTree pb_tree;
 
+  std::unique_ptr<Target> active_device_target;
+  int device_target_depth = 0;
+
   // Note: post-visiting each parallel-by
   //
   //  ...
@@ -913,6 +917,14 @@ private:
     auto pl = pb->GetLevel();
     assert(pl != ParallelLevel::UNKNOWN);
     return pl != ParallelLevel::NONE;
+  }
+
+  bool DeviceTargetHasLevel(ParallelLevel pl) const {
+    if (!active_device_target) return TargetHasLevel(pl);
+    auto arch = active_device_target->DefaultArch();
+    for (auto l : active_device_target->GetParallelLevels(arch))
+      if (l == pl) return true;
+    return false;
   }
 
 public:
@@ -1018,7 +1030,11 @@ public:
     return pb;
   }
 
-  void Reset() { pb_tree.Clear(); }
+  void Reset() {
+    pb_tree.Clear();
+    active_device_target.reset();
+    device_target_depth = 0;
+  }
 
   void FillPB(AST::ParallelBy* pb, FillType ty, ParallelLevel pl, int v = 1) {
     VST_DEBUG(dbgs() << "[PB-Fill] " << Name(ty) << "(" << STR(pl) << "): ";
@@ -1032,6 +1048,13 @@ public:
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       if (pb->GetLevel() == ParallelLevel::DEVICE)
         FCtx(fname).SetHasDeviceParallel(true);
+      if (pb->HasDeviceTarget() && !active_device_target) {
+        active_device_target =
+            TargetRegistry::CreateByDeviceName(pb->DeviceTargetName());
+        device_target_depth = 1;
+      } else if (active_device_target) {
+        device_target_depth++;
+      }
       pb_stack.push_back(pb);
       if (pb_stack.size() > 1)
         pb_tree.AddChild(*(pb_stack.rbegin() + 1), pb_stack.back());
@@ -1045,12 +1068,29 @@ public:
   // current parallel tree, implicit inference and depth checks should behave
   // as if DEVICE doesn't exist.  Returns the effective max depth for inference.
   int EffectiveMaxDepth(AST::ParallelBy* pb) const {
+    if (active_device_target) {
+      auto arch = active_device_target->DefaultArch();
+      auto levels = active_device_target->GetParallelLevels(arch);
+      return (int)levels.size();
+    }
     if (!TargetHasLevel(ParallelLevel::DEVICE)) return TargetMaxDepth();
     auto* cur = pb;
     while (!pb_tree.IsRoot(cur)) cur = pb_tree.GetParent(cur);
     if (cur && cur->GetLevel() == ParallelLevel::DEVICE)
       return TargetMaxDepth();
     return TargetMaxDepth() - 1;
+  }
+
+  size_t EffectiveLiteralDepth(AST::ParallelBy* pb) const {
+    if (!active_device_target) return pb_tree.GetDepth(pb) + 1;
+    auto* cur = pb;
+    size_t depth = 0;
+    while (!pb_tree.IsRoot(cur)) {
+      cur = pb_tree.GetParent(cur);
+      depth++;
+      if (cur->HasDeviceTarget()) return depth;
+    }
+    return pb_tree.GetDepth(pb) + 1;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
@@ -1074,14 +1114,29 @@ public:
     pb_stack.pop_back();
     auto pb = cast<AST::ParallelBy>(&n);
 
-    if (ExplicitLevel(pb) && !TargetHasLevel(pb->GetLevel()))
+    if (ExplicitLevel(pb) && pb->GetLevel() != ParallelLevel::DEVICE &&
+        !DeviceTargetHasLevel(pb->GetLevel()))
       Error1(pb->LOC(),
              STR(pb->GetLevel()) +
                  " level is not supported by the target architecture: " +
                  CCtx().GetArch() + ".");
 
+    if (pb->GetLevel() == ParallelLevel::DEVICE && pb->HasDeviceTarget()) {
+      if (active_device_target) {
+        device_target_depth--;
+        if (device_target_depth == 0) active_device_target.reset();
+      }
+      return true;
+    }
+
     auto eff_max = EffectiveMaxDepth(pb);
-    auto literal_depth = pb_tree.GetDepth(pb) + 1;
+    auto literal_depth = EffectiveLiteralDepth(pb);
+
+    if (active_device_target) {
+      device_target_depth--;
+      if (device_target_depth == 0) active_device_target.reset();
+    }
+
     if (literal_depth > (size_t)eff_max) {
       Error1(pb->LOC(),
              "too many parallel-by levels: " + std::to_string(literal_depth) +
