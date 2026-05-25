@@ -1,0 +1,28 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// --- Variable scope: re-assignment should not re-declare ---
+__co__ void scope_test(s32 [16] a) {
+  parallel p by 16 : thread {
+    mutable s32 acc = 0;
+    acc = a.at(p);
+    acc = acc + 1;
+    a.at(p) = acc;
+  }
+}
+
+// First declaration
+// CHECK: int acc = 0;
+// Re-assignment without re-declaration
+// CHECK: acc = *((int*)a + __vid_tid_x);
+// CHECK: acc = (acc + 1);
+
+// --- Boolean literal support ---
+__co__ void bool_test(s32 [16] a) {
+  parallel p by 16 : thread {
+    if (true) {
+      a.at(p) = 1;
+    }
+  }
+}
+
+// CHECK: if (true) {

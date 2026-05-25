@@ -108,6 +108,19 @@ private:
   std::stack<ParallelLevel> levels;
   ParallelLevel Level() const { return levels.top(); }
   bool IsParallel() const { return levels.size() > 2; }
+  bool NeedLevelPred() const {
+    return IsParallel() && (Level() != ParallelLevel::THREAD);
+  }
+
+  std::unordered_map<std::string, int> emitted_device_names_;
+  std::string UniqueDeviceName(const std::string& name) {
+    auto it = emitted_device_names_.find(name);
+    if (it == emitted_device_names_.end()) {
+      emitted_device_names_[name] = 0;
+      return name;
+    }
+    return name + "__" + std::to_string(++it->second);
+  }
 
   int parallel_idx = -1;
   AST::ParallelBy* cur_pb = nullptr;
@@ -128,6 +141,7 @@ private:
   std::ostringstream return_stream;
 
   std::set<std::string> global_buffers;
+  std::vector<std::string> event_global_buffers;
   bool emit_call = true;
   std::vector<std::string> code_segments;
 
@@ -146,8 +160,13 @@ private:
 
   std::ostringstream& Stream() { return IsHost() ? hs : ds; }
   std::ostringstream& IndStream() {
-    if (IsHost()) { hs << h_indent; return hs; }
-    else { ds << d_indent; return ds; }
+    if (IsHost()) {
+      hs << h_indent;
+      return hs;
+    } else {
+      ds << d_indent;
+      return ds;
+    }
   }
   const std::string Indent() const { return IsHost() ? h_indent : d_indent; }
   void IncrIndent() { IsHost() ? IncrHostIndent() : IncrDeviceIndent(); }
@@ -167,13 +186,12 @@ private:
   bool NeedDeviceFunc() const { return cgi.HasParallelBy(fname); }
 
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
-  const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string&,
-                              bool, bool) const;
+  const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string&, bool,
+                              bool) const;
   const std::string CallSTR(AST::Call&) const;
   const std::string ValueSTR(const ValueItem& vi, bool = false,
                              bool = false) const;
-  const std::string ValueSTR(const ValueList& vl, bool = false,
-                             bool = false,
+  const std::string ValueSTR(const ValueList& vl, bool = false, bool = false,
                              const std::string& sep = ", ") const;
   const std::string ShapeSTR(const Shape&, bool = false,
                              const std::string& = ", ",
@@ -194,17 +212,13 @@ private:
   void EmitHipFree();
 
   void EmitDMACopy(const HIPDMALoweringDecision& dec,
-                   const std::string& from_expr,
-                   const std::string& to_expr,
+                   const std::string& from_expr, const std::string& to_expr,
                    const ptr<SpannedType>& to_sty);
-  void EmitDMAPad(AST::DMA& n,
-                  const HIPDMALoweringDecision& dec,
-                  const std::string& from_expr,
-                  const std::string& to_expr,
+  void EmitDMAPad(AST::DMA& n, const HIPDMALoweringDecision& dec,
+                  const std::string& from_expr, const std::string& to_expr,
                   const ptr<SpannedType>& from_sty,
                   const ptr<SpannedType>& to_sty);
-  void EmitDMATranspose(AST::DMA& n,
-                        const HIPDMALoweringDecision& dec,
+  void EmitDMATranspose(AST::DMA& n, const HIPDMALoweringDecision& dec,
                         const std::string& from_expr,
                         const std::string& to_expr,
                         const ptr<SpannedType>& from_sty,
@@ -217,6 +231,8 @@ private:
     void_return = false;
     emit_call = true;
     parallel_idx = -1;
+    emitted_device_names_.clear();
+    event_global_buffers.clear();
   }
 
   bool IsChoreoInput(const std::string& sname) {
