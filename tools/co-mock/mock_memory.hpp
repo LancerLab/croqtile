@@ -4,6 +4,7 @@
 #include "types.hpp"
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <stack>
@@ -28,6 +29,19 @@ struct Allocation {
   const void* RawPtr() const { return data.data(); }
 };
 
+struct FutureInfo {
+  std::shared_future<void> handle;
+  std::string src_name;
+  std::string dst_name;
+  size_t bytes = 0;
+
+  bool IsReady() const {
+    return handle.valid() &&
+           handle.wait_for(std::chrono::seconds(0)) ==
+               std::future_status::ready;
+  }
+};
+
 struct Value {
   enum Kind { Scalar, Pointer, Future };
   Kind kind = Scalar;
@@ -45,6 +59,7 @@ struct Value {
 
   std::shared_ptr<Allocation> alloc;
   size_t offset = 0;
+  std::shared_ptr<FutureInfo> future_info;
 
   Value() = default;
 
@@ -55,6 +70,9 @@ struct Value {
   static Value MakeBool(bool v);
   static Value MakePointer(std::shared_ptr<Allocation> a, BaseType bt,
                            size_t off = 0);
+  static Value MakeFuture(std::shared_future<void> f,
+                          const std::string& src = "",
+                          const std::string& dst = "", size_t bytes = 0);
 
   int64_t AsInt() const;
   uint64_t AsUInt() const;

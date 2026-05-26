@@ -1,0 +1,19 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void math_bif_test() {
+  s32 a = 7;
+  s32 b = 3;
+  s32 c = __alignup(a, b);
+  println(c);
+
+  s32 d = __aligndown(a, b);
+  println(d);
+
+  // ceildiv via expression
+  s32 e = (a + b - 1) / b;
+  println(e);
+}
+
+// CHECK: 9
+// CHECK: 6
+// CHECK: 3

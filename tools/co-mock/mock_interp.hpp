@@ -49,6 +49,9 @@ private:
   void ExecCall(AST::Call& n);
   void ExecReturn(AST::Return& n);
   void ExecDMA(AST::DMA& n);
+  void ExecWait(AST::Wait& n);
+  void ExecRotate(AST::Rotate& n);
+  void ExecInThreads(AST::InThreadsBlock& n);
 
   Value EvalBinaryOp(Opcode op, const Value& lhs, const Value& rhs);
   Value EvalUnaryOp(Opcode op, const Value& operand);

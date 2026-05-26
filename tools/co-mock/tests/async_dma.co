@@ -1,0 +1,23 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void async_dma_test() {
+  s32[4] src;
+  s32[4] dst;
+
+  parallel p by 4
+    src.at(p) = (p + 1) * 11;
+
+  // async copy with future
+  f = dma.copy.async src => dst;
+  wait(f);
+
+  println(dst.at(0));
+  println(dst.at(1));
+  println(dst.at(2));
+  println(dst.at(3));
+}
+
+// CHECK: 11
+// CHECK: 22
+// CHECK: 33
+// CHECK: 44

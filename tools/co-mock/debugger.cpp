@@ -119,6 +119,12 @@ bool Debugger::ProcessCommand(const std::string& input, AST::Node& stmt) {
     iss >> what;
     if (what == "break" || what == "breakpoints" || what == "b")
       CmdBreakpoints();
+    else if (what == "futures" || what == "fut" || what == "f")
+      CmdInfoFutures();
+    else if (what == "mem" || what == "memory" || what == "m")
+      CmdInfoMem();
+    else if (what == "locals" || what == "l")
+      CmdInfo();
     else
       CmdInfo();
     mode_ = (Mode)-1;
@@ -149,6 +155,8 @@ void Debugger::CmdHelp() {
       << "  b <line>       Set breakpoint at line number\n"
       << "  d <line>       Delete breakpoint at line number\n"
       << "  info           Show all variables in scope\n"
+      << "  info futures   Show async DMA future status\n"
+      << "  info mem       Show memory allocations\n"
       << "  info break     Show all breakpoints\n"
       << "  q, quit        Exit the debugger\n"
       << "  <Enter>        Repeat last step\n"
@@ -237,6 +245,39 @@ void Debugger::CmdInfo() {
       std::cout << "\n";
     }
   }
+}
+
+void Debugger::CmdInfoFutures() {
+  bool found = false;
+  auto& scopes = mem_.AllScopes();
+  for (int s = (int)scopes.size() - 1; s >= 0; --s) {
+    for (auto& [name, val] : scopes[s]) {
+      if (val.kind != Value::Future) continue;
+      found = true;
+      std::cout << "  " << name << ": " << val.ToString() << "\n";
+    }
+  }
+  if (!found) std::cout << "No active futures.\n";
+}
+
+void Debugger::CmdInfoMem() {
+  std::set<void*> seen;
+  auto& scopes = mem_.AllScopes();
+  for (int s = (int)scopes.size() - 1; s >= 0; --s) {
+    for (auto& [name, val] : scopes[s]) {
+      if (val.kind != Value::Pointer || !val.alloc) continue;
+      if (seen.count(val.alloc->RawPtr())) continue;
+      seen.insert(val.alloc->RawPtr());
+      std::cout << "  " << name << ": " << STR(val.alloc->storage) << " "
+                << STR(val.alloc->elem_type) << "[";
+      for (size_t i = 0; i < val.alloc->shape.size(); ++i) {
+        if (i) std::cout << ", ";
+        std::cout << val.alloc->shape[i];
+      }
+      std::cout << "] (" << val.alloc->TotalBytes() << " bytes)\n";
+    }
+  }
+  if (seen.empty()) std::cout << "No allocations.\n";
 }
 
 void Debugger::CmdBreak(const std::string& arg) {

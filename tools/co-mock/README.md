@@ -82,6 +82,8 @@ Debugging: test.co
 | `b <line>`          | Set a breakpoint at a source line                 |
 | `d <line>`          | Delete a breakpoint (`d` alone clears all)        |
 | `info`              | Show all variables in all active scopes           |
+| `info futures`      | Show async DMA future status (pending/completed) |
+| `info mem`          | Show memory allocations with sizes                |
 | `info break`        | Show all breakpoints                              |
 | `q`, `quit`         | Exit the debugger                                 |
 | `<Enter>`           | Repeat the last step action                       |
@@ -143,8 +145,12 @@ The interpreter supports:
 - `.at(idx)` element access returning scalar values
 - `foreach` loops, `while` loops, `if-else` blocks
 - `break`, `continue`, and `return` control flow
-- Synchronous DMA copy operations
-- Built-in functions (`println`, `print`, `assert`, math functions)
+- Synchronous and asynchronous DMA with real `std::async` futures
+- `wait()` blocking on async DMA futures
+- `rotate()` for circular variable swapping
+- `InThreadsBlock` predicate-guarded execution
+- Built-in functions (`println`, `print`, `assert`, `alignup`, `aligndown`,
+  `sqrt`, `sin`, `cos`, `tan`, `exp`, `log`, `pow`, and more)
 - 2D array indexing
 
 ## Tests
