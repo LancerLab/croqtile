@@ -83,6 +83,19 @@ Value Value::MakePointer(std::shared_ptr<Allocation> a, BaseType bt,
   return val;
 }
 
+Value Value::MakeFuture(std::shared_future<void> f, const std::string& src,
+                        const std::string& dst, size_t bytes) {
+  Value val;
+  val.kind = Future;
+  val.base_type = BaseType::BOOL;
+  val.future_info = std::make_shared<FutureInfo>();
+  val.future_info->handle = std::move(f);
+  val.future_info->src_name = src;
+  val.future_info->dst_name = dst;
+  val.future_info->bytes = bytes;
+  return val;
+}
+
 int64_t Value::AsInt() const {
   switch (base_type) {
   case BaseType::S8: return (int8_t)scalar.i64;
@@ -151,6 +164,20 @@ bool Value::AsBool() const {
 
 std::string Value::ToString() const {
   std::ostringstream oss;
+  if (kind == Future) {
+    if (future_info && future_info->handle.valid()) {
+      bool ready = future_info->IsReady();
+      oss << "<future: " << (ready ? "completed" : "pending");
+      if (!future_info->src_name.empty())
+        oss << " " << future_info->src_name << " -> "
+            << future_info->dst_name;
+      if (future_info->bytes > 0) oss << ", " << future_info->bytes << "B";
+      oss << ">";
+    } else {
+      oss << "<future: completed>";
+    }
+    return oss.str();
+  }
   if (kind == Pointer) {
     oss << "<" << STR(alloc->storage) << " " << STR(base_type) << "[";
     for (size_t i = 0; i < alloc->shape.size(); ++i) {

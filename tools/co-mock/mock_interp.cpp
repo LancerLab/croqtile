@@ -52,6 +52,7 @@ bool MockInterpreter::RunOnProgramImpl(AST::Node& root) {
 // -----------------------------------------------------------------------
 void MockInterpreter::ExecBlock(const ptr<AST::MultiNodes>& stmts) {
   if (!stmts) return;
+  if (debugger_ && debugger_->IsActive()) debugger_->EnterBlock();
   auto subs = stmts->AllSubs();
   for (size_t i = 0; i < subs.size(); ++i) {
     if (cf.kind != ControlFlow::None || quit_requested_) return;
@@ -65,6 +66,7 @@ void MockInterpreter::ExecBlock(const ptr<AST::MultiNodes>& stmts) {
       ExecStatement(subs[i]);
     }
   }
+  if (debugger_ && debugger_->IsActive()) debugger_->LeaveBlock();
 }
 
 void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
@@ -104,10 +106,8 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
     ExecBlock(wb->stmts);
   else if (auto mn = dyn_cast<AST::MultiNodes>(stmt))
     ExecBlock(mn);
-  else if (dyn_cast<AST::Wait>(stmt)) {
-  } // no-op for Phase 1
   else if (dyn_cast<AST::Synchronize>(stmt)) {
-  } // no-op
+  } // no-op for single-threaded mock
   else if (dyn_cast<AST::Yield>(stmt)) {
   } // no-op
   else if (dyn_cast<AST::Trigger>(stmt)) {
@@ -119,7 +119,18 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
   } else if (auto mma = dyn_cast<AST::MMA>(stmt))
     Error1(mma->LOC(), "mock: MMA operations are not supported.");
   else if (auto rot = dyn_cast<AST::Rotate>(stmt))
-    Error1(rot->LOC(), "mock: rotate operations are not supported.");
+    ExecRotate(*rot);
+  else if (auto wait = dyn_cast<AST::Wait>(stmt))
+    ExecWait(*wait);
+  else if (auto itb = dyn_cast<AST::InThreadsBlock>(stmt))
+    ExecInThreads(*itb);
+  else if (dyn_cast<AST::NamedTypeDecl>(stmt)) {
+  } // type alias, skip
+  else {
+    Warning(stmt->LOC(),
+            "mock: unhandled statement type '" +
+                std::string(stmt->TypeNameString()) + "'");
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -400,7 +411,12 @@ void MockInterpreter::ExecCall(AST::Call& n) {
 
   if (n.IsBIF() || func_name == "print" || func_name == "println" ||
       func_name == "assert" || func_name == "sizeof" || func_name == "min" ||
-      func_name == "max" || func_name == "abs") {
+      func_name == "max" || func_name == "abs" || func_name == "sqrt" ||
+      func_name == "rsqrt" || func_name == "sin" || func_name == "cos" ||
+      func_name == "tan" || func_name == "exp" || func_name == "log" ||
+      func_name == "floor" || func_name == "ceil" || func_name == "round" ||
+      func_name == "pow" || func_name == "alignup" ||
+      func_name == "aligndown" || func_name == "isfinite") {
     CallBIF(func_name, args, n);
     return;
   }
@@ -444,14 +460,95 @@ void MockInterpreter::ExecDMA(AST::DMA& n) {
   auto src = ExprEval(n.from);
   auto dst = ExprEval(n.to);
 
-  if (src.kind == Value::Pointer && dst.kind == Value::Pointer && src.alloc &&
-      dst.alloc) {
-    size_t bytes = std::min(src.alloc->TotalBytes(), dst.alloc->TotalBytes());
+  if (src.kind != Value::Pointer || dst.kind != Value::Pointer || !src.alloc ||
+      !dst.alloc)
+    return;
+
+  size_t bytes = std::min(src.alloc->TotalBytes() - src.offset,
+                          dst.alloc->TotalBytes() - dst.offset);
+
+  if (n.IsAsync() && !n.future.empty()) {
+    auto src_ptr =
+        std::const_pointer_cast<Allocation>(src.alloc);
+    auto dst_ptr = dst.alloc;
+    size_t s_off = src.offset, d_off = dst.offset;
+    auto fut = std::async(std::launch::async,
+                          [src_ptr, dst_ptr, s_off, d_off, bytes]() {
+                            std::memcpy((uint8_t*)dst_ptr->RawPtr() + d_off,
+                                        (const uint8_t*)src_ptr->RawPtr() +
+                                            s_off,
+                                        bytes);
+                          });
+    std::string src_sym, dst_sym;
+    if (auto ca = dyn_cast<AST::ChunkAt>(n.from))
+      src_sym = ca->RefSymbol();
+    if (auto ca = dyn_cast<AST::ChunkAt>(n.to))
+      dst_sym = ca->RefSymbol();
+    mem.Define(n.future,
+               Value::MakeFuture(fut.share(), src_sym, dst_sym, bytes));
+  } else {
     std::memcpy((uint8_t*)dst.alloc->RawPtr() + dst.offset,
                 (const uint8_t*)src.alloc->RawPtr() + src.offset, bytes);
+    if (!n.future.empty()) mem.Define(n.future, Value::MakeBool(true));
   }
+}
 
-  if (!n.future.empty()) mem.Define(n.future, Value::MakeBool(true));
+// -----------------------------------------------------------------------
+// Wait -- block until futures complete
+// -----------------------------------------------------------------------
+void MockInterpreter::ExecWait(AST::Wait& n) {
+  for (auto& t : n.GetTargets()) {
+    std::string name;
+    if (auto id = dyn_cast<AST::Identifier>(t))
+      name = id->name;
+    else if (auto da = dyn_cast<AST::DataAccess>(t))
+      name = da->GetDataName();
+    else if (auto expr = dyn_cast<AST::Expr>(t)) {
+      if (expr->GetForm() == AST::Expr::Reference) {
+        if (auto id = dyn_cast<AST::Identifier>(expr->GetR()))
+          name = id->name;
+        else if (auto da = dyn_cast<AST::DataAccess>(expr->GetR()))
+          name = da->GetDataName();
+      }
+    }
+    if (name.empty() || !mem.Exists(name)) continue;
+    auto& val = mem.Lookup(name);
+    if (val.kind == Value::Future && val.future_info &&
+        val.future_info->handle.valid())
+      val.future_info->handle.get();
+  }
+}
+
+// -----------------------------------------------------------------------
+// Rotate -- circular rotation of variable values
+// -----------------------------------------------------------------------
+void MockInterpreter::ExecRotate(AST::Rotate& n) {
+  auto& ids = n.GetIds();
+  if (ids.size() < 2) return;
+
+  std::vector<std::string> names;
+  for (auto& id_node : ids) {
+    if (auto id = dyn_cast<AST::Identifier>(id_node))
+      names.push_back(id->name);
+  }
+  if (names.size() < 2) return;
+
+  Value last = mem.Lookup(names.back());
+  for (int i = (int)names.size() - 1; i > 0; --i)
+    mem.Define(names[i], mem.Lookup(names[i - 1]));
+  mem.Define(names[0], last);
+}
+
+// -----------------------------------------------------------------------
+// InThreadsBlock -- execute body under predicate
+// -----------------------------------------------------------------------
+void MockInterpreter::ExecInThreads(AST::InThreadsBlock& n) {
+  auto pred = ExprEval(n.GetPredicate());
+  if (pred.AsBool()) {
+    mem.EnterScope();
+    ExecBlock(n.stmts);
+    mem.LeaveScope();
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -583,7 +680,13 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
       for (auto& arg : call->GetArguments()) args.push_back(ExprEval(arg));
 
     if (call->IsBIF() || func_name == "sizeof" || func_name == "min" ||
-        func_name == "max" || func_name == "abs")
+        func_name == "max" || func_name == "abs" || func_name == "sqrt" ||
+        func_name == "rsqrt" || func_name == "sin" || func_name == "cos" ||
+        func_name == "tan" || func_name == "exp" || func_name == "log" ||
+        func_name == "floor" || func_name == "ceil" ||
+        func_name == "round" || func_name == "pow" ||
+        func_name == "alignup" || func_name == "aligndown" ||
+        func_name == "isfinite")
       return CallBIF(func_name, args, *call);
 
     auto it = functions.find(func_name);
@@ -649,6 +752,11 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
     return Value::MakeInt(0);
   }
 
+  if (e->LOC().begin.line > 0) {
+    Warning(e->LOC(),
+            "mock: unhandled expression type '" +
+                std::string(e->TypeNameString()) + "'");
+  }
   return Value::MakeInt(0);
 }
 
@@ -690,6 +798,7 @@ Value MockInterpreter::EvalBinaryOp(Opcode op, const Value& lhs,
   case Op::Mul: return Value::MakeInt(l * r);
   case Op::Div: return Value::MakeInt(r != 0 ? l / r : 0);
   case Op::Mod: return Value::MakeInt(r != 0 ? l % r : 0);
+  case Op::CeilDiv: return Value::MakeInt(r != 0 ? (l + r - 1) / r : 0);
   case Op::Eq: return Value::MakeBool(l == r);
   case Op::Ne: return Value::MakeBool(l != r);
   case Op::Gt: return Value::MakeBool(l > r);
@@ -712,12 +821,21 @@ Value MockInterpreter::EvalBinaryOp(Opcode op, const Value& lhs,
 // -----------------------------------------------------------------------
 Value MockInterpreter::EvalUnaryOp(Opcode op, const Value& operand) {
   auto k = op.GetKind();
+  bool is_float = (operand.base_type == BaseType::F32 ||
+                   operand.base_type == BaseType::F64);
   switch (k) {
-  case Op::Sub: return Value::MakeInt(-operand.AsInt());
+  case Op::Sub:
+    if (is_float) return Value::MakeDouble(-operand.AsDouble());
+    return Value::MakeInt(-operand.AsInt());
   case Op::LogicNot: return Value::MakeBool(!operand.AsBool());
   case Op::BitNot: return Value::MakeInt(~operand.AsInt());
-  case Op::PreInc: return Value::MakeInt(operand.AsInt() + 1);
-  case Op::PreDec: return Value::MakeInt(operand.AsInt() - 1);
+  case Op::PreInc:
+    if (is_float) return Value::MakeDouble(operand.AsDouble() + 1.0);
+    return Value::MakeInt(operand.AsInt() + 1);
+  case Op::PreDec:
+    if (is_float) return Value::MakeDouble(operand.AsDouble() - 1.0);
+    return Value::MakeInt(operand.AsInt() - 1);
+  case Op::GetUBound: return operand;
   default: return operand;
   }
 }
@@ -768,8 +886,69 @@ Value MockInterpreter::CallBIF(const std::string& name,
   }
 
   if (name == "abs") {
-    if (!args.empty()) return Value::MakeInt(std::abs(args[0].AsInt()));
+    if (!args.empty()) {
+      if (args[0].base_type == BaseType::F32 ||
+          args[0].base_type == BaseType::F64)
+        return Value::MakeDouble(std::abs(args[0].AsDouble()));
+      return Value::MakeInt(std::abs(args[0].AsInt()));
+    }
     return Value::MakeInt(0);
+  }
+
+  if (name == "sqrt" || name == "rsqrt") {
+    if (!args.empty()) {
+      double v = args[0].AsDouble();
+      if (name == "rsqrt")
+        return Value::MakeDouble(1.0 / std::sqrt(v));
+      return Value::MakeDouble(std::sqrt(v));
+    }
+    return Value::MakeDouble(0);
+  }
+
+  if (name == "sin" || name == "cos" || name == "tan" || name == "exp" ||
+      name == "log" || name == "floor" || name == "ceil" ||
+      name == "round") {
+    if (!args.empty()) {
+      double v = args[0].AsDouble();
+      if (name == "sin") return Value::MakeDouble(std::sin(v));
+      if (name == "cos") return Value::MakeDouble(std::cos(v));
+      if (name == "tan") return Value::MakeDouble(std::tan(v));
+      if (name == "exp") return Value::MakeDouble(std::exp(v));
+      if (name == "log") return Value::MakeDouble(std::log(v));
+      if (name == "floor") return Value::MakeDouble(std::floor(v));
+      if (name == "ceil") return Value::MakeDouble(std::ceil(v));
+      if (name == "round") return Value::MakeDouble(std::round(v));
+    }
+    return Value::MakeDouble(0);
+  }
+
+  if (name == "pow") {
+    if (args.size() >= 2)
+      return Value::MakeDouble(
+          std::pow(args[0].AsDouble(), args[1].AsDouble()));
+    return Value::MakeDouble(0);
+  }
+
+  if (name == "alignup") {
+    if (args.size() >= 2) {
+      int64_t v = args[0].AsInt(), a = args[1].AsInt();
+      return Value::MakeInt(a > 0 ? ((v + a - 1) / a) * a : v);
+    }
+    return Value::MakeInt(0);
+  }
+
+  if (name == "aligndown") {
+    if (args.size() >= 2) {
+      int64_t v = args[0].AsInt(), a = args[1].AsInt();
+      return Value::MakeInt(a > 0 ? (v / a) * a : v);
+    }
+    return Value::MakeInt(0);
+  }
+
+  if (name == "isfinite") {
+    if (!args.empty())
+      return Value::MakeBool(std::isfinite(args[0].AsDouble()));
+    return Value::MakeBool(false);
   }
 
   Warning(node.LOC(), "mock: unknown BIF '" + name + "', returning 0.");

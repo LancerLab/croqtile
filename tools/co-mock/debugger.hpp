@@ -29,6 +29,9 @@ public:
 
   void SetInputStream(std::istream* is) { input_ = is; }
 
+  void EnterBlock() { ++current_depth_; }
+  void LeaveBlock() { --current_depth_; }
+
 private:
   enum StopReason { Step, Next, Breakpoint, Initial };
   enum Mode { Run, StepInto, StepOver };
@@ -41,6 +44,8 @@ private:
   void CmdList(AST::Node& stmt, int context_lines = 5);
   void CmdPrint(const std::string& var_name);
   void CmdInfo();
+  void CmdInfoFutures();
+  void CmdInfoMem();
   void CmdBreak(const std::string& arg);
   void CmdDelete(const std::string& arg);
   void CmdBreakpoints();

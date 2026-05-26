@@ -1,0 +1,14 @@
+// RUN: printf 's\ninfo mem\nc\n' > %t.script && co-mock -s %t.script %s 2>&1 | FileCheck %s
+
+__co__ void debugger_info_test() {
+  s32[4] arr;
+
+  parallel p by 4
+    arr.at(p) = p * 10;
+
+  s32 x = arr.at(2);
+  println(x);
+}
+
+// CHECK: arr: global s32[4] (16 bytes)
+// CHECK: 20
