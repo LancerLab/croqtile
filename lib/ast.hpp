@@ -509,6 +509,24 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
       : Node(l, MakeScalarIntegerType(BaseType::S64)), value(v) {}
   IntLiteral(const location& l, uint64_t v)
       : Node(l, MakeScalarIntegerType(BaseType::U64)), value(v) {}
+#ifdef __EMSCRIPTEN__
+  IntLiteral(const location& l, unsigned long v)
+      : Node(l,
+             MakeScalarIntegerType(sizeof(unsigned long) == 4 ? BaseType::U32
+                                                              : BaseType::U64)),
+        value(
+            sizeof(unsigned long) == 4
+                ? std::variant<int, uint32_t, int64_t, uint64_t>(uint32_t(v))
+                : std::variant<int, uint32_t, int64_t, uint64_t>(uint64_t(v))) {
+  }
+  IntLiteral(const location& l, long v)
+      : Node(l, MakeScalarIntegerType(sizeof(long) == 4 ? BaseType::S32
+                                                        : BaseType::S64)),
+        value(
+            sizeof(long) == 4
+                ? std::variant<int, uint32_t, int64_t, uint64_t>(int(v))
+                : std::variant<int, uint32_t, int64_t, uint64_t>(int64_t(v))) {}
+#endif
   IntLiteral(const location& l,
              const std::variant<int, uint32_t, int64_t, uint64_t>& v)
       : Node(l, MakeScalarIntegerType(BaseType::UNKNOWN)), value(v) {}

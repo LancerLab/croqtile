@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Choreo Playground</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">Choreo <span class="logo-sub">Playground</span></h1>
+        <span class="version" id="version-badge">loading...</span>
+      </div>
+      <div class="header-right">
+        <select id="target-select" class="control-select">
+          <option value="cc">cc (C++ CPU)</option>
+          <option value="cute">cute (CUDA CuTe)</option>
+        </select>
+        <button id="btn-compile" class="btn btn-primary">Compile</button>
+        <button id="btn-run" class="btn btn-success">Run (Interpreter)</button>
+        <button id="btn-gpu" class="btn btn-gpu" disabled title="Requires GPU server">Run on GPU</button>
+        <button id="btn-ast" class="btn btn-secondary">Show AST</button>
+      </div>
+    </header>
+
+    <div class="main">
+      <div class="editor-panel">
+        <div class="panel-header">
+          <span class="panel-title">Source Code (.co)</span>
+          <select id="example-select" class="control-select control-select-sm">
+            <option value="">-- Examples --</option>
+            <option value="hello">Hello World</option>
+            <option value="dma">DMA Copy</option>
+            <option value="matmul">Matrix Multiply</option>
+          </select>
+        </div>
+        <div id="editor-container"></div>
+      </div>
+
+      <div class="output-panel">
+        <div class="panel-header">
+          <div class="tab-bar">
+            <button class="tab active" data-tab="output">Output</button>
+            <button class="tab" data-tab="errors">Errors</button>
+            <button class="tab" data-tab="ast">AST</button>
+          </div>
+        </div>
+        <div class="tab-content active" id="tab-output">
+          <pre id="output-content" class="output-pre"></pre>
+        </div>
+        <div class="tab-content" id="tab-errors">
+          <pre id="errors-content" class="output-pre errors-pre"></pre>
+        </div>
+        <div class="tab-content" id="tab-ast">
+          <pre id="ast-content" class="output-pre ast-pre"></pre>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <span id="status">Initializing WASM module...</span>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>

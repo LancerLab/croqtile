@@ -1,3 +1,8 @@
+if(EMSCRIPTEN)
+  message(STATUS "co-mock: skipped (not supported under Emscripten)")
+  return()
+endif()
+
 add_executable(co-mock
   mock_main.cpp
   mock_interp.cpp

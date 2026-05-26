@@ -964,8 +964,7 @@ bool CCCodeGen::Visit(AST::Rotate& n) {
 bool CCCodeGen::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
   if (n.Resource() == Storage::GLOBAL && !pending_device_futures.empty()) {
-    for (auto& f : pending_device_futures)
-      IndStream() << f << ".get();\n";
+    for (auto& f : pending_device_futures) IndStream() << f << ".get();\n";
     pending_device_futures.clear();
   }
   return true;
@@ -1237,6 +1236,11 @@ void CCCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
 
   out << R"script(
 CXX="${CXX:-g++}"
+CXX_LIBDIR="$(${CXX} -print-file-name=libstdc++.so | xargs dirname | xargs realpath 2>/dev/null)"
+RPATH_FLAG=""
+if [ -n "$CXX_LIBDIR" ] && [ -d "$CXX_LIBDIR" ]; then
+  RPATH_FLAG="-Wl,-rpath,$CXX_LIBDIR"
+fi
 CFLAGS="-std=c++17 -O2 -pthread -I)script"
       << build_path << R"script("
 
@@ -1250,7 +1254,7 @@ show_usage() {
 }
 
 do_compile() {
-  ${CXX} ${CFLAGS} -o )script"
+  ${CXX} ${CFLAGS} ${RPATH_FLAG} -o )script"
       << exe_file << " " << cc_file << R"script(
   if [ $? -ne 0 ]; then
     echo "Compilation failed."

@@ -430,8 +430,7 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
 
 void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
                                   const std::string& indent) const {
-  os << indent
-     << "asm volatile(\"bar.sync 15, 128;\\n\" ::: \"memory\");\n";
+  os << indent << "asm volatile(\"bar.sync 15, 128;\\n\" ::: \"memory\");\n";
 }
 
 void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
@@ -7674,6 +7673,12 @@ show_usage() {
 }
 
 bool CuteCodeGen::CompileWithScript(const std::string& action) {
+#ifdef __EMSCRIPTEN__
+  (void)action;
+  errs() << "CompileWithScript is not available in WebAssembly builds.\n"
+         << "Use -es (emit source) or -mock mode instead.\n";
+  return false;
+#else
   assert(!action.empty() && "no action is specified.");
 
   char tempFileName[] = "/tmp/choreo_cute_script_XXXXXX";
@@ -7711,6 +7716,7 @@ bool CuteCodeGen::CompileWithScript(const std::string& action) {
   }
 
   return true;
+#endif
 }
 
 // TODO: eliminate the need of the value replacement?

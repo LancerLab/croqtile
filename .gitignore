@@ -30,6 +30,11 @@ extern/clang-format*
 
 benchmark/**
 
+# co-web (WASM build artifacts)
+build-wasm/
+tools/co-web/web/co-web.js
+tools/co-web/web/co-web.wasm
+
 .claude**
 .codex**
 .github/**

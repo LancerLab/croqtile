@@ -113,6 +113,9 @@ private:
 
 public:
   static ASTPipeline& Get();
+#ifdef __EMSCRIPTEN__
+  static void ResetInstance() { instance = std::make_unique<ASTPipeline>(); }
+#endif
 }; // ASTPipeline
 
 } // end namespace Choreo
