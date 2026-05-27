@@ -1,0 +1,27 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// --- 3D block-level parallel ---
+__co__ void test_3d_block(f32 [24] a) {
+  parallel {x, y, z} by [2, 3, 4] : block {
+    parallel p by 1 : thread {
+      a.at(0) = 1.0;
+    }
+  }
+}
+
+// CHECK: __vid_bid = blockIdx.x
+// CHECK: __vid_bid_x = __vid_bid / 3 / 4
+// CHECK: __vid_bid_y = __vid_bid / 4 % 3
+// CHECK: __vid_bid_z = __vid_bid % 4
+
+// --- 3D thread-level parallel ---
+__co__ void test_3d_thread(f32 [24] a) {
+  parallel {x, y, z} by [2, 3, 4] : thread {
+    a.at(x) = 1.0;
+  }
+}
+
+// CHECK: __vid_tid = threadIdx.x
+// CHECK: __vid_tid_x = __vid_tid / 3 / 4
+// CHECK: __vid_tid_y = __vid_tid / 4 % 3
+// CHECK: __vid_tid_z = __vid_tid % 4
