@@ -241,10 +241,25 @@ bool HIPCodeGen::Visit(AST::Trigger& n) {
   return true;
 }
 
-bool HIPCodeGen::Visit(AST::Rotate&) {
-  choreo_unreachable("Rotate (future ring) is not yet supported by the HIP "
-                     "target.");
-  return false;
+bool HIPCodeGen::Visit(AST::Rotate& n) {
+  TraceEachVisit(n);
+  auto& os = IsHost() ? hs : ds;
+  auto& indent = IsHost() ? h_indent : d_indent;
+  auto& ids = n.GetIds();
+  auto Sym = [&](size_t i) {
+    auto name = cast<AST::Identifier>(ids[i])->name;
+    return SSMName(InScopeNameForRef(name), IsHost());
+  };
+  if (ids.size() == 2) {
+    os << indent << "{ auto __tmp = " << Sym(0) << "; " << Sym(0) << " = "
+       << Sym(1) << "; " << Sym(1) << " = __tmp; }\n";
+  } else {
+    os << indent << "{ auto __tmp = " << Sym(0) << ";\n";
+    for (size_t i = 0; i + 1 < ids.size(); ++i)
+      os << indent << "  " << Sym(i) << " = " << Sym(i + 1) << ";\n";
+    os << indent << "  " << Sym(ids.size() - 1) << " = __tmp; }\n";
+  }
+  return true;
 }
 
 bool HIPCodeGen::Visit(AST::Yield& n) {
@@ -682,8 +697,27 @@ bool HIPCodeGen::Visit(AST::DMA& n) {
 
   auto nty = NodeType(n);
 
-  // PlaceHolderType: bare future declarations (e.g. "f = dma;") -- no copy.
-  if (isa<PlaceHolderType>(nty)) return true;
+  if (isa<PlaceHolderType>(nty)) {
+    if (!n.future.empty()) {
+      auto& fbi = FCtx(fname).GetFutureBufferInfo();
+      auto it = fbi.find(InScopeName(n.future));
+      if (it != fbi.end() && !it->second.buffer.empty()) {
+        auto buf = it->second.buffer;
+        if (IsHost()) {
+          auto host_buf = ssm.HostName(buf);
+          ssm.MapHostSymbol(InScopeNameForRef(n.future), host_buf);
+          ssm.MapHostSymbol(InScopeName(n.future + ".data"), host_buf);
+        } else {
+          auto dev_buf = ssm.HasDeviceName(InScopeName(buf))
+                             ? ssm.DeviceName(InScopeName(buf))
+                             : buf;
+          ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
+          ssm.MapDeviceSymbol(InScopeName(n.future) + ".data", dev_buf);
+        }
+      }
+    }
+    return true;
+  }
 
   const HIPDMALoweringDecision* dec = HIPDMAPlan::Lookup(&n);
   if (!dec) {
@@ -963,6 +997,41 @@ bool HIPCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
+  if (auto s = dyn_cast<AST::Select>(n.value)) {
+    size_t val_count = s->expr_list->Count();
+    std::string arr = name + "_select_array__";
+    if (isa<FutureType>(nty)) {
+      os << indent << "bool * " << arr << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) os << ", ";
+        os << "&" << ExprSTR(s->expr_list->ValueAt(i), IsHost());
+      }
+      os << "};\n";
+      os << indent << "bool & " << name << " = *" << arr << "["
+         << ExprSTR(s->select_factor, IsHost()) << "];\n";
+    } else if (sty) {
+      auto bts = HIPNameBaseType(sty->ElementType());
+      os << indent << bts << " * " << arr << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) os << ", ";
+        os << ExprSTR(s->expr_list->ValueAt(i), IsHost());
+      }
+      os << "};\n";
+      os << indent << bts << " *& " << name << " = " << arr << "["
+         << ExprSTR(s->select_factor, IsHost()) << "];\n";
+    } else {
+      os << indent << "auto " << name << " = " << ExprSTR(n.value, IsHost())
+         << ";\n";
+    }
+    if (IsHost())
+      ssm.MapHostSymbol(scoped_name, name);
+    else
+      ssm.MapDeviceSymbolIfNotExist(scoped_name, name);
+    return true;
+  }
+
+  if (isa<FutureType>(nty)) { return true; }
+
   if (CanYieldAnInteger(nty)) {
     os << indent << "int " << name << " = " << ExprSTR(n.value, IsHost())
        << ";\n";
@@ -1178,6 +1247,30 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
     } break;
     default: break;
     }
+    return true;
+  }
+
+  if (isa<FutureType>(nty)) {
+    auto& os = Stream();
+    auto& indent = Indent();
+    if (auto s = dyn_cast<AST::Select>(n.init_expr)) {
+      size_t val_count = s->expr_list->Count();
+      std::string arr = sym + "_select_array__";
+      os << indent << "bool * " << arr << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) os << ", ";
+        os << "&" << ExprSTR(s->expr_list->ValueAt(i), IsHost());
+      }
+      os << "};\n";
+      os << indent << "bool & " << sym << " = *" << arr << "["
+         << ExprSTR(s->select_factor, IsHost()) << "];\n";
+    } else {
+      os << indent << "bool " << sym << " = false;\n";
+    }
+    if (IsHost())
+      ssm.MapHostSymbol(sname, sym);
+    else
+      ssm.MapDeviceSymbolIfNotExist(sname, sym);
     return true;
   }
 
@@ -1404,7 +1497,14 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
   if (auto lit = dyn_cast<AST::IntLiteral>(n))
     return std::visit([](auto v) { return std::to_string(v); }, lit->value);
   if (auto lit = dyn_cast<AST::FloatLiteral>(n)) {
-    return std::visit([](auto v) { return std::to_string(v); }, lit->value);
+    std::ostringstream fp;
+    if (lit->IsFloat32())
+      fp << std::fixed << lit->Val_f32() << "f";
+    else if (lit->IsFloat64())
+      fp << std::fixed << lit->Val_f64();
+    else
+      return std::visit([](auto v) { return std::to_string(v); }, lit->value);
+    return fp.str();
   }
   if (auto id = dyn_cast<AST::Identifier>(n)) {
     auto sname = InScopeNameForRef(id->name);
@@ -1416,21 +1516,58 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     return id->name;
   }
   if (auto expr = dyn_cast<AST::Expr>(n)) {
-    if (expr->IsUnary() && expr->op == Op::Cast) {
+    auto op = expr->GetOp();
+    if (expr->IsUnary() && op == Op::Cast) {
       return ExprSTR(expr->GetR(), is_host);
+    }
+    if (op == Op::SizeOf) {
+      auto se = expr->Opts().GetSize();
+      if (IsValidValueItem(se)) return ValueSTR(se);
+      return "sizeof(" + ExprSTR(expr->GetR(), is_host) + ")";
+    }
+    if (op == Op::PreInc) return "++" + ExprSTR(expr->GetR(), is_host);
+    if (op == Op::PreDec) return "--" + ExprSTR(expr->GetR(), is_host);
+    if (op == Op::AddrOf) {
+      if (auto id = AST::GetIdentifier(expr->GetR()))
+        return ExprSTR(id, is_host);
+      return "&(" + ExprSTR(expr->GetR(), is_host) + ")";
+    }
+    if (op == Op::GetIth) return ExprSTR(expr->GetR(), is_host);
+    if (op == Op::GetUBound) {
+      auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
+      if (rty->Dims() == 1) return ValueSTR(rty->GetUpperBound());
     }
     if (expr->IsUnary()) {
       return Choreo::STR(expr->op) + "(" + ExprSTR(expr->GetR(), is_host) + ")";
     }
-    if (expr->op == Op::ElemOf) {
+    if (op == Op::ElemOf) {
       return ExprSTR(expr->GetL(), is_host) + "[" +
              ExprSTR(expr->GetR(), is_host) + "]";
     }
+    if (op == Op::Select) {
+      return "(" + ExprSTR(expr->GetL(), is_host) + " ? " +
+             ExprSTR(expr->GetR(), is_host) + " : " +
+             ExprSTR(expr->GetR(), is_host) + ")";
+    }
+    if (op == Op::CeilDiv) {
+      return "((" + ExprSTR(expr->GetL(), is_host) + " + " +
+             ExprSTR(expr->GetR(), is_host) + " - 1) / " +
+             ExprSTR(expr->GetR(), is_host) + ")";
+    }
+    if (op == Op::UBound) {
+      auto lty = NodeType(*expr->GetL());
+      if (IsActualBoundedIntegerType(lty))
+        return ValueSTR(cast<BoundedType>(lty)->GetUpperBound());
+      return "(" + ExprSTR(expr->GetL(), is_host) + " * " +
+             ExprSTR(expr->GetR(), is_host) + ")";
+    }
+    if (op == Op::UBoundAdd || op == Op::UBoundSub)
+      return ExprSTR(expr->GetL(), is_host);
     if (expr->IsBinary()) {
       return "(" + ExprSTR(expr->GetL(), is_host) + " " +
              Choreo::STR(expr->op) + " " + ExprSTR(expr->GetR(), is_host) + ")";
     }
-    if (expr->GetOp() == Op::DataOf || expr->GetOp() == Op::MDataOf) {
+    if (op == Op::DataOf || op == Op::MDataOf) {
       if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
         auto sname = InScopeName(id->name) + ".data";
         if (!is_host && ssm.HasDeviceName(sname)) return ssm.DeviceName(sname);
@@ -1548,31 +1685,21 @@ const std::string HIPCodeGen::CallSTR(AST::Call& n) const {
 
   if (n.IsArith()) {
     static const std::unordered_map<std::string, std::string> arith_map = {
-        {"__sqrt", "sqrtf"},
-        {"__rsqrt", "rsqrtf"},
-        {"__exp", "expf"},
-        {"__expm1", "expm1f"},
-        {"__log", "logf"},
-        {"__log1p", "log1pf"},
-        {"__pow", "powf"},
-        {"__sin", "sinf"},
-        {"__cos", "cosf"},
-        {"__tan", "tanf"},
-        {"__asin", "asinf"},
-        {"__acos", "acosf"},
-        {"__atan", "atanf"},
-        {"__atan2", "atan2f"},
-        {"__sinh", "sinhf"},
-        {"__cosh", "coshf"},
-        {"__tanh", "tanhf"},
-        {"__ceil", "ceilf"},
-        {"__floor", "floorf"},
-        {"__round", "roundf"},
-        {"__isfinite", "isfinite"},
-        {"__sign", "__fsignbit"},
-        {"__gelu", "__gelu"},
-        {"__sigmoid", "__sigmoid"},
-        {"__softplus", "__softplus"},
+        {"__sqrt", "sqrtf"},        {"__rsqrt", "rsqrtf"},
+        {"__exp", "expf"},          {"__expm1", "expm1f"},
+        {"__log", "logf"},          {"__log1p", "log1pf"},
+        {"__pow", "powf"},          {"__sin", "sinf"},
+        {"__cos", "cosf"},          {"__tan", "tanf"},
+        {"__asin", "asinf"},        {"__acos", "acosf"},
+        {"__atan", "atanf"},        {"__atan2", "atan2f"},
+        {"__sinh", "sinhf"},        {"__cosh", "coshf"},
+        {"__tanh", "tanhf"},        {"__ceil", "ceilf"},
+        {"__floor", "floorf"},      {"__round", "roundf"},
+        {"__abs", "fabsf"},         {"__fabs", "fabsf"},
+        {"__fmod", "fmodf"},        {"__fmax", "fmaxf"},
+        {"__fmin", "fminf"},        {"__isfinite", "isfinite"},
+        {"__sign", "__fsignbit"},   {"__gelu", "__gelu"},
+        {"__sigmoid", "__sigmoid"}, {"__softplus", "__softplus"},
     };
     auto it = arith_map.find(n.function->name);
     std::string func = (it != arith_map.end()) ? it->second : n.function->name;
