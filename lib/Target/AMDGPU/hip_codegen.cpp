@@ -98,6 +98,17 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
 
       hs << h_indent << "hipDeviceSynchronize();\n";
       hs << h_indent << "choreo::verify_device_status();\n";
+
+      for (auto& item : GetChoreoFuncIns(updating_cgi)) {
+        if (auto sty = dyn_cast<SpannedType>(item.type)) {
+          if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference()) {
+            auto oname = UnScopedName(item.name);
+            hs << h_indent << "choreo::abend_true(hipMemcpy(" << oname
+               << ".data(), " << oname << "__device, " << UnScopedSizeExpr(*sty)
+               << ", hipMemcpyDeviceToHost));\n";
+          }
+        }
+      }
     }
   } else if (isa<AST::WithBlock>(&n)) {
     DecrIndent();
@@ -138,7 +149,18 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
 // Visit methods
 // ============================================================================
 
-bool HIPCodeGen::Visit(AST::ParamList&) { return true; }
+bool HIPCodeGen::Visit(AST::ParamList& n) {
+  int index = 0;
+  for (auto param : n.values) {
+    auto ty = GetSymbolType(param->sym->name);
+    if (isa<StreamType>(ty)) continue;
+    SSTab().DefineSymbol(param->sym->name, ty);
+    updating_cgi.AddSymbolDetail(fname, {InScopeName(param->sym->name),
+                                         param->GetType(), param->pass_by_ref,
+                                         index++, param->GetAttr()});
+  }
+  return true;
+}
 bool HIPCodeGen::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
   if (n.with)
@@ -280,7 +302,23 @@ bool HIPCodeGen::Visit(AST::Continue& n) {
   return true;
 }
 
-bool HIPCodeGen::Visit(AST::NamedTypeDecl&) { return true; }
+bool HIPCodeGen::Visit(AST::NamedTypeDecl& n) {
+  TraceEachVisit(n);
+  auto nty = NodeType(n);
+  auto sym = n.name_str;
+  SSTab().DefineSymbol(sym, nty);
+  auto sname = InScopeName(sym);
+  if (!FCtx(fname).HasSymbolValues(sname))
+    updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), false});
+
+  if (auto mty = dyn_cast<MDSpanType>(nty)) {
+    if (mty->Dims() <= 1 && mty->HasSufficientInfo()) {
+      IndStream() << "int " << sym << " = "
+                  << ValueSTR(mty->GetShape().ValueAt(0)) << ";\n";
+    }
+  }
+  return true;
+}
 
 bool HIPCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
@@ -326,7 +364,7 @@ bool HIPCodeGen::Visit(AST::Wait& n) {
                    : NodeType(*f);
     if (isa<FutureType>(fty)) {
       assert(!IsHost());
-      ds << d_indent << ExprSTR(f, false) << ".wait();\n";
+      ds << d_indent << "while (!" << ExprSTR(f, false) << ") { /* spin */ }\n";
     } else if (auto ety = dyn_cast<EventArrayType>(fty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
@@ -633,54 +671,87 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
   auto pv_y = bvs.size() > 1 ? bvs.at(1) : sbe::nu(1);
   auto pv_z = bvs.size() > 2 ? bvs.at(2) : sbe::nu(1);
 
+  auto MapPV = [&](size_t idx, const std::string& vid) {
+    auto name = cast<AST::Identifier>(sub_pvs[idx])->name;
+    ssm.MapDeviceSymbolIfNotExist(InScopeName(name), vid);
+  };
+
   switch (pb->GetLevel()) {
   case ParallelLevel::BLOCK: {
     if (sub_pvs.size() == 1) {
-      auto name = cast<AST::Identifier>(sub_pvs[0])->name;
       ds << d_indent << "int __vid_bid_x = blockIdx.x;\n";
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(name), "__vid_bid_x");
+      MapPV(0, "__vid_bid_x");
     } else if (sub_pvs.size() == 2) {
-      auto name_x = cast<AST::Identifier>(sub_pvs[0])->name;
-      auto name_y = cast<AST::Identifier>(sub_pvs[1])->name;
       ds << d_indent << "int __vid_bid = blockIdx.x;\n";
       ds << d_indent << "int __vid_bid_x = __vid_bid / " << ValueSTR(pv_y)
          << ";\n";
       ds << d_indent << "int __vid_bid_y = __vid_bid % " << ValueSTR(pv_y)
          << ";\n";
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(name_x), "__vid_bid_x");
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(name_y), "__vid_bid_y");
+      MapPV(0, "__vid_bid_x");
+      MapPV(1, "__vid_bid_y");
+    } else if (sub_pvs.size() == 3) {
+      ds << d_indent << "int __vid_bid = blockIdx.x;\n";
+      ds << d_indent << "int __vid_bid_x = __vid_bid / " << ValueSTR(pv_y)
+         << " / " << ValueSTR(pv_z) << ";\n";
+      ds << d_indent << "int __vid_bid_y = __vid_bid / " << ValueSTR(pv_z)
+         << " % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "int __vid_bid_z = __vid_bid % " << ValueSTR(pv_z)
+         << ";\n";
+      MapPV(0, "__vid_bid_x");
+      MapPV(1, "__vid_bid_y");
+      MapPV(2, "__vid_bid_z");
     }
     break;
   }
   case ParallelLevel::GROUP: {
-    if (sub_pvs.size() >= 1) {
-      auto name = cast<AST::Identifier>(sub_pvs[0])->name;
+    if (sub_pvs.size() == 1) {
       ds << d_indent << "int __vid_gid_x = threadIdx.x / 32;\n";
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(name), "__vid_gid_x");
-    }
-    if (sub_pvs.size() >= 2) {
-      auto name = cast<AST::Identifier>(sub_pvs[1])->name;
-      ds << d_indent << "int __vid_gid_y = (threadIdx.x / 32) % "
-         << ValueSTR(pv_y) << ";\n";
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(name), "__vid_gid_y");
+      MapPV(0, "__vid_gid_x");
+    } else if (sub_pvs.size() == 2) {
+      ds << d_indent << "int __vid_gid = threadIdx.x / 32;\n";
+      ds << d_indent << "int __vid_gid_x = __vid_gid / " << ValueSTR(pv_y)
+         << ";\n";
+      ds << d_indent << "int __vid_gid_y = __vid_gid % " << ValueSTR(pv_y)
+         << ";\n";
+      MapPV(0, "__vid_gid_x");
+      MapPV(1, "__vid_gid_y");
+    } else if (sub_pvs.size() == 3) {
+      ds << d_indent << "int __vid_gid = threadIdx.x / 32;\n";
+      ds << d_indent << "int __vid_gid_x = __vid_gid / " << ValueSTR(pv_y)
+         << " / " << ValueSTR(pv_z) << ";\n";
+      ds << d_indent << "int __vid_gid_y = __vid_gid / " << ValueSTR(pv_z)
+         << " % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "int __vid_gid_z = __vid_gid % " << ValueSTR(pv_z)
+         << ";\n";
+      MapPV(0, "__vid_gid_x");
+      MapPV(1, "__vid_gid_y");
+      MapPV(2, "__vid_gid_z");
     }
     break;
   }
   case ParallelLevel::THREAD: {
     if (sub_pvs.size() == 1) {
-      auto name = cast<AST::Identifier>(sub_pvs[0])->name;
       ds << d_indent << "int __vid_tid_x = threadIdx.x;\n";
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(name), "__vid_tid_x");
+      MapPV(0, "__vid_tid_x");
     } else if (sub_pvs.size() == 2) {
-      auto name_x = cast<AST::Identifier>(sub_pvs[0])->name;
-      auto name_y = cast<AST::Identifier>(sub_pvs[1])->name;
       ds << d_indent << "int __vid_tid = threadIdx.x;\n";
       ds << d_indent << "int __vid_tid_x = __vid_tid / " << ValueSTR(pv_y)
          << ";\n";
       ds << d_indent << "int __vid_tid_y = __vid_tid % " << ValueSTR(pv_y)
          << ";\n";
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(name_x), "__vid_tid_x");
-      ssm.MapDeviceSymbolIfNotExist(InScopeName(name_y), "__vid_tid_y");
+      MapPV(0, "__vid_tid_x");
+      MapPV(1, "__vid_tid_y");
+    } else if (sub_pvs.size() == 3) {
+      ds << d_indent << "int __vid_tid = threadIdx.x;\n";
+      ds << d_indent << "int __vid_tid_x = __vid_tid / " << ValueSTR(pv_y)
+         << " / " << ValueSTR(pv_z) << ";\n";
+      ds << d_indent << "int __vid_tid_y = __vid_tid / " << ValueSTR(pv_z)
+         << " % " << ValueSTR(pv_y) << ";\n";
+      ds << d_indent << "int __vid_tid_z = __vid_tid % " << ValueSTR(pv_z)
+         << ";\n";
+      MapPV(0, "__vid_tid_x");
+      MapPV(1, "__vid_tid_y");
+      MapPV(2, "__vid_tid_z");
     }
     break;
   }
@@ -1527,6 +1598,8 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     }
     if (op == Op::PreInc) return "++" + ExprSTR(expr->GetR(), is_host);
     if (op == Op::PreDec) return "--" + ExprSTR(expr->GetR(), is_host);
+    if (op == Op::BitNot) return "(~" + ExprSTR(expr->GetR(), is_host) + ")";
+    if (op == Op::LogicNot) return "(!" + ExprSTR(expr->GetR(), is_host) + ")";
     if (op == Op::AddrOf) {
       if (auto id = AST::GetIdentifier(expr->GetR()))
         return ExprSTR(id, is_host);
