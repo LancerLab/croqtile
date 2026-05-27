@@ -1,0 +1,12 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// --- Rotate: swap two DMA futures ---
+__co__ void dma_swap_test(f32 [4] a, f32 [4] b) {
+  parallel p by 1 {
+    f1 = dma.copy a => local;
+    f2 = dma.copy b => local;
+    swap(f1, f2);
+  }
+}
+
+// CHECK: auto __tmp = f1__buf__; f1__buf__ = f2__buf__; f2__buf__ = __tmp;
