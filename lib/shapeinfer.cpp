@@ -1838,8 +1838,8 @@ bool ShapeInference::Visit(AST::Call& n) {
       auto lhs = n.arguments->ValueAt(0);
       auto rhs = n.arguments->ValueAt(1);
       auto select_item = [&](const ValueItem& lv, const ValueItem& rv) {
-        auto pred = (func_name == "__min") ? sbe::oc_lt(lv, rv)
-                                            : sbe::oc_gt(lv, rv);
+        auto pred =
+            (func_name == "__min") ? sbe::oc_lt(lv, rv) : sbe::oc_gt(lv, rv);
         return sbe::sel(pred, lv, rv)->Normalize();
       };
       auto get_item = [&](AST::Node& arg, VNKind kind) -> ValueItem {
@@ -1851,8 +1851,8 @@ bool ShapeInference::Visit(AST::Call& n) {
       auto lhs_val = get_item(*lhs, VNKind::VNK_VALUE);
       auto rhs_val = get_item(*rhs, VNKind::VNK_VALUE);
       if (IsValidValueItem(lhs_val) && IsValidValueItem(rhs_val)) {
-        auto value_sign = vn.ValueItemToSignature(select_item(lhs_val, rhs_val),
-                                                  true);
+        auto value_sign =
+            vn.ValueItemToSignature(select_item(lhs_val, rhs_val), true);
         auto value_no = GetOrGenValNum(value_sign);
         ast_vn.Update(&n, value_no, VNKind::VNK_VALUE);
         cur_vn = value_no;
@@ -1865,8 +1865,8 @@ bool ShapeInference::Visit(AST::Call& n) {
                                            ? VNKind::VNK_UBOUND
                                            : VNKind::VNK_VALUE);
           if (IsValidValueItem(lhs_ub) && IsValidValueItem(rhs_ub)) {
-            auto ub_sign = vn.ValueItemToSignature(select_item(lhs_ub, rhs_ub),
-                                                   true);
+            auto ub_sign =
+                vn.ValueItemToSignature(select_item(lhs_ub, rhs_ub), true);
             auto ub_no = GetOrGenValNum(ub_sign);
             ast_vn.Update(&n, ub_no, VNKind::VNK_UBOUND);
             cur_vn = ub_no;
@@ -2228,8 +2228,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (auto call = dyn_cast<AST::Call>(n)) {
     return call->IsExpr() && call->IsArith() && call->arguments &&
            call->arguments->Count() == 2 &&
-           (call->function->name == "__min" ||
-            call->function->name == "__max");
+           (call->function->name == "__min" || call->function->name == "__max");
   }
   if (isa<AST::DataType>(n)) return false;
   auto nty = NodeType(*n);

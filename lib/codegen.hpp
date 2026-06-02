@@ -137,6 +137,8 @@ struct FuncTrait {
   bool has_tma = false;
   bool has_async_dma = false;
   bool has_warpspec_pattern = false;
+  // Inferred min blocks/SM for __launch_bounds__ (0 = not inferred).
+  int64_t inferred_launch_bounds_min_blocks = 0;
 
   // Per-event participation: OR of active thread vectors from all usage scopes.
   std::map<std::string, std::vector<bool>> event_participation;

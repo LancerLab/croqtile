@@ -5152,9 +5152,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         info.shared_swizzle_enum = swizzle_to_enum(swizzle);
         info.shared_ptr_expr =
             std::string("(") + elem_ty + "*)(" + base_expr + ")";
-        info.shared_iter_elem_offset_expr =
-          "((" + iter_expr + ") * " + std::to_string(*atom_k) +
-          " * (" + stride_expr + "))";
+        info.shared_iter_elem_offset_expr = "((" + iter_expr + ") * " +
+                                            std::to_string(*atom_k) + " * (" +
+                                            stride_expr + "))";
         {
           int desc_id = direct_wgmma_desc_cnt++;
           auto suffix = std::to_string(desc_id);
@@ -5208,8 +5208,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << info.shared_ptr_expr << ";\n";
         ds << d_indent << "uint64_t " << info.shared_desc_var
            << " = wgmma_make_smem_desc<" << info.shared_major_order << ", "
-           << info.shared_swizzle_enum << ">(" << info.shared_ptr_var
-           << ");\n";
+           << info.shared_swizzle_enum << ">(" << info.shared_ptr_var << ");\n";
       };
       auto emit_shared_direct_iter_update =
           [&](const DirectWGMMAOperandInfo& info) {
@@ -8822,8 +8821,13 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
                              std::to_string(*launch_bounds_min_blocks) + ") ";
       } else if (IsWarpSpecActive() ||
                  set_cuda_func_attribute_max_dynamic_shared_memory_size) {
-        launch_bounds_attr =
-            "__launch_bounds__(" + ValueSTR(thr_count) + ", 1) ";
+        int64_t min_blocks = 1;
+        if (auto inferred =
+                cgi.GetFunctionTrait(fname).inferred_launch_bounds_min_blocks;
+            inferred > 0)
+          min_blocks = inferred;
+        launch_bounds_attr = "__launch_bounds__(" + ValueSTR(thr_count) + ", " +
+                             std::to_string(min_blocks) + ") ";
       }
     }
   }
@@ -9061,6 +9065,7 @@ show_usage() {
     os << " -D__USE_CUTE_TYPE__";
 
   if (CCtx().TargetDebugInfo()) os << " -g -G";
+  if (CCtx().UseFastMath()) os << " --use_fast_math";
   if (CCtx().DMADiagnosis()) os << " -D__CHOREO_DMA_DIAGNOSIS__";
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();

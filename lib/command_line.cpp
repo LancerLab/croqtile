@@ -142,6 +142,12 @@ Option<bool>
                  "runtime for faster nvcc compilation. The precompiled "
                  "runtime is built automatically on first use and cached in "
                  "$XDG_CACHE_HOME/choreo/ (or ~/.cache/choreo/).");
+Option<bool> use_fast_math(
+    OptionKind::User, "--use-fast-math", "", true,
+    "Pass --use_fast_math to nvcc when compiling generated CUDA code "
+    "(default: on). Use --use-fast-math=false to disable. Enables faster "
+    "approximate transcendentals (exp2f, div) for softmax and similar "
+    "kernels.");
 Option<std::string>
     target_options(OptionKind::Hidden, "--target-options", "-tos", "",
                    "Extra target options used for target compilation.", "");
@@ -499,6 +505,7 @@ bool CommandLine::Parse(int argc, char** argv) {
     CCtx().SetDisableCudaRuntimeEnvCheck(
         disable_cuda_runtime_env_check.GetValue());
   CCtx().SetFastCompile(fast_compile.GetValue());
+  CCtx().SetUseFastMath(use_fast_math.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
 
   if (!trace_visit.GetValue().empty())

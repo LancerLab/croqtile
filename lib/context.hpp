@@ -513,6 +513,8 @@ private:
   bool skip_epilogue_group_sync = false;
   bool fast_compile = false; // Use precompiled CuTe runtime for faster nvcc
                              // compilation via separate compilation + linking.
+  bool use_fast_math = true; // Pass --use_fast_math to nvcc for faster
+                             // transcendentals (exp/div) in generated code.
   bool use_target_lib = false; // Lower __lib_* builtins to target library calls
                                // (e.g. native hardware library calls).
   std::string debug_file_dir;  // directory for compiler debug artifacts
@@ -759,6 +761,7 @@ public:
   bool SingleThreadProducer() const { return single_thread_producer; }
   bool SkipEpilogueGroupSync() const { return skip_epilogue_group_sync; }
   bool FastCompile() const { return fast_compile; }
+  bool UseFastMath() const { return use_fast_math; }
   bool UseTargetLib() const { return use_target_lib; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
@@ -803,6 +806,7 @@ public:
     skip_epilogue_group_sync = value;
   }
   void SetFastCompile(bool value) { fast_compile = value; }
+  void SetUseFastMath(bool value) { use_fast_math = value; }
   void SetUseTargetLib(bool value) { use_target_lib = value; }
   void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
