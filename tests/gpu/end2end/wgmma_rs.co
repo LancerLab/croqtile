@@ -1,0 +1,90 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+//
+// End-to-end tests for WGMMA RS mode (A from registers, B from shared memory).
+
+#define WARP_M 64
+#define WARP_N 64
+#define WARP_K 16
+
+__co__ auto rs_zero(f16 [WARP_N, WARP_K] rhs) {
+  f32 [WARP_M, WARP_N] output{0.0f};
+  parallel {bm, bn} by [1, 1] : block {
+    mc = mma.fill.f32 0.0f;
+    fragment f16[WARP_M, WARP_K] a_frag {0.0f};
+    rhs_s = tma.copy.swiz<32> rhs.subspan(WARP_N, WARP_K).at(bn, 0) => shared;
+    parallel p by 1 : group-4 {
+      mb = mma.load.swiz<32> rhs_s;
+      mma.row.row mc, a_frag, mb;
+    }
+    mma.store mc, output.chunkat(bm, bn);
+  }
+  return output;
+}
+
+__co__ auto rs_ones(f16 [WARP_N, WARP_K] rhs) {
+  f32 [WARP_M, WARP_N] output{0.0f};
+  parallel {bm, bn} by [1, 1] : block {
+    mc = mma.fill.f32 0.0f;
+    fragment f16[WARP_M, WARP_K] a_frag {1.0f};
+    rhs_s = tma.copy.swiz<32> rhs.subspan(WARP_N, WARP_K).at(bn, 0) => shared;
+    parallel p by 1 : group-4 {
+      mb = mma.load.swiz<32> rhs_s;
+      mma.row.row mc, a_frag, mb;
+    }
+    mma.store mc, output.chunkat(bm, bn);
+  }
+  return output;
+}
+
+int main(int argc, char** argv) {
+  constexpr size_t M = WARP_M, N = WARP_N, K = WARP_K;
+
+  auto h_rhs = choreo::make_spandata<choreo::f16>(N, K);
+  h_rhs.fill(0.5f);
+
+  __half* d_rhs;
+  choreo::abend_true(cudaMalloc(&d_rhs, N * K * sizeof(__half)));
+  choreo::abend_true(cudaMemcpy(d_rhs, h_rhs.data(), N * K * sizeof(__half),
+                                cudaMemcpyHostToDevice));
+  auto rhs_view = choreo::make_spanview<choreo::f16, 2>(d_rhs, {N, K});
+
+  // Test 1: rs_zero - zero fragment * B should give zero output
+  {
+    auto result = rs_zero(rhs_view);
+    bool pass = true;
+    for (size_t i = 0; i < M * N; i++) {
+      if (fabsf(result.data()[i]) > 1e-5f) {
+        printf("FAIL rs_zero: out[%zu] = %f\n", i, result.data()[i]);
+        pass = false;
+        break;
+      }
+    }
+    if (pass) printf("PASS rs_zero\n");
+  }
+
+  // Test 2: rs_ones - ones fragment * B should give row sums of B
+  {
+    auto result = rs_ones(rhs_view);
+    float expected = K * 0.5f;
+    bool pass = true;
+    for (size_t m = 0; m < M; m++) {
+      for (size_t n = 0; n < N; n++) {
+        float val = result.data()[m * N + n];
+        if (fabsf(val - expected) > 0.5f) {
+          printf("FAIL rs_ones: [%zu][%zu] = %f (exp %f)\n", m, n, val, expected);
+          pass = false;
+          break;
+        }
+      }
+      if (!pass) break;
+    }
+    if (pass) printf("PASS rs_ones\n");
+  }
+
+  choreo::abend_true(cudaFree(d_rhs));
+  return 0;
+}
+
+// CHECK: PASS rs_zero
+// CHECK: PASS rs_ones

@@ -1,0 +1,136 @@
+#define BLOCK_M 64
+#define BLOCK_N 64
+
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Test Case A: all fragments share same UNIFORM layout, same index pattern.
+// Should emit register-direct loop instead of flat-stride.
+__co__ void test_register_direct_1d() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M] src {0.0f};
+    fragment f32[BLOCK_M] dst;
+    foreach i in [BLOCK_M] : automap(t)
+      dst.at(i) = src.at(i);
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_register_direct_1d
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 1; ++__r)
+// CHECK: dst[__r] = src[__r]
+// CHECK-NOT: __automap_flat
+
+// Test Case A: 2D fragments, both same layout, same indices.
+__co__ void test_register_direct_2d() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M, BLOCK_N] acc;
+    fragment f16[BLOCK_M, BLOCK_N] acc_cast;
+    foreach {i, j} in [BLOCK_M, BLOCK_N] : automap(t)
+      acc_cast.at(i, j) = __to<f16>(acc.at(i, j));
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_register_direct_2d
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 32; ++__r)
+// CHECK: acc_cast[__r] = {{.*}}(acc[__r])
+// CHECK-NOT: __automap_flat
+
+// Test Case A: expression in body (not just assignment).
+__co__ void test_register_direct_expr() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M, BLOCK_N] a;
+    fragment f32[BLOCK_M, BLOCK_N] b;
+    foreach {i, j} in [BLOCK_M, BLOCK_N] : automap(t)
+      a.at(i, j) = a.at(i, j) + b.at(i, j);
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_register_direct_expr
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 32; ++__r)
+// CHECK: a[__r] = a[__r] + b[__r]
+// CHECK-NOT: __automap_flat
+
+// Test IV reconstruction: IV used in cast expression (non-fragment context).
+// Should still use register-direct loop with IV reconstructed from __r + tid.
+__co__ void test_iv_reconstruction_1d() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M] buf;
+    foreach i in [BLOCK_M] : automap(t)
+      buf.at(i) = __to<f32>(i) * 2.0f;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_iv_reconstruction_1d
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 1; ++__r)
+// CHECK: = (__r * 128 +
+// CHECK: buf[__r] =
+// CHECK-NOT: __automap_flat
+
+// Test vec4 layout: IV reconstruction uses vec4-grouped formula.
+// 1024 elements / 128 threads = 8 regs -> vec_width=4.
+__co__ void test_vec4_iv_reconstruction() {
+  parallel t by 128 : thread {
+    fragment f32[1024] buf;
+    foreach i in [1024] : automap(t)
+      buf.at(i) = __to<f32>(i) * 2.0f;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_vec4_iv_reconstruction
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 8; ++__r)
+// CHECK: = ((__r) / 4 * 512 + __choreo_vtid_x * 4 + (__r) % 4)
+// CHECK: buf[__r] =
+// CHECK-NOT: __automap_flat
+
+// Test vec4 store: copy from fragment to global memory uses float4.
+__co__ f32[1024] test_vec4_store() {
+  f32[1024] out;
+  parallel t by 128 : thread {
+    fragment f32[1024] buf {0.0f};
+    foreach i in [1024] : automap(t)
+      out.at(i) = buf.at(i);
+  }
+  return out;
+}
+
+// CHECK-LABEL: __choreo_device_test_vec4_store
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r4 = 0; __r4 < 2; ++__r4)
+// CHECK: *(float4*)({{.*}}out{{.*}} + __r4 * 512 + __choreo_vtid_x * 4) = *(float4*)(buf + __r4 * 4)
+// CHECK: } // vec4 automap
+
+// Test vec4 store 2D: 2D fragment copy also uses float4.
+__co__ f32[32, 32] test_vec4_store_2d() {
+  f32[32, 32] out;
+  parallel t by 128 : thread {
+    fragment f32[32, 32] tile {0.0f};
+    foreach {i, j} in [32, 32] : automap(t)
+      out.at(i, j) = tile.at(i, j);
+  }
+  return out;
+}
+
+// CHECK-LABEL: __choreo_device_test_vec4_store_2d
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r4 = 0; __r4 < 2; ++__r4)
+// CHECK: *(float4*)
+// CHECK: } // vec4 automap
+
+// Test fallback: mixed fragments (2D + 1D broadcast with UNIFORM)
+// should fall back to flat-stride since UNIFORM has no clean RowFromRegIndex.
+__co__ void test_fallback_broadcast_uniform() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M] row;
+    fragment f32[BLOCK_M, BLOCK_N] tile;
+    foreach {i, j} in [BLOCK_M, BLOCK_N] : automap(t)
+      tile.at(i, j) = row.at(i);
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_fallback_broadcast_uniform
+// CHECK: for (int __automap_flat
+// CHECK: __automap_flat += 128

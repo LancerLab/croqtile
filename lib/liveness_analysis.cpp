@@ -884,6 +884,14 @@ void LivenessAnalyzer::DumpMMA(const AST::MMA& mma, std::ostream& os) {
       os << "mma.load " << (op->IsAsync() ? ".async" : "") << " "
          << PSTR(op->LoadFrom());
     } break;
+    case AST::MMAOperation::LoadR: {
+      os << "mma.loadR " << PSTR(op->LoadFrom());
+      if (op->LoadTo()) os << ", " << PSTR(op->LoadTo());
+    } break;
+    case AST::MMAOperation::LoadS: {
+      os << "mma.loadS " << (op->IsAsync() ? ".async" : "") << " "
+         << PSTR(op->LoadFrom());
+    } break;
     case AST::MMAOperation::Exec: {
       os << "mma.exec";
       switch (op->GetMethod()) {

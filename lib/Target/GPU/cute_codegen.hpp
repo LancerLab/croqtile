@@ -11,6 +11,7 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "codegen_utils.hpp"
+#include "fragment_layout.hpp"
 #include "operator_info.hpp"
 #include "types.hpp"
 
@@ -75,6 +76,12 @@ inline const char* NameBaseType(BaseType bt) {
 
 using ScopedSymbolMap = ::Choreo::ScopedSymbolMap;
 
+enum class AutomapStrategy {
+  REGISTER_DIRECT,
+  REGISTER_WITH_BROADCAST,
+  FLAT_STRIDE
+};
+
 struct CuteCodeGen : public CodeGenerator {
 private:
   // Only use it for function parameters.
@@ -121,6 +128,8 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
   bool Visit(AST::MMA&) override;
+  bool Visit(AST::FragApply&) override;
+  bool Visit(AST::FragTransfer&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Break&) override;
@@ -214,6 +223,8 @@ private:
   static const std::string vid_pfx;
   // block dim enforcement level, default to thread level
   ParallelLevel bdim_level = ParallelLevel::THREAD;
+  size_t current_thread_count = 0;
+  std::string current_thread_count_expr;
   std::string stream_name; // deprecated: kept for ABI, no longer populated
   int tma_count = 0;
   int tma_future_count = 0;
@@ -229,6 +240,15 @@ private:
   bool has_analyzed_warpspec = false;
   bool warpspec_wgmma_arrived = false;
   AST::InThreadsBlock* current_inthreads = nullptr;
+
+  bool in_register_direct_automap_ = false;
+  bool vec4_automap_skip_ = false;
+  std::string reg_loop_var_;
+  std::map<std::string, std::string> automap_frag_reg_expr_;
+  std::map<std::string, std::string> frag_apply_iv_map_;
+
+  AutomapStrategy AnalyzeAutomap(const AST::ForeachBlock& n);
+
   struct BaseScaleAccumInfo {
     std::string frag_sym;
     std::string frag_expr;
@@ -583,6 +603,10 @@ private:
   }
 
   const std::string EmitSpannedArith(AST::Expr& e) const;
+  std::string EmitUniformFragmentAccess(const ptr<AST::ChunkAt>& ca,
+                                        bool is_host) const;
+  std::string
+  ResolveAutomapThreadExpr(const ptr<AST::AttributeExpr>& automap_attr) const;
 
   bool IsWarpSpecActive() const {
     return CCtx().UseWarpSpec() || has_analyzed_warpspec ||

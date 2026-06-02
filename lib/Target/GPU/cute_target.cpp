@@ -3,6 +3,7 @@
 #include "cute_device_codegen.hpp"
 #include "dma_plan.hpp"
 #include "dmaconf.hpp"
+#include "fragment_layout_pass.hpp"
 #include "gpu_adapt.hpp"
 #include "gpu_target.hpp"
 #include "memcheck.hpp"
@@ -231,6 +232,7 @@ public:
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {
     p.AddStage<GPUAdaptor>();
+    p.AddStage<FragmentLayoutPass>();
     p.AddStage<DMAPlan>();
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();

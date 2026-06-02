@@ -714,6 +714,11 @@ public:
                             "` to be dynamically shaped (by " +
                             STR(sty->GetShape()) + ").");
       break;
+    case Storage::REG:
+      if (!n.HasNote("fragment_decl"))
+        Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
+                            STR(st) + " inside choreo function.");
+      break;
     default:
       Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
                           STR(st) + " inside choreo function.");
@@ -847,6 +852,8 @@ public:
                "Only the acc of mma operation can be used in fill op.");
     } break;
     case AST::MMAOperation::Load: break;
+    case AST::MMAOperation::LoadR: break;
+    case AST::MMAOperation::LoadS: break;
     case AST::MMAOperation::Exec: {
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));
@@ -948,10 +955,19 @@ public:
         if (op.IsSparse() && !e_sym.empty())
           FCtx(fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       } else if (mma_ty == MMAType::WGMMA) {
-        std::string mma_policy = MMALimit::MMAConfig2WGMMAName(mma_config);
+        auto a_raw_ty = GetSymbolType(a_sym);
+        bool is_rs =
+            a_sty->GetStorage() == Storage::REG && !isa<FutureType>(a_raw_ty);
+        std::string mma_policy =
+            is_rs ? MMALimit::MMAConfig2WGMMANameRS(mma_config)
+                  : MMALimit::MMAConfig2WGMMAName(mma_config);
         FCtx(fname).SetMMAPolicyOfFrag(InScopeName(a_sym), mma_policy);
         FCtx(fname).SetMMAPolicyOfFrag(InScopeName(b_sym), mma_policy);
         FCtx(fname).SetMMAPolicyOfFrag(InScopeName(c_sym), mma_policy);
+        if (is_rs) {
+          FCtx(fname).SetFragIsRS(InScopeName(c_sym));
+          FCtx(fname).SetFragIsRS(InScopeName(a_sym));
+        }
         if (op.IsSparse() && !e_sym.empty())
           FCtx(fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       }

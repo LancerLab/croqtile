@@ -46,7 +46,7 @@ private:
 
   bool Visit(AST::MMA& n) override {
     auto op = n.GetOperation();
-    if (!op || op->Tag() != AST::MMAOperation::Load) return true;
+    if (!op || !op->IsLoad()) return true;
 
     auto frag_sym = AST::FragName(op->LoadTo());
     auto scoped_frag_sym = InScopeName(frag_sym);

@@ -79,7 +79,26 @@ public:
             loops.push_back(new_fb);
           }
         } else if (fb->ranges->Count() > 1) {
-          // multiple ranges, multiple loops
+          // multiple ranges, multiple loops (unless automap keeps flat
+          // iteration)
+          bool has_automap = false;
+          if (fb->suffixs) {
+            for (auto& suffix : fb->suffixs->values) {
+              if (auto attr_expr = dyn_cast<AST::AttributeExpr>(suffix)) {
+                if (attr_expr->AttrName() == "automap") {
+                  has_automap = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (has_automap) {
+            auto first_rng = cast<AST::LoopRange>(fb->ranges->ValueAt(0));
+            auto loop = std::make_shared<Loop>(
+                GenerateLoopName(), first_rng->GetIV()->GetType(), fb->LOC());
+            fb->loop = loop;
+            continue;
+          }
           const auto& ranges = fb->GetRangeNodes();
           for (size_t i = 0; i < ranges->Count(); ++i) {
             auto rng = cast<AST::LoopRange>(ranges->ValueAt(i));

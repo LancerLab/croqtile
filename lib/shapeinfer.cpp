@@ -1237,7 +1237,8 @@ bool ShapeInference::Visit(AST::MMA& n) {
                        ".span"); // valno is yet invalid
     }
   } break;
-  case AST::MMAOperation::Load: {
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadS: {
     std::string load_to_sym = AST::FragName(op.LoadTo());
     auto fty = cast<SpannedType>(op.LoadFrom()->GetType());
     auto f_span = load_to_sym + ".span";
@@ -1248,6 +1249,9 @@ bool ShapeInference::Visit(AST::MMA& n) {
     DefineASymbol(load_to_sym, f);
     DefineASymbol(f_span, s->Clone());
     SetNodeType(n, f);
+  } break;
+  case AST::MMAOperation::LoadR: {
+    // LoadR loads from shared into an existing fragment; no new symbol created
   } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0)); // mc
@@ -1389,6 +1393,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
   }
 
   // handle all spanned expressions iteratively
+  size_t op_idx = 0;
   for (auto op : n.AllOperations()) {
 
     std::vector<NumTy> tfs_vns;  // value number of tiling factors
@@ -1429,6 +1434,64 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       op->SetBlockStrides(cur_strd);
       VST_DEBUG(dbgs() << " |-<sop: " << PSTR(op)
                        << "> block shape: " << STR(bshape)
+                       << ", strides: " << STR(cur_strd) << "\n");
+    } else if (isa<AST::SOP::Squeeze>(op)) {
+      // .sqz: squeeze constant-1 dimensions from current shape.
+      // Find preceding shape-defining op to get dimension expressions.
+      ptr<AST::MultiValues> src_dims = nullptr;
+      for (int j = (int)op_idx - 1; j >= 0; --j) {
+        const auto& prev = n.OpAt(j);
+        if (auto sbs = dyn_cast<AST::SOP::SubSpan>(prev)) {
+          src_dims = sbs->subspan;
+          break;
+        }
+        if (auto rsp = dyn_cast<AST::SOP::Reshape>(prev)) {
+          src_dims = rsp->GetNewSpan();
+          break;
+        }
+        if (auto vw = dyn_cast<AST::SOP::View>(prev)) {
+          src_dims = vw->subspan;
+          break;
+        }
+      }
+      if (!src_dims || src_dims->Count() != cur_vns.size()) {
+        Error1(op->LOC(),
+               ".sqz requires a preceding .subspan, .span_as, or .view.");
+        return false;
+      }
+
+      auto mv = AST::Make<AST::MultiValues>(op->LOC());
+      std::vector<NumTy> new_vns;
+      ValueList new_strd;
+      auto& all_dims = src_dims->AllValues();
+      for (size_t i = 0; i < cur_vns.size(); ++i) {
+        auto vi = vn.GenValueItemFromValueNumber(cur_vns[i]);
+        if (sbe::ceq(vi, sbe::nu(1))) continue;
+        mv->Append(all_dims[i]->Clone());
+        new_vns.push_back(cur_vns[i]);
+        new_strd.push_back(cur_strd[i]);
+      }
+      if (new_vns.empty()) {
+        auto one = AST::MakeIntExpr(op->LOC(), 1);
+        one->SetType(MakeIntegerType());
+        mv->Append(one);
+        new_vns.push_back(GetOrGenValNum(c_sn(1)));
+        new_strd.push_back(sbe::nu(1));
+      }
+      mv->SetDelimiter(", ");
+
+      cur_vns = new_vns;
+      cur_strd = new_strd;
+      auto bshape = GenShape(vn.MakePluralSign(cur_vns));
+      cur_strd = bshape.GenDenseStrides();
+
+      auto reshape = AST::Make<AST::SOP::Reshape>(op->LOC(), mv);
+      reshape->SetBlockShape(bshape);
+      reshape->SetBlockStrides(cur_strd);
+      n.ReplaceOperation(op_idx, reshape);
+
+      VST_DEBUG(dbgs() << " |-<sop: .sqz => .SpanAs(" << STR(mv)
+                       << ")> block shape: " << STR(bshape)
                        << ", strides: " << STR(cur_strd) << "\n");
     } else {
       // when the code provides explicit tiling factors or subspan
@@ -1647,6 +1710,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
                        << "> block shape: " << STR(block_shape)
                        << ", strides: " << STR(cur_strd) << "\n");
     }
+    ++op_idx;
   }
 
   auto psn = vn.MakePluralSign(cur_vns);

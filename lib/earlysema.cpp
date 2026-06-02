@@ -42,6 +42,18 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     if (call->template_args) {
       in_template_param = true; // enter template param visit
     }
+  } else if (auto fa = dyn_cast<AST::FragApply>(&n)) {
+    for (auto& p : fa->params) {
+      auto scoped_p = SSTab().ScopedName(p);
+      if (!SSTab().IsDeclared(scoped_p))
+        SSTab().DefineSymbol(scoped_p, MakeIntegerType());
+    }
+  } else if (auto ft = dyn_cast<AST::FragTransfer>(&n)) {
+    for (auto& p : ft->params) {
+      auto scoped_p = SSTab().ScopedName(p);
+      if (!SSTab().IsDeclared(scoped_p))
+        SSTab().DefineSymbol(scoped_p, MakeIntegerType());
+    }
   }
 
   return true;
@@ -746,6 +758,25 @@ bool EarlySemantics::Visit(AST::AttributeExpr& n) {
     if (vec_len && vec_len->Val() <= 0 && !IsUnKnownInteger(vec_len->Val()))
       Error1(vec_len->LOC(),
              "the vector length of `vectorize` should be a positive integer");
+  } else if (n.AttrName() == "automap") {
+    Warning(n.LOC(), "'automap' is deprecated; use 'frag.apply' instead. "
+                     "'automap' will be removed in a future release.");
+    if (n.AttrValueCount() > 1)
+      Error1(n.LOC(), "suffix expression 'automap' accepts at most one "
+                      "parallel variable argument.");
+    if (n.AttrValueCount() == 1) {
+      auto pv = AST::GetIdentifier(n.AttrValueAt(0));
+      if (!pv)
+        Error1(n.AttrValueAt(0)->LOC(),
+               "the attribute value of `automap` should be a parallel variable "
+               "identifier.");
+      else if (!SSTab().IsDeclared(pv->name))
+        Error1(pv->LOC(), "the parallel variable '" + pv->name +
+                              "' is not declared in the current scope.");
+      else if (!pb_map.count(InScopeName(pv->name)))
+        Error1(pv->LOC(), "automap variable '" + pv->name +
+                              "' must be a parallel-by variable.");
+    }
   }
   return true;
 }
@@ -1051,6 +1082,11 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   }
 
   if (isa<SpannedType>(n.GetType())) {
+    if (n.mem && n.mem->st == Storage::REG && n.HasNote("fragment_decl")) {
+      if (pl_depth == 0)
+        Error1(n.LOC(),
+               "fragment declarations are only allowed on device side.");
+    }
     auto mds = dyn_cast<AST::MultiDimSpans>(n.type->mdspan_type);
     if (mds && mds->list) {
       if (auto e = dyn_cast<AST::Expr>(mds->list)) {
@@ -1984,7 +2020,8 @@ bool EarlySemantics::Visit(AST::MMA& n) {
       ReportErrorWhenUseBeforeDefine(n.LOC(), fill_sym);
     }
   } break;
-  case AST::MMAOperation::Load: {
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadS: {
     std::string fut_sym = AST::FragName(op.GetFuture());
     assert(!AST::FragIsArrayElem(op.GetFuture()) &&
            "For now, frag with indices is only supported for mc.");
@@ -1995,6 +2032,13 @@ bool EarlySemantics::Visit(AST::MMA& n) {
         MakeFutureType(cast<SpannedType>(sty->Clone()), op.IsAsync()));
     ReportErrorWhenViolateODR(n.LOC(), fut_sym + ".span", __FILE__, __LINE__,
                               cast<SpannedType>(sty->Clone()));
+  } break;
+  case AST::MMAOperation::LoadR: {
+    auto sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
+    if (!sty)
+      Error1(n.LOC(), "Expected a spanned buffer for MMA loadR source.");
+    std::string dst_sym = AST::FragName(op.LoadTo());
+    ReportErrorWhenUseBeforeDefine(n.LOC(), dst_sym);
   } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0));
@@ -2071,6 +2115,11 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       }
       if (IsValidRank(r_count)) rank = r_count;
       // can not check further util shapeinfer is done
+      continue;
+    }
+
+    if (isa<AST::SOP::Squeeze>(op)) {
+      // .sqz rank is resolved in ShapeInference
       continue;
     }
 

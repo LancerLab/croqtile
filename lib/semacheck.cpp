@@ -1068,7 +1068,9 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: break;
-  case AST::MMAOperation::Load: {
+  case AST::MMAOperation::LoadR: break;
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadS: {
     // Keep explicit mma.load swizzles consistent with the DMA/TMA that fills
     // the referenced shared-memory tensor.
     auto load_from = op.LoadFrom();

@@ -1615,6 +1615,10 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     if (expr->IsUnary()) {
       return Choreo::STR(expr->op) + "(" + ExprSTR(expr->GetR(), is_host) + ")";
     }
+    if (expr->IsBinary()) {
+      return "(" + ExprSTR(expr->GetL(), is_host) + " " +
+             Choreo::STR(expr->op) + " " + ExprSTR(expr->GetR(), is_host) + ")";
+    }
     if (op == Op::ElemOf) {
       return ExprSTR(expr->GetL(), is_host) + "[" +
              ExprSTR(expr->GetR(), is_host) + "]";

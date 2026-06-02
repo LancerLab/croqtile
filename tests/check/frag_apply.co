@@ -1,0 +1,65 @@
+#define BLOCK_M 64
+#define BLOCK_N 64
+
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Test: 1D frag.apply with IV in expression.
+__co__ void test_frag_apply_1d() {
+  parallel t by 128 : thread {
+    fragment f32[1024] buf {0.0f};
+    frag.apply buf, [](i) { return __to<f32>(i) * 2.0f; };
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_frag_apply_1d
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 8; ++__r)
+// CHECK: __frag_iv_i = ((__r) / 4 * 512 + __choreo_vtid_x * 4 + (__r) % 4)
+// CHECK: buf[__r] = {{.*}}(__frag_iv_i) * 2.000000f
+// CHECK: } // frag.apply
+
+// Test: 1D frag.apply reading another fragment via .at().
+__co__ void test_frag_apply_read_at() {
+  parallel t by 128 : thread {
+    fragment f32[1024] a {0.0f};
+    fragment f32[1024] b {0.0f};
+    frag.apply a, [](i) { return b.at(i) + 1.0f; };
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_frag_apply_read_at
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 8; ++__r)
+// CHECK: a[__r] = b[__r] + 1.000000f
+// CHECK: } // frag.apply
+
+// Test: 2D frag.apply with two IVs.
+__co__ void test_frag_apply_2d() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M, BLOCK_N] tile;
+    frag.apply tile, [](i, j) { return __to<f32>(i * BLOCK_N + j); };
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_frag_apply_2d
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 32; ++__r)
+// CHECK: __frag_iv_i =
+// CHECK: __frag_iv_j =
+// CHECK: tile[__r] =
+// CHECK: } // frag.apply
+
+// Test: frag.apply equivalent of the softmax-like pattern.
+__co__ void test_frag_apply_softmax() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M, BLOCK_N] acc;
+    fragment f32[BLOCK_M] row_max;
+    frag.apply acc, [](i, j) { return acc.at(i, j) - row_max.at(i); };
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_frag_apply_softmax
+// CHECK: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 32; ++__r)
+// CHECK: acc[__r] = acc[__r] - row_max[
+// CHECK: } // frag.apply

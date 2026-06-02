@@ -1,0 +1,212 @@
+#include "fragment_layout_pass.hpp"
+#include "context.hpp"
+#include "types.hpp"
+
+namespace Choreo {
+
+// ---------------------------------------------------------------------------
+// Thread count helpers
+// ---------------------------------------------------------------------------
+
+size_t FragmentLayoutPass::EffectiveThreadCount() const {
+  if (current_inthreads_ && current_inthreads_->HasActiveThreads()) {
+    auto at = VIInt(current_inthreads_->active_threads);
+    return at.value_or(current_thread_count_);
+  }
+  return current_thread_count_;
+}
+
+std::string FragmentLayoutPass::EffectiveThreadCountExpr() const {
+  if (current_inthreads_ && current_inthreads_->HasActiveThreads()) {
+    auto at = VIInt(current_inthreads_->active_threads);
+    if (at.has_value()) return std::to_string(at.value());
+  }
+  return current_thread_count_expr_;
+}
+
+// ---------------------------------------------------------------------------
+// Scope tracking
+// ---------------------------------------------------------------------------
+
+bool FragmentLayoutPass::BeforeVisitImpl(AST::Node& n) {
+  if (isa<AST::ChoreoFunction>(&n)) {
+    usages_.clear();
+    current_thread_count_ = 0;
+    current_thread_count_expr_.clear();
+    current_inthreads_ = nullptr;
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    if (pb->GetLevel() == ParallelLevel::THREAD) {
+      current_thread_count_ = 0;
+      current_thread_count_expr_.clear();
+      if (!pb->BoundValues().empty()) {
+        if (auto v0 = VIInt(pb->BoundValues()[0])) {
+          size_t tc = *v0;
+          for (size_t i = 1; i < pb->BoundValues().size(); ++i)
+            if (auto vi = VIInt(pb->BoundValues()[i])) tc *= *vi;
+          current_thread_count_ = tc;
+          current_thread_count_expr_ = std::to_string(tc);
+        }
+      }
+    }
+  } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
+    current_inthreads_ = it;
+  }
+  return true;
+}
+
+bool FragmentLayoutPass::AfterVisitImpl(AST::Node& n) {
+  if (isa<AST::ChoreoFunction>(&n)) {
+    AssignLayouts();
+    usages_.clear();
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    if (pb->GetLevel() == ParallelLevel::THREAD) {
+      current_thread_count_ = 0;
+      current_thread_count_expr_.clear();
+    }
+  } else if (isa<AST::InThreadsBlock>(&n)) {
+    current_inthreads_ = nullptr;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: COLLECT
+// ---------------------------------------------------------------------------
+
+bool FragmentLayoutPass::Visit(AST::NamedVariableDecl& n) {
+  if (!n.HasNote("fragment_decl")) return true;
+
+  auto sty = GetSpannedType(GetSymbolType(n.name_str));
+  if (!sty) return true;
+
+  auto scoped = InScopeName(n.name_str);
+  FragmentUsage usage;
+  usage.scoped_name = scoped;
+  usage.element_type = sty->ElementType();
+  usage.scope_thread_count = EffectiveThreadCount();
+  usage.scope_thread_count_expr = EffectiveThreadCountExpr();
+
+  auto& shape = sty->GetShape();
+  if (shape.IsValid()) {
+    for (size_t d = 0; d < shape.Rank(); ++d) {
+      if (auto v = VIInt(shape.ValueAt(d))) usage.shape.push_back(*v);
+    }
+  }
+
+  usages_[scoped] = usage;
+  return true;
+}
+
+bool FragmentLayoutPass::Visit(AST::MMA& n) {
+  auto& op = *n.operation;
+
+  if (op.IsKind(AST::MMAOperation::Exec)) {
+    auto a_sym = InScopeName(AST::FragName(op.ExecOperand(0)));
+    auto b_sym = InScopeName(AST::FragName(op.ExecOperand(1)));
+    auto c_sym = InScopeName(AST::FragName(op.ExecOperand(2)));
+
+    if (usages_.count(c_sym)) usages_[c_sym].is_mma_acc = true;
+    if (usages_.count(a_sym)) usages_[a_sym].is_mma_operand_a = true;
+    if (usages_.count(b_sym)) usages_[b_sym].is_mma_operand_b = true;
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 + 3: INFER and LEGALIZE
+// ---------------------------------------------------------------------------
+
+void FragmentLayoutPass::AssignLayouts() {
+  // Build MMA accumulator layouts first (anchors).
+  std::map<std::string, FragmentLayout> anchors;
+
+  for (auto& [scoped, usage] : usages_) {
+    if (!usage.is_mma_acc) continue;
+    if (!FCtx(fname).FragHasMMAType(scoped)) continue;
+
+    auto& mma_info = cgi.GetSymbolMMA(scoped);
+    auto& mma_shape = mma_info.GetShape();
+    if (mma_shape.size() < 2) continue;
+
+    auto M_opt = VIInt(mma_shape[0]);
+    auto N_opt = VIInt(mma_shape[1]);
+    if (!M_opt || !N_opt) continue;
+    size_t M = *M_opt, N = *N_opt;
+
+    if (FCtx(fname).FragIsWGMMA(scoped)) {
+      anchors[scoped] = FragmentLayout::MakeWGMMA_ACC(M, N);
+    } else if (FCtx(fname).FragIsCTMMA(scoped)) {
+      anchors[scoped] = FragmentLayout::MakeCTMMA_ACC(M, N);
+    }
+  }
+
+  // Assign RS A operand layouts.
+  for (auto& [scoped, usage] : usages_) {
+    if (!usage.is_mma_operand_a) continue;
+    if (anchors.count(scoped)) continue;
+    if (!FCtx(fname).FragHasMMAType(scoped)) continue;
+
+    if (FCtx(fname).FragIsWGMMA(scoped)) {
+      auto& mma_info = cgi.GetSymbolMMA(scoped);
+      auto& mma_shape = mma_info.GetShape();
+      if (mma_shape.size() < 3) continue;
+      auto M_opt = VIInt(mma_shape[0]);
+      auto K_opt = VIInt(mma_shape[2]);
+      if (!M_opt || !K_opt) continue;
+      anchors[scoped] = FragmentLayout::MakeWGMMA_RS_A(*M_opt, *K_opt);
+    }
+  }
+
+  // Store all inferred layouts.
+  for (auto& [scoped, usage] : usages_) {
+    FragmentLayout fl;
+
+    if (anchors.count(scoped)) {
+      fl = anchors[scoped];
+      fl.anchor_symbol = scoped;
+    } else {
+      // Fallback: UNIFORM with scope-aware thread count.
+      size_t total = 1;
+      for (auto d : usage.shape) total *= d;
+
+      size_t tc = usage.scope_thread_count;
+      std::string tc_expr = usage.scope_thread_count_expr;
+      if (tc == 0) {
+        tc = current_thread_count_;
+        tc_expr = current_thread_count_expr_;
+      }
+      if (tc_expr.empty()) tc_expr = "blockDim.x";
+
+      if (usage.shape.size() == 1) {
+        fl = FragmentLayout::MakeUniform(total, tc, tc_expr);
+      } else if (usage.shape.size() >= 2) {
+        fl = FragmentLayout::MakeUniform2D(usage.shape[0], usage.shape[1], tc,
+                                           tc_expr);
+      } else {
+        fl = FragmentLayout::MakeUniform(total, tc, tc_expr);
+      }
+    }
+
+    FCtx(fname).SetFragmentLayout(scoped, fl);
+
+    if (debug_visit) {
+      dbgs() << "[frag-layout] " << scoped << ": " << STR(fl.kind)
+             << " regs=" << fl.regs_per_thread << " threads=" << fl.thread_count
+             << " (" << fl.thread_count_expr << ")"
+             << " shape=[" << fl.logical_rows;
+      if (fl.logical_cols > 1) dbgs() << "," << fl.logical_cols;
+      dbgs() << "]";
+      if (fl.vec_width > 1) dbgs() << " vec_width=" << fl.vec_width;
+      if (fl.IsMMAAnchored()) dbgs() << " anchor=" << fl.anchor_symbol;
+      if (fl.kind == LayoutKind::WGMMA_ACC)
+        dbgs() << " rows_per_thread=" << fl.rows_per_thread
+               << " threads_per_row=" << fl.threads_per_row;
+      if (fl.kind == LayoutKind::REPLICATED_1D)
+        dbgs() << " replicate=" << fl.replicate;
+      dbgs() << "\n";
+    }
+  }
+}
+
+} // namespace Choreo
