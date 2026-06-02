@@ -1,5 +1,12 @@
 // REQUIRES: TARGET-SM_90A
 // RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=CODEGEN
+
+// CODEGEN: warpgroup_commit_batch();
+// CODEGEN-NEXT: warpgroup_wait<0>();
+// CODEGEN-NEXT: warpgroup_fence_operand(acc_s);
+// CODEGEN-NEXT: }
+// CODEGEN-NEXT: // if-else:
 
 #define DIM 64
 #define BLOCK_M 64
@@ -18,15 +25,15 @@ __co__ auto flash_atten(
   int past_len = KV_SEQ - Q_SEQ;
 
   parallel {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
+    Q_head = Q.subspan(1, 1, Q_SEQ, DIM).at(batch, head, 0, 0).sqz();
+    K_head = K.subspan(1, 1, KV_SEQ, DIM).at(batch, head, 0, 0).sqz();
+    V_head = V.subspan(1, 1, KV_SEQ, DIM).at(batch, head, 0, 0).sqz();
+    O_head = O.subspan(1, 1, Q_SEQ, DIM).at(batch, head, 0, 0).sqz();
+    
+    q_s = dma.copy.swiz<128>
+      Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => shared;
+
     parallel pw by 1 : group-4 {
-      Q_head = Q.subspan(1, 1, Q_SEQ, DIM).at(batch, head, 0, 0).sqz();
-      K_head = K.subspan(1, 1, KV_SEQ, DIM).at(batch, head, 0, 0).sqz();
-      V_head = V.subspan(1, 1, KV_SEQ, DIM).at(batch, head, 0, 0).sqz();
-      O_head = O.subspan(1, 1, Q_SEQ, DIM).at(batch, head, 0, 0).sqz();
-
-      q_s = dma.copy.swiz<128>
-        Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => shared;
-
       fragment f16[BLOCK_M, BLOCK_N] acc_s_cast;
       fragment f32[BLOCK_M] scores_max {-inf};
       fragment f32[BLOCK_M] scores_max_prev;
@@ -36,9 +43,10 @@ __co__ auto flash_atten(
       acc_o = mma.fill.f32 0.0f;
 
       kv_tiles = cdiv(KV_SEQ, BLOCK_N);
-      kv_causal = cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N);
       kv_bound = is_causal
-        ? (kv_causal < kv_tiles ? kv_causal : kv_tiles)
+        ? (cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N) < kv_tiles
+           ? cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N)
+           : kv_tiles)
         : kv_tiles;
       foreach {bn} in [kv_bound] {
         acc_s = mma.fill.f32 0.0f;

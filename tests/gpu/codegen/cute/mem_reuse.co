@@ -24,7 +24,7 @@ __co__ void foo(int n, int m) {
   }
 }
 
-// CHECK: __global__ void __choreo_device_foo0(int n, int m, unsigned long mr_offset_foo_paraby_0_s, unsigned long mr_offset_foo_paraby_0_ss, unsigned __co__shared_spm_size0) {
+// CHECK: __global__ __launch_bounds__(16, 1) void __choreo_device_foo0(int n, int m, unsigned long mr_offset_foo_paraby_0_s, unsigned long mr_offset_foo_paraby_0_ss, unsigned __co__shared_spm_size0) {
 // CHECK:   extern __shared__ char __choreo_device_foo0__runtime_shared_buffer__raw[];
 // CHECK:   auto __choreo_device_foo0__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo0__runtime_shared_buffer__raw));
 // CHECK:   auto anon_4 = (unsigned char*)__choreo_device_foo0__runtime_shared_buffer__;
@@ -37,7 +37,7 @@ __co__ void foo(int n, int m) {
 // CHECK:   kernel((unsigned char*)l, (unsigned char*)ll);
 // CHECK: }
 
-// CHECK: __global__ void __choreo_device_foo1(int n, int m, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_l, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_ll, unsigned long mr_offset_foo_paraby_3_s, unsigned long mr_offset_foo_paraby_3_ss, unsigned __co__shared_spm_size1) {
+// CHECK: __global__ __launch_bounds__(16, 1) void __choreo_device_foo1(int n, int m, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_l, unsigned long mr_offset_foo_paraby_3_paraby_4_paraby_5_ll, unsigned long mr_offset_foo_paraby_3_s, unsigned long mr_offset_foo_paraby_3_ss, unsigned __co__shared_spm_size1) {
 // CHECK:   extern __shared__ char __choreo_device_foo1__runtime_shared_buffer__raw[];
 // CHECK:   auto __choreo_device_foo1__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo1__runtime_shared_buffer__raw));
 // CHECK:   alignas(16) unsigned char anon_6[2048];

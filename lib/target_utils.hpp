@@ -606,6 +606,33 @@ inline bool IsValidMMAConfig(const MMAConfig& config, MMALimit::CUDA_CC cc) {
     return false;
 }
 
+inline int InferFixedWGMMAAtomK(const MMAConfig& config) {
+  if (ConfigIsWGMMA(config)) return config.shape.k;
+  if (config.shape.m != 64 || config.shape.k <= 0) return 0;
+
+  std::set<int> candidate_ks;
+  auto collect = [&](MMALimit::Sparsity sparsity) {
+    for (const auto& [candidate, _] : WGMMAConfigs()) {
+      if (candidate.sparsity != sparsity) continue;
+      if (candidate.a_ty != config.a_ty || candidate.b_ty != config.b_ty ||
+          candidate.c_ty != config.c_ty || candidate.d_ty != config.d_ty ||
+          candidate.scale_ty != config.scale_ty)
+        continue;
+      if (candidate.shape.m != config.shape.m ||
+          candidate.shape.n != config.shape.n)
+        continue;
+      if (config.shape.k % candidate.shape.k != 0) continue;
+      candidate_ks.insert(candidate.shape.k);
+    }
+  };
+
+  collect(config.sparsity);
+  if (candidate_ks.empty() && config.sparsity == MMALimit::SPARSE)
+    collect(MMALimit::DENSE);
+
+  return candidate_ks.size() == 1 ? *candidate_ks.begin() : 0;
+}
+
 inline size_t GetThreadGroupSize(const MMAConfig& config) {
   // WGMMA: 64x64 shapes use 128 threads (warp group)
   // WMMA/MMA: all others use 32 threads (warp)

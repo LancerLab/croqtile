@@ -35,6 +35,21 @@
 using namespace Choreo;
 using namespace Choreo::Cute;
 
+// Strip the outermost matching parentheses from a string if the opening
+// paren at position 0 matches the closing paren at the end.
+static std::string StripOuterParens(const std::string& s) {
+  if (s.size() < 2 || s.front() != '(' || s.back() != ')') return s;
+  int depth = 0;
+  for (size_t i = 0; i < s.size() - 1; ++i) {
+    if (s[i] == '(')
+      ++depth;
+    else if (s[i] == ')')
+      --depth;
+    if (depth == 0) return s;
+  }
+  return s.substr(1, s.size() - 2);
+}
+
 // TMA_Swizzle enum and cuda_stringify helper for code generation
 enum class TMA_Swizzle {
   NONE = 0, // No swizzle
@@ -327,6 +342,29 @@ GetMmaLoadShapeWarningKind(const MMAInfo& ssmi,
   if (!dim0_ok || !dim1_ok) return MmaLoadShapeWarningKind::Misaligned;
   return MmaLoadShapeWarningKind::None;
 }
+
+size_t GetWGMMAKAxis(const MMAInfo& ssmi) {
+  switch (ssmi.frag) {
+  case MMAInfo::FRAG_A:
+    switch (ssmi.method) {
+    case AST::MMAOperation::ROW_ROW:
+    case AST::MMAOperation::ROW_COL: return 1;
+    case AST::MMAOperation::COL_ROW:
+    case AST::MMAOperation::COL_COL: return 0;
+    }
+    break;
+  case MMAInfo::FRAG_B:
+    switch (ssmi.method) {
+    case AST::MMAOperation::ROW_ROW:
+    case AST::MMAOperation::COL_ROW: return 1;
+    case AST::MMAOperation::ROW_COL:
+    case AST::MMAOperation::COL_COL: return 0;
+    }
+    break;
+  default: break;
+  }
+  return 1;
+}
 } // namespace
 
 const AST::MMAOperation*
@@ -442,7 +480,11 @@ void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
   os << indent << "warpgroup_commit_batch();\n";
   if (!has_explicit_mma_wait || force_wait)
     os << indent << "warpgroup_wait<0>();\n";
+  if (!pending_wgmma_acc_sym.empty())
+    os << indent << "warpgroup_fence_operand(" << pending_wgmma_acc_sym
+       << ");\n";
   has_pending_wgmma_finalize = false;
+  pending_wgmma_acc_sym.clear();
   warpspec_wgmma_arrived = false;
 }
 
@@ -1049,6 +1091,14 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::ForeachBlock>(&n)) {
     IndStream() << "// foreach: " << n.LOC() << "\n";
   }
+  if (isa<AST::NamedVariableDecl>(&n)) in_named_var_decl_ = true;
+
+  if (!pending_barrier_inits_.empty() && !in_named_var_decl_)
+    FlushBarrierInits();
+
+  if (isa<AST::IfElseBlock>(&n) && !IsHost() && has_pending_wgmma_finalize)
+    EmitWGMMAFinalize(ds, d_indent);
+
   if (isa<AST::IfElseBlock>(&n) || isa<AST::NamedVariableDecl>(&n)) {
     emit_call = false;
   }
@@ -1070,6 +1120,8 @@ bool CuteCodeGen::InMidVisitImpl(AST::Node& n) {
 
 bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "After visiting " << n.TypeNameString() << "\n";
+
+  if (isa<AST::NamedVariableDecl>(&n)) in_named_var_decl_ = false;
 
   EmitPostSiteAssertions(n);
 
@@ -1435,6 +1487,7 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   end_idx = std::min(end_idx, ca->OpCount());
 
   sbe::ExprSum offset;
+  auto cur_strd = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetStrides();
 
   // assert(ca->OpCount() == 1 &&
   //        "count of spanned operations in CuTe DMA should be 1.");
@@ -1462,11 +1515,13 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
         else
           offset += idx.GetVals()[ith] * strd[ith] * blk.ValueAt(ith);
       }
+      cur_strd = strd;
     } else if (isa<AST::SOP::View>(sop)) {
       auto off = sop->GetOffsets()->Opts();
       auto strd = sop->GetBlockStrides();
       for (size_t ith = 0; ith < off.GetVals().size(); ++ith)
         offset += off.GetVals()[ith] * strd[ith];
+      cur_strd = sop->GetBlockStrides();
     } else
       choreo_unreachable("unsupported spanned operation.");
   }
@@ -1485,6 +1540,16 @@ const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,
     return t_strds;
   }
   return strides;
+}
+
+void CuteCodeGen::FlushBarrierInits() {
+  if (pending_barrier_inits_.empty()) return;
+  this->ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+  for (auto& init_line : pending_barrier_inits_) this->ds << init_line;
+  this->ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
+  this->ds << d_indent << "}\n";
+  this->ds << d_indent << "__syncthreads();\n";
+  pending_barrier_inits_.clear();
 }
 
 void CuteCodeGen::EmitFixedHostHead() {
@@ -1510,6 +1575,10 @@ void CuteCodeGen::EmitFixedHostHead() {
   if (native_f16)
     oss << "#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__\n";
   if (native_bf16) oss << "#define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__\n";
+  if (CCtx().GetApiMode() != "sglang" && !CCtx().DisableCudaRuntimeEnvCheck())
+    oss << "#define __CHOREO_ENABLE_CUDA_RUNTIME_ENV_CHECK__\n"
+           "#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ "
+        << CCtx().ArchNum() << "\n";
   oss << "#include \"choreo.h\"\n";
   if (EnableDebugTypeRTTI()) {
     oss << R"(
@@ -1522,123 +1591,7 @@ static __device__ __attribute__((noinline)) void __choreo_cuda_debug_point__() {
   if (cgi.HasTMA()) oss << "namespace cde = cuda::device::experimental;\n";
   oss << "#include <cooperative_groups.h>";
   oss << "\nusing namespace choreo;\n";
-  if (CCtx().GetApiMode() != "sglang") {
-    if (!CCtx().DisableCudaRuntimeEnvCheck()) {
-      oss << "\n#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ " << CCtx().ArchNum()
-          << "\n";
-      EmitRuntimeEnvironmentChecker(oss);
-    }
-  }
   code_segments.push_back(oss.str()); // reset the host code
-}
-
-void CuteCodeGen::EmitRuntimeEnvironmentChecker(std::ostream& os) const {
-  os << "\nstatic inline void __choreo_check_cuda_environment__() ";
-  os << R"({
-  // ----------- ONE-TIME GUARD -----------
-  static bool already_checked = false;
-  if (already_checked) return;
-  already_checked = true;
-  // --------------------------------------
-
-  auto decode_cuda_version =
-   [](int v, int& major, int& minor, int& patch) {
-    major = v / 1000;
-    minor = (v % 1000) / 10;
-    patch = v % 10;
-  };
-
-  // ----------- Runtime version check -----------
-  int runtime_ver = 0;
-  cudaError_t err = cudaRuntimeGetVersion(&runtime_ver);
-  if (err != cudaSuccess) {
-    std::fprintf(stderr,
-                "[choreo] CUDA runtime not available: %s\n",
-                cudaGetErrorString(err));
-    std::exit(EXIT_FAILURE);
-  }
-
-  int driver_ver = 0;
-  err = cudaDriverGetVersion(&driver_ver);
-  if (err != cudaSuccess) {
-    std::fprintf(stderr,
-                "[choreo] CUDA driver not available: %s\n",
-                cudaGetErrorString(err));
-    std::exit(EXIT_FAILURE);
-  }
-
-  int rMaj, rMin, rPat;
-  int dMaj, dMin, dPat;
-  decode_cuda_version(runtime_ver, rMaj, rMin, rPat);
-  decode_cuda_version(driver_ver, dMaj, dMin, dPat);
-
-  int reqMaj, reqMin, reqPat;
-  decode_cuda_version(CUDART_VERSION, reqMaj, reqMin, reqPat);
-
-  if (runtime_ver < CUDART_VERSION) {
-    std::fprintf(stderr,
-       "[choreo] CUDA runtime too old:\n"
-       "  found runtime %d.%d.%d (encoded=%d)\n"
-       "  required      %d.%d.%d (encoded=%d)\n",
-       rMaj, rMin, rPat, runtime_ver,
-       reqMaj, reqMin, reqPat, CUDART_VERSION);
-    std::exit(EXIT_FAILURE);
-  }
-
-  // Optional: check driver vs runtime mismatch
-  if (driver_ver < runtime_ver) {
-    std::fprintf(stderr,
-       "[choreo] Warning: CUDA driver (%d.%d.%d, encoded=%d) is older than "
-       "the CUDA runtime (%d.%d.%d, encoded=%d). This may cause issues.\n",
-       dMaj, dMin, dPat, driver_ver,
-       rMaj, rMin, rPat, runtime_ver);
-  }
-
-  // ----------- Device capability check -----------
-  int device_count = 0;
-  err = cudaGetDeviceCount(&device_count);
-  if (err != cudaSuccess || device_count == 0) {
-    std::fprintf(stderr,
-                "[choreo] No CUDA-capable devices found.\n");
-    std::exit(EXIT_FAILURE);
-  }
-
-  // ----------- Device capability check (selected device) -----------
-  int device_id = 0;
-  cudaDeviceProp prop{};
-  err = cudaGetDeviceProperties(&prop, device_id);
-  if (err != cudaSuccess) {
-    std::fprintf(stderr,
-                 "[choreo] cudaGetDeviceProperties failed: %s\n",
-                 cudaGetErrorString(err));
-    std::exit(EXIT_FAILURE);
-  }
-
-  int sm = prop.major * 10 + prop.minor;
-  if (sm < __CHOREO_REQUIRED_GPU_DEVICE_SM__) {
-    std::fprintf(stderr,
-        "[choreo] Compute capability too low on device %d (%s):\n"
-        "  found SM %d.%d (sm_%d)\n"
-        "  required SM >= %d (sm_%d)\n",
-        device_id, prop.name,
-        prop.major, prop.minor, sm,
-        __CHOREO_REQUIRED_GPU_DEVICE_SM__, __CHOREO_REQUIRED_GPU_DEVICE_SM__);
-    std::exit(EXIT_FAILURE);
-  }
-
-#if 0
-  // ----------- Optional success log -----------
-  std::fprintf(stderr,
-    "[choreo] CUDA environment OK\n"
-    "  runtime %d.%d.%d (encoded=%d)\n"
-    "  driver  %d.%d.%d (encoded=%d)\n"
-    "  device  %d: %s, SM %d.%d (sm_%d)\n",
-    rMaj, rMin, rPat, runtime_ver,
-    dMaj, dMin, dPat, driver_ver,
-    device_id, prop.name, prop.major, prop.minor, sm);
-#endif
-}
-)";
 }
 void CuteCodeGen::EmitFixedDeviceHead() {}
 
@@ -2039,6 +1992,10 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   auto nty = NodeType(n);
   auto sym = n.name_str;
   const bool enable_debug_rtti = EnableDebugTypeRTTI();
+
+  if (!pending_barrier_inits_.empty() && !isa<EventArrayType>(nty) &&
+      !isa<EventType>(nty))
+    FlushBarrierInits();
 
   // Register in the live scoped table so that InScopeNameForRef correctly
   // resolves subsequent references to this variable (declaration-order aware).
@@ -2529,9 +2486,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       }
 
       if (IsWarpSpecActive()) {
-        ds << d_indent << "// initialize the event barrier\n";
-        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-
         auto event_tc = ety->event->GetThreadCount();
         auto& ft = cgi.GetFunctionTrait(fname);
         auto auto_init = [&](int64_t explicit_tc,
@@ -2543,20 +2497,20 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         };
         std::string event_init_count = auto_init(event_tc, n.name_str);
 
-        if (is_cluster_event) {
-          GenerateSubscriptions(
-              ds, "  " + d_indent + "choreo::tma_mbarrier_init(&" + eaname,
-              ", (blockDim.x / 128 - 1) * choreo::tma_cluster_dim());\n",
-              ety->Dimensions());
-        } else {
-          GenerateSubscriptions(ds, "  " + d_indent + "init(&" + eaname,
-                                ", " + event_init_count + ");\n",
-                                ety->Dimensions());
+        {
+          std::ostringstream oss;
+          if (is_cluster_event) {
+            GenerateSubscriptions(
+                oss, "  " + d_indent + "choreo::tma_mbarrier_init(&" + eaname,
+                ", (blockDim.x / 128 - 1) * choreo::tma_cluster_dim());\n",
+                ety->Dimensions());
+          } else {
+            GenerateSubscriptions(oss, "  " + d_indent + "init(&" + eaname,
+                                  ", " + event_init_count + ");\n",
+                                  ety->Dimensions());
+          }
+          pending_barrier_inits_.push_back(oss.str());
         }
-
-        ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
-        ds << d_indent << "}\n";
-        ds << d_indent << "__syncthreads();\n";
         if (is_cluster_event) {
           GenerateSubscriptions(ds, d_indent + eaname + "__phase", " = 0;\n",
                                 ety->Dimensions());
@@ -2565,28 +2519,28 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         break;
       }
 
-      ds << d_indent << "// initialize the event barrier\n";
-      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-      auto event_tc = ety->event->GetThreadCount();
-      std::string init_count;
-      if (event_tc > 0) {
-        init_count = std::to_string(event_tc);
-      } else {
-        auto ep = cgi.GetFunctionTrait(fname).GetEventParticipation(n.name_str);
-        init_count = ep > 0 ? std::to_string(ep) : "(blockDim.x - 128) + 1";
+      {
+        auto event_tc = ety->event->GetThreadCount();
+        std::string init_count;
+        if (event_tc > 0) {
+          init_count = std::to_string(event_tc);
+        } else {
+          auto ep =
+              cgi.GetFunctionTrait(fname).GetEventParticipation(n.name_str);
+          init_count = ep > 0 ? std::to_string(ep) : "(blockDim.x - 128) + 1";
+        }
+        std::ostringstream oss;
+        if (is_cluster_event) {
+          GenerateSubscriptions(
+              oss, "  " + d_indent + "choreo::tma_mbarrier_init(&" + eaname,
+              ", (blockDim.x / 128 - 1) * choreo::tma_cluster_dim());\n",
+              ety->Dimensions());
+        } else {
+          GenerateSubscriptions(oss, "  " + d_indent + "init(&" + eaname,
+                                ", " + init_count + ");\n", ety->Dimensions());
+        }
+        pending_barrier_inits_.push_back(oss.str());
       }
-      if (is_cluster_event) {
-        GenerateSubscriptions(
-            ds, "  " + d_indent + "choreo::tma_mbarrier_init(&" + eaname,
-            ", (blockDim.x / 128 - 1) * choreo::tma_cluster_dim());\n",
-            ety->Dimensions());
-      } else {
-        GenerateSubscriptions(ds, "  " + d_indent + "init(&" + eaname,
-                              ", " + init_count + ");\n", ety->Dimensions());
-      }
-      ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
-      ds << d_indent << "}\n";
-      ds << d_indent << "__syncthreads();\n";
       if (is_cluster_event) {
         GenerateSubscriptions(ds, d_indent + eaname + "__phase", " = 0;\n",
                               ety->Dimensions());
@@ -2627,7 +2581,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       assert(!IsHost());
       ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
          << ename << "; // shared event barrier\n";
-      ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       {
         auto etc = ety->GetThreadCount();
         std::string ic;
@@ -2640,11 +2593,10 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
               cgi.GetFunctionTrait(fname).GetEventParticipation(n.name_str);
           ic = ep > 0 ? std::to_string(ep) : "(blockDim.x - 128) + 1";
         }
-        ds << d_indent << "  init(&" << ename << ", " << ic << ");\n";
+        std::ostringstream oss;
+        oss << d_indent << "  init(&" << ename << ", " << ic << ");\n";
+        pending_barrier_inits_.push_back(oss.str());
       }
-      ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
-      ds << d_indent << "}\n";
-      ds << d_indent << "__syncthreads();\n";
       if (event_arrive_tx) {
         ds << d_indent
            << "cuda::barrier<cuda::thread_scope_block>::arrival_token " << ename
@@ -2662,6 +2614,48 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapDeviceSymbol(InScopeName(n.name_str), ename);
     } break;
     default: break;
+    }
+  }
+
+  // Fallback: emit declaration for unresolved types with init expressions.
+  // Variables like `kv_bound = is_causal ? ... : kv_tiles` may have type
+  // "unknown" but still need a C++ declaration so that later references use the
+  // variable name instead of re-expanding the full expression tree.
+  if (n.init_expr && !IsHost() && !isa<EventType>(nty) &&
+      !isa<EventArrayType>(nty)) {
+    auto scoped = InScopeName(sym);
+    if (!ssm.HasDeviceName(scoped)) {
+      auto init_str = ExprSTR(n.init_expr, false);
+      // Guard against shadowing: if the init expression references the same
+      // C++ name as the variable being declared, emitting `auto x = f(x)`
+      // would be self-referential UB.  Skip the declaration in that case.
+      auto is_id_char = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+      };
+      bool self_ref = false;
+      for (auto pos = init_str.find(sym); pos != std::string::npos;
+           pos = init_str.find(sym, pos + 1)) {
+        bool left_ok = (pos == 0 || !is_id_char(init_str[pos - 1]));
+        bool right_ok = (pos + sym.size() >= init_str.size() ||
+                         !is_id_char(init_str[pos + sym.size()]));
+        if (left_ok && right_ok) {
+          self_ref = true;
+          break;
+        }
+      }
+      if (!self_ref) {
+        ds << d_indent << "auto " << sym << " = " << init_str << ";\n";
+        ssm.MapDeviceSymbol(scoped, sym);
+        // Register the string form of the value (without the top-level
+        // parens that ValueSTR wraps) so the replacement in ValueSTR
+        // can match it as a substring inside larger expressions.
+        if (FCtx(fname).HasSymbolValues(scoped)) {
+          auto& svs = FCtx(fname).GetSymbolValues(scoped);
+          if (svs.HasVal())
+            known_val_str_to_var_[StripOuterParens(ValueSTR(svs.GetVal()))] =
+                sym;
+        }
+      }
     }
   }
 
@@ -2686,6 +2680,11 @@ bool CuteCodeGen::Visit(AST::NamedTypeDecl& n) {
       if (mty->HasSufficientInfo()) {
         IndStream() << "int " << sym << " = "
                     << ValueSTR(mty->GetShape().ValueAt(0)) << ";\n";
+        if (!IsHost()) {
+          ssm.MapDeviceSymbol(sname, sym);
+          known_val_str_to_var_[StripOuterParens(
+              ValueSTR(mty->GetShape().ValueAt(0)))] = sym;
+        }
       }
       return true;
     }
@@ -2877,12 +2876,14 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
 
     bool anon_bounded = n.IsDecl() && isa<BoundedType>(nty) &&
                         PrefixedWith(n.GetName(), "anon_");
+    bool tma_subview = n.IsDecl() && isa<SpannedType>(nty) &&
+                       cgi.IsTMASubviewSym(InScopeName(n.GetName()));
     if (!(sty && sty->GetStorage() == Storage::REG && n.HasNote("update"))) {
       ds << d_indent;
       if (!n.IsDecl() || (IsMutable(*nty) && !isa<SpannedType>(nty)))
         ds << n.GetName() << " = ";
       else {
-        if (anon_bounded) ds << "[[maybe_unused]] ";
+        if (anon_bounded || tma_subview) ds << "[[maybe_unused]] ";
         ds << "auto " << n.GetName() << " = ";
       }
     } else
@@ -3640,6 +3641,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     if (has_future && swizzle_mode != SwizMode::NONE)
       shared_buf_swiz_[future_name] = swizzle_mode;
+    if (t_sty->GetStorage() == Storage::SHARED &&
+        swizzle_mode != SwizMode::NONE) {
+      shared_buf_swiz_[t_buf.first] = swizzle_mode;
+      shared_buf_swiz_[InScopeName(t_sym)] = swizzle_mode;
+    }
 
     if (future_only) cooperatives.insert(InScopeName(n.future));
     if (n.operation != ".copy" && n.operation != ".transp" &&
@@ -3846,8 +3852,23 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // (element-level, predicated) atom.
       suppress_fence = true; // fence emitted after all loops
       auto& db = *dma_plan->dyn_box;
-      std::string dyn_m_str = ValueSTR(db.dyn_extent_m);
-      std::string dyn_n_str = ValueSTR(db.dyn_extent_n);
+      auto resolve_dyn_extent = [&](const ValueItem& extent) {
+        if (auto sym = VISym(extent)) {
+          std::array<std::string, 3> candidates = {
+              *sym,
+              InScopeName(UnScopedExpr(*sym)),
+              InScopeNameForRef(UnScopedExpr(*sym)),
+          };
+          for (auto& candidate : candidates) {
+            if (!FCtx(fname).HasSymbolValues(candidate)) continue;
+            auto svs = FCtx(fname).GetSymbolValues(candidate);
+            if (svs.HasVal()) return ValueSTR(svs.GetVal());
+          }
+        }
+        return ValueSTR(extent);
+      };
+      std::string dyn_m_str = resolve_dyn_extent(db.dyn_extent_m);
+      std::string dyn_n_str = resolve_dyn_extent(db.dyn_extent_n);
       std::string tile_n_str = std::to_string(db.tile_n);
 
       // Row strides for the inner 2D shape.
@@ -4051,6 +4072,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     Shape t_shape = t_sty->GetShape();
     const auto& f_buf_expr = f_buf.second;
     const auto& t_buf_expr = t_buf.second;
+    auto swizzle_mode = dma_plan->swizzle_mode;
+
+    if (t_sty->GetStorage() == Storage::SHARED &&
+        swizzle_mode != SwizMode::NONE) {
+      shared_buf_swiz_[t_buf.first] = swizzle_mode;
+      shared_buf_swiz_[InScopeName(t_sym)] = swizzle_mode;
+    }
 
     if (auto idx = f_ca->IndexOfLastSpanAs()) {
       f_mds_offset = TileBaseOffset(f_ca);
@@ -4082,6 +4110,22 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       }
 
       auto rev_indices = Reverse(GenIndices(f_ca));
+
+      // When TMA source is a computed subview of a root parameter,
+      // add the intermediate offset to the outermost TMA coordinate.
+      if (tma_idx >= 0 && tma_descs[tma_idx].HasRootParam()) {
+        const auto& root_shape = tma_descs[tma_idx].GetRootParamShape();
+        const auto& def_ca = tma_descs[tma_idx].GetRootDefCA();
+        size_t end_idx = def_ca->OpCount();
+        while (end_idx > 0 && isa<AST::SOP::Reshape>(def_ca->OpAt(end_idx - 1)))
+          --end_idx;
+        auto elem_offset = GenOffset(def_ca, end_idx);
+        auto inner_dim = root_shape.ValueAt(root_shape.Rank() - 1);
+        auto row_offset = elem_offset / inner_dim;
+        assert(rev_indices.size() >= 1);
+        rev_indices.back() = rev_indices.back() + row_offset;
+      }
+
       std::vector<std::string> hoisted_rev_indices;
       if (hoist_offset && t_shape.Rank() == 2 && rev_indices.size() == 2) {
         auto make_dim_name = [&](size_t dim_index) {
@@ -4324,7 +4368,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
 
   if (op.Tag() == AST::MMAOperation::Commit) {
-    EmitWGMMAFinalize(ds, d_indent);
+    if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent);
     return true;
   }
 
@@ -4743,7 +4787,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto a_sym = AST::FragName(op.ExecOperand(1));
       auto b_sym = AST::FragName(op.ExecOperand(2));
       has_pending_wgmma_finalize = true;
+      pending_wgmma_acc_sym = ssm.DeviceName(c_sym);
       if (!(bdim_level == ParallelLevel::GROUPx4 && warpspec_wgmma_arrived)) {
+        ds << d_indent << "warpgroup_fence_operand(" << pending_wgmma_acc_sym
+           << ");\n";
         ds << d_indent << "warpgroup_arrive();\n";
         if (IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4)
           warpspec_wgmma_arrived = true;
@@ -4862,19 +4909,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool use_hoisted_scale_accum = op.HasScale() && hoisted_scale_info;
       bool use_explicit_scale_accum = explicit_scale_info != nullptr;
 
-      if (op.HasScale() || use_explicit_scale_accum) {
-        // dtype of accu: s32, f16, f32 (f16 => u32)
-        auto acc_dtype = ssmi.ty;
-        ValueItem frag_len = ssmi.shape[1] / sbe::nu(2);
-        if (ssmi.ty == BaseType::F16) {
-          acc_dtype = BaseType::U32;
-          frag_len = frag_len / sbe::nu(2);
-        }
-        reg_num_d = *VIInt(frag_len);
+      {
+        ValueItem frag_len_c = ssmi_c.shape[1] / sbe::nu(2);
+        if (ssmi_c.ty == BaseType::F16) frag_len_c = frag_len_c / sbe::nu(2);
+        reg_num_d = *VIInt(frag_len_c);
+      }
 
+      if (op.HasScale() || use_explicit_scale_accum) {
         if (op.HasScale() && !use_hoisted_scale_accum) {
-          ds << d_indent << NameBaseType(acc_dtype) << " " << c_sym
-             << "_scale_frag[" << reg_num_d << "];\n";
+          ds << d_indent
+             << NameBaseType(ssmi_c.ty == BaseType::F16 ? BaseType::U32
+                                                        : ssmi_c.ty)
+             << " " << c_sym << "_scale_frag[" << reg_num_d << "];\n";
           ds << d_indent << "memset(" << c_sym << "_scale_frag, 0, sizeof("
              << c_sym << "_scale_frag));\n";
         }
@@ -4890,46 +4936,368 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           ds << d_indent << "warpgroup_fence_operand(" << a_sym << ");\n";
         }
       }
-      ds << d_indent << "cute::" << mma_policy << "<";
-      if (!policy_is_tn) {
-        if (is_rs)
-          ds << cute_gmma_major_cast << "(0), " << cute_gmma_major_cast << "("
-             << trans_b << ")";
-        else
-          ds << cute_gmma_major_cast << "(" << trans_a << "), "
-             << cute_gmma_major_cast << "(" << trans_b << ")";
-      }
-      ds << ">::fma(";
-      if (is_rs) {
-        std::string a_base;
-        if (a_is_chunk_rs) {
-          auto& ci = frag_chunk_rs_aliases_[a_sym];
-          a_base = ci.parent_c_sym + " + " + ci.offset_var + " * " +
-                   std::to_string(ci.regs_per_step);
-        } else {
-          a_base = a_sym;
+      struct DirectWGMMAOperandInfo {
+        bool is_direct = false;
+        bool supported = false;
+        bool is_rs_direct = false;
+        bool is_shared_direct = false;
+        size_t k_iters = 1;
+        size_t regs_per_step = 0;
+        std::string desc_expr;
+        std::string rs_base_expr;
+        std::string shared_elem_ty;
+        std::string shared_ptr_var;
+        std::string shared_ptr_expr;
+        std::string shared_desc_var;
+        std::string shared_iter_ptr_var;
+        std::string shared_iter_desc_var;
+        std::string shared_major_order;
+        std::string shared_swizzle_enum;
+        std::string shared_iter_elem_offset_expr;
+        std::string error;
+      };
+      auto swizzle_to_enum = [](SwizMode swizzle) {
+        switch (swizzle) {
+        case SwizMode::NONE: return std::string("WGMMA_Swizzle::NS");
+        case SwizMode::B32: return std::string("WGMMA_Swizzle::B32");
+        case SwizMode::B64: return std::string("WGMMA_Swizzle::B64");
+        case SwizMode::B128: return std::string("WGMMA_Swizzle::B128");
+        default: return std::string("WGMMA_Swizzle::NS");
         }
-        ds << "reinterpret_cast<const uint32_t*>(" << a_base << ")[0], "
-           << "reinterpret_cast<const uint32_t*>(" << a_base << ")[1], "
-           << "reinterpret_cast<const uint32_t*>(" << a_base << ")[2], "
-           << "reinterpret_cast<const uint32_t*>(" << a_base << ")[3], "
-           << "desc_" << b_sym;
-      } else {
-        ds << "desc_" << a_sym << ", desc_" << b_sym;
+      };
+      auto major_order_for = [](const MMAInfo& info) {
+        if (info.frag == MMAInfo::FRAG_A) {
+          return (info.method == AST::MMAOperation::ROW_ROW ||
+                  info.method == AST::MMAOperation::ROW_COL)
+                     ? std::string("WGMMA_MajorOrder::K_MAJOR")
+                     : std::string("WGMMA_MajorOrder::MN_MAJOR");
+        }
+        if (info.frag == MMAInfo::FRAG_B) {
+          return (info.method == AST::MMAOperation::ROW_ROW ||
+                  info.method == AST::MMAOperation::COL_ROW)
+                     ? std::string("WGMMA_MajorOrder::K_MAJOR")
+                     : std::string("WGMMA_MajorOrder::MN_MAJOR");
+        }
+        return std::string("WGMMA_MajorOrder::MN_MAJOR");
+      };
+      static int direct_wgmma_desc_cnt = 0;
+      auto build_direct_operand =
+          [&](const ptr<AST::Expr>& operand_expr, const MMAInfo& operand_info,
+              const std::string& iter_expr) -> DirectWGMMAOperandInfo {
+        DirectWGMMAOperandInfo info;
+        auto elemof_expr =
+            operand_expr ? dyn_cast<AST::Expr>(operand_expr.get()) : nullptr;
+        auto ca = operand_expr
+                      ? dyn_cast<AST::ChunkAt>(operand_expr->GetReference())
+                      : nullptr;
+        auto sym = operand_expr ? operand_expr->GetSymbol() : nullptr;
+        auto elemof_base = (elemof_expr && elemof_expr->op == Op::ElemOf)
+                               ? AST::GetArrayBaseSymbol(*elemof_expr)
+                               : nullptr;
+        if (!ca && !sym && !elemof_base) return info;
+
+        if (policy_is_sparse) {
+          if (sym && !ca && !elemof_base) {
+            if (auto sym_sty = GetSpannedType(GetSymbolType(sym->name));
+                sym_sty && sym_sty->GetStorage() == Storage::REG)
+              return info;
+          }
+          info.is_direct = true;
+          info.error =
+              "direct sparse WGMMA operands still require explicit mma.load";
+          return info;
+        }
+
+        auto resolve_operand_spanned_type = [&]() -> ptr<SpannedType> {
+          if (ca)
+            if (auto ca_ty = GetSpannedType(ca->GetType())) return ca_ty;
+          if (elemof_base)
+            if (auto elem_ty = GetSpannedType(GetSymbolType(elemof_base->name)))
+              return elem_ty;
+          if (sym)
+            if (auto sym_ty = GetSpannedType(GetSymbolType(sym->name)))
+              return sym_ty;
+          return GetSpannedType(operand_expr->GetType());
+        };
+        auto sty = resolve_operand_spanned_type();
+        if (!sty) {
+          info.is_direct = true;
+          info.error = "failed to derive direct WGMMA operand type";
+          return info;
+        }
+
+        auto atom_k = VIInt(operand_info.shape.at(2));
+        if (!atom_k || *atom_k <= 0) {
+          info.is_direct = true;
+          info.error = "WGMMA atom K must be a compile-time constant";
+          return info;
+        }
+
+        size_t k_axis = GetWGMMAKAxis(operand_info);
+        auto shape = sty->GetShape();
+        if (shape.Rank() <= k_axis) {
+          info.is_direct = true;
+          info.error = "direct WGMMA operand rank is too small";
+          return info;
+        }
+
+        auto full_k = VIInt(shape.ValueAt(k_axis));
+        if (!full_k || *full_k <= 0 || (*full_k % *atom_k) != 0) {
+          info.is_direct = true;
+          info.error = "direct WGMMA operand K dimension must be a static "
+                       "multiple of the atom K";
+          return info;
+        }
+
+        auto source_sym =
+            ca ? ca->RefSymbol()
+               : (elemof_base ? elemof_base->name : (sym ? sym->name : ""));
+        auto source_scoped =
+            source_sym.empty() ? source_sym : InScopeName(source_sym);
+        bool is_chunk_rs_alias =
+            !source_sym.empty() &&
+            (frag_chunk_rs_aliases_.count(source_sym) > 0 ||
+             frag_chunk_rs_aliases_.count(source_scoped) > 0);
+        auto source_ty =
+            source_sym.empty() ? nullptr : GetSymbolType(source_sym);
+
+        if (sty->GetStorage() == Storage::REG) {
+          if (is_chunk_rs_alias) return info;
+          if (isa<FutureType>(source_ty)) return info;
+          if (!(is_rs && operand_info.frag == MMAInfo::FRAG_A && sym)) {
+            info.is_direct = true;
+            info.error = "direct WGMMA register operands are only supported "
+                         "for RS A operands";
+            return info;
+          }
+          if (!FCtx(fname).HasFragmentLayout(source_scoped)) {
+            info.is_direct = true;
+            info.error = "missing fragment layout for direct RS WGMMA operand";
+            return info;
+          }
+          auto& fl = FCtx(fname).GetFragmentLayout(source_scoped);
+          if (fl.kind != LayoutKind::WGMMA_RS_A || fl.logical_cols == 0 ||
+              fl.regs_per_thread == 0 || (fl.logical_cols % *atom_k) != 0) {
+            info.is_direct = true;
+            info.error =
+                "unsupported fragment layout for direct RS WGMMA operand";
+            return info;
+          }
+          size_t num_chunks = fl.logical_cols / *atom_k;
+          if (num_chunks == 0 || (fl.regs_per_thread % num_chunks) != 0) {
+            info.is_direct = true;
+            info.error = "failed to derive register chunk layout for direct RS "
+                         "WGMMA operand";
+            return info;
+          }
+          info.is_direct = true;
+          info.is_rs_direct = true;
+          info.k_iters = static_cast<size_t>(*full_k / *atom_k);
+          info.regs_per_step = fl.regs_per_thread / num_chunks;
+          info.rs_base_expr = source_sym;
+          info.supported = true;
+          return info;
+        }
+
+        if (sty->GetStorage() != Storage::SHARED) {
+          info.is_direct = true;
+          info.error = "direct WGMMA operands must reside in shared memory";
+          return info;
+        }
+
+        auto strides = ca ? GenStrides(ca) : sty->GetStrides();
+        if (k_axis >= strides.size()) {
+          info.is_direct = true;
+          info.error = "failed to derive direct WGMMA operand stride";
+          return info;
+        }
+
+        auto base_expr = [&]() {
+          if (ca) return ValueSTR(TileAddr(ca, false));
+          if (elemof_base) {
+            std::vector<ptr<AST::Node>> subscripts;
+            const AST::Expr* cur = elemof_expr;
+            while (cur && cur->GetOp() == Op::ElemOf) {
+              subscripts.push_back(cur->GetR());
+              if (isa<AST::Identifier>(cur->GetL())) break;
+              cur = dyn_cast<AST::Expr>(cur->GetL().get());
+            }
+            std::reverse(subscripts.begin(), subscripts.end());
+            auto base_ty = GetSymbolType(elemof_base->name);
+            if (auto array_ty = dyn_cast<ArrayType>(base_ty)) {
+              return LinearizeArrayOffset(
+                  ssm.DeviceName(InScopeName(elemof_base->name)), subscripts,
+                  array_ty->Dimensions(), sty->GetShape().ElementCountValue(),
+                  false);
+            }
+          }
+          if (sym) {
+            auto sym_ty = GetSymbolType(sym->name);
+            if (isa<FutureType>(sym_ty)) return sym->name + ".data()";
+          }
+          return ExprSTR(operand_expr, false);
+        }();
+        auto elem_ty = NameBaseType(sty->ElementType());
+        auto stride_expr = ValueSTR(strides.at(k_axis));
+        SwizMode swizzle = SwizMode::NONE;
+        if (auto it = shared_buf_swiz_.find(source_sym);
+            it != shared_buf_swiz_.end())
+          swizzle = it->second;
+
+        info.is_direct = true;
+        info.is_shared_direct = true;
+        info.k_iters = static_cast<size_t>(*full_k / *atom_k);
+        info.shared_elem_ty = elem_ty;
+        info.shared_major_order = major_order_for(operand_info);
+        info.shared_swizzle_enum = swizzle_to_enum(swizzle);
+        info.shared_ptr_expr =
+            std::string("(") + elem_ty + "*)(" + base_expr + ")";
+        info.shared_iter_elem_offset_expr =
+          "((" + iter_expr + ") * " + std::to_string(*atom_k) +
+          " * (" + stride_expr + "))";
+        {
+          int desc_id = direct_wgmma_desc_cnt++;
+          auto suffix = std::to_string(desc_id);
+          info.shared_ptr_var = "__choreo_wgmma_ptr_" + suffix;
+          info.shared_desc_var = "__choreo_wgmma_desc_" + suffix;
+          info.shared_iter_ptr_var = info.shared_ptr_var + "_iter";
+          info.shared_iter_desc_var = info.shared_desc_var + "_iter";
+        }
+        info.desc_expr = info.shared_desc_var;
+        info.supported = true;
+        return info;
+      };
+
+      auto& ssmi_a = cgi.GetSymbolMMA(InScopeName(a_sym));
+      auto& ssmi_b = cgi.GetSymbolMMA(InScopeName(b_sym));
+      auto direct_a = build_direct_operand(op.ExecOperand(1), ssmi_a,
+                                           "__choreo_wgmma_k_iter");
+      auto direct_b = build_direct_operand(op.ExecOperand(2), ssmi_b,
+                                           "__choreo_wgmma_k_iter");
+      if ((direct_a.is_direct && !direct_a.supported) ||
+          (direct_b.is_direct && !direct_b.supported)) {
+        Error1(n.LOC(), (direct_a.is_direct && !direct_a.supported)
+                            ? direct_a.error
+                            : direct_b.error);
+        return false;
       }
-      for (size_t i = 0; i < reg_num_d; ++i) {
-        if (use_explicit_scale_accum)
-          ds << ", " << explicit_scale_info->scale_frag_name << "[" << i << "]";
-        else if (op.HasScale())
-          ds << ", "
-             << (use_hoisted_scale_accum ? hoisted_scale_info->scale_frag_name
-                                         : c_sym + "_scale_frag")
-             << "[" << i << "]";
-        else
-          ds << ", " << ExprSTR(frag, false) << "[" << i << "]";
+
+      size_t wgmma_k_iters = 1;
+      if (direct_a.is_direct) wgmma_k_iters = direct_a.k_iters;
+      if (direct_b.is_direct)
+        wgmma_k_iters = std::max(wgmma_k_iters, direct_b.k_iters);
+      if ((direct_a.is_direct && direct_a.k_iters != wgmma_k_iters) ||
+          (direct_b.is_direct && direct_b.k_iters != wgmma_k_iters)) {
+        Error1(n.LOC(), "direct WGMMA operands must agree on the number of "
+                        "auto-split K iterations.");
+        return false;
       }
-      if (policy_is_sparse) ds << ", " << meta_var;
-      ds << ");\n";
+      if (wgmma_k_iters > 1 &&
+          !((direct_a.is_rs_direct && direct_b.is_direct) ||
+            (direct_a.is_direct && direct_b.is_direct))) {
+        Error1(n.LOC(), "auto-split WGMMA K iteration requires either direct "
+                        "shared/shared operands or an RS direct-register A "
+                        "with a direct shared-memory B operand.");
+        return false;
+      }
+
+      auto emit_shared_direct_setup = [&](DirectWGMMAOperandInfo& info) {
+        if (!info.is_shared_direct) return;
+        if (wgmma_k_iters > 1) return;
+        ds << d_indent << "auto* " << info.shared_ptr_var << " = "
+           << info.shared_ptr_expr << ";\n";
+        ds << d_indent << "uint64_t " << info.shared_desc_var
+           << " = wgmma_make_smem_desc<" << info.shared_major_order << ", "
+           << info.shared_swizzle_enum << ">(" << info.shared_ptr_var
+           << ");\n";
+      };
+      auto emit_shared_direct_iter_update =
+          [&](const DirectWGMMAOperandInfo& info) {
+            if (!info.is_shared_direct || wgmma_k_iters <= 1) return;
+            ds << d_indent << "auto* " << info.shared_iter_ptr_var << " = ("
+               << info.shared_elem_ty << "*)(" << info.shared_ptr_expr << " + "
+               << info.shared_iter_elem_offset_expr << ");\n";
+            ds << d_indent << "uint64_t " << info.shared_iter_desc_var
+               << " = wgmma_make_smem_desc<" << info.shared_major_order << ", "
+               << info.shared_swizzle_enum << ">(" << info.shared_iter_ptr_var
+               << ");\n";
+          };
+      auto desc_expr_for = [&](const DirectWGMMAOperandInfo& info,
+                               const std::string& fallback) {
+        if (!info.is_direct) return fallback;
+        if (info.is_shared_direct && wgmma_k_iters > 1)
+          return info.shared_iter_desc_var;
+        return info.desc_expr;
+      };
+
+      emit_shared_direct_setup(direct_a);
+      emit_shared_direct_setup(direct_b);
+
+      auto emit_wgmma_fma = [&](const std::string& a_desc_expr,
+                                const std::string& b_desc_expr) {
+        ds << d_indent << "cute::" << mma_policy << "<";
+        if (!policy_is_tn) {
+          if (is_rs)
+            ds << cute_gmma_major_cast << "(0), " << cute_gmma_major_cast << "("
+               << trans_b << ")";
+          else
+            ds << cute_gmma_major_cast << "(" << trans_a << "), "
+               << cute_gmma_major_cast << "(" << trans_b << ")";
+        }
+        ds << ">::fma(";
+        if (is_rs) {
+          std::string a_base;
+          if (direct_a.is_rs_direct) {
+            a_base = direct_a.rs_base_expr;
+            if (direct_a.regs_per_step > 0 && wgmma_k_iters > 1)
+              a_base += " + __choreo_wgmma_k_iter * " +
+                        std::to_string(direct_a.regs_per_step);
+          } else if (a_is_chunk_rs) {
+            auto& ci = frag_chunk_rs_aliases_[a_sym];
+            a_base = ci.parent_c_sym + " + " + ci.offset_var + " * " +
+                     std::to_string(ci.regs_per_step);
+          } else {
+            a_base = a_sym;
+          }
+          ds << "reinterpret_cast<const uint32_t*>(" << a_base << ")[0], "
+             << "reinterpret_cast<const uint32_t*>(" << a_base << ")[1], "
+             << "reinterpret_cast<const uint32_t*>(" << a_base << ")[2], "
+             << "reinterpret_cast<const uint32_t*>(" << a_base << ")[3], "
+             << b_desc_expr;
+        } else {
+          ds << a_desc_expr << ", " << b_desc_expr;
+        }
+        for (size_t i = 0; i < reg_num_d; ++i) {
+          if (use_explicit_scale_accum)
+            ds << ", " << explicit_scale_info->scale_frag_name << "[" << i
+               << "]";
+          else if (op.HasScale())
+            ds << ", "
+               << (use_hoisted_scale_accum ? hoisted_scale_info->scale_frag_name
+                                           : c_sym + "_scale_frag")
+               << "[" << i << "]";
+          else
+            ds << ", " << ExprSTR(frag, false) << "[" << i << "]";
+        }
+        if (policy_is_sparse) ds << ", " << meta_var;
+        ds << ");\n";
+      };
+
+      if (wgmma_k_iters > 1) {
+        ds << d_indent
+           << "for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < "
+           << wgmma_k_iters << "; ++__choreo_wgmma_k_iter) {\n";
+        IncrDeviceIndent();
+        emit_shared_direct_iter_update(direct_a);
+        emit_shared_direct_iter_update(direct_b);
+      }
+      emit_wgmma_fma(desc_expr_for(direct_a, "desc_" + a_sym),
+                     desc_expr_for(direct_b, "desc_" + b_sym));
+      if (wgmma_k_iters > 1) {
+        DecrDeviceIndent();
+        ds << d_indent << "}\n";
+        if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent);
+      }
 
       if (op.HasScale() && !use_hoisted_scale_accum) {
         std::string dim_n = STR(ssmi_c.shape.at(1));
@@ -5027,12 +5395,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
         }
       }
-      bool target_is_shared = f_sty->GetStorage() == Storage::SHARED;
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(t_sym, ".data()"), buf_expr, f_sty->GetStorage(),
           f_sty->ElementType(), ca->GetBlockShape(), false,
-          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true),
-          {}, target_is_shared, target_is_shared ? SwizMode::B128 : SwizMode::NONE);
+          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
       ds << f_mds.second;
       std::string DIM_N_STR = STR(ssmi.shape.at(1));
       std::string CUTE_WGMMA_ATOM =
@@ -6642,6 +7008,42 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
       ds << d_indent << "int __iv_" << id->name << " = 0;\n";
   }
 
+  // When the range source (n.in) is a 1D mdspan referencing a declared
+  // variable (e.g. `{bn} in [kv_bound]`), record the variable name as the
+  // preferred loop bound for that IV. ForeachBlock codegen consults this
+  // map to emit the variable name instead of inlining the full expression.
+  if (!IsHost() && n.with_matchers && n.GetMatchers().size() == 1) {
+    std::string var_name;
+    if (auto expr = dyn_cast<AST::Expr>(n.in)) {
+      if (auto ref = expr->GetReference()) {
+        if (auto mds = dyn_cast<AST::MultiDimSpans>(ref)) {
+          if (auto mv = dyn_cast<AST::MultiValues>(mds->list)) {
+            if (mv->AllValues().size() == 1) {
+              if (auto inner = AST::GetIdentifier(mv->AllValues()[0])) {
+                auto sn = InScopeNameForRef(inner->name);
+                if (ssm.HasDeviceName(sn))
+                  var_name = UnScopedName(ssm.DeviceName(sn));
+              }
+            }
+          }
+        }
+      }
+      if (var_name.empty()) {
+        if (auto sym = expr->GetSymbol()) {
+          auto sn = InScopeNameForRef(sym->name);
+          if (ssm.HasDeviceName(sn))
+            var_name = UnScopedName(ssm.DeviceName(sn));
+        }
+      }
+    }
+    if (!var_name.empty()) {
+      auto id = cast<AST::Identifier>(n.GetMatchers()[0]);
+      auto iv_scoped = InScopeName(id->name);
+      for (auto& iv_name : within_map.at(iv_scoped))
+        iv_upper_bound_expr_[iv_name] = var_name;
+    }
+  }
+
   if (EnableDebugTypeRTTI() && n.with && (n.GetMatchers().size() > 1)) {
     auto& os = Stream();
     os << Indent() << "choreo::rtti::bounded_ituple<" << n.GetMatchers().size()
@@ -6701,20 +7103,32 @@ bool CuteCodeGen::Visit(AST::WithBlock& n) {
   return true;
 }
 
-// True when the subtree has an MMA Exec but no MMA Commit (batched WGMMA).
-static bool ForeachHasMMAExecWithoutCommit(const ptr<AST::Node>& node) {
+// True when the foreach's DIRECT body (not nested foreachs) has MMA Exec
+// but no MMA Commit.  Stops at nested foreach boundaries so hoisting
+// targets the innermost foreach containing WGMMA.
+// Optionally extracts the accumulator symbol name from the first Exec found.
+static bool ForeachHasMMAExecWithoutCommit(const ptr<AST::Node>& node,
+                                           std::string* acc_sym = nullptr) {
   if (!node) return false;
   bool has_exec = false;
   bool has_commit = false;
+  std::unordered_set<std::string> fill_syms;
   auto walk = [&](auto&& self, const ptr<AST::Node>& n) -> void {
     if (!n) return;
     if (auto mma = dyn_cast<AST::MMA>(n)) {
       if (auto op = mma->GetOperation()) {
-        if (op->Tag() == AST::MMAOperation::Exec) has_exec = true;
+        if (op->Tag() == AST::MMAOperation::Exec) {
+          has_exec = true;
+          if (acc_sym && acc_sym->empty())
+            *acc_sym = AST::FragName(op->ExecOperand(0));
+        }
+        if (op->Tag() == AST::MMAOperation::Fill)
+          fill_syms.insert(AST::FragName(op->FillingTo()));
         if (op->Tag() == AST::MMAOperation::Commit) has_commit = true;
       }
       return;
     }
+    if (dyn_cast<AST::ForeachBlock>(n)) return;
     if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
       for (auto& item : mn->values) self(self, item);
       return;
@@ -6730,6 +7144,7 @@ static bool ForeachHasMMAExecWithoutCommit(const ptr<AST::Node>& node) {
     }
   };
   walk(walk, node);
+  if (acc_sym && !acc_sym->empty() && fill_syms.count(*acc_sym)) return false;
   return has_exec && !has_commit;
 }
 
@@ -6956,11 +7371,17 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   int unroll_factor = 0;
   const bool has_unroll = AST::HasUnrollHint(n, unroll_factor);
 
-  if (!IsHost() && CCtx().HoistWGMMAArrive() &&
-      bdim_level == ParallelLevel::GROUPx4 && !warpspec_wgmma_arrived &&
-      has_unroll && ForeachHasMMAExecWithoutCommit(n.GetBody())) {
-    ds << d_indent << "warpgroup_arrive();\n";
-    warpspec_wgmma_arrived = true;
+  {
+    std::string hoisted_acc;
+    if (!IsHost() && bdim_level == ParallelLevel::GROUPx4 &&
+        !warpspec_wgmma_arrived &&
+        ForeachHasMMAExecWithoutCommit(n.GetBody(), &hoisted_acc)) {
+      if (!hoisted_acc.empty())
+        ds << d_indent << "warpgroup_fence_operand("
+           << ssm.DeviceName(hoisted_acc) << ");\n";
+      ds << d_indent << "warpgroup_arrive();\n";
+      warpspec_wgmma_arrived = true;
+    }
   }
 
   if (has_unroll) {
@@ -7246,12 +7667,16 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
         auto iv_ty = GetSymbolType(UnScopedName(iv_name));
         assert(IsActualBoundedIntegerType(iv_ty));
         auto iv_bty = cast<BoundedType>(iv_ty);
+        auto ub_it = iv_upper_bound_expr_.find(iv_name);
+        std::string ub_expr =
+            ub_it != iv_upper_bound_expr_.end()
+                ? ub_it->second
+                : UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
         IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
                     << (rng->lbound
                             ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
                             : "0")
-                    << "; " << SSMName(iv_name, IsHost()) << " < "
-                    << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
+                    << "; " << SSMName(iv_name, IsHost()) << " < " << ub_expr
                     << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
                                     : "")
                     << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
@@ -7275,6 +7700,7 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
 bool CuteCodeGen::Visit(AST::FragApply& n) {
   TraceEachVisit(n);
   if (IsHost()) return true;
+  if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
 
   auto target_name = n.TargetName();
   auto scoped = InScopeNameForRef(target_name);
@@ -7287,9 +7713,13 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
   auto sym = UnScopedName(SSMName(scoped, false));
   size_t regs = fl.regs_per_thread;
 
-  std::string tid_expr = current_thread_count_expr.empty()
-                             ? std::string("threadIdx.x")
-                             : "__choreo_vtid_x";
+  std::string tid_expr;
+  if (bdim_level == ParallelLevel::GROUPx4)
+    tid_expr = "(threadIdx.x % 128)";
+  else if (!current_thread_count_expr.empty())
+    tid_expr = "__choreo_vtid_x";
+  else
+    tid_expr = "threadIdx.x";
 
   // Set up register-direct state so that .at() codegen emits frag[__r].
   reg_loop_var_ = "__r";
@@ -7300,8 +7730,7 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
   // Override other fragment accesses in the body to register-direct form.
   // Two cases: (1) compatible layout -> same register index;
   // (2) 1D row-broadcast in a 2D MMA apply -> map via RowFromRegIndex.
-  auto BuildOverrides =
-      [&](auto&& self, const ptr<AST::Node>& node) -> void {
+  auto BuildOverrides = [&](auto&& self, const ptr<AST::Node>& node) -> void {
     if (!node) return;
     if (auto da = dyn_cast<AST::DataAccess>(node)) {
       if (da->AccessElement()) {
@@ -7341,10 +7770,8 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
   // Set up frag_apply_iv_map_ before body generation.
   for (auto& p : n.params) {
     auto sp = SSTab().ScopedName(p);
-    if (!SSTab().IsDeclared(sp))
-      SSTab().DefineSymbol(sp, MakeIntegerType());
-    if (!SymTab()->Exists(sp))
-      SymTab()->AddSymbol(sp, MakeIntegerType());
+    if (!SSTab().IsDeclared(sp)) SSTab().DefineSymbol(sp, MakeIntegerType());
+    if (!SymTab()->Exists(sp)) SymTab()->AddSymbol(sp, MakeIntegerType());
     frag_apply_iv_map_[p] = "__frag_iv_" + p;
   }
 
@@ -7385,8 +7812,7 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
   }
 
   // Emit: target[__r] = body_expr;
-  ds << d_indent << sym << "[" << reg_loop_var_ << "] = " << body_expr
-     << ";\n";
+  ds << d_indent << sym << "[" << reg_loop_var_ << "] = " << body_expr << ";\n";
 
   DecrIndent();
   IndStream() << "}\n";
@@ -7404,6 +7830,7 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
 bool CuteCodeGen::Visit(AST::FragTransfer& n) {
   TraceEachVisit(n);
   if (IsHost()) return true;
+  if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
 
   auto dst_name = n.DstName();
   auto src_name = n.SrcName();
@@ -7421,9 +7848,13 @@ bool CuteCodeGen::Visit(AST::FragTransfer& n) {
   std::string dst_sym = UnScopedName(SSMName(dst_scoped, false));
   std::string src_sym = UnScopedName(SSMName(src_scoped, false));
 
-  std::string tid_expr = current_thread_count_expr.empty()
-                             ? std::string("threadIdx.x")
-                             : "__choreo_vtid_x";
+  std::string tid_expr;
+  if (bdim_level == ParallelLevel::GROUPx4)
+    tid_expr = "(threadIdx.x % 128)";
+  else if (!current_thread_count_expr.empty())
+    tid_expr = "__choreo_vtid_x";
+  else
+    tid_expr = "threadIdx.x";
 
   const std::string frag_name =
       (n.op == AST::FragTransferKind::STORE) ? src_name : dst_name;
@@ -7568,6 +7999,7 @@ bool CuteCodeGen::Visit(AST::FragTransfer& n) {
 bool CuteCodeGen::Visit(AST::FragReduce& n) {
   TraceEachVisit(n);
   if (IsHost()) return true;
+  if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
 
   // ---- Prepare: resolve symbols, compute all parameters ----
 
@@ -7619,19 +8051,18 @@ bool CuteCodeGen::Visit(AST::FragReduce& n) {
               << "; ++__rv) {\n";
   IncrIndent();
   if (is_max) {
-    IndStream() << "__local_reduce = fmaxf(__local_reduce, " << src_sym
-                << "[" << idx_expr << "]);\n";
+    IndStream() << "__local_reduce = fmaxf(__local_reduce, " << src_sym << "["
+                << idx_expr << "]);\n";
   } else {
-    IndStream() << "__local_reduce += " << src_sym << "[" << idx_expr
-                << "];\n";
+    IndStream() << "__local_reduce += " << src_sym << "[" << idx_expr << "];\n";
   }
   DecrIndent();
   IndStream() << "}\n";
 
   // Phase 2: Cross-thread butterfly AllReduce.
   if (rp.threads_per_row > 1) {
-    IndStream() << "__local_reduce = choreo::AllReduce<" << reduce_type
-                << ", " << rp.threads_per_row << ", 1>::run(__local_reduce";
+    IndStream() << "__local_reduce = choreo::AllReduce<" << reduce_type << ", "
+                << rp.threads_per_row << ", 1>::run(__local_reduce";
     if (rp.NeedsWorkspace()) ds << ", " << ws_name;
     ds << ");\n";
   }
@@ -8130,12 +8561,95 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     }
     std::string cu_swizzle_str = cuda_stringify(tma_swizzle);
 
+    std::string g_unscoped = UnScopedName(g_sym);
+
+    // Determine whether this tensor is a true GLOBAL argument.
+    bool is_global_arg = false;
+    bool found_param = false;
+    for (const auto& item : GetChoreoFuncIns(cgi)) {
+      if (UnScopedName(item.name) == g_unscoped) {
+        found_param = true;
+        is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
+        break;
+      }
+    }
+
+    std::string base_expr;
+    Shape host_shape = g_shape;
+    Shape host_stride = g_stride;
+    size_t host_rank = g_shape.Rank();
+
+    if (desc.HasRootParam()) {
+      // TMA source is a computed subview (e.g., Q_head derived from Q).
+      // Flatten the root parameter's N-D shape to 2D [outer_product, inner]
+      // so the TMA descriptor covers the entire root tensor.
+      auto root_name = UnScopedName(desc.GetRootParamName());
+      const auto& root_shape = desc.GetRootParamShape();
+
+      ValueItem inner_dim = root_shape.ValueAt(root_shape.Rank() - 1);
+      ValueItem outer_dim = sbe::nu(1);
+      for (size_t i = 0; i + 1 < root_shape.Rank(); ++i)
+        outer_dim = outer_dim * root_shape.ValueAt(i);
+
+      host_shape = Shape({outer_dim, inner_dim});
+      host_stride = Shape({inner_dim * gmem_ty->ElementSizeValue(),
+                           gmem_ty->ElementSizeValue()});
+      host_rank = 2;
+      base_expr = root_name + ".data()";
+    } else if (found_param && is_global_arg) {
+      base_expr = g_unscoped + ".data()";
+      // Check if a .view() operation flattens to a lower rank
+      bool has_view = false;
+      for (auto& sop : g_ca->AllOperations()) {
+        if (isa<AST::SOP::View>(sop)) {
+          has_view = true;
+          break;
+        }
+      }
+      if (has_view && host_rank > 2) {
+        ValueItem inner_dim = g_shape.ValueAt(g_shape.Rank() - 1);
+        ValueItem outer_dim = sbe::nu(1);
+        for (size_t i = 0; i + 1 < g_shape.Rank(); ++i)
+          outer_dim = outer_dim * g_shape.ValueAt(i);
+        host_shape = Shape({outer_dim, inner_dim});
+        host_stride = Shape({inner_dim * gmem_ty->ElementSizeValue(),
+                             gmem_ty->ElementSizeValue()});
+        host_rank = 2;
+      } else {
+        std::vector<ValueItem> byte_strides;
+        for (size_t i = 0; i < host_stride.Rank(); ++i)
+          byte_strides.push_back(host_stride.ValueAt(i) *
+                                 gmem_ty->ElementSizeValue());
+        host_stride = Shape(byte_strides);
+      }
+    } else if (found_param) {
+      base_expr = SSMName((g_unscoped + "__device"), true);
+      std::vector<ValueItem> byte_strides;
+      for (size_t i = 0; i < host_stride.Rank(); ++i)
+        byte_strides.push_back(host_stride.ValueAt(i) *
+                               gmem_ty->ElementSizeValue());
+      host_stride = Shape(byte_strides);
+    } else if (IsChoreoOutput(g_sym)) {
+      base_expr = SSMName(InScopeName(g_unscoped) + "__device", true);
+      std::vector<ValueItem> byte_strides;
+      for (size_t i = 0; i < host_stride.Rank(); ++i)
+        byte_strides.push_back(host_stride.ValueAt(i) *
+                               gmem_ty->ElementSizeValue());
+      host_stride = Shape(byte_strides);
+    } else {
+      std::ostringstream oss;
+      oss << g_ca->LOC();
+      choreo_unreachable(
+          "TMA source '" + g_unscoped +
+          "' is not a function parameter and could not be traced to one. "
+          "TMA descriptors require a host-accessible base pointer. At " +
+          oss.str());
+    }
+
     hs << h_indent << "uint64_t " << desc.GetName() << "_shape[] = {"
-       << ValueSTR(Reverse(g_shape.Value())) << "};\n"; // shape of buffer
-    // For TMA, strides should be in the same order as shape (not reversed)
+       << ValueSTR(Reverse(host_shape.Value())) << "};\n";
     hs << h_indent << "uint64_t " << desc.GetName() << "_strides[] = {"
-       << ValueSTR(Trim(Reverse(g_stride * gmem_ty->ElementSizeValue())))
-       << "};\n"; // strides of shape
+       << ValueSTR(Trim(Reverse(host_stride.Value()))) << "};\n";
     {
       auto box_vals = Reverse(t_shape.Value());
       hs << h_indent << "uint32_t " << desc.GetName() << "_box_shape[] = {";
@@ -8146,44 +8660,16 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       hs << "};\n";
     }
     hs << h_indent << "uint32_t " << desc.GetName() << "_elem_strides[] = {"
-       << ValueSTR(ValxN(sbe::nu(1), t_shape.Rank()))
-       << "};\n"; // elements' strides
-    std::string g_unscoped = UnScopedName(g_sym);
-
-    // Determine whether this tensor is a true GLOBAL argument.
-    // Correct behavior is to consult the parameter attribute
-    // (ParamAttr::GLOBAL_INPUT) when the symbol corresponds to a
-    // function parameter. Do NOT treat choreo output as global by
-    // default, because output may be shadowed to device memory.
-    bool is_global_arg = false;
-    [[maybe_unused]] bool found_param = false;
-    for (const auto& item : GetChoreoFuncIns(cgi)) {
-      if (UnScopedName(item.name) == g_unscoped) {
-        found_param = true;
-        is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
-        break;
-      }
-    }
-
-    std::string base_expr = is_global_arg
-                                ? (g_unscoped + ".data()")
-                                : SSMName((g_unscoped + "__device"), true);
-
-    // errs() << "[choreo][tma] g_sym=" << g_sym
-    //        << " g_scoped=" << g_scoped
-    //        << " storage=" << STR(gmem_ty->GetStorage())
-    //        << " is_global_arg=" << (is_global_arg ? "1" : "0")
-    //        << " base_expr=" << base_expr << "\n";
-    // errs().flush();
+       << ValueSTR(ValxN(sbe::nu(1), t_shape.Rank())) << "};\n";
 
     hs << h_indent << "alignas(64) CUtensorMap " << map_name << "{};\n";
     hs << h_indent << "CUresult " << map_name
        << "_res = cuTensorMapEncodeTiled(\n";
-    hs << h_indent << "        &" << map_name << ",\n"; // tensor_map
+    hs << h_indent << "        &" << map_name << ",\n";
     hs << h_indent << "        " << TMAMapDataType(gmem_ty->ElementType())
-       << ",\n"; // tma element type
-    hs << h_indent << "        " << g_shape.Rank() << ",\n";
-    hs << h_indent << "        " << base_expr << ",\n"; // base symbol
+       << ",\n";
+    hs << h_indent << "        " << host_rank << ",\n";
+    hs << h_indent << "        " << base_expr << ",\n";
     hs << h_indent << "        " << desc.GetName() << "_shape,\n";
     hs << h_indent << "        " << desc.GetName() << "_strides,\n";
     hs << h_indent << "        " << desc.GetName() << "_box_shape,\n";
@@ -8317,19 +8803,29 @@ void CuteCodeGen::EmitCudaFree() {
 void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
                                      AST::ParallelBy* pb,
                                      const ValueItem& ring_start) {
+  known_val_str_to_var_.clear();
+
   const auto& lcs = cgi.GetFunctionLaunches(fname);
   auto setreg_limit = GetSetRegLimit(pb);
   auto launch_bounds_min_blocks = GetLaunchBoundsMinBlocks(pb);
   bool use_maxnreg_attr = setreg_limit.has_value() && CCtx().ArchNum() < 90;
   std::optional<std::string> launch_bounds_attr;
-  if (launch_bounds_min_blocks.has_value() && !lcs.empty()) {
+  if (!lcs.empty()) {
     auto inner_thr_count =
         lcs[0].thread_count.x * lcs[0].thread_count.y * lcs[0].thread_count.z;
     auto group_count = lcs[0].group_count.x * lcs[0].group4_count.x *
                        lcs[0].group_count.y * lcs[0].group_count.z;
     auto thr_count = inner_thr_count * group_count;
-    launch_bounds_attr = "__launch_bounds__(" + ValueSTR(thr_count) + ", " +
-                         std::to_string(*launch_bounds_min_blocks) + ") ";
+    if (VIInt(thr_count).has_value()) {
+      if (launch_bounds_min_blocks.has_value()) {
+        launch_bounds_attr = "__launch_bounds__(" + ValueSTR(thr_count) + ", " +
+                             std::to_string(*launch_bounds_min_blocks) + ") ";
+      } else if (IsWarpSpecActive() ||
+                 set_cuda_func_attribute_max_dynamic_shared_memory_size) {
+        launch_bounds_attr =
+            "__launch_bounds__(" + ValueSTR(thr_count) + ", 1) ";
+      }
+    }
   }
   if (!lcs.empty() && lcs[0].HasCluster()) {
     auto& cc = lcs[0].cluster_count;
@@ -8704,7 +9200,18 @@ bool CuteCodeGen::CompileWithScript(const std::string& action) {
 // Currently, it is guaranteed that ValueSTR can be used safely and directly.
 const std::string CuteCodeGen::ValueSTR(const ValueItem& vi, bool LL_suffix,
                                         bool shp_lit) const {
-  return OpValueSTR(vi, "", true, LL_suffix, shp_lit);
+  auto result = OpValueSTR(vi, "", true, LL_suffix, shp_lit);
+  // Replace known subexpressions with their declared variable names.
+  // This avoids re-expanding expressions like kv_tiles when they appear
+  // inside larger expressions like kv_bound's ternary.
+  if (!IsHost() && !shp_lit && !LL_suffix && !known_val_str_to_var_.empty()) {
+    for (auto& [expr, var] : known_val_str_to_var_) {
+      for (auto pos = result.find(expr); pos != std::string::npos;
+           pos = result.find(expr, pos + var.size()))
+        result.replace(pos, expr.size(), var);
+    }
+  }
+  return result;
 }
 
 const std::string CuteCodeGen::ValueSTR(const ValueList& vl, bool LL_suffix,
@@ -9017,6 +9524,106 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       auto scoped = InScopeNameForRef(da->data->name);
       if (in_register_direct_automap_ && automap_frag_reg_expr_.count(scoped)) {
         oss << automap_frag_reg_expr_.at(scoped);
+      } else if (FCtx(fname).HasFragmentLayout(scoped)) {
+        const auto& fl = FCtx(fname).GetFragmentLayout(scoped);
+        if ((fl.kind == LayoutKind::WGMMA_ACC ||
+             fl.kind == LayoutKind::WGMMA_RS_A) &&
+            da->GetIndices().size() == 2) {
+          auto idx_it = da->GetIndices().begin();
+          auto row_expr = OpExprSTR(*idx_it++, "+", true, is_host);
+          auto col_expr = OpExprSTR(*idx_it, "+", false, is_host);
+          oss << UnScopedName(SSMName(scoped, is_host)) << "["
+              << fl.ForwardIndex(row_expr, col_expr) << "]";
+        } else if (FCtx(fname).HasFragmentInfo(scoped) &&
+                   !FCtx(fname).FragIsWGMMA(scoped)) {
+          sbe::ExprSum linear;
+          size_t idx = 0;
+          auto shape = sty->GetShape();
+          auto AppendLinear = [&](const ValueItem& op) {
+            auto offset = op;
+            assert(shape.Rank() >= idx + 1);
+            if (shape.Rank() > idx + 1)
+              offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
+            SimplifyExpression(offset);
+            linear += offset;
+            ++idx;
+          };
+          for (auto item : da->GetIndices()) {
+            if (auto id = AST::GetIdentifier(item)) {
+              if (frag_apply_iv_map_.count(id->name)) {
+                AppendLinear(sbe::sym(frag_apply_iv_map_.at(id->name)));
+              } else if (within_map.count(InScopeNameForRef(id->name))) {
+                auto ivs = within_map.at(InScopeNameForRef(id->name));
+                for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
+                  AppendLinear(sbe::sym(*iv_itr));
+              } else
+                AppendLinear(sbe::sym(InScopeNameForRef(id->name)));
+            } else if (auto il = AST::GetIntLiteral(*item)) {
+              AppendLinear(sbe::nu(il->Val()));
+            } else {
+              assert(shape.Rank() >= idx + 1);
+              if (shape.Rank() > idx + 1)
+                linear += sbe::sym(
+                    "(" + OpExprSTR(item, "*", true, is_host) + ")*" +
+                    ValueSTR(shape.TrimDims(idx + 1).ElementCountValue()));
+              else
+                linear += sbe::sym(OpExprSTR(item, "+", false, is_host));
+              ++idx;
+            }
+          }
+          const auto& finfo = FCtx(fname).GetFragmentInfo(scoped);
+          auto linear_str = ValueSTR(linear.Get());
+          if (FCtx(fname).HasFragmentLayout(scoped) &&
+              FCtx(fname).GetFragmentLayout(scoped).vec_width > 1) {
+            auto& fl = FCtx(fname).GetFragmentLayout(scoped);
+            auto TW = std::to_string(fl.thread_count * fl.vec_width);
+            auto W = std::to_string(fl.vec_width);
+            oss << UnScopedName(SSMName(scoped, is_host)) << "[(" << linear_str
+                << ") / " << TW << " * " << W << " + (" << linear_str << ") % "
+                << W << "]";
+          } else {
+            oss << UnScopedName(SSMName(scoped, is_host)) << "[(" << linear_str
+                << ") / (" << finfo.thread_count_expr << ")]";
+          }
+        } else {
+          oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
+              << OpExprSTR(da->data, "+", true, is_host);
+          size_t idx = 0;
+          auto shape = sty->GetShape();
+          auto AppendOffset = [this, &oss, &shape, &idx](const ValueItem& op) {
+            auto offset = op;
+            assert(shape.Rank() >= idx + 1);
+            if (shape.Rank() > idx + 1)
+              offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
+            SimplifyExpression(offset);
+            if (!sbe::ceq(offset, sbe::nu(0))) oss << " + " << ValueSTR(offset);
+            ++idx;
+          };
+          for (auto item : da->GetIndices()) {
+            if (auto id = AST::GetIdentifier(item)) {
+              if (frag_apply_iv_map_.count(id->name)) {
+                AppendOffset(sbe::sym(frag_apply_iv_map_.at(id->name)));
+              } else if (within_map.count(InScopeNameForRef(id->name))) {
+                auto ivs = within_map.at(InScopeNameForRef(id->name));
+                for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
+                  AppendOffset(sbe::sym(*iv_itr));
+              } else
+                AppendOffset(sbe::sym(InScopeNameForRef(id->name)));
+            } else if (auto il = AST::GetIntLiteral(*item)) {
+              AppendOffset(sbe::nu(il->Val()));
+            } else {
+              oss << " + ";
+              assert(shape.Rank() >= idx + 1);
+              if (shape.Rank() > idx + 1)
+                oss << OpExprSTR(item, "*", true, is_host) << "*"
+                    << ValueSTR(shape.TrimDims(idx + 1).ElementCountValue());
+              else
+                oss << OpExprSTR(item, "+", false, is_host);
+              ++idx;
+            }
+          }
+          oss << ")";
+        }
       } else if (sty->GetStorage() == Storage::REG &&
                  FCtx(fname).HasFragmentInfo(scoped) &&
                  !FCtx(fname).FragIsWGMMA(scoped)) {
@@ -9085,7 +9692,9 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         };
         for (auto item : da->GetIndices()) {
           if (auto id = AST::GetIdentifier(item)) {
-            if (within_map.count(InScopeNameForRef(id->name))) {
+            if (frag_apply_iv_map_.count(id->name)) {
+              AppendOffset(sbe::sym(frag_apply_iv_map_.at(id->name)));
+            } else if (within_map.count(InScopeNameForRef(id->name))) {
               auto ivs = within_map.at(InScopeNameForRef(id->name));
               for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                 AppendOffset(sbe::sym(*iv_itr));
@@ -9120,17 +9729,36 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     if (ce->IsForeignCast())
       return "((" + ce->ForeignType() + ")" +
              OpExprSTR(ce->GetR(), "", true, is_host) + ")";
-    return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
-                       is_host, ce->IsExplicit());
+    auto from_bt = ce->FromType();
+    if (in_register_direct_automap_ && from_bt == BaseType::F64) {
+      if (auto da = dyn_cast<AST::DataAccess>(ce->GetR())) {
+        auto sc = InScopeNameForRef(da->data->name);
+        if (FCtx(fname).HasFragmentLayout(sc))
+          from_bt = ElementType(GetSymbolType(da->data->name));
+      } else if (auto expr = dyn_cast<AST::Expr>(ce->GetR())) {
+        if (auto ref = dyn_cast<AST::DataAccess>(expr->GetReference())) {
+          auto sc = InScopeNameForRef(ref->data->name);
+          if (FCtx(fname).HasFragmentLayout(sc))
+            from_bt = ElementType(GetSymbolType(ref->data->name));
+        }
+      }
+    }
+    return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), from_bt, is_host,
+                       ce->IsExplicit());
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
     // frag.apply lambda param override (must be checked before scope lookup)
     if (auto sym = expr->GetSymbol()) {
       if (frag_apply_iv_map_.count(sym->name))
         return frag_apply_iv_map_.at(sym->name);
     }
-    // utilize the optimize value whenever possible
+    // Use the declared variable name when available rather than inlining
+    // the full optimized expression. This avoids re-computing complex
+    // expressions (e.g. ternary loop bounds) on every reference.
     if (auto sym = expr->GetSymbol()) {
       auto sname = InScopeNameForRef(sym->name);
+      if (!is_host && ssm.HasDeviceName(sname)) {
+        return UnScopedName(ssm.DeviceName(sname));
+      }
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
         if (svs.HasVal()) return ValueSTR(svs.GetVal());
@@ -9356,6 +9984,8 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
     const std::string prefix = "__";
     std::string func_name = name;
     if (auto res = RemovePrefixOrNull(prefix, name)) func_name = *res;
+    if (func_name == "min" || func_name == "max")
+      return "(choreo::nv_cute::numerics::" + func_name + ")";
     return "choreo::nv_cute::numerics::" + func_name;
   };
 

@@ -23,9 +23,11 @@ static constexpr int UNKNOWN_SIGNED =
 static constexpr float INVALID_FLOAT = std::numeric_limits<float>::quiet_NaN();
 static constexpr double INVALID_DOUBLE =
     std::numeric_limits<double>::quiet_NaN();
-static constexpr float UNKNOWN_FLOAT = std::numeric_limits<float>::infinity();
+// Use NaN as the internal unknown-float sentinel so real +/-inf literals remain
+// representable in the source language.
+static constexpr float UNKNOWN_FLOAT = std::numeric_limits<float>::quiet_NaN();
 static constexpr double UNKNOWN_DOUBLE =
-    std::numeric_limits<double>::infinity();
+    std::numeric_limits<double>::quiet_NaN();
 } // namespace __internal
 
 inline constexpr size_t GetInvalidUnsigned() {
@@ -57,8 +59,8 @@ inline constexpr bool IsUnKnownInteger(int64_t v) {
 }
 inline constexpr bool IsValidFloatPoint(float v) { return !std::isnan(v); }
 inline constexpr bool IsValidFloatPoint(double v) { return !std::isnan(v); }
-inline constexpr bool IsUnKnownFloatPoint(float v) { return std::isinf(v); }
-inline constexpr bool IsUnKnownFloatPoint(double v) { return std::isinf(v); }
+inline constexpr bool IsUnKnownFloatPoint(float v) { return std::isnan(v); }
+inline constexpr bool IsUnKnownFloatPoint(double v) { return std::isnan(v); }
 
 inline constexpr size_t GetInvalidRank() { return GetInvalidUnsigned(); }
 inline constexpr size_t GetUnknownRank() { return GetUnknownUnsigned(); }

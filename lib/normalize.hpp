@@ -758,6 +758,14 @@ public:
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
     if (n.IsArith() && n.IsBIF()) {
+      if ((n.function->name == "__min" || n.function->name == "__max") &&
+          std::all_of(n.arguments->AllValues().begin(),
+                      n.arguments->AllValues().end(), [](const auto& arg) {
+                        return CanYieldAnInteger(arg->GetType());
+                      })) {
+        return true;
+      }
+
       auto normalized_args =
           AST::Make<AST::MultiValues>(n.arguments->LOC(), ", ");
       bool normalized = false;

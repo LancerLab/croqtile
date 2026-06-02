@@ -10,6 +10,6 @@ __co__ void bar(int x) {
   }
 }
 
-// The printf for `y` should emit (x + 1) from the FCtx optimization.
+// The initialized value should be captured in `y` without self-referencing.
 // CHECK: __global__ void __choreo_device_bar
-// CHECK: printf("%lld\n", static_cast<long long>((x + 1)));
+// CHECK: printf("%lld\n", static_cast<long long>(y));

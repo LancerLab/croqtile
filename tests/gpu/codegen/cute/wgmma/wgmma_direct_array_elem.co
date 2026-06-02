@@ -1,0 +1,68 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=ROW-ROW
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=ROW-COL
+
+#define M 64
+#define N 128
+#define K 64
+#define STAGES 2
+
+__co__ auto direct_array_elem_row_row(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0.0f};
+
+  parallel pb by 1 : block {
+    lhs_s = dma.copy.swiz<128> lhs => shared;
+    shared f16 [N, K] rhs_s[STAGES];
+    foreach {stage} in [1] {
+      dma.copy.swiz<128> rhs => rhs_s[stage];
+
+      parallel g by 1 : group-4 {
+        mc = mma.fill.f32 0.0f;
+        mma.row.row mc, lhs_s, rhs_s[stage];
+        mma.commit;
+        mma.store mc, output;
+      }
+    }
+  }
+
+  return output;
+}
+
+__co__ auto direct_array_elem_row_col(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f16 [M, N] output{0.0f};
+
+  parallel pb by 1 : block {
+    lhs_s = dma.copy.swiz<128> lhs => shared;
+    shared f16 [K, N] rhs_s[STAGES];
+    foreach {stage} in [1] {
+      dma.copy.swiz<128> rhs => rhs_s[stage];
+
+      parallel g by 1 : group-4 {
+        mc = mma.fill.f32 0.0f;
+        mma.row.col mc, lhs_s, rhs_s[stage];
+        mma.commit;
+        mma.store mc, output;
+      }
+    }
+  }
+
+  return output;
+}
+
+// ROW-ROW: auto* __choreo_wgmma_ptr_{{[0-9]+}} = (f16*)(rhs_s + (__iv_stage)*(8192));
+// ROW-ROW: uint64_t __choreo_wgmma_desc_{{[0-9]+}} = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
+// ROW-ROW: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 4; ++__choreo_wgmma_k_iter) {
+// ROW-ROW: warpgroup_commit_batch();
+// ROW-ROW-NEXT: warpgroup_wait<0>();
+// ROW-ROW-NEXT: warpgroup_fence_operand(mc);
+// ROW-ROW-NOT: warpgroup_commit_batch();
+// ROW-ROW: store_fragment_d<CUTE_WGMMA_M64K16, 128>
+
+// ROW-COL: auto* __choreo_wgmma_ptr_{{[0-9]+}} = (f16*)(rhs_s + (__iv_stage)*(8192));
+// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}} = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::B128>
+// ROW-COL: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 4; ++__choreo_wgmma_k_iter) {
+// ROW-COL: warpgroup_commit_batch();
+// ROW-COL-NEXT: warpgroup_wait<0>();
+// ROW-COL-NEXT: warpgroup_fence_operand(mc);
+// ROW-COL-NOT: warpgroup_commit_batch();
+// ROW-COL: store_fragment_d<CUTE_WGMMA_M64K16, 128>

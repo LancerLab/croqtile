@@ -858,9 +858,10 @@ public:
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));
       auto& c_sym = AST::FragName(op.ExecOperand(0));
-      auto a_sty = GetSpannedType(GetSymbolType(a_sym));
-      auto b_sty = GetSpannedType(GetSymbolType(b_sym));
-      auto c_sty = GetSpannedType(GetSymbolType(c_sym));
+      auto a_sty = GetSpannedType(op.ExecOperand(1)->GetType());
+      auto b_sty = GetSpannedType(op.ExecOperand(2)->GetType());
+      auto c_sty = GetSpannedType(op.ExecOperand(0)->GetType());
+      auto exec_sty = GetSpannedType(n.GetType());
       auto a_shape = a_sty->GetShape();
       auto b_shape = b_sty->GetShape();
       switch (op.GetMethod()) {
@@ -907,6 +908,8 @@ public:
       auto a_ty = a_sty->ElementType();
       auto b_ty = b_sty->ElementType();
       auto c_ty = c_sty->ElementType();
+      if (c_ty == BaseType::UNKSCALAR && exec_sty)
+        c_ty = exec_sty->ElementType();
       auto d_ty = c_ty;
       auto scale_ty = BaseType::UNKNOWN;
       auto arch = CCtx().ArchNum();
@@ -915,8 +918,27 @@ public:
       if (b_ty == BaseType::F32) b_ty = BaseType::TF32;
 
       auto sparsity = op.IsSparse() ? MMALimit::SPARSE : MMALimit::DENSE;
-      MMALimit::MMAConfig mma_config{sparsity, a_ty,     b_ty,     c_ty,
-                                     d_ty,     scale_ty, mma_shape};
+      auto effective_shape = mma_shape;
+      if (mma_shape.size() == 3) {
+        auto m_opt = VIInt(mma_shape[0]);
+        auto n_opt = VIInt(mma_shape[1]);
+        auto k_opt = VIInt(mma_shape[2]);
+        if (m_opt && n_opt && k_opt) {
+          MMALimit::MMAConfig full_config{
+              sparsity,
+              a_ty,
+              b_ty,
+              c_ty,
+              d_ty,
+              scale_ty,
+              MMALimit::MMAShape{*m_opt, *n_opt, *k_opt}};
+          int atom_k = MMALimit::InferFixedWGMMAAtomK(full_config);
+          if (atom_k > 0 && atom_k != *k_opt)
+            effective_shape[2] = sbe::nu(atom_k);
+        }
+      }
+      MMALimit::MMAConfig mma_config{sparsity, a_ty,     b_ty,           c_ty,
+                                     d_ty,     scale_ty, effective_shape};
       if (!IsValidMMAConfig(mma_config, arch))
         Error1(n.LOC(), "MMA [" + STR(a_ty) + "(a)" + STR(b_ty) + "(b)" +
                             (scale_ty != BaseType::UNKNOWN

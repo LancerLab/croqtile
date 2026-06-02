@@ -262,8 +262,27 @@ public:
   void SetEventManaged(bool em) { event_managed = em; }
   bool IsEventManaged() const { return event_managed; }
 
+  // Root parameter resolution for TMA on computed subviews.
+  // When the TMA source is not a direct function parameter (e.g.,
+  // Q_head derived from Q via subspan/at/sqz), these fields allow
+  // the codegen to trace back to the root parameter for host-side
+  // TMA descriptor creation and flatten the address space to 2D.
+  void SetRootParam(const std::string& name, const Shape& shape,
+                    const ptr<AST::ChunkAt>& def) {
+    root_param_name = name;
+    root_param_shape = shape;
+    root_def_ca = def;
+  }
+  bool HasRootParam() const { return !root_param_name.empty(); }
+  const std::string& GetRootParamName() const { return root_param_name; }
+  const Shape& GetRootParamShape() const { return root_param_shape; }
+  const ptr<AST::ChunkAt>& GetRootDefCA() const { return root_def_ca; }
+
 private:
   static int index;
+  std::string root_param_name;
+  Shape root_param_shape;
+  ptr<AST::ChunkAt> root_def_ca;
 };
 
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
@@ -297,8 +316,7 @@ private:
   SymbolMMA sym_mmas;
   TMADescs tma_descs;
   PBTreeInfo pb_tree;
-
-  // TODO: maybe should add some vars here
+  std::set<std::string> tma_subview_syms;
 
 public:
   const std::vector<SymbolDetail>&
@@ -368,6 +386,13 @@ public:
   }
   const TMADescs& GetTMADescs() const { return tma_descs; }
   TMADescs& GetTMADescs() { return tma_descs; }
+
+  void AddTMASubviewSym(const std::string& sym) {
+    tma_subview_syms.insert(sym);
+  }
+  bool IsTMASubviewSym(const std::string& sym) const {
+    return tma_subview_syms.count(sym);
+  }
 
   const PBTree& GetPBTree(const std::string& fn) const {
     return pb_tree.at(fn);

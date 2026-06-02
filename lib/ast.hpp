@@ -4329,6 +4329,8 @@ inline bool FragIsArrayElem(const ptr<AST::Expr>& e) {
 
 inline const std::string FragName(const ptr<AST::Expr>& e) {
   if (auto id = e->GetSymbol()) return id->name;
+  if (auto ref = e->GetReference())
+    if (auto ca = dyn_cast<AST::ChunkAt>(ref)) return ca->RefSymbol();
   return GetArrayBaseSymbol(*e)->name;
 }
 

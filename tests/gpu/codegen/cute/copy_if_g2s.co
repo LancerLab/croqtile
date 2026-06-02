@@ -36,12 +36,12 @@ int main() { return 0; }
 // CHECK: } else {
 // CHECK:   choreo::tiled_copy<cute::Copy_Atom<cute::AutoVectorizingCopyWithAssumedAlignment<16>, f16>, 16, 8, 4, 8, true, true, true>(__tensor1_input, __tensor2_s_tail_m,
 // CHECK: }
-// CHECK: if (K % 8 == 0 && (64 < K - blockIdx.y * 64 ? 64 : K - blockIdx.y * 64) % 8 == 0) {
+// CHECK: if (K % 8 == 0 && (TK) % 8 == 0) {
 // CHECK:   choreo::tiled_copy<cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>, f16>, 16, 8, 1, 8, true, true, true>(__tensor3_input, __tensor4_s_tail_k,
 // CHECK: } else {
 // CHECK:   choreo::tiled_copy<cute::Copy_Atom<cute::AutoVectorizingCopyWithAssumedAlignment<16>, f16>, 16, 8, 4, 8, true, true, true>(__tensor3_input, __tensor4_s_tail_k,
 // CHECK: }
-// CHECK: if (K % 8 == 0 && (64 < K - blockIdx.y * 64 ? 64 : K - blockIdx.y * 64) % 8 == 0) {
+// CHECK: if (K % 8 == 0 && (TK) % 8 == 0) {
 // CHECK:   choreo::tiled_copy<cute::Copy_Atom<cute::SM80_CP_ASYNC_CACHEGLOBAL_ZFILL<cute::uint128_t>, f16>, 16, 8, 1, 8, true, true, true>(__tensor5_input, __tensor6_s_tail_mk,
 // CHECK: } else {
 // CHECK:   choreo::tiled_copy<cute::Copy_Atom<cute::AutoVectorizingCopyWithAssumedAlignment<16>, f16>, 16, 8, 4, 8, true, true, true>(__tensor5_input, __tensor6_s_tail_mk,

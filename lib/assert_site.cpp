@@ -314,7 +314,14 @@ void AssertSite::HoistAssertions(AST::ChoreoFunction* fnode) {
       if (!sym_name) continue;
 
       // inspect the def-site
-      assert(def_map.count(*sym_name) && "symbol is not defined.");
+      if (!def_map.count(*sym_name)) {
+        // Synthetic symbols like ::__choreo_parent_dim__ do not have a local
+        // definition site in the AST. Keep the assertion at its original site.
+        hoisted.site = ar.node;
+        hoisted.order = n_order;
+        hoisted.ae_pos = AssertionEmitPosition::BEFORE_NODE;
+        break;
+      }
       auto earliest_site = def_map[*sym_name];
       assert(node_order.count(earliest_site) && "node is not ordered");
       auto earliest_order = node_order[earliest_site];

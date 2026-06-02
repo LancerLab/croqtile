@@ -58,6 +58,13 @@ private:
   std::stack<AST::InThreadsBlock*> in_thr_block_stack;
   std::set<std::string> block_tma_futures;
 
+  struct SubviewDef {
+    std::string root_param;
+    Shape root_shape;
+    ptr<AST::ChunkAt> def_ca;
+  };
+  std::map<std::string, SubviewDef> subview_defs;
+
 private:
   auto Level() const {
     if (pb_stack.empty()) return ParallelLevel::SEQ;
@@ -308,6 +315,24 @@ public:
       cgi.AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name), ref});
       if (isa<AST::Select>(n.value)) select_syms.insert(InScopeName(name));
     }
+
+    {
+      ptr<AST::Node> val_node = n.value;
+      if (auto expr = dyn_cast<AST::Expr>(val_node))
+        if (auto ref = expr->GetReference()) val_node = ref;
+      if (auto ca = dyn_cast<AST::ChunkAt>(val_node)) {
+        auto ref_sym = ca->RefSymbol();
+        for (const auto& p : cgi.GetFunctionSymbols(fname)) {
+          if (UnScopedName(p.name) == ref_sym && p.IsParameter() &&
+              p.attr == ParamAttr::GLOBAL_INPUT) {
+            auto sty = GetSpannedType(p.type);
+            subview_defs[InScopeName(name)] = {p.name, sty->GetShape(), ca};
+            cgi.AddTMASubviewSym(InScopeName(name));
+            break;
+          }
+        }
+      }
+    }
     return true;
   }
 
@@ -403,6 +428,15 @@ public:
             n.GetSrc(), n.GetDst(), InScopeName(n.GetSrc()->RefSymbol()),
             InScopeName(n.GetDst()->RefSymbol()), n.GetSwizzleMode(),
             inner_pb_level, n.GetL2PromoteBytes());
+
+        auto g_ca =
+            (fsty->GetStorage() == Storage::SHARED) ? n.GetDst() : n.GetSrc();
+        auto g_scoped = InScopeName(cast<AST::ChunkAt>(g_ca)->RefSymbol());
+        if (subview_defs.count(g_scoped)) {
+          auto& def = subview_defs[g_scoped];
+          tma_desc.SetRootParam(def.root_param, def.root_shape, def.def_ca);
+        }
+
         auto in_thr_block =
             (in_thr_block_stack.empty() ? nullptr : in_thr_block_stack.top());
         bool is_block_scope = block_tma_futures.count(future_name) > 0;
@@ -443,6 +477,35 @@ public:
   bool Visit(AST::MMA& n) override {
     auto& op = *n.GetOperation();
     ValueList mma_shape;
+    auto normalize_wgmma_shape = [&](const ptr<SpannedType>& a_ty,
+                                     const ptr<SpannedType>& b_ty,
+                                     const ptr<SpannedType>& c_ty,
+                                     ValueList shape) {
+      if (!a_ty || !b_ty || !c_ty || shape.size() != 3) return shape;
+
+      auto a_ety = a_ty->ElementType();
+      auto b_ety = b_ty->ElementType();
+      auto c_ety = c_ty->ElementType();
+      if (a_ety == BaseType::F32) a_ety = BaseType::TF32;
+      if (b_ety == BaseType::F32) b_ety = BaseType::TF32;
+
+      auto m_opt = VIInt(shape[0]);
+      auto n_opt = VIInt(shape[1]);
+      auto k_opt = VIInt(shape[2]);
+      if (!m_opt || !n_opt || !k_opt) return shape;
+
+      auto sparsity = op.IsSparse() ? MMALimit::SPARSE : MMALimit::DENSE;
+      MMALimit::MMAConfig config{sparsity,
+                                 a_ety,
+                                 b_ety,
+                                 c_ety,
+                                 c_ety,
+                                 BaseType::UNKNOWN,
+                                 MMALimit::MMAShape{*m_opt, *n_opt, *k_opt}};
+      int atom_k = MMALimit::InferFixedWGMMAAtomK(config);
+      if (atom_k > 0 && atom_k != *k_opt) shape[2] = sbe::nu(atom_k);
+      return shape;
+    };
     switch (op.Tag()) {
     case AST::MMAOperation::Fill: break;
     case AST::MMAOperation::Load: break;
@@ -452,9 +515,10 @@ public:
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));
       auto& c_sym = AST::FragName(op.ExecOperand(0));
-      auto a_ty = GetSpannedType(GetSymbolType(a_sym));
-      auto b_ty = GetSpannedType(GetSymbolType(b_sym));
-      auto c_ty = GetSpannedType(GetSymbolType(c_sym));
+      auto a_ty = GetSpannedType(op.ExecOperand(1)->GetType());
+      auto b_ty = GetSpannedType(op.ExecOperand(2)->GetType());
+      auto c_ty = GetSpannedType(op.ExecOperand(0)->GetType());
+      auto exec_ty = GetSpannedType(n.GetType());
       auto a_shape = a_ty->GetShape();
       auto b_shape = b_ty->GetShape();
       switch (op.GetMethod()) {
@@ -492,9 +556,12 @@ public:
         break;
       default: choreo_unreachable("unsupported mma execution method.");
       }
+      mma_shape = normalize_wgmma_shape(a_ty, b_ty, c_ty, mma_shape);
       auto a_ety = a_ty->ElementType();
       auto b_ety = b_ty->ElementType();
       auto acc_ty = c_ty->ElementType();
+      if (acc_ty == BaseType::UNKSCALAR && exec_ty)
+        acc_ty = exec_ty->ElementType();
       if (a_ety == BaseType::F32) a_ety = BaseType::TF32;
       if (b_ety == BaseType::F32) b_ety = BaseType::TF32;
       cgi.AddSymbolMMA(

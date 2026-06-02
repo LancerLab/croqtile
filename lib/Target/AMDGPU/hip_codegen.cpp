@@ -1525,6 +1525,7 @@ std::string HIPCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
   if (!ca || ca->NoOperation()) return "0";
 
   sbe::ExprSum offset;
+  auto cur_strd = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetStrides();
 
   for (size_t i = 0; i < ca->OpCount(); ++i) {
     const auto& sop = ca->OpAt(i);
@@ -1546,11 +1547,13 @@ std::string HIPCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
         else
           offset += idx.GetVals()[dim] * strd[dim] * blk.ValueAt(dim);
       }
+      cur_strd = strd;
     } else if (isa<AST::SOP::View>(sop)) {
       auto off = sop->GetOffsets()->Opts();
       auto strd = sop->GetBlockStrides();
       for (size_t dim = 0; dim < off.GetVals().size(); ++dim)
         offset += off.GetVals()[dim] * strd[dim];
+      cur_strd = sop->GetBlockStrides();
     } else {
       choreo_unreachable("unsupported spanned operation in HIP GenOffset.");
     }

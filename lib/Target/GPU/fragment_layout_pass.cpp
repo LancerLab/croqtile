@@ -216,6 +216,11 @@ void FragmentLayoutPass::AssignLayouts() {
     if (!FCtx(fname).FragHasMMAType(scoped)) continue;
 
     if (FCtx(fname).FragIsWGMMA(scoped)) {
+      if (usage.shape.size() >= 2) {
+        anchors[scoped] =
+            FragmentLayout::MakeWGMMA_RS_A(usage.shape[0], usage.shape[1]);
+        continue;
+      }
       auto& mma_info = cgi.GetSymbolMMA(scoped);
       auto& mma_shape = mma_info.GetShape();
       if (mma_shape.size() < 3) continue;
@@ -344,8 +349,8 @@ void FragmentLayoutPass::AssignLayouts() {
           break;
         }
         // Same-shape 1D fragments inherit REPLICATED_1D from peers.
-        if (ref_fl.kind == LayoutKind::REPLICATED_1D &&
-            usages_.count(target) && usages_[target].shape.size() == 1) {
+        if (ref_fl.kind == LayoutKind::REPLICATED_1D && usages_.count(target) &&
+            usages_[target].shape.size() == 1) {
           FCtx(fname).SetFragmentLayout(target, ref_fl);
           changed = true;
           break;
