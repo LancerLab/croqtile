@@ -256,6 +256,7 @@ private:
     case Storage::SHARED: sbuffers.insert(sname); break;
     case Storage::GLOBAL: [[fallthrough]];
     case Storage::DEFAULT: gbuffers.insert(sname); break;
+    case Storage::REG: break; // fragment register arrays are not SPM buffers
     default: choreo_unreachable("unexpect storage: " + STR(sto));
     }
   }

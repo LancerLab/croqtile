@@ -1,0 +1,14 @@
+#define BLOCK_M 64
+
+// RUN: choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void fragment_decl_test() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M] scores_max {0.0f};
+    foreach i in [BLOCK_M] : automap(t)
+      scores_max.at(i) = 0.0f;
+  }
+}
+
+// CHECK: Var Decl
+// CHECK: scores_max

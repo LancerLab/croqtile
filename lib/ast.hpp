@@ -2429,6 +2429,17 @@ struct Reshape : public SpannedOperation, public TypeIDProvider<Reshape> {
   __UDT_TYPE_INFO__(SpannedOperation, Reshape)
 };
 
+struct Squeeze : public SpannedOperation, public TypeIDProvider<Squeeze> {
+  Squeeze(const location& l) : SpannedOperation(l) {}
+  const NodeList ReferredNodes() const override { return {}; }
+  const ptr<SpannedOperation> CloneImpl() const override {
+    return Make<Squeeze>(LOC());
+  }
+  void accept(Visitor& v) override;
+  void Print(std::ostream& os) const override { os << ".Sqz()"; }
+  __UDT_TYPE_INFO__(SpannedOperation, Squeeze)
+};
+
 } // end namespace SOP
 
 // If the block after applying the operation is contiguous in the original
@@ -2437,7 +2448,7 @@ struct Reshape : public SpannedOperation, public TypeIDProvider<Reshape> {
 //  the ValueItem is evaluted to true at runtime.
 inline std::variant<bool, ValueItem> IsContiguousSOp(const SpannedOperation& k,
                                                      Shape original_shape) {
-  if (isa<SOP::Reshape>(&k)) return true;
+  if (isa<SOP::Reshape>(&k) || isa<SOP::Squeeze>(&k)) return true;
 
   Shape new_shape = k.GetBlockShape();
   assert(original_shape.SameRankAs(new_shape));
@@ -2560,6 +2571,11 @@ public:
 
   void RemoveOperation(size_t index) {
     operations.erase(operations.begin() + index);
+  }
+
+  void ReplaceOperation(size_t index, const ptr<SpannedOperation>& op) {
+    assert(index < operations.size());
+    operations[index] = op;
   }
 
   ptr<Node> CloneImpl() const override {
@@ -2785,7 +2801,7 @@ public:
 
 struct MMAOperation {
 public:
-  enum Kind { Fill, Load, Exec, Store, Commit, Scale, Wait };
+  enum Kind { Fill, Load, LoadR, LoadS, Exec, Store, Commit, Scale, Wait };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
   // NOTE: acc, lhs, rhs are not accepted in ast.cpp.
@@ -2850,6 +2866,19 @@ public:
                SwizMode swizzle = SwizMode::NONE, bool explicit_swizzle = false)
       : tag(Load), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
+  struct LoadRTag {};
+  struct LoadSTag {};
+
+  explicit MMAOperation(LoadRTag, const ptr<ChunkAt>& e, const ptr<Expr>& fu,
+                        bool a = false, SwizMode swizzle = SwizMode::NONE,
+                        bool explicit_swizzle = false)
+      : tag(LoadR), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
+
+  explicit MMAOperation(LoadSTag, const ptr<ChunkAt>& e, const ptr<Expr>& fu,
+                        bool a = false, SwizMode swizzle = SwizMode::NONE,
+                        bool explicit_swizzle = false)
+      : tag(LoadS), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
+
   MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
                const ptr<Expr>& r, bool sp = false)
       : tag(Exec),
@@ -2882,6 +2911,9 @@ public:
 
 public:
   bool IsKind(Kind k) const { return k == tag; }
+  bool IsLoad() const { return tag == Load || tag == LoadR || tag == LoadS; }
+  bool IsLoadR() const { return tag == LoadR; }
+  bool IsLoadS() const { return tag == LoadS || tag == Load; }
 
   const ptr<Expr> FillingTo() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
@@ -2913,17 +2945,17 @@ public:
   }
 
   ptr<ChunkAt> LoadFrom() {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.ld_expr;
   }
   const ptr<ChunkAt> LoadFrom() const {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.ld_expr;
   }
   const ptr<Expr> LoadTo() const {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.future;
   }
@@ -2958,13 +2990,13 @@ public:
   }
 
   void SetAsync(bool async = true) {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     l_info.async = async;
   }
 
   bool IsAsync() const {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.async;
   }
@@ -3032,7 +3064,7 @@ public:
   }
 
   void SetFuture(const ptr<AST::Expr>& fut) {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     l_info.future = fut;
   }
@@ -3046,7 +3078,7 @@ public:
 
   const ptr<Expr> GetFrag() const {
     if (tag == Fill) return FillingTo();
-    if (tag == Load) return LoadTo();
+    if (IsLoad()) return LoadTo();
     if (tag == Exec) return ExecOperand(0);
     if (tag == Store) return StoreFrom();
     if (tag == Commit) return nullptr;
@@ -3057,19 +3089,19 @@ public:
   }
 
   SwizMode GetSwizzleMode() const {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.swiz_mode;
   }
 
   bool HasExplicitSwizzle() const {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.explicit_swizzle;
   }
 
   void SetSwizzleMode(SwizMode sm) {
-    if (tag != Load) choreo_unreachable("not a mma load operation.");
+    if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     l_info.swiz_mode = sm;
   }
@@ -3087,6 +3119,18 @@ public:
       return Make<MMAOperation>(CloneP(l_info.ld_expr), CloneP(l_info.future),
                                 l_info.async, l_info.swiz_mode,
                                 l_info.explicit_swizzle);
+    }
+    case LoadR: {
+      auto l_info = std::get<1>(info);
+      return Make<MMAOperation>(LoadRTag{}, CloneP(l_info.ld_expr),
+                                CloneP(l_info.future), l_info.async,
+                                l_info.swiz_mode, l_info.explicit_swizzle);
+    }
+    case LoadS: {
+      auto l_info = std::get<1>(info);
+      return Make<MMAOperation>(LoadSTag{}, CloneP(l_info.ld_expr),
+                                CloneP(l_info.future), l_info.async,
+                                l_info.swiz_mode, l_info.explicit_swizzle);
     }
     case Exec: {
       auto e_info = std::get<2>(info);
@@ -3124,6 +3168,17 @@ public:
       auto l_info = std::get<1>(info);
       if (l_info.future) os << PSTR(l_info.future) << " = ";
       os << "MMA.LOAD" << ((l_info.async) ? ".ASYNC" : "") << " "
+         << PSTR(l_info.ld_expr);
+    } break;
+    case LoadR: {
+      auto l_info = std::get<1>(info);
+      os << "MMA.LOADR " << PSTR(l_info.ld_expr);
+      if (l_info.future) os << ", " << PSTR(l_info.future);
+    } break;
+    case LoadS: {
+      auto l_info = std::get<1>(info);
+      if (l_info.future) os << PSTR(l_info.future) << " = ";
+      os << "MMA.LOADS" << ((l_info.async) ? ".ASYNC" : "") << " "
          << PSTR(l_info.ld_expr);
     } break;
     case Exec: {
@@ -3185,6 +3240,111 @@ public:
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, MMA)
+};
+
+// frag.apply target, [](i, j) { return expr; };
+// Element-wise transform over a fragment's register elements.
+// Desugars to a register-direct loop identical to automap codegen.
+struct FragApply : public Node, public TypeIDProvider<FragApply> {
+  ptr<Expr> target;
+  std::vector<std::string> params;
+  ptr<Node> body;
+
+  FragApply(const location& l, const ptr<Expr>& t, std::vector<std::string> p,
+            const ptr<Node>& b)
+      : Node(l), target(t), params(std::move(p)), body(b) {}
+
+  ptr<Node> CloneImpl() const override {
+    return Make<FragApply>(LOC(), CloneP(target), params, CloneP(body));
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << "frag.apply ";
+    target->Print(os, "", with_type);
+    os << ", [](";
+    for (size_t i = 0; i < params.size(); ++i) {
+      if (i > 0) os << ", ";
+      os << params[i];
+    }
+    os << ") { return ...; }";
+  }
+
+  const std::string& TargetName() const {
+    auto id = GetIdentifier(*target);
+    assert(id && "frag.apply target must be an identifier");
+    return id->name;
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, FragApply)
+};
+
+enum class FragTransferKind { STORE, LOAD, COPY };
+
+// frag.store dst, src [, [](i, j) { return expr; }];
+// frag.load  dst, src [, [](i, j) { return expr; }];
+// frag.copy  dst, src [, [](i, j) { return expr; }];
+struct FragTransfer : public Node, public TypeIDProvider<FragTransfer> {
+  FragTransferKind op;
+  ptr<Expr> dst;
+  ptr<Expr> src;
+  std::vector<std::string> params;
+  ptr<Node> body;
+
+  FragTransfer(const location& l, FragTransferKind k, const ptr<Expr>& d,
+               const ptr<Expr>& s, std::vector<std::string> p = {},
+               const ptr<Node>& b = nullptr)
+      : Node(l), op(k), dst(d), src(s), params(std::move(p)), body(b) {}
+
+  bool HasLambda() const { return body != nullptr; }
+
+  const char* OpName() const {
+    switch (op) {
+    case FragTransferKind::STORE: return "frag.store";
+    case FragTransferKind::LOAD: return "frag.load";
+    case FragTransferKind::COPY: return "frag.copy";
+    }
+    return "frag.?";
+  }
+
+  ptr<Node> CloneImpl() const override {
+    return Make<FragTransfer>(LOC(), op, CloneP(dst), CloneP(src), params,
+                              body ? CloneP(body) : nullptr);
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << OpName() << " ";
+    dst->Print(os, "", with_type);
+    os << ", ";
+    src->Print(os, "", with_type);
+    if (HasLambda()) {
+      os << ", [](";
+      for (size_t i = 0; i < params.size(); ++i) {
+        if (i > 0) os << ", ";
+        os << params[i];
+      }
+      os << ") { return ...; }";
+    }
+  }
+
+  const std::string& DstName() const {
+    auto id = GetIdentifier(*dst);
+    assert(id && "frag.* dst must be an identifier");
+    return id->name;
+  }
+
+  const std::string& SrcName() const {
+    auto id = GetIdentifier(*src);
+    assert(id && "frag.* src must be an identifier");
+    return id->name;
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, FragTransfer)
 };
 
 struct Wait : public Node, public TypeIDProvider<Wait> {
@@ -3982,6 +4142,33 @@ inline bool HasVectorizationHint(const ForeachBlock& n,
 inline bool HasVectorizationHint(const ForeachBlock& n) {
   ptr<AST::AttributeExpr> c;
   return HasVectorizationHint(n, c);
+}
+
+inline bool HasAutomapHint(const ForeachBlock& n,
+                           ptr<AST::AttributeExpr>& attr) {
+  attr = nullptr;
+  if (!n.suffixs) return false;
+  for (auto suffix : n.suffixs->values) {
+    if (auto a = dyn_cast<AttributeExpr>(suffix)) {
+      if (a->AttrName() == "automap") {
+        attr = a;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+inline bool HasAutomapHint(const ForeachBlock& n) {
+  ptr<AST::AttributeExpr> attr;
+  return HasAutomapHint(n, attr);
+}
+
+inline ptr<Identifier> GetAutomapParallelVar(const ForeachBlock& n) {
+  ptr<AttributeExpr> attr;
+  if (!HasAutomapHint(n, attr)) return nullptr;
+  if (attr->AttrValueCount() == 0) return nullptr;
+  return GetIdentifier(attr->AttrValueAt(0));
 }
 
 inline const ptr<Identifier> GetArrayBaseSymbol(const Expr& n) {

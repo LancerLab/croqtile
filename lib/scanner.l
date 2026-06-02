@@ -420,6 +420,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "stream"   return Choreo::Parser::make_STREAM(yytext, loc);
   "event"    return Choreo::Parser::make_EVENT(yytext, loc);
   "frag"     return Choreo::Parser::make_FRAG(yytext, loc);
+  "fragment" return Choreo::Parser::make_FRAGMENT(yytext, loc);
   "print"    return Choreo::Parser::make_PRINT(yytext, loc);
   "println"  return Choreo::Parser::make_PRINTLN(yytext, loc);
   "__acos"     return Choreo::Parser::make_ACOS(yytext, loc);
@@ -533,6 +534,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".chunk"   return Choreo::Parser::make_CHUNK(yytext, loc);
   ".subspan" return Choreo::Parser::make_SUBSPAN(yytext, loc);
   ".modspan" return Choreo::Parser::make_MODSPAN(yytext, loc);
+  ".sqz"     return Choreo::Parser::make_SQZ(yytext, loc);
   ".step"    return Choreo::Parser::make_STEP(yytext, loc);
   ".stride"  return Choreo::Parser::make_STRIDE(yytext, loc);
   ".at"      return Choreo::Parser::make_AT(yytext, loc);
@@ -541,6 +543,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
   "mma"      return Choreo::Parser::make_MMA(yytext, loc);
   ".fill"    return Choreo::Parser::make_FILL(yytext, loc);
+  ".loadR"   return Choreo::Parser::make_LOADR(yytext, loc);
+  ".loadS"   return Choreo::Parser::make_LOADS(yytext, loc);
   ".load"    return Choreo::Parser::make_LOAD(yytext, loc);
   ".store"   return Choreo::Parser::make_STORE(yytext, loc);
   ".row"     return Choreo::Parser::make_ROW(yytext, loc);
@@ -549,6 +553,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".mask"    return Choreo::Parser::make_MASK(yytext, loc);
   ".commit"  return Choreo::Parser::make_COMMIT(yytext, loc);
   ".wait"    return Choreo::Parser::make_MMAWAIT(yytext, loc);
+  ".apply"   return Choreo::Parser::make_FRAG_APPLY(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT(yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);
@@ -570,6 +575,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "while"    return Choreo::Parser::make_WHILE(yytext, loc);
   "break"    return Choreo::Parser::make_BREAK(yytext, loc);
   "vectorize" return Choreo::Parser::make_VECTORIZE(yytext, loc);
+  "automap"  return Choreo::Parser::make_AUTOMAP(yytext, loc);
   "unroll"   return Choreo::Parser::make_UNROLL(yytext, loc);
   "continue" return Choreo::Parser::make_CONTINUE(yytext, loc);
   "yield"    return Choreo::Parser::make_YIELD(yytext, loc);

@@ -1,0 +1,79 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+#define LEN 128
+
+// CHECK-LABEL: __choreo_device_test_frag_copy
+__co__ void test_frag_copy() {
+  parallel t by 128 : thread {
+    fragment f32[LEN] a {1.0f};
+    fragment f32[LEN] b {0.0f};
+    // CHECK: { // frag.copy
+    // CHECK-NEXT: #pragma unroll
+    // CHECK-NEXT: for (int __r = 0; __r < 1; ++__r)
+    // CHECK-NEXT: b[__r] = a[__r];
+    // CHECK: } // frag.copy
+    frag.copy b, a;
+  }
+}
+
+#define BLOCK_M 64
+#define BLOCK_N 64
+
+// CHECK-LABEL: __choreo_device_test_frag_store_vec4
+__co__ void test_frag_store_vec4(f32[BLOCK_M * BLOCK_N] Output) {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M, BLOCK_N] buf {0.0f};
+    // CHECK: { // frag.store
+    // CHECK: #pragma unroll
+    // CHECK: for (int __r4 = 0;
+    // CHECK: *(float4*)(Output
+    // CHECK: } // frag.store
+    frag.store Output, buf;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_frag_load_vec4
+__co__ void test_frag_load_vec4(f32[BLOCK_M * BLOCK_N] Input) {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M, BLOCK_N] buf;
+    // CHECK: { // frag.load
+    // CHECK: #pragma unroll
+    // CHECK: for (int __r4 = 0;
+    // CHECK: *(float4*)(buf
+    // CHECK: } // frag.load
+    frag.load buf, Input;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_frag_store_lambda
+__co__ void test_frag_store_lambda(f32[BLOCK_M * BLOCK_N] Output) {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M, BLOCK_N] acc {0.0f};
+    fragment f32[BLOCK_M] scale {1.0f};
+    // CHECK: { // frag.store
+    // CHECK: int __frag_iv_i = 0;
+    // CHECK: int __frag_iv_j = 0;
+    // CHECK: #pragma unroll
+    // CHECK-NEXT: for (int __r = 0; __r < 32; ++__r)
+    // CHECK: __frag_iv_i =
+    // CHECK: __frag_iv_j =
+    // CHECK: Output[__frag_iv_i * 64 + __frag_iv_j] = acc[__r] * scale[
+    // CHECK: } // frag.store
+    frag.store Output, acc, [](i, j) { return acc.at(i, j) * scale.at(i); };
+  }
+}
+
+// CHECK-LABEL: __choreo_device_test_frag_copy_lambda
+__co__ void test_frag_copy_lambda() {
+  parallel t by 128 : thread {
+    fragment f32[LEN] src {0.0f};
+    fragment f32[LEN] dst;
+    // CHECK: { // frag.copy
+    // CHECK: int __frag_iv_i = 0;
+    // CHECK: #pragma unroll
+    // CHECK-NEXT: for (int __r = 0; __r < 1; ++__r)
+    // CHECK: dst[__r] =
+    // CHECK: } // frag.copy
+    frag.copy dst, src, [](i) { return src.at(i) + 1.0f; };
+  }
+}

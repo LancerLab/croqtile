@@ -1055,7 +1055,8 @@ bool TypeInference::Visit(AST::MMA& n) {
       }
     }
   } break;
-  case AST::MMAOperation::Load: {
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadS: {
     std::string fut_sym = AST::FragName(op.GetFuture());
     AssignSymbolWithType(n.LOC(), fut_sym, n.GetType()->Clone());
     auto sty = GetSpannedType(n.GetType());
@@ -1071,6 +1072,7 @@ bool TypeInference::Visit(AST::MMA& n) {
              << "\n";
     }
   } break;
+  case AST::MMAOperation::LoadR: break;
   case AST::MMAOperation::Exec: {
     const auto& acc = op.ExecOperand(0);
     std::string acc_sym = AST::FragName(acc);

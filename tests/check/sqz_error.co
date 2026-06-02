@@ -1,0 +1,13 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void test_sqz_after_chunkat(f32 [10, 8] a) {
+  parallel p by 5 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.chunkat(p, _).sqz() => local;
+      }
+    }
+  }
+}
+
+// CHECK: error: .sqz requires a preceding .subspan, .span_as, or .view.

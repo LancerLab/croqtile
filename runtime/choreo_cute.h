@@ -2187,6 +2187,11 @@ __device__ static inline void warpgroup_wait() {
   #endif
 }
 
+template <class T>
+__device__ static inline void warpgroup_fence_operand(T& operand) {
+  asm volatile("" : "+r"(reinterpret_cast<uint32_t&>(operand))::"memory");
+}
+
 // Unified WGMMA template with automatic descriptor selection
 // Template parameters:
 //   - InputT: input data type (__half or __nv_bfloat16)

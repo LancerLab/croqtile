@@ -238,9 +238,11 @@ void MMA::accept(Choreo::Visitor& v) {
   if (operation->IsKind(MMAOperation::Fill)) {
     operation->FillingValue()->accept(v);
     if (operation->FillingArrayDims()) operation->FillingArrayDims()->accept(v);
-  } else if (operation->IsKind(MMAOperation::Load))
+  } else if (operation->IsLoad()) {
     operation->LoadFrom()->accept(v);
-  else if (operation->IsKind(MMAOperation::Exec)) {
+    if (operation->IsLoadR() && operation->LoadTo())
+      operation->LoadTo()->accept(v);
+  } else if (operation->IsKind(MMAOperation::Exec)) {
     if (operation->HasScale()) {
       if (operation->ScaleA()) operation->ScaleA()->accept(v);
       if (operation->ScaleB()) operation->ScaleB()->accept(v);
@@ -251,6 +253,18 @@ void MMA::accept(Choreo::Visitor& v) {
   } else if (operation->IsKind(MMAOperation::Store))
     operation->StoreTo()->accept(v);
 
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
+void FragApply::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
+void FragTransfer::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   v.Visit(*this);
   v.AfterVisit(*this);
 }
@@ -278,6 +292,8 @@ void SOP::View::accept(Visitor& v) {
 }
 
 void SOP::Reshape::accept(Visitor& v) { newspan->accept(v); }
+
+void SOP::Squeeze::accept(Visitor&) {}
 
 void ChunkAt::accept(Choreo::Visitor& v) {
   // handle span_as

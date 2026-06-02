@@ -1,0 +1,40 @@
+#define BLOCK_M 64
+#define BLOCK_N 64
+
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Test that FragmentLayoutPass correctly computes register allocation
+// for UNIFORM fragments and does not break existing behavior.
+
+__co__ void test_uniform_1d() {
+  parallel t by 128 : thread {
+    // 64 elements / 128 threads = 1 reg per thread (ceil)
+    fragment f32[BLOCK_M] row_frag {0.0f};
+    foreach i in [BLOCK_M] : automap(t)
+      row_frag.at(i) = 1.0f;
+  }
+}
+
+// CHECK: float row_frag[1];
+
+__co__ void test_uniform_2d() {
+  parallel t by 128 : thread {
+    // 64*64 = 4096 elements / 128 threads = 32 regs per thread
+    fragment f32[BLOCK_M, BLOCK_N] tile_frag;
+    foreach {i, j} in [BLOCK_M, BLOCK_N] : automap(t)
+      tile_frag.at(i, j) = 0.0f;
+  }
+}
+
+// CHECK: float tile_frag[32];
+
+__co__ void test_uniform_small() {
+  parallel t by 32 : thread {
+    // 64 elements / 32 threads = 2 regs per thread
+    fragment f32[BLOCK_M] small_frag;
+    foreach i in [BLOCK_M] : automap(t)
+      small_frag.at(i) = 0.0f;
+  }
+}
+
+// CHECK: float small_frag[2];

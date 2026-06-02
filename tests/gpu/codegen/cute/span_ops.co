@@ -326,3 +326,172 @@ __co__ void test_array_span_as_2(f32 [8, 16] a) {
 // Array offset = ((1)*2+1)*32 = 96 elements
 // CHECK-LABEL: __global__{{.*}}test_array_span_as_2
 // CHECK: auto* s0 = static_cast<float*>(s + ((1)*2+1)*(32))
+
+// ---------------------------------------------------------------------------
+// 22. .sqz sugar: squeeze singleton dims (equivalent to test 4 with .span_as)
+// ---------------------------------------------------------------------------
+__co__ void test_subspan_sqz(f32 [10, 9, 8] a) {
+  parallel p by 5 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(1, 9, 8).at(p, 0, 0).sqz() => local;
+      }
+    }
+  }
+}
+// subspan offset = p * 1 * (9*8) = p * 72
+// CHECK-LABEL: __global__{{.*}}test_subspan_sqz
+// CHECK: (float*)a + (blockIdx.x * 72)
+
+// ---------------------------------------------------------------------------
+// 23. .sqz with multiple singletons
+// ---------------------------------------------------------------------------
+__co__ void test_subspan_sqz_multi(f32 [10, 20, 9, 8] a) {
+  parallel p by 5 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(1, 1, 9, 8).at(p, x, 0, 0).sqz() => local;
+      }
+    }
+  }
+}
+// offset = p * 1 * (20*9*8) + x * 1 * (9*8) = p * 1440 + x * 72
+// CHECK-LABEL: __global__{{.*}}test_subspan_sqz_multi
+// CHECK: (float*)a + (blockIdx.x * 1440 + __iv_x * 72)
+
+// ---------------------------------------------------------------------------
+// 24. .sqz with wildcard _ resolving to 1 via ShapeInference
+// ---------------------------------------------------------------------------
+__co__ void test_subspan_sqz_wildcard(f32 [1, 9, 8] a) {
+  parallel p by 1 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(_, 9, 8).at(0, 0, 0).sqz() => local;
+      }
+    }
+  }
+}
+// _ resolves to parent dim 1, .sqz squeezes it => shape (9, 8)
+// CHECK-LABEL: __global__{{.*}}test_subspan_sqz_wildcard
+// CHECK: make_shape(cute::Int<9>{}, cute::Int<8>{})
+
+// ---------------------------------------------------------------------------
+// 25. .sqz() when all dims are 1 => 1D shape (1)
+// ---------------------------------------------------------------------------
+__co__ void test_subspan_sqz_all_ones(f32 [10, 20] a) {
+  parallel p by 5 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(1, 1).at(p, x).sqz() => local;
+      }
+    }
+  }
+}
+// all dims are 1, sqz() collapses to 1D shape (1)
+// CHECK-LABEL: __global__{{.*}}test_subspan_sqz_all_ones
+// CHECK: make_shape(cute::Int<1>{})
+
+// ---------------------------------------------------------------------------
+// 26. .sqz() with singleton in the middle
+// ---------------------------------------------------------------------------
+__co__ void test_sqz_middle_singleton(f32 [9, 10, 8] a) {
+  parallel p by 1 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(9, 1, 8).at(0, p, 0).sqz() => local;
+      }
+    }
+  }
+}
+// subspan(9, 1, 8) => sqz removes dim 1 => shape (9, 8)
+// offset = 0 * stride + p * 1 * 8 + 0 = p * 8
+// CHECK-LABEL: __global__{{.*}}test_sqz_middle_singleton
+// CHECK: make_shape(cute::Int<9>{}, cute::Int<8>{})
+
+// ---------------------------------------------------------------------------
+// 27. .sqz() with singleton at the end
+// ---------------------------------------------------------------------------
+__co__ void test_sqz_end_singleton(f32 [9, 8, 10] a) {
+  parallel p by 1 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(9, 8, 1).at(0, 0, p).sqz() => local;
+      }
+    }
+  }
+}
+// subspan(9, 8, 1) => sqz removes dim 2 => shape (9, 8)
+// offset = p * 1 * 1 = p
+// CHECK-LABEL: __global__{{.*}}test_sqz_end_singleton
+// CHECK: make_shape(cute::Int<9>{}, cute::Int<8>{})
+
+// ---------------------------------------------------------------------------
+// 28. .sqz() no-op: no singletons to squeeze
+// ---------------------------------------------------------------------------
+__co__ void test_sqz_noop(f32 [9, 8] a) {
+  parallel p by 1 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(9, 8).at(0, 0).sqz() => local;
+      }
+    }
+  }
+}
+// no dims are 1, sqz() is identity => shape stays (9, 8)
+// CHECK-LABEL: __global__{{.*}}test_sqz_noop
+// CHECK: make_shape(cute::Int<9>{}, cute::Int<8>{})
+
+// ---------------------------------------------------------------------------
+// 29. .sqz() after .span_as()
+// ---------------------------------------------------------------------------
+__co__ void test_sqz_after_span_as(f32 [32, 8] a) {
+  parallel p by 2 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.span_as(1, 32, 8).chunkat(_, p, _).sqz() => local;
+      }
+    }
+  }
+}
+// span_as(1, 32, 8) then chunkat(_, p, _) => tile shape (1, 16, 8)
+// sqz removes dim 0 (constant 1) => shape (16, 8)
+// CHECK-LABEL: __global__{{.*}}test_sqz_after_span_as
+// CHECK: make_shape(cute::Int<16>{}, cute::Int<8>{})
+
+// ---------------------------------------------------------------------------
+// 30. .sqz() mid-chain: squeeze then chunkat
+// ---------------------------------------------------------------------------
+__co__ void test_sqz_mid_chunkat(f32 [10, 18, 8] a) {
+  parallel p by 5 : block {
+    with index = {x} in [2] {
+      foreach index {
+        dma.copy a.subspan(1, 18, 8).at(p, 0, 0).sqz().chunkat(x, _) => local;
+      }
+    }
+  }
+}
+// subspan(1, 18, 8) => shape (1, 18, 8)
+// sqz removes dim 0 => shape (18, 8)
+// chunkat(x, _) with x in [2] => tile dim 0 by 2 => shape (9, 8)
+// offset = p * 144 + x * 72
+// CHECK-LABEL: __global__{{.*}}test_sqz_mid_chunkat
+// CHECK: (float*)a + (blockIdx.x * 144 + __iv_x * 72)
+// CHECK: make_shape(cute::Int<9>{}, cute::Int<8>{})
+
+// ---------------------------------------------------------------------------
+// 31. .sqz() mid-chain: squeeze then span_as
+// ---------------------------------------------------------------------------
+__co__ void test_sqz_mid_span_as(f32 [10, 9, 8] a) {
+  parallel p by 5 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(1, 9, 8).at(p, 0, 0).sqz().span_as(3, 3, 8) => local;
+      }
+    }
+  }
+}
+// subspan(1, 9, 8) => shape (1, 9, 8)
+// sqz removes dim 0 => shape (9, 8), 72 elements
+// span_as(3, 3, 8) => reshape to (3, 3, 8), 72 elements
+// CHECK-LABEL: __global__{{.*}}test_sqz_mid_span_as
+// CHECK: make_shape(cute::Int<3>{}, cute::Int<3>{}, cute::Int<8>{})

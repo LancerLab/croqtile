@@ -1,0 +1,20 @@
+#define BLOCK_M 64
+#define BLOCK_N 64
+
+// RUN: choreo -es -t cute %s 2>&1 | FileCheck %s
+
+__co__ void automap_basic() {
+  parallel t by 128 : thread {
+    fragment f32[BLOCK_M] row;
+    fragment f32[BLOCK_M, BLOCK_N] tile;
+
+    foreach i in [BLOCK_M] : automap(t)
+      row.at(i) = 1.0f;
+
+    foreach {i, j} in [BLOCK_M, BLOCK_N] : automap(t)
+      tile.at(i, j) = row.at(i);
+  }
+}
+
+// CHECK: for (int __automap_flat
+// CHECK: __automap_flat += 128

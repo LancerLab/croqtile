@@ -699,6 +699,37 @@ inline std::string MMAConfig2WGMMAName(const MMAConfig& mma_config,
   return DelimitedString(strs, sep);
 }
 
+inline std::string MMAConfig2WGMMANameRS(const MMAConfig& mma_config,
+                                         const std::string& sep = "_") {
+  auto lookup = mma_config;
+  if (!WGMMAConfigs().count(lookup) && lookup.sparsity == SPARSE)
+    lookup.sparsity = DENSE;
+  assert(ConfigIsWGMMA(mma_config));
+  std::vector<std::string> strs;
+  bool is_sparse = mma_config.sparsity == SPARSE;
+  strs.push_back("SM" + std::to_string(WGMMAConfigs().at(lookup)) +
+                 (is_sparse ? "::GMMA::SPARSE::GMMA" : "::GMMA::MMA"));
+  strs.push_back(std::to_string(mma_config.shape.m) + "x" +
+                 std::to_string(mma_config.shape.n) + "x" +
+                 std::to_string(mma_config.shape.k));
+  auto ty_str = [](BaseType bt) -> std::string {
+    switch (bt) {
+    case BaseType::F8_E4M3: return "E4M3";
+    case BaseType::F8_E5M2: return "E5M2";
+    case BaseType::F8_UE4M3: return "UE4M3";
+    case BaseType::F8_UE8M0: return "UE8M0";
+    default: return STR(bt);
+    }
+  };
+  strs.push_back(ToUpper(ty_str(mma_config.d_ty) + ty_str(mma_config.a_ty) +
+                         ty_str(mma_config.b_ty)));
+  bool is_f16_or_bf16 =
+      (mma_config.a_ty == BaseType::F16 || mma_config.a_ty == BaseType::BF16) &&
+      (mma_config.b_ty == BaseType::F16 || mma_config.b_ty == BaseType::BF16);
+  strs.push_back(is_f16_or_bf16 ? "RS" : "RS_TN");
+  return DelimitedString(strs, sep);
+}
+
 inline std::vector<BaseType> InferResultType() {
   // TODO
   return {};

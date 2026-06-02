@@ -4,6 +4,7 @@
 // shared global context for a compilation process
 
 #include "assess.hpp"
+#include "fragment_layout.hpp"
 #include "io.hpp"
 #include "loc.hpp"
 #include "symvals.hpp"
@@ -11,6 +12,7 @@
 #include "types.hpp"
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 #include <utility>
@@ -199,6 +201,12 @@ struct RuntimeCheckEntry {
 };
 
 enum class MMAType { WMMA, CTMMA, WGMMA, EFMMA };
+
+struct FragmentLayoutInfo {
+  size_t regs_per_thread = 0;
+  std::string thread_count_expr;
+};
+
 // per-function context
 class FunctionContext {
 private:
@@ -209,6 +217,9 @@ private:
   // TODO: consider to merge
   std::map<std::string, MMAType> frag_mma_type;
   std::map<std::string, std::string> MMA_policy_of_frag;
+
+  std::map<std::string, FragmentLayoutInfo> fragment_info;
+  std::map<std::string, FragmentLayout> fragment_layouts;
 
   struct DynMemReuseInfo {
     struct InfoEntry {
@@ -347,6 +358,38 @@ public:
   const std::map<std::string, MMAType>& GetFragMMATypes() const {
     return frag_mma_type;
   }
+
+  void SetFragmentInfo(const std::string& scoped_frag_name,
+                       const FragmentLayoutInfo& info) {
+    fragment_info[scoped_frag_name] = info;
+  }
+  bool HasFragmentInfo(const std::string& scoped_frag_name) const {
+    return fragment_info.count(scoped_frag_name);
+  }
+  const FragmentLayoutInfo&
+  GetFragmentInfo(const std::string& scoped_frag_name) const {
+    return fragment_info.at(scoped_frag_name);
+  }
+
+  void SetFragmentLayout(const std::string& scoped, const FragmentLayout& fl) {
+    fragment_layouts[scoped] = fl;
+  }
+  bool HasFragmentLayout(const std::string& scoped) const {
+    return fragment_layouts.count(scoped);
+  }
+  const FragmentLayout& GetFragmentLayout(const std::string& scoped) const {
+    return fragment_layouts.at(scoped);
+  }
+
+  void SetFragIsRS(const std::string& scoped_frag_name) {
+    wgmma_rs_frags.insert(scoped_frag_name);
+  }
+  bool FragIsRS(const std::string& scoped_frag_name) const {
+    return wgmma_rs_frags.count(scoped_frag_name) > 0;
+  }
+
+private:
+  std::set<std::string> wgmma_rs_frags;
 };
 
 /// Aggregate statistics for the loop auto-vectorizer across all functions.

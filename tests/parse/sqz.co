@@ -1,0 +1,15 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void test_sqz_parse(f32 [10, 9, 8] a) {
+  parallel p by 5 : block {
+    with index = {x} in [1] {
+      foreach index {
+        dma.copy a.subspan(1, 9, 8).at(p, 0, 0).sqz() => local;
+      }
+    }
+  }
+}
+
+// CHECK:      `- DMA.copy
+// CHECK:        `- from: a.SubSpan(1, 9, 8).At(p, 0, 0).Sqz()
+// CHECK:        `- to: local
