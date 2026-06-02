@@ -40,6 +40,8 @@ struct FragmentLayoutPass : public CodeGenerator {
   bool Visit(AST::NamedVariableDecl& n) override;
   bool Visit(AST::MMA& n) override;
   bool Visit(AST::FragReduce& n) override;
+  bool Visit(AST::FragTransfer& n) override;
+  bool Visit(AST::FragApply& n) override;
 
 private:
   // Track parallel scope thread count during traversal.
@@ -66,6 +68,13 @@ private:
   };
   std::map<std::string, FragmentUsage> usages_;
 
+  // frag.copy dst <- src: dst inherits layout from src.
+  std::vector<std::pair<std::string, std::string>> copy_edges_;
+  // frag.apply target: other fragments referenced in body.
+  std::map<std::string, std::vector<std::string>> apply_refs_;
+
+  void CollectBodyRefs(const ptr<AST::Node>& node,
+                       std::vector<std::string>& refs);
   void AssignLayouts();
 
   bool BeforeVisitImpl(AST::Node& n) override;

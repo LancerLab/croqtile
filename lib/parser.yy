@@ -207,7 +207,7 @@ extern int yylex();
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD LOADR LOADS STORE ROW COLUMN COMMIT SCALE MASK MMAWAIT
 %token <std::string> UNROLL
-%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
+%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
 %token <std::string> LIB_CALL
 %token <std::string> FRAG FRAGMENT AUTOMAP FRAG_APPLY REDUCE_MAX REDUCE_SUM
@@ -637,7 +637,9 @@ simple_val
     | U64_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | bool_value { $$ = AST::Make<AST::BoolLiteral>(@1, $1); }
     | FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
+    | MINUS FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
     | DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
+    | MINUS DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
     | cstrings { $$ = AST::Make<AST::StringLiteral>(@1, $1); }
     | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
@@ -2505,10 +2507,14 @@ arith_builtin_func
     | COS      { $$ = $1; }
     | COSH     { $$ = $1; }
     | EXP      { $$ = $1; }
+    | EXP2F    { $$ = $1; }
     | EXPM1    { $$ = $1; }
+    | FABS     { $$ = $1; }
     | FLOOR    { $$ = $1; }
     | GELU     { $$ = $1; }
     | ISFINITE { $$ = $1; }
+    | FMAX     { $$ = $1; }
+    | FMIN     { $$ = $1; }
     | ROUND    { $$ = $1; }
     | RSQRT    { $$ = $1; }
     | SIGMOID  { $$ = $1; }

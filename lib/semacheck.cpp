@@ -1083,9 +1083,9 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
         return false;
       }
 
+      auto it =
+          shared_tensor_producers.find(InScopeName(load_from->RefSymbol()));
       if (op.HasExplicitSwizzle()) {
-        auto it =
-            shared_tensor_producers.find(InScopeName(load_from->RefSymbol()));
         if (it != shared_tensor_producers.end()) {
           auto* dma = it->second;
           auto tensor_name = load_from->RefSymbol();
@@ -1111,6 +1111,18 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
             Note(dma->LOC(), std::string(dma_label) + " affecting tensor '" +
                                  tensor_name + "' is here.");
           }
+        }
+      } else if (it != shared_tensor_producers.end()) {
+        auto* dma = it->second;
+        auto dma_swizzle = dma->GetSwizzleMode();
+        if (dma_swizzle != SwizMode::NONE) {
+          op.SetSwizzleMode(dma_swizzle);
+          auto tensor_name = load_from->RefSymbol();
+          auto dma_label = dma->IsTMA() ? "TMA" : "DMA";
+          Note(n.LOC(),
+               std::string("inferred mma.load swizzle '") +
+                   STR(dma_swizzle) + "' from " + dma_label +
+                   " swizzle for tensor '" + tensor_name + "'.");
         }
       }
 

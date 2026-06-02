@@ -7,6 +7,7 @@
 
 #include <cerrno>
 #include <climits>
+#include <limits>
 #include <cstdlib>
 #include <cstring> // strerror
 #include <iostream>
@@ -431,7 +432,9 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "__cos"      return Choreo::Parser::make_COS(yytext, loc);
   "__cosh"     return Choreo::Parser::make_COSH(yytext, loc);
   "__exp"      return Choreo::Parser::make_EXP(yytext, loc);
+  "__exp2f"    return Choreo::Parser::make_EXP2F(yytext, loc);
   "__expm1"    return Choreo::Parser::make_EXPM1(yytext, loc);
+  "__fabs"     return Choreo::Parser::make_FABS(yytext, loc);
   "__floor"    return Choreo::Parser::make_FLOOR(yytext, loc);
   "__gelu"     return Choreo::Parser::make_GELU(yytext, loc);
   "__isfinite" return Choreo::Parser::make_ISFINITE(yytext, loc);
@@ -444,6 +447,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "__tan"      return Choreo::Parser::make_TAN(yytext, loc);
   "__log1p"    return Choreo::Parser::make_LOG1P(yytext, loc);
   "__log"      return Choreo::Parser::make_LOG(yytext, loc);
+  "__max"      return Choreo::Parser::make_FMAX(yytext, loc);
+  "__min"      return Choreo::Parser::make_FMIN(yytext, loc);
   "__pow"      return Choreo::Parser::make_POW(yytext, loc);
   "__sign"     return Choreo::Parser::make_SIGN(yytext, loc);
   "__sin"      return Choreo::Parser::make_SIN(yytext, loc);
@@ -510,6 +515,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "void"     return Choreo::Parser::make_VOID(BaseType::VOID, loc);
   "true"     return Choreo::Parser::make_TRUE(yytext, loc);
   "false"    return Choreo::Parser::make_FALSE(yytext, loc);
+  "inf"      return Choreo::Parser::make_FPVAL(std::numeric_limits<float>::infinity(), loc);
   "nullptr"  return Choreo::Parser::make_NULLPTR(yytext, loc);
   "dma"      return Choreo::Parser::make_DMA(yytext, loc);
   "tma"      return Choreo::Parser::make_TMA(yytext, loc);

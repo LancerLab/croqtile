@@ -3,6 +3,7 @@
 #include "cute_device_codegen.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <numeric>
@@ -2734,6 +2735,43 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
     if (auto rhs_ca = extract_chunk_alias(n.value)) {
       live_chunk_aliases[name] = rhs_ca;
       live_chunk_aliases[scoped_name] = rhs_ca;
+
+      auto parent_sym = rhs_ca->RefSymbol();
+      auto parent_scoped = InScopeNameForRef(parent_sym);
+      if (FCtx(fname).HasFragmentLayout(parent_scoped)) {
+        auto& fl = FCtx(fname).GetFragmentLayout(parent_scoped);
+        if (fl.kind == LayoutKind::WGMMA_ACC) {
+          auto parent_c_sym = UnScopedName(SSMName(parent_scoped, false));
+
+          std::string offset_var;
+          for (auto& sop : rhs_ca->AllOperations()) {
+            if (auto ta = dyn_cast<AST::SOP::TileAt>(sop)) {
+              auto indices = ta->GetIndices();
+              if (indices) {
+                for (auto& idx : indices->AllValues()) {
+                  auto val = ExprSTR(idx, false);
+                  if (val == "__choreo_no_tiling__" || val == "0") continue;
+                  offset_var = val;
+                  break;
+                }
+              }
+            }
+          }
+
+          size_t warp_k = 16;
+          size_t num_chunks = fl.logical_cols / warp_k;
+          size_t regs_per_step =
+              num_chunks > 0 ? fl.regs_per_thread / num_chunks : 0;
+
+          FragChunkRSInfo info;
+          info.parent_c_sym = parent_c_sym;
+          info.offset_var = offset_var;
+          info.regs_per_step = regs_per_step;
+          frag_chunk_rs_aliases_[name] = info;
+          frag_chunk_rs_aliases_[scoped_name] = info;
+          return true;
+        }
+      }
     } else {
       live_chunk_aliases.erase(name);
       live_chunk_aliases.erase(scoped_name);
@@ -3599,6 +3637,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ds << f_mds.second;
       ds << t_mds.second;
     }
+
+    if (has_future && swizzle_mode != SwizMode::NONE)
+      shared_buf_swiz_[future_name] = swizzle_mode;
 
     if (future_only) cooperatives.insert(InScopeName(n.future));
     if (n.operation != ".copy" && n.operation != ".transp" &&
@@ -4564,8 +4605,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           cute_major_order = "cute::SM90::GMMA::Major::K";
         }
       }
-      // Get swizzle value from MMA operation (default NONE / NS)
+      // Get swizzle value from MMA operation; infer from DMA if not explicit.
       auto swizzle_val = op.GetSwizzleMode();
+      if (swizzle_val == SwizMode::NONE && !op.HasExplicitSwizzle()) {
+        auto src_sym = op.LoadFrom()->RefSymbol();
+        auto sit = shared_buf_swiz_.find(src_sym);
+        if (sit != shared_buf_swiz_.end()) swizzle_val = sit->second;
+      }
       std::string swizzle_enum;
       std::string sparse_layout_suffix;
       switch (swizzle_val) {
@@ -4834,8 +4880,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
       }
       bool is_rs = FCtx(fname).FragIsRS(InScopeName(c_sym));
+      bool a_is_chunk_rs = frag_chunk_rs_aliases_.count(a_sym) > 0;
       if (is_rs) {
-        ds << d_indent << "warpgroup_fence_operand(" << a_sym << ");\n";
+        if (a_is_chunk_rs) {
+          auto& ci = frag_chunk_rs_aliases_[a_sym];
+          ds << d_indent << "warpgroup_fence_operand(" << ci.parent_c_sym
+             << ");\n";
+        } else {
+          ds << d_indent << "warpgroup_fence_operand(" << a_sym << ");\n";
+        }
       }
       ds << d_indent << "cute::" << mma_policy << "<";
       if (!policy_is_tn) {
@@ -4848,10 +4901,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       ds << ">::fma(";
       if (is_rs) {
-        ds << "reinterpret_cast<const uint32_t*>(" << a_sym << ")[0], "
-           << "reinterpret_cast<const uint32_t*>(" << a_sym << ")[1], "
-           << "reinterpret_cast<const uint32_t*>(" << a_sym << ")[2], "
-           << "reinterpret_cast<const uint32_t*>(" << a_sym << ")[3], "
+        std::string a_base;
+        if (a_is_chunk_rs) {
+          auto& ci = frag_chunk_rs_aliases_[a_sym];
+          a_base = ci.parent_c_sym + " + " + ci.offset_var + " * " +
+                   std::to_string(ci.regs_per_step);
+        } else {
+          a_base = a_sym;
+        }
+        ds << "reinterpret_cast<const uint32_t*>(" << a_base << ")[0], "
+           << "reinterpret_cast<const uint32_t*>(" << a_base << ")[1], "
+           << "reinterpret_cast<const uint32_t*>(" << a_base << ")[2], "
+           << "reinterpret_cast<const uint32_t*>(" << a_base << ")[3], "
            << "desc_" << b_sym;
       } else {
         ds << "desc_" << a_sym << ", desc_" << b_sym;
@@ -4966,10 +5027,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
         }
       }
+      bool target_is_shared = f_sty->GetStorage() == Storage::SHARED;
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(t_sym, ".data()"), buf_expr, f_sty->GetStorage(),
           f_sty->ElementType(), ca->GetBlockShape(), false,
-          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true));
+          ValueSTR(GenOffset(ca)), ValueSTR(GenStrides(ca), false, true),
+          {}, target_is_shared, target_is_shared ? SwizMode::B128 : SwizMode::NONE);
       ds << f_mds.second;
       std::string DIM_N_STR = STR(ssmi.shape.at(1));
       std::string CUTE_WGMMA_ATOM =
@@ -8910,14 +8973,25 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
     std::ostringstream fp_val;
-    // std::fixed: the value should be in fixed-point notation
-    // otherwise, 1.0f => 1f (error)
-    if (fl->IsFloat32())
-      fp_val << std::fixed << fl->Val_f32() << "f";
-    else if (fl->IsFloat64())
-      fp_val << std::fixed << fl->Val_f64();
-    else
+    if (fl->IsFloat32()) {
+      auto v = fl->Val_f32();
+      if (std::isinf(v))
+        fp_val << (v < 0 ? "(-INFINITY)" : "INFINITY");
+      else if (std::isnan(v))
+        fp_val << "NAN";
+      else
+        fp_val << std::fixed << v << "f";
+    } else if (fl->IsFloat64()) {
+      auto v = fl->Val_f64();
+      if (std::isinf(v))
+        fp_val << (v < 0 ? "(-INFINITY)" : "INFINITY");
+      else if (std::isnan(v))
+        fp_val << "NAN";
+      else
+        fp_val << std::fixed << v;
+    } else {
       choreo_unreachable("unsupported float literal.");
+    }
     oss << fp_val.str();
   } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
     oss << sl->EscapedVal();

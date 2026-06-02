@@ -4090,7 +4090,9 @@ CHOREO_CUTE_UNARY_NUMERIC(ceil, ::ceilf, ::ceil);
 CHOREO_CUTE_UNARY_NUMERIC(cos, ::cosf, ::cos);
 CHOREO_CUTE_UNARY_NUMERIC(cosh, ::coshf, ::cosh);
 CHOREO_CUTE_UNARY_NUMERIC(exp, ::expf, ::exp);
+CHOREO_CUTE_UNARY_NUMERIC(exp2f, ::exp2f, ::exp2);
 CHOREO_CUTE_UNARY_NUMERIC(expm1, ::expm1f, ::expm1);
+CHOREO_CUTE_UNARY_NUMERIC(fabs, ::fabsf, ::fabs);
 CHOREO_CUTE_UNARY_NUMERIC(floor, ::floorf, ::floor);
 CHOREO_CUTE_UNARY_NUMERIC(log, ::logf, ::log);
 CHOREO_CUTE_UNARY_NUMERIC(log1p, ::log1pf, ::log1p);
@@ -4102,6 +4104,8 @@ CHOREO_CUTE_UNARY_NUMERIC(tan, ::tanf, ::tan);
 CHOREO_CUTE_UNARY_NUMERIC(tanh, ::tanhf, ::tanh);
 
 CHOREO_CUTE_BINARY_NUMERIC(atan2, ::atan2f, ::atan2);
+CHOREO_CUTE_BINARY_NUMERIC(max, ::fmaxf, ::fmax);
+CHOREO_CUTE_BINARY_NUMERIC(min, ::fminf, ::fmin);
 CHOREO_CUTE_BINARY_NUMERIC(pow, ::powf, ::pow);
 
 template <typename T>
