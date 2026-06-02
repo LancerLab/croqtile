@@ -1,10 +1,23 @@
 #ifndef __CHOREO_FRAGMENT_LAYOUT_HPP__
 #define __CHOREO_FRAGMENT_LAYOUT_HPP__
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 
 namespace Choreo {
+
+// Target-agnostic parameters for a dim-1 (row-wise) fragment reduction.
+// Computed once by FragmentLayout::GetReduceParams() and consumed by any
+// target's codegen without the codegen needing to know the layout kind.
+struct ReduceParams {
+  size_t rows_per_thread = 0;  // outer loop bound
+  size_t local_cols = 0;       // inner loop bound (columns per row per thread)
+  size_t threads_per_row = 1;  // AllReduce width
+  size_t thread_count = 0;     // total threads (for workspace sizing)
+
+  bool NeedsWorkspace() const { return threads_per_row > 32; }
+};
 
 enum class LayoutKind {
   UNIFORM,
@@ -49,6 +62,10 @@ struct FragmentLayout {
 
   // REPLICATED_1D-specific
   size_t replicate = 0;
+  // For UNIFORM-derived REPLICATED_1D: row stride for LogicalRowFromReg.
+  // When nonzero, row = r * reduce_row_stride + tid / replicate.
+  // When zero (WGMMA-derived), use the WGMMA warp/lane formula.
+  size_t reduce_row_stride = 0;
 
   // Source tracking
   std::string anchor_symbol;
@@ -150,13 +167,49 @@ struct FragmentLayout {
     }
   }
 
-  // Register index for reduction inner loop over columns.
-  // rv = column iteration variable (0..cols_per_group-1 typically).
-  // row = row variable within thread (0..rows_per_thread-1).
+  // -------------------------------------------------------------------------
+  // Reduction support
+  // -------------------------------------------------------------------------
+
+  // Compute target-agnostic parameters for a dim-1 (row-wise) reduction.
+  // Called during layout pass (MakeReduceDst) and by codegen.
+  ReduceParams GetReduceParams() const {
+    ReduceParams rp;
+    rp.thread_count = thread_count;
+    if (kind == LayoutKind::WGMMA_ACC) {
+      rp.rows_per_thread = rows_per_thread;
+      rp.local_cols =
+          rows_per_thread > 0 ? regs_per_thread / rows_per_thread : 0;
+      rp.threads_per_row = threads_per_row;
+    } else if (kind == LayoutKind::UNIFORM && logical_cols > 1 &&
+               thread_count > 0) {
+      rp.local_cols = std::max((size_t)1,
+                               logical_cols < thread_count
+                                   ? (size_t)1
+                                   : logical_cols / thread_count);
+      rp.threads_per_row = std::min(logical_cols, thread_count);
+      rp.rows_per_thread =
+          rp.local_cols > 0 ? regs_per_thread / rp.local_cols : 0;
+    } else {
+      rp.rows_per_thread = 1;
+      rp.local_cols = regs_per_thread;
+      rp.threads_per_row = 1;
+    }
+    return rp;
+  }
+
+  // Register index for the reduction inner loop.
+  // rv = column iteration variable (0..rp.local_cols-1).
+  // row = row variable within thread (0..rp.rows_per_thread-1).
+  // The formula is layout-kind-specific and emitted as a C++ string.
   std::string ReduceLocalIndex(const std::string& row,
-                               const std::string& rv) const {
+                               const std::string& rv,
+                               size_t local_cols) const {
     if (kind == LayoutKind::WGMMA_ACC) {
       return "(((" + rv + " & 7) * 4) + (" + row + " * 2) + (" + rv + " >> 3))";
+    }
+    if (kind == LayoutKind::UNIFORM) {
+      return "(" + row + " * " + std::to_string(local_cols) + " + " + rv + ")";
     }
     return "0";
   }
@@ -177,6 +230,10 @@ struct FragmentLayout {
       return "(" + tid + " / 32 * 16 + ((" + r + ") % 4) / 2 * 8 + " + tid +
              " % 32 / 4)";
     case LayoutKind::REPLICATED_1D:
+      if (reduce_row_stride > 0) {
+        return "(" + r + " * " + std::to_string(reduce_row_stride) + " + " +
+               tid + " / " + std::to_string(replicate) + ")";
+      }
       return "(" + tid + " / 32 * 16 + ((" + r + ") % 4) / 2 * 8 + " + tid +
              " % 32 / 4)";
     default: return "0";
@@ -222,6 +279,8 @@ struct FragmentLayout {
       return "(" + row + " * " + std::to_string(logical_cols) + " + " + col +
              ")";
     }
+    case LayoutKind::REPLICATED_1D:
+      return LogicalRowFromReg(r, tid);
     default: return "0";
     }
   }
@@ -322,6 +381,29 @@ struct FragmentLayout {
     fl.rows_per_thread = src_acc.rows_per_thread;
     fl.replicate = src_acc.threads_per_row;
     fl.regs_per_thread = fl.rows_per_thread;
+    return fl;
+  }
+
+  // Reduction destination derived from any 2D source layout.
+  // Uses GetReduceParams() to derive REPLICATED_1D layout for the target.
+  static FragmentLayout MakeReduceDst(const FragmentLayout& src) {
+    if (src.kind == LayoutKind::WGMMA_ACC) {
+      return MakeReplicated1D(src.logical_rows, src);
+    }
+    auto rp = src.GetReduceParams();
+    FragmentLayout fl;
+    fl.kind = LayoutKind::REPLICATED_1D;
+    fl.thread_count = src.thread_count;
+    fl.thread_count_expr = src.thread_count_expr;
+    fl.logical_rows = src.logical_rows;
+    fl.logical_cols = 1;
+    fl.rows_per_thread = rp.rows_per_thread;
+    fl.threads_per_row = rp.threads_per_row;
+    fl.replicate = rp.threads_per_row;
+    fl.regs_per_thread = rp.rows_per_thread;
+    // For non-WGMMA: row = r * stride + tid / replicate
+    fl.reduce_row_stride =
+        fl.replicate > 0 ? fl.thread_count / fl.replicate : 0;
     return fl;
   }
 

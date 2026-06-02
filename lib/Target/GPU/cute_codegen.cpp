@@ -4661,7 +4661,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ds << d_indent << "{\n";
       ds << d_indent << "  auto* __loadr_src = reinterpret_cast<const "
          << NameBaseType(f_sty->ElementType()) << "*>(" << f_mds.first
-         << ");\n";
+         << ".data().get());\n";
       ds << d_indent << "  int __loadr_lane = threadIdx.x % 128;\n";
       ds << d_indent << "  #pragma unroll\n";
       ds << d_indent << "  for (int __loadr_i = 0; __loadr_i < "
@@ -7234,8 +7234,11 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
   automap_frag_reg_expr_.clear();
   automap_frag_reg_expr_[scoped] = sym + "[" + reg_loop_var_ + "]";
 
-  // Also override any other fragment accesses in the body.
-  auto BuildOverrides = [&](auto&& self, const ptr<AST::Node>& node) -> void {
+  // Override other fragment accesses in the body to register-direct form.
+  // Two cases: (1) compatible layout -> same register index;
+  // (2) 1D row-broadcast in a 2D MMA apply -> map via RowFromRegIndex.
+  auto BuildOverrides =
+      [&](auto&& self, const ptr<AST::Node>& node) -> void {
     if (!node) return;
     if (auto da = dyn_cast<AST::DataAccess>(node)) {
       if (da->AccessElement()) {
@@ -7243,8 +7246,13 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
         if (FCtx(fname).HasFragmentLayout(sc)) {
           auto s = UnScopedName(SSMName(sc, false));
           auto& other_fl = FCtx(fname).GetFragmentLayout(sc);
-          if (other_fl.IsCompatible(fl))
+          if (other_fl.IsCompatible(fl)) {
             automap_frag_reg_expr_[sc] = s + "[" + reg_loop_var_ + "]";
+          } else if (other_fl.logical_cols <= 1 && fl.logical_cols > 1 &&
+                     fl.IsMMAAnchored()) {
+            automap_frag_reg_expr_[sc] =
+                s + "[" + fl.RowFromRegIndex(reg_loop_var_) + "]";
+          }
         }
       }
       return;
@@ -7266,16 +7274,31 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
   };
   BuildOverrides(BuildOverrides, n.body);
 
+  // Register lambda params in symbol tables so ExprSTR can resolve types.
+  // Set up frag_apply_iv_map_ before body generation.
+  for (auto& p : n.params) {
+    auto sp = SSTab().ScopedName(p);
+    if (!SSTab().IsDeclared(sp))
+      SSTab().DefineSymbol(sp, MakeIntegerType());
+    if (!SymTab()->Exists(sp))
+      SymTab()->AddSymbol(sp, MakeIntegerType());
+    frag_apply_iv_map_[p] = "__frag_iv_" + p;
+  }
+
+  // Generate body expression first to determine which iv vars are referenced.
+  std::string body_expr = ExprSTR(n.body, false);
+
   IndStream() << "{ // frag.apply " << target_name << "\n";
   IncrIndent();
 
-  // Register lambda params in all symbol tables so ExprSTR can resolve types.
-  for (auto& p : n.params) {
-    auto sp = SSTab().ScopedName(p);
-    if (!SSTab().IsDeclared(sp)) SSTab().DefineSymbol(sp, MakeIntegerType());
-    if (!SymTab()->Exists(sp)) SymTab()->AddSymbol(sp, MakeIntegerType());
-    ds << d_indent << "int __frag_iv_" << p << " = 0;\n";
-    frag_apply_iv_map_[p] = "__frag_iv_" + p;
+  // Only declare iv variables that are actually used in the body.
+  std::vector<bool> param_used(n.params.size(), false);
+  for (size_t pi = 0; pi < n.params.size(); ++pi) {
+    std::string iv_var = "__frag_iv_" + n.params[pi];
+    if (body_expr.find(iv_var) != std::string::npos) {
+      param_used[pi] = true;
+      ds << d_indent << "int " << iv_var << " = 0;\n";
+    }
   }
 
   IndStream() << "#pragma unroll\n";
@@ -7283,8 +7306,9 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
               << " < " << regs << "; ++" << reg_loop_var_ << ") {\n";
   IncrIndent();
 
-  // Reconstruct iteration variables from register index + tid.
+  // Only compute iv variables that are actually referenced.
   for (size_t pi = 0; pi < n.params.size(); ++pi) {
+    if (!param_used[pi]) continue;
     std::string iv_var = "__frag_iv_" + n.params[pi];
     if (n.params.size() == 1)
       ds << d_indent << iv_var << " = "
@@ -7298,8 +7322,8 @@ bool CuteCodeGen::Visit(AST::FragApply& n) {
   }
 
   // Emit: target[__r] = body_expr;
-  ds << d_indent << sym << "[" << reg_loop_var_
-     << "] = " << ExprSTR(n.body, false) << ";\n";
+  ds << d_indent << sym << "[" << reg_loop_var_ << "] = " << body_expr
+     << ";\n";
 
   DecrIndent();
   IndStream() << "}\n";
@@ -7471,6 +7495,87 @@ bool CuteCodeGen::Visit(AST::FragTransfer& n) {
       }
     }
   }
+
+  DecrIndent();
+  IndStream() << "} // " << n.OpName() << "\n";
+
+  return true;
+}
+
+bool CuteCodeGen::Visit(AST::FragReduce& n) {
+  TraceEachVisit(n);
+  if (IsHost()) return true;
+
+  // ---- Prepare: resolve symbols, compute all parameters ----
+
+  auto src_scoped = InScopeNameForRef(n.SrcName());
+  auto dst_scoped = InScopeNameForRef(n.DstName());
+
+  if (!FCtx(fname).HasFragmentLayout(src_scoped) ||
+      !FCtx(fname).HasFragmentLayout(dst_scoped)) {
+    dbgs() << "frag.reduce: missing layout for " << src_scoped << " or "
+           << dst_scoped << "\n";
+    return true;
+  }
+
+  auto& src_fl = FCtx(fname).GetFragmentLayout(src_scoped);
+  auto src_sym = UnScopedName(SSMName(src_scoped, false));
+  auto dst_sym = UnScopedName(SSMName(dst_scoped, false));
+
+  auto rp = src_fl.GetReduceParams();
+  bool is_max = (n.op == AST::FragReduceOp::MAX);
+
+  std::string identity =
+      is_max ? "__int_as_float(0xff800000) /*-inf*/" : "0.0f";
+  std::string reduce_type = is_max ? "choreo::MaxOp" : "choreo::SumOp";
+  std::string idx_expr =
+      src_fl.ReduceLocalIndex("__row", "__rv", rp.local_cols);
+  std::string ws_name =
+      rp.NeedsWorkspace() ? ("__reduce_ws_" + n.DstName()) : "";
+
+  // ---- Emit: write CUDA code from prepared parameters ----
+
+  IndStream() << "{ // " << n.OpName() << " " << n.SrcName() << " -> "
+              << n.DstName() << "\n";
+  IncrIndent();
+
+  if (rp.NeedsWorkspace()) {
+    IndStream() << "__shared__ float " << ws_name << "[" << rp.thread_count
+                << "];\n";
+  }
+
+  // Phase 1: Thread-local reduction over owned column registers.
+  IndStream() << "#pragma unroll\n";
+  IndStream() << "for (int __row = 0; __row < " << rp.rows_per_thread
+              << "; ++__row) {\n";
+  IncrIndent();
+
+  IndStream() << "float __local_reduce = " << identity << ";\n";
+  IndStream() << "#pragma unroll\n";
+  IndStream() << "for (int __rv = 0; __rv < " << rp.local_cols
+              << "; ++__rv) {\n";
+  IncrIndent();
+  if (is_max) {
+    IndStream() << "__local_reduce = fmaxf(__local_reduce, " << src_sym
+                << "[" << idx_expr << "]);\n";
+  } else {
+    IndStream() << "__local_reduce += " << src_sym << "[" << idx_expr
+                << "];\n";
+  }
+  DecrIndent();
+  IndStream() << "}\n";
+
+  // Phase 2: Cross-thread butterfly AllReduce.
+  if (rp.threads_per_row > 1) {
+    IndStream() << "__local_reduce = choreo::AllReduce<" << reduce_type
+                << ", " << rp.threads_per_row << ", 1>::run(__local_reduce";
+    if (rp.NeedsWorkspace()) ds << ", " << ws_name;
+    ds << ");\n";
+  }
+
+  IndStream() << dst_sym << "[__row] = __local_reduce;\n";
+  DecrIndent();
+  IndStream() << "}\n";
 
   DecrIndent();
   IndStream() << "} // " << n.OpName() << "\n";

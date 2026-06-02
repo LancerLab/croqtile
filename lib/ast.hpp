@@ -3347,6 +3347,59 @@ struct FragTransfer : public Node, public TypeIDProvider<FragTransfer> {
   __UDT_TYPE_INFO__(Node, FragTransfer)
 };
 
+// frag.reduce_max src, dst, dim;
+// frag.reduce_sum src, dst, dim;
+// Row-wise (dim=1) reduction of a 2D fragment into a 1D fragment.
+enum class FragReduceOp { MAX, SUM };
+
+struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
+  FragReduceOp op;
+  ptr<Expr> src;
+  ptr<Expr> dst;
+  int dim;
+
+  FragReduce(const location& l, FragReduceOp o, const ptr<Expr>& s,
+             const ptr<Expr>& d, int dm)
+      : Node(l), op(o), src(s), dst(d), dim(dm) {}
+
+  const char* OpName() const {
+    switch (op) {
+    case FragReduceOp::MAX: return "frag.reduce_max";
+    case FragReduceOp::SUM: return "frag.reduce_sum";
+    }
+    return "frag.reduce_?";
+  }
+
+  ptr<Node> CloneImpl() const override {
+    return Make<FragReduce>(LOC(), op, CloneP(src), CloneP(dst), dim);
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << OpName() << " ";
+    src->Print(os, "", with_type);
+    os << ", ";
+    dst->Print(os, "", with_type);
+    os << ", " << dim;
+  }
+
+  const std::string& SrcName() const {
+    auto id = GetIdentifier(*src);
+    assert(id && "frag.reduce src must be an identifier");
+    return id->name;
+  }
+
+  const std::string& DstName() const {
+    auto id = GetIdentifier(*dst);
+    assert(id && "frag.reduce dst must be an identifier");
+    return id->name;
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, FragReduce)
+};
+
 struct Wait : public Node, public TypeIDProvider<Wait> {
   ptr<MultiValues> targets;
 

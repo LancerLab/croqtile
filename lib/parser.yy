@@ -210,7 +210,7 @@ extern int yylex();
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
 %token <std::string> LIB_CALL
-%token <std::string> FRAG FRAGMENT AUTOMAP FRAG_APPLY
+%token <std::string> FRAG FRAGMENT AUTOMAP FRAG_APPLY REDUCE_MAX REDUCE_SUM
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD
 %token <std::string> VECTORIZE
@@ -2256,6 +2256,12 @@ frag_stmt
       } LBRACE RET s_expr SEMCOL RBRACE {
         $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::COPY, $3, $5, std::move($10), $15);
       }
+    | FRAG REDUCE_MAX frag_expr COMMA frag_expr COMMA integer_value {
+        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::MAX, $3, $5, $7);
+      }
+    | FRAG REDUCE_SUM frag_expr COMMA frag_expr COMMA integer_value {
+        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::SUM, $3, $5, $7);
+      }
     ;
 
 frag_lambda_params
@@ -2573,10 +2579,20 @@ suffix_expr
   ;
 
 call_expr
-    : arith_builtin_func LPAREN value_list RPAREN {
+    : arith_builtin_func LPAREN s_expr RPAREN {
+        auto args = AST::Make<AST::MultiValues>(@3);
+        args->Append($3);
         $$ = AST::Make<AST::Expr>(@1,
              AST::Make<AST::Call>(@1,
-             AST::Make<AST::Identifier>(@1, $1), $3, AST::Call::BIF | AST::Call::ARITH | AST::Call::EXPR));
+             AST::Make<AST::Identifier>(@1, $1), args, AST::Call::BIF | AST::Call::ARITH | AST::Call::EXPR));
+      }
+    | arith_builtin_func LPAREN s_expr COMMA s_expr RPAREN {
+        auto args = AST::Make<AST::MultiValues>(@3);
+        args->Append($3);
+        args->Append($5);
+        $$ = AST::Make<AST::Expr>(@1,
+             AST::Make<AST::Call>(@1,
+             AST::Make<AST::Identifier>(@1, $1), args, AST::Call::BIF | AST::Call::ARITH | AST::Call::EXPR));
       }
     | align_func LPAREN s_expr COMMA s_expr RPAREN {
         auto mn = AST::Make<AST::MultiValues>(@1, ", ");

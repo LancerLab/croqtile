@@ -39,6 +39,7 @@ struct FragmentLayoutPass : public CodeGenerator {
   // Visitor interface -- only override nodes we care about.
   bool Visit(AST::NamedVariableDecl& n) override;
   bool Visit(AST::MMA& n) override;
+  bool Visit(AST::FragReduce& n) override;
 
 private:
   // Track parallel scope thread count during traversal.
@@ -55,7 +56,9 @@ private:
     bool is_mma_acc = false;
     bool is_mma_operand_a = false;
     bool is_mma_operand_b = false;
+    bool is_reduce_target = false;
     std::string mma_acc_source;
+    std::string reduce_source;
     std::vector<size_t> shape;
     BaseType element_type = BaseType::F32;
     size_t scope_thread_count = 0;

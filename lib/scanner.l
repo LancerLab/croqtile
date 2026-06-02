@@ -554,6 +554,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".commit"  return Choreo::Parser::make_COMMIT(yytext, loc);
   ".wait"    return Choreo::Parser::make_MMAWAIT(yytext, loc);
   ".apply"   return Choreo::Parser::make_FRAG_APPLY(yytext, loc);
+  ".reduce_max" return Choreo::Parser::make_REDUCE_MAX(yytext, loc);
+  ".reduce_sum" return Choreo::Parser::make_REDUCE_SUM(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT(yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);

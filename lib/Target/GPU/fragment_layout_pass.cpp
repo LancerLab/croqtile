@@ -101,13 +101,36 @@ bool FragmentLayoutPass::Visit(AST::MMA& n) {
   auto& op = *n.operation;
 
   if (op.IsKind(AST::MMAOperation::Exec)) {
-    auto a_sym = InScopeName(AST::FragName(op.ExecOperand(0)));
-    auto b_sym = InScopeName(AST::FragName(op.ExecOperand(1)));
-    auto c_sym = InScopeName(AST::FragName(op.ExecOperand(2)));
+    // ExecOperand order: 0=C(acc), 1=A, 2=B (matches GPUAdaptor convention).
+    auto c_sym = InScopeName(AST::FragName(op.ExecOperand(0)));
+    auto a_sym = InScopeName(AST::FragName(op.ExecOperand(1)));
+    auto b_sym = InScopeName(AST::FragName(op.ExecOperand(2)));
 
-    if (usages_.count(c_sym)) usages_[c_sym].is_mma_acc = true;
+    // MMA accumulators from mma.fill.f32 don't have NamedVariableDecl,
+    // so they must be added to usages_ when first seen in an MMA exec.
+    if (!usages_.count(c_sym)) {
+      FragmentUsage usage;
+      usage.scoped_name = c_sym;
+      usage.scope_thread_count = EffectiveThreadCount();
+      usage.scope_thread_count_expr = EffectiveThreadCountExpr();
+      usages_[c_sym] = usage;
+    }
+    usages_[c_sym].is_mma_acc = true;
+
     if (usages_.count(a_sym)) usages_[a_sym].is_mma_operand_a = true;
     if (usages_.count(b_sym)) usages_[b_sym].is_mma_operand_b = true;
+  }
+
+  return true;
+}
+
+bool FragmentLayoutPass::Visit(AST::FragReduce& n) {
+  auto dst_scoped = InScopeName(n.DstName());
+  auto src_scoped = InScopeName(n.SrcName());
+
+  if (usages_.count(dst_scoped)) {
+    usages_[dst_scoped].is_reduce_target = true;
+    usages_[dst_scoped].reduce_source = src_scoped;
   }
 
   return true;
@@ -159,12 +182,16 @@ void FragmentLayoutPass::AssignLayouts() {
   }
 
   // Store all inferred layouts.
+  // First pass: assign anchors and UNIFORM fallbacks.
   for (auto& [scoped, usage] : usages_) {
     FragmentLayout fl;
 
     if (anchors.count(scoped)) {
       fl = anchors[scoped];
       fl.anchor_symbol = scoped;
+    } else if (usage.is_reduce_target) {
+      // Defer -- assigned after source layouts are known.
+      continue;
     } else {
       // Fallback: UNIFORM with scope-aware thread count.
       size_t total = 1;
@@ -189,6 +216,38 @@ void FragmentLayoutPass::AssignLayouts() {
     }
 
     FCtx(fname).SetFragmentLayout(scoped, fl);
+  }
+
+  // Second pass: assign REPLICATED_1D to reduce targets.
+  for (auto& [scoped, usage] : usages_) {
+    if (!usage.is_reduce_target) continue;
+    if (FCtx(fname).HasFragmentLayout(scoped)) continue;
+
+    auto& src_name = usage.reduce_source;
+    if (FCtx(fname).HasFragmentLayout(src_name)) {
+      auto& src_fl = FCtx(fname).GetFragmentLayout(src_name);
+      auto fl = FragmentLayout::MakeReduceDst(src_fl);
+      FCtx(fname).SetFragmentLayout(scoped, fl);
+    } else {
+      // Source layout unknown; fall back to UNIFORM 1D.
+      size_t total = 1;
+      for (auto d : usage.shape) total *= d;
+      size_t tc = usage.scope_thread_count;
+      std::string tc_expr = usage.scope_thread_count_expr;
+      if (tc == 0) {
+        tc = current_thread_count_;
+        tc_expr = current_thread_count_expr_;
+      }
+      if (tc_expr.empty()) tc_expr = "blockDim.x";
+      auto fl = FragmentLayout::MakeUniform(total, tc, tc_expr);
+      FCtx(fname).SetFragmentLayout(scoped, fl);
+    }
+  }
+
+  // Debug logging for all layouts.
+  for (auto& [scoped, usage] : usages_) {
+    if (!FCtx(fname).HasFragmentLayout(scoped)) continue;
+    auto& fl = FCtx(fname).GetFragmentLayout(scoped);
 
     if (debug_visit) {
       dbgs() << "[frag-layout] " << scoped << ": " << STR(fl.kind)
