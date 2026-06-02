@@ -85,5 +85,6 @@ EXTRA_NVCC_FLAGS="--use_fast_math" bash bench.sh \
 |------|---------|
 | `flash_mha_fwd_aitune_2026-06-01_iter038.co` | Winning kernel |
 | `mha_helper.hpp` | Host data prep, verify, timing, TFLOPS |
+| `../baselines/` | TileLang + FlashAttention baselines (ml-hopper env) |
 | `bench.sh` | Compile, run, optional ncu profile |
 | `results.tsv` | Full 81-iteration experiment log |
