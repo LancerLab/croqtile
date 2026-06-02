@@ -130,6 +130,7 @@ public:
   bool Visit(AST::MMA&) override;
   bool Visit(AST::FragApply&) override;
   bool Visit(AST::FragTransfer&) override;
+  bool Visit(AST::FragReduce&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Break&) override;

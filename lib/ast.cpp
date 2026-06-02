@@ -269,6 +269,12 @@ void FragTransfer::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void FragReduce::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 Choreo::AST::SpannedOperation::~SpannedOperation() = default;
 
 // this is not a visitor type that must be invoked manually

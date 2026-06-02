@@ -91,6 +91,7 @@ struct Visitor {
   virtual bool Visit(AST::MMA&) = 0;
   virtual bool Visit(AST::FragApply&) = 0;
   virtual bool Visit(AST::FragTransfer&) = 0;
+  virtual bool Visit(AST::FragReduce&) = 0;
   virtual bool Visit(AST::ChunkAt&) = 0;
   virtual bool Visit(AST::Wait&) = 0;
   virtual bool Visit(AST::Trigger&) = 0;
@@ -620,6 +621,7 @@ public:
   bool Visit(AST::MMA&) override { return true; }
   bool Visit(AST::FragApply&) override { return true; }
   bool Visit(AST::FragTransfer&) override { return true; }
+  bool Visit(AST::FragReduce&) override { return true; }
   bool Visit(AST::ChunkAt&) override { return true; }
   bool Visit(AST::Wait&) override { return true; }
   bool Visit(AST::Trigger&) override { return true; }
@@ -1089,6 +1091,7 @@ private:
   bool Visit(AST::MMA&) final { return true; }
   bool Visit(AST::FragApply&) final { return true; }
   bool Visit(AST::FragTransfer&) final { return true; }
+  bool Visit(AST::FragReduce&) final { return true; }
   bool Visit(AST::ChunkAt&) final { return true; }
   bool Visit(AST::Wait&) final { return true; }
   bool Visit(AST::Trigger&) final { return true; }

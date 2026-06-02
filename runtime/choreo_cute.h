@@ -4240,6 +4240,69 @@ inplace_matrix_vectorx2_bop(ETy __restrict__* m, const ETy __restrict__* v0,
 } // end namespace warp_cooperative
 
 } // end namespace nv_cute
+
+// ---------------------------------------------------------------------------
+// AllReduce -- cross-thread butterfly reduction for fragment reductions.
+// Modeled after TileLang's AllReduce template (reduce.h).
+//
+// Template parameters:
+//   Reducer  - binary reduction functor (MaxOp, SumOp).
+//   threads  - number of threads spanning the reduce dimension.
+//   scale    - stride between participating threads (default 1).
+//
+// Uses __shfl_xor_sync for intra-warp rounds and shared memory for
+// cross-warp rounds (offset >= 32).
+// ---------------------------------------------------------------------------
+
+struct MaxOp {
+  template <typename T>
+  __device__ __forceinline__ T operator()(T x, T y) const {
+    return x > y ? x : y;
+  }
+};
+
+struct SumOp {
+  template <typename T>
+  __device__ __forceinline__ T operator()(T x, T y) const {
+    return x + y;
+  }
+};
+
+template <class Reducer, int threads, int scale = 1>
+struct AllReduce {
+  static_assert(threads % scale == 0, "threads must be divisible by scale");
+
+  template <typename T>
+  static __device__ __forceinline__ T run(T x, T* red_buf = nullptr) {
+    if constexpr (threads == scale) {
+      return x;
+    } else {
+      return butterfly(x, red_buf);
+    }
+  }
+
+private:
+  using Next = AllReduce<Reducer, threads / 2, scale>;
+
+  template <typename T>
+  static __device__ __forceinline__ T butterfly(T x, T* red_buf) {
+    constexpr int offset = threads / 2;
+    if constexpr (offset >= 32) {
+      __syncthreads();
+      red_buf[threadIdx.x] = x;
+      __syncthreads();
+      x = Reducer()(x, red_buf[threadIdx.x ^ offset]);
+    } else {
+      x = Reducer()(x, __shfl_xor_sync(0xffffffff, x, offset));
+    }
+    if constexpr (offset == scale) {
+      return x;
+    } else {
+      return Next::run(x, red_buf);
+    }
+  }
+};
+
 } // end namespace choreo
 
 #endif // __CHOREO_TARGET_CUTE__
