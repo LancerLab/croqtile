@@ -11,10 +11,10 @@ namespace Choreo {
 // Computed once by FragmentLayout::GetReduceParams() and consumed by any
 // target's codegen without the codegen needing to know the layout kind.
 struct ReduceParams {
-  size_t rows_per_thread = 0;  // outer loop bound
-  size_t local_cols = 0;       // inner loop bound (columns per row per thread)
-  size_t threads_per_row = 1;  // AllReduce width
-  size_t thread_count = 0;     // total threads (for workspace sizing)
+  size_t rows_per_thread = 0; // outer loop bound
+  size_t local_cols = 0;      // inner loop bound (columns per row per thread)
+  size_t threads_per_row = 1; // AllReduce width
+  size_t thread_count = 0;    // total threads (for workspace sizing)
 
   bool NeedsWorkspace() const { return threads_per_row > 32; }
 };
@@ -183,10 +183,9 @@ struct FragmentLayout {
       rp.threads_per_row = threads_per_row;
     } else if (kind == LayoutKind::UNIFORM && logical_cols > 1 &&
                thread_count > 0) {
-      rp.local_cols = std::max((size_t)1,
-                               logical_cols < thread_count
-                                   ? (size_t)1
-                                   : logical_cols / thread_count);
+      rp.local_cols = std::max((size_t)1, logical_cols < thread_count
+                                              ? (size_t)1
+                                              : logical_cols / thread_count);
       rp.threads_per_row = std::min(logical_cols, thread_count);
       rp.rows_per_thread =
           rp.local_cols > 0 ? regs_per_thread / rp.local_cols : 0;
@@ -202,11 +201,10 @@ struct FragmentLayout {
   // rv = column iteration variable (0..rp.local_cols-1).
   // row = row variable within thread (0..rp.rows_per_thread-1).
   // The formula is layout-kind-specific and emitted as a C++ string.
-  std::string ReduceLocalIndex(const std::string& row,
-                               const std::string& rv,
+  std::string ReduceLocalIndex(const std::string& row, const std::string& rv,
                                size_t local_cols) const {
     if (kind == LayoutKind::WGMMA_ACC) {
-      return "(((" + rv + " & 7) * 4) + (" + row + " * 2) + (" + rv + " >> 3))";
+      return "(((" + rv + " / 2) * 4) + (" + row + " * 2) + (" + rv + " % 2))";
     }
     if (kind == LayoutKind::UNIFORM) {
       return "(" + row + " * " + std::to_string(local_cols) + " + " + rv + ")";
@@ -279,14 +277,17 @@ struct FragmentLayout {
       return "(" + row + " * " + std::to_string(logical_cols) + " + " + col +
              ")";
     }
-    case LayoutKind::REPLICATED_1D:
-      return LogicalRowFromReg(r, tid);
+    case LayoutKind::REPLICATED_1D: return LogicalRowFromReg(r, tid);
     default: return "0";
     }
   }
 
   bool IsCompatible(const FragmentLayout& other) const {
-    if (kind != other.kind) return false;
+    auto wgmma_pair = [&](LayoutKind a, LayoutKind b) {
+      return (a == LayoutKind::WGMMA_ACC && b == LayoutKind::WGMMA_RS_A) ||
+             (a == LayoutKind::WGMMA_RS_A && b == LayoutKind::WGMMA_ACC);
+    };
+    if (kind != other.kind && !wgmma_pair(kind, other.kind)) return false;
     if (kind == LayoutKind::UNIFORM)
       return thread_count == other.thread_count && vec_width == other.vec_width;
     return logical_rows == other.logical_rows &&

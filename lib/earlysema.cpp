@@ -701,7 +701,12 @@ bool EarlySemantics::Visit(AST::CastExpr& n) {
                         target.Name() + "' (arch: " + arch + ").");
 
   // Derive the from-type from the child expression and validate.
-  auto r_type = NodeType(*n.GetR());
+  // Prefer the node's own type (set by DataAccess::Visit for element access)
+  // over the symbol-table lookup that NodeType() performs, since the latter
+  // returns the full SpannedType instead of the scalar element type.
+  auto r_type = n.GetR()->GetType() ? n.GetR()->GetType() : NodeType(*n.GetR());
+  if (auto spty = dyn_cast<SpannedType>(r_type))
+    r_type = MakeScalarType(spty->ElementType(), true);
   if (auto sty = dyn_cast<ScalarType>(r_type)) {
     auto from_type = sty->GetBaseType();
     n.SetFrom(from_type);
@@ -1908,10 +1913,26 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     }
 
   if (!isa<AST::Memory>(n.to)) {
-    if (!CompatibleRank(sty->Dims(), tty->Dims()) && !allow_auto_threading) {
+    size_t src_dims = sty->Dims();
+    bool has_view_or_sqz = false;
+    if (isa<AST::ChunkAt>(n.from)) {
+      auto from_ca = cast<AST::ChunkAt>(n.from);
+      for (auto& sop : from_ca->AllOperations()) {
+        if (isa<AST::SOP::View>(sop)) {
+          src_dims = cast<AST::SOP::View>(sop)->subspan->Count();
+          has_view_or_sqz = true;
+        }
+      }
+    }
+    // For async TMA (event-based), the source rank may differ from the
+    // declared type due to sqz()/view() on the definition chain. The TMA
+    // codegen validates rank independently via the descriptor setup.
+    bool is_tma_async = n.IsAsync() && n.HasEvent();
+    if (!CompatibleRank(src_dims, tty->Dims()) && !allow_auto_threading &&
+        !is_tma_async) {
       Error1(n.LOC(),
              "DMA statement has a rank mismatch between 'from' and 'to': " +
-                 std::to_string(sty->Dims()) +
+                 std::to_string(src_dims) +
                  " != " + std::to_string(tty->Dims()) + ".");
     }
     if (sty->ElementType() != tty->ElementType()) {
@@ -2007,14 +2028,15 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     if (op.FillingIsDecl()) {
       // `mc[1] = mma.fill 0;` is invalid.
       assert(!AST::FragIsArrayElem(op.FillingTo()));
+      auto fill_bt = op.FillingType();
       if (op.FillingArrayDims()) {
         auto arr_type = cast<ArrayType>(op.FillingArrayDims()->GetType());
         ReportErrorWhenViolateODR(
             n.LOC(), fill_sym, __FILE__, __LINE__,
-            MakeRankedSpannedArrayType(2, arr_type->dims));
+            MakeRankedSpannedArrayType(2, arr_type->dims, fill_bt));
       } else {
         ReportErrorWhenViolateODR(n.LOC(), fill_sym, __FILE__, __LINE__,
-                                  MakeRankedSpannedType(2));
+                                  MakeRankedSpannedType(2, fill_bt));
       }
       ReportErrorWhenViolateODR(n.LOC(), fill_sym + ".span", __FILE__, __LINE__,
                                 MakeRankedMDSpanType(2));

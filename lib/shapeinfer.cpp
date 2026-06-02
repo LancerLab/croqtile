@@ -759,10 +759,20 @@ bool ShapeInference::Visit(AST::Identifier& n) {
     // passed from the symbols
     switch (NodeValNoKind(n)) {
     case VNKind::VNK_UBOUND: {
-      if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName("@" + n.name)))
-        choreo_unreachable("value number of `" + SSTab().InScopeName(n.name) +
-                           "' has not been generated.");
-      cur_vn = GetValNum(SSTab().InScopeName("@" + n.name));
+      auto ub_name = SSTab().NameInScopeOrNull("@" + n.name);
+      if (!ub_name) {
+        auto ub_vi = GetSingleUpperBound(GetSymbolType(n.name));
+        auto ub_valno = GetOrGenValNum(vn.ValueItemToSignature(ub_vi, true));
+        DefineASymbol("@" + n.name, MakeIntegerType());
+        ub_name = SSTab().NameInScopeOrNull("@" + n.name);
+        assert(ub_name && "expected bounded alias symbol to be defined.");
+        SymbolAliasNum(*ub_name, ub_valno);
+      } else if (!vn.HasValueNumberOfSymbol(*ub_name)) {
+        auto ub_vi = GetSingleUpperBound(GetSymbolType(n.name));
+        auto ub_valno = GetOrGenValNum(vn.ValueItemToSignature(ub_vi, true));
+        SymbolAliasNum(*ub_name, ub_valno);
+      }
+      cur_vn = GetValNum(*ub_name);
       ast_vn.Update(&n, cur_vn, VNKind::VNK_UBOUND);
       if (!vn.HasValueNumberOfSymbol(SSTab().InScopeName(n.name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(n.name) +
@@ -1255,14 +1265,36 @@ bool ShapeInference::Visit(AST::MMA& n) {
   } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0)); // mc
-    std::string op1_sym = AST::FragName(op.ExecOperand(1)); // ma
-    std::string op2_sym = AST::FragName(op.ExecOperand(2)); // mb
-    auto fty = GetSpannedType(GetSymbolType(op1_sym));
-    assert(fty);
-    auto lspan = RemoveSuffix(SSTab().InScopeName(op1_sym), ".data") + ".span";
-    auto rspan = RemoveSuffix(SSTab().InScopeName(op2_sym), ".data") + ".span";
-    auto lsig = cast<MultiSigns>(SymbolSign(lspan));
-    auto rsig = cast<MultiSigns>(SymbolSign(rspan));
+    auto lhs_ty = GetSpannedType(op.ExecOperand(1)->GetType());
+    auto rhs_ty = GetSpannedType(op.ExecOperand(2)->GetType());
+    assert(lhs_ty && rhs_ty);
+    auto get_exec_operand_mds_valno = [&](const ptr<AST::Expr>& expr) -> NumTy {
+      if (HasValNo(*expr, VNKind::VNK_MDSPAN))
+        return GetValNo(*expr, VNKind::VNK_MDSPAN);
+      if (auto ref = expr->GetReference();
+          ref && HasValNo(*ref, VNKind::VNK_MDSPAN))
+        return GetValNo(*ref, VNKind::VNK_MDSPAN);
+      if (auto elemof = dyn_cast<AST::Expr>(expr.get());
+          elemof && elemof->op == Op::ElemOf) {
+        if (auto base = AST::GetArrayBaseSymbol(*elemof)) {
+          auto base_span = SSTab().InScopeName(base->name + ".span");
+          if (vn.HasValidValueNumberOfSymbol(base_span))
+            return GetValNum(base_span);
+        }
+      }
+      return NumTy::Invalid();
+    };
+    auto lhs_mds_vn = get_exec_operand_mds_valno(op.ExecOperand(1));
+    auto rhs_mds_vn = get_exec_operand_mds_valno(op.ExecOperand(2));
+    if (!lhs_mds_vn.IsValid() || !rhs_mds_vn.IsValid()) {
+      choreo_unreachable(
+          "can not find valno of node: " +
+          PSTR(!lhs_mds_vn.IsValid() ? op.ExecOperand(1) : op.ExecOperand(2)) +
+          ".");
+    }
+    auto lsig = vn.ToMSign(SignValNo(lhs_mds_vn));
+    auto rsig = vn.ToMSign(SignValNo(rhs_mds_vn));
+    assert(lsig && rsig);
     auto asig = m_sn();
     switch (op.GetMethod()) {
     case AST::MMAOperation::ROW_ROW:
@@ -1290,9 +1322,9 @@ bool ShapeInference::Visit(AST::MMA& n) {
     auto c_sty = GetSpannedType(GetSymbolType(op0_sym));
     auto c_elem = (c_sty && c_sty->ElementType() != BaseType::UNKSCALAR)
                       ? c_sty->ElementType()
-                      : fty->ElementType();
+                      : lhs_ty->ElementType();
     if (op.IsSparse()) {
-      auto a_elem = fty->ElementType();
+      auto a_elem = lhs_ty->ElementType();
       bool a_is_fp8 =
           a_elem == BaseType::F8_E4M3 || a_elem == BaseType::F8_E5M2 ||
           a_elem == BaseType::F8_UE4M3 || a_elem == BaseType::F8_UE8M0;
@@ -1492,6 +1524,50 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
 
       VST_DEBUG(dbgs() << " |-<sop: .sqz => .SpanAs(" << STR(mv)
                        << ")> block shape: " << STR(bshape)
+                       << ", strides: " << STR(cur_strd) << "\n");
+    } else if (isa<AST::SOP::View>(op)) {
+      auto view_op = cast<AST::SOP::View>(op);
+      auto sbs = view_op->GetSubSpan();
+      auto off = view_op->GetOffsets();
+      auto strd = view_op->GetStrides();
+      sbs_vns = vn.Flatten(GetValNo(*sbs));
+      if (strd) strd_vns = vn.Flatten(GetValNo(*strd));
+      if (off) off_vns = vn.Flatten(GetValNo(*off));
+
+      if (off) {
+        if (StaticFail(cur_vns.size() != off_vns.size())) {
+          Error1(op->LOC(),
+                 "data rank (" + std::to_string(cur_vns.size()) +
+                     ") must be consistent with offset index count (" +
+                     std::to_string(off_vns.size()) + ").");
+          return false;
+        }
+        for (size_t index = 0; index < cur_vns.size(); ++index) {
+          auto shi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+          auto ofi = vn.GenValueItemFromValueNumber(off_vns[index]);
+          if (StaticFail(sbe::clt(shi, ofi)))
+            Error1(off->LOC(), "offset out of bounds for dimension " +
+                                   std::to_string(index) + " (" + STR(ofi) +
+                                   " >= " + PSTR(shi) + ").");
+        }
+      }
+
+      // View replaces the current shape entirely (rank can change)
+      auto prev_strd = cur_strd;
+      cur_vns = sbs_vns;
+      auto bshape = GenShape(vn.MakePluralSign(cur_vns));
+      if (strd) {
+        cur_strd.clear();
+        for (auto stride_vn : strd_vns)
+          cur_strd.push_back(vn.GenValueItemFromValueNumber(stride_vn));
+      } else if (prev_strd.size() == cur_vns.size())
+        cur_strd = prev_strd;
+      else
+        cur_strd = bshape.GenDenseStrides();
+      op->SetBlockShape(bshape);
+      op->SetBlockStrides(cur_strd);
+
+      VST_DEBUG(dbgs() << " |-<sop: .view> block shape: " << STR(bshape)
                        << ", strides: " << STR(cur_strd) << "\n");
     } else {
       // when the code provides explicit tiling factors or subspan
@@ -1755,6 +1831,51 @@ bool ShapeInference::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
   if (cannot_proceed) return true;
+
+  if (n.IsExpr() && n.IsArith() && n.arguments && n.arguments->Count() == 2) {
+    const auto& func_name = n.function->name;
+    if (func_name == "__min" || func_name == "__max") {
+      auto lhs = n.arguments->ValueAt(0);
+      auto rhs = n.arguments->ValueAt(1);
+      auto select_item = [&](const ValueItem& lv, const ValueItem& rv) {
+        auto pred = (func_name == "__min") ? sbe::oc_lt(lv, rv)
+                                            : sbe::oc_gt(lv, rv);
+        return sbe::sel(pred, lv, rv)->Normalize();
+      };
+      auto get_item = [&](AST::Node& arg, VNKind kind) -> ValueItem {
+        auto valno = GetValNo(arg, kind);
+        if (!valno.IsValid()) return GetInvalidValueItem();
+        return vn.GenValueItemFromValueNumber(valno);
+      };
+
+      auto lhs_val = get_item(*lhs, VNKind::VNK_VALUE);
+      auto rhs_val = get_item(*rhs, VNKind::VNK_VALUE);
+      if (IsValidValueItem(lhs_val) && IsValidValueItem(rhs_val)) {
+        auto value_sign = vn.ValueItemToSignature(select_item(lhs_val, rhs_val),
+                                                  true);
+        auto value_no = GetOrGenValNum(value_sign);
+        ast_vn.Update(&n, value_no, VNKind::VNK_VALUE);
+        cur_vn = value_no;
+
+        if (NodeValNoKind(n) == VNKind::VNK_UBOUND) {
+          auto lhs_ub = get_item(*lhs, HasValNo(*lhs, VNKind::VNK_UBOUND)
+                                           ? VNKind::VNK_UBOUND
+                                           : VNKind::VNK_VALUE);
+          auto rhs_ub = get_item(*rhs, HasValNo(*rhs, VNKind::VNK_UBOUND)
+                                           ? VNKind::VNK_UBOUND
+                                           : VNKind::VNK_VALUE);
+          if (IsValidValueItem(lhs_ub) && IsValidValueItem(rhs_ub)) {
+            auto ub_sign = vn.ValueItemToSignature(select_item(lhs_ub, rhs_ub),
+                                                   true);
+            auto ub_no = GetOrGenValNum(ub_sign);
+            ast_vn.Update(&n, ub_no, VNKind::VNK_UBOUND);
+            cur_vn = ub_no;
+          }
+        }
+        return true;
+      }
+    }
+  }
 
 // the opts val of expr have been processed when visiting AST::Expr
 #if 0
@@ -2104,7 +2225,12 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   // if (isa<AST::ChunkAt>(n)) return false;
   if (isa<AST::StringLiteral>(n)) return false;
   if (isa<AST::DataAccess>(n)) return false;
-  if (isa<AST::Call>(n)) return false;
+  if (auto call = dyn_cast<AST::Call>(n)) {
+    return call->IsExpr() && call->IsArith() && call->arguments &&
+           call->arguments->Count() == 2 &&
+           (call->function->name == "__min" ||
+            call->function->name == "__max");
+  }
   if (isa<AST::DataType>(n)) return false;
   auto nty = NodeType(*n);
   if (!nty) {

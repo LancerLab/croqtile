@@ -239,7 +239,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr opt_stream_bind
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
@@ -2093,6 +2093,11 @@ frag_expr
       }
     ;
 
+mma_exec_operand_expr
+    : frag_expr { $$ = $1; }
+  | subdata_expr { $$ = AST::Make<AST::Expr>(@1, $1); }
+    ;
+
 mma_stmt
     : IDENTIFIER ASSIGN MMA FILL s_expr {
         // decl
@@ -2166,19 +2171,19 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>(AST::MMAOperation::LoadSTag{}, $3, $5, false);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method frag_expr COMMA frag_expr COMMA frag_expr {
+    | MMA mma_exec_method frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $3, $5, $7);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method SCALE frag_expr COMMA frag_expr COMMA frag_expr COMMA chunkat_expr COMMA s_expr {
+    | MMA mma_exec_method SCALE frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr COMMA chunkat_expr COMMA s_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, $12);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method SPARSE frag_expr COMMA frag_expr COMMA frag_expr COMMA frag_expr {
+    | MMA mma_exec_method SPARSE frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr COMMA frag_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, true);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA mma_exec_method SPARSE frag_expr COMMA frag_expr COMMA frag_expr {
+    | MMA mma_exec_method SPARSE frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, true);
         $$ = AST::Make<AST::MMA>(@1, op);
       }

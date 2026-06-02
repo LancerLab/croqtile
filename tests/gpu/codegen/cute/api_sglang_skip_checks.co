@@ -9,8 +9,8 @@ __co__ s32 [1] foo(s32 [1] a, s32 [1] b) {
   return out;
 }
 
+// CHECK-CFFI: #define __CHOREO_ENABLE_CUDA_RUNTIME_ENV_CHECK__
 // CHECK-CFFI: #define __CHOREO_REQUIRED_GPU_DEVICE_SM__
-// CHECK-CFFI: static inline void __choreo_check_cuda_environment__()
 // CHECK-CFFI: foo(
 // CHECK-CFFI: __choreo_check_cuda_environment__();
 

@@ -498,8 +498,14 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
     auto pick_extent = [&](int dim) -> ValueItem {
       auto f = eff_f_shape.ValueAt(dim);
       auto t = eff_t_shape.ValueAt(dim);
-      if (n.operation == ".pad") return VIIsInt(f) ? f : t;
-      return t;
+      auto resolve_parent_dim = [&](const ValueItem& preferred,
+                                    const ValueItem& fallback) {
+        if (STR(preferred) == "::__choreo_parent_dim__") return fallback;
+        return preferred;
+      };
+      if (n.operation == ".pad")
+        return resolve_parent_dim(VIIsInt(f) ? f : t, t);
+      return resolve_parent_dim(t, f);
     };
     auto dyn_m = pick_extent(0);
     auto dyn_n = pick_extent(1);

@@ -1119,10 +1119,9 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
           op.SetSwizzleMode(dma_swizzle);
           auto tensor_name = load_from->RefSymbol();
           auto dma_label = dma->IsTMA() ? "TMA" : "DMA";
-          Note(n.LOC(),
-               std::string("inferred mma.load swizzle '") +
-                   STR(dma_swizzle) + "' from " + dma_label +
-                   " swizzle for tensor '" + tensor_name + "'.");
+          Note(n.LOC(), std::string("inferred mma.load swizzle '") +
+                            STR(dma_swizzle) + "' from " + dma_label +
+                            " swizzle for tensor '" + tensor_name + "'.");
         }
       }
 
@@ -1560,6 +1559,18 @@ bool SemaChecker::VisitNode(AST::Call& n) {
     }
     if (n.IsArith()) {
       auto pty = NodeType(*n.arguments->ValueAt(0));
+      if ((n.function->name == "__min" || n.function->name == "__max") &&
+          CanYieldAnInteger(pty)) {
+        for (size_t i = 1; i < n.arguments->Count(); ++i) {
+          auto sty = NodeType(*n.arguments->ValueAt(i));
+          if (!CanYieldAnInteger(sty))
+            Error1(n.LOC(),
+                   "expect the " + std::to_string(i) +
+                       "th argument to be an integer-compatible type.");
+        }
+        return true;
+      }
+
       if (!(isa<ScalarFloatType>(pty) || isa<VectorType>(pty)))
         Error1(
             n.LOC(),

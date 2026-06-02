@@ -669,6 +669,7 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   end_idx = std::min(end_idx, ca->OpCount());
 
   sbe::ExprSum offset;
+  auto cur_strd = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetStrides();
 
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
@@ -681,10 +682,13 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
       auto blk = sop->GetBlockShape();
       for (size_t dim = 0; dim < vals.size(); ++dim)
         offset += vals[dim] * blk.ValueAt(dim) * strd[dim];
+      cur_strd = strd;
     } else if (auto off_mv = sop->GetOffsets()) {
       auto& vals = off_mv->Opts().GetVals();
+      auto off_strd = strd;
       for (size_t dim = 0; dim < vals.size(); ++dim)
-        offset += vals[dim] * strd[dim];
+        offset += vals[dim] * off_strd[dim];
+      cur_strd = strd;
     }
   }
 

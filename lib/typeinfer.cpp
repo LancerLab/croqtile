@@ -14,6 +14,21 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
 
   if (auto b = dyn_cast<AST::BoolLiteral>(n)) return sbe::bl(b->Val());
   if (auto i = dyn_cast<AST::IntLiteral>(n)) return sbe::nu(i->Val());
+  if (auto c = dyn_cast<AST::Call>(n)) {
+    if (c->IsExpr() && c->IsArith() && c->arguments &&
+        c->arguments->Count() == 2 &&
+        (c->function->name == "__min" || c->function->name == "__max")) {
+      auto lhs = BuildPredicate(ti, c->arguments->ValueAt(0));
+      auto rhs = BuildPredicate(ti, c->arguments->ValueAt(1));
+      if (!IsValidValueItem(lhs) || !IsValidValueItem(rhs))
+        return GetInvalidValueItem();
+
+      auto pred = (c->function->name == "__min") ? sbe::oc_lt(lhs, rhs)
+                                                   : sbe::oc_gt(lhs, rhs);
+      return sbe::sel(pred, lhs, rhs)->Normalize();
+    }
+    return GetInvalidValueItem();
+  }
   if (auto id = dyn_cast<AST::Identifier>(n))
     return sbe::sym(ti->InScopeName(id->name));
   if (auto idx = dyn_cast<AST::IntIndex>(n))
@@ -1110,6 +1125,22 @@ bool TypeInference::Visit(AST::MMA& n) {
                                                  acc_aty->Dimensions()));
     } else
       ModifySymbolType(acc->LOC(), acc_sym, res_sty);
+
+    auto refresh_array_ref_types = [&](const ptr<AST::Node>& node,
+                                       auto&& self) -> void {
+      if (auto id = dyn_cast<AST::Identifier>(node)) {
+        SetNodeType(*id, GetSymbolType(id->LOC(), id->name));
+        return;
+      }
+      auto expr = dyn_cast<AST::Expr>(node);
+      if (!expr || expr->op != Op::ElemOf) return;
+      self(expr->GetL(), self);
+      auto lty = NodeType(*expr->GetL());
+      if (auto aty = dyn_cast<ArrayType>(lty))
+        SetNodeType(*expr, aty->RemainderType(1));
+    };
+    refresh_array_ref_types(acc, refresh_array_ref_types);
+    SetNodeType(*acc, res_sty->Clone());
     SetNodeType(n, res_sty);
     auto mdspan_ty = res_sty->GetMDSpanType()->Clone();
     ModifySymbolType(acc->LOC(), acc_sym + ".span", mdspan_ty);

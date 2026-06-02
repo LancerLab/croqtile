@@ -234,10 +234,13 @@ private:
   std::string deferred_spm_decls;
   std::deque<std::string> recent_tma_tx_bytes;
   bool has_pending_wgmma_finalize = false;
+  std::string pending_wgmma_acc_sym;
   bool has_explicit_mma_wait = false;
   bool wgmma_arrive_state_declared = false;
   std::set<std::string> cluster_trigger_events_;
   std::set<std::string> event_arrive_tx_events_;
+  std::vector<std::string> pending_barrier_inits_;
+  bool in_named_var_decl_ = false;
   bool has_analyzed_warpspec = false;
   bool warpspec_wgmma_arrived = false;
   AST::InThreadsBlock* current_inthreads = nullptr;
@@ -247,6 +250,15 @@ private:
   std::string reg_loop_var_;
   std::map<std::string, std::string> automap_frag_reg_expr_;
   std::map<std::string, std::string> frag_apply_iv_map_;
+  // Maps scoped IV name -> preferred upper-bound C++ expression.
+  // Populated in Visit(WithIn) when the range source is a declared variable.
+  std::map<std::string, std::string> iv_upper_bound_expr_;
+
+  // Maps normalized ValueSTR output -> declared C++ variable name.
+  // Populated when an `auto var = expr;` declaration is emitted.
+  // OpValueSTR checks this to reuse the name instead of re-expanding
+  // complex subexpressions (e.g. kv_tiles inside kv_bound's ternary).
+  std::unordered_map<std::string, std::string> known_val_str_to_var_;
 
   AutomapStrategy AnalyzeAutomap(const AST::ForeachBlock& n);
 
@@ -286,6 +298,7 @@ private:
   std::unordered_map<std::string, FragChunkRSInfo> frag_chunk_rs_aliases_;
 
 private:
+  void FlushBarrierInits();
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
   void EmitFastCompileCache(std::ostream& os, const std::string& precomp_cu);
@@ -350,7 +363,6 @@ private:
   // emit mem reuse script for each device function.
   void EmitMemReuse(const std::string& dev_func_name);
   void EmitCudaFree();
-  void EmitRuntimeEnvironmentChecker(std::ostream&) const;
   void EmitDebugSpannedRTTI(std::ostringstream& os, const std::string& indent,
                             const std::string& sym, const ptr<SpannedType>& sty,
                             const std::string& data_expr,
@@ -418,6 +430,8 @@ private:
     shared_buf_swiz_.clear();
     frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
+    pending_barrier_inits_.clear();
+    in_named_var_decl_ = false;
     emitted_device_names_.clear();
     ResetLineDirectiveState();
   }
