@@ -4,9 +4,71 @@
 // This apply the type check and symbol table generation
 
 #include "codegen.hpp"
+#include "context.hpp"
 #include "target_utils.hpp"
 
 namespace Choreo {
+
+namespace {
+
+size_t BlockSharedMemBytes(const std::string& co_fname,
+                           const std::string& dev_scope, const FuncTrait& trait,
+                           const LaunchConfig& lc) {
+  size_t bytes = 0;
+  if (auto mri = FCtx(co_fname).GetStaticMemReuseInfo(dev_scope)) {
+    if (mri->infos.count(Storage::SHARED))
+      bytes = mri->infos.at(Storage::SHARED).spm_size;
+  }
+  // Event barriers use static __shared__ storage outside the mem-reuse heap.
+  bytes += trait.event_decls.size() * 128;
+  if (trait.has_async_dma) {
+    auto group_count = lc.group_count.x * lc.group4_count.x * lc.group_count.y *
+                       lc.group_count.z;
+    if (auto g = VIInt(group_count); g && *g > 0) bytes += *g * 8;
+  }
+  // Alignment / barrier slop for codegen padding.
+  bytes += 2048;
+  return bytes;
+}
+
+void InferLaunchBoundsMinBlocks(const std::string& co_fname,
+                                const std::string& dev_scope,
+                                CodeGenInfo& cgi) {
+  auto& trait = cgi.GetFunctionTrait(co_fname);
+  if (!trait.has_warpspec_pattern) return;
+
+  const auto& lcs = cgi.GetFunctionLaunches(co_fname);
+  if (lcs.empty()) return;
+  const auto& lc = lcs.back();
+
+  auto inner_thr_count =
+      lc.thread_count.x * lc.thread_count.y * lc.thread_count.z;
+  auto group_count = lc.group_count.x * lc.group4_count.x * lc.group_count.y *
+                     lc.group_count.z;
+  auto thr_opt = VIInt(inner_thr_count * group_count);
+  if (!thr_opt || *thr_opt <= 0) return;
+
+  const int64_t thr_count = *thr_opt;
+  const size_t smem_bytes = BlockSharedMemBytes(co_fname, dev_scope, trait, lc);
+  if (smem_bytes == 0) return;
+
+  const size_t smem_cap = CCtx().GetMemCapacity(Storage::SHARED);
+  const int64_t max_by_smem = smem_cap / smem_bytes;
+
+  // Register budget for dual occupancy: 65536 regs/SM, target <=128
+  // regs/thread.
+  constexpr int64_t k_regs_per_sm = 65536;
+  constexpr int64_t k_regs_per_thread_for_dual_occ = 128;
+  const int64_t max_by_regs =
+      k_regs_per_sm / (thr_count * k_regs_per_thread_for_dual_occ);
+
+  int64_t min_blocks = 1;
+  if (max_by_smem >= 2 && max_by_regs >= 2) min_blocks = 2;
+
+  trait.inferred_launch_bounds_min_blocks = min_blocks;
+}
+
+} // namespace
 
 struct FutureAnalysis : public CodeGenerator {
 private:
@@ -166,6 +228,8 @@ private:
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       auto lvl = pb->GetLevel();
       assert(lvl == Level());
+      if (lvl == ParallelLevel::BLOCK && pb->IsDeviceEntry())
+        InferLaunchBoundsMinBlocks(fname, SSTab().ScopeName(), cgi);
       pb_stack.pop_back();
       if (lvl == ParallelLevel::BLOCK) {
         assert(pb_stack.empty() ||

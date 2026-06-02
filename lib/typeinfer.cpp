@@ -24,7 +24,7 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
         return GetInvalidValueItem();
 
       auto pred = (c->function->name == "__min") ? sbe::oc_lt(lhs, rhs)
-                                                   : sbe::oc_gt(lhs, rhs);
+                                                 : sbe::oc_gt(lhs, rhs);
       return sbe::sel(pred, lhs, rhs)->Normalize();
     }
     return GetInvalidValueItem();
