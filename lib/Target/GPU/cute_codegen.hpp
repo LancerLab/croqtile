@@ -276,6 +276,14 @@ private:
   std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
   std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
+  std::unordered_map<std::string, SwizMode> shared_buf_swiz_;
+
+  struct FragChunkRSInfo {
+    std::string parent_c_sym;
+    std::string offset_var;
+    size_t regs_per_step = 0;
+  };
+  std::unordered_map<std::string, FragChunkRSInfo> frag_chunk_rs_aliases_;
 
 private:
   void EmitFixedHostHead();
@@ -407,6 +415,8 @@ private:
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();
     live_chunk_aliases.clear();
+    shared_buf_swiz_.clear();
+    frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
     emitted_device_names_.clear();
     ResetLineDirectiveState();

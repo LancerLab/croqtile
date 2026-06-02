@@ -1,6 +1,7 @@
 #ifndef __CHOREO_AST_HPP__
 #define __CHOREO_AST_HPP__
 
+#include <cmath>
 #include <memory>
 #include <numeric>
 #include <sstream>
@@ -642,12 +643,20 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
       auto f32 = std::get<float>(value);
       if (IsUnKnownFloatPoint(f32))
         oss << prefix << "?";
+      else if (std::isinf(f32))
+        oss << prefix << (f32 < 0 ? "(-INFINITY)" : "INFINITY");
+      else if (std::isnan(f32))
+        oss << prefix << "NAN";
       else
         oss << prefix << std::fixed << f32 << "f";
     } else if (IsFloat64()) {
       auto f64 = std::get<double>(value);
       if (IsUnKnownFloatPoint(f64))
         oss << prefix << "?";
+      else if (std::isinf(f64))
+        oss << prefix << (f64 < 0 ? "(-INFINITY)" : "INFINITY");
+      else if (std::isnan(f64))
+        oss << prefix << "NAN";
       else
         oss << prefix << std::fixed << f64;
     } else {
@@ -3102,8 +3111,7 @@ public:
 
   void SetSwizzleMode(SwizMode sm) {
     if (!IsLoad()) choreo_unreachable("not a mma load operation.");
-    auto l_info = std::get<1>(info);
-    l_info.swiz_mode = sm;
+    std::get<1>(info).swiz_mode = sm;
   }
 
   Kind Tag() const { return tag; }

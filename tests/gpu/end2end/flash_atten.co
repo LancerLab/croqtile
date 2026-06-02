@@ -1,0 +1,196 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#define DIM 64
+#define BLOCK_M 64
+#define BLOCK_N 64
+
+// Multi-head attention: O = softmax(Q @ K^T / sqrt(d)) @ V.
+// Q/O layout: [B, H, Q_SEQ, DIM].  K/V layout: [B, H, KV_SEQ, DIM].
+// Supports causal masking with past_len = KV_SEQ - Q_SEQ.
+__co__ auto flash_atten(
+  f16[B, H, Q_SEQ, DIM] Q, f16[B, H, KV_SEQ, DIM] K,
+  f16[B, H, KV_SEQ, DIM] V, bool is_causal
+) {
+  f16[B, H, Q_SEQ, DIM] O;
+  int WARP_K = 16;
+  float scale = 0.18033688f;  // 1/sqrt(DIM) * log2(e)
+  int past_len = KV_SEQ - Q_SEQ;
+
+  parallel {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
+    parallel pw by 1 : group-4 {
+      Q_head = Q.subspan(1, 1, Q_SEQ, DIM).at(batch, head, 0, 0).sqz();
+      K_head = K.subspan(1, 1, KV_SEQ, DIM).at(batch, head, 0, 0).sqz();
+      V_head = V.subspan(1, 1, KV_SEQ, DIM).at(batch, head, 0, 0).sqz();
+      O_head = O.subspan(1, 1, Q_SEQ, DIM).at(batch, head, 0, 0).sqz();
+
+      q_s = dma.copy.swiz<128>
+        Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => shared;
+
+      fragment f16[BLOCK_M, BLOCK_N] acc_s_cast;
+      fragment f32[BLOCK_M] scores_max {-inf};
+      fragment f32[BLOCK_M] scores_max_prev;
+      fragment f32[BLOCK_M] scores_scale;
+      fragment f32[BLOCK_M] scores_sum;
+      fragment f32[BLOCK_M] logsum {0.0f};
+      acc_o = mma.fill.f32 0.0f;
+
+      kv_tiles = cdiv(KV_SEQ, BLOCK_N);
+      kv_causal = cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N);
+      kv_bound = is_causal
+        ? (kv_causal < kv_tiles ? kv_causal : kv_tiles)
+        : kv_tiles;
+      foreach {bn} in [kv_bound] {
+        acc_s = mma.fill.f32 0.0f;
+        k_s = dma.copy.swiz<128>
+          K_head.subspan(BLOCK_N, DIM).at(bn, 0) => shared;
+        foreach {iv_k1} in [cdiv(DIM, WARP_K)] {
+          ma1 = mma.loadS q_s.chunkat(_, iv_k1);
+          mb1 = mma.loadS k_s.chunkat(_, iv_k1);
+          mma.row.row acc_s, ma1, mb1;
+        }
+
+        if (is_causal) {
+          frag.apply acc_s, [](i, j) {
+            return ((bn * BLOCK_N + j) > (bm * BLOCK_M + i + past_len))
+              ? -inf : acc_s.at(i, j);
+          };
+        }
+
+        frag.copy scores_max_prev, scores_max;
+        frag.reduce_max acc_s, scores_max, 1;
+        frag.apply scores_max, [](i) {
+          return __max(scores_max.at(i), scores_max_prev.at(i));
+        };
+        frag.apply scores_scale, [](i) {
+          return __exp2f(scores_max_prev.at(i) * scale - scores_max.at(i) * scale);
+        };
+        frag.apply acc_s, [](i, j) {
+          return __exp2f(acc_s.at(i, j) * scale - scores_max.at(i) * scale);
+        };
+        frag.reduce_sum acc_s, scores_sum, 1;
+        frag.apply logsum, [](i) {
+          return logsum.at(i) * scores_scale.at(i) + scores_sum.at(i);
+        };
+        frag.apply acc_o, [](i, j) {
+          return acc_o.at(i, j) * scores_scale.at(i);
+        };
+        frag.apply acc_s_cast, [](i, j) {
+          return __to<f16>(acc_s.at(i, j));
+        };
+
+        v_s = dma.copy.swiz<128> V_head.subspan(BLOCK_N, DIM).at(bn, 0) => shared;
+        foreach {iv_k2} in [cdiv(BLOCK_N, WARP_K)] {
+          ma2 = acc_s_cast.chunkat(_, iv_k2);
+          mb2 = mma.loadS v_s.chunkat(iv_k2, _);
+          mma.row.col acc_o, ma2, mb2;
+        }
+      }
+
+      frag.apply acc_o, [](i, j) {
+        return acc_o.at(i, j) / logsum.at(i);
+      };
+      mma.store acc_o, O_head.subspan(BLOCK_M, DIM).at(bm, 0);
+    }
+  }
+  return O;
+}
+
+int main() {
+  const int B = 2, H = 2, Q_SEQ = 100, KV_SEQ = 100;
+  const float scale = 1.0f / sqrtf((float)DIM) * 1.44269504f;  // log2(e)/sqrt(d)
+  auto Q = choreo::make_spandata<choreo::f16>(B, H, Q_SEQ, DIM);
+  auto K = choreo::make_spandata<choreo::f16>(B, H, KV_SEQ, DIM);
+  auto V = choreo::make_spandata<choreo::f16>(B, H, KV_SEQ, DIM);
+  srand(42);
+  auto randf = [](float lo, float hi) {
+    return lo + (float)rand() / RAND_MAX * (hi - lo);
+  };
+  for (int b = 0; b < B; b++)
+    for (int h = 0; h < H; h++) {
+      for (int i = 0; i < Q_SEQ; i++)
+        for (int j = 0; j < DIM; j++)
+          Q[b][h][i][j] = __float2half(randf(-0.5f, 0.5f));
+      for (int i = 0; i < KV_SEQ; i++)
+        for (int j = 0; j < DIM; j++) {
+          K[b][h][i][j] = __float2half(randf(-0.5f, 0.5f));
+          V[b][h][i][j] = __float2half(randf(-1.0f, 1.0f));
+        }
+    }
+
+  const int KV_SEQ_PAD = ((KV_SEQ + BLOCK_N - 1) / BLOCK_N) * BLOCK_N;
+  const int past_len = KV_SEQ - Q_SEQ;
+
+  auto test = [&](bool is_causal, const char* label) {
+    auto O = flash_atten(Q.view(), K.view(), V.view(), is_causal);
+
+    float max_err = 0.0f;
+    int fail_count = 0;
+    for (int b = 0; b < B; b++)
+      for (int h = 0; h < H; h++) {
+        const int CPAD = is_causal ? KV_SEQ : KV_SEQ_PAD;
+        std::vector<float> scores(Q_SEQ * CPAD, 0.0f);
+        for (int i = 0; i < Q_SEQ; i++)
+          for (int j = 0; j < KV_SEQ; j++) {
+            if (is_causal && j > i + past_len) continue;
+            float sum = 0.0f;
+            for (int k = 0; k < DIM; k++)
+              sum += __half2float(Q[b][h][i][k]) * __half2float(K[b][h][j][k]);
+            scores[i * CPAD + j] = sum;
+          }
+
+        std::vector<float> row_max(Q_SEQ), lsum(Q_SEQ);
+        for (int i = 0; i < Q_SEQ; i++) {
+          row_max[i] = -1e30f;
+          int jmax = is_causal ? std::min(i + 1 + past_len, KV_SEQ) : CPAD;
+          for (int j = 0; j < jmax; j++)
+            row_max[i] = std::max(row_max[i], scores[i * CPAD + j]);
+          lsum[i] = 0.0f;
+          for (int j = 0; j < jmax; j++) {
+            scores[i * CPAD + j] = exp2f(scores[i * CPAD + j] * scale - row_max[i] * scale);
+            lsum[i] += scores[i * CPAD + j];
+          }
+        }
+
+        std::vector<float> scores_f16(Q_SEQ * CPAD);
+        for (int i = 0; i < Q_SEQ * CPAD; i++)
+          scores_f16[i] = __half2float(__float2half(scores[i]));
+
+        for (int i = 0; i < Q_SEQ; i++)
+          for (int j = 0; j < DIM; j++) {
+            float sum = 0.0f;
+            int kmax = is_causal ? std::min(i + 1 + past_len, KV_SEQ) : KV_SEQ;
+            for (int k = 0; k < kmax; k++)
+              sum += scores_f16[i * CPAD + k] * __half2float(V[b][h][k][j]);
+            float ref = sum / lsum[i];
+            float got = __half2float(O[b][h][i][j]);
+            float err = fabsf(got - ref);
+            float rel = err / (fabsf(ref) + 1e-6f);
+            if (err > max_err) max_err = err;
+            if (rel > 0.05f && err > 0.01f) {
+              if (fail_count < 5)
+                std::cout << "MISMATCH " << label << " [" << b << ","
+                          << h << "," << i << "," << j
+                          << "] got=" << got << " ref=" << ref
+                          << " err=" << err << " rel=" << rel << "\n";
+              fail_count++;
+            }
+          }
+      }
+    if (fail_count == 0)
+      std::cout << label << " Passed\n";
+    else
+      std::cout << label << " FAILED (" << fail_count
+                << " mismatches, max_err=" << max_err << ")\n";
+    return fail_count == 0;
+  };
+
+  bool ok = true;
+  ok &= test(false, "non-causal");
+  ok &= test(true, "causal");
+  if (ok) std::cout << "Test flash_atten Passed\n";
+}
+
+// CHECK: non-causal Passed
+// CHECK: causal Passed
+// CHECK: Test flash_atten Passed

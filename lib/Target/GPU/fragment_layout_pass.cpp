@@ -31,6 +31,8 @@ std::string FragmentLayoutPass::EffectiveThreadCountExpr() const {
 bool FragmentLayoutPass::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     usages_.clear();
+    copy_edges_.clear();
+    apply_refs_.clear();
     current_thread_count_ = 0;
     current_thread_count_expr_.clear();
     current_inthreads_ = nullptr;
@@ -133,6 +135,49 @@ bool FragmentLayoutPass::Visit(AST::FragReduce& n) {
     usages_[dst_scoped].reduce_source = src_scoped;
   }
 
+  return true;
+}
+
+bool FragmentLayoutPass::Visit(AST::FragTransfer& n) {
+  if (n.op != AST::FragTransferKind::COPY) return true;
+  auto dst_scoped = InScopeName(n.DstName());
+  auto src_scoped = InScopeName(n.SrcName());
+  copy_edges_.emplace_back(dst_scoped, src_scoped);
+  return true;
+}
+
+void FragmentLayoutPass::CollectBodyRefs(const ptr<AST::Node>& node,
+                                         std::vector<std::string>& refs) {
+  if (!node) return;
+  if (auto da = dyn_cast<AST::DataAccess>(node)) {
+    if (da->AccessElement()) {
+      auto sc = InScopeNameForRef(da->data->name);
+      if (usages_.count(sc)) refs.push_back(sc);
+    }
+    return;
+  }
+  if (auto expr = dyn_cast<AST::Expr>(node)) {
+    if (expr->GetL()) CollectBodyRefs(expr->GetL(), refs);
+    if (expr->GetR()) CollectBodyRefs(expr->GetR(), refs);
+    if (expr->GetC()) CollectBodyRefs(expr->GetC(), refs);
+    return;
+  }
+  if (auto call = dyn_cast<AST::Call>(node)) {
+    if (call->arguments)
+      for (auto& a : call->arguments->AllValues()) CollectBodyRefs(a, refs);
+    return;
+  }
+  if (auto cast_expr = dyn_cast<AST::CastExpr>(node)) {
+    if (cast_expr->GetR()) CollectBodyRefs(cast_expr->GetR(), refs);
+    return;
+  }
+}
+
+bool FragmentLayoutPass::Visit(AST::FragApply& n) {
+  auto target_scoped = InScopeName(n.TargetName());
+  std::vector<std::string> refs;
+  CollectBodyRefs(n.body, refs);
+  if (!refs.empty()) apply_refs_[target_scoped] = std::move(refs);
   return true;
 }
 
@@ -241,6 +286,71 @@ void FragmentLayoutPass::AssignLayouts() {
       if (tc_expr.empty()) tc_expr = "blockDim.x";
       auto fl = FragmentLayout::MakeUniform(total, tc, tc_expr);
       FCtx(fname).SetFragmentLayout(scoped, fl);
+    }
+  }
+
+  // Third pass: propagate layouts through frag.copy and frag.apply edges.
+  // Fragments that got UNIFORM but should inherit REPLICATED_1D or MMA layout
+  // from related fragments are re-assigned here (fixpoint iteration).
+  bool changed = true;
+  int max_iters = 10;
+  while (changed && max_iters-- > 0) {
+    changed = false;
+
+    // Propagate through frag.copy: both operands share the same layout.
+    for (auto& [dst, src] : copy_edges_) {
+      if (!FCtx(fname).HasFragmentLayout(src)) continue;
+      if (!FCtx(fname).HasFragmentLayout(dst)) continue;
+      auto& src_fl = FCtx(fname).GetFragmentLayout(src);
+      auto& dst_fl = FCtx(fname).GetFragmentLayout(dst);
+      if (dst_fl.kind == LayoutKind::UNIFORM &&
+          src_fl.kind != LayoutKind::UNIFORM) {
+        FCtx(fname).SetFragmentLayout(dst, src_fl);
+        changed = true;
+      } else if (src_fl.kind == LayoutKind::UNIFORM &&
+                 dst_fl.kind != LayoutKind::UNIFORM) {
+        FCtx(fname).SetFragmentLayout(src, dst_fl);
+        changed = true;
+      }
+    }
+
+    // Propagate through frag.apply body references.
+    for (auto& [target, refs] : apply_refs_) {
+      if (!FCtx(fname).HasFragmentLayout(target)) continue;
+      auto& tgt_fl = FCtx(fname).GetFragmentLayout(target);
+      if (tgt_fl.kind != LayoutKind::UNIFORM) continue;
+
+      for (auto& ref : refs) {
+        if (ref == target) continue;
+        if (!FCtx(fname).HasFragmentLayout(ref)) continue;
+        auto& ref_fl = FCtx(fname).GetFragmentLayout(ref);
+        if (ref_fl.kind == LayoutKind::UNIFORM) continue;
+
+        // 1D target referencing a 2D MMA acc -> REPLICATED_1D.
+        if (usages_.count(target) && usages_[target].shape.size() == 1 &&
+            ref_fl.IsMMAAnchored()) {
+          auto fl = FragmentLayout::MakeReduceDst(ref_fl);
+          FCtx(fname).SetFragmentLayout(target, fl);
+          changed = true;
+          break;
+        }
+        // 2D target with same shape as MMA acc -> inherit WGMMA_ACC layout.
+        if (usages_.count(target) && usages_[target].shape.size() == 2 &&
+            ref_fl.kind == LayoutKind::WGMMA_ACC &&
+            usages_[target].shape[0] == (size_t)ref_fl.logical_rows &&
+            usages_[target].shape[1] == (size_t)ref_fl.logical_cols) {
+          FCtx(fname).SetFragmentLayout(target, ref_fl);
+          changed = true;
+          break;
+        }
+        // Same-shape 1D fragments inherit REPLICATED_1D from peers.
+        if (ref_fl.kind == LayoutKind::REPLICATED_1D &&
+            usages_.count(target) && usages_[target].shape.size() == 1) {
+          FCtx(fname).SetFragmentLayout(target, ref_fl);
+          changed = true;
+          break;
+        }
+      }
     }
   }
 
