@@ -1914,15 +1914,11 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 
   if (!isa<AST::Memory>(n.to)) {
     size_t src_dims = sty->Dims();
-    bool has_view_or_sqz = false;
     if (isa<AST::ChunkAt>(n.from)) {
       auto from_ca = cast<AST::ChunkAt>(n.from);
-      for (auto& sop : from_ca->AllOperations()) {
-        if (isa<AST::SOP::View>(sop)) {
+      for (auto& sop : from_ca->AllOperations())
+        if (isa<AST::SOP::View>(sop))
           src_dims = cast<AST::SOP::View>(sop)->subspan->Count();
-          has_view_or_sqz = true;
-        }
-      }
     }
     // For async TMA (event-based), the source rank may differ from the
     // declared type due to sqz()/view() on the definition chain. The TMA
