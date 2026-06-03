@@ -162,7 +162,7 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
     else if (fl->IsFloat64())
       fp_val << std::fixed << fl->Val_f64();
     else
-      choreo_unreachable("unsupported float literal.");
+      fp_val << "0.0f";
     oss << fp_val.str();
   } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
     oss << sl->EscapedVal();
@@ -946,6 +946,8 @@ bool CCCodeGen::Visit(AST::WithBlock& n) {
 bool CCCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
+  bool vectorizable = n.loop && n.loop->CanVectorize();
+
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
     auto cname = rng->IVName();
@@ -954,6 +956,7 @@ bool CCCodeGen::Visit(AST::ForeachBlock& n) {
       auto iv_bty = dyn_cast<BoundedType>(iv_ty);
       assert(iv_bty && "foreach IV should have bounded type.");
       auto mapped = ssm.HostName(iv_name);
+      if (vectorizable) IndStream() << "#pragma omp simd\n";
       IndStream() << "for (" << mapped << " = "
                   << (rng->lbound ? ("(" + ExprSTR(rng->lbound) + ")")
                                   : std::string("0"))
@@ -1626,7 +1629,7 @@ RPATH_FLAG=""
 if [ -n "$CXX_LIBDIR" ] && [ -d "$CXX_LIBDIR" ]; then
   RPATH_FLAG="-Wl,-rpath,$CXX_LIBDIR"
 fi
-CFLAGS="-std=c++17 -O2 -pthread -I)script"
+CFLAGS="-std=c++17 -O2 -pthread -fopenmp-simd -I)script"
       << build_path << R"script("
 
 show_usage() {

@@ -49,7 +49,15 @@ public:
         {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
         {STR(ChoreoFeature::LIBCALL), Description(ChoreoFeature::LIBCALL)},
+        {STR(ChoreoFeature::VECTORIZE), Description(ChoreoFeature::VECTORIZE)},
     };
+  }
+
+  size_t GetVectorLength(const ArchId&) const override { return 8; }
+  size_t VectorizeLimit(const ArchId&) const override { return 8; }
+
+  const std::set<BaseType> VectorizableTypes(const ArchId&) const override {
+    return {BaseType::F32, BaseType::F64, BaseType::S32, BaseType::S64};
   }
 
   bool IsLibCallSupported(const std::string& name) const override {
