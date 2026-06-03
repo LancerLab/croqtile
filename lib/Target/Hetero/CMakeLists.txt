@@ -4,9 +4,10 @@ set(HETERO_TARGET_SOURCES
 )
 
 add_library(HeteroTarget OBJECT ${HETERO_TARGET_SOURCES})
+add_dependencies(HeteroTarget cpu_deps)
 
 target_include_directories(HeteroTarget
   PUBLIC include
   PRIVATE ${CMAKE_SOURCE_DIR}
-  PRIVATE ${CMAKE_SOURCE_DIR}/lib/Target/CC
+  PRIVATE ${CMAKE_SOURCE_DIR}/lib/Target/CPU
 )
