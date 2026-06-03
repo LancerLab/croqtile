@@ -7,7 +7,6 @@
 #include <sstream>
 
 #include "ast.hpp"
-#include "choreo_cc_header.inc"
 #include "choreo_header.inc"
 #include "choreo_types_header.inc"
 #include "codegen.hpp"
@@ -22,7 +21,6 @@ using namespace Choreo::Hetero;
 
 void HeteroCodeGen::EmitPreamble() {
   os << "#include \"choreo.h\"\n";
-  os << "#include \"choreo_cc.h\"\n";
   os << "#include <cstring>\n";
   os << "#include <cstdlib>\n";
   os << "#include <future>\n";
@@ -501,8 +499,6 @@ void HeteroCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
   out << __choreo_header_as_string << "\nEOF\n\n";
   out << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
   out << __choreo_types_header_as_string << "\nEOF\n\n";
-  out << "cat <<'EOF' > " << build_path << "/choreo_cc.h\n";
-  out << __choreo_cc_header_as_string << "\nEOF\n\n";
 
   // Write offload .co source files
   std::vector<std::string> offload_obj_files;
