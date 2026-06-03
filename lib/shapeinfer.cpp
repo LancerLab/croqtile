@@ -1515,7 +1515,6 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       cur_vns = new_vns;
       cur_strd = new_strd;
       auto bshape = GenShape(vn.MakePluralSign(cur_vns));
-      cur_strd = bshape.GenDenseStrides();
 
       auto reshape = AST::Make<AST::SOP::Reshape>(op->LOC(), mv);
       reshape->SetBlockShape(bshape);
