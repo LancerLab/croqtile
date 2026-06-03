@@ -23,8 +23,7 @@ struct CCDeviceCodeGen : public DeviceCodeGen {
   }
 
   void EmitSync(std::ostream& os, const std::string& indent) override {
-    for (auto& f : pending_futures)
-      os << indent << f << ".get();\n";
+    for (auto& f : pending_futures) os << indent << f << ".get();\n";
     pending_futures.clear();
   }
 
@@ -39,9 +38,7 @@ struct CCDeviceCodeGen : public DeviceCodeGen {
     pending_futures.push_back(name);
   }
 
-  void Reset() override {
-    pending_futures.clear();
-  }
+  void Reset() override { pending_futures.clear(); }
 
 private:
   std::vector<std::string> pending_futures;

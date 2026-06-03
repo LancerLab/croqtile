@@ -8,6 +8,7 @@
 
 #include "assert_site.hpp"
 #include "ast.hpp"
+#include "choreo_cc_header.inc"
 #include "choreo_header.inc"
 #include "choreo_types_header.inc"
 #include "codegen.hpp"
@@ -30,8 +31,9 @@ const std::string CCCodeGen::TypeSTR(const Type& ty) const {
   if (isa<BooleanType>(&ty)) return "bool";
   if (isa<F16Type>(&ty)) return "choreo::f16";
   if (isa<BF16Type>(&ty)) return "choreo::bf16";
-  if (isa<F32Type>(&ty)) return "float";
+  if (isa<F32Type>(&ty) || isa<TF32Type>(&ty)) return "float";
   if (isa<F64Type>(&ty)) return "double";
+  if (isa<FloatE4M3Type>(&ty) || isa<FloatE5M2Type>(&ty)) return "uint8_t";
   if (auto sty = dyn_cast<SpannedType>(&ty))
     return "choreo::spanned_view<choreo::" + STR(sty->e_type) + ", " +
            std::to_string(sty->Dims()) + ">";
@@ -47,8 +49,16 @@ static const char* CCBaseTypeName(BaseType bt) {
   switch (bt) {
   case BaseType::F64: return "double";
   case BaseType::F32: return "float";
+  case BaseType::TF32: return "float";
   case BaseType::F16: return "choreo::f16";
   case BaseType::BF16: return "choreo::bf16";
+  case BaseType::F8_E4M3: return "uint8_t";
+  case BaseType::F8_E5M2: return "uint8_t";
+  case BaseType::F8_UE8M0: return "uint8_t";
+  case BaseType::F8_UE4M3: return "uint8_t";
+  case BaseType::F6_E2M3: return "uint8_t";
+  case BaseType::F6_E3M2: return "uint8_t";
+  case BaseType::F4_E2M1: return "uint8_t";
   case BaseType::U64: return "unsigned long long";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
@@ -279,8 +289,12 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       } else if (op == Op::GetIth) {
         oss << ExprSTR(expr->GetR());
       } else if (op == Op::Select) {
-        oss << "(" << ExprSTR(expr->GetL()) << " ? " << ExprSTR(expr->GetR())
-            << " : " << ExprSTR(expr->GetR()) << ")";
+        if (expr->IsTernary())
+          oss << "(" << ExprSTR(expr->GetC()) << " ? " << ExprSTR(expr->GetL())
+              << " : " << ExprSTR(expr->GetR()) << ")";
+        else
+          oss << "(" << ExprSTR(expr->GetL()) << " ? " << ExprSTR(expr->GetR())
+              << " : 0)";
       } else if (op == Op::CeilDiv) {
         oss << "((" << ExprSTR(expr->GetL()) << " + " << ExprSTR(expr->GetR())
             << " - 1) / " << ExprSTR(expr->GetR()) << ")";
@@ -413,6 +427,159 @@ const std::string CCCodeGen::CallSTR(AST::Call& n) const {
     return result;
   }
 
+  if (n.IsLibCall()) {
+    auto& fname = n.function->name;
+    auto& args = *n.arguments;
+    size_t argc = args.Count();
+    auto arg = [&](size_t i) { return ExprSTR(args.ValueAt(i)); };
+
+    if (fname == "__lib_gemm") {
+      // __lib_gemm(out, A, B, K, N) or (out, A, B, bias, K, N)
+      bool has_bias = (argc == 6);
+      std::string out = arg(0), A = arg(1), B = arg(2);
+      std::string K = has_bias ? arg(4) : arg(3);
+      std::string N = has_bias ? arg(5) : arg(4);
+      std::string M =
+          "(" + UnScopedExpr(SizeExprOf(*NodeType(*args.ValueAt(0)), true)) +
+          " / ((" + N + ") * sizeof(*" + out + ")))";
+      std::string result = "choreo::cc::lib_gemm(" + out + ", " + A + ", " + B +
+                           ", " + M + ", " + N + ", " + K + ")";
+      return result;
+    }
+
+    static const std::unordered_map<std::string, std::string> unary_map = {
+        {"__lib_abs", "std::abs"},
+        {"__lib_neg", "-"},
+        {"__lib_sqrt", "std::sqrt"},
+        {"__lib_rsqrt", ""},
+        {"__lib_exp", "std::exp"},
+        {"__lib_log", "std::log"},
+        {"__lib_ceil", "std::ceil"},
+        {"__lib_floor", "std::floor"},
+        {"__lib_round", "std::round"},
+        {"__lib_sin", "std::sin"},
+        {"__lib_cos", "std::cos"},
+        {"__lib_tan", "std::tan"},
+        {"__lib_asin", "std::asin"},
+        {"__lib_acos", "std::acos"},
+        {"__lib_atan", "std::atan"},
+        {"__lib_sinh", "std::sinh"},
+        {"__lib_cosh", "std::cosh"},
+        {"__lib_tanh", "std::tanh"},
+        {"__lib_erf", "std::erf"},
+        {"__lib_erfc", "std::erfc"},
+        {"__lib_reciprocal", ""},
+        {"__lib_sign", ""},
+        {"__lib_cbrt", "std::cbrt"},
+        {"__lib_relu", ""},
+        {"__lib_gelu", ""},
+        {"__lib_sigmoid", ""},
+        {"__lib_silu", ""},
+    };
+
+    auto uit = unary_map.find(fname);
+    if (uit != unary_map.end() && argc >= 3) {
+      // Unary: (dst, src, num)
+      std::string dst = arg(0), src = arg(1), num = arg(2);
+      std::string body;
+      if (fname == "__lib_neg")
+        body = dst + "[__i] = -" + src + "[__i]";
+      else if (fname == "__lib_rsqrt")
+        body = dst + "[__i] = 1.0 / std::sqrt(" + src + "[__i])";
+      else if (fname == "__lib_reciprocal")
+        body = dst + "[__i] = 1.0 / " + src + "[__i]";
+      else if (fname == "__lib_sign")
+        body = dst + "[__i] = (" + src + "[__i] > 0) - (" + src + "[__i] < 0)";
+      else if (fname == "__lib_relu")
+        body = dst + "[__i] = " + src + "[__i] > 0 ? " + src + "[__i] : 0";
+      else if (fname == "__lib_gelu")
+        body = dst + "[__i] = " + src + "[__i] * 0.5 * (1.0 + std::erf(" + src +
+               "[__i] * 0.7071067811865476))";
+      else if (fname == "__lib_sigmoid")
+        body = dst + "[__i] = 1.0 / (1.0 + std::exp(-" + src + "[__i]))";
+      else if (fname == "__lib_silu")
+        body = dst + "[__i] = " + src + "[__i] / (1.0 + std::exp(-" + src +
+               "[__i]))";
+      else
+        body = dst + "[__i] = " + uit->second + "(" + src + "[__i])";
+      return "for (int __i = 0; __i < " + num + "; ++__i) " + body;
+    }
+
+    static const std::unordered_map<std::string, std::string> binary_map = {
+        {"__lib_add", "+"}, {"__lib_sub", "-"}, {"__lib_mul", "*"},
+        {"__lib_div", "/"}, {"__lib_max", ""},  {"__lib_min", ""},
+        {"__lib_pow", ""},  {"__lib_fmod", ""}, {"__lib_atan2", ""},
+        {"__lib_gt", ">"},  {"__lib_ge", ">="}, {"__lib_lt", "<"},
+        {"__lib_le", "<="}, {"__lib_eq", "=="}, {"__lib_ne", "!="},
+    };
+    auto bit = binary_map.find(fname);
+    if (bit != binary_map.end() && argc >= 4) {
+      // Binary: (dst, lhs, rhs, num)
+      std::string dst = arg(0), lhs = arg(1), rhs = arg(2), num = arg(3);
+      std::string body;
+      if (fname == "__lib_max")
+        body = dst + "[__i] = std::max(" + lhs + "[__i], " + rhs + "[__i])";
+      else if (fname == "__lib_min")
+        body = dst + "[__i] = std::min(" + lhs + "[__i], " + rhs + "[__i])";
+      else if (fname == "__lib_pow")
+        body = dst + "[__i] = std::pow(" + lhs + "[__i], " + rhs + "[__i])";
+      else if (fname == "__lib_fmod")
+        body = dst + "[__i] = std::fmod(" + lhs + "[__i], " + rhs + "[__i])";
+      else if (fname == "__lib_atan2")
+        body = dst + "[__i] = std::atan2(" + lhs + "[__i], " + rhs + "[__i])";
+      else
+        body = dst + "[__i] = " + lhs + "[__i] " + bit->second + " " + rhs +
+               "[__i]";
+      return "for (int __i = 0; __i < " + num + "; ++__i) " + body;
+    }
+
+    if (fname == "__lib_reduce_sum" || fname == "__lib_reduce_max" ||
+        fname == "__lib_reduce_min" || fname == "__lib_reduce_mean") {
+      // (dst, src, num, reduce_dim, num_reduce)
+      if (argc >= 5) {
+        std::string dst = arg(0), src = arg(1), num = arg(2);
+        std::string rdim = arg(3), nreduce = arg(4);
+        std::string init;
+        std::string accum;
+        if (fname == "__lib_reduce_sum" || fname == "__lib_reduce_mean")
+          init = "0",
+          accum = "__acc += " + src + "[__outer * " + nreduce + " + __inner]";
+        else if (fname == "__lib_reduce_max")
+          init = src + "[__outer * " + nreduce + "]",
+          accum = "__acc = std::max(__acc, " + src + "[__outer * " + nreduce +
+                  " + __inner])";
+        else
+          init = src + "[__outer * " + nreduce + "]",
+          accum = "__acc = std::min(__acc, " + src + "[__outer * " + nreduce +
+                  " + __inner])";
+        std::string result = "{ int __nouter = " + num + " / " + nreduce +
+                             "; for (int __outer = 0; __outer < __nouter; "
+                             "++__outer) { auto __acc = decltype(" +
+                             src + "[0])(" + init +
+                             "); for (int __inner = 0; __inner < " + nreduce +
+                             "; ++__inner) { " + accum + "; } " + dst +
+                             "[__outer] = __acc";
+        if (fname == "__lib_reduce_mean") result += " / " + nreduce;
+        result += "; } }";
+        return result;
+      }
+    }
+
+    if (fname == "__lib_convert" && argc >= 3) {
+      std::string dst = arg(0), src = arg(1), num = arg(2);
+      return "for (int __i = 0; __i < " + num + "; ++__i) " + dst +
+             "[__i] = static_cast<std::remove_pointer_t<decltype(" + dst +
+             ")>>(" + src + "[__i])";
+    }
+
+    if (fname == "__lib_where" && argc >= 5) {
+      std::string dst = arg(0), cond = arg(1), x = arg(2), y = arg(3),
+                  num = arg(4);
+      return "for (int __i = 0; __i < " + num + "; ++__i) " + dst +
+             "[__i] = " + cond + "[__i] ? " + x + "[__i] : " + y + "[__i]";
+    }
+  }
+
   std::string result = n.function->name + "(";
   if (n.arguments) {
     for (size_t i = 0; i < n.arguments->Count(); i++) {
@@ -464,6 +631,7 @@ const ValueItem CCCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
 void CCCodeGen::EmitPreamble() {
   os << "#define __CHOREO_TARGET_CC__\n";
   os << "#include \"choreo.h\"\n";
+  os << "#include \"choreo_cc.h\"\n";
   os << "#include <algorithm>\n";
   os << "#include <cmath>\n";
   os << "#include <cstring>\n";
@@ -476,6 +644,7 @@ void CCCodeGen::EmitPreamble() {
 
 bool CCCodeGen::BeforeVisitImpl(AST::Node& n) {
   EmitPreSiteAssertions(n);
+  EmitLineDirective(n);
 
   if (isa<AST::Program>(&n)) {
     EmitPreamble();
@@ -671,6 +840,38 @@ void CCCodeGen::EmitPostSiteAssertions(AST::Node& n) {
   }
 }
 
+void CCCodeGen::EmitLineDirective(AST::Node& n) {
+  if (!CCtx().GenDebugInfo()) return;
+  if (!(isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+        isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
+        isa<AST::WhileBlock>(&n) || isa<AST::Assignment>(&n) ||
+        isa<AST::ParallelBy>(&n) || isa<AST::DMA>(&n) || isa<AST::MMA>(&n) ||
+        isa<AST::Wait>(&n) || isa<AST::Trigger>(&n) || isa<AST::Break>(&n) ||
+        isa<AST::Continue>(&n) || isa<AST::Call>(&n) ||
+        isa<AST::NamedVariableDecl>(&n) || isa<AST::Return>(&n)))
+    return;
+  auto loc = n.LOC();
+  if (loc.begin.line <= 0) return;
+  auto file = loc.begin.filename;
+  os << "#line " << loc.begin.line << " \"" << file << "\"\n";
+}
+
+bool CCCodeGen::Visit(AST::NamedTypeDecl& n) {
+  TraceEachVisit(n);
+
+  auto nty = NodeType(n);
+  auto sym = n.name_str;
+  SSTab().DefineSymbol(sym, nty);
+
+  if (auto mty = dyn_cast<MDSpanType>(nty)) {
+    if (mty->Dims() <= 1 && mty->HasSufficientInfo()) {
+      IndStream() << "int " << sym << " = "
+                  << ValueSTR(mty->GetShape().ValueAt(0)) << ";\n";
+    }
+  }
+  return true;
+}
+
 bool CCCodeGen::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
 
@@ -703,6 +904,8 @@ bool CCCodeGen::Visit(AST::FunctionDecl& n) {
 
 bool CCCodeGen::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
+  for (auto& name : global_allocs)
+    IndStream() << "std::free(" << name << ");\n";
   DecrIndent();
   os << "}\n\n";
   return true;
@@ -896,9 +1099,167 @@ bool CCCodeGen::Visit(AST::DMA& n) {
 
 bool CCCodeGen::Visit(AST::MMA& n) {
   TraceEachVisit(n);
-  errs() << "error: MMA is not supported on the CC target.\n";
-  error_count++;
-  return false;
+  auto& op = *n.GetOperation();
+
+  if (op.Tag() == AST::MMAOperation::Commit ||
+      op.Tag() == AST::MMAOperation::Wait)
+    return true;
+
+  const ptr<AST::Expr>& frag = op.GetFrag();
+  std::string sym = AST::FragName(frag);
+  std::string scoped = InScopeName(sym);
+
+  switch (op.Tag()) {
+  case AST::MMAOperation::Fill: {
+    auto fill_val = ExprSTR(op.FillingValue());
+    auto fill_ty = op.FillingType();
+    if (fill_ty == BaseType::UNKSCALAR) {
+      auto nty = NodeType(*op.FillingValue());
+      fill_ty = GetBaseType(*nty);
+    }
+    auto ty_str = CCBaseTypeName(fill_ty);
+    if (op.FillingIsDecl()) {
+      if (FCtx(fname).FragHasMMAType(scoped)) {
+        auto& ssmi = cgi.GetSymbolMMA(scoped);
+        auto shape = ssmi.GetShape();
+        int total = 1;
+        for (auto& v : shape) {
+          auto iv = VIInt(v);
+          total *= iv ? *iv : 1;
+        }
+        os << indent << ty_str << " " << sym << "[" << total << "];\n";
+        IndStream() << "choreo::cc::mma_fill<" << ty_str << ">(" << sym << ", "
+                    << "static_cast<" << ty_str << ">(" << fill_val << "), "
+                    << total << ");\n";
+      } else {
+        os << indent << ty_str << " " << sym << " = " << fill_val << ";\n";
+      }
+      ssm.MapHostSymbol(scoped, sym);
+    } else {
+      if (FCtx(fname).FragHasMMAType(scoped)) {
+        auto& ssmi = cgi.GetSymbolMMA(scoped);
+        auto shape = ssmi.GetShape();
+        int total = 1;
+        for (auto& v : shape) {
+          auto iv = VIInt(v);
+          total *= iv ? *iv : 1;
+        }
+        IndStream() << "choreo::cc::mma_fill<" << ty_str << ">(" << sym << ", "
+                    << "static_cast<" << ty_str << ">(" << fill_val << "), "
+                    << total << ");\n";
+      }
+    }
+    break;
+  }
+  case AST::MMAOperation::Load: {
+    auto ca = op.LoadFrom();
+    auto from_sty = cast<SpannedType>(ca->GetType());
+    auto size_expr = UnScopedExpr(SizeExprOf(*from_sty, true));
+    auto from_expr = ExprSTR(ca);
+    IndStream() << "std::memcpy(" << sym << ", " << from_expr << ", "
+                << size_expr << ");\n";
+    ssm.MapHostSymbol(scoped, sym);
+    break;
+  }
+  case AST::MMAOperation::Exec: {
+    auto& ssmi = cgi.GetSymbolMMA(scoped);
+    auto shape = ssmi.GetShape();
+    std::string acc_sym = AST::FragName(op.ExecOperand(0));
+    std::string a_sym = AST::FragName(op.ExecOperand(1));
+    std::string b_sym = AST::FragName(op.ExecOperand(2));
+    auto acc_ty_str = CCBaseTypeName(ssmi.ty);
+    auto a_scoped = InScopeName(a_sym);
+    auto b_scoped = InScopeName(b_sym);
+    auto a_sty = GetSpannedType(GetSymbolType(a_sym));
+    auto b_sty = GetSpannedType(GetSymbolType(b_sym));
+    auto a_ty_str = CCBaseTypeName(a_sty->ElementType());
+    auto b_ty_str = CCBaseTypeName(b_sty->ElementType());
+    auto a_shape = a_sty->GetShape();
+    auto b_shape = b_sty->GetShape();
+    std::string M_str, N_str, K_str;
+    switch (op.GetMethod()) {
+    case AST::MMAOperation::ROW_COL:
+      M_str = ValueSTR(a_shape.ValueAt(0));
+      K_str = ValueSTR(a_shape.ValueAt(1));
+      N_str = ValueSTR(b_shape.ValueAt(1));
+      IndStream() << "choreo::cc::mma_exec_row_col<" << acc_ty_str << ", "
+                  << a_ty_str << ", " << b_ty_str << ", " << acc_ty_str << ">("
+                  << acc_sym << ", " << a_sym << ", " << b_sym << ", "
+                  << acc_sym << ", " << M_str << ", " << N_str << ", " << K_str
+                  << ");\n";
+      break;
+    case AST::MMAOperation::ROW_ROW:
+      M_str = ValueSTR(a_shape.ValueAt(0));
+      K_str = ValueSTR(a_shape.ValueAt(1));
+      N_str = ValueSTR(b_shape.ValueAt(0));
+      IndStream() << "choreo::cc::mma_exec_row_row<" << acc_ty_str << ", "
+                  << a_ty_str << ", " << b_ty_str << ", " << acc_ty_str << ">("
+                  << acc_sym << ", " << a_sym << ", " << b_sym << ", "
+                  << acc_sym << ", " << M_str << ", " << N_str << ", " << K_str
+                  << ");\n";
+      break;
+    case AST::MMAOperation::COL_ROW:
+      M_str = ValueSTR(a_shape.ValueAt(1));
+      K_str = ValueSTR(a_shape.ValueAt(0));
+      N_str = ValueSTR(b_shape.ValueAt(0));
+      IndStream() << "choreo::cc::mma_exec_col_row<" << acc_ty_str << ", "
+                  << a_ty_str << ", " << b_ty_str << ", " << acc_ty_str << ">("
+                  << acc_sym << ", " << a_sym << ", " << b_sym << ", "
+                  << acc_sym << ", " << M_str << ", " << N_str << ", " << K_str
+                  << ");\n";
+      break;
+    case AST::MMAOperation::COL_COL:
+      M_str = ValueSTR(a_shape.ValueAt(1));
+      K_str = ValueSTR(a_shape.ValueAt(0));
+      N_str = ValueSTR(b_shape.ValueAt(1));
+      IndStream() << "choreo::cc::mma_exec_col_col<" << acc_ty_str << ", "
+                  << a_ty_str << ", " << b_ty_str << ", " << acc_ty_str << ">("
+                  << acc_sym << ", " << a_sym << ", " << b_sym << ", "
+                  << acc_sym << ", " << M_str << ", " << N_str << ", " << K_str
+                  << ");\n";
+      break;
+    }
+    break;
+  }
+  case AST::MMAOperation::Store: {
+    auto ca = op.StoreTo();
+    auto to_sty = cast<SpannedType>(ca->GetType());
+    auto to_expr = ExprSTR(ca);
+    if (op.StoreIsTranspose()) {
+      auto shape = to_sty->GetShape();
+      auto M_str = ValueSTR(shape.ValueAt(0));
+      auto N_str = ValueSTR(shape.ValueAt(1));
+      auto ty_str = CCBaseTypeName(to_sty->ElementType());
+      IndStream() << "choreo::cc::mma_store_transpose<" << ty_str << ">("
+                  << to_expr << ", " << sym << ", " << M_str << ", " << N_str
+                  << ");\n";
+    } else {
+      auto size_expr = UnScopedExpr(SizeExprOf(*to_sty, true));
+      IndStream() << "std::memcpy(" << to_expr << ", " << sym << ", "
+                  << size_expr << ");\n";
+    }
+    break;
+  }
+  case AST::MMAOperation::Scale: {
+    auto acc_sym = ssm.HostName(InScopeNameForRef(PSTR(op.ScaleAccumulator())));
+    auto scale_a_expr = ExprSTR(op.ScaleA());
+    if (FCtx(fname).FragHasMMAType(scoped)) {
+      auto& ssmi = cgi.GetSymbolMMA(scoped);
+      auto shape = ssmi.GetShape();
+      int total = 1;
+      for (auto& v : shape) {
+        auto iv = VIInt(v);
+        total *= iv ? *iv : 1;
+      }
+      auto ty_str = CCBaseTypeName(ssmi.ty);
+      IndStream() << "choreo::cc::mma_scale<" << ty_str << ">(" << acc_sym
+                  << ", " << scale_a_expr << ", " << total << ");\n";
+    }
+    break;
+  }
+  default: break;
+  }
+  return true;
 }
 
 bool CCCodeGen::Visit(AST::Wait& n) {
@@ -906,8 +1267,11 @@ bool CCCodeGen::Visit(AST::Wait& n) {
 
   for (auto& t : n.GetTargets()) {
     if (auto id = AST::GetIdentifier(t)) {
-      auto fty_w = NodeType(*t);
-      if (isa<FutureType>(fty_w)) { IndStream() << id->name << ".get();\n"; }
+      auto wty = NodeType(*t);
+      if (isa<FutureType>(wty))
+        IndStream() << id->name << ".get();\n";
+      else if (isa<EventType>(wty))
+        IndStream() << id->name << ".wait();\n";
     }
   }
   return true;
@@ -915,9 +1279,11 @@ bool CCCodeGen::Visit(AST::Wait& n) {
 
 bool CCCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
-  errs() << "error: event trigger is not supported on the CC target.\n";
-  error_count++;
-  return false;
+  for (auto& t : n.targets->AllValues()) {
+    if (auto id = AST::GetIdentifier(t))
+      IndStream() << id->name << ".trigger();\n";
+  }
+  return true;
 }
 
 bool CCCodeGen::Visit(AST::Break& n) {
@@ -934,6 +1300,7 @@ bool CCCodeGen::Visit(AST::Continue& n) {
 
 bool CCCodeGen::Visit(AST::Yield& n) {
   TraceEachVisit(n);
+  IndStream() << "return;\n";
   return true;
 }
 
@@ -967,6 +1334,8 @@ bool CCCodeGen::Visit(AST::Synchronize& n) {
     for (auto& f : pending_device_futures) IndStream() << f << ".get();\n";
     pending_device_futures.clear();
   }
+  // sync.shared is a no-op: CC target executes sequentially, so shared
+  // memory is always coherent within the same address space.
   return true;
 }
 
@@ -1105,7 +1474,20 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
     return true;
   }
 
-  if (isa<EventType>(nty) || isa<EventArrayType>(nty)) { return true; }
+  if (isa<EventType>(nty)) {
+    os << indent << "choreo::cc::event_t " << sym << ";\n";
+    ssm.MapHostSymbol(sname, sym);
+    return true;
+  }
+
+  if (auto eat = dyn_cast<EventArrayType>(nty)) {
+    auto dims = eat->Dimensions();
+    os << indent << "choreo::cc::event_t " << sym;
+    for (auto& d : dims) os << "[" << ValueSTR(d) << "]";
+    os << ";\n";
+    ssm.MapHostSymbol(sname, sym);
+    return true;
+  }
 
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     ssm.MapHostSymbol(sname, sym);
@@ -1119,6 +1501,7 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
     } else {
       os << indent << elem_ty << "* " << sym << " = static_cast<" << elem_ty
          << "*>(std::aligned_alloc(64, " << size << "));\n";
+      global_allocs.push_back(sym);
     }
     return true;
   }
@@ -1229,6 +1612,8 @@ void CCCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
   out << __choreo_header_as_string << "\nEOF\n\n";
   out << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
   out << __choreo_types_header_as_string << "\nEOF\n\n";
+  out << "cat <<'EOF' > " << build_path << "/choreo_cc.h\n";
+  out << __choreo_cc_header_as_string << "\nEOF\n\n";
 
   out << "cat <<'EOF' > " << cc_file << "\n";
   for (auto& code : code_segments) out << code << "\n";

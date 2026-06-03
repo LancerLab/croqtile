@@ -17,7 +17,8 @@ namespace Hetero {
 struct HeteroCodeGen : public CC::CCCodeGen {
 public:
   HeteroCodeGen() {
-    cpp_name = "__choreo_hetero_" + OptionRegistry::GetInstance().GetInputName();
+    cpp_name =
+        "__choreo_hetero_" + OptionRegistry::GetInstance().GetInputName();
     cmp_dir = CreateUniquePath();
   }
 
@@ -28,7 +29,8 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::Synchronize&) override;
 
-  // Offload device block: skip host-level Visit methods during source extraction
+  // Offload device block: skip host-level Visit methods during source
+  // extraction
   bool Visit(AST::WithIn&) override;
   bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::IfElseBlock&) override;
@@ -69,7 +71,7 @@ private:
     std::string parent_fname;
     std::string co_source;
     std::string host_fwd_decl;
-    std::string target_name;  // choreo target name for compilation
+    std::string target_name; // choreo target name for compilation
     struct BufferInfo {
       std::string host_name;
       std::string device_name;

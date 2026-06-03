@@ -41,7 +41,7 @@ public:
   bool Visit(AST::FloatLiteral&) override { return true; }
   bool Visit(AST::Expr&) override { return true; }
   bool Visit(AST::MultiDimSpans&) override { return true; }
-  bool Visit(AST::NamedTypeDecl&) override { return true; }
+  bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::IntTuple&) override { return true; }
   bool Visit(AST::IntIndex&) override { return true; }
   bool Visit(AST::DataType&) override { return true; }
@@ -114,6 +114,7 @@ protected:
   void BuildSiteAssertionMap();
   void EmitPreSiteAssertions(AST::Node& n);
   void EmitPostSiteAssertions(AST::Node& n);
+  void EmitLineDirective(AST::Node& n);
 
   std::unordered_map<AST::Node*, std::vector<Assertion>> pre_site_assertions;
   std::unordered_map<AST::Node*, std::vector<Assertion>> post_site_assertions;
@@ -131,6 +132,7 @@ protected:
 
   int device_future_counter = 0;
   std::vector<std::string> pending_device_futures;
+  std::vector<std::string> global_allocs;
 
   virtual void ResetFunctionStates() {
     fty = nullptr;
@@ -140,6 +142,7 @@ protected:
     post_site_assertions.clear();
     device_future_counter = 0;
     pending_device_futures.clear();
+    global_allocs.clear();
   }
 };
 

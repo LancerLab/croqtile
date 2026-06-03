@@ -45,15 +45,69 @@ public:
   SupportedFeatures(const ArchId&) const override {
     return {
         {STR(ChoreoFeature::ASYNC_DMA), Description(ChoreoFeature::ASYNC_DMA)},
+        {STR(ChoreoFeature::EVENT), Description(ChoreoFeature::EVENT)},
+        {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
+        {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
+        {STR(ChoreoFeature::LIBCALL), Description(ChoreoFeature::LIBCALL)},
     };
+  }
+
+  bool IsLibCallSupported(const std::string& name) const override {
+    static const std::set<std::string> supported = {
+        "__lib_gemm",        "__lib_add",        "__lib_sub",
+        "__lib_mul",         "__lib_div",        "__lib_max",
+        "__lib_min",         "__lib_pow",        "__lib_atan2",
+        "__lib_fmod",        "__lib_gt",         "__lib_ge",
+        "__lib_lt",          "__lib_le",         "__lib_eq",
+        "__lib_ne",          "__lib_abs",        "__lib_neg",
+        "__lib_sqrt",        "__lib_rsqrt",      "__lib_exp",
+        "__lib_log",         "__lib_ceil",       "__lib_floor",
+        "__lib_round",       "__lib_sin",        "__lib_cos",
+        "__lib_tan",         "__lib_asin",       "__lib_acos",
+        "__lib_atan",        "__lib_sinh",       "__lib_cosh",
+        "__lib_tanh",        "__lib_erf",        "__lib_erfc",
+        "__lib_cbrt",        "__lib_reciprocal", "__lib_sign",
+        "__lib_relu",        "__lib_gelu",       "__lib_sigmoid",
+        "__lib_silu",        "__lib_convert",    "__lib_where",
+        "__lib_reduce_sum",  "__lib_reduce_max", "__lib_reduce_min",
+        "__lib_reduce_mean",
+    };
+    return supported.count(name) > 0;
+  }
+
+  std::pair<int, int> LibCallArgRange(const std::string& name) const override {
+    if (name == "__lib_gemm") return {5, 6};
+    if (name == "__lib_where") return {5, 5};
+    if (name == "__lib_convert") return {3, 3};
+    if (name == "__lib_reduce_sum" || name == "__lib_reduce_max" ||
+        name == "__lib_reduce_min" || name == "__lib_reduce_mean")
+      return {5, 5};
+    // Binary: 4 args; Unary: 3 args
+    if (name.find("__lib_add") != std::string::npos ||
+        name.find("__lib_sub") != std::string::npos ||
+        name.find("__lib_mul") != std::string::npos ||
+        name.find("__lib_div") != std::string::npos ||
+        name.find("__lib_max") != std::string::npos ||
+        name.find("__lib_min") != std::string::npos ||
+        name.find("__lib_pow") != std::string::npos ||
+        name.find("__lib_fmod") != std::string::npos ||
+        name.find("__lib_atan2") != std::string::npos ||
+        name.find("__lib_gt") != std::string::npos ||
+        name.find("__lib_ge") != std::string::npos ||
+        name.find("__lib_lt") != std::string::npos ||
+        name.find("__lib_le") != std::string::npos ||
+        name.find("__lib_eq") != std::string::npos ||
+        name.find("__lib_ne") != std::string::npos)
+      return {4, 4};
+    return {3, 3};
   }
 
   const std::set<BaseType> SupportedScalarTypes(const ArchId&) const override {
     return {
-        BaseType::F64,  BaseType::F32, BaseType::F16, BaseType::BF16,
-        BaseType::S64,  BaseType::U64, BaseType::S32, BaseType::U32,
-        BaseType::S16,  BaseType::U16, BaseType::S8,  BaseType::U8,
-        BaseType::BOOL,
+        BaseType::F64,  BaseType::F32,     BaseType::TF32,    BaseType::F16,
+        BaseType::BF16, BaseType::F8_E4M3, BaseType::F8_E5M2, BaseType::S64,
+        BaseType::U64,  BaseType::S32,     BaseType::U32,     BaseType::S16,
+        BaseType::U16,  BaseType::S8,      BaseType::U8,      BaseType::BOOL,
     };
   }
 

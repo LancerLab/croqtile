@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "ast.hpp"
+#include "choreo_cc_header.inc"
 #include "choreo_header.inc"
 #include "choreo_types_header.inc"
 #include "codegen.hpp"
@@ -21,6 +22,7 @@ using namespace Choreo::Hetero;
 
 void HeteroCodeGen::EmitPreamble() {
   os << "#include \"choreo.h\"\n";
+  os << "#include \"choreo_cc.h\"\n";
   os << "#include <cstring>\n";
   os << "#include <cstdlib>\n";
   os << "#include <future>\n";
@@ -86,8 +88,7 @@ bool HeteroCodeGen::AfterVisitImpl(AST::Node& n) {
 
     if (!offload_functions_.empty() && !code_segments.empty()) {
       std::string fwd;
-      for (auto& fi : offload_functions_)
-        fwd += fi.host_fwd_decl + ";\n";
+      for (auto& fi : offload_functions_) fwd += fi.host_fwd_decl + ";\n";
       fwd += "\n";
       code_segments.insert(code_segments.begin() + 1, fwd);
     }
@@ -308,8 +309,7 @@ bool HeteroCodeGen::Visit(AST::Synchronize& n) {
   if (in_offload_device_block_) return true;
 
   if (n.Resource() == Storage::GLOBAL) {
-    for (auto& f : pending_host_futures_)
-      IndStream() << f << ".get();\n";
+    for (auto& f : pending_host_futures_) IndStream() << f << ".get();\n";
     pending_host_futures_.clear();
   }
   return true;
@@ -351,8 +351,8 @@ std::string HeteroCodeGen::ChoreoTypeSTR(const Type& ty) const {
     case BaseType::BOOL: bts = "bool"; break;
     default: choreo_unreachable("unsupported choreo base type"); break;
     }
-    auto shape_str = UnScopedExpr(
-        ValueSTR(sty->GetShape().ElementCountValue()));
+    auto shape_str =
+        UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()));
     return bts + " [" + shape_str + "]";
   }
   if (isa<S32Type>(&ty)) return "s32";
@@ -369,9 +369,9 @@ std::string HeteroCodeGen::ChoreoTypeSTR(const Type& ty) const {
 void HeteroCodeGen::BeginOffloadFunction(AST::ParallelBy& n,
                                          DeviceCodeGen& dcg) {
   cur_offload_func_ = {};
-  cur_offload_func_.co_func_name =
-      "__hetero_" + dcg.DeviceName() + "_" + fname + "_" +
-      std::to_string(offload_func_counter_++);
+  cur_offload_func_.co_func_name = "__hetero_" + dcg.DeviceName() + "_" +
+                                   fname + "_" +
+                                   std::to_string(offload_func_counter_++);
   cur_offload_func_.parent_fname = fname;
   cur_offload_func_.target_name = dcg.TargetName();
 
@@ -408,8 +408,7 @@ void HeteroCodeGen::BeginOffloadFunction(AST::ParallelBy& n,
 
   auto input_fn = OptionRegistry::GetInstance().GetInputFileName();
   std::ifstream ifs(input_fn);
-  if (!ifs.is_open())
-    choreo_unreachable("cannot open input file: " + input_fn);
+  if (!ifs.is_open()) choreo_unreachable("cannot open input file: " + input_fn);
   std::string source((std::istreambuf_iterator<char>(ifs)),
                      std::istreambuf_iterator<char>());
   ifs.close();
@@ -502,6 +501,8 @@ void HeteroCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
   out << __choreo_header_as_string << "\nEOF\n\n";
   out << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
   out << __choreo_types_header_as_string << "\nEOF\n\n";
+  out << "cat <<'EOF' > " << build_path << "/choreo_cc.h\n";
+  out << __choreo_cc_header_as_string << "\nEOF\n\n";
 
   // Write offload .co source files
   std::vector<std::string> offload_obj_files;
@@ -526,8 +527,7 @@ void HeteroCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
 
   // Emit build env setup for all offload devices
   for (auto& [name, dcg] : device_codegens) {
-    if (!dcg->IsHostDevice())
-      dcg->SetupBuildEnv(out);
+    if (!dcg->IsHostDevice()) dcg->SetupBuildEnv(out);
   }
 
   out << R"script(
@@ -551,17 +551,20 @@ do_compile() {
       auto obj_file = offload_obj_files[i];
       out << "  echo \"Compiling offload function: " << fi.co_func_name
           << "\"\n";
-      out << "  ${CHOREO} -t " << fi.target_name << " -c " << co_file
-          << " -o " << obj_file << " -rtc=none"
-          << " || { echo 'Offload compilation failed for "
-          << fi.co_func_name << "'; exit 1; }\n\n";
+      out << "  ${CHOREO} -t " << fi.target_name << " -c " << co_file << " -o "
+          << obj_file << " -rtc=none"
+          << " || { echo 'Offload compilation failed for " << fi.co_func_name
+          << "'; exit 1; }\n\n";
     }
 
     // Step 2: Compile host C++ with the offload device's toolchain
     // (use the first offload device's toolchain for host compilation)
     DeviceCodeGen* offload_dcg = nullptr;
     for (auto& [name, dcg] : device_codegens) {
-      if (!dcg->IsHostDevice()) { offload_dcg = dcg.get(); break; }
+      if (!dcg->IsHostDevice()) {
+        offload_dcg = dcg.get();
+        break;
+      }
     }
 
     out << "  echo \"Compiling host code\"\n";
@@ -575,14 +578,12 @@ do_compile() {
     for (auto& obj : offload_obj_files) all_objs.push_back(obj);
 
     out << "\n  echo \"Linking\"\n";
-    if (offload_dcg)
-      offload_dcg->EmitLinkCommand(out, all_objs, exe_file);
+    if (offload_dcg) offload_dcg->EmitLinkCommand(out, all_objs, exe_file);
   } else {
     // Host-only: compile with g++, use any host device's link flags
     out << "  ${CXX:-g++} -std=c++17 -O2 -pthread -I" << build_path << " "
         << host_cc_file << " -o " << exe_file;
-    for (auto& [name, dcg] : device_codegens)
-      out << " " << dcg->LinkFlags();
+    for (auto& [name, dcg] : device_codegens) out << " " << dcg->LinkFlags();
     out << " || { echo 'Compilation failed'; exit 1; }\n";
   }
 
