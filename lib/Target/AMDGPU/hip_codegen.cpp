@@ -67,7 +67,8 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
     switch (CCtx().GetOutputKind()) {
-    case OutputKind::TargetSourceCode: EmitSource(); break;
+    case OutputKind::TargetSourceCode:
+    case OutputKind::DeviceSourceOnly: EmitSource(); break;
     case OutputKind::TargetModule:
     case OutputKind::TargetExecutable:
       if (!CompileWithScript(CCtx().GetOutputKind() == OutputKind::TargetModule
@@ -85,7 +86,10 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ssm.LeaveScope();
     levels.pop();
-    code_segments.back() += ds.str() + hs.str();
+    if (CCtx().GetOutputKind() == OutputKind::DeviceSourceOnly)
+      code_segments.back() += ds.str();
+    else
+      code_segments.back() += ds.str() + hs.str();
     ds.str("");
     hs.str("");
     return_stream.str("");

@@ -1,6 +1,8 @@
 #include "pipeline.hpp"
 #include "active_threads.hpp"
+#include "codegen.hpp"
 #include "codegen_prepare.hpp"
+#include "target_utils.hpp"
 #include "colors.hpp"
 #include "earlysema.hpp"
 #include "interval.hpp"
@@ -17,6 +19,50 @@
 #include "visualize.hpp"
 #include <chrono>
 #include <iomanip>
+
+extern Choreo::AST::Program root;
+
+void Choreo::CompilationContext::SavePreSemaRoot(AST::Node& r) {
+  pre_sema_root_ = r.Clone();
+}
+
+// --- TargetCompilationState implementation ---
+
+struct Choreo::CompilationContext::TargetCompilationState::CGIHolder {
+  std::unique_ptr<CodeGenInfo> cgi;
+};
+
+Choreo::CompilationContext::TargetCompilationState::TargetCompilationState() = default;
+Choreo::CompilationContext::TargetCompilationState::~TargetCompilationState() = default;
+Choreo::CompilationContext::TargetCompilationState::TargetCompilationState(TargetCompilationState&&) noexcept = default;
+Choreo::CompilationContext::TargetCompilationState&
+Choreo::CompilationContext::TargetCompilationState::operator=(TargetCompilationState&&) noexcept = default;
+
+Choreo::CompilationContext::TargetCompilationState
+Choreo::CompilationContext::SaveTargetState() {
+  TargetCompilationState s;
+  s.target = std::move(compile_target);
+  s.archs = archs;
+  s.output_kind = out_kind;
+  s.sym_tab = sym_tab;
+  s.anonymous_count = SymbolTable::anonymous_count;
+  s.anon_pb_count = SymbolTable::anon_pb_count;
+  s.cgi_holder = std::make_unique<TargetCompilationState::CGIHolder>();
+  s.cgi_holder->cgi = std::move(CodeGenInfo::instance);
+  s.pl_depth_map = std::move(pl_depth_map_);
+  return s;
+}
+
+void Choreo::CompilationContext::RestoreTargetState(TargetCompilationState&& s) {
+  compile_target = std::move(s.target);
+  archs = s.archs;
+  out_kind = s.output_kind;
+  sym_tab = s.sym_tab;
+  SymbolTable::anonymous_count = s.anonymous_count;
+  SymbolTable::anon_pb_count = s.anon_pb_count;
+  CodeGenInfo::instance = std::move(s.cgi_holder->cgi);
+  pl_depth_map_ = std::move(s.pl_depth_map);
+}
 
 using namespace Choreo;
 
@@ -234,6 +280,11 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
 }
 
 ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
+  // For heterogeneous compilation, save a pre-sema clone of the AST so that
+  // device offload functions can be compiled from a clean (artifact-free) AST.
+  if (CCtx().NeedPreSemaClone())
+    AddAction([](ASTPipeline&) { CCtx().SavePreSemaRoot(root); });
+
   // Initialize the common ast pipeline.
   // apply early semantics check without knowing type details
   AddStage<EarlySemantics>();

@@ -1,6 +1,8 @@
 #ifndef __CHOREO_TOPSCC_DEVICE_CODEGEN_HPP__
 #define __CHOREO_TOPSCC_DEVICE_CODEGEN_HPP__
 
+#include "aux.hpp"
+#include "topscc_header.inc"
 #include "codegen.hpp"
 #include <string>
 #include <vector>
@@ -34,16 +36,24 @@ struct TopsccDeviceCodeGen : public DeviceCodeGen {
   }
 
   void SetupBuildEnv(std::ostream& out) const override {
-    out << R"script(
-# Find topscc
-if [[ -z "${TOPSCC_INSTALL}" ]]; then
-  FOUND_PATH=$(which "topscc" 2>/dev/null)
+    out << "\n# Find topscc\n";
+    out << "if [[ -z \"${TOPSCC_INSTALL}\" ]]; then\n";
+#ifdef __CHOREO_TOPSCC_DIR__
+    out << "  if [[ -d " << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
+    out << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+    out << "  else\n";
+#endif
+    out << R"script(  FOUND_PATH=$(which "topscc" 2>/dev/null)
   if [ -n "$FOUND_PATH" ]; then
     TOPSCC_INSTALL=$(dirname "$(dirname "$FOUND_PATH")")
   elif [[ -f /opt/tops/bin/topscc ]]; then
     TOPSCC_INSTALL=/opt/tops
   fi
-fi
+)script";
+#ifdef __CHOREO_TOPSCC_DIR__
+    out << "  fi\n";
+#endif
+    out << R"script(fi
 
 if [[ -z "${TOPSCC_INSTALL}" ]]; then
   echo "failed to find topscc. install topscc or set TOPSCC_INSTALL."
@@ -57,22 +67,51 @@ export LD_LIBRARY_PATH="${TOPSCC_LIB}:${LD_LIBRARY_PATH:-}"
 # Detect GCU arch
 gcu_arch="${GCU_ARCH:-}"
 if [[ -z "${gcu_arch}" ]]; then
-  _gcu_dstr="$(lspci 2>/dev/null | grep -iE '(Enflame|Tencent)' | head -1)"
-  case "${_gcu_dstr}" in
-    *S60G*|*c035*|*S60*) gcu_arch="gcu300" ;;
-    *I20*|*Tencent*)      gcu_arch="gcu210" ;;
-    *)                    gcu_arch="gcu300" ;;
-  esac
+  GCU_DEVICE_STR="$(lspci 2>/dev/null | grep -iE 'Enflame' | head -1)"
+  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+    gcu_arch=gcu300
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+    gcu_arch=gcu300
+    export TOPS_VISIBLE_DEVICES=1
+  elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
+    gcu_arch=gcu300
+  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+    gcu_arch=gcu210
+    export TOPS_VISIBLE_DEVICES=1
+  elif [[ "$(lspci 2>/dev/null | grep -iE 'Tencent')" != "" ]]; then
+    gcu_arch=gcu210
+  else
+    gcu_arch=gcu300
+  fi
 fi
 
 )script";
+  }
+
+  void EmitSetupFiles(std::ostream& out,
+                     const std::string& build_path) const override {
+    auto tdir = TargetBuildDir(build_path);
+    out << "mkdir -p " << tdir << "\n";
+    out << "cat <<'DEFEOF' > " << tdir
+        << "/private_target0_defines.h\n";
+    out << "#ifdef __TOPSCC__\n";
+    out << "#define __CHOREO_PRIVATE_TGT0__\n";
+    out << "#endif\n";
+    out << "#define __CHOREO_TGT0_ARCH__ __GCU_ARCH__\n";
+    out << "#define tgt0HostMalloc topsHostMalloc\n";
+    out << "#define tgt0HostFree topsHostFree\n";
+    out << "DEFEOF\n\n";
+    out << "cat <<'RTEOF' > " << tdir
+        << "/private_target0_runtime.h\n";
+    out << __topscc_header_as_string << "\nRTEOF\n\n";
   }
 
   void EmitHostCompileCommand(std::ostream& out,
                               const std::string& build_path,
                               const std::string& src,
                               const std::string& obj) const override {
-    out << "  ${TOPSCC} -arch ${gcu_arch} -std=c++17 -c -I" << build_path
+    out << "  ${TOPSCC} -arch ${gcu_arch} -std=c++17 -c -I" << TargetBuildDir(build_path)
+        << " -I" << build_path
         << " -I${TOPSCC_INSTALL}/include " << src << " -o " << obj
         << " || { echo 'Host compilation failed'; exit 1; }\n";
   }

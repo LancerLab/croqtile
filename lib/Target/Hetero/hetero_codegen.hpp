@@ -29,8 +29,6 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::Synchronize&) override;
 
-  // Offload device block: skip host-level Visit methods during source
-  // extraction
   bool Visit(AST::WithIn&) override;
   bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::IfElseBlock&) override;
@@ -51,27 +49,27 @@ public:
 private:
   std::string active_device_target;
 
-  // Device codegen delegates, keyed by device name.
-  // Created via Target::MakeDeviceCodeGen() -- no hardcoded types.
+  // DeviceCodeGen delegates for host includes, sync, link flags, etc.
   std::map<std::string, std::unique_ptr<DeviceCodeGen>> device_codegens;
 
-  // Returns the DeviceCodeGen for the active device, or nullptr.
   DeviceCodeGen* ActiveDeviceCodeGen() {
     auto it = device_codegens.find(active_device_target);
     return (it != device_codegens.end()) ? it->second.get() : nullptr;
   }
 
-  // Offload device two-step delegation: capture device blocks as standalone .co
-  // functions and delegate compilation to the device target's pipeline.
+  AST::ChoreoFunction* current_func_node_ = nullptr;
   bool in_offload_device_block_ = false;
   int offload_func_counter_ = 0;
+  std::map<std::string, int> device_pb_counters_;
 
   struct OffloadFuncInfo {
     std::string co_func_name;
     std::string parent_fname;
-    std::string co_source;
+    AST::ptr<AST::ChoreoFunction> offload_func;
+    std::string device_source;
+    std::string source_ext;
     std::string host_fwd_decl;
-    std::string target_name; // choreo target name for compilation
+    std::string target_name;
     struct BufferInfo {
       std::string host_name;
       std::string device_name;
@@ -95,19 +93,20 @@ private:
 
   void EmitHeteroSource();
 
+  bool CompileOffloadToSource(OffloadFuncInfo& fi);
   void BeginOffloadFunction(AST::ParallelBy& n, DeviceCodeGen& dcg);
   void EndOffloadFunction();
   void EmitOffloadHostCall(const OffloadFuncInfo& fi);
 
-  std::string ChoreoTypeSTR(const Type& ty) const;
-
   void ResetFunctionStates() override {
     CCCodeGen::ResetFunctionStates();
     active_device_target = "";
+    current_func_node_ = nullptr;
     host_future_counter_ = 0;
     pending_host_futures_.clear();
     in_offload_device_block_ = false;
     cur_offload_func_ = {};
+    device_pb_counters_.clear();
   }
 };
 

@@ -2,11 +2,11 @@
 #define __CHOREO_TARGET_UTILS_HPP__
 
 #include "types.hpp"
-#include <mutex>
 
 namespace Choreo {
 
-// parallel level <-> parallel depth mapping
+// Parallel level <-> depth mapping for the active target + arch.
+// Built when the compilation target is configured; invalidated on target/arch change.
 class PlDepthMap {
 private:
   std::unordered_map<int, ParallelLevel> to_levels;
@@ -38,10 +38,7 @@ public:
   ParallelLevel MaxLevel() const { return max_level; }
   int MaxDepth() const { return max_depth; }
 
-public:
   static const PlDepthMap& Get();
-  static std::once_flag init_flag;
-  static std::unique_ptr<PlDepthMap> instance;
 };
 
 inline int TargetDepth(ParallelLevel pl) {

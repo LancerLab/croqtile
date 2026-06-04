@@ -1,4 +1,5 @@
 #include "topscc_codegen.hpp"
+#include "topscc_device_codegen.hpp"
 #include "codegen_utils.hpp"
 
 #include <cctype>
@@ -13,6 +14,7 @@
 #include "io.hpp"
 #include "lower_libcall.hpp"
 #include "operator_info.hpp"
+#include "target.hpp"
 #include "target_utils.hpp"
 #include "topscc_header.inc"
 #include "types.hpp"
@@ -392,7 +394,8 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     }
 
     switch (CCtx().GetOutputKind()) {
-    case OutputKind::TargetSourceCode: EmitSource(); break;
+    case OutputKind::TargetSourceCode:
+    case OutputKind::DeviceSourceOnly: EmitSource(); break;
     case OutputKind::TargetModule: {
       if (!CompileWithScript("--compile-module")) {
         error_count++;
@@ -418,7 +421,10 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     PLDCheck();
     ssm.LeaveScope();
-    code_segments.back() += ds.str() + hs.str();
+    if (CCtx().GetOutputKind() == OutputKind::DeviceSourceOnly)
+      code_segments.back() += ds.str();
+    else
+      code_segments.back() += ds.str() + hs.str();
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");
@@ -3075,6 +3081,8 @@ void TopsccCodeGen::EmitSource() {
 }
 
 void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
+  TopsccDeviceCodeGen dcg_instance;
+
   auto filename = RemoveDirectoryPrefix(
       RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
   os << R"script(#!/usr/bin/env bash
@@ -3088,40 +3096,22 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
   fi
 )script";
 
-  if (use_system_toolchain) {
-    os << R"script(
-	# Search for the binary in the PATH
-	FOUND_PATH=$(which "topscc" 2>/dev/null)
-
-	if [ -n "$FOUND_PATH" ]; then
-		# If the binary is found, extract the installation path
-		TOPSCC_INSTALL=$(dirname "$(dirname "$FOUND_PATH")")
-	elif [[ -f /opt/tops/bin/topscc ]]; then
-		# Search for the default topscc installation directory
-		TOPSCC_INSTALL=/opt/tops
-  elif [[ -d )script"
-       << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
-    os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__);
-    os << R"script(
-  fi
-)script";
-  } else
+  if (!use_system_toolchain)
     os << "  TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
 
-  os << R"script(
-fi
+  os << "fi\n\n";
 
-if [[ -z "${TOPSCC_INSTALL}" ]]; then
-  echo "failed to find the topscc installation."
-  echo "install topscc or set TOPSCC_INSTALL to topscc installation directory."
-  exit 1
-fi
+  // Pre-set gcu_arch from compile-time -arch flag so that SetupBuildEnv()
+  // skips JIT device detection (and TOPS_VISIBLE_DEVICES side effects).
+  if (CCtx().GetArch() == "gcu400" || CCtx().GetArch() == "gcu500")
+    os << "export GCU_ARCH=" << ToLower(CCtx().GetArch()) << "\n";
+  else if (CCtx().IsArchSet())
+    os << "export GCU_ARCH=" << ToLower(CCtx().GetArch()) << "\n";
 
-TOPSCC=${TOPSCC_INSTALL}/bin/topscc
-TOPSPROF=${TOPSCC_INSTALL}/bin/topsprof
-TOPSCC_LIB=${TOPSCC_INSTALL}/lib
+  dcg_instance.SetupBuildEnv(os);
 
-)script";
+  // Standalone extras: profiler and acore
+  os << "TOPSPROF=${TOPSCC_INSTALL}/bin/topsprof\n";
 #ifdef __CHOREO_GCU_ACORE_DIR__
   os << R"(if [[ -z "${ACORE_INSTALL}" ]]; then)" << "\n";
   os << "  ACORE_INSTALL=" << STRINGIZE(__CHOREO_GCU_ACORE_DIR__) << "\n";
@@ -3185,38 +3175,8 @@ EOF
   }
   os << "\nEOF\n\n";
 
-  // JIT: detect the environment
-  if (CCtx().GetArch() == "gcu400" || CCtx().GetArch() == "gcu500")
-    os << "gcu_arch=" << ToLower(CCtx().GetArch()) << "\n";
-  else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
-            (CCtx().GetOutputKind() == OutputKind::TargetExecutable) ||
-            (CCtx().GetOutputKind() == OutputKind::ShellScript)) &&
-           CCtx().IsArchSet()) {
-    // enforce the arch type
-    os << "gcu_arch=" << ToLower(CCtx().GetArch()) << "\n";
-  } else
-    os << R"script(
-  # check the device just-in-time
-  # TODO: improve the target check with more solid code
-  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-  # echo $GCU_DEVICE_STR
-  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_arch=gcu300
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-    gcu_arch=gcu300
-    export TOPS_VISIBLE_DEVICES=1
-  elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
-    gcu_arch=gcu300
-  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-    gcu_arch=gcu210
-    export TOPS_VISIBLE_DEVICES=1
-  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
-    gcu_arch=gcu210
-  else
-    echo "can not determine the GCU device type."
-    exit 1
-  fi
-  )script";
+  // gcu_arch is set by SetupBuildEnv() -- either from GCU_ARCH env
+  // (pre-set above for compile-time -arch) or via JIT lspci detection.
 
   os << R"script(
 show_usage() {
@@ -3293,7 +3253,7 @@ option_detect() {
   else if (CCtx().GetArch() == "gcu500")
     os << "\nexport INTERNAL_GCU_SIM=DRACO";
 
-  os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
+  os << "\n";
 
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
   if (verbose)

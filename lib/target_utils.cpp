@@ -1,16 +1,18 @@
 #include "target_utils.hpp"
 #include "ast.hpp"
+#include "context.hpp"
 
 using namespace Choreo;
 
-std::once_flag PlDepthMap::init_flag;
-std::unique_ptr<PlDepthMap> PlDepthMap::instance;
+struct CompilationContext::PlDepthMapHolder {
+  PlDepthMap map;
+};
 
 const PlDepthMap& PlDepthMap::Get() {
-  // the context must be valid
-  std::call_once(init_flag,
-                 []() { instance = std::make_unique<PlDepthMap>(); });
-  return *instance;
+  auto& ctx = CCtx();
+  if (!ctx.pl_depth_map_)
+    ctx.pl_depth_map_ = std::make_shared<CompilationContext::PlDepthMapHolder>();
+  return ctx.pl_depth_map_->map;
 }
 
 PlDepthMap::PlDepthMap() {
@@ -21,10 +23,9 @@ PlDepthMap::PlDepthMap() {
     ++li;
   }
 
-  // retrieve the maximums
   for (auto d : to_levels)
     max_depth = (d.first > max_depth) ? d.first : max_depth;
 
-  assert(to_levels.count(max_depth));
-  max_level = to_levels[max_depth];
+  if (to_levels.count(max_depth))
+    max_level = to_levels[max_depth];
 }

@@ -685,7 +685,8 @@ bool CCCodeGen::AfterVisitImpl(AST::Node& n) {
     ssm.LeaveScope();
 
     switch (CCtx().GetOutputKind()) {
-    case OutputKind::TargetSourceCode: EmitSource(); break;
+    case OutputKind::TargetSourceCode:
+    case OutputKind::DeviceSourceOnly: EmitSource(); break;
     case OutputKind::TargetModule:
     case OutputKind::TargetExecutable: {
       if (!CompileWithScript("--compile-link")) {
