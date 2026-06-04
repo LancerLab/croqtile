@@ -4113,18 +4113,27 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       auto rev_indices = Reverse(GenIndices(f_ca));
 
       // When TMA source is a computed subview of a root parameter,
-      // add the intermediate offset to the outermost TMA coordinate.
+      // recompute TMA coordinates using the subview's outermost stride
+      // as inner_dim.  This matches EmitTMAConfiguration which also uses
+      // the subview stride for the tensor-map row stride.
+      //
+      // GenIndices gives logical tile indices that don't account for
+      // non-contiguous strides.  Use GenOffset instead to get the true
+      // element offset from both the tile position and the subview
+      // definition, then split into the TMA's 2D coordinate space.
       if (tma_idx >= 0 && tma_descs[tma_idx].HasRootParam()) {
-        const auto& root_shape = tma_descs[tma_idx].GetRootParamShape();
         const auto& def_ca = tma_descs[tma_idx].GetRootDefCA();
         size_t end_idx = def_ca->OpCount();
         while (end_idx > 0 && isa<AST::SOP::Reshape>(def_ca->OpAt(end_idx - 1)))
           --end_idx;
-        auto elem_offset = GenOffset(def_ca, end_idx);
-        auto inner_dim = root_shape.ValueAt(root_shape.Rank() - 1);
-        auto row_offset = elem_offset / inner_dim;
-        assert(rev_indices.size() >= 1);
-        rev_indices.back() = rev_indices.back() + row_offset;
+        auto def_elem_offset = GenOffset(def_ca, end_idx);
+        auto tile_elem_offset = GenOffset(f_ca);
+        auto total_elem = tile_elem_offset + def_elem_offset;
+        auto inner_dim = f_sty->GetStrides().at(0);
+
+        assert(rev_indices.size() >= 2);
+        rev_indices.front() = total_elem % inner_dim;
+        rev_indices.back() = total_elem / inner_dim;
       }
 
       std::vector<std::string> hoisted_rev_indices;
@@ -4944,6 +4953,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool is_shared_direct = false;
         size_t k_iters = 1;
         size_t regs_per_step = 0;
+        int lbo_override_bytes = 0;
         std::string desc_expr;
         std::string rs_base_expr;
         std::string shared_elem_ty;
@@ -5145,6 +5155,122 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             it != shared_buf_swiz_.end())
           swizzle = it->second;
 
+        bool is_mn_major =
+            major_order_for(operand_info) == "WGMMA_MajorOrder::MN_MAJOR";
+        size_t non_k_axis = (k_axis == 0) ? 1 : 0;
+
+        int swiz_atom_cols = 0;
+        if (swizzle != SwizMode::NONE) {
+          int swiz_bytes = 0;
+          switch (swizzle) {
+          case SwizMode::B32: swiz_bytes = 32; break;
+          case SwizMode::B64: swiz_bytes = 64; break;
+          case SwizMode::B128: swiz_bytes = 128; break;
+          default: break;
+          }
+          if (swiz_bytes > 0)
+            swiz_atom_cols = swiz_bytes / (int)SizeOf(sty->ElementType());
+        }
+
+        // For swizzled layouts, recompute base_expr with physical offsets.
+        // In a tiled-swizzled smem layout the non-K axis stride is atom_cols
+        // (one swizzle period width), not the logical stride.
+        auto phys_base_expr = [&]() -> std::string {
+          if (ca && swiz_atom_cols > 0) {
+            std::string raw_base;
+            if (auto fty = dyn_cast<FutureType>(NodeType(*ca->data)))
+              raw_base = std::string("(") + elem_ty + "*)" +
+                         ExprSTR(ca->data, false) + ".data()";
+            else
+              raw_base = ExprSTR(ca->data, false);
+
+            if (ca->NoOperation()) return raw_base;
+
+            sbe::ExprSum phys;
+            for (size_t i = 0; i < ca->OpCount(); ++i) {
+              const auto& sop = ca->OpAt(i);
+              if (isa<AST::SOP::Reshape>(sop)) continue;
+              if (!(isa<AST::SOP::Tiling>(sop) ||
+                    isa<AST::SOP::TileAt>(sop) ||
+                    isa<AST::SOP::SubSpan>(sop)))
+                continue;
+              auto idx = sop->GetIndices()->Opts();
+              auto strd = sop->GetBlockStrides();
+              auto blk = sop->GetBlockShape();
+              bool has_step =
+                  isa<AST::SOP::SubSpan>(sop) && sop->GetSteps();
+              for (size_t ith = 0; ith < idx.GetVals().size(); ++ith) {
+                ValueItem eff_strd = (ith == non_k_axis)
+                                         ? sbe::nu(swiz_atom_cols)
+                                         : strd[ith];
+                if (has_step)
+                  phys += idx.GetVals()[ith] * eff_strd;
+                else
+                  phys += idx.GetVals()[ith] * eff_strd * blk.ValueAt(ith);
+              }
+            }
+            auto off = ValueSTR(phys.Get());
+            if (off == "0") return raw_base;
+            return "(" + raw_base + " + " + off + ")";
+          }
+          return base_expr;
+        }();
+
+        // Build the iter-offset expression.
+        // Logical formula:  k_iter * atom_k * stride
+        // Physical formulas for swizzled layouts:
+        //   K-major:  col = k_iter*atom_k;
+        //             (col & (atom_cols-1)) +
+        //             (col / atom_cols) * full_nonk * atom_cols
+        //   MN-major: k_iter * atom_k * atom_cols
+        size_t local_k_iters = static_cast<size_t>(*full_k / *atom_k);
+        auto iter_offset = [&]() -> std::string {
+          if (swiz_atom_cols > 0 && local_k_iters > 1) {
+            if (is_mn_major) {
+              int step = *atom_k * swiz_atom_cols;
+              return "((" + iter_expr + ") * " + std::to_string(step) + ")";
+            }
+            // K-major: need the full non-K dimension of the parent tensor
+            int full_nonk = 0;
+            if (ca) {
+              auto parent_sty =
+                  GetSpannedType(GetSymbolType(ca->RefSymbol()));
+              if (parent_sty) {
+                auto pv = VIInt(parent_sty->GetShape().ValueAt(non_k_axis));
+                if (pv) full_nonk = *pv;
+              }
+            }
+            if (full_nonk == 0) {
+              auto sv = VIInt(shape.ValueAt(non_k_axis));
+              if (sv) full_nonk = *sv;
+            }
+            if (full_nonk > 0) {
+              int col_group_elems = full_nonk * swiz_atom_cols;
+              return "(((" + iter_expr + ") * " +
+                     std::to_string(*atom_k) + " & " +
+                     std::to_string(swiz_atom_cols - 1) + ") + ((" +
+                     iter_expr + ") * " + std::to_string(*atom_k) +
+                     " / " + std::to_string(swiz_atom_cols) + ") * " +
+                     std::to_string(col_group_elems) + ")";
+            }
+          }
+          return "((" + iter_expr + ") * " + std::to_string(*atom_k) +
+                 " * (" + stride_expr + "))";
+        }();
+
+        // LBO override: when MN-major and the non-K dimension exceeds one
+        // swizzle period, the leading-byte-offset must encode the stride
+        // between column groups instead of the default 16-byte line.
+        int lbo_override = 0;
+        if (swiz_atom_cols > 0 && is_mn_major) {
+          int full_k_dim = *full_k;
+          auto non_k_val = VIInt(shape.ValueAt(non_k_axis));
+          int non_k_dim = non_k_val ? *non_k_val : 0;
+          if (non_k_dim > swiz_atom_cols)
+            lbo_override =
+                full_k_dim * swiz_atom_cols * (int)SizeOf(sty->ElementType());
+        }
+
         info.is_direct = true;
         info.is_shared_direct = true;
         info.k_iters = static_cast<size_t>(*full_k / *atom_k);
@@ -5152,10 +5278,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         info.shared_major_order = major_order_for(operand_info);
         info.shared_swizzle_enum = swizzle_to_enum(swizzle);
         info.shared_ptr_expr =
-            std::string("(") + elem_ty + "*)(" + base_expr + ")";
-        info.shared_iter_elem_offset_expr = "((" + iter_expr + ") * " +
-                                            std::to_string(*atom_k) + " * (" +
-                                            stride_expr + "))";
+            std::string("(") + elem_ty + "*)(" + phys_base_expr + ")";
+        info.shared_iter_elem_offset_expr = iter_offset;
+        info.lbo_override_bytes = lbo_override;
         {
           int desc_id = direct_wgmma_desc_cnt++;
           auto suffix = std::to_string(desc_id);
@@ -5202,14 +5327,23 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         return false;
       }
 
+      auto emit_wgmma_desc_call =
+          [&](std::ostream& os, const DirectWGMMAOperandInfo& info,
+              const std::string& ptr_var) {
+            os << "wgmma_make_smem_desc<" << info.shared_major_order << ", "
+               << info.shared_swizzle_enum;
+            if (info.lbo_override_bytes > 0)
+              os << ", " << info.lbo_override_bytes;
+            os << ">(" << ptr_var << ")";
+          };
       auto emit_shared_direct_setup = [&](DirectWGMMAOperandInfo& info) {
         if (!info.is_shared_direct) return;
         if (wgmma_k_iters > 1) return;
         ds << d_indent << "auto* " << info.shared_ptr_var << " = "
            << info.shared_ptr_expr << ";\n";
-        ds << d_indent << "uint64_t " << info.shared_desc_var
-           << " = wgmma_make_smem_desc<" << info.shared_major_order << ", "
-           << info.shared_swizzle_enum << ">(" << info.shared_ptr_var << ");\n";
+        ds << d_indent << "uint64_t " << info.shared_desc_var << " = ";
+        emit_wgmma_desc_call(ds, info, info.shared_ptr_var);
+        ds << ";\n";
       };
       auto emit_shared_direct_iter_update =
           [&](const DirectWGMMAOperandInfo& info) {
@@ -5218,9 +5352,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                << info.shared_elem_ty << "*)(" << info.shared_ptr_expr << " + "
                << info.shared_iter_elem_offset_expr << ");\n";
             ds << d_indent << "uint64_t " << info.shared_iter_desc_var
-               << " = wgmma_make_smem_desc<" << info.shared_major_order << ", "
-               << info.shared_swizzle_enum << ">(" << info.shared_iter_ptr_var
-               << ");\n";
+               << " = ";
+            emit_wgmma_desc_call(ds, info, info.shared_iter_ptr_var);
+            ds << ";\n";
           };
       auto desc_expr_for = [&](const DirectWGMMAOperandInfo& info,
                                const std::string& fallback) {
@@ -8587,15 +8721,21 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
 
     if (desc.HasRootParam()) {
       // TMA source is a computed subview (e.g., Q_head derived from Q).
-      // Flatten the root parameter's N-D shape to 2D [outer_product, inner]
+      // Flatten the root parameter's N-D shape to 2D [outer, inner]
       // so the TMA descriptor covers the entire root tensor.
+      //
+      // Use the subview's outermost stride as inner_dim rather than the
+      // root's last dimension.  When squeezed dimensions sit between the
+      // tiled and innermost dimensions (e.g. Q[B,SEQ,H,DIM] -> Q_head[SEQ,DIM]
+      // with stride [H*DIM,1]), the row stride is H*DIM, not DIM.
       auto root_name = UnScopedName(desc.GetRootParamName());
       const auto& root_shape = desc.GetRootParamShape();
 
-      ValueItem inner_dim = root_shape.ValueAt(root_shape.Rank() - 1);
-      ValueItem outer_dim = sbe::nu(1);
-      for (size_t i = 0; i + 1 < root_shape.Rank(); ++i)
-        outer_dim = outer_dim * root_shape.ValueAt(i);
+      ValueItem inner_dim = g_stride[0];
+      ValueItem total_elems = sbe::nu(1);
+      for (size_t i = 0; i < root_shape.Rank(); ++i)
+        total_elems = total_elems * root_shape.ValueAt(i);
+      ValueItem outer_dim = total_elems / inner_dim;
 
       host_shape = Shape({outer_dim, inner_dim});
       host_stride = Shape({inner_dim * gmem_ty->ElementSizeValue(),

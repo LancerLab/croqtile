@@ -12,11 +12,13 @@ Between decoder D=64 and non-causal `prefill_d128` peak case.
 
 ## Choreo
 
-Not yet (D=128 BHSD kernel). FA3 only.
+v1 DMA baseline kernel (bf16, BSHD). Same tile pattern as `decoder_causal_d64` v1
+with D=128 and bf16 type.
 
 ## Run
 
 ```bash
 bash baselines/bench.sh
+cd choreo && bash bench.sh --kernel v1_manual_baseline.co --no-verify
 bash compare_all.sh
 ```

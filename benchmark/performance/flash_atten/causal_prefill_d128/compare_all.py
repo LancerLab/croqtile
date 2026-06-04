@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FA3 baseline compare for causal_prefill_d128."""
+"""Compare Choreo vs FA3 for causal_prefill_d128."""
 
 from __future__ import annotations
 
@@ -19,9 +19,10 @@ if __name__ == "__main__":
         run_compare(
             VARIANT_DIR,
             VARIANT_ID,
-            "D=128 causal prefill, BSHD (FA3 only)",
+            "D=128 causal prefill, BSHD; Choreo bf16 vs FA3 bf16",
             labels,
-            ("fa3",),
-            has_choreo=False,
+            ("choreo", "fa3"),
+            has_choreo=True,
+            default_kernel="v1_manual_baseline.co",
         )
     )

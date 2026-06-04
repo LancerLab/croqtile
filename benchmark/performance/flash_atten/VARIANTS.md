@@ -20,7 +20,7 @@ Backends: **Choreo** (where available) and **FA3** (`flash_attn_interface`). No 
 | 2 | `prefill_d128/` | B=2 H=16 S=8192 non-causal D=128 bf16 | No |
 | 3 | `gqa_decoder_d64/` | B=1 Hq=32 Hkv=4 S=8192 causal D=64 | No |
 | 4 | `kv_cache_decode_d64/` | B=1 H=32 q=1 kv=8192 D=64 | Yes (BHSD v2 1p1c TMA kernel) |
-| 5 | `causal_prefill_d128/` | B=2 H=16 S=8192 causal D=128 bf16 | No |
+| 5 | `causal_prefill_d128/` | B=2 H=16 S=8192 causal D=128 bf16 | Yes (BSHD v1 baseline bf16) |
 | 6 | `fp8_d128/` | B=2 H=16 S=8192 FP8 non-causal D=128 | No |
 
 Details and full config tables: each variant `README.md`.
