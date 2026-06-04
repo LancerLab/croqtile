@@ -4136,8 +4136,32 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         rev_indices.back() = total_elem / inner_dim;
       }
 
+      // If host-side TMA was split (inner dim exceeded swizzle width),
+      // expand 2D coordinates to 3D.  The groups dimension is outermost
+      // so TMA fills all rows of group 0 before group 1 (atom-major
+      // layout matching WGMMA B128 expectations).
+      // Coordinate order: [inner%swiz, outer, inner/swiz]
+      bool tma_has_inner_split = false;
+      if (tma_idx >= 0) {
+        auto split_it =
+            tma_inner_splits_.find(tma_descs[tma_idx].GetName());
+        if (split_it != tma_inner_splits_.end()) {
+          tma_has_inner_split = true;
+          auto se = sbe::nu((int64_t)split_it->second.swiz_elems);
+          auto orig_inner = rev_indices.front();
+          auto orig_outer = rev_indices.back();
+          rev_indices.clear();
+          rev_indices.push_back(orig_inner % se);
+          rev_indices.push_back(orig_outer);
+          rev_indices.push_back(orig_inner / se);
+        }
+      }
+      size_t effective_tma_rank =
+          tma_has_inner_split ? t_shape.Rank() + 1 : t_shape.Rank();
+
       std::vector<std::string> hoisted_rev_indices;
-      if (hoist_offset && t_shape.Rank() == 2 && rev_indices.size() == 2) {
+      if (hoist_offset && !tma_has_inner_split && t_shape.Rank() == 2 &&
+          rev_indices.size() == 2) {
         auto make_dim_name = [&](size_t dim_index) {
           auto dim = f_sty->GetShape().ValueAt(f_sty->Dims() - 1 - dim_index);
           auto dim_name = ToLower(UnScopedExpr(ValueSTR(dim)));
@@ -4163,7 +4187,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                          cgi.GetFunctionLaunches(fname)[0].HasCluster();
       bool use_ptx_tma_sync = (tma_cluster_aware || ptx_barrier ||
                                is_multicast_tma || has_cluster) &&
-                              t_shape.Rank() == 2;
+                              effective_tma_rank == 2;
       bool emit_tma_single_guard =
           !ScopeAlreadySingleThreadForLevel(tma_sync_level);
       if (!warpspec_only)
@@ -4242,8 +4266,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           tma_barrier_arg = tma_atom_ref + ".barrier()";
 
         ds << d_indent << tma_issue_prefix << "cde::cp_async_bulk_tensor_"
-           << t_shape.Rank() << "d_global_to_shared(" << t_buf_expr_with_offset
-           << ", &" << *tname << "_tensor_map, "
+           << effective_tma_rank << "d_global_to_shared("
+           << t_buf_expr_with_offset << ", &" << *tname << "_tensor_map, "
            << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices)
                                            : hoisted_rev_indices.at(0) + ", " +
                                                  hoisted_rev_indices.at(1))
@@ -4356,9 +4380,27 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       }
 
-      ds << d_indent << "  cde::cp_async_bulk_tensor_" << t_shape.Rank()
-         << "d_shared_to_global(&" << *tname << "_tensor_map, "
-         << ValueSTR(Reverse(GenIndices(t_ca))) << ", " << f_buf_expr << ");\n";
+      {
+        auto s2g_indices = Reverse(GenIndices(t_ca));
+        size_t s2g_rank = t_shape.Rank();
+        if (tma_idx >= 0) {
+          auto s2g_it =
+              tma_inner_splits_.find(tma_descs[tma_idx].GetName());
+          if (s2g_it != tma_inner_splits_.end()) {
+            auto se = sbe::nu((int64_t)s2g_it->second.swiz_elems);
+            auto orig_inner = s2g_indices.front();
+            auto orig_outer = s2g_indices.back();
+            s2g_indices.clear();
+            s2g_indices.push_back(orig_inner % se);
+            s2g_indices.push_back(orig_outer);
+            s2g_indices.push_back(orig_inner / se);
+            s2g_rank += 1;
+          }
+        }
+        ds << d_indent << "  cde::cp_async_bulk_tensor_" << s2g_rank
+           << "d_shared_to_global(&" << *tname << "_tensor_map, "
+           << ValueSTR(s2g_indices) << ", " << f_buf_expr << ");\n";
+      }
       ds << d_indent << "  cde::cp_async_bulk_commit_group();\n";
       ds << d_indent << "  cde::cp_async_bulk_wait_group_read<0>();\n";
       ds << d_indent << "}\n";
@@ -8792,12 +8834,75 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
           oss.str());
     }
 
+    // When TMA swizzle is enabled and the box inner dimension (in bytes)
+    // exceeds the swizzle width, CUDA requires boxDim[0]*elemSize <=
+    // swizzle_bytes.  Fix by splitting the innermost dimension into groups
+    // of swiz_elems and using a higher-rank TMA descriptor (e.g. 2D->3D).
+    //
+    // Dimension ordering: the groups dimension is placed OUTERMOST so that
+    // TMA fills all rows of group 0 before group 1.  This produces an
+    // atom-major shared-memory layout (matching WGMMA B128 expectations):
+    //   [outer, inner] -> [groups, outer, swiz_elems]
+    // After Reverse for CUDA: [swiz_elems, outer, groups]
+    int swiz_bytes = 0;
+    switch (tma_swizzle) {
+    case TMA_Swizzle::B32: swiz_bytes = 32; break;
+    case TMA_Swizzle::B64: swiz_bytes = 64; break;
+    case TMA_Swizzle::B128: swiz_bytes = 128; break;
+    default: break;
+    }
+    size_t elem_size = SizeOf(gmem_ty->ElementType());
+    Shape box_shape = t_shape;
+    if (swiz_bytes > 0 && t_shape.Rank() >= 1) {
+      auto inner_vi = t_shape.ValueAt(t_shape.Rank() - 1);
+      if (auto inner_val = VIInt(inner_vi)) {
+        size_t inner_bytes = (size_t)*inner_val * elem_size;
+        if (inner_bytes > (size_t)swiz_bytes) {
+          size_t swiz_elems = (size_t)swiz_bytes / elem_size;
+
+          // Split box: [outer, inner] -> [inner/swiz, outer, swiz]
+          auto box_groups =
+              sbe::nu((int64_t)(*inner_val / (int64_t)swiz_elems));
+          std::vector<ValueItem> new_box;
+          new_box.push_back(box_groups);
+          for (size_t i = 0; i + 1 < t_shape.Rank(); ++i)
+            new_box.push_back(t_shape.ValueAt(i));
+          new_box.push_back(sbe::nu((int64_t)swiz_elems));
+          box_shape = Shape(new_box);
+
+          // Split host_shape: [outer, inner] -> [groups, outer, swiz]
+          auto orig_inner = host_shape.ValueAt(host_shape.Rank() - 1);
+          auto num_groups = orig_inner / sbe::nu((int64_t)swiz_elems);
+          auto group_stride_val =
+              sbe::nu((int64_t)swiz_elems) * gmem_ty->ElementSizeValue();
+
+          std::vector<ValueItem> new_shape;
+          new_shape.push_back(num_groups);
+          for (size_t i = 0; i + 1 < host_shape.Rank(); ++i)
+            new_shape.push_back(host_shape.ValueAt(i));
+          new_shape.push_back(sbe::nu((int64_t)swiz_elems));
+          host_shape = Shape(new_shape);
+
+          // Strides: [group_stride, outer_stride..., elem_stride]
+          std::vector<ValueItem> new_stride;
+          new_stride.push_back(group_stride_val);
+          for (size_t i = 0; i + 1 < host_stride.Rank(); ++i)
+            new_stride.push_back(host_stride.ValueAt(i));
+          new_stride.push_back(host_stride.ValueAt(host_stride.Rank() - 1));
+          host_stride = Shape(new_stride);
+
+          host_rank += 1;
+          tma_inner_splits_[desc.GetName()] = {swiz_elems};
+        }
+      }
+    }
+
     hs << h_indent << "uint64_t " << desc.GetName() << "_shape[] = {"
        << ValueSTR(Reverse(host_shape.Value())) << "};\n";
     hs << h_indent << "uint64_t " << desc.GetName() << "_strides[] = {"
        << ValueSTR(Trim(Reverse(host_stride.Value()))) << "};\n";
     {
-      auto box_vals = Reverse(t_shape.Value());
+      auto box_vals = Reverse(box_shape.Value());
       hs << h_indent << "uint32_t " << desc.GetName() << "_box_shape[] = {";
       for (size_t i = 0; i < box_vals.size(); ++i) {
         if (i > 0) hs << ", ";
@@ -8806,7 +8911,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       hs << "};\n";
     }
     hs << h_indent << "uint32_t " << desc.GetName() << "_elem_strides[] = {"
-       << ValueSTR(ValxN(sbe::nu(1), t_shape.Rank())) << "};\n";
+       << ValueSTR(ValxN(sbe::nu(1), box_shape.Rank())) << "};\n";
 
     hs << h_indent << "alignas(64) CUtensorMap " << map_name << "{};\n";
     hs << h_indent << "CUresult " << map_name
