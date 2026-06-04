@@ -8,8 +8,8 @@ tmp
 **gcusim.**
 tests/*co.test
 extern/*
-choreo
-copp
+/choreo
+/copp
 /co-mock
 /co2ir
 /coir-opt

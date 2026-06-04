@@ -1,0 +1,127 @@
+// Usage: choreo -gs -t cute -arch=sm_90a v2_1p2c_tma.co -o bench.sh
+//        bash bench.sh --execute
+// Stage = 2, warpspec = 1 producer + 2 consumer, TMA for Q/K/V, with double buffering and synchronization via shared memory events.
+
+#define BLOCK_M 128
+#define BLOCK_N 128
+#define WG_M 64
+#define WG_K 16
+#define SWIZ 128
+#define STAGES 2
+
+#define DIM 64
+
+#define min(a, b) ((a) < (b) ? (a) : (b))
+
+__co__ void flash_atten(
+  global f16[B, Q_SEQ, H, DIM] Q,
+  global f16[B, KV_SEQ, H, DIM] K,
+  global f16[B, KV_SEQ, H, DIM] V,
+  global f16[B, Q_SEQ, H, DIM] O
+) {
+  float scale = 0.18033688f;
+  int past_len = KV_SEQ - Q_SEQ;
+
+  parallel {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
+    Q_head = Q.subspan(1, Q_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
+    K_head = K.subspan(1, KV_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
+    V_head = V.subspan(1, KV_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
+    O_head = O.subspan(1, Q_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
+
+    shared f16[BLOCK_M, DIM] q_shared; // 128x64 = 8K * 2 = 16K
+    shared f16[BLOCK_N, DIM] k_buf[STAGES]; // 128x64x2 = 16K * 2 = 32K
+    shared f16[BLOCK_N, DIM] v_buf[STAGES]; // 128x64x2 = 16K * 2 = 32K
+    shared event qf, kf[STAGES], ke[STAGES], vf[STAGES], ve[STAGES];
+
+    kv_bound = __min(cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N), cdiv(KV_SEQ, BLOCK_N));
+
+    parallel p by [BLOCK_M/WG_M + 1] : group-4, t by 128 : thread { // 1 producer warpgroup + 2 consumer warpgroups
+      inthreads.async (p == 0 && t == 0) {
+        tma.copy.async<qf>.swiz<SWIZ>
+          Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => q_shared;
+        trigger qf;
+
+        foreach {bn} in [kv_bound] {
+          stage = bn % STAGES;
+          wait ke[stage];
+          tma.copy.async<kf[stage]>.swiz<SWIZ>
+            K_head.subspan(BLOCK_N, DIM).at(bn, 0) => k_buf[stage];
+          trigger kf[stage];
+
+          wait ve[stage];
+          tma.copy.async<vf[stage]>.swiz<SWIZ>
+            V_head.subspan(BLOCK_N, DIM).at(bn, 0) => v_buf[stage];
+          trigger vf[stage];
+        }
+      }
+
+      inthreads.async (p > 0) {
+        cid = p - 1;
+        foreach {s} in [STAGES] {
+          trigger ke[s];
+          trigger ve[s];
+        }
+
+        wait qf;
+
+        fragment f32[WG_M] scores_max {-inf};
+        fragment f32[WG_M] scores_max_prev;
+        fragment f32[WG_M] scores_scale;
+        fragment f32[WG_M] scores_sum;
+        fragment f32[WG_M] logsum {0.0f};
+        acc_o = mma.fill.f32 0.0f;
+
+        foreach {bn} in [kv_bound] {
+          stage = bn % STAGES;
+          acc_s = mma.fill.f32 0.0f;
+
+          wait kf[stage];
+          mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[stage];
+          trigger ke[stage];
+
+          frag.apply acc_s, [](i, j) {
+            return ((bn * BLOCK_N + j) > (bm * BLOCK_M + cid * WG_M + i + past_len))
+              ? -inf : acc_s.at(i, j);
+          };
+          
+          frag.copy scores_max_prev, scores_max;
+          frag.reduce_max acc_s, scores_max, 1;
+          frag.apply scores_max, [](i) { return __max(scores_max.at(i), scores_max_prev.at(i)); };
+          frag.apply scores_scale, [](i) { return __exp2f(scores_max_prev.at(i) * scale - scores_max.at(i) * scale);};
+          frag.apply acc_s, [](i, j) { return __exp2f(acc_s.at(i, j) * scale - scores_max.at(i) * scale);};
+          frag.reduce_sum acc_s, scores_sum, 1;
+          frag.apply logsum, [](i) { return logsum.at(i) * scores_scale.at(i) + scores_sum.at(i);};
+          frag.apply acc_o, [](i, j) { return acc_o.at(i, j) * scores_scale.at(i);};
+
+          fragment f16[WG_M, BLOCK_N] acc_s_cast;
+          frag.apply acc_s_cast, [](i, j) { return __to<f16>(acc_s.at(i, j));};
+
+          wait vf[stage];
+          mma.row.col acc_o, acc_s_cast, v_buf[stage];
+          trigger ve[stage];
+        }
+
+        frag.apply acc_o, [](i, j) { return acc_o.at(i, j) / logsum.at(i); };
+        mma.store acc_o, O_head.subspan(WG_M, DIM).at(bm * 2 + cid, 0);
+      }
+    }
+  }
+}
+
+#include "mha_helper.hpp"
+
+int main() {
+  mha_helper::BenchConfig configs[] = {
+    {1, 32, 2048, 2048, true, "B=1 H=32 SEQ=2048 decoder"},
+    {2, 32, 4096, 4096, true, "B=2 H=32 SEQ=4096 decoder"},
+    {1, 32, 8192, 8192, true, "B=1 H=32 SEQ=8192 decoder"},
+  };
+  return mha_helper::RunBenchmarks(
+      "Choreo Flash Attention v2 Manual S2 1p2c TMA", configs,
+      sizeof(configs) / sizeof(configs[0]),
+      [&](const mha_helper::BenchConfig& cfg,
+          const mha_helper::TensorViews& views) {
+        (void)cfg;
+        flash_atten(views.Q, views.K, views.V, views.O);
+      });
+}
