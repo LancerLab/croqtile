@@ -2193,19 +2193,20 @@ __device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
 
 // Unified shared memory descriptor encoding template
 // Automatically determines stride and leading dimension based on major order
-// and swizzle
-template <WGMMA_MajorOrder MajorOrder, WGMMA_Swizzle Swizzle, typename T>
+// and swizzle.  When LBOBytes > 0 the caller overrides the leading-byte-offset
+// (needed for MN-major layouts where N spans multiple swizzle periods, e.g.
+// Layout_K_SW128_Atom tiled to N=128 for bf16).
+template <WGMMA_MajorOrder MajorOrder, WGMMA_Swizzle Swizzle,
+          int LBOBytes = 0, typename T>
 __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
   uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
   uint64_t desc = 0x0000000000000000;
   desc |= matrix_descriptor_encode(addr);
 
-  // Determine stride and leading dimension based on major order and swizzle
   uint64_t LBO = 0;
   uint64_t SBO = 0;
 
   if constexpr (MajorOrder == WGMMA_MajorOrder::K_MAJOR) {
-    // K-major layout: stride varies by swizzle pattern
     switch (Swizzle) {
     case WGMMA_Swizzle::NS:
       LBO = 256;
@@ -2225,10 +2226,6 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
       break;
     }
   } else { // MN_MAJOR
-    // For swizzled MN-major GMMA layouts, the leading-byte offset remains one
-    // 128-bit line (16B for f16/bf16). Only the stride-byte offset scales with
-    // the swizzle width; this matches CuTe's canonical GMMA descriptor
-    // construction.
     switch (Swizzle) {
     case WGMMA_Swizzle::NS:
       LBO = 16;
@@ -2248,6 +2245,8 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
       break;
     }
   }
+
+  if constexpr (LBOBytes > 0) LBO = LBOBytes;
 
   desc |= matrix_descriptor_encode(LBO) << 16;
   desc |= matrix_descriptor_encode(SBO) << 32;
