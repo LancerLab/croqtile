@@ -11,15 +11,51 @@
 #include "choreo_types_header.inc"
 #include "codegen.hpp"
 #include "context.hpp"
+#include "pipeline.hpp"
 #include "target.hpp"
+#include "target_registry.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
 using namespace Choreo::Hetero;
 
+extern AST::Program root;
+
+namespace {
+// Find the Nth device(target) ParallelBy inside a named function in the AST.
+AST::ParallelBy* FindDevicePB(AST::Node& program, const std::string& func_name,
+                               const std::string& target_name, int nth) {
+  int count = 0;
+  AST::ChoreoFunction* func = nullptr;
+  if (auto p = dyn_cast<AST::Program>(&program)) {
+    for (auto& child : p->stmts->values) {
+      if (auto f = dyn_cast<AST::ChoreoFunction>(child.get())) {
+        if (f->name == func_name) { func = f; break; }
+      }
+    }
+  }
+  if (!func || !func->stmts) return nullptr;
+  for (auto& child : func->stmts->values) {
+    if (auto pb = dyn_cast<AST::ParallelBy>(child.get())) {
+      if (pb->HasDeviceTarget() && pb->DeviceTargetName() == target_name) {
+        if (count == nth) return pb;
+        count++;
+      }
+    }
+  }
+  return nullptr;
+}
+} // namespace
+
 // ---- Preamble ----
 
 void HeteroCodeGen::EmitPreamble() {
+  // Device includes must come before choreo.h so that device SDK types
+  // referenced by target-specific headers are available.
+  for (auto& [name, dcg] : device_codegens) {
+    dcg->EmitHostIncludes(os);
+  }
+
   os << "#include \"choreo.h\"\n";
   os << "#include <cstring>\n";
   os << "#include <cstdlib>\n";
@@ -27,7 +63,6 @@ void HeteroCodeGen::EmitPreamble() {
   os << "#include <thread>\n\n";
 
   for (auto& [name, dcg] : device_codegens) {
-    dcg->EmitHostIncludes(os);
     dcg->EmitHostPreamble(os);
   }
 }
@@ -50,8 +85,9 @@ bool HeteroCodeGen::BeforeVisitImpl(AST::Node& n) {
     os.str("");
     ssm.EnterScope();
     levels.push(ParallelLevel::NONE);
-  } else if (isa<AST::ChoreoFunction>(&n)) {
+  } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     ResetFunctionStates();
+    current_func_node_ = f;
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
     levels.push(ParallelLevel::SEQ);
@@ -90,6 +126,25 @@ bool HeteroCodeGen::AfterVisitImpl(AST::Node& n) {
       fwd += "\n";
       code_segments.insert(code_segments.begin() + 1, fwd);
     }
+
+    // Save output stream before in-process compilation may redirect it.
+    auto& saved_outs = outs();
+    // Compile offload functions in-process to get device source code.
+    for (auto& fi : offload_functions_) {
+      if (fi.offload_func && fi.device_source.empty()) {
+        if (!CompileOffloadToSource(fi)) {
+          // For source output mode, continue with .co source for display.
+          // For compile/execute modes, this is fatal.
+          if (CCtx().GetOutputKind() != OutputKind::TargetSourceCode) {
+            error_count++;
+            return false;
+          }
+        }
+      }
+    }
+
+    // Restore output stream after in-process compilation.
+    OptionRegistry::GetInstance().SetOutputStream(saved_outs);
 
     switch (CCtx().GetOutputKind()) {
     case OutputKind::TargetSourceCode: EmitHeteroSource(); break;
@@ -319,50 +374,17 @@ void HeteroCodeGen::EmitHeteroSource() {
   for (auto& code : code_segments) outs() << code << "\n";
 
   for (auto& fi : offload_functions_) {
-    outs() << "\n// --- Offload .co source: " << fi.co_func_name
+    outs() << "\n// --- Offload device source: " << fi.co_func_name
            << " (target: " << fi.target_name << ") ---\n";
-    std::istringstream iss(fi.co_source);
-    std::string line;
-    while (std::getline(iss, line)) outs() << "// " << line << "\n";
+    if (!fi.device_source.empty())
+      outs() << fi.device_source;
+    else {
+      outs() << "// [device compilation failed for " << fi.target_name << "]\n";
+    }
   }
 }
 
 // ---- Offload Device Two-Step Delegation ----
-
-std::string HeteroCodeGen::ChoreoTypeSTR(const Type& ty) const {
-  if (auto sty = dyn_cast<SpannedType>(&ty)) {
-    auto bt = sty->ElementType();
-    std::string bts;
-    switch (bt) {
-    case BaseType::F32: bts = "f32"; break;
-    case BaseType::F64: bts = "f64"; break;
-    case BaseType::F16: bts = "f16"; break;
-    case BaseType::BF16: bts = "bf16"; break;
-    case BaseType::S32: bts = "s32"; break;
-    case BaseType::U32: bts = "u32"; break;
-    case BaseType::S64: bts = "s64"; break;
-    case BaseType::U64: bts = "u64"; break;
-    case BaseType::S16: bts = "s16"; break;
-    case BaseType::U16: bts = "u16"; break;
-    case BaseType::S8: bts = "s8"; break;
-    case BaseType::U8: bts = "u8"; break;
-    case BaseType::BOOL: bts = "bool"; break;
-    default: choreo_unreachable("unsupported choreo base type"); break;
-    }
-    auto shape_str =
-        UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()));
-    return bts + " [" + shape_str + "]";
-  }
-  if (isa<S32Type>(&ty)) return "s32";
-  if (isa<U32Type>(&ty)) return "u32";
-  if (isa<S64Type>(&ty)) return "s64";
-  if (isa<U64Type>(&ty)) return "u64";
-  if (isa<F32Type>(&ty)) return "f32";
-  if (isa<F64Type>(&ty)) return "f64";
-  if (isa<BooleanType>(&ty)) return "bool";
-  choreo_unreachable("unsupported choreo type: " + STR(ty));
-  return "";
-}
 
 void HeteroCodeGen::BeginOffloadFunction(AST::ParallelBy& n,
                                          DeviceCodeGen& dcg) {
@@ -372,6 +394,7 @@ void HeteroCodeGen::BeginOffloadFunction(AST::ParallelBy& n,
                                    std::to_string(offload_func_counter_++);
   cur_offload_func_.parent_fname = fname;
   cur_offload_func_.target_name = dcg.TargetName();
+  cur_offload_func_.source_ext = dcg.SourceExtension();
 
   for (auto& item : cgi.GetParameters(fname)) {
     auto ty = item.type;
@@ -404,61 +427,32 @@ void HeteroCodeGen::BeginOffloadFunction(AST::ParallelBy& n,
     cur_offload_func_.host_fwd_decl = fwd.str();
   }
 
-  auto input_fn = OptionRegistry::GetInstance().GetInputFileName();
-  std::ifstream ifs(input_fn);
-  if (!ifs.is_open()) choreo_unreachable("cannot open input file: " + input_fn);
-  std::string source((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
-  ifs.close();
+  // Build the offload function from the pre-sema AST clone. The pre-sema
+  // clone is artifact-free (no implicit casts, no normalizer modifications,
+  // no LateNorm __buf__ names), so the device pipeline can re-analyze it.
+  auto pre_sema = CCtx().GetPreSemaRoot();
+  if (!pre_sema)
+    choreo_unreachable("pre-sema AST clone not available for hetero offload");
+  if (!current_func_node_)
+    choreo_unreachable(
+        "current function node not set in BeginOffloadFunction");
 
-  int pb_start_line = n.LOC().begin.line;
+  auto target_name = n.DeviceTargetName();
+  int nth = device_pb_counters_[target_name]++;
+  auto* clean_pb = FindDevicePB(*pre_sema, fname, target_name, nth);
+  if (!clean_pb)
+    choreo_unreachable("failed to find device(" + target_name +
+                       ") parallel-by #" + std::to_string(nth) +
+                       " in pre-sema AST for function '" + fname + "'");
 
-  std::istringstream iss(source);
-  std::string line;
-  std::vector<std::string> all_lines;
-  while (std::getline(iss, line)) all_lines.push_back(line);
-
-  int brace_depth = 0;
-  int body_start = -1;
-  int body_end = -1;
-  for (int i = pb_start_line - 1; i < (int)all_lines.size(); ++i) {
-    for (char c : all_lines[i]) {
-      if (c == '{') {
-        if (brace_depth == 0) body_start = i + 1;
-        brace_depth++;
-      } else if (c == '}') {
-        brace_depth--;
-        if (brace_depth == 0) {
-          body_end = i - 1;
-          break;
-        }
-      }
-    }
-    if (body_end >= 0) break;
-  }
-
-  std::ostringstream body_text;
-  if (body_start >= 0 && body_end >= body_start) {
-    for (int i = body_start; i <= body_end; ++i)
-      body_text << all_lines[i] << "\n";
-  }
-
-  std::ostringstream co;
-  co << "#include \"choreo.h\"\n\n";
-  co << "__co__ void " << cur_offload_func_.co_func_name << "(";
-  bool first = true;
-  for (auto& item : cgi.GetParameters(fname)) {
-    if (!first) co << ", ";
-    co << ChoreoTypeSTR(*item.type);
-    if (item.IsReference()) co << " &";
-    co << " " << UnScopedName(item.name);
-    first = false;
-  }
-  co << ") {\n";
-  co << body_text.str();
-  co << "}\n";
-
-  cur_offload_func_.co_source = co.str();
+  auto func = AST::Make<AST::ChoreoFunction>(clean_pb->LOC());
+  func->name = cur_offload_func_.co_func_name;
+  func->f_decl.name = func->name;
+  func->f_decl.ret_type =
+      AST::Make<AST::DataType>(clean_pb->LOC(), BaseType::VOID);
+  func->f_decl.params = CloneP(current_func_node_->f_decl.params);
+  func->stmts = CloneP(clean_pb->stmts);
+  cur_offload_func_.offload_func = func;
 }
 
 void HeteroCodeGen::EndOffloadFunction() {
@@ -477,6 +471,56 @@ void HeteroCodeGen::EmitOffloadHostCall(const OffloadFuncInfo& fi) {
     first = false;
   }
   os << ");\n";
+}
+
+
+// Run the device target's full pipeline on the offload function AST cloned
+// from the pre-sema root. Returns true with fi.device_source populated.
+bool HeteroCodeGen::CompileOffloadToSource(OffloadFuncInfo& fi) {
+  if (!fi.offload_func) return false;
+
+  auto saved = CCtx().SaveTargetState();
+  auto saved_root_stmts = root.stmts;
+
+  auto device_target = TargetRegistry::Create(fi.target_name);
+  if (!device_target) {
+    errs() << "Failed to create target '" << fi.target_name
+           << "' for offload compilation.\n";
+    CCtx().RestoreTargetState(std::move(saved));
+    return false;
+  }
+
+  CCtx().SetTarget(std::move(device_target));
+  CCtx().SetOutputKind(OutputKind::DeviceSourceOnly);
+  CCtx().ClearArchs();
+  CCtx().SetGlobalSymbolTable(std::make_shared<SymbolTable>());
+  CodeGenInfo::instance = std::make_unique<CodeGenInfo>();
+
+  // Build a program containing only the cloned offload function.
+  location fresh_loc;
+  root = AST::Program(fresh_loc);
+  root.stmts->Append(fi.offload_func);
+
+  ASTPipeline device_pl;
+  device_pl.PlanSemanticRoutine().PlanCodeGenRoutine();
+
+  std::ostringstream capture_os;
+  auto& opt_reg = OptionRegistry::GetInstance();
+  opt_reg.SetOutputStream(capture_os);
+
+  bool ok = false;
+  if (device_pl.RunOnProgram(root)) {
+    fi.device_source = capture_os.str();
+    ok = true;
+  } else {
+    errs() << "Device codegen pipeline failed for target '"
+           << fi.target_name << "'.\n";
+  }
+
+  root.stmts = saved_root_stmts;
+  CCtx().RestoreTargetState(std::move(saved));
+
+  return ok;
 }
 
 void HeteroCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
@@ -500,16 +544,26 @@ void HeteroCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
   out << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
   out << __choreo_types_header_as_string << "\nEOF\n\n";
 
-  // Write offload .co source files
+  // Emit target-specific setup files needed by device toolchains.
+  for (auto& [name, dcg] : device_codegens) {
+    if (!dcg->IsHostDevice())
+      dcg->EmitSetupFiles(out, build_path);
+  }
+
+  // Write offload device source files into per-target subdirectories.
   std::vector<std::string> offload_obj_files;
   for (size_t i = 0; i < offload_functions_.size(); ++i) {
     auto& fi = offload_functions_[i];
-    auto co_file = build_path + "/" + fi.co_func_name + ".co";
-    auto obj_file = build_path + "/" + fi.co_func_name + ".o";
+    auto it = device_codegens.find(fi.target_name);
+    std::string tdir = (it != device_codegens.end())
+                           ? it->second->TargetBuildDir(build_path)
+                           : build_path;
+    auto src_file = tdir + "/" + fi.co_func_name + fi.source_ext;
+    auto obj_file = tdir + "/" + fi.co_func_name + ".o";
     offload_obj_files.push_back(obj_file);
 
-    out << "cat <<'EOF' > " << co_file << "\n";
-    out << fi.co_source;
+    out << "cat <<'EOF' > " << src_file << "\n";
+    out << fi.device_source;
     out << "\nEOF\n\n";
   }
 
@@ -519,7 +573,6 @@ void HeteroCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
   for (auto& code : code_segments) out << code << "\n";
   out << "\nEOF\n\n";
 
-  out << "CHOREO=\"${CHOREO:-choreo}\"\n";
 
   // Emit build env setup for all offload devices
   for (auto& [name, dcg] : device_codegens) {
@@ -540,17 +593,20 @@ do_compile() {
 )script";
 
   if (has_offload) {
-    // Step 1: Compile each offload .co file via choreo -target <target_name>
+    // Step 1: Compile each device source file with the device toolchain
     for (size_t i = 0; i < offload_functions_.size(); ++i) {
       auto& fi = offload_functions_[i];
-      auto co_file = build_path + "/" + fi.co_func_name + ".co";
       auto obj_file = offload_obj_files[i];
       out << "  echo \"Compiling offload function: " << fi.co_func_name
           << "\"\n";
-      out << "  ${CHOREO} -t " << fi.target_name << " -c " << co_file << " -o "
-          << obj_file << " -rtc=none"
-          << " || { echo 'Offload compilation failed for " << fi.co_func_name
-          << "'; exit 1; }\n\n";
+      for (auto& [dname, dcg] : device_codegens) {
+        if (dcg->TargetName() == fi.target_name) {
+          auto tdir = dcg->TargetBuildDir(build_path);
+          auto src_file = tdir + "/" + fi.co_func_name + fi.source_ext;
+          dcg->EmitDeviceCompileCommand(out, build_path, src_file, obj_file);
+          break;
+        }
+      }
     }
 
     // Step 2: Compile host C++ with the offload device's toolchain

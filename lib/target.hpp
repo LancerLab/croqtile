@@ -15,6 +15,7 @@ enum class SwizMode;
 class ASTPipeline;
 class Preprocess;
 struct DeviceCodeGen;
+struct CodeGenerator;
 
 // see the Description
 enum class ChoreoFeature {

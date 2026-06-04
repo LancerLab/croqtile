@@ -251,6 +251,8 @@ public:
     return std::cin;
   }
 
+  void SetOutputStream(std::ostream& os) { output_stream = &os; }
+
   void SetOutputStream(const std::string& filename) {
     if (!filename.empty() && filename != "-") {
       output_filename = filename;

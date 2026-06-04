@@ -1,4 +1,5 @@
 #include "cute_codegen.hpp"
+#include "cute_device_codegen.hpp"
 #include "codegen_utils.hpp"
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include "codegen.hpp"
 #include "dma_plan.hpp"
 #include "operator_info.hpp"
+#include "target.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
   #warning "missing macro definition of __CHOREO_CUDA_DIR__"
@@ -1074,7 +1076,8 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     ssm.LeaveScope();
 
     switch (CCtx().GetOutputKind()) {
-    case OutputKind::TargetSourceCode: EmitSource(); break;
+    case OutputKind::TargetSourceCode:
+    case OutputKind::DeviceSourceOnly: EmitSource(); break;
     case OutputKind::TargetModule: {
       if (!CompileWithScript("--compile-module")) {
         error_count++;
@@ -1100,7 +1103,10 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     PLDCheck();
     ssm.LeaveScope();
-    code_segments.back() += ds.str() + hs.str();
+    if (CCtx().GetOutputKind() == OutputKind::DeviceSourceOnly)
+      code_segments.back() += ds.str();
+    else
+      code_segments.back() += ds.str() + hs.str();
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");
@@ -7467,6 +7473,8 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
 }
 
 void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
+  CuteDeviceCodeGen dcg_instance;
+
   auto filename = RemoveDirectoryPrefix(
       RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
   os << R"script(#!/usr/bin/env bash
@@ -7474,13 +7482,10 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
 # This is the choreo generated bash script to compile cute code
 )script";
 
-  // we must use the built compilation tools
+  dcg_instance.SetupBuildEnv(os);
+
+  // CUTE library discovery (standalone-only, not in DeviceCodeGen)
   if (RequiresE2ECompilation(CCtx().GetOutputKind())) {
-#ifdef __CHOREO_CUDA_DIR__
-    os << "\nif [ -z \"${CUDA_HOME}\" ]; then";
-    os << "\n  export CUDA_HOME=" << STRINGIZE(__CHOREO_CUDA_DIR__);
-    os << "\nfi\n";
-#endif // __CHOREO_CUDA_DIR__
 #ifdef __CHOREO_CUTE_DIR__
     os << "\nif [ -z \"${CUTE_HOME}\" ]; then";
     os << "\n  export CUTE_HOME=" << STRINGIZE(__CHOREO_CUTE_DIR__);
@@ -7489,20 +7494,11 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   }
 
   os << R"script(
-if [ ! -n "${CUDA_HOME}" ] || [ ! -f ${CUDA_HOME}/bin/nvcc ]; then
-  echo "failed to find the CUDA installation."
-  echo "install cuda or set CUDA_HOME to cuda installation directory."
-  exit 1
-fi
-
 if [ ! -n "${CUTE_HOME}" ] || [ ! -f ${CUTE_HOME}/include/cutlass/cutlass.h ]; then
   echo "failed to find the CUTE installation."
   echo "install cuda or set CUTE_HOME to cute installation directory."
   exit 1
 fi
-
-NVCC=${CUDA_HOME}/bin/nvcc
-NVCC_LIB=${CUDA_LIB}/lib
 
 )script";
 
@@ -7603,8 +7599,7 @@ show_usage() {
     os << " -D" << macro.first
        << (macro.second.empty() ? "" : ("=" + macro.second));
 
-  os << " -L${CUDA_HOME}/lib64 -lcuda\"";
-  os << "\nexport LD_LIBRARY_PATH=${CUDA_LIB}:${LD_LIBRARY_PATH}\n\n";
+  os << " -L${CUDA_HOME}/lib64 -lcuda\"\n\n";
 
   if (CCtx().FastCompile()) {
     // --- Fast-compile mode: separate compilation + precompiled runtime ---

@@ -1,6 +1,9 @@
 #ifndef __CHOREO_CUTE_DEVICE_CODEGEN_HPP__
 #define __CHOREO_CUTE_DEVICE_CODEGEN_HPP__
 
+#include "aux.hpp"
+#include "choreo_cute_header.inc"
+#include "choreo_types_cute_header.inc"
 #include "codegen.hpp"
 #include <string>
 #include <vector>
@@ -10,6 +13,7 @@ namespace Choreo {
 struct CuteDeviceCodeGen : public DeviceCodeGen {
   std::string DeviceName() const override { return "gpu"; }
   std::string TargetName() const override { return "cute"; }
+  std::string SourceExtension() const override { return ".cu"; }
   bool IsHostDevice() const override { return false; }
 
   void EmitHostIncludes(std::ostream& os) const override {
@@ -30,19 +34,28 @@ struct CuteDeviceCodeGen : public DeviceCodeGen {
   }
 
   void SetupBuildEnv(std::ostream& out) const override {
-    out << R"script(
-# Find CUDA / nvcc
-if [[ -z "${CUDA_HOME}" ]]; then
-  FOUND_PATH=$(which "nvcc" 2>/dev/null)
+    out << "\n# Find CUDA / nvcc\n";
+    out << "if [[ -z \"${CUDA_HOME}\" ]]; then\n";
+#ifdef __CHOREO_CUDA_DIR__
+    out << "  if [[ -d " << STRINGIZE(__CHOREO_CUDA_DIR__) << " ]]; then\n";
+    out << "    CUDA_HOME=" << STRINGIZE(__CHOREO_CUDA_DIR__) << "\n";
+    out << "  else\n";
+#endif
+    out << R"script(  FOUND_PATH=$(which "nvcc" 2>/dev/null)
   if [ -n "$FOUND_PATH" ]; then
     CUDA_HOME=$(dirname "$(dirname "$FOUND_PATH")")
   elif [[ -f /usr/local/cuda/bin/nvcc ]]; then
     CUDA_HOME=/usr/local/cuda
   fi
-fi
+)script";
+#ifdef __CHOREO_CUDA_DIR__
+    out << "  fi\n";
+#endif
+    out << R"script(fi
 
 if [[ -z "${CUDA_HOME}" ]]; then
-  echo "failed to find nvcc. install CUDA or set CUDA_HOME."
+  echo "failed to find the CUDA installation."
+  echo "install CUDA or set CUDA_HOME to CUDA installation directory."
   exit 1
 fi
 
@@ -72,14 +85,61 @@ if [[ -z "${gpu_arch}" ]]; then
 fi
 
 )script";
+
+    // CUTE_HOME for cutlass/cute headers
+    out << "if [[ -z \"${CUTE_HOME}\" ]]; then\n";
+#ifdef __CHOREO_CUTE_DIR__
+    out << "  export CUTE_HOME=" << STRINGIZE(__CHOREO_CUTE_DIR__) << "\n";
+#else
+    out << R"script(  echo "CUTE_HOME is not set and no default is configured."
+  echo "set CUTE_HOME to the cute/cutlass header library path."
+  exit 1
+)script";
+#endif
+    out << "fi\n\n";
+
+    out << R"script(if [ ! -f ${CUTE_HOME}/include/cutlass/cutlass.h ]; then
+  echo "CUTE_HOME=${CUTE_HOME} does not contain cutlass headers."
+  echo "set CUTE_HOME to the cute/cutlass header library path."
+  exit 1
+fi
+)script";
+  }
+
+  void EmitSetupFiles(std::ostream& out,
+                     const std::string& build_path) const override {
+    auto tdir = TargetBuildDir(build_path);
+    out << "mkdir -p " << tdir << "\n";
+    out << "cat <<'EOF' > " << tdir << "/choreo_types_cute.h\n";
+    out << __choreo_types_cute_header_as_string << "\nEOF\n\n";
+    out << "cat <<'EOF' > " << tdir << "/choreo_cute.h\n";
+    out << __choreo_cute_header_as_string << "\nEOF\n\n";
+    out << "cp " << build_path << "/choreo.h " << tdir << "/\n";
+    out << "cp " << build_path << "/choreo_types.h " << tdir << "/\n\n";
+  }
+
+  void EmitDeviceCompileCommand(std::ostream& out,
+                               const std::string& build_path,
+                               const std::string& src,
+                               const std::string& obj) const override {
+    out << "  ${NVCC} -arch ${gpu_arch} -std=c++17"
+        << " -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__"
+        << " -D__USE_CUDA_TYPE__"
+        << " -c -I" << TargetBuildDir(build_path)
+        << " -I" << build_path
+        << " -I${CUDA_HOME}/include -I${CUTE_HOME}/include " << src
+        << " -o " << obj
+        << " || { echo 'Device compilation failed'; exit 1; }\n";
   }
 
   void EmitHostCompileCommand(std::ostream& out,
                               const std::string& build_path,
                               const std::string& src,
                               const std::string& obj) const override {
-    out << "  ${NVCC} -arch ${gpu_arch} -std=c++17 -c -I" << build_path
-        << " -I${CUDA_HOME}/include " << src << " -o " << obj
+    out << "  ${NVCC} -arch ${gpu_arch} -std=c++17"
+        << " -c -I" << build_path
+        << " -I${CUDA_HOME}/include " << src
+        << " -o " << obj
         << " || { echo 'Host compilation failed'; exit 1; }\n";
   }
 

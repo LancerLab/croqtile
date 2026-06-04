@@ -657,9 +657,14 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 
 bool EarlySemantics::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
-  if (!n.IsExplicit())
+  if (!n.IsExplicit()) {
+    // Implicit casts may already exist when re-analyzing a cloned AST
+    // (e.g. in-process device compilation of offload functions).
+    // Accept them if type info is already set.
+    if (n.GetType()) return true;
     choreo_unreachable("implicit AST::CastExpr should not appear at "
                        "EarlySemantics.");
+  }
 
   // Foreign casts (__cast<"type">(expr)) bypass type validation; the type
   // string is opaque and will be emitted verbatim by codegen.

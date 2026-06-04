@@ -22,9 +22,12 @@ namespace AST {
 struct Node;
 }
 
+class PlDepthMap;
+
 enum class OutputKind {
   PreProcessedCode,
   TargetSourceCode,
+  DeviceSourceOnly,
   TargetModule,
   TargetAssembly,
   TargetExecutable,
@@ -51,6 +54,7 @@ inline static const std::string STR(OutputKind ok) {
   switch (ok) {
   case OutputKind::PreProcessedCode: return "PreProcessedCode";
   case OutputKind::TargetSourceCode: return "TargetSourceCode";
+  case OutputKind::DeviceSourceOnly: return "DeviceSourceOnly";
   case OutputKind::TargetModule: return "TargetModule";
   case OutputKind::TargetAssembly: return "TargetAssembly";
   case OutputKind::TargetExecutable: return "TargetExecutable";
@@ -402,6 +406,13 @@ private:
   OutputKind out_kind = OutputKind::TargetExecutable;
   int8_t opt_level = -1; // undecided
 
+  // PlDepthMap is built when the compilation target or arch is configured,
+  // and invalidated whenever either changes. PlDepthMap::Get() accesses this.
+  friend class PlDepthMap;
+  struct PlDepthMapHolder;
+  std::shared_ptr<PlDepthMapHolder> pl_depth_map_;
+  void InvalidatePlDepthMap() { pl_depth_map_ = nullptr; }
+
 private:
   // compiler configurations
   bool debug_symtab = false;
@@ -462,6 +473,36 @@ private:
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
+  ptr<AST::Node> pre_sema_root_;
+
+public:
+  bool NeedPreSemaClone() const { return compile_target && compile_target->Name() == "hetero"; }
+  void SavePreSemaRoot(AST::Node& r);
+  ptr<AST::Node> GetPreSemaRoot() const { return pre_sema_root_; }
+
+  // Captures mutable target-compilation state so that device offload
+  // pipelines can run in isolation and then restore the parent state.
+  // Grouping these together enables future thread-based target compilation.
+  struct TargetCompilationState {
+    std::unique_ptr<Target> target;
+    std::vector<ArchId> archs;
+    OutputKind output_kind = OutputKind::TargetExecutable;
+    std::shared_ptr<SymbolTable> sym_tab;
+    unsigned anonymous_count = 0;
+    unsigned anon_pb_count = 0;
+    // CodeGenInfo held opaquely; managed by Save/Restore implementation.
+    struct CGIHolder;
+    std::unique_ptr<CGIHolder> cgi_holder;
+    // PlDepthMap snapshot.
+    std::shared_ptr<PlDepthMapHolder> pl_depth_map;
+    TargetCompilationState();
+    ~TargetCompilationState();
+    TargetCompilationState(TargetCompilationState&&) noexcept;
+    TargetCompilationState& operator=(TargetCompilationState&&) noexcept;
+  };
+
+  TargetCompilationState SaveTargetState();
+  void RestoreTargetState(TargetCompilationState&& state);
 
 private:
   std::unordered_map<std::string, std::string> cl_macros; // defined macros
@@ -496,7 +537,15 @@ public:
   bool SetTarget(std::unique_ptr<Target>&& ct) {
     if (ct == nullptr) return false;
     compile_target = std::move(ct);
+    InvalidatePlDepthMap();
     return true;
+  }
+
+  std::unique_ptr<Target> SwapTarget(std::unique_ptr<Target>&& ct) {
+    auto old = std::move(compile_target);
+    compile_target = std::move(ct);
+    InvalidatePlDepthMap();
+    return old;
   }
 
   const std::string TargetName() const { return compile_target->Name(); }
@@ -533,11 +582,14 @@ public:
       choreo_unreachable("unexpected multiple architecture.");
     return archs[0];
   }
+  void ClearArchs() { archs.clear(); InvalidatePlDepthMap(); }
+  void SetArchs(const std::vector<ArchId>& a) { archs = a; InvalidatePlDepthMap(); }
   void AddArch(const ArchId& arch) {
     if (!GetTarget().IsArchSupported(arch))
       choreo_unreachable("-arch=" + arch + " is not supported by target '" +
                          GetTarget().Name() + "'.");
     archs.push_back(arch);
+    InvalidatePlDepthMap();
   }
 
   int GetOptimizationLevel() const {
