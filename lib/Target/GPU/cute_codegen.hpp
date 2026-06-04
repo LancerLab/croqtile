@@ -290,6 +290,11 @@ private:
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
   std::unordered_map<std::string, SwizMode> shared_buf_swiz_;
 
+  struct TMAInnerSplit {
+    size_t swiz_elems;
+  };
+  std::unordered_map<std::string, TMAInnerSplit> tma_inner_splits_;
+
   struct FragChunkRSInfo {
     std::string parent_c_sym;
     std::string offset_var;
@@ -428,6 +433,7 @@ private:
     hoisted_scale_accum_scopes.clear();
     live_chunk_aliases.clear();
     shared_buf_swiz_.clear();
+    tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
     pending_barrier_inits_.clear();
