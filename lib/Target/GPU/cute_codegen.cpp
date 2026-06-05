@@ -8243,10 +8243,36 @@ bool CuteCodeGen::Visit(AST::FragReduce& n) {
 
   // Phase 2: Cross-thread butterfly AllReduce.
   if (rp.threads_per_row > 1) {
-    IndStream() << "__local_reduce = choreo::AllReduce<" << reduce_type << ", "
-                << rp.threads_per_row << ", 1>::run(__local_reduce";
-    if (rp.NeedsWorkspace()) ds << ", " << ws_name;
-    ds << ");\n";
+    if (!rp.NeedsWorkspace()) {
+      // Inline the butterfly shuffles directly to avoid function boundaries
+      // that can cause ptxas WGMMA serialization (C7510/C7514).
+      size_t offset = rp.threads_per_row / 2;
+      int round = 0;
+      while (offset >= 1) {
+        std::string vname = "__shfl_v" + std::to_string(round);
+        IndStream() << "{\n";
+        IncrIndent();
+        IndStream() << "float " << vname
+                    << " = __shfl_xor_sync(0xffffffff, __local_reduce, "
+                    << offset << ");\n";
+        if (is_max) {
+          IndStream() << "__local_reduce = fmaxf(__local_reduce, " << vname
+                      << ");\n";
+        } else {
+          IndStream() << "__local_reduce = __local_reduce + " << vname << ";\n";
+        }
+        DecrIndent();
+        IndStream() << "}\n";
+        if (offset == 1) break;
+        offset /= 2;
+        round++;
+      }
+    } else {
+      IndStream() << "__local_reduce = choreo::AllReduce<" << reduce_type
+                  << ", " << rp.threads_per_row << ", 1>::run(__local_reduce";
+      ds << ", " << ws_name;
+      ds << ");\n";
+    }
   }
 
   IndStream() << dst_sym << "[__row] = __local_reduce;\n";
