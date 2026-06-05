@@ -2187,7 +2187,7 @@ __device__ constexpr int get_trans_b() {
 }
 
 // Helper function to encode matrix descriptor
-__device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
+__device__ static __forceinline__ uint64_t matrix_descriptor_encode(uint64_t x) {
   return (((x) & 0x3FFFF) >> 0x4);
 }
 
@@ -2198,7 +2198,7 @@ __device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
 // Layout_K_SW128_Atom tiled to N=128 for bf16).
 template <WGMMA_MajorOrder MajorOrder, WGMMA_Swizzle Swizzle,
           int LBOBytes = 0, typename T>
-__device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
+__device__ static __forceinline__ uint64_t wgmma_make_smem_desc(T* ptr) {
   uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
   uint64_t desc = 0x0000000000000000;
   desc |= matrix_descriptor_encode(addr);
@@ -2256,20 +2256,20 @@ __device__ static inline uint64_t wgmma_make_smem_desc(T* ptr) {
 }
 
 // WGMMA fence/sync primitives
-__device__ static inline void warpgroup_arrive() {
+__device__ static __forceinline__ void warpgroup_arrive() {
   #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
   #endif
 }
 
-__device__ static inline void warpgroup_commit_batch() {
+__device__ static __forceinline__ void warpgroup_commit_batch() {
   #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
   #endif
 }
 
 template <int PD>
-__device__ static inline void warpgroup_wait() {
+__device__ static __forceinline__ void warpgroup_wait() {
   #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
   static_assert(PD >= 0 && PD <= 7, "WGMMA wait: N must be in range [0, 7]");
   asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(PD) : "memory");
@@ -2277,7 +2277,7 @@ __device__ static inline void warpgroup_wait() {
 }
 
 template <class T>
-__device__ static inline void warpgroup_fence_operand(T& operand) {
+__device__ static __forceinline__ void warpgroup_fence_operand(T& operand) {
   asm volatile("" : "+r"(reinterpret_cast<uint32_t&>(operand))::"memory");
 }
 
@@ -3128,7 +3128,7 @@ __device__ static inline void load_fragment_d(Tensor const& D,
 
 // store d fragment with pointer
 template <class MMA, int N = 0, class Tensor, class AccumT>
-__device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
+__device__ static __forceinline__ void store_fragment_d(Tensor& D, AccumT* const d) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   static_assert(std::is_same<AccumT, float>::value ||
                     std::is_same<AccumT, double>::value ||
@@ -3145,7 +3145,7 @@ __device__ static inline void store_fragment_d(Tensor& D, AccumT* const d) {
 }
 
 template <class MMA, int N = 0, class Tensor, class AccumT>
-__device__ static inline void
+__device__ static __forceinline__ void
 store_fragment_d_mask_row(Tensor& D, AccumT* const d, int row_guard) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   static_assert(std::is_same<AccumT, float>::value ||
