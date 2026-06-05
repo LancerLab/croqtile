@@ -4143,8 +4143,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // Coordinate order: [inner%swiz, outer, inner/swiz]
       bool tma_has_inner_split = false;
       if (tma_idx >= 0) {
-        auto split_it =
-            tma_inner_splits_.find(tma_descs[tma_idx].GetName());
+        auto split_it = tma_inner_splits_.find(tma_descs[tma_idx].GetName());
         if (split_it != tma_inner_splits_.end()) {
           tma_has_inner_split = true;
           auto se = sbe::nu((int64_t)split_it->second.swiz_elems);
@@ -4384,8 +4383,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         auto s2g_indices = Reverse(GenIndices(t_ca));
         size_t s2g_rank = t_shape.Rank();
         if (tma_idx >= 0) {
-          auto s2g_it =
-              tma_inner_splits_.find(tma_descs[tma_idx].GetName());
+          auto s2g_it = tma_inner_splits_.find(tma_descs[tma_idx].GetName());
           if (s2g_it != tma_inner_splits_.end()) {
             auto se = sbe::nu((int64_t)s2g_it->second.swiz_elems);
             auto orig_inner = s2g_indices.front();
@@ -5232,19 +5230,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             for (size_t i = 0; i < ca->OpCount(); ++i) {
               const auto& sop = ca->OpAt(i);
               if (isa<AST::SOP::Reshape>(sop)) continue;
-              if (!(isa<AST::SOP::Tiling>(sop) ||
-                    isa<AST::SOP::TileAt>(sop) ||
+              if (!(isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
                     isa<AST::SOP::SubSpan>(sop)))
                 continue;
               auto idx = sop->GetIndices()->Opts();
               auto strd = sop->GetBlockStrides();
               auto blk = sop->GetBlockShape();
-              bool has_step =
-                  isa<AST::SOP::SubSpan>(sop) && sop->GetSteps();
+              bool has_step = isa<AST::SOP::SubSpan>(sop) && sop->GetSteps();
               for (size_t ith = 0; ith < idx.GetVals().size(); ++ith) {
-                ValueItem eff_strd = (ith == non_k_axis)
-                                         ? sbe::nu(swiz_atom_cols)
-                                         : strd[ith];
+                ValueItem eff_strd =
+                    (ith == non_k_axis) ? sbe::nu(swiz_atom_cols) : strd[ith];
                 if (has_step)
                   phys += idx.GetVals()[ith] * eff_strd;
                 else
@@ -5275,8 +5270,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             // K-major: need the full non-K dimension of the parent tensor
             int full_nonk = 0;
             if (ca) {
-              auto parent_sty =
-                  GetSpannedType(GetSymbolType(ca->RefSymbol()));
+              auto parent_sty = GetSpannedType(GetSymbolType(ca->RefSymbol()));
               if (parent_sty) {
                 auto pv = VIInt(parent_sty->GetShape().ValueAt(non_k_axis));
                 if (pv) full_nonk = *pv;
@@ -5288,16 +5282,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             }
             if (full_nonk > 0) {
               int col_group_elems = full_nonk * swiz_atom_cols;
-              return "(((" + iter_expr + ") * " +
-                     std::to_string(*atom_k) + " & " +
-                     std::to_string(swiz_atom_cols - 1) + ") + ((" +
-                     iter_expr + ") * " + std::to_string(*atom_k) +
-                     " / " + std::to_string(swiz_atom_cols) + ") * " +
+              return "(((" + iter_expr + ") * " + std::to_string(*atom_k) +
+                     " & " + std::to_string(swiz_atom_cols - 1) + ") + ((" +
+                     iter_expr + ") * " + std::to_string(*atom_k) + " / " +
+                     std::to_string(swiz_atom_cols) + ") * " +
                      std::to_string(col_group_elems) + ")";
             }
           }
-          return "((" + iter_expr + ") * " + std::to_string(*atom_k) +
-                 " * (" + stride_expr + "))";
+          return "((" + iter_expr + ") * " + std::to_string(*atom_k) + " * (" +
+                 stride_expr + "))";
         }();
 
         // LBO override: when MN-major and the non-K dimension exceeds one
@@ -5369,15 +5362,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         return false;
       }
 
-      auto emit_wgmma_desc_call =
-          [&](std::ostream& os, const DirectWGMMAOperandInfo& info,
-              const std::string& ptr_var) {
-            os << "wgmma_make_smem_desc<" << info.shared_major_order << ", "
-               << info.shared_swizzle_enum;
-            if (info.lbo_override_bytes > 0)
-              os << ", " << info.lbo_override_bytes;
-            os << ">(" << ptr_var << ")";
-          };
+      auto emit_wgmma_desc_call = [&](std::ostream& os,
+                                      const DirectWGMMAOperandInfo& info,
+                                      const std::string& ptr_var) {
+        os << "wgmma_make_smem_desc<" << info.shared_major_order << ", "
+           << info.shared_swizzle_enum;
+        if (info.lbo_override_bytes > 0) os << ", " << info.lbo_override_bytes;
+        os << ">(" << ptr_var << ")";
+      };
       auto emit_shared_direct_setup = [&](DirectWGMMAOperandInfo& info) {
         if (!info.is_shared_direct) return;
         if (wgmma_k_iters > 1) return;
@@ -5393,8 +5385,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "auto* " << info.shared_iter_ptr_var << " = ("
                << info.shared_elem_ty << "*)(" << info.shared_ptr_expr << " + "
                << info.shared_iter_elem_offset_expr << ");\n";
-            ds << d_indent << "uint64_t " << info.shared_iter_desc_var
-               << " = ";
+            ds << d_indent << "uint64_t " << info.shared_iter_desc_var << " = ";
             emit_wgmma_desc_call(ds, info, info.shared_iter_ptr_var);
             ds << ";\n";
           };
@@ -7047,6 +7038,21 @@ bool CuteCodeGen::Visit(AST::Call& n) {
       }
       return true;
     } else if (func_name == "launch_bounds") {
+      return true;
+    } else if (func_name == "__bar_arrive" || func_name == "__bar_sync") {
+      if (IsHost()) return true;
+      if (n.arguments->Count() != 2)
+        choreo_unreachable(func_name +
+                           " expects exactly 2 arguments (barrier_id, count).");
+      auto id_str = ExprSTR(n.GetArguments().at(0), false);
+      auto count_str = ExprSTR(n.GetArguments().at(1), false);
+      if (func_name == "__bar_arrive") {
+        os << indent << "asm volatile(\"bar.arrive %0, %1;\" :: \"r\"("
+           << id_str << "), \"r\"(" << count_str << ") : \"memory\");\n";
+      } else {
+        os << indent << "asm volatile(\"bar.sync %0, %1;\" :: \"r\"(" << id_str
+           << "), \"r\"(" << count_str << ") : \"memory\");\n";
+      }
       return true;
     } else if (func_name == "print" || func_name == "println") {
       if (n.CompileTimeEval()) return true;
