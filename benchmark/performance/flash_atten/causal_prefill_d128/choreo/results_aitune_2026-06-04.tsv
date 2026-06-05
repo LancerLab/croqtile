@@ -37,3 +37,14 @@ iter034	iter/iter034_prefill_mask.co	sm_90a	317.35	20.98	wgmma_serialized_low_oc
 iter036	iter/iter036_qk_pv_overlap.co	sm_90a	444.60	29.39	wgmma_serialized_allreduce_boundary	bash bench.sh --kernel iter/iter036_qk_pv_overlap.co	Overlap QK[n+1] with PV[n] via mma.commit/wait pipelining (KEEP - 37% improvement!)
 iter037	-	sm_90a	-	-	-	-	Multiple attempts (DISCARD): single_commit=445/wait1=352/prescale_q=422/fused_max=443/BN64=393/fused_mask_exp=355/BN256=OOM/STAGES3=324/STAGES1=271/1p3c=150/stmatrix=same/fast_math=same/flags=same -- all within noise or worse
 iter038	-	sm_90a	-	-	-	-	QK-before-rescale=360 (DISCARD - compiler injects extra sync), lb2=PTXAS_FAIL, maxrregcount=same, skip-epilogue-group-sync=same -- all within noise or worse
+iter045	iter/iter045_no_branch_pipeline.co	sm_90a	451.3	29.8	wgmma_serialized_C7514	bash bench.sh --kernel iter/iter045_no_branch_pipeline.co	Prologue/epilogue loop restructure to remove branch between QK/PV WGMMA (DISCARD - same perf as baseline)
+iter046	-	sm_90a	-	-	barrier_stall	-	Overlap Q+KV0 load=DEADLOCK, smem_output=RANK_MISMATCH (DISCARD - both approaches failed)
+iter047	build/iter047_nanosleep.cute.result	sm_90a	450	29.7	barrier_stall	bash build/iter047_nanosleep.cute.result --execute	nanosleep(40-200) between K/V TMA loads in producer (DISCARD - no effect on barrier stall)
+iter048	iter/iter048_persistent.co	sm_90a	-	-	-	-	Persistent kernel with work-stealing (ABANDONED - TMA descriptors bound to grid, can't do dynamic tile scheduling)
+iter049	-	sm_90a	453.7	30.0	wgmma_serialized_C7514	-	Multiple attempts: unroll1=444(worse), early_kve=452(noise), manual_split=453(noise) (DISCARD)
+iter050	build/iter050_*.cute.result	sm_90a	348-451	23-30	barrier_stall+C7514	-	kvf wait inside PV k-loop=same, kvf before PV=348(worse) (DISCARD)
+iter051	iter/iter051_1p1c_overlap.co	sm_90a	344	22.8	wgmma_serialized_C7514	bash bench.sh --kernel iter/iter051_1p1c_overlap.co	1p1c BLOCK_M=64 with QK/PV overlap (DISCARD - lost inter-WG parallelism)
+iter052	build/iter052_*.cute.result	sm_90a	453	30.0	wgmma_serialized_C7514	-	uniform_branch=454(noise), split_wait=453(noise): PV/QK overlap was NOT providing benefit (DISCARD - C7514 in PV pipeline from acc_s_cast RS read)
+iter053	iter/iter053_elim_max_copy.co	sm_90a	448	29.6	wgmma_serialized_C7514	-	Eliminate scores_max_prev copy using local_max (DISCARD - slightly worse)
+iter054	iter/iter054_reorder_cast_sum.co	sm_90a	448	29.6	wgmma_serialized_C7514	-	Reorder cast+sum+rescale for register locality (DISCARD - no change)
+iter055	iter/iter055_stmatrix_vec_store.cu	sm_90a	458.5	30.3	uncoalesced_stores	bash build/iter055_vec_store.cute.result --execute	stmatrix f32->bf16 to shared + vectorized int4 copy to global (KEEP - coalesced epilogue stores)
