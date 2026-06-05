@@ -209,6 +209,7 @@ extern int yylex();
 %token <std::string> UNROLL
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FMAF FRCP_RN FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
+%token <std::string> BAR_ARRIVE BAR_SYNC
 %token <std::string> LIB_CALL
 %token <std::string> FRAG FRAGMENT AUTOMAP FRAG_APPLY REDUCE_MAX REDUCE_SUM
 // control related
@@ -2691,6 +2692,14 @@ call_stmt
     | atomic_builtin_func LPAREN value_list RPAREN {
         $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
                                   AST::Call::BIF | AST::Call::ATOMIC);
+      }
+    | BAR_ARRIVE LPAREN value_list RPAREN {
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
+                                  AST::Call::BIF);
+      }
+    | BAR_SYNC LPAREN value_list RPAREN {
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
+                                  AST::Call::BIF);
       }
     ;
 

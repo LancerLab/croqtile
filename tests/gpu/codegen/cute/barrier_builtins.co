@@ -1,0 +1,13 @@
+// RUN: choreo -es -t cute %s -o - | FileCheck %s
+
+__co__ void barrier_codegen_test(f32 [256] a) {
+  parallel p by 256 : thread {
+    a.at(p) = a.at(p) + 1.0f;
+    __bar_arrive(2, 256);
+    __bar_sync(1, 256);
+    a.at(p) = a.at(p) + 2.0f;
+  }
+}
+
+// CHECK: bar.arrive %0, %1;
+// CHECK: bar.sync %0, %1;

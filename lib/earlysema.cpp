@@ -2417,6 +2417,28 @@ bool EarlySemantics::Visit(AST::Call& n) {
                        " but got '" + PSTR(arg_ty) + "'.");
         }
       }
+    } else if (func_name == "__bar_arrive" || func_name == "__bar_sync") {
+      if (n.arguments->Count() != 2) {
+        Error1(n.LOC(), "'" + func_name +
+                            "' expects 2 arguments (barrier_id, thread_count)"
+                            " but got " +
+                            std::to_string(n.arguments->Count()) + ".");
+      } else {
+        auto id_arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(0));
+        if (id_arg && id_arg->Opts().HasVal()) {
+          auto id_val = VIInt(id_arg->Opts().GetVal());
+          if (id_val && id_val.value() == 15)
+            Warning(n.LOC(),
+                    "barrier_id 15 is reserved for internal warpspec sync.");
+        }
+        auto cnt_arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(1));
+        if (cnt_arg && cnt_arg->Opts().HasVal()) {
+          auto cnt_val = VIInt(cnt_arg->Opts().GetVal());
+          if (cnt_val && cnt_val.value() % 32 != 0)
+            Warning(n.LOC(),
+                    "thread_count should be a multiple of 32 (warp size).");
+        }
+      }
     } else if (n.IsLibCall()) {
       auto& tgt = CCtx().GetTarget();
       if (!tgt.IsLibCallSupported(func_name))
