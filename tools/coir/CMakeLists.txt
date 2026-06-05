@@ -182,13 +182,14 @@ target_link_libraries(coir-opt PRIVATE
 )
 
 # ------------------------------------------------------------------
-# coir-codegen: CoIR -> CUDA/C++ source emission (GPU target)
+# coir-codegen: CoIR -> target source emission (--target selects backend)
 # ------------------------------------------------------------------
 add_executable(coir-codegen lib/CodeGen/GPU/CuteCodeGen.cpp)
 target_include_directories(coir-codegen PRIVATE
   ${COIR_INCLUDE_DIR}
   ${COIR_INCLUDE_DIR}/Dialect
   ${COIR_GEN_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/CodeGen
 )
 target_link_libraries(coir-codegen PRIVATE
   MLIRCoIRDialect
@@ -210,18 +211,20 @@ target_link_libraries(coir-codegen PRIVATE
 # ------------------------------------------------------------------
 # Additional codegen targets (auto-discovered from lib/CodeGen/*/)
 # ------------------------------------------------------------------
-option(COIR_BUILD_EXTRA_TARGETS "Build additional codegen backends" OFF)
-if(COIR_BUILD_EXTRA_TARGETS)
-  file(GLOB _codegen_backends
-    RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/lib/CodeGen"
-    "${CMAKE_CURRENT_SOURCE_DIR}/lib/CodeGen/*/CMakeLists.txt")
-  foreach(_backend_cmake ${_codegen_backends})
-    get_filename_component(_backend_dir "${_backend_cmake}" DIRECTORY)
-    if(NOT _backend_dir STREQUAL "GPU")
-      add_subdirectory("lib/CodeGen/${_backend_dir}")
-    endif()
-  endforeach()
-endif()
+# Auto-discover extra codegen backends (beyond GPU)
+file(GLOB _extra_codegen_dirs
+  "${CMAKE_CURRENT_SOURCE_DIR}/lib/CodeGen/*/CMakeLists.txt")
+foreach(_extra_cmake ${_extra_codegen_dirs})
+  get_filename_component(_dir "${_extra_cmake}" DIRECTORY)
+  get_filename_component(_name "${_dir}" NAME)
+  if(NOT _name STREQUAL "GPU")
+    add_subdirectory("${_dir}")
+    target_link_libraries(coir-codegen PRIVATE MLIRCoIRCodeGen${_name})
+    target_compile_definitions(coir-codegen PRIVATE COIR_HAS_AUX_TARGET)
+    target_include_directories(coir-codegen PRIVATE "${_dir}")
+  endif()
+endforeach()
+
 
 # ------------------------------------------------------------------
 # coir-gen: Choreo AST -> CoIR MLIR translation

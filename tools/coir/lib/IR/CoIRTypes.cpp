@@ -28,6 +28,18 @@ static ParseResult parseShape(AsmParser &parser,
 // coir::TensorType custom parser/printer
 //===----------------------------------------------------------------------===//
 
+static int32_t parseMemorySpaceKeyword(llvm::StringRef msStr) {
+  if (msStr == "global")
+    return static_cast<int32_t>(coir::TensorMemorySpace::Global);
+  if (msStr == "shared")
+    return static_cast<int32_t>(coir::TensorMemorySpace::Shared);
+  if (msStr == "local")
+    return static_cast<int32_t>(coir::TensorMemorySpace::Local);
+  if (msStr == "register")
+    return static_cast<int32_t>(coir::TensorMemorySpace::Register);
+  return -2; // invalid
+}
+
 mlir::Type coir::TensorType::parse(mlir::AsmParser &parser) {
   if (parser.parseLess())
     return {};
@@ -41,29 +53,66 @@ mlir::Type coir::TensorType::parse(mlir::AsmParser &parser) {
     return {};
 
   int32_t memSpace = -1;
+  llvm::SmallVector<int64_t> strides;
+
   if (succeeded(parser.parseOptionalComma())) {
-    llvm::StringRef msStr;
-    if (parser.parseKeyword(&msStr))
+    llvm::StringRef kw;
+    if (parser.parseKeyword(&kw))
       return {};
-    if (msStr == "global")
-      memSpace = static_cast<int32_t>(coir::TensorMemorySpace::Global);
-    else if (msStr == "shared")
-      memSpace = static_cast<int32_t>(coir::TensorMemorySpace::Shared);
-    else if (msStr == "local")
-      memSpace = static_cast<int32_t>(coir::TensorMemorySpace::Local);
-    else if (msStr == "register")
-      memSpace = static_cast<int32_t>(coir::TensorMemorySpace::Register);
-    else {
-      parser.emitError(parser.getCurrentLocation(),
-                       "unknown memory space: " + msStr);
-      return {};
+
+    if (kw == "strides") {
+      // strides without memspace: parse ": [...]"
+      if (parser.parseColon() || parser.parseLSquare())
+        return {};
+      int64_t s;
+      auto res = parser.parseOptionalInteger(s);
+      if (res.has_value() && succeeded(*res)) {
+        strides.push_back(s);
+        while (succeeded(parser.parseOptionalComma())) {
+          if (parser.parseInteger(s))
+            return {};
+          strides.push_back(s);
+        }
+      }
+      if (parser.parseRSquare())
+        return {};
+    } else {
+      int32_t ms = parseMemorySpaceKeyword(kw);
+      if (ms == -2) {
+        parser.emitError(parser.getCurrentLocation(),
+                         "unknown memory space: " + kw);
+        return {};
+      }
+      memSpace = ms;
+
+      // Check for optional strides after memspace
+      if (succeeded(parser.parseOptionalComma())) {
+        llvm::StringRef stKw;
+        if (parser.parseKeyword(&stKw) || stKw != "strides")
+          return {};
+        if (parser.parseColon() || parser.parseLSquare())
+          return {};
+        int64_t s;
+        auto res2 = parser.parseOptionalInteger(s);
+        if (res2.has_value() && succeeded(*res2)) {
+          strides.push_back(s);
+          while (succeeded(parser.parseOptionalComma())) {
+            if (parser.parseInteger(s))
+              return {};
+            strides.push_back(s);
+          }
+        }
+        if (parser.parseRSquare())
+          return {};
+      }
     }
   }
 
   if (parser.parseGreater())
     return {};
 
-  return coir::TensorType::get(parser.getContext(), elemType, shape, memSpace);
+  return coir::TensorType::get(parser.getContext(), elemType, shape, memSpace,
+                               strides);
 }
 
 void coir::TensorType::print(mlir::AsmPrinter &printer) const {
@@ -81,7 +130,25 @@ void coir::TensorType::print(mlir::AsmPrinter &printer) const {
     case coir::TensorMemorySpace::Register: printer << "register"; break;
     }
   }
+  auto stridesArr = getStrides();
+  if (!stridesArr.empty()) {
+    printer << ", strides: [";
+    llvm::interleaveComma(stridesArr, printer.getStream());
+    printer << "]";
+  }
   printer << ">";
+}
+
+bool coir::TensorType::isDenseContiguous() const {
+  auto stridesArr = getStrides();
+  if (stridesArr.empty()) return true;
+  auto shapeArr = getShape();
+  int64_t expected = 1;
+  for (int i = (int)shapeArr.size() - 1; i >= 0; --i) {
+    if (stridesArr[i] != expected) return false;
+    expected *= shapeArr[i];
+  }
+  return true;
 }
 
 //===----------------------------------------------------------------------===//

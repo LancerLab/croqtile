@@ -151,7 +151,7 @@ int main(int argc, char* argv[]) {
   CoIR::IRSession::Get().ResetModule(opts.input_file);
 
   // Translate AST to CoIR MLIR
-  CoIR::CoIRTranslate translator;
+  CoIR::ASTCoIRGen translator;
   if (!translator.RunOnProgram(root)) return 1;
 
   return 0;

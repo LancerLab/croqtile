@@ -3,7 +3,7 @@ import lit.formats
 
 config.name = 'CoIR'
 config.test_format = lit.formats.ShTest(True)
-config.suffixes = ['.mlir']
+config.suffixes = ['.mlir', '.co']
 config.test_source_root = os.path.dirname(__file__)
 config.test_exec_root = os.path.dirname(__file__)
 

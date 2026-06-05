@@ -1,0 +1,23 @@
+// RUN: coir-gen %s | FileCheck %s
+
+// IRGen test: verify that AST-to-CoIR lowering generates correct MLIR
+// for a simple elementwise add kernel.
+
+// CHECK: coir.kernel @ele_add
+// CHECK-SAME: !coir.tensor<64xi32, global>
+// CHECK: coir.parallel
+// CHECK-SAME: level = #coir.level<block>
+// CHECK: coir.parallel
+// CHECK-SAME: level = #coir.level<thread>
+// CHECK: coir.tensor.load_elem
+// CHECK: coir.tensor.load_elem
+// CHECK: arith.addi
+// CHECK: coir.tensor.store_elem
+// CHECK: coir.return
+
+__co__ s32 [64] ele_add(s32 [64] a, s32 [64] b) {
+  s32[a.span] c;
+  parallel p by 64
+    c.at(p) = a.at(p) + b.at(p);
+  return c;
+}

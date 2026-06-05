@@ -28,17 +28,23 @@ class CoIR_I32EnumAttr<string mnemonic, CoIR_I32Enum enumInfo> :
 // ParallelLevel -- execution hierarchy in GPU parallel model
 //===----------------------------------------------------------------------===//
 
-def CoIR_PL_Block     : I32EnumAttrCase<"Block",     0, "block">;
-def CoIR_PL_Warpgroup : I32EnumAttrCase<"Warpgroup", 1, "warpgroup">;
-def CoIR_PL_Warp      : I32EnumAttrCase<"Warp",      2, "warp">;
-def CoIR_PL_Thread    : I32EnumAttrCase<"Thread",     3, "thread">;
+def CoIR_PL_Thread    : I32EnumAttrCase<"THREAD",    0, "thread">;
+def CoIR_PL_Group     : I32EnumAttrCase<"GROUP",     1, "group">;
+def CoIR_PL_GroupX4   : I32EnumAttrCase<"GROUPx4",   2, "groupx4">;
+def CoIR_PL_Block     : I32EnumAttrCase<"BLOCK",     3, "block">;
+def CoIR_PL_Cluster   : I32EnumAttrCase<"CLUSTER",   4, "cluster">;
+def CoIR_PL_Device    : I32EnumAttrCase<"DEVICE",    5, "device">;
+def CoIR_PL_Seq       : I32EnumAttrCase<"SEQ",       6, "seq">;
 
 def CoIR_ParallelLevelEnum : CoIR_I32Enum<
   "ParallelLevel", "parallel execution level", [
+    CoIR_PL_Thread,
+    CoIR_PL_Group,
+    CoIR_PL_GroupX4,
     CoIR_PL_Block,
-    CoIR_PL_Warpgroup,
-    CoIR_PL_Warp,
-    CoIR_PL_Thread
+    CoIR_PL_Cluster,
+    CoIR_PL_Device,
+    CoIR_PL_Seq
   ]>;
 
 def CoIR_ParallelLevelAttr :

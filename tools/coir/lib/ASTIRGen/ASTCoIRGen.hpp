@@ -17,39 +17,51 @@ using namespace Choreo;
 
 namespace CoIR {
 
-struct CoIRTranslate : public CodeGenerator {
+struct ASTCoIRGen : public CodeGenerator {
 private:
   mlir::ModuleOp IRModule() { return IRSession::Get().Module(); }
   mlir::MLIRContext &IRContext() { return IRSession::Get().Context(); }
   mlir::OpBuilder builder;
 
-  const mlir::Location IRize(const Choreo::location &cloc) {
+  const mlir::Location ToLoc(const Choreo::location &cloc) {
     return ToMLIRLoc(IRContext(), cloc);
   }
   const mlir::Location Loc(const Choreo::AST::Node &n) {
-    return IRize(n.LOC());
+    return ToLoc(n.LOC());
   }
 
-  mlir::Type translateBaseType(BaseType bt);
-  coir::TensorType translateSpannedType(const ptr<SpannedType> &sty);
-  coir::ParallelLevelAttr translateParallelLevel(ParallelLevel pl);
+  mlir::Type LowerBaseType(BaseType bt);
+  coir::TensorType LowerSpannedType(const ptr<SpannedType> &sty);
+  coir::ParallelLevelAttr LowerParallelLevel(ParallelLevel pl);
 
   llvm::SmallVector<llvm::StringMap<mlir::Value>> value_stack;
-  void pushScope() { value_stack.push_back({}); }
-  void popScope() { value_stack.pop_back(); }
-  void mapValue(llvm::StringRef name, mlir::Value val) {
+  void PushScope() { value_stack.push_back({}); }
+  void PopScope() { value_stack.pop_back(); }
+  void MapValue(llvm::StringRef name, mlir::Value val) {
     value_stack.back()[name] = val;
   }
-  mlir::Value lookupValue(llvm::StringRef name) {
+  mlir::Value LookupValue(llvm::StringRef name) {
     for (auto it = value_stack.rbegin(); it != value_stack.rend(); ++it)
       if (auto found = it->find(name); found != it->end())
         return found->second;
     return nullptr;
   }
 
+  llvm::SmallVector<mlir::Value> expr_stack;
+  void PushExpr(mlir::Value v) { expr_stack.push_back(v); }
+  mlir::Value PopExpr() {
+    if (expr_stack.empty()) return nullptr;
+    auto v = expr_stack.back();
+    expr_stack.pop_back();
+    return v;
+  }
+
+  mlir::Value EmitExpr(AST::Node &n);
+  void CreateKernelOp(AST::ChoreoFunction &cf);
+
 public:
-  CoIRTranslate()
-      : CodeGenerator("coir-translate"),
+  ASTCoIRGen()
+      : CodeGenerator("ast-coir-gen"),
         builder(&IRContext()) {}
 
   bool BeforeVisitImpl(AST::Node &) override;
@@ -91,7 +103,7 @@ public:
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
   bool Visit(AST::SpanAs &) override { return true; }
-  bool Visit(AST::DMA &) override { return true; }
+  bool Visit(AST::DMA &) override;
   bool Visit(AST::MMA &) override { return true; }
   bool Visit(AST::ChunkAt &) override { return true; }
   bool Visit(AST::Wait &) override { return true; }
@@ -107,7 +119,7 @@ public:
   bool Visit(AST::InThreadsBlock &) override { return true; }
   bool Visit(AST::WhileBlock &) override { return true; }
   bool Visit(AST::IfElseBlock &) override { return true; }
-  bool Visit(AST::CppSourceCode &) override { return true; }
+  bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::DeviceFunctionDecl &) override { return true; }
 };
 
