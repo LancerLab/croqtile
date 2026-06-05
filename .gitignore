@@ -37,4 +37,5 @@ tools/co-web/web/co-web.wasm
 
 .claude**
 .codex**
+.cursor**
 .github/**
