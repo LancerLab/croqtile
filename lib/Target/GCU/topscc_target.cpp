@@ -2,6 +2,7 @@
 #include "gcu_check.hpp"
 #include "gcu_target.hpp"
 #include "pipeline.hpp"
+#include "sys_utils.hpp"
 #include "target_registry.hpp"
 #include "topscc_codegen.hpp"
 #include "topscc_device_codegen.hpp"
@@ -25,6 +26,24 @@ public:
         {"gcu300", "GCU Architecture 3.0"}, {"gcu400", "GCU Architecture 4.0"},
         {"gcu450", "GCU Architecture 4.5"}, {"gcu500", "GCU Architecture 5.0"},
     };
+  }
+
+  ArchId ResolveNativeArch() const override {
+    std::string cfg_dir;
+#ifdef __CHOREO_TOPSCC_DIR__
+    cfg_dir = STRINGIZE(__CHOREO_TOPSCC_DIR__);
+#endif
+    auto topscc = FindToolchain(cfg_dir, "topscc");
+    if (topscc.empty()) return "";
+    auto arch = CompileAndRun(topscc,
+        "#include <cstdio>\n"
+        "#include \"tops/tops_runtime.h\"\n"
+        "int main(){topsDeviceProp_t p;"
+        "if(topsGetDeviceProperties(&p,0)!=topsSuccess)return 1;"
+        "printf(\"gcu%d\",p.major*100+p.minor*10);return 0;}\n",
+        ".cpp", "-x c++");
+    if (!arch.empty() && IsArchSupported(arch)) return arch;
+    return "";
   }
 
   const std::unordered_map<std::string, std::string>

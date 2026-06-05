@@ -4,6 +4,7 @@
 // shared global context for a compilation process
 
 #include "assess.hpp"
+#include "io.hpp"
 #include "loc.hpp"
 #include "symvals.hpp"
 #include "target.hpp"
@@ -585,10 +586,18 @@ public:
   void ClearArchs() { archs.clear(); InvalidatePlDepthMap(); }
   void SetArchs(const std::vector<ArchId>& a) { archs = a; InvalidatePlDepthMap(); }
   void AddArch(const ArchId& arch) {
-    if (!GetTarget().IsArchSupported(arch))
-      choreo_unreachable("-arch=" + arch + " is not supported by target '" +
+    ArchId resolved = arch;
+    if (arch == "native") {
+      resolved = GetTarget().ResolveNativeArch();
+      if (resolved.empty())
+        choreo_unreachable("-arch=native is not supported by target '" +
+                           GetTarget().Name() + "'.");
+      errs() << "note: -arch=native resolved to '" << resolved << "'\n";
+    }
+    if (!GetTarget().IsArchSupported(resolved))
+      choreo_unreachable("-arch=" + resolved + " is not supported by target '" +
                          GetTarget().Name() + "'.");
-    archs.push_back(arch);
+    archs.push_back(resolved);
     InvalidatePlDepthMap();
   }
 

@@ -27,6 +27,8 @@ public:
 
   const ArchId DefaultArch() const override { return "x86_64"; }
 
+  ArchId ResolveNativeArch() const override { return "x86_64"; }
+
   size_t GetMemCapacity(const Storage& sto, const ArchId&) const override {
     switch (sto) {
     case Storage::LOCAL: return 1ull * 1024 * 1024;

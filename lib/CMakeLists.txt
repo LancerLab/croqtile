@@ -77,6 +77,7 @@ set(CORE_SOURCES
   diversity_analysis.cpp
   scalar_evolution.cpp
   pipeline.cpp
+  sys_utils.cpp
   target_registry.cpp
   target_utils.cpp
   target.cpp

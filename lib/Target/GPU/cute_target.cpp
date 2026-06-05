@@ -7,6 +7,7 @@
 #include "gpu_target.hpp"
 #include "memcheck.hpp"
 #include "pipeline.hpp"
+#include "sys_utils.hpp"
 #include "target_registry.hpp"
 #include "types.hpp"
 
@@ -46,6 +47,26 @@ public:
   }
 
   const ArchId DefaultArch() const override { return "sm_86"; }
+
+  ArchId ResolveNativeArch() const override {
+    std::string cfg_dir;
+#ifdef __CHOREO_CUDA_DIR__
+    cfg_dir = STRINGIZE(__CHOREO_CUDA_DIR__);
+#endif
+    auto nvcc = FindToolchain(cfg_dir, "nvcc");
+    if (nvcc.empty()) return "";
+    auto cc = CompileAndRun(nvcc,
+        "#include <cstdio>\n"
+        "#include <cuda_runtime.h>\n"
+        "int main(){cudaDeviceProp p;"
+        "if(cudaGetDeviceProperties(&p,0)!=cudaSuccess)return 1;"
+        "printf(\"%d%d\",p.major,p.minor);return 0;}\n",
+        ".cu", "-lcudart");
+    if (cc.empty()) return "";
+    ArchId arch = "sm_" + cc;
+    if (IsArchSupported(arch)) return arch;
+    return "";
+  }
 
   size_t GetMemCapacity(const Storage& sto, const ArchId& arch) const override {
     int arch_num = ArchNum(arch);
