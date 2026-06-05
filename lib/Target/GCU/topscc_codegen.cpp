@@ -1,6 +1,6 @@
 #include "topscc_codegen.hpp"
-#include "topscc_device_codegen.hpp"
 #include "codegen_utils.hpp"
+#include "topscc_device_codegen.hpp"
 
 #include <cctype>
 #include <iostream>
@@ -421,30 +421,29 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     PLDCheck();
     ssm.LeaveScope();
-    if (CCtx().GetOutputKind() == OutputKind::DeviceSourceOnly)
-      code_segments.back() += ds.str();
-    else
-      code_segments.back() += ds.str() + hs.str();
+    // ds: __global__ kernel. hs: target launch entry for this __co__ function
+    // (malloc/H2D/launch/D2H/free). For DeviceSourceOnly (hetero offload) hs
+    // supplies the __hetero_* symbol the hetero host .o links against; it is
+    // not the hetero orchestration program and does not duplicate main().
+    code_segments.back() += ds.str() + hs.str();
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-    bool was_device_deferred_block =
-        !pb->IsOuter() && pb->GetLevel() == ParallelLevel::BLOCK &&
-        device_defers_launch;
+    bool was_device_deferred_block = !pb->IsOuter() &&
+                                     pb->GetLevel() == ParallelLevel::BLOCK &&
+                                     device_defers_launch;
     levels.pop();
     if (pb->IsOuter() && pb->GetLevel() == ParallelLevel::DEVICE) {
-      if (h_indent.size() >= 2)
-        h_indent.resize(h_indent.size() - 2);
+      if (h_indent.size() >= 2) h_indent.resize(h_indent.size() - 2);
       hs << h_indent << "} // end device parallel-by\n";
       auto pv_name = pb->BPV()->name;
       auto bound = ValueSTR(pb->BoundValue());
       hs << h_indent << "for (int __sync_" << pv_name << " = 0; __sync_"
          << pv_name << " < " << bound << "; ++__sync_" << pv_name << ") {\n";
-      hs << h_indent << "  choreo::abend_true(topsSetDevice(__sync_"
-         << pv_name << "));\n";
-      hs << h_indent
-         << "  choreo::abend_true(topsDeviceSynchronize());\n";
+      hs << h_indent << "  choreo::abend_true(topsSetDevice(__sync_" << pv_name
+         << "));\n";
+      hs << h_indent << "  choreo::abend_true(topsDeviceSynchronize());\n";
 
       for (auto& item : GetChoreoFuncIns(cgi)) {
         auto sty = dyn_cast<SpannedType>(item.type);
@@ -812,8 +811,8 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         if (!FCtx(fname).HasDeviceParallel()) {
-          hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym
-             << ", " << UnScopedSizeExpr(*sty) << "));\n";
+          hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+             << UnScopedSizeExpr(*sty) << "));\n";
           hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
              << ssm.HostName(item.name) << ", " << UnScopedSizeExpr(*sty)
              << ", topsMemcpyHostToDevice));\n";
@@ -1379,8 +1378,8 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
       hs << h_indent
          << "  choreo::abend_true(topsGetDeviceCount(&__choreo_device_count));"
             "\n";
-      hs << h_indent << "  choreo::runtime_check(__choreo_device_count >= "
-         << bound
+      hs << h_indent
+         << "  choreo::runtime_check(__choreo_device_count >= " << bound
          << ", \"device parallelism requires " << bound
          << " device(s), but only \""
             "\n"
@@ -1402,8 +1401,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     hs << h_indent << "for (int " << pv_name << " = 0; " << pv_name << " < "
        << bound << "; ++" << pv_name << ") {\n";
     h_indent += "  ";
-    hs << h_indent << "choreo::abend_true(topsSetDevice(" << pv_name
-       << "));\n";
+    hs << h_indent << "choreo::abend_true(topsSetDevice(" << pv_name << "));\n";
 
     for (auto& item : GetChoreoFuncIns(cgi)) {
       auto sty = dyn_cast<SpannedType>(item.type);
@@ -1502,8 +1500,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
         if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
           hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname
              << ".data(), " << oname + "__device" << ", "
-             << UnScopedSizeExpr(*item.type)
-             << ", topsMemcpyDeviceToHost));\n";
+             << UnScopedSizeExpr(*item.type) << ", topsMemcpyDeviceToHost));\n";
       }
     }
   }

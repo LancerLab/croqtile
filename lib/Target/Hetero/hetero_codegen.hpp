@@ -69,6 +69,7 @@ private:
     std::string device_source;
     std::string source_ext;
     std::string host_fwd_decl;
+    std::string device_name;
     std::string target_name;
     struct BufferInfo {
       std::string host_name;

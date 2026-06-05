@@ -86,10 +86,8 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ssm.LeaveScope();
     levels.pop();
-    if (CCtx().GetOutputKind() == OutputKind::DeviceSourceOnly)
-      code_segments.back() += ds.str();
-    else
-      code_segments.back() += ds.str() + hs.str();
+    // ds: device kernel. hs: target launch entry (__hetero_* shim for hetero).
+    code_segments.back() += ds.str() + hs.str();
     ds.str("");
     hs.str("");
     return_stream.str("");
