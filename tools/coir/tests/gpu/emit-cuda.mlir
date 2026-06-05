@@ -1,0 +1,81 @@
+// RUN: coir-opt --coir-classify-copies --coir-lower-mma --coir-lower-copy --coir-emit-cuda %s | FileCheck %s
+
+// CHECK: #include <cuda_fp16.h>
+// CHECK: #include <mma.h>
+// CHECK: using namespace nvcuda;
+
+// End-to-end test: simple MMA kernel
+// CHECK: __global__ void mma_kernel
+// CHECK: wmma::fill_fragment
+// CHECK: wmma::load_matrix_sync
+// CHECK: wmma::load_matrix_sync
+// CHECK: wgmma::mma_async
+// CHECK: wmma::store_matrix_sync
+coir.kernel @mma_kernel(
+    %a_tile: !coir.tensor<16x16xf16, shared>,
+    %b_tile: !coir.tensor<16x16xf16, shared>,
+    %c_tile: !coir.tensor<16x16xf32, shared>) {
+  %zero = arith.constant 0.0 : f32
+  %acc = coir.mma.fill %zero : f32 -> !coir.mma_frag<16x16xf32>
+  %a_frag = coir.mma.load %a_tile : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
+  %b_frag = coir.mma.load %b_tile : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
+  %res = coir.mma.exec %acc, %a_frag, %b_frag {layout = #coir.mma_layout<row_col>} : (!coir.mma_frag<16x16xf32>, !coir.mma_frag<16x16xf16>, !coir.mma_frag<16x16xf16>) -> !coir.mma_frag<16x16xf32>
+  coir.mma.store %res, %c_tile : !coir.mma_frag<16x16xf32>, !coir.tensor<16x16xf32, shared>
+}
+
+// End-to-end test: copy + barrier + MMA
+// CHECK: __global__ void copy_and_mma
+// CHECK: cute::copy(tma_desc
+// CHECK: __syncthreads
+// CHECK: wmma::fill_fragment
+// CHECK: wmma::load_matrix_sync
+// CHECK: wgmma::mma_async
+// CHECK: wmma::store_matrix_sync
+coir.kernel @copy_and_mma(
+    %ga: !coir.tensor<128x64xf16>,
+    %gb: !coir.tensor<64x128xf16>,
+    %c: !coir.tensor<16x16xf32, shared>) {
+  %sa = coir.tensor.alloc : !coir.tensor<128x64xf16, shared>
+  %sb = coir.tensor.alloc : !coir.tensor<64x128xf16, shared>
+
+  coir.data.copy %ga to %sa : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
+  coir.data.copy %gb to %sb : !coir.tensor<64x128xf16> -> !coir.tensor<64x128xf16, shared>
+  coir.barrier #coir.level<block>
+
+  %at = coir.tensor.tile %sa[] : !coir.tensor<128x64xf16, shared> -> !coir.tensor<16x16xf16, shared>
+  %bt = coir.tensor.tile %sb[] : !coir.tensor<64x128xf16, shared> -> !coir.tensor<16x16xf16, shared>
+
+  %zero = arith.constant 0.0 : f32
+  %acc = coir.mma.fill %zero : f32 -> !coir.mma_frag<16x16xf32>
+  %af = coir.mma.load %at : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
+  %bf = coir.mma.load %bt : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
+  %res = coir.mma.exec %acc, %af, %bf {layout = #coir.mma_layout<row_col>} : (!coir.mma_frag<16x16xf32>, !coir.mma_frag<16x16xf16>, !coir.mma_frag<16x16xf16>) -> !coir.mma_frag<16x16xf32>
+  coir.mma.store %res, %c : !coir.mma_frag<16x16xf32>, !coir.tensor<16x16xf32, shared>
+}
+
+// End-to-end test: parallel + foreach accumulate
+// CHECK: __global__ void matmul_kernel
+// CHECK: parallel level=block
+// CHECK: for (int
+// CHECK: wmma::load_matrix_sync
+// CHECK: wgmma::mma_async
+// CHECK: wmma::store_matrix_sync
+coir.kernel @matmul_kernel(
+    %a: !coir.tensor<128x64xf16, shared>,
+    %b: !coir.tensor<64x128xf16, shared>,
+    %c: !coir.tensor<128x128xf32, shared>) {
+  coir.parallel (%bm, %bn) in [2, 2] level = #coir.level<block> {
+    %zero = arith.constant 0.0 : f32
+    %c4 = arith.constant 4 : index
+    %init = coir.mma.fill %zero : f32 -> !coir.mma_frag<16x16xf32>
+    %final = coir.foreach %k in %c4 iter_args(%acc = %init) : !coir.mma_frag<16x16xf32> {
+      %at = coir.tensor.tile %a[%k] : !coir.tensor<128x64xf16, shared> -> !coir.tensor<16x16xf16, shared>
+      %bt = coir.tensor.tile %b[%k] : !coir.tensor<64x128xf16, shared> -> !coir.tensor<16x16xf16, shared>
+      %af = coir.mma.load %at : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
+      %bf = coir.mma.load %bt : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
+      %r = coir.mma.exec %acc, %af, %bf {layout = #coir.mma_layout<row_col>} : (!coir.mma_frag<16x16xf32>, !coir.mma_frag<16x16xf16>, !coir.mma_frag<16x16xf16>) -> !coir.mma_frag<16x16xf32>
+      coir.yield %r : !coir.mma_frag<16x16xf32>
+    }
+    coir.mma.store %final, %c : !coir.mma_frag<16x16xf32>, !coir.tensor<128x128xf32, shared>
+  }
+}
