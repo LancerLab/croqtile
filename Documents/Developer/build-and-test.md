@@ -11,11 +11,25 @@ This guide covers how to build the Croqtile compiler from source, run the test s
 - **Ninja** (build system)
 - **Flex** and **Bison** (parser generation)
 
-Run the setup target to fetch toolchain dependencies:
+### Environment setup (required on fresh clones)
+
+Before the first build or test run:
 
 ```bash
-make setup
+make setup-core
 ```
+
+`setup-core` applies to **every target**. It fetches the shared Choreo toolchain
+(FileCheck, clang-format, parser generators, agent skills), initializes git
+submodules, and installs git hooks. **Always run this on a fresh clone** before
+`make`, `make test`, or end-to-end `.co` execution.
+
+For the CUDA/CuTe target, `setup-core` also initializes the
+`extern/cutlass` submodule. You do not need to set `CUTE_HOME` manually after
+running `setup-core`.
+
+For target-specific environment notes, see
+[Target Environment Setup](target/env_setting_up.md).
 
 ---
 
@@ -82,7 +96,8 @@ Use `lit.sh` directly for individual tests:
 ./tests/lit.sh -j4 tests/                      # parallel full suite
 ```
 
-Target-specific end-to-end tests may require additional hardware or SDK configuration; see [Target Environment Setup](target/env_setting_up.md).
+Target-specific end-to-end tests may require additional hardware or SDK
+configuration on internal CI runners.
 
 ### Standalone tests
 
@@ -109,8 +124,11 @@ For details on the test runner's directives, hooks, and target integration, see 
 ```bash
 ./choreo -t <target> program.co        # end-to-end compile for a target
 ./choreo -t <target> -es program.co    # emit target source only (no target compiler)
-./choreo -t <target> -gs program.co    # generate work-script
+./choreo -t <target> -gs program.co    # generate work-script (compile and run)
 ```
+
+Use `-gs` for the normal end-to-end workflow: the compiler emits a bash script
+that drives target compilation and execution.
 
 ### Debug flags
 

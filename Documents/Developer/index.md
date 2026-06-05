@@ -29,4 +29,4 @@ For a **hands-on tutorial**, see the [Croqtile Tutorial](https://codes1gn.github
 ### Target-Specific References
 
 8. [Target-Specific Calls](target/calls.md) -- calling conventions for specific backends (e.g., `extern "C"` for Factor)
-9. [Target Environment Setup](target/env_setting_up.md) -- hardware driver and SDK configuration
+9. [Target Environment Setup](target/env_setting_up.md) -- target SDK and hardware configuration

@@ -27,6 +27,10 @@ class PlDepthMap;
 enum class OutputKind {
   PreProcessedCode,
   TargetSourceCode,
+  // Hetero offload: emit a standalone translation unit for the offload .o.
+  // Includes the device kernel (ds) and the target launch entry (hs) that
+  // defines __hetero_<device>_... (alloc, dispatch, sync). Does NOT include
+  // hetero orchestration host code or main() - those are in the hetero host .o.
   DeviceSourceOnly,
   TargetModule,
   TargetAssembly,
@@ -476,7 +480,9 @@ private:
   ptr<AST::Node> pre_sema_root_;
 
 public:
-  bool NeedPreSemaClone() const { return compile_target && compile_target->Name() == "hetero"; }
+  bool NeedPreSemaClone() const {
+    return compile_target && compile_target->Name() == "hetero";
+  }
   void SavePreSemaRoot(AST::Node& r);
   ptr<AST::Node> GetPreSemaRoot() const { return pre_sema_root_; }
 
@@ -582,8 +588,14 @@ public:
       choreo_unreachable("unexpected multiple architecture.");
     return archs[0];
   }
-  void ClearArchs() { archs.clear(); InvalidatePlDepthMap(); }
-  void SetArchs(const std::vector<ArchId>& a) { archs = a; InvalidatePlDepthMap(); }
+  void ClearArchs() {
+    archs.clear();
+    InvalidatePlDepthMap();
+  }
+  void SetArchs(const std::vector<ArchId>& a) {
+    archs = a;
+    InvalidatePlDepthMap();
+  }
   void AddArch(const ArchId& arch) {
     if (!GetTarget().IsArchSupported(arch))
       choreo_unreachable("-arch=" + arch + " is not supported by target '" +

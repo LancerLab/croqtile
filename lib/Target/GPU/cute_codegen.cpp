@@ -1,6 +1,6 @@
 #include "cute_codegen.hpp"
-#include "cute_device_codegen.hpp"
 #include "codegen_utils.hpp"
+#include "cute_device_codegen.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -1103,10 +1103,8 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     PLDCheck();
     ssm.LeaveScope();
-    if (CCtx().GetOutputKind() == OutputKind::DeviceSourceOnly)
-      code_segments.back() += ds.str();
-    else
-      code_segments.back() += ds.str() + hs.str();
+    // ds: device kernel. hs: target launch entry (__hetero_* shim for hetero).
+    code_segments.back() += ds.str() + hs.str();
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");

@@ -24,13 +24,16 @@ extern AST::Program root;
 namespace {
 // Find the Nth device(target) ParallelBy inside a named function in the AST.
 AST::ParallelBy* FindDevicePB(AST::Node& program, const std::string& func_name,
-                               const std::string& target_name, int nth) {
+                              const std::string& target_name, int nth) {
   int count = 0;
   AST::ChoreoFunction* func = nullptr;
   if (auto p = dyn_cast<AST::Program>(&program)) {
     for (auto& child : p->stmts->values) {
       if (auto f = dyn_cast<AST::ChoreoFunction>(child.get())) {
-        if (f->name == func_name) { func = f; break; }
+        if (f->name == func_name) {
+          func = f;
+          break;
+        }
       }
     }
   }
@@ -52,9 +55,7 @@ AST::ParallelBy* FindDevicePB(AST::Node& program, const std::string& func_name,
 void HeteroCodeGen::EmitPreamble() {
   // Device includes must come before choreo.h so that device SDK types
   // referenced by target-specific headers are available.
-  for (auto& [name, dcg] : device_codegens) {
-    dcg->EmitHostIncludes(os);
-  }
+  for (auto& [name, dcg] : device_codegens) { dcg->EmitHostIncludes(os); }
 
   os << "#include \"choreo.h\"\n";
   os << "#include <cstring>\n";
@@ -62,9 +63,7 @@ void HeteroCodeGen::EmitPreamble() {
   os << "#include <future>\n";
   os << "#include <thread>\n\n";
 
-  for (auto& [name, dcg] : device_codegens) {
-    dcg->EmitHostPreamble(os);
-  }
+  for (auto& [name, dcg] : device_codegens) { dcg->EmitHostPreamble(os); }
 }
 
 // ---- Before/InMid/After VisitImpl ----
@@ -393,6 +392,7 @@ void HeteroCodeGen::BeginOffloadFunction(AST::ParallelBy& n,
                                    fname + "_" +
                                    std::to_string(offload_func_counter_++);
   cur_offload_func_.parent_fname = fname;
+  cur_offload_func_.device_name = active_device_target;
   cur_offload_func_.target_name = dcg.TargetName();
   cur_offload_func_.source_ext = dcg.SourceExtension();
 
@@ -434,8 +434,7 @@ void HeteroCodeGen::BeginOffloadFunction(AST::ParallelBy& n,
   if (!pre_sema)
     choreo_unreachable("pre-sema AST clone not available for hetero offload");
   if (!current_func_node_)
-    choreo_unreachable(
-        "current function node not set in BeginOffloadFunction");
+    choreo_unreachable("current function node not set in BeginOffloadFunction");
 
   auto target_name = n.DeviceTargetName();
   int nth = device_pb_counters_[target_name]++;
@@ -472,7 +471,6 @@ void HeteroCodeGen::EmitOffloadHostCall(const OffloadFuncInfo& fi) {
   }
   os << ");\n";
 }
-
 
 // Run the device target's full pipeline on the offload function AST cloned
 // from the pre-sema root. Returns true with fi.device_source populated.
@@ -513,8 +511,8 @@ bool HeteroCodeGen::CompileOffloadToSource(OffloadFuncInfo& fi) {
     fi.device_source = capture_os.str();
     ok = true;
   } else {
-    errs() << "Device codegen pipeline failed for target '"
-           << fi.target_name << "'.\n";
+    errs() << "Device codegen pipeline failed for target '" << fi.target_name
+           << "'.\n";
   }
 
   root.stmts = saved_root_stmts;
@@ -546,15 +544,14 @@ void HeteroCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
 
   // Emit target-specific setup files needed by device toolchains.
   for (auto& [name, dcg] : device_codegens) {
-    if (!dcg->IsHostDevice())
-      dcg->EmitSetupFiles(out, build_path);
+    if (!dcg->IsHostDevice()) dcg->EmitSetupFiles(out, build_path);
   }
 
   // Write offload device source files into per-target subdirectories.
   std::vector<std::string> offload_obj_files;
   for (size_t i = 0; i < offload_functions_.size(); ++i) {
     auto& fi = offload_functions_[i];
-    auto it = device_codegens.find(fi.target_name);
+    auto it = device_codegens.find(fi.device_name);
     std::string tdir = (it != device_codegens.end())
                            ? it->second->TargetBuildDir(build_path)
                            : build_path;
@@ -572,7 +569,6 @@ void HeteroCodeGen::EmitScript(std::ostream& out, const std::string& exe_fn) {
   out << "cat <<'EOF' > " << host_cc_file << "\n";
   for (auto& code : code_segments) out << code << "\n";
   out << "\nEOF\n\n";
-
 
   // Emit build env setup for all offload devices
   for (auto& [name, dcg] : device_codegens) {
