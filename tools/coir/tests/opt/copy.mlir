@@ -54,8 +54,8 @@ coir.kernel @test_thread_copy(
 coir.kernel @test_barrier() {
   // CHECK: coir.barrier <block>
   coir.barrier #coir.level<block>
-  // CHECK: coir.barrier <warp>
-  coir.barrier #coir.level<warp>
+  // CHECK: coir.barrier <group>
+  coir.barrier #coir.level<group>
 }
 
 // Test combined copy + barrier + MMA pipeline

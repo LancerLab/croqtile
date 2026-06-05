@@ -13,8 +13,8 @@ coir.kernel @test_parallel(%a: !coir.tensor<128x256xf16>) {
 coir.kernel @test_nested_parallel(%a: !coir.tensor<128x256xf16>) {
   // CHECK: coir.parallel (%arg1, %arg2) in [2, 16] level = #coir.level<block>
   coir.parallel (%bm, %bn) in [2, 16] level = #coir.level<block> {
-    // CHECK: coir.parallel (%arg3) in [4] level = #coir.level<warpgroup>
-    coir.parallel (%wg) in [4] level = #coir.level<warpgroup> {
+    // CHECK: coir.parallel (%arg3) in [4] level = #coir.level<groupx4>
+    coir.parallel (%wg) in [4] level = #coir.level<groupx4> {
     }
   }
 }

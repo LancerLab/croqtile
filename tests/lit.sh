@@ -1066,7 +1066,7 @@ while [[ $# -gt 0 ]]; do
       if [ -d "$1" ]; then
           # If it's a directory, find all .co, .cmt(cmake test) files
           _given_dir="$1"
-          files_array=($(find "$_given_dir" -type f -name '*.co' -o -name '*.cmt'))
+          files_array=($(find "$_given_dir" -type f -name '*.co' -o -name '*.cmt' -o -name '*.mlir'))
           expand_includes "$_given_dir"
       elif [ -f "$1" ]; then
           # If it's a file, add it to the array
@@ -1283,7 +1283,7 @@ for _entry in "${files_array[@]}"; do
   # Read the file and search for lines starting with "// RUN:"
   while IFS= read -r line; do
     # check if it is valid line
-    if [[ ${ext} == "co" ]]; then
+    if [[ ${ext} == "co" || ${ext} == "mlir" ]]; then
       if [[ "${line}" =~ ^//[[:blank:]]*RUN(.+) ]]; then
         line=${line#//}
       else

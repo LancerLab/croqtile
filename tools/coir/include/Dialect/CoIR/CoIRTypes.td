@@ -34,24 +34,32 @@ def CoIR_FinalDMADescType : TypeDef<CoIR_Dialect, "FinalDMADesc"> {
 
 def CoIR_TensorType : TypeDef<CoIR_Dialect, "Tensor"> {
   let mnemonic = "tensor";
-  let summary = "N-D typed tensor with element type, shape, and memory space";
+  let summary = "N-D typed tensor with element type, shape, strides, and memory space";
   let description = [{
     Represents a multi-dimensional tensor in the CoIR dialect.
-    Carries an element type, a static shape, and an optional memory space
-    (global, shared, local, register). Defaults to global if unspecified.
+    Carries an element type, a static shape, optional strides, and an optional
+    memory space (global, shared, local, register). Defaults to global if
+    unspecified. If strides are empty, the tensor is assumed dense contiguous
+    (row-major).
 
     Syntax:
-      !coir.tensor<128x64xf16>                       // global by default
-      !coir.tensor<16x16xf32, shared>                // explicit memory space
+      !coir.tensor<128x64xf16>                             // dense, global
+      !coir.tensor<16x16xf32, shared>                      // dense, shared
+      !coir.tensor<128x64xf16, global, strides: [64, 1]>  // explicit strides
   }];
 
   let parameters = (ins
     "mlir::Type":$elementType,
     ArrayRefParameter<"int64_t">:$shape,
-    DefaultValuedParameter<"int32_t", "-1">:$memorySpace
+    DefaultValuedParameter<"int32_t", "-1">:$memorySpace,
+    OptionalArrayRefParameter<"int64_t">:$strides
   );
 
   let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = [{
+    bool isDenseContiguous() const;
+  }];
 }
 
 //===----------------------------------------------------------------------===//

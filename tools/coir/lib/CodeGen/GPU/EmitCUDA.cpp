@@ -38,12 +38,18 @@ public:
       if (auto kernel = dyn_cast<KernelOp>(op))
         emitKernel(kernel);
     }
+    for (auto &op : module.getBody()->getOperations()) {
+      if (auto kernel = dyn_cast<KernelOp>(op))
+        emitHostWrapper(kernel);
+    }
   }
 
 private:
   llvm::raw_ostream &os;
   unsigned indent;
   DenseMap<Value, std::string> valueNames;
+  DenseMap<unsigned, std::string> returnParamNames;
+  DenseSet<Value> returnValues;
   unsigned nextId = 0;
 
   std::string getIndent() { return std::string(indent * 2, ' '); }
@@ -101,6 +107,7 @@ private:
   void emitHeader() {
     os << "#include <cuda_fp16.h>\n";
     os << "#include <mma.h>\n";
+    os << "#include \"choreo.h\"\n";
     os << "using namespace nvcuda;\n\n";
   }
 
@@ -109,18 +116,38 @@ private:
     os << "__global__ void " << kernel.getSymName() << "(";
 
     auto &body = kernel.getBody();
+    unsigned paramIdx = 0;
     if (!body.empty()) {
       auto args = body.getArguments();
       for (unsigned i = 0; i < args.size(); ++i) {
-        if (i > 0)
+        if (paramIdx > 0)
           os << ", ";
-        std::string name = "arg" + std::to_string(i);
+        std::string name = "arg" + std::to_string(paramIdx);
         valueNames[args[i]] = name;
         os << emitCUDAType(fnType.getInput(i)) << " " << name;
+        paramIdx++;
       }
+    }
+    for (unsigned i = 0; i < fnType.getNumResults(); ++i) {
+      if (paramIdx > 0)
+        os << ", ";
+      std::string name = "out" + std::to_string(i);
+      os << emitCUDAType(fnType.getResult(i)) << " " << name;
+      returnParamNames[i] = name;
+      paramIdx++;
     }
     os << ") {\n";
     incIndent();
+
+    // Pre-scan: identify return values to bind allocs to output params
+    for (auto &op : body.front().getOperations()) {
+      if (auto ret = dyn_cast<KernelReturnOp>(op)) {
+        for (unsigned i = 0; i < ret.getOperands().size(); ++i) {
+          returnValues.insert(ret.getOperands()[i]);
+          valueNames[ret.getOperands()[i]] = returnParamNames[i];
+        }
+      }
+    }
 
     for (auto &op : body.front().getOperations())
       emitOp(&op);
@@ -129,11 +156,132 @@ private:
     os << "}\n\n";
   }
 
+  std::string emitChoreoType(Type ty, bool asView = true) {
+    if (auto tty = dyn_cast<coir::TensorType>(ty)) {
+      std::string eTy = emitElementType(tty.getElementType());
+      std::string choreoElem;
+      if (tty.getElementType().isInteger(32)) choreoElem = "choreo::s32";
+      else if (tty.getElementType().isF32()) choreoElem = "choreo::f32";
+      else if (tty.getElementType().isF16()) choreoElem = "choreo::f16";
+      else choreoElem = "choreo::s32";
+      unsigned ndim = tty.getShape().size();
+      if (asView)
+        return "const choreo::spanned_view<" + choreoElem + ", " +
+               std::to_string(ndim) + "> &";
+      else
+        return "choreo::spanned_data<" + choreoElem + ", " +
+               std::to_string(ndim) + ">";
+    }
+    return "/* unknown */";
+  }
+
+  int64_t getTensorBytes(coir::TensorType tty) {
+    int64_t n = 1;
+    for (auto d : tty.getShape()) n *= d;
+    Type eTy = tty.getElementType();
+    int64_t elemSize = 4;
+    if (eTy.isF16() || eTy.isInteger(16)) elemSize = 2;
+    else if (eTy.isF64() || eTy.isInteger(64)) elemSize = 8;
+    else if (eTy.isInteger(8)) elemSize = 1;
+    return n * elemSize;
+  }
+
+  void emitHostWrapper(KernelOp kernel) {
+    auto fnType = kernel.getFunctionType();
+    auto name = kernel.getSymName();
+    unsigned numInputs = fnType.getNumInputs();
+    unsigned numResults = fnType.getNumResults();
+
+    if (numResults == 0) return;
+
+    auto resTy = dyn_cast<coir::TensorType>(fnType.getResult(0));
+    if (!resTy) return;
+
+    os << emitChoreoType(fnType.getResult(0), false) << " " << name << "(";
+    for (unsigned i = 0; i < numInputs; ++i) {
+      if (i > 0) os << ", ";
+      auto &body = kernel.getBody();
+      std::string pName = "arg" + std::to_string(i);
+      if (!body.empty() && i < body.getArguments().size()) {
+        pName = "p" + std::to_string(i);
+      }
+      os << emitChoreoType(fnType.getInput(i), true) << " " << pName;
+    }
+    os << ") {\n";
+
+    std::string eType = emitElementType(resTy.getElementType());
+
+    for (unsigned i = 0; i < numInputs; ++i) {
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (!tty) continue;
+      int64_t bytes = getTensorBytes(tty);
+      os << "  " << eType << "* p" << i << "__device = nullptr;\n";
+      os << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
+      os << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
+         << bytes << "ULL, cudaMemcpyHostToDevice);\n";
+    }
+
+    int64_t resBytes = getTensorBytes(resTy);
+    std::string shapeStr;
+    {
+      llvm::raw_string_ostream ss(shapeStr);
+      ss << "{";
+      for (unsigned d = 0; d < resTy.getShape().size(); ++d) {
+        if (d > 0) ss << ", ";
+        ss << resTy.getShape()[d];
+      }
+      ss << "}";
+    }
+    std::string choreoElem;
+    if (resTy.getElementType().isInteger(32)) choreoElem = "choreo::s32";
+    else if (resTy.getElementType().isF32()) choreoElem = "choreo::f32";
+    else if (resTy.getElementType().isF16()) choreoElem = "choreo::f16";
+    else choreoElem = "choreo::s32";
+
+    os << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
+       << resTy.getShape().size() << ">(" << shapeStr << ");\n";
+    os << "  " << eType << "* __result__device = nullptr;\n";
+    os << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
+
+    // Determine grid/block dims from parallel levels in the kernel
+    int64_t gridDim = 1, blockDim = 1;
+    kernel.getBody().walk([&](ParallelOp par) {
+      auto lvl = par.getLevel();
+      auto bounds = par.getBounds();
+      int64_t totalBound = 1;
+      for (auto b : bounds) totalBound *= b;
+      if (lvl == coir::ParallelLevel::BLOCK)
+        gridDim = totalBound;
+      else if (lvl == coir::ParallelLevel::THREAD)
+        blockDim = totalBound;
+    });
+
+    os << "  " << name << "<<<" << gridDim << ", " << blockDim << ">>>(";
+    for (unsigned i = 0; i < numInputs; ++i) {
+      if (i > 0) os << ", ";
+      os << "p" << i << "__device";
+    }
+    os << ", __result__device);\n";
+    os << "  cudaDeviceSynchronize();\n";
+    os << "  cudaMemcpy(__result.data(), __result__device, "
+       << resBytes << "ULL, cudaMemcpyDeviceToHost);\n";
+
+    for (unsigned i = 0; i < numInputs; ++i)
+      os << "  cudaFree(p" << i << "__device);\n";
+    os << "  cudaFree(__result__device);\n";
+    os << "  return __result;\n";
+    os << "}\n\n";
+  }
+
   void emitOp(Operation *op) {
     if (auto parallel = dyn_cast<ParallelOp>(op))
       emitParallel(parallel);
     else if (auto foreach_ = dyn_cast<ForeachOp>(op))
       emitForeach(foreach_);
+    else if (auto loadElem = dyn_cast<TensorLoadElemOp>(op))
+      emitTensorLoadElem(loadElem);
+    else if (auto storeElem = dyn_cast<TensorStoreElemOp>(op))
+      emitTensorStoreElem(storeElem);
     else if (auto fill = dyn_cast<MMAFillOp>(op))
       emitMMAFill(fill);
     else if (auto load = dyn_cast<MMALoadOp>(op))
@@ -162,6 +310,7 @@ private:
       emitYield(yield);
     else if (auto constOp = dyn_cast<arith::ConstantOp>(op))
       emitConstant(constOp);
+    else if (emitArithBinOp(op)) {}
     else {
       os << getIndent() << "// [unhandled] " << op->getName().getStringRef()
          << "\n";
@@ -182,12 +331,12 @@ private:
     }
     os << "]\n";
 
-    if (level == ParallelLevel::Block) {
+    if (level == ParallelLevel::BLOCK) {
       for (unsigned i = 0; i < args.size(); ++i) {
         std::string dim = i == 0 ? "blockIdx.x" : "blockIdx.y";
         valueNames[args[i]] = dim;
       }
-    } else if (level == ParallelLevel::Thread) {
+    } else if (level == ParallelLevel::THREAD) {
       for (unsigned i = 0; i < args.size(); ++i) {
         std::string dim = i == 0 ? "threadIdx.x" : "threadIdx.y";
         valueNames[args[i]] = dim;
@@ -301,7 +450,7 @@ private:
 
   void emitBarrier(BarrierOp op) {
     auto scope = op.getScope();
-    if (scope == ParallelLevel::Block)
+    if (scope == ParallelLevel::BLOCK)
       os << getIndent() << "__syncthreads();\n";
     else
       os << getIndent() << "// barrier scope="
@@ -313,6 +462,9 @@ private:
   }
 
   void emitTensorAlloc(TensorAllocOp op) {
+    if (returnValues.count(op.getResult()))
+      return; // bound to output parameter
+
     auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
     int32_t ms = tensorTy.getMemorySpace();
     std::string qualifier = ms == 1 ? "__shared__ " : "";
@@ -330,6 +482,77 @@ private:
     std::string name = getName(op.getResult());
     os << getIndent() << "auto " << name << " = "
        << getName(op.getSource()) << " + /* tile offset */;\n";
+  }
+
+  void emitLinearIndex(mlir::ValueRange indices, coir::TensorType tty) {
+    auto strides = tty.getStrides();
+    auto shape = tty.getShape();
+    if (indices.empty()) {
+      os << "0";
+      return;
+    }
+    if (indices.size() == 1 && strides.empty()) {
+      os << getName(indices[0]);
+      return;
+    }
+    llvm::SmallVector<int64_t> effectiveStrides;
+    if (!strides.empty()) {
+      effectiveStrides.assign(strides.begin(), strides.end());
+    } else {
+      effectiveStrides.resize(shape.size());
+      int64_t s = 1;
+      for (int i = (int)shape.size() - 1; i >= 0; --i) {
+        effectiveStrides[i] = s;
+        s *= shape[i];
+      }
+    }
+    for (unsigned i = 0; i < indices.size(); ++i) {
+      if (i > 0) os << " + ";
+      if (i < effectiveStrides.size() && effectiveStrides[i] != 1)
+        os << getName(indices[i]) << " * " << effectiveStrides[i];
+      else
+        os << getName(indices[i]);
+    }
+  }
+
+  void emitTensorLoadElem(TensorLoadElemOp op) {
+    std::string name = getName(op.getResult());
+    std::string src = getName(op.getSource());
+    auto tty = cast<coir::TensorType>(op.getSource().getType());
+    os << getIndent() << emitCUDAType(op.getResult().getType()) << " " << name
+       << " = " << src << "[";
+    emitLinearIndex(op.getIndices(), tty);
+    os << "];\n";
+  }
+
+  void emitTensorStoreElem(TensorStoreElemOp op) {
+    std::string dst = getName(op.getDest());
+    std::string val = getName(op.getValue());
+    auto tty = cast<coir::TensorType>(op.getDest().getType());
+    os << getIndent() << dst << "[";
+    emitLinearIndex(op.getIndices(), tty);
+    os << "] = " << val << ";\n";
+  }
+
+  bool emitArithBinOp(Operation *op) {
+    llvm::StringRef opStr;
+    if (isa<arith::AddIOp>(op) || isa<arith::AddFOp>(op))
+      opStr = "+";
+    else if (isa<arith::SubIOp>(op) || isa<arith::SubFOp>(op))
+      opStr = "-";
+    else if (isa<arith::MulIOp>(op) || isa<arith::MulFOp>(op))
+      opStr = "*";
+    else if (isa<arith::DivSIOp>(op) || isa<arith::DivFOp>(op))
+      opStr = "/";
+    else
+      return false;
+
+    std::string name = getName(op->getResult(0));
+    std::string lhs = getName(op->getOperand(0));
+    std::string rhs = getName(op->getOperand(1));
+    os << getIndent() << emitCUDAType(op->getResult(0).getType()) << " "
+       << name << " = " << lhs << " " << opStr << " " << rhs << ";\n";
+    return true;
   }
 
   void emitYield(YieldOp op) {
