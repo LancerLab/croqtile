@@ -12,3 +12,4 @@
 .gitmodules
 .gitattributes
 .clang-format
+tools/coir/llvm-dep.conf

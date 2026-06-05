@@ -68,5 +68,10 @@ AGENTS.md
 # Misc internal artifacts
 results.tsv
 
+# CoIR IR tooling -- internal-only paths
+tools/coir/lib/CodeGen/GCU/
+tools/coir/tests/gcu/
+tools/coir/llvm-dep.conf
+
 # External deps (managed separately per repo)
 extern/*

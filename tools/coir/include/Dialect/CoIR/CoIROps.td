@@ -1,0 +1,339 @@
+// CoIROps.td -- Operation definitions for the CoIR dialect
+#ifndef COIR_OPS_TD
+#define COIR_OPS_TD
+
+include "mlir/IR/OpBase.td"
+include "mlir/IR/AttrTypeBase.td"
+include "mlir/IR/DialectBase.td"
+include "mlir/IR/SymbolInterfaces.td"
+include "mlir/Dialect/Async/IR/AsyncTypes.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/Interfaces/ControlFlowInterfaces.td"
+include "mlir/Interfaces/InferTypeOpInterface.td"
+
+include "CoIR/CoIRDialect.td"
+include "CoIR/CoIRAttrs.td"
+include "CoIR/CoIRTypes.td"
+
+// Base class for CoIR ops
+class CoIR_Op<string mnemonic, list<Trait> traits = []>
+    : Op<CoIR_Dialect, mnemonic, traits>;
+
+//===----------------------------------------------------------------------===//
+// Existing DMA descriptor pipeline ops
+//===----------------------------------------------------------------------===//
+
+def DMAConstDescOp : CoIR_Op<"dma.const.desc", [NoMemoryEffect]> {
+  let summary = "Create compile-time DMA descriptor";
+  let arguments = (ins AnyMemRef:$g_ptr,
+                       AnyType:$f_shape,
+                       AnyType:$s_shape);
+  let results = (outs CoIR_DMADescType:$out);
+  let assemblyFormat = [{
+    $g_ptr `,` $f_shape `,` $s_shape attr-dict `:` type($g_ptr) `,` type($f_shape) `,` type($s_shape) `->` type($out)
+  }];
+}
+
+def DMACheckOp : CoIR_Op<"dma.check", [NoMemoryEffect]> {
+  let summary = "Optional compile-time check";
+  let arguments = (ins CoIR_DMADescType:$in);
+  let assemblyFormat = "$in attr-dict `:` type($in)";
+}
+
+def DMADescPrefetchOp : CoIR_Op<"dma.prefetch.desc", []> {
+  let arguments = (ins CoIR_DMADescType:$in);
+  let results   = (outs CoIR_FinalDMADescType:$out);
+  let hasCanonicalizer = 1;
+  let assemblyFormat = "$in attr-dict `:` type($in) `->` type($out)";
+}
+
+def DMADescRuntimeOp : CoIR_Op<"dma.runtime.desc", []> {
+  let arguments = (ins CoIR_FinalDMADescType:$in,
+                       Index:$coords,
+                       AnyMemRef:$smem_buffer,
+                       AnyType:$mbarrier);
+  let results   = (outs CoIR_FinalDMADescType:$out);
+  let assemblyFormat = "$in `,` $coords `,` $smem_buffer `,` $mbarrier attr-dict `:` type($in) `,` type($coords) `,` type($smem_buffer) `,` type($mbarrier) `->` type($out)";
+}
+
+def DMAInvokeOp : CoIR_Op<"dma.invoke",
+                   [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let arguments = (ins CoIR_FinalDMADescType:$desc);
+  let results   = (outs AnyType:$done);
+  let hasCustomAssemblyFormat = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// Tier 1: Kernel and parallelism ops
+//===----------------------------------------------------------------------===//
+
+def KernelOp : CoIR_Op<"kernel", [
+    IsolatedFromAbove, Symbol, SingleBlock, NoTerminator
+]> {
+  let summary = "Top-level device kernel function";
+  let description = [{
+    Defines a device kernel with typed tensor arguments and results.
+    Carries launch grid metadata as attributes.
+
+    Example:
+      coir.kernel @matmul(%a: !coir.tensor<128x64xf16>) -> !coir.tensor<128x256xf16> {
+        ...
+      }
+  }];
+
+  let arguments = (ins
+    SymbolNameAttr:$sym_name,
+    TypeAttrOf<FunctionType>:$function_type
+  );
+  let regions = (region SizedRegion<1>:$body);
+
+  let hasCustomAssemblyFormat = 1;
+}
+
+def KernelReturnOp : CoIR_Op<"return", [Terminator, HasParent<"KernelOp">]> {
+  let summary = "Return from a kernel";
+  let arguments = (ins Variadic<AnyType>:$operands);
+  let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
+}
+
+def ParallelOp : CoIR_Op<"parallel", [SingleBlock, NoTerminator]> {
+  let summary = "Parallel execution region at a given hierarchy level";
+  let description = [{
+    Models parallel execution at block/warpgroup/warp/thread level.
+    Block arguments are the parallel iteration variables.
+    Bounds specify the number of parallel instances per dimension.
+
+    Example:
+      coir.parallel (%m, %n) in [2, 16] level = #coir.level<block> {
+        ...
+      }
+  }];
+
+  let arguments = (ins
+    CoIR_ParallelLevelAttr:$level,
+    DenseI64ArrayAttr:$bounds
+  );
+  let regions = (region SizedRegion<1>:$body);
+
+  let hasCustomAssemblyFormat = 1;
+}
+
+def ForeachOp : CoIR_Op<"foreach", [SingleBlock]> {
+  let summary = "Tiled sequential loop";
+  let description = [{
+    Sequential iteration over a tile dimension.
+    The body region has one block argument (the induction variable)
+    plus optional iter_args for loop-carried values.
+
+    Example:
+      %res = coir.foreach %k in 4 iter_args(%acc = %init) {
+        ...
+        coir.yield %next : !coir.mma_frag<16x16xf16>
+      } : !coir.mma_frag<16x16xf16>
+  }];
+
+  let arguments = (ins
+    Index:$upper_bound,
+    Variadic<AnyType>:$iter_args
+  );
+  let results = (outs Variadic<AnyType>:$results);
+  let regions = (region SizedRegion<1>:$body);
+
+  let hasCustomAssemblyFormat = 1;
+}
+
+def YieldOp : CoIR_Op<"yield", [Terminator]> {
+  let summary = "Yield values from a foreach or parallel region";
+  let arguments = (ins Variadic<AnyType>:$operands);
+  let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
+}
+
+//===----------------------------------------------------------------------===//
+// Tier 1: Tensor ops
+//===----------------------------------------------------------------------===//
+
+def TensorAllocOp : CoIR_Op<"tensor.alloc", [NoMemoryEffect]> {
+  let summary = "Allocate a tensor";
+  let description = [{
+    Allocates a tensor with the specified type.
+    Memory space is determined by the tensor type.
+  }];
+  let results = (outs CoIR_TensorTypeC:$result);
+  let assemblyFormat = "attr-dict `:` type($result)";
+}
+
+def TensorTileOp : CoIR_Op<"tensor.tile", [NoMemoryEffect]> {
+  let summary = "Extract a tile from a tensor at given coordinates";
+  let description = [{
+    Extracts a sub-tensor (tile) from a larger tensor using
+    the provided index coordinates. The result type determines
+    the tile shape.
+  }];
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    Variadic<Index>:$indices
+  );
+  let results = (outs CoIR_TensorTypeC:$result);
+  let assemblyFormat = "$source `[` $indices `]` attr-dict `:` type($source) `->` type($result)";
+}
+
+def TensorStoreTileOp : CoIR_Op<"tensor.store_tile", []> {
+  let summary = "Store a tile back into a tensor";
+  let arguments = (ins
+    CoIR_TensorTypeC:$tile,
+    CoIR_TensorTypeC:$dest,
+    Variadic<Index>:$indices
+  );
+  let assemblyFormat = "$tile `,` $dest `[` $indices `]` attr-dict `:` type($tile) `,` type($dest)";
+}
+
+//===----------------------------------------------------------------------===//
+// Tier 1: Scalar compute (for simple matmul.co-style kernels)
+//===----------------------------------------------------------------------===//
+
+def TensorLoadElemOp : CoIR_Op<"tensor.load_elem", [NoMemoryEffect]> {
+  let summary = "Load a scalar element from a tensor at indices";
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    Variadic<Index>:$indices
+  );
+  let results = (outs AnyType:$result);
+  let assemblyFormat = "$source `[` $indices `]` attr-dict `:` type($source) `->` type($result)";
+}
+
+def TensorStoreElemOp : CoIR_Op<"tensor.store_elem", []> {
+  let summary = "Store a scalar element to a tensor at indices";
+  let arguments = (ins
+    AnyType:$value,
+    CoIR_TensorTypeC:$dest,
+    Variadic<Index>:$indices
+  );
+  let assemblyFormat = "$value `,` $dest `[` $indices `]` attr-dict `:` type($value) `,` type($dest)";
+}
+
+def TensorReduceElemOp : CoIR_Op<"tensor.reduce_elem", []> {
+  let summary = "Accumulate (reduce) a value into a tensor element";
+  let description = [{
+    Performs dest[indices] += value. Used for matmul-style accumulation.
+  }];
+  let arguments = (ins
+    AnyType:$value,
+    CoIR_TensorTypeC:$dest,
+    Variadic<Index>:$indices
+  );
+  let assemblyFormat = "$value `,` $dest `[` $indices `]` attr-dict `:` type($value) `,` type($dest)";
+}
+
+//===----------------------------------------------------------------------===//
+// Tier 1/2: MMA ops (defined here, fully used in Phase 2)
+//===----------------------------------------------------------------------===//
+
+def MMAFillOp : CoIR_Op<"mma.fill", [NoMemoryEffect]> {
+  let summary = "Initialize MMA accumulator fragment with a value";
+  let arguments = (ins AnyType:$value);
+  let results = (outs CoIR_MMAFragTypeC:$result);
+  let assemblyFormat = "$value attr-dict `:` type($value) `->` type($result)";
+}
+
+def MMALoadOp : CoIR_Op<"mma.load", [NoMemoryEffect]> {
+  let summary = "Load MMA operand from a tensor tile";
+  let arguments = (ins CoIR_TensorTypeC:$source);
+  let results = (outs CoIR_MMAFragTypeC:$result);
+  let assemblyFormat = "$source attr-dict `:` type($source) `->` type($result)";
+}
+
+def MMAExecOp : CoIR_Op<"mma.exec", [NoMemoryEffect]> {
+  let summary = "Execute matrix multiply-accumulate";
+  let arguments = (ins
+    CoIR_MMAFragTypeC:$accumulator,
+    CoIR_MMAFragTypeC:$lhs,
+    CoIR_MMAFragTypeC:$rhs,
+    CoIR_MMALayoutAttr:$layout
+  );
+  let results = (outs CoIR_MMAFragTypeC:$result);
+  let hasCustomAssemblyFormat = 1;
+}
+
+def MMAStoreOp : CoIR_Op<"mma.store", []> {
+  let summary = "Store MMA result to a tensor tile";
+  let arguments = (ins
+    CoIR_MMAFragTypeC:$fragment,
+    CoIR_TensorTypeC:$dest
+  );
+  let assemblyFormat = "$fragment `,` $dest attr-dict `:` type($fragment) `,` type($dest)";
+}
+
+//===----------------------------------------------------------------------===//
+// Tier 2: Copy and synchronization ops (defined here, used in Phase 3)
+//===----------------------------------------------------------------------===//
+
+def DataCopyOp : CoIR_Op<"data.copy", []> {
+  let summary = "Generic data copy (disambiguated to dma/tma/thread in lowering)";
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    CoIR_TensorTypeC:$dest,
+    OptionalAttr<UnitAttr>:$async
+  );
+  let results = (outs Optional<CoIR_AsyncTokenTypeC>:$token);
+  let hasCustomAssemblyFormat = 1;
+}
+
+def BarrierOp : CoIR_Op<"barrier", []> {
+  let summary = "Synchronization barrier at the given scope";
+  let arguments = (ins CoIR_ParallelLevelAttr:$scope);
+  let assemblyFormat = "$scope attr-dict";
+}
+
+def WaitOp : CoIR_Op<"wait", []> {
+  let summary = "Wait for an async operation to complete";
+  let arguments = (ins CoIR_AsyncTokenTypeC:$token);
+  let assemblyFormat = "$token attr-dict `:` type($token)";
+}
+
+//===----------------------------------------------------------------------===//
+// Tier 3: Specialized copy ops (lowered from data.copy by classify-copies)
+//===----------------------------------------------------------------------===//
+
+def DmaCopyOp : CoIR_Op<"dma.copy", []> {
+  let summary = "Asynchronous DMA copy between memory hierarchies";
+  let description = [{
+    Copy data asynchronously using the DMA engine (e.g. global -> shared).
+    Always returns an async token for subsequent synchronization.
+  }];
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    CoIR_TensorTypeC:$dest
+  );
+  let results = (outs CoIR_AsyncTokenTypeC:$token);
+  let hasCustomAssemblyFormat = 1;
+}
+
+def TmaCopyOp : CoIR_Op<"tma.copy", []> {
+  let summary = "Tensor Memory Accelerator (TMA) bulk copy";
+  let description = [{
+    TMA-based bulk copy for SM90+. Uses hardware tensor descriptors
+    for efficient global <-> shared memory transfers.
+  }];
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    CoIR_TensorTypeC:$dest
+  );
+  let results = (outs CoIR_AsyncTokenTypeC:$token);
+  let hasCustomAssemblyFormat = 1;
+}
+
+def ThreadCopyOp : CoIR_Op<"thread.copy", []> {
+  let summary = "Synchronous per-thread element copy";
+  let description = [{
+    Cooperative thread-level copy where each thread copies its share
+    of elements. Used for shared -> register or register -> shared
+    transfers, or when DMA/TMA is not available.
+  }];
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    CoIR_TensorTypeC:$dest
+  );
+  let assemblyFormat = "$source `to` $dest attr-dict `:` type($source) `->` type($dest)";
+}
+
+#endif // COIR_OPS_TD
