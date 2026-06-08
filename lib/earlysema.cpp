@@ -1913,23 +1913,30 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     }
 
   if (!isa<AST::Memory>(n.to)) {
-    size_t src_dims = sty->Dims();
-    if (isa<AST::ChunkAt>(n.from)) {
-      auto from_ca = cast<AST::ChunkAt>(n.from);
-      for (auto& sop : from_ca->AllOperations())
-        if (isa<AST::SOP::View>(sop))
-          src_dims = cast<AST::SOP::View>(sop)->subspan->Count();
-    }
+    auto getEffectiveRank = [](size_t base_dims,
+                               const ptr<AST::Node>& node) -> size_t {
+      if (!isa<AST::ChunkAt>(node)) return base_dims;
+      auto ca = cast<AST::ChunkAt>(node);
+      for (auto& sop : ca->AllOperations()) {
+        if (auto sub = dyn_cast<AST::SOP::SubSpan>(sop))
+          return sub->subspan->Count();
+        if (auto view = dyn_cast<AST::SOP::View>(sop))
+          return view->subspan->Count();
+      }
+      return base_dims;
+    };
+    size_t src_dims = getEffectiveRank(sty->Dims(), n.from);
+    size_t dst_dims = getEffectiveRank(tty->Dims(), n.to);
     // For async TMA (event-based), the source rank may differ from the
     // declared type due to sqz()/view() on the definition chain. The TMA
     // codegen validates rank independently via the descriptor setup.
     bool is_tma_async = n.IsAsync() && n.HasEvent();
-    if (!CompatibleRank(src_dims, tty->Dims()) && !allow_auto_threading &&
+    if (!CompatibleRank(src_dims, dst_dims) && !allow_auto_threading &&
         !is_tma_async) {
       Error1(n.LOC(),
              "DMA statement has a rank mismatch between 'from' and 'to': " +
-                 std::to_string(src_dims) +
-                 " != " + std::to_string(tty->Dims()) + ".");
+                 std::to_string(src_dims) + " != " + std::to_string(dst_dims) +
+                 ".");
     }
     if (sty->ElementType() != tty->ElementType()) {
       Error1(n.LOC(),

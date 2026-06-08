@@ -926,10 +926,19 @@ __device__ static inline void tiled_copy(const SrcTensor& src, DstTensor& dst,
                       make_layout(make_shape(Int<ThrRows>{}, Int<ThrCols>{}),
                                   make_stride(Int<ThrCols>{}, Int<1>{})),
                       make_layout(make_shape(Int<ValRows>{}, Int<ValCols>{})));
-  auto thr_copy = tc.get_thread_slice(threadIdx.x);
-  auto src_thr = thr_copy.partition_S(src);
+  constexpr int NumThreads = ThrRows * ThrCols;
+  auto thr_copy = tc.get_thread_slice(threadIdx.x % NumThreads);
+  auto src_thr = [&]() {
+    if constexpr (Swizzle && is_smem<remove_cvref_t<SrcTensor>>::value) {
+      auto src_pi =
+          as_position_independent_swizzle_tensor(const_cast<SrcTensor&>(src));
+      return thr_copy.partition_S(src_pi);
+    } else {
+      return thr_copy.partition_S(src);
+    }
+  }();
   auto dst_thr = [&]() {
-    if constexpr (Swizzle) {
+    if constexpr (Swizzle && is_smem<remove_cvref_t<DstTensor>>::value) {
       auto dst_pi = as_position_independent_swizzle_tensor(dst);
       return thr_copy.partition_D(dst_pi);
     } else {
@@ -2187,7 +2196,8 @@ __device__ constexpr int get_trans_b() {
 }
 
 // Helper function to encode matrix descriptor
-__device__ static __forceinline__ uint64_t matrix_descriptor_encode(uint64_t x) {
+__device__ static __forceinline__ uint64_t
+matrix_descriptor_encode(uint64_t x) {
   return (((x) & 0x3FFFF) >> 0x4);
 }
 
@@ -2196,8 +2206,8 @@ __device__ static __forceinline__ uint64_t matrix_descriptor_encode(uint64_t x) 
 // and swizzle.  When LBOBytes > 0 the caller overrides the leading-byte-offset
 // (needed for MN-major layouts where N spans multiple swizzle periods, e.g.
 // Layout_K_SW128_Atom tiled to N=128 for bf16).
-template <WGMMA_MajorOrder MajorOrder, WGMMA_Swizzle Swizzle,
-          int LBOBytes = 0, typename T>
+template <WGMMA_MajorOrder MajorOrder, WGMMA_Swizzle Swizzle, int LBOBytes = 0,
+          typename T>
 __device__ static __forceinline__ uint64_t wgmma_make_smem_desc(T* ptr) {
   uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
   uint64_t desc = 0x0000000000000000;
@@ -3128,7 +3138,8 @@ __device__ static inline void load_fragment_d(Tensor const& D,
 
 // store d fragment with pointer
 template <class MMA, int N = 0, class Tensor, class AccumT>
-__device__ static __forceinline__ void store_fragment_d(Tensor& D, AccumT* const d) {
+__device__ static __forceinline__ void store_fragment_d(Tensor& D,
+                                                        AccumT* const d) {
   static_assert(MMA_Policy<MMA>::supported, "No policy for this MMA");
   static_assert(std::is_same<AccumT, float>::value ||
                     std::is_same<AccumT, double>::value ||
