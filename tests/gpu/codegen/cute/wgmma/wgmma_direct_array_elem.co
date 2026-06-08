@@ -50,9 +50,7 @@ __co__ auto direct_array_elem_row_col(f16 [M, K] lhs, f16 [K, N] rhs) {
 }
 
 // ROW-ROW: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 4; ++__choreo_wgmma_k_iter) {
-// ROW-ROW: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)
-// ROW-ROW: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
-// ROW-ROW: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)
+// ROW-ROW: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)((f16*)(rhs_s + (__iv_stage)*(8192))
 // ROW-ROW: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
 // ROW-ROW: warpgroup_commit_batch();
 // ROW-ROW-NEXT: warpgroup_wait<0>();
@@ -60,11 +58,10 @@ __co__ auto direct_array_elem_row_col(f16 [M, K] lhs, f16 [K, N] rhs) {
 // ROW-ROW-NOT: warpgroup_commit_batch();
 // ROW-ROW: store_fragment_d<CUTE_WGMMA_M64K16, 128>
 
+// ROW-COL: __choreo_device_direct_array_elem_row_col(
 // ROW-COL: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 4; ++__choreo_wgmma_k_iter) {
-// ROW-COL: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)
-// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
-// ROW-COL: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)
-// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::B128>
+// ROW-COL: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)((f16*)(rhs_s + (__iv_stage)*(8192))
+// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::B128
 // ROW-COL: warpgroup_commit_batch();
 // ROW-COL-NEXT: warpgroup_wait<0>();
 // ROW-COL-NEXT: warpgroup_fence_operand(mc);

@@ -1913,17 +1913,29 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     }
 
   if (!isa<AST::Memory>(n.to)) {
-    auto getEffectiveRank = [](size_t base_dims,
+    auto getReshapeRank = [](const ptr<AST::SOP::Reshape>& reshape) -> size_t {
+      auto ns = reshape->GetNewSpan();
+      size_t cnt = ns->Count();
+      if (cnt == 1)
+        if (auto e = dyn_cast<AST::Expr>(ns->ValueAt(0)))
+          if (auto mds = dyn_cast<AST::MultiDimSpans>(e->GetReference()))
+            if (mds->HasValidRank()) cnt = mds->Rank();
+      return cnt;
+    };
+    auto getEffectiveRank = [&getReshapeRank](size_t base_dims,
                                const ptr<AST::Node>& node) -> size_t {
       if (!isa<AST::ChunkAt>(node)) return base_dims;
       auto ca = cast<AST::ChunkAt>(node);
+      size_t rank = base_dims;
       for (auto& sop : ca->AllOperations()) {
         if (auto sub = dyn_cast<AST::SOP::SubSpan>(sop))
-          return sub->subspan->Count();
-        if (auto view = dyn_cast<AST::SOP::View>(sop))
-          return view->subspan->Count();
+          rank = sub->subspan->Count();
+        else if (auto view = dyn_cast<AST::SOP::View>(sop))
+          rank = view->subspan->Count();
+        else if (auto reshape = dyn_cast<AST::SOP::Reshape>(sop))
+          rank = getReshapeRank(reshape);
       }
-      return base_dims;
+      return rank;
     };
     size_t src_dims = getEffectiveRank(sty->Dims(), n.from);
     size_t dst_dims = getEffectiveRank(tty->Dims(), n.to);
