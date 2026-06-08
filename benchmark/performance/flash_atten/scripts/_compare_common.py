@@ -12,6 +12,8 @@ from typing import Sequence
 
 TFLOPS_RE = re.compile(r"^TFLOPS:\s*([0-9.eE+-]+)")
 FA3_LABEL_RE = re.compile(r"^\[fa3 (.+)\]$")
+TILELANG_LABEL_RE = re.compile(r"^\[tilelang (.+)\]$")
+TRITON_LABEL_RE = re.compile(r"^\[triton (.+)\]$")
 
 _NOISE_LINE = re.compile(
     r"^(?:\s*\d{4}-\d{2}-\d{2}.*WARNING:|\[bench\]|ptxas info|Remark:|"
@@ -92,6 +94,136 @@ def collect_fa3(baselines_dir: Path, labels: list[str]) -> list[dict]:
     rows = _parse_fa3_output(_filter_text(proc.stdout + proc.stderr), labels)
     if len(rows) != len(labels):
         raise RuntimeError(f"expected {len(labels)} FA3 rows, got {len(rows)}")
+    return rows
+
+
+def collect_tilelang(baselines_dir: Path, labels: list[str]) -> list[dict]:
+    script = baselines_dir / "bench_tilelang.py"
+    if not script.is_file():
+        raise FileNotFoundError(f"tilelang bench not found: {script}")
+
+    env = os.environ.copy()
+    env.setdefault("CHOREO_TIMING_WARMUP", "100")
+    env.setdefault("CHOREO_TIMING_REPEAT", "500")
+
+    print("[compare] Running TileLang", file=sys.stderr)
+    gpu = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if gpu is not None:
+        env["CUDA_VISIBLE_DEVICES"] = gpu
+
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(baselines_dir),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        print(proc.stdout, file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        raise RuntimeError(f"TileLang bench failed (exit {proc.returncode})")
+
+    rows = _parse_tilelang_output(
+        _filter_text(proc.stdout + proc.stderr), labels
+    )
+    if len(rows) != len(labels):
+        raise RuntimeError(
+            f"expected {len(labels)} TileLang rows, got {len(rows)}"
+        )
+    return rows
+
+
+def _parse_tilelang_output(text: str, labels: list[str]) -> list[dict]:
+    rows: list[dict] = []
+    pending: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        m = TILELANG_LABEL_RE.match(stripped)
+        if m:
+            inner = m.group(1)
+            for lab in labels:
+                if inner == lab:
+                    pending = lab
+                    break
+            continue
+        if pending is not None:
+            match = TFLOPS_RE.match(stripped)
+            if match:
+                rows.append(
+                    {
+                        "backend": "tilelang",
+                        "kernel": "tilelang_flashattn",
+                        "label": pending,
+                        "tflops": float(match.group(1)),
+                    }
+                )
+                pending = None
+    return rows
+
+
+def collect_triton(baselines_dir: Path, labels: list[str]) -> list[dict]:
+    script = baselines_dir / "bench_triton.py"
+    if not script.is_file():
+        raise FileNotFoundError(f"triton bench not found: {script}")
+
+    env = os.environ.copy()
+    env.setdefault("CHOREO_TIMING_WARMUP", "100")
+    env.setdefault("CHOREO_TIMING_REPEAT", "500")
+
+    print("[compare] Running Triton", file=sys.stderr)
+    gpu = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if gpu is not None:
+        env["CUDA_VISIBLE_DEVICES"] = gpu
+
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(baselines_dir),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        print(proc.stdout, file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        raise RuntimeError(f"Triton bench failed (exit {proc.returncode})")
+
+    rows = _parse_triton_output(
+        _filter_text(proc.stdout + proc.stderr), labels
+    )
+    if len(rows) != len(labels):
+        raise RuntimeError(
+            f"expected {len(labels)} Triton rows, got {len(rows)}"
+        )
+    return rows
+
+
+def _parse_triton_output(text: str, labels: list[str]) -> list[dict]:
+    rows: list[dict] = []
+    pending: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        m = TRITON_LABEL_RE.match(stripped)
+        if m:
+            inner = m.group(1)
+            for lab in labels:
+                if inner == lab:
+                    pending = lab
+                    break
+            continue
+        if pending is not None:
+            match = TFLOPS_RE.match(stripped)
+            if match:
+                rows.append(
+                    {
+                        "backend": "triton",
+                        "kernel": "triton_fused_attn",
+                        "label": pending,
+                        "tflops": float(match.group(1)),
+                    }
+                )
+                pending = None
     return rows
 
 
@@ -233,6 +365,8 @@ def run_compare(
     if has_choreo:
         parser.add_argument("--skip-choreo", action="store_true")
     parser.add_argument("--skip-fa3", action="store_true")
+    parser.add_argument("--skip-tilelang", action="store_true")
+    parser.add_argument("--skip-triton", action="store_true")
     args = parser.parse_args()
 
     warmup = int(os.environ.get("CHOREO_TIMING_WARMUP", "100"))
@@ -248,6 +382,28 @@ def run_compare(
         )
     if not args.skip_fa3:
         by_backend["fa3"] = collect_fa3(baselines_dir, labels)
+    if not args.skip_tilelang and "tilelang" in backends:
+        tilelang_script = baselines_dir / "bench_tilelang.py"
+        if tilelang_script.is_file():
+            try:
+                by_backend["tilelang"] = collect_tilelang(
+                    baselines_dir, labels
+                )
+            except Exception as exc:
+                print(
+                    f"[compare] TileLang skipped: {exc}", file=sys.stderr
+                )
+    if not args.skip_triton and "triton" in backends:
+        triton_script = baselines_dir / "bench_triton.py"
+        if triton_script.is_file():
+            try:
+                by_backend["triton"] = collect_triton(
+                    baselines_dir, labels
+                )
+            except Exception as exc:
+                print(
+                    f"[compare] Triton skipped: {exc}", file=sys.stderr
+                )
 
     if not by_backend:
         print("Nothing to run.", file=sys.stderr)

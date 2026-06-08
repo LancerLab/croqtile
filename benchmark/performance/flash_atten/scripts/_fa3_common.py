@@ -159,6 +159,7 @@ def run_fa3_baseline(
                 q_descale=q_descale,
                 k_descale=k_descale,
                 v_descale=v_descale,
+                num_splits=0,
             )
 
         for _ in range(3):

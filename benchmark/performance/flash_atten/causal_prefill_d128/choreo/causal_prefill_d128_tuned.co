@@ -34,7 +34,6 @@ __co__ void flash_atten(
     O_head = O.subspan(1, Q_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
 
     shared bf16[BLOCK_M, DIM] q_shared;
-
     shared bf16[BLOCK_N, DIM] k_buf[STAGES];
     shared bf16[BLOCK_N, DIM] v_buf[STAGES];
     shared bf16[BLOCK_M, DIM] acc_o_shared;

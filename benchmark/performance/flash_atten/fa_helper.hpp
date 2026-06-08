@@ -451,8 +451,10 @@ inline int RunBenchmarks(const char* title, const BenchConfig* configs,
         detail::upload_tensors(Q_h, K_h, V_h, O_h, dev);
 #endif
 
-    auto launch_kernel = [&]() {
-      kernel_fn(cfg, views);
+    auto launch_kernel = [&]() { kernel_fn(cfg, views); };
+
+    auto launch_and_sync = [&]() {
+      launch_kernel();
       choreo::abend_true(cudaDeviceSynchronize());
     };
 
@@ -477,11 +479,11 @@ inline int RunBenchmarks(const char* title, const BenchConfig* configs,
       std::cout << "TFLOPS: " << tflops << "\n";
       std::cout << "HW efficiency: " << eff << "%\n";
     } else {
-      launch_kernel();
+      launch_and_sync();
     }
 
     if (do_verify) {
-      if (!do_timing) launch_kernel();
+      if (!do_timing) launch_and_sync();
 #ifdef MHA_LAYOUT_BHSD
       fetch_output();
 #else
