@@ -1,9 +1,12 @@
 #pragma once
 
-// Host-side benchmark helper for Choreo flash attention MHA forward kernels.
-// Included after choreo.h in generated CUDA. Provides data prep, verification,
-// timing, and TFLOPS reporting for BSHD layout [batch, seqlen, heads, dim]
-// on host and device (same as FA3).
+// Unified host-side benchmark helper for Choreo flash attention MHA kernels.
+// Provides data prep, verification, timing, and TFLOPS reporting.
+//
+// Compile-time configuration:
+//   MHA_DIM           head dimension (default 64)
+//   MHA_DTYPE         choreo dtype, e.g. choreo::f16 or choreo::bf16 (default f16)
+//   MHA_LAYOUT_BHSD   define to enable BHSD device layout with host transpose
 
 #include <algorithm>
 #include <cmath>
@@ -15,6 +18,10 @@
 
 #ifndef MHA_DIM
 #define MHA_DIM 64
+#endif
+
+#ifndef MHA_DTYPE
+#define MHA_DTYPE choreo::f16
 #endif
 
 #ifndef MHA_ENABLE_VERIFY
@@ -31,6 +38,8 @@
 
 namespace mha_helper {
 
+using scalar_t = MHA_DTYPE;
+
 struct BenchConfig {
   int batch;
   int heads;
@@ -41,10 +50,10 @@ struct BenchConfig {
 };
 
 struct TensorViews {
-  choreo::spanned_view<choreo::f16, 4> Q;
-  choreo::spanned_view<choreo::f16, 4> K;
-  choreo::spanned_view<choreo::f16, 4> V;
-  choreo::spanned_view<choreo::f16, 4> O;
+  choreo::spanned_view<scalar_t, 4> Q;
+  choreo::spanned_view<scalar_t, 4> K;
+  choreo::spanned_view<scalar_t, 4> V;
+  choreo::spanned_view<scalar_t, 4> O;
 };
 
 namespace detail {
@@ -96,24 +105,24 @@ inline size_t verify_num_samples(size_t total_elems) {
   return total_elems < num_samples ? total_elems : num_samples;
 }
 
-inline size_t bshd_index(size_t b, size_t seq, size_t h, size_t d, size_t seq_len,
-                         size_t H, size_t head_dim) {
+inline size_t bshd_index(size_t b, size_t seq, size_t h, size_t d,
+                         size_t seq_len, size_t H, size_t head_dim) {
   return (((b * seq_len + seq) * H + h) * head_dim + d);
 }
 
-inline float read_bshd(const choreo::f16* data, size_t b, size_t seq, size_t h,
+inline float read_bshd(const scalar_t* data, size_t b, size_t seq, size_t h,
                        size_t d, size_t seq_len, size_t H, size_t head_dim) {
   return choreo::to_f32(
       data[bshd_index(b, seq, h, d, seq_len, H, head_dim)]);
 }
 
-inline void fill_random_bshd(choreo::spanned_data<choreo::f16, 4>& tensor,
+inline void fill_random_bshd(choreo::spanned_data<scalar_t, 4>& tensor,
                              float lo, float hi, std::mt19937& gen) {
   std::uniform_real_distribution<float> dist(lo, hi);
   const size_t n = tensor.shape()[0] * tensor.shape()[1] * tensor.shape()[2] *
                    tensor.shape()[3];
   for (size_t i = 0; i < n; ++i) {
-    tensor.data()[i] = choreo::f16(dist(gen));
+    tensor.data()[i] = scalar_t(dist(gen));
   }
 }
 
@@ -128,8 +137,8 @@ inline double attention_flops(const BenchConfig& cfg) {
   return flops;
 }
 
-inline float reference_output(const choreo::f16* Q, const choreo::f16* K,
-                              const choreo::f16* V, int b, int h, int qi,
+inline float reference_output(const scalar_t* Q, const scalar_t* K,
+                              const scalar_t* V, int b, int h, int qi,
                               int di, bool is_causal, int past_len, size_t H,
                               size_t q_seq, size_t kv_seq) {
   const float scale =
@@ -172,9 +181,9 @@ inline float reference_output(const choreo::f16* Q, const choreo::f16* K,
   return acc / lsum;
 }
 
-inline bool verify_output(const BenchConfig& cfg, const choreo::f16* Q_h,
-                          const choreo::f16* K_h, const choreo::f16* V_h,
-                          const choreo::f16* O_h, size_t B, size_t H,
+inline bool verify_output(const BenchConfig& cfg, const scalar_t* Q_h,
+                          const scalar_t* K_h, const scalar_t* V_h,
+                          const scalar_t* O_h, size_t B, size_t H,
                           size_t q_seq, size_t head_dim) {
   const int past_len = cfg.kv_seq - cfg.q_seq;
   const size_t kv_seq = static_cast<size_t>(cfg.kv_seq);
@@ -224,11 +233,72 @@ inline bool verify_output(const BenchConfig& cfg, const choreo::f16* Q_h,
   return passed;
 }
 
+#ifdef MHA_LAYOUT_BHSD
+inline void transpose_bshd_to_bhsd(const scalar_t* src, scalar_t* dst,
+                                   size_t B, size_t seq_len, size_t H,
+                                   size_t head_dim) {
+  for (size_t b = 0; b < B; ++b) {
+    for (size_t h = 0; h < H; ++h) {
+      for (size_t s = 0; s < seq_len; ++s) {
+        for (size_t d = 0; d < head_dim; ++d) {
+          dst[(((b * H + h) * seq_len + s) * head_dim + d)] =
+              src[(((b * seq_len + s) * H + h) * head_dim + d)];
+        }
+      }
+    }
+  }
+}
+
+inline void transpose_bhsd_to_bshd(const scalar_t* src, scalar_t* dst,
+                                   size_t B, size_t seq_len, size_t H,
+                                   size_t head_dim) {
+  for (size_t b = 0; b < B; ++b) {
+    for (size_t h = 0; h < H; ++h) {
+      for (size_t s = 0; s < seq_len; ++s) {
+        for (size_t d = 0; d < head_dim; ++d) {
+          dst[(((b * seq_len + s) * H + h) * head_dim + d)] =
+              src[(((b * H + h) * seq_len + s) * head_dim + d)];
+        }
+      }
+    }
+  }
+}
+
+struct HostBhsdBuffers {
+  std::vector<scalar_t> q;
+  std::vector<scalar_t> k;
+  std::vector<scalar_t> v;
+  std::vector<scalar_t> o;
+};
+
+inline HostBhsdBuffers make_bhsd_host(
+    const choreo::spanned_data<scalar_t, 4>& Q_h,
+    const choreo::spanned_data<scalar_t, 4>& K_h,
+    const choreo::spanned_data<scalar_t, 4>& V_h) {
+  const size_t B = Q_h.shape()[0];
+  const size_t Q_SEQ = Q_h.shape()[1];
+  const size_t H = Q_h.shape()[2];
+  const size_t KV_SEQ = K_h.shape()[1];
+  const size_t head_dim = Q_h.shape()[3];
+
+  HostBhsdBuffers buf;
+  buf.q.resize(B * H * Q_SEQ * head_dim);
+  buf.k.resize(B * H * KV_SEQ * head_dim);
+  buf.v.resize(B * H * KV_SEQ * head_dim);
+  buf.o.resize(B * H * Q_SEQ * head_dim);
+
+  transpose_bshd_to_bhsd(Q_h.data(), buf.q.data(), B, Q_SEQ, H, head_dim);
+  transpose_bshd_to_bhsd(K_h.data(), buf.k.data(), B, KV_SEQ, H, head_dim);
+  transpose_bshd_to_bhsd(V_h.data(), buf.v.data(), B, KV_SEQ, H, head_dim);
+  return buf;
+}
+#endif // MHA_LAYOUT_BHSD
+
 struct DeviceBuffers {
-  choreo::f16* q_d = nullptr;
-  choreo::f16* k_d = nullptr;
-  choreo::f16* v_d = nullptr;
-  choreo::f16* o_d = nullptr;
+  scalar_t* q_d = nullptr;
+  scalar_t* k_d = nullptr;
+  scalar_t* v_d = nullptr;
+  scalar_t* o_d = nullptr;
 
   ~DeviceBuffers() {
     if (q_d) cudaFree(q_d);
@@ -238,19 +308,20 @@ struct DeviceBuffers {
   }
 };
 
+#ifndef MHA_LAYOUT_BHSD
 inline TensorViews upload_tensors(
-    const choreo::spanned_data<choreo::f16, 4>& Q_h,
-    const choreo::spanned_data<choreo::f16, 4>& K_h,
-    const choreo::spanned_data<choreo::f16, 4>& V_h,
-    choreo::spanned_data<choreo::f16, 4>& O_h, DeviceBuffers& dev) {
+    const choreo::spanned_data<scalar_t, 4>& Q_h,
+    const choreo::spanned_data<scalar_t, 4>& K_h,
+    const choreo::spanned_data<scalar_t, 4>& V_h,
+    choreo::spanned_data<scalar_t, 4>& O_h, DeviceBuffers& dev) {
   const size_t B = Q_h.shape()[0];
   const size_t Q_SEQ = Q_h.shape()[1];
   const size_t H = Q_h.shape()[2];
   const size_t KV_SEQ = K_h.shape()[1];
   const size_t head_dim = Q_h.shape()[3];
 
-  const size_t q_bytes = B * Q_SEQ * H * head_dim * sizeof(choreo::f16);
-  const size_t kv_bytes = B * KV_SEQ * H * head_dim * sizeof(choreo::f16);
+  const size_t q_bytes = B * Q_SEQ * H * head_dim * sizeof(scalar_t);
+  const size_t kv_bytes = B * KV_SEQ * H * head_dim * sizeof(scalar_t);
 
   choreo::abend_true(cudaMalloc(&dev.q_d, q_bytes));
   choreo::abend_true(cudaMalloc(&dev.k_d, kv_bytes));
@@ -268,36 +339,69 @@ inline TensorViews upload_tensors(
   choreo::abend_true(cudaDeviceSynchronize());
 
   return TensorViews{
-      choreo::make_spanview<choreo::f16, 4>(dev.q_d,
-                                            {B, Q_SEQ, H, head_dim}),
-      choreo::make_spanview<choreo::f16, 4>(dev.k_d,
-                                            {B, KV_SEQ, H, head_dim}),
-      choreo::make_spanview<choreo::f16, 4>(dev.v_d,
-                                            {B, KV_SEQ, H, head_dim}),
-      choreo::make_spanview<choreo::f16, 4>(dev.o_d,
-                                            {B, Q_SEQ, H, head_dim}),
+      choreo::make_spanview<scalar_t, 4>(dev.q_d, {B, Q_SEQ, H, head_dim}),
+      choreo::make_spanview<scalar_t, 4>(dev.k_d, {B, KV_SEQ, H, head_dim}),
+      choreo::make_spanview<scalar_t, 4>(dev.v_d, {B, KV_SEQ, H, head_dim}),
+      choreo::make_spanview<scalar_t, 4>(dev.o_d, {B, Q_SEQ, H, head_dim}),
   };
 }
 
-inline void download_output(choreo::spanned_data<choreo::f16, 4>& O_h,
-                            choreo::f16* o_d) {
+inline void download_output(choreo::spanned_data<scalar_t, 4>& O_h,
+                            scalar_t* o_d) {
   const size_t bytes = O_h.bytes();
   choreo::abend_true(
       cudaMemcpy(O_h.data(), o_d, bytes, cudaMemcpyDeviceToHost));
   choreo::abend_true(cudaDeviceSynchronize());
 }
+#else // MHA_LAYOUT_BHSD
+inline TensorViews upload_bhsd(
+    const HostBhsdBuffers& host, size_t B, size_t Q_SEQ, size_t KV_SEQ,
+    size_t H, size_t head_dim, DeviceBuffers& dev) {
+  const size_t q_bytes = B * H * Q_SEQ * head_dim * sizeof(scalar_t);
+  const size_t kv_bytes = B * H * KV_SEQ * head_dim * sizeof(scalar_t);
+
+  choreo::abend_true(cudaMalloc(&dev.q_d, q_bytes));
+  choreo::abend_true(cudaMalloc(&dev.k_d, kv_bytes));
+  choreo::abend_true(cudaMalloc(&dev.v_d, kv_bytes));
+  choreo::abend_true(cudaMalloc(&dev.o_d, q_bytes));
+
+  choreo::abend_true(cudaMemcpy(dev.q_d, host.q.data(), q_bytes,
+                                cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(dev.k_d, host.k.data(), kv_bytes,
+                                cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(dev.v_d, host.v.data(), kv_bytes,
+                                cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(dev.o_d, host.o.data(), q_bytes,
+                                cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaDeviceSynchronize());
+
+  return TensorViews{
+      choreo::make_spanview<scalar_t, 4>(dev.q_d, {B, H, Q_SEQ, head_dim}),
+      choreo::make_spanview<scalar_t, 4>(dev.k_d, {B, H, KV_SEQ, head_dim}),
+      choreo::make_spanview<scalar_t, 4>(dev.v_d, {B, H, KV_SEQ, head_dim}),
+      choreo::make_spanview<scalar_t, 4>(dev.o_d, {B, H, Q_SEQ, head_dim}),
+  };
+}
+#endif // MHA_LAYOUT_BHSD
 
 } // namespace detail
 
 template <typename KernelFn>
-inline int RunBenchmarks(const char* title, BenchConfig* configs,
+inline int RunBenchmarks(const char* title, const BenchConfig* configs,
                          size_t num_configs, KernelFn kernel_fn) {
   const bool do_verify = detail::enable_verify();
   const bool do_timing = detail::enable_timing();
   const choreo::TimerOption timer_opt = detail::read_timer_options();
 
+#ifdef MHA_LAYOUT_BHSD
+  std::cout << title << " (DIM=" << MHA_DIM << ", BSHD host I/O)\n";
+  std::cout << "Choreo kernel: BHSD device tiles; host BSHD<->BHSD once per "
+               "config\n";
+  std::cout << "Timing: device kernel only\n";
+#else
   std::cout << title << " (DIM=" << MHA_DIM << ", BSHD host and device)\n";
   std::cout << "Layout: [batch, seqlen, heads, dim] (matches FA3 baseline)\n";
+#endif
   if (do_timing) {
     std::cout << "Warmup=" << timer_opt.warmup
               << " Repeat=" << timer_opt.repeat << "\n";
@@ -311,16 +415,16 @@ inline int RunBenchmarks(const char* title, BenchConfig* configs,
     const BenchConfig& cfg = configs[ci];
     std::cout << cfg.label << "\n";
 
-    auto Q_h = choreo::make_spandata<choreo::f16>(
+    auto Q_h = choreo::make_spandata<scalar_t>(
         static_cast<size_t>(cfg.batch), static_cast<size_t>(cfg.q_seq),
         static_cast<size_t>(cfg.heads), static_cast<size_t>(MHA_DIM));
-    auto K_h = choreo::make_spandata<choreo::f16>(
+    auto K_h = choreo::make_spandata<scalar_t>(
         static_cast<size_t>(cfg.batch), static_cast<size_t>(cfg.kv_seq),
         static_cast<size_t>(cfg.heads), static_cast<size_t>(MHA_DIM));
-    auto V_h = choreo::make_spandata<choreo::f16>(
+    auto V_h = choreo::make_spandata<scalar_t>(
         static_cast<size_t>(cfg.batch), static_cast<size_t>(cfg.kv_seq),
         static_cast<size_t>(cfg.heads), static_cast<size_t>(MHA_DIM));
-    auto O_h = choreo::make_spandata<choreo::f16>(
+    auto O_h = choreo::make_spandata<scalar_t>(
         static_cast<size_t>(cfg.batch), static_cast<size_t>(cfg.q_seq),
         static_cast<size_t>(cfg.heads), static_cast<size_t>(MHA_DIM));
 
@@ -330,13 +434,38 @@ inline int RunBenchmarks(const char* title, BenchConfig* configs,
     O_h.fill(0.0f);
 
     detail::DeviceBuffers dev;
+
+#ifdef MHA_LAYOUT_BHSD
+    const size_t B = Q_h.shape()[0];
+    const size_t Q_SEQ = Q_h.shape()[1];
+    const size_t H = Q_h.shape()[2];
+    const size_t KV_SEQ = K_h.shape()[1];
+    const size_t head_dim = Q_h.shape()[3];
+
+    detail::HostBhsdBuffers bhsd_h =
+        detail::make_bhsd_host(Q_h, K_h, V_h);
+    TensorViews views = detail::upload_bhsd(bhsd_h, B, Q_SEQ, KV_SEQ, H,
+                                            head_dim, dev);
+#else
     TensorViews views =
         detail::upload_tensors(Q_h, K_h, V_h, O_h, dev);
+#endif
 
     auto launch_kernel = [&]() {
       kernel_fn(cfg, views);
       choreo::abend_true(cudaDeviceSynchronize());
     };
+
+#ifdef MHA_LAYOUT_BHSD
+    auto fetch_output = [&]() {
+      const size_t q_bytes = B * H * Q_SEQ * head_dim * sizeof(scalar_t);
+      choreo::abend_true(cudaMemcpy(bhsd_h.o.data(), dev.o_d, q_bytes,
+                                    cudaMemcpyDeviceToHost));
+      choreo::abend_true(cudaDeviceSynchronize());
+      detail::transpose_bhsd_to_bshd(bhsd_h.o.data(), O_h.data(), B, Q_SEQ, H,
+                                     head_dim);
+    };
+#endif
 
     if (do_timing) {
       const double avg_ms = choreo::timing(launch_kernel, timer_opt);
@@ -353,7 +482,11 @@ inline int RunBenchmarks(const char* title, BenchConfig* configs,
 
     if (do_verify) {
       if (!do_timing) launch_kernel();
+#ifdef MHA_LAYOUT_BHSD
+      fetch_output();
+#else
       detail::download_output(O_h, dev.o_d);
+#endif
       const bool passed = detail::verify_output(
           cfg, Q_h.data(), K_h.data(), V_h.data(), O_h.data(), Q_h.shape()[0],
           Q_h.shape()[2], Q_h.shape()[1], Q_h.shape()[3]);

@@ -10,11 +10,18 @@ Kernel takes runtime `Q_SEQ` / `KV_SEQ` from host tensor shapes.
 - Host I/O: **BSHD** with transpose (not in timed loop)
 - FA3 baseline: **BSHD** native
 
+## Workload config
+
+Benchmark workload shapes are defined in `../config.py`. `bench.sh`
+auto-generates `build/bench_configs.inc` from it before compiling.
+Edit `config.py` to change workloads (q=1/kv=8192 and q=128/kv=8192).
+
 ## Run
 
 ```bash
-export CUDA_VISIBLE_DEVICES=1
-bash bench.sh --kernel v2_manual_s2_1p1c_tma.co --no-verify
+bash bench.sh --gpu 1 --kernel v2_manual_s2_1p1c_tma.co --no-verify
+bash bench.sh --gpu 1 --kernel v2_manual_s2_1p1c_tma.co --force-compile
 ```
 
-Configs embedded in `.co` main: q=1/kv=8192 and q=128/kv=8192.
+Repeated runs skip Choreo recompilation when the kernel source hasn't changed.
+Use `--force-compile` to override.

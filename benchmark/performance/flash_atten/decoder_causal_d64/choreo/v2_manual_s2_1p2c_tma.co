@@ -108,17 +108,14 @@ __co__ void flash_atten(
   }
 }
 
-#include "mha_helper.hpp"
+#define MHA_DIM DIM
+#include "../../fa_helper.hpp"
 
 int main() {
-  mha_helper::BenchConfig configs[] = {
-    {1, 32, 2048, 2048, true, "B=1 H=32 SEQ=2048 decoder"},
-    {2, 32, 4096, 4096, true, "B=2 H=32 SEQ=4096 decoder"},
-    {1, 32, 8192, 8192, true, "B=1 H=32 SEQ=8192 decoder"},
-  };
+  #include "build/bench_configs.inc"
   return mha_helper::RunBenchmarks(
-      "Choreo Flash Attention v2 Manual S2 1p2c TMA", configs,
-      sizeof(configs) / sizeof(configs[0]),
+      "Choreo Flash Attention v2 Manual S2 1p2c TMA",
+      kBenchConfigs, kBenchConfigCount,
       [&](const mha_helper::BenchConfig& cfg,
           const mha_helper::TensorViews& views) {
         (void)cfg;

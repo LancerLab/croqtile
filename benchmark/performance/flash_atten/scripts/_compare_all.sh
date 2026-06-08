@@ -4,7 +4,7 @@ set -euo pipefail
 VARIANT_DIR="${FLASH_ATTEN_VARIANT_DIR:?set FLASH_ATTEN_VARIANT_DIR}"
 FLASH_ATTEN_ROOT=$(cd "$VARIANT_DIR/.." && pwd)
 # shellcheck source=_bench_common.sh
-source "$FLASH_ATTEN_ROOT/_bench_common.sh"
+source "$FLASH_ATTEN_ROOT/scripts/_bench_common.sh"
 
 flash_atten_activate_ml_hopper
 parse_flash_atten_gpu "$@"

@@ -15,6 +15,7 @@ enable_timing=1
 enable_profile=0
 profile_iter=""
 gpu_override=""
+force_compile=0
 
 trim_field() {
   local value="$1"
@@ -119,6 +120,7 @@ Options:
   --no-verify             Disable verification
   --no-timing             Disable timing output
   --profile [ITER]        Profile with ncu (--set full)
+  --force-compile         Force recompilation even if the output is up-to-date
   --help                  Show this message
 EOF
 }
@@ -154,6 +156,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --force-compile)
+      force_compile=1
+      shift
+      ;;
     --help)
       usage
       exit 0
@@ -180,6 +186,10 @@ if [[ -z "$output_script" ]]; then
   kernel_base=$(basename "$kernel_path" .co)
   output_script="$SCRIPT_DIR/build/${kernel_base}.cute.result"
 fi
+
+FLASH_ATTEN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+VARIANT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+python3 "$FLASH_ATTEN_ROOT/scripts/gen_bench_configs.py" "$VARIANT_DIR"
 
 selected_gpu=""
 if [[ -n "$gpu_override" ]]; then
@@ -223,12 +233,25 @@ fi
 choreo_cmd+=("$kernel_path" -o "$output_script")
 
 echo "[bench] Detected arch $detected_arch"
-echo "[bench] Generating $output_script"
-"${choreo_cmd[@]}"
 
-if grep -q '__launch_bounds__(256, 1)' "$output_script" 2>/dev/null; then
-  sed -i 's/__launch_bounds__(256, 1)/__launch_bounds__(256, 2)/' "$output_script"
-  echo "[bench] Patched launch_bounds(256,1) -> (256,2)"
+bench_configs_inc="$SCRIPT_DIR/build/bench_configs.inc"
+need_compile=1
+if [[ $force_compile -eq 1 ]]; then
+  echo "[bench] Forced recompilation requested"
+elif [[ -f "$output_script" && "$output_script" -nt "$kernel_path" \
+        && ( ! -f "$bench_configs_inc" || "$output_script" -nt "$bench_configs_inc" ) ]]; then
+  need_compile=0
+  echo "[bench] Skipping compilation (output is up-to-date with kernel source)"
+fi
+
+if [[ $need_compile -eq 1 ]]; then
+  echo "[bench] Generating $output_script"
+  "${choreo_cmd[@]}"
+
+  if grep -q '__launch_bounds__(256, 1)' "$output_script" 2>/dev/null; then
+    sed -i 's/__launch_bounds__(256, 1)/__launch_bounds__(256, 2)/' "$output_script"
+    echo "[bench] Patched launch_bounds(256,1) -> (256,2)"
+  fi
 fi
 
 echo "[bench] Running --execute for $(basename "$kernel_path")"

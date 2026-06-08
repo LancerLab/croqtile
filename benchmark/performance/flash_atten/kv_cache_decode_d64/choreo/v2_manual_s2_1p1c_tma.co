@@ -108,16 +108,15 @@ __co__ void flash_atten(
   }
 }
 
-#include "mha_helper.hpp"
+#define MHA_DIM DIM
+#define MHA_LAYOUT_BHSD
+#include "../../fa_helper.hpp"
 
 int main() {
-  mha_helper::BenchConfig configs[] = {
-    {1, 32, 1, 8192, true, "B=1 H=32 q=1 kv=8192 decode"},
-    {1, 32, 128, 8192, true, "B=1 H=32 q=128 kv=8192 chunk"},
-  };
+  #include "build/bench_configs.inc"
   return mha_helper::RunBenchmarks(
-      "Choreo Flash Attention v2 KV-cache decode (BHSD)", configs,
-      sizeof(configs) / sizeof(configs[0]),
+      "Choreo Flash Attention v2 KV-cache decode (BHSD)",
+      kBenchConfigs, kBenchConfigCount,
       [&](const mha_helper::BenchConfig& cfg,
           const mha_helper::TensorViews& views) {
         (void)cfg;

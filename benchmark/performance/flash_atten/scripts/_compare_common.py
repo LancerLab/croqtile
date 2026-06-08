@@ -40,8 +40,8 @@ def collect_choreo(
         cmd.extend(["--gpu", gpu])
 
     env = os.environ.copy()
-    env.setdefault("CHOREO_TIMING_WARMUP", "10")
-    env.setdefault("CHOREO_TIMING_REPEAT", "50")
+    env.setdefault("CHOREO_TIMING_WARMUP", "100")
+    env.setdefault("CHOREO_TIMING_REPEAT", "500")
 
     print(f"[compare] Running Choreo: {kernel}", file=sys.stderr)
     proc = subprocess.run(
@@ -68,8 +68,8 @@ def collect_choreo(
 def collect_fa3(baselines_dir: Path, labels: list[str]) -> list[dict]:
     script = baselines_dir / "bench_fa3.py"
     env = os.environ.copy()
-    env.setdefault("CHOREO_TIMING_WARMUP", "10")
-    env.setdefault("CHOREO_TIMING_REPEAT", "50")
+    env.setdefault("CHOREO_TIMING_WARMUP", "100")
+    env.setdefault("CHOREO_TIMING_REPEAT", "500")
 
     print("[compare] Running FA3", file=sys.stderr)
     gpu = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -235,8 +235,8 @@ def run_compare(
     parser.add_argument("--skip-fa3", action="store_true")
     args = parser.parse_args()
 
-    warmup = int(os.environ.get("CHOREO_TIMING_WARMUP", "10"))
-    repeat = int(os.environ.get("CHOREO_TIMING_REPEAT", "50"))
+    warmup = int(os.environ.get("CHOREO_TIMING_WARMUP", "100"))
+    repeat = int(os.environ.get("CHOREO_TIMING_REPEAT", "500"))
 
     choreo_dir = variant_dir / "choreo"
     baselines_dir = variant_dir / "baselines"

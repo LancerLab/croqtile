@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 
 VARIANT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(VARIANT_DIR.parent))
+sys.path.insert(0, str(VARIANT_DIR.parent / "scripts"))
 sys.path.insert(0, str(VARIANT_DIR))
 
 from _fa3_common import run_fa3_baseline  # noqa: E402

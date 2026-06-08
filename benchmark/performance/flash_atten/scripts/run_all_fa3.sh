@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Run FA3 baselines for all six flash_atten variants.
 set -euo pipefail
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=_bench_common.sh
-source "$ROOT/_bench_common.sh"
+source "$SCRIPT_DIR/_bench_common.sh"
 
 flash_atten_activate_ml_hopper
 parse_flash_atten_gpu "$@"

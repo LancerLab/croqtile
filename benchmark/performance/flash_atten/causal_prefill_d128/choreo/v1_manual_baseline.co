@@ -68,16 +68,15 @@ __co__ void flash_atten(
   }
 }
 
-#include "mha_helper.hpp"
+#define MHA_DIM DIM
+#define MHA_DTYPE choreo::bf16
+#include "../../fa_helper.hpp"
 
 int main() {
-  mha_helper::BenchConfig configs[] = {
-    {2, 16, 8192, 8192, true, "B=2 H=16 SEQ=8192 causal prefill"},
-    {1, 16, 4096, 4096, true, "B=1 H=16 SEQ=4096 causal prefill"},
-  };
+  #include "build/bench_configs.inc"
   return mha_helper::RunBenchmarks(
-      "Choreo Flash Attention v1 Manual Baseline (D=128 bf16 causal)", configs,
-      sizeof(configs) / sizeof(configs[0]),
+      "Choreo Flash Attention v1 Manual Baseline (D=128 bf16 causal)",
+      kBenchConfigs, kBenchConfigCount,
       [&](const mha_helper::BenchConfig& cfg,
           const mha_helper::TensorViews& views) {
         flash_atten(views.Q, views.K, views.V, views.O);
