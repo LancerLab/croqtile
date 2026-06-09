@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <functional>
 #include <iostream>
 #include <random>
@@ -97,7 +98,7 @@ inline choreo::TimerOption read_timer_options() {
 }
 
 inline size_t verify_num_samples(size_t total_elems) {
-  size_t num_samples = 512;
+  size_t num_samples = 4096;
   if (const char* env = std::getenv("MHA_VERIFY_SAMPLES")) {
     int value = std::atoi(env);
     if (value > 0) num_samples = static_cast<size_t>(value);
@@ -197,26 +198,50 @@ inline bool verify_output(const BenchConfig& cfg, const scalar_t* Q_h,
   size_t checked = 0;
   size_t failed = 0;
 
+  auto check_point = [&](int b, int h, int qi, int di) {
+    const float ref = reference_output(Q_h, K_h, V_h, b, h, qi, di,
+                                       cfg.is_causal, past_len, H, q_seq,
+                                       kv_seq);
+    const float got =
+        read_bshd(O_h, static_cast<size_t>(b), static_cast<size_t>(qi),
+                  static_cast<size_t>(h), static_cast<size_t>(di), q_seq, H,
+                  head_dim);
+    if (std::isnan(got) || std::isinf(got)) {
+      ++failed;
+      ++checked;
+      max_abs_err = std::numeric_limits<float>::infinity();
+      return;
+    }
+    const float err = std::abs(got - ref);
+    const float tol = 0.05f + 0.1f * std::abs(ref);
+    if (err > max_abs_err) max_abs_err = err;
+    sum_abs_err += err;
+    if (err > tol) ++failed;
+    ++checked;
+  };
+
+  // Targeted check: last few query rows see the most KV tiles and are most
+  // sensitive to online softmax rescaling correctness.
+  {
+    size_t tail_rows = std::min(q_seq, static_cast<size_t>(8));
+    size_t tail_dims = std::min(head_dim, static_cast<size_t>(16));
+    for (size_t b = 0; b < B; ++b)
+      for (size_t h_idx = 0; h_idx < std::min(H, static_cast<size_t>(2));
+           ++h_idx)
+        for (size_t r = 0; r < tail_rows; ++r)
+          for (size_t d = 0; d < tail_dims; ++d)
+            check_point(static_cast<int>(b), static_cast<int>(h_idx),
+                        static_cast<int>(q_seq - 1 - r), static_cast<int>(d));
+  }
+
+  // Strided random sampling.
   for (size_t idx = 0; idx < total && checked < num_samples; idx += stride) {
     const size_t flat = idx;
     const int di = static_cast<int>(flat % head_dim);
     const int qi = static_cast<int>((flat / head_dim) % q_seq);
     const int h = static_cast<int>((flat / (q_seq * head_dim)) % H);
     const int b = static_cast<int>(flat / (H * q_seq * head_dim));
-
-    const float ref = reference_output(
-        Q_h, K_h, V_h, b, h, qi, di, cfg.is_causal, past_len, H, q_seq,
-        kv_seq);
-    const float got =
-        read_bshd(O_h, static_cast<size_t>(b), static_cast<size_t>(qi),
-                  static_cast<size_t>(h), static_cast<size_t>(di), q_seq, H,
-                  head_dim);
-    const float err = std::abs(got - ref);
-    const float tol = 0.05f + 0.1f * std::abs(ref);
-    max_abs_err = std::max(max_abs_err, err);
-    sum_abs_err += err;
-    if (err > tol) ++failed;
-    ++checked;
+    check_point(b, h, qi, di);
   }
 
   const float avg_abs_err =
@@ -224,7 +249,7 @@ inline bool verify_output(const BenchConfig& cfg, const scalar_t* Q_h,
   const float fail_rate =
       checked > 0 ? static_cast<float>(failed) / static_cast<float>(checked)
                   : 0.0f;
-  const bool passed = fail_rate < 0.01f;
+  const bool passed = (failed == 0);
 
   std::cout << "[VERIFY " << cfg.label << "] max_abs_err=" << max_abs_err
             << " avg_abs_err=" << avg_abs_err << " fail_rate=" << fail_rate
@@ -428,8 +453,8 @@ inline int RunBenchmarks(const char* title, const BenchConfig* configs,
         static_cast<size_t>(cfg.batch), static_cast<size_t>(cfg.q_seq),
         static_cast<size_t>(cfg.heads), static_cast<size_t>(MHA_DIM));
 
-    detail::fill_random_bshd(Q_h, -0.5f, 0.5f, gen);
-    detail::fill_random_bshd(K_h, -0.5f, 0.5f, gen);
+    detail::fill_random_bshd(Q_h, -2.0f, 2.0f, gen);
+    detail::fill_random_bshd(K_h, -2.0f, 2.0f, gen);
     detail::fill_random_bshd(V_h, -1.0f, 1.0f, gen);
     O_h.fill(0.0f);
 
