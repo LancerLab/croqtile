@@ -9,6 +9,7 @@
 #include "topscc_preprocess.hpp"
 #include "topscc_transform.hpp"
 #include "types.hpp"
+#include <filesystem>
 
 using namespace Choreo;
 
@@ -31,18 +32,35 @@ public:
   ArchId ResolveNativeArch() const override {
     std::string cfg_dir;
 #ifdef __CHOREO_TOPSCC_DIR__
-    cfg_dir = STRINGIZE(__CHOREO_TOPSCC_DIR__);
+    cfg_dir = __CHOREO_TOPSCC_DIR__;
 #endif
     auto topscc = FindToolchain(cfg_dir, "topscc");
     if (topscc.empty()) return "";
-    auto arch = CompileAndRun(topscc,
+    // topscc's tops_runtime.h includes device intrinsics that require an
+    // arch target for __bf16 support. Use a baseline arch (gcu300) to enable
+    // the compilation environment; the detection program only queries host-
+    // side runtime APIs so any valid arch suffices.
+    // Embed rpath so the detection binary finds libtopsrt.so at runtime.
+    namespace fs = std::filesystem;
+    auto lib_dir =
+        (fs::path(topscc).parent_path().parent_path() / "lib").string();
+    std::string flags = "-arch gcu300 -ltops -Wl,-rpath," + lib_dir;
+    auto output = CompileAndRun(
+        topscc,
         "#include <cstdio>\n"
         "#include \"tops/tops_runtime.h\"\n"
         "int main(){topsDeviceProp_t p;"
         "if(topsGetDeviceProperties(&p,0)!=topsSuccess)return 1;"
-        "printf(\"gcu%d\",p.major*100+p.minor*10);return 0;}\n",
-        ".cpp", "-x c++");
-    if (!arch.empty() && IsArchSupported(arch)) return arch;
+        "printf(\"CHOREO_ARCH:gcu%d:\",p.major*100+p.minor*10);return 0;}\n",
+        ".cpp", flags);
+    // Extract arch between markers (runtime may emit logs to stdout).
+    auto pos = output.find("CHOREO_ARCH:");
+    if (pos == std::string::npos) return "";
+    pos += 12;
+    auto end = output.find(':', pos);
+    if (end == std::string::npos) return "";
+    auto arch = output.substr(pos, end - pos);
+    if (IsArchSupported(arch)) return arch;
     return "";
   }
 
@@ -84,8 +102,7 @@ public:
       };
     return {
         {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},
-        {STR(ChoreoFeature::ASYNC_DMA),
-         Description(ChoreoFeature::ASYNC_DMA)},
+        {STR(ChoreoFeature::ASYNC_DMA), Description(ChoreoFeature::ASYNC_DMA)},
         {STR(ChoreoFeature::HDRPARSE), Description(ChoreoFeature::HDRPARSE)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
     };
