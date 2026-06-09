@@ -5,11 +5,14 @@
 __co__ f32[N] fma_test() {
   f32[N] out;
   parallel t by 128 : thread {
-    fragment f32[N] a {1.0f};
-    fragment f32[N] b {2.0f};
-    fragment f32[N] c {3.0f};
-    frag.apply c, [](i) { return __fmaf(a.at(i), b.at(i), c.at(i)); };
-    frag.store out, c;
+    frag f32[N] a {1.0f};
+    frag f32[N] b {2.0f};
+    frag f32[N] c {3.0f};
+    apply {i} in c.span {
+      c.at(i) = __fmaf(a.at(i), b.at(i), c.at(i));
+    }
+    apply {i} in c.span
+      out.at(i) = c.at(i);
   }
   return out;
 }
@@ -19,9 +22,12 @@ __co__ f32[N] fma_test() {
 __co__ f32[N] rcp_test() {
   f32[N] out;
   parallel t by 128 : thread {
-    fragment f32[N] a {2.0f};
-    frag.apply a, [](i) { return __frcp_rn(a.at(i)); };
-    frag.store out, a;
+    frag f32[N] a {2.0f};
+    apply {i} in a.span {
+      a.at(i) = __frcp_rn(a.at(i));
+    }
+    apply {i} in a.span
+      out.at(i) = a.at(i);
   }
   return out;
 }

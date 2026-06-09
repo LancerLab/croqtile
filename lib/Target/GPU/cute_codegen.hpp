@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <thread>
+#include <set>
 #include <unordered_set>
 
 #include "ast.hpp"
@@ -128,7 +129,7 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
   bool Visit(AST::MMA&) override;
-  bool Visit(AST::FragApply&) override;
+  bool Visit(AST::ApplyBlock&) override;
   bool Visit(AST::FragTransfer&) override;
   bool Visit(AST::FragReduce&) override;
   bool Visit(AST::Wait&) override;
@@ -250,6 +251,8 @@ private:
   std::string reg_loop_var_;
   std::map<std::string, std::string> automap_frag_reg_expr_;
   std::map<std::string, std::string> frag_apply_iv_map_;
+  std::set<AST::Node*> apply_row_hoisted_stmts_;
+  bool apply_has_main_loop_ = true;
   // Maps scoped IV name -> preferred upper-bound C++ expression.
   // Populated in Visit(WithIn) when the range source is a declared variable.
   std::map<std::string, std::string> iv_upper_bound_expr_;

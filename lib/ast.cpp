@@ -261,8 +261,9 @@ void MMA::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void FragApply::accept(Choreo::Visitor& v) {
+void ApplyBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
+  if (body) body->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }

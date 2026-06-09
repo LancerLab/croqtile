@@ -197,6 +197,22 @@ public:
     return false; // sym_name not found in any scope
   }
 
+  // Check if symbol is declared in a parent scope reachable without crossing
+  // a parallel boundary (paraby_ or inthreads_). Used to distinguish re-fill
+  // from shadowing new declaration in a nested parallel context.
+  bool DeclaredInSameParallelContext(const std::string& sym_name) const {
+    int n = (int)scoped_symtab.size();
+    for (int i = n - 2; i >= 0; --i) {
+      // Check if entering scope i+1 crossed a parallel boundary
+      const auto& sn = scope_names[i + 1];
+      if (sn.rfind("paraby_", 0) == 0 || sn.rfind("inthreads_", 0) == 0)
+        return false;
+      if (scoped_symtab[i].count(sym_name))
+        return true;
+    }
+    return false;
+  }
+
   bool DefineSymbol(const std::string& n, const ptr<Type> ty) {
     if (scoped_symtab.empty()) {
       choreo_unreachable("internal error: symtab is empty (@ insertion of `" +

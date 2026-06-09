@@ -11,7 +11,7 @@ __co__ auto rs_zero(f16 [WARP_N, WARP_K] rhs) {
   f32 [WARP_M, WARP_N] output{0.0f};
   parallel {bm, bn} by [1, 1] : block {
     mc = mma.fill.f32 0.0f;
-    fragment f16[WARP_M, WARP_K] a_frag {0.0f};
+    frag f16[WARP_M, WARP_K] a_frag {0.0f};
     rhs_s = tma.copy.swiz<32> rhs.subspan(WARP_N, WARP_K).at(bn, 0) => shared;
     parallel p by 1 : group-4 {
       mb = mma.load.swiz<32> rhs_s;
@@ -26,7 +26,7 @@ __co__ auto rs_ones(f16 [WARP_N, WARP_K] rhs) {
   f32 [WARP_M, WARP_N] output{0.0f};
   parallel {bm, bn} by [1, 1] : block {
     mc = mma.fill.f32 0.0f;
-    fragment f16[WARP_M, WARP_K] a_frag {1.0f};
+    frag f16[WARP_M, WARP_K] a_frag {1.0f};
     rhs_s = tma.copy.swiz<32> rhs.subspan(WARP_N, WARP_K).at(bn, 0) => shared;
     parallel p by 1 : group-4 {
       mb = mma.load.swiz<32> rhs_s;

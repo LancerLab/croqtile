@@ -1091,6 +1091,293 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     IncrIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
     IndStream() << "// foreach: " << n.LOC() << "\n";
+  } else if (auto ab = dyn_cast<AST::ApplyBlock>(&n)) {
+    if (!IsHost()) {
+      if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
+
+      auto target_name = ab->SpanFragmentName();
+      auto scoped = InScopeNameForRef(target_name);
+
+      if (FCtx(fname).HasFragmentLayout(scoped)) {
+        auto& fl = FCtx(fname).GetFragmentLayout(scoped);
+        auto sym = UnScopedName(SSMName(scoped, false));
+        size_t regs = fl.regs_per_thread;
+
+        std::string tid_expr;
+        if (bdim_level == ParallelLevel::GROUPx4)
+          tid_expr = "(threadIdx.x % 128)";
+        else if (!current_thread_count_expr.empty())
+          tid_expr = "__choreo_vtid_x";
+        else
+          tid_expr = "threadIdx.x";
+
+        reg_loop_var_ = "__r";
+        in_register_direct_automap_ = true;
+        automap_frag_reg_expr_.clear();
+        automap_frag_reg_expr_[scoped] = sym + "[" + reg_loop_var_ + "]";
+
+        // Build overrides for all fragment accesses in the body.
+        auto BuildOverrides = [&](auto&& self,
+                                  const ptr<AST::Node>& node) -> void {
+          if (!node) return;
+          if (auto da = dyn_cast<AST::DataAccess>(node)) {
+            if (da->AccessElement()) {
+              auto sc = InScopeNameForRef(da->data->name);
+              if (FCtx(fname).HasFragmentLayout(sc)) {
+                auto s = UnScopedName(SSMName(sc, false));
+                auto& other_fl = FCtx(fname).GetFragmentLayout(sc);
+                if (other_fl.IsCompatible(fl)) {
+                  automap_frag_reg_expr_[sc] = s + "[" + reg_loop_var_ + "]";
+                } else if (other_fl.logical_cols <= 1 &&
+                           fl.logical_cols > 1 && fl.IsMMAAnchored()) {
+                  automap_frag_reg_expr_[sc] =
+                      s + "[" + fl.RowFromRegIndex(reg_loop_var_) + "]";
+                }
+              }
+            }
+            return;
+          }
+          if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
+            for (auto& child : mn->values) self(self, child);
+            return;
+          }
+          if (auto asgn = dyn_cast<AST::Assignment>(node)) {
+            if (asgn->da) self(self, asgn->da);
+            if (asgn->value) self(self, asgn->value);
+            return;
+          }
+          if (auto ie = dyn_cast<AST::IfElseBlock>(node)) {
+            if (ie->pred) self(self, ie->pred);
+            if (ie->stmts) self(self, ie->stmts);
+            if (ie->else_stmts) self(self, ie->else_stmts);
+            return;
+          }
+          if (auto expr = dyn_cast<AST::Expr>(node)) {
+            if (expr->GetL()) self(self, expr->GetL());
+            if (expr->GetR()) self(self, expr->GetR());
+            if (expr->GetC()) self(self, expr->GetC());
+            return;
+          }
+          if (auto call = dyn_cast<AST::Call>(node)) {
+            for (auto& arg : call->GetArguments()) self(self, arg);
+            return;
+          }
+          if (auto cast_expr = dyn_cast<AST::CastExpr>(node)) {
+            if (cast_expr->GetR()) self(self, cast_expr->GetR());
+            return;
+          }
+        };
+        BuildOverrides(BuildOverrides, ab->body);
+
+        // Detect which iterators are used OUTSIDE of .at() index positions.
+        // Iterators in .at() are resolved by register-direct mapping and don't
+        // need explicit variables. Only iterators in conditions, arithmetic,
+        // or other expressions need __frag_iv_X emission.
+        std::set<std::string> used_iters;
+        auto FindUsedIters = [&](auto&& self, const ptr<AST::Node>& node,
+                                 bool in_at_index) -> void {
+          if (!node) return;
+          if (auto expr = dyn_cast<AST::Expr>(node)) {
+            if (auto sym = expr->GetSymbol()) {
+              if (!in_at_index)
+                for (auto& p : ab->iterators)
+                  if (sym->name == p) used_iters.insert(p);
+            }
+            if (expr->GetL()) self(self, expr->GetL(), in_at_index);
+            if (expr->GetR()) self(self, expr->GetR(), in_at_index);
+            if (expr->GetC()) self(self, expr->GetC(), in_at_index);
+            return;
+          }
+          if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
+            for (auto& child : mn->values) self(self, child, in_at_index);
+            return;
+          }
+          if (auto asgn = dyn_cast<AST::Assignment>(node)) {
+            if (asgn->da) self(self, asgn->da, in_at_index);
+            if (asgn->value) self(self, asgn->value, in_at_index);
+            return;
+          }
+          if (auto ie = dyn_cast<AST::IfElseBlock>(node)) {
+            if (ie->pred) self(self, ie->pred, false);
+            if (ie->stmts) self(self, ie->stmts, in_at_index);
+            if (ie->else_stmts) self(self, ie->else_stmts, in_at_index);
+            return;
+          }
+          if (auto da = dyn_cast<AST::DataAccess>(node)) {
+            if (da->AccessElement())
+              for (auto& idx : da->GetIndices())
+                self(self, idx, true);
+            return;
+          }
+          if (auto call = dyn_cast<AST::Call>(node)) {
+            for (auto& arg : call->GetArguments())
+              self(self, arg, in_at_index);
+            return;
+          }
+          if (auto cast_expr = dyn_cast<AST::CastExpr>(node)) {
+            if (cast_expr->GetR()) self(self, cast_expr->GetR(), in_at_index);
+            return;
+          }
+        };
+        FindUsedIters(FindUsedIters, ab->body, false);
+
+        // Set up iterator variable mappings (only for used iterators).
+        for (auto& p : ab->iterators) {
+          frag_apply_iv_map_[p] = "__frag_iv_" + p;
+        }
+
+        // Row-hoisting: classify each top-level body statement.
+        // A statement is "row-only" if it exclusively accesses 1D fragments.
+        apply_row_hoisted_stmts_.clear();
+        std::vector<AST::Node*> row_only_stmts;
+        auto IsRowOnly = [&](const ptr<AST::Node>& stmt) -> bool {
+          bool has_2d = false;
+          auto Check = [&](auto&& self, const ptr<AST::Node>& node) -> void {
+            if (!node) return;
+            if (auto da = dyn_cast<AST::DataAccess>(node)) {
+              if (da->AccessElement()) {
+                auto sc = InScopeNameForRef(da->data->name);
+                if (FCtx(fname).HasFragmentLayout(sc)) {
+                  auto& ffl = FCtx(fname).GetFragmentLayout(sc);
+                  if (ffl.IsCompatible(fl)) has_2d = true;
+                }
+              }
+              return;
+            }
+            if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
+              for (auto& c : mn->values) self(self, c);
+              return;
+            }
+            if (auto a = dyn_cast<AST::Assignment>(node)) {
+              if (a->da) self(self, a->da);
+              if (a->value) self(self, a->value);
+              return;
+            }
+            if (auto ie = dyn_cast<AST::IfElseBlock>(node)) {
+              if (ie->pred) self(self, ie->pred);
+              if (ie->stmts) self(self, ie->stmts);
+              if (ie->else_stmts) self(self, ie->else_stmts);
+              return;
+            }
+            if (auto e = dyn_cast<AST::Expr>(node)) {
+              if (e->GetL()) self(self, e->GetL());
+              if (e->GetR()) self(self, e->GetR());
+              if (e->GetC()) self(self, e->GetC());
+              return;
+            }
+            if (auto c = dyn_cast<AST::Call>(node)) {
+              for (auto& arg : c->GetArguments()) self(self, arg);
+              return;
+            }
+            if (auto ce = dyn_cast<AST::CastExpr>(node)) {
+              if (ce->GetR()) self(self, ce->GetR());
+              return;
+            }
+          };
+          Check(Check, stmt);
+          return !has_2d;
+        };
+
+        if (auto body_mn = dyn_cast<AST::MultiNodes>(ab->body)) {
+          for (auto& child : body_mn->values) {
+            if (IsRowOnly(child)) {
+              row_only_stmts.push_back(child.get());
+              apply_row_hoisted_stmts_.insert(child.get());
+            }
+          }
+        }
+
+        // Emit the apply block opening.
+        IndStream() << "{ // apply " << target_name << "\n";
+        IncrIndent();
+
+        // Emit row-hoisted statements in a small row loop.
+        if (!row_only_stmts.empty()) {
+          size_t rows = fl.rows_per_thread;
+          std::string row_var = "__row";
+
+          // Save current register-direct state and set up row-only context.
+          auto saved_reg_loop = reg_loop_var_;
+          auto saved_overrides = automap_frag_reg_expr_;
+
+          reg_loop_var_ = row_var;
+          automap_frag_reg_expr_.clear();
+          // Map all 1D fragments to direct row-indexed access: sym[__row].
+          for (auto& [sc, expr] : saved_overrides) {
+            if (!FCtx(fname).HasFragmentLayout(sc)) continue;
+            auto& ffl = FCtx(fname).GetFragmentLayout(sc);
+            if (ffl.logical_cols <= 1) {
+              auto s = UnScopedName(SSMName(sc, false));
+              automap_frag_reg_expr_[sc] = s + "[" + row_var + "]";
+            }
+          }
+
+          IndStream() << "#pragma unroll\n";
+          IndStream() << "for (int " << row_var << " = 0; " << row_var << " < "
+                      << rows << "; ++" << row_var << ") {\n";
+          IncrIndent();
+
+          // Emit each row-only statement directly.
+          for (auto* stmt : row_only_stmts) {
+            if (auto asgn = dynamic_cast<AST::Assignment*>(stmt)) {
+              if (asgn->AssignToDataElement()) {
+                auto lhs = ExprSTR(asgn->da, false);
+                auto rhs = ExprSTR(asgn->value, false);
+                IndStream() << lhs << " = " << rhs << ";\n";
+              }
+            }
+          }
+
+          DecrIndent();
+          IndStream() << "}\n";
+
+          // Now mark them to be skipped during main loop traversal.
+          for (auto* stmt : row_only_stmts)
+            apply_row_hoisted_stmts_.insert(stmt);
+
+          // Restore register-direct state for main loop.
+          reg_loop_var_ = saved_reg_loop;
+          automap_frag_reg_expr_ = saved_overrides;
+        }
+
+        // Emit the main register loop (for full/2D statements).
+        bool has_full_stmts = false;
+        if (auto body_mn = dyn_cast<AST::MultiNodes>(ab->body)) {
+          for (auto& child : body_mn->values)
+            if (!apply_row_hoisted_stmts_.count(child.get())) {
+              has_full_stmts = true;
+              break;
+            }
+        } else {
+          has_full_stmts = true;
+        }
+
+        apply_has_main_loop_ = has_full_stmts;
+        if (has_full_stmts) {
+          for (size_t pi = 0; pi < ab->iterators.size(); ++pi)
+            if (used_iters.count(ab->iterators[pi]))
+              ds << d_indent << "int __frag_iv_" << ab->iterators[pi]
+                 << " = 0;\n";
+
+          IndStream() << "#pragma unroll\n";
+          IndStream() << "for (int " << reg_loop_var_ << " = 0; "
+                      << reg_loop_var_ << " < " << regs << "; ++"
+                      << reg_loop_var_ << ") {\n";
+          IncrIndent();
+
+          for (size_t pi = 0; pi < ab->iterators.size(); ++pi) {
+            if (!used_iters.count(ab->iterators[pi])) continue;
+            std::string iv_var = "__frag_iv_" + ab->iterators[pi];
+            if (ab->iterators.size() == 1 || pi == 0)
+              ds << d_indent << iv_var << " = "
+                 << fl.LogicalRowFromReg(reg_loop_var_, tid_expr) << ";\n";
+            else
+              ds << d_indent << iv_var << " = "
+                 << fl.LogicalColFromReg(reg_loop_var_, tid_expr) << ";\n";
+          }
+        }
+      }
+    }
   }
   if (isa<AST::NamedVariableDecl>(&n)) in_named_var_decl_ = true;
 
@@ -2705,6 +2992,7 @@ bool CuteCodeGen::Visit(AST::NamedTypeDecl& n) {
 bool CuteCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
   if (vec4_automap_skip_) return true;
+  if (apply_row_hoisted_stmts_.count(&n)) return true;
 
   auto extract_chunk_alias =
       [](const ptr<AST::Node>& node) -> ptr<AST::ChunkAt> {
@@ -4525,7 +4813,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       ++fill_cnt;
     } break;
-    case AST::MMAOperation::LoadS:
     case AST::MMAOperation::Load: {
       // Check if loading from a buffer whose shape may not evenly divide
       // the MMA fragment. Static shared buffers are always tile-sized, but
@@ -5883,10 +6170,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         choreo_unreachable("unexpect MMA frag");
       }
     } break;
-    case AST::MMAOperation::LoadR:
-    case AST::MMAOperation::LoadS:
-      Error1(n.LOC(), "mma.loadR/loadS are only supported for WGMMA/CuTe MMA.");
-      return false;
     case AST::MMAOperation::Exec: {
       ds << d_indent << "nvcuda::wmma::mma_sync("
          << ExprSTR(op.ExecOperand(0), false) << ", "
@@ -5999,7 +6282,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       ++fill_cnt;
     } break;
-    case AST::MMAOperation::LoadS:
     case AST::MMAOperation::Load: {
       auto ca = op.LoadFrom();
       auto f_sym = ca->data->name;
@@ -7885,133 +8167,25 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   return true;
 }
 
-bool CuteCodeGen::Visit(AST::FragApply& n) {
+
+bool CuteCodeGen::Visit(AST::ApplyBlock& n) {
   TraceEachVisit(n);
   if (IsHost()) return true;
-  if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
 
-  auto target_name = n.TargetName();
-  auto scoped = InScopeNameForRef(target_name);
-
-  if (!FCtx(fname).HasFragmentLayout(scoped)) {
-    dbgs() << "frag.apply: no layout for " << scoped << "\n";
-    return true;
+  // Post-order: body has been emitted; close the register loop.
+  if (apply_has_main_loop_) {
+    DecrIndent();
+    IndStream() << "}\n";
   }
-  auto& fl = FCtx(fname).GetFragmentLayout(scoped);
-  auto sym = UnScopedName(SSMName(scoped, false));
-  size_t regs = fl.regs_per_thread;
-
-  std::string tid_expr;
-  if (bdim_level == ParallelLevel::GROUPx4)
-    tid_expr = "(threadIdx.x % 128)";
-  else if (!current_thread_count_expr.empty())
-    tid_expr = "__choreo_vtid_x";
-  else
-    tid_expr = "threadIdx.x";
-
-  // Set up register-direct state so that .at() codegen emits frag[__r].
-  reg_loop_var_ = "__r";
-  in_register_direct_automap_ = true;
-  automap_frag_reg_expr_.clear();
-  automap_frag_reg_expr_[scoped] = sym + "[" + reg_loop_var_ + "]";
-
-  // Override other fragment accesses in the body to register-direct form.
-  // Two cases: (1) compatible layout -> same register index;
-  // (2) 1D row-broadcast in a 2D MMA apply -> map via RowFromRegIndex.
-  auto BuildOverrides = [&](auto&& self, const ptr<AST::Node>& node) -> void {
-    if (!node) return;
-    if (auto da = dyn_cast<AST::DataAccess>(node)) {
-      if (da->AccessElement()) {
-        auto sc = InScopeNameForRef(da->data->name);
-        if (FCtx(fname).HasFragmentLayout(sc)) {
-          auto s = UnScopedName(SSMName(sc, false));
-          auto& other_fl = FCtx(fname).GetFragmentLayout(sc);
-          if (other_fl.IsCompatible(fl)) {
-            automap_frag_reg_expr_[sc] = s + "[" + reg_loop_var_ + "]";
-          } else if (other_fl.logical_cols <= 1 && fl.logical_cols > 1 &&
-                     fl.IsMMAAnchored()) {
-            automap_frag_reg_expr_[sc] =
-                s + "[" + fl.RowFromRegIndex(reg_loop_var_) + "]";
-          }
-        }
-      }
-      return;
-    }
-    if (auto expr = dyn_cast<AST::Expr>(node)) {
-      if (expr->GetL()) self(self, expr->GetL());
-      if (expr->GetR()) self(self, expr->GetR());
-      if (expr->GetC()) self(self, expr->GetC());
-      return;
-    }
-    if (auto call = dyn_cast<AST::Call>(node)) {
-      for (auto& arg : call->GetArguments()) self(self, arg);
-      return;
-    }
-    if (auto cast_expr = dyn_cast<AST::CastExpr>(node)) {
-      if (cast_expr->GetR()) self(self, cast_expr->GetR());
-      return;
-    }
-  };
-  BuildOverrides(BuildOverrides, n.body);
-
-  // Register lambda params in symbol tables so ExprSTR can resolve types.
-  // Set up frag_apply_iv_map_ before body generation.
-  for (auto& p : n.params) {
-    auto sp = SSTab().ScopedName(p);
-    if (!SSTab().IsDeclared(sp)) SSTab().DefineSymbol(sp, MakeIntegerType());
-    if (!SymTab()->Exists(sp)) SymTab()->AddSymbol(sp, MakeIntegerType());
-    frag_apply_iv_map_[p] = "__frag_iv_" + p;
-  }
-
-  // Generate body expression first to determine which iv vars are referenced.
-  std::string body_expr = ExprSTR(n.body, false);
-
-  IndStream() << "{ // frag.apply " << target_name << "\n";
-  IncrIndent();
-
-  // Only declare iv variables that are actually used in the body.
-  std::vector<bool> param_used(n.params.size(), false);
-  for (size_t pi = 0; pi < n.params.size(); ++pi) {
-    std::string iv_var = "__frag_iv_" + n.params[pi];
-    if (body_expr.find(iv_var) != std::string::npos) {
-      param_used[pi] = true;
-      ds << d_indent << "int " << iv_var << " = 0;\n";
-    }
-  }
-
-  IndStream() << "#pragma unroll\n";
-  IndStream() << "for (int " << reg_loop_var_ << " = 0; " << reg_loop_var_
-              << " < " << regs << "; ++" << reg_loop_var_ << ") {\n";
-  IncrIndent();
-
-  // Only compute iv variables that are actually referenced.
-  for (size_t pi = 0; pi < n.params.size(); ++pi) {
-    if (!param_used[pi]) continue;
-    std::string iv_var = "__frag_iv_" + n.params[pi];
-    if (n.params.size() == 1)
-      ds << d_indent << iv_var << " = "
-         << fl.LogicalRowFromReg(reg_loop_var_, tid_expr) << ";\n";
-    else if (pi == 0)
-      ds << d_indent << iv_var << " = "
-         << fl.LogicalRowFromReg(reg_loop_var_, tid_expr) << ";\n";
-    else
-      ds << d_indent << iv_var << " = "
-         << fl.LogicalColFromReg(reg_loop_var_, tid_expr) << ";\n";
-  }
-
-  // Emit: target[__r] = body_expr;
-  ds << d_indent << sym << "[" << reg_loop_var_ << "] = " << body_expr << ";\n";
-
   DecrIndent();
-  IndStream() << "}\n";
-  DecrIndent();
-  IndStream() << "} // frag.apply\n";
+  IndStream() << "} // apply " << n.SpanFragmentName() << "\n";
 
   in_register_direct_automap_ = false;
   automap_frag_reg_expr_.clear();
   reg_loop_var_.clear();
   frag_apply_iv_map_.clear();
-
+  apply_row_hoisted_stmts_.clear();
+  apply_has_main_loop_ = true;
   return true;
 }
 
@@ -10049,14 +10223,16 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       if (!is_host && ssm.HasDeviceName(sname)) {
         return UnScopedName(ssm.DeviceName(sname));
       }
-      if (FCtx(fname).HasSymbolValues(sname)) {
+      if (!frag_apply_iv_map_.count(sym->name) &&
+          FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
         if (svs.HasVal()) return ValueSTR(svs.GetVal());
       }
     }
 
-    if (ConvertibleToInt(NodeType(*e)))
+    if (ConvertibleToInt(NodeType(*e)) && frag_apply_iv_map_.empty()) {
       if (expr->Opts().HasVal()) return ValueSTR(expr->Opts().GetVal());
+    }
 
     if (expr->IsReference()) {
       if (PSTR(expr) == "_") return "0";

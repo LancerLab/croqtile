@@ -97,6 +97,11 @@ bool ShapeInference::BeforeVisitImpl(AST::Node& n) {
     vn.EnterScope();
     ast_vn.EnterScope();
     gen_values = false; // disable valno on range expressions
+  } else if (auto ab = dyn_cast<AST::ApplyBlock>(&n)) {
+    vn.EnterScope();
+    ast_vn.EnterScope();
+    for (auto& p : ab->iterators)
+      GenValNum(SSTab().InScopeName(p));
   } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
     if (b->ref_name != "") {
       if (auto n = SSTab().NameInScopeOrNull(b->ref_name))
@@ -146,7 +151,7 @@ bool ShapeInference::AfterVisitImpl(AST::Node& n) {
     vn.LeaveScope();
     ast_vn.LeaveScope();
   } else if (isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-             isa<AST::IfElseBlock>(&n)) {
+             isa<AST::IfElseBlock>(&n) || isa<AST::ApplyBlock>(&n)) {
     vn.LeaveScope();
     ast_vn.LeaveScope();
   } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
@@ -1247,8 +1252,7 @@ bool ShapeInference::Visit(AST::MMA& n) {
                        ".span"); // valno is yet invalid
     }
   } break;
-  case AST::MMAOperation::Load:
-  case AST::MMAOperation::LoadS: {
+  case AST::MMAOperation::Load: {
     std::string load_to_sym = AST::FragName(op.LoadTo());
     auto fty = cast<SpannedType>(op.LoadFrom()->GetType());
     auto f_span = load_to_sym + ".span";
@@ -1842,6 +1846,7 @@ bool ShapeInference::Visit(AST::Call& n) {
         return sbe::sel(pred, lv, rv)->Normalize();
       };
       auto get_item = [&](AST::Node& arg, VNKind kind) -> ValueItem {
+        if (!HasValNo(arg, kind)) return GetInvalidValueItem();
         auto valno = GetValNo(arg, kind);
         if (!valno.IsValid()) return GetInvalidValueItem();
         return vn.GenValueItemFromValueNumber(valno);
@@ -2225,9 +2230,13 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (isa<AST::StringLiteral>(n)) return false;
   if (isa<AST::DataAccess>(n)) return false;
   if (auto call = dyn_cast<AST::Call>(n)) {
-    return call->IsExpr() && call->IsArith() && call->arguments &&
-           call->arguments->Count() == 2 &&
-           (call->function->name == "__min" || call->function->name == "__max");
+    if (!(call->IsExpr() && call->IsArith() && call->arguments &&
+          call->arguments->Count() == 2 &&
+          (call->function->name == "__min" || call->function->name == "__max")))
+      return false;
+    for (auto& arg : call->arguments->AllValues())
+      if (!CanBeValueNumbered(arg.get())) return false;
+    return true;
   }
   if (isa<AST::DataType>(n)) return false;
   auto nty = NodeType(*n);
