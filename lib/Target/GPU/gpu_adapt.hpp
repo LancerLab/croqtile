@@ -853,7 +853,6 @@ public:
     } break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::LoadR: break;
-    case AST::MMAOperation::LoadS: break;
     case AST::MMAOperation::Exec: {
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));

@@ -1,0 +1,21 @@
+// RUN: choreo -ii %s | FileCheck %s
+
+// .sqz must preserve parent strides for non-squeezed dims, not densify.
+
+__co__ void sqz_stride_middle(f32 [9, 10, 8] a) {
+  parallel p by 1 : block {
+    head = a.subspan(9, 1, 8).at(0, p, 0).sqz();
+    dma.copy head.subspan(9, 8).at(0, 0) => local;
+  }
+}
+
+// CHECK: Symbol:    ::sqz_stride_middle{{(::paraby_[0-9]+)*}}::head, Type: global f32 mdspan<2> [9, 8] {80, 1}
+
+__co__ void sqz_stride_bshd(f16[B, S, H, D] q) {
+  parallel {batch, head} by [B, H] : block {
+    Q_head = q.subspan(1, S, 1, D).at(batch, 0, head, 0).sqz();
+    dma.copy Q_head.subspan(1, D).at(0, 0) => local;
+  }
+}
+
+// CHECK: Symbol:    ::sqz_stride_bshd{{(::paraby_[0-9]+)*}}::Q_head, Type: global f16 mdspan<2> [::sqz_stride_bshd::S, ::sqz_stride_bshd::D] {(::sqz_stride_bshd::D * ::sqz_stride_bshd::H), 1}

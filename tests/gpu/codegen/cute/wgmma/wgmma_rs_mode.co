@@ -2,19 +2,18 @@
 // RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
 
 // ---------------------------------------------------------------------------
-// 1. Basic RS mode: mma.loadR loads shared->register, mma.load B
+// 1. Basic RS mode: mma.load loads shared->register, B via span ref
 // ---------------------------------------------------------------------------
 __co__ auto rs_basic(f16 [64, 16] lhs, f16 [64, 16] rhs) {
   f16 [64, 64] output{0.0f};
   parallel {bm, bn} by [1, 1] : block {
     mc = mma.fill.f32 0.0f;
-    fragment f16[64, 16] a_frag {0.0f};
+    frag f16[64, 16] a_frag {0.0f};
     lhs_s = dma.copy lhs.chunkat(bm, _) => shared;
     rhs_s = dma.copy rhs.chunkat(bn, _) => shared;
     parallel p by 1 : group-4 {
-      mma.loadR lhs_s, a_frag;
-      mb = mma.load rhs_s;
-      mma.row.row mc, a_frag, mb;
+      mma.load lhs_s, a_frag;
+      mma.row.row mc, a_frag, rhs_s;
     }
     mma.store mc, output.chunkat(bm, bn);
   }
@@ -24,22 +23,20 @@ __co__ auto rs_basic(f16 [64, 16] lhs, f16 [64, 16] rhs) {
 // CHECK: __loadr_src
 // CHECK: warpgroup_fence_operand(a_frag)
 // CHECK: MMA_64x64x16_F32F16F16_RS<{{.*}}>::fma(reinterpret_cast<const uint32_t*>(a_frag)
-// CHECK-SAME: desc_mb
 
 // ---------------------------------------------------------------------------
-// 2. RS mode with row.col (B is MN_MAJOR), using mma.loadS for B
+// 2. RS mode with row.col (B is MN_MAJOR)
 // ---------------------------------------------------------------------------
 __co__ auto rs_row_col(f16 [64, 16] lhs, f16 [16, 64] rhs) {
   f16 [64, 64] output{0.0f};
   parallel {bm, bn} by [1, 1] : block {
     mc = mma.fill.f32 0.0f;
-    fragment f16[64, 16] a_frag {0.0f};
+    frag f16[64, 16] a_frag {0.0f};
     lhs_s = dma.copy lhs.chunkat(bm, _) => shared;
     rhs_s = dma.copy rhs.chunkat(_, bn) => shared;
     parallel p by 1 : group-4 {
-      mma.loadR lhs_s, a_frag;
-      mb = mma.loadS rhs_s;
-      mma.row.col mc, a_frag, mb;
+      mma.load lhs_s, a_frag;
+      mma.row.col mc, a_frag, rhs_s;
     }
     mma.store mc, output.chunkat(bm, bn);
   }
@@ -59,18 +56,15 @@ __co__ auto ss_then_rs(f16 [64, 16] a, f16 [64, 16] b, f16 [64, 16] c) {
     a_s = dma.copy a.chunkat(bm, _) => shared;
     b_s = dma.copy b.chunkat(bn, _) => shared;
     parallel p by 1 : group-4 {
-      ma = mma.load a_s;
-      mb = mma.load b_s;
-      mma.row.row mc_ss, ma, mb;
+      mma.row.row mc_ss, a_s, b_s;
     }
 
     mc_rs = mma.fill.f32 0.0f;
-    fragment f16[64, 16] a_frag {0.0f};
+    frag f16[64, 16] a_frag {0.0f};
     c_s = dma.copy c.chunkat(bn, _) => shared;
     parallel q by 1 : group-4 {
-      mma.loadR c_s, a_frag;
-      mb2 = mma.loadS c_s;
-      mma.row.row mc_rs, a_frag, mb2;
+      mma.load c_s, a_frag;
+      mma.row.row mc_rs, a_frag, c_s;
     }
 
     mma.store mc_ss, output.chunkat(bm, bn);
@@ -79,10 +73,9 @@ __co__ auto ss_then_rs(f16 [64, 16] a, f16 [64, 16] b, f16 [64, 16] c) {
 }
 // SS phase: both descriptors
 // CHECK-LABEL: __global__{{.*}}ss_then_rs
-// CHECK: MMA_64x64x16_F32F16F16_SS<{{.*}}>::fma(desc_ma, desc_mb
+// CHECK: MMA_64x64x16_F32F16F16_SS<{{.*}}>::fma(
 // RS phase: A from registers
 // CHECK: MMA_64x64x16_F32F16F16_RS<{{.*}}>::fma(reinterpret_cast<const uint32_t*>(a_frag)
-// CHECK-SAME: desc_mb2
 
 // ---------------------------------------------------------------------------
 // 4. RS mode with bf16
@@ -91,13 +84,12 @@ __co__ auto rs_bf16(bf16 [64, 16] lhs, bf16 [64, 16] rhs) {
   bf16 [64, 64] output{0.0f};
   parallel {bm, bn} by [1, 1] : block {
     mc = mma.fill.f32 0.0f;
-    fragment bf16[64, 16] a_frag {0.0f};
+    frag bf16[64, 16] a_frag {0.0f};
     lhs_s = dma.copy lhs.chunkat(bm, _) => shared;
     rhs_s = dma.copy rhs.chunkat(bn, _) => shared;
     parallel p by 1 : group-4 {
-      mma.loadR lhs_s, a_frag;
-      mb = mma.loadS rhs_s;
-      mma.row.row mc, a_frag, mb;
+      mma.load lhs_s, a_frag;
+      mma.row.row mc, a_frag, rhs_s;
     }
     mma.store mc, output.chunkat(bm, bn);
   }
@@ -105,7 +97,6 @@ __co__ auto rs_bf16(bf16 [64, 16] lhs, bf16 [64, 16] rhs) {
 }
 // CHECK-LABEL: __global__{{.*}}rs_bf16
 // CHECK: MMA_64x64x16_F32BF16BF16_RS<{{.*}}>::fma(reinterpret_cast<const uint32_t*>(a_frag)
-// CHECK-SAME: desc_mb
 
 // ---------------------------------------------------------------------------
 // 5. RS mode with fp8 e4m3 (K=32, uses _RS_TN suffix)
@@ -114,13 +105,12 @@ __co__ auto rs_fp8(f8_e4m3 [64, 32] lhs, f8_e4m3 [64, 32] rhs) {
   f32 [64, 64] output{0.0f};
   parallel {bm, bn} by [1, 1] : block {
     mc = mma.fill.f32 0.0f;
-    fragment f8_e4m3[64, 32] a_frag {0.0f};
+    frag f8_e4m3[64, 32] a_frag {0.0f};
     lhs_s = dma.copy lhs.chunkat(bm, _) => shared;
     rhs_s = dma.copy rhs.chunkat(bn, _) => shared;
     parallel p by 1 : group-4 {
-      mma.loadR lhs_s, a_frag;
-      mb = mma.loadS rhs_s;
-      mma.row.row mc, a_frag, mb;
+      mma.load lhs_s, a_frag;
+      mma.row.row mc, a_frag, rhs_s;
     }
     mma.store mc, output.chunkat(bm, bn);
   }
@@ -128,4 +118,3 @@ __co__ auto rs_fp8(f8_e4m3 [64, 32] lhs, f8_e4m3 [64, 32] rhs) {
 }
 // CHECK-LABEL: __global__{{.*}}rs_fp8
 // CHECK: MMA_64x64x32_F32E4M3E4M3_RS_TN<>::fma(reinterpret_cast<const uint32_t*>(a_frag)
-// CHECK-SAME: desc_mb

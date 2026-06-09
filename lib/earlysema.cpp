@@ -42,12 +42,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     if (call->template_args) {
       in_template_param = true; // enter template param visit
     }
-  } else if (auto fa = dyn_cast<AST::FragApply>(&n)) {
-    for (auto& p : fa->params) {
-      auto scoped_p = SSTab().ScopedName(p);
-      if (!SSTab().IsDeclared(scoped_p))
-        SSTab().DefineSymbol(scoped_p, MakeIntegerType());
-    }
+  } else if (isa<AST::ApplyBlock>(&n)) {
+    // iterators are defined in VisitorWithScope::BeforeVisit
   } else if (auto ft = dyn_cast<AST::FragTransfer>(&n)) {
     for (auto& p : ft->params) {
       auto scoped_p = SSTab().ScopedName(p);
@@ -767,25 +763,6 @@ bool EarlySemantics::Visit(AST::AttributeExpr& n) {
     if (vec_len && vec_len->Val() <= 0 && !IsUnKnownInteger(vec_len->Val()))
       Error1(vec_len->LOC(),
              "the vector length of `vectorize` should be a positive integer");
-  } else if (n.AttrName() == "automap") {
-    Warning(n.LOC(), "'automap' is deprecated; use 'frag.apply' instead. "
-                     "'automap' will be removed in a future release.");
-    if (n.AttrValueCount() > 1)
-      Error1(n.LOC(), "suffix expression 'automap' accepts at most one "
-                      "parallel variable argument.");
-    if (n.AttrValueCount() == 1) {
-      auto pv = AST::GetIdentifier(n.AttrValueAt(0));
-      if (!pv)
-        Error1(n.AttrValueAt(0)->LOC(),
-               "the attribute value of `automap` should be a parallel variable "
-               "identifier.");
-      else if (!SSTab().IsDeclared(pv->name))
-        Error1(pv->LOC(), "the parallel variable '" + pv->name +
-                              "' is not declared in the current scope.");
-      else if (!pb_map.count(InScopeName(pv->name)))
-        Error1(pv->LOC(), "automap variable '" + pv->name +
-                              "' must be a parallel-by variable.");
-    }
   }
   return true;
 }
@@ -2043,26 +2020,32 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     if (op.FillingIsDecl()) {
       // `mc[1] = mma.fill 0;` is invalid.
       assert(!AST::FragIsArrayElem(op.FillingTo()));
-      auto fill_bt = op.FillingType();
-      if (op.FillingArrayDims()) {
-        auto arr_type = cast<ArrayType>(op.FillingArrayDims()->GetType());
-        ReportErrorWhenViolateODR(
-            n.LOC(), fill_sym, __FILE__, __LINE__,
-            MakeRankedSpannedArrayType(2, arr_type->dims, fill_bt));
+      // If the symbol already exists in a parent scope within the same
+      // parallel context, this is a re-fill, not a new declaration.
+      if (!SSTab().DeclaredInScope(fill_sym) &&
+          SSTab().DeclaredInSameParallelContext(fill_sym)) {
+        op.SetFillingIsDecl(false);
       } else {
-        ReportErrorWhenViolateODR(n.LOC(), fill_sym, __FILE__, __LINE__,
-                                  MakeRankedSpannedType(2, fill_bt));
+        auto fill_bt = op.FillingType();
+        if (op.FillingArrayDims()) {
+          auto arr_type = cast<ArrayType>(op.FillingArrayDims()->GetType());
+          ReportErrorWhenViolateODR(
+              n.LOC(), fill_sym, __FILE__, __LINE__,
+              MakeRankedSpannedArrayType(2, arr_type->dims, fill_bt));
+        } else {
+          ReportErrorWhenViolateODR(n.LOC(), fill_sym, __FILE__, __LINE__,
+                                    MakeRankedSpannedType(2, fill_bt));
+        }
+        ReportErrorWhenViolateODR(n.LOC(), fill_sym + ".span", __FILE__,
+                                  __LINE__, MakeRankedMDSpanType(2));
+        if (!isa<ScalarType>(op.FillingValue()->GetType()))
+          Error1(n.LOC(), "Expect a scalar value for MMA fill.");
       }
-      ReportErrorWhenViolateODR(n.LOC(), fill_sym + ".span", __FILE__, __LINE__,
-                                MakeRankedMDSpanType(2));
-      if (!isa<ScalarType>(op.FillingValue()->GetType()))
-        Error1(n.LOC(), "Expect a scalar value for MMA fill.");
     } else {
       ReportErrorWhenUseBeforeDefine(n.LOC(), fill_sym);
     }
   } break;
-  case AST::MMAOperation::Load:
-  case AST::MMAOperation::LoadS: {
+  case AST::MMAOperation::Load: {
     std::string fut_sym = AST::FragName(op.GetFuture());
     assert(!AST::FragIsArrayElem(op.GetFuture()) &&
            "For now, frag with indices is only supported for mc.");

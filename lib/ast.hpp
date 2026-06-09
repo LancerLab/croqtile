@@ -2810,7 +2810,7 @@ public:
 
 struct MMAOperation {
 public:
-  enum Kind { Fill, Load, LoadR, LoadS, Exec, Store, Commit, Scale, Wait };
+  enum Kind { Fill, Load, LoadR, Exec, Store, Commit, Scale, Wait };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
   // NOTE: acc, lhs, rhs are not accepted in ast.cpp.
@@ -2876,17 +2876,10 @@ public:
       : tag(Load), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
   struct LoadRTag {};
-  struct LoadSTag {};
-
   explicit MMAOperation(LoadRTag, const ptr<ChunkAt>& e, const ptr<Expr>& fu,
                         bool a = false, SwizMode swizzle = SwizMode::NONE,
                         bool explicit_swizzle = false)
       : tag(LoadR), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
-
-  explicit MMAOperation(LoadSTag, const ptr<ChunkAt>& e, const ptr<Expr>& fu,
-                        bool a = false, SwizMode swizzle = SwizMode::NONE,
-                        bool explicit_swizzle = false)
-      : tag(LoadS), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
   MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
                const ptr<Expr>& r, bool sp = false)
@@ -2920,9 +2913,8 @@ public:
 
 public:
   bool IsKind(Kind k) const { return k == tag; }
-  bool IsLoad() const { return tag == Load || tag == LoadR || tag == LoadS; }
+  bool IsLoad() const { return tag == Load || tag == LoadR; }
   bool IsLoadR() const { return tag == LoadR; }
-  bool IsLoadS() const { return tag == LoadS || tag == Load; }
 
   const ptr<Expr> FillingTo() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
@@ -2943,6 +2935,10 @@ public:
   bool FillingIsDecl() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
     return std::get<0>(info).is_decl;
+  }
+  void SetFillingIsDecl(bool v) {
+    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
+    std::get<0>(info).is_decl = v;
   }
   void SetFillingArrayDims(ptr<MultiValues> d) {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
@@ -3134,12 +3130,6 @@ public:
                                 CloneP(l_info.future), l_info.async,
                                 l_info.swiz_mode, l_info.explicit_swizzle);
     }
-    case LoadS: {
-      auto l_info = std::get<1>(info);
-      return Make<MMAOperation>(LoadSTag{}, CloneP(l_info.ld_expr),
-                                CloneP(l_info.future), l_info.async,
-                                l_info.swiz_mode, l_info.explicit_swizzle);
-    }
     case Exec: {
       auto e_info = std::get<2>(info);
       if (e_info.scale)
@@ -3176,17 +3166,6 @@ public:
       auto l_info = std::get<1>(info);
       if (l_info.future) os << PSTR(l_info.future) << " = ";
       os << "MMA.LOAD" << ((l_info.async) ? ".ASYNC" : "") << " "
-         << PSTR(l_info.ld_expr);
-    } break;
-    case LoadR: {
-      auto l_info = std::get<1>(info);
-      os << "MMA.LOADR " << PSTR(l_info.ld_expr);
-      if (l_info.future) os << ", " << PSTR(l_info.future);
-    } break;
-    case LoadS: {
-      auto l_info = std::get<1>(info);
-      if (l_info.future) os << PSTR(l_info.future) << " = ";
-      os << "MMA.LOADS" << ((l_info.async) ? ".ASYNC" : "") << " "
          << PSTR(l_info.ld_expr);
     } break;
     case Exec: {
@@ -3250,43 +3229,48 @@ public:
   __UDT_TYPE_INFO__(Node, MMA)
 };
 
-// frag.apply target, [](i, j) { return expr; };
-// Element-wise transform over a fragment's register elements.
-// Desugars to a register-direct loop identical to automap codegen.
-struct FragApply : public Node, public TypeIDProvider<FragApply> {
-  ptr<Expr> target;
-  std::vector<std::string> params;
-  ptr<Node> body;
 
-  FragApply(const location& l, const ptr<Expr>& t, std::vector<std::string> p,
-            const ptr<Node>& b)
-      : Node(l), target(t), params(std::move(p)), body(b) {}
+// apply {i, j} in frag.span { stmts }
+// Collective element-wise operation over a fragment's logical span.
+// Multi-statement body with row-hoisting semantics:
+//   - Statements referencing only outer iterators execute once per row.
+//   - Statements referencing inner iterators execute per element.
+// ApplyBlock is
+// imperative with multiple assignment statements in the body.
+struct ApplyBlock : public Node, public TypeIDProvider<ApplyBlock> {
+  ptr<Expr> span_expr;
+  std::vector<std::string> iterators;
+  ptr<MultiNodes> body;
+
+  ApplyBlock(const location& l, const ptr<Expr>& span, std::vector<std::string> iters,
+             const ptr<MultiNodes>& b)
+      : Node(l), span_expr(span), iterators(std::move(iters)), body(b) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<FragApply>(LOC(), CloneP(target), params, CloneP(body));
+    return Make<ApplyBlock>(LOC(), CloneP(span_expr), iterators, CloneP(body));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << "frag.apply ";
-    target->Print(os, "", with_type);
-    os << ", [](";
-    for (size_t i = 0; i < params.size(); ++i) {
+    os << prefix << "apply {";
+    for (size_t i = 0; i < iterators.size(); ++i) {
       if (i > 0) os << ", ";
-      os << params[i];
+      os << iterators[i];
     }
-    os << ") { return ...; }";
+    os << "} in ";
+    span_expr->Print(os, "", with_type);
+    os << " { ... }";
   }
 
-  const std::string& TargetName() const {
-    auto id = GetIdentifier(*target);
-    assert(id && "frag.apply target must be an identifier");
+  const std::string& SpanFragmentName() const {
+    auto id = GetIdentifier(*span_expr);
+    assert(id && "apply span must reference a fragment");
     return id->name;
   }
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, FragApply)
+  __UDT_TYPE_INFO__(Node, ApplyBlock)
 };
 
 enum class FragTransferKind { STORE, LOAD, COPY };

@@ -1,0 +1,156 @@
+2026-06-08 18:33:47,797 INFO:Auto-tuning with 0.9 CPU utilizations, 256 CPUs available, 230 CPUs will be used
+2026-06-08 18:33:48,647 WARNING:Benchmark timeout is enforced in benchmark workers by running each benchmark call in a daemon sub-thread and waiting up to the configured timeout.
+2026-06-08 18:33:50,043 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 1, 'threads': 256} at index 7 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:33:50,068 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 1, 'threads': 256} at index 1 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:33:50,073 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 3, 'threads': 256} at index 5 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:33:50,079 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 2, 'threads': 256} at index 9 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:33:50,093 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 2, 'threads': 256} at index 3 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:33:50,105 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 3, 'threads': 256} at index 11 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:33:59,019 INFO:Auto-tuning with 0.9 CPU utilizations, 256 CPUs available, 230 CPUs will be used
+2026-06-08 18:33:59,948 WARNING:Benchmark timeout is enforced in benchmark workers by running each benchmark call in a daemon sub-thread and waiting up to the configured timeout.
+2026-06-08 18:34:02,023 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 2, 'threads': 256} at index 3 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:02,113 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 2, 'threads': 256} at index 9 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:02,245 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 1, 'threads': 256} at index 1 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:02,307 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 3, 'threads': 256} at index 5 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:02,309 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 3, 'threads': 256} at index 11 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:02,315 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 1, 'threads': 256} at index 7 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:26,353 INFO:Auto-tuning with 0.9 CPU utilizations, 256 CPUs available, 230 CPUs will be used
+2026-06-08 18:34:27,235 WARNING:Benchmark timeout is enforced in benchmark workers by running each benchmark call in a daemon sub-thread and waiting up to the configured timeout.
+2026-06-08 18:34:29,211 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 2, 'threads': 256} at index 3 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:29,232 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 3, 'threads': 256} at index 11 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:29,324 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 1, 'threads': 256} at index 7 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:29,334 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 2, 'threads': 256} at index 9 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:29,376 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 1, 'threads': 256} at index 1 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:29,384 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 3, 'threads': 256} at index 5 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:53,283 INFO:Auto-tuning with 0.9 CPU utilizations, 256 CPUs available, 230 CPUs will be used
+2026-06-08 18:34:54,169 WARNING:Benchmark timeout is enforced in benchmark workers by running each benchmark call in a daemon sub-thread and waiting up to the configured timeout.
+2026-06-08 18:34:56,010 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 3, 'threads': 256} at index 11 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:56,013 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 1, 'threads': 256} at index 7 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:56,080 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 2, 'threads': 256} at index 3 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:56,122 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 3, 'threads': 256} at index 5 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:56,122 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 2, 'threads': 256} at index 9 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:34:56,162 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 1, 'threads': 256} at index 1 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:18,943 INFO:Auto-tuning with 0.9 CPU utilizations, 256 CPUs available, 230 CPUs will be used
+2026-06-08 18:35:19,717 WARNING:Benchmark timeout is enforced in benchmark workers by running each benchmark call in a daemon sub-thread and waiting up to the configured timeout.
+2026-06-08 18:35:21,481 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 2, 'threads': 256} at index 9 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:21,483 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 1, 'threads': 256} at index 7 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:21,570 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 3, 'threads': 256} at index 5 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:21,579 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 3, 'threads': 256} at index 11 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:21,606 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 2, 'threads': 256} at index 3 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:21,606 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 1, 'threads': 256} at index 1 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:41,039 INFO:Auto-tuning with 0.9 CPU utilizations, 256 CPUs available, 230 CPUs will be used
+2026-06-08 18:35:41,908 WARNING:Benchmark timeout is enforced in benchmark workers by running each benchmark call in a daemon sub-thread and waiting up to the configured timeout.
+2026-06-08 18:35:43,752 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 2, 'threads': 256} at index 3 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:43,967 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 2, 'threads': 256} at index 9 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:43,969 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 1, 'threads': 256} at index 7 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:43,989 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 1, 'threads': 256} at index 1 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:43,990 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 64, 'num_stages': 3, 'threads': 256} at index 11 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 64) -> (32,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 64) -> (16,), replicate: 1, thread: 256, forward_thread: _j // 32 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 32 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+
+2026-06-08 18:35:44,032 DEBUG:Compilation failed for config {'block_M': 64, 'block_N': 32, 'num_stages': 3, 'threads': 256} at index 5 with error: Layout infer conflict between acc_s and acc_s_cast in T.Parallel loop:
+    loop Fragment((64, 32) -> (16,), replicate: 2, thread: 256, forward_thread: _rep * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+    fragment Fragment((64, 32) -> (8,), replicate: 1, thread: 256, forward_thread: _j // 16 * 128 + _i // 16 * 32 + _i % 8 * 4 + _j % 8 // 2, forward_index: (_j % 16 // 8 * 4 + _i % 16 // 8 * 2 + _j % 2,), thread_range: I.Range(0, 256))
+

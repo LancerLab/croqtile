@@ -4,8 +4,8 @@
 
 __co__ void fragment_decl_test() {
   parallel t by 128 : thread {
-    fragment f32[BLOCK_M] scores_max {0.0f};
-    foreach i in [BLOCK_M] : automap(t)
+    frag f32[BLOCK_M] scores_max {0.0f};
+    apply {i} in scores_max.span
       scores_max.at(i) = 0.0f;
   }
 }

@@ -65,12 +65,12 @@ __co__ void flash_atten(
 
         wait qf;
 
-        fragment f32[WG_M] scores_max {-inf};
-        fragment f32[WG_M] scores_max_prev;
-        fragment f32[WG_M] scores_scale;
-        fragment f32[WG_M] scores_sum;
-        fragment f32[WG_M] logsum {0.0f};
-        fragment bf16[WG_M, BLOCK_N] acc_s_cast;
+        frag f32[WG_M] scores_max {-inf};
+        frag f32[WG_M] scores_max_prev;
+        frag f32[WG_M] scores_scale;
+        frag f32[WG_M] scores_sum;
+        frag f32[WG_M] logsum {0.0f};
+        frag bf16[WG_M, BLOCK_N] acc_s_cast;
         acc_o = mma.fill.f32 0.0f;
 
         // Prologue: issue QK[0]
@@ -86,22 +86,27 @@ __co__ void flash_atten(
           // Softmax on acc_s (QK[bn] result is ready)
           int causal_row_base = bm * BLOCK_M + cid * WG_M + past_len;
           if ((bn + 1) * BLOCK_N > causal_row_base + 1) {
-            frag.apply acc_s, [](i, j) {
-              return ((bn * BLOCK_N + j) > (bm * BLOCK_M + cid * WG_M + i + past_len))
-                ? -inf : acc_s.at(i, j);
-            };
+            apply {i, j} in acc_s.span {
+              if ((bn * BLOCK_N + j) > (bm * BLOCK_M + cid * WG_M + i + past_len))
+                acc_s.at(i, j) = -inf;
+            }
           }
 
-          frag.copy scores_max_prev, scores_max;
-          frag.reduce_max acc_s, scores_max, 1;
-          frag.apply scores_max, [](i) { return __max(scores_max.at(i), scores_max_prev.at(i)); };
-          frag.apply scores_scale, [](i) { return __exp2f(scores_max_prev.at(i) * scale - scores_max.at(i) * scale); };
-          frag.apply acc_s, [](i, j) { return __exp2f(acc_s.at(i, j) * scale - scores_max.at(i) * scale); };
-          frag.reduce_sum acc_s, scores_sum, 1;
-          frag.apply logsum, [](i) { return logsum.at(i) * scores_scale.at(i) + scores_sum.at(i); };
-
-          frag.apply acc_s_cast, [](i, j) { return __to<bf16>(acc_s.at(i, j)); };
-          frag.apply acc_o, [](i, j) { return acc_o.at(i, j) * scores_scale.at(i); };
+          copy(scores_max_prev, scores_max);
+          reduce_max(scores_max, acc_s, 1);
+          apply {i} in scores_max.span {
+            scores_max.at(i) = __max(scores_max.at(i), scores_max_prev.at(i));
+            scores_scale.at(i) = __exp2f(scores_max_prev.at(i) * scale - scores_max.at(i) * scale);
+          }
+          apply {i, j} in acc_s.span
+            acc_s.at(i, j) = __exp2f(acc_s.at(i, j) * scale - scores_max.at(i) * scale);
+          reduce_sum(scores_sum, acc_s, 1);
+          apply {i} in logsum.span
+            logsum.at(i) = logsum.at(i) * scores_scale.at(i) + scores_sum.at(i);
+          apply {i, j} in acc_o.span
+            acc_o.at(i, j) = acc_o.at(i, j) * scores_scale.at(i);
+          apply {i, j} in acc_s_cast.span
+            acc_s_cast.at(i, j) = __to<bf16>(acc_s.at(i, j));
 
           // Issue PV[bn]
           mma.row.col acc_o, acc_s_cast, v_buf[stage];
@@ -120,7 +125,8 @@ __co__ void flash_atten(
           }
         }
 
-        frag.apply acc_o, [](i, j) { return acc_o.at(i, j) / logsum.at(i); };
+        apply {i, j} in acc_o.span
+          acc_o.at(i, j) = acc_o.at(i, j) / logsum.at(i);
         mma.store acc_o, acc_o_shared.subspan(WG_M, DIM).at(cid, 0);
         dma.copy acc_o_shared.subspan(WG_M, DIM).at(cid, 0) => O_head.subspan(WG_M, DIM).at(bm * 2 + cid, 0);
       }

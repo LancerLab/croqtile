@@ -3,12 +3,12 @@
 #define BLOCK_M 64
 #define BLOCK_N 64
 
-// --- UNIFORM source: frag.reduce_max with 2D UNIFORM fragment ---
+// --- UNIFORM source: reduce_max with 2D UNIFORM fragment ---
 // CHECK-LABEL: __choreo_device_test_uniform_reduce_max
 __co__ void test_uniform_reduce_max() {
   parallel t by 128 : thread {
-    fragment f32[BLOCK_M, BLOCK_N] src {0.0f};
-    fragment f32[BLOCK_M] dst;
+    frag f32[BLOCK_M, BLOCK_N] src {0.0f};
+    frag f32[BLOCK_M] dst;
     // CHECK: { // frag.reduce_max
     // CHECK: for (int __row = 0; __row <
     // CHECK: float __local_reduce = __int_as_float(0xff800000)
@@ -17,22 +17,22 @@ __co__ void test_uniform_reduce_max() {
     // CHECK: choreo::AllReduce<choreo::MaxOp,
     // CHECK: dst[__row] = __local_reduce;
     // CHECK: } // frag.reduce_max
-    frag.reduce_max src, dst, 1;
+    reduce_max(dst, src, 1);
   }
 }
 
-// --- UNIFORM source: frag.reduce_sum ---
+// --- UNIFORM source: reduce_sum ---
 // CHECK-LABEL: __choreo_device_test_uniform_reduce_sum
 __co__ void test_uniform_reduce_sum() {
   parallel t by 128 : thread {
-    fragment f32[BLOCK_M, BLOCK_N] src {0.0f};
-    fragment f32[BLOCK_M] dst;
+    frag f32[BLOCK_M, BLOCK_N] src {0.0f};
+    frag f32[BLOCK_M] dst;
     // CHECK: { // frag.reduce_sum
     // CHECK: float __local_reduce = 0.0f;
     // CHECK: __local_reduce += src[
     // CHECK: choreo::AllReduce<choreo::SumOp,
     // CHECK: dst[__row] = __local_reduce;
     // CHECK: } // frag.reduce_sum
-    frag.reduce_sum src, dst, 1;
+    reduce_sum(dst, src, 1);
   }
 }
