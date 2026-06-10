@@ -7,10 +7,10 @@
 
 #include <algorithm>
 #include <assert.h>
-#include <cmath>   // For fp16
+#include <cmath> // For fp16
+#include <condition_variable>
 #include <cstdint> // For fixed-width integer types
 #include <cstdlib>
-#include <condition_variable>
 #include <functional>
 #include <future>
 #include <initializer_list> // for std::initializer_list
@@ -38,9 +38,9 @@
   #define __co_any__ __device__ __host__
 
 #elif defined(__CHOREO_TARGET_AMDGPU__)
-  #include <hip/hip_runtime.h>
-  #include <hip/hip_fp16.h>
   #include <hip/hip_bfloat16.h>
+  #include <hip/hip_fp16.h>
+  #include <hip/hip_runtime.h>
   #define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
   #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
   #define __co_device__ __device__

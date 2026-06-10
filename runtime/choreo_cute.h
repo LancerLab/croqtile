@@ -817,7 +817,8 @@ CUTE_HOST_DEVICE void naive_copy(const Src& src, Dst& dst) {
 // Trait: detect AutoVectorizingCopy atoms wider than element size.
 // These atoms cause misaligned stores in CuTe's copy_if (per-element dispatch
 // with a wide atom). cp_async and narrow atoms are safe with copy_if.
-template <class> struct choreo_is_wide_autovec_ : std::false_type {};
+template <class>
+struct choreo_is_wide_autovec_ : std::false_type {};
 template <int N, class T>
 struct choreo_is_wide_autovec_<
     cute::Copy_Atom<cute::AutoVectorizingCopyWithAssumedAlignment<N>, T>>
@@ -865,7 +866,10 @@ __device__ static inline void tiled_copy(const SrcTensor& src, DstTensor& dst,
             bool all_valid = true;
             CUTE_UNROLL
             for (int v = 0; v < kAtomV; ++v) {
-              if (!pred_thr(v, m, k)) { all_valid = false; break; }
+              if (!pred_thr(v, m, k)) {
+                all_valid = false;
+                break;
+              }
             }
             if (all_valid) {
               copy(ATOM{}, src_thr(_, m, k), dst_thr(_, m, k));
@@ -883,7 +887,10 @@ __device__ static inline void tiled_copy(const SrcTensor& src, DstTensor& dst,
           bool all_valid = true;
           CUTE_UNROLL
           for (int v = 0; v < kAtomV; ++v) {
-            if (!pred_thr(v, m)) { all_valid = false; break; }
+            if (!pred_thr(v, m)) {
+              all_valid = false;
+              break;
+            }
           }
           if (all_valid) {
             copy(ATOM{}, src_thr(_, m), dst_thr(_, m));

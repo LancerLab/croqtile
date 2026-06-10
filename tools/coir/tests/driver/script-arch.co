@@ -1,0 +1,15 @@
+// RUN: cocc -t cute -gs -arch=sm_80 %s | FileCheck %s
+//
+// Test cocc -arch: verify architecture is embedded in generated script
+
+__co__ s32 [16] identity(s32 [16] x) {
+  s32[x.span] y;
+  parallel p by 16
+    y.at(p) = x.at(p);
+  return y;
+}
+
+// CHECK: cat > "$TMPDIR/choreo.h"
+// CHECK: gpu_arch="sm_80"
+// CHECK: __global__ void identity
+// CHECK: "${NVCC}" -std=c++17 -arch="${gpu_arch}"

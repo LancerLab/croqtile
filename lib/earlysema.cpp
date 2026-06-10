@@ -1461,21 +1461,21 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     if (n.GetLevel() != ParallelLevel::DEVICE)
       Error1(n.LOC(), "device target annotation is only valid on 'device' "
                       "parallel level.");
-    auto dev_target =
-        TargetRegistry::CreateByDeviceName(n.DeviceTargetName());
+    auto dev_target = TargetRegistry::CreateByDeviceName(n.DeviceTargetName());
     if (!dev_target)
-      Error1(n.LOC(), "unknown device target '" + n.DeviceTargetName() +
-                          "'; available targets: " +
-                          [&] {
-                            std::string s;
-                            for (auto& ti : TargetRegistry::List()) {
-                              auto t = TargetRegistry::Create(ti.name);
-                              if (!s.empty()) s += ", ";
-                              s += t->DeviceName();
-                            }
-                            return s;
-                          }() +
-                          ".");
+      Error1(
+          n.LOC(), "unknown device target '" + n.DeviceTargetName() +
+                       "'; available targets: " +
+                       [&] {
+                         std::string s;
+                         for (auto& ti : TargetRegistry::List()) {
+                           auto t = TargetRegistry::Create(ti.name);
+                           if (!s.empty()) s += ", ";
+                           s += t->DeviceName();
+                         }
+                         return s;
+                       }() +
+                       ".");
     else if (!CCtx().GetDeviceTarget(n.DeviceTargetName()))
       CCtx().AddDeviceTarget(n.DeviceTargetName(), std::move(dev_target));
     if (!n.IsAsync())

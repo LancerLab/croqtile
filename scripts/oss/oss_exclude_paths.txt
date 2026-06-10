@@ -71,6 +71,7 @@ results.tsv
 # CoIR IR tooling -- internal-only paths
 tools/coir/lib/CodeGen/GCU/
 tools/coir/tests/gcu/
+tools/coir/tests/driver/emit-topscc.co
 tools/coir/llvm-dep.conf
 
 # External deps (managed separately per repo)

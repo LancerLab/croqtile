@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCU
-// RUN: coir-gen %s | coir-codegen --target=gcu -gs - > %s.sh && bash %s.sh --execute | FileCheck --match-full-lines %s && rm -f %s.sh
+// RUN: co2ir %s | coir-codegen --target=gcu -gs - > %s.sh && bash %s.sh --execute | FileCheck --match-full-lines %s && rm -f %s.sh
 //
-// End-to-end GCU test: .co -> coir-gen -> coir-codegen --target=gcu -gs -> execute
+// End-to-end GCU test: .co -> co2ir -> coir-codegen --target=gcu -gs -> execute
 
 __co__ s32 [64] ele_add(s32 [64] a, s32 [64] b) {
   s32[a.span] c;

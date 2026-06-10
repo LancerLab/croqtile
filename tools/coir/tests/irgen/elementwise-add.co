@@ -1,4 +1,4 @@
-// RUN: coir-gen %s | FileCheck %s
+// RUN: co2ir %s | FileCheck %s
 
 // IRGen test: verify that AST-to-CoIR lowering generates correct MLIR
 // for a simple elementwise add kernel.

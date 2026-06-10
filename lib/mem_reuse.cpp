@@ -32,16 +32,14 @@ private:
     if (isa<AST::ChoreoFunction>(&n)) {
       cur_dev_fname = CurrentFunctionName();
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      if (pb->IsDeviceEntry())
-        cur_dev_fname = SSTab().ScopeName();
+      if (pb->IsDeviceEntry()) cur_dev_fname = SSTab().ScopeName();
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      if (pb->IsDeviceEntry())
-        cur_dev_fname = CurrentFunctionName();
+      if (pb->IsDeviceEntry()) cur_dev_fname = CurrentFunctionName();
     }
     return true;
   }

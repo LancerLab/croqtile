@@ -1,0 +1,17 @@
+// RUN: cocc -emit-coir %s | FileCheck %s
+//
+// Test cocc -emit-coir: verify CoIR MLIR output from end-to-end driver
+
+__co__ s32 [64] vec_add(s32 [64] a, s32 [64] b) {
+  s32[a.span] c;
+  parallel p by 64
+    c.at(p) = a.at(p) + b.at(p);
+  return c;
+}
+
+// CHECK: coir.kernel @vec_add
+// CHECK-SAME: !coir.tensor<64xi32, global>
+// CHECK: coir.parallel
+// CHECK: arith.addi
+// CHECK: coir.tensor.store_elem
+// CHECK: coir.return

@@ -5,8 +5,8 @@
 
 namespace Choreo {
 
-// Execute a shell command and capture its stdout (trimmed of trailing newlines).
-// Returns empty string on failure.
+// Execute a shell command and capture its stdout (trimmed of trailing
+// newlines). Returns empty string on failure.
 std::string ExecCapture(const std::string& cmd);
 
 // Find a toolchain binary: check configured_dir/bin/<name> first, then PATH.
@@ -21,8 +21,7 @@ std::string MakeTempFile(const std::string& suffix);
 // Write source to a temp file, compile with `compiler`, run, return stdout.
 // Returns empty string on failure.
 std::string CompileAndRun(const std::string& compiler,
-                          const std::string& source,
-                          const std::string& suffix,
+                          const std::string& source, const std::string& suffix,
                           const std::string& extra_flags = "");
 
 } // namespace Choreo

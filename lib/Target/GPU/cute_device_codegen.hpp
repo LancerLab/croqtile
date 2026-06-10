@@ -107,7 +107,7 @@ fi
   }
 
   void EmitSetupFiles(std::ostream& out,
-                     const std::string& build_path) const override {
+                      const std::string& build_path) const override {
     auto tdir = TargetBuildDir(build_path);
     out << "mkdir -p " << tdir << "\n";
     out << "cat <<'EOF' > " << tdir << "/choreo_types_cute.h\n";
@@ -119,28 +119,23 @@ fi
   }
 
   void EmitDeviceCompileCommand(std::ostream& out,
-                               const std::string& build_path,
-                               const std::string& src,
-                               const std::string& obj) const override {
+                                const std::string& build_path,
+                                const std::string& src,
+                                const std::string& obj) const override {
     out << "  ${NVCC} -arch ${gpu_arch} -std=c++17"
         << " -DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -D__CHOREO_TARGET_CUTE__"
         << " -D__USE_CUDA_TYPE__"
-        << " -c -I" << TargetBuildDir(build_path)
-        << " -I" << build_path
-        << " -I${CUDA_HOME}/include -I${CUTE_HOME}/include " << src
-        << " -o " << obj
-        << " || { echo 'Device compilation failed'; exit 1; }\n";
+        << " -c -I" << TargetBuildDir(build_path) << " -I" << build_path
+        << " -I${CUDA_HOME}/include -I${CUTE_HOME}/include " << src << " -o "
+        << obj << " || { echo 'Device compilation failed'; exit 1; }\n";
   }
 
-  void EmitHostCompileCommand(std::ostream& out,
-                              const std::string& build_path,
+  void EmitHostCompileCommand(std::ostream& out, const std::string& build_path,
                               const std::string& src,
                               const std::string& obj) const override {
     out << "  ${NVCC} -arch ${gpu_arch} -std=c++17"
-        << " -c -I" << build_path
-        << " -I${CUDA_HOME}/include " << src
-        << " -o " << obj
-        << " || { echo 'Host compilation failed'; exit 1; }\n";
+        << " -c -I" << build_path << " -I${CUDA_HOME}/include " << src << " -o "
+        << obj << " || { echo 'Host compilation failed'; exit 1; }\n";
   }
 
   void EmitLinkCommand(std::ostream& out,

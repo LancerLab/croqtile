@@ -42,13 +42,14 @@ public:
 #endif
     auto hipcc = FindToolchain(cfg_dir, "hipcc");
     if (hipcc.empty()) return "";
-    auto arch = CompileAndRun(hipcc,
-        "#include <cstdio>\n"
-        "#include <hip/hip_runtime.h>\n"
-        "int main(){hipDeviceProp_t p;"
-        "if(hipGetDeviceProperties(&p,0)!=hipSuccess)return 1;"
-        "printf(\"%s\",p.gcnArchName);return 0;}\n",
-        ".cpp");
+    auto arch =
+        CompileAndRun(hipcc,
+                      "#include <cstdio>\n"
+                      "#include <hip/hip_runtime.h>\n"
+                      "int main(){hipDeviceProp_t p;"
+                      "if(hipGetDeviceProperties(&p,0)!=hipSuccess)return 1;"
+                      "printf(\"%s\",p.gcnArchName);return 0;}\n",
+                      ".cpp");
     if (!arch.empty() && IsArchSupported(arch)) return arch;
     return "";
   }

@@ -73,8 +73,7 @@ std::string FindToolchain(const std::string& configured_dir,
 }
 
 std::string CompileAndRun(const std::string& compiler,
-                          const std::string& source,
-                          const std::string& suffix,
+                          const std::string& source, const std::string& suffix,
                           const std::string& extra_flags) {
   auto src = MakeTempFile(suffix);
   if (src.empty()) return "";
@@ -83,7 +82,11 @@ std::string CompileAndRun(const std::string& compiler,
     std::ofstream f(src);
     if (!f) return "";
     f << source;
-    if (!f) { std::error_code ec; fs::remove(src, ec); return ""; }
+    if (!f) {
+      std::error_code ec;
+      fs::remove(src, ec);
+      return "";
+    }
   }
 #ifdef _WIN32
   std::string cmd = "\"" + compiler + "\" -o \"" + exe + "\" \"" + src + "\"";

@@ -55,13 +55,14 @@ public:
 #endif
     auto nvcc = FindToolchain(cfg_dir, "nvcc");
     if (nvcc.empty()) return "";
-    auto cc = CompileAndRun(nvcc,
-        "#include <cstdio>\n"
-        "#include <cuda_runtime.h>\n"
-        "int main(){cudaDeviceProp p;"
-        "if(cudaGetDeviceProperties(&p,0)!=cudaSuccess)return 1;"
-        "printf(\"%d%d\",p.major,p.minor);return 0;}\n",
-        ".cu", "-lcudart");
+    auto cc =
+        CompileAndRun(nvcc,
+                      "#include <cstdio>\n"
+                      "#include <cuda_runtime.h>\n"
+                      "int main(){cudaDeviceProp p;"
+                      "if(cudaGetDeviceProperties(&p,0)!=cudaSuccess)return 1;"
+                      "printf(\"%d%d\",p.major,p.minor);return 0;}\n",
+                      ".cu", "-lcudart");
     if (cc.empty()) return "";
     ArchId arch = "sm_" + cc;
     if (IsArchSupported(arch)) return arch;
@@ -147,8 +148,7 @@ public:
     return {
         {STR(ChoreoFeature::EVENT), Description(ChoreoFeature::EVENT)},
         {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
-        {STR(ChoreoFeature::ASYNC_DMA),
-         Description(ChoreoFeature::ASYNC_DMA)},
+        {STR(ChoreoFeature::ASYNC_DMA), Description(ChoreoFeature::ASYNC_DMA)},
         {STR(ChoreoFeature::DGMA), Description(ChoreoFeature::DGMA)},
         {STR(ChoreoFeature::SLML), Description(ChoreoFeature::SLML)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},

@@ -1,4 +1,5 @@
 #include "ast.hpp"
+#include "choreo_api.hpp"
 #include "command_line.hpp"
 #include "options.hpp"
 #include "pipeline.hpp"
@@ -8,11 +9,7 @@
 #include <getopt.h>
 
 using namespace Choreo;
-
-extern AST::Program root;
-
 using namespace AST;
-using namespace Choreo;
 
 int main(int argc, char* argv[]) {
   CommandLine cl;
@@ -53,7 +50,7 @@ int main(int argc, char* argv[]) {
 
   if (CCtx().DebugAll()) {
     dbgs() << "Choreo: Debug of parsing is switched on." << std::endl;
-    p.set_debug_level(1); // Enable Bison debugging
+    p.set_debug_level(1);
     Scanner::SetDebug();
   }
 
@@ -77,14 +74,14 @@ int main(int argc, char* argv[]) {
   }
 
   if (CCtx().DumpAst()) {
-    root.Print(dbgs());
+    CompilerAPI::GetAST().Print(dbgs());
     return 0;
   }
 
   auto& pl = ASTPipeline::Get().PlanAllRoutines();
   pl.ValidatePassNames();
 
-  if (!pl.RunOnProgram(root)) return pl.Status();
+  if (!pl.RunOnProgram(CompilerAPI::GetAST())) return pl.Status();
 
   return 0;
 }

@@ -11,9 +11,10 @@ extern/*
 choreo
 copp
 /co-mock
-/coir-gen
+/co2ir
 /coir-opt
 /coir-codegen
+/cocc
 build/
 build-release/
 build-debug/

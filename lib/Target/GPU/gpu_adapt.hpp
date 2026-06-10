@@ -774,9 +774,9 @@ public:
                             " (" + STR(fst) + " -> " + STR(tst) + ").");
     } else if (n.IsAsync()) {
       if (!CCtx().TargetSupportAsyncDMA())
-        Error1(n.LOC(),
-               "target '" + CCtx().GetTarget().Name() + "' (arch '" +
-                   CCtx().GetArch() + "') does not support async DMA.");
+        Error1(n.LOC(), "target '" + CCtx().GetTarget().Name() + "' (arch '" +
+                            CCtx().GetArch() +
+                            "') does not support async DMA.");
       if ((fst == Storage::SHARED && tst == Storage::GLOBAL) ||
           (fst == Storage::SHARED && tst == Storage::SHARED) ||
           (fst == Storage::SHARED && tst == Storage::LOCAL) ||

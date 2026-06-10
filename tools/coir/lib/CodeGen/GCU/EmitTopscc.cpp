@@ -5,6 +5,7 @@
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
 #include "Dialect/CoIR/CoIRAttrs.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -456,63 +457,80 @@ private:
 } // namespace
 
 namespace coir {
-
 void emitTopscc(mlir::ModuleOp module, llvm::raw_ostream &os) {
   TopsccEmitter emitter(os);
   emitter.emitModule(module);
 }
+} // namespace coir
 
-static void emitScriptHeader(llvm::raw_ostream &os) {
-  os << "#!/usr/bin/env bash\n";
-  os << "# CoIR generated script -- compile and execute topscc kernel\n";
-  os << "set -euo pipefail\n\n";
-  os << "TOPSCC=\"${TOPSCC:-topscc}\"\n";
-  os << "if ! command -v \"$TOPSCC\" &>/dev/null; then\n";
-  os << "  echo \"Error: topscc not found\"; exit 1\n";
-  os << "fi\n\n";
-  os << "# Find choreo runtime header\n";
-  os << "if [[ -z \"${CHOREO_ROOT:-}\" ]]; then\n";
-  os << "  _coir_bin=$(which coir-codegen 2>/dev/null || true)\n";
-  os << "  if [[ -n \"$_coir_bin\" ]]; then\n";
-  os << "    CHOREO_ROOT=\"$(cd \"$(dirname \"$_coir_bin\")\" && "
-        "git rev-parse --show-toplevel 2>/dev/null || true)\"\n";
-  os << "  fi\n";
-  os << "  if [[ -z \"${CHOREO_ROOT:-}\" ]]; then\n";
-  os << "    CHOREO_ROOT=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && "
-        "git rev-parse --show-toplevel 2>/dev/null || "
-        "echo \"$(dirname \"${BASH_SOURCE[0]}\")\")\" \n";
-  os << "  fi\n";
-  os << "fi\n";
-  os << "CHOREO_RT=\"${CHOREO_ROOT}/runtime\"\n\n";
-  os << "TMPFILE=$(mktemp /tmp/coir_XXXXXX.cc)\n";
-  os << "BINFILE=\"${TMPFILE%.cc}\"\n";
-  os << "trap 'rm -f $TMPFILE $BINFILE' EXIT\n\n";
-  os << "cat > \"$TMPFILE\" << '__COIR_TOPSCC_SOURCE__'\n";
-}
+namespace {
 
-static void emitScriptFooter(llvm::raw_ostream &os) {
-  os << "__COIR_TOPSCC_SOURCE__\n\n";
-  os << "# Compile and optionally execute\n";
-  os << "\"$TOPSCC\" -std=c++17 -I\"$CHOREO_RT\" "
-        "-o \"$BINFILE\" \"$TMPFILE\" -lpthread -ldl -lrt 2>&1\n";
-  os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
-  os << "  shift\n";
-  os << "  \"$BINFILE\" \"$@\"\n";
-  os << "fi\n";
-}
-
-static void emitHostCode(llvm::raw_ostream &os, ModuleOp module) {
+void emitHostCode(llvm::raw_ostream &os, ModuleOp module) {
   auto hostCodeAttr = module->getAttrOfType<StringAttr>("coir.host_code");
   if (!hostCodeAttr) return;
   os << "\n" << hostCodeAttr.getValue() << "\n";
 }
 
-void emitTopsccScript(mlir::ModuleOp module, llvm::raw_ostream &os) {
-  emitScriptHeader(os);
-  TopsccEmitter emitter(os);
-  emitter.emitModule(module);
-  emitHostCode(os, module);
-  emitScriptFooter(os);
-}
+class TopsccTargetEmitter : public CoIR::Emitter {
+public:
+  void EmitScript(mlir::ModuleOp module, llvm::raw_ostream &os) override {
+    auto &sctx = CoIR::ScriptContext::Get();
 
-} // namespace coir
+    os << "#!/usr/bin/env bash\n";
+    os << "# CoIR generated script -- compile and execute topscc kernel\n";
+    os << "set -eo pipefail\n\n";
+
+    os << "TMPDIR=$(mktemp -d /tmp/cocc_XXXXXX)\n";
+    os << "trap 'rm -rf $TMPDIR' EXIT\n\n";
+
+    if (sctx.types_header) {
+      os << "cat > \"$TMPDIR/choreo_types.h\" << '__COCC_TYPES_HEADER__'\n";
+      os << sctx.types_header;
+      os << "\n__COCC_TYPES_HEADER__\n\n";
+    }
+    if (sctx.runtime_header) {
+      os << "cat > \"$TMPDIR/choreo.h\" << '__COCC_CHOREO_HEADER__'\n";
+      os << sctx.runtime_header;
+      os << "\n__COCC_CHOREO_HEADER__\n\n";
+    }
+
+    if (!sctx.build_env.empty()) os << sctx.build_env;
+
+    os << "TOPSCC=\"${TOPSCC:-topscc}\"\n";
+    os << "if ! command -v \"$TOPSCC\" &>/dev/null; then\n";
+    os << "  echo \"Error: topscc not found\"; exit 1\n";
+    os << "fi\n\n";
+
+    os << "TMPFILE=\"$TMPDIR/kernel.cc\"\n";
+    os << "BINFILE=\"$TMPDIR/kernel\"\n\n";
+    os << "cat > \"$TMPFILE\" << '__COIR_TOPSCC_SOURCE__'\n";
+
+    coir::emitTopscc(module, os);
+    emitHostCode(os, module);
+
+    os << "\n__COIR_TOPSCC_SOURCE__\n\n";
+    os << "\"$TOPSCC\" -std=c++17 -I\"$TMPDIR\" "
+          "-o \"$BINFILE\" \"$TMPFILE\" -lpthread -ldl -lrt 2>&1\n";
+    os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
+    os << "  shift\n";
+    os << "  \"$BINFILE\" \"$@\"\n";
+    os << "fi\n";
+  }
+
+  void EmitSource(mlir::ModuleOp module, llvm::raw_ostream &os) override {
+    coir::emitTopscc(module, os);
+    emitHostCode(os, module);
+  }
+};
+
+static bool registered_topscc = [] {
+  CoIR::EmitterRegistry::Register("topscc", [] {
+    return std::make_unique<TopsccTargetEmitter>();
+  });
+  CoIR::EmitterRegistry::Register("gcu", [] {
+    return std::make_unique<TopsccTargetEmitter>();
+  });
+  return true;
+}();
+
+} // namespace
