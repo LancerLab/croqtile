@@ -1,15 +1,12 @@
-// Warp-specialized 1p2c with 2-stage pipeline, TMA + 128B swizzle
+// Warp-specialized 1p2c with 2-stage pipeline, combined KV events
+// + Skip causal mask for tiles that are entirely below the diagonal
+// + launch_bounds(1)
 // D=128, bf16, causal prefill
 //
-// Compared to v1_manual_baseline (sequential dma.copy):
-//   - Async TMA loads for Q, K, V (single-thread producer)
-//   - 1p2c warp specialization: 1 producer warpgroup + 2 consumer warpgroups
-//   - 2-stage double buffering with shared events for K and V
-//   - Producer/consumer overlap hides memory latency
-//   - 128B swizzle on TMA and WGMMA to avoid bank conflicts
-//
-// The compiler auto-splits the 128-element inner dim into [2, 64] groups
-// so that each TMA box fits the 128B swizzle constraint (64 * 2B = 128B).
+// Optimization: For tiles where the entire BLOCK_N column range is below
+// the causal diagonal for ALL rows in this consumer's WG_M slice, skip
+// the expensive per-element mask entirely. Only apply per-element masking
+// on the "boundary" tile where the diagonal intersects this consumer's rows.
 
 #define BLOCK_M 128
 #define BLOCK_N 128
@@ -39,7 +36,7 @@ __co__ void flash_atten(
     shared bf16[BLOCK_M, DIM] q_shared;
     shared bf16[BLOCK_N, DIM] k_buf[STAGES];
     shared bf16[BLOCK_N, DIM] v_buf[STAGES];
-    shared event qf, kf[STAGES], ke[STAGES], vf[STAGES], ve[STAGES];
+    shared event qf, kvf[STAGES], kve[STAGES];
 
     kv_bound = __min(cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N), cdiv(KV_SEQ, BLOCK_N));
 
@@ -51,23 +48,19 @@ __co__ void flash_atten(
 
         foreach {bn} in [kv_bound] {
           stage = bn % STAGES;
-          wait ke[stage];
-          tma.copy.async<kf[stage]>.swiz<SWIZ>
+          wait kve[stage];
+          tma.copy.async<kvf[stage]>.swiz<SWIZ>
             K_head.subspan(BLOCK_N, DIM).at(bn, 0) => k_buf[stage];
-          trigger kf[stage];
-
-          wait ve[stage];
-          tma.copy.async<vf[stage]>.swiz<SWIZ>
+          tma.copy.async<kvf[stage]>.swiz<SWIZ>
             V_head.subspan(BLOCK_N, DIM).at(bn, 0) => v_buf[stage];
-          trigger vf[stage];
+          trigger kvf[stage];
         }
       }
 
       inthreads.async (p > 0) {
         cid = p - 1;
         foreach {s} in [STAGES] {
-          trigger ke[s];
-          trigger ve[s];
+          trigger kve[s];
         }
 
         wait qf;
@@ -77,16 +70,20 @@ __co__ void flash_atten(
         frag f32[WG_M] scores_scale;
         frag f32[WG_M] scores_sum;
         frag f32[WG_M] logsum {0.0f};
+        frag bf16[WG_M, BLOCK_N] acc_s_cast;
         acc_o = mma.fill.f32 0.0f;
+
+        // Prologue: issue QK[0]
+        wait kvf[0];
+        acc_s = mma.fill.f32 0.0f;
+        mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[0];
+        mma.commit;
+        mma.wait<0>;
 
         foreach {bn} in [kv_bound] {
           stage = bn % STAGES;
-          acc_s = mma.fill.f32 0.0f;
 
-          wait kf[stage];
-          mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[stage];
-          trigger ke[stage];
-
+          // Softmax on acc_s (QK[bn] result is ready)
           int causal_row_base = bm * BLOCK_M + cid * WG_M + past_len;
           if ((bn + 1) * BLOCK_N > causal_row_base + 1) {
             apply {i, j} in acc_s.span {
@@ -108,14 +105,24 @@ __co__ void flash_atten(
             logsum.at(i) = logsum.at(i) * scores_scale.at(i) + scores_sum.at(i);
           apply {i, j} in acc_o.span
             acc_o.at(i, j) = acc_o.at(i, j) * scores_scale.at(i);
-
-          frag bf16[WG_M, BLOCK_N] acc_s_cast;
           apply {i, j} in acc_s_cast.span
             acc_s_cast.at(i, j) = __to<bf16>(acc_s.at(i, j));
 
-          wait vf[stage];
+          // Issue PV[bn]
           mma.row.col acc_o, acc_s_cast, v_buf[stage];
-          trigger ve[stage];
+          mma.commit;
+          trigger kve[stage];
+
+          // Issue QK[bn+1] while PV[bn] may still be in flight
+          if (bn + 1 < kv_bound) {
+            wait kvf[(bn + 1) % STAGES];
+            mma.fill acc_s, 0.0f;
+            mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[(bn + 1) % STAGES];
+            mma.commit;
+            mma.wait<0>;
+          } else {
+            mma.wait<0>;
+          }
         }
 
         apply {i, j} in acc_o.span
@@ -133,7 +140,7 @@ __co__ void flash_atten(
 int main() {
   #include "build/bench_configs.inc"
   return mha_helper::RunBenchmarks(
-      "Choreo Flash Attention v2 Manual S2 1p2c TMA (D=128 bf16 causal)",
+      "Choreo Flash Attention iter012 reorder_cast (D=128 bf16 causal)",
       kBenchConfigs, kBenchConfigCount,
       [&](const mha_helper::BenchConfig& cfg,
           const mha_helper::TensorViews& views) {

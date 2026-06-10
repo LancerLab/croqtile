@@ -116,7 +116,7 @@ __co__ void flash_atten(
           // Issue QK[bn+1] while PV[bn] may still be in flight
           if (bn + 1 < kv_bound) {
             wait kvf[(bn + 1) % STAGES];
-            acc_s = mma.fill.f32 0.0f;
+            mma.fill acc_s, 0.0f;
             mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[(bn + 1) % STAGES];
             mma.commit;
             mma.wait<0>;

@@ -1,12 +1,7 @@
-// Warp-specialized 1p2c with 2-stage pipeline, combined KV events
-// + Skip causal mask for tiles that are entirely below the diagonal
-// + launch_bounds(1)
+// Warp-specialized 1p2c with 2-stage pipeline, split K/V events
+// + Prototype FA3-like intra-consumer overlap schedule:
+//   issue QK[n+1] first, then PV[n], then mma.wait<1>.
 // D=128, bf16, causal prefill
-//
-// Optimization: For tiles where the entire BLOCK_N column range is below
-// the causal diagonal for ALL rows in this consumer's WG_M slice, skip
-// the expensive per-element mask entirely. Only apply per-element masking
-// on the "boundary" tile where the diagonal intersects this consumer's rows.
 
 #define BLOCK_M 128
 #define BLOCK_N 128
@@ -36,7 +31,8 @@ __co__ void flash_atten(
     shared bf16[BLOCK_M, DIM] q_shared;
     shared bf16[BLOCK_N, DIM] k_buf[STAGES];
     shared bf16[BLOCK_N, DIM] v_buf[STAGES];
-    shared event qf, kvf[STAGES], kve[STAGES];
+    shared bf16[BLOCK_M, DIM] acc_o_shared;
+    shared event qf, kf[STAGES], ke[STAGES], vf[STAGES], ve[STAGES];
 
     kv_bound = __min(cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N), cdiv(KV_SEQ, BLOCK_N));
 
@@ -48,19 +44,22 @@ __co__ void flash_atten(
 
         foreach {bn} in [kv_bound] {
           stage = bn % STAGES;
-          wait kve[stage];
-          tma.copy.async<kvf[stage]>.swiz<SWIZ>
+          wait ke[stage];
+          tma.copy.async<kf[stage]>.swiz<SWIZ>
             K_head.subspan(BLOCK_N, DIM).at(bn, 0) => k_buf[stage];
-          tma.copy.async<kvf[stage]>.swiz<SWIZ>
+          trigger kf[stage];
+          wait ve[stage];
+          tma.copy.async<vf[stage]>.swiz<SWIZ>
             V_head.subspan(BLOCK_N, DIM).at(bn, 0) => v_buf[stage];
-          trigger kvf[stage];
+          trigger vf[stage];
         }
       }
 
       inthreads.async (p > 0) {
         cid = p - 1;
         foreach {s} in [STAGES] {
-          trigger kve[s];
+          trigger ke[s];
+          trigger ve[s];
         }
 
         wait qf;
@@ -74,7 +73,7 @@ __co__ void flash_atten(
         acc_o = mma.fill.f32 0.0f;
 
         // Prologue: issue QK[0]
-        wait kvf[0];
+        wait kf[0];
         acc_s = mma.fill.f32 0.0f;
         mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[0];
         mma.commit;
@@ -82,6 +81,7 @@ __co__ void flash_atten(
 
         foreach {bn} in [kv_bound] {
           stage = bn % STAGES;
+          trigger ke[stage];
 
           // Softmax on acc_s (QK[bn] result is ready)
           int causal_row_base = bm * BLOCK_M + cid * WG_M + past_len;
@@ -108,26 +108,37 @@ __co__ void flash_atten(
           apply {i, j} in acc_s_cast.span
             acc_s_cast.at(i, j) = __to<bf16>(acc_s.at(i, j));
 
-          // Issue PV[bn]
-          mma.row.col acc_o, acc_s_cast, v_buf[stage];
-          mma.commit;
-          trigger kve[stage];
-
-          // Issue QK[bn+1] while PV[bn] may still be in flight
+          // Prototype overlap schedule:
+          //   1) issue QK[bn+1]
+          //   2) issue PV[bn]
+          //   3) wait<1> so QK[bn+1] is ready while PV[bn] may still be in flight
           if (bn + 1 < kv_bound) {
-            wait kvf[(bn + 1) % STAGES];
-            acc_s = mma.fill.f32 0.0f;
+            wait kf[(bn + 1) % STAGES];
+            mma.fill acc_s, 0.0f;
             mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[(bn + 1) % STAGES];
             mma.commit;
-            mma.wait<0>;
+          }
+
+          wait vf[stage];
+          mma.row.col acc_o, acc_s_cast, v_buf[stage];
+          mma.commit;
+
+          if (bn + 1 < kv_bound) {
+            mma.wait<1>;
           } else {
             mma.wait<0>;
           }
+
+          if (bn > 0)
+            trigger ve[(bn - 1) % STAGES];
         }
+        if (kv_bound > 0)
+          trigger ve[(kv_bound - 1) % STAGES];
 
         apply {i, j} in acc_o.span
           acc_o.at(i, j) = acc_o.at(i, j) / logsum.at(i);
-        mma.store acc_o, O_head.subspan(WG_M, DIM).at(bm * 2 + cid, 0);
+        mma.store acc_o, acc_o_shared.subspan(WG_M, DIM).at(cid, 0);
+        dma.copy acc_o_shared.subspan(WG_M, DIM).at(cid, 0) => O_head.subspan(WG_M, DIM).at(bm * 2 + cid, 0);
       }
     }
   }
@@ -135,12 +146,12 @@ __co__ void flash_atten(
 
 #define MHA_DIM DIM
 #define MHA_DTYPE choreo::bf16
-#include "../../fa_helper.hpp"
+#include "../../../fa_helper.hpp"
 
 int main() {
-  #include "build/bench_configs.inc"
+  #include "../build/bench_configs.inc"
   return mha_helper::RunBenchmarks(
-      "Choreo Flash Attention iter012 reorder_cast (D=128 bf16 causal)",
+      "Choreo Flash Attention iter060 intra-consumer overlap prototype (D=128 bf16 causal)",
       kBenchConfigs, kBenchConfigCount,
       [&](const mha_helper::BenchConfig& cfg,
           const mha_helper::TensorViews& views) {
