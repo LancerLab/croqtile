@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GPU
-// RUN: co2ir %s | coir-codegen -gs - > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cute -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 //
-// End-to-end GPU test: .co -> co2ir -> coir-codegen -gs -> execute
+// End-to-end test: cocc generates script, compiles, and executes
 
 __co__ s32 [64] ele_add(s32 [64] a, s32 [64] b) {
   s32[a.span] c;
@@ -21,7 +21,7 @@ int main() {
   for (size_t i = 0; i < 64; ++i)
     choreo::choreo_assert(a[i] + b[i] == res[i], "mismatch");
 
-  std::cout << "PASS: ele_add" << std::endl;
+  std::cout << "PASS: cocc e2e" << std::endl;
 }
 
-// CHECK: PASS: ele_add
+// CHECK: PASS: cocc e2e

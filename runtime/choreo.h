@@ -7,10 +7,10 @@
 
 #include <algorithm>
 #include <assert.h>
-#include <cmath>   // For fp16
+#include <cmath> // For fp16
+#include <condition_variable>
 #include <cstdint> // For fixed-width integer types
 #include <cstdlib>
-#include <condition_variable>
 #include <functional>
 #include <future>
 #include <initializer_list> // for std::initializer_list

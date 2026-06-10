@@ -2,7 +2,6 @@
 #include "active_threads.hpp"
 #include "codegen.hpp"
 #include "codegen_prepare.hpp"
-#include "target_utils.hpp"
 #include "colors.hpp"
 #include "earlysema.hpp"
 #include "interval.hpp"
@@ -15,6 +14,7 @@
 #include "semacheck.hpp"
 #include "shapeinfer.hpp"
 #include "symbexpr.hpp"
+#include "target_utils.hpp"
 #include "typeinfer.hpp"
 #include "visualize.hpp"
 #include <chrono>
@@ -32,11 +32,15 @@ struct Choreo::CompilationContext::TargetCompilationState::CGIHolder {
   std::unique_ptr<CodeGenInfo> cgi;
 };
 
-Choreo::CompilationContext::TargetCompilationState::TargetCompilationState() = default;
-Choreo::CompilationContext::TargetCompilationState::~TargetCompilationState() = default;
-Choreo::CompilationContext::TargetCompilationState::TargetCompilationState(TargetCompilationState&&) noexcept = default;
+Choreo::CompilationContext::TargetCompilationState::TargetCompilationState() =
+    default;
+Choreo::CompilationContext::TargetCompilationState::~TargetCompilationState() =
+    default;
+Choreo::CompilationContext::TargetCompilationState::TargetCompilationState(
+    TargetCompilationState&&) noexcept = default;
 Choreo::CompilationContext::TargetCompilationState&
-Choreo::CompilationContext::TargetCompilationState::operator=(TargetCompilationState&&) noexcept = default;
+Choreo::CompilationContext::TargetCompilationState::operator=(
+    TargetCompilationState&&) noexcept = default;
 
 Choreo::CompilationContext::TargetCompilationState
 Choreo::CompilationContext::SaveTargetState() {
@@ -53,7 +57,8 @@ Choreo::CompilationContext::SaveTargetState() {
   return s;
 }
 
-void Choreo::CompilationContext::RestoreTargetState(TargetCompilationState&& s) {
+void Choreo::CompilationContext::RestoreTargetState(
+    TargetCompilationState&& s) {
   compile_target = std::move(s.target);
   archs = s.archs;
   out_kind = s.output_kind;

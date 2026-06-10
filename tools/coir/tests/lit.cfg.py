@@ -20,8 +20,8 @@ llvm_tools_dir = lit_config.params.get('llvm_tools_dir',
 
 config.substitutions.append(('%coir-opt',
     os.path.join(coir_tools_dir, 'coir-opt')))
-config.substitutions.append(('%coir-gen',
-    os.path.join(coir_tools_dir, 'coir-gen')))
+config.substitutions.append(('%co2ir',
+    os.path.join(coir_tools_dir, 'co2ir')))
 config.substitutions.append(('%coir-codegen',
     os.path.join(coir_tools_dir, 'coir-codegen')))
 

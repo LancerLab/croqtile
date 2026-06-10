@@ -18,6 +18,8 @@ using namespace Choreo;
 namespace CoIR {
 
 struct ASTCoIRGen : public CodeGenerator {
+  bool suppress_output = false;
+
 private:
   mlir::ModuleOp IRModule() { return IRSession::Get().Module(); }
   mlir::MLIRContext &IRContext() { return IRSession::Get().Context(); }

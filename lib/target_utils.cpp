@@ -11,7 +11,8 @@ struct CompilationContext::PlDepthMapHolder {
 const PlDepthMap& PlDepthMap::Get() {
   auto& ctx = CCtx();
   if (!ctx.pl_depth_map_)
-    ctx.pl_depth_map_ = std::make_shared<CompilationContext::PlDepthMapHolder>();
+    ctx.pl_depth_map_ =
+        std::make_shared<CompilationContext::PlDepthMapHolder>();
   return ctx.pl_depth_map_->map;
 }
 
@@ -26,6 +27,5 @@ PlDepthMap::PlDepthMap() {
   for (auto d : to_levels)
     max_depth = (d.first > max_depth) ? d.first : max_depth;
 
-  if (to_levels.count(max_depth))
-    max_level = to_levels[max_depth];
+  if (to_levels.count(max_depth)) max_level = to_levels[max_depth];
 }

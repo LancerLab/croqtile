@@ -39,7 +39,8 @@ std::unique_ptr<Target> TargetRegistry::Create(const std::string& name) {
   return nullptr;
 }
 
-std::unique_ptr<Target> TargetRegistry::CreateByDeviceName(const std::string& dev) {
+std::unique_ptr<Target>
+TargetRegistry::CreateByDeviceName(const std::string& dev) {
   std::lock_guard<std::mutex> lock(registryMutex());
   auto& regs = registry();
   for (auto& reg : regs) {

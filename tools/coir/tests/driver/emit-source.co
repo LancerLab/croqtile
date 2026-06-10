@@ -1,0 +1,16 @@
+// RUN: cocc -t cute -es %s | FileCheck %s
+//
+// Test cocc -es: verify CUDA source emission from end-to-end driver
+
+__co__ s32 [32] scale(s32 [32] x) {
+  s32[x.span] y;
+  parallel p by 32
+    y.at(p) = x.at(p) + x.at(p);
+  return y;
+}
+
+// CHECK: __global__ void scale
+// CHECK: choreo::spanned_data
+// CHECK: cudaMalloc
+// CHECK: cudaMemcpy
+// CHECK: cudaFree

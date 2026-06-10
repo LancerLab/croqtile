@@ -6,7 +6,8 @@
 namespace Choreo {
 
 // Parallel level <-> depth mapping for the active target + arch.
-// Built when the compilation target is configured; invalidated on target/arch change.
+// Built when the compilation target is configured; invalidated on target/arch
+// change.
 class PlDepthMap {
 private:
   std::unordered_map<int, ParallelLevel> to_levels;

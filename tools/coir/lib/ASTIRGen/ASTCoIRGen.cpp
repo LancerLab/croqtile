@@ -117,9 +117,11 @@ bool ASTCoIRGen::InMidVisitImpl(AST::Node &) { return true; }
 bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
     PopScope();
-    mlir::OpPrintingFlags flags;
-    IRModule().print(llvm::outs(), flags);
-    llvm::outs() << "\n";
+    if (!suppress_output) {
+      mlir::OpPrintingFlags flags;
+      IRModule().print(llvm::outs(), flags);
+      llvm::outs() << "\n";
+    }
   } else if (isa<AST::ChoreoFunction>(&n)) {
     auto *block = builder.getInsertionBlock();
     if (block && (block->empty() || !block->back().hasTrait<mlir::OpTrait::IsTerminator>()))

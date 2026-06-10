@@ -555,7 +555,8 @@ public:
 };
 
 // Interface for device-specific code generation in heterogeneous compilation.
-// HeteroCodeGen delegates to DeviceCodeGen implementations for each device type.
+// HeteroCodeGen delegates to DeviceCodeGen implementations for each device
+// type.
 struct DeviceCodeGen {
   virtual ~DeviceCodeGen() = default;
 
@@ -618,8 +619,8 @@ struct DeviceCodeGen {
                                       const std::string& build_path,
                                       const std::string& src,
                                       const std::string& obj) const {
-    out << "  ${CXX:-g++} -std=c++17 -O2 -pthread -c -I" << build_path
-        << " " << src << " -o " << obj
+    out << "  ${CXX:-g++} -std=c++17 -O2 -pthread -c -I" << build_path << " "
+        << src << " -o " << obj
         << " || { echo 'Host compilation failed'; exit 1; }\n";
   }
 

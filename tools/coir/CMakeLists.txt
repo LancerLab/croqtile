@@ -184,7 +184,7 @@ target_link_libraries(coir-opt PRIVATE
 # ------------------------------------------------------------------
 # coir-codegen: CoIR -> target source emission (--target selects backend)
 # ------------------------------------------------------------------
-add_executable(coir-codegen lib/CodeGen/GPU/CuteCodeGen.cpp)
+add_executable(coir-codegen lib/CodeGen/GPU/CuteCodeGen.cpp lib/Driver/Pipeline.cpp)
 target_include_directories(coir-codegen PRIVATE
   ${COIR_INCLUDE_DIR}
   ${COIR_INCLUDE_DIR}/Dialect
@@ -194,7 +194,7 @@ target_include_directories(coir-codegen PRIVATE
 target_link_libraries(coir-codegen PRIVATE
   MLIRCoIRDialect
   MLIRCoIRTransforms
-  MLIRCoIRCodeGenGPU
+  -Wl,--whole-archive MLIRCoIRCodeGenGPU -Wl,--no-whole-archive
   MLIRIR
   MLIRPass
   MLIRFuncDialect
@@ -219,21 +219,21 @@ foreach(_extra_cmake ${_extra_codegen_dirs})
   get_filename_component(_name "${_dir}" NAME)
   if(NOT _name STREQUAL "GPU")
     add_subdirectory("${_dir}")
-    target_link_libraries(coir-codegen PRIVATE MLIRCoIRCodeGen${_name})
-    target_compile_definitions(coir-codegen PRIVATE COIR_HAS_AUX_TARGET)
+    target_link_libraries(coir-codegen PRIVATE
+      -Wl,--whole-archive MLIRCoIRCodeGen${_name} -Wl,--no-whole-archive)
     target_include_directories(coir-codegen PRIVATE "${_dir}")
   endif()
 endforeach()
 
 
 # ------------------------------------------------------------------
-# coir-gen: Choreo AST -> CoIR MLIR translation
+# co2ir: Choreo AST -> CoIR MLIR translation
 # ------------------------------------------------------------------
-add_executable(coir-gen
+add_executable(co2ir
   lib/ASTIRGen/CoIRGen.cpp
   lib/ASTIRGen/ASTCoIRGen.cpp
 )
-target_include_directories(coir-gen PRIVATE
+target_include_directories(co2ir PRIVATE
   ${COIR_INCLUDE_DIR}
   ${COIR_INCLUDE_DIR}/Dialect
   ${COIR_GEN_DIR}
@@ -242,8 +242,8 @@ target_include_directories(coir-gen PRIVATE
   ${CMAKE_SOURCE_DIR}/runtime
   ${CMAKE_BINARY_DIR}
 )
-add_dependencies(coir-gen CoIRTableGen)
-target_link_libraries(coir-gen PRIVATE
+add_dependencies(co2ir CoIRTableGen)
+target_link_libraries(co2ir PRIVATE
   parse
   core
   codegen
@@ -267,9 +267,61 @@ target_link_libraries(coir-gen PRIVATE
 )
 
 # ------------------------------------------------------------------
+# cocc: end-to-end CoIR compiler driver (.co -> target code)
+# ------------------------------------------------------------------
+
+add_executable(cocc
+  lib/Driver/CoCC.cpp
+  lib/Driver/Pipeline.cpp
+  lib/ASTIRGen/ASTCoIRGen.cpp
+)
+target_include_directories(cocc PRIVATE
+  ${COIR_INCLUDE_DIR}
+  ${COIR_INCLUDE_DIR}/Dialect
+  ${COIR_GEN_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/ASTIRGen
+  ${CMAKE_SOURCE_DIR}/lib
+  ${CMAKE_SOURCE_DIR}/runtime
+  ${CMAKE_BINARY_DIR}
+)
+add_dependencies(cocc CoIRTableGen)
+target_link_libraries(cocc PRIVATE
+  parse
+  core
+  codegen
+  support
+  pp
+  -Wl,--whole-archive targets MLIRCoIRCodeGenGPU -Wl,--no-whole-archive
+  MLIRCoIRDialect
+  MLIRCoIRTransforms
+  MLIRIR
+  MLIRFuncDialect
+  MLIRArithDialect
+  MLIRAsyncDialect
+  MLIRMemRefDialect
+  MLIRSCFDialect
+  MLIRGPUDialect
+  MLIRSupport
+  LLVMSupport
+  stdc++fs
+  Threads::Threads
+)
+
+# Link auxiliary codegen targets (whole-archive to pull in static registrations)
+foreach(_extra_cmake ${_extra_codegen_dirs})
+  get_filename_component(_dir "${_extra_cmake}" DIRECTORY)
+  get_filename_component(_name "${_dir}" NAME)
+  if(NOT _name STREQUAL "GPU")
+    target_link_libraries(cocc PRIVATE
+      -Wl,--whole-archive MLIRCoIRCodeGen${_name} -Wl,--no-whole-archive)
+    target_include_directories(cocc PRIVATE "${_dir}")
+  endif()
+endforeach()
+
+# ------------------------------------------------------------------
 # Install rules
 # ------------------------------------------------------------------
-install(TARGETS coir-gen coir-opt coir-codegen
+install(TARGETS co2ir coir-opt coir-codegen cocc
   RUNTIME DESTINATION bin
   COMPONENT executables
 )

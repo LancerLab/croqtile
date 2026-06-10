@@ -594,4 +594,117 @@ namespace coir {
 std::unique_ptr<mlir::Pass> createEmitCUDAPass() {
   return std::make_unique<EmitCUDAPass>();
 }
+
+void emitCUDA(mlir::ModuleOp module, llvm::raw_ostream &os) {
+  CUDAEmitter emitter(os);
+  emitter.emitModule(module);
+}
 } // namespace coir
+
+namespace {
+
+void emitHostCode(mlir::ModuleOp module, llvm::raw_ostream &os) {
+  auto attr = module->getAttrOfType<mlir::StringAttr>("coir.host_code");
+  if (attr) os << "\n" << attr.getValue() << "\n";
+}
+
+void emitScriptHeader(llvm::raw_ostream &os) {
+  auto &sctx = CoIR::ScriptContext::Get();
+  bool has_embedded = sctx.types_header && sctx.runtime_header;
+
+  os << "#!/usr/bin/env bash\n";
+  os << "# CoIR generated script -- compile and execute kernel\n";
+  os << "set -eo pipefail\n\n";
+
+  os << "TMPDIR=$(mktemp -d /tmp/cocc_XXXXXX)\n";
+  os << "trap 'rm -rf $TMPDIR' EXIT\n\n";
+
+  if (has_embedded) {
+    os << "cat > \"$TMPDIR/choreo_types.h\" << '__COCC_TYPES_HEADER__'\n";
+    os << sctx.types_header;
+    os << "\n__COCC_TYPES_HEADER__\n\n";
+
+    os << "cat > \"$TMPDIR/choreo.h\" << '__COCC_CHOREO_HEADER__'\n";
+    os << sctx.runtime_header;
+    os << "\n__COCC_CHOREO_HEADER__\n\n";
+  } else {
+    os << "if [[ -z \"${CHOREO_ROOT:-}\" ]]; then\n";
+    os << "  _coir_bin=$(which coir-codegen 2>/dev/null || true)\n";
+    os << "  if [[ -n \"$_coir_bin\" ]]; then\n";
+    os << "    CHOREO_ROOT=\"$(cd \"$(dirname \"$_coir_bin\")\" && "
+          "git rev-parse --show-toplevel 2>/dev/null || true)\"\n";
+    os << "  fi\n";
+    os << "  if [[ -z \"${CHOREO_ROOT:-}\" ]]; then\n";
+    os << "    CHOREO_ROOT=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && "
+          "git rev-parse --show-toplevel 2>/dev/null || "
+          "echo \"$(dirname \"${BASH_SOURCE[0]}\")\")\" \n";
+    os << "  fi\n";
+    os << "fi\n";
+    os << "CHOREO_INC=\"${CHOREO_ROOT}/runtime\"\n\n";
+  }
+
+  if (!sctx.build_env.empty()) {
+    os << sctx.build_env;
+  } else {
+    os << "CUDA_HOME=\"${CUDA_HOME:-/usr/local/cuda}\"\n";
+    os << "NVCC=\"${CUDA_HOME}/bin/nvcc\"\n";
+    os << "if [[ ! -x \"$NVCC\" ]]; then\n";
+    os << "  echo \"Error: nvcc not found at $NVCC\"; exit 1\n";
+    os << "fi\n";
+    os << "if [[ -z \"${gpu_arch:-}\" ]]; then\n";
+    os << "  _cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader "
+          "2>/dev/null | head -1 | tr -d '.' || true)\n";
+    os << "  gpu_arch=\"sm_${_cc:-86}\"\n";
+    os << "fi\n\n";
+  }
+
+  if (!sctx.arch_override.empty())
+    os << "gpu_arch=\"" << sctx.arch_override << "\"\n\n";
+}
+
+void emitScriptFooter(llvm::raw_ostream &os) {
+  auto &sctx = CoIR::ScriptContext::Get();
+  bool has_embedded = sctx.types_header && sctx.runtime_header;
+
+  os << "\n__COCC_CUDA_SOURCE__\n\n";
+
+  if (has_embedded) {
+    os << "\"${NVCC}\" -std=c++17 -arch=\"${gpu_arch}\" -I\"$TMPDIR\" "
+          "-o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
+  } else {
+    os << "\"$NVCC\" -std=c++17 -arch=\"$gpu_arch\" -I\"$CHOREO_INC\" "
+          "-I\"$TMPDIR\" -o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
+  }
+
+  os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
+  os << "  shift\n";
+  os << "  \"$BINFILE\" \"$@\"\n";
+  os << "fi\n";
+}
+
+class CUDATargetEmitter : public CoIR::Emitter {
+public:
+  void EmitScript(mlir::ModuleOp module, llvm::raw_ostream &os) override {
+    emitScriptHeader(os);
+    os << "TMPFILE=\"$TMPDIR/kernel.cu\"\n";
+    os << "BINFILE=\"$TMPDIR/kernel\"\n\n";
+    os << "cat > \"$TMPFILE\" << '__COCC_CUDA_SOURCE__'\n";
+    coir::emitCUDA(module, os);
+    emitHostCode(module, os);
+    emitScriptFooter(os);
+  }
+
+  void EmitSource(mlir::ModuleOp module, llvm::raw_ostream &os) override {
+    coir::emitCUDA(module, os);
+    emitHostCode(module, os);
+  }
+};
+
+static bool registered_gpu = [] {
+  CoIR::EmitterRegistry::Register("cute", [] {
+    return std::make_unique<CUDATargetEmitter>();
+  });
+  return true;
+}();
+
+} // namespace

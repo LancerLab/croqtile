@@ -515,8 +515,8 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
     bool enable_cp_async = false;
 
     size_t slow_vf = slow_align / elem_bits;
-    auto slow_cfg = SearchTiledConfig(1, tile_n, threads_count, slow_vf,
-                                      elem_bits, false);
+    auto slow_cfg =
+        SearchTiledConfig(1, tile_n, threads_count, slow_vf, elem_bits, false);
     if (!slow_cfg.found) {
       dec.strategy = DMAStrategy::NAIVE_COPY;
       dec.atom = dec.is_async ? CUDA_COPY_ATOM::ASYNC_COPY
@@ -811,11 +811,9 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
   auto to_ca = dyn_cast<AST::ChunkAt>(n.GetTo().get());
   assert(to_ca && "ResolvePrediction requires a dest ChunkAt");
 
-  const bool guard_on_dest =
-      (dec.direction == DMADirection::S2G) && !is_pad;
-  auto outer_bounds = guard_on_dest
-                          ? ShapeToValueList(dec.to_parent_shape)
-                          : ShapeToValueList(dec.from_parent_shape);
+  const bool guard_on_dest = (dec.direction == DMADirection::S2G) && !is_pad;
+  auto outer_bounds = guard_on_dest ? ShapeToValueList(dec.to_parent_shape)
+                                    : ShapeToValueList(dec.from_parent_shape);
   auto inner_bounds = guard_on_dest ? ShapeToValueList(dec.to_ca_shape)
                                     : ShapeToValueList(dec.from_ca_shape);
   auto offsets = guard_on_dest ? ResolveTileCoordOffsets(*to_ca)
@@ -1022,8 +1020,7 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
   // or if CuTe gains lighter-weight predication.
   bool fast_path_would_cp_async =
       dec.direction == DMADirection::G2S && threads_count % 32 == 0;
-  bool fast_path_safe =
-      !dec.has_pred || fast_path_would_cp_async;
+  bool fast_path_safe = !dec.has_pred || fast_path_would_cp_async;
   if (any_stride_unknown && !assume_aligned_global && param.align_bits < 128 &&
       fast_path_safe) {
     size_t fast_align;
@@ -1081,9 +1078,7 @@ void DMAPlan::ResolveTiledParams(const AST::DMA& n, DMALoweringDecision& dec,
           size_t new_vn = slow_box_n / fast_thr_n;
           bool rewrite_ok = true;
           if (dec.swizzle_mode != SwizMode::NONE) {
-            auto is_p2 = [](size_t v) {
-              return v != 0 && (v & (v - 1)) == 0;
-            };
+            auto is_p2 = [](size_t v) { return v != 0 && (v & (v - 1)) == 0; };
             if (!is_p2(new_vm) || !is_p2(new_vn)) rewrite_ok = false;
           }
           if (rewrite_ok) {
