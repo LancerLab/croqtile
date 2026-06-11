@@ -239,7 +239,6 @@ private:
   bool has_explicit_mma_wait = false;
   bool wgmma_arrive_state_declared = false;
   std::set<std::string> cluster_trigger_events_;
-  std::set<std::string> event_arrive_tx_events_;
   std::set<std::string> warpspec_raw_mbar_events_;
   // TMA-trigger binding: event names whose triggers are no-ops
   // (because arrive_and_expect_tx is emitted at the DMA load site)

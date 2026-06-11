@@ -76,11 +76,11 @@ extern Option<bool> verbose;
 extern Option<bool> use_pic;
 extern Option<bool> use_fast_math;
 extern Option<bool> tma_cluster_aware;
-extern Option<bool> ptx_barrier;
+// ptx_barrier option removed: PTX mbarrier is now the default TMA path
 extern Option<bool> use_stmatrix;
 extern Option<bool> hoist_offset;
 extern Option<bool> hoist_scale;
-extern Option<bool> event_arrive_tx;
+// event_arrive_tx option removed: arrive_and_expect_tx is now auto-compiled
 
 namespace Choreo {
 extern Option<bool> sim_sparse;
@@ -2916,9 +2916,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
           auto tp = cgi.GetFunctionTrait(fname).GetEventTriggerParticipation(
               n.name_str);
           ic = tp > 0 ? std::to_string(tp) : "(blockDim.x - 128) + 1";
-        } else if (event_arrive_tx && !IsWarpSpecActive())
-          ic = "blockDim.x";
-        else {
+        } else {
           auto ep =
               cgi.GetFunctionTrait(fname).GetEventParticipation(n.name_str);
           ic = ep > 0 ? std::to_string(ep) : "(blockDim.x - 128) + 1";
@@ -2929,11 +2927,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         else
           oss << d_indent << "  init(&" << ename << ", " << ic << ");\n";
         pending_barrier_inits_.push_back(oss.str());
-      }
-      if (event_arrive_tx && !use_raw_mbar_scalar) {
-        ds << d_indent
-           << "cuda::barrier<cuda::thread_scope_block>::arrival_token " << ename
-           << "__tok;\n";
       }
       ssm.MapDeviceSymbol(InScopeName(n.name_str), ename);
     } break;
@@ -7017,15 +7010,10 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           ds << d_indent << base_name << "__phase ^= 1;\n";
         } else {
           auto bar_name = ExprSTR(t, false);
-          if (event_arrive_tx && event_arrive_tx_events_.count(bar_name) > 0) {
-            ds << d_indent << bar_name << ".wait(std::move(" << bar_name
-               << "__tok)); // wait event(barrier)\n";
-          } else {
-            bool guarded = BeginEventCritical();
-            ds << d_indent << bar_name << ".wait(" << bar_name
-               << ".arrive()); // wait event(barrier)\n";
-            EndEventCritical(guarded);
-          }
+          bool guarded = BeginEventCritical();
+          ds << d_indent << bar_name << ".wait(" << bar_name
+             << ".arrive()); // wait event(barrier)\n";
+          EndEventCritical(guarded);
         }
       } break;
       default:
