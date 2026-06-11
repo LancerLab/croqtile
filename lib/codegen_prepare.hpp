@@ -525,7 +525,15 @@ public:
   bool Visit(AST::Trigger& n) override {
     for (auto& f : n.GetEvents()) {
       auto name = ExtractEventName(*f);
-      if (!name.empty()) RecordEventRef(name, n.LOC());
+      if (!name.empty()) {
+        RecordEventRef(name, n.LOC());
+        if (!in_thr_block_stack.empty()) {
+          auto* it = in_thr_block_stack.top();
+          if (it->HasScopeThreadMask())
+            cgi.GetFunctionTrait(fname).RecordEventTriggerUsage(
+                name, it->GetScopeThreadMask());
+        }
+      }
     }
     return true;
   }
