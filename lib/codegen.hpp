@@ -142,6 +142,8 @@ struct FuncTrait {
 
   // Per-event participation: OR of active thread vectors from all usage scopes.
   std::map<std::string, std::vector<bool>> event_participation;
+  // Trigger-only participation: threads that call trigger on this event.
+  std::map<std::string, std::vector<bool>> event_trigger_participation;
 
   void RecordEventUsage(const std::string& event_name,
                         const std::vector<bool>& mask) {
@@ -155,9 +157,30 @@ struct FuncTrait {
     }
   }
 
+  void RecordEventTriggerUsage(const std::string& event_name,
+                               const std::vector<bool>& mask) {
+    auto it = event_trigger_participation.find(event_name);
+    if (it == event_trigger_participation.end()) {
+      event_trigger_participation[event_name] = mask;
+    } else {
+      auto& existing = it->second;
+      for (size_t i = 0; i < std::min(existing.size(), mask.size()); ++i)
+        existing[i] = existing[i] || mask[i];
+    }
+  }
+
   int64_t GetEventParticipation(const std::string& event_name) const {
     auto it = event_participation.find(event_name);
     if (it == event_participation.end()) return -1;
+    int64_t count = 0;
+    for (bool b : it->second)
+      if (b) ++count;
+    return count;
+  }
+
+  int64_t GetEventTriggerParticipation(const std::string& event_name) const {
+    auto it = event_trigger_participation.find(event_name);
+    if (it == event_trigger_participation.end()) return -1;
     int64_t count = 0;
     for (bool b : it->second)
       if (b) ++count;

@@ -140,19 +140,6 @@ __device__ __forceinline__ void tma_mbarrier_expect_tx(uint64_t* bar,
 }
 
 __device__ __forceinline__ void
-tma_mbarrier_expect_tx_noarrive(uint64_t* bar, uint32_t bytes) {
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-  uint32_t bar_ptr = tma_to_shared_u32(bar);
-  asm volatile("mbarrier.expect_tx.relaxed.cta.shared::cta.b64 [%0], %1;\n"
-               :
-               : "r"(bar_ptr), "r"(bytes));
-  #else
-  (void)bar;
-  (void)bytes;
-  #endif
-}
-
-__device__ __forceinline__ void
 tma_load_2d_shared_cta_global_mbarrier(void* dst, const void* tma_map,
                                        uint64_t* bar, int32_t coord0,
                                        int32_t coord1) {
@@ -173,6 +160,31 @@ tma_load_2d_shared_cta_global_mbarrier(void* dst, const void* tma_map,
   (void)bar;
   (void)coord0;
   (void)coord1;
+  #endif
+}
+
+__device__ __forceinline__ void
+tma_load_3d_shared_cta_global_mbarrier(void* dst, const void* tma_map,
+                                       uint64_t* bar, int32_t coord0,
+                                       int32_t coord1, int32_t coord2) {
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  uint64_t tma_ptr = reinterpret_cast<uint64_t>(tma_map);
+  uint32_t bar_ptr = tma_to_shared_u32(bar);
+  uint32_t dst_ptr = tma_to_shared_u32(dst);
+  asm volatile("cp.async.bulk.tensor.3d.shared::cta.global.tile.mbarrier::"
+               "complete_tx::bytes "
+               "[%0], [%1, {%3, %4, %5}], [%2];"
+               :
+               : "r"(dst_ptr), "l"(tma_ptr), "r"(bar_ptr), "r"(coord0),
+                 "r"(coord1), "r"(coord2)
+               : "memory");
+  #else
+  (void)dst;
+  (void)tma_map;
+  (void)bar;
+  (void)coord0;
+  (void)coord1;
+  (void)coord2;
   #endif
 }
 
@@ -271,48 +283,6 @@ tma_mbarrier_arrive_cluster(uint64_t* bar, uint32_t cta_id,
   #endif
 }
 
-__device__ __forceinline__ void
-tma_mbarrier_wait_parity_cluster(uint64_t* bar, int phase_bit) {
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-  uint32_t bar_ptr = tma_to_shared_u32(bar);
-  uint32_t spins = 0;
-  while (true) {
-    uint32_t ready = 0;
-    asm volatile(
-        "{\n"
-        ".reg .pred P1;\n"
-        "mbarrier.try_wait.parity.acquire.cluster.shared::cta.b64 P1, [%1], "
-        "%2;\n"
-        "selp.b32 %0, 1, 0, P1;\n"
-        "}\n"
-        : "=r"(ready)
-        : "r"(bar_ptr), "r"(phase_bit)
-        : "memory");
-    if (ready) return;
-    if (++spins >= CHOREO_PTX_BARRIER_MAX_SPINS) {
-      printf("WARN: cluster mbarrier wait exceeded max spins\n");
-      return;
-    }
-  }
-  #else
-  (void)bar;
-  (void)phase_bit;
-  #endif
-}
-
-__device__ __forceinline__ void tma_mbarrier_arrive(uint64_t* bar,
-                                                    uint32_t count = 1) {
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-  uint32_t bar_ptr = tma_to_shared_u32(bar);
-  asm volatile("mbarrier.arrive.release.cta.shared::cta.b64 _, [%0], %1;\n"
-               :
-               : "r"(bar_ptr), "r"(count)
-               : "memory");
-  #else
-  (void)bar;
-  (void)count;
-  #endif
-}
 
 __device__ __forceinline__ void tma_mbarrier_wait_parity(uint64_t* bar,
                                                          int phase_bit) {
@@ -2286,179 +2256,27 @@ __device__ static __forceinline__ void warpgroup_wait() {
   #endif
 }
 
-template <class T>
-__device__ static __forceinline__ void warpgroup_fence_operand(T& operand) {
-  asm volatile("" : "+r"(reinterpret_cast<uint32_t&>(operand))::"memory");
+__device__ static __forceinline__ void warpgroup_fence_operand(float& reg) {
+  asm volatile("" : "+f"(reg) :: "memory");
 }
 
-// Unified WGMMA template with automatic descriptor selection
-// Template parameters:
-//   - InputT: input data type (__half or __nv_bfloat16)
-//   - OutputT: output data type (float or same as InputT)
-//   - MajorOrderA: major order for matrix A (K_MAJOR or MN_MAJOR)
-//   - SwizzleA: swizzle pattern for matrix A
-//   - MajorOrderB: major order for matrix B (K_MAJOR or MN_MAJOR)
-//   - SwizzleB: swizzle pattern for matrix B
-template <typename InputT, typename OutputT,
-          WGMMA_MajorOrder MajorOrderA = WGMMA_MajorOrder::K_MAJOR,
-          WGMMA_Swizzle SwizzleA = WGMMA_Swizzle::NS,
-          WGMMA_MajorOrder MajorOrderB = WGMMA_MajorOrder::K_MAJOR,
-          WGMMA_Swizzle SwizzleB = WGMMA_Swizzle::NS>
-__device__ static __forceinline__ void wgmma_m64n64k16(OutputT d[4][8],
-                                                       InputT* sA, InputT* sB) {
-  static_assert(
-      std::is_same_v<InputT, __half> || std::is_same_v<InputT, __nv_bfloat16> ||
-          std::is_same_v<InputT, f8_e4m3> || std::is_same_v<InputT, f8_e5m2>,
-      "wgmma_m64n64k16_unified requires __half, __nv_bfloat16 or fp8 input "
-      "type");
-  static_assert(
-      std::is_same_v<OutputT, float> || std::is_same_v<OutputT, InputT>,
-      "wgmma_m64n64k16_unified requires float or same as InputT output type");
+__device__ static __forceinline__ void warpgroup_fence_operand(uint32_t& reg) {
+  asm volatile("" : "+r"(reg) :: "memory");
+}
 
-  uint64_t desc_a = wgmma_make_smem_desc<MajorOrderA, SwizzleA>(&sA[0]);
-  uint64_t desc_b = wgmma_make_smem_desc<MajorOrderB, SwizzleB>(&sB[0]);
-  constexpr uint64_t trans_a = get_trans_a<MajorOrderA>();
-  constexpr uint64_t trans_b = get_trans_b<MajorOrderB>();
+template <class T>
+__device__ static __forceinline__ void warpgroup_fence_operand(T& operand) {
+  asm volatile("" : "+r"(reinterpret_cast<uint32_t&>(operand)) :: "memory");
+}
 
-  // Determine PTX instruction based on input and output types
-  if constexpr (std::is_same_v<InputT, __half> &&
-                std::is_same_v<OutputT, __half>) {
-  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
-    asm volatile("{\n"
-                 "wgmma.mma_async.sync.aligned.m64n64k16.f16.f16.f16 "
-                 "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
-                 " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
-                 " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
-                 " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
-                 " %32,"
-                 " %33,"
-                 " %34, %35, %36, %37, %38;\n"
-                 "}\n"
-                 : "+h"(*(uint16_t*)&d[0][0]), "+h"(*(uint16_t*)&d[0][1]),
-                   "+h"(*(uint16_t*)&d[0][2]), "+h"(*(uint16_t*)&d[0][3]),
-                   "+h"(*(uint16_t*)&d[0][4]), "+h"(*(uint16_t*)&d[0][5]),
-                   "+h"(*(uint16_t*)&d[0][6]), "+h"(*(uint16_t*)&d[0][7]),
-                   "+h"(*(uint16_t*)&d[1][0]), "+h"(*(uint16_t*)&d[1][1]),
-                   "+h"(*(uint16_t*)&d[1][2]), "+h"(*(uint16_t*)&d[1][3]),
-                   "+h"(*(uint16_t*)&d[1][4]), "+h"(*(uint16_t*)&d[1][5]),
-                   "+h"(*(uint16_t*)&d[1][6]), "+h"(*(uint16_t*)&d[1][7]),
-                   "+h"(*(uint16_t*)&d[2][0]), "+h"(*(uint16_t*)&d[2][1]),
-                   "+h"(*(uint16_t*)&d[2][2]), "+h"(*(uint16_t*)&d[2][3]),
-                   "+h"(*(uint16_t*)&d[2][4]), "+h"(*(uint16_t*)&d[2][5]),
-                   "+h"(*(uint16_t*)&d[2][6]), "+h"(*(uint16_t*)&d[2][7]),
-                   "+h"(*(uint16_t*)&d[3][0]), "+h"(*(uint16_t*)&d[3][1]),
-                   "+h"(*(uint16_t*)&d[3][2]), "+h"(*(uint16_t*)&d[3][3]),
-                   "+h"(*(uint16_t*)&d[3][4]), "+h"(*(uint16_t*)&d[3][5]),
-                   "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
-                 : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(trans_a), "n"(trans_b));
-  #endif
-  } else if constexpr (std::is_same_v<InputT, __half> &&
-                       std::is_same_v<OutputT, float>) {
-  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
-    asm volatile("{\n"
-                 "wgmma.mma_async.sync.aligned.m64n64k16.f32.f16.f16 "
-                 "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
-                 " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
-                 " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
-                 " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
-                 " %32,"
-                 " %33,"
-                 " %34, %35, %36, %37, %38;\n"
-                 "}\n"
-                 : "+f"(d[0][0]), "+f"(d[0][1]), "+f"(d[0][2]), "+f"(d[0][3]),
-                   "+f"(d[0][4]), "+f"(d[0][5]), "+f"(d[0][6]), "+f"(d[0][7]),
-                   "+f"(d[1][0]), "+f"(d[1][1]), "+f"(d[1][2]), "+f"(d[1][3]),
-                   "+f"(d[1][4]), "+f"(d[1][5]), "+f"(d[1][6]), "+f"(d[1][7]),
-                   "+f"(d[2][0]), "+f"(d[2][1]), "+f"(d[2][2]), "+f"(d[2][3]),
-                   "+f"(d[2][4]), "+f"(d[2][5]), "+f"(d[2][6]), "+f"(d[2][7]),
-                   "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]),
-                   "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
-                 : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(trans_a), "n"(trans_b));
-  #endif
-  } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> &&
-                       std::is_same_v<OutputT, __nv_bfloat16>) {
-  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
-    asm volatile("{\n"
-                 "wgmma.mma_async.sync.aligned.m64n64k16.bf16.bf16.bf16 "
-                 "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
-                 " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
-                 " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
-                 " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
-                 " %32,"
-                 " %33,"
-                 " %34, %35, %36, %37, %38;\n"
-                 "}\n"
-                 : "+h"(*(uint16_t*)&d[0][0]), "+h"(*(uint16_t*)&d[0][1]),
-                   "+h"(*(uint16_t*)&d[0][2]), "+h"(*(uint16_t*)&d[0][3]),
-                   "+h"(*(uint16_t*)&d[0][4]), "+h"(*(uint16_t*)&d[0][5]),
-                   "+h"(*(uint16_t*)&d[0][6]), "+h"(*(uint16_t*)&d[0][7]),
-                   "+h"(*(uint16_t*)&d[1][0]), "+h"(*(uint16_t*)&d[1][1]),
-                   "+h"(*(uint16_t*)&d[1][2]), "+h"(*(uint16_t*)&d[1][3]),
-                   "+h"(*(uint16_t*)&d[1][4]), "+h"(*(uint16_t*)&d[1][5]),
-                   "+h"(*(uint16_t*)&d[1][6]), "+h"(*(uint16_t*)&d[1][7]),
-                   "+h"(*(uint16_t*)&d[2][0]), "+h"(*(uint16_t*)&d[2][1]),
-                   "+h"(*(uint16_t*)&d[2][2]), "+h"(*(uint16_t*)&d[2][3]),
-                   "+h"(*(uint16_t*)&d[2][4]), "+h"(*(uint16_t*)&d[2][5]),
-                   "+h"(*(uint16_t*)&d[2][6]), "+h"(*(uint16_t*)&d[2][7]),
-                   "+h"(*(uint16_t*)&d[3][0]), "+h"(*(uint16_t*)&d[3][1]),
-                   "+h"(*(uint16_t*)&d[3][2]), "+h"(*(uint16_t*)&d[3][3]),
-                   "+h"(*(uint16_t*)&d[3][4]), "+h"(*(uint16_t*)&d[3][5]),
-                   "+h"(*(uint16_t*)&d[3][6]), "+h"(*(uint16_t*)&d[3][7])
-                 : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(trans_a), "n"(trans_b));
-  #endif
-  } else if constexpr (std::is_same_v<InputT, __nv_bfloat16> &&
-                       std::is_same_v<OutputT, float>) {
-  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
-    asm volatile("{\n"
-                 "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
-                 "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
-                 " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
-                 " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
-                 " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
-                 " %32,"
-                 " %33,"
-                 " %34, %35, %36, %37, %38;\n"
-                 "}\n"
-                 : "+f"(d[0][0]), "+f"(d[0][1]), "+f"(d[0][2]), "+f"(d[0][3]),
-                   "+f"(d[0][4]), "+f"(d[0][5]), "+f"(d[0][6]), "+f"(d[0][7]),
-                   "+f"(d[1][0]), "+f"(d[1][1]), "+f"(d[1][2]), "+f"(d[1][3]),
-                   "+f"(d[1][4]), "+f"(d[1][5]), "+f"(d[1][6]), "+f"(d[1][7]),
-                   "+f"(d[2][0]), "+f"(d[2][1]), "+f"(d[2][2]), "+f"(d[2][3]),
-                   "+f"(d[2][4]), "+f"(d[2][5]), "+f"(d[2][6]), "+f"(d[2][7]),
-                   "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]),
-                   "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
-                 : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(trans_a), "n"(trans_b));
-  #endif
-  } else if constexpr ((std::is_same_v<InputT, f8_e4m3> ||
-                        std::is_same_v<InputT, f8_e5m2>) &&
-                       std::is_same_v<OutputT, float>) {
-  #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
-    asm volatile("{\n"
-                 "wgmma.mma_async.sync.aligned.m64n64k16.f32.f8.f8 "
-                 "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
-                 " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
-                 " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
-                 " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
-                 " %32,"
-                 " %33,"
-                 " %34, %35, %36, %37, %38;\n"
-                 "}\n"
-                 : "+f"(d[0][0]), "+f"(d[0][1]), "+f"(d[0][2]), "+f"(d[0][3]),
-                   "+f"(d[0][4]), "+f"(d[0][5]), "+f"(d[0][6]), "+f"(d[0][7]),
-                   "+f"(d[1][0]), "+f"(d[1][1]), "+f"(d[1][2]), "+f"(d[1][3]),
-                   "+f"(d[1][4]), "+f"(d[1][5]), "+f"(d[1][6]), "+f"(d[1][7]),
-                   "+f"(d[2][0]), "+f"(d[2][1]), "+f"(d[2][2]), "+f"(d[2][3]),
-                   "+f"(d[2][4]), "+f"(d[2][5]), "+f"(d[2][6]), "+f"(d[2][7]),
-                   "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]),
-                   "+f"(d[3][4]), "+f"(d[3][5]), "+f"(d[3][6]), "+f"(d[3][7])
-                 : "l"(desc_a), "l"(desc_b), "n"(1), "n"(1), "n"(1),
-                   "n"(trans_a), "n"(trans_b));
-  #endif
-  }
+template <int N>
+__device__ static __forceinline__ void warpgroup_fence_operand(float (&arr)[N]) {
+  asm volatile("" : "+f"(arr[0]) :: "memory");
+}
+
+template <class T, int N>
+__device__ static __forceinline__ void warpgroup_fence_operand(T (&arr)[N]) {
+  asm volatile("" : "+r"(reinterpret_cast<uint32_t&>(arr[0])) :: "memory");
 }
 
 // wgmma store d

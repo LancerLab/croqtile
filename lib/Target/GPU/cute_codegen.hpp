@@ -4,9 +4,9 @@
 #include <deque>
 #include <filesystem>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <thread>
-#include <set>
 #include <unordered_set>
 
 #include "ast.hpp"
@@ -240,9 +240,14 @@ private:
   bool wgmma_arrive_state_declared = false;
   std::set<std::string> cluster_trigger_events_;
   std::set<std::string> event_arrive_tx_events_;
+  std::set<std::string> warpspec_raw_mbar_events_;
   std::vector<std::string> pending_barrier_inits_;
   bool in_named_var_decl_ = false;
   bool has_analyzed_warpspec = false;
+
+  bool IsWarpSpecRawMbar(const std::string& event_name) const {
+    return warpspec_raw_mbar_events_.count(event_name) > 0;
+  }
   bool warpspec_wgmma_arrived = false;
   AST::InThreadsBlock* current_inthreads = nullptr;
 
@@ -439,6 +444,7 @@ private:
     tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
+    warpspec_raw_mbar_events_.clear();
     pending_barrier_inits_.clear();
     in_named_var_decl_ = false;
     emitted_device_names_.clear();
