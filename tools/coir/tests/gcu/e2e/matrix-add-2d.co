@@ -1,0 +1,30 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s -o %s.sh && bash %s.sh --execute | FileCheck --match-full-lines %s && rm -f %s.sh
+//
+// E2e: 2D tensor indexing (multi-dim stride linearization, multi-block)
+
+__co__ s32 [4, 8] mat_add(s32 [4, 8] a, s32 [4, 8] b) {
+  s32[a.span] c;
+  parallel i by 4
+    parallel j by 8
+      c.at(i, j) = a.at(i, j) + b.at(i, j);
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(4, 8);
+  auto b = choreo::make_spandata<choreo::s32>(4, 8);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = mat_add(a.view(), b.view());
+
+  bool ok = true;
+  for (size_t i = 0; i < 4 * 8; ++i)
+    if (a.data()[i] + b.data()[i] != res.data()[i]) ok = false;
+
+  if (ok) std::cout << "PASS: mat_add_2d" << std::endl;
+  else    std::cout << "FAIL: mat_add_2d" << std::endl;
+}
+
+// CHECK: PASS: mat_add_2d

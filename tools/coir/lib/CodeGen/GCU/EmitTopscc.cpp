@@ -142,6 +142,22 @@ private:
     return n;
   }
 
+  int64_t getGridDim(KernelOp kernel) {
+    auto &body = kernel.getBody();
+    if (body.empty()) return 1;
+    for (auto &op : body.front().getOperations()) {
+      auto parallel = dyn_cast<ParallelOp>(op);
+      if (!parallel) continue;
+      if (parallel.getLevel() != ParallelLevel::BLOCK) continue;
+      auto bounds = parallel.getBounds();
+      if (bounds.empty()) continue;
+      int64_t grid = 1;
+      for (auto b : bounds) grid *= b;
+      return grid;
+    }
+    return 1;
+  }
+
   void emitHostWrapper(KernelOp kernel) {
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
@@ -155,15 +171,20 @@ private:
     std::string eType = emitElemType(resTy.getElementType());
     int64_t resN = getTensorNumElems(resTy);
     int64_t resBytes = getTensorBytes(resTy);
+    int64_t gridDim = getGridDim(kernel);
 
-    // Emit __global__ wrapper that handles DMA staging
+    // Each block copies full input tensors to local memory, calls the
+    // __device__ kernel, then copies back only its output chunk when
+    // multiple blocks are used.
+    int64_t chunkN = (gridDim > 1) ? (resN / gridDim) : resN;
+
     os << "__global__ void __coir_global_" << name.str() << "(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       os << emitType(fnType.getInput(i)) << " g_in" << i;
     }
     os << ", " << eType << "* g_out, int N) {\n";
-    // Local buffers
+
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       int64_t n = tty ? getTensorNumElems(tty) : resN;
@@ -177,14 +198,23 @@ private:
       os << "  tops::memcpy(ctx, tops::mdspan(l_in" << i << ", " << n
          << "), tops::mdspan(g_in" << i << ", " << n << "));\n";
     }
+
     os << "  " << name.str() << "(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       os << "l_in" << i;
     }
     os << ", l_out);\n";
-    os << "  tops::memcpy(ctx, tops::mdspan(g_out, " << resN
-       << "), tops::mdspan(l_out, " << resN << "));\n";
+
+    if (gridDim > 1) {
+      os << "  int __bid = tops::block_idx_x();\n";
+      os << "  int __off = __bid * " << chunkN << ";\n";
+      os << "  tops::memcpy(ctx, tops::mdspan(g_out + __off, " << chunkN
+         << "), tops::mdspan(l_out + __off, " << chunkN << "));\n";
+    } else {
+      os << "  tops::memcpy(ctx, tops::mdspan(g_out, " << resN
+         << "), tops::mdspan(l_out, " << resN << "));\n";
+    }
     os << "}\n\n";
 
     // Emit host-callable wrapper using choreo runtime types
@@ -230,7 +260,7 @@ private:
        << ndim << ">(" << shapeStr << ");\n";
     os << "  " << eType << "* __result__device = nullptr;\n";
     os << "  topsMalloc((void**)&__result__device, " << resBytes << "ULL);\n";
-    os << "  __coir_global_" << name.str() << "<<<1, 1>>>(";
+    os << "  __coir_global_" << name.str() << "<<<" << gridDim << ", 1>>>(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       os << "p" << i << "__device";
@@ -333,16 +363,19 @@ private:
   void emitDataCopy(DataCopyOp op) {
     std::string src = getName(op.getSource());
     std::string dst = getName(op.getDest());
-    auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+    auto dstTy = cast<coir::TensorType>(op.getDest().getType());
     int64_t totalElems = 1;
-    for (auto d : srcTy.getShape()) totalElems *= d;
-    int64_t elemBytes = 4;
-    if (srcTy.getElementType().isF16()) elemBytes = 2;
-    else if (srcTy.getElementType().isF64()) elemBytes = 8;
+    for (auto d : dstTy.getShape()) totalElems *= d;
 
-    os << getIndent() << "tcle::dma_copy(" << dst << ", " << src
-       << ", " << totalElems * elemBytes << ");  // "
-       << totalElems << " elements\n";
+    os << getIndent() << "{\n";
+    incIndent();
+    os << getIndent() << "tops::private_dte __dma_ctx;\n";
+    os << getIndent() << "__dma_ctx.init();\n";
+    os << getIndent() << "tops::memcpy(__dma_ctx, tops::mdspan("
+       << dst << ", " << totalElems << "), tops::mdspan("
+       << src << ", " << totalElems << "));\n";
+    decIndent();
+    os << getIndent() << "}\n";
 
     if (op.getToken())
       valueNames[op.getToken()] = "/* dma_token */";

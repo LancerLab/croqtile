@@ -1,0 +1,30 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s -o %s.sh && bash %s.sh --execute | FileCheck --match-full-lines %s && rm -f %s.sh
+//
+// E2e: f32 elementwise multiply via cocc topscc driver
+
+__co__ f32 [128] ele_mul(f32 [128] a, f32 [128] b) {
+  f32[a.span] c;
+  parallel p by 128
+    c.at(p) = a.at(p) * b.at(p);
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(128);
+  auto b = choreo::make_spandata<choreo::f32>(128);
+  a.fill_random(-5.0f, 5.0f);
+  b.fill_random(-5.0f, 5.0f);
+
+  auto res = ele_mul(a.view(), b.view());
+
+  bool ok = true;
+  for (size_t i = 0; i < 128; ++i) {
+    float diff = a[i] * b[i] - res[i];
+    if (diff > 1e-4f || diff < -1e-4f) ok = false;
+  }
+  if (ok) std::cout << "PASS: ele_mul_f32" << std::endl;
+  else    std::cout << "FAIL: ele_mul_f32" << std::endl;
+}
+
+// CHECK: PASS: ele_mul_f32

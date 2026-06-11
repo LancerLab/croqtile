@@ -1,0 +1,29 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s -o %s.sh && bash %s.sh --execute | FileCheck --match-full-lines %s && rm -f %s.sh
+//
+// E2e: mixed arith (sub + mul) with block-parallel dispatch
+
+__co__ s32 [256] vec_sub_scale(s32 [256] a, s32 [256] b) {
+  s32[a.span] c;
+  parallel p by 256
+    c.at(p) = (a.at(p) - b.at(p)) * 3;
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(256);
+  auto b = choreo::make_spandata<choreo::s32>(256);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = vec_sub_scale(a.view(), b.view());
+
+  bool ok = true;
+  for (size_t i = 0; i < 256; ++i)
+    if ((a[i] - b[i]) * 3 != res[i]) ok = false;
+
+  if (ok) std::cout << "PASS: vec_sub_scale" << std::endl;
+  else    std::cout << "FAIL: vec_sub_scale" << std::endl;
+}
+
+// CHECK: PASS: vec_sub_scale

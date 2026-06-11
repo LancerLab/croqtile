@@ -297,7 +297,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
 
   if (auto *il = dyn_cast<AST::IntLiteral>(&n)) {
     auto ty = mlir::IntegerType::get(&IRContext(), 32,
-                                     mlir::IntegerType::Signed);
+                                     mlir::IntegerType::Signless);
     int64_t val = std::visit([](auto v) -> int64_t { return v; }, il->value);
     return builder.create<mlir::arith::ConstantIntOp>(loc, val, ty);
   }
