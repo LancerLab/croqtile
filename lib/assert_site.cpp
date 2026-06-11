@@ -387,6 +387,12 @@ void AssertSite::HoistAssertions(AST::ChoreoFunction* fnode) {
       hoisted.order = n_order;
     }
 
+    // --disable-assert-hoist: force non-entry assertions to remain at use site
+    if (!is_entry && CCtx().DisableAssertHoist()) {
+      hoisted.site = ar.node;
+      hoisted.order = n_order;
+    }
+
     bool is_hoisted = false;
     if (is_entry) {
       // hoisted as parameter reference

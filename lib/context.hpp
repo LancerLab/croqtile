@@ -452,6 +452,7 @@ private:
   bool warning_as_error = false;   // Make all warnings into errors.
   bool show_assess = false;        // Print assessment report after hoisting.
   bool trace_assess = false;       // Trace assessment processing.
+  bool disable_assert_hoist = false; // Disable assertion hoisting (for eval).
   bool print_stats = false;        // Print aggregate assessment statistics.
   AssertionCost rtc_cost_threshold =
       AssertionCost::ENTRY; // Runtime check assertion level
@@ -704,6 +705,7 @@ public:
   }
   bool UseWarpSpec() const { return use_warpspec; }
   bool HoistWGMMAArrive() const { return hoist_wgmma_arrive; }
+  bool DisableAssertHoist() const { return disable_assert_hoist; }
   bool SingleThreadProducer() const { return single_thread_producer; }
   bool SkipEpilogueGroupSync() const { return skip_epilogue_group_sync; }
   bool FastCompile() const { return fast_compile; }
@@ -746,6 +748,7 @@ public:
   }
   void SetUseWarpSpec(bool value) { use_warpspec = value; }
   void SetHoistWGMMAArrive(bool value) { hoist_wgmma_arrive = value; }
+  void SetDisableAssertHoist(bool value) { disable_assert_hoist = value; }
   void SetSingleThreadProducer(bool value) { single_thread_producer = value; }
   void SetSkipEpilogueGroupSync(bool value) {
     skip_epilogue_group_sync = value;
