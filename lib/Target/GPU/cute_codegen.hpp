@@ -241,6 +241,9 @@ private:
   std::set<std::string> cluster_trigger_events_;
   std::set<std::string> event_arrive_tx_events_;
   std::set<std::string> warpspec_raw_mbar_events_;
+  // TMA-trigger binding: event names whose triggers are no-ops
+  // (because arrive_and_expect_tx is emitted at the DMA load site)
+  std::set<std::string> tma_bound_event_triggers_;
   std::vector<std::string> pending_barrier_inits_;
   bool in_named_var_decl_ = false;
   bool has_analyzed_warpspec = false;
