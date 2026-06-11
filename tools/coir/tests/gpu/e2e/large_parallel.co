@@ -1,0 +1,28 @@
+// REQUIRES: TARGET-GPU
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Large parallel dimensions with multi-level parallelism.
+
+__co__ s32 [256, 128] large_add(s32 [256, 128] a, s32 [256, 128] b) {
+  s32[a.span] c;
+  parallel p by 256, q by 128
+    c.at(p, q) = a.at(p, q) + b.at(p, q);
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(256, 128);
+  auto b = choreo::make_spandata<choreo::s32>(256, 128);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = large_add(a.view(), b.view());
+
+  for (size_t i = 0; i < 256; ++i)
+    for (size_t j = 0; j < 128; ++j)
+      choreo::choreo_assert(a[i][j] + b[i][j] == res[i][j], "mismatch");
+
+  std::cout << "PASS: large_parallel" << std::endl;
+}
+
+// CHECK: PASS: large_parallel

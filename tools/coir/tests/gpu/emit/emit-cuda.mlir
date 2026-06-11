@@ -5,7 +5,7 @@
 // CHECK: using namespace nvcuda;
 
 // End-to-end test: simple MMA kernel
-// CHECK: __global__ void mma_kernel
+// CHECK: __global__ void __mma_kernel_kernel__
 // CHECK: wmma::fill_fragment
 // CHECK: wmma::load_matrix_sync
 // CHECK: wmma::load_matrix_sync
@@ -24,7 +24,7 @@ coir.kernel @mma_kernel(
 }
 
 // End-to-end test: copy + barrier + MMA
-// CHECK: __global__ void copy_and_mma
+// CHECK: __global__ void __copy_and_mma_kernel__
 // CHECK: cute::copy(tma_desc
 // CHECK: __syncthreads
 // CHECK: wmma::fill_fragment
@@ -54,7 +54,7 @@ coir.kernel @copy_and_mma(
 }
 
 // End-to-end test: parallel + foreach accumulate
-// CHECK: __global__ void matmul_kernel
+// CHECK: __global__ void __matmul_kernel_kernel__
 // CHECK: parallel level=block
 // CHECK: for (int
 // CHECK: wmma::load_matrix_sync

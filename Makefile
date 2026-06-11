@@ -180,7 +180,6 @@ build-with-cmake-ninja:
 	@test -f $(CMAKE_BUILD_DIR)/co-mock && ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock || true
 	@test -f $(CMAKE_BUILD_DIR)/tools/coir/co2ir && ln -sf $(CMAKE_BUILD_DIR)/tools/coir/co2ir $(WORK_DIR)/co2ir || true
 	@test -f $(CMAKE_BUILD_DIR)/tools/coir/coir-opt && ln -sf $(CMAKE_BUILD_DIR)/tools/coir/coir-opt $(WORK_DIR)/coir-opt || true
-	@test -f $(CMAKE_BUILD_DIR)/tools/coir/coir-codegen && ln -sf $(CMAKE_BUILD_DIR)/tools/coir/coir-codegen $(WORK_DIR)/coir-codegen || true
 	@test -f $(CMAKE_BUILD_DIR)/tools/coir/cocc && ln -sf $(CMAKE_BUILD_DIR)/tools/coir/cocc $(WORK_DIR)/cocc || true
 
 config-with-cmake-ninja:

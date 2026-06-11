@@ -1,0 +1,13 @@
+// REQUIRES: TARGET-GPU
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Minimal kernel: no params, no return. Tests host wrapper for void kernels.
+
+__co__ void nil() {}
+
+int main() {
+  nil();
+  std::cout << "Run Complete.\n";
+}
+
+// CHECK: Run Complete.

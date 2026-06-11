@@ -22,8 +22,13 @@ config.substitutions.append(('%coir-opt',
     os.path.join(coir_tools_dir, 'coir-opt')))
 config.substitutions.append(('%co2ir',
     os.path.join(coir_tools_dir, 'co2ir')))
-config.substitutions.append(('%coir-codegen',
-    os.path.join(coir_tools_dir, 'coir-codegen')))
+config.substitutions.append(('%cocc',
+    os.path.join(coir_tools_dir, 'cocc')))
+
+# Path to choreo e2e tests (for cross-reference)
+choreo_root = os.path.join(os.path.dirname(__file__), '..', '..', '..')
+config.substitutions.append(('%choreo_e2e',
+    os.path.join(choreo_root, 'tests', 'gpu', 'end2end')))
 
 # Add both coir tools and LLVM tools (FileCheck) to PATH
 config.environment['PATH'] = os.pathsep.join([

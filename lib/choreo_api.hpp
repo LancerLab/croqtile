@@ -83,7 +83,6 @@ struct CompilerAPI {
   /// Sets NoCodegen(true) since this only runs up to semantic analysis.
   int RunFrontend(const std::string& filename) {
     CCtx().SetNoCodegen(true);
-    CCtx().SetDropComments(true);
     if (!OpenInput(filename)) return 1;
 
     std::stringstream pps;

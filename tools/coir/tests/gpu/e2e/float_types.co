@@ -1,0 +1,29 @@
+// REQUIRES: TARGET-GPU
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Float type element-wise operations.
+
+__co__ f32 [64] float_add(f32 [64] a, f32 [64] b) {
+  f32[a.span] c;
+  parallel p by 64
+    c.at(p) = a.at(p) + b.at(p);
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(64);
+  auto b = choreo::make_spandata<choreo::f32>(64);
+  a.fill_random(-10.0f, 10.0f);
+  b.fill_random(-10.0f, 10.0f);
+
+  auto res = float_add(a.view(), b.view());
+
+  for (size_t i = 0; i < 64; ++i) {
+    float expected = a[i] + b[i];
+    choreo::choreo_assert(std::abs(expected - res[i]) < 1e-5f, "mismatch");
+  }
+
+  std::cout << "PASS: float_add" << std::endl;
+}
+
+// CHECK: PASS: float_add

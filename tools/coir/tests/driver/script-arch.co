@@ -11,5 +11,5 @@ __co__ s32 [16] identity(s32 [16] x) {
 
 // CHECK: cat > "$TMPDIR/choreo.h"
 // CHECK: gpu_arch="sm_80"
-// CHECK: __global__ void identity
+// CHECK: __global__ void __identity_kernel__
 // CHECK: "${NVCC}" -std=c++17 -arch="${gpu_arch}"

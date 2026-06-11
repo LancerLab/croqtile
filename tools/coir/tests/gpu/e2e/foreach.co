@@ -1,0 +1,31 @@
+// REQUIRES: TARGET-GPU
+// XFAIL: *
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Foreach loop within parallel kernel.
+
+__co__ s32 [4, 16] reduce_inner(s32 [4, 16] input) {
+  s32[input.span] output;
+  parallel p by 4, q by 16 {
+    s32 acc = 0;
+    foreach x in 1
+      acc = acc + input.at(p, q);
+    output.at(p, q) = acc;
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(4, 16);
+  a.fill_random(1, 5);
+
+  auto res = reduce_inner(a.view());
+
+  for (size_t i = 0; i < 4; ++i)
+    for (size_t j = 0; j < 16; ++j)
+      choreo::choreo_assert(a[i][j] == res[i][j], "foreach mismatch");
+
+  std::cout << "PASS: foreach" << std::endl;
+}
+
+// CHECK: PASS: foreach

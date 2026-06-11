@@ -578,6 +578,7 @@ fi
 # handles missing binaries gracefully.
 _choreo_bin="$(which choreo 2>/dev/null || true)"
 _copp_bin="$(which copp 2>/dev/null || true)"
+_cocc_bin="$(which cocc 2>/dev/null || true)"
 
 if ! which not.sh &>/dev/null; then
   echo "Error: not.sh is not found in PATH."
@@ -941,6 +942,7 @@ execute_command() {
   _sed_args+=(-e "s#\bco-mock\b#__CO_MOCK_PLACEHOLDER__#g")
   [[ -n "$_choreo_bin" ]] && _sed_args+=(-e "s#\bchoreo\b#${_choreo_bin} -n#g")
   [[ -n "$_copp_bin" ]]   && _sed_args+=(-e "s#\bcopp\b#${_copp_bin}#g")
+  [[ -n "$_cocc_bin" ]]   && _sed_args+=(-e "s#\bcocc\b#${_cocc_bin} -n#g")
   _sed_args+=(-e "s#\bFileCheck\b#${FILECHECK}#g")
   _sed_args+=(-e "s#\bgdb\b#${GDB_BIN}#g")
   _sed_args+=(-e "s#\bcuda_gdb\b#${CUDA_GDB_BIN}#g")
