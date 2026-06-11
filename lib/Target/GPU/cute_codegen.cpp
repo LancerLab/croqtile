@@ -4489,10 +4489,45 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       }
 
+      // Register TMA-bound event trigger (the trigger will be a no-op)
+      if (event_only) {
+        auto ev_expr = cast<AST::Expr>(n.Event());
+        std::string ev_base;
+        if (ev_expr->op == Op::ElemOf) {
+          auto bid = AST::GetArrayBaseSymbol(*ev_expr);
+          if (bid) ev_base = bid->name;
+        } else {
+          auto sym = ev_expr->GetSymbol();
+          if (sym) ev_base = sym->name;
+        }
+        if (!ev_base.empty()) tma_bound_event_triggers_.insert(ev_base);
+      }
+
       // PTX mbarrier TMA path (unified for all cases)
       std::string ptx_bar_expr;
       if (event_only) {
         ptx_bar_expr = "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
+        // arrive_and_expect_tx BEFORE TMA load (required by hardware)
+        auto ev_str = ExprSTR(n.Event(), IsHost());
+        auto ev_expr = cast<AST::Expr>(n.Event());
+        std::string ev_base_name;
+        if (ev_expr->op == Op::ElemOf) {
+          auto bid = AST::GetArrayBaseSymbol(*ev_expr);
+          if (bid) ev_base_name = bid->name;
+        } else {
+          auto sym = ev_expr->GetSymbol();
+          if (sym) ev_base_name = sym->name;
+        }
+        bool is_raw_mbar =
+            !ev_base_name.empty() && IsWarpSpecRawMbar(ev_base_name);
+        if (is_raw_mbar) {
+          ds << d_indent << tma_issue_prefix << ev_str
+             << ".arrive_and_expect_tx(" << tma_tx_bytes_expr << ");\n";
+        } else {
+          ds << d_indent << tma_issue_prefix
+             << "choreo::tma_mbarrier_expect_tx(" << ptx_bar_expr << ", "
+             << tma_tx_bytes_expr << ");\n";
+        }
       } else {
         ptx_bar_expr =
             "((TMAAtom*)" + future_name + ".get_atom())->ptx_barrier()";
@@ -7109,6 +7144,25 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           break;
         }
         case Storage::SHARED: {
+          // Extract event base name for TMA-bound check
+          std::string base_name;
+          {
+            auto ev_sym = expr->GetSymbol();
+            if (ev_sym) {
+              base_name = UnScopedName(ev_sym->name);
+            } else if (is_array_ref) {
+              auto bid = AST::GetArrayBaseSymbol(*expr);
+              if (bid) base_name = UnScopedName(bid->name);
+            }
+          }
+
+          // TMA-bound triggers are no-ops
+          if (!base_name.empty() &&
+              tma_bound_event_triggers_.count(base_name) > 0) {
+            recent_tma_tx_bytes.clear();
+            break;
+          }
+
           bool is_cluster_trigger = n.IsClusterScope();
 
           ds << d_indent << "// trigger event(barrier) " << PSTR(f);
@@ -7138,13 +7192,6 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             ds << d_indent << "}\n";
           } else if (!recent_tma_tx_bytes.empty()) {
             auto tx_bytes_expr = SumRecentTMATxBytesExpr();
-            std::string base_name;
-            if (is_array_ref) {
-              auto bid = AST::GetArrayBaseSymbol(*expr);
-              base_name = UnScopedName(bid->name);
-            } else {
-              base_name = UnScopedName(expr->GetSymbol()->name);
-            }
             bool is_raw_mbar = IsWarpSpecRawMbar(base_name);
             if (is_raw_mbar) {
               if (is_array_ref) {
@@ -7158,43 +7205,8 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                     ";\n", ety->RemainderDimensions(0));
               }
             } else {
-              bool conditional_tx =
-                  IsWarpSpecActive() &&
-                  !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
-              if (is_array_ref) {
-                if (conditional_tx) {
-                  ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
-                     << ExprSTR(f, false) << ", 1, __CHOREO_GROUPX4_SINGLE__ ? "
-                     << tx_bytes_expr << " : 0);\n";
-                } else if (IsWarpSpecActive()) {
-                  ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
-                     << ExprSTR(f, false) << ", 1, " << tx_bytes_expr
-                     << ");\n";
-                } else {
-                  ds << d_indent << "(void)" << ExprSTR(f, false)
-                     << ".arrive();\n";
-                }
-              } else {
-                if (conditional_tx) {
-                  GenerateSubscriptions(
-                      ds,
-                      d_indent + "(void)cuda::device::barrier_arrive_tx(" +
-                          ExprSTR(f, false) +
-                          ", 1, __CHOREO_GROUPX4_SINGLE__ ? " + tx_bytes_expr +
-                          " : 0)",
-                      ";\n", ety->RemainderDimensions(0));
-                } else if (IsWarpSpecActive()) {
-                  GenerateSubscriptions(
-                      ds,
-                      d_indent + "(void)cuda::device::barrier_arrive_tx(" +
-                          ExprSTR(f, false) + ", 1, " + tx_bytes_expr + ")",
-                      ";\n", ety->RemainderDimensions(0));
-                } else {
-                  GenerateSubscriptions(
-                      ds, d_indent + "(void)" + ExprSTR(f, false),
-                      ".arrive();\n", ety->RemainderDimensions(0));
-                }
-              }
+              ds << d_indent << "(void)" << ExprSTR(f, false)
+                 << ".arrive();\n";
             }
             recent_tma_tx_bytes.clear();
           } else {
@@ -7241,6 +7253,22 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
           break;
         }
         case Storage::SHARED: {
+          // Extract event base name for TMA-bound trigger check
+          std::string base_name;
+          if (is_array_ref) {
+            auto bid = AST::GetArrayBaseSymbol(*expr);
+            base_name = UnScopedName(bid->name);
+          } else {
+            base_name = UnScopedName(expr->GetSymbol()->name);
+          }
+
+          // TMA-bound triggers are no-ops: the arrive_and_expect_tx
+          // was already emitted at the DMA load site
+          if (tma_bound_event_triggers_.count(base_name) > 0) {
+            recent_tma_tx_bytes.clear();
+            break;
+          }
+
           bool is_cluster_trigger = n.IsClusterScope();
 
           if (is_cluster_trigger) {
@@ -7256,50 +7284,21 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             ds << d_indent << "}\n";
             DecrDeviceIndent();
             ds << d_indent << "}\n";
-          } else if (!recent_tma_tx_bytes.empty() && IsWarpSpecActive()) {
+          } else if (!recent_tma_tx_bytes.empty()) {
             auto tx_bytes_expr = SumRecentTMATxBytesExpr();
-            std::string base_name;
-            if (is_array_ref) {
-              auto bid = AST::GetArrayBaseSymbol(*expr);
-              base_name = UnScopedName(bid->name);
-            } else {
-              base_name = UnScopedName(expr->GetSymbol()->name);
-            }
             bool is_raw_mbar = IsWarpSpecRawMbar(base_name);
             if (is_raw_mbar) {
               ds << d_indent << ExprSTR(f, false)
                  << ".arrive_and_expect_tx(" << tx_bytes_expr
                  << "); // trigger event(raw mbarrier)\n";
             } else {
-              bool conditional_tx =
-                  !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
-              if (conditional_tx) {
-                ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
-                   << ExprSTR(f, false) << ", 1, __CHOREO_GROUPX4_SINGLE__ ? "
-                   << tx_bytes_expr << " : 0); // trigger event(barrier)\n";
-              } else {
-                ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
-                   << ExprSTR(f, false) << ", 1, " << tx_bytes_expr
-                   << "); // trigger event(barrier)\n";
-              }
+              ds << d_indent << "(void)" << ExprSTR(f, false)
+                 << ".arrive(); // trigger event\n";
             }
-            recent_tma_tx_bytes.clear();
-          } else if (!recent_tma_tx_bytes.empty() && event_arrive_tx) {
-            auto tx_bytes_expr = SumRecentTMATxBytesExpr();
-            auto bar_name = ExprSTR(f, false);
-            ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-            ds << d_indent << "  " << bar_name << "__tok = "
-               << "cuda::device::barrier_arrive_tx(" << bar_name << ", 1, "
-               << tx_bytes_expr << ");\n";
-            ds << d_indent << "} else {\n";
-            ds << d_indent << "  " << bar_name << "__tok = " << bar_name
-               << ".arrive();\n";
-            ds << d_indent << "}\n";
-            event_arrive_tx_events_.insert(bar_name);
             recent_tma_tx_bytes.clear();
           } else {
             ds << d_indent << "(void)" << ExprSTR(f, false)
-               << ".arrive(); // trigger event(barrier)\n";
+               << ".arrive(); // trigger event\n";
           }
           break;
         }
