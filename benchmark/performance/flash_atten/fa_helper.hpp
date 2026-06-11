@@ -84,8 +84,8 @@ inline bool enable_timing() {
 
 inline choreo::TimerOption read_timer_options() {
   choreo::TimerOption opt;
-  opt.warmup = 10;
-  opt.repeat = 50;
+  opt.warmup = 100;
+  opt.repeat = 500;
   if (const char* warmup_env = std::getenv("CHOREO_TIMING_WARMUP")) {
     int value = std::atoi(warmup_env);
     if (value >= 0) opt.warmup = value;

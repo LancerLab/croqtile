@@ -2,6 +2,7 @@
 #define CHOREO_CODEGEN_HPP_
 
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -197,6 +198,18 @@ struct FuncTrait {
   void RecordEventDecl(const std::string& name, int64_t tc,
                        const location& loc) {
     event_decls.push_back({name, tc, loc});
+  }
+
+  // Events used in tma.copy.async<event> are "fill" events (init(1)).
+  // Events only used in trigger/wait are "empty" events (init(N)).
+  std::set<std::string> tma_fill_events;
+
+  void RecordTMAFillEvent(const std::string& name) {
+    tma_fill_events.insert(name);
+  }
+
+  bool IsTMAFillEvent(const std::string& name) const {
+    return tma_fill_events.count(name) > 0;
   }
 };
 

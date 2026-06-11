@@ -207,8 +207,7 @@ public:
       const auto& sn = scope_names[i + 1];
       if (sn.rfind("paraby_", 0) == 0 || sn.rfind("inthreads_", 0) == 0)
         return false;
-      if (scoped_symtab[i].count(sym_name))
-        return true;
+      if (scoped_symtab[i].count(sym_name)) return true;
     }
     return false;
   }

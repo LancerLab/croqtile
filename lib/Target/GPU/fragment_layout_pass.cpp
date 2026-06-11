@@ -178,8 +178,7 @@ bool FragmentLayoutPass::Visit(AST::ApplyBlock& n) {
   std::vector<std::string> body_frags;
 
   // Walk the multi-statement body collecting all fragment .at() accesses.
-  auto CollectFromBody = [&](auto&& self,
-                             const ptr<AST::Node>& node) -> void {
+  auto CollectFromBody = [&](auto&& self, const ptr<AST::Node>& node) -> void {
     if (!node) return;
     if (auto da = dyn_cast<AST::DataAccess>(node)) {
       if (da->AccessElement()) {

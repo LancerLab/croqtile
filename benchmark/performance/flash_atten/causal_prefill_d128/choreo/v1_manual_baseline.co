@@ -21,7 +21,7 @@ __co__ void flash_atten(
   assert(BLOCK_M % WG_M == 0, "BLOCK_M must be a multiple of WG_M");
   assert(BLOCK_N % WG_K == 0, "BLOCK_N must be a multiple of WG_K");
 
-  parallel {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
+  parallel.async {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
     Q_head = Q.subspan(1, Q_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
     K_head = K.subspan(1, KV_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
     V_head = V.subspan(1, KV_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();

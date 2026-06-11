@@ -27,9 +27,8 @@ __co__ void flash_atten(
   global bf16[B, Q_SEQ, H, DIM] O
 ) {
   float scale = 0.12751743f;
-  int past_len = KV_SEQ - Q_SEQ;
 
-  parallel {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
+  parallel.async {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
     launch_bounds(1);
     Q_head = Q.subspan(1, Q_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
     K_head = K.subspan(1, KV_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
@@ -39,12 +38,13 @@ __co__ void flash_atten(
     shared bf16[BLOCK_M, DIM] q_shared;
     shared bf16[BLOCK_N, DIM] k_buf[STAGES];
     shared bf16[BLOCK_N, DIM] v_buf[STAGES];
+
     shared event qf, kf[STAGES], ke[STAGES], vf[STAGES], ve[STAGES];
 
-    kv_bound = __min(cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N), cdiv(KV_SEQ, BLOCK_N));
+    kv_bound = cdiv((bm + 1) * BLOCK_M, BLOCK_N);
 
     parallel p by [BLOCK_M/WG_M + 1] : group-4, t by 128 : thread {
-      inthreads.async (p == 0 && t == 0) {
+      inthreads.async (p == 0) {
         tma.copy.async<qf>.swiz<SWIZ>
           Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => q_shared;
         trigger qf;
@@ -87,10 +87,10 @@ __co__ void flash_atten(
           mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[stage];
           trigger ke[stage];
 
-          int causal_row_base = bm * BLOCK_M + cid * WG_M + past_len;
+          int causal_row_base = bm * BLOCK_M + cid * WG_M;
           if ((bn + 1) * BLOCK_N > causal_row_base + 1) {
             apply {i, j} in acc_s.span {
-              if ((bn * BLOCK_N + j) > (bm * BLOCK_M + cid * WG_M + i + past_len))
+              if ((bn * BLOCK_N + j) > (bm * BLOCK_M + cid * WG_M + i))
                 acc_s.at(i, j) = -inf;
             }
           }
@@ -120,7 +120,9 @@ __co__ void flash_atten(
 
         apply {i, j} in acc_o.span
           acc_o.at(i, j) = acc_o.at(i, j) / logsum.at(i);
-        mma.store acc_o, O_head.subspan(WG_M, DIM).at(bm * 2 + cid, 0);
+        shared bf16[BLOCK_M, DIM] o_buf;
+        mma.store acc_o, o_buf.subspan(WG_M, DIM).at(cid, 0);
+        tma.copy o_buf.subspan(WG_M, DIM).at(cid, 0) => O_head.subspan(WG_M, DIM).at(bm * 2 + cid, 0);
       }
     }
   }

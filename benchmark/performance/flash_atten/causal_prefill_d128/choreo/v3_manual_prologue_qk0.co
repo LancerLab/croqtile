@@ -26,7 +26,7 @@ __co__ void flash_atten(
   float scale = 0.12751743f;
   int past_len = KV_SEQ - Q_SEQ;
 
-  parallel {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
+  parallel.async {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
     launch_bounds(1);
     Q_head = Q.subspan(1, Q_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
     K_head = K.subspan(1, KV_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
