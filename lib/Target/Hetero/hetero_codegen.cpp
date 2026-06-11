@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
 #include "ast.hpp"
 #include "choreo_header.inc"
@@ -48,6 +49,27 @@ AST::ParallelBy* FindDevicePB(AST::Node& program, const std::string& func_name,
   }
   return nullptr;
 }
+// Collect the names of arrays written (assigned to) within an AST subtree.
+// Walks all Assignment nodes whose LHS is a data-element access (e.g. B[i])
+// and records the root array name.
+void CollectWrittenArrays(AST::Node* node,
+                          std::unordered_set<std::string>& written) {
+  if (!node) return;
+  if (auto a = dyn_cast<AST::Assignment>(node)) {
+    if (a->AssignToDataElement()) written.insert(a->GetDataArrayName());
+  }
+  if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
+    for (auto& child : mn->values) CollectWrittenArrays(child.get(), written);
+  }
+  if (node->IsBlock()) {
+    auto body = node->GetBody();
+    if (body) CollectWrittenArrays(body.get(), written);
+  }
+  if (auto ib = dyn_cast<AST::IfElseBlock>(node)) {
+    CollectWrittenArrays(ib->else_stmts.get(), written);
+  }
+}
+
 } // namespace
 
 // ---- Preamble ----
@@ -451,6 +473,22 @@ void HeteroCodeGen::BeginOffloadFunction(AST::ParallelBy& n,
       AST::Make<AST::DataType>(clean_pb->LOC(), BaseType::VOID);
   func->f_decl.params = CloneP(current_func_node_->f_decl.params);
   func->stmts = CloneP(clean_pb->stmts);
+
+  // Mark parameters that the offload block does not write as pass-by-value
+  // so the device codegen skips the device-to-host copy-back. This prevents
+  // stale device copies from overwriting concurrent CPU modifications.
+  std::unordered_set<std::string> written_arrays;
+  CollectWrittenArrays(clean_pb->stmts.get(), written_arrays);
+  if (func->f_decl.params) {
+    for (auto& p : func->f_decl.params->values) {
+      auto param = cast<AST::Parameter>(p.get());
+      if (param->pass_by_ref && param->HasSymbol()) {
+        if (written_arrays.find(param->sym->name) == written_arrays.end())
+          param->pass_by_ref = false;
+      }
+    }
+  }
+
   cur_offload_func_.offload_func = func;
 }
 
