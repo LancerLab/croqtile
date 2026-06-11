@@ -16,9 +16,9 @@ if(NOT EXISTS "${_DEP_CONF}")
     "Missing ${_DEP_CONF} -- cannot determine LLVM source.\n"
     "This file should contain LLVM_URL, LLVM_TAR, LLVM_MD5, LLVM_SHASH.")
 endif()
-file(STRINGS "${_DEP_CONF}" _dep_lines REGEX "^[A-Z_]+=")
+file(STRINGS "${_DEP_CONF}" _dep_lines REGEX "^[A-Z_0-9]+=")
 foreach(_line ${_dep_lines})
-  string(REGEX MATCH "^([A-Z_]+)=(.*)" _ "${_line}")
+  string(REGEX MATCH "^([A-Z_0-9]+)=(.*)" _ "${_line}")
   set(COIR_${CMAKE_MATCH_1} "${CMAKE_MATCH_2}")
 endforeach()
 

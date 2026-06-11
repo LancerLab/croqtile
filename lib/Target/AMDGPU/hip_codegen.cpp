@@ -125,7 +125,7 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
       auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
-      auto cname = rng->IVName();
+      auto cname = rng->GetIVName();
       auto ivs = within_map.at(InScopeName(cname));
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
         DecrIndent();
@@ -1368,7 +1368,7 @@ bool HIPCodeGen::Visit(AST::ForeachBlock& n) {
 
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
-    auto cname = rng->IVName();
+    auto cname = rng->GetIVName();
     for (auto iv_name : within_map.at(InScopeName(cname))) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));

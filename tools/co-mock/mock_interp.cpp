@@ -348,7 +348,7 @@ void MockInterpreter::ExecForeach(AST::ForeachBlock& n) {
   for (auto& r : n.ranges->AllValues()) {
     auto lr = cast<AST::LoopRange>(r);
     RangeInfo ri;
-    ri.iv_name = lr->IVName();
+    ri.iv_name = lr->GetIVName();
 
     if (lr->lbound)
       ri.lb = ExprEval(lr->lbound).AsInt();
@@ -359,7 +359,7 @@ void MockInterpreter::ExecForeach(AST::ForeachBlock& n) {
       ri.ub = ExprEval(lr->ubound).AsInt();
     } else {
       ri.ub = 0;
-      auto iv_ty = lr->IV()->GetType();
+      auto iv_ty = lr->GetIV()->GetType();
       if (auto bit = dyn_cast<BoundedITupleType>(iv_ty.get())) {
         auto ub_val = bit->GetUpperBound();
         if (auto iv = VIInt(ub_val)) ri.ub = *iv;
