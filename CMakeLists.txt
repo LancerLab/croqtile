@@ -433,6 +433,10 @@ if(ENABLE_HIP)
   endif()
 endif()
 
+# Ensure executables wait for bison-generated headers before compiling
+add_dependencies(choreo parser_deps)
+add_dependencies(copp parser_deps)
+
 # Link the library to the executable
 target_link_libraries(choreo PRIVATE
   parse

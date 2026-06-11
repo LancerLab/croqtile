@@ -114,6 +114,7 @@ set(CHOREO_COMPONENTS
 )
 
 add_dependencies(parse parser_deps)
+add_dependencies(core parser_deps)
 
 target_include_directories(parse PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_include_directories(core PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})

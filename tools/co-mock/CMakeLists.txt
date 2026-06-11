@@ -14,6 +14,8 @@ set_target_properties(co-mock PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_dependencies(co-mock parser_deps)
+
 target_include_directories(co-mock PRIVATE
   ${CMAKE_SOURCE_DIR}/lib
   ${CMAKE_BINARY_DIR}
