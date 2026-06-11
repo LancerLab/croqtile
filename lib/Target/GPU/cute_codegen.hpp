@@ -239,17 +239,17 @@ private:
   bool has_explicit_mma_wait = false;
   bool wgmma_arrive_state_declared = false;
   std::set<std::string> cluster_trigger_events_;
-  std::set<std::string> warpspec_raw_mbar_events_;
-  // TMA-trigger binding: event names whose triggers are no-ops
-  // (because arrive_and_expect_tx is emitted at the DMA load site)
+  std::set<std::string> event_arrive_tx_events_;
   std::set<std::string> tma_bound_event_triggers_;
+  std::set<std::string> empty_event_names_;
+  std::set<std::string> waited_events_;
   std::vector<std::string> pending_barrier_inits_;
+  std::vector<std::string> pending_tma_prefetch_names_;
+  // Stack of innermost foreach loop induction variable names (__iv_xxx).
+  // Used to derive inline phase formulas for mbarrier waits.
+  std::vector<std::string> foreach_iv_stack_;
   bool in_named_var_decl_ = false;
   bool has_analyzed_warpspec = false;
-
-  bool IsWarpSpecRawMbar(const std::string& event_name) const {
-    return warpspec_raw_mbar_events_.count(event_name) > 0;
-  }
   bool warpspec_wgmma_arrived = false;
   AST::InThreadsBlock* current_inthreads = nullptr;
 
@@ -314,6 +314,7 @@ private:
 
 private:
   void FlushBarrierInits();
+  std::string InlinePhaseExpr(int stages, bool is_fill) const;
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
   void EmitFastCompileCache(std::ostream& os, const std::string& precomp_cu);
@@ -446,7 +447,6 @@ private:
     tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
-    warpspec_raw_mbar_events_.clear();
     pending_barrier_inits_.clear();
     in_named_var_decl_ = false;
     emitted_device_names_.clear();
@@ -598,7 +598,8 @@ private:
   GetDMABufferExpr(const std::string& sym,
                    const ptr<AST::MultiValues> subscription,
                    const ptr<Type>& sym_ty) const;
-  void EmitGroupX4Sync(std::ostringstream& os, const std::string& indent) const;
+  void EmitGroupX4Sync(std::ostringstream& os, const std::string& indent,
+                       int thread_count = 128) const;
   std::optional<HoistedScaleAccumInfo> AnalyzeHoistableScaledWGMMAAccum(
       const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const;
   bool CollectHoistableScaledWGMMAAccum(
@@ -679,6 +680,42 @@ private:
       if (count > 1) return false;
     }
     return true;
+  }
+
+  int64_t CurrentWarpGroupCount() const {
+    return CurrentWarpGroupIndices().size();
+  }
+
+  std::vector<int64_t> CurrentWarpGroupIndices() const {
+    if (!current_inthreads || !current_inthreads->HasActiveThreads() ||
+        !current_inthreads->HasScopeThreadMask())
+      return {};
+
+    auto& mask = current_inthreads->GetScopeThreadMask();
+    std::vector<int64_t> consumer_wgs;
+    for (size_t i = 0; i < mask.size(); i += 128)
+      for (size_t j = i; j < std::min(i + 128, mask.size()); ++j)
+        if (mask[j]) {
+          consumer_wgs.push_back(i / 128);
+          break;
+        }
+    return consumer_wgs;
+  }
+
+  int64_t CurrentScopeThreadsCount() const {
+    return CurrentScopeThreadIndices().size();
+  }
+
+  std::vector<int64_t> CurrentScopeThreadIndices() const {
+    if (!current_inthreads || !current_inthreads->HasActiveThreads() ||
+        !current_inthreads->HasScopeThreadMask())
+      return {};
+
+    auto& mask = current_inthreads->GetScopeThreadMask();
+    std::vector<int64_t> thread_indices;
+    for (size_t i = 0; i < mask.size(); ++i)
+      if (mask[i]) thread_indices.push_back(i);
+    return thread_indices;
   }
 
   // In warpspec mode, use wg_barrier.sync() instead of __syncthreads()

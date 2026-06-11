@@ -512,6 +512,11 @@ public:
         }
         tma_desc.SetInThreadsBlock(in_thr_block);
         tma_desc.SetEventManaged(n.HasEvent());
+        if (n.HasEvent()) {
+          auto ev_name = ExtractEventName(*n.Event());
+          if (!ev_name.empty())
+            cgi.GetFunctionTrait(fname).RecordTMAFillEvent(ev_name);
+        }
         tma_descs.at(block_pb).push_back(tma_desc);
       } else
         choreo_unreachable(

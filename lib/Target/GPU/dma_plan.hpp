@@ -222,17 +222,6 @@ struct DMALoweringDecision {
   // tiles and predicated for the last partial tile.
   std::optional<DynBoxTileInfo> dyn_box;
 
-  // -- TMA event protocol (filled by codegen_prepare + DMAPlan) --------
-  // When event_managed=true, codegen emits arrive_and_expect_tx before the
-  // PTX TMA load, and the corresponding trigger becomes a no-op.
-  struct TMAProtocol {
-    bool event_managed = false; // tma.copy.async<event>
-    int tx_bytes = 0;           // tile bytes for arrive_and_expect_tx
-    std::string event_name;     // "kf[stage]" expression string
-    std::string event_base;     // "kf" base name (for trigger binding)
-  };
-  std::optional<TMAProtocol> tma_protocol;
-
   bool IsResolved() const { return strategy != DMAStrategy::UNKNOWN; }
   bool IsTiledDMA() const {
     return strategy == DMAStrategy::TILED_COPY_UNPRED ||

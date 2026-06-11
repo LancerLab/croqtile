@@ -3229,7 +3229,6 @@ public:
   __UDT_TYPE_INFO__(Node, MMA)
 };
 
-
 // apply {i, j} in frag.span { stmts }
 // Collective element-wise operation over a fragment's logical span.
 // Multi-statement body with row-hoisting semantics:
@@ -3242,8 +3241,8 @@ struct ApplyBlock : public Node, public TypeIDProvider<ApplyBlock> {
   std::vector<std::string> iterators;
   ptr<MultiNodes> body;
 
-  ApplyBlock(const location& l, const ptr<Expr>& span, std::vector<std::string> iters,
-             const ptr<MultiNodes>& b)
+  ApplyBlock(const location& l, const ptr<Expr>& span,
+             std::vector<std::string> iters, const ptr<MultiNodes>& b)
       : Node(l), span_expr(span), iterators(std::move(iters)), body(b) {}
 
   ptr<Node> CloneImpl() const override {

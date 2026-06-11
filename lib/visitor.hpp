@@ -488,8 +488,7 @@ public:
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
     } else if (auto ab = dyn_cast<AST::ApplyBlock>(&n)) {
       SSTab().EnterScope("apply_" + std::to_string(fe_count++));
-      for (auto& p : ab->iterators)
-        SSTab().DefineSymbol(p, MakeIntegerType());
+      for (auto& p : ab->iterators) SSTab().DefineSymbol(p, MakeIntegerType());
     } else if (isa<AST::InThreadsBlock>(&n)) {
       SSTab().EnterScope("inthreads_" + std::to_string(it_count++));
     } else if (isa<AST::WhileBlock>(&n)) {

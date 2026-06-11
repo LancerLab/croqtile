@@ -100,8 +100,7 @@ bool ShapeInference::BeforeVisitImpl(AST::Node& n) {
   } else if (auto ab = dyn_cast<AST::ApplyBlock>(&n)) {
     vn.EnterScope();
     ast_vn.EnterScope();
-    for (auto& p : ab->iterators)
-      GenValNum(SSTab().InScopeName(p));
+    for (auto& p : ab->iterators) GenValNum(SSTab().InScopeName(p));
   } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
     if (b->ref_name != "") {
       if (auto n = SSTab().NameInScopeOrNull(b->ref_name))

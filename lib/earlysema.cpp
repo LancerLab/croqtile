@@ -1899,8 +1899,9 @@ bool EarlySemantics::Visit(AST::DMA& n) {
             if (mds->HasValidRank()) cnt = mds->Rank();
       return cnt;
     };
-    auto getEffectiveRank = [&getReshapeRank](size_t base_dims,
-                               const ptr<AST::Node>& node) -> size_t {
+    auto getEffectiveRank =
+        [&getReshapeRank](size_t base_dims,
+                          const ptr<AST::Node>& node) -> size_t {
       if (!isa<AST::ChunkAt>(node)) return base_dims;
       auto ca = cast<AST::ChunkAt>(node);
       size_t rank = base_dims;
