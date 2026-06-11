@@ -321,23 +321,13 @@ __device__ __forceinline__ void tma_mbarrier_wait_parity(uint64_t* bar,
 
 // SM90+ (Hopper+) - TMA barrier and token
 struct TMAAtom {
-  cuda::barrier<cuda::thread_scope_block>* bar;
-  cuda::barrier<cuda::thread_scope_block>::arrival_token tok;
   uint64_t* ptx_bar = nullptr;
   int ptx_phase = 0;
-  bool use_ptx_mbarrier = false;
-  //  TMAAtom(cuda::barrier<cuda::thread_scope_block> *b): bar(b) {}
-  __device__ auto& barrier() { return *bar; }
-  __device__ auto& token() { return tok; }
+  TMAAtom() = default;
+  __device__ explicit TMAAtom(uint64_t* b) : ptx_bar(b), ptx_phase(0) {}
   __device__ uint64_t* ptx_barrier() { return ptx_bar; }
   __device__ int ptx_phase_bit() const { return ptx_phase; }
   __device__ void toggle_ptx_phase() { ptx_phase ^= 1; }
-  __device__ bool IsPTXMBarrier() const { return use_ptx_mbarrier; }
-  __device__ void EnablePTXMBarrier(uint64_t* b) {
-    ptx_bar = b;
-    ptx_phase = 0;
-    use_ptx_mbarrier = true;
-  }
 };
 
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
@@ -500,18 +490,12 @@ struct future {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     if (is_tma) {
       auto* tma_atom = ((TMAAtom*)atom);
-      if (tma_atom->IsPTXMBarrier()) {
     #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-        tma_mbarrier_wait_parity(tma_atom->ptx_barrier(),
-                                 tma_atom->ptx_phase_bit());
+      tma_mbarrier_wait_parity(tma_atom->ptx_barrier(),
+                               tma_atom->ptx_phase_bit());
     #else
-        __co_abort__();
+      __co_abort__();
     #endif
-      } else {
-        auto& barrier = tma_atom->barrier();
-        auto& token = tma_atom->token();
-        barrier.wait(std::move(token));
-      }
       return;
     }
     // TODO: make shared memory be allocated by host

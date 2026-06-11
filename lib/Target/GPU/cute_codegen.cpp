@@ -3631,11 +3631,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       auto f_sty = GetSpannedType(desc.GetFrom()->GetType());
       auto t_sty = GetSpannedType(desc.GetTo()->GetType());
       auto io_sty = (t_sty->GetStorage() == Storage::SHARED) ? t_sty : f_sty;
-      bool rank2_tma = io_sty->GetShape().Rank() == 2;
-      bool has_cluster = !cgi.GetFunctionLaunches(fname).empty() &&
-                         cgi.GetFunctionLaunches(fname)[0].HasCluster();
-      bool use_ptx_barrier_for_desc =
-          (tma_cluster_aware || ptx_barrier || has_cluster) && rank2_tma;
       auto in_thr_block = desc.GetInThreadsBlock();
       auto inner_pb_level = desc.GetPBLevel();
 
@@ -3645,54 +3640,17 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
 
       if (skip_load_tma_init_block) { continue; }
 
-      if (event_arrive_tx && desc.IsEventManaged()) { continue; }
-
-      if (event_arrive_tx && desc.IsStore()) { continue; }
-
       emitted_tma_init_idx++;
 
-      // TMA stores (S2G) still need a barrier/TMAAtom for proper
-      // synchronization with the consuming warpgroups.
-
-      if (use_ptx_barrier_for_desc) {
-        ds << d_indent << "__shared__ __align__(8) uint64_t "
-           << tma_barrier_name << ";\n";
-      } else {
-        ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
-           << tma_barrier_name << ";\n";
-      }
+      ds << d_indent << "__shared__ __align__(8) uint64_t "
+         << tma_barrier_name << ";\n";
       ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-      // if in_thr_block is specified, the number of threads is compitable with
-      // inner parallel-by the barrier. otherwise, all threads in the CTA will
-      // wait.
-
-      std::string threads_waited;
-      if (!in_thr_block) {
-        threads_waited = "blockDim.x";
-      } else if (inner_pb_level == ParallelLevel::GROUP) {
-        threads_waited = IsWarpSpecActive() ? "1" : "32";
-      } else if (inner_pb_level == ParallelLevel::GROUPx4) {
-        threads_waited = IsWarpSpecActive() ? "1" : "128";
-      }
-
-      if (use_ptx_barrier_for_desc) {
-        ds << d_indent << "  choreo::tma_mbarrier_init(&" << tma_barrier_name
-           << ", 1);\n";
-      } else {
-        ds << d_indent << "  init(&" << tma_barrier_name << ", "
-           << threads_waited << ");\n";
-        ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
-      }
+      ds << d_indent << "  choreo::tma_mbarrier_init(&" << tma_barrier_name
+         << ", 1);\n";
       ds << d_indent << "}\n";
       ds << d_indent << "__syncthreads();\n";
-      if (use_ptx_barrier_for_desc) {
-        ds << d_indent << "TMAAtom " << cp_atom_name << "{};\n";
-        ds << d_indent << cp_atom_name << ".EnablePTXMBarrier(&"
-           << tma_barrier_name << ");\n\n";
-      } else {
-        ds << d_indent << "TMAAtom " << cp_atom_name << "{&" << cp_atom_name
-           << "_barrier};\n\n";
-      }
+      ds << d_indent << "TMAAtom " << cp_atom_name << "{&"
+         << tma_barrier_name << "};\n\n";
     }
   }
   EmitDeviceVirtualIndices(&n);
@@ -3781,9 +3739,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!is_tma && !future_only) return "";
     // Event-only TMAs use event barriers and don't need futures
     if (is_tma && !future_only && event_only) return "";
-    if (is_tma && !future_only && event_arrive_tx && dma_plan &&
-        dma_plan->direction == DMADirection::S2G)
-      return "";
     auto future_name = n.future;
 
     auto cp_atom_name =
@@ -4517,9 +4472,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
       bool has_cluster = !cgi.GetFunctionLaunches(fname).empty() &&
                          cgi.GetFunctionLaunches(fname)[0].HasCluster();
-      bool use_ptx_tma_sync = (tma_cluster_aware || ptx_barrier ||
-                               is_multicast_tma || has_cluster) &&
-                              effective_tma_rank == 2;
       bool emit_tma_single_guard =
           !ScopeAlreadySingleThreadForLevel(tma_sync_level);
       if (!warpspec_only)
@@ -4537,155 +4489,88 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       }
 
-      if (use_ptx_tma_sync) {
-        std::string ptx_bar_expr;
-        if (event_only) {
-          ptx_bar_expr = "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
-        } else {
-          ptx_bar_expr =
-              "((TMAAtom*)" + future_name + ".get_atom())->ptx_barrier()";
-          std::string expect_fn = "choreo::tma_mbarrier_expect_tx";
-          ds << d_indent << tma_issue_prefix << expect_fn << "(" << ptx_bar_expr
-             << ", " << tma_tx_bytes_expr << ");\n";
-        }
-
-        auto coord0_expr = hoisted_rev_indices.empty()
-                               ? ValueSTR(rev_indices.at(0))
-                               : hoisted_rev_indices.at(0);
-        auto coord1_expr = hoisted_rev_indices.empty()
-                               ? ValueSTR(rev_indices.at(1))
-                               : hoisted_rev_indices.at(1);
-        if (is_multicast_tma) {
-          const auto& lcfg = cgi.GetFunctionLaunches(fname);
-          auto cluster_total = lcfg.empty() ? sbe::nu(1)
-                                            : lcfg[0].cluster_count.x *
-                                                  lcfg[0].cluster_count.y *
-                                                  lcfg[0].cluster_count.z;
-          ds << d_indent << tma_issue_prefix
-             << "if (choreo::tma_cluster_rank() == 0) {\n";
-          ds << d_indent << tma_issue_prefix << "  "
-             << "choreo::tma_load_2d_shared_cluster_global_mbarrier_multicast("
-                "(void*)"
-             << t_buf_expr_with_offset << ", (const void*)&" << *tname
-             << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
-             << coord1_expr << ", "
-             << "static_cast<uint16_t>((1u << " << ValueSTR(cluster_total)
-             << ") - 1u)"
-             << ");\n";
-          ds << d_indent << tma_issue_prefix << "}\n";
-        } else if (tma_cluster_aware) {
-          ds << d_indent << tma_issue_prefix
-             << "choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
-             << t_buf_expr_with_offset << ", (const void*)&" << *tname
-             << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
-             << coord1_expr << ");\n";
-        } else {
-          ds << d_indent << tma_issue_prefix
-             << "choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
-             << t_buf_expr_with_offset << ", (const void*)&" << *tname
-             << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
-             << coord1_expr << ");\n";
-        }
+      // PTX mbarrier TMA path (unified for all cases)
+      std::string ptx_bar_expr;
+      if (event_only) {
+        ptx_bar_expr = "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
       } else {
-        auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
-        std::string tma_barrier_arg;
-        bool raw_mbar_event_tma = false;
-        if (has_future)
-          tma_barrier_arg =
-              "((TMAAtom*)" + future_name + ".get_atom())->barrier()";
-        else if (event_only) {
-          auto ev_expr = cast<AST::Expr>(n.Event());
-          std::string ev_base;
-          if (ev_expr->op == Op::ElemOf) {
-            auto bid = AST::GetArrayBaseSymbol(*ev_expr);
-            if (bid) ev_base = bid->name;
-          } else {
-            auto sym = ev_expr->GetSymbol();
-            if (sym) ev_base = sym->name;
-          }
-          raw_mbar_event_tma = IsWarpSpecRawMbar(ev_base);
-          if (raw_mbar_event_tma)
-            tma_barrier_arg =
-                "reinterpret_cast<cuda::barrier<cuda::thread_scope_block>&>(" +
-                ExprSTR(n.Event(), IsHost()) + ")";
-          else
-            tma_barrier_arg = ExprSTR(n.Event(), IsHost());
-        } else
-          tma_barrier_arg = tma_atom_ref + ".barrier()";
-
-        ds << d_indent << tma_issue_prefix << "cde::cp_async_bulk_tensor_"
-           << effective_tma_rank << "d_global_to_shared("
-           << t_buf_expr_with_offset << ", &" << *tname << "_tensor_map, "
-           << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices)
-                                           : hoisted_rev_indices.at(0) + ", " +
-                                                 hoisted_rev_indices.at(1))
-           << ", " << tma_barrier_arg << ");\n";
-        if (has_future) {
-          ds << d_indent << tma_issue_prefix << "((TMAAtom*)" << future_name
-             << ".get_atom())->token() = "
-                "cuda::device::barrier_arrive_tx(((TMAAtom*)"
-             << future_name << ".get_atom())->barrier(), 1, "
-             << tma_tx_bytes_expr << ");\n";
-        } else if (!event_only) {
-          ds << d_indent << tma_issue_prefix << tma_atom_ref
-             << ".token() = "
-                "cuda::device::barrier_arrive_tx("
-             << tma_atom_ref << ".barrier(), 1, " << tma_tx_bytes_expr
-             << ");\n";
-        }
+        ptx_bar_expr =
+            "((TMAAtom*)" + future_name + ".get_atom())->ptx_barrier()";
+        ds << d_indent << tma_issue_prefix
+           << "choreo::tma_mbarrier_expect_tx(" << ptx_bar_expr << ", "
+           << tma_tx_bytes_expr << ");\n";
       }
+
+      auto coord0_expr = hoisted_rev_indices.empty()
+                             ? ValueSTR(rev_indices.at(0))
+                             : hoisted_rev_indices.at(0);
+      auto coord1_expr = hoisted_rev_indices.empty()
+                             ? ValueSTR(rev_indices.at(1))
+                             : hoisted_rev_indices.at(1);
+
+      if (is_multicast_tma) {
+        const auto& lcfg = cgi.GetFunctionLaunches(fname);
+        auto cluster_total = lcfg.empty() ? sbe::nu(1)
+                                          : lcfg[0].cluster_count.x *
+                                                lcfg[0].cluster_count.y *
+                                                lcfg[0].cluster_count.z;
+        ds << d_indent << tma_issue_prefix
+           << "if (choreo::tma_cluster_rank() == 0) {\n";
+        ds << d_indent << tma_issue_prefix << "  "
+           << "choreo::tma_load_2d_shared_cluster_global_mbarrier_multicast("
+              "(void*)"
+           << t_buf_expr_with_offset << ", (const void*)&" << *tname
+           << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
+           << coord1_expr << ", "
+           << "static_cast<uint16_t>((1u << " << ValueSTR(cluster_total)
+           << ") - 1u)"
+           << ");\n";
+        ds << d_indent << tma_issue_prefix << "}\n";
+      } else if (tma_cluster_aware) {
+        ds << d_indent << tma_issue_prefix
+           << "choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
+           << t_buf_expr_with_offset << ", (const void*)&" << *tname
+           << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
+           << coord1_expr << ");\n";
+      } else if (effective_tma_rank == 3) {
+        auto coord2_expr = hoisted_rev_indices.empty()
+                               ? ValueSTR(rev_indices.at(2))
+                               : hoisted_rev_indices.at(2);
+        ds << d_indent << tma_issue_prefix
+           << "choreo::tma_load_3d_shared_cta_global_mbarrier((void*)"
+           << t_buf_expr_with_offset << ", (const void*)&" << *tname
+           << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
+           << coord1_expr << ", " << coord2_expr << ");\n";
+      } else {
+        ds << d_indent << tma_issue_prefix
+           << "choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
+           << t_buf_expr_with_offset << ", (const void*)&" << *tname
+           << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
+           << coord1_expr << ");\n";
+      }
+
       if (emit_tma_single_guard) {
-        ds << d_indent << "}";
-        if ((has_future || !event_only) && !use_ptx_tma_sync) {
-          ds << " else {\n";
-          if (has_future) {
-            ds << d_indent << "  ((TMAAtom*)" << future_name
-               << ".get_atom())->token() = ((TMAAtom*)" << future_name
-               << ".get_atom())->barrier().arrive();\n";
-          } else {
-            auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
-            ds << d_indent << "  " << tma_atom_ref
-               << ".token() = " << tma_atom_ref << ".barrier().arrive();\n";
-          }
-          ds << d_indent << "}\n";
-        } else
-          ds << "\n";
+        ds << d_indent << "}\n";
       }
       recent_tma_tx_bytes.push_back(tma_tx_bytes_expr);
       if (recent_tma_tx_bytes.size() > 8) recent_tma_tx_bytes.pop_front();
 
-      // For async tma.copy.async, trigger the future
-      // For sync tma.copy, default behavior is immediate wait.
-      // Under --use-warpspec, defer this wait to event barrier protocol
-      // so producer-consumer pipelining remains asynchronous like ref kernels.
       if (fty->IsAsync()) {
-        if (has_future) ds << d_indent << future_name << ".trigger();\n";
+        // async: trigger handled by separate Trigger AST node
       } else {
-        // Synchronous tma.copy: wait immediately
         auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
         if (has_future) {
-          if (use_ptx_tma_sync) {
-            ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
-               << future_name << ".get_atom())->ptx_barrier(), ((TMAAtom*)"
-               << future_name << ".get_atom())->ptx_phase_bit());\n";
-            ds << d_indent << "((TMAAtom*)" << future_name
-               << ".get_atom())->toggle_ptx_phase();\n";
-          } else {
-            ds << d_indent << "((TMAAtom*)" << future_name
-               << ".get_atom())->barrier().wait(std::move(((TMAAtom*)"
-               << future_name << ".get_atom())->token()));\n";
-          }
+          ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
+             << future_name << ".get_atom())->ptx_barrier(), ((TMAAtom*)"
+             << future_name << ".get_atom())->ptx_phase_bit());\n";
+          ds << d_indent << "((TMAAtom*)" << future_name
+             << ".get_atom())->toggle_ptx_phase();\n";
           ds << d_indent << future_name << ".set_nowait();\n\n";
         } else if (!event_only) {
-          if (use_ptx_tma_sync) {
-            ds << d_indent << "choreo::tma_mbarrier_wait_parity("
-               << tma_atom_ref << ".ptx_barrier(), " << tma_atom_ref
-               << ".ptx_phase_bit());\n";
-            ds << d_indent << tma_atom_ref << ".toggle_ptx_phase();\n";
-          } else {
-            ds << d_indent << tma_atom_ref << ".barrier().wait(std::move("
-               << tma_atom_ref << ".token()));\n";
-          }
+          ds << d_indent << "choreo::tma_mbarrier_wait_parity("
+             << tma_atom_ref << ".ptx_barrier(), " << tma_atom_ref
+             << ".ptx_phase_bit());\n";
+          ds << d_indent << tma_atom_ref << ".toggle_ptx_phase();\n";
         }
       }
     } else if ((tsto == Storage::GLOBAL || tsto == Storage::DEFAULT) &&

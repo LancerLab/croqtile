@@ -29,5 +29,5 @@ __co__ void foo(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] 
   }
 }
 
-// CHECK: init(&choreo_copy_atom_t_0_barrier, blockDim.x);
-// CHECK: init(&choreo_copy_atom_t_1_barrier, blockDim.x);
+// CHECK: choreo::tma_mbarrier_init(&choreo_copy_atom_t_0_barrier, 1);
+// CHECK: choreo::tma_mbarrier_init(&choreo_copy_atom_t_1_barrier, 1);
