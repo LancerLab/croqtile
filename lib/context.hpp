@@ -553,6 +553,7 @@ private:
   bool warning_as_error = false;   // Make all warnings into errors.
   bool show_assess = false;        // Print assessment report after hoisting.
   bool trace_assess = false;       // Trace assessment processing.
+  bool disable_assert_hoist = false; // Disable assertion hoisting (for eval).
   bool print_stats = false;        // Print aggregate assessment statistics.
   AssertionCost rtc_cost_threshold =
       AssertionCost::ENTRY; // Runtime check assertion level
@@ -831,6 +832,7 @@ public:
     return disable_cuda_runtime_env_check;
   }
   bool DeviceOnly() const { return device_only; }
+  bool DisableAssertHoist() const { return disable_assert_hoist; }
   bool FastCompile() const { return fast_compile; }
   bool UseFastMath() const { return use_fast_math; }
   bool UseTargetLib() const { return use_target_lib; }
@@ -876,6 +878,7 @@ public:
     max_local_mem_capacity = sz;
   }
   void SetDeviceOnly(bool value) { device_only = value; }
+  void SetDisableAssertHoist(bool value) { disable_assert_hoist = value; }
   void SetFastCompile(bool value) { fast_compile = value; }
   void SetUseFastMath(bool value) { use_fast_math = value; }
   void SetUseTargetLib(bool value) { use_target_lib = value; }

@@ -126,6 +126,9 @@ Option<std::string> runtime_check_level(OptionKind::User, "--runtime-check",
                                         "-rtc", "entry",
                                         "Control runtime assertion insertion. "
                                         "(none|entry|low|medium|high|all)");
+Option<bool> disable_assert_hoist(
+    OptionKind::User, "--disable-assert-hoist", "", false,
+    "Disable assertion site hoisting (assertions remain at use site).");
 Option<bool> show_assess(
     OptionKind::User, "--show-assess", "-sass", false,
     "Print a report of all generated assessments after the hoisting pass: "
@@ -489,6 +492,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
   CCtx().SetSharedMemAlignment(shared_mem_alignment.GetValue());
+  CCtx().SetDisableAssertHoist(disable_assert_hoist.GetValue());
   if (use_target_lib.WasExplicitlySet())
     CCtx().SetUseTargetLib(use_target_lib.GetValue());
   else
