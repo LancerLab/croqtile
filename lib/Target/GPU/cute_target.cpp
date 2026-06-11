@@ -59,9 +59,18 @@ public:
     auto cc =
         CompileAndRun(nvcc,
                       "#include <cstdio>\n"
+                      "#include <cstring>\n"
                       "#include <cuda_runtime.h>\n"
                       "int main(){cudaDeviceProp p;"
                       "if(cudaGetDeviceProperties(&p,0)!=cudaSuccess)return 1;"
+                      "if(p.major==9&&p.minor==0){"
+                      "  const char*n=p.name;"
+                      "  if(strstr(n,\"H100\")||strstr(n,\"H200\")"
+                      "    ||strstr(n,\"H800\")||strstr(n,\"H20\")"
+                      "    ||strstr(n,\"GH200\")||strstr(n,\"GH100\")"
+                      "    ||strstr(n,\"B100\")||strstr(n,\"B200\")"
+                      "    ||strstr(n,\"GB200\")||strstr(n,\"GB100\"))"
+                      "    {printf(\"90a\");return 0;}}"
                       "printf(\"%d%d\",p.major,p.minor);return 0;}\n",
                       ".cu", "-lcudart");
     if (cc.empty()) return "";
