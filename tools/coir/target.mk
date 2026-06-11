@@ -26,7 +26,7 @@ setup-coir-deps:
 		echo "LLVM/MLIR already present at $(COIR_LLVM_DIR)"; \
 	fi
 
-# Build all CoIR tools (coir-gen, coir-opt, coir-codegen)
+# Build all CoIR tools (co2ir, coir-opt, coir-codegen, cocc)
 .PHONY: coir
 coir: build
 	@echo "=== Building CoIR tools ==="
@@ -35,11 +35,12 @@ coir: build
 		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
 		-DCHOREO_BUILD_COIR=ON \
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
-	ninja -C $(BUILD_DIR) coir-gen coir-opt coir-codegen
+	ninja -C $(BUILD_DIR) co2ir coir-opt coir-codegen cocc
 	@echo "CoIR tools built:"
-	@echo "  $(BUILD_DIR)/tools/coir/coir-gen"
+	@echo "  $(BUILD_DIR)/tools/coir/co2ir"
 	@echo "  $(BUILD_DIR)/tools/coir/coir-opt"
 	@echo "  $(BUILD_DIR)/tools/coir/coir-codegen"
+	@echo "  $(BUILD_DIR)/tools/coir/cocc"
 
 # Run CoIR lit tests
 .PHONY: coir-test
