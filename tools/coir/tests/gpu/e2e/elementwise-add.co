@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GPU
-// RUN: co2ir %s | coir-codegen -gs - > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 //
-// End-to-end GPU test: .co -> co2ir -> coir-codegen -gs -> execute
+// End-to-end GPU test: .co -> cocc -t cute -gs -> execute
 
 __co__ s32 [64] ele_add(s32 [64] a, s32 [64] b) {
   s32[a.span] c;

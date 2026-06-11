@@ -13,7 +13,6 @@ copp
 /co-mock
 /co2ir
 /coir-opt
-/coir-codegen
 /cocc
 build/
 build-release/

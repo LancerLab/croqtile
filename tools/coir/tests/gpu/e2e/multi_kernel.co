@@ -1,0 +1,37 @@
+// REQUIRES: TARGET-GPU
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Multiple kernel functions in single translation unit.
+
+__co__ s32 [64] kernel_add(s32 [64] a, s32 [64] b) {
+  s32[a.span] c;
+  parallel p by 64
+    c.at(p) = a.at(p) + b.at(p);
+  return c;
+}
+
+__co__ s32 [64] kernel_sub(s32 [64] a, s32 [64] b) {
+  s32[a.span] c;
+  parallel p by 64
+    c.at(p) = a.at(p) - b.at(p);
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(64);
+  auto b = choreo::make_spandata<choreo::s32>(64);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto add_res = kernel_add(a.view(), b.view());
+  auto sub_res = kernel_sub(a.view(), b.view());
+
+  for (size_t i = 0; i < 64; ++i) {
+    choreo::choreo_assert(a[i] + b[i] == add_res[i], "add mismatch");
+    choreo::choreo_assert(a[i] - b[i] == sub_res[i], "sub mismatch");
+  }
+
+  std::cout << "PASS: multi_kernel" << std::endl;
+}
+
+// CHECK: PASS: multi_kernel

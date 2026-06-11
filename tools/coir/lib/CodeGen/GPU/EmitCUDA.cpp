@@ -111,9 +111,15 @@ private:
     os << "using namespace nvcuda;\n\n";
   }
 
+  std::string kernelDeviceName(StringRef name) {
+    return ("__" + name + "_kernel__").str();
+  }
+
   void emitKernel(KernelOp kernel) {
     auto fnType = kernel.getFunctionType();
-    os << "__global__ void " << kernel.getSymName() << "(";
+    auto symName = kernel.getSymName();
+    std::string devName = kernelDeviceName(symName);
+    os << "__global__ void " << devName << "(";
 
     auto &body = kernel.getBody();
     unsigned paramIdx = 0;
@@ -186,18 +192,69 @@ private:
     return n * elemSize;
   }
 
+  void getGridBlockDims(KernelOp kernel, int64_t &gridDim, int64_t &blockDim) {
+    gridDim = 1;
+    blockDim = 1;
+    kernel.getBody().walk([&](ParallelOp par) {
+      auto lvl = par.getLevel();
+      auto bounds = par.getBounds();
+      int64_t totalBound = 1;
+      for (auto b : bounds) totalBound *= b;
+      if (lvl == coir::ParallelLevel::BLOCK)
+        gridDim = totalBound;
+      else if (lvl == coir::ParallelLevel::THREAD)
+        blockDim = totalBound;
+    });
+  }
+
   void emitHostWrapper(KernelOp kernel) {
     auto fnType = kernel.getFunctionType();
-    auto name = kernel.getSymName();
+    auto symName = kernel.getSymName();
+    std::string devName = kernelDeviceName(symName);
     unsigned numInputs = fnType.getNumInputs();
     unsigned numResults = fnType.getNumResults();
 
-    if (numResults == 0) return;
+    if (numResults == 0) {
+      os << "void " << symName << "(";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        if (i > 0) os << ", ";
+        os << emitChoreoType(fnType.getInput(i), true) << " p" << i;
+      }
+      os << ") {\n";
+
+      std::string eType = "int8_t";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (!tty) continue;
+        eType = emitElementType(tty.getElementType());
+        int64_t bytes = getTensorBytes(tty);
+        os << "  " << eType << "* p" << i << "__device = nullptr;\n";
+        os << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
+        os << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
+           << bytes << "ULL, cudaMemcpyHostToDevice);\n";
+      }
+
+      int64_t gridDim, blockDim;
+      getGridBlockDims(kernel, gridDim, blockDim);
+
+      os << "  " << devName << "<<<" << gridDim << ", " << blockDim << ">>>(";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        if (i > 0) os << ", ";
+        os << "p" << i << "__device";
+      }
+      os << ");\n";
+      os << "  cudaDeviceSynchronize();\n";
+
+      for (unsigned i = 0; i < numInputs; ++i)
+        os << "  cudaFree(p" << i << "__device);\n";
+      os << "}\n\n";
+      return;
+    }
 
     auto resTy = dyn_cast<coir::TensorType>(fnType.getResult(0));
     if (!resTy) return;
 
-    os << emitChoreoType(fnType.getResult(0), false) << " " << name << "(";
+    os << emitChoreoType(fnType.getResult(0), false) << " " << symName << "(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       auto &body = kernel.getBody();
@@ -243,20 +300,10 @@ private:
     os << "  " << eType << "* __result__device = nullptr;\n";
     os << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
 
-    // Determine grid/block dims from parallel levels in the kernel
-    int64_t gridDim = 1, blockDim = 1;
-    kernel.getBody().walk([&](ParallelOp par) {
-      auto lvl = par.getLevel();
-      auto bounds = par.getBounds();
-      int64_t totalBound = 1;
-      for (auto b : bounds) totalBound *= b;
-      if (lvl == coir::ParallelLevel::BLOCK)
-        gridDim = totalBound;
-      else if (lvl == coir::ParallelLevel::THREAD)
-        blockDim = totalBound;
-    });
+    int64_t gridDim, blockDim;
+    getGridBlockDims(kernel, gridDim, blockDim);
 
-    os << "  " << name << "<<<" << gridDim << ", " << blockDim << ">>>(";
+    os << "  " << devName << "<<<" << gridDim << ", " << blockDim << ">>>(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       os << "p" << i << "__device";

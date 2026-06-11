@@ -1,0 +1,29 @@
+// REQUIRES: TARGET-GPU
+// XFAIL: *
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// WMMA matrix multiply (16x16x16, f16 input, f32 accumulator).
+
+__co__ f32 [16, 16] wmma_matmul(f16 [16, 16] a, f16 [16, 16] b) {
+  f32 [16, 16] c;
+  parallel p by 1 {
+    acc = mma.zero f32 [16, 16];
+    la = mma.load a;
+    lb = mma.load b;
+    acc = mma a=la b=lb c=acc;
+    mma.store acc => c;
+  }
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f16>(16, 16);
+  auto b = choreo::make_spandata<choreo::f16>(16, 16);
+  a.fill_random(-1.0f, 1.0f);
+  b.fill_random(-1.0f, 1.0f);
+
+  auto res = wmma_matmul(a.view(), b.view());
+  std::cout << "PASS: wmma" << std::endl;
+}
+
+// CHECK: PASS: wmma

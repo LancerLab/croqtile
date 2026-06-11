@@ -1,0 +1,28 @@
+// REQUIRES: TARGET-GPU
+// XFAIL: *
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// DMA copy operations (global -> shared -> global).
+
+__co__ s32 [64] dma_roundtrip(s32 [64] input) {
+  s32[input.span] output;
+  parallel p by 64 {
+    data = dma.copy input.chunkat(p) => local;
+    dma.copy data.data => output.chunkat(p);
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(64);
+  a.fill_random(-100, 100);
+
+  auto res = dma_roundtrip(a.view());
+
+  for (size_t i = 0; i < 64; ++i)
+    choreo::choreo_assert(a[i] == res[i], "roundtrip mismatch");
+
+  std::cout << "PASS: dma_roundtrip" << std::endl;
+}
+
+// CHECK: PASS: dma_roundtrip
