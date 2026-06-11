@@ -23,11 +23,14 @@
 
 #include "choreo.h"
 #include "cutlass/cutlass.h"
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 namespace cde = cuda::device::experimental;
+#endif
 #include <cooperative_groups.h>
 using namespace choreo;
 
 // ---------------------------------------------------------------------------
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 // WGMMA smem descriptor wrappers
 // ---------------------------------------------------------------------------
 __device__ uint64_t __choreo_wgmma_smem_desc_k_ns(void* ptr) {
@@ -256,6 +259,7 @@ __device__ void __choreo_tma_store_wait_0() {
 __device__ void __choreo_fence_proxy_async() {
   cde::fence_proxy_async_shared_cta();
 }
+#endif // __CUDA_ARCH__ >= 900
 
 // ---------------------------------------------------------------------------
 // Cooperative groups wrapper
