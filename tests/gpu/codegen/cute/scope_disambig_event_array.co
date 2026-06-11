@@ -14,5 +14,6 @@ __co__ void foo(f32 [128, 128] input) {
 }
 
 // First `ev` keeps its name, nested `ev` gets a suffix.
-// CHECK: cuda::barrier<cuda::thread_scope_block> ev[2]
-// CHECK: cuda::barrier<cuda::thread_scope_block> ev__1[2]
+// On SM90+ warpspec, events use raw PTX mbarrier (uint64_t).
+// CHECK: uint64_t ev__mem[2]
+// CHECK: uint64_t ev__1__mem[2]
