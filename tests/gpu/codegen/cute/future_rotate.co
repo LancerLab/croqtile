@@ -116,7 +116,8 @@ __co__ void test_triple_rotate(
 // CHECK: choreo::rotate(o_f0, o_f1, o_f2);
 
 // -- steady-state loop with all three rotates --
-// CHECK: for (__iv_i_t__elem__0 = (2);
+// CHECK: auto [[ANON:[A-Za-z0-9_]+]] = 2;
+// CHECK: for (__iv_i_t__elem__0 = ([[ANON]]);
 // CHECK:   choreo::rotate(q_s0, q_s1, q_s2);
 // CHECK:   choreo::rotate(v_s0, v_s1, v_s2);
 // CHECK:   choreo::rotate(o_f0, o_f1, o_f2);
