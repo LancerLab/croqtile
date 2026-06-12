@@ -52,8 +52,8 @@ __co__ void foo(global f16 [M, K] lhs,
 // CHECK: warpgroup_commit_batch();
 // CHECK-NEXT: warpgroup_wait<0>();
 // CHECK: store_fragment_d<CUTE_WGMMA_M64K16, 128>(
-// CHECK: asm volatile("bar.sync 15, 128;
+// CHECK: choreo::named_barrier_sync(128, 15);
 // CHECK: cde::fence_proxy_async_shared_cta();
-// CHECK-NEXT: asm volatile("bar.sync 15, 128;
-// CHECK: if (__CHOREO_GROUPX4_SINGLE__) {
-// CHECK-NEXT:   cde::cp_async_bulk_tensor_2d_shared_to_global(
+// CHECK-NEXT: choreo::named_barrier_sync(128, 15);
+// CHECK: if (__choreo_vtid_x == 0) {
+// CHECK-NEXT: cde::cp_async_bulk_tensor_2d_shared_to_global(
