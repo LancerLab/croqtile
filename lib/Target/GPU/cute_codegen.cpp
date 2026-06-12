@@ -7812,11 +7812,11 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
 
   if (!IsHost() && !n.GetRanges().empty()) {
     auto rng0 = cast<AST::LoopRange>(n.GetRanges()[0]);
-    auto ivs0 = within_map.at(InScopeName(rng0->IVName()));
+    auto ivs0 = within_map.at(InScopeName(rng0->GetIVName()));
     if (!ivs0.empty())
       foreach_iv_stack_.push_back(SSMName(ivs0.front(), false));
     else
-      foreach_iv_stack_.push_back("__iv_" + rng0->IVName());
+      foreach_iv_stack_.push_back("__iv_" + rng0->GetIVName());
   }
 
   if (!IsHost() && n.GetBody()) {
