@@ -42,9 +42,9 @@ __co__ void flash_atten(
     shared event qf, kf[STAGES], ke[STAGES], vf[STAGES], ve[STAGES];
 
     kv_bound = cdiv((bm + 1) * BLOCK_M, BLOCK_N);
-
     parallel p by [BLOCK_M/WG_M + 1] : group-4, t by 128 : thread {
       inthreads.async (p == 0) {
+        setreg.dec(24);
         tma.copy.async<qf>.swiz<SWIZ>
           Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => q_shared;
         trigger qf;
@@ -64,6 +64,7 @@ __co__ void flash_atten(
       }
 
       inthreads.async (p > 0) {
+        setreg.inc(240);
         cid = p - 1;
         foreach {s} in [STAGES] {
           trigger ke[s];
