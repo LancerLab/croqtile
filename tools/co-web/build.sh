@@ -69,6 +69,8 @@ TARGET_SOURCES=(
   "$LIB_DIR/Target/GPU/cute_codegen.cpp"
   "$LIB_DIR/Target/GPU/cute_target.cpp"
   "$LIB_DIR/Target/GPU/dma_plan.cpp"
+  "$LIB_DIR/Target/GPU/fragment_layout_pass.cpp"
+  "$LIB_DIR/sys_utils.cpp"
 )
 
 SDK_SOURCES=(

@@ -38,6 +38,10 @@ int parse_source(const std::string& source, const std::string& target) {
   auto& r = OptionRegistry::GetInstance();
   r.Reset();
 
+  // Reset the global AST root to avoid accumulating state across calls.
+  location fresh_loc;
+  root.SetBody(AST::Make<AST::MultiNodes>(fresh_loc));
+
   auto& ctx = CCtx();
   ctx.SetDumpAst(false);
   ctx.SetNoCodegen(true);
