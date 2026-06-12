@@ -74,6 +74,7 @@ extern Option<bool> native_f16;
 extern Option<bool> native_bf16;
 extern Option<bool> verbose;
 extern Option<bool> use_pic;
+extern Option<bool> use_fast_math;
 extern Option<bool> tma_cluster_aware;
 extern Option<bool> ptx_barrier;
 extern Option<bool> use_stmatrix;
@@ -5440,8 +5441,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
 
         // Row (M) mask - Source 2: parent M not aligned with tile M
+        bool target_is_shared = f_sty->GetStorage() == Storage::SHARED;
         if (!need_m_mask && f_sty->GetStorage() == Storage::GLOBAL &&
-            !store_trans && !use_stmatrix) {
+            !store_trans && !(use_stmatrix && target_is_shared)) {
           auto parent_sym = ca->RefSymbol();
           auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
           if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
@@ -5482,7 +5484,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
         // Column (N) mask: parent N not aligned with tile N
         if (f_sty->GetStorage() == Storage::GLOBAL && !store_trans &&
-            !use_stmatrix) {
+            !(use_stmatrix && target_is_shared)) {
           auto parent_sym = ca->RefSymbol();
           auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
           if (parent_ty && parent_ty->GetShape().Rank() >= 2) {
@@ -5529,22 +5531,25 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                "global memory. Support for more cases can be added if needed.");
 
       // --- Emit store ---
-      if (use_stmatrix) {
-        bool use_stmatrix_f32_bf16 = accum_type == BaseType::F32 &&
-                                     f_sty->ElementType() == BaseType::BF16 &&
-                                     !store_trans;
-        bool use_stmatrix_f32_bf16_trans =
-            accum_type == BaseType::F32 &&
-            f_sty->ElementType() == BaseType::BF16 && store_trans;
-        ds << d_indent
-           << (use_stmatrix_f32_bf16
-                   ? "store_fragment_d_stmatrix_f32_bf16<"
-                   : (use_stmatrix_f32_bf16_trans
-                          ? "store_fragment_d_stmatrix_trans_f32_bf16<"
-                          : (store_trans ? "store_fragment_d_stmatrix_trans<"
-                                         : "store_fragment_d_stmatrix<")))
-           << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">(" << f_mds.first
-           << ", "
+      bool stmatrix_ok = use_stmatrix && f_sty->GetStorage() == Storage::SHARED;
+      if (stmatrix_ok) {
+        bool is_f32_acc = (accum_type == BaseType::F32);
+        auto elem = f_sty->ElementType();
+        bool is_bf16 = (elem == BaseType::BF16);
+        bool is_f16 = (elem == BaseType::F16);
+        std::string fn;
+        if (is_f32_acc && is_bf16 && !store_trans)
+          fn = "store_fragment_d_stmatrix_f32_bf16<";
+        else if (is_f32_acc && is_bf16 && store_trans)
+          fn = "store_fragment_d_stmatrix_trans_f32_bf16<";
+        else if (is_f32_acc && is_f16 && !store_trans)
+          fn = "store_fragment_d_stmatrix_f32_f16<";
+        else if (store_trans)
+          fn = "store_fragment_d_stmatrix_trans<";
+        else
+          fn = "store_fragment_d_stmatrix<";
+        ds << d_indent << fn << CUTE_WGMMA_ATOM << ", " << DIM_N_STR << ">("
+           << f_mds.first << ", "
            << "reinterpret_cast<" << NameBaseType(accum_type) << "*>("
            << ExprSTR(frag, false) << "));\n";
       } else {
@@ -6852,15 +6857,17 @@ bool CuteCodeGen::Visit(AST::Call& n) {
         os << indent << "}\n";
       }
       return true;
-    } else if (func_name == "setreg") {
+    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
+               func_name == "setreg.dec") {
       if (IsHost()) return true;
       auto arg = cast<AST::Expr>(n.arguments->ValueAt(0));
       auto reg_limit = VIInt(arg->Opts().GetVal());
       if (!reg_limit || reg_limit.value() <= 0)
         choreo_unreachable("setreg expects a positive integer constant.");
       if (CCtx().ArchNum() >= 90) {
-        os << indent << "asm volatile(\"setmaxnreg.dec.sync.aligned.u32 "
-           << reg_limit.value() << ";\");\n";
+        const char* dir = (func_name == "setreg.inc") ? "inc" : "dec";
+        os << indent << "asm volatile(\"setmaxnreg." << dir
+           << ".sync.aligned.u32 " << reg_limit.value() << ";\");\n";
       }
       return true;
     } else if (func_name == "launch_bounds") {
@@ -9070,6 +9077,7 @@ show_usage() {
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";
+  if (use_fast_math) os << " --use_fast_math";
   if (verbose) os << " -v"; // if it requires to be verbose
   os << " --expt-relaxed-constexpr";
   // always enclose
@@ -9984,8 +9992,13 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
     return oss.str();
   }
 
+  static const std::unordered_map<std::string, std::string> cuda_intrinsic_map =
+      {{"__fmaf", "fmaf"}, {"__frcp_rn", "__frcp_rn"}};
+
   auto func_name = [&n](const std::string& name) -> std::string {
     if (!n.IsArith()) return name;
+    auto it = cuda_intrinsic_map.find(name);
+    if (it != cuda_intrinsic_map.end()) return it->second;
     const std::string prefix = "__";
     std::string func_name = name;
     if (auto res = RemovePrefixOrNull(prefix, name)) func_name = *res;

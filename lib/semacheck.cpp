@@ -649,7 +649,9 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
     for (const auto& stmt : body->values) {
       auto call = dyn_cast<AST::Call>(stmt);
       if (!call || !call->IsBIF()) continue;
-      if (call->function->name == "setreg") {
+      if (call->function->name == "setreg" ||
+          call->function->name == "setreg.inc" ||
+          call->function->name == "setreg.dec") {
         setreg_count++;
       } else if (call->function->name == "launch_bounds") {
         launch_bounds_count++;
@@ -1509,7 +1511,8 @@ bool SemaChecker::VisitNode(AST::Call& n) {
           Error1(n.LOC(), "choreo assertion abort: " + msg);
         }
       }
-    } else if (func_name == "setreg") {
+    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
+               func_name == "setreg.dec") {
       if (n.arguments->Count() != 1) {
         Error1(n.LOC(), "setreg expects exactly one argument.");
       } else {

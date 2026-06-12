@@ -143,7 +143,7 @@ Option<bool>
                  "runtime is built automatically on first use and cached in "
                  "$XDG_CACHE_HOME/choreo/ (or ~/.cache/choreo/).");
 Option<bool> use_fast_math(
-    OptionKind::User, "--use-fast-math", "", true,
+    OptionKind::User, "--use-fast-math", "-fmath", true,
     "Pass --use_fast_math to nvcc when compiling generated CUDA code "
     "(default: on). Use --use-fast-math=false to disable. Enables faster "
     "approximate transcendentals (exp2f, div) for softmax and similar "

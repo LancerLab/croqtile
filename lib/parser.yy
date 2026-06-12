@@ -203,11 +203,11 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG LAUNCHBOUNDS
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG SETREG_INC SETREG_DEC LAUNCHBOUNDS
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD LOADR LOADS STORE ROW COLUMN COMMIT SCALE MASK MMAWAIT
 %token <std::string> UNROLL
-%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
+%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FMAF FRCP_RN FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
 %token <std::string> LIB_CALL
 %token <std::string> FRAG FRAGMENT AUTOMAP FRAG_APPLY REDUCE_MAX REDUCE_SUM
@@ -2515,6 +2515,8 @@ arith_builtin_func
     | EXP2F    { $$ = $1; }
     | EXPM1    { $$ = $1; }
     | FABS     { $$ = $1; }
+    | FMAF     { $$ = $1; }
+    | FRCP_RN  { $$ = $1; }
     | FLOOR    { $$ = $1; }
     | GELU     { $$ = $1; }
     | ISFINITE { $$ = $1; }
@@ -2605,6 +2607,15 @@ call_expr
              AST::Make<AST::Call>(@1,
              AST::Make<AST::Identifier>(@1, $1), args, AST::Call::BIF | AST::Call::ARITH | AST::Call::EXPR));
       }
+    | arith_builtin_func LPAREN s_expr COMMA s_expr COMMA s_expr RPAREN {
+        auto args = AST::Make<AST::MultiValues>(@3);
+        args->Append($3);
+        args->Append($5);
+        args->Append($7);
+        $$ = AST::Make<AST::Expr>(@1,
+             AST::Make<AST::Call>(@1,
+             AST::Make<AST::Identifier>(@1, $1), args, AST::Call::BIF | AST::Call::ARITH | AST::Call::EXPR));
+      }
     | align_func LPAREN s_expr COMMA s_expr RPAREN {
         auto mn = AST::Make<AST::MultiValues>(@1, ", ");
         mn->Append($3);
@@ -2688,7 +2699,21 @@ setreg_stmt
         auto args = AST::Make<AST::MultiValues>(@1, ", ");
         args->Append($2);
         $$ = AST::Make<AST::Call>(
-            @1, AST::Make<AST::Identifier>(@1, $1), args,
+            @1, AST::Make<AST::Identifier>(@1, "setreg"), args,
+            AST::Call::BIF | AST::Call::ANNO);
+      }
+    | SETREG_INC s_expr {
+        auto args = AST::Make<AST::MultiValues>(@1, ", ");
+        args->Append($2);
+        $$ = AST::Make<AST::Call>(
+            @1, AST::Make<AST::Identifier>(@1, "setreg.inc"), args,
+            AST::Call::BIF | AST::Call::ANNO);
+      }
+    | SETREG_DEC s_expr {
+        auto args = AST::Make<AST::MultiValues>(@1, ", ");
+        args->Append($2);
+        $$ = AST::Make<AST::Call>(
+            @1, AST::Make<AST::Identifier>(@1, "setreg.dec"), args,
             AST::Call::BIF | AST::Call::ANNO);
       }
     ;

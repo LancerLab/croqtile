@@ -3614,7 +3614,6 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   // True when an explicit local name was written: foreach local=source(...)
   bool HasExplicitIV() const { return iv && iv.get() != rv.get(); }
 
-
   bool BoundIsMutated() const {
     return (lbound != nullptr) || (ubound != nullptr);
   }
@@ -3622,8 +3621,8 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ptr<Node> CloneImpl() const override {
     auto cloned_rv = (!rv) ? nullptr : CloneP(rv);
     auto cloned_iv = (!iv) ? nullptr : CloneP(iv);
-    auto copied = Make<LoopRange>(LOC(), cloned_rv, CloneP(lbound),
-                                  CloneP(ubound), step);
+    auto copied =
+        Make<LoopRange>(LOC(), cloned_rv, CloneP(lbound), CloneP(ubound), step);
     copied->iv = cloned_iv;
     copied->scope_predicate = scope_predicate;
     return copied;
@@ -3634,8 +3633,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
     // iv is the iteration variable the body sees.
     // rv is the range source (within-declared) that provides bounds.
     os << "\n" << prefix << "`- Iteration variables: " << GetIVName();
-    if (HasExplicitIV())
-      os << " (source: " << GetRVName() << ")";
+    if (HasExplicitIV()) os << " (source: " << GetRVName() << ")";
 
     if (!lbound && !ubound && !IsValidStep(step)) return;
 

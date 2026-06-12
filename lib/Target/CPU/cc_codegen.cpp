@@ -1439,7 +1439,9 @@ bool CCCodeGen::Visit(AST::Call& n) {
       os << ";\n";
       return true;
     }
-    if (func_name == "launch_bounds" || func_name == "setreg") return true;
+    if (func_name == "launch_bounds" || func_name == "setreg" ||
+        func_name == "setreg.inc" || func_name == "setreg.dec")
+      return true;
     if (n.IsArith() || n.IsAtomic()) {
       if (!n.IsExpr()) os << indent << CallSTR(n) << ";\n";
       return true;
