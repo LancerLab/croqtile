@@ -2060,7 +2060,7 @@ bool ShapeInference::Visit(AST::ForeachBlock& n) {
     auto vl = vn.GenValueListFromValueNumber(valno);
     if (IsValidValueList(vl) && !IsComputable(vl))
       Error1(rng->GetRV()->LOC(), "The upper bound(s) of '" + rng->GetRVName() +
-                                   "' can not be evaluated.");
+                                      "' can not be evaluated.");
   }
 
   // invalidate any current value generated

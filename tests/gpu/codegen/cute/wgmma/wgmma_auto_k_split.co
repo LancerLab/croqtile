@@ -40,19 +40,21 @@ __co__ auto direct_row_col_auto_split(f16 [M, K] lhs, f16 [K, N] rhs) {
   return output;
 }
 
-// ROW-ROW: uint64_t __choreo_wgmma_desc_{{[0-9]+}} = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
-// ROW-ROW: uint64_t __choreo_wgmma_desc_{{[0-9]+}} = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
 // ROW-ROW: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 4; ++__choreo_wgmma_k_iter) {
-// ROW-ROW: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = uint64_t(__choreo_wgmma_desc_{{[0-9]+}} +
+// ROW-ROW: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)
+// ROW-ROW: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
+// ROW-ROW: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)
+// ROW-ROW: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
 // ROW-ROW: MMA_64x128x16_F32F16F16_SS<static_cast<cute::SM90::GMMA::Major>(0), static_cast<cute::SM90::GMMA::Major>(0)>::fma(__choreo_wgmma_desc_{{[0-9]+}}_iter, __choreo_wgmma_desc_{{[0-9]+}}_iter
 // ROW-ROW: warpgroup_commit_batch();
 // ROW-ROW-NEXT: warpgroup_wait<0>();
 // ROW-ROW-NEXT: warpgroup_fence_operand(mc);
 
-// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}} = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
-// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}} = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::B128>
 // ROW-COL: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 4; ++__choreo_wgmma_k_iter) {
-// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = uint64_t(__choreo_wgmma_desc_{{[0-9]+}} +
+// ROW-COL: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)
+// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
+// ROW-COL: auto* __choreo_wgmma_ptr_{{[0-9]+}}_iter = (f16*)
+// ROW-COL: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_iter = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::B128>
 // ROW-COL: MMA_64x128x16_F32F16F16_SS<static_cast<cute::SM90::GMMA::Major>(0), static_cast<cute::SM90::GMMA::Major>(1)>::fma(__choreo_wgmma_desc_{{[0-9]+}}_iter, __choreo_wgmma_desc_{{[0-9]+}}_iter
 // ROW-COL: warpgroup_commit_batch();
 // ROW-COL-NEXT: warpgroup_wait<0>();

@@ -114,8 +114,8 @@ public:
           }
         } else if (fb->ranges->Count() == 1 && !matcher_map.count(cname)) {
           // single range, single loop
-          auto loop = std::make_shared<Loop>(GenerateLoopName(),
-                                             rng->GetRV()->GetType(), fb->LOC());
+          auto loop = std::make_shared<Loop>(
+              GenerateLoopName(), rng->GetRV()->GetType(), fb->LOC());
           fb->loop = loop;
           continue;
         } else {

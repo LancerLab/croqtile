@@ -2291,7 +2291,8 @@ bool EarlySemantics::Visit(AST::Call& n) {
       auto sty = NodeType(*n.arguments->ValueAt(1));
       if (!isa<StringType>(sty))
         Error1(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
-    } else if (func_name == "setreg") {
+    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
+               func_name == "setreg.dec") {
       if (CCtx().TargetName() != "cute") {
         Error1(n.LOC(), "setreg is only supported for the cute target.");
       }

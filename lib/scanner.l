@@ -435,6 +435,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "__exp2f"    return Choreo::Parser::make_EXP2F(yytext, loc);
   "__expm1"    return Choreo::Parser::make_EXPM1(yytext, loc);
   "__fabs"     return Choreo::Parser::make_FABS(yytext, loc);
+  "__fmaf"     return Choreo::Parser::make_FMAF(yytext, loc);
+  "__frcp_rn"  return Choreo::Parser::make_FRCP_RN(yytext, loc);
   "__floor"    return Choreo::Parser::make_FLOOR(yytext, loc);
   "__gelu"     return Choreo::Parser::make_GELU(yytext, loc);
   "__isfinite" return Choreo::Parser::make_ISFINITE(yytext, loc);
@@ -575,6 +577,8 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "foreach"  return Choreo::Parser::make_FOREACH(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
+  "setreg.inc" return Choreo::Parser::make_SETREG_INC(yytext, loc);
+  "setreg.dec" return Choreo::Parser::make_SETREG_DEC(yytext, loc);
   "setreg"   return Choreo::Parser::make_SETREG(yytext, loc);
   "launch_bounds" return Choreo::Parser::make_LAUNCHBOUNDS(yytext, loc);
   "select"   return Choreo::Parser::make_SELECT(yytext, loc);

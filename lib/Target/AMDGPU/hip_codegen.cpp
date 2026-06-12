@@ -1449,7 +1449,10 @@ bool HIPCodeGen::Visit(AST::Call& n) {
       if (func_name == "println") os << indent << "printf(\"\\n\");\n";
       return true;
     }
-    if (func_name == "setreg" || func_name == "launch_bounds") { return true; }
+    if (func_name == "setreg" || func_name == "setreg.inc" ||
+        func_name == "setreg.dec" || func_name == "launch_bounds") {
+      return true;
+    }
     if (n.IsArith()) {         /* fall through to CallSTR emission below */
     } else if (n.IsAtomic()) { /* fall through to CallSTR emission below */
     } else

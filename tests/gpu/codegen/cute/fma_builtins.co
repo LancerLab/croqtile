@@ -1,0 +1,29 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+#define N 64
+
+__co__ f32[N] fma_test() {
+  f32[N] out;
+  parallel t by 128 : thread {
+    fragment f32[N] a {1.0f};
+    fragment f32[N] b {2.0f};
+    fragment f32[N] c {3.0f};
+    frag.apply c, [](i) { return __fmaf(a.at(i), b.at(i), c.at(i)); };
+    frag.store out, c;
+  }
+  return out;
+}
+
+// CHECK: fmaf(
+
+__co__ f32[N] rcp_test() {
+  f32[N] out;
+  parallel t by 128 : thread {
+    fragment f32[N] a {2.0f};
+    frag.apply a, [](i) { return __frcp_rn(a.at(i)); };
+    frag.store out, a;
+  }
+  return out;
+}
+
+// CHECK: __frcp_rn(
