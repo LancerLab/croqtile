@@ -103,6 +103,13 @@ static inline void __choreo_check_cuda_environment__() {
     #define CHOREO_PTX_BARRIER_MAX_SPINS (1u << 24)
   #endif
 
+__device__ __forceinline__ void named_barrier_sync(uint32_t num_threads,
+                                                   uint32_t barrier_id) {
+  #if CUDA_BARRIER_ENABLED
+  asm volatile("bar.sync %0, %1;" : : "r"(barrier_id), "r"(num_threads));
+  #endif
+}
+
 __device__ __forceinline__ uint32_t tma_to_shared_u32(const void* p) {
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   return static_cast<uint32_t>(__cvta_generic_to_shared(p));
