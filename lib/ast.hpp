@@ -3359,7 +3359,12 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
 };
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
-  ptr<Identifier> iv; // induction variable
+  // rv: the range-source variable (a within-declared bounded variable whose
+  // bounds define this range). Not directly visible inside the foreach body.
+  ptr<Identifier> rv;
+  // iv: the iteration variable visible inside the foreach body.
+  // Only set when the parser saw an explicit local name: foreach local=source.
+  ptr<Identifier> iv;
   // both will be normalized to Expr which ref to anon_x
   ptr<Node> lbound = nullptr;
   ptr<Node> ubound = nullptr;
@@ -3367,28 +3372,49 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ValueItem scope_predicate = GetInvalidValueItem();
 
   LoopRange(const location& l, const ptr<Identifier>& i)
-      : Node(l), iv(i) {} // the cmpt_bounds are yet to be inferred
+      : Node(l), rv(i), iv(nullptr) {} // the cmpt_bounds are yet to be inferred
   LoopRange(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
-      : Node(l), iv(i), lbound(lb), ubound(ub), step(s) {}
+      : Node(l), rv(i), iv(nullptr), lbound(lb), ubound(ub), step(s) {}
+  // Constructor for explicit local name: foreach local=source(lb:ub[:step])
+  LoopRange(const location& l, const ptr<Identifier>& local,
+            const ptr<Identifier>& source, const ptr<Node>& lb,
+            const ptr<Node>& ub, int s = 1)
+      : Node(l), rv(source), iv(local), lbound(lb), ubound(ub), step(s) {}
 
-  const std::string IVName() const { return iv->name; }
-  const ptr<Identifier> IV() const { return iv; }
+  // Range source variable (the within-declared bounded variable).
+  const std::string GetRVName() const { return rv->name; }
+  const ptr<Identifier> GetRV() const { return rv; }
+
+  // Iteration variable visible inside the foreach body.
+  const std::string GetIVName() const { return GetIV()->name; }
+  const ptr<Identifier> GetIV() const { return iv ? iv : rv; }
+
+  // True when an explicit local name was written: foreach local=source(...)
+  bool HasExplicitIV() const { return iv && iv.get() != rv.get(); }
+
 
   bool BoundIsMutated() const {
     return (lbound != nullptr) || (ubound != nullptr);
   }
 
   ptr<Node> CloneImpl() const override {
-    auto copied = Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv),
-                                  CloneP(lbound), CloneP(ubound), step);
+    auto cloned_rv = (!rv) ? nullptr : CloneP(rv);
+    auto cloned_iv = (!iv) ? nullptr : CloneP(iv);
+    auto copied = Make<LoopRange>(LOC(), cloned_rv, CloneP(lbound),
+                                  CloneP(ubound), step);
+    copied->iv = cloned_iv;
     copied->scope_predicate = scope_predicate;
     return copied;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    os << "\n" << prefix << "`- Iteration variables: " << iv->name;
+    // iv is the iteration variable the body sees.
+    // rv is the range source (within-declared) that provides bounds.
+    os << "\n" << prefix << "`- Iteration variables: " << GetIVName();
+    if (HasExplicitIV())
+      os << " (source: " << GetRVName() << ")";
 
     if (!lbound && !ubound && !IsValidStep(step)) return;
 
@@ -3468,10 +3494,10 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
 
   bool IsNorm() const { return loop != nullptr; }
 
-  ptr<Identifier> GetIV() const {
+  ptr<Identifier> GetRV() const {
     if (ranges->Count() == 1) {
       auto range = dyn_cast<AST::LoopRange>(ranges->ValueAt(0));
-      return range->IV();
+      return range->GetRV();
     }
     return nullptr;
   }

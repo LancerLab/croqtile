@@ -127,6 +127,11 @@ public:
                          "' supports no architecture.");
     return archs.begin()->id;
   }
+
+  // Resolve "native" to a concrete arch by probing local hardware.
+  // Returns empty string if detection is not supported or fails.
+  virtual ArchId ResolveNativeArch() const { return ""; }
+
   virtual const std::vector<FeatureToggle>
   SupportedFeatures(const ArchId&) const {
     return {};

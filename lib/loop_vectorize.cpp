@@ -38,7 +38,7 @@ bool LoopAnalysis::AfterVisitImpl(AST::Node& n) {
 }
 
 bool LoopAnalysis::Visit(AST::ForeachBlock& n) {
-  auto iv = n.GetIV();
+  auto iv = n.GetRV();
 
   ptr<Loop> loop = n.loop;
   auto loop_name = loop->LoopName();
@@ -757,7 +757,7 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
   auto smi = cur_loop->GetScopedMaskInfo();
   auto loc = n.stmts->LOC();
   auto mask_ty = MakeVectorType(BaseType::BOOL, cur_loop->GetVectorFactor());
-  auto iv = n.GetIV();
+  auto iv = n.GetRV();
   auto iv_ty = iv->GetType();
   auto upper_bound = GetSingleUpperBound(iv_ty);
   ptr<AST::NamedVariableDecl> loop_cond = nullptr;
@@ -770,7 +770,7 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
     if (!HasDivergentBranch(*n.stmts)) {
       if (debug_visit)
         dbgs() << "[mask] No divergent branch inside vectorized loop: "
-               << n.GetIV()->name << ", skip mask generation.\n";
+               << n.GetRV()->name << ", skip mask generation.\n";
       return true;
     }
     auto bool_literal = AST::Make<AST::BoolLiteral>(loc, true);
@@ -810,9 +810,9 @@ bool MaskGen::Visit(AST::ForeachBlock& n) {
   n.stmts->Insert(cur_mask, 1);
   if (debug_visit) {
     dbgs() << "[mask] Inserted loop condition(exec): " << STR(loop_cond)
-           << " at the beginning of loop: " << n.GetIV()->name << "\n";
+           << " at the beginning of loop: " << n.GetRV()->name << "\n";
     dbgs() << "[mask] Inserted scoped mask: " << STR(cur_mask)
-           << " at the beginning of loop: " << n.GetIV()->name << "\n";
+           << " at the beginning of loop: " << n.GetRV()->name << "\n";
   }
 
   return true;

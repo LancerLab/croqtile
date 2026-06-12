@@ -7,6 +7,7 @@
 #include "gpu_target.hpp"
 #include "memcheck.hpp"
 #include "pipeline.hpp"
+#include "sys_utils.hpp"
 #include "target_registry.hpp"
 #include "types.hpp"
 

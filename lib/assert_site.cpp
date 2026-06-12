@@ -73,7 +73,7 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
     size_t trip = 1;
     for (auto range_node : fb->GetRanges()) {
       auto range = cast<AST::LoopRange>(range_node);
-      auto sty = GetSymbolType(range->IVName());
+      auto sty = GetSymbolType(range->GetRVName());
       int64_t span = 100; // default trip count
       if (IsActualBoundedIntegerType(sty)) {
         auto ub = GetSingleUpperBound(sty);
@@ -233,7 +233,7 @@ bool AssertSite::Visit(AST::LoopRange& n) {
     // Record a barrier only if the IV is findable in the symbol table.
     // Synthetic iteration variables (e.g. `foreach i in [K]` where `i`
     // is a fresh name) are not registered and InScopeName would abort.
-    auto iv = n.IVName();
+    auto iv = n.GetRVName();
     std::string scoped_iv;
     std::string scope_name = scoped_symtab.ScopeName();
     while (true) {

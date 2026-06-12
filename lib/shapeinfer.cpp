@@ -1871,10 +1871,10 @@ bool ShapeInference::Visit(AST::ForeachBlock& n) {
 
   for (auto r : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(r);
-    auto valno = GetValNo(*rng->IV(), VNKind::VNK_UBOUND);
+    auto valno = GetValNo(*rng->GetRV(), VNKind::VNK_UBOUND);
     auto vl = vn.GenValueListFromValueNumber(valno);
     if (IsValidValueList(vl) && !IsComputable(vl))
-      Error1(rng->IV()->LOC(), "The upper bound(s) of '" + rng->IVName() +
+      Error1(rng->GetRV()->LOC(), "The upper bound(s) of '" + rng->GetRVName() +
                                    "' can not be evaluated.");
   }
 

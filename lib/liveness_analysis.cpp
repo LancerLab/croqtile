@@ -777,7 +777,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     for (size_t i = 0; i < fb->ranges->Count(); ++i) {
       if (i > 0) os << ", ";
       auto lr = cast<AST::LoopRange>(fb->ranges->values[i]);
-      os << lr->iv->name << "(";
+      os << lr->GetRV()->name << "(";
       os << (lr->lbound ? PSTR(lr->lbound) : "") << ":";
       os << (lr->ubound ? PSTR(lr->ubound) : "") << ":";
       os << (IsValidStep(lr->step) ? std::to_string(lr->step) : "") << ")";
@@ -1579,8 +1579,8 @@ bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   for (const auto& item : n.GetRanges()) {
     auto range = cast<AST::LoopRange>(item);
-    // Although `iv` is reset to zero, still treat it as a use.
-    AddUse(current_stmt, range->IVName());
+    // Although the range var is reset to zero, still treat it as a use.
+    AddUse(current_stmt, range->GetRVName());
     for (const auto& offset : {range->lbound, range->ubound}) {
       if (!offset) continue;
       if (auto id = AST::GetIdentifier(*offset))

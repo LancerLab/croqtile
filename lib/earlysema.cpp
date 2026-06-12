@@ -2735,8 +2735,30 @@ bool EarlySemantics::Visit(AST::LoopRange& n) {
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
+  // Check for duplicate local names across all ranges in this foreach.
+  std::unordered_set<std::string> local_names_seen;
+
   for (auto& i : n.GetRanges()) {
-    if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
+    auto rng = dyn_cast<AST::LoopRange>(i);
+
+    // Validate explicit local name (the iteration variable "c" in c=b(...)).
+    if (rng->HasExplicitIV()) {
+      auto lid = rng->GetIV();
+      if (lid->name == "_")
+        Error1(lid->LOC(), "_ is not allowed as a local iteration variable.");
+
+      // Reject duplicate local names within the same foreach range list.
+      if (!local_names_seen.insert(lid->name).second) {
+        Error1(lid->LOC(), "local iteration variable '" + lid->name +
+                               "' is already used in this foreach.");
+      }
+
+      // Register the iteration variable in the foreach scope so that any
+      // redefinition inside the body is caught as an ODR violation.
+      ReportErrorWhenViolateODR(lid->LOC(), lid->name, __FILE__, __LINE__);
+    }
+
+    if (auto id = rng->GetRV()) {
       if (id->name == "_") {
         Error1(id->LOC(), "_ is not allowed as an iteration variable.");
         continue;

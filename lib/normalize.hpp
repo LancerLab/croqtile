@@ -59,7 +59,7 @@ public:
         std::vector<ptr<AST::ForeachBlock>> loops;
 
         auto rng = cast<AST::LoopRange>(fb->ranges->ValueAt(0));
-        auto cname = rng->IVName();
+        auto cname = rng->GetRVName();
         if (fb->ranges->Count() == 1 && matcher_map.count(cname)) {
           // single range, multiple loops (range dim > 1)
           for (auto matcher : matcher_map[cname]->values) {
@@ -89,14 +89,14 @@ public:
             auto new_fb =
                 AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
             auto loop = AST::Make<Loop>(GenerateLoopName(),
-                                        rng->IV()->GetType(), fb->LOC());
+                                        rng->GetRV()->GetType(), fb->LOC());
             new_fb->loop = loop;
             loops.push_back(new_fb);
           }
         } else if (fb->ranges->Count() == 1 && !matcher_map.count(cname)) {
           // single range, single loop
           auto loop = std::make_shared<Loop>(GenerateLoopName(),
-                                             rng->IV()->GetType(), fb->LOC());
+                                             rng->GetRV()->GetType(), fb->LOC());
           fb->loop = loop;
           continue;
         } else {
@@ -125,7 +125,7 @@ public:
                        "expect only one range in the loop hierarchy.");
                 if (arg_id->name ==
                     dyn_cast<AST::LoopRange>(sub_fb->GetRanges()[0])
-                        ->IVName()) {
+                        ->GetRVName()) {
                   found = true;
                   sub_fb->suffixs = suffixs;
                 }

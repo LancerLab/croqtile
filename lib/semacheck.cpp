@@ -219,8 +219,8 @@ static int64_t GetForeachStaticExtent(const AST::ForeachBlock& fe) {
   auto& ranges = fe.GetRanges();
   if (ranges.empty()) return -1;
   auto rng = dyn_cast<AST::LoopRange>(ranges.front());
-  if (!rng || !rng->IV()) return -1;
-  auto iv_ty = dyn_cast<BoundedType>(rng->IV()->GetType());
+  if (!rng || !rng->GetRV()) return -1;
+  auto iv_ty = dyn_cast<BoundedType>(rng->GetRV()->GetType());
   if (!iv_ty) return -1;
   auto ub = iv_ty->GetUpperBound();
   if (!ub || !ub->IsNumeric()) return -1;
@@ -231,8 +231,8 @@ static ValueItem GetForeachDynamicExtent(const AST::ForeachBlock& fe) {
   auto& ranges = fe.GetRanges();
   if (ranges.empty()) return nullptr;
   auto rng = dyn_cast<AST::LoopRange>(ranges.front());
-  if (!rng || !rng->IV()) return nullptr;
-  auto iv_ty = dyn_cast<BoundedType>(rng->IV()->GetType());
+  if (!rng || !rng->GetRV()) return nullptr;
+  auto iv_ty = dyn_cast<BoundedType>(rng->GetRV()->GetType());
   if (!iv_ty) return nullptr;
   return iv_ty->GetUpperBound();
 }

@@ -18,8 +18,8 @@ Option<std::string> target(OptionKind::User, "--target", "-t",
                            "show current supported targets.",
                            "--target <platform>", true);
 Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
-                         "Set the architecture to execute the binary code.",
-                         "-arch=<processor>");
+                         "Set the architecture. Use 'native' to auto-detect.",
+                         "-arch=<processor|native>");
 Option<std::string> output(OptionKind::User, "-o", "", "",
                            "Place the output into <file>.", "-o <file>", true);
 Option<std::string>
