@@ -197,6 +197,8 @@ private:
   // collisions when nested scopes declare variables with the same short name.
   std::unordered_map<std::string, int> emitted_device_names_;
   std::vector<std::unordered_map<std::string, int>> emitted_names_stack_;
+  std::vector<std::unordered_map<std::string, std::string>>
+      known_val_str_stack_;
   std::string UniqueDeviceName(const std::string& name) {
     auto it = emitted_device_names_.find(name);
     if (it == emitted_device_names_.end()) {
@@ -207,11 +209,16 @@ private:
   }
   void PushEmittedNames() {
     emitted_names_stack_.push_back(emitted_device_names_);
+    known_val_str_stack_.push_back(known_val_str_to_var_);
   }
   void PopEmittedNames() {
     if (!emitted_names_stack_.empty()) {
       emitted_device_names_ = emitted_names_stack_.back();
       emitted_names_stack_.pop_back();
+    }
+    if (!known_val_str_stack_.empty()) {
+      known_val_str_to_var_ = known_val_str_stack_.back();
+      known_val_str_stack_.pop_back();
     }
   }
 
@@ -447,6 +454,8 @@ private:
     tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
+    event_arrive_tx_events_.clear();
+    tma_bound_event_triggers_.clear();
     pending_barrier_inits_.clear();
     in_named_var_decl_ = false;
     emitted_device_names_.clear();

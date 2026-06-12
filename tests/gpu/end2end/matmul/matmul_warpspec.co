@@ -40,7 +40,7 @@ __co__ void matmul_f16_ws_1p1c(global f16 [M, K] lhs, global f16 [N, K] rhs, glo
     shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
 
     parallel p1 by 2 : group-4, t by 128 : thread {
-      inthreads.async (p1 == 0 && t == 0) {
+      inthreads.async (p1 == 0) {
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
           wait empty[stage];
@@ -209,7 +209,7 @@ __co__ void matmul_f16_ws_1p3c_persis(global f16 [M, K] lhs, global f16 [N, K] r
         block_n = tile_id % tiles_n;
 
         parallel p1 by 4 : group-4, t by 128 : thread {
-          inthreads.async (p1 == 0 && t == 0) {
+          inthreads.async (p1 == 0 ) {
             foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
               stage = iv_k % MATMUL_STAGES;
               wait empty[stage];

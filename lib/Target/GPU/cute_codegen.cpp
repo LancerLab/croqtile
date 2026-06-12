@@ -473,8 +473,8 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
 void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
                                   const std::string& indent,
                                   int thread_count) const {
-  os << indent << "asm volatile(\"bar.sync 15, " << std::to_string(thread_count)
-     << ";\\n\" ::: \"memory\");\n";
+  os << indent << "choreo::named_barrier_sync(" << std::to_string(thread_count)
+     << ", 15);\n";
 }
 
 void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
@@ -1836,10 +1836,8 @@ void CuteCodeGen::FlushBarrierInits() {
   if (!pending_tma_prefetch_names_.empty()) {
     this->ds << d_indent << "if (threadIdx.x == 0) {\n";
     for (auto& name : pending_tma_prefetch_names_) {
-      this->ds << d_indent << "  { uint64_t __d = reinterpret_cast<uint64_t>(&"
-               << name
-               << "); asm volatile(\"prefetch.tensormap [%0];\" : : "
-                  "\"l\"(__d) : \"memory\"); }\n";
+      this->ds << d_indent << "  cute::prefetch_tma_descriptor(&" << name
+               << ");\n";
     }
     this->ds << d_indent << "}\n";
     pending_tma_prefetch_names_.clear();
@@ -1847,9 +1845,7 @@ void CuteCodeGen::FlushBarrierInits() {
   this->ds << d_indent << "if (threadIdx.x == 0) {\n";
   for (auto& init_line : pending_barrier_inits_) this->ds << init_line;
   this->ds << d_indent << "}\n";
-  this->ds << d_indent
-           << "asm volatile(\"fence.proxy.async.shared::cta;\\n\" ::: "
-              "\"memory\");\n";
+  this->ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
   this->ds << d_indent << "__syncthreads();\n";
   pending_barrier_inits_.clear();
 }
@@ -4455,22 +4451,36 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (event_only) {
         ptx_bar_expr = "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
         auto event_expr = ExprSTR(n.Event(), IsHost());
-        ds << d_indent << tma_issue_prefix << event_expr
-           << ".arrive_and_expect_tx(" << tma_tx_bytes_expr << ");\n";
-        // Mark this event's trigger as a no-op since arrive_and_expect_tx
-        // is already emitted before the PTX TMA load.
+        // Extract the event base name to detect multiple TMA loads
+        // sharing the same barrier event within one iteration.
+        std::string evt_base_name;
         {
           auto evt = n.Event();
           auto* expr_evt = cast<AST::Expr>(evt.get());
-          std::string base_name;
           if (expr_evt && expr_evt->op == Op::ElemOf) {
             auto sym = AST::GetArrayBaseSymbol(*expr_evt);
-            if (sym) base_name = sym->name;
+            if (sym) evt_base_name = sym->name;
           } else if (expr_evt && expr_evt->GetSymbol()) {
-            base_name = expr_evt->GetSymbol()->name;
+            evt_base_name = expr_evt->GetSymbol()->name;
           }
-          if (!base_name.empty()) tma_bound_event_triggers_.insert(base_name);
         }
+        bool already_arrived = !evt_base_name.empty() &&
+                               event_arrive_tx_events_.count(evt_base_name);
+        if (already_arrived) {
+          // A prior TMA load already called arrive_and_expect_tx on this
+          // barrier; only add expected bytes without an extra arrival.
+          ds << d_indent << tma_issue_prefix << event_expr
+             << ".expect_transaction(" << tma_tx_bytes_expr << ");\n";
+        } else {
+          ds << d_indent << tma_issue_prefix << event_expr
+             << ".arrive_and_expect_tx(" << tma_tx_bytes_expr << ");\n";
+          if (!evt_base_name.empty())
+            event_arrive_tx_events_.insert(evt_base_name);
+        }
+        // Mark this event's trigger as a no-op since arrive_and_expect_tx
+        // is already emitted before the PTX TMA load.
+        if (!evt_base_name.empty())
+          tma_bound_event_triggers_.insert(evt_base_name);
       } else {
         ptx_bar_expr =
             "((TMAAtom*)" + future_name + ".get_atom())->ptx_barrier()";
@@ -4567,14 +4577,16 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (tma_sync_level == ParallelLevel::GROUP) {
         ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
       } else if (tma_sync_level == ParallelLevel::GROUPx4) {
+        std::string wg_tid_zero = current_thread_count_expr.empty()
+                                      ? "(threadIdx.x % 128) == 0"
+                                      : "__choreo_vtid_x == 0";
         if (InSpecWarp() && current_inthreads->ActiveWarpGroup() < 0) {
           auto consumer_wgs = CurrentWarpGroupIndices();
           int64_t first_wg = consumer_wgs.empty() ? 0 : consumer_wgs.front();
-          ds << d_indent
-             << "if (__choreo_vtid_x == 0 && __choreo_vg4id_x == " << first_wg
-             << ") {\n";
+          ds << d_indent << "if (" << wg_tid_zero
+             << " && __choreo_vg4id_x == " << first_wg << ") {\n";
         } else {
-          ds << d_indent << "if (__choreo_vtid_x == 0) {\n";
+          ds << d_indent << "if (" << wg_tid_zero << ") {\n";
         }
       } else {
         ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
@@ -6883,21 +6895,23 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             IncrDeviceIndent();
           }
           {
-            auto& ft_cl = cgi.GetFunctionTrait(fname);
-            bool is_fill_cl = ft_cl.IsTMAFillEvent(base_name);
             auto dims_cl = ety->Dimensions();
             int stages_cl = 2;
             if (!dims_cl.empty()) {
               if (auto nv = dyn_cast<sbe::NumericValue>(dims_cl[0].get()))
                 stages_cl = static_cast<int>(nv->Value());
             }
-            std::string phase_cl = InlinePhaseExpr(stages_cl, is_fill_cl);
+            // Cluster-scoped events always have priming performed (never
+            // suppressed), so the phase after init+priming is already
+            // flipped.  Use is_fill=true to avoid the ^1 inversion that
+            // non-cluster empty events need (where priming is suppressed).
+            std::string phase_cl = InlinePhaseExpr(stages_cl, /*is_fill=*/true);
             if (is_array_ref) {
               std::string bar_expr = ExprSTR(t, false);
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity(&" << bar_expr
-                 << ", " << phase_cl << ");\n";
+              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
+                 << bar_expr << ", " << phase_cl << ");\n";
             } else {
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity(&"
+              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
                  << ExprSTR(t, false) << ", " << phase_cl << ");\n";
             }
           }
@@ -6975,10 +6989,10 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             std::string phase_sc = is_fill_sc ? InlinePhaseExpr(1, true) : "0";
             if (is_array_ref) {
               std::string bar_expr = ExprSTR(t, false);
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity(&" << bar_expr
-                 << ", " << phase_sc << ");\n";
+              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
+                 << bar_expr << ", " << phase_sc << ");\n";
             } else {
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity(&"
+              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
                  << ExprSTR(t, false) << ", " << phase_sc << ");\n";
             }
           }
@@ -7133,12 +7147,14 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                   "choreo::tma_cluster_dim(); ++__cta) {\n";
             IncrDeviceIndent();
             if (is_array_ref) {
-              ds << d_indent << "choreo::tma_mbarrier_arrive_cluster(&"
+              ds << d_indent
+                 << "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&"
                  << ExprSTR(f, false) << ", __cta);\n";
             } else {
               GenerateSubscriptions(
                   ds,
-                  d_indent + "choreo::tma_mbarrier_arrive_cluster(&" +
+                  d_indent +
+                      "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&" +
                       ExprSTR(f, false),
                   ", __cta);\n", ety->RemainderDimensions(0));
             }
@@ -7240,7 +7256,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                << "for (uint32_t __cta = 0; __cta < "
                   "choreo::tma_cluster_dim(); ++__cta) {\n";
             IncrDeviceIndent();
-            ds << d_indent << "choreo::tma_mbarrier_arrive_cluster(&"
+            ds << d_indent << "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&"
                << ExprSTR(f, false) << ", __cta);\n";
             DecrDeviceIndent();
             ds << d_indent << "}\n";
@@ -8498,14 +8514,6 @@ bool CuteCodeGen::Visit(AST::InThreadsBlock& n) {
     ds << d_indent << "if (" << pred_str << ") {\n";
   }
   IncrDeviceIndent();
-  if (IsWarpSpecActive() && n.HasScopeThreadMask() &&
-      n.inthreads_level == ParallelLevel::GROUPx4) {
-    auto wg = n.ActiveWarpGroup();
-    if (wg == 0)
-      ds << d_indent << "cutlass::arch::warpgroup_reg_dealloc<24>();\n";
-    else
-      ds << d_indent << "cutlass::arch::warpgroup_reg_alloc<240>();\n";
-  }
   return true;
 }
 
