@@ -32,13 +32,13 @@ void restore_streams() {
   orig_cerr = nullptr;
 }
 
-// Parse source code only (preprocess + scan + parse).
+// Common setup: reset state, set target, preprocess, parse.
 // Returns 0 on success, non-zero on error.
-int parse_source(const std::string& source, const std::string& target) {
+int parse_source(const std::string& source, const std::string& target,
+                 bool run_pipeline) {
   auto& r = OptionRegistry::GetInstance();
   r.Reset();
 
-  // Reset the global AST root to avoid accumulating state across calls.
   location fresh_loc;
   root.SetBody(AST::Make<AST::MultiNodes>(fresh_loc));
 
@@ -79,6 +79,14 @@ int parse_source(const std::string& source, const std::string& target) {
     if (p.parse() != 0 || pctx.HasError()) {
       std::cerr << "Parsing failed due to syntax errors.\n";
       result = 1;
+      goto cleanup;
+    }
+
+    if (run_pipeline) {
+      auto& pl = ASTPipeline::Get().PlanAllRoutines();
+      if (!pl.RunOnProgram(root)) {
+        result = pl.Status();
+      }
     }
   }
 
@@ -96,7 +104,7 @@ emscripten::val compile(const std::string& source, const std::string& target,
   std::ostringstream out_stream, err_stream;
   capture_streams(out_stream, err_stream);
 
-  int rc = parse_source(source, target);
+  int rc = parse_source(source, target, true);
   if (rc == 0) {
     root.Print(std::cout);
   }
@@ -113,7 +121,7 @@ emscripten::val dumpAST(const std::string& source) {
   std::ostringstream out_stream, err_stream;
   capture_streams(out_stream, err_stream);
 
-  int rc = parse_source(source, "");
+  int rc = parse_source(source, "", false);
   if (rc == 0) {
     root.Print(std::cout);
   }
@@ -130,13 +138,13 @@ emscripten::val mockRun(const std::string& source) {
   std::ostringstream out_stream, err_stream;
   capture_streams(out_stream, err_stream);
 
-  int rc = parse_source(source, "cute");
+  int rc = parse_source(source, "cute", true);
   restore_streams();
 
   std::string output = out_stream.str();
   if (rc == 0 && output.empty()) {
-    output = "[mock] Program parsed and validated successfully.\n"
-             "[mock] No runtime output (mock interpreter not yet available).\n";
+    output = "[mock] Program compiled successfully.\n"
+             "[mock] No runtime output (interpreter not yet available).\n";
   }
 
   emscripten::val result = emscripten::val::object();
