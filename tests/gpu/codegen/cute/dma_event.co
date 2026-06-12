@@ -21,5 +21,5 @@ __co__ void foo(f32 [128, 128] input) {
   }
 }
 
-// CHECK: choreo::tma_load_2d_shared_cta_global_mbarrier((void*)input_s, (const void*)&__choreo_tma_0_tensor_map, (uint64_t*)&(full[__iv_stage]), 0, 0);
-// CHECK: full[__iv_stage].wait(full__phase[__iv_stage]);
+// CHECK: choreo::tma_load_2d_shared_cta_global_mbarrier((void*)(input_s), (const void*)&__choreo_tma_0_tensor_map, (uint64_t*)&(full[__iv_stage]), 0, 0);
+// CHECK: full[__iv_stage].wait(((__iv_stage & 3) >> 1));

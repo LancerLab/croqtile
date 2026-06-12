@@ -18,5 +18,5 @@ __co__ auto foo(f16 [128, 128] lhs, f16 [128, 128] rhs) {
 }
 
 // First `e` keeps original name, nested `e` gets a suffix.
-// CHECK: cuda::barrier<cuda::thread_scope_block> e;
-// CHECK: cuda::barrier<cuda::thread_scope_block> e__1;
+// CHECK: Barrier& e = *reinterpret_cast<Barrier*>(&e__mem);
+// CHECK: Barrier& e__1 = *reinterpret_cast<Barrier*>(&e__1__mem);

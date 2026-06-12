@@ -108,7 +108,7 @@ Option<bool> inhibit_warning(OptionKind::User, "-w", "", false,
 Option<bool> warning_as_error(OptionKind::User, "-Werror", "", false,
                               "Make all warnings into errors.");
 Option<bool> disable_runtime_check(OptionKind::User, "--disable-runtime-check",
-                                   "", true, "Disable all runtime checks.");
+                                   "", false, "Disable all runtime checks.");
 Option<std::string> runtime_check_level(OptionKind::User, "--runtime-check",
                                         "-rtc", "entry",
                                         "Control runtime assertion insertion. "

@@ -18,7 +18,7 @@ Option<bool> tma_cluster_aware(
 Option<bool> ptx_barrier(
     OptionKind::User, "--ptx-barrier", "", false,
     "Enable PTX mbarrier-style synchronization for TMA cluster-aware path.");
-Option<bool> use_stmatrix(OptionKind::User, "--stmatrix", "", true,
+Option<bool> use_stmatrix(OptionKind::User, "--stmatrix", "", false,
                           "Use stmatrix PTX instruction for WGMMA accumulator "
                           "store to shared memory.");
 Option<bool> hoist_offset(
