@@ -471,7 +471,11 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
 void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
                                   const std::string& indent,
                                   int thread_count) const {
-  os << indent << "choreo::named_barrier_sync(" << std::to_string(thread_count)
+  int tc = thread_count > 0
+               ? thread_count
+               : (CurrentScopeThreadsCount() > 0 ? CurrentScopeThreadsCount()
+                                                  : 128);
+  os << indent << "choreo::named_barrier_sync(" << std::to_string(tc)
      << ", 15);\n";
 }
 
