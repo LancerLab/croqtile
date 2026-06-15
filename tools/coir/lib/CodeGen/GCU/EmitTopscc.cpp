@@ -276,6 +276,9 @@ private:
     os << "}\n\n";
   }
 
+  unsigned nextDmaId = 0;
+  DenseMap<Value, std::string> dmaCtxNames;
+
   void emitOp(Operation *op) {
     if (auto parallel = dyn_cast<ParallelOp>(op))
       emitParallel(parallel);
@@ -283,12 +286,22 @@ private:
       emitForeach(foreach_);
     else if (auto dataCopy = dyn_cast<DataCopyOp>(op))
       emitDataCopy(dataCopy);
+    else if (auto constDesc = dyn_cast<DMAConstDescOp>(op))
+      emitDMAConstDesc(constDesc);
+    else if (auto prefetch = dyn_cast<DMADescPrefetchOp>(op))
+      emitDMAPrefetch(prefetch);
+    else if (auto rtDesc = dyn_cast<DMADescRuntimeOp>(op))
+      emitDMARuntimeDesc(rtDesc);
+    else if (auto invoke = dyn_cast<DMAInvokeOp>(op))
+      emitDMAInvoke(invoke);
     else if (auto loadElem = dyn_cast<TensorLoadElemOp>(op))
       emitLoadElem(loadElem);
     else if (auto storeElem = dyn_cast<TensorStoreElemOp>(op))
       emitStoreElem(storeElem);
     else if (auto alloc = dyn_cast<TensorAllocOp>(op))
       emitAlloc(alloc);
+    else if (auto tile = dyn_cast<TensorTileOp>(op))
+      (void)tile;
     else if (auto barrier = dyn_cast<BarrierOp>(op))
       emitBarrier(barrier);
     else if (auto wait = dyn_cast<WaitOp>(op))
@@ -297,6 +310,8 @@ private:
       (void)ret;
     else if (auto yield = dyn_cast<YieldOp>(op))
       (void)yield;
+    else if (auto check = dyn_cast<DMACheckOp>(op))
+      (void)check;
     else if (auto constOp = dyn_cast<arith::ConstantOp>(op))
       emitConstant(constOp);
     else if (emitArithBinOp(op)) {}
@@ -379,6 +394,83 @@ private:
 
     if (op.getToken())
       valueNames[op.getToken()] = "/* dma_token */";
+  }
+
+  std::string emitMdspan(Value tensor) {
+    auto tty = cast<coir::TensorType>(tensor.getType());
+    std::string name = getName(tensor);
+    auto shape = tty.getShape();
+    std::string space;
+    int32_t ms = tty.getMemorySpace();
+    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Global))
+      space = "tops::Global";
+    else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Shared))
+      space = "tops::Shared";
+    else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
+      space = "tops::Private";
+    else
+      space = "tops::Private";
+
+    std::string result = "tops::mdspan(" + space + ", ("
+      + emitElemType(tty.getElementType()) + "*)" + name;
+    for (auto d : shape)
+      result += ", " + std::to_string(d);
+    result += ")";
+    return result;
+  }
+
+  void emitDMAConstDesc(DMAConstDescOp op) {
+    std::string ctxName = "__dma_" + std::to_string(nextDmaId++);
+    dmaCtxNames[op.getOut()] = ctxName;
+
+    os << getIndent() << "tops::private_dte " << ctxName << ";\n";
+    os << getIndent() << ctxName << ".init();\n";
+
+    std::string srcMds = emitMdspan(op.getSource());
+    std::string dstMds = emitMdspan(op.getDest());
+
+    auto kind = op.getKind();
+    if (kind == coir::DMAKind::Copy) {
+      os << getIndent() << ctxName << ".config_memcpy(" << dstMds << ", "
+         << srcMds << ");\n";
+    } else if (kind == coir::DMAKind::Slice) {
+      os << getIndent() << ctxName << ".config_slice(" << dstMds << ", "
+         << srcMds << ", (int[]){0});\n";
+    } else if (kind == coir::DMAKind::Transpose) {
+      os << getIndent() << ctxName << ".config_memcpy(" << dstMds << ", "
+         << srcMds << ");\n";
+    } else if (kind == coir::DMAKind::Pad) {
+      os << getIndent() << ctxName << ".config_memcpy(" << dstMds << ", "
+         << srcMds << ");\n";
+    }
+  }
+
+  void emitDMAPrefetch(DMADescPrefetchOp op) {
+    auto it = dmaCtxNames.find(op.getIn());
+    if (it != dmaCtxNames.end())
+      dmaCtxNames[op.getOut()] = it->second;
+  }
+
+  void emitDMARuntimeDesc(DMADescRuntimeOp op) {
+    auto it = dmaCtxNames.find(op.getIn());
+    std::string ctxName = (it != dmaCtxNames.end()) ? it->second : "__dma_?";
+    dmaCtxNames[op.getOut()] = ctxName;
+
+    auto offsets = op.getOffsets();
+    for (unsigned i = 0; i < offsets.size(); ++i) {
+      os << getIndent() << ctxName << ".set_src_offset(" << i << ", "
+         << getName(offsets[i]) << ");\n";
+    }
+  }
+
+  void emitDMAInvoke(DMAInvokeOp op) {
+    auto it = dmaCtxNames.find(op.getDesc());
+    std::string ctxName = (it != dmaCtxNames.end()) ? it->second : "__dma_?";
+
+    os << getIndent() << ctxName << ".trigger_and_wait();\n";
+
+    if (op.getDone())
+      valueNames[op.getDone()] = "/* dma_token */";
   }
 
   void emitLinearIndex(mlir::ValueRange indices, coir::TensorType tty) {

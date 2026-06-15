@@ -92,6 +92,49 @@ def LowerCopy : Pass<"coir-lower-copy"> {
   ];
 }
 
+def LowerDMADesc : Pass<"coir-lower-dma-desc"> {
+  let summary = "Decompose copy ops into DMA descriptor pipeline";
+  let description = [{
+    Rewrites coir.data.copy (and classified dma.copy) operations inside
+    coir.foreach loops into the DMA descriptor pipeline:
+
+    1. coir.dma.const.desc   -- captures loop-invariant geometry
+    2. coir.dma.prefetch.desc -- materializes the descriptor
+    3. coir.dma.runtime.desc -- binds per-iteration offsets
+    4. coir.dma.invoke        -- triggers the transfer
+
+    The const.desc and prefetch.desc are placed before the loop by
+    construction, enabling the hoist pass to verify placement.
+  }];
+
+  let constructor = "::coir::createLowerDMADescPass()";
+
+  let dependentDialects = [
+    "::coir::CoIRDialect",
+    "::mlir::arith::ArithDialect"
+  ];
+}
+
+def HoistDMAConfig : Pass<"coir-hoist-dma-config"> {
+  let summary = "Hoist loop-invariant DMA descriptor setup above loops";
+  let description = [{
+    Performs loop-invariant code motion (LICM) on DMA descriptor ops:
+
+    - Moves coir.dma.const.desc and coir.dma.prefetch.desc above
+      coir.foreach loops when their operands are loop-invariant
+    - Keeps coir.dma.runtime.desc inside the loop when offsets
+      depend on the induction variable
+    - If runtime.desc offsets are also invariant, hoists it too
+
+    This is a safety-net pass: the lower-dma-desc pass already places
+    const.desc outside loops by construction.
+  }];
+
+  let constructor = "::coir::createHoistDMAConfigPass()";
+
+  let dependentDialects = ["::coir::CoIRDialect"];
+}
+
 def EmitCUDA : Pass<"coir-emit-cuda", "::mlir::ModuleOp"> {
   let summary = "Emit CUDA/C++ source from lowered CoIR IR";
   let description = [{

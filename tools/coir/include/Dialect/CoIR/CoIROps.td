@@ -20,27 +20,56 @@ class CoIR_Op<string mnemonic, list<Trait> traits = []>
     : Op<CoIR_Dialect, mnemonic, traits>;
 
 //===----------------------------------------------------------------------===//
-// Existing DMA descriptor pipeline ops
+// DMA descriptor pipeline ops
+//
+// Target-neutral ops for DMA configuration hoisting. The pipeline:
+//   dma.const.desc  -- capture loop-invariant transfer geometry
+//   dma.prefetch.desc -- materialize descriptor (prefetch or no-op per target)
+//   dma.runtime.desc -- bind per-iteration offsets / coordinates
+//   dma.invoke       -- execute the transfer
+//
+// Target backends lower these ops to hardware-specific APIs.
+// Example mappings:
+//   const.desc  -> descriptor/context configuration
+//   runtime.desc -> per-iteration offset binding
+//   invoke       -> transfer trigger
 //===----------------------------------------------------------------------===//
 
 def DMAConstDescOp : CoIR_Op<"dma.const.desc", [NoMemoryEffect]> {
-  let summary = "Create compile-time DMA descriptor";
-  let arguments = (ins AnyMemRef:$g_ptr,
-                       AnyType:$f_shape,
-                       AnyType:$s_shape);
-  let results = (outs CoIR_DMADescType:$out);
-  let assemblyFormat = [{
-    $g_ptr `,` $f_shape `,` $s_shape attr-dict `:` type($g_ptr) `,` type($f_shape) `,` type($s_shape) `->` type($out)
+  let summary = "Create compile-time DMA descriptor from source/dest tensors";
+  let description = [{
+    Captures the loop-invariant transfer geometry (shapes, strides, element
+    types, memory spaces) from source and destination tensors. The `kind`
+    attribute selects the transfer operation: copy, slice, transpose, or pad.
+    The resulting `!coir.desc` handle is target-neutral and can be hoisted
+    above loops.
+
+    Example:
+      %d = coir.dma.const.desc %src, %dst {kind = #coir.dma_kind<copy>}
+             : !coir.tensor<128x64xf32, global>,
+               !coir.tensor<128x64xf32, local> -> !coir.desc
   }];
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    CoIR_TensorTypeC:$dest,
+    CoIR_DMAKindAttr:$kind
+  );
+  let results = (outs CoIR_DMADescType:$out);
+  let hasCustomAssemblyFormat = 1;
 }
 
 def DMACheckOp : CoIR_Op<"dma.check", [NoMemoryEffect]> {
-  let summary = "Optional compile-time check";
+  let summary = "Optional compile-time descriptor validation";
   let arguments = (ins CoIR_DMADescType:$in);
   let assemblyFormat = "$in attr-dict `:` type($in)";
 }
 
 def DMADescPrefetchOp : CoIR_Op<"dma.prefetch.desc", []> {
+  let summary = "Materialize descriptor for execution";
+  let description = [{
+    Converts a compile-time descriptor to a runtime-ready descriptor.
+    On some targets this prefetches the descriptor; on others it is a no-op.
+  }];
   let arguments = (ins CoIR_DMADescType:$in);
   let results   = (outs CoIR_FinalDMADescType:$out);
   let hasCanonicalizer = 1;
@@ -48,18 +77,32 @@ def DMADescPrefetchOp : CoIR_Op<"dma.prefetch.desc", []> {
 }
 
 def DMADescRuntimeOp : CoIR_Op<"dma.runtime.desc", []> {
+  let summary = "Bind per-iteration offsets to a DMA descriptor";
+  let description = [{
+    Binds runtime offset values to a materialized descriptor. The variadic
+    `offsets` list specifies per-dimension coordinates that vary per loop
+    iteration. Target backends emit the appropriate offset-binding calls
+    (e.g., dimension offset setters or tile coordinate binding).
+
+    Example:
+      %d1 = coir.dma.runtime.desc %d0 offsets(%k, %j)
+              : !coir.desc.rt -> !coir.desc.rt
+  }];
   let arguments = (ins CoIR_FinalDMADescType:$in,
-                       Index:$coords,
-                       AnyMemRef:$smem_buffer,
-                       AnyType:$mbarrier);
+                       Variadic<Index>:$offsets);
   let results   = (outs CoIR_FinalDMADescType:$out);
-  let assemblyFormat = "$in `,` $coords `,` $smem_buffer `,` $mbarrier attr-dict `:` type($in) `,` type($coords) `,` type($smem_buffer) `,` type($mbarrier) `->` type($out)";
+  let hasCustomAssemblyFormat = 1;
 }
 
 def DMAInvokeOp : CoIR_Op<"dma.invoke",
                    [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Execute the configured DMA transfer";
+  let description = [{
+    Triggers the DMA transfer described by a runtime-bound descriptor.
+    Returns a completion token for synchronization.
+  }];
   let arguments = (ins CoIR_FinalDMADescType:$desc);
-  let results   = (outs AnyType:$done);
+  let results   = (outs CoIR_AsyncTokenTypeC:$done);
   let hasCustomAssemblyFormat = 1;
 }
 

@@ -260,6 +260,33 @@ struct future {
     #endif // __GCU_ARCH__
   #endif   // __CHOREO_DMA_DIAGNOSIS__
 
+  // Configure DMA descriptor without triggering. For use with hoisted
+  // DMA config: call configure() once outside the loop, then set_offset()
+  // + trigger_only() per iteration.
+  __device__ void configure(
+      const tops::mdspan_base& dst, const tops::mdspan_base& src) {
+    if (s == ST_NONE) {
+  #if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
+      if (explicit_init) ctx->init_comm();
+  #else
+      tops_init_dte(ctx);
+  #endif
+      s = ST_INITED;
+    }
+    ctx->config_memcpy(dst, src);
+  }
+
+  // Set per-iteration offset on a dimension. Call after configure().
+  __device__ void set_offset(int dim, int offset) {
+    ctx->set_src_offset(dim, offset);
+  }
+
+  // Trigger transfer without re-configuring. Call after set_offset().
+  __device__ void trigger_only() {
+    e = ctx->trigger();
+    s = ST_TRIGGERED;
+  }
+
   // context is retrieved to invoke data operations
   __device__ auto get_ctx() {
     if (s == ST_NONE) {
