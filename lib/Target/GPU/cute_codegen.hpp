@@ -610,7 +610,7 @@ private:
                    const ptr<AST::MultiValues> subscription,
                    const ptr<Type>& sym_ty) const;
   void EmitGroupX4Sync(std::ostringstream& os, const std::string& indent,
-                       int thread_count = 128) const;
+                       int thread_count = 0) const;
   std::optional<HoistedScaleAccumInfo> AnalyzeHoistableScaledWGMMAAccum(
       const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const;
   bool CollectHoistableScaledWGMMAAccum(
