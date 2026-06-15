@@ -1,6 +1,5 @@
 #include "cute_codegen.hpp"
 #include "codegen_utils.hpp"
-#include "cute_device_codegen.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -20,7 +19,6 @@
 #include "codegen.hpp"
 #include "dma_plan.hpp"
 #include "operator_info.hpp"
-#include "target.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
   #warning "missing macro definition of __CHOREO_CUDA_DIR__"
@@ -1444,7 +1442,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     PLDCheck();
     ssm.LeaveScope();
-    // ds: device kernel. hs: target launch entry (__hetero_* shim for hetero).
     code_segments.back() += ds.str() + hs.str();
     ds.str(""); // reset the streams
     hs.str("");
@@ -2926,9 +2923,13 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         // can match it as a substring inside larger expressions.
         if (FCtx(fname).HasSymbolValues(scoped)) {
           auto& svs = FCtx(fname).GetSymbolValues(scoped);
-          if (svs.HasVal())
-            known_val_str_to_var_[StripOuterParens(ValueSTR(svs.GetVal()))] =
-                sym;
+          if (svs.HasVal()) {
+            auto stripped = StripOuterParens(ValueSTR(svs.GetVal()));
+            bool is_simple_literal =
+                !stripped.empty() &&
+                stripped.find_first_not_of("0123456789-") == std::string::npos;
+            if (!is_simple_literal) known_val_str_to_var_[stripped] = sym;
+          }
         }
       }
     }
@@ -2957,8 +2958,12 @@ bool CuteCodeGen::Visit(AST::NamedTypeDecl& n) {
                     << ValueSTR(mty->GetShape().ValueAt(0)) << ";\n";
         if (!IsHost()) {
           ssm.MapDeviceSymbol(sname, sym);
-          known_val_str_to_var_[StripOuterParens(
-              ValueSTR(mty->GetShape().ValueAt(0)))] = sym;
+          auto stripped =
+              StripOuterParens(ValueSTR(mty->GetShape().ValueAt(0)));
+          bool is_simple_literal =
+              !stripped.empty() &&
+              stripped.find_first_not_of("0123456789-") == std::string::npos;
+          if (!is_simple_literal) known_val_str_to_var_[stripped] = sym;
         }
       }
       return true;
@@ -3183,8 +3188,13 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
       }
       std::string val_str = ExprSTR(n.value, false);
       ds << val_str << ";\n";
-      if (n.IsDecl() && !IsHost())
-        known_val_str_to_var_[StripOuterParens(val_str)] = n.GetName();
+      if (n.IsDecl() && !IsHost()) {
+        auto stripped = StripOuterParens(val_str);
+        bool is_simple_literal =
+            !stripped.empty() &&
+            stripped.find_first_not_of("0123456789-") == std::string::npos;
+        if (!is_simple_literal) known_val_str_to_var_[stripped] = n.GetName();
+      }
     }
     return true;
   }
@@ -3646,6 +3656,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         if (n.IsTMA()) {
           ds << d_indent << n.future << ".is_tma = true;\n";
           ds << d_indent << n.future << ".set_atom(&" << cp_atom_name << ");\n";
+          tma_futures_.insert(InScopeName(n.future));
         }
       }
       ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
@@ -3724,6 +3735,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (is_tma) {
       ds << d_indent << future_name << ".is_tma = true;\n";
       ds << d_indent << future_name << ".set_atom(&" << cp_atom_name << ");\n";
+      if (!n.future.empty()) tma_futures_.insert(InScopeName(n.future));
     } else if (is_async) {
       auto cp_atom_type = GetCopyAtomType(plan->atom, t_sty->ElementType());
       ds << d_indent << cp_atom_type << " " << cp_atom_name << "{};\n";
@@ -4437,9 +4449,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (emit_tma_single_guard) {
         if (tma_sync_level == ParallelLevel::GROUP)
           ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
-        else if (tma_sync_level == ParallelLevel::GROUPx4 && IsWarpSpecActive())
-          ds << d_indent << "if (threadIdx.x == 0) {\n";
-        else if (tma_sync_level == ParallelLevel::GROUPx4)
+        else if (tma_sync_level == ParallelLevel::GROUPx4 &&
+                 IsWarpSpecActive()) {
+          std::string wg_tid_zero = current_thread_count_expr.empty()
+                                        ? "(threadIdx.x % 128) == 0"
+                                        : "__choreo_vtid_x == 0";
+          ds << d_indent << "if (" << wg_tid_zero << ") {\n";
+        } else if (tma_sync_level == ParallelLevel::GROUPx4)
           ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
         else
           ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
@@ -4481,9 +4497,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         // is already emitted before the PTX TMA load.
         if (!evt_base_name.empty())
           tma_bound_event_triggers_.insert(evt_base_name);
-      } else {
+      } else if (!future_name.empty()) {
         ptx_bar_expr =
             "((TMAAtom*)" + future_name + ".get_atom())->ptx_barrier()";
+        ds << d_indent << tma_issue_prefix << "choreo::tma_mbarrier_expect_tx("
+           << ptx_bar_expr << ", " << tma_tx_bytes_expr << ");\n";
+      } else {
+        auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
+        ptx_bar_expr = tma_atom_ref + ".ptx_barrier()";
         ds << d_indent << tma_issue_prefix << "choreo::tma_mbarrier_expect_tx("
            << ptx_bar_expr << ", " << tma_tx_bytes_expr << ");\n";
       }
@@ -5997,6 +6018,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         auto elem = f_sty->ElementType();
         bool is_bf16 = (elem == BaseType::BF16);
         bool is_f16 = (elem == BaseType::F16);
+        bool is_f32_dest = (elem == BaseType::F32);
+        if (is_f32_acc && is_f32_dest) stmatrix_ok = false;
+      }
+      if (stmatrix_ok) {
+        bool is_f32_acc = (accum_type == BaseType::F32);
+        auto elem = f_sty->ElementType();
+        bool is_bf16 = (elem == BaseType::BF16);
+        bool is_f16 = (elem == BaseType::F16);
         std::string fn;
         if (is_f32_acc && is_bf16 && !store_trans)
           fn = "store_fragment_d_stmatrix_f32_bf16<";
@@ -6693,12 +6722,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       } else {
         ds << d_indent << full_call_sync;
       }
-      if (f_sty->GetStorage() == Storage::SHARED) {
-        if (NeedWarpSpecGroupX4SyncForCurrentScope())
-          EmitGroupX4Sync(ds, d_indent);
-        else
-          ds << d_indent << "__syncthreads();\n";
-      }
     } break;
     default: break;
     }
@@ -6818,7 +6841,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
       auto name = expr->GetSymbol()->name;
       bool is_block_shared = IsFutureBlockShared(InScopeName(name));
       bool is_cooperative = cooperatives.count(InScopeName(name));
-      bool single_thread_wait = is_block_shared && !is_cooperative;
+      bool is_tma = tma_futures_.count(InScopeName(name)) > 0;
+      bool single_thread_wait = is_block_shared && !is_cooperative && !is_tma;
       if (single_thread_wait) {
         ds << d_indent << LevelPred() << " {\n";
         IncrDeviceIndent();
@@ -6870,6 +6894,12 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         EndEventCritical(guarded);
       } break;
       case Storage::SHARED: {
+        if (ScopeAlreadySingleThreadForLevel(bdim_level)) {
+          Error1(n.LOC(), "shared event wait (" + PSTR(t) +
+                              ") is inside a single-thread scope; "
+                              "mbarrier wait must not be predicated to a "
+                              "single thread.");
+        }
         std::string base_name;
         if (is_array_ref) {
           auto bid = AST::GetArrayBaseSymbol(*expr);
@@ -6965,6 +6995,12 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         EndEventCritical(guarded);
       } break;
       case Storage::SHARED: {
+        if (ScopeAlreadySingleThreadForLevel(bdim_level)) {
+          Error1(n.LOC(), "shared event wait (" + PSTR(t) +
+                              ") is inside a single-thread scope; "
+                              "mbarrier wait must not be predicated to a "
+                              "single thread.");
+        }
         std::string base_name;
         if (is_array_ref) {
           auto bid = AST::GetArrayBaseSymbol(*expr);
@@ -7803,7 +7839,7 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   std::vector<std::string> loop_refs;
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
-    auto cname = rng->GetRVName();
+    auto cname = rng->GetIVName();
     loop_refs.push_back(cname);
     loop_refs.push_back(std::string("__iv_") + cname);
     for (auto iv_name : within_map.at(InScopeName(cname)))
@@ -8160,27 +8196,29 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       }
     }
   } else {
-    for (auto& rn : n.GetRanges()) {
-      auto rng = cast<AST::LoopRange>(rn);
-      auto cname = rng->GetIVName();
-      for (auto iv_name : within_map.at(InScopeName(cname))) {
-        auto iv_ty = GetSymbolType(UnScopedName(iv_name));
-        assert(IsActualBoundedIntegerType(iv_ty));
-        auto iv_bty = cast<BoundedType>(iv_ty);
-        auto ub_it = iv_upper_bound_expr_.find(iv_name);
-        std::string ub_expr =
-            ub_it != iv_upper_bound_expr_.end()
-                ? ub_it->second
-                : UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
-        IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
-                    << (rng->lbound
-                            ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
-                            : "0")
-                    << "; " << SSMName(iv_name, IsHost()) << " < " << ub_expr
-                    << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                    : "")
-                    << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
-        IncrIndent();
+    {
+      for (auto& rn : n.GetRanges()) {
+        auto rng = cast<AST::LoopRange>(rn);
+        auto cname = rng->GetIVName();
+        for (auto iv_name : within_map.at(InScopeName(cname))) {
+          auto iv_ty = GetSymbolType(UnScopedName(iv_name));
+          assert(IsActualBoundedIntegerType(iv_ty));
+          auto iv_bty = cast<BoundedType>(iv_ty);
+          auto ub_it = iv_upper_bound_expr_.find(iv_name);
+          std::string ub_expr =
+              ub_it != iv_upper_bound_expr_.end()
+                  ? ub_it->second
+                  : UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
+          IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
+                      << (rng->lbound
+                              ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
+                              : "0")
+                      << "; " << SSMName(iv_name, IsHost()) << " < " << ub_expr
+                      << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
+                                      : "")
+                      << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
+          IncrIndent();
+        }
       }
     }
   }
@@ -9437,8 +9475,6 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
 }
 
 void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
-  CuteDeviceCodeGen dcg_instance;
-
   auto filename = RemoveDirectoryPrefix(
       RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
   os << R"script(#!/usr/bin/env bash
@@ -9446,10 +9482,13 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
 # This is the choreo generated bash script to compile cute code
 )script";
 
-  dcg_instance.SetupBuildEnv(os);
-
-  // CUTE library discovery (standalone-only, not in DeviceCodeGen)
+  // we must use the built compilation tools
   if (RequiresE2ECompilation(CCtx().GetOutputKind())) {
+#ifdef __CHOREO_CUDA_DIR__
+    os << "\nif [ -z \"${CUDA_HOME}\" ]; then";
+    os << "\n  export CUDA_HOME=" << STRINGIZE(__CHOREO_CUDA_DIR__);
+    os << "\nfi\n";
+#endif // __CHOREO_CUDA_DIR__
 #ifdef __CHOREO_CUTE_DIR__
     os << "\nif [ -z \"${CUTE_HOME}\" ]; then";
     os << "\n  export CUTE_HOME=" << STRINGIZE(__CHOREO_CUTE_DIR__);
@@ -9458,11 +9497,20 @@ void CuteCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   }
 
   os << R"script(
+if [ ! -n "${CUDA_HOME}" ] || [ ! -f ${CUDA_HOME}/bin/nvcc ]; then
+  echo "failed to find the CUDA installation."
+  echo "install cuda or set CUDA_HOME to cuda installation directory."
+  exit 1
+fi
+
 if [ ! -n "${CUTE_HOME}" ] || [ ! -f ${CUTE_HOME}/include/cutlass/cutlass.h ]; then
   echo "failed to find the CUTE installation."
   echo "install cuda or set CUTE_HOME to cute installation directory."
   exit 1
 fi
+
+NVCC=${CUDA_HOME}/bin/nvcc
+NVCC_LIB=${CUDA_LIB}/lib
 
 )script";
 
@@ -9565,7 +9613,8 @@ show_usage() {
     os << " -D" << macro.first
        << (macro.second.empty() ? "" : ("=" + macro.second));
 
-  os << " -L${CUDA_HOME}/lib64 -lcuda\"\n\n";
+  os << " -L${CUDA_HOME}/lib64 -lcuda\"";
+  os << "\nexport LD_LIBRARY_PATH=${CUDA_LIB}:${LD_LIBRARY_PATH}\n\n";
 
   if (CCtx().FastCompile()) {
     // --- Fast-compile mode: separate compilation + precompiled runtime ---
@@ -9634,12 +9683,6 @@ show_usage() {
 }
 
 bool CuteCodeGen::CompileWithScript(const std::string& action) {
-#ifdef __EMSCRIPTEN__
-  (void)action;
-  errs() << "CompileWithScript is not available in WebAssembly builds.\n"
-         << "Use -es (emit source) or -mock mode instead.\n";
-  return false;
-#else
   assert(!action.empty() && "no action is specified.");
 
   char tempFileName[] = "/tmp/choreo_cute_script_XXXXXX";
@@ -9677,7 +9720,6 @@ bool CuteCodeGen::CompileWithScript(const std::string& action) {
   }
 
   return true;
-#endif
 }
 
 // TODO: eliminate the need of the value replacement?
@@ -9689,10 +9731,18 @@ const std::string CuteCodeGen::ValueSTR(const ValueItem& vi, bool LL_suffix,
   // This avoids re-expanding expressions like kv_tiles when they appear
   // inside larger expressions like kv_bound's ternary.
   if (!IsHost() && !shp_lit && !LL_suffix && !known_val_str_to_var_.empty()) {
+    auto isWordChar = [](char c) {
+      return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
     for (auto& [expr, var] : known_val_str_to_var_) {
       for (auto pos = result.find(expr); pos != std::string::npos;
-           pos = result.find(expr, pos + var.size()))
+           pos = result.find(expr, pos + 1)) {
+        auto end = pos + expr.size();
+        if (pos > 0 && isWordChar(result[pos - 1])) continue;
+        if (end < result.size() && isWordChar(result[end])) continue;
         result.replace(pos, expr.size(), var);
+        pos += var.size() - 1;
+      }
     }
   }
   return result;
