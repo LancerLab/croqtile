@@ -773,7 +773,10 @@ stmts_block
     ;
 
 opt_stream_bind
-    : LPAREN s_expr RPAREN { $$ = $2; }
+    : LT IDENTIFIER GT {
+        $$ = AST::Make<AST::Expr>(@2,
+               AST::Make<AST::Identifier>(@2, $2));
+      }
     | %empty { $$ = nullptr; }
     ;
 

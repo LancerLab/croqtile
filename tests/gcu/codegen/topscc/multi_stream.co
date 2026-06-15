@@ -7,11 +7,11 @@
 
 // Two parallel blocks bound to different streams
 __co__ void multi_stream_topscc(stream s0, stream s1, f32[M] a, f32[N] b) {
-  parallel(s0) p by M : block {
+  parallel<s0> p by M : block {
     parallel t by 1 : thread {
     }
   }
-  parallel(s1) q by N : block {
+  parallel<s1> q by N : block {
     parallel t by 1 : thread {
     }
   }
@@ -24,11 +24,11 @@ __co__ void multi_stream_topscc(stream s0, stream s1, f32[M] a, f32[N] b) {
 
 // Async launches: streams but no synchronize
 __co__ void async_multi_stream_topscc(stream s0, stream s1, f32[M] a) {
-  parallel.async(s0) p by M : block {
+  parallel.async<s0> p by M : block {
     parallel t by 1 : thread {
     }
   }
-  parallel.async(s1) q by N : block {
+  parallel.async<s1> q by N : block {
     parallel t by 1 : thread {
     }
   }

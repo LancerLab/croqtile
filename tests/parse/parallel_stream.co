@@ -16,7 +16,7 @@ __co__ void no_stream(f32[M] a) {
 
 // Single stream binding
 __co__ void single_stream(stream s, f32[M] a) {
-  parallel(s) p by M : block {
+  parallel<s> p by M : block {
     a.at(p) = 1.0f;
   }
 }
@@ -31,10 +31,10 @@ __co__ void single_stream(stream s, f32[M] a) {
 
 // Multiple streams bound to different parallel blocks
 __co__ void multi_stream(stream s0, stream s1, f32[M] a, f32[M] b) {
-  parallel(s0) p by M : block {
+  parallel<s0> p by M : block {
     b.at(p) = a.at(p) + 1.0f;
   }
-  parallel(s1) q by M : block {
+  parallel<s1> q by M : block {
     a.at(q) = b.at(q) * 2.0f;
   }
 }
@@ -52,10 +52,10 @@ __co__ void multi_stream(stream s0, stream s1, f32[M] a, f32[M] b) {
 
 // Async with stream
 __co__ void async_with_stream(stream s0, stream s1, f32[M] a) {
-  parallel.async(s0) p by M : block {
+  parallel.async<s0> p by M : block {
     a.at(p) = 1.0f;
   }
-  parallel.async(s1) q by M : block {
+  parallel.async<s1> q by M : block {
     a.at(q) = 2.0f;
   }
 }

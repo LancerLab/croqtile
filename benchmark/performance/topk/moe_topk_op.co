@@ -70,7 +70,7 @@ void moe_topk(f32[N_TOKENS, N_EXPERTS] scores, u32[N_TOKENS, K]& topk_ids,
   assert(ELTS_PER_WARP % ELTS_PER_ROW == 0,
          "The elts per row must cleanly divide the total elt per warp");
 
-  parallel(_s) n by N_BLOCK : block {
+  parallel<_s> n by N_BLOCK : block {
     parallel gid by WARPS_PER_CTA : group {
       parallel {sgid, tid_in_sg} by [SWARP_CNT, THREADS_PER_SWARP] : thread {
         if (n # gid # sgid >= scores.span(0)) {

@@ -4,8 +4,8 @@
 
 // Stream binding on device-level should be rejected (codegen incomplete)
 __co__ void stream_on_device(stream s0, stream s1) {
-  parallel(s0) d by 2 : device {
-    parallel(s1) p by 2 : block {
+  parallel<s0> d by 2 : device {
+    parallel<s1> p by 2 : block {
     }
   }
 }

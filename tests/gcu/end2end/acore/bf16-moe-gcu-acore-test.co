@@ -61,7 +61,7 @@ __co__ void indexed_moe_kernel(global dtype [batch, M, K]       input,
   println("num_experts: ", num_experts);
   println("topk: ", topk);
 
-  parallel.async(_s) bid by BLK_NUM : block
+  parallel.async<_s> bid by BLK_NUM : block
     parallel tid by THR_NUM : thread {
       local s32 [2048/4] local_workspace;
       local dtype [K]    l1_in;
