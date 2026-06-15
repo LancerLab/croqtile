@@ -185,6 +185,7 @@ private:
   LineDirectiveState device_line_state;
 
   std::map<std::string, std::string> claimed_futs;
+  std::set<std::string> tma_futures_;
   std::vector<std::string> pld_checklist = {};
 
   size_t future_count_ = 0;
@@ -432,6 +433,7 @@ private:
     host_param_count = 0; // reset the count of host parameter
     symbolic_dimensions.clear();
     claimed_futs.clear();
+    tma_futures_.clear();
     async_subbyte_futures.clear();
     future_count_ = 0;
     dma_count_ = 0;

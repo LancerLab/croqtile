@@ -596,6 +596,7 @@ struct future {
     #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
       tma_mbarrier_wait_parity(tma_atom->ptx_barrier(),
                                tma_atom->ptx_phase_bit());
+      tma_atom->toggle_ptx_phase();
     #else
       __co_abort__();
     #endif
