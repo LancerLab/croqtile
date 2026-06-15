@@ -48,8 +48,7 @@ coir_test:
     - echo "Running CoIR IR tests..."
     - make setup-core
     - make setup-coir-deps
-    - make coir
-    - python3 -c "from lit.main import main; main()" -- tools/coir/tests/
+    - make coir-test
   tags:
     - GPU
   timeout: 10m
