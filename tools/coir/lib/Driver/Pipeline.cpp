@@ -26,6 +26,8 @@ bool Pipeline::Optimize() {
 bool Pipeline::Lower() {
   mlir::PassManager pm(&ctx_);
   pm.addPass(coir::createClassifyCopiesPass());
+  pm.addPass(coir::createLowerDMADescPass());
+  pm.addPass(coir::createHoistDMAConfigPass());
   pm.addPass(coir::createLowerMMAPass());
   pm.addPass(coir::createLowerCopyPass());
   return mlir::succeeded(pm.run(module_));

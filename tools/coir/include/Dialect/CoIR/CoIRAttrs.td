@@ -91,6 +91,26 @@ def CoIR_MMALayoutAttr :
   CoIR_I32EnumAttr<"mma_layout", CoIR_MMALayoutEnum>;
 
 //===----------------------------------------------------------------------===//
+// DMAKind -- transfer operation kind for DMA descriptor pipeline
+//===----------------------------------------------------------------------===//
+
+def CoIR_DK_Copy      : I32EnumAttrCase<"Copy",      0, "copy">;
+def CoIR_DK_Slice     : I32EnumAttrCase<"Slice",     1, "slice">;
+def CoIR_DK_Transpose : I32EnumAttrCase<"Transpose", 2, "transpose">;
+def CoIR_DK_Pad       : I32EnumAttrCase<"Pad",       3, "pad">;
+
+def CoIR_DMAKindEnum : CoIR_I32Enum<
+  "DMAKind", "DMA transfer operation kind", [
+    CoIR_DK_Copy,
+    CoIR_DK_Slice,
+    CoIR_DK_Transpose,
+    CoIR_DK_Pad
+  ]>;
+
+def CoIR_DMAKindAttr :
+  CoIR_I32EnumAttr<"dma_kind", CoIR_DMAKindEnum>;
+
+//===----------------------------------------------------------------------===//
 // Legacy layout constraint (kept for existing DMA ops)
 //===----------------------------------------------------------------------===//
 

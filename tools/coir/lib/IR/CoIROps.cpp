@@ -13,6 +13,87 @@ using namespace mlir;
 using namespace coir;
 
 //===----------------------------------------------------------------------===//
+// DMAConstDescOp
+//===----------------------------------------------------------------------===//
+
+// Format: %d = coir.dma.const.desc %src, %dst {kind = #coir.dma_kind<copy>}
+//           : !coir.tensor<...>, !coir.tensor<...> -> !coir.desc
+ParseResult DMAConstDescOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand src, dst;
+  Type srcType, dstType, outType;
+  if (parser.parseOperand(src) || parser.parseComma() ||
+      parser.parseOperand(dst) ||
+      parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColon() || parser.parseType(srcType) ||
+      parser.parseComma() || parser.parseType(dstType) ||
+      parser.parseArrow() || parser.parseType(outType))
+    return failure();
+  if (parser.resolveOperand(src, srcType, result.operands) ||
+      parser.resolveOperand(dst, dstType, result.operands))
+    return failure();
+  result.addTypes(outType);
+  return success();
+}
+
+void DMAConstDescOp::print(OpAsmPrinter &printer) {
+  printer << " " << getSource() << ", " << getDest();
+  printer.printOptionalAttrDict((*this)->getAttrs());
+  printer << " : " << getSource().getType() << ", " << getDest().getType()
+          << " -> " << getOut().getType();
+}
+
+//===----------------------------------------------------------------------===//
+// DMADescRuntimeOp
+//===----------------------------------------------------------------------===//
+
+// Format: %d1 = coir.dma.runtime.desc %d0 offsets(%k, %j)
+//           : !coir.desc.rt -> !coir.desc.rt
+ParseResult DMADescRuntimeOp::parse(OpAsmParser &parser,
+                                     OperationState &result) {
+  OpAsmParser::UnresolvedOperand inOperand;
+  Type inType, outType;
+  if (parser.parseOperand(inOperand))
+    return failure();
+
+  llvm::SmallVector<OpAsmParser::UnresolvedOperand> offsetOperands;
+  if (succeeded(parser.parseOptionalKeyword("offsets"))) {
+    if (parser.parseLParen() ||
+        parser.parseOperandList(offsetOperands) ||
+        parser.parseRParen())
+      return failure();
+  }
+
+  if (parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColon() || parser.parseType(inType) ||
+      parser.parseArrow() || parser.parseType(outType))
+    return failure();
+
+  if (parser.resolveOperand(inOperand, inType, result.operands))
+    return failure();
+
+  auto indexType = IndexType::get(parser.getContext());
+  for (auto &off : offsetOperands) {
+    if (parser.resolveOperand(off, indexType, result.operands))
+      return failure();
+  }
+
+  result.addTypes(outType);
+  return success();
+}
+
+void DMADescRuntimeOp::print(OpAsmPrinter &printer) {
+  printer << " " << getIn();
+  auto offsets = getOffsets();
+  if (!offsets.empty()) {
+    printer << " offsets(";
+    llvm::interleaveComma(offsets, printer);
+    printer << ")";
+  }
+  printer.printOptionalAttrDict((*this)->getAttrs());
+  printer << " : " << getIn().getType() << " -> " << getOut().getType();
+}
+
+//===----------------------------------------------------------------------===//
 // DMAInvokeOp
 //===----------------------------------------------------------------------===//
 
@@ -36,7 +117,7 @@ ParseResult DMAInvokeOp::parse(OpAsmParser &parser, OperationState &result) {
     return failure();
   if (parser.resolveOperand(desc, descType, result.operands))
     return failure();
-  result.addTypes(mlir::async::TokenType::get(parser.getContext()));
+  result.addTypes(coir::AsyncTokenType::get(parser.getContext()));
   return success();
 }
 
