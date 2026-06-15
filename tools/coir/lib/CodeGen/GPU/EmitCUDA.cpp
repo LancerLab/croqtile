@@ -50,6 +50,9 @@ private:
   DenseMap<Value, std::string> valueNames;
   DenseMap<unsigned, std::string> returnParamNames;
   DenseSet<Value> returnValues;
+  DenseSet<Value> mmaAccumulators;
+  DenseMap<Value, std::string> mmaFragRoles;
+  DenseMap<Value, std::string> mmaFragLayouts;
   unsigned nextId = 0;
 
   std::string getIndent() { return std::string(indent * 2, ' '); }
@@ -73,12 +76,7 @@ private:
       return result;
     }
     if (auto fragTy = dyn_cast<coir::MMAFragType>(ty)) {
-      std::string result;
-      llvm::raw_string_ostream ss(result);
-      ss << "wmma::fragment<wmma::accumulator, "
-         << fragTy.getShape()[0] << ", " << fragTy.getShape()[1]
-         << ", 16, " << emitElementType(fragTy.getElementType()) << ">";
-      return result;
+      return "/* mma_frag -- see declaration */";
     }
     if (isa<coir::AsyncTokenType>(ty))
       return "cuda::barrier::arrival_token";
@@ -104,6 +102,49 @@ private:
     return "/* unknown */";
   }
 
+  std::string emitWMMAFragType(coir::MMAFragType fragTy,
+                               StringRef role = "accumulator",
+                               StringRef layout = "") {
+    std::string result;
+    llvm::raw_string_ostream ss(result);
+    auto shape = fragTy.getShape();
+    int64_t M = shape.size() > 0 ? shape[0] : 16;
+    int64_t N = shape.size() > 1 ? shape[1] : 16;
+    int64_t K = 16;
+    ss << "wmma::fragment<wmma::" << role << ", "
+       << M << ", " << N << ", " << K << ", "
+       << emitElementType(fragTy.getElementType());
+    if (!layout.empty())
+      ss << ", wmma::" << layout;
+    ss << ">";
+    return result;
+  }
+
+  void prescanMMAFragRoles(mlir::Operation *root) {
+    root->walk([&](MMAFillOp fill) {
+      mmaFragRoles[fill.getResult()] = "accumulator";
+    });
+    root->walk([&](MMAExecOp exec) {
+      auto layout = exec.getLayout();
+      std::string lhsLayout, rhsLayout;
+      if (layout == MMALayout::RowCol) {
+        lhsLayout = "row_major"; rhsLayout = "col_major";
+      } else if (layout == MMALayout::RowRow) {
+        lhsLayout = "row_major"; rhsLayout = "row_major";
+      } else if (layout == MMALayout::ColCol) {
+        lhsLayout = "col_major"; rhsLayout = "col_major";
+      } else {
+        lhsLayout = "col_major"; rhsLayout = "row_major";
+      }
+      mmaFragRoles[exec.getLhs()] = "matrix_a";
+      mmaFragLayouts[exec.getLhs()] = lhsLayout;
+      mmaFragRoles[exec.getRhs()] = "matrix_b";
+      mmaFragLayouts[exec.getRhs()] = rhsLayout;
+      mmaFragRoles[exec.getAccumulator()] = "accumulator";
+      mmaFragRoles[exec.getResult()] = "accumulator";
+    });
+  }
+
   void emitHeader() {
     os << "#include <cuda_fp16.h>\n";
     os << "#include <mma.h>\n";
@@ -116,6 +157,8 @@ private:
   }
 
   void emitKernel(KernelOp kernel) {
+    prescanMMAFragRoles(kernel);
+
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
     std::string devName = kernelDeviceName(symName);
@@ -192,19 +235,42 @@ private:
     return n * elemSize;
   }
 
-  void getGridBlockDims(KernelOp kernel, int64_t &gridDim, int64_t &blockDim) {
-    gridDim = 1;
-    blockDim = 1;
+  struct LaunchDims {
+    llvm::SmallVector<int64_t, 3> grid = {1};
+    llvm::SmallVector<int64_t, 3> block = {1};
+
+    std::string gridStr() const {
+      if (grid.size() == 1) return std::to_string(grid[0]);
+      std::string s = "dim3(";
+      for (unsigned i = 0; i < grid.size(); ++i) {
+        if (i > 0) s += ", ";
+        s += std::to_string(grid[i]);
+      }
+      return s + ")";
+    }
+    std::string blockStr() const {
+      if (block.size() == 1) return std::to_string(block[0]);
+      std::string s = "dim3(";
+      for (unsigned i = 0; i < block.size(); ++i) {
+        if (i > 0) s += ", ";
+        s += std::to_string(block[i]);
+      }
+      return s + ")";
+    }
+  };
+
+  LaunchDims getLaunchDims(KernelOp kernel) {
+    LaunchDims dims;
     kernel.getBody().walk([&](ParallelOp par) {
       auto lvl = par.getLevel();
       auto bounds = par.getBounds();
-      int64_t totalBound = 1;
-      for (auto b : bounds) totalBound *= b;
+      llvm::SmallVector<int64_t, 3> bv(bounds.begin(), bounds.end());
       if (lvl == coir::ParallelLevel::BLOCK)
-        gridDim = totalBound;
+        dims.grid = bv;
       else if (lvl == coir::ParallelLevel::THREAD)
-        blockDim = totalBound;
+        dims.block = bv;
     });
+    return dims;
   }
 
   void emitHostWrapper(KernelOp kernel) {
@@ -234,10 +300,10 @@ private:
            << bytes << "ULL, cudaMemcpyHostToDevice);\n";
       }
 
-      int64_t gridDim, blockDim;
-      getGridBlockDims(kernel, gridDim, blockDim);
+      auto dims = getLaunchDims(kernel);
 
-      os << "  " << devName << "<<<" << gridDim << ", " << blockDim << ">>>(";
+      os << "  " << devName << "<<<" << dims.gridStr() << ", "
+         << dims.blockStr() << ">>>(";
       for (unsigned i = 0; i < numInputs; ++i) {
         if (i > 0) os << ", ";
         os << "p" << i << "__device";
@@ -271,8 +337,9 @@ private:
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (!tty) continue;
+      std::string inputEType = emitElementType(tty.getElementType());
       int64_t bytes = getTensorBytes(tty);
-      os << "  " << eType << "* p" << i << "__device = nullptr;\n";
+      os << "  " << inputEType << "* p" << i << "__device = nullptr;\n";
       os << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
       os << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
          << bytes << "ULL, cudaMemcpyHostToDevice);\n";
@@ -300,10 +367,10 @@ private:
     os << "  " << eType << "* __result__device = nullptr;\n";
     os << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
 
-    int64_t gridDim, blockDim;
-    getGridBlockDims(kernel, gridDim, blockDim);
+    auto dims = getLaunchDims(kernel);
 
-    os << "  " << devName << "<<<" << gridDim << ", " << blockDim << ">>>(";
+    os << "  " << devName << "<<<" << dims.gridStr() << ", "
+       << dims.blockStr() << ">>>(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       os << "p" << i << "__device";
@@ -429,38 +496,52 @@ private:
   void emitMMAFill(MMAFillOp op) {
     auto fragTy = cast<coir::MMAFragType>(op.getResult().getType());
     std::string name = getName(op.getResult());
-    os << getIndent() << emitCUDAType(fragTy) << " " << name << ";\n";
+    mmaAccumulators.insert(op.getResult());
+    os << getIndent() << emitWMMAFragType(fragTy, "accumulator")
+       << " " << name << ";\n";
     os << getIndent() << "wmma::fill_fragment(" << name << ", "
        << getName(op.getValue()) << ");\n";
+  }
+
+  int64_t getSourceLeadingDim(Value v) {
+    if (auto tileOp = v.getDefiningOp<TensorTileOp>()) {
+      auto srcTy = dyn_cast<coir::TensorType>(tileOp.getSource().getType());
+      if (srcTy && srcTy.getShape().size() >= 2)
+        return srcTy.getShape().back();
+    }
+    if (auto tty = dyn_cast<coir::TensorType>(v.getType()))
+      if (tty.getShape().size() >= 2)
+        return tty.getShape().back();
+    return 16;
   }
 
   void emitMMALoad(MMALoadOp op) {
     auto fragTy = cast<coir::MMAFragType>(op.getResult().getType());
     std::string name = getName(op.getResult());
-    os << getIndent() << emitCUDAType(fragTy) << " " << name << ";\n";
+    auto roleIt = mmaFragRoles.find(op.getResult());
+    std::string role = roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
+    auto layoutIt = mmaFragLayouts.find(op.getResult());
+    std::string layout = layoutIt != mmaFragLayouts.end() ? layoutIt->second : "";
+    os << getIndent() << emitWMMAFragType(fragTy, role, layout)
+       << " " << name << ";\n";
+    int64_t ldm = getSourceLeadingDim(op.getSource());
     os << getIndent() << "wmma::load_matrix_sync(" << name << ", "
-       << getName(op.getSource()) << ", " << fragTy.getShape()[1] << ");\n";
+       << getName(op.getSource()) << ", " << ldm << ");\n";
   }
 
   void emitMMAExec(MMAExecOp op) {
-    std::string res = getName(op.getResult());
-    std::string target = "wmma::mma_sync";
-    if (auto tAttr = op->getAttrOfType<StringAttr>("target")) {
-      if (tAttr.getValue() == "wgmma")
-        target = "wgmma::mma_async";
-    }
-    auto resTy = cast<coir::MMAFragType>(op.getResult().getType());
-    os << getIndent() << emitCUDAType(resTy) << " " << res << ";\n";
-    os << getIndent() << target << "(" << res << ", "
+    std::string acc = getName(op.getAccumulator());
+    valueNames[op.getResult()] = acc;
+    os << getIndent() << "wmma::mma_sync(" << acc << ", "
        << getName(op.getLhs()) << ", " << getName(op.getRhs()) << ", "
-       << getName(op.getAccumulator()) << ");\n";
+       << acc << ");\n";
   }
 
   void emitMMAStore(MMAStoreOp op) {
-    auto fragTy = cast<coir::MMAFragType>(op.getFragment().getType());
+    int64_t ldm = getSourceLeadingDim(op.getDest());
     os << getIndent() << "wmma::store_matrix_sync("
        << getName(op.getDest()) << ", " << getName(op.getFragment())
-       << ", " << fragTy.getShape()[1] << ", wmma::mem_row_major);\n";
+       << ", " << ldm << ", wmma::mem_row_major);\n";
   }
 
   void emitDmaCopy(DmaCopyOp op) {
@@ -527,8 +608,31 @@ private:
 
   void emitTensorTile(TensorTileOp op) {
     std::string name = getName(op.getResult());
-    os << getIndent() << "auto " << name << " = "
-       << getName(op.getSource()) << " + /* tile offset */;\n";
+    auto srcTy = dyn_cast<coir::TensorType>(op.getSource().getType());
+    auto tileTy = dyn_cast<coir::TensorType>(op.getResult().getType());
+    auto indices = op.getIndices();
+
+    if (indices.empty()) {
+      valueNames[op.getResult()] = getName(op.getSource());
+      return;
+    }
+
+    os << getIndent() << "auto " << name << " = " << getName(op.getSource());
+    if (srcTy && !indices.empty()) {
+      os << " + (";
+      auto srcShape = srcTy.getShape();
+      auto tileShape = tileTy ? tileTy.getShape() : llvm::ArrayRef<int64_t>{};
+      for (unsigned i = 0; i < indices.size(); ++i) {
+        if (i > 0) os << " + ";
+        os << getName(indices[i]);
+        int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
+        os << " * " << tileDim;
+        for (unsigned j = i + 1; j < srcShape.size(); ++j)
+          os << " * " << srcShape[j];
+      }
+      os << ")";
+    }
+    os << ";\n";
   }
 
   void emitLinearIndex(mlir::ValueRange indices, coir::TensorType tty) {

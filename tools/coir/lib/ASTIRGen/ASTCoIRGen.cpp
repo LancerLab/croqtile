@@ -137,9 +137,37 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     PopScope();
   } else if (isa<AST::ForeachBlock>(&n)) {
     auto *block = builder.getInsertionBlock();
-    auto *parentBlock = block->getParentOp()->getBlock();
-    if (parentBlock) builder.setInsertionPointAfter(block->getParentOp());
+    auto *foreachOp = block->getParentOp();
+
+    if (!pendingYields.empty()) {
+      auto *terminator = block->getTerminator();
+      llvm::SmallVector<mlir::Value> yieldVals;
+      for (auto &[name, _] : pendingYields) {
+        auto val = LookupValue(name);
+        if (val) yieldVals.push_back(val);
+      }
+      if (terminator)
+        terminator->erase();
+      builder.setInsertionPointToEnd(block);
+      builder.create<coir::YieldOp>(builder.getUnknownLoc(), yieldVals);
+    }
+
+    auto *parentBlock = foreachOp->getBlock();
+    if (parentBlock) builder.setInsertionPointAfter(foreachOp);
+
+    llvm::SmallVector<std::pair<std::string, mlir::Value>> resultMappings;
+    if (auto foreach_ = mlir::dyn_cast<coir::ForeachOp>(foreachOp)) {
+      unsigned numRes = foreach_.getNumResults();
+      for (unsigned i = 0; i < pendingYields.size(); ++i) {
+        if (i < numRes)
+          resultMappings.push_back(
+              {pendingYields[i].first, foreach_.getResult(i)});
+      }
+    }
+    pendingYields.clear();
     PopScope();
+    for (auto &[name, val] : resultMappings)
+      UpdateValue(name, val);
   } else if (isa<AST::WithBlock>(&n)) {
     PopScope();
   }
@@ -242,6 +270,31 @@ bool ASTCoIRGen::Visit(AST::ParallelBy &pb) {
   return true;
 }
 
+namespace {
+void collectMMAAccNames(AST::Node *node,
+                        llvm::SmallVectorImpl<std::string> &names) {
+  if (!node) return;
+  if (auto *mma = dyn_cast<AST::MMA>(node)) {
+    auto &op = *mma->GetOperation();
+    if (op.IsKind(AST::MMAOperation::Exec)) {
+      auto acc = op.ExecOperand(0);
+      if (acc) names.push_back(AST::FragName(acc));
+    }
+    return;
+  }
+  if (auto *mn = dyn_cast<AST::MultiNodes>(node)) {
+    for (auto &child : mn->values) {
+      if (child) collectMMAAccNames(child.get(), names);
+    }
+    return;
+  }
+  if (node->HasBody()) {
+    auto body = node->GetBody();
+    if (body) collectMMAAccNames(body.get(), names);
+  }
+}
+} // namespace
+
 bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
   auto loc = Loc(fb);
   auto indexType = mlir::IndexType::get(&IRContext());
@@ -258,10 +311,25 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
     }
   }
 
+  llvm::SmallVector<std::string> accNames;
+  if (fb.stmts) collectMMAAccNames(fb.stmts.get(), accNames);
+
+  llvm::SmallVector<mlir::Value> iterArgs;
+  llvm::SmallVector<mlir::Type> iterTypes;
+  llvm::SmallVector<std::string> iterNames;
+  for (auto &name : accNames) {
+    auto val = LookupValue(name);
+    if (val) {
+      iterArgs.push_back(val);
+      iterTypes.push_back(val.getType());
+      iterNames.push_back(name);
+    }
+  }
+
   auto ubConst = builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
 
   auto foreachOp = builder.create<coir::ForeachOp>(
-      loc, mlir::TypeRange{}, ubConst.getResult(), mlir::ValueRange{});
+      loc, iterTypes, ubConst.getResult(), iterArgs);
 
   auto &bodyRegion = foreachOp.getBody();
   auto *block = new mlir::Block();
@@ -272,8 +340,14 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
   if (fb.ranges && !fb.ranges->values.empty()) {
     auto &firstRange = fb.ranges->values[0];
     if (auto *lr = dyn_cast<AST::LoopRange>(firstRange.get()))
-      if (lr->iv)
-        MapValue(lr->iv->name, ivArg);
+      MapValue(lr->GetIVName(), ivArg);
+  }
+
+  pendingYields.clear();
+  for (unsigned i = 0; i < iterNames.size(); ++i) {
+    auto iterArg = block->addArgument(iterTypes[i], loc);
+    MapValue(iterNames[i], iterArg);
+    pendingYields.push_back({iterNames[i], iterArg});
   }
 
   builder.setInsertionPointToEnd(block);
@@ -514,6 +588,208 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
       MapValue(dma.future, copyOp.getToken());
     else if (dstVal)
       MapValue(dma.future, dstVal);
+  }
+
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::MMA &n) {
+  auto loc = Loc(n);
+  auto &op = *n.GetOperation();
+
+  switch (op.Tag()) {
+  case AST::MMAOperation::Fill: {
+    auto fillVal = EmitExpr(*op.FillingValue());
+    if (!fillVal) return true;
+
+    auto fillType = op.FillingType();
+    auto elemTy = (fillType != BaseType::UNKSCALAR)
+                      ? LowerBaseType(fillType)
+                      : fillVal.getType();
+
+    auto nodeType = n.GetType();
+    llvm::SmallVector<int64_t> shape;
+    if (auto sty = dyn_cast<SpannedType>(nodeType)) {
+      auto &mdspan = sty->s_type->value;
+      if (mdspan.IsValid())
+        for (auto &v : mdspan.Value())
+          shape.push_back(EvalToInt(v));
+    }
+    if (shape.empty())
+      shape = {16, 16};
+
+    auto fragTy = coir::MMAFragType::get(&IRContext(), elemTy, shape);
+
+    if (fillVal.getType() != elemTy) {
+      if (elemTy.isa<mlir::FloatType>() && fillVal.getType().isa<mlir::FloatType>())
+        fillVal = builder.create<mlir::arith::ExtFOp>(loc, elemTy, fillVal);
+      else if (elemTy.isa<mlir::FloatType>())
+        fillVal = builder.create<mlir::arith::SIToFPOp>(loc, elemTy, fillVal);
+    }
+
+    auto fillOp = builder.create<coir::MMAFillOp>(loc, fragTy, fillVal);
+    std::string fragName = AST::FragName(op.FillingTo());
+    MapValue(fragName, fillOp.getResult());
+    break;
+  }
+
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadR: {
+    auto chunkAt = op.LoadFrom();
+    if (!chunkAt) return true;
+
+    auto srcVal = LookupValue(chunkAt->data->name);
+    if (!srcVal) return true;
+
+    auto srcTy = srcVal.getType().dyn_cast<coir::TensorType>();
+    if (!srcTy) return true;
+
+    llvm::SmallVector<mlir::Value> idxVals;
+    if (chunkAt->HasOperation()) {
+      for (auto &sop : chunkAt->AllOperations()) {
+        if (auto indices = sop->GetIndices()) {
+          for (auto &idx : indices->AllValues()) {
+            if (auto *id = dyn_cast<AST::Identifier>(idx.get())) {
+              auto v = LookupValue(id->name);
+              if (v && !v.getType().isa<mlir::IndexType>())
+                v = builder.create<mlir::arith::IndexCastOp>(
+                    loc, mlir::IndexType::get(&IRContext()), v);
+              if (v) idxVals.push_back(v);
+            } else {
+              mlir::Value v = EmitExpr(*idx);
+              if (v && !v.getType().isa<mlir::IndexType>())
+                v = builder.create<mlir::arith::IndexCastOp>(
+                    loc, mlir::IndexType::get(&IRContext()), v);
+              if (v) idxVals.push_back(v);
+            }
+          }
+        }
+      }
+    } else if (chunkAt->indices) {
+      for (auto &idx : chunkAt->indices->AllValues()) {
+        mlir::Value v = EmitExpr(*idx);
+        if (v && !v.getType().isa<mlir::IndexType>())
+          v = builder.create<mlir::arith::IndexCastOp>(
+              loc, mlir::IndexType::get(&IRContext()), v);
+        if (v) idxVals.push_back(v);
+      }
+    }
+
+    auto nodeType = n.GetType();
+    llvm::SmallVector<int64_t> tileShape;
+    if (auto sty = dyn_cast<SpannedType>(nodeType)) {
+      auto &mdspan = sty->s_type->value;
+      if (mdspan.IsValid())
+        for (auto &v : mdspan.Value())
+          tileShape.push_back(EvalToInt(v));
+    }
+    if (tileShape.empty())
+      tileShape = {16, 16};
+
+    auto tileTy = coir::TensorType::get(
+        &IRContext(), srcTy.getElementType(), tileShape,
+        static_cast<int32_t>(coir::TensorMemorySpace::Shared),
+        llvm::ArrayRef<int64_t>{});
+    auto tileOp = builder.create<coir::TensorTileOp>(
+        loc, tileTy, srcVal, idxVals);
+
+    auto fragTy = coir::MMAFragType::get(
+        &IRContext(), srcTy.getElementType(), tileShape);
+    auto loadOp = builder.create<coir::MMALoadOp>(
+        loc, fragTy, tileOp.getResult());
+
+    std::string fragName;
+    if (op.IsLoadR()) {
+      if (auto loadTo = op.LoadTo())
+        fragName = AST::FragName(loadTo);
+    } else {
+      auto future = op.LoadTo();
+      if (future)
+        fragName = AST::FragName(future);
+    }
+    if (!fragName.empty())
+      MapValue(fragName, loadOp.getResult());
+    break;
+  }
+
+  case AST::MMAOperation::Exec: {
+    auto accExpr = op.ExecOperand(0);
+    auto lhsExpr = op.ExecOperand(1);
+    auto rhsExpr = op.ExecOperand(2);
+    if (!accExpr || !lhsExpr || !rhsExpr) return true;
+
+    auto accVal = LookupValue(AST::FragName(accExpr));
+    auto lhsVal = LookupValue(AST::FragName(lhsExpr));
+    auto rhsVal = LookupValue(AST::FragName(rhsExpr));
+    if (!accVal || !lhsVal || !rhsVal) return true;
+
+    coir::MMALayout layout;
+    switch (op.GetMethod()) {
+    case AST::MMAOperation::ROW_ROW: layout = coir::MMALayout::RowRow; break;
+    case AST::MMAOperation::ROW_COL: layout = coir::MMALayout::RowCol; break;
+    case AST::MMAOperation::COL_ROW: layout = coir::MMALayout::ColRow; break;
+    case AST::MMAOperation::COL_COL: layout = coir::MMALayout::ColCol; break;
+    }
+    auto layoutAttr = coir::MMALayoutAttr::get(&IRContext(), layout);
+
+    auto execOp = builder.create<coir::MMAExecOp>(
+        loc, accVal.getType(), accVal, lhsVal, rhsVal, layoutAttr);
+
+    std::string accName = AST::FragName(accExpr);
+    MapValue(accName, execOp.getResult());
+    break;
+  }
+
+  case AST::MMAOperation::Store: {
+    auto srcExpr = op.StoreFrom();
+    auto dstChunk = op.StoreTo();
+    if (!srcExpr || !dstChunk) return true;
+
+    auto fragVal = LookupValue(AST::FragName(srcExpr));
+    if (!fragVal) return true;
+
+    auto dstVal = LookupValue(dstChunk->data->name);
+    if (!dstVal) return true;
+
+    auto dstTy = dstVal.getType().dyn_cast<coir::TensorType>();
+    if (!dstTy) return true;
+
+    llvm::SmallVector<mlir::Value> idxVals;
+    if (dstChunk->HasOperation()) {
+      for (auto &sop : dstChunk->AllOperations()) {
+        if (auto indices = sop->GetIndices()) {
+          for (auto &idx : indices->AllValues()) {
+            mlir::Value v = EmitExpr(*idx);
+            if (v && !v.getType().isa<mlir::IndexType>())
+              v = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), v);
+            if (v) idxVals.push_back(v);
+          }
+        }
+      }
+    } else if (dstChunk->indices) {
+      for (auto &idx : dstChunk->indices->AllValues()) {
+        mlir::Value v = EmitExpr(*idx);
+        if (v && !v.getType().isa<mlir::IndexType>())
+          v = builder.create<mlir::arith::IndexCastOp>(
+              loc, mlir::IndexType::get(&IRContext()), v);
+        if (v) idxVals.push_back(v);
+      }
+    }
+
+    auto fragTy = fragVal.getType().cast<coir::MMAFragType>();
+    auto tileTy = coir::TensorType::get(
+        &IRContext(), dstTy.getElementType(), fragTy.getShape(),
+        dstTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
+    auto tileOp = builder.create<coir::TensorTileOp>(
+        loc, tileTy, dstVal, idxVals);
+
+    builder.create<coir::MMAStoreOp>(loc, fragVal, tileOp.getResult());
+    break;
+  }
+
+  default:
+    break;
   }
 
   return true;
