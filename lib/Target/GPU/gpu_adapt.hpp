@@ -246,19 +246,19 @@ public:
     auto se = pb->StreamExpr();
     if (!se->IsReference()) {
       Error1(se->LOC(),
-             "stream binding in parallel(...) must be a stream variable.");
+             "stream binding in parallel<...> must be a stream variable.");
       return;
     }
     auto id = dyn_cast<AST::Identifier>(se->GetR().get());
     if (!id) {
       Error1(se->LOC(),
-             "stream binding in parallel(...) must be a stream variable.");
+             "stream binding in parallel<...> must be a stream variable.");
       return;
     }
     auto ty = GetSymbolType(id->name);
     if (!isa<StreamType>(ty))
       Error1(se->LOC(), "'" + id->name +
-                            "' is not a stream type; parallel(...) requires "
+                            "' is not a stream type; parallel<...> requires "
                             "a stream variable.");
   }
 

@@ -6,8 +6,8 @@
 
 // Stream binding on thread-level should be rejected
 __co__ void stream_on_thread(stream s0, stream s1, f32[M] a) {
-  parallel(s0) p by M : block {
-    parallel(s1) q by 1 : thread {
+  parallel<s0> p by M : block {
+    parallel<s1> q by 1 : thread {
     }
   }
 }
