@@ -42,12 +42,23 @@ private:
   void MapValue(llvm::StringRef name, mlir::Value val) {
     value_stack.back()[name] = val;
   }
+  void UpdateValue(llvm::StringRef name, mlir::Value val) {
+    for (auto it = value_stack.rbegin(); it != value_stack.rend(); ++it) {
+      if (auto found = it->find(name); found != it->end()) {
+        found->second = val;
+        return;
+      }
+    }
+    value_stack.back()[name] = val;
+  }
   mlir::Value LookupValue(llvm::StringRef name) {
     for (auto it = value_stack.rbegin(); it != value_stack.rend(); ++it)
       if (auto found = it->find(name); found != it->end())
         return found->second;
     return nullptr;
   }
+
+  llvm::SmallVector<std::pair<std::string, mlir::Value>> pendingYields;
 
   llvm::SmallVector<mlir::Value> expr_stack;
   void PushExpr(mlir::Value v) { expr_stack.push_back(v); }
@@ -106,7 +117,7 @@ public:
   bool Visit(AST::Memory &) override { return true; }
   bool Visit(AST::SpanAs &) override { return true; }
   bool Visit(AST::DMA &) override;
-  bool Visit(AST::MMA &) override { return true; }
+  bool Visit(AST::MMA &) override;
   bool Visit(AST::ChunkAt &) override { return true; }
   bool Visit(AST::Wait &) override { return true; }
   bool Visit(AST::Trigger &) override { return true; }

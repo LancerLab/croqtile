@@ -9,7 +9,7 @@
 // CHECK: wmma::fill_fragment
 // CHECK: wmma::load_matrix_sync
 // CHECK: wmma::load_matrix_sync
-// CHECK: wgmma::mma_async
+// CHECK: wmma::mma_sync
 // CHECK: wmma::store_matrix_sync
 coir.kernel @mma_kernel(
     %a_tile: !coir.tensor<16x16xf16, shared>,
@@ -29,7 +29,7 @@ coir.kernel @mma_kernel(
 // CHECK: __syncthreads
 // CHECK: wmma::fill_fragment
 // CHECK: wmma::load_matrix_sync
-// CHECK: wgmma::mma_async
+// CHECK: wmma::mma_sync
 // CHECK: wmma::store_matrix_sync
 coir.kernel @copy_and_mma(
     %ga: !coir.tensor<128x64xf16>,
@@ -58,7 +58,7 @@ coir.kernel @copy_and_mma(
 // CHECK: parallel level=block
 // CHECK: for (int
 // CHECK: wmma::load_matrix_sync
-// CHECK: wgmma::mma_async
+// CHECK: wmma::mma_sync
 // CHECK: wmma::store_matrix_sync
 coir.kernel @matmul_kernel(
     %a: !coir.tensor<128x64xf16, shared>,
