@@ -58,7 +58,7 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global 
 
     parallel p1 by 2 : group-4, t by 128 : thread {
 
-      inthreads.async (p1 == 0 && t == 0) {
+      inthreads.async (p1 == 0) {
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
           wait empty[stage];

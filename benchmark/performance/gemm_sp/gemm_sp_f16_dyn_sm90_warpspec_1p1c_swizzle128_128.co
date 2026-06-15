@@ -62,14 +62,14 @@ __co__ void spmm(global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed,
                  global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_N] output) {
   parallel {block_m, block_n}
       by [cdiv(SPMM_DEFAULT_M, SPMM_WARP_M), cdiv(SPMM_DEFAULT_N, SPMM_WARP_N)] : block {
-    shared event full[SPMM_STAGES], empty[SPMM_STAGES];
+    shared event<256> full[SPMM_STAGES], empty[SPMM_STAGES];
     shared f16 [SPMM_STAGES * SPMM_WARP_M, SPMM_PACKED_TILE_K] lhs_load_s;
     shared f16 [SPMM_STAGES * SPMM_WARP_N, SPMM_TILE_K] rhs_load_s;
     // shared u8 [SPMM_WARP_M, SPMM_META_TILE_COLS] lhs_meta_s;
     shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s;
 
     parallel p1 by 2 : group-4, t by 128 : thread {
-      inthreads.async (p1 == 0 && t == 0) {
+      inthreads.async (p1 == 0) {
         foreach {iv_k} in [cdiv(SPMM_DEFAULT_K, SPMM_TILE_K)] {
           stage = iv_k % SPMM_STAGES;
           wait empty[stage];
@@ -80,11 +80,11 @@ __co__ void spmm(global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed,
 
           tma.copy.async<full[stage]>.swiz<128> rhs
               .subspan(SPMM_WARP_N, 64)
-              .at(block_n, 2*iv_k)
+              .at(block_n, 2 * iv_k)
               => rhs_load_s.subspan(SPMM_WARP_N, 64).at(stage, 0);
           tma.copy.async<full[stage]>.swiz<128> rhs
               .subspan(SPMM_WARP_N, 64)
-              .at(block_n, 2*iv_k+1)
+              .at(block_n, 2 * iv_k + 1)
               => rhs_load_s.subspan(SPMM_WARP_N, 64).at(stage, 1);
           trigger full[stage];
         }

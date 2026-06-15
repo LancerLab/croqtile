@@ -27,7 +27,7 @@ __co__ void matmul(global bf16 [M, K] lhs, global bf16 [N, K] rhs, global bf16 [
     shared bf16 [WARP_M, WARP_N + OUTPUT_PAD] output_s[CONSUMER_COUNT];
 
     parallel wg by 2 : group-4, t by 128 : thread {
-      inthreads.async (wg == 0 && t == 0) {
+      inthreads.async (wg == 0) {
         foreach {iv_k} in [cdiv(K, TILE_K)] {
           stage = iv_k % STAGES;
           wait empty[stage];

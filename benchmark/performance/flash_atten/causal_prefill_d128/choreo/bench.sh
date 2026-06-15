@@ -222,7 +222,7 @@ fi
 
 combined_target_cflags="-DMHA_ENABLE_VERIFY=$enable_verify -DMHA_ENABLE_TIMING=$enable_timing ${EXTRA_NVCC_FLAGS:-}"
 extra_choreo_flags="${EXTRA_CHOREO_FLAGS:-}"
-choreo_cmd=("$CHOREO_BIN" -gs -t cute -arch="$detected_arch" --use-fast-math)
+choreo_cmd=("$CHOREO_BIN" -gs -t cute -arch="$detected_arch" --use-fast-math --stmatrix)
 if [[ -n "$extra_choreo_flags" ]]; then
   read -ra __cf <<< "$extra_choreo_flags"
   choreo_cmd+=("${__cf[@]}")

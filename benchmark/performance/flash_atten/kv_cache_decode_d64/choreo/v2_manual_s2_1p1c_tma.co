@@ -36,7 +36,7 @@ __co__ void flash_atten(
     kv_bound = __min(cdiv((bm + 1) * BLOCK_M + past_len, BLOCK_N), cdiv(KV_SEQ, BLOCK_N));
 
     parallel p by [BLOCK_M/WG_M + 1] : group-4, t by 128 : thread { // 1 producer warpgroup + 2 consumer warpgroups
-      inthreads.async (p == 0 && t == 0) {
+      inthreads.async (p == 0) {
         tma.copy.async<qf>.swiz<SWIZ>
           Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => q_shared;
         trigger qf;
