@@ -181,9 +181,7 @@ build-with-cmake-ninja:
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
 	@test -f $(CMAKE_BUILD_DIR)/co-mock && ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock || true
-	@test -f $(CMAKE_BUILD_DIR)/tools/coir/co2ir && ln -sf $(CMAKE_BUILD_DIR)/tools/coir/co2ir $(WORK_DIR)/co2ir || true
-	@test -f $(CMAKE_BUILD_DIR)/tools/coir/coir-opt && ln -sf $(CMAKE_BUILD_DIR)/tools/coir/coir-opt $(WORK_DIR)/coir-opt || true
-	@test -f $(CMAKE_BUILD_DIR)/tools/coir/cocc && ln -sf $(CMAKE_BUILD_DIR)/tools/coir/cocc $(WORK_DIR)/cocc || true
+	@$(MAKE) --no-print-directory symlink-coir
 
 config-with-cmake-ninja:
 	@echo "Starting build with CMake..."

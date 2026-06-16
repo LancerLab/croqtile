@@ -721,6 +721,8 @@ prepare() {
     :
   elif [[ "${ext}" == "cmt" ]]; then
     :
+  elif [[ "${ext}" == "mlir" ]]; then
+    :
   else
     echo "Error: Invalid test file: $file" >&2
     return 1
