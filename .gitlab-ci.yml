@@ -32,31 +32,6 @@ mock_test:
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
     - 'echo "Cleanup done."'
 
-# CoIR IR tooling tests (no hardware required, needs LLVM/MLIR)
-coir_test:
-  variables:
-   GIT_SUBMODULE_STRATEGY: recursive
-   GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
-  stage: check-in-tests
-  rules:
-    - if: >
-        $CI_COMMIT_BRANCH == "main" || 
-        $CI_COMMIT_BRANCH =~ /^release\// ||
-        $CI_PIPELINE_SOURCE == "merge_request_event"
-      when: on_success
-  script:
-    - echo "Running CoIR IR tests..."
-    - make setup-core
-    - make setup-coir-deps
-    - make coir-test
-  tags:
-    - GPU
-  timeout: 10m
-  after_script:
-    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
-    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
-    - 'echo "Cleanup done."'
-
 # GPU Testing
 gpu_test:
   variables:
@@ -78,6 +53,9 @@ gpu_test:
     - make setup-core
     - make build
     - make ci-test
+    - echo "Running CoIR tests..."
+    - make setup-coir-deps
+    - make coir-test
   artifacts:
     paths:
       - choreo
@@ -89,7 +67,7 @@ gpu_test:
       - tools/shared
   tags:
     - GPU
-  timeout: 22m
+  timeout: 25m
   after_script:
     - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
@@ -149,6 +127,9 @@ gcu2_test:
     - make setup-gcu2
     - make build
     - make ci-test
+    - echo "Running CoIR tests..."
+    - make setup-coir-deps
+    - make coir-test
   artifacts:
     paths:
       - choreo
@@ -161,7 +142,7 @@ gcu2_test:
   tags:
     - GCU2
   allow_failure: false
-  timeout: 10m
+  timeout: 15m
   after_script:
     - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
@@ -187,6 +168,9 @@ gcu3_test:
     - make setup-gcu3
     - make build
     - make ci-test
+    - echo "Running CoIR tests..."
+    - make setup-coir-deps
+    - make coir-test
   artifacts:
     paths:
       - choreo
