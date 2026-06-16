@@ -1,8 +1,8 @@
 //===- HoistDMAConfig.cpp - Hoist loop-invariant DMA descriptor setup -----===//
 //
-// LICM for DMA descriptor pipeline ops: moves dma.const.desc and
-// dma.prefetch.desc above coir.foreach loops when their operands are
-// defined outside the loop.
+// Uses MLIR's LoopLikeOpInterface LICM to hoist DMA descriptor pipeline
+// ops (const.desc, prefetch.desc, check) above loop nests when their
+// operands are loop-invariant.  Works with arbitrarily nested loops.
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,7 +11,8 @@
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
 
-#include "mlir/IR/Dominance.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Transforms/LoopInvariantCodeMotionUtils.h"
 #include "mlir/Pass/Pass.h"
 
 namespace coir {
@@ -25,43 +26,23 @@ using namespace coir;
 
 namespace {
 
-static bool isDefinedOutsideLoop(Value v, ForeachOp loop) {
-  if (!v.getDefiningOp())
-    return true;
-  return !loop->isAncestor(v.getDefiningOp());
-}
-
-static bool allOperandsOutsideLoop(Operation *op, ForeachOp loop) {
-  for (auto operand : op->getOperands()) {
-    if (!isDefinedOutsideLoop(operand, loop))
-      return false;
-  }
-  return true;
-}
-
 struct HoistDMAConfigPass
     : public ::coir::impl::HoistDMAConfigBase<HoistDMAConfigPass> {
   using HoistDMAConfigBase::HoistDMAConfigBase;
 
   void runOnOperation() override {
-    getOperation()->walk([&](ForeachOp foreachOp) {
-      bool changed = true;
-      while (changed) {
-        changed = false;
-        llvm::SmallVector<Operation *, 4> toHoist;
-
-        foreachOp.getBody().walk([&](Operation *op) {
-          if (!isa<DMAConstDescOp, DMADescPrefetchOp, DMACheckOp>(op))
-            return;
-          if (allOperandsOutsideLoop(op, foreachOp))
-            toHoist.push_back(op);
-        });
-
-        for (auto *op : toHoist) {
-          op->moveBefore(foreachOp);
-          changed = true;
-        }
-      }
+    getOperation()->walk([&](LoopLikeOpInterface loopLike) {
+      moveLoopInvariantCode(
+          loopLike.getLoopRegions(),
+          [&](Value value, Region *region) {
+            return loopLike.isDefinedOutsideOfLoop(value);
+          },
+          [](Operation *op, Region *) {
+            return isa<DMAConstDescOp, DMADescPrefetchOp, DMACheckOp>(op);
+          },
+          [](Operation *op, Region *region) {
+            op->moveBefore(region->getParentOp());
+          });
     });
   }
 };

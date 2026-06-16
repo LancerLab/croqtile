@@ -8,6 +8,7 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Dialect/Async/IR/AsyncTypes.h"
 #include "CoIRDialect.h"
 #include "CoIRTypes.h"

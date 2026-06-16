@@ -115,6 +115,7 @@ target_include_directories(MLIRCoIRDialect PUBLIC
 )
 target_link_libraries(MLIRCoIRDialect PUBLIC
   MLIRIR MLIRFuncDialect MLIRAsyncDialect MLIRGPUDialect MLIRSupport
+  MLIRLoopLikeInterface
 )
 
 # ------------------------------------------------------------------
