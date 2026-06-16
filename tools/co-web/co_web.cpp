@@ -11,6 +11,7 @@
 #include "scanner.hpp"
 #include "target_registry.hpp"
 #include "choreo_sdk.hpp"
+#include "interpreter.hpp"
 
 using namespace Choreo;
 extern AST::Program root;
@@ -138,18 +139,27 @@ emscripten::val mockRun(const std::string& source) {
   std::ostringstream out_stream, err_stream;
   capture_streams(out_stream, err_stream);
 
-  int rc = parse_source(source, "cute", true);
+  int rc = parse_source(source, "cute", false);
   restore_streams();
 
-  std::string output = out_stream.str();
-  if (rc == 0 && output.empty()) {
-    output = "[mock] Program compiled successfully.\n"
-             "[mock] No runtime output (interpreter not yet available).\n";
+  std::string output;
+  std::string errors = err_stream.str();
+
+  if (rc == 0) {
+    try {
+      Interpreter interp;
+      output = interp.Run(root);
+    } catch (const std::exception& e) {
+      errors += std::string("Runtime error: ") + e.what() + "\n";
+      rc = 1;
+    }
+  } else {
+    output = out_stream.str();
   }
 
   emscripten::val result = emscripten::val::object();
   result.set("output", output);
-  result.set("errors", err_stream.str());
+  result.set("errors", errors);
   result.set("success", rc == 0);
   return result;
 }
