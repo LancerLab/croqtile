@@ -10,6 +10,7 @@ include "mlir/Dialect/Async/IR/AsyncTypes.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
+include "mlir/Interfaces/LoopLikeInterface.td"
 
 include "CoIR/CoIRDialect.td"
 include "CoIR/CoIRAttrs.td"
@@ -161,7 +162,12 @@ def ParallelOp : CoIR_Op<"parallel", [SingleBlock, NoTerminator]> {
   let hasCustomAssemblyFormat = 1;
 }
 
-def ForeachOp : CoIR_Op<"foreach", [SingleBlock]> {
+def ForeachOp : CoIR_Op<"foreach",
+    [SingleBlock, DeclareOpInterfaceMethods<LoopLikeOpInterface,
+      ["getLoopRegions", "getLoopInductionVars",
+       "getLoopLowerBounds", "getLoopUpperBounds", "getLoopSteps",
+       "getInitsMutable", "getRegionIterArgs",
+       "getYieldedValuesMutable", "getLoopResults"]>]> {
   let summary = "Tiled sequential loop";
   let description = [{
     Sequential iteration over a tile dimension.

@@ -295,7 +295,52 @@ void ParallelOp::print(OpAsmPrinter &printer) {
 }
 
 //===----------------------------------------------------------------------===//
-// ForeachOp
+// ForeachOp -- LoopLikeOpInterface
+//===----------------------------------------------------------------------===//
+
+SmallVector<Region *> ForeachOp::getLoopRegions() { return {&getBody()}; }
+
+std::optional<SmallVector<Value>> ForeachOp::getLoopInductionVars() {
+  return SmallVector<Value>{getBody().getArgument(0)};
+}
+
+std::optional<SmallVector<OpFoldResult>> ForeachOp::getLoopLowerBounds() {
+  OpBuilder b(getContext());
+  return SmallVector<OpFoldResult>{b.getIndexAttr(0)};
+}
+
+std::optional<SmallVector<OpFoldResult>> ForeachOp::getLoopUpperBounds() {
+  return SmallVector<OpFoldResult>{getUpperBound()};
+}
+
+std::optional<SmallVector<OpFoldResult>> ForeachOp::getLoopSteps() {
+  OpBuilder b(getContext());
+  return SmallVector<OpFoldResult>{b.getIndexAttr(1)};
+}
+
+MutableArrayRef<OpOperand> ForeachOp::getInitsMutable() {
+  return getIterArgsMutable();
+}
+
+Block::BlockArgListType ForeachOp::getRegionIterArgs() {
+  auto args = getBody().getArguments();
+  return args.drop_front(1);
+}
+
+std::optional<MutableArrayRef<OpOperand>> ForeachOp::getYieldedValuesMutable() {
+  auto &block = getBody().front();
+  auto *term = block.getTerminator();
+  if (!term || term->getNumOperands() == 0)
+    return std::nullopt;
+  return term->getOpOperands();
+}
+
+std::optional<ResultRange> ForeachOp::getLoopResults() {
+  return getResults();
+}
+
+//===----------------------------------------------------------------------===//
+// ForeachOp -- parsing / printing
 //===----------------------------------------------------------------------===//
 
 ParseResult ForeachOp::parse(OpAsmParser &parser, OperationState &result) {
