@@ -2472,6 +2472,19 @@ ShapeInference::SignBounded(const AST::Node& n) {
           choreo_unreachable("operation is not permitted.");
       } else
         choreo_unreachable("operation is not supported for bounded variables.");
+    } else if (e->IsTernary() && e->op == Op::Select) {
+      if (auto cond = CSign(GetSign(*e->GetC()))) {
+        if (cond->GetBool())
+          ub_sign = GetSign(*e->GetL(), VNKind::VNK_UBOUND);
+        else
+          ub_sign = GetSign(*e->GetR(), VNKind::VNK_UBOUND);
+      } else {
+        auto signature = o_sn(Op::Select);
+        signature->Append(GetSign(*e->GetC()));
+        signature->Append(GetSign(*e->GetL(), VNKind::VNK_UBOUND));
+        signature->Append(GetSign(*e->GetR(), VNKind::VNK_UBOUND));
+        ub_sign = vn.Simplify(signature);
+      }
     } else
       choreo_unreachable("unexpected expression for bounded variables.");
   } else
