@@ -2012,6 +2012,11 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 }
 
 bool EarlySemantics::Visit(AST::MMA& n) {
+  if (!CCtx().TargetSupportMMA()) {
+    Error1(n.LOC(), "mma is not supported by the target: " +
+                        std::string(CCtx().TargetName()) + ".");
+    return true;
+  }
   auto old_ec = error_count;
   auto& op = *n.GetOperation();
   switch (op.Tag()) {

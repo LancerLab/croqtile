@@ -33,6 +33,7 @@ enum class ChoreoFeature {
   VECTORIZE,
   HDRPARSE,
   LIBCALL,
+  MMA_UKERNEL,
 };
 
 inline static const std::string STR(ChoreoFeature cf) {
@@ -51,6 +52,7 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::VECTORIZE: return "vectorize";
   case ChoreoFeature::HDRPARSE: return "hdrparse";
   case ChoreoFeature::LIBCALL: return "libcall";
+  case ChoreoFeature::MMA_UKERNEL: return "mma_ukernel";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -78,6 +80,8 @@ inline static const std::string Description(ChoreoFeature cf) {
     return "Parse C++ Header Files Included by Choreo Source.";
   case ChoreoFeature::LIBCALL:
     return "Target Library (__lib_*) Builtin Support.";
+  case ChoreoFeature::MMA_UKERNEL:
+    return "Micro-kernel based MMA via target library calls.";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
