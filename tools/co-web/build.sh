@@ -79,6 +79,7 @@ SDK_SOURCES=(
 
 COWEB_SOURCES=(
   "$SCRIPT_DIR/co_web.cpp"
+  "$SCRIPT_DIR/interpreter.cpp"
 )
 
 ALL_SOURCES=(
