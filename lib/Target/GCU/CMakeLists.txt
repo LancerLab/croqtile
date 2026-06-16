@@ -42,7 +42,10 @@ target_compile_definitions(GCUTarget PRIVATE
   __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
 )
 
-if(EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")
+if(NOT EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")
+  message(WARNING "acore library not found at ${TOOLCHAIN_DIR}/lib/libacoreop.bc. "
+    "MMA and __lib_* codegen will be disabled.")
+else()
   target_compile_definitions(GCUTarget PRIVATE
     __CHOREO_GCU_ACORE_DIR__="${TOOLCHAIN_DIR}"
   )

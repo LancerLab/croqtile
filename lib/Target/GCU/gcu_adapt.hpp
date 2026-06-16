@@ -1,10 +1,11 @@
-#ifndef __CHOREO_GCU_CHECK_INFO_HPP__
-#define __CHOREO_GCU_CHECK_INFO_HPP__
+#ifndef __CHOREO_GCU_ADAPT_HPP__
+#define __CHOREO_GCU_ADAPT_HPP__
 
-// This apply the GCU target specific check and information annotation
+// GCU target-specific validation and MMA adaptation pass.
 
 #include "assess.hpp"
 #include "ast.hpp"
+#include "gcu_mma_limit.hpp"
 #include "lower_libcall.hpp"
 #include "target_utils.hpp"
 #include "visitor.hpp"
@@ -16,7 +17,7 @@ inline size_t GCUVLdStAlignment(ptr<VectorType> vt) {
   return 1;
 }
 
-struct GCUCheck : public VisitorWithSymTab {
+struct GCUAdaptor : public VisitorWithSymTab {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
   AST::Node* cur_fnode;
@@ -659,8 +660,9 @@ public:
   }
 
 public:
-  GCUCheck() : VisitorWithSymTab("gcu"), cur_arch(ToUpper(CCtx().GetArch())) {}
-  ~GCUCheck() {}
+  GCUAdaptor()
+      : VisitorWithSymTab("gcu"), cur_arch(ToUpper(CCtx().GetArch())) {}
+  ~GCUAdaptor() {}
 
   bool Visit(AST::FloatLiteral& n) override {
     TraceEachVisit(n);
@@ -917,13 +919,106 @@ public:
   }
 
   bool Visit(AST::MMA& n) override {
-    if (!CCtx().TargetSupportMMA())
-      Error1(n.LOC(), "mma is not supported by the target: " +
-                          std::string(CCtx().TargetName()) + ".");
+    TraceEachVisit(n);
+    if (!CCtx().TargetSupportMMAUKernel()) return true;
+
+    auto& op = *n.GetOperation();
+
+    switch (op.Tag()) {
+    case AST::MMAOperation::Fill: break;
+
+    case AST::MMAOperation::Load: {
+      if (op.IsAsync())
+        Error1(n.LOC(), "async MMA load is not supported on GCU target.");
+      if (op.GetSwizzleMode() != SwizMode::NONE)
+        Error1(n.LOC(), "swizzled MMA load is not supported on GCU target.");
+      auto src = op.LoadFrom();
+      if (src) {
+        auto src_ty = src->GetType();
+        if (src_ty) {
+          if (auto sty = dyn_cast<SpannedType>(src_ty)) {
+            auto sto = sty->GetStorage();
+            if (sto != Storage::LOCAL && sto != Storage::NONE)
+              Error1(n.LOC(),
+                     "MMA load on GCU requires source in LOCAL (L1) "
+                     "storage, but found " +
+                         STR(sto) +
+                         ". Use dma.copy to move data to local first.");
+          }
+        }
+      }
+    } break;
+
+    case AST::MMAOperation::LoadR: {
+      Error1(n.LOC(), "MMA register load is not supported on GCU target.");
+    } break;
+
+    case AST::MMAOperation::Exec: {
+      auto& a_sym = AST::FragName(op.ExecOperand(1));
+      auto& b_sym = AST::FragName(op.ExecOperand(2));
+      auto& c_sym = AST::FragName(op.ExecOperand(0));
+      auto a_sty = GetSpannedType(op.ExecOperand(1)->GetType());
+      auto b_sty = GetSpannedType(op.ExecOperand(2)->GetType());
+      auto c_sty = GetSpannedType(op.ExecOperand(0)->GetType());
+
+      if (!a_sty || !b_sty)
+        Error1(n.LOC(), "MMA exec operands must have spanned types.");
+
+      auto a_ty = a_sty->ElementType();
+      auto method = op.GetMethod();
+
+      if (method != AST::MMAOperation::ROW_COL &&
+          method != AST::MMAOperation::ROW_ROW)
+        Error1(n.LOC(), "GCU acore only supports row.col (MK_KN) and "
+                        "row.row (MK_NK) MMA layouts.");
+
+      if (op.IsSparse())
+        Error1(n.LOC(), "sparse MMA is not supported on GCU target.");
+
+      if (op.HasScale())
+        Error1(n.LOC(), "scaled MMA is not supported on GCU target.");
+
+      auto a_shape = a_sty->GetShape();
+      int static_M = -1;
+      if (a_shape.Rank() >= 1) {
+        auto m_vi = a_shape.Value()[0];
+        if (auto mv = VIInt(m_vi)) static_M = (int)mv.value();
+      }
+
+      AcoreMMAConfig cfg;
+      cfg.lhs_type = a_ty;
+      cfg.rhs_type = b_sty->ElementType();
+      cfg.acc_type = c_sty ? c_sty->ElementType() : BaseType::UNKNOWN;
+      cfg.M = static_M > 0 ? static_M : 0;
+      cfg.method = method;
+
+      if (!IsValidAcoreMMAConfig(cfg))
+        Error1(n.LOC(), "MMA config [" + AcoreMMAConfigStr(cfg) +
+                            "] is not supported by acore.");
+
+      FCtx(fname).SetFragMMAType(InScopeName(a_sym), MMAType::UKERNEL);
+      FCtx(fname).SetFragMMAType(InScopeName(b_sym), MMAType::UKERNEL);
+      FCtx(fname).SetFragMMAType(InScopeName(c_sym), MMAType::UKERNEL);
+    } break;
+
+    case AST::MMAOperation::Store: break;
+
+    case AST::MMAOperation::Commit:
+    case AST::MMAOperation::Wait:
+      choreo_unreachable("mma.commit/wait should not reach GCU adaptor.");
+      break;
+
+    case AST::MMAOperation::Scale:
+      Error1(n.LOC(), "mma.scale is not supported on GCU target.");
+      break;
+
+    default: break;
+    }
+
     return true;
   }
 };
 
 } // end namespace Choreo
 
-#endif // __CHOREO_GCU_CHECK_INFO_HPP__
+#endif // __CHOREO_GCU_ADAPT_HPP__

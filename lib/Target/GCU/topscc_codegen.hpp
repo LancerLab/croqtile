@@ -7,6 +7,7 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "codegen_utils.hpp"
+#include "gcu_mma_codegen.hpp"
 #include "io.hpp"
 #include "types.hpp"
 
@@ -111,8 +112,13 @@ public:
   bool Visit(AST::ChoreoFunction&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::Return&) override;
+  bool Visit(AST::MMA&) override;
 
 private:
+  AcoreMMACodeGenState acore_mma;
+
+  std::string ResolveFragAddr(const AST::ptr<AST::Expr>& frag);
+
   CodeSegment cs = CS_UNKNOWN;
   std::vector<std::string> code_segments; // multiple code segment
 
@@ -251,6 +257,7 @@ private:
     pre_site_assertions.clear();
     post_site_assertions.clear();
     emitted_device_names_.clear();
+    acore_mma.Reset();
     ResetLineDirectiveState();
   }
 

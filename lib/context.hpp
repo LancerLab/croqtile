@@ -200,7 +200,7 @@ struct RuntimeCheckEntry {
   std::map<std::string, std::string> notes;
 };
 
-enum class MMAType { WMMA, CTMMA, WGMMA, EFMMA };
+enum class MMAType { WMMA, CTMMA, WGMMA, EFMMA, UKERNEL };
 
 struct FragmentLayoutInfo {
   size_t regs_per_thread = 0;
@@ -331,6 +331,13 @@ public:
       choreo_unreachable("expect the fragament name is scoped.");
     if (!frag_mma_type.count(scoped_frag_name)) return false;
     return frag_mma_type.at(scoped_frag_name) == MMAType::WGMMA;
+  }
+
+  bool FragIsUKERNEL(const std::string& scoped_frag_name) const {
+    if (!PrefixedWith(scoped_frag_name, "::"))
+      choreo_unreachable("expect the fragament name is scoped.");
+    if (!frag_mma_type.count(scoped_frag_name)) return false;
+    return frag_mma_type.at(scoped_frag_name) == MMAType::UKERNEL;
   }
 
   void SetFragMMAType(const std::string& scoped_frag_name, MMAType mma_ty) {
@@ -884,6 +891,9 @@ public:
   }
   bool TargetSupportMMA() const {
     return HasFeature(ChoreoFeature::MMA, GetArch());
+  }
+  bool TargetSupportMMAUKernel() const {
+    return HasFeature(ChoreoFeature::MMA_UKERNEL, GetArch());
   }
   bool TargetSupportWGMMA() const {
     return HasFeature(ChoreoFeature::WGMMA, GetArch());

@@ -531,7 +531,8 @@ public:
                          << " with:\n");
         for (size_t idx = 0; idx < itt->dim_count; ++idx) {
           auto ii = AST::Make<AST::IntIndex>(
-              expr->LOC(), AST::Make<AST::IntLiteral>(expr->LOC(), static_cast<int64_t>(idx)));
+              expr->LOC(), AST::Make<AST::IntLiteral>(
+                               expr->LOC(), static_cast<int64_t>(idx)));
           ii->SetType(MakeIndexType());
           auto new_expr =
               AST::Make<AST::Expr>(expr->LOC(), Op::DimOf, expr->Clone(), ii);

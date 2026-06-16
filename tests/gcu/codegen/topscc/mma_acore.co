@@ -1,0 +1,24 @@
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck %s
+
+// Test MMA on GCU target: mma ops lower to acore::matmul with VACC flags.
+
+__co__ void mma_gemm(f16 [128, 256] A, f16 [256, 256] B) {
+  parallel p by 1, q by 1 {
+    local f16[128, 256] lhs;
+    local f16[256, 256] rhs;
+    local f16[128, 256] out;
+    dma.copy A => lhs;
+    dma.copy B => rhs;
+    mc = mma.fill 0;
+    foreach k in [1] {
+      ma = mma.load lhs.chunkat(p, k);
+      mb = mma.load rhs.chunkat(k, q);
+      mma.row.col mc, ma, mb;
+    }
+    mma.store mc, out.chunkat(p, q);
+  }
+}
+
+// CHECK: __choreo_mma
+// CHECK: acore::matmul
+// CHECK: __mma_ws_mc

@@ -1,5 +1,5 @@
 #include "assert_site.hpp"
-#include "gcu_check.hpp"
+#include "gcu_adapt.hpp"
 #include "gcu_target.hpp"
 #include "pipeline.hpp"
 #include "sys_utils.hpp"
@@ -86,6 +86,9 @@ public:
           {STR(ChoreoFeature::VECTORIZE),
            Description(ChoreoFeature::VECTORIZE)},
           {STR(ChoreoFeature::LIBCALL), Description(ChoreoFeature::LIBCALL)},
+          {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
+          {STR(ChoreoFeature::MMA_UKERNEL),
+           Description(ChoreoFeature::MMA_UKERNEL)},
       };
     else if (ArchNum(arch) >= 300)
       return {
@@ -99,6 +102,9 @@ public:
           {STR(ChoreoFeature::VECTORIZE),
            Description(ChoreoFeature::VECTORIZE)},
           {STR(ChoreoFeature::LIBCALL), Description(ChoreoFeature::LIBCALL)},
+          {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
+          {STR(ChoreoFeature::MMA_UKERNEL),
+           Description(ChoreoFeature::MMA_UKERNEL)},
       };
     return {
         {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},
@@ -170,7 +176,7 @@ public:
   }
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {
-    p.AddStage<GCUCheck>();
+    p.AddStage<GCUAdaptor>();
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();
     p.AddStage<Topscc::TopsccCodeGen>();

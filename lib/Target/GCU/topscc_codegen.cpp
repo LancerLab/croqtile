@@ -381,6 +381,8 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
                           "#endif // __ACORE_OP__\n\n";
     }
 #endif
+    if (!acore_mma.stub_code.empty() && !code_segments.empty())
+      code_segments[0] += acore_mma.stub_code;
     if ((has_lib_gemm_general || has_lib_fallback) && !code_segments.empty())
       code_segments[0] += "#include \"gcu/lib_fallback.h\"\n\n";
 
@@ -3071,6 +3073,221 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
 }
 
 // EmitLibCall is defined in lower_libcall.cpp for maintainability.
+
+// ============================================================================
+// MMA codegen for GCU acore/VACC
+// ============================================================================
+
+std::string TopsccCodeGen::ResolveFragAddr(const AST::ptr<AST::Expr>& frag) {
+  auto sym = AST::FragName(frag);
+  auto scoped = InScopeName(sym);
+  if (acore_mma.frag_addr.count(scoped)) return acore_mma.frag_addr.at(scoped);
+  if (ssm.HasDeviceName(scoped)) return ssm.DeviceName(scoped);
+  return sym;
+}
+
+bool TopsccCodeGen::Visit(AST::MMA& n) {
+  TraceEachVisit(n);
+
+  auto& op = *n.GetOperation();
+  auto& indent = d_indent;
+
+  switch (op.Tag()) {
+  case AST::MMAOperation::Fill: {
+    auto frag = op.FillingTo();
+    auto frag_sym = AST::FragName(frag);
+    auto scoped = InScopeName(frag_sym);
+
+    if (!FCtx(fname).FragIsUKERNEL(scoped)) break;
+
+    AcoreAccumState state;
+    state.first_exec = true;
+    state.vab_off = acore_mma.next_vab_off;
+    state.ws_name = "__mma_ws_" + frag_sym;
+
+    auto frag_ty = frag->GetType();
+    if (auto sty = dyn_cast<SpannedType>(frag_ty)) {
+      auto shape = sty->GetShape();
+      if (shape.Rank() >= 2) {
+        auto m_vi = shape.Value()[0];
+        auto n_vi = shape.Value()[1];
+        if (auto mv = VIInt(m_vi))
+          if (auto nv = VIInt(n_vi)) {
+            int vacc_usage = AcoreVACCUsage(*mv, *nv);
+            int aligned =
+                ((vacc_usage + ACORE_VAB_ALIGN - 1) / ACORE_VAB_ALIGN) *
+                ACORE_VAB_ALIGN;
+            acore_mma.next_vab_off += aligned;
+          }
+      }
+    }
+
+    acore_mma.accum_states[scoped] = state;
+
+    ds << indent << "int " << state.ws_name << "[" << ACORE_WS_SIZE << "];\n";
+  } break;
+
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadR: {
+    // On GCU, mma.load records the source buffer address for use at exec time.
+    auto ld_to = op.LoadTo();
+    if (!ld_to) break;
+    auto frag_sym = AST::FragName(ld_to);
+    auto scoped = InScopeName(frag_sym);
+
+    auto ld_from = op.LoadFrom();
+    if (!ld_from) break;
+
+    auto ref_sym = ld_from->RefSymbol();
+    auto scoped_ref = InScopeName(ref_sym);
+    std::string buf_name;
+    if (ssm.HasDeviceName(scoped_ref))
+      buf_name = ssm.DeviceName(scoped_ref);
+    else
+      buf_name = ref_sym;
+
+    auto offset = GenOffset(ld_from);
+    if (!offset.empty())
+      acore_mma.frag_addr[scoped] = "(" + buf_name + " + (" + offset + "))";
+    else
+      acore_mma.frag_addr[scoped] = buf_name;
+  } break;
+
+  case AST::MMAOperation::Exec: {
+    auto c_frag = op.ExecOperand(0);
+    auto a_frag = op.ExecOperand(1);
+    auto b_frag = op.ExecOperand(2);
+
+    auto c_sym = AST::FragName(c_frag);
+    auto scoped_c = InScopeName(c_sym);
+
+    if (!FCtx(fname).FragIsUKERNEL(scoped_c)) break;
+
+    auto& state = acore_mma.accum_states[scoped_c];
+
+    auto a_sty = GetSpannedType(a_frag->GetType());
+    auto b_sty = GetSpannedType(b_frag->GetType());
+    if (!a_sty || !b_sty)
+      choreo_unreachable("MMA exec operands must have spanned types.");
+
+    auto a_shape = a_sty->GetShape();
+    auto b_shape = b_sty->GetShape();
+    auto method = op.GetMethod();
+
+    int static_M = 0;
+    if (a_shape.Rank() >= 1)
+      if (auto mv = VIInt(a_shape.Value()[0])) static_M = (int)*mv;
+
+    if (static_M == 0)
+      Error1(n.LOC(), "MMA on GCU requires statically known M dimension.");
+
+    state.static_M = static_M;
+    state.elem_type = a_sty->ElementType();
+    state.method = method;
+
+    // Determine output type from the accumulator fragment
+    auto c_sty = GetSpannedType(c_frag->GetType());
+    if (c_sty)
+      state.out_type = c_sty->ElementType();
+    else
+      state.out_type = state.elem_type;
+
+    auto stub = acore_mma.GetOrEmitStub(static_M, state.elem_type,
+                                        state.out_type, method);
+    has_acore_call = true;
+    state.stub_name = stub;
+
+    std::string a_addr = ResolveFragAddr(a_frag);
+    std::string b_addr = ResolveFragAddr(b_frag);
+
+    std::string k_dim, n_dim;
+    if (method == AST::MMAOperation::ROW_COL) {
+      k_dim = (a_shape.Rank() >= 2) ? STR(a_shape.Value()[1]) : "0";
+      n_dim = (b_shape.Rank() >= 2) ? STR(b_shape.Value()[1]) : "0";
+    } else {
+      k_dim = (a_shape.Rank() >= 2) ? STR(a_shape.Value()[1]) : "0";
+      n_dim = (b_shape.Rank() >= 2) ? STR(b_shape.Value()[0]) : "0";
+    }
+
+    int acc_flag = state.first_exec ? 0 : 1;
+    int lt_flag = state.first_exec ? 0 : 1;
+
+    // Flush any previously pending exec before recording a new one.
+    // In a K-loop, each exec except the last emits with store_flag=0.
+    if (state.pending.valid) {
+      auto in_ptr = AcoreMMACodeGenState::PtrTypeStr(state.elem_type);
+      auto out_ptr = AcoreMMACodeGenState::PtrTypeStr(state.out_type);
+      ds << indent << state.stub_name << "(\n"
+         << indent << "    (" << out_ptr << "*)" << a_addr << ",\n"
+         << indent << "    (" << in_ptr << "*)" << state.pending.a_addr << ",\n"
+         << indent << "    (" << in_ptr << "*)" << state.pending.b_addr << ",\n"
+         << indent << "    " << state.ws_name << ",\n"
+         << indent << "    " << state.pending.k_dim << ", "
+         << state.pending.n_dim << ", " << state.pending.acc_flag << ", 0, "
+         << state.vab_off << ", " << state.pending.lt_flag << ");\n";
+    }
+
+    // Record this exec as pending; it will be emitted by mma.store
+    // (with store_flag=1) or by the next mma.exec (with store_flag=0).
+    state.pending = {a_addr, b_addr, k_dim, n_dim, acc_flag, lt_flag, true};
+
+    state.first_exec = false;
+  } break;
+
+  case AST::MMAOperation::Store: {
+    auto frag = op.StoreFrom();
+    auto frag_sym = AST::FragName(frag);
+    auto scoped = InScopeName(frag_sym);
+
+    if (!FCtx(fname).FragIsUKERNEL(scoped)) break;
+
+    auto& state = acore_mma.accum_states[scoped];
+
+    if (!state.pending.valid)
+      Error1(n.LOC(), "mma.store without prior mma.exec on GCU target.");
+
+    auto dest = op.StoreTo();
+
+    // Resolve store destination address
+    auto dest_ref = dest->RefSymbol();
+    auto scoped_dest = InScopeName(dest_ref);
+    std::string dest_name;
+    if (ssm.HasDeviceName(scoped_dest))
+      dest_name = ssm.DeviceName(scoped_dest);
+    else
+      dest_name = dest_ref;
+
+    auto dest_offset = GenOffset(dest);
+    std::string out_addr;
+    if (!dest_offset.empty())
+      out_addr = "(" + dest_name + " + (" + dest_offset + "))";
+    else
+      out_addr = dest_name;
+
+    // Emit the pending exec with store_flag=1: compute + store in one call
+    auto in_ptr = AcoreMMACodeGenState::PtrTypeStr(state.elem_type);
+    auto out_ptr = AcoreMMACodeGenState::PtrTypeStr(state.out_type);
+    ds << indent << state.stub_name << "(\n"
+       << indent << "    (" << out_ptr << "*)" << out_addr << ",\n"
+       << indent << "    (" << in_ptr << "*)" << state.pending.a_addr << ",\n"
+       << indent << "    (" << in_ptr << "*)" << state.pending.b_addr << ",\n"
+       << indent << "    " << state.ws_name << ",\n"
+       << indent << "    " << state.pending.k_dim << ", " << state.pending.n_dim
+       << ", " << state.pending.acc_flag << ", 1, " << state.vab_off << ", "
+       << state.pending.lt_flag << ");\n";
+
+    state.pending.valid = false;
+  } break;
+
+  case AST::MMAOperation::Commit:
+  case AST::MMAOperation::Wait:
+  case AST::MMAOperation::Scale: break;
+
+  default: break;
+  }
+
+  return true;
+}
 
 void TopsccCodeGen::EmitSource() {
   for (auto& code : code_segments) {
