@@ -237,6 +237,53 @@ static ValueItem GetForeachDynamicExtent(const AST::ForeachBlock& fe) {
   return iv_ty->GetUpperBound();
 }
 
+// Count MMA Exec operations in the direct body of a foreach (not nested
+// foreachs) that precede the given mma.wait node.  Each Exec on a distinct
+// accumulator generates a warpgroup_commit_batch(), so the maximum number of
+// batches in flight per iteration equals the number of Exec ops.
+static int CountMMAExecsInBody(const ptr<AST::Node>& node,
+                               const AST::Node* stop_at = nullptr,
+                               bool* found_stop = nullptr) {
+  if (!node) return 0;
+  int count = 0;
+  bool dummy = false;
+  if (!found_stop) found_stop = &dummy;
+
+  auto walk = [&](auto&& self, const ptr<AST::Node>& n) -> void {
+    if (!n || *found_stop) return;
+    if (stop_at && n.get() == stop_at) {
+      *found_stop = true;
+      return;
+    }
+    if (auto mma = dyn_cast<AST::MMA>(n)) {
+      if (auto op = mma->GetOperation()) {
+        if (op->Tag() == AST::MMAOperation::Exec) count++;
+      }
+      return;
+    }
+    if (dyn_cast<AST::ForeachBlock>(n)) return;
+    if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
+      for (auto& item : mn->values) {
+        self(self, item);
+        if (*found_stop) return;
+      }
+      return;
+    }
+    if (auto ie = dyn_cast<AST::IfElseBlock>(n)) {
+      self(self, ie->GetBody());
+      if (*found_stop) return;
+      if (ie->HasElse()) self(self, ie->GetElseBody());
+      return;
+    }
+    if (auto block = dyn_cast<AST::Block>(n)) {
+      self(self, block->GetBody());
+      return;
+    }
+  };
+  walk(walk, node);
+  return count;
+}
+
 bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     pending_async.clear();
@@ -1298,20 +1345,30 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
     int depth = op.WaitDepth();
     if (depth > 0 && !foreach_stack.empty()) {
       auto* fe = foreach_stack.back();
+      int execs_per_iter =
+          CountMMAExecsInBody(fe->GetBody(), &n);
+      if (execs_per_iter < 1) execs_per_iter = 1;
       int64_t extent = GetForeachStaticExtent(*fe);
-      if (extent > 0 && depth >= extent) {
-        Error1(n.LOC(), "mma.wait<" + std::to_string(depth) +
-                            "> depth must be less than the enclosing loop "
-                            "extent (" +
-                            std::to_string(extent) + ").");
+      if (extent > 0 && depth >= extent * execs_per_iter) {
+        Error1(n.LOC(),
+               "mma.wait<" + std::to_string(depth) +
+                   "> depth must be less than the enclosing loop "
+                   "extent (" +
+                   std::to_string(extent) + ") * commits per iteration (" +
+                   std::to_string(execs_per_iter) + ").");
       } else if (extent < 0) {
         auto ub = GetForeachDynamicExtent(*fe);
         if (ub) {
-          auto cond = sbe::oc_lt(sbe::nu(depth), ub);
+          auto limit = (execs_per_iter > 1)
+                           ? ub * sbe::nu(execs_per_iter)
+                           : ub;
+          auto cond = sbe::oc_lt(sbe::nu(depth), limit);
           FCtx(fname).GetAssessor(*this).Assess(
               AssessPolicy::Error, cond,
               "mma.wait<" + std::to_string(depth) +
-                  "> depth must be less than the enclosing loop extent.",
+                  "> depth must be less than the enclosing loop extent"
+                  " * commits per iteration (" +
+                  std::to_string(execs_per_iter) + ").",
               UsageType::ShapeCompatibility, AssessType::ENTRY, n.LOC(), &n);
         }
       }
