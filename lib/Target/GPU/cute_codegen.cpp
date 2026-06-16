@@ -490,7 +490,7 @@ void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
        << ");\n";
   has_pending_wgmma_finalize = false;
   pending_wgmma_acc_sym.clear();
-  warpspec_wgmma_arrived = false;
+  if (!has_explicit_mma_wait || force_wait) warpspec_wgmma_arrived = false;
 }
 
 std::optional<CuteCodeGen::HoistedScaleAccumInfo>
@@ -4744,6 +4744,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   if (op.Tag() == AST::MMAOperation::Wait) {
     int depth = op.WaitDepth();
     ds << d_indent << "warpgroup_wait<" << depth << ">();\n";
+    if (depth == 0) warpspec_wgmma_arrived = false;
     return true;
   }
 
@@ -5156,9 +5157,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto b_sym = AST::FragName(op.ExecOperand(2));
       has_pending_wgmma_finalize = true;
       pending_wgmma_acc_sym = ssm.DeviceName(c_sym);
+      ds << d_indent << "warpgroup_fence_operand(" << pending_wgmma_acc_sym
+         << ");\n";
       if (!(bdim_level == ParallelLevel::GROUPx4 && warpspec_wgmma_arrived)) {
-        ds << d_indent << "warpgroup_fence_operand(" << pending_wgmma_acc_sym
-           << ");\n";
         ds << d_indent << "warpgroup_arrive();\n";
         if (IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4)
           warpspec_wgmma_arrived = true;
@@ -5166,13 +5167,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(c_sym));
       std::string cc = SplitStringByDelimiter(mma_policy, "::")[0];
       auto cute_gmma_major_cast = "static_cast<cute::" + cc + "::GMMA::Major>";
-      // WGMMA execution using unified template with automatic descriptor
-      // selection Operands: C (accum), A, B - result stored in C
-      ds << d_indent
-         << "// Note: warpgroup_arrive() should be called once before first "
-            "WGMMA\n";
-      ds << d_indent
-         << "// and warpgroup_wait() should be called once after all WGMMAs\n";
       bool policy_is_tn = mma_policy.rfind("_TN") != std::string::npos;
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
       std::string meta_var;
@@ -6961,6 +6955,17 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
               stages = static_cast<int>(nv->Value());
           }
           std::string phase_expr = InlinePhaseExpr(stages, is_fill);
+          if (is_array_ref && !foreach_iv_stack_.empty() && stages == 2) {
+            auto subscript = cast<AST::Expr>(expr->GetR());
+            if (subscript && subscript->IsTernary() &&
+                subscript->op == Op::Select) {
+              const auto& iv = foreach_iv_stack_.back();
+              phase_expr = is_fill ? ("((" + iv + " == 0) ? 0 : (((" + iv +
+                                      " - 1) & 3) >> 1))")
+                                   : ("((" + iv + " == 0) ? 1 : ((((" + iv +
+                                      " - 1) & 3) >> 1) ^ 1))");
+            }
+          }
           if (is_array_ref) {
             std::string bar_expr = ExprSTR(t, false);
             ds << d_indent << bar_expr << ".wait(" << phase_expr << ");\n";
