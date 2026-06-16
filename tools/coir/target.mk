@@ -26,6 +26,13 @@ setup-coir-deps:
 		echo "LLVM/MLIR already present at $(COIR_LLVM_DIR)"; \
 	fi
 
+# Symlink CoIR tools into repo root (reused by both `coir` and `build`)
+.PHONY: symlink-coir
+symlink-coir:
+	@test -f $(BUILD_DIR)/tools/coir/co2ir && ln -sf $(BUILD_DIR)/tools/coir/co2ir $(WORK_DIR)/co2ir || true
+	@test -f $(BUILD_DIR)/tools/coir/coir-opt && ln -sf $(BUILD_DIR)/tools/coir/coir-opt $(WORK_DIR)/coir-opt || true
+	@test -f $(BUILD_DIR)/tools/coir/cocc && ln -sf $(BUILD_DIR)/tools/coir/cocc $(WORK_DIR)/cocc || true
+
 # Build all CoIR tools (co2ir, coir-opt, cocc)
 .PHONY: coir
 coir: build
@@ -36,6 +43,7 @@ coir: build
 		-DCHOREO_BUILD_COIR=ON \
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
 	ninja -C $(BUILD_DIR) co2ir coir-opt cocc
+	@$(MAKE) --no-print-directory symlink-coir
 	@echo "CoIR tools built:"
 	@echo "  $(BUILD_DIR)/tools/coir/co2ir"
 	@echo "  $(BUILD_DIR)/tools/coir/coir-opt"
