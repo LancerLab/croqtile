@@ -1,0 +1,160 @@
+// FA3-style IntraWG Overlap: softmax[n] overlaps PV[n-1] on Tensor Cores
+// D=128, bf16, causal prefill, warp-specialized 1p2c
+//
+// Matches v3_overlap.cu (gold reference, 358 TFLOPS):
+//   Single unified loop: QK[n] + PV[n-1] per iteration (bn=0..kv_bound-1)
+//   - bn=0: QK + PV(no-op, acc_s_cast=0)
+//   - bn>0: QK[n] + PV[n-1] overlapped
+//   - Epilogue PV[kv_bound-1] merged into last iteration
+//
+// PV uses acc_s_cast (register fragment, RS WGMMA) -- same as gold .cu
+// Single warpgroup_arrive() per iteration for both QK and PV.
+// Compile with: --zero-cost (eliminates device asserts causing C7510)
+
+#define BLOCK_M 128
+#define BLOCK_N 128
+#define WG_M 64
+#define WG_K 16
+#define SWIZ 128
+#define STAGES 2
+
+#define DIM 128
+
+__co__ void flash_atten(
+  global bf16[B, Q_SEQ, H, DIM] Q,
+  global bf16[B, KV_SEQ, H, DIM] K,
+  global bf16[B, KV_SEQ, H, DIM] V,
+  global bf16[B, Q_SEQ, H, DIM] O
+) {
+  float scale = 0.12751743f;
+
+  parallel.async {bm, head, batch} by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
+    launch_bounds(1);
+    Q_head = Q.subspan(1, Q_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
+    K_head = K.subspan(1, KV_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
+    V_head = V.subspan(1, KV_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
+    O_head = O.subspan(1, Q_SEQ, 1, DIM).at(batch, 0, head, 0).sqz();
+
+    shared bf16[BLOCK_M, DIM] q_shared;
+    shared bf16[BLOCK_N, DIM] k_buf[STAGES];
+    shared bf16[BLOCK_N, DIM] v_buf[STAGES];
+
+    shared event qf, kf[STAGES], ke[STAGES], vf[STAGES], ve[STAGES];
+
+    kv_bound = cdiv((bm + 1) * BLOCK_M, BLOCK_N);
+    parallel p by [BLOCK_M/WG_M + 1] : group-4 {
+      inthreads.async (p == 0) {
+        setreg.dec(24);
+        tma.copy.async<qf>.swiz<SWIZ>
+          Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => q_shared;
+        trigger qf;
+
+        foreach {bn} in [kv_bound] {
+          stage = bn % STAGES;
+          wait ke[stage];
+          tma.copy.async<kf[stage]>.swiz<SWIZ>
+            K_head.subspan(BLOCK_N, DIM).at(bn, 0) => k_buf[stage];
+          trigger kf[stage];
+
+          wait ve[stage];
+          tma.copy.async<vf[stage]>.swiz<SWIZ>
+            V_head.subspan(BLOCK_N, DIM).at(bn, 0) => v_buf[stage];
+          trigger vf[stage];
+        }
+      }
+
+      inthreads.async (p > 0) {
+        setreg.inc(240);
+        cid = p - 1;
+        foreach {s} in [STAGES] {
+          trigger ke[s];
+          trigger ve[s];
+        }
+
+        wait qf;
+
+        frag f32[WG_M] scores_max {-inf};
+        frag f32[WG_M] scores_max_prev;
+        frag f32[WG_M] scores_scale;
+        frag f32[WG_M] scores_sum;
+        frag f32[WG_M] logsum {0.0f};
+        acc_o = mma.fill.f32 0.0f;
+        frag bf16[WG_M, BLOCK_N] acc_s_cast {0.0f};
+        int causal_row_base = bm * BLOCK_M + cid * WG_M;
+
+        // === Unified loop: QK[n] + PV[n-1] ===
+        foreach {bn} in [kv_bound] {
+          stage = bn % STAGES;
+          prev_stage = (bn + 1) % STAGES;
+
+          acc_s = mma.fill.f32 0.0f;
+
+          wait kf[stage];
+          wait vf[bn == 0 ? stage : prev_stage];
+          mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[stage];
+          trigger ke[stage];
+
+          mma.row.col acc_o, acc_s_cast, v_buf[bn == 0 ? stage : prev_stage];
+          if (bn > 0) trigger ve[prev_stage];
+
+          mma.wait<1>;
+
+          if ((bn + 1) * BLOCK_N > causal_row_base + 1) {
+            apply {i, j} in acc_s.span {
+              if ((bn * BLOCK_N + j) > (bm * BLOCK_M + cid * WG_M + i))
+                acc_s.at(i, j) = -inf;
+            }
+          }
+
+          mma.wait<0>;
+
+          copy(scores_max_prev, scores_max);
+          reduce_max(scores_max, acc_s, 1);
+          apply {i} in scores_max.span {
+            scores_max.at(i) = __max(scores_max.at(i), scores_max_prev.at(i));
+            scores_scale.at(i) = __exp2f(scores_max_prev.at(i) * scale - scores_max.at(i) * scale);
+          }
+          apply {i, j} in acc_s.span
+            acc_s.at(i, j) = __exp2f(acc_s.at(i, j) * scale - scores_max.at(i) * scale);
+          reduce_sum(scores_sum, acc_s, 1);
+          apply {i} in logsum.span
+            logsum.at(i) = logsum.at(i) * scores_scale.at(i) + scores_sum.at(i);
+          apply {i, j} in acc_o.span
+            acc_o.at(i, j) = acc_o.at(i, j) * scores_scale.at(i);
+          apply {i, j} in acc_s_cast.span
+            acc_s_cast.at(i, j) = __to<bf16>(acc_s.at(i, j));
+
+          // Epilogue PV merged into last iteration
+          if (bn == kv_bound - 1) {
+            wait vf[stage];
+            mma.row.col acc_o, acc_s_cast, v_buf[stage];
+            trigger ve[stage];
+            mma.wait<0>;
+          }
+        }
+
+        apply {i, j} in acc_o.span
+          acc_o.at(i, j) = acc_o.at(i, j) / logsum.at(i);
+        shared bf16[BLOCK_M, DIM] o_buf;
+        mma.store acc_o, o_buf.subspan(WG_M, DIM).at(cid, 0);
+        tma.copy o_buf.subspan(WG_M, DIM).at(cid, 0) => O_head.subspan(WG_M, DIM).at(bm * 2 + cid, 0);
+      }
+    }
+  }
+}
+
+#define MHA_DIM DIM
+#define MHA_DTYPE choreo::bf16
+#include "../../fa_helper.hpp"
+
+int main() {
+  #include "build/bench_configs.inc"
+  return mha_helper::RunBenchmarks(
+      "Choreo Flash Attention v3 FA3 Overlap (D=128 bf16 causal)",
+      kBenchConfigs, kBenchConfigCount,
+      [&](const mha_helper::BenchConfig& cfg,
+          const mha_helper::TensorViews& views) {
+        (void)cfg;
+        flash_atten(views.Q, views.K, views.V, views.O);
+      });
+}

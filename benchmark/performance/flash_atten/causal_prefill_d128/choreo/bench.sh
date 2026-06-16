@@ -228,7 +228,8 @@ if [[ -n "$extra_choreo_flags" ]]; then
   choreo_cmd+=("${__cf[@]}")
 fi
 if [[ $enable_timing -eq 1 ]]; then
-  choreo_cmd+=("--disable-runtime-check")
+  choreo_cmd+=("--disable-runtime-check=true")
+  choreo_cmd+=("--zero-cost=true")
 fi
 choreo_cmd+=("$kernel_path" -o "$output_script")
 
