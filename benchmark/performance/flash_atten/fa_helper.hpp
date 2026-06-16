@@ -34,7 +34,7 @@
 #endif
 
 #ifndef H800_PCIE_PEAK_F16_TFLOPS
-#define H800_PCIE_PEAK_F16_TFLOPS 1513
+#define H800_PCIE_PEAK_F16_TFLOPS 756.5
 #endif
 
 namespace mha_helper {
@@ -84,8 +84,8 @@ inline bool enable_timing() {
 
 inline choreo::TimerOption read_timer_options() {
   choreo::TimerOption opt;
-  opt.warmup = 100;
-  opt.repeat = 500;
+  opt.warmup = 50;
+  opt.repeat = 200;
   if (const char* warmup_env = std::getenv("CHOREO_TIMING_WARMUP")) {
     int value = std::atoi(warmup_env);
     if (value >= 0) opt.warmup = value;

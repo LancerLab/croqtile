@@ -11,18 +11,28 @@ sys.path.insert(0, str(VARIANT_DIR.parent / "scripts"))
 sys.path.insert(0, str(VARIANT_DIR))
 
 from _compare_common import run_compare  # noqa: E402
-from config import BENCHMARK_CONFIGS, VARIANT_ID  # noqa: E402
+from config import (  # noqa: E402
+    BACKENDS,
+    BENCHMARK_CONFIGS,
+    REPEAT,
+    VARIANT_ID,
+    WARMUP,
+)
 
 if __name__ == "__main__":
     labels = [c.label for c in BENCHMARK_CONFIGS]
+    active = tuple(b for b in ("choreo", "fa3", "tilelang", "triton", "triton_ws")
+                   if BACKENDS.get(b, False))
     raise SystemExit(
         run_compare(
             VARIANT_DIR,
             VARIANT_ID,
-            "D=128 causal prefill, BSHD; Choreo vs FA3 vs TileLang vs Triton",
+            "D=128 causal prefill, BSHD; Choreo vs FA3 vs TileLang vs Triton vs Triton+WS",
             labels,
-            ("choreo", "fa3", "tilelang", "triton"),
-            has_choreo=True,
+            active,
+            has_choreo="choreo" in active,
             default_kernel="v1_manual_baseline.co",
+            warmup=WARMUP,
+            repeat=REPEAT,
         )
     )

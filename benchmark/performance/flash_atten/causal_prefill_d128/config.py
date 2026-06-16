@@ -9,13 +9,23 @@ VARIANT_TITLE = "Causal prefill (D=128)"
 
 DTYPE_NAME = "bf16"
 
-CANONICAL_LABEL = "B=2 H=16 SEQ=8192 causal prefill"
+CANONICAL_LABEL = "B=4 H=32 SEQ=8192 causal prefill"
 
 BENCHMARK_CONFIGS: list[BenchCase] = [
-    # BenchCase(2, 512, 512, 16, 16, 128, 128, True, "B=2 H=16 SEQ=512 causal prefill"),
-    # BenchCase(2, 1024, 1024, 16, 16, 128, 128, True, "B=2 H=16 SEQ=1024 causal prefill"),
-    # BenchCase(2, 2048, 2048, 16, 16, 128, 128, True, "B=2 H=16 SEQ=2048 causal prefill"),
-    BenchCase(1, 4096, 4096, 16, 16, 128, 128, True, "B=1 H=16 SEQ=4096 causal prefill"),
-    BenchCase(2, 8192, 8192, 16, 16, 128, 128, True, CANONICAL_LABEL),
-    # BenchCase(1, 16384, 16384, 16, 16, 128, 128, True, "B=1 H=16 SEQ=16384 causal prefill"),
+    BenchCase(4, 4096, 4096, 32, 32, 128, 128, True, "B=4 H=32 SEQ=4096 causal prefill"),
+    BenchCase(4, 8192, 8192, 32, 32, 128, 128, True, CANONICAL_LABEL),
+    BenchCase(4, 16384, 16384, 32, 32, 128, 128, True, "B=4 H=32 SEQ=16384 causal prefill"),
 ]
+
+# Which backends to include in compare_all.  Set to False to skip.
+BACKENDS: dict[str, bool] = {
+    "choreo": True,
+    "fa3": True,
+    "tilelang": True,
+    "triton": True,
+    "triton_ws": True,
+}
+
+# Timing parameters (overridden by CHOREO_TIMING_WARMUP / _REPEAT env vars)
+WARMUP = 50
+REPEAT = 200

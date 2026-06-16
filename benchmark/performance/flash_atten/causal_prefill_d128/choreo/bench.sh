@@ -236,26 +236,79 @@ choreo_cmd+=("$kernel_path" -o "$output_script")
 echo "[bench] Detected arch $detected_arch"
 
 bench_configs_inc="$SCRIPT_DIR/build/bench_configs.inc"
-need_compile=1
+cached_binary="$SCRIPT_DIR/build/${kernel_base}.exe"
+
+need_choreo=1
 if [[ $force_compile -eq 1 ]]; then
   echo "[bench] Forced recompilation requested"
 elif [[ -f "$output_script" && "$output_script" -nt "$kernel_path" \
         && ( ! -f "$bench_configs_inc" || "$output_script" -nt "$bench_configs_inc" ) ]]; then
-  need_compile=0
-  echo "[bench] Skipping compilation (output is up-to-date with kernel source)"
+  need_choreo=0
+  echo "[bench] Skipping choreo (script is up-to-date with kernel source)"
 fi
 
-if [[ $need_compile -eq 1 ]]; then
+if [[ $need_choreo -eq 1 ]]; then
   echo "[bench] Generating $output_script"
   "${choreo_cmd[@]}"
 fi
 
-echo "[bench] Running --execute for $(basename "$kernel_path")"
-if [[ -n "$selected_gpu" ]]; then
-  env CUDA_VISIBLE_DEVICES="$selected_gpu" EXTRA_TARGET_CFLAGS="$combined_target_cflags" \
-    bash "$output_script" --execute
-else
-  EXTRA_TARGET_CFLAGS="$combined_target_cflags" bash "$output_script" --execute
+# Check if the cached binary is newer than ALL inputs (script, kernel,
+# bench_configs.inc, and the extra flags).  If so skip the expensive nvcc step.
+flag_hash=$(echo "$combined_target_cflags" | md5sum | cut -c1-8)
+flag_stamp="$SCRIPT_DIR/build/.flags_${kernel_base}_${flag_hash}"
+
+need_nvcc=1
+if [[ $force_compile -eq 1 ]]; then
+  : # already logged above
+elif [[ -x "$cached_binary" && -f "$flag_stamp" \
+        && "$cached_binary" -nt "$output_script" \
+        && "$cached_binary" -nt "$kernel_path" \
+        && ( ! -f "$bench_configs_inc" || "$cached_binary" -nt "$bench_configs_inc" ) ]]; then
+  need_nvcc=0
+  echo "[bench] Skipping nvcc (binary is up-to-date)"
+fi
+
+if [[ $need_nvcc -eq 1 ]]; then
+  echo "[bench] Compiling via nvcc ..."
+  # Run the script in compile-link mode, then copy the resulting binary.
+  # The script writes the exe to a /tmp path; capture it.
+  if [[ -n "$selected_gpu" ]]; then
+    env CUDA_VISIBLE_DEVICES="$selected_gpu" EXTRA_TARGET_CFLAGS="$combined_target_cflags" \
+      bash "$output_script" --compile-link
+  else
+    EXTRA_TARGET_CFLAGS="$combined_target_cflags" bash "$output_script" --compile-link
+  fi
+
+  # Locate the compiled binary in /tmp (the script uses a deterministic dir name)
+  tmp_exe=$(rg -l '' /tmp/*/$(echo "__choreo_cute_${kernel_base}.exe") 2>/dev/null | head -1 || true)
+  if [[ -z "$tmp_exe" ]]; then
+    # Fallback: search for the binary pattern
+    tmp_exe=$(find /tmp -maxdepth 2 -name "__choreo_cute_${kernel_base}.exe" -newer "$output_script" 2>/dev/null | head -1 || true)
+  fi
+  if [[ -n "$tmp_exe" && -x "$tmp_exe" ]]; then
+    cp "$tmp_exe" "$cached_binary"
+    touch "$flag_stamp"
+    echo "[bench] Cached binary: $cached_binary"
+  else
+    echo "[bench] Warning: could not locate compiled binary; falling back to --execute" >&2
+    if [[ -n "$selected_gpu" ]]; then
+      env CUDA_VISIBLE_DEVICES="$selected_gpu" EXTRA_TARGET_CFLAGS="$combined_target_cflags" \
+        bash "$output_script" --execute
+    else
+      EXTRA_TARGET_CFLAGS="$combined_target_cflags" bash "$output_script" --execute
+    fi
+    # Skip the run below since --execute already ran it
+    cached_binary=""
+  fi
+fi
+
+if [[ -n "$cached_binary" && -x "$cached_binary" ]]; then
+  echo "[bench] Running $(basename "$cached_binary") for $(basename "$kernel_path")"
+  if [[ -n "$selected_gpu" ]]; then
+    env CUDA_VISIBLE_DEVICES="$selected_gpu" "$cached_binary"
+  else
+    "$cached_binary"
+  fi
 fi
 
 if [[ $enable_profile -eq 1 ]]; then
@@ -282,8 +335,13 @@ if [[ $enable_profile -eq 1 ]]; then
   if [[ -n "${EXTRA_NCU_FLAGS:-}" ]]; then
     read -ra extra_ncu_flags <<< "$EXTRA_NCU_FLAGS"
   fi
-  ncu_cmd=("$NCU_BIN" --set full --target-processes all "${extra_ncu_flags[@]}" -o "$ncu_output"
-           bash "$output_script" --execute)
+  if [[ -n "$cached_binary" && -x "$cached_binary" ]]; then
+    ncu_cmd=("$NCU_BIN" --set full --target-processes all --launch-count 1 --launch-skip 0 "${extra_ncu_flags[@]}" -o "$ncu_output"
+             "$cached_binary")
+  else
+    ncu_cmd=("$NCU_BIN" --set full --target-processes all --launch-count 1 --launch-skip 0 "${extra_ncu_flags[@]}" -o "$ncu_output"
+             bash "$output_script" --execute)
+  fi
 
   if [[ -n "$selected_gpu" ]]; then
     env CUDA_VISIBLE_DEVICES="$selected_gpu" EXTRA_TARGET_CFLAGS="$combined_target_cflags" \

@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Sequence
 
@@ -14,11 +15,57 @@ TFLOPS_RE = re.compile(r"^TFLOPS:\s*([0-9.eE+-]+)")
 FA3_LABEL_RE = re.compile(r"^\[fa3 (.+)\]$")
 TILELANG_LABEL_RE = re.compile(r"^\[tilelang (.+)\]$")
 TRITON_LABEL_RE = re.compile(r"^\[triton (.+)\]$")
+TRITON_WS_LABEL_RE = re.compile(r"^\[triton_ws (.+)\]$")
 
 _NOISE_LINE = re.compile(
     r"^(?:\s*\d{4}-\d{2}-\d{2}.*WARNING:|\[bench\]|ptxas info|Remark:|"
     r"INFO \(|WARNING \()"
 )
+
+_COOLDOWN_TARGET_C = 72
+_COOLDOWN_TIMEOUT_S = 120
+_COOLDOWN_POLL_S = 3
+
+
+def _gpu_temperature(gpu_id: str | None = None) -> int | None:
+    """Read current GPU temperature in Celsius via nvidia-smi."""
+    cmd = ["nvidia-smi", "--query-gpu=temperature.gpu",
+           "--format=csv,noheader,nounits"]
+    if gpu_id is not None:
+        cmd.extend(["--id=" + str(gpu_id)])
+    try:
+        out = subprocess.check_output(cmd, text=True, timeout=5).strip()
+        return int(out.splitlines()[0])
+    except Exception:
+        return None
+
+
+def _gpu_cooldown(gpu_id: str | None = None) -> None:
+    """Wait for GPU to cool below threshold for fair benchmarking."""
+    temp = _gpu_temperature(gpu_id)
+    if temp is None or temp <= _COOLDOWN_TARGET_C:
+        return
+    print(
+        f"[compare] GPU at {temp}C, cooling to {_COOLDOWN_TARGET_C}C ...",
+        file=sys.stderr,
+        end="",
+    )
+    deadline = time.monotonic() + _COOLDOWN_TIMEOUT_S
+    while time.monotonic() < deadline:
+        time.sleep(_COOLDOWN_POLL_S)
+        temp = _gpu_temperature(gpu_id)
+        if temp is None or temp <= _COOLDOWN_TARGET_C:
+            if temp is not None:
+                print(f" {temp}C ok", file=sys.stderr)
+            else:
+                print(" ok", file=sys.stderr)
+            return
+        print(f" {temp}C", file=sys.stderr, end="", flush=True)
+    temp = _gpu_temperature(gpu_id)
+    print(
+        f" timeout ({temp}C), proceeding anyway",
+        file=sys.stderr,
+    )
 
 
 def _filter_text(text: str) -> str:
@@ -42,8 +89,6 @@ def collect_choreo(
         cmd.extend(["--gpu", gpu])
 
     env = os.environ.copy()
-    env.setdefault("CHOREO_TIMING_WARMUP", "100")
-    env.setdefault("CHOREO_TIMING_REPEAT", "500")
 
     print(f"[compare] Running Choreo: {kernel}", file=sys.stderr)
     proc = subprocess.run(
@@ -70,8 +115,6 @@ def collect_choreo(
 def collect_fa3(baselines_dir: Path, labels: list[str]) -> list[dict]:
     script = baselines_dir / "bench_fa3.py"
     env = os.environ.copy()
-    env.setdefault("CHOREO_TIMING_WARMUP", "100")
-    env.setdefault("CHOREO_TIMING_REPEAT", "500")
 
     print("[compare] Running FA3", file=sys.stderr)
     gpu = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -103,8 +146,6 @@ def collect_tilelang(baselines_dir: Path, labels: list[str]) -> list[dict]:
         raise FileNotFoundError(f"tilelang bench not found: {script}")
 
     env = os.environ.copy()
-    env.setdefault("CHOREO_TIMING_WARMUP", "100")
-    env.setdefault("CHOREO_TIMING_REPEAT", "500")
 
     print("[compare] Running TileLang", file=sys.stderr)
     gpu = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -168,8 +209,6 @@ def collect_triton(baselines_dir: Path, labels: list[str]) -> list[dict]:
         raise FileNotFoundError(f"triton bench not found: {script}")
 
     env = os.environ.copy()
-    env.setdefault("CHOREO_TIMING_WARMUP", "100")
-    env.setdefault("CHOREO_TIMING_REPEAT", "500")
 
     print("[compare] Running Triton", file=sys.stderr)
     gpu = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -219,6 +258,88 @@ def _parse_triton_output(text: str, labels: list[str]) -> list[dict]:
                     {
                         "backend": "triton",
                         "kernel": "triton_fused_attn",
+                        "label": pending,
+                        "tflops": float(match.group(1)),
+                    }
+                )
+                pending = None
+    return rows
+
+
+def _triton_aref_python() -> str | None:
+    """Return the Python interpreter for the triton-aref venv, or None."""
+    venv = os.environ.get(
+        "TRITON_AREF_ENV", os.path.expanduser("~/.env/triton-aref")
+    )
+    py = os.path.join(venv, "bin", "python3")
+    if os.path.isfile(py):
+        return py
+    return None
+
+
+def collect_triton_ws(baselines_dir: Path, labels: list[str]) -> list[dict]:
+    script = baselines_dir / "bench_triton_ws.py"
+    if not script.is_file():
+        raise FileNotFoundError(f"triton_ws bench not found: {script}")
+
+    py = _triton_aref_python()
+    if py is None:
+        raise RuntimeError(
+            "Triton+WS requires the triton-aref venv "
+            "(~/.env/triton-aref with aref_auto_ws branch). "
+            "Set TRITON_AREF_ENV to override."
+        )
+
+    env = os.environ.copy()
+
+    print("[compare] Running Triton+WS (aref venv)", file=sys.stderr)
+    gpu = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if gpu is not None:
+        env["CUDA_VISIBLE_DEVICES"] = gpu
+
+    proc = subprocess.run(
+        [py, str(script)],
+        cwd=str(baselines_dir),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        print(proc.stdout, file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        raise RuntimeError(f"Triton+WS bench failed (exit {proc.returncode})")
+
+    rows = _parse_triton_ws_output(
+        _filter_text(proc.stdout + proc.stderr), labels
+    )
+    if len(rows) != len(labels):
+        raise RuntimeError(
+            f"expected {len(labels)} Triton+WS rows, got {len(rows)}"
+        )
+    return rows
+
+
+def _parse_triton_ws_output(text: str, labels: list[str]) -> list[dict]:
+    rows: list[dict] = []
+    pending: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        m = TRITON_WS_LABEL_RE.match(stripped)
+        if m:
+            inner = m.group(1)
+            for lab in labels:
+                if inner == lab:
+                    pending = lab
+                    break
+            continue
+        if pending is not None:
+            match = TFLOPS_RE.match(stripped)
+            if match:
+                rows.append(
+                    {
+                        "backend": "triton_ws",
+                        "kernel": "triton_fused_attn_ws",
                         "label": pending,
                         "tflops": float(match.group(1)),
                     }
@@ -347,6 +468,8 @@ def run_compare(
     *,
     has_choreo: bool,
     default_kernel: str = "v2_manual_s2_1p1c_tma.co",
+    warmup: int | None = None,
+    repeat: int | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(description=f"Compare backends for {variant_id}")
     if has_choreo:
@@ -367,25 +490,43 @@ def run_compare(
     parser.add_argument("--skip-fa3", action="store_true")
     parser.add_argument("--skip-tilelang", action="store_true")
     parser.add_argument("--skip-triton", action="store_true")
+    parser.add_argument("--skip-triton-ws", action="store_true")
+    parser.add_argument(
+        "--no-cooldown",
+        action="store_true",
+        help="Skip GPU cooldown between backends (faster but less fair)",
+    )
     args = parser.parse_args()
 
-    warmup = int(os.environ.get("CHOREO_TIMING_WARMUP", "100"))
-    repeat = int(os.environ.get("CHOREO_TIMING_REPEAT", "500"))
+    _default_warmup = warmup if warmup is not None else 50
+    _default_repeat = repeat if repeat is not None else 200
+    warmup = int(os.environ.get("CHOREO_TIMING_WARMUP", str(_default_warmup)))
+    repeat = int(os.environ.get("CHOREO_TIMING_REPEAT", str(_default_repeat)))
+    os.environ["CHOREO_TIMING_WARMUP"] = str(warmup)
+    os.environ["CHOREO_TIMING_REPEAT"] = str(repeat)
+    do_cooldown = not args.no_cooldown
 
     choreo_dir = variant_dir / "choreo"
     baselines_dir = variant_dir / "baselines"
     by_backend: dict[str, list[dict]] = {}
 
+    def _maybe_cooldown() -> None:
+        if do_cooldown and by_backend:
+            _gpu_cooldown(args.gpu)
+
     if has_choreo and not args.skip_choreo:
+        _maybe_cooldown()
         by_backend["choreo"] = collect_choreo(
             choreo_dir, labels, args.kernel, args.gpu
         )
     if not args.skip_fa3:
+        _maybe_cooldown()
         by_backend["fa3"] = collect_fa3(baselines_dir, labels)
     if not args.skip_tilelang and "tilelang" in backends:
         tilelang_script = baselines_dir / "bench_tilelang.py"
         if tilelang_script.is_file():
             try:
+                _maybe_cooldown()
                 by_backend["tilelang"] = collect_tilelang(
                     baselines_dir, labels
                 )
@@ -397,12 +538,25 @@ def run_compare(
         triton_script = baselines_dir / "bench_triton.py"
         if triton_script.is_file():
             try:
+                _maybe_cooldown()
                 by_backend["triton"] = collect_triton(
                     baselines_dir, labels
                 )
             except Exception as exc:
                 print(
                     f"[compare] Triton skipped: {exc}", file=sys.stderr
+                )
+    if not args.skip_triton_ws and "triton_ws" in backends:
+        triton_ws_script = baselines_dir / "bench_triton_ws.py"
+        if triton_ws_script.is_file():
+            try:
+                _maybe_cooldown()
+                by_backend["triton_ws"] = collect_triton_ws(
+                    baselines_dir, labels
+                )
+            except Exception as exc:
+                print(
+                    f"[compare] Triton+WS skipped: {exc}", file=sys.stderr
                 )
 
     if not by_backend:

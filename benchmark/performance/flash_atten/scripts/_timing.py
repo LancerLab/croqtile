@@ -7,10 +7,11 @@ from typing import Callable
 
 import torch
 
-# H800 PCIe reference for efficiency line only (not a hard roofline).
-H800_PCIE_PEAK_F16_TFLOPS = 1513.0
-# Hopper FP8 tensor ops are ~2x FP16 peak; use 2x peak so efficiency matches F16 util.
-H800_PCIE_PEAK_FP8_TFLOPS = H800_PCIE_PEAK_F16_TFLOPS * 2.0
+# H800 PCIe dense Tensor Core peaks (without structured sparsity).
+# NVIDIA spec shows 1513 / 3026 -- those are WITH sparsity (2x).
+# Dense: FP16/BF16 = 756.5 TFLOPS, FP8 = 1513 TFLOPS.
+H800_PCIE_PEAK_F16_TFLOPS = 756.5
+H800_PCIE_PEAK_FP8_TFLOPS = 1513.0
 
 
 def peak_tflops_for_dtype(dtype) -> float:
@@ -22,8 +23,8 @@ def peak_tflops_for_dtype(dtype) -> float:
 
 
 def read_timer_options() -> tuple[int, int]:
-    warmup = 10
-    repeat = 50
+    warmup = 50
+    repeat = 200
     if env := os.getenv("CHOREO_TIMING_WARMUP"):
         value = int(env)
         if value >= 0:
