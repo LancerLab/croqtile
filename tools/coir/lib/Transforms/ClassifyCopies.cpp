@@ -113,28 +113,22 @@ struct ClassifyCopiesPass
   void runOnOperation() override {
     auto *ctx = &getContext();
 
-    // Module attributes (set by the driver via StampTargetOnModule) are
-    // authoritative.  Only fall back to --target-arch inference when no
-    // module attributes are present (standalone coir-opt usage).
+    // CLI --target-arch overrides module attributes when provided.
+    // Otherwise read coir.has_tma / coir.has_dma from the module
+    // (set by the driver or embedded directly in the IR).
     bool hasTMA = false;
     bool hasDMA = false;
-    bool hasModuleAttrs = false;
-    if (auto module = dyn_cast<ModuleOp>(getOperation())) {
-      if (module->hasAttr("coir.has_tma")) {
-        hasModuleAttrs = true;
+    if (!targetArch.empty()) {
+      hasTMA = inferHasTMAFromArch(targetArch);
+      hasDMA = inferHasDMAFromArch(targetArch);
+    } else {
+      if (auto module = dyn_cast<ModuleOp>(getOperation())) {
         hasTMA = CoIR::HasTMA(module);
         hasDMA = CoIR::HasDMA(module);
-      }
-    } else if (auto pm = getOperation()->getParentOfType<ModuleOp>()) {
-      if (pm->hasAttr("coir.has_tma")) {
-        hasModuleAttrs = true;
+      } else if (auto pm = getOperation()->getParentOfType<ModuleOp>()) {
         hasTMA = CoIR::HasTMA(pm);
         hasDMA = CoIR::HasDMA(pm);
       }
-    }
-    if (!hasModuleAttrs) {
-      hasTMA = inferHasTMAFromArch(targetArch);
-      hasDMA = inferHasDMAFromArch(targetArch);
     }
 
     RewritePatternSet patterns(ctx);

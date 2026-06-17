@@ -36,7 +36,6 @@ struct LowerMMAFill : public OpRewritePattern<MMAFillOp> {
 
   LogicalResult matchAndRewrite(MMAFillOp op,
                                 PatternRewriter &rewriter) const override {
-    auto fragType = op.getResult().getType();
     // Keep the fill as-is since it already represents the low-level operation.
     // The value is already a scalar constant that will become a register fill.
     // Mark it with an attribute to signal it's been lowered.
@@ -104,7 +103,7 @@ struct LowerMMAStore : public OpRewritePattern<MMAStoreOp> {
 // where the Choreo target interface is not available.
 static std::string inferMMATargetFromArch(llvm::StringRef arch) {
   if (arch.empty()) return "";
-  if (arch.contains("sm_9")) return "wgmma";
+  if (arch.contains("sm_9") || arch.contains("sm_100")) return "wgmma";
   if (arch.contains("sm_")) return "mma_sync";
   return "ukernel";
 }
@@ -115,15 +114,25 @@ struct LowerMMAPass : public ::coir::impl::LowerMMABase<LowerMMAPass> {
   void runOnOperation() override {
     auto *ctx = &getContext();
 
-    // Module attribute (set by the driver via Target::MMATargetName)
-    // is authoritative. Fall back to --target-arch for coir-opt.
+    // CLI --target-arch overrides module attributes when provided.
+    // Otherwise read coir.mma_target from the module (set by the
+    // driver or embedded directly in the IR).
     std::string mmaTarget;
-    if (auto module = dyn_cast<ModuleOp>(getOperation()))
-      mmaTarget = CoIR::GetMMATarget(module).str();
-    else if (auto pm = getOperation()->getParentOfType<ModuleOp>())
-      mmaTarget = CoIR::GetMMATarget(pm).str();
-    if (mmaTarget.empty())
+    if (!targetArch.empty()) {
       mmaTarget = inferMMATargetFromArch(targetArch);
+    } else {
+      if (auto module = dyn_cast<ModuleOp>(getOperation()))
+        mmaTarget = CoIR::GetMMATarget(module).str();
+      else if (auto pm = getOperation()->getParentOfType<ModuleOp>())
+        mmaTarget = CoIR::GetMMATarget(pm).str();
+    }
+
+    if (mmaTarget.empty()) {
+      getOperation()->emitError()
+          << "no MMA target: set coir.mma_target module attribute "
+             "or pass --target-arch";
+      return signalPassFailure();
+    }
 
     RewritePatternSet patterns(ctx);
     patterns.add<LowerMMAFill>(ctx);

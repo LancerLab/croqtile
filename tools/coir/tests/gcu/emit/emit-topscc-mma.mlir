@@ -1,4 +1,6 @@
-// RUN: coir-opt --coir-lower-mma=target-arch=ukernel --coir-emit-topscc %s 2>&1 | FileCheck %s
+// RUN: coir-opt --coir-lower-mma --coir-emit-topscc %s 2>&1 | FileCheck %s
+
+module attributes { "coir.mma_target" = "ukernel" } {
 
 // CHECK: #include <common/acore_op.h>
 
@@ -52,3 +54,5 @@ coir.kernel @mma_kloop(
   }
   coir.mma.store %final, %c : !coir.mma_frag<128x16xf32>, !coir.tensor<128x128xf32, shared>
 }
+
+} // module
