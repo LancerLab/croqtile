@@ -45,9 +45,10 @@ namespace CoIR {
 ///   "coir.mma_target" -- MMA lowering strategy: "wgmma", "mma_sync",
 ///                        "ukernel", or "" (no MMA)
 ///   "coir.has_tma"    -- whether the target supports TMA
+///   "coir.has_dma"    -- whether the target needs DMA for global<->local
 void StampTargetOnModule(mlir::ModuleOp module, llvm::StringRef target,
                          llvm::StringRef arch, llvm::StringRef mma_target,
-                         bool has_tma);
+                         bool has_tma, bool has_dma);
 
 /// Read MMA target strategy from module attributes.
 /// Returns empty string if not set.
@@ -55,6 +56,9 @@ llvm::StringRef GetMMATarget(mlir::ModuleOp module);
 
 /// Read whether the target has TMA from module attributes.
 bool HasTMA(mlir::ModuleOp module);
+
+/// Read whether the target needs hardware DMA for global<->local transfers.
+bool HasDMA(mlir::ModuleOp module);
 
 /// Read the architecture string from module attributes.
 llvm::StringRef GetArch(mlir::ModuleOp module);

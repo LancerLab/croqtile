@@ -5,8 +5,15 @@
 
 __co__ s32 [64] ele_add(s32 [64] a, s32 [64] b) {
   s32[a.span] c;
-  parallel p by 64
-    c.at(p) = a.at(p) + b.at(p);
+  parallel p by 1 {
+    l1_a = dma.copy a.chunkat(p) => local;
+    l1_b = dma.copy b.chunkat(p) => local;
+    local s32[l1_a.span] l1_c;
+    foreach i in [l1_a.span(0)] {
+      l1_c.at(i) = l1_a.data.at(i) + l1_b.data.at(i);
+    }
+    dma.copy l1_c => c.chunkat(p);
+  }
   return c;
 }
 

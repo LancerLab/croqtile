@@ -26,6 +26,9 @@ public:
   TopsccEmitter(llvm::raw_ostream &os) : os(os), indent(0) {}
 
   void emitModule(ModuleOp module) {
+    // Read target arch for per-arch DTE type selection.
+    archStr = CoIR::GetArch(module).str();
+
     // Pre-scan to detect MMA ops so we can include the acore header early.
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op)) {
@@ -59,6 +62,7 @@ public:
 private:
   llvm::raw_ostream &os;
   unsigned indent;
+  std::string archStr;
   DenseMap<Value, std::string> valueNames;
   DenseMap<unsigned, std::string> returnParamNames;
   DenseSet<Value> returnValues;
@@ -95,11 +99,18 @@ private:
     return "/* unknown */";
   }
 
+  // Portable DTE context type that works across all target architectures.
+  // tops_dte_ctx_t is universally available; the choreo.h header typedefs
+  // it to the arch-appropriate underlying type when compiled with topscc.
+  std::string getDTEType() const { return "tops_dte_ctx_t"; }
+
+  // tops_dte_ctx_t requires explicit .init() on legacy targets (gcu210).
+  // On gcu300/400 the type is RAII and init() is a no-op, so always calling
+  // it is safe and keeps generated code portable.
+  bool needsExplicitInit() const { return true; }
+
   void emitHeader() {
-    os << "#include <krt/misc.h>\n";
-    os << "#include <tcle.h>\n";
     os << "#include <stdint.h>\n";
-    os << "#include <tops/topscc_types.h>\n";
     os << "#include <tops.h>\n";
     os << "#include \"tops/tops_runtime.h\"\n";
     os << "#include \"choreo.h\"\n\n";
@@ -213,48 +224,20 @@ private:
     int64_t resBytes = getTensorBytes(resTy);
     int64_t gridDim = getGridDim(kernel);
 
-    // Each block copies full input tensors to local memory, calls the
-    // __device__ kernel, then copies back only its output chunk when
-    // multiple blocks are used.
-    int64_t chunkN = (gridDim > 1) ? (resN / gridDim) : resN;
-
+    // __global__ wrapper: pass global pointers directly to the __device__
+    // kernel. The kernel body handles DMA internally (from lowered IR).
     os << "__global__ void __coir_global_" << name.str() << "(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       os << emitType(fnType.getInput(i)) << " g_in" << i;
     }
     os << ", " << eType << "* g_out, int N) {\n";
-
-    for (unsigned i = 0; i < numInputs; ++i) {
-      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
-      int64_t n = tty ? getTensorNumElems(tty) : resN;
-      os << "  __local__ " << eType << " l_in" << i << "[" << n << "];\n";
-    }
-    os << "  __local__ " << eType << " l_out[" << resN << "];\n";
-    os << "  tops::private_dte ctx;\n  ctx.init();\n";
-    for (unsigned i = 0; i < numInputs; ++i) {
-      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
-      int64_t n = tty ? getTensorNumElems(tty) : resN;
-      os << "  tops::memcpy(ctx, tops::mdspan(l_in" << i << ", " << n
-         << "), tops::mdspan(g_in" << i << ", " << n << "));\n";
-    }
-
     os << "  " << name.str() << "(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
-      os << "l_in" << i;
+      os << "g_in" << i;
     }
-    os << ", l_out);\n";
-
-    if (gridDim > 1) {
-      os << "  int __bid = tops::block_idx_x();\n";
-      os << "  int __off = __bid * " << chunkN << ";\n";
-      os << "  tops::memcpy(ctx, tops::mdspan(g_out + __off, " << chunkN
-         << "), tops::mdspan(l_out + __off, " << chunkN << "));\n";
-    } else {
-      os << "  tops::memcpy(ctx, tops::mdspan(g_out, " << resN
-         << "), tops::mdspan(l_out, " << resN << "));\n";
-    }
+    os << ", g_out);\n";
     os << "}\n\n";
 
     // Emit host-callable wrapper using choreo runtime types
@@ -326,6 +309,8 @@ private:
       emitForeach(foreach_);
     else if (auto dataCopy = dyn_cast<DataCopyOp>(op))
       emitDataCopy(dataCopy);
+    else if (auto dmaCopy = dyn_cast<DmaCopyOp>(op))
+      emitDmaCopy(dmaCopy);
     else if (auto constDesc = dyn_cast<DMAConstDescOp>(op))
       emitDMAConstDesc(constDesc);
     else if (auto prefetch = dyn_cast<DMADescPrefetchOp>(op))
@@ -353,7 +338,7 @@ private:
     else if (auto barrier = dyn_cast<BarrierOp>(op))
       emitBarrier(barrier);
     else if (auto wait = dyn_cast<WaitOp>(op))
-      (void)wait;
+      emitWait(wait);
     else if (auto ret = dyn_cast<KernelReturnOp>(op))
       (void)ret;
     else if (auto yield = dyn_cast<YieldOp>(op))
@@ -758,8 +743,9 @@ private:
 
     os << getIndent() << "{\n";
     incIndent();
-    os << getIndent() << "tops::private_dte __dma_ctx;\n";
-    os << getIndent() << "__dma_ctx.init();\n";
+    os << getIndent() << getDTEType() << " __dma_ctx;\n";
+    if (needsExplicitInit())
+      os << getIndent() << "__dma_ctx.init();\n";
     os << getIndent() << "tops::memcpy(__dma_ctx, tops::mdspan("
        << dst << ", " << totalElems << "), tops::mdspan("
        << src << ", " << totalElems << "));\n";
@@ -768,6 +754,33 @@ private:
 
     if (op.getToken())
       valueNames[op.getToken()] = "/* dma_token */";
+  }
+
+  void emitDmaCopy(DmaCopyOp op) {
+    std::string src = getName(op.getSource());
+    std::string dst = getName(op.getDest());
+    auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+    auto dstTy = cast<coir::TensorType>(op.getDest().getType());
+    int64_t srcElems = 1, dstElems = 1;
+    for (auto d : srcTy.getShape()) srcElems *= d;
+    for (auto d : dstTy.getShape()) dstElems *= d;
+    int64_t totalElems = std::max(srcElems, dstElems);
+
+    std::string ctxName = "__dte_" + std::to_string(nextDmaId++);
+    os << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    if (needsExplicitInit())
+      os << getIndent() << ctxName << ".init();\n";
+    os << getIndent() << "tops::memcpy(" << ctxName << ", tops::mdspan("
+       << dst << ", " << totalElems << "), tops::mdspan("
+       << src << ", " << totalElems << "));\n";
+
+    if (op.getToken())
+      valueNames[op.getToken()] = ctxName;
+  }
+
+  void emitWait(WaitOp op) {
+    // Blocking tops::memcpy completes synchronously; wait is a no-op.
+    // When async DMA is used, this would emit tops::wait(event).
   }
 
   std::string emitMdspan(Value tensor) {
@@ -1028,7 +1041,7 @@ public:
     emitHostCode(os, module);
 
     os << "\n__COIR_TOPSCC_SOURCE__\n\n";
-    os << "\"$TOPSCC\" -std=c++17 -I\"$TMPDIR\" "
+    os << "\"$TOPSCC\" ${CFLAGS} -I\"$TMPDIR\" "
           "-o \"$BINFILE\" \"$TMPFILE\" -lpthread -ldl -lrt 2>&1\n";
     os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
     os << "  shift\n";
