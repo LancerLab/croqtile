@@ -1,16 +1,49 @@
 //===- Pipeline.cpp - CoIR Pipeline class implementation ------------------===//
 //
-// Implements CoIR::Pipeline (EmitCoIR, Optimize, Lower, EmitSource).
+// Implements CoIR::Pipeline (EmitCoIR, Optimize, Lower, EmitSource) and
+// the module-level target attribute helpers.
 //
 //===----------------------------------------------------------------------===//
 
 #include "Dialect/CoIR/Passes.h"
 
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace CoIR {
+
+void StampTargetOnModule(mlir::ModuleOp module, llvm::StringRef target,
+                         llvm::StringRef arch, llvm::StringRef mma_target,
+                         bool has_tma) {
+  auto *ctx = module.getContext();
+  if (!target.empty())
+    module->setAttr("coir.target", mlir::StringAttr::get(ctx, target));
+  if (!arch.empty())
+    module->setAttr("coir.arch", mlir::StringAttr::get(ctx, arch));
+  if (!mma_target.empty())
+    module->setAttr("coir.mma_target", mlir::StringAttr::get(ctx, mma_target));
+  module->setAttr("coir.has_tma", mlir::BoolAttr::get(ctx, has_tma));
+}
+
+llvm::StringRef GetMMATarget(mlir::ModuleOp module) {
+  if (auto attr = module->getAttrOfType<mlir::StringAttr>("coir.mma_target"))
+    return attr.getValue();
+  return {};
+}
+
+bool HasTMA(mlir::ModuleOp module) {
+  if (auto attr = module->getAttrOfType<mlir::BoolAttr>("coir.has_tma"))
+    return attr.getValue();
+  return false;
+}
+
+llvm::StringRef GetArch(mlir::ModuleOp module) {
+  if (auto attr = module->getAttrOfType<mlir::StringAttr>("coir.arch"))
+    return attr.getValue();
+  return {};
+}
 
 void Pipeline::EmitCoIR(llvm::raw_ostream &os) {
   mlir::OpPrintingFlags flags;

@@ -10,6 +10,7 @@
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
 
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -38,9 +39,9 @@ static bool isRegisterOrLocal(int32_t ms) { return ms >= 2; }
 struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
   using OpRewritePattern::OpRewritePattern;
 
-  std::string arch;
-  ClassifyDataCopy(MLIRContext *ctx, StringRef arch)
-      : OpRewritePattern(ctx), arch(arch.str()) {}
+  bool hasTMA;
+  ClassifyDataCopy(MLIRContext *ctx, bool hasTMA)
+      : OpRewritePattern(ctx), hasTMA(hasTMA) {}
 
   LogicalResult matchAndRewrite(DataCopyOp op,
                                 PatternRewriter &rewriter) const override {
@@ -52,9 +53,6 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
     int32_t srcMS = getMemSpace(srcType);
     int32_t dstMS = getMemSpace(dstType);
     Location loc = op.getLoc();
-
-    bool hasTMA = arch.find("sm_9") != std::string::npos ||
-                  arch.find("sm_100") != std::string::npos;
 
     bool needsAsync =
         (isGlobal(srcMS) && isShared(dstMS)) ||
@@ -88,14 +86,31 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
   }
 };
 
+// Infer TMA capability from --target-arch string.
+// This mirrors Target::HasTMA() for standalone coir-opt usage.
+static bool inferHasTMAFromArch(llvm::StringRef arch) {
+  return arch.contains("sm_9") || arch.contains("sm_100");
+}
+
 struct ClassifyCopiesPass
     : public ::coir::impl::ClassifyCopiesBase<ClassifyCopiesPass> {
   using ClassifyCopiesBase::ClassifyCopiesBase;
 
   void runOnOperation() override {
     auto *ctx = &getContext();
+
+    // Module attribute (set by the driver via Target::HasTMA)
+    // is authoritative. Fall back to --target-arch for coir-opt.
+    bool hasTMA = false;
+    if (auto module = dyn_cast<ModuleOp>(getOperation()))
+      hasTMA = CoIR::HasTMA(module);
+    else if (auto pm = getOperation()->getParentOfType<ModuleOp>())
+      hasTMA = CoIR::HasTMA(pm);
+    if (!hasTMA)
+      hasTMA = inferHasTMAFromArch(targetArch);
+
     RewritePatternSet patterns(ctx);
-    patterns.add<ClassifyDataCopy>(ctx, targetArch);
+    patterns.add<ClassifyDataCopy>(ctx, hasTMA);
 
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();

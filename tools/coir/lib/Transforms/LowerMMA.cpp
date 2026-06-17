@@ -63,23 +63,21 @@ struct LowerMMALoad : public OpRewritePattern<MMALoadOp> {
 };
 
 // MMA exec: perform the matrix multiply-accumulate.
-// On SM90: this becomes wgmma.mma_async
-// On SM80: this becomes mma.sync or wmma::mma_sync
+// The target MMA strategy is read from the module attribute "coir.mma_target",
+// which is set per-target by the driver (e.g. "wgmma", "mma_sync", "ukernel").
+// When running via coir-opt, the --target-arch option is used as fallback.
 struct LowerMMAExec : public OpRewritePattern<MMAExecOp> {
-  std::string arch;
-  LowerMMAExec(MLIRContext *ctx, StringRef arch)
-      : OpRewritePattern(ctx), arch(arch.str()) {}
+  std::string mmaTarget;
+  LowerMMAExec(MLIRContext *ctx, StringRef mmaTarget)
+      : OpRewritePattern(ctx), mmaTarget(mmaTarget.str()) {}
 
   LogicalResult matchAndRewrite(MMAExecOp op,
                                 PatternRewriter &rewriter) const override {
     if (op->hasAttr("lowered"))
       return failure();
 
-    bool isSM90 = arch.find("sm_9") != std::string::npos;
-    if (isSM90)
-      op->setAttr("target", rewriter.getStringAttr("wgmma"));
-    else
-      op->setAttr("target", rewriter.getStringAttr("mma_sync"));
+    if (!mmaTarget.empty())
+      op->setAttr("target", rewriter.getStringAttr(mmaTarget));
 
     op->setAttr("lowered", rewriter.getUnitAttr());
     return success();
@@ -101,15 +99,36 @@ struct LowerMMAStore : public OpRewritePattern<MMAStoreOp> {
   }
 };
 
+// Infer MMA target from --target-arch string.
+// This mirrors Target::MMATargetName() for standalone coir-opt usage
+// where the Choreo target interface is not available.
+static std::string inferMMATargetFromArch(llvm::StringRef arch) {
+  if (arch.empty()) return "";
+  if (arch.contains("sm_9")) return "wgmma";
+  if (arch.contains("sm_")) return "mma_sync";
+  return "ukernel";
+}
+
 struct LowerMMAPass : public ::coir::impl::LowerMMABase<LowerMMAPass> {
   using LowerMMABase::LowerMMABase;
 
   void runOnOperation() override {
     auto *ctx = &getContext();
+
+    // Module attribute (set by the driver via Target::MMATargetName)
+    // is authoritative. Fall back to --target-arch for coir-opt.
+    std::string mmaTarget;
+    if (auto module = dyn_cast<ModuleOp>(getOperation()))
+      mmaTarget = CoIR::GetMMATarget(module).str();
+    else if (auto pm = getOperation()->getParentOfType<ModuleOp>())
+      mmaTarget = CoIR::GetMMATarget(pm).str();
+    if (mmaTarget.empty())
+      mmaTarget = inferMMATargetFromArch(targetArch);
+
     RewritePatternSet patterns(ctx);
     patterns.add<LowerMMAFill>(ctx);
     patterns.add<LowerMMALoad>(ctx);
-    patterns.add<LowerMMAExec>(ctx, targetArch);
+    patterns.add<LowerMMAExec>(ctx, mmaTarget);
     patterns.add<LowerMMAStore>(ctx);
 
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))

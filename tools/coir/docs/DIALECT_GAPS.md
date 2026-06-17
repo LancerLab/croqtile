@@ -116,6 +116,42 @@ values to additional pointer parameters in the generated kernel signature.
 **Future work**: May need explicit `output` argument annotation to distinguish
 input vs output pointers in the generated signature.
 
+## 8. MMA Operations -- GPU Complete, Micro-Kernel Backend Implemented
+
+**Status**: MMA IR is fully supported across the CoIR pipeline.
+
+**GPU (WMMA)**: Complete pipeline from AST to generated code.
+- `ASTCoIRGen` lowers `AST::MMA` Fill/Load/Exec/Store to `coir.mma.*` ops
+- `LowerMMA` pass annotates ops with `target = "wgmma"` (SM90) or `"mma_sync"` (SM80)
+- `EmitCUDA` emits `nvcuda::wmma` API calls
+- E2E tested via `tools/coir/tests/gpu/e2e/wmma.co`
+
+**Micro-kernel backend**: Emission implemented for targets that use library-based
+MMA via `target = "ukernel"`.
+- `LowerMMA` sets `target = "ukernel"` for non-GPU architectures
+- Target emitter handles all four MMA ops via micro-kernel stub calls:
+  - `mma.fill` -> workspace allocation (`int ws[2048]`)
+  - `mma.load` -> address recording (no actual load instruction)
+  - `mma.exec` -> deferred exec with acc/store flag state machine
+  - `mma.store` -> final micro-kernel call with `store_flag=1`
+- K-loop accumulation uses the deferred exec+store pattern:
+  iterations 0..N-2 emit with `store=0`, final iteration deferred to `mma.store`
+- Out-of-line `__device__` stubs work around linker relocation limitations
+
+**Semantic differences between GPU and micro-kernel MMA**:
+| Aspect | GPU (WMMA) | Micro-kernel |
+|--------|-----------|-------------|
+| Fragment objects | `wmma::fragment` structs | Raw buffer pointers |
+| Accumulation | Fragment register state | Hardware accumulator registers |
+| Exec model | Immediate `mma_sync` call | Deferred exec+store pattern |
+| Store model | Separate `store_matrix_sync` | Combined compute+store via `store_flag` |
+| Code generation | Direct API calls | Out-of-line stub wrappers |
+
+**Remaining limitations**:
+- `TensorTileOp` in target emitter computes pointer offsets assuming row-major dense layout
+- Host wrapper input types inferred from output tensor type (may mismatch for mixed precision)
+- `mma.commit`, `mma.wait`, `mma.scale` are not supported in the micro-kernel backend
+
 ## Summary Priority
 
 | Gap | Priority | Needed For |
@@ -127,3 +163,5 @@ input vs output pointers in the generated signature.
 | ChunkAt tiling | High | DMA-staged elementwise (Phase 2) |
 | Signed vs signless | Resolved | -- |
 | Return semantics | Resolved | -- |
+| MMA (GPU WMMA) | Resolved | -- |
+| MMA (micro-kernel) | Resolved | -- |

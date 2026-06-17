@@ -116,6 +116,15 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  // --- Stamp target info onto module for lowering passes ---
+  {
+    auto& target = CCtx().GetTarget();
+    auto arch = CCtx().GetArch();
+    CoIR::StampTargetOnModule(session.Module(), CCtx().TargetName(), arch,
+                              target.MMATargetName(arch),
+                              target.HasTMA(arch));
+  }
+
   // --- Lowering ---
   if (!pipeline.Lower()) {
     errs() << "cocc: lowering failed\n";

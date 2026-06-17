@@ -1,5 +1,6 @@
 // RUN: coir-opt --coir-lower-mma %s | FileCheck %s
 // RUN: coir-opt --coir-lower-mma=target-arch=sm_80 %s | FileCheck %s --check-prefix=SM80
+// RUN: coir-opt --coir-lower-mma=target-arch=ukernel %s | FileCheck %s --check-prefix=UKERNEL
 
 // Test: full pipeline - SM90 gets wgmma target
 // CHECK-LABEL: coir.kernel @test_pipeline_sm90
@@ -34,6 +35,10 @@ coir.kernel @test_pipeline_sm80(
   %res = coir.mma.exec %acc, %a_frag, %b_frag {layout = #coir.mma_layout<row_col>} : (!coir.mma_frag<16x16xf32>, !coir.mma_frag<16x16xf16>, !coir.mma_frag<16x16xf16>) -> !coir.mma_frag<16x16xf32>
   coir.mma.store %res, %c_tile : !coir.mma_frag<16x16xf32>, !coir.tensor<16x16xf32, shared>
 }
+
+// Test: non-GPU architecture gets ukernel target via --target-arch fallback
+// UKERNEL-LABEL: coir.kernel @test_pipeline_sm90
+// UKERNEL: coir.mma.exec {{.*}} target = "ukernel"
 
 // Test: accumulate loop with lowered MMA
 // CHECK-LABEL: coir.kernel @test_accumulate

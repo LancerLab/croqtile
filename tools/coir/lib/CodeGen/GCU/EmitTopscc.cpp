@@ -10,8 +10,11 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/Pass/Pass.h"
 
 #include "llvm/Support/raw_ostream.h"
+
+#include <set>
 
 using namespace mlir;
 using namespace coir;
@@ -23,11 +26,30 @@ public:
   TopsccEmitter(llvm::raw_ostream &os) : os(os), indent(0) {}
 
   void emitModule(ModuleOp module) {
+    // Pre-scan to detect MMA ops so we can include the acore header early.
+    for (auto &op : module.getBody()->getOperations()) {
+      if (auto kernel = dyn_cast<KernelOp>(op)) {
+        kernel.walk([&](Operation *inner) {
+          if (isa<MMAFillOp, MMALoadOp, MMAExecOp, MMAStoreOp>(inner))
+            hasAcoreCall = true;
+        });
+      }
+    }
+
     emitHeader();
+    if (hasAcoreCall)
+      os << "#include <common/acore_op.h>\n\n";
+
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
         emitKernel(kernel);
     }
+
+    // Stub definitions after all kernels -- declarations already emitted
+    // before each kernel that uses them.
+    if (!stubCode.empty())
+      os << stubCode;
+
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
         emitHostWrapper(kernel);
@@ -83,7 +105,25 @@ private:
     os << "#include \"choreo.h\"\n\n";
   }
 
+  void preCollectStubs(KernelOp kernel) {
+    kernel.walk([&](MMAExecOp exec) {
+      auto lhsFragTy = cast<coir::MMAFragType>(exec.getLhs().getType());
+      auto accFragTy =
+          cast<coir::MMAFragType>(exec.getAccumulator().getType());
+      int64_t M = lhsFragTy.getShape()[0];
+      getOrEmitStub(M, lhsFragTy.getElementType(),
+                    accFragTy.getElementType(), exec.getLayout());
+    });
+  }
+
   void emitKernel(KernelOp kernel) {
+    preCollectStubs(kernel);
+
+    if (!stubDeclCode.empty()) {
+      os << stubDeclCode;
+      stubDeclCode.clear();
+    }
+
     auto fnType = kernel.getFunctionType();
     os << "__device__ void " << kernel.getSymName() << "(";
 
@@ -301,7 +341,15 @@ private:
     else if (auto alloc = dyn_cast<TensorAllocOp>(op))
       emitAlloc(alloc);
     else if (auto tile = dyn_cast<TensorTileOp>(op))
-      (void)tile;
+      emitTensorTile(tile);
+    else if (auto fill = dyn_cast<MMAFillOp>(op))
+      emitMMAFill(fill);
+    else if (auto load = dyn_cast<MMALoadOp>(op))
+      emitMMALoad(load);
+    else if (auto exec = dyn_cast<MMAExecOp>(op))
+      emitMMAExec(exec);
+    else if (auto store = dyn_cast<MMAStoreOp>(op))
+      emitMMAStore(store);
     else if (auto barrier = dyn_cast<BarrierOp>(op))
       emitBarrier(barrier);
     else if (auto wait = dyn_cast<WaitOp>(op))
@@ -309,7 +357,7 @@ private:
     else if (auto ret = dyn_cast<KernelReturnOp>(op))
       (void)ret;
     else if (auto yield = dyn_cast<YieldOp>(op))
-      (void)yield;
+      emitYield(yield);
     else if (auto check = dyn_cast<DMACheckOp>(op))
       (void)check;
     else if (auto constOp = dyn_cast<arith::ConstantOp>(op))
@@ -366,6 +414,20 @@ private:
     std::string iv = getName(args[0]);
     std::string ub = getName(op.getUpperBound());
 
+    auto iterArgs = op.getIterArgs();
+    for (unsigned i = 0; i < iterArgs.size(); ++i) {
+      std::string iterName = getName(args[i + 1]);
+      os << getIndent() << "auto " << iterName << " = "
+         << getName(iterArgs[i]) << ";\n";
+      auto stateIt = acoreStates.find(iterArgs[i]);
+      if (stateIt != acoreStates.end()) {
+        acoreStates[args[i + 1]] = stateIt->second;
+        auto &st = stateIt->second;
+        os << getIndent() << "void* " << st.ws_name << "_last_lhs;\n";
+        os << getIndent() << "void* " << st.ws_name << "_last_rhs;\n";
+      }
+    }
+
     os << getIndent() << "for (int " << iv << " = 0; " << iv << " < "
        << ub << "; ++" << iv << ") {\n";
     incIndent();
@@ -373,6 +435,318 @@ private:
       emitOp(&bodyOp);
     decIndent();
     os << getIndent() << "}\n";
+
+    for (unsigned i = 0; i < op.getResults().size(); ++i) {
+      valueNames[op.getResult(i)] = getName(args[i + 1]);
+      auto stateIt = acoreStates.find(args[i + 1]);
+      if (stateIt != acoreStates.end())
+        acoreStates[op.getResult(i)] = stateIt->second;
+    }
+  }
+
+  void emitTensorTile(TensorTileOp op) {
+    std::string name = getName(op.getResult());
+    auto srcTy = dyn_cast<coir::TensorType>(op.getSource().getType());
+    auto tileTy = dyn_cast<coir::TensorType>(op.getResult().getType());
+    auto indices = op.getIndices();
+
+    if (indices.empty()) {
+      valueNames[op.getResult()] = getName(op.getSource());
+      return;
+    }
+
+    os << getIndent() << "auto " << name << " = " << getName(op.getSource());
+    if (srcTy && !indices.empty()) {
+      os << " + (";
+      auto srcShape = srcTy.getShape();
+      auto tileShape = tileTy ? tileTy.getShape() : llvm::ArrayRef<int64_t>{};
+      for (unsigned i = 0; i < indices.size(); ++i) {
+        if (i > 0) os << " + ";
+        os << getName(indices[i]);
+        int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
+        os << " * " << tileDim;
+        for (unsigned j = i + 1; j < srcShape.size(); ++j)
+          os << " * " << srcShape[j];
+      }
+      os << ")";
+    }
+    os << ";\n";
+  }
+
+  // -- MMA emission for GCU (acore::matmul micro-kernel backend) -----------
+  //
+  // GCU MMA does not use fragment objects. Instead, acore::matmul operates
+  // on raw buffer pointers and keeps accumulation state in VACC hardware
+  // registers, controlled by acc_flag/store_flag arguments.
+  //
+  // The deferred exec+store pattern: mma.exec records parameters as pending.
+  // When mma.store is seen, the pending exec is emitted with store_flag=1.
+  // In a K-loop, each new mma.exec flushes the previous one with store_flag=0.
+
+  struct AcoreAccumState {
+    bool first_exec = true;
+    std::string ws_name;
+    std::string pending_lhs;
+    std::string pending_rhs;
+    std::string pending_k_dim;
+    std::string pending_n_dim;
+    std::string stub_name;
+    int acc_flag = 0;
+    int lt_flag = 0;
+    bool has_pending = false;
+  };
+
+  DenseMap<Value, AcoreAccumState> acoreStates;
+  DenseMap<Value, std::string> mmaFragAddrs;
+  std::set<std::string> emittedStubs;
+  std::string stubCode;
+  std::string stubDeclCode;
+  bool hasAcoreCall = false;
+
+  std::string acorePtrType(Type elemTy) {
+    if (elemTy.isF16()) return "__fp16";
+    if (elemTy.isBF16()) return "__bf16";
+    if (elemTy.isF32()) return "float";
+    if (elemTy.isInteger(8)) return "char";
+    return "void";
+  }
+
+  std::string acoreTypeTag(Type elemTy) {
+    if (elemTy.isF16()) return "f16";
+    if (elemTy.isBF16()) return "bf16";
+    if (elemTy.isF32()) return "f32";
+    if (elemTy.isInteger(8)) return "s8";
+    return "unk";
+  }
+
+  std::string stubSignature(const std::string &name,
+                            const std::string &outPtr,
+                            const std::string &inPtr) {
+    return "__device__ void " + name + "(\n"
+      "    " + outPtr + "* __restrict__ out,\n"
+      "    " + inPtr + "* __restrict__ lhs,\n"
+      "    " + inPtr + "* __restrict__ rhs,\n"
+      "    int* __restrict__ ws,\n"
+      "    int K, int N, int acc, int store, int vab_off, int lt)";
+  }
+
+  std::string getOrEmitStub(int64_t M, Type inElemTy, Type outElemTy,
+                            coir::MMALayout layout) {
+    std::string inPtr = acorePtrType(inElemTy);
+    std::string outPtr = acorePtrType(outElemTy);
+    std::string fmtStr = (layout == coir::MMALayout::RowCol) ? "MK_KN"
+                                                              : "MK_NK";
+    std::string name = "__choreo_mma_" + acoreTypeTag(inElemTy) + "_" +
+                       acoreTypeTag(outElemTy) + "_M" + std::to_string(M) +
+                       "_" + fmtStr;
+    if (emittedStubs.count(name)) return name;
+    emittedStubs.insert(name);
+
+    std::string sig = stubSignature(name, outPtr, inPtr);
+    stubDeclCode += sig + ";\n\n";
+
+    std::string acoreFmt = (layout == coir::MMALayout::RowCol)
+                               ? "acore::MK_KN"
+                               : "acore::MK_NK";
+    llvm::raw_string_ostream s(stubCode);
+    s << sig << " {\n"
+      << "  acore::matmul<" << M << ", " << acoreFmt << ">(\n"
+      << "      out, lhs, rhs, (" << inPtr << "*)nullptr, ws,\n"
+      << "      K, N, acc, store, 0, vab_off, lt);\n"
+      << "}\n\n";
+    return name;
+  }
+
+  void emitMMAFill(MMAFillOp op) {
+    std::string name = getName(op.getResult());
+
+    AcoreAccumState state;
+    state.ws_name = "__mma_ws_" + name;
+
+    os << getIndent() << "int " << state.ws_name << "[2048];\n";
+    acoreStates[op.getResult()] = state;
+  }
+
+  void emitMMALoad(MMALoadOp op) {
+    mmaFragAddrs[op.getResult()] = getName(op.getSource());
+  }
+
+  bool isInsideForeach(Operation *op) {
+    return op->getParentOfType<ForeachOp>() != nullptr;
+  }
+
+  std::string getForeachIV(Operation *op) {
+    auto foreach_ = op->getParentOfType<ForeachOp>();
+    if (!foreach_) return "";
+    return getName(foreach_.getBody().front().getArgument(0));
+  }
+
+  std::string getForeachUB(Operation *op) {
+    auto foreach_ = op->getParentOfType<ForeachOp>();
+    if (!foreach_) return "";
+    return getName(foreach_.getUpperBound());
+  }
+
+  void emitMMAExec(MMAExecOp op) {
+    Value accVal = op.getAccumulator();
+    auto lhsFragTy = cast<coir::MMAFragType>(op.getLhs().getType());
+    auto accFragTy = cast<coir::MMAFragType>(op.getAccumulator().getType());
+    auto layout = op.getLayout();
+
+    int64_t M = lhsFragTy.getShape()[0];
+    int64_t K = lhsFragTy.getShape()[1];
+    int64_t N = 0;
+    auto rhsFragTy = cast<coir::MMAFragType>(op.getRhs().getType());
+    if (layout == coir::MMALayout::RowCol)
+      N = rhsFragTy.getShape()[1];
+    else
+      N = rhsFragTy.getShape()[0];
+
+    Type inElemTy = lhsFragTy.getElementType();
+    Type outElemTy = accFragTy.getElementType();
+
+    std::string stub = getOrEmitStub(M, inElemTy, outElemTy, layout);
+    hasAcoreCall = true;
+
+    std::string lhsAddr = mmaFragAddrs.count(op.getLhs())
+                              ? mmaFragAddrs[op.getLhs()]
+                              : getName(op.getLhs());
+    std::string rhsAddr = mmaFragAddrs.count(op.getRhs())
+                              ? mmaFragAddrs[op.getRhs()]
+                              : getName(op.getRhs());
+
+    auto it = acoreStates.find(accVal);
+    if (it == acoreStates.end()) {
+      AcoreAccumState fresh;
+      fresh.ws_name = "__mma_ws_" + getName(accVal);
+      os << getIndent() << "int " << fresh.ws_name << "[2048];\n";
+      acoreStates[accVal] = fresh;
+      it = acoreStates.find(accVal);
+    }
+    auto &state = it->second;
+
+    std::string inPtr = acorePtrType(inElemTy);
+    std::string outPtr = acorePtrType(outElemTy);
+
+    bool inLoop = isInsideForeach(op);
+    if (inLoop) {
+      // Inside a K-loop: emit exec for all iterations except the last.
+      // The last iteration's exec is deferred to mma.store which will
+      // emit it with store_flag=1 (compute + writeback in one call).
+      std::string iv = getForeachIV(op);
+      std::string ub = getForeachUB(op);
+
+      std::string savedLhs = state.ws_name + "_last_lhs";
+      std::string savedRhs = state.ws_name + "_last_rhs";
+      os << getIndent() << savedLhs << " = (void*)" << lhsAddr << ";\n";
+      os << getIndent() << savedRhs << " = (void*)" << rhsAddr << ";\n";
+
+      os << getIndent() << "if (" << iv << " < " << ub << " - 1) {\n";
+      incIndent();
+      os << getIndent() << stub << "(\n"
+         << getIndent() << "    (" << outPtr << "*)nullptr,\n"
+         << getIndent() << "    (" << inPtr << "*)" << lhsAddr << ",\n"
+         << getIndent() << "    (" << inPtr << "*)" << rhsAddr << ",\n"
+         << getIndent() << "    " << state.ws_name << ",\n"
+         << getIndent() << "    " << K << ", " << N << ", "
+         << "(" << iv << " > 0 ? 1 : 0)"
+         << ", 0, 0, (" << iv << " > 0 ? 1 : 0));\n";
+      decIndent();
+      os << getIndent() << "}\n";
+
+      state.pending_lhs = savedLhs;
+      state.pending_rhs = savedRhs;
+      state.pending_k_dim = std::to_string(K);
+      state.pending_n_dim = std::to_string(N);
+      state.stub_name = stub;
+      state.acc_flag = 1;
+      state.lt_flag = 1;
+      state.has_pending = true;
+      state.first_exec = false;
+    } else {
+      // Outside loops: use deferred exec+store pattern.
+      // mma.exec just records pending; mma.store emits the call.
+      state.pending_lhs = lhsAddr;
+      state.pending_rhs = rhsAddr;
+      state.pending_k_dim = std::to_string(K);
+      state.pending_n_dim = std::to_string(N);
+      state.stub_name = stub;
+      state.acc_flag = state.first_exec ? 0 : 1;
+      state.lt_flag = state.first_exec ? 0 : 1;
+      state.has_pending = true;
+      state.first_exec = false;
+    }
+
+    valueNames[op.getResult()] = getName(accVal);
+    acoreStates[op.getResult()] = state;
+  }
+
+  void emitMMAStore(MMAStoreOp op) {
+    Value fragVal = op.getFragment();
+    std::string destAddr = getName(op.getDest());
+
+    auto it = acoreStates.find(fragVal);
+    if (it == acoreStates.end()) {
+      os << getIndent() << "// [error] mma.store without prior exec\n";
+      return;
+    }
+    auto &state = it->second;
+    if (!state.has_pending) {
+      os << getIndent() << "// [error] mma.store: no pending exec\n";
+      return;
+    }
+
+    auto fragTy = cast<coir::MMAFragType>(fragVal.getType());
+    Type outElemTy = fragTy.getElementType();
+
+    // Find the input element type from the exec op chain.
+    Type inElemTy = outElemTy;
+    if (auto execOp = fragVal.getDefiningOp<MMAExecOp>()) {
+      auto lhsFrag = cast<coir::MMAFragType>(execOp.getLhs().getType());
+      inElemTy = lhsFrag.getElementType();
+    } else if (auto foreachOp = fragVal.getDefiningOp<ForeachOp>()) {
+      // Result comes from a foreach loop; walk into the yield to find
+      // the exec op.
+      auto &body = foreachOp.getBody().front();
+      for (auto &bodyOp : body.getOperations()) {
+        if (auto execOp = dyn_cast<MMAExecOp>(bodyOp)) {
+          auto lhsFrag = cast<coir::MMAFragType>(execOp.getLhs().getType());
+          inElemTy = lhsFrag.getElementType();
+          break;
+        }
+      }
+    }
+
+    std::string inPtr = acorePtrType(inElemTy);
+    std::string outPtr = acorePtrType(outElemTy);
+
+    os << getIndent() << state.stub_name << "(\n"
+       << getIndent() << "    (" << outPtr << "*)" << destAddr << ",\n"
+       << getIndent() << "    (" << inPtr << "*)" << state.pending_lhs
+       << ",\n"
+       << getIndent() << "    (" << inPtr << "*)" << state.pending_rhs
+       << ",\n"
+       << getIndent() << "    " << state.ws_name << ",\n"
+       << getIndent() << "    " << state.pending_k_dim << ", "
+       << state.pending_n_dim << ", " << state.acc_flag
+       << ", 1, 0, " << state.lt_flag << ");\n";
+
+    state.has_pending = false;
+  }
+
+  void emitYield(YieldOp op) {
+    for (unsigned i = 0; i < op.getOperands().size(); ++i) {
+      auto yieldVal = op.getOperands()[i];
+      auto it = acoreStates.find(yieldVal);
+      if (it != acoreStates.end()) {
+        auto parentForeach = op->getParentOfType<ForeachOp>();
+        if (parentForeach) {
+          auto iterArgs = parentForeach.getBody().front().getArguments();
+          if (i + 1 < iterArgs.size())
+            acoreStates[iterArgs[i + 1]] = it->second;
+        }
+      }
+    }
   }
 
   void emitDataCopy(DataCopyOp op) {
@@ -579,14 +953,34 @@ private:
   }
 };
 
+struct EmitTopsccPass
+    : public PassWrapper<EmitTopsccPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(EmitTopsccPass)
+  StringRef getArgument() const override { return "coir-emit-topscc"; }
+  StringRef getDescription() const override {
+    return "Emit topscc/GCU C++ source from CoIR IR";
+  }
+  void runOnOperation() override {
+    auto module = getOperation();
+    TopsccEmitter emitter(llvm::outs());
+    emitter.emitModule(module);
+  }
+};
+
 } // namespace
 
 namespace coir {
+std::unique_ptr<mlir::Pass> createEmitTopsccPass() {
+  return std::make_unique<EmitTopsccPass>();
+}
+
 void emitTopscc(mlir::ModuleOp module, llvm::raw_ostream &os) {
   TopsccEmitter emitter(os);
   emitter.emitModule(module);
 }
 } // namespace coir
+
+static mlir::PassRegistration<EmitTopsccPass> reg;
 
 namespace {
 

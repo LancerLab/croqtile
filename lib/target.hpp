@@ -277,6 +277,25 @@ public:
   // Whether this target enables target-library lowering by default.
   virtual bool DefaultUseTargetLib() const { return false; }
 
+  // MMA target strategy name for CoIR lowering.
+  // Returns the string used to annotate coir.mma.exec operations:
+  //   "wgmma"    -- warp-group MMA (SM90+)
+  //   "mma_sync" -- cooperative MMA (SM80)
+  //   "ukernel"  -- library-based micro-kernel MMA
+  //   ""         -- target does not support MMA
+  virtual std::string MMATargetName(const ArchId& arch) const {
+    if (IsFeatureSupported(arch, STR(ChoreoFeature::MMA_UKERNEL)))
+      return "ukernel";
+    if (IsFeatureSupported(arch, STR(ChoreoFeature::WGMMA))) return "wgmma";
+    if (IsFeatureSupported(arch, STR(ChoreoFeature::MMA))) return "mma_sync";
+    return "";
+  }
+
+  // Whether TMA is supported for the given architecture (for CoIR lowering).
+  virtual bool HasTMA(const ArchId& arch) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::TMA));
+  }
+
   virtual bool PlanCodeGenStages(ASTPipeline&) const = 0;
 
   // Factory for DeviceCodeGen used by HeteroCodeGen. Returns nullptr if
