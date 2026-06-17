@@ -71,3 +71,33 @@ Re-install kits after toolchain package updates:
 ```bash
 make resetup-gcu2   # or resetup-gcu3, etc.
 ```
+
+## AMDGPU runners
+
+On AMDGPU CI machines (`tags: AMDGPU`):
+
+Unlike GCU, ROCm must be pre-installed by the user. There is no
+`make setup-amdgpu`.
+
+| Component | Default location | Override env var |
+|-----------|-----------------|------------------|
+| ROCm install | `/opt/rocm` | `ROCM_HOME` |
+| `hipcc` compiler | `${ROCM_HOME}/bin/hipcc` | -- |
+| Kernel driver | `amdgpu-dkms` package | -- |
+
+CI sequence (from `.gitlab-ci.yml`):
+
+```bash
+make setup-core
+make debug
+./tests/lit.sh tests/amdgpu/
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `hipGetDeviceCount` returns 0 | Driver/runtime version mismatch | Ensure `amdgpu-dkms` and ROCm userspace from same release; reboot |
+| `HSA_STATUS_ERROR_OUT_OF_RESOURCES` | Locked memory limit too low | Set `memlock unlimited` in `/etc/security/limits.d/99-rocm.conf` |
+| `open(/dev/dri/renderD128)` EINVAL | Stale driver state | Reboot or reload amdgpu module |
+| SSH submodule clone fails | `/opt/gitlab-runner/ssh/config` permission denied | `sudo chown gitlab-runner:gitlab-runner /opt/gitlab-runner/ssh/config` |
