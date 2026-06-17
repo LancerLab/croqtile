@@ -1,0 +1,64 @@
+// REQUIRES: TARGET-GPU
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+#include "choreo.h"
+
+#define K 8
+#define N 256
+
+__co__ auto mem_reuse_static(u8 [K, N] i0, u8 [K, N] i1) {
+  u8 [i0.span] output;
+
+  parallel p by 8, q by 128 {
+    smem1 = dma.copy.async i0.chunkat(p, _) => shared;
+    shared u8 [smem1.span] output_s{0};
+    wait smem1;
+
+    foreach i in [output_s.span(0)] {
+      output_s.at(i, q) = smem1.data.at(i, q);
+      output_s.at(i, q + 128) = smem1.data.at(i, q + 128);
+    }
+
+    // smem2 reuse smem1
+    smem2 = dma.copy.async i1.chunkat(p, _) => shared;
+    wait smem2;
+
+    foreach i in [output_s.span(0)] {
+      output_s.at(i, q) += smem2.data.at(i, q);
+      output_s.at(i, q + 128) += smem2.data.at(i, q + 128);
+    }
+
+    sync.shared;
+    dma.copy output_s => output.chunkat(p, _);
+  }
+
+  return output;
+}
+
+int main()
+{
+  choreo::u8 a[K][N] = {0};
+  choreo::u8 b[K][N] = {0};
+  auto a_data = choreo::make_spanview<2, choreo::u8>((choreo::u8*)a, {K, N});
+  auto b_data = choreo::make_spanview<2, choreo::u8>((choreo::u8*)b, {K, N});
+  a_data.fill_random(0, 10);
+  b_data.fill_random(0, 10);
+
+  auto res = mem_reuse_static(a_data, b_data);
+
+  std::cout << "shape of res: " << res.shape()[0] << std::endl;
+  std::cout << "shape of res: " << res.shape()[1] << std::endl;
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      if (a[i][j] + b[i][j] != res[i][j]) {
+        std::cout << "index: " << i << ", " << j << "__";
+        std::cout << "a: " << (int)a[i][j]  << "__";
+        std::cout << "b: " << (int)b[i][j]  << "__";
+        std::cout << "res: " << (int)res[i][j] << std::endl;
+        choreo::choreo_assert(a[i][j] + b[i][j] == res[i][j], "values are not equal.");
+      }
+  std::cout << "pass" << std::endl;
+  return 0;
+}
+
+// CHECK: pass

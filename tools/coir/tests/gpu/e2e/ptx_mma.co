@@ -1,0 +1,28 @@
+// REQUIRES: TARGET-GPU
+// XFAIL: *
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+__co__ auto mma_m16n8k16_f16_f32(f16[16, 16] lhs, f16[16, 16] rhs) {
+  f32 [16, 16] output;
+  parallel m by 1 : block {
+    parallel n by 1 : group {
+      mma.fill mc;
+      mma.load.a ma = lhs.row;
+      mma.load.b mb = rhs.col;
+      mma.row.col mc, ma, mb;
+      mma.store output, mc;
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f16>(16, 16);
+  auto b = choreo::make_spandata<choreo::f16>(16, 16);
+  a.fill_random(-1, 1);
+  b.fill_random(-1, 1);
+  auto c = mma_m16n8k16_f16_f32(a.view(), b.view());
+  std::cout << "PTX MMA Test Passed" << std::endl;
+}
+
+// CHECK: PTX MMA Test Passed
