@@ -1,5 +1,7 @@
 // RUN: coir-opt --coir-classify-copies --coir-lower-mma --coir-lower-copy --coir-emit-cuda %s | FileCheck %s
 
+module attributes { "coir.has_tma" = true, "coir.mma_target" = "wgmma" } {
+
 // CHECK: #include <cuda_fp16.h>
 // CHECK: #include <mma.h>
 // CHECK: using namespace nvcuda;
@@ -79,3 +81,5 @@ coir.kernel @matmul_kernel(
     coir.mma.store %final, %c : !coir.mma_frag<16x16xf32>, !coir.tensor<128x128xf32, shared>
   }
 }
+
+} // module

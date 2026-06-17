@@ -21,7 +21,10 @@ def ClassifyCopies : Pass<"coir-classify-copies"> {
     - shared -> shared (same level): coir.thread.copy
 
     TMA capability is read from the module attribute "coir.has_tma"
-    (set by the driver). When absent, --target-arch is used as fallback.
+    (set by the driver or embedded in test IR). When absent and
+    --target-arch is given, the arch string is used to infer TMA
+    capability. Without either, global-to-shared copies conservatively
+    become coir.dma.copy.
 
     Async coir.data.copy ops produce tokens that are threaded through
     to the specialized async ops.
@@ -31,8 +34,8 @@ def ClassifyCopies : Pass<"coir-classify-copies"> {
 
   let options = [
     Option<"targetArch", "target-arch", "std::string",
-           /*default=*/"\"sm_86\"",
-           "Fallback architecture when module lacks coir.has_tma">
+           /*default=*/"\"\"",
+           "Override architecture (takes precedence over module attrs)">
   ];
 
   let dependentDialects = ["::coir::CoIRDialect"];
@@ -49,15 +52,17 @@ def LowerMMA : Pass<"coir-lower-mma"> {
     - "ukernel"  : library-based micro-kernel MMA (non-GPU targets)
 
     The MMA target is read from the module attribute "coir.mma_target"
-    (set by the driver). When absent, --target-arch is used as fallback.
+    (set by the driver or embedded in test IR). When absent and
+    --target-arch is given, the arch string is used to infer the MMA
+    strategy. Without either, the pass emits an error.
   }];
 
   let constructor = "::coir::createLowerMMAPass()";
 
   let options = [
     Option<"targetArch", "target-arch", "std::string",
-           /*default=*/"\"sm_86\"",
-           "Fallback architecture when module lacks coir.mma_target">
+           /*default=*/"\"\"",
+           "Override architecture (takes precedence over module attrs)">
   ];
 
   let dependentDialects = [
@@ -84,8 +89,8 @@ def LowerCopy : Pass<"coir-lower-copy"> {
 
   let options = [
     Option<"targetArch", "target-arch", "std::string",
-           /*default=*/"\"sm_86\"",
-           "Fallback architecture (reserved for future use)">
+           /*default=*/"\"\"",
+           "Override architecture (reserved for future use)">
   ];
 
   let dependentDialects = [

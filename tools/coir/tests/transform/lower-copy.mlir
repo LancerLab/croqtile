@@ -1,6 +1,8 @@
 // RUN: coir-opt --coir-lower-copy %s | FileCheck %s
 // RUN: coir-opt --coir-classify-copies --coir-lower-copy %s | FileCheck %s --check-prefix=PIPE
 
+module attributes { "coir.has_tma" = true } {
+
 // Test: thread.copy gets element count annotation
 // CHECK-LABEL: coir.kernel @test_thread_copy
 // CHECK: coir.thread.copy %arg0 to %arg1 {lowered, total_elements = 256 : i64}
@@ -42,3 +44,5 @@ coir.kernel @test_classify_then_lower(
   coir.data.copy %g to %s : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
   coir.data.copy %s2 to %s3 : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
 }
+
+} // module

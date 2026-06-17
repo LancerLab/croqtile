@@ -4,7 +4,7 @@
 // RUN: coir-opt --coir-lower-mma %s | FileCheck %s
 
 // The module declares coir.mma_target = "ukernel"; LowerMMA should use it
-// instead of the default sm_90a fallback.
+// as the primary source of truth (no --target-arch needed).
 module attributes {
   "coir.mma_target" = "ukernel",
   "coir.arch" = "custom_arch_v1"
