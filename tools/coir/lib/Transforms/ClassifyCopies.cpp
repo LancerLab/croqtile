@@ -34,14 +34,16 @@ static int32_t getMemSpace(coir::TensorType ty) {
 
 static bool isGlobal(int32_t ms) { return ms <= 0; }
 static bool isShared(int32_t ms) { return ms == 1; }
+static bool isLocal(int32_t ms) { return ms == 2; }
 static bool isRegisterOrLocal(int32_t ms) { return ms >= 2; }
 
 struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
   using OpRewritePattern::OpRewritePattern;
 
   bool hasTMA;
-  ClassifyDataCopy(MLIRContext *ctx, bool hasTMA)
-      : OpRewritePattern(ctx), hasTMA(hasTMA) {}
+  bool hasDMA;
+  ClassifyDataCopy(MLIRContext *ctx, bool hasTMA, bool hasDMA)
+      : OpRewritePattern(ctx), hasTMA(hasTMA), hasDMA(hasDMA) {}
 
   LogicalResult matchAndRewrite(DataCopyOp op,
                                 PatternRewriter &rewriter) const override {
@@ -56,7 +58,9 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
 
     bool needsAsync =
         (isGlobal(srcMS) && isShared(dstMS)) ||
-        (isShared(srcMS) && isGlobal(dstMS));
+        (isShared(srcMS) && isGlobal(dstMS)) ||
+        (hasDMA && isGlobal(srcMS) && isLocal(dstMS)) ||
+        (hasDMA && isLocal(srcMS) && isGlobal(dstMS));
 
     if (needsAsync && hasTMA) {
       auto newOp = rewriter.create<TmaCopyOp>(loc,
@@ -92,6 +96,16 @@ static bool inferHasTMAFromArch(llvm::StringRef arch) {
   return arch.contains("sm_9") || arch.contains("sm_100");
 }
 
+// Infer DMA-engine requirement from --target-arch string.
+// This mirrors Target::HasDMA() for standalone coir-opt usage.
+// Any target not in the GPU/CPU family needs a DMA engine for global<->local.
+static bool inferHasDMAFromArch(llvm::StringRef arch) {
+  if (arch.empty()) return false;
+  if (arch.starts_with("sm_")) return false;
+  if (arch.starts_with("x86") || arch.starts_with("cpu")) return false;
+  return true;
+}
+
 struct ClassifyCopiesPass
     : public ::coir::impl::ClassifyCopiesBase<ClassifyCopiesPass> {
   using ClassifyCopiesBase::ClassifyCopiesBase;
@@ -99,18 +113,32 @@ struct ClassifyCopiesPass
   void runOnOperation() override {
     auto *ctx = &getContext();
 
-    // Module attribute (set by the driver via Target::HasTMA)
-    // is authoritative. Fall back to --target-arch for coir-opt.
+    // Module attributes (set by the driver via StampTargetOnModule) are
+    // authoritative.  Only fall back to --target-arch inference when no
+    // module attributes are present (standalone coir-opt usage).
     bool hasTMA = false;
-    if (auto module = dyn_cast<ModuleOp>(getOperation()))
-      hasTMA = CoIR::HasTMA(module);
-    else if (auto pm = getOperation()->getParentOfType<ModuleOp>())
-      hasTMA = CoIR::HasTMA(pm);
-    if (!hasTMA)
+    bool hasDMA = false;
+    bool hasModuleAttrs = false;
+    if (auto module = dyn_cast<ModuleOp>(getOperation())) {
+      if (module->hasAttr("coir.has_tma")) {
+        hasModuleAttrs = true;
+        hasTMA = CoIR::HasTMA(module);
+        hasDMA = CoIR::HasDMA(module);
+      }
+    } else if (auto pm = getOperation()->getParentOfType<ModuleOp>()) {
+      if (pm->hasAttr("coir.has_tma")) {
+        hasModuleAttrs = true;
+        hasTMA = CoIR::HasTMA(pm);
+        hasDMA = CoIR::HasDMA(pm);
+      }
+    }
+    if (!hasModuleAttrs) {
       hasTMA = inferHasTMAFromArch(targetArch);
+      hasDMA = inferHasDMAFromArch(targetArch);
+    }
 
     RewritePatternSet patterns(ctx);
-    patterns.add<ClassifyDataCopy>(ctx, hasTMA);
+    patterns.add<ClassifyDataCopy>(ctx, hasTMA, hasDMA);
 
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();

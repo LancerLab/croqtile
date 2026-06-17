@@ -122,7 +122,8 @@ int main(int argc, char *argv[]) {
     auto arch = CCtx().GetArch();
     CoIR::StampTargetOnModule(session.Module(), CCtx().TargetName(), arch,
                               target.MMATargetName(arch),
-                              target.HasTMA(arch));
+                              target.HasTMA(arch),
+                              target.HasDMA(arch));
   }
 
   // --- Lowering ---

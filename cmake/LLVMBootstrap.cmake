@@ -112,6 +112,16 @@ list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 
 include(AddLLVM)
 include(AddMLIR)
+
+# CMP0116 (CMake >= 3.20): Ninja generators transform DEPFILEs from
+# add_custom_command().  The NEW behavior produces multiple-output dep
+# entries that older Ninja versions (< 1.11) cannot handle, causing:
+#   "multiple outputs aren't (yet?) supported by depslog"
+# Set OLD to keep depfiles untransformed so the build works everywhere.
+if(POLICY CMP0116)
+  cmake_policy(SET CMP0116 OLD)
+endif()
+
 include(TableGen)
 
 include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})

@@ -296,6 +296,13 @@ public:
     return IsFeatureSupported(arch, STR(ChoreoFeature::TMA));
   }
 
+  // Whether the target requires a hardware DMA engine for global<->local
+  // memory transfers (for CoIR lowering).  When true, ClassifyCopies
+  // produces coir.dma.copy instead of coir.thread.copy for global<->local.
+  virtual bool HasDMA(const ArchId& arch) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::ASYNC_DMA));
+  }
+
   virtual bool PlanCodeGenStages(ASTPipeline&) const = 0;
 
   // Factory for DeviceCodeGen used by HeteroCodeGen. Returns nullptr if
