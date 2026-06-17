@@ -15,9 +15,13 @@ def ClassifyCopies : Pass<"coir-classify-copies"> {
     Analyzes source and destination memory spaces of coir.data.copy
     operations and replaces them with the appropriate specialized op:
 
-    - global -> shared: coir.dma.copy (SM < 90) or coir.tma.copy (SM >= 90)
+    - global <-> shared with TMA: coir.tma.copy
+    - global <-> shared without TMA: coir.dma.copy
     - shared -> register / register -> shared: coir.thread.copy
     - shared -> shared (same level): coir.thread.copy
+
+    TMA capability is read from the module attribute "coir.has_tma"
+    (set by the driver). When absent, --target-arch is used as fallback.
 
     Async coir.data.copy ops produce tokens that are threaded through
     to the specialized async ops.
@@ -28,7 +32,7 @@ def ClassifyCopies : Pass<"coir-classify-copies"> {
   let options = [
     Option<"targetArch", "target-arch", "std::string",
            /*default=*/"\"sm_90a\"",
-           "Target GPU architecture (e.g. sm_80, sm_90a)">
+           "Fallback architecture when module lacks coir.has_tma">
   ];
 
   let dependentDialects = ["::coir::CoIRDialect"];
@@ -37,16 +41,15 @@ def ClassifyCopies : Pass<"coir-classify-copies"> {
 def LowerMMA : Pass<"coir-lower-mma"> {
   let summary = "Lower coir.mma ops to target-specific MMA instructions";
   let description = [{
-    Converts coir.mma.fill/load/exec/store into sequences targeting
-    the selected GPU MMA instruction set:
+    Marks coir.mma.fill/load/exec/store as lowered and annotates
+    mma.exec with the target MMA strategy:
 
-    SM90+ (WGMMA):  coir.mma.* -> cute_nvgpu.make_sm90_mma pipeline
-    SM80  (MMA.sync): coir.mma.* -> gpu.subgroup_mma_* pipeline
+    - "wgmma"    : SM90+ warp-group MMA
+    - "mma_sync" : SM80 cooperative MMA
+    - "ukernel"  : library-based micro-kernel MMA (non-GPU targets)
 
-    The pass:
-    1. Expands mma.fill to explicit zero-init patterns
-    2. Expands mma.load/store to load/store-matrix sequences
-    3. Expands mma.exec to the target MMA compute instruction
+    The MMA target is read from the module attribute "coir.mma_target"
+    (set by the driver). When absent, --target-arch is used as fallback.
   }];
 
   let constructor = "::coir::createLowerMMAPass()";
@@ -54,7 +57,7 @@ def LowerMMA : Pass<"coir-lower-mma"> {
   let options = [
     Option<"targetArch", "target-arch", "std::string",
            /*default=*/"\"sm_90a\"",
-           "Target GPU architecture (e.g. sm_80, sm_90a)">
+           "Fallback architecture when module lacks coir.mma_target">
   ];
 
   let dependentDialects = [
@@ -82,7 +85,7 @@ def LowerCopy : Pass<"coir-lower-copy"> {
   let options = [
     Option<"targetArch", "target-arch", "std::string",
            /*default=*/"\"sm_90a\"",
-           "Target GPU architecture">
+           "Fallback architecture (reserved for future use)">
   ];
 
   let dependentDialects = [
