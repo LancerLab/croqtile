@@ -12,6 +12,7 @@
 #include "Dialect/CoIR/CoIRAttrs.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/SmallString.h"
@@ -53,6 +54,7 @@ private:
   DenseSet<Value> mmaAccumulators;
   DenseMap<Value, std::string> mmaFragRoles;
   DenseMap<Value, std::string> mmaFragLayouts;
+  DenseMap<Value, int64_t> tileStrides;
   unsigned nextId = 0;
 
   std::string getIndent() { return std::string(indent * 2, ' '); }
@@ -86,6 +88,14 @@ private:
       return "half";
     if (ty.isF32())
       return "float";
+    if (ty.isF64())
+      return "double";
+    if (ty.isInteger(1))
+      return "bool";
+    if (ty.isInteger(8))
+      return "uint8_t";
+    if (ty.isInteger(16))
+      return "int16_t";
     if (ty.isInteger(32))
       return "int";
     if (ty.isInteger(64))
@@ -97,8 +107,10 @@ private:
     if (ty.isF16()) return "half";
     if (ty.isF32()) return "float";
     if (ty.isF64()) return "double";
-    if (ty.isInteger(8)) return "int8_t";
+    if (ty.isInteger(8)) return "uint8_t";
+    if (ty.isInteger(16)) return "int16_t";
     if (ty.isInteger(32)) return "int32_t";
+    if (ty.isInteger(64)) return "int64_t";
     return "/* unknown */";
   }
 
@@ -209,9 +221,14 @@ private:
     if (auto tty = dyn_cast<coir::TensorType>(ty)) {
       std::string eTy = emitElementType(tty.getElementType());
       std::string choreoElem;
-      if (tty.getElementType().isInteger(32)) choreoElem = "choreo::s32";
-      else if (tty.getElementType().isF32()) choreoElem = "choreo::f32";
-      else if (tty.getElementType().isF16()) choreoElem = "choreo::f16";
+      auto eTyML = tty.getElementType();
+      if (eTyML.isInteger(8)) choreoElem = "choreo::u8";
+      else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
+      else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
+      else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
+      else if (eTyML.isF32()) choreoElem = "choreo::f32";
+      else if (eTyML.isF16()) choreoElem = "choreo::f16";
+      else if (eTyML.isF64()) choreoElem = "choreo::f64";
       else choreoElem = "choreo::s32";
       unsigned ndim = tty.getShape().size();
       if (asView)
@@ -357,9 +374,14 @@ private:
       ss << "}";
     }
     std::string choreoElem;
-    if (resTy.getElementType().isInteger(32)) choreoElem = "choreo::s32";
-    else if (resTy.getElementType().isF32()) choreoElem = "choreo::f32";
-    else if (resTy.getElementType().isF16()) choreoElem = "choreo::f16";
+    auto resElemTy = resTy.getElementType();
+    if (resElemTy.isInteger(8)) choreoElem = "choreo::u8";
+    else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
+    else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
+    else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
+    else if (resElemTy.isF32()) choreoElem = "choreo::f32";
+    else if (resElemTy.isF16()) choreoElem = "choreo::f16";
+    else if (resElemTy.isF64()) choreoElem = "choreo::f64";
     else choreoElem = "choreo::s32";
 
     os << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
@@ -404,6 +426,8 @@ private:
       emitMMAExec(exec);
     else if (auto store = dyn_cast<MMAStoreOp>(op))
       emitMMAStore(store);
+    else if (auto dataCopy = dyn_cast<DataCopyOp>(op))
+      emitDataCopy(dataCopy);
     else if (auto dmaCopy = dyn_cast<DmaCopyOp>(op))
       emitDmaCopy(dmaCopy);
     else if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
@@ -414,6 +438,8 @@ private:
       emitBarrier(barrier);
     else if (auto wait = dyn_cast<WaitOp>(op))
       emitWait(wait);
+    else if (auto reduceElem = dyn_cast<TensorReduceElemOp>(op))
+      emitTensorReduceElem(reduceElem);
     else if (auto alloc = dyn_cast<TensorAllocOp>(op))
       emitTensorAlloc(alloc);
     else if (auto tile = dyn_cast<TensorTileOp>(op))
@@ -424,7 +450,22 @@ private:
       emitYield(yield);
     else if (auto constOp = dyn_cast<arith::ConstantOp>(op))
       emitConstant(constOp);
+    else if (auto indexCast = dyn_cast<arith::IndexCastOp>(op)) {
+      valueNames[indexCast.getResult()] = getName(indexCast.getIn());
+    }
+    else if (auto ifOp = dyn_cast<mlir::scf::IfOp>(op))
+      emitIfOp(ifOp);
+    else if (isa<mlir::scf::YieldOp>(op))
+      (void)op;
     else if (emitArithBinOp(op)) {}
+    else if (emitCmpOp(op)) {}
+    else if (auto selectOp = dyn_cast<arith::SelectOp>(op)) {
+      std::string name = getName(selectOp.getResult());
+      os << getIndent() << emitCUDAType(selectOp.getResult().getType()) << " "
+         << name << " = " << getName(selectOp.getCondition()) << " ? "
+         << getName(selectOp.getTrueValue()) << " : "
+         << getName(selectOp.getFalseValue()) << ";\n";
+    }
     else {
       os << getIndent() << "// [unhandled] " << op->getName().getStringRef()
          << "\n";
@@ -544,15 +585,47 @@ private:
        << ", " << ldm << ", wmma::mem_row_major);\n";
   }
 
+  void emitDataCopy(DataCopyOp op) {
+    auto srcTy = dyn_cast<coir::TensorType>(op.getSource().getType());
+    int64_t totalElems = 1;
+    if (srcTy)
+      for (auto d : srcTy.getShape()) totalElems *= d;
+
+    os << getIndent() << "for (int i = threadIdx.x; i < " << totalElems
+       << "; i += blockDim.x)\n";
+    incIndent();
+    os << getIndent() << getName(op.getDest()) << "[i] = "
+       << getName(op.getSource()) << "[i];\n";
+    decIndent();
+    os << getIndent() << "__syncthreads();\n";
+
+    if (op.getToken())
+      valueNames[op.getToken()] = getName(op.getDest());
+  }
+
   void emitDmaCopy(DmaCopyOp op) {
-    os << getIndent() << "// DMA copy: cp.async\n";
-    os << getIndent() << "cuda::memcpy_async(" << getName(op.getDest())
-       << ", " << getName(op.getSource()) << ", "
-       << "/* transfer_bytes */";
+    auto srcTy = dyn_cast<coir::TensorType>(op.getSource().getType());
+    int64_t totalElems = 1;
+    if (srcTy)
+      for (auto d : srcTy.getShape()) totalElems *= d;
+
+    int64_t totalBytes = totalElems * 4;
     if (auto bytes = op->getAttrOfType<IntegerAttr>("transfer_bytes"))
-      os << " " << bytes.getInt();
-    os << ");\n";
-    valueNames[op.getToken()] = "/* dma_token */";
+      totalBytes = bytes.getInt();
+    else if (srcTy) {
+      unsigned bits = srcTy.getElementType().getIntOrFloatBitWidth();
+      totalBytes = totalElems * bits / 8;
+    }
+
+    os << getIndent() << "for (int i = threadIdx.x; i < " << totalElems
+       << "; i += blockDim.x)\n";
+    incIndent();
+    os << getIndent() << getName(op.getDest()) << "[i] = "
+       << getName(op.getSource()) << "[i];\n";
+    decIndent();
+    os << getIndent() << "__syncthreads();\n";
+
+    valueNames[op.getToken()] = getName(op.getDest());
   }
 
   void emitTmaCopy(TmaCopyOp op) {
@@ -566,14 +639,31 @@ private:
     int64_t totalElems = 0;
     if (auto n = op->getAttrOfType<IntegerAttr>("total_elements"))
       totalElems = n.getInt();
-    os << getIndent() << "// thread cooperative copy (" << totalElems
-       << " elements)\n";
-    os << getIndent() << "for (int i = threadIdx.x; i < " << totalElems
-       << "; i += blockDim.x)\n";
-    incIndent();
-    os << getIndent() << getName(op.getDest()) << "[i] = "
-       << getName(op.getSource()) << "[i];\n";
-    decIndent();
+
+    auto srcStrideIt = tileStrides.find(op.getSource());
+    auto dstStrideIt = tileStrides.find(op.getDest());
+    int64_t srcStride = srcStrideIt != tileStrides.end() ? srcStrideIt->second : 1;
+    int64_t dstStride = dstStrideIt != tileStrides.end() ? dstStrideIt->second : 1;
+
+    if (totalElems <= 1) {
+      os << getIndent() << getName(op.getDest()) << "[0] = "
+         << getName(op.getSource()) << "[0];\n";
+    } else if (srcStride == 1 && dstStride == 1) {
+      os << getIndent() << "for (int i = threadIdx.x; i < " << totalElems
+         << "; i += blockDim.x)\n";
+      incIndent();
+      os << getIndent() << getName(op.getDest()) << "[i] = "
+         << getName(op.getSource()) << "[i];\n";
+      decIndent();
+    } else {
+      os << getIndent() << "for (int i = 0; i < " << totalElems << "; ++i)\n";
+      incIndent();
+      std::string srcIdx = srcStride != 1 ? "i * " + std::to_string(srcStride) : "i";
+      std::string dstIdx = dstStride != 1 ? "i * " + std::to_string(dstStride) : "i";
+      os << getIndent() << getName(op.getDest()) << "[" << dstIdx << "] = "
+         << getName(op.getSource()) << "[" << srcIdx << "];\n";
+      decIndent();
+    }
   }
 
   void emitBarrier(BarrierOp op) {
@@ -586,7 +676,7 @@ private:
   }
 
   void emitWait(WaitOp op) {
-    os << getIndent() << "// wait for async op\n";
+    os << getIndent() << "__syncthreads();\n";
   }
 
   void emitTensorAlloc(TensorAllocOp op) {
@@ -617,22 +707,58 @@ private:
       return;
     }
 
-    os << getIndent() << "auto " << name << " = " << getName(op.getSource());
-    if (srcTy && !indices.empty()) {
-      os << " + (";
-      auto srcShape = srcTy.getShape();
-      auto tileShape = tileTy ? tileTy.getShape() : llvm::ArrayRef<int64_t>{};
-      for (unsigned i = 0; i < indices.size(); ++i) {
-        if (i > 0) os << " + ";
-        os << getName(indices[i]);
-        int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
-        os << " * " << tileDim;
-        for (unsigned j = i + 1; j < srcShape.size(); ++j)
-          os << " * " << srcShape[j];
+    auto srcShape = srcTy.getShape();
+    auto tileShape = tileTy ? tileTy.getShape() : llvm::ArrayRef<int64_t>{};
+
+    llvm::SmallVector<int64_t> srcStrides(srcShape.size());
+    {
+      int64_t s = 1;
+      for (int i = (int)srcShape.size() - 1; i >= 0; --i) {
+        srcStrides[i] = s;
+        s *= srcShape[i];
       }
-      os << ")";
     }
-    os << ";\n";
+
+    bool hasWildcard = false;
+    int64_t wildcardStride = 1;
+
+    llvm::SmallVector<int64_t> perIdxTileSize(indices.size(), 1);
+    if (indices.size() == srcShape.size() &&
+        tileShape.size() == srcShape.size()) {
+      for (unsigned i = 0; i < indices.size(); ++i)
+        perIdxTileSize[i] = tileShape[i];
+    } else {
+      for (unsigned i = 0; i < indices.size() && i < srcShape.size(); ++i) {
+        bool isConst0 = false;
+        if (auto constOp = indices[i].getDefiningOp<arith::ConstantOp>())
+          if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue()))
+            if (intAttr.getInt() == 0)
+              isConst0 = true;
+
+        if (isConst0 && srcShape[i] > 1) {
+          perIdxTileSize[i] = srcShape[i];
+          hasWildcard = true;
+          wildcardStride = srcStrides[i];
+        } else {
+          perIdxTileSize[i] = 1;
+        }
+      }
+    }
+
+    if (hasWildcard)
+      tileStrides[op.getResult()] = wildcardStride;
+
+    os << getIndent() << "auto " << name << " = " << getName(op.getSource());
+    os << " + (";
+    for (unsigned i = 0; i < indices.size(); ++i) {
+      if (i > 0) os << " + ";
+      os << getName(indices[i]);
+      int64_t stride = perIdxTileSize[i];
+      for (unsigned j = i + 1; j < srcShape.size(); ++j)
+        stride *= srcShape[j];
+      os << " * " << stride;
+    }
+    os << ");\n";
   }
 
   void emitLinearIndex(mlir::ValueRange indices, coir::TensorType tty) {
@@ -676,6 +802,22 @@ private:
     os << "];\n";
   }
 
+  void emitTensorReduceElem(TensorReduceElemOp op) {
+    std::string dst = getName(op.getDest());
+    std::string val = getName(op.getValue());
+    auto tty = cast<coir::TensorType>(op.getDest().getType());
+    bool isAtomic = op->hasAttr("atomic");
+    if (isAtomic) {
+      os << getIndent() << "atomicAdd(&" << dst << "[";
+      emitLinearIndex(op.getIndices(), tty);
+      os << "], " << val << ");\n";
+    } else {
+      os << getIndent() << dst << "[";
+      emitLinearIndex(op.getIndices(), tty);
+      os << "] += " << val << ";\n";
+    }
+  }
+
   void emitTensorStoreElem(TensorStoreElemOp op) {
     std::string dst = getName(op.getDest());
     std::string val = getName(op.getValue());
@@ -695,6 +837,8 @@ private:
       opStr = "*";
     else if (isa<arith::DivSIOp>(op) || isa<arith::DivFOp>(op))
       opStr = "/";
+    else if (isa<arith::RemSIOp>(op))
+      opStr = "%";
     else
       return false;
 
@@ -706,9 +850,75 @@ private:
     return true;
   }
 
+  void emitIfOp(mlir::scf::IfOp op) {
+    os << getIndent() << "if (" << getName(op.getCondition()) << ") {\n";
+    incIndent();
+    for (auto &bodyOp : op.getThenRegion().front().getOperations())
+      emitOp(&bodyOp);
+    decIndent();
+    os << getIndent() << "}\n";
+    if (!op.getElseRegion().empty()) {
+      os << getIndent() << "else {\n";
+      incIndent();
+      for (auto &bodyOp : op.getElseRegion().front().getOperations())
+        emitOp(&bodyOp);
+      decIndent();
+      os << getIndent() << "}\n";
+    }
+  }
+
+  bool emitCmpOp(Operation *op) {
+    if (auto cmpI = dyn_cast<arith::CmpIOp>(op)) {
+      std::string name = getName(cmpI.getResult());
+      std::string lhs = getName(cmpI.getLhs());
+      std::string rhs = getName(cmpI.getRhs());
+      llvm::StringRef opStr;
+      switch (cmpI.getPredicate()) {
+      case arith::CmpIPredicate::eq:  opStr = "=="; break;
+      case arith::CmpIPredicate::ne:  opStr = "!="; break;
+      case arith::CmpIPredicate::slt: opStr = "<"; break;
+      case arith::CmpIPredicate::sle: opStr = "<="; break;
+      case arith::CmpIPredicate::sgt: opStr = ">"; break;
+      case arith::CmpIPredicate::sge: opStr = ">="; break;
+      case arith::CmpIPredicate::ult: opStr = "<"; break;
+      case arith::CmpIPredicate::ule: opStr = "<="; break;
+      case arith::CmpIPredicate::ugt: opStr = ">"; break;
+      case arith::CmpIPredicate::uge: opStr = ">="; break;
+      }
+      os << getIndent() << "bool " << name << " = (" << lhs << " " << opStr
+         << " " << rhs << ");\n";
+      return true;
+    }
+    if (auto cmpF = dyn_cast<arith::CmpFOp>(op)) {
+      std::string name = getName(cmpF.getResult());
+      std::string lhs = getName(cmpF.getLhs());
+      std::string rhs = getName(cmpF.getRhs());
+      llvm::StringRef opStr;
+      switch (cmpF.getPredicate()) {
+      case arith::CmpFPredicate::OEQ: opStr = "=="; break;
+      case arith::CmpFPredicate::OGT: opStr = ">"; break;
+      case arith::CmpFPredicate::OGE: opStr = ">="; break;
+      case arith::CmpFPredicate::OLT: opStr = "<"; break;
+      case arith::CmpFPredicate::OLE: opStr = "<="; break;
+      default: opStr = "!="; break;
+      }
+      os << getIndent() << "bool " << name << " = (" << lhs << " " << opStr
+         << " " << rhs << ");\n";
+      return true;
+    }
+    return false;
+  }
+
   void emitYield(YieldOp op) {
-    for (unsigned i = 0; i < op.getOperands().size(); ++i) {
-      os << getIndent() << "// yield -> loop carried\n";
+    auto *parentOp = op->getParentOp();
+    if (auto foreachOp = dyn_cast<ForeachOp>(parentOp)) {
+      auto args = foreachOp.getBody().front().getArguments();
+      for (unsigned i = 0; i < op.getOperands().size(); ++i) {
+        auto iterArgName = getName(args[i + 1]);
+        auto yieldValName = getName(op.getOperands()[i]);
+        if (iterArgName != yieldValName)
+          os << getIndent() << iterArgName << " = " << yieldValName << ";\n";
+      }
     }
   }
 

@@ -1,0 +1,16 @@
+// REQUIRES: TARGET-GPU
+// XFAIL: *
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck %s && rm -f %s.result
+
+__co__ void foo(int a, stream _s) {
+  parallel(_s) p by 6 : block {
+    parallel q by 256 : thread {
+    }
+  }
+}
+
+int main() {
+  std::cout << "Stream test passed" << std::endl;
+}
+
+// CHECK: Stream test passed

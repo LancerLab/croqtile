@@ -1,0 +1,45 @@
+// REQUIRES: TARGET-GPU
+// XFAIL: *
+// RUN: cocc -t cute -gs %s --disable-runtime-check -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+__co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by 6 : block {
+    foreach x in 6 {
+      X = (x == 5) ? 2 : 3;
+      shared s32 [1, 3, 64] lhs_s, rhs_s, buffer;
+      f = dma.copy.async lhs.view(1, X, _).from(p, 3*x, 0) => lhs_s.subspan(1, X, _);
+      g = dma.copy.async rhs.view(1, X, _).from(p, 3*x, 0) => rhs_s.subspan(1, X, _);
+      wait f, g;
+
+      parallel q by 64
+        foreach y in X
+          buffer.at(0, y, q) = lhs_s.at(0, y, q) + rhs_s.at(0, y, q);
+
+      dma.copy buffer => output.view(1, X, _).from(p, 3*x, 0);
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  auto b = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = ele_add(a.view(), b.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

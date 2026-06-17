@@ -31,7 +31,7 @@ def ClassifyCopies : Pass<"coir-classify-copies"> {
 
   let options = [
     Option<"targetArch", "target-arch", "std::string",
-           /*default=*/"\"sm_90a\"",
+           /*default=*/"\"sm_86\"",
            "Fallback architecture when module lacks coir.has_tma">
   ];
 
@@ -56,7 +56,7 @@ def LowerMMA : Pass<"coir-lower-mma"> {
 
   let options = [
     Option<"targetArch", "target-arch", "std::string",
-           /*default=*/"\"sm_90a\"",
+           /*default=*/"\"sm_86\"",
            "Fallback architecture when module lacks coir.mma_target">
   ];
 
@@ -84,7 +84,7 @@ def LowerCopy : Pass<"coir-lower-copy"> {
 
   let options = [
     Option<"targetArch", "target-arch", "std::string",
-           /*default=*/"\"sm_90a\"",
+           /*default=*/"\"sm_86\"",
            "Fallback architecture (reserved for future use)">
   ];
 

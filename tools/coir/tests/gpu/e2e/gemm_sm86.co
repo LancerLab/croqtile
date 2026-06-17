@@ -1,0 +1,28 @@
+// REQUIRES: TARGET-GPU
+// XFAIL: *
+// RUN: cocc -t cute -gs %s -arch=sm_86 -o %s.result && CHOREO_DISABLE_TIMING=1 bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+__co__ auto matmul_rc_mma_sync(f16 [256, 16] lhs, f16 [16, 256] rhs) {
+  f32 [256, 256] output;
+  parallel m by 8 : block {
+    parallel n by 1 : group {
+      mma.fill mc;
+      mma.load.a ma = lhs.row;
+      mma.load.b mb = rhs.col;
+      mma.row.col mc, ma, mb;
+      mma.store output, mc;
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f16>(256, 16);
+  auto b = choreo::make_spandata<choreo::f16>(16, 256);
+  a.fill_random(-1, 1);
+  b.fill_random(-1, 1);
+  auto c = matmul_rc_mma_sync(a.view(), b.view());
+  std::cout << "GEMM SM86 Test Passed" << std::endl;
+}
+
+// CHECK: GEMM SM86 Test Passed

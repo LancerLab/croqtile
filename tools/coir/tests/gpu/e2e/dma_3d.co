@@ -1,0 +1,33 @@
+// REQUIRES: TARGET-GPU
+// XFAIL: *
+// RUN: cocc -t cute -gs %s -o %s.result && CHOREO_DISABLE_TIMING=1 bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+#include "choreo.h"
+
+__co__ auto test_flat_s32(s32 [2, 4, 8] input) {
+  s32[2, 4, 8] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.copy input.subspan(2, 4, 8) => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s32>(2, 4, 8);
+  for (size_t i = 0; i < 2; ++i)
+    for (size_t j = 0; j < 4; ++j)
+      for (size_t k = 0; k < 8; ++k)
+        input[i][j][k] = static_cast<choreo::s32>((i * 31 + j * 17 + k * 5) % 41 - 20);
+  auto output = test_flat_s32(input.view());
+  for (size_t i = 0; i < 2; ++i)
+    for (size_t j = 0; j < 4; ++j)
+      for (size_t k = 0; k < 8; ++k)
+        choreo::choreo_assert(output[i][j][k] == input[i][j][k], "mismatch");
+  std::cout << "Test 3D Passed" << std::endl;
+}
+
+// CHECK: Test 3D Passed

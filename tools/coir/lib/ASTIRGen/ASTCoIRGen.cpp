@@ -3,6 +3,8 @@
 #include "codegen_utils.hpp"
 #include "symbexpr.hpp"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "llvm/ADT/StringSet.h"
 
 using namespace Choreo;
 using namespace CoIR;
@@ -27,10 +29,18 @@ mlir::Type ASTCoIRGen::LowerBaseType(BaseType bt) {
   case BaseType::BF16: return mlir::BFloat16Type::get(&ctx);
   case BaseType::F8_E4M3: return mlir::Float8E4M3FNType::get(&ctx);
   case BaseType::F8_E5M2: return mlir::Float8E5M2Type::get(&ctx);
+  case BaseType::U8:
+  case BaseType::S8:
+    return mlir::IntegerType::get(&ctx, 8);
+  case BaseType::U16:
+  case BaseType::S16:
+    return mlir::IntegerType::get(&ctx, 16);
   case BaseType::U32:
-    return mlir::IntegerType::get(&ctx, 32, mlir::IntegerType::Unsigned);
   case BaseType::S32:
-    return mlir::IntegerType::get(&ctx, 32, mlir::IntegerType::Signless);
+    return mlir::IntegerType::get(&ctx, 32);
+  case BaseType::S64:
+  case BaseType::U64:
+    return mlir::IntegerType::get(&ctx, 64);
   case BaseType::BOOL: return mlir::IntegerType::get(&ctx, 1);
   default: return mlir::Float32Type::get(&ctx);
   }
@@ -112,7 +122,19 @@ bool ASTCoIRGen::BeforeVisitImpl(AST::Node &n) {
   return true;
 }
 
-bool ASTCoIRGen::InMidVisitImpl(AST::Node &) { return true; }
+bool ASTCoIRGen::InMidVisitImpl(AST::Node &n) {
+  if (isa<AST::IfElseBlock>(&n) && !ifOpStack.empty()) {
+    auto ifOp = ifOpStack.back();
+    auto &thenBlock = ifOp.getThenRegion().front();
+    builder.setInsertionPointToEnd(&thenBlock);
+    if (thenBlock.empty() ||
+        !thenBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
+      builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc());
+    if (!ifOp.getElseRegion().empty())
+      builder.setInsertionPointToStart(&ifOp.getElseRegion().front());
+  }
+  return true;
+}
 
 bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
@@ -168,6 +190,17 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     PopScope();
     for (auto &[name, val] : resultMappings)
       UpdateValue(name, val);
+  } else if (isa<AST::IfElseBlock>(&n) && !ifOpStack.empty()) {
+    auto ifOp = ifOpStack.pop_back_val();
+    auto &lastRegion = ifOp.getElseRegion().empty()
+                           ? ifOp.getThenRegion()
+                           : ifOp.getElseRegion();
+    auto &lastBlock = lastRegion.front();
+    builder.setInsertionPointToEnd(&lastBlock);
+    if (lastBlock.empty() ||
+        !lastBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
+      builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc());
+    builder.setInsertionPointAfter(ifOp);
   } else if (isa<AST::WithBlock>(&n)) {
     PopScope();
   }
@@ -293,6 +326,31 @@ void collectMMAAccNames(AST::Node *node,
     if (body) collectMMAAccNames(body.get(), names);
   }
 }
+
+void collectScalarIterArgs(AST::Node *node,
+                           llvm::SmallVectorImpl<std::string> &names,
+                           llvm::StringSet<> &seen) {
+  if (!node) return;
+  if (auto *asgn = dyn_cast<AST::Assignment>(node)) {
+    if (!asgn->AssignToDataElement() && !asgn->IsDecl()) {
+      auto &name = asgn->GetName();
+      if (!seen.count(name)) {
+        names.push_back(name);
+        seen.insert(name);
+      }
+    }
+    return;
+  }
+  if (auto *mn = dyn_cast<AST::MultiNodes>(node)) {
+    for (auto &child : mn->values)
+      if (child) collectScalarIterArgs(child.get(), names, seen);
+    return;
+  }
+  if (node->HasBody()) {
+    auto body = node->GetBody();
+    if (body) collectScalarIterArgs(body.get(), names, seen);
+  }
+}
 } // namespace
 
 bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
@@ -308,21 +366,86 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
           if (expr->Opts().HasVal())
             bound = EvalToInt(expr->Opts().GetVal());
       }
+      if (bound <= 1) {
+        auto rvName = lr->GetRVName();
+        auto symType = GetSymbolType(rvName);
+        if (auto bty = dyn_cast<BoundedType>(symType)) {
+          if (bty->HasValidBound()) {
+            auto &ub = bty->GetUpperBound();
+            if (ub && ub->IsNumeric())
+              bound = EvalToInt(ub);
+          }
+        }
+      }
+      if (bound <= 1 && lr->ubound) {
+        std::string spanRef;
+        if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get())) {
+          if (auto *inner = dyn_cast<AST::Identifier>(expr->GetR().get()))
+            spanRef = inner->name;
+        } else if (auto *id = dyn_cast<AST::Identifier>(lr->ubound.get())) {
+          spanRef = id->name;
+        }
+        if (!spanRef.empty()) {
+          auto base = spanRef;
+          if (base.size() > 5 &&
+              base.substr(base.size() - 5) == ".span")
+            base = base.substr(0, base.size() - 5);
+          auto val = LookupValue(base);
+          if (!val) val = LookupValue(base + ".data");
+          if (val) {
+            if (auto tty = val.getType().dyn_cast<coir::TensorType>()) {
+              int64_t totalElems = 1;
+              for (auto d : tty.getShape()) totalElems *= d;
+              if (totalElems > 1) bound = totalElems;
+            }
+          }
+        }
+      }
+      if (bound <= 1) {
+        auto rvName = lr->GetRVName();
+        auto symType = GetSymbolType(rvName);
+        if (auto bty = dyn_cast<BoundedType>(symType)) {
+          if (bty->HasValidBound()) {
+            auto ubs = bty->GetUpperBounds();
+            if (ubs.IsValid()) {
+              int64_t total = 1;
+              for (auto &ub : ubs.Value())
+                if (ub && ub->IsNumeric()) total *= EvalToInt(ub);
+              if (total > 1) bound = total;
+            }
+          }
+        }
+      }
     }
   }
 
   llvm::SmallVector<std::string> accNames;
   if (fb.stmts) collectMMAAccNames(fb.stmts.get(), accNames);
 
+  llvm::SmallVector<std::string> scalarNames;
+  llvm::StringSet<> scalarSeen;
+  if (fb.stmts) collectScalarIterArgs(fb.stmts.get(), scalarNames, scalarSeen);
+
   llvm::SmallVector<mlir::Value> iterArgs;
   llvm::SmallVector<mlir::Type> iterTypes;
   llvm::SmallVector<std::string> iterNames;
+  llvm::StringSet<> iterSeen;
   for (auto &name : accNames) {
     auto val = LookupValue(name);
-    if (val) {
+    if (val && !iterSeen.count(name)) {
       iterArgs.push_back(val);
       iterTypes.push_back(val.getType());
       iterNames.push_back(name);
+      iterSeen.insert(name);
+    }
+  }
+  for (auto &name : scalarNames) {
+    auto val = LookupValue(name);
+    if (val && !iterSeen.count(name)) {
+      iterArgs.push_back(val);
+      iterTypes.push_back(val.getType());
+      iterNames.push_back(name);
+      iterSeen.insert(name);
     }
   }
 
@@ -384,6 +507,35 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         loc, llvm::APFloat(val), ty);
   }
 
+  if (auto *sa = dyn_cast<AST::SpanAs>(&n)) {
+    auto srcVal = LookupValue(sa->id->name);
+    if (!srcVal) return nullptr;
+    auto srcTy = srcVal.getType().dyn_cast<coir::TensorType>();
+    if (!srcTy) return srcVal;
+
+    llvm::SmallVector<int64_t> newShape;
+    if (sa->list) {
+      for (auto &v : sa->list->AllValues()) {
+        if (auto *il = dyn_cast<AST::IntLiteral>(v.get())) {
+          int64_t val =
+              std::visit([](auto x) -> int64_t { return x; }, il->value);
+          newShape.push_back(val);
+        } else if (auto *expr = dyn_cast<AST::Expr>(v.get())) {
+          if (expr->Opts().HasVal())
+            newShape.push_back(EvalToInt(expr->Opts().GetVal()));
+        }
+      }
+    }
+    if (newShape.empty()) return srcVal;
+
+    auto reshapedTy = coir::TensorType::get(
+        &IRContext(), srcTy.getElementType(), newShape,
+        srcTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
+    auto tileOp = builder.create<coir::TensorTileOp>(
+        loc, reshapedTy, srcVal, mlir::ValueRange{});
+    return tileOp.getResult();
+  }
+
   if (auto *da = dyn_cast<AST::DataAccess>(&n)) {
     if (da->AccessElement()) {
       auto tensorVal = LookupValue(da->GetDataName());
@@ -420,6 +572,17 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       auto rhs = EmitExpr(*expr->GetR());
       if (!lhs || !rhs) return nullptr;
 
+      if (lhs.getType() != rhs.getType()) {
+        if (lhs.getType().isa<mlir::IndexType>() &&
+            rhs.getType().isa<mlir::IntegerType>())
+          rhs = builder.create<mlir::arith::IndexCastOp>(loc, lhs.getType(),
+                                                          rhs);
+        else if (rhs.getType().isa<mlir::IndexType>() &&
+                 lhs.getType().isa<mlir::IntegerType>())
+          lhs = builder.create<mlir::arith::IndexCastOp>(loc, rhs.getType(),
+                                                          lhs);
+      }
+
       auto resTy = lhs.getType();
       bool isFloat = resTy.isa<mlir::FloatType>();
       auto op = expr->GetOp();
@@ -448,6 +611,59 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
                                                                       rhs)
                    : (mlir::Value)builder.create<mlir::arith::DivSIOp>(loc, lhs,
                                                                        rhs);
+      if (op == Op::Mod)
+        return (mlir::Value)builder.create<mlir::arith::RemSIOp>(loc, lhs, rhs);
+      if (op == Op::Lt)
+        return isFloat
+                   ? (mlir::Value)builder.create<mlir::arith::CmpFOp>(
+                         loc, mlir::arith::CmpFPredicate::OLT, lhs, rhs)
+                   : (mlir::Value)builder.create<mlir::arith::CmpIOp>(
+                         loc, mlir::arith::CmpIPredicate::slt, lhs, rhs);
+      if (op == Op::Gt)
+        return isFloat
+                   ? (mlir::Value)builder.create<mlir::arith::CmpFOp>(
+                         loc, mlir::arith::CmpFPredicate::OGT, lhs, rhs)
+                   : (mlir::Value)builder.create<mlir::arith::CmpIOp>(
+                         loc, mlir::arith::CmpIPredicate::sgt, lhs, rhs);
+      if (op == Op::Eq)
+        return isFloat
+                   ? (mlir::Value)builder.create<mlir::arith::CmpFOp>(
+                         loc, mlir::arith::CmpFPredicate::OEQ, lhs, rhs)
+                   : (mlir::Value)builder.create<mlir::arith::CmpIOp>(
+                         loc, mlir::arith::CmpIPredicate::eq, lhs, rhs);
+      if (op == Op::Le)
+        return isFloat
+                   ? (mlir::Value)builder.create<mlir::arith::CmpFOp>(
+                         loc, mlir::arith::CmpFPredicate::OLE, lhs, rhs)
+                   : (mlir::Value)builder.create<mlir::arith::CmpIOp>(
+                         loc, mlir::arith::CmpIPredicate::sle, lhs, rhs);
+      if (op == Op::Ge)
+        return isFloat
+                   ? (mlir::Value)builder.create<mlir::arith::CmpFOp>(
+                         loc, mlir::arith::CmpFPredicate::OGE, lhs, rhs)
+                   : (mlir::Value)builder.create<mlir::arith::CmpIOp>(
+                         loc, mlir::arith::CmpIPredicate::sge, lhs, rhs);
+      if (op == Op::Ne)
+        return isFloat
+                   ? (mlir::Value)builder.create<mlir::arith::CmpFOp>(
+                         loc, mlir::arith::CmpFPredicate::UNE, lhs, rhs)
+                   : (mlir::Value)builder.create<mlir::arith::CmpIOp>(
+                         loc, mlir::arith::CmpIPredicate::ne, lhs, rhs);
+    }
+
+    if (expr->GetForm() == AST::Expr::Ternary) {
+      auto cond = EmitExpr(*expr->GetC());
+      auto trueVal = EmitExpr(*expr->GetL());
+      auto falseVal = EmitExpr(*expr->GetR());
+      if (!cond || !trueVal || !falseVal) return nullptr;
+      if (!cond.getType().isInteger(1)) {
+        auto zero = builder.create<mlir::arith::ConstantIntOp>(
+            loc, 0, cond.getType());
+        cond = builder.create<mlir::arith::CmpIOp>(
+            loc, mlir::arith::CmpIPredicate::ne, cond, zero);
+      }
+      return builder.create<mlir::arith::SelectOp>(loc, cond, trueVal,
+                                                    falseVal);
     }
 
     if (expr->GetForm() == AST::Expr::Unary) {
@@ -474,10 +690,12 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
 
 bool ASTCoIRGen::Visit(AST::Assignment &asgn) {
   if (!asgn.AssignToDataElement()) {
-    if (asgn.IsDecl()) {
-      auto rhs = EmitExpr(*asgn.value);
-      if (rhs)
+    auto rhs = EmitExpr(*asgn.value);
+    if (rhs) {
+      if (asgn.IsDecl())
         MapValue(asgn.GetName(), rhs);
+      else
+        UpdateValue(asgn.GetName(), rhs);
     }
     return true;
   }
@@ -526,6 +744,12 @@ bool ASTCoIRGen::Visit(AST::Return &ret) {
 }
 
 bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
+  if (lastSpanAsResult) {
+    MapValue(nvd.GetName(), lastSpanAsResult);
+    lastSpanAsResult = nullptr;
+    return true;
+  }
+
   auto symType = GetSymbolType(nvd.GetName());
   if (!symType) return true;
 
@@ -534,8 +758,148 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
     auto tty = LowerSpannedType(sty);
     auto allocOp = builder.create<coir::TensorAllocOp>(loc, tty);
     MapValue(nvd.GetName(), allocOp.getResult());
+  } else {
+    if (nvd.init_expr) {
+      auto val = EmitExpr(*nvd.init_expr);
+      if (val) MapValue(nvd.GetName(), val);
+    } else if (nvd.init_value) {
+      auto val = EmitExpr(*nvd.init_value);
+      if (val) MapValue(nvd.GetName(), val);
+    }
   }
   return true;
+}
+
+bool ASTCoIRGen::Visit(AST::SpanAs &sa) {
+  auto srcVal = LookupValue(sa.id->name);
+  if (!srcVal) return true;
+  auto srcTy = srcVal.getType().dyn_cast<coir::TensorType>();
+  if (!srcTy) return true;
+
+  auto loc = Loc(sa);
+  llvm::SmallVector<int64_t> newShape;
+  if (sa.list) {
+    for (auto &v : sa.list->AllValues()) {
+      if (auto *il = dyn_cast<AST::IntLiteral>(v.get())) {
+        int64_t val =
+            std::visit([](auto x) -> int64_t { return x; }, il->value);
+        newShape.push_back(val);
+      } else if (auto *expr = dyn_cast<AST::Expr>(v.get())) {
+        if (expr->Opts().HasVal())
+          newShape.push_back(EvalToInt(expr->Opts().GetVal()));
+      }
+    }
+  }
+  if (newShape.empty()) return true;
+
+  auto reshapedTy = coir::TensorType::get(
+      &IRContext(), srcTy.getElementType(), newShape,
+      srcTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
+  auto tileOp = builder.create<coir::TensorTileOp>(
+      loc, reshapedTy, srcVal, mlir::ValueRange{});
+
+  if (sa.nid && !sa.nid->name.empty())
+    MapValue(sa.nid->name, tileOp.getResult());
+
+  lastSpanAsResult = tileOp.getResult();
+  return true;
+}
+
+mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
+                                        mlir::Value baseVal) {
+  auto loc = Loc(chunk);
+  auto baseTy = baseVal.getType().dyn_cast<coir::TensorType>();
+  if (!baseTy) return baseVal;
+
+  auto baseShape = baseTy.getShape();
+
+  auto isWildcard = [](AST::Node *idx) -> bool {
+    if (auto *id = dyn_cast<AST::Identifier>(idx))
+      return id->name == "_" || id->name == "__choreo_no_tiling__";
+    if (auto *expr = dyn_cast<AST::Expr>(idx)) {
+      if (expr->GetForm() == AST::Expr::Reference) {
+        auto *inner = expr->GetR().get();
+        if (auto *id = dyn_cast<AST::Identifier>(inner))
+          return id->name == "_" || id->name == "__choreo_no_tiling__";
+      }
+    }
+    return false;
+  };
+
+  auto emitIdx = [&](AST::Node *idx) -> mlir::Value {
+    if (auto *id = dyn_cast<AST::Identifier>(idx)) {
+      auto v = LookupValue(id->name);
+      if (v) {
+        if (!v.getType().isa<mlir::IndexType>())
+          v = builder.create<mlir::arith::IndexCastOp>(
+              loc, mlir::IndexType::get(&IRContext()), v);
+        return v;
+      }
+    }
+    auto v = EmitExpr(*idx);
+    if (v && !v.getType().isa<mlir::IndexType>())
+      v = builder.create<mlir::arith::IndexCastOp>(
+          loc, mlir::IndexType::get(&IRContext()), v);
+    return v;
+  };
+
+  llvm::SmallVector<mlir::Value> idxVals;
+  llvm::SmallVector<int64_t> tileShape;
+
+  if (chunk.HasOperation()) {
+    for (auto &sop : chunk.AllOperations()) {
+      auto indices = sop->GetIndices();
+      if (!indices) continue;
+      unsigned dimIdx = 0;
+      for (auto &idx : indices->AllValues()) {
+        if (isWildcard(idx.get())) {
+          tileShape.push_back(dimIdx < baseShape.size()
+                                  ? baseShape[dimIdx]
+                                  : 1);
+          auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+          idxVals.push_back(zero);
+        } else {
+          auto v = emitIdx(idx.get());
+          if (v) {
+            idxVals.push_back(v);
+            tileShape.push_back(1);
+          }
+        }
+        dimIdx++;
+      }
+      break;
+    }
+  } else if (chunk.indices) {
+    unsigned dimIdx = 0;
+    for (auto &idx : chunk.indices->AllValues()) {
+      if (isWildcard(idx.get())) {
+        tileShape.push_back(dimIdx < baseShape.size()
+                                ? baseShape[dimIdx]
+                                : 1);
+        auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+        idxVals.push_back(zero);
+      } else {
+        auto v = emitIdx(idx.get());
+        if (v) {
+          idxVals.push_back(v);
+          tileShape.push_back(1);
+        }
+      }
+      dimIdx++;
+    }
+  }
+
+  if (idxVals.empty()) return baseVal;
+
+  llvm::SmallVector<int64_t> resultShape;
+  for (auto d : tileShape)
+    if (d != 1) resultShape.push_back(d);
+  if (resultShape.empty()) resultShape.push_back(1);
+
+  auto tileTy = coir::TensorType::get(
+      &IRContext(), baseTy.getElementType(), resultShape,
+      baseTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
+  return builder.create<coir::TensorTileOp>(loc, tileTy, baseVal, idxVals);
 }
 
 bool ASTCoIRGen::Visit(AST::DMA &dma) {
@@ -546,30 +910,44 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   mlir::Value srcVal = nullptr;
   mlir::Value dstVal = nullptr;
 
+  auto resolveDMAVal = [&](mlir::Value val, llvm::StringRef name) -> mlir::Value {
+    if (val && val.getType().isa<coir::AsyncTokenType>()) {
+      auto dataVal = LookupValue((name + ".data").str());
+      if (dataVal) return dataVal;
+    }
+    return val;
+  };
+
   if (auto *srcChunk = dyn_cast<AST::ChunkAt>(dma.from.get())) {
-    srcVal = LookupValue(srcChunk->data->name);
+    auto base = LookupValue(srcChunk->data->name);
+    base = resolveDMAVal(base, srcChunk->data->name);
+    if (base) srcVal = EmitChunkAtTile(*srcChunk, base);
   } else if (auto *srcId = dyn_cast<AST::Identifier>(dma.from.get())) {
     srcVal = LookupValue(srcId->name);
+    srcVal = resolveDMAVal(srcVal, srcId->name);
   } else if (auto *srcDA = dyn_cast<AST::DataAccess>(dma.from.get())) {
     srcVal = LookupValue(srcDA->GetDataName());
+    srcVal = resolveDMAVal(srcVal, srcDA->GetDataName());
   }
 
   if (auto *dstChunk = dyn_cast<AST::ChunkAt>(dma.to.get())) {
-    dstVal = LookupValue(dstChunk->data->name);
+    auto base = LookupValue(dstChunk->data->name);
+    if (base) dstVal = EmitChunkAtTile(*dstChunk, base);
   } else if (auto *dstId = dyn_cast<AST::Identifier>(dma.to.get())) {
     dstVal = LookupValue(dstId->name);
   } else if (auto *dstDA = dyn_cast<AST::DataAccess>(dma.to.get())) {
     dstVal = LookupValue(dstDA->GetDataName());
-  } else if (isa<AST::Memory>(dma.to.get())) {
-    // "=> local" pattern: create a local tensor alloc for the destination
+  } else if (auto *mem = dyn_cast<AST::Memory>(dma.to.get())) {
     if (srcVal) {
       auto srcTy = srcVal.getType().dyn_cast<coir::TensorType>();
       if (srcTy) {
-        auto localTy = coir::TensorType::get(
+        auto space = coir::TensorMemorySpace::Local;
+        if (mem->Get() == Storage::SHARED)
+          space = coir::TensorMemorySpace::Shared;
+        auto dstTy = coir::TensorType::get(
             &IRContext(), srcTy.getElementType(), srcTy.getShape(),
-            static_cast<int32_t>(coir::TensorMemorySpace::Local),
-            srcTy.getStrides());
-        auto allocOp = builder.create<coir::TensorAllocOp>(loc, localTy);
+            static_cast<int32_t>(space), srcTy.getStrides());
+        auto allocOp = builder.create<coir::TensorAllocOp>(loc, dstTy);
         dstVal = allocOp.getResult();
       }
     }
@@ -584,10 +962,14 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
       srcVal, dstVal, isAsync ? builder.getUnitAttr() : mlir::UnitAttr{});
 
   if (!dma.future.empty()) {
-    if (isAsync && copyOp.getToken())
+    if (isAsync && copyOp.getToken()) {
       MapValue(dma.future, copyOp.getToken());
-    else if (dstVal)
+      if (dstVal)
+        MapValue(dma.future + ".data", dstVal);
+    } else if (dstVal) {
       MapValue(dma.future, dstVal);
+      MapValue(dma.future + ".data", dstVal);
+    }
   }
 
   return true;
@@ -792,6 +1174,106 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     break;
   }
 
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::Wait &w) {
+  if (!w.targets) return true;
+  auto loc = Loc(w);
+  for (auto &t : w.targets->AllValues()) {
+    std::string name;
+    if (auto *id = dyn_cast<AST::Identifier>(t.get()))
+      name = id->name;
+    else if (auto *expr = dyn_cast<AST::Expr>(t.get())) {
+      if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get()))
+        name = id->name;
+    }
+    if (name.empty()) continue;
+    auto tokenVal = LookupValue(name);
+    if (!tokenVal) continue;
+    if (tokenVal.getType().isa<coir::AsyncTokenType>())
+      builder.create<coir::WaitOp>(loc, tokenVal);
+  }
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::Synchronize &sync) {
+  auto loc = Loc(sync);
+  auto scope = coir::ParallelLevel::BLOCK;
+  if (sync.buf_ty == Storage::SHARED)
+    scope = coir::ParallelLevel::BLOCK;
+  builder.create<coir::BarrierOp>(
+      loc, coir::ParallelLevelAttr::get(&IRContext(), scope));
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::Call &call) {
+  if (!call.IsAtomic()) return true;
+  auto loc = Loc(call);
+  auto &fname = call.function->name;
+  auto &args = call.GetArguments();
+
+  if (fname == "__atomic_add" && args.size() >= 2) {
+    AST::Node *addrNode = args[0].get();
+    auto valNode = args[1].get();
+
+    if (auto *expr = dyn_cast<AST::Expr>(addrNode))
+      if (expr->GetForm() == AST::Expr::Reference && expr->GetR())
+        addrNode = expr->GetR().get();
+
+    mlir::Value valVal = nullptr;
+
+    if (auto *da = dyn_cast<AST::DataAccess>(addrNode)) {
+      auto tensorVal = LookupValue(da->GetDataName());
+      if (tensorVal) {
+        auto tty = tensorVal.getType().dyn_cast<coir::TensorType>();
+        if (tty) {
+          llvm::SmallVector<mlir::Value> idxVals;
+          for (auto &idx : da->GetIndices()) {
+            mlir::Value v = EmitExpr(*idx);
+            if (!v) {
+              if (auto *idNode = dyn_cast<AST::Identifier>(idx.get()))
+                v = LookupValue(idNode->name);
+            }
+            if (v && !v.getType().isa<mlir::IndexType>())
+              v = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), v);
+            if (v) idxVals.push_back(v);
+          }
+          valVal = EmitExpr(*valNode);
+          if (valVal && tensorVal) {
+            auto reduceOp = builder.create<coir::TensorReduceElemOp>(
+                loc, valVal, tensorVal, idxVals);
+            reduceOp->setAttr("atomic", builder.getUnitAttr());
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::IfElseBlock &ifelse) {
+  auto loc = Loc(ifelse);
+  auto pred = ifelse.GetPredicate();
+  if (!pred) return true;
+
+  auto condVal = EmitExpr(*pred);
+  if (!condVal) return true;
+
+  if (!condVal.getType().isInteger(1)) {
+    auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, 0,
+        condVal.getType());
+    condVal = builder.create<mlir::arith::CmpIOp>(
+        loc, mlir::arith::CmpIPredicate::ne, condVal, zero);
+  }
+
+  bool hasElse = ifelse.HasElse();
+  auto ifOp = builder.create<mlir::scf::IfOp>(loc, mlir::TypeRange{},
+                                                condVal, hasElse);
+  ifOpStack.push_back(ifOp);
+
+  builder.setInsertionPointToStart(&ifOp.getThenRegion().front());
   return true;
 }
 

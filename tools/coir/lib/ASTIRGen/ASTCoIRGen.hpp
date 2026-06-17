@@ -12,6 +12,7 @@
 #include "Dialect/CoIR/CoIRTypes.h"
 #include "Dialect/CoIR/CoIRAttrs.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 
 using namespace Choreo;
 
@@ -55,10 +56,18 @@ private:
     for (auto it = value_stack.rbegin(); it != value_stack.rend(); ++it)
       if (auto found = it->find(name); found != it->end())
         return found->second;
+    if (name.ends_with(".data")) {
+      auto base = name.drop_back(5);
+      for (auto it = value_stack.rbegin(); it != value_stack.rend(); ++it)
+        if (auto found = it->find(base); found != it->end())
+          return found->second;
+    }
     return nullptr;
   }
 
   llvm::SmallVector<std::pair<std::string, mlir::Value>> pendingYields;
+  mlir::Value lastSpanAsResult;
+  llvm::SmallVector<mlir::scf::IfOp> ifOpStack;
 
   llvm::SmallVector<mlir::Value> expr_stack;
   void PushExpr(mlir::Value v) { expr_stack.push_back(v); }
@@ -70,6 +79,7 @@ private:
   }
 
   mlir::Value EmitExpr(AST::Node &n);
+  mlir::Value EmitChunkAtTile(AST::ChunkAt &chunk, mlir::Value baseVal);
   void CreateKernelOp(AST::ChoreoFunction &cf);
 
 public:
@@ -115,23 +125,23 @@ public:
   bool Visit(AST::WithIn &) override { return true; }
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
-  bool Visit(AST::SpanAs &) override { return true; }
+  bool Visit(AST::SpanAs &) override;
   bool Visit(AST::DMA &) override;
   bool Visit(AST::MMA &) override;
   bool Visit(AST::ChunkAt &) override { return true; }
-  bool Visit(AST::Wait &) override { return true; }
+  bool Visit(AST::Wait &) override;
   bool Visit(AST::Trigger &) override { return true; }
   bool Visit(AST::Break &) override { return true; }
   bool Visit(AST::Continue &) override { return true; }
   bool Visit(AST::Yield &) override { return true; }
-  bool Visit(AST::Call &) override { return true; }
+  bool Visit(AST::Call &) override;
   bool Visit(AST::Rotate &) override { return true; }
-  bool Visit(AST::Synchronize &) override { return true; }
+  bool Visit(AST::Synchronize &) override;
   bool Visit(AST::Select &) override { return true; }
   bool Visit(AST::LoopRange &) override { return true; }
   bool Visit(AST::InThreadsBlock &) override { return true; }
   bool Visit(AST::WhileBlock &) override { return true; }
-  bool Visit(AST::IfElseBlock &) override { return true; }
+  bool Visit(AST::IfElseBlock &) override;
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::DeviceFunctionDecl &) override { return true; }
 };
