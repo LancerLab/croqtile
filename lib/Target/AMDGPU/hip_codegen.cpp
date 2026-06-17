@@ -98,7 +98,7 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
       DecrDeviceIndent();
       ds << d_indent << "}\n";
 
-      hs << h_indent << "hipDeviceSynchronize();\n";
+      hs << h_indent << "(void)hipDeviceSynchronize();\n";
       hs << h_indent << "choreo::verify_device_status();\n";
 
       for (auto& item : GetChoreoFuncIns(updating_cgi)) {
@@ -338,7 +338,7 @@ bool HIPCodeGen::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
   switch (n.Resource()) {
   case Storage::GLOBAL:
-    hs << h_indent << "hipDeviceSynchronize();\n";
+    hs << h_indent << "(void)hipDeviceSynchronize();\n";
     hs << h_indent << "choreo::verify_device_status();\n";
     break;
   case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
@@ -816,8 +816,8 @@ bool HIPCodeGen::Visit(AST::DMA& n) {
   if (IsHost()) {
     auto to_sty = GetSpannedType(NodeType(*n.GetTo()));
     if (to_sty) {
-      hs << h_indent << "hipMemcpy(" << to_expr << ", " << from_expr << ", "
-         << UnScopedSizeExpr(*to_sty) << ", hipMemcpyDefault);\n";
+      hs << h_indent << "(void)hipMemcpy(" << to_expr << ", " << from_expr
+         << ", " << UnScopedSizeExpr(*to_sty) << ", hipMemcpyDefault);\n";
     }
     return true;
   }
@@ -1513,11 +1513,11 @@ void HIPCodeGen::EmitHipFree() {
       (void)sty;
       if (item.attr == ParamAttr::GLOBAL_INPUT) continue;
       auto sym = UnScopedName(item.name);
-      hs << h_indent << "hipFree(" << sym << "__device);\n";
+      hs << h_indent << "(void)hipFree(" << sym << "__device);\n";
     }
   }
   for (auto& buf : event_global_buffers)
-    hs << h_indent << "hipFree(" << buf << ");\n";
+    hs << h_indent << "(void)hipFree(" << buf << ");\n";
 }
 
 // ============================================================================
@@ -1587,6 +1587,15 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
   }
   if (auto id = dyn_cast<AST::Identifier>(n)) {
     auto sname = InScopeNameForRef(id->name);
+    if (within_map.count(sname)) {
+      std::string r;
+      size_t i = 0;
+      for (auto& iv_name : within_map.at(sname)) {
+        if (i++ > 0) r += ", ";
+        r += UnScopedName(SSMName(iv_name, is_host));
+      }
+      return r;
+    }
     if (is_host && ssm.HasHostName(sname)) return ssm.HostName(sname);
     if (!is_host && ssm.HasDeviceName(sname)) return ssm.DeviceName(sname);
     auto sname2 = InScopeName(id->name);
@@ -1695,6 +1704,22 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
         auto shape = sty->GetShape();
         size_t idx = 0;
         for (auto item : da->GetIndices()) {
+          if (auto id_node = AST::GetIdentifier(item)) {
+            auto id_sname = InScopeNameForRef(id_node->name);
+            if (within_map.count(id_sname)) {
+              for (auto& iv : within_map.at(id_sname)) {
+                auto offset_vi = sbe::sym(iv);
+                if (shape.Rank() > idx + 1)
+                  offset_vi =
+                      offset_vi * shape.TrimDims(idx + 1).ElementCountValue();
+                SimplifyExpression(offset_vi);
+                if (!sbe::ceq(offset_vi, sbe::nu(0)))
+                  oss << " + " << ValueSTR(offset_vi);
+                ++idx;
+              }
+              continue;
+            }
+          }
           oss << " + ";
           if (shape.Rank() > idx + 1)
             oss << ExprSTR(item, is_host) << " * "

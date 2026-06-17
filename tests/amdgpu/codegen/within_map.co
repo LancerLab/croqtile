@@ -1,0 +1,37 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// --- Tuple within_map: component-wise index expansion ---
+__co__ void test_within_tuple(f32 [4, 8] a) {
+  f32 [4, 8] output;
+  parallel p by 1 {
+    with {x, y} in [4, 8] {
+      foreach x, y {
+        output.at(x, y) = a.at(x, y);
+      }
+    }
+  }
+}
+
+// CHECK: int __iv_x = 0;
+// CHECK: int __iv_y = 0;
+// CHECK: for (__iv_x = 0; __iv_x < 4; ++__iv_x) {
+// CHECK:   for (__iv_y = 0; __iv_y < 8; ++__iv_y) {
+// CHECK:     *((float*)output + (__iv_x * 8) + __iv_y) = *((float*)a + (__iv_x * 8) + __iv_y);
+
+// --- Named index with foreach index ---
+__co__ void test_named_within(f32 [4, 8] a) {
+  f32 [4, 8] output;
+  parallel p by 1 {
+    with index={x, y} in [4, 8] {
+      foreach index {
+        output.at(x, y) = a.at(x, y);
+      }
+    }
+  }
+}
+
+// CHECK: int __iv_x = 0;
+// CHECK: int __iv_y = 0;
+// CHECK: for (__iv_x = 0; __iv_x < 4; ++__iv_x) {
+// CHECK:   for (__iv_y = 0; __iv_y < 8; ++__iv_y) {
+// CHECK:     *((float*)output + (__iv_x * 8) + __iv_y) = *((float*)a + (__iv_x * 8) + __iv_y);
