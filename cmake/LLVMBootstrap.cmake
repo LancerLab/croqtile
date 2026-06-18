@@ -96,6 +96,16 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
   message(STATUS "CoIR: LLVM/MLIR installed to ${_LLVM_ROOT}")
 endif()
 
+# CMP0116 (CMake >= 3.20): Ninja generators transform DEPFILEs from
+# add_custom_command().  The NEW behavior produces multiple-output dep
+# entries that older Ninja versions (< 1.11) cannot handle, causing:
+#   "multiple outputs aren't (yet?) supported by depslog"
+# Set OLD before loading LLVM/MLIR modules so their TableGen rules
+# inherit the policy.
+if(POLICY CMP0116)
+  cmake_policy(SET CMP0116 OLD)
+endif()
+
 # --- Configure LLVM/MLIR ---
 list(PREPEND CMAKE_PREFIX_PATH "${_LLVM_ROOT}")
 set(MLIR_DIR "${_LLVM_CMAKE_DIR}/mlir" CACHE PATH "MLIR CMake directory")
@@ -112,16 +122,6 @@ list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 
 include(AddLLVM)
 include(AddMLIR)
-
-# CMP0116 (CMake >= 3.20): Ninja generators transform DEPFILEs from
-# add_custom_command().  The NEW behavior produces multiple-output dep
-# entries that older Ninja versions (< 1.11) cannot handle, causing:
-#   "multiple outputs aren't (yet?) supported by depslog"
-# Set OLD to keep depfiles untransformed so the build works everywhere.
-if(POLICY CMP0116)
-  cmake_policy(SET CMP0116 OLD)
-endif()
-
 include(TableGen)
 
 include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
