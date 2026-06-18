@@ -32,6 +32,8 @@
 
 #include "choreo_header.inc"
 #include "choreo_types_header.inc"
+#include "choreo_types_cute_header.inc"
+#include "choreo_cute_header.inc"
 
 using namespace Choreo;
 
@@ -55,6 +57,8 @@ void SetupScriptContext() {
   auto &sctx = CoIR::ScriptContext::Get();
   sctx.types_header = __choreo_types_header_as_string;
   sctx.runtime_header = __choreo_header_as_string;
+  sctx.types_cute_header = __choreo_types_cute_header_as_string;
+  sctx.cute_header = __choreo_cute_header_as_string;
   auto dcg = CCtx().GetTarget().MakeDeviceCodeGen();
   if (dcg) {
     std::ostringstream env_ss;

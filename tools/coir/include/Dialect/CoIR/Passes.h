@@ -69,6 +69,8 @@ llvm::StringRef GetArch(mlir::ModuleOp module);
 struct ScriptContext {
   const char *types_header = nullptr;
   const char *runtime_header = nullptr;
+  const char *types_cute_header = nullptr;
+  const char *cute_header = nullptr;
   std::string build_env;
   std::string arch_override;
 

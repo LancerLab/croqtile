@@ -2,8 +2,8 @@
 
 module attributes { "coir.has_tma" = true, "coir.mma_target" = "wgmma" } {
 
-// CHECK: #include <cuda_fp16.h>
-// CHECK: #include <mma.h>
+// CHECK: #define __CHOREO_TARGET_CUTE__
+// CHECK: #include "choreo.h"
 // CHECK: using namespace nvcuda;
 
 // End-to-end test: simple MMA kernel
