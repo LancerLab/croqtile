@@ -54,7 +54,12 @@ private:
   DenseSet<Value> mmaAccumulators;
   DenseMap<Value, std::string> mmaFragRoles;
   DenseMap<Value, std::string> mmaFragLayouts;
+  struct TileLayout {
+    llvm::SmallVector<int64_t> shape;
+    llvm::SmallVector<int64_t> strides;
+  };
   DenseMap<Value, int64_t> tileStrides;
+  DenseMap<Value, TileLayout> tileLayouts;
   unsigned nextId = 0;
 
   std::string getIndent() { return std::string(indent * 2, ' '); }
@@ -158,8 +163,8 @@ private:
   }
 
   void emitHeader() {
-    os << "#include <cuda_fp16.h>\n";
-    os << "#include <mma.h>\n";
+    os << "#define __CHOREO_TARGET_CUTE__\n";
+    os << "#define __USE_CUDA_TYPE__\n";
     os << "#include \"choreo.h\"\n";
     os << "using namespace nvcuda;\n\n";
   }
@@ -585,18 +590,83 @@ private:
        << ", " << ldm << ", wmma::mem_row_major);\n";
   }
 
-  void emitDataCopy(DataCopyOp op) {
-    auto srcTy = dyn_cast<coir::TensorType>(op.getSource().getType());
-    int64_t totalElems = 1;
-    if (srcTy)
-      for (auto d : srcTy.getShape()) totalElems *= d;
+  TileLayout getLayoutForValue(Value v) {
+    auto it = tileLayouts.find(v);
+    if (it != tileLayouts.end())
+      return it->second;
+    auto tty = dyn_cast<coir::TensorType>(v.getType());
+    if (!tty) return {};
+    auto shape = tty.getShape();
+    TileLayout layout;
+    layout.shape.assign(shape.begin(), shape.end());
+    layout.strides.resize(shape.size());
+    int64_t s = 1;
+    for (int i = (int)shape.size() - 1; i >= 0; --i) {
+      layout.strides[i] = s;
+      s *= shape[i];
+    }
+    return layout;
+  }
 
-    os << getIndent() << "for (int i = threadIdx.x; i < " << totalElems
-       << "; i += blockDim.x)\n";
-    incIndent();
-    os << getIndent() << getName(op.getDest()) << "[i] = "
-       << getName(op.getSource()) << "[i];\n";
-    decIndent();
+  void emitCuteMakeShape(llvm::StringRef varName,
+                         const llvm::SmallVector<int64_t> &dims) {
+    os << getIndent() << "auto " << varName << " = cute::make_shape(";
+    for (unsigned i = 0; i < dims.size(); ++i) {
+      if (i > 0) os << ", ";
+      os << "cute::Int<" << dims[i] << ">{}";
+    }
+    os << ");\n";
+  }
+
+  void emitCuteMakeStride(llvm::StringRef varName,
+                          const llvm::SmallVector<int64_t> &strides) {
+    os << getIndent() << "auto " << varName << " = cute::make_stride(";
+    for (unsigned i = 0; i < strides.size(); ++i) {
+      if (i > 0) os << ", ";
+      os << "cute::Int<" << strides[i] << ">{}";
+    }
+    os << ");\n";
+  }
+
+  std::string emitCuteTensor(Value v, const std::string &suffix) {
+    auto layout = getLayoutForValue(v);
+    auto tty = dyn_cast<coir::TensorType>(v.getType());
+    int32_t ms = tty ? tty.getMemorySpace() : 0;
+
+    std::string shapeName = "__shape" + suffix;
+    std::string strideName = "__stride" + suffix;
+    std::string layoutName = "__layout" + suffix;
+    std::string tensorName = "__tensor" + suffix;
+
+    emitCuteMakeShape(shapeName, layout.shape);
+    emitCuteMakeStride(strideName, layout.strides);
+    os << getIndent() << "auto " << layoutName
+       << " = cute::make_layout(" << shapeName << ", " << strideName
+       << ");\n";
+
+    std::string elemTy = tty ? emitElementType(tty.getElementType()) : "int";
+    std::string ptrName = getName(v);
+    os << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
+    if (ms == 0)
+      os << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
+         << ptrName << ")";
+    else
+      os << "((" << elemTy << "*)" << ptrName << ")";
+    os << ", " << layoutName << ");\n";
+
+    return tensorName;
+  }
+
+  void emitNaiveCopy(Value src, Value dst) {
+    unsigned id = nextId++;
+    std::string srcTensor = emitCuteTensor(src, "_src_" + std::to_string(id));
+    std::string dstTensor = emitCuteTensor(dst, "_dst_" + std::to_string(id));
+    os << getIndent() << "choreo::naive_copy(" << srcTensor << ", "
+       << dstTensor << ");\n";
+  }
+
+  void emitDataCopy(DataCopyOp op) {
+    emitNaiveCopy(op.getSource(), op.getDest());
     os << getIndent() << "__syncthreads();\n";
 
     if (op.getToken())
@@ -604,25 +674,7 @@ private:
   }
 
   void emitDmaCopy(DmaCopyOp op) {
-    auto srcTy = dyn_cast<coir::TensorType>(op.getSource().getType());
-    int64_t totalElems = 1;
-    if (srcTy)
-      for (auto d : srcTy.getShape()) totalElems *= d;
-
-    int64_t totalBytes = totalElems * 4;
-    if (auto bytes = op->getAttrOfType<IntegerAttr>("transfer_bytes"))
-      totalBytes = bytes.getInt();
-    else if (srcTy) {
-      unsigned bits = srcTy.getElementType().getIntOrFloatBitWidth();
-      totalBytes = totalElems * bits / 8;
-    }
-
-    os << getIndent() << "for (int i = threadIdx.x; i < " << totalElems
-       << "; i += blockDim.x)\n";
-    incIndent();
-    os << getIndent() << getName(op.getDest()) << "[i] = "
-       << getName(op.getSource()) << "[i];\n";
-    decIndent();
+    emitNaiveCopy(op.getSource(), op.getDest());
     os << getIndent() << "__syncthreads();\n";
 
     valueNames[op.getToken()] = getName(op.getDest());
@@ -636,34 +688,7 @@ private:
   }
 
   void emitThreadCopy(ThreadCopyOp op) {
-    int64_t totalElems = 0;
-    if (auto n = op->getAttrOfType<IntegerAttr>("total_elements"))
-      totalElems = n.getInt();
-
-    auto srcStrideIt = tileStrides.find(op.getSource());
-    auto dstStrideIt = tileStrides.find(op.getDest());
-    int64_t srcStride = srcStrideIt != tileStrides.end() ? srcStrideIt->second : 1;
-    int64_t dstStride = dstStrideIt != tileStrides.end() ? dstStrideIt->second : 1;
-
-    if (totalElems <= 1) {
-      os << getIndent() << getName(op.getDest()) << "[0] = "
-         << getName(op.getSource()) << "[0];\n";
-    } else if (srcStride == 1 && dstStride == 1) {
-      os << getIndent() << "for (int i = threadIdx.x; i < " << totalElems
-         << "; i += blockDim.x)\n";
-      incIndent();
-      os << getIndent() << getName(op.getDest()) << "[i] = "
-         << getName(op.getSource()) << "[i];\n";
-      decIndent();
-    } else {
-      os << getIndent() << "for (int i = 0; i < " << totalElems << "; ++i)\n";
-      incIndent();
-      std::string srcIdx = srcStride != 1 ? "i * " + std::to_string(srcStride) : "i";
-      std::string dstIdx = dstStride != 1 ? "i * " + std::to_string(dstStride) : "i";
-      os << getIndent() << getName(op.getDest()) << "[" << dstIdx << "] = "
-         << getName(op.getSource()) << "[" << srcIdx << "];\n";
-      decIndent();
-    }
+    emitNaiveCopy(op.getSource(), op.getDest());
   }
 
   void emitBarrier(BarrierOp op) {
@@ -747,6 +772,11 @@ private:
 
     if (hasWildcard)
       tileStrides[op.getResult()] = wildcardStride;
+
+    TileLayout layout;
+    layout.shape.assign(perIdxTileSize.begin(), perIdxTileSize.end());
+    layout.strides.assign(srcStrides.begin(), srcStrides.end());
+    tileLayouts[op.getResult()] = std::move(layout);
 
     os << getIndent() << "auto " << name << " = " << getName(op.getSource());
     os << " + (";
@@ -988,6 +1018,18 @@ void emitScriptHeader(llvm::raw_ostream &os) {
     os << "cat > \"$TMPDIR/choreo.h\" << '__COCC_CHOREO_HEADER__'\n";
     os << sctx.runtime_header;
     os << "\n__COCC_CHOREO_HEADER__\n\n";
+
+    if (sctx.types_cute_header) {
+      os << "cat > \"$TMPDIR/choreo_types_cute.h\" "
+            "<< '__COCC_TYPES_CUTE_HEADER__'\n";
+      os << sctx.types_cute_header;
+      os << "\n__COCC_TYPES_CUTE_HEADER__\n\n";
+    }
+    if (sctx.cute_header) {
+      os << "cat > \"$TMPDIR/choreo_cute.h\" << '__COCC_CUTE_HEADER__'\n";
+      os << sctx.cute_header;
+      os << "\n__COCC_CUTE_HEADER__\n\n";
+    }
   } else {
     os << "if [[ -z \"${CHOREO_ROOT:-}\" ]]; then\n";
     os << "  _coir_bin=$(which coir-codegen 2>/dev/null || true)\n";
@@ -1030,11 +1072,15 @@ void emitScriptFooter(llvm::raw_ostream &os) {
   os << "\n__COCC_CUDA_SOURCE__\n\n";
 
   if (has_embedded) {
-    os << "\"${NVCC}\" -std=c++17 -arch=\"${gpu_arch}\" -I\"$TMPDIR\" "
+    os << "\"${NVCC}\" -std=c++17 -arch=\"${gpu_arch}\" "
+          "--expt-relaxed-constexpr "
+          "-I\"$TMPDIR\" -I\"${CUTE_HOME}/include\" "
           "-o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
   } else {
-    os << "\"$NVCC\" -std=c++17 -arch=\"$gpu_arch\" -I\"$CHOREO_INC\" "
-          "-I\"$TMPDIR\" -o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
+    os << "\"$NVCC\" -std=c++17 -arch=\"$gpu_arch\" "
+          "--expt-relaxed-constexpr "
+          "-I\"$CHOREO_INC\" -I\"$TMPDIR\" -I\"${CUTE_HOME}/include\" "
+          "-o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
   }
 
   os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
