@@ -1,10 +1,8 @@
 // REQUIRES: TARGET-GCU300
-// XFAIL: *
 // RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 //
 // MMA matrix multiply via micro-kernel on GCU (f16 input, f32 accum).
 // Data must reside in local (L1) memory for MMA operations.
-// XFAIL: CoIR emitter needs half->__fp16 mapping and acore::matmul sig fix.
 
 __co__ auto mma_matmul(f16 [128, 32] A, f16 [32, 128] B) {
   f32 [128, 128] output;

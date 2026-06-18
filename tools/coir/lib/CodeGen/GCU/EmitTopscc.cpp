@@ -85,18 +85,26 @@ private:
     if (auto tensorTy = dyn_cast<coir::TensorType>(ty))
       return emitElemType(tensorTy.getElementType()) + "*";
     if (ty.isIndex()) return "int";
-    if (ty.isF16()) return "half";
+    if (ty.isF16()) return "__fp16";
     if (ty.isF32()) return "float";
     if (ty.isInteger(32)) return "int";
     return "/* unknown */";
   }
 
   std::string emitElemType(Type ty) {
-    if (ty.isF16()) return "half";
+    if (ty.isF16()) return "__fp16";
     if (ty.isF32()) return "float";
     if (ty.isF64()) return "double";
     if (ty.isInteger(32)) return "int";
     return "/* unknown */";
+  }
+
+  std::string choreoElemFor(Type ty) {
+    if (ty.isF16()) return "choreo::f16";
+    if (ty.isF32()) return "choreo::f32";
+    if (ty.isF64()) return "choreo::f64";
+    if (ty.isInteger(32)) return "choreo::s32";
+    return "choreo::s32";
   }
 
   // Portable DTE context type that works across all target architectures.
@@ -122,6 +130,11 @@ private:
       auto accFragTy =
           cast<coir::MMAFragType>(exec.getAccumulator().getType());
       int64_t M = lhsFragTy.getShape()[0];
+      // Look through mma.load -> tensor.tile to find original M.
+      if (auto loadOp = exec.getLhs().getDefiningOp<MMALoadOp>()) {
+        if (auto origTy = getOriginalTensorType(loadOp.getSource()))
+          M = origTy.getShape()[0];
+      }
       getOrEmitStub(M, lhsFragTy.getElementType(),
                     accFragTy.getElementType(), exec.getLayout());
     });
@@ -253,7 +266,8 @@ private:
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       auto inTy = dyn_cast<coir::TensorType>(fnType.getInput(i));
-      std::string inChoreo = choreoElem;
+      std::string inChoreo = inTy ? choreoElemFor(inTy.getElementType())
+                                  : choreoElem;
       unsigned inDim = inTy ? inTy.getShape().size() : ndim;
       os << "const choreo::spanned_view<" << inChoreo << ", " << inDim
          << "> & p" << i;
@@ -263,7 +277,8 @@ private:
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       int64_t bytes = tty ? getTensorBytes(tty) : resBytes;
-      os << "  " << eType << "* p" << i << "__device = nullptr;\n";
+      std::string inEType = tty ? emitElemType(tty.getElementType()) : eType;
+      os << "  " << inEType << "* p" << i << "__device = nullptr;\n";
       os << "  topsMalloc((void**)&p" << i << "__device, " << bytes << "ULL);\n";
       os << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
          << bytes << "ULL, topsMemcpyHostToDevice);\n";
@@ -552,8 +567,26 @@ private:
     acoreStates[op.getResult()] = state;
   }
 
+  DenseMap<Value, Value> mmaLoadSources;
+
   void emitMMALoad(MMALoadOp op) {
-    mmaFragAddrs[op.getResult()] = getName(op.getSource());
+    // Look through tensor.tile to find the base buffer address.
+    // acore::matmul operates on the full buffer, not a tiled view.
+    Value src = op.getSource();
+    mmaLoadSources[op.getResult()] = src;
+    while (auto tileOp = src.getDefiningOp<TensorTileOp>())
+      src = tileOp.getSource();
+    mmaFragAddrs[op.getResult()] = getName(src);
+  }
+
+  // Walk through tensor.tile chain to find the original untiled tensor.
+  // For micro-kernel MMA, acore::matmul needs the full tensor dimensions.
+  coir::TensorType getOriginalTensorType(Value v) {
+    while (auto tileOp = v.getDefiningOp<TensorTileOp>())
+      v = tileOp.getSource();
+    if (auto tty = dyn_cast<coir::TensorType>(v.getType()))
+      return tty;
+    return {};
   }
 
   bool isInsideForeach(Operation *op) {
@@ -578,6 +611,9 @@ private:
     auto accFragTy = cast<coir::MMAFragType>(op.getAccumulator().getType());
     auto layout = op.getLayout();
 
+    // For micro-kernel targets, read M/K/N from the original (pre-tile)
+    // tensor so that acore::matmul gets the full data dimensions.
+    // The hardware micro-kernel handles internal tiling.
     int64_t M = lhsFragTy.getShape()[0];
     int64_t K = lhsFragTy.getShape()[1];
     int64_t N = 0;
@@ -586,6 +622,23 @@ private:
       N = rhsFragTy.getShape()[1];
     else
       N = rhsFragTy.getShape()[0];
+
+    auto lhsSrcIt = mmaLoadSources.find(op.getLhs());
+    auto rhsSrcIt = mmaLoadSources.find(op.getRhs());
+    if (lhsSrcIt != mmaLoadSources.end()) {
+      if (auto origTy = getOriginalTensorType(lhsSrcIt->second)) {
+        M = origTy.getShape()[0];
+        K = origTy.getShape()[1];
+      }
+    }
+    if (rhsSrcIt != mmaLoadSources.end()) {
+      if (auto origTy = getOriginalTensorType(rhsSrcIt->second)) {
+        if (layout == coir::MMALayout::RowCol)
+          N = origTy.getShape()[1];
+        else
+          N = origTy.getShape()[0];
+      }
+    }
 
     Type inElemTy = lhsFragTy.getElementType();
     Type outElemTy = accFragTy.getElementType();
@@ -668,7 +721,12 @@ private:
 
   void emitMMAStore(MMAStoreOp op) {
     Value fragVal = op.getFragment();
-    std::string destAddr = getName(op.getDest());
+    // Look through tensor.tile to get the base address of the original
+    // tensor -- acore::matmul writes to the full output buffer.
+    Value destVal = op.getDest();
+    while (auto tileOp = destVal.getDefiningOp<TensorTileOp>())
+      destVal = tileOp.getSource();
+    std::string destAddr = getName(destVal);
 
     auto it = acoreStates.find(fragVal);
     if (it == acoreStates.end()) {
