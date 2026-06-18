@@ -23,6 +23,8 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/Pass/PassManager.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <cstdlib>
@@ -72,11 +74,52 @@ void SetupScriptContext() {
     sctx.arch_override.clear();
 }
 
+/// Extract -mcoir / -mcoir= tokens from argv and forward them to the
+/// LLVM/MLIR cl::opt registry (like clang's -mllvm).  Returns the
+/// filtered argc/argv for Choreo's CommandLine parser, or {0, {}} on error.
+std::pair<int, std::vector<char *>>
+ProcessCoIROptions(int argc, char *argv[]) {
+  coir::registerCoIRPasses();
+  mlir::registerPassManagerCLOptions();
+
+  std::vector<std::string> coir_args;
+  std::vector<char *> filtered;
+  filtered.push_back(argv[0]);
+
+  for (int i = 1; i < argc; ++i) {
+    llvm::StringRef arg(argv[i]);
+    if (arg == "-mcoir") {
+      if (i + 1 >= argc) {
+        errs() << "error: -mcoir requires an argument.\n";
+        return {0, {}};
+      }
+      coir_args.push_back(argv[++i]);
+    } else if (arg.starts_with("-mcoir=")) {
+      coir_args.push_back(arg.drop_front(7).str());
+    } else {
+      filtered.push_back(argv[i]);
+    }
+  }
+
+  if (!coir_args.empty()) {
+    std::vector<const char *> fwd;
+    fwd.push_back("cocc (CoIR option parsing)");
+    for (auto &a : coir_args) fwd.push_back(a.c_str());
+    llvm::cl::ParseCommandLineOptions(fwd.size(), fwd.data(),
+                                      "CoIR/MLIR options via -mcoir\n");
+  }
+
+  return {static_cast<int>(filtered.size()), std::move(filtered)};
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
+  auto [filt_argc, filt_argv] = ProcessCoIROptions(argc, argv);
+  if (filt_argc == 0) return 1;
+
   CommandLine cl;
-  if (!cl.Parse(argc, argv)) return cl.ReturnCode();
+  if (!cl.Parse(filt_argc, filt_argv.data())) return cl.ReturnCode();
 
   auto &reg = OptionRegistry::GetInstance();
   std::string input_file = reg.GetInputFileName();

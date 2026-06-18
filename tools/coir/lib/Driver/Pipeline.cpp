@@ -65,6 +65,9 @@ bool Pipeline::Optimize() {
 
 bool Pipeline::Lower() {
   mlir::PassManager pm(&ctx_);
+  // Apply -mcoir pass-manager options (IR printing, timing, etc.).
+  if (mlir::failed(mlir::applyPassManagerCLOptions(pm)))
+    return false;
   pm.addPass(coir::createClassifyCopiesPass());
   pm.addPass(coir::createLowerDMADescPass());
   pm.addPass(coir::createHoistDMAConfigPass());
