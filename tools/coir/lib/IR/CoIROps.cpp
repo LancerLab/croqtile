@@ -574,5 +574,5 @@ void TmaCopyOp::print(OpAsmPrinter &printer) {
 }
 
 //===----------------------------------------------------------------------===//
-// ThreadCopyOp (uses declarative format, no custom parse/print needed)
+// ElementCopyOp (uses declarative format, no custom parse/print needed)
 //===----------------------------------------------------------------------===//

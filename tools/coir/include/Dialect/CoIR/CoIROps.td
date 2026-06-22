@@ -371,12 +371,15 @@ def TmaCopyOp : CoIR_Op<"tma.copy", []> {
   let hasCustomAssemblyFormat = 1;
 }
 
-def ThreadCopyOp : CoIR_Op<"thread.copy", []> {
-  let summary = "Synchronous per-thread element copy";
+def ElementCopyOp : CoIR_Op<"element.copy", []> {
+  let summary = "Element-wise data copy";
   let description = [{
-    Cooperative thread-level copy where each thread copies its share
-    of elements. Used for shared -> register or register -> shared
-    transfers, or when DMA/TMA is not available.
+    Element-wise copy between tensors. Used when no hardware-assisted
+    copy engine (DMA/TMA) is available or applicable for the given
+    memory space pair. Lowered to target-specific patterns:
+
+    - GPU: cooperative per-thread copy (element.parallel.copy)
+    - CPU: sequential iteration (element.iteration.copy)
   }];
   let arguments = (ins
     CoIR_TensorTypeC:$source,

@@ -1,7 +1,11 @@
-//===- LowerDMADesc.cpp - Decompose copy ops into DMA descriptor pipeline -===//
+//===- LowerDMADesc.cpp - Decompose DMA copy ops into descriptor pipeline -===//
 //
-// Rewrites coir.data.copy inside coir.foreach loops into the DMA descriptor
-// pipeline: const.desc + prefetch.desc + runtime.desc + invoke.
+// Target-driven decomposition of coir.dma.copy into the DMA descriptor
+// pipeline (const.desc -> prefetch.desc -> runtime.desc -> invoke).
+//
+// The pass reads the module attribute "coir.has_dma" to decide whether
+// to apply descriptor decomposition. Also matches coir.data.copy for
+// backward compatibility with standalone tests that bypass ClassifyCopies.
 //
 //===----------------------------------------------------------------------===//
 
@@ -27,20 +31,25 @@ using namespace coir;
 
 namespace {
 
-struct DecomposeDataCopyInLoop : public OpRewritePattern<DataCopyOp> {
-  using OpRewritePattern::OpRewritePattern;
+/// Decompose a DMA copy inside a foreach loop into the descriptor pipeline.
+/// Works on both DmaCopyOp (post-ClassifyCopies) and DataCopyOp (standalone).
+template <typename CopyOpTy>
+struct DecomposeCopyInLoop : public OpRewritePattern<CopyOpTy> {
+  using OpRewritePattern<CopyOpTy>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(DataCopyOp op,
+  LogicalResult matchAndRewrite(CopyOpTy op,
                                 PatternRewriter &rewriter) const override {
     if (op->hasAttr("lowered"))
       return failure();
 
-    auto foreachOp = op->getParentOfType<ForeachOp>();
+    auto foreachOp = op->template getParentOfType<ForeachOp>();
     if (!foreachOp)
       return failure();
 
-    auto srcType = llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
-    auto dstType = llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
+    auto srcType =
+        llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
+    auto dstType =
+        llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
     if (!srcType || !dstType)
       return failure();
 
@@ -51,7 +60,7 @@ struct DecomposeDataCopyInLoop : public OpRewritePattern<DataCopyOp> {
     llvm::SmallVector<Value> offsets;
     bool srcDependsOnIV = false;
 
-    if (auto tileOp = srcBase.getDefiningOp<TensorTileOp>()) {
+    if (auto tileOp = srcBase.template getDefiningOp<TensorTileOp>()) {
       srcBase = tileOp.getSource();
       for (auto idx : tileOp.getIndices()) {
         offsets.push_back(idx);
@@ -100,29 +109,53 @@ struct DecomposeDataCopyInLoop : public OpRewritePattern<DataCopyOp> {
     }
 
     auto invoke = rewriter.create<DMAInvokeOp>(loc, tokenType, rtDesc);
-    auto wait = rewriter.create<WaitOp>(loc, invoke.getDone());
-    (void)wait;
 
-    if (auto tileOp = op.getSource().getDefiningOp<TensorTileOp>()) {
-      rewriter.eraseOp(op);
-      if (tileOp->use_empty())
-        rewriter.eraseOp(tileOp);
-    } else {
-      rewriter.eraseOp(op);
-    }
+    // Replace the original copy's token (if any) with the invoke's token.
+    // DmaCopyOp always produces a token; DataCopyOp optionally does.
+    if (op.getToken() && !op.getToken().use_empty())
+      rewriter.replaceAllUsesWith(op.getToken(), invoke.getDone());
+    else
+      rewriter.create<WaitOp>(loc, invoke.getDone());
+
+    auto tileOp =
+        op.getSource().template getDefiningOp<TensorTileOp>();
+    rewriter.eraseOp(op);
+    if (tileOp && tileOp->use_empty())
+      rewriter.eraseOp(tileOp);
 
     return success();
   }
 };
+
+/// Check whether the target uses a descriptor-based DMA engine.
+/// Uses coir.has_dma module attribute (set by the driver from target features).
+static bool targetUsesDescriptorDMA(Operation *op) {
+  auto module = dyn_cast<ModuleOp>(op);
+  if (!module)
+    module = op->getParentOfType<ModuleOp>();
+  if (!module)
+    return true; // standalone test: assume descriptor DMA
+
+  auto hasDMA =
+      module->getAttrOfType<BoolAttr>("coir.has_dma");
+  if (!hasDMA)
+    return true; // no attr: assume descriptor DMA (for tests)
+
+  return hasDMA.getValue();
+}
 
 struct LowerDMADescPass
     : public ::coir::impl::LowerDMADescBase<LowerDMADescPass> {
   using LowerDMADescBase::LowerDMADescBase;
 
   void runOnOperation() override {
+    if (!targetUsesDescriptorDMA(getOperation()))
+      return;
+
     auto *ctx = &getContext();
     RewritePatternSet patterns(ctx);
-    patterns.add<DecomposeDataCopyInLoop>(ctx);
+    patterns.add<DecomposeCopyInLoop<DmaCopyOp>>(ctx);
+    patterns.add<DecomposeCopyInLoop<DataCopyOp>>(ctx);
 
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();

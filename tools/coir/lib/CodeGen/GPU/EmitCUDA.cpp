@@ -437,8 +437,8 @@ private:
       emitDmaCopy(dmaCopy);
     else if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
       emitTmaCopy(tmaCopy);
-    else if (auto threadCopy = dyn_cast<ThreadCopyOp>(op))
-      emitThreadCopy(threadCopy);
+    else if (auto elemCopy = dyn_cast<ElementCopyOp>(op))
+      emitElementCopy(elemCopy);
     else if (auto barrier = dyn_cast<BarrierOp>(op))
       emitBarrier(barrier);
     else if (auto wait = dyn_cast<WaitOp>(op))
@@ -687,7 +687,7 @@ private:
     valueNames[op.getToken()] = "/* tma_token */";
   }
 
-  void emitThreadCopy(ThreadCopyOp op) {
+  void emitElementCopy(ElementCopyOp op) {
     emitNaiveCopy(op.getSource(), op.getDest());
   }
 

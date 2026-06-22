@@ -98,39 +98,24 @@ struct LowerMMAStore : public OpRewritePattern<MMAStoreOp> {
   }
 };
 
-// Infer MMA target from --target-arch string.
-// This mirrors Target::MMATargetName() for standalone coir-opt usage
-// where the Choreo target interface is not available.
-static std::string inferMMATargetFromArch(llvm::StringRef arch) {
-  if (arch.empty()) return "";
-  if (arch.contains("sm_9") || arch.contains("sm_100")) return "wgmma";
-  if (arch.contains("sm_")) return "mma_sync";
-  return "ukernel";
-}
-
 struct LowerMMAPass : public ::coir::impl::LowerMMABase<LowerMMAPass> {
   using LowerMMABase::LowerMMABase;
 
   void runOnOperation() override {
     auto *ctx = &getContext();
 
-    // CLI --target-arch overrides module attributes when provided.
-    // Otherwise read coir.mma_target from the module (set by the
-    // driver or embedded directly in the IR).
+    // Read coir.mma_target from the module (set by the driver via
+    // Target::MMATargetName()). For standalone coir-opt tests, embed
+    // coir.mma_target directly in the test IR.
     std::string mmaTarget;
-    if (!targetArch.empty()) {
-      mmaTarget = inferMMATargetFromArch(targetArch);
-    } else {
-      if (auto module = dyn_cast<ModuleOp>(getOperation()))
-        mmaTarget = CoIR::GetMMATarget(module).str();
-      else if (auto pm = getOperation()->getParentOfType<ModuleOp>())
-        mmaTarget = CoIR::GetMMATarget(pm).str();
-    }
+    if (auto module = dyn_cast<ModuleOp>(getOperation()))
+      mmaTarget = CoIR::GetMMATarget(module).str();
+    else if (auto pm = getOperation()->getParentOfType<ModuleOp>())
+      mmaTarget = CoIR::GetMMATarget(pm).str();
 
     if (mmaTarget.empty()) {
       getOperation()->emitError()
-          << "no MMA target: set coir.mma_target module attribute "
-             "or pass --target-arch";
+          << "no MMA target: set coir.mma_target module attribute";
       return signalPassFailure();
     }
 
