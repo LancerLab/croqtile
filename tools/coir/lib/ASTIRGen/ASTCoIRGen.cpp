@@ -393,7 +393,7 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
           auto val = LookupValue(base);
           if (!val) val = LookupValue(base + ".data");
           if (val) {
-            if (auto tty = val.getType().dyn_cast<coir::TensorType>()) {
+            if (auto tty = mlir::dyn_cast<coir::TensorType>(val.getType())) {
               int64_t totalElems = 1;
               for (auto d : tty.getShape()) totalElems *= d;
               if (totalElems > 1) bound = totalElems;
@@ -510,7 +510,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
   if (auto *sa = dyn_cast<AST::SpanAs>(&n)) {
     auto srcVal = LookupValue(sa->id->name);
     if (!srcVal) return nullptr;
-    auto srcTy = srcVal.getType().dyn_cast<coir::TensorType>();
+    auto srcTy = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
     if (!srcTy) return srcVal;
 
     llvm::SmallVector<int64_t> newShape;
@@ -540,7 +540,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
     if (da->AccessElement()) {
       auto tensorVal = LookupValue(da->GetDataName());
       if (!tensorVal) return nullptr;
-      auto tty = tensorVal.getType().dyn_cast<coir::TensorType>();
+      auto tty = mlir::dyn_cast<coir::TensorType>(tensorVal.getType());
       if (!tty) return nullptr;
 
       llvm::SmallVector<mlir::Value> idxVals;
@@ -550,7 +550,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           if (auto *idNode = dyn_cast<AST::Identifier>(idx.get()))
             v = LookupValue(idNode->name);
         }
-        if (v && !v.getType().isa<mlir::IndexType>())
+        if (v && !mlir::isa<mlir::IndexType>(v.getType()))
           v = builder.create<mlir::arith::IndexCastOp>(
               loc, mlir::IndexType::get(&IRContext()), v);
         if (v) idxVals.push_back(v);
@@ -573,18 +573,18 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       if (!lhs || !rhs) return nullptr;
 
       if (lhs.getType() != rhs.getType()) {
-        if (lhs.getType().isa<mlir::IndexType>() &&
-            rhs.getType().isa<mlir::IntegerType>())
+        if (mlir::isa<mlir::IndexType>(lhs.getType()) &&
+            mlir::isa<mlir::IntegerType>(rhs.getType()))
           rhs = builder.create<mlir::arith::IndexCastOp>(loc, lhs.getType(),
                                                           rhs);
-        else if (rhs.getType().isa<mlir::IndexType>() &&
-                 lhs.getType().isa<mlir::IntegerType>())
+        else if (mlir::isa<mlir::IndexType>(rhs.getType()) &&
+                 mlir::isa<mlir::IntegerType>(lhs.getType()))
           lhs = builder.create<mlir::arith::IndexCastOp>(loc, rhs.getType(),
                                                           lhs);
       }
 
       auto resTy = lhs.getType();
-      bool isFloat = resTy.isa<mlir::FloatType>();
+      bool isFloat = mlir::isa<mlir::FloatType>(resTy);
       auto op = expr->GetOp();
 
       if (op == Op::Add)
@@ -671,10 +671,10 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       if (!operand) return nullptr;
       auto op = expr->GetOp();
       if (op == Op::Sub) {
-        bool isFloat = operand.getType().isa<mlir::FloatType>();
+        bool isFloat = mlir::isa<mlir::FloatType>(operand.getType());
         if (isFloat) {
           auto zero = builder.create<mlir::arith::ConstantFloatOp>(
-              loc, llvm::APFloat(0.0f), operand.getType().cast<mlir::FloatType>());
+              loc, llvm::APFloat(0.0f), mlir::cast<mlir::FloatType>(operand.getType()));
           return builder.create<mlir::arith::SubFOp>(loc, zero, operand);
         } else {
           auto zero = builder.create<mlir::arith::ConstantIntOp>(
@@ -705,7 +705,7 @@ bool ASTCoIRGen::Visit(AST::Assignment &asgn) {
   auto tensorVal = LookupValue(da.GetDataName());
   if (!tensorVal) return true;
 
-  auto tty = tensorVal.getType().dyn_cast<coir::TensorType>();
+  auto tty = mlir::dyn_cast<coir::TensorType>(tensorVal.getType());
   if (!tty) return true;
 
   auto rhs = EmitExpr(*asgn.value);
@@ -718,7 +718,7 @@ bool ASTCoIRGen::Visit(AST::Assignment &asgn) {
       if (auto *idNode = dyn_cast<AST::Identifier>(idx.get()))
         v = LookupValue(idNode->name);
     }
-    if (v && !v.getType().isa<mlir::IndexType>())
+    if (v && !mlir::isa<mlir::IndexType>(v.getType()))
       v = builder.create<mlir::arith::IndexCastOp>(
           loc, mlir::IndexType::get(&IRContext()), v);
     if (v) idxVals.push_back(v);
@@ -773,7 +773,7 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
 bool ASTCoIRGen::Visit(AST::SpanAs &sa) {
   auto srcVal = LookupValue(sa.id->name);
   if (!srcVal) return true;
-  auto srcTy = srcVal.getType().dyn_cast<coir::TensorType>();
+  auto srcTy = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
   if (!srcTy) return true;
 
   auto loc = Loc(sa);
@@ -808,7 +808,7 @@ bool ASTCoIRGen::Visit(AST::SpanAs &sa) {
 mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
                                         mlir::Value baseVal) {
   auto loc = Loc(chunk);
-  auto baseTy = baseVal.getType().dyn_cast<coir::TensorType>();
+  auto baseTy = mlir::dyn_cast<coir::TensorType>(baseVal.getType());
   if (!baseTy) return baseVal;
 
   auto baseShape = baseTy.getShape();
@@ -830,14 +830,14 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
     if (auto *id = dyn_cast<AST::Identifier>(idx)) {
       auto v = LookupValue(id->name);
       if (v) {
-        if (!v.getType().isa<mlir::IndexType>())
+        if (!mlir::isa<mlir::IndexType>(v.getType()))
           v = builder.create<mlir::arith::IndexCastOp>(
               loc, mlir::IndexType::get(&IRContext()), v);
         return v;
       }
     }
     auto v = EmitExpr(*idx);
-    if (v && !v.getType().isa<mlir::IndexType>())
+    if (v && !mlir::isa<mlir::IndexType>(v.getType()))
       v = builder.create<mlir::arith::IndexCastOp>(
           loc, mlir::IndexType::get(&IRContext()), v);
     return v;
@@ -911,7 +911,7 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   mlir::Value dstVal = nullptr;
 
   auto resolveDMAVal = [&](mlir::Value val, llvm::StringRef name) -> mlir::Value {
-    if (val && val.getType().isa<coir::AsyncTokenType>()) {
+    if (val && mlir::isa<coir::AsyncTokenType>(val.getType())) {
       auto dataVal = LookupValue((name + ".data").str());
       if (dataVal) return dataVal;
     }
@@ -939,7 +939,7 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
     dstVal = LookupValue(dstDA->GetDataName());
   } else if (auto *mem = dyn_cast<AST::Memory>(dma.to.get())) {
     if (srcVal) {
-      auto srcTy = srcVal.getType().dyn_cast<coir::TensorType>();
+      auto srcTy = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
       if (srcTy) {
         auto space = coir::TensorMemorySpace::Local;
         if (mem->Get() == Storage::SHARED)
@@ -1003,9 +1003,9 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     auto fragTy = coir::MMAFragType::get(&IRContext(), elemTy, shape);
 
     if (fillVal.getType() != elemTy) {
-      if (elemTy.isa<mlir::FloatType>() && fillVal.getType().isa<mlir::FloatType>())
+      if (mlir::isa<mlir::FloatType>(elemTy) && mlir::isa<mlir::FloatType>(fillVal.getType()))
         fillVal = builder.create<mlir::arith::ExtFOp>(loc, elemTy, fillVal);
-      else if (elemTy.isa<mlir::FloatType>())
+      else if (mlir::isa<mlir::FloatType>(elemTy))
         fillVal = builder.create<mlir::arith::SIToFPOp>(loc, elemTy, fillVal);
     }
 
@@ -1023,7 +1023,7 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     auto srcVal = LookupValue(chunkAt->data->name);
     if (!srcVal) return true;
 
-    auto srcTy = srcVal.getType().dyn_cast<coir::TensorType>();
+    auto srcTy = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
     if (!srcTy) return true;
 
     llvm::SmallVector<mlir::Value> idxVals;
@@ -1033,13 +1033,13 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
           for (auto &idx : indices->AllValues()) {
             if (auto *id = dyn_cast<AST::Identifier>(idx.get())) {
               auto v = LookupValue(id->name);
-              if (v && !v.getType().isa<mlir::IndexType>())
+              if (v && !mlir::isa<mlir::IndexType>(v.getType()))
                 v = builder.create<mlir::arith::IndexCastOp>(
                     loc, mlir::IndexType::get(&IRContext()), v);
               if (v) idxVals.push_back(v);
             } else {
               mlir::Value v = EmitExpr(*idx);
-              if (v && !v.getType().isa<mlir::IndexType>())
+              if (v && !mlir::isa<mlir::IndexType>(v.getType()))
                 v = builder.create<mlir::arith::IndexCastOp>(
                     loc, mlir::IndexType::get(&IRContext()), v);
               if (v) idxVals.push_back(v);
@@ -1050,7 +1050,7 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     } else if (chunkAt->indices) {
       for (auto &idx : chunkAt->indices->AllValues()) {
         mlir::Value v = EmitExpr(*idx);
-        if (v && !v.getType().isa<mlir::IndexType>())
+        if (v && !mlir::isa<mlir::IndexType>(v.getType()))
           v = builder.create<mlir::arith::IndexCastOp>(
               loc, mlir::IndexType::get(&IRContext()), v);
         if (v) idxVals.push_back(v);
@@ -1105,7 +1105,7 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     auto rhsVal = LookupValue(AST::FragName(rhsExpr));
     if (!accVal || !lhsVal || !rhsVal) return true;
 
-    coir::MMALayout layout;
+    coir::MMALayout layout = coir::MMALayout::RowCol;
     switch (op.GetMethod()) {
     case AST::MMAOperation::ROW_ROW: layout = coir::MMALayout::RowRow; break;
     case AST::MMAOperation::ROW_COL: layout = coir::MMALayout::RowCol; break;
@@ -1133,7 +1133,7 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     auto dstVal = LookupValue(dstChunk->data->name);
     if (!dstVal) return true;
 
-    auto dstTy = dstVal.getType().dyn_cast<coir::TensorType>();
+    auto dstTy = mlir::dyn_cast<coir::TensorType>(dstVal.getType());
     if (!dstTy) return true;
 
     llvm::SmallVector<mlir::Value> idxVals;
@@ -1142,7 +1142,7 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
         if (auto indices = sop->GetIndices()) {
           for (auto &idx : indices->AllValues()) {
             mlir::Value v = EmitExpr(*idx);
-            if (v && !v.getType().isa<mlir::IndexType>())
+            if (v && !mlir::isa<mlir::IndexType>(v.getType()))
               v = builder.create<mlir::arith::IndexCastOp>(
                   loc, mlir::IndexType::get(&IRContext()), v);
             if (v) idxVals.push_back(v);
@@ -1152,14 +1152,14 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     } else if (dstChunk->indices) {
       for (auto &idx : dstChunk->indices->AllValues()) {
         mlir::Value v = EmitExpr(*idx);
-        if (v && !v.getType().isa<mlir::IndexType>())
+        if (v && !mlir::isa<mlir::IndexType>(v.getType()))
           v = builder.create<mlir::arith::IndexCastOp>(
               loc, mlir::IndexType::get(&IRContext()), v);
         if (v) idxVals.push_back(v);
       }
     }
 
-    auto fragTy = fragVal.getType().cast<coir::MMAFragType>();
+    auto fragTy = mlir::cast<coir::MMAFragType>(fragVal.getType());
     auto tileTy = coir::TensorType::get(
         &IRContext(), dstTy.getElementType(), fragTy.getShape(),
         dstTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
@@ -1191,7 +1191,7 @@ bool ASTCoIRGen::Visit(AST::Wait &w) {
     if (name.empty()) continue;
     auto tokenVal = LookupValue(name);
     if (!tokenVal) continue;
-    if (tokenVal.getType().isa<coir::AsyncTokenType>())
+    if (mlir::isa<coir::AsyncTokenType>(tokenVal.getType()))
       builder.create<coir::WaitOp>(loc, tokenVal);
   }
   return true;
@@ -1226,7 +1226,7 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
     if (auto *da = dyn_cast<AST::DataAccess>(addrNode)) {
       auto tensorVal = LookupValue(da->GetDataName());
       if (tensorVal) {
-        auto tty = tensorVal.getType().dyn_cast<coir::TensorType>();
+        auto tty = mlir::dyn_cast<coir::TensorType>(tensorVal.getType());
         if (tty) {
           llvm::SmallVector<mlir::Value> idxVals;
           for (auto &idx : da->GetIndices()) {
@@ -1235,7 +1235,7 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
               if (auto *idNode = dyn_cast<AST::Identifier>(idx.get()))
                 v = LookupValue(idNode->name);
             }
-            if (v && !v.getType().isa<mlir::IndexType>())
+            if (v && !mlir::isa<mlir::IndexType>(v.getType()))
               v = builder.create<mlir::arith::IndexCastOp>(
                   loc, mlir::IndexType::get(&IRContext()), v);
             if (v) idxVals.push_back(v);

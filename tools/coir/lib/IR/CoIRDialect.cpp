@@ -7,6 +7,9 @@
 #include "mlir/Dialect/Async/IR/Async.h"
 #include "llvm/ADT/TypeSwitch.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include "CoIR/CoIRDialect.cpp.inc"
 
 #define GET_ATTRDEF_CLASSES
@@ -15,6 +18,7 @@
 
 #define GET_OP_CLASSES
 #include "CoIR/CoIROps.cpp.inc"
+#pragma GCC diagnostic pop
 
 using namespace mlir;
 using namespace coir;

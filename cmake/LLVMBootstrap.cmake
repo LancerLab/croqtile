@@ -96,16 +96,6 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
   message(STATUS "CoIR: LLVM/MLIR installed to ${_LLVM_ROOT}")
 endif()
 
-# CMP0116 (CMake >= 3.20): Ninja generators transform DEPFILEs from
-# add_custom_command().  The NEW behavior produces multiple-output dep
-# entries that older Ninja versions (< 1.11) cannot handle, causing:
-#   "multiple outputs aren't (yet?) supported by depslog"
-# Set OLD before loading LLVM/MLIR modules so their TableGen rules
-# inherit the policy.
-if(POLICY CMP0116)
-  cmake_policy(SET CMP0116 OLD)
-endif()
-
 # --- Configure LLVM/MLIR ---
 list(PREPEND CMAKE_PREFIX_PATH "${_LLVM_ROOT}")
 set(MLIR_DIR "${_LLVM_CMAKE_DIR}/mlir" CACHE PATH "MLIR CMake directory")
@@ -123,6 +113,71 @@ list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 include(AddMLIR)
 include(TableGen)
+
+# Ninja < 1.10 cannot handle depfile mode when CMake adds implicit
+# outputs (| ${cmake_ninja_workdir}...) for IDE support.  The depslog
+# rejects them with "multiple outputs aren't (yet?) supported".
+# Override tablegen() to fall back to globbing .td files instead of
+# using DEPFILE when the installed Ninja is too old.
+if(CMAKE_GENERATOR MATCHES "Ninja")
+  execute_process(
+    COMMAND ninja --version
+    OUTPUT_VARIABLE _ninja_ver
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if(_ninja_ver VERSION_LESS "1.10")
+    message(STATUS "CoIR: Ninja ${_ninja_ver} < 1.10 -- "
+      "disabling tablegen depfile mode to avoid depslog error")
+    function(tablegen project ofn)
+      cmake_parse_arguments(ARG "" "" "DEPENDS;EXTRA_INCLUDES" ${ARGN})
+
+      if(NOT ${project}_TABLEGEN_EXE)
+        message(FATAL_ERROR "${project}_TABLEGEN_EXE not set")
+      endif()
+
+      file(GLOB local_tds "*.td")
+      file(GLOB_RECURSE global_tds
+        "${LLVM_MAIN_INCLUDE_DIR}/llvm/*.td")
+      set(additional_cmdline -o ${CMAKE_CURRENT_BINARY_DIR}/${ofn})
+
+      if(IS_ABSOLUTE ${LLVM_TARGET_DEFINITIONS})
+        set(LLVM_TARGET_DEFINITIONS_ABSOLUTE ${LLVM_TARGET_DEFINITIONS})
+      else()
+        set(LLVM_TARGET_DEFINITIONS_ABSOLUTE
+          ${CMAKE_CURRENT_SOURCE_DIR}/${LLVM_TARGET_DEFINITIONS})
+      endif()
+
+      get_directory_property(tblgen_includes INCLUDE_DIRECTORIES)
+      list(APPEND tblgen_includes ${ARG_EXTRA_INCLUDES})
+      list(REMOVE_ITEM tblgen_includes "")
+      list(TRANSFORM tblgen_includes PREPEND -I)
+
+      set(tablegen_exe ${${project}_TABLEGEN_EXE})
+      set(tablegen_depends ${${project}_TABLEGEN_TARGET} ${tablegen_exe})
+
+      add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${ofn}
+        COMMAND ${tablegen_exe} ${ARG_UNPARSED_ARGUMENTS}
+          -I ${CMAKE_CURRENT_SOURCE_DIR}
+          ${tblgen_includes}
+          ${LLVM_TABLEGEN_FLAGS}
+          ${LLVM_TARGET_DEFINITIONS_ABSOLUTE}
+          --write-if-changed
+          ${additional_cmdline}
+        DEPENDS ${ARG_DEPENDS} ${tablegen_depends}
+          ${local_tds} ${global_tds}
+          ${LLVM_TARGET_DEFINITIONS_ABSOLUTE}
+          ${LLVM_TARGET_DEPENDS}
+        COMMENT "Building ${ofn}...")
+
+      set_property(DIRECTORY APPEND
+        PROPERTY ADDITIONAL_MAKE_CLEAN_FILES ${ofn})
+      set(TABLEGEN_OUTPUT ${TABLEGEN_OUTPUT}
+        ${CMAKE_CURRENT_BINARY_DIR}/${ofn} PARENT_SCOPE)
+      set_source_files_properties(
+        ${CMAKE_CURRENT_BINARY_DIR}/${ofn} PROPERTIES GENERATED 1)
+    endfunction()
+  endif()
+endif()
 
 include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
 include_directories(SYSTEM ${MLIR_INCLUDE_DIRS})

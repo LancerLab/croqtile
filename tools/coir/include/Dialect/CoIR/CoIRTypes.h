@@ -11,6 +11,9 @@ class CoIRDialect;
 } // namespace coir
 
 #define GET_TYPEDEF_CLASSES
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "CoIR/CoIRTypes.h.inc"
+#pragma GCC diagnostic pop
 
 #endif // COIR_TYPES_H

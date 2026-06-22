@@ -35,7 +35,6 @@ static int32_t getMemSpace(coir::TensorType ty) {
 static bool isGlobal(int32_t ms) { return ms <= 0; }
 static bool isShared(int32_t ms) { return ms == 1; }
 static bool isLocal(int32_t ms) { return ms == 2; }
-static bool isRegisterOrLocal(int32_t ms) { return ms >= 2; }
 
 struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
   using OpRewritePattern::OpRewritePattern;

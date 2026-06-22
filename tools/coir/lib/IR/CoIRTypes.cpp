@@ -186,7 +186,10 @@ void coir::MMAFragType::print(mlir::AsmPrinter &printer) const {
 //===----------------------------------------------------------------------===//
 
 #define GET_TYPEDEF_CLASSES
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "CoIR/CoIRTypes.cpp.inc"
+#pragma GCC diagnostic pop
 
 //===----------------------------------------------------------------------===//
 // Type registration

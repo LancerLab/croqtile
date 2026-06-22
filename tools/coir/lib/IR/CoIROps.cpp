@@ -106,7 +106,8 @@ void DMAInvokeOp::getEffects(
 }
 
 void DMADescPrefetchOp::getCanonicalizationPatterns(
-    mlir::RewritePatternSet &results, mlir::MLIRContext *context) {}
+    mlir::RewritePatternSet & /*results*/,
+    mlir::MLIRContext * /*context*/) {}
 
 ParseResult DMAInvokeOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand desc;
@@ -244,7 +245,7 @@ ParseResult ParallelOp::parse(OpAsmParser &parser, OperationState &result) {
       break;
     if (!bounds.empty() && parser.parseComma())
       return failure();
-    int64_t b;
+    int64_t b = 0;
     if (parser.parseInteger(b))
       return failure();
     bounds.push_back(b);

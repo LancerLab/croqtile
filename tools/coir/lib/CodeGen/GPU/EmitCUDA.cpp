@@ -700,7 +700,7 @@ private:
          << stringifyParallelLevel(scope) << "\n";
   }
 
-  void emitWait(WaitOp op) {
+  void emitWait(WaitOp /*op*/) {
     os << getIndent() << "__syncthreads();\n";
   }
 
