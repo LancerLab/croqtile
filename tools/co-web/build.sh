@@ -13,6 +13,12 @@ if [ ! -f "$NATIVE_BUILD_DIR/parser.tab.cc" ]; then
   exit 1
 fi
 
+if [ ! -f "$NATIVE_BUILD_DIR/choreo_header.inc" ]; then
+  echo "ERROR: choreo_header.inc not found. Run native build first."
+  echo "  cd $CROQTILE_DIR && make build"
+  exit 1
+fi
+
 if [ ! -d "$EMSDK_DIR/upstream" ]; then
   echo "ERROR: Emscripten SDK not found at $EMSDK_DIR"
   exit 1
@@ -70,6 +76,8 @@ TARGET_SOURCES=(
   "$LIB_DIR/Target/GPU/cute_target.cpp"
   "$LIB_DIR/Target/GPU/dma_plan.cpp"
   "$LIB_DIR/Target/GPU/fragment_layout_pass.cpp"
+  "$LIB_DIR/Target/CPU/cc_codegen.cpp"
+  "$LIB_DIR/Target/CPU/cc_target.cpp"
   "$LIB_DIR/sys_utils.cpp"
 )
 
@@ -78,8 +86,10 @@ SDK_SOURCES=(
 )
 
 COWEB_SOURCES=(
-  "$SCRIPT_DIR/co_web.cpp"
-  "$SCRIPT_DIR/interpreter.cpp"
+  "$SCRIPT_DIR/wasm_api.cpp"
+  "$CROQTILE_DIR/tools/co-mock/mock_interp.cpp"
+  "$CROQTILE_DIR/tools/co-mock/mock_memory.cpp"
+  "$CROQTILE_DIR/tools/co-mock/debugger.cpp"
 )
 
 ALL_SOURCES=(
@@ -97,9 +107,12 @@ VERSION=$(cat "$CROQTILE_DIR/VERSION.txt" | tr -d '\n')
 
 INCLUDE_FLAGS=(
   -I"$LIB_DIR"
+  -I"$LIB_DIR/Target/CPU"
+  -I"$LIB_DIR/Target/GPU"
   -I"$NATIVE_BUILD_DIR"
   -I"$CROQTILE_DIR/runtime"
   -I"$CROQTILE_DIR/tools/sdk"
+  -I"$CROQTILE_DIR/tools/co-mock"
   -I"$CROQTILE_DIR"
   -I"$CROQTILE_DIR/extern/include"
 )
