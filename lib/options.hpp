@@ -242,7 +242,7 @@ public:
   std::istream& GetInputStream() {
     if (input_stream) return *input_stream;
 
-    if (!input_filename.empty()) {
+    if (!input_filename.empty() && input_filename != "-") {
       if (!input_file_stream.is_open()) input_file_stream.open(input_filename);
       input_stream = &input_file_stream;
       return *input_stream;
