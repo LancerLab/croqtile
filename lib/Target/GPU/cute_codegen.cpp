@@ -6019,10 +6019,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool stmatrix_ok = use_stmatrix && f_sty->GetStorage() == Storage::SHARED;
       if (stmatrix_ok) {
         bool is_f32_acc = (accum_type == BaseType::F32);
-        auto elem = f_sty->ElementType();
-        bool is_bf16 = (elem == BaseType::BF16);
-        bool is_f16 = (elem == BaseType::F16);
-        bool is_f32_dest = (elem == BaseType::F32);
+        bool is_f32_dest = (f_sty->ElementType() == BaseType::F32);
         if (is_f32_acc && is_f32_dest) stmatrix_ok = false;
       }
       if (stmatrix_ok) {

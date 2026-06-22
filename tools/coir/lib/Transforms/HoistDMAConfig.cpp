@@ -34,7 +34,7 @@ struct HoistDMAConfigPass
     getOperation()->walk([&](LoopLikeOpInterface loopLike) {
       moveLoopInvariantCode(
           loopLike.getLoopRegions(),
-          [&](Value value, Region *region) {
+          [&](Value value, Region *) {
             return loopLike.isDefinedOutsideOfLoop(value);
           },
           [](Operation *op, Region *) {

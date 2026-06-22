@@ -9,9 +9,12 @@ namespace coir {
 class CoIRDialect;
 } // namespace coir
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "CoIR/CoIREnums.h.inc"
 
 #define GET_ATTRDEF_CLASSES
 #include "CoIR/CoIRAttrs.h.inc"
+#pragma GCC diagnostic pop
 
 #endif // COIR_ATTRS_H

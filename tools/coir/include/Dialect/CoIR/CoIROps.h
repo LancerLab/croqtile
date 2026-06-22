@@ -19,6 +19,10 @@ class CoIRDialect;
 } // namespace coir
 
 #define GET_OP_CLASSES
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include "CoIR/CoIROps.h.inc"
+#pragma GCC diagnostic pop
 
 #endif // COIR_OPS_H

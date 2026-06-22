@@ -836,7 +836,7 @@ private:
       valueNames[op.getToken()] = ctxName;
   }
 
-  void emitWait(WaitOp op) {
+  void emitWait(WaitOp /*op*/) {
     // Blocking tops::memcpy completes synchronously; wait is a no-op.
     // When async DMA is used, this would emit tops::wait(event).
   }

@@ -11,6 +11,9 @@ namespace coir {
 class CoIRDialect;
 } // namespace coir
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "CoIR/CoIRDialect.h.inc"
+#pragma GCC diagnostic pop
 
 #endif // COIR_DIALECT_H
