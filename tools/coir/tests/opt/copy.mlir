@@ -40,13 +40,13 @@ coir.kernel @test_tma_copy(
   coir.wait %tok : !coir.token
 }
 
-// Test coir.thread.copy
-// CHECK-LABEL: coir.kernel @test_thread_copy
-coir.kernel @test_thread_copy(
+// Test coir.element.copy
+// CHECK-LABEL: coir.kernel @test_element_copy
+coir.kernel @test_element_copy(
     %src: !coir.tensor<16x16xf16, shared>,
     %dst: !coir.tensor<16x16xf16, shared>) {
-  // CHECK: coir.thread.copy %arg0 to %arg1 : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
-  coir.thread.copy %src to %dst : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
+  // CHECK: coir.element.copy %arg0 to %arg1 : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
+  coir.element.copy %src to %dst : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
 }
 
 // Test coir.barrier

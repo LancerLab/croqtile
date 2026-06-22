@@ -1,7 +1,13 @@
 //===- ClassifyCopies.cpp - Lower data.copy to specialized copy ops --------===//
 //
-// Classifies coir.data.copy operations into dma.copy, tma.copy, or
-// thread.copy based on source/destination memory spaces and target arch.
+// Classifies coir.data.copy into dma.copy, tma.copy, or element.copy
+// based on source/destination memory spaces and target capabilities
+// read from module attributes.
+//
+// Target capabilities (set by the driver from Target::HasTMA()/HasDMA()):
+//   coir.has_tma  -- target supports TMA (e.g. SM90+)
+//   coir.has_dma  -- target has DMA engine for cross-level transfers
+//                    (global<->shared, global<->local, shared<->local)
 //
 //===----------------------------------------------------------------------===//
 
@@ -55,13 +61,22 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
     int32_t dstMS = getMemSpace(dstType);
     Location loc = op.getLoc();
 
-    bool needsAsync =
+    bool crossLevel =
         (isGlobal(srcMS) && isShared(dstMS)) ||
-        (isShared(srcMS) && isGlobal(dstMS)) ||
-        (hasDMA && isGlobal(srcMS) && isLocal(dstMS)) ||
-        (hasDMA && isLocal(srcMS) && isGlobal(dstMS));
+        (isShared(srcMS) && isGlobal(dstMS));
+    bool globalLocal =
+        (isGlobal(srcMS) && isLocal(dstMS)) ||
+        (isLocal(srcMS) && isGlobal(dstMS));
+    bool sharedLocal =
+        (isShared(srcMS) && isLocal(dstMS)) ||
+        (isLocal(srcMS) && isShared(dstMS));
 
-    if (needsAsync && hasTMA) {
+    bool needsHwCopy =
+        crossLevel ||
+        (hasDMA && globalLocal) ||
+        (hasDMA && sharedLocal);
+
+    if (needsHwCopy && hasTMA) {
       auto newOp = rewriter.create<TmaCopyOp>(loc,
           coir::AsyncTokenType::get(rewriter.getContext()),
           op.getSource(), op.getDest());
@@ -72,7 +87,7 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
       return success();
     }
 
-    if (needsAsync) {
+    if (needsHwCopy) {
       auto newOp = rewriter.create<DmaCopyOp>(loc,
           coir::AsyncTokenType::get(rewriter.getContext()),
           op.getSource(), op.getDest());
@@ -83,26 +98,30 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
       return success();
     }
 
-    rewriter.create<ThreadCopyOp>(loc, op.getSource(), op.getDest());
+    rewriter.create<ElementCopyOp>(loc, op.getSource(), op.getDest());
     rewriter.eraseOp(op);
     return success();
   }
 };
 
-// Infer TMA capability from --target-arch string.
-// This mirrors Target::HasTMA() for standalone coir-opt usage.
-static bool inferHasTMAFromArch(llvm::StringRef arch) {
-  return arch.contains("sm_9") || arch.contains("sm_100");
-}
+/// Resolve target capabilities from module attributes.
+/// These attributes are set by the driver via Target::HasTMA()/HasDMA(),
+/// which query the target's feature table. For standalone coir-opt tests,
+/// embed coir.has_tma/coir.has_dma directly in the test IR.
+static void resolveTargetCaps(Operation *op, bool &hasTMA, bool &hasDMA) {
+  hasTMA = false;
+  hasDMA = false;
 
-// Infer DMA-engine requirement from --target-arch string.
-// This mirrors Target::HasDMA() for standalone coir-opt usage.
-// Any target not in the GPU/CPU family needs a DMA engine for global<->local.
-static bool inferHasDMAFromArch(llvm::StringRef arch) {
-  if (arch.empty()) return false;
-  if (arch.starts_with("sm_")) return false;
-  if (arch.starts_with("x86") || arch.starts_with("cpu")) return false;
-  return true;
+  auto module = dyn_cast<ModuleOp>(op);
+  if (!module)
+    module = op->getParentOfType<ModuleOp>();
+  if (!module)
+    return;
+
+  if (auto attr = module->getAttrOfType<BoolAttr>("coir.has_tma"))
+    hasTMA = attr.getValue();
+  if (auto attr = module->getAttrOfType<BoolAttr>("coir.has_dma"))
+    hasDMA = attr.getValue();
 }
 
 struct ClassifyCopiesPass
@@ -112,23 +131,9 @@ struct ClassifyCopiesPass
   void runOnOperation() override {
     auto *ctx = &getContext();
 
-    // CLI --target-arch overrides module attributes when provided.
-    // Otherwise read coir.has_tma / coir.has_dma from the module
-    // (set by the driver or embedded directly in the IR).
     bool hasTMA = false;
     bool hasDMA = false;
-    if (!targetArch.empty()) {
-      hasTMA = inferHasTMAFromArch(targetArch);
-      hasDMA = inferHasDMAFromArch(targetArch);
-    } else {
-      if (auto module = dyn_cast<ModuleOp>(getOperation())) {
-        hasTMA = CoIR::HasTMA(module);
-        hasDMA = CoIR::HasDMA(module);
-      } else if (auto pm = getOperation()->getParentOfType<ModuleOp>()) {
-        hasTMA = CoIR::HasTMA(pm);
-        hasDMA = CoIR::HasDMA(pm);
-      }
-    }
+    resolveTargetCaps(getOperation(), hasTMA, hasDMA);
 
     RewritePatternSet patterns(ctx);
     patterns.add<ClassifyDataCopy>(ctx, hasTMA, hasDMA);

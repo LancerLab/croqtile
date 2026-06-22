@@ -1,6 +1,6 @@
 //===- LowerCopy.cpp - Lower specialized copy ops to transfer patterns ----===//
 //
-// Expands coir.dma.copy, coir.tma.copy, and coir.thread.copy into
+// Expands coir.dma.copy, coir.tma.copy, and coir.element.copy into
 // the corresponding low-level transfer and synchronization sequences.
 //
 //===----------------------------------------------------------------------===//
@@ -27,14 +27,11 @@ using namespace coir;
 
 namespace {
 
-// Thread copy: annotate with "lowered" to signal readiness for codegen.
-// In codegen (Phase 5), this becomes a cooperative per-thread copy loop:
-//   for (int i = threadIdx.x; i < N; i += blockDim.x)
-//     dst[i] = src[i];
-struct LowerThreadCopy : public OpRewritePattern<ThreadCopyOp> {
+// Element copy: annotate with "lowered" to signal readiness for codegen.
+struct LowerElementCopy : public OpRewritePattern<ElementCopyOp> {
   using OpRewritePattern::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(ThreadCopyOp op,
+  LogicalResult matchAndRewrite(ElementCopyOp op,
                                 PatternRewriter &rewriter) const override {
     if (op->hasAttr("lowered"))
       return failure();
@@ -113,7 +110,7 @@ struct LowerCopyPass : public ::coir::impl::LowerCopyBase<LowerCopyPass> {
   void runOnOperation() override {
     auto *ctx = &getContext();
     RewritePatternSet patterns(ctx);
-    patterns.add<LowerThreadCopy>(ctx);
+    patterns.add<LowerElementCopy>(ctx);
     patterns.add<LowerDmaCopy>(ctx);
     patterns.add<LowerTmaCopy>(ctx);
 

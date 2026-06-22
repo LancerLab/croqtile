@@ -3,13 +3,13 @@
 
 module attributes { "coir.has_tma" = true } {
 
-// Test: thread.copy gets element count annotation
-// CHECK-LABEL: coir.kernel @test_thread_copy
-// CHECK: coir.thread.copy %arg0 to %arg1 {lowered, total_elements = 256 : i64}
-coir.kernel @test_thread_copy(
+// Test: element.copy gets element count annotation
+// CHECK-LABEL: coir.kernel @test_element_copy
+// CHECK: coir.element.copy %arg0 to %arg1 {lowered, total_elements = 256 : i64}
+coir.kernel @test_element_copy(
     %src: !coir.tensor<16x16xf16, shared>,
     %dst: !coir.tensor<16x16xf16, shared>) {
-  coir.thread.copy %src to %dst : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
+  coir.element.copy %src to %dst : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
 }
 
 // Test: dma.copy gets transfer metadata
@@ -35,7 +35,7 @@ coir.kernel @test_tma_copy(
 // Test: combined pipeline -- classify then lower
 // PIPE-LABEL: coir.kernel @test_classify_then_lower
 // PIPE: coir.tma.copy {{.*}} {lowered, mechanism = "tma"
-// PIPE: coir.thread.copy {{.*}} {lowered, total_elements
+// PIPE: coir.element.copy {{.*}} {lowered, total_elements
 coir.kernel @test_classify_then_lower(
     %g: !coir.tensor<128x64xf16>,
     %s: !coir.tensor<128x64xf16, shared>,
