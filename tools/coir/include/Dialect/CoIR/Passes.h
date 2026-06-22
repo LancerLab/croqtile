@@ -24,6 +24,8 @@ std::unique_ptr<mlir::Pass> createLowerDMADescPass();
 std::unique_ptr<mlir::Pass> createHoistDMAConfigPass();
 std::unique_ptr<mlir::Pass> createLowerMMAPass();
 std::unique_ptr<mlir::Pass> createLowerCopyPass();
+std::unique_ptr<mlir::Pass> createHoistAssertionsPass();
+std::unique_ptr<mlir::Pass> createHoistAssertionsPass();
 std::unique_ptr<mlir::Pass> createEmitCUDAPass();
 
 void emitCUDA(mlir::ModuleOp module, llvm::raw_ostream &os);

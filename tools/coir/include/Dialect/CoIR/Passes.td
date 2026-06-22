@@ -137,6 +137,30 @@ def HoistDMAConfig : Pass<"coir-hoist-dma-config"> {
   let dependentDialects = ["::coir::CoIRDialect"];
 }
 
+def HoistAssertions : Pass<"coir-hoist-assertions"> {
+  let summary = "Hoist runtime assertions to earliest safe emission site";
+  let description = [{
+    Performs LICM-style hoisting on coir.assert ops to reduce their
+    runtime cost by moving them out of hot loops when possible:
+
+    - If all values feeding the condition are kernel arguments
+      (loop-invariant at kernel level), promote to site=ENTRY and
+      move to the kernel entry block.
+    - If the condition is loop-invariant w.r.t. an enclosing
+      coir.foreach / scf.for, hoist to just before that loop and
+      set site=HOIST.
+    - Assertions inside conditional regions (scf.if) are NOT hoisted
+      past the conditional boundary.
+
+    ENTRY assertions are emitted by backends as host-side checks
+    before kernel launch; HOIST/USE assertions become device-side
+    checks. This is target-agnostic and applies to all backends.
+  }];
+
+  let constructor = "::coir::createHoistAssertionsPass()";
+  let dependentDialects = ["::coir::CoIRDialect"];
+}
+
 def EmitCUDA : Pass<"coir-emit-cuda", "::mlir::ModuleOp"> {
   let summary = "Emit CUDA/C++ source from lowered CoIR IR";
   let description = [{

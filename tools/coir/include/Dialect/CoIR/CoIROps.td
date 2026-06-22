@@ -388,4 +388,46 @@ def ElementCopyOp : CoIR_Op<"element.copy", []> {
   let assemblyFormat = "$source `to` $dest attr-dict `:` type($source) `->` type($dest)";
 }
 
+//===----------------------------------------------------------------------===//
+// Runtime safety assertions
+//
+// Target-agnostic: every backend emits the appropriate check API.
+//   ENTRY  -> host-side check before kernel launch
+//   HOIST  -> device-side check at hoisted site
+//   USE    -> device-side check at original use site
+//
+// Backends emit the check as the appropriate host/device assertion macro.
+//===----------------------------------------------------------------------===//
+
+def AssertOp : CoIR_Op<"assert", []> {
+  let summary = "Runtime safety assertion";
+  let description = [{
+    Emits a runtime assertion that `condition` is true. When the
+    condition is false at runtime, the assertion handler aborts with
+    the diagnostic `message`.
+
+    The `site` attribute determines where the check is emitted:
+      - entry: host wrapper, before kernel launch (cheapest)
+      - hoist: device code, at a hoisted site above inner loops
+      - use:   device code, at the original use site
+
+    The `usage` attribute classifies the check for filtering and
+    diagnostics (shape compatibility, element access bounds, loop
+    bounds, hardware constraints, etc.).
+
+    The HoistAssertions pass promotes assertions from USE -> HOIST
+    or ENTRY based on SSA def-chain analysis, analogous to Choreo's
+    AssertSite pass.
+  }];
+  let arguments = (ins
+    I1:$condition,
+    StrAttr:$message,
+    CoIR_AssertSiteAttr:$site,
+    CoIR_AssertUsageAttr:$usage
+  );
+  let assemblyFormat = [{
+    $condition `,` $message $site $usage attr-dict
+  }];
+}
+
 #endif // COIR_OPS_TD

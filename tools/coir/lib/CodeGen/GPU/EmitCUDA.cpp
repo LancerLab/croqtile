@@ -62,6 +62,12 @@ private:
   DenseMap<Value, TileLayout> tileLayouts;
   unsigned nextId = 0;
 
+  struct EntryAssertion {
+    std::string condition;
+    std::string message;
+  };
+  llvm::SmallVector<EntryAssertion> entryAssertions;
+
   std::string getIndent() { return std::string(indent * 2, ' '); }
   void incIndent() { indent++; }
   void decIndent() { if (indent > 0) indent--; }
@@ -174,6 +180,7 @@ private:
   }
 
   void emitKernel(KernelOp kernel) {
+    entryAssertions.clear();
     prescanMMAFragRoles(kernel);
 
     auto fnType = kernel.getFunctionType();
@@ -323,6 +330,7 @@ private:
       }
 
       auto dims = getLaunchDims(kernel);
+      emitEntryAssertions();
 
       os << "  " << devName << "<<<" << dims.gridStr() << ", "
          << dims.blockStr() << ">>>(";
@@ -395,6 +403,7 @@ private:
     os << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
 
     auto dims = getLaunchDims(kernel);
+    emitEntryAssertions();
 
     os << "  " << devName << "<<<" << dims.gridStr() << ", "
        << dims.blockStr() << ">>>(";
@@ -464,6 +473,8 @@ private:
       (void)op;
     else if (emitArithBinOp(op)) {}
     else if (emitCmpOp(op)) {}
+    else if (auto assertOp = dyn_cast<AssertOp>(op))
+      emitAssert(assertOp);
     else if (auto selectOp = dyn_cast<arith::SelectOp>(op)) {
       std::string name = getName(selectOp.getResult());
       os << getIndent() << emitCUDAType(selectOp.getResult().getType()) << " "
@@ -475,6 +486,23 @@ private:
       os << getIndent() << "// [unhandled] " << op->getName().getStringRef()
          << "\n";
     }
+  }
+
+  void emitAssert(AssertOp op) {
+    auto site = op.getSite();
+    auto msg = op.getMessage().str();
+    if (site == AssertSite::ENTRY) {
+      entryAssertions.push_back({getName(op.getCondition()), msg});
+      return;
+    }
+    os << getIndent() << "choreo::choreo_assert(" << getName(op.getCondition())
+       << ", \"" << msg << "\");" << "\n";
+  }
+
+  void emitEntryAssertions() {
+    for (auto &ea : entryAssertions)
+      os << "  choreo::runtime_check(" << ea.condition
+         << ", \"" << ea.message << "\");\n";
   }
 
   void emitParallel(ParallelOp op) {
