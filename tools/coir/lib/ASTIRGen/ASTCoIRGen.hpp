@@ -82,6 +82,15 @@ private:
   mlir::Value EmitChunkAtTile(AST::ChunkAt &chunk, mlir::Value baseVal);
   void CreateKernelOp(AST::ChoreoFunction &cf);
 
+  void EmitAssert(mlir::Location loc, mlir::Value condition,
+                  llvm::StringRef message,
+                  coir::AssertSite site = coir::AssertSite::USE,
+                  coir::AssertUsage usage = coir::AssertUsage::UNCLASSIFIED);
+
+  // Resolve a bounded variable (within or parallel-by) to its total
+  // iteration extent by looking up bv_map -> MLIR values or BoundedType.
+  int64_t ResolveBoundedVarExtent(llvm::StringRef rvName);
+
 public:
   ASTCoIRGen()
       : CodeGenerator("ast-coir-gen"),

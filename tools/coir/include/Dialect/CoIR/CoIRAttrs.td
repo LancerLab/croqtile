@@ -111,6 +111,55 @@ def CoIR_DMAKindAttr :
   CoIR_I32EnumAttr<"dma_kind", CoIR_DMAKindEnum>;
 
 //===----------------------------------------------------------------------===//
+// AssertSite -- emission tier for runtime safety assertions
+//
+// Target-agnostic: applies to all backends (GPU, accelerators, etc.).
+// The HoistAssertions pass promotes assertions up the tier ladder;
+// emitters map each tier to the appropriate host/device check API.
+//===----------------------------------------------------------------------===//
+
+def CoIR_AS_Entry : I32EnumAttrCase<"ENTRY", 0, "entry">;
+def CoIR_AS_Hoist : I32EnumAttrCase<"HOIST", 1, "hoist">;
+def CoIR_AS_Use   : I32EnumAttrCase<"USE",   2, "use">;
+
+def CoIR_AssertSiteEnum : CoIR_I32Enum<
+  "AssertSite", "assertion emission site tier", [
+    CoIR_AS_Entry,
+    CoIR_AS_Hoist,
+    CoIR_AS_Use
+  ]>;
+
+def CoIR_AssertSiteAttr :
+  CoIR_I32EnumAttr<"assert_site", CoIR_AssertSiteEnum>;
+
+//===----------------------------------------------------------------------===//
+// AssertUsage -- semantic category of a runtime safety check
+//
+// Target-agnostic classification. Each category maps to a family of
+// predicates that the frontend (SemaChecker) or target adaptor generates.
+// Backends and diagnostic tools use this to filter, report, or suppress
+// specific check families.
+//===----------------------------------------------------------------------===//
+
+def CoIR_AU_Unclassified    : I32EnumAttrCase<"UNCLASSIFIED",    0, "unclassified">;
+def CoIR_AU_ShapeCompat     : I32EnumAttrCase<"SHAPE_COMPAT",    1, "shape_compat">;
+def CoIR_AU_ElementAccess   : I32EnumAttrCase<"ELEMENT_ACCESS",  2, "element_access">;
+def CoIR_AU_LoopBound       : I32EnumAttrCase<"LOOP_BOUND",      3, "loop_bound">;
+def CoIR_AU_HwConstraint    : I32EnumAttrCase<"HW_CONSTRAINT",   4, "hw_constraint">;
+
+def CoIR_AssertUsageEnum : CoIR_I32Enum<
+  "AssertUsage", "semantic category of safety check", [
+    CoIR_AU_Unclassified,
+    CoIR_AU_ShapeCompat,
+    CoIR_AU_ElementAccess,
+    CoIR_AU_LoopBound,
+    CoIR_AU_HwConstraint
+  ]>;
+
+def CoIR_AssertUsageAttr :
+  CoIR_I32EnumAttr<"assert_usage", CoIR_AssertUsageEnum>;
+
+//===----------------------------------------------------------------------===//
 // Legacy layout constraint (kept for existing DMA ops)
 //===----------------------------------------------------------------------===//
 

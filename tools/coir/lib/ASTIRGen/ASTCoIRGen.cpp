@@ -9,6 +9,46 @@
 using namespace Choreo;
 using namespace CoIR;
 
+void ASTCoIRGen::EmitAssert(mlir::Location loc, mlir::Value condition,
+                            llvm::StringRef message, coir::AssertSite site,
+                            coir::AssertUsage usage) {
+  auto siteAttr = coir::AssertSiteAttr::get(&IRContext(), site);
+  auto usageAttr = coir::AssertUsageAttr::get(&IRContext(), usage);
+  builder.create<coir::AssertOp>(loc, condition,
+                                 builder.getStringAttr(message),
+                                 siteAttr, usageAttr);
+}
+
+int64_t ASTCoIRGen::ResolveBoundedVarExtent(llvm::StringRef rvName) {
+  auto scoped = InScopeName(rvName.str());
+  auto it = bv_map.find(scoped);
+  if (it == bv_map.end()) return 0;
+
+  int64_t total = 1;
+  for (auto &mappedName : it->second) {
+    // First try: look up the MLIR value by the mapped unscoped name
+    auto lookupName = UnScopedName(mappedName);
+    auto val = LookupValue(lookupName);
+    if (!val) val = LookupValue(lookupName + ".data");
+    if (val) {
+      if (auto tty = val.getType().dyn_cast<coir::TensorType>()) {
+        for (auto d : tty.getShape())
+          if (d > 0) total *= d;
+        continue;
+      }
+    }
+    // Second try: BoundedType from the symbol table
+    auto symType = GetSymbolType(UnScopedName(mappedName));
+    if (auto bty = dyn_cast<BoundedType>(symType)) {
+      if (bty->HasValidBound()) {
+        auto &ub = bty->GetUpperBound();
+        if (auto v = VIInt(ub)) { total *= *v; continue; }
+      }
+    }
+  }
+  return total;
+}
+
 namespace {
 
 int64_t EvalToInt(const ValueItem &vi) {
@@ -377,29 +417,9 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
           }
         }
       }
-      if (bound <= 1 && lr->ubound) {
-        std::string spanRef;
-        if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get())) {
-          if (auto *inner = dyn_cast<AST::Identifier>(expr->GetR().get()))
-            spanRef = inner->name;
-        } else if (auto *id = dyn_cast<AST::Identifier>(lr->ubound.get())) {
-          spanRef = id->name;
-        }
-        if (!spanRef.empty()) {
-          auto base = spanRef;
-          if (base.size() > 5 &&
-              base.substr(base.size() - 5) == ".span")
-            base = base.substr(0, base.size() - 5);
-          auto val = LookupValue(base);
-          if (!val) val = LookupValue(base + ".data");
-          if (val) {
-            if (auto tty = mlir::dyn_cast<coir::TensorType>(val.getType())) {
-              int64_t totalElems = 1;
-              for (auto d : tty.getShape()) totalElems *= d;
-              if (totalElems > 1) bound = totalElems;
-            }
-          }
-        }
+      if (bound <= 1) {
+        auto resolved = ResolveBoundedVarExtent(lr->GetRVName());
+        if (resolved > 1) bound = resolved;
       }
       if (bound <= 1) {
         auto rvName = lr->GetRVName();
@@ -954,6 +974,31 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   }
 
   if (!srcVal || !dstVal) return true;
+
+  // Emit shape-compatibility assertion for DMA copies.
+  // Uses static TensorType shapes when available; the HoistAssertions pass
+  // can later promote this to ENTRY site if the condition is kernel-invariant.
+  auto srcTensor = srcVal.getType().dyn_cast<coir::TensorType>();
+  auto dstTensor = dstVal.getType().dyn_cast<coir::TensorType>();
+  if (srcTensor && dstTensor) {
+    auto srcShape = srcTensor.getShape();
+    auto dstShape = dstTensor.getShape();
+    int64_t srcElems = 1, dstElems = 1;
+    bool srcStatic = true, dstStatic = true;
+    for (auto s : srcShape) {
+      if (s < 0) { srcStatic = false; break; }
+      srcElems *= s;
+    }
+    for (auto s : dstShape) {
+      if (s < 0) { dstStatic = false; break; }
+      dstElems *= s;
+    }
+    if (srcStatic && dstStatic && srcElems != dstElems) {
+      auto cond = builder.create<mlir::arith::ConstantIntOp>(loc, 0, 1);
+      EmitAssert(loc, cond, "DMA copy: src elements != dst elements",
+                 coir::AssertSite::ENTRY, coir::AssertUsage::SHAPE_COMPAT);
+    }
+  }
 
   bool isAsync = dma.IsAsync();
   auto copyOp = builder.create<coir::DataCopyOp>(

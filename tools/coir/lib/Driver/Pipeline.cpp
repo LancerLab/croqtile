@@ -59,8 +59,9 @@ void Pipeline::EmitCoIR(llvm::raw_ostream &os) {
 }
 
 bool Pipeline::Optimize() {
-  // TODO: CoIR optimization passes (CSE, canonicalize, etc.)
-  return true;
+  mlir::PassManager pm(&ctx_);
+  pm.addPass(coir::createHoistAssertionsPass());
+  return mlir::succeeded(pm.run(module_));
 }
 
 bool Pipeline::Lower() {
