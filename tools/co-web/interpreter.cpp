@@ -253,7 +253,7 @@ Value Interpreter::Eval(AST::Node& node) {
     return EvalDataAccess(*da);
   }
   if (auto* ce = dyn_cast<AST::CastExpr>(&node)) {
-    auto& val_node = ce->value_r ? ce->value_r : ce->value_l;
+    const auto& val_node = ce->GetR() ? ce->GetR() : ce->GetL();
     if (!val_node) return int64_t(0);
     Value inner = Eval(*val_node);
     auto bt = ce->ToType();
@@ -268,32 +268,32 @@ Value Interpreter::EvalExpr(AST::Expr& expr) {
   auto op = expr.op.GetKind();
 
   if (op == Op::Ref) {
-    if (expr.value_l) return Eval(*expr.value_l);
-    if (expr.value_r) return Eval(*expr.value_r);
+    if (expr.GetL()) return Eval(*expr.GetL());
+    if (expr.GetR()) return Eval(*expr.GetR());
     return int64_t(0);
   }
 
   if (op == Op::Cast) {
-    if (expr.value_l) return Eval(*expr.value_l);
+    if (expr.GetL()) return Eval(*expr.GetL());
     return int64_t(0);
   }
 
   if (op == Op::ElemOf) {
     if (auto name = AST::GetName(expr)) {
       auto ait = arrays_.find(*name);
-      if (ait != arrays_.end() && expr.value_r) {
-        auto* da = dyn_cast<AST::DataAccess>(&*expr.value_r);
+      if (ait != arrays_.end() && expr.GetR()) {
+        auto* da = dyn_cast<AST::DataAccess>(&*expr.GetR());
         if (da) return EvalDataAccess(*da);
       }
     }
-    if (expr.value_r) return Eval(*expr.value_r);
-    if (expr.value_l) return Eval(*expr.value_l);
+    if (expr.GetR()) return Eval(*expr.GetR());
+    if (expr.GetL()) return Eval(*expr.GetL());
     return int64_t(0);
   }
 
-  if (expr.value_l && expr.value_r) {
-    Value lv = Eval(*expr.value_l);
-    Value rv = Eval(*expr.value_r);
+  if (expr.GetL() && expr.GetR()) {
+    Value lv = Eval(*expr.GetL());
+    Value rv = Eval(*expr.GetR());
 
     bool use_float = std::holds_alternative<double>(lv) ||
                      std::holds_alternative<double>(rv);
@@ -343,8 +343,8 @@ Value Interpreter::EvalExpr(AST::Expr& expr) {
     }
   }
 
-  if (expr.value_l || expr.value_r) {
-    auto& operand = expr.value_l ? expr.value_l : expr.value_r;
+  if (expr.GetL() || expr.GetR()) {
+    const auto& operand = expr.GetL() ? expr.GetL() : expr.GetR();
     Value v = Eval(*operand);
     switch (op) {
     case Op::LogicNot: return Value(!ToBool(v));
