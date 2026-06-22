@@ -67,7 +67,7 @@ export LD_LIBRARY_PATH="${TOPSCC_LIB}:${LD_LIBRARY_PATH:-}"
 # Detect GCU arch
 gcu_arch="${GCU_ARCH:-}"
 if [[ -z "${gcu_arch}" ]]; then
-  GCU_DEVICE_STR="$(lspci 2>/dev/null | grep -iE 'Enflame' | head -1)"
+  GCU_DEVICE_STR="$(lspci 2>/dev/null | grep -iE 'Enflame' | head -1 || true)"
   if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
     gcu_arch=gcu300
   elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
