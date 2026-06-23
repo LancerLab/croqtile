@@ -14,12 +14,14 @@ coir.kernel @mma_simple(
     %a_tile: !coir.tensor<16x16xf16, shared>,
     %b_tile: !coir.tensor<16x16xf16, shared>,
     %c_tile: !coir.tensor<16x16xf32, shared>) {
-  %zero = arith.constant 0.0 : f32
-  %acc = coir.mma.fill %zero : f32 -> !coir.mma_frag<16x16xf32>
-  %a_frag = coir.mma.load %a_tile : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
-  %b_frag = coir.mma.load %b_tile : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
-  %res = coir.mma.exec %acc, %a_frag, %b_frag {layout = #coir.mma_layout<row_col>} : (!coir.mma_frag<16x16xf32>, !coir.mma_frag<16x16xf16>, !coir.mma_frag<16x16xf16>) -> !coir.mma_frag<16x16xf32>
-  coir.mma.store %res, %c_tile : !coir.mma_frag<16x16xf32>, !coir.tensor<16x16xf32, shared>
+  coir.parallel (%p) in [1] level = #coir.level<block> {
+    %zero = arith.constant 0.0 : f32
+    %acc = coir.mma.fill %zero : f32 -> !coir.mma_frag<16x16xf32>
+    %a_frag = coir.mma.load %a_tile : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
+    %b_frag = coir.mma.load %b_tile : !coir.tensor<16x16xf16, shared> -> !coir.mma_frag<16x16xf16>
+    %res = coir.mma.exec %acc, %a_frag, %b_frag {layout = #coir.mma_layout<row_col>} : (!coir.mma_frag<16x16xf32>, !coir.mma_frag<16x16xf16>, !coir.mma_frag<16x16xf16>) -> !coir.mma_frag<16x16xf32>
+    coir.mma.store %res, %c_tile : !coir.mma_frag<16x16xf32>, !coir.tensor<16x16xf32, shared>
+  }
 }
 
 // Test: K-loop accumulation with deferred exec+store pattern
@@ -41,18 +43,20 @@ coir.kernel @mma_kloop(
     %a: !coir.tensor<128x64xf16, shared>,
     %b: !coir.tensor<64x128xf16, shared>,
     %c: !coir.tensor<128x128xf32, shared>) {
-  %zero = arith.constant 0.0 : f32
-  %c4 = arith.constant 4 : index
-  %init = coir.mma.fill %zero : f32 -> !coir.mma_frag<128x16xf32>
-  %final = coir.foreach %k in %c4 iter_args(%acc = %init) : !coir.mma_frag<128x16xf32> {
-    %at = coir.tensor.tile %a[%k] : !coir.tensor<128x64xf16, shared> -> !coir.tensor<128x16xf16, shared>
-    %bt = coir.tensor.tile %b[%k] : !coir.tensor<64x128xf16, shared> -> !coir.tensor<16x128xf16, shared>
-    %af = coir.mma.load %at : !coir.tensor<128x16xf16, shared> -> !coir.mma_frag<128x16xf16>
-    %bf = coir.mma.load %bt : !coir.tensor<16x128xf16, shared> -> !coir.mma_frag<16x128xf16>
-    %r = coir.mma.exec %acc, %af, %bf {layout = #coir.mma_layout<row_col>} : (!coir.mma_frag<128x16xf32>, !coir.mma_frag<128x16xf16>, !coir.mma_frag<16x128xf16>) -> !coir.mma_frag<128x16xf32>
-    coir.yield %r : !coir.mma_frag<128x16xf32>
+  coir.parallel (%p) in [1] level = #coir.level<block> {
+    %zero = arith.constant 0.0 : f32
+    %c4 = arith.constant 4 : index
+    %init = coir.mma.fill %zero : f32 -> !coir.mma_frag<128x16xf32>
+    %final = coir.foreach %k in %c4 iter_args(%acc = %init) : !coir.mma_frag<128x16xf32> {
+      %at = coir.tensor.tile %a[%k] : !coir.tensor<128x64xf16, shared> -> !coir.tensor<128x16xf16, shared>
+      %bt = coir.tensor.tile %b[%k] : !coir.tensor<64x128xf16, shared> -> !coir.tensor<16x128xf16, shared>
+      %af = coir.mma.load %at : !coir.tensor<128x16xf16, shared> -> !coir.mma_frag<128x16xf16>
+      %bf = coir.mma.load %bt : !coir.tensor<16x128xf16, shared> -> !coir.mma_frag<16x128xf16>
+      %r = coir.mma.exec %acc, %af, %bf {layout = #coir.mma_layout<row_col>} : (!coir.mma_frag<128x16xf32>, !coir.mma_frag<128x16xf16>, !coir.mma_frag<16x128xf16>) -> !coir.mma_frag<128x16xf32>
+      coir.yield %r : !coir.mma_frag<128x16xf32>
+    }
+    coir.mma.store %final, %c : !coir.mma_frag<128x16xf32>, !coir.tensor<128x128xf32, shared>
   }
-  coir.mma.store %final, %c : !coir.mma_frag<128x16xf32>, !coir.tensor<128x128xf32, shared>
 }
 
 } // module

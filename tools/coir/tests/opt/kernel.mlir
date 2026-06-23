@@ -2,9 +2,9 @@
 
 // Test coir.kernel op
 // CHECK-LABEL: coir.kernel @matmul
-// CHECK-SAME: %arg0: !coir.tensor<128x64xf16>
-// CHECK-SAME: %arg1: !coir.tensor<64x256xf16>
-// CHECK: -> !coir.tensor<128x256xf16>
+// CHECK-SAME: %arg0: !coir.tensor<128x64xf16, default>
+// CHECK-SAME: %arg1: !coir.tensor<64x256xf16, default>
+// CHECK: -> !coir.tensor<128x256xf16, default>
 coir.kernel @matmul(%a: !coir.tensor<128x64xf16>,
                     %b: !coir.tensor<64x256xf16>)
     -> !coir.tensor<128x256xf16> {

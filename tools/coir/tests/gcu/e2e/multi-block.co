@@ -1,0 +1,34 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Multi-block parallel: 4 blocks each processing 1/4 of the input.
+
+__co__ s32 [256] vec_add(s32 [256] a, s32 [256] b) {
+  s32[a.span] c;
+  parallel p by 4 {
+    l1_a = dma.copy a.chunkat(p) => local;
+    l1_b = dma.copy b.chunkat(p) => local;
+    local s32[l1_a.span] l1_c;
+    foreach i in [l1_a.span(0)] {
+      l1_c.at(i) = l1_a.data.at(i) + l1_b.data.at(i);
+    }
+    dma.copy l1_c => c.chunkat(p);
+  }
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(256);
+  auto b = choreo::make_spandata<choreo::s32>(256);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = vec_add(a.view(), b.view());
+
+  for (size_t i = 0; i < 256; ++i)
+    choreo::choreo_assert(a[i] + b[i] == res[i], "mismatch");
+
+  std::cout << "PASS: multi-block vec_add" << std::endl;
+}
+
+// CHECK: PASS: multi-block vec_add

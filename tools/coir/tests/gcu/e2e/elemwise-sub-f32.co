@@ -1,0 +1,38 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// f32 elementwise subtract.
+
+__co__ f32 [256] ele_sub(f32 [256] a, f32 [256] b) {
+  f32[a.span] c;
+  parallel p by 1 {
+    l1_a = dma.copy a.chunkat(p) => local;
+    l1_b = dma.copy b.chunkat(p) => local;
+    local f32[l1_a.span] l1_c;
+    foreach i in [l1_a.span(0)] {
+      l1_c.at(i) = l1_a.data.at(i) - l1_b.data.at(i);
+    }
+    dma.copy l1_c => c.chunkat(p);
+  }
+  return c;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(256);
+  auto b = choreo::make_spandata<choreo::f32>(256);
+  a.fill(10.0f);
+  b.fill(3.0f);
+
+  auto res = ele_sub(a.view(), b.view());
+
+  bool pass = true;
+  for (size_t i = 0; i < 256; ++i)
+    if (std::abs(res[i] - 7.0f) > 0.001f) { pass = false; break; }
+
+  if (pass)
+    std::cout << "PASS: f32 elemwise sub" << std::endl;
+  else
+    std::cout << "FAIL: f32 elemwise sub" << std::endl;
+}
+
+// CHECK: PASS: f32 elemwise sub

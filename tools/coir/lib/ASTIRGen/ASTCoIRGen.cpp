@@ -98,8 +98,9 @@ ASTCoIRGen::LowerSpannedType(const ptr<SpannedType> &sty) {
 
   int32_t memSpace = -1;
   switch (sty->m_type) {
-  case Storage::GLOBAL:
   case Storage::DEFAULT:
+    break;
+  case Storage::GLOBAL:
     memSpace = static_cast<int32_t>(coir::TensorMemorySpace::Global);
     break;
   case Storage::SHARED:

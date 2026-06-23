@@ -10,7 +10,7 @@ __co__ s32 [64] vec_add(s32 [64] a, s32 [64] b) {
 }
 
 // CHECK: coir.kernel @vec_add
-// CHECK-SAME: !coir.tensor<64xi32, global>
+// CHECK-SAME: !coir.tensor<64xi32, default>
 // CHECK: coir.parallel
 // CHECK: arith.addi
 // CHECK: coir.tensor.store_elem

@@ -45,17 +45,16 @@ public:
 
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
-        emitKernel(kernel);
+        if (hasBlockParallel(kernel))
+          emitDeviceFunction(kernel);
     }
 
-    // Stub definitions after all kernels -- declarations already emitted
-    // before each kernel that uses them.
     if (!stubCode.empty())
       os << stubCode;
 
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
-        emitHostWrapper(kernel);
+        emitHostFunction(kernel);
     }
   }
 
@@ -83,27 +82,28 @@ private:
 
   std::string emitType(Type ty) {
     if (auto tensorTy = dyn_cast<coir::TensorType>(ty))
-      return emitElemType(tensorTy.getElementType()) + "*";
+      return emitType(tensorTy.getElementType()) + "*";
     if (ty.isIndex()) return "int";
     if (ty.isF16()) return "__fp16";
-    if (ty.isF32()) return "float";
-    if (ty.isInteger(32)) return "int";
-    return "/* unknown */";
-  }
-
-  std::string emitElemType(Type ty) {
-    if (ty.isF16()) return "__fp16";
+    if (ty.isBF16()) return "__bf16";
     if (ty.isF32()) return "float";
     if (ty.isF64()) return "double";
+    if (ty.isInteger(8)) return "int8_t";
+    if (ty.isInteger(16)) return "int16_t";
     if (ty.isInteger(32)) return "int";
+    if (ty.isInteger(64)) return "int64_t";
     return "/* unknown */";
   }
 
-  std::string choreoElemFor(Type ty) {
+  std::string choreoType(Type ty) {
     if (ty.isF16()) return "choreo::f16";
+    if (ty.isBF16()) return "choreo::bf16";
     if (ty.isF32()) return "choreo::f32";
     if (ty.isF64()) return "choreo::f64";
+    if (ty.isInteger(8)) return "choreo::s8";
+    if (ty.isInteger(16)) return "choreo::s16";
     if (ty.isInteger(32)) return "choreo::s32";
+    if (ty.isInteger(64)) return "choreo::s64";
     return "choreo::s32";
   }
 
@@ -140,7 +140,31 @@ private:
     });
   }
 
-  void emitKernel(KernelOp kernel) {
+  // Check if kernel return value i is an input argument (return-input pattern).
+  int getReturnInputArgIdx(KernelOp kernel, unsigned retIdx) {
+    auto &body = kernel.getBody();
+    if (body.empty()) return -1;
+    for (auto &op : body.front().getOperations()) {
+      if (auto ret = dyn_cast<KernelReturnOp>(op)) {
+        if (retIdx < ret.getOperands().size()) {
+          Value v = ret.getOperands()[retIdx];
+          if (auto arg = dyn_cast<BlockArgument>(v))
+            return arg.getArgNumber();
+        }
+      }
+    }
+    return -1;
+  }
+
+  bool hasBlockParallel(KernelOp kernel) {
+    bool found = false;
+    kernel.walk([&](ParallelOp p) {
+      if (p.getLevel() == ParallelLevel::BLOCK) found = true;
+    });
+    return found;
+  }
+
+  void emitDeviceFunction(KernelOp kernel) {
     preCollectStubs(kernel);
 
     if (!stubDeclCode.empty()) {
@@ -149,6 +173,7 @@ private:
     }
 
     auto fnType = kernel.getFunctionType();
+
     os << "__device__ void " << kernel.getSymName() << "(";
 
     auto &body = kernel.getBody();
@@ -164,11 +189,16 @@ private:
       }
     }
     for (unsigned i = 0; i < fnType.getNumResults(); ++i) {
-      if (paramIdx > 0) os << ", ";
-      std::string name = "out" + std::to_string(i);
-      os << emitType(fnType.getResult(i)) << " " << name;
-      returnParamNames[i] = name;
-      paramIdx++;
+      int argIdx = getReturnInputArgIdx(kernel, i);
+      if (argIdx >= 0) {
+        returnParamNames[i] = "arg" + std::to_string(argIdx);
+      } else {
+        if (paramIdx > 0) os << ", ";
+        std::string name = "out" + std::to_string(i);
+        os << emitType(fnType.getResult(i)) << " " << name;
+        returnParamNames[i] = name;
+        paramIdx++;
+      }
     }
     os << ") {\n";
     incIndent();
@@ -177,7 +207,8 @@ private:
       if (auto ret = dyn_cast<KernelReturnOp>(op)) {
         for (unsigned i = 0; i < ret.getOperands().size(); ++i) {
           returnValues.insert(ret.getOperands()[i]);
-          valueNames[ret.getOperands()[i]] = returnParamNames[i];
+          if (getReturnInputArgIdx(kernel, i) < 0)
+            valueNames[ret.getOperands()[i]] = returnParamNames[i];
         }
       }
     }
@@ -222,66 +253,119 @@ private:
     return 1;
   }
 
-  void emitHostWrapper(KernelOp kernel) {
+  std::string hostReturnType(FunctionType fnType) {
+    if (fnType.getNumResults() == 0) return "void";
+    Type resTy = fnType.getResult(0);
+    if (auto tty = dyn_cast<coir::TensorType>(resTy)) {
+      return "choreo::spanned_data<" +
+             choreoType(tty.getElementType()) + ", " +
+             std::to_string(tty.getShape().size()) + ">";
+    }
+    return emitType(resTy);
+  }
+
+  void emitHostFunction(KernelOp kernel) {
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
     unsigned numResults = fnType.getNumResults();
-    if (numResults == 0) return;
+    bool needsDevice = hasBlockParallel(kernel);
+    auto resTy = numResults > 0
+                     ? dyn_cast<coir::TensorType>(fnType.getResult(0))
+                     : nullptr;
 
-    auto resTy = dyn_cast<coir::TensorType>(fnType.getResult(0));
-    if (!resTy) return;
+    // __global__ trampoline -- only when device offload is needed and
+    // the result is a tensor requiring D2H copy.
+    if (needsDevice && resTy) {
+      int retInputIdx = getReturnInputArgIdx(kernel, 0);
+      std::string eType = emitType(resTy.getElementType());
 
-    std::string eType = emitElemType(resTy.getElementType());
+      os << "__global__ void __coir_global_" << name.str() << "(";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        if (i > 0) os << ", ";
+        os << emitType(fnType.getInput(i)) << " g_in" << i;
+      }
+      if (retInputIdx < 0)
+        os << ", " << eType << "* g_out, int N";
+      os << ") {\n";
+      os << "  " << name.str() << "(";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        if (i > 0) os << ", ";
+        os << "g_in" << i;
+      }
+      if (retInputIdx < 0)
+        os << ", g_out";
+      os << ");\n";
+      os << "}\n\n";
+    }
+
+    // Host function signature.
+    os << hostReturnType(fnType) << " " << name.str() << "(";
+    for (unsigned i = 0; i < numInputs; ++i) {
+      if (i > 0) os << ", ";
+      auto inTy = fnType.getInput(i);
+      if (auto tensorTy = dyn_cast<coir::TensorType>(inTy)) {
+        unsigned inDim = tensorTy.getShape().size();
+        os << "const choreo::spanned_view<"
+           << choreoType(tensorTy.getElementType()) << ", "
+           << inDim << "> & p" << i;
+      } else {
+        os << emitType(inTy) << " p" << i;
+      }
+    }
+    os << ") {\n";
+
+    if (needsDevice && resTy) {
+      emitDeviceOffloadBody(kernel, resTy);
+    } else {
+      // No device offload: emit the body directly (the function IS the
+      // host function, just like how the AST codegen handles __co__
+      // functions without parallel-by).
+      auto &body = kernel.getBody();
+      if (!body.empty()) {
+        incIndent();
+        for (auto &op : body.front().getOperations())
+          emitOp(&op);
+        decIndent();
+      }
+    }
+
+    os << "}\n\n";
+  }
+
+  bool isDeviceGlobal(coir::TensorType tty) {
+    return tty.getMemorySpace() ==
+           static_cast<int32_t>(coir::TensorMemorySpace::Global);
+  }
+
+  void emitDeviceOffloadBody(KernelOp kernel, coir::TensorType resTy) {
+    auto fnType = kernel.getFunctionType();
+    auto name = kernel.getSymName();
+    unsigned numInputs = fnType.getNumInputs();
+    int retInputIdx = getReturnInputArgIdx(kernel, 0);
+    std::string eType = emitType(resTy.getElementType());
+    std::string choreoElem = choreoType(resTy.getElementType());
+    unsigned ndim = resTy.getShape().size();
     int64_t resN = getTensorNumElems(resTy);
     int64_t resBytes = getTensorBytes(resTy);
     int64_t gridDim = getGridDim(kernel);
 
-    // __global__ wrapper: pass global pointers directly to the __device__
-    // kernel. The kernel body handles DMA internally (from lowered IR).
-    os << "__global__ void __coir_global_" << name.str() << "(";
-    for (unsigned i = 0; i < numInputs; ++i) {
-      if (i > 0) os << ", ";
-      os << emitType(fnType.getInput(i)) << " g_in" << i;
-    }
-    os << ", " << eType << "* g_out, int N) {\n";
-    os << "  " << name.str() << "(";
-    for (unsigned i = 0; i < numInputs; ++i) {
-      if (i > 0) os << ", ";
-      os << "g_in" << i;
-    }
-    os << ", g_out);\n";
-    os << "}\n\n";
-
-    // Emit host-callable wrapper using choreo runtime types
-    std::string choreoElem;
-    if (resTy.getElementType().isInteger(32)) choreoElem = "choreo::s32";
-    else if (resTy.getElementType().isF32()) choreoElem = "choreo::f32";
-    else if (resTy.getElementType().isF16()) choreoElem = "choreo::f16";
-    else choreoElem = "choreo::s32";
-
-    unsigned ndim = resTy.getShape().size();
-    os << "choreo::spanned_data<" << choreoElem << ", " << ndim << "> "
-       << name.str() << "(";
-    for (unsigned i = 0; i < numInputs; ++i) {
-      if (i > 0) os << ", ";
-      auto inTy = dyn_cast<coir::TensorType>(fnType.getInput(i));
-      std::string inChoreo = inTy ? choreoElemFor(inTy.getElementType())
-                                  : choreoElem;
-      unsigned inDim = inTy ? inTy.getShape().size() : ndim;
-      os << "const choreo::spanned_view<" << inChoreo << ", " << inDim
-         << "> & p" << i;
-    }
-    os << ") {\n";
-
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
-      int64_t bytes = tty ? getTensorBytes(tty) : resBytes;
-      std::string inEType = tty ? emitElemType(tty.getElementType()) : eType;
-      os << "  " << inEType << "* p" << i << "__device = nullptr;\n";
-      os << "  topsMalloc((void**)&p" << i << "__device, " << bytes << "ULL);\n";
-      os << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
-         << bytes << "ULL, topsMemcpyHostToDevice);\n";
+      if (tty && isDeviceGlobal(tty)) {
+        std::string inEType = emitType(tty.getElementType());
+        os << "  " << inEType << "* p" << i
+           << "__device = const_cast<" << inEType << "*>(p" << i
+           << ".data());\n";
+      } else {
+        int64_t bytes = tty ? getTensorBytes(tty) : resBytes;
+        std::string inEType = tty ? emitType(tty.getElementType()) : eType;
+        os << "  " << inEType << "* p" << i << "__device = nullptr;\n";
+        os << "  topsMalloc((void**)&p" << i << "__device, "
+           << bytes << "ULL);\n";
+        os << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+           << bytes << "ULL, topsMemcpyHostToDevice);\n";
+      }
     }
 
     std::string shapeStr;
@@ -294,24 +378,49 @@ private:
       }
       ss << "}";
     }
-    os << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
-       << ndim << ">(" << shapeStr << ");\n";
-    os << "  " << eType << "* __result__device = nullptr;\n";
-    os << "  topsMalloc((void**)&__result__device, " << resBytes << "ULL);\n";
-    os << "  __coir_global_" << name.str() << "<<<" << gridDim << ", 1>>>(";
-    for (unsigned i = 0; i < numInputs; ++i) {
-      if (i > 0) os << ", ";
-      os << "p" << i << "__device";
+
+    if (retInputIdx >= 0) {
+      os << "  __coir_global_" << name.str() << "<<<" << gridDim << ", 1>>>(";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        if (i > 0) os << ", ";
+        os << "p" << i << "__device";
+      }
+      os << ");\n";
+      os << "  topsDeviceSynchronize();\n";
+      os << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+         << ".data()), p" << retInputIdx << "__device, "
+         << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (tty && isDeviceGlobal(tty)) continue;
+        os << "  topsFree(p" << i << "__device);\n";
+      }
+      os << "  return choreo::copy_as_spanned(p" << retInputIdx
+         << ".data(), p" << retInputIdx << ".shape());\n";
+    } else {
+      os << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
+         << ndim << ">(" << shapeStr << ");\n";
+      os << "  " << eType << "* __result__device = nullptr;\n";
+      os << "  topsMalloc((void**)&__result__device, " << resBytes
+         << "ULL);\n";
+      os << "  __coir_global_" << name.str() << "<<<" << gridDim
+         << ", 1>>>(";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        if (i > 0) os << ", ";
+        os << "p" << i << "__device";
+      }
+      os << ", __result__device, " << resN << ");\n";
+      os << "  topsDeviceSynchronize();\n";
+      os << "  topsMemcpy(__result.data(), __result__device, "
+         << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
+      for (unsigned i = 0; i < numInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (tty && isDeviceGlobal(tty)) continue;
+        os << "  topsFree(p" << i << "__device);\n";
+      }
+      os << "  topsFree(__result__device);\n";
+      os << "  return __result;\n";
     }
-    os << ", __result__device, " << resN << ");\n";
-    os << "  topsDeviceSynchronize();\n";
-    os << "  topsMemcpy(__result.data(), __result__device, "
-       << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
-    for (unsigned i = 0; i < numInputs; ++i)
-      os << "  topsFree(p" << i << "__device);\n";
-    os << "  topsFree(__result__device);\n";
-    os << "  return __result;\n";
-    os << "}\n\n";
   }
 
   unsigned nextDmaId = 0;
@@ -355,7 +464,7 @@ private:
     else if (auto wait = dyn_cast<WaitOp>(op))
       emitWait(wait);
     else if (auto ret = dyn_cast<KernelReturnOp>(op))
-      (void)ret;
+      emitKernelReturn(ret);
     else if (auto yield = dyn_cast<YieldOp>(op))
       emitYield(yield);
     else if (auto check = dyn_cast<DMACheckOp>(op))
@@ -777,6 +886,14 @@ private:
     state.has_pending = false;
   }
 
+  void emitKernelReturn(KernelReturnOp op) {
+    for (unsigned i = 0; i < op.getOperands().size(); ++i) {
+      Value val = op.getOperands()[i];
+      if (isa<coir::TensorType>(val.getType())) continue;
+      os << getIndent() << "return " << getName(val) << ";\n";
+    }
+  }
+
   void emitYield(YieldOp op) {
     for (unsigned i = 0; i < op.getOperands().size(); ++i) {
       auto yieldVal = op.getOperands()[i];
@@ -857,7 +974,7 @@ private:
       space = "tops::Private";
 
     std::string result = "tops::mdspan(" + space + ", ("
-      + emitElemType(tty.getElementType()) + "*)" + name;
+      + emitType(tty.getElementType()) + "*)" + name;
     for (auto d : shape)
       result += ", " + std::to_string(d);
     result += ")";
@@ -981,7 +1098,7 @@ private:
         static_cast<int32_t>(coir::TensorMemorySpace::Local))
       qualifier = "__local__ ";
 
-    os << getIndent() << qualifier << emitElemType(tensorTy.getElementType())
+    os << getIndent() << qualifier << emitType(tensorTy.getElementType())
        << " " << name << "[" << totalElems << "];\n";
   }
 
@@ -997,7 +1114,7 @@ private:
     else if (auto floatAttr = dyn_cast<FloatAttr>(op.getValue())) {
       llvm::SmallString<16> strVal;
       floatAttr.getValue().toString(strVal, 6, 0);
-      os << getIndent() << "const " << emitElemType(op.getType())
+      os << getIndent() << "const " << emitType(op.getType())
          << " " << name << " = " << strVal << ";\n";
     }
   }

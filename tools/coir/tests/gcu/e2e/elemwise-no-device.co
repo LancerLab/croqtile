@@ -1,0 +1,39 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Elementwise add without device kernel -- async DMA + foreach elem math.
+
+__co__ auto elemwise_no_device(s32 [64] lhs, s32 [64] rhs) {
+  s32 [lhs.span] output;
+
+  parallel p by 1 {
+    lf = dma.copy.async lhs.chunkat(p) => local;
+    rf = dma.copy.async rhs.chunkat(p) => local;
+    wait lf, rf;
+
+    local s32 [lf.span] l1_out;
+
+    foreach i in [l1_out.span]
+      l1_out.at(i) = lf.data.at(i) + rf.data.at(i);
+
+    dma.copy l1_out => output.chunkat(p);
+  }
+
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(64);
+  auto b = choreo::make_spandata<choreo::s32>(64);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = elemwise_no_device(a.view(), b.view());
+
+  for (size_t i = 0; i < 64; ++i)
+    choreo::choreo_assert(a[i] + b[i] == res[i], "mismatch");
+
+  std::cout << "PASS: elemwise no device" << std::endl;
+}
+
+// CHECK: PASS: elemwise no device

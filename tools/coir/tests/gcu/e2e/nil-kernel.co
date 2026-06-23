@@ -1,0 +1,13 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Nil kernel - empty __co__ function with no arguments.
+
+__co__ void nil() {}
+
+int main() {
+  nil();
+  std::cout << "Test Passed" << std::endl;
+}
+
+// CHECK: Test Passed

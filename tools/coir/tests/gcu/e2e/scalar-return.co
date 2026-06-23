@@ -1,0 +1,19 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Scalar return from __co__ function.
+
+__co__ auto int_ret() { return 3; }
+
+__co__ auto float_ret() { return 1.5f; }
+
+int main() {
+  auto res0 = int_ret();
+  std::cout << "int return: " << res0 << std::endl;
+
+  auto res1 = float_ret();
+  std::cout << "float return: " << res1 << std::endl;
+}
+
+// CHECK: int return: 3
+// CHECK: float return: 1.5
