@@ -447,19 +447,20 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     }
     {
       auto device_code = ds.str();
-      if (dte_pool_emitted) {
+      if (dte_pool_size > 0) {
         auto pos = device_code.find("/*__CHOREO_DTE_POOL_PLACEHOLDER__*/");
         if (pos != std::string::npos) {
-          std::string pool_decl =
-              "choreo::choreo_sdte __choreo_dte_pool__;\n"
-              "  __choreo_dte_pool__.init();";
+          std::string pool_decl = "choreo::choreo_sdte __choreo_dte_pool__[" +
+                                  std::to_string(dte_pool_size) +
+                                  "];\n"
+                                  "  for (int __i = 0; __i < " +
+                                  std::to_string(dte_pool_size) +
+                                  "; ++__i) __choreo_dte_pool__[__i].init();";
           device_code.replace(pos, 35, pool_decl);
         }
       } else {
         auto pos = device_code.find("/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n");
-        if (pos != std::string::npos) {
-          device_code.erase(pos, 36);
-        }
+        if (pos != std::string::npos) { device_code.erase(pos, 36); }
       }
       code_segments.back() += device_code + hs.str();
     }
@@ -1568,17 +1569,32 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       return n.future;
 
     std::string dte_ctx;
-    bool use_pool = (CCtx().GetArch() == "gcu300" && n.future.empty());
+    bool use_pool = (CCtx().GetArch() == "gcu300" && sto != Storage::SHARED);
 
     if (use_pool) {
-      // GCU300 anonymous DMA: reuse a persistent DTE from the pool
-      // to avoid DTE resource exhaustion from repeated init/destroy.
-      // Pool is declared via __CHOREO_DTE_POOL_PLACEHOLDER__ that gets
-      // replaced at the function level during finalization.
-      dte_pool_emitted = true;
-      dte_ctx = "__choreo_dte_pool__";
+      // GCU300 SDTE pool: all Private-level DMA (anonymous and named)
+      // reuse persistent DTE pool slots to avoid resource exhaustion from
+      // repeated init/destroy in loops. Each unique named future gets its
+      // own stable slot; anonymous DMA shares slot 0.
+      int slot = 0;
+      if (!n.future.empty()) {
+        // Use unscoped name as pool key so that same-named futures in
+        // different scopes (e.g., `fd` in tile-0 vs foreach vs tail)
+        // share one DTE slot — they are never active simultaneously.
+        auto key = n.future;
+        auto it = dte_pool_slots.find(key);
+        if (it != dte_pool_slots.end()) {
+          slot = it->second;
+        } else {
+          slot = dte_pool_size++;
+          dte_pool_slots[key] = slot;
+        }
+      } else {
+        if (dte_pool_size == 0) dte_pool_size = 1;
+        slot = 0;
+      }
+      dte_ctx = "__choreo_dte_pool__[" + std::to_string(slot) + "]";
     } else {
-      // Original path: allocate a new DTE context
       dte_ctx = GetDTEContextName();
       EmitDTEDecl(ds, d_indent, sto, dte_ctx, false, NeedLevelPred());
     }

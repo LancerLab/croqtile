@@ -156,7 +156,8 @@ private:
   LineDirectiveState device_line_state;
 
   std::map<std::string, std::string> claimed_dte;
-  bool dte_pool_emitted = false;
+  int dte_pool_size = 0;
+  std::map<std::string, int> dte_pool_slots;
   std::vector<std::string> pld_checklist = {};
 
   std::set<std::string> global_buffers; // global buffers
@@ -251,7 +252,8 @@ private:
     host_param_count = 0; // reset the count of host parameter
     symbolic_dimensions.clear();
     claimed_dte.clear();
-    dte_pool_emitted = false;
+    dte_pool_size = 0;
+    dte_pool_slots.clear();
     fty = nullptr;
     void_return = false;
     emit_call = true;
