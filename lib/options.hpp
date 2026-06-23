@@ -91,6 +91,7 @@ private:
   std::ostream* output_stream = nullptr;
 
   std::string input_filename;
+  std::vector<std::string> input_filenames;
   std::string output_filename;
   std::ifstream input_file_stream;
   std::ofstream output_file_stream;
@@ -107,12 +108,17 @@ public:
   const std::string GetInputName() const {
     return RemoveDirectoryPrefix(RemoveSuffix(input_filename, ".co"));
   }
+  const std::vector<std::string>& GetInputFileNames() const {
+    return input_filenames;
+  }
+  bool HasMultipleInputs() const { return input_filenames.size() > 1; }
 
   bool StdoutAsOutput() const { return stdout_as_output; }
   bool StdinAsInput() const { return stdin_as_input; }
 
   void SetInputFileDirect(const std::string& f) {
-    input_filename = f;
+    input_filenames.push_back(f);
+    if (input_filename.empty()) input_filename = f;
     if (f == "-") stdin_as_input = true;
   }
 
@@ -126,6 +132,7 @@ public:
     output_stream = nullptr;
 
     input_filename.clear();
+    input_filenames.clear();
     output_filename.clear();
     input_file_stream.close();
     output_file_stream.close();
@@ -217,14 +224,9 @@ public:
       ret_code = 1;
       return false;
     } else {
-      if (!input_filename.empty()) {
-        ess << "error: set input file twice: '" << input_filename << "' and '"
-            << arg << "'.";
-        ret_code = 1;
-        return false;
-      } else
-        input_filename = arg;
-      if (input_filename == "-") stdin_as_input = true;
+      input_filenames.push_back(arg);
+      if (input_filename.empty()) input_filename = arg;
+      if (arg == "-") stdin_as_input = true;
     }
 
     return true;
@@ -259,6 +261,10 @@ public:
       output_file_stream.open(filename);
       output_stream = &output_file_stream;
     }
+  }
+
+  void SetOutputFileName(const std::string& filename) {
+    output_filename = filename;
   }
 
   std::string GetInputFileName() { return input_filename; }

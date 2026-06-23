@@ -33,11 +33,13 @@ enum class OutputKind {
   // Hetero offload: emit a standalone translation unit for the offload .o.
   // Includes the device kernel (ds) and the target launch entry (hs) that
   // defines __hetero_<device>_... (alloc, dispatch, sync). Does NOT include
-  // hetero orchestration host code or main() - those are in the hetero host .o.
+  // hetero orchestration host code or main() -- those are in the hetero host
+  // .o.
   DeviceSourceOnly,
   TargetModule,
   TargetAssembly,
   TargetExecutable,
+  TargetLibrary,
   ShellScript,
 };
 
@@ -51,6 +53,7 @@ inline bool RequiresE2ECompilation(OutputKind ok) {
   case OutputKind::TargetModule:
   case OutputKind::TargetAssembly:
   case OutputKind::TargetExecutable:
+  case OutputKind::TargetLibrary:
   case OutputKind::ShellScript: return true;
   default: break;
   }
@@ -65,6 +68,7 @@ inline static const std::string STR(OutputKind ok) {
   case OutputKind::TargetModule: return "TargetModule";
   case OutputKind::TargetAssembly: return "TargetAssembly";
   case OutputKind::TargetExecutable: return "TargetExecutable";
+  case OutputKind::TargetLibrary: return "TargetLibrary";
   case OutputKind::ShellScript: return "ShellScript";
   default: choreo_unreachable("Unsupported output kind.");
   }
@@ -522,6 +526,8 @@ private:
             // producer TMA/event ops individually.
   // Skip wg_barrier.sync() before shared-to-global TMA copies when set via CLI.
   bool skip_epilogue_group_sync = false;
+  bool device_only = false;  // Suppress user main() in generated code
+                             // (set by --lib / --suppress-main).
   bool fast_compile = false; // Use precompiled CuTe runtime for faster nvcc
                              // compilation via separate compilation + linking.
   bool use_fast_math = true; // Pass --use_fast_math to nvcc for faster
@@ -774,6 +780,7 @@ public:
   bool HoistWGMMAArrive() const { return hoist_wgmma_arrive; }
   bool SingleThreadProducer() const { return single_thread_producer; }
   bool SkipEpilogueGroupSync() const { return skip_epilogue_group_sync; }
+  bool DeviceOnly() const { return device_only; }
   bool FastCompile() const { return fast_compile; }
   bool UseFastMath() const { return use_fast_math; }
   bool UseTargetLib() const { return use_target_lib; }
@@ -819,6 +826,7 @@ public:
   void SetSkipEpilogueGroupSync(bool value) {
     skip_epilogue_group_sync = value;
   }
+  void SetDeviceOnly(bool value) { device_only = value; }
   void SetFastCompile(bool value) { fast_compile = value; }
   void SetUseFastMath(bool value) { use_fast_math = value; }
   void SetUseTargetLib(bool value) { use_target_lib = value; }

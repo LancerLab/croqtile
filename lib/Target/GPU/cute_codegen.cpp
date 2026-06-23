@@ -1431,6 +1431,13 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
       }
       break;
     }
+    case OutputKind::TargetLibrary: {
+      if (!CompileWithScript("--lib")) {
+        error_count++;
+        return false;
+      }
+      break;
+    }
     case OutputKind::ShellScript: {
       EmitScript(outs());
       break;
@@ -1871,8 +1878,8 @@ void CuteCodeGen::EmitFixedHostHead() {
 #include <string>
 #include <vector>
 
-#include "cutlass/cutlass.h"
 #include "cutlass/arch/barrier.h"
+#include "cutlass/cutlass.h"
 #include <cutlass/arch/reg_reconfig.h>
 )";
 
@@ -9470,7 +9477,8 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
      << "\n";
   os << R"(  echo "[choreo-fc] Warning: cannot write to ${CHOREO_CACHE_DIR}, using temp dir" >&2)"
      << "\n";
-  os << R"(  CHOREO_CACHE_DIR=$(mktemp -d))" << "\n";
+  os << R"(  CHOREO_CACHE_DIR=$(mktemp -d))"
+     << "\n";
   os << "fi\n\n";
 
   // Cache key includes arch, content fingerprint, and CUDA toolkit version.
@@ -9483,11 +9491,16 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
      << fp_hex << ".o\n\n";
 
   // Build with flock to prevent concurrent builds from colliding.
-  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
-  os << R"(  LOCK_FILE="${CHOREO_CACHE_DIR}/.choreo_precompile.lock")" << "\n";
-  os << R"(  ()" << "\n";
-  os << R"(    flock -x 200)" << "\n";
-  os << R"(    if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
+  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)"
+     << "\n";
+  os << R"(  LOCK_FILE="${CHOREO_CACHE_DIR}/.choreo_precompile.lock")"
+     << "\n";
+  os << R"(  ()"
+     << "\n";
+  os << R"(    flock -x 200)"
+     << "\n";
+  os << R"(    if [ ! -f "${PRECOMP_CACHED}" ]; then)"
+     << "\n";
   os << R"(      echo "[choreo-fc] Building precompiled CuTe runtime for ${nv_arch} (one-time)..." >&2)"
      << "\n";
   os << "      ${NVCC} -dc ${DCFLAGS} " << precomp_cu
@@ -9496,12 +9509,15 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
      << "\n";
   os << R"(      echo "[choreo-fc] Cached at ${PRECOMP_CACHED}" >&2)"
      << "\n";
-  os << R"(    fi)" << "\n";
-  os << R"(  ) 200>"${LOCK_FILE}")" << "\n";
+  os << R"(    fi)"
+     << "\n";
+  os << R"(  ) 200>"${LOCK_FILE}")"
+     << "\n";
   os << "fi\n\n";
 
   // Final check: the precompiled object must exist
-  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
+  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)"
+     << "\n";
   os << R"(  echo "[choreo-fc] Error: failed to build precompiled runtime at ${PRECOMP_CACHED}" >&2)"
      << "\n";
   os << "  exit 1\nfi\n\n";
@@ -9668,20 +9684,24 @@ show_usage() {
     // Content fingerprint (computed at choreo build time)
     EmitFastCompileCache(os, precomp_cu);
 
-    os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)" << "\n";
+    os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)"
+       << "\n";
     os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << kernel_obj
        << "\n";
     os << "  ${NVCC} ${CFLAGS} " << kernel_obj << " ${PRECOMP_CACHED} -o "
        << exe_file << "\n";
     os << "  " << exe_file << "\n";
-    os << R"(elif [ "$1" == "--compile-module" ]; then)" << "\n";
+    os << R"(elif [ "$1" == "--compile-module" ]; then)"
+       << "\n";
     os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << exe_file << "\n";
-    os << R"(elif [ "$1" == "--compile-link" ]; then)" << "\n";
+    os << R"(elif [ "$1" == "--compile-link" ]; then)"
+       << "\n";
     os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << kernel_obj
        << "\n";
     os << "  ${NVCC} ${CFLAGS} " << kernel_obj << " ${PRECOMP_CACHED} -o "
        << exe_file << "\n";
-    os << R"(elif [ "$1" == "--lib" ]; then)" << "\n";
+    os << R"(elif [ "$1" == "--lib" ]; then)"
+       << "\n";
     os << "  ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file << " -o "
        << exe_file << "\n";
     os << "\nelse show_usage";

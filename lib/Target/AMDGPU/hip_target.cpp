@@ -20,6 +20,7 @@ public:
   ~AMDGPUTarget() {}
   const std::string Name() const override { return "hip"; }
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
+  std::string HostCXXCompiler() const override { return "hipcc"; }
 
   int DefaultOptLevel(const ArchId&) const override { return 3; }
 

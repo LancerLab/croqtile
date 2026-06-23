@@ -136,6 +136,10 @@ public:
   // Returns empty string if detection is not supported or fails.
   virtual ArchId ResolveNativeArch() const { return ""; }
 
+  // Return path to the host C++ compiler for this target.
+  // Used by --lib multi-file driver to compile .cpp wrapper files.
+  virtual std::string HostCXXCompiler() const { return "c++"; }
+
   virtual const std::vector<FeatureToggle>
   SupportedFeatures(const ArchId&) const {
     return {};

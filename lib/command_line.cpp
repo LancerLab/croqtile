@@ -39,6 +39,17 @@ Option<bool> compile_only(
     "Compile choreo code and the generated target code; Without linking.");
 Option<bool> generate_script(OptionKind::User, "--generate-script", "-gs",
                              false, "Generate target script.");
+Option<bool> make_lib(OptionKind::User, "--lib", "", false,
+                      "Compile and archive into a static library (.a). "
+                      "Implies -fPIC. User main() is automatically suppressed "
+                      "to avoid link conflicts.");
+Option<bool> suppress_main(OptionKind::Hidden, "--suppress-main", "", false,
+                           "Suppress user main() in generated code. "
+                           "Automatically set by --lib.");
+Option<size_t> parallel_jobs(OptionKind::User, "-j", "", 1,
+                             "Number of parallel compilation jobs for "
+                             "multi-file --lib mode.",
+                             "-j <N>");
 namespace Choreo {
 Option<bool>
     sim_sparse(OptionKind::Hidden, "--sim", "-sim", false,
@@ -278,12 +289,6 @@ bool CommandLine::Parse(int argc, char** argv) {
 
     if (end_of_options) {
       // After '--', treat everything as positional (input file)
-      if (!r.GetInputFileName().empty()) {
-        errs() << "error: set input file twice: '" << r.GetInputFileName()
-               << "' and '" << arg << "'.\n";
-        ret_code = 1;
-        return false;
-      }
       r.SetInputFileDirect(arg);
       continue;
     }
@@ -340,6 +345,15 @@ bool CommandLine::Parse(int argc, char** argv) {
         return false;
       }
       CCtx().SetOptimizationLevel(level);
+    } else if (arg.substr(0, 2) == "-j" && arg.size() > 2) {
+      // GCC-style -jN: parse concatenated job count
+      try {
+        parallel_jobs = (size_t)std::stoul(arg.substr(2));
+      } catch (...) {
+        std::cerr << "Invalid job count: " << arg << ".\n";
+        ret_code = 1;
+        return false;
+      }
     } else if (!r.Parse(argc, argv, i)) {
       if (!r.Message().empty()) errs() << r.Message() << "\n";
       exit(r.ReturnCode());
@@ -409,18 +423,40 @@ bool CommandLine::Parse(int argc, char** argv) {
       exit(1);
     }
     CCtx().SetOutputKind(OutputKind::PreProcessedCode);
-  } else if (emit_source)
+  } else if (make_lib) {
+    CCtx().SetOutputKind(OutputKind::TargetLibrary);
+    if (output.GetValue().empty()) output = "a.a";
+  } else if (emit_source) {
     CCtx().SetOutputKind(OutputKind::TargetSourceCode);
-  else if (compile_only) {
+  } else if (compile_only) {
     CCtx().SetOutputKind(OutputKind::TargetModule);
-    if (output.GetValue().empty()) output = "a.o"; // default module name
+    if (output.GetValue().empty()) output = "a.o";
   } else if (generate_script)
     CCtx().SetOutputKind(OutputKind::ShellScript);
   else {
     CCtx().SetOutputKind(OutputKind::TargetExecutable);
-    if (output.GetValue().empty()) output = "a.out"; // default exe name
+    if (output.GetValue().empty()) output = "a.out";
   }
-  r.SetOutputStream(output.GetValue());
+
+  CCtx().SetDeviceOnly(make_lib.GetValue() || suppress_main.GetValue());
+
+  // Multi-file is only supported for --lib mode
+  if (r.HasMultipleInputs() && !make_lib) {
+    errs() << "error: multiple input files are only supported with --lib.\n";
+    ret_code = 1;
+    return false;
+  }
+
+  // For modes where the backend produces binary output (module, executable,
+  // library), don't open the output file as a text stream -- the backend
+  // scripts write directly. For source/script modes, open the stream for text
+  // output.
+  switch (CCtx().GetOutputKind()) {
+  case OutputKind::TargetModule:
+  case OutputKind::TargetExecutable:
+  case OutputKind::TargetLibrary: r.SetOutputFileName(output.GetValue()); break;
+  default: r.SetOutputStream(output.GetValue()); break;
+  }
 
   // save the options to the global context
   CCtx().SetGenDebugInfo(generate_debug_info.GetValue());
