@@ -121,6 +121,7 @@ private:
 
   CodeSegment cs = CS_UNKNOWN;
   std::vector<std::string> code_segments; // multiple code segment
+  std::vector<CodeSegment> segment_tags;  // per-segment kind for filtering
 
   std::string device_fn; // current device function name
 

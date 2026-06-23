@@ -22,6 +22,19 @@ public:
   const std::string Name() const override { return "topscc"; }
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
 
+  std::string HostCXXCompiler() const override {
+    auto* env = getenv("TOPSCC_INSTALL");
+    if (env) {
+      auto p = std::string(env) + "/bin/topscc";
+      if (std::filesystem::exists(p)) return p;
+    }
+#ifdef __CHOREO_TOPSCC_DIR__
+    std::string dflt = __CHOREO_TOPSCC_DIR__ "/bin/topscc";
+    if (std::filesystem::exists(dflt)) return dflt;
+#endif
+    return "topscc";
+  }
+
   const std::vector<ArchInfo> SupportedArchs() const override {
     return {
         {"gcu200", "GCU Architecture 2.0"}, {"gcu210", "GCU Architecture 2.1"},

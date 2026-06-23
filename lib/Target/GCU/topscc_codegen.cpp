@@ -316,8 +316,8 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       std::string vec_iv_base_name = "__vec_iv_" + iv + "_base";
       auto vector_type = MakeVectorType(BaseType::U32, vector_width);
       ds << d_indent << VectorTypeSTR(vector_type) << " " << vec_iv_base_name
-         << " = " << "(" << VectorTypeSTR(vector_type) << ")(" << iv_name
-         << ");\n";
+         << " = "
+         << "(" << VectorTypeSTR(vector_type) << ")(" << iv_name << ");\n";
 
       ds << d_indent << VectorTypeSTR(vector_type) << " " << vec_iv_plus_name
          << " = ";
@@ -412,6 +412,13 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       }
       break;
     }
+    case OutputKind::TargetLibrary: {
+      if (!CompileWithScript("--lib")) {
+        error_count++;
+        return false;
+      }
+      break;
+    }
     case OutputKind::ShellScript: {
       EmitScript(outs());
       break;
@@ -427,6 +434,12 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     // (malloc/H2D/launch/D2H/free). For DeviceSourceOnly (hetero offload) hs
     // supplies the __hetero_* symbol the hetero host .o links against; it is
     // not the hetero orchestration program and does not duplicate main().
+    // Ensure choreo function code lands in a CS_CO segment, even if user code
+    // pushed a CS_USER segment between choreo functions.
+    if (segment_tags.empty() || segment_tags.back() != CS_CO) {
+      code_segments.push_back("");
+      segment_tags.push_back(CS_CO);
+    }
     code_segments.back() += ds.str() + hs.str();
     ds.str(""); // reset the streams
     hs.str("");
@@ -726,7 +739,8 @@ using namespace choreo;
 
 )";
 
-  code_segments.push_back(oss.str()); // reset the host code
+  code_segments.push_back(oss.str());
+  segment_tags.push_back(CS_CO);
 }
 
 void TopsccCodeGen::EmitFixedDeviceHead() {}
@@ -1083,7 +1097,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       bool rparen = false;
       if (!IsActualVectorType(rhs_ty)) {
         if (n.init_expr->HasNote("broadcast")) {
-          Stream() << "(" << VectorTypeSTR(vty) << ")" << "(";
+          Stream() << "(" << VectorTypeSTR(vty) << ")"
+                   << "(";
           rparen = true;
         } else {
           choreo_unreachable("not supported scalar -> vector");
@@ -2808,9 +2823,11 @@ bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
   } else {
     CodeSegment cur_cs =
         (n.kind == AST::CppSourceCode::Host) ? CS_USER : CS_COK;
-    if (cur_cs != cs) { code_segments.push_back(""); }
+    if (cur_cs != cs) {
+      code_segments.push_back("");
+      segment_tags.push_back(cur_cs);
+    }
 
-    // append the content
     code_segments.back() += n.GetCode();
   }
 
@@ -2931,7 +2948,8 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
 void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
   const auto& mri = FCtx(fname).GetDynMemReuseInfo(df_name);
   if (!mri) return;
-  hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
+  hs << h_indent << R"(// JIT memory reuse begin)"
+     << "\n";
   for (const auto& [sto, ie] : mri->infos) {
     hs << h_indent << "HeapSimulator::Chunks " << ie.chunks_name << ";\n";
     for (const auto& c : ie.chunks)
@@ -2953,7 +2971,8 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
          << " spm should not exceed the memory usage limit " << mem_capacity
          << " bytes.\");\n";
     hs << h_indent << "unsigned long " << ie.offsets_name << "["
-       << mri->infos[sto].offset_args.size() << "];" << "\n";
+       << mri->infos[sto].offset_args.size() << "];"
+       << "\n";
     std::string idx = ie.chunks_name + "_idx";
     hs << h_indent << "size_t " << idx << " = 0;\n";
     hs << h_indent << "for (const auto& [buffer_id, offset] : " << ie.result
@@ -2961,7 +2980,8 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
     hs << h_indent << "  " << ie.offsets_name << "[" << idx
        << "++] = offset;\n";
   }
-  hs << h_indent << R"(// JIT memory reuse end)" << "\n";
+  hs << h_indent << R"(// JIT memory reuse end)"
+     << "\n";
 }
 
 static inline const std::string
@@ -3290,12 +3310,19 @@ bool TopsccCodeGen::Visit(AST::MMA& n) {
 }
 
 void TopsccCodeGen::EmitSource() {
-  for (auto& code : code_segments) {
-    if (EnableLineDirective())
-      outs() << PinLineDirectivePerGeneratedLine(code) << "\n";
-    else
-      outs() << code << "\n";
+  bool suppress_main = CCtx().DeviceOnly();
+  if (suppress_main) {
+    auto name = RemoveDirectoryPrefix(
+        RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
+    outs() << "#define main __choreo_lib_suppressed_main_" << name << "\n";
   }
+  for (size_t i = 0; i < code_segments.size(); ++i) {
+    if (EnableLineDirective())
+      outs() << PinLineDirectivePerGeneratedLine(code_segments[i]) << "\n";
+    else
+      outs() << code_segments[i] << "\n";
+  }
+  if (suppress_main) outs() << "#undef main\n";
 }
 
 void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
@@ -3331,7 +3358,8 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
   // Standalone extras: profiler and acore
   os << "TOPSPROF=${TOPSCC_INSTALL}/bin/topsprof\n";
 #ifdef __CHOREO_GCU_ACORE_DIR__
-  os << R"(if [[ -z "${ACORE_INSTALL}" ]]; then)" << "\n";
+  os << R"(if [[ -z "${ACORE_INSTALL}" ]]; then)"
+     << "\n";
   os << "  ACORE_INSTALL=" << STRINGIZE(__CHOREO_GCU_ACORE_DIR__) << "\n";
   os << "fi\n";
 #endif
@@ -3385,12 +3413,16 @@ EOF
 )";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
-  for (auto& code : code_segments) {
+  bool suppress_main = CCtx().DeviceOnly();
+  if (suppress_main)
+    os << "#define main __choreo_lib_suppressed_main_" << filename << "\n";
+  for (size_t i = 0; i < code_segments.size(); ++i) {
     if (EnableLineDirective())
-      os << PinLineDirectivePerGeneratedLine(code) << "\n";
+      os << PinLineDirectivePerGeneratedLine(code_segments[i]) << "\n";
     else
-      os << code << "\n";
+      os << code_segments[i] << "\n";
   }
+  if (suppress_main) os << "#undef main\n";
   os << "\nEOF\n\n";
 
   // gcu_arch is set by SetupBuildEnv() -- either from GCU_ARCH env
@@ -3407,6 +3439,8 @@ show_usage() {
   echo "   --compile-link,      Compile and link"
   echo "   --compile-module,    Compile and generate the module"
   echo "   --gen-fatbin,        Compile and generate the fatbin"
+  echo "   --lib,               Compile and archive into a static library (.a)"
+  echo "   --shared,            Compile into a shared library (.so)"
   echo ""
   echo "  Environment Variables:"
   echo "   EXTRA_TARGET_CFLAGS: Extra target compilation flags"
@@ -3517,6 +3551,26 @@ option_detect() {
      << fb_file;
   os << "\n  cd ${__cur_dir}";
   os << "\n  echo \"Fatbin file generated: " << fb_file << "\"";
+
+  auto obj_file = build_path + "/__choreo_topscc_" + filename + ".o";
+  os << R"(
+elif [ "$1" == "--lib" ]; then)";
+  if (verbose)
+    os << "\n  echo ${TOPSCC} -c -fPIC ${CFLAGS} " << cc_file << " -o "
+       << obj_file << "\n";
+  os << "\n  ${TOPSCC} -c -fPIC ${CFLAGS} " << cc_file << " -o " << obj_file;
+  os << "\n  ar rcs " << exe_file << " " << obj_file;
+  if (verbose) os << "\n  echo \"Library generated: " << exe_file << "\"";
+  os << R"(
+elif [ "$1" == "--shared" ]; then)";
+  if (verbose)
+    os << "\n  echo ${TOPSCC} -shared -fPIC ${CFLAGS} " << cc_file << " -o "
+       << exe_file << "\n";
+  os << "\n  ${TOPSCC} -shared -fPIC ${CFLAGS} " << cc_file << " -o "
+     << exe_file;
+  if (verbose)
+    os << "\n  echo \"Shared library generated: " << exe_file << "\"";
+
   os << "\nelse show_usage";
   os << "\nfi";
 }
@@ -3896,7 +3950,8 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       if (IsActualBoundedIntegerType(ety)) bty = BaseType::S32;
 
       auto vty = MakeVectorType(bty, vector_width);
-      oss << "(" << VectorTypeSTR(vty) << ")" << "(";
+      oss << "(" << VectorTypeSTR(vty) << ")"
+          << "(";
       rparen = true;
     }
 
@@ -4158,7 +4213,8 @@ const std::string TopsccCodeGen::BuildTcleGather(
     const std::string& ty_str, const std::string& mask,
     const std::string& other) const {
   std::ostringstream oss;
-  oss << "tcle::gather<" << ty_str << ">(" << "(" << base << "), " << offset;
+  oss << "tcle::gather<" << ty_str << ">("
+      << "(" << base << "), " << offset;
   if (mask.empty()) {
     oss << ")";
   } else {
@@ -4172,7 +4228,8 @@ const std::string TopsccCodeGen::BuildTcleScatter(
     const std::string& value, const std::string& base,
     const std::string& offset, const std::string& mask) const {
   std::ostringstream oss;
-  oss << "tcle::scatter(" << value << ", " << "(" << base << "), " << offset;
+  oss << "tcle::scatter(" << value << ", "
+      << "(" << base << "), " << offset;
   if (mask.empty()) {
     oss << ")";
   } else {

@@ -39,9 +39,9 @@
 
 #elif defined(__CHOREO_TARGET_AMDGPU__)
   // clang-format off
-  #include <hip/hip_runtime.h>
-  #include <hip/hip_fp16.h>
   #include <hip/hip_bfloat16.h>
+  #include <hip/hip_fp16.h>
+  #include <hip/hip_runtime.h>
   // clang-format on
   #define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
   #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
