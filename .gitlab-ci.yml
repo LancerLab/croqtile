@@ -48,6 +48,15 @@ gpu_test:
         $CI_COMMIT_BRANCH =~ /^oss\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
+  before_script:
+    - |
+      if echo "$CI_COMMIT_BRANCH" | grep -q '^oss/'; then
+        echo "OSS branch detected -- using llvm-dep.conf from main..."
+        git fetch origin main --depth=1
+        git show origin/main:tools/coir/llvm-dep.conf > tools/coir/llvm-dep.conf
+        echo "llvm-dep.conf overridden:"
+        cat tools/coir/llvm-dep.conf
+      fi
   script:
     - echo "Running tests with GPU..."
     - make setup-core
