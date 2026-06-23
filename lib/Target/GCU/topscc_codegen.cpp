@@ -226,9 +226,11 @@ void TopsccCodeGen::EmitDTEDecl(std::ostringstream& os,
                                 bool block_level) const {
   auto type = DMATypeSTR(sto, block_level);
   os << indent << type << " " << varname << ";\n";
-  if (with_scope && CCtx().GetArch() != "gcu300" &&
-      CCtx().GetArch() != "gcu400")
+  if (CCtx().GetArch() == "gcu300") {
+    os << indent << varname << ".init();\n";
+  } else if (with_scope && CCtx().GetArch() != "gcu400") {
     os << indent << "tops::dte_scope s_" << varname << "(" << varname << ");\n";
+  }
 }
 
 const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
@@ -292,6 +294,9 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       EmitDeviceFuncDecl(ds);
       ds << " {\n";
       IncrDeviceIndent();
+      if (CCtx().GetArch() == "gcu300") {
+        ds << d_indent << "/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n";
+      }
       ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
       VST_DEBUG(pb->InlinePrint(dbgs());
                 dbgs() << " (max-level: " << STR(TargetMaxLevel()) << ")\n");
@@ -440,7 +445,24 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       code_segments.push_back("");
       segment_tags.push_back(CS_CO);
     }
-    code_segments.back() += ds.str() + hs.str();
+    {
+      auto device_code = ds.str();
+      if (dte_pool_emitted) {
+        auto pos = device_code.find("/*__CHOREO_DTE_POOL_PLACEHOLDER__*/");
+        if (pos != std::string::npos) {
+          std::string pool_decl =
+              "choreo::choreo_sdte __choreo_dte_pool__;\n"
+              "  __choreo_dte_pool__.init();";
+          device_code.replace(pos, 35, pool_decl);
+        }
+      } else {
+        auto pos = device_code.find("/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n");
+        if (pos != std::string::npos) {
+          device_code.erase(pos, 36);
+        }
+      }
+      code_segments.back() += device_code + hs.str();
+    }
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");
@@ -1545,9 +1567,22 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
       return n.future;
 
-    // claim the date transfer engine
-    auto dte_ctx = GetDTEContextName();
-    EmitDTEDecl(ds, d_indent, sto, dte_ctx, false, NeedLevelPred());
+    std::string dte_ctx;
+    bool use_pool = (CCtx().GetArch() == "gcu300" && n.future.empty());
+
+    if (use_pool) {
+      // GCU300 anonymous DMA: reuse a persistent DTE from the pool
+      // to avoid DTE resource exhaustion from repeated init/destroy.
+      // Pool is declared via __CHOREO_DTE_POOL_PLACEHOLDER__ that gets
+      // replaced at the function level during finalization.
+      dte_pool_emitted = true;
+      dte_ctx = "__choreo_dte_pool__";
+    } else {
+      // Original path: allocate a new DTE context
+      dte_ctx = GetDTEContextName();
+      EmitDTEDecl(ds, d_indent, sto, dte_ctx, false, NeedLevelPred());
+    }
+
     auto future_name = n.future;
     if (future_name.empty()) {
       static size_t future_count = 0;
@@ -1934,6 +1969,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // if `no_linear_opt` is true, will not do linear optimization even
   // `opt_to_linear_copy` is available. Use it to control runtime opt.
   auto DMACodeGen = [&](bool no_linear_opt) {
+    no_linear_opt = true;
     std::string f_mds_offset = "";
     std::string t_mds_offset = "";
     Shape f_shape = f_sty->GetShape();
