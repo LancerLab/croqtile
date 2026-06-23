@@ -29,6 +29,8 @@ static ParseResult parseShape(AsmParser &parser,
 //===----------------------------------------------------------------------===//
 
 static int32_t parseMemorySpaceKeyword(llvm::StringRef msStr) {
+  if (msStr == "default")
+    return -1;
   if (msStr == "global")
     return static_cast<int32_t>(coir::TensorMemorySpace::Global);
   if (msStr == "shared")
@@ -121,8 +123,10 @@ void coir::TensorType::print(mlir::AsmPrinter &printer) const {
     printer << dim << "x";
   printer << getElementType();
   int32_t ms = getMemorySpace();
-  if (ms >= 0) {
-    printer << ", ";
+  printer << ", ";
+  if (ms < 0) {
+    printer << "default";
+  } else {
     switch (static_cast<coir::TensorMemorySpace>(ms)) {
     case coir::TensorMemorySpace::Global:   printer << "global";   break;
     case coir::TensorMemorySpace::Shared:   printer << "shared";   break;

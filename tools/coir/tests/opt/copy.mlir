@@ -5,7 +5,7 @@
 coir.kernel @test_data_copy_sync(
     %src: !coir.tensor<128x64xf16>,
     %dst: !coir.tensor<128x64xf16, shared>) {
-  // CHECK: coir.data.copy %arg0 to %arg1 : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
+  // CHECK: coir.data.copy %arg0 to %arg1 : !coir.tensor<128x64xf16, default> -> !coir.tensor<128x64xf16, shared>
   coir.data.copy %src to %dst : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
 }
 
@@ -14,7 +14,7 @@ coir.kernel @test_data_copy_sync(
 coir.kernel @test_data_copy_async(
     %src: !coir.tensor<128x64xf16>,
     %dst: !coir.tensor<128x64xf16, shared>) {
-  // CHECK: coir.data.copy %arg0 to %arg1 async : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>, !coir.token
+  // CHECK: coir.data.copy %arg0 to %arg1 async : !coir.tensor<128x64xf16, default> -> !coir.tensor<128x64xf16, shared>, !coir.token
   %tok = coir.data.copy %src to %dst async : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>, !coir.token
   // CHECK: coir.wait
   coir.wait %tok : !coir.token
@@ -25,7 +25,7 @@ coir.kernel @test_data_copy_async(
 coir.kernel @test_dma_copy(
     %src: !coir.tensor<128x64xf16>,
     %dst: !coir.tensor<128x64xf16, shared>) {
-  // CHECK: coir.dma.copy %arg0 to %arg1 : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
+  // CHECK: coir.dma.copy %arg0 to %arg1 : !coir.tensor<128x64xf16, default> -> !coir.tensor<128x64xf16, shared>
   %tok = coir.dma.copy %src to %dst : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
   coir.wait %tok : !coir.token
 }
@@ -35,7 +35,7 @@ coir.kernel @test_dma_copy(
 coir.kernel @test_tma_copy(
     %src: !coir.tensor<128x64xf16>,
     %dst: !coir.tensor<128x64xf16, shared>) {
-  // CHECK: coir.tma.copy %arg0 to %arg1 : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
+  // CHECK: coir.tma.copy %arg0 to %arg1 : !coir.tensor<128x64xf16, default> -> !coir.tensor<128x64xf16, shared>
   %tok = coir.tma.copy %src to %dst : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
   coir.wait %tok : !coir.token
 }

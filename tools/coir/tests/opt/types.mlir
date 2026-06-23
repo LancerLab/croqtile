@@ -6,7 +6,7 @@ func.func @test_tensor_types(
     %a: !coir.tensor<128x64xf16>,
     %b: !coir.tensor<16x16xf32, shared>,
     %c: !coir.tensor<256x256xf16, global>) {
-  // CHECK: !coir.tensor<128x64xf16>
+  // CHECK: !coir.tensor<128x64xf16, default>
   // CHECK: !coir.tensor<16x16xf32, shared>
   // CHECK: !coir.tensor<256x256xf16, global>
   func.return
