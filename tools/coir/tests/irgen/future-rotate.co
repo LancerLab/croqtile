@@ -1,0 +1,15 @@
+// RUN: co2ir %s -o - | FileCheck %s
+//
+// Test: swap/rotate lowers to coir.async.rotate in the IR.
+
+__co__ void test_rotate(f32 [15] input) {
+  parallel p by 1 {
+    f0 = dma.copy.async input => local;
+    f1 = dma.copy.async input => local;
+    swap(f0, f1);
+    wait f1;
+  }
+}
+
+// CHECK: coir.async.rotate
+// CHECK: coir.wait

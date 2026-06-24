@@ -74,6 +74,7 @@ struct ScriptContext {
   const char *types_cute_header = nullptr;
   const char *cute_header = nullptr;
   std::string build_env;
+  std::string target_setup;
   std::string arch_override;
 
   static ScriptContext &Get() {

@@ -19,7 +19,7 @@ coir.kernel @test_dma_copy(
     %src: !coir.tensor<128x64xf16>,
     %dst: !coir.tensor<128x64xf16, shared>) {
   %tok = coir.dma.copy %src to %dst : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
-  coir.wait %tok : !coir.token
+  coir.wait %tok : !coir.async
 }
 
 // Test: tma.copy gets TMA transfer metadata
@@ -29,7 +29,7 @@ coir.kernel @test_tma_copy(
     %src: !coir.tensor<128x64xf16>,
     %dst: !coir.tensor<128x64xf16, shared>) {
   %tok = coir.tma.copy %src to %dst : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
-  coir.wait %tok : !coir.token
+  coir.wait %tok : !coir.async
 }
 
 // Test: combined pipeline -- classify then lower

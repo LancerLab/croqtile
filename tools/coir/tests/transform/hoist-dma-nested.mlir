@@ -26,7 +26,7 @@ coir.kernel @test_nested_hoist(
       %d1 = coir.dma.prefetch.desc %d0 : !coir.desc -> !coir.desc.rt
       %d2 = coir.dma.runtime.desc %d1 offsets(%k) : !coir.desc.rt -> !coir.desc.rt
       %t = coir.dma.invoke %d2 : !coir.desc.rt
-      coir.wait %t : !coir.token
+      coir.wait %t : !coir.async
       coir.yield
     }
     coir.yield
@@ -62,7 +62,7 @@ coir.kernel @test_partial_hoist(
     coir.foreach %k in %c16 {
       %d2 = coir.dma.runtime.desc %d1a offsets(%k) : !coir.desc.rt -> !coir.desc.rt
       %t = coir.dma.invoke %d2 : !coir.desc.rt
-      coir.wait %t : !coir.token
+      coir.wait %t : !coir.async
       coir.yield
     }
     coir.yield

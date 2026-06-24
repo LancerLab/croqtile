@@ -90,10 +90,12 @@ def CoIR_MMAFragType : TypeDef<CoIR_Dialect, "MMAFrag"> {
 //===----------------------------------------------------------------------===//
 
 def CoIR_AsyncTokenType : TypeDef<CoIR_Dialect, "AsyncToken"> {
-  let mnemonic = "token";
-  let summary = "Async completion token for copy/DMA operations";
+  let mnemonic = "async";
+  let summary = "Async completion handle for copy/DMA operations";
   let description = [{
-    An opaque token representing the completion of an asynchronous operation.
+    An opaque handle representing the completion of an asynchronous operation.
+    When __CHOREO_DMA_DIAGNOSIS__ is enabled, unwaited async handles trigger
+    runtime errors via choreo::future's destructor check.
   }];
 }
 
@@ -111,7 +113,7 @@ def CoIR_MMAFragTypeC : Type<
 
 def CoIR_AsyncTokenTypeC : Type<
   CPred<"$_self.isa<coir::AsyncTokenType>()">,
-  "CoIR async token type">;
+  "CoIR async handle type">;
 
 def CoIR_TensorOrMemRef : AnyTypeOf<[CoIR_TensorTypeC, AnyMemRef]>;
 

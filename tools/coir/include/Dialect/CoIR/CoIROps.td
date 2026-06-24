@@ -100,7 +100,7 @@ def DMAInvokeOp : CoIR_Op<"dma.invoke",
   let summary = "Execute the configured DMA transfer";
   let description = [{
     Triggers the DMA transfer described by a runtime-bound descriptor.
-    Returns a completion token for synchronization.
+    Returns an async handle for synchronization.
   }];
   let arguments = (ins CoIR_FinalDMADescType:$desc);
   let results   = (outs CoIR_AsyncTokenTypeC:$done);
@@ -339,6 +339,19 @@ def WaitOp : CoIR_Op<"wait", []> {
   let assemblyFormat = "$token attr-dict `:` type($token)";
 }
 
+def FutureRotateOp : CoIR_Op<"async.rotate", []> {
+  let summary = "Left-rotate async handles (swap when arity=2)";
+  let description = [{
+    Exchanges the underlying async handles among the operands via a
+    left rotation.  For two operands this is equivalent to swap.
+    The operation rebinds the runtime future objects so that subsequent
+    waits target different physical DMA transfers.
+  }];
+  let arguments = (ins Variadic<CoIR_AsyncTokenTypeC>:$futures);
+  let results   = (outs Variadic<CoIR_AsyncTokenTypeC>:$results);
+  let hasCustomAssemblyFormat = 1;
+}
+
 //===----------------------------------------------------------------------===//
 // Tier 3: Specialized copy ops (lowered from data.copy by classify-copies)
 //===----------------------------------------------------------------------===//
@@ -347,7 +360,7 @@ def DmaCopyOp : CoIR_Op<"dma.copy", []> {
   let summary = "Asynchronous DMA copy between memory hierarchies";
   let description = [{
     Copy data asynchronously using the DMA engine (e.g. global -> shared).
-    Always returns an async token for subsequent synchronization.
+    Always returns an async handle for subsequent synchronization.
   }];
   let arguments = (ins
     CoIR_TensorTypeC:$source,
