@@ -1,0 +1,14 @@
+// RUN: co2ir %s -o - | FileCheck %s
+//
+// Verify that chunkat produces correct tile shapes in the IR.
+
+__co__ auto test_tile(s32 [256] input) {
+  s32 [256] output;
+  parallel p by 4 {
+    dma.copy input.chunkat(p) => local;
+  }
+  return output;
+}
+
+// CHECK: coir.tensor.tile %{{.*}} : !coir.tensor<256xi32, default> -> !coir.tensor<64xi32, default>
+// CHECK: coir.data.copy %{{.*}} to %{{.*}} : !coir.tensor<64xi32, default> -> !coir.tensor<64xi32, local>
