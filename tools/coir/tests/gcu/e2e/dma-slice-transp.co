@@ -1,0 +1,42 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Slice+Transpose: 4x6 input split into 2 blocks of 2x6, each transposed to 6x2.
+
+__co__ s32 [6, 4] test_slice_transp(s32 [4, 6] input) {
+  s32 [6, 4] output;
+  parallel p by 2 {
+    f = dma.transp<1, 0>.async input.chunkat(p, _) => local;
+    wait f;
+    dma.copy f.data => output.chunkat(_, p);
+  }
+  return output;
+}
+
+int main() {
+  auto in = choreo::make_spandata<choreo::s32>(4, 6);
+  auto in_p = in.data();
+  for (int i = 0; i < 24; ++i) in_p[i] = i + 1;
+
+  auto res = test_slice_transp(in.view());
+  auto res_p = res.data();
+
+  bool pass = true;
+  for (int block = 0; block < 2; ++block) {
+    for (int r = 0; r < 6; ++r) {
+      for (int c = 0; c < 2; ++c) {
+        int out_idx = r * 4 + block * 2 + c;
+        int in_idx = (block * 2 + c) * 6 + r;
+        if (res_p[out_idx] != in_p[in_idx]) {
+          pass = false;
+        }
+      }
+    }
+  }
+  if (pass)
+    std::cout << "PASS: dma-slice-transp" << std::endl;
+  else
+    std::cout << "FAIL: dma-slice-transp" << std::endl;
+}
+
+// CHECK: PASS: dma-slice-transp

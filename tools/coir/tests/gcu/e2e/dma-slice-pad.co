@@ -1,0 +1,48 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Slice+Pad: 4x4 input split into 2 blocks of 2x4, each padded to 4x6.
+
+__co__ s32 [8, 6] test_slice_pad(s32 [4, 4] input) {
+  s32 [8, 6] output;
+  parallel p by 2 {
+    f = dma.pad<{1, 1}, {1, 1}, {0, 0}, -1>.async input.chunkat(p, _) => local;
+    wait f;
+    dma.copy f.data => output.chunkat(p, _);
+  }
+  return output;
+}
+
+int main() {
+  auto in = choreo::make_spandata<choreo::s32>(4, 4);
+  auto in_p = in.data();
+  for (int i = 0; i < 16; ++i) in_p[i] = i + 1;
+
+  auto res = test_slice_pad(in.view());
+  auto res_p = res.data();
+
+  bool pass = true;
+  for (int block = 0; block < 2; ++block) {
+    for (int r = 0; r < 4; ++r) {
+      for (int c = 0; c < 6; ++c) {
+        int idx = block * 24 + r * 6 + c;
+        int sr = r - 1;
+        int sc = c - 1;
+        int expected;
+        if (sr < 0 || sr >= 2 || sc < 0 || sc >= 4)
+          expected = -1;
+        else
+          expected = in_p[block * 8 + sr * 4 + sc];
+        if (res_p[idx] != expected) {
+          pass = false;
+        }
+      }
+    }
+  }
+  if (pass)
+    std::cout << "PASS: dma-slice-pad" << std::endl;
+  else
+    std::cout << "FAIL: dma-slice-pad" << std::endl;
+}
+
+// CHECK: PASS: dma-slice-pad
