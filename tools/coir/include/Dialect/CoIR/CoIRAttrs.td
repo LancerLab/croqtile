@@ -160,6 +160,32 @@ def CoIR_AssertUsageAttr :
   CoIR_I32EnumAttr<"assert_usage", CoIR_AssertUsageEnum>;
 
 //===----------------------------------------------------------------------===//
+// AssertCost -- cost classification for runtime assertion filtering
+//
+// Target-agnostic cost tier derived from the assertion's nesting depth.
+// EstimateAssertCost computes a raw numeric cost (product of enclosing
+// loop trip counts) and maps it to one of these tiers. Emitters use the
+// `enabled` attribute (computed from the user's --runtime-check threshold)
+// to decide whether to emit the assertion.
+//===----------------------------------------------------------------------===//
+
+def CoIR_AC_Entry  : I32EnumAttrCase<"ENTRY",  0, "entry">;
+def CoIR_AC_Low    : I32EnumAttrCase<"LOW",    1, "low">;
+def CoIR_AC_Medium : I32EnumAttrCase<"MEDIUM", 2, "medium">;
+def CoIR_AC_High   : I32EnumAttrCase<"HIGH",   3, "high">;
+
+def CoIR_AssertCostEnum : CoIR_I32Enum<
+  "AssertCost", "assertion cost classification tier", [
+    CoIR_AC_Entry,
+    CoIR_AC_Low,
+    CoIR_AC_Medium,
+    CoIR_AC_High
+  ]>;
+
+def CoIR_AssertCostAttr :
+  CoIR_I32EnumAttr<"cost_class", CoIR_AssertCostEnum>;
+
+//===----------------------------------------------------------------------===//
 // Legacy layout constraint (kept for existing DMA ops)
 //===----------------------------------------------------------------------===//
 

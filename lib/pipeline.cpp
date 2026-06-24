@@ -167,40 +167,10 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
   if (abend || pass_failed) return false;
 
   if (CCtx().PrintStats()) {
-    const auto& s = CCtx().GetAssessmentStats();
+    PrintAssessmentStats(CCtx().GetAssessmentStats());
     const char* sep =
         "===-------------------------------------------------------------------"
         "----===";
-    errs() << "\n"
-           << color::err(color::kBold) << sep << "\n"
-           << "                      ... Assessment Statistics ...\n"
-           << sep << color::err(color::kReset) << "\n";
-    auto row = [&](size_t n, const char* desc) {
-      errs() << color::err(color::kBold) << std::right << std::setw(6) << n
-             << color::err(color::kReset) << "  assess  - " << desc << "\n";
-    };
-    row(s.total, "Assessments evaluated");
-    row(s.static_true, "Resolved at compile time (static-true)");
-    row(s.static_false, "Proven false at compile time (static-false)");
-    row(s.runtime_total, "Runtime assertions generated");
-    row(s.runtime_entry, "Runtime assertions (entry cost)");
-    row(s.runtime_low, "Runtime assertions (low cost)");
-    row(s.runtime_medium, "Runtime assertions (medium cost)");
-    row(s.runtime_high, "Runtime assertions (high cost)");
-    row(s.runtime_enabled, "Runtime assertions enabled");
-    row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
-    errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
-           << "\n";
-    row(s.unclassified_total, "Assessments (unclassified)");
-    row(s.shape_compat_total, "Assessments (shape-compatibility)");
-    row(s.elem_access_total, "Assessments (element-access)");
-    row(s.loop_bound_total, "Assessments (loop-bound)");
-    row(s.hw_constraint_total, "Assessments (hw-constraint)");
-    row(s.unclassified_runtime, "Runtime assertions (unclassified)");
-    row(s.shape_compat_runtime, "Runtime assertions (shape-compatibility)");
-    row(s.elem_access_runtime, "Runtime assertions (element-access)");
-    row(s.loop_bound_runtime, "Runtime assertions (loop-bound)");
-    row(s.hw_constraint_runtime, "Runtime assertions (hw-constraint)");
 
 #if CHOREO_ENABLE_SBE_STATS
     // SBE stats live under --stats so they follow the same colored reporting
@@ -356,4 +326,40 @@ ASTPipeline& ASTPipeline::Get() {
   std::call_once(init_flag,
                  []() { instance = std::make_unique<ASTPipeline>(); });
   return *instance;
+}
+
+void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
+  const char* sep =
+      "===-------------------------------------------------------------------"
+      "----===";
+  errs() << "\n"
+         << color::err(color::kBold) << sep << "\n"
+         << "                      ... Assessment Statistics ...\n"
+         << sep << color::err(color::kReset) << "\n";
+  auto row = [&](size_t n, const char* desc) {
+    errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+           << color::err(color::kReset) << "  assess  - " << desc << "\n";
+  };
+  row(s.total, "Assessments evaluated");
+  row(s.static_true, "Resolved at compile time (static-true)");
+  row(s.static_false, "Proven false at compile time (static-false)");
+  row(s.runtime_total, "Runtime assertions generated");
+  row(s.runtime_entry, "Runtime assertions (entry cost)");
+  row(s.runtime_low, "Runtime assertions (low cost)");
+  row(s.runtime_medium, "Runtime assertions (medium cost)");
+  row(s.runtime_high, "Runtime assertions (high cost)");
+  row(s.runtime_enabled, "Runtime assertions enabled");
+  row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
+  errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+         << "\n";
+  row(s.unclassified_total, "Assessments (unclassified)");
+  row(s.shape_compat_total, "Assessments (shape-compatibility)");
+  row(s.elem_access_total, "Assessments (element-access)");
+  row(s.loop_bound_total, "Assessments (loop-bound)");
+  row(s.hw_constraint_total, "Assessments (hw-constraint)");
+  row(s.unclassified_runtime, "Runtime assertions (unclassified)");
+  row(s.shape_compat_runtime, "Runtime assertions (shape-compatibility)");
+  row(s.elem_access_runtime, "Runtime assertions (element-access)");
+  row(s.loop_bound_runtime, "Runtime assertions (loop-bound)");
+  row(s.hw_constraint_runtime, "Runtime assertions (hw-constraint)");
 }

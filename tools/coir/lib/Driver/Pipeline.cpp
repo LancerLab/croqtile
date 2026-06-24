@@ -59,9 +59,18 @@ void Pipeline::EmitCoIR(llvm::raw_ostream &os) {
 }
 
 bool Pipeline::Optimize() {
+  // Stamp cost threshold as module attribute for EstimateAssertCost to read.
+  module_->setAttr("coir.cost_threshold",
+                   mlir::IntegerAttr::get(
+                       mlir::IntegerType::get(&ctx_, 32), cost_threshold_));
   mlir::PassManager pm(&ctx_);
   pm.addPass(coir::createHoistAssertionsPass());
-  return mlir::succeeded(pm.run(module_));
+  pm.addPass(coir::createEstimateAssertCostPass());
+  if (collect_stats_)
+    pm.addPass(coir::createCollectAssertStatsPass());
+  if (mlir::failed(pm.run(module_)))
+    return false;
+  return true;
 }
 
 bool Pipeline::Lower() {

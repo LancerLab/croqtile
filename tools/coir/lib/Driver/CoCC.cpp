@@ -131,8 +131,12 @@ int main(int argc, char *argv[]) {
     generate_script = true;
 
   // --- Frontend ---
+  // Suppress stats from the AST sema pipeline; cocc prints unified stats later.
+  bool want_stats = CCtx().PrintStats();
+  CCtx().SetPrintStats(false);
   CompilerAPI api;
   int fe_status = api.RunFrontend(input_file);
+  CCtx().SetPrintStats(want_stats);
   if (fe_status != 0) return fe_status;
 
   if (dump_ast) {
@@ -150,7 +154,9 @@ int main(int argc, char *argv[]) {
   }
 
   auto &session = CoIR::IRSession::Get();
-  CoIR::Pipeline pipeline(session.Module(), session.Context());
+  int coirThreshold = static_cast<int>(CCtx().RuntimeCheckCostThreshold());
+  CoIR::Pipeline pipeline(session.Module(), session.Context(),
+                           coirThreshold, CCtx().PrintStats());
 
   // --- Emit IR early exit ---
   if (emit_coir) {
@@ -183,12 +189,13 @@ int main(int argc, char *argv[]) {
   }
 
   // --- Output dispatch ---
+  int result = 0;
   if (ShouldEmitSource()) {
     bool is_script = generate_script;
     if (is_script) SetupScriptContext();
     std::string out_path =
         output.WasExplicitlySet() ? output.GetValue() : "";
-    return pipeline.EmitSource(CCtx().TargetName(), is_script, out_path);
+    result = pipeline.EmitSource(CCtx().TargetName(), is_script, out_path);
   } else if (ShouldGenerateBinary()) {
     choreo_unreachable("binary generation not yet implemented");
   } else if (ShouldGenerateAssembly()) {
@@ -197,5 +204,10 @@ int main(int argc, char *argv[]) {
     choreo_unreachable("no output mode selected");
   }
 
-  return 0;
+  // --- Stats reporting ---
+  // CollectAssertStats already wrote directly into CCtx().GetAssessmentStats().
+  if (CCtx().PrintStats())
+    PrintAssessmentStats(CCtx().GetAssessmentStats());
+
+  return result;
 }

@@ -500,6 +500,8 @@ private:
   }
 
   void emitAssert(AssertOp op) {
+    if (auto ea = op->getAttrOfType<BoolAttr>("enabled"))
+      if (!ea.getValue()) return;
     auto site = op.getSite();
     auto msg = op.getMessage().str();
     if (site == AssertSite::ENTRY) {

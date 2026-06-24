@@ -47,14 +47,10 @@ static bool allDepsMovableOutOfRegion(Value cond, Region *region) {
   while (!worklist.empty()) {
     Value v = worklist.pop_back_val();
     if (!visited.insert(v).second) continue;
-    // Already outside -> ok
     if (isDefinedOutsideRegion(v, region)) continue;
-    // Block argument inside the region (e.g., loop IV) -> pinned
     auto *defOp = v.getDefiningOp();
     if (!defOp) return false;
-    // Constants can be rematerialized outside -> ok, but check operands
     if (isa<arith::ConstantOp>(defOp)) continue;
-    // Non-constant op inside the region -> check if its operands can move
     for (Value operand : defOp->getOperands())
       worklist.push_back(operand);
   }
@@ -90,9 +86,6 @@ static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
   HoistTarget target;
   Value cond = assertOp.getCondition();
 
-  // Track the best hoist position found so far.
-  // Walk from the assert's parent up toward the kernel, deciding at each
-  // layer whether we can exit (transparent/opaque rules).
   Operation *bestInsertBefore = nullptr;
   Block *bestBlock = nullptr;
   bool hoistedPastSomething = false;
@@ -101,7 +94,6 @@ static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
   auto *current = assertOp->getParentOp();
   while (current && current != kernel.getOperation()) {
     if (isa<scf::IfOp>(current)) {
-      // scf.if is transparent: post-dom lift through
       bestInsertBefore = current;
       bestBlock = current->getBlock();
       hoistedPastSomething = true;
@@ -122,7 +114,6 @@ static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
     current = current->getParentOp();
   }
 
-  // If we reached the kernel (not stopped early), check for ENTRY
   if (!stoppedEarly && allInputsFromKernelArgs(cond, kernel)) {
     target.destBlock = &kernel.getBody().front();
     target.insertBefore = nullptr;
