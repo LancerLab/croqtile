@@ -227,7 +227,7 @@ private:
     for (auto d : tty.getShape()) n *= d;
     Type eTy = tty.getElementType();
     int64_t elemSize = 4;
-    if (eTy.isF16() || eTy.isInteger(16)) elemSize = 2;
+    if (eTy.isF16() || eTy.isBF16() || eTy.isInteger(16)) elemSize = 2;
     else if (eTy.isF64() || eTy.isInteger(64)) elemSize = 8;
     else if (eTy.isInteger(8)) elemSize = 1;
     return n * elemSize;
