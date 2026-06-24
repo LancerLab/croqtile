@@ -63,8 +63,7 @@ private:
   unsigned nextId = 0;
 
   struct EntryAssertion {
-    std::string condition;
-    std::string message;
+    AssertOp op;
   };
   llvm::SmallVector<EntryAssertion> entryAssertions;
 
@@ -330,7 +329,7 @@ private:
       }
 
       auto dims = getLaunchDims(kernel);
-      emitEntryAssertions();
+      emitEntryAssertions(kernel);
 
       os << "  " << devName << "<<<" << dims.gridStr() << ", "
          << dims.blockStr() << ">>>(";
@@ -403,7 +402,7 @@ private:
     os << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
 
     auto dims = getLaunchDims(kernel);
-    emitEntryAssertions();
+    emitEntryAssertions(kernel);
 
     os << "  " << devName << "<<<" << dims.gridStr() << ", "
        << dims.blockStr() << ">>>(";
@@ -469,7 +468,17 @@ private:
     }
     else if (auto ifOp = dyn_cast<mlir::scf::IfOp>(op))
       emitIfOp(ifOp);
-    else if (isa<mlir::scf::YieldOp>(op))
+    else if (auto whileOp = dyn_cast<mlir::scf::WhileOp>(op))
+      emitWhileOp(whileOp);
+    else if (auto coirWhile = dyn_cast<coir::CoIRWhileOp>(op))
+      emitCoIRWhileOp(coirWhile);
+    else if (isa<coir::CoIRWhileCondOp>(op))
+      (void)op;
+    else if (isa<coir::CoIRBreakOp>(op))
+      emitBreak(cast<coir::CoIRBreakOp>(op));
+    else if (isa<coir::CoIRContinueOp>(op))
+      emitContinue(cast<coir::CoIRContinueOp>(op));
+    else if (isa<mlir::scf::YieldOp>(op) || isa<mlir::scf::ConditionOp>(op))
       (void)op;
     else if (emitArithBinOp(op)) {}
     else if (emitCmpOp(op)) {}
@@ -492,17 +501,107 @@ private:
     auto site = op.getSite();
     auto msg = op.getMessage().str();
     if (site == AssertSite::ENTRY) {
-      entryAssertions.push_back({getName(op.getCondition()), msg});
+      entryAssertions.push_back({op});
       return;
     }
     os << getIndent() << "choreo::choreo_assert(" << getName(op.getCondition())
        << ", \"" << msg << "\");" << "\n";
   }
 
-  void emitEntryAssertions() {
-    for (auto &ea : entryAssertions)
-      os << "  choreo::runtime_check(" << ea.condition
-         << ", \"" << ea.message << "\");\n";
+  std::string emitExprInHostScope(Value v, KernelOp kernel,
+                                  DenseMap<Value, std::string> &hostNames) {
+    auto it = hostNames.find(v);
+    if (it != hostNames.end()) return it->second;
+
+    if (auto arg = dyn_cast<BlockArgument>(v)) {
+      if (arg.getOwner()->getParentOp() == kernel.getOperation()) {
+        std::string name = "p" + std::to_string(arg.getArgNumber());
+        hostNames[v] = name;
+        return name;
+      }
+    }
+
+    auto *defOp = v.getDefiningOp();
+    if (!defOp) return "/* unknown */";
+
+    if (auto constOp = dyn_cast<arith::ConstantOp>(defOp)) {
+      std::string val;
+      if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue()))
+        val = std::to_string(intAttr.getInt());
+      else
+        val = "/* const */";
+      hostNames[v] = val;
+      return val;
+    }
+
+    if (auto cmpOp = dyn_cast<arith::CmpIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames);
+      const char *pred = "==";
+      switch (cmpOp.getPredicate()) {
+      case arith::CmpIPredicate::eq: pred = "=="; break;
+      case arith::CmpIPredicate::ne: pred = "!="; break;
+      case arith::CmpIPredicate::slt:
+      case arith::CmpIPredicate::ult: pred = "<"; break;
+      case arith::CmpIPredicate::sle:
+      case arith::CmpIPredicate::ule: pred = "<="; break;
+      case arith::CmpIPredicate::sgt:
+      case arith::CmpIPredicate::ugt: pred = ">"; break;
+      case arith::CmpIPredicate::sge:
+      case arith::CmpIPredicate::uge: pred = ">="; break;
+      }
+      std::string result = "(" + lhs + " " + pred + " " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+
+    if (auto addOp = dyn_cast<arith::AddIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(addOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(addOp.getRhs(), kernel, hostNames);
+      std::string result = "(" + lhs + " + " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+    if (auto mulOp = dyn_cast<arith::MulIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(mulOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(mulOp.getRhs(), kernel, hostNames);
+      std::string result = "(" + lhs + " * " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+    if (auto subOp = dyn_cast<arith::SubIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(subOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(subOp.getRhs(), kernel, hostNames);
+      std::string result = "(" + lhs + " - " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+    if (auto divOp = dyn_cast<arith::DivSIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(divOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(divOp.getRhs(), kernel, hostNames);
+      std::string result = "(" + lhs + " / " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+    if (auto remOp = dyn_cast<arith::RemSIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(remOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(remOp.getRhs(), kernel, hostNames);
+      std::string result = "(" + lhs + " % " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+
+    llvm_unreachable("unsupported op in host-scope expression");
+  }
+
+  void emitEntryAssertions(KernelOp kernel) {
+    DenseMap<Value, std::string> hostNames;
+    for (auto &ea : entryAssertions) {
+      auto cond =
+          emitExprInHostScope(ea.op.getCondition(), kernel, hostNames);
+      os << "  choreo::runtime_check(" << cond << ", \""
+         << ea.op.getMessage() << "\");\n";
+    }
   }
 
   void emitParallel(ParallelOp op) {
@@ -909,20 +1008,176 @@ private:
   }
 
   void emitIfOp(mlir::scf::IfOp op) {
+    // Declare result variables before the if statement
+    for (auto res : op.getResults()) {
+      os << getIndent() << emitCUDAType(res.getType()) << " "
+         << getName(res) << ";\n";
+    }
+
     os << getIndent() << "if (" << getName(op.getCondition()) << ") {\n";
     incIndent();
-    for (auto &bodyOp : op.getThenRegion().front().getOperations())
-      emitOp(&bodyOp);
+    for (auto &bodyOp : op.getThenRegion().front().getOperations()) {
+      if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
+        for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i)
+          os << getIndent() << getName(op.getResult(i)) << " = "
+             << getName(yieldOp.getOperand(i)) << ";\n";
+      } else {
+        emitOp(&bodyOp);
+      }
+    }
     decIndent();
     os << getIndent() << "}\n";
     if (!op.getElseRegion().empty()) {
       os << getIndent() << "else {\n";
       incIndent();
-      for (auto &bodyOp : op.getElseRegion().front().getOperations())
-        emitOp(&bodyOp);
+      for (auto &bodyOp : op.getElseRegion().front().getOperations()) {
+        if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
+          for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i)
+            os << getIndent() << getName(op.getResult(i)) << " = "
+               << getName(yieldOp.getOperand(i)) << ";\n";
+        } else {
+          emitOp(&bodyOp);
+        }
+      }
       decIndent();
       os << getIndent() << "}\n";
     }
+  }
+
+  void emitWhileOp(mlir::scf::WhileOp op) {
+    auto &beforeBlock = op.getBefore().front();
+    auto condOp = dyn_cast<mlir::scf::ConditionOp>(beforeBlock.getTerminator());
+
+    // Map init values to the before-region block args
+    for (unsigned i = 0; i < op.getInits().size(); ++i)
+      valueNames[beforeBlock.getArgument(i)] = getName(op.getInits()[i]);
+
+    // Declare mutable iter variables
+    llvm::SmallVector<std::string> iterVarNames;
+    for (unsigned i = 0; i < op.getInits().size(); ++i) {
+      std::string name = getName(op.getInits()[i]);
+      iterVarNames.push_back(name);
+    }
+
+    // Emit "before" region ops (except the terminating scf.condition)
+    for (auto &bodyOp : beforeBlock.getOperations()) {
+      if (isa<mlir::scf::ConditionOp>(&bodyOp)) continue;
+      emitOp(&bodyOp);
+    }
+
+    // Emit while (condition)
+    os << getIndent() << "while (" << getName(condOp.getCondition())
+       << ") {\n";
+    incIndent();
+
+    // Map condition-forwarded args to after-region block args
+    auto &afterBlock = op.getAfter().front();
+    for (unsigned i = 0; i < condOp.getArgs().size(); ++i)
+      valueNames[afterBlock.getArgument(i)] =
+          getName(condOp.getArgs()[i]);
+
+    // Emit "after" region ops
+    for (auto &bodyOp : afterBlock.getOperations()) {
+      if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
+        // Update iter variables and re-emit condition ops
+        for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i) {
+          os << getIndent() << iterVarNames[i] << " = "
+             << getName(yieldOp.getOperand(i)) << ";\n";
+          valueNames[beforeBlock.getArgument(i)] =
+              getName(yieldOp.getOperand(i));
+        }
+        // Re-emit before-region ops for next iteration condition
+        for (auto &bOp : beforeBlock.getOperations()) {
+          if (isa<mlir::scf::ConditionOp>(&bOp)) continue;
+          emitOp(&bOp);
+        }
+      } else {
+        emitOp(&bodyOp);
+      }
+    }
+
+    decIndent();
+    os << getIndent() << "}\n";
+
+    // Map while results
+    for (unsigned i = 0; i < op.getNumResults(); ++i) {
+      if (condOp && i < condOp.getArgs().size())
+        valueNames[op.getResult(i)] = getName(condOp.getArgs()[i]);
+    }
+  }
+
+  void emitCoIRWhileOp(coir::CoIRWhileOp op) {
+    auto &condBlock = op.getCondRegion().front();
+    auto condOp = dyn_cast<coir::CoIRWhileCondOp>(condBlock.getTerminator());
+
+    // Map init values to condition block args
+    for (unsigned i = 0; i < op.getInits().size(); ++i)
+      valueNames[condBlock.getArgument(i)] = getName(op.getInits()[i]);
+
+    llvm::SmallVector<std::string> iterVarNames;
+    for (unsigned i = 0; i < op.getInits().size(); ++i)
+      iterVarNames.push_back(getName(op.getInits()[i]));
+
+    // Emit condition region ops (except terminator)
+    for (auto &bodyOp : condBlock.getOperations()) {
+      if (isa<coir::CoIRWhileCondOp>(&bodyOp)) continue;
+      emitOp(&bodyOp);
+    }
+
+    os << getIndent() << "while (" << getName(condOp.getCondition())
+       << ") {\n";
+    incIndent();
+
+    // Map condition-forwarded args to body block args
+    auto &bodyBlock = op.getBodyRegion().front();
+    for (unsigned i = 0; i < condOp.getArgs().size(); ++i)
+      valueNames[bodyBlock.getArgument(i)] =
+          getName(condOp.getArgs()[i]);
+
+    // Emit body region ops
+    for (auto &bodyOp : bodyBlock.getOperations()) {
+      if (auto breakOp = dyn_cast<coir::CoIRBreakOp>(&bodyOp)) {
+        for (unsigned i = 0; i < breakOp.getOperands().size(); ++i) {
+          os << getIndent() << iterVarNames[i] << " = "
+             << getName(breakOp.getOperand(i)) << ";\n";
+          valueNames[condBlock.getArgument(i)] =
+              getName(breakOp.getOperand(i));
+        }
+        os << getIndent() << "break;\n";
+      } else if (auto contOp = dyn_cast<coir::CoIRContinueOp>(&bodyOp)) {
+        for (unsigned i = 0; i < contOp.getOperands().size(); ++i) {
+          os << getIndent() << iterVarNames[i] << " = "
+             << getName(contOp.getOperand(i)) << ";\n";
+          valueNames[condBlock.getArgument(i)] =
+              getName(contOp.getOperand(i));
+        }
+        // Re-emit condition computation for next iteration
+        for (auto &cOp : condBlock.getOperations()) {
+          if (isa<coir::CoIRWhileCondOp>(&cOp)) continue;
+          emitOp(&cOp);
+        }
+        os << getIndent() << "continue;\n";
+      } else {
+        emitOp(&bodyOp);
+      }
+    }
+
+    decIndent();
+    os << getIndent() << "}\n";
+
+    // Map while results
+    for (unsigned i = 0; i < op.getNumResults(); ++i) {
+      if (condOp && i < condOp.getArgs().size())
+        valueNames[op.getResult(i)] = getName(condOp.getArgs()[i]);
+    }
+  }
+
+  void emitBreak(coir::CoIRBreakOp op) {
+    os << getIndent() << "break;\n";
+  }
+
+  void emitContinue(coir::CoIRContinueOp op) {
+    os << getIndent() << "continue;\n";
   }
 
   bool emitCmpOp(Operation *op) {

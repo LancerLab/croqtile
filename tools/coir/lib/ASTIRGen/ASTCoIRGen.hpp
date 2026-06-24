@@ -67,7 +67,21 @@ private:
 
   llvm::SmallVector<std::pair<std::string, mlir::Value>> pendingYields;
   mlir::Value lastSpanAsResult;
-  llvm::SmallVector<mlir::scf::IfOp> ifOpStack;
+
+  struct IfMergeInfo {
+    mlir::scf::IfOp ifOp;
+    llvm::SmallVector<std::string> modifiedNames;
+    llvm::SmallVector<mlir::Value> preIfValues;
+  };
+  llvm::SmallVector<IfMergeInfo> ifMergeStack;
+
+  struct WhileMergeInfo {
+    mlir::Operation *whileOp;
+    llvm::SmallVector<std::string> iterNames;
+    llvm::SmallVector<mlir::Type> iterTypes;
+    bool isCoirWhile = false;
+  };
+  llvm::SmallVector<WhileMergeInfo> whileMergeStack;
 
   llvm::SmallVector<mlir::Value> expr_stack;
   void PushExpr(mlir::Value v) { expr_stack.push_back(v); }
@@ -140,8 +154,8 @@ public:
   bool Visit(AST::ChunkAt &) override { return true; }
   bool Visit(AST::Wait &) override;
   bool Visit(AST::Trigger &) override { return true; }
-  bool Visit(AST::Break &) override { return true; }
-  bool Visit(AST::Continue &) override { return true; }
+  bool Visit(AST::Break &) override;
+  bool Visit(AST::Continue &) override;
   bool Visit(AST::Yield &) override { return true; }
   bool Visit(AST::Call &) override;
   bool Visit(AST::Rotate &) override { return true; }
@@ -149,7 +163,7 @@ public:
   bool Visit(AST::Select &) override { return true; }
   bool Visit(AST::LoopRange &) override { return true; }
   bool Visit(AST::InThreadsBlock &) override { return true; }
-  bool Visit(AST::WhileBlock &) override { return true; }
+  bool Visit(AST::WhileBlock &) override;
   bool Visit(AST::IfElseBlock &) override;
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::DeviceFunctionDecl &) override { return true; }

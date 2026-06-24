@@ -1,0 +1,20 @@
+// RUN: co2ir %s | FileCheck %s
+
+// IRGen test: while loop with break lowers to coir.while + coir.break.
+
+// CHECK: coir.kernel
+// CHECK: coir.while
+// CHECK: coir.while.cond
+// CHECK: coir.break
+// CHECK: coir.continue
+
+__co__ void test_while_break(s32 [64] buf, s32 N) {
+  parallel p by 64 {
+    mutable s32 i = 0;
+    while (i < N) {
+      if (i == 10) break;
+      buf.at(p) = i;
+      i = i + 1;
+    }
+  }
+}

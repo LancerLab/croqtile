@@ -164,15 +164,25 @@ bool ASTCoIRGen::BeforeVisitImpl(AST::Node &n) {
 }
 
 bool ASTCoIRGen::InMidVisitImpl(AST::Node &n) {
-  if (isa<AST::IfElseBlock>(&n) && !ifOpStack.empty()) {
-    auto ifOp = ifOpStack.back();
+  if (isa<AST::IfElseBlock>(&n) && !ifMergeStack.empty()) {
+    auto &info = ifMergeStack.back();
+    auto ifOp = info.ifOp;
     auto &thenBlock = ifOp.getThenRegion().front();
     builder.setInsertionPointToEnd(&thenBlock);
-    if (thenBlock.empty() ||
-        !thenBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
-      builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc());
-    if (!ifOp.getElseRegion().empty())
-      builder.setInsertionPointToStart(&ifOp.getElseRegion().front());
+
+    llvm::SmallVector<mlir::Value> yieldVals;
+    for (unsigned i = 0; i < info.modifiedNames.size(); ++i) {
+      auto val = LookupValue(info.modifiedNames[i]);
+      yieldVals.push_back(val ? val : info.preIfValues[i]);
+    }
+
+    if (!thenBlock.empty() &&
+        thenBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
+      thenBlock.back().erase();
+    builder.setInsertionPointToEnd(&thenBlock);
+    builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc(), yieldVals);
+
+    builder.setInsertionPointToStart(&ifOp.getElseRegion().front());
   }
   return true;
 }
@@ -231,17 +241,78 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     PopScope();
     for (auto &[name, val] : resultMappings)
       UpdateValue(name, val);
-  } else if (isa<AST::IfElseBlock>(&n) && !ifOpStack.empty()) {
-    auto ifOp = ifOpStack.pop_back_val();
-    auto &lastRegion = ifOp.getElseRegion().empty()
-                           ? ifOp.getThenRegion()
-                           : ifOp.getElseRegion();
-    auto &lastBlock = lastRegion.front();
-    builder.setInsertionPointToEnd(&lastBlock);
-    if (lastBlock.empty() ||
-        !lastBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
-      builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc());
+  } else if (isa<AST::IfElseBlock>(&n) && !ifMergeStack.empty()) {
+    auto info = ifMergeStack.pop_back_val();
+    auto ifOp = info.ifOp;
+    auto &elseBlock = ifOp.getElseRegion().front();
+    builder.setInsertionPointToEnd(&elseBlock);
+
+    llvm::SmallVector<mlir::Value> yieldVals;
+    auto *ifElse = dyn_cast<AST::IfElseBlock>(&n);
+    if (ifElse && ifElse->HasElse()) {
+      for (auto &name : info.modifiedNames) {
+        auto val = LookupValue(name);
+        yieldVals.push_back(val ? val : info.preIfValues[yieldVals.size()]);
+      }
+    } else {
+      yieldVals = info.preIfValues;
+    }
+
+    if (!elseBlock.empty() &&
+        elseBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
+      elseBlock.back().erase();
+    builder.setInsertionPointToEnd(&elseBlock);
+    builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc(), yieldVals);
+
     builder.setInsertionPointAfter(ifOp);
+
+    for (unsigned i = 0; i < info.modifiedNames.size(); ++i)
+      UpdateValue(info.modifiedNames[i], ifOp.getResult(i));
+  } else if (isa<AST::WhileBlock>(&n) && !whileMergeStack.empty()) {
+    auto info = whileMergeStack.pop_back_val();
+
+    if (info.isCoirWhile) {
+      auto coirWhile = mlir::cast<coir::CoIRWhileOp>(info.whileOp);
+      auto &bodyBlock = coirWhile.getBodyRegion().front();
+      builder.setInsertionPointToEnd(&bodyBlock);
+
+      // If body doesn't end with a terminator, add coir.continue
+      if (bodyBlock.empty() ||
+          !bodyBlock.back().hasTrait<mlir::OpTrait::IsTerminator>()) {
+        llvm::SmallVector<mlir::Value> yieldVals;
+        for (auto &name : info.iterNames) {
+          auto val = LookupValue(name);
+          if (val) yieldVals.push_back(val);
+        }
+        builder.create<coir::CoIRContinueOp>(builder.getUnknownLoc(),
+                                              yieldVals);
+      }
+
+      PopScope();
+      builder.setInsertionPointAfter(coirWhile);
+      for (unsigned i = 0; i < info.iterNames.size(); ++i)
+        UpdateValue(info.iterNames[i], coirWhile.getResult(i));
+    } else {
+      auto scfWhile = mlir::cast<mlir::scf::WhileOp>(info.whileOp);
+      auto &afterBlock = scfWhile.getAfter().front();
+      builder.setInsertionPointToEnd(&afterBlock);
+
+      llvm::SmallVector<mlir::Value> yieldVals;
+      for (auto &name : info.iterNames) {
+        auto val = LookupValue(name);
+        yieldVals.push_back(val);
+      }
+
+      if (!afterBlock.empty() &&
+          afterBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
+        afterBlock.back().erase();
+      builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc(), yieldVals);
+
+      PopScope();
+      builder.setInsertionPointAfter(scfWhile);
+      for (unsigned i = 0; i < info.iterNames.size(); ++i)
+        UpdateValue(info.iterNames[i], scfWhile.getResult(i));
+    }
   } else if (isa<AST::WithBlock>(&n)) {
     PopScope();
   }
@@ -391,6 +462,33 @@ void collectScalarIterArgs(AST::Node *node,
     auto body = node->GetBody();
     if (body) collectScalarIterArgs(body.get(), names, seen);
   }
+}
+
+void collectIfModifiedScalars(AST::Node *thenBody, AST::Node *elseBody,
+                              llvm::SmallVectorImpl<std::string> &names,
+                              llvm::StringSet<> &seen) {
+  if (thenBody) collectScalarIterArgs(thenBody, names, seen);
+  if (elseBody) collectScalarIterArgs(elseBody, names, seen);
+}
+
+bool hasEarlyExit(AST::Node *node) {
+  if (!node) return false;
+  if (isa<AST::Break>(node) || isa<AST::Continue>(node)) return true;
+  if (auto *mn = dyn_cast<AST::MultiNodes>(node)) {
+    for (auto &child : mn->values)
+      if (child && hasEarlyExit(child.get())) return true;
+    return false;
+  }
+  if (auto *ifb = dyn_cast<AST::IfElseBlock>(node)) {
+    if (ifb->stmts && hasEarlyExit(ifb->stmts.get())) return true;
+    if (ifb->else_stmts && hasEarlyExit(ifb->else_stmts.get())) return true;
+    return false;
+  }
+  if (node->HasBody()) {
+    auto body = node->GetBody();
+    if (body && hasEarlyExit(body.get())) return true;
+  }
+  return false;
 }
 } // namespace
 
@@ -976,9 +1074,6 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
 
   if (!srcVal || !dstVal) return true;
 
-  // Emit shape-compatibility assertion for DMA copies.
-  // Uses static TensorType shapes when available; the HoistAssertions pass
-  // can later promote this to ENTRY site if the condition is kernel-invariant.
   auto srcTensor = srcVal.getType().dyn_cast<coir::TensorType>();
   auto dstTensor = dstVal.getType().dyn_cast<coir::TensorType>();
   if (srcTensor && dstTensor) {
@@ -994,10 +1089,13 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
       if (s < 0) { dstStatic = false; break; }
       dstElems *= s;
     }
-    if (srcStatic && dstStatic && srcElems != dstElems) {
-      auto cond = builder.create<mlir::arith::ConstantIntOp>(loc, 0, 1);
-      EmitAssert(loc, cond, "DMA copy: src elements != dst elements",
-                 coir::AssertSite::ENTRY, coir::AssertUsage::SHAPE_COMPAT);
+    if (srcStatic && dstStatic && srcElems > dstElems) {
+      auto srcC = builder.create<mlir::arith::ConstantIndexOp>(loc, srcElems);
+      auto dstC = builder.create<mlir::arith::ConstantIndexOp>(loc, dstElems);
+      auto cmp = builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::sle, srcC, dstC);
+      EmitAssert(loc, cmp, "DMA copy: src elements exceed dst capacity",
+                 coir::AssertSite::USE, coir::AssertUsage::SHAPE_COMPAT);
     }
   }
 
@@ -1299,6 +1397,212 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
   return true;
 }
 
+bool ASTCoIRGen::Visit(AST::WhileBlock &wb) {
+  auto loc = Loc(wb);
+  auto pred = wb.GetPred();
+  if (!pred) return true;
+
+  if (hasEarlyExit(wb.stmts.get())) {
+    llvm::SmallVector<std::string> modNames;
+    llvm::StringSet<> modSeen;
+    if (wb.stmts) collectScalarIterArgs(wb.stmts.get(), modNames, modSeen);
+
+    llvm::SmallVector<std::string> predNames;
+    llvm::StringSet<> predSeen;
+    collectScalarIterArgs(pred.get(), predNames, predSeen);
+    for (auto &name : predNames) {
+      if (!modSeen.count(name)) {
+        auto val = LookupValue(name);
+        if (val) {
+          modNames.push_back(name);
+          modSeen.insert(name);
+        }
+      }
+    }
+
+    llvm::SmallVector<mlir::Value> iterArgs;
+    llvm::SmallVector<mlir::Type> iterTypes;
+    llvm::SmallVector<std::string> validNames;
+    for (auto &name : modNames) {
+      auto val = LookupValue(name);
+      if (val) {
+        iterArgs.push_back(val);
+        iterTypes.push_back(val.getType());
+        validNames.push_back(name);
+      }
+    }
+
+    auto coirWhile = builder.create<coir::CoIRWhileOp>(
+        loc, iterTypes, iterArgs);
+
+    // Condition region
+    auto &condRegion = coirWhile.getCondRegion();
+    auto *condBlock = new mlir::Block();
+    condRegion.push_back(condBlock);
+    for (unsigned i = 0; i < iterTypes.size(); ++i)
+      condBlock->addArgument(iterTypes[i], loc);
+
+    builder.setInsertionPointToEnd(condBlock);
+    for (unsigned i = 0; i < validNames.size(); ++i)
+      UpdateValue(validNames[i], condBlock->getArgument(i));
+
+    auto condVal = EmitExpr(*pred);
+    if (condVal && !condVal.getType().isInteger(1)) {
+      auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, 0,
+          condVal.getType());
+      condVal = builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ne, condVal, zero);
+    }
+    if (!condVal) {
+      condVal = builder.create<mlir::arith::ConstantIntOp>(loc, 1, 1);
+    }
+
+    llvm::SmallVector<mlir::Value> condArgs;
+    for (unsigned i = 0; i < validNames.size(); ++i)
+      condArgs.push_back(condBlock->getArgument(i));
+    builder.create<coir::CoIRWhileCondOp>(loc, condVal, condArgs);
+
+    // Body region
+    auto &bodyRegion = coirWhile.getBodyRegion();
+    auto *bodyBlock = new mlir::Block();
+    bodyRegion.push_back(bodyBlock);
+    for (unsigned i = 0; i < iterTypes.size(); ++i)
+      bodyBlock->addArgument(iterTypes[i], loc);
+
+    PushScope();
+    for (unsigned i = 0; i < validNames.size(); ++i)
+      MapValue(validNames[i], bodyBlock->getArgument(i));
+
+    builder.setInsertionPointToEnd(bodyBlock);
+
+    WhileMergeInfo info;
+    info.whileOp = coirWhile;
+    info.iterNames = std::move(validNames);
+    info.iterTypes = std::move(iterTypes);
+    info.isCoirWhile = true;
+    whileMergeStack.push_back(std::move(info));
+
+    return true;
+  }
+
+  // Structured while (no break/continue) -> scf.while
+  llvm::SmallVector<std::string> modNames;
+  llvm::StringSet<> modSeen;
+  if (wb.stmts) collectScalarIterArgs(wb.stmts.get(), modNames, modSeen);
+
+  // Also include variables used in the predicate that are modified in the body
+  // (the loop variable itself)
+  llvm::SmallVector<std::string> predNames;
+  llvm::StringSet<> predSeen;
+  collectScalarIterArgs(pred.get(), predNames, predSeen);
+  for (auto &name : predNames) {
+    if (!modSeen.count(name)) {
+      auto val = LookupValue(name);
+      if (val) {
+        modNames.push_back(name);
+        modSeen.insert(name);
+      }
+    }
+  }
+
+  llvm::SmallVector<mlir::Value> iterArgs;
+  llvm::SmallVector<mlir::Type> iterTypes;
+  llvm::SmallVector<std::string> validNames;
+  for (auto &name : modNames) {
+    auto val = LookupValue(name);
+    if (val) {
+      iterArgs.push_back(val);
+      iterTypes.push_back(val.getType());
+      validNames.push_back(name);
+    }
+  }
+
+  auto whileOp = builder.create<mlir::scf::WhileOp>(
+      loc, iterTypes, iterArgs);
+
+  // -- "before" region: evaluate condition, emit scf.condition --
+  auto &beforeRegion = whileOp.getBefore();
+  auto *beforeBlock = new mlir::Block();
+  beforeRegion.push_back(beforeBlock);
+  for (unsigned i = 0; i < iterTypes.size(); ++i)
+    beforeBlock->addArgument(iterTypes[i], loc);
+
+  builder.setInsertionPointToEnd(beforeBlock);
+
+  // Map iter_args so EmitExpr can reference the loop variables
+  for (unsigned i = 0; i < validNames.size(); ++i)
+    UpdateValue(validNames[i], beforeBlock->getArgument(i));
+
+  auto condVal = EmitExpr(*pred);
+  if (condVal && !condVal.getType().isInteger(1)) {
+    auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, 0,
+        condVal.getType());
+    condVal = builder.create<mlir::arith::CmpIOp>(
+        loc, mlir::arith::CmpIPredicate::ne, condVal, zero);
+  }
+  if (!condVal) {
+    auto c1 = builder.create<mlir::arith::ConstantIntOp>(loc, 1, 1);
+    condVal = c1;
+  }
+
+  llvm::SmallVector<mlir::Value> condArgs;
+  for (unsigned i = 0; i < validNames.size(); ++i)
+    condArgs.push_back(beforeBlock->getArgument(i));
+  builder.create<mlir::scf::ConditionOp>(loc, condVal, condArgs);
+
+  // -- "after" region: body will be filled by visitor --
+  auto &afterRegion = whileOp.getAfter();
+  auto *afterBlock = new mlir::Block();
+  afterRegion.push_back(afterBlock);
+  for (unsigned i = 0; i < iterTypes.size(); ++i)
+    afterBlock->addArgument(iterTypes[i], loc);
+
+  PushScope();
+  for (unsigned i = 0; i < validNames.size(); ++i)
+    MapValue(validNames[i], afterBlock->getArgument(i));
+
+  builder.setInsertionPointToEnd(afterBlock);
+
+  WhileMergeInfo info;
+  info.whileOp = whileOp;
+  info.iterNames = std::move(validNames);
+  info.iterTypes = std::move(iterTypes);
+  info.isCoirWhile = false;
+  whileMergeStack.push_back(std::move(info));
+
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::Break &br) {
+  if (whileMergeStack.empty() || !whileMergeStack.back().isCoirWhile)
+    return true;
+
+  auto loc = Loc(br);
+  auto &info = whileMergeStack.back();
+  llvm::SmallVector<mlir::Value> vals;
+  for (auto &name : info.iterNames) {
+    auto val = LookupValue(name);
+    if (val) vals.push_back(val);
+  }
+  builder.create<coir::CoIRBreakOp>(loc, vals);
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::Continue &cont) {
+  if (whileMergeStack.empty() || !whileMergeStack.back().isCoirWhile)
+    return true;
+
+  auto loc = Loc(cont);
+  auto &info = whileMergeStack.back();
+  llvm::SmallVector<mlir::Value> vals;
+  for (auto &name : info.iterNames) {
+    auto val = LookupValue(name);
+    if (val) vals.push_back(val);
+  }
+  builder.create<coir::CoIRContinueOp>(loc, vals);
+  return true;
+}
+
 bool ASTCoIRGen::Visit(AST::IfElseBlock &ifelse) {
   auto loc = Loc(ifelse);
   auto pred = ifelse.GetPredicate();
@@ -1314,10 +1618,32 @@ bool ASTCoIRGen::Visit(AST::IfElseBlock &ifelse) {
         loc, mlir::arith::CmpIPredicate::ne, condVal, zero);
   }
 
-  bool hasElse = ifelse.HasElse();
-  auto ifOp = builder.create<mlir::scf::IfOp>(loc, mlir::TypeRange{},
-                                                condVal, hasElse);
-  ifOpStack.push_back(ifOp);
+  llvm::SmallVector<std::string> modNames;
+  llvm::StringSet<> modSeen;
+  collectIfModifiedScalars(ifelse.GetThenBody().get(),
+                           ifelse.GetElseBody().get(), modNames, modSeen);
+
+  llvm::SmallVector<mlir::Value> preIfValues;
+  llvm::SmallVector<mlir::Type> resultTypes;
+  llvm::SmallVector<std::string> validNames;
+  for (auto &name : modNames) {
+    auto val = LookupValue(name);
+    if (val) {
+      preIfValues.push_back(val);
+      resultTypes.push_back(val.getType());
+      validNames.push_back(name);
+    }
+  }
+
+  auto ifOp = builder.create<mlir::scf::IfOp>(loc, resultTypes,
+                                                condVal,
+                                                /*withElseRegion=*/true);
+
+  IfMergeInfo info;
+  info.ifOp = ifOp;
+  info.modifiedNames = std::move(validNames);
+  info.preIfValues = std::move(preIfValues);
+  ifMergeStack.push_back(std::move(info));
 
   builder.setInsertionPointToStart(&ifOp.getThenRegion().front());
   return true;
