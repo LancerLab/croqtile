@@ -263,8 +263,8 @@ struct future {
   // Configure DMA descriptor without triggering. For use with hoisted
   // DMA config: call configure() once outside the loop, then set_offset()
   // + trigger_only() per iteration.
-  __device__ void configure(
-      const tops::mdspan_base& dst, const tops::mdspan_base& src) {
+  __device__ void configure(const tops::mdspan_base& dst,
+                            const tops::mdspan_base& src) {
     if (s == ST_NONE) {
   #if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
       if (explicit_init) ctx->init_comm();
