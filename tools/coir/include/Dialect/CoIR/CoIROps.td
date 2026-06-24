@@ -399,6 +399,75 @@ def ElementCopyOp : CoIR_Op<"element.copy", []> {
 // Backends emit the check as the appropriate host/device assertion macro.
 //===----------------------------------------------------------------------===//
 
+//===----------------------------------------------------------------------===//
+// While loop with early exit (break/continue)
+//
+// coir.while models loops that may contain break/continue statements.
+// It has two regions: a condition region and a body region, each receiving
+// iter_args as block arguments.
+//
+// The condition region is terminated by coir.while.cond which tests the
+// loop predicate and forwards values to the body.
+// The body region uses coir.continue to yield next-iteration values and
+// coir.break for early exit.
+//===----------------------------------------------------------------------===//
+
+def CoIRWhileOp : CoIR_Op<"while", [RecursiveMemoryEffects]> {
+  let summary = "While loop with optional break/continue support";
+  let description = [{
+    A while loop with two regions: condition and body.
+    Supports iter_args for SSA loop-carried values.
+    The condition region is terminated by coir.while.cond.
+    The body region uses coir.continue and coir.break for control flow.
+  }];
+  let arguments = (ins Variadic<AnyType>:$inits);
+  let results = (outs Variadic<AnyType>:$results);
+  let regions = (region SizedRegion<1>:$cond_region,
+                        SizedRegion<1>:$body_region);
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
+}
+
+def CoIRWhileCondOp : CoIR_Op<"while.cond", [Terminator,
+    HasParent<"CoIRWhileOp">]> {
+  let summary = "Condition terminator for coir.while condition region";
+  let description = [{
+    Tests the loop predicate. If true, forwards values to the body region.
+    If false, the while loop exits and the forwarded values become the
+    while op's results.
+  }];
+  let arguments = (ins I1:$condition, Variadic<AnyType>:$args);
+  let assemblyFormat = [{
+    `(` $condition `)` ($args^ `:` type($args))? attr-dict
+  }];
+}
+
+def CoIRBreakOp : CoIR_Op<"break", []> {
+  let summary = "Break out of a coir.while loop";
+  let description = [{
+    Exits the enclosing coir.while loop. Operands are the final values
+    of the loop-carried variables. May appear inside scf.if to model
+    conditional break.
+  }];
+  let arguments = (ins Variadic<AnyType>:$operands);
+  let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
+}
+
+def CoIRContinueOp : CoIR_Op<"continue", [Terminator]> {
+  let summary = "Continue to next iteration of a coir.while loop";
+  let description = [{
+    Jumps to the next iteration of the enclosing coir.while loop.
+    Operands become the next iteration's iter_args.
+    Must be the terminator of the coir.while body region.
+  }];
+  let arguments = (ins Variadic<AnyType>:$operands);
+  let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
+}
+
+//===----------------------------------------------------------------------===//
+// Runtime safety assertions
+//===----------------------------------------------------------------------===//
+
 def AssertOp : CoIR_Op<"assert", []> {
   let summary = "Runtime safety assertion";
   let description = [{

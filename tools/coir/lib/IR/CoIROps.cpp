@@ -574,5 +574,120 @@ void TmaCopyOp::print(OpAsmPrinter &printer) {
 }
 
 //===----------------------------------------------------------------------===//
+// CoIRWhileOp
+//===----------------------------------------------------------------------===//
+
+// Format:
+//   %res = coir.while (%arg = %init) : (type) -> type {
+//   ^cond(%c: type):
+//     ...
+//     coir.while.cond(%pred) %c : type
+//   ^body(%b: type):
+//     ...
+//     coir.continue %next : type
+//   }
+ParseResult CoIRWhileOp::parse(OpAsmParser &parser, OperationState &result) {
+  SmallVector<OpAsmParser::UnresolvedOperand> initOperands;
+  SmallVector<OpAsmParser::Argument> condBlockArgs;
+  SmallVector<Type> argTypes;
+
+  if (parser.parseLParen())
+    return failure();
+
+  // Parse iter_args list: (%arg = %init, ...)
+  if (parser.parseOptionalRParen()) {
+    do {
+      OpAsmParser::Argument regionArg;
+      OpAsmParser::UnresolvedOperand initVal;
+      if (parser.parseArgument(regionArg) || parser.parseEqual() ||
+          parser.parseOperand(initVal))
+        return failure();
+      condBlockArgs.push_back(regionArg);
+      initOperands.push_back(initVal);
+    } while (succeeded(parser.parseOptionalComma()));
+    if (parser.parseRParen())
+      return failure();
+  }
+
+  // Parse `: (types) -> (types)`
+  FunctionType funcType;
+  if (parser.parseColon() || parser.parseType(funcType))
+    return failure();
+
+  argTypes = llvm::to_vector(funcType.getInputs());
+  result.addTypes(funcType.getResults());
+
+  // Set types on region args
+  for (unsigned i = 0; i < condBlockArgs.size(); ++i)
+    condBlockArgs[i].type = argTypes[i];
+
+  // Resolve init operands
+  if (parser.resolveOperands(initOperands, argTypes, parser.getNameLoc(),
+                             result.operands))
+    return failure();
+
+  // Parse condition region (with implicit block args from iter_args)
+  auto *condRegion = result.addRegion();
+  if (parser.parseRegion(*condRegion, condBlockArgs))
+    return failure();
+
+  // Parse body region (its own block args)
+  auto *bodyRegion = result.addRegion();
+  if (parser.parseRegion(*bodyRegion))
+    return failure();
+
+  return success();
+}
+
+void CoIRWhileOp::print(OpAsmPrinter &printer) {
+  auto inits = getInits();
+  auto &condBlock = getCondRegion().front();
+  auto &bodyBlock = getBodyRegion().front();
+
+  printer << " (";
+  llvm::interleaveComma(
+      llvm::zip(condBlock.getArguments(), inits), printer,
+      [&](auto pair) {
+        printer << std::get<0>(pair) << " = " << std::get<1>(pair);
+      });
+  printer << ") : (";
+  llvm::interleaveComma(
+      condBlock.getArgumentTypes(), printer,
+      [&](Type ty) { printer << ty; });
+  printer << ") -> (";
+  llvm::interleaveComma(
+      getResultTypes(), printer,
+      [&](Type ty) { printer << ty; });
+  printer << ") ";
+
+  printer.printRegion(getCondRegion(), /*printEntryBlockArgs=*/false);
+  printer.printRegion(getBodyRegion());
+}
+
+LogicalResult CoIRWhileOp::verify() {
+  auto &condRegion = getCondRegion();
+  auto &bodyRegion = getBodyRegion();
+
+  if (condRegion.empty() || bodyRegion.empty())
+    return emitOpError("requires non-empty condition and body regions");
+
+  auto numInits = getInits().size();
+  auto &condBlock = condRegion.front();
+  auto &bodyBlock = bodyRegion.front();
+
+  if (condBlock.getNumArguments() != numInits)
+    return emitOpError("condition region block argument count (")
+           << condBlock.getNumArguments()
+           << ") must match init count (" << numInits << ")";
+
+  if (bodyBlock.getNumArguments() != numInits)
+    return emitOpError("body region block argument count (")
+           << bodyBlock.getNumArguments()
+           << ") must match init count (" << numInits << ")";
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // ElementCopyOp (uses declarative format, no custom parse/print needed)
 //===----------------------------------------------------------------------===//

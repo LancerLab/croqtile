@@ -1,0 +1,22 @@
+// RUN: co2ir %s | FileCheck %s
+
+// IRGen test: verify that mutable scalar reassignment inside if/else
+// generates scf.if with result types (SSA merge).
+
+// CHECK: coir.kernel
+// CHECK: scf.if
+// CHECK-SAME: -> (i32)
+// CHECK: scf.yield
+// CHECK: scf.yield
+// CHECK: coir.tensor.store_elem
+
+__co__ void test_if_merge(s32 [64] buf, s32 N) {
+  parallel p by 64 {
+    mutable s32 x = 0;
+    if (N > 10)
+      x = 1;
+    else
+      x = 2;
+    buf.at(p) = x;
+  }
+}

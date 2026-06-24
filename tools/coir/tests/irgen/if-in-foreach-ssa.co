@@ -1,0 +1,24 @@
+// RUN: co2ir %s | FileCheck %s
+
+// IRGen test: mutable scalar modified inside if within foreach.
+// The scf.if result flows into the coir.foreach iter_args / yield.
+
+// CHECK: coir.kernel
+// CHECK: coir.foreach
+// CHECK-SAME: iter_args
+// CHECK: scf.if
+// CHECK-SAME: -> (i32)
+// CHECK: scf.yield
+// CHECK: scf.yield
+// CHECK: coir.yield
+
+__co__ void test_if_foreach(s32 [64] buf) {
+  parallel p by 64 {
+    mutable s32 acc = 0;
+    foreach k in [16] {
+      if (k > 5)
+        acc = acc + 1;
+    }
+    buf.at(p) = acc;
+  }
+}
