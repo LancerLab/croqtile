@@ -7,6 +7,7 @@
 
 #include "ast.hpp"
 #include "ASTCoIRGen.hpp"
+#include "assert_site.hpp"
 #include "aux.hpp"
 #include "choreo_api.hpp"
 #include "codegen.hpp"
@@ -115,6 +116,16 @@ ProcessCoIROptions(int argc, char *argv[]) {
   return {static_cast<int>(filtered.size()), std::move(filtered)};
 }
 
+/// Run the AST-level AssertSite pass on the frontend AST.
+/// This performs assertion hoisting, cost estimation, and stats accumulation
+/// -- the same work that PlanCodeGenStages() would do in the Choreo path.
+/// RunFrontend() sets NoCodegen(true), so codegen stages (including
+/// AssertSite) are skipped; we run it explicitly here.
+void RunAssertSiteOnAST() {
+  AssertSite as;
+  as.RunOnProgram(CompilerAPI::GetAST());
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -138,6 +149,7 @@ int main(int argc, char *argv[]) {
   int fe_status = api.RunFrontend(input_file);
   CCtx().SetPrintStats(want_stats);
   if (fe_status != 0) return fe_status;
+  RunAssertSiteOnAST();
 
   if (dump_ast) {
     CompilerAPI::GetAST().Print(dbgs());

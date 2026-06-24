@@ -1,0 +1,15 @@
+// RUN: cocc -t cute -es -rtc=none %s 2>&1 | FileCheck %s --check-prefix=NONE
+// RUN: cocc -t cute -es -rtc=all %s 2>&1 | FileCheck %s --check-prefix=ALL
+//
+// Test assertion filtering: -rtc=none suppresses all assertions,
+// -rtc=all emits them.
+
+__co__ void add(s32 [64] a, s32 [64] b) {
+  s32[64] c;
+  parallel p by 64
+    c.at(p) = a.at(p) + b.at(p);
+}
+
+// NONE-NOT: choreo_assert
+// NONE-NOT: runtime_check
+// ALL: choreo_assert

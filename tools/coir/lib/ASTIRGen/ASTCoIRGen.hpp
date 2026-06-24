@@ -100,6 +100,9 @@ private:
                   llvm::StringRef message,
                   coir::AssertSite site = coir::AssertSite::USE,
                   coir::AssertUsage usage = coir::AssertUsage::UNCLASSIFIED);
+  void EmitElemAccessAsserts(mlir::Location loc, llvm::StringRef dataName,
+                             llvm::ArrayRef<mlir::Value> indices,
+                             coir::TensorType tty);
 
   // Resolve a bounded variable (within or parallel-by) to its total
   // iteration extent by looking up bv_map -> MLIR values or BoundedType.

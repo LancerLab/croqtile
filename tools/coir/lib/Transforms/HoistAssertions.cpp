@@ -146,6 +146,9 @@ static void collectDefChain(Value root, Region *boundary,
   }
 }
 
+/// Move (or clone) ops to destBlock before destPoint, in topological order.
+/// Ops that have users outside the move set are cloned instead of moved,
+/// so that existing references remain valid.
 static void moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
                                      Block *destBlock,
                                      Block::iterator destPoint) {
@@ -162,7 +165,19 @@ static void moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
   };
 
   for (auto *op : ops) visit(op);
-  for (auto *op : sorted) op->moveBefore(destBlock, destPoint);
+  for (auto *op : sorted) {
+    bool hasExternalUsers = llvm::any_of(
+        op->getUsers(), [&](Operation *u) { return !opSet.count(u); });
+    if (hasExternalUsers) {
+      OpBuilder b(destBlock, destPoint);
+      auto *clone = b.clone(*op);
+      for (auto &use : llvm::make_early_inc_range(op->getUses()))
+        if (opSet.count(use.getOwner()))
+          use.set(clone->getResult(0));
+    } else {
+      op->moveBefore(destBlock, destPoint);
+    }
+  }
 }
 
 struct HoistAssertionsPass

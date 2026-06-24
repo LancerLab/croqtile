@@ -1,0 +1,18 @@
+// RUN: cocc -t cute -es -rtc=all %s 2>&1 | FileCheck %s
+//
+// Test that COIR emits runtime assertions for dynamic element access.
+// The 'data.at(index0)' uses an indirectly-loaded index whose value
+// is unknown at compile time, so bounds checks must appear in device code.
+
+__co__ void indirect(s32 [1024] data, s32 [8] idx) {
+  parallel by 1 {
+    foreach {i} in [idx.span] {
+      index0 = idx.at(i);
+      data.at(index0) += 1;
+    }
+  }
+}
+
+// Device code: bounds checks for data.at(index0) appear as choreo_assert.
+// CHECK: choreo::choreo_assert({{.*}}element access 'data' should be >= 0
+// CHECK: choreo::choreo_assert({{.*}}element access 'data' should be < 1024

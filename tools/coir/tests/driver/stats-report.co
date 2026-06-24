@@ -1,8 +1,8 @@
 // RUN: cocc -t cute -es --stats -rtc=entry %s 2>&1 | FileCheck %s
 //
 // Test cocc --stats: verify assessment/assertion statistics are printed.
-// The scale function triggers at least sema-phase assessments and
-// CoIR-level assertions (shape checks on parallel element access).
+// The scale function triggers sema-phase assessments (element-access)
+// and CoIR-level runtime assertions (bounds checks on parallel element access).
 
 __co__ s32 [32] scale(s32 [32] x) {
   s32[x.span] y;
@@ -11,8 +11,11 @@ __co__ s32 [32] scale(s32 [32] x) {
   return y;
 }
 
+// Sema evaluates 3 element-access assessments, all resolved static-true.
+// CoIR generates bounds-check assertions for each element access.
 // CHECK: Assessment Statistics
-// CHECK: assess  - Assessments evaluated
+// CHECK: 3  assess  - Assessments evaluated
+// CHECK: 3  assess  - Resolved at compile time (static-true)
 // CHECK: assess  - Runtime assertions generated
 // CHECK: assess  - Runtime assertions enabled
 // CHECK: assess  - Runtime assertions disabled by cost filter
