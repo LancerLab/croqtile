@@ -1,0 +1,40 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Test: while loop in device code.
+
+__co__ auto test_while(s32 [16] input) {
+  s32 [input.span] output;
+
+  parallel p by 1 {
+    f = dma.copy.async input.chunkat(p) => local;
+    wait f;
+
+    local s32 [16] tmp;
+    foreach i in [16] {
+      mutable s32 sum = 0;
+      mutable s32 j = 0;
+      while (j <= i) {
+        sum = sum + f.data.at(j);
+        j = j + 1;
+      }
+      tmp.at(i) = sum;
+    }
+
+    dma.copy tmp => output.chunkat(p);
+  }
+
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(16);
+  for (int i = 0; i < 16; i++)
+    a.data()[i] = 1;
+  auto res = test_while(a.view());
+  for (int i = 0; i < 16; i++)
+    choreo::choreo_assert(res[i] == i + 1, "mismatch");
+  std::cout << "PASS: while_loop" << std::endl;
+}
+
+// CHECK: PASS: while_loop
