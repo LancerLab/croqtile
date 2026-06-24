@@ -1,0 +1,27 @@
+// RUN: co2ir %s -o - | FileCheck %s
+
+__co__ auto test_pad(s32 [2, 3] input) {
+  global s32 [4, 5] res;
+  parallel p by 1 {
+    dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> input => res;
+  }
+  return res;
+}
+
+// CHECK: coir.data.copy
+// CHECK-SAME: kind = #coir.dma_kind<pad>
+// CHECK-SAME: pad_high = array<i64: 1, 1>
+// CHECK-SAME: pad_low = array<i64: 1, 1>
+// CHECK-SAME: pad_value = 0 : i64
+
+__co__ auto test_transp(s32 [2, 4] input) {
+  global s32 [4, 2] res;
+  parallel p by 1 {
+    dma.transp<1, 0> input => res;
+  }
+  return res;
+}
+
+// CHECK: coir.data.copy
+// CHECK-SAME: kind = #coir.dma_kind<transpose>
+// CHECK-SAME: transpose_perm = array<i64: 1, 0>

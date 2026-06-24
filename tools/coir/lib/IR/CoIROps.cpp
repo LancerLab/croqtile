@@ -526,7 +526,10 @@ void DataCopyOp::print(OpAsmPrinter &printer) {
   printer << " " << getSource() << " to " << getDest();
   if (getAsync())
     printer << " async";
-  printer.printOptionalAttrDict((*this)->getAttrs(), {"async"});
+  llvm::SmallVector<llvm::StringRef> elidedAttrs = {"async"};
+  if (getKind() == coir::DMAKind::Copy)
+    elidedAttrs.push_back("kind");
+  printer.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
   printer << " : " << getSource().getType() << " -> " << getDest().getType();
   if (getToken())
     printer << ", " << getToken().getType();
@@ -563,7 +566,12 @@ ParseResult DmaCopyOp::parse(OpAsmParser &parser, OperationState &result) {
   return parseAsyncCopyOp(parser, result);
 }
 void DmaCopyOp::print(OpAsmPrinter &printer) {
-  printAsyncCopyOp(printer, *this, getSource(), getDest());
+  printer << " " << getSource() << " to " << getDest();
+  llvm::SmallVector<llvm::StringRef> elidedAttrs;
+  if (getKind() == coir::DMAKind::Copy)
+    elidedAttrs.push_back("kind");
+  printer.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
+  printer << " : " << getSource().getType() << " -> " << getDest().getType();
 }
 
 ParseResult TmaCopyOp::parse(OpAsmParser &parser, OperationState &result) {

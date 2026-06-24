@@ -76,6 +76,9 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
         (hasDMA && globalLocal) ||
         (hasDMA && sharedLocal);
 
+    if (op.getKind() != coir::DMAKind::Copy)
+      needsHwCopy = true;
+
     if (needsHwCopy && hasTMA) {
       auto newOp = rewriter.create<TmaCopyOp>(loc,
           coir::AsyncTokenType::get(rewriter.getContext()),
@@ -90,7 +93,10 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
     if (needsHwCopy) {
       auto newOp = rewriter.create<DmaCopyOp>(loc,
           coir::AsyncTokenType::get(rewriter.getContext()),
-          op.getSource(), op.getDest());
+          op.getSource(), op.getDest(),
+          op.getKindAttr(),
+          op.getPadLowAttr(), op.getPadHighAttr(),
+          op.getPadValueAttr(), op.getTransposePermAttr());
       if (op.getToken())
         rewriter.replaceOp(op, newOp.getToken());
       else

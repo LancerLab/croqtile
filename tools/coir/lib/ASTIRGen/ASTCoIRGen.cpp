@@ -1,6 +1,7 @@
 // ast_coir_gen.cpp -- AST-to-CoIR MLIR translation
 #include "ASTCoIRGen.hpp"
 #include "codegen_utils.hpp"
+#include "dmaconf.hpp"
 #include "symbexpr.hpp"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -1103,10 +1104,69 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   }
 
   bool isAsync = dma.IsAsync();
+
+  // Map DMA kind from AST operation string.
+  auto kind = coir::DMAKind::Copy;
+  if (dma.operation == ".pad") kind = coir::DMAKind::Pad;
+  else if (dma.operation == ".transp") kind = coir::DMAKind::Transpose;
+  auto kindAttr = coir::DMAKindAttr::get(&IRContext(), kind);
+
+  // Extract pad config.
+  mlir::DenseI64ArrayAttr padLowAttr, padHighAttr;
+  mlir::Attribute padValueAttr;
+  if (kind == coir::DMAKind::Pad && dma.config) {
+    if (dma.config->Name() == "pad") {
+      auto *pc = static_cast<PadConfig*>(dma.config.get());
+      auto extractIntList = [](const ptr<AST::MultiValues> &mv)
+          -> llvm::SmallVector<int64_t> {
+        llvm::SmallVector<int64_t> vals;
+        if (!mv) return vals;
+        for (auto &v : mv->AllValues()) {
+          AST::Node *n = v.get();
+          if (auto *expr = dyn_cast<AST::Expr>(n))
+            n = expr->GetR().get();
+          if (auto *lit = dyn_cast<AST::IntLiteral>(n))
+            vals.push_back(
+                std::visit([](auto x) -> int64_t { return x; }, lit->value));
+          else
+            vals.push_back(0);
+        }
+        return vals;
+      };
+      auto low = extractIntList(pc->pad_low);
+      auto high = extractIntList(pc->pad_high);
+      if (!low.empty())
+        padLowAttr = builder.getDenseI64ArrayAttr(low);
+      if (!high.empty())
+        padHighAttr = builder.getDenseI64ArrayAttr(high);
+      if (pc->value) {
+        auto *valNode = pc->value->GetR().get();
+        if (auto *intLit = dyn_cast<AST::IntLiteral>(valNode))
+          padValueAttr = builder.getI64IntegerAttr(
+              std::visit([](auto x) -> int64_t { return x; }, intLit->value));
+        else if (auto *fLit = dyn_cast<AST::FloatLiteral>(valNode))
+          padValueAttr = builder.getF64FloatAttr(
+              std::visit([](auto x) -> double { return x; }, fLit->value));
+      }
+    }
+  }
+
+  // Extract transpose permutation.
+  mlir::DenseI64ArrayAttr transpPermAttr;
+  if (kind == coir::DMAKind::Transpose && dma.config) {
+    if (dma.config->Name() == "transpose") {
+      auto *tc = static_cast<TransposeConfig*>(dma.config.get());
+      llvm::SmallVector<int64_t> perm(tc->dim_values.begin(),
+                                       tc->dim_values.end());
+      transpPermAttr = builder.getDenseI64ArrayAttr(perm);
+    }
+  }
+
   auto copyOp = builder.create<coir::DataCopyOp>(
       loc, isAsync ? mlir::TypeRange{coir::AsyncTokenType::get(&IRContext())}
                    : mlir::TypeRange{},
-      srcVal, dstVal, isAsync ? builder.getUnitAttr() : mlir::UnitAttr{});
+      srcVal, dstVal, isAsync ? builder.getUnitAttr() : mlir::UnitAttr{},
+      kindAttr, padLowAttr, padHighAttr, padValueAttr, transpPermAttr);
 
   if (!dma.future.empty()) {
     if (isAsync && copyOp.getToken()) {
