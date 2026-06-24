@@ -1,7 +1,10 @@
 //===- Pipeline.cpp - CoIR Pipeline class implementation ------------------===//
 //
-// Implements CoIR::Pipeline (EmitCoIR, Optimize, Lower, EmitSource) and
-// the module-level target attribute helpers.
+// Implements CoIR::Pipeline (EmitCoIR, Optimize, Lower, EmitSource,
+// CompileBinary) and the module-level target attribute helpers.
+//
+// The pipeline has shared phases (Optimize, Lower) that run for every
+// target, followed by target-specific codegen delegated to CodeGen backends.
 //
 //===----------------------------------------------------------------------===//
 
@@ -75,7 +78,6 @@ bool Pipeline::Optimize() {
 
 bool Pipeline::Lower() {
   mlir::PassManager pm(&ctx_);
-  // Apply -mcoir pass-manager options (IR printing, timing, etc.).
   if (mlir::failed(mlir::applyPassManagerCLOptions(pm)))
     return false;
   pm.addPass(coir::createClassifyCopiesPass());
@@ -87,7 +89,20 @@ bool Pipeline::Lower() {
 }
 
 int Pipeline::EmitSource(llvm::StringRef target, bool script,
-                         llvm::StringRef output_path) {
+                         llvm::StringRef output_path,
+                         llvm::StringRef arch) {
+  auto codegen = CodeGenRegistry::Create(target.str());
+  if (!codegen) {
+    llvm::errs() << "error: no code generator registered for target '"
+                 << target << "'\n";
+    return 1;
+  }
+
+  if (!codegen->Lower(module_)) {
+    llvm::errs() << "error: target '" << target << "' lowering failed\n";
+    return 1;
+  }
+
   llvm::raw_ostream *os = &llvm::outs();
   std::unique_ptr<llvm::raw_fd_ostream> file_os;
 
@@ -102,18 +117,26 @@ int Pipeline::EmitSource(llvm::StringRef target, bool script,
     os = file_os.get();
   }
 
-  auto emitter = EmitterRegistry::Create(target.str());
-  if (!emitter) {
-    llvm::errs() << "error: no emitter registered for target '" << target
-                 << "'\n";
+  if (script)
+    return codegen->EmitScript(module_, arch, *os);
+  return codegen->EmitSource(module_, arch, *os);
+}
+
+int Pipeline::CompileBinary(llvm::StringRef target, llvm::StringRef output_path,
+                            llvm::StringRef arch) {
+  auto codegen = CodeGenRegistry::Create(target.str());
+  if (!codegen) {
+    llvm::errs() << "error: no code generator for target '" << target
+                 << "' (binary mode requires a CodeGen backend)\n";
     return 1;
   }
 
-  if (script)
-    emitter->EmitScript(module_, *os);
-  else
-    emitter->EmitSource(module_, *os);
-  return 0;
+  if (!codegen->Lower(module_)) {
+    llvm::errs() << "error: target '" << target << "' lowering failed\n";
+    return 1;
+  }
+
+  return codegen->Compile(module_, arch, output_path);
 }
 
 } // namespace CoIR

@@ -1,7 +1,7 @@
 //===- CoCC.cpp - CoIR Compiler Driver ------------------------------------===//
 //
 // End-to-end compiler driver for Choreo via CoIR path:
-//   .co -> parse -> sema -> CoIR MLIR -> opt -> lower -> emit
+//   .co -> parse -> sema -> CoIR MLIR -> opt -> lower -> target codegen
 //
 //===----------------------------------------------------------------------===//
 
@@ -49,11 +49,14 @@ static Option<bool> emit_coir(OptionKind::User, "-emit-coir", "", false,
                               "Emit CoIR MLIR (like clang -emit-llvm).");
 static Option<bool> no_opt(OptionKind::User, "--no-opt", "", false,
                            "Skip CoIR optimization passes.");
+static Option<bool> compile_binary(OptionKind::User, "--compile-binary", "-cb",
+                                   false,
+                                   "Compile to executable binary.");
 
 namespace {
 
 bool ShouldEmitSource() { return emit_source || generate_script; }
-bool ShouldGenerateBinary() { return false; /* TODO */ }
+bool ShouldGenerateBinary() { return compile_binary; }
 bool ShouldGenerateAssembly() { return false; /* TODO */ }
 
 void SetupScriptContext() {
@@ -76,6 +79,13 @@ void SetupScriptContext() {
     sctx.arch_override = arch_str;
   else
     sctx.arch_override.clear();
+
+  // CUDA home for in-memory compilation.
+  const char *env = std::getenv("CUDA_HOME");
+  if (env)
+    sctx.cuda_home = env;
+  else
+    sctx.cuda_home = "/usr/local/cuda";
 }
 
 /// Extract -mcoir / -mcoir= tokens from argv and forward them to the
@@ -138,7 +148,8 @@ int main(int argc, char *argv[]) {
   auto &reg = OptionRegistry::GetInstance();
   std::string input_file = reg.GetInputFileName();
 
-  if (!emit_source && !generate_script && !emit_coir && !dump_ast)
+  if (!emit_source && !generate_script && !emit_coir && !dump_ast &&
+      !compile_binary)
     generate_script = true;
 
   // --- Frontend ---
@@ -194,22 +205,27 @@ int main(int argc, char *argv[]) {
                               target.HasDMA(arch));
   }
 
-  // --- Lowering ---
+  // --- Shared lowering (DMA/MMA classification, hoisting) ---
   if (!pipeline.Lower()) {
     errs() << "cocc: lowering failed\n";
     return 1;
   }
 
-  // --- Output dispatch ---
+  // --- Target-specific codegen ---
   int result = 0;
   if (ShouldEmitSource()) {
     bool is_script = generate_script;
     if (is_script) SetupScriptContext();
     std::string out_path =
         output.WasExplicitlySet() ? output.GetValue() : "";
-    result = pipeline.EmitSource(CCtx().TargetName(), is_script, out_path);
+    std::string arch = CCtx().GetArch();
+    result = pipeline.EmitSource(CCtx().TargetName(), is_script, out_path, arch);
   } else if (ShouldGenerateBinary()) {
-    choreo_unreachable("binary generation not yet implemented");
+    SetupScriptContext();
+    std::string out_path =
+        output.WasExplicitlySet() ? output.GetValue() : "a.out";
+    std::string arch = CCtx().GetArch();
+    result = pipeline.CompileBinary(CCtx().TargetName(), out_path, arch);
   } else if (ShouldGenerateAssembly()) {
     choreo_unreachable("assembly generation not yet implemented");
   } else {

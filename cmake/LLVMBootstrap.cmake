@@ -104,6 +104,12 @@ set(LLVM_DIR "${_LLVM_CMAKE_DIR}/llvm" CACHE PATH "LLVM CMake directory")
 find_package(MLIR REQUIRED CONFIG)
 find_package(LLVM REQUIRED CONFIG)
 
+set(Clang_DIR "${_LLVM_CMAKE_DIR}/clang" CACHE PATH "Clang CMake directory")
+find_package(Clang CONFIG)
+if(Clang_FOUND)
+  message(STATUS "CoIR: Found Clang at ${Clang_DIR}")
+endif()
+
 message(STATUS "CoIR: Found LLVM ${LLVM_PACKAGE_VERSION} at ${LLVM_DIR}")
 message(STATUS "CoIR: Found MLIR at ${MLIR_DIR}")
 

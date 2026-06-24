@@ -1376,9 +1376,17 @@ void emitScriptFooter(llvm::raw_ostream &os) {
   os << "fi\n";
 }
 
-class CUDATargetEmitter : public CoIR::Emitter {
+class CUDATargetCodeGen : public CoIR::CodeGen {
 public:
-  void EmitScript(mlir::ModuleOp module, llvm::raw_ostream &os) override {
+  int EmitSource(mlir::ModuleOp module, llvm::StringRef /*arch*/,
+                 llvm::raw_ostream &os) override {
+    coir::emitCUDA(module, os);
+    emitHostCode(module, os);
+    return 0;
+  }
+
+  int EmitScript(mlir::ModuleOp module, llvm::StringRef /*arch*/,
+                 llvm::raw_ostream &os) override {
     emitScriptHeader(os);
     os << "TMPFILE=\"$TMPDIR/kernel.cu\"\n";
     os << "BINFILE=\"$TMPDIR/kernel\"\n\n";
@@ -1386,17 +1394,13 @@ public:
     coir::emitCUDA(module, os);
     emitHostCode(module, os);
     emitScriptFooter(os);
-  }
-
-  void EmitSource(mlir::ModuleOp module, llvm::raw_ostream &os) override {
-    coir::emitCUDA(module, os);
-    emitHostCode(module, os);
+    return 0;
   }
 };
 
 static bool registered_gpu = [] {
-  CoIR::EmitterRegistry::Register("cute", [] {
-    return std::make_unique<CUDATargetEmitter>();
+  CoIR::CodeGenRegistry::Register("cute", [] {
+    return std::make_unique<CUDATargetCodeGen>();
   });
   return true;
 }();

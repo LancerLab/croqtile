@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GPU
 // RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t gpu -es %s | FileCheck --check-prefix=PTX %s
 //
 // Large parallel dimensions with multi-level parallelism.
 
@@ -26,3 +27,4 @@ int main() {
 }
 
 // CHECK: PASS: large_parallel
+// PTX: .visible .entry large_add_kernel

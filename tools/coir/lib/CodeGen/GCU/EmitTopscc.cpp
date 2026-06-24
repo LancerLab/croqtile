@@ -1821,9 +1821,17 @@ void emitHostCode(llvm::raw_ostream &os, ModuleOp module) {
   os << "\n" << hostCodeAttr.getValue() << "\n";
 }
 
-class TopsccTargetEmitter : public CoIR::Emitter {
+class TopsccTargetCodeGen : public CoIR::CodeGen {
 public:
-  void EmitScript(mlir::ModuleOp module, llvm::raw_ostream &os) override {
+  int EmitSource(mlir::ModuleOp module, llvm::StringRef /*arch*/,
+                 llvm::raw_ostream &os) override {
+    coir::emitTopscc(module, os);
+    emitHostCode(os, module);
+    return 0;
+  }
+
+  int EmitScript(mlir::ModuleOp module, llvm::StringRef /*arch*/,
+                 llvm::raw_ostream &os) override {
     auto &sctx = CoIR::ScriptContext::Get();
 
     os << "#!/usr/bin/env bash\n";
@@ -1867,20 +1875,16 @@ public:
     os << "  shift\n";
     os << "  \"$BINFILE\" \"$@\"\n";
     os << "fi\n";
-  }
-
-  void EmitSource(mlir::ModuleOp module, llvm::raw_ostream &os) override {
-    coir::emitTopscc(module, os);
-    emitHostCode(os, module);
+    return 0;
   }
 };
 
 static bool registered_topscc = [] {
-  CoIR::EmitterRegistry::Register("topscc", [] {
-    return std::make_unique<TopsccTargetEmitter>();
+  CoIR::CodeGenRegistry::Register("topscc", [] {
+    return std::make_unique<TopsccTargetCodeGen>();
   });
-  CoIR::EmitterRegistry::Register("gcu", [] {
-    return std::make_unique<TopsccTargetEmitter>();
+  CoIR::CodeGenRegistry::Register("gcu", [] {
+    return std::make_unique<TopsccTargetCodeGen>();
   });
   return true;
 }();

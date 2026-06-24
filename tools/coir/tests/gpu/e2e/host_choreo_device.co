@@ -1,0 +1,51 @@
+// REQUIRES: TARGET-GPU
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t gpu -es %s | FileCheck --check-prefix=PTX %s
+// RUN: cocc -t gpu -gs %s -o %s.gpu.sh && bash %s.gpu.sh --execute | FileCheck --check-prefix=GPU --match-full-lines %s && rm -f %s.gpu.sh
+//
+// End-to-end test: host C++ -> __co__ kernel -> host verification.
+// Verifies the full compilation pipeline including host code, choreo
+// kernel, and the generated host entry stubs with auto-memory-shadowing.
+
+// Host helper function (runs on CPU).
+int compute_expected(int a, int b) { return a * 2 + b; }
+
+// Choreo kernel function (runs on GPU via generated PTX).
+__co__ s32[128] fused_op(s32[128] x, s32[128] y) {
+  s32[x.span] out;
+  parallel i by 128
+    out.at(i) = x.at(i) * 2 + y.at(i);
+  return out;
+}
+
+// Host main -- orchestrates the full pipeline.
+int main() {
+  auto x = choreo::make_spandata<choreo::s32>(128);
+  auto y = choreo::make_spandata<choreo::s32>(128);
+  for (size_t i = 0; i < 128; ++i) {
+    x[i] = static_cast<int>(i);
+    y[i] = static_cast<int>(i * 3);
+  }
+
+  // Call the __co__ function -- this invokes the GPU kernel.
+  auto result = fused_op(x.view(), y.view());
+
+  // Verify on host using the C++ helper.
+  bool pass = true;
+  for (size_t i = 0; i < 128; ++i) {
+    int expected = compute_expected(x[i], y[i]);
+    if (result[i] != expected) {
+      std::cerr << "FAIL at " << i << ": got " << result[i]
+                << " expected " << expected << std::endl;
+      pass = false;
+    }
+  }
+
+  if (pass)
+    std::cout << "PASS: host_choreo_device" << std::endl;
+  return pass ? 0 : 1;
+}
+
+// CHECK: PASS: host_choreo_device
+// GPU: PASS: host_choreo_device
+// PTX: .visible .entry fused_op_kernel
