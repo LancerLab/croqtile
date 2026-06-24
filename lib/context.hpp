@@ -241,12 +241,21 @@ private:
       std::vector<std::string> offset_args;
       // var of spm size
       std::string spm_size;
+
+      // Parametric plan: compile-time interference graph
+      size_t n_buffers = 0;
+      // Buffer size expressions (C++ code strings), in declaration order
+      std::vector<std::string> size_exprs;
+      // Buffer IDs in declaration order (unscoped, matches offset_args order)
+      std::vector<std::string> buffer_ids;
+      // Flattened NxN interference matrix (row-major)
+      std::vector<bool> interference;
+      size_t alignment = 0;
     };
     std::map<Storage, InfoEntry> infos;
   };
   struct StaticMemReuseInfo {
     struct InfoEntry {
-      // the actual size of spm
       size_t spm_size;
     };
     std::map<Storage, InfoEntry> infos;
@@ -484,6 +493,7 @@ private:
   // compiler configurations
   bool debug_symtab = false;
   bool dump_ast = false;            // dump the AST after parsing
+  bool dump_hb = false;             // dump HB graph in DOT format
   bool no_codegen = false;          // stop before code generation
   bool print_pass_names = false;    // print pass name before pass run
   bool time_passes = false;         // measure time per compiler pass
@@ -500,6 +510,7 @@ private:
   bool show_source_loc = true;    // show source code location when error, etc.
   bool liveness = false;          // analyze the liveness of the program
   bool mem_reuse = false;         // reuse the memory of the program
+  bool sala = true;               // signal-aware liveness analysis
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate source-level debug information
@@ -726,6 +737,7 @@ public:
 public:
   // Getters of compiler configurations
   bool DumpAst() const { return dump_ast; }
+  bool DumpHB() const { return dump_hb; }
   bool NoCodegen() const { return no_codegen; }
   bool PrintPassNames() const { return print_pass_names; }
   bool TimePasses() const { return time_passes; }
@@ -741,6 +753,7 @@ public:
   bool TraceVectorize() const { return trace_vectorize; }
   bool LivenessAnalysis() const { return liveness; }
   bool MemReuse() const { return mem_reuse; }
+  bool SALA() const { return sala; }
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
@@ -784,6 +797,7 @@ public:
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
+  void SetDumpHB(bool value) { dump_hb = value; }
   void SetNoCodegen(bool value) { no_codegen = value; }
   void SetPrintPassNames(bool value) { print_pass_names = value; }
   void SetTimePasses(bool value) { time_passes = value; }
@@ -799,6 +813,7 @@ public:
   void SetTraceVectorize(bool value) { trace_vectorize = value; }
   void SetLivenessAnalysis(bool value) { liveness = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
+  void SetSALA(bool value) { sala = value; }
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }

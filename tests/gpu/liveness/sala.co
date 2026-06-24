@@ -1,0 +1,1236 @@
+// RUN: choreo -dv=liveness -sa=liveness -t cute -arch=sm_90a --dump-hb %s 2>&1 | FileCheck --check-prefix=LIVE %s
+// RUN: choreo -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck %s
+// REQUIRES: TARGET-GPU
+//
+// SALA (Signal-Aware Liveness Analysis) -- HB Analysis Test Cases
+// Two-layer verification:
+//   LIVE  - buffer liveness ranges + HB graph structure
+//   CHECK - final mem-reuse codegen result (SPM allocation sizes)
+
+// ------------------------------------------------------------
+// POSITIVE: Basic signal-ordered overlap (buffer inside inthreads)
+// Expected: x and y overlap (same offset)
+// ------------------------------------------------------------
+__co__ void pos_basic_inside() {
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        shared f16 [16] x;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        shared f16 [16] y;
+        call kernel(y);
+        trigger signal;
+      }
+
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_basic_inside
+// LIVE: Phase 1 [WG0 async]
+// LIVE-SAME: in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async]
+// LIVE-SAME: out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_basic_inside
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// POSITIVE: Buffers declared at block level, used across WGs
+// Expected: x and y overlap
+// ------------------------------------------------------------
+__co__ void pos_basic_outside() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(y);
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_basic_outside
+// LIVE: Phase 1 [WG0 async]
+// LIVE-SAME: in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async]
+// LIVE-SAME: out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_basic_outside
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// POSITIVE: Buffers declared at group level
+// Expected: x and y overlap
+// ------------------------------------------------------------
+__co__ void pos_basic_group() {
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event signal;
+      shared f16 [16] x;
+      inthreads.async (q == 0) {
+        wait signal;
+        call kernel(x);
+      }
+      
+      shared f16 [16] y;
+      inthreads.async (q == 1) {
+        call kernel(y);
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_basic_group
+// LIVE: Phase 1 [WG0 async]
+// LIVE-SAME: in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async]
+// LIVE-SAME: out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_basic_group
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// POSITIVE: Three buffers, two signal boundaries
+// WG1: use(a), trigger s1, use(b), trigger s2
+// WG0: wait s1, use(c), wait s2, ...
+// Expected: a and c overlap (s1 orders them)
+//           b and c may or may not overlap depending on phase ordering
+// ------------------------------------------------------------
+__co__ void pos_three_bufs_chain() {
+  parallel p by 1 : block {
+    shared f16 [16] a;
+    shared f16 [16] b;
+    shared f16 [16] c;
+    parallel q by 2 : group-4 {
+      shared event sig1;
+      shared event sig2;
+      inthreads.async (q == 0) {
+        wait sig1;
+        call kernel(c);
+        wait sig2;
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(a);
+        trigger sig1;
+        call kernel(b);
+        trigger sig2;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_three_bufs_chain
+// LIVE: HB Graph (6 phases):
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}sig1 bufs={{{.*}}c}
+// LIVE: Phase 3 [WG1 async{{.*}}out={{.*}}sig1 bufs={{{.*}}a}
+// LIVE: Phase 4 [WG1 async{{.*}}out={{.*}}sig2 bufs={{{.*}}b}
+// LIVE: 3 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_three_bufs_chain
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: a = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: b = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: c = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// POSITIVE: Reverse direction - WG0 triggers, WG1 waits
+// Expected: x and y overlap
+// ------------------------------------------------------------
+__co__ void pos_reverse_direction() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        call kernel(x);
+        trigger signal;
+      }
+
+      inthreads.async (q == 1) {
+        wait signal;
+        call kernel(y);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_reverse_direction
+// LIVE: Phase 0 [WG0 async{{.*}}out={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 3 [WG1 async{{.*}}in={{.*}}signal bufs={{{.*}}y}
+// LIVE: 0 -->hb 3
+// CHECK-LABEL: __choreo_device_pos_reverse_direction
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// NEGATIVE: Both buffers accessed in same WG, same phase
+// Expected: x and y do NOT overlap (co-live in same phase)
+// ------------------------------------------------------------
+__co__ void neg_same_phase() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        call kernel(x);
+        call kernel(y);
+        trigger signal;
+      }
+
+      inthreads.async (q == 1) {
+        wait signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_same_phase
+// LIVE: Phase 0 [WG0 async{{.*}}bufs={{{.*}}x,{{.*}}y}
+// CHECK-LABEL: __choreo_device_neg_same_phase
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// NEGATIVE: No signal at all - concurrent access
+// Expected: x and y do NOT overlap (no HB ordering between WGs)
+// ------------------------------------------------------------
+__co__ void neg_no_signal() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      inthreads.async (q == 0) {
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(y);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_no_signal
+// LIVE: HB Graph (2 phases):
+// LIVE: Phase 0 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 1 [WG1 async{{.*}}bufs={{{.*}}y}
+// LIVE-NEXT: Reachability:
+// LIVE-NOT: -->hb
+// LIVE: digraph
+// CHECK-LABEL: __choreo_device_neg_no_signal
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// NEGATIVE: Cyclic signals (like FA K/V back-edge)
+// WG0 (producer): wait empty, use(x), trigger full, wait empty, use(y), trigger full
+// WG1 (consumer): trigger empty (init), wait full, use(x), trigger empty, wait full, use(y), trigger empty
+// The back-edge (trigger empty -> wait empty) creates a cycle.
+// x and y accessed in both WGs with complementary full/empty signals.
+// Expected: x and y do NOT overlap (acyclic constraint rejects back-edges)
+// ------------------------------------------------------------
+__co__ void neg_cyclic_back_edge() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event x_full;
+      shared event x_empty;
+      shared event y_full;
+      shared event y_empty;
+      inthreads.async (q == 0) {
+        wait x_empty;
+        call write_x(x);
+        trigger x_full;
+        wait y_empty;
+        call write_y(y);
+        trigger y_full;
+      }
+
+      inthreads.async (q == 1) {
+        trigger x_empty;
+        trigger y_empty;
+        wait x_full;
+        call read_x(x);
+        trigger x_empty;
+        wait y_full;
+        call read_y(y);
+        trigger y_empty;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_cyclic_back_edge
+// LIVE: HB Graph (12 phases):
+// LIVE: Phase 1 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 3 [WG0 async{{.*}}bufs={{{.*}}y}
+// LIVE: Phase 8 [WG1 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 10 [WG1 async{{.*}}bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_neg_cyclic_back_edge
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// POSITIVE: Same buffer in different phases of same WG (within-WG ordering)
+// and different buffers in different WGs with signal ordering.
+// WG0: use(a), trigger s, use(b)
+// WG1: wait s, use(c)
+// Expected: a and c overlap (a before trigger, c after wait)
+//           a and b do NOT overlap (a and b both in WG0 same phase? 
+//           Actually a and b are in different phases separated by trigger s)
+//           b and c: b is after trigger s in WG0, c is after wait s in WG1.
+//           b and c are concurrent (no ordering between post-trigger and post-wait in same signal)
+// ------------------------------------------------------------
+__co__ void pos_mixed_ordering() {
+  parallel p by 1 : block {
+    shared f16 [16] a;
+    shared f16 [16] b;
+    shared f16 [16] c;
+    parallel q by 2 : group-4 {
+      shared event sig;
+      inthreads.async (q == 0) {
+        call kernel(a);
+        trigger sig;
+        call kernel(b);
+      }
+
+      inthreads.async (q == 1) {
+        wait sig;
+        call kernel(c);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_mixed_ordering
+// LIVE: Phase 0 [WG0 async{{.*}}out={{.*}}sig bufs={{{.*}}a}
+// LIVE: Phase 1 [WG0 async{{.*}}bufs={{{.*}}b}
+// LIVE: Phase 3 [WG1 async{{.*}}in={{.*}}sig bufs={{{.*}}c}
+// LIVE: 0 -->hb 3
+// CHECK-LABEL: __choreo_device_pos_mixed_ordering
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: a = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: b = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: c = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// POSITIVE: Different-sized buffers overlap
+// Expected: x(128B) and y(64B) overlap at same offset
+// SMEM = max(128,64) = 128 instead of 192
+// ------------------------------------------------------------
+__co__ void pos_different_sizes() {
+  parallel p by 1 : block {
+    shared f16 [64] x;
+    shared f16 [32] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(y);
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_different_sizes
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_different_sizes
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+__co__ void f0() {
+  parallel p by 1 : block {
+    shared f16 [32] x;
+    shared f16 [32] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(y);
+        trigger signal;
+      }
+      call kernel(y);
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::f0
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_f0
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+__co__ void f1() {
+  parallel p by 1 : block {
+    shared f16 [32] x;
+    shared f16 [32] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(y);
+        trigger signal;
+      }
+      sync.shared;
+      call kernel(y);
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::f1
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_f1
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+__co__ void f2() {
+  parallel p by 1 : block {
+    shared f16 [32] x;
+    shared f16 [32] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        x.at(0) = 1.0f;
+      }
+
+      inthreads.async (q == 1) {
+        y.at(0) = 1.0f;
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::f2
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_f2
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// POSITIVE: RHS data access (xx = x.at(0)) inside inthreads
+// Expected: x and y overlap
+// (Tests AddUse hook via NVD -> GetAllSymbolicOperands -> DataAccess)
+// ------------------------------------------------------------
+__co__ void f3() {
+  parallel p by 1 : block {
+    shared f16 [32] x;
+    shared f16 [32] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        xx = x.at(0);
+      }
+
+      inthreads.async (q == 1) {
+        yy = y.at(0);
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::f3
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_f3
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// NEGATIVE: x used at group level BEFORE inthreads
+// Expected: x and y do NOT overlap
+// (x is globally live because call kernel(x) is before inthreads)
+// ------------------------------------------------------------
+__co__ void neg_pre_inthreads() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      call kernel(x);
+      inthreads.async (q == 0) {
+        wait signal;
+      }
+      inthreads.async (q == 1) {
+        call kernel(y);
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_pre_inthreads
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_neg_pre_inthreads
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// NEGATIVE: one buffer inside, one buffer at group level via .at()
+// Expected: x and y do NOT overlap
+// (y.at(0) = 1.0f at group level makes y globally live)
+// ------------------------------------------------------------
+__co__ void neg_group_level_at() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        call kernel(x);
+      }
+      inthreads.async (q == 1) {
+        trigger signal;
+      }
+      y.at(0) = 1.0f;
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_group_level_at
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={}
+// CHECK-LABEL: __choreo_device_neg_group_level_at
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// POSITIVE: foreach inside inthreads with signal ordering
+// Expected: x and y overlap
+// (Signal ordering holds across loop iterations)
+// ------------------------------------------------------------
+__co__ void pos_foreach_inside() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        foreach {i} in [4] {
+          call kernel(x);
+        }
+      }
+
+      inthreads.async (q == 1) {
+        foreach {j} in [4] {
+          call kernel(y);
+        }
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_foreach_inside
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_foreach_inside
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// NEGATIVE: foreach at group level (outside inthreads) uses buffer
+// Expected: x and y do NOT overlap
+// (x accessed in group-level foreach -> globally live)
+// ------------------------------------------------------------
+__co__ void neg_foreach_group() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+      }
+      inthreads.async (q == 1) {
+        call kernel(y);
+        trigger signal;
+      }
+      foreach {k} in [4] {
+        call kernel(x);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_foreach_group
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_neg_foreach_group
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// POSITIVE: one buffer per inthreads, foreach only on loop index
+// Expected: x and y overlap
+// (foreach inside inthreads doesn't change the HB ordering)
+// ------------------------------------------------------------
+__co__ void pos_foreach_and_at() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        foreach {i} in [4] {
+          xx = x.at(i);
+        }
+      }
+
+      inthreads.async (q == 1) {
+        foreach {j} in [4] {
+          y.at(j) = 1.0f;
+        }
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_foreach_and_at
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_foreach_and_at
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// NEGATIVE: Pipeline with bidirectional signals (cyclic)
+// WG0: trigger empty; foreach { wait sig; use(x); trigger empty; }
+// WG1: foreach { wait empty; use(y); trigger sig; }
+// Expected: x and y do NOT overlap
+// (sig + empty form a cycle -> acyclic constraint rejects back-edge)
+// Same behavior as FA K/V pipeline - conservative but correct.
+// ------------------------------------------------------------
+__co__ void neg_pipeline_cyclic() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event sig;
+      shared event empty;
+      inthreads.async (q == 0) {
+        trigger empty;
+        foreach {i} in [4] {
+          wait sig;
+          call kernel(x);
+          trigger empty;
+        }
+      }
+
+      inthreads.async (q == 1) {
+        foreach {j} in [4] {
+          wait empty;
+          call kernel(y);
+          trigger sig;
+        }
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_pipeline_cyclic
+// LIVE: HB Graph (7 phases):
+// LIVE: Phase 2 [WG0 async{{.*}}in={{.*}}sig{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 5 [WG1 async{{.*}}in={{.*}}empty{{.*}}bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_neg_pipeline_cyclic
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// NEGATIVE: Same buffer accessed in BOTH inthreads groups
+// Expected: x and y do NOT overlap (x co-live in both WGs)
+// (x is in same phase in WG0 AND WG1 -> not overlappable with y)
+// ------------------------------------------------------------
+__co__ void neg_shared_across_wgs() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(x);
+        call kernel(y);
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_shared_across_wgs
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}x,{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_neg_shared_across_wgs
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// POSITIVE: Three WG scenario (3 warp groups)
+// WG0: wait s1; use(a)
+// WG1: use(b); trigger s1; trigger s2
+// WG2: wait s2; use(c)
+// Expected: (a,b) overlap and (b,c) overlap
+// (b->s1->a and b->s2->c)
+// NOTE: Need parallel q by 3 : group-4
+// ------------------------------------------------------------
+__co__ void pos_three_wgs() {
+  parallel p by 1 : block {
+    shared f16 [16] a;
+    shared f16 [16] b;
+    shared f16 [16] c;
+    parallel q by 3 : group-4 {
+      shared event evt1;
+      shared event evt2;
+      inthreads.async (q == 0) {
+        wait evt1;
+        call kernel(a);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(b);
+        trigger evt1;
+        trigger evt2;
+      }
+
+      inthreads.async (q == 2) {
+        wait evt2;
+        call kernel(c);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_three_wgs
+// LIVE: HB Graph (7 phases):
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}evt1 bufs={{{.*}}a}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}evt1 bufs={{{.*}}b}
+// LIVE: Phase 6 [WG2 async{{.*}}in={{.*}}evt2 bufs={{{.*}}c}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_three_wgs
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: a = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: b = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: c = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// POSITIVE: Signal from WG0 to WG1, then WG1 to WG0
+// WG0: use(a); trigger evt1; wait evt2; use(c)
+// WG1: wait evt1; use(b); trigger evt2
+// Expected: (a,b) overlap, (b,c) overlap, (a,c) NOT overlap (same WG)
+// a and c are in same WG0 with sequential ordering,
+// but they're in different phases separated by signals
+// ------------------------------------------------------------
+__co__ void pos_ping_pong() {
+  parallel p by 1 : block {
+    shared f16 [16] a;
+    shared f16 [16] b;
+    shared f16 [16] c;
+    parallel q by 2 : group-4 {
+      shared event evt1;
+      shared event evt2;
+      inthreads.async (q == 0) {
+        call kernel(a);
+        trigger evt1;
+        wait evt2;
+        call kernel(c);
+      }
+
+      inthreads.async (q == 1) {
+        wait evt1;
+        call kernel(b);
+        trigger evt2;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_ping_pong
+// LIVE: HB Graph (6 phases):
+// LIVE: Phase 0 [WG0 async{{.*}}out={{.*}}evt1 bufs={{{.*}}a}
+// LIVE: Phase 2 [WG0 async{{.*}}in={{.*}}evt2 bufs={{{.*}}c}
+// LIVE: Phase 4 [WG1 async{{.*}}in={{.*}}evt1{{.*}}out={{.*}}evt2 bufs={{{.*}}b}
+// LIVE: 0 -->hb 4
+// LIVE: 4 -->hb 2
+// CHECK-LABEL: __choreo_device_pos_ping_pong
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: a = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: b = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: c = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ============================================================
+// Multi-consumer CTA barrier tests
+// ============================================================
+
+// ------------------------------------------------------------
+// NEGATIVE: Multi-consumer, epilogue inside async block, no barrier.
+// 3 consumers (q > 0) share one async block.  Different physical
+// instances can be at different phases simultaneously, so
+// pipeline buffers (x) and epilogue buffer (y) may race.
+// Expected: x and y do NOT overlap
+// ------------------------------------------------------------
+__co__ void neg_multi_consumer_no_barrier() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 4 : group-4 {
+      shared event full;
+      shared event empty;
+      inthreads.async (q == 0) {
+        wait empty;
+        call kernel(x);
+        trigger full;
+      }
+
+      inthreads.async (q > 0) {
+        trigger empty;
+        wait full;
+        call kernel(x);
+        trigger empty;
+        call kernel(y);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_multi_consumer_no_barrier
+// LIVE: Phase 1 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 5 [WG1 multi async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 6 [WG1 multi async{{.*}}bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_neg_multi_consumer_no_barrier
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+// ------------------------------------------------------------
+// POSITIVE: Multi-consumer with CTA barrier before epilogue.
+// Same structure as above, but epilogue is in a separate sync
+// inthreads block after sync.shared.  The CTA barrier ensures
+// all consumer instances finish the pipeline before any starts
+// the epilogue.
+// Expected: x and y overlap
+// ------------------------------------------------------------
+__co__ void pos_multi_consumer_with_barrier() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 4 : group-4 {
+      shared event full;
+      shared event empty;
+      inthreads.async (q == 0) {
+        wait empty;
+        call kernel(x);
+        trigger full;
+      }
+
+      inthreads.async (q > 0) {
+        trigger empty;
+        wait full;
+        call kernel(x);
+        trigger empty;
+      }
+
+      sync.shared;
+
+      inthreads (q > 0) {
+        call kernel(y);
+      }
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_multi_consumer_with_barrier
+// LIVE: Phase 1 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 5 [WG1 multi async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 7 [WG1 multi cta-bar{{.*}}bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_pos_multi_consumer_with_barrier
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// POSITIVE: Single consumer (q == 1), epilogue inside async.
+// Only one physical instance exists, so within-instance
+// sequential ordering suffices - no CTA barrier needed.
+// Expected: x and y overlap
+// ------------------------------------------------------------
+__co__ void pos_single_consumer_no_barrier() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event full;
+      shared event empty;
+      inthreads.async (q == 0) {
+        wait empty;
+        call kernel(x);
+        trigger full;
+      }
+
+      inthreads.async (q == 1) {
+        trigger empty;
+        wait full;
+        call kernel(x);
+        trigger empty;
+        call kernel(y);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_single_consumer_no_barrier
+// LIVE: Phase 1 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 5 [WG1 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 6 [WG1 async{{.*}}bufs={{{.*}}y}
+// LIVE: 5 -->hb 6
+// CHECK-LABEL: __choreo_device_pos_single_consumer_no_barrier
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// NEGATIVE: Multi-consumer, inner-scope output buffer (like v4).
+// output_s is declared INSIDE the inthreads.async (q > 0) block.
+// Standard liveness says non-interfering, but multi-instance
+// concurrency makes the overlap unsafe without a CTA barrier.
+// Expected: x and y do NOT overlap
+// ------------------------------------------------------------
+__co__ void neg_inner_scope_multi_consumer() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    parallel q by 3 : group-4 {
+      shared event full;
+      shared event empty;
+      inthreads.async (q == 0) {
+        wait empty;
+        call kernel(x);
+        trigger full;
+      }
+
+      inthreads.async (q > 0) {
+        trigger empty;
+        wait full;
+        call kernel(x);
+        trigger empty;
+        shared f16 [16] y;
+        call kernel(y);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_inner_scope_multi_consumer
+// LIVE: Phase 1 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 5 [WG1 multi async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 6 [WG1 multi async{{.*}}bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_neg_inner_scope_multi_consumer
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 128)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// POSITIVE: Multi-consumer, inner-scope output, WITH CTA barrier.
+// Same as above but with sync.shared between K-loop and epilogue.
+// Expected: x and y overlap
+// ------------------------------------------------------------
+__co__ void pos_inner_scope_multi_consumer_with_barrier() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    parallel q by 3 : group-4 {
+      shared event full;
+      shared event empty;
+      inthreads.async (q == 0) {
+        wait empty;
+        call kernel(x);
+        trigger full;
+      }
+
+      inthreads.async (q > 0) {
+        trigger empty;
+        wait full;
+        call kernel(x);
+        trigger empty;
+      }
+      sync.shared;
+      inthreads (q > 0) {
+        shared f16 [16] y;
+        call kernel(y);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_inner_scope_multi_consumer_with_barrier
+// LIVE: Phase 1 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 5 [WG1 multi async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 7 [WG1 multi cta-bar{{.*}}bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_pos_inner_scope_multi_consumer_with_barrier
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+// ------------------------------------------------------------
+// POSITIVE: Multiple signals creating a chain: c -> sig1 -> a -> b, d -> sig2 -> b
+// WG0: wait sig1, use a, wait sig2, use b
+// WG1: use c, trigger sig1, use d, trigger sig2
+// Signal chain: Phase3(c) ->hb Phase1(a) ->hb Phase2(b), Phase4(d) ->hb Phase2(b)
+// Expected: a,b,c all overlap at offset 0; d separate (interferes with a)
+// ------------------------------------------------------------
+__co__ void pos_multi_signal_independent() {
+  parallel p by 1 : block {
+    shared f16 [16] a;
+    shared f16 [16] b;
+    shared f16 [16] c;
+    shared f16 [16] d;
+    parallel q by 2 : group-4 {
+      shared event sig1;
+      shared event sig2;
+      inthreads.async (q == 0) {
+        wait sig1;
+        call kernel(a);
+        wait sig2;
+        call kernel(b);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(c);
+        trigger sig1;
+        call kernel(d);
+        trigger sig2;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_multi_signal_independent
+// LIVE: HB Graph (6 phases):
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}sig1 bufs={{{.*}}a}
+// LIVE: Phase 2 [WG0 async{{.*}}in={{.*}}sig2 bufs={{{.*}}b}
+// LIVE: Phase 3 [WG1 async{{.*}}out={{.*}}sig1 bufs={{{.*}}c}
+// LIVE: Phase 4 [WG1 async{{.*}}out={{.*}}sig2 bufs={{{.*}}d}
+// LIVE: 3 -->hb 1
+// LIVE: 4 -->hb 2
+// CHECK-LABEL: __choreo_device_pos_multi_signal_independent
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: a = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: b = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: c = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: d = (f16*)(anon_{{[0-9]+}} + 128)
+
+
+// ------------------------------------------------------------
+// POSITIVE: Buffer used between trigger and end of inthreads
+// WG0: use x, trigger signal
+// WG1: wait signal, use y
+// Key: x's last use is BEFORE trigger, so x hb y
+// Expected: x and y overlap
+// ------------------------------------------------------------
+__co__ void pos_use_before_trigger() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        call kernel(x);
+        trigger signal;
+      }
+
+      inthreads.async (q == 1) {
+        wait signal;
+        call kernel(y);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_use_before_trigger
+// LIVE: Phase 0 [WG0 async{{.*}}out={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 3 [WG1 async{{.*}}in={{.*}}signal bufs={{{.*}}y}
+// LIVE: 0 -->hb 3
+// CHECK-LABEL: __choreo_device_pos_use_before_trigger
+// CHECK: anon_{{[0-9]+}}[128]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+
+// ------------------------------------------------------------
+// NEGATIVE: Buffer used AFTER trigger (same WG still accesses after signal)
+// WG0: trigger signal, THEN use x (x lives beyond the trigger)
+// WG1: wait signal, use y
+// Since x is used after trigger, x and y could be concurrent
+// Expected: x and y do NOT overlap
+// ------------------------------------------------------------
+__co__ void neg_use_after_trigger() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        trigger signal;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        wait signal;
+        call kernel(y);
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_use_after_trigger
+// LIVE: Phase 0 [WG0 async{{.*}}out={{.*}}signal bufs={}
+// LIVE: Phase 1 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 3 [WG1 async{{.*}}in={{.*}}signal bufs={{{.*}}y}
+// LIVE: 0 -->hb 3
+// CHECK-LABEL: __choreo_device_neg_use_after_trigger
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)
+
+
+// ------------------------------------------------------------
+// POSITIVE: Large buffers with different sizes verify alignment
+// 256-byte and 64-byte buffer, signal-ordered
+// Expected: overlap (same offset 0, total SPM = larger buffer)
+// ------------------------------------------------------------
+__co__ void pos_different_sizes_large() {
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        wait signal;
+        shared f16 [128] x;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        shared f16 [32] y;
+        call kernel(y);
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::pos_different_sizes_large
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// LIVE: 2 -->hb 1
+// CHECK-LABEL: __choreo_device_pos_different_sizes_large
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
+
+
+// ------------------------------------------------------------
+// NEGATIVE: Buffer used both before AND after wait in same WG
+// WG0: use x, wait signal, use x again (x spans the wait boundary)
+// WG1: trigger signal, use y
+// Since x is live across the wait point, x's range overlaps with y's phase
+// Expected: x and y do NOT overlap
+// ------------------------------------------------------------
+__co__ void neg_buffer_spans_wait() {
+  parallel p by 1 : block {
+    shared f16 [16] x;
+    shared f16 [16] y;
+    parallel q by 2 : group-4 {
+      shared event signal;
+      inthreads.async (q == 0) {
+        call kernel(x);
+        wait signal;
+        call kernel(x);
+      }
+
+      inthreads.async (q == 1) {
+        call kernel(y);
+        trigger signal;
+      }
+      sync.shared;
+    }
+  }
+}
+// LIVE-LABEL: Built HB graph for scope '::neg_buffer_spans_wait
+// LIVE: Phase 0 [WG0 async{{.*}}bufs={{{.*}}x}
+// LIVE: Phase 1 [WG0 async{{.*}}in={{.*}}signal bufs={{{.*}}x}
+// LIVE: Phase 2 [WG1 async{{.*}}out={{.*}}signal bufs={{{.*}}y}
+// CHECK-LABEL: __choreo_device_neg_buffer_spans_wait
+// CHECK: anon_{{[0-9]+}}[256]
+// CHECK: x = (f16*)(anon_{{[0-9]+}} + 0)
+// CHECK: y = (f16*)(anon_{{[0-9]+}} + 128)

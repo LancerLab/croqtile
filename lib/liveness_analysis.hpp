@@ -8,6 +8,7 @@
 #include "types.hpp"
 #include "visitor.hpp"
 
+#include <algorithm>
 #include <queue>
 #include <sstream>
 #include <unordered_set>
@@ -275,6 +276,7 @@ private:
   size_t inthreads_async_level = 0;
   std::unordered_map<std::string, VarSet> async_inthreads_vars;
   bool visiting_synchronize = false;
+  bool adding_synthetic_uses = false;
 
   // -- Liveness info per statement --
   std::unordered_map<const Stmt*, LivenessInfo> stmt_linfo;
@@ -315,6 +317,76 @@ private:
   std::stack<InThreadsBBs> it_bb_list;
   std::map<ptr<BB>, ptr<BB>> end2cond;
 
+public:
+  // Happens-Before graph for signal-aware liveness analysis (SALA).
+  struct HBPhase {
+    int wg_id = -1;
+    int phase_id = -1;
+    size_t first_stmt_id = 0;
+    size_t last_stmt_id = 0;
+    std::string signal_in;
+    std::string signal_out;
+    std::set<std::string> buffers_accessed;
+    bool is_async = false;
+    bool multi_instance = false;
+    int multi_instance_count = 0;
+    bool has_cta_barrier_before = false;
+  };
+
+  struct HBGraph {
+    std::vector<HBPhase> phases;
+    std::vector<std::vector<bool>> reachable;
+    std::set<std::string> globally_live_bufs;
+
+    void AddEdge(int from, int to);
+    void ComputeTransitiveClosure();
+    bool Reaches(int from, int to) const;
+    bool CanOverlap(const std::string& buf_a, const std::string& buf_b) const;
+    bool IsUnsafeMultiInstanceOverlap(const std::string& buf_a,
+                                      const std::string& buf_b) const;
+    void Dump(std::ostream& os) const;
+    void DumpDot(std::ostream& os, const std::string& scope) const;
+  };
+
+  std::map<std::string, HBGraph> hb_graphs;
+  const std::map<std::string, HBGraph>& HBGraphs() const { return hb_graphs; }
+
+private:
+  struct WGInfo {
+    int wg_id = -1;
+    std::string scope_name;
+    size_t first_stmt_id = 0;
+    size_t last_stmt_id = 0;
+  };
+
+  struct HBBuildState {
+    std::string paraby_scope;
+    std::string pv_name;
+    int64_t pv_bound = -1;
+    int next_phase_id = 0;
+    std::vector<WGInfo> warp_groups;
+    std::unordered_map<std::string, std::vector<std::pair<int, bool>>>
+        event_phases;
+    std::set<std::string> globally_live_bufs;
+  };
+  std::map<std::string, HBBuildState> hb_build_states;
+
+  HBBuildState* cur_hb_state = nullptr;
+  int cur_wg_id = -1;
+  HBPhase wip_phase_;
+  HBPhase* cur_hb_phase = nullptr;
+  std::vector<HBPhase> pending_phases;
+  bool cur_block_is_async = false;
+  bool cur_block_multi_instance = false;
+  int cur_multi_instance_count = 1;
+  bool cta_barrier_since_last_inthreads = false;
+
+  void BuildHBGraph(const std::string& paraby_scope);
+  void FinalizeHBPhase();
+  void StartNewHBPhase(const std::string& signal_in);
+  void RecordHBBufferAccess(const std::string& sname,
+                            const char* caller = nullptr);
+
   // -- Private helper methods --
   std::string GetFuncNameFromScopedName(const std::string& name) const {
     if (!PrefixedWith(name, "::")) return name;
@@ -349,6 +421,7 @@ private:
   void AddFut2Buffers(const std::string& fut, const DMABufInfo& buf_info);
   void AddAsyncInthreadsVar(const std::string& scope_name,
                             const std::string& var);
+  void HandleAnon(const std::string& name);
 
   struct BlockInfo {
     VarSet in;
@@ -364,7 +437,6 @@ private:
   void RecordStmt(const Stmt& s, bool dump_brace, bool only_else = false);
   ptr<ScopeEnd> RegisterScopeEnd(AST::Node& origin, ptr<BasicBlock> bb,
                                  bool dump_brace, bool only_else = false);
-  // handle stmt in Before/Mid/After VisitImpl
   void HandleStmtInBefore(AST::Node& n);
   void HandleStmtInMid(AST::Node& n);
   void HandleStmtInAfter(AST::Node& n);

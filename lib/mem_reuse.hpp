@@ -11,6 +11,7 @@
 #include "visitor.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <numeric>
 
 namespace Choreo {
@@ -149,10 +150,21 @@ private:
       size_t heap_size;                            // total memory size
     };
 
+    using HBOverride =
+        std::function<bool(const std::string&, const std::string&)>;
+    using HBMustInterfere =
+        std::function<bool(const std::string&, const std::string&)>;
+
     // global decreasing size best fit allocate algorithm
     // (support arbitrary alignment)
-    Result GlobalDecreasingSizeBestFitAllocate(const std::vector<Chunk>& chunks,
-                                               size_t alignment = 0) {
+    // hb_override: if set, called for interfering pairs. Returns true if the
+    // HB analysis proves the pair is non-interfering (safe to overlap).
+    // hb_must_interfere: if set, called for non-interfering pairs. Returns
+    // true if multi-instance concurrency makes overlap unsafe.
+    Result GlobalDecreasingSizeBestFitAllocate(
+        const std::vector<Chunk>& chunks, size_t alignment = 0,
+        HBOverride hb_override = nullptr,
+        HBMustInterfere hb_must_interfere = nullptr) {
       Result result;
       result.heap_size = 0;
 
@@ -172,11 +184,20 @@ private:
           length, std::vector<bool>(length, false));
 
       for (size_t i = 0; i < length; ++i)
-        for (size_t j = i + 1; j < length; ++j)
+        for (size_t j = i + 1; j < length; ++j) {
           if (sorted_chunks[i].Interfere(sorted_chunks[j])) {
+            if (hb_override && hb_override(sorted_chunks[i].buffer_id,
+                                           sorted_chunks[j].buffer_id))
+              continue;
+            interference_graph[i][j] = true;
+            interference_graph[j][i] = true;
+          } else if (hb_must_interfere &&
+                     hb_must_interfere(sorted_chunks[i].buffer_id,
+                                       sorted_chunks[j].buffer_id)) {
             interference_graph[i][j] = true;
             interference_graph[j][i] = true;
           }
+        }
 
       // assign space for each buffer
       std::map<size_t, size_t> assigned_offsets;
@@ -266,8 +287,11 @@ private:
       return result;
     }
 
-    Result Allocate(const std::vector<Chunk>& chunks, int64_t alignment = 0) {
-      return GlobalDecreasingSizeBestFitAllocate(chunks, alignment);
+    Result Allocate(const std::vector<Chunk>& chunks, int64_t alignment = 0,
+                    HBOverride hb_override = nullptr,
+                    HBMustInterfere hb_must_interfere = nullptr) {
+      return GlobalDecreasingSizeBestFitAllocate(chunks, alignment, hb_override,
+                                                 hb_must_interfere);
     }
   };
 
@@ -304,8 +328,11 @@ private:
   void AnalyzeMemOffset();
   void ProtoType(const std::string& dev_fname, DevFuncMemReuseCtx& ctx,
                  std::string idx_suffix);
-  bool ValidateResult(const HeapSimulator::Result& res,
-                      const HeapSimulator::Chunks& chunks);
+  bool
+  ValidateResult(const HeapSimulator::Result& res,
+                 const HeapSimulator::Chunks& chunks,
+                 HeapSimulator::HBOverride hb_override = nullptr,
+                 HeapSimulator::HBMustInterfere hb_must_interfere = nullptr);
   void ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto);
   bool RunOnProgramImpl(AST::Node& root) override;
 };

@@ -218,6 +218,8 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
   VST_DEBUG(dbgs() << "USE: " << svar << "\n");
   stmt_linfo[s].use.insert(svar);
   var_events[svar].push_back({EventKind::Use, SSTab().ScopeName()});
+  if (cur_hb_phase && !adding_synthetic_uses)
+    RecordHBBufferAccess(svar, "AddUse");
   if (inthreads_async_level && !visiting_synchronize)
     AddAsyncInthreadsVar(SSTab().ScopeName(), svar);
   // when using a var, its binding should also be treated as used.
@@ -445,6 +447,498 @@ void TopoSortBB(
 }
 
 } // anonymous namespace
+
+// --- Happens-Before Graph Implementation ---
+
+void LivenessAnalyzer::HBGraph::AddEdge(int from, int to) {
+  if (from >= 0 && to >= 0 && (size_t)from < reachable.size() &&
+      (size_t)to < reachable.size())
+    reachable[from][to] = true;
+}
+
+void LivenessAnalyzer::HBGraph::ComputeTransitiveClosure() {
+  size_t n = phases.size();
+  for (size_t k = 0; k < n; ++k)
+    for (size_t i = 0; i < n; ++i)
+      if (reachable[i][k])
+        for (size_t j = 0; j < n; ++j)
+          if (reachable[k][j]) reachable[i][j] = true;
+}
+
+bool LivenessAnalyzer::HBGraph::Reaches(int from, int to) const {
+  if (from < 0 || to < 0 || (size_t)from >= reachable.size() ||
+      (size_t)to >= reachable.size())
+    return false;
+  return reachable[from][to];
+}
+
+bool LivenessAnalyzer::HBGraph::CanOverlap(const std::string& buf_a,
+                                           const std::string& buf_b) const {
+  if (globally_live_bufs.count(buf_a) || globally_live_bufs.count(buf_b))
+    return false;
+  std::vector<int> phases_a, phases_b;
+  for (const auto& p : phases) {
+    if (p.buffers_accessed.count(buf_a)) phases_a.push_back(p.phase_id);
+    if (p.buffers_accessed.count(buf_b)) phases_b.push_back(p.phase_id);
+  }
+  if (phases_a.empty() || phases_b.empty()) return false;
+
+  // For multi-instance WGs (predicate matches >1 physical WG), phases
+  // within the same async block are concurrent across instances even
+  // though they are sequential within each instance.  A CTA barrier
+  // (sync.shared) between blocks ensures all instances synchronize.
+  auto needsCTABarrier = [&](int ia, int ib) -> bool {
+    const auto& pa = phases[ia];
+    const auto& pb = phases[ib];
+    if (pa.wg_id != pb.wg_id) return false;
+    if (!pa.multi_instance) return false;
+    return true;
+  };
+  auto hasCTABarrier = [&](int ia, int ib) -> bool {
+    int lo = std::min(ia, ib), hi = std::max(ia, ib);
+    for (int k = lo + 1; k <= hi; ++k)
+      if (phases[k].wg_id == phases[lo].wg_id &&
+          phases[k].has_cta_barrier_before)
+        return true;
+    return false;
+  };
+
+  for (int pa : phases_a)
+    for (int pb : phases_b) {
+      if (pa == pb) return false;
+      if (!Reaches(pa, pb) && !Reaches(pb, pa)) return false;
+      if (needsCTABarrier(pa, pb) && !hasCTABarrier(pa, pb)) return false;
+    }
+  return true;
+}
+
+bool LivenessAnalyzer::HBGraph::IsUnsafeMultiInstanceOverlap(
+    const std::string& buf_a, const std::string& buf_b) const {
+  std::vector<int> phases_a, phases_b;
+  for (const auto& p : phases) {
+    if (p.buffers_accessed.count(buf_a)) phases_a.push_back(p.phase_id);
+    if (p.buffers_accessed.count(buf_b)) phases_b.push_back(p.phase_id);
+  }
+  if (phases_a.empty() || phases_b.empty()) return false;
+
+  for (int pa_id : phases_a) {
+    const auto& pa = phases[pa_id];
+    if (!pa.multi_instance) continue;
+    for (int pb_id : phases_b) {
+      if (pa_id == pb_id) continue;
+      const auto& pb = phases[pb_id];
+      if (pa.wg_id != pb.wg_id) continue;
+      int lo = std::min(pa_id, pb_id), hi = std::max(pa_id, pb_id);
+      bool has_barrier = false;
+      for (int k = lo + 1; k <= hi; ++k) {
+        if (phases[k].wg_id == pa.wg_id && phases[k].has_cta_barrier_before) {
+          has_barrier = true;
+          break;
+        }
+      }
+      if (!has_barrier) return true;
+    }
+  }
+  return false;
+}
+
+void LivenessAnalyzer::HBGraph::Dump(std::ostream& os) const {
+  os << "  HB Graph (" << phases.size() << " phases):\n";
+  for (const auto& p : phases) {
+    os << "    Phase " << p.phase_id << " [WG" << p.wg_id;
+    if (p.multi_instance) os << " multi";
+    if (p.is_async) os << " async";
+    if (p.has_cta_barrier_before) os << " cta-bar";
+    os << "] stmts [" << p.first_stmt_id << "," << p.last_stmt_id << "]";
+    if (!p.signal_in.empty()) os << " in=" << p.signal_in;
+    if (!p.signal_out.empty()) os << " out=" << p.signal_out;
+    os << " bufs={";
+    bool first = true;
+    for (const auto& b : p.buffers_accessed) {
+      if (!first) os << ",";
+      os << b;
+      first = false;
+    }
+    os << "}\n";
+  }
+  os << "  Reachability:\n";
+  for (size_t i = 0; i < phases.size(); ++i)
+    for (size_t j = 0; j < phases.size(); ++j)
+      if (reachable[i][j]) os << "    " << i << " -->hb " << j << "\n";
+}
+
+void LivenessAnalyzer::HBGraph::DumpDot(std::ostream& os,
+                                        const std::string& scope) const {
+  auto shortName = [](const std::string& s) -> std::string {
+    auto trimmed = s;
+    while (trimmed.size() >= 2 && trimmed.substr(trimmed.size() - 2) == "::")
+      trimmed.erase(trimmed.size() - 2);
+    while (!trimmed.empty() && trimmed[0] == ':') trimmed.erase(0, 1);
+    auto pos = trimmed.rfind("::");
+    return pos != std::string::npos ? trimmed.substr(pos + 2) : trimmed;
+  };
+
+  os << "digraph \"HB_" << scope << "\" {\n"
+     << "  rankdir=TB;\n"
+     << "  node [shape=box, style=\"rounded,filled\", fontsize=10];\n"
+     << "  edge [fontsize=8];\n"
+     << "  label=\"HB Graph: " << scope << "\";\n"
+     << "  labelloc=t;\n\n";
+
+  static const char* colors[] = {"#4E79A7", "#F28E2B", "#E15759",
+                                 "#76B7B2", "#59A14F", "#EDC948"};
+  static const char* fills[] = {"#D6E4F0", "#FDE5C9", "#F5C4C6",
+                                "#D4ECEA", "#C7E3C1", "#F9EFC4"};
+
+  std::map<int, std::vector<int>> by_wg;
+  for (size_t i = 0; i < phases.size(); ++i)
+    by_wg[phases[i].wg_id].push_back(i);
+
+  for (const auto& [wg_id, idxs] : by_wg) {
+    int ci = wg_id % 6;
+    os << "  subgraph cluster_wg" << wg_id << " {\n"
+       << "    label=\"WG" << wg_id << "\";\n"
+       << "    style=dashed; color=\"" << colors[ci] << "\";\n\n";
+    for (int i : idxs) {
+      const auto& p = phases[i];
+      os << "    p" << i << " [label=\"P" << p.phase_id;
+      if (!p.signal_in.empty()) os << "\\nwait " << shortName(p.signal_in);
+      if (!p.signal_out.empty()) os << "\\ntrigger " << shortName(p.signal_out);
+      if (!p.buffers_accessed.empty()) {
+        os << "\\n[";
+        bool first = true;
+        for (const auto& b : p.buffers_accessed) {
+          if (!first) os << ", ";
+          os << shortName(b);
+          first = false;
+        }
+        os << "]";
+      }
+      os << "\", fillcolor=\"" << fills[ci] << "\", color=\"" << colors[ci]
+         << "\"];\n";
+    }
+    os << "  }\n\n";
+  }
+
+  for (size_t i = 0; i + 1 < phases.size(); ++i) {
+    if (phases[i].wg_id == phases[i + 1].wg_id)
+      os << "  p" << i << " -> p" << (i + 1)
+         << " [style=solid, color=\"#666666\"];\n";
+  }
+
+  struct SigEdge {
+    int from, to;
+    std::string event;
+    bool accepted;
+  };
+  std::vector<SigEdge> sig_edges;
+  std::unordered_map<std::string, std::vector<int>> trigger_map, wait_map;
+  for (size_t i = 0; i < phases.size(); ++i) {
+    if (!phases[i].signal_out.empty())
+      trigger_map[phases[i].signal_out].push_back(i);
+    if (!phases[i].signal_in.empty())
+      wait_map[phases[i].signal_in].push_back(i);
+  }
+  for (const auto& [event, triggers] : trigger_map) {
+    auto wit = wait_map.find(event);
+    if (wit == wait_map.end()) continue;
+    for (int t : triggers)
+      for (int w : wit->second) {
+        if (phases[t].wg_id == phases[w].wg_id) continue;
+        sig_edges.push_back({t, w, event, Reaches(t, w)});
+      }
+  }
+
+  std::set<std::pair<int, int>> bidir_pairs;
+  for (size_t i = 0; i < sig_edges.size(); ++i)
+    for (size_t j = i + 1; j < sig_edges.size(); ++j)
+      if (sig_edges[i].from == sig_edges[j].to &&
+          sig_edges[i].to == sig_edges[j].from) {
+        bidir_pairs.insert({sig_edges[i].from, sig_edges[i].to});
+        bidir_pairs.insert({sig_edges[j].from, sig_edges[j].to});
+      }
+
+  for (const auto& e : sig_edges) {
+    bool is_bidir = bidir_pairs.count({e.from, e.to}) > 0;
+    bool goes_down = e.from < e.to;
+    os << "  p" << e.from;
+    if (is_bidir) os << (goes_down ? ":e" : ":w");
+    os << " -> p" << e.to;
+    if (is_bidir) os << (goes_down ? ":e" : ":w");
+    os << " [style=" << (e.accepted ? "dashed" : "dotted") << ", color=\""
+       << (e.accepted ? "#CC0000" : "#999999") << "\", label=\""
+       << shortName(e.event) << (e.accepted ? "" : " (dropped)")
+       << "\", fontcolor=\"" << (e.accepted ? "#CC0000" : "#999999") << "\"";
+    if (!e.accepted) os << ", constraint=false";
+    os << "];\n";
+  }
+
+  os << "}\n";
+}
+
+// Extract a canonical warp-group ID from a predicate involving `pv_name`.
+// Handles: pv == N, pv > N (-> N+1), pv >= N, pv != N,
+// and compound predicates (pv == 0 && t == 0).
+// Returns -1 if the parallel variable is not found in the predicate.
+static int64_t ExtractPVValue(AST::Expr* pred, const std::string& pv_name) {
+  if (!pred) return -1;
+  auto kind = pred->GetOp().GetKind();
+  auto* lhs_id = AST::GetIdentifier(*pred->GetL());
+  auto* rhs_id = AST::GetIdentifier(*pred->GetR());
+  if (kind == Opcode::Kind::Eq) {
+    if (lhs_id && lhs_id->name == pv_name) {
+      if (auto il = AST::GetIntLiteral(*pred->GetR())) return il->Val();
+    }
+    if (rhs_id && rhs_id->name == pv_name) {
+      if (auto il = AST::GetIntLiteral(*pred->GetL())) return il->Val();
+    }
+  }
+  // pv > N -> canonical WG = N+1 (first value in the range)
+  if (kind == Opcode::Kind::Gt) {
+    if (lhs_id && lhs_id->name == pv_name) {
+      if (auto il = AST::GetIntLiteral(*pred->GetR())) return il->Val() + 1;
+    }
+    if (rhs_id && rhs_id->name == pv_name) {
+      if (auto il = AST::GetIntLiteral(*pred->GetL())) return il->Val() - 1;
+    }
+  }
+  // pv >= N -> canonical WG = N
+  if (kind == Opcode::Kind::Ge) {
+    if (lhs_id && lhs_id->name == pv_name) {
+      if (auto il = AST::GetIntLiteral(*pred->GetR())) return il->Val();
+    }
+    if (rhs_id && rhs_id->name == pv_name) {
+      if (auto il = AST::GetIntLiteral(*pred->GetL())) return il->Val();
+    }
+  }
+  // pv != N -> canonical WG = the "other" side
+  if (kind == Opcode::Kind::Ne) {
+    if (lhs_id && lhs_id->name == pv_name) {
+      if (auto il = AST::GetIntLiteral(*pred->GetR()))
+        return il->Val() == 0 ? 1 : 0;
+    }
+    if (rhs_id && rhs_id->name == pv_name) {
+      if (auto il = AST::GetIntLiteral(*pred->GetL()))
+        return il->Val() == 0 ? 1 : 0;
+    }
+  }
+  if (kind == Opcode::Kind::LogicAnd || kind == Opcode::Kind::LogicOr) {
+    auto l = ExtractPVValue(dyn_cast<AST::Expr>(pred->GetL().get()), pv_name);
+    if (l >= 0) return l;
+    return ExtractPVValue(dyn_cast<AST::Expr>(pred->GetR().get()), pv_name);
+  }
+  return -1;
+}
+
+// Returns true if the predicate matches multiple physical warp groups.
+// Evaluate a simple comparison: lhs op rhs.
+// (Mirrors ActiveThreadsAnalysis::EvalCompare from active_threads.hpp.)
+static bool EvalCmp(Opcode::Kind op, int64_t lhs, int64_t rhs) {
+  switch (op) {
+  case Opcode::Kind::Eq: return lhs == rhs;
+  case Opcode::Kind::Ne: return lhs != rhs;
+  case Opcode::Kind::Lt: return lhs < rhs;
+  case Opcode::Kind::Le: return lhs <= rhs;
+  case Opcode::Kind::Gt: return lhs > rhs;
+  case Opcode::Kind::Ge: return lhs >= rhs;
+  default: return true;
+  }
+}
+
+// Evaluate whether pv_val satisfies the predicate.
+// Returns: 1 = true, 0 = false, -1 = unknown.
+static int EvalPredForPV(AST::Expr* pred, const std::string& pv_name,
+                         int64_t pv_val) {
+  if (!pred) return -1;
+  auto kind = pred->GetOp().GetKind();
+
+  if (kind == Opcode::Kind::LogicAnd) {
+    int l =
+        EvalPredForPV(dyn_cast<AST::Expr>(pred->GetL().get()), pv_name, pv_val);
+    int r =
+        EvalPredForPV(dyn_cast<AST::Expr>(pred->GetR().get()), pv_name, pv_val);
+    if (l == 0 || r == 0) return 0;
+    if (l == 1 && r == 1) return 1;
+    return -1;
+  }
+  if (kind == Opcode::Kind::LogicOr) {
+    int l =
+        EvalPredForPV(dyn_cast<AST::Expr>(pred->GetL().get()), pv_name, pv_val);
+    int r =
+        EvalPredForPV(dyn_cast<AST::Expr>(pred->GetR().get()), pv_name, pv_val);
+    if (l == 1 || r == 1) return 1;
+    if (l == 0 && r == 0) return 0;
+    return -1;
+  }
+
+  auto* lhs_id = AST::GetIdentifier(*pred->GetL());
+  auto* rhs_id = AST::GetIdentifier(*pred->GetR());
+  bool lhs_is_pv = lhs_id && lhs_id->name == pv_name;
+  bool rhs_is_pv = rhs_id && rhs_id->name == pv_name;
+  if (!lhs_is_pv && !rhs_is_pv) return -1;
+
+  auto* const_node = lhs_is_pv ? pred->GetR().get() : pred->GetL().get();
+  auto il = AST::GetIntLiteral(*const_node);
+  if (!il) return -1;
+  int64_t c = il->Val();
+
+  if (lhs_is_pv) return EvalCmp(kind, pv_val, c) ? 1 : 0;
+  return EvalCmp(kind, c, pv_val) ? 1 : 0;
+}
+
+static int CountMatchingInstances(AST::Expr* pred, const std::string& pv_name,
+                                  int64_t pv_bound) {
+  if (!pred || pv_bound <= 0) return -1;
+  int count = 0;
+  for (int64_t v = 0; v < pv_bound; ++v) {
+    int r = EvalPredForPV(pred, pv_name, v);
+    if (r == -1) return -1;
+    if (r == 1) ++count;
+  }
+  return count;
+}
+
+// Determine if a predicate matches more than one warp-group instance.
+// When the upper bound is statically known, enumerate all possible
+// pv values and count how many satisfy the predicate.
+static bool IsMultiInstancePredicate(AST::Expr* pred,
+                                     const std::string& pv_name,
+                                     int64_t pv_bound) {
+  if (!pred) return false;
+  if (pv_bound <= 0) {
+    auto kind = pred->GetOp().GetKind();
+    auto* lhs_id = AST::GetIdentifier(*pred->GetL());
+    auto* rhs_id = AST::GetIdentifier(*pred->GetR());
+    bool involves_pv = (lhs_id && lhs_id->name == pv_name) ||
+                       (rhs_id && rhs_id->name == pv_name);
+    if (involves_pv) return kind != Opcode::Kind::Eq;
+    if (kind == Opcode::Kind::LogicAnd || kind == Opcode::Kind::LogicOr) {
+      return IsMultiInstancePredicate(dyn_cast<AST::Expr>(pred->GetL().get()),
+                                      pv_name, -1) ||
+             IsMultiInstancePredicate(dyn_cast<AST::Expr>(pred->GetR().get()),
+                                      pv_name, -1);
+    }
+    return false;
+  }
+
+  int match_count = 0;
+  for (int64_t v = 0; v < pv_bound; ++v) {
+    int r = EvalPredForPV(pred, pv_name, v);
+    if (r == -1) return true;
+    if (r == 1) ++match_count;
+    if (match_count > 1) return true;
+  }
+  return false;
+}
+
+void LivenessAnalyzer::FinalizeHBPhase() {
+  if (!cur_hb_phase) return;
+  cur_hb_phase->last_stmt_id = stmt_id;
+  pending_phases.push_back(*cur_hb_phase);
+  cur_hb_phase = nullptr;
+}
+
+void LivenessAnalyzer::RecordHBBufferAccess(const std::string& sname,
+                                            const char* caller) {
+  (void)caller;
+  if (!cur_hb_state || !sbuffers.count(sname)) return;
+  if (cur_hb_phase)
+    cur_hb_phase->buffers_accessed.insert(sname);
+  else
+    cur_hb_state->globally_live_bufs.insert(sname);
+}
+
+void LivenessAnalyzer::StartNewHBPhase(const std::string& signal_in) {
+  FinalizeHBPhase();
+  if (!cur_hb_state) return;
+  auto& state = *cur_hb_state;
+  wip_phase_ = HBPhase();
+  wip_phase_.wg_id = cur_wg_id;
+  wip_phase_.phase_id = state.next_phase_id++;
+  wip_phase_.first_stmt_id = stmt_id;
+  wip_phase_.last_stmt_id = stmt_id;
+  wip_phase_.signal_in = signal_in;
+  wip_phase_.is_async = cur_block_is_async;
+  wip_phase_.multi_instance = cur_block_multi_instance;
+  wip_phase_.multi_instance_count = cur_multi_instance_count;
+  cur_hb_phase = &wip_phase_;
+}
+
+void LivenessAnalyzer::BuildHBGraph(const std::string& paraby_scope) {
+  auto it = hb_build_states.find(paraby_scope);
+  if (it == hb_build_states.end()) return;
+  HBGraph graph;
+  graph.phases = std::move(pending_phases);
+  graph.globally_live_bufs = it->second.globally_live_bufs;
+  pending_phases.clear();
+
+  size_t n = graph.phases.size();
+  graph.reachable.assign(n, std::vector<bool>(n, false));
+
+  // Sequential edges: consecutive phases in the same WG.
+  for (size_t i = 0; i + 1 < n; ++i) {
+    if (graph.phases[i].wg_id == graph.phases[i + 1].wg_id)
+      graph.AddEdge(i, i + 1);
+  }
+
+  // Signal edges: trigger E in phase i --> wait E in phase j (cross-WG).
+  // Acyclic constraint: only add edges that do not create cycles.
+  // Back-edges (e.g., consumer triggers empty -> producer waits empty)
+  // represent cross-iteration ordering and must be excluded to avoid
+  // false within-iteration happens-before orderings.
+  std::unordered_map<std::string, std::vector<int>> trigger_phases;
+  std::unordered_map<std::string, std::vector<int>> wait_phases;
+  for (size_t i = 0; i < n; ++i) {
+    const auto& p = graph.phases[i];
+    if (!p.signal_out.empty()) trigger_phases[p.signal_out].push_back(i);
+    if (!p.signal_in.empty()) wait_phases[p.signal_in].push_back(i);
+  }
+
+  // Compute initial reachability from sequential edges alone.
+  graph.ComputeTransitiveClosure();
+
+  // Collect candidate signal edges, sorted by trigger phase's stmt position
+  // to prioritize init/forward edges over back-edges.
+  struct SignalEdge {
+    int trigger_idx;
+    int wait_idx;
+    std::string event;
+  };
+  std::vector<SignalEdge> candidates;
+  for (const auto& [event, triggers] : trigger_phases) {
+    auto wit = wait_phases.find(event);
+    if (wit == wait_phases.end()) continue;
+    for (int t : triggers)
+      for (int w : wit->second) {
+        if (graph.phases[t].wg_id != graph.phases[w].wg_id)
+          candidates.push_back({t, w, event});
+      }
+  }
+  std::sort(candidates.begin(), candidates.end(),
+            [&](const SignalEdge& a, const SignalEdge& b) {
+              return graph.phases[a.trigger_idx].first_stmt_id <
+                     graph.phases[b.trigger_idx].first_stmt_id;
+            });
+
+  for (const auto& e : candidates) {
+    if (!graph.Reaches(e.wait_idx, e.trigger_idx)) {
+      graph.AddEdge(e.trigger_idx, e.wait_idx);
+      graph.ComputeTransitiveClosure();
+    } else {
+      VST_DEBUG(dbgs() << "  Skipped back-edge: phase " << e.trigger_idx
+                       << " -> phase " << e.wait_idx << " (event '" << e.event
+                       << "' would create cycle)\n");
+    }
+  }
+  VST_DEBUG({
+    dbgs() << "Built HB graph for scope '" << paraby_scope << "':\n";
+    graph.Dump(dbgs());
+  });
+
+  if (CCtx().DumpHB()) graph.DumpDot(errs(), paraby_scope);
+
+  hb_graphs[paraby_scope] = std::move(graph);
+}
 
 // ---------- Dataflow computation ----------
 
@@ -1084,12 +1578,14 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
   RecordStmt(*rbrace, false);
 
   if (IsLoopBlock(n) && events_to_add.count(&n)) {
+    adding_synthetic_uses = true;
     for (const auto& [event_type, var] : events_to_add[&n]) {
       assert(event_type == EventKind::Use && "unexpected event type.");
       VST_DEBUG(dbgs() << "EXTRA use: " << var << " in "
                        << stmt2id[rbrace.get()] << "\n";);
       AddUse(rbrace.get(), var, false);
     }
+    adding_synthetic_uses = false;
   }
 }
 
@@ -1117,10 +1613,32 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
       AddDef(current_stmt, sname, true);
     }
   } else if (auto ib = dyn_cast<AST::InThreadsBlock>(&n)) {
+    // TODO: Check if this pattern is done
     // For vars which are defined inside inthreads.async block,
     // an extra use should be added to the sync point statement.
     // In other words, their liveness is extended to the sync point.
     if (ib->async) ++inthreads_async_level;
+
+    if (cur_hb_state) {
+      auto pred = dyn_cast<AST::Expr>(ib->GetPred().get());
+      int64_t wg = ExtractPVValue(pred, cur_hb_state->pv_name);
+      if (wg >= 0) {
+        cur_wg_id = static_cast<int>(wg);
+        cur_block_is_async = ib->async;
+        cur_block_multi_instance = IsMultiInstancePredicate(
+            pred, cur_hb_state->pv_name, cur_hb_state->pv_bound);
+        cur_multi_instance_count =
+            cur_block_multi_instance
+                ? CountMatchingInstances(pred, cur_hb_state->pv_name,
+                                         cur_hb_state->pv_bound)
+                : 1;
+        StartNewHBPhase("");
+        if (cur_hb_phase)
+          cur_hb_phase->has_cta_barrier_before =
+              cta_barrier_since_last_inthreads;
+        cta_barrier_since_last_inthreads = false;
+      }
+    }
   }
 
   return true;
@@ -1212,6 +1730,19 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
     }
   } else if (auto ib = dyn_cast<AST::InThreadsBlock>(&n)) {
     if (ib->async) --inthreads_async_level;
+
+    if (cur_hb_state && cur_wg_id >= 0) {
+      FinalizeHBPhase();
+      cur_wg_id = -1;
+      cur_block_is_async = false;
+      cur_block_multi_instance = false;
+    }
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    if (cur_hb_state && pb->GetLevel() == ParallelLevel::GROUPx4) {
+      std::string scope = cur_hb_state->paraby_scope;
+      if (CCtx().SALA()) BuildHBGraph(scope);
+      cur_hb_state = nullptr;
+    }
   }
 
   return true;
@@ -1297,24 +1828,24 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
     AddUse(current_stmt, sa->id->name);
     AddIsAlias(current_stmt, n.GetName());
     AddAlias(n.GetName(), sa->id->name);
-    return true;
-  }
-  VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n) << ".\n");
-  if (n.AssignToDataElement())
-    AddUse(current_stmt, n.GetDataArrayName());
-  else if (PrefixedWith(n.GetName(), "anon_"))
-    AddDef(current_stmt, n.GetName());
-  else {
-    if (n.IsDecl())
+  } else {
+    VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n) << ".\n");
+    if (n.AssignToDataElement()) {
+      AddUse(current_stmt, n.GetDataArrayName());
+    } else if (PrefixedWith(n.GetName(), "anon_")) {
       AddDef(current_stmt, n.GetName());
-    else
-      AddUse(current_stmt, n.GetName());
-  }
+    } else {
+      if (n.IsDecl())
+        AddDef(current_stmt, n.GetName());
+      else
+        AddUse(current_stmt, n.GetName());
+    }
 
-  if (isa<AST::Expr>(n.value))
-    AddUse(current_stmt, GetAllSymbolicOperands(n.value.get()));
-  else if (!isa<AST::Call>(n.value)) // Call is handled in Visit(AST::Call)
-    choreo_unreachable("expecting the assignment value is an expr or call.");
+    if (isa<AST::Expr>(n.value))
+      AddUse(current_stmt, GetAllSymbolicOperands(n.value.get()));
+    else if (!isa<AST::Call>(n.value))
+      choreo_unreachable("expecting the assignment value is an expr or call.");
+  }
   return true;
 }
 
@@ -1330,6 +1861,26 @@ bool LivenessAnalyzer::Visit(AST::ParallelBy& n) {
     events_to_add[current_stmt].insert({EventKind::Use, iv_symbol_name});
     paraby_bounded_vars.insert(iv_symbol_name);
     AddBinding(n.BPV()->name, iv_symbol_name);
+  }
+
+  if (n.GetLevel() == ParallelLevel::GROUPx4) {
+    std::string scope = SSTab().ScopeName();
+    auto& state = hb_build_states[scope];
+    state.paraby_scope = scope;
+    state.pv_name = n.BPV()->name;
+    auto bv = n.BoundValue();
+    if (IsValidValueItem(bv)) {
+      auto v = VIInt(bv);
+      state.pv_bound = v.has_value() ? v.value() : -1;
+    } else {
+      state.pv_bound = -1;
+    }
+    state.next_phase_id = 0;
+    cur_hb_state = &state;
+    pending_phases.clear();
+    VST_DEBUG(dbgs() << "[HB] Entered GROUPx4 parallel scope: " << scope
+                     << " pv=" << state.pv_name << " bound=" << state.pv_bound
+                     << "\n");
   }
   return true;
 }
@@ -1407,11 +1958,47 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     AddUse(current_stmt, GetAllSymbolicOperands(pc->GetPadValue().get()));
   }
 
+  if (!n.future.empty()) {
+    RecordHBBufferAccess(InScopeName(n.ToSymbol()), "DMA-to");
+    RecordHBBufferAccess(InScopeName(n.FromSymbol()), "DMA-from");
+  }
+
   return true;
 }
 
 bool LivenessAnalyzer::Visit(AST::MMA& n) {
   TraceEachVisit(n);
+  auto op = n.GetOperation();
+  switch (op->Tag()) {
+  case AST::MMAOperation::Fill: break;
+  case AST::MMAOperation::Load: break;
+  case AST::MMAOperation::Exec: {
+    for (int i = 1; i <= 2; i++) {
+      auto operand = op->ExecOperand(i);
+      if (!operand) continue;
+      if (auto expr = dyn_cast<AST::Expr>(operand.get())) {
+        if (expr->op == Op::ElemOf) {
+          auto base = AST::GetArrayBaseSymbol(*expr);
+          if (base) RecordHBBufferAccess(InScopeName(base->name), "MMA-exec");
+        } else if (auto sym = expr->GetSymbol()) {
+          RecordHBBufferAccess(InScopeName(sym->name), "MMA-exec");
+        }
+      }
+    }
+    break;
+  }
+  case AST::MMAOperation::Store: {
+    auto store_to = op->StoreTo();
+    if (store_to)
+      RecordHBBufferAccess(InScopeName(store_to->RefSymbol()), "MMA-store");
+    break;
+  }
+  case AST::MMAOperation::Commit: break;
+  case AST::MMAOperation::Scale: break;
+  case AST::MMAOperation::Wait: break;
+  case AST::MMAOperation::LoadR: break;
+  }
+
   stmt_linfo[current_stmt].buffer_related = true;
   auto op = n.GetOperation();
   switch (op->Tag()) {
@@ -1470,6 +2057,11 @@ bool LivenessAnalyzer::Visit(AST::Wait& n) {
       }
     } else {
       AddUse(current_stmt, GetEventName(*item));
+
+      if (cur_hb_state && cur_wg_id >= 0) {
+        std::string event_base = InScopeName(GetEventName(*item));
+        StartNewHBPhase(event_base);
+      }
     }
   }
   return true;
@@ -1494,9 +2086,9 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
       // TODO: will only the dims of future be used?
       assert(isa<FutureType>(expr->GetR()->GetType()) &&
              "expect a future operand.");
-      if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol())
+      if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
         AddUse(current_stmt, id->name);
-      else
+      } else
         choreo_unreachable("Can not retrieve name of the future.");
     } else if (expr->op == Op::AddrOf) {
       if (auto id = AST::GetIdentifier(expr->GetR()))
@@ -1544,8 +2136,10 @@ bool LivenessAnalyzer::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
   std::string cur_scope = SSTab().ScopeName();
   visiting_synchronize = true;
+  adding_synthetic_uses = true;
   for (const auto& [scope, vars] : async_inthreads_vars) {
     if (!PrefixedWith(scope, cur_scope)) continue;
+    // TODO: Check if this pattern is done.
     // the scope of vars is inside cur_scope.
     /*
     {
@@ -1556,13 +2150,24 @@ bool LivenessAnalyzer::Visit(AST::Synchronize& n) {
     */
     for (const auto& var : vars) AddUse(&n, var, false);
   }
+  adding_synthetic_uses = false;
   visiting_synchronize = false;
+  if (cur_hb_state) cta_barrier_since_last_inthreads = true;
   return true;
 }
 
 bool LivenessAnalyzer::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
-  for (const auto& e : n.GetEvents()) AddUse(&n, GetEventName(*e));
+  for (const auto& e : n.GetEvents()) {
+    AddUse(&n, GetEventName(*e));
+
+    if (cur_hb_state && cur_wg_id >= 0 && cur_hb_phase) {
+      std::string event_base = InScopeName(GetEventName(*e));
+      cur_hb_phase->signal_out = event_base;
+      FinalizeHBPhase();
+      StartNewHBPhase("");
+    }
+  }
   return true;
 }
 
