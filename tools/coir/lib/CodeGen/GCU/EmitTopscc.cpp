@@ -981,16 +981,23 @@ private:
 
   void emitDataCopy(DataCopyOp op) {
     auto kind = op.getKind();
+
+    auto srcTile = getTileDefiningOp(op.getSource());
+    auto dstTile = getTileDefiningOp(op.getDest());
+
+    bool isSlice = srcTile && !dstTile;
+    bool isDeslice = !srcTile && dstTile;
+    bool isSliceDeslice = srcTile && dstTile;
+
+    if (kind != coir::DMAKind::Copy) {
+      isSlice = isDeslice = isSliceDeslice = false;
+    }
+
     bool useIndividualShapes = (kind != coir::DMAKind::Copy);
     int64_t srcElems = tensorElems(op.getSource());
     int64_t dstElems = tensorElems(op.getDest());
     int64_t copyElems = std::max(srcElems, dstElems);
-    std::string srcMds = useIndividualShapes
-        ? emitMdspanWithShape(op.getSource())
-        : emitCopyMdspan(op.getSource(), copyElems);
-    std::string dstMds = useIndividualShapes
-        ? emitMdspanWithShape(op.getDest())
-        : emitCopyMdspan(op.getDest(), copyElems);
+
     bool isAsync = op.getAsync() && hasAsyncUses(op.getToken());
     unsigned id = nextDmaId++;
     std::string ctxName = "__dte_" + std::to_string(id);
@@ -1002,7 +1009,51 @@ private:
 
     std::string evName = futName + "__event__";
 
-    if (kind == coir::DMAKind::Pad) {
+    if (isSlice) {
+      std::string dstMds = emitMdspanWithShape(op.getDest());
+      std::string srcMds = emitFullBaseMdspan(srcTile);
+      std::string offArr = emitSliceOffsets(srcTile, futName);
+      std::string api = isAsync ? "tops::slice_async" : "tops::slice";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", " << offArr << ");\n";
+    } else if (isDeslice) {
+      std::string srcMds = emitMdspanWithShape(op.getSource());
+      std::string dstMds = emitFullBaseMdspan(dstTile);
+      std::string offArr = emitSliceOffsets(dstTile, futName);
+      std::string api = isAsync ? "tops::deslice_async" : "tops::deslice";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", " << offArr << ");\n";
+    } else if (isSliceDeslice) {
+      std::string srcMds = emitFullBaseMdspan(srcTile);
+      std::string dstMds = emitFullBaseMdspan(dstTile);
+      std::string srcOff = emitSliceOffsets(srcTile, futName + "_s");
+      auto srcTileTy =
+          cast<coir::TensorType>(srcTile.getResult().getType());
+      os << getIndent() << "unsigned int " << futName << "__sshape__[] = {";
+      for (unsigned i = 0; i < srcTileTy.getShape().size(); ++i) {
+        if (i) os << ", ";
+        os << srcTileTy.getShape()[i];
+      }
+      os << "};\n";
+      std::string dstOff = emitSliceOffsets(dstTile, futName + "_d");
+      std::string api = isAsync ? "tops::slice_deslice_async"
+                                : "tops::slice_deslice";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", "
+         << srcOff << ", " << futName << "__sshape__, " << dstOff << ");\n";
+    } else if (kind == coir::DMAKind::Pad) {
+      std::string srcMds = useIndividualShapes
+          ? emitMdspanWithShape(op.getSource())
+          : emitCopyMdspan(op.getSource(), copyElems);
+      std::string dstMds = useIndividualShapes
+          ? emitMdspanWithShape(op.getDest())
+          : emitCopyMdspan(op.getDest(), copyElems);
       emitPadArraysFromDataCopy(op, futName);
       std::string padValStr = emitPadValueFromDataCopy(op);
       std::string api = isAsync ? "tops::pad_async" : "tops::pad";
@@ -1013,6 +1064,12 @@ private:
          << futName << "__pad_low__, " << futName << "__pad_high__, "
          << futName << "__pad_mid__, " << padValStr << ");\n";
     } else if (kind == coir::DMAKind::Transpose) {
+      std::string srcMds = useIndividualShapes
+          ? emitMdspanWithShape(op.getSource())
+          : emitCopyMdspan(op.getSource(), copyElems);
+      std::string dstMds = useIndividualShapes
+          ? emitMdspanWithShape(op.getDest())
+          : emitCopyMdspan(op.getDest(), copyElems);
       emitTransposeLayoutFromDataCopy(op, futName);
       std::string api = isAsync ? "tops::transpose_async" : "tops::transpose";
       os << getIndent();
@@ -1021,6 +1078,8 @@ private:
          << dstMds << ", " << srcMds << ", "
          << futName << "__layout__);\n";
     } else {
+      std::string srcMds = emitCopyMdspan(op.getSource(), copyElems);
+      std::string dstMds = emitCopyMdspan(op.getDest(), copyElems);
       std::string api = isAsync ? "tops::memcpy_async" : "tops::memcpy";
       os << getIndent();
       if (isAsync) os << "tops::event " << evName << " = ";
@@ -1080,18 +1139,70 @@ private:
     os << "};\n";
   }
 
+  TensorTileOp getTileDefiningOp(Value v) {
+    return v.getDefiningOp<TensorTileOp>();
+  }
+
+  std::string emitFullBaseMdspan(TensorTileOp tile) {
+    Value base = tile.getSource();
+    auto baseTy = cast<coir::TensorType>(base.getType());
+    std::string name = getName(base);
+    std::string space;
+    int32_t ms = baseTy.getMemorySpace();
+    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
+      space = "tops::Private";
+    else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Shared))
+      space = "tops::Shared";
+    else
+      space = "tops::Global";
+    std::string result = "tops::mdspan(" + space + ", (" +
+                         emitType(baseTy.getElementType()) + "*)" + name;
+    for (auto dim : baseTy.getShape())
+      result += ", " + std::to_string(dim);
+    result += ")";
+    return result;
+  }
+
+  std::string emitSliceOffsets(TensorTileOp tile, const std::string &prefix) {
+    auto tileTy = cast<coir::TensorType>(tile.getResult().getType());
+    auto baseTy = cast<coir::TensorType>(tile.getSource().getType());
+    auto tileShape = tileTy.getShape();
+    auto baseShape = baseTy.getShape();
+    auto indices = tile.getIndices();
+    std::string arrName = prefix + "__off__";
+    os << getIndent() << "int " << arrName << "[] = {";
+    for (unsigned i = 0; i < baseShape.size(); ++i) {
+      if (i) os << ", ";
+      if (i < indices.size()) {
+        int64_t chunkDim = (i < tileShape.size()) ? tileShape[i] : 1;
+        os << getName(indices[i]) << " * " << chunkDim;
+      } else {
+        os << "0";
+      }
+    }
+    os << "};\n";
+    return arrName;
+  }
+
   void emitDmaCopy(DmaCopyOp op) {
     auto kind = op.getKind();
+
+    auto srcTile = getTileDefiningOp(op.getSource());
+    auto dstTile = getTileDefiningOp(op.getDest());
+
+    bool isSlice = srcTile && !dstTile;
+    bool isDeslice = !srcTile && dstTile;
+    bool isSliceDeslice = srcTile && dstTile;
+
+    if (kind != coir::DMAKind::Copy) {
+      isSlice = isDeslice = isSliceDeslice = false;
+    }
+
     bool useIndividualShapes = (kind != coir::DMAKind::Copy);
     int64_t srcElems = tensorElems(op.getSource());
     int64_t dstElems = tensorElems(op.getDest());
     int64_t copyElems = std::max(srcElems, dstElems);
-    std::string srcMds = useIndividualShapes
-        ? emitMdspanWithShape(op.getSource())
-        : emitCopyMdspan(op.getSource(), copyElems);
-    std::string dstMds = useIndividualShapes
-        ? emitMdspanWithShape(op.getDest())
-        : emitCopyMdspan(op.getDest(), copyElems);
+
     bool isAsync = hasAsyncUses(op.getToken());
     unsigned id = nextDmaId++;
     std::string ctxName = "__dte_" + std::to_string(id);
@@ -1103,52 +1214,89 @@ private:
 
     std::string evName = futName + "__event__";
 
-    if (kind == coir::DMAKind::Pad) {
+    if (isSlice) {
+      std::string dstMds = emitMdspanWithShape(op.getDest());
+      std::string srcMds = emitFullBaseMdspan(srcTile);
+      std::string offArr = emitSliceOffsets(srcTile, futName);
+      std::string api = isAsync ? "tops::slice_async" : "tops::slice";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", " << offArr << ");\n";
+    } else if (isDeslice) {
+      std::string srcMds = emitMdspanWithShape(op.getSource());
+      std::string dstMds = emitFullBaseMdspan(dstTile);
+      std::string offArr = emitSliceOffsets(dstTile, futName);
+      std::string api = isAsync ? "tops::deslice_async" : "tops::deslice";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", " << offArr << ");\n";
+    } else if (isSliceDeslice) {
+      std::string srcMds = emitFullBaseMdspan(srcTile);
+      std::string dstMds = emitFullBaseMdspan(dstTile);
+      std::string srcOff = emitSliceOffsets(srcTile, futName + "_s");
+      auto srcTileTy = cast<coir::TensorType>(srcTile.getResult().getType());
+      os << getIndent() << "unsigned int " << futName << "__sshape__[] = {";
+      for (unsigned i = 0; i < srcTileTy.getShape().size(); ++i) {
+        if (i) os << ", ";
+        os << srcTileTy.getShape()[i];
+      }
+      os << "};\n";
+      std::string dstOff = emitSliceOffsets(dstTile, futName + "_d");
+      std::string api = isAsync ? "tops::slice_deslice_async"
+                                : "tops::slice_deslice";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", "
+         << srcOff << ", " << futName << "__sshape__, " << dstOff << ");\n";
+    } else if (kind == coir::DMAKind::Pad) {
+      std::string srcMds = useIndividualShapes
+          ? emitMdspanWithShape(op.getSource())
+          : emitCopyMdspan(op.getSource(), copyElems);
+      std::string dstMds = useIndividualShapes
+          ? emitMdspanWithShape(op.getDest())
+          : emitCopyMdspan(op.getDest(), copyElems);
       emitPadArrays(op, futName);
       std::string padValStr = emitPadValue(op);
-      if (isAsync) {
-        os << getIndent() << "tops::event " << evName
-           << " = tops::pad_async(*" << futName << ".get_ctx(), "
-           << dstMds << ", " << srcMds << ", "
-           << futName << "__pad_low__, " << futName << "__pad_high__, "
-           << futName << "__pad_mid__, " << padValStr << ");\n";
-        os << getIndent() << futName << ".set_event(" << evName << ");\n";
-      } else {
-        os << getIndent() << "tops::pad(*" << futName << ".get_ctx(), "
-           << dstMds << ", " << srcMds << ", "
-           << futName << "__pad_low__, " << futName << "__pad_high__, "
-           << futName << "__pad_mid__, " << padValStr << ");\n";
-        os << getIndent() << futName << ".set_nowait();\n";
-      }
+      std::string api = isAsync ? "tops::pad_async" : "tops::pad";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", "
+         << futName << "__pad_low__, " << futName << "__pad_high__, "
+         << futName << "__pad_mid__, " << padValStr << ");\n";
     } else if (kind == coir::DMAKind::Transpose) {
+      std::string srcMds = useIndividualShapes
+          ? emitMdspanWithShape(op.getSource())
+          : emitCopyMdspan(op.getSource(), copyElems);
+      std::string dstMds = useIndividualShapes
+          ? emitMdspanWithShape(op.getDest())
+          : emitCopyMdspan(op.getDest(), copyElems);
       emitTransposeLayout(op, futName);
-      if (isAsync) {
-        os << getIndent() << "tops::event " << evName
-           << " = tops::transpose_async(*" << futName << ".get_ctx(), "
-           << dstMds << ", " << srcMds << ", "
-           << futName << "__layout__);\n";
-        os << getIndent() << futName << ".set_event(" << evName << ");\n";
-      } else {
-        os << getIndent() << "tops::transpose(*" << futName << ".get_ctx(), "
-           << dstMds << ", " << srcMds << ", "
-           << futName << "__layout__);\n";
-        os << getIndent() << futName << ".set_nowait();\n";
-      }
+      std::string api = isAsync ? "tops::transpose_async" : "tops::transpose";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", "
+         << futName << "__layout__);\n";
     } else {
-      if (isAsync) {
-        os << getIndent() << "tops::event " << evName
-           << " = tops::memcpy_async(*" << futName << ".get_ctx(), "
-           << dstMds << ", " << srcMds << ");\n";
-        os << getIndent() << futName << ".set_event(" << evName << ");\n";
-      } else {
-        os << getIndent() << "tops::memcpy(*" << futName << ".get_ctx(), "
-           << dstMds << ", " << srcMds << ");\n";
-        os << getIndent() << futName << ".set_nowait();\n";
-      }
+      std::string srcMds = emitCopyMdspan(op.getSource(), copyElems);
+      std::string dstMds = emitCopyMdspan(op.getDest(), copyElems);
+      std::string api = isAsync ? "tops::memcpy_async" : "tops::memcpy";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ");\n";
     }
 
-    if (isAsync)
+    if (isAsync) {
+      os << getIndent() << futName << ".set_event(" << evName << ");\n";
       asyncFutures[op.getToken()] = futName;
+    } else {
+      os << getIndent() << futName << ".set_nowait();\n";
+    }
   }
 
   void emitPadArrays(DmaCopyOp op, const std::string &futName) {

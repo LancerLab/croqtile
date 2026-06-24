@@ -1,0 +1,34 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Async slice + deslice: 128-elem input, 4 blocks, each block slices a
+// 32-elem chunk, adds 10, then deslices back asynchronously.
+
+__co__ s32 [128] test_async_slice_deslice(s32 [128] input) {
+  s32 [128] output;
+  parallel p by 4 {
+    f = dma.copy.async input.chunkat(p) => local;
+    wait f;
+    local s32 [32] tmp;
+    foreach i in [32] {
+      tmp.at(i) = f.data.at(i) + 10;
+    }
+    g = dma.copy.async tmp => output.chunkat(p);
+    wait g;
+  }
+  return output;
+}
+
+int main() {
+  auto in = choreo::make_spandata<choreo::s32>(128);
+  for (int i = 0; i < 128; ++i) in[i] = i;
+
+  auto res = test_async_slice_deslice(in.view());
+
+  for (int i = 0; i < 128; ++i)
+    choreo::choreo_assert(res[i] == i + 10, "mismatch");
+
+  std::cout << "PASS: dma-deslice-async" << std::endl;
+}
+
+// CHECK: PASS: dma-deslice-async

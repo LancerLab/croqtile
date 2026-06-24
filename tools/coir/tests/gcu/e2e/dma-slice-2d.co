@@ -1,0 +1,36 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// 2D slice: 4x6 input split across 2 blocks, each processing a 2x6 tile.
+
+__co__ s32 [4, 6] test_slice_2d(s32 [4, 6] input) {
+  s32 [4, 6] output;
+  parallel p by 2 {
+    f = dma.copy.async input.chunkat(p, _) => local;
+    wait f;
+    local s32 [2, 6] tmp;
+    foreach i in [2] {
+      foreach j in [6] {
+        tmp.at(i, j) = f.data.at(i, j) * 2;
+      }
+    }
+    dma.copy tmp => output.chunkat(p, _);
+  }
+  return output;
+}
+
+int main() {
+  auto in = choreo::make_spandata<choreo::s32>(4, 6);
+  auto in_p = in.data();
+  for (int i = 0; i < 24; ++i) in_p[i] = i + 1;
+
+  auto res = test_slice_2d(in.view());
+  auto res_p = res.data();
+
+  for (int i = 0; i < 24; ++i)
+    choreo::choreo_assert(res_p[i] == (i + 1) * 2, "mismatch");
+
+  std::cout << "PASS: dma-slice-2d" << std::endl;
+}
+
+// CHECK: PASS: dma-slice-2d

@@ -1065,7 +1065,7 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
 
   llvm::SmallVector<int64_t> resultShape;
   for (auto d : tileShape)
-    if (d != 1) resultShape.push_back(d);
+    resultShape.push_back(d);
   if (resultShape.empty()) resultShape.push_back(1);
 
   auto tileTy = coir::TensorType::get(
