@@ -29,6 +29,7 @@ public:
   void emitModule(ModuleOp module) {
     // Read target arch for per-arch DTE type selection.
     archStr = CoIR::GetArch(module).str();
+    archNum = parseArchNum(archStr);
 
     // Pre-scan to detect MMA ops so we can include the acore header early.
     for (auto &op : module.getBody()->getOperations()) {
@@ -63,10 +64,23 @@ private:
   llvm::raw_ostream &os;
   unsigned indent;
   std::string archStr;
+  int archNum = 0;
   DenseMap<Value, std::string> valueNames;
   DenseMap<unsigned, std::string> returnParamNames;
   DenseSet<Value> returnValues;
   unsigned nextId = 0;
+
+  bool hasGroupLevel() const { return archNum >= 400; }
+
+  int parseArchNum(llvm::StringRef arch) {
+    auto s = arch.str();
+    auto it = s.rbegin();
+    while (it != s.rend() && !std::isdigit(*it)) ++it;
+    auto numEnd = it;
+    while (it != s.rend() && std::isdigit(*it)) ++it;
+    if (it == numEnd) return 0;
+    return std::stoi(std::string(it.base(), numEnd.base()));
+  }
 
   std::string getIndent() { return std::string(indent * 2, ' '); }
   void incIndent() { indent++; }
@@ -166,6 +180,44 @@ private:
     return found;
   }
 
+  struct LaunchConfig {
+    SmallVector<int64_t> blockDims;  // BLOCK bounds -> gridDim
+    SmallVector<int64_t> groupDims;  // GROUP bounds -> blockDim (gcu400+)
+    SmallVector<int64_t> threadDims; // THREAD bounds -> blockDim (gcu300) or
+                                     // __thread_dims__ (gcu400+)
+  };
+
+  LaunchConfig collectLaunchConfig(KernelOp kernel) {
+    LaunchConfig lc;
+    kernel.walk([&](ParallelOp p) {
+      auto bounds = p.getBounds();
+      switch (p.getLevel()) {
+      case ParallelLevel::BLOCK:
+        for (auto b : bounds) lc.blockDims.push_back(b);
+        break;
+      case ParallelLevel::GROUP:
+        for (auto b : bounds) lc.groupDims.push_back(b);
+        break;
+      case ParallelLevel::THREAD:
+        for (auto b : bounds) lc.threadDims.push_back(b);
+        break;
+      default:
+        break;
+      }
+    });
+    return lc;
+  }
+
+  std::string emitDim3(ArrayRef<int64_t> dims) {
+    std::string s;
+    llvm::raw_string_ostream ss(s);
+    auto d = [&](unsigned i) -> int64_t {
+      return i < dims.size() ? dims[i] : 1;
+    };
+    ss << "dim3(" << d(0) << ", " << d(1) << ", " << d(2) << ")";
+    return s;
+  }
+
   void emitDeviceFunction(KernelOp kernel) {
     preCollectStubs(kernel);
 
@@ -175,6 +227,15 @@ private:
     }
 
     auto fnType = kernel.getFunctionType();
+
+    if (hasGroupLevel()) {
+      auto lc = collectLaunchConfig(kernel);
+      auto td = [&](unsigned i) -> int64_t {
+        return i < lc.threadDims.size() ? lc.threadDims[i] : 1;
+      };
+      os << "__thread_dims__(" << td(0) << ", " << td(1) << ", " << td(2)
+         << ")\n";
+    }
 
     os << "__device__ void " << kernel.getSymName() << "(";
 
@@ -239,22 +300,6 @@ private:
     return n;
   }
 
-  int64_t getGridDim(KernelOp kernel) {
-    auto &body = kernel.getBody();
-    if (body.empty()) return 1;
-    for (auto &op : body.front().getOperations()) {
-      auto parallel = dyn_cast<ParallelOp>(op);
-      if (!parallel) continue;
-      if (parallel.getLevel() != ParallelLevel::BLOCK) continue;
-      auto bounds = parallel.getBounds();
-      if (bounds.empty()) continue;
-      int64_t grid = 1;
-      for (auto b : bounds) grid *= b;
-      return grid;
-    }
-    return 1;
-  }
-
   std::string hostReturnType(FunctionType fnType) {
     if (fnType.getNumResults() == 0) return "void";
     Type resTy = fnType.getResult(0);
@@ -282,6 +327,14 @@ private:
       int retInputIdx = getReturnInputArgIdx(kernel, 0);
       std::string eType = emitType(resTy.getElementType());
 
+      if (hasGroupLevel()) {
+        auto lc = collectLaunchConfig(kernel);
+        auto td = [&](unsigned i) -> int64_t {
+          return i < lc.threadDims.size() ? lc.threadDims[i] : 1;
+        };
+        os << "__thread_dims__(" << td(0) << ", " << td(1) << ", " << td(2)
+           << ")\n";
+      }
       os << "__global__ void __coir_global_" << name.str() << "(";
       for (unsigned i = 0; i < numInputs; ++i) {
         if (i > 0) os << ", ";
@@ -350,7 +403,11 @@ private:
     unsigned ndim = resTy.getShape().size();
     int64_t resN = getTensorNumElems(resTy);
     int64_t resBytes = getTensorBytes(resTy);
-    int64_t gridDim = getGridDim(kernel);
+    auto lc = collectLaunchConfig(kernel);
+    std::string gdims = emitDim3(lc.blockDims);
+    std::string bdims = hasGroupLevel()
+                            ? emitDim3(lc.groupDims)
+                            : emitDim3(lc.threadDims);
 
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
@@ -382,7 +439,8 @@ private:
     }
 
     if (retInputIdx >= 0) {
-      os << "  __coir_global_" << name.str() << "<<<" << gridDim << ", 1>>>(";
+      os << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
+         << bdims << ">>>(";
       for (unsigned i = 0; i < numInputs; ++i) {
         if (i > 0) os << ", ";
         os << "p" << i << "__device";
@@ -405,8 +463,8 @@ private:
       os << "  " << eType << "* __result__device = nullptr;\n";
       os << "  topsMalloc((void**)&__result__device, " << resBytes
          << "ULL);\n";
-      os << "  __coir_global_" << name.str() << "<<<" << gridDim
-         << ", 1>>>(";
+      os << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
+         << bdims << ">>>(";
       for (unsigned i = 0; i < numInputs; ++i) {
         if (i > 0) os << ", ";
         os << "p" << i << "__device";
@@ -511,16 +569,38 @@ private:
     auto bounds = op.getBounds();
     auto &body = op.getBody();
     auto args = body.getArguments();
+    const char *dimName[] = {"x", "y", "z"};
 
     os << getIndent() << "// parallel level="
        << stringifyParallelLevel(level) << "\n";
 
-    if (level == ParallelLevel::BLOCK) {
+    bool useHwId = false;
+    std::string idPrefix;
+
+    switch (level) {
+    case ParallelLevel::BLOCK:
+      useHwId = true;
+      idPrefix = "__tops_bid_";
+      break;
+    case ParallelLevel::GROUP:
+      useHwId = true;
+      idPrefix = "__tops_tid_";
+      break;
+    case ParallelLevel::THREAD:
+      useHwId = true;
+      idPrefix = hasGroupLevel() ? "__tops_stid_" : "__tops_tid_";
+      break;
+    default:
+      break;
+    }
+
+    if (useHwId) {
       for (unsigned i = 0; i < args.size(); ++i) {
         std::string name = "pid_" + std::to_string(nextId++);
         valueNames[args[i]] = name;
-        os << getIndent() << "int " << name
-           << " = tops::block_idx_x();  // bound=" << bounds[i] << "\n";
+        unsigned dim = std::min(i, 2u);
+        os << getIndent() << "int " << name << " = " << idPrefix
+           << dimName[dim] << "();  // bound=" << bounds[i] << "\n";
       }
       os << getIndent() << "{\n";
       incIndent();

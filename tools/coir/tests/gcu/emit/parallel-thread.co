@@ -1,0 +1,20 @@
+// RUN: cocc -t topscc -es -arch=gcu300 %s -o - | FileCheck %s
+//
+// Verify THREAD-level parallel on gcu300: __tops_tid_* (no stid on gcu300).
+
+__co__ s32 [8] test_thread(s32 [8] input) {
+  s32 [8] output;
+  parallel p by 2 : block {
+    parallel q by 4 : thread {
+      output.at(p * 4 + q) = input.at(p * 4 + q) * 2;
+    }
+  }
+  return output;
+}
+
+// CHECK-NOT: __thread_dims__
+// CHECK: __device__ void test_thread(
+// CHECK: int pid_{{[0-9]+}} = __tops_bid_x();
+// CHECK: int pid_{{[0-9]+}} = __tops_tid_x();
+
+// CHECK: <<<dim3(2, 1, 1), dim3(4, 1, 1)>>>
