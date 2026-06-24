@@ -24,7 +24,7 @@ func.func @test_frag_types(
 
 // Test coir.token type
 // CHECK-LABEL: func.func @test_token_type
-func.func @test_token_type(%t: !coir.token) {
-  // CHECK: !coir.token
+func.func @test_token_type(%t: !coir.async) {
+  // CHECK: !coir.async
   func.return
 }

@@ -46,7 +46,7 @@ coir.kernel @test_dma_copy_desc(
       : !coir.tensor<1024xf32, global> -> !coir.tensor<64xf32, global>
     %tok = coir.dma.copy %tile to %buf
       : !coir.tensor<64xf32, global> -> !coir.tensor<64xf32, local>
-    coir.wait %tok : !coir.token
+    coir.wait %tok : !coir.async
 
     // CHECK: coir.dma.runtime.desc %[[RT2]] offsets(%{{.*}})
     // CHECK: coir.dma.invoke
@@ -68,7 +68,7 @@ coir.kernel @test_no_iv_dep(
     // CHECK-NOT: coir.dma.const.desc
     %tok = coir.dma.copy %src to %buf
       : !coir.tensor<64xf32, global> -> !coir.tensor<64xf32, local>
-    coir.wait %tok : !coir.token
+    coir.wait %tok : !coir.async
     coir.yield
   }
 }

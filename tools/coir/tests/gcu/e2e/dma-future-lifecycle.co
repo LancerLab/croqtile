@@ -1,0 +1,37 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Test: async DMA with choreo::future lifecycle -- proper wait, no diagnosis error.
+// Verifies that __CHOREO_DMA_DIAGNOSIS__ is enabled and futures are correctly
+// waited (no destructor abort).
+
+__co__ auto dma_lifecycle(s32 [64] input) {
+  s32 [input.span] output;
+
+  parallel p by 1 {
+    f = dma.copy.async input.chunkat(p) => local;
+    wait f;
+
+    local s32 [64] tmp;
+    foreach i in [tmp.span]
+      tmp.at(i) = f.data.at(i) * 2;
+
+    dma.copy tmp => output.chunkat(p);
+  }
+
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(64);
+  for (size_t i = 0; i < 64; ++i) a[i] = static_cast<int>(i);
+
+  auto res = dma_lifecycle(a.view());
+
+  for (size_t i = 0; i < 64; ++i)
+    choreo::choreo_assert(res[i] == static_cast<int>(i) * 2, "mismatch");
+
+  std::cout << "PASS: dma future lifecycle" << std::endl;
+}
+
+// CHECK: PASS: dma future lifecycle

@@ -425,6 +425,11 @@ private:
 
   unsigned nextDmaId = 0;
   DenseMap<Value, std::string> dmaCtxNames;
+  DenseMap<Value, std::string> asyncFutures;
+
+  bool hasAsyncUses(Value asyncHandle) {
+    return asyncHandle && !asyncHandle.use_empty();
+  }
 
   void emitOp(Operation *op) {
     if (auto parallel = dyn_cast<ParallelOp>(op))
@@ -463,6 +468,8 @@ private:
       emitBarrier(barrier);
     else if (auto wait = dyn_cast<WaitOp>(op))
       emitWait(wait);
+    else if (auto rotate = dyn_cast<FutureRotateOp>(op))
+      emitFutureRotate(rotate);
     else if (auto ret = dyn_cast<KernelReturnOp>(op))
       emitKernelReturn(ret);
     else if (auto yield = dyn_cast<YieldOp>(op))
@@ -909,53 +916,108 @@ private:
     }
   }
 
+  std::string emitCopyMdspan(Value tensor, int64_t transferElems) {
+    auto tty = cast<coir::TensorType>(tensor.getType());
+    std::string name = getName(tensor);
+    std::string space;
+    int32_t ms = tty.getMemorySpace();
+    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
+      space = "tops::Private";
+    else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Shared))
+      space = "tops::Shared";
+    else
+      space = "tops::Global";
+    return "tops::mdspan(" + space + ", (" +
+           emitType(tty.getElementType()) + "*)" + name + ", " +
+           std::to_string(transferElems) + ")";
+  }
+
+  int64_t tensorElems(Value v) {
+    auto tty = cast<coir::TensorType>(v.getType());
+    int64_t n = 1;
+    for (auto d : tty.getShape()) n *= d;
+    return n;
+  }
+
   void emitDataCopy(DataCopyOp op) {
-    std::string src = getName(op.getSource());
-    std::string dst = getName(op.getDest());
-    auto dstTy = cast<coir::TensorType>(op.getDest().getType());
-    int64_t totalElems = 1;
-    for (auto d : dstTy.getShape()) totalElems *= d;
+    int64_t elems = std::max(tensorElems(op.getSource()),
+                             tensorElems(op.getDest()));
+    std::string srcMds = emitCopyMdspan(op.getSource(), elems);
+    std::string dstMds = emitCopyMdspan(op.getDest(), elems);
+    bool isAsync = op.getAsync() && hasAsyncUses(op.getToken());
+    unsigned id = nextDmaId++;
+    std::string ctxName = "__dte_" + std::to_string(id);
+    std::string futName = "__fut_" + std::to_string(id);
 
-    os << getIndent() << "{\n";
-    incIndent();
-    os << getIndent() << getDTEType() << " __dma_ctx;\n";
-    if (needsExplicitInit())
-      os << getIndent() << "__dma_ctx.init();\n";
-    os << getIndent() << "tops::memcpy(__dma_ctx, tops::mdspan("
-       << dst << ", " << totalElems << "), tops::mdspan("
-       << src << ", " << totalElems << "));\n";
-    decIndent();
-    os << getIndent() << "}\n";
+    os << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    os << getIndent() << "choreo::future " << futName << "("
+       << ctxName << ", \"dma_" << id << "\", 0, 0);\n";
 
-    if (op.getToken())
-      valueNames[op.getToken()] = "/* dma_token */";
+    if (isAsync) {
+      std::string evName = futName + "__event__";
+      os << getIndent() << "tops::event " << evName
+         << " = tops::memcpy_async(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ");\n";
+      os << getIndent() << futName << ".set_event(" << evName << ");\n";
+      asyncFutures[op.getToken()] = futName;
+    } else {
+      os << getIndent() << "tops::memcpy(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ");\n";
+      os << getIndent() << futName << ".set_nowait();\n";
+    }
   }
 
   void emitDmaCopy(DmaCopyOp op) {
-    std::string src = getName(op.getSource());
-    std::string dst = getName(op.getDest());
-    auto srcTy = cast<coir::TensorType>(op.getSource().getType());
-    auto dstTy = cast<coir::TensorType>(op.getDest().getType());
-    int64_t srcElems = 1, dstElems = 1;
-    for (auto d : srcTy.getShape()) srcElems *= d;
-    for (auto d : dstTy.getShape()) dstElems *= d;
-    int64_t totalElems = std::max(srcElems, dstElems);
+    int64_t elems = std::max(tensorElems(op.getSource()),
+                             tensorElems(op.getDest()));
+    std::string srcMds = emitCopyMdspan(op.getSource(), elems);
+    std::string dstMds = emitCopyMdspan(op.getDest(), elems);
+    bool isAsync = hasAsyncUses(op.getToken());
+    unsigned id = nextDmaId++;
+    std::string ctxName = "__dte_" + std::to_string(id);
+    std::string futName = "__fut_" + std::to_string(id);
 
-    std::string ctxName = "__dte_" + std::to_string(nextDmaId++);
     os << getIndent() << getDTEType() << " " << ctxName << ";\n";
-    if (needsExplicitInit())
-      os << getIndent() << ctxName << ".init();\n";
-    os << getIndent() << "tops::memcpy(" << ctxName << ", tops::mdspan("
-       << dst << ", " << totalElems << "), tops::mdspan("
-       << src << ", " << totalElems << "));\n";
+    os << getIndent() << "choreo::future " << futName << "("
+       << ctxName << ", \"dma_" << id << "\", 0, 0);\n";
 
-    if (op.getToken())
-      valueNames[op.getToken()] = ctxName;
+    if (isAsync) {
+      std::string evName = futName + "__event__";
+      os << getIndent() << "tops::event " << evName
+         << " = tops::memcpy_async(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ");\n";
+      os << getIndent() << futName << ".set_event(" << evName << ");\n";
+      asyncFutures[op.getToken()] = futName;
+    } else {
+      os << getIndent() << "tops::memcpy(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ");\n";
+      os << getIndent() << futName << ".set_nowait();\n";
+    }
   }
 
-  void emitWait(WaitOp /*op*/) {
-    // Blocking tops::memcpy completes synchronously; wait is a no-op.
-    // When async DMA is used, this would emit tops::wait(event).
+  void emitWait(WaitOp op) {
+    auto it = asyncFutures.find(op.getToken());
+    if (it != asyncFutures.end())
+      os << getIndent() << it->second << ".wait();\n";
+  }
+
+  void emitFutureRotate(FutureRotateOp op) {
+    auto inputs = op.getFutures();
+    auto outputs = op.getResults();
+    SmallVector<std::string> names;
+    for (auto in : inputs) {
+      auto it = asyncFutures.find(in);
+      names.push_back(it != asyncFutures.end() ? it->second : "?");
+    }
+    os << getIndent() << "choreo::rotate(";
+    for (unsigned i = 0; i < names.size(); ++i) {
+      if (i) os << ", ";
+      os << names[i];
+    }
+    os << ");\n";
+    // Left-rotate the map: output[i] gets the future name of input[(i+1) % n]
+    for (unsigned i = 0; i < names.size(); ++i)
+      asyncFutures[outputs[i]] = names[(i + 1) % names.size()];
   }
 
   std::string emitMdspan(Value tensor) {
@@ -964,14 +1026,12 @@ private:
     auto shape = tty.getShape();
     std::string space;
     int32_t ms = tty.getMemorySpace();
-    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Global))
-      space = "tops::Global";
+    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
+      space = "tops::Private";
     else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Shared))
       space = "tops::Shared";
-    else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
-      space = "tops::Private";
     else
-      space = "tops::Private";
+      space = "tops::Global";
 
     std::string result = "tops::mdspan(" + space + ", ("
       + emitType(tty.getElementType()) + "*)" + name;
@@ -982,27 +1042,30 @@ private:
   }
 
   void emitDMAConstDesc(DMAConstDescOp op) {
-    std::string ctxName = "__dma_" + std::to_string(nextDmaId++);
-    dmaCtxNames[op.getOut()] = ctxName;
+    unsigned id = nextDmaId++;
+    std::string ctxName = "__dma_" + std::to_string(id);
+    std::string futName = "__fut_desc_" + std::to_string(id);
+    dmaCtxNames[op.getOut()] = futName;
 
-    os << getIndent() << "tops::private_dte " << ctxName << ";\n";
-    os << getIndent() << ctxName << ".init();\n";
+    os << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    os << getIndent() << "choreo::future " << futName << "("
+       << ctxName << ", \"dma_desc_" << id << "\", 0, 0);\n";
 
     std::string srcMds = emitMdspan(op.getSource());
     std::string dstMds = emitMdspan(op.getDest());
 
     auto kind = op.getKind();
     if (kind == coir::DMAKind::Copy) {
-      os << getIndent() << ctxName << ".config_memcpy(" << dstMds << ", "
+      os << getIndent() << futName << ".configure(" << dstMds << ", "
          << srcMds << ");\n";
     } else if (kind == coir::DMAKind::Slice) {
-      os << getIndent() << ctxName << ".config_slice(" << dstMds << ", "
-         << srcMds << ", (int[]){0});\n";
+      os << getIndent() << futName << ".configure(" << dstMds << ", "
+         << srcMds << ");\n";
     } else if (kind == coir::DMAKind::Transpose) {
-      os << getIndent() << ctxName << ".config_memcpy(" << dstMds << ", "
+      os << getIndent() << futName << ".configure(" << dstMds << ", "
          << srcMds << ");\n";
     } else if (kind == coir::DMAKind::Pad) {
-      os << getIndent() << ctxName << ".config_memcpy(" << dstMds << ", "
+      os << getIndent() << futName << ".configure(" << dstMds << ", "
          << srcMds << ");\n";
     }
   }
@@ -1015,12 +1078,12 @@ private:
 
   void emitDMARuntimeDesc(DMADescRuntimeOp op) {
     auto it = dmaCtxNames.find(op.getIn());
-    std::string ctxName = (it != dmaCtxNames.end()) ? it->second : "__dma_?";
-    dmaCtxNames[op.getOut()] = ctxName;
+    std::string futName = (it != dmaCtxNames.end()) ? it->second : "__dma_?";
+    dmaCtxNames[op.getOut()] = futName;
 
     auto offsets = op.getOffsets();
     for (unsigned i = 0; i < offsets.size(); ++i) {
-      os << getIndent() << ctxName << ".set_src_offset(" << i << ", "
+      os << getIndent() << futName << ".set_offset(" << i << ", "
          << getName(offsets[i]) << ");\n";
     }
   }
@@ -1029,10 +1092,12 @@ private:
     auto it = dmaCtxNames.find(op.getDesc());
     std::string ctxName = (it != dmaCtxNames.end()) ? it->second : "__dma_?";
 
-    os << getIndent() << ctxName << ".trigger_and_wait();\n";
-
-    if (op.getDone())
-      valueNames[op.getDone()] = "/* dma_token */";
+    if (hasAsyncUses(op.getDone())) {
+      os << getIndent() << ctxName << ".trigger_only();\n";
+      asyncFutures[op.getDone()] = ctxName;
+    } else {
+      os << getIndent() << ctxName << ".trigger_and_wait();\n";
+    }
   }
 
   void emitLinearIndex(mlir::ValueRange indices, coir::TensorType tty) {
@@ -1201,6 +1266,7 @@ public:
       os << "\n__COCC_CHOREO_HEADER__\n\n";
     }
 
+    if (!sctx.target_setup.empty()) os << sctx.target_setup << "\n";
     if (!sctx.build_env.empty()) os << sctx.build_env;
 
     os << "TOPSCC=\"${TOPSCC:-topscc}\"\n";
@@ -1216,7 +1282,8 @@ public:
     emitHostCode(os, module);
 
     os << "\n__COIR_TOPSCC_SOURCE__\n\n";
-    os << "\"$TOPSCC\" ${CFLAGS} -I\"$TMPDIR\" "
+    os << "\"$TOPSCC\" ${CFLAGS} -D__CHOREO_DMA_DIAGNOSIS__"
+          " -I\"$TMPDIR\" -I\"$TMPDIR/topscc\" "
           "-o \"$BINFILE\" \"$TMPFILE\" -lpthread -ldl -lrt 2>&1\n";
     os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
     os << "  shift\n";

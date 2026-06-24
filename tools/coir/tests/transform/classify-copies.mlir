@@ -17,8 +17,8 @@ coir.kernel @test_global_to_shared(
 coir.kernel @test_async_global_to_shared(
     %src: !coir.tensor<128x64xf16>,
     %dst: !coir.tensor<128x64xf16, shared>) {
-  %tok = coir.data.copy %src to %dst async : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>, !coir.token
-  coir.wait %tok : !coir.token
+  %tok = coir.data.copy %src to %dst async : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>, !coir.async
+  coir.wait %tok : !coir.async
 }
 
 // shared -> shared becomes element.copy

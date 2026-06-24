@@ -451,6 +451,8 @@ private:
       emitBarrier(barrier);
     else if (auto wait = dyn_cast<WaitOp>(op))
       emitWait(wait);
+    else if (dyn_cast<FutureRotateOp>(op))
+      {}
     else if (auto reduceElem = dyn_cast<TensorReduceElemOp>(op))
       emitTensorReduceElem(reduceElem);
     else if (auto alloc = dyn_cast<TensorAllocOp>(op))

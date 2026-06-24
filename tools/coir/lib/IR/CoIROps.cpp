@@ -689,5 +689,33 @@ LogicalResult CoIRWhileOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// FutureRotateOp
+//===----------------------------------------------------------------------===//
+
+// Format: %r0, %r1 = coir.async.rotate %a, %b : !coir.async
+ParseResult FutureRotateOp::parse(OpAsmParser &parser, OperationState &result) {
+  SmallVector<OpAsmParser::UnresolvedOperand> operands;
+  Type tokenTy;
+  if (parser.parseOperandList(operands) ||
+      parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColon() || parser.parseType(tokenTy))
+    return failure();
+  SmallVector<Type> types(operands.size(), tokenTy);
+  if (parser.resolveOperands(operands, types, parser.getNameLoc(),
+                             result.operands))
+    return failure();
+  result.addTypes(types);
+  return success();
+}
+
+void FutureRotateOp::print(OpAsmPrinter &printer) {
+  printer << " ";
+  printer.printOperands(getFutures());
+  printer.printOptionalAttrDict((*this)->getAttrs());
+  if (!getFutures().empty())
+    printer << " : " << getFutures().front().getType();
+}
+
+//===----------------------------------------------------------------------===//
 // ElementCopyOp (uses declarative format, no custom parse/print needed)
 //===----------------------------------------------------------------------===//

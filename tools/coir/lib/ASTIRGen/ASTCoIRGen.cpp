@@ -1321,6 +1321,28 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
   return true;
 }
 
+bool ASTCoIRGen::Visit(AST::Rotate &rot) {
+  auto loc = Loc(rot);
+  llvm::SmallVector<std::string> names;
+  llvm::SmallVector<mlir::Value> tokens;
+  for (auto &node : rot.GetIds()) {
+    auto *id = dyn_cast<AST::Identifier>(node.get());
+    if (!id) continue;
+    auto val = LookupValue(id->name);
+    if (!val || !mlir::isa<coir::AsyncTokenType>(val.getType())) continue;
+    names.push_back(id->name);
+    tokens.push_back(val);
+  }
+  if (tokens.size() < 2) return true;
+  llvm::SmallVector<mlir::Type> resultTypes(tokens.size(),
+      coir::AsyncTokenType::get(builder.getContext()));
+  auto rotateOp = builder.create<coir::FutureRotateOp>(
+      loc, resultTypes, tokens);
+  for (unsigned i = 0; i < names.size(); ++i)
+    UpdateValue(names[i], rotateOp.getResult(i));
+  return true;
+}
+
 bool ASTCoIRGen::Visit(AST::Wait &w) {
   if (!w.targets) return true;
   auto loc = Loc(w);

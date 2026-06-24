@@ -66,6 +66,9 @@ void SetupScriptContext() {
     std::ostringstream env_ss;
     dcg->SetupBuildEnv(env_ss);
     sctx.build_env = env_ss.str();
+    std::ostringstream setup_ss;
+    dcg->EmitSetupFiles(setup_ss, "$TMPDIR");
+    sctx.target_setup = setup_ss.str();
   }
   auto arch_str = CCtx().GetArch();
   if (!arch_str.empty() && arch_str != "x86_64")

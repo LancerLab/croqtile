@@ -18,5 +18,5 @@ coir.kernel @test_dma_desc(
   %d2 = coir.dma.runtime.desc %d1 offsets(%c0) : !coir.desc.rt -> !coir.desc.rt
   // CHECK: coir.dma.invoke
   %t = coir.dma.invoke %d2 : !coir.desc.rt
-  coir.wait %t : !coir.token
+  coir.wait %t : !coir.async
 }
