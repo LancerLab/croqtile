@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GPU
 // RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t gpu -es %s | FileCheck --check-prefix=PTX %s
 //
 // Integral type operations: s32, u32.
 
@@ -35,3 +36,5 @@ int main() {
 }
 
 // CHECK: PASS: integral_types
+// PTX: .visible .entry int_add_kernel
+// PTX: .visible .entry int_mul_kernel

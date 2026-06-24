@@ -385,6 +385,53 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
       loc, mlir::StringAttr::get(&IRContext(), cf.name),
       mlir::TypeAttr::get(mlirFnType));
 
+  // Attach host-facing metadata so downstream stub generation can
+  // reconstruct the Choreo calling convention (spanned_view / spanned_data,
+  // auto-memory-shadowing, pass-by-ref copy-back).
+  llvm::SmallVector<mlir::Attribute> paramNames, paramAttrs, paramRefs,
+      hostElemTypes;
+  llvm::SmallVector<mlir::Attribute> paramDims;
+  if (cf.f_decl.params) {
+    for (auto &p : cf.f_decl.params->values) {
+      paramNames.push_back(mlir::StringAttr::get(
+          &IRContext(), p->HasSymbol() ? p->sym->name : ""));
+      paramAttrs.push_back(
+          builder.getI32IntegerAttr(static_cast<int>(p->attr)));
+      paramRefs.push_back(builder.getBoolAttr(p->pass_by_ref));
+      if (auto sty = dyn_cast<SpannedType>(p->type->GetType())) {
+        hostElemTypes.push_back(mlir::StringAttr::get(
+            &IRContext(), STR(sty->ElementType())));
+        paramDims.push_back(
+            builder.getI64IntegerAttr(static_cast<int64_t>(sty->Dims())));
+      } else {
+        hostElemTypes.push_back(mlir::StringAttr::get(&IRContext(), ""));
+        paramDims.push_back(builder.getI64IntegerAttr(0));
+      }
+    }
+  }
+  kernelOp->setAttr("coir.param_names",
+                     mlir::ArrayAttr::get(&IRContext(), paramNames));
+  kernelOp->setAttr("coir.param_attrs",
+                     mlir::ArrayAttr::get(&IRContext(), paramAttrs));
+  kernelOp->setAttr("coir.param_refs",
+                     mlir::ArrayAttr::get(&IRContext(), paramRefs));
+  kernelOp->setAttr("coir.host_elem_types",
+                     mlir::ArrayAttr::get(&IRContext(), hostElemTypes));
+  kernelOp->setAttr("coir.param_dims",
+                     mlir::ArrayAttr::get(&IRContext(), paramDims));
+
+  // Output type metadata for stub return signature.
+  if (fty->out_ty && fty->out_ty->GetBaseType() != BaseType::VOID) {
+    if (auto sty = dyn_cast<SpannedType>(fty->out_ty)) {
+      kernelOp->setAttr("coir.host_ret_elem_type",
+                         mlir::StringAttr::get(&IRContext(),
+                                               STR(sty->ElementType())));
+      kernelOp->setAttr("coir.host_ret_dims",
+                         builder.getI64IntegerAttr(
+                             static_cast<int64_t>(sty->Dims())));
+    }
+  }
+
   auto &bodyRegion = kernelOp.getBody();
   auto *entryBlock = new mlir::Block();
   bodyRegion.push_back(entryBlock);
@@ -1790,6 +1837,13 @@ bool ASTCoIRGen::Visit(AST::CppSourceCode &n) {
     std::string combined = existing ? existing.getValue().str() : "";
     combined += n.GetCode();
     IRModule()->setAttr("coir.host_code",
+                        mlir::StringAttr::get(&IRContext(), combined));
+  } else if (n.kind == AST::CppSourceCode::Device) {
+    auto existing =
+        IRModule()->getAttrOfType<mlir::StringAttr>("coir.device_code");
+    std::string combined = existing ? existing.getValue().str() : "";
+    combined += n.GetCode();
+    IRModule()->setAttr("coir.device_code",
                         mlir::StringAttr::get(&IRContext(), combined));
   }
   return true;

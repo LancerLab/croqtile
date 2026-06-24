@@ -178,6 +178,7 @@ foreach(_subdir ${_codegen_subdirs})
       target_link_libraries(MLIRCoIRCodeGen${_subdir} PUBLIC
         MLIRCoIRDialect MLIRCoIRTransforms MLIRCoIRDriver
         MLIRIR MLIRPass MLIRSupport MLIRArithDialect MLIRGPUDialect MLIRSCFDialect
+        MLIRMemRefDialect
       )
       list(APPEND COIR_CODEGEN_LIBS "MLIRCoIRCodeGen${_subdir}")
     endif()
@@ -198,6 +199,23 @@ target_link_libraries(coir-opt PRIVATE
   MLIRCoIRTransforms
   MLIROptLib
   ${COIR_MLIR_LIBS}
+  MLIRLLVMDialect
+  MLIRNVVMDialect
+  MLIRControlFlowDialect
+  MLIRArithToLLVM
+  MLIRControlFlowToLLVM
+  MLIRFuncToLLVM
+  MLIRGPUToNVVMTransforms
+  MLIRGPUPipelines
+  MLIRGPUToGPURuntimeTransforms
+  MLIRIndexToLLVM
+  MLIRMemRefToLLVM
+  MLIRNVVMToLLVM
+  MLIRSCFToControlFlow
+  MLIRReconcileUnrealizedCasts
+  MLIRGPUTransforms
+  MLIRFuncAllExtensions
+  MLIRNVVMToLLVMIRTranslation
 )
 # Link all codegen libs (for pass registration)
 foreach(_lib ${COIR_CODEGEN_LIBS})
