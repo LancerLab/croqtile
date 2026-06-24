@@ -1,0 +1,21 @@
+// RUN: cocc -t cute -es --stats -rtc=all %s 2>&1 | FileCheck %s
+//
+// Test that stats correctly count runtime assertions for dynamic access.
+// The indirect element access generates runtime assertions that cannot
+// be resolved statically.
+
+__co__ void gather(s32 [256] data, s32 [4] indices) {
+  s32[4] result;
+  parallel by 1 {
+    foreach {i} in [indices.span] {
+      index = indices.at(i);
+      result.at(i) = data.at(index);
+    }
+  }
+}
+
+// Sema generates assessments; some are static-true, some are runtime.
+// CHECK: Assessment Statistics
+// CHECK: assess  - Assessments evaluated
+// CHECK: assess  - Runtime assertions generated
+// CHECK-NOT: 0  assess  - Runtime assertions generated

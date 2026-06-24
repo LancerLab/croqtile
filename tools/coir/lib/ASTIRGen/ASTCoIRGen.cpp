@@ -1,6 +1,7 @@
 // ast_coir_gen.cpp -- AST-to-CoIR MLIR translation
 #include "ASTCoIRGen.hpp"
 #include "codegen_utils.hpp"
+#include "context.hpp"
 #include "dmaconf.hpp"
 #include "symbexpr.hpp"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -21,6 +22,36 @@ void ASTCoIRGen::EmitAssert(mlir::Location loc, mlir::Value condition,
                                  mlir::IntegerAttr{},
                                  coir::AssertCostAttr{},
                                  mlir::BoolAttr{});
+}
+
+void ASTCoIRGen::EmitElemAccessAsserts(
+    mlir::Location loc, llvm::StringRef dataName,
+    llvm::ArrayRef<mlir::Value> indices, coir::TensorType tty) {
+  if (CCtx().DisableRuntimeCheck()) return;
+  auto shape = tty.getShape();
+  auto indexType = mlir::IndexType::get(&IRContext());
+  auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+  for (unsigned d = 0; d < indices.size() && d < shape.size(); ++d) {
+    auto idx = indices[d];
+    auto dim = builder.create<mlir::arith::ConstantIndexOp>(loc, shape[d]);
+    std::string ordinal = std::to_string(d + 1);
+    ordinal += (d == 0 ? "st" : d == 1 ? "nd" : d == 2 ? "rd" : "th");
+
+    std::string name = dataName.str();
+    auto geCond = builder.create<mlir::arith::CmpIOp>(
+        loc, mlir::arith::CmpIPredicate::sge, idx, zero);
+    EmitAssert(loc, geCond,
+               "The " + ordinal + " index of element access '" + name +
+                   "' should be >= 0",
+               coir::AssertSite::USE, coir::AssertUsage::ELEMENT_ACCESS);
+
+    auto ltCond = builder.create<mlir::arith::CmpIOp>(
+        loc, mlir::arith::CmpIPredicate::slt, idx, dim);
+    EmitAssert(loc, ltCond,
+               "The " + ordinal + " index of element access '" + name +
+                   "' should be < " + std::to_string(shape[d]),
+               coir::AssertSite::USE, coir::AssertUsage::ELEMENT_ACCESS);
+  }
 }
 
 int64_t ASTCoIRGen::ResolveBoundedVarExtent(llvm::StringRef rvName) {
@@ -679,6 +710,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         if (v) idxVals.push_back(v);
       }
 
+      EmitElemAccessAsserts(loc, da->GetDataName(), idxVals, tty);
       return builder.create<coir::TensorLoadElemOp>(
           loc, tty.getElementType(), tensorVal, idxVals);
     } else {
@@ -847,6 +879,7 @@ bool ASTCoIRGen::Visit(AST::Assignment &asgn) {
     if (v) idxVals.push_back(v);
   }
 
+  EmitElemAccessAsserts(loc, da.GetDataName(), idxVals, tty);
   builder.create<coir::TensorStoreElemOp>(loc, rhs, tensorVal, idxVals);
   return true;
 }

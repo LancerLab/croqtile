@@ -594,6 +594,9 @@ public:
   const FunctionContext& GetFunctionContext(const std::string fname) const {
     return function_contexts.at(fname);
   }
+  const std::map<std::string, FunctionContext>& GetAllFunctionContexts() const {
+    return function_contexts;
+  }
 
   const Target& GetTarget() const { return *compile_target; }
   Target& GetTarget() { return *compile_target; }
