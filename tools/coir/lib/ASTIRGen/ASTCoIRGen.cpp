@@ -999,6 +999,16 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
     return v;
   };
 
+  // Use the pre-computed block shape from shape inference when available.
+  // ChunkAt::GetBlockShape() gives the actual tile shape after applying
+  // tiling operations (e.g., Chunk(4) on a [256] tensor yields [64]).
+  llvm::SmallVector<int64_t> blockDims;
+  if (chunk.GetBlockShape().IsValid()) {
+    auto posVals = chunk.GetBlockShape().PosValList();
+    if (posVals)
+      for (auto d : *posVals) blockDims.push_back(static_cast<int64_t>(d));
+  }
+
   llvm::SmallVector<mlir::Value> idxVals;
   llvm::SmallVector<int64_t> tileShape;
 
@@ -1018,7 +1028,10 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
           auto v = emitIdx(idx.get());
           if (v) {
             idxVals.push_back(v);
-            tileShape.push_back(1);
+            if (dimIdx < blockDims.size())
+              tileShape.push_back(blockDims[dimIdx]);
+            else
+              tileShape.push_back(1);
           }
         }
         dimIdx++;
@@ -1038,7 +1051,10 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
         auto v = emitIdx(idx.get());
         if (v) {
           idxVals.push_back(v);
-          tileShape.push_back(1);
+          if (dimIdx < blockDims.size())
+            tileShape.push_back(blockDims[dimIdx]);
+          else
+            tileShape.push_back(1);
         }
       }
       dimIdx++;
