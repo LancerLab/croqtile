@@ -321,7 +321,12 @@ def DataCopyOp : CoIR_Op<"data.copy", []> {
   let arguments = (ins
     CoIR_TensorTypeC:$source,
     CoIR_TensorTypeC:$dest,
-    OptionalAttr<UnitAttr>:$async
+    OptionalAttr<UnitAttr>:$async,
+    DefaultValuedAttr<CoIR_DMAKindAttr, "coir::DMAKind::Copy">:$kind,
+    OptionalAttr<DenseI64ArrayAttr>:$pad_low,
+    OptionalAttr<DenseI64ArrayAttr>:$pad_high,
+    OptionalAttr<AnyAttrOf<[I64Attr, F64Attr]>>:$pad_value,
+    OptionalAttr<DenseI64ArrayAttr>:$transpose_perm
   );
   let results = (outs Optional<CoIR_AsyncTokenTypeC>:$token);
   let hasCustomAssemblyFormat = 1;
@@ -364,7 +369,12 @@ def DmaCopyOp : CoIR_Op<"dma.copy", []> {
   }];
   let arguments = (ins
     CoIR_TensorTypeC:$source,
-    CoIR_TensorTypeC:$dest
+    CoIR_TensorTypeC:$dest,
+    DefaultValuedAttr<CoIR_DMAKindAttr, "coir::DMAKind::Copy">:$kind,
+    OptionalAttr<DenseI64ArrayAttr>:$pad_low,
+    OptionalAttr<DenseI64ArrayAttr>:$pad_high,
+    OptionalAttr<AnyAttrOf<[I64Attr, F64Attr]>>:$pad_value,
+    OptionalAttr<DenseI64ArrayAttr>:$transpose_perm
   );
   let results = (outs CoIR_AsyncTokenTypeC:$token);
   let hasCustomAssemblyFormat = 1;

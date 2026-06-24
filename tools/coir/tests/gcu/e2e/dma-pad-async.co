@@ -1,0 +1,41 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Test: 2D dma.pad with asymmetric padding through CoIR path.
+
+__co__ auto test_pad_asym(s32 [3, 4] input) {
+  s32 [5, 6] output;
+  parallel p by 1 {
+    f = dma.pad<{2, 0}, {0, 2}, {0, 0}, 0>.async input => local;
+    wait f;
+    dma.copy f.data => output;
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(3, 4);
+  for (int i = 0; i < 12; i++)
+    a.data()[i] = 10 + i;  // 10..21
+
+  auto res = test_pad_asym(a.view());
+  // Expected 5x6: pad_low={2,0}, pad_high={0,2}
+  // [[ 0, 0, 0, 0, 0, 0],
+  //  [ 0, 0, 0, 0, 0, 0],
+  //  [10,11,12,13, 0, 0],
+  //  [14,15,16,17, 0, 0],
+  //  [18,19,20,21, 0, 0]]
+  int expected[5][6] = {
+    { 0,  0,  0,  0, 0, 0},
+    { 0,  0,  0,  0, 0, 0},
+    {10, 11, 12, 13, 0, 0},
+    {14, 15, 16, 17, 0, 0},
+    {18, 19, 20, 21, 0, 0}
+  };
+  for (int i = 0; i < 5; i++)
+    for (int j = 0; j < 6; j++)
+      choreo::choreo_assert(res[i][j] == expected[i][j], "pad_asym mismatch");
+  std::cout << "PASS: dma_pad_asym" << std::endl;
+}
+
+// CHECK: PASS: dma_pad_asym

@@ -1,0 +1,30 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Test: dma.transp (global to local) through CoIR path.
+
+__co__ auto test_transp(s32 [2, 4] input) {
+  s32 [4, 2] output;
+  parallel p by 1 {
+    f = dma.transp<1, 0>.async input => local;
+    wait f;
+    dma.copy f.data => output;
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(2, 4);
+  // Fill with row-major: [[0,1,2,3],[4,5,6,7]]
+  for (int i = 0; i < 8; i++)
+    a.data()[i] = i;
+
+  auto res = test_transp(a.view());
+  // Transposed: [[0,4],[1,5],[2,6],[3,7]]
+  int expected[] = {0, 4, 1, 5, 2, 6, 3, 7};
+  for (int i = 0; i < 8; i++)
+    choreo::choreo_assert(res.data()[i] == expected[i], "transp mismatch");
+  std::cout << "PASS: dma_transp" << std::endl;
+}
+
+// CHECK: PASS: dma_transp

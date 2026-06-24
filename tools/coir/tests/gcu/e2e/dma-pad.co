@@ -1,0 +1,42 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Test: 2D dma.pad (global to local, async) through CoIR path.
+
+__co__ auto test_pad(s32 [2, 3] input) {
+  s32 [4, 5] output;
+  parallel p by 1 {
+    f = dma.pad<{1, 1}, {1, 1}, {0, 0}, -1>.async input => local;
+    wait f;
+    dma.copy f.data => output;
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(2, 3);
+  // [[1,2,3],[4,5,6]]
+  int v = 1;
+  for (int i = 0; i < 2; i++)
+    for (int j = 0; j < 3; j++)
+      a.data()[i * 3 + j] = v++;
+
+  auto res = test_pad(a.view());
+  // Expected 4x5:
+  // [[-1,-1,-1,-1,-1],
+  //  [-1, 1, 2, 3,-1],
+  //  [-1, 4, 5, 6,-1],
+  //  [-1,-1,-1,-1,-1]]
+  int expected[4][5] = {
+    {-1, -1, -1, -1, -1},
+    {-1,  1,  2,  3, -1},
+    {-1,  4,  5,  6, -1},
+    {-1, -1, -1, -1, -1}
+  };
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 5; j++)
+      choreo::choreo_assert(res[i][j] == expected[i][j], "pad mismatch");
+  std::cout << "PASS: dma_pad_2d" << std::endl;
+}
+
+// CHECK: PASS: dma_pad_2d

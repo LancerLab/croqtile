@@ -937,6 +937,25 @@ private:
     }
   }
 
+  std::string emitMdspanWithShape(Value tensor) {
+    auto tty = cast<coir::TensorType>(tensor.getType());
+    std::string name = getName(tensor);
+    std::string space;
+    int32_t ms = tty.getMemorySpace();
+    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
+      space = "tops::Private";
+    else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Shared))
+      space = "tops::Shared";
+    else
+      space = "tops::Global";
+    std::string result = "tops::mdspan(" + space + ", (" +
+                         emitType(tty.getElementType()) + "*)" + name;
+    for (auto dim : tty.getShape())
+      result += ", " + std::to_string(dim);
+    result += ")";
+    return result;
+  }
+
   std::string emitCopyMdspan(Value tensor, int64_t transferElems) {
     auto tty = cast<coir::TensorType>(tensor.getType());
     std::string name = getName(tensor);
@@ -961,10 +980,17 @@ private:
   }
 
   void emitDataCopy(DataCopyOp op) {
-    int64_t elems = std::max(tensorElems(op.getSource()),
-                             tensorElems(op.getDest()));
-    std::string srcMds = emitCopyMdspan(op.getSource(), elems);
-    std::string dstMds = emitCopyMdspan(op.getDest(), elems);
+    auto kind = op.getKind();
+    bool useIndividualShapes = (kind != coir::DMAKind::Copy);
+    int64_t srcElems = tensorElems(op.getSource());
+    int64_t dstElems = tensorElems(op.getDest());
+    int64_t copyElems = std::max(srcElems, dstElems);
+    std::string srcMds = useIndividualShapes
+        ? emitMdspanWithShape(op.getSource())
+        : emitCopyMdspan(op.getSource(), copyElems);
+    std::string dstMds = useIndividualShapes
+        ? emitMdspanWithShape(op.getDest())
+        : emitCopyMdspan(op.getDest(), copyElems);
     bool isAsync = op.getAsync() && hasAsyncUses(op.getToken());
     unsigned id = nextDmaId++;
     std::string ctxName = "__dte_" + std::to_string(id);
@@ -974,25 +1000,98 @@ private:
     os << getIndent() << "choreo::future " << futName << "("
        << ctxName << ", \"dma_" << id << "\", 0, 0);\n";
 
-    if (isAsync) {
-      std::string evName = futName + "__event__";
-      os << getIndent() << "tops::event " << evName
-         << " = tops::memcpy_async(*" << futName << ".get_ctx(), "
+    std::string evName = futName + "__event__";
+
+    if (kind == coir::DMAKind::Pad) {
+      emitPadArraysFromDataCopy(op, futName);
+      std::string padValStr = emitPadValueFromDataCopy(op);
+      std::string api = isAsync ? "tops::pad_async" : "tops::pad";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", "
+         << futName << "__pad_low__, " << futName << "__pad_high__, "
+         << futName << "__pad_mid__, " << padValStr << ");\n";
+    } else if (kind == coir::DMAKind::Transpose) {
+      emitTransposeLayoutFromDataCopy(op, futName);
+      std::string api = isAsync ? "tops::transpose_async" : "tops::transpose";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
+         << dstMds << ", " << srcMds << ", "
+         << futName << "__layout__);\n";
+    } else {
+      std::string api = isAsync ? "tops::memcpy_async" : "tops::memcpy";
+      os << getIndent();
+      if (isAsync) os << "tops::event " << evName << " = ";
+      os << api << "(*" << futName << ".get_ctx(), "
          << dstMds << ", " << srcMds << ");\n";
+    }
+
+    if (isAsync) {
       os << getIndent() << futName << ".set_event(" << evName << ");\n";
       asyncFutures[op.getToken()] = futName;
     } else {
-      os << getIndent() << "tops::memcpy(*" << futName << ".get_ctx(), "
-         << dstMds << ", " << srcMds << ");\n";
       os << getIndent() << futName << ".set_nowait();\n";
     }
   }
 
+  void emitPadArraysFromDataCopy(DataCopyOp op, const std::string &futName) {
+    auto emitArr = [&](const char *suffix,
+                       std::optional<ArrayRef<int64_t>> arr, int rank) {
+      os << getIndent() << "unsigned int " << futName << suffix << "[] = {";
+      if (arr) {
+        for (int i = 0; i < (int)arr->size(); ++i) {
+          if (i) os << ", ";
+          os << (*arr)[i];
+        }
+      } else {
+        for (int i = 0; i < rank; ++i) {
+          if (i) os << ", ";
+          os << "0";
+        }
+      }
+      os << "};\n";
+    };
+    auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+    int rank = srcTy.getShape().size();
+    emitArr("__pad_low__", op.getPadLow(), rank);
+    emitArr("__pad_high__", op.getPadHigh(), rank);
+    emitArr("__pad_mid__", std::nullopt, rank);
+  }
+
+  std::string emitPadValueFromDataCopy(DataCopyOp op) {
+    if (auto intAttr = op.getPadValueAttr().dyn_cast_or_null<IntegerAttr>())
+      return std::to_string(intAttr.getInt());
+    if (auto fpAttr = op.getPadValueAttr().dyn_cast_or_null<FloatAttr>())
+      return std::to_string(fpAttr.getValueAsDouble());
+    return "0";
+  }
+
+  void emitTransposeLayoutFromDataCopy(DataCopyOp op,
+                                        const std::string &futName) {
+    os << getIndent() << "int " << futName << "__layout__[] = {";
+    if (auto perm = op.getTransposePerm()) {
+      for (int i = 0; i < (int)perm->size(); ++i) {
+        if (i) os << ", ";
+        os << (*perm)[i];
+      }
+    }
+    os << "};\n";
+  }
+
   void emitDmaCopy(DmaCopyOp op) {
-    int64_t elems = std::max(tensorElems(op.getSource()),
-                             tensorElems(op.getDest()));
-    std::string srcMds = emitCopyMdspan(op.getSource(), elems);
-    std::string dstMds = emitCopyMdspan(op.getDest(), elems);
+    auto kind = op.getKind();
+    bool useIndividualShapes = (kind != coir::DMAKind::Copy);
+    int64_t srcElems = tensorElems(op.getSource());
+    int64_t dstElems = tensorElems(op.getDest());
+    int64_t copyElems = std::max(srcElems, dstElems);
+    std::string srcMds = useIndividualShapes
+        ? emitMdspanWithShape(op.getSource())
+        : emitCopyMdspan(op.getSource(), copyElems);
+    std::string dstMds = useIndividualShapes
+        ? emitMdspanWithShape(op.getDest())
+        : emitCopyMdspan(op.getDest(), copyElems);
     bool isAsync = hasAsyncUses(op.getToken());
     unsigned id = nextDmaId++;
     std::string ctxName = "__dte_" + std::to_string(id);
@@ -1002,18 +1101,97 @@ private:
     os << getIndent() << "choreo::future " << futName << "("
        << ctxName << ", \"dma_" << id << "\", 0, 0);\n";
 
-    if (isAsync) {
-      std::string evName = futName + "__event__";
-      os << getIndent() << "tops::event " << evName
-         << " = tops::memcpy_async(*" << futName << ".get_ctx(), "
-         << dstMds << ", " << srcMds << ");\n";
-      os << getIndent() << futName << ".set_event(" << evName << ");\n";
-      asyncFutures[op.getToken()] = futName;
+    std::string evName = futName + "__event__";
+
+    if (kind == coir::DMAKind::Pad) {
+      emitPadArrays(op, futName);
+      std::string padValStr = emitPadValue(op);
+      if (isAsync) {
+        os << getIndent() << "tops::event " << evName
+           << " = tops::pad_async(*" << futName << ".get_ctx(), "
+           << dstMds << ", " << srcMds << ", "
+           << futName << "__pad_low__, " << futName << "__pad_high__, "
+           << futName << "__pad_mid__, " << padValStr << ");\n";
+        os << getIndent() << futName << ".set_event(" << evName << ");\n";
+      } else {
+        os << getIndent() << "tops::pad(*" << futName << ".get_ctx(), "
+           << dstMds << ", " << srcMds << ", "
+           << futName << "__pad_low__, " << futName << "__pad_high__, "
+           << futName << "__pad_mid__, " << padValStr << ");\n";
+        os << getIndent() << futName << ".set_nowait();\n";
+      }
+    } else if (kind == coir::DMAKind::Transpose) {
+      emitTransposeLayout(op, futName);
+      if (isAsync) {
+        os << getIndent() << "tops::event " << evName
+           << " = tops::transpose_async(*" << futName << ".get_ctx(), "
+           << dstMds << ", " << srcMds << ", "
+           << futName << "__layout__);\n";
+        os << getIndent() << futName << ".set_event(" << evName << ");\n";
+      } else {
+        os << getIndent() << "tops::transpose(*" << futName << ".get_ctx(), "
+           << dstMds << ", " << srcMds << ", "
+           << futName << "__layout__);\n";
+        os << getIndent() << futName << ".set_nowait();\n";
+      }
     } else {
-      os << getIndent() << "tops::memcpy(*" << futName << ".get_ctx(), "
-         << dstMds << ", " << srcMds << ");\n";
-      os << getIndent() << futName << ".set_nowait();\n";
+      if (isAsync) {
+        os << getIndent() << "tops::event " << evName
+           << " = tops::memcpy_async(*" << futName << ".get_ctx(), "
+           << dstMds << ", " << srcMds << ");\n";
+        os << getIndent() << futName << ".set_event(" << evName << ");\n";
+      } else {
+        os << getIndent() << "tops::memcpy(*" << futName << ".get_ctx(), "
+           << dstMds << ", " << srcMds << ");\n";
+        os << getIndent() << futName << ".set_nowait();\n";
+      }
     }
+
+    if (isAsync)
+      asyncFutures[op.getToken()] = futName;
+  }
+
+  void emitPadArrays(DmaCopyOp op, const std::string &futName) {
+    auto emitArr = [&](const char *suffix,
+                       std::optional<ArrayRef<int64_t>> arr, int rank) {
+      os << getIndent() << "unsigned int " << futName << suffix << "[] = {";
+      if (arr) {
+        for (int i = 0; i < (int)arr->size(); ++i) {
+          if (i) os << ", ";
+          os << (*arr)[i];
+        }
+      } else {
+        for (int i = 0; i < rank; ++i) {
+          if (i) os << ", ";
+          os << "0";
+        }
+      }
+      os << "};\n";
+    };
+    auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+    int rank = srcTy.getShape().size();
+    emitArr("__pad_low__", op.getPadLow(), rank);
+    emitArr("__pad_high__", op.getPadHigh(), rank);
+    emitArr("__pad_mid__", std::nullopt, rank);
+  }
+
+  std::string emitPadValue(DmaCopyOp op) {
+    if (auto intAttr = op.getPadValueAttr().dyn_cast_or_null<IntegerAttr>())
+      return std::to_string(intAttr.getInt());
+    if (auto fpAttr = op.getPadValueAttr().dyn_cast_or_null<FloatAttr>())
+      return std::to_string(fpAttr.getValueAsDouble());
+    return "0";
+  }
+
+  void emitTransposeLayout(DmaCopyOp op, const std::string &futName) {
+    os << getIndent() << "int " << futName << "__layout__[] = {";
+    if (auto perm = op.getTransposePerm()) {
+      for (int i = 0; i < (int)perm->size(); ++i) {
+        if (i) os << ", ";
+        os << (*perm)[i];
+      }
+    }
+    os << "};\n";
   }
 
   void emitWait(WaitOp op) {
