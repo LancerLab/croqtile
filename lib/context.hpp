@@ -446,6 +446,10 @@ struct AssessmentStats {
   size_t hw_constraint_runtime = 0;
 };
 
+/// Print the assessment/assertion statistics section to stderr.
+/// Used by both the AST pipeline and the CoIR pipeline (CoCC).
+void PrintAssessmentStats(const AssessmentStats& s);
+
 class SymbolTable;
 // per-compilation context
 class CompilationContext {

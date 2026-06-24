@@ -161,6 +161,52 @@ def HoistAssertions : Pass<"coir-hoist-assertions"> {
   let dependentDialects = ["::coir::CoIRDialect"];
 }
 
+def EstimateAssertCost : Pass<"coir-estimate-assert-cost"> {
+  let summary = "Estimate cost and filter runtime assertions by threshold";
+  let description = [{
+    Walks all coir.assert ops (after hoisting) and stamps three
+    attributes on each:
+
+    - estimated_cost (I64): raw trip-count product from enclosing
+      loops. coir.foreach uses static bounds when available (else
+      100); scf.while / coir.while use 100 conservatively.
+    - cost_class (AssertCost enum): classified tier derived from
+      estimated_cost (1->ENTRY, 2-49->LOW, 50-499->MEDIUM, >=500->HIGH).
+    - enabled (Bool): true iff the tier passes the cost-threshold.
+
+    The cost-threshold option maps to Choreo's --runtime-check / -rtc
+    levels: 0=none, 1=entry, 2=low, 3=medium, 4=high/all.
+
+    Run after coir-hoist-assertions so cost reflects the final
+    position.
+  }];
+
+  let constructor = "::coir::createEstimateAssertCostPass()";
+  let dependentDialects = ["::coir::CoIRDialect"];
+  let options = [
+    Option<"costThreshold", "cost-threshold", "int", /*default=*/"4",
+           "Maximum AssertCost tier to enable"
+           " (0=none, 1=entry, 2=low, 3=medium, 4=high/all)."
+           " Assertions whose tier >= threshold are disabled.">
+  ];
+}
+
+def CollectAssertStats : Pass<"coir-collect-assert-stats"> {
+  let summary = "Collect assertion statistics from stamped cost attributes";
+  let description = [{
+    Walks all coir.assert ops and accumulates per-tier, per-usage,
+    and enabled/disabled counts into the compilation context's
+    AssessmentStats (accessible via CCtx()). This pass does not
+    modify the IR.
+
+    Run after coir-estimate-assert-cost so that the cost attributes
+    are present.
+  }];
+
+  let constructor = "::coir::createCollectAssertStatsPass()";
+  let dependentDialects = ["::coir::CoIRDialect"];
+}
+
 def EmitCUDA : Pass<"coir-emit-cuda", "::mlir::ModuleOp"> {
   let summary = "Emit CUDA/C++ source from lowered CoIR IR";
   let description = [{

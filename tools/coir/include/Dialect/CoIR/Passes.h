@@ -25,7 +25,8 @@ std::unique_ptr<mlir::Pass> createHoistDMAConfigPass();
 std::unique_ptr<mlir::Pass> createLowerMMAPass();
 std::unique_ptr<mlir::Pass> createLowerCopyPass();
 std::unique_ptr<mlir::Pass> createHoistAssertionsPass();
-std::unique_ptr<mlir::Pass> createHoistAssertionsPass();
+std::unique_ptr<mlir::Pass> createEstimateAssertCostPass();
+std::unique_ptr<mlir::Pass> createCollectAssertStatsPass();
 std::unique_ptr<mlir::Pass> createEmitCUDAPass();
 
 void emitCUDA(mlir::ModuleOp module, llvm::raw_ostream &os);
@@ -122,13 +123,18 @@ private:
 /// CoIR compilation pipeline -- encapsulates opt -> lower -> emit flow.
 class Pipeline {
 public:
-  Pipeline(mlir::ModuleOp module, mlir::MLIRContext &ctx)
-      : module_(module), ctx_(ctx) {}
+  Pipeline(mlir::ModuleOp module, mlir::MLIRContext &ctx,
+           int costThreshold = 4, bool collectStats = false)
+      : module_(module), ctx_(ctx), cost_threshold_(costThreshold),
+        collect_stats_(collectStats) {}
 
   /// Print the CoIR MLIR module (like clang -emit-llvm).
   void EmitCoIR(llvm::raw_ostream &os);
 
-  /// Run CoIR optimization passes. Returns true on success.
+  /// Run CoIR optimization and analysis passes:
+  ///   1. HoistAssertions   -- LICM for assertions
+  ///   2. EstimateAssertCost -- stamp cost/enabled attrs
+  ///   3. CollectAssertStats -- collect stats (if collect_stats_)
   bool Optimize();
 
   /// Run CoIR lowering passes. Reads target info from module attributes
@@ -148,6 +154,8 @@ public:
 private:
   mlir::ModuleOp module_;
   mlir::MLIRContext &ctx_;
+  int cost_threshold_;
+  bool collect_stats_;
 };
 
 } // namespace CoIR

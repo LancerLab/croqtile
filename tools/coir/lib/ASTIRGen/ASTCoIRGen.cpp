@@ -16,7 +16,10 @@ void ASTCoIRGen::EmitAssert(mlir::Location loc, mlir::Value condition,
   auto usageAttr = coir::AssertUsageAttr::get(&IRContext(), usage);
   builder.create<coir::AssertOp>(loc, condition,
                                  builder.getStringAttr(message),
-                                 siteAttr, usageAttr);
+                                 siteAttr, usageAttr,
+                                 mlir::IntegerAttr{},
+                                 coir::AssertCostAttr{},
+                                 mlir::BoolAttr{});
 }
 
 int64_t ASTCoIRGen::ResolveBoundedVarExtent(llvm::StringRef rvName) {

@@ -505,7 +505,10 @@ def AssertOp : CoIR_Op<"assert", []> {
     I1:$condition,
     StrAttr:$message,
     CoIR_AssertSiteAttr:$site,
-    CoIR_AssertUsageAttr:$usage
+    CoIR_AssertUsageAttr:$usage,
+    OptionalAttr<I64Attr>:$estimated_cost,
+    OptionalAttr<CoIR_AssertCostAttr>:$cost_class,
+    OptionalAttr<BoolAttr>:$enabled
   );
   let assemblyFormat = [{
     $condition `,` $message $site $usage attr-dict
