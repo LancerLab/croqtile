@@ -1,14 +1,16 @@
 //===- HoistAssertions.cpp - Hoist runtime assertions to earliest site ----===//
 //
-// Target-agnostic assertion hoisting pass for CoIR.
+// SSA post-dominator based assertion hoisting for CoIR.
 //
-// Promotes coir.assert ops from USE -> HOIST or ENTRY based on SSA
-// def-chain analysis:
-//   - ENTRY: all condition inputs are kernel arguments (host-side check)
-//   - HOIST: condition is loop-invariant w.r.t. enclosing loop
-//   - USE:   condition depends on loop IV or is inside conditional
-//
-// Mirrors Choreo's AssertSite pass but operates on MLIR SSA graph.
+// Algorithm (computeHoistTarget):
+//   1. Collect condition def-chain to find all dependencies.
+//   2. Walk up from assertion's parent ops toward the kernel:
+//      - scf.if    -> transparent (post-dom lift through)
+//      - ForeachOp -> opaque (exit only if all deps are outside)
+//      - scf.while -> opaque (never exit -- conservative)
+//      - coir.while-> opaque (never exit -- conservative)
+//      - KernelOp  -> ENTRY
+//   3. Move assertion + def-chain to the computed target.
 //
 //===----------------------------------------------------------------------===//
 
@@ -32,54 +34,119 @@ using namespace coir;
 
 namespace {
 
-static bool isDefinedOutsideRegion(Value v, Region* region) {
+static bool isDefinedOutsideRegion(Value v, Region *region) {
   if (auto arg = dyn_cast<BlockArgument>(v))
     return !region->isAncestor(arg.getOwner()->getParent());
   return !region->isAncestor(v.getDefiningOp()->getParentRegion());
+}
+
+static bool allDepsMovableOutOfRegion(Value cond, Region *region) {
+  SmallVector<Value> worklist;
+  DenseSet<Value> visited;
+  worklist.push_back(cond);
+  while (!worklist.empty()) {
+    Value v = worklist.pop_back_val();
+    if (!visited.insert(v).second) continue;
+    // Already outside -> ok
+    if (isDefinedOutsideRegion(v, region)) continue;
+    // Block argument inside the region (e.g., loop IV) -> pinned
+    auto *defOp = v.getDefiningOp();
+    if (!defOp) return false;
+    // Constants can be rematerialized outside -> ok, but check operands
+    if (isa<arith::ConstantOp>(defOp)) continue;
+    // Non-constant op inside the region -> check if its operands can move
+    for (Value operand : defOp->getOperands())
+      worklist.push_back(operand);
+  }
+  return true;
 }
 
 static bool allInputsFromKernelArgs(Value cond, KernelOp kernel) {
   SmallVector<Value> worklist;
   DenseSet<Value> visited;
   worklist.push_back(cond);
-
   while (!worklist.empty()) {
     Value v = worklist.pop_back_val();
     if (!visited.insert(v).second) continue;
-
     if (auto arg = dyn_cast<BlockArgument>(v)) {
       if (arg.getOwner()->getParentOp() == kernel.getOperation()) continue;
       return false;
     }
-
-    auto* defOp = v.getDefiningOp();
+    auto *defOp = v.getDefiningOp();
     if (!defOp) return false;
-
     if (isa<arith::ConstantOp>(defOp)) continue;
-
     for (Value operand : defOp->getOperands()) worklist.push_back(operand);
   }
   return true;
 }
 
-static bool isInsideConditional(Operation* op) {
-  auto* parent = op->getParentOp();
-  while (parent) {
-    if (isa<scf::IfOp>(parent)) return true;
-    parent = parent->getParentOp();
+struct HoistTarget {
+  Operation *insertBefore = nullptr;
+  Block *destBlock = nullptr;
+  AssertSite site = AssertSite::USE;
+};
+
+static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
+  HoistTarget target;
+  Value cond = assertOp.getCondition();
+
+  // Track the best hoist position found so far.
+  // Walk from the assert's parent up toward the kernel, deciding at each
+  // layer whether we can exit (transparent/opaque rules).
+  Operation *bestInsertBefore = nullptr;
+  Block *bestBlock = nullptr;
+  bool hoistedPastSomething = false;
+  bool stoppedEarly = false;
+
+  auto *current = assertOp->getParentOp();
+  while (current && current != kernel.getOperation()) {
+    if (isa<scf::IfOp>(current)) {
+      // scf.if is transparent: post-dom lift through
+      bestInsertBefore = current;
+      bestBlock = current->getBlock();
+      hoistedPastSomething = true;
+    } else if (auto foreachOp = dyn_cast<ForeachOp>(current)) {
+      Region &loopRegion = foreachOp.getBody();
+      if (allDepsMovableOutOfRegion(cond, &loopRegion)) {
+        bestInsertBefore = current;
+        bestBlock = current->getBlock();
+        hoistedPastSomething = true;
+      } else {
+        stoppedEarly = true;
+        break;
+      }
+    } else if (isa<scf::WhileOp>(current) || isa<CoIRWhileOp>(current)) {
+      stoppedEarly = true;
+      break;
+    }
+    current = current->getParentOp();
   }
-  return false;
+
+  // If we reached the kernel (not stopped early), check for ENTRY
+  if (!stoppedEarly && allInputsFromKernelArgs(cond, kernel)) {
+    target.destBlock = &kernel.getBody().front();
+    target.insertBefore = nullptr;
+    target.site = AssertSite::ENTRY;
+    return target;
+  }
+
+  if (hoistedPastSomething && bestInsertBefore) {
+    target.insertBefore = bestInsertBefore;
+    target.destBlock = bestBlock;
+    target.site = AssertSite::HOIST;
+  }
+
+  return target;
 }
 
-static void collectDefChain(Value root, Region* boundary,
-                            SmallVectorImpl<Operation*>& opsToMove) {
+static void collectDefChain(Value root, Region *boundary,
+                            SmallVectorImpl<Operation *> &opsToMove) {
   SmallVector<Value> worklist;
-  DenseSet<Operation*> visited;
+  DenseSet<Operation *> visited;
   worklist.push_back(root);
-
   while (!worklist.empty()) {
     Value v = worklist.pop_back_val();
-    auto* defOp = v.getDefiningOp();
+    auto *defOp = v.getDefiningOp();
     if (!defOp) continue;
     if (!boundary->isAncestor(defOp->getParentRegion())) continue;
     if (!visited.insert(defOp).second) continue;
@@ -88,61 +155,23 @@ static void collectDefChain(Value root, Region* boundary,
   }
 }
 
-static void moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation*>& ops,
-                                     Block* destBlock,
+static void moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
+                                     Block *destBlock,
                                      Block::iterator destPoint) {
-  DenseSet<Operation*> opSet(ops.begin(), ops.end());
-  SmallVector<Operation*> sorted;
-  DenseSet<Operation*> emitted;
+  DenseSet<Operation *> opSet(ops.begin(), ops.end());
+  SmallVector<Operation *> sorted;
+  DenseSet<Operation *> emitted;
 
-  std::function<void(Operation*)> visit = [&](Operation* op) {
+  std::function<void(Operation *)> visit = [&](Operation *op) {
     if (!opSet.count(op) || emitted.count(op)) return;
     for (Value operand : op->getOperands())
-      if (auto* defOp = operand.getDefiningOp()) visit(defOp);
+      if (auto *defOp = operand.getDefiningOp()) visit(defOp);
     sorted.push_back(op);
     emitted.insert(op);
   };
 
-  for (auto* op : ops) visit(op);
-
-  for (auto* op : sorted) op->moveBefore(destBlock, destPoint);
-}
-
-static Operation* findOutermostInvariantLoop(AssertOp assertOp) {
-  Operation* bestLoop = nullptr;
-  auto* current = assertOp->getParentOp();
-
-  while (current) {
-    if (auto foreachOp = dyn_cast<ForeachOp>(current)) {
-      Region& loopRegion = foreachOp.getBody();
-      bool allOutside = true;
-
-      SmallVector<Value> worklist;
-      DenseSet<Value> visited;
-      worklist.push_back(assertOp.getCondition());
-
-      while (!worklist.empty()) {
-        Value v = worklist.pop_back_val();
-        if (!visited.insert(v).second) continue;
-        if (!isDefinedOutsideRegion(v, &loopRegion)) {
-          allOutside = false;
-          break;
-        }
-        if (auto* defOp = v.getDefiningOp()) {
-          if (!isa<arith::ConstantOp>(defOp))
-            for (Value operand : defOp->getOperands())
-              worklist.push_back(operand);
-        }
-      }
-
-      if (allOutside)
-        bestLoop = current;
-      else
-        break;
-    }
-    current = current->getParentOp();
-  }
-  return bestLoop;
+  for (auto *op : ops) visit(op);
+  for (auto *op : sorted) op->moveBefore(destBlock, destPoint);
 }
 
 struct HoistAssertionsPass
@@ -156,34 +185,27 @@ struct HoistAssertionsPass
     for (auto assertOp : asserts) {
       if (assertOp.getSite() == AssertSite::ENTRY) continue;
 
-      if (isInsideConditional(assertOp)) continue;
-
       auto kernel = assertOp->getParentOfType<KernelOp>();
       if (!kernel) continue;
 
-      if (allInputsFromKernelArgs(assertOp.getCondition(), kernel)) {
+      auto target = computeHoistTarget(assertOp, kernel);
+
+      if (target.site == AssertSite::ENTRY) {
         assertOp.setSiteAttr(
             AssertSiteAttr::get(assertOp.getContext(), AssertSite::ENTRY));
-
-        auto& entryBlock = kernel.getBody().front();
-        SmallVector<Operation*> chain;
+        auto &entryBlock = kernel.getBody().front();
+        SmallVector<Operation *> chain;
         collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain);
         chain.push_back(assertOp);
         moveOpsBeforeInTopoOrder(chain, &entryBlock, entryBlock.begin());
-        continue;
-      }
-
-      auto* targetLoop = findOutermostInvariantLoop(assertOp);
-      if (targetLoop) {
+      } else if (target.site == AssertSite::HOIST && target.insertBefore) {
         assertOp.setSiteAttr(
             AssertSiteAttr::get(assertOp.getContext(), AssertSite::HOIST));
-        SmallVector<Operation*> chain;
-        collectDefChain(assertOp.getCondition(),
-                        &targetLoop->getParentOfType<KernelOp>().getBody(),
-                        chain);
+        SmallVector<Operation *> chain;
+        collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain);
         chain.push_back(assertOp);
-        moveOpsBeforeInTopoOrder(chain, targetLoop->getBlock(),
-                                 targetLoop->getIterator());
+        moveOpsBeforeInTopoOrder(chain, target.destBlock,
+                                 target.insertBefore->getIterator());
       }
     }
   }
