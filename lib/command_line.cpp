@@ -196,6 +196,8 @@ Option<bool> debug_on(OptionKind::Hidden, "--debug", "-d", false,
                       "Enable Debugging of all the visit passes.");
 Option<bool> dump_ast(OptionKind::User, "--dump-ast", "-e", false,
                       "Dump the Abstract Syntax Tree (AST) after parsing.");
+Option<bool> dump_hb(OptionKind::User, "--dump-hb", "", false,
+                     "Dump Happens-Before graph in DOT (Graphviz) format.");
 Option<bool> print_vn(OptionKind::Hidden, "--print-valno", "-vn", false,
                       "Trace the value numbering process.");
 Option<bool> dump_sym(OptionKind::Hidden, "--dump-symbol", "-l", false,
@@ -217,6 +219,8 @@ Option<bool> liveness(OptionKind::Hidden, "--liveness", "", true,
                       "Analyze the liveness of the program.");
 Option<bool> mem_reuse(OptionKind::Hidden, "--mem-reuse", "", true,
                        "Analyze the memory usage, then perform memory reuse.");
+Option<bool> no_sala(OptionKind::Hidden, "--no-sala", "", false,
+                     "Disable signal-aware liveness analysis (SALA).");
 Option<bool> diag_dma(OptionKind::Hidden, "--diag-dma", "-dd", true,
                       "Enable runtime DMA diagnosis.");
 Option<bool> print_node_type(OptionKind::Hidden, "--print-node-type", "-pnt",
@@ -445,6 +449,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetTargetDebugInfo(generate_debug_info.GetValue() ||
                             target_generate_debug_info.GetValue());
   CCtx().SetDumpAst(dump_ast.GetValue());
+  CCtx().SetDumpHB(dump_hb.GetValue());
   CCtx().SetNoCodegen(ncodegen.GetValue());
   CCtx().SetPrintPassNames(prt_pass.GetValue());
   CCtx().SetTimePasses(time_passes.GetValue());
@@ -463,6 +468,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
   CCtx().SetLivenessAnalysis(liveness.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());
+  CCtx().SetSALA(!no_sala.GetValue());
   CCtx().SetSimplifyFpValno(simplify_fp_valno.GetValue());
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
   CCtx().SetDMADiagnosis(diag_dma.GetValue());

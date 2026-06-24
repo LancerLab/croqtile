@@ -449,6 +449,107 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       // record the offset args in sorted order
       std::sort(infos[sto].offset_args.begin(), infos[sto].offset_args.end());
 
+      // Build compile-time interference graph for parametric plan.
+      // Liveness ranges are static even when buffer sizes are dynamic.
+      {
+        auto& ie = infos[sto];
+        // Collect all buffers in the order chunks were added
+        struct BufEntry {
+          std::string size_expr;
+          std::vector<Range> ranges;
+          std::string buffer_id;
+        };
+        std::vector<BufEntry> all_bufs;
+
+        auto CollectBufs = [&](const auto& bs) {
+          for (const auto& buffer : bs) {
+            if (ma.buf_sto.at(buffer.buffer_id) != sto) continue;
+            if (sto == Storage::LOCAL && CCtx().TargetName() == "cute") {
+              if constexpr (std::is_same_v<std::decay_t<decltype(buffer.size)>,
+                                           size_t>) {
+                if (!ShouldReuseBuffer(buffer.buffer_id, Storage::LOCAL,
+                                       df_name))
+                  continue;
+              }
+            }
+            std::string sz;
+            if constexpr (std::is_same_v<std::decay_t<decltype(buffer.size)>,
+                                         std::string>)
+              sz = "static_cast<size_t>(" + UnScopedExpr(buffer.size) + ")";
+            else
+              sz = UnScopedExpr(std::to_string(buffer.size));
+            all_bufs.push_back({sz, buffer.ranges, buffer.buffer_id});
+          }
+        };
+        if (!(sto == Storage::LOCAL && CCtx().TargetName() == "cute"))
+          CollectBufs(ctx.buffers);
+        CollectBufs(ctx.dynamic_buffers);
+
+        size_t n = all_bufs.size();
+        ie.n_buffers = n;
+        ie.alignment = alignment;
+        ie.size_exprs.clear();
+        ie.buffer_ids.clear();
+        ie.interference.assign(n * n, false);
+
+        for (size_t i = 0; i < n; ++i) {
+          ie.size_exprs.push_back(all_bufs[i].size_expr);
+          ie.buffer_ids.push_back(
+              RegexReplaceAll(all_bufs[i].buffer_id, "::", "_"));
+        }
+
+        const LivenessAnalyzer::HBGraph* hb_graph = nullptr;
+        if (sto == Storage::SHARED) {
+          for (const auto& [scope, graph] : la.HBGraphs()) {
+            if (scope.find(df_name) == 0) {
+              hb_graph = &graph;
+              break;
+            }
+          }
+        }
+
+        // Build interference from liveness ranges (static, known at compile
+        // time)
+        for (size_t i = 0; i < n; ++i) {
+          for (size_t j = i + 1; j < n; ++j) {
+            bool interfere = false;
+            size_t ri = 0, rj = 0;
+            const auto& ra = all_bufs[i].ranges;
+            const auto& rb = all_bufs[j].ranges;
+            while (ri < ra.size() && rj < rb.size()) {
+              if (ra[ri].Overlaps(rb[rj])) {
+                interfere = true;
+                break;
+              }
+              if (ra[ri].end < rb[rj].end)
+                ++ri;
+              else
+                ++rj;
+            }
+            if (interfere && hb_graph &&
+                hb_graph->CanOverlap(all_bufs[i].buffer_id,
+                                     all_bufs[j].buffer_id)) {
+              interfere = false;
+              errs() << "info: HB analysis: buffers "
+                     << UnScopedExpr(all_bufs[i].buffer_id) << " and "
+                     << UnScopedExpr(all_bufs[j].buffer_id)
+                     << " can share memory (signal-ordered lifetimes).\n";
+            }
+            if (!interfere && hb_graph &&
+                hb_graph->IsUnsafeMultiInstanceOverlap(all_bufs[i].buffer_id,
+                                                       all_bufs[j].buffer_id)) {
+              interfere = true;
+              errs() << "info: HB analysis: buffers "
+                     << UnScopedExpr(all_bufs[i].buffer_id) << " and "
+                     << UnScopedExpr(all_bufs[j].buffer_id)
+                     << " cannot share memory (multi-instance safety).\n";
+            }
+            ie.interference[i * n + j] = interfere;
+            ie.interference[j * n + i] = interfere;
+          }
+        }
+      }
+
       return;
     }
 
@@ -462,11 +563,37 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     }
 
     HeapSimulator simulator;
+    HeapSimulator::HBOverride hb_override = nullptr;
+    HeapSimulator::HBMustInterfere hb_must_interfere = nullptr;
+    std::vector<std::pair<std::string, std::string>> hb_overlapped_pairs;
+    if (sto == Storage::SHARED) {
+      const auto& hb_graphs = la.HBGraphs();
+      for (const auto& [scope, graph] : hb_graphs) {
+        if (scope.find(df_name) == 0) {
+          hb_override = [&graph, &hb_overlapped_pairs](const std::string& a,
+                                                       const std::string& b) {
+            if (graph.CanOverlap(a, b)) {
+              hb_overlapped_pairs.emplace_back(a, b);
+              return true;
+            }
+            return false;
+          };
+          hb_must_interfere = [&graph](const std::string& a,
+                                       const std::string& b) {
+            return graph.IsUnsafeMultiInstanceOverlap(a, b);
+          };
+          break;
+        }
+      }
+    }
+
     // ptr<StaticMemReuseInfo>
     auto mri = FCtx(co_func_name).SetStaticMemReuseInfo(df_name);
     if (!chunks.empty()) {
-      HeapSimulator::Result result = simulator.Allocate(chunks, alignment);
-      assert(ValidateResult(result, chunks));
+      size_t baseline_size = simulator.Allocate(chunks, alignment).heap_size;
+      HeapSimulator::Result result =
+          simulator.Allocate(chunks, alignment, hb_override, hb_must_interfere);
+      assert(ValidateResult(result, chunks, hb_override, hb_must_interfere));
       auto& ctx_spm_size =
           (sto == Storage::LOCAL ? ctx.local_spm_size : ctx.shared_spm_size);
       ctx_spm_size = result.heap_size;
@@ -476,6 +603,16 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
         ctx.mem_offset.emplace(buffer_id, offset);
       VST_DEBUG(dbgs() << "For '" << df_name << "'\n\t" << STR(sto)
                        << " memory usage: " << result.heap_size << " bytes\n");
+      if (!hb_overlapped_pairs.empty() && result.heap_size < baseline_size) {
+        errs() << "info: HB analysis: shared memory reduced from "
+               << baseline_size << " to " << result.heap_size << " bytes ("
+               << (baseline_size - result.heap_size)
+               << " saved). Overlapped buffers:";
+        for (const auto& [a, b] : hb_overlapped_pairs) {
+          errs() << " (" << UnScopedExpr(a) << ", " << UnScopedExpr(b) << ")";
+        }
+        errs() << "\n";
+      }
     }
   };
 
@@ -483,19 +620,28 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     if (ShouldReuseStorage(sto, df_name)) DoMemReuse(sto);
 }
 
-bool MemReuse::ValidateResult(const HeapSimulator::Result& res,
-                              const HeapSimulator::Chunks& chunks) {
+bool MemReuse::ValidateResult(
+    const HeapSimulator::Result& res, const HeapSimulator::Chunks& chunks,
+    HeapSimulator::HBOverride hb_override,
+    HeapSimulator::HBMustInterfere hb_must_interfere) {
   size_t size = chunks.size();
   for (size_t i = 0; i < size; ++i) {
     for (size_t j = i + 1; j < size; ++j) {
       const auto& c1 = chunks[i];
       const auto& c2 = chunks[j];
-      if (c1.Interfere(c2)) {
+      bool interfere = c1.Interfere(c2);
+      if (interfere && hb_override && hb_override(c1.buffer_id, c2.buffer_id))
+        interfere = false;
+      if (!interfere && hb_must_interfere &&
+          hb_must_interfere(c1.buffer_id, c2.buffer_id))
+        interfere = true;
+      if (interfere) {
         auto o1 = res.chunk_offsets.at(c1.buffer_id);
         auto o2 = res.chunk_offsets.at(c2.buffer_id);
         if ((o1 <= o2 && o1 + c1.size > o2) ||
             (o2 <= o1 && o2 + c2.size > o1)) {
-          dbgs() << "Error: unexpected memory overlap detected between buffers "
+          errs() << "Error: unexpected memory overlap detected between "
+                    "buffers "
                  << c1.buffer_id << " and " << c2.buffer_id
                  << " after applying memory reuse.\n";
           return false;
