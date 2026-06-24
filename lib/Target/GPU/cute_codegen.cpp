@@ -6961,20 +6961,17 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
                 subscript->op == Op::Select) {
               const auto& iv = foreach_iv_stack_.back();
               if (stages == 2) {
-                phase_expr =
-                    is_fill ? ("((" + iv + " == 0) ? 0 : (((" + iv +
-                               " - 1) & 3) >> 1))")
-                            : ("((" + iv + " == 0) ? 1 : ((((" + iv +
-                               " - 1) & 3) >> 1) ^ 1))");
+                phase_expr = is_fill ? ("((" + iv + " == 0) ? 0 : (((" + iv +
+                                        " - 1) & 3) >> 1))")
+                                     : ("((" + iv + " == 0) ? 1 : ((((" + iv +
+                                        " - 1) & 3) >> 1) ^ 1))");
               } else {
                 std::string s = std::to_string(stages);
-                std::string prev_base =
-                    "((" + iv + " - 1) / " + s + ") & 1";
+                std::string prev_base = "((" + iv + " - 1) / " + s + ") & 1";
                 phase_expr =
-                    is_fill
-                        ? ("((" + iv + " == 0) ? 0 : (" + prev_base + "))")
-                        : ("((" + iv + " == 0) ? 1 : ((" + prev_base +
-                           ") ^ 1))");
+                    is_fill ? ("((" + iv + " == 0) ? 0 : (" + prev_base + "))")
+                            : ("((" + iv + " == 0) ? 1 : ((" + prev_base +
+                               ") ^ 1))");
               }
             }
           }

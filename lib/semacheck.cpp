@@ -1345,23 +1345,20 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
     int depth = op.WaitDepth();
     if (depth > 0 && !foreach_stack.empty()) {
       auto* fe = foreach_stack.back();
-      int execs_per_iter =
-          CountMMAExecsInBody(fe->GetBody(), &n);
+      int execs_per_iter = CountMMAExecsInBody(fe->GetBody(), &n);
       if (execs_per_iter < 1) execs_per_iter = 1;
       int64_t extent = GetForeachStaticExtent(*fe);
       if (extent > 0 && depth >= extent * execs_per_iter) {
-        Error1(n.LOC(),
-               "mma.wait<" + std::to_string(depth) +
-                   "> depth must be less than the enclosing loop "
-                   "extent (" +
-                   std::to_string(extent) + ") * commits per iteration (" +
-                   std::to_string(execs_per_iter) + ").");
+        Error1(n.LOC(), "mma.wait<" + std::to_string(depth) +
+                            "> depth must be less than the enclosing loop "
+                            "extent (" +
+                            std::to_string(extent) +
+                            ") * commits per iteration (" +
+                            std::to_string(execs_per_iter) + ").");
       } else if (extent < 0) {
         auto ub = GetForeachDynamicExtent(*fe);
         if (ub) {
-          auto limit = (execs_per_iter > 1)
-                           ? ub * sbe::nu(execs_per_iter)
-                           : ub;
+          auto limit = (execs_per_iter > 1) ? ub * sbe::nu(execs_per_iter) : ub;
           auto cond = sbe::oc_lt(sbe::nu(depth), limit);
           FCtx(fname).GetAssessor(*this).Assess(
               AssessPolicy::Error, cond,
