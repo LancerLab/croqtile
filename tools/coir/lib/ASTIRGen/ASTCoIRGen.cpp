@@ -1198,7 +1198,7 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
 
   llvm::SmallVector<int64_t> resultShape;
   for (auto d : tileShape)
-    if (d != 1) resultShape.push_back(d);
+    resultShape.push_back(d);
   if (resultShape.empty()) resultShape.push_back(1);
 
   auto tileTy = coir::TensorType::get(
@@ -1344,15 +1344,24 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
     }
   }
 
-  auto copyOp = builder.create<coir::DataCopyOp>(
-      loc, isAsync ? mlir::TypeRange{coir::AsyncTokenType::get(&IRContext())}
-                   : mlir::TypeRange{},
-      srcVal, dstVal, isAsync ? builder.getUnitAttr() : mlir::UnitAttr{},
-      kindAttr, padLowAttr, padHighAttr, padValueAttr, transpPermAttr);
+  // Emit the appropriate copy op based on user's explicit intent.
+  // TMA: user wrote `tma.copy` -> TmaCopyOp (always async).
+  // DMA: user wrote `dma.copy` -> DmaCopyOp (always produces token).
+  mlir::Value token = nullptr;
+  if (dma.IsTMA()) {
+    auto tmaCopy = builder.create<coir::TmaCopyOp>(
+        loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal);
+    token = tmaCopy.getToken();
+  } else {
+    auto dmaCopy = builder.create<coir::DmaCopyOp>(
+        loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal,
+        kindAttr, padLowAttr, padHighAttr, padValueAttr, transpPermAttr);
+    token = dmaCopy.getToken();
+  }
 
   if (!dma.future.empty()) {
-    if (isAsync && copyOp.getToken()) {
-      MapValue(dma.future, copyOp.getToken());
+    if (isAsync && token) {
+      MapValue(dma.future, token);
       if (dstVal)
         MapValue(dma.future + ".data", dstVal);
     } else if (dstVal) {

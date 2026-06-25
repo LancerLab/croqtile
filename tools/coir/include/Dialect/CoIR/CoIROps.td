@@ -45,15 +45,20 @@ def DMAConstDescOp : CoIR_Op<"dma.const.desc", [NoMemoryEffect]> {
     The resulting `!coir.desc` handle is target-neutral and can be hoisted
     above loops.
 
+    When `tma` is set, the descriptor uses the target's hardware tensor-move
+    accelerator path (requires target support). Without `tma`, the descriptor
+    uses the standard asynchronous DMA or cooperative-copy mechanism.
+
     Example:
-      %d = coir.dma.const.desc %src, %dst {kind = #coir.dma_kind<copy>}
+      %d = coir.dma.const.desc %src, %dst {kind = #coir.dma_kind<copy>, tma}
              : !coir.tensor<128x64xf32, global>,
-               !coir.tensor<128x64xf32, local> -> !coir.desc
+               !coir.tensor<128x64xf32, shared> -> !coir.desc
   }];
   let arguments = (ins
     CoIR_TensorTypeC:$source,
     CoIR_TensorTypeC:$dest,
-    CoIR_DMAKindAttr:$kind
+    CoIR_DMAKindAttr:$kind,
+    UnitAttr:$tma
   );
   let results = (outs CoIR_DMADescType:$out);
   let hasCustomAssemblyFormat = 1;

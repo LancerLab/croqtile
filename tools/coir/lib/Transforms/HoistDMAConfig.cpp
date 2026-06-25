@@ -38,7 +38,10 @@ struct HoistDMAConfigPass
             return loopLike.isDefinedOutsideOfLoop(value);
           },
           [](Operation *op, Region *) {
-            return isa<DMAConstDescOp, DMADescPrefetchOp, DMACheckOp>(op);
+            // Hoist DMA descriptor ops and their tensor.alloc operands.
+            return isa<DMAConstDescOp, DMADescPrefetchOp, DMACheckOp>(op) ||
+                   (isa<TensorAllocOp>(op) && op->hasOneUse() &&
+                    isa<DMAConstDescOp>(*op->getUsers().begin()));
           },
           [](Operation *op, Region *region) {
             op->moveBefore(region->getParentOp());

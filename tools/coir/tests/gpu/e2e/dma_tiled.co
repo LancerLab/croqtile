@@ -1,0 +1,58 @@
+// REQUIRES: TARGET-SM_90
+// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+// DMA tiled copy: foreach loop with chunkat for tiled global->shared->global.
+// Tests the descriptor pipeline for non-TMA async DMA with tiling.
+
+__co__ auto dma_tiled_roundtrip(f32 [8, 64] input) {
+  f32 [input.span] output;
+
+  parallel p by 8, q by 64 {
+    data = dma.copy input.chunkat(p, q) => local;
+    dma.copy data.data => output.chunkat(p, q);
+  }
+
+  return output;
+}
+
+__co__ auto dma_tiled_shared(f32 [4, 128] input) {
+  f32 [input.span] output;
+
+  parallel p by 4 : block {
+    smem = dma.copy.async input.chunkat(p, _) => shared;
+    wait smem;
+    dma.copy smem.data => output.chunkat(p, _);
+  }
+
+  return output;
+}
+
+int main() {
+  {
+    auto a = choreo::make_spandata<choreo::f32>(8, 64);
+    a.fill_random(-10.0f, 10.0f);
+
+    auto res = dma_tiled_roundtrip(a.view());
+
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        choreo::choreo_assert(a[i][j] == res[i][j], "local roundtrip mismatch");
+
+    std::cout << "PASS: dma_tiled_roundtrip" << std::endl;
+  }
+  {
+    auto a = choreo::make_spandata<choreo::f32>(4, 128);
+    a.fill_random(-10.0f, 10.0f);
+
+    auto res = dma_tiled_shared(a.view());
+
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        choreo::choreo_assert(a[i][j] == res[i][j], "shared tiled mismatch");
+
+    std::cout << "PASS: dma_tiled_shared" << std::endl;
+  }
+}
+
+// CHECK: PASS: dma_tiled_roundtrip
+// CHECK: PASS: dma_tiled_shared

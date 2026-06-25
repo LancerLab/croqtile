@@ -34,7 +34,14 @@ public:
   CUDAEmitter(llvm::raw_ostream &os) : os(os), indent(0) {}
 
   void emitModule(ModuleOp module) {
-    emitHeader();
+    hasTMA = false;
+    hasDMA = false;
+    if (auto attr = module->getAttrOfType<mlir::BoolAttr>("coir.has_tma"))
+      hasTMA = attr.getValue();
+    if (auto attr = module->getAttrOfType<mlir::BoolAttr>("coir.has_dma"))
+      hasDMA = attr.getValue();
+
+    emitHeader(hasTMA);
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
         emitKernel(kernel);
@@ -48,6 +55,8 @@ public:
 private:
   llvm::raw_ostream &os;
   unsigned indent;
+  bool hasTMA = false;
+  bool hasDMA = false;
   DenseMap<Value, std::string> valueNames;
   DenseMap<unsigned, std::string> returnParamNames;
   DenseSet<Value> returnValues;
@@ -66,6 +75,24 @@ private:
     AssertOp op;
   };
   llvm::SmallVector<EntryAssertion> entryAssertions;
+
+  // DMA descriptor tracking: populated by prescanDescriptors from
+  // DMAConstDescOp instances in the kernel body.
+  struct DescInfo {
+    unsigned index;
+    coir::TensorType srcType;
+    coir::TensorType dstType;
+    coir::DMAKind kind;
+    bool isTMA;   // global<->shared with hasTMA
+    bool isLoad;  // global->shared direction
+    Value constDescResult; // SSA value from DMAConstDescOp
+  };
+  llvm::SmallVector<DescInfo> descInfos;
+  DenseMap<Value, unsigned> descValueToIndex;
+  // Runtime offsets bound per DMAInvokeOp desc operand (from DMADescRuntimeOp)
+  DenseMap<Value, SmallVector<Value, 4>> descRuntimeOffsets;
+  DenseSet<Value> dmaTokens; // tokens from DMAInvokeOp
+  unsigned nextFutureId = 0;
 
   std::string getIndent() { return std::string(indent * 2, ' '); }
   void incIndent() { indent++; }
@@ -167,20 +194,51 @@ private:
     });
   }
 
-  void emitHeader() {
+  void emitHeader(bool withTMA) {
     os << "#define __CHOREO_TARGET_CUTE__\n";
     os << "#define __USE_CUDA_TYPE__\n";
+    if (withTMA) {
+      os << "#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ 90\n";
+      os << "#define __CHOREO_ENABLE_CUDA_RUNTIME_ENV_CHECK__\n";
+    }
     os << "#include \"choreo.h\"\n";
-    os << "using namespace nvcuda;\n\n";
+    if (withTMA) {
+      os << "namespace cde = cuda::device::experimental;\n";
+    }
+    os << "using namespace nvcuda;\n";
+    os << "using namespace choreo;\n\n";
   }
 
   std::string kernelDeviceName(StringRef name) {
     return ("__" + name + "_kernel__").str();
   }
 
+  void prescanDescriptors(KernelOp kernel) {
+    descInfos.clear();
+    descValueToIndex.clear();
+
+    kernel.getBody().walk([&](DMAConstDescOp op) {
+      auto srcType = dyn_cast<coir::TensorType>(op.getSource().getType());
+      auto dstType = dyn_cast<coir::TensorType>(op.getDest().getType());
+      if (!srcType || !dstType) return;
+
+      int32_t srcMS = srcType.getMemorySpace();
+      int32_t dstMS = dstType.getMemorySpace();
+
+      bool isTMA = op.getTma();
+      bool isLoad = (srcMS <= 0) && (dstMS == 1);
+
+      unsigned idx = descInfos.size();
+      descInfos.push_back({idx, srcType, dstType, op.getKind(),
+                           isTMA, isLoad, op.getOut()});
+      descValueToIndex[op.getOut()] = idx;
+    });
+  }
+
   void emitKernel(KernelOp kernel) {
     entryAssertions.clear();
     prescanMMAFragRoles(kernel);
+    prescanDescriptors(kernel);
 
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
@@ -208,6 +266,17 @@ private:
       returnParamNames[i] = name;
       paramIdx++;
     }
+    // TMA descriptors as kernel parameters
+    unsigned tmaParamCount = 0;
+    for (unsigned i = 0; i < descInfos.size(); ++i) {
+      if (!descInfos[i].isTMA) continue;
+      if (paramIdx > 0)
+        os << ", ";
+      os << "const __grid_constant__ CUtensorMap __choreo_tma_"
+         << tmaParamCount << "_tensor_map";
+      paramIdx++;
+      tmaParamCount++;
+    }
     os << ") {\n";
     incIndent();
 
@@ -219,6 +288,26 @@ private:
           valueNames[ret.getOperands()[i]] = returnParamNames[i];
         }
       }
+    }
+
+    // Emit TMA barriers and atoms at kernel body start (only for TMA loads)
+    unsigned tmaIdx = 0;
+    for (unsigned i = 0; i < descInfos.size(); ++i) {
+      if (!descInfos[i].isTMA) continue;
+      if (descInfos[i].isLoad) {
+        os << getIndent() << "__shared__ __align__(8) uint64_t "
+           << "choreo_copy_atom_t_" << tmaIdx << "_barrier;\n";
+        os << getIndent() << "if (threadIdx.x == 0 && threadIdx.y == 0) {\n";
+        incIndent();
+        os << getIndent() << "choreo::tma_mbarrier_init(&choreo_copy_atom_t_"
+           << tmaIdx << "_barrier, 1);\n";
+        decIndent();
+        os << getIndent() << "}\n";
+        os << getIndent() << "__syncthreads();\n";
+        os << getIndent() << "TMAAtom choreo_copy_atom_t_" << tmaIdx
+           << "{&choreo_copy_atom_t_" << tmaIdx << "_barrier};\n\n";
+      }
+      tmaIdx++;
     }
 
     for (auto &op : body.front().getOperations())
@@ -301,12 +390,127 @@ private:
     return dims;
   }
 
+  std::string emitTMADataType(Type elemTy) {
+    if (elemTy.isF32()) return "CU_TENSOR_MAP_DATA_TYPE_FLOAT32";
+    if (elemTy.isF16()) return "CU_TENSOR_MAP_DATA_TYPE_FLOAT16";
+    if (elemTy.isF64()) return "CU_TENSOR_MAP_DATA_TYPE_FLOAT64";
+    if (elemTy.isInteger(8)) return "CU_TENSOR_MAP_DATA_TYPE_UINT8";
+    if (elemTy.isInteger(16)) return "CU_TENSOR_MAP_DATA_TYPE_UINT16";
+    if (elemTy.isInteger(32)) return "CU_TENSOR_MAP_DATA_TYPE_UINT32";
+    if (auto f8Ty = dyn_cast<mlir::Float8E4M3FNType>(elemTy))
+      return "CU_TENSOR_MAP_DATA_TYPE_UINT8";
+    if (auto f8Ty = dyn_cast<mlir::Float8E5M2Type>(elemTy))
+      return "CU_TENSOR_MAP_DATA_TYPE_UINT8";
+    return "CU_TENSOR_MAP_DATA_TYPE_FLOAT32";
+  }
+
+  void emitTMADescriptorSetup(unsigned descIdx, const std::string &dataPtr,
+                              coir::TensorType globalType,
+                              coir::TensorType tileType) {
+    auto shape = globalType.getShape();
+    auto elemTy = globalType.getElementType();
+    unsigned elemBytes = elemTy.getIntOrFloatBitWidth() / 8;
+    unsigned rank = shape.size();
+
+    // Tile shape for box dimensions (transfer size per TMA op)
+    auto tileShape = tileType.getShape();
+
+    std::string prefix = "__choreo_tma_" + std::to_string(descIdx);
+
+    // Shape (innermost-first for cuTensorMapEncodeTiled)
+    os << "  uint64_t " << prefix << "_shape[] = {";
+    for (int i = (int)rank - 1; i >= 0; --i) {
+      if (i < (int)rank - 1) os << ", ";
+      os << shape[i];
+    }
+    os << "};\n";
+
+    // Strides (byte strides, skip innermost -- it's implicit)
+    os << "  uint64_t " << prefix << "_strides[] = {";
+    int64_t stride = elemBytes;
+    for (int i = (int)rank - 1; i >= 1; --i) {
+      if (i < (int)rank - 1) os << ", ";
+      stride *= shape[i];
+      os << stride;
+    }
+    os << "};\n";
+
+    // Box shape from the tile type (innermost-first)
+    os << "  uint32_t " << prefix << "_box_shape[] = {";
+    for (int i = (int)rank - 1; i >= 0; --i) {
+      if (i < (int)rank - 1) os << ", ";
+      int64_t tileDim = (i < (int)tileShape.size()) ? tileShape[i] : 1;
+      os << "(uint32_t)(" << tileDim << ")";
+    }
+    os << "};\n";
+
+    // Element strides (always 1)
+    os << "  uint32_t " << prefix << "_elem_strides[] = {";
+    for (unsigned i = 0; i < rank; ++i) {
+      if (i > 0) os << ", ";
+      os << "1";
+    }
+    os << "};\n";
+
+    // Tensor map
+    os << "  alignas(64) CUtensorMap " << prefix << "_tensor_map{};\n";
+    os << "  CUresult " << prefix << "_res = cuTensorMapEncodeTiled(\n";
+    os << "          &" << prefix << "_tensor_map,\n";
+    os << "          CUtensorMapDataType::" << emitTMADataType(elemTy) << ",\n";
+    os << "          " << rank << ",\n";
+    os << "          " << dataPtr << ",\n";
+    os << "          " << prefix << "_shape,\n";
+    os << "          " << prefix << "_strides,\n";
+    os << "          " << prefix << "_box_shape,\n";
+    os << "          " << prefix << "_elem_strides,\n";
+    os << "          CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE,\n";
+    os << "          CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE,\n";
+    os << "          CUtensorMapL2promotion::"
+       << "CU_TENSOR_MAP_L2_PROMOTION_L2_128B,\n";
+    os << "          CUtensorMapFloatOOBfill::"
+       << "CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);\n";
+    os << "  choreo::abend_true(" << prefix << "_res != CUDA_SUCCESS);\n";
+  }
+
+  std::string getTMAGlobalPtr(unsigned tmaIdx, KernelOp kernel) {
+    unsigned tmaLoadIdx = 0;
+    unsigned tmaStoreIdx = 0;
+    unsigned tmaCount = 0;
+    for (unsigned i = 0; i < descInfos.size(); ++i) {
+      if (!descInfos[i].isTMA) continue;
+      if (tmaCount == tmaIdx) {
+        if (descInfos[i].isLoad) {
+          unsigned fnInputs = kernel.getFunctionType().getNumInputs();
+          unsigned argIdx = tmaLoadIdx < fnInputs ? tmaLoadIdx : 0;
+          return "p" + std::to_string(argIdx) + "__device";
+        } else {
+          return "__result__device";
+        }
+      }
+      if (descInfos[i].isLoad)
+        tmaLoadIdx++;
+      else
+        tmaStoreIdx++;
+      tmaCount++;
+    }
+    return "/* unknown TMA ptr */";
+  }
+
+  unsigned countTMADescs() {
+    unsigned count = 0;
+    for (auto &d : descInfos)
+      if (d.isTMA) count++;
+    return count;
+  }
+
   void emitHostWrapper(KernelOp kernel) {
+    prescanDescriptors(kernel);
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
     std::string devName = kernelDeviceName(symName);
     unsigned numInputs = fnType.getNumInputs();
     unsigned numResults = fnType.getNumResults();
+    unsigned numTMA = countTMADescs();
 
     if (numResults == 0) {
       os << "void " << symName << "(";
@@ -328,6 +532,19 @@ private:
            << bytes << "ULL, cudaMemcpyHostToDevice);\n";
       }
 
+      // TMA descriptor setup
+      unsigned tmaIdx = 0;
+      for (unsigned i = 0; i < descInfos.size(); ++i) {
+        if (!descInfos[i].isTMA) continue;
+        auto globalType = descInfos[i].isLoad ? descInfos[i].srcType
+                                              : descInfos[i].dstType;
+        auto tileType = descInfos[i].isLoad ? descInfos[i].dstType
+                                            : descInfos[i].srcType;
+        std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
+        emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType);
+        tmaIdx++;
+      }
+
       auto dims = getLaunchDims(kernel);
       emitEntryAssertions(kernel);
 
@@ -336,6 +553,9 @@ private:
       for (unsigned i = 0; i < numInputs; ++i) {
         if (i > 0) os << ", ";
         os << "p" << i << "__device";
+      }
+      for (unsigned i = 0; i < numTMA; ++i) {
+        os << ", __choreo_tma_" << i << "_tensor_map";
       }
       os << ");\n";
       os << "  cudaDeviceSynchronize();\n";
@@ -401,6 +621,19 @@ private:
     os << "  " << eType << "* __result__device = nullptr;\n";
     os << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
 
+    // TMA descriptor setup
+    unsigned tmaIdx = 0;
+    for (unsigned i = 0; i < descInfos.size(); ++i) {
+      if (!descInfos[i].isTMA) continue;
+      auto globalType = descInfos[i].isLoad ? descInfos[i].srcType
+                                            : descInfos[i].dstType;
+      auto tileType = descInfos[i].isLoad ? descInfos[i].dstType
+                                          : descInfos[i].srcType;
+      std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
+      emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType);
+      tmaIdx++;
+    }
+
     auto dims = getLaunchDims(kernel);
     emitEntryAssertions(kernel);
 
@@ -410,7 +643,11 @@ private:
       if (i > 0) os << ", ";
       os << "p" << i << "__device";
     }
-    os << ", __result__device);\n";
+    os << ", __result__device";
+    for (unsigned i = 0; i < numTMA; ++i) {
+      os << ", __choreo_tma_" << i << "_tensor_map";
+    }
+    os << ");\n";
     os << "  cudaDeviceSynchronize();\n";
     os << "  cudaMemcpy(__result.data(), __result__device, "
        << resBytes << "ULL, cudaMemcpyDeviceToHost);\n";
@@ -439,6 +676,14 @@ private:
       emitMMAExec(exec);
     else if (auto store = dyn_cast<MMAStoreOp>(op))
       emitMMAStore(store);
+    else if (auto constDesc = dyn_cast<DMAConstDescOp>(op))
+      emitDMAConstDesc(constDesc);
+    else if (auto prefetch = dyn_cast<DMADescPrefetchOp>(op))
+      emitDMAPrefetch(prefetch);
+    else if (auto rtDesc = dyn_cast<DMADescRuntimeOp>(op))
+      emitDMARuntimeDesc(rtDesc);
+    else if (auto invoke = dyn_cast<DMAInvokeOp>(op))
+      emitDMAInvoke(invoke);
     else if (auto dataCopy = dyn_cast<DataCopyOp>(op))
       emitDataCopy(dataCopy);
     else if (auto dmaCopy = dyn_cast<DmaCopyOp>(op))
@@ -493,6 +738,8 @@ private:
          << getName(selectOp.getTrueValue()) << " : "
          << getName(selectOp.getFalseValue()) << ";\n";
     }
+    else if (isa<DMACheckOp>(op))
+      (void)op;
     else {
       os << getIndent() << "// [unhandled] " << op->getName().getStringRef()
          << "\n";
@@ -796,26 +1043,222 @@ private:
        << dstTensor << ");\n";
   }
 
+  // --- DMA Descriptor Pipeline Emission ---
+
+  void emitDMAConstDesc(DMAConstDescOp op) {
+    // DMAConstDescOp is a compile-time descriptor -- no runtime code emitted.
+    // We propagate the desc value index for use by downstream ops.
+    auto it = descValueToIndex.find(op.getOut());
+    if (it == descValueToIndex.end()) return;
+    // Track the prefetch chain: prefetch.desc consumes const.desc result
+    valueNames[op.getOut()] = "__desc_" + std::to_string(it->second);
+  }
+
+  void emitDMAPrefetch(DMADescPrefetchOp op) {
+    // Prefetch materializes the descriptor. For TMA on GPU, this is a
+    // prefetch_tma_descriptor intrinsic. For cp.async DMA, this is a no-op.
+    Value in = op.getIn();
+    auto it = descValueToIndex.find(in);
+    if (it == descValueToIndex.end()) {
+      // Walk the chain to find the original const.desc
+      valueNames[op.getOut()] = "/* prefetch unknown */";
+      return;
+    }
+    unsigned descIdx = it->second;
+    descValueToIndex[op.getOut()] = descIdx;
+    valueNames[op.getOut()] = "__desc_" + std::to_string(descIdx);
+  }
+
+  void emitDMARuntimeDesc(DMADescRuntimeOp op) {
+    Value in = op.getIn();
+    auto it = descValueToIndex.find(in);
+    if (it == descValueToIndex.end()) {
+      valueNames[op.getOut()] = "/* rt_desc unknown */";
+      return;
+    }
+    unsigned descIdx = it->second;
+    descValueToIndex[op.getOut()] = descIdx;
+    valueNames[op.getOut()] = "__desc_" + std::to_string(descIdx);
+    // Capture runtime offsets for use in TMA coordinate emission.
+    SmallVector<Value, 4> offs(op.getOffsets().begin(), op.getOffsets().end());
+    descRuntimeOffsets[op.getOut()] = std::move(offs);
+  }
+
+  unsigned getTMAIndexForDesc(unsigned descIdx) {
+    unsigned tmaIdx = 0;
+    for (unsigned i = 0; i < descIdx; ++i) {
+      if (descInfos[i].isTMA)
+        tmaIdx++;
+    }
+    return tmaIdx;
+  }
+
+  void emitDMAInvoke(DMAInvokeOp op) {
+    Value descVal = op.getDesc();
+    auto it = descValueToIndex.find(descVal);
+    if (it == descValueToIndex.end()) {
+      os << getIndent() << "// DMA invoke (no descriptor info)\n";
+      os << getIndent() << "__syncthreads();\n";
+      dmaTokens.insert(op.getDone());
+      return;
+    }
+
+    unsigned descIdx = it->second;
+    auto &desc = descInfos[descIdx];
+    dmaTokens.insert(op.getDone());
+
+    // Collect runtime offsets if any
+    SmallVector<Value, 4> offsets;
+    auto offsIt = descRuntimeOffsets.find(descVal);
+    if (offsIt != descRuntimeOffsets.end())
+      offsets = offsIt->second;
+
+    if (desc.isTMA) {
+      emitTMAInvoke(descIdx, desc, offsets);
+    } else {
+      emitCpAsyncInvoke(descIdx, desc);
+    }
+  }
+
+  void emitTMAInvoke(unsigned descIdx, const DescInfo &desc,
+                     const SmallVector<Value, 4> &offsets) {
+    unsigned tmaIdx = getTMAIndexForDesc(descIdx);
+    std::string atomName = "choreo_copy_atom_t_" + std::to_string(tmaIdx);
+    std::string mapName = "__choreo_tma_" + std::to_string(tmaIdx) +
+                          "_tensor_map";
+
+    // Compute TMA coordinates from runtime offsets.
+    // Offsets are tile indices; multiply by tile dimensions to get element coords.
+    // TMA expects coordinates in innermost-first order.
+    auto tileShape = desc.isLoad ? desc.dstType.getShape()
+                                 : desc.srcType.getShape();
+    auto globalShape = desc.isLoad ? desc.srcType.getShape()
+                                   : desc.dstType.getShape();
+    unsigned rank = globalShape.size();
+
+    if (desc.isLoad) {
+      auto shape = desc.dstType.getShape();
+      int64_t elemBits = desc.dstType.getElementType().getIntOrFloatBitWidth();
+      int64_t totalElems = 1;
+      for (auto d : shape) totalElems *= d;
+      int64_t transferBytes = totalElems * elemBits / 8;
+
+      std::string loadFunc = rank <= 2
+          ? "choreo::tma_load_2d_shared_cta_global_mbarrier"
+          : "choreo::tma_load_3d_shared_cta_global_mbarrier";
+
+      std::string dstName;
+      if (auto constOp =
+              desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
+        dstName = getName(constOp.getDest());
+      } else {
+        dstName = "/* unknown dest */";
+      }
+
+      os << getIndent() << "if (threadIdx.x == 0 && threadIdx.y == 0) {\n";
+      incIndent();
+      os << getIndent() << "choreo::tma_mbarrier_expect_tx("
+         << atomName << ".ptx_barrier(), " << transferBytes << ");\n";
+      os << getIndent() << loadFunc << "((void*)(" << dstName
+         << "), (const void*)&" << mapName << ", "
+         << atomName << ".ptx_barrier()";
+      // Emit coordinates (innermost-first)
+      for (int d = (int)rank - 1; d >= 0; --d) {
+        os << ", ";
+        if (d < (int)offsets.size()) {
+          int64_t tileDim = tileShape[d];
+          if (tileDim > 1)
+            os << getName(offsets[d]) << " * " << tileDim;
+          else
+            os << getName(offsets[d]);
+        } else {
+          os << "0";
+        }
+      }
+      os << ");\n";
+      decIndent();
+      os << getIndent() << "}\n";
+
+      os << getIndent() << "choreo::tma_mbarrier_wait_parity("
+         << atomName << ".ptx_barrier(), "
+         << atomName << ".ptx_phase_bit());\n";
+      os << getIndent() << atomName << ".toggle_ptx_phase();\n";
+    } else {
+      // S2G TMA store
+      std::string srcName;
+      if (auto constOp =
+              desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
+        srcName = getName(constOp.getSource());
+      } else {
+        srcName = "/* unknown src */";
+      }
+
+      os << getIndent() << "cde::fence_proxy_async_shared_cta();\n";
+      os << getIndent() << "__syncthreads();\n";
+      os << getIndent() << "if (threadIdx.x == 0 && threadIdx.y == 0) {\n";
+      incIndent();
+
+      auto srcType = desc.srcType;
+      std::string storeFunc = rank <= 2
+          ? "cde::cp_async_bulk_tensor_2d_shared_to_global"
+          : "cde::cp_async_bulk_tensor_3d_shared_to_global";
+
+      os << getIndent() << storeFunc << "(&" << mapName;
+      // Emit coordinates (innermost-first)
+      for (int d = (int)rank - 1; d >= 0; --d) {
+        os << ", ";
+        if (d < (int)offsets.size()) {
+          int64_t tileDim = tileShape[d];
+          if (tileDim > 1)
+            os << getName(offsets[d]) << " * " << tileDim;
+          else
+            os << getName(offsets[d]);
+        } else {
+          os << "0";
+        }
+      }
+      os << ", " << srcName << ");\n";
+      os << getIndent() << "cde::cp_async_bulk_commit_group();\n";
+      os << getIndent() << "cde::cp_async_bulk_wait_group_read<0>();\n";
+      decIndent();
+      os << getIndent() << "}\n";
+    }
+  }
+
+  void emitCpAsyncInvoke(unsigned /*descIdx*/, const DescInfo &desc) {
+    // cp.async DMA: cooperative copy with fence/wait
+    // Use the original operands from the DMAConstDescOp
+    if (auto constOp =
+            desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
+      os << getIndent() << "// cp.async DMA\n";
+      emitNaiveCopy(constOp.getSource(), constOp.getDest());
+      os << getIndent() << "__syncthreads();\n";
+    } else {
+      os << getIndent() << "// cp.async DMA (unknown source)\n";
+      os << getIndent() << "__syncthreads();\n";
+    }
+  }
+
+  // --- Fallback handlers for un-lowered copy ops (when LowerDMADesc skips) ---
+
   void emitDataCopy(DataCopyOp op) {
     emitNaiveCopy(op.getSource(), op.getDest());
     os << getIndent() << "__syncthreads();\n";
-
     if (op.getToken())
-      valueNames[op.getToken()] = getName(op.getDest());
+      dmaTokens.insert(op.getToken());
   }
 
   void emitDmaCopy(DmaCopyOp op) {
     emitNaiveCopy(op.getSource(), op.getDest());
     os << getIndent() << "__syncthreads();\n";
-
-    valueNames[op.getToken()] = getName(op.getDest());
+    dmaTokens.insert(op.getToken());
   }
 
   void emitTmaCopy(TmaCopyOp op) {
-    os << getIndent() << "// TMA copy\n";
-    os << getIndent() << "cute::copy(tma_desc, " << getName(op.getSource())
-       << ", " << getName(op.getDest()) << ");\n";
-    valueNames[op.getToken()] = "/* tma_token */";
+    // Should not reach here after LowerDMADesc; fallback to naive copy
+    emitNaiveCopy(op.getSource(), op.getDest());
+    os << getIndent() << "__syncthreads();\n";
+    dmaTokens.insert(op.getToken());
   }
 
   void emitElementCopy(ElementCopyOp op) {
@@ -831,7 +1274,12 @@ private:
          << stringifyParallelLevel(scope) << "\n";
   }
 
-  void emitWait(WaitOp /*op*/) {
+  void emitWait(WaitOp op) {
+    auto token = op.getToken();
+    if (dmaTokens.count(token)) {
+      // Wait already handled inline during DMA invoke emission
+      return;
+    }
     os << getIndent() << "__syncthreads();\n";
   }
 
@@ -841,15 +1289,27 @@ private:
 
     auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
     int32_t ms = tensorTy.getMemorySpace();
-    std::string qualifier = ms == 1 ? "__shared__ " : "";
     std::string name = getName(op.getResult());
 
     int64_t totalElems = 1;
     for (auto d : tensorTy.getShape())
       totalElems *= d;
 
-    os << getIndent() << qualifier << emitElementType(tensorTy.getElementType())
-       << " " << name << "[" << totalElems << "];\n";
+    if (ms == 1 && hasTMA) {
+      // Shared memory with TMA needs 128-byte alignment
+      int64_t totalBytes = totalElems *
+          (tensorTy.getElementType().getIntOrFloatBitWidth() / 8);
+      os << getIndent() << "__shared__ alignas(128) unsigned char "
+         << name << "_storage[" << totalBytes << "];\n";
+      os << getIndent() << emitElementType(tensorTy.getElementType())
+         << "* " << name << " = ("
+         << emitElementType(tensorTy.getElementType()) << "*)("
+         << name << "_storage);\n";
+    } else {
+      std::string qualifier = ms == 1 ? "__shared__ " : "";
+      os << getIndent() << qualifier << emitElementType(tensorTy.getElementType())
+         << " " << name << "[" << totalElems << "];\n";
+    }
   }
 
   void emitTensorTile(TensorTileOp op) {
@@ -1362,11 +1822,13 @@ void emitScriptFooter(llvm::raw_ostream &os) {
     os << "\"${NVCC}\" -std=c++17 -arch=\"${gpu_arch}\" "
           "--expt-relaxed-constexpr "
           "-I\"$TMPDIR\" -I\"${CUTE_HOME}/include\" "
+          "-L\"${CUDA_HOME}/lib64\" -lcuda "
           "-o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
   } else {
     os << "\"$NVCC\" -std=c++17 -arch=\"$gpu_arch\" "
           "--expt-relaxed-constexpr "
           "-I\"$CHOREO_INC\" -I\"$TMPDIR\" -I\"${CUTE_HOME}/include\" "
+          "-L\"${CUDA_HOME}/lib64\" -lcuda "
           "-o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
   }
 

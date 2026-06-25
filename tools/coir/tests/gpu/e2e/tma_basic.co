@@ -1,0 +1,32 @@
+// REQUIRES: TARGET-SM_90
+// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+// Basic TMA copy: global -> shared -> global roundtrip on SM90.
+
+__co__ auto tma_roundtrip(f32 [6, 16, 64] input) {
+  f32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = tma.copy.async input => shared;
+    wait f;
+    tma.copy f.data => output;
+  }
+
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(6, 16, 64);
+  a.fill_random(-10, 10);
+
+  auto res = tma_roundtrip(a.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k)
+        choreo::choreo_assert(a[i][j][k] == res[i][j][k], "TMA roundtrip mismatch");
+
+  std::cout << "TMA roundtrip PASSED" << std::endl;
+}
+
+// CHECK: TMA roundtrip PASSED
