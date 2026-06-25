@@ -180,6 +180,25 @@ private:
     return found;
   }
 
+  bool hasDeviceParallel(KernelOp kernel) {
+    bool found = false;
+    kernel.walk([&](ParallelOp p) {
+      if (p.getLevel() == ParallelLevel::DEVICE) found = true;
+    });
+    return found;
+  }
+
+  int64_t getDeviceBound(KernelOp kernel) {
+    int64_t bound = 1;
+    kernel.walk([&](ParallelOp p) {
+      if (p.getLevel() == ParallelLevel::DEVICE) {
+        auto bounds = p.getBounds();
+        for (auto b : bounds) bound *= b;
+      }
+    });
+    return bound;
+  }
+
   struct LaunchConfig {
     SmallVector<int64_t> blockDims;  // BLOCK bounds -> gridDim
     SmallVector<int64_t> groupDims;  // GROUP bounds -> blockDim (gcu400+)
@@ -220,6 +239,7 @@ private:
 
   void emitDeviceFunction(KernelOp kernel) {
     preCollectStubs(kernel);
+    bool isMultiDevice = hasDeviceParallel(kernel);
 
     if (!stubDeclCode.empty()) {
       os << stubDeclCode;
@@ -262,6 +282,10 @@ private:
         returnParamNames[i] = name;
         paramIdx++;
       }
+    }
+    if (isMultiDevice) {
+      if (paramIdx > 0) os << ", ";
+      os << "int __device_id";
     }
     os << ") {\n";
     incIndent();
@@ -326,6 +350,7 @@ private:
     if (needsDevice && resTy) {
       int retInputIdx = getReturnInputArgIdx(kernel, 0);
       std::string eType = emitType(resTy.getElementType());
+      bool isMultiDevice = hasDeviceParallel(kernel);
 
       if (hasGroupLevel()) {
         auto lc = collectLaunchConfig(kernel);
@@ -342,6 +367,8 @@ private:
       }
       if (retInputIdx < 0)
         os << ", " << eType << "* g_out, int N";
+      if (isMultiDevice)
+        os << ", int __device_id";
       os << ") {\n";
       os << "  " << name.str() << "(";
       for (unsigned i = 0; i < numInputs; ++i) {
@@ -350,6 +377,8 @@ private:
       }
       if (retInputIdx < 0)
         os << ", g_out";
+      if (isMultiDevice)
+        os << ", __device_id";
       os << ");\n";
       os << "}\n\n";
     }
@@ -408,6 +437,13 @@ private:
     std::string bdims = hasGroupLevel()
                             ? emitDim3(lc.groupDims)
                             : emitDim3(lc.threadDims);
+    bool isMultiDevice = hasDeviceParallel(kernel);
+    int64_t devCount = isMultiDevice ? getDeviceBound(kernel) : 1;
+
+    if (isMultiDevice) {
+      emitMultiDeviceOffloadBody(kernel, resTy, gdims, bdims, devCount);
+      return;
+    }
 
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
@@ -479,6 +515,132 @@ private:
         os << "  topsFree(p" << i << "__device);\n";
       }
       os << "  topsFree(__result__device);\n";
+      os << "  return __result;\n";
+    }
+  }
+
+  void emitMultiDeviceOffloadBody(KernelOp kernel, coir::TensorType resTy,
+                                  const std::string &gdims,
+                                  const std::string &bdims,
+                                  int64_t devCount) {
+    auto fnType = kernel.getFunctionType();
+    auto name = kernel.getSymName();
+    unsigned numInputs = fnType.getNumInputs();
+    int retInputIdx = getReturnInputArgIdx(kernel, 0);
+    std::string eType = emitType(resTy.getElementType());
+    std::string choreoElem = choreoType(resTy.getElementType());
+    unsigned ndim = resTy.getShape().size();
+    int64_t resN = getTensorNumElems(resTy);
+    int64_t resBytes = getTensorBytes(resTy);
+    std::string dc = std::to_string(devCount);
+
+    std::string shapeStr;
+    {
+      llvm::raw_string_ostream ss(shapeStr);
+      ss << "{";
+      for (unsigned d = 0; d < resTy.getShape().size(); ++d) {
+        if (d > 0) ss << ", ";
+        ss << resTy.getShape()[d];
+      }
+      ss << "}";
+    }
+
+    // Per-device buffer vectors
+    for (unsigned i = 0; i < numInputs; ++i) {
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (tty && isDeviceGlobal(tty)) continue;
+      std::string inEType = tty ? emitType(tty.getElementType()) : eType;
+      os << "  std::vector<" << inEType << "*> p" << i
+         << "__device_vec(" << dc << ", nullptr);\n";
+    }
+    if (retInputIdx < 0) {
+      os << "  " << eType << "* __result_buf = (" << eType
+         << "*)malloc(" << resBytes << "ULL);\n";
+      os << "  topsHostRegister(__result_buf, " << resBytes
+         << "ULL, topsHostRegisterPortable);\n";
+      os << "  std::vector<" << eType << "*> __result__device_vec("
+         << dc << ", nullptr);\n";
+    }
+
+    // Device loop: topsSetDevice + malloc + H2D + launch
+    os << "  for (int __d = 0; __d < " << dc << "; ++__d) {\n";
+    os << "    topsSetDevice(__d);\n";
+
+    for (unsigned i = 0; i < numInputs; ++i) {
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (tty && isDeviceGlobal(tty)) continue;
+      int64_t bytes = tty ? getTensorBytes(tty) : resBytes;
+      os << "    topsMalloc((void**)&p" << i << "__device_vec[__d], "
+         << bytes << "ULL);\n";
+      os << "    topsMemcpy(p" << i << "__device_vec[__d], p" << i
+         << ".data(), " << bytes << "ULL, topsMemcpyHostToDevice);\n";
+    }
+
+    if (retInputIdx < 0) {
+      os << "    topsMalloc((void**)&__result__device_vec[__d], "
+         << resBytes << "ULL);\n";
+    }
+
+    // Kernel launch with device ID
+    os << "    __coir_global_" << name.str() << "<<<" << gdims << ", "
+       << bdims << ">>>(";
+    bool first = true;
+    for (unsigned i = 0; i < numInputs; ++i) {
+      if (!first) os << ", ";
+      first = false;
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (tty && isDeviceGlobal(tty))
+        os << "const_cast<" << emitType(tty.getElementType())
+           << "*>(p" << i << ".data())";
+      else
+        os << "p" << i << "__device_vec[__d]";
+    }
+    if (retInputIdx < 0) {
+      if (!first) os << ", ";
+      os << "__result__device_vec[__d], " << resN;
+    }
+    os << ", __d);\n";
+
+    os << "  }\n";
+
+    // Sync loop: topsSetDevice + sync + partial D2H + free.
+    // Each device's portion: total / device_count bytes at its own offset.
+    int64_t portionElems = resN / devCount;
+    int64_t portionBytes = resBytes / devCount;
+    os << "  for (int __sync_d = 0; __sync_d < " << dc << "; ++__sync_d) {\n";
+    os << "    topsSetDevice(__sync_d);\n";
+    os << "    topsDeviceSynchronize();\n";
+
+    if (retInputIdx >= 0) {
+      os << "    topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+         << ".data()) + __sync_d * " << portionElems << ", p" << retInputIdx
+         << "__device_vec[__sync_d] + __sync_d * " << portionElems << ", "
+         << portionBytes << "ULL, topsMemcpyDeviceToHost);\n";
+    } else {
+      os << "    topsMemcpy(__result_buf + __sync_d * " << portionElems
+         << ", __result__device_vec[__sync_d] + __sync_d * " << portionElems
+         << ", " << portionBytes
+         << "ULL, topsMemcpyDeviceToHost);\n";
+    }
+
+    for (unsigned i = 0; i < numInputs; ++i) {
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (tty && isDeviceGlobal(tty)) continue;
+      os << "    topsFree(p" << i << "__device_vec[__sync_d]);\n";
+    }
+    if (retInputIdx < 0)
+      os << "    topsFree(__result__device_vec[__sync_d]);\n";
+
+    os << "  }\n";
+
+    if (retInputIdx >= 0) {
+      os << "  return choreo::copy_as_spanned(p" << retInputIdx
+         << ".data(), p" << retInputIdx << ".shape());\n";
+    } else {
+      os << "  auto __result = choreo::copy_as_spanned<" << ndim
+         << ">(__result_buf, " << shapeStr << ");\n";
+      os << "  topsHostUnregister(__result_buf);\n";
+      os << "  free(__result_buf);\n";
       os << "  return __result;\n";
     }
   }
@@ -573,6 +735,15 @@ private:
 
     os << getIndent() << "// parallel level="
        << stringifyParallelLevel(level) << "\n";
+
+    if (level == ParallelLevel::DEVICE) {
+      for (unsigned i = 0; i < args.size(); ++i) {
+        valueNames[args[i]] = "__device_id";
+      }
+      for (auto &bodyOp : body.front().getOperations())
+        emitOp(&bodyOp);
+      return;
+    }
 
     bool useHwId = false;
     std::string idPrefix;

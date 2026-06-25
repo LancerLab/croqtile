@@ -1,0 +1,48 @@
+// RUN: cocc -t topscc -es %s -o - | FileCheck %s
+//
+// Verify multi-device parallel generates topsSetDevice loop + per-device
+// allocations + kernel launch with device ID + partial D2H sync loop.
+
+__co__ s32 [8] test_device(s32 [8] input) {
+  s32 [8] output;
+  parallel d by 2 : device {
+    parallel p by 4 : block {
+      f = dma.copy.async input.chunkat(p) => local;
+      wait f;
+      local s32 [2] tmp;
+      foreach i in [2] {
+        tmp.at(i) = f.data.at(i) * 2;
+      }
+      dma.copy tmp => output.chunkat(p);
+    }
+  }
+  return output;
+}
+
+// Device function accepts __device_id parameter
+// CHECK: __device__ void test_device({{.*}}, int __device_id)
+// CHECK: // parallel level=device
+// CHECK: // parallel level=block
+// CHECK: __tops_bid_x()
+
+// Global trampoline passes __device_id
+// CHECK: __global__ void __coir_global_test_device({{.*}}, int __device_id)
+
+// Host: per-device buffer vectors + portable registered result buffer
+// CHECK: std::vector<{{.*}}> p0__device_vec(2, nullptr)
+// CHECK: malloc(
+// CHECK: topsHostRegister({{.*}}topsHostRegisterPortable)
+
+// Host: device loop with topsSetDevice + malloc + H2D + launch
+// CHECK: for (int __d = 0; __d < 2; ++__d)
+// CHECK: topsSetDevice(__d)
+// CHECK: topsMalloc
+// CHECK: topsMemcpy
+// CHECK: __coir_global_test_device<<<{{.*}}>>>({{.*}}, __d)
+
+// Host: sync loop with partial D2H
+// CHECK: for (int __sync_d = 0; __sync_d < 2; ++__sync_d)
+// CHECK: topsSetDevice(__sync_d)
+// CHECK: topsDeviceSynchronize()
+// CHECK: topsMemcpy(__result_buf + __sync_d * 4
+// CHECK: topsFree
