@@ -50,6 +50,8 @@ all: build docs
 
 build: build-with-cmake-ninja
 
+build-all: coir
+
 -include $(TARGET_MK)
 -include $(TOOLS_MK)
 -include .local.mk
@@ -134,18 +136,95 @@ test-legacy: legacy
 test: build
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
-test-all: build
-	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
-	$(LIT) tools/co-mock/tests/
-
 test-debug: debug
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
 test-release: release
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
+# Unified test targets: choreo + coir
+test-all: coir
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
+
+test-all-debug: coir-debug
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
+
+test-all-release: coir-release
+	$(LIT) tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
+
 ci-test:
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+
+# ---- CoIR IR tooling ----
+COIR_DEP_CONF = $(WORK_DIR)/tools/coir/llvm-dep.conf
+COIR_LLVM_DIR = $(WORK_DIR)/extern/llvm-project
+COIR_LLVM_SHASH := $(shell grep '^LLVM_SHASH=' $(COIR_DEP_CONF) | cut -d= -f2-)
+COIR_LLVM_TAR := $(shell grep '^LLVM_TAR=' $(COIR_DEP_CONF) | cut -d= -f2-)
+COIR_LLVM_URL := $(shell grep '^LLVM_URL=' $(COIR_DEP_CONF) | cut -d= -f2-)
+COIR_LLVM_MD5 := $(shell grep '^LLVM_MD5=' $(COIR_DEP_CONF) | cut -d= -f2-)
+
+COIR_BUILD_DIR ?= $(CMAKE_BUILD_DIR)
+
+.PHONY: setup-coir-deps
+setup-coir-deps:
+	@echo "=== Setting up LLVM/MLIR for CoIR tooling ==="
+	@mkdir -p $(COIR_LLVM_DIR)
+	@if [ ! -f "$(COIR_LLVM_DIR)/lib/cmake/mlir/MLIRConfig.cmake" ]; then \
+		echo "Downloading LLVM/MLIR ($(COIR_LLVM_SHASH))..."; \
+		cd $(WORK_DIR)/extern && \
+		wget -q --show-progress -O $(COIR_LLVM_TAR) $(COIR_LLVM_URL) && \
+		echo "Extracting into extern/llvm-project/..." && \
+		tar -xzf $(COIR_LLVM_TAR) --strip-components=1 -C llvm-project && \
+		rm -f $(COIR_LLVM_TAR) && \
+		echo "LLVM/MLIR ready at $(COIR_LLVM_DIR)"; \
+	else \
+		echo "LLVM/MLIR already present at $(COIR_LLVM_DIR)"; \
+	fi
+
+.PHONY: symlink-coir
+symlink-coir:
+	@test -f $(COIR_BUILD_DIR)/tools/coir/co2ir && ln -sf $(COIR_BUILD_DIR)/tools/coir/co2ir $(WORK_DIR)/co2ir || true
+	@test -f $(COIR_BUILD_DIR)/tools/coir/coir-opt && ln -sf $(COIR_BUILD_DIR)/tools/coir/coir-opt $(WORK_DIR)/coir-opt || true
+	@test -f $(COIR_BUILD_DIR)/tools/coir/cocc && ln -sf $(COIR_BUILD_DIR)/tools/coir/cocc $(WORK_DIR)/cocc || true
+
+define build-coir
+	@echo "=== Building CoIR tools ($(1)) ==="
+	cmake -S $(WORK_DIR) -B $(COIR_BUILD_DIR) \
+		-G Ninja \
+		-DCMAKE_BUILD_TYPE=$(1) \
+		-DCHOREO_BUILD_COIR=ON \
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
+	ninja -C $(COIR_BUILD_DIR) co2ir coir-opt cocc
+	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(COIR_BUILD_DIR) symlink-coir
+endef
+
+.PHONY: coir
+coir: build
+	$(call build-coir,$(CMAKE_BUILD_TYPE))
+
+.PHONY: coir-debug
+coir-debug: debug
+	$(eval COIR_BUILD_DIR := $(DBG_BUILD_DIR))
+	$(call build-coir,Debug)
+
+.PHONY: coir-release
+coir-release: release
+	$(eval COIR_BUILD_DIR := $(REL_BUILD_DIR))
+	$(call build-coir,Release)
+
+.PHONY: coir-test
+coir-test: coir
+	@echo "=== Running CoIR tests ==="
+	$(LIT) tools/coir/tests/
+
+.PHONY: coir-clean
+coir-clean:
+	@for d in $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR); do \
+		if [ -d "$$d/tools/coir" ]; then \
+			rm -rf "$$d/tools/coir"; \
+			echo "Removed $$d/tools/coir"; \
+		fi; \
+	done
 
 # ---- co-mock (standalone mock interpreter) ----
 co-mock: build-co-mock-with-cmake-ninja
@@ -167,6 +246,8 @@ clean:
 	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(LGY_BUILD_DIR) $(WASM_BUILD_DIR) $(TEST_TARGETS) tests/*.result
 	@cd tests/standalone/ && $(MAKE) clean
 
+clean-all: clean coir-clean
+
 build-with-cmake:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir $(CMAKE_BUILD_DIR); fi
@@ -181,7 +262,7 @@ build-with-cmake-ninja:
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
 	@test -f $(CMAKE_BUILD_DIR)/co-mock && ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock || true
-	@$(MAKE) --no-print-directory symlink-coir
+	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(CMAKE_BUILD_DIR) symlink-coir
 
 config-with-cmake-ninja:
 	@echo "Starting build with CMake..."
