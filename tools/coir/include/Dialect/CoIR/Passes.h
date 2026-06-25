@@ -104,10 +104,14 @@ public:
   /// Print the CoIR MLIR module (like clang -emit-llvm).
   void EmitCoIR(llvm::raw_ostream &os);
 
-  /// Run CoIR optimization and analysis passes:
-  ///   1. HoistAssertions   -- LICM for assertions
+  /// Run safety instrumentation passes (always, not skippable by --no-opt):
+  ///   1. HoistAssertions   -- LICM for assertions (SSA dominance)
   ///   2. EstimateAssertCost -- stamp cost/enabled attrs
   ///   3. CollectAssertStats -- collect stats (if collect_stats_)
+  bool InstrumentSafety();
+
+  /// Run CoIR optimization passes (skipped by --no-opt / -O0).
+  /// Currently empty; future home for real optimizations.
   bool Optimize();
 
   /// Run shared CoIR lowering passes (DMA/MMA classification and hoisting).

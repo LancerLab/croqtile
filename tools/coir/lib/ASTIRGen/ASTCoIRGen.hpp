@@ -2,9 +2,11 @@
 #define __AST_COIR_GEN_HPP__
 
 #include "ast.hpp"
+#include "assess.hpp"
 #include "codegen.hpp"
 #include "MLIRUtility.hpp"
 #include "Session.hpp"
+#include "symbexpr.hpp"
 #include "types.hpp"
 
 #include "Dialect/CoIR/CoIRDialect.h"
@@ -100,9 +102,20 @@ private:
                   llvm::StringRef message,
                   coir::AssertSite site = coir::AssertSite::USE,
                   coir::AssertUsage usage = coir::AssertUsage::UNCLASSIFIED);
-  void EmitElemAccessAsserts(mlir::Location loc, llvm::StringRef dataName,
-                             llvm::ArrayRef<mlir::Value> indices,
-                             coir::TensorType tty);
+
+  /// Materialize an SBE symbolic expression into MLIR values.
+  /// Returns nullptr if the expression pattern is unsupported.
+  mlir::Value MaterializeSBE(mlir::Location loc, const ValueItem& expr);
+
+  /// Emit coir.assert ops for all RUNTIME assertions anchored at `node`.
+  void EmitNodeAssertions(AST::Node* node);
+
+  /// Map from AST Node* to the RUNTIME assertions that should be emitted
+  /// when visiting that node.
+  std::unordered_map<AST::Node*, std::vector<const Assertion*>> assert_map_;
+
+  /// Build the assertion map for the current function from the assessor.
+  void BuildAssertionMap();
 
   // Resolve a bounded variable (within or parallel-by) to its total
   // iteration extent by looking up bv_map -> MLIR values or BoundedType.

@@ -1,0 +1,18 @@
+// RUN: cocc -t cute -es --no-opt -rtc=all %s 2>&1 | FileCheck %s
+//
+// Test that --no-opt still runs safety passes (InstrumentSafety).
+// Dynamic element access assertions should still be emitted even
+// when optimization is disabled.
+
+__co__ void gather(s32 [256] data, s32 [4] indices) {
+  s32[4] result;
+  parallel by 1 {
+    foreach {i} in [indices.span] {
+      index = indices.at(i);
+      result.at(i) = data.at(index);
+    }
+  }
+}
+
+// Even with --no-opt, safety assertions are emitted.
+// CHECK: choreo::choreo_assert({{.*}}element access 'data'

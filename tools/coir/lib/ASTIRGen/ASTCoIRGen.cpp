@@ -24,33 +24,119 @@ void ASTCoIRGen::EmitAssert(mlir::Location loc, mlir::Value condition,
                                  mlir::BoolAttr{});
 }
 
-void ASTCoIRGen::EmitElemAccessAsserts(
-    mlir::Location loc, llvm::StringRef dataName,
-    llvm::ArrayRef<mlir::Value> indices, coir::TensorType tty) {
-  if (CCtx().DisableRuntimeCheck()) return;
-  auto shape = tty.getShape();
+void ASTCoIRGen::BuildAssertionMap() {
+  assert_map_.clear();
+  for (const auto& ar : FCtx(fname).GetAssessor().GetAssertions())
+    assert_map_[ar.node].push_back(&ar);
+}
+
+mlir::Value ASTCoIRGen::MaterializeSBE(mlir::Location loc,
+                                        const ValueItem& expr) {
+  using namespace sbe;
   auto indexType = mlir::IndexType::get(&IRContext());
-  auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
-  for (unsigned d = 0; d < indices.size() && d < shape.size(); ++d) {
-    auto idx = indices[d];
-    auto dim = builder.create<mlir::arith::ConstantIndexOp>(loc, shape[d]);
-    std::string ordinal = std::to_string(d + 1);
-    ordinal += (d == 0 ? "st" : d == 1 ? "nd" : d == 2 ? "rd" : "th");
 
-    std::string name = dataName.str();
-    auto geCond = builder.create<mlir::arith::CmpIOp>(
-        loc, mlir::arith::CmpIPredicate::sge, idx, zero);
-    EmitAssert(loc, geCond,
-               "The " + ordinal + " index of element access '" + name +
-                   "' should be >= 0",
-               coir::AssertSite::USE, coir::AssertUsage::ELEMENT_ACCESS);
+  if (auto nv = dyn_cast<NumericValue>(expr))
+    return builder.create<mlir::arith::ConstantIndexOp>(loc, nv->Value());
 
-    auto ltCond = builder.create<mlir::arith::CmpIOp>(
-        loc, mlir::arith::CmpIPredicate::slt, idx, dim);
-    EmitAssert(loc, ltCond,
-               "The " + ordinal + " index of element access '" + name +
-                   "' should be < " + std::to_string(shape[d]),
-               coir::AssertSite::USE, coir::AssertUsage::ELEMENT_ACCESS);
+  if (auto bv = dyn_cast<BooleanValue>(expr)) {
+    auto i1Type = mlir::IntegerType::get(&IRContext(), 1);
+    return builder.create<mlir::arith::ConstantOp>(
+        loc, mlir::IntegerAttr::get(i1Type, bv->Value() ? 1 : 0));
+  }
+
+  if (auto sv = dyn_cast<SymbolicValue>(expr)) {
+    auto val = LookupValue(UnScopedName(sv->Value()));
+    if (!val) return nullptr;
+    if (!mlir::isa<mlir::IndexType>(val.getType()))
+      val = builder.create<mlir::arith::IndexCastOp>(loc, indexType, val);
+    return val;
+  }
+
+  if (auto bo = dyn_cast<BinaryOperation>(expr)) {
+    auto lhs = MaterializeSBE(loc, bo->GetLeft());
+    auto rhs = MaterializeSBE(loc, bo->GetRight());
+    if (!lhs || !rhs) return nullptr;
+
+    if (!mlir::isa<mlir::IndexType>(lhs.getType()))
+      lhs = builder.create<mlir::arith::IndexCastOp>(loc, indexType, lhs);
+    if (!mlir::isa<mlir::IndexType>(rhs.getType()))
+      rhs = builder.create<mlir::arith::IndexCastOp>(loc, indexType, rhs);
+
+    switch (bo->GetOpCode()) {
+    case OpCode::ADD:
+      return builder.create<mlir::arith::AddIOp>(loc, lhs, rhs);
+    case OpCode::SUBTRACT:
+      return builder.create<mlir::arith::SubIOp>(loc, lhs, rhs);
+    case OpCode::MULTIPLY:
+      return builder.create<mlir::arith::MulIOp>(loc, lhs, rhs);
+    case OpCode::DIVIDE:
+      return builder.create<mlir::arith::DivSIOp>(loc, lhs, rhs);
+    case OpCode::IRES:
+      return builder.create<mlir::arith::RemSIOp>(loc, lhs, rhs);
+    case OpCode::GE:
+      return builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::sge, lhs, rhs);
+    case OpCode::GT:
+      return builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::sgt, lhs, rhs);
+    case OpCode::LT:
+      return builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::slt, lhs, rhs);
+    case OpCode::LE:
+      return builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::sle, lhs, rhs);
+    case OpCode::EQ:
+      return builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::eq, lhs, rhs);
+    case OpCode::NE:
+      return builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ne, lhs, rhs);
+    case OpCode::AND: {
+      auto i1 = mlir::IntegerType::get(&IRContext(), 1);
+      auto l1 = builder.create<mlir::arith::TruncIOp>(loc, i1, lhs);
+      auto r1 = builder.create<mlir::arith::TruncIOp>(loc, i1, rhs);
+      return builder.create<mlir::arith::AndIOp>(loc, l1, r1);
+    }
+    case OpCode::OR: {
+      auto i1 = mlir::IntegerType::get(&IRContext(), 1);
+      auto l1 = builder.create<mlir::arith::TruncIOp>(loc, i1, lhs);
+      auto r1 = builder.create<mlir::arith::TruncIOp>(loc, i1, rhs);
+      return builder.create<mlir::arith::OrIOp>(loc, l1, r1);
+    }
+    default:
+      return nullptr;
+    }
+  }
+
+  return nullptr;
+}
+
+void ASTCoIRGen::EmitNodeAssertions(AST::Node* node) {
+  if (CCtx().DisableRuntimeCheck()) return;
+  auto it = assert_map_.find(node);
+  if (it == assert_map_.end()) return;
+
+  for (auto* ar : it->second) {
+    auto loc = ToLoc(ar->loc);
+    auto predicate = MaterializeSBE(loc, ar->expr);
+    if (!predicate) continue;
+
+    auto site = coir::AssertSite::USE;
+    auto usage = coir::AssertUsage::UNCLASSIFIED;
+    switch (ar->usage_type) {
+    case UsageType::ShapeCompatibility:
+      usage = coir::AssertUsage::SHAPE_COMPAT; break;
+    case UsageType::ElementAccess:
+      usage = coir::AssertUsage::ELEMENT_ACCESS; break;
+    case UsageType::LoopBound:
+      usage = coir::AssertUsage::LOOP_BOUND; break;
+    case UsageType::HardwareConstraint:
+      usage = coir::AssertUsage::HW_CONSTRAINT; break;
+    case UsageType::UnClassified:
+      usage = coir::AssertUsage::UNCLASSIFIED; break;
+    }
+
+    EmitAssert(loc, predicate, ar->message, site, usage);
   }
 }
 
@@ -191,10 +277,12 @@ bool ASTCoIRGen::BeforeVisitImpl(AST::Node &n) {
   } else if (auto *cf = dyn_cast<AST::ChoreoFunction>(&n)) {
     PushScope();
     CreateKernelOp(*cf);
+    BuildAssertionMap();
   } else if (isa<AST::ParallelBy>(&n) || isa<AST::ForeachBlock>(&n) ||
              isa<AST::WithBlock>(&n)) {
     PushScope();
   }
+  EmitNodeAssertions(&n);
   return true;
 }
 
@@ -757,7 +845,6 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         if (v) idxVals.push_back(v);
       }
 
-      EmitElemAccessAsserts(loc, da->GetDataName(), idxVals, tty);
       return builder.create<coir::TensorLoadElemOp>(
           loc, tty.getElementType(), tensorVal, idxVals);
     } else {
@@ -926,7 +1013,6 @@ bool ASTCoIRGen::Visit(AST::Assignment &asgn) {
     if (v) idxVals.push_back(v);
   }
 
-  EmitElemAccessAsserts(loc, da.GetDataName(), idxVals, tty);
   builder.create<coir::TensorStoreElemOp>(loc, rhs, tensorVal, idxVals);
   return true;
 }

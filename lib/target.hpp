@@ -305,6 +305,14 @@ public:
 
   virtual bool PlanCodeGenStages(ASTPipeline&) const = 0;
 
+  /// Run the pre-codegen AST stages that populate CodeGenInfo and register
+  /// target-specific assessments (HW constraints).  Called by CoCC before
+  /// ASTCoIRGen so that the assessor contains both sema-level and
+  /// target-level assertions for the COIR path.  Targets override to add
+  /// their adaptor (e.g. GPUAdaptor).  The base implementation adds only
+  /// CodegenPrepare.
+  virtual bool PlanPreCodegenStages(ASTPipeline& p) const;
+
   // Factory for DeviceCodeGen used by HeteroCodeGen. Returns nullptr if
   // the target does not support heterogeneous device code generation.
   virtual std::unique_ptr<DeviceCodeGen> MakeDeviceCodeGen() const;

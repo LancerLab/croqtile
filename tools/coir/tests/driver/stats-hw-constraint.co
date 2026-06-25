@@ -1,0 +1,19 @@
+// RUN: cocc -t cute -es --stats -rtc=all %s 2>&1 | FileCheck %s
+//
+// Test that COIR collects HW-constraint assessments from the target adaptor.
+// A simple kernel with a parallel dimension triggers GPUAdaptor checks
+// (warp alignment, max threads/block, etc.), all of which should resolve
+// at compile time since the dimensions are constants.
+
+__co__ void hw_check(s32 [64] x) {
+  s32[64] y;
+  parallel p by 64
+    y.at(p) = x.at(p);
+}
+
+// Verify assessment statistics include hw-constraint entries from GPUAdaptor.
+// CHECK: Assessment Statistics
+// CHECK: assess  - Assessments evaluated
+// CHECK: assess  - Resolved at compile time (static-true)
+// CHECK: assess  - Assessments (hw-constraint)
+// CHECK-NOT: 0  assess  - Assessments (hw-constraint)

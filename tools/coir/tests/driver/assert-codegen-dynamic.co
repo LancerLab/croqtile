@@ -14,5 +14,5 @@ __co__ void indirect(s32 [1024] data, s32 [8] idx) {
 }
 
 // Device code: bounds checks for data.at(index0) appear as choreo_assert.
-// CHECK: choreo::choreo_assert({{.*}}element access 'data' should be >= 0
-// CHECK: choreo::choreo_assert({{.*}}element access 'data' should be < 1024
+// CHECK: choreo::choreo_assert({{.*}}element access 'data'{{.*}}greater than or equal to 0
+// CHECK: choreo::choreo_assert({{.*}}element access 'data'{{.*}}less than 1024
