@@ -7,7 +7,7 @@
 
 #include "ast.hpp"
 #include "ASTCoIRGen.hpp"
-#include "assert_site.hpp"
+#include "assess.hpp"
 #include "aux.hpp"
 #include "choreo_api.hpp"
 #include "codegen.hpp"
@@ -15,6 +15,7 @@
 #include "context.hpp"
 #include "io.hpp"
 #include "options.hpp"
+#include "pipeline.hpp"
 
 #include "Dialect/CoIR/Passes.h"
 #include "Dialect/CoIR/CoIRDialect.h"
@@ -126,14 +127,47 @@ ProcessCoIROptions(int argc, char *argv[]) {
   return {static_cast<int>(filtered.size()), std::move(filtered)};
 }
 
-/// Run the AST-level AssertSite pass on the frontend AST.
-/// This performs assertion hoisting, cost estimation, and stats accumulation
-/// -- the same work that PlanCodeGenStages() would do in the Choreo path.
-/// RunFrontend() sets NoCodegen(true), so codegen stages (including
-/// AssertSite) are skipped; we run it explicitly here.
-void RunAssertSiteOnAST() {
-  AssertSite as;
-  as.RunOnProgram(CompilerAPI::GetAST());
+/// Run the pre-codegen AST stages (CodegenPrepare + target adaptor) so that
+/// the assessor contains both sema-level and target-level (HW constraint)
+/// assertions.  RunFrontend() sets NoCodegen(true), so PlanCodeGenStages()
+/// never executes; we run the pre-codegen subset explicitly.
+void RunPreCodegenOnAST() {
+  ASTPipeline pre_cg;
+  CCtx().GetTarget().PlanPreCodegenStages(pre_cg);
+  pre_cg.RunOnProgram(CompilerAPI::GetAST());
+}
+
+/// Collect sema-level stats directly from the assessment log.
+/// Walks each function's assessor log to tally total/static_true/
+/// static_false/runtime counts without running the full AssertSite pass.
+void CollectSemaStats() {
+  auto& stats = CCtx().GetAssessmentStats();
+  for (auto& [fname, fctx] : CCtx().GetAllFunctionContexts()) {
+    for (auto& entry : fctx.GetAssessor().GetAssessmentLog()) {
+      stats.total++;
+      switch (entry.outcome) {
+      case AssessOutcome::STATIC_TRUE: stats.static_true++; break;
+      case AssessOutcome::STATIC_FALSE: stats.static_false++; break;
+      case AssessOutcome::RUNTIME: stats.runtime_total++; break;
+      }
+      switch (entry.usage_type) {
+      case UsageType::UnClassified: stats.unclassified_total++; break;
+      case UsageType::ShapeCompatibility: stats.shape_compat_total++; break;
+      case UsageType::ElementAccess: stats.elem_access_total++; break;
+      case UsageType::LoopBound: stats.loop_bound_total++; break;
+      case UsageType::HardwareConstraint: stats.hw_constraint_total++; break;
+      }
+      if (entry.outcome == AssessOutcome::RUNTIME) {
+        switch (entry.usage_type) {
+        case UsageType::UnClassified: stats.unclassified_runtime++; break;
+        case UsageType::ShapeCompatibility: stats.shape_compat_runtime++; break;
+        case UsageType::ElementAccess: stats.elem_access_runtime++; break;
+        case UsageType::LoopBound: stats.loop_bound_runtime++; break;
+        case UsageType::HardwareConstraint: stats.hw_constraint_runtime++; break;
+        }
+      }
+    }
+  }
 }
 
 } // namespace
@@ -152,15 +186,21 @@ int main(int argc, char *argv[]) {
       !compile_binary)
     generate_script = true;
 
-  // --- Frontend ---
-  // Suppress stats from the AST sema pipeline; cocc prints unified stats later.
+  // --- Frontend + pre-codegen ---
+  // Suppress stats from AST pipelines; cocc prints unified stats later.
   bool want_stats = CCtx().PrintStats();
   CCtx().SetPrintStats(false);
   CompilerAPI api;
   int fe_status = api.RunFrontend(input_file);
-  CCtx().SetPrintStats(want_stats);
   if (fe_status != 0) return fe_status;
-  RunAssertSiteOnAST();
+
+  // Run pre-codegen AST passes (CodegenPrepare + target adaptor).
+  // Populates CodeGenInfo (PBTree, launch config) and registers HW-constraint
+  // assessments via SBE.  After this, the assessor contains RUNTIME assertions
+  // from both SemaChecker and the target adaptor.
+  RunPreCodegenOnAST();
+  CollectSemaStats();
+  CCtx().SetPrintStats(want_stats);
 
   if (dump_ast) {
     CompilerAPI::GetAST().Print(dbgs());
@@ -185,6 +225,12 @@ int main(int argc, char *argv[]) {
   if (emit_coir) {
     pipeline.EmitCoIR(llvm::outs());
     return 0;
+  }
+
+  // --- Safety instrumentation (always runs) ---
+  if (!pipeline.InstrumentSafety()) {
+    errs() << "cocc: safety instrumentation failed\n";
+    return 1;
   }
 
   // --- Optimization (skipped with --no-opt or -O0) ---

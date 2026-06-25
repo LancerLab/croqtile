@@ -1,4 +1,5 @@
 #include "assert_site.hpp"
+#include "codegen_prepare.hpp"
 #include "gpu_adapt.hpp"
 #include "gpu_target.hpp"
 #include "hip_codegen.hpp"
@@ -151,6 +152,12 @@ public:
         {"__CHOREO_TARGET_AMDGPU__", "1"},
         {"__CHOREO_AMDGPU_ARCH__", arch},
     };
+  }
+
+  bool PlanPreCodegenStages(ASTPipeline& p) const override {
+    p.AddStage<CodegenPrepare>();
+    p.AddStage<GPUAdaptor>();
+    return true;
   }
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {

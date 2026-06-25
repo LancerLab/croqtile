@@ -1,8 +1,9 @@
 // RUN: cocc -t cute -es -rtc=none %s 2>&1 | FileCheck %s --check-prefix=NONE
 // RUN: cocc -t cute -es -rtc=all %s 2>&1 | FileCheck %s --check-prefix=ALL
 //
-// Test assertion filtering: -rtc=none suppresses all assertions,
-// -rtc=all emits them.
+// Test assertion filtering: with a parallel index bounded by 64, SBE proves
+// all element-access bounds statically.  Neither -rtc=none nor -rtc=all
+// emits runtime assertions because they are already resolved.
 
 __co__ void add(s32 [64] a, s32 [64] b) {
   s32[64] c;
@@ -12,4 +13,5 @@ __co__ void add(s32 [64] a, s32 [64] b) {
 
 // NONE-NOT: choreo_assert
 // NONE-NOT: runtime_check
-// ALL: choreo_assert
+// ALL-NOT: choreo_assert
+// ALL-NOT: runtime_check

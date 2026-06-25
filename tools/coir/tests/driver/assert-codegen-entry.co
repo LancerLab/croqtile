@@ -1,8 +1,8 @@
 // RUN: cocc -t cute -es -rtc=all %s 2>&1 | FileCheck %s
 //
-// Test that COIR emits device-side assertions for thread-level element access.
-// The parallel index (threadIdx.x) is a thread-level value, so assertions
-// stay in device code as choreo_assert rather than being hoisted to host.
+// Test that COIR does NOT emit runtime assertions when the index is a
+// parallel variable with a compile-time-known bound (SBE proves p >= 0
+// and p < 128 statically).  This verifies the SBE resolution path.
 
 __co__ void double_it(s32 [128] x) {
   s32[128] y;
@@ -10,7 +10,6 @@ __co__ void double_it(s32 [128] x) {
     y.at(p) = x.at(p) * 2;
 }
 
-// Device code: bounds checks on thread index.
-// CHECK: choreo::choreo_assert({{.*}}element access 'x' should be >= 0
-// CHECK: choreo::choreo_assert({{.*}}element access 'x' should be < 128
-// CHECK: choreo::choreo_assert({{.*}}element access 'y' should be >= 0
+// No element-access assertions emitted -- SBE proves them statically.
+// CHECK-NOT: choreo_assert
+// CHECK-NOT: runtime_check

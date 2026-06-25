@@ -1,4 +1,5 @@
 #include "assert_site.hpp"
+#include "codegen_prepare.hpp"
 #include "cute_codegen.hpp"
 #include "cute_device_codegen.hpp"
 #include "dma_plan.hpp"
@@ -61,6 +62,12 @@ public:
       return {SwizMode::NONE, SwizMode::B32, SwizMode::B64, SwizMode::B128};
     else
       return {};
+  }
+
+  bool PlanPreCodegenStages(ASTPipeline& p) const override {
+    p.AddStage<CodegenPrepare>();
+    p.AddStage<GPUAdaptor>();
+    return true;
   }
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {

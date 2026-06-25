@@ -1,4 +1,5 @@
 #include "assert_site.hpp"
+#include "codegen_prepare.hpp"
 #include "gcu_adapt.hpp"
 #include "gcu_target.hpp"
 #include "pipeline.hpp"
@@ -173,6 +174,12 @@ public:
 
   bool EnforceVectorAlignment(const ArchId& arch) const override {
     return ArchNum(arch) < 400;
+  }
+
+  bool PlanPreCodegenStages(ASTPipeline& p) const override {
+    p.AddStage<CodegenPrepare>();
+    p.AddStage<GCUAdaptor>();
+    return true;
   }
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {
