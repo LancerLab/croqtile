@@ -1,0 +1,22 @@
+// RUN: not choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ f32 [128, 128] test_mma(f16 [128, 32] A, f16 [32, 128] B) {
+  f32[128, 128] output;
+
+  parallel by 1, by 1 {
+    local f16[128, 32] lhs;
+    local f16[32, 128] rhs;
+    local f32[128, 128] out;
+    dma.copy A => lhs;
+    dma.copy B => rhs;
+    mc = mma.fill.f32 0;
+    ma = mma.load lhs;
+    mb = mma.load rhs;
+    mma.row.col mc, ma, mb;
+    mma.store mc, out;
+    dma.copy out => output;
+  }
+  return output;
+}
+
+// CHECK: error: mma is not supported by the target: hip

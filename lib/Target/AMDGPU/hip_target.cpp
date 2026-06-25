@@ -1,6 +1,6 @@
+#include "amdgpu_adapt.hpp"
 #include "assert_site.hpp"
 #include "codegen_prepare.hpp"
-#include "gpu_adapt.hpp"
 #include "gpu_target.hpp"
 #include "hip_codegen.hpp"
 #include "hip_dma_plan.hpp"
@@ -156,14 +156,14 @@ public:
 
   bool PlanPreCodegenStages(ASTPipeline& p) const override {
     p.AddStage<CodegenPrepare>();
-    p.AddStage<GPUAdaptor>();
+    p.AddStage<AMDGPUAdaptor>();
     return true;
   }
 
   bool PlanCodeGenStages(ASTPipeline& p) const override {
     errs() << "warning: AMDGPU target is experimental and not yet fully "
               "supported.\n";
-    p.AddStage<GPUAdaptor>();
+    p.AddStage<AMDGPUAdaptor>();
     p.AddStage<HIP::HIPDMAPlan>();
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();

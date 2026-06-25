@@ -613,7 +613,38 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
            vi_str(prod_z) + ")";
   }();
 
-  ds << "\n__global__ void " << device_fn << "(";
+  // Emit __launch_bounds__ if the user specified it via the BIF
+  auto launch_bounds_min_blocks = [&]() -> std::optional<int64_t> {
+    if (!cur_pb || !cur_pb->GetBody()) return std::nullopt;
+    for (const auto& stmt : cur_pb->GetBody()->values) {
+      auto call = dyn_cast<AST::Call>(stmt);
+      if (!call || !call->IsBIF() ||
+          call->function->name != "launch_bounds")
+        continue;
+      if (!call->arguments || call->arguments->Count() != 1)
+        return std::nullopt;
+      auto arg = dyn_cast<AST::Expr>(call->arguments->ValueAt(0));
+      if (!arg || !arg->Opts().HasVal() ||
+          !arg->Opts().GetVal()->IsNumeric())
+        return std::nullopt;
+      auto mb = VIInt(arg->Opts().GetVal());
+      if (!mb || mb.value() <= 0) return std::nullopt;
+      return mb.value();
+    }
+    return std::nullopt;
+  }();
+
+  ds << "\n__global__ ";
+  auto thr_count = lc.thread_count.x * lc.group_count.x *
+                   lc.thread_count.y * lc.group_count.y *
+                   lc.thread_count.z * lc.group_count.z;
+  if (auto thr_val = VIInt(thr_count); thr_val) {
+    if (launch_bounds_min_blocks.has_value()) {
+      ds << "__launch_bounds__(" << *thr_val << ", "
+         << *launch_bounds_min_blocks << ") ";
+    }
+  }
+  ds << "void " << device_fn << "(";
   bool first = true;
   for (auto& item : cgi.GetDeviceAllIns(fname)) {
     if (!first) ds << ", ";

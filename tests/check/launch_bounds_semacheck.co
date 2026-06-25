@@ -1,5 +1,5 @@
 // RUN: not choreo -t cute -sa=check %s 2>&1 | FileCheck %s
-// CHECK: error: launch_bounds is only allowed in parallel-by blocks lowered to CUDA kernels (level : block).
+// CHECK: error: launch_bounds is only allowed in parallel-by blocks lowered to GPU kernels (level : block).
 // CHECK: error: launch_bounds argument must be a compile-time integer constant.
 // CHECK: error: launch_bounds argument must be a positive integer.
 // CHECK: error: multiple launch_bounds directives are not allowed in the same parallel-by block.

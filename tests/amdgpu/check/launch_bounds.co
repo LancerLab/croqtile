@@ -1,0 +1,17 @@
+// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ auto test_lb(s32 [128] a) {
+  s32[a.span] b;
+
+  parallel p by 4 : block {
+    launch_bounds(2);
+    parallel by 1 : group {
+      parallel t by 32 : thread {
+        b.at(p * 32 + t) = a.at(p * 32 + t) + 1;
+      }
+    }
+  }
+  return b;
+}
+
+// CHECK: __launch_bounds__(32, 2)

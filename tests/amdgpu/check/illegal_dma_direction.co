@@ -1,0 +1,12 @@
+// RUN: not choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void test_g2g() {
+  global s32[64] a;
+  global s32[64] b;
+
+  parallel by 1, by 64 {
+    dma.copy a => b;
+  }
+}
+
+// CHECK: error:{{.*}}does not allow sync copy (global -> global)
