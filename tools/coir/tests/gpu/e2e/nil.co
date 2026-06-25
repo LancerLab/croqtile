@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GPU
 // RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
-// RUN: cocc -t gpu -es %s | FileCheck --check-prefix=PTX %s
+// RUN: cocc -t gpu -gs %s -o %s.gpu.sh && bash %s.gpu.sh --execute | FileCheck --check-prefix=GPU --match-full-lines %s && rm -f %s.gpu.sh
 //
 // Minimal kernel: no params, no return. Tests host wrapper for void kernels.
 
@@ -12,4 +12,4 @@ int main() {
 }
 
 // CHECK: Run Complete.
-// PTX: .visible .entry nil_kernel
+// GPU: Run Complete.

@@ -422,7 +422,14 @@ private:
     auto loop = builder.create<scf::ForOp>(loc, zero, ub, step, initVals);
     {
       OpBuilder::InsertionGuard guard(builder);
-      builder.setInsertionPointToStart(loop.getBody());
+      Block *loopBody = loop.getBody();
+
+      // If ForOp created an implicit yield terminator, erase it.
+      // We will emit the correct terminator from the coir.yield.
+      if (loopBody->mightHaveTerminator())
+        loopBody->getTerminator()->erase();
+
+      builder.setInsertionPointToEnd(loopBody);
 
       mapping.map(args[0], loop.getInductionVar());
 
