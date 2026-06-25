@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GPU
 // RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t gpu -gs %s -o %s.gpu.sh && bash %s.gpu.sh --execute | FileCheck --check-prefix=GPU --match-full-lines %s && rm -f %s.gpu.sh
 
 __co__ s32 [16, 16] matmul_basic(s32 [16, 16] lhs, s32 [16, 16] rhs) {
   s32 [16, 16] output;
@@ -29,3 +30,4 @@ int main() {
 }
 
 // CHECK: Matmul S32 Test Passed
+// GPU: Matmul S32 Test Passed

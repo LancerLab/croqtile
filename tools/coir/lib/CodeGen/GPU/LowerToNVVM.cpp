@@ -50,9 +50,11 @@ bool lowerToNVVM(mlir::ModuleOp module) {
   pm.addPass(mlir::createGpuKernelOutliningPass());
   pm.addNestedPass<mlir::gpu::GPUModuleOp>(
       mlir::createConvertGpuOpsToNVVMOps());
+  pm.addPass(mlir::createSCFToControlFlowPass());
   pm.addPass(mlir::createArithToLLVMConversionPass());
   pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
   pm.addPass(mlir::createConvertIndexToLLVMPass());
+  pm.addPass(mlir::createConvertControlFlowToLLVMPass());
   pm.addPass(mlir::createReconcileUnrealizedCastsPass());
   return mlir::succeeded(pm.run(module));
 }

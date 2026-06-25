@@ -42,6 +42,8 @@ struct KernelInfo {
   std::vector<KernelParamInfo> params;
   std::string ret_elem_type; // empty if void
   int64_t ret_dims = 0;
+  int64_t gridDims[3] = {1, 1, 1};
+  int64_t blockDims[3] = {1, 1, 1};
 };
 
 /// Return the choreo:: qualified C++ type for a choreo element type name.
@@ -97,6 +99,19 @@ std::vector<KernelInfo> collectKernels(ModuleOp module) {
       ki.ret_elem_type = retAttr.getValue().str();
     if (auto retDims = kop->getAttrOfType<IntegerAttr>("coir.host_ret_dims"))
       ki.ret_dims = retDims.getInt();
+
+    kop.getBody().walk([&](coir::ParallelOp par) {
+      auto bounds = par.getBounds();
+      auto lvl = par.getLevel();
+      int64_t *target = nullptr;
+      if (lvl == coir::ParallelLevel::BLOCK)
+        target = ki.gridDims;
+      else if (lvl == coir::ParallelLevel::THREAD)
+        target = ki.blockDims;
+      if (!target) return;
+      for (unsigned i = 0; i < bounds.size() && i < 3; ++i)
+        target[i] = bounds[i];
+    });
 
     kernels.push_back(std::move(ki));
   });
@@ -291,24 +306,29 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     os << "  static int64_t __off_out = 0;\n";
     os << "  __args[" << idx << "] = &__off_out;\n";
     idx++;
-    std::string sizeExpr;
+    std::string refParam;
     for (auto &p : ki.params) {
       if (!p.host_elem_type.empty() && p.dims > 0) {
-        sizeExpr = p.name + ".shape()[0]";
+        refParam = p.name;
         break;
       }
     }
-    if (sizeExpr.empty()) sizeExpr = "1";
     for (int64_t d = 0; d < ki.ret_dims; ++d) {
-      if (d == 0)
-        os << "  static int64_t __sz_out_" << d << " = " << sizeExpr << ";\n";
+      if (!refParam.empty())
+        os << "  static int64_t __sz_out_" << d << " = " << refParam
+           << ".shape()[" << d << "];\n";
       else
         os << "  static int64_t __sz_out_" << d << " = 1;\n";
       os << "  __args[" << idx << "] = &__sz_out_" << d << ";\n";
       idx++;
     }
     for (int64_t d = 0; d < ki.ret_dims; ++d) {
-      os << "  static int64_t __st_out_" << d << " = 1;\n";
+      if (d == ki.ret_dims - 1) {
+        os << "  static int64_t __st_out_" << d << " = 1;\n";
+      } else {
+        os << "  static int64_t __st_out_" << d << " = "
+           << refParam << ".shape()[" << (d + 1) << "];\n";
+      }
       os << "  __args[" << idx << "] = &__st_out_" << d << ";\n";
       idx++;
     }
@@ -316,18 +336,10 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
 
   os << "  __nargs = " << idx << ";\n\n";
 
-  // Determine grid/block.  The ConvertToGPU pass maps the parallel
-  // dimension to threadIdx.x, so launch 1 block with N threads.
-  std::string blockExpr = "1";
-  for (auto &p : ki.params) {
-    if (!p.host_elem_type.empty() && p.dims > 0) {
-      blockExpr = p.name + ".element_count()";
-      break;
-    }
-  }
-
   os << "  CUresult __launch_err = cuLaunchKernel(\n";
-  os << "      __fn, 1, 1, 1, " << blockExpr << ", 1, 1,\n";
+  os << "      __fn, " << ki.gridDims[0] << ", " << ki.gridDims[1] << ", "
+     << ki.gridDims[2] << ", " << ki.blockDims[0] << ", " << ki.blockDims[1]
+     << ", " << ki.blockDims[2] << ",\n";
   os << "      0, nullptr, __args, nullptr);\n";
   os << "  if (__launch_err != CUDA_SUCCESS) {\n";
   os << "    std::cerr << \"cuLaunchKernel failed: \" << __launch_err"
@@ -360,8 +372,29 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
       }
     }
     if (sizeExpr.empty()) sizeExpr = "1";
-    os << "  auto __result = choreo::make_spandata<choreo::"
-       << ki.ret_elem_type << ">(" << sizeExpr << ");\n";
+    if (ki.ret_dims > 1) {
+      // Multi-dimensional return: pass individual dimension sizes.
+      os << "  auto __result = choreo::make_spandata<choreo::"
+         << ki.ret_elem_type << ">(";
+      std::string refParam;
+      for (auto &p : ki.params) {
+        if (!p.host_elem_type.empty() && p.dims > 0) {
+          refParam = p.name;
+          break;
+        }
+      }
+      for (int64_t d = 0; d < ki.ret_dims; ++d) {
+        if (d > 0) os << ", ";
+        if (!refParam.empty() && d < ki.ret_dims)
+          os << refParam << ".shape()[" << d << "]";
+        else
+          os << "1";
+      }
+      os << ");\n";
+    } else {
+      os << "  auto __result = choreo::make_spandata<choreo::"
+         << ki.ret_elem_type << ">(" << sizeExpr << ");\n";
+    }
     os << "  cuMemcpyDtoH(__result.data(), (CUdeviceptr)__out_dev, "
        << sizeExpr << " * sizeof(" << retCpp << "));\n";
   }
