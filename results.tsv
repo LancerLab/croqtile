@@ -1,3 +1,0 @@
-# Auto-tune experiment log. Columns: iter	kernel	arch	tflops	eff%	bottleneck_before	run_command	idea_summary
-# Run tag: ai-tune/2026-03-21/gemm_sp_f16
-iter	kernel	arch	tflops	eff%	bottleneck_before	run_command	idea_summary
