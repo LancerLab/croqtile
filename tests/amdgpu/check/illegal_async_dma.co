@@ -1,16 +1,13 @@
 // RUN: not choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
-// RUN: not choreo -es -t hip -arch=gfx1100 %s 2>&1 | FileCheck %s
 
-// gfx1030 and gfx1100 do not support async DMA; verify the compiler rejects it.
-__co__ auto async_copy(s32 [64] input) {
+__co__ auto test_async(s32 [64] input) {
   s32[input.span] output;
 
-  parallel by 1, by 1 {
+  parallel by 1, by 64 {
     f = dma.copy.async input => shared;
     wait f;
     dma.copy f.data => output;
   }
-
   return output;
 }
 

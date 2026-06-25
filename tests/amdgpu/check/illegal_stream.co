@@ -1,0 +1,9 @@
+// RUN: not choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void test_stream(int a, stream _s) {
+  parallel(_s) p by 6 : block {
+    println(a + p);
+  }
+}
+
+// CHECK: error: stream{{.*}}not{{.*}}supported on HIP target

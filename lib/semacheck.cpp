@@ -716,10 +716,9 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
                     "parallel-by block.");
   }
   if (launch_bounds_count > 0 && n.GetLevel() != ParallelLevel::BLOCK) {
-    Error1(
-        n.LOC(),
-        "launch_bounds is only allowed in parallel-by blocks lowered to CUDA "
-        "kernels (level : block).");
+    Error1(n.LOC(),
+           "launch_bounds is only allowed in parallel-by blocks lowered to "
+           "GPU kernels (level : block).");
   }
   if (launch_bounds_count > 1) {
     Error1(n.LOC(),

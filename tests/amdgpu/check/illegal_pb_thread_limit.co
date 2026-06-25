@@ -1,0 +1,16 @@
+// RUN: not choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ auto test_exceed_max(s32 [2048] a) {
+  s32[a.span] b;
+
+  parallel by 1 : block {
+    parallel by 64 : group {
+      parallel i by 32 : thread {
+        b.at(i) = a.at(i) + 1;
+      }
+    }
+  }
+  return b;
+}
+
+// CHECK: error:{{.*}}must not exceed 1024

@@ -1,0 +1,13 @@
+// RUN: not choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ auto test_shared_at_host(s32 [64] a) {
+  shared s32[64] buf;
+  s32[a.span] b;
+  parallel by 1, by 64 {
+    dma.copy a => buf;
+    dma.copy buf => b;
+  }
+  return b;
+}
+
+// CHECK: error:{{.*}}shared variable{{.*}}must be declared inside parallel-by
