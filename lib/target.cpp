@@ -18,3 +18,5 @@ bool Target::PlanPreCodegenStages(ASTPipeline& p) const {
   p.AddStage<CodegenPrepare>();
   return true;
 }
+
+bool Target::HasDeviceCodeGen() const { return MakeDeviceCodeGen() != nullptr; }

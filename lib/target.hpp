@@ -316,6 +316,7 @@ public:
   // Factory for DeviceCodeGen used by HeteroCodeGen. Returns nullptr if
   // the target does not support heterogeneous device code generation.
   virtual std::unique_ptr<DeviceCodeGen> MakeDeviceCodeGen() const;
+  virtual bool HasDeviceCodeGen() const;
 
   virtual const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId&) const = 0;
