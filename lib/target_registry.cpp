@@ -43,11 +43,15 @@ std::unique_ptr<Target>
 TargetRegistry::CreateByDeviceName(const std::string& dev) {
   std::lock_guard<std::mutex> lock(registryMutex());
   auto& regs = registry();
+  std::unique_ptr<Target> fallback;
   for (auto& reg : regs) {
     auto t = reg.second.create();
-    if (t->DeviceName() == dev) return t;
+    if (t->DeviceName() == dev) {
+      if (t->HasDeviceCodeGen()) return t;
+      if (!fallback) fallback = std::move(t);
+    }
   }
-  return nullptr;
+  return fallback;
 }
 
 std::vector<TargetInfo> TargetRegistry::List() {
