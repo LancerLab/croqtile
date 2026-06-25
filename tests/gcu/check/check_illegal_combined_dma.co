@@ -1,0 +1,14 @@
+// RUN: not choreo -gs -t topscc -arch=gcu210 %s 2>&1 | FileCheck %s
+
+// Combined slice+transpose DMA is not supported on gcu2.
+__co__ s32 [6, 4] test_slice_transp(s32 [4, 6] input) {
+  s32 [6, 4] output;
+  parallel p by 2 {
+    f = dma.transp<1, 0>.async input.chunkat(p, _) => local;
+    wait f;
+    dma.copy f.data => output.chunkat(_, p);
+  }
+  return output;
+}
+
+// CHECK: combined slice+transpose DMA is not supported

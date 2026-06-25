@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCU
+// REQUIRES: TARGET-GCU300
 // RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 //
 // Slice+Pad: 4x4 input split into 2 blocks of 2x4, each padded to 4x6.

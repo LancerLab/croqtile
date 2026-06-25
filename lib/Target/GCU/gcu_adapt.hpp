@@ -103,14 +103,14 @@ public:
   void CheckDMA(AST::DMA& n) {
     if (n.operation == ".any") return;
 
-    assert(isa<AST::ChunkAt>(n.from));
+    if (!isa<AST::ChunkAt>(n.from) || !isa<AST::ChunkAt>(n.to)) return;
+
     auto f_ca = cast<AST::ChunkAt>(n.from);
     auto f_name = f_ca->RefSymbol();
     auto f_sty = GetSpannedType(NodeType(*f_ca));
     auto f_shape = f_sty->GetShape();
     auto f_rank = f_shape.Rank();
 
-    assert(isa<AST::ChunkAt>(n.to));
     auto t_ca = cast<AST::ChunkAt>(n.to);
     auto t_name = t_ca->RefSymbol();
     auto t_sty = GetSpannedType(NodeType(*t_ca));
@@ -801,6 +801,25 @@ public:
 
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
+
+    // GCU2 does not support combined DMA operations (slice+pad,
+    // slice+transpose, transpose+deslice).  Reject early before
+    // CheckDMA which requires both operands to be ChunkAt.
+    if (CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210") {
+      bool has_src_tile = isa<AST::ChunkAt>(n.from) &&
+                          cast<AST::ChunkAt>(n.from)->HasTilingOperation();
+      bool has_dst_tile = isa<AST::ChunkAt>(n.to) &&
+                          cast<AST::ChunkAt>(n.to)->HasTilingOperation();
+      if (n.operation == ".pad" && has_src_tile)
+        Error1(n.LOC(), "On " + cur_arch +
+                            ", combined slice+pad DMA is not supported.");
+      if (n.operation == ".transp" && has_src_tile && !has_dst_tile)
+        Error1(n.LOC(), "On " + cur_arch +
+                            ", combined slice+transpose DMA is not supported.");
+      if (n.operation == ".transp" && !has_src_tile && has_dst_tile)
+        Error1(n.LOC(), "On " + cur_arch +
+                            ", combined transpose+deslice DMA is not supported.");
+    }
 
     // Check DMA first.
     CheckDMA(n);
