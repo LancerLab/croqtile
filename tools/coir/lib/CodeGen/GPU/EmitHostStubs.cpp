@@ -194,9 +194,9 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     } else {
       os << "  " << cppType << "* " << devSym << " = nullptr;\n";
       os << "  cuMemAlloc((CUdeviceptr*)&" << devSym << ", "
-         << p.name << ".size() * sizeof(" << cppType << "));\n";
+         << p.name << ".element_count() * sizeof(" << cppType << "));\n";
       os << "  cuMemcpyHtoD((CUdeviceptr)" << devSym << ", "
-         << p.name << ".data(), " << p.name << ".size() * sizeof("
+         << p.name << ".data(), " << p.name << ".element_count() * sizeof("
          << cppType << "));\n";
     }
   }
@@ -208,7 +208,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     std::string sizeExpr;
     for (auto &p : ki.params) {
       if (!p.host_elem_type.empty() && p.dims > 0) {
-        sizeExpr = p.name + ".size()";
+        sizeExpr = p.name + ".element_count()";
         break;
       }
     }
@@ -256,7 +256,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
       idx++;
       for (int64_t d = 0; d < p.dims; ++d) {
         os << "  static int64_t __sz_" << p.name << "_" << d << " = "
-           << p.name << ".extent(" << d << ");\n";
+           << p.name << ".shape()[" << d << "];\n";
         os << "  __args[" << idx << "] = &__sz_" << p.name << "_" << d
            << ";\n";
         idx++;
@@ -267,7 +267,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
           os << "  static int64_t __st_" << p.name << "_" << d << " = 1;\n";
         } else {
           os << "  static int64_t __st_" << p.name << "_" << d << " = "
-             << p.name << ".extent(" << (d + 1) << ");\n";
+             << p.name << ".shape()[" << (d + 1) << "];\n";
         }
         os << "  __args[" << idx << "] = &__st_" << p.name << "_" << d
            << ";\n";
@@ -294,7 +294,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     std::string sizeExpr;
     for (auto &p : ki.params) {
       if (!p.host_elem_type.empty() && p.dims > 0) {
-        sizeExpr = p.name + ".extent(0)";
+        sizeExpr = p.name + ".shape()[0]";
         break;
       }
     }
@@ -316,18 +316,18 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
 
   os << "  __nargs = " << idx << ";\n\n";
 
-  // Determine grid/block.  The ConvertToGPU pass uses (N, 1, 1) grid and
-  // (1, 1, 1) block by default.  Use the first tensor param size as N.
-  std::string gridExpr = "1";
+  // Determine grid/block.  The ConvertToGPU pass maps the parallel
+  // dimension to threadIdx.x, so launch 1 block with N threads.
+  std::string blockExpr = "1";
   for (auto &p : ki.params) {
     if (!p.host_elem_type.empty() && p.dims > 0) {
-      gridExpr = p.name + ".size()";
+      blockExpr = p.name + ".element_count()";
       break;
     }
   }
 
   os << "  CUresult __launch_err = cuLaunchKernel(\n";
-  os << "      __fn, " << gridExpr << ", 1, 1, 1, 1, 1,\n";
+  os << "      __fn, 1, 1, 1, " << blockExpr << ", 1, 1,\n";
   os << "      0, nullptr, __args, nullptr);\n";
   os << "  if (__launch_err != CUDA_SUCCESS) {\n";
   os << "    std::cerr << \"cuLaunchKernel failed: \" << __launch_err"
@@ -344,7 +344,8 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
       std::string cppType = elemTypeToCpp(p.host_elem_type);
       os << "  cuMemcpyDtoH(const_cast<" << cppType << "*>("
          << p.name << ".data()), (CUdeviceptr)" << p.name
-         << "__dev, " << p.name << ".size() * sizeof(" << cppType << "));\n";
+         << "__dev, " << p.name << ".element_count() * sizeof(" << cppType
+         << "));\n";
     }
   }
 
@@ -354,7 +355,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     std::string sizeExpr;
     for (auto &p : ki.params) {
       if (!p.host_elem_type.empty() && p.dims > 0) {
-        sizeExpr = p.name + ".size()";
+        sizeExpr = p.name + ".element_count()";
         break;
       }
     }

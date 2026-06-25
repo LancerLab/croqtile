@@ -106,8 +106,6 @@ public:
     os << "static const char __coir_ptx_string[] = \""
        << escapeCString(ptx) << "\";\n\n";
 
-    if (sctx.types_header)
-      os << "#include \"choreo_types.h\"\n";
     if (sctx.runtime_header)
       os << "#include \"choreo.h\"\n";
     os << "\n";
