@@ -1,0 +1,31 @@
+// REQUIRES: TARGET-SM_90
+// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+// TMA copy with f16 data type on SM90.
+
+__co__ auto tma_f16_roundtrip(f16 [16, 64] input) {
+  f16 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = tma.copy.async input => shared;
+    wait f;
+    tma.copy f.data => output;
+  }
+
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f16>(16, 64);
+  a.fill_random(-5.0f, 5.0f);
+
+  auto res = tma_f16_roundtrip(a.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      choreo::choreo_assert(a[i][j] == res[i][j], "TMA f16 mismatch");
+
+  std::cout << "TMA f16 PASSED" << std::endl;
+}
+
+// CHECK: TMA f16 PASSED

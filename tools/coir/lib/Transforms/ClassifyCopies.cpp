@@ -1,13 +1,11 @@
-//===- ClassifyCopies.cpp - Lower data.copy to specialized copy ops --------===//
+//===- ClassifyCopies.cpp - Validate DMA/TMA copy ops against target ------===//
 //
-// Classifies coir.data.copy into dma.copy, tma.copy, or element.copy
-// based on source/destination memory spaces and target capabilities
-// read from module attributes.
+// Validates that coir.tma.copy ops are supported by the target (emits an
+// error if not). DmaCopyOp is always valid since thread-cooperative copy
+// is a form of DMA in GPU environments.
 //
-// Target capabilities (set by the driver from Target::HasTMA()/HasDMA()):
-//   coir.has_tma  -- target supports TMA (e.g. SM90+)
-//   coir.has_dma  -- target has DMA engine for cross-level transfers
-//                    (global<->shared, global<->local, shared<->local)
+// Also handles legacy coir.data.copy ops from older IR files by classifying
+// them into the appropriate specialized op based on memory spaces and caps.
 //
 //===----------------------------------------------------------------------===//
 
@@ -40,8 +38,8 @@ static int32_t getMemSpace(coir::TensorType ty) {
 
 static bool isGlobal(int32_t ms) { return ms <= 0; }
 static bool isShared(int32_t ms) { return ms == 1; }
-static bool isLocal(int32_t ms) { return ms == 2; }
 
+/// Handle legacy DataCopyOp (for backward compatibility with older IR).
 struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
   using OpRewritePattern::OpRewritePattern;
 
@@ -64,22 +62,12 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
     bool crossLevel =
         (isGlobal(srcMS) && isShared(dstMS)) ||
         (isShared(srcMS) && isGlobal(dstMS));
-    bool globalLocal =
-        (isGlobal(srcMS) && isLocal(dstMS)) ||
-        (isLocal(srcMS) && isGlobal(dstMS));
-    bool sharedLocal =
-        (isShared(srcMS) && isLocal(dstMS)) ||
-        (isLocal(srcMS) && isShared(dstMS));
 
-    bool needsHwCopy =
-        crossLevel ||
-        (hasDMA && globalLocal) ||
-        (hasDMA && sharedLocal);
-
+    bool needsHwCopy = crossLevel || hasDMA;
     if (op.getKind() != coir::DMAKind::Copy)
       needsHwCopy = true;
 
-    if (needsHwCopy && hasTMA) {
+    if (needsHwCopy && hasTMA && crossLevel) {
       auto newOp = rewriter.create<TmaCopyOp>(loc,
           coir::AsyncTokenType::get(rewriter.getContext()),
           op.getSource(), op.getDest());
@@ -111,9 +99,6 @@ struct ClassifyDataCopy : public OpRewritePattern<DataCopyOp> {
 };
 
 /// Resolve target capabilities from module attributes.
-/// These attributes are set by the driver via Target::HasTMA()/HasDMA(),
-/// which query the target's feature table. For standalone coir-opt tests,
-/// embed coir.has_tma/coir.has_dma directly in the test IR.
 static void resolveTargetCaps(Operation *op, bool &hasTMA, bool &hasDMA) {
   hasTMA = false;
   hasDMA = false;
@@ -141,6 +126,20 @@ struct ClassifyCopiesPass
     bool hasDMA = false;
     resolveTargetCaps(getOperation(), hasTMA, hasDMA);
 
+    // Hard check: reject tma.copy if target lacks TMA.
+    if (!hasTMA) {
+      bool hasTmaCopyOps = false;
+      getOperation()->walk([&](TmaCopyOp op) {
+        op.emitOpError(
+            "requires TMA support but target does not provide it; "
+            "use dma.copy instead or target a TMA-capable architecture");
+        hasTmaCopyOps = true;
+      });
+      if (hasTmaCopyOps)
+        return signalPassFailure();
+    }
+
+    // Classify legacy DataCopyOp (backward compat with older IR).
     RewritePatternSet patterns(ctx);
     patterns.add<ClassifyDataCopy>(ctx, hasTMA, hasDMA);
 

@@ -1,0 +1,53 @@
+// REQUIRES: TARGET-SM_90
+// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+// TMA multi-kernel test: validates TMA descriptor indexing across kernels.
+
+__co__ auto tma_kernel1(f32 [8, 32] input) {
+  f32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = tma.copy.async input => shared;
+    wait f;
+    tma.copy f.data => output;
+  }
+
+  return output;
+}
+
+__co__ auto tma_kernel2(f32 [4, 16, 8] input) {
+  f32 [input.span] output;
+
+  parallel by 1, by 1 {
+    f = tma.copy.async input => shared;
+    wait f;
+    tma.copy f.data => output;
+  }
+
+  return output;
+}
+
+int main() {
+  {
+    auto a = choreo::make_spandata<choreo::f32>(8, 32);
+    a.fill_random(-10, 10);
+    auto res = tma_kernel1(a.view());
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        choreo::choreo_assert(a[i][j] == res[i][j], "kernel1 mismatch");
+    std::cout << "TMA kernel1 PASSED" << std::endl;
+  }
+  {
+    auto a = choreo::make_spandata<choreo::f32>(4, 16, 8);
+    a.fill_random(-10, 10);
+    auto res = tma_kernel2(a.view());
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        for (size_t k = 0; k < res.shape()[2]; ++k)
+          choreo::choreo_assert(a[i][j][k] == res[i][j][k], "kernel2 mismatch");
+    std::cout << "TMA kernel2 PASSED" << std::endl;
+  }
+}
+
+// CHECK: TMA kernel1 PASSED
+// CHECK: TMA kernel2 PASSED

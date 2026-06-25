@@ -1,0 +1,62 @@
+// REQUIRES: TARGET-SM_90
+// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+// TMA tiled copy: foreach loop with chunkat for iterated tile transfers.
+
+__co__ auto tma_tiled_copy(f32 [16, 128] input) {
+  f32 [input.span] output;
+
+  parallel p by 1 : block {
+    foreach k in [16] {
+      sf = tma.copy.async input.chunkat(k, p) => shared;
+      wait sf;
+      tma.copy sf.data => output.chunkat(k, p);
+    }
+  }
+
+  return output;
+}
+
+__co__ auto tma_tiled_multi_block(f32 [8, 256] input) {
+  f32 [input.span] output;
+
+  parallel p by 2 : block {
+    foreach k in [8] {
+      sf = tma.copy.async input.chunkat(k, p) => shared;
+      wait sf;
+      tma.copy sf.data => output.chunkat(k, p);
+    }
+  }
+
+  return output;
+}
+
+int main() {
+  {
+    auto a = choreo::make_spandata<choreo::f32>(16, 128);
+    a.fill_random(-10.0f, 10.0f);
+
+    auto res = tma_tiled_copy(a.view());
+
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        choreo::choreo_assert(a[i][j] == res[i][j], "tiled copy mismatch");
+
+    std::cout << "PASS: tma_tiled_copy" << std::endl;
+  }
+  {
+    auto a = choreo::make_spandata<choreo::f32>(8, 256);
+    a.fill_random(-10.0f, 10.0f);
+
+    auto res = tma_tiled_multi_block(a.view());
+
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        choreo::choreo_assert(a[i][j] == res[i][j], "multi-block mismatch");
+
+    std::cout << "PASS: tma_tiled_multi_block" << std::endl;
+  }
+}
+
+// CHECK: PASS: tma_tiled_copy
+// CHECK: PASS: tma_tiled_multi_block
