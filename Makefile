@@ -72,11 +72,6 @@ STANDALONE = OFF
 PUBLIC_PACKAGE=OFF
 FAST_COMPILE_DEFAULT=OFF
 
-# Ensure git hooks are active (idempotent, runs on every make invocation)
-$(shell if [ -d scripts/hooks ] && [ "$$(git config core.hooksPath 2>/dev/null)" != "scripts/hooks" ]; then \
-  git config core.hooksPath scripts/hooks 2>/dev/null; \
-fi)
-
 # Build rules
 # Ensure running `make` with no target invokes the `build` target by default.
 # This overrides any `.DEFAULT_GOAL` set in included makefragments.
