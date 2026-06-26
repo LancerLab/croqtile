@@ -119,9 +119,6 @@ sdk-install: sdk
 sdk-test: sdk-install
 	@$(MAKE) -C tests/sdk test SDK_PREFIX=$(SDK_INSTALL_PREFIX)
 
-co-web: build
-	@bash tools/co-web/build.sh
-
 debug: CMAKE_BUILD_TYPE=Debug
 debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
 debug: build-with-cmake-ninja
