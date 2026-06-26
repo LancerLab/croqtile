@@ -143,9 +143,14 @@ void emitStaticHelper(std::ostringstream &os) {
   os << "    std::cerr << \"cuDeviceGet failed: \" << err << std::endl;\n";
   os << "    std::exit(1);\n";
   os << "  }\n";
-  os << "  err = cuCtxCreate(&__ctx, 0, dev);\n";
+  os << "  err = cuDevicePrimaryCtxRetain(&__ctx, dev);\n";
   os << "  if (err != CUDA_SUCCESS) {\n";
-  os << "    std::cerr << \"cuCtxCreate failed: \" << err << std::endl;\n";
+  os << "    std::cerr << \"cuDevicePrimaryCtxRetain failed: \" << err << std::endl;\n";
+  os << "    std::exit(1);\n";
+  os << "  }\n";
+  os << "  err = cuCtxSetCurrent(__ctx);\n";
+  os << "  if (err != CUDA_SUCCESS) {\n";
+  os << "    std::cerr << \"cuCtxSetCurrent failed: \" << err << std::endl;\n";
   os << "    std::exit(1);\n";
   os << "  }\n";
   os << "  err = cuModuleLoadData(&__ptx_module, ptx);\n";
