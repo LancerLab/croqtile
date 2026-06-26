@@ -809,8 +809,8 @@ private:
          << getName(iterArgs[i]) << ";\n";
       auto stateIt = acoreStates.find(iterArgs[i]);
       if (stateIt != acoreStates.end()) {
-        acoreStates[args[i + 1]] = stateIt->second;
-        auto &st = stateIt->second;
+        auto st = stateIt->second;
+        acoreStates[args[i + 1]] = st;
         os << getIndent() << "void* " << st.ws_name << "_last_lhs;\n";
         os << getIndent() << "void* " << st.ws_name << "_last_rhs;\n";
       }
@@ -827,8 +827,10 @@ private:
     for (unsigned i = 0; i < op.getResults().size(); ++i) {
       valueNames[op.getResult(i)] = getName(args[i + 1]);
       auto stateIt = acoreStates.find(args[i + 1]);
-      if (stateIt != acoreStates.end())
-        acoreStates[op.getResult(i)] = stateIt->second;
+      if (stateIt != acoreStates.end()) {
+        auto st = stateIt->second;
+        acoreStates[op.getResult(i)] = st;
+      }
     }
   }
 
@@ -1181,8 +1183,10 @@ private:
         auto parentForeach = op->getParentOfType<ForeachOp>();
         if (parentForeach) {
           auto iterArgs = parentForeach.getBody().front().getArguments();
-          if (i + 1 < iterArgs.size())
-            acoreStates[iterArgs[i + 1]] = it->second;
+          if (i + 1 < iterArgs.size()) {
+            auto st = it->second;
+            acoreStates[iterArgs[i + 1]] = st;
+          }
         }
       }
     }
