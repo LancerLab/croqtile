@@ -33,9 +33,11 @@ struct CollectAssertStatsPass
   void runOnOperation() override {
     auto &s = Choreo::CCtx().GetAssessmentStats();
 
+    // Only collect cost-classification and enabled/disabled counts here.
+    // Base stats (runtime_total, per-usage runtime) are already counted by
+    // CollectSemaStats from the assessor log, avoiding double-counting for
+    // assertions that appear in both the log and as coir.assert ops.
     getOperation()->walk([&](AssertOp op) {
-      s.runtime_total++;
-
       if (auto costAttr =
               op->getAttrOfType<AssertCostAttr>("cost_class")) {
         switch (costAttr.getValue()) {
@@ -49,24 +51,6 @@ struct CollectAssertStatsPass
       if (auto ea = op->getAttrOfType<BoolAttr>("enabled")) {
         if (ea.getValue()) s.runtime_enabled++;
         else s.runtime_disabled++;
-      }
-
-      switch (op.getUsage()) {
-      case AssertUsage::SHAPE_COMPAT:
-        s.shape_compat_runtime++;
-        break;
-      case AssertUsage::ELEMENT_ACCESS:
-        s.elem_access_runtime++;
-        break;
-      case AssertUsage::LOOP_BOUND:
-        s.loop_bound_runtime++;
-        break;
-      case AssertUsage::HW_CONSTRAINT:
-        s.hw_constraint_runtime++;
-        break;
-      case AssertUsage::UNCLASSIFIED:
-        s.unclassified_runtime++;
-        break;
       }
     });
   }

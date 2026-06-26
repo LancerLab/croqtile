@@ -45,7 +45,8 @@ mlir::Value ASTCoIRGen::MaterializeSBE(mlir::Location loc,
   }
 
   if (auto sv = dyn_cast<SymbolicValue>(expr)) {
-    auto val = LookupValue(UnScopedName(sv->Value()));
+    auto name = UnScopedName(sv->Value());
+    auto val = LookupValue(name);
     if (!val) return nullptr;
     if (!mlir::isa<mlir::IndexType>(val.getType()))
       val = builder.create<mlir::arith::IndexCastOp>(loc, indexType, val);
@@ -528,6 +529,50 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
     }
   }
 
+  // Collect dynamic (symbolic) dimension names from all SpannedType params.
+  // Each unique symbolic dim gets an extra index-typed kernel argument so
+  // that runtime dimension values are available inside the kernel for
+  // foreach bounds, stride computation, and assertion materialization.
+  struct DimArgInfo {
+    unsigned paramIdx;
+    unsigned dimIdx;
+    std::string symbolName;
+  };
+  llvm::SmallVector<DimArgInfo> dimArgs;
+  llvm::StringSet<> seenDimSymbols;
+
+  if (cf.f_decl.params) {
+    unsigned pIdx = 0;
+    for (auto &inTy : fty->in_tys) {
+      if (auto sty = dyn_cast<SpannedType>(inTy)) {
+        auto mdspan = sty->s_type;
+        auto &shape = mdspan->value;
+        if (shape.IsValid()) {
+          unsigned dIdx = 0;
+          for (auto &v : shape.Value()) {
+            if (v && !v->IsNumeric()) {
+              if (auto *sv = dyn_cast<sbe::SymbolicValue>(v.get())) {
+                auto name = UnScopedName(sv->Value());
+                if (!seenDimSymbols.count(name)) {
+                  seenDimSymbols.insert(name);
+                  dimArgs.push_back({pIdx, dIdx, name});
+                  argTypes.push_back(mlir::IndexType::get(&IRContext()));
+                }
+              }
+            }
+            ++dIdx;
+          }
+        }
+      }
+      ++pIdx;
+    }
+  }
+
+  // Rebuild the FunctionType to include extra dim arguments.
+  auto mlirFnType2 =
+      mlir::FunctionType::get(&IRContext(), argTypes, resultTypes);
+  kernelOp.setFunctionTypeAttr(mlir::TypeAttr::get(mlirFnType2));
+
   auto &bodyRegion = kernelOp.getBody();
   auto *entryBlock = new mlir::Block();
   bodyRegion.push_back(entryBlock);
@@ -545,6 +590,28 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
       ++idx;
     }
   }
+
+  // Map dynamic dimension symbols to their kernel arguments and record
+  // metadata so EmitCUDA can emit the corresponding parameters.
+  unsigned baseArgCount = argTypes.size() - dimArgs.size();
+  llvm::SmallVector<mlir::Attribute> dimArgAttrs;
+  for (unsigned i = 0; i < dimArgs.size(); ++i) {
+    auto argVal = entryBlock->getArgument(baseArgCount + i);
+    MapValue(dimArgs[i].symbolName, argVal);
+    auto dict = mlir::DictionaryAttr::get(&IRContext(), {
+      mlir::NamedAttribute(mlir::StringAttr::get(&IRContext(), "param"),
+                           builder.getI64IntegerAttr(dimArgs[i].paramIdx)),
+      mlir::NamedAttribute(mlir::StringAttr::get(&IRContext(), "dim"),
+                           builder.getI64IntegerAttr(dimArgs[i].dimIdx)),
+      mlir::NamedAttribute(mlir::StringAttr::get(&IRContext(), "name"),
+                           mlir::StringAttr::get(&IRContext(),
+                                                 dimArgs[i].symbolName)),
+    });
+    dimArgAttrs.push_back(dict);
+  }
+  if (!dimArgAttrs.empty())
+    kernelOp->setAttr("coir.dim_args",
+                       mlir::ArrayAttr::get(&IRContext(), dimArgAttrs));
 }
 
 bool ASTCoIRGen::Visit(AST::ChoreoFunction &) { return true; }
@@ -766,10 +833,44 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
     }
   }
 
-  auto ubConst = builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
+  // Use the runtime dimension value when the static bound could not be
+  // resolved (remains <= 1 after all fallbacks).  Dynamic dimension symbols
+  // are mapped by CreateKernelOp as hidden kernel arguments.
+  mlir::Value ubValue;
+  if (bound <= 1 && fb.ranges && !fb.ranges->values.empty()) {
+    auto &firstRange = fb.ranges->values[0];
+    if (auto *lr = dyn_cast<AST::LoopRange>(firstRange.get())) {
+      if (lr->ubound) {
+        if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get())) {
+          if (expr->Opts().HasVal()) {
+            auto &vi = expr->Opts().GetVal();
+            if (vi && !vi->IsNumeric()) {
+              if (auto *sv = dyn_cast<sbe::SymbolicValue>(vi.get()))
+                ubValue = LookupValue(UnScopedName(sv->Value()));
+            }
+          }
+        }
+      }
+      if (!ubValue) {
+        auto rvName = lr->GetRVName();
+        auto symType = GetSymbolType(rvName);
+        if (auto bty = dyn_cast<BoundedType>(symType)) {
+          if (bty->HasValidBound()) {
+            auto &ub = bty->GetUpperBound();
+            if (ub && !ub->IsNumeric()) {
+              if (auto *sv = dyn_cast<sbe::SymbolicValue>(ub.get()))
+                ubValue = LookupValue(UnScopedName(sv->Value()));
+            }
+          }
+        }
+      }
+    }
+  }
+  if (!ubValue)
+    ubValue = builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
 
   auto foreachOp = builder.create<coir::ForeachOp>(
-      loc, iterTypes, ubConst.getResult(), iterArgs);
+      loc, iterTypes, ubValue, iterArgs);
 
   auto &bodyRegion = foreachOp.getBody();
   auto *block = new mlir::Block();
@@ -1515,8 +1616,6 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
     }
   }
 
-  // Emit the appropriate copy op based on user's explicit intent.
-  // TMA: user wrote `tma.copy` -> TmaCopyOp (always async).
   // DMA: user wrote `dma.copy` -> DmaCopyOp (always produces token).
   mlir::Value token = nullptr;
   if (dma.IsTMA()) {

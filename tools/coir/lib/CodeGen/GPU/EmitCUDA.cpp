@@ -546,25 +546,48 @@ private:
     return count;
   }
 
+  struct DimArgMeta {
+    int64_t paramIdx;
+    int64_t dimIdx;
+    std::string name;
+  };
+
+  llvm::SmallVector<DimArgMeta> getDimArgs(KernelOp kernel) {
+    llvm::SmallVector<DimArgMeta> result;
+    auto attr = kernel->getAttrOfType<ArrayAttr>("coir.dim_args");
+    if (!attr) return result;
+    for (auto a : attr) {
+      auto dict = dyn_cast<DictionaryAttr>(a);
+      if (!dict) continue;
+      DimArgMeta m;
+      m.paramIdx = dict.getAs<IntegerAttr>("param").getInt();
+      m.dimIdx = dict.getAs<IntegerAttr>("dim").getInt();
+      m.name = dict.getAs<StringAttr>("name").getValue().str();
+      result.push_back(m);
+    }
+    return result;
+  }
+
   void emitHostEntry(KernelOp kernel) override {
     prescanDescriptors(kernel);
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
     std::string devName = kernelDeviceName(symName);
-    unsigned numInputs = fnType.getNumInputs();
     unsigned numResults = fnType.getNumResults();
     unsigned numTMA = countTMADescs();
+    auto dimArgMeta = getDimArgs(kernel);
+    unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size();
 
     if (numResults == 0) {
       os() << "void " << symName << "(";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << emitChoreoType(fnType.getInput(i), true) << " p" << i;
       }
       os() << ") {\n";
 
       std::string eType = "int8_t";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (!tty) continue;
         eType = emitElementType(tty.getElementType());
@@ -593,17 +616,20 @@ private:
 
       os() << "  " << devName << "<<<" << dims.gridStr() << ", "
          << dims.blockStr() << ">>>(";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << "p" << i << "__device";
       }
       for (unsigned i = 0; i < numTMA; ++i) {
         os() << ", __choreo_tma_" << i << "_tensor_map";
       }
+      for (auto &da : dimArgMeta) {
+        os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+      }
       os() << ");\n";
       os() << "  cudaDeviceSynchronize();\n";
 
-      for (unsigned i = 0; i < numInputs; ++i)
+      for (unsigned i = 0; i < numOrigInputs; ++i)
         os() << "  cudaFree(p" << i << "__device);\n";
       os() << "}\n\n";
       return;
@@ -613,7 +639,7 @@ private:
     if (!resTy) return;
 
     os() << emitChoreoType(fnType.getResult(0), false) << " " << symName << "(";
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
       auto &body = kernel.getBody();
       std::string pName = "arg" + std::to_string(i);
@@ -626,7 +652,7 @@ private:
 
     std::string eType = emitElementType(resTy.getElementType());
 
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (!tty) continue;
       std::string inputEType = emitElementType(tty.getElementType());
@@ -682,7 +708,7 @@ private:
 
     os() << "  " << devName << "<<<" << dims.gridStr() << ", "
        << dims.blockStr() << ">>>(";
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
       os() << "p" << i << "__device";
     }
@@ -690,12 +716,15 @@ private:
     for (unsigned i = 0; i < numTMA; ++i) {
       os() << ", __choreo_tma_" << i << "_tensor_map";
     }
+    for (auto &da : dimArgMeta) {
+      os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+    }
     os() << ");\n";
     os() << "  cudaDeviceSynchronize();\n";
     os() << "  cudaMemcpy(__result.data(), __result__device, "
        << resBytes << "ULL, cudaMemcpyDeviceToHost);\n";
 
-    for (unsigned i = 0; i < numInputs; ++i)
+    for (unsigned i = 0; i < numOrigInputs; ++i)
       os() << "  cudaFree(p" << i << "__device);\n";
     os() << "  cudaFree(__result__device);\n";
     os() << "  return __result;\n";
