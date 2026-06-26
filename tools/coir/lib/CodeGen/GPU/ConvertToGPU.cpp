@@ -12,6 +12,7 @@
 //   coir.kernel       -> gpu.module + gpu.func (kernel)
 //   coir.parallel     -> gpu.thread_id / gpu.block_id
 //   coir.foreach      -> scf.for
+//   coir.tensor.tile  -> memref.subview
 //   coir.tensor.alloc -> memref.alloc (with GPU address space for shared)
 //   coir.tensor.load_elem / store_elem -> memref.load / store
 //   coir.tensor.reduce_elem -> memref.load + arith.add + memref.store
@@ -226,6 +227,10 @@ private:
                    shmGlobalNames, shmGlobalTypes);
       return;
     }
+    if (auto tile = dyn_cast<TensorTileOp>(op)) {
+      convertTensorTile(builder, loc, tile, mapping);
+      return;
+    }
     if (auto par = dyn_cast<ParallelOp>(op)) {
       convertParallel(builder, loc, par, mapping, returnAllocMap,
                       shmGlobalNames, shmGlobalTypes);
@@ -314,8 +319,16 @@ private:
       return;
     }
     auto memTy = convertTensorType(tty);
-    auto newAlloc = builder.create<memref::AllocOp>(loc, memTy);
-    mapping.map(alloc.getResult(), newAlloc.getResult());
+    int32_t ms = tty.getMemorySpace();
+    // Local memory (ms=2) or small device allocations use stack alloca
+    // to avoid generating malloc calls inside GPU kernels.
+    if (ms == 2) {
+      auto newAlloc = builder.create<memref::AllocaOp>(loc, memTy);
+      mapping.map(alloc.getResult(), newAlloc.getResult());
+    } else {
+      auto newAlloc = builder.create<memref::AllocOp>(loc, memTy);
+      mapping.map(alloc.getResult(), newAlloc.getResult());
+    }
   }
 
   void convertLoadElem(OpBuilder &builder, Location loc,
@@ -352,6 +365,57 @@ private:
     else
       sum = builder.create<arith::AddIOp>(loc, old, val);
     builder.create<memref::StoreOp>(loc, sum, dst, indices);
+  }
+
+  void convertTensorTile(OpBuilder &builder, Location loc,
+                         TensorTileOp tileOp, IRMapping &mapping) {
+    auto srcTy = cast<coir::TensorType>(tileOp.getSource().getType());
+    auto tileTy = cast<coir::TensorType>(tileOp.getResult().getType());
+    Value src = mapping.lookup(tileOp.getSource());
+    auto srcMemTy = cast<MemRefType>(src.getType());
+    auto tileShape = tileTy.getShape();
+    auto srcShape = srcTy.getShape();
+    auto indices = tileOp.getIndices();
+
+    if (indices.empty()) {
+      mapping.map(tileOp.getResult(), src);
+      return;
+    }
+
+    // Compute flat byte offset: sum(indices[i] * tileShape[i] * stride[i])
+    // where stride[i] = product of srcShape[i+1..n-1].
+    SmallVector<int64_t> srcStrides(srcShape.size());
+    {
+      int64_t s = 1;
+      for (int i = (int)srcShape.size() - 1; i >= 0; --i) {
+        srcStrides[i] = s;
+        s *= srcShape[i];
+      }
+    }
+
+    Value offset = builder.create<arith::ConstantIndexOp>(loc, 0);
+    for (unsigned i = 0; i < indices.size() && i < srcShape.size(); ++i) {
+      Value idx = mapping.lookup(indices[i]);
+      int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
+      int64_t elemStride = tileDim * srcStrides[i];
+      Value stride = builder.create<arith::ConstantIndexOp>(loc, elemStride);
+      Value term = builder.create<arith::MulIOp>(loc, idx, stride);
+      offset = builder.create<arith::AddIOp>(loc, offset, term);
+    }
+
+    auto tileMemTy = convertTensorType(tileTy);
+    int64_t totalTileElems = 1;
+    for (auto d : tileShape)
+      totalTileElems *= d;
+
+    auto flatTy = MemRefType::get({totalTileElems}, srcMemTy.getElementType(),
+                                  AffineMap{}, srcMemTy.getMemorySpace());
+    Value totalSize =
+        builder.create<arith::ConstantIndexOp>(loc, totalTileElems);
+    Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+    auto cast = builder.create<memref::ReinterpretCastOp>(
+        loc, flatTy, src, offset, ValueRange{totalSize}, ValueRange{one});
+    mapping.map(tileOp.getResult(), cast.getResult());
   }
 
   // element.copy -> flat scf.for loop of memref load/store.
@@ -407,6 +471,28 @@ private:
     builder.create<mgpu::BarrierOp>(loc);
   }
 
+  // Extract the dynamic offset from a memref if it was produced by a
+  // reinterpret_cast with a non-zero offset (e.g., from convertTensorTile).
+  Value extractOffset(OpBuilder &builder, Location loc, Value memref) {
+    if (auto castOp =
+            memref.getDefiningOp<memref::ReinterpretCastOp>()) {
+      auto staticOffsets = castOp.getStaticOffsets();
+      if (!staticOffsets.empty() && staticOffsets[0] == ShapedType::kDynamic)
+        return castOp.getOffsets()[0];
+      if (!staticOffsets.empty() && staticOffsets[0] != 0)
+        return builder.create<arith::ConstantIndexOp>(loc, staticOffsets[0]);
+    }
+    return builder.create<arith::ConstantIndexOp>(loc, 0);
+  }
+
+  // Get the underlying base memref, skipping through reinterpret_casts.
+  Value getBaseMemRef(Value memref) {
+    if (auto castOp =
+            memref.getDefiningOp<memref::ReinterpretCastOp>())
+      return castOp.getSource();
+    return memref;
+  }
+
   void emitFlatCopyLoop(OpBuilder &builder, Location loc, Value src,
                         Value dst) {
     auto srcTy = cast<MemRefType>(src.getType());
@@ -414,23 +500,56 @@ private:
     for (auto dim : srcTy.getShape())
       totalElems *= dim;
 
+    Value srcOffset = extractOffset(builder, loc, src);
+    Value dstOffset = extractOffset(builder, loc, dst);
+    Value srcBase = getBaseMemRef(src);
+    Value dstBase = getBaseMemRef(dst);
+
     Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
     Value total = builder.create<arith::ConstantIndexOp>(loc, totalElems);
     Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
 
     auto elemTy = srcTy.getElementType();
-    auto flatTy = MemRefType::get({totalElems}, elemTy, AffineMap{},
-                                  srcTy.getMemorySpace());
-    auto dstTy = cast<MemRefType>(dst.getType());
-    auto flatDstTy = MemRefType::get({totalElems}, elemTy, AffineMap{},
-                                     dstTy.getMemorySpace());
+    auto srcBaseTy = cast<MemRefType>(srcBase.getType());
+    auto dstBaseTy = cast<MemRefType>(dstBase.getType());
 
-    auto flatSrc = builder.create<memref::ReinterpretCastOp>(
-        loc, flatTy, src, /*offset=*/zero, /*sizes=*/ValueRange{total},
-        /*strides=*/ValueRange{one});
-    auto flatDst = builder.create<memref::ReinterpretCastOp>(
-        loc, flatDstTy, dst, /*offset=*/zero, /*sizes=*/ValueRange{total},
-        /*strides=*/ValueRange{one});
+    auto makeReinterpret = [&](Value base, Value offset,
+                               Attribute addrSpace) -> Value {
+      bool hasDynOffset =
+          !arith::ConstantIndexOp::isBuildableWith(
+              builder.getIndexAttr(0), offset.getType()) ||
+          (offset.getDefiningOp<arith::ConstantIndexOp>() &&
+           offset.getDefiningOp<arith::ConstantIndexOp>().value() != 0) ||
+          !offset.getDefiningOp<arith::ConstantIndexOp>();
+
+      int64_t staticOffset = 0;
+      if (auto cst = offset.getDefiningOp<arith::ConstantIndexOp>())
+        staticOffset = cst.value();
+      else
+        hasDynOffset = true;
+
+      MemRefType flatTy;
+      if (hasDynOffset && staticOffset == 0) {
+        auto layout = StridedLayoutAttr::get(builder.getContext(),
+                                             ShapedType::kDynamic, {1});
+        flatTy = MemRefType::get({totalElems}, elemTy, layout, addrSpace);
+      } else if (staticOffset != 0) {
+        auto layout = StridedLayoutAttr::get(builder.getContext(),
+                                             staticOffset, {1});
+        flatTy = MemRefType::get({totalElems}, elemTy, layout, addrSpace);
+      } else {
+        flatTy = MemRefType::get({totalElems}, elemTy, AffineMap{},
+                                 addrSpace);
+      }
+      return builder.create<memref::ReinterpretCastOp>(
+          loc, flatTy, base, offset,
+          ValueRange{total}, ValueRange{one});
+    };
+
+    auto flatSrc = makeReinterpret(srcBase, srcOffset,
+                                   srcBaseTy.getMemorySpace());
+    auto flatDst = makeReinterpret(dstBase, dstOffset,
+                                   dstBaseTy.getMemorySpace());
 
     auto loop = builder.create<scf::ForOp>(loc, zero, total, one);
     {
