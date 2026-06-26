@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="220" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<defs>
+  <linearGradient id="grad0" x1="0%" y1="0%" x2="100%" y2="0%">
+    <stop offset="0%" stop-color="#2a9d8f" stop-opacity="0.95"/>
+    <stop offset="100%" stop-color="#2a9d8f" stop-opacity="0.7"/>
+  </linearGradient>
+  <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="0%">
+    <stop offset="0%" stop-color="#457b9d" stop-opacity="0.95"/>
+    <stop offset="100%" stop-color="#457b9d" stop-opacity="0.7"/>
+  </linearGradient>
+  <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="0%">
+    <stop offset="0%" stop-color="#264653" stop-opacity="0.95"/>
+    <stop offset="100%" stop-color="#264653" stop-opacity="0.7"/>
+  </linearGradient>
+</defs>
+<rect width="640" height="220" fill="#fafbfc" rx="8"/>
+<g transform="translate(80,32)">
+<rect x="0" y="16" width="33.5" height="28" fill="url(#grad0)" rx="4"/>
+<text x="-8" y="35" text-anchor="end" font-size="12" font-weight="500" fill="#24292f">Croqtile</text>
+<text x="41.5" y="35" font-size="11" font-weight="600" fill="#2a9d8f">500 tok</text>
+<rect x="0" y="58" width="147.4" height="28" fill="url(#grad1)" rx="4"/>
+<text x="-8" y="77" text-anchor="end" font-size="12" font-weight="500" fill="#24292f">CUDA+CuTe</text>
+<text x="155.4" y="77" font-size="11" font-weight="600" fill="#457b9d">2,200 tok</text>
+<rect x="0" y="100" width="268" height="28" fill="url(#grad2)" rx="4"/>
+<text x="-8" y="119" text-anchor="end" font-size="12" font-weight="500" fill="#24292f">CUTLASS</text>
+<text x="276" y="119" font-size="11" font-weight="600" fill="#264653">4,000 tok</text>
+<line x1="0" x2="536" y1="148" y2="148" stroke="#d1d5da" stroke-width="0.8"/>
+<line x1="0" x2="0" y1="145" y2="151" stroke="#6e7681" stroke-width="0.8"/>
+<text x="0" y="164" text-anchor="middle" font-size="9" fill="#6e7681">0K</text>
+<line x1="134" x2="134" y1="145" y2="151" stroke="#6e7681" stroke-width="0.8"/>
+<text x="134" y="164" text-anchor="middle" font-size="9" fill="#6e7681">2K</text>
+<line x1="268" x2="268" y1="145" y2="151" stroke="#6e7681" stroke-width="0.8"/>
+<text x="268" y="164" text-anchor="middle" font-size="9" fill="#6e7681">4K</text>
+<line x1="402" x2="402" y1="145" y2="151" stroke="#6e7681" stroke-width="0.8"/>
+<text x="402" y="164" text-anchor="middle" font-size="9" fill="#6e7681">6K</text>
+<line x1="536" x2="536" y1="145" y2="151" stroke="#6e7681" stroke-width="0.8"/>
+<text x="536" y="164" text-anchor="middle" font-size="9" fill="#6e7681">8K</text>
+<text x="268" y="180" text-anchor="middle" font-size="10" fill="#57606a">tokens per kernel representation</text>
+<line x1="536" x2="536" y1="8" y2="148" stroke="#cf222e" stroke-width="1.2" stroke-dasharray="4,3" opacity="0.7"/>
+</g>
+</svg>
