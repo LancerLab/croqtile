@@ -1638,9 +1638,20 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (IsHost()) return true;
 
     claimFuture(UnScopedName(buf_name));
-    // make following buffer reference all be indirect
-    // TODO: any better idea than this
-    ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
+    // For auto-alloc (DOK_SYMBOL), redirect buffer references through
+    // future.data() so that rotate() transparently updates the pointer.
+    // For explicit buffer chunks (DOK_CHUNK), the user manages buffers
+    // via l_xbuf[idx] directly; remapping would break after rotate()
+    // because future.data() no longer points to the array base.
+    // For auto-alloc (DOK_SYMBOL), redirect buffer references through
+    // future.data() so that rotate() transparently updates the pointer.
+    // For explicit buffer arrays (ArrayType), the user manages buffers
+    // via l_xbuf[idx] directly; remapping would break after rotate()
+    // because future.data() no longer points to the array base.
+    auto buf_ty = GetSymbolType(UnScopedName(buf_name));
+    if (!isa<ArrayType>(buf_ty)) {
+      ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
+    }
     return true;
   }
 
@@ -1793,11 +1804,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (subscription != nullptr) {
       if (auto array_ty = dyn_cast<ArrayType>(sym_ty);
           array_ty && CCtx().MemReuse()) {
-        // Suppose we declared `shared s32[3,4] i[2]`
-        // For `i[1]`, if memory reuse is enabled, we need to generate pointer
-        // expr `i + 1 * (3*4)` rather than array subscript expr `i[1]`.
-        // Because if memory reuse is enabled, `i` is declared as point not
-        // array!
+        // When MemReuse is on, `i` is a flat pointer, so `i[1]` must use
+        // pointer arithmetic.  Because the base may be void* (e.g.
+        // future.data()), we use byte-level arithmetic with (char*) cast:
+        //   (char*)base + idx * sub_byte_size
         std::string array_idx = "";
         auto subscriptions = subscription->AllValues();
         const ValueList& array_sizes = array_ty->Dimensions();
@@ -1808,9 +1818,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
             array_idx = "(" + array_idx + ")*" + ValueSTR(array_sizes[i]) +
                         "+" + ExprSTR(subscriptions[i], IsHost());
         }
-        std::string elem_count =
-            ValueSTR(cast<SpannedType>(sym_ty)->GetShape().ElementCountValue());
-        buf_expr += " + (" + array_idx + ")*(" + elem_count + ")";
+        auto inner_sty = cast<SpannedType>(sym_ty);
+        std::string sub_bytes = inner_sty->ByteSizeExpression();
+        buf_expr = "((char*)" + buf_expr + " + (" + array_idx + ") * " + sub_bytes + ")";
       } else {
         for (auto expr : subscription->AllValues())
           buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
@@ -2005,6 +2015,59 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       t_mds_offset = TileBaseOffset(t_ca);
       t_shape = t_ca->OpAt(*idx)->GetBlockShape();
     }
+
+    // When a View operation specifies non-default strides (e.g.
+    // buf.view(x, y : P, Q).from(i, j)), the stride {P, Q, ...} changes
+    // the memory layout interpretation.  tops::mdspan encodes layout
+    // solely through its shape (row-major), so we derive an equivalent
+    // shape whose implied row-major strides equal the View strides.
+    //
+    // For N-dim stride {P0, P1, ..., P_{N-1}} (P_{N-1}==1):
+    //   new_shape[k] = P_{k-1} / P_k   for 1 <= k <= N-1
+    //   new_shape[0]  kept from original (only bounds-check, not pitch)
+    auto ApplyStrideToShape = [this](Shape& shape, const ptr<AST::ChunkAt>& ca,
+                                      const ptr<SpannedType>& sty) {
+      auto ca_ty = dyn_cast<SpannedType>(ca->GetType());
+      if (!ca_ty) return;
+      const auto& strides = ca_ty->GetStrides();
+      if (strides.empty()) return;
+      // Check if strides differ from the default row-major strides of shape
+      auto default_strides = sty->GetStrides();
+      bool differs = (strides.size() != default_strides.size());
+      if (!differs) {
+        for (size_t i = 0; i < strides.size(); ++i) {
+          if (!sbe::ceq(strides[i], default_strides[i])) { differs = true; break; }
+        }
+      }
+      if (!differs) return;
+      // Derive equivalent shape whose row-major strides equal the View
+      // strides.  For stride {P0, P1, ..., P_{N-1}} with P_{N-1}=1:
+      //   new_shape[k] = P_{k-1} / P_k  for 1 <= k <= N-1
+      //   new_shape[0] = original dim-0  (only affects bounds, not pitch)
+      //
+      // When all strides are compile-time constants we compute exact
+      // integer division; otherwise fall back to symbolic division.
+      size_t N = strides.size();
+      ValueList vl(N);
+      vl[0] = shape.ValueAt(0);
+      for (size_t k = 1; k < N; ++k) {
+        auto pk_1 = strides[k - 1];
+        auto pk   = strides[k];
+        if (auto nv1 = dyn_cast<sbe::NumericValue>(pk_1)) {
+          if (auto nv2 = dyn_cast<sbe::NumericValue>(pk)) {
+            if (nv2->Value() != 0) {
+              vl[k] = sbe::nu(nv1->Value() / nv2->Value());
+              continue;
+            }
+          }
+        }
+        vl[k] = pk_1 / pk;
+      }
+      shape = Shape(N, vl);
+    };
+    ApplyStrideToShape(f_shape, f_ca, f_sty);
+    ApplyStrideToShape(t_shape, t_ca, t_sty);
+
     if (!no_linear_opt && opt_to_linear_copy != DMA_OP::none) {
       if (TileToSymbol()) {
         assert(opt_to_linear_copy == DMA_OP::src);
@@ -2301,7 +2364,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   };
 
-  if (!f_opt_condition.empty() || !t_opt_condition.empty()) {
+  if (false && (!f_opt_condition.empty() || !t_opt_condition.empty())) {
     // need generating runtime conditional optimization
     std::ostringstream condition;
     if (!f_opt_condition.empty())
@@ -3034,6 +3097,29 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
        << ".chunk_offsets)\n";
     hs << h_indent << "  " << ie.offsets_name << "[" << idx
        << "++] = offset;\n";
+
+    // --- memory reuse diagnostics ---
+    hs << h_indent << "printf(\"[mem-reuse] heap_size = %u bytes (%.1f KB), "
+       << "capacity = " << mem_capacity << " bytes (%.1f KB), "
+       << "usage = %.1f%%\\n\", "
+       << ie.spm_size << ", "
+       << ie.spm_size << " / 1024.0, "
+       << mem_capacity << " / 1024.0, "
+       << ie.spm_size << " * 100.0 / " << mem_capacity << ");\n";
+    hs << h_indent << "printf(\"[mem-reuse] %zu chunks allocated:\\n\", "
+       << ie.chunks_name << ".size());\n";
+    hs << h_indent << "{\n";
+    hs << h_indent << "  size_t __mr_i = 0;\n";
+    hs << h_indent << "  for (const auto& __mr_c : " << ie.chunks_name
+       << ") {\n";
+    hs << h_indent << "    printf(\"[mem-reuse]   [%zu] %-60s  size=%8zu  "
+       << "offset=%8lu\\n\",\n";
+    hs << h_indent << "           __mr_i, __mr_c.buffer_id.c_str(), __mr_c.size, "
+       << ie.offsets_name << "[__mr_i]);\n";
+    hs << h_indent << "    __mr_i++;\n";
+    hs << h_indent << "  }\n";
+    hs << h_indent << "}\n";
+    // --- end memory reuse diagnostics ---
   }
   hs << h_indent << R"(// JIT memory reuse end)"
      << "\n";
@@ -4108,8 +4194,31 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         } else
           oss << OpExprSTR(r, parent_op, is_left_child, is_host);
       } else if (expr->GetOp() == Op::ElemOf) {
-        oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
-            << OpExprSTR(expr->GetR(), "", true, is_host) << "]";
+        // When MemReuse is on and the base is an ArrayType of SpannedType,
+        // the declaration is a flat pointer (or future data()), so arr[idx]
+        // must become byte-level pointer arithmetic to handle void* base:
+        //   (elem_type*)((char*)base + idx * sub_byte_size)
+        bool use_ptr_arith = false;
+        if (CCtx().MemReuse()) {
+          if (auto base_id = dyn_cast<AST::Identifier>(expr->GetL())) {
+            auto base_ty = GetSymbolType(base_id->name);
+            if (auto arr_ty = dyn_cast<ArrayType>(base_ty)) {
+              if (auto inner_sty = GetSpannedType(arr_ty)) {
+                use_ptr_arith = true;
+                std::string sub_bytes = inner_sty->ByteSizeExpression();
+                std::string bts =
+                    std::string(NameBaseType(inner_sty->ElementType(), is_host));
+                oss << "((" << bts << "*)((char*)"
+                    << OpExprSTR(expr->GetL(), "", true, is_host)
+                    << " + (" << OpExprSTR(expr->GetR(), "*", true, is_host)
+                    << ") * " << sub_bytes << "))";
+              }
+            }
+          }
+        }
+        if (!use_ptr_arith)
+          oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "[" 
+              << OpExprSTR(expr->GetR(), "", true, is_host) << "]";
       } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare() ||
                  expr->isBitwise()) {
         auto& l = expr->GetL();
