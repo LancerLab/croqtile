@@ -11,4 +11,4 @@ __co__ auto test_tile(s32 [256] input) {
 }
 
 // CHECK: coir.tensor.tile %{{.*}} : !coir.tensor<256xi32, default> -> !coir.tensor<64xi32, default>
-// CHECK: coir.data.copy %{{.*}} to %{{.*}} : !coir.tensor<64xi32, default> -> !coir.tensor<64xi32, local>
+// CHECK: coir.dma.copy %{{.*}} to %{{.*}} : !coir.tensor<64xi32, default> -> !coir.tensor<64xi32, local>

@@ -1,10 +1,10 @@
 // RUN: co2ir %s | FileCheck %s
 
-// IRGen test: verify DMA copy lowering to coir.data.copy
+// IRGen test: verify DMA copy lowering to coir.dma.copy
 // Tests the basic "dma.copy src => shared" pattern inside parallel.
 
 // CHECK: coir.kernel @dma_add
-// CHECK: coir.data.copy
+// CHECK: coir.dma.copy
 // CHECK: coir.return
 
 __co__ s32 [128] dma_add(s32 [128] a, s32 [128] b) {
