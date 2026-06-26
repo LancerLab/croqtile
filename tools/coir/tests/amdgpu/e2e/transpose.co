@@ -1,0 +1,35 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: cocc -t hip -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// DMA transpose: copy with permuted indices.
+
+__co__ s32 [8, 4] transp_2d(s32 [4, 8] input) {
+  s32[8, 4] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      tile = dma.transp<1, 0> input => shared;
+      dma.copy tile => output;
+    }
+
+  return output;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s32>(4, 8);
+  for (size_t i = 0; i < 4; ++i)
+    for (size_t j = 0; j < 8; ++j)
+      input[i][j] = static_cast<choreo::s32>(i * 10 + j);
+
+  auto output = transp_2d(input.view());
+
+  bool pass = true;
+  for (size_t i = 0; i < 8; ++i)
+    for (size_t j = 0; j < 4; ++j)
+      if (output[i][j] != input[j][i]) pass = false;
+
+  if (pass) std::cout << "PASS" << std::endl;
+  else std::cout << "FAIL" << std::endl;
+}
+
+// CHECK: PASS

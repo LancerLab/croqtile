@@ -51,7 +51,8 @@ coir.kernel @barrier_test(%a: !coir.tensor<64xf32>) {
 // CHECK: __syncthreads
 coir.kernel @copy_test(%src: !coir.tensor<128xf32>) {
   %dst = coir.tensor.alloc : !coir.tensor<128xf32, shared>
-  coir.data.copy %src to %dst : !coir.tensor<128xf32> -> !coir.tensor<128xf32, shared>
+  %tok = coir.dma.copy %src to %dst : !coir.tensor<128xf32> -> !coir.tensor<128xf32, shared>
+  coir.wait %tok : !coir.async
   coir.parallel (%tid) in [64] level = #coir.level<thread> {
     %v = coir.tensor.load_elem %dst[%tid] : !coir.tensor<128xf32, shared> -> f32
     coir.tensor.store_elem %v, %src[%tid] : f32, !coir.tensor<128xf32>

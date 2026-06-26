@@ -6,7 +6,7 @@
 //
 // This pass runs AFTER the shared CoIR lowering pipeline, so the IR
 // contains lowered copy forms (element.copy, dma.copy, tma.copy) and
-// DMA descriptor ops rather than raw data.copy.
+// DMA descriptor ops.
 //
 // Handled ops:
 //   coir.kernel       -> gpu.module + gpu.func (kernel)
@@ -289,13 +289,6 @@ private:
     if (isa<AssertOp>(op))
       return;
 
-    // --- DataCopyOp (pre-lowering fallback, should not appear after
-    // shared Lower() but kept for robustness) ---
-    if (auto dc = dyn_cast<DataCopyOp>(op)) {
-      convertDataCopyFallback(builder, loc, dc, mapping);
-      return;
-    }
-
     if (isa<YieldOp>(op))
       return;
     builder.clone(op, mapping);
@@ -412,18 +405,6 @@ private:
       emitFlatCopyLoop(builder, loc, src, dst);
     }
     builder.create<mgpu::BarrierOp>(loc);
-  }
-
-  // Pre-lowering fallback for data.copy (should not appear after shared
-  // Lower() but kept for robustness).
-  void convertDataCopyFallback(OpBuilder &builder, Location loc,
-                               DataCopyOp copyOp, IRMapping &mapping) {
-    Value src = mapping.lookup(copyOp.getSource());
-    Value dst = mapping.lookup(copyOp.getDest());
-    emitFlatCopyLoop(builder, loc, src, dst);
-    builder.create<mgpu::BarrierOp>(loc);
-    if (copyOp.getToken())
-      mapping.map(copyOp.getToken(), dst);
   }
 
   void emitFlatCopyLoop(OpBuilder &builder, Location loc, Value src,

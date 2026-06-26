@@ -6,9 +6,7 @@
 module attributes {coir.target = "topscc", coir.arch = "gcu300",
                    coir.has_tma = false, coir.has_dma = true} {
 
-  // data.copy global->shared inside foreach:
-  //   ClassifyCopies -> dma.copy (hasDMA=true, crossLevel)
-  //   LowerDMADesc skips non-TMA copies with tile offsets
+  // dma.copy global->shared inside foreach
   // CHECK-LABEL: coir.kernel @test_gcu_dma_pipeline
   coir.kernel @test_gcu_dma_pipeline(
       %src: !coir.tensor<1024xf32, global>,
@@ -19,25 +17,24 @@ module attributes {coir.target = "topscc", coir.arch = "gcu300",
     coir.foreach %k in %c16 {
       %tile = coir.tensor.tile %src[%k]
         : !coir.tensor<1024xf32, global> -> !coir.tensor<64xf32, global>
-      coir.data.copy %tile to %buf
+      %tok = coir.dma.copy %tile to %buf
         : !coir.tensor<64xf32, global> -> !coir.tensor<64xf32, shared>
+      coir.wait %tok : !coir.async
 
       // CHECK: coir.dma.copy
-      // CHECK-NOT: coir.data.copy
       coir.yield
     }
   }
 
-  // data.copy global->local outside foreach:
-  //   ClassifyCopies -> dma.copy (hasDMA=true, globalLocal)
-  //   LowerDMADesc does not decompose (not global<->shared)
+  // dma.copy global->local outside foreach
   // CHECK-LABEL: coir.kernel @test_gcu_no_loop
   coir.kernel @test_gcu_no_loop(
       %src: !coir.tensor<64xf32, global>,
       %buf: !coir.tensor<64xf32, local>) {
     // CHECK: coir.dma.copy
     // CHECK-NOT: coir.dma.const.desc
-    coir.data.copy %src to %buf
+    %tok = coir.dma.copy %src to %buf
       : !coir.tensor<64xf32, global> -> !coir.tensor<64xf32, local>
+    coir.wait %tok : !coir.async
   }
 }

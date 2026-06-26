@@ -1,0 +1,40 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: cocc -t hip -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// DMA pad: copy source into padded destination with fill value.
+
+__co__ s32 [8, 12] pad_2d(s32 [4, 8] input) {
+  s32[8, 12] output;
+
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      f = dma.pad<{2, 2}, {2, 2}, {0, 0}, -1> input => shared;
+      dma.copy f.data => output;
+    }
+
+  return output;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s32>(4, 8);
+  for (size_t i = 0; i < 4; ++i)
+    for (size_t j = 0; j < 8; ++j)
+      input[i][j] = static_cast<choreo::s32>(i * 10 + j);
+
+  auto output = pad_2d(input.view());
+
+  bool pass = true;
+  for (size_t i = 0; i < 8; ++i)
+    for (size_t j = 0; j < 12; ++j) {
+      if (i >= 2 && i < 6 && j >= 2 && j < 10) {
+        if (output[i][j] != input[i - 2][j - 2]) pass = false;
+      } else {
+        if (output[i][j] != -1) pass = false;
+      }
+    }
+
+  if (pass) std::cout << "PASS" << std::endl;
+  else std::cout << "FAIL" << std::endl;
+}
+
+// CHECK: PASS

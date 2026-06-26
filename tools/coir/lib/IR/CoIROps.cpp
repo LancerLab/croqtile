@@ -486,56 +486,6 @@ void MMAExecOp::print(OpAsmPrinter &printer) {
 }
 
 //===----------------------------------------------------------------------===//
-// DataCopyOp
-//===----------------------------------------------------------------------===//
-
-ParseResult DataCopyOp::parse(OpAsmParser &parser, OperationState &result) {
-  OpAsmParser::UnresolvedOperand src, dst;
-  Type srcType, dstType;
-
-  if (parser.parseOperand(src) || parser.parseKeyword("to") ||
-      parser.parseOperand(dst))
-    return failure();
-
-  bool isAsync = succeeded(parser.parseOptionalKeyword("async"));
-  if (isAsync)
-    result.addAttribute("async", UnitAttr::get(parser.getContext()));
-
-  if (parser.parseOptionalAttrDict(result.attributes))
-    return failure();
-
-  if (parser.parseColon() || parser.parseType(srcType) ||
-      parser.parseArrow() || parser.parseType(dstType))
-    return failure();
-
-  if (parser.resolveOperand(src, srcType, result.operands) ||
-      parser.resolveOperand(dst, dstType, result.operands))
-    return failure();
-
-  if (isAsync) {
-    Type tokenType;
-    if (parser.parseComma() || parser.parseType(tokenType))
-      return failure();
-    result.addTypes(tokenType);
-  }
-
-  return success();
-}
-
-void DataCopyOp::print(OpAsmPrinter &printer) {
-  printer << " " << getSource() << " to " << getDest();
-  if (getAsync())
-    printer << " async";
-  llvm::SmallVector<llvm::StringRef> elidedAttrs = {"async"};
-  if (getKind() == coir::DMAKind::Copy)
-    elidedAttrs.push_back("kind");
-  printer.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
-  printer << " : " << getSource().getType() << " -> " << getDest().getType();
-  if (getToken())
-    printer << ", " << getToken().getType();
-}
-
-//===----------------------------------------------------------------------===//
 // DmaCopyOp / TmaCopyOp -- shared helper for "src to dst : srcT -> dstT"
 //===----------------------------------------------------------------------===//
 

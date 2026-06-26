@@ -7,8 +7,7 @@
 // loop-invariant ops (const.desc, prefetch) is done by HoistDMAConfig which
 // runs immediately after.
 //
-// Precondition: ClassifyCopies must run before this pass. Any remaining
-// global<->shared DataCopyOp will trigger a compile-time error.
+// Precondition: input IR should use coir.dma.copy / coir.tma.copy directly.
 //
 //===----------------------------------------------------------------------===//
 
@@ -151,23 +150,6 @@ struct LowerDMADescPass
                     (hasTMA && hasTMA.getValue());
       if (!active)
         return;
-    }
-
-    // Precondition: ClassifyCopies must have run.
-    // Reject any global<->shared DataCopyOp still present.
-    bool hasUnclassified = false;
-    getOperation()->walk([&](DataCopyOp op) {
-      auto srcType = llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
-      auto dstType = llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
-      if (!srcType || !dstType) return;
-      if (isGlobalSharedCopy(srcType, dstType))
-        hasUnclassified = true;
-    });
-    if (hasUnclassified) {
-      getOperation()->emitError()
-          << "LowerDMADesc requires ClassifyCopies to run first; "
-             "found unclassified global<->shared coir.data.copy ops";
-      return signalPassFailure();
     }
 
     auto *ctx = &getContext();

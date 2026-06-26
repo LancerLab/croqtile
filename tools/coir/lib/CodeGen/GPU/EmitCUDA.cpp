@@ -684,8 +684,6 @@ private:
       emitDMARuntimeDesc(rtDesc);
     else if (auto invoke = dyn_cast<DMAInvokeOp>(op))
       emitDMAInvoke(invoke);
-    else if (auto dataCopy = dyn_cast<DataCopyOp>(op))
-      emitDataCopy(dataCopy);
     else if (auto dmaCopy = dyn_cast<DmaCopyOp>(op))
       emitDmaCopy(dmaCopy);
     else if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
@@ -1240,13 +1238,6 @@ private:
   }
 
   // --- Fallback handlers for un-lowered copy ops (when LowerDMADesc skips) ---
-
-  void emitDataCopy(DataCopyOp op) {
-    emitNaiveCopy(op.getSource(), op.getDest());
-    os << getIndent() << "__syncthreads();\n";
-    if (op.getToken())
-      dmaTokens.insert(op.getToken());
-  }
 
   void emitDmaCopy(DmaCopyOp op) {
     emitNaiveCopy(op.getSource(), op.getDest());
