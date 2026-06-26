@@ -1,0 +1,14 @@
+// RUN: not choreo -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+// CHECK: error: {{\[\[}}launch_bounds]] maxThreadsPerBlock (64) is less than the computed thread count (128).
+
+__co__ void bad_max_threads(global f16 [M, K] input,
+                            global f16 [M, K] output) {
+  [[launch_bounds(64, 1)]]
+  parallel by 1 : block {
+    parallel t by 128 : thread {
+      output.at(t, 0) = input.at(t, 0);
+    }
+  }
+}
+
+int main() { return 0; }

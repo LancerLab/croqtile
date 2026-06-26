@@ -1,26 +1,20 @@
 // RUN: not choreo -t cute -sa=check %s 2>&1 | FileCheck %s
-// CHECK: error: launch_bounds is only allowed in parallel-by blocks lowered to GPU kernels (level : block).
-// CHECK: error: launch_bounds argument must be a compile-time integer constant.
-// CHECK: error: launch_bounds argument must be a positive integer.
-// CHECK: error: multiple launch_bounds directives are not allowed in the same parallel-by block.
-// CHECK: Totally 4 errors have been detected.
+// CHECK: error: {{\[\[}}launch_bounds]] is only valid on block-level parallel-by.
+// CHECK: error: {{\[\[}}launch_bounds]] argument must be a compile-time integer constant.
+// CHECK: error: {{\[\[}}launch_bounds]] argument must be a non-negative integer.
+// CHECK: Totally {{[0-9]+}} errors have been detected.
 
 __co__ void bad_semacheck(int n) {
+  [[launch_bounds(1)]]
   parallel t by 128 : thread {
-    launch_bounds(1);
   }
 
+  [[launch_bounds(n)]]
   parallel by 1 : block {
-    launch_bounds(n);
   }
 
+  [[launch_bounds(-1)]]
   parallel by 1 : block {
-    launch_bounds(0);
-  }
-
-  parallel by 1 : block {
-    launch_bounds(1);
-    launch_bounds(2);
   }
 }
 

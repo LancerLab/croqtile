@@ -1,6 +1,6 @@
 // RUN: not choreo -t cute %s 2>&1 | FileCheck %s
-// CHECK: error: launch_bounds can only be used inside parallel-by blocks.
-// CHECK: Totally 1 errors have been detected.
+// CHECK: error: 'launch_bounds' is a compiler directive
+// CHECK: Parsing failed due to syntax errors.
 
 __co__ void bad_placement() {
   launch_bounds(7);

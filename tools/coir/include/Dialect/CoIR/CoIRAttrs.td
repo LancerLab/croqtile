@@ -216,6 +216,27 @@ def CoIR_AtomicKindAttr :
   CoIR_I32EnumAttr<"atomic_kind", CoIR_AtomicKindEnum>;
 
 //===----------------------------------------------------------------------===//
+// LaunchBounds -- CUDA/HIP __launch_bounds__ parameters
+//===----------------------------------------------------------------------===//
+
+def CoIR_LaunchBoundsAttr : AttrDef<CoIR_Dialect, "LaunchBounds"> {
+  let mnemonic = "launch_bounds";
+  let summary = "CUDA/HIP __launch_bounds__ parameters";
+  let description = [{
+    Encodes up to three __launch_bounds__ parameters:
+      maxThreadsPerBlock (required),
+      minBlocksPerMultiprocessor (optional, default 0 = unset),
+      maxBlocksPerCluster (optional, default 0 = unset).
+  }];
+  let parameters = (ins
+    "int64_t":$maxThreadsPerBlock,
+    DefaultValuedParameter<"int64_t", "0">:$minBlocksPerMultiprocessor,
+    DefaultValuedParameter<"int64_t", "0">:$maxBlocksPerCluster
+  );
+  let assemblyFormat = "`<` $maxThreadsPerBlock (`,` $minBlocksPerMultiprocessor^ (`,` $maxBlocksPerCluster^)?)? `>`";
+}
+
+//===----------------------------------------------------------------------===//
 // Legacy layout constraint (kept for existing DMA ops)
 //===----------------------------------------------------------------------===//
 

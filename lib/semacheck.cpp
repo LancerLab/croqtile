@@ -691,7 +691,6 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
   }
 
   int setreg_count = 0;
-  int launch_bounds_count = 0;
   if (auto body = n.GetBody()) {
     for (const auto& stmt : body->values) {
       auto call = dyn_cast<AST::Call>(stmt);
@@ -700,8 +699,6 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
           call->function->name == "setreg.inc" ||
           call->function->name == "setreg.dec") {
         setreg_count++;
-      } else if (call->function->name == "launch_bounds") {
-        launch_bounds_count++;
       }
     }
   }
@@ -715,15 +712,28 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
     Error1(n.LOC(), "multiple setreg directives are not allowed in the same "
                     "parallel-by block.");
   }
-  if (launch_bounds_count > 0 && n.GetLevel() != ParallelLevel::BLOCK) {
-    Error1(n.LOC(),
-           "launch_bounds is only allowed in parallel-by blocks lowered to "
-           "GPU kernels (level : block).");
-  }
-  if (launch_bounds_count > 1) {
-    Error1(n.LOC(),
-           "multiple launch_bounds directives are not allowed in the same "
-           "parallel-by block.");
+
+  if (n.HasLaunchBounds()) {
+    if (n.GetLevel() != ParallelLevel::BLOCK)
+      Error1(n.LOC(),
+             "[[launch_bounds]] is only valid on block-level parallel-by.");
+    auto& lb_args = n.GetLaunchBoundsArgs();
+    for (size_t i = 0; i < lb_args->Count(); ++i) {
+      auto arg = dyn_cast<AST::Expr>(lb_args->ValueAt(i));
+      if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric()) {
+        Error1(lb_args->ValueAt(i)->LOC(),
+               "[[launch_bounds]] argument must be a compile-time "
+               "integer constant.");
+      } else if (auto val = VIInt(arg->Opts().GetVal());
+                 !val || val.value() < 0) {
+        Error1(lb_args->ValueAt(i)->LOC(),
+               "[[launch_bounds]] argument must be a non-negative integer.");
+      } else if (i > 0 && val && val.value() == 0) {
+        Error1(lb_args->ValueAt(i)->LOC(),
+               "[[launch_bounds]] minBlocks/maxCluster must be positive "
+               "(use 0 only for maxThreadsPerBlock to auto-compute).");
+      }
+    }
   }
 
   return true;
@@ -1583,31 +1593,6 @@ bool SemaChecker::VisitNode(AST::Call& n) {
           } else if (auto reg_limit = VIInt(arg->Opts().GetVal());
                      !reg_limit || reg_limit.value() <= 0) {
             Error1(n.LOC(), "setreg argument must be a positive integer.");
-          }
-        }
-      }
-    } else if (func_name == "launch_bounds") {
-      if (n.arguments->Count() != 1) {
-        Error1(n.LOC(), "launch_bounds expects exactly one argument.");
-      } else {
-        auto arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(0));
-        if (!arg) {
-          Error1(n.LOC(),
-                 "launch_bounds expects an integer expression argument.");
-        } else {
-          auto aty = NodeType(*arg);
-          if (!isa<ScalarIntegerType>(aty)) {
-            Error1(n.LOC(),
-                   "launch_bounds expects an integer argument but got '" +
-                       PSTR(aty) + "'.");
-          } else if (!arg->Opts().HasVal() ||
-                     !arg->Opts().GetVal()->IsNumeric()) {
-            Error1(n.LOC(), "launch_bounds argument must be a compile-time "
-                            "integer constant.");
-          } else if (auto min_blocks = VIInt(arg->Opts().GetVal());
-                     !min_blocks || min_blocks.value() <= 0) {
-            Error1(n.LOC(),
-                   "launch_bounds argument must be a positive integer.");
           }
         }
       }

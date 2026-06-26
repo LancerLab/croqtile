@@ -100,6 +100,7 @@ private:
 
       VST_DEBUG(ps.Show(dbgs(), lvl); dbgs() << "\n";);
       CheckPBSettings(pb);
+      CheckLaunchBounds(pb);
       CheckStreamBinding(pb);
     }
     return true;
@@ -203,6 +204,32 @@ public:
           Assess(pred, msg, *pb, pb);
         }
       }
+    }
+  }
+
+  void CheckLaunchBounds(AST::ParallelBy* pb) {
+    if (!pb->HasLaunchBounds()) return;
+    if (pb->GetLevel() != ParallelLevel::BLOCK) return;
+    auto& lb_args = pb->GetLaunchBoundsArgs();
+    if (lb_args->Count() < 1) return;
+    auto arg0 = dyn_cast<AST::Expr>(lb_args->ValueAt(0));
+    if (!arg0 || !arg0->Opts().HasVal()) return;
+    auto max_threads = VIInt(arg0->Opts().GetVal());
+    if (!max_threads || max_threads.value() == 0) return;
+    auto& lcs = cgi.GetFunctionLaunches(fname);
+    if (lcs.empty()) return;
+    auto inner_thr =
+        lcs[0].thread_count.x * lcs[0].thread_count.y * lcs[0].thread_count.z;
+    auto group_cnt = lcs[0].group_count.x * lcs[0].group4_count.x *
+                     lcs[0].group_count.y * lcs[0].group_count.z;
+    auto computed = (inner_thr * group_cnt)->Normalize();
+    if (auto ct = VIInt(computed)) {
+      if (ct.value() > max_threads.value())
+        Error1(lb_args->ValueAt(0)->LOC(),
+               "[[launch_bounds]] maxThreadsPerBlock (" +
+                   std::to_string(max_threads.value()) +
+                   ") is less than the computed thread count (" +
+                   std::to_string(ct.value()) + ").");
     }
   }
 

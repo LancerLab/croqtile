@@ -613,36 +613,22 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
            vi_str(prod_z) + ")";
   }();
 
-  // Emit __launch_bounds__ if the user specified it via the BIF
-  auto launch_bounds_min_blocks = [&]() -> std::optional<int64_t> {
-    if (!cur_pb || !cur_pb->GetBody()) return std::nullopt;
-    for (const auto& stmt : cur_pb->GetBody()->values) {
-      auto call = dyn_cast<AST::Call>(stmt);
-      if (!call || !call->IsBIF() ||
-          call->function->name != "launch_bounds")
-        continue;
-      if (!call->arguments || call->arguments->Count() != 1)
-        return std::nullopt;
-      auto arg = dyn_cast<AST::Expr>(call->arguments->ValueAt(0));
-      if (!arg || !arg->Opts().HasVal() ||
-          !arg->Opts().GetVal()->IsNumeric())
-        return std::nullopt;
-      auto mb = VIInt(arg->Opts().GetVal());
-      if (!mb || mb.value() <= 0) return std::nullopt;
-      return mb.value();
-    }
-    return std::nullopt;
-  }();
-
   ds << "\n__global__ ";
-  auto thr_count = lc.thread_count.x * lc.group_count.x *
-                   lc.thread_count.y * lc.group_count.y *
-                   lc.thread_count.z * lc.group_count.z;
-  if (auto thr_val = VIInt(thr_count); thr_val) {
-    if (launch_bounds_min_blocks.has_value()) {
-      ds << "__launch_bounds__(" << *thr_val << ", "
-         << *launch_bounds_min_blocks << ") ";
+  if (n.HasLaunchBounds()) {
+    auto& lb_args = n.GetLaunchBoundsArgs();
+    auto arg0 = cast<AST::Expr>(lb_args->ValueAt(0));
+    auto v0 = VIInt(arg0->Opts().GetVal());
+    auto thr_count = lc.thread_count.x * lc.group_count.x * lc.thread_count.y *
+                     lc.group_count.y * lc.thread_count.z * lc.group_count.z;
+    std::string max_thr_str = (v0 && v0.value() > 0)
+                                  ? ValueSTR(arg0->Opts().GetVal())
+                                  : ValueSTR(thr_count);
+    ds << "__launch_bounds__(" << max_thr_str;
+    for (size_t i = 1; i < lb_args->Count(); ++i) {
+      auto arg = cast<AST::Expr>(lb_args->ValueAt(i));
+      ds << ", " << ValueSTR(arg->Opts().GetVal());
     }
+    ds << ") ";
   }
   ds << "void " << device_fn << "(";
   bool first = true;
@@ -1481,7 +1467,7 @@ bool HIPCodeGen::Visit(AST::Call& n) {
       return true;
     }
     if (func_name == "setreg" || func_name == "setreg.inc" ||
-        func_name == "setreg.dec" || func_name == "launch_bounds") {
+        func_name == "setreg.dec") {
       return true;
     }
     if (n.IsArith()) {         /* fall through to CallSTR emission below */

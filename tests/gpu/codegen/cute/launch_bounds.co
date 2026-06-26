@@ -1,10 +1,32 @@
-// REQUIRES: TARGET-SM_90A
-// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v "\<CHECK\>" | FileCheck %s
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | grep -v "\<CHECK\>" | FileCheck %s
 
-__co__ void launch_bounds_demo(global f16 [M, K] input,
-                               global f16 [M, K] output) {
+// Test 1: _ (auto) maxThreads with minBlocks -- compiler fills in 128
+__co__ void lb_auto(global f16 [M, K] input,
+                    global f16 [M, K] output) {
+  [[launch_bounds(_, 7)]]
   parallel by 1 : block {
-    launch_bounds(7);
+    parallel t by 128 : thread {
+      output.at(t, 0) = input.at(t, 0);
+    }
+  }
+}
+
+// Test 2: explicit maxThreads (256 > computed 128) with minBlocks
+__co__ void lb_explicit(global f16 [M, K] input,
+                        global f16 [M, K] output) {
+  [[launch_bounds(256, 2)]]
+  parallel by 1 : block {
+    parallel t by 128 : thread {
+      output.at(t, 0) = input.at(t, 0);
+    }
+  }
+}
+
+// Test 3: single arg (maxThreads only, no minBlocks)
+__co__ void lb_max_only(global f16 [M, K] input,
+                        global f16 [M, K] output) {
+  [[launch_bounds(256)]]
+  parallel by 1 : block {
     parallel t by 128 : thread {
       output.at(t, 0) = input.at(t, 0);
     }
@@ -13,4 +35,6 @@ __co__ void launch_bounds_demo(global f16 [M, K] input,
 
 int main() { return 0; }
 
-// CHECK: __global__ __launch_bounds__(128, 7) void __choreo_device_launch_bounds_demo(
+// CHECK: __global__ __launch_bounds__(128, 7) void __choreo_device_lb_auto(
+// CHECK: __global__ __launch_bounds__(256, 2) void __choreo_device_lb_explicit(
+// CHECK: __global__ __launch_bounds__(256) void __choreo_device_lb_max_only(

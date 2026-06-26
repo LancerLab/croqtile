@@ -7391,8 +7391,6 @@ bool CuteCodeGen::Visit(AST::Call& n) {
            << ".sync.aligned.u32 " << reg_limit.value() << ";\");\n";
       }
       return true;
-    } else if (func_name == "launch_bounds") {
-      return true;
     } else if (func_name == "__bar_arrive" || func_name == "__bar_sync") {
       if (IsHost()) return true;
       if (n.arguments->Count() != 2)
@@ -9299,22 +9297,15 @@ std::optional<int64_t> CuteCodeGen::GetSetRegLimit(AST::ParallelBy* pb) const {
 
 std::optional<int64_t>
 CuteCodeGen::GetLaunchBoundsMinBlocks(AST::ParallelBy* pb) const {
-  if (!pb || !pb->GetBody()) return std::nullopt;
-
-  for (const auto& stmt : pb->GetBody()->values) {
-    auto call = dyn_cast<AST::Call>(stmt);
-    if (!call || !call->IsBIF() || call->function->name != "launch_bounds")
-      continue;
-    if (!call->arguments || call->arguments->Count() != 1) return std::nullopt;
-    auto arg = dyn_cast<AST::Expr>(call->arguments->ValueAt(0));
-    if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric())
-      return std::nullopt;
-    auto min_blocks = VIInt(arg->Opts().GetVal());
-    if (!min_blocks || min_blocks.value() <= 0) return std::nullopt;
-    return min_blocks.value();
-  }
-
-  return std::nullopt;
+  if (!pb || !pb->HasLaunchBounds()) return std::nullopt;
+  auto& lb_args = pb->GetLaunchBoundsArgs();
+  if (lb_args->Count() < 2) return std::nullopt;
+  auto arg = dyn_cast<AST::Expr>(lb_args->ValueAt(1));
+  if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric())
+    return std::nullopt;
+  auto min_blocks = VIInt(arg->Opts().GetVal());
+  if (!min_blocks || min_blocks.value() <= 0) return std::nullopt;
+  return min_blocks.value();
 }
 
 void CuteCodeGen::EmitCudaFree() {
@@ -9346,10 +9337,37 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
     auto group_count = lcs[0].group_count.x * lcs[0].group4_count.x *
                        lcs[0].group_count.y * lcs[0].group_count.z;
     auto thr_count = inner_thr_count * group_count;
-    if (VIInt(thr_count).has_value()) {
+
+    std::string max_thr_str;
+    if (pb && pb->HasLaunchBounds()) {
+      auto arg0 = dyn_cast<AST::Expr>(pb->GetLaunchBoundsArgs()->ValueAt(0));
+      if (arg0 && arg0->Opts().HasVal()) {
+        auto v = VIInt(arg0->Opts().GetVal());
+        if (v && v.value() > 0) max_thr_str = ValueSTR(arg0->Opts().GetVal());
+      }
+    }
+    if (max_thr_str.empty() && VIInt(thr_count).has_value())
+      max_thr_str = ValueSTR(thr_count);
+
+    if (!max_thr_str.empty()) {
+      std::optional<int64_t> max_blocks_per_cluster;
+      if (pb && pb->HasLaunchBounds() &&
+          pb->GetLaunchBoundsArgs()->Count() >= 3) {
+        auto arg2 = dyn_cast<AST::Expr>(pb->GetLaunchBoundsArgs()->ValueAt(2));
+        if (arg2 && arg2->Opts().HasVal())
+          max_blocks_per_cluster = VIInt(arg2->Opts().GetVal());
+      }
+
       if (launch_bounds_min_blocks.has_value()) {
-        launch_bounds_attr = "__launch_bounds__(" + ValueSTR(thr_count) + ", " +
-                             std::to_string(*launch_bounds_min_blocks) + ") ";
+        launch_bounds_attr = "__launch_bounds__(" + max_thr_str + ", " +
+                             std::to_string(*launch_bounds_min_blocks);
+        if (max_blocks_per_cluster)
+          launch_bounds_attr.value() +=
+              ", " + std::to_string(*max_blocks_per_cluster);
+        launch_bounds_attr.value() += ") ";
+      } else if (pb && pb->HasLaunchBounds() &&
+                 pb->GetLaunchBoundsArgs()->Count() == 1) {
+        launch_bounds_attr = "__launch_bounds__(" + max_thr_str + ") ";
       } else if (IsWarpSpecActive() ||
                  set_cuda_func_attribute_max_dynamic_shared_memory_size) {
         int64_t min_blocks = 1;
@@ -9357,7 +9375,7 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
                 cgi.GetFunctionTrait(fname).inferred_launch_bounds_min_blocks;
             inferred > 0)
           min_blocks = inferred;
-        launch_bounds_attr = "__launch_bounds__(" + ValueSTR(thr_count) + ", " +
+        launch_bounds_attr = "__launch_bounds__(" + max_thr_str + ", " +
                              std::to_string(min_blocks) + ") ";
       }
     }

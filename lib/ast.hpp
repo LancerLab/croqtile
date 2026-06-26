@@ -1872,6 +1872,7 @@ private:
   ptr<Expr> stream_expr = nullptr;
   bool device_entry = false;
   std::string device_target_name;
+  ptr<MultiValues> launch_bounds_args = nullptr;
 
 public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
@@ -1983,6 +1984,14 @@ public:
   const std::string& DeviceTargetName() const { return device_target_name; }
   void SetDeviceTargetName(const std::string& n) { device_target_name = n; }
 
+  bool HasLaunchBounds() const { return launch_bounds_args != nullptr; }
+  const ptr<MultiValues>& GetLaunchBoundsArgs() const {
+    return launch_bounds_args;
+  }
+  void SetLaunchBoundsArgs(const ptr<MultiValues>& args) {
+    launch_bounds_args = args;
+  }
+
   ptr<Node> CloneImpl() const override {
     auto pb = Make<ParallelBy>(LOC(), CloneP(bpv), CloneP(bound_expr),
                                CloneP(cmpt_bpvs), CloneP(cmpt_bounds),
@@ -1995,12 +2004,18 @@ public:
     if (stream_expr) pb->SetStream(CloneP(stream_expr));
     pb->SetDeviceEntry(IsDeviceEntry());
     if (HasDeviceTarget()) pb->SetDeviceTargetName(DeviceTargetName());
+    if (HasLaunchBounds()) pb->SetLaunchBoundsArgs(CloneP(launch_bounds_args));
     return pb;
   }
 
   void InlinePrint(std::ostream& os, const std::string& prefix = {},
                    bool with_type = false) const override {
-    os << prefix << "parallel";
+    if (HasLaunchBounds()) {
+      os << prefix << "[[launch_bounds(";
+      launch_bounds_args->InlinePrint(os, "", with_type);
+      os << ")]] ";
+    }
+    os << (HasLaunchBounds() ? "" : prefix) << "parallel";
     if (stream_expr) {
       os << "(";
       stream_expr->InlinePrint(os);

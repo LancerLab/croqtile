@@ -204,6 +204,7 @@ extern int yylex();
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG SETREG_INC SETREG_DEC LAUNCHBOUNDS
+%token DLBRAKT
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK MMAWAIT
 %token <std::string> UNROLL
@@ -236,6 +237,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Call>> call_stmt setreg_stmt launch_bounds_stmt
+%nterm <AST::ptr<AST::MultiValues>> pb_attribute
 %nterm <AST::DMAAsync> tdma_async
 %nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
@@ -775,19 +777,27 @@ opt_stream_bind
     | %empty { $$ = nullptr; }
     ;
 
+pb_attribute
+    : DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
+        $$ = $4;
+      }
+    | %empty { $$ = nullptr; }
+    ;
+
 paraby_block
-    : PARA sync_type opt_stream_bind {
+    : pb_attribute PARA sync_type opt_stream_bind {
         paraby_symbols.clear();
       } parabys stmts_block {
-        $5->SetAsync($2);
-        if ($3) $5->SetStream($3);
+        $6->SetAsync($3);
+        if ($4) $6->SetStream($4);
         // attach statement to the inner-most pb
-        auto pb = $5;
+        auto pb = $6;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
         assert(pb->stmts->None() && "expect no statement.");
-        pb->stmts = $6;
-        $$ = $5;
+        pb->stmts = $7;
+        if ($1) $6->SetLaunchBoundsArgs($1);
+        $$ = $6;
       }
     ;
 
@@ -2671,11 +2681,10 @@ setreg_stmt
 
 launch_bounds_stmt
   : LAUNCHBOUNDS LPAREN s_expr RPAREN {
-    auto args = AST::Make<AST::MultiValues>(@1, ", ");
-    args->Append($3);
-    $$ = AST::Make<AST::Call>(
-      @1, AST::Make<AST::Identifier>(@1, $1), args,
-      AST::Call::BIF | AST::Call::ANNO);
+    Parser::error(@1, "'launch_bounds' is a compiler directive; use as a C++ attribute:\n"
+                      "       [[launch_bounds(maxThreads, minBlocks)]]\n"
+                      "       parallel by N : block { ... }");
+    YYERROR;
     }
   ;
 

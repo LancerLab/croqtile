@@ -281,7 +281,19 @@ private:
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
     std::string devName = kernelDeviceName(symName);
-    os() << "__global__ void " << devName << "(";
+    os() << "__global__ ";
+    if (auto lb = kernel.getLaunchBoundsAttr()) {
+      if (lb.getMaxThreadsPerBlock() > 0) {
+        os() << "__launch_bounds__(" << lb.getMaxThreadsPerBlock();
+        if (lb.getMinBlocksPerMultiprocessor() > 0) {
+          os() << ", " << lb.getMinBlocksPerMultiprocessor();
+          if (lb.getMaxBlocksPerCluster() > 0)
+            os() << ", " << lb.getMaxBlocksPerCluster();
+        }
+        os() << ") ";
+      }
+    }
+    os() << "void " << devName << "(";
 
     auto &body = kernel.getBody();
     unsigned paramIdx = 0;
