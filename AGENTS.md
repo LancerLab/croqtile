@@ -21,6 +21,20 @@ Choreo is a low-level Embedded Domain Specific Language (EDSL) for C++ that prog
 
 ### BAD BUILD COMMANDS: AVOID to use cmake directly if make commands can do the thing
 
+### CoIR (MLIR-based IR tooling)
+
+CoIR requires LLVM/MLIR which is not bundled with the repo.
+
+| Command | Description |
+|---------|-------------|
+| `make setup-coir-deps` | Download and extract LLVM/MLIR into `extern/llvm-project/` |
+| `make coir` | Build CoIR tools (`coir-opt`, `co2ir`, `cocc`) |
+| `make coir-test` | Run CoIR lit tests |
+| `make coir-clean` | Remove CoIR build artifacts |
+
+Always run `make setup-coir-deps` before `make coir` if
+`extern/llvm-project/` is not already populated.
+
 ### After Build
 - `./choreo` - Main compiler symlink (points to `build/choreo`)
 - `./copp` - Preprocessor symlink (points to `build/copp`)

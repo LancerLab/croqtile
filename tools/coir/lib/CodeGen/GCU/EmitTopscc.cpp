@@ -1043,15 +1043,13 @@ private:
                               ? mmaFragAddrs[op.getRhs()]
                               : getName(op.getRhs());
 
-    auto it = acoreStates.find(accVal);
-    if (it == acoreStates.end()) {
+    if (acoreStates.find(accVal) == acoreStates.end()) {
       AcoreAccumState fresh;
       fresh.ws_name = "__mma_ws_" + getName(accVal);
       os << getIndent() << "int " << fresh.ws_name << "[2048];\n";
       acoreStates[accVal] = fresh;
-      it = acoreStates.find(accVal);
     }
-    auto &state = it->second;
+    auto &state = acoreStates[accVal];
 
     std::string inPtr = acorePtrType(inElemTy);
     std::string outPtr = acorePtrType(outElemTy);
@@ -1106,7 +1104,8 @@ private:
     }
 
     valueNames[op.getResult()] = getName(accVal);
-    acoreStates[op.getResult()] = state;
+    AcoreAccumState stateCopy = state;
+    acoreStates[op.getResult()] = stateCopy;
   }
 
   void emitMMAStore(MMAStoreOp op) {
