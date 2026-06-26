@@ -78,6 +78,8 @@ private:
       return "int";
     if (ty.isIndex())
       return "int";
+    if (ty.isBF16())
+      return "__hip_bfloat16";
     if (ty.isF16())
       return "__half";
     if (ty.isF32())
@@ -98,6 +100,7 @@ private:
   }
 
   std::string emitElementType(Type ty) {
+    if (ty.isBF16()) return "__hip_bfloat16";
     if (ty.isF16()) return "__half";
     if (ty.isF32()) return "float";
     if (ty.isF64()) return "double";
@@ -126,6 +129,7 @@ private:
       else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
       else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
       else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
+      else if (eTyML.isBF16()) choreoElem = "choreo::bf16";
       else if (eTyML.isF32()) choreoElem = "choreo::f32";
       else if (eTyML.isF16()) choreoElem = "choreo::f16";
       else if (eTyML.isF64()) choreoElem = "choreo::f64";
@@ -321,6 +325,7 @@ private:
     else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
     else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
     else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
+    else if (resElemTy.isBF16()) choreoElem = "choreo::bf16";
     else if (resElemTy.isF32()) choreoElem = "choreo::f32";
     else if (resElemTy.isF16()) choreoElem = "choreo::f16";
     else if (resElemTy.isF64()) choreoElem = "choreo::f64";
@@ -368,8 +373,6 @@ private:
              isa<DMADescRuntimeOp>(op) || isa<DMAInvokeOp>(op) ||
              isa<DMACheckOp>(op))
       (void)op;
-    else if (auto dataCopy = dyn_cast<DataCopyOp>(op))
-      emitDataCopy(dataCopy);
     else if (auto dmaCopy = dyn_cast<DmaCopyOp>(op))
       emitDmaCopy(dmaCopy);
     else if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
@@ -609,15 +612,176 @@ private:
     os << getIndent() << "}\n";
   }
 
-  void emitDataCopy(DataCopyOp op) {
-    emitCooperativeCopy(op.getSource(), op.getDest());
+  void emitCopyWithPad(Value src, Value dst,
+                       std::optional<ArrayRef<int64_t>> padLow,
+                       std::optional<ArrayRef<int64_t>> padHigh,
+                       std::optional<Attribute> padValueAttr) {
+    auto srcTy = dyn_cast<coir::TensorType>(src.getType());
+    auto dstTy = dyn_cast<coir::TensorType>(dst.getType());
+    if (!srcTy || !dstTy) {
+      os << getIndent() << "// pad copy (unknown tensor type)\n";
+      return;
+    }
+    auto srcShape = srcTy.getShape();
+    auto dstShape = dstTy.getShape();
+    int rank = srcShape.size();
+    std::string eTy = emitElementType(srcTy.getElementType());
+    std::string srcName = getName(src);
+    std::string dstName = getName(dst);
+
+    std::string padVal = "0";
+    if (padValueAttr) {
+      if (auto intAttr = dyn_cast<IntegerAttr>(*padValueAttr))
+        padVal = std::to_string(intAttr.getInt());
+      else if (auto fpAttr = dyn_cast<FloatAttr>(*padValueAttr)) {
+        llvm::SmallString<16> s;
+        fpAttr.getValue().toString(s, 6, 0);
+        padVal = std::string(s);
+      }
+    }
+
+    int64_t dstElems = 1;
+    for (auto d : dstShape) dstElems *= d;
+    os << getIndent() << "for (size_t __i = threadIdx.x; __i < "
+       << dstElems << "; __i += blockDim.x) {\n";
+    incIndent();
+    os << getIndent() << "((" << eTy << "*)" << dstName << ")[__i] = ("
+       << eTy << ")" << padVal << ";\n";
+    decIndent();
+    os << getIndent() << "}\n";
     os << getIndent() << "__syncthreads();\n";
-    if (op.getToken())
-      valueNames[op.getToken()] = getName(op.getDest());
+
+    llvm::SmallVector<int64_t> lowVals(rank, 0);
+    if (padLow) {
+      auto pl = *padLow;
+      for (int i = 0; i < rank && i < (int)pl.size(); ++i)
+        lowVals[i] = pl[i];
+    }
+
+    int64_t srcElems = 1;
+    for (auto d : srcShape) srcElems *= d;
+
+    os << getIndent() << "for (size_t __i = threadIdx.x; __i < "
+       << srcElems << "; __i += blockDim.x) {\n";
+    incIndent();
+    os << getIndent() << "size_t __rem = __i;\n";
+    for (int d = 0; d < rank; ++d) {
+      std::string dn = "__d" + std::to_string(d);
+      if (d < rank - 1) {
+        int64_t stride = 1;
+        for (int k = d + 1; k < rank; ++k) stride *= srcShape[k];
+        os << getIndent() << "size_t " << dn << " = __rem / " << stride
+           << ";\n";
+        os << getIndent() << "__rem = __rem % " << stride << ";\n";
+      } else {
+        os << getIndent() << "size_t " << dn << " = __rem;\n";
+      }
+    }
+    os << getIndent() << "size_t __dst_idx = ";
+    for (int d = 0; d < rank; ++d) {
+      if (d > 0) os << " + ";
+      std::string coord = "(__d" + std::to_string(d) + " + "
+                         + std::to_string(lowVals[d]) + ")";
+      int64_t stride = 1;
+      for (int k = d + 1; k < rank; ++k) stride *= dstShape[k];
+      if (stride != 1)
+        os << coord << " * " << stride;
+      else
+        os << coord;
+    }
+    os << ";\n";
+    os << getIndent() << "((" << eTy << "*)" << dstName << ")[__dst_idx] = (("
+       << eTy << "*)" << srcName << ")[__i];\n";
+    decIndent();
+    os << getIndent() << "}\n";
+  }
+
+  void emitCopyWithTranspose(Value src, Value dst,
+                             std::optional<ArrayRef<int64_t>> permAttr) {
+    auto srcTy = dyn_cast<coir::TensorType>(src.getType());
+    auto dstTy = dyn_cast<coir::TensorType>(dst.getType());
+    if (!srcTy || !dstTy) {
+      os << getIndent() << "// transpose copy (unknown tensor type)\n";
+      return;
+    }
+    auto srcShape = srcTy.getShape();
+    auto dstShape = dstTy.getShape();
+    int rank = srcShape.size();
+    std::string eTy = emitElementType(srcTy.getElementType());
+    std::string srcName = getName(src);
+    std::string dstName = getName(dst);
+
+    llvm::SmallVector<int64_t> perm;
+    if (permAttr) {
+      auto pa = *permAttr;
+      perm.assign(pa.begin(), pa.end());
+    }
+    if (perm.empty())
+      for (int i = rank - 1; i >= 0; --i) perm.push_back(i);
+
+    int64_t srcElems = 1;
+    for (auto d : srcShape) srcElems *= d;
+
+    os << getIndent() << "for (size_t __i = threadIdx.x; __i < "
+       << srcElems << "; __i += blockDim.x) {\n";
+    incIndent();
+    os << getIndent() << "size_t __rem = __i;\n";
+    for (int d = 0; d < rank; ++d) {
+      std::string dn = "__d" + std::to_string(d);
+      if (d < rank - 1) {
+        int64_t stride = 1;
+        for (int k = d + 1; k < rank; ++k) stride *= srcShape[k];
+        os << getIndent() << "size_t " << dn << " = __rem / " << stride
+           << ";\n";
+        os << getIndent() << "__rem = __rem % " << stride << ";\n";
+      } else {
+        os << getIndent() << "size_t " << dn << " = __rem;\n";
+      }
+    }
+    os << getIndent() << "size_t __dst_idx = ";
+    for (int d = 0; d < rank; ++d) {
+      if (d > 0) os << " + ";
+      std::string coord = "__d" + std::to_string(perm[d]);
+      int64_t stride = 1;
+      for (int k = d + 1; k < rank; ++k) stride *= dstShape[k];
+      if (stride != 1)
+        os << coord << " * " << stride;
+      else
+        os << coord;
+    }
+    os << ";\n";
+    os << getIndent() << "((" << eTy << "*)" << dstName << ")[__dst_idx] = (("
+       << eTy << "*)" << srcName << ")[__i];\n";
+    decIndent();
+    os << getIndent() << "}\n";
+  }
+
+  template <typename CopyOp>
+  void emitCopyDispatch(CopyOp op) {
+    auto kind = op.getKind();
+    if (kind == DMAKind::Pad) {
+      auto padLow = op.getPadLow();
+      auto padHigh = op.getPadHigh();
+      auto padValue = op.getPadValue();
+      std::optional<ArrayRef<int64_t>> pl =
+          padLow ? std::optional(padLow.value()) : std::nullopt;
+      std::optional<ArrayRef<int64_t>> ph =
+          padHigh ? std::optional(padHigh.value()) : std::nullopt;
+      std::optional<Attribute> pv =
+          padValue ? std::optional<Attribute>(*padValue) : std::nullopt;
+      emitCopyWithPad(op.getSource(), op.getDest(), pl, ph, pv);
+    } else if (kind == DMAKind::Transpose) {
+      auto tp = op.getTransposePerm();
+      std::optional<ArrayRef<int64_t>> perm =
+          tp ? std::optional(tp.value()) : std::nullopt;
+      emitCopyWithTranspose(op.getSource(), op.getDest(), perm);
+    } else {
+      emitCooperativeCopy(op.getSource(), op.getDest());
+    }
   }
 
   void emitDmaCopy(DmaCopyOp op) {
-    emitCooperativeCopy(op.getSource(), op.getDest());
+    emitCopyDispatch(op);
     os << getIndent() << "__syncthreads();\n";
     valueNames[op.getToken()] = getName(op.getDest());
   }

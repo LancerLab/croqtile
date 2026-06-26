@@ -40,8 +40,10 @@ coir.kernel @copy_and_mma(
   %sa = coir.tensor.alloc : !coir.tensor<128x64xf16, shared>
   %sb = coir.tensor.alloc : !coir.tensor<64x128xf16, shared>
 
-  coir.data.copy %ga to %sa : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
-  coir.data.copy %gb to %sb : !coir.tensor<64x128xf16> -> !coir.tensor<64x128xf16, shared>
+  %tok_a = coir.dma.copy %ga to %sa : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
+  %tok_b = coir.dma.copy %gb to %sb : !coir.tensor<64x128xf16> -> !coir.tensor<64x128xf16, shared>
+  coir.wait %tok_a : !coir.async
+  coir.wait %tok_b : !coir.async
   coir.barrier #coir.level<block>
 
   %at = coir.tensor.tile %sa[] : !coir.tensor<128x64xf16, shared> -> !coir.tensor<16x16xf16, shared>

@@ -10,16 +10,13 @@
 include "mlir/Pass/PassBase.td"
 
 def ClassifyCopies : Pass<"coir-classify-copies"> {
-  let summary = "Lower coir.data.copy to specialized copy ops";
+  let summary = "Validate copy ops against target capabilities";
   let description = [{
-    Analyzes source and destination memory spaces of coir.data.copy
-    operations and replaces them with the appropriate specialized op:
+    Validates that coir.tma.copy ops are supported by the target.
+    If the target lacks TMA (coir.has_tma = false or absent), any
+    coir.tma.copy op triggers a compile-time error.
 
-    - global <-> shared with TMA: coir.tma.copy
-    - global <-> shared without TMA: coir.dma.copy
-    - global <-> local with DMA engine: coir.dma.copy
-    - shared <-> local with DMA engine: coir.dma.copy
-    - other: coir.element.copy
+    coir.dma.copy and coir.element.copy pass through unchanged.
 
     Target capabilities are read from module attributes set by the
     driver via Target::HasTMA() / Target::HasDMA():
@@ -27,12 +24,6 @@ def ClassifyCopies : Pass<"coir-classify-copies"> {
     - "coir.has_tma" (bool) -- target has TMA hardware
     - "coir.has_dma" (bool) -- target has DMA engine for cross-level
       transfers (global<->shared, global<->local, shared<->local)
-
-    For standalone coir-opt usage (tests), embed coir.has_tma/coir.has_dma
-    directly in the test IR module attributes.
-
-    Async coir.data.copy ops produce tokens that are threaded through
-    to the specialized async ops.
   }];
 
   let constructor = "::coir::createClassifyCopiesPass()";
@@ -89,8 +80,7 @@ def LowerCopy : Pass<"coir-lower-copy"> {
 def LowerDMADesc : Pass<"coir-lower-dma-desc"> {
   let summary = "Decompose DMA copy ops into descriptor pipeline";
   let description = [{
-    Target-driven decomposition of coir.dma.copy (and coir.data.copy
-    for backward compatibility) inside coir.foreach loops into the DMA
+    Target-driven decomposition of coir.dma.copy inside coir.foreach loops into the DMA
     descriptor pipeline:
 
     1. coir.dma.const.desc    -- captures loop-invariant geometry

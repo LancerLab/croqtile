@@ -60,7 +60,7 @@ To disable the automatic download, pass `-DCOIR_AUTO_DOWNLOAD_LLVM=OFF`.
 
 | Pass | Description |
 |------|-------------|
-| `--coir-classify-copies` | Lower generic `coir.data.copy` to specialized DMA/TMA/thread copy ops |
+| `--coir-classify-copies` | Validate copy ops against target capabilities (reject unsupported TMA) |
 | `--coir-lower-mma` | Lower `coir.mma.*` ops to target-specific MMA instructions |
 | `--coir-lower-copy` | Lower specialized copy ops to transfer/sync sequences |
 | `--coir-emit-cuda` | Emit CUDA/C++ source from lowered CoIR IR |

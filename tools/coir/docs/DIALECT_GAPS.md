@@ -53,7 +53,7 @@ use stride-based linearization for element access: `offset = sum(idx[i] * stride
 - Multicast descriptors (SM90 TMA)
 - Pipeline stages and buffering depth
 
-**CoIR** `coir.data.copy` / `coir.dma.copy` / `coir.tma.copy` currently have:
+**CoIR** `coir.dma.copy` / `coir.tma.copy` currently have:
 - Source/dest tensor operands
 - Optional `transfer_bytes` attribute
 - Token result for async completion

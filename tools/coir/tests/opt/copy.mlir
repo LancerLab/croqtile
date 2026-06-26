@@ -1,25 +1,5 @@
 // RUN: coir-opt %s | FileCheck %s
 
-// Test coir.data.copy (sync)
-// CHECK-LABEL: coir.kernel @test_data_copy_sync
-coir.kernel @test_data_copy_sync(
-    %src: !coir.tensor<128x64xf16>,
-    %dst: !coir.tensor<128x64xf16, shared>) {
-  // CHECK: coir.data.copy %arg0 to %arg1 : !coir.tensor<128x64xf16, default> -> !coir.tensor<128x64xf16, shared>
-  coir.data.copy %src to %dst : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
-}
-
-// Test coir.data.copy (async)
-// CHECK-LABEL: coir.kernel @test_data_copy_async
-coir.kernel @test_data_copy_async(
-    %src: !coir.tensor<128x64xf16>,
-    %dst: !coir.tensor<128x64xf16, shared>) {
-  // CHECK: coir.data.copy %arg0 to %arg1 async : !coir.tensor<128x64xf16, default> -> !coir.tensor<128x64xf16, shared>, !coir.async
-  %tok = coir.data.copy %src to %dst async : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>, !coir.async
-  // CHECK: coir.wait
-  coir.wait %tok : !coir.async
-}
-
 // Test coir.dma.copy
 // CHECK-LABEL: coir.kernel @test_dma_copy
 coir.kernel @test_dma_copy(

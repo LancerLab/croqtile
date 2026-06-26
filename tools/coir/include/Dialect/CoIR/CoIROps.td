@@ -349,22 +349,6 @@ def MMAStoreOp : CoIR_Op<"mma.store", []> {
 // Tier 2: Copy and synchronization ops (defined here, used in Phase 3)
 //===----------------------------------------------------------------------===//
 
-def DataCopyOp : CoIR_Op<"data.copy", []> {
-  let summary = "Generic data copy (disambiguated to dma/tma/thread in lowering)";
-  let arguments = (ins
-    CoIR_TensorTypeC:$source,
-    CoIR_TensorTypeC:$dest,
-    OptionalAttr<UnitAttr>:$async,
-    DefaultValuedAttr<CoIR_DMAKindAttr, "coir::DMAKind::Copy">:$kind,
-    OptionalAttr<DenseI64ArrayAttr>:$pad_low,
-    OptionalAttr<DenseI64ArrayAttr>:$pad_high,
-    OptionalAttr<AnyAttrOf<[I64Attr, F64Attr]>>:$pad_value,
-    OptionalAttr<DenseI64ArrayAttr>:$transpose_perm
-  );
-  let results = (outs Optional<CoIR_AsyncTokenTypeC>:$token);
-  let hasCustomAssemblyFormat = 1;
-}
-
 def BarrierOp : CoIR_Op<"barrier", []> {
   let summary = "Synchronization barrier at the given scope";
   let arguments = (ins CoIR_ParallelLevelAttr:$scope);
@@ -391,7 +375,7 @@ def FutureRotateOp : CoIR_Op<"async.rotate", []> {
 }
 
 //===----------------------------------------------------------------------===//
-// Tier 3: Specialized copy ops (lowered from data.copy by classify-copies)
+// Tier 3: Specialized copy ops (from AST-to-CoIR generation)
 //===----------------------------------------------------------------------===//
 
 def DmaCopyOp : CoIR_Op<"dma.copy", []> {

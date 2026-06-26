@@ -41,8 +41,9 @@ coir.kernel @test_classify_then_lower(
     %s: !coir.tensor<128x64xf16, shared>,
     %s2: !coir.tensor<16x16xf16, shared>,
     %s3: !coir.tensor<16x16xf16, shared>) {
-  coir.data.copy %g to %s : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
-  coir.data.copy %s2 to %s3 : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
+  %tok = coir.tma.copy %g to %s : !coir.tensor<128x64xf16> -> !coir.tensor<128x64xf16, shared>
+  coir.wait %tok : !coir.async
+  coir.element.copy %s2 to %s3 : !coir.tensor<16x16xf16, shared> -> !coir.tensor<16x16xf16, shared>
 }
 
 } // module
