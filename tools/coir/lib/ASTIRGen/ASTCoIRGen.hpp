@@ -174,11 +174,13 @@ public:
   bool Visit(AST::Continue &) override;
   bool Visit(AST::Yield &) override { return true; }
   bool Visit(AST::Call &) override;
+  void emitAtomicCall(AST::Call &call);
   bool Visit(AST::Rotate &) override;
   bool Visit(AST::Synchronize &) override;
   bool Visit(AST::Select &) override { return true; }
   bool Visit(AST::LoopRange &) override { return true; }
-  bool Visit(AST::InThreadsBlock &) override { return true; }
+  bool Visit(AST::InThreadsBlock &) override;
+  // AfterVisit handled via AfterVisitImpl dispatch
   bool Visit(AST::WhileBlock &) override;
   bool Visit(AST::IfElseBlock &) override;
   bool Visit(AST::CppSourceCode &) override;
