@@ -27,7 +27,7 @@ coir.kernel @mma_kernel(
 
 // End-to-end test: copy + barrier + MMA
 // CHECK: __global__ void __copy_and_mma_kernel__
-// CHECK: cute::copy(tma_desc
+// CHECK: choreo::naive_copy
 // CHECK: __syncthreads
 // CHECK: wmma::fill_fragment
 // CHECK: wmma::load_matrix_sync

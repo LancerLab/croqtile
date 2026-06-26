@@ -8,7 +8,7 @@ __co__ auto test_pad(s32 [2, 3] input) {
   return res;
 }
 
-// CHECK: coir.data.copy
+// CHECK: coir.dma.copy
 // CHECK-SAME: kind = #coir.dma_kind<pad>
 // CHECK-SAME: pad_high = array<i64: 1, 1>
 // CHECK-SAME: pad_low = array<i64: 1, 1>
@@ -22,6 +22,6 @@ __co__ auto test_transp(s32 [2, 4] input) {
   return res;
 }
 
-// CHECK: coir.data.copy
+// CHECK: coir.dma.copy
 // CHECK-SAME: kind = #coir.dma_kind<transpose>
 // CHECK-SAME: transpose_perm = array<i64: 1, 0>
