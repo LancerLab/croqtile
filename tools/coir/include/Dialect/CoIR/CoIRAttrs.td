@@ -186,6 +186,36 @@ def CoIR_AssertCostAttr :
   CoIR_I32EnumAttr<"cost_class", CoIR_AssertCostEnum>;
 
 //===----------------------------------------------------------------------===//
+// AtomicKind -- read-modify-write operation kind for atomic ops
+//===----------------------------------------------------------------------===//
+
+def CoIR_AK_Add  : I32EnumAttrCase<"Add",  0, "add">;
+def CoIR_AK_Sub  : I32EnumAttrCase<"Sub",  1, "sub">;
+def CoIR_AK_Exch : I32EnumAttrCase<"Exch", 2, "exch">;
+def CoIR_AK_Min  : I32EnumAttrCase<"Min",  3, "min">;
+def CoIR_AK_Max  : I32EnumAttrCase<"Max",  4, "max">;
+def CoIR_AK_And  : I32EnumAttrCase<"And",  5, "and">;
+def CoIR_AK_Or   : I32EnumAttrCase<"Or",   6, "or">;
+def CoIR_AK_Xor  : I32EnumAttrCase<"Xor",  7, "xor">;
+def CoIR_AK_CAS  : I32EnumAttrCase<"CAS",  8, "cas">;
+
+def CoIR_AtomicKindEnum : CoIR_I32Enum<
+  "AtomicKind", "atomic read-modify-write operation kind", [
+    CoIR_AK_Add,
+    CoIR_AK_Sub,
+    CoIR_AK_Exch,
+    CoIR_AK_Min,
+    CoIR_AK_Max,
+    CoIR_AK_And,
+    CoIR_AK_Or,
+    CoIR_AK_Xor,
+    CoIR_AK_CAS
+  ]>;
+
+def CoIR_AtomicKindAttr :
+  CoIR_I32EnumAttr<"atomic_kind", CoIR_AtomicKindEnum>;
+
+//===----------------------------------------------------------------------===//
 // Legacy layout constraint (kept for existing DMA ops)
 //===----------------------------------------------------------------------===//
 

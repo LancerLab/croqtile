@@ -1,0 +1,28 @@
+// RUN: cocc -t topscc -es %s -o - | FileCheck %s
+//
+// Verify inthreads.async emits if-guard WITHOUT __syncthreads.
+
+__co__ s32 [4] test_inthreads_async(s32 [4] input) {
+  s32 [4] output;
+  parallel p by 2 : block {
+    local s32 [2] la;
+    f = dma.copy.async input.chunkat(p) => la;
+    wait f;
+    local s32 [2] lb;
+    parallel t by 2 : thread {
+      inthreads.async (t < 1) {
+        lb.at(0) = la.at(0) * 3;
+      }
+    }
+    g = dma.copy.async lb => output.chunkat(p);
+    wait g;
+  }
+  return output;
+}
+
+// Async: if-guard present but no __syncthreads between if-close and DMA
+// CHECK: if (
+// CHECK-NEXT: int
+// CHECK: }
+// CHECK-NOT: __syncthreads
+// CHECK: }

@@ -31,12 +31,18 @@ public:
     archStr = CoIR::GetArch(module).str();
     archNum = parseArchNum(archStr);
 
-    // Pre-scan to detect MMA ops so we can include the acore header early.
+    // Pre-scan to detect MMA ops or acore calls for auto-include.
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op)) {
         kernel.walk([&](Operation *inner) {
           if (isa<MMAFillOp, MMALoadOp, MMAExecOp, MMAStoreOp>(inner))
             hasAcoreCall = true;
+          if (auto callOp = dyn_cast<CallOp>(inner)) {
+            auto callee = callOp.getCallee().str();
+            if (callee.find("acore::") == 0 ||
+                (callOp.getIsLibCall() && *callOp.getIsLibCall()))
+              hasAcoreCall = true;
+          }
         });
       }
     }
@@ -718,6 +724,12 @@ private:
       valueNames[indexCast.getResult()] = getName(indexCast.getIn());
     else if (auto selectOp = dyn_cast<arith::SelectOp>(op))
       emitSelect(selectOp);
+    else if (auto callOp = dyn_cast<coir::CallOp>(op))
+      emitCall(callOp);
+    else if (auto ithOp = dyn_cast<coir::InThreadsOp>(op))
+      emitInThreads(ithOp);
+    else if (auto atomicOp = dyn_cast<coir::AtomicOp>(op))
+      emitAtomic(atomicOp);
     else if (emitArithBinOp(op)) {}
     else if (emitCmpOp(op)) {}
     else {
@@ -1941,6 +1953,81 @@ private:
        << name << " = " << getName(op.getCondition()) << " ? "
        << getName(op.getTrueValue()) << " : "
        << getName(op.getFalseValue()) << ";\n";
+  }
+
+  void emitCall(CallOp op) {
+    auto callee = op.getCallee().str();
+    os << getIndent() << callee;
+
+    // Template arguments
+    if (auto tplArgs = op.getTemplateArgs()) {
+      os << "<";
+      bool first = true;
+      for (auto a : *tplArgs) {
+        if (!first) os << ", ";
+        first = false;
+        os << mlir::cast<mlir::StringAttr>(a).getValue().str();
+      }
+      os << ">";
+    }
+
+    // Call arguments
+    os << "(";
+    bool first = true;
+    for (auto arg : op.getOperands_()) {
+      if (!first) os << ", ";
+      first = false;
+      auto ty = arg.getType();
+      if (auto tty = mlir::dyn_cast<coir::TensorType>(ty)) {
+        os << "(" << emitType(tty.getElementType()) << "*)"
+           << getName(arg);
+      } else {
+        os << getName(arg);
+      }
+    }
+    os << ");\n";
+  }
+
+  void emitInThreads(InThreadsOp op) {
+    os << getIndent() << "if (" << getName(op.getPredicate()) << ") {\n";
+    incIndent();
+    for (auto &bodyOp : op.getBody().front().getOperations())
+      emitOp(&bodyOp);
+    decIndent();
+    os << getIndent() << "}";
+    bool isAsync = op.getAsync() && *op.getAsync();
+    bool isOuter = !op.getOuter() || *op.getOuter();
+    if (!isAsync && isOuter)
+      os << "\n" << getIndent() << "__syncthreads();";
+    os << "\n";
+  }
+
+  void emitAtomic(AtomicOp op) {
+    using AK = coir::AtomicKind;
+    llvm::StringRef fnName;
+    switch (op.getKind()) {
+    case AK::Add:  fnName = "atomicAdd"; break;
+    case AK::Sub:  fnName = "atomicSub"; break;
+    case AK::Exch: fnName = "atomicExch"; break;
+    case AK::Min:  fnName = "atomicMin"; break;
+    case AK::Max:  fnName = "atomicMax"; break;
+    case AK::And:  fnName = "atomicAnd"; break;
+    case AK::Or:   fnName = "atomicOr"; break;
+    case AK::Xor:  fnName = "atomicXor"; break;
+    case AK::CAS:  fnName = "atomicCAS"; break;
+    }
+
+    os << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
+    bool first = true;
+    for (auto idx : op.getIndices()) {
+      if (!first) os << " + ";
+      first = false;
+      os << getName(idx);
+    }
+    os << "], " << getName(op.getValue());
+    if (op.getKind() == AK::CAS && op.getCompare())
+      os << ", " << "/* compare */";
+    os << ");\n";
   }
 
   bool emitCmpOp(Operation *op) {

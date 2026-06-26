@@ -279,6 +279,34 @@ def TensorReduceElemOp : CoIR_Op<"tensor.reduce_elem", []> {
 }
 
 //===----------------------------------------------------------------------===//
+// Atomic read-modify-write
+//===----------------------------------------------------------------------===//
+
+def AtomicOp : CoIR_Op<"atomic", []> {
+  let summary = "Atomic read-modify-write on a tensor element";
+  let description = [{
+    Performs an atomic read-modify-write at dest[indices].
+    The `kind` attribute selects the operation (add, sub, exch, min, max,
+    and, or, xor, cas). For CAS, `compare` provides the expected value.
+
+    Example:
+      coir.atomic <add> %val, %tensor[%i, %j]
+        : f32, !coir.tensor<128x128xf32, global>
+  }];
+  let arguments = (ins
+    CoIR_AtomicKindAttr:$kind,
+    AnyType:$value,
+    CoIR_TensorTypeC:$dest,
+    Variadic<Index>:$indices,
+    OptionalAttr<AnyAttr>:$compare
+  );
+  let assemblyFormat = [{
+    $kind $value `,` $dest `[` $indices `]` attr-dict
+    `:` type($value) `,` type($dest)
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // Tier 1/2: MMA ops (defined here, fully used in Phase 2)
 //===----------------------------------------------------------------------===//
 
@@ -528,6 +556,58 @@ def AssertOp : CoIR_Op<"assert", []> {
   let assemblyFormat = [{
     $condition `,` $message $site $usage attr-dict
   }];
+}
+
+//===----------------------------------------------------------------------===//
+// Library / device function call
+//===----------------------------------------------------------------------===//
+
+def CallOp : CoIR_Op<"call", []> {
+  let summary = "Call a library or device function";
+  let description = [{
+    Represents a call to a library function (__lib_*) or a
+    user-defined device function.
+
+    `callee` is the fully-qualified function name (e.g. "__lib_gemm",
+    "my_kernel", or a target-specific library call).
+
+    `operands_` are the call arguments (tensor pointers, scalars).
+    `template_args` holds compile-time template parameters as strings.
+    `is_lib_call` marks __lib_* builtins for target-specific lowering.
+    `is_bif` marks compiler built-in functions (assert, print, arith, lib).
+    `is_expr` marks calls whose return value is used.
+  }];
+  let arguments = (ins
+    StrAttr:$callee,
+    Variadic<AnyType>:$operands_,
+    OptionalAttr<StrArrayAttr>:$template_args,
+    OptionalAttr<BoolAttr>:$is_lib_call,
+    OptionalAttr<BoolAttr>:$is_bif,
+    OptionalAttr<BoolAttr>:$is_expr
+  );
+  let results = (outs Optional<AnyType>:$result);
+}
+
+//===----------------------------------------------------------------------===//
+// InThreads predicated block
+//===----------------------------------------------------------------------===//
+
+def InThreadsOp : CoIR_Op<"inthreads", [SingleBlock, NoTerminator]> {
+  let summary = "Predicated thread partition block";
+  let description = [{
+    Represents an `inthreads (pred) { ... }` block. The body executes
+    only on threads where `predicate` is true.
+
+    If `async` is true, no implicit __syncthreads() is emitted at end.
+    If `outer` is true, a __syncthreads() is emitted at block close
+    (when not async).
+  }];
+  let arguments = (ins
+    I1:$predicate,
+    OptionalAttr<BoolAttr>:$async,
+    OptionalAttr<BoolAttr>:$outer
+  );
+  let regions = (region SizedRegion<1>:$body);
 }
 
 #endif // COIR_OPS_TD

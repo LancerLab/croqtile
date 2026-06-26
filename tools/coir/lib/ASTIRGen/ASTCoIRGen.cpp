@@ -438,6 +438,11 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     }
   } else if (isa<AST::WithBlock>(&n)) {
     PopScope();
+  } else if (isa<AST::InThreadsBlock>(&n)) {
+    auto *block = builder.getInsertionBlock();
+    auto *parentOp = block->getParentOp();
+    if (parentOp && parentOp->getBlock())
+      builder.setInsertionPointAfter(parentOp);
   }
   return true;
 }
@@ -1627,49 +1632,121 @@ bool ASTCoIRGen::Visit(AST::Synchronize &sync) {
   return true;
 }
 
-bool ASTCoIRGen::Visit(AST::Call &call) {
-  if (!call.IsAtomic()) return true;
+static coir::AtomicKind parseAtomicKind(llvm::StringRef fname) {
+  using AK = coir::AtomicKind;
+  return llvm::StringSwitch<AK>(fname)
+      .Case("__atomic_add", AK::Add)
+      .Case("__atomic_sub", AK::Sub)
+      .Case("__atomic_exch", AK::Exch)
+      .Case("__atomic_min", AK::Min)
+      .Case("__atomic_max", AK::Max)
+      .Case("__atomic_and", AK::And)
+      .Case("__atomic_or", AK::Or)
+      .Case("__atomic_xor", AK::Xor)
+      .Case("__atomic_cas", AK::CAS)
+      .Default(AK::Add);
+}
+
+void ASTCoIRGen::emitAtomicCall(AST::Call &call) {
   auto loc = Loc(call);
   auto &fname = call.function->name;
   auto &args = call.GetArguments();
 
-  if (fname == "__atomic_add" && args.size() >= 2) {
-    AST::Node *addrNode = args[0].get();
-    auto valNode = args[1].get();
+  if (args.size() < 2) return;
 
-    if (auto *expr = dyn_cast<AST::Expr>(addrNode))
-      if (expr->GetForm() == AST::Expr::Reference && expr->GetR())
-        addrNode = expr->GetR().get();
+  AST::Node *addrNode = args[0].get();
+  auto valNode = args[1].get();
 
-    mlir::Value valVal = nullptr;
+  if (auto *expr = dyn_cast<AST::Expr>(addrNode))
+    if (expr->GetForm() == AST::Expr::Reference && expr->GetR())
+      addrNode = expr->GetR().get();
 
-    if (auto *da = dyn_cast<AST::DataAccess>(addrNode)) {
-      auto tensorVal = LookupValue(da->GetDataName());
-      if (tensorVal) {
-        auto tty = mlir::dyn_cast<coir::TensorType>(tensorVal.getType());
-        if (tty) {
-          llvm::SmallVector<mlir::Value> idxVals;
-          for (auto &idx : da->GetIndices()) {
-            mlir::Value v = EmitExpr(*idx);
-            if (!v) {
-              if (auto *idNode = dyn_cast<AST::Identifier>(idx.get()))
-                v = LookupValue(idNode->name);
-            }
-            if (v && !mlir::isa<mlir::IndexType>(v.getType()))
-              v = builder.create<mlir::arith::IndexCastOp>(
-                  loc, mlir::IndexType::get(&IRContext()), v);
-            if (v) idxVals.push_back(v);
-          }
-          valVal = EmitExpr(*valNode);
-          if (valVal && tensorVal) {
-            auto reduceOp = builder.create<coir::TensorReduceElemOp>(
-                loc, valVal, tensorVal, idxVals);
-            reduceOp->setAttr("atomic", builder.getUnitAttr());
-          }
-        }
+  if (auto *da = dyn_cast<AST::DataAccess>(addrNode)) {
+    auto tensorVal = LookupValue(da->GetDataName());
+    if (!tensorVal) return;
+    auto tty = mlir::dyn_cast<coir::TensorType>(tensorVal.getType());
+    if (!tty) return;
+
+    llvm::SmallVector<mlir::Value> idxVals;
+    for (auto &idx : da->GetIndices()) {
+      mlir::Value v = EmitExpr(*idx);
+      if (!v) {
+        if (auto *idNode = dyn_cast<AST::Identifier>(idx.get()))
+          v = LookupValue(idNode->name);
       }
+      if (v && !mlir::isa<mlir::IndexType>(v.getType()))
+        v = builder.create<mlir::arith::IndexCastOp>(
+            loc, mlir::IndexType::get(&IRContext()), v);
+      if (v) idxVals.push_back(v);
     }
+    mlir::Value valVal = EmitExpr(*valNode);
+    if (!valVal || !tensorVal) return;
+
+    auto kindAttr = coir::AtomicKindAttr::get(&IRContext(),
+                                               parseAtomicKind(fname));
+    builder.create<coir::AtomicOp>(loc, kindAttr, valVal, tensorVal,
+                                   idxVals, /*compare=*/nullptr);
   }
+}
+
+bool ASTCoIRGen::Visit(AST::Call &call) {
+  auto loc = Loc(call);
+  auto &fname = call.function->name;
+  auto &args = call.GetArguments();
+
+  // Atomics lower to TensorReduceElemOp with atomic attribute
+  if (call.IsAtomic()) {
+    emitAtomicCall(call);
+    return true;
+  }
+
+  // Skip non-lib BIFs that we don't yet lower (assert, print, arith)
+  if (call.IsBIF() && !call.IsLibCall()) return true;
+
+  // Emit arguments as operands
+  llvm::SmallVector<mlir::Value> operands;
+  for (auto &arg : args) {
+    mlir::Value v = EmitExpr(*arg);
+    if (!v) {
+      if (isa<AST::Identifier>(arg))
+        v = LookupValue(
+            std::static_pointer_cast<AST::Identifier>(arg)->name);
+    }
+    if (v) operands.push_back(v);
+  }
+
+  // Collect template arguments as string attributes
+  llvm::SmallVector<mlir::StringRef> tplStrs;
+  llvm::SmallVector<std::string> tplStorage;
+  if (call.template_args) {
+    for (auto &ta : call.template_args->AllValues()) {
+      std::string taStr;
+      if (isa<AST::Identifier>(ta))
+        taStr = std::static_pointer_cast<AST::Identifier>(ta)->name;
+      else if (isa<AST::IntLiteral>(ta))
+        taStr = std::to_string(std::visit(
+            [](auto v) -> int64_t { return v; },
+            std::static_pointer_cast<AST::IntLiteral>(ta)->value));
+      else
+        taStr = "?";
+      tplStorage.push_back(std::move(taStr));
+    }
+    for (auto &s : tplStorage)
+      tplStrs.push_back(s);
+  }
+
+  auto callOp = builder.create<coir::CallOp>(
+      loc,
+      /*result=*/mlir::Type{},
+      builder.getStringAttr(fname),
+      operands,
+      tplStrs.empty() ? nullptr
+                      : builder.getStrArrayAttr(tplStrs),
+      call.IsLibCall() ? builder.getBoolAttr(true) : nullptr,
+      call.IsBIF() ? builder.getBoolAttr(true) : nullptr,
+      call.IsExpr() ? builder.getBoolAttr(true) : nullptr);
+  (void)callOp;
+
   return true;
 }
 
@@ -1941,5 +2018,32 @@ bool ASTCoIRGen::Visit(AST::CppSourceCode &n) {
     IRModule()->setAttr("coir.device_code",
                         mlir::StringAttr::get(&IRContext(), combined));
   }
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::InThreadsBlock &n) {
+  auto loc = Loc(n);
+
+  if (!n.pred) return true;
+
+  mlir::Value predVal = EmitExpr(*n.pred);
+  if (!predVal) return true;
+
+  if (!predVal.getType().isInteger(1)) {
+    auto zero = builder.create<mlir::arith::ConstantIntOp>(
+        loc, 0, predVal.getType());
+    predVal = builder.create<mlir::arith::CmpIOp>(
+        loc, mlir::arith::CmpIPredicate::ne, predVal, zero);
+  }
+
+  auto ithOp = builder.create<coir::InThreadsOp>(
+      loc, predVal,
+      n.async ? builder.getBoolAttr(true) : nullptr,
+      n.outer ? builder.getBoolAttr(true) : nullptr);
+
+  auto &bodyRegion = ithOp.getBody();
+  auto *block = new mlir::Block();
+  bodyRegion.push_back(block);
+  builder.setInsertionPointToStart(block);
   return true;
 }
