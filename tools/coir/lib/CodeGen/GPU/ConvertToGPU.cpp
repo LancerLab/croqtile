@@ -145,7 +145,29 @@ private:
     builder.setInsertionPoint(kernel);
     auto gpuModule = builder.create<mgpu::GPUModuleOp>(loc, moduleName);
 
-    builder.setInsertionPointToStart(gpuModule.getBody());
+    // Pre-scan for shared-memory TensorAllocOps and create memref.global
+    // ops in the gpu.module so they lower to static .shared PTX buffers
+    // instead of runtime malloc.
+    unsigned shmIdx = 0;
+    DenseMap<Operation*, std::string> shmGlobalNames;
+    DenseMap<Operation*, MemRefType> shmGlobalTypes;
+    auto &kernelBody = kernel.getBody();
+    kernelBody.walk([&](TensorAllocOp alloc) {
+      auto tty = cast<coir::TensorType>(alloc.getResult().getType());
+      if (tty.getMemorySpace() != 1) return;
+      auto memTy = convertTensorType(tty);
+      std::string globalName =
+          ("__shm_" + symName + "_" + std::to_string(shmIdx++)).str();
+      shmGlobalNames[alloc.getOperation()] = globalName;
+      shmGlobalTypes[alloc.getOperation()] = memTy;
+      builder.setInsertionPointToStart(gpuModule.getBody());
+      builder.create<memref::GlobalOp>(
+          loc, globalName,
+          builder.getStringAttr("private"),
+          memTy, Attribute(), /*constant=*/false, IntegerAttr());
+    });
+
+    builder.setInsertionPointToEnd(gpuModule.getBody());
     auto gpuFuncType =
         builder.getFunctionType(gpuArgTypes, TypeRange{});
     std::string kernelName = (symName + "_kernel").str();
@@ -163,7 +185,6 @@ private:
     builder.setInsertionPointToStart(&entry);
 
     IRMapping mapping;
-    auto &kernelBody = kernel.getBody();
     if (!kernelBody.empty()) {
       auto kernelArgs = kernelBody.getArguments();
       for (unsigned i = 0; i < kernelArgs.size(); ++i)
@@ -181,7 +202,8 @@ private:
     }
 
     for (auto &op : kernelBody.front().getOperations())
-      convertOp(builder, loc, op, mapping, returnAllocMap);
+      convertOp(builder, loc, op, mapping, returnAllocMap,
+                shmGlobalNames, shmGlobalTypes);
 
     if (entry.empty() || !entry.back().hasTrait<OpTrait::IsTerminator>())
       builder.create<mgpu::ReturnOp>(loc);
@@ -192,21 +214,26 @@ private:
 
   void convertOp(OpBuilder &builder, Location loc, Operation &op,
                  IRMapping &mapping,
-                 DenseMap<Value, Value> &returnAllocMap) {
+                 DenseMap<Value, Value> &returnAllocMap,
+                 DenseMap<Operation*, std::string> &shmGlobalNames,
+                 DenseMap<Operation*, MemRefType> &shmGlobalTypes) {
     if (isa<KernelReturnOp>(op)) {
       builder.create<mgpu::ReturnOp>(loc);
       return;
     }
     if (auto alloc = dyn_cast<TensorAllocOp>(op)) {
-      convertAlloc(builder, loc, alloc, mapping, returnAllocMap);
+      convertAlloc(builder, loc, alloc, mapping, returnAllocMap,
+                   shmGlobalNames, shmGlobalTypes);
       return;
     }
     if (auto par = dyn_cast<ParallelOp>(op)) {
-      convertParallel(builder, loc, par, mapping, returnAllocMap);
+      convertParallel(builder, loc, par, mapping, returnAllocMap,
+                      shmGlobalNames, shmGlobalTypes);
       return;
     }
     if (auto fe = dyn_cast<ForeachOp>(op)) {
-      convertForeach(builder, loc, fe, mapping, returnAllocMap);
+      convertForeach(builder, loc, fe, mapping, returnAllocMap,
+                     shmGlobalNames, shmGlobalTypes);
       return;
     }
     if (auto le = dyn_cast<TensorLoadElemOp>(op)) {
@@ -244,10 +271,7 @@ private:
         isa<DMADescRuntimeOp>(op) || isa<DMACheckOp>(op))
       return;
     if (auto invoke = dyn_cast<DMAInvokeOp>(op)) {
-      // DMA invoke on basic GPU -> barrier (the actual data movement
-      // was already done by the dma.copy that was not decomposed, or
-      // will be handled by the runtime). Emit barrier for sync.
-      builder.create<mgpu::BarrierOp>(loc);
+      convertDMAInvoke(builder, loc, invoke, mapping);
       return;
     }
 
@@ -279,11 +303,21 @@ private:
 
   void convertAlloc(OpBuilder &builder, Location loc, TensorAllocOp alloc,
                     IRMapping &mapping,
-                    DenseMap<Value, Value> &returnAllocMap) {
+                    DenseMap<Value, Value> &returnAllocMap,
+                    DenseMap<Operation*, std::string> &shmGlobalNames,
+                    DenseMap<Operation*, MemRefType> &shmGlobalTypes) {
     auto tty = cast<coir::TensorType>(alloc.getResult().getType());
     auto it = returnAllocMap.find(alloc.getResult());
     if (it != returnAllocMap.end()) {
       mapping.map(alloc.getResult(), it->second);
+      return;
+    }
+    auto shmIt = shmGlobalNames.find(alloc.getOperation());
+    if (shmIt != shmGlobalNames.end()) {
+      auto memTy = shmGlobalTypes[alloc.getOperation()];
+      auto ref = builder.create<memref::GetGlobalOp>(loc, memTy,
+                                                     shmIt->second);
+      mapping.map(alloc.getResult(), ref.getResult());
       return;
     }
     auto memTy = convertTensorType(tty);
@@ -357,6 +391,29 @@ private:
       mapping.map(copyOp.getToken(), dst);
   }
 
+  // dma.invoke -> trace descriptor chain to find src/dst, emit flat copy.
+  void convertDMAInvoke(OpBuilder &builder, Location loc,
+                        DMAInvokeOp invoke, IRMapping &mapping) {
+    // Walk use-def: invoke.desc -> prefetch.in -> const.desc
+    Value desc = invoke.getDesc();
+    DMAConstDescOp constDesc = nullptr;
+
+    if (auto prefetch = desc.getDefiningOp<DMADescPrefetchOp>())
+      constDesc = prefetch.getIn().getDefiningOp<DMAConstDescOp>();
+    else if (auto rt = desc.getDefiningOp<DMADescRuntimeOp>()) {
+      auto prefetch2 = rt.getIn().getDefiningOp<DMADescPrefetchOp>();
+      if (prefetch2)
+        constDesc = prefetch2.getIn().getDefiningOp<DMAConstDescOp>();
+    }
+
+    if (constDesc) {
+      Value src = mapping.lookup(constDesc.getSource());
+      Value dst = mapping.lookup(constDesc.getDest());
+      emitFlatCopyLoop(builder, loc, src, dst);
+    }
+    builder.create<mgpu::BarrierOp>(loc);
+  }
+
   // Pre-lowering fallback for data.copy (should not appear after shared
   // Lower() but kept for robustness).
   void convertDataCopyFallback(OpBuilder &builder, Location loc,
@@ -406,7 +463,9 @@ private:
 
   void convertForeach(OpBuilder &builder, Location loc, ForeachOp fe,
                       IRMapping &mapping,
-                      DenseMap<Value, Value> &returnAllocMap) {
+                      DenseMap<Value, Value> &returnAllocMap,
+                      DenseMap<Operation*, std::string> &shmGlobalNames,
+                      DenseMap<Operation*, MemRefType> &shmGlobalTypes) {
     auto &body = fe.getBody();
     if (body.empty()) return;
     auto args = body.front().getArguments();
@@ -444,7 +503,8 @@ private:
           builder.create<scf::YieldOp>(loc, yieldedVals);
           continue;
         }
-        convertOp(builder, loc, op, mapping, returnAllocMap);
+        convertOp(builder, loc, op, mapping, returnAllocMap,
+                   shmGlobalNames, shmGlobalTypes);
       }
     }
 
@@ -454,7 +514,9 @@ private:
 
   void convertParallel(OpBuilder &builder, Location loc, ParallelOp par,
                        IRMapping &mapping,
-                       DenseMap<Value, Value> &returnAllocMap) {
+                       DenseMap<Value, Value> &returnAllocMap,
+                       DenseMap<Operation*, std::string> &shmGlobalNames,
+                       DenseMap<Operation*, MemRefType> &shmGlobalTypes) {
     auto lvl = par.getLevel();
     auto &body = par.getBody();
     if (body.empty()) return;
@@ -472,7 +534,8 @@ private:
     }
 
     for (auto &op : body.front().getOperations())
-      convertOp(builder, loc, op, mapping, returnAllocMap);
+      convertOp(builder, loc, op, mapping, returnAllocMap,
+                shmGlobalNames, shmGlobalTypes);
   }
 };
 
