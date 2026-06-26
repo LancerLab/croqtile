@@ -60,7 +60,6 @@ gpu_test:
   script:
     - echo "Running tests with GPU..."
     - make setup-core
-    - make setup-coir-deps
     - make test-all
   artifacts:
     paths:
@@ -131,7 +130,6 @@ gcu2_test:
   script:
     - echo "Running tests with GCU2..."
     - make setup-gcu2
-    - make setup-coir-deps
     - make test-all
   artifacts:
     paths:
@@ -169,7 +167,6 @@ gcu3_test:
   script:
     - echo "Running tests with GCU3 S60..."
     - make setup-gcu3
-    - make setup-coir-deps
     - make test-all
   artifacts:
     paths:
@@ -248,7 +245,6 @@ gcu3_debug_test:
   script:
     - echo "Running DEBUG tests with GCU3 S60..."
     - make setup-gcu3
-    - make setup-coir-deps
     - make test-all-debug
   artifacts:
     paths:

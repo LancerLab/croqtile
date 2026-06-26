@@ -153,30 +153,7 @@ ci-test:
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
 # ---- CoIR IR tooling ----
-COIR_DEP_CONF = $(WORK_DIR)/tools/coir/llvm-dep.conf
-COIR_LLVM_DIR = $(WORK_DIR)/extern/llvm-project
-COIR_LLVM_SHASH := $(shell grep '^LLVM_SHASH=' $(COIR_DEP_CONF) | cut -d= -f2-)
-COIR_LLVM_TAR := $(shell grep '^LLVM_TAR=' $(COIR_DEP_CONF) | cut -d= -f2-)
-COIR_LLVM_URL := $(shell grep '^LLVM_URL=' $(COIR_DEP_CONF) | cut -d= -f2-)
-COIR_LLVM_MD5 := $(shell grep '^LLVM_MD5=' $(COIR_DEP_CONF) | cut -d= -f2-)
-
 COIR_BUILD_DIR ?= $(CMAKE_BUILD_DIR)
-
-.PHONY: setup-coir-deps
-setup-coir-deps:
-	@echo "=== Setting up LLVM/MLIR for CoIR tooling ==="
-	@mkdir -p $(COIR_LLVM_DIR)
-	@if [ ! -f "$(COIR_LLVM_DIR)/lib/cmake/mlir/MLIRConfig.cmake" ]; then \
-		echo "Downloading LLVM/MLIR ($(COIR_LLVM_SHASH))..."; \
-		cd $(WORK_DIR)/extern && \
-		wget -q --show-progress -O $(COIR_LLVM_TAR) $(COIR_LLVM_URL) && \
-		echo "Extracting into extern/llvm-project/..." && \
-		tar -xzf $(COIR_LLVM_TAR) --strip-components=1 -C llvm-project && \
-		rm -f $(COIR_LLVM_TAR) && \
-		echo "LLVM/MLIR ready at $(COIR_LLVM_DIR)"; \
-	else \
-		echo "LLVM/MLIR already present at $(COIR_LLVM_DIR)"; \
-	fi
 
 .PHONY: symlink-coir
 symlink-coir:

@@ -33,20 +33,20 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
     message(FATAL_ERROR
       "LLVM/MLIR not found at ${_LLVM_ROOT}.\n"
       "CoIR tooling requires a pre-built LLVM/MLIR installation.\n"
-      "Run: make setup-coir-deps\n"
-      "Or set -DCOIR_AUTO_DOWNLOAD_LLVM=ON to download automatically.\n"
-      "Or manually extract the LLVM tarball into extern/llvm-project/")
+      "Set -DCOIR_AUTO_DOWNLOAD_LLVM=ON to download automatically,\n"
+      "or manually extract the LLVM tarball into extern/llvm-project/")
   endif()
 
   message(STATUS "CoIR: LLVM/MLIR not found, downloading (${COIR_LLVM_SHASH})...")
   set(_TAR_PATH "${CMAKE_SOURCE_DIR}/extern/${COIR_LLVM_TAR}")
 
   if(NOT EXISTS "${_TAR_PATH}")
-    file(DOWNLOAD "${COIR_LLVM_URL}" "${_TAR_PATH}"
-      SHOW_PROGRESS
-      EXPECTED_MD5 "${COIR_LLVM_MD5}"
-      STATUS _dl_status
-      TIMEOUT 600)
+    set(_dl_args "${COIR_LLVM_URL}" "${_TAR_PATH}"
+      SHOW_PROGRESS STATUS _dl_status TIMEOUT 600)
+    if(COIR_LLVM_MD5)
+      list(APPEND _dl_args EXPECTED_MD5 "${COIR_LLVM_MD5}")
+    endif()
+    file(DOWNLOAD ${_dl_args})
     list(GET _dl_status 0 _dl_code)
     if(NOT _dl_code EQUAL 0)
       list(GET _dl_status 1 _dl_msg)
@@ -61,7 +61,7 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
   message(STATUS "CoIR: Extracting LLVM/MLIR into ${_LLVM_ROOT}...")
   file(MAKE_DIRECTORY "${_LLVM_ROOT}")
   execute_process(
-    COMMAND ${CMAKE_COMMAND} -E tar xzf "${_TAR_PATH}"
+    COMMAND ${CMAKE_COMMAND} -E tar xf "${_TAR_PATH}"
     WORKING_DIRECTORY "${_LLVM_ROOT}"
     RESULT_VARIABLE _extract_result)
   if(NOT _extract_result EQUAL 0)
