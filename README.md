@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://croqtile.io">Website</a> &bull;
+  <a href="https://lancerlab.github.io/croqtile-website/">Website</a> &bull;
   <a href="https://lancerlab.github.io/croqtile-tutorial/tutorial/">Tutorial</a> &bull;
   <a href="https://lancerlab.github.io/croqtile-tutorial/documentation/">Docs</a> &bull;
   <a href="https://github.com/SyntaxArchmage/croqtile-playground">Playground</a>
@@ -11,38 +11,40 @@
 
 ---
 
-Croqtile is built for AI agents that write and optimize GPU kernels. Token-compact source (~500 tokens per kernel), sub-second deterministic compilation, and 353 structured diagnostics with fix hints give agents a tight edit-compile-profile loop — no 30-90s device-hang debugging cycles, no wasted context on opaque errors.
+Croqtile is the first AI-native GPU kernel language. Every design decision -- from syntax to compiler diagnostics -- is made so that AI agents can write, tune, and ship production kernels autonomously. The result is a language that feels intuitive to a first-time programmer (tiles, pipelines, and warp roles read like pseudocode) yet gives experts single-site control over every hardware knob without coupling or hidden side effects.
 
-Under the hood: a statically-typed, tile-oriented DSL compiled through SEMA → VALNO → INFER → CHECK → CODEGEN. Source programs express tiles, tensor views, TMA descriptors, and warp-cooperative schedules as first-class constructs. The compiler propagates symbolic shapes via value numbering, infers types and storage, verifies resource constraints (shared memory, register pressure, barrier budgets, async ordering), and emits target code (CUDA/CuTe SM 70-100, HIP RDNA 2+, portable C++) matching hand-tuned expert implementations.
+**Design Principles -- two co-designs that make AI-native work:**
+
+- **Syntax-Context Co-Design.** The syntax is engineered to maximize semantic density per token. Structural intent (tile shapes, pipeline depth, warp roles) is expressed directly rather than encoded in template parameters or macro expansions. Agents read less, understand more, and fit an entire kernel plus its optimization history inside a single context window.
+
+- **Compiler-Harness Co-Design.** The compiler is the other half of the agent's control loop. Every compilation is deterministic and returns in seconds -- not with a bare pass/fail, but with a structured diagnostic that names the violated constraint, traces the symbolic derivation, and proposes a repair. The agent never guesses what went wrong; it acts on machine-readable feedback.
 
 ## Why Croqtile
 
-The core thesis: **the programming substrate is the first-order determinant of AI tuning quality.** A compact, orthogonal, compile-time-verified language lets agents spend their context budget on forward progress — not on error recovery, multi-site coordination, or debugging silent hardware hangs.
+The claims above are measurable. Here's the evidence across three axes: token budget, kernel-writing accuracy, and compile-time safety coverage.
 
-### Token Efficiency
+### Token Budget
 
-Croqtile's syntax encodes structural intent (tile shapes, pipeline depth, warp roles) rather than mechanical boilerplate: ~500 tokens per kernel, where CUDA/CuTe requires ~2,200 and CUTLASS ~4,000. Fewer tokens on representation means more tokens for profiling data, optimization rules, and iteration history within a single context window.
+Croqtile encodes structural intent directly -- ~500 tokens per kernel versus ~2,200 for CUDA/CuTe and ~4,000 for CUTLASS. The savings compound: agents fit more iteration history, profiling data, and optimization rules in the same context window.
 
 <p align="center">
   <img src="docs/assets/token-analysis.svg" alt="Token budget analysis: CroqTile vs CUDA+CuTe vs CUTLASS within an 8K context window" width="540">
 </p>
 
-### Compiler–Harness Co-Design
+### Agent Kernel-Writing Accuracy
 
-Every tuning dimension (tile geometry, pipeline depth, swizzle mode, warp specialization, data type) is an orthogonal, single-site edit. The compiler closes the loop with immediate structured feedback: pass/fail + fix hint in 3-8 seconds. The agent never reasons about multi-site coupling — changing one knob cannot silently invalidate another.
-
-Croqtile covers all ten GPU kernel tuning features with 1-3 code sites each; CUDA covers the same features at 3-8 sites per change. The quantitative result:
+Given a kernel specification, how often does an AI agent produce a correct implementation on the first attempt? Croqtile's compact syntax and immediate compile-time feedback let agents get it right without trial-and-error debugging cycles:
 
 | DSL | pass@1 | pass@5 |
 |-----|:------:|:------:|
 | **Croqtile** | **85.7%** | **95.6%** |
-| Triton | 84.3% | — |
-| TileLang | 84.8% | — |
-| CUDA | 35.3% | — |
+| Triton | 84.3% | -- |
+| TileLang | 84.8% | -- |
+| CUDA | 35.3% | -- |
 
 Highest pass@1 among DSLs exposing warp-level controls, despite deeper structural edits that probe resource boundaries. On dynamic shapes, Croqtile drops only 4 pp (to 82.1%) while Triton falls to 48%, TileLang to 52%, and Helion to 45%.
 
-The advantage is model-independent — it widens on moderate-capacity models:
+The advantage is model-independent -- it widens on moderate-capacity models:
 
 | Model | Croqtile | Triton | TileLang | CUDA |
 |-------|:--------:|:------:|:--------:|:----:|
@@ -51,11 +53,11 @@ The advantage is model-independent — it widens on moderate-capacity models:
 
 **Evaluation:** Claude Sonnet 4.6 High, NVIDIA H800 PCIe, 60-200 iterations/shape, identical system prompt and harness across all DSLs.
 
-### Code Safety
+### Compile-Time Safety
 
-353 compile-time checks across 7 verification modules catch bugs before code reaches the GPU — from tile shape mismatches and shared memory overflows to DMA configuration errors and async barrier misordering. Every rejection carries a structured diagnostic (violated constraint + symbolic derivation chain + repair hint) in fewer than 100 tokens, enabling one-shot correction.
+353 checks across 7 verification modules catch bugs before code reaches the GPU. Every rejection carries a structured diagnostic (violated constraint + symbolic derivation + repair hint) in fewer than 100 tokens -- enabling one-shot correction without debugging cycles.
 
-The VALNO-based symbolic shape inference engine resolves shape constraints at compile time even when tensor dimensions are runtime values — propagating symbolic bounds through tile decomposition, reduction, and MMA chains. Dynamic workloads (variable batches, sequence lengths, MoE routing) get full compile-time safety where other DSLs defer to launch-time asserts or runtime crashes.
+The VALNO-based symbolic shape inference engine resolves shape constraints at compile time even when tensor dimensions are runtime values -- propagating symbolic bounds through tile decomposition, reduction, and MMA chains. Dynamic workloads (variable batches, sequence lengths, MoE routing) get full compile-time safety where other DSLs defer to launch-time asserts or runtime crashes.
 
 What gets caught at compile time:
 
@@ -70,11 +72,11 @@ What gets caught at compile time:
 | Dynamic shape constraint | **Yes** | **No** | **No** | **No** |
 | Fix hint in error | **Yes** | **No** | **No** | **No** |
 
-Notes: Triton checks `tl.dot` dimension ≥16 but not general tile shape consistency. Triton auto-inserts memory barriers (no user diagnostic). TileLang validates shapes at kernel launch via host stubs, not at compile time.
+Notes: Triton checks `tl.dot` dimension >=16 but not general tile shape consistency. Triton auto-inserts memory barriers (no user diagnostic). TileLang validates shapes at kernel launch via host stubs, not at compile time.
 
 ## What It Looks Like
 
-A persistent warp-specialized GEMM — TMA, software pipelining, Hilbert-curve scheduling — in 25 lines:
+A persistent warp-specialized GEMM -- TMA, software pipelining, Hilbert-curve scheduling -- in 25 lines:
 
 ```c
 __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
@@ -114,7 +116,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
 | CUDA + CuTe | 182 |
 | CUTLASS | 280 |
 
-More examples (dynamic shapes, CroqPy, fused operators) at [croqtile.io](https://croqtile.io).
+More examples (dynamic shapes, CroqPy, fused operators) in the [Tutorial](https://lancerlab.github.io/croqtile-tutorial/tutorial/).
 
 ## Getting Started
 
@@ -206,43 +208,18 @@ For the complete reference, see the [Developer Guide -- Build and Test](./Docume
 
 ## Documentation
 
-| Level | Audience | Link |
-|-------|----------|------|
-| **Tutorial** | New users, hands-on learning | [Croqtile Tutorial](https://lancerlab.github.io/croqtile-tutorial/tutorial/) |
-| **Language Reference** | Syntax and semantics | [Language Reference](https://lancerlab.github.io/croqtile-tutorial/documentation/) |
-| **Developer Guide** | Compiler contributors | [Developer Guide](./Documents/Developer/index.md) |
+| | |
+|--|--|
+| **Tutorial** | [lancerlab.github.io/croqtile-tutorial/tutorial](https://lancerlab.github.io/croqtile-tutorial/tutorial/) |
+| **Language Reference** | [lancerlab.github.io/croqtile-tutorial/documentation](https://lancerlab.github.io/croqtile-tutorial/documentation/) |
 
-## Ecosystem
+## Tools
 
-| Project | Description | Link |
-|---------|-------------|------|
-| **Croqtile** | Compiler and runtime | This repo |
-| **Tutorial** | Guided learning with examples | [lancerlab/croqtile-tutorial](https://lancerlab.github.io/croqtile-tutorial/) |
-| **Playground** | Browser-based IDE (WASM compiler) | [SyntaxArchmage/croqtile-playground](https://github.com/SyntaxArchmage/croqtile-playground) |
-| **Website** | Project website | [croqtile.io](https://croqtile.io) |
-
-## Repository Structure
-
-```
-croqtile/
-  lib/          Compiler source (parser, passes, codegen)
-  runtime/      Runtime headers included by generated code
-  tools/        Tool binaries (choreo, copp, co-mock)
-  tests/        Test suite (lit-style with RUN: directives)
-  samples/      Sample .co programs
-  Documents/    Documentation (Language Reference, Developer Guide)
-  scripts/      Build and CI scripts
-```
-
-## Contributing
-
-```bash
-make format       # format code (ClangFormat, LLVM-based)
-make test         # run full test suite
-```
-
-See [Developer Guide -- Coding Style](./Documents/Developer/coding-style.md) for naming conventions and code patterns.
+| | |
+|--|--|
+| **Tuner** | [AI-agent-driven kernel autotuning harness](https://github.com/LancerLab/croqtile-tuner) |
+| **Playground** | [Browser-based IDE (WASM compiler)](https://github.com/SyntaxArchmage/croqtile-playground) |
 
 ## License
 
-Apache License 2.0. See [LICENSE](./LICENSE) for details.
+Apache License 2.0.
