@@ -476,7 +476,8 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
   builder.setInsertionPointToEnd(IRModule().getBody());
   auto kernelOp = builder.create<coir::KernelOp>(
       loc, mlir::StringAttr::get(&IRContext(), cf.name),
-      mlir::TypeAttr::get(mlirFnType));
+      mlir::TypeAttr::get(mlirFnType),
+      coir::LaunchBoundsAttr{});
 
   // Attach host-facing metadata so downstream stub generation can
   // reconstruct the Choreo calling convention (spanned_view / spanned_data,
@@ -584,6 +585,26 @@ bool ASTCoIRGen::Visit(AST::ParallelBy &pb) {
   } else {
     auto arg = block->addArgument(indexType, loc);
     MapValue(pb.BPV()->name, arg);
+  }
+
+  if (pb.HasLaunchBounds() && pb.GetLevel() == ParallelLevel::BLOCK) {
+    auto &lb_args = pb.GetLaunchBoundsArgs();
+    int64_t maxThr = 0, minBlk = 0, maxCluster = 0;
+    if (lb_args->Count() >= 1)
+      if (auto *e = dyn_cast<AST::Expr>(lb_args->ValueAt(0).get()))
+        if (e->Opts().HasVal()) maxThr = EvalToInt(e->Opts().GetVal());
+    if (lb_args->Count() >= 2)
+      if (auto *e = dyn_cast<AST::Expr>(lb_args->ValueAt(1).get()))
+        if (e->Opts().HasVal()) minBlk = EvalToInt(e->Opts().GetVal());
+    if (lb_args->Count() >= 3)
+      if (auto *e = dyn_cast<AST::Expr>(lb_args->ValueAt(2).get()))
+        if (e->Opts().HasVal()) maxCluster = EvalToInt(e->Opts().GetVal());
+    if (maxThr > 0 || minBlk > 0 || maxCluster > 0) {
+      auto lbAttr = coir::LaunchBoundsAttr::get(
+          &IRContext(), maxThr, minBlk, maxCluster);
+      if (auto kernelOp = parallelOp->getParentOfType<coir::KernelOp>())
+        kernelOp.setLaunchBoundsAttr(lbAttr);
+    }
   }
 
   builder.setInsertionPointToEnd(block);

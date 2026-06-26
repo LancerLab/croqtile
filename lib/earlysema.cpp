@@ -27,6 +27,23 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     pl_depths.push_back(pl_depth);
     inthreads_levels.push_back(0);
     assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
+    if (pb->HasLaunchBounds()) {
+      auto& lb_args = pb->GetLaunchBoundsArgs();
+      for (size_t i = 0; i < lb_args->Count(); ++i) {
+        auto node = lb_args->ValueAt(i);
+        AST::Identifier* id = nullptr;
+        if (auto id_ptr = dyn_cast<AST::Identifier>(node))
+          id = id_ptr.get();
+        else if (auto expr = dyn_cast<AST::Expr>(node))
+          if (auto id_ptr2 = dyn_cast<AST::Identifier>(expr->GetR()))
+            id = id_ptr2.get();
+        if (id && (id->name == "_" || id->name == "auto")) {
+          lb_args->SetValueAt(
+              i, AST::Make<AST::Expr>(
+                     id->LOC(), AST::Make<AST::IntLiteral>(id->LOC(), 0)));
+        }
+      }
+    }
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     ++inthreads_levels[pl_depth];
     if (inthreads_levels[pl_depth] > 1)
@@ -1505,6 +1522,26 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
              "device(" + n.DeviceTargetName() + ") block must be async.");
   }
 
+  if (n.HasLaunchBounds()) {
+    if (CCtx().TargetName() != "cute" && CCtx().TargetName() != "hip")
+      Error1(
+          n.LOC(),
+          "[[launch_bounds]] is only supported for GPU targets (cute, hip).");
+    auto& lb_args = n.GetLaunchBoundsArgs();
+    auto argc = lb_args->Count();
+    if (argc < 1 || argc > 3)
+      Error1(n.LOC(),
+             "[[launch_bounds]] expects 1 to 3 integer arguments, but got " +
+                 std::to_string(argc) + ".");
+    for (size_t i = 0; i < argc; ++i) {
+      auto aty = NodeType(*lb_args->ValueAt(i));
+      if (!isa<ScalarIntegerType>(aty))
+        Error1(lb_args->ValueAt(i)->LOC(),
+               "[[launch_bounds]] argument must be an integer but got '" +
+                   PSTR(aty) + "'.");
+    }
+  }
+
   if (pl_depth > 1 && n.IsAsync())
     Error1(n.LOC(), "inner parallel-by level can not be asynchronous.");
 
@@ -2312,26 +2349,6 @@ bool EarlySemantics::Visit(AST::Call& n) {
         if (!isa<ScalarIntegerType>(aty))
           Error1(n.LOC(), "setreg expects an integer argument but got '" +
                               PSTR(aty) + "'.");
-      }
-    } else if (func_name == "launch_bounds") {
-      if (CCtx().TargetName() != "cute" && CCtx().TargetName() != "hip") {
-        Error1(n.LOC(),
-               "launch_bounds is only supported for GPU targets (cute, hip).");
-      }
-      if (pl_depth == 0) {
-        Error1(n.LOC(),
-               "launch_bounds can only be used inside parallel-by blocks.");
-      }
-      if (n.arguments->Count() != 1) {
-        Error1(n.LOC(),
-               "launch_bounds expects exactly one integer argument, but got " +
-                   std::to_string(n.arguments->Count()) + ".");
-      } else {
-        auto aty = NodeType(*n.arguments->ValueAt(0));
-        if (!isa<ScalarIntegerType>(aty))
-          Error1(n.LOC(),
-                 "launch_bounds expects an integer argument but got '" +
-                     PSTR(aty) + "'.");
       }
     } else if (func_name == "print" || func_name == "println") {
       auto Printable = [](ptr<Type> ty) -> bool {

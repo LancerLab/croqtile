@@ -1,10 +1,10 @@
 // TODO-RUN: not choreo %s 2>&1 | FileCheck %s
-// CHECK: error: launch_bounds is only supported for the cute target.
+// CHECK: error: {{\[\[}}launch_bounds]] is only supported for GPU targets (cute, hip).
 // CHECK: Totally 1 errors have been detected.
 
 __co__ void bad_target() {
+  [[launch_bounds(7)]]
   parallel by 1 : block {
-    launch_bounds(7);
   }
 }
 

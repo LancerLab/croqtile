@@ -628,6 +628,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "#%"       return Choreo::Parser::make_UBPECET (loc);
   "("        return Choreo::Parser::make_LPAREN (loc);
   ")"        return Choreo::Parser::make_RPAREN (loc);
+  "[["       return Choreo::Parser::make_DLBRAKT(loc);
   "["        return Choreo::Parser::make_LBRAKT (loc);
   "]"        { if (double_bracket) {
                  BEGIN(MDSPAN_SUGER);

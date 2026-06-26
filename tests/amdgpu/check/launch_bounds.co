@@ -3,8 +3,8 @@
 __co__ auto test_lb(s32 [128] a) {
   s32[a.span] b;
 
+  [[launch_bounds(_, 2)]]
   parallel p by 4 : block {
-    launch_bounds(2);
     parallel by 1 : group {
       parallel t by 32 : thread {
         b.at(p * 32 + t) = a.at(p * 32 + t) + 1;
