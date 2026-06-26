@@ -114,9 +114,7 @@ struct LowerMMAPass : public ::coir::impl::LowerMMABase<LowerMMAPass> {
       mmaTarget = CoIR::GetMMATarget(pm).str();
 
     if (mmaTarget.empty()) {
-      getOperation()->emitError()
-          << "no MMA target: set coir.mma_target module attribute";
-      return signalPassFailure();
+      return;
     }
 
     RewritePatternSet patterns(ctx);
