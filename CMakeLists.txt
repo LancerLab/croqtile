@@ -354,7 +354,7 @@ else()
   set(CUDA_HOME "/usr/local/cuda" CACHE PATH "Path to CUDA installation")
 endif()
 
-add_compile_options(-Wall -Wextra -g)
+add_compile_options(-Wall -Wextra)
 
 if(EMSCRIPTEN)
   # Choreo is developed against GCC; suppress Clang-specific pedantic warnings
