@@ -28,8 +28,10 @@ std::unique_ptr<mlir::Pass> createHoistAssertionsPass();
 std::unique_ptr<mlir::Pass> createEstimateAssertCostPass();
 std::unique_ptr<mlir::Pass> createCollectAssertStatsPass();
 std::unique_ptr<mlir::Pass> createEmitCUDAPass();
+std::unique_ptr<mlir::Pass> createEmitHIPPass();
 
 void emitCUDA(mlir::ModuleOp module, llvm::raw_ostream &os);
+void emitHIP(mlir::ModuleOp module, llvm::raw_ostream &os);
 
 #define GEN_PASS_REGISTRATION
 #include "CoIR/Passes.h.inc"

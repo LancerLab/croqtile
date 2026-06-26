@@ -1,0 +1,32 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: cocc -t hip -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Multi-block parallel kernel with return value.
+
+__co__ s32 [256] increment(s32 [256] a) {
+  s32[256] output;
+  parallel bid by 4 {
+    parallel tid by 64 {
+      s32 idx = bid * 64 + tid;
+      output.at(idx) = a.at(idx) + 1;
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(256);
+  for (size_t i = 0; i < 256; ++i)
+    a[i] = (int)i;
+
+  auto res = increment(a.view());
+
+  bool pass = true;
+  for (size_t i = 0; i < 256; ++i)
+    if (res[i] != (int)(i + 1)) pass = false;
+
+  if (pass) std::cout << "PASS" << std::endl;
+  else std::cout << "FAIL" << std::endl;
+}
+
+// CHECK: PASS

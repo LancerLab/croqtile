@@ -227,4 +227,24 @@ def EmitCUDA : Pass<"coir-emit-cuda", "::mlir::ModuleOp"> {
   let dependentDialects = ["::coir::CoIRDialect"];
 }
 
+def EmitHIP : Pass<"coir-emit-hip", "::mlir::ModuleOp"> {
+  let summary = "Emit HIP/C++ source from lowered CoIR IR";
+  let description = [{
+    Walks the module and emits HIP kernel source text to stdout
+    or a specified output file. Expects the IR to have been lowered
+    through classify-copies and lower-copy passes.
+
+    The emitter handles:
+    - coir.kernel -> __global__ void kernel(...)
+    - coir.parallel -> grid/block dimension mapping
+    - coir.foreach -> for loop
+    - coir.element.copy -> cooperative thread loop
+    - coir.barrier -> __syncthreads()
+    - MMA ops are rejected (unsupported on AMD RDNA)
+  }];
+
+  let constructor = "::coir::createEmitHIPPass()";
+  let dependentDialects = ["::coir::CoIRDialect"];
+}
+
 #endif // COIR_PASSES_TD

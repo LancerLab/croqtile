@@ -1,0 +1,50 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: cocc -t hip -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Element-wise operations: multiply, subtract.
+
+__co__ f32 [128] vec_mul(f32 [128] a, f32 [128] b) {
+  f32[a.span] output;
+  parallel tid by 128
+    output.at(tid) = a.at(tid) * b.at(tid);
+  return output;
+}
+
+__co__ f32 [128] vec_sub(f32 [128] a, f32 [128] b) {
+  f32[a.span] output;
+  parallel tid by 128
+    output.at(tid) = a.at(tid) - b.at(tid);
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(128);
+  auto b = choreo::make_spandata<choreo::f32>(128);
+  a.fill_random(-5.0f, 5.0f);
+  b.fill_random(-5.0f, 5.0f);
+
+  {
+    auto res = vec_mul(a.view(), b.view());
+    bool pass = true;
+    for (size_t i = 0; i < 128; ++i) {
+      float expected = a[i] * b[i];
+      if (std::abs(res[i] - expected) > 1e-5f) pass = false;
+    }
+    if (pass) std::cout << "MUL PASS" << std::endl;
+    else std::cout << "MUL FAIL" << std::endl;
+  }
+
+  {
+    auto res = vec_sub(a.view(), b.view());
+    bool pass = true;
+    for (size_t i = 0; i < 128; ++i) {
+      float expected = a[i] - b[i];
+      if (std::abs(res[i] - expected) > 1e-5f) pass = false;
+    }
+    if (pass) std::cout << "SUB PASS" << std::endl;
+    else std::cout << "SUB FAIL" << std::endl;
+  }
+}
+
+// CHECK: MUL PASS
+// CHECK: SUB PASS
