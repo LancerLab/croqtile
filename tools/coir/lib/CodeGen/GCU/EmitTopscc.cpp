@@ -1813,9 +1813,6 @@ static bool registered_topscc = [] {
   CoIR::CodeGenRegistry::Register("topscc", [] {
     return std::make_unique<TopsccEmitter>();
   });
-  CoIR::CodeGenRegistry::Register("gcu", [] {
-    return std::make_unique<TopsccEmitter>();
-  });
   return true;
 }();
 

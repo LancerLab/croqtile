@@ -228,6 +228,7 @@ gcu3-kmd: check-gcu3-platform-kit
 gcu4-kmd: check-gcu4-platform-kit
 	sudo $(GCU4_PLATFORM_PKG) -y -C enflame --force-asic
 
+
 gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit
 gcu3-kit: setup-gcu3-platform-kit
 gcu4-kit: setup-gcu4-platform-kit install-gcu-sim

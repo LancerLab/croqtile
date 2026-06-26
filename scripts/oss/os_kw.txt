@@ -35,6 +35,9 @@
 (?i)\btops[a-z]
 (?i)\btops\b
 
+# Internal compiler stacks
+(?i)\bkurama\b
+
 # Simulator and runtime libraries
 (?i)gcusim
 (?i)\btcle\b

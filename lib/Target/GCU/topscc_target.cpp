@@ -210,7 +210,6 @@ std::unique_ptr<Target> CreateTopscc() {
 
 } // end anonymous namespace
 
-// register at the initialization time
 static bool registered = [] {
   TargetRegistry::Register(TopsccTarget::Id(), "topscc",
                            "Topscc target for GCU.", &CreateTopscc);

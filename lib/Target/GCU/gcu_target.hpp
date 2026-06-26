@@ -40,7 +40,6 @@ public:
       default: choreo_unreachable("unsupported storage level.");
       }
     } else if (arch == "gcu400") {
-      assert(Name() == "topscc");
       switch (sto) {
       case Storage::LOCAL: return 1.5 * 1024 * 1024 - 512; // todo: check this
       case Storage::SHARED: return 64ull * 1024 * 1024;    // todo: check this
@@ -49,7 +48,6 @@ public:
       default: choreo_unreachable("unsupported storage level.");
       }
     } else if (arch == "gcu500") {
-      assert(Name() == "topscc");
       switch (sto) {
       case Storage::LOCAL: return 4 * 1024 * 1024 - 512; // todo: check this
       case Storage::SHARED: return 256ull * 1024 * 1024; // todo: check this

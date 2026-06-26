@@ -1,0 +1,19 @@
+// RUN: not cocc -t gcu -arch=gcu210 %s 2>&1 | FileCheck --check-prefix=ARCH %s
+// RUN: not cocc -t gcu -es -arch=gcu300 %s 2>&1 | FileCheck --check-prefix=ES %s
+// RUN: not cocc -t gcu -gs -arch=gcu300 %s 2>&1 | FileCheck --check-prefix=GS %s
+//
+// Verify -t gcu driver guards: reject gcu200/210 and -es/-gs.
+
+// ARCH: is not supported by target 'gcu'
+// ES: error: target 'gcu' does not support -es or -gs
+// GS: error: target 'gcu' does not support -es or -gs
+
+__co__ s32 [64] f(s32 [64] a) {
+  s32[a.span] c;
+  parallel p by 1 {
+    foreach i in [a.span(0)] {
+      c.at(p, i) = a.at(p, i);
+    }
+  }
+  return c;
+}

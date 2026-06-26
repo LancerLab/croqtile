@@ -25,6 +25,7 @@ add_custom_target(
 
 set(GCU_TARGET_SOURCES
   topscc_target.cpp
+  gcu_native_target.cpp
   topscc_preprocess.cpp
   topscc_codegen.cpp
   lower_libcall.cpp
