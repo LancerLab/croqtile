@@ -303,6 +303,11 @@ public:
     return IsFeatureSupported(arch, STR(ChoreoFeature::ASYNC_DMA));
   }
 
+  // Whether the target's code generation only produces binaries (no text
+  // source or script emission).  Targets that return true default to
+  // compile_binary mode and reject -es/-gs.
+  virtual bool IsBinaryOnlyCodeGen() const { return false; }
+
   virtual bool PlanCodeGenStages(ASTPipeline&) const = 0;
 
   /// Run the pre-codegen AST stages that populate CodeGenInfo and register

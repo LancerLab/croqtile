@@ -183,8 +183,20 @@ int main(int argc, char *argv[]) {
   std::string input_file = reg.GetInputFileName();
 
   if (!emit_source && !generate_script && !emit_coir && !dump_ast &&
-      !compile_binary)
-    generate_script = true;
+      !compile_binary) {
+    if (CCtx().GetTarget().IsBinaryOnlyCodeGen())
+      compile_binary = true;
+    else
+      generate_script = true;
+  }
+
+  if (CCtx().GetTarget().IsBinaryOnlyCodeGen()) {
+    if (emit_source || generate_script) {
+      errs() << "error: target '" << CCtx().TargetName()
+             << "' does not support -es or -gs\n";
+      return 1;
+    }
+  }
 
   // --- Frontend + pre-codegen ---
   // Suppress stats from AST pipelines; cocc prints unified stats later.
