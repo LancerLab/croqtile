@@ -21,16 +21,14 @@ transformation.
 
 ## Build
 
-CoIR requires LLVM/MLIR and is disabled by default:
+CoIR requires LLVM/MLIR. CMake downloads it automatically into
+`extern/llvm-project/` on first build when it is not present.
 
 ```bash
-# 1. Download LLVM/MLIR dependency
-make setup-coir-deps
-
-# 2. Build CoIR tools
+# Build CoIR tools (auto-downloads LLVM/MLIR if missing)
 make coir
 
-# 3. Run tests
+# Run tests
 make coir-test
 ```
 
@@ -40,8 +38,10 @@ Or configure manually with CMake:
 cmake -S . -B build -G Ninja \
   -DCHOREO_BUILD_COIR=ON \
   -DCMAKE_BUILD_TYPE=Release
-ninja -C build coir-gen coir-opt coir-codegen
+ninja -C build co2ir coir-opt cocc
 ```
+
+To disable the automatic download, pass `-DCOIR_AUTO_DOWNLOAD_LLVM=OFF`.
 
 ## Usage
 
@@ -67,5 +67,5 @@ ninja -C build coir-gen coir-opt coir-codegen
 
 ## Dependencies
 
-- LLVM/MLIR (pre-built, fetched via `make setup-coir-deps`)
+- LLVM/MLIR (pre-built, auto-downloaded by CMake on first build)
 - Choreo compiler libraries (built as part of normal `make build`)
