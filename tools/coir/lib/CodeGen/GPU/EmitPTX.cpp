@@ -114,12 +114,24 @@ std::string emitPTXFromCoIR(mlir::ModuleOp module, llvm::StringRef arch) {
   // translation to a single PTX compilation unit.
   mlir::OpBuilder builder(clone.getContext());
   auto tempModule = builder.create<mlir::ModuleOp>(clone.getLoc());
-  mlir::IRMapping mapping;
+  llvm::DenseSet<llvm::StringRef> seenSymbols;
   builder.setInsertionPointToStart(tempModule.getBody());
-  for (auto gpuMod : gpuMods)
-    for (auto &op : gpuMod.getBody()->getOperations())
-      builder.clone(op, mapping);
+  for (auto gpuMod : gpuMods) {
+    for (auto &op : llvm::make_early_inc_range(
+             gpuMod.getBody()->getOperations())) {
+      if (op.hasTrait<mlir::OpTrait::IsTerminator>())
+        continue;
+      if (auto sym = op.getAttrOfType<mlir::StringAttr>(
+              mlir::SymbolTable::getSymbolAttrName())) {
+        if (!seenSymbols.insert(sym.getValue()).second)
+          continue;
+      }
+      op.moveBefore(tempModule.getBody(), tempModule.getBody()->end());
+    }
+  }
 
+  if (getenv("COIR_DUMP_TEMP_MODULE"))
+    tempModule.dump();
   std::string ptx = emitPTX(tempModule, arch);
   tempModule->erase();
   clone->erase();

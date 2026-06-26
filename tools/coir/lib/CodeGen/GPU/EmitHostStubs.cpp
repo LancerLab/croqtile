@@ -282,13 +282,17 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
         idx++;
       }
       for (int64_t d = 0; d < p.dims; ++d) {
-        // Row-major stride: 1 for the last dimension.
+        // Row-major stride: product of all trailing dimensions.
+        os << "  static int64_t __st_" << p.name << "_" << d << " = ";
         if (d == p.dims - 1) {
-          os << "  static int64_t __st_" << p.name << "_" << d << " = 1;\n";
+          os << "1";
         } else {
-          os << "  static int64_t __st_" << p.name << "_" << d << " = "
-             << p.name << ".shape()[" << (d + 1) << "];\n";
+          for (int64_t k = d + 1; k < p.dims; ++k) {
+            if (k > d + 1) os << " * ";
+            os << p.name << ".shape()[" << k << "]";
+          }
         }
+        os << ";\n";
         os << "  __args[" << idx << "] = &__st_" << p.name << "_" << d
            << ";\n";
         idx++;
@@ -328,12 +332,18 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
       idx++;
     }
     for (int64_t d = 0; d < ki.ret_dims; ++d) {
+      os << "  static int64_t __st_out_" << d << " = ";
       if (d == ki.ret_dims - 1) {
-        os << "  static int64_t __st_out_" << d << " = 1;\n";
+        os << "1";
+      } else if (!refParam.empty()) {
+        for (int64_t k = d + 1; k < ki.ret_dims; ++k) {
+          if (k > d + 1) os << " * ";
+          os << refParam << ".shape()[" << k << "]";
+        }
       } else {
-        os << "  static int64_t __st_out_" << d << " = "
-           << refParam << ".shape()[" << (d + 1) << "];\n";
+        os << "1";
       }
+      os << ";\n";
       os << "  __args[" << idx << "] = &__st_out_" << d << ";\n";
       idx++;
     }
