@@ -2,7 +2,6 @@ FTP_SERVER ?= 172.16.11.18
 
 SETUP_TARGET_DEPENDS += setup-choreo-kit
 SETUP_TARGET_DEPENDS += setup-clang-format
-SETUP_TARGET_DEPENDS += setup-git-hooks
 SETUP_TARGET_DEPENDS += setup-skills
 #SETUP_TARGET_DEPENDS += setup-gcu-acore
 CHOREO_DEFAULT_TARGET = topscc
@@ -17,7 +16,7 @@ BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
 CFLAGS += -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
 
-.PHONY: setup-gcu2 setup-gcu3 setup-git-hooks
+.PHONY: setup-gcu2 setup-gcu3
 
 check-choreo-kit:
 	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
@@ -49,11 +48,6 @@ setup-skills:
 	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.claude $(WORK_DIR); \
 	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.github $(WORK_DIR); \
 	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.codex $(WORK_DIR)
-
-setup-git-hooks:
-	@mkdir -p .git/hooks; \
-	cp ./scripts/hooks/pre-commit-check.sh .git/hooks/pre-commit; \
-	chmod +x .git/hooks/pre-commit
 
 setup-gcu-acore:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore FTP_SERVER=$(FTP_SERVER)
