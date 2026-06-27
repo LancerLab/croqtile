@@ -26,8 +26,8 @@ const std::string CCCodeGen::TypeSTR(const Type& ty) const {
   if (isa<U16Type>(&ty)) return "unsigned short";
   if (isa<S32Type>(&ty)) return "int";
   if (isa<U32Type>(&ty)) return "unsigned int";
-  if (isa<S64Type>(&ty)) return "long long";
-  if (isa<U64Type>(&ty)) return "unsigned long long";
+  if (isa<S64Type>(&ty)) return "int64_t";
+  if (isa<U64Type>(&ty)) return "uint64_t";
   if (isa<BooleanType>(&ty)) return "bool";
   if (isa<F16Type>(&ty)) return "choreo::f16";
   if (isa<BF16Type>(&ty)) return "choreo::bf16";
@@ -59,11 +59,11 @@ static const char* CCBaseTypeName(BaseType bt) {
   case BaseType::F6_E2M3: return "uint8_t";
   case BaseType::F6_E3M2: return "uint8_t";
   case BaseType::F4_E2M1: return "uint8_t";
-  case BaseType::U64: return "unsigned long long";
+  case BaseType::U64: return "uint64_t";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
   case BaseType::U8: return "unsigned char";
-  case BaseType::S64: return "long long";
+  case BaseType::S64: return "int64_t";
   case BaseType::S32: return "int";
   case BaseType::S16: return "short";
   case BaseType::S8: return "signed char";

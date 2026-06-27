@@ -23,11 +23,11 @@ inline const char* HIPNameBaseType(BaseType bt) {
   case BaseType::F32: return "float";
   case BaseType::F16: return "__half";
   case BaseType::BF16: return "hip_bfloat16";
-  case BaseType::U64: return "unsigned long long";
+  case BaseType::U64: return "uint64_t";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
   case BaseType::U8: return "unsigned char";
-  case BaseType::S64: return "long long";
+  case BaseType::S64: return "int64_t";
   case BaseType::S32: return "int";
   case BaseType::S16: return "short";
   case BaseType::S8: return "signed char";

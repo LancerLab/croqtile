@@ -9243,9 +9243,9 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
   else if (isa<U32Type>(&ty))
     return "unsigned int";
   else if (isa<S64Type>(&ty))
-    return "long long";
+    return "int64_t";
   else if (isa<U64Type>(&ty))
-    return "unsigned long long";
+    return "uint64_t";
   else if (isa<BooleanType>(&ty))
     return "bool";
   else if (isa<FloatE4M3Type>(&ty))

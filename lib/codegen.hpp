@@ -814,9 +814,9 @@ HostTypeStringify(const Choreo::Type& ty, bool is_ret = false,
   else if (isa<U32Type>(&ty))
     res = "unsigned int";
   else if (isa<S64Type>(&ty))
-    res = "long long";
+    res = "int64_t";
   else if (isa<U64Type>(&ty))
-    res = "unsigned long long";
+    res = "uint64_t";
   else if (isa<BooleanType>(&ty))
     res = "bool";
   else if (isa<FloatE4M3Type>(&ty))
