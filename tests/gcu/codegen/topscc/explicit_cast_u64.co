@@ -10,9 +10,9 @@ __co__ auto test_u64_s64_cast(int i, float f) {
   return d;
 }
 
-// CHECK: unsigned long long a = static_cast<unsigned long long>(i);
-// CHECK: long long b = static_cast<long long>(i);
+// CHECK: uint64_t a = static_cast<uint64_t>(i);
+// CHECK: int64_t b = static_cast<int64_t>(i);
 // CHECK: float c = static_cast<float>(a);
 // CHECK: int d = static_cast<int>(b);
-// CHECK: unsigned long long e = static_cast<unsigned long long>(b);
-// CHECK: long long g = static_cast<long long>(a);
+// CHECK: uint64_t e = static_cast<uint64_t>(b);
+// CHECK: int64_t g = static_cast<int64_t>(a);

@@ -4,10 +4,10 @@
 __cok__ {
   template <typename T>
   __co_device__ void template_func() {
-    if constexpr (std::is_same_v<T, long long>) {
-      printf("Called template_func with long long\n");
-    } else if constexpr (std::is_same_v<T, unsigned long long>) {
-      printf("Called template_func with unsigned long long\n");
+    if constexpr (std::is_same_v<T, int64_t>) {
+      printf("Called template_func with s64\n");
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      printf("Called template_func with u64\n");
     } else if constexpr (std::is_same_v<T, int>) {
       printf("Called template_func with int\n");
     } else if constexpr (std::is_same_v<T, unsigned int>) {
@@ -62,8 +62,8 @@ int main() {
   return 0;
 }
 
-// CHECK: Called template_func with long long
-// CHECK: Called template_func with unsigned long long
+// CHECK: Called template_func with s64
+// CHECK: Called template_func with u64
 // CHECK: Called template_func with int
 // CHECK: Called template_func with int
 // CHECK: Called template_func with unsigned int

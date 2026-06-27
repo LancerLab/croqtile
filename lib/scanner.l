@@ -263,6 +263,22 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "short"     { if (accumulate_buffer(yytext, token_type::S16)) return make_device_symbol(); }
   "int"       { if (accumulate_buffer(yytext, token_type::INT)) return make_device_symbol(); }
   "long long" { if (accumulate_buffer(yytext, token_type::S64)) return make_device_symbol(); }
+  "s64"       { if (accumulate_buffer(yytext, token_type::S64)) return make_device_symbol(); }
+  "s32"       { if (accumulate_buffer(yytext, token_type::INT)) return make_device_symbol(); }
+  "s16"       { if (accumulate_buffer(yytext, token_type::S16)) return make_device_symbol(); }
+  "s8"        { if (accumulate_buffer(yytext, token_type::S8)) return make_device_symbol(); }
+  "u64"       { if (accumulate_buffer(yytext, token_type::U64)) return make_device_symbol(); }
+  "u32"       { if (accumulate_buffer(yytext, token_type::U32)) return make_device_symbol(); }
+  "u16"       { if (accumulate_buffer(yytext, token_type::U16)) return make_device_symbol(); }
+  "u8"        { if (accumulate_buffer(yytext, token_type::U8)) return make_device_symbol(); }
+  "int64_t"   { if (accumulate_buffer(yytext, token_type::S64)) return make_device_symbol(); }
+  "int32_t"   { if (accumulate_buffer(yytext, token_type::INT)) return make_device_symbol(); }
+  "int16_t"   { if (accumulate_buffer(yytext, token_type::S16)) return make_device_symbol(); }
+  "int8_t"    { if (accumulate_buffer(yytext, token_type::S8)) return make_device_symbol(); }
+  "uint64_t"  { if (accumulate_buffer(yytext, token_type::U64)) return make_device_symbol(); }
+  "uint32_t"  { if (accumulate_buffer(yytext, token_type::U32)) return make_device_symbol(); }
+  "uint16_t"  { if (accumulate_buffer(yytext, token_type::U16)) return make_device_symbol(); }
+  "uint8_t"   { if (accumulate_buffer(yytext, token_type::U8)) return make_device_symbol(); }
   "float"     { if (accumulate_buffer(yytext, token_type::F32)) return make_device_symbol(); }
   "double"    { if (accumulate_buffer(yytext, token_type::F64)) return make_device_symbol(); }
   "const"     { if (accumulate_buffer(yytext, token_type::CONST)) return make_device_symbol(); }
@@ -737,13 +753,25 @@ typename Choreo::BaseType STR2BT(std::string s) {
   if (s == "void") return Choreo::BaseType::VOID;
   if (s == "float") return Choreo::BaseType::F32;
   if (s == "double") return Choreo::BaseType::F64;
-  if (s == "long long") return Choreo::BaseType::S64;
-  if (s == "int") return Choreo::BaseType::S32;
-  if (s == "short") return Choreo::BaseType::S16;
-  if (s == "char") return Choreo::BaseType::S8;
+  if (s == "long long" || s == "s64" || s == "int64_t")
+    return Choreo::BaseType::S64;
+  if (s == "int" || s == "s32" || s == "int32_t")
+    return Choreo::BaseType::S32;
+  if (s == "short" || s == "s16" || s == "int16_t")
+    return Choreo::BaseType::S16;
+  if (s == "char" || s == "s8" || s == "int8_t")
+    return Choreo::BaseType::S8;
+  if (s == "unsigned long long" || s == "u64" || s == "uint64_t")
+    return Choreo::BaseType::U64;
+  if (s == "unsigned int" || s == "u32" || s == "uint32_t")
+    return Choreo::BaseType::U32;
+  if (s == "unsigned short" || s == "u16" || s == "uint16_t")
+    return Choreo::BaseType::U16;
+  if (s == "unsigned char" || s == "u8" || s == "uint8_t")
+    return Choreo::BaseType::U8;
   if (s == "bool") return Choreo::BaseType::BOOL;
 
-  return Choreo::BaseType::UNKNOWN; // default to void
+  return Choreo::BaseType::UNKNOWN;
 }
 
 Choreo::Parser::symbol_type make_device_symbol() {

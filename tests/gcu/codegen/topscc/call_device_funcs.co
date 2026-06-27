@@ -44,7 +44,7 @@ __co__ void func() {
 }
 
 // CHECK: type_test0(v0, v1, v2, v3, v4, v5, v6, v7);
-// CHECK: type_test1((char*)arr0, (unsigned char*)arr1, (short*)arr2, (unsigned short*)arr3, (int*)arr4, (unsigned int*)arr5, (long long*)arr6, (unsigned long long*)arr7);
+// CHECK: type_test1((char*)arr0, (unsigned char*)arr1, (short*)arr2, (unsigned short*)arr3, (int*)arr4, (unsigned int*)arr5, (int64_t*)arr6, (uint64_t*)arr7);
 // CHECK: type_test2(v0, (char*)arr0);
 // CHECK: type_test3((char*)arr0, (unsigned char*)arr1, (short*)arr2, (unsigned short*)arr3);
 // CHECK: int a = getInt();

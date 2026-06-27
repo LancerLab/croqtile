@@ -1,7 +1,7 @@
 // RUN: choreo -es -t topscc %s 2>&1 | FileCheck %s
 // RUN: choreo -es -t topscc %s 2>&1 | FileCheck %s --check-prefix=NOWARN
 
-__co__ auto test_topscc_cast(int i, float f) {
+__co__ auto test_topscc_cast(int i, float f, s64 s64_val) {
   f32 x = __to<f32>(i);
   s32 y = __to<s32>(f);
   bf16 z = __to<bf16>(f);
@@ -10,6 +10,7 @@ __co__ auto test_topscc_cast(int i, float f) {
   u8 b = __to<u8>(i);
   s16 s = __to<s16>(i);
   u32 u = __to<u32>(y);
+  s32 s32_val = __to<s32>(s64_val);
   return w;
 }
 
@@ -21,6 +22,7 @@ __co__ auto test_topscc_cast(int i, float f) {
 // CHECK: unsigned char b = static_cast<unsigned char>(i);
 // CHECK: short s = static_cast<short>(i);
 // CHECK: unsigned int u = static_cast<unsigned int>(y);
+// CHECK: int s32_val = static_cast<int>(s64_val);
 
 // Verify no warnings from explicit casts
 // NOWARN-NOT: warning:{{.*}}explicit

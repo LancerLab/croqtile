@@ -344,6 +344,10 @@ device_base_type
     | S16 { $$ = MakeDeviceDataType("short", $1); }
     | INT { $$ = MakeDeviceDataType("int", $1); }
     | S64 { $$ = MakeDeviceDataType("long long", $1); }
+    | U8 { $$ = MakeDeviceDataType("unsigned char", BaseType::U8); }
+    | U16 { $$ = MakeDeviceDataType("unsigned short", BaseType::U16); }
+    | U32 { $$ = MakeDeviceDataType("unsigned int", BaseType::U32); }
+    | U64 { $$ = MakeDeviceDataType("unsigned long long", BaseType::U64); }
     | SIGNED S8 { $$ = MakeDeviceDataType($1 + " char", BaseType::S8); }
     | SIGNED S16 { $$ = MakeDeviceDataType($1 + " short", BaseType::S16); }
     | SIGNED INT { $$ = MakeDeviceDataType($1 + " int", BaseType::S32); }

@@ -23,8 +23,8 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
   }
 }
 
-// CHECK: __global__ void __choreo_device_EmbeddingCacheReplaceChoreo_kernel(long long * keys, float * vals, unsigned long long * slot_counter, long long * d_keys, float * d_values, unsigned long long global_counter, int dim_grid, int dim_block, unsigned capacity_in_set, unsigned embedding_vec_size, unsigned len, unsigned set_associativity, unsigned warp_size, unsigned long mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_counter, unsigned long mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_key, unsigned long mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_query, unsigned long mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_src_set) {
-// CHECK:   long long* buffer_key = (long long*)(anon_0 + mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_key);
-// CHECK:   unsigned long long* buffer_counter = (unsigned long long*)(anon_0 + mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_counter);
-// CHECK:   long long* buffer_query = (long long*)(anon_0 + mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_query);
+// CHECK: __global__ void __choreo_device_EmbeddingCacheReplaceChoreo_kernel(int64_t * keys, float * vals, uint64_t * slot_counter, int64_t * d_keys, float * d_values, uint64_t global_counter, int dim_grid, int dim_block, unsigned capacity_in_set, unsigned embedding_vec_size, unsigned len, unsigned set_associativity, unsigned warp_size, unsigned long mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_counter, unsigned long mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_key, unsigned long mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_query, unsigned long mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_src_set) {
+// CHECK:   int64_t* buffer_key = (int64_t*)(anon_0 + mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_key);
+// CHECK:   uint64_t* buffer_counter = (uint64_t*)(anon_0 + mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_counter);
+// CHECK:   int64_t* buffer_query = (int64_t*)(anon_0 + mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_query);
 // CHECK:   unsigned int* buffer_src_set = (unsigned int*)(anon_0 + mr_offset_EmbeddingCacheReplaceChoreo_kernel_paraby_0_paraby_1_buffer_src_set);
