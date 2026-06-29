@@ -212,17 +212,11 @@ private:
       mmaFragRoles[fill.getResult()] = "accumulator";
     });
     root->walk([&](MMAExecOp exec) {
-      auto layout = exec.getLayout();
-      std::string lhsLayout, rhsLayout;
-      if (layout == MMALayout::RowCol) {
-        lhsLayout = "row_major"; rhsLayout = "col_major";
-      } else if (layout == MMALayout::RowRow) {
-        lhsLayout = "row_major"; rhsLayout = "row_major";
-      } else if (layout == MMALayout::ColCol) {
-        lhsLayout = "col_major"; rhsLayout = "col_major";
-      } else {
-        lhsLayout = "col_major"; rhsLayout = "row_major";
-      }
+      // Choreo tensors are always row-major in memory.
+      // The MMALayout attribute describes the mathematical interpretation,
+      // but WMMA load_matrix_sync always uses the physical memory layout.
+      std::string lhsLayout = "row_major";
+      std::string rhsLayout = "row_major";
       mmaFragRoles[exec.getLhs()] = "matrix_a";
       mmaFragLayouts[exec.getLhs()] = lhsLayout;
       mmaFragRoles[exec.getRhs()] = "matrix_b";
@@ -409,15 +403,33 @@ private:
 
   LaunchDims getLaunchDims(KernelOp kernel) {
     LaunchDims dims;
+    int64_t groupWarps = 0;
+    bool hasThreadLevel = false;
     kernel.getBody().walk([&](ParallelOp par) {
       auto lvl = par.getLevel();
       auto bounds = par.getBounds();
       llvm::SmallVector<int64_t, 3> bv(bounds.begin(), bounds.end());
       if (lvl == coir::ParallelLevel::BLOCK)
         dims.grid = bv;
-      else if (lvl == coir::ParallelLevel::THREAD)
+      else if (lvl == coir::ParallelLevel::THREAD) {
         dims.block = bv;
+        hasThreadLevel = true;
+      } else if (lvl == coir::ParallelLevel::GROUP ||
+                 lvl == coir::ParallelLevel::GROUPx4) {
+        int64_t nWarps = 1;
+        for (auto b : bounds) nWarps *= b;
+        if (lvl == coir::ParallelLevel::GROUPx4)
+          nWarps *= 4;
+        groupWarps = nWarps;
+      }
     });
+    if (groupWarps > 0 && hasThreadLevel) {
+      int64_t threadsPerGroup = 1;
+      for (auto b : dims.block) threadsPerGroup *= b;
+      dims.block = {groupWarps * threadsPerGroup};
+    } else if (groupWarps > 0) {
+      dims.block = {groupWarps * 32};
+    }
     return dims;
   }
 
@@ -823,6 +835,24 @@ private:
         std::string dim = i == 0 ? "threadIdx.x" : "threadIdx.y";
         valueNames[args[i]] = dim;
       }
+    } else if (level == ParallelLevel::GROUP ||
+               level == ParallelLevel::GROUPx4) {
+      int warpScale = (level == ParallelLevel::GROUPx4) ? 4 : 1;
+      std::string warpId = "(threadIdx.x / " +
+                           std::to_string(32 * warpScale) + ")";
+      if (args.size() == 1) {
+        valueNames[args[0]] = warpId;
+      } else {
+        for (unsigned i = 0; i < args.size(); ++i) {
+          int64_t divisor = 1;
+          for (unsigned j = i + 1; j < args.size(); ++j)
+            divisor *= bounds[j];
+          std::string expr = "(" + warpId + " / " +
+                             std::to_string(divisor) + " % " +
+                             std::to_string(bounds[i]) + ")";
+          valueNames[args[i]] = expr;
+        }
+      }
     } else {
       for (unsigned i = 0; i < args.size(); ++i)
         valueNames[args[i]] = getName(args[i]);
@@ -880,11 +910,63 @@ private:
        << acc << ");\n";
   }
 
+  unsigned mmaStoreCvtIdx = 0;
+
   void emitMMAStore(MMAStoreOp op) override {
     int64_t ldm = getSourceLeadingDim(op.getDest());
-    os() << getIndent() << "wmma::store_matrix_sync("
-       << getName(op.getDest()) << ", " << getName(op.getFragment())
-       << ", " << ldm << ", wmma::mem_row_major);\n";
+    auto fragTy = cast<coir::MMAFragType>(op.getFragment().getType());
+    auto dstTy = cast<coir::TensorType>(op.getDest().getType());
+
+    if (fragTy.getElementType().isF32() && dstTy.getElementType().isF16()) {
+      auto shape = fragTy.getShape();
+      int64_t tileM = shape.size() > 0 ? shape[0] : 16;
+      int64_t tileN = shape.size() > 1 ? shape[1] : 16;
+      int64_t tileElems = tileM * tileN;
+      int64_t numWarps = 1;
+      auto *parentOp = op->getParentOp();
+      while (parentOp) {
+        if (auto par = dyn_cast<ParallelOp>(parentOp)) {
+          auto lvl = par.getLevel();
+          if (lvl == ParallelLevel::GROUP ||
+              lvl == ParallelLevel::GROUPx4) {
+            numWarps = 1;
+            for (auto b : par.getBounds()) numWarps *= b;
+            if (lvl == ParallelLevel::GROUPx4) numWarps *= 4;
+            break;
+          }
+        }
+        parentOp = parentOp->getParentOp();
+      }
+      std::string idx = std::to_string(mmaStoreCvtIdx++);
+      os() << getIndent() << "{\n";
+      incIndent();
+      os() << getIndent() << "__shared__ float __mma_cvt_" << idx
+           << "[" << numWarps * tileElems << "];\n";
+      os() << getIndent() << "float* __mma_cvt_" << idx
+           << "_local = __mma_cvt_" << idx
+           << " + (threadIdx.x / 32) * " << tileElems << ";\n";
+      os() << getIndent() << "wmma::store_matrix_sync(__mma_cvt_" << idx
+           << "_local, " << getName(op.getFragment()) << ", " << tileN
+           << ", wmma::mem_row_major);\n";
+      os() << getIndent() << "__syncwarp();\n";
+      os() << getIndent() << "for (int _r = 0; _r < " << tileM
+           << "; ++_r)\n";
+      incIndent();
+      os() << getIndent() << "for (int _c = threadIdx.x % 32; _c < "
+           << tileN << "; _c += 32)\n";
+      incIndent();
+      os() << getIndent() << getName(op.getDest()) << "[_r * " << ldm
+           << " + _c] = __float2half(__mma_cvt_" << idx
+           << "_local[_r * " << tileN << " + _c]);\n";
+      decIndent();
+      decIndent();
+      decIndent();
+      os() << getIndent() << "}\n";
+    } else {
+      os() << getIndent() << "wmma::store_matrix_sync("
+           << getName(op.getDest()) << ", " << getName(op.getFragment())
+           << ", " << ldm << ", wmma::mem_row_major);\n";
+    }
   }
 
   TileLayout getLayoutForValue(Value v) {
