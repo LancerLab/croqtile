@@ -108,6 +108,7 @@ std::string CoIREmitterBase::getName(Value v) {
 
 std::string CoIREmitterBase::emitElementType(Type ty) {
   if (ty.isF16()) return "half";
+  if (ty.isBF16()) return "__bf16";
   if (ty.isF32()) return "float";
   if (ty.isF64()) return "double";
   if (ty.isInteger(8)) return "uint8_t";
@@ -124,7 +125,7 @@ int64_t CoIREmitterBase::getTensorBytes(TensorType tty) {
   for (auto d : tty.getShape()) n *= d;
   Type eTy = tty.getElementType();
   int64_t elemSize = 4;
-  if (eTy.isF16() || eTy.isInteger(16)) elemSize = 2;
+  if (eTy.isF16() || eTy.isBF16() || eTy.isInteger(16)) elemSize = 2;
   else if (eTy.isF64() || eTy.isInteger(64)) elemSize = 8;
   else if (eTy.isInteger(8)) elemSize = 1;
   return n * elemSize;
