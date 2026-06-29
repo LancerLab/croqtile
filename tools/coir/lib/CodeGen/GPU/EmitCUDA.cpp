@@ -696,6 +696,8 @@ private:
       emitWait(wait);
     else if (dyn_cast<FutureRotateOp>(op))
       {}
+    else if (auto atomicOp = dyn_cast<coir::AtomicOp>(op))
+      emitAtomic(atomicOp);
     else if (auto reduceElem = dyn_cast<TensorReduceElemOp>(op))
       emitTensorReduceElem(reduceElem);
     else if (auto alloc = dyn_cast<TensorAllocOp>(op))
@@ -1412,6 +1414,29 @@ private:
        << " = " << src << "[";
     emitLinearIndex(op.getIndices(), tty);
     os << "];\n";
+  }
+
+  void emitAtomic(AtomicOp op) {
+    using AK = coir::AtomicKind;
+    llvm::StringRef fnName;
+    switch (op.getKind()) {
+    case AK::Add:  fnName = "atomicAdd"; break;
+    case AK::Sub:  fnName = "atomicSub"; break;
+    case AK::Exch: fnName = "atomicExch"; break;
+    case AK::Min:  fnName = "atomicMin"; break;
+    case AK::Max:  fnName = "atomicMax"; break;
+    case AK::And:  fnName = "atomicAnd"; break;
+    case AK::Or:   fnName = "atomicOr"; break;
+    case AK::Xor:  fnName = "atomicXor"; break;
+    case AK::CAS:  fnName = "atomicCAS"; break;
+    }
+    auto tty = cast<coir::TensorType>(op.getDest().getType());
+    os << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
+    emitLinearIndex(op.getIndices(), tty);
+    os << "], " << getName(op.getValue());
+    if (op.getKind() == AK::CAS && op.getCompare())
+      os << ", " << "/* compare */";
+    os << ");\n";
   }
 
   void emitTensorReduceElem(TensorReduceElemOp op) {
