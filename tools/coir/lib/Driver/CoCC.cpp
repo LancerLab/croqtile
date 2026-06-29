@@ -64,8 +64,11 @@ void SetupScriptContext() {
   auto &sctx = CoIR::ScriptContext::Get();
   sctx.types_header = __choreo_types_header_as_string;
   sctx.runtime_header = __choreo_header_as_string;
-  sctx.types_cute_header = __choreo_types_cute_header_as_string;
-  sctx.cute_header = __choreo_cute_header_as_string;
+  auto tname = CCtx().TargetName();
+  if (tname == "cute" || tname == "nvptx") {
+    sctx.types_cute_header = __choreo_types_cute_header_as_string;
+    sctx.cute_header = __choreo_cute_header_as_string;
+  }
   auto dcg = CCtx().GetTarget().MakeDeviceCodeGen();
   if (dcg) {
     std::ostringstream env_ss;

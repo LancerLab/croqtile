@@ -84,8 +84,23 @@ target_link_libraries(MLIRCoIRCodeGenGCU PRIVATE
   LLVMSupport
 )
 
+# Locate kurama: prefer extern/kurama/, then TOOLCHAIN_DIR, then /opt/tops.
+set(_KURAMA_FOUND_DIR "")
 if(EXISTS "${_KURAMA_MARKER}")
+  set(_KURAMA_FOUND_DIR "${_KURAMA_ROOT}")
+elseif(EXISTS "${TOOLCHAIN_DIR}/bin/gcu-compiler-opt")
+  set(_KURAMA_FOUND_DIR "${TOOLCHAIN_DIR}")
+elseif(EXISTS "/opt/tops/bin/gcu-compiler-opt")
+  set(_KURAMA_FOUND_DIR "/opt/tops")
+endif()
+
+if(_KURAMA_FOUND_DIR)
+  message(STATUS "GCU native: kurama toolchain at ${_KURAMA_FOUND_DIR}")
   target_compile_definitions(MLIRCoIRCodeGenGCU PRIVATE
-    __CHOREO_KURAMA_DIR__="${_KURAMA_ROOT}"
+    __CHOREO_KURAMA_DIR__="${_KURAMA_FOUND_DIR}"
   )
 endif()
+
+target_compile_definitions(MLIRCoIRCodeGenGCU PRIVATE
+  __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
+)

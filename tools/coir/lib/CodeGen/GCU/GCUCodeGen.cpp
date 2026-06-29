@@ -37,16 +37,25 @@ static constexpr const char *kKuramaDir = __CHOREO_KURAMA_DIR__;
 static constexpr const char *kKuramaDir = nullptr;
 #endif
 
+#ifdef __CHOREO_TOPSCC_DIR__
+static constexpr const char *kTopsccDir = __CHOREO_TOPSCC_DIR__;
+#else
+static constexpr const char *kTopsccDir = nullptr;
+#endif
+
 std::string findTool(llvm::StringRef name) {
-  if (kKuramaDir) {
-    llvm::SmallString<256> path(kKuramaDir);
+  auto checkDir = [&](const char *dir) -> std::string {
+    if (!dir) return {};
+    llvm::SmallString<256> path(dir);
     llvm::sys::path::append(path, "bin", name);
     if (llvm::sys::fs::exists(path))
       return std::string(path);
-  }
-  // Fallback: search PATH.
-  auto found = llvm::sys::findProgramByName(name);
-  if (found)
+    return {};
+  };
+  if (auto p = checkDir(kKuramaDir); !p.empty()) return p;
+  if (auto p = checkDir(kTopsccDir); !p.empty()) return p;
+  if (auto p = checkDir("/opt/tops"); !p.empty()) return p;
+  if (auto found = llvm::sys::findProgramByName(name))
     return std::string(*found);
   return {};
 }
