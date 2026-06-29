@@ -747,9 +747,21 @@ private:
     auto iterArgs = op.getIterArgs();
     for (unsigned i = 0; i < iterArgs.size(); ++i) {
       std::string iterName = getName(args[i + 1]);
-      os() << getIndent() << "auto " << iterName << " = "
-         << getName(iterArgs[i]) << ";\n";
-      auto stateIt = acoreStates.find(iterArgs[i]);
+      auto initVal = iterArgs[i];
+      if (mlir::isa<coir::AsyncTokenType>(initVal.getType())) {
+        auto futIt = asyncFutures.find(initVal);
+        if (futIt != asyncFutures.end()) {
+          asyncFutures[args[i + 1]] = futIt->second;
+          valueNames[args[i + 1]] = futIt->second;
+        } else {
+          asyncFutures[args[i + 1]] = iterName;
+          os() << getIndent() << "choreo::future " << iterName << ";\n";
+        }
+      } else {
+        os() << getIndent() << "auto " << iterName << " = "
+           << getName(initVal) << ";\n";
+      }
+      auto stateIt = acoreStates.find(initVal);
       if (stateIt != acoreStates.end()) {
         auto st = stateIt->second;
         acoreStates[args[i + 1]] = st;
@@ -768,6 +780,9 @@ private:
 
     for (unsigned i = 0; i < op.getResults().size(); ++i) {
       valueNames[op.getResult(i)] = getName(args[i + 1]);
+      auto futIt = asyncFutures.find(args[i + 1]);
+      if (futIt != asyncFutures.end())
+        asyncFutures[op.getResult(i)] = futIt->second;
       auto stateIt = acoreStates.find(args[i + 1]);
       if (stateIt != acoreStates.end()) {
         auto st = stateIt->second;
@@ -1119,17 +1134,18 @@ private:
   void emitYield(YieldOp op) override {
     for (unsigned i = 0; i < op.getOperands().size(); ++i) {
       auto yieldVal = op.getOperands()[i];
+      auto parentForeach = op->getParentOfType<ForeachOp>();
+      if (!parentForeach) continue;
+      auto iterArgs = parentForeach.getBody().front().getArguments();
+      if (i + 1 >= iterArgs.size()) continue;
       auto it = acoreStates.find(yieldVal);
       if (it != acoreStates.end()) {
-        auto parentForeach = op->getParentOfType<ForeachOp>();
-        if (parentForeach) {
-          auto iterArgs = parentForeach.getBody().front().getArguments();
-          if (i + 1 < iterArgs.size()) {
-            auto st = it->second;
-            acoreStates[iterArgs[i + 1]] = st;
-          }
-        }
+        auto st = it->second;
+        acoreStates[iterArgs[i + 1]] = st;
       }
+      auto futIt = asyncFutures.find(yieldVal);
+      if (futIt != asyncFutures.end())
+        asyncFutures[iterArgs[i + 1]] = futIt->second;
     }
   }
 
@@ -1402,6 +1418,13 @@ private:
     auto it = asyncFutures.find(op.getToken());
     if (it != asyncFutures.end())
       os() << getIndent() << it->second << ".wait();\n";
+  }
+
+  void emitAsyncUndef(AsyncUndefOp op) {
+    unsigned id = nextDmaId++;
+    std::string futName = "__fut_" + std::to_string(id);
+    os() << getIndent() << "choreo::future " << futName << ";\n";
+    asyncFutures[op.getResult()] = futName;
   }
 
   void emitFutureRotate(FutureRotateOp op) override {

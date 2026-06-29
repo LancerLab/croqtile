@@ -6,13 +6,16 @@
 module attributes {coir.target = "topscc", coir.arch = "gcu300",
                    coir.has_tma = false, coir.has_dma = true} {
 
-  // dma.copy global->shared inside foreach
+  // dma.copy global->shared with tile inside foreach -> decomposed
   // CHECK-LABEL: coir.kernel @test_gcu_dma_pipeline
   coir.kernel @test_gcu_dma_pipeline(
       %src: !coir.tensor<1024xf32, global>,
       %buf: !coir.tensor<64xf32, shared>) {
     %c16 = arith.constant 16 : index
 
+    // const.desc + prefetch hoisted above loop:
+    // CHECK: coir.dma.const.desc
+    // CHECK: coir.dma.prefetch.desc
     // CHECK: coir.foreach
     coir.foreach %k in %c16 {
       %tile = coir.tensor.tile %src[%k]
@@ -21,7 +24,10 @@ module attributes {coir.target = "topscc", coir.arch = "gcu300",
         : !coir.tensor<64xf32, global> -> !coir.tensor<64xf32, shared>
       coir.wait %tok : !coir.async
 
-      // CHECK: coir.dma.copy
+      // runtime.desc + invoke stay inside loop:
+      // CHECK: coir.dma.runtime.desc
+      // CHECK: coir.dma.invoke
+      // CHECK: coir.wait
       coir.yield
     }
   }

@@ -1,0 +1,29 @@
+// RUN: co2ir %s -o - | FileCheck %s
+//
+// Test: swap inside foreach lowers to iter_args + async.rotate + yield.
+
+__co__ auto test_double_buffer(f32 [1024] input) {
+  f32 [input.span(0)] output;
+
+  parallel p by 1 {
+    with {i} in [4] {
+      fa = dma.copy.async input.chunkat(i) => shared;
+      fb = dma.any;
+      foreach i(1:) {
+        fb = dma.copy.async input.chunkat(i) => shared;
+        wait fa;
+        dma.copy fa.data => output.chunkat(i - 1);
+        swap(fa, fb);
+      }
+      wait fa;
+      dma.copy fa.data => output.chunkat(i(-1));
+    }
+  }
+
+  return output;
+}
+
+// CHECK: coir.async.undef
+// CHECK: coir.foreach {{.*}} iter_args
+// CHECK: coir.async.rotate
+// CHECK: coir.yield {{.*}} : !coir.async

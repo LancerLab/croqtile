@@ -211,6 +211,8 @@ void CoIREmitterBase::emitOp(Operation *op) {
     emitWait(wait);
   else if (auto rotate = dyn_cast<FutureRotateOp>(op))
     emitFutureRotate(rotate);
+  else if (auto asyncUndef = dyn_cast<AsyncUndefOp>(op))
+    emitAsyncUndef(asyncUndef);
   else if (auto atomicOp = dyn_cast<AtomicOp>(op))
     emitAtomic(atomicOp);
   else if (auto reduceElem = dyn_cast<TensorReduceElemOp>(op))

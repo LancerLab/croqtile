@@ -82,11 +82,10 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       }
     }
 
-    // For non-TMA copies with tile offsets, skip decomposition.
-    // The emitter handles tiled DmaCopyOp directly via naive_copy.
+    // For TMA copies, tile offsets become runtime.desc coordinates.
+    // For DMA copies with tile offsets, also decompose: the base geometry
+    // goes into const.desc (hoistable) and offsets go into runtime.desc.
     constexpr bool isTMA = std::is_same_v<CopyOpTy, TmaCopyOp>;
-    if (hasOffsets && !isTMA)
-      return failure();
 
     auto descType = coir::DMADescType::get(rewriter.getContext());
     auto descRtType = coir::FinalDMADescType::get(rewriter.getContext());

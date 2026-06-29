@@ -125,6 +125,7 @@ protected:
 
   // -- Target-specific op hooks (no-op by default) --
   virtual void emitFutureRotate(FutureRotateOp op) { (void)op; }
+  virtual void emitAsyncUndef(AsyncUndefOp op) { (void)op; }
   virtual void emitKernelReturn(KernelReturnOp op) { (void)op; }
   virtual void emitTensorReduceElem(TensorReduceElemOp op) { (void)op; }
   virtual void emitAtomic(AtomicOp op) { (void)op; }
