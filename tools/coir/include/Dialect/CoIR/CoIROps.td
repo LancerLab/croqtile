@@ -351,6 +351,12 @@ def MMAStoreOp : CoIR_Op<"mma.store", []> {
 
 def BarrierOp : CoIR_Op<"barrier", []> {
   let summary = "Synchronization barrier at the given scope";
+  let description = [{
+    Emits a scope-appropriate synchronization barrier:
+    - BLOCK: block-level thread sync
+    - GROUP: sub-thread group sync
+    - DEVICE: host device synchronize
+  }];
   let arguments = (ins CoIR_ParallelLevelAttr:$scope);
   let assemblyFormat = "$scope attr-dict";
 }
@@ -359,6 +365,38 @@ def WaitOp : CoIR_Op<"wait", []> {
   let summary = "Wait for an async operation to complete";
   let arguments = (ins CoIR_AsyncTokenTypeC:$token);
   let assemblyFormat = "$token attr-dict `:` type($token)";
+}
+
+//===----------------------------------------------------------------------===//
+// Event synchronization ops (bool-event model)
+//===----------------------------------------------------------------------===//
+
+def EventTriggerOp : CoIR_Op<"event.trigger", []> {
+  let summary = "Signal an event (set to true)";
+  let description = [{
+    Signals a software event by setting it to true. On device targets,
+    events are volatile bools in shared/local memory. The `name` attr
+    identifies the event variable for codegen.
+  }];
+  let arguments = (ins
+    StrAttr:$event_name,
+    OptionalAttr<StrAttr>:$subscript
+  );
+  let assemblyFormat = "$event_name (`[` $subscript^ `]`)? attr-dict";
+}
+
+def EventWaitOp : CoIR_Op<"event.wait", []> {
+  let summary = "Wait on an event (spin until true, then auto-reset)";
+  let description = [{
+    Waits for a software event by spin-waiting until the event is true,
+    then resets it to false (auto-reset semantics). Used for inter-thread
+    signaling within a kernel.
+  }];
+  let arguments = (ins
+    StrAttr:$event_name,
+    OptionalAttr<StrAttr>:$subscript
+  );
+  let assemblyFormat = "$event_name (`[` $subscript^ `]`)? attr-dict";
 }
 
 def FutureRotateOp : CoIR_Op<"async.rotate", []> {
