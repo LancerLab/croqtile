@@ -1507,7 +1507,10 @@ private:
 
 
   std::string getAllocQualifier(coir::TensorType tty) override {
-    return tty.getMemorySpace() == 1 ? "__local__ " : "";
+    return tty.getMemorySpace() ==
+                   static_cast<int32_t>(coir::TensorMemorySpace::Local)
+               ? "__local__ "
+               : "";
   }
 
   void emitTensorAlloc(TensorAllocOp op) override {
