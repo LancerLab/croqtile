@@ -1,0 +1,2 @@
+# User-facing target names that map to the AMDGPU backend.
+hip

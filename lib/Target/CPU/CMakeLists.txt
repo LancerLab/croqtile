@@ -1,11 +1,3 @@
-add_custom_target(
-  cpu_deps ALL
-  DEPENDS
-  ${CMAKE_BINARY_DIR}/choreo_header.inc
-  ${CMAKE_BINARY_DIR}/choreo_types_header.inc
-  ${CMAKE_BINARY_DIR}/choreo_cc_header.inc
-)
-
 set(CPU_TARGET_SOURCES
   cc_codegen.cpp
   cc_target.cpp

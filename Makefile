@@ -140,17 +140,21 @@ test-release: release
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
 # Unified test targets: choreo + coir
-test-all: coir
+test-all: build
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
 
-test-all-debug: coir-debug
+test-all-debug: debug
 	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
 
-test-all-release: coir-release
+test-all-release: release
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
 
 ci-test:
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+
+.PHONY: cmake-test
+cmake-test:
+	bash tests/cmake/test_croq_options.sh
 
 # ---- CoIR IR tooling ----
 COIR_BUILD_DIR ?= $(CMAKE_BUILD_DIR)
@@ -163,26 +167,27 @@ symlink-coir:
 
 define build-coir
 	@echo "=== Building CoIR tools ($(1)) ==="
-	cmake -S $(WORK_DIR) -B $(COIR_BUILD_DIR) \
+	$(CMAKE) -S $(WORK_DIR) -B $(COIR_BUILD_DIR) \
 		-G Ninja \
 		-DCMAKE_BUILD_TYPE=$(1) \
-		-DCHOREO_BUILD_COIR=ON \
-		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
+		'-DCROQ_PROJECT=$(CROQ_PROJECT)' \
+		'-DCROQ_TARGET=$(CROQ_TARGET)'
 	ninja -C $(COIR_BUILD_DIR) co2ir coir-opt cocc
 	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(COIR_BUILD_DIR) symlink-coir
 endef
 
 .PHONY: coir
-coir: build
+coir:
 	$(call build-coir,$(CMAKE_BUILD_TYPE))
 
 .PHONY: coir-debug
-coir-debug: debug
+coir-debug:
 	$(eval COIR_BUILD_DIR := $(DBG_BUILD_DIR))
 	$(call build-coir,Debug)
 
 .PHONY: coir-release
-coir-release: release
+coir-release:
 	$(eval COIR_BUILD_DIR := $(REL_BUILD_DIR))
 	$(call build-coir,Release)
 
@@ -206,7 +211,11 @@ co-mock: build-co-mock-with-cmake-ninja
 build-co-mock-with-cmake-ninja:
 	@echo "Building co-mock..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja \
+		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
+		'-DCROQ_PROJECT=choreo;co-mock' \
+		'-DCROQ_TARGET=$(CROQ_TARGET)'
 	ninja -C $(CMAKE_BUILD_DIR) co-mock
 	@ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock
 
@@ -225,23 +234,41 @@ clean-all: clean coir-clean
 build-with-cmake:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) \
+		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
+		'-DCROQ_PROJECT=$(CROQ_PROJECT)' \
+		'-DCROQ_TARGET=$(CROQ_TARGET)'
 	time $(MAKE) -C $(CMAKE_BUILD_DIR)
+
+CROQ_PROJECT ?= choreo;coir
+CROQ_TARGET  ?= all
 
 build-with-cmake-ninja:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) -DSTANDALONE=$(STANDALONE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) -DCHOREO_FAST_COMPILE_DEFAULT=$(FAST_COMPILE_DEFAULT)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja \
+		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
+		-DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) \
+		-DSTANDALONE=$(STANDALONE) \
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
+		-DCHOREO_FAST_COMPILE_DEFAULT=$(FAST_COMPILE_DEFAULT) \
+		'-DCROQ_PROJECT=$(CROQ_PROJECT)' \
+		'-DCROQ_TARGET=$(CROQ_TARGET)'
 	time ninja -C $(CMAKE_BUILD_DIR)
-	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
-	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
+	@test -f $(CMAKE_BUILD_DIR)/choreo && ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo || true
+	@test -f $(CMAKE_BUILD_DIR)/copp && ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp || true
 	@test -f $(CMAKE_BUILD_DIR)/co-mock && ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock || true
 	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(CMAKE_BUILD_DIR) symlink-coir
 
 config-with-cmake-ninja:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja \
+		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
+		'-DCROQ_PROJECT=$(CROQ_PROJECT)' \
+		'-DCROQ_TARGET=$(CROQ_TARGET)'
 
 
 # Legacy Makefile

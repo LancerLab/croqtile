@@ -1,12 +1,3 @@
-add_custom_target(
-  gpu_deps ALL
-  DEPENDS
-  ${CMAKE_BINARY_DIR}/choreo_header.inc
-  ${CMAKE_BINARY_DIR}/choreo_types_header.inc
-  ${CMAKE_BINARY_DIR}/choreo_types_cute_header.inc
-  ${CMAKE_BINARY_DIR}/choreo_cute_header.inc
-)
-
 set(GPU_TARGET_SOURCES
   cute_codegen.cpp
   cute_target.cpp
