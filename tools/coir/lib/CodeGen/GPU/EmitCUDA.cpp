@@ -1069,6 +1069,36 @@ private:
     return tensorName;
   }
 
+  std::string emitCuteTensorFromPtr(const std::string &ptrExpr,
+                                    coir::TensorType origType,
+                                    llvm::ArrayRef<int64_t> shape,
+                                    const std::string &suffix) {
+    int32_t ms = origType.getMemorySpace();
+    std::string shapeName = "__shape" + suffix;
+    std::string layoutName = "__layout" + suffix;
+    std::string tensorName = "__tensor" + suffix;
+
+    os() << getIndent() << "auto " << shapeName << " = cute::make_shape(";
+    for (unsigned i = 0; i < shape.size(); ++i) {
+      if (i) os() << ", ";
+      os() << "cute::Int<" << shape[i] << ">{}";
+    }
+    os() << ");\n";
+    os() << getIndent() << "auto " << layoutName
+       << " = cute::make_layout(" << shapeName << ");\n";
+
+    std::string elemTy = emitElementType(origType.getElementType());
+    os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
+    if (ms == 0)
+      os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
+         << ptrExpr << ")";
+    else
+      os() << "((" << elemTy << "*)" << ptrExpr << ")";
+    os() << ", " << layoutName << ");\n";
+
+    return tensorName;
+  }
+
   void emitNaiveCopy(Value src, Value dst) {
     unsigned id = nextId++;
     std::string srcTensor = emitCuteTensor(src, "_src_" + std::to_string(id));
@@ -1150,7 +1180,7 @@ private:
     if (desc.isTMA) {
       emitTMAInvoke(descIdx, desc, offsets);
     } else {
-      emitCpAsyncInvoke(descIdx, desc);
+      emitCpAsyncInvoke(descIdx, desc, offsets);
     }
   }
 
@@ -1258,13 +1288,48 @@ private:
     }
   }
 
-  void emitCpAsyncInvoke(unsigned /*descIdx*/, const DescInfo &desc) {
+  void emitCpAsyncInvoke(unsigned /*descIdx*/, const DescInfo &desc,
+                         const SmallVector<Value, 4> &offsets) {
     // cp.async DMA: cooperative copy with fence/wait
     // Use the original operands from the DMAConstDescOp
     if (auto constOp =
             desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
       os() << getIndent() << "// cp.async DMA\n";
-      emitNaiveCopy(constOp.getSource(), constOp.getDest());
+      if (!offsets.empty()) {
+        // Tiled copy: apply offset to the global pointer, copy tile-sized chunk.
+        Value globalVal = desc.isLoad ? constOp.getSource() : constOp.getDest();
+        Value localVal = desc.isLoad ? constOp.getDest() : constOp.getSource();
+        auto globalTy = cast<coir::TensorType>(globalVal.getType());
+        auto localTy = cast<coir::TensorType>(localVal.getType());
+        int64_t tileElems = 1;
+        for (auto d : localTy.getShape()) tileElems *= d;
+
+        unsigned id = nextId++;
+        std::string ptrName = getName(globalVal);
+        std::string offExpr = getName(offsets[0]);
+        if (tileElems > 1)
+          offExpr += " * " + std::to_string(tileElems);
+        std::string elemTy = emitElementType(globalTy.getElementType());
+        std::string slicedPtr =
+            "__slice_ptr_" + std::to_string(id);
+        os() << getIndent() << elemTy << "* " << slicedPtr << " = ("
+           << elemTy << "*)" << ptrName << " + " << offExpr << ";\n";
+
+        // Build a tensor from the sliced pointer with tile shape
+        std::string srcTensor, dstTensor;
+        std::string suffix = "_" + std::to_string(id);
+        if (desc.isLoad) {
+          srcTensor = emitCuteTensorFromPtr(slicedPtr, globalTy, localTy.getShape(), suffix + "_s");
+          dstTensor = emitCuteTensor(localVal, suffix + "_d");
+        } else {
+          srcTensor = emitCuteTensor(localVal, suffix + "_s");
+          dstTensor = emitCuteTensorFromPtr(slicedPtr, globalTy, localTy.getShape(), suffix + "_d");
+        }
+        os() << getIndent() << "choreo::naive_copy(" << srcTensor << ", "
+           << dstTensor << ");\n";
+      } else {
+        emitNaiveCopy(constOp.getSource(), constOp.getDest());
+      }
       os() << getIndent() << "__syncthreads();\n";
     } else {
       os() << getIndent() << "// cp.async DMA (unknown source)\n";

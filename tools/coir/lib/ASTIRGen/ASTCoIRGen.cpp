@@ -749,6 +749,32 @@ void collectIfModifiedScalars(AST::Node *thenBody, AST::Node *elseBody,
   if (elseBody) collectScalarIterArgs(elseBody, names, seen);
 }
 
+void collectRotateIterArgs(AST::Node *node,
+                           llvm::SmallVectorImpl<std::string> &names,
+                           llvm::StringSet<> &seen) {
+  if (!node) return;
+  if (auto *rot = dyn_cast<AST::Rotate>(node)) {
+    for (auto &idNode : rot->GetIds()) {
+      if (auto *id = dyn_cast<AST::Identifier>(idNode.get())) {
+        if (!seen.count(id->name)) {
+          names.push_back(id->name);
+          seen.insert(id->name);
+        }
+      }
+    }
+    return;
+  }
+  if (auto *mn = dyn_cast<AST::MultiNodes>(node)) {
+    for (auto &child : mn->values)
+      if (child) collectRotateIterArgs(child.get(), names, seen);
+    return;
+  }
+  if (node->HasBody()) {
+    auto body = node->GetBody();
+    if (body) collectRotateIterArgs(body.get(), names, seen);
+  }
+}
+
 bool hasEarlyExit(AST::Node *node) {
   if (!node) return false;
   if (isa<AST::Break>(node) || isa<AST::Continue>(node)) return true;
@@ -823,6 +849,10 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
   llvm::StringSet<> scalarSeen;
   if (fb.stmts) collectScalarIterArgs(fb.stmts.get(), scalarNames, scalarSeen);
 
+  llvm::SmallVector<std::string> rotateNames;
+  llvm::StringSet<> rotateSeen;
+  if (fb.stmts) collectRotateIterArgs(fb.stmts.get(), rotateNames, rotateSeen);
+
   llvm::SmallVector<mlir::Value> iterArgs;
   llvm::SmallVector<mlir::Type> iterTypes;
   llvm::SmallVector<std::string> iterNames;
@@ -843,6 +873,29 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
       iterTypes.push_back(val.getType());
       iterNames.push_back(name);
       iterSeen.insert(name);
+    }
+  }
+  for (auto &name : rotateNames) {
+    if (iterSeen.count(name)) continue;
+    auto val = LookupValue(name);
+    auto asyncTy = coir::AsyncTokenType::get(&IRContext());
+    if (!val) {
+      val = builder.create<coir::AsyncUndefOp>(loc, asyncTy).getResult();
+      MapValue(name, val);
+    }
+    iterArgs.push_back(val);
+    iterTypes.push_back(val.getType());
+    iterNames.push_back(name);
+    iterSeen.insert(name);
+    auto dataName = name + ".data";
+    if (!iterSeen.count(dataName)) {
+      auto dataVal = LookupValue(dataName);
+      if (dataVal && mlir::isa<coir::TensorType>(dataVal.getType())) {
+        iterArgs.push_back(dataVal);
+        iterTypes.push_back(dataVal.getType());
+        iterNames.push_back(dataName);
+        iterSeen.insert(dataName);
+      }
     }
   }
 
@@ -1877,6 +1930,15 @@ bool ASTCoIRGen::Visit(AST::Rotate &rot) {
       loc, resultTypes, tokens);
   for (unsigned i = 0; i < names.size(); ++i)
     UpdateValue(names[i], rotateOp.getResult(i));
+  // Left-rotate the .data associations to match the token rotation.
+  llvm::SmallVector<mlir::Value> dataVals;
+  for (auto &name : names)
+    dataVals.push_back(LookupValue(name + ".data"));
+  for (unsigned i = 0; i < names.size(); ++i) {
+    auto rotatedData = dataVals[(i + 1) % names.size()];
+    if (rotatedData)
+      UpdateValue(names[i] + ".data", rotatedData);
+  }
   return true;
 }
 

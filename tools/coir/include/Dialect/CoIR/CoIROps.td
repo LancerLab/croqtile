@@ -401,6 +401,17 @@ def EventWaitOp : CoIR_Op<"event.wait", []> {
   let assemblyFormat = "$event_name (`[` $subscript^ `]`)? attr-dict";
 }
 
+def AsyncUndefOp : CoIR_Op<"async.undef", [NoMemoryEffect]> {
+  let summary = "Placeholder async token for uninitialized futures";
+  let description = [{
+    Produces an undefined async token value.  Used as the initial iter_arg
+    for loop-carried futures that are assigned inside the loop body before
+    first use (e.g. the second buffer in a double-buffering swap pattern).
+  }];
+  let results = (outs CoIR_AsyncTokenTypeC:$result);
+  let assemblyFormat = "attr-dict `:` type($result)";
+}
+
 def FutureRotateOp : CoIR_Op<"async.rotate", []> {
   let summary = "Left-rotate async handles (swap when arity=2)";
   let description = [{
