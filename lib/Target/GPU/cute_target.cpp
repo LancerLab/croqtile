@@ -95,7 +95,9 @@ public:
   const std::string Name() const override { return "gpu"; }
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
 
-  bool PlanCodeGenStages(ASTPipeline&) const override { return false; }
+  bool PlanCodeGenStages(ASTPipeline&) const override {
+    choreo_unreachable("NVPTX target uses CoIR pipeline, not AST codegen");
+  }
 
 private:
   static int id;
