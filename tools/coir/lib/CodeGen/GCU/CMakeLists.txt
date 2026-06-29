@@ -21,7 +21,6 @@ if(NOT EXISTS "${_KURAMA_MARKER}" AND COIR_AUTO_DOWNLOAD_KURAMA AND _KUR_KURAMA_
     message(STATUS "GCU native: kurama not found, downloading...")
     file(DOWNLOAD "${_KUR_KURAMA_URL}" "${_KUR_TAR}"
       SHOW_PROGRESS
-      EXPECTED_MD5 "${_KUR_KURAMA_MD5}"
       STATUS _kur_dl_status
       TIMEOUT 300)
     list(GET _kur_dl_status 0 _kur_dl_code)
@@ -31,7 +30,16 @@ if(NOT EXISTS "${_KURAMA_MARKER}" AND COIR_AUTO_DOWNLOAD_KURAMA AND _KUR_KURAMA_
       message(WARNING
         "Failed to download kurama toolchain: ${_kur_dl_msg}\n"
         "GCU native codegen will be disabled.\n"
-        "Run: make -C extern setup-kurama-kit FTP_SERVER=172.16.11.18")
+        "Re-run cmake with -DCOIR_AUTO_DOWNLOAD_KURAMA=OFF to skip, "
+        "or check network/FTP access.")
+    elseif(_KUR_KURAMA_MD5)
+      file(MD5 "${_KUR_TAR}" _kur_actual_md5)
+      if(NOT _kur_actual_md5 STREQUAL _KUR_KURAMA_MD5)
+        file(REMOVE "${_KUR_TAR}")
+        message(WARNING
+          "Kurama tarball MD5 mismatch: expected ${_KUR_KURAMA_MD5}, got ${_kur_actual_md5}\n"
+          "GCU native codegen will be disabled.")
+      endif()
     endif()
   endif()
 
