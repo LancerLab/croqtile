@@ -1,8 +1,0 @@
-// RUN: not choreo -es -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s
-
-__co__ auto test_u64_unsupported(int i) {
-  u64 a = __to<u64>(i);
-  return a;
-}
-
-// CHECK: error: the target type 'u64' is not supported by the current target 'topscc' (arch: gcu300).

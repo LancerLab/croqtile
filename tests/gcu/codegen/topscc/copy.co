@@ -11,8 +11,10 @@ __co__ auto foo(f32 [32, 4] a) {
 
 
 // CHECK-HT: __global__ void __choreo_device_foo(float * a, float * data) {
+// CHECK-HT:   choreo::choreo_sdte __choreo_dte_pool__[1];
+// CHECK-HT:   for (int __i = 0; __i < 1; ++__i) __choreo_dte_pool__[__i].init();
 // CHECK-HT:   __local__ __valigned__ float anon_0[32];
-// CHECK-HT:   choreo::choreo_sdte choreo_topscc_ctx0;
+// CHECK-HT:   choreo::future __choreo_anon_fut__0(__choreo_dte_pool__[0], "", 7, 5, anon_0);
 // CHECK-HT:   tops::mdspan __mds0_data(tops::Global, (float*)data, 32, 4);
 // CHECK-HT:   tops::mdspan __mds1_anon_0(tops::Private, (float*)anon_0, 16, 2);
 // CHECK-HT:   int __slice_offset0__data_2_anon_0[] = {(int)((__tops_tid_x() * 16)), (int)((__tops_tid_x() * 2))};
@@ -37,9 +39,10 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK-HT: }
 
 // CHECK-NHT: __global__ void __choreo_device_foo(float * a, float * data) {
+// CHECK-NHT:   choreo::choreo_sdte __choreo_dte_pool__[1];
+// CHECK-NHT:   for (int __i = 0; __i < 1; ++__i) __choreo_dte_pool__[__i].init();
 // CHECK-NHT:   __local__ __valigned__ float anon_0[32];
-// CHECK-NHT:   choreo::choreo_sdte choreo_topscc_ctx0;
-// CHECK-NHT:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", 7, 5, anon_0);
+// CHECK-NHT:   choreo::future __choreo_anon_fut__0(__choreo_dte_pool__[0], "", 7, 5, anon_0);
 // CHECK-NHT:   tops::mdspan __mds0_data(tops::Global, (float*)data, 32, 4);
 // CHECK-NHT:   tops::mdspan __mds1_anon_0(tops::Private, (float*)anon_0, 16, 2);
 // CHECK-NHT:   int __slice_offset0__data_2_anon_0[] = {(int)((__tops_tid_x() * 16)), (int)((__tops_tid_x() * 2))};

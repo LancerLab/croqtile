@@ -38,14 +38,15 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 //}
 
 // CHECK: __global__ void __choreo_device_foo(float * a) {
+// CHECK:   choreo::choreo_sdte __choreo_dte_pool__[1];
+// CHECK:   for (int __i = 0; __i < 1; ++__i) __choreo_dte_pool__[__i].init();
 // CHECK:   {
 // CHECK:     int __iv_x = 0;
 // CHECK:     int __iv_y = 0;
 // CHECK:     for (__iv_x = 0; __iv_x < 4; ++__iv_x) {
 // CHECK:       for (__iv_y = 0; __iv_y < 9; ++__iv_y) {
 // CHECK:         __local__ __valigned__ float anon_0[48];
-// CHECK:         choreo::choreo_sdte choreo_topscc_ctx0;
-// CHECK:         choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]+}}, {{[0-9]+}}, anon_0);
+// CHECK:         choreo::future __choreo_anon_fut__0(__choreo_dte_pool__[0], "", {{[0-9]+}}, {{[0-9]+}}, anon_0);
 // CHECK:         tops::mdspan __mds0_a(tops::Global, (float*)a, 32, 4, 27);
 // CHECK:         tops::mdspan __mds1_anon_0(tops::Private, (float*)anon_0, 16, 1, 3);
 // CHECK:         int __slice_offset0__a_2_anon_0[] = {(int)((__tops_tid_x() * 16)), (int)(__iv_x), (int)((__iv_y * 3))};
@@ -71,14 +72,15 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK: }
 
 // CHECK: __global__ void __choreo_device_bar(choreo::f16 * a) {
+// CHECK:   choreo::choreo_sdte __choreo_dte_pool__[1];
+// CHECK:   for (int __i = 0; __i < 1; ++__i) __choreo_dte_pool__[__i].init();
 // CHECK:   {
 // CHECK:     int __iv_index__elem__0 = 0;
 // CHECK:     int __iv_index__elem__1 = 0;
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
 // CHECK:       for (__iv_index__elem__1 = 0; __iv_index__elem__1 < 4; ++__iv_index__elem__1) {
 // CHECK:         __local__ __valigned__ choreo::half anon_1[10304];
-// CHECK:         choreo::choreo_sdte choreo_topscc_ctx1;
-// CHECK:         choreo::future __choreo_anon_fut__1(choreo_topscc_ctx1, "", {{[0-9]+}}, {{[0-9]+}}, anon_1);
+// CHECK:         choreo::future __choreo_anon_fut__1(__choreo_dte_pool__[0], "", {{[0-9]+}}, {{[0-9]+}}, anon_1);
 // CHECK:         tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 128, 4, 14, 69);
 // CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (choreo::half*)anon_1, 64, 1, 7, 23);
 // CHECK:         int __slice_offset1__a_2_anon_1[] = {(int)((__iv_index__elem__0 * 64)), (int)(__iv_index__elem__1), (int)((__tops_bid_x() * 7)), (int)((__tops_tid_x() * 23))};

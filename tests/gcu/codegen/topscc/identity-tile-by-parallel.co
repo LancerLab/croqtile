@@ -57,6 +57,8 @@ int main() { /// host program
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
+// CHECK:  choreo::choreo_sdte __choreo_dte_pool__[2];
+// CHECK:  for (int __i = 0; __i < 2; ++__i) __choreo_dte_pool__[__i].init();
 // CHECK:  __shared__ float l2_out[5120];
 // CHECK:  __shared__ float input_load__buf__[5120];
 // CHECK:  choreo::choreo_cdte choreo_topscc_ctx0;
@@ -71,19 +73,17 @@ int main() { /// host program
 // CHECK:  }
 // CHECK:  __syncthreads();
 // CHECK:  __local__ __valigned__ float input_load_s__buf__[1024];
-// CHECK:  choreo::choreo_sdte choreo_topscc_ctx1;
 // CHECK:  tops::mdspan __mds2_input_load(tops::Shared, (float*)input_load.data() + (__tops_tid_x() * 1024), 1024);
 // CHECK:  tops::mdspan __mds3_input_load_s__buf__(tops::Private, (float*)input_load_s__buf__, 1024);
 // CHECK:  tops::event input_load_s__event__ = tops::memcpy_async(*input_load_s.get_ctx(), __mds3_input_load_s__buf__, __mds2_input_load);
 // CHECK:  input_load_s.set_event(input_load_s__event__);
 // CHECK:  input_load_s.wait();
-// CHECK:  choreo::choreo_sdte choreo_topscc_ctx2;
 // CHECK:  tops::mdspan __mds4_input_load_s(tops::Private, (float*)input_load_s.data(), 1024);
 // CHECK:  tops::mdspan __mds5_l2_out(tops::Shared, (float*)l2_out + (__tops_tid_x() * 1024), 1024);
 // CHECK:  tops::event out_store_s__event__ = tops::memcpy_async(*out_store_s.get_ctx(), __mds5_l2_out, __mds4_input_load_s);
 // CHECK:  out_store_s.set_event(out_store_s__event__);
 // CHECK:  out_store_s.wait();
-// CHECK:  choreo::choreo_cdte choreo_topscc_ctx3;
+// CHECK:  choreo::choreo_cdte choreo_topscc_ctx1;
 // CHECK:  tops::mdspan __mds6_l2_out(tops::Shared, (float*)l2_out, 5120);
 // CHECK:  tops::mdspan __mds7_output(tops::Global, (float*)output + (__tops_bid_x() * 5120), 5120);
 // CHECK:  if (__CHOREO_BLOCK_SINGLE__) {

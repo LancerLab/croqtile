@@ -1,0 +1,8 @@
+// RUN: not choreo -es -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s
+
+__co__ auto test_f8e4m3_unsupported(int i) {
+  f8_e4m3 a = __to<f8_e4m3>(i);
+  return a;
+}
+
+// CHECK: error: the target type 'f8_e4m3' is not supported by the current target 'topscc' (arch: gcu300).

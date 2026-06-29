@@ -16,6 +16,6 @@ __co__ void foo(int x) {
 
 // Both printfs should reference `x` (the parameter), not `(x + 10)`.
 // CHECK: __global__ void __choreo_device_foo
-// CHECK: printf("%lld\n", static_cast<long long>(x));
-// CHECK: printf("%lld\n", static_cast<long long>(x));
+// CHECK: printf("%lld\n", static_cast<int64_t>(x));
+// CHECK: printf("%lld\n", static_cast<int64_t>(x));
 // CHECK-NOT: (x + 10)

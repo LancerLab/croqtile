@@ -26,4 +26,4 @@ __co__ void foo(s32 yyy) {
 // CHECK:  int x = 555;
 // CHECK:  x = 1;
 // CHECK:  int y = (x + yyy);
-// CHECK:  printf("%lld\n", static_cast<long long>(y));
+// CHECK:  printf("%lld\n", static_cast<int64_t>(y));
