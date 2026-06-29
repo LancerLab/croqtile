@@ -13,4 +13,4 @@ __co__ void baz(int a) {
 // After the declaration, println(a) should reference the inner `a`.
 // FCtx optimizes it to (a + 7) where `a` is the parameter.
 // CHECK: __global__ void __choreo_device_baz
-// CHECK: printf("%lld\n", static_cast<long long>((a + 7)));
+// CHECK: printf("%lld\n", static_cast<int64_t>((a + 7)));
