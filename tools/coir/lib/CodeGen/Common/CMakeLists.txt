@@ -1,5 +1,6 @@
 add_library(MLIRCoIRCodeGenCommon STATIC
   ../CoIREmitterBase.cpp
+  ../CoIRKernelLowering.cpp
 )
 
 target_include_directories(MLIRCoIRCodeGenCommon PUBLIC
@@ -10,6 +11,8 @@ target_include_directories(MLIRCoIRCodeGenCommon PUBLIC
 target_link_libraries(MLIRCoIRCodeGenCommon PUBLIC
   MLIRArithDialect
   MLIRSCFDialect
+  MLIRGPUDialect
+  MLIRMemRefDialect
   MLIRIR
   LLVMCore
   LLVMSupport
