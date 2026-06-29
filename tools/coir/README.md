@@ -35,13 +35,14 @@ make coir-test
 Or configure manually with CMake:
 
 ```bash
+# Build only CoIR (skip choreo compiler)
 cmake -S . -B build -G Ninja \
-  -DCHOREO_BUILD_COIR=ON \
+  -DCROQ_PROJECT="coir" \
   -DCMAKE_BUILD_TYPE=Release
 ninja -C build co2ir coir-opt cocc
 ```
 
-To disable the automatic download, pass `-DCOIR_AUTO_DOWNLOAD_LLVM=OFF`.
+To disable the automatic LLVM download, pass `-DCOIR_AUTO_DOWNLOAD_LLVM=OFF`.
 
 ## Usage
 

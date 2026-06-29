@@ -72,7 +72,9 @@ results.tsv
 tools/coir/lib/CodeGen/GCU/
 tools/coir/tests/gcu/
 tools/coir/tests/driver/emit-topscc.co
-tools/coir/llvm-dep.conf
+
+# Dependency config (managed as conflict path, different per branch)
+cmake/deps.conf
 
 # External deps (managed separately per repo)
 extern/*

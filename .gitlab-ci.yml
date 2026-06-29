@@ -51,11 +51,11 @@ gpu_test:
   before_script:
     - |
       if echo "$CI_COMMIT_BRANCH" | grep -q '^oss/'; then
-        echo "OSS branch detected -- using llvm-dep.conf from main..."
+        echo "OSS branch detected -- using cmake/deps.conf from main..."
         git fetch origin main --depth=1
-        git show origin/main:tools/coir/llvm-dep.conf > tools/coir/llvm-dep.conf
-        echo "llvm-dep.conf overridden:"
-        cat tools/coir/llvm-dep.conf
+        git show origin/main:cmake/deps.conf > cmake/deps.conf
+        echo "cmake/deps.conf overridden:"
+        cat cmake/deps.conf
       fi
   script:
     - echo "Running tests with GPU..."

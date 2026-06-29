@@ -2,9 +2,9 @@
 set(_KURAMA_ROOT "${CMAKE_SOURCE_DIR}/extern/kurama")
 set(_KURAMA_MARKER "${_KURAMA_ROOT}/bin/gcu-compiler-opt")
 
-set(_DEP_CONF "${CMAKE_CURRENT_SOURCE_DIR}/kurama-dep.conf")
+set(_DEP_CONF "${CMAKE_SOURCE_DIR}/cmake/deps.conf")
 if(EXISTS "${_DEP_CONF}")
-  file(STRINGS "${_DEP_CONF}" _kur_lines REGEX "^[A-Z_0-9]+=")
+  file(STRINGS "${_DEP_CONF}" _kur_lines REGEX "^KURAMA_[A-Z_0-9]+=")
   foreach(_line ${_kur_lines})
     string(REGEX MATCH "^([A-Z_0-9]+)=(.*)" _ "${_line}")
     set(_KUR_${CMAKE_MATCH_1} "${CMAKE_MATCH_2}")

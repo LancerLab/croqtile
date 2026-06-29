@@ -12,4 +12,4 @@
 .gitmodules
 .gitattributes
 .clang-format
-tools/coir/llvm-dep.conf
+cmake/deps.conf

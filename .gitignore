@@ -37,7 +37,6 @@ tests/*.sh
 extern/clang-format*
 
 !extern/Makefile
-!extern/cutlass
 
 # co-web (WASM build artifacts)
 build-wasm/

@@ -21,10 +21,42 @@ Choreo is a low-level Embedded Domain Specific Language (EDSL) for C++ that prog
 
 ### BAD BUILD COMMANDS: AVOID to use cmake directly if make commands can do the thing
 
-### CoIR (MLIR-based IR tooling)
+### CMake Project and Target Selection
 
-CoIR requires LLVM/MLIR. CMake downloads it automatically into
-`extern/llvm-project/` on first build when it is not present.
+Use `CROQ_PROJECT` to select which projects to build (semicolon-separated,
+like LLVM's `LLVM_ENABLE_PROJECTS`):
+
+```bash
+cmake -DCROQ_PROJECT="choreo;coir" ...   # default
+cmake -DCROQ_PROJECT="coir" ...          # coir only
+cmake -DCROQ_PROJECT="choreo;co-mock" ...
+```
+
+Available projects: `choreo`, `coir`, `co-mock`, `co-web`.
+
+Use `CROQ_TARGET` to select which target backends to build:
+
+```bash
+cmake -DCROQ_TARGET="all" ...            # default: all backends
+cmake -DCROQ_TARGET="gpu;cpu" ...        # GPU + CPU only
+cmake -DCROQ_TARGET="cpu" ...            # CPU only
+```
+
+Available targets: `all`, plus any directory under `lib/Target/` (e.g.
+`gpu`, `cpu`, `amdgpu`, `hetero`). Each backend's `target.aliases` file
+defines extra accepted names (e.g. `cute` and `nvptx` map to the GPU
+backend, `hip` maps to AMDGPU, `cc` maps to CPU). Unknown names are
+silently ignored.
+
+Toolchain dependencies (CUDA/CUTLASS, HIP/ROCm) are only probed when the
+corresponding target is enabled (GPU needs CUDA/CUTLASS, AMDGPU needs ROCm).
+
+All sub-projects share the Choreo core libraries (parser, codegen, targets).
+Software dependencies (flex/bison, LLVM/MLIR, CUTLASS) are auto-downloaded
+by CMake when not present in `extern/`. Dependency URLs and versions are
+configured in `cmake/deps.conf` (branch-specific, see `oss_conflict_paths.txt`).
+
+### CoIR (MLIR-based IR tooling)
 
 | Command | Description |
 |---------|-------------|

@@ -1,6 +1,4 @@
-option(CHOREO_BUILD_CO_MOCK "Build the mock interpreter tool (co-mock)" ON)
-option(CHOREO_BUILD_CO_WEB "Build the web playground (co-web, requires Emscripten)" ON)
-option(CHOREO_BUILD_COIR "Build CoIR IR tools (requires LLVM/MLIR)" OFF)
+# Project selection is driven by CROQ_PROJECT in the root CMakeLists.txt.
 
 if(CHOREO_BUILD_CO_MOCK)
   add_subdirectory(co-mock)

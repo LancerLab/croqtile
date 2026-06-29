@@ -378,12 +378,12 @@ mode_tree() {
 mode_staged() {
   echo "Scanning staged changes..."
 
-  # Scan paths of staged files (process substitution to avoid subshell)
-  scan_paths "staged" < <(git -C "$REPO_ROOT" diff --cached --name-only)
+  # Scan paths of staged files, filtering excluded paths
+  scan_paths "staged" < <(git -C "$REPO_ROOT" diff --cached --name-only | filter_excluded_paths)
 
-  # Scan added lines in staged diff
+  # Scan added lines in staged diff (only for non-excluded files)
   local diff_text
-  diff_text="$(git -C "$REPO_ROOT" diff --cached)"
+  diff_text="$(git -C "$REPO_ROOT" diff --cached -- $(git -C "$REPO_ROOT" diff --cached --name-only | filter_excluded_paths))"
   scan_content_from_diff "$diff_text" "staged"
 
   # Strict non-ASCII check on staged additions

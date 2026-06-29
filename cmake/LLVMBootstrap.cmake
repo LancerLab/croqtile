@@ -1,7 +1,7 @@
 # LLVMBootstrap.cmake
 # On-demand LLVM/MLIR dependency for the CoIR tooling.
 #
-# Reads tools/coir/llvm-dep.conf for URL, tarball name, and MD5.
+# Reads LLVM_* entries from cmake/deps.conf for URL, tarball name, and MD5.
 # When LLVM/MLIR is not found in extern/llvm-project/, downloads it
 # automatically (or errors out if COIR_AUTO_DOWNLOAD_LLVM is OFF).
 #
@@ -9,14 +9,14 @@
 
 set(_LLVM_ROOT "${CMAKE_SOURCE_DIR}/extern/llvm-project")
 
-# --- Parse llvm-dep.conf ---
-set(_DEP_CONF "${CMAKE_SOURCE_DIR}/tools/coir/llvm-dep.conf")
+# --- Read LLVM settings from cmake/deps.conf ---
+set(_DEP_CONF "${CMAKE_SOURCE_DIR}/cmake/deps.conf")
 if(NOT EXISTS "${_DEP_CONF}")
   message(FATAL_ERROR
     "Missing ${_DEP_CONF} -- cannot determine LLVM source.\n"
     "This file should contain LLVM_URL, LLVM_TAR, LLVM_MD5, LLVM_SHASH.")
 endif()
-file(STRINGS "${_DEP_CONF}" _dep_lines REGEX "^[A-Z_0-9]+=")
+file(STRINGS "${_DEP_CONF}" _dep_lines REGEX "^LLVM_[A-Z_0-9]+=")
 foreach(_line ${_dep_lines})
   string(REGEX MATCH "^([A-Z_0-9]+)=(.*)" _ "${_line}")
   set(COIR_${CMAKE_MATCH_1} "${CMAKE_MATCH_2}")
