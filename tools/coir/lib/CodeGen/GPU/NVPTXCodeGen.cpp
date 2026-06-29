@@ -67,29 +67,11 @@ public:
     }
 
     std::string stubs = coir::gpu::emitHostStubs(module);
-
     auto &sctx = CoIR::ScriptContext::Get();
 
-    os << "#!/usr/bin/env bash\n";
-    os << "# CoIR generated script -- NVPTX: compile + execute\n";
-    os << "set -eo pipefail\n\n";
+    emitScriptPrologue(os, "NVPTX: compile + execute", "_gpu");
 
-    os << "TMPDIR=$(mktemp -d /tmp/cocc_gpu_XXXXXX)\n";
-    os << "trap 'rm -rf $TMPDIR' EXIT\n\n";
-
-    if (sctx.types_header && sctx.runtime_header) {
-      os << "cat > \"$TMPDIR/choreo_types.h\" << '__COCC_TYPES_HEADER__'\n";
-      os << sctx.types_header;
-      os << "\n__COCC_TYPES_HEADER__\n\n";
-
-      os << "cat > \"$TMPDIR/choreo.h\" << '__COCC_CHOREO_HEADER__'\n";
-      os << sctx.runtime_header;
-      os << "\n__COCC_CHOREO_HEADER__\n\n";
-    }
-
-    if (!sctx.build_env.empty()) {
-      os << sctx.build_env;
-    } else {
+    if (sctx.build_env.empty()) {
       os << "CUDA_HOME=\"${CUDA_HOME:-/usr/local/cuda}\"\n";
       os << "if [[ ! -d \"$CUDA_HOME\" ]]; then\n";
       os << "  echo \"Error: CUDA_HOME not found at $CUDA_HOME\"; exit 1\n";
@@ -112,10 +94,7 @@ public:
 
     os << stubs;
 
-    auto hostAttr =
-        module->getAttrOfType<mlir::StringAttr>("coir.host_code");
-    if (hostAttr && !hostAttr.getValue().empty())
-      os << hostAttr.getValue();
+    emitHostCode(module, os);
 
     os << "\n__COCC_HOST_SOURCE__\n\n";
 
@@ -124,10 +103,7 @@ public:
           "-o \"$TMPDIR/runner\" \"$TMPDIR/host.cpp\" "
           "-L\"${CUDA_HOME}/lib64\" -lcuda 2>&1\n\n";
 
-    os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
-    os << "  shift\n";
-    os << "  \"$TMPDIR/runner\" \"$@\"\n";
-    os << "fi\n";
+    emitScriptExecuteBlock(os);
 
     return 0;
   }

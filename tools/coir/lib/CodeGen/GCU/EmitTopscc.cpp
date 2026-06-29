@@ -6,6 +6,7 @@
 #include "Dialect/CoIR/CoIRTypes.h"
 #include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/Passes.h"
+#include "CodeGen/CoIREmitterBase.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -22,11 +23,13 @@ using namespace coir;
 
 namespace {
 
-class TopsccEmitter {
+class TopsccEmitter : public coir::CoIREmitterBase {
 public:
-  TopsccEmitter(llvm::raw_ostream &os) : os(os), indent(0) {}
+  TopsccEmitter() = default;
 
-  void emitModule(ModuleOp module) {
+  void emitModule(ModuleOp module, llvm::raw_ostream &out) override {
+    os_ = &out;
+    resetState();
     // Read target arch for per-arch DTE type selection.
     archStr = CoIR::GetArch(module).str();
     archNum = parseArchNum(archStr);
@@ -49,7 +52,7 @@ public:
 
     emitHeader();
     if (hasAcoreCall)
-      os << "#include <common/acore_op.h>\n\n";
+      os() << "#include <common/acore_op.h>\n\n";
 
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
@@ -58,23 +61,40 @@ public:
     }
 
     if (!stubCode.empty())
-      os << stubCode;
+      os() << stubCode;
 
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
-        emitHostFunction(kernel);
+        emitHostEntry(kernel);
     }
   }
 
+  int EmitScript(mlir::ModuleOp module, llvm::StringRef /*arch*/,
+                 llvm::raw_ostream &os) override {
+    emitScriptPrologue(os, "compile and execute topscc kernel");
+
+    os << "TOPSCC=\"${TOPSCC:-topscc}\"\n";
+    os << "if ! command -v \"$TOPSCC\" &>/dev/null; then\n";
+    os << "  echo \"Error: topscc not found\"; exit 1\n";
+    os << "fi\n\n";
+
+    os << "TMPFILE=\"$TMPDIR/kernel.cc\"\n";
+    os << "BINFILE=\"$TMPDIR/kernel\"\n\n";
+    os << "cat > \"$TMPFILE\" << '__COIR_TOPSCC_SOURCE__'\n";
+    EmitSource(module, "", os);
+
+    os << "\n__COIR_TOPSCC_SOURCE__\n\n";
+    os << "\"$TOPSCC\" ${CFLAGS} -D__CHOREO_DMA_DIAGNOSIS__"
+          " -I\"$TMPDIR\" -I\"$TMPDIR/topscc\" "
+          "-o \"$BINFILE\" \"$TMPFILE\" -lpthread -ldl -lrt 2>&1\n";
+    emitScriptExecuteBlock(os);
+    return 0;
+  }
+
+
 private:
-  llvm::raw_ostream &os;
-  unsigned indent;
   std::string archStr;
   int archNum = 0;
-  DenseMap<Value, std::string> valueNames;
-  DenseMap<unsigned, std::string> returnParamNames;
-  DenseSet<Value> returnValues;
-  unsigned nextId = 0;
 
   bool hasGroupLevel() const { return archNum >= 400; }
 
@@ -88,20 +108,7 @@ private:
     return std::stoi(std::string(it.base(), numEnd.base()));
   }
 
-  std::string getIndent() { return std::string(indent * 2, ' '); }
-  void incIndent() { indent++; }
-  void decIndent() { if (indent > 0) indent--; }
-
-  std::string getName(Value v) {
-    auto it = valueNames.find(v);
-    if (it != valueNames.end())
-      return it->second;
-    std::string name = "v" + std::to_string(nextId++);
-    valueNames[v] = name;
-    return name;
-  }
-
-  std::string emitType(Type ty) {
+  std::string emitType(Type ty) override {
     if (auto tensorTy = dyn_cast<coir::TensorType>(ty))
       return emitType(tensorTy.getElementType()) + "*";
     if (ty.isIndex()) return "int";
@@ -140,10 +147,10 @@ private:
   bool needsExplicitInit() const { return true; }
 
   void emitHeader() {
-    os << "#include <stdint.h>\n";
-    os << "#include <tops.h>\n";
-    os << "#include \"tops/tops_runtime.h\"\n";
-    os << "#include \"choreo.h\"\n\n";
+    os() << "#include <stdint.h>\n";
+    os() << "#include <tops.h>\n";
+    os() << "#include \"tops/tops_runtime.h\"\n";
+    os() << "#include \"choreo.h\"\n\n";
   }
 
   void preCollectStubs(KernelOp kernel) {
@@ -248,7 +255,7 @@ private:
     bool isMultiDevice = hasDeviceParallel(kernel);
 
     if (!stubDeclCode.empty()) {
-      os << stubDeclCode;
+      os() << stubDeclCode;
       stubDeclCode.clear();
     }
 
@@ -259,21 +266,21 @@ private:
       auto td = [&](unsigned i) -> int64_t {
         return i < lc.threadDims.size() ? lc.threadDims[i] : 1;
       };
-      os << "__thread_dims__(" << td(0) << ", " << td(1) << ", " << td(2)
+      os() << "__thread_dims__(" << td(0) << ", " << td(1) << ", " << td(2)
          << ")\n";
     }
 
-    os << "__device__ void " << kernel.getSymName() << "(";
+    os() << "__device__ void " << kernel.getSymName() << "(";
 
     auto &body = kernel.getBody();
     unsigned paramIdx = 0;
     if (!body.empty()) {
       auto args = body.getArguments();
       for (unsigned i = 0; i < args.size(); ++i) {
-        if (paramIdx > 0) os << ", ";
+        if (paramIdx > 0) os() << ", ";
         std::string name = "arg" + std::to_string(paramIdx);
         valueNames[args[i]] = name;
-        os << emitType(fnType.getInput(i)) << " " << name;
+        os() << emitType(fnType.getInput(i)) << " " << name;
         paramIdx++;
       }
     }
@@ -282,18 +289,18 @@ private:
       if (argIdx >= 0) {
         returnParamNames[i] = "arg" + std::to_string(argIdx);
       } else {
-        if (paramIdx > 0) os << ", ";
+        if (paramIdx > 0) os() << ", ";
         std::string name = "out" + std::to_string(i);
-        os << emitType(fnType.getResult(i)) << " " << name;
+        os() << emitType(fnType.getResult(i)) << " " << name;
         returnParamNames[i] = name;
         paramIdx++;
       }
     }
     if (isMultiDevice) {
-      if (paramIdx > 0) os << ", ";
-      os << "int __device_id";
+      if (paramIdx > 0) os() << ", ";
+      os() << "int __device_id";
     }
-    os << ") {\n";
+    os() << ") {\n";
     incIndent();
 
     for (auto &op : body.front().getOperations()) {
@@ -310,18 +317,7 @@ private:
       emitOp(&op);
 
     decIndent();
-    os << "}\n\n";
-  }
-
-  int64_t getTensorBytes(coir::TensorType tty) {
-    int64_t n = 1;
-    for (auto d : tty.getShape()) n *= d;
-    Type eTy = tty.getElementType();
-    int64_t elemSize = 4;
-    if (eTy.isF16() || eTy.isBF16() || eTy.isInteger(16)) elemSize = 2;
-    else if (eTy.isF64() || eTy.isInteger(64)) elemSize = 8;
-    else if (eTy.isInteger(8)) elemSize = 1;
-    return n * elemSize;
+    os() << "}\n\n";
   }
 
   int64_t getTensorNumElems(coir::TensorType tty) {
@@ -341,7 +337,7 @@ private:
     return emitType(resTy);
   }
 
-  void emitHostFunction(KernelOp kernel) {
+  void emitHostEntry(KernelOp kernel) override {
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
@@ -363,47 +359,47 @@ private:
         auto td = [&](unsigned i) -> int64_t {
           return i < lc.threadDims.size() ? lc.threadDims[i] : 1;
         };
-        os << "__thread_dims__(" << td(0) << ", " << td(1) << ", " << td(2)
+        os() << "__thread_dims__(" << td(0) << ", " << td(1) << ", " << td(2)
            << ")\n";
       }
-      os << "__global__ void __coir_global_" << name.str() << "(";
+      os() << "__global__ void __coir_global_" << name.str() << "(";
       for (unsigned i = 0; i < numInputs; ++i) {
-        if (i > 0) os << ", ";
-        os << emitType(fnType.getInput(i)) << " g_in" << i;
+        if (i > 0) os() << ", ";
+        os() << emitType(fnType.getInput(i)) << " g_in" << i;
       }
       if (retInputIdx < 0)
-        os << ", " << eType << "* g_out, int N";
+        os() << ", " << eType << "* g_out, int N";
       if (isMultiDevice)
-        os << ", int __device_id";
-      os << ") {\n";
-      os << "  " << name.str() << "(";
+        os() << ", int __device_id";
+      os() << ") {\n";
+      os() << "  " << name.str() << "(";
       for (unsigned i = 0; i < numInputs; ++i) {
-        if (i > 0) os << ", ";
-        os << "g_in" << i;
+        if (i > 0) os() << ", ";
+        os() << "g_in" << i;
       }
       if (retInputIdx < 0)
-        os << ", g_out";
+        os() << ", g_out";
       if (isMultiDevice)
-        os << ", __device_id";
-      os << ");\n";
-      os << "}\n\n";
+        os() << ", __device_id";
+      os() << ");\n";
+      os() << "}\n\n";
     }
 
     // Host function signature.
-    os << hostReturnType(fnType) << " " << name.str() << "(";
+    os() << hostReturnType(fnType) << " " << name.str() << "(";
     for (unsigned i = 0; i < numInputs; ++i) {
-      if (i > 0) os << ", ";
+      if (i > 0) os() << ", ";
       auto inTy = fnType.getInput(i);
       if (auto tensorTy = dyn_cast<coir::TensorType>(inTy)) {
         unsigned inDim = tensorTy.getShape().size();
-        os << "const choreo::spanned_view<"
+        os() << "const choreo::spanned_view<"
            << choreoType(tensorTy.getElementType()) << ", "
            << inDim << "> & p" << i;
       } else {
-        os << emitType(inTy) << " p" << i;
+        os() << emitType(inTy) << " p" << i;
       }
     }
-    os << ") {\n";
+    os() << ") {\n";
 
     if (needsDevice && resTy) {
       emitDeviceOffloadBody(kernel, resTy);
@@ -420,7 +416,7 @@ private:
       }
     }
 
-    os << "}\n\n";
+    os() << "}\n\n";
   }
 
   bool isDeviceGlobal(coir::TensorType tty) {
@@ -455,16 +451,16 @@ private:
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) {
         std::string inEType = emitType(tty.getElementType());
-        os << "  " << inEType << "* p" << i
+        os() << "  " << inEType << "* p" << i
            << "__device = const_cast<" << inEType << "*>(p" << i
            << ".data());\n";
       } else {
         int64_t bytes = tty ? getTensorBytes(tty) : resBytes;
         std::string inEType = tty ? emitType(tty.getElementType()) : eType;
-        os << "  " << inEType << "* p" << i << "__device = nullptr;\n";
-        os << "  topsMalloc((void**)&p" << i << "__device, "
+        os() << "  " << inEType << "* p" << i << "__device = nullptr;\n";
+        os() << "  topsMalloc((void**)&p" << i << "__device, "
            << bytes << "ULL);\n";
-        os << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+        os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
            << bytes << "ULL, topsMemcpyHostToDevice);\n";
       }
     }
@@ -481,47 +477,47 @@ private:
     }
 
     if (retInputIdx >= 0) {
-      os << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
+      os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
          << bdims << ">>>(";
       for (unsigned i = 0; i < numInputs; ++i) {
-        if (i > 0) os << ", ";
-        os << "p" << i << "__device";
+        if (i > 0) os() << ", ";
+        os() << "p" << i << "__device";
       }
-      os << ");\n";
-      os << "  topsDeviceSynchronize();\n";
-      os << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+      os() << ");\n";
+      os() << "  topsDeviceSynchronize();\n";
+      os() << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
          << ".data()), p" << retInputIdx << "__device, "
          << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
       for (unsigned i = 0; i < numInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (tty && isDeviceGlobal(tty)) continue;
-        os << "  topsFree(p" << i << "__device);\n";
+        os() << "  topsFree(p" << i << "__device);\n";
       }
-      os << "  return choreo::copy_as_spanned(p" << retInputIdx
+      os() << "  return choreo::copy_as_spanned(p" << retInputIdx
          << ".data(), p" << retInputIdx << ".shape());\n";
     } else {
-      os << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
+      os() << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
          << ndim << ">(" << shapeStr << ");\n";
-      os << "  " << eType << "* __result__device = nullptr;\n";
-      os << "  topsMalloc((void**)&__result__device, " << resBytes
+      os() << "  " << eType << "* __result__device = nullptr;\n";
+      os() << "  topsMalloc((void**)&__result__device, " << resBytes
          << "ULL);\n";
-      os << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
+      os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
          << bdims << ">>>(";
       for (unsigned i = 0; i < numInputs; ++i) {
-        if (i > 0) os << ", ";
-        os << "p" << i << "__device";
+        if (i > 0) os() << ", ";
+        os() << "p" << i << "__device";
       }
-      os << ", __result__device, " << resN << ");\n";
-      os << "  topsDeviceSynchronize();\n";
-      os << "  topsMemcpy(__result.data(), __result__device, "
+      os() << ", __result__device, " << resN << ");\n";
+      os() << "  topsDeviceSynchronize();\n";
+      os() << "  topsMemcpy(__result.data(), __result__device, "
          << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
       for (unsigned i = 0; i < numInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (tty && isDeviceGlobal(tty)) continue;
-        os << "  topsFree(p" << i << "__device);\n";
+        os() << "  topsFree(p" << i << "__device);\n";
       }
-      os << "  topsFree(__result__device);\n";
-      os << "  return __result;\n";
+      os() << "  topsFree(__result__device);\n";
+      os() << "  return __result;\n";
     }
   }
 
@@ -556,74 +552,74 @@ private:
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) continue;
       std::string inEType = tty ? emitType(tty.getElementType()) : eType;
-      os << "  std::vector<" << inEType << "*> p" << i
+      os() << "  std::vector<" << inEType << "*> p" << i
          << "__device_vec(" << dc << ", nullptr);\n";
     }
     if (retInputIdx < 0) {
-      os << "  " << eType << "* __result_buf = (" << eType
+      os() << "  " << eType << "* __result_buf = (" << eType
          << "*)malloc(" << resBytes << "ULL);\n";
-      os << "  topsHostRegister(__result_buf, " << resBytes
+      os() << "  topsHostRegister(__result_buf, " << resBytes
          << "ULL, topsHostRegisterPortable);\n";
-      os << "  std::vector<" << eType << "*> __result__device_vec("
+      os() << "  std::vector<" << eType << "*> __result__device_vec("
          << dc << ", nullptr);\n";
     }
 
     // Device loop: topsSetDevice + malloc + H2D + launch
-    os << "  for (int __d = 0; __d < " << dc << "; ++__d) {\n";
-    os << "    topsSetDevice(__d);\n";
+    os() << "  for (int __d = 0; __d < " << dc << "; ++__d) {\n";
+    os() << "    topsSetDevice(__d);\n";
 
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) continue;
       int64_t bytes = tty ? getTensorBytes(tty) : resBytes;
-      os << "    topsMalloc((void**)&p" << i << "__device_vec[__d], "
+      os() << "    topsMalloc((void**)&p" << i << "__device_vec[__d], "
          << bytes << "ULL);\n";
-      os << "    topsMemcpy(p" << i << "__device_vec[__d], p" << i
+      os() << "    topsMemcpy(p" << i << "__device_vec[__d], p" << i
          << ".data(), " << bytes << "ULL, topsMemcpyHostToDevice);\n";
     }
 
     if (retInputIdx < 0) {
-      os << "    topsMalloc((void**)&__result__device_vec[__d], "
+      os() << "    topsMalloc((void**)&__result__device_vec[__d], "
          << resBytes << "ULL);\n";
     }
 
     // Kernel launch with device ID
-    os << "    __coir_global_" << name.str() << "<<<" << gdims << ", "
+    os() << "    __coir_global_" << name.str() << "<<<" << gdims << ", "
        << bdims << ">>>(";
     bool first = true;
     for (unsigned i = 0; i < numInputs; ++i) {
-      if (!first) os << ", ";
+      if (!first) os() << ", ";
       first = false;
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty))
-        os << "const_cast<" << emitType(tty.getElementType())
+        os() << "const_cast<" << emitType(tty.getElementType())
            << "*>(p" << i << ".data())";
       else
-        os << "p" << i << "__device_vec[__d]";
+        os() << "p" << i << "__device_vec[__d]";
     }
     if (retInputIdx < 0) {
-      if (!first) os << ", ";
-      os << "__result__device_vec[__d], " << resN;
+      if (!first) os() << ", ";
+      os() << "__result__device_vec[__d], " << resN;
     }
-    os << ", __d);\n";
+    os() << ", __d);\n";
 
-    os << "  }\n";
+    os() << "  }\n";
 
     // Sync loop: topsSetDevice + sync + partial D2H + free.
     // Each device's portion: total / device_count bytes at its own offset.
     int64_t portionElems = resN / devCount;
     int64_t portionBytes = resBytes / devCount;
-    os << "  for (int __sync_d = 0; __sync_d < " << dc << "; ++__sync_d) {\n";
-    os << "    topsSetDevice(__sync_d);\n";
-    os << "    topsDeviceSynchronize();\n";
+    os() << "  for (int __sync_d = 0; __sync_d < " << dc << "; ++__sync_d) {\n";
+    os() << "    topsSetDevice(__sync_d);\n";
+    os() << "    topsDeviceSynchronize();\n";
 
     if (retInputIdx >= 0) {
-      os << "    topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+      os() << "    topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
          << ".data()) + __sync_d * " << portionElems << ", p" << retInputIdx
          << "__device_vec[__sync_d] + __sync_d * " << portionElems << ", "
          << portionBytes << "ULL, topsMemcpyDeviceToHost);\n";
     } else {
-      os << "    topsMemcpy(__result_buf + __sync_d * " << portionElems
+      os() << "    topsMemcpy(__result_buf + __sync_d * " << portionElems
          << ", __result__device_vec[__sync_d] + __sync_d * " << portionElems
          << ", " << portionBytes
          << "ULL, topsMemcpyDeviceToHost);\n";
@@ -632,22 +628,22 @@ private:
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) continue;
-      os << "    topsFree(p" << i << "__device_vec[__sync_d]);\n";
+      os() << "    topsFree(p" << i << "__device_vec[__sync_d]);\n";
     }
     if (retInputIdx < 0)
-      os << "    topsFree(__result__device_vec[__sync_d]);\n";
+      os() << "    topsFree(__result__device_vec[__sync_d]);\n";
 
-    os << "  }\n";
+    os() << "  }\n";
 
     if (retInputIdx >= 0) {
-      os << "  return choreo::copy_as_spanned(p" << retInputIdx
+      os() << "  return choreo::copy_as_spanned(p" << retInputIdx
          << ".data(), p" << retInputIdx << ".shape());\n";
     } else {
-      os << "  auto __result = choreo::copy_as_spanned<" << ndim
+      os() << "  auto __result = choreo::copy_as_spanned<" << ndim
          << ">(__result_buf, " << shapeStr << ");\n";
-      os << "  topsHostUnregister(__result_buf);\n";
-      os << "  free(__result_buf);\n";
-      os << "  return __result;\n";
+      os() << "  topsHostUnregister(__result_buf);\n";
+      os() << "  free(__result_buf);\n";
+      os() << "  return __result;\n";
     }
   }
 
@@ -659,95 +655,27 @@ private:
     return asyncHandle && !asyncHandle.use_empty();
   }
 
-  void emitOp(Operation *op) {
-    if (auto parallel = dyn_cast<ParallelOp>(op))
-      emitParallel(parallel);
-    else if (auto foreach_ = dyn_cast<ForeachOp>(op))
-      emitForeach(foreach_);
-    else if (auto dmaCopy = dyn_cast<DmaCopyOp>(op))
-      emitDmaCopy(dmaCopy);
-    else if (auto constDesc = dyn_cast<DMAConstDescOp>(op))
-      emitDMAConstDesc(constDesc);
-    else if (auto prefetch = dyn_cast<DMADescPrefetchOp>(op))
-      emitDMAPrefetch(prefetch);
-    else if (auto rtDesc = dyn_cast<DMADescRuntimeOp>(op))
-      emitDMARuntimeDesc(rtDesc);
-    else if (auto invoke = dyn_cast<DMAInvokeOp>(op))
-      emitDMAInvoke(invoke);
-    else if (auto loadElem = dyn_cast<TensorLoadElemOp>(op))
-      emitLoadElem(loadElem);
-    else if (auto storeElem = dyn_cast<TensorStoreElemOp>(op))
-      emitStoreElem(storeElem);
-    else if (auto alloc = dyn_cast<TensorAllocOp>(op))
-      emitAlloc(alloc);
-    else if (auto tile = dyn_cast<TensorTileOp>(op))
-      emitTensorTile(tile);
-    else if (auto fill = dyn_cast<MMAFillOp>(op))
-      emitMMAFill(fill);
-    else if (auto load = dyn_cast<MMALoadOp>(op))
-      emitMMALoad(load);
-    else if (auto exec = dyn_cast<MMAExecOp>(op))
-      emitMMAExec(exec);
-    else if (auto store = dyn_cast<MMAStoreOp>(op))
-      emitMMAStore(store);
-    else if (auto barrier = dyn_cast<BarrierOp>(op))
-      emitBarrier(barrier);
-    else if (auto wait = dyn_cast<WaitOp>(op))
-      emitWait(wait);
+  void emitOpFallback(Operation *op) override {
+    if (auto callOp = dyn_cast<coir::CallOp>(op))
+      emitCall(callOp);
+    else if (auto ithOp = dyn_cast<coir::InThreadsOp>(op))
+      emitInThreads(ithOp);
     else if (auto evtTrig = dyn_cast<EventTriggerOp>(op))
       emitEventTrigger(evtTrig);
     else if (auto evtWait = dyn_cast<EventWaitOp>(op))
       emitEventWait(evtWait);
-    else if (auto rotate = dyn_cast<FutureRotateOp>(op))
-      emitFutureRotate(rotate);
-    else if (auto ret = dyn_cast<KernelReturnOp>(op))
-      emitKernelReturn(ret);
-    else if (auto yield = dyn_cast<YieldOp>(op))
-      emitYield(yield);
-    else if (auto check = dyn_cast<DMACheckOp>(op))
-      (void)check;
-    else if (auto constOp = dyn_cast<arith::ConstantOp>(op))
-      emitConstant(constOp);
-    else if (auto ifOp = dyn_cast<mlir::scf::IfOp>(op))
-      emitIfOp(ifOp);
-    else if (auto whileOp = dyn_cast<mlir::scf::WhileOp>(op))
-      emitWhileOp(whileOp);
-    else if (auto coirWhile = dyn_cast<coir::CoIRWhileOp>(op))
-      emitCoIRWhileOp(coirWhile);
-    else if (isa<coir::CoIRWhileCondOp>(op))
-      {}
-    else if (auto breakOp = dyn_cast<coir::CoIRBreakOp>(op))
-      emitBreak(breakOp);
-    else if (auto contOp = dyn_cast<coir::CoIRContinueOp>(op))
-      emitContinue(contOp);
-    else if (isa<mlir::scf::YieldOp>(op) || isa<mlir::scf::ConditionOp>(op))
-      {}
-    else if (auto indexCast = dyn_cast<arith::IndexCastOp>(op))
-      valueNames[indexCast.getResult()] = getName(indexCast.getIn());
-    else if (auto selectOp = dyn_cast<arith::SelectOp>(op))
-      emitSelect(selectOp);
-    else if (auto callOp = dyn_cast<coir::CallOp>(op))
-      emitCall(callOp);
-    else if (auto ithOp = dyn_cast<coir::InThreadsOp>(op))
-      emitInThreads(ithOp);
-    else if (auto atomicOp = dyn_cast<coir::AtomicOp>(op))
-      emitAtomic(atomicOp);
-    else if (emitArithBinOp(op)) {}
-    else if (emitCmpOp(op)) {}
-    else {
-      os << getIndent() << "// [unhandled] " << op->getName().getStringRef()
-         << "\n";
-    }
+    else
+      CoIREmitterBase::emitOpFallback(op);
   }
 
-  void emitParallel(ParallelOp op) {
+  void emitParallel(ParallelOp op) override {
     auto level = op.getLevel();
     auto bounds = op.getBounds();
     auto &body = op.getBody();
     auto args = body.getArguments();
     const char *dimName[] = {"x", "y", "z"};
 
-    os << getIndent() << "// parallel level="
+    os() << getIndent() << "// parallel level="
        << stringifyParallelLevel(level) << "\n";
 
     if (level == ParallelLevel::DEVICE) {
@@ -784,20 +712,20 @@ private:
         std::string name = "pid_" + std::to_string(nextId++);
         valueNames[args[i]] = name;
         unsigned dim = std::min(i, 2u);
-        os << getIndent() << "int " << name << " = " << idPrefix
+        os() << getIndent() << "int " << name << " = " << idPrefix
            << dimName[dim] << "();  // bound=" << bounds[i] << "\n";
       }
-      os << getIndent() << "{\n";
+      os() << getIndent() << "{\n";
       incIndent();
       for (auto &bodyOp : body.front().getOperations())
         emitOp(&bodyOp);
       decIndent();
-      os << getIndent() << "}\n";
+      os() << getIndent() << "}\n";
     } else {
       for (unsigned i = 0; i < args.size(); ++i) {
         std::string name = "pid_" + std::to_string(nextId++);
         valueNames[args[i]] = name;
-        os << getIndent() << "for (int " << name << " = 0; " << name
+        os() << getIndent() << "for (int " << name << " = 0; " << name
            << " < " << bounds[i] << "; ++" << name << ") {\n";
         incIndent();
       }
@@ -805,12 +733,12 @@ private:
         emitOp(&bodyOp);
       for (unsigned i = 0; i < args.size(); ++i) {
         decIndent();
-        os << getIndent() << "}\n";
+        os() << getIndent() << "}\n";
       }
     }
   }
 
-  void emitForeach(ForeachOp op) {
+  void emitForeach(ForeachOp op) override {
     auto &body = op.getBody();
     auto args = body.front().getArguments();
     std::string iv = getName(args[0]);
@@ -819,24 +747,24 @@ private:
     auto iterArgs = op.getIterArgs();
     for (unsigned i = 0; i < iterArgs.size(); ++i) {
       std::string iterName = getName(args[i + 1]);
-      os << getIndent() << "auto " << iterName << " = "
+      os() << getIndent() << "auto " << iterName << " = "
          << getName(iterArgs[i]) << ";\n";
       auto stateIt = acoreStates.find(iterArgs[i]);
       if (stateIt != acoreStates.end()) {
         auto st = stateIt->second;
         acoreStates[args[i + 1]] = st;
-        os << getIndent() << "void* " << st.ws_name << "_last_lhs;\n";
-        os << getIndent() << "void* " << st.ws_name << "_last_rhs;\n";
+        os() << getIndent() << "void* " << st.ws_name << "_last_lhs;\n";
+        os() << getIndent() << "void* " << st.ws_name << "_last_rhs;\n";
       }
     }
 
-    os << getIndent() << "for (int " << iv << " = 0; " << iv << " < "
+    os() << getIndent() << "for (int " << iv << " = 0; " << iv << " < "
        << ub << "; ++" << iv << ") {\n";
     incIndent();
     for (auto &bodyOp : body.front().getOperations())
       emitOp(&bodyOp);
     decIndent();
-    os << getIndent() << "}\n";
+    os() << getIndent() << "}\n";
 
     for (unsigned i = 0; i < op.getResults().size(); ++i) {
       valueNames[op.getResult(i)] = getName(args[i + 1]);
@@ -848,7 +776,7 @@ private:
     }
   }
 
-  void emitTensorTile(TensorTileOp op) {
+  void emitTensorTile(TensorTileOp op) override {
     std::string name = getName(op.getResult());
     auto srcTy = dyn_cast<coir::TensorType>(op.getSource().getType());
     auto tileTy = dyn_cast<coir::TensorType>(op.getResult().getType());
@@ -859,22 +787,22 @@ private:
       return;
     }
 
-    os << getIndent() << "auto " << name << " = " << getName(op.getSource());
+    os() << getIndent() << "auto " << name << " = " << getName(op.getSource());
     if (srcTy && !indices.empty()) {
-      os << " + (";
+      os() << " + (";
       auto srcShape = srcTy.getShape();
       auto tileShape = tileTy ? tileTy.getShape() : llvm::ArrayRef<int64_t>{};
       for (unsigned i = 0; i < indices.size(); ++i) {
-        if (i > 0) os << " + ";
-        os << getName(indices[i]);
+        if (i > 0) os() << " + ";
+        os() << getName(indices[i]);
         int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
-        os << " * " << tileDim;
+        os() << " * " << tileDim;
         for (unsigned j = i + 1; j < srcShape.size(); ++j)
-          os << " * " << srcShape[j];
+          os() << " * " << srcShape[j];
       }
-      os << ")";
+      os() << ")";
     }
-    os << ";\n";
+    os() << ";\n";
   }
 
   // -- MMA emission for GCU (acore::matmul micro-kernel backend) -----------
@@ -961,19 +889,19 @@ private:
     return name;
   }
 
-  void emitMMAFill(MMAFillOp op) {
+  void emitMMAFill(MMAFillOp op) override {
     std::string name = getName(op.getResult());
 
     AcoreAccumState state;
     state.ws_name = "__mma_ws_" + name;
 
-    os << getIndent() << "int " << state.ws_name << "[2048];\n";
+    os() << getIndent() << "int " << state.ws_name << "[2048];\n";
     acoreStates[op.getResult()] = state;
   }
 
   DenseMap<Value, Value> mmaLoadSources;
 
-  void emitMMALoad(MMALoadOp op) {
+  void emitMMALoad(MMALoadOp op) override {
     // Look through tensor.tile to find the base buffer address.
     // acore::matmul operates on the full buffer, not a tiled view.
     Value src = op.getSource();
@@ -1009,7 +937,7 @@ private:
     return getName(foreach_.getUpperBound());
   }
 
-  void emitMMAExec(MMAExecOp op) {
+  void emitMMAExec(MMAExecOp op) override {
     Value accVal = op.getAccumulator();
     auto lhsFragTy = cast<coir::MMAFragType>(op.getLhs().getType());
     auto accFragTy = cast<coir::MMAFragType>(op.getAccumulator().getType());
@@ -1060,7 +988,7 @@ private:
     if (acoreStates.find(accVal) == acoreStates.end()) {
       AcoreAccumState fresh;
       fresh.ws_name = "__mma_ws_" + getName(accVal);
-      os << getIndent() << "int " << fresh.ws_name << "[2048];\n";
+      os() << getIndent() << "int " << fresh.ws_name << "[2048];\n";
       acoreStates[accVal] = fresh;
     }
     auto &state = acoreStates[accVal];
@@ -1078,12 +1006,12 @@ private:
 
       std::string savedLhs = state.ws_name + "_last_lhs";
       std::string savedRhs = state.ws_name + "_last_rhs";
-      os << getIndent() << savedLhs << " = (void*)" << lhsAddr << ";\n";
-      os << getIndent() << savedRhs << " = (void*)" << rhsAddr << ";\n";
+      os() << getIndent() << savedLhs << " = (void*)" << lhsAddr << ";\n";
+      os() << getIndent() << savedRhs << " = (void*)" << rhsAddr << ";\n";
 
-      os << getIndent() << "if (" << iv << " < " << ub << " - 1) {\n";
+      os() << getIndent() << "if (" << iv << " < " << ub << " - 1) {\n";
       incIndent();
-      os << getIndent() << stub << "(\n"
+      os() << getIndent() << stub << "(\n"
          << getIndent() << "    (" << outPtr << "*)nullptr,\n"
          << getIndent() << "    (" << inPtr << "*)" << lhsAddr << ",\n"
          << getIndent() << "    (" << inPtr << "*)" << rhsAddr << ",\n"
@@ -1092,7 +1020,7 @@ private:
          << "(" << iv << " > 0 ? 1 : 0)"
          << ", 0, 0, (" << iv << " > 0 ? 1 : 0));\n";
       decIndent();
-      os << getIndent() << "}\n";
+      os() << getIndent() << "}\n";
 
       state.pending_lhs = savedLhs;
       state.pending_rhs = savedRhs;
@@ -1122,7 +1050,7 @@ private:
     acoreStates[op.getResult()] = stateCopy;
   }
 
-  void emitMMAStore(MMAStoreOp op) {
+  void emitMMAStore(MMAStoreOp op) override {
     Value fragVal = op.getFragment();
     // Look through tensor.tile to get the base address of the original
     // tensor -- acore::matmul writes to the full output buffer.
@@ -1133,12 +1061,12 @@ private:
 
     auto it = acoreStates.find(fragVal);
     if (it == acoreStates.end()) {
-      os << getIndent() << "// [error] mma.store without prior exec\n";
+      os() << getIndent() << "// [error] mma.store without prior exec\n";
       return;
     }
     auto &state = it->second;
     if (!state.has_pending) {
-      os << getIndent() << "// [error] mma.store: no pending exec\n";
+      os() << getIndent() << "// [error] mma.store: no pending exec\n";
       return;
     }
 
@@ -1166,7 +1094,7 @@ private:
     std::string inPtr = acorePtrType(inElemTy);
     std::string outPtr = acorePtrType(outElemTy);
 
-    os << getIndent() << state.stub_name << "(\n"
+    os() << getIndent() << state.stub_name << "(\n"
        << getIndent() << "    (" << outPtr << "*)" << destAddr << ",\n"
        << getIndent() << "    (" << inPtr << "*)" << state.pending_lhs
        << ",\n"
@@ -1180,15 +1108,15 @@ private:
     state.has_pending = false;
   }
 
-  void emitKernelReturn(KernelReturnOp op) {
+  void emitKernelReturn(KernelReturnOp op) override {
     for (unsigned i = 0; i < op.getOperands().size(); ++i) {
       Value val = op.getOperands()[i];
       if (isa<coir::TensorType>(val.getType())) continue;
-      os << getIndent() << "return " << getName(val) << ";\n";
+      os() << getIndent() << "return " << getName(val) << ";\n";
     }
   }
 
-  void emitYield(YieldOp op) {
+  void emitYield(YieldOp op) override {
     for (unsigned i = 0; i < op.getOperands().size(); ++i) {
       auto yieldVal = op.getOperands()[i];
       auto it = acoreStates.find(yieldVal);
@@ -1278,33 +1206,33 @@ private:
     auto baseShape = baseTy.getShape();
     auto indices = tile.getIndices();
     std::string arrName = prefix + "__off__";
-    os << getIndent() << "int " << arrName << "[] = {";
+    os() << getIndent() << "int " << arrName << "[] = {";
     for (unsigned i = 0; i < baseShape.size(); ++i) {
-      if (i) os << ", ";
+      if (i) os() << ", ";
       if (i < indices.size()) {
         int64_t chunkDim = (i < tileShape.size()) ? tileShape[i] : 1;
-        os << getName(indices[i]) << " * " << chunkDim;
+        os() << getName(indices[i]) << " * " << chunkDim;
       } else {
-        os << "0";
+        os() << "0";
       }
     }
-    os << "};\n";
+    os() << "};\n";
     return arrName;
   }
 
   std::string emitSliceShape(TensorTileOp tile, const std::string &prefix) {
     auto tileTy = cast<coir::TensorType>(tile.getResult().getType());
     std::string arrName = prefix + "__sshape__";
-    os << getIndent() << "unsigned int " << arrName << "[] = {";
+    os() << getIndent() << "unsigned int " << arrName << "[] = {";
     for (unsigned i = 0; i < tileTy.getShape().size(); ++i) {
-      if (i) os << ", ";
-      os << tileTy.getShape()[i];
+      if (i) os() << ", ";
+      os() << tileTy.getShape()[i];
     }
-    os << "};\n";
+    os() << "};\n";
     return arrName;
   }
 
-  void emitDmaCopy(DmaCopyOp op) {
+  void emitDmaCopy(DmaCopyOp op) override {
     auto kind = op.getKind();
 
     auto srcTile = getTileDefiningOp(op.getSource());
@@ -1319,8 +1247,8 @@ private:
     std::string ctxName = "__dte_" + std::to_string(id);
     std::string futName = "__fut_" + std::to_string(id);
 
-    os << getIndent() << getDTEType() << " " << ctxName << ";\n";
-    os << getIndent() << "choreo::future " << futName << "("
+    os() << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    os() << getIndent() << "choreo::future " << futName << "("
        << ctxName << ", \"dma_" << id << "\", 0, 0);\n";
 
     std::string evName = futName + "__event__";
@@ -1415,34 +1343,34 @@ private:
                  srcMds + ")";
     }
 
-    os << getIndent();
-    if (isAsync) os << "tops::event " << evName << " = ";
-    os << apiCall << ";\n";
+    os() << getIndent();
+    if (isAsync) os() << "tops::event " << evName << " = ";
+    os() << apiCall << ";\n";
 
     if (isAsync) {
-      os << getIndent() << futName << ".set_event(" << evName << ");\n";
+      os() << getIndent() << futName << ".set_event(" << evName << ");\n";
       asyncFutures[op.getToken()] = futName;
     } else {
-      os << getIndent() << futName << ".set_nowait();\n";
+      os() << getIndent() << futName << ".set_nowait();\n";
     }
   }
 
   void emitPadArrays(DmaCopyOp op, const std::string &futName) {
     auto emitArr = [&](const char *suffix,
                        std::optional<ArrayRef<int64_t>> arr, int rank) {
-      os << getIndent() << "unsigned int " << futName << suffix << "[] = {";
+      os() << getIndent() << "unsigned int " << futName << suffix << "[] = {";
       if (arr) {
         for (int i = 0; i < (int)arr->size(); ++i) {
-          if (i) os << ", ";
-          os << (*arr)[i];
+          if (i) os() << ", ";
+          os() << (*arr)[i];
         }
       } else {
         for (int i = 0; i < rank; ++i) {
-          if (i) os << ", ";
-          os << "0";
+          if (i) os() << ", ";
+          os() << "0";
         }
       }
-      os << "};\n";
+      os() << "};\n";
     };
     auto srcTy = cast<coir::TensorType>(op.getSource().getType());
     int rank = srcTy.getShape().size();
@@ -1460,23 +1388,23 @@ private:
   }
 
   void emitTransposeLayout(DmaCopyOp op, const std::string &futName) {
-    os << getIndent() << "int " << futName << "__layout__[] = {";
+    os() << getIndent() << "int " << futName << "__layout__[] = {";
     if (auto perm = op.getTransposePerm()) {
       for (int i = 0; i < (int)perm->size(); ++i) {
-        if (i) os << ", ";
-        os << (*perm)[i];
+        if (i) os() << ", ";
+        os() << (*perm)[i];
       }
     }
-    os << "};\n";
+    os() << "};\n";
   }
 
-  void emitWait(WaitOp op) {
+  void emitWait(WaitOp op) override {
     auto it = asyncFutures.find(op.getToken());
     if (it != asyncFutures.end())
-      os << getIndent() << it->second << ".wait();\n";
+      os() << getIndent() << it->second << ".wait();\n";
   }
 
-  void emitFutureRotate(FutureRotateOp op) {
+  void emitFutureRotate(FutureRotateOp op) override {
     auto inputs = op.getFutures();
     auto outputs = op.getResults();
     SmallVector<std::string> names;
@@ -1484,12 +1412,12 @@ private:
       auto it = asyncFutures.find(in);
       names.push_back(it != asyncFutures.end() ? it->second : "?");
     }
-    os << getIndent() << "choreo::rotate(";
+    os() << getIndent() << "choreo::rotate(";
     for (unsigned i = 0; i < names.size(); ++i) {
-      if (i) os << ", ";
-      os << names[i];
+      if (i) os() << ", ";
+      os() << names[i];
     }
-    os << ");\n";
+    os() << ");\n";
     // Left-rotate the map: output[i] gets the future name of input[(i+1) % n]
     for (unsigned i = 0; i < names.size(); ++i)
       asyncFutures[outputs[i]] = names[(i + 1) % names.size()];
@@ -1516,14 +1444,14 @@ private:
     return result;
   }
 
-  void emitDMAConstDesc(DMAConstDescOp op) {
+  void emitDMAConstDesc(DMAConstDescOp op) override {
     unsigned id = nextDmaId++;
     std::string ctxName = "__dma_" + std::to_string(id);
     std::string futName = "__fut_desc_" + std::to_string(id);
     dmaCtxNames[op.getOut()] = futName;
 
-    os << getIndent() << getDTEType() << " " << ctxName << ";\n";
-    os << getIndent() << "choreo::future " << futName << "("
+    os() << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    os() << getIndent() << "choreo::future " << futName << "("
        << ctxName << ", \"dma_desc_" << id << "\", 0, 0);\n";
 
     std::string srcMds = emitMdspan(op.getSource());
@@ -1531,101 +1459,58 @@ private:
 
     auto kind = op.getKind();
     if (kind == coir::DMAKind::Copy) {
-      os << getIndent() << futName << ".configure(" << dstMds << ", "
+      os() << getIndent() << futName << ".configure(" << dstMds << ", "
          << srcMds << ");\n";
     } else if (kind == coir::DMAKind::Slice) {
-      os << getIndent() << futName << ".configure(" << dstMds << ", "
+      os() << getIndent() << futName << ".configure(" << dstMds << ", "
          << srcMds << ");\n";
     } else if (kind == coir::DMAKind::Transpose) {
-      os << getIndent() << futName << ".configure(" << dstMds << ", "
+      os() << getIndent() << futName << ".configure(" << dstMds << ", "
          << srcMds << ");\n";
     } else if (kind == coir::DMAKind::Pad) {
-      os << getIndent() << futName << ".configure(" << dstMds << ", "
+      os() << getIndent() << futName << ".configure(" << dstMds << ", "
          << srcMds << ");\n";
     }
   }
 
-  void emitDMAPrefetch(DMADescPrefetchOp op) {
+  void emitDMAPrefetch(DMADescPrefetchOp op) override {
     auto it = dmaCtxNames.find(op.getIn());
     if (it != dmaCtxNames.end())
       dmaCtxNames[op.getOut()] = it->second;
   }
 
-  void emitDMARuntimeDesc(DMADescRuntimeOp op) {
+  void emitDMARuntimeDesc(DMADescRuntimeOp op) override {
     auto it = dmaCtxNames.find(op.getIn());
     std::string futName = (it != dmaCtxNames.end()) ? it->second : "__dma_?";
     dmaCtxNames[op.getOut()] = futName;
 
     auto offsets = op.getOffsets();
     for (unsigned i = 0; i < offsets.size(); ++i) {
-      os << getIndent() << futName << ".set_offset(" << i << ", "
+      os() << getIndent() << futName << ".set_offset(" << i << ", "
          << getName(offsets[i]) << ");\n";
     }
   }
 
-  void emitDMAInvoke(DMAInvokeOp op) {
+  void emitDMAInvoke(DMAInvokeOp op) override {
     auto it = dmaCtxNames.find(op.getDesc());
     std::string ctxName = (it != dmaCtxNames.end()) ? it->second : "__dma_?";
 
     if (hasAsyncUses(op.getDone())) {
-      os << getIndent() << ctxName << ".trigger_only();\n";
+      os() << getIndent() << ctxName << ".trigger_only();\n";
       asyncFutures[op.getDone()] = ctxName;
     } else {
-      os << getIndent() << ctxName << ".trigger_and_wait();\n";
+      os() << getIndent() << ctxName << ".trigger_and_wait();\n";
     }
   }
 
-  void emitLinearIndex(mlir::ValueRange indices, coir::TensorType tty) {
-    auto strides = tty.getStrides();
-    auto shape = tty.getShape();
-    if (indices.empty()) {
-      os << "0";
-      return;
-    }
-    if (indices.size() == 1 && strides.empty()) {
-      os << getName(indices[0]);
-      return;
-    }
-    llvm::SmallVector<int64_t> effectiveStrides;
-    if (!strides.empty()) {
-      effectiveStrides.assign(strides.begin(), strides.end());
-    } else {
-      effectiveStrides.resize(shape.size());
-      int64_t s = 1;
-      for (int i = (int)shape.size() - 1; i >= 0; --i) {
-        effectiveStrides[i] = s;
-        s *= shape[i];
-      }
-    }
-    for (unsigned i = 0; i < indices.size(); ++i) {
-      if (i > 0) os << " + ";
-      if (i < effectiveStrides.size() && effectiveStrides[i] != 1)
-        os << getName(indices[i]) << " * " << effectiveStrides[i];
-      else
-        os << getName(indices[i]);
-    }
+
+
+
+  std::string getAllocQualifier(coir::TensorType tty) override {
+    return tty.getMemorySpace() == 1 ? "__local__ " : "";
   }
 
-  void emitLoadElem(TensorLoadElemOp op) {
-    std::string name = getName(op.getResult());
-    std::string src = getName(op.getSource());
-    auto tty = cast<coir::TensorType>(op.getSource().getType());
-    os << getIndent() << emitType(op.getResult().getType()) << " " << name
-       << " = " << src << "[";
-    emitLinearIndex(op.getIndices(), tty);
-    os << "];\n";
-  }
-
-  void emitStoreElem(TensorStoreElemOp op) {
-    std::string dst = getName(op.getDest());
-    std::string val = getName(op.getValue());
-    auto tty = cast<coir::TensorType>(op.getDest().getType());
-    os << getIndent() << dst << "[";
-    emitLinearIndex(op.getIndices(), tty);
-    os << "] = " << val << ";\n";
-  }
-
-  void emitAlloc(TensorAllocOp op) {
+  void emitTensorAlloc(TensorAllocOp op) override {
     if (returnValues.count(op.getResult())) return;
 
     auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
@@ -1633,38 +1518,34 @@ private:
     int64_t totalElems = 1;
     for (auto d : tensorTy.getShape()) totalElems *= d;
 
-    std::string qualifier;
-    if (tensorTy.getMemorySpace() ==
-        static_cast<int32_t>(coir::TensorMemorySpace::Local))
-      qualifier = "__local__ ";
-
-    os << getIndent() << qualifier << emitType(tensorTy.getElementType())
+    std::string qualifier = getAllocQualifier(tensorTy);
+    os() << getIndent() << qualifier << emitType(tensorTy.getElementType())
        << " " << name << "[" << totalElems << "];\n";
   }
 
-  void emitBarrier(BarrierOp op) {
+  void emitBarrier(BarrierOp op) override {
     switch (op.getScope()) {
     case coir::ParallelLevel::BLOCK:
-      os << getIndent() << "__syncthreads();\n";
+      os() << getIndent() << "__syncthreads();\n";
       break;
     case coir::ParallelLevel::GROUP:
-      os << getIndent() << "__syncsubthreads();\n";
+      os() << getIndent() << "__syncsubthreads();\n";
       break;
     case coir::ParallelLevel::DEVICE:
-      os << getIndent() << "topsDeviceSynchronize();\n";
+      os() << getIndent() << "topsDeviceSynchronize();\n";
       break;
     default:
-      os << getIndent() << "__syncthreads();\n";
+      os() << getIndent() << "__syncthreads();\n";
       break;
     }
   }
 
   void emitEventTrigger(EventTriggerOp op) {
     auto name = op.getEventName().str();
-    os << getIndent() << name;
+    os() << getIndent() << name;
     if (auto sub = op.getSubscript())
-      os << "[" << sub->str() << "]";
-    os << " = true;\n";
+      os() << "[" << sub->str() << "]";
+    os() << " = true;\n";
   }
 
   void emitEventWait(EventWaitOp op) {
@@ -1672,52 +1553,19 @@ private:
     std::string ref = name;
     if (auto sub = op.getSubscript())
       ref += "[" + sub->str() + "]";
-    os << getIndent() << "while (" << ref << " == false) continue;\n";
-    os << getIndent() << ref << " = false;\n";
+    os() << getIndent() << "while (" << ref << " == false) continue;\n";
+    os() << getIndent() << ref << " = false;\n";
   }
 
-  void emitIfOp(mlir::scf::IfOp op) {
-    for (auto res : op.getResults())
-      os << getIndent() << emitType(res.getType()) << " "
-         << getName(res) << ";\n";
-    os << getIndent() << "if (" << getName(op.getCondition()) << ") {\n";
-    incIndent();
-    for (auto &bodyOp : op.getThenRegion().front().getOperations()) {
-      if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
-        for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i)
-          os << getIndent() << getName(op.getResult(i)) << " = "
-             << getName(yieldOp.getOperand(i)) << ";\n";
-      } else {
-        emitOp(&bodyOp);
-      }
-    }
-    decIndent();
-    os << getIndent() << "}\n";
-    if (!op.getElseRegion().empty()) {
-      os << getIndent() << "else {\n";
-      incIndent();
-      for (auto &bodyOp : op.getElseRegion().front().getOperations()) {
-        if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
-          for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i)
-            os << getIndent() << getName(op.getResult(i)) << " = "
-               << getName(yieldOp.getOperand(i)) << ";\n";
-        } else {
-          emitOp(&bodyOp);
-        }
-      }
-      decIndent();
-      os << getIndent() << "}\n";
-    }
-  }
 
-  void emitWhileOp(mlir::scf::WhileOp op) {
+  void emitWhileOp(mlir::scf::WhileOp op) override {
     auto &beforeBlock = op.getBefore().front();
     auto condOp = dyn_cast<mlir::scf::ConditionOp>(beforeBlock.getTerminator());
     llvm::SmallVector<std::string> iterVarNames;
     for (unsigned i = 0; i < op.getInits().size(); ++i) {
       std::string name = "wv" + std::to_string(nextId++);
       iterVarNames.push_back(name);
-      os << getIndent() << emitType(op.getInits()[i].getType()) << " "
+      os() << getIndent() << emitType(op.getInits()[i].getType()) << " "
          << name << " = " << getName(op.getInits()[i]) << ";\n";
       valueNames[beforeBlock.getArgument(i)] = name;
     }
@@ -1727,7 +1575,7 @@ private:
       emitOp(&bodyOp);
     }
     std::string condName = getName(condOp.getCondition());
-    os << getIndent() << "while (" << condName << ") {\n";
+    os() << getIndent() << "while (" << condName << ") {\n";
     incIndent();
     auto &afterBlock = op.getAfter().front();
     for (unsigned i = 0; i < condOp.getArgs().size(); ++i)
@@ -1735,7 +1583,7 @@ private:
     for (auto &bodyOp : afterBlock.getOperations()) {
       if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
         for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i) {
-          os << getIndent() << iterVarNames[i] << " = "
+          os() << getIndent() << iterVarNames[i] << " = "
              << getName(yieldOp.getOperand(i)) << ";\n";
           valueNames[beforeBlock.getArgument(i)] = iterVarNames[i];
         }
@@ -1749,19 +1597,19 @@ private:
       }
     }
     decIndent();
-    os << getIndent() << "}\n";
+    os() << getIndent() << "}\n";
     for (unsigned i = 0; i < op.getNumResults(); ++i)
       valueNames[op.getResult(i)] = iterVarNames[i];
   }
 
-  void emitCoIRWhileOp(coir::CoIRWhileOp op) {
+  void emitCoIRWhileOp(coir::CoIRWhileOp op) override {
     auto &condBlock = op.getCondRegion().front();
     auto condOp = dyn_cast<coir::CoIRWhileCondOp>(condBlock.getTerminator());
     llvm::SmallVector<std::string> iterVarNames;
     for (unsigned i = 0; i < op.getInits().size(); ++i) {
       std::string name = "wv" + std::to_string(nextId++);
       iterVarNames.push_back(name);
-      os << getIndent() << emitType(op.getInits()[i].getType()) << " "
+      os() << getIndent() << emitType(op.getInits()[i].getType()) << " "
          << name << " = " << getName(op.getInits()[i]) << ";\n";
       valueNames[condBlock.getArgument(i)] = name;
     }
@@ -1769,7 +1617,7 @@ private:
       if (isa<coir::CoIRWhileCondOp>(&bodyOp)) continue;
       emitOp(&bodyOp);
     }
-    os << getIndent() << "while (" << getName(condOp.getCondition())
+    os() << getIndent() << "while (" << getName(condOp.getCondition())
        << ") {\n";
     incIndent();
     auto &bodyBlock = op.getBodyRegion().front();
@@ -1778,14 +1626,14 @@ private:
     for (auto &bodyOp : bodyBlock.getOperations()) {
       if (auto breakOp = dyn_cast<coir::CoIRBreakOp>(&bodyOp)) {
         for (unsigned i = 0; i < breakOp.getOperands().size(); ++i) {
-          os << getIndent() << iterVarNames[i] << " = "
+          os() << getIndent() << iterVarNames[i] << " = "
              << getName(breakOp.getOperand(i)) << ";\n";
           valueNames[condBlock.getArgument(i)] = iterVarNames[i];
         }
-        os << getIndent() << "break;\n";
+        os() << getIndent() << "break;\n";
       } else if (auto contOp = dyn_cast<coir::CoIRContinueOp>(&bodyOp)) {
         for (unsigned i = 0; i < contOp.getOperands().size(); ++i) {
-          os << getIndent() << iterVarNames[i] << " = "
+          os() << getIndent() << iterVarNames[i] << " = "
              << getName(contOp.getOperand(i)) << ";\n";
           valueNames[condBlock.getArgument(i)] = iterVarNames[i];
         }
@@ -1793,81 +1641,67 @@ private:
           if (isa<coir::CoIRWhileCondOp>(&cOp)) continue;
           emitReassignOp(&cOp);
         }
-        os << getIndent() << "continue;\n";
+        os() << getIndent() << "continue;\n";
       } else {
         emitOp(&bodyOp);
       }
     }
     decIndent();
-    os << getIndent() << "}\n";
+    os() << getIndent() << "}\n";
     for (unsigned i = 0; i < op.getNumResults(); ++i)
       valueNames[op.getResult(i)] = iterVarNames[i];
   }
 
-  void emitBreak(coir::CoIRBreakOp) {
-    os << getIndent() << "break;\n";
-  }
 
-  void emitContinue(coir::CoIRContinueOp) {
-    os << getIndent() << "continue;\n";
-  }
-
-  void emitSelect(arith::SelectOp op) {
-    std::string name = getName(op.getResult());
-    os << getIndent() << emitType(op.getResult().getType()) << " "
-       << name << " = " << getName(op.getCondition()) << " ? "
-       << getName(op.getTrueValue()) << " : "
-       << getName(op.getFalseValue()) << ";\n";
-  }
 
   void emitCall(CallOp op) {
     auto callee = op.getCallee().str();
-    os << getIndent() << callee;
+    os() << getIndent() << callee;
 
     // Template arguments
     if (auto tplArgs = op.getTemplateArgs()) {
-      os << "<";
+      os() << "<";
       bool first = true;
       for (auto a : *tplArgs) {
-        if (!first) os << ", ";
+        if (!first) os() << ", ";
         first = false;
-        os << mlir::cast<mlir::StringAttr>(a).getValue().str();
+        os() << mlir::cast<mlir::StringAttr>(a).getValue().str();
       }
-      os << ">";
+      os() << ">";
     }
 
     // Call arguments
-    os << "(";
+    os() << "(";
     bool first = true;
     for (auto arg : op.getOperands_()) {
-      if (!first) os << ", ";
+      if (!first) os() << ", ";
       first = false;
       auto ty = arg.getType();
       if (auto tty = mlir::dyn_cast<coir::TensorType>(ty)) {
-        os << "(" << emitType(tty.getElementType()) << "*)"
+        os() << "(" << emitType(tty.getElementType()) << "*)"
            << getName(arg);
       } else {
-        os << getName(arg);
+        os() << getName(arg);
       }
     }
-    os << ");\n";
+    os() << ");\n";
   }
 
   void emitInThreads(InThreadsOp op) {
-    os << getIndent() << "if (" << getName(op.getPredicate()) << ") {\n";
+    os() << getIndent() << "if (" << getName(op.getPredicate()) << ") {\n";
     incIndent();
     for (auto &bodyOp : op.getBody().front().getOperations())
       emitOp(&bodyOp);
     decIndent();
-    os << getIndent() << "}";
+    os() << getIndent() << "}";
     bool isAsync = op.getAsync() && *op.getAsync();
     bool isOuter = !op.getOuter() || *op.getOuter();
     if (!isAsync && isOuter)
-      os << "\n" << getIndent() << "__syncthreads();";
-    os << "\n";
+      os() << "\n" << getIndent() << "__syncthreads();";
+    os() << "\n";
   }
 
-  void emitAtomic(AtomicOp op) {
+  void emitAtomic(AtomicOp op) override {
     using AK = coir::AtomicKind;
     llvm::StringRef fnName;
     switch (op.getKind()) {
@@ -1882,60 +1716,19 @@ private:
     case AK::CAS:  fnName = "atomicCAS"; break;
     }
 
-    os << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
+    os() << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
     bool first = true;
     for (auto idx : op.getIndices()) {
-      if (!first) os << " + ";
+      if (!first) os() << " + ";
       first = false;
-      os << getName(idx);
+      os() << getName(idx);
     }
-    os << "], " << getName(op.getValue());
+    os() << "], " << getName(op.getValue());
     if (op.getKind() == AK::CAS && op.getCompare())
-      os << ", " << "/* compare */";
-    os << ");\n";
+      os() << ", " << "/* compare */";
+    os() << ");\n";
   }
 
-  bool emitCmpOp(Operation *op) {
-    if (auto cmpI = dyn_cast<arith::CmpIOp>(op)) {
-      std::string name = getName(cmpI.getResult());
-      std::string lhs = getName(cmpI.getLhs());
-      std::string rhs = getName(cmpI.getRhs());
-      llvm::StringRef opStr;
-      switch (cmpI.getPredicate()) {
-      case arith::CmpIPredicate::eq:  opStr = "=="; break;
-      case arith::CmpIPredicate::ne:  opStr = "!="; break;
-      case arith::CmpIPredicate::slt: opStr = "<"; break;
-      case arith::CmpIPredicate::sle: opStr = "<="; break;
-      case arith::CmpIPredicate::sgt: opStr = ">"; break;
-      case arith::CmpIPredicate::sge: opStr = ">="; break;
-      case arith::CmpIPredicate::ult: opStr = "<"; break;
-      case arith::CmpIPredicate::ule: opStr = "<="; break;
-      case arith::CmpIPredicate::ugt: opStr = ">"; break;
-      case arith::CmpIPredicate::uge: opStr = ">="; break;
-      }
-      os << getIndent() << "bool " << name << " = (" << lhs << " " << opStr
-         << " " << rhs << ");\n";
-      return true;
-    }
-    if (auto cmpF = dyn_cast<arith::CmpFOp>(op)) {
-      std::string name = getName(cmpF.getResult());
-      std::string lhs = getName(cmpF.getLhs());
-      std::string rhs = getName(cmpF.getRhs());
-      llvm::StringRef opStr;
-      switch (cmpF.getPredicate()) {
-      case arith::CmpFPredicate::OEQ: opStr = "=="; break;
-      case arith::CmpFPredicate::OGT: opStr = ">"; break;
-      case arith::CmpFPredicate::OGE: opStr = ">="; break;
-      case arith::CmpFPredicate::OLT: opStr = "<"; break;
-      case arith::CmpFPredicate::OLE: opStr = "<="; break;
-      default: opStr = "!="; break;
-      }
-      os << getIndent() << "bool " << name << " = (" << lhs << " " << opStr
-         << " " << rhs << ");\n";
-      return true;
-    }
-    return false;
-  }
 
   // Re-emit an op as assignment (for while-loop condition re-computation).
   // Instead of declaring a new variable, assigns to the existing name.
@@ -1961,7 +1754,7 @@ private:
       case arith::CmpIPredicate::sge: case arith::CmpIPredicate::uge:
         opStr = ">="; break;
       }
-      os << getIndent() << existingName << " = (" << lhs << " " << opStr
+      os() << getIndent() << existingName << " = (" << lhs << " " << opStr
          << " " << rhs << ");\n";
     } else if (auto cmpF = dyn_cast<arith::CmpFOp>(op)) {
       std::string lhs = getName(cmpF.getLhs());
@@ -1975,46 +1768,14 @@ private:
       case arith::CmpFPredicate::OLE: opStr = "<="; break;
       default: opStr = "!="; break;
       }
-      os << getIndent() << existingName << " = (" << lhs << " " << opStr
+      os() << getIndent() << existingName << " = (" << lhs << " " << opStr
          << " " << rhs << ");\n";
     } else {
       emitOp(op);
     }
   }
 
-  void emitConstant(arith::ConstantOp op) {
-    std::string name = getName(op.getResult());
-    if (auto intAttr = dyn_cast<IntegerAttr>(op.getValue()))
-      os << getIndent() << "const int " << name << " = "
-         << intAttr.getInt() << ";\n";
-    else if (auto floatAttr = dyn_cast<FloatAttr>(op.getValue())) {
-      llvm::SmallString<16> strVal;
-      floatAttr.getValue().toString(strVal, 6, 0);
-      os << getIndent() << "const " << emitType(op.getType())
-         << " " << name << " = " << strVal << ";\n";
-    }
-  }
 
-  bool emitArithBinOp(Operation *op) {
-    llvm::StringRef opStr;
-    if (isa<arith::AddIOp>(op) || isa<arith::AddFOp>(op))
-      opStr = "+";
-    else if (isa<arith::SubIOp>(op) || isa<arith::SubFOp>(op))
-      opStr = "-";
-    else if (isa<arith::MulIOp>(op) || isa<arith::MulFOp>(op))
-      opStr = "*";
-    else if (isa<arith::DivSIOp>(op) || isa<arith::DivFOp>(op))
-      opStr = "/";
-    else
-      return false;
-
-    std::string name = getName(op->getResult(0));
-    std::string lhs = getName(op->getOperand(0));
-    std::string rhs = getName(op->getOperand(1));
-    os << getIndent() << emitType(op->getResult(0).getType()) << " "
-       << name << " = " << lhs << " " << opStr << " " << rhs << ";\n";
-    return true;
-  }
 };
 
 struct EmitTopsccPass
@@ -2026,8 +1787,8 @@ struct EmitTopsccPass
   }
   void runOnOperation() override {
     auto module = getOperation();
-    TopsccEmitter emitter(llvm::outs());
-    emitter.emitModule(module);
+    TopsccEmitter emitter;
+    emitter.emitModule(module, llvm::outs());
   }
 };
 
@@ -2039,8 +1800,8 @@ std::unique_ptr<mlir::Pass> createEmitTopsccPass() {
 }
 
 void emitTopscc(mlir::ModuleOp module, llvm::raw_ostream &os) {
-  TopsccEmitter emitter(os);
-  emitter.emitModule(module);
+  TopsccEmitter emitter;
+  emitter.emitModule(module, os);
 }
 } // namespace coir
 
@@ -2048,76 +1809,12 @@ static mlir::PassRegistration<EmitTopsccPass> reg;
 
 namespace {
 
-void emitHostCode(llvm::raw_ostream &os, ModuleOp module) {
-  auto hostCodeAttr = module->getAttrOfType<StringAttr>("coir.host_code");
-  if (!hostCodeAttr) return;
-  os << "\n" << hostCodeAttr.getValue() << "\n";
-}
-
-class TopsccTargetCodeGen : public CoIR::CodeGen {
-public:
-  int EmitSource(mlir::ModuleOp module, llvm::StringRef /*arch*/,
-                 llvm::raw_ostream &os) override {
-    coir::emitTopscc(module, os);
-    emitHostCode(os, module);
-    return 0;
-  }
-
-  int EmitScript(mlir::ModuleOp module, llvm::StringRef /*arch*/,
-                 llvm::raw_ostream &os) override {
-    auto &sctx = CoIR::ScriptContext::Get();
-
-    os << "#!/usr/bin/env bash\n";
-    os << "# CoIR generated script -- compile and execute topscc kernel\n";
-    os << "set -eo pipefail\n\n";
-
-    os << "TMPDIR=$(mktemp -d /tmp/cocc_XXXXXX)\n";
-    os << "trap 'rm -rf $TMPDIR' EXIT\n\n";
-
-    if (sctx.types_header) {
-      os << "cat > \"$TMPDIR/choreo_types.h\" << '__COCC_TYPES_HEADER__'\n";
-      os << sctx.types_header;
-      os << "\n__COCC_TYPES_HEADER__\n\n";
-    }
-    if (sctx.runtime_header) {
-      os << "cat > \"$TMPDIR/choreo.h\" << '__COCC_CHOREO_HEADER__'\n";
-      os << sctx.runtime_header;
-      os << "\n__COCC_CHOREO_HEADER__\n\n";
-    }
-
-    if (!sctx.target_setup.empty()) os << sctx.target_setup << "\n";
-    if (!sctx.build_env.empty()) os << sctx.build_env;
-
-    os << "TOPSCC=\"${TOPSCC:-topscc}\"\n";
-    os << "if ! command -v \"$TOPSCC\" &>/dev/null; then\n";
-    os << "  echo \"Error: topscc not found\"; exit 1\n";
-    os << "fi\n\n";
-
-    os << "TMPFILE=\"$TMPDIR/kernel.cc\"\n";
-    os << "BINFILE=\"$TMPDIR/kernel\"\n\n";
-    os << "cat > \"$TMPFILE\" << '__COIR_TOPSCC_SOURCE__'\n";
-
-    coir::emitTopscc(module, os);
-    emitHostCode(os, module);
-
-    os << "\n__COIR_TOPSCC_SOURCE__\n\n";
-    os << "\"$TOPSCC\" ${CFLAGS} -D__CHOREO_DMA_DIAGNOSIS__"
-          " -I\"$TMPDIR\" -I\"$TMPDIR/topscc\" "
-          "-o \"$BINFILE\" \"$TMPFILE\" -lpthread -ldl -lrt 2>&1\n";
-    os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
-    os << "  shift\n";
-    os << "  \"$BINFILE\" \"$@\"\n";
-    os << "fi\n";
-    return 0;
-  }
-};
-
 static bool registered_topscc = [] {
   CoIR::CodeGenRegistry::Register("topscc", [] {
-    return std::make_unique<TopsccTargetCodeGen>();
+    return std::make_unique<TopsccEmitter>();
   });
   CoIR::CodeGenRegistry::Register("gcu", [] {
-    return std::make_unique<TopsccTargetCodeGen>();
+    return std::make_unique<TopsccEmitter>();
   });
   return true;
 }();

@@ -68,25 +68,6 @@ bool HasDMA(mlir::ModuleOp module);
 /// Read the architecture string from module attributes.
 llvm::StringRef GetArch(mlir::ModuleOp module);
 
-/// Script generation context -- set by the driver before calling Emit with
-/// script=true. Provides target-independent infrastructure (headers, build
-/// env) so emitters don't depend on Choreo headers directly.
-struct ScriptContext {
-  const char *types_header = nullptr;
-  const char *runtime_header = nullptr;
-  const char *types_cute_header = nullptr;
-  const char *cute_header = nullptr;
-  std::string build_env;
-  std::string target_setup;
-  std::string arch_override;
-  std::string cuda_home;
-
-  static ScriptContext &Get() {
-    static ScriptContext ctx;
-    return ctx;
-  }
-};
-
 /// CoIR compilation pipeline -- encapsulates opt -> lower -> codegen flow.
 ///
 /// The pipeline has three phases:
