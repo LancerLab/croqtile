@@ -156,6 +156,7 @@ private:
     return n * elemSize;
   }
 
+
   struct LaunchDims {
     llvm::SmallVector<int64_t, 3> grid = {1};
     llvm::SmallVector<int64_t, 3> block = {1};
@@ -385,6 +386,12 @@ private:
       emitWait(wait);
     else if (dyn_cast<FutureRotateOp>(op))
       {}
+    else if (auto callOp = dyn_cast<coir::CallOp>(op))
+      emitCall(callOp);
+    else if (auto ithOp = dyn_cast<coir::InThreadsOp>(op))
+      emitInThreads(ithOp);
+    else if (auto atomicOp = dyn_cast<coir::AtomicOp>(op))
+      emitAtomic(atomicOp);
     else if (auto reduceElem = dyn_cast<TensorReduceElemOp>(op))
       emitTensorReduceElem(reduceElem);
     else if (auto alloc = dyn_cast<TensorAllocOp>(op))
@@ -529,6 +536,89 @@ private:
     }
   }
 
+  void emitCall(CallOp op) {
+    auto callee = op.getCallee().str();
+    bool isExpr = op.getIsExpr() && *op.getIsExpr() && op.getResult();
+
+    os << getIndent();
+    if (isExpr) {
+      auto resTy = op.getResult().getType();
+      os << emitType(resTy) << " " << getName(op.getResult()) << " = ";
+    }
+    os << callee;
+
+    if (auto tplArgs = op.getTemplateArgs()) {
+      os << "<";
+      bool first = true;
+      for (auto a : *tplArgs) {
+        if (!first) os << ", ";
+        first = false;
+        os << mlir::cast<mlir::StringAttr>(a).getValue().str();
+      }
+      os << ">";
+    }
+
+    os << "(";
+    bool first = true;
+    for (auto arg : op.getOperands_()) {
+      if (!first) os << ", ";
+      first = false;
+      auto ty = arg.getType();
+      if (auto tty = mlir::dyn_cast<coir::TensorType>(ty))
+        os << "(" << emitElementType(tty.getElementType()) << "*)"
+           << getName(arg);
+      else
+        os << getName(arg);
+    }
+    os << ");\n";
+  }
+
+  void emitInThreads(InThreadsOp op) {
+    os << getIndent() << "if (" << getName(op.getPredicate()) << ") {\n";
+    incIndent();
+    for (auto &bodyOp : op.getBody().front().getOperations())
+      emitOp(&bodyOp);
+    decIndent();
+    os << getIndent() << "}";
+    bool isAsync = op.getAsync() && *op.getAsync();
+    bool isOuter = !op.getOuter() || *op.getOuter();
+    if (!isAsync && isOuter)
+      os << "\n" << getIndent() << "__syncthreads();";
+    os << "\n";
+  }
+
+  void emitAtomic(AtomicOp op) {
+    using AK = coir::AtomicKind;
+    llvm::StringRef fnName;
+    switch (op.getKind()) {
+    case AK::Add:  fnName = "atomicAdd"; break;
+    case AK::Sub:  fnName = "atomicSub"; break;
+    case AK::Exch: fnName = "atomicExch"; break;
+    case AK::Min:  fnName = "atomicMin"; break;
+    case AK::Max:  fnName = "atomicMax"; break;
+    case AK::And:  fnName = "atomicAnd"; break;
+    case AK::Or:   fnName = "atomicOr"; break;
+    case AK::Xor:  fnName = "atomicXor"; break;
+    case AK::CAS:  fnName = "atomicCAS"; break;
+    }
+
+    auto dstTy = mlir::cast<coir::TensorType>(op.getDest().getType());
+    os << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
+    emitLinearIndex(op.getIndices(), dstTy);
+    os << "], ";
+    if (op.getKind() == AK::CAS && op.getCompare()) {
+      if (auto intAttr = mlir::dyn_cast<IntegerAttr>(*op.getCompare()))
+        os << intAttr.getInt() << ", ";
+      else if (auto fpAttr = mlir::dyn_cast<FloatAttr>(*op.getCompare())) {
+        llvm::SmallString<16> s;
+        fpAttr.getValue().toString(s, 6, 0);
+        os << std::string(s) << ", ";
+      } else
+        os << "/* compare */, ";
+    }
+    os << getName(op.getValue()) << ");\n";
+  }
+
   void emitParallel(ParallelOp op) {
     auto level = op.getLevel();
     auto bounds = op.getBounds();
@@ -614,7 +704,7 @@ private:
 
   void emitCopyWithPad(Value src, Value dst,
                        std::optional<ArrayRef<int64_t>> padLow,
-                       std::optional<ArrayRef<int64_t>> padHigh,
+                       std::optional<ArrayRef<int64_t>> /*padHigh*/,
                        std::optional<Attribute> padValueAttr) {
     auto srcTy = dyn_cast<coir::TensorType>(src.getType());
     auto dstTy = dyn_cast<coir::TensorType>(dst.getType());

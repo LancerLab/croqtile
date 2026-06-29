@@ -1,0 +1,18 @@
+// RUN: cocc -t hip -es %s -o - | FileCheck %s
+//
+// Verify inthreads emits if-guard with predicate and __syncthreads on HIP.
+
+__co__ s32 [4] test_inthreads(s32 [4] input) {
+  s32 [4] output;
+  parallel p by 2 : block {
+    parallel t by 2 : thread {
+      inthreads (t < 1) {
+        output.at(p * 2 + t) = input.at(p * 2 + t) * 3;
+      }
+    }
+  }
+  return output;
+}
+
+// CHECK: if (
+// CHECK: __syncthreads()
