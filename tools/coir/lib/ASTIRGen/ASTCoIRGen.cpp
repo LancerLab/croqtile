@@ -1607,26 +1607,83 @@ bool ASTCoIRGen::Visit(AST::Wait &w) {
   auto loc = Loc(w);
   for (auto &t : w.targets->AllValues()) {
     std::string name;
+    std::string subscript;
     if (auto *id = dyn_cast<AST::Identifier>(t.get()))
       name = id->name;
     else if (auto *expr = dyn_cast<AST::Expr>(t.get())) {
-      if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get()))
+      if (expr->op == Op::ElemOf) {
+        if (auto *base = dyn_cast<AST::Identifier>(expr->GetL().get()))
+          name = base->name;
+        if (expr->GetR()) {
+          if (auto *si = dyn_cast<AST::Identifier>(expr->GetR().get()))
+            subscript = si->name;
+          else if (auto *sl = dyn_cast<AST::IntLiteral>(expr->GetR().get()))
+            subscript = std::to_string(std::visit(
+                [](auto v) -> int64_t { return v; }, sl->value));
+        }
+      } else if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get()))
         name = id->name;
     }
     if (name.empty()) continue;
     auto tokenVal = LookupValue(name);
-    if (!tokenVal) continue;
-    if (mlir::isa<coir::AsyncTokenType>(tokenVal.getType()))
+    if (tokenVal && mlir::isa<coir::AsyncTokenType>(tokenVal.getType())) {
       builder.create<coir::WaitOp>(loc, tokenVal);
+    } else {
+      builder.create<coir::EventWaitOp>(
+          loc, builder.getStringAttr(name),
+          subscript.empty() ? nullptr : builder.getStringAttr(subscript));
+    }
+  }
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::Trigger &trig) {
+  auto loc = Loc(trig);
+  for (auto &t : trig.GetEvents()) {
+    std::string name;
+    std::string subscript;
+    if (auto *expr = dyn_cast<AST::Expr>(t.get())) {
+      if (expr->op == Op::ElemOf) {
+        if (auto *base = dyn_cast<AST::Identifier>(expr->GetL().get()))
+          name = base->name;
+        if (expr->GetR()) {
+          if (auto *si = dyn_cast<AST::Identifier>(expr->GetR().get()))
+            subscript = si->name;
+          else if (auto *sl = dyn_cast<AST::IntLiteral>(expr->GetR().get()))
+            subscript = std::to_string(std::visit(
+                [](auto v) -> int64_t { return v; }, sl->value));
+        }
+      } else if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get()))
+        name = id->name;
+      else if (auto *id2 = dyn_cast<AST::Identifier>(expr->GetL().get()))
+        name = id2->name;
+    } else if (auto *id = dyn_cast<AST::Identifier>(t.get()))
+      name = id->name;
+    if (name.empty()) continue;
+    builder.create<coir::EventTriggerOp>(
+        loc, builder.getStringAttr(name),
+        subscript.empty() ? nullptr : builder.getStringAttr(subscript));
   }
   return true;
 }
 
 bool ASTCoIRGen::Visit(AST::Synchronize &sync) {
   auto loc = Loc(sync);
-  auto scope = coir::ParallelLevel::BLOCK;
-  if (sync.buf_ty == Storage::SHARED)
+  coir::ParallelLevel scope;
+  switch (sync.buf_ty) {
+  case Storage::SHARED:
     scope = coir::ParallelLevel::BLOCK;
+    break;
+  case Storage::LOCAL:
+    scope = coir::ParallelLevel::GROUP;
+    break;
+  case Storage::GLOBAL:
+    scope = coir::ParallelLevel::DEVICE;
+    break;
+  default:
+    scope = coir::ParallelLevel::BLOCK;
+    break;
+  }
   builder.create<coir::BarrierOp>(
       loc, coir::ParallelLevelAttr::get(&IRContext(), scope));
   return true;

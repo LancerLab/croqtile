@@ -169,7 +169,7 @@ public:
   bool Visit(AST::MMA &) override;
   bool Visit(AST::ChunkAt &) override { return true; }
   bool Visit(AST::Wait &) override;
-  bool Visit(AST::Trigger &) override { return true; }
+  bool Visit(AST::Trigger &) override;
   bool Visit(AST::Break &) override;
   bool Visit(AST::Continue &) override;
   bool Visit(AST::Yield &) override { return true; }

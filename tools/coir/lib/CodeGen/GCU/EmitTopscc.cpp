@@ -694,6 +694,10 @@ private:
       emitBarrier(barrier);
     else if (auto wait = dyn_cast<WaitOp>(op))
       emitWait(wait);
+    else if (auto evtTrig = dyn_cast<EventTriggerOp>(op))
+      emitEventTrigger(evtTrig);
+    else if (auto evtWait = dyn_cast<EventWaitOp>(op))
+      emitEventWait(evtWait);
     else if (auto rotate = dyn_cast<FutureRotateOp>(op))
       emitFutureRotate(rotate);
     else if (auto ret = dyn_cast<KernelReturnOp>(op))
@@ -1638,8 +1642,38 @@ private:
        << " " << name << "[" << totalElems << "];\n";
   }
 
-  void emitBarrier(BarrierOp) {
-    os << getIndent() << "tcle::sync();\n";
+  void emitBarrier(BarrierOp op) {
+    switch (op.getScope()) {
+    case coir::ParallelLevel::BLOCK:
+      os << getIndent() << "__syncthreads();\n";
+      break;
+    case coir::ParallelLevel::GROUP:
+      os << getIndent() << "__syncsubthreads();\n";
+      break;
+    case coir::ParallelLevel::DEVICE:
+      os << getIndent() << "topsDeviceSynchronize();\n";
+      break;
+    default:
+      os << getIndent() << "__syncthreads();\n";
+      break;
+    }
+  }
+
+  void emitEventTrigger(EventTriggerOp op) {
+    auto name = op.getEventName().str();
+    os << getIndent() << name;
+    if (auto sub = op.getSubscript())
+      os << "[" << sub->str() << "]";
+    os << " = true;\n";
+  }
+
+  void emitEventWait(EventWaitOp op) {
+    auto name = op.getEventName().str();
+    std::string ref = name;
+    if (auto sub = op.getSubscript())
+      ref += "[" + sub->str() + "]";
+    os << getIndent() << "while (" << ref << " == false) continue;\n";
+    os << getIndent() << ref << " = false;\n";
   }
 
   void emitIfOp(mlir::scf::IfOp op) {
