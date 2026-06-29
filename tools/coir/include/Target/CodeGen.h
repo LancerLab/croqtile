@@ -2,13 +2,15 @@
 //
 // Base class and registry for CoIR target-specific code generation.
 //
-// Each target registers a CodeGen subclass that
-// owns its entire pipeline from CoIR lowering through code emission:
+// Class hierarchy for source-text emitters:
 //
-//   Lower()       -- target-specific lowering passes on the CoIR module
-//   EmitSource()  -- emit target source code to a stream
-//   EmitScript()  -- emit self-contained build+run script
-//   Compile()     -- full in-memory compilation to binary
+//   CoIR::CodeGen                  -- abstract pipeline interface
+//     CoIR::CodeGen (direct)       -- used by NVPTXCodeGen (MLIR->PTX path)
+//     coir::CoIREmitterBase        -- unified base for IR-walking emitters;
+//                                    combines CodeGen pipeline + op visitor +
+//                                    script/host-code helpers
+//       CUDAEmitter                -- CUDA/CUTE target
+//       HIPEmitter                 -- HIP/AMD target
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,34 +27,65 @@
 
 namespace CoIR {
 
-/// Base class for CoIR target code generators. Each target implements its
-/// own lowering and emission pipeline.
+/// Script generation context -- set by the driver before codegen.
+/// Provides target-independent infrastructure (headers, build env)
+/// so emitters don't depend on Choreo headers directly.
+struct ScriptContext {
+  const char *types_header = nullptr;
+  const char *runtime_header = nullptr;
+  const char *types_cute_header = nullptr;
+  const char *cute_header = nullptr;
+  std::string build_env;
+  std::string target_setup;
+  std::string arch_override;
+  std::string cuda_home;
+
+  static ScriptContext &Get() {
+    static ScriptContext ctx;
+    return ctx;
+  }
+};
+
+/// Base class for CoIR target code generators.
 class CodeGen {
 public:
   virtual ~CodeGen() = default;
 
-  /// Run target-specific lowering passes on the module.
-  /// Called after shared optimization passes. The module still contains
-  /// high-level CoIR ops; this method applies whatever target-specific
-  /// transformations are needed before emission.
-  /// Returns true on success.
   virtual bool Lower(mlir::ModuleOp /*module*/) { return true; }
 
-  /// Emit target source code to the output stream.
   virtual int EmitSource(mlir::ModuleOp module, llvm::StringRef arch,
                          llvm::raw_ostream &os) = 0;
 
-  /// Emit a self-contained build+run script. Default calls EmitSource().
   virtual int EmitScript(mlir::ModuleOp module, llvm::StringRef arch,
                          llvm::raw_ostream &os) {
     return EmitSource(module, arch, os);
   }
 
-  /// Full in-memory compilation to a binary at |outputPath|.
   virtual int Compile(mlir::ModuleOp /*module*/, llvm::StringRef /*arch*/,
                       llvm::StringRef /*outputPath*/) {
     llvm::errs() << "Compile() not implemented for this target\n";
     return 1;
+  }
+
+  // -- Shared script helpers (used by all source-text targets) --
+
+  /// Emit the user's host-code block attached to the module.
+  static void emitHostCode(mlir::ModuleOp module, llvm::raw_ostream &os) {
+    auto attr = module->getAttrOfType<mlir::StringAttr>("coir.host_code");
+    if (attr) os << "\n" << attr.getValue() << "\n";
+  }
+
+  /// Emit common script prologue: shebang, tmpdir, embedded Choreo headers.
+  static void emitScriptPrologue(llvm::raw_ostream &os,
+                                 llvm::StringRef comment,
+                                 llvm::StringRef tmpSuffix = "");
+
+  /// Emit the --execute block common to all script targets.
+  static void emitScriptExecuteBlock(llvm::raw_ostream &os) {
+    os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
+    os << "  shift\n";
+    os << "  \"$BINFILE\" \"$@\"\n";
+    os << "fi\n";
   }
 };
 
