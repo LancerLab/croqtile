@@ -1,28 +1,54 @@
 // REQUIRES: TARGET-GPU
-// XFAIL: *
 // RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// MMA f16 matmul: fill + row.col with group-4 (WGMMA path on SM90).
 
-__co__ auto matmul_fill_rc(f16[16, 16] lhs, f16[16, 16] rhs) {
-  f32 [16, 16] output;
-  parallel m by 1 : block {
-    parallel n by 1 : group {
-      mma.fill mc;
-      mma.load.a ma = lhs.row;
-      mma.load.b mb = rhs.col;
-      mma.row.col mc, ma, mb;
-      mma.store output, mc;
+#define M 128
+#define N 256
+#define K 64
+
+__co__ auto matmul_fill_rc(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f16 [M, N] output;
+
+  int MMA_M = 16, MMA_N = 16, MMA_K = 16;
+
+  parallel {m, n} by [M / MMA_M / 4, N / MMA_N] : block {
+    mc = mma.fill 0.0;
+    parallel {g0, g1} by [4, 1]: group {
+      mma.fill mc, 0.0f;
+      foreach k in K / MMA_K {
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.chunkat(m#g0, n#g1);
     }
   }
+
   return output;
 }
 
 int main() {
-  auto a = choreo::make_spandata<choreo::f16>(16, 16);
-  auto b = choreo::make_spandata<choreo::f16>(16, 16);
-  a.fill_random(-1, 1);
-  b.fill_random(-1, 1);
-  auto c = matmul_fill_rc(a.view(), b.view());
-  std::cout << "MMA F16 Test Passed" << std::endl;
+  auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f16>(K, N);
+  lhs.fill_random(1, 10);
+  rhs.fill_random(1, 10);
+
+  auto res = matmul_fill_rc(lhs.view(), rhs.view());
+
+  float tolerance = 0.002f;
+  bool pass = true;
+  for (int i = 0; i < M; ++i)
+    for (int j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (int k = 0; k < K; ++k)
+        ref += __half2float(lhs[i][k] * rhs[k][j]);
+      auto delta = std::abs((ref - __half2float(res[i][j])) / ref);
+      if (delta >= tolerance) pass = false;
+    }
+
+  if (pass) std::cout << "MMA F16 Test Passed" << std::endl;
+  else std::cout << "FAIL: mma_f16" << std::endl;
 }
 
 // CHECK: MMA F16 Test Passed

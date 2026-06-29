@@ -964,6 +964,35 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
                          loc, mlir::arith::CmpFPredicate::UNE, lhs, rhs)
                    : (mlir::Value)builder.create<mlir::arith::CmpIOp>(
                          loc, mlir::arith::CmpIPredicate::ne, lhs, rhs);
+
+      if (op == Op::UBound) {
+        // m # g0 = m * upperBound(g0) + g0
+        int64_t ub = 0;
+        auto *rhsNode = expr->GetR().get();
+        if (auto *rhsId = dyn_cast<AST::Identifier>(rhsNode)) {
+          auto symType = GetSymbolType(rhsId->name);
+          if (auto bty = dyn_cast<BoundedType>(symType))
+            if (bty->HasValidBound())
+              if (auto v = VIInt(bty->GetUpperBound()))
+                ub = *v;
+        }
+        if (ub == 0) {
+          if (auto *rhsExpr = dyn_cast<AST::Expr>(rhsNode))
+            if (rhsExpr->Opts().HasUBound())
+              if (auto v = VIInt(rhsExpr->Opts().GetUBound()))
+                ub = *v;
+        }
+        if (ub > 0) {
+          auto ubConst = builder.create<mlir::arith::ConstantOp>(
+              loc, resTy,
+              builder.getIntegerAttr(resTy, ub));
+          auto mul = builder.create<mlir::arith::MulIOp>(loc, lhs, ubConst);
+          return (mlir::Value)builder.create<mlir::arith::AddIOp>(
+              loc, mul, rhs);
+        }
+        return (mlir::Value)builder.create<mlir::arith::AddIOp>(loc, lhs,
+                                                                 rhs);
+      }
     }
 
     if (expr->GetForm() == AST::Expr::Ternary) {
