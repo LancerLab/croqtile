@@ -42,6 +42,7 @@ struct KernelInfo {
   std::vector<KernelParamInfo> params;
   std::string ret_elem_type; // empty if void
   int64_t ret_dims = 0;
+  SmallVector<int64_t> ret_shape; // static shape from tensor type
   int64_t gridDims[3] = {1, 1, 1};
   int64_t blockDims[3] = {1, 1, 1};
 };
@@ -99,6 +100,12 @@ std::vector<KernelInfo> collectKernels(ModuleOp module) {
       ki.ret_elem_type = retAttr.getValue().str();
     if (auto retDims = kop->getAttrOfType<IntegerAttr>("coir.host_ret_dims"))
       ki.ret_dims = retDims.getInt();
+
+    auto fnType = kop.getFunctionType();
+    if (fnType.getNumResults() > 0) {
+      if (auto tty = dyn_cast<coir::TensorType>(fnType.getResult(0)))
+        ki.ret_shape.assign(tty.getShape().begin(), tty.getShape().end());
+    }
 
     kop.getBody().walk([&](coir::ParallelOp par) {
       auto bounds = par.getBounds();
@@ -224,12 +231,17 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
   // Output buffer.
   if (has_tensor_ret) {
     std::string retCpp = elemTypeToCpp(ki.ret_elem_type);
-    // Infer output size from first tensor param (same span convention).
     std::string sizeExpr;
-    for (auto &p : ki.params) {
-      if (!p.host_elem_type.empty() && p.dims > 0) {
-        sizeExpr = p.name + ".element_count()";
-        break;
+    if (!ki.ret_shape.empty()) {
+      int64_t total = 1;
+      for (auto d : ki.ret_shape) total *= d;
+      sizeExpr = std::to_string(total);
+    } else {
+      for (auto &p : ki.params) {
+        if (!p.host_elem_type.empty() && p.dims > 0) {
+          sizeExpr = p.name + ".element_count()";
+          break;
+        }
       }
     }
     if (sizeExpr.empty()) sizeExpr = "1";
@@ -315,17 +327,10 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     os << "  static int64_t __off_out = 0;\n";
     os << "  __args[" << idx << "] = &__off_out;\n";
     idx++;
-    std::string refParam;
-    for (auto &p : ki.params) {
-      if (!p.host_elem_type.empty() && p.dims > 0) {
-        refParam = p.name;
-        break;
-      }
-    }
     for (int64_t d = 0; d < ki.ret_dims; ++d) {
-      if (!refParam.empty())
-        os << "  static int64_t __sz_out_" << d << " = " << refParam
-           << ".shape()[" << d << "];\n";
+      if (d < (int64_t)ki.ret_shape.size())
+        os << "  static int64_t __sz_out_" << d << " = "
+           << ki.ret_shape[d] << ";\n";
       else
         os << "  static int64_t __sz_out_" << d << " = 1;\n";
       os << "  __args[" << idx << "] = &__sz_out_" << d << ";\n";
@@ -335,13 +340,11 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
       os << "  static int64_t __st_out_" << d << " = ";
       if (d == ki.ret_dims - 1) {
         os << "1";
-      } else if (!refParam.empty()) {
-        for (int64_t k = d + 1; k < ki.ret_dims; ++k) {
-          if (k > d + 1) os << " * ";
-          os << refParam << ".shape()[" << k << "]";
-        }
       } else {
-        os << "1";
+        int64_t stride = 1;
+        for (int64_t k = d + 1; k < (int64_t)ki.ret_shape.size(); ++k)
+          stride *= ki.ret_shape[k];
+        os << stride;
       }
       os << ";\n";
       os << "  __args[" << idx << "] = &__st_out_" << d << ";\n";
@@ -379,39 +382,34 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
   // Copy-back output.
   if (has_tensor_ret) {
     std::string retCpp = elemTypeToCpp(ki.ret_elem_type);
-    std::string sizeExpr;
-    for (auto &p : ki.params) {
-      if (!p.host_elem_type.empty() && p.dims > 0) {
-        sizeExpr = p.name + ".element_count()";
-        break;
-      }
-    }
-    if (sizeExpr.empty()) sizeExpr = "1";
-    if (ki.ret_dims > 1) {
-      // Multi-dimensional return: pass individual dimension sizes.
-      os << "  auto __result = choreo::make_spandata<choreo::"
-         << ki.ret_elem_type << ">(";
-      std::string refParam;
+    std::string totalExpr;
+    if (!ki.ret_shape.empty()) {
+      int64_t total = 1;
+      for (auto d : ki.ret_shape) total *= d;
+      totalExpr = std::to_string(total);
+    } else {
       for (auto &p : ki.params) {
         if (!p.host_elem_type.empty() && p.dims > 0) {
-          refParam = p.name;
+          totalExpr = p.name + ".element_count()";
           break;
         }
       }
-      for (int64_t d = 0; d < ki.ret_dims; ++d) {
-        if (d > 0) os << ", ";
-        if (!refParam.empty() && d < ki.ret_dims)
-          os << refParam << ".shape()[" << d << "]";
-        else
-          os << "1";
-      }
-      os << ");\n";
-    } else {
-      os << "  auto __result = choreo::make_spandata<choreo::"
-         << ki.ret_elem_type << ">(" << sizeExpr << ");\n";
     }
+    if (totalExpr.empty()) totalExpr = "1";
+
+    os << "  auto __result = choreo::make_spandata<choreo::"
+       << ki.ret_elem_type << ">(";
+    if (!ki.ret_shape.empty()) {
+      for (int64_t d = 0; d < (int64_t)ki.ret_shape.size(); ++d) {
+        if (d > 0) os << ", ";
+        os << ki.ret_shape[d];
+      }
+    } else {
+      os << totalExpr;
+    }
+    os << ");\n";
     os << "  cuMemcpyDtoH(__result.data(), (CUdeviceptr)__out_dev, "
-       << sizeExpr << " * sizeof(" << retCpp << "));\n";
+       << totalExpr << " * sizeof(" << retCpp << "));\n";
   }
 
   // Free shadow device buffers.

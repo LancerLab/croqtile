@@ -8,23 +8,12 @@
 // contains lowered copy forms (element.copy, dma.copy, tma.copy) and
 // DMA descriptor ops.
 //
-// Handled ops:
-//   coir.kernel       -> gpu.module + gpu.func (kernel)
-//   coir.parallel     -> gpu.thread_id / gpu.block_id
-//   coir.foreach      -> scf.for
-//   coir.tensor.tile  -> memref.subview
-//   coir.tensor.alloc -> memref.alloc (with GPU address space for shared)
-//   coir.tensor.load_elem / store_elem -> memref.load / store
-//   coir.tensor.reduce_elem -> memref.load + arith.add + memref.store
-//   coir.element.copy -> flat memcpy loop (scf.for + load + store)
-//   coir.dma.copy     -> flat memcpy loop + barrier
-//   coir.tma.copy     -> flat memcpy loop + barrier
+// Target-specific ops handled here (beyond CoIRKernelLoweringBase):
+//   coir.tensor.tile  -> memref.reinterpret_cast (with source strides)
+//   coir.tma.copy     -> flat/strided copy loop + barrier
 //   coir.dma.invoke   -> flat memcpy from descriptor source/dest + barrier
-//   coir.dma.const.desc / prefetch.desc / runtime.desc -> skipped
-//   coir.barrier      -> gpu.barrier
-//   coir.wait         -> gpu.barrier (conservative)
-//   coir.assert       -> skipped (handled at host level)
-//   coir.return       -> gpu.return
+//   coir.atomic       -> memref.atomic_rmw / generic_atomic_rmw
+//   scf.if            -> scf.if (recursive conversion of body ops)
 //
 //===----------------------------------------------------------------------===//
 
@@ -126,6 +115,28 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
       convertDMAInvoke(builder, loc, invoke, ctx);
       return true;
     }
+    if (auto atomicOp = dyn_cast<AtomicOp>(op)) {
+      convertAtomic(builder, loc, atomicOp, ctx.mapping);
+      return true;
+    }
+    if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
+      convertScfIf(builder, loc, ifOp, ctx);
+      return true;
+    }
+    // Override base load/store/reduce to handle index count mismatches
+    // from rank-changing tensor.tile.
+    if (auto le = dyn_cast<TensorLoadElemOp>(op)) {
+      gpuConvertLoadElem(builder, loc, le, ctx.mapping);
+      return true;
+    }
+    if (auto se = dyn_cast<TensorStoreElemOp>(op)) {
+      gpuConvertStoreElem(builder, loc, se, ctx.mapping);
+      return true;
+    }
+    if (auto re = dyn_cast<TensorReduceElemOp>(op)) {
+      gpuConvertReduceElem(builder, loc, re, ctx.mapping);
+      return true;
+    }
     return false;
   }
 
@@ -140,7 +151,8 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
     auto shmIt = shmGlobalNames_.find(alloc.getOperation());
     if (shmIt != shmGlobalNames_.end()) {
       auto memTy = shmGlobalTypes_[alloc.getOperation()];
-      auto ref = builder.create<memref::GetGlobalOp>(loc, memTy, shmIt->second);
+      auto ref =
+          builder.create<memref::GetGlobalOp>(loc, memTy, shmIt->second);
       ctx.mapping.map(alloc.getResult(), ref.getResult());
       return;
     }
@@ -164,74 +176,180 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
   void emitFlatCopyLoop(OpBuilder &builder, Location loc,
                         Value src, Value dst) override {
     auto srcTy = cast<MemRefType>(src.getType());
+    auto dstTy = cast<MemRefType>(dst.getType());
     int64_t totalElems = 1;
     for (auto dim : srcTy.getShape())
       totalElems *= dim;
 
-    Value srcOffset = extractOffset(builder, loc, src);
-    Value dstOffset = extractOffset(builder, loc, dst);
-    Value srcBase = getBaseMemRef(src);
-    Value dstBase = getBaseMemRef(dst);
+    bool srcIsStridedTile = false, dstIsStridedTile = false;
+    if (srcTy.getRank() > 1) {
+      if (isa<StridedLayoutAttr>(srcTy.getLayout()))
+        srcIsStridedTile = true;
+      else if (src.getDefiningOp<memref::ReinterpretCastOp>())
+        srcIsStridedTile = true;
+    }
+    if (dstTy.getRank() > 1) {
+      if (isa<StridedLayoutAttr>(dstTy.getLayout()))
+        dstIsStridedTile = true;
+      else if (dst.getDefiningOp<memref::ReinterpretCastOp>())
+        dstIsStridedTile = true;
+    }
+
+    if (!srcIsStridedTile && !dstIsStridedTile) {
+      Value srcOffset = extractOffset(builder, loc, src);
+      Value dstOffset = extractOffset(builder, loc, dst);
+      Value srcBase = getBaseMemRef(src);
+      Value dstBase = getBaseMemRef(dst);
+
+      Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
+      Value total = builder.create<arith::ConstantIndexOp>(loc, totalElems);
+      Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+
+      auto elemTy = srcTy.getElementType();
+      auto srcBaseTy = cast<MemRefType>(srcBase.getType());
+      auto dstBaseTy = cast<MemRefType>(dstBase.getType());
+
+      auto makeFlatView = [&](Value base, Value offset,
+                              Attribute addrSpace) -> Value {
+        bool hasDynOffset = false;
+        int64_t staticOff = 0;
+        if (auto cst = offset.getDefiningOp<arith::ConstantIndexOp>())
+          staticOff = cst.value();
+        else
+          hasDynOffset = true;
+
+        MemRefType flatTy;
+        if (hasDynOffset) {
+          auto layout = StridedLayoutAttr::get(builder.getContext(),
+                                               ShapedType::kDynamic, {1});
+          flatTy = MemRefType::get({totalElems}, elemTy, layout, addrSpace);
+        } else if (staticOff != 0) {
+          auto layout = StridedLayoutAttr::get(builder.getContext(),
+                                               staticOff, {1});
+          flatTy = MemRefType::get({totalElems}, elemTy, layout, addrSpace);
+        } else {
+          flatTy = MemRefType::get({totalElems}, elemTy, AffineMap{},
+                                   addrSpace);
+        }
+        return builder.create<memref::ReinterpretCastOp>(
+            loc, flatTy, base, offset,
+            ValueRange{total}, ValueRange{one});
+      };
+
+      auto flatSrc = makeFlatView(srcBase, srcOffset,
+                                  srcBaseTy.getMemorySpace());
+      auto flatDst = makeFlatView(dstBase, dstOffset,
+                                  dstBaseTy.getMemorySpace());
+
+      auto loop = builder.create<scf::ForOp>(loc, zero, total, one);
+      {
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPointToStart(loop.getBody());
+        Value iv = loop.getInductionVar();
+        Value elem = builder.create<memref::LoadOp>(loc, flatSrc, iv);
+        builder.create<memref::StoreOp>(loc, elem, flatDst, iv);
+      }
+      return;
+    }
+
+    // At least one side is a strided multi-dimensional tile.
+    auto shape = srcTy.getShape();
+    unsigned rank = shape.size();
 
     Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
-    Value total = builder.create<arith::ConstantIndexOp>(loc, totalElems);
     Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
 
-    auto elemTy = srcTy.getElementType();
-    auto srcBaseTy = cast<MemRefType>(srcBase.getType());
-    auto dstBaseTy = cast<MemRefType>(dstBase.getType());
+    SmallVector<Value> ivs;
+    SmallVector<scf::ForOp> loops;
 
-    auto makeReinterpret = [&](Value base, Value offset,
-                               Attribute addrSpace) -> Value {
-      bool hasDynOffset =
-          !arith::ConstantIndexOp::isBuildableWith(
-              builder.getIndexAttr(0), offset.getType()) ||
-          (offset.getDefiningOp<arith::ConstantIndexOp>() &&
-           offset.getDefiningOp<arith::ConstantIndexOp>().value() != 0) ||
-          !offset.getDefiningOp<arith::ConstantIndexOp>();
-
-      int64_t staticOffset = 0;
-      if (auto cst = offset.getDefiningOp<arith::ConstantIndexOp>())
-        staticOffset = cst.value();
-      else
-        hasDynOffset = true;
-
-      MemRefType flatTy;
-      if (hasDynOffset && staticOffset == 0) {
-        auto layout = StridedLayoutAttr::get(builder.getContext(),
-                                             ShapedType::kDynamic, {1});
-        flatTy = MemRefType::get({totalElems}, elemTy, layout, addrSpace);
-      } else if (staticOffset != 0) {
-        auto layout = StridedLayoutAttr::get(builder.getContext(),
-                                             staticOffset, {1});
-        flatTy = MemRefType::get({totalElems}, elemTy, layout, addrSpace);
-      } else {
-        flatTy = MemRefType::get({totalElems}, elemTy, AffineMap{},
-                                 addrSpace);
-      }
-      return builder.create<memref::ReinterpretCastOp>(
-          loc, flatTy, base, offset,
-          ValueRange{total}, ValueRange{one});
-    };
-
-    auto flatSrc = makeReinterpret(srcBase, srcOffset,
-                                   srcBaseTy.getMemorySpace());
-    auto flatDst = makeReinterpret(dstBase, dstOffset,
-                                   dstBaseTy.getMemorySpace());
-
-    auto loop = builder.create<scf::ForOp>(loc, zero, total, one);
-    {
-      OpBuilder::InsertionGuard guard(builder);
+    for (unsigned d = 0; d < rank; ++d) {
+      Value ub = builder.create<arith::ConstantIndexOp>(loc, shape[d]);
+      auto loop = builder.create<scf::ForOp>(loc, zero, ub, one);
+      loops.push_back(loop);
+      ivs.push_back(loop.getInductionVar());
       builder.setInsertionPointToStart(loop.getBody());
-      Value iv = loop.getInductionVar();
-      Value elem = builder.create<memref::LoadOp>(loc, flatSrc, iv);
-      builder.create<memref::StoreOp>(loc, elem, flatDst, iv);
     }
+
+    Value elem = builder.create<memref::LoadOp>(loc, src, ivs);
+    if (dstTy.getRank() == srcTy.getRank()) {
+      builder.create<memref::StoreOp>(loc, elem, dst, ivs);
+    } else {
+      Value linearIdx = builder.create<arith::ConstantIndexOp>(loc, 0);
+      for (unsigned d = 0; d < rank; ++d) {
+        int64_t stride = 1;
+        for (unsigned k = d + 1; k < rank; ++k) stride *= shape[k];
+        Value s = builder.create<arith::ConstantIndexOp>(loc, stride);
+        Value term = builder.create<arith::MulIOp>(loc, ivs[d], s);
+        linearIdx = builder.create<arith::AddIOp>(loc, linearIdx, term);
+      }
+      dst = flattenIfNeeded(builder, loc, dst, 1);
+      builder.create<memref::StoreOp>(loc, elem, dst, linearIdx);
+    }
+
+    if (!loops.empty())
+      builder.setInsertionPointAfter(loops.front());
   }
 
 private:
   DenseMap<Operation*, std::string> shmGlobalNames_;
   DenseMap<Operation*, MemRefType> shmGlobalTypes_;
+
+  Value flattenIfNeeded(OpBuilder &builder, Location loc, Value memref,
+                        unsigned numIndices) {
+    auto memTy = cast<MemRefType>(memref.getType());
+    if ((unsigned)memTy.getRank() == numIndices)
+      return memref;
+    int64_t totalElems = 1;
+    for (auto d : memTy.getShape()) totalElems *= d;
+    auto flatTy = MemRefType::get({totalElems}, memTy.getElementType(),
+                                  AffineMap{}, memTy.getMemorySpace());
+    Value base = getBaseMemRef(memref);
+    Value offset = extractOffset(builder, loc, memref);
+    Value sz = builder.create<arith::ConstantIndexOp>(loc, totalElems);
+    Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+    return builder.create<memref::ReinterpretCastOp>(
+        loc, flatTy, base, offset, ValueRange{sz}, ValueRange{one});
+  }
+
+  void gpuConvertLoadElem(OpBuilder &builder, Location loc,
+                         TensorLoadElemOp loadElem, IRMapping &mapping) {
+    Value src = mapping.lookup(loadElem.getSource());
+    SmallVector<Value> indices;
+    for (auto idx : loadElem.getIndices())
+      indices.push_back(mapping.lookup(idx));
+    src = flattenIfNeeded(builder, loc, src, indices.size());
+    auto loaded = builder.create<memref::LoadOp>(loc, src, indices);
+    mapping.map(loadElem.getResult(), loaded.getResult());
+  }
+
+  void gpuConvertStoreElem(OpBuilder &builder, Location loc,
+                           TensorStoreElemOp storeElem, IRMapping &mapping) {
+    Value dst = mapping.lookup(storeElem.getDest());
+    Value val = mapping.lookup(storeElem.getValue());
+    SmallVector<Value> indices;
+    for (auto idx : storeElem.getIndices())
+      indices.push_back(mapping.lookup(idx));
+    dst = flattenIfNeeded(builder, loc, dst, indices.size());
+    builder.create<memref::StoreOp>(loc, val, dst, indices);
+  }
+
+  void gpuConvertReduceElem(OpBuilder &builder, Location loc,
+                            TensorReduceElemOp reduceElem,
+                            IRMapping &mapping) {
+    Value dst = mapping.lookup(reduceElem.getDest());
+    Value val = mapping.lookup(reduceElem.getValue());
+    SmallVector<Value> indices;
+    for (auto idx : reduceElem.getIndices())
+      indices.push_back(mapping.lookup(idx));
+    dst = flattenIfNeeded(builder, loc, dst, indices.size());
+    Value old = builder.create<memref::LoadOp>(loc, dst, indices);
+    Value sum;
+    if (isa<FloatType>(val.getType()))
+      sum = builder.create<arith::AddFOp>(loc, old, val);
+    else
+      sum = builder.create<arith::AddIOp>(loc, old, val);
+    builder.create<memref::StoreOp>(loc, sum, dst, indices);
+  }
 
   void convertTensorTile(OpBuilder &builder, Location loc,
                          TensorTileOp tileOp, IRMapping &mapping) {
@@ -243,13 +361,6 @@ private:
     auto srcShape = srcTy.getShape();
     auto indices = tileOp.getIndices();
 
-    if (indices.empty()) {
-      mapping.map(tileOp.getResult(), src);
-      return;
-    }
-
-    // Compute flat byte offset: sum(indices[i] * tileShape[i] * stride[i])
-    // where stride[i] = product of srcShape[i+1..n-1].
     SmallVector<int64_t> srcStrides(srcShape.size());
     {
       int64_t s = 1;
@@ -260,27 +371,71 @@ private:
     }
 
     Value offset = builder.create<arith::ConstantIndexOp>(loc, 0);
-    for (unsigned i = 0; i < indices.size() && i < srcShape.size(); ++i) {
-      Value idx = mapping.lookup(indices[i]);
-      int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
-      int64_t elemStride = tileDim * srcStrides[i];
-      Value stride = builder.create<arith::ConstantIndexOp>(loc, elemStride);
-      Value term = builder.create<arith::MulIOp>(loc, idx, stride);
-      offset = builder.create<arith::AddIOp>(loc, offset, term);
+    if (!indices.empty()) {
+      for (unsigned i = 0; i < indices.size() && i < srcShape.size(); ++i) {
+        Value idx = mapping.lookup(indices[i]);
+        int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
+        int64_t elemStride = tileDim * srcStrides[i];
+        Value stride =
+            builder.create<arith::ConstantIndexOp>(loc, elemStride);
+        Value term = builder.create<arith::MulIOp>(loc, idx, stride);
+        offset = builder.create<arith::AddIOp>(loc, offset, term);
+      }
     }
 
-    auto tileMemTy = convertTensorType(tileTy);
-    int64_t totalTileElems = 1;
-    for (auto d : tileShape)
-      totalTileElems *= d;
+    SmallVector<int64_t> tileStrides;
+    if (tileShape.size() == srcShape.size()) {
+      tileStrides.assign(srcStrides.begin(), srcStrides.end());
+    } else {
+      tileStrides.resize(tileShape.size());
+      int64_t s = 1;
+      for (int i = (int)tileShape.size() - 1; i >= 0; --i) {
+        tileStrides[i] = s;
+        s *= tileShape[i];
+      }
+    }
 
-    auto flatTy = MemRefType::get({totalTileElems}, srcMemTy.getElementType(),
-                                  AffineMap{}, srcMemTy.getMemorySpace());
-    Value totalSize =
-        builder.create<arith::ConstantIndexOp>(loc, totalTileElems);
-    Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+    bool hasDynOffset = false;
+    int64_t staticOffset = 0;
+    if (auto cst = offset.getDefiningOp<arith::ConstantIndexOp>())
+      staticOffset = cst.value();
+    else
+      hasDynOffset = true;
+
+    bool needsLayout = hasDynOffset || staticOffset != 0;
+    MemRefType tileMem;
+    if (needsLayout) {
+      int64_t layoutOffset =
+          hasDynOffset ? ShapedType::kDynamic : staticOffset;
+      auto layout = StridedLayoutAttr::get(builder.getContext(),
+                                           layoutOffset, tileStrides);
+      tileMem = MemRefType::get(tileShape, srcMemTy.getElementType(),
+                                layout, srcMemTy.getMemorySpace());
+    } else {
+      tileMem = MemRefType::get(tileShape, srcMemTy.getElementType(),
+                                AffineMap{}, srcMemTy.getMemorySpace());
+    }
+
+    SmallVector<Value> sizes;
+    SmallVector<Value> strides;
+    for (unsigned i = 0; i < tileShape.size(); ++i) {
+      sizes.push_back(
+          builder.create<arith::ConstantIndexOp>(loc, tileShape[i]));
+      strides.push_back(
+          builder.create<arith::ConstantIndexOp>(loc, tileStrides[i]));
+    }
+
+    Value base = getBaseMemRef(src);
+    Value parentOffset = extractOffset(builder, loc, src);
+    if (auto cst = parentOffset.getDefiningOp<arith::ConstantIndexOp>()) {
+      if (cst.value() != 0)
+        offset = builder.create<arith::AddIOp>(loc, offset, parentOffset);
+    } else {
+      offset = builder.create<arith::AddIOp>(loc, offset, parentOffset);
+    }
+
     auto cast = builder.create<memref::ReinterpretCastOp>(
-        loc, flatTy, src, offset, ValueRange{totalSize}, ValueRange{one});
+        loc, tileMem, base, offset, sizes, strides);
     mapping.map(tileOp.getResult(), cast.getResult());
   }
 
@@ -313,6 +468,121 @@ private:
       emitFlatCopyLoop(builder, loc, src, dst);
     }
     builder.create<mgpu::BarrierOp>(loc);
+  }
+
+  void convertAtomic(OpBuilder &builder, Location loc, AtomicOp atomicOp,
+                     IRMapping &mapping) {
+    Value dst = mapping.lookup(atomicOp.getDest());
+    Value val = mapping.lookup(atomicOp.getValue());
+    SmallVector<Value> indices;
+    for (auto idx : atomicOp.getIndices())
+      indices.push_back(mapping.lookup(idx));
+    dst = flattenIfNeeded(builder, loc, dst, indices.size());
+
+    auto kind = atomicOp.getKind();
+    bool isFloat = isa<FloatType>(val.getType());
+
+    using AK = coir::AtomicKind;
+    using RMW = arith::AtomicRMWKind;
+
+    auto mapKind = [&]() -> std::optional<RMW> {
+      switch (kind) {
+      case AK::Add:  return isFloat ? RMW::addf : RMW::addi;
+      case AK::Exch: return RMW::assign;
+      case AK::Min:  return isFloat ? RMW::minimumf : RMW::mins;
+      case AK::Max:  return isFloat ? RMW::maximumf : RMW::maxs;
+      case AK::And:  return RMW::andi;
+      case AK::Or:   return RMW::ori;
+      default:       return std::nullopt;
+      }
+    };
+
+    auto rmwKind = mapKind();
+    if (rmwKind) {
+      builder.create<memref::AtomicRMWOp>(loc, val.getType(), *rmwKind, val,
+                                          dst, indices);
+    } else if (kind == AK::Sub) {
+      Value neg;
+      if (isFloat)
+        neg = builder.create<arith::NegFOp>(loc, val);
+      else {
+        Value zero = builder.create<arith::ConstantOp>(
+            loc, builder.getIntegerAttr(val.getType(), 0));
+        neg = builder.create<arith::SubIOp>(loc, zero, val);
+      }
+      builder.create<memref::AtomicRMWOp>(loc, val.getType(), RMW::addi, neg,
+                                          dst, indices);
+    } else {
+      auto genAtomic = builder.create<memref::GenericAtomicRMWOp>(
+          loc, dst, indices);
+      Block *body = &genAtomic.body().front();
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(body);
+      Value current = body->getArgument(0);
+      Value result;
+      if (kind == AK::Xor)
+        result = builder.create<arith::XOrIOp>(loc, current, val);
+      else
+        result = current;
+      builder.create<memref::AtomicYieldOp>(loc, result);
+    }
+  }
+
+  void convertScfIf(OpBuilder &builder, Location loc, scf::IfOp ifOp,
+                    KernelConvertCtx &ctx) {
+    Value cond = ctx.mapping.lookup(ifOp.getCondition());
+
+    bool hasElse = !ifOp.getElseRegion().empty();
+    SmallVector<Type> resultTypes;
+    for (auto r : ifOp.getResults())
+      resultTypes.push_back(r.getType());
+
+    auto newIf = builder.create<scf::IfOp>(loc, resultTypes, cond, hasElse);
+
+    {
+      OpBuilder::InsertionGuard guard(builder);
+      Block &thenBlock = newIf.getThenRegion().front();
+      if (thenBlock.mightHaveTerminator())
+        thenBlock.getTerminator()->erase();
+      builder.setInsertionPointToEnd(&thenBlock);
+
+      for (auto &op : ifOp.getThenRegion().front().getOperations()) {
+        if (isa<scf::YieldOp>(op)) {
+          SmallVector<Value> yieldVals;
+          for (auto v : op.getOperands())
+            yieldVals.push_back(ctx.mapping.lookup(v));
+          builder.create<scf::YieldOp>(loc, yieldVals);
+          continue;
+        }
+        convertOp(builder, loc, op, ctx);
+      }
+      if (!thenBlock.mightHaveTerminator())
+        builder.create<scf::YieldOp>(loc);
+    }
+
+    if (hasElse) {
+      OpBuilder::InsertionGuard guard(builder);
+      Block &elseBlock = newIf.getElseRegion().front();
+      if (elseBlock.mightHaveTerminator())
+        elseBlock.getTerminator()->erase();
+      builder.setInsertionPointToEnd(&elseBlock);
+
+      for (auto &op : ifOp.getElseRegion().front().getOperations()) {
+        if (isa<scf::YieldOp>(op)) {
+          SmallVector<Value> yieldVals;
+          for (auto v : op.getOperands())
+            yieldVals.push_back(ctx.mapping.lookup(v));
+          builder.create<scf::YieldOp>(loc, yieldVals);
+          continue;
+        }
+        convertOp(builder, loc, op, ctx);
+      }
+      if (!elseBlock.mightHaveTerminator())
+        builder.create<scf::YieldOp>(loc);
+    }
+
+    for (unsigned i = 0; i < ifOp.getNumResults(); ++i)
+      ctx.mapping.map(ifOp.getResult(i), newIf.getResult(i));
   }
 
   Value extractOffset(OpBuilder &builder, Location loc, Value memref) {
