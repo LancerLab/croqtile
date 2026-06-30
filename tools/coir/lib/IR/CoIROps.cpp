@@ -600,8 +600,6 @@ ParseResult CoIRWhileOp::parse(OpAsmParser &parser, OperationState &result) {
 void CoIRWhileOp::print(OpAsmPrinter &printer) {
   auto inits = getInits();
   auto &condBlock = getCondRegion().front();
-  auto &bodyBlock = getBodyRegion().front();
-
   printer << " (";
   llvm::interleaveComma(
       llvm::zip(condBlock.getArguments(), inits), printer,

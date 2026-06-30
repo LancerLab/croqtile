@@ -363,11 +363,11 @@ void CoIREmitterBase::emitIfOp(mlir::scf::IfOp op) {
   }
 }
 
-void CoIREmitterBase::emitBreak(CoIRBreakOp op) {
+void CoIREmitterBase::emitBreak(CoIRBreakOp /*op*/) {
   os() << getIndent() << "break;\n";
 }
 
-void CoIREmitterBase::emitContinue(CoIRContinueOp op) {
+void CoIREmitterBase::emitContinue(CoIRContinueOp /*op*/) {
   os() << getIndent() << "continue;\n";
 }
 
@@ -597,6 +597,6 @@ std::string CoIREmitterBase::getAllocQualifier(TensorType tty) {
   return tty.getMemorySpace() == 1 ? "__shared__ " : "";
 }
 
-bool CoIREmitterBase::needsTMAAlignment(TensorType tty) {
+bool CoIREmitterBase::needsTMAAlignment(TensorType /*tty*/) {
   return false;
 }

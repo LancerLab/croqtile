@@ -853,12 +853,12 @@ private:
       auto padLow = op.getPadLow();
       auto padHigh = op.getPadHigh();
       auto padValue = op.getPadValue();
-      std::optional<ArrayRef<int64_t>> pl =
-          padLow ? std::optional(padLow.value()) : std::nullopt;
-      std::optional<ArrayRef<int64_t>> ph =
-          padHigh ? std::optional(padHigh.value()) : std::nullopt;
-      std::optional<Attribute> pv =
-          padValue ? std::optional<Attribute>(*padValue) : std::nullopt;
+      std::optional<ArrayRef<int64_t>> pl;
+      if (padLow) pl = padLow.value();
+      std::optional<ArrayRef<int64_t>> ph;
+      if (padHigh) ph = padHigh.value();
+      std::optional<Attribute> pv;
+      if (padValue) pv = *padValue;
       emitCopyWithPad(op.getSource(), op.getDest(), pl, ph, pv);
     } else if (kind == DMAKind::Transpose) {
       auto tp = op.getTransposePerm();

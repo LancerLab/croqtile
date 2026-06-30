@@ -20,13 +20,9 @@
 #include "dma_plan.hpp"
 #include "operator_info.hpp"
 
-#ifndef __CHOREO_CUDA_DIR__
-  #warning "missing macro definition of __CHOREO_CUDA_DIR__"
-#endif // __CHOREO_CUDA_DIR__
-
-#ifndef __CHOREO_CUTE_DIR__
-  #warning "missing macro definition of __CHOREO_CUTE_DIR__"
-#endif // __CHOREO_CUTE_DIR__
+// __CHOREO_CUDA_DIR__ and __CHOREO_CUTE_DIR__ are set by CMake when
+// ENABLE_CUDA / ENABLE_CUTE are ON.  Code below uses #ifdef guards
+// to degrade gracefully when they are absent.
 
 // #define USING_OP_INFO
 

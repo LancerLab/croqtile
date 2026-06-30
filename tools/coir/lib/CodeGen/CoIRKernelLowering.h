@@ -52,16 +52,18 @@ protected:
   /// Hook called after gpu.module is created but before the kernel body
   /// is converted. Use to pre-scan for shared-memory allocs, set module
   /// attributes, etc.
-  virtual void preScanKernel(KernelOp kernel, mlir::OpBuilder &builder,
-                             mlir::gpu::GPUModuleOp gpuModule) {}
+  virtual void preScanKernel(KernelOp /*kernel*/, mlir::OpBuilder &/*builder*/,
+                             mlir::gpu::GPUModuleOp /*gpuModule*/) {}
 
   // -- Op conversion --
   virtual void convertOp(mlir::OpBuilder &builder, mlir::Location loc,
                          mlir::Operation &op, KernelConvertCtx &ctx);
 
   /// Hook for target-specific ops. Return true if handled.
-  virtual bool convertTargetOp(mlir::OpBuilder &builder, mlir::Location loc,
-                               mlir::Operation &op, KernelConvertCtx &ctx) {
+  virtual bool convertTargetOp(mlir::OpBuilder &/*builder*/,
+                               mlir::Location /*loc*/,
+                               mlir::Operation &/*op*/,
+                               KernelConvertCtx &/*ctx*/) {
     return false;
   }
 
