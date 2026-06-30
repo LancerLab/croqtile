@@ -1,0 +1,94 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=FP8-K128
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=FP8-K64
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=BF16-K128
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=FP8-N192
+
+#define M 64
+
+// FP8 e4m3: atom_k=32, K=128 => 4 iterations
+__co__ auto fp8_k128_auto_split(f8_e4m3 [M, 128] lhs, f8_e4m3 [128, 128] rhs) {
+  f16 [M, 128] output{0.0f};
+
+  parallel pb by 1 : block {
+    lhs_s = dma.copy.swiz<128> lhs => shared;
+    rhs_s = dma.copy.swiz<128> rhs => shared;
+
+    parallel g by 1 : group-4 {
+      mc = mma.fill.f16 0.0f;
+      mma.row.row mc, lhs_s, rhs_s;
+      mma.store mc, output;
+    }
+  }
+
+  return output;
+}
+
+// FP8 e4m3: atom_k=32, K=64 => 2 iterations
+__co__ auto fp8_k64_auto_split(f8_e4m3 [M, 64] lhs, f8_e4m3 [128, 64] rhs) {
+  f16 [M, 128] output{0.0f};
+
+  parallel pb by 1 : block {
+    lhs_s = dma.copy.swiz<64> lhs => shared;
+    rhs_s = dma.copy.swiz<64> rhs => shared;
+
+    parallel g by 1 : group-4 {
+      mc = mma.fill.f16 0.0f;
+      mma.row.row mc, lhs_s, rhs_s;
+      mma.store mc, output;
+    }
+  }
+
+  return output;
+}
+
+// BF16: atom_k=16, K=128 => 8 iterations
+__co__ auto bf16_k128_auto_split(bf16 [M, 128] lhs, bf16 [128, 128] rhs) {
+  f32 [M, 128] output{0.0f};
+
+  parallel pb by 1 : block {
+    lhs_s = dma.copy.swiz<128> lhs => shared;
+    rhs_s = dma.copy.swiz<128> rhs => shared;
+
+    parallel g by 1 : group-4 {
+      mc = mma.fill.f32 0.0f;
+      mma.row.row mc, lhs_s, rhs_s;
+      mma.store mc, output;
+    }
+  }
+
+  return output;
+}
+
+// FP8 e4m3: atom_k=32, K=128, N=192 => 4 iterations (non-power-of-2 N)
+__co__ auto fp8_n192_k128_auto_split(f8_e4m3 [M, 128] lhs, f8_e4m3 [192, 128] rhs) {
+  f16 [M, 192] output{0.0f};
+
+  parallel pb by 1 : block {
+    lhs_s = dma.copy.swiz<128> lhs => shared;
+    rhs_s = dma.copy.swiz<128> rhs => shared;
+
+    parallel g by 1 : group-4 {
+      mc = mma.fill.f16 0.0f;
+      mma.row.row mc, lhs_s, rhs_s;
+      mma.store mc, output;
+    }
+  }
+
+  return output;
+}
+
+// FP8-K128: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 4; ++__choreo_wgmma_k_iter) {
+// FP8-K128: MMA_64x128x32_F16E4M3E4M3_SS_TN<>::fma(
+
+// FP8-K64: __choreo_device_fp8_k64_auto_split(
+// FP8-K64: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 2; ++__choreo_wgmma_k_iter) {
+// FP8-K64: MMA_64x128x32_F16E4M3E4M3_SS_TN<>::fma(
+
+// BF16-K128: __choreo_device_bf16_k128_auto_split(
+// BF16-K128: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 8; ++__choreo_wgmma_k_iter) {
+// BF16-K128: MMA_64x128x16_F32BF16BF16_SS<static_cast<cute::SM90::GMMA::Major>(0), static_cast<cute::SM90::GMMA::Major>(0)>::fma(
+
+// FP8-N192: __choreo_device_fp8_n192_k128_auto_split(
+// FP8-N192: for (int __choreo_wgmma_k_iter = 0; __choreo_wgmma_k_iter < 4; ++__choreo_wgmma_k_iter) {
+// FP8-N192: MMA_64x192x32_F16E4M3E4M3_SS_TN<>::fma(

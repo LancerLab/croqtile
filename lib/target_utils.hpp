@@ -630,7 +630,11 @@ inline int InferFixedWGMMAAtomK(const MMAConfig& config) {
   if (candidate_ks.empty() && config.sparsity == MMALimit::SPARSE)
     collect(MMALimit::DENSE);
 
-  return candidate_ks.size() == 1 ? *candidate_ks.begin() : 0;
+  if (candidate_ks.empty()) return 0;
+  if (candidate_ks.size() == 1) return *candidate_ks.begin();
+  // Multiple valid atom-K values exist (e.g., both k=16 and k=32 for FP8).
+  // Return the largest valid candidate to maximize throughput per iteration.
+  return *candidate_ks.rbegin();
 }
 
 inline size_t GetThreadGroupSize(const MMAConfig& config) {
