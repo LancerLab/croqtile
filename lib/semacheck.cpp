@@ -1041,13 +1041,6 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     if (emit_error && !smaller_source_dma) {
       Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                           ") and 'to'(" + PSTR(tty) + ").");
-    } else if (smaller_source_dma && !n.IsOOBZeroFill()) {
-      Warning(n.LOC(),
-              "DMA 'from' shape is smaller than 'to'; add '.zfill' to make "
-              "the tail-fill behavior explicit.");
-    } else if (!n.IsOOBZeroFill() && !supported_conditional_dma) {
-      Warning(n.LOC(),
-              "Dimensions could be inconsistent between DMA" + msg + ").");
     }
   }
 

@@ -13,9 +13,9 @@ __co__ void matmul_e4m3(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, gl
 
     mc = mma.fill.f32 0.0f;
     foreach {iv_k} in [cdiv(K, TILE_K)] {
-      dma.copy.swiz<32>.zfill lhs.subspan(WARP_M, TILE_K).step(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
+      dma.copy.swiz<32> lhs.subspan(WARP_M, TILE_K).step(WARP_M, TILE_K).at(block_m, iv_k) => lhs_load_s;
 
-      dma.copy.swiz<32>.zfill rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      dma.copy.swiz<32> rhs.chunkat(block_n, iv_k) => rhs_load_s;
 
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {

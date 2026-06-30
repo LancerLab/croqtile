@@ -164,7 +164,7 @@ __co__ void matmul_f16_sm90_tbc(global f16 [M, K] lhs, global f16 [N, K] rhs, gl
 
 #undef CLUSTER_M
 
-// ============ matmul_f16_dyn_sm90_unaligned_k: dma.copy.swiz.zfill (non-aligned K) ============
+// ============ matmul_f16_dyn_sm90_unaligned_k: dma.copy.swiz (non-aligned K) ============
 __co__ void matmul_f16_unaligned_k(global f16 [M, K] lhs, global f16 [N, K] rhs,
                                     global f16 [M, N] output) {
   parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block {
@@ -173,8 +173,8 @@ __co__ void matmul_f16_unaligned_k(global f16 [M, K] lhs, global f16 [N, K] rhs,
     parallel p by 1 : group-4 {
       mc = mma.fill.f16 0.0f;
       foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-        dma.copy.swiz<MATMUL_SWIZ>.zfill lhs.chunkat(block_m, iv_k) => lhs_load_s;
-        dma.copy.swiz<MATMUL_SWIZ>.zfill rhs.chunkat(block_n, iv_k) => rhs_load_s;
+        dma.copy.swiz<MATMUL_SWIZ> lhs.chunkat(block_m, iv_k) => lhs_load_s;
+        dma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
         foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
           ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
           mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);

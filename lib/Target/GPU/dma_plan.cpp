@@ -255,8 +255,7 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
       }
     }
 
-    // TMA shape-mismatch / zfill diagnostics.
-    // Account for .transp permutation when comparing shapes.
+    // TMA shape-mismatch: auto-enable zfill when source != dest.
     Shape tma_effective_from = f_ca_shape;
     if (n.operation == ".transp") {
       auto tc = cast<TransposeConfig>(n.GetConfig())->dim_values;
@@ -267,17 +266,9 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
     const bool tma_mismatch =
         tma_is_pad ? false
                    : StaticShapeMismatch(tma_effective_from, t_ca_shape);
-    const bool tma_explicit_zfill = n.IsOOBZeroFill();
 
-    if (tma_mismatch && !tma_explicit_zfill) {
-      Warning(n.LOC(),
-              "TMA source and destination tiles have different shapes; "
-              "consider adding .zfill to avoid out-of-bounds access.");
+    if (tma_mismatch) {
       dec.is_zfill = true;
-    } else if (tma_explicit_zfill && !tma_mismatch) {
-      Warning(n.LOC(),
-              "TMA .zfill is redundant because source and destination tiles "
-              "have the same shape.");
     }
     return;
   }
@@ -762,23 +753,14 @@ static TiledCopySearchResult SearchTiledConfig(size_t box_m, size_t box_n,
 
 // ---------------------------------------------------------------------------
 // dma prediction rules to avoid oob:
-// 1. user should set zfill for dma with
-// different shape from and to, if user forget to set this zfill, gives warning
-// and compiler auto-set implicit zfill active , if user set zfill but from and
-// to are same, compiler should also gives waning to let user know this zfill is
-// useless.
-// 2. When no zfill are set(include explicit zfill and implicit zfill,
-// equal to "from == to"). compiler should add auto-mask to avoid oob, like get
-// a sub box [TM, TK] from [M, K] the guard masking should be [min(TM,
-// M-OFFSET_M, K-OFFSET_K)]. These two rules are exclusive. This means
-// choreo(our compiler) auto-avoid oob if no explicit/implicit zfill are used.
-// This rules let user easily write safe and flexible dma.
+// When source and dest shapes differ, compiler auto-enables zfill (zero-fill
+// out-of-bounds positions). When shapes match, compiler adds auto-mask to
+// avoid oob. These two rules are exclusive. The .zfill modifier is accepted
+// but deprecated -- the compiler always does the right thing automatically.
 void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
                                 TiledCopyParams& param) const {
   auto from_ca = dyn_cast<AST::ChunkAt>(n.GetFrom().get());
   assert(from_ca && "ResolvePrediction requires a source ChunkAt");
-
-  const bool explicit_zfill = n.IsOOBZeroFill();
 
   // For .transp, permute source shape before comparison so that
   // from[M,N] transposed as <1,0> correctly matches to[N,M].
@@ -793,22 +775,8 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
   const bool is_pad = (n.operation == ".pad");
   const bool shape_mismatch =
       StaticShapeMismatch(effective_from, dec.to_ca_shape);
-  const bool implicit_zfill = shape_mismatch && !explicit_zfill;
 
-  // Suppress shape-mismatch warning for .pad -- padding inherently produces
-  // different source/destination shapes; cooperative_fill handles pad values.
-  if (implicit_zfill && !is_pad) {
-    Warning(n.LOC(),
-            "DMA source and destination tiles have different shapes; "
-            "implicitly enabling zfill to avoid out-of-bounds access.");
-  } else if (explicit_zfill && !shape_mismatch && !is_pad) {
-    Warning(n.LOC(),
-            "DMA zfill is redundant because source and destination tiles "
-            "have the same shape; falling back to guard masking only.");
-  }
-
-  dec.is_zfill = explicit_zfill || implicit_zfill;
-  if (explicit_zfill && !shape_mismatch) dec.is_zfill = false;
+  dec.is_zfill = shape_mismatch && !is_pad;
 
   // For G2S the guard protects reads from the source (global) side.
   // For S2G the guard protects writes to the destination (global) side.
