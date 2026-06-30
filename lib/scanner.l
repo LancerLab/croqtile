@@ -60,7 +60,7 @@ static bool accumulate_expr_buffer = false;
 
 %}
 
-%x CO_FUNC DEVICE_FUNC KERNEL REAL_KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE
+%x CO_FUNC DEVICE_FUNC KERNEL REAL_KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE PB_ATTR
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
@@ -298,6 +298,13 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   /* Other tokens reset to CO_FUNC */
   [ \t\n]   ; /* Ignore whitespace */
   .         { BEGIN(CO_FUNC); yyless(0); } /* Rewind and reprocess in NORMAL */
+}
+
+<PB_ATTR>{
+  "launch_bounds" { BEGIN(CO_FUNC); return Choreo::Parser::make_LAUNCHBOUNDS(yytext, loc); }
+  "maxnreg"    { BEGIN(CO_FUNC); return Choreo::Parser::make_MAXNREG(yytext, loc); }
+  [ \t\n]    ; /* Ignore whitespace */
+  .          { BEGIN(CO_FUNC); yyless(0); }
 }
 
 <RAW_STRING>{
@@ -577,10 +584,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "copy"     return Choreo::Parser::make_COPY_STMT(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
-  "setreg.inc" return Choreo::Parser::make_SETREG_INC(yytext, loc);
-  "setreg.dec" return Choreo::Parser::make_SETREG_DEC(yytext, loc);
-  "setreg"   return Choreo::Parser::make_SETREG(yytext, loc);
-  "launch_bounds" return Choreo::Parser::make_LAUNCHBOUNDS(yytext, loc);
   "select"   return Choreo::Parser::make_SELECT(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "where"    return Choreo::Parser::make_WHERE(yytext, loc);
@@ -628,7 +631,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "#%"       return Choreo::Parser::make_UBPECET (loc);
   "("        return Choreo::Parser::make_LPAREN (loc);
   ")"        return Choreo::Parser::make_RPAREN (loc);
-  "[["       return Choreo::Parser::make_DLBRAKT(loc);
+  "[["       { BEGIN(PB_ATTR); return Choreo::Parser::make_DLBRAKT(loc); }
   "["        return Choreo::Parser::make_LBRAKT (loc);
   "]"        { if (double_bracket) {
                  BEGIN(MDSPAN_SUGER);

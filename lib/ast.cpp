@@ -176,6 +176,7 @@ void ParallelBy::accept(Choreo::Visitor& v) {
   if (cmpt_bounds) cmpt_bounds->accept(v);
   if (stream_expr) stream_expr->accept(v);
   if (launch_bounds_args) launch_bounds_args->accept(v);
+  if (maxnreg_arg) maxnreg_arg->accept(v);
   v.Visit(*this);
 
   // handle identifier/matcher inside 'parallelby'

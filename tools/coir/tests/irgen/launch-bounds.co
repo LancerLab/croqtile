@@ -1,0 +1,14 @@
+// RUN: co2ir -t cute %s | FileCheck %s
+
+// IRGen test: verify [[launch_bounds]] propagates to CoIR KernelOp attribute.
+
+// CHECK: coir.kernel @lb_demo
+// CHECK-SAME: launchBounds = #coir.launch_bounds<128, 2>
+// CHECK: coir.parallel
+// CHECK-SAME: level = #coir.level<block>
+
+__co__ void lb_demo() {
+  [[launch_bounds(128, 2)]]
+  parallel by 1 : block {
+  }
+}

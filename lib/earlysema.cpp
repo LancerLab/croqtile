@@ -1524,9 +1524,8 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
 
   if (n.HasLaunchBounds()) {
     if (CCtx().TargetName() != "cute" && CCtx().TargetName() != "hip")
-      Error1(
-          n.LOC(),
-          "[[launch_bounds]] is only supported for GPU targets (cute, hip).");
+      Warning(n.LOC(),
+              "[[launch_bounds]] is ignored for non-GPU targets (cute, hip).");
     auto& lb_args = n.GetLaunchBoundsArgs();
     auto argc = lb_args->Count();
     if (argc < 1 || argc > 3)
@@ -1540,6 +1539,17 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
                "[[launch_bounds]] argument must be an integer but got '" +
                    PSTR(aty) + "'.");
     }
+  }
+
+  if (n.HasMaxnreg()) {
+    if (CCtx().TargetName() != "cute" && CCtx().TargetName() != "hip")
+      Warning(n.LOC(),
+              "[[maxnreg]] is ignored for non-GPU targets (cute, hip).");
+    auto aty = NodeType(*n.GetMaxnregArg());
+    if (!isa<ScalarIntegerType>(aty))
+      Error1(n.GetMaxnregArg()->LOC(),
+             "[[maxnreg]] argument must be an integer but got '" + PSTR(aty) +
+                 "'.");
   }
 
   if (pl_depth > 1 && n.IsAsync())
@@ -2315,6 +2325,9 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
   size_t ec = error_count;
 
+  // Promote croq:: namespaced calls to BIF status
+  if (!n.IsBIF() && n.function->name.rfind("croq::", 0) == 0) { n.SetBIF(); }
+
   if ((pl_depth == 0) && !n.IsBIF()) {
     Error1(n.LOC(),
            "unable to call kernel function outside the parallel-by block(s).");
@@ -2325,6 +2338,28 @@ bool EarlySemantics::Visit(AST::Call& n) {
     if (n.template_args)
       Error1(n.LOC(), "the built-in functions are not function templates.");
     const auto func_name = n.function->name;
+
+    // Namespace-based target validation for croq:: qualified BIFs
+    if (func_name.rfind("croq::cuda::", 0) == 0) {
+      if (CCtx().TargetName() != "cute")
+        Warning(n.LOC(), "'" + func_name +
+                             "' is a CUDA intrinsic and is ignored for "
+                             "target '" +
+                             CCtx().TargetName() + "'.");
+    } else if (func_name.rfind("croq::hip::", 0) == 0) {
+      if (CCtx().TargetName() != "hip")
+        Warning(n.LOC(), "'" + func_name +
+                             "' is a HIP intrinsic and is ignored for "
+                             "target '" +
+                             CCtx().TargetName() + "'.");
+    } else if (func_name.rfind("croq::gpu::", 0) == 0) {
+      if (CCtx().TargetName() != "cute" && CCtx().TargetName() != "hip")
+        Warning(n.LOC(), "'" + func_name +
+                             "' is a GPU intrinsic and is ignored for "
+                             "target '" +
+                             CCtx().TargetName() + "'.");
+    }
+
     if (func_name == "assert") {
       auto pty = NodeType(*n.arguments->ValueAt(0));
       if (!isa<BooleanType>(pty))
@@ -2332,22 +2367,21 @@ bool EarlySemantics::Visit(AST::Call& n) {
       auto sty = NodeType(*n.arguments->ValueAt(1));
       if (!isa<StringType>(sty))
         Error1(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
-    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
-               func_name == "setreg.dec") {
-      if (CCtx().TargetName() != "cute") {
-        Error1(n.LOC(), "setreg is only supported for the cute target.");
-      }
+    } else if (func_name == "croq::cuda::setreg_inc" ||
+               func_name == "croq::cuda::setreg_dec") {
       if (pl_depth == 0) {
-        Error1(n.LOC(), "setreg can only be used inside parallel-by blocks.");
+        Error1(n.LOC(), "'" + func_name +
+                            "' can only be used inside parallel-by blocks.");
       }
       if (n.arguments->Count() != 1) {
-        Error1(n.LOC(),
-               "setreg expects exactly one integer argument, but got " +
-                   std::to_string(n.arguments->Count()) + ".");
+        Error1(n.LOC(), "'" + func_name +
+                            "' expects exactly one integer argument, but got " +
+                            std::to_string(n.arguments->Count()) + ".");
       } else {
         auto aty = NodeType(*n.arguments->ValueAt(0));
         if (!isa<ScalarIntegerType>(aty))
-          Error1(n.LOC(), "setreg expects an integer argument but got '" +
+          Error1(n.LOC(), "'" + func_name +
+                              "' expects an integer argument but got '" +
                               PSTR(aty) + "'.");
       }
     } else if (func_name == "print" || func_name == "println") {

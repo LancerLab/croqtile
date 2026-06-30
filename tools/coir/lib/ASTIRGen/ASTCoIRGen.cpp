@@ -478,9 +478,10 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
 
   builder.setInsertionPointToEnd(IRModule().getBody());
   auto kernelOp = builder.create<coir::KernelOp>(
-      loc, mlir::StringAttr::get(&IRContext(), cf.name),
-      mlir::TypeAttr::get(mlirFnType),
-      coir::LaunchBoundsAttr{});
+      loc, mlir::TypeRange{},
+      cf.name, mlirFnType,
+      coir::LaunchBoundsAttr{},
+      coir::MaxNregAttr{});
 
   // Attach host-facing metadata so downstream stub generation can
   // reconstruct the Choreo calling convention (spanned_view / spanned_data,
@@ -673,6 +674,18 @@ bool ASTCoIRGen::Visit(AST::ParallelBy &pb) {
           &IRContext(), maxThr, minBlk, maxCluster);
       if (auto kernelOp = parallelOp->getParentOfType<coir::KernelOp>())
         kernelOp.setLaunchBoundsAttr(lbAttr);
+    }
+  }
+
+  if (pb.HasMaxnreg() && pb.GetLevel() == ParallelLevel::BLOCK) {
+    auto *arg = pb.GetMaxnregArg().get();
+    if (arg && arg->Opts().HasVal()) {
+      int64_t regVal = EvalToInt(arg->Opts().GetVal());
+      if (regVal > 0) {
+        auto nregAttr = coir::MaxNregAttr::get(&IRContext(), regVal);
+        if (auto kernelOp = parallelOp->getParentOfType<coir::KernelOp>())
+          kernelOp.setMaxNregAttr(nregAttr);
+      }
     }
   }
 

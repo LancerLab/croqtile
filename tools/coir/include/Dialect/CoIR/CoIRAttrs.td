@@ -237,6 +237,21 @@ def CoIR_LaunchBoundsAttr : AttrDef<CoIR_Dialect, "LaunchBounds"> {
 }
 
 //===----------------------------------------------------------------------===//
+// MaxNreg -- CUDA __maxnreg__ / PTX setmaxnreg parameter
+//===----------------------------------------------------------------------===//
+
+def CoIR_MaxNregAttr : AttrDef<CoIR_Dialect, "MaxNreg"> {
+  let mnemonic = "maxnreg";
+  let summary = "Maximum register count for a kernel";
+  let description = [{
+    Encodes the __maxnreg__(N) kernel attribute (pre-SM90) or the
+    setmaxnreg.dec.sync.aligned.u32 N PTX instruction (SM90+).
+  }];
+  let parameters = (ins "int64_t":$value);
+  let assemblyFormat = "`<` $value `>`";
+}
+
+//===----------------------------------------------------------------------===//
 // Legacy layout constraint (kept for existing DMA ops)
 //===----------------------------------------------------------------------===//
 

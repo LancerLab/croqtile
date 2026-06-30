@@ -58,6 +58,13 @@ struct PLAnnotation {
       : level(l), device_target(dt) {}
 };
 
+namespace Choreo { namespace AST { struct MultiValues; struct Expr; } }
+
+struct PBAttributes {
+  std::shared_ptr<Choreo::AST::MultiValues> launch_bounds;
+  std::shared_ptr<Choreo::AST::Expr> maxnreg;
+};
+
 } // %code requires
 
 // inject into Parser class
@@ -203,7 +210,7 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG SETREG_INC SETREG_DEC LAUNCHBOUNDS
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
 %token DLBRAKT
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN COMMIT SCALE MASK MMAWAIT
@@ -236,8 +243,8 @@ extern int yylex();
 %nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type_list device_nested_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Call>> call_stmt setreg_stmt launch_bounds_stmt
-%nterm <AST::ptr<AST::MultiValues>> pb_attribute
+%nterm <AST::ptr<AST::Call>> call_stmt
+%nterm <PBAttributes> pb_attribute
 %nterm <AST::DMAAsync> tdma_async
 %nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
@@ -734,8 +741,6 @@ statement
     | wait_stmt    SEMCOL        { $$ = $1; }
     | trigger_stmt SEMCOL        { $$ = $1; }
     | call_stmt    SEMCOL        { $$ = $1; }
-    | setreg_stmt  SEMCOL        { $$ = $1; }
-    | launch_bounds_stmt SEMCOL  { $$ = $1; }
     | swap_stmt    SEMCOL        { $$ = $1; }
     | return_stmt  SEMCOL        { $$ = $1; }
     | sync_stmt    SEMCOL        { $$ = $1; }
@@ -781,10 +786,15 @@ opt_stream_bind
     ;
 
 pb_attribute
-    : DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
-        $$ = $4;
+    : pb_attribute DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
+        $$ = $1;
+        $$.launch_bounds = $5;
       }
-    | %empty { $$ = nullptr; }
+    | pb_attribute DLBRAKT MAXNREG LPAREN s_expr RPAREN RBRAKT RBRAKT {
+        $$ = $1;
+        $$.maxnreg = $5;
+      }
+    | %empty { $$ = PBAttributes{}; }
     ;
 
 paraby_block
@@ -799,7 +809,8 @@ paraby_block
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
         assert(pb->stmts->None() && "expect no statement.");
         pb->stmts = $7;
-        if ($1) $6->SetLaunchBoundsArgs($1);
+        if ($1.launch_bounds) $6->SetLaunchBoundsArgs($1.launch_bounds);
+        if ($1.maxnreg) $6->SetMaxnregArg($1.maxnreg);
         $$ = $6;
       }
     ;
@@ -2658,38 +2669,6 @@ call_stmt
       }
     ;
 
-setreg_stmt
-    : SETREG s_expr {
-        auto args = AST::Make<AST::MultiValues>(@1, ", ");
-        args->Append($2);
-        $$ = AST::Make<AST::Call>(
-            @1, AST::Make<AST::Identifier>(@1, "setreg"), args,
-            AST::Call::BIF | AST::Call::ANNO);
-      }
-    | SETREG_INC s_expr {
-        auto args = AST::Make<AST::MultiValues>(@1, ", ");
-        args->Append($2);
-        $$ = AST::Make<AST::Call>(
-            @1, AST::Make<AST::Identifier>(@1, "setreg.inc"), args,
-            AST::Call::BIF | AST::Call::ANNO);
-      }
-    | SETREG_DEC s_expr {
-        auto args = AST::Make<AST::MultiValues>(@1, ", ");
-        args->Append($2);
-        $$ = AST::Make<AST::Call>(
-            @1, AST::Make<AST::Identifier>(@1, "setreg.dec"), args,
-            AST::Call::BIF | AST::Call::ANNO);
-      }
-    ;
-
-launch_bounds_stmt
-  : LAUNCHBOUNDS LPAREN s_expr RPAREN {
-    Parser::error(@1, "'launch_bounds' is a compiler directive; use as a C++ attribute:\n"
-                      "       [[launch_bounds(maxThreads, minBlocks)]]\n"
-                      "       parallel by N : block { ... }");
-    YYERROR;
-    }
-  ;
 
 swap_stmt
     : SWAP LPAREN id_list RPAREN {

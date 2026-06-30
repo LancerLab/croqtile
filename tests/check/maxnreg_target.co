@@ -1,0 +1,8 @@
+// RUN: choreo -t cc -sa=check %s 2>&1 | FileCheck %s
+
+__co__ void maxnreg_on_cpu() {
+  [[maxnreg(40)]]
+  parallel by 1 : block {
+  }
+}
+// CHECK: warning: {{\[\[}}maxnreg]] is ignored for non-GPU targets (cute, hip).

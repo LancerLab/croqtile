@@ -1439,8 +1439,8 @@ bool CCCodeGen::Visit(AST::Call& n) {
       os << ";\n";
       return true;
     }
-    if (func_name == "setreg" || func_name == "setreg.inc" ||
-        func_name == "setreg.dec")
+    if (func_name == "croq::cuda::setreg_inc" ||
+        func_name == "croq::cuda::setreg_dec")
       return true;
     if (n.IsArith() || n.IsAtomic()) {
       if (!n.IsExpr()) os << indent << CallSTR(n) << ";\n";

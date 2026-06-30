@@ -287,6 +287,10 @@ private:
         os() << ") ";
       }
     }
+    if (auto nr = kernel.getMaxNregAttr()) {
+      if (nr.getValue() > 0)
+        os() << "__maxnreg__(" << nr.getValue() << ") ";
+    }
     os() << "void " << devName << "(";
 
     auto &body = kernel.getBody();

@@ -3516,6 +3516,12 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     EmitDeviceFuncDecl(ds, &n, ring_start);
     ds << " {\n";
     IncrDeviceIndent();
+    if (n.HasMaxnreg() && CCtx().ArchNum() >= 90) {
+      auto reg_limit = VIInt(n.GetMaxnregArg()->Opts().GetVal());
+      if (reg_limit && reg_limit.value() > 0)
+        ds << d_indent << "asm volatile(\"setmaxnreg.dec.sync.aligned.u32 "
+           << reg_limit.value() << ";\");\n";
+    }
     if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
           sbe::ceq(ring_start, sbe::nu(0)))) {
       ds << d_indent << "extern __shared__ char " << device_fn
@@ -7374,15 +7380,17 @@ bool CuteCodeGen::Visit(AST::Call& n) {
         os << indent << "}\n";
       }
       return true;
-    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
-               func_name == "setreg.dec") {
+    } else if (func_name == "croq::cuda::setreg_inc" ||
+               func_name == "croq::cuda::setreg_dec") {
       if (IsHost()) return true;
       auto arg = cast<AST::Expr>(n.arguments->ValueAt(0));
       auto reg_limit = VIInt(arg->Opts().GetVal());
       if (!reg_limit || reg_limit.value() <= 0)
-        choreo_unreachable("setreg expects a positive integer constant.");
+        choreo_unreachable(
+            "croq::cuda::setreg_inc/dec expects a positive integer constant.");
       if (CCtx().ArchNum() >= 90) {
-        const char* dir = (func_name == "setreg.inc") ? "inc" : "dec";
+        const char* dir =
+            (func_name == "croq::cuda::setreg_inc") ? "inc" : "dec";
         os << indent << "asm volatile(\"setmaxnreg." << dir
            << ".sync.aligned.u32 " << reg_limit.value() << ";\");\n";
       }
@@ -9274,18 +9282,14 @@ static inline std::string HostParamTypeStringifyForCute(const Choreo::Type& ty,
 }
 
 std::optional<int64_t> CuteCodeGen::GetSetRegLimit(AST::ParallelBy* pb) const {
-  if (!pb || !pb->GetBody()) return std::nullopt;
+  if (!pb) return std::nullopt;
 
-  for (const auto& stmt : pb->GetBody()->values) {
-    auto call = dyn_cast<AST::Call>(stmt);
-    if (!call || !call->IsBIF() || call->function->name != "setreg") continue;
-    if (!call->arguments || call->arguments->Count() != 1) return std::nullopt;
-    auto arg = dyn_cast<AST::Expr>(call->arguments->ValueAt(0));
-    if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric())
-      return std::nullopt;
-    auto reg_limit = VIInt(arg->Opts().GetVal());
-    if (!reg_limit || reg_limit.value() <= 0) return std::nullopt;
-    return reg_limit.value();
+  if (pb->HasMaxnreg()) {
+    auto arg = pb->GetMaxnregArg();
+    if (arg && arg->Opts().HasVal() && arg->Opts().GetVal()->IsNumeric()) {
+      auto reg_limit = VIInt(arg->Opts().GetVal());
+      if (reg_limit && reg_limit.value() > 0) return reg_limit.value();
+    }
   }
 
   return std::nullopt;
