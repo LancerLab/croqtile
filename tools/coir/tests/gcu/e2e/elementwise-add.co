@@ -1,10 +1,10 @@
 // REQUIRES: TARGET-GCU
 // RUN: cocc -t topscc -gs %s -o %s.sh && bash %s.sh --execute | FileCheck --match-full-lines %s && rm -f %s.sh
-// RUN-GCU300+: cocc -t gcu %s -o %t.out && %t.out | FileCheck --match-full-lines %s
+// RUN-GCU300+: cocc -t gcu -gs %s -o %s.gcu.sh && bash %s.gcu.sh && rm -f %s.gcu.sh
 //
 // End-to-end GCU test:
 //   topscc: all GCU targets
-//   native: GCU300+ only (via RUN-GCU300+)
+//   native: GCU300+ device compilation only (via RUN-GCU300+)
 
 __co__ s32 [64] ele_add(s32 [64] a, s32 [64] b) {
   s32[a.span] c;

@@ -2,11 +2,10 @@
 //
 // Implements the "gcu" CodeGen backend for CoIR. This backend:
 //   1. Lowers CoIR ops to GCU-compatible GPU MLIR (in-process pass)
-//   2. Invokes gcu-compiler-opt and gcu-compiler-kernel as subprocesses
-//      to produce a GCU binary (fatbin)
+//   2. Invokes gcu-compiler-opt to lower and serialize GPU modules
+//   3. Invokes gcu-compiler-compile to produce a GCU device binary
 //
-// Only GCU300+ architectures are supported. The -es and -gs options are
-// not available for this target.
+// Only GCU300+ architectures are supported.
 //
 //===----------------------------------------------------------------------===//
 
@@ -43,20 +42,32 @@ static constexpr const char *kTopsccDir = __CHOREO_TOPSCC_DIR__;
 static constexpr const char *kTopsccDir = nullptr;
 #endif
 
-std::string findTool(llvm::StringRef name) {
-  auto checkDir = [&](const char *dir) -> std::string {
+std::string findTool(llvm::StringRef name, bool verbose = false) {
+  auto checkDir = [&](const char *label,
+                      const char *dir) -> std::string {
     if (!dir) return {};
     llvm::SmallString<256> path(dir);
     llvm::sys::path::append(path, "bin", name);
-    if (llvm::sys::fs::exists(path))
+    if (verbose)
+      llvm::errs() << "  " << label << ": " << path;
+    if (llvm::sys::fs::exists(path)) {
+      if (verbose) llvm::errs() << " [found]\n";
       return std::string(path);
+    }
+    if (verbose) llvm::errs() << " [not found]\n";
     return {};
   };
-  if (auto p = checkDir(kKuramaDir); !p.empty()) return p;
-  if (auto p = checkDir(kTopsccDir); !p.empty()) return p;
-  if (auto p = checkDir("/opt/tops"); !p.empty()) return p;
-  if (auto found = llvm::sys::findProgramByName(name))
+  if (verbose)
+    llvm::errs() << "findTool(\"" << name << "\") search order:\n";
+  if (auto p = checkDir("KURAMA_DIR", kKuramaDir); !p.empty()) return p;
+  if (auto p = checkDir("TOPSCC_DIR", kTopsccDir); !p.empty()) return p;
+  if (auto p = checkDir("/opt/tops", "/opt/tops"); !p.empty()) return p;
+  if (auto found = llvm::sys::findProgramByName(name)) {
+    if (verbose)
+      llvm::errs() << "  PATH: " << *found << " [found]\n";
     return std::string(*found);
+  }
+  if (verbose) llvm::errs() << "  PATH: [not found]\n";
   return {};
 }
 
@@ -75,28 +86,67 @@ public:
     return 1;
   }
 
-  int EmitScript(mlir::ModuleOp, llvm::StringRef,
+  int EmitScript(mlir::ModuleOp module, llvm::StringRef arch,
                  llvm::raw_ostream &os) override {
-    os << "error: -t gcu does not support -gs (generate script); "
-          "use -t topscc for script generation\n";
-    return 1;
+    emitScriptPrologue(os, "GCU native: compile device binary via kurama");
+
+    std::string optPath = findTool("gcu-compiler-opt");
+    std::string compilePath = findTool("gcu-compiler-compile");
+    if (optPath.empty() || compilePath.empty()) {
+      llvm::errs() << "error: required tools not found for GCU script.\n";
+      if (optPath.empty())
+        findTool("gcu-compiler-opt", true);
+      if (compilePath.empty())
+        findTool("gcu-compiler-compile", true);
+      return 1;
+    }
+
+    std::string a = arch.empty() ? "gcu300" : arch.str();
+
+    os << "MLIRFILE=\"$TMPDIR/kernel.mlir\"\n";
+    os << "LOWFILE=\"$TMPDIR/kernel_low.mlir\"\n";
+    os << "BINMLIR=\"$TMPDIR/kernel_bin.mlir\"\n";
+    os << "BINFILE=\"$TMPDIR/kernel.devbin\"\n\n";
+
+    os << "cat > \"$MLIRFILE\" << '__COIR_GCU_MLIR__'\n";
+    module.print(os);
+    os << "\n__COIR_GCU_MLIR__\n\n";
+
+    os << "\"" << optPath << "\""
+       << " -convert-memref-to-gcu"
+       << " -kernel-memory-alloc"
+       << " -convert-scf-to-cf"
+       << " -convert-gpu-to-gcu"
+       << " -reconcile-unrealized-casts"
+       << " --gcu-attach-target=arch=" << a
+       << " \"$MLIRFILE\" -o \"$LOWFILE\" || exit 1\n\n";
+
+    os << "\"" << optPath << "\""
+       << " -gpu-module-to-binary=format=llvm"
+       << " \"$LOWFILE\" -o \"$BINMLIR\" || exit 1\n\n";
+
+    os << "\"" << compilePath << "\""
+       << " \"$BINMLIR\" -a " << a
+       << " -o \"$BINFILE\" || exit 1\n\n";
+
+    return 0;
   }
 
   int Compile(mlir::ModuleOp module, llvm::StringRef arch,
               llvm::StringRef outputPath) override {
     std::string optTool = findTool("gcu-compiler-opt");
     if (optTool.empty()) {
-      llvm::errs() << "error: gcu-compiler-opt not found. "
-                      "Set up the GCU compiler toolchain or add it to PATH.\n";
+      llvm::errs() << "error: gcu-compiler-opt not found.\n";
+      findTool("gcu-compiler-opt", /*verbose=*/true);
       return 1;
     }
-    std::string kernelTool = findTool("gcu-compiler-kernel");
-    if (kernelTool.empty()) {
-      llvm::errs() << "error: gcu-compiler-kernel not found.\n";
+    std::string compileTool = findTool("gcu-compiler-compile");
+    if (compileTool.empty()) {
+      llvm::errs() << "error: gcu-compiler-compile not found.\n";
+      findTool("gcu-compiler-compile", /*verbose=*/true);
       return 1;
     }
 
-    // Write lowered MLIR to temp file.
     llvm::SmallString<128> mlirFile;
     if (auto ec = llvm::sys::fs::createTemporaryFile(
             "choreo-gcu", "mlir", mlirFile)) {
@@ -171,7 +221,8 @@ public:
 
     {
       llvm::SmallVector<llvm::StringRef, 8> args = {
-          optTool, "-gpu-module-to-binary", loweredMlir, "-o", binaryMlir};
+          optTool, "-gpu-module-to-binary=format=llvm",
+          loweredMlir, "-o", binaryMlir};
 
       std::string errMsg;
       int rc = llvm::sys::ExecuteAndWait(optTool, args, /*Env=*/std::nullopt,
@@ -190,18 +241,24 @@ public:
 
     llvm::sys::fs::remove(loweredMlir);
 
-    // Step 2: gcu-compiler-kernel <binary.mlir> -o <output>
+    // Step 3: gcu-compiler-compile <binary.mlir> -o <output>
     {
-      llvm::SmallVector<llvm::StringRef, 6> args = {
-          kernelTool, binaryMlir, "-o", outputPath};
+      llvm::SmallVector<llvm::StringRef, 8> args = {
+          compileTool, binaryMlir, "-o", outputPath};
+      llvm::SmallString<32> archFlag;
+      if (!arch.empty()) {
+        archFlag = "-a";
+        args.push_back(archFlag);
+        args.push_back(arch);
+      }
 
       std::string errMsg;
-      int rc = llvm::sys::ExecuteAndWait(kernelTool, args,
+      int rc = llvm::sys::ExecuteAndWait(compileTool, args,
                                          /*Env=*/std::nullopt,
                                          /*Redirects=*/{}, /*SecondsToWait=*/0,
                                          /*MemLimit=*/0, &errMsg);
       if (rc != 0) {
-        llvm::errs() << "error: gcu-compiler-kernel failed";
+        llvm::errs() << "error: gcu-compiler-compile failed";
         if (!errMsg.empty()) llvm::errs() << ": " << errMsg;
         llvm::errs() << "\n";
         llvm::sys::fs::remove(mlirFile);
@@ -210,7 +267,6 @@ public:
       }
     }
 
-    // Cleanup temp files.
     llvm::sys::fs::remove(mlirFile);
     llvm::sys::fs::remove(binaryMlir);
     return 0;

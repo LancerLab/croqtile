@@ -50,7 +50,7 @@ public:
     return true;
   }
 
-  bool IsBinaryOnlyCodeGen() const override { return true; }
+  bool IsBinaryOnlyCodeGen() const override { return false; }
 
   bool PlanCodeGenStages(ASTPipeline&) const override {
     choreo_unreachable("GCU native target uses CoIR pipeline, not AST codegen");
