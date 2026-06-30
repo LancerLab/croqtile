@@ -271,6 +271,11 @@ Option<bool>
     use_target_lib(OptionKind::User, "--use-target-lib", "-utl", false,
                    "Lower __lib_* builtins to target-specific library calls. "
                    "Overrides the target's default when explicitly set.");
+Option<bool> use_dte_pool(
+    OptionKind::User, "--use-dte-pool", "", false,
+    "Reuse a persistent DTE pool for anonymous and named DMAs instead of "
+    "creating per-DMA DTE instances. Prevents DTE resource exhaustion "
+    "(SIP asserts) when total init/destroy cycles exceed hardware limits.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -542,6 +547,7 @@ bool CommandLine::Parse(int argc, char** argv) {
         disable_cuda_runtime_env_check.GetValue());
   CCtx().SetFastCompile(fast_compile.GetValue());
   CCtx().SetUseFastMath(use_fast_math.GetValue());
+  CCtx().SetUseDtePool(use_dte_pool.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
 
   if (!trace_visit.GetValue().empty())
