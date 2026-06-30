@@ -10,13 +10,14 @@
 
 // NOTE: M64N128K32 can reduce accumulated error, but slower than N256 in tiling.
 // this may suggest we must have multi warpgroups to distribute over M dims
+#define MATMUL_TILE_N 128
 #define MATMUL_WARP_N 128
 // #define MATMUL_WARP_N 256
 
 #define MATMUL_TILE_K 128
 #define MATMUL_WARP_K 32
 #define MATMUL_SWIZ 128
-#define MATMUL_STAGES 4
+#define MATMUL_STAGES 2
 
 #if MATMUL_WARP_K != 32
 #error "MATMUL_WARP_K must be 32 for current swizzle pattern"
@@ -24,10 +25,6 @@
 
 #if MATMUL_WARP_M != 64
 #error "MATMUL_WARP_M must be 64 for e4m3 WGMMA constraints"
-#endif
-
-#if MATMUL_WARP_N != 128
-#error "MATMUL_WARP_N must be 128 for e4m3 block scaling"
 #endif
 
 #if MATMUL_TILE_K != 128
@@ -42,6 +39,9 @@
 #error "MATMUL_SWIZ must be one of 32, 64, 128"
 #endif
 
+// #define MATMUL_DEFAULT_M 4096
+// #define MATMUL_DEFAULT_N 16384
+// #define MATMUL_DEFAULT_K 7168
 #define MATMUL_DEFAULT_M 2048
 #define MATMUL_DEFAULT_N 2048
 #define MATMUL_DEFAULT_K 2048
@@ -58,14 +58,13 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
     shared event full[MATMUL_STAGES], empty[MATMUL_STAGES];
     shared f8_e4m3 [MATMUL_STAGES * MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
     shared f8_e4m3 [MATMUL_STAGES * MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
-    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
-
+    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s_1;
     parallel p1 by 2 : group-4, t by 128 : thread {
       inthreads.async (p1 == 0) {
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
           wait empty[stage];
-          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ>.zfill lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0);
+          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0);
           tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0);
           trigger full[stage];
         }
@@ -82,13 +81,14 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
           foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
             ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
             mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
-            mma.row.row.scale mc, ma, mb, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k), scale_rhs.at(block_n, iv_k);
+            mma.row.row mc, ma, mb;
           }
+          mma.scale mc, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k), scale_rhs.at(block_n, iv_k);
           mma.commit;
           trigger empty[stage];
         }
-        mma.store mc, output_s;
-        tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+        mma.store mc, output_s_1;
+        tma.copy output_s_1 => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
       }
     }
   }

@@ -2,16 +2,16 @@
 #include <chrono>
 #include <iostream>
 
-size_t s1 = 1;
-size_t s2 = 3;
+size_t dim1 = 1;
+size_t dim2 = 3;
 
 #ifdef __STATIC_SHAPE__
 #define J1 1
 #define J2 3
 #define J_OUT 4
 #else
-#define J1 s1
-#define J2 s2
+#define J1 dim1
+#define J2 dim2
 #define J_OUT 4
 #endif
 

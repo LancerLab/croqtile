@@ -1,0 +1,16 @@
+# Build artifacts - never commit these
+*.o
+*.exe
+a.out
+b.out
+*.ncu-rep
+*.nsys-rep
+*.cute.result
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Temporary/working directories
+.tmp/
+build/
