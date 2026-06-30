@@ -1873,6 +1873,7 @@ private:
   bool device_entry = false;
   std::string device_target_name;
   ptr<MultiValues> launch_bounds_args = nullptr;
+  ptr<Expr> maxnreg_arg = nullptr;
 
 public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
@@ -1992,6 +1993,10 @@ public:
     launch_bounds_args = args;
   }
 
+  bool HasMaxnreg() const { return maxnreg_arg != nullptr; }
+  const ptr<Expr>& GetMaxnregArg() const { return maxnreg_arg; }
+  void SetMaxnregArg(const ptr<Expr>& arg) { maxnreg_arg = arg; }
+
   ptr<Node> CloneImpl() const override {
     auto pb = Make<ParallelBy>(LOC(), CloneP(bpv), CloneP(bound_expr),
                                CloneP(cmpt_bpvs), CloneP(cmpt_bounds),
@@ -2005,17 +2010,24 @@ public:
     pb->SetDeviceEntry(IsDeviceEntry());
     if (HasDeviceTarget()) pb->SetDeviceTargetName(DeviceTargetName());
     if (HasLaunchBounds()) pb->SetLaunchBoundsArgs(CloneP(launch_bounds_args));
+    if (HasMaxnreg()) pb->SetMaxnregArg(CloneP(maxnreg_arg));
     return pb;
   }
 
   void InlinePrint(std::ostream& os, const std::string& prefix = {},
                    bool with_type = false) const override {
+    bool has_attr = HasLaunchBounds() || HasMaxnreg();
     if (HasLaunchBounds()) {
       os << prefix << "[[launch_bounds(";
       launch_bounds_args->InlinePrint(os, "", with_type);
       os << ")]] ";
     }
-    os << (HasLaunchBounds() ? "" : prefix) << "parallel";
+    if (HasMaxnreg()) {
+      os << (HasLaunchBounds() ? "" : prefix) << "[[maxnreg(";
+      maxnreg_arg->InlinePrint(os, "", with_type);
+      os << ")]] ";
+    }
+    os << (has_attr ? "" : prefix) << "parallel";
     if (stream_expr) {
       os << "(";
       stream_expr->InlinePrint(os);

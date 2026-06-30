@@ -1,0 +1,12 @@
+// RUN: cocc -t cute -es %s | FileCheck %s
+//
+// Test: [[maxnreg]] emitted as __maxnreg__ via COIR codegen path.
+
+__co__ void nreg_codegen() {
+  [[maxnreg(72)]]
+  parallel by 1 : block {
+  }
+}
+
+// CHECK: __maxnreg__(72)
+// CHECK-SAME: void

@@ -695,9 +695,8 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
     for (const auto& stmt : body->values) {
       auto call = dyn_cast<AST::Call>(stmt);
       if (!call || !call->IsBIF()) continue;
-      if (call->function->name == "setreg" ||
-          call->function->name == "setreg.inc" ||
-          call->function->name == "setreg.dec") {
+      if (call->function->name == "croq::cuda::setreg_inc" ||
+          call->function->name == "croq::cuda::setreg_dec") {
         setreg_count++;
       }
     }
@@ -705,12 +704,8 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
 
   if (setreg_count > 0 && n.GetLevel() != ParallelLevel::BLOCK) {
     Error1(n.LOC(),
-           "setreg is only allowed in parallel-by blocks lowered to CUDA "
-           "kernels (level : block).");
-  }
-  if (setreg_count > 1) {
-    Error1(n.LOC(), "multiple setreg directives are not allowed in the same "
-                    "parallel-by block.");
+           "croq::cuda::setreg_inc/dec is only allowed in parallel-by blocks "
+           "lowered to CUDA kernels (level : block).");
   }
 
   if (n.HasLaunchBounds()) {
@@ -733,6 +728,19 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
                "[[launch_bounds]] minBlocks/maxCluster must be positive "
                "(use 0 only for maxThreadsPerBlock to auto-compute).");
       }
+    }
+  }
+
+  if (n.HasMaxnreg()) {
+    if (n.GetLevel() != ParallelLevel::BLOCK)
+      Error1(n.LOC(), "[[maxnreg]] is only valid on block-level parallel-by.");
+    auto arg = n.GetMaxnregArg();
+    if (!arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric()) {
+      Error1(arg->LOC(),
+             "[[maxnreg]] argument must be a compile-time integer constant.");
+    } else if (auto val = VIInt(arg->Opts().GetVal());
+               !val || val.value() <= 0) {
+      Error1(arg->LOC(), "[[maxnreg]] argument must be a positive integer.");
     }
   }
 
@@ -1573,26 +1581,30 @@ bool SemaChecker::VisitNode(AST::Call& n) {
           Error1(n.LOC(), "choreo assertion abort: " + msg);
         }
       }
-    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
-               func_name == "setreg.dec") {
+    } else if (func_name == "croq::cuda::setreg_inc" ||
+               func_name == "croq::cuda::setreg_dec") {
       if (n.arguments->Count() != 1) {
-        Error1(n.LOC(), "setreg expects exactly one argument.");
+        Error1(n.LOC(), "'" + func_name + "' expects exactly one argument.");
       } else {
         auto arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(0));
         if (!arg) {
-          Error1(n.LOC(), "setreg expects an integer expression argument.");
+          Error1(n.LOC(),
+                 "'" + func_name + "' expects an integer expression argument.");
         } else {
           auto aty = NodeType(*arg);
           if (!isa<ScalarIntegerType>(aty)) {
-            Error1(n.LOC(), "setreg expects an integer argument but got '" +
+            Error1(n.LOC(), "'" + func_name +
+                                "' expects an integer argument but got '" +
                                 PSTR(aty) + "'.");
           } else if (!arg->Opts().HasVal() ||
                      !arg->Opts().GetVal()->IsNumeric()) {
             Error1(n.LOC(),
-                   "setreg argument must be a compile-time integer constant.");
+                   "'" + func_name +
+                       "' argument must be a compile-time integer constant.");
           } else if (auto reg_limit = VIInt(arg->Opts().GetVal());
                      !reg_limit || reg_limit.value() <= 0) {
-            Error1(n.LOC(), "setreg argument must be a positive integer.");
+            Error1(n.LOC(),
+                   "'" + func_name + "' argument must be a positive integer.");
           }
         }
       }

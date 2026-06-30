@@ -2,20 +2,22 @@
 // RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=SM90
 
 __co__ void setreg_demo() {
+  [[maxnreg(40)]]
   parallel by 1 : block {
-    setreg 40;
   }
 }
 
 __co__ void setreg_inc_demo() {
+  [[maxnreg(40)]]
   parallel by 1 : block {
-    setreg.inc 240;
+    call croq::cuda::setreg_inc(240);
   }
 }
 
 __co__ void setreg_dec_demo() {
+  [[maxnreg(40)]]
   parallel by 1 : block {
-    setreg.dec 32;
+    call croq::cuda::setreg_dec(32);
   }
 }
 

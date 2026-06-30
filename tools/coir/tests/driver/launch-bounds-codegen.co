@@ -1,0 +1,12 @@
+// RUN: cocc -t cute -es %s | FileCheck %s
+//
+// Test: [[launch_bounds]] emitted as __launch_bounds__ via COIR codegen path.
+
+__co__ void lb_codegen() {
+  [[launch_bounds(256, 4)]]
+  parallel by 1 : block {
+  }
+}
+
+// CHECK: __launch_bounds__(256, 4)
+// CHECK-SAME: void

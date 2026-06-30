@@ -1,0 +1,13 @@
+// RUN: co2ir -t cute %s | FileCheck %s
+
+// IRGen test: [[launch_bounds]] and [[maxnreg]] combined on same kernel.
+
+// CHECK: coir.kernel @combined_demo
+// CHECK-SAME: launchBounds = #coir.launch_bounds<256, 1>
+// CHECK-SAME: maxNreg = #coir.maxnreg<64>
+
+__co__ void combined_demo() {
+  [[launch_bounds(256, 1)]] [[maxnreg(64)]]
+  parallel by 1 : block {
+  }
+}

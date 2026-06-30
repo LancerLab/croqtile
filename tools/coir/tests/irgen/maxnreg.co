@@ -1,0 +1,14 @@
+// RUN: co2ir -t cute %s | FileCheck %s
+
+// IRGen test: verify [[maxnreg]] propagates to CoIR KernelOp attribute.
+
+// CHECK: coir.kernel @nreg_demo
+// CHECK-SAME: maxNreg = #coir.maxnreg<40>
+// CHECK: coir.parallel
+// CHECK-SAME: level = #coir.level<block>
+
+__co__ void nreg_demo() {
+  [[maxnreg(40)]]
+  parallel by 1 : block {
+  }
+}

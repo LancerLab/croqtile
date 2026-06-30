@@ -1466,8 +1466,8 @@ bool HIPCodeGen::Visit(AST::Call& n) {
       if (func_name == "println") os << indent << "printf(\"\\n\");\n";
       return true;
     }
-    if (func_name == "setreg" || func_name == "setreg.inc" ||
-        func_name == "setreg.dec") {
+    if (func_name == "croq::cuda::setreg_inc" ||
+        func_name == "croq::cuda::setreg_dec") {
       return true;
     }
     if (n.IsArith()) {         /* fall through to CallSTR emission below */

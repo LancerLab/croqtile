@@ -1,0 +1,15 @@
+// RUN: not choreo -t cute -sa=check %s 2>&1 | FileCheck %s
+
+__co__ void maxnreg_not_block() {
+  [[maxnreg(40)]]
+  parallel by 1 : thread {
+  }
+}
+// CHECK: error: {{\[\[}}maxnreg]] is only valid on block-level parallel-by.
+
+__co__ void maxnreg_negative() {
+  [[maxnreg(-1)]]
+  parallel by 1 : block {
+  }
+}
+// CHECK: error: {{\[\[}}maxnreg]] argument must be a positive integer.

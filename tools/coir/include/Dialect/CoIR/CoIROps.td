@@ -133,7 +133,8 @@ def KernelOp : CoIR_Op<"kernel", [
   let arguments = (ins
     SymbolNameAttr:$sym_name,
     TypeAttrOf<FunctionType>:$function_type,
-    OptionalAttr<CoIR_LaunchBoundsAttr>:$launchBounds
+    OptionalAttr<CoIR_LaunchBoundsAttr>:$launchBounds,
+    OptionalAttr<CoIR_MaxNregAttr>:$maxNreg
   );
   let regions = (region SizedRegion<1>:$body);
 

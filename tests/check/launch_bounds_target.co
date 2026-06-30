@@ -1,6 +1,5 @@
-// TODO-RUN: not choreo %s 2>&1 | FileCheck %s
-// CHECK: error: {{\[\[}}launch_bounds]] is only supported for GPU targets (cute, hip).
-// CHECK: Totally 1 errors have been detected.
+// RUN: choreo -t cc -sa=check %s 2>&1 | FileCheck %s
+// CHECK: warning: {{\[\[}}launch_bounds]] is ignored for non-GPU targets (cute, hip).
 
 __co__ void bad_target() {
   [[launch_bounds(7)]]
