@@ -1,0 +1,112 @@
+// Test: --use-dte-pool flag enables persistent DTE pool for private-level DMAs.
+//
+// With --use-dte-pool, all private-storage DMAs (anonymous and named) share a
+// persistent __choreo_dte_pool__[] array instead of creating per-DMA DTE
+// instances.  Shared-storage DMA retains its own choreo_cdte DTE.
+//
+// RUN: choreo -t topscc -arch=gcu300 -es --use-dte-pool %s -o - 2>&1 | FileCheck --check-prefix=POOL %s
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=NOPOOL %s
+
+// ---------------------------------------------------------------
+// Test 1: single named future — pool size 1, slot 0
+// ---------------------------------------------------------------
+__co__ auto single_named(f32 [32, 4] a) {
+  parallel p by 2 {
+    shared f32 [a.span] b;
+    local f32 [a.span] c;
+    dma.copy a => b;
+    f0 = dma.copy.async b => c;
+    wait f0;
+  }
+}
+
+// POOL-LABEL:  __choreo_device_single_named
+// POOL:          choreo::choreo_sdte __choreo_dte_pool__[1];
+// POOL-NEXT:     for (int __i = 0; __i < 1; ++__i) __choreo_dte_pool__[__i].init();
+// POOL:          choreo::choreo_cdte_priv choreo_topscc_ctx0;
+// POOL:          choreo::future f0(__choreo_dte_pool__[0], "f0",
+// POOL:          f0.wait();
+
+// NOPOOL-LABEL: __choreo_device_single_named
+// NOPOOL-NOT:   __choreo_dte_pool__
+// NOPOOL:       choreo::choreo_sdte choreo_topscc_ctx{{[0-9]+}};
+// NOPOOL:       choreo::future f0(choreo_topscc_ctx{{[0-9]+}}, "f0",
+// NOPOOL:       f0.wait();
+
+// ---------------------------------------------------------------
+// Test 2: two named futures — pool size 2, slots 0 and 1
+// ---------------------------------------------------------------
+__co__ auto multi_named(f32 [16, 8] a) {
+  parallel p by 2 {
+    local f32 [a.span] x;
+    local f32 [a.span] y;
+    fx = dma.copy.async a => x;
+    fy = dma.copy.async a => y;
+    wait fx;
+    wait fy;
+    dma.copy x => a;
+  }
+}
+
+// POOL-LABEL:  __choreo_device_multi_named
+// POOL:          choreo::choreo_sdte __choreo_dte_pool__[2];
+// POOL-NEXT:     for (int __i = 0; __i < 2; ++__i) __choreo_dte_pool__[__i].init();
+// POOL:          choreo::future fx(__choreo_dte_pool__[0], "fx",
+// POOL:          choreo::future fy(__choreo_dte_pool__[1], "fy",
+// POOL:          choreo::future __choreo_anon_fut__{{[0-9]+}}(__choreo_dte_pool__[0], "",
+
+// NOPOOL-LABEL: __choreo_device_multi_named
+// NOPOOL-NOT:   __choreo_dte_pool__
+// NOPOOL:       choreo::choreo_sdte choreo_topscc_ctx{{[0-9]+}};
+// NOPOOL:       choreo::future fx(choreo_topscc_ctx{{[0-9]+}}, "fx",
+// NOPOOL:       choreo::choreo_sdte choreo_topscc_ctx{{[0-9]+}};
+// NOPOOL:       choreo::future fy(choreo_topscc_ctx{{[0-9]+}}, "fy",
+
+// ---------------------------------------------------------------
+// Test 3: anonymous DMAs — all share pool slot 0, pool size 1
+// ---------------------------------------------------------------
+__co__ auto anon_dma(f32 [16, 4] a) {
+  parallel p by 2 {
+    local f32 [a.span] c;
+    dma.copy a => c;
+    dma.copy a => c;
+  }
+}
+
+// POOL-LABEL:  __choreo_device_anon_dma
+// POOL:          choreo::choreo_sdte __choreo_dte_pool__[1];
+// POOL-NEXT:     for (int __i = 0; __i < 1; ++__i) __choreo_dte_pool__[__i].init();
+// POOL:          choreo::future __choreo_anon_fut__{{[0-9]+}}(__choreo_dte_pool__[0], "",
+// POOL:          choreo::future __choreo_anon_fut__{{[0-9]+}}(__choreo_dte_pool__[0], "",
+
+// NOPOOL-LABEL: __choreo_device_anon_dma
+// NOPOOL-NOT:   __choreo_dte_pool__
+// NOPOOL:       choreo::choreo_sdte choreo_topscc_ctx{{[0-9]+}};
+// NOPOOL:       choreo::future __choreo_anon_fut__{{[0-9]+}}(choreo_topscc_ctx{{[0-9]+}}, "",
+// NOPOOL:       choreo::choreo_sdte choreo_topscc_ctx{{[0-9]+}};
+// NOPOOL:       choreo::future __choreo_anon_fut__{{[0-9]+}}(choreo_topscc_ctx{{[0-9]+}}, "",
+
+// ---------------------------------------------------------------
+// Test 4: mixed shared + private — shared DMA does NOT use pool
+// ---------------------------------------------------------------
+__co__ auto mixed_storage(f32 [8, 4] a) {
+  parallel p by 2 {
+    shared f32 [a.span] s;
+    local f32 [a.span] c;
+    dma.copy a => s;
+    fd = dma.copy.async s => c;
+    wait fd;
+  }
+}
+
+// POOL-LABEL:  __choreo_device_mixed_storage
+// POOL:          choreo::choreo_sdte __choreo_dte_pool__[1];
+// POOL:          choreo::choreo_cdte_priv choreo_topscc_ctx{{[0-9]+}};
+// POOL:          choreo::future __choreo_anon_fut__{{[0-9]+}}(choreo_topscc_ctx{{[0-9]+}}, "",
+// POOL:          choreo::future fd(__choreo_dte_pool__[0], "fd",
+
+// NOPOOL-LABEL: __choreo_device_mixed_storage
+// NOPOOL-NOT:   __choreo_dte_pool__
+// NOPOOL:       choreo::choreo_cdte_priv choreo_topscc_ctx{{[0-9]+}};
+// NOPOOL:       choreo::choreo_sdte choreo_topscc_ctx{{[0-9]+}};
+// NOPOOL:       choreo::future fd(choreo_topscc_ctx{{[0-9]+}}, "fd",

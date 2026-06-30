@@ -534,6 +534,8 @@ private:
                              // transcendentals (exp/div) in generated code.
   bool use_target_lib = false; // Lower __lib_* builtins to target library calls
                                // (e.g. native hardware library calls).
+  bool use_dte_pool = false;   // Reuse a persistent DTE pool for anonymous
+                               // and named DMAs to prevent resource exhaustion.
   std::string debug_file_dir;  // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
@@ -784,6 +786,7 @@ public:
   bool FastCompile() const { return fast_compile; }
   bool UseFastMath() const { return use_fast_math; }
   bool UseTargetLib() const { return use_target_lib; }
+  bool UseDtePool() const { return use_dte_pool; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -830,6 +833,7 @@ public:
   void SetFastCompile(bool value) { fast_compile = value; }
   void SetUseFastMath(bool value) { use_fast_math = value; }
   void SetUseTargetLib(bool value) { use_target_lib = value; }
+  void SetUseDtePool(bool value) { use_dte_pool = value; }
   void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
