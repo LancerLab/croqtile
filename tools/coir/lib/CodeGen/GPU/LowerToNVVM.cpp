@@ -21,8 +21,65 @@
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/GPU/Transforms/Passes.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/LLVMIR/NVVMDialect.h"
+#include "mlir/Dialect/SCF/Transforms/Patterns.h"
 #include "mlir/IR/DialectRegistry.h"
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/DialectConversion.h"
+
+namespace {
+
+struct GpuToNVVMWithSCFPass
+    : public mlir::OperationPass<mlir::gpu::GPUModuleOp> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(GpuToNVVMWithSCFPass)
+  GpuToNVVMWithSCFPass()
+      : OperationPass(mlir::TypeID::get<GpuToNVVMWithSCFPass>()) {}
+  llvm::StringRef getName() const override { return "GpuToNVVMWithSCF"; }
+  llvm::StringRef getArgument() const override {
+    return "coir-gpu-to-nvvm-with-scf";
+  }
+  llvm::StringRef getDescription() const override {
+    return "GPU+SCF to NVVM/LLVM with unified type converter";
+  }
+  std::unique_ptr<mlir::Pass> clonePass() const override {
+    return std::make_unique<GpuToNVVMWithSCFPass>();
+  }
+  void getDependentDialects(mlir::DialectRegistry &registry) const override {
+    registry.insert<mlir::LLVM::LLVMDialect, mlir::NVVM::NVVMDialect>();
+  }
+
+  void runOnOperation() override {
+    auto gpuModule = getOperation();
+    mlir::MLIRContext &ctx = *gpuModule.getContext();
+
+    mlir::LowerToLLVMOptions llvmOpts(&ctx);
+    llvmOpts.useBarePtrCallConv = false;
+    mlir::LLVMTypeConverter converter(&ctx, llvmOpts);
+    mlir::configureGpuToNVVMTypeConverter(converter);
+
+    mlir::ConversionTarget target(ctx);
+    mlir::configureGpuToNVVMConversionLegality(target);
+    target.addLegalDialect<mlir::LLVM::LLVMDialect>();
+    target.addLegalDialect<mlir::NVVM::NVVMDialect>();
+    target.addIllegalDialect<mlir::gpu::GPUDialect>();
+    target.addLegalOp<mlir::gpu::GPUModuleOp>();
+    target.addLegalOp<mlir::gpu::YieldOp>();
+
+    mlir::RewritePatternSet patterns(&ctx);
+    mlir::populateGpuToNVVMConversionPatterns(converter, patterns);
+    mlir::populateGpuWMMAToNVVMConversionPatterns(converter, patterns);
+    mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
+        converter, patterns, target);
+
+    if (mlir::failed(mlir::applyPartialConversion(gpuModule, target,
+                                                  std::move(patterns))))
+      signalPassFailure();
+  }
+};
+
+} // namespace
 
 namespace coir {
 namespace gpu {
@@ -49,7 +106,7 @@ bool lowerToNVVM(mlir::ModuleOp module) {
   pm.addPass(coir::createConvertToGPUPass());
   pm.addPass(mlir::createGpuKernelOutliningPass());
   pm.addNestedPass<mlir::gpu::GPUModuleOp>(
-      mlir::createConvertGpuOpsToNVVMOps());
+      std::make_unique<GpuToNVVMWithSCFPass>());
   pm.addPass(mlir::createSCFToControlFlowPass());
   pm.addPass(mlir::createArithToLLVMConversionPass());
   pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());

@@ -107,18 +107,37 @@ std::vector<KernelInfo> collectKernels(ModuleOp module) {
         ki.ret_shape.assign(tty.getShape().begin(), tty.getShape().end());
     }
 
+    int64_t groupWarps = 0;
+    bool hasThreadLevel = false;
     kop.getBody().walk([&](coir::ParallelOp par) {
       auto bounds = par.getBounds();
       auto lvl = par.getLevel();
-      int64_t *target = nullptr;
-      if (lvl == coir::ParallelLevel::BLOCK)
-        target = ki.gridDims;
-      else if (lvl == coir::ParallelLevel::THREAD)
-        target = ki.blockDims;
-      if (!target) return;
-      for (unsigned i = 0; i < bounds.size() && i < 3; ++i)
-        target[i] = bounds[i];
+      if (lvl == coir::ParallelLevel::BLOCK) {
+        for (unsigned i = 0; i < bounds.size() && i < 3; ++i)
+          ki.gridDims[i] = bounds[i];
+      } else if (lvl == coir::ParallelLevel::THREAD) {
+        hasThreadLevel = true;
+        for (unsigned i = 0; i < bounds.size() && i < 3; ++i)
+          ki.blockDims[i] = bounds[i];
+      } else if (lvl == coir::ParallelLevel::GROUP ||
+                 lvl == coir::ParallelLevel::GROUPx4) {
+        int64_t nWarps = 1;
+        for (auto b : bounds) nWarps *= b;
+        if (lvl == coir::ParallelLevel::GROUPx4) nWarps *= 4;
+        groupWarps = nWarps;
+      }
     });
+    if (groupWarps > 0 && hasThreadLevel) {
+      int64_t tpg = 1;
+      for (int i = 0; i < 3; ++i) tpg *= ki.blockDims[i];
+      ki.blockDims[0] = groupWarps * tpg;
+      ki.blockDims[1] = 1;
+      ki.blockDims[2] = 1;
+    } else if (groupWarps > 0) {
+      ki.blockDims[0] = groupWarps * 32;
+      ki.blockDims[1] = 1;
+      ki.blockDims[2] = 1;
+    }
 
     kernels.push_back(std::move(ki));
   });

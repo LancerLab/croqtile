@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GPU
 // RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t gpu -gs %s -o %s.gpu.result && bash %s.gpu.result --execute | FileCheck --match-full-lines --check-prefix=GPU %s && rm -f %s.gpu.result
 //
 // MMA f16 matmul: fill + row.col with group-4 (WGMMA path on SM90).
 
@@ -31,8 +32,8 @@ __co__ auto matmul_fill_rc(f16 [M, K] lhs, f16 [K, N] rhs) {
 int main() {
   auto lhs = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs = choreo::make_spandata<choreo::f16>(K, N);
-  lhs.fill_random(1, 10);
-  rhs.fill_random(1, 10);
+  lhs.fill_random(1.0f, 10.0f);
+  rhs.fill_random(1.0f, 10.0f);
 
   auto res = matmul_fill_rc(lhs.view(), rhs.view());
 
@@ -42,8 +43,8 @@ int main() {
     for (int j = 0; j < N; ++j) {
       float ref = 0.0f;
       for (int k = 0; k < K; ++k)
-        ref += __half2float(lhs[i][k] * rhs[k][j]);
-      auto delta = std::abs((ref - __half2float(res[i][j])) / ref);
+        ref += float(lhs[i][k]) * float(rhs[k][j]);
+      auto delta = std::abs((ref - float(res[i][j])) / ref);
       if (delta >= tolerance) pass = false;
     }
 
@@ -52,3 +53,4 @@ int main() {
 }
 
 // CHECK: MMA F16 Test Passed
+// GPU: MMA F16 Test Passed
