@@ -2344,6 +2344,26 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       live_chunk_aliases.erase(sym);
       live_chunk_aliases.erase(sname);
     }
+
+    // Propagate swizzle for ElemOf-based declarations (e.g., `ma = arr[idx]`).
+    auto decl_sty = GetSpannedType(NodeType(n));
+    if (decl_sty && decl_sty->GetStorage() == Storage::SHARED && n.init_expr) {
+      auto rhs_expr = dyn_cast<AST::Expr>(n.init_expr.get());
+      if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf) {
+        auto base_sym_node = AST::GetArrayBaseSymbol(*rhs_expr);
+        if (base_sym_node) {
+          auto base_name = base_sym_node->name;
+          auto base_scoped = InScopeName(base_name);
+          auto sit = shared_buf_swiz_.find(base_scoped);
+          if (sit == shared_buf_swiz_.end())
+            sit = shared_buf_swiz_.find(base_name);
+          if (sit != shared_buf_swiz_.end()) {
+            shared_buf_swiz_[sym] = sit->second;
+            shared_buf_swiz_[sname] = sit->second;
+          }
+        }
+      }
+    }
   }
 
   // The type is determined first, and then
@@ -3062,6 +3082,27 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
     } else {
       live_chunk_aliases.erase(name);
       live_chunk_aliases.erase(scoped_name);
+    }
+
+    // Propagate swizzle for ElemOf-based aliases (e.g., `ma = lhs_load_s[stage]`).
+    // When the RHS is an array element access into a swizzled shared buffer,
+    // record the swizzle for the alias name so direct WGMMA can find it.
+    if (sty && sty->GetStorage() == Storage::SHARED) {
+      auto rhs_expr = dyn_cast<AST::Expr>(n.value.get());
+      if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf) {
+        auto base_sym = AST::GetArrayBaseSymbol(*rhs_expr);
+        if (base_sym) {
+          auto base_name = base_sym->name;
+          auto base_scoped = InScopeName(base_name);
+          auto sit = shared_buf_swiz_.find(base_scoped);
+          if (sit == shared_buf_swiz_.end())
+            sit = shared_buf_swiz_.find(base_name);
+          if (sit != shared_buf_swiz_.end()) {
+            shared_buf_swiz_[name] = sit->second;
+            shared_buf_swiz_[scoped_name] = sit->second;
+          }
+        }
+      }
     }
   }
 
@@ -5426,6 +5467,23 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                : (elemof_base ? elemof_base->name : (sym ? sym->name : ""));
         auto source_scoped =
             source_sym.empty() ? source_sym : InScopeName(source_sym);
+
+        // If source_sym is an alias (assigned via `=` from a ChunkAt), resolve
+        // it through live_chunk_aliases to find the underlying root buffer.
+        // This propagates swizzle from TMA-loaded buffers to reference aliases.
+        if (!ca && !source_sym.empty() &&
+            shared_buf_swiz_.find(source_sym) == shared_buf_swiz_.end() &&
+            shared_buf_swiz_.find(source_scoped) == shared_buf_swiz_.end()) {
+          auto ait = live_chunk_aliases.find(source_sym);
+          if (ait == live_chunk_aliases.end())
+            ait = live_chunk_aliases.find(source_scoped);
+          if (ait != live_chunk_aliases.end()) {
+            ca = ait->second;
+            source_sym = ca->RefSymbol();
+            source_scoped =
+                source_sym.empty() ? source_sym : InScopeName(source_sym);
+          }
+        }
         bool is_chunk_rs_alias =
             !source_sym.empty() &&
             (frag_chunk_rs_aliases_.count(source_sym) > 0 ||
