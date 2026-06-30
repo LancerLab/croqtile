@@ -1,4 +1,5 @@
 // RUN: choreo %s --vectorize -es 2>&1 | FileCheck %s
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo %s -es 2>&1 | FileCheck %s --check-prefix=NO-VEC
 // RUN: choreo %s --vectorize -dvec 2>&1 | FileCheck %s --check-prefix=VEC-CHECK
 #define M 128

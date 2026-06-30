@@ -1,4 +1,5 @@
 // RUN: choreo -vn -dv=valno %s | FileCheck --check-prefix=VALNO --match-full-lines %s
+// REQUIRES: TARGET-GCUALL
 
 #include "choreo.h"
 

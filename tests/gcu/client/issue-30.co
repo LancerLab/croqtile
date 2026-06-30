@@ -1,4 +1,5 @@
 // RUN: choreo -dv=norm -sa=norm %s | FileCheck --match-full-lines %s
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -es %s -i | FileCheck --match-full-lines --check-prefix=INFER %s
 
 __co__ void foo(s32[N, M, K] lhs) {

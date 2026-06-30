@@ -1,4 +1,5 @@
 // RUN: choreo -es %s | FileCheck %s
+// REQUIRES: TARGET-GCUALL
 
 #define PART_SIZE 1024
 #define TILE_SIZE 256

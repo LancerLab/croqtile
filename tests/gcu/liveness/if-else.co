@@ -1,4 +1,5 @@
 // RUN: choreo -es -dv=liveness %s | FileCheck --match-full-lines %s
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -es -dv=memreuse %s | FileCheck --match-full-lines --check-prefix=MEMREUSE %s
 
 #include "choreo.h"

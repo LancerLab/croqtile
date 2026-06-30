@@ -1,4 +1,5 @@
 // RUN: choreo %s -es -o - | FileCheck %s
+// REQUIRES: TARGET-GCUALL
 
 __co__ void foo(global f32 [M, ??] data) {
   parallel p by 1

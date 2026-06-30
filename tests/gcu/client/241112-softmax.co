@@ -1,4 +1,5 @@
 // RUN: choreo -gs -i %s | FileCheck --match-full-lines %s
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -gs -dp=memreuse %s 2>&1 | FileCheck --check-prefix=CHKERR %s
 
 __co__ f32 [M] softmax(f32 [M, N] input,int TILE_M) {

@@ -1,4 +1,5 @@
 // RUN: choreo %s -dvec | FileCheck %s
+// REQUIRES: TARGET-GCUALL
 #define H 128
 #define W 512
 __co__ void vecadd(s32 [H, W] a, s32 [H, W] b)

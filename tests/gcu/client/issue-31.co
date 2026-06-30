@@ -1,4 +1,5 @@
 // RUN: choreo -dv=norm -sa=norm %s | FileCheck --match-full-lines --check-prefix=NORM %s
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo %s -i | FileCheck --match-full-lines --check-prefix=INFER %s
 
 

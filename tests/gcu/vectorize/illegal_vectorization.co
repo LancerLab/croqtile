@@ -1,4 +1,5 @@
 // RUN: choreo %s -dvec --vectorize 2>&1 | FileCheck %s
+// REQUIRES: TARGET-GCUALL
 #define M 128
 #define N 512
 __co__ void func(s32 [M,N] a, s32 [M, N] b) {

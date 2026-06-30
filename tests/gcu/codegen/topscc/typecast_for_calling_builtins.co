@@ -1,4 +1,5 @@
 // RUN: choreo -es %s | FileCheck %s
+// REQUIRES: TARGET-GCUALL
 __co__ s32 [100] co_sqrt_s32(s32 [100] input) {
   s32[input.span(0)] output;
   parallel p by 1 {

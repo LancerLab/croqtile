@@ -1,4 +1,5 @@
 // RUN: choreo %s -dvec | FileCheck %s
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo %s -es | FileCheck %s --check-prefix=CODEGEN
 #define I 32
 #define J 256

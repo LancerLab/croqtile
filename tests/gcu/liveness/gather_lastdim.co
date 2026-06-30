@@ -1,4 +1,5 @@
 // RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+// REQUIRES: TARGET-GCUALL
 
 __co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] id,
                 s32[10] para) {

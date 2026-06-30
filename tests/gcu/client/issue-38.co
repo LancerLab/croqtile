@@ -1,4 +1,5 @@
 // RUN: choreo %s -i | FileCheck --match-full-lines --check-prefix=INFER %s
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -es %s | FileCheck --match-full-lines %s
 
 #include "choreo.h"

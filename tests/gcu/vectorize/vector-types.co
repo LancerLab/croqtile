@@ -1,4 +1,5 @@
 // RUN: choreo -dvec %s | FileCheck %s 
+// REQUIRES: TARGET-GCUALL
 __co__ auto vecadd(f32 [128, 512] a, f32 [128, 512] b)  {
   f32 [a.span] c;
   parallel p by 2, q by 2 {

@@ -1,4 +1,5 @@
 // RUN: choreo -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines --check-prefix=LIVENESS %s
+// REQUIRES: TARGET-GCUALL
 
 #include "choreo.h"
 

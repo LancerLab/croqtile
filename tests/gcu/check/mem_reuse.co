@@ -1,4 +1,5 @@
 // RUN: choreo -arch=gcu300 -es %s -dp=memreuse 2>&1 | FileCheck --check-prefix=MUCHK %s
+// REQUIRES: TARGET-GCUALL
 #include "choreo.h"
 
 __cok__{

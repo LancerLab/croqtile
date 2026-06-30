@@ -1,4 +1,5 @@
 // RUN: choreo -dv=liveness -sa=liveness -ddir=build %s -o - | FileCheck --match-full-lines %s
+// REQUIRES: TARGET-GCUALL
 
 __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
   f32 [N, H, W] out;

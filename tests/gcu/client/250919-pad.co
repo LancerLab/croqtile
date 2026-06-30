@@ -1,4 +1,4 @@
-
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -es -fopt-dma=false %s | FileCheck --match-full-lines %s
 
 __co__ auto matmul(f16[M, K] lhs, f16[K, N] rhs) {
