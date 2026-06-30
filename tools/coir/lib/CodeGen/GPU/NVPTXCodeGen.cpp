@@ -83,6 +83,7 @@ public:
     else
       os << "gpu_arch=\"" << a << "\"\n\n";
 
+    os << "BINFILE=\"$TMPDIR/runner\"\n\n";
     os << "cat > \"$TMPDIR/host.cpp\" << '__COCC_HOST_SOURCE__'\n";
 
     os << "static const char __coir_ptx_string[] = \""
@@ -100,7 +101,7 @@ public:
 
     os << "g++ -std=c++17 -I\"$TMPDIR\" "
           "-I\"${CUDA_HOME}/include\" "
-          "-o \"$TMPDIR/runner\" \"$TMPDIR/host.cpp\" "
+          "-o \"$BINFILE\" \"$TMPDIR/host.cpp\" "
           "-L\"${CUDA_HOME}/lib64\" -lcuda 2>&1\n\n";
 
     emitScriptExecuteBlock(os);
