@@ -1380,9 +1380,9 @@ private:
   }
 
   std::string emitPadValue(DmaCopyOp op) {
-    if (auto intAttr = op.getPadValueAttr().dyn_cast_or_null<IntegerAttr>())
+    if (auto intAttr = mlir::dyn_cast_or_null<IntegerAttr>(op.getPadValueAttr()))
       return std::to_string(intAttr.getInt());
-    if (auto fpAttr = op.getPadValueAttr().dyn_cast_or_null<FloatAttr>())
+    if (auto fpAttr = mlir::dyn_cast_or_null<FloatAttr>(op.getPadValueAttr()))
       return std::to_string(fpAttr.getValueAsDouble());
     return "0";
   }

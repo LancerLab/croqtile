@@ -44,7 +44,7 @@ target_compile_definitions(GCUTarget PRIVATE
 )
 
 if(NOT EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")
-  message(WARNING "acore library not found at ${TOOLCHAIN_DIR}/lib/libacoreop.bc. "
+  message(STATUS "acore library not found at ${TOOLCHAIN_DIR}/lib/libacoreop.bc. "
     "MMA and __lib_* codegen will be disabled.")
 else()
   target_compile_definitions(GCUTarget PRIVATE

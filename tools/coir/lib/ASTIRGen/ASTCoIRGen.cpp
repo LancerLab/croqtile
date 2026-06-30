@@ -152,7 +152,7 @@ int64_t ASTCoIRGen::ResolveBoundedVarExtent(llvm::StringRef rvName) {
     auto val = LookupValue(lookupName);
     if (!val) val = LookupValue(lookupName + ".data");
     if (val) {
-      if (auto tty = val.getType().dyn_cast<coir::TensorType>()) {
+      if (auto tty = mlir::dyn_cast<coir::TensorType>(val.getType())) {
         for (auto d : tty.getShape())
           if (d > 0) total *= d;
         continue;
@@ -1431,8 +1431,8 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
 
   if (!srcVal || !dstVal) return true;
 
-  auto srcTensor = srcVal.getType().dyn_cast<coir::TensorType>();
-  auto dstTensor = dstVal.getType().dyn_cast<coir::TensorType>();
+  auto srcTensor = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
+  auto dstTensor = mlir::dyn_cast<coir::TensorType>(dstVal.getType());
   if (srcTensor && dstTensor) {
     auto srcShape = srcTensor.getShape();
     auto dstShape = dstTensor.getShape();

@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 
+if(POLICY CMP0116)
+  cmake_policy(SET CMP0116 OLD)
+endif()
+
 # Read version from VERSION.txt
 file(READ "${CMAKE_SOURCE_DIR}/VERSION.txt" VERSION_FROM_FILE)
 string(STRIP "${VERSION_FROM_FILE}" VERSION_FROM_FILE)
@@ -107,7 +111,7 @@ set(DEFAULT_CUDA_HOME "/usr/local/cuda" CACHE PATH "Optional default CUDA path (
 
 # Find CUDA package to get version info
 if(NOT EMSCRIPTEN)
-  find_package(CUDAToolkit)
+  find_package(CUDAToolkit QUIET)
 endif()
 
 if(CUDAToolkit_FOUND)

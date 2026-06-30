@@ -1199,7 +1199,6 @@ private:
       os() << getIndent() << "if (threadIdx.x == 0 && threadIdx.y == 0) {\n";
       incIndent();
 
-      auto srcType = desc.srcType;
       std::string storeFunc = rank <= 2
           ? "cde::cp_async_bulk_tensor_2d_shared_to_global"
           : "cde::cp_async_bulk_tensor_3d_shared_to_global";
