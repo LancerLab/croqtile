@@ -56,8 +56,8 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
   // - consumer warpgroup (p1 == 1): wait full[stage], WGMMA compute, trigger empty[stage]
   parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block {
     shared event full[MATMUL_STAGES], empty[MATMUL_STAGES];
-    shared f8_e4m3 [MATMUL_STAGES * MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
-    shared f8_e4m3 [MATMUL_STAGES * MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s[MATMUL_STAGES];
+    shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s[MATMUL_STAGES];
     shared f32 [MATMUL_STAGES, 1] rhs_scale_s;
     shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s_1;
     parallel p1 by 2 : group-4, t by 128 : thread {
@@ -65,8 +65,8 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
           wait empty[stage];
-          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0);
-          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0);
+          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s[stage];
+          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s[stage];
           rhs_scale_f = dma.copy.async scale_rhs.subspan(1, 1).at(block_n, iv_k) => rhs_scale_s.subspan(1, 1).at(stage, 0);
           wait rhs_scale_f;
           trigger full[stage];
@@ -75,19 +75,14 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
 
       inthreads.async (p1 == 1) {
         mc = mma.fill.f16 0.0f;
-        foreach {s} in [MATMUL_STAGES] {
+        foreach {s} in [MATMUL_STAGES]
           trigger empty[s];
-        }
+
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
           wait full[stage];
-          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-            ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
-            mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
-            mma.row.row mc, ma, mb;
-          }
+          mma.row.row mc, lhs_load_s[stage], rhs_load_s[stage];
           mma.scale mc, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k), rhs_scale_s.at(stage, 0);
-          mma.commit;
           trigger empty[stage];
         }
         mma.store mc, output_s_1;

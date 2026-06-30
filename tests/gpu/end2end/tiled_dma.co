@@ -21,7 +21,7 @@ __co__ auto foo2(f16 [31, 32] input) {
   parallel p by 1 : block
     parallel q by 32 : thread {
       shared f16 [32, 32] buf;
-      dma.copy.zfill input.subspan(31, 32) => buf.subspan(32, 32);
+      dma.copy input.subspan(31, 32) => buf.subspan(32, 32);
       dma.copy buf => output;
     }
 
@@ -60,7 +60,7 @@ __co__ auto foo5(f16 [31, 64] input) {
   parallel p by 1 : block
     parallel q by 32 : thread {
       shared f16 [32, 64] buf;
-      dma.copy.zfill input.subspan(31, 64) => buf.subspan(32, 64);
+      dma.copy input.subspan(31, 64) => buf.subspan(32, 64);
       dma.copy buf => output;
     }
 
@@ -141,7 +141,7 @@ __co__ auto foo10(s32 [13, 32] input) {
   parallel p by 1 : block
     parallel q by 32 : thread {
       shared s32 [16, 32] buf;
-      dma.copy.zfill input.subspan(13, 32) => buf.subspan(16, 32);
+      dma.copy input.subspan(13, 32) => buf.subspan(16, 32);
       dma.copy buf.subspan(13, 32) => output;
     }
 
@@ -156,7 +156,7 @@ __co__ auto foo11(s32 [13, 64] input) {
   parallel p by 1 : block
     parallel q by 32 : thread {
       shared s32 [16, 64] buf;
-      fut = dma.copy.async.zfill input.subspan(13, 64) => buf.subspan(16, 64);
+      fut = dma.copy.async input.subspan(13, 64) => buf.subspan(16, 64);
       wait fut;
       dma.copy buf.subspan(13, 64) => output;
     }
@@ -270,7 +270,7 @@ __co__ auto foo18(s8 [M, N] input) {
   parallel p by 1 : block
     parallel q by 32 : thread {
       shared s8 [16, 64] buf;
-      dma.copy.zfill input.subspan(13, 64) => buf.subspan(16, 64);
+      dma.copy input.subspan(13, 64) => buf.subspan(16, 64);
       dma.copy buf.subspan(13, 64) => output;
     }
 
@@ -730,7 +730,7 @@ __co__ auto foo24(s32 [30, 60] input) {
   parallel p by 1 : block
     parallel q by 32 : thread {
       shared s32 [32, 60] buf;
-      dma.copy.zfill input.subspan(30, 60) => buf.subspan(32, 60);
+      dma.copy input.subspan(30, 60) => buf.subspan(32, 60);
       dma.pad<{2, 1}, {3, 2}, {0, 0}, -1> buf.subspan(30, 60) => output;
     }
 

@@ -59,7 +59,7 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
           wait empty[stage];
-          dma.copy.async<full[stage]>.swiz<128>.zfill
+          dma.copy.async<full[stage]>.swiz<128>
             lhs.view(TILE_M, MATMUL_TILE_K).from(seg_start + iv_m * MATMUL_WARP_M, iv_k * MATMUL_TILE_K)
               => sA.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0);
           tma.copy.async<full[stage]>.swiz<128>

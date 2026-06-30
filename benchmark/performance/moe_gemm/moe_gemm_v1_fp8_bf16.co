@@ -44,7 +44,7 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
       ROWS_M = min(WARP_M, seg_length - iv_m * WARP_M);
       mc = mma.fill.f32 0.0f;
       foreach {iv_k} in [cdiv(K, TILE_K)] {
-        dma.copy.swiz<128>.zfill lhs
+        dma.copy.swiz<128> lhs
           .view(ROWS_M, TILE_K)
           .from(seg_start + iv_m * WARP_M, iv_k * TILE_K) 
           => sA;

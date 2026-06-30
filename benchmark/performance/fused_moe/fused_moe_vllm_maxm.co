@@ -737,7 +737,7 @@ __co__ void fused_moe_grouped_wgmma_fp8(
       foreach iv_k in [QWEN35_K_BLOCKS] {
         tma.copy.swiz<QWEN35_SWIZZLE>
             rhs.subspan(QWEN35_WARP_N, QWEN35_TILE_K).at(eid # block_n, iv_k) => sB;
-        dma.copy.swiz<QWEN35_SWIZZLE>.zfill
+        dma.copy.swiz<QWEN35_SWIZZLE>
             lhs.view(tile_rows, QWEN35_TILE_K).from(
                 seg_start + iv_m * QWEN35_WARP_M, iv_k * QWEN35_TILE_K)
             => sA;
@@ -842,7 +842,7 @@ __co__ void fused_moe_grouped_wgmma_fp8_noscat(
       foreach iv_k in [QWEN35_K_BLOCKS] {
         tma.copy.swiz<QWEN35_SWIZZLE>
             rhs.subspan(QWEN35_WARP_N, QWEN35_TILE_K).at(eid # block_n, iv_k) => sB;
-        dma.copy.swiz<QWEN35_SWIZZLE>.zfill
+        dma.copy.swiz<QWEN35_SWIZZLE>
             lhs.view(tile_rows, QWEN35_TILE_K).from(
                 seg_start + iv_m * QWEN35_WARP_M, iv_k * QWEN35_TILE_K)
             => sA;
@@ -1013,7 +1013,7 @@ __co__ void fused_moe_grouped_wgmma_fp8_k512(
       foreach iv_k in [QWEN35_K_BLOCKS_512] {
         tma.copy.swiz<QWEN35_SWIZZLE>
             rhs.subspan(QWEN35_WARP_N, QWEN35_TILE_K).at(eid # block_n, iv_k) => sB;
-        dma.copy.swiz<QWEN35_SWIZZLE>.zfill
+        dma.copy.swiz<QWEN35_SWIZZLE>
             lhs.view(tile_rows, QWEN35_TILE_K).from(
                 seg_start + iv_m * QWEN35_WARP_M, iv_k * QWEN35_TILE_K)
             => sA;

@@ -53,8 +53,8 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
 
   parallel block_id by NUM_SMS : block {
     shared event full[MATMUL_STAGES], empty[MATMUL_STAGES];
-    shared f8_e4m3 [MATMUL_STAGES * MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
-    shared f8_e4m3 [MATMUL_STAGES * MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s[MATMUL_STAGES];
+    shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s[MATMUL_STAGES];
     shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
 
     foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
@@ -68,10 +68,10 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
             foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
               stage = iv_k % MATMUL_STAGES;
               wait empty[stage];
-              tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).step(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k)
-                  => lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0);
-              tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k)
-                  => rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0);
+              tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k)
+                  => lhs_load_s[stage];
+              tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k)
+                  => rhs_load_s[stage];
               trigger full[stage];
             }
           }
@@ -86,15 +86,12 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
             foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
               stage = iv_k % MATMUL_STAGES;
               wait full[stage];
-              foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-                ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
-                mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
-                mma.row.row mc, ma, mb;
-              }
+
+              mma.row.row mc, lhs_load_s[stage], rhs_load_s[stage];
+
               mma.scale mc,
                         scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k),
                         scale_rhs.at(block_n, iv_k);
-              mma.commit;
               trigger empty[stage];
             }
             mma.store mc, output_s;

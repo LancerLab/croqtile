@@ -178,8 +178,8 @@ __co__ void blockscale_gemm_e4m3_n48(global f8_e4m3 [M, K] lhs,
     parallel p by 1 : group-4 {
       mc = mma.fill.f16 0.0f;
       foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-        tma.copy.swiz<MATMUL_SWIZ>.zfill lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
-        tma.copy.swiz<MATMUL_SWIZ>.zfill rhs.chunkat(block_n, iv_k) => rhs_load_s;
+        tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+        tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
         foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
           ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
           mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);

@@ -51,17 +51,13 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
     shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
 
     parallel p by 1 : group-4 {
-      // __cpp__(R"(asm volatile("setmaxnreg.dec.sync.aligned.u32 %0;\n" : : "n"(24));\n)");
       mc = mma.fill.f16 0.0f;
       foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-        tma.copy.swiz<MATMUL_SWIZ>.zfill lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+        tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
         tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
 
-        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row mc, ma, mb;
-        }
+        mma.row.row mc, lhs_load_s, rhs_load_s;
+
         mma.scale mc, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k), scale_rhs.at(block_n, iv_k);
       }
       shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
