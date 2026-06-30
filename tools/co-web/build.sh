@@ -133,6 +133,7 @@ em++ \
   "${DEFINES[@]}" \
   -std=c++17 \
   -O2 \
+  -DNDEBUG \
   -s MODULARIZE=1 \
   -s EXPORT_NAME="ChoreoModule" \
   -s ALLOW_MEMORY_GROWTH=1 \

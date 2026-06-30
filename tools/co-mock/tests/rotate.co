@@ -1,24 +1,36 @@
 // RUN: co-mock %s 2>&1 | FileCheck %s
 
 __co__ void rotate_test() {
-  s32[4] a;
-  s32[4] b;
+  s32[4] src1;
+  s32[4] src2;
+  s32[4] dst1;
+  s32[4] dst2;
 
   parallel p by 4 {
-    a.at(p) = 10 + p;
-    b.at(p) = 0;
+    src1.at(p) = (p + 1) * 10;
+    src2.at(p) = (p + 1) * 100;
   }
 
-  f1 = dma.copy.async a => b;
-  wait(f1);
+  // Create two futures
+  f1 = dma.copy.async src1 => dst1;
+  f2 = dma.copy.async src2 => dst2;
 
-  println(b.at(0));
-  println(b.at(1));
-  println(b.at(2));
-  println(b.at(3));
+  // Swap the futures -- f1 now points to src2->dst2, f2 to src1->dst1
+  swap(f1, f2);
+
+  // Wait both
+  wait(f1);
+  wait(f2);
+
+  // After swap+wait, dst1 should have src1 data, dst2 should have src2 data
+  // (swap only swaps future handles, not the actual copy destinations)
+  println(dst1.at(0));
+  println(dst1.at(3));
+  println(dst2.at(0));
+  println(dst2.at(3));
 }
 
 // CHECK: 10
-// CHECK: 11
-// CHECK: 12
-// CHECK: 13
+// CHECK: 40
+// CHECK: 100
+// CHECK: 400

@@ -43,7 +43,7 @@ struct FutureInfo {
 };
 
 struct Value {
-  enum Kind { Scalar, Pointer, Future };
+  enum Kind { Scalar, Pointer, Future, String };
   Kind kind = Scalar;
 
   BaseType base_type = BaseType::S32;
@@ -60,6 +60,7 @@ struct Value {
   std::shared_ptr<Allocation> alloc;
   size_t offset = 0;
   std::shared_ptr<FutureInfo> future_info;
+  std::string str_val;
 
   Value() = default;
 
@@ -73,6 +74,7 @@ struct Value {
   static Value MakeFuture(std::shared_future<void> f,
                           const std::string& src = "",
                           const std::string& dst = "", size_t bytes = 0);
+  static Value MakeString(const std::string& s);
 
   int64_t AsInt() const;
   uint64_t AsUInt() const;

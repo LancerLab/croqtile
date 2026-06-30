@@ -96,6 +96,13 @@ Value Value::MakeFuture(std::shared_future<void> f, const std::string& src,
   return val;
 }
 
+Value Value::MakeString(const std::string& s) {
+  Value val;
+  val.kind = String;
+  val.str_val = s;
+  return val;
+}
+
 int64_t Value::AsInt() const {
   switch (base_type) {
   case BaseType::S8: return (int8_t)scalar.i64;
@@ -163,6 +170,7 @@ bool Value::AsBool() const {
 }
 
 std::string Value::ToString() const {
+  if (kind == String) return str_val;
   std::ostringstream oss;
   if (kind == Future) {
     if (future_info && future_info->handle.valid()) {

@@ -56,6 +56,7 @@ private:
   Value EvalBinaryOp(Opcode op, const Value& lhs, const Value& rhs);
   Value EvalUnaryOp(Opcode op, const Value& operand);
 
+  bool IsKnownBIF(const std::string& name) const;
   Value CallBIF(const std::string& name, const std::vector<Value>& args,
                 const AST::Call& node);
 

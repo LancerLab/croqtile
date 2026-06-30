@@ -10,6 +10,7 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <set>
 #include <thread>
 
 namespace Choreo {
@@ -177,6 +178,11 @@ void MockInterpreter::ExecParallelBy(AST::ParallelBy& n) {
     }
   }
 
+#ifdef __EMSCRIPTEN__
+  for (int64_t i = 0; i < bound; ++i) {
+    ExecParallelByBody(n, i, bound, pv_name, has_sub, sub_names, sub_bounds);
+  }
+#else
   // Shared mutex for serializing print output across threads
   std::mutex pm;
   bool own_mutex = (print_mutex_ == nullptr);
@@ -201,6 +207,7 @@ void MockInterpreter::ExecParallelBy(AST::ParallelBy& n) {
   for (auto& t : threads) t.join();
 
   if (own_mutex) print_mutex_ = nullptr;
+#endif
 }
 
 // -----------------------------------------------------------------------
@@ -409,14 +416,7 @@ void MockInterpreter::ExecCall(AST::Call& n) {
   if (n.arguments)
     for (auto& arg : n.GetArguments()) args.push_back(ExprEval(arg));
 
-  if (n.IsBIF() || func_name == "print" || func_name == "println" ||
-      func_name == "assert" || func_name == "sizeof" || func_name == "min" ||
-      func_name == "max" || func_name == "abs" || func_name == "sqrt" ||
-      func_name == "rsqrt" || func_name == "sin" || func_name == "cos" ||
-      func_name == "tan" || func_name == "exp" || func_name == "log" ||
-      func_name == "floor" || func_name == "ceil" || func_name == "round" ||
-      func_name == "pow" || func_name == "alignup" ||
-      func_name == "aligndown" || func_name == "isfinite") {
+  if (n.IsBIF() || IsKnownBIF(func_name)) {
     CallBIF(func_name, args, n);
     return;
   }
@@ -592,14 +592,23 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
   if (auto lit = dyn_cast<AST::BoolLiteral>(e))
     return Value::MakeBool(lit->value);
 
+  if (auto lit = dyn_cast<AST::StringLiteral>(e))
+    return Value::MakeString(lit->Val());
+
   if (auto id = dyn_cast<AST::Identifier>(e)) {
     if (mem.Exists(id->name)) return mem.Lookup(id->name);
+    Warning(id->LOC(),
+            "mock: undefined variable '" + id->name + "', defaulting to 0.");
     return Value::MakeInt(0);
   }
 
   if (auto da = dyn_cast<AST::DataAccess>(e)) {
     std::string name = da->GetDataName();
-    if (!mem.Exists(name)) return Value::MakeInt(0);
+    if (!mem.Exists(name)) {
+      Warning(da->LOC(),
+              "mock: undefined variable '" + name + "', defaulting to 0.");
+      return Value::MakeInt(0);
+    }
 
     auto& val = mem.Lookup(name);
     if (!da->AccessElement()) return val;
@@ -679,14 +688,7 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
     if (call->arguments)
       for (auto& arg : call->GetArguments()) args.push_back(ExprEval(arg));
 
-    if (call->IsBIF() || func_name == "sizeof" || func_name == "min" ||
-        func_name == "max" || func_name == "abs" || func_name == "sqrt" ||
-        func_name == "rsqrt" || func_name == "sin" || func_name == "cos" ||
-        func_name == "tan" || func_name == "exp" || func_name == "log" ||
-        func_name == "floor" || func_name == "ceil" ||
-        func_name == "round" || func_name == "pow" ||
-        func_name == "alignup" || func_name == "aligndown" ||
-        func_name == "isfinite")
+    if (call->IsBIF() || IsKnownBIF(func_name))
       return CallBIF(func_name, args, *call);
 
     auto it = functions.find(func_name);
@@ -838,6 +840,17 @@ Value MockInterpreter::EvalUnaryOp(Opcode op, const Value& operand) {
   case Op::GetUBound: return operand;
   default: return operand;
   }
+}
+
+bool MockInterpreter::IsKnownBIF(const std::string& name) const {
+  static const std::set<std::string> bifs = {
+      "print",    "println",  "assert",  "sizeof",   "min",
+      "max",      "abs",      "sqrt",    "rsqrt",    "sin",
+      "cos",      "tan",      "exp",     "log",      "floor",
+      "ceil",     "round",    "pow",     "alignup",  "aligndown",
+      "isfinite",
+  };
+  return bifs.count(name) > 0;
 }
 
 // -----------------------------------------------------------------------
