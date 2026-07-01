@@ -115,7 +115,7 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
         cpp->kind == AST::CppSourceCode::Device)
       Warning(cpp->LOC(), "mock: host C++ source code is not interpretable.");
   } else if (auto mma = dyn_cast<AST::MMA>(stmt))
-    Error1(mma->LOC(), "mock: MMA operations are not supported.");
+    ExecMMA(*mma);
   else if (auto rot = dyn_cast<AST::Rotate>(stmt))
     ExecRotate(*rot);
   else if (auto wait = dyn_cast<AST::Wait>(stmt))
@@ -1045,6 +1045,271 @@ Value MockInterpreter::CastValue(const Value& v, BaseType target_type) const {
   }
 
   return result;
+}
+
+static std::string NameFromExpr(const ptr<AST::Expr>& e) {
+  if (!e) return "";
+  if (e->GetForm() == AST::Expr::Reference) {
+    if (auto id = dyn_cast<AST::Identifier>(e->GetR())) return id->name;
+    if (auto da = dyn_cast<AST::DataAccess>(e->GetR()))
+      return da->GetDataName();
+  }
+  return "";
+}
+
+static Value MakeScalarOf(BaseType bt, double v) {
+  Value r;
+  r.kind = Value::Scalar;
+  r.base_type = bt;
+  if (bt == BaseType::F32)
+    r.scalar.f32 = (float)v;
+  else if (bt == BaseType::F64)
+    r.scalar.f64 = v;
+  else
+    r.scalar.i64 = (int64_t)v;
+  return r;
+}
+
+// -----------------------------------------------------------------------
+// MMA -- matrix multiply-accumulate mock using reference GEMM
+// -----------------------------------------------------------------------
+void MockInterpreter::ExecMMA(AST::MMA& n) {
+  auto& op = *n.GetOperation();
+
+  using MMAOp = AST::MMAOperation;
+  if (op.IsKind(MMAOp::Fill)) {
+    auto fill_val = ExprEval(op.FillingValue());
+    std::string name = NameFromExpr(op.FillingTo());
+    if (name.empty()) {
+      Warning(n.LOC(), "mock: mma.fill target is not a simple identifier.");
+      return;
+    }
+
+    auto fill_type = op.FillingType();
+    if (fill_type == BaseType::UNKSCALAR)
+      fill_type = (fill_val.base_type == BaseType::F32 ||
+                   fill_val.base_type == BaseType::F64)
+                      ? fill_val.base_type
+                      : BaseType::F32;
+
+    auto dims_mv = op.FillingArrayDims();
+    std::vector<size_t> shape;
+    if (dims_mv) {
+      for (size_t i = 0; i < dims_mv->Count(); ++i)
+        shape.push_back((size_t)ExprEval(dims_mv->ValueAt(i)).AsInt());
+    }
+    if (shape.empty()) shape = {1, 1}; // placeholder until exec
+
+    auto alloc = mem.Allocate(fill_type, shape, Storage::LOCAL);
+    double fv = fill_val.AsDouble();
+    Value tmp = MakeScalarOf(fill_type, fv);
+    for (size_t i = 0; i < alloc->TotalElements(); ++i) {
+      auto ptr_val = Value::MakePointer(alloc, fill_type);
+      ptr_val.WriteToAlloc(i * alloc->ElemSize(), tmp);
+    }
+
+    mem.Define(name, Value::MakePointer(alloc, fill_type));
+
+  } else if (op.IsLoad()) {
+    auto src_val = ExprEval(op.LoadFrom());
+    if (src_val.kind != Value::Pointer || !src_val.alloc) {
+      Warning(n.LOC(), "mock: mma.load source is not a valid pointer.");
+      return;
+    }
+
+    auto& src_alloc = src_val.alloc;
+    auto alloc =
+        mem.Allocate(src_alloc->elem_type, src_alloc->shape, Storage::LOCAL);
+    size_t bytes = std::min(alloc->TotalBytes(), src_alloc->TotalBytes());
+    std::memcpy(alloc->RawPtr(),
+                (const uint8_t*)src_alloc->RawPtr() + src_val.offset, bytes);
+
+    if (op.IsLoadR()) {
+      std::string dst_name = NameFromExpr(op.LoadTo());
+      if (!dst_name.empty() && mem.Exists(dst_name)) {
+        auto& dst = mem.Lookup(dst_name);
+        if (dst.kind == Value::Pointer && dst.alloc) {
+          size_t copy_bytes =
+              std::min(dst.alloc->TotalBytes(), alloc->TotalBytes());
+          std::memcpy(dst.alloc->RawPtr(), alloc->RawPtr(), copy_bytes);
+        }
+      }
+    } else {
+      std::string dst_name = NameFromExpr(op.LoadTo());
+      if (!dst_name.empty())
+        mem.Define(dst_name, Value::MakePointer(alloc, src_alloc->elem_type));
+    }
+
+  } else if (op.IsKind(MMAOp::Exec)) {
+    auto acc_val = ExprEval(op.ExecOperand(0));
+    auto lhs_val = ExprEval(op.ExecOperand(1));
+    auto rhs_val = ExprEval(op.ExecOperand(2));
+
+    if (acc_val.kind != Value::Pointer || !acc_val.alloc ||
+        lhs_val.kind != Value::Pointer || !lhs_val.alloc ||
+        rhs_val.kind != Value::Pointer || !rhs_val.alloc) {
+      Warning(n.LOC(), "mock: mma.exec operands must be valid pointers.");
+      return;
+    }
+
+    auto method = op.GetMethod();
+    auto& a_shape = lhs_val.alloc->shape;
+    auto& b_shape = rhs_val.alloc->shape;
+
+    if (a_shape.size() < 2 || b_shape.size() < 2) {
+      Warning(n.LOC(), "mock: mma.exec operands must be 2D arrays.");
+      return;
+    }
+
+    int64_t M = 0, N = 0, K = 0;
+    switch (method) {
+    case MMAOp::ROW_COL:
+      M = a_shape[0];
+      K = a_shape[1];
+      N = b_shape[1];
+      break;
+    case MMAOp::ROW_ROW:
+      M = a_shape[0];
+      K = a_shape[1];
+      N = b_shape[0];
+      break;
+    case MMAOp::COL_ROW:
+      M = a_shape[1];
+      K = a_shape[0];
+      N = b_shape[0];
+      break;
+    case MMAOp::COL_COL:
+      M = a_shape[1];
+      K = a_shape[0];
+      N = b_shape[1];
+      break;
+    }
+
+    auto acc_alloc = acc_val.alloc;
+    if (acc_alloc->TotalElements() == 1 && (M > 1 || N > 1)) {
+      double init_val = 0;
+      auto old_ptr = Value::MakePointer(acc_alloc, acc_val.base_type);
+      auto old_elem = old_ptr.ReadFromAlloc(0, acc_alloc->elem_type);
+      init_val = old_elem.AsDouble();
+
+      auto new_alloc = mem.Allocate(acc_alloc->elem_type,
+                                    {(size_t)M, (size_t)N}, Storage::LOCAL);
+      Value fill = MakeScalarOf(new_alloc->elem_type, init_val);
+      for (size_t i = 0; i < new_alloc->TotalElements(); ++i) {
+        auto tmp = Value::MakePointer(new_alloc, new_alloc->elem_type);
+        tmp.WriteToAlloc(i * new_alloc->ElemSize(), fill);
+      }
+
+      acc_alloc = new_alloc;
+      std::string acc_name = NameFromExpr(op.ExecOperand(0));
+      if (!acc_name.empty() && mem.Exists(acc_name))
+        mem.Define(acc_name,
+                   Value::MakePointer(new_alloc, new_alloc->elem_type));
+    }
+
+    // Reference GEMM: D[m,n] += A[...] * B[...]
+    size_t a_elem = lhs_val.alloc->ElemSize();
+    size_t b_elem = rhs_val.alloc->ElemSize();
+    size_t c_elem = acc_alloc->ElemSize();
+    auto a_bt = lhs_val.alloc->elem_type;
+    auto b_bt = rhs_val.alloc->elem_type;
+    auto c_bt = acc_alloc->elem_type;
+
+    for (int64_t m = 0; m < M; ++m) {
+      for (int64_t n = 0; n < N; ++n) {
+        double acc = 0;
+        auto c_ptr = Value::MakePointer(acc_alloc, c_bt);
+        auto c_old = c_ptr.ReadFromAlloc((size_t)(m * N + n) * c_elem, c_bt);
+        acc = c_old.AsDouble();
+
+        for (int64_t k = 0; k < K; ++k) {
+          size_t a_idx = 0, b_idx = 0;
+          switch (method) {
+          case MMAOp::ROW_COL:
+            a_idx = m * K + k;
+            b_idx = k * N + n;
+            break;
+          case MMAOp::ROW_ROW:
+            a_idx = m * K + k;
+            b_idx = n * K + k;
+            break;
+          case MMAOp::COL_ROW:
+            a_idx = k * M + m;
+            b_idx = n * K + k;
+            break;
+          case MMAOp::COL_COL:
+            a_idx = k * M + m;
+            b_idx = k * N + n;
+            break;
+          }
+
+          auto a_ptr = Value::MakePointer(lhs_val.alloc, a_bt);
+          auto a_val =
+              a_ptr.ReadFromAlloc(a_idx * a_elem + lhs_val.offset, a_bt);
+          auto b_ptr = Value::MakePointer(rhs_val.alloc, b_bt);
+          auto b_val =
+              b_ptr.ReadFromAlloc(b_idx * b_elem + rhs_val.offset, b_bt);
+          acc += a_val.AsDouble() * b_val.AsDouble();
+        }
+
+        auto d_ptr = Value::MakePointer(acc_alloc, c_bt);
+        d_ptr.WriteToAlloc((size_t)(m * N + n) * c_elem,
+                           MakeScalarOf(c_bt, acc));
+      }
+    }
+
+  } else if (op.IsKind(MMAOp::Store)) {
+    auto src_val = ExprEval(op.StoreFrom());
+    auto dst_val = ExprEval(op.StoreTo());
+
+    if (src_val.kind != Value::Pointer || !src_val.alloc ||
+        dst_val.kind != Value::Pointer || !dst_val.alloc) {
+      Warning(n.LOC(), "mock: mma.store operands must be valid pointers.");
+      return;
+    }
+
+    auto& src = src_val.alloc;
+    auto& dst = dst_val.alloc;
+
+    if (op.StoreIsTranspose() && src->shape.size() >= 2) {
+      size_t M = src->shape[0], N = src->shape[1];
+      size_t elem = src->ElemSize();
+      auto bt = src->elem_type;
+      for (size_t m = 0; m < M; ++m) {
+        for (size_t n = 0; n < N; ++n) {
+          auto sp = Value::MakePointer(src_val.alloc, bt);
+          auto val = sp.ReadFromAlloc((m * N + n) * elem + src_val.offset, bt);
+          auto dp = Value::MakePointer(dst_val.alloc, bt);
+          dp.WriteToAlloc((n * M + m) * elem + dst_val.offset, val);
+        }
+      }
+    } else {
+      size_t bytes = std::min(src->TotalBytes() - src_val.offset,
+                              dst->TotalBytes() - dst_val.offset);
+      std::memcpy((uint8_t*)dst->RawPtr() + dst_val.offset,
+                  (const uint8_t*)src->RawPtr() + src_val.offset, bytes);
+    }
+
+  } else if (op.IsKind(MMAOp::Scale)) {
+    auto acc_val = ExprEval(op.ScaleAccumulator());
+    auto scale_b_val = ExprEval(op.ScaleB());
+    if (acc_val.kind != Value::Pointer || !acc_val.alloc) return;
+
+    double sb = scale_b_val.AsDouble();
+    auto bt = acc_val.alloc->elem_type;
+    size_t elem = acc_val.alloc->ElemSize();
+    for (size_t i = 0; i < acc_val.alloc->TotalElements(); ++i) {
+      auto ptr = Value::MakePointer(acc_val.alloc, bt);
+      auto v = ptr.ReadFromAlloc(i * elem + acc_val.offset, bt);
+      ptr.WriteToAlloc(i * elem + acc_val.offset,
+                       MakeScalarOf(bt, v.AsDouble() * sb));
+    }
+
+  } else if (op.IsKind(MMAOp::Commit) || op.IsKind(MMAOp::Wait)) {
+    // No-ops for single-threaded mock.
+  } else {
+    Warning(n.LOC(), "mock: unhandled MMA operation kind.");
+  }
 }
 
 } // namespace Mock

@@ -1,0 +1,122 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Test all four MMA exec methods produce the same logical GEMM result.
+// Logical A=[[1,2,3],[4,5,6]] (M=2,K=3)
+// Logical B=[[1,4],[2,5],[3,6]] (K=3,N=2)
+// Expected C = A*B = [[14,32],[32,77]]
+
+__co__ void mma_methods_test() {
+  // --- ROW_COL: A[m*K+k], B[k*N+n] ---
+  s32[2, 3] a_rc;
+  s32[3, 2] b_rc;
+  s32[2, 2] c_rc;
+
+  foreach i in 2
+    foreach j in 3
+      a_rc.at(i, j) = i * 3 + j + 1;
+  // B row-major [K=3,N=2]: B[k,n] = logical B
+  foreach k in 3
+    foreach n in 2
+      b_rc.at(k, n) = k + n * 3 + 1;
+
+  mc1 = mma.fill.s32 0;
+  ma1 = mma.load a_rc;
+  mb1 = mma.load b_rc;
+  mma.row.col mc1, ma1, mb1;
+  mma.store mc1, c_rc;
+
+  println("ROW_COL:");
+  foreach i in 2
+    foreach j in 2
+      println(c_rc.at(i, j));
+
+  // --- ROW_ROW: A[m*K+k], B[n*K+k] ---
+  s32[2, 3] a_rr;
+  s32[2, 3] b_rr;
+  s32[2, 2] c_rr;
+
+  foreach i in 2
+    foreach j in 3
+      a_rr.at(i, j) = i * 3 + j + 1;
+  foreach n in 2
+    foreach k in 3
+      b_rr.at(n, k) = n * 3 + k + 1;
+
+  mc2 = mma.fill.s32 0;
+  ma2 = mma.load a_rr;
+  mb2 = mma.load b_rr;
+  mma.row.row mc2, ma2, mb2;
+  mma.store mc2, c_rr;
+
+  println("ROW_ROW:");
+  foreach i in 2
+    foreach j in 2
+      println(c_rr.at(i, j));
+
+  // --- COL_ROW: A[k*M+m], B[n*K+k] ---
+  s32[3, 2] a_cr;
+  s32[2, 3] b_cr;
+  s32[2, 2] c_cr;
+
+  foreach k in 3
+    foreach m in 2
+      a_cr.at(k, m) = k + m * 3 + 1;
+  foreach n in 2
+    foreach k in 3
+      b_cr.at(n, k) = n * 3 + k + 1;
+
+  mc3 = mma.fill.s32 0;
+  ma3 = mma.load a_cr;
+  mb3 = mma.load b_cr;
+  mma.col.row mc3, ma3, mb3;
+  mma.store mc3, c_cr;
+
+  println("COL_ROW:");
+  foreach i in 2
+    foreach j in 2
+      println(c_cr.at(i, j));
+
+  // --- COL_COL: A[k*M+m], B[k*N+n] ---
+  s32[3, 2] a_cc;
+  s32[3, 2] b_cc;
+  s32[2, 2] c_cc;
+
+  foreach k in 3
+    foreach m in 2
+      a_cc.at(k, m) = k + m * 3 + 1;
+  foreach k in 3
+    foreach n in 2
+      b_cc.at(k, n) = k + n * 3 + 1;
+
+  mc4 = mma.fill.s32 0;
+  ma4 = mma.load a_cc;
+  mb4 = mma.load b_cc;
+  mma.col.col mc4, ma4, mb4;
+  mma.store mc4, c_cc;
+
+  println("COL_COL:");
+  foreach i in 2
+    foreach j in 2
+      println(c_cc.at(i, j));
+}
+
+// CHECK: ROW_COL:
+// CHECK: 14
+// CHECK: 32
+// CHECK: 32
+// CHECK: 77
+// CHECK: ROW_ROW:
+// CHECK: 14
+// CHECK: 32
+// CHECK: 32
+// CHECK: 77
+// CHECK: COL_ROW:
+// CHECK: 14
+// CHECK: 32
+// CHECK: 32
+// CHECK: 77
+// CHECK: COL_COL:
+// CHECK: 14
+// CHECK: 32
+// CHECK: 32
+// CHECK: 77
