@@ -124,6 +124,10 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
     ExecInThreads(*itb);
   else if (auto ab = dyn_cast<AST::ApplyBlock>(stmt))
     ExecApply(*ab);
+  else if (auto fr = dyn_cast<AST::FragReduce>(stmt))
+    ExecFragReduce(*fr);
+  else if (auto ft = dyn_cast<AST::FragTransfer>(stmt))
+    ExecFragTransfer(*ft);
   else if (isa<AST::NamedTypeDecl>(stmt)) {
   } // type alias, skip
   else {
@@ -832,22 +836,33 @@ Value MockInterpreter::EvalUnaryOp(Opcode op, const Value& operand) {
   }
 }
 
+static std::string StripBIFPrefix(const std::string& name) {
+  if (name.size() > 2 && name[0] == '_' && name[1] == '_' &&
+      name != "__co__" && name != "__cpp__")
+    return name.substr(2);
+  return name;
+}
+
 bool MockInterpreter::IsKnownBIF(const std::string& name) const {
   static const std::set<std::string> bifs = {
       "print",   "println",   "assert",   "sizeof", "min",   "max",
       "abs",     "sqrt",      "rsqrt",    "sin",    "cos",   "tan",
       "exp",     "log",       "floor",    "ceil",   "round", "pow",
-      "alignup", "aligndown", "isfinite",
+      "alignup", "aligndown", "isfinite", "sign",   "fabs",  "fmaf",
+      "exp2f",   "expm1",     "frcp_rn",  "gelu",   "sigmoid",
+      "sinh",    "cosh",      "softplus", "log1p",  "acos",  "asin",
+      "atan",    "atan2",     "tanh",
   };
-  return bifs.count(name) > 0;
+  return bifs.count(name) > 0 || bifs.count(StripBIFPrefix(name)) > 0;
 }
 
 // -----------------------------------------------------------------------
 // Built-in function calls
 // -----------------------------------------------------------------------
-Value MockInterpreter::CallBIF(const std::string& name,
+Value MockInterpreter::CallBIF(const std::string& raw_name,
                                const std::vector<Value>& args,
                                const AST::Call& node) {
+  auto name = StripBIFPrefix(raw_name);
   if (name == "print" || name == "println") {
     std::unique_lock<std::mutex> lock;
     if (print_mutex_) lock = std::unique_lock<std::mutex>(*print_mutex_);
@@ -902,9 +917,13 @@ Value MockInterpreter::CallBIF(const std::string& name,
   {
     using MathFn = double (*)(double);
     static const std::map<std::string, MathFn> math_fns = {
-        {"sqrt", std::sqrt},   {"sin", std::sin},   {"cos", std::cos},
-        {"tan", std::tan},     {"exp", std::exp},   {"log", std::log},
-        {"floor", std::floor}, {"ceil", std::ceil}, {"round", std::round},
+        {"sqrt", std::sqrt},   {"sin", std::sin},     {"cos", std::cos},
+        {"tan", std::tan},     {"exp", std::exp},     {"log", std::log},
+        {"floor", std::floor}, {"ceil", std::ceil},   {"round", std::round},
+        {"sinh", std::sinh},   {"cosh", std::cosh},   {"tanh", std::tanh},
+        {"acos", std::acos},   {"asin", std::asin},   {"atan", std::atan},
+        {"log1p", std::log1p}, {"expm1", std::expm1}, {"exp2f", ::exp2},
+        {"fabs", std::fabs},   {"cbrt", std::cbrt},
     };
     auto it = math_fns.find(name);
     if (it != math_fns.end()) {
@@ -912,17 +931,56 @@ Value MockInterpreter::CallBIF(const std::string& name,
         return Value::MakeDouble(it->second(args[0].AsDouble()));
       return Value::MakeDouble(0);
     }
-    if (name == "rsqrt") {
+    if (name == "rsqrt" || name == "frcp_rn") {
+      if (!args.empty()) {
+        double v = args[0].AsDouble();
+        return Value::MakeDouble(name == "rsqrt" ? 1.0 / std::sqrt(v)
+                                                 : 1.0 / v);
+      }
+      return Value::MakeDouble(0);
+    }
+    if (name == "sign") {
+      if (!args.empty()) {
+        double v = args[0].AsDouble();
+        return Value::MakeDouble(v > 0 ? 1.0 : (v < 0 ? -1.0 : 0.0));
+      }
+      return Value::MakeDouble(0);
+    }
+    if (name == "gelu") {
+      if (!args.empty()) {
+        double x = args[0].AsDouble();
+        return Value::MakeDouble(
+            0.5 * x * (1.0 + std::tanh(std::sqrt(2.0 / M_PI) *
+                                        (x + 0.044715 * x * x * x))));
+      }
+      return Value::MakeDouble(0);
+    }
+    if (name == "sigmoid") {
       if (!args.empty())
-        return Value::MakeDouble(1.0 / std::sqrt(args[0].AsDouble()));
+        return Value::MakeDouble(1.0 / (1.0 + std::exp(-args[0].AsDouble())));
+      return Value::MakeDouble(0);
+    }
+    if (name == "softplus") {
+      if (!args.empty())
+        return Value::MakeDouble(std::log1p(std::exp(args[0].AsDouble())));
       return Value::MakeDouble(0);
     }
   }
 
-  if (name == "pow") {
-    if (args.size() >= 2)
-      return Value::MakeDouble(
-          std::pow(args[0].AsDouble(), args[1].AsDouble()));
+  if (name == "pow" || name == "atan2") {
+    if (args.size() >= 2) {
+      double a = args[0].AsDouble(), b = args[1].AsDouble();
+      return Value::MakeDouble(name == "pow" ? std::pow(a, b)
+                                             : std::atan2(a, b));
+    }
+    return Value::MakeDouble(0);
+  }
+
+  if (name == "fmaf") {
+    if (args.size() >= 3)
+      return Value::MakeDouble(std::fma(args[0].AsDouble(),
+                                        args[1].AsDouble(),
+                                        args[2].AsDouble()));
     return Value::MakeDouble(0);
   }
 
@@ -1354,6 +1412,99 @@ void MockInterpreter::ExecApply(AST::ApplyBlock& n) {
       if (cf.kind != ControlFlow::None) break;
     }
   }
+}
+
+// -----------------------------------------------------------------------
+// FragReduce -- row/column reduction of a 2D array into a 1D array
+// reduce_sum(dst, src, dim)  /  reduce_max(dst, src, dim)
+// -----------------------------------------------------------------------
+void MockInterpreter::ExecFragReduce(AST::FragReduce& n) {
+  auto src_name = n.SrcName();
+  auto dst_name = n.DstName();
+
+  if (!mem.Exists(src_name) || !mem.Exists(dst_name)) {
+    Warning(n.LOC(), "mock: reduce operand not found.");
+    return;
+  }
+
+  auto& src_val = mem.Lookup(src_name);
+  auto& dst_val = mem.Lookup(dst_name);
+
+  if (src_val.kind != Value::Pointer || !src_val.alloc ||
+      dst_val.kind != Value::Pointer || !dst_val.alloc) {
+    Warning(n.LOC(), "mock: reduce operands must be arrays.");
+    return;
+  }
+
+  auto& s = *src_val.alloc;
+  auto& d = *dst_val.alloc;
+  if (s.shape.size() < 2) {
+    Warning(n.LOC(), "mock: reduce source must be at least 2D.");
+    return;
+  }
+
+  size_t rows = s.shape[0], cols = s.shape[1];
+  size_t se = s.ElemSize(), de = d.ElemSize();
+  auto sbt = s.elem_type, dbt = d.elem_type;
+
+  auto read_src = [&](size_t idx) {
+    auto p = Value::MakePointer(src_val.alloc, sbt);
+    return p.ReadFromAlloc(idx * se + src_val.offset, sbt);
+  };
+  auto write_dst = [&](size_t idx, double v) {
+    auto p = Value::MakePointer(dst_val.alloc, dbt);
+    p.WriteToAlloc(idx * de + dst_val.offset, MakeScalarOf(dbt, v));
+  };
+
+  auto reduce_range = [&](size_t out_idx, size_t start, size_t stride,
+                          size_t count) {
+    auto first = read_src(start);
+    double best = first.AsDouble();
+    double sum = best;
+    for (size_t k = 1; k < count; ++k) {
+      double v = read_src(start + k * stride).AsDouble();
+      sum += v;
+      if (v > best) best = v;
+    }
+    write_dst(out_idx,
+              n.op == AST::FragReduceOp::SUM ? sum : best);
+  };
+
+  if (n.dim == 1) {
+    for (size_t i = 0; i < rows; ++i)
+      reduce_range(i, i * cols, 1, cols);
+  } else if (n.dim == 0) {
+    for (size_t j = 0; j < cols; ++j)
+      reduce_range(j, j, cols, rows);
+  } else {
+    Warning(n.LOC(), "mock: unsupported reduce dim=" + std::to_string(n.dim));
+  }
+}
+
+// -----------------------------------------------------------------------
+// FragTransfer -- copy between arrays
+// copy(dst, src)
+// -----------------------------------------------------------------------
+void MockInterpreter::ExecFragTransfer(AST::FragTransfer& n) {
+  auto dst_name = n.DstName();
+  auto src_name = n.SrcName();
+
+  if (!mem.Exists(src_name) || !mem.Exists(dst_name)) {
+    Warning(n.LOC(), "mock: copy operand not found.");
+    return;
+  }
+
+  auto& src_val = mem.Lookup(src_name);
+  auto& dst_val = mem.Lookup(dst_name);
+
+  if (src_val.kind != Value::Pointer || !src_val.alloc ||
+      dst_val.kind != Value::Pointer || !dst_val.alloc) {
+    Warning(n.LOC(), "mock: copy operands must be arrays.");
+    return;
+  }
+
+  size_t bytes = std::min(src_val.alloc->TotalBytes(), dst_val.alloc->TotalBytes());
+  std::memcpy(dst_val.alloc->RawPtr(), src_val.alloc->RawPtr(), bytes);
 }
 
 } // namespace Mock

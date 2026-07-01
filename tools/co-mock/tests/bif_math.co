@@ -1,0 +1,15 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+// Test BIF name matching with __ prefix.
+
+__co__ void bif_math_test() {
+  s32 a = 3;
+  s32 b = 7;
+
+  s32 mn = __min(a, b);
+  s32 mx = __max(a, b);
+  println("min =", mn);
+  println("max =", mx);
+}
+
+// CHECK: min = 3
+// CHECK: max = 7

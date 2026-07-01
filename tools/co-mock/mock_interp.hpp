@@ -54,6 +54,8 @@ private:
   void ExecInThreads(AST::InThreadsBlock& n);
   void ExecMMA(AST::MMA& n);
   void ExecApply(AST::ApplyBlock& n);
+  void ExecFragReduce(AST::FragReduce& n);
+  void ExecFragTransfer(AST::FragTransfer& n);
 
   Value EvalBinaryOp(Opcode op, const Value& lhs, const Value& rhs);
   Value EvalUnaryOp(Opcode op, const Value& operand);
