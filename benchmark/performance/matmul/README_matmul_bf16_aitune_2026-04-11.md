@@ -10,12 +10,11 @@ Historical experiment results on the ai-tune branch showed two verified winners 
 |--------|------------------------------|----------------------------------|------------------|
 | Main shipped winner (`matmul_bf16_aitune_2026-04-07_iter024.co`) | 351.000 | 335.792 | 1p1c, WARP_N=160, STAGES=3 |
 | `matmul_bf16_aitune_2026-04-11_iter015.co` | 352.171 | 347.669 | Flattened staged lhs/rhs buffers with explicit stage subspan views |
-| `matmul_bf16_aitune_2026-04-11_iter027.co` | 352.504 | 347.000 | Added a 16-column pad to the shared-output epilogue layout |
 
 ## Ship Status
 
-- These two kernels are the only verified winners from this branch that beat the current main shipment once revalidated on the current branch toolchain.
-- They depend on the compiler-backed `--stmatrix` BF16 shared-output store path developed on `ai-tune/2026-04-11/matmul_bf16`.
+- iter015 is the only verified winner from this branch that beats the current main shipment once revalidated on the current branch toolchain.
+- It depends on the compiler-backed `--stmatrix` BF16 shared-output store path developed on `ai-tune/2026-04-11/matmul_bf16`.
 - The branch-tip reruns show an absolute performance regression across the family versus the historical experiment logs, so this summary should be treated as a local wrap-up and not as a clean push-ready shipment.
 - Nothing from this summary was pushed to any remote.
 
@@ -30,17 +29,6 @@ Historical experiment results on the ai-tune branch showed two verified winners 
 
 CUDA_VISIBLE_DEVICES=0 CHOREO_TIMING_WARMUP=5 CHOREO_TIMING_REPEAT=50 \
   bash build/agent_tmp/matmul_bf16_aitune_2026-04-11_iter015.cute.result --execute
-```
-
-### `matmul_bf16_aitune_2026-04-11_iter027.co`
-
-```bash
-./choreo -gs -t cute -arch=sm_90a --stmatrix \
-  benchmark/performance/matmul_bf16/matmul_bf16_aitune_2026-04-11_iter027.co \
-  -o build/agent_tmp/matmul_bf16_aitune_2026-04-11_iter027.cute.result
-
-CUDA_VISIBLE_DEVICES=0 CHOREO_TIMING_WARMUP=5 CHOREO_TIMING_REPEAT=50 \
-  bash build/agent_tmp/matmul_bf16_aitune_2026-04-11_iter027.cute.result --execute
 ```
 
 ## Environment Variables
@@ -58,9 +46,9 @@ CUDA_VISIBLE_DEVICES=0 CHOREO_TIMING_WARMUP=5 CHOREO_TIMING_REPEAT=50 \
 
 This was the first verified winner above the existing main shipment in the historical experiment logs. It kept the 1p1c, WARP_N=160, STAGES=3 structure but flattened the staged lhs/rhs shared-memory tensors and accessed them through explicit stage subspan views. The change preserved the new compiler-backed stmatrix epilogue and lifted throughput while keeping the same basic occupancy regime. On the current branch tip it is also the faster of the two prepared ship-form kernels.
 
-### `matmul_bf16_aitune_2026-04-11_iter027.co`
+### `matmul_bf16_aitune_2026-04-11_iter027.co` (REMOVED)
 
-This was the best verified kernel from the historical experiment branch. Source-correlated profiling showed the dominant residual issue had moved into the epilogue shared-store path, so the winning follow-up changed only the shared-output row stride by padding the output tile with 16 extra columns. That small layout perturbation gave the best measured result during the experiment, although the branch-tip rerun dropped slightly below iter015.
+This kernel used OUTPUT_PAD=16 to add padding to the shared epilogue buffer for bank-conflict avoidance, combined with TMA S2G for the epilogue store. However, TMA hardware reads shared memory contiguously and cannot skip padding between rows, making this combination fundamentally incorrect. The kernel has been removed.
 
 ## Rejected Follow-Ups
 
