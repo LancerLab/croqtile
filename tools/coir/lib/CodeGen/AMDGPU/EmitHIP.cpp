@@ -61,6 +61,19 @@ private:
   int64_t groupThreadScale = 0;
   llvm::DenseSet<mlir::Value> dmaTokens;
 
+  struct DescInfo {
+    unsigned idx;
+    coir::TensorType srcType;
+    coir::TensorType dstType;
+    DMAKind kind;
+    bool isTMA;
+    bool isLoad;
+    Value constDescResult;
+  };
+  llvm::SmallVector<DescInfo> descInfos;
+  DenseMap<Value, unsigned> descValueToIndex;
+  DenseMap<Value, SmallVector<Value, 4>> descRuntimeOffsets;
+
   std::string getIndent() { return std::string(indent * 2, ' '); }
   void incIndent() { indent++; }
   void decIndent() { if (indent > 0) indent--; }
@@ -150,18 +163,147 @@ private:
 
   int64_t getTensorBytes(coir::TensorType tty) {
     int64_t n = 1;
-    for (auto d : tty.getShape()) n *= d;
+    for (auto d : tty.getShape()) {
+      if (mlir::ShapedType::isDynamic(d))
+        return -1;
+      n *= d;
+    }
     Type eTy = tty.getElementType();
     int64_t elemSize = 4;
-    if (eTy.isF16() || eTy.isInteger(16)) elemSize = 2;
+    if (eTy.isF16() || eTy.isBF16() || eTy.isInteger(16)) elemSize = 2;
     else if (eTy.isF64() || eTy.isInteger(64)) elemSize = 8;
     else if (eTy.isInteger(8)) elemSize = 1;
     return n * elemSize;
   }
 
+  void prescanDescriptors(KernelOp kernel) {
+    descInfos.clear();
+    descValueToIndex.clear();
+    descRuntimeOffsets.clear();
+
+    kernel.getBody().walk([&](DMAConstDescOp op) {
+      auto srcType = dyn_cast<coir::TensorType>(op.getSource().getType());
+      auto dstType = dyn_cast<coir::TensorType>(op.getDest().getType());
+      if (!srcType || !dstType) return;
+
+      int32_t srcMS = srcType.getMemorySpace();
+      int32_t dstMS = dstType.getMemorySpace();
+      bool isLoad = (srcMS <= 0) && (dstMS == 1);
+
+      unsigned idx = descInfos.size();
+      descInfos.push_back(
+          {idx, srcType, dstType, op.getKind(), op.getTma(), isLoad,
+           op.getOut()});
+      descValueToIndex[op.getOut()] = idx;
+    });
+  }
+
+  void emitDMAConstDesc(DMAConstDescOp op) {
+    auto it = descValueToIndex.find(op.getOut());
+    if (it == descValueToIndex.end()) return;
+    valueNames[op.getOut()] = "__desc_" + std::to_string(it->second);
+  }
+
+  void emitDMAPrefetch(DMADescPrefetchOp op) {
+    auto it = descValueToIndex.find(op.getIn());
+    if (it == descValueToIndex.end()) {
+      valueNames[op.getOut()] = "/* prefetch unknown */";
+      return;
+    }
+    unsigned descIdx = it->second;
+    descValueToIndex[op.getOut()] = descIdx;
+    valueNames[op.getOut()] = "__desc_" + std::to_string(descIdx);
+  }
+
+  void emitDMARuntimeDesc(DMADescRuntimeOp op) {
+    auto it = descValueToIndex.find(op.getIn());
+    if (it == descValueToIndex.end()) {
+      valueNames[op.getOut()] = "/* rt_desc unknown */";
+      return;
+    }
+    unsigned descIdx = it->second;
+    descValueToIndex[op.getOut()] = descIdx;
+    valueNames[op.getOut()] = "__desc_" + std::to_string(descIdx);
+    SmallVector<Value, 4> offs(op.getOffsets().begin(), op.getOffsets().end());
+    descRuntimeOffsets[op.getOut()] = std::move(offs);
+  }
+
   void emitDMAInvoke(DMAInvokeOp op) {
     dmaTokens.insert(op.getDone());
+
+    Value descVal = op.getDesc();
+    auto it = descValueToIndex.find(descVal);
+    if (it == descValueToIndex.end()) {
+      os << getIndent() << "// DMA invoke (no descriptor info)\n";
+      os << getIndent() << "__syncthreads();\n";
+      return;
+    }
+
+    unsigned descIdx = it->second;
+    auto &desc = descInfos[descIdx];
+    auto constOp = desc.constDescResult.getDefiningOp<DMAConstDescOp>();
+    if (!constOp) {
+      os << getIndent() << "__syncthreads();\n";
+      return;
+    }
+
+    Value srcVal = constOp.getSource();
+    Value dstVal = constOp.getDest();
+
+    // Handle runtime offsets: slice into the global tensor
+    SmallVector<Value, 4> offsets;
+    auto offsIt = descRuntimeOffsets.find(descVal);
+    if (offsIt != descRuntimeOffsets.end())
+      offsets = offsIt->second;
+
+    if (!offsets.empty()) {
+      Value globalVal = desc.isLoad ? srcVal : dstVal;
+      Value localVal = desc.isLoad ? dstVal : srcVal;
+      auto localTy = dyn_cast<coir::TensorType>(localVal.getType());
+      auto globalTy = dyn_cast<coir::TensorType>(globalVal.getType());
+      if (localTy && globalTy) {
+        int64_t tileElems = 1;
+        for (auto d : localTy.getShape()) tileElems *= d;
+        std::string elemTy = emitElementType(globalTy.getElementType());
+        std::string ptrName = getName(globalVal);
+        std::string offExpr = getName(offsets[0]);
+        if (tileElems > 1)
+          offExpr += " * " + std::to_string(tileElems);
+        unsigned id = nextId++;
+        std::string slicedPtr = "__slice_ptr_" + std::to_string(id);
+        os << getIndent() << elemTy << "* " << slicedPtr << " = ("
+           << elemTy << "*)" << ptrName << " + " << offExpr << ";\n";
+
+        // Register sliced pointer as name for the global val in this copy
+        std::string origName = getName(globalVal);
+        if (desc.isLoad)
+          valueNames[srcVal] = slicedPtr;
+        else
+          valueNames[dstVal] = slicedPtr;
+      }
+    }
+
+    // Emit the actual copy based on descriptor kind
+    switch (desc.kind) {
+    case DMAKind::Pad:
+      emitCopyWithPad(srcVal, dstVal, std::nullopt, std::nullopt, std::nullopt);
+      break;
+    case DMAKind::Transpose:
+      emitCopyWithTranspose(srcVal, dstVal, std::nullopt);
+      break;
+    default:
+      emitCooperativeCopy(srcVal, dstVal);
+      break;
+    }
     os << getIndent() << "__syncthreads();\n";
+
+    // Restore original name if we overwrote it
+    if (!offsets.empty()) {
+      if (desc.isLoad)
+        valueNames.erase(srcVal);
+      else
+        valueNames.erase(dstVal);
+    }
   }
 
   struct LaunchDims {
@@ -222,6 +364,7 @@ private:
     hasGroupLevel = false;
     groupThreadScale = 0;
     dmaTokens.clear();
+    prescanDescriptors(kernel);
 
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
@@ -275,6 +418,28 @@ private:
     os << "}\n\n";
   }
 
+  std::string getDynShmemExpr(KernelOp kernel) {
+    std::string expr;
+    kernel.getBody().walk([&](coir::TensorAllocOp alloc) {
+      if (!expr.empty()) return;
+      auto tty = mlir::cast<coir::TensorType>(alloc.getResult().getType());
+      if (tty.getMemorySpace() != 1) return;
+      if (!tty.hasDynamicShape()) return;
+      llvm::raw_string_ostream ss(expr);
+      for (unsigned d = 0; d < tty.getRank(); ++d) {
+        if (d > 0) ss << " * ";
+        auto dim = tty.getShape()[d];
+        if (mlir::ShapedType::isDynamic(dim))
+          ss << "1";
+        else
+          ss << dim;
+      }
+      int64_t elemBits = tty.getElementType().getIntOrFloatBitWidth();
+      ss << " * " << (elemBits / 8);
+    });
+    return expr;
+  }
+
   void emitHostWrapper(KernelOp kernel) {
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
@@ -296,17 +461,29 @@ private:
         std::string eType = emitElementType(tty.getElementType());
         int64_t bytes = getTensorBytes(tty);
         os << "  " << eType << "* p" << i << "__device = nullptr;\n";
-        os << "  (void)hipMalloc(&p" << i << "__device, " << bytes
-           << "ULL);\n";
-        os << "  (void)hipMemcpy(p" << i << "__device, p" << i << ".data(), "
-           << bytes << "ULL, hipMemcpyHostToDevice);\n";
+        if (bytes < 0) {
+          os << "  (void)hipMalloc(&p" << i << "__device, p" << i
+             << ".size() * sizeof(" << eType << "));\n";
+          os << "  (void)hipMemcpy(p" << i << "__device, p" << i
+             << ".data(), p" << i << ".size() * sizeof(" << eType
+             << "), hipMemcpyHostToDevice);\n";
+        } else {
+          os << "  (void)hipMalloc(&p" << i << "__device, " << bytes
+             << "ULL);\n";
+          os << "  (void)hipMemcpy(p" << i << "__device, p" << i
+             << ".data(), " << bytes << "ULL, hipMemcpyHostToDevice);\n";
+        }
       }
 
       auto dims = getLaunchDims(kernel);
+      auto dynShmem = getDynShmemExpr(kernel);
       emitEntryAssertions(kernel);
 
       os << "  " << devName << "<<<" << dims.gridStr() << ", "
-         << dims.blockStr() << ">>>(";
+         << dims.blockStr();
+      if (!dynShmem.empty())
+        os << ", " << dynShmem;
+      os << ">>>(";
       for (unsigned i = 0; i < numInputs; ++i) {
         if (i > 0) os << ", ";
         os << "p" << i << "__device";
@@ -338,9 +515,18 @@ private:
       std::string inputEType = emitElementType(tty.getElementType());
       int64_t bytes = getTensorBytes(tty);
       os << "  " << inputEType << "* p" << i << "__device = nullptr;\n";
-      os << "  (void)hipMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
-      os << "  (void)hipMemcpy(p" << i << "__device, p" << i << ".data(), "
-         << bytes << "ULL, hipMemcpyHostToDevice);\n";
+      if (bytes < 0) {
+        os << "  (void)hipMalloc(&p" << i << "__device, p" << i
+           << ".size() * sizeof(" << inputEType << "));\n";
+        os << "  (void)hipMemcpy(p" << i << "__device, p" << i
+           << ".data(), p" << i << ".size() * sizeof(" << inputEType
+           << "), hipMemcpyHostToDevice);\n";
+      } else {
+        os << "  (void)hipMalloc(&p" << i << "__device, " << bytes
+           << "ULL);\n";
+        os << "  (void)hipMemcpy(p" << i << "__device, p" << i << ".data(), "
+           << bytes << "ULL, hipMemcpyHostToDevice);\n";
+      }
     }
 
     int64_t resBytes = getTensorBytes(resTy);
@@ -372,10 +558,14 @@ private:
     os << "  (void)hipMalloc(&__result__device, " << resBytes << "ULL);\n";
 
     auto dims = getLaunchDims(kernel);
+    auto dynShmem = getDynShmemExpr(kernel);
     emitEntryAssertions(kernel);
 
     os << "  " << devName << "<<<" << dims.gridStr() << ", "
-       << dims.blockStr() << ">>>(";
+       << dims.blockStr();
+    if (!dynShmem.empty())
+      os << ", " << dynShmem;
+    os << ">>>(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os << ", ";
       os << "p" << i << "__device";
@@ -406,8 +596,13 @@ private:
       os << getIndent() << "// ERROR: MMA not supported on HIP target\n";
     else if (auto dmaInv = dyn_cast<DMAInvokeOp>(op))
       emitDMAInvoke(dmaInv);
-    else if (isa<DMAConstDescOp>(op) || isa<DMADescPrefetchOp>(op) ||
-             isa<DMADescRuntimeOp>(op) || isa<DMACheckOp>(op))
+    else if (auto dmaConst = dyn_cast<DMAConstDescOp>(op))
+      emitDMAConstDesc(dmaConst);
+    else if (auto dmaPrefetch = dyn_cast<DMADescPrefetchOp>(op))
+      emitDMAPrefetch(dmaPrefetch);
+    else if (auto dmaRt = dyn_cast<DMADescRuntimeOp>(op))
+      emitDMARuntimeDesc(dmaRt);
+    else if (isa<DMACheckOp>(op))
       (void)op;
     else if (auto dmaCopy = dyn_cast<DmaCopyOp>(op))
       emitDmaCopy(dmaCopy);
@@ -969,9 +1164,17 @@ private:
 
     auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
     int32_t ms = tensorTy.getMemorySpace();
-    std::string qualifier = ms == 1 ? "__shared__ " : "";
     std::string name = getName(op.getResult());
 
+    if (tensorTy.hasDynamicShape() && ms == 1 /*shared*/) {
+      std::string eType = emitElementType(tensorTy.getElementType());
+      os << getIndent() << "extern __shared__ unsigned char __dyn_smem[];\n";
+      os << getIndent() << eType << "* " << name
+         << " = (" << eType << "*)__dyn_smem;\n";
+      return;
+    }
+
+    std::string qualifier = ms == 1 ? "__shared__ " : "";
     int64_t totalElems = 1;
     for (auto d : tensorTy.getShape())
       totalElems *= d;
