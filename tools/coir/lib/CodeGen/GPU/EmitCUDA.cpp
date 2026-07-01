@@ -1349,13 +1349,26 @@ private:
                                     KernelOp kernel = nullptr) {
     int32_t ms = origType.getMemorySpace();
     std::string shapeName = "__shape" + suffix;
+    std::string strideName = "__stride" + suffix;
     std::string layoutName = "__layout" + suffix;
     std::string tensorName = "__tensor" + suffix;
 
+    // Compute row-major strides for the tile shape.
+    llvm::SmallVector<int64_t> strides(shape.size());
+    {
+      int64_t s = 1;
+      for (int i = (int)shape.size() - 1; i >= 0; --i) {
+        strides[i] = s;
+        s *= shape[i];
+      }
+    }
+
     llvm::SmallVector<int64_t> shapeVec(shape.begin(), shape.end());
     emitCuteMakeShape(shapeName, shapeVec, kernel);
+    emitCuteMakeStride(strideName, strides);
     os() << getIndent() << "auto " << layoutName
-       << " = cute::make_layout(" << shapeName << ");\n";
+       << " = cute::make_layout(" << shapeName << ", " << strideName
+       << ");\n";
 
     std::string elemTy = emitElementType(origType.getElementType());
     os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
