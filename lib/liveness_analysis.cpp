@@ -1413,10 +1413,25 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
 bool LivenessAnalyzer::Visit(AST::MMA& n) {
   TraceEachVisit(n);
   stmt_linfo[current_stmt].buffer_related = true;
-  // TODO: async MMA
-  // TODO: handel swizzle, scale; use values after typeinfer.
-  // TODO: handle fragment liveness (def and use). Only buffer is considered
-  // now.
+  auto op = n.GetOperation();
+  switch (op->Tag()) {
+  case AST::MMAOperation::Scale: {
+    AddUse(current_stmt, GetAllSymbolicOperands(op->ScaleA().get()));
+    AddUse(current_stmt, GetAllSymbolicOperands(op->ScaleB().get()));
+  } break;
+  case AST::MMAOperation::Exec: {
+    AddUse(current_stmt, GetAllSymbolicOperands(op->ExecOperand(1).get()));
+    AddUse(current_stmt, GetAllSymbolicOperands(op->ExecOperand(2).get()));
+  } break;
+  case AST::MMAOperation::Store: {
+    AddUse(current_stmt, GetAllSymbolicOperands(op->StoreTo().get()));
+  } break;
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadR: {
+    AddUse(current_stmt, GetAllSymbolicOperands(op->LoadFrom().get()));
+  } break;
+  default: break;
+  }
   return true;
 }
 
