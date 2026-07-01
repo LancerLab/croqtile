@@ -159,10 +159,11 @@ def KernelOp : CoIR_Op<"kernel", [
   let hasCustomAssemblyFormat = 1;
 }
 
-def KernelReturnOp : CoIR_Op<"return", [Terminator, HasParent<"KernelOp">]> {
+def KernelReturnOp : CoIR_Op<"return", []> {
   let summary = "Return from a kernel";
   let arguments = (ins Variadic<AnyType>:$operands);
   let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
+  let hasVerifier = 1;
 }
 
 def ParallelOp : CoIR_Op<"parallel", [SingleBlock, NoTerminator]> {

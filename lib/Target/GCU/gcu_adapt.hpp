@@ -811,14 +811,15 @@ public:
       bool has_dst_tile = isa<AST::ChunkAt>(n.to) &&
                           cast<AST::ChunkAt>(n.to)->HasTilingOperation();
       if (n.operation == ".pad" && has_src_tile)
-        Error1(n.LOC(), "On " + cur_arch +
-                            ", combined slice+pad DMA is not supported.");
+        Error1(n.LOC(),
+               "On " + cur_arch + ", combined slice+pad DMA is not supported.");
       if (n.operation == ".transp" && has_src_tile && !has_dst_tile)
         Error1(n.LOC(), "On " + cur_arch +
                             ", combined slice+transpose DMA is not supported.");
       if (n.operation == ".transp" && !has_src_tile && has_dst_tile)
-        Error1(n.LOC(), "On " + cur_arch +
-                            ", combined transpose+deslice DMA is not supported.");
+        Error1(n.LOC(),
+               "On " + cur_arch +
+                   ", combined transpose+deslice DMA is not supported.");
     }
 
     // Check DMA first.

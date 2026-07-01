@@ -287,10 +287,9 @@ public:
 
     // DMA size validation: total transfer <= 4GB
     if (isa<AST::ChunkAt>(n.to)) {
-      auto t_sty = GetSpannedType(GetSymbolType(
-          cast<AST::ChunkAt>(n.to)->RefSymbol()));
-      if (t_sty && !t_sty->RuntimeShaped() &&
-          t_sty->ByteSize() >= (1ULL << 32))
+      auto t_sty =
+          GetSpannedType(GetSymbolType(cast<AST::ChunkAt>(n.to)->RefSymbol()));
+      if (t_sty && !t_sty->RuntimeShaped() && t_sty->ByteSize() >= (1ULL << 32))
         Error1(n.LOC(), "On " + cur_arch +
                             ", the size of data transferred by DMA cannot "
                             "exceed 4GB.");

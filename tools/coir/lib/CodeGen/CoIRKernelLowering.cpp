@@ -122,10 +122,8 @@ void CoIRKernelLoweringBase::convertOp(OpBuilder &builder, Location loc,
   if (convertTargetOp(builder, loc, op, ctx))
     return;
 
-  if (isa<KernelReturnOp>(op)) {
-    builder.create<mgpu::ReturnOp>(loc);
+  if (isa<KernelReturnOp>(op))
     return;
-  }
   if (auto alloc = dyn_cast<TensorAllocOp>(op)) {
     convertAlloc(builder, loc, alloc, ctx);
     return;
@@ -556,6 +554,11 @@ void CoIRKernelLoweringBase::convertForeach(OpBuilder &builder, Location loc,
                  : fe.getUpperBound();
   Value step = builder.create<arith::ConstantIndexOp>(loc, 1);
 
+  unsigned yieldCount = 0;
+  for (auto &op : body.front().getOperations())
+    if (auto yield = dyn_cast<YieldOp>(op))
+      yieldCount = yield.getNumOperands();
+
   SmallVector<Value> initVals;
   SmallVector<unsigned> asyncUndefIndices;
   for (unsigned i = 0; i < fe.getIterArgs().size(); ++i) {
@@ -568,7 +571,9 @@ void CoIRKernelLoweringBase::convertForeach(OpBuilder &builder, Location loc,
     }
   }
 
-  if (!asyncUndefIndices.empty()) {
+  bool bareYield = (yieldCount == 0 && !initVals.empty());
+
+  if (!asyncUndefIndices.empty() && !bareYield) {
     SmallVector<Value> yieldedVals;
     for (auto &op : body.front().getOperations()) {
       if (auto yield = dyn_cast<YieldOp>(op)) {
@@ -577,6 +582,8 @@ void CoIRKernelLoweringBase::convertForeach(OpBuilder &builder, Location loc,
       }
     }
     for (unsigned idx : asyncUndefIndices) {
+      if (idx >= yieldedVals.size())
+        continue;
       Value yieldedVal = yieldedVals[idx];
       if (auto *defOp = yieldedVal.getDefiningOp()) {
         if (auto rotateOp = dyn_cast<FutureRotateOp>(defOp)) {
@@ -618,40 +625,61 @@ void CoIRKernelLoweringBase::convertForeach(OpBuilder &builder, Location loc,
     }
   }
 
-  auto loop = builder.create<scf::ForOp>(loc, zero, ub, step, initVals);
-  {
-    OpBuilder::InsertionGuard guard(builder);
-    Block *loopBody = loop.getBody();
-
-    if (loopBody->mightHaveTerminator())
-      loopBody->getTerminator()->erase();
-
-    builder.setInsertionPointToEnd(loopBody);
-
-    ctx.mapping.map(args[0], loop.getInductionVar());
-    for (unsigned i = 0; i < initVals.size(); ++i)
-      ctx.mapping.map(args[i + 1], loop.getRegionIterArg(i));
-
-    for (auto &op : body.front().getOperations()) {
-      if (auto yield = dyn_cast<YieldOp>(op)) {
-        SmallVector<Value> yieldedVals;
-        for (unsigned yi = 0; yi < yield.getNumOperands(); ++yi) {
-          Value v = yield.getOperand(yi);
-          if (ctx.mapping.contains(v)) {
-            yieldedVals.push_back(ctx.mapping.lookup(v));
-          } else {
-            yieldedVals.push_back(loop.getRegionIterArg(yi));
-          }
-        }
-        builder.create<scf::YieldOp>(loc, yieldedVals);
-        continue;
-      }
-      convertOp(builder, loc, op, ctx);
+  if (bareYield) {
+    for (unsigned i = 0; i < fe.getIterArgs().size(); ++i) {
+      Value init = fe.getIterArgs()[i];
+      if (ctx.mapping.contains(init))
+        ctx.mapping.map(args[i + 1], ctx.mapping.lookup(init));
     }
-  }
+    auto loop = builder.create<scf::ForOp>(loc, zero, ub, step);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+      Block *loopBody = loop.getBody();
+      if (loopBody->mightHaveTerminator())
+        loopBody->getTerminator()->erase();
+      builder.setInsertionPointToEnd(loopBody);
+      ctx.mapping.map(args[0], loop.getInductionVar());
+      for (auto &op : body.front().getOperations()) {
+        if (isa<YieldOp>(op)) {
+          builder.create<scf::YieldOp>(loc);
+          continue;
+        }
+        convertOp(builder, loc, op, ctx);
+      }
+    }
+  } else {
+    auto loop = builder.create<scf::ForOp>(loc, zero, ub, step, initVals);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+      Block *loopBody = loop.getBody();
+      if (loopBody->mightHaveTerminator())
+        loopBody->getTerminator()->erase();
+      builder.setInsertionPointToEnd(loopBody);
 
-  for (unsigned i = 0; i < fe.getNumResults(); ++i)
-    ctx.mapping.map(fe.getResult(i), loop.getResult(i));
+      ctx.mapping.map(args[0], loop.getInductionVar());
+      for (unsigned i = 0; i < initVals.size(); ++i)
+        ctx.mapping.map(args[i + 1], loop.getRegionIterArg(i));
+
+      for (auto &op : body.front().getOperations()) {
+        if (auto yield = dyn_cast<YieldOp>(op)) {
+          SmallVector<Value> yieldedVals;
+          for (unsigned yi = 0; yi < yield.getNumOperands(); ++yi) {
+            Value v = yield.getOperand(yi);
+            if (ctx.mapping.contains(v)) {
+              yieldedVals.push_back(ctx.mapping.lookup(v));
+            } else {
+              yieldedVals.push_back(loop.getRegionIterArg(yi));
+            }
+          }
+          builder.create<scf::YieldOp>(loc, yieldedVals);
+          continue;
+        }
+        convertOp(builder, loc, op, ctx);
+      }
+    }
+    for (unsigned i = 0; i < fe.getNumResults(); ++i)
+      ctx.mapping.map(fe.getResult(i), loop.getResult(i));
+  }
 }
 
 void CoIRKernelLoweringBase::convertParallel(OpBuilder &builder, Location loc,
