@@ -62,6 +62,8 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       return failure();
 
     // Extract base tensors and tile offsets.
+    // Convention: TensorTileOp indices = [offsets..., dynDimVals...]
+    // where offsets has `rank` elements and dynDimVals has numDynDims.
     Value srcBase = op.getSource();
     Value dstBase = op.getDest();
     llvm::SmallVector<Value> offsets;
@@ -69,15 +71,22 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
 
     if (auto tileOp = srcBase.template getDefiningOp<TensorTileOp>()) {
       srcBase = tileOp.getSource();
-      for (auto idx : tileOp.getIndices())
-        offsets.push_back(idx);
+      auto tileTy = llvm::cast<coir::TensorType>(tileOp.getResult().getType());
+      unsigned rank = tileTy.getRank();
+      auto allIdx = tileOp.getIndices();
+      for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i)
+        offsets.push_back(allIdx[i]);
       hasOffsets = true;
     }
     if (auto tileOp = dstBase.template getDefiningOp<TensorTileOp>()) {
       dstBase = tileOp.getSource();
       if (!hasOffsets) {
-        for (auto idx : tileOp.getIndices())
-          offsets.push_back(idx);
+        auto tileTy =
+            llvm::cast<coir::TensorType>(tileOp.getResult().getType());
+        unsigned rank = tileTy.getRank();
+        auto allIdx = tileOp.getIndices();
+        for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i)
+          offsets.push_back(allIdx[i]);
         hasOffsets = true;
       }
     }
@@ -111,7 +120,45 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       invokeDesc = prefetch.getOut();
     }
 
-    auto invoke = rewriter.create<DMAInvokeOp>(loc, tokenType, invokeDesc);
+    llvm::SmallVector<Value> dynDims;
+    llvm::SmallVector<int64_t> copyShapeVec;
+    if (hasOffsets) {
+      auto srcTy =
+          llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
+      auto dstTy =
+          llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
+      if (srcTy && dstTy &&
+          (srcTy.hasDynamicShape() || dstTy.hasDynamicShape())) {
+        auto shapeRef = srcTy.hasDynamicShape() ? srcTy.getShape()
+                                                 : dstTy.getShape();
+        copyShapeVec.assign(shapeRef.begin(), shapeRef.end());
+        unsigned numDyn = 0;
+        for (auto d : shapeRef)
+          if (mlir::ShapedType::isDynamic(d)) numDyn++;
+        auto tileOp = srcTy.hasDynamicShape()
+            ? op.getSource().template getDefiningOp<TensorTileOp>()
+            : op.getDest().template getDefiningOp<TensorTileOp>();
+        if (tileOp && numDyn > 0) {
+          auto indices = tileOp.getIndices();
+          unsigned rank = shapeRef.size();
+          if (indices.size() >= rank + numDyn) {
+            for (unsigned i = rank; i < rank + numDyn; ++i)
+              dynDims.push_back(indices[i]);
+          }
+        }
+      }
+    }
+
+    auto invoke = rewriter.create<DMAInvokeOp>(
+        loc, /*done=*/mlir::Type(tokenType), /*desc=*/invokeDesc,
+        /*dyn_dims=*/mlir::ValueRange(dynDims),
+        /*thr_layout=*/nullptr, /*val_layout=*/nullptr,
+        /*copy_atom=*/nullptr, /*need_pred=*/nullptr,
+        /*prediction=*/nullptr, /*swizzle=*/nullptr,
+        /*copy_shape=*/nullptr);
+    if (!copyShapeVec.empty())
+      invoke->setAttr("copy_shape",
+                      rewriter.getDenseI64ArrayAttr(copyShapeVec));
 
     if (op.getToken() && !op.getToken().use_empty())
       rewriter.replaceAllUsesWith(op.getToken(), invoke.getDone());

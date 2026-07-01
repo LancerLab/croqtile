@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GPU
-// XFAIL: *
 // RUN: cocc -t cute -gs %s --disable-runtime-check -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 
 __co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {

@@ -111,6 +111,26 @@ mlir::Value ASTCoIRGen::MaterializeSBE(mlir::Location loc,
     }
   }
 
+  if (auto to = dyn_cast<TernaryOperation>(expr)) {
+    auto pred = MaterializeSBE(loc, to->GetPred());
+    auto lhs = MaterializeSBE(loc, to->GetLeft());
+    auto rhs = MaterializeSBE(loc, to->GetRight());
+    if (!pred || !lhs || !rhs) return nullptr;
+
+    if (!pred.getType().isInteger(1)) {
+      auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+      if (!mlir::isa<mlir::IndexType>(pred.getType()))
+        pred = builder.create<mlir::arith::IndexCastOp>(loc, indexType, pred);
+      pred = builder.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ne, pred, zero);
+    }
+    if (!mlir::isa<mlir::IndexType>(lhs.getType()))
+      lhs = builder.create<mlir::arith::IndexCastOp>(loc, indexType, lhs);
+    if (!mlir::isa<mlir::IndexType>(rhs.getType()))
+      rhs = builder.create<mlir::arith::IndexCastOp>(loc, indexType, rhs);
+    return builder.create<mlir::arith::SelectOp>(loc, pred, lhs, rhs);
+  }
+
   return nullptr;
 }
 
@@ -883,6 +903,31 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
           if (ub && !ub->IsNumeric()) {
             if (auto *sv = dyn_cast<sbe::SymbolicValue>(ub.get()))
               ubValue = LookupValue(UnScopedName(sv->Value()));
+          }
+        }
+      }
+    }
+    if (!ubValue && lr->ubound) {
+      auto v = EmitExpr(*lr->ubound);
+      if (v) ubValue = v;
+      if (ubValue && !mlir::isa<mlir::IndexType>(ubValue.getType()))
+        ubValue = builder.create<mlir::arith::IndexCastOp>(
+            loc, mlir::IndexType::get(&IRContext()), ubValue);
+    }
+    if (!ubValue) {
+      auto rvName = lr->GetRVName();
+      auto symType = GetSymbolType(rvName);
+      if (auto bty = dyn_cast<BoundedType>(symType)) {
+        if (bty->HasValidBound()) {
+          auto &ub = bty->GetUpperBound();
+          if (ub && !dyn_cast<sbe::NumericValue>(ub.get())) {
+            auto v = MaterializeSBE(loc, ub);
+            if (v) {
+              if (!mlir::isa<mlir::IndexType>(v.getType()))
+                v = builder.create<mlir::arith::IndexCastOp>(
+                    loc, mlir::IndexType::get(&IRContext()), v);
+              ubValue = v;
+            }
           }
         }
       }
@@ -1671,13 +1716,17 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
   auto baseShape = baseTy.getShape();
 
   auto isWildcard = [](AST::Node *idx) -> bool {
+    auto checkName = [](const std::string &n) {
+      return n == "_" || n == "__choreo_no_tiling__" ||
+             n == "__choreo_parent_dim__";
+    };
     if (auto *id = dyn_cast<AST::Identifier>(idx))
-      return id->name == "_" || id->name == "__choreo_no_tiling__";
+      return checkName(id->name);
     if (auto *expr = dyn_cast<AST::Expr>(idx)) {
       if (expr->GetForm() == AST::Expr::Reference) {
         auto *inner = expr->GetR().get();
         if (auto *id = dyn_cast<AST::Identifier>(inner))
-          return id->name == "_" || id->name == "__choreo_no_tiling__";
+          return checkName(id->name);
       }
     }
     return false;
@@ -1713,8 +1762,106 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
   llvm::SmallVector<mlir::Value> idxVals;
   llvm::SmallVector<int64_t> tileShape;
 
+  llvm::SmallVector<mlir::Value> dynDimVals;
+
   if (chunk.HasOperation()) {
     for (auto &sop : chunk.AllOperations()) {
+      if (auto *viewOp = dyn_cast<AST::SOP::View>(sop.get())) {
+        auto offsets = viewOp->GetOffsets();
+        auto subspan = viewOp->GetSubSpan();
+        if (!offsets || !subspan) continue;
+        for (auto &off : offsets->AllValues()) {
+          auto v = emitIdx(off.get());
+          if (v) idxVals.push_back(v);
+          else {
+            auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+            idxVals.push_back(zero);
+          }
+        }
+        unsigned dimIdx = 0;
+        for (auto &dim : subspan->AllValues()) {
+          if (isWildcard(dim.get())) {
+            tileShape.push_back(dimIdx < baseShape.size()
+                                    ? baseShape[dimIdx]
+                                    : 1);
+          } else if (auto *lit = dyn_cast<AST::IntLiteral>(dim.get())) {
+            tileShape.push_back(lit->Val());
+          } else if (auto *expr = dyn_cast<AST::Expr>(dim.get())) {
+            if (expr->GetForm() == AST::Expr::Reference) {
+              if (auto *lit = dyn_cast<AST::IntLiteral>(
+                      expr->GetR().get()))
+                tileShape.push_back(lit->Val());
+              else {
+                tileShape.push_back(mlir::ShapedType::kDynamic);
+                auto v = emitIdx(dim.get());
+                if (v) dynDimVals.push_back(v);
+              }
+            } else {
+              tileShape.push_back(mlir::ShapedType::kDynamic);
+              auto v = emitIdx(dim.get());
+              if (v) dynDimVals.push_back(v);
+            }
+          } else {
+            tileShape.push_back(mlir::ShapedType::kDynamic);
+            auto v = emitIdx(dim.get());
+            if (v) dynDimVals.push_back(v);
+          }
+          dimIdx++;
+        }
+        break;
+      }
+      if (auto *subspanOp = dyn_cast<AST::SOP::SubSpan>(sop.get())) {
+        auto subspan = subspanOp->GetSubSpan();
+        auto indices = subspanOp->GetIndices();
+        if (!subspan) continue;
+        if (indices) {
+          for (auto &idx : indices->AllValues()) {
+            auto v = emitIdx(idx.get());
+            if (v) idxVals.push_back(v);
+            else {
+              auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+              idxVals.push_back(zero);
+            }
+          }
+        } else {
+          unsigned rank = subspan->AllValues().size();
+          for (unsigned i = 0; i < rank; ++i) {
+            auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+            idxVals.push_back(zero);
+          }
+        }
+        unsigned dimIdx = 0;
+        for (auto &dim : subspan->AllValues()) {
+          if (isWildcard(dim.get())) {
+            tileShape.push_back(dimIdx < baseShape.size()
+                                    ? baseShape[dimIdx]
+                                    : 1);
+          } else if (auto *lit = dyn_cast<AST::IntLiteral>(dim.get())) {
+            tileShape.push_back(lit->Val());
+          } else if (auto *expr = dyn_cast<AST::Expr>(dim.get())) {
+            if (expr->GetForm() == AST::Expr::Reference) {
+              if (auto *lit = dyn_cast<AST::IntLiteral>(
+                      expr->GetR().get()))
+                tileShape.push_back(lit->Val());
+              else {
+                tileShape.push_back(mlir::ShapedType::kDynamic);
+                auto v = emitIdx(dim.get());
+                if (v) dynDimVals.push_back(v);
+              }
+            } else {
+              tileShape.push_back(mlir::ShapedType::kDynamic);
+              auto v = emitIdx(dim.get());
+              if (v) dynDimVals.push_back(v);
+            }
+          } else {
+            tileShape.push_back(mlir::ShapedType::kDynamic);
+            auto v = emitIdx(dim.get());
+            if (v) dynDimVals.push_back(v);
+          }
+          dimIdx++;
+        }
+        break;
+      }
       auto indices = sop->GetIndices();
       if (!indices) continue;
       unsigned dimIdx = 0;
@@ -1768,6 +1915,9 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
   for (auto d : tileShape)
     resultShape.push_back(d);
   if (resultShape.empty()) resultShape.push_back(1);
+
+  for (auto &v : dynDimVals)
+    idxVals.push_back(v);
 
   auto tileTy = coir::TensorType::get(
       &IRContext(), baseTy.getElementType(), resultShape,

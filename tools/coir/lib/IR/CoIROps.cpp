@@ -112,18 +112,37 @@ void DMADescPrefetchOp::getCanonicalizationPatterns(
 ParseResult DMAInvokeOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand desc;
   Type descType;
-  if (parser.parseOperand(desc) ||
-      parser.parseOptionalAttrDict(result.attributes) ||
+  if (parser.parseOperand(desc))
+    return failure();
+
+  llvm::SmallVector<OpAsmParser::UnresolvedOperand> dynDims;
+  if (succeeded(parser.parseOptionalKeyword("dyn_dims"))) {
+    if (parser.parseLParen() ||
+        parser.parseOperandList(dynDims) ||
+        parser.parseRParen())
+      return failure();
+  }
+
+  if (parser.parseOptionalAttrDict(result.attributes) ||
       parser.parseColonType(descType))
     return failure();
   if (parser.resolveOperand(desc, descType, result.operands))
     return failure();
+  auto indexType = mlir::IndexType::get(parser.getContext());
+  for (auto &dyn : dynDims)
+    if (parser.resolveOperand(dyn, indexType, result.operands))
+      return failure();
   result.addTypes(coir::AsyncTokenType::get(parser.getContext()));
   return success();
 }
 
 void DMAInvokeOp::print(OpAsmPrinter &printer) {
   printer << " " << getDesc();
+  if (!getDynDims().empty()) {
+    printer << " dyn_dims(";
+    llvm::interleaveComma(getDynDims(), printer);
+    printer << ")";
+  }
   printer.printOptionalAttrDict((*this)->getAttrs());
   printer << " : " << getDesc().getType();
 }

@@ -1815,7 +1815,7 @@ private:
     if (desc.isTMA) {
       emitTMAInvoke(descIdx, desc, offsets);
     } else {
-      emitCpAsyncInvoke(descIdx, desc, offsets);
+      emitCpAsyncInvoke(descIdx, desc, offsets, op);
     }
   }
 
@@ -1974,13 +1974,36 @@ private:
       Value localVal = desc.isLoad ? dstVal : srcVal;
       auto globalTy = cast<coir::TensorType>(globalVal.getType());
       auto localTy = cast<coir::TensorType>(localVal.getType());
-      int64_t tileElems = 1;
-      for (auto d : localTy.getShape()) tileElems *= d;
+
+      auto globalShape = globalTy.getShape();
+      llvm::SmallVector<int64_t> globalStrides(globalShape.size());
+      {
+        int64_t s = 1;
+        for (int i = (int)globalShape.size() - 1; i >= 0; --i) {
+          globalStrides[i] = s;
+          if (!mlir::ShapedType::isDynamic(globalShape[i]))
+            s *= globalShape[i];
+        }
+      }
 
       std::string ptrName = getName(globalVal);
-      std::string offExpr = getName(offsets[0]);
-      if (tileElems > 1)
-        offExpr += " * " + std::to_string(tileElems);
+      std::string offExpr;
+      if (offsets.size() == 1) {
+        int64_t tileElems = 1;
+        for (auto d : localTy.getShape()) tileElems *= d;
+        offExpr = getName(offsets[0]);
+        if (tileElems > 1)
+          offExpr += " * " + std::to_string(tileElems);
+      } else {
+        for (unsigned i = 0; i < offsets.size(); ++i) {
+          std::string term = getName(offsets[i]);
+          if (globalStrides[i] != 1)
+            term += " * " + std::to_string(globalStrides[i]);
+          if (i == 0) offExpr = term;
+          else offExpr += " + " + term;
+        }
+      }
+
       std::string slicedPtr = "__tc_ptr_" + std::to_string(id);
       os() << getIndent() << emitElementType(globalTy.getElementType())
          << "* " << slicedPtr << " = ("
@@ -2032,7 +2055,8 @@ private:
   }
 
   void emitCpAsyncInvoke(unsigned /*descIdx*/, const DescInfo &desc,
-                         const SmallVector<Value, 4> &offsets) {
+                         const SmallVector<Value, 4> &offsets,
+                         DMAInvokeOp invokeOp) {
     // cp.async DMA: cooperative copy with fence/wait
     if (auto constOp =
             desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
@@ -2085,25 +2109,102 @@ private:
 
         unsigned id = nextId++;
         std::string ptrName = getName(globalVal);
-        std::string offExpr = getName(offsets[0]);
-        if (tileElemsExpr != "1")
-          offExpr += " * " + tileElemsExpr;
         std::string elemTy = emitElementType(globalTy.getElementType());
+
+        // Compute linearized offset using global tensor strides.
+        auto globalShape = globalTy.getShape();
+        llvm::SmallVector<int64_t> globalStrides(globalShape.size());
+        {
+          int64_t s = 1;
+          for (int i = (int)globalShape.size() - 1; i >= 0; --i) {
+            globalStrides[i] = s;
+            if (!mlir::ShapedType::isDynamic(globalShape[i]))
+              s *= globalShape[i];
+          }
+        }
+        std::string offExpr;
+        if (offsets.size() == 1) {
+          offExpr = getName(offsets[0]);
+          if (tileElemsExpr != "1")
+            offExpr += " * " + tileElemsExpr;
+        } else {
+          for (unsigned i = 0; i < offsets.size(); ++i) {
+            std::string term = getName(offsets[i]);
+            if (globalStrides[i] != 1)
+              term += " * " + std::to_string(globalStrides[i]);
+            if (i == 0) offExpr = term;
+            else offExpr += " + " + term;
+          }
+        }
+
         std::string slicedPtr = "__slice_ptr_" + std::to_string(id);
         os() << getIndent() << elemTy << "* " << slicedPtr << " = ("
            << elemTy << "*)" << ptrName << " + " << offExpr << ";\n";
 
+        auto copyShapeAttr = invokeOp.getCopyShapeAttr();
+        llvm::ArrayRef<int64_t> copyShape =
+            copyShapeAttr ? copyShapeAttr.asArrayRef() : localTy.getShape();
+        bool hasDynCopy = llvm::any_of(copyShape, mlir::ShapedType::isDynamic);
+
         std::string srcTensor, dstTensor;
         std::string suffix = "_" + std::to_string(id);
-        if (desc.isLoad) {
+        if (hasDynCopy) {
+          auto dynDims = invokeOp.getDynDims();
+          std::string shapeName = "__dma_shape" + suffix;
+          os() << getIndent() << "auto " << shapeName << " = cute::make_shape(";
+          unsigned dynIdx = 0;
+          for (unsigned i = 0; i < copyShape.size(); ++i) {
+            if (i > 0) os() << ", ";
+            if (mlir::ShapedType::isDynamic(copyShape[i])) {
+              if (dynIdx < dynDims.size())
+                os() << "(int)" << getName(dynDims[dynIdx]);
+              else
+                os() << "1";
+              dynIdx++;
+            } else {
+              os() << "cute::Int<" << copyShape[i] << ">{}";
+            }
+          }
+          os() << ");\n";
+          std::string layoutName = "__dma_layout" + suffix;
+          os() << getIndent() << "auto " << layoutName
+             << " = cute::make_layout(" << shapeName << ");\n";
+
+          std::string elemTySrc = emitElementType(globalTy.getElementType());
+          if (desc.isLoad) {
+            srcTensor = "__dma_src" + suffix;
+            os() << getIndent() << "auto " << srcTensor
+               << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTySrc
+               << ">((" << elemTySrc << "*)" << slicedPtr << "), "
+               << layoutName << ");\n";
+            dstTensor = "__dma_dst" + suffix;
+            std::string elemTyDst = emitElementType(localTy.getElementType());
+            os() << getIndent() << "auto " << dstTensor
+               << " = cute::make_tensor(cute::make_smem_ptr(("
+               << elemTyDst << "*)" << getName(localVal) << "), "
+               << layoutName << ");\n";
+          } else {
+            srcTensor = "__dma_src" + suffix;
+            std::string elemTyS = emitElementType(localTy.getElementType());
+            os() << getIndent() << "auto " << srcTensor
+               << " = cute::make_tensor(cute::make_smem_ptr(("
+               << elemTyS << "*)" << getName(localVal) << "), "
+               << layoutName << ");\n";
+            dstTensor = "__dma_dst" + suffix;
+            os() << getIndent() << "auto " << dstTensor
+               << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTySrc
+               << ">((" << elemTySrc << "*)" << slicedPtr << "), "
+               << layoutName << ");\n";
+          }
+        } else if (desc.isLoad) {
           srcTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
-                                            localTy.getShape(), suffix + "_s",
+                                            copyShape, suffix + "_s",
                                             enclosingKernel);
           dstTensor = emitCuteTensor(localVal, suffix + "_d");
         } else {
           srcTensor = emitCuteTensor(localVal, suffix + "_s");
           dstTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
-                                            localTy.getShape(), suffix + "_d",
+                                            copyShape, suffix + "_d",
                                             enclosingKernel);
         }
         os() << getIndent() << "choreo::naive_copy(" << srcTensor << ", "
