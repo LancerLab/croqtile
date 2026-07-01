@@ -3,23 +3,31 @@
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIRAttrs.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
 
 //===----------------------------------------------------------------------===//
-// Helper: parse shape like "128x64x" (consumes trailing 'x')
+// Helper: parse shape like "128x64x" or "?x128x" (consumes trailing 'x')
 //===----------------------------------------------------------------------===//
 static ParseResult parseShape(AsmParser &parser,
                               llvm::SmallVectorImpl<int64_t> &shape) {
-  int64_t dim;
-  auto res = parser.parseOptionalInteger(dim);
-  while (res.has_value() && succeeded(*res)) {
+  while (true) {
+    if (succeeded(parser.parseOptionalQuestion())) {
+      shape.push_back(mlir::ShapedType::kDynamic);
+      if (failed(parser.parseXInDimensionList()))
+        return failure();
+      continue;
+    }
+    int64_t dim;
+    auto res = parser.parseOptionalInteger(dim);
+    if (!res.has_value() || failed(*res))
+      break;
     shape.push_back(dim);
     if (failed(parser.parseXInDimensionList()))
       return failure();
-    res = parser.parseOptionalInteger(dim);
   }
   return success();
 }
@@ -119,8 +127,12 @@ mlir::Type coir::TensorType::parse(mlir::AsmParser &parser) {
 
 void coir::TensorType::print(mlir::AsmPrinter &printer) const {
   printer << "<";
-  for (auto dim : getShape())
-    printer << dim << "x";
+  for (auto dim : getShape()) {
+    if (mlir::ShapedType::isDynamic(dim))
+      printer << "?x";
+    else
+      printer << dim << "x";
+  }
   printer << getElementType();
   int32_t ms = getMemorySpace();
   printer << ", ";
@@ -149,6 +161,8 @@ bool coir::TensorType::isDenseContiguous() const {
   auto shapeArr = getShape();
   int64_t expected = 1;
   for (int i = (int)shapeArr.size() - 1; i >= 0; --i) {
+    if (mlir::ShapedType::isDynamic(shapeArr[i]))
+      return false;
     if (stridesArr[i] != expected) return false;
     expected *= shapeArr[i];
   }
