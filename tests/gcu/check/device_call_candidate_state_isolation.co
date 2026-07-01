@@ -1,0 +1,18 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -adf -t topscc -dv=check %s 2>&1 | FileCheck %s
+
+__cok__ {
+  __device__ int pick(float* p);
+  __device__ int pick(int* p);
+}
+
+__co__ void func() {
+  parallel by 1 {
+    local s32[4] buf;
+    mutable out = call pick(buf);
+  }
+}
+
+// Ensure failed candidates do not pollute selected candidate parameter types.
+// CHECK: Find matched device function 'pick' -> s32 (s32 *)
+// CHECK-NOT: Find matched device function 'pick' -> s32 (f32 *, s32 *)

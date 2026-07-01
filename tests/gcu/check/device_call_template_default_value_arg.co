@@ -1,0 +1,22 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -adf -t topscc %s 2>&1 | FileCheck %s
+
+__cok__ {
+  template <typename T, int N = (1 << 2)>
+  __device__ int use_default(__private__ T* p);
+  template <typename T>
+  __device__ void only_value(__private__ T* p);
+}
+
+__co__ void func() {
+  parallel by 1 {
+    local s32[1] buf;
+    mutable out = call use_default<s32>(buf);
+    call only_value<s32, s32>(buf);
+  }
+}
+
+// Template default value argument should be accepted.
+// CHECK-DAG: int out = use_default<int>((__private__ int*)buf);
+// CHECK-DAG: warning:{{.*}}unmatched template arguments of the device function 'only_value'
+// CHECK-DAG: warning:{{.*}}unable to find a device function 'only_value'

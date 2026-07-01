@@ -1,0 +1,32 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -adf -t topscc %s 2>&1 | FileCheck %s
+
+__cok__ {
+  __device__ int select_overload(int v);
+  __device__ float select_overload(long long v);
+  __device__ int pick_ptr(void* p);
+  __device__ int pick_ptr(int* p);
+  __device__ int pick_space(__private__ int* p);
+  __device__ int pick_space(__shared__ int* p);
+}
+
+__co__ void func() {
+  parallel by 1 {
+    s32 v = 1;
+    local s32[4] buf;
+    local s32[4] lbuf;
+    shared s32[4] sbuf;
+    mutable exact_out = call select_overload(v);
+    mutable ptr_out = call pick_ptr(buf);
+    mutable local_out = call pick_space(lbuf);
+    mutable shared_out = call pick_space(sbuf);
+  }
+}
+
+// Prefer exact s32 -> s32 overload over promotive s32 -> s64.
+// CHECK: int exact_out = select_overload(v);
+// Prefer exact int* overload over void* fallback.
+// CHECK: int ptr_out = pick_ptr((int*)buf);
+// Prefer storage-compatible overloads for local/shared arguments.
+// CHECK: int local_out = pick_space((__private__ int*)lbuf);
+// CHECK: int shared_out = pick_space((__shared__ int*)sbuf);

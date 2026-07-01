@@ -114,9 +114,9 @@ __co__ void func() {
 
 // CHECK: Find instantiated device function 'print_buffer' -> void (s32 *, s32)
 // CHECK: Find instantiated device function 'print_vector' -> void (s32, s32)
-// CHECK: Find instantiated device function 'get_i64_part' -> unknown (s32 *, s32 *)
+// CHECK: Find instantiated device function 'get_i64_part' -> unknown (s32 *)
 // CHECK: Find instantiated device function 'contain' -> bool (s32 *, s32)
-// CHECK: Find instantiated device function 'index' -> s32 (s32 *, s32, s32 *, s32)
+// CHECK: Find instantiated device function 'index' -> s32 (s32 *, s32)
 // CHECK: Find instantiated device function 'argmin' -> s32 (s32 *, s32, s32)
 // CHECK: Find instantiated device function 'indexAllVecL3' -> s32 (s32 *, s32 *, s32 *, u32 *, s32, s32 *, s8 *, s8 *, u32)
 // CHECK: Find instantiated device function 'argminAllVecL3' -> s32 (s32 *, s32 *, u32 *, s32, s8 *, s8 *, u32)

@@ -1,0 +1,11 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -e %s | FileCheck %s
+#include "choreo.h"
+#include "devices_nested_mid.h"
+
+__cok__ {
+  __device__ void local_func();
+}
+
+// CHECK: DeviceFunction: nested_inner_func -> void ()
+// CHECK: DeviceFunction: local_func -> void ()

@@ -27,6 +27,9 @@ static int scope = 0;
 static int device_param_paren_scope = 0;
 static int device_param_brace_scope = 0;
 static int device_template_scope = 0;
+static int device_template_paren_scope = 0;
+static int device_template_brace_scope = 0;
+static int device_template_bracket_scope = 0;
 
 extern Choreo::location loc;
 extern Choreo::Option<bool> analyze_device_functions;
@@ -158,6 +161,9 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                 }
   "template"  { device_template_buffer = "";
                 device_template_scope = 0;
+                device_template_paren_scope = 0;
+                device_template_brace_scope = 0;
+                device_template_bracket_scope = 0;
                 if (analyze_device_functions) {
                   BEGIN(TEMPLATE);
                   device_template_buffer += yytext;
@@ -181,14 +187,30 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   \n+         {}
   "//".*      {}
   {comments}  {}
+  "("         { device_template_paren_scope++; device_template_buffer += yytext; }
+  ")"         { if (device_template_paren_scope > 0) device_template_paren_scope--;
+                device_template_buffer += yytext; }
+  "{"         { device_template_brace_scope++; device_template_buffer += yytext; }
+  "}"         { if (device_template_brace_scope > 0) device_template_brace_scope--;
+                device_template_buffer += yytext; }
+  "["         { device_template_bracket_scope++; device_template_buffer += yytext; }
+  "]"         { if (device_template_bracket_scope > 0) device_template_bracket_scope--;
+                device_template_buffer += yytext; }
   "<"         { if (device_template_scope < 0)
                   Choreo::Scanner::Error(loc, "unmatched '<' in device template declaration.");
-                device_template_scope++;
+                if (device_template_paren_scope == 0 &&
+                    device_template_brace_scope == 0 &&
+                    device_template_bracket_scope == 0)
+                  device_template_scope++;
                 device_template_buffer += yytext;
               }
-  ">"         { if (device_template_scope <= 0)
-                  Choreo::Scanner::Error(loc, "unmatched '>' in device template declaration.");
-                device_template_scope--;
+  ">"         { if (device_template_paren_scope == 0 &&
+                    device_template_brace_scope == 0 &&
+                    device_template_bracket_scope == 0) {
+                  if (device_template_scope <= 0)
+                    Choreo::Scanner::Error(loc, "unmatched '>' in device template declaration.");
+                  device_template_scope--;
+                }
                 device_template_buffer += yytext;
                 if (device_template_scope == 0)
                   BEGIN(REAL_KERNEL);
