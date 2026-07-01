@@ -196,6 +196,12 @@ struct HoistAssertionsPass
 
       auto target = computeHoistTarget(assertOp, kernel);
 
+      LLVM_DEBUG(llvm::dbgs() << "HOIST: msg=\""
+                              << assertOp.getMessage() << "\" -> site="
+                              << (target.site == AssertSite::ENTRY ? "ENTRY"
+                                  : target.site == AssertSite::HOIST ? "HOIST"
+                                  : "USE") << "\n");
+
       if (target.site == AssertSite::ENTRY) {
         assertOp.setSiteAttr(
             AssertSiteAttr::get(assertOp.getContext(), AssertSite::ENTRY));

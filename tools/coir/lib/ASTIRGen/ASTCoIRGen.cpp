@@ -26,8 +26,10 @@ void ASTCoIRGen::EmitAssert(mlir::Location loc, mlir::Value condition,
 
 void ASTCoIRGen::BuildAssertionMap() {
   assert_map_.clear();
-  for (const auto& ar : FCtx(fname).GetAssessor().GetAssertions())
-    assert_map_[ar.node].push_back(&ar);
+  for (const auto& ar : FCtx(fname).GetAssessor().GetAssertions()) {
+    auto* key = ar.emit_node ? ar.emit_node : ar.node;
+    assert_map_[key].push_back(&ar);
+  }
 }
 
 mlir::Value ASTCoIRGen::MaterializeSBE(mlir::Location loc,
