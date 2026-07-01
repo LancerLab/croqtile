@@ -193,6 +193,9 @@ mlir::Type ASTCoIRGen::LowerBaseType(BaseType bt) {
   case BaseType::BF16: return mlir::BFloat16Type::get(&ctx);
   case BaseType::F8_E4M3: return mlir::Float8E4M3FNType::get(&ctx);
   case BaseType::F8_E5M2: return mlir::Float8E5M2Type::get(&ctx);
+  case BaseType::F6_E2M3: return mlir::Float6E2M3FNType::get(&ctx);
+  case BaseType::F6_E3M2: return mlir::Float6E3M2FNType::get(&ctx);
+  case BaseType::F4_E2M1: return mlir::Float4E2M1FNType::get(&ctx);
   case BaseType::U8:
   case BaseType::S8:
     return mlir::IntegerType::get(&ctx, 8);
@@ -206,6 +209,7 @@ mlir::Type ASTCoIRGen::LowerBaseType(BaseType bt) {
   case BaseType::U64:
     return mlir::IntegerType::get(&ctx, 64);
   case BaseType::BOOL: return mlir::IntegerType::get(&ctx, 1);
+  case BaseType::STREAM: return mlir::IndexType::get(&ctx);
   default: return mlir::Float32Type::get(&ctx);
   }
 }
@@ -471,6 +475,7 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
   llvm::SmallVector<mlir::Type> resultTypes;
 
   for (auto &inTy : fty->in_tys) {
+    if (isa<StreamType>(inTy)) continue;
     if (auto sty = dyn_cast<SpannedType>(inTy))
       argTypes.push_back(LowerSpannedType(sty));
     else
@@ -502,6 +507,7 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
   llvm::SmallVector<mlir::Attribute> paramDims;
   if (cf.f_decl.params) {
     for (auto &p : cf.f_decl.params->values) {
+      if (isa<StreamType>(p->type->GetType())) continue;
       paramNames.push_back(mlir::StringAttr::get(
           &IRContext(), p->HasSymbol() ? p->sym->name : ""));
       paramAttrs.push_back(
@@ -556,6 +562,7 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
   if (cf.f_decl.params) {
     unsigned pIdx = 0;
     for (auto &inTy : fty->in_tys) {
+      if (isa<StreamType>(inTy)) { ++pIdx; continue; }
       if (auto sty = dyn_cast<SpannedType>(inTy)) {
         auto mdspan = sty->s_type;
         auto &shape = mdspan->value;
@@ -597,6 +604,7 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
   if (cf.f_decl.params) {
     unsigned idx = 0;
     for (auto &param : cf.f_decl.params->values) {
+      if (isa<StreamType>(param->type->GetType())) continue;
       if (param->HasSymbol() && idx < argTypes.size())
         MapValue(param->sym->name, entryBlock->getArgument(idx));
       ++idx;
@@ -647,7 +655,17 @@ bool ASTCoIRGen::Visit(AST::ParallelBy &pb) {
 
   auto parallelOp = builder.create<coir::ParallelOp>(
       loc, levelAttr,
-      mlir::DenseI64ArrayAttr::get(&IRContext(), bounds));
+      mlir::DenseI64ArrayAttr::get(&IRContext(), bounds),
+      /*stream=*/nullptr, /*is_async=*/nullptr);
+
+  if (pb.HasStream()) {
+    std::string streamStr = STR(pb.StreamExpr());
+    if (!streamStr.empty())
+      parallelOp.setStreamAttr(
+          mlir::StringAttr::get(&IRContext(), streamStr));
+    if (pb.IsAsync())
+      parallelOp.setIsAsyncAttr(mlir::BoolAttr::get(&IRContext(), true));
+  }
 
   auto &bodyRegion = parallelOp.getBody();
   auto *block = new mlir::Block();

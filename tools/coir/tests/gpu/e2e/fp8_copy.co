@@ -1,0 +1,43 @@
+// REQUIRES: TARGET-GPU
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+
+__co__ auto copy_e4m3(f8_e4m3 [8, 64] lhs) {
+  f8_e4m3[lhs.span] output;
+  parallel p by 8, q by 64
+    output.at(p, q) = lhs.at(p, q);
+  return output;
+}
+
+__co__ auto copy_e5m2(f8_e5m2 [8, 64] lhs) {
+  f8_e5m2[lhs.span] output;
+  parallel p by 8, q by 64
+    output.at(p, q) = lhs.at(p, q);
+  return output;
+}
+
+int main() {
+  {
+    auto a = choreo::make_spandata<choreo::f8_e4m3>(8, 64);
+    a.fill_random(-2.0f, 2.0f);
+    auto res = copy_e4m3(a.view());
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        choreo::choreo_assert(float(a[i][j]) == float(res[i][j]),
+                              "f8_e4m3 mismatch");
+    std::cout << "Test f8_e4m3 Passed" << std::endl;
+  }
+  {
+    auto a = choreo::make_spandata<choreo::f8_e5m2>(8, 64);
+    a.fill_random(-2.0f, 2.0f);
+    auto res = copy_e5m2(a.view());
+    for (size_t i = 0; i < res.shape()[0]; ++i)
+      for (size_t j = 0; j < res.shape()[1]; ++j)
+        choreo::choreo_assert(float(a[i][j]) == float(res[i][j]),
+                              "f8_e5m2 mismatch");
+    std::cout << "Test f8_e5m2 Passed" << std::endl;
+  }
+  std::cout << "All FP8 Tests Passed" << std::endl;
+}
+// CHECK: Test f8_e4m3 Passed
+// CHECK: Test f8_e5m2 Passed
+// CHECK: All FP8 Tests Passed

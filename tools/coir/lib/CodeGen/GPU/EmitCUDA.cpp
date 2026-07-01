@@ -161,10 +161,22 @@ private:
       return "int";
     if (ty.isF16())
       return "half";
+    if (ty.isBF16())
+      return "__nv_bfloat16";
     if (ty.isF32())
       return "float";
     if (ty.isF64())
       return "double";
+    if (isa<mlir::Float8E4M3FNType>(ty))
+      return "choreo::f8_e4m3";
+    if (isa<mlir::Float8E5M2Type>(ty))
+      return "choreo::f8_e5m2";
+    if (isa<mlir::Float6E2M3FNType>(ty))
+      return "choreo::f6_e2m3";
+    if (isa<mlir::Float6E3M2FNType>(ty))
+      return "choreo::f6_e3m2";
+    if (isa<mlir::Float4E2M1FNType>(ty))
+      return "choreo::f4_e2m1";
     if (ty.isInteger(1))
       return "bool";
     if (ty.isInteger(8))
@@ -391,19 +403,34 @@ private:
     os() << "}\n\n";
   }
 
-  std::string emitChoreoType(Type ty, bool asView = true) {
+  std::string emitChoreoType(Type ty, bool asView = true,
+                             llvm::StringRef hostElemHint = "") {
     if (auto tty = dyn_cast<coir::TensorType>(ty)) {
-      std::string eTy = emitElementType(tty.getElementType());
       std::string choreoElem;
-      auto eTyML = tty.getElementType();
-      if (eTyML.isInteger(8)) choreoElem = "choreo::u8";
-      else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
-      else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
-      else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
-      else if (eTyML.isF32()) choreoElem = "choreo::f32";
-      else if (eTyML.isF16()) choreoElem = "choreo::f16";
-      else if (eTyML.isF64()) choreoElem = "choreo::f64";
-      else choreoElem = "choreo::s32";
+      if (!hostElemHint.empty()) {
+        choreoElem = "choreo::" + hostElemHint.str();
+      } else {
+        auto eTyML = tty.getElementType();
+        if (eTyML.isInteger(8)) choreoElem = "choreo::u8";
+        else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
+        else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
+        else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
+        else if (eTyML.isF32()) choreoElem = "choreo::f32";
+        else if (eTyML.isF16()) choreoElem = "choreo::f16";
+        else if (eTyML.isBF16()) choreoElem = "choreo::bf16";
+        else if (eTyML.isF64()) choreoElem = "choreo::f64";
+        else if (isa<mlir::Float8E4M3FNType>(eTyML))
+          choreoElem = "choreo::f8_e4m3";
+        else if (isa<mlir::Float8E5M2Type>(eTyML))
+          choreoElem = "choreo::f8_e5m2";
+        else if (isa<mlir::Float6E2M3FNType>(eTyML))
+          choreoElem = "choreo::f6_e2m3";
+        else if (isa<mlir::Float6E3M2FNType>(eTyML))
+          choreoElem = "choreo::f6_e3m2";
+        else if (isa<mlir::Float4E2M1FNType>(eTyML))
+          choreoElem = "choreo::f4_e2m1";
+        else choreoElem = "choreo::s32";
+      }
       unsigned ndim = tty.getShape().size();
       if (asView)
         return "const choreo::spanned_view<" + choreoElem + ", " +
@@ -412,6 +439,14 @@ private:
         return "choreo::spanned_data<" + choreoElem + ", " +
                std::to_string(ndim) + ">";
     }
+    if (ty.isInteger(32)) return "int";
+    if (ty.isInteger(64)) return "int64_t";
+    if (ty.isInteger(16)) return "int16_t";
+    if (ty.isInteger(8)) return "uint8_t";
+    if (ty.isF32()) return "float";
+    if (ty.isF64()) return "double";
+    if (ty.isF16()) return "half";
+    if (ty.isIndex()) return "int";
     return "/* unknown */";
   }
 
@@ -438,6 +473,25 @@ private:
       return s + ")";
     }
   };
+
+  std::string getStreamName(KernelOp kernel) {
+    std::string stream;
+    kernel.getBody().walk([&](ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::BLOCK && par.getStreamAttr())
+        stream = par.getStreamAttr().getValue().str();
+    });
+    return stream;
+  }
+
+  bool isAsyncLaunch(KernelOp kernel) {
+    bool async = false;
+    kernel.getBody().walk([&](ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::BLOCK &&
+          par.getIsAsyncAttr() && par.getIsAsyncAttr().getValue())
+        async = true;
+    });
+    return async;
+  }
 
   LaunchDims getLaunchDims(KernelOp kernel) {
     LaunchDims dims;
@@ -478,10 +532,15 @@ private:
     if (elemTy.isInteger(8)) return "CU_TENSOR_MAP_DATA_TYPE_UINT8";
     if (elemTy.isInteger(16)) return "CU_TENSOR_MAP_DATA_TYPE_UINT16";
     if (elemTy.isInteger(32)) return "CU_TENSOR_MAP_DATA_TYPE_UINT32";
-    if (auto f8Ty = dyn_cast<mlir::Float8E4M3FNType>(elemTy))
+    if (isa<mlir::Float8E4M3FNType>(elemTy))
       return "CU_TENSOR_MAP_DATA_TYPE_UINT8";
-    if (auto f8Ty = dyn_cast<mlir::Float8E5M2Type>(elemTy))
+    if (isa<mlir::Float8E5M2Type>(elemTy))
       return "CU_TENSOR_MAP_DATA_TYPE_UINT8";
+    if (isa<mlir::Float6E2M3FNType>(elemTy) ||
+        isa<mlir::Float6E3M2FNType>(elemTy) ||
+        isa<mlir::Float4E2M1FNType>(elemTy))
+      return "CU_TENSOR_MAP_DATA_TYPE_UINT8";
+    if (elemTy.isBF16()) return "CU_TENSOR_MAP_DATA_TYPE_BFLOAT16";
     return "CU_TENSOR_MAP_DATA_TYPE_FLOAT32";
   }
 
@@ -649,11 +708,23 @@ private:
     auto dimArgMeta = getDimArgs(kernel);
     unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size();
 
+    auto streamName = getStreamName(kernel);
+
+    llvm::SmallVector<llvm::StringRef> hostElemHints;
+    if (auto attr = kernel->getAttrOfType<mlir::ArrayAttr>("coir.host_elem_types"))
+      for (auto a : attr)
+        hostElemHints.push_back(cast<mlir::StringAttr>(a).getValue());
+
     if (numResults == 0) {
       os() << "void " << symName << "(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
-        os() << emitChoreoType(fnType.getInput(i), true) << " p" << i;
+        llvm::StringRef hint = (i < hostElemHints.size()) ? hostElemHints[i] : "";
+        os() << emitChoreoType(fnType.getInput(i), true, hint) << " p" << i;
+      }
+      if (!streamName.empty()) {
+        if (numOrigInputs > 0) os() << ", ";
+        os() << "cudaStream_t " << streamName;
       }
       os() << ") {\n";
 
@@ -693,11 +764,15 @@ private:
       auto dims = getLaunchDims(kernel);
       emitEntryAssertions(kernel);
       auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
+      auto streamName = getStreamName(kernel);
+      bool asyncLaunch = isAsyncLaunch(kernel);
 
       os() << "  " << devName << "<<<" << dims.gridStr() << ", "
          << dims.blockStr();
-      if (!dynShmem.empty())
-        os() << ", " << dynShmem;
+      if (!dynShmem.empty() || !streamName.empty())
+        os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
+      if (!streamName.empty())
+        os() << ", " << streamName;
       os() << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
@@ -710,7 +785,13 @@ private:
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
       }
       os() << ");\n";
-      os() << "  cudaDeviceSynchronize();\n";
+      if (!asyncLaunch) {
+        if (!streamName.empty())
+          os() << "  choreo::abend_true(cudaStreamSynchronize("
+               << streamName << "));\n";
+        else
+          os() << "  cudaDeviceSynchronize();\n";
+      }
 
       for (unsigned i = 0; i < numOrigInputs; ++i)
         os() << "  cudaFree(p" << i << "__device);\n";
@@ -721,7 +802,10 @@ private:
     auto resTy = dyn_cast<coir::TensorType>(fnType.getResult(0));
     if (!resTy) return;
 
-    os() << emitChoreoType(fnType.getResult(0), false) << " " << symName << "(";
+    llvm::StringRef retHint;
+    if (auto retAttr = kernel->getAttrOfType<mlir::StringAttr>("coir.host_ret_elem_type"))
+      retHint = retAttr.getValue();
+    os() << emitChoreoType(fnType.getResult(0), false, retHint) << " " << symName << "(";
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
       auto &body = kernel.getBody();
@@ -729,7 +813,12 @@ private:
       if (!body.empty() && i < body.getArguments().size()) {
         pName = "p" + std::to_string(i);
       }
-      os() << emitChoreoType(fnType.getInput(i), true) << " " << pName;
+      llvm::StringRef hint = (i < hostElemHints.size()) ? hostElemHints[i] : "";
+      os() << emitChoreoType(fnType.getInput(i), true, hint) << " " << pName;
+    }
+    if (!streamName.empty()) {
+      if (numOrigInputs > 0) os() << ", ";
+      os() << "cudaStream_t " << streamName;
     }
     os() << ") {\n";
 
@@ -777,15 +866,30 @@ private:
       ss << "}";
     }
     std::string choreoElem;
-    auto resElemTy = resTy.getElementType();
-    if (resElemTy.isInteger(8)) choreoElem = "choreo::u8";
-    else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
-    else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
-    else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
-    else if (resElemTy.isF32()) choreoElem = "choreo::f32";
-    else if (resElemTy.isF16()) choreoElem = "choreo::f16";
-    else if (resElemTy.isF64()) choreoElem = "choreo::f64";
-    else choreoElem = "choreo::s32";
+    if (!retHint.empty()) {
+      choreoElem = "choreo::" + retHint.str();
+    } else {
+      auto resElemTy = resTy.getElementType();
+      if (resElemTy.isInteger(8)) choreoElem = "choreo::u8";
+      else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
+      else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
+      else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
+      else if (resElemTy.isF32()) choreoElem = "choreo::f32";
+      else if (resElemTy.isF16()) choreoElem = "choreo::f16";
+      else if (resElemTy.isBF16()) choreoElem = "choreo::bf16";
+      else if (resElemTy.isF64()) choreoElem = "choreo::f64";
+      else if (isa<mlir::Float8E4M3FNType>(resElemTy))
+        choreoElem = "choreo::f8_e4m3";
+      else if (isa<mlir::Float8E5M2Type>(resElemTy))
+        choreoElem = "choreo::f8_e5m2";
+      else if (isa<mlir::Float6E2M3FNType>(resElemTy))
+        choreoElem = "choreo::f6_e2m3";
+      else if (isa<mlir::Float6E3M2FNType>(resElemTy))
+        choreoElem = "choreo::f6_e3m2";
+      else if (isa<mlir::Float4E2M1FNType>(resElemTy))
+        choreoElem = "choreo::f4_e2m1";
+      else choreoElem = "choreo::s32";
+    }
 
     os() << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
        << resTy.getShape().size() << ">(" << shapeStr << ");\n";
@@ -813,11 +917,14 @@ private:
     auto dims = getLaunchDims(kernel);
     emitEntryAssertions(kernel);
     auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
+    bool asyncLaunch = isAsyncLaunch(kernel);
 
     os() << "  " << devName << "<<<" << dims.gridStr() << ", "
        << dims.blockStr();
-    if (!dynShmem.empty())
-      os() << ", " << dynShmem;
+    if (!dynShmem.empty() || !streamName.empty())
+      os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
+    if (!streamName.empty())
+      os() << ", " << streamName;
     os() << ">>>(";
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
@@ -831,7 +938,13 @@ private:
       os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
     }
     os() << ");\n";
-    os() << "  cudaDeviceSynchronize();\n";
+    if (!asyncLaunch) {
+      if (!streamName.empty())
+        os() << "  choreo::abend_true(cudaStreamSynchronize("
+             << streamName << "));\n";
+      else
+        os() << "  cudaDeviceSynchronize();\n";
+    }
     if (resBytes < 0) {
       os() << "  cudaMemcpy(__result.data(), __result__device, "
          << "__result.size() * sizeof(" << eType
