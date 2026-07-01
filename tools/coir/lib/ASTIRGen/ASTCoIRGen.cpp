@@ -1046,9 +1046,14 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
   }
 
   if (auto *fl = dyn_cast<AST::FloatLiteral>(&n)) {
+    if (fl->IsFloat64()) {
+      auto ty = mlir::Float64Type::get(&IRContext());
+      double val = fl->Val_f64();
+      return builder.create<mlir::arith::ConstantFloatOp>(
+          loc, llvm::APFloat(val), ty);
+    }
     auto ty = mlir::Float32Type::get(&IRContext());
-    float val = std::visit([](auto v) -> float { return static_cast<float>(v); },
-                           fl->value);
+    float val = fl->Val_f32();
     return builder.create<mlir::arith::ConstantFloatOp>(
         loc, llvm::APFloat(val), ty);
   }
@@ -1931,9 +1936,16 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     auto fragTy = coir::MMAFragType::get(&IRContext(), elemTy, shape);
 
     if (fillVal.getType() != elemTy) {
-      if (mlir::isa<mlir::FloatType>(elemTy) && mlir::isa<mlir::FloatType>(fillVal.getType()))
-        fillVal = builder.create<mlir::arith::ExtFOp>(loc, elemTy, fillVal);
-      else if (mlir::isa<mlir::FloatType>(elemTy))
+      if (mlir::isa<mlir::FloatType>(elemTy) &&
+          mlir::isa<mlir::FloatType>(fillVal.getType())) {
+        unsigned fromBits = fillVal.getType().getIntOrFloatBitWidth();
+        unsigned toBits = elemTy.getIntOrFloatBitWidth();
+        if (toBits > fromBits)
+          fillVal = builder.create<mlir::arith::ExtFOp>(loc, elemTy, fillVal);
+        else
+          fillVal =
+              builder.create<mlir::arith::TruncFOp>(loc, elemTy, fillVal);
+      } else if (mlir::isa<mlir::FloatType>(elemTy))
         fillVal = builder.create<mlir::arith::SIToFPOp>(loc, elemTy, fillVal);
     }
 

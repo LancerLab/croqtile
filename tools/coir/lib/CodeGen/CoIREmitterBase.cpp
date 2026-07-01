@@ -281,6 +281,18 @@ void CoIREmitterBase::emitOp(Operation *op) {
     emitConstant(constOp);
   else if (auto indexCast = dyn_cast<arith::IndexCastOp>(op))
     valueNames[indexCast.getResult()] = getName(indexCast.getIn());
+  else if (auto extF = dyn_cast<arith::ExtFOp>(op)) {
+    auto resTy = extF.getResult().getType();
+    os() << getIndent() << emitType(resTy) << " " << getName(extF.getResult())
+         << " = (" << emitType(resTy) << ")" << getName(extF.getIn())
+         << ";\n";
+  }
+  else if (auto truncF = dyn_cast<arith::TruncFOp>(op)) {
+    auto resTy = truncF.getResult().getType();
+    os() << getIndent() << emitType(resTy) << " "
+         << getName(truncF.getResult()) << " = (" << emitType(resTy) << ")"
+         << getName(truncF.getIn()) << ";\n";
+  }
   else if (auto ifOp = dyn_cast<mlir::scf::IfOp>(op))
     emitIfOp(ifOp);
   else if (auto whileOp = dyn_cast<mlir::scf::WhileOp>(op))
