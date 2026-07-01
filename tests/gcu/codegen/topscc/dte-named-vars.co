@@ -1,0 +1,21 @@
+// RUN: choreo -t topscc --use-dte-pool -fno-future -fnamed-dte -es %s -o - | grep -v '^//' | FileCheck %s --check-prefix=NAMED
+// RUN: choreo -t topscc --use-dte-pool -fno-future -es %s -o - | grep -v '^//' | FileCheck %s --check-prefix=POOL
+
+__co__ void test_namedvar(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    fA = dma.copy.async input => buf_a;
+    fB = dma.copy.async input => buf_b;
+    wait fA;
+    wait fB;
+  }
+}
+
+// Named mode: individual tops::private_dte declarations
+// NAMED: tops::private_dte __dte_fA__
+// NAMED: tops::private_dte __dte_fB__
+
+// Pool mode: array declaration
+// POOL: choreo::choreo_sdte __choreo_dte_pool__[2]
+// POOL: __choreo_dte_pool__[fA_slot]

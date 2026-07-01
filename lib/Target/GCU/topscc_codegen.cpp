@@ -2,10 +2,12 @@
 #include "codegen_utils.hpp"
 #include "topscc_device_codegen.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <iostream>
 #include <sstream>
 #include <system_error>
+#include <vector>
 
 #include "ast.hpp"
 #include "choreo_header.inc"
@@ -48,6 +50,25 @@ Option<bool> split_8byte_dma_transfer(
     OptionKind::Hidden, "-fsplit-8b-dma", "", true,
     "8-byte DMA transfers will be split into 1-byte chunks when platforms that "
     "do not support native 8-byte DMA.");
+Option<bool> raw_dte_mode(
+    OptionKind::User, "-fraw-dte", "", false,
+    "Use raw DTE pool references instead of choreo::future for anonymous sync "
+    "DMA on GCU300. Reduces per-DMA overhead by eliminating future "
+    "construct/destruct.");
+Option<bool> no_future_mode(
+    OptionKind::User, "-fno-future", "", false,
+    "Eliminate ALL choreo::future objects on GCU300. Named async futures are "
+    "replaced with raw DTE pool refs + tops::event tracking. Rotate/swap "
+    "become raw pointer swaps. Subsumes -fraw-dte.");
+Option<bool> named_dte_mode(
+    OptionKind::User, "-fnamed-dte", "", false,
+    "Generate named tops::private_dte variables instead of an array pool. "
+    "Enables better register allocation by eliminating indirect addressing.");
+Option<bool> dte_merge_mode(
+    OptionKind::User, "-fdte-merge", "", false,
+    "Merge DTE slots based on liveness: reuse a waited future's DTE for "
+    "new allocations. Implies -fnamed-dte. Reduces DTE instance count "
+    "(e.g. 8 -> 4 for conv1d). Off by default.");
 
 namespace {
 
@@ -259,6 +280,15 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
 
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << STR(FBInfo()) << "\n");
+    if ((no_future_mode || named_dte_mode || dte_merge_mode) &&
+        !CCtx().UseDtePool()) {
+      std::string flags;
+      if (no_future_mode) flags += " -fno-future";
+      if (named_dte_mode) flags += " -fnamed-dte";
+      if (dte_merge_mode) flags += " -fdte-merge";
+      choreo_unreachable("flags" + flags +
+                         " require --use-dte-pool to be enabled.");
+    }
     // emit the fixed headers
     EmitFixedHostHead();
     EmitFixedDeviceHead();
@@ -449,13 +479,64 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       if (dte_pool_size > 0) {
         auto pos = device_code.find("/*__CHOREO_DTE_POOL_PLACEHOLDER__*/");
         if (pos != std::string::npos) {
-          std::string pool_decl = "choreo::choreo_sdte __choreo_dte_pool__[" +
-                                  std::to_string(dte_pool_size) +
-                                  "];\n"
-                                  "  for (int __i = 0; __i < " +
-                                  std::to_string(dte_pool_size) +
-                                  "; ++__i) __choreo_dte_pool__[__i].init();";
-          device_code.replace(pos, 35, pool_decl);
+          bool use_named = (named_dte_mode || dte_merge_mode);
+          if (use_named) {
+            // Generate named DTE variables instead of array pool.
+            // Named variables enable better register allocation and
+            // eliminate indirect addressing overhead from array indexing.
+            std::string pool_decl;
+            for (int i = 0; i < dte_pool_size; ++i) {
+              std::vector<std::string> slot_users;
+              for (const auto& kv : dte_pool_slots) {
+                if (kv.second == i) slot_users.push_back(kv.first);
+              }
+              std::string var_name;
+              if (slot_users.empty()) {
+                var_name = "__dte_anon_" + std::to_string(i) + "__";
+              } else if (slot_users.size() == 1) {
+                var_name = "__dte_" + slot_users[0] + "__";
+              } else {
+                std::sort(slot_users.begin(), slot_users.end());
+                var_name = "__dte_" + slot_users[0] + "__";
+              }
+              dte_named_vars[i] = var_name;
+              pool_decl += "tops::private_dte " + var_name + ";\n  ";
+            }
+            device_code.replace(pos, 35, pool_decl);
+            // Replace all __choreo_dte_pool__[N] refs with named vars
+            for (int i = 0; i < dte_pool_size; ++i) {
+              std::string old_ref =
+                  "__choreo_dte_pool__[" + std::to_string(i) + "]";
+              std::string new_ref = dte_named_vars[i];
+              size_t search_pos = 0;
+              while ((search_pos = device_code.find(old_ref, search_pos)) !=
+                     std::string::npos) {
+                device_code.replace(search_pos, old_ref.length(), new_ref);
+                search_pos += new_ref.length();
+              }
+            }
+            // Replace dynamic slot refs: __choreo_dte_pool__[X_slot]
+            for (const auto& kv : dte_pool_slots) {
+              std::string old_ref =
+                  "__choreo_dte_pool__[" + kv.first + "_slot]";
+              std::string new_ref = dte_named_vars[kv.second];
+              size_t search_pos = 0;
+              while ((search_pos = device_code.find(old_ref, search_pos)) !=
+                     std::string::npos) {
+                device_code.replace(search_pos, old_ref.length(), new_ref);
+                search_pos += new_ref.length();
+              }
+            }
+          } else {
+            // Default: array pool (original behavior)
+            std::string pool_decl = "choreo::choreo_sdte __choreo_dte_pool__[" +
+                                    std::to_string(dte_pool_size) +
+                                    "];\n"
+                                    "  for (int __i = 0; __i < " +
+                                    std::to_string(dte_pool_size) +
+                                    "; ++__i) __choreo_dte_pool__[__i].init();";
+            device_code.replace(pos, 35, pool_decl);
+          }
         }
       } else {
         auto pos = device_code.find("/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n");
@@ -1561,9 +1642,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // - not support async.
 
   // Generate tops dte and choreo::future in device-side
-  auto claimFuture =
-      [this, &n](const std::string& buf_expr, Storage sto = Storage::DEFAULT,
-                 const std::string& mdata_expr = "") -> std::string {
+  // When raw_dte_mode is enabled, anonymous sync DMA on GCU300 bypasses
+  // choreo::future entirely, using __choreo_dte_pool__[slot] directly.
+  bool is_raw_dte = false;
+  std::string raw_dte_ctx; // e.g. "__choreo_dte_pool__[0]"
+  auto claimFuture = [this, &n, &is_raw_dte, &raw_dte_ctx](
+                         const std::string& buf_expr,
+                         Storage sto = Storage::DEFAULT,
+                         const std::string& mdata_expr = "") -> std::string {
     if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
       return n.future;
 
@@ -1585,7 +1671,22 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (it != dte_pool_slots.end()) {
           slot = it->second;
         } else {
-          slot = dte_pool_size++;
+          // DTE merge (-fdte-merge): reuse a waited future's DTE slot.
+          int reuse_slot = -1;
+          if (dte_merge_mode) {
+            for (const auto& kv : dte_pool_slots) {
+              if (waited_futures.count(kv.first)) {
+                reuse_slot = kv.second;
+                waited_futures.erase(kv.first);
+                break;
+              }
+            }
+          }
+          if (reuse_slot >= 0) {
+            slot = reuse_slot;
+          } else {
+            slot = dte_pool_size++;
+          }
           dte_pool_slots[key] = slot;
         }
       } else {
@@ -1597,6 +1698,38 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       dte_ctx = GetDTEContextName();
       EmitDTEDecl(ds, d_indent, sto, dte_ctx, false, NeedLevelPred());
     }
+
+    // No-future / raw-dte mode: bypass choreo::future entirely
+    bool skip_future = (no_future_mode && use_pool) ||
+                       (raw_dte_mode && use_pool && n.future.empty());
+    if (skip_future) {
+      is_raw_dte = true;
+      raw_dte_ctx = dte_ctx;
+      if (!n.future.empty()) {
+        // Named future: track raw data pointer, event, and DTE slot
+        int slot = dte_pool_slots[n.future];
+        claimed_dte.emplace(InScopeName(n.future), dte_ctx);
+        ds << d_indent << "void* " << n.future << "_data = "
+           << (buf_expr.empty() ? "nullptr" : "(void*)" + buf_expr) << ";\n";
+        ds << d_indent << "tops::event " << n.future << "_evt;\n";
+        if (!(named_dte_mode || dte_merge_mode)) {
+          // Emit _slot variable only in default array pool mode (needed
+          // for dynamic pool indexing and rotate swaps).
+          ds << d_indent << "int " << n.future << "_slot = " << slot << ";\n";
+        }
+        nofuture_vars[InScopeName(n.future)] = {n.future + "_data",
+                                                n.future + "_evt", slot};
+        // Map symbols to raw accessors
+        ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
+        ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
+                            n.future + "_data");
+        if (n.IsSparse())
+          ssm.MapDeviceSymbol(InScopeName(n.future) + ".mdata",
+                              n.future + "_mdata");
+      }
+      return n.future.empty() ? dte_ctx : n.future;
+    }
+    is_raw_dte = false;
 
     auto future_name = n.future;
     if (future_name.empty()) {
@@ -1650,7 +1783,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     // because future.data() no longer points to the array base.
     auto buf_ty = GetSymbolType(UnScopedName(buf_name));
     if (!isa<ArrayType>(buf_ty)) {
-      ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
+      if (no_future_mode && nofuture_vars.count(InScopeName(n.future)))
+        ssm.RemapDeviceSymbol(buf_name, n.future + "_data");
+      else
+        ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
     }
     return true;
   }
@@ -1820,7 +1956,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         }
         auto inner_sty = cast<SpannedType>(sym_ty);
         std::string sub_bytes = inner_sty->ByteSizeExpression();
-        buf_expr = "((char*)" + buf_expr + " + (" + array_idx + ") * " + sub_bytes + ")";
+        buf_expr = "((char*)" + buf_expr + " + (" + array_idx + ") * " +
+                   sub_bytes + ")";
       } else {
         for (auto expr : subscription->AllValues())
           buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
@@ -1986,7 +2123,45 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     future_name = claimFuture("", dma_sto, "");
 
   std::string event_name;
-  if (fty->IsAsync()) event_name = future_name + "__event__";
+  // nf_named: true when this DMA targets a named future tracked in nofuture
+  // mode. Two cases: (1) claimFuture just created the tracking
+  // (is_raw_dte=true),
+  //            (2) future was previously claimed — look it up in nofuture_vars.
+  bool nf_named = is_raw_dte && !n.future.empty() && no_future_mode;
+  if (!nf_named && no_future_mode && !n.future.empty()) {
+    auto sn = InScopeName(n.future);
+    if (nofuture_vars.find(sn) != nofuture_vars.end()) {
+      nf_named = true;
+      is_raw_dte = true;
+    }
+  }
+  if (fty->IsAsync()) {
+    event_name =
+        nf_named ? (future_name + "_evt") : (future_name + "__event__");
+  }
+
+  // DTE context expression for DMA API calls:
+  // no-future/raw-dte mode uses pool reference directly; normal mode
+  // dereferences future
+  std::string dte_ref_expr;
+  if (is_raw_dte) {
+    dte_ref_expr = nf_named ? ("__choreo_dte_pool__[" + future_name + "_slot]")
+                            : raw_dte_ctx;
+  } else {
+    dte_ref_expr = "*" + future_name + ".get_ctx()";
+  }
+
+  // No-future event helpers:
+  // event_decl_prefix: prepended before async DMA call
+  //   normal mode: "tops::event fA__event__ = " (declares new variable)
+  //   no-future:   "fA_evt = "                 (assigns to existing variable)
+  std::string event_decl_prefix;
+  if (!event_name.empty()) {
+    event_decl_prefix =
+        nf_named ? (event_name + " = ") : ("tops::event " + event_name + " = ");
+  }
+  // skip_set_event: whether to skip future_name.set_event() emission
+  bool skip_set_event = nf_named;
 
   // indicate which side can be optimized to linear copy
   DMA_OP opt_to_linear_copy = OptToLinearCopy();
@@ -1994,10 +2169,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // if `no_linear_opt` is true, will not do linear optimization even
   // `opt_to_linear_copy` is available. Use it to control runtime opt.
   auto DMACodeGen = [&](bool no_linear_opt) {
-    // linear opt makes code bloat, lead to bad performance when tuning conv1d.
-    // to get high performance with dte pool, disable it temporarily.
-    // TODO: consider removing linear opt completely.
-    if (CCtx().UseDtePool()) no_linear_opt = true;
     std::string f_mds_offset = "";
     std::string t_mds_offset = "";
     Shape f_shape = f_sty->GetShape();
@@ -2026,7 +2197,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     //   new_shape[k] = P_{k-1} / P_k   for 1 <= k <= N-1
     //   new_shape[0]  kept from original (only bounds-check, not pitch)
     auto ApplyStrideToShape = [this](Shape& shape, const ptr<AST::ChunkAt>& ca,
-                                      const ptr<SpannedType>& sty) {
+                                     const ptr<SpannedType>& sty) {
       auto ca_ty = dyn_cast<SpannedType>(ca->GetType());
       if (!ca_ty) return;
       const auto& strides = ca_ty->GetStrides();
@@ -2036,7 +2207,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       bool differs = (strides.size() != default_strides.size());
       if (!differs) {
         for (size_t i = 0; i < strides.size(); ++i) {
-          if (!sbe::ceq(strides[i], default_strides[i])) { differs = true; break; }
+          if (!sbe::ceq(strides[i], default_strides[i])) {
+            differs = true;
+            break;
+          }
         }
       }
       if (!differs) return;
@@ -2052,7 +2226,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       vl[0] = shape.ValueAt(0);
       for (size_t k = 1; k < N; ++k) {
         auto pk_1 = strides[k - 1];
-        auto pk   = strides[k];
+        auto pk = strides[k];
         if (auto nv1 = dyn_cast<sbe::NumericValue>(pk_1)) {
           if (auto nv2 = dyn_cast<sbe::NumericValue>(pk)) {
             if (nv2->Value() != 0) {
@@ -2111,15 +2285,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (n.operation == ".copy") {
       auto LinearCopy = [&]() -> void {
         ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+        if (!event_name.empty()) ds << event_decl_prefix;
+        ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "("
+           << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name
            << ");\n";
         VerboseDMA(ds, d_indent, t_sym, f_sym, "copy", "", 0,
                    ", line " + std::to_string(n.LOC().begin.line));
         if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+          if (!skip_set_event)
+            ds << d_indent << future_name << ".set_event(" << event_name
+               << ");\n";
       };
       auto Deslice = [&]() -> void {
         static int ds_cnt = 0;
@@ -2129,14 +2304,22 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", offset, offcnt,
                    ", line " + std::to_string(n.LOC().begin.line));
         ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ");\n";
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+        if (nf_named && fty->IsAsync()) {
+          ds << d_indent << dte_ref_expr << ".config_deslice(" << t_mds_name
+             << ", " << f_mds_name << ", " << off_name << ");\n";
+          ds << d_indent << event_name << " = " << dte_ref_expr
+             << ".trigger();\n";
+        } else {
+          ds << d_indent;
+          if (!event_name.empty()) ds << event_decl_prefix;
+          ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "("
+             << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name << ", "
+             << off_name << ");\n";
+          if (!event_name.empty())
+            if (!skip_set_event)
+              ds << d_indent << future_name << ".set_event(" << event_name
+                 << ");\n";
+        }
       };
       auto Slice = [&]() -> void {
         static int s_cnt = 0;
@@ -2146,14 +2329,22 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         VerboseDMA(ds, d_indent, f_sym, t_sym, "slice", offset, offcnt,
                    ", line " + std::to_string(n.LOC().begin.line));
         ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ");\n";
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+        if (nf_named && fty->IsAsync()) {
+          ds << d_indent << dte_ref_expr << ".config_slice(" << t_mds_name
+             << ", " << f_mds_name << ", " << off_name << ", 0);\n";
+          ds << d_indent << event_name << " = " << dte_ref_expr
+             << ".trigger();\n";
+        } else {
+          ds << d_indent;
+          if (!event_name.empty()) ds << event_decl_prefix;
+          ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "("
+             << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name << ", "
+             << off_name << ");\n";
+          if (!event_name.empty())
+            if (!skip_set_event)
+              ds << d_indent << future_name << ".set_event(" << event_name
+                 << ");\n";
+        }
       };
       auto SliceDeslice = [&]() -> void {
         static int s_cnt = 0;
@@ -2168,25 +2359,43 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
         VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", ds_offset, ds_offcnt,
                    ", line " + std::to_string(n.LOC().begin.line));
-        ds << d_indent << "int " << s_off_name << "[] = {" << s_offset
-           << "};\n";
-        ds << d_indent << "int " << ds_off_name << "[] = {" << ds_offset
-           << "};\n";
 
-        auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
-                                f_sym + "_2_" + t_sym;
-        ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-           << ShapeSTR(f_ca->GetBlockShape(), ", ", BaseType::U32) << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::slice_deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << s_off_name << ", " << slice_shape_name << ", "
-           << ds_off_name << ");\n";
+        if (nf_named && fty->IsAsync()) {
+          ds << d_indent << "int " << s_off_name << "[] = {" << s_offset
+             << "};\n";
+          ds << d_indent << "int " << ds_off_name << "[] = {" << ds_offset
+             << "};\n";
+          auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) +
+                                  "__" + f_sym + "_2_" + t_sym;
+          ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
+             << ShapeSTR(f_ca->GetBlockShape(), ", ", BaseType::U32) << "};\n";
+          ds << d_indent << dte_ref_expr << ".config_slice_deslice("
+             << t_mds_name << ", " << f_mds_name << ", " << s_off_name << ", "
+             << slice_shape_name << ", " << ds_off_name << ");\n";
+          ds << d_indent << event_name << " = " << dte_ref_expr
+             << ".trigger();\n";
+        } else {
+          ds << d_indent << "int " << s_off_name << "[] = {" << s_offset
+             << "};\n";
+          ds << d_indent << "int " << ds_off_name << "[] = {" << ds_offset
+             << "};\n";
 
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
+          auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) +
+                                  "__" + f_sym + "_2_" + t_sym;
+          ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
+             << ShapeSTR(f_ca->GetBlockShape(), ", ", BaseType::U32) << "};\n";
+          ds << d_indent;
+          if (!event_name.empty()) ds << event_decl_prefix;
+          ds << "tops::slice_deslice" << (fty->IsAsync() ? "_async" : "") << "("
+             << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name << ", "
+             << s_off_name << ", " << slice_shape_name << ", " << ds_off_name
              << ");\n";
+
+          if (!event_name.empty())
+            if (!skip_set_event)
+              ds << d_indent << future_name << ".set_event(" << event_name
+                 << ");\n";
+        }
       };
 
       if (SymbolToSymbol()) {
@@ -2238,15 +2447,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
       auto Pad = [&]() -> void {
         ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << pad_low << ", " << pad_high << ", " << pad_mid << ", "
+        if (!event_name.empty()) ds << event_decl_prefix;
+        ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "("
+           << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name << ", "
+           << pad_low << ", " << pad_high << ", " << pad_mid << ", "
            << ExprSTR(pad_config->value, IsHost()) << ");\n";
         // set the device future
         if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+          if (!skip_set_event)
+            ds << d_indent << future_name << ".set_event(" << event_name
+               << ");\n";
       };
 
       auto SlicePad = [&]() -> void {
@@ -2262,16 +2472,17 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
            << ShapeSTR(f_ca->GetBlockShape(), ", ", BaseType::U32) << "};\n";
         ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ", " << slice_shape_name << ", " << pad_low
-           << ", " << pad_high << ", " << pad_mid << ", "
+        if (!event_name.empty()) ds << event_decl_prefix;
+        ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "("
+           << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name << ", "
+           << off_name << ", " << slice_shape_name << ", " << pad_low << ", "
+           << pad_high << ", " << pad_mid << ", "
            << ExprSTR(pad_config->value, IsHost()) << ");\n";
         // set the device future
         if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+          if (!skip_set_event)
+            ds << d_indent << future_name << ".set_event(" << event_name
+               << ");\n";
       };
 
       if (SymbolToSymbol()) {
@@ -2297,13 +2508,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
       auto Transpose = [&]() -> void {
         ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << layout_name << ");\n";
+        if (!event_name.empty()) ds << event_decl_prefix;
+        ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "("
+           << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name << ", "
+           << layout_name << ");\n";
         if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+          if (!skip_set_event)
+            ds << d_indent << future_name << ".set_event(" << event_name
+               << ");\n";
       };
       auto SliceTranspose = [&]() -> void {
         static int s_cnt = 0;
@@ -2312,13 +2524,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         auto [offset, offcnt] = GenMdsOffset(f_ca, n.GetConfig());
         ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
         ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "")
-           << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
-           << f_mds_name << ", " << off_name << ", " << layout_name << ");\n";
+        if (!event_name.empty()) ds << event_decl_prefix;
+        ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "") << "("
+           << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name << ", "
+           << off_name << ", " << layout_name << ");\n";
         if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+          if (!skip_set_event)
+            ds << d_indent << future_name << ".set_event(" << event_name
+               << ");\n";
       };
       auto TransposeDeslice = [&]() -> void {
         static int ds_cnt = 0;
@@ -2327,13 +2540,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         auto [offset, offcnt] = GenMdsOffset(t_ca, n.GetConfig());
         ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
         ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        if (!event_name.empty()) ds << event_decl_prefix;
         ds << "tops::transpose_deslice" << (fty->IsAsync() ? "_async" : "")
-           << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
-           << f_mds_name << ", " << layout_name << ", " << off_name << ");\n";
+           << "(" << dte_ref_expr << ", " << t_mds_name << ", " << f_mds_name
+           << ", " << layout_name << ", " << off_name << ");\n";
         if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+          if (!skip_set_event)
+            ds << d_indent << future_name << ".set_event(" << event_name
+               << ");\n";
       };
 
       if (SymbolToSymbol()) {
@@ -2364,7 +2578,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   };
 
-  if (false && (!f_opt_condition.empty() || !t_opt_condition.empty())) {
+  // linear opt makes code bloat, lead to bad performance when tuning conv1d.
+  // to get high performance with dte pool, disable it temporarily.
+  // TODO: consider removing linear opt completely.
+  if (!CCtx().UseDtePool() &&
+      (!f_opt_condition.empty() || !t_opt_condition.empty())) {
     // need generating runtime conditional optimization
     std::ostringstream condition;
     if (!f_opt_condition.empty())
@@ -2383,7 +2601,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     DecrDeviceIndent();
     IndStream() << "} // end DMA opt: " << n.LOC() << "\n";
   } else {
-    DMACodeGen(false);
+    DMACodeGen(true);
   }
 
   return true;
@@ -2395,6 +2613,37 @@ bool TopsccCodeGen::Visit(AST::Rotate& n) {
   if (IsHost())
     choreo_unreachable(
         "rotate is only support in device side(inside parallel-by)!");
+
+  // No-future mode: emit raw pointer/event/slot rotation
+  if (no_future_mode) {
+    auto& ids = n.GetIds();
+    std::vector<std::string> names;
+    bool all_nofuture = true;
+    for (auto& id : ids) {
+      auto sym = cast<AST::Identifier>(id);
+      names.push_back(sym->name);
+      if (!nofuture_vars.count(InScopeName(sym->name))) all_nofuture = false;
+    }
+    if (all_nofuture && names.size() >= 2) {
+      // Rotate: a <- b <- c <- a (for 3 elements)
+      // Implemented as: tmp = a; a = b; b = c; c = tmp;
+      auto emit_swap_field = [&](const std::string& suffix) {
+        ds << d_indent << "{ auto __tmp = " << names[0] << suffix << "; ";
+        for (size_t i = 0; i < names.size() - 1; ++i)
+          ds << names[i] << suffix << " = " << names[i + 1] << suffix << "; ";
+        ds << names.back() << suffix << " = __tmp; }\n";
+      };
+      emit_swap_field("_data");
+      emit_swap_field("_evt");
+      if (!(named_dte_mode || dte_merge_mode)) {
+        // Only emit _slot swap when using array pool (default mode).
+        // Named DTE mode doesn't need slot swaps — DTE references are
+        // resolved by the final text replacement pass.
+        emit_swap_field("_slot");
+      }
+      return true;
+    }
+  }
 
   ds << d_indent << "choreo::rotate(";
   int i = 0;
@@ -2448,7 +2697,19 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
                    : NodeType(*f);
     if (isa<FutureType>(fty)) {
       assert(!IsHost());
-      ds << d_indent << ExprSTR(f, false) << ".wait();\n";
+      auto fut_sym = cast<AST::Expr>(f)->GetSymbol();
+      auto sname = fut_sym ? InScopeName(fut_sym->name) : "";
+      auto nf_wait_it =
+          no_future_mode ? nofuture_vars.find(sname) : nofuture_vars.end();
+      if (nf_wait_it != nofuture_vars.end()) {
+        ds << d_indent << "tops::wait(" << nf_wait_it->second.event_var
+           << ");\n";
+      } else {
+        ds << d_indent << ExprSTR(f, false) << ".wait();\n";
+      }
+      // Track that this future has been waited (DTE is now free for reuse)
+      if (fut_sym && !fut_sym->name.empty())
+        waited_futures.insert(fut_sym->name);
     } else if (auto ety = dyn_cast<EventArrayType>(fty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
@@ -3101,11 +3362,9 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
     // --- memory reuse diagnostics ---
     hs << h_indent << "printf(\"[mem-reuse] heap_size = %u bytes (%.1f KB), "
        << "capacity = " << mem_capacity << " bytes (%.1f KB), "
-       << "usage = %.1f%%\\n\", "
-       << ie.spm_size << ", "
-       << ie.spm_size << " / 1024.0, "
-       << mem_capacity << " / 1024.0, "
-       << ie.spm_size << " * 100.0 / " << mem_capacity << ");\n";
+       << "usage = %.1f%%\\n\", " << ie.spm_size << ", " << ie.spm_size
+       << " / 1024.0, " << mem_capacity << " / 1024.0, " << ie.spm_size
+       << " * 100.0 / " << mem_capacity << ");\n";
     hs << h_indent << "printf(\"[mem-reuse] %zu chunks allocated:\\n\", "
        << ie.chunks_name << ".size());\n";
     hs << h_indent << "{\n";
@@ -3114,7 +3373,8 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
        << ") {\n";
     hs << h_indent << "    printf(\"[mem-reuse]   [%zu] %-60s  size=%8zu  "
        << "offset=%8lu\\n\",\n";
-    hs << h_indent << "           __mr_i, __mr_c.buffer_id.c_str(), __mr_c.size, "
+    hs << h_indent
+       << "           __mr_i, __mr_c.buffer_id.c_str(), __mr_c.size, "
        << ie.offsets_name << "[__mr_i]);\n";
     hs << h_indent << "    __mr_i++;\n";
     hs << h_indent << "  }\n";
@@ -4113,10 +4373,22 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
         auto caty = cast<SpannedType>(ca->GetType());
         std::string res;
-        if (isa<FutureType>(NodeType(*ca->data)))
-          res = OpExprSTR(ca->data, parent_op, true, is_host) + ".data() + " +
-                GenOffset(ca);
-        else
+        if (isa<FutureType>(NodeType(*ca->data))) {
+          if (no_future_mode) {
+            auto ca_id = dyn_cast<AST::Identifier>(ca->data);
+            auto ca_sn = ca_id ? InScopeName(ca_id->name) : "";
+            auto nf_it = nofuture_vars.find(ca_sn);
+            if (nf_it != nofuture_vars.end())
+              res = "((" + std::string(NameBaseType(caty->GetBaseType())) +
+                    "*)" + nf_it->second.data_ptr + ") + " + GenOffset(ca);
+            else
+              res = OpExprSTR(ca->data, parent_op, true, is_host) +
+                    ".data() + " + GenOffset(ca);
+          } else {
+            res = OpExprSTR(ca->data, parent_op, true, is_host) + ".data() + " +
+                  GenOffset(ca);
+          }
+        } else
           res = OpExprSTR(ca->data, "+", true, is_host) + " + " + GenOffset(ca);
         return WrapParen(res, "+");
       } else {
@@ -4134,11 +4406,19 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
-          if (is_host)
+          if (is_host) {
             oss << id->name << "__buf__";
-          else
-            oss << id->name
-                << (expr->GetOp() == Op::MDataOf ? ".mdata()" : ".data()");
+          } else {
+            auto sname = InScopeName(id->name);
+            auto nf_data_it = no_future_mode ? nofuture_vars.find(sname)
+                                             : nofuture_vars.end();
+            if (nf_data_it != nofuture_vars.end()) {
+              oss << nf_data_it->second.data_ptr;
+            } else {
+              oss << id->name
+                  << (expr->GetOp() == Op::MDataOf ? ".mdata()" : ".data()");
+            }
+          }
         } else
           choreo_unreachable("Can not retrieve name of the future.");
       } else if (expr->GetOp() == Op::SizeOf) {
@@ -4206,18 +4486,18 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
               if (auto inner_sty = GetSpannedType(arr_ty)) {
                 use_ptr_arith = true;
                 std::string sub_bytes = inner_sty->ByteSizeExpression();
-                std::string bts =
-                    std::string(NameBaseType(inner_sty->ElementType(), is_host));
+                std::string bts = std::string(
+                    NameBaseType(inner_sty->ElementType(), is_host));
                 oss << "((" << bts << "*)((char*)"
-                    << OpExprSTR(expr->GetL(), "", true, is_host)
-                    << " + (" << OpExprSTR(expr->GetR(), "*", true, is_host)
-                    << ") * " << sub_bytes << "))";
+                    << OpExprSTR(expr->GetL(), "", true, is_host) << " + ("
+                    << OpExprSTR(expr->GetR(), "*", true, is_host) << ") * "
+                    << sub_bytes << "))";
               }
             }
           }
         }
         if (!use_ptr_arith)
-          oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "[" 
+          oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
               << OpExprSTR(expr->GetR(), "", true, is_host) << "]";
       } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare() ||
                  expr->isBitwise()) {

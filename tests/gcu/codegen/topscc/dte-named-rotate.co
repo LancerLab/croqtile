@@ -1,0 +1,24 @@
+// RUN: choreo -t topscc -fno-future -fnamed-dte --use-dte-pool -es %s -o - | grep -v '^//' | FileCheck %s --check-prefix=NAMED
+// RUN: choreo -t topscc -fno-future --use-dte-pool -es %s -o - | grep -v '^//' | FileCheck %s --check-prefix=POOL
+
+// Test rotate/swap with named DTE mode.
+// Named: no _slot swap emitted. Pool: _slot swap present.
+__co__ void test_rotatedte(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    fA = dma.copy.async input => buf_a;
+    fB = dma.copy.async input => buf_b;
+    swap(fA, fB);
+    wait fA;
+    wait fB;
+  }
+}
+
+// Named mode: data/evt swap but no slot swap
+// NAMED: { auto __tmp = fA_data;
+// NAMED: { auto __tmp = fA_evt;
+// NAMED-NOT: fA_slot =
+
+// Pool mode: includes slot swap
+// POOL: { auto __tmp = fA_slot;

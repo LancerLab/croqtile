@@ -158,6 +158,15 @@ private:
   std::map<std::string, std::string> claimed_dte;
   int dte_pool_size = 0;
   std::map<std::string, int> dte_pool_slots;
+  std::map<int, std::string> dte_named_vars;
+  std::set<std::string> waited_futures; // futures that have been waited
+
+  struct NoFutureInfo {
+    std::string data_ptr;
+    std::string event_var;
+    int dte_slot;
+  };
+  std::map<std::string, NoFutureInfo> nofuture_vars;
   std::vector<std::string> pld_checklist = {};
 
   std::set<std::string> global_buffers; // global buffers
@@ -254,6 +263,9 @@ private:
     claimed_dte.clear();
     dte_pool_size = 0;
     dte_pool_slots.clear();
+    dte_named_vars.clear();
+    waited_futures.clear();
+    nofuture_vars.clear();
     fty = nullptr;
     void_return = false;
     emit_call = true;
