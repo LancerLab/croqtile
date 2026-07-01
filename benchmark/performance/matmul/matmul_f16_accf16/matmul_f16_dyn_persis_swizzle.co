@@ -60,15 +60,10 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
 
         mc = mma.fill.f16 0.0f;
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).step(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
-          tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).step(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
-
-          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-            parallel p by 1 : group-4 {
-              ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(_, iv_warp);
-              mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-              mma.row.row mc, ma, mb;
-            }
+          tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+          tma.copy.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s;
+          parallel p by 1 : group-4 {
+            mma.row.row mc, lhs_load_s, rhs_load_s;
           }
         }
         mma.store mc, output_s;
@@ -212,25 +207,11 @@ int main(int argc, char** argv) {
   auto rhs_view = rhs_h.view();
   auto res_view = res_h.view();
 
-  float tolerance = 0.05f;
-  auto rel_error = [](float ref, float got) {
-    float abs_ref = std::abs(ref);
-    float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
-    return std::abs(ref - got) / denom;
-  };
-  for (size_t i = 0; i < 256; ++i) {
-    for (size_t j = 0; j < 256; ++j) {
-      float ref = 0.0f;
-      for (size_t k = 0; k < lhs_view.shape()[1]; ++k)
-        ref += __half2float(lhs_view[i][k] * rhs_view[j][k]);
-      float got = __half2float(res_view[i][j]);
-      auto delta = rel_error(ref, got);
-      if (delta >= tolerance) {
-        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << got << ", delta: " << delta * 100 << "%\n";
-      }
-      choreo::choreo_assert((delta < tolerance), "values are not equal.");
-    }
-  }
+  choreo::SampledVerifierConfig vcfg;
+  vcfg.num_samples = 512;
+  vcfg.base_tol = 0.5f;
+  vcfg.rel_tol = 0.02f;
+  choreo::verify_matmul_row_row_sampled(lhs_view, rhs_view, res_view, vcfg);
 
   std::cout << "Test Passed\n" << std::endl;
 

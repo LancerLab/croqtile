@@ -55,7 +55,6 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
     shared event full[MATMUL_STAGES], empty[MATMUL_STAGES];
     shared f8_e4m3 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s[MATMUL_STAGES];
     shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s[MATMUL_STAGES];
-    shared f32 [MATMUL_STAGES, 1] rhs_scale_s;
     shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
 
     foreach {tile_iter} in [cdiv(total_tiles, NUM_SMS)] {
@@ -64,6 +63,7 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
         block_m = tile_id / tiles_n;
         block_n = tile_id % tiles_n;
 
+        rhs_scale_s = dma.copy scale_rhs.subspan(1, DIV_BLK_K).at(block_n, 0) => shared;
         parallel p1 by 2 : group-4, t by 128 : thread {
           inthreads.async (p1 == 0) {
             foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
@@ -73,8 +73,6 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
                   => lhs_load_s[stage];
               tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k)
                   => rhs_load_s[stage];
-              rhs_scale_f = dma.copy.async scale_rhs.subspan(1, 1).at(block_n, iv_k) => rhs_scale_s.subspan(1, 1).at(stage, 0);
-              wait rhs_scale_f;
               trigger full[stage];
             }
           }
@@ -92,15 +90,16 @@ __co__ void blockscale_gemm(global f8_e4m3 [M, K] lhs,
 
               mma.row.row mc, lhs_load_s[stage], rhs_load_s[stage];
 
-              mma.scale mc, 
+              mma.scale mc,
                         scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k),
-                        rhs_scale_s.at(stage, 0);
+                        rhs_scale_s.data.at(0, iv_k);
               trigger empty[stage];
             }
             mma.store mc, output_s;
             tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
           }
         }
+        sync.shared;
       }
     }
   }

@@ -11,9 +11,9 @@ This document summarizes the comparison between Choreo's current `blockscale_gem
 - `wip_kernels/blockscale_gemm_e4m3_dyn_sm90_warpspec_1p1c.co`
 - `wip_kernels/blockscale_gemm_e4m3_dyn_sm90_tileN.co`
 - `tests/gpu/end2end/matmul/blockscale_gemm_e4m3_dyn_sm90_N48.co`
-- `tests/gpu/end2end/matmul/matmul_e4m3_dynamic_sm90.co`
-- `tests/gpu/end2end/matmul/matmul_e4m3_dynamic_mwg_sm90.co`
-- `tests/gpu/end2end/matmul/matmul_f16_dyn_sm90_warpspec_1p1c.co`
+- `tests/gpu/end2end/matmul/matmul_e4m3_dyn.co`
+- `tests/gpu/end2end/matmul/matmul_e4m3_dyn_mwg.co`
+- `tests/gpu/end2end/matmul/matmul_f16_dyn_warpspec_1p1c.co`
 
 ### Generated CUDA Files (via `-es`)
 All generated to `build/investigate/`:
@@ -21,9 +21,9 @@ All generated to `build/investigate/`:
 - `blockscale_gemm_e4m3_dyn_sm90_warpspec_1p1c.cu`
 - `blockscale_gemm_e4m3_dyn_sm90_tileN.cu`
 - `blockscale_gemm_e4m3_dyn_sm90_N48.cu`
-- `matmul_e4m3_dynamic_sm90.cu`
-- `matmul_e4m3_dynamic_mwg_sm90.cu`
-- `matmul_f16_dyn_sm90_warpspec_1p1c.cu`
+- `matmul_e4m3_dyn.cu`
+- `matmul_e4m3_dyn_mwg.cu`
+- `matmul_f16_dyn_warpspec_1p1c.cu`
 
 ---
 
@@ -119,7 +119,7 @@ dim3 __blockscale_gemm_bdims0(128, 1, 1);
 - Can handle complex tiling patterns
 
 **Note:** Choreo has persistent kernel examples in regular FP8 matmul:
-- `benchmark/performance/matmul/matmul_e4m3_dyn_persis_sta_sm90.co`
+- `benchmark/performance/matmul/matmul_e4m3_dyn_persis_sta.co`
 
 ---
 
@@ -189,8 +189,8 @@ DeepGEMM treats scale as first-class pipeline citizen:
 ### Priority 2: Producer/Consumer Topology
 - Extend from `1p1c` to `1pN` (e.g., 1 producer + 2-3 consumers)
 - Leverage existing templates in:
-  - `tests/gpu/end2end/matmul/matmul_e4m3_dynamic_mwg_sm90.co`
-  - `benchmark/performance/matmul/matmul_e4m3_dyn_sm90_warpspec_1p1c.co`
+  - `tests/gpu/end2end/matmul/matmul_e4m3_dyn_mwg.co`
+  - `benchmark/performance/matmul/matmul_e4m3_dyn_warpspec_1p1c.co`
 
 ### Priority 3: Hyperparameter Tuning
 - After fixing P1/P2, tune:
@@ -221,9 +221,9 @@ build/investigate/
 ├── blockscale_gemm_e4m3_dyn_sm90_warpspec_1p1c.cu
 ├── blockscale_gemm_e4m3_dyn_sm90_tileN.cu
 ├── blockscale_gemm_e4m3_dyn_sm90_N48.cu
-├── matmul_e4m3_dynamic_sm90.cu
-├── matmul_e4m3_dynamic_mwg_sm90.cu
-└── matmul_f16_dyn_sm90_warpspec_1p1c.cu
+├── matmul_e4m3_dyn.cu
+├── matmul_e4m3_dyn_mwg.cu
+└── matmul_f16_dyn_warpspec_1p1c.cu
 ```
 
 ---

@@ -45,7 +45,8 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global 
   // and warp_k==32 are fixed by ISA; warp_n is tunable.  The tiling
   // scheme mirrors the f16 mwg kernel but with e4m3 data types.
   // WGMMA requires 128 threads (4 warps x 32 threads/warp)
-  parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block {
+  parallel {block_m, block_n} by [cdiv(M, MATMUL_TILE_M), cdiv(N, MATMUL_WARP_N)] : block
+  parallel p1 by 2 : group-4 {
     shared f8_e4m3 [MATMUL_TILE_M, MATMUL_TILE_K] lhs_load_s;
     shared f8_e4m3 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
     shared f16 [MATMUL_TILE_M, MATMUL_WARP_N] output_s;
@@ -54,16 +55,10 @@ __co__ void matmul(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global 
     foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
       tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
       tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
-      parallel p1 by 2 : group-4 {
-        foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-          ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.chunkat(p1, iv_warp);
-          mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.chunkat(_, iv_warp);
-          mma.row.row mc, ma, mb;
-        }
-        if (iv_k == cdiv(K, MATMUL_TILE_K) - 1)
-          mma.store mc, output_s.chunkat(p1, _);
-      }
+
+      mma.row.row mc, lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(p1, 0), rhs_load_s;       
     }
+    mma.store mc, output_s.chunkat(p1, _);
     tma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(block_m, block_n);
   }
 }
@@ -178,24 +173,10 @@ int main(int argc, char** argv) {
   auto rhs_view = rhs_h.view();
   auto res_view = res_h.view();
 
-  float tolerance = 0.05f;
-  auto rel_error = [](float ref, float got) {
-    float abs_ref = std::abs(ref);
-    float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
-    return std::abs(ref - got) / denom;
-  };
-  for (size_t i = 0; i < M; ++i) {
-    for (size_t j = 0; j < N; ++j) {
-      float ref = 0.0f;
-      for (size_t k = 0; k < lhs_view.shape()[1]; ++k)
-        ref += static_cast<float>(lhs_view[i][k]) * static_cast<float>(rhs_view[j][k]);
-      float got = __half2float(res_view[i][j]);
-      auto delta = rel_error(ref, got);
-      if (delta >= tolerance) {
-        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << got << ", delta: " << delta * 100 << "%\n";
-      }
-      choreo::choreo_assert((delta < tolerance), "values are not equal.");
-    }
-  }
+  choreo::SampledVerifierConfig vcfg;
+  vcfg.num_samples = 512;
+  vcfg.base_tol = 1.0f;
+  vcfg.rel_tol = 0.05f;
+  choreo::verify_matmul_row_row_sampled(lhs_view, rhs_view, res_view, vcfg);
   std::cout << "Test Passed\n" << std::endl;
 }

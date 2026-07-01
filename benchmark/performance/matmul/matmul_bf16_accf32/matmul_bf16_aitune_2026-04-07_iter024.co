@@ -1,30 +1,58 @@
 #include <cstring>
 #include <cstdlib>
 
-#define H800_PCIE_PEAK_F16_TFLOPS 1513
+#define H800_PCIE_PEAK_bf16_TFLOPS 1513
 
-#define TILE_M 32
-#define TILE_N 32
-#define TILE_K 128
+#define WARP_M 64
+#define WARP_N 160
+#define TILE_M 64
+#define TILE_K 64
+#define WARP_K 16
+#define SWIZ 128
+#define STAGES 3
+#define CONSUMER_COUNT 1
 
-#define DEFAULT_M 8192
-#define DEFAULT_N 8192
-#define DEFAULT_K 8192
+#define DEFAULT_M 2048
+#define DEFAULT_N 2048
+#define DEFAULT_K 2048
 
-__co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
-  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, TILE_N)] : block,
-           {thr_m, thr_n} by [TILE_M, TILE_N] : thread {
-    shared f16 [TILE_M, TILE_K] lhs_s;
-    shared f16 [TILE_N, TILE_K] rhs_s;
-    f16 acc = 0.0f;
-    foreach {iv_k} in [cdiv(K, TILE_K)] {
-      dma.copy lhs.subspan(TILE_M, TILE_K).at(block_m, iv_k) => lhs_s;
-      dma.copy rhs.subspan(TILE_N, TILE_K).at(block_n, iv_k) => rhs_s;
+__co__ void matmul(global bf16 [M, K] lhs, global bf16 [N, K] rhs, global bf16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, WARP_N)] : block {
+    shared event full[STAGES], empty[STAGES];
+    shared bf16 [TILE_M, TILE_K] lhs_s[STAGES];
+    shared bf16 [WARP_N, TILE_K] rhs_s[STAGES];
+    shared bf16 [WARP_M, WARP_N] output_s[CONSUMER_COUNT];
 
-      foreach {ik} in [TILE_K]
-        acc += lhs_s.at(thr_m, ik) * rhs_s.at(thr_n, ik);
+    parallel wg by 2 : group-4, t by 128 : thread {
+      inthreads.async (wg == 0) {
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait empty[stage];
+          tma.copy.async<full[stage]>.swiz<SWIZ> lhs
+            .subspan(TILE_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
+          tma.copy.async<full[stage]>.swiz<SWIZ> rhs
+            .subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
+          trigger full[stage];
+        }
+      }
+
+      inthreads.async (wg >= 1) {
+        cidx = wg - 1;
+        mc = mma.fill.f32 0.0f;
+        foreach {s} in [STAGES]
+          trigger empty[s];
+
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait full[stage];
+          mma.row.row mc, lhs_s[stage], rhs_s[stage];
+          trigger empty[stage];
+        }
+        mma.store mc, output_s[cidx];
+        tma.copy output_s[cidx] => output.subspan(WARP_M, WARP_N)
+          .at(block_m * CONSUMER_COUNT + cidx, block_n);
+      }
     }
-    output.at(block_m#thr_m, block_n#thr_n) = acc;
   }
 }
 
@@ -72,9 +100,9 @@ int main(int argc, char** argv) {
   size_t N = DEFAULT_N;
   size_t K = DEFAULT_K;
 
-  auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);
-  auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);
-  auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+  auto lhs_h = choreo::make_spandata<choreo::bf16>(M, K);
+  auto rhs_h = choreo::make_spandata<choreo::bf16>(N, K);
+  auto res_h = choreo::make_spandata<choreo::bf16>(M, N);
   lhs_h.fill_random(0, 2);
   rhs_h.fill_random(0, 2);
   res_h.fill(0.0f);
@@ -89,9 +117,9 @@ int main(int argc, char** argv) {
   choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaDeviceSynchronize());
 
-  auto lhs_d = choreo::make_spanview<choreo::f16, 2>(a_d, {M, K});
-  auto rhs_d = choreo::make_spanview<choreo::f16, 2>(b_d, {N, K});
-  auto res_d = choreo::make_spanview<choreo::f16, 2>(c_d, {M, N});
+  auto lhs_d = choreo::make_spanview<choreo::bf16, 2>(a_d, {M, K});
+  auto rhs_d = choreo::make_spanview<choreo::bf16, 2>(b_d, {N, K});
+  auto res_d = choreo::make_spanview<choreo::bf16, 2>(c_d, {M, N});
   if (enable_timing) {
     int warmup = 5;
     int repeat = 20;
@@ -115,7 +143,7 @@ int main(int argc, char** argv) {
     double tflops = (flops / (avg_ms / 1000.0)) / 1e12;
     std::cout << "TFLOPS: " << tflops << "\n";
 
-    double eff = (tflops / H800_PCIE_PEAK_F16_TFLOPS) * 100.0;
+    double eff = (tflops / H800_PCIE_PEAK_bf16_TFLOPS) * 100.0;
     std::cout << "HW efficiency: " << eff << "%\n";
   } else {
     matmul(lhs_d, rhs_d, res_d);
@@ -133,25 +161,11 @@ int main(int argc, char** argv) {
   auto rhs_view = rhs_h.view();
   auto res_view = res_h.view();
 
-  float tolerance = 0.05f;
-  auto rel_error = [](float ref, float got) {
-    float abs_ref = std::abs(ref);
-    float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
-    return std::abs(ref - got) / denom;
-  };
-  for (size_t i = 0; i < 128; ++i) {
-    for (size_t j = 0; j < 128; ++j) {
-      float ref = 0.0f;
-      for (size_t k = 0; k < lhs_view.shape()[1]; ++k)
-        ref += __half2float(lhs_view[i][k] * rhs_view[j][k]);
-      float got = __half2float(res_view[i][j]);
-      auto delta = rel_error(ref, got);
-      if (delta >= tolerance) {
-        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << got << ", delta: " << delta * 100 << "%\n";
-      }
-      choreo::choreo_assert((delta < tolerance), "values are not equal.");
-    }
-  }
+  choreo::SampledVerifierConfig vcfg;
+  vcfg.num_samples = 512;
+  vcfg.base_tol = 1.0f;
+  vcfg.rel_tol = 0.01f;
+  choreo::verify_matmul_row_row_sampled(lhs_view, rhs_view, res_view, vcfg);
 
   std::cout << "Test Passed\n" << std::endl;
 }

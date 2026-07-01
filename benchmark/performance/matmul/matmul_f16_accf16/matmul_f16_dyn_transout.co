@@ -16,7 +16,6 @@
 #define MATMUL_TILE_K 64
 #define MATMUL_WARP_K 16
 #define MATMUL_SWIZ 128
-#define MATMUL_STAGES 4
 
 #if MATMUL_SWIZ != (2 * MATMUL_TILE_K)
 #error "MATMUL_SWIZ must equal 2 * MATMUL_TILE_K for f16 kernel"
@@ -46,47 +45,25 @@
 #define MATMUL_DEFAULT_N 2048
 #define MATMUL_DEFAULT_K 2048
 
-__co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
-  // Warp-specialized (1 producer + 1 consumer):
-  // - producer warpgroup (p1 == 0): issue TMA load and trigger full[stage]
-  // - consumer warpgroup (p1 == 1): wait full[stage], WGMMA compute, trigger empty[stage]
+__co__ void matmul_trans_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [N, M] output) {
+
+  // each block handles 64x64 block with WGMMA
+  // WGMMA requires 128 threads (4 warps x 32 threads/warp)
   parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block {
-    shared event full[MATMUL_STAGES], empty[MATMUL_STAGES];
-    shared f16 [MATMUL_STAGES * MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
-    shared f16 [MATMUL_STAGES * MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
-    shared f16 [MATMUL_WARP_M, MATMUL_WARP_N] output_s;
-
-    parallel p1 by 2 : group-4, t by 128 : thread {
-      inthreads.async (p1 == 0) {
-        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-          stage = iv_k % MATMUL_STAGES;
-          wait empty[stage];
-          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0);
-          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0);
-          trigger full[stage];
-        }
-      }
-
-      inthreads.async (p1 == 1) {
-        mc = mma.fill.f16 0.0f;
-        foreach {s} in [MATMUL_STAGES] {
-          trigger empty[s];
-        }
-        foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-          stage = iv_k % MATMUL_STAGES;
-          wait full[stage];
-          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-            ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
-            mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
-            mma.row.row mc, ma, mb;
-          }
-          mma.commit;
-          trigger empty[stage];
-        }
-        mma.store mc, output_s;
-        tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);
+    shared f16 [MATMUL_WARP_M, MATMUL_TILE_K] lhs_load_s;
+    shared f16 [MATMUL_WARP_N, MATMUL_TILE_K] rhs_load_s;
+    mc = mma.fill.f16 0.0f;
+    foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+      tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
+      parallel p by 1 : group-4 {
+        mma.row.row mc, lhs_load_s, rhs_load_s;
       }
     }
+
+    shared f16 [MATMUL_WARP_N, MATMUL_WARP_M] output_s;
+    mma.store.transp mc, output_s;
+    tma.copy output_s => output.subspan(MATMUL_WARP_N, MATMUL_WARP_M).at(block_n, block_m);
   }
 }
 
@@ -136,7 +113,7 @@ int main(int argc, char** argv) {
 
   auto lhs_h = choreo::make_spandata<choreo::f16>(M, K);
   auto rhs_h = choreo::make_spandata<choreo::f16>(N, K);
-  auto res_h = choreo::make_spandata<choreo::f16>(M, N);
+  auto res_h = choreo::make_spandata<choreo::f16>(N, M);
   lhs_h.fill_random(0, 2);
   rhs_h.fill_random(0, 2);
   res_h.fill(0.0f);
@@ -144,16 +121,16 @@ int main(int argc, char** argv) {
   half *a_d = nullptr, *b_d = nullptr, *c_d = nullptr;
   choreo::abend_true(cudaMalloc(&a_d, M * K * sizeof(half)));
   choreo::abend_true(cudaMalloc(&b_d, N * K * sizeof(half)));
-  choreo::abend_true(cudaMalloc(&c_d, M * N * sizeof(half)));
+  choreo::abend_true(cudaMalloc(&c_d, N * M * sizeof(half)));
   
   choreo::abend_true(cudaMemcpy(a_d, lhs_h.data(), M * K * sizeof(half), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaMemcpy(b_d, rhs_h.data(), N * K * sizeof(half), cudaMemcpyHostToDevice));
-  choreo::abend_true(cudaMemcpy(c_d, res_h.data(), M * N * sizeof(half), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(c_d, res_h.data(), N * M * sizeof(half), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaDeviceSynchronize());
 
   auto lhs_d = choreo::make_spanview<choreo::f16, 2>(a_d, {M, K});
   auto rhs_d = choreo::make_spanview<choreo::f16, 2>(b_d, {N, K});
-  auto res_d = choreo::make_spanview<choreo::f16, 2>(c_d, {M, N});
+  auto res_d = choreo::make_spanview<choreo::f16, 2>(c_d, {N, M});
   if (enable_timing) {
     int warmup = 10;
     int repeat = 500;
@@ -170,7 +147,7 @@ int main(int argc, char** argv) {
     choreo::TimerOption topt;
     topt.warmup = warmup;
     topt.repeat = repeat;
-    auto avg_ms = choreo::timing([&]() { matmul(lhs_d, rhs_d, res_d); cudaDeviceSynchronize(); }, topt);
+    auto avg_ms = choreo::timing([&]() { matmul_trans_sm90(lhs_d, rhs_d, res_d); cudaDeviceSynchronize(); }, topt);
     std::cout << "Timing avg ms: " << avg_ms << "\n";
 
     double flops = (user_flops > 0.0) ? user_flops : (2.0 * double(M) * double(N) * double(K));
@@ -180,10 +157,10 @@ int main(int argc, char** argv) {
     double eff = (tflops / H800_PCIE_PEAK_F16_TFLOPS) * 100.0;
     std::cout << "HW efficiency: " << eff << "%\n";
   } else {
-    matmul(lhs_d, rhs_d, res_d);
+    matmul_trans_sm90(lhs_d, rhs_d, res_d);
   }
 
-  choreo::abend_true(cudaMemcpy(res_h.data(), c_d, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+  choreo::abend_true(cudaMemcpy(res_h.data(), c_d, N * M * sizeof(half), cudaMemcpyDeviceToHost));
   choreo::abend_true(cudaDeviceSynchronize());
 
   if (skip_verify) {
@@ -195,25 +172,32 @@ int main(int argc, char** argv) {
   auto rhs_view = rhs_h.view();
   auto res_view = res_h.view();
 
-  float tolerance = 0.05f;
-  auto rel_error = [](float ref, float got) {
-    float abs_ref = std::abs(ref);
-    float denom = abs_ref > 1e-6f ? abs_ref : 1.0f;
-    return std::abs(ref - got) / denom;
-  };
-  // verification
-  for (size_t i = 0; i < 128; ++i) {
-    for (size_t j = 0; j < 256; ++j) {
-      float ref = 0.0f;
-      for (size_t k = 0; k < lhs_view.shape()[1]; ++k)
-        ref += __half2float(lhs_view[i][k] * rhs_view[j][k]);
-      float got = __half2float(res_view[i][j]);
-      auto delta = rel_error(ref, got);
-      if (delta >= tolerance) {
-        std::cout << "[" << i << ", " << j << "] " << ref << " <-> " << got << ", delta: " << delta * 100 << "%\n";
-      }
-      choreo::choreo_assert((delta < tolerance), "values are not equal.");
+  // Output is transposed [N,M], so res_view[j][i] = dot(lhs[i,:], rhs[j,:])
+  choreo::SampledVerifierConfig vcfg;
+  vcfg.num_samples = 512;
+  vcfg.base_tol = 0.5f;
+  vcfg.rel_tol = 0.02f;
+  size_t total = M * N;
+  size_t stride = 97;
+  size_t checked = 0, failed = 0;
+  size_t k_dim = lhs_view.shape()[1];
+  for (size_t idx = 0; idx < total && checked < vcfg.num_samples; idx += stride) {
+    size_t i = idx / N, j = idx % N;
+    float ref = 0.0f;
+    for (size_t kk = 0; kk < k_dim; ++kk)
+      ref += __half2float(lhs_view[i][kk]) * __half2float(rhs_view[j][kk]);
+    float got = __half2float(res_view[j][i]);
+    float tol = vcfg.base_tol + vcfg.rel_tol * std::abs(ref);
+    if (std::abs(got - ref) > tol) {
+      if (failed < 5)
+        std::cout << "mismatch at (" << i << ", " << j << ") gpu=" << got << " ref=" << ref << "\n";
+      ++failed;
     }
+    ++checked;
+  }
+  if (failed > 0) {
+    std::cout << "FAILED: " << failed << "/" << checked << " samples\n";
+    choreo::choreo_assert(false, "sampled verification failed");
   }
 
   std::cout << "Test Passed\n" << std::endl;

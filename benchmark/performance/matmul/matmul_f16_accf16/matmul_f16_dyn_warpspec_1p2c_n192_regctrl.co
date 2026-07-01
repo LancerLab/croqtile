@@ -4,35 +4,57 @@
 #define H800_PCIE_PEAK_F16_TFLOPS 1513
 
 #define WARP_M 64
-#define WARP_N 128
+#define WARP_N 192
 #define WARP_K 16
+#define TILE_M 128
 #define TILE_K 64
 #define SWIZ 128
+#define STAGES 2
+#define CONSUMERS 2
 
 #define DEFAULT_M 8192
 #define DEFAULT_N 8192
 #define DEFAULT_K 8192
 
 __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
-  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block, by 1 : group-4 {
-    shared f16 [WARP_M, TILE_K] lhs_s;
-    shared f16 [WARP_N, TILE_K] rhs_s;
-    shared f16 [WARP_M, WARP_N] output_s;
+  parallel {block_m, block_n} by [cdiv(M, TILE_M), cdiv(N, WARP_N)] : block {
+    shared event full[STAGES], empty[STAGES];
+    shared f16 [TILE_M, TILE_K] lhs_s[STAGES];
+    shared f16 [WARP_N, TILE_K] rhs_s[STAGES];
 
-    mc = mma.fill.f16 0.0f;
-    foreach {iv_k} in [cdiv(K, TILE_K)] {
-      tma.copy.swiz<SWIZ> lhs.chunkat(block_m, iv_k) => lhs_s;
-      tma.copy.swiz<SWIZ> rhs.chunkat(block_n, iv_k) => rhs_s;
+    parallel wg by 3 : group-4, t by 128 : thread {
+      inthreads.async (wg == 0) {
+        setreg.dec(40);
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait empty[stage];
+          tma.copy.async<full[stage]>.swiz<SWIZ> lhs
+            .subspan(TILE_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
+          tma.copy.async<full[stage]>.swiz<SWIZ> rhs
+            .subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
+          trigger full[stage];
+        }
+      }
 
-      foreach {iv_wk} in [cdiv(TILE_K, WARP_K)] {
-        ma = mma.load.swiz<SWIZ> lhs_s.chunkat(_, iv_wk);
-        mb = mma.load.swiz<SWIZ> rhs_s.chunkat(_, iv_wk);
-        mma.row.row mc, ma, mb;
+      inthreads.async (wg >= 1) {
+        setreg.inc(216);
+        mc = mma.fill.f16 0.0f;
+        cidx = wg - 1;
+        foreach {s} in [STAGES]
+          trigger empty[s];
+
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait full[stage];
+          mma.row.row mc, lhs_s[stage].subspan(WARP_M, TILE_K).at(cidx, 0), rhs_s[stage];
+          trigger empty[stage];
+        }
+        shared f16 [WARP_M, WARP_N] output_s[CONSUMERS];
+        mma.store mc, output_s[cidx];
+        tma.copy output_s[cidx] => output.subspan(WARP_M, WARP_N)
+          .at(block_m * CONSUMERS + cidx, block_n);
       }
     }
-
-    mma.store mc, output_s;
-    tma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
   }
 }
 
