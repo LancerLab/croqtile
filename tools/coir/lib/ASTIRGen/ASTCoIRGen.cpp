@@ -1441,8 +1441,23 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
         }
       }
     }
+    mlir::TypedAttr initAttr;
+    if (nvd.init_value) {
+      auto *valNode = nvd.init_value.get();
+      if (auto *expr = dyn_cast<AST::Expr>(valNode))
+        valNode = expr->GetR().get();
+      if (auto *il = dyn_cast<AST::IntLiteral>(valNode)) {
+        int64_t v =
+            std::visit([](auto x) -> int64_t { return x; }, il->value);
+        initAttr = builder.getIntegerAttr(tty.getElementType(), v);
+      } else if (auto *fl = dyn_cast<AST::FloatLiteral>(valNode)) {
+        double v =
+            std::visit([](auto x) -> double { return x; }, fl->value);
+        initAttr = builder.getFloatAttr(tty.getElementType(), v);
+      }
+    }
     auto allocOp =
-        builder.create<coir::TensorAllocOp>(loc, tty, dynDimVals);
+        builder.create<coir::TensorAllocOp>(loc, tty, dynDimVals, initAttr);
     MapValue(nvd.GetName(), allocOp.getResult());
   } else {
     if (nvd.init_expr) {
@@ -1656,7 +1671,8 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
                               srcAlloc.getDynamicDims().end());
         }
         auto allocOp =
-            builder.create<coir::TensorAllocOp>(loc, dstTy, dstDynDims);
+            builder.create<coir::TensorAllocOp>(loc, dstTy, dstDynDims,
+                                                nullptr);
         dstVal = allocOp.getResult();
       }
     }

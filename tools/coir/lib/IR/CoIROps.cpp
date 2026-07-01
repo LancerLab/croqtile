@@ -679,11 +679,18 @@ void FutureRotateOp::print(OpAsmPrinter &printer) {
 // Format:
 //   %0 = coir.tensor.alloc : !coir.tensor<128x64xf16, shared>
 //   %1 = coir.tensor.alloc(%K, %N) : !coir.tensor<?x?xi8, shared>
+//   %2 = coir.tensor.alloc init -5 : i32 : !coir.tensor<32x4xi32, local>
 ParseResult TensorAllocOp::parse(OpAsmParser &parser, OperationState &result) {
   SmallVector<OpAsmParser::UnresolvedOperand> dynDims;
   if (succeeded(parser.parseOptionalLParen())) {
     if (parser.parseOperandList(dynDims) || parser.parseRParen())
       return failure();
+  }
+  if (succeeded(parser.parseOptionalKeyword("init"))) {
+    Attribute initAttr;
+    if (parser.parseAttribute(initAttr))
+      return failure();
+    result.addAttribute("init", initAttr);
   }
   if (parser.parseOptionalAttrDict(result.attributes) || parser.parseColon())
     return failure();
@@ -706,7 +713,12 @@ void TensorAllocOp::print(OpAsmPrinter &printer) {
     printer.printOperands(dynDims);
     printer << ")";
   }
-  printer.printOptionalAttrDict((*this)->getAttrs());
+  if (auto initAttr = getInit()) {
+    printer << " init ";
+    printer.printAttribute(*initAttr);
+  }
+  printer.printOptionalAttrDict((*this)->getAttrs(),
+                                /*elidedAttrs=*/{"init"});
   printer << " : " << getResult().getType();
 }
 
