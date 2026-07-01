@@ -1,0 +1,20 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Fibonacci via dependency chain.
+
+__co__ void fibonacci_test() {
+  s32[8] fib;
+
+  fib.at(0) = 0;
+  fib.at(1) = 1;
+  foreach i in 6
+    fib.at(i + 2) = fib.at(i + 1) + fib.at(i);
+
+  println(fib.at(0));
+  println(fib.at(4));
+  println(fib.at(7));
+}
+
+// CHECK: 0
+// CHECK: 3
+// CHECK: 13

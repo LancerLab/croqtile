@@ -1,0 +1,33 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Matrix diagonal extraction and submatrix operations.
+
+__co__ void matrix_ops_test() {
+  s32[4, 4] M;
+  s32[4] diag;
+
+  parallel {i, j} by [4, 4]
+    M.at(i, j) = i * 4 + j + 1;
+
+  // Diagonal
+  parallel p by 4
+    diag.at(p) = M.at(p, p);
+
+  foreach i in 4
+    println("diag[", i, "] =", diag.at(i));
+
+  // Submatrix extraction
+  s32[2, 2] sub;
+  parallel {i, j} by [2, 2]
+    sub.at(i, j) = M.at(i + 1, j + 1);
+
+  println("sub[0,0] =", sub.at(0, 0));
+  println("sub[1,1] =", sub.at(1, 1));
+}
+
+// CHECK: diag[ 0 ] = 1
+// CHECK: diag[ 1 ] = 6
+// CHECK: diag[ 2 ] = 11
+// CHECK: diag[ 3 ] = 16
+// CHECK: sub[0,0] = 6
+// CHECK: sub[1,1] = 11

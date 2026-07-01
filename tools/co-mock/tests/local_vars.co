@@ -1,0 +1,25 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Per-thread local variables with parallel computation.
+
+__co__ void local_vars_test() {
+  s32[4] data;
+  s32[4] out;
+
+  parallel p by 4
+    data.at(p) = p + 1;
+
+  parallel p by 4 {
+    mutable int local_val = data.at(p);
+    local_val = local_val * local_val + 1;
+    out.at(p) = local_val;
+  }
+
+  foreach i in 4
+    println(out.at(i));
+}
+
+// CHECK: 2
+// CHECK: 5
+// CHECK: 10
+// CHECK: 17

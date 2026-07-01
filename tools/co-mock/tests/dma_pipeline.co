@@ -1,0 +1,25 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Two-stage pipeline with DMA copy.
+
+__co__ void dma_pipeline_test() {
+  s32[4] raw;
+  s32[4] buf;
+  s32[4] processed;
+
+  parallel p by 4
+    raw.at(p) = (p + 1) * 10;
+
+  f = dma.copy raw => buf;
+
+  parallel p by 4
+    processed.at(p) = buf.at(p) * 2 + 1;
+
+  foreach i in 4
+    println(processed.at(i));
+}
+
+// CHECK: 21
+// CHECK: 41
+// CHECK: 61
+// CHECK: 81

@@ -1,0 +1,7 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void hello() {
+  println("Hello from Croqtile!");
+}
+
+// CHECK: Hello from Croqtile!

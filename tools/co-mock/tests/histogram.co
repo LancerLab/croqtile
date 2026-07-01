@@ -1,0 +1,25 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Histogram counting with sequential accumulation.
+
+__co__ void histogram_test() {
+  s32[8] data;
+  s32[4] bins;
+
+  parallel p by 8
+    data.at(p) = p % 4;
+
+  parallel p by 4
+    bins.at(p) = 0;
+
+  foreach i in 8
+    bins.at(data.at(i)) = bins.at(data.at(i)) + 1;
+
+  foreach i in 4
+    println("bin[", i, "] =", bins.at(i));
+}
+
+// CHECK: bin[ 0 ] = 2
+// CHECK: bin[ 1 ] = 2
+// CHECK: bin[ 2 ] = 2
+// CHECK: bin[ 3 ] = 2

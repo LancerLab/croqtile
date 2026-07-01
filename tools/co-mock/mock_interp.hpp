@@ -53,6 +53,7 @@ private:
   void ExecRotate(AST::Rotate& n);
   void ExecInThreads(AST::InThreadsBlock& n);
   void ExecMMA(AST::MMA& n);
+  void ExecApply(AST::ApplyBlock& n);
 
   Value EvalBinaryOp(Opcode op, const Value& lhs, const Value& rhs);
   Value EvalUnaryOp(Opcode op, const Value& operand);

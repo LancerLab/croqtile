@@ -1,0 +1,28 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// 1D stencil neighbor averaging with boundary handling.
+
+__co__ void stencil_test() {
+  s32[6] input;
+  s32[6] output;
+
+  parallel p by 6
+    input.at(p) = p * 10;
+
+  parallel p by 6 {
+    if (p == 0 || p == 5)
+      output.at(p) = input.at(p);
+    else
+      output.at(p) = (input.at(p - 1) + input.at(p) + input.at(p + 1)) / 3;
+  }
+
+  foreach i in 6
+    println(output.at(i));
+}
+
+// CHECK: 0
+// CHECK: 10
+// CHECK: 20
+// CHECK: 30
+// CHECK: 40
+// CHECK: 50

@@ -1,0 +1,28 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Multi-stage hierarchical reduction.
+
+__co__ void multi_stage_test() {
+  s32[16] data;
+  s32[4] partial;
+
+  parallel p by 16
+    data.at(p) = p + 1;
+
+  // Stage 1: chunk sums
+  parallel blk by 4 {
+    mutable int chunk_sum = 0;
+    foreach i in 4
+      chunk_sum = chunk_sum + data.at(blk * 4 + i);
+    partial.at(blk) = chunk_sum;
+  }
+
+  // Stage 2: final sum
+  mutable int total = 0;
+  foreach i in 4
+    total = total + partial.at(i);
+
+  println("sum of 1..16 =", total);
+}
+
+// CHECK: sum of 1..16 = 136

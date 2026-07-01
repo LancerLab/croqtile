@@ -1,0 +1,27 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Checkerboard pattern fill with conditional parallel.
+
+__co__ void pattern_fill_test() {
+  s32[4, 4] grid;
+
+  parallel {i, j} by [4, 4] {
+    if ((i + j) % 2 == 0)
+      grid.at(i, j) = 1;
+    else
+      grid.at(i, j) = 0;
+  }
+
+  // Print corners and center to verify pattern
+  println(grid.at(0, 0));
+  println(grid.at(0, 1));
+  println(grid.at(1, 0));
+  println(grid.at(1, 1));
+  println(grid.at(3, 3));
+}
+
+// CHECK: 1
+// CHECK: 0
+// CHECK: 0
+// CHECK: 1
+// CHECK: 1

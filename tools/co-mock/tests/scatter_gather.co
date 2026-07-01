@@ -1,0 +1,25 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Scatter and gather access patterns.
+
+__co__ void scatter_gather_test() {
+  s32[8] src;
+  s32[8] dst;
+
+  parallel p by 8
+    src.at(p) = (p + 1) * 10;
+
+  // Gather: dst[p] = src[(p*3) % 8]
+  parallel p by 8
+    dst.at(p) = src.at((p * 3) % 8);
+
+  println(dst.at(0));
+  println(dst.at(1));
+  println(dst.at(2));
+  println(dst.at(3));
+}
+
+// CHECK: 10
+// CHECK: 40
+// CHECK: 70
+// CHECK: 20
