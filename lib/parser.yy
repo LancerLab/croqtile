@@ -379,10 +379,10 @@ device_nested_type
 device_nested_type_list
     : %empty { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
     | device_nested_type_list COMMA device_complex_type {
-        auto type_str = $3->GetTypeStr() + ", " + $3->GetTypeStr();
-        $3->SetTypeStr(type_str);
-        $3->SetDataType(BaseType::UNKNOWN);
-        $$ = $3;
+        auto type_str = $1->GetTypeStr() + ", " + $3->GetTypeStr();
+        $1->SetTypeStr(type_str);
+        $1->SetDataType(BaseType::UNKNOWN);
+        $$ = $1;
       }
     | device_type { $$ = $1; }
     ;

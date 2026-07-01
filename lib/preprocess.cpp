@@ -9,6 +9,7 @@
 #include <istream>
 #include <regex>
 #include <sstream>
+#include <unordered_set>
 
 using namespace Choreo;
 
@@ -1229,19 +1230,60 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
 
 namespace {
 
+std::string ResolveInclude(const std::string& filename,
+                           const std::string& input_dir) {
+  namespace fs = std::filesystem;
+  auto candidate = fs::path(input_dir) / filename;
+  if (fs::exists(candidate)) return candidate.string();
+  for (auto& inc_path : CCtx().GetIncPaths()) {
+    candidate = fs::path(inc_path) / filename;
+    if (fs::exists(candidate)) return candidate.string();
+  }
+  return "";
+}
+
+std::string NormalizePath(const std::string& path) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto p = fs::weakly_canonical(fs::path(path), ec);
+  if (!ec) return p.string();
+  p = fs::absolute(fs::path(path), ec);
+  if (!ec) return p.string();
+  return path;
+}
+
 // Line-based extraction of __cok__ block contents from a raw source file.
-// Unlike the host-compiler's extract_cok_sections (which operates on
-// preprocessed strings and returns Range pairs), this reads an unprocessed
-// source file and returns the lines inside __cok__ { ... } blocks.
-std::vector<std::string> CollectCokLines(const std::string& filepath) {
+// This recursively follows quote includes to collect nested __cok__ blocks.
+std::vector<std::string>
+CollectCokLinesRecursive(const std::string& filepath,
+                         std::unordered_set<std::string>& visited) {
   std::vector<std::string> result;
-  std::ifstream ifs(filepath);
+  auto normalized = NormalizePath(filepath);
+  if (visited.count(normalized)) return result;
+  visited.insert(normalized);
+
+  std::ifstream ifs(normalized);
   if (!ifs.is_open()) return result;
+
+  std::regex inc_re("^\\s*#include\\s+\"(.*)\"");
+  auto current_dir =
+      std::filesystem::path(normalized).parent_path().string();
 
   std::string line;
   int depth = 0;
   bool in_cok = false;
   while (std::getline(ifs, line)) {
+    if (!in_cok) {
+      std::smatch m;
+      if (std::regex_match(line, m, inc_re)) {
+        auto resolved = ResolveInclude(m[1].str(), current_dir);
+        if (!resolved.empty()) {
+          auto nested = CollectCokLinesRecursive(resolved, visited);
+          result.insert(result.end(), nested.begin(), nested.end());
+        }
+      }
+    }
+
     auto trimmed = line;
     size_t first = trimmed.find_first_not_of(" \t");
     if (first != std::string::npos) trimmed = trimmed.substr(first);
@@ -1276,18 +1318,6 @@ std::vector<std::string> CollectCokLines(const std::string& filepath) {
   return result;
 }
 
-std::string ResolveInclude(const std::string& filename,
-                           const std::string& input_dir) {
-  namespace fs = std::filesystem;
-  auto candidate = fs::path(input_dir) / filename;
-  if (fs::exists(candidate)) return candidate.string();
-  for (auto& inc_path : CCtx().GetIncPaths()) {
-    candidate = fs::path(inc_path) / filename;
-    if (fs::exists(candidate)) return candidate.string();
-  }
-  return "";
-}
-
 } // anonymous namespace
 
 bool Preprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
@@ -1295,6 +1325,7 @@ bool Preprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
 
   auto input_file = OptionRegistry::GetInstance().GetInputFileName();
   auto input_dir = GetAbsPath(std::filesystem::current_path(), input_file);
+  std::unordered_set<std::string> visited;
 
   std::regex inc_re("#include\\s+\"(.*)\"");
   for (auto& inc_line : include_lines) {
@@ -1302,7 +1333,7 @@ bool Preprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
     if (std::regex_match(inc_line, m, inc_re)) {
       auto resolved = ResolveInclude(m[1].str(), input_dir);
       if (!resolved.empty()) {
-        auto inc_cok = CollectCokLines(resolved);
+        auto inc_cok = CollectCokLinesRecursive(resolved, visited);
         all_cok.insert(all_cok.end(), inc_cok.begin(), inc_cok.end());
       }
     }
