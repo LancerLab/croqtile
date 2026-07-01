@@ -348,6 +348,14 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     if (parentBlock) builder.setInsertionPointAfter(block->getParentOp());
     PopScope();
   } else if (isa<AST::ForeachBlock>(&n)) {
+    // Close inner nested foreachs (no iter_args) first.
+    for (unsigned ri = foreachNestDepth; ri > 1; --ri) {
+      auto *block = builder.getInsertionBlock();
+      auto *innerOp = block->getParentOp();
+      auto *parentBlock = innerOp->getBlock();
+      if (parentBlock) builder.setInsertionPointAfter(innerOp);
+    }
+
     auto *block = builder.getInsertionBlock();
     auto *foreachOp = block->getParentOp();
 
@@ -377,6 +385,7 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
       }
     }
     pendingYields.clear();
+    foreachNestDepth = 0;
     PopScope();
     for (auto &[name, val] : resultMappings)
       UpdateValue(name, val);
@@ -825,51 +834,97 @@ bool hasEarlyExit(AST::Node *node) {
 }
 } // namespace
 
-bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
-  auto loc = Loc(fb);
-  auto indexType = mlir::IndexType::get(&IRContext());
-
+int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange *lr) {
   int64_t bound = 1;
-  if (fb.ranges && !fb.ranges->values.empty()) {
-    auto &firstRange = fb.ranges->values[0];
-    if (auto *lr = dyn_cast<AST::LoopRange>(firstRange.get())) {
-      if (lr->ubound) {
-        if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get()))
-          if (expr->Opts().HasVal())
-            bound = EvalToInt(expr->Opts().GetVal());
+  if (lr->ubound) {
+    if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get()))
+      if (expr->Opts().HasVal())
+        bound = EvalToInt(expr->Opts().GetVal());
+  }
+  if (bound <= 1) {
+    auto rvName = lr->GetRVName();
+    auto symType = GetSymbolType(rvName);
+    if (auto bty = dyn_cast<BoundedType>(symType)) {
+      if (bty->HasValidBound()) {
+        auto &ub = bty->GetUpperBound();
+        if (ub && ub->IsNumeric())
+          bound = EvalToInt(ub);
       }
-      if (bound <= 1) {
-        auto rvName = lr->GetRVName();
-        auto symType = GetSymbolType(rvName);
-        if (auto bty = dyn_cast<BoundedType>(symType)) {
-          if (bty->HasValidBound()) {
-            auto &ub = bty->GetUpperBound();
-            if (ub && ub->IsNumeric())
-              bound = EvalToInt(ub);
+    }
+  }
+  if (bound <= 1) {
+    auto resolved = ResolveBoundedVarExtent(lr->GetRVName());
+    if (resolved > 1) bound = resolved;
+  }
+  return bound;
+}
+
+mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
+  auto loc = Loc(*lr);
+  mlir::Value ubValue;
+  if (bound <= 1) {
+    if (lr->ubound) {
+      if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get())) {
+        if (expr->Opts().HasVal()) {
+          auto &vi = expr->Opts().GetVal();
+          if (vi && !vi->IsNumeric()) {
+            if (auto *sv = dyn_cast<sbe::SymbolicValue>(vi.get()))
+              ubValue = LookupValue(UnScopedName(sv->Value()));
           }
         }
       }
-      if (bound <= 1) {
-        auto resolved = ResolveBoundedVarExtent(lr->GetRVName());
-        if (resolved > 1) bound = resolved;
-      }
-      if (bound <= 1) {
-        auto rvName = lr->GetRVName();
-        auto symType = GetSymbolType(rvName);
-        if (auto bty = dyn_cast<BoundedType>(symType)) {
-          if (bty->HasValidBound()) {
-            auto ubs = bty->GetUpperBounds();
-            if (ubs.IsValid()) {
-              int64_t total = 1;
-              for (auto &ub : ubs.Value())
-                if (ub && ub->IsNumeric()) total *= EvalToInt(ub);
-              if (total > 1) bound = total;
-            }
+    }
+    if (!ubValue) {
+      auto rvName = lr->GetRVName();
+      auto symType = GetSymbolType(rvName);
+      if (auto bty = dyn_cast<BoundedType>(symType)) {
+        if (bty->HasValidBound()) {
+          auto &ub = bty->GetUpperBound();
+          if (ub && !ub->IsNumeric()) {
+            if (auto *sv = dyn_cast<sbe::SymbolicValue>(ub.get()))
+              ubValue = LookupValue(UnScopedName(sv->Value()));
           }
         }
       }
     }
   }
+  if (!ubValue)
+    ubValue = builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
+  return ubValue;
+}
+
+bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
+  auto loc = Loc(fb);
+  auto indexType = mlir::IndexType::get(&IRContext());
+
+  // Collect all range bounds for multi-dim foreach.
+  llvm::SmallVector<std::pair<AST::LoopRange*, int64_t>> rangeBounds;
+  if (fb.ranges && !fb.ranges->values.empty()) {
+    for (auto &rng : fb.ranges->values) {
+      if (auto *lr = dyn_cast<AST::LoopRange>(rng.get())) {
+        int64_t bound = resolveRangeBound(lr);
+        // For multi-dim span, also check GetUpperBounds per dimension
+        if (bound <= 1 && rangeBounds.empty()) {
+          auto rvName = lr->GetRVName();
+          auto symType = GetSymbolType(rvName);
+          if (auto bty = dyn_cast<BoundedType>(symType)) {
+            if (bty->HasValidBound()) {
+              auto ubs = bty->GetUpperBounds();
+              if (ubs.IsValid()) {
+                int64_t total = 1;
+                for (auto &ub : ubs.Value())
+                  if (ub && ub->IsNumeric()) total *= EvalToInt(ub);
+                if (total > 1) bound = total;
+              }
+            }
+          }
+        }
+        rangeBounds.push_back({lr, bound});
+      }
+    }
+  }
+  if (rangeBounds.empty())
+    rangeBounds.push_back({nullptr, 1});
 
   llvm::SmallVector<std::string> accNames;
   if (fb.stmts) collectMMAAccNames(fb.stmts.get(), accNames);
@@ -928,68 +983,46 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
     }
   }
 
-  // Use the runtime dimension value when the static bound could not be
-  // resolved (remains <= 1 after all fallbacks).  Dynamic dimension symbols
-  // are mapped by CreateKernelOp as hidden kernel arguments.
-  mlir::Value ubValue;
-  if (bound <= 1 && fb.ranges && !fb.ranges->values.empty()) {
-    auto &firstRange = fb.ranges->values[0];
-    if (auto *lr = dyn_cast<AST::LoopRange>(firstRange.get())) {
-      if (lr->ubound) {
-        if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get())) {
-          if (expr->Opts().HasVal()) {
-            auto &vi = expr->Opts().GetVal();
-            if (vi && !vi->IsNumeric()) {
-              if (auto *sv = dyn_cast<sbe::SymbolicValue>(vi.get()))
-                ubValue = LookupValue(UnScopedName(sv->Value()));
-            }
-          }
-        }
-      }
-      if (!ubValue) {
-        auto rvName = lr->GetRVName();
-        auto symType = GetSymbolType(rvName);
-        if (auto bty = dyn_cast<BoundedType>(symType)) {
-          if (bty->HasValidBound()) {
-            auto &ub = bty->GetUpperBound();
-            if (ub && !ub->IsNumeric()) {
-              if (auto *sv = dyn_cast<sbe::SymbolicValue>(ub.get()))
-                ubValue = LookupValue(UnScopedName(sv->Value()));
-            }
-          }
-        }
+  // Emit nested ForeachOps: outermost carries iter_args, inner ones are plain.
+  unsigned numRanges = rangeBounds.size();
+  for (unsigned ri = 0; ri < numRanges; ++ri) {
+    auto *lr = rangeBounds[ri].first;
+    int64_t bound = rangeBounds[ri].second;
+    mlir::Value ubValue = lr ? resolveRangeUBValue(lr, bound)
+                             : builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
+
+    coir::ForeachOp foreachOp;
+    if (ri == 0) {
+      foreachOp = builder.create<coir::ForeachOp>(
+          loc, iterTypes, ubValue, iterArgs);
+    } else {
+      foreachOp = builder.create<coir::ForeachOp>(
+          loc, mlir::TypeRange{}, ubValue, mlir::ValueRange{});
+    }
+
+    auto &bodyRegion = foreachOp.getBody();
+    auto *block = new mlir::Block();
+    bodyRegion.push_back(block);
+
+    auto ivArg = block->addArgument(indexType, loc);
+    if (lr)
+      MapValue(lr->GetIVName(), ivArg);
+
+    if (ri == 0) {
+      pendingYields.clear();
+      for (unsigned i = 0; i < iterNames.size(); ++i) {
+        auto iterArg = block->addArgument(iterTypes[i], loc);
+        MapValue(iterNames[i], iterArg);
+        pendingYields.push_back({iterNames[i], iterArg});
       }
     }
-  }
-  if (!ubValue)
-    ubValue = builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
 
-  auto foreachOp = builder.create<coir::ForeachOp>(
-      loc, iterTypes, ubValue, iterArgs);
-
-  auto &bodyRegion = foreachOp.getBody();
-  auto *block = new mlir::Block();
-  bodyRegion.push_back(block);
-
-  auto ivArg = block->addArgument(indexType, loc);
-
-  if (fb.ranges && !fb.ranges->values.empty()) {
-    auto &firstRange = fb.ranges->values[0];
-    if (auto *lr = dyn_cast<AST::LoopRange>(firstRange.get()))
-      MapValue(lr->GetIVName(), ivArg);
+    builder.setInsertionPointToEnd(block);
+    builder.create<coir::YieldOp>(loc, mlir::ValueRange{});
+    builder.setInsertionPoint(block->getTerminator());
   }
 
-  pendingYields.clear();
-  for (unsigned i = 0; i < iterNames.size(); ++i) {
-    auto iterArg = block->addArgument(iterTypes[i], loc);
-    MapValue(iterNames[i], iterArg);
-    pendingYields.push_back({iterNames[i], iterArg});
-  }
-
-  builder.setInsertionPointToEnd(block);
-  builder.create<coir::YieldOp>(loc, mlir::ValueRange{});
-  builder.setInsertionPoint(block->getTerminator());
-
+  foreachNestDepth = numRanges;
   return true;
 }
 
