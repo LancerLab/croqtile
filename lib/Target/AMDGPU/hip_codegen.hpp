@@ -124,6 +124,7 @@ private:
 
   int parallel_idx = -1;
   AST::ParallelBy* cur_pb = nullptr;
+  ParallelLevel bdim_level = ParallelLevel::THREAD;
 
   size_t host_param_count = 0;
   ptr<FunctionType> fty = nullptr;
@@ -231,6 +232,7 @@ private:
     void_return = false;
     emit_call = true;
     parallel_idx = -1;
+    bdim_level = ParallelLevel::THREAD;
     emitted_device_names_.clear();
     event_global_buffers.clear();
   }

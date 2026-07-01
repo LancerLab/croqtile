@@ -723,6 +723,7 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
     break;
   }
   case ParallelLevel::GROUP: {
+    if (pb->IsEnforced()) bdim_level = ParallelLevel::GROUP;
     if (sub_pvs.size() == 1) {
       ds << d_indent << "int __vid_gid_x = threadIdx.x / 32;\n";
       MapPV(0, "__vid_gid_x");
@@ -749,11 +750,14 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
     break;
   }
   case ParallelLevel::THREAD: {
+    std::string tidBase =
+        (bdim_level == ParallelLevel::GROUP) ? "threadIdx.x % 32"
+                                             : "threadIdx.x";
     if (sub_pvs.size() == 1) {
-      ds << d_indent << "int __vid_tid_x = threadIdx.x;\n";
+      ds << d_indent << "int __vid_tid_x = " << tidBase << ";\n";
       MapPV(0, "__vid_tid_x");
     } else if (sub_pvs.size() == 2) {
-      ds << d_indent << "int __vid_tid = threadIdx.x;\n";
+      ds << d_indent << "int __vid_tid = " << tidBase << ";\n";
       ds << d_indent << "int __vid_tid_x = __vid_tid / " << ValueSTR(pv_y)
          << ";\n";
       ds << d_indent << "int __vid_tid_y = __vid_tid % " << ValueSTR(pv_y)
@@ -761,7 +765,7 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       MapPV(0, "__vid_tid_x");
       MapPV(1, "__vid_tid_y");
     } else if (sub_pvs.size() == 3) {
-      ds << d_indent << "int __vid_tid = threadIdx.x;\n";
+      ds << d_indent << "int __vid_tid = " << tidBase << ";\n";
       ds << d_indent << "int __vid_tid_x = __vid_tid / " << ValueSTR(pv_y)
          << " / " << ValueSTR(pv_z) << ";\n";
       ds << d_indent << "int __vid_tid_y = __vid_tid / " << ValueSTR(pv_z)
