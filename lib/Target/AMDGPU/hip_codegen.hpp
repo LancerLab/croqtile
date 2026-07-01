@@ -186,6 +186,8 @@ private:
 
   bool NeedDeviceFunc() const { return cgi.HasParallelBy(fname); }
 
+  void EmitHostRuntimeCheck();
+
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
   const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string&, bool,
                               bool) const;

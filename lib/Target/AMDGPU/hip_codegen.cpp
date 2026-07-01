@@ -452,6 +452,63 @@ void HIPCodeGen::EmitHostFuncDecl(std::ostringstream& os) {
   os << ")";
 }
 
+void HIPCodeGen::EmitHostRuntimeCheck() {
+  if (CCtx().DisableRuntimeCheck()) return;
+  if (cgi.ParameterCount(fname) == 0) return;
+
+  struct Entry {
+    size_t para_ordinal;
+    size_t dim;
+    std::string elem_name;
+  };
+  std::map<std::string, std::vector<Entry>> ve_entries_map;
+
+  size_t host_pindex = 0;
+  for (const auto& item : GetChoreoFuncIns(cgi)) {
+    assert((int)host_pindex == item.p_index);
+    auto name = UnScopedName(item.name);
+    if (auto sty = dyn_cast<SpannedType>(item.type)) {
+      size_t dim_count = 0;
+      for (auto vi : sty->GetShape().Value()) {
+        auto elem_name = name + ".shape()[" + std::to_string(dim_count) + "]";
+        if (auto vale = VIInt(vi)) {
+          hs << h_indent << "choreo::runtime_check(" << elem_name
+             << " == " << *vale;
+          hs << ", \"shape inconsistent on the " << Ordinal(host_pindex + 1)
+             << " parameter (\'" << name << "\', dim: " << dim_count
+             << "): expect: " << *vale << ", but got \" + std::to_string("
+             << elem_name << ") + \".\");\n";
+        } else if (auto vale = VISym(vi))
+          ve_entries_map[*vale].push_back(
+              {host_pindex + 1, dim_count, elem_name});
+        dim_count++;
+      }
+    }
+    host_pindex++;
+  }
+
+  for (const auto& [_, entries] : ve_entries_map) {
+    for (size_t i = 1; i < entries.size(); ++i) {
+      auto& entry0 = entries[i - 1];
+      auto& entry1 = entries[i];
+      hs << h_indent << "choreo::runtime_check(" << entry0.elem_name
+         << " == " << entry1.elem_name;
+      hs << ", \"The shapes of the " << Ordinal(entry0.para_ordinal)
+         << " parameter (dim: " << entry0.dim << ") and the "
+         << Ordinal(entry1.para_ordinal) << " parameter (dim: " << entry1.dim
+         << ") are inconsistent.\");\n";
+    }
+  }
+
+  hs << "\n";
+
+  for (const auto& rc : FCtx(fname).GetRtChecks()) {
+    hs << h_indent << "choreo::runtime_check(" << ValueSTR(sbe::sym(rc.lhs))
+       << " " << rc.op << " " << ValueSTR(sbe::sym(rc.rhs)) << ", \""
+       << rc.message << ", " << rc.loc << "\");\n";
+  }
+}
+
 bool HIPCodeGen::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
   assert(n.name == fname && "inconsistent function names.");
@@ -501,6 +558,8 @@ bool HIPCodeGen::Visit(AST::FunctionDecl& n) {
        << item.second.hsd_expr << ";\n";
     ssm.MapHostSymbol(item.first, UnScopedName(item.first));
   }
+
+  EmitHostRuntimeCheck();
 
   if (NeedDeviceFunc()) {
     for (auto& item : GetChoreoFuncIns(cgi)) {

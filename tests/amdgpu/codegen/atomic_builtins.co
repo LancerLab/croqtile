@@ -7,6 +7,7 @@ __co__ void atomic_shared(s32 [64] a) {
     s.at(p) = a.at(p);
     sync.shared;
     __atomic_add(s.at(p), 1);
+    __atomic_sub(s.at(p), 1);
     __atomic_exch(s.at(p), 0);
     __atomic_min(s.at(p), a.at(p));
     __atomic_max(s.at(p), a.at(p));
@@ -17,6 +18,7 @@ __co__ void atomic_shared(s32 [64] a) {
   }
 }
 // CHECK: atomicAdd(&(
+// CHECK: atomicSub(&(
 // CHECK: atomicExch(&(
 // CHECK: atomicMin(&(
 // CHECK: atomicMax(&(
