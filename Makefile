@@ -410,6 +410,7 @@ help:
 	@echo "  debug               - Build debug version"
 	@echo "  clean               - Clean build artifacts"
 	@echo ""
+	@echo ""
 	@echo "Test Targets:"
 	@echo "  test                - Run choreo compiler tests"
 	@echo "  test-all            - Run all tests (choreo + co-mock)"

@@ -1,0 +1,14 @@
+include CMakeLists.txt
+include Makefile
+include README.md
+include pyproject.toml
+recursive-include src *.py *.cpp *.h *.hpp
+recursive-include tests *.py
+recursive-include docs *.md
+prune build
+prune dist
+prune .github
+global-exclude __pycache__
+global-exclude *.pyc
+global-exclude *.so
+global-exclude *.egg-info
