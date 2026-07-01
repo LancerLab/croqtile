@@ -37,14 +37,20 @@ def CoIR_TensorType : TypeDef<CoIR_Dialect, "Tensor"> {
   let summary = "N-D typed tensor with element type, shape, strides, and memory space";
   let description = [{
     Represents a multi-dimensional tensor in the CoIR dialect.
-    Carries an element type, a static shape, optional strides, and an optional
-    memory space (global, shared, local, register). Defaults to global if
-    unspecified. If strides are empty, the tensor is assumed dense contiguous
-    (row-major).
+    Carries an element type, a shape (static or dynamic), optional strides,
+    and an optional memory space (global, shared, local, register).
+    Defaults to global if unspecified. If strides are empty, the tensor is
+    assumed dense contiguous (row-major).
+
+    Dynamic dimensions use `?` (stored as ShapedType::kDynamic). Runtime
+    sizes for dynamic dims are carried as SSA operands on tensor-creating
+    ops (e.g. tensor.alloc), following MLIR's tensor dialect convention.
 
     Syntax:
       !coir.tensor<128x64xf16>                             // dense, global
       !coir.tensor<16x16xf32, shared>                      // dense, shared
+      !coir.tensor<?x?xi8, shared>                         // dynamic dims
+      !coir.tensor<128x?xf16, global>                      // mixed static/dynamic
       !coir.tensor<128x64xf16, global, strides: [64, 1]>  // explicit strides
   }];
 
@@ -59,6 +65,25 @@ def CoIR_TensorType : TypeDef<CoIR_Dialect, "Tensor"> {
 
   let extraClassDeclaration = [{
     bool isDenseContiguous() const;
+
+    /// Returns true if dimension `idx` is dynamic.
+    bool isDynamicDim(unsigned idx) const {
+      return mlir::ShapedType::isDynamic(getShape()[idx]);
+    }
+
+    /// Returns the number of dynamic dimensions.
+    unsigned getNumDynamicDims() const {
+      unsigned count = 0;
+      for (auto d : getShape())
+        if (mlir::ShapedType::isDynamic(d)) ++count;
+      return count;
+    }
+
+    /// Returns true if any dimension is dynamic.
+    bool hasDynamicShape() const { return getNumDynamicDims() > 0; }
+
+    /// Returns the rank (number of dimensions).
+    unsigned getRank() const { return getShape().size(); }
   }];
 }
 

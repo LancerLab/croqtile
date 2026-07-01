@@ -13,6 +13,7 @@
 #include "CodeGen/CoIREmitterBase.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
@@ -572,6 +573,39 @@ private:
     return result;
   }
 
+  std::string getDynShmemExpr(KernelOp kernel,
+                              llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+    std::string expr;
+    kernel.getBody().walk([&](coir::TensorAllocOp alloc) {
+      if (!expr.empty()) return;
+      auto tty = mlir::cast<coir::TensorType>(alloc.getResult().getType());
+      if (tty.getMemorySpace() != 1) return;
+      if (!tty.hasDynamicShape()) return;
+      llvm::raw_string_ostream ss(expr);
+      for (unsigned d = 0; d < tty.getRank(); ++d) {
+        if (d > 0) ss << " * ";
+        auto dim = tty.getShape()[d];
+        if (mlir::ShapedType::isDynamic(dim)) {
+          bool found = false;
+          for (auto &da : dimArgMeta) {
+            if (da.dimIdx == (int64_t)d) {
+              ss << "p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+              found = true;
+              break;
+            }
+          }
+          if (!found) ss << "1";
+        } else {
+          ss << dim;
+        }
+      }
+      unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
+      if (elemBits > 8)
+        ss << " * " << (elemBits / 8);
+    });
+    return expr;
+  }
+
   void emitHostEntry(KernelOp kernel) override {
     prescanDescriptors(kernel);
     auto fnType = kernel.getFunctionType();
@@ -597,9 +631,17 @@ private:
         eType = emitElementType(tty.getElementType());
         int64_t bytes = getTensorBytes(tty);
         os() << "  " << eType << "* p" << i << "__device = nullptr;\n";
-        os() << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
-        os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
-           << bytes << "ULL, cudaMemcpyHostToDevice);\n";
+        if (bytes < 0) {
+          os() << "  cudaMalloc(&p" << i << "__device, p" << i
+             << ".size() * sizeof(" << eType << "));\n";
+          os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), p"
+             << i << ".size() * sizeof(" << eType
+             << "), cudaMemcpyHostToDevice);\n";
+        } else {
+          os() << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
+          os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << bytes << "ULL, cudaMemcpyHostToDevice);\n";
+        }
       }
 
       // TMA descriptor setup
@@ -617,9 +659,13 @@ private:
 
       auto dims = getLaunchDims(kernel);
       emitEntryAssertions(kernel);
+      auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
 
       os() << "  " << devName << "<<<" << dims.gridStr() << ", "
-         << dims.blockStr() << ">>>(";
+         << dims.blockStr();
+      if (!dynShmem.empty())
+        os() << ", " << dynShmem;
+      os() << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << "p" << i << "__device";
@@ -662,9 +708,17 @@ private:
       std::string inputEType = emitElementType(tty.getElementType());
       int64_t bytes = getTensorBytes(tty);
       os() << "  " << inputEType << "* p" << i << "__device = nullptr;\n";
-      os() << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
-      os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
-         << bytes << "ULL, cudaMemcpyHostToDevice);\n";
+      if (bytes < 0) {
+        os() << "  cudaMalloc(&p" << i << "__device, p" << i
+           << ".size() * sizeof(" << inputEType << "));\n";
+        os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), p"
+           << i << ".size() * sizeof(" << inputEType
+           << "), cudaMemcpyHostToDevice);\n";
+      } else {
+        os() << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
+        os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
+           << bytes << "ULL, cudaMemcpyHostToDevice);\n";
+      }
     }
 
     int64_t resBytes = getTensorBytes(resTy);
@@ -674,7 +728,18 @@ private:
       ss << "{";
       for (unsigned d = 0; d < resTy.getShape().size(); ++d) {
         if (d > 0) ss << ", ";
-        ss << resTy.getShape()[d];
+        auto dim = resTy.getShape()[d];
+        if (mlir::ShapedType::isDynamic(dim)) {
+          // Find matching dimArgMeta to get runtime shape
+          for (auto &da : dimArgMeta) {
+            if (da.dimIdx == (int64_t)d) {
+              ss << "p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+              break;
+            }
+          }
+        } else {
+          ss << dim;
+        }
       }
       ss << "}";
     }
@@ -692,7 +757,12 @@ private:
     os() << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
        << resTy.getShape().size() << ">(" << shapeStr << ");\n";
     os() << "  " << eType << "* __result__device = nullptr;\n";
-    os() << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
+    if (resBytes < 0) {
+      os() << "  cudaMalloc(&__result__device, __result.size() * sizeof("
+         << eType << "));\n";
+    } else {
+      os() << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
+    }
 
     // TMA descriptor setup
     unsigned tmaIdx = 0;
@@ -709,9 +779,13 @@ private:
 
     auto dims = getLaunchDims(kernel);
     emitEntryAssertions(kernel);
+    auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
 
     os() << "  " << devName << "<<<" << dims.gridStr() << ", "
-       << dims.blockStr() << ">>>(";
+       << dims.blockStr();
+    if (!dynShmem.empty())
+      os() << ", " << dynShmem;
+    os() << ">>>(";
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
       os() << "p" << i << "__device";
@@ -725,8 +799,14 @@ private:
     }
     os() << ");\n";
     os() << "  cudaDeviceSynchronize();\n";
-    os() << "  cudaMemcpy(__result.data(), __result__device, "
-       << resBytes << "ULL, cudaMemcpyDeviceToHost);\n";
+    if (resBytes < 0) {
+      os() << "  cudaMemcpy(__result.data(), __result__device, "
+         << "__result.size() * sizeof(" << eType
+         << "), cudaMemcpyDeviceToHost);\n";
+    } else {
+      os() << "  cudaMemcpy(__result.data(), __result__device, "
+         << resBytes << "ULL, cudaMemcpyDeviceToHost);\n";
+    }
 
     for (unsigned i = 0; i < numOrigInputs; ++i)
       os() << "  cudaFree(p" << i << "__device);\n";
@@ -1011,21 +1091,40 @@ private:
     auto shape = tty.getShape();
     TileLayout layout;
     layout.shape.assign(shape.begin(), shape.end());
-    layout.strides.resize(shape.size());
-    int64_t s = 1;
-    for (int i = (int)shape.size() - 1; i >= 0; --i) {
-      layout.strides[i] = s;
-      s *= shape[i];
+    if (!tty.hasDynamicShape()) {
+      layout.strides.resize(shape.size());
+      int64_t s = 1;
+      for (int i = (int)shape.size() - 1; i >= 0; --i) {
+        layout.strides[i] = s;
+        s *= shape[i];
+      }
     }
     return layout;
   }
 
   void emitCuteMakeShape(llvm::StringRef varName,
-                         const llvm::SmallVector<int64_t> &dims) {
+                         const llvm::SmallVector<int64_t> &dims,
+                         KernelOp kernel = nullptr) {
     os() << getIndent() << "auto " << varName << " = cute::make_shape(";
+    llvm::SmallVector<std::string> dimArgNames;
+    if (kernel) {
+      auto fnTy = kernel.getFunctionType();
+      for (unsigned a = 0; a < fnTy.getNumInputs(); ++a)
+        if (fnTy.getInput(a).isIndex())
+          dimArgNames.push_back(getName(kernel.getBody().getArgument(a)));
+    }
+    unsigned dynIdx = 0;
     for (unsigned i = 0; i < dims.size(); ++i) {
       if (i > 0) os() << ", ";
-      os() << "cute::Int<" << dims[i] << ">{}";
+      if (mlir::ShapedType::isDynamic(dims[i])) {
+        if (dynIdx < dimArgNames.size())
+          os() << dimArgNames[dynIdx];
+        else
+          os() << "1";
+        dynIdx++;
+      } else {
+        os() << "cute::Int<" << dims[i] << ">{}";
+      }
     }
     os() << ");\n";
   }
@@ -1050,11 +1149,22 @@ private:
     std::string layoutName = "__layout" + suffix;
     std::string tensorName = "__tensor" + suffix;
 
-    emitCuteMakeShape(shapeName, layout.shape);
-    emitCuteMakeStride(strideName, layout.strides);
-    os() << getIndent() << "auto " << layoutName
-       << " = cute::make_layout(" << shapeName << ", " << strideName
-       << ");\n";
+    KernelOp enclosingKernel = nullptr;
+    if (tty && tty.hasDynamicShape())
+      if (auto *block = v.getParentBlock())
+        enclosingKernel = block->getParent()->getParentOfType<KernelOp>();
+    emitCuteMakeShape(shapeName, layout.shape, enclosingKernel);
+
+    // For dynamic tensors, use shape-only layout (CUTE computes row-major strides)
+    if (tty && tty.hasDynamicShape()) {
+      os() << getIndent() << "auto " << layoutName
+         << " = cute::make_layout(" << shapeName << ");\n";
+    } else {
+      emitCuteMakeStride(strideName, layout.strides);
+      os() << getIndent() << "auto " << layoutName
+         << " = cute::make_layout(" << shapeName << ", " << strideName
+         << ");\n";
+    }
 
     std::string elemTy = tty ? emitElementType(tty.getElementType()) : "int";
     std::string ptrName = getName(v);
@@ -1072,18 +1182,15 @@ private:
   std::string emitCuteTensorFromPtr(const std::string &ptrExpr,
                                     coir::TensorType origType,
                                     llvm::ArrayRef<int64_t> shape,
-                                    const std::string &suffix) {
+                                    const std::string &suffix,
+                                    KernelOp kernel = nullptr) {
     int32_t ms = origType.getMemorySpace();
     std::string shapeName = "__shape" + suffix;
     std::string layoutName = "__layout" + suffix;
     std::string tensorName = "__tensor" + suffix;
 
-    os() << getIndent() << "auto " << shapeName << " = cute::make_shape(";
-    for (unsigned i = 0; i < shape.size(); ++i) {
-      if (i) os() << ", ";
-      os() << "cute::Int<" << shape[i] << ">{}";
-    }
-    os() << ");\n";
+    llvm::SmallVector<int64_t> shapeVec(shape.begin(), shape.end());
+    emitCuteMakeShape(shapeName, shapeVec, kernel);
     os() << getIndent() << "auto " << layoutName
        << " = cute::make_layout(" << shapeName << ");\n";
 
@@ -1291,39 +1398,77 @@ private:
   void emitCpAsyncInvoke(unsigned /*descIdx*/, const DescInfo &desc,
                          const SmallVector<Value, 4> &offsets) {
     // cp.async DMA: cooperative copy with fence/wait
-    // Use the original operands from the DMAConstDescOp
     if (auto constOp =
             desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
       os() << getIndent() << "// cp.async DMA\n";
       if (!offsets.empty()) {
-        // Tiled copy: apply offset to the global pointer, copy tile-sized chunk.
         Value globalVal = desc.isLoad ? constOp.getSource() : constOp.getDest();
         Value localVal = desc.isLoad ? constOp.getDest() : constOp.getSource();
         auto globalTy = cast<coir::TensorType>(globalVal.getType());
         auto localTy = cast<coir::TensorType>(localVal.getType());
-        int64_t tileElems = 1;
-        for (auto d : localTy.getShape()) tileElems *= d;
+
+        // Find enclosing kernel for dynamic dim resolution
+        KernelOp enclosingKernel = nullptr;
+        if (localTy.hasDynamicShape() || globalTy.hasDynamicShape())
+          if (auto *block = constOp->getBlock())
+            enclosingKernel =
+                block->getParent()->getParentOfType<KernelOp>();
+
+        // Compute tile element count (static or runtime expression)
+        bool hasDynLocal = localTy.hasDynamicShape();
+        std::string tileElemsExpr;
+        if (hasDynLocal) {
+          llvm::raw_string_ostream ss(tileElemsExpr);
+          llvm::SmallVector<std::string> dimArgNames;
+          if (enclosingKernel) {
+            auto fnTy = enclosingKernel.getFunctionType();
+            for (unsigned a = 0; a < fnTy.getNumInputs(); ++a)
+              if (fnTy.getInput(a).isIndex())
+                dimArgNames.push_back(
+                    getName(enclosingKernel.getBody().getArgument(a)));
+          }
+          unsigned dynIdx = 0;
+          for (unsigned d = 0; d < localTy.getRank(); ++d) {
+            if (d > 0) ss << " * ";
+            auto dim = localTy.getShape()[d];
+            if (mlir::ShapedType::isDynamic(dim)) {
+              if (dynIdx < dimArgNames.size())
+                ss << dimArgNames[dynIdx];
+              else
+                ss << "1";
+              dynIdx++;
+            } else {
+              ss << dim;
+            }
+          }
+        } else {
+          int64_t tileElems = 1;
+          for (auto d : localTy.getShape()) tileElems *= d;
+          tileElemsExpr = std::to_string(tileElems);
+        }
 
         unsigned id = nextId++;
         std::string ptrName = getName(globalVal);
         std::string offExpr = getName(offsets[0]);
-        if (tileElems > 1)
-          offExpr += " * " + std::to_string(tileElems);
+        if (tileElemsExpr != "1")
+          offExpr += " * " + tileElemsExpr;
         std::string elemTy = emitElementType(globalTy.getElementType());
-        std::string slicedPtr =
-            "__slice_ptr_" + std::to_string(id);
+        std::string slicedPtr = "__slice_ptr_" + std::to_string(id);
         os() << getIndent() << elemTy << "* " << slicedPtr << " = ("
            << elemTy << "*)" << ptrName << " + " << offExpr << ";\n";
 
-        // Build a tensor from the sliced pointer with tile shape
         std::string srcTensor, dstTensor;
         std::string suffix = "_" + std::to_string(id);
         if (desc.isLoad) {
-          srcTensor = emitCuteTensorFromPtr(slicedPtr, globalTy, localTy.getShape(), suffix + "_s");
+          srcTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
+                                            localTy.getShape(), suffix + "_s",
+                                            enclosingKernel);
           dstTensor = emitCuteTensor(localVal, suffix + "_d");
         } else {
           srcTensor = emitCuteTensor(localVal, suffix + "_s");
-          dstTensor = emitCuteTensorFromPtr(slicedPtr, globalTy, localTy.getShape(), suffix + "_d");
+          dstTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
+                                            localTy.getShape(), suffix + "_d",
+                                            enclosingKernel);
         }
         os() << getIndent() << "choreo::naive_copy(" << srcTensor << ", "
            << dstTensor << ");\n";

@@ -174,10 +174,10 @@ int64_t ASTCoIRGen::ResolveBoundedVarExtent(llvm::StringRef rvName) {
 namespace {
 
 int64_t EvalToInt(const ValueItem &vi) {
-  if (!vi || !vi->IsNumeric()) return 0;
+  if (!vi || !vi->IsNumeric()) return mlir::ShapedType::kDynamic;
   if (auto *nv = dyn_cast<sbe::NumericValue>(vi.get()))
     return nv->Value();
-  return 0;
+  return mlir::ShapedType::kDynamic;
 }
 
 } // namespace
@@ -241,17 +241,26 @@ ASTCoIRGen::LowerSpannedType(const ptr<SpannedType> &sty) {
     strides.push_back(val);
   }
 
-  // Omit strides when they describe a dense contiguous layout (row-major)
-  bool isDense = true;
-  if (!strides.empty() && strides.size() == dims.size()) {
-    int64_t expected = 1;
-    for (int i = (int)dims.size() - 1; i >= 0; --i) {
-      if (strides[i] != expected) { isDense = false; break; }
-      expected *= dims[i];
-    }
-  }
-  if (isDense)
+  // If any dimension is dynamic, cannot compute dense strides -- clear them.
+  bool hasDynDim = false;
+  for (auto d : dims)
+    if (mlir::ShapedType::isDynamic(d)) { hasDynDim = true; break; }
+
+  if (hasDynDim) {
     strides.clear();
+  } else {
+    // Omit strides when they describe a dense contiguous layout (row-major)
+    bool isDense = true;
+    if (!strides.empty() && strides.size() == dims.size()) {
+      int64_t expected = 1;
+      for (int i = (int)dims.size() - 1; i >= 0; --i) {
+        if (strides[i] != expected) { isDense = false; break; }
+        expected *= dims[i];
+      }
+    }
+    if (isDense)
+      strides.clear();
+  }
 
   return coir::TensorType::get(&IRContext(), elemType, dims, memSpace, strides);
 }
@@ -1383,7 +1392,37 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
   if (auto sty = dyn_cast<SpannedType>(symType)) {
     auto loc = Loc(nvd);
     auto tty = LowerSpannedType(sty);
-    auto allocOp = builder.create<coir::TensorAllocOp>(loc, tty);
+    llvm::SmallVector<mlir::Value> dynDimVals;
+    if (tty.hasDynamicShape()) {
+      for (unsigned d = 0; d < tty.getRank(); ++d) {
+        if (tty.isDynamicDim(d)) {
+          auto &shape = sty->GetShape();
+          if (shape.IsValid() && d < shape.Value().size()) {
+            auto &vi = shape.Value()[d];
+            if (auto *sv = dyn_cast<sbe::SymbolicValue>(vi.get())) {
+              auto symName = UnScopedName(sv->Value());
+              auto val = LookupValue(symName);
+              if (val) { dynDimVals.push_back(val); continue; }
+            }
+          }
+          // Fallback: find from kernel index block args
+          if (auto kernelOp =
+                  builder.getBlock()->getParent()->getParentOfType<
+                      coir::KernelOp>()) {
+            auto fnTy = kernelOp.getFunctionType();
+            for (unsigned a = 0; a < fnTy.getNumInputs(); ++a) {
+              if (mlir::isa<mlir::IndexType>(fnTy.getInput(a))) {
+                dynDimVals.push_back(
+                    kernelOp.getBody().getArgument(a));
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    auto allocOp =
+        builder.create<coir::TensorAllocOp>(loc, tty, dynDimVals);
     MapValue(nvd.GetName(), allocOp.getResult());
   } else {
     if (nvd.init_expr) {
@@ -1590,7 +1629,14 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
         auto dstTy = coir::TensorType::get(
             &IRContext(), srcTy.getElementType(), srcTy.getShape(),
             static_cast<int32_t>(space), srcTy.getStrides());
-        auto allocOp = builder.create<coir::TensorAllocOp>(loc, dstTy);
+        llvm::SmallVector<mlir::Value> dstDynDims;
+        if (dstTy.hasDynamicShape()) {
+          if (auto srcAlloc = srcVal.getDefiningOp<coir::TensorAllocOp>())
+            dstDynDims.append(srcAlloc.getDynamicDims().begin(),
+                              srcAlloc.getDynamicDims().end());
+        }
+        auto allocOp =
+            builder.create<coir::TensorAllocOp>(loc, dstTy, dstDynDims);
         dstVal = allocOp.getResult();
       }
     }

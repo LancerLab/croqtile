@@ -213,9 +213,19 @@ def TensorAllocOp : CoIR_Op<"tensor.alloc", [NoMemoryEffect]> {
   let description = [{
     Allocates a tensor with the specified type.
     Memory space is determined by the tensor type.
+
+    For tensors with dynamic dimensions (`?`), one `index` operand must be
+    provided for each `?` dimension, in left-to-right order, following
+    MLIR's tensor dialect convention.
+
+    Example:
+      %0 = coir.tensor.alloc : !coir.tensor<128x64xf16, shared>
+      %1 = coir.tensor.alloc(%K, %N) : !coir.tensor<?x?xi8, shared>
   }];
+  let arguments = (ins Variadic<Index>:$dynamicDims);
   let results = (outs CoIR_TensorTypeC:$result);
-  let assemblyFormat = "attr-dict `:` type($result)";
+
+  let hasCustomAssemblyFormat = 1;
 }
 
 def TensorTileOp : CoIR_Op<"tensor.tile", [NoMemoryEffect]> {

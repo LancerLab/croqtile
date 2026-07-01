@@ -6,6 +6,7 @@
 
 #include "CodeGen/CoIREmitterBase.h"
 
+#include "mlir/IR/BuiltinTypes.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
@@ -122,7 +123,10 @@ std::string CoIREmitterBase::emitElementType(Type ty) {
 
 int64_t CoIREmitterBase::getTensorBytes(TensorType tty) {
   int64_t n = 1;
-  for (auto d : tty.getShape()) n *= d;
+  for (auto d : tty.getShape()) {
+    if (mlir::ShapedType::isDynamic(d)) return -1;
+    n *= d;
+  }
   Type eTy = tty.getElementType();
   int64_t elemSize = 4;
   if (eTy.isF16() || eTy.isBF16() || eTy.isInteger(16)) elemSize = 2;
@@ -142,6 +146,43 @@ void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty) {
     os() << getName(indices[0]);
     return;
   }
+
+  // For dynamic shapes without explicit strides, emit row-major linearization
+  // using runtime dim expressions from the kernel's index block arguments.
+  if (strides.empty() && tty.hasDynamicShape()) {
+    // Collect dim arg names from enclosing kernel
+    llvm::SmallVector<std::string> dimArgNames;
+    if (auto *block = indices[0].getParentBlock()) {
+      if (auto kernelOp = block->getParent()->getParentOfType<KernelOp>()) {
+        auto fnTy = kernelOp.getFunctionType();
+        for (unsigned a = 0; a < fnTy.getNumInputs(); ++a) {
+          if (fnTy.getInput(a).isIndex())
+            dimArgNames.push_back(getName(kernelOp.getBody().getArgument(a)));
+        }
+      }
+    }
+
+    unsigned dynIdx = 0;
+    for (unsigned i = 0; i < indices.size(); ++i) {
+      if (i > 0) os() << " + ";
+      os() << getName(indices[i]);
+      // Multiply by the product of all inner dimensions
+      for (unsigned j = i + 1; j < shape.size(); ++j) {
+        if (mlir::ShapedType::isDynamic(shape[j])) {
+          // Count which dynamic dim index this corresponds to
+          unsigned dj = 0;
+          for (unsigned k = 0; k < j; ++k)
+            if (mlir::ShapedType::isDynamic(shape[k])) ++dj;
+          if (dj < dimArgNames.size())
+            os() << " * " << dimArgNames[dj];
+        } else {
+          os() << " * " << shape[j];
+        }
+      }
+    }
+    return;
+  }
+
   llvm::SmallVector<int64_t> effectiveStrides;
   if (!strides.empty()) {
     effectiveStrides.assign(strides.begin(), strides.end());
@@ -557,6 +598,17 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
 
   auto tensorTy = cast<TensorType>(op.getResult().getType());
   std::string name = getName(op.getResult());
+
+  // Dynamic shared memory: emit extern __shared__ with pointer arithmetic.
+  if (tensorTy.hasDynamicShape() &&
+      tensorTy.getMemorySpace() == 1 /*shared*/) {
+    std::string eType = emitElementType(tensorTy.getElementType());
+    os() << getIndent() << "extern __shared__ unsigned char __dyn_smem[];\n";
+    os() << getIndent() << eType << "* " << name
+         << " = (" << eType << "*)__dyn_smem;\n";
+    return;
+  }
+
   int64_t totalElems = 1;
   for (auto d : tensorTy.getShape()) totalElems *= d;
 

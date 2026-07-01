@@ -673,5 +673,43 @@ void FutureRotateOp::print(OpAsmPrinter &printer) {
 }
 
 //===----------------------------------------------------------------------===//
+// TensorAllocOp
+//===----------------------------------------------------------------------===//
+
+// Format:
+//   %0 = coir.tensor.alloc : !coir.tensor<128x64xf16, shared>
+//   %1 = coir.tensor.alloc(%K, %N) : !coir.tensor<?x?xi8, shared>
+ParseResult TensorAllocOp::parse(OpAsmParser &parser, OperationState &result) {
+  SmallVector<OpAsmParser::UnresolvedOperand> dynDims;
+  if (succeeded(parser.parseOptionalLParen())) {
+    if (parser.parseOperandList(dynDims) || parser.parseRParen())
+      return failure();
+  }
+  if (parser.parseOptionalAttrDict(result.attributes) || parser.parseColon())
+    return failure();
+  Type resultType;
+  if (parser.parseType(resultType))
+    return failure();
+  result.addTypes(resultType);
+  auto indexTy = parser.getBuilder().getIndexType();
+  SmallVector<Type> dynDimTypes(dynDims.size(), indexTy);
+  if (parser.resolveOperands(dynDims, dynDimTypes, parser.getNameLoc(),
+                             result.operands))
+    return failure();
+  return success();
+}
+
+void TensorAllocOp::print(OpAsmPrinter &printer) {
+  auto dynDims = getDynamicDims();
+  if (!dynDims.empty()) {
+    printer << "(";
+    printer.printOperands(dynDims);
+    printer << ")";
+  }
+  printer.printOptionalAttrDict((*this)->getAttrs());
+  printer << " : " << getResult().getType();
+}
+
+//===----------------------------------------------------------------------===//
 // ElementCopyOp (uses declarative format, no custom parse/print needed)
 //===----------------------------------------------------------------------===//
