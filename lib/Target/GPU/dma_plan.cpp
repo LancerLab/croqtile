@@ -270,6 +270,30 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
     if (tma_mismatch) {
       dec.is_zfill = true;
     }
+
+    // Warn about S2G TMA with padded shared memory source.  TMA reads shared
+    // memory contiguously (no stride support in hardware).  If the source
+    // buffer has padding (outer stride > inner dimension), the TMA will read
+    // incorrect data, producing wrong results silently.
+    if (dec.direction == DMADirection::S2G && f_ca_shape.Rank() >= 2) {
+      auto inner_dim = f_ca_shape.ValueAt(f_ca_shape.Rank() - 1);
+      auto outer_stride = dec.from_strides.at(0);
+      if (VIIsInt(inner_dim) && VIIsInt(outer_stride)) {
+        auto inner_val = *VIInt(inner_dim);
+        auto stride_val = *VIInt(outer_stride);
+        if (stride_val > inner_val) {
+          Warning(n.LOC(),
+                  "tma.copy S2G: source shared memory has padded stride (" +
+                      std::to_string(stride_val) + " > " +
+                      std::to_string(inner_val) +
+                      "). TMA hardware reads shared memory contiguously "
+                      "and cannot skip padding. This will produce "
+                      "incorrect results. Remove shared memory padding "
+                      "for the TMA source buffer.");
+        }
+      }
+    }
+
     return;
   }
 
@@ -843,6 +867,21 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
     }
   }
 
+  // For .pad, full_tiles based on outer_bounds (parent shape) is misleading
+  // when the box was ceiled beyond the actual source extent (from_ca_shape).
+  // The tiled copy source tensor uses the box shape, so if box > source data,
+  // predication is required to avoid copying uninitialized memory.
+  if (full_tiles && is_pad) {
+    for (size_t i = 0; i < 2 && i < pred_inner.size(); ++i) {
+      auto inner_val = VIInt(pred_inner[i]);
+      auto box_val = VIInt(param.box_shape[i]);
+      if (inner_val && box_val && *inner_val < *box_val) {
+        full_tiles = false;
+        break;
+      }
+    }
+  }
+
   if (full_tiles) {
     param.need_pred = false;
     param.prediction.clear();
@@ -853,6 +892,19 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
   ValueList prediction = {
       BuildPrediction(pred_outer[0], pred_offsets[0], param.box_shape[0]),
       BuildPrediction(pred_outer[1], pred_offsets[1], param.box_shape[1])};
+
+  // For .pad, the prediction from outer_bounds may equal the box (because
+  // outer = parent buffer which is >= box), but the actual data extent
+  // (pred_inner = from_ca_shape) is smaller.  Override the prediction with
+  // the source data extent to ensure predication limits copies to valid data.
+  if (is_pad) {
+    for (size_t i = 0; i < 2 && i < pred_inner.size(); ++i) {
+      auto inner_v = VIInt(pred_inner[i]);
+      auto box_v = VIInt(param.box_shape[i]);
+      if (inner_v && box_v && *inner_v < *box_v)
+        prediction[i] = pred_inner[i];
+    }
+  }
 
   if (pred_matches_box(prediction)) {
     param.need_pred = false;
