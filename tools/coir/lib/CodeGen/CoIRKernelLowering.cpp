@@ -170,6 +170,137 @@ void CoIRKernelLoweringBase::convertOp(OpBuilder &builder, Location loc,
     return;
   }
 
+  if (auto rotate = dyn_cast<FutureRotateOp>(op)) {
+    auto inputs = rotate.getFutures();
+    auto outputs = rotate.getResults();
+    unsigned n = inputs.size();
+    if (n >= 2) {
+      SmallVector<Value> mapped;
+      for (auto in : inputs)
+        mapped.push_back(ctx.mapping.lookup(in));
+      for (unsigned i = 0; i < n; ++i)
+        ctx.mapping.map(outputs[i], mapped[(i + 1) % n]);
+    } else if (n == 1) {
+      ctx.mapping.map(outputs[0], ctx.mapping.lookup(inputs[0]));
+    }
+    return;
+  }
+
+  if (isa<AsyncUndefOp>(op)) {
+    return;
+  }
+
+  if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
+    Value cond = ctx.mapping.lookup(ifOp.getCondition());
+    SmallVector<Type> resultTypes;
+    for (auto ty : ifOp.getResultTypes()) {
+      if (auto tty = dyn_cast<TensorType>(ty))
+        resultTypes.push_back(convertTensorType(tty));
+      else
+        resultTypes.push_back(ty);
+    }
+    bool hasElse = !ifOp.getElseRegion().empty();
+    auto newIf = builder.create<scf::IfOp>(loc, resultTypes, cond, hasElse);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+
+      if (newIf.thenBlock()->mightHaveTerminator())
+        newIf.thenBlock()->getTerminator()->erase();
+      builder.setInsertionPointToEnd(newIf.thenBlock());
+      for (auto &thenOp : ifOp.thenBlock()->getOperations()) {
+        if (auto yield = dyn_cast<scf::YieldOp>(thenOp)) {
+          SmallVector<Value> yieldVals;
+          for (auto v : yield.getOperands())
+            yieldVals.push_back(ctx.mapping.lookup(v));
+          builder.create<scf::YieldOp>(loc, yieldVals);
+        } else {
+          convertOp(builder, loc, thenOp, ctx);
+        }
+      }
+      if (hasElse) {
+        if (newIf.elseBlock()->mightHaveTerminator())
+          newIf.elseBlock()->getTerminator()->erase();
+        builder.setInsertionPointToEnd(newIf.elseBlock());
+        for (auto &elseOp : ifOp.elseBlock()->getOperations()) {
+          if (auto yield = dyn_cast<scf::YieldOp>(elseOp)) {
+            SmallVector<Value> yieldVals;
+            for (auto v : yield.getOperands())
+              yieldVals.push_back(ctx.mapping.lookup(v));
+            builder.create<scf::YieldOp>(loc, yieldVals);
+          } else {
+            convertOp(builder, loc, elseOp, ctx);
+          }
+        }
+      }
+    }
+    for (unsigned i = 0; i < ifOp.getNumResults(); ++i)
+      ctx.mapping.map(ifOp.getResult(i), newIf.getResult(i));
+    return;
+  }
+
+  if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+    SmallVector<Value> inits;
+    for (auto init : whileOp.getInits())
+      inits.push_back(ctx.mapping.lookup(init));
+
+    SmallVector<Type> resultTypes;
+    for (auto ty : whileOp.getResultTypes())
+      resultTypes.push_back(ty);
+
+    auto newWhile = builder.create<scf::WhileOp>(loc, resultTypes, inits);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+
+      SmallVector<Type> beforeArgTypes;
+      for (auto arg : whileOp.getBeforeArguments())
+        beforeArgTypes.push_back(arg.getType());
+      SmallVector<Location> beforeLocs(beforeArgTypes.size(), loc);
+      Block *beforeBlock = builder.createBlock(
+          &newWhile.getBefore(), newWhile.getBefore().end(),
+          beforeArgTypes, beforeLocs);
+      builder.setInsertionPointToStart(beforeBlock);
+      for (unsigned i = 0; i < whileOp.getBeforeArguments().size(); ++i)
+        ctx.mapping.map(whileOp.getBeforeArguments()[i],
+                        beforeBlock->getArgument(i));
+      for (auto &beforeOp : whileOp.getBefore().front().getOperations()) {
+        if (auto condOp = dyn_cast<scf::ConditionOp>(beforeOp)) {
+          Value cond = ctx.mapping.lookup(condOp.getCondition());
+          SmallVector<Value> condArgs;
+          for (auto v : condOp.getArgs())
+            condArgs.push_back(ctx.mapping.lookup(v));
+          builder.create<scf::ConditionOp>(loc, cond, condArgs);
+        } else {
+          convertOp(builder, loc, beforeOp, ctx);
+        }
+      }
+
+      SmallVector<Type> afterArgTypes;
+      for (auto arg : whileOp.getAfterArguments())
+        afterArgTypes.push_back(arg.getType());
+      SmallVector<Location> afterLocs(afterArgTypes.size(), loc);
+      Block *afterBlock = builder.createBlock(
+          &newWhile.getAfter(), newWhile.getAfter().end(),
+          afterArgTypes, afterLocs);
+      builder.setInsertionPointToStart(afterBlock);
+      for (unsigned i = 0; i < whileOp.getAfterArguments().size(); ++i)
+        ctx.mapping.map(whileOp.getAfterArguments()[i],
+                        afterBlock->getArgument(i));
+      for (auto &afterOp : whileOp.getAfter().front().getOperations()) {
+        if (auto yield = dyn_cast<scf::YieldOp>(afterOp)) {
+          SmallVector<Value> yieldVals;
+          for (auto v : yield.getOperands())
+            yieldVals.push_back(ctx.mapping.lookup(v));
+          builder.create<scf::YieldOp>(loc, yieldVals);
+        } else {
+          convertOp(builder, loc, afterOp, ctx);
+        }
+      }
+    }
+    for (unsigned i = 0; i < whileOp.getNumResults(); ++i)
+      ctx.mapping.map(whileOp.getResult(i), newWhile.getResult(i));
+    return;
+  }
+
   if (isa<AssertOp>(op) || isa<YieldOp>(op))
     return;
 
@@ -199,6 +330,12 @@ void CoIRKernelLoweringBase::convertLoadElem(OpBuilder &builder, Location loc,
   SmallVector<Value> indices;
   for (auto idx : loadElem.getIndices())
     indices.push_back(mapping.lookup(idx));
+  if (indices.empty() && cast<MemRefType>(src.getType()).getRank() > 0) {
+    src = flattenIfNeeded(builder, loc, src, 1);
+    indices.push_back(builder.create<arith::ConstantIndexOp>(loc, 0));
+  } else {
+    src = flattenIfNeeded(builder, loc, src, indices.size());
+  }
   auto loaded = builder.create<memref::LoadOp>(loc, src, indices);
   mapping.map(loadElem.getResult(), loaded.getResult());
 }
@@ -211,6 +348,12 @@ void CoIRKernelLoweringBase::convertStoreElem(OpBuilder &builder, Location loc,
   SmallVector<Value> indices;
   for (auto idx : storeElem.getIndices())
     indices.push_back(mapping.lookup(idx));
+  if (indices.empty() && cast<MemRefType>(dst.getType()).getRank() > 0) {
+    dst = flattenIfNeeded(builder, loc, dst, 1);
+    indices.push_back(builder.create<arith::ConstantIndexOp>(loc, 0));
+  } else {
+    dst = flattenIfNeeded(builder, loc, dst, indices.size());
+  }
   builder.create<memref::StoreOp>(loc, val, dst, indices);
 }
 
@@ -222,6 +365,12 @@ void CoIRKernelLoweringBase::convertReduceElem(
   SmallVector<Value> indices;
   for (auto idx : reduceElem.getIndices())
     indices.push_back(mapping.lookup(idx));
+  if (indices.empty() && cast<MemRefType>(dst.getType()).getRank() > 0) {
+    dst = flattenIfNeeded(builder, loc, dst, 1);
+    indices.push_back(builder.create<arith::ConstantIndexOp>(loc, 0));
+  } else {
+    dst = flattenIfNeeded(builder, loc, dst, indices.size());
+  }
   Value old = builder.create<memref::LoadOp>(loc, dst, indices);
   Value sum;
   if (isa<FloatType>(val.getType()))
@@ -229,6 +378,68 @@ void CoIRKernelLoweringBase::convertReduceElem(
   else
     sum = builder.create<arith::AddIOp>(loc, old, val);
   builder.create<memref::StoreOp>(loc, sum, dst, indices);
+}
+
+// ===== Rank-mismatch helpers =====
+
+Value CoIRKernelLoweringBase::flattenIfNeeded(OpBuilder &builder, Location loc,
+                                              Value memref,
+                                              unsigned numIndices) {
+  auto memTy = cast<MemRefType>(memref.getType());
+  if ((unsigned)memTy.getRank() == numIndices)
+    return memref;
+  int64_t totalElems = 1;
+  for (auto d : memTy.getShape())
+    totalElems *= d;
+  Value base = getBaseMemRef(memref);
+  Value offset = extractOffset(builder, loc, memref);
+
+  bool hasDynOffset = false;
+  int64_t staticOff = 0;
+  if (auto cst = offset.getDefiningOp<arith::ConstantIndexOp>())
+    staticOff = cst.value();
+  else
+    hasDynOffset = true;
+
+  MemRefType flatTy;
+  if (hasDynOffset) {
+    auto layout = StridedLayoutAttr::get(builder.getContext(),
+                                         ShapedType::kDynamic, {1});
+    flatTy = MemRefType::get({totalElems}, memTy.getElementType(), layout,
+                             memTy.getMemorySpace());
+  } else if (staticOff != 0) {
+    auto layout =
+        StridedLayoutAttr::get(builder.getContext(), staticOff, {1});
+    flatTy = MemRefType::get({totalElems}, memTy.getElementType(), layout,
+                             memTy.getMemorySpace());
+  } else {
+    flatTy = MemRefType::get({totalElems}, memTy.getElementType(),
+                             AffineMap{}, memTy.getMemorySpace());
+  }
+
+  Value sz = builder.create<arith::ConstantIndexOp>(loc, totalElems);
+  Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+  return builder.create<memref::ReinterpretCastOp>(loc, flatTy, base, offset,
+                                                   ValueRange{sz},
+                                                   ValueRange{one});
+}
+
+Value CoIRKernelLoweringBase::getBaseMemRef(Value memref) {
+  if (auto castOp = memref.getDefiningOp<memref::ReinterpretCastOp>())
+    return castOp.getSource();
+  return memref;
+}
+
+Value CoIRKernelLoweringBase::extractOffset(OpBuilder &builder, Location loc,
+                                            Value memref) {
+  if (auto castOp = memref.getDefiningOp<memref::ReinterpretCastOp>()) {
+    auto staticOffsets = castOp.getStaticOffsets();
+    if (!staticOffsets.empty() && staticOffsets[0] == ShapedType::kDynamic)
+      return castOp.getOffsets()[0];
+    if (!staticOffsets.empty() && staticOffsets[0] != 0)
+      return builder.create<arith::ConstantIndexOp>(loc, staticOffsets[0]);
+  }
+  return builder.create<arith::ConstantIndexOp>(loc, 0);
 }
 
 void CoIRKernelLoweringBase::convertElementCopy(OpBuilder &builder,
@@ -295,8 +506,52 @@ void CoIRKernelLoweringBase::convertForeach(OpBuilder &builder, Location loc,
   Value step = builder.create<arith::ConstantIndexOp>(loc, 1);
 
   SmallVector<Value> initVals;
-  for (auto init : fe.getIterArgs())
-    initVals.push_back(ctx.mapping.lookup(init));
+  SmallVector<unsigned> asyncUndefIndices;
+  for (unsigned i = 0; i < fe.getIterArgs().size(); ++i) {
+    Value init = fe.getIterArgs()[i];
+    if (ctx.mapping.contains(init)) {
+      initVals.push_back(ctx.mapping.lookup(init));
+    } else {
+      asyncUndefIndices.push_back(i);
+      initVals.push_back(Value());
+    }
+  }
+
+  if (!asyncUndefIndices.empty()) {
+    SmallVector<Value> yieldedVals;
+    for (auto &op : body.front().getOperations()) {
+      if (auto yield = dyn_cast<YieldOp>(op)) {
+        for (auto v : yield.getOperands())
+          yieldedVals.push_back(v);
+      }
+    }
+    for (unsigned idx : asyncUndefIndices) {
+      Value yieldedVal = yieldedVals[idx];
+      if (auto *defOp = yieldedVal.getDefiningOp()) {
+        if (auto rotateOp = dyn_cast<FutureRotateOp>(defOp)) {
+          Value firstInput = rotateOp.getFutures()[0];
+          if (ctx.mapping.contains(firstInput)) {
+            Value mapped = ctx.mapping.lookup(firstInput);
+            initVals[idx] = mapped;
+            ctx.mapping.map(fe.getIterArgs()[idx], mapped);
+            continue;
+          }
+        }
+      }
+      if (ctx.mapping.contains(yieldedVal)) {
+        Value mapped = ctx.mapping.lookup(yieldedVal);
+        initVals[idx] = mapped;
+        ctx.mapping.map(fe.getIterArgs()[idx], mapped);
+      }
+    }
+    for (unsigned idx : asyncUndefIndices) {
+      if (!initVals[idx]) {
+        Value dummy = builder.create<arith::ConstantIndexOp>(loc, 0);
+        initVals[idx] = dummy;
+        ctx.mapping.map(fe.getIterArgs()[idx], dummy);
+      }
+    }
+  }
 
   auto loop = builder.create<scf::ForOp>(loc, zero, ub, step, initVals);
   {

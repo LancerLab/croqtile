@@ -10,7 +10,7 @@
 //                                    combines CodeGen pipeline + op visitor +
 //                                    script/host-code helpers
 //       CUDAEmitter                -- CUDA/CUTE target
-//       TopsccEmitter              -- Topscc/GCU target
+//       (target-specific emitters for other backends)
 //       HIPEmitter                 -- HIP/AMD target
 //
 //===----------------------------------------------------------------------===//
