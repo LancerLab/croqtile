@@ -1266,8 +1266,7 @@ CollectCokLinesRecursive(const std::string& filepath,
   if (!ifs.is_open()) return result;
 
   std::regex inc_re("^\\s*#include\\s+\"(.*)\"");
-  auto current_dir =
-      std::filesystem::path(normalized).parent_path().string();
+  auto current_dir = std::filesystem::path(normalized).parent_path().string();
 
   std::string line;
   int depth = 0;

@@ -157,6 +157,8 @@ private:
 
   std::map<std::string, std::string> claimed_dte;
   int dte_pool_size = 0;
+  int anon_dte_slot = -1;
+  bool has_nofuture_rotate = false;
   std::map<std::string, int> dte_pool_slots;
   std::map<int, std::string> dte_named_vars;
   std::set<std::string> waited_futures; // futures that have been waited
@@ -262,6 +264,8 @@ private:
     symbolic_dimensions.clear();
     claimed_dte.clear();
     dte_pool_size = 0;
+    anon_dte_slot = -1;
+    has_nofuture_rotate = false;
     dte_pool_slots.clear();
     dte_named_vars.clear();
     waited_futures.clear();

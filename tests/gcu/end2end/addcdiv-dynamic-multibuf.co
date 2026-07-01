@@ -532,10 +532,12 @@ int main() { /// host program
   auto second_data = choreo::make_spanview<1, choreo::f32>((float*)b, {LL});
   auto third_data = choreo::make_spanview<1, choreo::f32>((float*)c, {LL});
 
-  std::fill_n((float*)&first_data[0], LL, 1.0);
-  std::fill_n((float*)&second_data[0], LL, 1.0);
-  std::fill_n((float*)&third_data[0], LL, 1.0);
-  // first_data.fill_random(-1.0, 1.0);
+  // std::fill_n((float*)&first_data[0], LL, 1.0);
+  // std::fill_n((float*)&second_data[0], LL, 1.0);
+  // std::fill_n((float*)&third_data[0], LL, 1.0);
+  first_data.fill_random(1.0, 2.0);
+  second_data.fill_random(1.0, 2.0);
+  third_data.fill_random(1.0, 2.0);
 
   auto start = std::chrono::high_resolution_clock::now();
 
@@ -553,7 +555,7 @@ int main() { /// host program
     // float ref = first_data[j] + second_data[j];
 
     // std::cout << "ref: " << ref << std::endl;
-    choreo::choreo_assert(ref == res[j], "values are not equal.");
+    choreo::choreo_assert(abs(ref - res[j]) <= 1e-6, "values are not equal.");
   }
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;

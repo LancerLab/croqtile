@@ -55,6 +55,11 @@ Option<bool> raw_dte_mode(
     "Use raw DTE pool references instead of choreo::future for anonymous sync "
     "DMA on GCU300. Reduces per-DMA overhead by eliminating future "
     "construct/destruct.");
+Option<bool> use_dte_pool(
+    OptionKind::User, "--use-dte-pool", "", true,
+    "Reuse a persistent DTE pool for anonymous and named DMAs instead of "
+    "creating per-DMA DTE instances. Prevents DTE resource exhaustion "
+    "(SIP asserts) when total init/destroy cycles exceed hardware limits.");
 Option<bool> no_future_mode(
     OptionKind::User, "-fno-future", "", false,
     "Eliminate ALL choreo::future objects on GCU300. Named async futures are "
@@ -280,8 +285,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
 
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << STR(FBInfo()) << "\n");
-    if ((no_future_mode || named_dte_mode || dte_merge_mode) &&
-        !CCtx().UseDtePool()) {
+    if ((no_future_mode || named_dte_mode || dte_merge_mode) && !use_dte_pool) {
       std::string flags;
       if (no_future_mode) flags += " -fno-future";
       if (named_dte_mode) flags += " -fnamed-dte";
@@ -323,7 +327,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       EmitDeviceFuncDecl(ds);
       ds << " {\n";
       IncrDeviceIndent();
-      if (CCtx().UseDtePool()) {
+      if (use_dte_pool) {
         ds << d_indent << "/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n";
       }
       ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
@@ -477,70 +481,77 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     {
       auto device_code = ds.str();
       if (dte_pool_size > 0) {
-        auto pos = device_code.find("/*__CHOREO_DTE_POOL_PLACEHOLDER__*/");
-        if (pos != std::string::npos) {
-          bool use_named = (named_dte_mode || dte_merge_mode);
-          if (use_named) {
-            // Generate named DTE variables instead of array pool.
-            // Named variables enable better register allocation and
-            // eliminate indirect addressing overhead from array indexing.
-            std::string pool_decl;
-            for (int i = 0; i < dte_pool_size; ++i) {
-              std::vector<std::string> slot_users;
-              for (const auto& kv : dte_pool_slots) {
-                if (kv.second == i) slot_users.push_back(kv.first);
-              }
-              std::string var_name;
-              if (slot_users.empty()) {
-                var_name = "__dte_anon_" + std::to_string(i) + "__";
-              } else if (slot_users.size() == 1) {
-                var_name = "__dte_" + slot_users[0] + "__";
-              } else {
-                std::sort(slot_users.begin(), slot_users.end());
-                var_name = "__dte_" + slot_users[0] + "__";
-              }
-              dte_named_vars[i] = var_name;
-              pool_decl += "tops::private_dte " + var_name + ";\n  ";
-            }
-            device_code.replace(pos, 35, pool_decl);
-            // Replace all __choreo_dte_pool__[N] refs with named vars
-            for (int i = 0; i < dte_pool_size; ++i) {
-              std::string old_ref =
-                  "__choreo_dte_pool__[" + std::to_string(i) + "]";
-              std::string new_ref = dte_named_vars[i];
-              size_t search_pos = 0;
-              while ((search_pos = device_code.find(old_ref, search_pos)) !=
-                     std::string::npos) {
-                device_code.replace(search_pos, old_ref.length(), new_ref);
-                search_pos += new_ref.length();
-              }
-            }
-            // Replace dynamic slot refs: __choreo_dte_pool__[X_slot]
+        // Disable named-dte when no-future rotate is used: rotation requires
+        // runtime slot indexing that named variable replacement would break.
+        bool use_named =
+            (named_dte_mode || dte_merge_mode) && !has_nofuture_rotate;
+        std::string pool_decl;
+        if (use_named) {
+          for (int i = 0; i < dte_pool_size; ++i) {
+            std::vector<std::string> slot_users;
             for (const auto& kv : dte_pool_slots) {
-              std::string old_ref =
-                  "__choreo_dte_pool__[" + kv.first + "_slot]";
-              std::string new_ref = dte_named_vars[kv.second];
-              size_t search_pos = 0;
-              while ((search_pos = device_code.find(old_ref, search_pos)) !=
-                     std::string::npos) {
-                device_code.replace(search_pos, old_ref.length(), new_ref);
-                search_pos += new_ref.length();
-              }
+              if (kv.second == i) slot_users.push_back(kv.first);
             }
-          } else {
-            // Default: array pool (original behavior)
-            std::string pool_decl = "choreo::choreo_sdte __choreo_dte_pool__[" +
-                                    std::to_string(dte_pool_size) +
-                                    "];\n"
-                                    "  for (int __i = 0; __i < " +
-                                    std::to_string(dte_pool_size) +
-                                    "; ++__i) __choreo_dte_pool__[__i].init();";
-            device_code.replace(pos, 35, pool_decl);
+            std::string var_name;
+            if (slot_users.empty()) {
+              var_name = "__dte_anon_" + std::to_string(i) + "__";
+            } else if (slot_users.size() == 1) {
+              var_name = "__dte_" + slot_users[0] + "__";
+            } else {
+              std::sort(slot_users.begin(), slot_users.end());
+              var_name = "__dte_" + slot_users[0] + "__";
+            }
+            dte_named_vars[i] = var_name;
+            pool_decl += "tops::private_dte " + var_name + ";\n  ";
+          }
+        } else {
+          pool_decl = "choreo::choreo_sdte __choreo_dte_pool__[" +
+                      std::to_string(dte_pool_size) +
+                      "];\n"
+                      "  for (int __i = 0; __i < " +
+                      std::to_string(dte_pool_size) +
+                      "; ++__i) __choreo_dte_pool__[__i].init();";
+        }
+        // Replace ALL placeholders with DTE declarations
+        const std::string placeholder = "/*__CHOREO_DTE_POOL_PLACEHOLDER__*/";
+        size_t pos = 0;
+        while ((pos = device_code.find(placeholder, pos)) !=
+               std::string::npos) {
+          device_code.replace(pos, placeholder.length(), pool_decl);
+          pos += pool_decl.length();
+        }
+        if (use_named) {
+          // Replace all __choreo_dte_pool__[N] refs with named vars
+          for (int i = 0; i < dte_pool_size; ++i) {
+            std::string old_ref =
+                "__choreo_dte_pool__[" + std::to_string(i) + "]";
+            std::string new_ref = dte_named_vars[i];
+            size_t search_pos = 0;
+            while ((search_pos = device_code.find(old_ref, search_pos)) !=
+                   std::string::npos) {
+              device_code.replace(search_pos, old_ref.length(), new_ref);
+              search_pos += new_ref.length();
+            }
+          }
+          // Replace dynamic slot refs: __choreo_dte_pool__[X_slot]
+          for (const auto& kv : dte_pool_slots) {
+            std::string old_ref = "__choreo_dte_pool__[" + kv.first + "_slot]";
+            std::string new_ref = dte_named_vars[kv.second];
+            size_t search_pos = 0;
+            while ((search_pos = device_code.find(old_ref, search_pos)) !=
+                   std::string::npos) {
+              device_code.replace(search_pos, old_ref.length(), new_ref);
+              search_pos += new_ref.length();
+            }
           }
         }
       } else {
-        auto pos = device_code.find("/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n");
-        if (pos != std::string::npos) device_code.erase(pos, 36);
+        const std::string placeholder = "/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n";
+        size_t pos = 0;
+        while ((pos = device_code.find(placeholder, pos)) !=
+               std::string::npos) {
+          device_code.erase(pos, placeholder.length());
+        }
       }
       code_segments.back() += device_code + hs.str();
     }
@@ -1015,9 +1026,15 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (IsHost()) choreo_unreachable("span-as should be on device side.");
       ds << d_indent << "auto* " << sym << " = ";
       auto tty = GetSymbolType(sa->id->name);
-      if (isa<FutureType>(tty))
-        ds << sa->id->name << ".data();\n";
-      else
+      if (isa<FutureType>(tty)) {
+        auto sn = InScopeName(sa->id->name);
+        auto nf_it =
+            no_future_mode ? nofuture_vars.find(sn) : nofuture_vars.end();
+        if (nf_it != nofuture_vars.end())
+          ds << nf_it->second.data_ptr << ";\n";
+        else
+          ds << sa->id->name << ".data();\n";
+      } else
         ds << sa->id->name << ";\n";
       ssm.MapDeviceSymbol(InScopeName(sym), sym);
       return true;
@@ -1365,9 +1382,15 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     assert(!IsHost() && "span-as should be on device side.");
     ds << d_indent << "auto * " << n.GetName() << " = ";
     auto tty = GetSymbolType(sa->id->name);
-    if (isa<FutureType>(tty))
-      ds << sa->id->name << ".data();\n";
-    else
+    if (isa<FutureType>(tty)) {
+      auto sn = InScopeName(sa->id->name);
+      auto nf_it =
+          no_future_mode ? nofuture_vars.find(sn) : nofuture_vars.end();
+      if (nf_it != nofuture_vars.end())
+        ds << nf_it->second.data_ptr << ";\n";
+      else
+        ds << sa->id->name << ".data();\n";
+    } else
       ds << sa->id->name << ";\n";
     ssm.MapDeviceSymbol(InScopeName(n.GetName()), n.GetName());
     return true;
@@ -1654,7 +1677,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       return n.future;
 
     std::string dte_ctx;
-    bool use_pool = (CCtx().UseDtePool() && sto != Storage::SHARED);
+    bool use_pool = (use_dte_pool && sto != Storage::SHARED);
 
     if (use_pool) {
       // GCU300 SDTE pool: all Private-level DMA (anonymous and named)
@@ -1670,12 +1693,21 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         auto it = dte_pool_slots.find(key);
         if (it != dte_pool_slots.end()) {
           slot = it->second;
+          waited_futures.erase(key);
         } else {
-          // DTE merge (-fdte-merge): reuse a waited future's DTE slot.
+          // DTE merge (-fdte-merge): reuse a waited future's DTE slot,
+          // but only if the slot is truly free (no un-waited future uses it).
           int reuse_slot = -1;
           if (dte_merge_mode) {
+            // Collect slots that are currently in-flight (have un-waited users)
+            std::set<int> in_flight_slots;
             for (const auto& kv : dte_pool_slots) {
-              if (waited_futures.count(kv.first)) {
+              if (!waited_futures.count(kv.first))
+                in_flight_slots.insert(kv.second);
+            }
+            for (const auto& kv : dte_pool_slots) {
+              if (waited_futures.count(kv.first) &&
+                  !in_flight_slots.count(kv.second)) {
                 reuse_slot = kv.second;
                 waited_futures.erase(kv.first);
                 break;
@@ -1688,10 +1720,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
             slot = dte_pool_size++;
           }
           dte_pool_slots[key] = slot;
+          waited_futures.erase(key);
         }
       } else {
-        if (dte_pool_size == 0) dte_pool_size = 1;
-        slot = 0;
+        // Anonymous DMA: use a dedicated slot separate from named futures.
+        // This avoids conflicts with rotate patterns where named DTEs'
+        // data/event get rotated but the DTE context does not.
+        if (anon_dte_slot < 0) anon_dte_slot = dte_pool_size++;
+        slot = anon_dte_slot;
       }
       dte_ctx = "__choreo_dte_pool__[" + std::to_string(slot) + "]";
     } else {
@@ -1712,11 +1748,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "void* " << n.future << "_data = "
            << (buf_expr.empty() ? "nullptr" : "(void*)" + buf_expr) << ";\n";
         ds << d_indent << "tops::event " << n.future << "_evt;\n";
-        if (!(named_dte_mode || dte_merge_mode)) {
-          // Emit _slot variable only in default array pool mode (needed
-          // for dynamic pool indexing and rotate swaps).
-          ds << d_indent << "int " << n.future << "_slot = " << slot << ";\n";
-        }
+        ds << d_indent << "int " << n.future << "_slot = " << slot << ";\n";
         nofuture_vars[InScopeName(n.future)] = {n.future + "_data",
                                                 n.future + "_evt", slot};
         // Map symbols to raw accessors
@@ -1770,7 +1802,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     // It should not be claimed. And there is no future to remap to.
     if (IsHost()) return true;
 
-    claimFuture(UnScopedName(buf_name));
+    // Determine buffer storage so that the DTE pool decision matches
+    // the actual DMA that will be assigned later (avoid future/raw mismatch
+    // when rotate/swap pairs a dma.any placeholder with a real DMA).
+    Storage ph_sto = Storage::DEFAULT;
+    auto ph_buf_ty = GetSymbolType(UnScopedName(buf_name));
+    if (auto sty = GetSpannedType(ph_buf_ty)) ph_sto = sty->GetStorage();
+    claimFuture(UnScopedName(buf_name), ph_sto);
     // For auto-alloc (DOK_SYMBOL), redirect buffer references through
     // future.data() so that rotate() transparently updates the pointer.
     // For explicit buffer chunks (DOK_CHUNK), the user manages buffers
@@ -2581,8 +2619,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // linear opt makes code bloat, lead to bad performance when tuning conv1d.
   // to get high performance with dte pool, disable it temporarily.
   // TODO: consider removing linear opt completely.
-  if (!CCtx().UseDtePool() &&
-      (!f_opt_condition.empty() || !t_opt_condition.empty())) {
+  if (!use_dte_pool && (!f_opt_condition.empty() || !t_opt_condition.empty())) {
     // need generating runtime conditional optimization
     std::ostringstream condition;
     if (!f_opt_condition.empty())
@@ -2635,12 +2672,10 @@ bool TopsccCodeGen::Visit(AST::Rotate& n) {
       };
       emit_swap_field("_data");
       emit_swap_field("_evt");
-      if (!(named_dte_mode || dte_merge_mode)) {
-        // Only emit _slot swap when using array pool (default mode).
-        // Named DTE mode doesn't need slot swaps — DTE references are
-        // resolved by the final text replacement pass.
-        emit_swap_field("_slot");
-      }
+      // Always swap slot indices — needed for DTE context tracking after
+      // rotation. Forces array pool mode (disables named-dte text replacement).
+      emit_swap_field("_slot");
+      has_nofuture_rotate = true;
       return true;
     }
   }
@@ -4379,7 +4414,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             auto ca_sn = ca_id ? InScopeName(ca_id->name) : "";
             auto nf_it = nofuture_vars.find(ca_sn);
             if (nf_it != nofuture_vars.end())
-              res = "((" + std::string(NameBaseType(caty->GetBaseType())) +
+              res = "((" + std::string(NameBaseType(caty->ElementType())) +
                     "*)" + nf_it->second.data_ptr + ") + " + GenOffset(ca);
             else
               res = OpExprSTR(ca->data, parent_op, true, is_host) +
