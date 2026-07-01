@@ -1109,6 +1109,85 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
     }
   }
 
+  if (auto *ce = dyn_cast<AST::CastExpr>(&n)) {
+    auto inner = EmitExpr(*ce->GetR());
+    if (!inner) return nullptr;
+    if (ce->FromType() == ce->ToType()) return inner;
+    auto toBT = ce->ToType();
+    bool fromFloat = (ce->FromType() == BaseType::F16 ||
+                      ce->FromType() == BaseType::F32 ||
+                      ce->FromType() == BaseType::F64 ||
+                      ce->FromType() == BaseType::BF16);
+    bool toFloat = (toBT == BaseType::F16 || toBT == BaseType::F32 ||
+                    toBT == BaseType::F64 || toBT == BaseType::BF16);
+    if (fromFloat && toFloat) {
+      mlir::Type targetTy;
+      if (toBT == BaseType::F16)
+        targetTy = mlir::Float16Type::get(&IRContext());
+      else if (toBT == BaseType::F32)
+        targetTy = mlir::Float32Type::get(&IRContext());
+      else if (toBT == BaseType::F64)
+        targetTy = mlir::Float64Type::get(&IRContext());
+      else if (toBT == BaseType::BF16)
+        targetTy = mlir::BFloat16Type::get(&IRContext());
+      if (targetTy && targetTy != inner.getType()) {
+        unsigned fromBits = inner.getType().getIntOrFloatBitWidth();
+        unsigned toBits = targetTy.getIntOrFloatBitWidth();
+        if (toBits > fromBits)
+          return builder.create<mlir::arith::ExtFOp>(loc, targetTy, inner);
+        else
+          return builder.create<mlir::arith::TruncFOp>(loc, targetTy, inner);
+      }
+    }
+    return inner;
+  }
+
+  if (auto *call = dyn_cast<AST::Call>(&n)) {
+    if (call->IsArith() || call->IsLibCall()) {
+      auto &fname = call->function->name;
+      auto &callArgs = call->GetArguments();
+      llvm::SmallVector<mlir::Value> operands;
+      for (auto &arg : callArgs) {
+        mlir::Value v = EmitExpr(*arg);
+        if (!v) {
+          if (isa<AST::Identifier>(arg))
+            v = LookupValue(
+                std::static_pointer_cast<AST::Identifier>(arg)->name);
+        }
+        if (v) operands.push_back(v);
+      }
+      if (operands.empty()) return nullptr;
+      mlir::Type resTy = operands[0].getType();
+      if (mlir::isa<mlir::IndexType>(resTy))
+        resTy = mlir::IntegerType::get(&IRContext(), 32,
+                                       mlir::IntegerType::Signless);
+      llvm::SmallVector<mlir::StringRef> tplStrs;
+      llvm::SmallVector<std::string> tplStorage;
+      if (call->template_args) {
+        for (auto &ta : call->template_args->AllValues()) {
+          if (isa<AST::Identifier>(ta))
+            tplStorage.push_back(
+                std::static_pointer_cast<AST::Identifier>(ta)->name);
+          else if (isa<AST::IntLiteral>(ta))
+            tplStorage.push_back(std::to_string(std::visit(
+                [](auto v) -> int64_t { return v; },
+                std::static_pointer_cast<AST::IntLiteral>(ta)->value)));
+          else
+            tplStorage.push_back("?");
+        }
+        for (auto &s : tplStorage)
+          tplStrs.push_back(s);
+      }
+      auto callOp = builder.create<coir::CallOp>(
+          loc, resTy, builder.getStringAttr(fname), operands,
+          tplStrs.empty() ? nullptr : builder.getStrArrayAttr(tplStrs),
+          call->IsLibCall() ? builder.getBoolAttr(true) : nullptr,
+          call->IsBIF() ? builder.getBoolAttr(true) : nullptr,
+          builder.getBoolAttr(true));
+      return callOp.getResult();
+    }
+  }
+
   if (auto *expr = dyn_cast<AST::Expr>(&n)) {
     if (expr->GetForm() == AST::Expr::Reference)
       return EmitExpr(*expr->GetR());
