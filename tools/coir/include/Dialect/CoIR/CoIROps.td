@@ -366,7 +366,7 @@ def MMALoadOp : CoIR_Op<"mma.load", [NoMemoryEffect]> {
   let assemblyFormat = "$source attr-dict `:` type($source) `->` type($result)";
 }
 
-def MMAExecOp : CoIR_Op<"mma.exec", [NoMemoryEffect]> {
+def MMAExecOp : CoIR_Op<"mma.exec", []> {
   let summary = "Execute matrix multiply-accumulate";
   let arguments = (ins
     CoIR_MMAFragTypeC:$accumulator,

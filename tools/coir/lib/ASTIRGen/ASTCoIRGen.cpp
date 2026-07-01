@@ -1528,6 +1528,45 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
 
   if (auto sty = dyn_cast<SpannedType>(symType)) {
     auto loc = Loc(nvd);
+
+    // Register-storage spanned types with init are MMA operand fragments
+    if (sty->m_type == Storage::REG && (nvd.init_expr || nvd.init_value)) {
+      auto elemTy = LowerBaseType(sty->ElementType());
+      llvm::SmallVector<int64_t> shape;
+      auto &mdspan = sty->GetShape();
+      if (mdspan.IsValid())
+        for (auto &v : mdspan.Value())
+          shape.push_back(EvalToInt(v));
+      if (shape.empty()) shape = {16, 16};
+
+      auto fragTy = coir::MMAFragType::get(&IRContext(), elemTy, shape);
+      mlir::Value fillVal;
+      if (nvd.init_expr)
+        fillVal = EmitExpr(*nvd.init_expr);
+      else if (nvd.init_value)
+        fillVal = EmitExpr(*nvd.init_value);
+      if (!fillVal) return true;
+
+      if (fillVal.getType() != elemTy) {
+        if (mlir::isa<mlir::FloatType>(elemTy) &&
+            mlir::isa<mlir::FloatType>(fillVal.getType())) {
+          unsigned srcBits =
+              mlir::cast<mlir::FloatType>(fillVal.getType()).getWidth();
+          unsigned dstBits = mlir::cast<mlir::FloatType>(elemTy).getWidth();
+          if (dstBits > srcBits)
+            fillVal = builder.create<mlir::arith::ExtFOp>(loc, elemTy, fillVal);
+          else
+            fillVal =
+                builder.create<mlir::arith::TruncFOp>(loc, elemTy, fillVal);
+        } else if (mlir::isa<mlir::FloatType>(elemTy))
+          fillVal = builder.create<mlir::arith::SIToFPOp>(loc, elemTy, fillVal);
+      }
+
+      auto fillOp = builder.create<coir::MMAFillOp>(loc, fragTy, fillVal);
+      MapValue(nvd.GetName(), fillOp.getResult());
+      return true;
+    }
+
     auto tty = LowerSpannedType(sty);
     llvm::SmallVector<mlir::Value> dynDimVals;
     if (tty.hasDynamicShape()) {
@@ -1922,13 +1961,26 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
                       ? LowerBaseType(fillType)
                       : fillVal.getType();
 
-    auto nodeType = n.GetType();
     llvm::SmallVector<int64_t> shape;
-    if (auto sty = dyn_cast<SpannedType>(nodeType)) {
-      auto &mdspan = sty->s_type->value;
-      if (mdspan.IsValid())
-        for (auto &v : mdspan.Value())
-          shape.push_back(EvalToInt(v));
+    // Prefer shape from symbol table (set by ShapeInference)
+    std::string fragName = AST::FragName(op.FillingTo());
+    auto symType = GetSymbolType(fragName);
+    if (symType) {
+      if (auto sty = dyn_cast<SpannedType>(symType)) {
+        auto &mdspan = sty->GetShape();
+        if (mdspan.IsValid())
+          for (auto &v : mdspan.Value())
+            shape.push_back(EvalToInt(v));
+      }
+    }
+    if (shape.empty()) {
+      auto nodeType = n.GetType();
+      if (auto sty = dyn_cast<SpannedType>(nodeType)) {
+        auto &mdspan = sty->s_type->value;
+        if (mdspan.IsValid())
+          for (auto &v : mdspan.Value())
+            shape.push_back(EvalToInt(v));
+      }
     }
     if (shape.empty())
       shape = {16, 16};
@@ -1950,7 +2002,6 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     }
 
     auto fillOp = builder.create<coir::MMAFillOp>(loc, fragTy, fillVal);
-    std::string fragName = AST::FragName(op.FillingTo());
     MapValue(fragName, fillOp.getResult());
     break;
   }
@@ -2003,6 +2054,12 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
       auto posVals = chunkAt->GetBlockShape().PosValList();
       if (posVals)
         for (auto d : *posVals) tileShape.push_back(static_cast<int64_t>(d));
+    }
+    if (tileShape.empty()) {
+      // WGMMA B operand: shared-memory source with no chunkat -> full tensor
+      if (srcTy.getMemorySpace() == 1 && idxVals.empty())
+        for (auto d : srcTy.getShape())
+          tileShape.push_back(d);
     }
     if (tileShape.empty()) {
       auto nodeType = n.GetType();
