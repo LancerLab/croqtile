@@ -1,0 +1,73 @@
+// RUN: co-mock -t cute %s 2>&1 | FileCheck %s
+// Test fragment copy, reduce, and apply under cute target.
+
+__co__ void test_frag_ops() {
+  parallel t by 1 : thread {
+    frag s32[2, 3] src;
+    frag s32[2, 3] dst;
+    foreach i in 2
+      foreach j in 3 {
+        src.at(i, j) = i * 3 + j + 1;
+        dst.at(i, j) = 0;
+      }
+
+    // copy
+    copy(dst, src);
+    println("after copy:");
+    foreach i in 2
+      foreach j in 3
+        println("dst[", i, ",", j, "] =", dst.at(i, j));
+
+    // apply: double each element
+    apply {x, y} in dst.span {
+      dst.at(x, y) = dst.at(x, y) * 2;
+    }
+    println("after apply *2:");
+    foreach i in 2
+      foreach j in 3
+        println("dst[", i, ",", j, "] =", dst.at(i, j));
+
+    // reduce_sum (row-wise, dim=1)
+    frag s32[1, 2] rsum;
+    reduce_sum(rsum, dst, 1);
+    println("row sums:");
+    foreach i in 2
+      println("rsum[", i, "] =", rsum.at(0, i));
+
+    // reduce_max (row-wise, dim=1)
+    frag s32[1, 2] rmax;
+    reduce_max(rmax, dst, 1);
+    println("row maxes:");
+    foreach i in 2
+      println("rmax[", i, "] =", rmax.at(0, i));
+  }
+}
+
+// src = [[1,2,3],[4,5,6]]
+// after copy: dst = src
+// CHECK: after copy:
+// CHECK: dst[ 0 , 0 ] = 1
+// CHECK: dst[ 0 , 1 ] = 2
+// CHECK: dst[ 0 , 2 ] = 3
+// CHECK: dst[ 1 , 0 ] = 4
+// CHECK: dst[ 1 , 1 ] = 5
+// CHECK: dst[ 1 , 2 ] = 6
+
+// after apply *2: dst = [[2,4,6],[8,10,12]]
+// CHECK: after apply *2:
+// CHECK: dst[ 0 , 0 ] = 2
+// CHECK: dst[ 0 , 1 ] = 4
+// CHECK: dst[ 0 , 2 ] = 6
+// CHECK: dst[ 1 , 0 ] = 8
+// CHECK: dst[ 1 , 1 ] = 10
+// CHECK: dst[ 1 , 2 ] = 12
+
+// row sums: [2+4+6, 8+10+12] = [12, 30]
+// CHECK: row sums:
+// CHECK: rsum[ 0 ] = 12
+// CHECK: rsum[ 1 ] = 30
+
+// row maxes: [6, 12]
+// CHECK: row maxes:
+// CHECK: rmax[ 0 ] = 6
+// CHECK: rmax[ 1 ] = 12

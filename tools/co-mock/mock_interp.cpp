@@ -1145,6 +1145,19 @@ void MockInterpreter::ExecMMA(AST::MMA& n) {
       return;
     }
 
+    if (mem.Exists(name)) {
+      auto& existing = mem.Lookup(name);
+      if (existing.kind == Value::Pointer && existing.alloc) {
+        double fv = fill_val.AsDouble();
+        Value tmp = MakeScalarOf(existing.alloc->elem_type, fv);
+        for (size_t i = 0; i < existing.alloc->TotalElements(); ++i) {
+          auto ptr_val = Value::MakePointer(existing.alloc, existing.alloc->elem_type);
+          ptr_val.WriteToAlloc(i * existing.alloc->ElemSize(), tmp);
+        }
+        return;
+      }
+    }
+
     auto fill_type = op.FillingType();
     if (fill_type == BaseType::UNKSCALAR)
       fill_type = (fill_val.base_type == BaseType::F32 ||
@@ -1158,7 +1171,7 @@ void MockInterpreter::ExecMMA(AST::MMA& n) {
       for (size_t i = 0; i < dims_mv->Count(); ++i)
         shape.push_back((size_t)ExprEval(dims_mv->ValueAt(i)).AsInt());
     }
-    if (shape.empty()) shape = {1, 1}; // placeholder until exec
+    if (shape.empty()) shape = {1, 1};
 
     auto alloc = mem.Allocate(fill_type, shape, Storage::LOCAL);
     double fv = fill_val.AsDouble();
