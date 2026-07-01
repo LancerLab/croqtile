@@ -869,18 +869,20 @@ Value MockInterpreter::CallBIF(const std::string& name,
     return Value::MakeInt(0);
   }
 
-  if (name == "min") {
+  if (name == "min" || name == "max") {
     if (args.size() >= 2) {
+      bool use_float = (args[0].base_type == BaseType::F32 ||
+                        args[0].base_type == BaseType::F64 ||
+                        args[1].base_type == BaseType::F32 ||
+                        args[1].base_type == BaseType::F64);
+      if (use_float) {
+        double a = args[0].AsDouble(), b = args[1].AsDouble();
+        bool pick_a = (name == "min") ? (a < b) : (a > b);
+        return Value::MakeDouble(pick_a ? a : b);
+      }
       int64_t a = args[0].AsInt(), b = args[1].AsInt();
-      return Value::MakeInt(a < b ? a : b);
-    }
-    return args.empty() ? Value::MakeInt(0) : args[0];
-  }
-
-  if (name == "max") {
-    if (args.size() >= 2) {
-      int64_t a = args[0].AsInt(), b = args[1].AsInt();
-      return Value::MakeInt(a > b ? a : b);
+      bool pick_a = (name == "min") ? (a < b) : (a > b);
+      return Value::MakeInt(pick_a ? a : b);
     }
     return args.empty() ? Value::MakeInt(0) : args[0];
   }
