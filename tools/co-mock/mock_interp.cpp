@@ -107,12 +107,9 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
     ExecBlock(wb->stmts);
   else if (auto mn = dyn_cast<AST::MultiNodes>(stmt))
     ExecBlock(mn);
-  else if (dyn_cast<AST::Synchronize>(stmt)) {
-  } // no-op for single-threaded mock
-  else if (dyn_cast<AST::Yield>(stmt)) {
-  } // no-op
-  else if (dyn_cast<AST::Trigger>(stmt)) {
-  } // no-op
+  else if (isa<AST::Synchronize>(stmt) || isa<AST::Yield>(stmt) ||
+           isa<AST::Trigger>(stmt)) {
+  } // no-ops for mock interpreter
   else if (auto cpp = dyn_cast<AST::CppSourceCode>(stmt)) {
     if (cpp->kind == AST::CppSourceCode::Host ||
         cpp->kind == AST::CppSourceCode::Device)
@@ -125,12 +122,11 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
     ExecWait(*wait);
   else if (auto itb = dyn_cast<AST::InThreadsBlock>(stmt))
     ExecInThreads(*itb);
-  else if (dyn_cast<AST::NamedTypeDecl>(stmt)) {
+  else if (isa<AST::NamedTypeDecl>(stmt)) {
   } // type alias, skip
   else {
-    Warning(stmt->LOC(),
-            "mock: unhandled statement type '" +
-                std::string(stmt->TypeNameString()) + "'");
+    Warning(stmt->LOC(), "mock: unhandled statement type '" +
+                             std::string(stmt->TypeNameString()) + "'");
   }
 }
 
@@ -468,22 +464,17 @@ void MockInterpreter::ExecDMA(AST::DMA& n) {
                           dst.alloc->TotalBytes() - dst.offset);
 
   if (n.IsAsync() && !n.future.empty()) {
-    auto src_ptr =
-        std::const_pointer_cast<Allocation>(src.alloc);
+    auto src_ptr = std::const_pointer_cast<Allocation>(src.alloc);
     auto dst_ptr = dst.alloc;
     size_t s_off = src.offset, d_off = dst.offset;
-    auto fut = std::async(std::launch::async,
-                          [src_ptr, dst_ptr, s_off, d_off, bytes]() {
-                            std::memcpy((uint8_t*)dst_ptr->RawPtr() + d_off,
-                                        (const uint8_t*)src_ptr->RawPtr() +
-                                            s_off,
-                                        bytes);
-                          });
+    auto fut = std::async(
+        std::launch::async, [src_ptr, dst_ptr, s_off, d_off, bytes]() {
+          std::memcpy((uint8_t*)dst_ptr->RawPtr() + d_off,
+                      (const uint8_t*)src_ptr->RawPtr() + s_off, bytes);
+        });
     std::string src_sym, dst_sym;
-    if (auto ca = dyn_cast<AST::ChunkAt>(n.from))
-      src_sym = ca->RefSymbol();
-    if (auto ca = dyn_cast<AST::ChunkAt>(n.to))
-      dst_sym = ca->RefSymbol();
+    if (auto ca = dyn_cast<AST::ChunkAt>(n.from)) src_sym = ca->RefSymbol();
+    if (auto ca = dyn_cast<AST::ChunkAt>(n.to)) dst_sym = ca->RefSymbol();
     mem.Define(n.future,
                Value::MakeFuture(fut.share(), src_sym, dst_sym, bytes));
   } else {
@@ -528,8 +519,7 @@ void MockInterpreter::ExecRotate(AST::Rotate& n) {
 
   std::vector<std::string> names;
   for (auto& id_node : ids) {
-    if (auto id = dyn_cast<AST::Identifier>(id_node))
-      names.push_back(id->name);
+    if (auto id = dyn_cast<AST::Identifier>(id_node)) names.push_back(id->name);
   }
   if (names.size() < 2) return;
 
@@ -735,8 +725,7 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
         for (auto& idx_node : indices_mv->AllValues())
           idx_vals.push_back((size_t)ExprEval(idx_node).AsInt());
 
-        size_t linear =
-            ComputeLinearIndex(idx_vals, base_val.alloc->shape);
+        size_t linear = ComputeLinearIndex(idx_vals, base_val.alloc->shape);
         size_t byte_offset =
             linear * base_val.alloc->ElemSize() + base_val.offset;
         return base_val.ReadFromAlloc(byte_offset, base_val.base_type);
@@ -755,9 +744,8 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
   }
 
   if (e->LOC().begin.line > 0) {
-    Warning(e->LOC(),
-            "mock: unhandled expression type '" +
-                std::string(e->TypeNameString()) + "'");
+    Warning(e->LOC(), "mock: unhandled expression type '" +
+                          std::string(e->TypeNameString()) + "'");
   }
   return Value::MakeInt(0);
 }
@@ -844,11 +832,10 @@ Value MockInterpreter::EvalUnaryOp(Opcode op, const Value& operand) {
 
 bool MockInterpreter::IsKnownBIF(const std::string& name) const {
   static const std::set<std::string> bifs = {
-      "print",    "println",  "assert",  "sizeof",   "min",
-      "max",      "abs",      "sqrt",    "rsqrt",    "sin",
-      "cos",      "tan",      "exp",     "log",      "floor",
-      "ceil",     "round",    "pow",     "alignup",  "aligndown",
-      "isfinite",
+      "print",   "println",   "assert",   "sizeof", "min",   "max",
+      "abs",     "sqrt",      "rsqrt",    "sin",    "cos",   "tan",
+      "exp",     "log",       "floor",    "ceil",   "round", "pow",
+      "alignup", "aligndown", "isfinite",
   };
   return bifs.count(name) > 0;
 }
@@ -908,31 +895,24 @@ Value MockInterpreter::CallBIF(const std::string& name,
     return Value::MakeInt(0);
   }
 
-  if (name == "sqrt" || name == "rsqrt") {
-    if (!args.empty()) {
-      double v = args[0].AsDouble();
-      if (name == "rsqrt")
-        return Value::MakeDouble(1.0 / std::sqrt(v));
-      return Value::MakeDouble(std::sqrt(v));
+  {
+    using MathFn = double (*)(double);
+    static const std::map<std::string, MathFn> math_fns = {
+        {"sqrt", std::sqrt},   {"sin", std::sin},   {"cos", std::cos},
+        {"tan", std::tan},     {"exp", std::exp},   {"log", std::log},
+        {"floor", std::floor}, {"ceil", std::ceil}, {"round", std::round},
+    };
+    auto it = math_fns.find(name);
+    if (it != math_fns.end()) {
+      if (!args.empty())
+        return Value::MakeDouble(it->second(args[0].AsDouble()));
+      return Value::MakeDouble(0);
     }
-    return Value::MakeDouble(0);
-  }
-
-  if (name == "sin" || name == "cos" || name == "tan" || name == "exp" ||
-      name == "log" || name == "floor" || name == "ceil" ||
-      name == "round") {
-    if (!args.empty()) {
-      double v = args[0].AsDouble();
-      if (name == "sin") return Value::MakeDouble(std::sin(v));
-      if (name == "cos") return Value::MakeDouble(std::cos(v));
-      if (name == "tan") return Value::MakeDouble(std::tan(v));
-      if (name == "exp") return Value::MakeDouble(std::exp(v));
-      if (name == "log") return Value::MakeDouble(std::log(v));
-      if (name == "floor") return Value::MakeDouble(std::floor(v));
-      if (name == "ceil") return Value::MakeDouble(std::ceil(v));
-      if (name == "round") return Value::MakeDouble(std::round(v));
+    if (name == "rsqrt") {
+      if (!args.empty())
+        return Value::MakeDouble(1.0 / std::sqrt(args[0].AsDouble()));
+      return Value::MakeDouble(0);
     }
-    return Value::MakeDouble(0);
   }
 
   if (name == "pow") {
