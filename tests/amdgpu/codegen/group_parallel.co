@@ -1,0 +1,17 @@
+// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ auto group_test(s32 [128] a) {
+  s32[a.span] b;
+
+  parallel p by 2 : block {
+    parallel g by 2 : group {
+      parallel t by 32 : thread {
+        b.at(p * 64 + g * 32 + t) = a.at(p * 64 + g * 32 + t) + 1;
+      }
+    }
+  }
+  return b;
+}
+
+// CHECK: __vid_gid_x = threadIdx.x / 32
+// CHECK: __vid_tid_x = threadIdx.x % 32

@@ -1,0 +1,35 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+
+__co__ s32 [128] group_add(s32 [128] a, s32 [128] b) {
+  s32[a.span] out;
+
+  parallel p by 2 : block {
+    parallel g by 2 : group {
+      parallel t by 32 : thread {
+        out.at(p * 64 + g * 32 + t) = a.at(p * 64 + g * 32 + t) + b.at(p * 64 + g * 32 + t);
+      }
+    }
+  }
+  return out;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(128);
+  auto b = choreo::make_spandata<choreo::s32>(128);
+  for (size_t i = 0; i < 128; ++i) {
+    a[i] = (int)i;
+    b[i] = 1;
+  }
+
+  auto res = group_add(a.view(), b.view());
+
+  for (size_t i = 0; i < 128; ++i)
+    choreo::choreo_assert(
+        res[i] == (int)(i + 1),
+        "group_add: values are not equal.");
+
+  std::cout << "Test group_add Passed" << std::endl;
+}
+
+// CHECK: Test group_add Passed

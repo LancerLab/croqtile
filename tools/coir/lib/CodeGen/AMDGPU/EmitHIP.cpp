@@ -57,6 +57,9 @@ private:
     AssertOp op;
   };
   llvm::SmallVector<EntryAssertion> entryAssertions;
+  bool hasGroupLevel = false;
+  int64_t groupThreadScale = 0;
+  llvm::DenseSet<mlir::Value> dmaTokens;
 
   std::string getIndent() { return std::string(indent * 2, ' '); }
   void incIndent() { indent++; }
@@ -156,6 +159,10 @@ private:
     return n * elemSize;
   }
 
+  void emitDMAInvoke(DMAInvokeOp op) {
+    dmaTokens.insert(op.getDone());
+    os << getIndent() << "__syncthreads();\n";
+  }
 
   struct LaunchDims {
     llvm::SmallVector<int64_t, 3> grid = {1};
@@ -183,25 +190,52 @@ private:
 
   LaunchDims getLaunchDims(KernelOp kernel) {
     LaunchDims dims;
+    int64_t groupWarps = 0;
+    bool hasThreadLevel = false;
     kernel.getBody().walk([&](ParallelOp par) {
       auto lvl = par.getLevel();
       auto bounds = par.getBounds();
       llvm::SmallVector<int64_t, 3> bv(bounds.begin(), bounds.end());
       if (lvl == coir::ParallelLevel::BLOCK)
         dims.grid = bv;
-      else if (lvl == coir::ParallelLevel::THREAD)
+      else if (lvl == coir::ParallelLevel::THREAD) {
         dims.block = bv;
+        hasThreadLevel = true;
+      } else if (lvl == coir::ParallelLevel::GROUP) {
+        int64_t nWarps = 1;
+        for (auto b : bounds) nWarps *= b;
+        groupWarps = nWarps;
+      }
     });
+    if (groupWarps > 0 && hasThreadLevel) {
+      int64_t threadsPerGroup = 1;
+      for (auto b : dims.block) threadsPerGroup *= b;
+      dims.block = {groupWarps * threadsPerGroup};
+    } else if (groupWarps > 0) {
+      dims.block = {groupWarps * 32};
+    }
     return dims;
   }
 
   void emitKernel(KernelOp kernel) {
     entryAssertions.clear();
+    hasGroupLevel = false;
+    groupThreadScale = 0;
+    dmaTokens.clear();
 
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
     std::string devName = kernelDeviceName(symName);
-    os << "__global__ void " << devName << "(";
+    os << "__global__ ";
+    if (auto lb = kernel.getLaunchBoundsAttr()) {
+      if (lb.getMaxThreadsPerBlock() > 0) {
+        os << "__launch_bounds__(" << lb.getMaxThreadsPerBlock();
+        if (lb.getMinBlocksPerMultiprocessor() > 0)
+          os << ", " << lb.getMinBlocksPerMultiprocessor();
+        os << ") ";
+      }
+    }
+    os << "void " << devName << "(";
 
     auto &body = kernel.getBody();
     unsigned paramIdx = 0;
@@ -370,9 +404,10 @@ private:
     else if (isa<MMAFillOp>(op) || isa<MMALoadOp>(op) ||
              isa<MMAExecOp>(op) || isa<MMAStoreOp>(op))
       os << getIndent() << "// ERROR: MMA not supported on HIP target\n";
+    else if (auto dmaInv = dyn_cast<DMAInvokeOp>(op))
+      emitDMAInvoke(dmaInv);
     else if (isa<DMAConstDescOp>(op) || isa<DMADescPrefetchOp>(op) ||
-             isa<DMADescRuntimeOp>(op) || isa<DMAInvokeOp>(op) ||
-             isa<DMACheckOp>(op))
+             isa<DMADescRuntimeOp>(op) || isa<DMACheckOp>(op))
       (void)op;
     else if (auto dmaCopy = dyn_cast<DmaCopyOp>(op))
       emitDmaCopy(dmaCopy);
@@ -639,9 +674,41 @@ private:
         valueNames[args[i]] = dim;
       }
     } else if (level == ParallelLevel::THREAD) {
-      for (unsigned i = 0; i < args.size(); ++i) {
-        std::string dim = i == 0 ? "threadIdx.x" : "threadIdx.y";
-        valueNames[args[i]] = dim;
+      if (hasGroupLevel && groupThreadScale > 1) {
+        int64_t threadsPerGroup = 1;
+        for (auto b : bounds) threadsPerGroup *= b;
+        std::string mod = std::to_string(threadsPerGroup);
+        for (unsigned i = 0; i < args.size(); ++i) {
+          std::string dim = i == 0
+              ? "(threadIdx.x % " + mod + ")"
+              : "(threadIdx.y % " + mod + ")";
+          valueNames[args[i]] = dim;
+        }
+      } else {
+        for (unsigned i = 0; i < args.size(); ++i) {
+          std::string dim = i == 0 ? "threadIdx.x" : "threadIdx.y";
+          valueNames[args[i]] = dim;
+        }
+      }
+    } else if (level == ParallelLevel::GROUP) {
+      int64_t totalWarps = 1;
+      for (auto b : bounds) totalWarps *= b;
+      hasGroupLevel = true;
+      groupThreadScale = totalWarps;
+      int64_t warpSize = 32;
+      std::string warpId = "(threadIdx.x / " + std::to_string(warpSize) + ")";
+      if (args.size() == 1) {
+        valueNames[args[0]] = warpId;
+      } else {
+        for (unsigned i = 0; i < args.size(); ++i) {
+          int64_t divisor = 1;
+          for (unsigned j = i + 1; j < args.size(); ++j)
+            divisor *= bounds[j];
+          std::string expr = "(" + warpId + " / " +
+                             std::to_string(divisor) + " % " +
+                             std::to_string(bounds[i]) + ")";
+          valueNames[args[i]] = expr;
+        }
       }
     } else {
       for (unsigned i = 0; i < args.size(); ++i)
@@ -889,7 +956,10 @@ private:
          << stringifyParallelLevel(scope) << "\n";
   }
 
-  void emitWait(WaitOp /*op*/) {
+  void emitWait(WaitOp op) {
+    auto token = op.getToken();
+    if (dmaTokens.count(token))
+      return;
     os << getIndent() << "__syncthreads();\n";
   }
 
