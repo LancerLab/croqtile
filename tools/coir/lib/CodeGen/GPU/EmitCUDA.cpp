@@ -287,8 +287,24 @@ private:
   }
 
   DenseSet<Value> ctmmaValues;
+  bool useWGMMA = false;
+  DenseSet<Value> wgmmaOperandFrags; // register-resident A operands for RS
 
   void prescanMMAFragRoles(mlir::Operation *root) {
+    // Detect WGMMA: any GROUPx4 parallel level signals SM90+ warp-group MMA
+    useWGMMA = false;
+    wgmmaOperandFrags.clear();
+    root->walk([&](coir::ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::GROUPx4)
+        useWGMMA = true;
+    });
+    if (useWGMMA) {
+      root->walk([&](MMAExecOp exec) {
+        if (exec.getMmaAtomNameAttr()) return; // skip CTMMA execs
+        auto lhsDef = exec.getLhs().getDefiningOp<MMAFillOp>();
+        if (lhsDef) wgmmaOperandFrags.insert(lhsDef.getResult());
+      });
+    }
     root->walk([&](MMAFillOp fill) {
       mmaFragRoles[fill.getResult()] = "accumulator";
     });
@@ -334,13 +350,18 @@ private:
   void emitHeader(bool withTMA) {
     os() << "#define __CHOREO_TARGET_CUTE__\n";
     os() << "#define __USE_CUDA_TYPE__\n";
-    if (withTMA) {
+    if (withTMA || useWGMMA) {
       os() << "#define __CHOREO_REQUIRED_GPU_DEVICE_SM__ 90\n";
       os() << "#define __CHOREO_ENABLE_CUDA_RUNTIME_ENV_CHECK__\n";
     }
     os() << "#include \"choreo.h\"\n";
     if (withTMA) {
       os() << "namespace cde = cuda::device::experimental;\n";
+    }
+    if (useWGMMA) {
+      os() << "#include <cutlass/cutlass.h>\n";
+      os() << "#include <cutlass/arch/barrier.h>\n";
+      os() << "#include <cutlass/arch/reg_reconfig.h>\n";
     }
     os() << "using namespace nvcuda;\n";
     os() << "using namespace choreo;\n\n";
@@ -1256,6 +1277,29 @@ private:
       return;
     }
 
+    if (useWGMMA) {
+      auto shape = fragTy.getShape();
+      bool isOperandFrag = wgmmaOperandFrags.count(op.getResult()) > 0;
+      if (isOperandFrag) {
+        int64_t M = shape.size() > 0 ? shape[0] : 16;
+        int64_t K = shape.size() > 1 ? shape[1] : 16;
+        int64_t fragElems = (M * K) / 128; // per-thread elements for RS
+        os() << getIndent() << "half " << name << "[" << fragElems << "];\n";
+        os() << getIndent() << "for (int __i = 0; __i < " << fragElems
+             << "; ++__i) " << name << "[__i] = choreo::f32_to_f16("
+             << getName(op.getValue()) << ");\n";
+      } else {
+        int64_t M = shape.size() > 0 ? shape[0] : 64;
+        int64_t N = shape.size() > 1 ? shape[1] : 64;
+        int64_t accRegs = (M * N) / 128; // accumulator regs per thread
+        os() << getIndent() << "float " << name << "[" << accRegs << "];\n";
+        os() << getIndent() << "for (int __i = 0; __i < " << accRegs
+             << "; ++__i) " << name << "[__i] = " << getName(op.getValue())
+             << ";\n";
+      }
+      return;
+    }
+
     os() << getIndent() << emitWMMAFragType(fragTy, "accumulator")
        << " " << name << ";\n";
     os() << getIndent() << "wmma::fill_fragment(" << name << ", "
@@ -1294,6 +1338,14 @@ private:
       }
     }
 
+    if (useWGMMA) {
+      os() << getIndent() << "uint64_t " << name
+           << " = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, "
+              "WGMMA_Swizzle::NS>("
+           << getName(op.getSource()) << ");\n";
+      return;
+    }
+
     auto roleIt = mmaFragRoles.find(op.getResult());
     std::string role = roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
     auto layoutIt = mmaFragLayouts.find(op.getResult());
@@ -1316,14 +1368,12 @@ private:
       std::string lhs = getName(op.getLhs());
       std::string rhs = getName(op.getRhs());
 
-      // Get the full CuTe FMA atom name from the fma_atom attribute
       std::string fmaAtom;
       if (auto attr = op->getAttrOfType<StringAttr>("fma_atom"))
         fmaAtom = attr.getValue().str();
       else
         fmaAtom = "cute::SM80_16x8x8_F32F16F16F32_TN";
 
-      // Emit: cute::SM80_16x8x8_F32F16F16F32_TN::fma(d[0],..., a[0],..., b[0],..., d[0],...);
       os() << getIndent() << fmaAtom << "::fma(";
       for (int64_t i = 0; i < regD; ++i)
         os() << acc << "[" << i << "], ";
@@ -1336,6 +1386,59 @@ private:
         if (i < regD - 1) os() << ", ";
       }
       os() << ");\n";
+      return;
+    }
+
+    if (useWGMMA) {
+      std::string lhs = getName(op.getLhs());
+      std::string rhs = getName(op.getRhs());
+
+      auto accTy = cast<coir::MMAFragType>(op.getAccumulator().getType());
+      auto lhsTy = cast<coir::MMAFragType>(op.getLhs().getType());
+      int64_t M = accTy.getShape()[0];
+      int64_t N = accTy.getShape()[1];
+      int64_t K = lhsTy.getShape().size() > 1 ? lhsTy.getShape()[1] : 16;
+
+      bool isRS = wgmmaOperandFrags.count(op.getLhs()) > 0;
+      std::string mode = isRS ? "RS" : "SS";
+
+      os() << getIndent() << "warpgroup_fence_operand(" << acc << ");\n";
+      os() << getIndent() << "warpgroup_arrive();\n";
+      if (isRS)
+        os() << getIndent() << "warpgroup_fence_operand(" << lhs << ");\n";
+
+      os() << getIndent() << "cute::SM90::GMMA::MMA_" << M << "x" << N << "x"
+           << K << "_F32F16F16_" << mode
+           << "<static_cast<cute::SM90::GMMA::Major>(0), "
+              "static_cast<cute::SM90::GMMA::Major>(0)>::fma(\n";
+      incIndent();
+      // A operand: 4 uint32_t regs from the register fragment
+      if (isRS) {
+        os() << getIndent();
+        int64_t lhsU32 = (M * K) / (128 * 2); // half->uint32 packing: 2 halves per u32
+        for (int64_t i = 0; i < lhsU32; ++i) {
+          os() << "reinterpret_cast<const uint32_t*>(" << lhs << ")[" << i
+               << "]";
+          os() << ", ";
+        }
+        os() << "\n";
+      } else {
+        os() << getIndent() << lhs << ", ";
+      }
+      // B operand (descriptor)
+      os() << getIndent() << rhs << ",\n";
+      // D regs (output accumulator)
+      os() << getIndent();
+      int64_t accRegs = (M * N) / 128;
+      for (int64_t i = 0; i < accRegs; ++i) {
+        os() << acc << "[" << i << "]";
+        if (i < accRegs - 1) os() << ", ";
+      }
+      os() << ");\n";
+      decIndent();
+      os() << getIndent() << "warpgroup_commit_batch();\n";
+      os() << getIndent() << "warpgroup_wait<0>();\n";
+      os() << getIndent() << "warpgroup_fence_operand(" << acc << ");\n";
       return;
     }
 
@@ -1395,6 +1498,35 @@ private:
              << tensorName << ", " << getName(fragVal) << ");\n";
         return;
       }
+    }
+
+    if (useWGMMA) {
+      auto fragTy = cast<coir::MMAFragType>(op.getFragment().getType());
+      auto shape = fragTy.getShape();
+      int64_t M = shape.size() > 0 ? shape[0] : 64;
+      int64_t N = shape.size() > 1 ? shape[1] : 64;
+      int64_t accRegs = (M * N) / 128;
+      std::string suffix = "_wgmma_st_" + std::to_string(nextId++);
+      auto dstTy = cast<coir::TensorType>(op.getDest().getType());
+      std::string elemTy = emitElementType(dstTy.getElementType());
+      int64_t ldm = getSourceLeadingDim(op.getDest());
+      std::string shapeName = "__shape" + suffix;
+      std::string layoutName = "__layout" + suffix;
+      std::string tensorName = "__tensor" + suffix;
+      os() << getIndent() << "auto " << shapeName
+           << " = cute::make_shape(cute::Int<" << M << ">{}, cute::Int<"
+           << N << ">{});\n";
+      os() << getIndent() << "auto " << layoutName
+           << " = cute::make_layout(" << shapeName
+           << ", cute::make_stride(cute::Int<" << ldm
+           << ">{}, cute::Int<1>{}));\n";
+      os() << getIndent() << "auto " << tensorName
+           << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTy << ">(("
+           << elemTy << "*)" << getName(op.getDest()) << "), " << layoutName
+           << ");\n";
+      os() << getIndent() << "store_fragment_d<CUTE_WGMMA_M64K16, " << N
+           << ">(" << tensorName << ", " << getName(op.getFragment()) << ");\n";
+      return;
     }
 
     int64_t ldm = getSourceLeadingDim(op.getDest());
