@@ -822,10 +822,12 @@ private:
                         DMAInvokeOp invoke, KernelConvertCtx &ctx) {
     Value desc = invoke.getDesc();
     DMAConstDescOp constDesc = nullptr;
+    DMADescRuntimeOp rtDesc = nullptr;
 
     if (auto prefetch = desc.getDefiningOp<DMADescPrefetchOp>())
       constDesc = prefetch.getIn().getDefiningOp<DMAConstDescOp>();
     else if (auto rt = desc.getDefiningOp<DMADescRuntimeOp>()) {
+      rtDesc = rt;
       auto prefetch2 = rt.getIn().getDefiningOp<DMADescPrefetchOp>();
       if (prefetch2)
         constDesc = prefetch2.getIn().getDefiningOp<DMAConstDescOp>();
@@ -834,9 +836,105 @@ private:
     if (constDesc) {
       Value src = ctx.mapping.lookup(constDesc.getSource());
       Value dst = ctx.mapping.lookup(constDesc.getDest());
-      emitFlatCopyLoop(builder, loc, src, dst);
+
+      if (rtDesc && !rtDesc.getOffsets().empty()) {
+        auto srcCoirTy =
+            cast<coir::TensorType>(constDesc.getSource().getType());
+        auto dstCoirTy =
+            cast<coir::TensorType>(constDesc.getDest().getType());
+        bool isLoad = (srcCoirTy.getMemorySpace() <= 0) &&
+                      (dstCoirTy.getMemorySpace() == 1);
+
+        Value globalMem = isLoad ? src : dst;
+        auto globalCoirTy = isLoad ? srcCoirTy : dstCoirTy;
+        auto localCoirTy = isLoad ? dstCoirTy : srcCoirTy;
+        auto globalShape = globalCoirTy.getShape();
+        auto tileShape = localCoirTy.getShape();
+
+        Value sliced =
+            applyTileOffset(builder, loc, globalMem, globalShape,
+                            tileShape, rtDesc.getOffsets(), ctx.mapping);
+        if (isLoad)
+          emitFlatCopyLoop(builder, loc, sliced, dst);
+        else
+          emitFlatCopyLoop(builder, loc, src, sliced);
+      } else {
+        emitFlatCopyLoop(builder, loc, src, dst);
+      }
     }
     builder.create<mgpu::BarrierOp>(loc);
+  }
+
+  Value applyTileOffset(OpBuilder &builder, Location loc, Value base,
+                        ArrayRef<int64_t> baseShape,
+                        ArrayRef<int64_t> tileShape,
+                        OperandRange coirOffsets, IRMapping &mapping) {
+    auto baseTy = cast<MemRefType>(base.getType());
+
+    SmallVector<int64_t> baseStrides(baseShape.size());
+    {
+      int64_t s = 1;
+      for (int i = (int)baseShape.size() - 1; i >= 0; --i) {
+        baseStrides[i] = s;
+        s *= baseShape[i];
+      }
+    }
+
+    Value offset = builder.create<arith::ConstantIndexOp>(loc, 0);
+    for (unsigned i = 0; i < coirOffsets.size() && i < baseShape.size(); ++i) {
+      Value idx = mapping.lookup(coirOffsets[i]);
+      int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
+      int64_t elemStride = tileDim * baseStrides[i];
+      Value stride = builder.create<arith::ConstantIndexOp>(loc, elemStride);
+      Value term = builder.create<arith::MulIOp>(loc, idx, stride);
+      offset = builder.create<arith::AddIOp>(loc, offset, term);
+    }
+
+    SmallVector<int64_t> tileStrides;
+    if (tileShape.size() == baseShape.size())
+      tileStrides.assign(baseStrides.begin(), baseStrides.end());
+    else {
+      tileStrides.resize(tileShape.size());
+      int64_t s = 1;
+      for (int i = (int)tileShape.size() - 1; i >= 0; --i) {
+        tileStrides[i] = s;
+        s *= tileShape[i];
+      }
+    }
+
+    bool hasDynOffset = false;
+    int64_t staticOffset = 0;
+    if (auto cst = offset.getDefiningOp<arith::ConstantIndexOp>())
+      staticOffset = cst.value();
+    else
+      hasDynOffset = true;
+
+    int64_t layoutOffset =
+        hasDynOffset ? ShapedType::kDynamic : staticOffset;
+    auto layout = StridedLayoutAttr::get(builder.getContext(),
+                                         layoutOffset, tileStrides);
+    MemRefType tileMem = MemRefType::get(tileShape, baseTy.getElementType(),
+                                         layout, baseTy.getMemorySpace());
+
+    SmallVector<Value> sizes, strides;
+    for (unsigned i = 0; i < tileShape.size(); ++i) {
+      sizes.push_back(
+          builder.create<arith::ConstantIndexOp>(loc, tileShape[i]));
+      strides.push_back(
+          builder.create<arith::ConstantIndexOp>(loc, tileStrides[i]));
+    }
+
+    Value basePtr = getBaseMemRef(base);
+    Value parentOffset = extractOffset(builder, loc, base);
+    if (auto cst = parentOffset.getDefiningOp<arith::ConstantIndexOp>()) {
+      if (cst.value() != 0)
+        offset = builder.create<arith::AddIOp>(loc, offset, parentOffset);
+    } else {
+      offset = builder.create<arith::AddIOp>(loc, offset, parentOffset);
+    }
+
+    return builder.create<memref::ReinterpretCastOp>(
+        loc, tileMem, basePtr, offset, sizes, strides);
   }
 
   void convertAtomic(OpBuilder &builder, Location loc, AtomicOp atomicOp,
