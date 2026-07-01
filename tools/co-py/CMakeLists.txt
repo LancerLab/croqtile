@@ -1,4 +1,4 @@
-# tools/co-py/CMakeLists.txt -- Python bindings for CroqTile
+# tools/co-py/CMakeLists.txt -- croqtile-python bindings
 if(EMSCRIPTEN)
   message(STATUS "co-py: skipped (not supported under Emscripten)")
   return()

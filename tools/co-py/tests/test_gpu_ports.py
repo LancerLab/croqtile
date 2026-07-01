@@ -1,8 +1,8 @@
 """
-Ports of Choreo gpu/end2end tests to CroqPy.
+Ports of Choreo gpu/end2end tests to croqtile-python.
 
 Each test corresponds to a .co file under tests/gpu/end2end/ in the Choreo
-repo. These tests verify that CroqPy can express the same kernel patterns
+repo. These tests verify that croqtile-python can express the same kernel patterns
 and produce valid AST.
 """
 import croqtile as croq
@@ -433,7 +433,7 @@ class TestTmaCo:
 
 class TestTransposeCo:
     def test_transpose_structure(self):
-        """Port transpose.co structure -- dma.transp not yet in CroqPy,
+        """Port transpose.co structure -- dma.transp not yet in croqtile-python,
         but verify the surrounding parallel/copy pattern works."""
         @croq.co
         def transpose(a: croq.s32[3, 4, 5]) -> croq.s32[4, 3, 5]:
@@ -2066,7 +2066,7 @@ class TestStreamCo:
 class TestMakeTiledCopyCo:
     def test_tiled_copy_structure(self):
         """Structural port of make_tiled_copy.co ele_add0.
-        Note: foreach over .span is not yet supported in CroqPy,
+        Note: foreach over .span is not yet supported in croqtile-python,
         so we use explicit bounds instead."""
         @croq.co
         def ele_add0(lhs: croq.s32[16, 32],
@@ -2093,7 +2093,7 @@ class TestMakeTiledCopyCo:
 class TestPadCo:
     def test_pad_structure(self):
         """Structural port of pad.co: DMA copy + output declaration.
-        Note: dma.pad is not yet supported in CroqPy."""
+        Note: dma.pad is not yet supported in croqtile-python."""
         @croq.co
         def pad(inp: croq.s32[30, 60]) -> croq.s32[35, 63]:
             output = croq.declare(croq.s32[35, 63], "output")
@@ -2115,7 +2115,7 @@ class TestPadCo:
 class TestWarpspecCo:
     def test_warpspec_structure(self):
         """Structural port of warpspec.co: WGMMA matmul skeleton.
-        Note: event system and inthreads.async are not yet in CroqPy."""
+        Note: event system and inthreads.async are not yet in croqtile-python."""
         WARP_M, WARP_N = 64, 128
         TILE_K, WARP_K = 64, 16
 
@@ -2313,7 +2313,7 @@ class TestAsyncCopyFp6Fp4Co:
 class TestDebugRttiCo:
     def test_debug_rtti_structure(self):
         """Structural port of debug_rtti_GDB_types.co.
-        Note: ituple, a:[7,8,9], with idx in [b] are not yet in CroqPy.
+        Note: ituple, a:[7,8,9], with idx in [b] are not yet in croqtile-python.
         We verify the basic kernel structure with parallel + println."""
         @croq.co
         def debug_kern(lhs: croq.s32[32, 64], x: croq.s32[1]):

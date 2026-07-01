@@ -1,13 +1,13 @@
 """Real GPU execution tests -- compile, run, and verify on SM86.
 
 These tests go beyond source compilation to actually:
-  1. Generate .co source from CroqTile Python DSL
-  2. Compile through the croqtile compiler to CUDA source
+  1. Generate .co source from croqtile-python DSL
+  2. Compile through the Choreo compiler to CUDA source
   3. Compile CUDA -> executable via nvcc
   4. Execute on the GPU
-  5. Verify output
+  5. Verify output (numpy-based or check-line based)
 
-Requires: croqtile compiler, nvcc, NVIDIA GPU.
+Requires: Choreo compiler, nvcc, NVIDIA GPU.
 """
 
 import pytest
@@ -15,11 +15,14 @@ import croq
 
 
 class TestGPUExecution:
-    """Full end-to-end execution on GPU hardware."""
+    """Full end-to-end execution on GPU hardware with numpy data."""
 
     @pytest.mark.gpu
-    def test_add_execute(self, compile_and_run):
-        """Element-wise add: compile + execute + verify."""
+    def test_add_execute(self):
+        """Element-wise add: numpy in -> GPU kernel -> numpy verify."""
+        import numpy as np
+        from croqtile.runtime import run_with_numpy
+
         @croq.co
         def ele_add(lhs: croq.s32[6, 64],
                     rhs: croq.s32[6, 64]) -> croq.s32[6, 64]:
@@ -30,26 +33,18 @@ class TestGPUExecution:
 
         prog = croq.Program()
         prog.add(ele_add)
-        prog.add("""
-int main() {
-  auto a = choreo::make_spandata<choreo::s32>(6, 64);
-  auto b = choreo::make_spandata<choreo::s32>(6, 64);
-  a.fill_random(-10, 10);
-  b.fill_random(-10, 10);
-  auto res = ele_add(a.view(), b.view());
-  for (size_t i = 0; i < 6; ++i)
-    for (size_t j = 0; j < 64; ++j)
-      choreo::choreo_assert(a[i][j] + b[i][j] == res[i][j], "mismatch");
-  std::cout << "Test Passed" << std::endl;
-}
-""")
-        stdout = compile_and_run(
-            prog.to_co(check_lines=["Test Passed"]))
-        assert "Test Passed" in stdout
+
+        a = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
+        b = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
+        result = run_with_numpy(prog, {"lhs": a, "rhs": b}, arch="sm_86")
+        np.testing.assert_array_equal(result, a + b)
 
     @pytest.mark.gpu
-    def test_add_shared_execute(self, compile_and_run):
+    def test_add_shared_execute(self):
         """Element-wise add with shared memory staging."""
+        import numpy as np
+        from croqtile.runtime import run_with_numpy
+
         @croq.co
         def ele_add(lhs: croq.s32[6, 64],
                     rhs: croq.s32[6, 64]) -> croq.s32[6, 64]:
@@ -61,26 +56,18 @@ int main() {
 
         prog = croq.Program()
         prog.add(ele_add)
-        prog.add("""
-int main() {
-  auto a = choreo::make_spandata<choreo::s32>(6, 64);
-  auto b = choreo::make_spandata<choreo::s32>(6, 64);
-  a.fill_random(-10, 10);
-  b.fill_random(-10, 10);
-  auto res = ele_add(a.view(), b.view());
-  for (size_t i = 0; i < 6; ++i)
-    for (size_t j = 0; j < 64; ++j)
-      choreo::choreo_assert(a[i][j] + b[i][j] == res[i][j], "mismatch");
-  std::cout << "Test Passed" << std::endl;
-}
-""")
-        stdout = compile_and_run(
-            prog.to_co(check_lines=["Test Passed"]))
-        assert "Test Passed" in stdout
+
+        a = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
+        b = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
+        result = run_with_numpy(prog, {"lhs": a, "rhs": b}, arch="sm_86")
+        np.testing.assert_array_equal(result, a + b)
 
     @pytest.mark.gpu
-    def test_dma_copy_execute(self, compile_and_run):
-        """DMA copy: global -> shared -> global."""
+    def test_dma_copy_execute(self):
+        """DMA copy: global -> shared -> global, verified with numpy."""
+        import numpy as np
+        from croqtile.runtime import run_with_numpy
+
         @croq.co
         def copy_kernel(src: croq.s32[4, 8]) -> croq.s32[4, 8]:
             output = croq.declare(croq.s32[4, 8], "output")
@@ -91,24 +78,17 @@ int main() {
 
         prog = croq.Program()
         prog.add(copy_kernel)
-        prog.add("""
-int main() {
-  auto a = choreo::make_spandata<choreo::s32>(4, 8);
-  a.fill_random(1, 100);
-  auto res = copy_kernel(a.view());
-  for (size_t i = 0; i < 4; ++i)
-    for (size_t j = 0; j < 8; ++j)
-      choreo::choreo_assert(a[i][j] == res[i][j], "mismatch");
-  std::cout << "Test Passed" << std::endl;
-}
-""")
-        stdout = compile_and_run(
-            prog.to_co(check_lines=["Test Passed"]))
-        assert "Test Passed" in stdout
+
+        a = np.random.randint(1, 100, (4, 8), dtype=np.int32)
+        result = run_with_numpy(prog, {"src": a}, arch="sm_86")
+        np.testing.assert_array_equal(result, a)
 
     @pytest.mark.gpu
-    def test_mma_matmul_execute(self, compile_and_run):
-        """WMMA matmul f16: compile + execute + verify on SM86."""
+    def test_mma_matmul_execute(self):
+        """WMMA matmul f16: numpy in -> GPU -> numpy verify on SM86."""
+        import numpy as np
+        from croqtile.runtime import run_with_numpy
+
         M, N, K = 128, 256, 256
 
         @croq.co
@@ -133,32 +113,23 @@ int main() {
         prog.define("N", N)
         prog.define("K", K)
         prog.add(matmul)
-        prog.add("""
-int main() {
-  auto lhs = choreo::make_spandata<choreo::f16>(M, K);
-  auto rhs = choreo::make_spandata<choreo::f16>(K, N);
-  lhs.fill_random(1, 10);
-  rhs.fill_random(1, 10);
-  auto res = matmul(lhs.view(), rhs.view());
-  float tolerance = 0.005f;
-  for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; j < res.shape()[1]; ++j) {
-      auto ref = 0.0f;
-      for (size_t k = 0; k < lhs.shape()[1]; ++k)
-        ref += __half2float(lhs[i][k] * rhs[k][j]);
-      auto delta = std::abs((ref - __half2float(res[i][j])) / ref);
-      choreo::choreo_assert(delta < tolerance, "mismatch");
-    }
-  std::cout << "Test Passed" << std::endl;
-}
-""")
-        stdout = compile_and_run(
-            prog.to_co(check_lines=["Test Passed"]))
-        assert "Test Passed" in stdout
+
+        lhs = np.random.uniform(1, 10, (M, K)).astype(np.float16)
+        rhs = np.random.uniform(1, 10, (K, N)).astype(np.float16)
+        result = run_with_numpy(
+            prog, {"lhs": lhs, "rhs": rhs},
+            output_shape=(M, N), output_dtype=np.float16,
+            arch="sm_86")
+        ref = lhs.astype(np.float32) @ rhs.astype(np.float32)
+        np.testing.assert_allclose(
+            result.astype(np.float32), ref, rtol=0.01)
 
     @pytest.mark.gpu
-    def test_gemm_rc_mma_sync_execute(self, compile_and_run):
-        """GEMM with DMA to shared: compile + execute + verify on SM86."""
+    def test_gemm_rc_mma_sync_execute(self):
+        """GEMM with DMA to shared: numpy in -> GPU -> numpy verify."""
+        import numpy as np
+        from croqtile.runtime import run_with_numpy
+
         M, N, K = 256, 256, 256
         TILE_M, TILE_N, TILE_K = 32, 32, 16
         WARP_M, WARP_N, WARP_K = 16, 16, 16
@@ -203,28 +174,16 @@ int main() {
         prog.define("N", N)
         prog.define("K", K)
         prog.add(matmul)
-        prog.add("""
-int main() {
-  auto lhs = choreo::make_spandata<choreo::f16>(M, K);
-  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
-  lhs.fill_random(1.0, 10.0);
-  rhs.fill_random(1.0, 10.0);
-  auto res = matmul(lhs.view(), rhs.view());
-  float tolerance = 0.005f;
-  for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; j < res.shape()[1]; ++j) {
-      auto ref = 0.0f;
-      for (size_t k = 0; k < lhs.shape()[1]; ++k)
-        ref += __half2float(lhs[i][k] * rhs[j][k]);
-      auto delta = std::abs((ref - __half2float(res[i][j])) / ref);
-      choreo::choreo_assert(delta < tolerance, "mismatch");
-    }
-  std::cout << "Test Passed" << std::endl;
-}
-""")
-        stdout = compile_and_run(
-            prog.to_co(check_lines=["Test Passed"]))
-        assert "Test Passed" in stdout
+
+        lhs = np.random.uniform(1, 10, (M, K)).astype(np.float16)
+        rhs = np.random.uniform(1, 10, (N, K)).astype(np.float16)
+        result = run_with_numpy(
+            prog, {"lhs": lhs, "rhs": rhs},
+            output_shape=(M, N), output_dtype=np.float16,
+            arch="sm_86")
+        ref = lhs.astype(np.float32) @ rhs.T.astype(np.float32)
+        np.testing.assert_allclose(
+            result.astype(np.float32), ref, rtol=0.01)
 
 
 class TestRuntimeDiscovery:
@@ -254,3 +213,30 @@ class TestRuntimeDiscovery:
             pytest.skip("runtime headers not found")
         import os
         assert os.path.isfile(os.path.join(path, "choreo.h"))
+
+
+class TestNumpyScalar:
+    """Additional numpy-based tests with different dtypes."""
+
+    @pytest.mark.gpu
+    def test_scale_f32(self):
+        """Scale f32 array by constant, verify with numpy."""
+        import numpy as np
+        from croqtile.runtime import run_with_numpy
+
+        @croq.co
+        def scale(src: croq.f32[4, 32]) -> croq.f32[4, 32]:
+            output = croq.declare(croq.f32[4, 32], "output")
+            for p, q in croq.parallel(p=4, q=32):
+                output[p, q] = src[p, q] * 2
+            return output
+
+        prog = croq.Program()
+        prog.add(scale)
+
+        a = np.random.randn(4, 32).astype(np.float32)
+        result = run_with_numpy(
+            prog, {"src": a},
+            output_shape=(4, 32), output_dtype=np.float32,
+            arch="sm_86")
+        np.testing.assert_allclose(result, a * 2, rtol=1e-5)

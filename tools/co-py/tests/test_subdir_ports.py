@@ -1,7 +1,7 @@
-"""Ports of subdirectory GPU end2end tests to CroqPy.
+"""Ports of subdirectory GPU end2end tests to croqtile-python.
 
 Covers: wmma/, ptx_mma/, gemm/, gemm_sp/ directories.
-These tests verify that CroqPy can express MMA matmul patterns with
+These tests verify that croqtile-python can express MMA matmul patterns with
 various type combinations, MMA shapes, and layouts, and that the
 generated .co source compiles through the choreo compiler.
 """
@@ -750,9 +750,9 @@ int main() {
 class TestGEMMSPDir:
     """Ports of tests/gpu/end2end/gemm_sp/ -- sparse GEMM (structural)."""
 
-    @pytest.mark.skipif(True, reason="Sparse MMA not yet in CroqPy")
+    @pytest.mark.skipif(True, reason="Sparse MMA not yet in croqtile-python")
     def test_gemm_sp_placeholder(self):
-        """Sparse MMA uses mma.sp.* constructs not yet in CroqPy."""
+        """Sparse MMA uses mma.sp.* constructs not yet in croqtile-python."""
         pass
 
 
