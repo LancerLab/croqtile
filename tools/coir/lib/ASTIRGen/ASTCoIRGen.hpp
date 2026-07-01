@@ -68,6 +68,7 @@ private:
   }
 
   llvm::SmallVector<std::pair<std::string, mlir::Value>> pendingYields;
+  unsigned foreachNestDepth = 0;
   mlir::Value lastSpanAsResult;
 
   struct IfMergeInfo {
@@ -120,6 +121,9 @@ private:
   // Resolve a bounded variable (within or parallel-by) to its total
   // iteration extent by looking up bv_map -> MLIR values or BoundedType.
   int64_t ResolveBoundedVarExtent(llvm::StringRef rvName);
+
+  int64_t resolveRangeBound(AST::LoopRange *lr);
+  mlir::Value resolveRangeUBValue(AST::LoopRange *lr, int64_t bound);
 
 public:
   ASTCoIRGen()
