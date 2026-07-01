@@ -96,7 +96,15 @@ private:
   std::string archStr;
   int archNum = 0;
 
-  bool hasGroupLevel() const { return archNum >= 400; }
+  struct EntryAssertion { AssertOp op; };
+  llvm::SmallVector<EntryAssertion> entryAssertions;
+
+  bool hasGroupLevel() const override { return archNum >= 400; }
+  bool supportsFP8() const override { return archNum >= 400; }
+  bool supportsFP6() const override { return false; }
+  bool supportsFP4() const override { return false; }
+  bool supportsLaunchBounds() const override { return false; }
+  bool supportsMaxNreg() const override { return false; }
 
   int parseArchNum(llvm::StringRef arch) {
     auto s = arch.str();
@@ -117,6 +125,20 @@ private:
     if (ty.isBF16()) return "__bf16";
     if (ty.isF32()) return "float";
     if (ty.isF64()) return "double";
+    if (isa<mlir::Float8E4M3FNType>(ty) || isa<mlir::Float8E5M2Type>(ty)) {
+      if (!supportsFP8()) {
+        llvm::errs() << "error: f8 types not supported on " << archStr << "\n";
+        return "/* unsupported_f8 */";
+      }
+      if (isa<mlir::Float8E4M3FNType>(ty)) return "tops::float_e4m3";
+      return "tops::float_e5m2";
+    }
+    if (isa<mlir::Float6E2M3FNType>(ty) || isa<mlir::Float6E3M2FNType>(ty) ||
+        isa<mlir::Float4E2M1FNType>(ty)) {
+      llvm::errs() << "error: topscc does not support sub-byte float types"
+                      " (f6/f4); these require the CUTE target\n";
+      return "/* unsupported_narrow_float */";
+    }
     if (ty.isInteger(8)) return "int8_t";
     if (ty.isInteger(16)) return "int16_t";
     if (ty.isInteger(32)) return "int";
@@ -251,6 +273,7 @@ private:
   }
 
   void emitDeviceFunction(KernelOp kernel) {
+    entryAssertions.clear();
     preCollectStubs(kernel);
     bool isMultiDevice = hasDeviceParallel(kernel);
 
@@ -270,7 +293,31 @@ private:
          << ")\n";
     }
 
-    os() << "__device__ void " << kernel.getSymName() << "(";
+    os() << "__device__ ";
+    if (auto lb = kernel.getLaunchBoundsAttr()) {
+      if (lb.getMaxThreadsPerBlock() > 0) {
+        if (supportsLaunchBounds()) {
+          os() << "__launch_bounds__(" << lb.getMaxThreadsPerBlock();
+          if (lb.getMinBlocksPerMultiprocessor() > 0)
+            os() << ", " << lb.getMinBlocksPerMultiprocessor();
+          os() << ") ";
+        } else {
+          os() << "/* launch_bounds(" << lb.getMaxThreadsPerBlock();
+          if (lb.getMinBlocksPerMultiprocessor() > 0)
+            os() << ", " << lb.getMinBlocksPerMultiprocessor();
+          os() << ") unsupported */ ";
+        }
+      }
+    }
+    if (auto nr = kernel.getMaxNregAttr()) {
+      if (nr.getValue() > 0) {
+        if (supportsMaxNreg())
+          os() << "__maxnreg__(" << nr.getValue() << ") ";
+        else
+          os() << "/* maxnreg(" << nr.getValue() << ") unsupported */ ";
+      }
+    }
+    os() << "void " << kernel.getSymName() << "(";
 
     auto &body = kernel.getBody();
     unsigned paramIdx = 0;
@@ -402,6 +449,11 @@ private:
     os() << ") {\n";
 
     if (needsDevice && resTy) {
+      for (auto &ea : entryAssertions) {
+        os() << "  choreo::runtime_check("
+           << getName(ea.op.getCondition()) << ", \""
+           << ea.op.getMessage().str() << "\");\n";
+      }
       emitDeviceOffloadBody(kernel, resTy);
     } else {
       // No device offload: emit the body directly (the function IS the
@@ -413,6 +465,11 @@ private:
         for (auto &op : body.front().getOperations())
           emitOp(&op);
         decIndent();
+      }
+      for (auto &ea : entryAssertions) {
+        os() << "  choreo::runtime_check("
+           << getName(ea.op.getCondition()) << ", \""
+           << ea.op.getMessage().str() << "\");\n";
       }
     }
 
@@ -664,6 +721,10 @@ private:
       emitEventTrigger(evtTrig);
     else if (auto evtWait = dyn_cast<EventWaitOp>(op))
       emitEventWait(evtWait);
+    else if (auto assertOp = dyn_cast<AssertOp>(op))
+      emitAssert(assertOp);
+    else if (auto elemCopy = dyn_cast<ElementCopyOp>(op))
+      emitElementCopy(elemCopy);
     else
       CoIREmitterBase::emitOpFallback(op);
   }
@@ -1603,6 +1664,32 @@ private:
     }
   }
 
+  void emitAssert(AssertOp op) {
+    if (auto ea = op->getAttrOfType<BoolAttr>("enabled"))
+      if (!ea.getValue()) return;
+    auto site = op.getSite();
+    if (site == AssertSite::ENTRY) {
+      entryAssertions.push_back({op});
+      return;
+    }
+    os() << getIndent() << "choreo::choreo_assert("
+       << getName(op.getCondition()) << ", \"" << op.getMessage().str()
+       << "\");\n";
+  }
+
+  void emitElementCopy(ElementCopyOp op) {
+    auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+    int64_t totalElems = 1;
+    for (auto d : srcTy.getShape()) totalElems *= d;
+    std::string src = getName(op.getSource());
+    std::string dst = getName(op.getDest());
+    std::string idx = "i" + std::to_string(nextId++);
+    os() << getIndent() << "for (int " << idx << " = 0; " << idx << " < "
+       << totalElems << "; ++" << idx << ")\n";
+    os() << getIndent() << "  " << dst << "[" << idx << "] = " << src
+       << "[" << idx << "];\n";
+  }
+
   void emitEventTrigger(EventTriggerOp op) {
     auto name = op.getEventName().str();
     os() << getIndent() << name;
@@ -1764,6 +1851,31 @@ private:
     os() << "\n";
   }
 
+  void emitTensorReduceElem(TensorReduceElemOp op) override {
+    std::string dst = getName(op.getDest());
+    std::string val = getName(op.getValue());
+    bool isAtomic = op->hasAttr("atomic");
+    if (isAtomic) {
+      os() << getIndent() << "atomicAdd(&" << dst << "[";
+      bool first = true;
+      for (auto idx : op.getIndices()) {
+        if (!first) os() << " + ";
+        first = false;
+        os() << getName(idx);
+      }
+      os() << "], " << val << ");\n";
+    } else {
+      os() << getIndent() << dst << "[";
+      bool first = true;
+      for (auto idx : op.getIndices()) {
+        if (!first) os() << " + ";
+        first = false;
+        os() << getName(idx);
+      }
+      os() << "] += " << val << ";\n";
+    }
+  }
+
   void emitAtomic(AtomicOp op) override {
     using AK = coir::AtomicKind;
     llvm::StringRef fnName;
@@ -1787,8 +1899,15 @@ private:
       os() << getName(idx);
     }
     os() << "], " << getName(op.getValue());
-    if (op.getKind() == AK::CAS && op.getCompare())
-      os() << ", " << "/* compare */";
+    if (op.getKind() == AK::CAS && op.getCompare()) {
+      auto cmpAttr = *op.getCompare();
+      if (auto ia = mlir::dyn_cast<mlir::IntegerAttr>(cmpAttr))
+        os() << ", " << ia.getInt();
+      else if (auto fa = mlir::dyn_cast<mlir::FloatAttr>(cmpAttr))
+        os() << ", " << fa.getValueAsDouble();
+      else
+        os() << ", /* compare */";
+    }
     os() << ");\n";
   }
 
