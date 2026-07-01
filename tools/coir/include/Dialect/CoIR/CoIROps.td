@@ -119,12 +119,14 @@ def DMAInvokeOp : CoIR_Op<"dma.invoke",
   }];
   let arguments = (ins
     CoIR_FinalDMADescType:$desc,
+    Variadic<Index>:$dyn_dims,
     OptionalAttr<DenseI64ArrayAttr>:$thr_layout,
     OptionalAttr<DenseI64ArrayAttr>:$val_layout,
     OptionalAttr<StrAttr>:$copy_atom,
     OptionalAttr<BoolAttr>:$need_pred,
     OptionalAttr<DenseI64ArrayAttr>:$prediction,
-    OptionalAttr<BoolAttr>:$swizzle
+    OptionalAttr<BoolAttr>:$swizzle,
+    OptionalAttr<DenseI64ArrayAttr>:$copy_shape
   );
   let results   = (outs CoIR_AsyncTokenTypeC:$done);
   let hasCustomAssemblyFormat = 1;
