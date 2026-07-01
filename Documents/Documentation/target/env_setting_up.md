@@ -3,7 +3,7 @@
 This supplement is included when the GCU target is enabled in the build. It is
 not synced to the public OSS branch.
 
-Shared setup (`make setup-core`) and the OSS-safe baseline are documented in
+Shared setup and the OSS-safe baseline are documented in
 [Build and Test](../../Developer/build-and-test.md) and
 [Developer Target Environment Setup](../../Developer/target/env_setting_up.md).
 
@@ -15,7 +15,7 @@ On GCU2 CI machines (`tags: GCU2`):
 make setup-gcu2
 ```
 
-This runs `setup-core` and installs the GCU-2.x compiler/runtime kit.
+This installs the GCU-2.x compiler/runtime kit.
 
 `make gcu2-kmd` installs the base kernel-module driver. Without it the device
 is not usable. It is optional on CI runners because the driver is normally
@@ -41,8 +41,7 @@ On GCU3 CI machines (`tags: GCU3`):
 make setup-gcu3
 ```
 
-This runs `setup-core`, installs the acore library, and installs the GCU-3.x
-platform kit.
+This installs the acore library and the GCU-3.x platform kit.
 
 `make gcu3-kmd` installs the base kernel-module driver (same one-time /
 usually-already-present note as `gcu2-kmd` above):
@@ -88,7 +87,6 @@ Unlike GCU, ROCm must be pre-installed by the user. There is no
 CI sequence (from `.gitlab-ci.yml`):
 
 ```bash
-make setup-core
 make debug
 ./tests/lit.sh tests/amdgpu/
 ```
@@ -100,4 +98,4 @@ make debug
 | `hipGetDeviceCount` returns 0 | Driver/runtime version mismatch | Ensure `amdgpu-dkms` and ROCm userspace from same release; reboot |
 | `HSA_STATUS_ERROR_OUT_OF_RESOURCES` | Locked memory limit too low | Set `memlock unlimited` in `/etc/security/limits.d/99-rocm.conf` |
 | `open(/dev/dri/renderD128)` EINVAL | Stale driver state | Reboot or reload amdgpu module |
-| SSH submodule clone fails | `/opt/gitlab-runner/ssh/config` permission denied | `sudo chown gitlab-runner:gitlab-runner /opt/gitlab-runner/ssh/config` |
+| SSH clone fails | `/opt/gitlab-runner/ssh/config` permission denied | `sudo chown gitlab-runner:gitlab-runner /opt/gitlab-runner/ssh/config` |

@@ -480,6 +480,9 @@ else()
   include(${CMAKE_SOURCE_DIR}/cmake/EmscriptenBootstrap.cmake)
 endif()
 
+# GoogleTest: auto-download source for standalone tests
+include(${CMAKE_SOURCE_DIR}/cmake/GTestBootstrap.cmake)
+
 # CUDA_HOME as a cache variable with environment fallback
 if(DEFINED ENV{CUDA_HOME})
   set(CUDA_HOME $ENV{CUDA_HOME} CACHE PATH "Path to CUDA installation")
@@ -533,6 +536,10 @@ add_subdirectory(lib)
 
 # additional tools (co-mock, etc.)
 add_subdirectory(tools)
+
+# FileCheck: must run after add_subdirectory(tools) so that LLVMBootstrap
+# (included by CoIR) has already downloaded LLVM when CoIR is enabled.
+include(${CMAKE_SOURCE_DIR}/cmake/FileCheckBootstrap.cmake)
 
 if(NOT EMSCRIPTEN)
 

@@ -1,6 +1,5 @@
 FTP_SERVER ?= 172.16.11.18
 
-SETUP_TARGET_DEPENDS += setup-choreo-kit
 SETUP_TARGET_DEPENDS += setup-clang-format
 SETUP_TARGET_DEPENDS += setup-skills
 #SETUP_TARGET_DEPENDS += setup-gcu-acore
@@ -59,7 +58,6 @@ setup-gcu2: setup-core
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)
 
 setup-gcu3: setup-core setup-gcu-acore
-	git submodule update --init --recursive;\
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
 
 setup-gcu4: setup-core

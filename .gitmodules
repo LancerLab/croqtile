@@ -1,4 +1,0 @@
-[submodule "extern/gtest"]
-	path = extern/gtest
-	url = git@git.enflame.cn:era-dev/googletest.git
-	ignore = dirty

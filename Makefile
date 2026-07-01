@@ -156,6 +156,29 @@ ci-test:
 cmake-test:
 	bash tests/cmake/test_croq_options.sh
 
+# ---- choreo-only (no CoIR/co-mock) ----
+define build-choreo-only
+	@echo "=== Building choreo only ($(1)) ==="
+	$(CMAKE) -S $(WORK_DIR) -B $(2) -G Ninja \
+		-DCMAKE_BUILD_TYPE=$(1) \
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
+		'-DCROQ_PROJECT=choreo' \
+		'-DCROQ_TARGET=$(CROQ_TARGET)'
+	ninja -C $(2) choreo copp
+	@test -f $(2)/choreo && ln -sf $(2)/choreo $(WORK_DIR)/choreo || true
+	@test -f $(2)/copp && ln -sf $(2)/copp $(WORK_DIR)/copp || true
+endef
+
+.PHONY: choreo choreo-debug choreo-release
+choreo:
+	$(call build-choreo-only,$(CMAKE_BUILD_TYPE),$(CMAKE_BUILD_DIR))
+
+choreo-debug:
+	$(call build-choreo-only,Debug,$(DBG_BUILD_DIR))
+
+choreo-release:
+	$(call build-choreo-only,Release,$(REL_BUILD_DIR))
+
 # ---- CoIR IR tooling ----
 COIR_BUILD_DIR ?= $(CMAKE_BUILD_DIR)
 
@@ -489,7 +512,6 @@ standalone_test: $(TARGET)
 .PHONY: all clean lines test test-all co-mock mock-test
 
 setup-core: $(SETUP_TARGET_DEPENDS)
-	git submodule update --init --recursive;
 	@if [ -d scripts/hooks ]; then \
 	  git config core.hooksPath scripts/hooks; \
 	  echo "[setup-core] Git hooks: core.hooksPath -> scripts/hooks/"; \

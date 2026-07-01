@@ -10,7 +10,6 @@ stages:
 # Mock interpreter testing (no hardware required)
 mock_test:
   variables:
-   GIT_SUBMODULE_STRATEGY: recursive
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   rules:
@@ -20,9 +19,15 @@ mock_test:
         $CI_COMMIT_BRANCH =~ /^oss\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
+  before_script:
+    - |
+      if echo "$CI_COMMIT_BRANCH" | grep -q '^oss/'; then
+        echo "OSS branch detected -- using cmake/deps.conf from main..."
+        git fetch origin main --depth=1
+        git show origin/main:cmake/deps.conf > cmake/deps.conf
+      fi
   script:
     - echo "Running co-mock tests..."
-    - make setup-core
     - make mock-test
   tags:
     - GPU
@@ -35,7 +40,6 @@ mock_test:
 # GPU Testing
 gpu_test:
   variables:
-   GIT_SUBMODULE_STRATEGY: recursive
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   rules:
@@ -59,7 +63,6 @@ gpu_test:
       fi
   script:
     - echo "Running tests with GPU..."
-    - make setup-core
     - make test-all
   artifacts:
     paths:
@@ -81,7 +84,6 @@ gpu_test:
 # AMDGPU Testing
 amdgpu_test:
   variables:
-   GIT_SUBMODULE_STRATEGY: recursive
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   rules:
@@ -95,9 +97,14 @@ amdgpu_test:
       when: on_success
   before_script:
     - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    - |
+      if echo "$CI_COMMIT_BRANCH" | grep -q '^oss/'; then
+        echo "OSS branch detected -- using cmake/deps.conf from main..."
+        git fetch origin main --depth=1
+        git show origin/main:cmake/deps.conf > cmake/deps.conf
+      fi
   script:
     - echo "Running tests with AMDGPU..."
-    - make setup-core
     - make debug
     - ./tests/lit.sh tests/amdgpu/
   tags:
@@ -112,7 +119,6 @@ amdgpu_test:
 # GCU2 Testing
 gcu2_test:
   variables:
-   GIT_SUBMODULE_STRATEGY: recursive
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   rules:
@@ -189,7 +195,6 @@ gcu3_test:
 # GCU4 Testing
 gcu4_test:
   variables:
-   GIT_SUBMODULE_STRATEGY: recursive
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   rules:
@@ -324,7 +329,6 @@ package_test:
       when: on_success
   script:
     - echo "Running release tests..."
-    - make setup-core
     - make package
     - echo "Checking for generated packages..."
     - echo $(pwd)

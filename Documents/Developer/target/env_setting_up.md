@@ -1,14 +1,14 @@
 # Target Environment Setup
 
-Shared environment setup (`make setup-core`) is documented in
-[Build and Test](../build-and-test.md). Run that on every fresh clone before
-building or testing.
+All toolchain dependencies are auto-downloaded by CMake during the first
+configure. See [Build and Test](../build-and-test.md) for general build
+instructions.
 
 ## CUDA / CuTe target
 
-GPU end-to-end tests use `-t cute` or `-t hetero` with GPU offload. After
-`setup-core`, the `extern/cutlass` submodule provides CuTe/CUTLASS headers; you
-do not need to set `CUTE_HOME` manually.
+GPU end-to-end tests use `-t cute` or `-t hetero` with GPU offload. CMake
+auto-downloads CUTLASS headers to `extern/cutlass/`; you do not need to set
+`CUTE_HOME` manually.
 
 A system CUDA toolkit install is still required for device execution (typically
 `/usr/local/cuda`, overridable via `CUDA_HOME` in generated scripts).

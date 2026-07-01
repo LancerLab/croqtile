@@ -551,7 +551,7 @@ repo_root="$(cd "$repo_root" && pwd)"
 timestamp=$(date +%Y%m%d%H%M%S)
 
 # Add repo root and its tooling directories to PATH
-export PATH="$script_dir:${repo_root}:${repo_root}/extern/bin/:${repo_root}/extern/:$PATH"
+export PATH="$script_dir:${repo_root}:${repo_root}/extern/bin/:${repo_root}/extern/:${repo_root}/extern/llvm-project/bin/:$PATH"
 
 # Check if FileCheck exists in the PATH
 FILECHECK=$(which FileCheck \
