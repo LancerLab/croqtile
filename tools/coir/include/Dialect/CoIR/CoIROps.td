@@ -180,7 +180,9 @@ def ParallelOp : CoIR_Op<"parallel", [SingleBlock, NoTerminator]> {
 
   let arguments = (ins
     CoIR_ParallelLevelAttr:$level,
-    DenseI64ArrayAttr:$bounds
+    DenseI64ArrayAttr:$bounds,
+    OptionalAttr<StrAttr>:$stream,
+    OptionalAttr<BoolAttr>:$is_async
   );
   let regions = (region SizedRegion<1>:$body);
 

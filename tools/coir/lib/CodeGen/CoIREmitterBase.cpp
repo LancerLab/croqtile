@@ -112,10 +112,16 @@ std::string CoIREmitterBase::emitElementType(Type ty) {
   if (ty.isBF16()) return "__bf16";
   if (ty.isF32()) return "float";
   if (ty.isF64()) return "double";
+  if (isa<mlir::Float8E4M3FNType>(ty)) return "choreo::f8_e4m3";
+  if (isa<mlir::Float8E5M2Type>(ty)) return "choreo::f8_e5m2";
+  if (isa<mlir::Float6E2M3FNType>(ty)) return "choreo::f6_e2m3";
+  if (isa<mlir::Float6E3M2FNType>(ty)) return "choreo::f6_e3m2";
+  if (isa<mlir::Float4E2M1FNType>(ty)) return "choreo::f4_e2m1";
   if (ty.isInteger(8)) return "uint8_t";
   if (ty.isInteger(16)) return "int16_t";
   if (ty.isInteger(32)) return "int32_t";
   if (ty.isInteger(64)) return "int64_t";
+  if (ty.isInteger(1)) return "bool";
   llvm_unreachable("unsupported element type");
 }
 
@@ -131,7 +137,12 @@ int64_t CoIREmitterBase::getTensorBytes(TensorType tty) {
   int64_t elemSize = 4;
   if (eTy.isF16() || eTy.isBF16() || eTy.isInteger(16)) elemSize = 2;
   else if (eTy.isF64() || eTy.isInteger(64)) elemSize = 8;
-  else if (eTy.isInteger(8)) elemSize = 1;
+  else if (eTy.isInteger(8) || isa<mlir::Float8E4M3FNType>(eTy) ||
+           isa<mlir::Float8E5M2Type>(eTy) ||
+           isa<mlir::Float6E2M3FNType>(eTy) ||
+           isa<mlir::Float6E3M2FNType>(eTy) ||
+           isa<mlir::Float4E2M1FNType>(eTy))
+    elemSize = 1;
   return n * elemSize;
 }
 
