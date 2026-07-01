@@ -360,5 +360,5 @@ The project includes specialized skills for Claude Code:
 
 ## Additional Resources
 
-- [Getting Started Guide](./Documents/Documentation/getting-started-with-choreo.md)
-- [Choreo Language Documentation](./Documents/Documentation/)
+- [Language Reference](./Documents/Documentation/index.md)
+- [Developer Guide](./Documents/Developer/index.md)
