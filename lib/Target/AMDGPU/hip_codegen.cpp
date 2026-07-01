@@ -743,9 +743,9 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
     break;
   }
   case ParallelLevel::THREAD: {
-    std::string tidBase =
-        (bdim_level == ParallelLevel::GROUP) ? "threadIdx.x % 32"
-                                             : "threadIdx.x";
+    std::string tidBase = (bdim_level == ParallelLevel::GROUP)
+                              ? "threadIdx.x % 32"
+                              : "threadIdx.x";
     if (sub_pvs.size() == 1) {
       ds << d_indent << "int __vid_tid_x = " << tidBase << ";\n";
       MapPV(0, "__vid_tid_x");

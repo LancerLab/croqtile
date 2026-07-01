@@ -214,6 +214,20 @@ void KernelOp::print(OpAsmPrinter &printer) {
 }
 
 //===----------------------------------------------------------------------===//
+// KernelReturnOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult KernelReturnOp::verify() {
+  Operation *parent = (*this)->getParentOp();
+  while (parent) {
+    if (isa<KernelOp>(parent))
+      return success();
+    parent = parent->getParentOp();
+  }
+  return emitOpError("expects ancestor op 'coir.kernel'");
+}
+
+//===----------------------------------------------------------------------===//
 // ParallelOp
 //===----------------------------------------------------------------------===//
 
