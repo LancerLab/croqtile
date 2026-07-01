@@ -107,6 +107,31 @@ def LowerDMADesc : Pass<"coir-lower-dma-desc"> {
   ];
 }
 
+def PlanDMACopy : Pass<"coir-plan-dma-copy"> {
+  let summary = "Plan cooperative tiled copy strategy for DMA invoke ops";
+  let description = [{
+    Analyzes DMAInvokeOp instances that use the non-TMA descriptor pipeline
+    and determines whether cooperative tiled copy is profitable. When it is,
+    the pass stamps thr_layout, val_layout, copy_atom, need_pred, prediction,
+    and swizzle attributes on the DMAInvokeOp. The EmitCUDA backend reads
+    these to emit `choreo::tiled_copy<...>` instead of `choreo::naive_copy`.
+
+    The planning logic considers:
+    - Participating thread count (from enclosing parallel ops or launch_bounds)
+    - Tile box shape (flattened to 2D: M rows x N cols)
+    - Memory alignment for vectorization factor selection
+    - Copy atom selection (cp.async for G2S with warp-multiple threads,
+      AutoVectorizingCopy otherwise)
+    - Predication when box_M is not divisible by thread_M
+
+    Runs after coir-hoist-dma-config and before coir-lower-copy.
+  }];
+
+  let constructor = "::coir::createPlanDMACopyPass()";
+
+  let dependentDialects = ["::coir::CoIRDialect"];
+}
+
 def HoistDMAConfig : Pass<"coir-hoist-dma-config"> {
   let summary = "Hoist loop-invariant DMA descriptor setup above loops";
   let description = [{

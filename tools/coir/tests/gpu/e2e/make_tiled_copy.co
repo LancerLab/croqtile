@@ -1,6 +1,9 @@
 // REQUIRES: TARGET-GPU
 // XFAIL: *
-// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cute -gs %s -o %s.result && CHOREO_DISABLE_TIMING=1 bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// NOTE: Tiled copy emission works (compiles correctly with tiled_copy<...>),
+// but the foreach loop over 2D span is incorrectly lowered (iterates only
+// first dimension). The tiled DMA itself is verified by dma_tiled_copy.co.
 
 #include "choreo.h"
 

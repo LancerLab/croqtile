@@ -61,10 +61,89 @@ struct LowerMMALoad : public OpRewritePattern<MMALoadOp> {
   }
 };
 
+// Infer K dimension from the LHS MMALoadOp's source tensor.
+// For a matmul C[M,N] += A[M,K] * B[K,N], the LHS load source is [M,K].
+static int64_t inferKFromLHS(MMAExecOp op) {
+  auto lhsLoad = op.getLhs().getDefiningOp<MMALoadOp>();
+  if (!lhsLoad)
+    return 0;
+  auto srcType = dyn_cast<coir::TensorType>(lhsLoad.getSource().getType());
+  if (!srcType || srcType.getShape().size() < 2)
+    return 0;
+  return srcType.getShape().back();
+}
+
+// Determine if an MxNxK config maps to CTMMA (inline PTX mma.sync) rather than
+// WMMA. CTMMA configs are m16n8kX and m8n8kX families.
+static bool isCTMMAConfig(int64_t M, int64_t N, int64_t K) {
+  if (M == 16 && N == 8 && (K == 8 || K == 16 || K == 32))
+    return true;
+  if (M == 8 && N == 8 && (K == 4 || K == 16 || K == 32 || K == 128))
+    return true;
+  return false;
+}
+
+// Compute register count for accumulator (D) fragment.
+static int64_t getRegNumD(int64_t M, int64_t N) {
+  if (M == 16 && N == 8) return 4;
+  if (M == 8 && N == 8) return 2;
+  return 4;
+}
+
+// Compute register count for A operand fragment.
+static int64_t getRegNumA(int64_t M, int64_t N, int64_t K) {
+  if (M == 16 && N == 8 && K == 8) return 2;
+  if (M == 16 && N == 8 && K == 16) return 4;
+  if (M == 16 && N == 8 && K == 32) return 8;
+  if (M == 8 && N == 8 && K == 4) return 1;
+  if (M == 8 && N == 8 && K == 16) return 2;
+  return 2;
+}
+
+// Compute register count for B operand fragment.
+static int64_t getRegNumB(int64_t M, int64_t N, int64_t K) {
+  if (M == 16 && N == 8 && K == 8) return 1;
+  if (M == 16 && N == 8 && K == 16) return 2;
+  if (M == 16 && N == 8 && K == 32) return 4;
+  if (M == 8 && N == 8 && K == 4) return 1;
+  if (M == 8 && N == 8 && K == 16) return 1;
+  return 1;
+}
+
+// Map MLIR types to the CuTe type letter for the FMA atom name.
+static std::string typeToFMALetter(mlir::Type t) {
+  if (t.isF32()) return "F32";
+  if (t.isF16()) return "F16";
+  if (t.isBF16()) return "BF16";
+  if (t.isInteger(8)) return "S8";
+  if (t.isInteger(32)) return "S32";
+  return "F32";
+}
+
+// Get SM generation for the atom prefix.
+static std::string getArchPrefix(int64_t M, int64_t N, int64_t K) {
+  if (M == 8 && N == 8 && K == 4) return "SM70";
+  return "SM80";
+}
+
+// Build the full CuTe FMA atom name (e.g., "cute::SM80_16x8x8_F32F16F16F32_TN").
+static std::string buildFMAAtomName(int64_t M, int64_t N, int64_t K,
+                                    mlir::Type accumType, mlir::Type aType,
+                                    mlir::Type bType) {
+  std::string prefix = getArchPrefix(M, N, K);
+  std::string d_str = typeToFMALetter(accumType);
+  std::string a_str = typeToFMALetter(aType);
+  std::string b_str = typeToFMALetter(bType);
+  std::string c_str = d_str;
+
+  return "cute::" + prefix + "_" + std::to_string(M) + "x" +
+         std::to_string(N) + "x" + std::to_string(K) + "_" + d_str + a_str +
+         b_str + c_str + "_TN";
+}
+
 // MMA exec: perform the matrix multiply-accumulate.
 // The target MMA strategy is read from the module attribute "coir.mma_target",
 // which is set per-target by the driver (e.g. "wgmma", "mma_sync", "ukernel").
-// When running via coir-opt, the --target-arch option is used as fallback.
 struct LowerMMAExec : public OpRewritePattern<MMAExecOp> {
   std::string mmaTarget;
   LowerMMAExec(MLIRContext *ctx, StringRef mmaTarget)
@@ -77,6 +156,42 @@ struct LowerMMAExec : public OpRewritePattern<MMAExecOp> {
 
     if (!mmaTarget.empty())
       op->setAttr("target", rewriter.getStringAttr(mmaTarget));
+
+    // For mma_sync target, detect CTMMA configs and stamp atom metadata.
+    if (mmaTarget == "mma_sync") {
+      // Derive M, N, K from operand fragment shapes (more reliable than accum):
+      // lhs is [M, K], rhs is [K, N].
+      auto lhsType = cast<coir::MMAFragType>(op.getLhs().getType());
+      auto rhsType = cast<coir::MMAFragType>(op.getRhs().getType());
+      auto lhsShape = lhsType.getShape();
+      auto rhsShape = rhsType.getShape();
+      int64_t M = lhsShape.size() > 0 ? lhsShape[0] : 16;
+      int64_t K = inferKFromLHS(op);
+      int64_t N = rhsShape.size() > 1 ? rhsShape[1] : (rhsShape.size() > 0 ? rhsShape[0] : 16);
+      if (K == 0)
+        K = lhsShape.size() > 1 ? lhsShape[1] : 16;
+
+      if (K > 0 && isCTMMAConfig(M, N, K)) {
+        // Infer element types from fragment types.
+        auto fragType = cast<coir::MMAFragType>(op.getResult().getType());
+        mlir::Type accumType = fragType.getElementType();
+        mlir::Type aType = lhsType.getElementType();
+        mlir::Type bType = rhsType.getElementType();
+
+        std::string policyName =
+            "CUTE_MMA_M" + std::to_string(M) + "N" + std::to_string(N) +
+            "K" + std::to_string(K);
+        std::string fmaAtom = buildFMAAtomName(M, N, K, accumType, aType, bType);
+
+        op.setMmaAtomNameAttr(rewriter.getStringAttr(policyName));
+        op.setKDimAttr(rewriter.getI64IntegerAttr(K));
+        op.setRegNumAAttr(rewriter.getI64IntegerAttr(getRegNumA(M, N, K)));
+        op.setRegNumBAttr(rewriter.getI64IntegerAttr(getRegNumB(M, N, K)));
+        op.setRegNumDAttr(rewriter.getI64IntegerAttr(getRegNumD(M, N)));
+        // Also store the FMA CuTe atom for emission.
+        op->setAttr("fma_atom", rewriter.getStringAttr(fmaAtom));
+      }
+    }
 
     op->setAttr("lowered", rewriter.getUnitAttr());
     return success();

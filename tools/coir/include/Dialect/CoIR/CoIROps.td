@@ -106,8 +106,26 @@ def DMAInvokeOp : CoIR_Op<"dma.invoke",
   let description = [{
     Triggers the DMA transfer described by a runtime-bound descriptor.
     Returns an async handle for synchronization.
+
+    When the PlanDMACopy pass determines that a tiled (cooperative) copy is
+    profitable, it stamps optional attrs that EmitCUDA uses to emit
+    `choreo::tiled_copy<...>` instead of `choreo::naive_copy`:
+      - thr_layout: [ThrRows, ThrCols] thread tile
+      - val_layout: [ValRows, ValCols] value tile per thread
+      - copy_atom: CuTe copy atom type name string
+      - need_pred: whether predicated copy is required
+      - prediction: [pred_dim0, pred_dim1] shape for predication
+      - swizzle: whether to apply shared-memory swizzle
   }];
-  let arguments = (ins CoIR_FinalDMADescType:$desc);
+  let arguments = (ins
+    CoIR_FinalDMADescType:$desc,
+    OptionalAttr<DenseI64ArrayAttr>:$thr_layout,
+    OptionalAttr<DenseI64ArrayAttr>:$val_layout,
+    OptionalAttr<StrAttr>:$copy_atom,
+    OptionalAttr<BoolAttr>:$need_pred,
+    OptionalAttr<DenseI64ArrayAttr>:$prediction,
+    OptionalAttr<BoolAttr>:$swizzle
+  );
   let results   = (outs CoIR_AsyncTokenTypeC:$done);
   let hasCustomAssemblyFormat = 1;
 }
@@ -331,7 +349,10 @@ def MMAFillOp : CoIR_Op<"mma.fill", [NoMemoryEffect]> {
 
 def MMALoadOp : CoIR_Op<"mma.load", [NoMemoryEffect]> {
   let summary = "Load MMA operand from a tensor tile";
-  let arguments = (ins CoIR_TensorTypeC:$source);
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    OptionalAttr<I64Attr>:$k_dim
+  );
   let results = (outs CoIR_MMAFragTypeC:$result);
   let assemblyFormat = "$source attr-dict `:` type($source) `->` type($result)";
 }
@@ -342,7 +363,12 @@ def MMAExecOp : CoIR_Op<"mma.exec", [NoMemoryEffect]> {
     CoIR_MMAFragTypeC:$accumulator,
     CoIR_MMAFragTypeC:$lhs,
     CoIR_MMAFragTypeC:$rhs,
-    CoIR_MMALayoutAttr:$layout
+    CoIR_MMALayoutAttr:$layout,
+    OptionalAttr<I64Attr>:$k_dim,
+    OptionalAttr<StrAttr>:$mma_atom_name,
+    OptionalAttr<I64Attr>:$reg_num_a,
+    OptionalAttr<I64Attr>:$reg_num_b,
+    OptionalAttr<I64Attr>:$reg_num_d
   );
   let results = (outs CoIR_MMAFragTypeC:$result);
   let hasCustomAssemblyFormat = 1;

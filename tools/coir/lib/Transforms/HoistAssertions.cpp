@@ -22,6 +22,9 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/Pass/Pass.h"
+#include "llvm/Support/Debug.h"
+
+#define DEBUG_TYPE "coir-hoist-assertions"
 
 namespace coir {
 #define GEN_PASS_DECL_HOISTASSERTIONS
