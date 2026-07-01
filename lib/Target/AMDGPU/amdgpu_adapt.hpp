@@ -303,8 +303,7 @@ public:
       if (f_ca->HasOperation())
         f_rank = f_ca->AllOperations().back()->GetRank();
       if (f_rank > 5)
-        Error1(n.LOC(), "On " + cur_arch +
-                            ", the rank in dma" + n.operation +
+        Error1(n.LOC(), "On " + cur_arch + ", the rank in dma" + n.operation +
                             " must be in range [1, 5], but got " +
                             std::to_string(f_rank) + ".");
     }

@@ -1650,7 +1650,11 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
       if (auto *il = dyn_cast<AST::IntLiteral>(valNode)) {
         int64_t v =
             std::visit([](auto x) -> int64_t { return x; }, il->value);
-        initAttr = builder.getIntegerAttr(tty.getElementType(), v);
+        if (mlir::isa<mlir::FloatType>(tty.getElementType()))
+          initAttr = builder.getFloatAttr(tty.getElementType(),
+                                          static_cast<double>(v));
+        else
+          initAttr = builder.getIntegerAttr(tty.getElementType(), v);
       } else if (auto *fl = dyn_cast<AST::FloatLiteral>(valNode)) {
         double v =
             std::visit([](auto x) -> double { return x; }, fl->value);
