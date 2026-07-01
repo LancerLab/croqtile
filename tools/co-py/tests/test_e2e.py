@@ -1,7 +1,7 @@
-"""End-to-end tests: CroqPy -> .co source -> choreo compiler -> CUDA source.
+"""End-to-end tests: croqtile-python -> .co source -> Choreo compiler -> CUDA source.
 
 Each test:
-  1. Defines a kernel using the CroqPy DSL
+  1. Defines a kernel using the croqtile-python DSL
   2. Adds host verification code (verbatim C++ from the original .co files)
   3. Generates .co source with ``prog.to_co()``
   4. Compiles through the choreo compiler (``-es -t cute``)

@@ -16,11 +16,11 @@ from Python, run semantic analysis, and drive the full compiler pipeline
 
 ## Build (in-tree)
 
-co-py is an in-tree subproject of the Choreo repository, built via the
+croqtile-python is an in-tree subproject of the Croqtile repository, built via the
 `CROQ_PROJECT` mechanism. From the repository root:
 
 ```bash
-# Build the _core Python extension (and choreo compiler as prerequisite):
+# Build the _core Python extension (and Choreo compiler as prerequisite):
 make co-py
 
 # Run the test suite:
@@ -42,7 +42,7 @@ PYTHONPATH=tools/co-py/src python3 -c "import croq; print(croq.version())"
 ### Requirements
 
 - Python 3.8+ with development headers (`python3-dev`)
-- The Choreo compiler prerequisites (GCC 9+, CMake 3.18+, Ninja)
+- The Croqtile compiler prerequisites (GCC 9+, CMake 3.18+, Ninja)
 
 ### Python version support
 
@@ -58,7 +58,7 @@ The `croqtile` package includes:
   semantic analysis
 - **`builder`** -- Pythonic DSL for defining kernels
 - **`runtime`** -- compilation and execution pipeline (`.co` -> CUDA ->
-  executable); uses the in-tree `build/choreo` binary
+  executable); uses the in-tree Choreo compiler (`build/choreo`)
 
 ## Quick start
 

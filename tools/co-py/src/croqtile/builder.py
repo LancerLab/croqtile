@@ -103,12 +103,12 @@ class _Scope:
 class Var:
     """A symbolic expression node with Pythonic operators.
 
-    All values flowing through CroqPy are Var objects -- function parameters,
+    All values flowing through croqtile-python are Var objects -- function parameters,
     declared variables, loop indices, and expression results.
 
     Each Var carries a ``_co`` string -- its ``.co`` source representation --
     alongside the C++ AST node.  This enables round-trip emission of ``.co``
-    source from a CroqPy program without walking the opaque AST.
+    source from a croqtile-python program without walking the opaque AST.
     """
 
     __slots__ = ("_node", "_name", "_co")
@@ -612,7 +612,7 @@ def declare_int(name: str, value) -> Var:
 def assign(target: Var, value):
     """Emit a plain assignment: ``croq.assign(mc, mc + bias)``.
 
-    CroqTile: ``mc += bias;``  ->  CroqPy: ``croq.assign(mc, mc + bias)``
+    CroqTile: ``mc += bias;``  ->  croqtile-python: ``croq.assign(mc, mc + bias)``
 
     Works for any named Var. For indexed assignment, use
     ``output[i, j] = expr`` instead.
@@ -1244,7 +1244,7 @@ def foreach_staged(var: Var, *, start: int = 1):
     """Staged foreach: iterates from ``start`` using the enclosing with-in bound.
 
     CroqTile syntax: ``foreach k(1:) { ... }``
-    CroqPy:
+    croqtile-python:
         with croq.with_in(k=K//MMA_K) as k:
             ...
             for _ in croq.foreach_staged(k, start=1):

@@ -1,10 +1,10 @@
-# Choreo `.co` -> CroqPy Syntax Mapping
+# Choreo `.co` -> croqtile-python Syntax Mapping
 
-This document maps every Choreo `.co` construct to its CroqPy Python equivalent.
+This document maps every Choreo `.co` construct to its croqtile-python equivalent.
 
 ## Function Declaration
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `__co__ s32[6,64] ele_add(s32[2,3,64] lhs, s32[2,3,64] rhs)` | `@croq.co` with type annotations | Done |
 | `global f16[M, N] output` (parameter storage) | `output: croq.Global(croq.f16[M, N])` | Done |
@@ -21,7 +21,7 @@ def ele_add(lhs: croq.s32[2,3,64], rhs: croq.s32[2,3,64]) -> croq.s32[6,64]:
 
 ### `parallel ... by ...`
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `parallel p by 6, q by 64 { ... }` | `for p, q in croq.parallel(p=6, q=64):` | Done |
 | `parallel p by 6 : block { ... }` | `for p in croq.parallel(p=6, scope=croq.BLOCK):` | Done |
@@ -39,7 +39,7 @@ Short alias: `croq.pb(...)`.
 
 ### `foreach ... in ...`
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `foreach k in K / MMA_K { ... }` | `for k in croq.foreach(k=K // MMA_K):` | Done |
 | `foreach {m, n, k} in [M, N, K]` | `for m, n, k in croq.foreach(m=M, n=N, k=K):` | Done |
@@ -54,7 +54,7 @@ Short alias: `croq.fe(...)`. Staged: `croq.fs(var, start=1)`.
 
 ### `with ... in ...`
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `with tile_k in 16 { ... }` | `with croq.with_in(tile_k=16) as tile_k:` | Done |
 | `with tile_m in 8, tile_n in 8 { ... }` | `with croq.with_in(tile_m=8, tile_n=8) as (tile_m, tile_n):` | Done |
@@ -70,7 +70,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Variable Declarations
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `s32[6, 64] output` (local) | `output = croq.declare(croq.s32[6,64], "output")` | Done |
 | `shared f16[128, 64] buf` | `buf = croq.declare(..., "buf", storage=croq.SHARED)` | Done |
@@ -80,7 +80,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Expressions
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `a + b`, `a - b`, `a * b`, `a / b` | `a + b`, `a - b`, `a * b`, `a / b` | Done |
 | `a % b` | `a % b` | Done |
@@ -93,7 +93,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Data Access
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `output[p, q]` (read) | `output[p, q]` | Done |
 | `output[p, q] = expr` (write) | `output[p, q] = expr` | Done |
@@ -111,7 +111,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## DMA (Direct Memory Access)
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `f = dma.copy src => dst` | `f = croq.dma.copy(src, dst)` | Done |
 | `f = dma.copy.async src => shared dst` | `f = croq.dma.copy_async(src, dst, to=croq.SHARED)` | Done |
@@ -122,7 +122,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## TMA (Tensor Memory Access)
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `f = tma.copy src => dst` | `f = croq.tma.copy(src, dst)` | Done |
 | `f = tma.copy.async src => shared dst` | `f = croq.tma.copy_async(src, dst, to=croq.SHARED)` | Done |
@@ -133,7 +133,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## MMA (Matrix Multiply-Accumulate)
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `mc = mma.fill 0.0f` | `mc = croq.mma.fill(0.0)` | Done |
 | `mma.fill.f32 mc, 0.0f` | `mc = croq.mma.fill(mc, 0.0, dtype=croq.f32)` | Done |
@@ -152,7 +152,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Synchronization
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `wait f` | `croq.wait(f)` | Done |
 | `wait f1, f2` | `croq.wait(f1, f2)` | Done |
@@ -164,7 +164,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Types
 
-| Choreo `.co` | CroqPy Python |
+| Choreo `.co` | croqtile-python |
 |---|---|
 | `s32`, `u32`, `s16`, etc. | `croq.s32`, `croq.u32`, `croq.s16` |
 | `f32`, `f16`, `bf16`, `tf32` | `croq.f32`, `croq.f16`, `croq.bf16`, `croq.tf32` |
@@ -176,14 +176,14 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Host Code
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `int main() { ... }` | `croq.host("""...""")` | Done |
 | `#include <...>` | embedded in `croq.host(...)` | Done |
 
 ## Storage Qualifiers
 
-| Choreo `.co` | CroqPy Python |
+| Choreo `.co` | croqtile-python |
 |---|---|
 | `global` | `croq.GLOBAL` |
 | `shared` | `croq.SHARED` |
@@ -191,7 +191,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Scope Annotations
 
-| Choreo `.co` | CroqPy Python |
+| Choreo `.co` | croqtile-python |
 |---|---|
 | `: block` | `scope=croq.BLOCK` |
 | `: group` | `scope=croq.GROUP` |
@@ -200,7 +200,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Math Builtins
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `__sqrt(x)` | `croq.sqrt(x)` | Done |
 | `__rsqrt(x)` | `croq.rsqrt(x)` | Done |
@@ -230,14 +230,14 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 
 ## Device Printing
 
-| Choreo `.co` | CroqPy Python | Status |
+| Choreo `.co` | croqtile-python | Status |
 |---|---|---|
 | `println(a, b)` | `croq.println(a, b)` | Done |
 | `print(a, b)` | Not yet (only println) | Planned |
 
 ## Not Yet Supported
 
-These constructs are identified in the GPU end-to-end tests but not yet implemented in CroqPy.
+These constructs are identified in the GPU end-to-end tests but not yet implemented in croqtile-python.
 Sorted by priority (how many tests use them):
 
 ### High Priority -- All Done

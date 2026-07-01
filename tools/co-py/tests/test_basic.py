@@ -1,5 +1,5 @@
 """
-Tests for the CroqPy Python bindings.
+Tests for the croqtile-python bindings.
 
 Layers:
   1. _core: raw C++ binding smoke tests

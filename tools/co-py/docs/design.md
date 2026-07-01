@@ -1,14 +1,13 @@
-# CroqPy Design Document
+# croqtile-python Design Document
 
 ## 1. Motivation
 
-Choreo is an Embedded DSL (EDSL) for programming data-movement entities
-(DMAs, TMAs, MMAs) on heterogeneous hardware.  Today the only way to
-build a Choreo program is by writing `.co` source files and feeding them
-to the `choreo` compiler.  **CroqPy** (`import croq`) provides a Python
-interface that constructs a Choreo AST directly in memory, applies the
-same compiler passes, and emits the generated CUDA/C++ code -- all
-without touching `.co` text.
+Croqtile is a toolchain for programming data-movement entities
+(DMAs, TMAs, MMAs) on heterogeneous hardware.  The Choreo front-end
+provides a `.co` DSL and compiler.  **croqtile-python** (`import croq`)
+provides a Python interface that constructs a Choreo AST directly in
+memory, applies the same compiler passes, and emits the generated
+CUDA/C++ code -- all without touching `.co` text.
 
 ## 2. Architecture
 
@@ -33,7 +32,7 @@ without touching `.co` text.
 |  +----------+-----------------------+  |
 |             | links                    |
 |  +----------v-----------------------+  |
-|  |  libchoreo-dev.a  (Choreo SDK)   |  |
+|  |  libchoreo-dev.a  (Croqtile SDK) |  |
 |  |  Full compiler: parse, sema,     |  |
 |  |  normalization, type inference,  |  |
 |  |  codegen, targets                |  |
@@ -193,14 +192,13 @@ var.data                       # DMA future data member
 ## 5. Build
 
 ```bash
-make build     # cmake + ninja
-make test      # PYTHONPATH=src pytest
-make install   # pip install -e .
+make co-py       # build the _core extension
+make co-py-test  # run pytest suite
 ```
 
 ## 6. Relationship to Existing Projects
 
-- **Choreo SDK**: CroqPy links against `libchoreo-dev.a`. It does not
-  modify the compiler.
-- **coir**: Also consumes the Choreo SDK, for MLIR-based IR work.
+- **Croqtile SDK**: croqtile-python links against the Croqtile SDK
+  object libraries. It does not modify the compiler.
+- **coir**: Also consumes the Croqtile SDK, for MLIR-based IR work.
 - **TVM Relay**: Inspiration for the two-layer design pattern.
