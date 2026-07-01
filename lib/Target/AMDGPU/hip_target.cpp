@@ -103,6 +103,7 @@ public:
     caps.push_back(
         {AtomicOp::ADD,
          {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32}});
+    caps.push_back({AtomicOp::SUB, {BaseType::S32, BaseType::U32}});
     caps.push_back(
         {AtomicOp::EXCH, {BaseType::S32, BaseType::U32, BaseType::U64}});
     caps.push_back(

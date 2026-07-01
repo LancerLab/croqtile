@@ -137,19 +137,24 @@ private:
     return ("__" + name + "_kernel__").str();
   }
 
-  std::string emitChoreoType(Type ty, bool asView = true) {
+  std::string emitChoreoType(Type ty, bool asView = true,
+                             llvm::StringRef hostElemHint = "") {
     if (auto tty = dyn_cast<coir::TensorType>(ty)) {
       std::string choreoElem;
-      auto eTyML = tty.getElementType();
-      if (eTyML.isInteger(8)) choreoElem = "choreo::u8";
-      else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
-      else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
-      else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
-      else if (eTyML.isBF16()) choreoElem = "choreo::bf16";
-      else if (eTyML.isF32()) choreoElem = "choreo::f32";
-      else if (eTyML.isF16()) choreoElem = "choreo::f16";
-      else if (eTyML.isF64()) choreoElem = "choreo::f64";
-      else choreoElem = "choreo::s32";
+      if (!hostElemHint.empty()) {
+        choreoElem = "choreo::" + hostElemHint.str();
+      } else {
+        auto eTyML = tty.getElementType();
+        if (eTyML.isInteger(8)) choreoElem = "choreo::u8";
+        else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
+        else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
+        else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
+        else if (eTyML.isBF16()) choreoElem = "choreo::bf16";
+        else if (eTyML.isF32()) choreoElem = "choreo::f32";
+        else if (eTyML.isF16()) choreoElem = "choreo::f16";
+        else if (eTyML.isF64()) choreoElem = "choreo::f64";
+        else choreoElem = "choreo::s32";
+      }
       unsigned ndim = tty.getShape().size();
       if (asView)
         return "const choreo::spanned_view<" + choreoElem + ", " +
@@ -158,6 +163,14 @@ private:
         return "choreo::spanned_data<" + choreoElem + ", " +
                std::to_string(ndim) + ">";
     }
+    if (ty.isInteger(32)) return "int";
+    if (ty.isInteger(64)) return "int64_t";
+    if (ty.isInteger(16)) return "int16_t";
+    if (ty.isInteger(8)) return "uint8_t";
+    if (ty.isF32()) return "float";
+    if (ty.isF64()) return "double";
+    if (ty.isF16()) return "__half";
+    if (ty.isIndex()) return "int";
     return "/* unknown */";
   }
 
@@ -330,6 +343,47 @@ private:
     }
   };
 
+  struct DimArgMeta {
+    int64_t paramIdx;
+    int64_t dimIdx;
+    std::string name;
+  };
+
+  llvm::SmallVector<DimArgMeta> getDimArgs(KernelOp kernel) {
+    llvm::SmallVector<DimArgMeta> result;
+    auto attr = kernel->getAttrOfType<ArrayAttr>("coir.dim_args");
+    if (!attr) return result;
+    for (auto a : attr) {
+      auto dict = dyn_cast<DictionaryAttr>(a);
+      if (!dict) continue;
+      DimArgMeta m;
+      m.paramIdx = dict.getAs<IntegerAttr>("param").getInt();
+      m.dimIdx = dict.getAs<IntegerAttr>("dim").getInt();
+      m.name = dict.getAs<StringAttr>("name").getValue().str();
+      result.push_back(m);
+    }
+    return result;
+  }
+
+  std::string getStreamName(KernelOp kernel) {
+    std::string stream;
+    kernel.getBody().walk([&](ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::BLOCK && par.getStreamAttr())
+        stream = par.getStreamAttr().getValue().str();
+    });
+    return stream;
+  }
+
+  bool isAsyncLaunch(KernelOp kernel) {
+    bool async = false;
+    kernel.getBody().walk([&](ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::BLOCK &&
+          par.getIsAsyncAttr() && par.getIsAsyncAttr().getValue())
+        async = true;
+    });
+    return async;
+  }
+
   LaunchDims getLaunchDims(KernelOp kernel) {
     LaunchDims dims;
     int64_t groupWarps = 0;
@@ -378,6 +432,11 @@ private:
         os << ") ";
       }
     }
+    if (auto nr = kernel.getMaxNregAttr()) {
+      if (nr.getValue() > 0)
+        os << "__attribute__((amdgpu_num_vgpr(" << nr.getValue()
+           << "))) ";
+    }
     os << "void " << devName << "(";
 
     auto &body = kernel.getBody();
@@ -418,7 +477,8 @@ private:
     os << "}\n\n";
   }
 
-  std::string getDynShmemExpr(KernelOp kernel) {
+  std::string getDynShmemExpr(KernelOp kernel,
+                              llvm::ArrayRef<DimArgMeta> dimArgMeta = {}) {
     std::string expr;
     kernel.getBody().walk([&](coir::TensorAllocOp alloc) {
       if (!expr.empty()) return;
@@ -429,13 +489,23 @@ private:
       for (unsigned d = 0; d < tty.getRank(); ++d) {
         if (d > 0) ss << " * ";
         auto dim = tty.getShape()[d];
-        if (mlir::ShapedType::isDynamic(dim))
-          ss << "1";
-        else
+        if (mlir::ShapedType::isDynamic(dim)) {
+          bool found = false;
+          for (auto &da : dimArgMeta) {
+            if (da.dimIdx == (int64_t)d) {
+              ss << "p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+              found = true;
+              break;
+            }
+          }
+          if (!found) ss << "1";
+        } else {
           ss << dim;
+        }
       }
-      int64_t elemBits = tty.getElementType().getIntOrFloatBitWidth();
-      ss << " * " << (elemBits / 8);
+      unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
+      if (elemBits > 8)
+        ss << " * " << (elemBits / 8);
     });
     return expr;
   }
@@ -444,18 +514,33 @@ private:
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
     std::string devName = kernelDeviceName(symName);
-    unsigned numInputs = fnType.getNumInputs();
     unsigned numResults = fnType.getNumResults();
+    auto dimArgMeta = getDimArgs(kernel);
+    unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size();
+
+    auto streamName = getStreamName(kernel);
+
+    llvm::SmallVector<llvm::StringRef> hostElemHints;
+    if (auto attr =
+            kernel->getAttrOfType<mlir::ArrayAttr>("coir.host_elem_types"))
+      for (auto a : attr)
+        hostElemHints.push_back(cast<mlir::StringAttr>(a).getValue());
 
     if (numResults == 0) {
       os << "void " << symName << "(";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os << ", ";
-        os << emitChoreoType(fnType.getInput(i), true) << " p" << i;
+        llvm::StringRef hint =
+            (i < hostElemHints.size()) ? hostElemHints[i] : "";
+        os << emitChoreoType(fnType.getInput(i), true, hint) << " p" << i;
+      }
+      if (!streamName.empty()) {
+        if (numOrigInputs > 0) os << ", ";
+        os << "hipStream_t " << streamName;
       }
       os << ") {\n";
 
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (!tty) continue;
         std::string eType = emitElementType(tty.getElementType());
@@ -463,9 +548,9 @@ private:
         os << "  " << eType << "* p" << i << "__device = nullptr;\n";
         if (bytes < 0) {
           os << "  (void)hipMalloc(&p" << i << "__device, p" << i
-             << ".size() * sizeof(" << eType << "));\n";
+             << ".element_count() * sizeof(" << eType << "));\n";
           os << "  (void)hipMemcpy(p" << i << "__device, p" << i
-             << ".data(), p" << i << ".size() * sizeof(" << eType
+             << ".data(), p" << i << ".element_count() * sizeof(" << eType
              << "), hipMemcpyHostToDevice);\n";
         } else {
           os << "  (void)hipMalloc(&p" << i << "__device, " << bytes
@@ -476,22 +561,33 @@ private:
       }
 
       auto dims = getLaunchDims(kernel);
-      auto dynShmem = getDynShmemExpr(kernel);
-      emitEntryAssertions(kernel);
+      auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
+      emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
+      bool asyncLaunch = isAsyncLaunch(kernel);
 
       os << "  " << devName << "<<<" << dims.gridStr() << ", "
          << dims.blockStr();
-      if (!dynShmem.empty())
-        os << ", " << dynShmem;
+      if (!dynShmem.empty() || !streamName.empty())
+        os << ", " << (dynShmem.empty() ? "0" : dynShmem);
+      if (!streamName.empty())
+        os << ", " << streamName;
       os << ">>>(";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os << ", ";
         os << "p" << i << "__device";
       }
+      for (auto &da : dimArgMeta) {
+        os << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+      }
       os << ");\n";
-      os << "  (void)hipDeviceSynchronize();\n";
+      if (!asyncLaunch) {
+        if (!streamName.empty())
+          os << "  (void)hipStreamSynchronize(" << streamName << ");\n";
+        else
+          os << "  (void)hipDeviceSynchronize();\n";
+      }
 
-      for (unsigned i = 0; i < numInputs; ++i)
+      for (unsigned i = 0; i < numOrigInputs; ++i)
         os << "  (void)hipFree(p" << i << "__device);\n";
       os << "}\n\n";
       return;
@@ -500,16 +596,28 @@ private:
     auto resTy = dyn_cast<coir::TensorType>(fnType.getResult(0));
     if (!resTy) return;
 
-    os << emitChoreoType(fnType.getResult(0), false) << " " << symName << "(";
-    for (unsigned i = 0; i < numInputs; ++i) {
+    llvm::StringRef retHint;
+    if (auto attr =
+            kernel->getAttrOfType<mlir::StringAttr>("coir.host_ret_type"))
+      retHint = attr.getValue();
+
+    os << emitChoreoType(fnType.getResult(0), false, retHint) << " "
+       << symName << "(";
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os << ", ";
-      os << emitChoreoType(fnType.getInput(i), true) << " p" << i;
+      llvm::StringRef hint =
+          (i < hostElemHints.size()) ? hostElemHints[i] : "";
+      os << emitChoreoType(fnType.getInput(i), true, hint) << " p" << i;
+    }
+    if (!streamName.empty()) {
+      if (numOrigInputs > 0) os << ", ";
+      os << "hipStream_t " << streamName;
     }
     os << ") {\n";
 
     std::string eType = emitElementType(resTy.getElementType());
 
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (!tty) continue;
       std::string inputEType = emitElementType(tty.getElementType());
@@ -517,9 +625,9 @@ private:
       os << "  " << inputEType << "* p" << i << "__device = nullptr;\n";
       if (bytes < 0) {
         os << "  (void)hipMalloc(&p" << i << "__device, p" << i
-           << ".size() * sizeof(" << inputEType << "));\n";
+           << ".element_count() * sizeof(" << inputEType << "));\n";
         os << "  (void)hipMemcpy(p" << i << "__device, p" << i
-           << ".data(), p" << i << ".size() * sizeof(" << inputEType
+           << ".data(), p" << i << ".element_count() * sizeof(" << inputEType
            << "), hipMemcpyHostToDevice);\n";
       } else {
         os << "  (void)hipMalloc(&p" << i << "__device, " << bytes
@@ -541,41 +649,68 @@ private:
       ss << "}";
     }
     std::string choreoElem;
-    auto resElemTy = resTy.getElementType();
-    if (resElemTy.isInteger(8)) choreoElem = "choreo::u8";
-    else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
-    else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
-    else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
-    else if (resElemTy.isBF16()) choreoElem = "choreo::bf16";
-    else if (resElemTy.isF32()) choreoElem = "choreo::f32";
-    else if (resElemTy.isF16()) choreoElem = "choreo::f16";
-    else if (resElemTy.isF64()) choreoElem = "choreo::f64";
-    else choreoElem = "choreo::s32";
+    if (!retHint.empty()) {
+      choreoElem = "choreo::" + retHint.str();
+    } else {
+      auto resElemTy = resTy.getElementType();
+      if (resElemTy.isInteger(8)) choreoElem = "choreo::u8";
+      else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
+      else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
+      else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
+      else if (resElemTy.isBF16()) choreoElem = "choreo::bf16";
+      else if (resElemTy.isF32()) choreoElem = "choreo::f32";
+      else if (resElemTy.isF16()) choreoElem = "choreo::f16";
+      else if (resElemTy.isF64()) choreoElem = "choreo::f64";
+      else choreoElem = "choreo::s32";
+    }
 
     os << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
        << resTy.getShape().size() << ">(" << shapeStr << ");\n";
     os << "  " << eType << "* __result__device = nullptr;\n";
-    os << "  (void)hipMalloc(&__result__device, " << resBytes << "ULL);\n";
+    if (resBytes < 0) {
+      os << "  (void)hipMalloc(&__result__device, __result.element_count()"
+         << " * sizeof(" << eType << "));\n";
+    } else {
+      os << "  (void)hipMalloc(&__result__device, " << resBytes
+         << "ULL);\n";
+    }
 
     auto dims = getLaunchDims(kernel);
-    auto dynShmem = getDynShmemExpr(kernel);
-    emitEntryAssertions(kernel);
+    auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
+    emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
+    bool asyncLaunch = isAsyncLaunch(kernel);
 
     os << "  " << devName << "<<<" << dims.gridStr() << ", "
        << dims.blockStr();
-    if (!dynShmem.empty())
-      os << ", " << dynShmem;
+    if (!dynShmem.empty() || !streamName.empty())
+      os << ", " << (dynShmem.empty() ? "0" : dynShmem);
+    if (!streamName.empty())
+      os << ", " << streamName;
     os << ">>>(";
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os << ", ";
       os << "p" << i << "__device";
     }
+    for (auto &da : dimArgMeta) {
+      os << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+    }
     os << ", __result__device);\n";
-    os << "  (void)hipDeviceSynchronize();\n";
-    os << "  (void)hipMemcpy(__result.data(), __result__device, "
-       << resBytes << "ULL, hipMemcpyDeviceToHost);\n";
+    if (!asyncLaunch) {
+      if (!streamName.empty())
+        os << "  (void)hipStreamSynchronize(" << streamName << ");\n";
+      else
+        os << "  (void)hipDeviceSynchronize();\n";
+    }
+    if (resBytes < 0) {
+      os << "  (void)hipMemcpy(__result.data(), __result__device, "
+         << "__result.element_count() * sizeof(" << eType
+         << "), hipMemcpyDeviceToHost);\n";
+    } else {
+      os << "  (void)hipMemcpy(__result.data(), __result__device, "
+         << resBytes << "ULL, hipMemcpyDeviceToHost);\n";
+    }
 
-    for (unsigned i = 0; i < numInputs; ++i)
+    for (unsigned i = 0; i < numOrigInputs; ++i)
       os << "  (void)hipFree(p" << i << "__device);\n";
     os << "  (void)hipFree(__result__device);\n";
     os << "  return __result;\n";
@@ -680,14 +815,29 @@ private:
        << ", \"" << msg << "\");\n";
   }
 
-  std::string emitExprInHostScope(Value v, KernelOp kernel,
-                                  DenseMap<Value, std::string> &hostNames) {
+  std::string emitExprInHostScope(
+      Value v, KernelOp kernel, DenseMap<Value, std::string> &hostNames,
+      unsigned numOrigInputs, llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     auto it = hostNames.find(v);
     if (it != hostNames.end()) return it->second;
 
     if (auto arg = dyn_cast<BlockArgument>(v)) {
       if (arg.getOwner()->getParentOp() == kernel.getOperation()) {
-        std::string name = "p" + std::to_string(arg.getArgNumber());
+        unsigned idx = arg.getArgNumber();
+        if (idx < numOrigInputs) {
+          std::string name = "p" + std::to_string(idx);
+          hostNames[v] = name;
+          return name;
+        }
+        unsigned daIdx = idx - numOrigInputs;
+        if (daIdx < dimArgMeta.size()) {
+          auto &da = dimArgMeta[daIdx];
+          std::string name = "(int)p" + std::to_string(da.paramIdx) +
+                             ".shape()[" + std::to_string(da.dimIdx) + "]";
+          hostNames[v] = name;
+          return name;
+        }
+        std::string name = "/* arg" + std::to_string(idx) + " */";
         hostNames[v] = name;
         return name;
       }
@@ -706,9 +856,16 @@ private:
       return val;
     }
 
+    if (auto castOp = dyn_cast<arith::IndexCastOp>(defOp)) {
+      return emitExprInHostScope(castOp.getIn(), kernel, hostNames,
+                                 numOrigInputs, dimArgMeta);
+    }
+
     if (auto cmpOp = dyn_cast<arith::CmpIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       const char *pred = "==";
       switch (cmpOp.getPredicate()) {
       case arith::CmpIPredicate::eq: pred = "=="; break;
@@ -728,39 +885,50 @@ private:
     }
 
     if (auto addOp = dyn_cast<arith::AddIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(addOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(addOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(addOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(addOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       return (hostNames[v] = "(" + lhs + " + " + rhs + ")");
     }
     if (auto mulOp = dyn_cast<arith::MulIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(mulOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(mulOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(mulOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(mulOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       return (hostNames[v] = "(" + lhs + " * " + rhs + ")");
     }
     if (auto subOp = dyn_cast<arith::SubIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(subOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(subOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(subOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(subOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       return (hostNames[v] = "(" + lhs + " - " + rhs + ")");
     }
     if (auto divOp = dyn_cast<arith::DivSIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(divOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(divOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(divOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(divOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       return (hostNames[v] = "(" + lhs + " / " + rhs + ")");
     }
     if (auto remOp = dyn_cast<arith::RemSIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(remOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(remOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(remOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(remOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       return (hostNames[v] = "(" + lhs + " % " + rhs + ")");
     }
 
-    return "/* unsupported expr */";
+    return "/* unknown */";
   }
 
-  void emitEntryAssertions(KernelOp kernel) {
+  void emitEntryAssertions(KernelOp kernel, unsigned numOrigInputs,
+                           llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     DenseMap<Value, std::string> hostNames;
     for (auto &ea : entryAssertions) {
-      auto cond =
-          emitExprInHostScope(ea.op.getCondition(), kernel, hostNames);
+      auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames,
+                                      numOrigInputs, dimArgMeta);
       os << "  choreo::runtime_check(" << cond << ", \""
          << ea.op.getMessage() << "\");\n";
     }
@@ -769,13 +937,29 @@ private:
   void emitCall(CallOp op) {
     auto callee = op.getCallee().str();
     bool isExpr = op.getIsExpr() && *op.getIsExpr() && op.getResult();
+    bool isArith = op.getIsBif() && *op.getIsBif();
+
+    std::string funcName = callee;
+    if (isArith) {
+      static const llvm::StringMap<std::string> intrinsicMap = {
+          {"__fmaf", "fmaf"}, {"__frcp_rn", "__frcp_rn"}};
+      auto it = intrinsicMap.find(callee);
+      if (it != intrinsicMap.end()) {
+        funcName = it->second;
+      } else {
+        llvm::StringRef ref(callee);
+        if (ref.starts_with("__"))
+          ref = ref.drop_front(2);
+        funcName = ref.str();
+      }
+    }
 
     os << getIndent();
     if (isExpr) {
       auto resTy = op.getResult().getType();
       os << emitType(resTy) << " " << getName(op.getResult()) << " = ";
     }
-    os << callee;
+    os << funcName;
 
     if (auto tplArgs = op.getTemplateArgs()) {
       os << "<";

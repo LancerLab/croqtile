@@ -1,0 +1,18 @@
+// RUN: choreo -es -t hip -arch=gfx1030 %s -o - 2>&1 | FileCheck %s
+
+// Test: runtime_check for static shapes
+__co__ void fixed_shapes(f32 [4, 8] a, f32 [4, 8] b) {
+  parallel p by 4, q by 8
+    b.at(p, q) = a.at(p, q) * 2.0f;
+}
+// CHECK: runtime_check(a.shape()[0] == 4
+// CHECK: runtime_check(a.shape()[1] == 8
+// CHECK: runtime_check(b.shape()[0] == 4
+// CHECK: runtime_check(b.shape()[1] == 8
+
+// Test: runtime_check for symbolic dimensions (consistency check)
+__co__ void sym_shapes(f32 [M, N] a, f32 [N, K] b) {
+  parallel p by M, q by K
+    b.at(p, q) = a.at(p, 0) + b.at(p, q);
+}
+// CHECK: runtime_check(a.shape()[1] == b.shape()[0]
