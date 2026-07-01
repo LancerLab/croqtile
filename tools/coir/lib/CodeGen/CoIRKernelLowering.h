@@ -1,7 +1,7 @@
 //===- CoIRKernelLowering.h - Shared CoIR->GPU kernel lowering ----*- C++ -*-===//
 //
 // Base class for lowering CoIR kernel ops to MLIR GPU + memref + arith + SCF.
-// Shared by ConvertToGPU (NVPTX) and other target-specific passes.
+// Shared by target-specific ConvertTo* passes (NVPTX, etc.).
 //
 //===----------------------------------------------------------------------===//
 
@@ -70,12 +70,20 @@ protected:
   // -- Shared op converters --
   virtual void convertAlloc(mlir::OpBuilder &builder, mlir::Location loc,
                             TensorAllocOp alloc, KernelConvertCtx &ctx);
-  void convertLoadElem(mlir::OpBuilder &builder, mlir::Location loc,
-                       TensorLoadElemOp op, mlir::IRMapping &mapping);
-  void convertStoreElem(mlir::OpBuilder &builder, mlir::Location loc,
-                        TensorStoreElemOp op, mlir::IRMapping &mapping);
-  void convertReduceElem(mlir::OpBuilder &builder, mlir::Location loc,
-                         TensorReduceElemOp op, mlir::IRMapping &mapping);
+  virtual void convertLoadElem(mlir::OpBuilder &builder, mlir::Location loc,
+                               TensorLoadElemOp op, mlir::IRMapping &mapping);
+  virtual void convertStoreElem(mlir::OpBuilder &builder, mlir::Location loc,
+                                TensorStoreElemOp op, mlir::IRMapping &mapping);
+  virtual void convertReduceElem(mlir::OpBuilder &builder, mlir::Location loc,
+                                 TensorReduceElemOp op,
+                                 mlir::IRMapping &mapping);
+
+  // -- Rank-mismatch helpers --
+  mlir::Value flattenIfNeeded(mlir::OpBuilder &builder, mlir::Location loc,
+                              mlir::Value memref, unsigned numIndices);
+  mlir::Value getBaseMemRef(mlir::Value memref);
+  mlir::Value extractOffset(mlir::OpBuilder &builder, mlir::Location loc,
+                            mlir::Value memref);
   void convertElementCopy(mlir::OpBuilder &builder, mlir::Location loc,
                           ElementCopyOp op, mlir::IRMapping &mapping);
   virtual void convertDmaCopy(mlir::OpBuilder &builder, mlir::Location loc,
