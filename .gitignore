@@ -39,6 +39,9 @@ build-wasm/
 tools/co-web/web/co-web.js
 tools/co-web/web/co-web.wasm
 
+# co-py (Python bindings build artifacts)
+tools/co-py/src/croqtile/_core*.so
+
 # Generated logs and data artifacts
 *.log
 *.tsv

@@ -107,10 +107,10 @@ option(CHOREO_FAST_COMPILE_DEFAULT "Default --fast-compile to ON for faster nvcc
 
 # ============================
 # Project selection (semicolon-separated list, like LLVM_ENABLE_PROJECTS)
-# Available: choreo, coir, co-mock, co-web
+# Available: choreo, coir, co-mock, co-web, co-py
 # ============================
 set(CROQ_PROJECT "choreo;coir" CACHE STRING
-  "Semicolon-separated list of projects to build (choreo;coir;co-mock;co-web)")
+  "Semicolon-separated list of projects to build (choreo;coir;co-mock;co-web;co-py)")
 
 list(FIND CROQ_PROJECT "choreo" _idx)
 if(_idx GREATER_EQUAL 0)
@@ -138,6 +138,13 @@ if(_idx GREATER_EQUAL 0)
   set(CHOREO_BUILD_CO_WEB ON)
 else()
   set(CHOREO_BUILD_CO_WEB OFF)
+endif()
+
+list(FIND CROQ_PROJECT "co-py" _idx)
+if(_idx GREATER_EQUAL 0)
+  set(CHOREO_BUILD_CO_PY ON)
+else()
+  set(CHOREO_BUILD_CO_PY OFF)
 endif()
 
 # ============================

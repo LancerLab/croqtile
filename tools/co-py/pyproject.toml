@@ -1,0 +1,56 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "croqtile"
+version = "0.1.0"
+description = "Python bindings for the CroqTile data-movement DSL compiler"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+dependencies = ["numpy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Compilers",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "numpy"]
+dev = ["pytest>=7.0", "numpy", "build", "twine"]
+
+[project.urls]
+Homepage = "https://github.com/LancerLab/croqtile-python"
+Repository = "https://github.com/LancerLab/croqtile-python"
+Issues = "https://github.com/LancerLab/croqtile-python/issues"
+
+# ---------------------------------------------------------------------------
+# scikit-build-core configuration
+# ---------------------------------------------------------------------------
+[tool.scikit-build]
+cmake.build-type = "Release"
+wheel.packages = ["src/croq", "src/croqtile"]
+wheel.install-dir = "."
+
+[tool.scikit-build.cmake.define]
+CHOREO_BUILD_CO_PY = "ON"
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "e2e: end-to-end compilation test (requires croqtile binary)",
+    "gpu: requires GPU + nvcc for execution",
+]

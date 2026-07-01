@@ -11,3 +11,7 @@ endif()
 if(CHOREO_BUILD_COIR)
   add_subdirectory(coir)
 endif()
+
+if(CHOREO_BUILD_CO_PY)
+  add_subdirectory(co-py)
+endif()
