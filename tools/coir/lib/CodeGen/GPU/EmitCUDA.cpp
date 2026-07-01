@@ -205,8 +205,67 @@ private:
       emitElementCopy(elemCopy);
     else if (auto assertOp = dyn_cast<AssertOp>(op))
       emitAssert(assertOp);
+    else if (auto callOp = dyn_cast<coir::CallOp>(op))
+      emitCall(callOp);
     else
       CoIREmitterBase::emitOpFallback(op);
+  }
+
+  void emitCall(CallOp op) {
+    auto callee = op.getCallee().str();
+    bool isExpr = op.getIsExpr() && *op.getIsExpr() && op.getResult();
+    bool isArith = op.getIsBif() && *op.getIsBif();
+
+    std::string funcName = callee;
+    if (isArith) {
+      static const llvm::StringMap<std::string> intrinsicMap = {
+          {"__fmaf", "fmaf"}, {"__frcp_rn", "__frcp_rn"}};
+      auto it = intrinsicMap.find(callee);
+      if (it != intrinsicMap.end()) {
+        funcName = it->second;
+      } else {
+        llvm::StringRef ref(callee);
+        if (ref.starts_with("__"))
+          ref = ref.drop_front(2);
+        std::string stripped = ref.str();
+        if (stripped == "min" || stripped == "max")
+          funcName = "(choreo::nv_cute::numerics::" + stripped + ")";
+        else
+          funcName = "choreo::nv_cute::numerics::" + stripped;
+      }
+    }
+
+    os() << getIndent();
+    if (isExpr) {
+      auto resTy = op.getResult().getType();
+      os() << emitType(resTy) << " " << getName(op.getResult()) << " = ";
+    }
+    os() << funcName;
+
+    if (auto tplArgs = op.getTemplateArgs()) {
+      os() << "<";
+      bool first = true;
+      for (auto a : *tplArgs) {
+        if (!first) os() << ", ";
+        first = false;
+        os() << mlir::cast<mlir::StringAttr>(a).getValue().str();
+      }
+      os() << ">";
+    }
+
+    os() << "(";
+    bool first = true;
+    for (auto arg : op.getOperands_()) {
+      if (!first) os() << ", ";
+      first = false;
+      auto ty = arg.getType();
+      if (auto tty = mlir::dyn_cast<coir::TensorType>(ty))
+        os() << "(" << emitElementType(tty.getElementType()) << "*)"
+             << getName(arg);
+      else
+        os() << getName(arg);
+    }
+    os() << ");\n";
   }
 
   std::string emitWMMAFragType(coir::MMAFragType fragTy,
@@ -773,22 +832,24 @@ private:
         os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
       if (!streamName.empty())
         os() << ", " << streamName;
+      // Launch order must match kernel signature:
+      //   [input ptrs] [dim args] [TMA maps]
       os() << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << "p" << i << "__device";
       }
-      for (unsigned i = 0; i < numTMA; ++i) {
-        os() << ", __choreo_tma_" << i << "_tensor_map";
-      }
       for (auto &da : dimArgMeta) {
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+      }
+      for (unsigned i = 0; i < numTMA; ++i) {
+        os() << ", __choreo_tma_" << i << "_tensor_map";
       }
       os() << ");\n";
       if (!asyncLaunch) {
         if (!streamName.empty())
           os() << "  choreo::abend_true(cudaStreamSynchronize("
-               << streamName << "));\n";
+             << streamName << "));\n";
         else
           os() << "  cudaDeviceSynchronize();\n";
       }
@@ -925,17 +986,19 @@ private:
       os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
     if (!streamName.empty())
       os() << ", " << streamName;
+    // Launch order must match kernel signature:
+    //   [input ptrs] [dim args] [output ptrs] [TMA maps]
     os() << ">>>(";
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
       os() << "p" << i << "__device";
     }
+    for (auto &da : dimArgMeta) {
+      os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+    }
     os() << ", __result__device";
     for (unsigned i = 0; i < numTMA; ++i) {
       os() << ", __choreo_tma_" << i << "_tensor_map";
-    }
-    for (auto &da : dimArgMeta) {
-      os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
     }
     os() << ");\n";
     if (!asyncLaunch) {
