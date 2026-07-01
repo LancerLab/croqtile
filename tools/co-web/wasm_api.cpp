@@ -182,15 +182,17 @@ CompileResult compile(const std::string& source, const std::string& target,
   return runCompilation(source, tgt, allFlags);
 }
 
-CompileResult mockRun(const std::string& source) {
+CompileResult mockRun(const std::string& source,
+                      const std::string& target_name) {
   CompileResult result;
   result.success = false;
 
   resetGlobalState();
 
-  auto target = TargetRegistry::Create("cc");
+  std::string tgt = target_name.empty() ? "cc" : target_name;
+  auto target = TargetRegistry::Create(tgt);
   if (!target) {
-    result.errors = "Internal error: 'cc' target not available.";
+    result.errors = "Unknown target: '" + tgt + "'.";
     return result;
   }
   CCtx().SetTarget(std::move(target));
@@ -200,7 +202,7 @@ CompileResult mockRun(const std::string& source) {
   auto& reg = OptionRegistry::GetInstance();
   reg.Reset();
 
-  std::vector<std::string> argStrings = {"choreo", "-t", "cc", "-s", "-"};
+  std::vector<std::string> argStrings = {"choreo", "-t", tgt, "-s", "-"};
   std::vector<char*> argv;
   for (auto& s : argStrings) argv.push_back(const_cast<char*>(s.c_str()));
   CommandLine cl;

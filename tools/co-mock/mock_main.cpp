@@ -24,6 +24,7 @@ namespace {
 struct MockOptions {
   std::string input_file;
   std::string script_file;
+  std::string target = "cc";
   bool dump_ast = false;
   bool interactive = false;
   bool show_help = false;
@@ -37,6 +38,7 @@ void PrintUsage(const char* prog) {
             << "and control flow.\n"
             << "\n"
             << "Options:\n"
+            << "  -t <target>         Set hardware target (cc, cute, hip)\n"
             << "  -e, --dump-ast      Dump the AST after semantic analysis\n"
             << "  -i, --interactive   Start in interactive debugger mode\n"
             << "  -s, --script <file> Run debugger commands from a script\n"
@@ -71,6 +73,13 @@ bool ParseArgs(int argc, char* argv[], MockOptions& opts) {
       opts.dump_ast = true;
     } else if (arg == "-i" || arg == "--interactive") {
       opts.interactive = true;
+    } else if (arg == "-t") {
+      if (i + 1 < argc)
+        opts.target = argv[++i];
+      else {
+        std::cerr << "co-mock: -t requires a target name\n";
+        return false;
+      }
     } else if (arg == "-s" || arg == "--script") {
       if (i + 1 < argc)
         opts.script_file = argv[++i];
@@ -110,12 +119,13 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // Use "cc" as the backing target -- it provides the broadest CPU-like
-  // semantic model (parallel levels, memory capacities) without requiring
-  // any real hardware toolchain.
-  auto target = TargetRegistry::Create("cc");
+  auto target = TargetRegistry::Create(opts.target);
   if (!target) {
-    std::cerr << "co-mock: internal error: 'cc' target not available\n";
+    std::cerr << "co-mock: unknown target '" << opts.target << "'\n";
+    auto all = TargetRegistry::List();
+    std::cerr << "  available targets:";
+    for (auto& t : all) std::cerr << " " << t.name;
+    std::cerr << "\n";
     return 1;
   }
   CCtx().SetTarget(std::move(target));

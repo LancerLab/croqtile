@@ -1,0 +1,18 @@
+// RUN: co-mock -t cute %s 2>&1 | FileCheck %s
+// Test nested parallel blocks (block + thread) under cute target.
+// Uses 1 block to avoid non-deterministic output order from concurrent blocks.
+
+__co__ void test_nested() {
+  parallel b by 1 : block {
+    parallel t by 4 : thread {
+      frag s32[1, 1] val;
+      val.at(0, 0) = b * 100 + t;
+      println("val=", val.at(0, 0));
+    }
+  }
+}
+
+// CHECK-DAG: val= 0
+// CHECK-DAG: val= 1
+// CHECK-DAG: val= 2
+// CHECK-DAG: val= 3

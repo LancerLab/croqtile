@@ -1,0 +1,22 @@
+// RUN: co-mock -t cute %s 2>&1 | FileCheck %s
+// Test fragment declaration and access under cute target.
+
+__co__ void cute_frag_test() {
+  parallel t by 1 : thread {
+    frag s32[2, 3] f;
+    foreach i in 2
+      foreach j in 3
+        f.at(i, j) = i * 3 + j + 1;
+
+    foreach i in 2
+      foreach j in 3
+        println("f[", i, ",", j, "] =", f.at(i, j));
+  }
+}
+
+// CHECK: f[ 0 , 0 ] = 1
+// CHECK: f[ 0 , 1 ] = 2
+// CHECK: f[ 0 , 2 ] = 3
+// CHECK: f[ 1 , 0 ] = 4
+// CHECK: f[ 1 , 1 ] = 5
+// CHECK: f[ 1 , 2 ] = 6
