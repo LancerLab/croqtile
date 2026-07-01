@@ -179,6 +179,10 @@ searchTiledConfig(int64_t boxM, int64_t boxN, int64_t threadsCount,
       bool thisPred = false;
       int64_t effBoxM = boxM;
       if (boxM % thrM != 0) {
+        // Skip when boxM < thrM: ZFILL predication writes zeros into the
+        // same tile buffer that valid threads populated, corrupting data.
+        if (boxM < thrM)
+          continue;
         thisPred = true;
         effBoxM = ((boxM + thrM - 1) / thrM) * thrM;
       }
