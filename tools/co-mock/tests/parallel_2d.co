@@ -1,0 +1,30 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Test 2D parallel grid and matrix operations.
+
+__co__ void parallel_2d_test() {
+  s32[3, 3] grid;
+
+  parallel {i, j} by [3, 3]
+    grid.at(i, j) = i * 10 + j;
+
+  println(grid.at(0, 0));
+  println(grid.at(0, 2));
+  println(grid.at(1, 1));
+  println(grid.at(2, 2));
+
+  // Transpose
+  s32[3, 3] T;
+  parallel {i, j} by [3, 3]
+    T.at(j, i) = grid.at(i, j);
+
+  println(T.at(0, 1));
+  println(T.at(2, 0));
+}
+
+// CHECK: 0
+// CHECK: 2
+// CHECK: 11
+// CHECK: 22
+// CHECK: 10
+// CHECK: 2

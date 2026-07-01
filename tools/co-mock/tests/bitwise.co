@@ -1,0 +1,32 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Test bitwise and arithmetic operations.
+
+__co__ void bitwise_test() {
+  s32[4] data;
+  parallel p by 4
+    data.at(p) = (p + 1) * 5;
+
+  // AND, OR, shift
+  println(data.at(0) & 7);
+  println(data.at(1) | 1);
+  println(data.at(2) >> 1);
+  println(data.at(3) << 1);
+
+  // Modulo and division
+  println(17 % 5);
+  println(17 / 5);
+
+  // Ternary
+  s32 x = 7;
+  s32 r = (x > 5) ? 100 : 200;
+  println(r);
+}
+
+// CHECK: 5
+// CHECK: 11
+// CHECK: 7
+// CHECK: 40
+// CHECK: 2
+// CHECK: 3
+// CHECK: 100

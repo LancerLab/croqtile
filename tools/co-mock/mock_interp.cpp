@@ -122,6 +122,8 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
     ExecWait(*wait);
   else if (auto itb = dyn_cast<AST::InThreadsBlock>(stmt))
     ExecInThreads(*itb);
+  else if (auto ab = dyn_cast<AST::ApplyBlock>(stmt))
+    ExecApply(*ab);
   else if (isa<AST::NamedTypeDecl>(stmt)) {
   } // type alias, skip
   else {
@@ -1309,6 +1311,48 @@ void MockInterpreter::ExecMMA(AST::MMA& n) {
     // No-ops for single-threaded mock.
   } else {
     Warning(n.LOC(), "mock: unhandled MMA operation kind.");
+  }
+}
+
+// -----------------------------------------------------------------------
+// ApplyBlock -- element-wise iteration over a fragment's span
+// -----------------------------------------------------------------------
+void MockInterpreter::ExecApply(AST::ApplyBlock& n) {
+  std::string frag_name = n.SpanFragmentName();
+  if (!mem.Exists(frag_name)) {
+    Warning(n.LOC(), "mock: apply target '" + frag_name + "' not found.");
+    return;
+  }
+  auto& frag_val = mem.Lookup(frag_name);
+  if (frag_val.kind != Value::Pointer || !frag_val.alloc) {
+    Warning(n.LOC(), "mock: apply target must be a pointer/fragment.");
+    return;
+  }
+
+  auto& shape = frag_val.alloc->shape;
+  auto& iters = n.iterators;
+
+  if (iters.size() == 1 || shape.size() == 1) {
+    size_t total = frag_val.alloc->TotalElements();
+    for (size_t i = 0; i < total; ++i) {
+      mem.EnterScope();
+      mem.Define(iters[0], Value::MakeInt((int64_t)i));
+      ExecBlock(n.body);
+      mem.LeaveScope();
+      if (cf.kind != ControlFlow::None) break;
+    }
+  } else if (iters.size() >= 2 && shape.size() >= 2) {
+    for (size_t i = 0; i < shape[0]; ++i) {
+      for (size_t j = 0; j < shape[1]; ++j) {
+        mem.EnterScope();
+        mem.Define(iters[0], Value::MakeInt((int64_t)i));
+        mem.Define(iters[1], Value::MakeInt((int64_t)j));
+        ExecBlock(n.body);
+        mem.LeaveScope();
+        if (cf.kind != ControlFlow::None) break;
+      }
+      if (cf.kind != ControlFlow::None) break;
+    }
   }
 }
 

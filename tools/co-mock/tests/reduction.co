@@ -1,0 +1,40 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Test reduction patterns: sum, dot product, prefix sum.
+
+__co__ void reduction_test() {
+  s32[8] data;
+
+  parallel p by 8
+    data.at(p) = p + 1;
+
+  // Sum reduction
+  mutable int sum = 0;
+  foreach i in 8
+    sum = sum + data.at(i);
+  println("sum =", sum);
+
+  // Dot product
+  s32[4] a;
+  s32[4] b;
+  parallel p by 4 {
+    a.at(p) = p + 1;
+    b.at(p) = p * 2;
+  }
+
+  mutable int dot = 0;
+  foreach i in 4
+    dot = dot + a.at(i) * b.at(i);
+  println("dot =", dot);
+
+  // Prefix sum
+  s32[4] prefix;
+  prefix.at(0) = a.at(0);
+  foreach i in 3
+    prefix.at(i + 1) = prefix.at(i) + a.at(i + 1);
+  println("prefix[3] =", prefix.at(3));
+}
+
+// CHECK: sum = 36
+// CHECK: dot = 40
+// CHECK: prefix[3] = 10

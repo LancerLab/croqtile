@@ -1,0 +1,71 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Test apply block for element-wise fragment operations.
+
+__co__ void mma_apply_test() {
+  // GEMM then apply to double each element
+  s32[2, 3] lhs;
+  s32[3, 2] rhs;
+  s32[2, 2] out;
+
+  foreach i in 2
+    foreach j in 3
+      lhs.at(i, j) = i * 3 + j + 1;
+  foreach i in 3
+    foreach j in 2
+      rhs.at(i, j) = i + j * 3 + 1;
+
+  mc = mma.fill.s32 0;
+  ma = mma.load lhs;
+  mb = mma.load rhs;
+  mma.row.col mc, ma, mb;
+
+  apply {i, j} in mc.span {
+    mc.at(i, j) = mc.at(i, j) * 2;
+  }
+
+  mma.store mc, out;
+
+  // [[14,32],[32,77]] * 2 = [[28,64],[64,154]]
+  println("doubled GEMM:");
+  println(out.at(0, 0));
+  println(out.at(0, 1));
+  println(out.at(1, 0));
+  println(out.at(1, 1));
+
+  // Apply: add 100 to a GEMM result
+  s32[2, 2] A2;
+  s32[2, 2] B2;
+  s32[2, 2] out2;
+
+  foreach i in 2
+    foreach j in 2 {
+      A2.at(i, j) = i + j + 1;
+      B2.at(i, j) = i + j + 1;
+    }
+
+  mc2 = mma.fill.s32 0;
+  ma2 = mma.load A2;
+  mb2 = mma.load B2;
+  mma.row.col mc2, ma2, mb2;
+
+  apply {i, j} in mc2.span {
+    mc2.at(i, j) = mc2.at(i, j) + 100;
+  }
+
+  mma.store mc2, out2;
+
+  // A2=[[1,2],[2,3]], C=A2@A2=[[5,8],[8,13]], +100=[[105,108],[108,113]]
+  println("add 100:");
+  println(out2.at(0, 0));
+  println(out2.at(1, 1));
+}
+
+// CHECK: doubled GEMM:
+// CHECK: 28
+// CHECK: 64
+// CHECK: 64
+// CHECK: 154
+// CHECK: add 100:
+// CHECK: 105
+// CHECK: 113

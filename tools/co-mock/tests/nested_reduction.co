@@ -1,0 +1,35 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Row and column sum reduction over a 2D matrix.
+
+__co__ void nested_reduction_test() {
+  s32[3, 3] matrix;
+  s32[3] row_sum;
+  s32[3] col_sum;
+
+  parallel {i, j} by [3, 3]
+    matrix.at(i, j) = i * 3 + j + 1;
+
+  foreach i in 3 {
+    mutable int rsum = 0;
+    foreach j in 3
+      rsum = rsum + matrix.at(i, j);
+    row_sum.at(i) = rsum;
+  }
+
+  foreach j in 3 {
+    mutable int csum = 0;
+    foreach i in 3
+      csum = csum + matrix.at(i, j);
+    col_sum.at(j) = csum;
+  }
+
+  // matrix = [[1,2,3],[4,5,6],[7,8,9]]
+  // row_sum = [6, 15, 24]
+  // col_sum = [12, 15, 18]
+  println("row:", row_sum.at(0), row_sum.at(1), row_sum.at(2));
+  println("col:", col_sum.at(0), col_sum.at(1), col_sum.at(2));
+}
+
+// CHECK: row: 6 15 24
+// CHECK: col: 12 15 18
