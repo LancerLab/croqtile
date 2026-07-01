@@ -1,0 +1,58 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+__co__ void mma_basic_test() {
+  // A[2x3] @ B[3x2] = C[2x2], zero-initialized accumulator
+  s32[2, 3] lhs;
+  s32[3, 2] rhs;
+  s32[2, 2] out;
+
+  foreach i in 2
+    foreach j in 3
+      lhs.at(i, j) = i * 3 + j + 1;
+
+  foreach i in 3
+    foreach j in 2
+      rhs.at(i, j) = i * 2 + j + 1;
+
+  mc = mma.fill.s32 0;
+  ma = mma.load lhs;
+  mb = mma.load rhs;
+  mma.row.col mc, ma, mb;
+  mma.store mc, out;
+
+  // lhs = [[1,2,3],[4,5,6]], rhs = [[1,2],[3,4],[5,6]]
+  // out = [[22,28],[49,64]]
+  println(out.at(0, 0));
+  println(out.at(0, 1));
+  println(out.at(1, 0));
+  println(out.at(1, 1));
+
+  // Test accumulation: fill with 10, then GEMM adds on top
+  // A'=[[1,1],[1,1]], B'=[[1,1],[1,1]] => GEMM=[[2,2],[2,2]]
+  // acc starts at 10, result = 10 + 2 = 12
+  s32[2, 2] a2;
+  s32[2, 2] b2;
+  s32[2, 2] out2;
+
+  foreach i in 2
+    foreach j in 2 {
+      a2.at(i, j) = 1;
+      b2.at(i, j) = 1;
+    }
+
+  mc2 = mma.fill.s32 10;
+  ma2 = mma.load a2;
+  mb2 = mma.load b2;
+  mma.row.col mc2, ma2, mb2;
+  mma.store mc2, out2;
+
+  println(out2.at(0, 0));
+  println(out2.at(1, 1));
+}
+
+// CHECK: 22
+// CHECK: 28
+// CHECK: 49
+// CHECK: 64
+// CHECK: 12
+// CHECK: 12

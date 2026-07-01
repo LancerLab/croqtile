@@ -1,0 +1,39 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+
+// Larger 4x4 GEMM: C = 100*I + A*B where A=I (identity), B=1..16
+// Result diagonal = 100 + B[i,i]
+
+__co__ void mma_large_test() {
+  s32[4, 4] A;
+  s32[4, 4] B;
+  s32[4, 4] C;
+
+  foreach i in 4
+    foreach j in 4 {
+      s32 a_val = 0;
+      if (i == j) a_val = 1;
+      A.at(i, j) = a_val;
+      B.at(i, j) = i * 4 + j + 1;
+    }
+
+  mc = mma.fill.s32 100;
+  ma = mma.load A;
+  mb = mma.load B;
+  mma.row.col mc, ma, mb;
+  mma.store mc, C;
+
+  // C = 100 + I*B = 100 + B, so C[i,j] = 100 + B[i,j] only on diagonal
+  // Off-diagonal: C[0,1] = 100 + 0*2 + 0*6 + 0*10 + 0*14 = 100... wait,
+  // I*B = B, so C = 100 + B for all elements
+  println(C.at(0, 0));
+  println(C.at(0, 1));
+  println(C.at(1, 0));
+  println(C.at(3, 3));
+}
+
+// C = 100 + B
+// C[0,0] = 100+1=101, C[0,1]=100+2=102, C[1,0]=100+5=105, C[3,3]=100+16=116
+// CHECK: 101
+// CHECK: 102
+// CHECK: 105
+// CHECK: 116
