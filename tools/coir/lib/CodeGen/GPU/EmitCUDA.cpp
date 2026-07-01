@@ -17,6 +17,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassManager.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -34,6 +35,12 @@ namespace {
 class CUDAEmitter : public coir::CoIREmitterBase {
 public:
   CUDAEmitter() = default;
+
+  bool Lower(mlir::ModuleOp module) override {
+    mlir::PassManager pm(module.getContext());
+    pm.addPass(coir::createPlanDMACopyPass());
+    return mlir::succeeded(pm.run(module));
+  }
 
   void emitModule(ModuleOp module, llvm::raw_ostream &os) override {
     os_ = &os;
@@ -208,14 +215,13 @@ private:
     return result;
   }
 
+  DenseSet<Value> ctmmaValues;
+
   void prescanMMAFragRoles(mlir::Operation *root) {
     root->walk([&](MMAFillOp fill) {
       mmaFragRoles[fill.getResult()] = "accumulator";
     });
     root->walk([&](MMAExecOp exec) {
-      // Choreo tensors are always row-major in memory.
-      // The MMALayout attribute describes the mathematical interpretation,
-      // but WMMA load_matrix_sync always uses the physical memory layout.
       std::string lhsLayout = "row_major";
       std::string rhsLayout = "row_major";
       mmaFragRoles[exec.getLhs()] = "matrix_a";
@@ -224,6 +230,33 @@ private:
       mmaFragLayouts[exec.getRhs()] = rhsLayout;
       mmaFragRoles[exec.getAccumulator()] = "accumulator";
       mmaFragRoles[exec.getResult()] = "accumulator";
+      // Track all values that feed into CTMMA execs.
+      if (exec.getMmaAtomNameAttr()) {
+        ctmmaValues.insert(exec.getLhs());
+        ctmmaValues.insert(exec.getRhs());
+        ctmmaValues.insert(exec.getAccumulator());
+        ctmmaValues.insert(exec.getResult());
+      }
+    });
+    // Propagate CTMMA markers through foreach iter_args: if the exec result
+    // is yielded as a foreach iter_arg, the initial value (fill) is also CTMMA.
+    root->walk([&](coir::ForeachOp foreach) {
+      auto iterArgs = foreach.getIterArgs();
+      auto &bodyRegion = foreach.getBody();
+      auto *bodyBlock = &bodyRegion.front();
+      if (bodyBlock->getNumArguments() == 0) return;
+      auto yieldOp = dyn_cast<coir::YieldOp>(bodyBlock->getTerminator());
+      if (!yieldOp) return;
+      auto yieldVals = yieldOp.getOperands();
+      for (unsigned i = 0; i < yieldVals.size() && i < iterArgs.size(); ++i) {
+        if (ctmmaValues.count(yieldVals[i]) ||
+            ctmmaValues.count(bodyBlock->getArgument(i + 1))) {
+          ctmmaValues.insert(iterArgs[i]);
+          ctmmaValues.insert(bodyBlock->getArgument(i + 1));
+          ctmmaValues.insert(yieldVals[i]);
+          ctmmaValues.insert(foreach.getResult(i));
+        }
+      }
     });
   }
 
@@ -979,10 +1012,40 @@ private:
     os() << getIndent() << "}\n";
   }
 
+  bool isCTMMAExec(MMAExecOp exec) {
+    return exec.getMmaAtomNameAttr() != nullptr;
+  }
+
+  // Find the MMAExecOp that uses this value (through the ctmmaValues set)
+  MMAExecOp findCTMMAExec(mlir::Operation *root) {
+    MMAExecOp found = nullptr;
+    root->walk([&](MMAExecOp exec) {
+      if (exec.getMmaAtomNameAttr())
+        found = exec;
+    });
+    return found;
+  }
+
+  bool isValueCTMMA(Value v) {
+    return ctmmaValues.count(v) > 0;
+  }
+
   void emitMMAFill(MMAFillOp op) override {
     auto fragTy = cast<coir::MMAFragType>(op.getResult().getType());
     std::string name = getName(op.getResult());
     mmaAccumulators.insert(op.getResult());
+
+    if (isValueCTMMA(op.getResult())) {
+      auto exec = findCTMMAExec(op->getParentOfType<KernelOp>());
+      int64_t regNum = (exec && exec.getRegNumDAttr()) ? exec.getRegNumDAttr().getInt() : 4;
+      std::string elemTy = fragTy.getElementType().isF32() ? "float" : "int32_t";
+      os() << getIndent() << elemTy << " " << name << "[" << regNum << "];\n";
+      os() << getIndent() << "for (int __i = 0; __i < " << regNum
+           << "; ++__i) " << name << "[__i] = " << getName(op.getValue())
+           << ";\n";
+      return;
+    }
+
     os() << getIndent() << emitWMMAFragType(fragTy, "accumulator")
        << " " << name << ";\n";
     os() << getIndent() << "wmma::fill_fragment(" << name << ", "
@@ -1004,6 +1067,23 @@ private:
   void emitMMALoad(MMALoadOp op) override {
     auto fragTy = cast<coir::MMAFragType>(op.getResult().getType());
     std::string name = getName(op.getResult());
+
+    if (isValueCTMMA(op.getResult())) {
+      auto exec = findCTMMAExec(op->getParentOfType<KernelOp>());
+      if (exec) {
+        std::string atomName = exec.getMmaAtomNameAttr().getValue().str();
+        auto roleIt = mmaFragRoles.find(op.getResult());
+        std::string role = roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
+        std::string suffix = (role == "matrix_a") ? "a" : "b";
+
+        std::string srcTensor = emitCuteTensor(op.getSource(),
+                                               "_mma_ld_" + std::to_string(nextId++));
+        os() << getIndent() << "auto " << name << " = load_fragment_" << suffix
+             << "<" << atomName << ">(" << srcTensor << ");\n";
+        return;
+      }
+    }
+
     auto roleIt = mmaFragRoles.find(op.getResult());
     std::string role = roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
     auto layoutIt = mmaFragLayouts.find(op.getResult());
@@ -1018,6 +1098,37 @@ private:
   void emitMMAExec(MMAExecOp op) override {
     std::string acc = getName(op.getAccumulator());
     valueNames[op.getResult()] = acc;
+
+    if (isCTMMAExec(op)) {
+      int64_t regD = op.getRegNumDAttr().getInt();
+      int64_t regA = op.getRegNumAAttr().getInt();
+      int64_t regB = op.getRegNumBAttr().getInt();
+      std::string lhs = getName(op.getLhs());
+      std::string rhs = getName(op.getRhs());
+
+      // Get the full CuTe FMA atom name from the fma_atom attribute
+      std::string fmaAtom;
+      if (auto attr = op->getAttrOfType<StringAttr>("fma_atom"))
+        fmaAtom = attr.getValue().str();
+      else
+        fmaAtom = "cute::SM80_16x8x8_F32F16F16F32_TN";
+
+      // Emit: cute::SM80_16x8x8_F32F16F16F32_TN::fma(d[0],..., a[0],..., b[0],..., d[0],...);
+      os() << getIndent() << fmaAtom << "::fma(";
+      for (int64_t i = 0; i < regD; ++i)
+        os() << acc << "[" << i << "], ";
+      for (int64_t i = 0; i < regA; ++i)
+        os() << lhs << "[" << i << "], ";
+      for (int64_t i = 0; i < regB; ++i)
+        os() << rhs << "[" << i << "], ";
+      for (int64_t i = 0; i < regD; ++i) {
+        os() << acc << "[" << i << "]";
+        if (i < regD - 1) os() << ", ";
+      }
+      os() << ");\n";
+      return;
+    }
+
     os() << getIndent() << "wmma::mma_sync(" << acc << ", "
        << getName(op.getLhs()) << ", " << getName(op.getRhs()) << ", "
        << acc << ");\n";
@@ -1026,6 +1137,56 @@ private:
   unsigned mmaStoreCvtIdx = 0;
 
   void emitMMAStore(MMAStoreOp op) override {
+    // CTMMA store: use store_fragment_d helper from choreo_cute.h
+    auto fragVal = op.getFragment();
+    if (isValueCTMMA(fragVal)) {
+      auto exec = findCTMMAExec(op->getParentOfType<KernelOp>());
+      if (exec) {
+        std::string atomName = exec.getMmaAtomNameAttr().getValue().str();
+        // For CTMMA, the actual output tile is MxN (derived from operand shapes)
+        auto lhsTy = mlir::cast<coir::MMAFragType>(exec.getLhs().getType());
+        auto rhsTy = mlir::cast<coir::MMAFragType>(exec.getRhs().getType());
+        int64_t mmaM = lhsTy.getShape()[0];
+        int64_t mmaN = rhsTy.getShape().size() > 1 ? rhsTy.getShape()[1] : rhsTy.getShape()[0];
+        std::string suffix = "_mma_st_" + std::to_string(nextId++);
+        // Emit tensor with correct MxN shape (override the fragment type's shape)
+        auto dstTy = mlir::cast<coir::TensorType>(op.getDest().getType());
+        std::string elemTy = emitElementType(dstTy.getElementType());
+        int32_t ms = dstTy.getMemorySpace();
+        int64_t ldm = dstTy.getShape().size() > 1 ? dstTy.getStrides().empty()
+            ? dstTy.getShape()[1] : dstTy.getStrides()[0] : 1;
+        // Get leading dim from parent tensor shape
+        auto srcOp = op.getDest().getDefiningOp();
+        if (auto tileOp = mlir::dyn_cast_or_null<coir::TensorTileOp>(srcOp)) {
+          auto parentTy = mlir::cast<coir::TensorType>(tileOp.getSource().getType());
+          if (parentTy.getShape().size() > 1)
+            ldm = parentTy.getShape()[1];
+        }
+        std::string shapeName = "__shape" + suffix;
+        std::string strideName = "__stride" + suffix;
+        std::string layoutName = "__layout" + suffix;
+        std::string tensorName = "__tensor" + suffix;
+        os() << getIndent() << "auto " << shapeName
+             << " = cute::make_shape(cute::Int<" << mmaM << ">{}, cute::Int<" << mmaN << ">{});\n";
+        os() << getIndent() << "auto " << strideName
+             << " = cute::make_stride(cute::Int<" << ldm << ">{}, cute::Int<1>{});\n";
+        os() << getIndent() << "auto " << layoutName
+             << " = cute::make_layout(" << shapeName << ", " << strideName << ");\n";
+        std::string ptrName = getName(op.getDest());
+        os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
+        if (ms <= 0)
+          os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)" << ptrName << ")";
+        else if (ms == 1)
+          os() << "cute::make_smem_ptr((" << elemTy << "*)" << ptrName << ")";
+        else
+          os() << "((" << elemTy << "*)" << ptrName << ")";
+        os() << ", " << layoutName << ");\n";
+        os() << getIndent() << "store_fragment_d<" << atomName << ">("
+             << tensorName << ", " << getName(fragVal) << ");\n";
+        return;
+      }
+    }
+
     int64_t ldm = getSourceLeadingDim(op.getDest());
     auto fragTy = cast<coir::MMAFragType>(op.getFragment().getType());
     auto dstTy = cast<coir::TensorType>(op.getDest().getType());
@@ -1169,9 +1330,11 @@ private:
     std::string elemTy = tty ? emitElementType(tty.getElementType()) : "int";
     std::string ptrName = getName(v);
     os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
-    if (ms == 0)
+    if (ms <= 0)
       os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
          << ptrName << ")";
+    else if (ms == 1)
+      os() << "cute::make_smem_ptr((" << elemTy << "*)" << ptrName << ")";
     else
       os() << "((" << elemTy << "*)" << ptrName << ")";
     os() << ", " << layoutName << ");\n";
@@ -1196,9 +1359,11 @@ private:
 
     std::string elemTy = emitElementType(origType.getElementType());
     os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
-    if (ms == 0)
+    if (ms <= 0)
       os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
          << ptrExpr << ")";
+    else if (ms == 1)
+      os() << "cute::make_smem_ptr((" << elemTy << "*)" << ptrExpr << ")";
     else
       os() << "((" << elemTy << "*)" << ptrExpr << ")";
     os() << ", " << layoutName << ");\n";
@@ -1277,6 +1442,12 @@ private:
     unsigned descIdx = it->second;
     auto &desc = descInfos[descIdx];
     dmaTokens.insert(op.getDone());
+
+    // Check if PlanDMACopy stamped tiled copy attrs
+    if (op.getThrLayout()) {
+      emitTiledCopy(op, desc);
+      return;
+    }
 
     // Collect runtime offsets if any
     SmallVector<Value, 4> offsets;
@@ -1392,6 +1563,114 @@ private:
       os() << getIndent() << "cde::cp_async_bulk_wait_group_read<0>();\n";
       decIndent();
       os() << getIndent() << "}\n";
+    }
+  }
+
+  void emitTiledCopy(DMAInvokeOp op, const DescInfo &desc) {
+    auto thrLayoutArr = *op.getThrLayout();
+    auto valLayoutArr = *op.getValLayout();
+    auto atomStr = op.getCopyAtomAttr().getValue().str();
+    bool needPred = op.getNeedPredAttr() && op.getNeedPredAttr().getValue();
+    bool swizzle = op.getSwizzleAttr() && op.getSwizzleAttr().getValue();
+
+    int64_t thrRows = thrLayoutArr[0];
+    int64_t thrCols = thrLayoutArr[1];
+    int64_t valRows = valLayoutArr[0];
+    int64_t valCols = valLayoutArr[1];
+
+    auto constOp = desc.constDescResult.getDefiningOp<DMAConstDescOp>();
+    if (!constOp) {
+      os() << getIndent() << "// tiled copy: no const desc, fallback\n";
+      os() << getIndent() << "__syncthreads();\n";
+      return;
+    }
+
+    // Resolve element type name for atom template parameter
+    auto tileType = desc.isLoad ? desc.dstType : desc.srcType;
+    std::string elemTy = emitElementType(tileType.getElementType());
+
+    // Substitute ELEM placeholder in atom name
+    std::string atom = atomStr;
+    size_t pos = atom.find("ELEM");
+    while (pos != std::string::npos) {
+      atom.replace(pos, 4, elemTy);
+      pos = atom.find("ELEM", pos + elemTy.size());
+    }
+
+    // Build source and destination CuTe tensors
+    unsigned id = nextId++;
+    std::string suffix = "_tc_" + std::to_string(id);
+
+    Value srcVal = constOp.getSource();
+    Value dstVal = constOp.getDest();
+
+    // Handle runtime offsets (sliced pointer) if present
+    Value descV = op.getDesc();
+    SmallVector<Value, 4> offsets;
+    auto offsIt = descRuntimeOffsets.find(descV);
+    if (offsIt != descRuntimeOffsets.end())
+      offsets = offsIt->second;
+
+    std::string srcTensor, dstTensor;
+    if (!offsets.empty()) {
+      Value globalVal = desc.isLoad ? srcVal : dstVal;
+      Value localVal = desc.isLoad ? dstVal : srcVal;
+      auto globalTy = cast<coir::TensorType>(globalVal.getType());
+      auto localTy = cast<coir::TensorType>(localVal.getType());
+      int64_t tileElems = 1;
+      for (auto d : localTy.getShape()) tileElems *= d;
+
+      std::string ptrName = getName(globalVal);
+      std::string offExpr = getName(offsets[0]);
+      if (tileElems > 1)
+        offExpr += " * " + std::to_string(tileElems);
+      std::string slicedPtr = "__tc_ptr_" + std::to_string(id);
+      os() << getIndent() << emitElementType(globalTy.getElementType())
+         << "* " << slicedPtr << " = ("
+         << emitElementType(globalTy.getElementType()) << "*)"
+         << ptrName << " + " << offExpr << ";\n";
+
+      if (desc.isLoad) {
+        srcTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
+                                          localTy.getShape(), suffix + "_s");
+        dstTensor = emitCuteTensor(localVal, suffix + "_d");
+      } else {
+        srcTensor = emitCuteTensor(localVal, suffix + "_s");
+        dstTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
+                                          localTy.getShape(), suffix + "_d");
+      }
+    } else {
+      srcTensor = emitCuteTensor(srcVal, suffix + "_s");
+      dstTensor = emitCuteTensor(dstVal, suffix + "_d");
+    }
+
+    // Emit the choreo::tiled_copy call
+    os() << getIndent() << "choreo::tiled_copy<" << atom << ", "
+       << thrRows << ", " << thrCols << ", "
+       << valRows << ", " << valCols << ", "
+       << (swizzle ? "true" : "false") << ", "
+       << (needPred ? "true" : "false") << ", false>("
+       << srcTensor << ", " << dstTensor << ", ";
+
+    if (needPred) {
+      auto predArr = *op.getPrediction();
+      os() << "[&](const auto& __coord) { return cute::elem_less(__coord, "
+              "cute::make_shape(cute::Int<"
+           << predArr[0] << ">{}, cute::Int<"
+           << predArr[1] << ">{})); }";
+    } else {
+      os() << "[](const auto&) { return true; }";
+    }
+    os() << ");\n";
+
+    // Emit synchronization: cp.async fence/wait for cp_async atoms, else syncthreads
+    bool isCpAsync = atom.find("CP_ASYNC") != std::string::npos;
+    if (isCpAsync) {
+      os() << getIndent() << "cute::cp_async_fence();\n";
+      os() << getIndent() << "cute::cp_async_wait<0>();\n";
+      os() << getIndent() << "__syncthreads();\n";
+    } else {
+      os() << getIndent() << "__syncthreads();\n";
     }
   }
 

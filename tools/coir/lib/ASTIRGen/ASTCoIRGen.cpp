@@ -1839,20 +1839,28 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
       }
     }
 
-    auto nodeType = n.GetType();
+    // Infer tile shape from ChunkAt's block shape (preferred) or AST type.
     llvm::SmallVector<int64_t> tileShape;
-    if (auto sty = dyn_cast<SpannedType>(nodeType)) {
-      auto &mdspan = sty->s_type->value;
-      if (mdspan.IsValid())
-        for (auto &v : mdspan.Value())
-          tileShape.push_back(EvalToInt(v));
+    if (chunkAt->GetBlockShape().IsValid()) {
+      auto posVals = chunkAt->GetBlockShape().PosValList();
+      if (posVals)
+        for (auto d : *posVals) tileShape.push_back(static_cast<int64_t>(d));
+    }
+    if (tileShape.empty()) {
+      auto nodeType = n.GetType();
+      if (auto sty = dyn_cast<SpannedType>(nodeType)) {
+        auto &mdspan = sty->s_type->value;
+        if (mdspan.IsValid())
+          for (auto &v : mdspan.Value())
+            tileShape.push_back(EvalToInt(v));
+      }
     }
     if (tileShape.empty())
       tileShape = {16, 16};
 
     auto tileTy = coir::TensorType::get(
         &IRContext(), srcTy.getElementType(), tileShape,
-        static_cast<int32_t>(coir::TensorMemorySpace::Shared),
+        srcTy.getMemorySpace(),
         llvm::ArrayRef<int64_t>{});
     auto tileOp = builder.create<coir::TensorTileOp>(
         loc, tileTy, srcVal, idxVals);
@@ -1860,7 +1868,7 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     auto fragTy = coir::MMAFragType::get(
         &IRContext(), srcTy.getElementType(), tileShape);
     auto loadOp = builder.create<coir::MMALoadOp>(
-        loc, fragTy, tileOp.getResult());
+        loc, fragTy, tileOp.getResult(), /*k_dim=*/nullptr);
 
     std::string fragName;
     if (op.IsLoadR()) {
@@ -1897,7 +1905,10 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     auto layoutAttr = coir::MMALayoutAttr::get(&IRContext(), layout);
 
     auto execOp = builder.create<coir::MMAExecOp>(
-        loc, accVal.getType(), accVal, lhsVal, rhsVal, layoutAttr);
+        loc, accVal.getType(), accVal, lhsVal, rhsVal, layoutAttr,
+        /*k_dim=*/nullptr, /*mma_atom_name=*/nullptr,
+        /*reg_num_a=*/nullptr, /*reg_num_b=*/nullptr,
+        /*reg_num_d=*/nullptr);
 
     std::string accName = AST::FragName(accExpr);
     MapValue(accName, execOp.getResult());
@@ -1942,8 +1953,18 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     }
 
     auto fragTy = mlir::cast<coir::MMAFragType>(fragVal.getType());
+    // Prefer the actual block shape from ChunkAt over the fragment type shape
+    llvm::SmallVector<int64_t> storeShape;
+    if (dstChunk->GetBlockShape().IsValid()) {
+      auto posVals = dstChunk->GetBlockShape().PosValList();
+      if (posVals)
+        for (auto d : *posVals) storeShape.push_back(static_cast<int64_t>(d));
+    }
+    if (storeShape.empty())
+      storeShape.assign(fragTy.getShape().begin(), fragTy.getShape().end());
+
     auto tileTy = coir::TensorType::get(
-        &IRContext(), dstTy.getElementType(), fragTy.getShape(),
+        &IRContext(), dstTy.getElementType(), storeShape,
         dstTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
     auto tileOp = builder.create<coir::TensorTileOp>(
         loc, tileTy, dstVal, idxVals);
