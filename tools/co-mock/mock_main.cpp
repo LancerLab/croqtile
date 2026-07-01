@@ -38,7 +38,7 @@ void PrintUsage(const char* prog) {
             << "and control flow.\n"
             << "\n"
             << "Options:\n"
-            << "  -t <target>         Set hardware target (cc, cute, hip, topscc)\n"
+            << "  -t <target>         Set hardware target (cc, cute, hip)\n"
             << "  -e, --dump-ast      Dump the AST after semantic analysis\n"
             << "  -i, --interactive   Start in interactive debugger mode\n"
             << "  -s, --script <file> Run debugger commands from a script\n"

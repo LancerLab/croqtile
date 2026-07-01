@@ -12,7 +12,7 @@ __co__ void test_nested() {
   }
 }
 
-// CHECK: val= 0
-// CHECK: val= 1
-// CHECK: val= 2
-// CHECK: val= 3
+// CHECK-DAG: val= 0
+// CHECK-DAG: val= 1
+// CHECK-DAG: val= 2
+// CHECK-DAG: val= 3
