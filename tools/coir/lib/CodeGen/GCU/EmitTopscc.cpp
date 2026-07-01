@@ -1547,6 +1547,43 @@ private:
     std::string qualifier = getAllocQualifier(tensorTy);
     os() << getIndent() << qualifier << emitType(tensorTy.getElementType())
        << " " << name << "[" << totalElems << "];\n";
+
+    if (auto initAttr = op.getInit()) {
+      auto ms = tensorTy.getMemorySpace();
+      bool isLocal =
+          (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local));
+      std::string space = isLocal ? "tops::Private" : "tops::Shared";
+      std::string initVal;
+      mlir::TypedAttr attr = *initAttr;
+      if (auto ia = mlir::dyn_cast<mlir::IntegerAttr>(attr)) {
+        initVal = std::to_string(ia.getInt());
+      } else if (auto fa = mlir::dyn_cast<mlir::FloatAttr>(attr)) {
+        llvm::SmallString<16> buf;
+        fa.getValue().toString(buf);
+        initVal = std::string(buf);
+        if (initVal.find('.') == std::string::npos &&
+            initVal.find('e') == std::string::npos)
+          initVal += ".0";
+        if (tensorTy.getElementType().isF16() ||
+            tensorTy.getElementType().isBF16())
+          initVal = "(" + emitType(tensorTy.getElementType()) + ")" + initVal;
+      }
+      std::string mds = "tops::mdspan(" + space + ", (" +
+                        emitType(tensorTy.getElementType()) + "*)" + name;
+      for (auto d : tensorTy.getShape())
+        mds += ", " + std::to_string(d);
+      mds += ")";
+
+      os() << getIndent() << "{\n";
+      incIndent();
+      os() << getIndent() << getDTEType() << " " << name << "__init;\n";
+      if (needsExplicitInit())
+        os() << getIndent() << name << "__init.init();\n";
+      os() << getIndent() << "tops::memset(" << name << "__init, "
+           << mds << ", " << initVal << ");\n";
+      decIndent();
+      os() << getIndent() << "}\n";
+    }
   }
 
   void emitBarrier(BarrierOp op) override {

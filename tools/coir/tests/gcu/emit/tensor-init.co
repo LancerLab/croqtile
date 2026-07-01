@@ -1,0 +1,17 @@
+// RUN: cocc -t topscc -es %s -o - | FileCheck %s
+//
+// Verify tensor brace-initializer emits tops::memset with DTE context.
+
+// CHECK: __local__ int [[BUF:v[0-9]+]][128];
+// CHECK-NEXT: {
+// CHECK-NEXT:   tops_dte_ctx_t [[BUF]]__init;
+// CHECK-NEXT:   [[BUF]]__init.init();
+// CHECK-NEXT:   tops::memset([[BUF]]__init, tops::mdspan(tops::Private, (int*)[[BUF]], 32, 4), -5);
+// CHECK-NEXT: }
+
+__co__ void test_memset(s32[32, 4] out) {
+  parallel by 1 {
+    local s32[32, 4] buf{-5};
+    dma.copy buf => out;
+  }
+}

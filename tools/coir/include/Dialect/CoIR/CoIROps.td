@@ -238,11 +238,17 @@ def TensorAllocOp : CoIR_Op<"tensor.alloc", [NoMemoryEffect]> {
     provided for each `?` dimension, in left-to-right order, following
     MLIR's tensor dialect convention.
 
+    An optional `init` attribute specifies a scalar fill value
+    (e.g. `init = -5 : i32`) that the runtime uses to memset
+    the buffer immediately after allocation.
+
     Example:
       %0 = coir.tensor.alloc : !coir.tensor<128x64xf16, shared>
       %1 = coir.tensor.alloc(%K, %N) : !coir.tensor<?x?xi8, shared>
+      %2 = coir.tensor.alloc init -5 : i32 : !coir.tensor<32x4xi32, local>
   }];
-  let arguments = (ins Variadic<Index>:$dynamicDims);
+  let arguments = (ins Variadic<Index>:$dynamicDims,
+                       OptionalAttr<TypedAttrInterface>:$init);
   let results = (outs CoIR_TensorTypeC:$result);
 
   let hasCustomAssemblyFormat = 1;

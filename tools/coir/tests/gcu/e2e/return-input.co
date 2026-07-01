@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GCU
-// XFAIL: * CoIR ASTIRGen does not handle tensor initializer {val} yet
 // RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 //
 // Return input tensor after device modification.
