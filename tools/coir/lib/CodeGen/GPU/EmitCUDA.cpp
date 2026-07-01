@@ -796,9 +796,9 @@ private:
         os() << "  " << eType << "* p" << i << "__device = nullptr;\n";
         if (bytes < 0) {
           os() << "  cudaMalloc(&p" << i << "__device, p" << i
-             << ".size() * sizeof(" << eType << "));\n";
+             << ".element_count() * sizeof(" << eType << "));\n";
           os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), p"
-             << i << ".size() * sizeof(" << eType
+             << i << ".element_count() * sizeof(" << eType
              << "), cudaMemcpyHostToDevice);\n";
         } else {
           os() << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
@@ -821,7 +821,7 @@ private:
       }
 
       auto dims = getLaunchDims(kernel);
-      emitEntryAssertions(kernel);
+      emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
       auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
       auto streamName = getStreamName(kernel);
       bool asyncLaunch = isAsyncLaunch(kernel);
@@ -893,9 +893,9 @@ private:
       os() << "  " << inputEType << "* p" << i << "__device = nullptr;\n";
       if (bytes < 0) {
         os() << "  cudaMalloc(&p" << i << "__device, p" << i
-           << ".size() * sizeof(" << inputEType << "));\n";
+           << ".element_count() * sizeof(" << inputEType << "));\n";
         os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), p"
-           << i << ".size() * sizeof(" << inputEType
+           << i << ".element_count() * sizeof(" << inputEType
            << "), cudaMemcpyHostToDevice);\n";
       } else {
         os() << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
@@ -956,8 +956,8 @@ private:
        << resTy.getShape().size() << ">(" << shapeStr << ");\n";
     os() << "  " << eType << "* __result__device = nullptr;\n";
     if (resBytes < 0) {
-      os() << "  cudaMalloc(&__result__device, __result.size() * sizeof("
-         << eType << "));\n";
+      os() << "  cudaMalloc(&__result__device, __result.element_count()"
+         << " * sizeof(" << eType << "));\n";
     } else {
       os() << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
     }
@@ -976,7 +976,7 @@ private:
     }
 
     auto dims = getLaunchDims(kernel);
-    emitEntryAssertions(kernel);
+    emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
     auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
     bool asyncLaunch = isAsyncLaunch(kernel);
 
@@ -1010,7 +1010,7 @@ private:
     }
     if (resBytes < 0) {
       os() << "  cudaMemcpy(__result.data(), __result__device, "
-         << "__result.size() * sizeof(" << eType
+         << "__result.element_count() * sizeof(" << eType
          << "), cudaMemcpyDeviceToHost);\n";
     } else {
       os() << "  cudaMemcpy(__result.data(), __result__device, "
@@ -1037,14 +1037,29 @@ private:
        << ", \"" << msg << "\");" << "\n";
   }
 
-  std::string emitExprInHostScope(Value v, KernelOp kernel,
-                                  DenseMap<Value, std::string> &hostNames) {
+  std::string emitExprInHostScope(
+      Value v, KernelOp kernel, DenseMap<Value, std::string> &hostNames,
+      unsigned numOrigInputs, llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     auto it = hostNames.find(v);
     if (it != hostNames.end()) return it->second;
 
     if (auto arg = dyn_cast<BlockArgument>(v)) {
       if (arg.getOwner()->getParentOp() == kernel.getOperation()) {
-        std::string name = "p" + std::to_string(arg.getArgNumber());
+        unsigned idx = arg.getArgNumber();
+        if (idx < numOrigInputs) {
+          std::string name = "p" + std::to_string(idx);
+          hostNames[v] = name;
+          return name;
+        }
+        unsigned daIdx = idx - numOrigInputs;
+        if (daIdx < dimArgMeta.size()) {
+          auto &da = dimArgMeta[daIdx];
+          std::string name = "(int)p" + std::to_string(da.paramIdx) +
+                             ".shape()[" + std::to_string(da.dimIdx) + "]";
+          hostNames[v] = name;
+          return name;
+        }
+        std::string name = "/* arg" + std::to_string(idx) + " */";
         hostNames[v] = name;
         return name;
       }
@@ -1063,9 +1078,16 @@ private:
       return val;
     }
 
+    if (auto castOp = dyn_cast<arith::IndexCastOp>(defOp)) {
+      return emitExprInHostScope(castOp.getIn(), kernel, hostNames,
+                                 numOrigInputs, dimArgMeta);
+    }
+
     if (auto cmpOp = dyn_cast<arith::CmpIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       const char *pred = "==";
       switch (cmpOp.getPredicate()) {
       case arith::CmpIPredicate::eq: pred = "=="; break;
@@ -1085,49 +1107,61 @@ private:
     }
 
     if (auto addOp = dyn_cast<arith::AddIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(addOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(addOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(addOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(addOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       std::string result = "(" + lhs + " + " + rhs + ")";
       hostNames[v] = result;
       return result;
     }
     if (auto mulOp = dyn_cast<arith::MulIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(mulOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(mulOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(mulOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(mulOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       std::string result = "(" + lhs + " * " + rhs + ")";
       hostNames[v] = result;
       return result;
     }
     if (auto subOp = dyn_cast<arith::SubIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(subOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(subOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(subOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(subOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       std::string result = "(" + lhs + " - " + rhs + ")";
       hostNames[v] = result;
       return result;
     }
     if (auto divOp = dyn_cast<arith::DivSIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(divOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(divOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(divOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(divOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       std::string result = "(" + lhs + " / " + rhs + ")";
       hostNames[v] = result;
       return result;
     }
     if (auto remOp = dyn_cast<arith::RemSIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(remOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(remOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(remOp.getLhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
+      auto rhs = emitExprInHostScope(remOp.getRhs(), kernel, hostNames,
+                                     numOrigInputs, dimArgMeta);
       std::string result = "(" + lhs + " % " + rhs + ")";
       hostNames[v] = result;
       return result;
     }
 
-    llvm_unreachable("unsupported op in host-scope expression");
+    return "/* unknown */";
   }
 
-  void emitEntryAssertions(KernelOp kernel) {
+  void emitEntryAssertions(KernelOp kernel,
+                           unsigned numOrigInputs,
+                           llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     DenseMap<Value, std::string> hostNames;
     for (auto &ea : entryAssertions) {
-      auto cond =
-          emitExprInHostScope(ea.op.getCondition(), kernel, hostNames);
+      auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames,
+                                      numOrigInputs, dimArgMeta);
       os() << "  choreo::runtime_check(" << cond << ", \""
          << ea.op.getMessage() << "\");\n";
     }
