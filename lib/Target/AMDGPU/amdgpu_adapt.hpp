@@ -81,6 +81,7 @@ private:
         ps.AddLevelPV(lvl, InScopeName(cast<AST::Identifier>(id)->name));
 
       CheckPBSettings(pb);
+      CheckLaunchBounds(pb);
       CheckStreamBinding(pb);
     }
     return true;
@@ -150,6 +151,32 @@ public:
               "workgroup uses only " + std::to_string(*thr_val) +
                   " threads; RDNA CUs are most efficient with >= 64 threads "
                   "per workgroup.");
+    }
+  }
+
+  void CheckLaunchBounds(AST::ParallelBy* pb) {
+    if (!pb->HasLaunchBounds()) return;
+    if (pb->GetLevel() != ParallelLevel::BLOCK) return;
+    auto& lb_args = pb->GetLaunchBoundsArgs();
+    if (lb_args->Count() < 1) return;
+    auto arg0 = dyn_cast<AST::Expr>(lb_args->ValueAt(0));
+    if (!arg0 || !arg0->Opts().HasVal()) return;
+    auto max_threads = VIInt(arg0->Opts().GetVal());
+    if (!max_threads || max_threads.value() == 0) return;
+    auto& lcs = cgi.GetFunctionLaunches(fname);
+    if (lcs.empty()) return;
+    auto inner_thr =
+        lcs[0].thread_count.x * lcs[0].thread_count.y * lcs[0].thread_count.z;
+    auto group_cnt =
+        lcs[0].group_count.x * lcs[0].group_count.y * lcs[0].group_count.z;
+    auto computed = (inner_thr * group_cnt)->Normalize();
+    if (auto ct = VIInt(computed)) {
+      if (ct.value() > max_threads.value())
+        Error1(lb_args->ValueAt(0)->LOC(),
+               "[[launch_bounds]] maxThreadsPerBlock (" +
+                   std::to_string(max_threads.value()) +
+                   ") is less than the computed thread count (" +
+                   std::to_string(ct.value()) + ").");
     }
   }
 
@@ -267,6 +294,29 @@ public:
         Error1(n.LOC(), "On " + cur_arch +
                             ", the size of data transferred by DMA cannot "
                             "exceed 4GB.");
+    }
+
+    // Rank validation for non-trivial DMA ops
+    if (isa<AST::ChunkAt>(n.from)) {
+      auto f_ca = cast<AST::ChunkAt>(n.from);
+      auto f_sty = GetSpannedType(GetSymbolType(f_ca->RefSymbol()));
+      auto f_rank = f_sty->GetShape().Rank();
+      if (f_ca->HasOperation())
+        f_rank = f_ca->AllOperations().back()->GetRank();
+      if (f_rank > 5)
+        Error1(n.LOC(), "On " + cur_arch +
+                            ", the rank in dma" + n.operation +
+                            " must be in range [1, 5], but got " +
+                            std::to_string(f_rank) + ".");
+    }
+
+    // pad_mid must be zero (HIP sync copy constraint)
+    if (n.operation == ".pad") {
+      auto pc = cast<PadConfig>(n.config);
+      for (const auto& v : pc->pad_mid->AllValues())
+        if (auto il = AST::GetIntLiteral(v); !il || il->Val() != 0)
+          Error1(v->LOC(), "dma.pad with pad_mid is not supported for HIP "
+                           "target (must set pad_mid to 0).");
     }
 
     // Parameter shadow annotation

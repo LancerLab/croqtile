@@ -701,21 +701,14 @@ void HIPCodeGen::EmitDeviceVirtualIndices(AST::ParallelBy* pb) {
       ds << d_indent << "int __vid_bid_x = blockIdx.x;\n";
       MapPV(0, "__vid_bid_x");
     } else if (sub_pvs.size() == 2) {
-      ds << d_indent << "int __vid_bid = blockIdx.x;\n";
-      ds << d_indent << "int __vid_bid_x = __vid_bid / " << ValueSTR(pv_y)
-         << ";\n";
-      ds << d_indent << "int __vid_bid_y = __vid_bid % " << ValueSTR(pv_y)
-         << ";\n";
+      ds << d_indent << "int __vid_bid_x = blockIdx.x;\n";
+      ds << d_indent << "int __vid_bid_y = blockIdx.y;\n";
       MapPV(0, "__vid_bid_x");
       MapPV(1, "__vid_bid_y");
     } else if (sub_pvs.size() == 3) {
-      ds << d_indent << "int __vid_bid = blockIdx.x;\n";
-      ds << d_indent << "int __vid_bid_x = __vid_bid / " << ValueSTR(pv_y)
-         << " / " << ValueSTR(pv_z) << ";\n";
-      ds << d_indent << "int __vid_bid_y = __vid_bid / " << ValueSTR(pv_z)
-         << " % " << ValueSTR(pv_y) << ";\n";
-      ds << d_indent << "int __vid_bid_z = __vid_bid % " << ValueSTR(pv_z)
-         << ";\n";
+      ds << d_indent << "int __vid_bid_x = blockIdx.x;\n";
+      ds << d_indent << "int __vid_bid_y = blockIdx.y;\n";
+      ds << d_indent << "int __vid_bid_z = blockIdx.z;\n";
       MapPV(0, "__vid_bid_x");
       MapPV(1, "__vid_bid_y");
       MapPV(2, "__vid_bid_z");

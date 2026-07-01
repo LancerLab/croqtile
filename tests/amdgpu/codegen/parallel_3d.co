@@ -9,10 +9,9 @@ __co__ void test_3d_block(f32 [24] a) {
   }
 }
 
-// CHECK: __vid_bid = blockIdx.x
-// CHECK: __vid_bid_x = __vid_bid / 3 / 4
-// CHECK: __vid_bid_y = __vid_bid / 4 % 3
-// CHECK: __vid_bid_z = __vid_bid % 4
+// CHECK: __vid_bid_x = blockIdx.x
+// CHECK: __vid_bid_y = blockIdx.y
+// CHECK: __vid_bid_z = blockIdx.z
 
 // --- 3D thread-level parallel ---
 __co__ void test_3d_thread(f32 [24] a) {
