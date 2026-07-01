@@ -174,6 +174,16 @@ void CoIRKernelLoweringBase::convertOp(OpBuilder &builder, Location loc,
     auto inputs = rotate.getFutures();
     auto outputs = rotate.getResults();
     unsigned n = inputs.size();
+    bool allMapped = true;
+    for (auto in : inputs)
+      if (!ctx.mapping.contains(in)) { allMapped = false; break; }
+    if (!allMapped) {
+      for (unsigned i = 0; i < n; ++i) {
+        if (ctx.mapping.contains(inputs[i]))
+          ctx.mapping.map(outputs[i], ctx.mapping.lookup(inputs[i]));
+      }
+      return;
+    }
     if (n >= 2) {
       SmallVector<Value> mapped;
       for (auto in : inputs)
@@ -301,6 +311,30 @@ void CoIRKernelLoweringBase::convertOp(OpBuilder &builder, Location loc,
     return;
   }
 
+  if (auto it = dyn_cast<InThreadsOp>(op)) {
+    Value pred = ctx.mapping.lookup(it.getPredicate());
+    auto newIf = builder.create<scf::IfOp>(loc, TypeRange{}, pred,
+                                           /*withElseRegion=*/false);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+      if (newIf.thenBlock()->mightHaveTerminator())
+        newIf.thenBlock()->getTerminator()->erase();
+      builder.setInsertionPointToEnd(newIf.thenBlock());
+      for (auto &bodyOp : it.getBody().front().getOperations())
+        convertOp(builder, loc, bodyOp, ctx);
+      builder.create<scf::YieldOp>(loc);
+    }
+    bool needsSync = !it.getAsync().value_or(false);
+    if (needsSync)
+      builder.create<mgpu::BarrierOp>(loc);
+    return;
+  }
+
+  if (isa<EventTriggerOp>(op) || isa<EventWaitOp>(op)) {
+    builder.clone(op, ctx.mapping);
+    return;
+  }
+
   if (isa<AssertOp>(op) || isa<YieldOp>(op))
     return;
 
@@ -319,7 +353,10 @@ void CoIRKernelLoweringBase::convertAlloc(OpBuilder &builder, Location loc,
     return;
   }
   auto memTy = convertTensorType(tty);
-  auto newAlloc = builder.create<memref::AllocOp>(loc, memTy);
+  SmallVector<Value> dynDims;
+  for (auto dim : alloc.getDynamicDims())
+    dynDims.push_back(ctx.mapping.lookup(dim));
+  auto newAlloc = builder.create<memref::AllocOp>(loc, memTy, dynDims);
   ctx.mapping.map(alloc.getResult(), newAlloc.getResult());
 }
 
@@ -454,6 +491,18 @@ void CoIRKernelLoweringBase::convertElementCopy(OpBuilder &builder,
 void CoIRKernelLoweringBase::convertDmaCopy(OpBuilder &builder, Location loc,
                                             DmaCopyOp copyOp,
                                             KernelConvertCtx &ctx) {
+  if (!ctx.mapping.contains(copyOp.getSource()) ||
+      !ctx.mapping.contains(copyOp.getDest())) {
+    if (copyOp.getToken()) {
+      if (ctx.mapping.contains(copyOp.getDest()))
+        ctx.mapping.map(copyOp.getToken(),
+                        ctx.mapping.lookup(copyOp.getDest()));
+      else if (ctx.mapping.contains(copyOp.getSource()))
+        ctx.mapping.map(copyOp.getToken(),
+                        ctx.mapping.lookup(copyOp.getSource()));
+    }
+    return;
+  }
   Value src = ctx.mapping.lookup(copyOp.getSource());
   Value dst = ctx.mapping.lookup(copyOp.getDest());
   emitFlatCopyLoop(builder, loc, src, dst);
@@ -502,7 +551,9 @@ void CoIRKernelLoweringBase::convertForeach(OpBuilder &builder, Location loc,
   auto args = body.front().getArguments();
 
   Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
-  Value ub = ctx.mapping.lookup(fe.getUpperBound());
+  Value ub = ctx.mapping.contains(fe.getUpperBound())
+                 ? ctx.mapping.lookup(fe.getUpperBound())
+                 : fe.getUpperBound();
   Value step = builder.create<arith::ConstantIndexOp>(loc, 1);
 
   SmallVector<Value> initVals;
@@ -546,9 +597,23 @@ void CoIRKernelLoweringBase::convertForeach(OpBuilder &builder, Location loc,
     }
     for (unsigned idx : asyncUndefIndices) {
       if (!initVals[idx]) {
-        Value dummy = builder.create<arith::ConstantIndexOp>(loc, 0);
-        initVals[idx] = dummy;
-        ctx.mapping.map(fe.getIterArgs()[idx], dummy);
+        MemRefType peerMemTy;
+        for (unsigned j = 0; j < initVals.size(); ++j) {
+          if (initVals[j])
+            if (auto mt = dyn_cast<MemRefType>(initVals[j].getType())) {
+              peerMemTy = mt;
+              break;
+            }
+        }
+        if (peerMemTy) {
+          Value dummy = builder.create<memref::AllocOp>(loc, peerMemTy);
+          initVals[idx] = dummy;
+          ctx.mapping.map(fe.getIterArgs()[idx], dummy);
+        } else {
+          Value dummy = builder.create<arith::ConstantIndexOp>(loc, 0);
+          initVals[idx] = dummy;
+          ctx.mapping.map(fe.getIterArgs()[idx], dummy);
+        }
       }
     }
   }
@@ -570,8 +635,14 @@ void CoIRKernelLoweringBase::convertForeach(OpBuilder &builder, Location loc,
     for (auto &op : body.front().getOperations()) {
       if (auto yield = dyn_cast<YieldOp>(op)) {
         SmallVector<Value> yieldedVals;
-        for (auto v : yield.getOperands())
-          yieldedVals.push_back(ctx.mapping.lookup(v));
+        for (unsigned yi = 0; yi < yield.getNumOperands(); ++yi) {
+          Value v = yield.getOperand(yi);
+          if (ctx.mapping.contains(v)) {
+            yieldedVals.push_back(ctx.mapping.lookup(v));
+          } else {
+            yieldedVals.push_back(loop.getRegionIterArg(yi));
+          }
+        }
         builder.create<scf::YieldOp>(loc, yieldedVals);
         continue;
       }
