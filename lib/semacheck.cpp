@@ -928,7 +928,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                        ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
                        ") at the " + Ordinal(i + 1) + " dim.";
         CreateAssessment(eq, message, n.from->LOC(), n.from,
-                         UsageType::ShapeCompatibility);
+                         UsageType::ShapeCompatibility, &n);
       }
     }
   } else if (n.operation == ".pad") {
@@ -983,7 +983,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                    STR(f_shape.ElementCountValue()) + " > " +
                    STR(t_shape.ElementCountValue()) + ")";
     CreateAssessment(asrt, message, n.LOC(), n.from,
-                     UsageType::ShapeCompatibility);
+                     UsageType::ShapeCompatibility, &n);
 
     bool emit_error = true;
     std::string msg;
