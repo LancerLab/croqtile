@@ -1488,6 +1488,9 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
         AddUse(current_stmt, id->name);
       else if (!isa<AST::DataAccess>(expr->GetR()))
         choreo_unreachable("Can not retrieve name of the future.");
+    } else if (expr->op == Op::ElemOf) {
+      if (auto base = AST::GetArrayBaseSymbol(*expr))
+        AddUse(current_stmt, base->name);
     } else {
       assert(isa<AST::ChunkAt>(expr->GetR()) && "expect a chunkat operand.");
     }
