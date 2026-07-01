@@ -683,9 +683,9 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
       // not the parallel variable itself.  The SubPV has BoundedType, so
       // CreateAssessment would escalate to USE_SITE - bypass it and force
       // ENTRY.
-      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt, message,
-                                            UsageType::LoopBound,
-                                            AssessType::ENTRY, loc, spv.get());
+      FCtx(fname).GetAssessor(*this).Assess(
+          AssessPolicy::Error, asrt, message, UsageType::LoopBound,
+          AssessType::ENTRY, loc, spv.get(), &n);
       ++index;
     }
   }
