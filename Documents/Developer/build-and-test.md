@@ -11,24 +11,13 @@ This guide covers how to build the Croqtile compiler from source, run the test s
 - **Ninja** (build system)
 - **Flex** and **Bison** (parser generation)
 
-### Environment setup (required on fresh clones)
+### Environment setup
 
-Before the first build or test run:
+All toolchain dependencies (flex, bison, CUTLASS, GoogleTest, LLVM/MLIR) are
+auto-downloaded by CMake during the first configure step. No manual setup is
+needed for a default build -- just run `make`.
 
-```bash
-make setup-core
-```
-
-`setup-core` applies to **every target**. It fetches the shared Choreo toolchain
-(FileCheck, clang-format, parser generators, agent skills), initializes git
-submodules, and installs git hooks. **Always run this on a fresh clone** before
-`make`, `make test`, or end-to-end `.co` execution.
-
-For the CUDA/CuTe target, `setup-core` also initializes the
-`extern/cutlass` submodule. You do not need to set `CUTE_HOME` manually after
-running `setup-core`.
-
-For target-specific environment notes, see
+For target-specific environment notes (CUDA, HIP, etc.), see
 [Target Environment Setup](target/env_setting_up.md).
 
 ---
@@ -56,7 +45,7 @@ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
 ninja -C build
 ```
 
-**Do not invoke `cmake` directly** -- the Makefile configures target-specific flags, submodule paths, and feature toggles automatically.
+**Do not invoke `cmake` directly** -- the Makefile configures target-specific flags and feature toggles automatically.
 
 ### SDK build
 

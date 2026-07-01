@@ -131,8 +131,7 @@ More examples (dynamic shapes, CroqPy, fused operators) in the [Tutorial](https:
 ### Build from Source
 
 ```bash
-make setup-core   # required on fresh clones: fetches submodules, toolchain, git hooks
-make              # build compiler (Release, CMake + Ninja)
+make              # build compiler (Release, CMake + Ninja; deps auto-downloaded)
 make test         # run full test suite
 ```
 

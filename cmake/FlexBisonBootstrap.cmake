@@ -17,31 +17,34 @@ set(_FB_BISON_DATA_DIR "${_FB_TOOLCHAIN_DIR}/shared/bison")
 set(_FB_BISON_MIN_VERSION "3.8")
 set(_FB_FLEX_MIN_VERSION "2.6")
 
-# Source URLs (fallback when prebuilt kit is unavailable)
-set(_FB_BISON_SRC_URL "https://ftp.gnu.org/gnu/bison/bison-3.8.2.tar.gz")
-set(_FB_FLEX_SRC_URL
-  "https://github.com/westes/flex/releases/download/v2.6.4/flex-2.6.4.tar.gz")
-
 # Download timeout (seconds)
 set(FLEX_BISON_DOWNLOAD_TIMEOUT 120 CACHE STRING
   "Timeout in seconds for downloading flex/bison archives")
 
-# --- Read prebuilt kit settings from cmake/deps.conf ---
+# --- Read settings from cmake/deps.conf ---
 set(_FB_KIT_URL "")
 set(_FB_KIT_TAR "")
 set(_FB_KIT_MD5 "")
+set(_FB_BISON_SRC_URL "")
+set(_FB_FLEX_SRC_URL "")
 
 set(_FB_CONF "${CMAKE_SOURCE_DIR}/cmake/deps.conf")
 if(EXISTS "${_FB_CONF}")
-  file(STRINGS "${_FB_CONF}" _fb_lines REGEX "^FLEX_BISON_[A-Z_0-9]+=")
+  file(STRINGS "${_FB_CONF}" _fb_lines
+    REGEX "^(FLEX_BISON_[A-Z_0-9]+|BISON_SRC_URL|FLEX_SRC_URL)=")
   foreach(_line ${_fb_lines})
-    string(REGEX MATCH "^FLEX_BISON_([A-Z_0-9]+)=(.*)" _ "${_line}")
-    if(CMAKE_MATCH_1 STREQUAL "URL")
-      set(_FB_KIT_URL "${CMAKE_MATCH_2}")
-    elseif(CMAKE_MATCH_1 STREQUAL "TAR")
-      set(_FB_KIT_TAR "${CMAKE_MATCH_2}")
-    elseif(CMAKE_MATCH_1 STREQUAL "MD5")
-      set(_FB_KIT_MD5 "${CMAKE_MATCH_2}")
+    if(_line MATCHES "^FLEX_BISON_([A-Z_0-9]+)=(.*)")
+      if(CMAKE_MATCH_1 STREQUAL "URL")
+        set(_FB_KIT_URL "${CMAKE_MATCH_2}")
+      elseif(CMAKE_MATCH_1 STREQUAL "TAR")
+        set(_FB_KIT_TAR "${CMAKE_MATCH_2}")
+      elseif(CMAKE_MATCH_1 STREQUAL "MD5")
+        set(_FB_KIT_MD5 "${CMAKE_MATCH_2}")
+      endif()
+    elseif(_line MATCHES "^BISON_SRC_URL=(.*)")
+      set(_FB_BISON_SRC_URL "${CMAKE_MATCH_1}")
+    elseif(_line MATCHES "^FLEX_SRC_URL=(.*)")
+      set(_FB_FLEX_SRC_URL "${CMAKE_MATCH_1}")
     endif()
   endforeach()
 endif()
@@ -270,8 +273,16 @@ if(NOT _bison_ok OR NOT _flex_ok)
   endif()
 endif()
 
-# 4. Last resort: build from source
+# 4. Last resort: build from source (requires BISON_SRC_URL / FLEX_SRC_URL
+#    in cmake/deps.conf)
 if(NOT _bison_ok)
+  if(NOT _FB_BISON_SRC_URL)
+    message(FATAL_ERROR
+      "No suitable bison (>= ${_FB_BISON_MIN_VERSION}) found and"
+      " BISON_SRC_URL is not set in cmake/deps.conf.\n"
+      "Install bison >= ${_FB_BISON_MIN_VERSION} manually"
+      " (e.g. apt install bison).")
+  endif()
   message(STATUS
     "No suitable bison (>= ${_FB_BISON_MIN_VERSION}) found."
     " Building from source...")
@@ -287,6 +298,13 @@ if(NOT _bison_ok)
 endif()
 
 if(NOT _flex_ok)
+  if(NOT _FB_FLEX_SRC_URL)
+    message(FATAL_ERROR
+      "No suitable flex (>= ${_FB_FLEX_MIN_VERSION}) found and"
+      " FLEX_SRC_URL is not set in cmake/deps.conf.\n"
+      "Install flex >= ${_FB_FLEX_MIN_VERSION} manually"
+      " (e.g. apt install flex).")
+  endif()
   message(STATUS
     "No suitable flex (>= ${_FB_FLEX_MIN_VERSION}) found."
     " Building from source...")
