@@ -628,8 +628,21 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
   if (auto expr = dyn_cast<AST::Expr>(e)) {
     if (expr->GetForm() == AST::Expr::Reference) return ExprEval(expr->GetR());
 
-    if (expr->GetForm() == AST::Expr::Unary)
+    if (expr->GetForm() == AST::Expr::Unary) {
+      auto k = expr->op.GetKind();
+      if (k == Op::PreInc || k == Op::PreDec) {
+        Value val = ExprEval(expr->GetR());
+        Value result = EvalUnaryOp(expr->op, val);
+        if (auto id = dyn_cast<AST::Identifier>(expr->GetR()))
+          mem.Define(id->name, result);
+        else if (auto da = dyn_cast<AST::DataAccess>(expr->GetR())) {
+          if (!da->AccessElement())
+            mem.Define(da->GetDataName(), result);
+        }
+        return result;
+      }
       return EvalUnaryOp(expr->op, ExprEval(expr->GetR()));
+    }
 
     if (expr->GetForm() == AST::Expr::Binary) {
       if (expr->op == Op::ElemOf) {
@@ -1004,6 +1017,81 @@ Value MockInterpreter::CallBIF(const std::string& raw_name,
     if (!args.empty())
       return Value::MakeBool(std::isfinite(args[0].AsDouble()));
     return Value::MakeBool(false);
+  }
+
+  if (name.substr(0, 7) == "atomic_") {
+    if (node.arguments && node.arguments->Count() >= 2) {
+      auto& arg_nodes = node.GetArguments();
+      Value old_val = args[0];
+      Value operand = args.size() > 1 ? args[1] : Value::MakeInt(0);
+      Value new_val = old_val;
+      std::string op = name.substr(7);
+      if (op == "add")
+        new_val = Value::MakeInt(old_val.AsInt() + operand.AsInt());
+      else if (op == "sub")
+        new_val = Value::MakeInt(old_val.AsInt() - operand.AsInt());
+      else if (op == "max")
+        new_val = Value::MakeInt(std::max(old_val.AsInt(), operand.AsInt()));
+      else if (op == "min")
+        new_val = Value::MakeInt(std::min(old_val.AsInt(), operand.AsInt()));
+      else if (op == "and")
+        new_val = Value::MakeInt(old_val.AsInt() & operand.AsInt());
+      else if (op == "or")
+        new_val = Value::MakeInt(old_val.AsInt() | operand.AsInt());
+      else if (op == "xor")
+        new_val = Value::MakeInt(old_val.AsInt() ^ operand.AsInt());
+      else if (op == "exch")
+        new_val = operand;
+      else if (op == "cas" && args.size() >= 3) {
+        if (old_val.AsInt() == operand.AsInt())
+          new_val = args[2];
+      }
+
+      auto target_node = arg_nodes[0];
+      if (auto expr = dyn_cast<AST::Expr>(target_node))
+        if (expr->GetForm() == AST::Expr::Reference)
+          target_node = expr->GetR();
+
+      if (auto chunk = dyn_cast<AST::ChunkAt>(target_node)) {
+        std::string base_name = chunk->data->name;
+        auto dot = base_name.rfind(".data");
+        if (dot != std::string::npos) base_name = base_name.substr(0, dot);
+        if (mem.Exists(base_name)) {
+          auto& arr_val = mem.Lookup(base_name);
+          if (arr_val.kind == Value::Pointer && arr_val.alloc &&
+              chunk->indices) {
+            std::vector<size_t> indices;
+            for (auto& idx : chunk->indices->AllValues())
+              indices.push_back((size_t)ExprEval(idx).AsInt());
+            size_t linear =
+                ComputeLinearIndex(indices, arr_val.alloc->shape);
+            size_t byte_off =
+                linear * arr_val.alloc->ElemSize() + arr_val.offset;
+            arr_val.WriteToAlloc(byte_off, new_val);
+          }
+        }
+      } else if (auto da = dyn_cast<AST::DataAccess>(target_node)) {
+        if (da->AccessElement()) {
+          auto& arr_val = mem.Lookup(da->GetDataName());
+          if (arr_val.kind == Value::Pointer && arr_val.alloc) {
+            std::vector<size_t> indices;
+            for (auto& idx : da->GetIndices())
+              indices.push_back((size_t)ExprEval(idx).AsInt());
+            size_t linear =
+                ComputeLinearIndex(indices, arr_val.alloc->shape);
+            size_t byte_off =
+                linear * arr_val.alloc->ElemSize() + arr_val.offset;
+            arr_val.WriteToAlloc(byte_off, new_val);
+          }
+        } else {
+          mem.Define(da->GetDataName(), new_val);
+        }
+      } else if (auto id = dyn_cast<AST::Identifier>(target_node)) {
+        mem.Define(id->name, new_val);
+      }
+      return old_val;
+    }
+    return Value::MakeInt(0);
   }
 
   Warning(node.LOC(), "mock: unknown BIF '" + name + "', returning 0.");

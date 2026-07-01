@@ -1,0 +1,24 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+// Test pre-increment and pre-decrement write-back in expression context.
+
+__co__ void test_incr_decr() {
+  mutable int x = 5;
+  int a = ++x;
+  println("a=", a, " x=", x);
+  // CHECK: a= 6 x= 6
+
+  int b = --x;
+  println("b=", b, " x=", x);
+  // CHECK: b= 5 x= 5
+
+  mutable int idx = 0;
+  s32[4] arr;
+  foreach i in 4
+    arr.at(i) = 0;
+
+  arr.at(idx) = 100;
+  int next_idx = ++idx;
+  arr.at(next_idx) = 200;
+  println("idx=", idx, " arr:", arr.at(0), arr.at(1));
+  // CHECK: idx= 1 arr: 100 200
+}

@@ -1,0 +1,40 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+// Test atomic built-in functions in the mock interpreter.
+
+__co__ void test_atomics() {
+  s32[4] data;
+  foreach i in 4
+    data.at(i) = i * 10;
+
+  __atomic_add(data.at(1), 5);
+  println("add:", data.at(1));
+  // CHECK: add: 15
+
+  mutable int old = __atomic_add(data.at(2), 100);
+  println("old=", old, " new=", data.at(2));
+  // CHECK: old= 20 new= 120
+
+  __atomic_max(data.at(0), 99);
+  println("max:", data.at(0));
+  // CHECK: max: 99
+
+  __atomic_min(data.at(3), 15);
+  println("min:", data.at(3));
+  // CHECK: min: 15
+
+  __atomic_exch(data.at(0), 42);
+  println("exch:", data.at(0));
+  // CHECK: exch: 42
+
+  __atomic_and(data.at(0), 0xF0);
+  println("and:", data.at(0));
+  // CHECK: and: 32
+
+  __atomic_or(data.at(0), 3);
+  println("or:", data.at(0));
+  // CHECK: or: 35
+
+  __atomic_xor(data.at(0), 0xFF);
+  println("xor:", data.at(0));
+  // CHECK: xor: 220
+}
