@@ -76,10 +76,11 @@ int main() { /// host program
 // CHECK:   __shared__ float l2_out[1024];
 // CHECK:   __shared__ float input_load__buf__[1024];
 // CHECK:   choreo::choreo_cdte choreo_topscc_ctx0;
-// CHECK:   tops::mdspan __mds0_input(tops::Global, (float*)input + (__tops_bid_x() * 1024), 1024);
+// CHECK:   tops::mdspan __mds0_input(tops::Global, (float*)input, 1024);
 // CHECK:   tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
 // CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
-// CHECK:     tops::event input_load__event__ = tops::memcpy_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_input);
+// CHECK:     int __slice_offset0__input_2_input_load__buf__[] = {(int)((__tops_bid_x() * 1024))};
+// CHECK:     tops::event input_load__event__ = tops::slice_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_input, __slice_offset0__input_2_input_load__buf__);
 // CHECK:     input_load.set_event(input_load__event__);
 // CHECK:   } // single instance
 // CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
@@ -99,9 +100,10 @@ int main() { /// host program
 // CHECK:   out_store_s.wait();
 // CHECK:   choreo::choreo_cdte choreo_topscc_ctx1;
 // CHECK:   tops::mdspan __mds6_l2_out(tops::Shared, (float*)l2_out, 1024);
-// CHECK:   tops::mdspan __mds7_output(tops::Global, (float*)output + (__tops_bid_x() * 1024), 1024);
+// CHECK:   tops::mdspan __mds7_output(tops::Global, (float*)output, 1024);
 // CHECK:   if (__CHOREO_BLOCK_SINGLE__) {
-// CHECK:     tops::event out_store__event__ = tops::memcpy_async(*out_store.get_ctx(), __mds7_output, __mds6_l2_out);
+// CHECK:     int __deslice_offset0__output_2_l2_out[] = {(int)((__tops_bid_x() * 1024))};
+// CHECK:     tops::event out_store__event__ = tops::deslice_async(*out_store.get_ctx(), __mds7_output, __mds6_l2_out, __deslice_offset0__output_2_l2_out);
 // CHECK:     out_store.set_event(out_store__event__);
 // CHECK:   } // single instance
 // CHECK:   if (__CHOREO_BLOCK_SINGLE__) {

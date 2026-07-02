@@ -2041,102 +2041,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     return {mds_name, mds_decl.str()};
   };
 
-  ValueList f_opt_condition, t_opt_condition;
-
-  // if the value is dst, means MAY do optimization on dst
-  enum DMA_OP : uint8_t {
-    none = 0,
-    dst = 1 << 0,
-    src = 1 << 1,
-    both = src | dst
-  };
-
-  // Check the current DMA. If the new span is address-contiguous within the
-  // original span, then slice or deslice can be optimized to linear copy.
-  auto OptToLinearCopy = [&]() -> DMA_OP {
-    if (!dma_opt) return DMA_OP::none;
-    if (SymbolToSymbol()) return DMA_OP::none;
-
-    // return `bool` if able to ensure true positive or true negative.
-    // return `ValueList` as the runtime condition if unable to ensure.
-    auto IsOptimizableChunkat =
-        [&](const ptr<AST::ChunkAt>& ca) -> std::variant<bool, ValueList> {
-      ValueList opt_condition;
-      Shape shape, new_shape;
-      shape = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetShape();
-      // check the shape transformation of each op inside ca
-      for (const auto& sop : ca->AllOperations()) {
-        if (isa<AST::SOP::Reshape>(sop)) {
-          shape = sop->GetBlockShape();
-        } else {
-          new_shape = sop->GetBlockShape();
-          auto is_contiguous = IsContiguousSOp(*sop, shape);
-          if (auto val = std::get_if<bool>(&is_contiguous);
-              val && *val == false)
-            return false;
-          else if (!val)
-            opt_condition.push_back(std::get<ValueItem>(is_contiguous));
-
-          shape = new_shape;
-        }
-      }
-      if (opt_condition.empty()) return true;
-      return opt_condition;
-    };
-
-    DMA_OP optimizable = DMA_OP::none;
-    if (SymbolToTile()) {
-      auto res = IsOptimizableChunkat(t_ca);
-      if (auto val = std::get_if<bool>(&res); val && *val == true)
-        optimizable = DMA_OP::dst;
-      else if (!val) {
-        t_opt_condition = std::get<ValueList>(res);
-        optimizable = DMA_OP::dst;
-      }
-    } else if (TileToSymbol()) {
-      auto res = IsOptimizableChunkat(f_ca);
-      if (auto val = std::get_if<bool>(&res); val && *val == true)
-        optimizable = DMA_OP::src;
-      else if (!val) {
-        f_opt_condition = std::get<ValueList>(res);
-        optimizable = DMA_OP::src;
-      }
-    } else if (TileToTile()) {
-      // For tile to tile, there are 3 situtations.
-      auto res_f = IsOptimizableChunkat(f_ca);
-      if (auto val = std::get_if<bool>(&res_f); val && *val == true)
-        optimizable = DMA_OP::src;
-      else if (!val) {
-        f_opt_condition = std::get<ValueList>(res_f);
-        optimizable = DMA_OP::src;
-      }
-      auto res_t = IsOptimizableChunkat(t_ca);
-      if (auto val = std::get_if<bool>(&res_t); val && *val == true)
-        optimizable = (optimizable & DMA_OP::src) ? DMA_OP::both : DMA_OP::dst;
-      else if (!val) {
-        t_opt_condition = std::get<ValueList>(res_t);
-        optimizable = (optimizable & DMA_OP::src) ? DMA_OP::both : DMA_OP::dst;
-      }
-    }
-
-    VST_DEBUG({
-      if (optimizable != DMA_OP::none) {
-        dbgs() << "Optimize DMA at " << n.LOC() << " to linear copy:\n";
-        if (optimizable & DMA_OP::src) {
-          dbgs() << "\tSRC";
-          if (!f_opt_condition.empty()) dbgs() << " (runtime)";
-        }
-        if (optimizable & DMA_OP::dst) {
-          dbgs() << "\tDST";
-          if (!t_opt_condition.empty()) dbgs() << " (runtime)";
-        }
-        dbgs() << "\n";
-      }
-    });
-
-    return optimizable;
-  };
-
   const auto f_buf = GetBufferExpr(f_sym, f_idx, f_ty);
   const auto t_buf = GetBufferExpr(t_sym, t_idx, t_ty);
 
@@ -2200,13 +2104,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   }
   // skip_set_event: whether to skip future_name.set_event() emission
   bool skip_set_event = nf_named;
-
-  // indicate which side can be optimized to linear copy
-  DMA_OP opt_to_linear_copy = OptToLinearCopy();
-
-  // if `no_linear_opt` is true, will not do linear optimization even
-  // `opt_to_linear_copy` is available. Use it to control runtime opt.
-  auto DMACodeGen = [&](bool no_linear_opt) {
+  auto DMACodeGen = [&]() {
     std::string f_mds_offset = "";
     std::string t_mds_offset = "";
     Shape f_shape = f_sty->GetShape();
@@ -2280,26 +2178,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ApplyStrideToShape(f_shape, f_ca, f_sty);
     ApplyStrideToShape(t_shape, t_ca, t_sty);
 
-    if (!no_linear_opt && opt_to_linear_copy != DMA_OP::none) {
-      if (TileToSymbol()) {
-        assert(opt_to_linear_copy == DMA_OP::src);
-        f_mds_offset = GenOffset(f_ca);
-        f_shape = f_ca->GetBlockShape();
-      } else if (SymbolToTile()) {
-        assert(opt_to_linear_copy == DMA_OP::dst);
-        t_mds_offset = GenOffset(t_ca);
-        t_shape = t_ca->GetBlockShape();
-      } else if (TileToTile()) {
-        if (opt_to_linear_copy & DMA_OP::src) {
-          f_mds_offset = GenOffset(f_ca);
-          f_shape = f_ca->GetBlockShape();
-        }
-        if (opt_to_linear_copy & DMA_OP::dst) {
-          t_mds_offset = GenOffset(t_ca);
-          t_shape = t_ca->GetBlockShape();
-        }
-      }
-    }
     const auto f_mds =
         GenMDSDecl(f_buf_name, f_buf_expr, f_sty, f_mds_offset, f_shape);
     const auto t_mds =
@@ -2439,24 +2317,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (SymbolToSymbol()) {
         LinearCopy();
       } else if (SymbolToTile()) {
-        if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
-          LinearCopy();
-        else
-          Deslice();
+        Deslice();
       } else if (TileToSymbol()) {
-        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
-          LinearCopy();
-        else
-          Slice();
+        Slice();
       } else if (TileToTile()) {
-        if (opt_to_linear_copy == DMA_OP::both && !no_linear_opt)
-          LinearCopy();
-        else if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
-          Deslice();
-        else if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
-          Slice();
-        else
-          SliceDeslice();
+        SliceDeslice();
       } else {
         choreo_unreachable("unexpected situation.");
       }
@@ -2526,10 +2391,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (SymbolToSymbol()) {
         Pad();
       } else if (TileToSymbol()) {
-        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
-          Pad();
-        else
-          SlicePad();
+        SlicePad();
       } else {
         choreo_unreachable(
             "only support dma.pad with (symbol=>symbol), (tile=>symbol).");
@@ -2591,15 +2453,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (SymbolToSymbol()) {
         Transpose();
       } else if (SymbolToTile()) {
-        if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
-          Transpose();
-        else
-          TransposeDeslice();
+        TransposeDeslice();
       } else if (TileToSymbol()) {
-        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
-          Transpose();
-        else
-          SliceTranspose();
+        SliceTranspose();
       } else if (TileToTile()) {
         choreo_unreachable("slice-transpose-deslice is not supported now.");
       }
@@ -2616,30 +2472,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   };
 
-  // linear opt makes code bloat, lead to bad performance when tuning conv1d.
-  // to get high performance with dte pool, disable it temporarily.
-  // TODO: consider removing linear opt completely.
-  if (!use_dte_pool && (!f_opt_condition.empty() || !t_opt_condition.empty())) {
-    // need generating runtime conditional optimization
-    std::ostringstream condition;
-    if (!f_opt_condition.empty())
-      condition << ValueListSTR(f_opt_condition, " && ");
-    if (!t_opt_condition.empty()) {
-      if (!f_opt_condition.empty()) condition << " && ";
-      condition << ValueListSTR(t_opt_condition, " && ");
-    }
-    IndStream() << "if (" << condition.str() << ") {\n";
-    IncrDeviceIndent();
-    DMACodeGen(false);
-    DecrDeviceIndent();
-    IndStream() << "} else {\n";
-    IncrDeviceIndent();
-    DMACodeGen(true);
-    DecrDeviceIndent();
-    IndStream() << "} // end DMA opt: " << n.LOC() << "\n";
-  } else {
-    DMACodeGen(true);
-  }
+  DMACodeGen();
 
   return true;
 }

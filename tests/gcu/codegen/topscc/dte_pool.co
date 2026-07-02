@@ -5,7 +5,7 @@
 // instances.  Shared-storage DMA retains its own choreo_cdte DTE.
 //
 // RUN: choreo -t topscc -arch=gcu300 -es --use-dte-pool %s -o - 2>&1 | FileCheck --check-prefix=POOL %s
-// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck --check-prefix=NOPOOL %s
+// RUN: choreo -t topscc -arch=gcu300 -es --use-dte-pool=false %s -o - 2>&1 | FileCheck --check-prefix=NOPOOL %s
 
 // ---------------------------------------------------------------
 // Test 1: single named future — pool size 1, slot 0
@@ -49,11 +49,11 @@ __co__ auto multi_named(f32 [16, 8] a) {
 }
 
 // POOL-LABEL:  __choreo_device_multi_named
-// POOL:          choreo::choreo_sdte __choreo_dte_pool__[2];
-// POOL-NEXT:     for (int __i = 0; __i < 2; ++__i) __choreo_dte_pool__[__i].init();
+// POOL:          choreo::choreo_sdte __choreo_dte_pool__[3];
+// POOL-NEXT:     for (int __i = 0; __i < 3; ++__i) __choreo_dte_pool__[__i].init();
 // POOL:          choreo::future fx(__choreo_dte_pool__[0], "fx",
 // POOL:          choreo::future fy(__choreo_dte_pool__[1], "fy",
-// POOL:          choreo::future __choreo_anon_fut__{{[0-9]+}}(__choreo_dte_pool__[0], "",
+// POOL:          choreo::future __choreo_anon_fut__{{[0-9]+}}(__choreo_dte_pool__[2], "",
 
 // NOPOOL-LABEL: __choreo_device_multi_named
 // NOPOOL-NOT:   __choreo_dte_pool__
