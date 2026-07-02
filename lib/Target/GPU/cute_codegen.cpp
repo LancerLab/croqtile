@@ -949,6 +949,10 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
         auto BuildOverrides = [&](auto&& self,
                                   const ptr<AST::Node>& node) -> void {
           if (!node) return;
+          if (auto nvd = dyn_cast<AST::NamedVariableDecl>(node)) {
+            if (nvd->init_expr) self(self, nvd->init_expr);
+            return;
+          }
           if (auto da = dyn_cast<AST::DataAccess>(node)) {
             if (da->AccessElement()) {
               auto sc = InScopeNameForRef(da->data->name);
@@ -998,10 +1002,11 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
         };
         BuildOverrides(BuildOverrides, ab->body);
 
-        // Detect which iterators are used OUTSIDE of .at() index positions.
-        // Iterators in .at() are resolved by register-direct mapping and don't
-        // need explicit variables. Only iterators in conditions, arithmetic,
-        // or other expressions need __frag_iv_X emission.
+        // Detect which iterators need __frag_iv_X variables.
+        // Iterators in fragment .at() are resolved by register-direct mapping
+        // and don't need explicit variables. But iterators in non-fragment
+        // .at() (global/shared memory) need __frag_iv_X for coordinate
+        // computation.
         std::set<std::string> used_iters;
         auto FindUsedIters = [&](auto&& self, const ptr<AST::Node>& node,
                                  bool in_at_index) -> void {
@@ -1032,9 +1037,17 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
             if (ie->else_stmts) self(self, ie->else_stmts, in_at_index);
             return;
           }
+          if (auto nvd = dyn_cast<AST::NamedVariableDecl>(node)) {
+            if (nvd->init_expr) self(self, nvd->init_expr, in_at_index);
+            return;
+          }
           if (auto da = dyn_cast<AST::DataAccess>(node)) {
-            if (da->AccessElement())
-              for (auto& idx : da->GetIndices()) self(self, idx, true);
+            if (da->AccessElement()) {
+              auto sc = InScopeNameForRef(da->data->name);
+              bool is_frag = FCtx(fname).HasFragmentLayout(sc);
+              for (auto& idx : da->GetIndices())
+                self(self, idx, is_frag);
+            }
             return;
           }
           if (auto call = dyn_cast<AST::Call>(node)) {
@@ -1061,6 +1074,10 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
           bool has_2d = false;
           auto Check = [&](auto&& self, const ptr<AST::Node>& node) -> void {
             if (!node) return;
+            if (auto nvd = dyn_cast<AST::NamedVariableDecl>(node)) {
+              if (nvd->init_expr) self(self, nvd->init_expr);
+              return;
+            }
             if (auto da = dyn_cast<AST::DataAccess>(node)) {
               if (da->AccessElement()) {
                 auto sc = InScopeNameForRef(da->data->name);
