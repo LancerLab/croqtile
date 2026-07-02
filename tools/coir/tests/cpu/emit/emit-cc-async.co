@@ -1,0 +1,16 @@
+// RUN: cocc -t cc -es %s -o - | FileCheck %s
+//
+// Verify async DMA emits std::async and wait emits .get() on CPU.
+
+__co__ void test_async(f32 [64] src, f32 [64] dst) {
+  f32 [64] buf;
+  token = dma.copy.async src => buf;
+  wait token;
+  parallel p by 64
+    dst.at(p) = buf.at(p) + 1.0;
+}
+
+// CHECK: #include <future>
+// CHECK: std::async(std::launch::async
+// CHECK: std::memcpy
+// CHECK: .get()
