@@ -1,0 +1,18 @@
+// Mock-vs-Real comparison: fibonacci sequence.
+
+__co__ void test() {
+  s32[8] fib;
+  fib.at(0) = 0;
+  fib.at(1) = 1;
+  foreach i in 6
+    fib.at(i + 2) = fib.at(i + 1) + fib.at(i);
+
+  println(fib.at(0));
+  println(fib.at(1));
+  println(fib.at(2));
+  println(fib.at(3));
+  println(fib.at(4));
+  println(fib.at(5));
+  println(fib.at(6));
+  println(fib.at(7));
+}
