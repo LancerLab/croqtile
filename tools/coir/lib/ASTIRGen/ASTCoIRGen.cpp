@@ -1276,22 +1276,19 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
     if (!inner) return nullptr;
     if (ce->FromType() == ce->ToType()) return inner;
     auto toBT = ce->ToType();
-    bool fromFloat = (ce->FromType() == BaseType::F16 ||
-                      ce->FromType() == BaseType::F32 ||
-                      ce->FromType() == BaseType::F64 ||
-                      ce->FromType() == BaseType::BF16);
-    bool toFloat = (toBT == BaseType::F16 || toBT == BaseType::F32 ||
-                    toBT == BaseType::F64 || toBT == BaseType::BF16);
+    bool fromFloat = IsFloatType(ce->FromType());
+    bool toFloat = IsFloatType(toBT);
+    bool fromInt = IsIntegerType(ce->FromType());
+    bool toInt = IsIntegerType(toBT);
+    auto getFloatTy = [&](BaseType bt) -> mlir::Type {
+      if (bt == BaseType::F16) return mlir::Float16Type::get(&IRContext());
+      if (bt == BaseType::F32) return mlir::Float32Type::get(&IRContext());
+      if (bt == BaseType::F64) return mlir::Float64Type::get(&IRContext());
+      if (bt == BaseType::BF16) return mlir::BFloat16Type::get(&IRContext());
+      return {};
+    };
     if (fromFloat && toFloat) {
-      mlir::Type targetTy;
-      if (toBT == BaseType::F16)
-        targetTy = mlir::Float16Type::get(&IRContext());
-      else if (toBT == BaseType::F32)
-        targetTy = mlir::Float32Type::get(&IRContext());
-      else if (toBT == BaseType::F64)
-        targetTy = mlir::Float64Type::get(&IRContext());
-      else if (toBT == BaseType::BF16)
-        targetTy = mlir::BFloat16Type::get(&IRContext());
+      auto targetTy = getFloatTy(toBT);
       if (targetTy && targetTy != inner.getType()) {
         unsigned fromBits = inner.getType().getIntOrFloatBitWidth();
         unsigned toBits = targetTy.getIntOrFloatBitWidth();
@@ -1300,6 +1297,31 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         else
           return builder.create<mlir::arith::TruncFOp>(loc, targetTy, inner);
       }
+    } else if (fromInt && toFloat) {
+      auto targetTy = getFloatTy(toBT);
+      if (targetTy) {
+        if (mlir::isa<mlir::IndexType>(inner.getType()))
+          inner = builder.create<mlir::arith::IndexCastOp>(
+              loc, builder.getI32Type(), inner);
+        if (IsSignedType(ce->FromType()))
+          return builder.create<mlir::arith::SIToFPOp>(loc, targetTy, inner);
+        else
+          return builder.create<mlir::arith::UIToFPOp>(loc, targetTy, inner);
+      }
+    } else if (fromFloat && toInt) {
+      auto getBits = [](BaseType bt) -> unsigned {
+        switch (bt) {
+        case BaseType::S8: case BaseType::U8: return 8;
+        case BaseType::S16: case BaseType::U16: return 16;
+        case BaseType::S64: case BaseType::U64: return 64;
+        default: return 32;
+        }
+      };
+      auto intTy = mlir::IntegerType::get(&IRContext(), getBits(toBT));
+      if (IsSignedType(toBT))
+        return builder.create<mlir::arith::FPToSIOp>(loc, intTy, inner);
+      else
+        return builder.create<mlir::arith::FPToUIOp>(loc, intTy, inner);
     }
     return inner;
   }
