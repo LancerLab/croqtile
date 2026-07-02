@@ -663,7 +663,7 @@ private:
   ResolveAutomapThreadExpr(const ptr<AST::AttributeExpr>& automap_attr) const;
 
   bool IsWarpSpecActive() const {
-    return CCtx().UseWarpSpec() || has_analyzed_warpspec ||
+    return has_analyzed_warpspec ||
            cgi.GetFunctionTrait(fname).has_warpspec_pattern;
   }
 

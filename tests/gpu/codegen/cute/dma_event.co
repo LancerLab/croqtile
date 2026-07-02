@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -es --use-warpspec -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
 
 __co__ void foo(f32 [128, 128] input) {
   

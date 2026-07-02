@@ -35,9 +35,6 @@ detect_compile_flags() {
         elif echo "$run_line" | grep -q "\-arch=sm_86"; then
             flags="$flags -arch=sm_86"
         fi
-        if echo "$run_line" | grep -q "\-\-use-warpspec"; then
-            flags="$flags --use-warpspec"
-        fi
         if echo "$run_line" | grep -q "\-\-use-prepack-v2"; then
             flags="$flags --use-prepack-v2"
         elif echo "$run_line" | grep -q "\-\-use-prepack"; then
@@ -52,7 +49,6 @@ detect_compile_flags() {
     if echo "$name" | grep -q "sm90\|sm_90\|wgmma\|tma\|warpspec\|tbc"; then
         echo "$flags" | grep -q "\-t cute" || flags="$flags -t cute"
         echo "$flags" | grep -q "\-arch" || flags="$flags -arch=sm_90a"
-        echo "$name" | grep -q "warpspec" && { echo "$flags" | grep -q "use-warpspec" || flags="$flags --use-warpspec"; }
     elif echo "$name" | grep -q "sm86\|sm_86\|mma"; then
         echo "$flags" | grep -q "\-t cute" || flags="$flags -t cute"
         echo "$flags" | grep -q "\-arch" || flags="$flags -arch=sm_86"
