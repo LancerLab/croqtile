@@ -1,0 +1,20 @@
+// RUN: cocc -t cc -es %s -o - | FileCheck %s
+//
+// Verify event trigger/wait emit choreo::cc::event_t on CPU.
+
+__co__ void test_events() {
+  event ev;
+  parallel p by 2 : block {
+    parallel t by 2 : thread {
+      if (t == 0)
+        trigger ev;
+      if (t == 1)
+        wait ev;
+    }
+  }
+}
+
+// CHECK: choreo_cc.h
+// CHECK: choreo::cc::event_t ev
+// CHECK: ev.trigger()
+// CHECK: ev.wait()

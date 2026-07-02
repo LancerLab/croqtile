@@ -43,6 +43,8 @@ public:
     hasLibCalls = false;
     hasPrintCalls = false;
     hasAsyncOps = false;
+    hasEventOps = false;
+    eventNames.clear();
     scanFeatures(module);
     emitHeader();
     for (auto &op : module.getBody()->getOperations()) {
@@ -139,6 +141,8 @@ private:
   bool hasLibCalls = false;
   bool hasPrintCalls = false;
   bool hasAsyncOps = false;
+  bool hasEventOps = false;
+  llvm::DenseSet<llvm::StringRef> eventNames;
 
   void scanFeatures(ModuleOp module) {
     module.walk([&](Operation *op) {
@@ -146,6 +150,14 @@ private:
         hasMMAOps = true;
       if (isa<DmaCopyOp, AsyncUndefOp, FutureRotateOp>(op))
         hasAsyncOps = true;
+      if (auto et = dyn_cast<EventTriggerOp>(op)) {
+        hasEventOps = true;
+        eventNames.insert(et.getEventName());
+      }
+      if (auto ew = dyn_cast<EventWaitOp>(op)) {
+        hasEventOps = true;
+        eventNames.insert(ew.getEventName());
+      }
       if (auto call = dyn_cast<CallOp>(op)) {
         auto callee = call.getCallee();
         if (callee.starts_with("__lib_") || callee.starts_with("__sqrt") ||
@@ -164,7 +176,7 @@ private:
   void emitHeader() {
     os() << "#define __CHOREO_TARGET_CPU__ 1\n";
     os() << "#include \"choreo.h\"\n";
-    if (hasMMAOps)
+    if (hasMMAOps || hasEventOps)
       os() << "#include \"choreo_cc.h\"\n";
     os() << "#include <cstring>\n";
     os() << "#include <cstdlib>\n";
@@ -218,6 +230,10 @@ private:
       emitCall(callOp);
     else if (auto ithOp = dyn_cast<coir::InThreadsOp>(op))
       emitInThreads(ithOp);
+    else if (auto et = dyn_cast<coir::EventTriggerOp>(op))
+      emitEventTrigger(et);
+    else if (auto ew = dyn_cast<coir::EventWaitOp>(op))
+      emitEventWait(ew);
     else
       CoIREmitterBase::emitOpFallback(op);
   }
@@ -419,11 +435,44 @@ private:
 
     prescanReturnValues(kernel);
 
+    if (hasEventOps)
+      emitEventDecls(kernel);
+
     for (auto &op : body.front().getOperations())
       emitOp(&op);
 
     decIndent();
     os() << "}\n\n";
+  }
+
+  void emitEventDecls(KernelOp kernel) {
+    llvm::DenseSet<llvm::StringRef> emitted;
+    kernel.walk([&](EventTriggerOp et) {
+      auto name = et.getEventName();
+      if (emitted.insert(name).second)
+        os() << getIndent() << "choreo::cc::event_t " << name << ";\n";
+    });
+    kernel.walk([&](EventWaitOp ew) {
+      auto name = ew.getEventName();
+      if (emitted.insert(name).second)
+        os() << getIndent() << "choreo::cc::event_t " << name << ";\n";
+    });
+  }
+
+  void emitEventTrigger(EventTriggerOp op) {
+    auto name = op.getEventName();
+    std::string ref = name.str();
+    if (auto sub = op.getSubscript())
+      ref += "[" + sub->str() + "]";
+    os() << getIndent() << ref << ".trigger();\n";
+  }
+
+  void emitEventWait(EventWaitOp op) {
+    auto name = op.getEventName();
+    std::string ref = name.str();
+    if (auto sub = op.getSubscript())
+      ref += "[" + sub->str() + "]";
+    os() << getIndent() << ref << ".wait();\n";
   }
 
   void emitHostEntry(KernelOp kernel) override {
