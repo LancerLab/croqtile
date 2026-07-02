@@ -251,6 +251,7 @@ private:
     parallel_idx = -1;
     bdim_level = ParallelLevel::THREAD;
     emitted_device_names_.clear();
+    global_buffers.clear();
     event_global_buffers.clear();
     ResetLineDirectiveState();
     pre_site_assertions.clear();

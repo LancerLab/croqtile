@@ -1,0 +1,13 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void unroll_test(f32 [256] a) {
+  parallel p by 1 : block
+    parallel q by 256 : thread {
+      mutable f32 sum = 0.0;
+      foreach {q} in [4] :unroll(4)
+        sum = sum + a.at(q);
+      a.at(q) = sum;
+    }
+}
+// CHECK: #pragma unroll 4
+// CHECK-NEXT: for (

@@ -1,0 +1,11 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// Verify global NamedVariableDecl buffers get hipFree'd
+__co__ void alloc_free_test(f32 [64] input) {
+  global f32 [64] temp;
+  parallel p by 64 : thread {
+    temp.at(p) = input.at(p) + 1.0;
+  }
+}
+// CHECK: hipMalloc(
+// CHECK: hipFree(

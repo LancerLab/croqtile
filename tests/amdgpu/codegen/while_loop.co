@@ -1,0 +1,13 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void while_test(s32 [64] a) {
+  parallel p by 64 : thread {
+    mutable s32 v = a.at(p);
+    while (v > 0) {
+      v = v - 1;
+    }
+    a.at(p) = v;
+  }
+}
+// CHECK: while ((v > 0))
+// CHECK: v = (v - 1)

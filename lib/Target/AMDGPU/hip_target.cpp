@@ -56,13 +56,18 @@ public:
     return "";
   }
 
-  size_t GetMemCapacity(const Storage& sto, const ArchId&) const override {
-    if (sto == Storage::LOCAL)
-      return 1024;
-    else if (sto == Storage::SHARED)
-      return 64ull * 1024; // 64KB LDS
-    else if (sto == Storage::GLOBAL)
-      return 16ull * 1024 * 1024 * 1024; // 16GB
+  size_t GetMemCapacity(const Storage& sto,
+                        const ArchId& arch) const override {
+    // arch -> {local, shared}
+    static std::map<std::string, std::pair<size_t, size_t>> caps = {
+        {"gfx1030", {1024, 64ull * 1024}},  // RDNA2: 64KB LDS per WGP
+        {"gfx1100", {1024, 128ull * 1024}},  // RDNA3: 128KB LDS per WGP
+    };
+    if (sto == Storage::GLOBAL) return 16ull * 1024 * 1024 * 1024;
+    auto it = caps.find(arch);
+    auto& cap = (it != caps.end()) ? it->second : caps.at("gfx1030");
+    if (sto == Storage::LOCAL) return cap.first;
+    if (sto == Storage::SHARED) return cap.second;
     choreo_unreachable("unsupported memory level.");
     return 0;
   }
