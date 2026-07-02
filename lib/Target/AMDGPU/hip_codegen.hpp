@@ -5,11 +5,13 @@
 #include <sstream>
 #include <stack>
 
+#include "assess.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "codegen_utils.hpp"
 #include "hip_dma_plan.hpp"
 #include "operator_info.hpp"
+#include "options.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -188,6 +190,19 @@ private:
 
   void EmitHostRuntimeCheck();
 
+  bool EnableLineDirective() const { return CCtx().GenDebugInfo(); }
+  bool ShouldEmitLineDirective(AST::Node& n) const;
+  void EmitLineDirective(AST::Node& n);
+  void ResetLineDirectiveState();
+  LineDirectiveState host_line_state;
+  LineDirectiveState device_line_state;
+
+  std::unordered_map<AST::Node*, std::vector<Assertion>> pre_site_assertions;
+  std::unordered_map<AST::Node*, std::vector<Assertion>> post_site_assertions;
+  void BuildSiteAssertionMap();
+  void EmitPreSiteAssertions(AST::Node& n);
+  void EmitPostSiteAssertions(AST::Node& n);
+
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
   const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string&, bool,
                               bool) const;
@@ -237,6 +252,9 @@ private:
     bdim_level = ParallelLevel::THREAD;
     emitted_device_names_.clear();
     event_global_buffers.clear();
+    ResetLineDirectiveState();
+    pre_site_assertions.clear();
+    post_site_assertions.clear();
   }
 
   bool IsChoreoInput(const std::string& sname) {

@@ -92,9 +92,10 @@ public:
 
   const std::set<BaseType> SupportedScalarTypes(const ArchId&) const override {
     return {
-        BaseType::F64, BaseType::F32, BaseType::F16, BaseType::BF16,
-        BaseType::S64, BaseType::U64, BaseType::S32, BaseType::U32,
-        BaseType::S16, BaseType::U16, BaseType::S8,  BaseType::U8,
+        BaseType::F64,  BaseType::F32, BaseType::F16, BaseType::BF16,
+        BaseType::S64,  BaseType::U64, BaseType::S32, BaseType::U32,
+        BaseType::S16,  BaseType::U16, BaseType::S8,  BaseType::U8,
+        BaseType::BOOL,
     };
   }
 
@@ -105,8 +106,9 @@ public:
         {AtomicOp::ADD,
          {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32}});
     caps.push_back({AtomicOp::SUB, {BaseType::S32, BaseType::U32}});
-    caps.push_back(
-        {AtomicOp::EXCH, {BaseType::S32, BaseType::U32, BaseType::U64}});
+    caps.push_back({AtomicOp::EXCH,
+                     {BaseType::S32, BaseType::U32, BaseType::U64,
+                      BaseType::F32}});
     caps.push_back(
         {AtomicOp::MIN,
          {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
@@ -122,8 +124,9 @@ public:
     caps.push_back(
         {AtomicOp::XOR,
          {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
-    caps.push_back(
-        {AtomicOp::CAS, {BaseType::S32, BaseType::U32, BaseType::U64}});
+    caps.push_back({AtomicOp::CAS,
+                     {BaseType::S32, BaseType::U32, BaseType::U64,
+                      BaseType::U16}});
     return caps;
   }
 

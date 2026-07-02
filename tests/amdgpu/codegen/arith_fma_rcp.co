@@ -1,0 +1,12 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void fma_rcp_test(f32 [64] a) {
+  parallel p by 64 : thread {
+    mutable f32 v = a.at(p);
+    mutable f32 r1 = __fmaf(v, v, v);
+    mutable f32 r2 = __frcp_rn(v);
+    a.at(p) = r1 + r2;
+  }
+}
+// CHECK: fmaf(
+// CHECK: __frcp_rn(

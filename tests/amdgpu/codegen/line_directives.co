@@ -1,0 +1,9 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 -g %s 2>&1 | FileCheck %s
+
+__co__ void line_test(f32 [64] a) {
+  parallel p by 64 : thread {
+    mutable f32 v = a.at(p);
+    a.at(p) = v + 1.0;
+  }
+}
+// CHECK: #line

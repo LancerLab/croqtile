@@ -1,0 +1,13 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// Test atomicExch with f32
+__co__ void atomic_exch_f32(f32 [64] a) {
+  parallel p by 64 : thread {
+    shared f32 [64] s;
+    s.at(p) = a.at(p);
+    sync.shared;
+    mutable f32 zero = 0.0;
+    __atomic_exch(s.at(p), zero);
+  }
+}
+// CHECK: atomicExch(&(

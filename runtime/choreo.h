@@ -2133,6 +2133,41 @@ inline bool profile(F&& matmul, ProfilerOption& opt, Args&&... args) {
 
 #endif // __CHOREO_TARGET_CUTE__
 
+#ifdef __CHOREO_TARGET_AMDGPU__
+
+struct TimerOption {
+  int warmup = 10;
+  int repeat = 100;
+  bool sync = true;
+};
+
+template <typename F, typename... Args>
+inline double timing(F&& kernel, const TimerOption& opt, Args&&... args) {
+  int warmup = std::max(0, opt.warmup);
+  int repeat = std::max(1, opt.repeat);
+
+  for (int i = 0; i < warmup; ++i) kernel(std::forward<Args>(args)...);
+
+  if (opt.sync) abend_true(hipDeviceSynchronize());
+
+  hipEvent_t start = nullptr;
+  hipEvent_t stop = nullptr;
+  abend_true(hipEventCreate(&start));
+  abend_true(hipEventCreate(&stop));
+  abend_true(hipEventRecord(start));
+  for (int i = 0; i < repeat; ++i) kernel(std::forward<Args>(args)...);
+  abend_true(hipEventRecord(stop));
+  abend_true(hipEventSynchronize(stop));
+
+  float elapsed_ms = 0.0f;
+  abend_true(hipEventElapsedTime(&elapsed_ms, start, stop));
+  abend_true(hipEventDestroy(start));
+  abend_true(hipEventDestroy(stop));
+  return static_cast<double>(elapsed_ms) / static_cast<double>(repeat);
+}
+
+#endif // __CHOREO_TARGET_AMDGPU__
+
 // target specific definations
 #ifdef __CHOREO_PRIVATE_TGT0__
 template <typename T>
