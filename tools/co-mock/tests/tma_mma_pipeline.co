@@ -1,0 +1,40 @@
+// RUN: co-mock -t cute %s 2>&1 | FileCheck %s
+// Test full TMA + MMA pipeline: load, compute, store.
+
+__co__ void tma_mma_pipeline() {
+  parallel t by 1 : thread {
+    s32[2, 3] global_A;
+    s32[3, 2] global_B;
+    s32[2, 2] global_C;
+
+    foreach i in 2
+      foreach j in 3
+        global_A.at(i, j) = i + j + 1;
+    foreach i in 3
+      foreach j in 2
+        global_B.at(i, j) = i * 2 + j + 1;
+
+    s32[2, 3] shared_A;
+    s32[3, 2] shared_B;
+    s32[2, 2] shared_C;
+
+    fa = tma.copy.async global_A => shared_A;
+    fb = tma.copy.async global_B => shared_B;
+    wait fa;
+    wait fb;
+
+    ma = mma.load shared_A;
+    mb = mma.load shared_B;
+    mc = mma.fill.s32 0;
+    mma.row.col mc, ma, mb;
+    mma.store mc, shared_C;
+
+    fc = tma.copy shared_C => global_C;
+
+    println(global_C.at(0, 0), global_C.at(0, 1));
+    println(global_C.at(1, 0), global_C.at(1, 1));
+  }
+}
+
+// CHECK: 22 28
+// CHECK: 31 40
