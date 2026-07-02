@@ -1,0 +1,54 @@
+// RUN: choreo -e %s | FileCheck %s
+
+// Tests for the foreach local name binding syntax: foreach c=b(lb:ub[:step])
+// The "c=" prefix declares a body-local alias; the source variable (b) still
+// refers to the within-declared bounded variable.
+
+__co__ void single_range(int N) {
+  parallel p by 6 {
+    with {a} in [3] {
+      // Explicit local name with full bounds.
+      foreach c=a(1:-1) {}
+    }
+  }
+}
+
+__co__ void multi_range() {
+  parallel p by 6 {
+    with {a, b} in [3, 4] {
+      // Two ranges, each with an explicit local name.
+      foreach x=a(1:), y=b(:2) {}
+    }
+  }
+}
+
+__co__ void sugar_form() {
+  parallel p by 6 {
+    with {a} in [3] {
+      // Sugar: foreach a(1:-1) is equivalent to foreach a=a(1:-1).
+      // No "(local: ...)" annotation should appear in the AST.
+      foreach a(1:-1) {}
+    }
+  }
+}
+
+// CHECK-LABEL: ChoreoFunction
+// CHECK:        `- Name: single_range
+// CHECK:         `- Foreach Block:
+// CHECK:          `- Iteration variables: c (source: a)
+// CHECK:          `- Loop Control: (1:-1:1)
+
+// CHECK-LABEL: ChoreoFunction
+// CHECK:        `- Name: multi_range
+// CHECK:         `- Foreach Block:
+// CHECK:          `- Iteration variables: x (source: a)
+// CHECK:          `- Loop Control: (1:?:1)
+// CHECK:          `- Iteration variables: y (source: b)
+// CHECK:          `- Loop Control: (?:2:1)
+
+// CHECK-LABEL: ChoreoFunction
+// CHECK:        `- Name: sugar_form
+// CHECK:         `- Foreach Block:
+// CHECK:          `- Iteration variables: a
+// CHECK-NOT:      (source:
+// CHECK:          `- Loop Control: (1:-1:1)

@@ -1,0 +1,30 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+// Verify early-sema errors for foreach local name binding (foreach c=b(...)).
+
+__co__ void illegal_foreach_local_iv() {
+  parallel p by 6 {
+    with {a, b} in [3, 4] {
+      // Error: duplicate local name 'c' in the same foreach range list.
+      foreach c=a, c=b {}
+
+      // Error: '_' is not allowed as a local iteration variable.
+      foreach _=a {}
+    }
+  }
+}
+
+// Error: redefinition of the iteration variable inside the foreach body.
+__co__ void odr_foreach_local_iv() {
+  parallel p by 6 {
+    with {b} in [4] {
+      foreach a=b {
+        s32 a = 3;
+      }
+    }
+  }
+}
+
+// CHECK: local iteration variable 'c' is already used in this foreach.
+// CHECK: _ is not allowed as a local iteration variable.
+// CHECK: symbol `a' has been declared already.
