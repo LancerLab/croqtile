@@ -130,8 +130,6 @@ std::string emitPTXFromCoIR(mlir::ModuleOp module, llvm::StringRef arch) {
     }
   }
 
-  if (getenv("COIR_DUMP_TEMP_MODULE"))
-    tempModule.dump();
   std::string ptx = emitPTX(tempModule, arch);
   tempModule->erase();
   clone->erase();
