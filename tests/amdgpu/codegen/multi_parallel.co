@@ -1,0 +1,15 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// Two parallel-by blocks in one function produce two device kernels
+__co__ void multi_pb(f32 [128] a, f32 [128] b) {
+  parallel p by 128 : thread {
+    a.at(p) = a.at(p) + 1.0;
+  }
+  parallel q by 128 : thread {
+    b.at(q) = b.at(q) + 2.0;
+  }
+}
+// CHECK: __global__ void __choreo_device_multi_pb0(
+// CHECK: __global__ void __choreo_device_multi_pb1(
+// CHECK: __choreo_device_multi_pb0<<<
+// CHECK: __choreo_device_multi_pb1<<<

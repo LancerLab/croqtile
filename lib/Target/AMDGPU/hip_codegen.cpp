@@ -1680,6 +1680,15 @@ void HIPCodeGen::EmitHipFree() {
       hs << h_indent << "(void)hipFree(" << sym << "__device);\n";
     }
   }
+  // Free internally allocated global buffers (NamedVariableDecl with
+  // Storage::GLOBAL) that are not already covered by GetDeviceAllocIns.
+  std::set<std::string> freed;
+  for (auto& item : cgi.GetDeviceAllocIns(fname))
+    if (auto sty = dyn_cast<SpannedType>(item.type))
+      freed.insert(UnScopedName(item.name) + "__device");
+  for (auto& buf : global_buffers)
+    if (!freed.count(buf))
+      hs << h_indent << "(void)hipFree(" << buf << ");\n";
   for (auto& buf : event_global_buffers)
     hs << h_indent << "(void)hipFree(" << buf << ");\n";
 }
