@@ -2164,7 +2164,6 @@ class TestWarpspecCo:
                                 swizzle=128)
                             mc = croq.mma.exec(
                                 mc, ma, mb, method="row.row")
-                    croq.mma.commit()
 
                 croq.mma.store(mc, output_s)
                 croq.tma.copy(

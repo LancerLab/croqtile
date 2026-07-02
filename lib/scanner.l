@@ -603,7 +603,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);
   ".scale"   return Choreo::Parser::make_SCALE(yytext, loc);
   ".mask"    return Choreo::Parser::make_MASK(yytext, loc);
-  ".commit"  return Choreo::Parser::make_COMMIT(yytext, loc);
   ".wait"    return Choreo::Parser::make_MMAWAIT(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT(yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);

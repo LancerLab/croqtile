@@ -39,7 +39,6 @@ __co__ void foo(global f16 [M, K] lhs,
             mb = mma.load.swiz<128> rhs_s[stage].chunkat(_, iv_wk);
             mma.row.row mc, ma, mb;
           }
-          mma.commit;
           trigger empty[stage];
         }
         mma.store mc, output_s;

@@ -39,7 +39,6 @@ __co__ void test_wait_depth(global f16 [M, K] lhs,
             mb = mma.load.swiz<128> rhs_s[stage].chunkat(_, iv_wk);
             mma.row.row mc, ma, mb;
           }
-          mma.commit;
           mma.wait<3>;
           trigger empty[stage];
         }
@@ -50,6 +49,6 @@ __co__ void test_wait_depth(global f16 [M, K] lhs,
   }
 }
 
-// CHECK: warpgroup_commit_batch();
-// CHECK-NOT: warpgroup_wait<0>();
 // CHECK: warpgroup_wait<3>();
+// CHECK: warpgroup_commit_batch();
+// CHECK: warpgroup_wait<0>();

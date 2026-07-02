@@ -150,7 +150,7 @@ MMA via `target = "ukernel"`.
 **Remaining limitations**:
 - `TensorTileOp` in target emitter computes pointer offsets assuming row-major dense layout
 - Host wrapper input types inferred from output tensor type (may mismatch for mixed precision)
-- `mma.commit`, `mma.wait`, `mma.scale` are not supported in the micro-kernel backend
+- `mma.wait`, `mma.scale` are not supported in the micro-kernel backend
 
 ## Summary Priority
 

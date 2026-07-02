@@ -62,7 +62,6 @@ __co__ void matmul_f16_ws_1p1c(global f16 [M, K] lhs, global f16 [N, K] rhs, glo
             mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
             mma.row.row mc, ma, mb;
           }
-          mma.commit;
           trigger empty[stage];
         }
         mma.store mc, output_s;
@@ -119,7 +118,7 @@ __co__ void matmul_f16_ws_1p1c_persis(global f16 [M, K] lhs, global f16 [N, K] r
                 mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
                 mma.row.row mc, ma, mb;
               }
-              mma.commit;
+
               trigger empty[stage];
             }
             mma.store mc, output_s;
@@ -174,7 +173,6 @@ __co__ void matmul_f16_ws_1p3c(global f16 [M, K] lhs, global f16 [N, K] rhs, glo
             mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
             mma.row.row mc, ma, mb;
           }
-          mma.commit;
           trigger empty[stage];
         }
         mma.store mc, output_s.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(p1 - 1, 0);
@@ -235,7 +233,7 @@ __co__ void matmul_f16_ws_1p3c_persis(global f16 [M, K] lhs, global f16 [N, K] r
                 mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
                 mma.row.row mc, ma, mb;
               }
-              mma.commit;
+
               trigger empty[stage];
             }
             inthreads (p1 == 1) {
@@ -318,7 +316,6 @@ __co__ void matmul_e4m3_ws_tbc(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] 
               mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
               mma.row.row mc, ma, mb;
             }
-            mma.commit;
             trigger.cluster empty[stage];
           }
           mma.store mc, output_s;
@@ -389,7 +386,7 @@ __co__ void blockscale_gemm_e4m3_ws_persis(global f8_e4m3 [M, K] lhs,
                 mma.row.row mc, ma, mb;
               }
               mma.scale mc, scale_lhs.subspan(MATMUL_WARP_M, 1).at(block_m, iv_k), scale_rhs.at(block_n, iv_k);
-              mma.commit;
+
               trigger empty[stage];
             }
             mma.store mc, output_s;

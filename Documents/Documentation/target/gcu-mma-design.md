@@ -14,7 +14,7 @@ GPU (CUTE mma.sync/WGMMA) and GCU (acore/VACC).
 machine. Out-of-line device stubs (ICALL workaround). Performance parity with
 hand-tuned acore patterns.
 
-**Out of scope:** GPU `mma.commit`/`mma.wait<N>` (kept as-is), `mma.scale`,
+**Out of scope:** GPU `mma.wait<N>` (kept as-is), `mma.scale`,
 sparse MMA on GCU. Async-future MMA redesign (separate GPU effort).
 
 ## Architecture
@@ -88,7 +88,7 @@ Supported configurations (from lower_libcall.hpp):
 
 ## Future: Async-Future MMA (GPU, Separate Effort)
 
-Replace `mma.commit`/`mma.wait<N>` with:
+Replace `mma.wait<N>` with:
 ```
 f = mma.row.col.async mc, ma, mb;
 wait f;

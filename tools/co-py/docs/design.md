@@ -154,7 +154,6 @@ ma = croq.mma.load(lhs.chunkat(m @ g0, k))    # ma = mma.load ...
 mb = croq.mma.load(rhs.chunkat(k, n @ g1))
 croq.mma.exec(mc, ma, mb, method="row.col")   # mma.row.col mc, ma, mb
 croq.mma.store(mc, output.chunkat(m @ g0, n @ g1))
-croq.mma.commit()
 ```
 
 ### 3.7 Data Access Methods

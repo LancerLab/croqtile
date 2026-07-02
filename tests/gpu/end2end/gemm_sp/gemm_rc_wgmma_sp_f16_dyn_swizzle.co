@@ -81,7 +81,6 @@ __co__ auto matmul_sp_f16_1p1c_swiz64_128(
             me = mma.load lhs_meta.subspan(WM, MC).at(bm, ik).chunkat(_, iw);
             mma.row.row.sp mc, ma, mb, me;
           }
-          mma.commit;
           trigger empty[stage];
         }
         mma.store mc, os;

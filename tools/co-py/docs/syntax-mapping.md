@@ -142,7 +142,6 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 | `mc = mma.row.col mc, ma, mb` | `mc = croq.mma.exec(mc, ma, mb, method="row.col")` | Done |
 | `mma.store mc, output_s.chunkat(...)` | `croq.mma.store(mc, output_s.chunkat(...))` | Done |
 | `mma.store.transp mc, ...` | `croq.mma.store(mc, ..., transpose=True)` | Done |
-| `mma.commit` | `croq.mma.commit()` | Done |
 | `frag mc[2][3] {0.0}` | `mc = croq.mma.frag("mc", [2, 3], 0.0)` | Done |
 | `mma.fill mc[0][1], 0.0f` | `croq.mma.fill(mc[0][1], 0.0)` | Done |
 | `mma.row.col mc[0][1], ma, mb` | `croq.mma.exec(mc[0][1], ma, mb, method="row.col")` | Done |

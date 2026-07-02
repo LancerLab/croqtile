@@ -686,13 +686,6 @@ PYBIND11_MODULE(_core, m) {
         py::arg("transpose") = false,
         "Create MMA store to a named variable (no chunkat indices).");
 
-  m.def("make_mma_commit",
-        []() -> Ptr<A::MMA> {
-          auto op = std::make_shared<A::MMAOperation>();
-          return A::Make<A::MMA>(pyloc(), op);
-        },
-        "Create MMA commit.");
-
   // ---- Call (builtins: __sqrt, __pow, etc.) ---------------------
 
   py::class_<A::Call, A::Node, Ptr<A::Call>>(m, "Call");
