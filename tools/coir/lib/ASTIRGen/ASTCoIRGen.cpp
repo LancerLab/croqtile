@@ -4,6 +4,7 @@
 #include "context.hpp"
 #include "dmaconf.hpp"
 #include "symbexpr.hpp"
+#include "symvals.hpp"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "llvm/ADT/StringSet.h"
@@ -140,6 +141,27 @@ void ASTCoIRGen::EmitNodeAssertions(AST::Node* node) {
   if (it == assert_map_.end()) return;
 
   for (auto* ar : it->second) {
+    // Re-evaluate the SBE expression with the current scope's bound
+    // information. Loop-scoped variables may have become concretely
+    // bounded since the original SemaChecker assessment, allowing
+    // compile-time resolution that the initial Assess() could not do.
+    if (ar->expr) {
+      auto norm = ar->expr->Normalize();
+      if (auto bv = VIBool(norm); bv && *bv) {
+        auto& stats = CCtx().GetAssessmentStats();
+        stats.static_true++;
+        stats.runtime_total--;
+        switch (ar->usage_type) {
+        case UsageType::UnClassified: stats.unclassified_runtime--; break;
+        case UsageType::ShapeCompatibility: stats.shape_compat_runtime--; break;
+        case UsageType::ElementAccess: stats.elem_access_runtime--; break;
+        case UsageType::LoopBound: stats.loop_bound_runtime--; break;
+        case UsageType::HardwareConstraint: stats.hw_constraint_runtime--; break;
+        }
+        continue;
+      }
+    }
+
     auto loc = ToLoc(ar->loc);
     auto predicate = MaterializeSBE(loc, ar->expr);
     if (!predicate) continue;
