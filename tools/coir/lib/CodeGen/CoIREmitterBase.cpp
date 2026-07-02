@@ -334,6 +334,10 @@ void CoIREmitterBase::emitConstant(arith::ConstantOp op) {
   }
 }
 
+static bool isFP8Type(mlir::Type ty) {
+  return isa<mlir::Float8E4M3FNType>(ty) || isa<mlir::Float8E5M2Type>(ty);
+}
+
 bool CoIREmitterBase::emitArithBinOp(Operation *op) {
   llvm::StringRef opStr;
   if (isa<arith::AddIOp>(op) || isa<arith::AddFOp>(op)) opStr = "+";
@@ -346,8 +350,17 @@ bool CoIREmitterBase::emitArithBinOp(Operation *op) {
   std::string name = getName(op->getResult(0));
   std::string lhs = getName(op->getOperand(0));
   std::string rhs = getName(op->getOperand(1));
-  os() << getIndent() << emitType(op->getResult(0).getType()) << " "
-       << name << " = " << lhs << " " << opStr << " " << rhs << ";\n";
+  auto resTy = op->getResult(0).getType();
+
+  // FP8 arithmetic operators in C++ return float; cast back if needed
+  if (isFP8Type(resTy)) {
+    os() << getIndent() << emitType(resTy) << " " << name << " = "
+         << emitType(resTy) << "(" << lhs << " " << opStr << " " << rhs
+         << ");\n";
+  } else {
+    os() << getIndent() << emitType(resTy) << " " << name << " = " << lhs
+         << " " << opStr << " " << rhs << ";\n";
+  }
   return true;
 }
 
