@@ -285,6 +285,12 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
 
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << STR(FBInfo()) << "\n");
+    if (CCtx().GetArch() != "gcu300") {
+      use_dte_pool = false;
+      no_future_mode = false;
+      named_dte_mode = false;
+      dte_merge_mode = false;
+    }
     if ((no_future_mode || named_dte_mode || dte_merge_mode) && !use_dte_pool) {
       std::string flags;
       if (no_future_mode) flags += " -fno-future";
