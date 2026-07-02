@@ -1,0 +1,13 @@
+// RUN: cocc -t cc -es %s | FileCheck %s
+//
+// Test: basic tensor operations on CPU target produce clean C++
+
+__co__ void copy_cpu(s32 [64] src, s32 [64] dst) {
+  parallel i by 64
+    dst.at(i) = src.at(i);
+}
+
+// CHECK: void __copy_cpu_impl__
+// CHECK: for (int
+// CHECK-NOT: cudaMemcpy
+// CHECK-NOT: __syncthreads

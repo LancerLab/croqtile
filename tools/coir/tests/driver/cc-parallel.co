@@ -1,0 +1,15 @@
+// RUN: cocc -t cc -es %s | FileCheck %s
+//
+// Test: parallel-by on CPU target emits for-loops instead of CUDA grid/block
+
+__co__ void parallel_cpu(s32 [128] x) {
+  parallel i by 4 : block
+    parallel j by 32
+      x.at(i * 32 + j) = 42;
+}
+
+// CHECK: void __parallel_cpu_impl__
+// CHECK: for (int
+// CHECK: for (int
+// CHECK-NOT: blockIdx
+// CHECK-NOT: threadIdx

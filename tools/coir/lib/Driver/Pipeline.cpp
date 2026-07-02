@@ -83,10 +83,17 @@ bool Pipeline::Lower() {
   mlir::PassManager pm(&ctx_);
   if (mlir::failed(mlir::applyPassManagerCLOptions(pm)))
     return false;
+
+  auto targetAttr =
+      module_->getAttrOfType<mlir::StringAttr>("coir.target");
+  bool isGPU = !targetAttr || targetAttr.getValue() != "cc";
+
   pm.addPass(coir::createClassifyCopiesPass());
-  pm.addPass(coir::createLowerDMADescPass());
-  pm.addPass(coir::createHoistDMAConfigPass());
-  pm.addPass(coir::createLowerMMAPass());
+  if (isGPU) {
+    pm.addPass(coir::createLowerDMADescPass());
+    pm.addPass(coir::createHoistDMAConfigPass());
+    pm.addPass(coir::createLowerMMAPass());
+  }
   pm.addPass(coir::createLowerCopyPass());
   return mlir::succeeded(pm.run(module_));
 }
