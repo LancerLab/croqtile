@@ -25,20 +25,20 @@ Documents/GPU-Examples/
 # External build scripts (GCU toolchain)
 extern/Makefile
 
-# Internal scripts (individual shell/md files in scripts/)
+# Internal scripts
 scripts/*.sh
 scripts/*.md
 scripts/hooks/
-
-# Internal oss sync tools (push, pull, setup, watch -- NOT scan)
 scripts/oss/
+scripts/sdk/
 
 # Samples (internal)
 samples/
 
-# GitLab CI (internal)
+# GitLab CI and tokens (internal)
 .gitlab-ci.yml
 .gitlab/
+.gitlab-*.txt
 
 # Internal runtime module
 runtime/catz/
@@ -61,6 +61,7 @@ performance/
 # Project meta (managed separately per repo)
 AGENTS.md
 .clang-format
+LICENSE.TXT
 
 # IDE / editor config
 .vscode/

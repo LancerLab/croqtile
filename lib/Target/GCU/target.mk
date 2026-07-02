@@ -219,7 +219,8 @@ SYNC_ALL    := bash $(OSS_SCRIPTS)/sync_all.sh
         oss-push-range oss-push-dry oss-catchup oss-catchup-dry \
         oss-pull oss-pull-last oss-pull-catchup oss-pull-catchup-dry \
         oss-pull-scan oss-watch \
-        oss-setup oss-status oss-help sync-all sync-all-once
+        oss-setup oss-status oss-help oss-sync-check oss-sync-check-verbose \
+        sync-all sync-all-once
 
 oss-push:
 	@if [ -z "$(COMMIT)" ]; then \
@@ -301,6 +302,12 @@ oss-status:
 	@echo ""; echo "Remotes:"
 	@git remote -v | grep -E '(oss-shadow|public)' || echo "  (no oss remote -- run: make oss-setup)"
 
+oss-sync-check:
+	@bash $(OSS_SCRIPTS)/oss-sync-check.sh
+
+oss-sync-check-verbose:
+	@bash $(OSS_SCRIPTS)/oss-sync-check.sh -v
+
 oss-help:
 	@echo "Open-Source Sync Commands"
 	@echo "========================="
@@ -326,6 +333,7 @@ oss-help:
 	@echo ""
 	@echo "  make oss-setup                  Initialize oss remote + branch"
 	@echo "  make oss-status                 Show sync status"
+	@echo "  make oss-sync-check             Verify file consistency main vs oss/main"
 	@echo ""
 	@echo "  make sync-all                   Start unified sync daemon (2-min loop)"
 	@echo "  make sync-all-once              Run one unified sync cycle"
