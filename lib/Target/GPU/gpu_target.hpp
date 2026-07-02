@@ -98,6 +98,7 @@ public:
           {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
           {STR(ChoreoFeature::TMA), Description(ChoreoFeature::TMA)},
           {STR(ChoreoFeature::DGMA), Description(ChoreoFeature::DGMA)},
+          {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
           {STR(ChoreoFeature::ASYNC_DMA),
            Description(ChoreoFeature::ASYNC_DMA)},
           {STR(ChoreoFeature::SLML), Description(ChoreoFeature::SLML)},
@@ -111,6 +112,7 @@ public:
     return {
         {STR(ChoreoFeature::EVENT), Description(ChoreoFeature::EVENT)},
         {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
+        {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
         {STR(ChoreoFeature::ASYNC_DMA), Description(ChoreoFeature::ASYNC_DMA)},
         {STR(ChoreoFeature::DGMA), Description(ChoreoFeature::DGMA)},
         {STR(ChoreoFeature::SLML), Description(ChoreoFeature::SLML)},
