@@ -1,0 +1,26 @@
+// Mock-vs-Real comparison: if/else, break, continue.
+
+__co__ void test() {
+  // Sum of odd numbers 1..10 using continue
+  mutable s32 sum = 0;
+  mutable s32 i = 0;
+  while (i < 20) {
+    i = i + 1;
+    if (i > 10)
+      break;
+    if (i % 2 == 0)
+      continue;
+    sum = sum + i;
+  }
+  println(sum);
+  println(i);
+
+  // Simple if/else
+  s32 x = 7;
+  mutable s32 r = 0;
+  if (x > 5)
+    r = 100;
+  else
+    r = 200;
+  println(r);
+}

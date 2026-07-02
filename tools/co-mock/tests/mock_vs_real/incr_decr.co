@@ -1,0 +1,12 @@
+// Mock-vs-Real comparison: pre-increment and pre-decrement.
+
+__co__ void test() {
+  mutable int x = 5;
+  int a = ++x;
+  println(a);
+  println(x);
+
+  int b = --x;
+  println(b);
+  println(x);
+}

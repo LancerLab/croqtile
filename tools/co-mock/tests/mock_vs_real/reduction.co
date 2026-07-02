@@ -1,0 +1,33 @@
+// Mock-vs-Real comparison: sum reduction and prefix sum.
+
+__co__ void test() {
+  s32[8] data;
+  foreach i in 8
+    data.at(i) = i + 1;
+
+  // Sum reduction
+  mutable s32 sum = 0;
+  foreach i in 8
+    sum = sum + data.at(i);
+  println(sum);
+
+  // Dot product: a[i] = i+1, b[i] = i*2
+  s32[4] a;
+  s32[4] b;
+  foreach i in 4 {
+    a.at(i) = i + 1;
+    b.at(i) = i * 2;
+  }
+
+  mutable s32 dot = 0;
+  foreach i in 4
+    dot = dot + a.at(i) * b.at(i);
+  println(dot);
+
+  // Prefix sum
+  s32[4] prefix;
+  prefix.at(0) = a.at(0);
+  foreach i in 3
+    prefix.at(i + 1) = prefix.at(i) + a.at(i + 1);
+  println(prefix.at(3));
+}

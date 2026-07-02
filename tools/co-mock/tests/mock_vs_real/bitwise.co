@@ -1,0 +1,16 @@
+// Mock-vs-Real comparison: bitwise and arithmetic operations.
+
+__co__ void test() {
+  s32 a = 5;
+  s32 b = 10;
+  s32 c = 15;
+  s32 d = 20;
+
+  println(a & 7);
+  println(b | 1);
+  println(c >> 1);
+  println(d << 1);
+
+  println(17 % 5);
+  println(17 / 5);
+}

@@ -1,0 +1,14 @@
+// Mock-vs-Real comparison: while loop computing factorial.
+
+__co__ void test() {
+  mutable s32 counter = 1;
+  mutable s32 result = 1;
+
+  while (counter <= 5) {
+    result = result * counter;
+    counter = counter + 1;
+  }
+
+  println(result);
+  println(counter);
+}
