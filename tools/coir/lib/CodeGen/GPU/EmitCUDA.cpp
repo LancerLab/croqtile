@@ -1898,21 +1898,14 @@ private:
 
   void emitCuteMakeShape(llvm::StringRef varName,
                          const llvm::SmallVector<int64_t> &dims,
-                         KernelOp kernel = nullptr) {
+                         const llvm::SmallVector<std::string> &dynNames) {
     os() << getIndent() << "auto " << varName << " = cute::make_shape(";
-    llvm::SmallVector<std::string> dimArgNames;
-    if (kernel) {
-      auto fnTy = kernel.getFunctionType();
-      for (unsigned a = 0; a < fnTy.getNumInputs(); ++a)
-        if (fnTy.getInput(a).isIndex())
-          dimArgNames.push_back(getName(kernel.getBody().getArgument(a)));
-    }
     unsigned dynIdx = 0;
     for (unsigned i = 0; i < dims.size(); ++i) {
       if (i > 0) os() << ", ";
       if (mlir::ShapedType::isDynamic(dims[i])) {
-        if (dynIdx < dimArgNames.size())
-          os() << dimArgNames[dynIdx];
+        if (dynIdx < dynNames.size())
+          os() << dynNames[dynIdx];
         else
           os() << "1";
         dynIdx++;
@@ -1921,6 +1914,107 @@ private:
       }
     }
     os() << ");\n";
+  }
+
+  void emitCuteMakeShape(llvm::StringRef varName,
+                         const llvm::SmallVector<int64_t> &dims,
+                         KernelOp kernel = nullptr) {
+    llvm::SmallVector<std::string> dimArgNames;
+    if (kernel) {
+      auto fnTy = kernel.getFunctionType();
+      for (unsigned a = 0; a < fnTy.getNumInputs(); ++a)
+        if (fnTy.getInput(a).isIndex())
+          dimArgNames.push_back(getName(kernel.getBody().getArgument(a)));
+    }
+    emitCuteMakeShape(varName, dims, dimArgNames);
+  }
+
+  // Resolve the kernel dim-arg names for each dynamic dimension of a Value,
+  // tracing through TensorTileOp to the originating kernel argument.
+  llvm::SmallVector<std::string> resolveDynDimNames(Value v, KernelOp kernel) {
+    llvm::SmallVector<std::string> result;
+    if (!kernel) return result;
+
+    auto dimArgMeta = getDimArgs(kernel);
+    if (dimArgMeta.empty()) return result;
+
+    auto tty = dyn_cast<coir::TensorType>(v.getType());
+    if (!tty) return result;
+
+    // Build map: (paramIdx, dimIdx) -> kernel arg name
+    // dim_args are in order matching the kernel index args
+    auto fnTy = kernel.getFunctionType();
+    llvm::SmallVector<Value> indexArgs;
+    for (unsigned a = 0; a < fnTy.getNumInputs(); ++a)
+      if (fnTy.getInput(a).isIndex())
+        indexArgs.push_back(kernel.getBody().getArgument(a));
+    llvm::DenseMap<std::pair<int64_t, int64_t>, std::string> dimMap;
+    for (unsigned i = 0; i < dimArgMeta.size() && i < indexArgs.size(); ++i)
+      dimMap[{dimArgMeta[i].paramIdx, dimArgMeta[i].dimIdx}] =
+          getName(indexArgs[i]);
+
+    // Trace value back to find source kernel param and dimension mapping.
+    // dimMapping[i] = which source dimension flows into result dimension i.
+    Value srcVal = v;
+    llvm::SmallVector<int> dimMapping;
+    for (unsigned i = 0; i < tty.getRank(); ++i)
+      dimMapping.push_back(i);
+
+    // Walk through TensorTileOp chains
+    while (auto tileOp = srcVal.getDefiningOp<TensorTileOp>()) {
+      auto srcTy = dyn_cast<coir::TensorType>(tileOp.getSource().getType());
+      if (!srcTy) break;
+      // TensorTileOp preserves dimension identity (same rank in/out for
+      // our cases); the result dim i corresponds to source dim i.
+      srcVal = tileOp.getSource();
+    }
+
+    // Handle TensorAllocOp: dynamic dims are explicit operands
+    if (auto allocOp = srcVal.getDefiningOp<coir::TensorAllocOp>()) {
+      auto dynOperands = allocOp.getDynamicDims();
+      unsigned dynIdx = 0;
+      auto shape = tty.getShape();
+      for (unsigned i = 0; i < shape.size(); ++i) {
+        if (mlir::ShapedType::isDynamic(shape[i])) {
+          unsigned srcDim = (unsigned)dimMapping[i];
+          // Find the dynOperand for this source dim position
+          auto srcTy = dyn_cast<coir::TensorType>(allocOp.getType());
+          unsigned srcDynIdx = 0;
+          for (unsigned d = 0; d < srcDim && srcTy; ++d)
+            if (mlir::ShapedType::isDynamic(srcTy.getShape()[d]))
+              srcDynIdx++;
+          if (srcDynIdx < dynOperands.size())
+            result.push_back(getName(dynOperands[srcDynIdx]));
+          else
+            result.push_back("1");
+          dynIdx++;
+        }
+      }
+      return result;
+    }
+
+    // Now srcVal should be a kernel block argument (the original tensor param)
+    int64_t paramIdx = -1;
+    if (auto blockArg = dyn_cast<BlockArgument>(srcVal)) {
+      auto *parentOp = blockArg.getOwner()->getParentOp();
+      if (parentOp == kernel.getOperation())
+        paramIdx = blockArg.getArgNumber();
+    }
+    if (paramIdx < 0) return result;
+
+    // For each dynamic dim in the tensor type, look up the correct arg name
+    auto shape = tty.getShape();
+    for (unsigned i = 0; i < shape.size(); ++i) {
+      if (mlir::ShapedType::isDynamic(shape[i])) {
+        unsigned srcDim = (unsigned)dimMapping[i];
+        auto it = dimMap.find({paramIdx, srcDim});
+        if (it != dimMap.end())
+          result.push_back(it->second);
+        else
+          result.push_back("1");
+      }
+    }
+    return result;
   }
 
   void emitCuteMakeStride(llvm::StringRef varName,
@@ -1950,7 +2044,11 @@ private:
     if (tty && tty.hasDynamicShape())
       if (auto *block = v.getParentBlock())
         enclosingKernel = block->getParent()->getParentOfType<KernelOp>();
-    emitCuteMakeShape(shapeName, layout.shape, enclosingKernel);
+    auto dynNames = resolveDynDimNames(v, enclosingKernel);
+    if (!dynNames.empty())
+      emitCuteMakeShape(shapeName, layout.shape, dynNames);
+    else
+      emitCuteMakeShape(shapeName, layout.shape, enclosingKernel);
 
     // For dynamic tensors, use shape-only layout (CUTE computes row-major strides)
     if (tty && tty.hasDynamicShape()) {
@@ -2380,12 +2478,12 @@ private:
         std::string tileElemsExpr;
         if (hasDynLocal) {
           llvm::raw_string_ostream ss(tileElemsExpr);
-          llvm::SmallVector<std::string> dimArgNames;
-          if (enclosingKernel) {
+          auto dynNames = resolveDynDimNames(localVal, enclosingKernel);
+          if (dynNames.empty() && enclosingKernel) {
             auto fnTy = enclosingKernel.getFunctionType();
             for (unsigned a = 0; a < fnTy.getNumInputs(); ++a)
               if (fnTy.getInput(a).isIndex())
-                dimArgNames.push_back(
+                dynNames.push_back(
                     getName(enclosingKernel.getBody().getArgument(a)));
           }
           unsigned dynIdx = 0;
@@ -2393,8 +2491,8 @@ private:
             if (d > 0) ss << " * ";
             auto dim = localTy.getShape()[d];
             if (mlir::ShapedType::isDynamic(dim)) {
-              if (dynIdx < dimArgNames.size())
-                ss << dimArgNames[dynIdx];
+              if (dynIdx < dynNames.size())
+                ss << dynNames[dynIdx];
               else
                 ss << "1";
               dynIdx++;
@@ -2413,15 +2511,99 @@ private:
         std::string elemTy = emitElementType(globalTy.getElementType());
 
         // Compute linearized offset using global tensor strides.
+        // For dynamic shapes, build runtime stride expressions.
         auto globalShape = globalTy.getShape();
-        llvm::SmallVector<int64_t> globalStrides(globalShape.size());
-        {
+        bool hasDynGlobal = globalTy.hasDynamicShape();
+        llvm::SmallVector<std::string> globalStrideExprs(globalShape.size());
+        if (hasDynGlobal && enclosingKernel) {
+          // Resolve dim names for global tensor to build stride expressions
+          llvm::SmallVector<std::string> gDimNames;
+          Value gBase = globalVal;
+          // Try resolving from TensorAllocOp first (covers output tensors)
+          if (auto gAlloc = gBase.getDefiningOp<coir::TensorAllocOp>()) {
+            auto dynOps = gAlloc.getDynamicDims();
+            unsigned dynIdx = 0;
+            for (unsigned d = 0; d < globalShape.size(); ++d) {
+              if (mlir::ShapedType::isDynamic(globalShape[d])) {
+                if (dynIdx < dynOps.size())
+                  gDimNames.push_back(getName(dynOps[dynIdx]));
+                else
+                  gDimNames.push_back("1");
+                dynIdx++;
+              } else {
+                gDimNames.push_back(std::to_string(globalShape[d]));
+              }
+            }
+          } else {
+            int64_t gParamIdx = -1;
+            if (auto blk = dyn_cast<BlockArgument>(gBase))
+              if (blk.getOwner()->getParentOp() == enclosingKernel)
+                gParamIdx = blk.getArgNumber();
+            auto gDimMeta = getDimArgs(enclosingKernel);
+            auto gDimChecks = getDimChecks(enclosingKernel);
+            auto gFnTy = enclosingKernel.getFunctionType();
+            llvm::SmallVector<Value> gIndexArgs;
+            for (unsigned a = 0; a < gFnTy.getNumInputs(); ++a)
+              if (gFnTy.getInput(a).isIndex())
+                gIndexArgs.push_back(
+                    enclosingKernel.getBody().getArgument(a));
+            llvm::DenseMap<std::pair<int64_t, int64_t>, std::string> gMap;
+            for (unsigned m = 0; m < gDimMeta.size() &&
+                                 m < gIndexArgs.size();
+                 ++m)
+              gMap[{gDimMeta[m].paramIdx, gDimMeta[m].dimIdx}] =
+                  getName(gIndexArgs[m]);
+            for (unsigned d = 0; d < globalShape.size(); ++d) {
+              if (mlir::ShapedType::isDynamic(globalShape[d])) {
+                auto it = gMap.find({gParamIdx, d});
+                if (it != gMap.end())
+                  gDimNames.push_back(it->second);
+                else {
+                  std::string found;
+                  for (auto &dc : gDimChecks) {
+                    if (dc.param1 == gParamIdx && (int64_t)d == dc.dim1) {
+                      auto it2 = gMap.find({dc.param0, dc.dim0});
+                      if (it2 != gMap.end()) {
+                        found = it2->second;
+                        break;
+                      }
+                    }
+                    if (dc.param0 == gParamIdx && (int64_t)d == dc.dim0) {
+                      auto it2 = gMap.find({dc.param1, dc.dim1});
+                      if (it2 != gMap.end()) {
+                        found = it2->second;
+                        break;
+                      }
+                    }
+                  }
+                  gDimNames.push_back(found.empty() ? "1" : found);
+                }
+              } else {
+                gDimNames.push_back(std::to_string(globalShape[d]));
+              }
+            }
+          }
+          // Build stride expressions: stride[i] = prod(dim[i+1..n-1])
+          for (unsigned d = 0; d < globalShape.size(); ++d) {
+            std::string expr = "1";
+            for (unsigned j = d + 1; j < globalShape.size(); ++j) {
+              if (expr == "1")
+                expr = gDimNames[j];
+              else
+                expr += " * " + gDimNames[j];
+            }
+            globalStrideExprs[d] = expr;
+          }
+        } else {
+          llvm::SmallVector<int64_t> staticStrides(globalShape.size());
           int64_t s = 1;
           for (int i = (int)globalShape.size() - 1; i >= 0; --i) {
-            globalStrides[i] = s;
+            staticStrides[i] = s;
             if (!mlir::ShapedType::isDynamic(globalShape[i]))
               s *= globalShape[i];
           }
+          for (unsigned d = 0; d < globalShape.size(); ++d)
+            globalStrideExprs[d] = std::to_string(staticStrides[d]);
         }
         std::string offExpr;
         if (offsets.size() == 1) {
@@ -2431,8 +2613,8 @@ private:
         } else {
           for (unsigned i = 0; i < offsets.size(); ++i) {
             std::string term = getName(offsets[i]);
-            if (globalStrides[i] != 1)
-              term += " * " + std::to_string(globalStrides[i]);
+            if (globalStrideExprs[i] != "1")
+              term += " * " + globalStrideExprs[i];
             if (i == 0) offExpr = term;
             else offExpr += " + " + term;
           }
@@ -2451,6 +2633,73 @@ private:
         std::string suffix = "_" + std::to_string(id);
         if (hasDynCopy) {
           auto dynDims = invokeOp.getDynDims();
+          // Fallback: resolve dim names from the base tensor's dim_args,
+          // indexed by position in copyShape (not by dynamic-dim count).
+          llvm::DenseMap<unsigned, std::string> positionedNames;
+          if (dynDims.empty() && enclosingKernel) {
+            Value baseVal = desc.isLoad ? globalVal : localVal;
+            auto dimArgMeta = getDimArgs(enclosingKernel);
+            auto dimChecks = getDimChecks(enclosingKernel);
+            auto fnTy = enclosingKernel.getFunctionType();
+            llvm::SmallVector<Value> indexArgs;
+            for (unsigned a = 0; a < fnTy.getNumInputs(); ++a)
+              if (fnTy.getInput(a).isIndex())
+                indexArgs.push_back(
+                    enclosingKernel.getBody().getArgument(a));
+            // Build (param, dim) -> argName from dim_args
+            llvm::DenseMap<std::pair<int64_t, int64_t>, std::string> dimMap;
+            for (unsigned m = 0; m < dimArgMeta.size() &&
+                                 m < indexArgs.size();
+                 ++m)
+              dimMap[{dimArgMeta[m].paramIdx, dimArgMeta[m].dimIdx}] =
+                  getName(indexArgs[m]);
+            // Find which kernel param the base tensor is
+            int64_t paramIdx = -1;
+            if (auto blk = dyn_cast<BlockArgument>(baseVal))
+              if (blk.getOwner()->getParentOp() == enclosingKernel)
+                paramIdx = blk.getArgNumber();
+            if (paramIdx >= 0) {
+              for (unsigned d = 0; d < copyShape.size(); ++d) {
+                if (!mlir::ShapedType::isDynamic(copyShape[d])) continue;
+                auto it = dimMap.find({paramIdx, d});
+                if (it != dimMap.end()) {
+                  positionedNames[d] = it->second;
+                } else {
+                  for (auto &dc : dimChecks) {
+                    if (dc.param1 == paramIdx && (int64_t)d == dc.dim1) {
+                      auto it2 = dimMap.find({dc.param0, dc.dim0});
+                      if (it2 != dimMap.end())
+                        positionedNames[d] = it2->second;
+                      break;
+                    }
+                    if (dc.param0 == paramIdx && (int64_t)d == dc.dim0) {
+                      auto it2 = dimMap.find({dc.param1, dc.dim1});
+                      if (it2 != dimMap.end())
+                        positionedNames[d] = it2->second;
+                      break;
+                    }
+                  }
+                }
+              }
+            } else if (auto allocOp =
+                           baseVal.getDefiningOp<coir::TensorAllocOp>()) {
+              // For alloc'd tensors, use dynamic operand names directly
+              auto dynOps = allocOp.getDynamicDims();
+              auto allocTy = dyn_cast<coir::TensorType>(allocOp.getType());
+              unsigned dynIdx = 0;
+              for (unsigned d = 0; d < copyShape.size() && allocTy; ++d) {
+                if (!mlir::ShapedType::isDynamic(copyShape[d])) continue;
+                // Find which alloc dynOp corresponds to this position
+                unsigned allocDynIdx = 0;
+                for (unsigned ad = 0; ad < d; ++ad)
+                  if (mlir::ShapedType::isDynamic(allocTy.getShape()[ad]))
+                    allocDynIdx++;
+                if (allocDynIdx < dynOps.size())
+                  positionedNames[d] = getName(dynOps[allocDynIdx]);
+                dynIdx++;
+              }
+            }
+          }
           std::string shapeName = "__dma_shape" + suffix;
           os() << getIndent() << "auto " << shapeName << " = cute::make_shape(";
           unsigned dynIdx = 0;
@@ -2459,6 +2708,8 @@ private:
             if (mlir::ShapedType::isDynamic(copyShape[i])) {
               if (dynIdx < dynDims.size())
                 os() << "(int)" << getName(dynDims[dynIdx]);
+              else if (positionedNames.count(i))
+                os() << positionedNames[i];
               else
                 os() << "1";
               dynIdx++;

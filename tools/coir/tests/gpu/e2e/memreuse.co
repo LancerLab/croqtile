@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GPU
-// XFAIL: *
 // RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 #include "choreo.h"
 
