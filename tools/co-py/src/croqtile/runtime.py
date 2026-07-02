@@ -1,23 +1,31 @@
 """croqtile-python runtime -- compile, execute, and verify kernels from Python.
 
 Provides a Python-native interface for:
-  - Finding the croqtile compiler and nvcc
+  - Finding the Choreo compiler and nvcc
   - Compiling .co source -> CUDA -> executable
-  - Executing kernels with numpy data
-  - Auto-generating host verification code
+  - Executing kernels with array data (GPU arch auto-detected)
+  - Auto-generating host code for data marshaling
 
 Usage::
 
     import croq
     import numpy as np
+    from croqtile.runtime import execute
+
+    @croq.co
+    def add(lhs: croq.s32[6, 64],
+            rhs: croq.s32[6, 64]) -> croq.s32[6, 64]:
+        output = croq.declare(croq.s32[6, 64], "output")
+        for p, q in croq.parallel(p=6, q=64):
+            output[p, q] = lhs[p, q] + rhs[p, q]
+        return output
 
     prog = croq.Program()
-    prog.add(my_kernel)
+    prog.add(add)
 
-    result = croq.runtime.compile_and_run(
-        prog, arch="sm_86",
-        inputs={"lhs": np.ones((6, 64), dtype=np.int32),
-                "rhs": np.ones((6, 64), dtype=np.int32)})
+    a = np.ones((6, 64), dtype=np.int32)
+    b = np.ones((6, 64), dtype=np.int32)
+    result = execute(prog, {"lhs": a, "rhs": b})
 """
 
 from __future__ import annotations
@@ -127,6 +135,52 @@ def find_cutlass_include() -> Optional[str]:
         if resolved.is_dir() and (resolved / "cutlass").is_dir():
             return str(resolved)
     return None
+
+
+_detected_arch: Optional[str] = None
+
+
+def detect_gpu_arch() -> str:
+    """Auto-detect the GPU compute capability of the current device.
+
+    Queries the NVIDIA driver via nvidia-smi or a small CUDA program.
+    Caches the result for subsequent calls.
+
+    Returns:
+        Architecture string like "sm_86", "sm_90a", etc.
+    """
+    global _detected_arch
+    if _detected_arch is not None:
+        return _detected_arch
+
+    # Method 1: nvidia-smi --query-gpu
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            cap = result.stdout.strip().split('\n')[0].strip()
+            major, minor = cap.split('.')
+            arch = f"sm_{major}{minor}"
+            # SM90 GPUs with async features report as sm_90a
+            if arch == "sm_90":
+                arch = "sm_90a"
+            _detected_arch = arch
+            return _detected_arch
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        pass
+
+    # Method 2: CUDA_ARCH environment override
+    env_arch = os.environ.get("CROQTILE_ARCH") or os.environ.get("CUDA_ARCH")
+    if env_arch:
+        if not env_arch.startswith("sm_"):
+            env_arch = f"sm_{env_arch}"
+        _detected_arch = env_arch
+        return _detected_arch
+
+    # Fallback
+    _detected_arch = "sm_86"
+    return _detected_arch
 
 
 def compile_co_to_cuda(co_source: str, *,
@@ -391,18 +445,59 @@ _NUMPY_TO_CHOREO_DTYPE = {
     "float16": "f16",
 }
 
+_CHOREO_TO_NUMPY_DTYPE = {
+    "s32": "int32", "u32": "uint32",
+    "s16": "int16", "u16": "uint16",
+    "s8": "int8", "u8": "uint8",
+    "s64": "int64", "u64": "uint64",
+    "f32": "float32", "f64": "float64",
+    "f16": "float16",
+    "bf16": "uint16",
+    "f8_e4m3": "uint8", "f8_e5m2": "uint8",
+}
+
+
+def _infer_output_from_program(program):
+    """Infer output shape and dtype from the kernel's return type annotation.
+
+    Returns (shape_tuple, numpy_dtype, choreo_dtype_str) or (None, None, None)
+    if inference fails.
+    """
+    import numpy as _np
+    from croqtile.builder import _FunctionBuilder
+    for kind, item in program._items:
+        if kind == "func" and isinstance(item, _FunctionBuilder):
+            ret_co = item._ret_co
+            if not ret_co or ret_co in ("auto", "void"):
+                return None, None, None
+            ret_co = ret_co.strip()
+            bracket = ret_co.find("[")
+            if bracket < 0:
+                return None, None, None
+            base_type = ret_co[:bracket].strip()
+            dims_str = ret_co[bracket + 1:ret_co.rfind("]")]
+            shape = tuple(int(d.strip()) for d in dims_str.split(","))
+            np_dtype_name = _CHOREO_TO_NUMPY_DTYPE.get(base_type)
+            if np_dtype_name is None:
+                return None, None, None
+            return shape, _np.dtype(np_dtype_name), base_type
+    return None, None, None
+
 
 def _numpy_dtype_to_choreo(np_dtype) -> str:
     """Convert numpy dtype name to Choreo dtype string."""
-    name = str(np_dtype)
+    import numpy as _np
+    dt = _np.dtype(np_dtype)
+    name = dt.name
     if name in _NUMPY_TO_CHOREO_DTYPE:
         return _NUMPY_TO_CHOREO_DTYPE[name]
-    raise ValueError(f"Unsupported numpy dtype: {np_dtype}")
+    raise ValueError(f"Unsupported numpy dtype: {np_dtype} (name={name})")
 
 
 def generate_host_main_numpy(kernel_name: str,
                              params: List[Dict],
-                             output_file: str) -> str:
+                             output_file: str,
+                             output_info: Dict = None) -> str:
     """Generate C++ host main() that reads inputs from binary files and
     writes output to a binary file.
 
@@ -410,8 +505,10 @@ def generate_host_main_numpy(kernel_name: str,
         kernel_name: Name of the __co__ function
         params: List of parameter specs:
             {"name": str, "dtype": str, "shape": tuple,
-             "role": "input"|"output", "bin_path": str}
+             "role": "input"|"output"|"scalar", "bin_path": str}
         output_file: Path to write the kernel output (binary)
+        output_info: Optional dict with "dtype" and "shape" for the output
+            (overrides inference from params)
 
     Returns:
         C++ main() source string
@@ -426,9 +523,25 @@ def generate_host_main_numpy(kernel_name: str,
 
     for p in params:
         dtype = p["dtype"]
-        shape = p["shape"]
         name = p["name"]
         role = p.get("role", "input")
+
+        if role == "scalar":
+            choreo_dt = _DTYPE_MAP.get(dtype, (f"choreo::{dtype}",))[0]
+            val = p['value']
+            if dtype == "f16":
+                lines.append(
+                    f"  {choreo_dt} {name} = __float2half({val}f);")
+            elif dtype == "bf16":
+                lines.append(
+                    f"  {choreo_dt} {name} = __float2bfloat16({val}f);")
+            else:
+                lines.append(
+                    f"  {choreo_dt} {name} = "
+                    f"static_cast<{choreo_dt}>({val});")
+            continue
+
+        shape = p["shape"]
         ctype = _NUMPY_DTYPE_MAP.get(dtype, dtype)
         choreo_dt = _DTYPE_MAP.get(dtype, (f"choreo::{dtype}",))[0]
         shape_args = ", ".join(str(d) for d in shape)
@@ -450,26 +563,43 @@ def generate_host_main_numpy(kernel_name: str,
                 f" {numel} * sizeof({ctype}));")
             lines.append(f"  }}")
 
-    input_params = [p for p in params if p.get("role", "input") == "input"]
+    input_params = [p for p in params
+                    if p.get("role") in ("input", "scalar")]
     output_params = [p for p in params if p.get("role") == "output"]
 
     if output_params:
-        all_views = ", ".join(f"{p['name']}.view()" for p in params)
-        lines.append(f"  {kernel_name}({all_views});")
+        call_args = []
+        for p in params:
+            if p.get("role") == "scalar":
+                call_args.append(p["name"])
+            else:
+                call_args.append(f"{p['name']}.view()")
+        lines.append(
+            f"  {kernel_name}({', '.join(call_args)});")
         out_p = output_params[0]
         out_name = out_p["name"]
     else:
-        input_views = ", ".join(
-            f"{p['name']}.view()" for p in input_params)
+        call_args = []
+        for p in input_params:
+            if p.get("role") == "scalar":
+                call_args.append(p["name"])
+            else:
+                call_args.append(f"{p['name']}.view()")
         lines.append(
-            f"  auto res = {kernel_name}({input_views});")
+            f"  auto res = {kernel_name}({', '.join(call_args)});")
         out_name = "res"
 
-    out_dtype = (output_params[0]["dtype"] if output_params
-                 else input_params[0]["dtype"])
+    if output_info:
+        out_dtype = output_info["dtype"]
+        out_shape = output_info["shape"]
+    elif output_params:
+        out_dtype = output_params[0]["dtype"]
+        out_shape = output_params[0]["shape"]
+    else:
+        array_params = [p for p in input_params if p.get("role") != "scalar"]
+        out_dtype = array_params[0]["dtype"]
+        out_shape = array_params[0]["shape"]
     out_ctype = _NUMPY_DTYPE_MAP.get(out_dtype, out_dtype)
-    out_shape = (output_params[0]["shape"] if output_params
-                 else input_params[0]["shape"])
     out_numel = 1
     for d in out_shape:
         out_numel *= d
@@ -486,23 +616,37 @@ def generate_host_main_numpy(kernel_name: str,
     return "\n".join(lines)
 
 
-def run_with_numpy(program, inputs: Dict, *,
-                   output_shape=None,
-                   output_dtype=None,
-                   arch: str = "sm_86",
-                   target: str = "cute",
-                   timeout: int = 120):
-    """Execute a kernel with numpy array inputs and get numpy output.
+def execute(program, inputs: Dict, *,
+            output_shape=None,
+            output_dtype=None,
+            output_choreo_dtype: str = None,
+            arch: str = None,
+            target: str = "cute",
+            timeout: int = 120):
+    """Compile and execute a kernel, returning results as a numpy array.
+
+    This is the primary Python-native interface for running Choreo kernels.
+    Output shape and dtype are inferred from the kernel's return type
+    annotation. GPU architecture is auto-detected unless explicitly
+    overridden.
 
     Args:
-        program: A croq.Program with a single kernel (no host code)
-        inputs: Dict mapping parameter names to numpy arrays
-        output_shape: Shape of output (inferred from kernel return type
-                      if not specified)
-        output_dtype: numpy dtype of output (inferred if not specified)
-        arch: GPU architecture
-        target: Compilation target
-        timeout: Execution timeout
+        program: A croq.Program with a single kernel (no host code added)
+        inputs: Dict mapping parameter names to data. Values can be:
+            - numpy arrays
+            - Python scalars (int, float) for scalar kernel parameters
+            - tuples of (array, choreo_dtype_str) for types without native
+              numpy support (bf16, fp8, etc.)
+        output_shape: Override output shape (normally inferred from kernel
+            return type)
+        output_dtype: Override numpy dtype of output (normally inferred)
+        output_choreo_dtype: Override Choreo dtype string for output.
+            Only needed when output_dtype alone is ambiguous (e.g. uint16
+            could be bf16 or u16).
+        arch: GPU architecture (default: auto-detected from device).
+            Override with e.g. "sm_86", "sm_90a" for cross-compilation.
+        target: Compilation target (default: "cute")
+        timeout: Execution timeout in seconds
 
     Returns:
         numpy array with kernel output
@@ -525,10 +669,11 @@ def run_with_numpy(program, inputs: Dict, *,
 
         a = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
         b = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
-        result = croq.runtime.run_with_numpy(
-            prog, {"lhs": a, "rhs": b}, arch="sm_86")
+        result = croqtile.runtime.execute(prog, {"lhs": a, "rhs": b})
         np.testing.assert_array_equal(result, a + b)
     """
+    if arch is None:
+        arch = detect_gpu_arch()
     import numpy as np
 
     tmpdir = tempfile.mkdtemp(prefix="croqtile_np_")
@@ -536,24 +681,56 @@ def run_with_numpy(program, inputs: Dict, *,
         params = []
         kernel_name = None
 
-        for name, arr in inputs.items():
-            bin_path = os.path.join(tmpdir, f"{name}.bin")
-            arr.tofile(bin_path)
-            choreo_dtype = _numpy_dtype_to_choreo(arr.dtype)
-            params.append({
-                "name": name,
-                "dtype": choreo_dtype,
-                "shape": arr.shape,
-                "role": "input",
-                "bin_path": bin_path,
-            })
+        for name, val in inputs.items():
+            if isinstance(val, tuple) and len(val) == 2:
+                arr, explicit_dtype = np.asarray(val[0]), val[1]
+            else:
+                arr, explicit_dtype = np.asarray(val), None
 
-        if output_shape is None:
-            first_arr = next(iter(inputs.values()))
-            output_shape = first_arr.shape
-        if output_dtype is None:
-            first_arr = next(iter(inputs.values()))
-            output_dtype = first_arr.dtype
+            if arr.ndim == 0:
+                choreo_dtype = (explicit_dtype
+                                or _numpy_dtype_to_choreo(arr.dtype))
+                params.append({
+                    "name": name,
+                    "dtype": choreo_dtype,
+                    "shape": (),
+                    "role": "scalar",
+                    "value": arr.item(),
+                })
+            else:
+                bin_path = os.path.join(tmpdir, f"{name}.bin")
+                arr.tofile(bin_path)
+                choreo_dtype = (explicit_dtype
+                                or _numpy_dtype_to_choreo(arr.dtype))
+                params.append({
+                    "name": name,
+                    "dtype": choreo_dtype,
+                    "shape": arr.shape,
+                    "role": "input",
+                    "bin_path": bin_path,
+                })
+
+        if output_shape is None or output_dtype is None:
+            inferred = _infer_output_from_program(program)
+            inf_shape, inf_np_dtype, inf_co_dtype = inferred
+            if inf_shape is not None:
+                if output_shape is None:
+                    output_shape = inf_shape
+                if output_dtype is None:
+                    output_dtype = inf_np_dtype
+                if output_choreo_dtype is None:
+                    output_choreo_dtype = inf_co_dtype
+            else:
+                array_inputs = [np.asarray(v) for v in inputs.values()
+                               if np.asarray(v).ndim > 0]
+                if not array_inputs:
+                    raise ValueError(
+                        "Cannot infer output shape/dtype: no array "
+                        "inputs and kernel return type not annotated")
+                if output_shape is None:
+                    output_shape = array_inputs[0].shape
+                if output_dtype is None:
+                    output_dtype = array_inputs[0].dtype
 
         out_bin = os.path.join(tmpdir, "output.bin")
 
@@ -570,8 +747,13 @@ def run_with_numpy(program, inputs: Dict, *,
         if not kernel_name:
             raise ValueError("Cannot determine kernel name from program")
 
+        if output_choreo_dtype:
+            out_co_dtype = output_choreo_dtype
+        else:
+            out_co_dtype = _numpy_dtype_to_choreo(output_dtype)
+        out_info = {"dtype": out_co_dtype, "shape": output_shape}
         host_main = generate_host_main_numpy(
-            kernel_name, params, out_bin)
+            kernel_name, params, out_bin, output_info=out_info)
         program.add(host_main)
 
         co_source = program.to_co(check_lines=["IO_DONE"])
@@ -593,3 +775,7 @@ def run_with_numpy(program, inputs: Dict, *,
     finally:
         import shutil as _shutil
         _shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# Backward-compatible alias
+run_with_numpy = execute
