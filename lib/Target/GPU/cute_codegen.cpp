@@ -5603,9 +5603,32 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             else
               raw_base = ExprSTR(ca->data, false);
 
-            if (ca->NoOperation()) return raw_base;
-
             sbe::ExprSum phys;
+
+            if (ca->indices != nullptr) {
+              auto sym_ty = GetSymbolType(ca->data->name);
+              if (auto array_ty = dyn_cast<ArrayType>(sym_ty)) {
+                std::string array_idx;
+                auto subscriptions = ca->indices->AllValues();
+                const ValueList& array_sizes = array_ty->Dimensions();
+                for (size_t i = 0; i < subscriptions.size(); ++i) {
+                  if (array_idx.empty())
+                    array_idx = ExprSTR(subscriptions[i], false);
+                  else
+                    array_idx = "(" + array_idx + ")*" +
+                                ValueSTR(array_sizes[i]) + "+" +
+                                ExprSTR(subscriptions[i], false);
+                }
+                auto f_sty = GetSpannedType(sym_ty);
+                std::string elem_count =
+                    ValueSTR(f_sty->GetShape().ElementCountValue());
+                phys += sbe::sym("(" + array_idx + ")*(" + elem_count + ")");
+              }
+            }
+
+            if (ca->NoOperation() && ValueSTR(phys.Get()) == "0")
+              return raw_base;
+
             for (size_t i = 0; i < ca->OpCount(); ++i) {
               const auto& sop = ca->OpAt(i);
               if (isa<AST::SOP::Reshape>(sop)) continue;
