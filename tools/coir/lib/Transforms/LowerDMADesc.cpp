@@ -106,13 +106,16 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
         hasOffsets ? coir::DMAKind::Slice : coir::DMAKind::Copy);
 
     mlir::IntegerAttr swizAttr;
+    mlir::UnitAttr zfillAttr;
     if constexpr (isTMA) {
       if (auto sb = op.getSwizzleBytes())
         swizAttr = rewriter.getI64IntegerAttr(*sb);
+      if (op.getZfill())
+        zfillAttr = rewriter.getUnitAttr();
     }
     auto constDesc = rewriter.create<DMAConstDescOp>(
         loc, descType, srcBase, dstBase, kindAttr,
-        isTMA ? rewriter.getUnitAttr() : nullptr, swizAttr);
+        isTMA ? rewriter.getUnitAttr() : nullptr, swizAttr, zfillAttr);
     auto prefetch = rewriter.create<DMADescPrefetchOp>(
         loc, descRtType, constDesc.getOut());
 

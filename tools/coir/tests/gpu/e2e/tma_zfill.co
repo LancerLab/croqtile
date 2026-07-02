@@ -1,0 +1,71 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: cocc -t cute -es -arch=sm_90a %s 2>&1 | FileCheck %s
+// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines --check-prefix=EXEC %s && rm -f %s.result
+//
+// TMA copy with .zfill: out-of-bounds elements are zero-filled.
+// Tests CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA emission.
+
+#define M 64
+#define N 64
+#define K 40
+#define TILE_K 16
+
+__co__ auto tma_zfill_matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0};
+  parallel {bm, bn} by [1, 1] : block {
+    shared f16 [M, TILE_K] lhs_s;
+    shared f16 [N, TILE_K] rhs_s;
+    mc = mma.fill.f32 0.0f;
+
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      tma.copy.swiz<32>.zfill lhs.subspan(M, TILE_K).at(bm, iv_k) => lhs_s;
+      tma.copy.swiz<32>.zfill rhs.subspan(N, TILE_K).at(bn, iv_k) => rhs_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K, 16)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<32> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared f16 [M, N] out_s;
+    mma.store mc, out_s;
+    tma.copy out_s => output.subspan(M, N).at(bm, bn);
+  }
+  return output;
+}
+
+int main() {
+  size_t m = 64, n = 64, k = 40;
+
+  auto lhs_h = choreo::make_spandata<choreo::f16>(m, k);
+  auto rhs_h = choreo::make_spandata<choreo::f16>(n, k);
+  lhs_h.fill(1.0f);
+  rhs_h.fill(1.0f);
+
+  auto res = tma_zfill_matmul(lhs_h.view(), rhs_h.view());
+
+  // A=1, B=1, K=40 with TILE_K=16 => 3 iterations (cdiv(40,16)=3)
+  // iter 2 loads cols 32..47 but K=40, so cols 40..47 are OOB zero-filled.
+  // Total accumulation: 40 (only valid elements contribute)
+  float expected = (float)k;
+  bool pass = true;
+  for (size_t i = 0; i < m && pass; ++i)
+    for (size_t j = 0; j < n && pass; ++j) {
+      float got = __half2float(res[i][j]);
+      if (std::abs(got - expected) > 1.0f) {
+        std::cout << "FAIL at [" << i << "," << j << "]: got " << got
+                  << " expected " << expected << std::endl;
+        pass = false;
+      }
+    }
+
+  if (pass) std::cout << "TMA zfill Test Passed" << std::endl;
+  else std::cout << "FAIL: tma_zfill" << std::endl;
+}
+
+// CHECK: CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA
+// CHECK: CU_TENSOR_MAP_SWIZZLE_32B
+// EXEC: TMA zfill Test Passed
