@@ -1355,7 +1355,27 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       }
 
       auto resTy = lhs.getType();
+      bool isMMAFrag = mlir::isa<coir::MMAFragType>(resTy);
       bool isFloat = mlir::isa<mlir::FloatType>(resTy);
+      if (!isFloat && isMMAFrag) {
+        auto fragTy = mlir::cast<coir::MMAFragType>(resTy);
+        isFloat = mlir::isa<mlir::FloatType>(fragTy.getElementType());
+      }
+
+      if (isMMAFrag) {
+        std::string funcName;
+        if (op == Op::Add) funcName = "fragment_scalar_elementwise_add";
+        else if (op == Op::Sub) funcName = "fragment_scalar_elementwise_sub";
+        else if (op == Op::Mul) funcName = "fragment_scalar_elementwise_mul";
+        if (!funcName.empty()) {
+          llvm::SmallVector<mlir::Value> operands = {lhs, rhs};
+          auto callOp = builder.create<coir::CallOp>(
+              loc, resTy, funcName, operands,
+              mlir::ArrayAttr{},
+              mlir::BoolAttr{}, mlir::BoolAttr{}, mlir::BoolAttr{});
+          return callOp.getResult();
+        }
+      }
 
       if (op == Op::Add)
         return isFloat
@@ -2189,9 +2209,14 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
     if (!fillVal) return true;
 
     auto fillType = op.FillingType();
-    auto elemTy = (fillType != BaseType::UNKSCALAR)
-                      ? LowerBaseType(fillType)
-                      : fillVal.getType();
+    mlir::Type elemTy;
+    if (fillType != BaseType::UNKSCALAR)
+      elemTy = LowerBaseType(fillType);
+    else {
+      elemTy = fillVal.getType();
+      if (elemTy.isF64())
+        elemTy = mlir::Float32Type::get(&IRContext());
+    }
 
     llvm::SmallVector<int64_t> shape;
     // Prefer shape from symbol table (set by ShapeInference)

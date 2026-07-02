@@ -146,6 +146,11 @@ private:
   DenseSet<Value> dmaTokens; // tokens from DMAInvokeOp
   unsigned nextFutureId = 0;
 
+  std::string emitElementType(Type ty) override {
+    if (ty.isBF16()) return "__nv_bfloat16";
+    return CoIREmitterBase::emitElementType(ty);
+  }
+
   std::string emitType(Type ty) override {
     if (auto tensorTy = dyn_cast<coir::TensorType>(ty)) {
       std::string result;
@@ -216,6 +221,28 @@ private:
     auto callee = op.getCallee().str();
     bool isExpr = op.getIsExpr() && *op.getIsExpr() && op.getResult();
     bool isArith = op.getIsBif() && *op.getIsBif();
+
+    if (callee.find("fragment_scalar_elementwise_") == 0) {
+      std::string opSymbol;
+      if (callee == "fragment_scalar_elementwise_add") opSymbol = "+";
+      else if (callee == "fragment_scalar_elementwise_sub") opSymbol = "-";
+      else if (callee == "fragment_scalar_elementwise_mul") opSymbol = "*";
+
+      auto operands = op.getOperands_();
+      auto fragVal = operands[0];
+      auto scalarVal = operands[1];
+      auto fragTy = mlir::cast<coir::MMAFragType>(fragVal.getType());
+      std::string eTy = emitElementType(fragTy.getElementType());
+
+      std::string resName = getName(op.getResult());
+      valueNames[op.getResult()] = getName(fragVal);
+      os() << getIndent()
+           << "choreo::nv_cute::warp_cooperative::fragment_scalar_elementwise("
+           << getName(fragVal) << ", " << getName(scalarVal) << ", []("
+           << eTy << " a, " << eTy << " b) { return a " << opSymbol
+           << " b; });\n";
+      return;
+    }
 
     std::string funcName = callee;
     if (isArith) {
@@ -891,11 +918,14 @@ private:
       if (!streamName.empty())
         os() << ", " << streamName;
       // Launch order must match kernel signature:
-      //   [input ptrs] [dim args] [TMA maps]
+      //   [input ptrs/scalars] [dim args] [TMA maps]
       os() << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
-        os() << "p" << i << "__device";
+        if (isa<coir::TensorType>(fnType.getInput(i)))
+          os() << "p" << i << "__device";
+        else
+          os() << "p" << i;
       }
       for (auto &da : dimArgMeta) {
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
@@ -912,8 +942,10 @@ private:
           os() << "  cudaDeviceSynchronize();\n";
       }
 
-      for (unsigned i = 0; i < numOrigInputs; ++i)
-        os() << "  cudaFree(p" << i << "__device);\n";
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        if (isa<coir::TensorType>(fnType.getInput(i)))
+          os() << "  cudaFree(p" << i << "__device);\n";
+      }
       os() << "}\n\n";
       return;
     }
@@ -1047,11 +1079,14 @@ private:
     if (!streamName.empty())
       os() << ", " << streamName;
     // Launch order must match kernel signature:
-    //   [input ptrs] [dim args] [output ptrs] [TMA maps]
+    //   [input ptrs/scalars] [dim args] [output ptrs] [TMA maps]
     os() << ">>>(";
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
-      os() << "p" << i << "__device";
+      if (isa<coir::TensorType>(fnType.getInput(i)))
+        os() << "p" << i << "__device";
+      else
+        os() << "p" << i;
     }
     for (auto &da : dimArgMeta) {
       os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
@@ -1077,8 +1112,10 @@ private:
          << resBytes << "ULL, cudaMemcpyDeviceToHost);\n";
     }
 
-    for (unsigned i = 0; i < numOrigInputs; ++i)
-      os() << "  cudaFree(p" << i << "__device);\n";
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
+      if (isa<coir::TensorType>(fnType.getInput(i)))
+        os() << "  cudaFree(p" << i << "__device);\n";
+    }
     os() << "  cudaFree(__result__device);\n";
     os() << "  return __result;\n";
     os() << "}\n\n";
@@ -1222,6 +1259,9 @@ private:
     for (auto &ea : entryAssertions) {
       auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames,
                                       numOrigInputs, dimArgMeta);
+      if (cond.find("/* unknown */") != std::string::npos ||
+          cond.find("/* arg") != std::string::npos)
+        continue;
       os() << "  choreo::runtime_check(" << cond << ", \""
          << ea.op.getMessage() << "\");\n";
     }
@@ -1704,7 +1744,10 @@ private:
     os() << getIndent() << "auto " << varName << " = cute::make_stride(";
     for (unsigned i = 0; i < strides.size(); ++i) {
       if (i > 0) os() << ", ";
-      os() << "cute::Int<" << strides[i] << ">{}";
+      if (mlir::ShapedType::isDynamic(strides[i]))
+        os() << "cute::Int<1>{}";
+      else
+        os() << "cute::Int<" << strides[i] << ">{}";
     }
     os() << ");\n";
   }
@@ -1856,16 +1899,22 @@ private:
   void emitDMAInvoke(DMAInvokeOp op) override {
     Value descVal = op.getDesc();
     auto it = descValueToIndex.find(descVal);
+    auto registerDoneToken = [&](Value token) {
+      std::string n = getName(token);
+      os() << getIndent() << "int " << n << " = 0;\n";
+      dmaTokens.insert(token);
+    };
+
     if (it == descValueToIndex.end()) {
       os() << getIndent() << "// DMA invoke (no descriptor info)\n";
       os() << getIndent() << "__syncthreads();\n";
-      dmaTokens.insert(op.getDone());
+      registerDoneToken(op.getDone());
       return;
     }
 
     unsigned descIdx = it->second;
     auto &desc = descInfos[descIdx];
-    dmaTokens.insert(op.getDone());
+    registerDoneToken(op.getDone());
 
     // Check if PlanDMACopy stamped tiled copy attrs
     if (op.getThrLayout()) {
@@ -2291,13 +2340,16 @@ private:
   void emitDmaCopy(DmaCopyOp op) override {
     emitNaiveCopy(op.getSource(), op.getDest());
     os() << getIndent() << "__syncthreads();\n";
+    std::string name = getName(op.getToken());
+    os() << getIndent() << "int " << name << " = 0;\n";
     dmaTokens.insert(op.getToken());
   }
 
   void emitTmaCopy(TmaCopyOp op) {
-    // Should not reach here after LowerDMADesc; fallback to naive copy
     emitNaiveCopy(op.getSource(), op.getDest());
     os() << getIndent() << "__syncthreads();\n";
+    std::string name = getName(op.getToken());
+    os() << getIndent() << "int " << name << " = 0;\n";
     dmaTokens.insert(op.getToken());
   }
 
@@ -2317,10 +2369,23 @@ private:
   void emitWait(WaitOp op) override {
     auto token = op.getToken();
     if (dmaTokens.count(token)) {
-      // Wait already handled inline during DMA invoke emission
       return;
     }
     os() << getIndent() << "__syncthreads();\n";
+  }
+
+  void emitAsyncUndef(AsyncUndefOp op) override {
+    std::string name = getName(op.getResult());
+    os() << getIndent() << "int " << name << " = 0;\n";
+    dmaTokens.insert(op.getResult());
+  }
+
+  void emitFutureRotate(FutureRotateOp op) override {
+    for (auto res : op.getResults()) {
+      std::string name = getName(res);
+      os() << getIndent() << "int " << name << " = 0;\n";
+      dmaTokens.insert(res);
+    }
   }
 
   void emitTensorTile(TensorTileOp op) override {
