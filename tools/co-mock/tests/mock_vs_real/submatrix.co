@@ -1,0 +1,20 @@
+// Mock-vs-Real comparison: 2D .at() with computed expression indices.
+// This tests the cc codegen fix for missing stride multiplication.
+
+__co__ void test() {
+  s32[4, 4] M;
+  foreach i in 4
+    foreach j in 4
+      M.at(i, j) = i * 4 + j + 1;
+
+  // Computed index access: M.at(expr, expr)
+  foreach i in 2
+    foreach j in 2
+      println(M.at(i + 1, j + 1));
+
+  // Verify with more complex expressions
+  s32 r = 2;
+  s32 c = 1;
+  println(M.at(r, c));
+  println(M.at(r + 1, c + 2));
+}

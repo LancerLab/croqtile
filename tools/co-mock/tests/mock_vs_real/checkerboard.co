@@ -1,0 +1,19 @@
+// Mock-vs-Real comparison: checkerboard pattern fill.
+
+__co__ void test() {
+  s32[4, 4] grid;
+
+  foreach i in 4 {
+    foreach j in 4 {
+      if ((i + j) % 2 == 0)
+        grid.at(i, j) = 1;
+      else
+        grid.at(i, j) = 0;
+    }
+  }
+
+  // Print full grid row by row
+  foreach i in 4
+    foreach j in 4
+      println(grid.at(i, j));
+}
