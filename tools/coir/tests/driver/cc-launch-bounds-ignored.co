@@ -1,0 +1,13 @@
+// RUN: cocc -t cc -es %s | FileCheck %s
+//
+// Test: [[launch_bounds]] is silently ignored on CPU target
+
+__co__ void lb_cpu() {
+  [[launch_bounds(256, 4)]]
+  parallel by 1 : block {
+  }
+}
+
+// CHECK: void __lb_cpu_impl__
+// CHECK-NOT: __launch_bounds__
+// CHECK-NOT: launch_bounds

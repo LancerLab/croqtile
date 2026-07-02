@@ -1,0 +1,18 @@
+// RUN: cocc -t cc -es %s | FileCheck %s
+//
+// Test cocc -es with CPU target: verify C++ source emission
+
+__co__ s32 [32] scale(s32 [32] x) {
+  s32[x.span] y;
+  parallel p by 32
+    y.at(p) = x.at(p) + x.at(p);
+  return y;
+}
+
+// CHECK: #define __CHOREO_TARGET_CPU__ 1
+// CHECK: #include "choreo.h"
+// CHECK: #include <cstring>
+// CHECK: void __scale_impl__
+// CHECK: choreo::spanned_data
+// CHECK-NOT: cudaMalloc
+// CHECK-NOT: __global__

@@ -1,0 +1,14 @@
+// RUN: cocc -t cc -gs %s | FileCheck %s
+//
+// Test cocc -gs with CPU target: verify bash script generation
+
+__co__ void add(s32 [32] x) {
+  parallel i by 32
+    x.at(i) = x.at(i) + 1;
+}
+
+// CHECK: #!/usr/bin/env bash
+// CHECK: __COCC_CC_SOURCE__
+// CHECK: #define __CHOREO_TARGET_CPU__ 1
+// CHECK: __COCC_CC_SOURCE__
+// CHECK: g++ -std=c++17 -O2 -pthread

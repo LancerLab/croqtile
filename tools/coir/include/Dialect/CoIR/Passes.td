@@ -262,4 +262,16 @@ def EmitHIP : Pass<"coir-emit-hip", "::mlir::ModuleOp"> {
   let dependentDialects = ["::coir::CoIRDialect"];
 }
 
+def EmitCC : Pass<"coir-emit-cc", "::mlir::ModuleOp"> {
+  let summary = "Emit portable C++ source from CoIR IR for CPU execution";
+  let description = [{
+    Walks the module and emits C++ source for CPU execution.
+    Parallel levels become nested for-loops, DMA becomes std::memcpy,
+    and barriers are no-ops.
+  }];
+
+  let constructor = "::coir::createEmitCCPass()";
+  let dependentDialects = ["::coir::CoIRDialect"];
+}
+
 #endif // COIR_PASSES_TD

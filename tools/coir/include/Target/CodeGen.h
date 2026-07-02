@@ -9,9 +9,9 @@
 //     coir::CoIREmitterBase        -- unified base for IR-walking emitters;
 //                                    combines CodeGen pipeline + op visitor +
 //                                    script/host-code helpers
-//       CUDAEmitter                -- CUDA/CUTE target
-//       (target-specific emitters for other backends)
+//       CUDAEmitter                -- CUDA/CuTe target
 //       HIPEmitter                 -- HIP/AMD target
+//       CCEmitter                  -- CPU/C++ target
 //
 //===----------------------------------------------------------------------===//
 
