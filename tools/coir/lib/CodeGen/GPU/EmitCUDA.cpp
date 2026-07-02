@@ -140,6 +140,7 @@ private:
     int64_t swizzleBytes = 0; // 0=none, 32, 64, 128
     int storeArgIdx = -1; // kernel arg index for TMA store dest (-1=return)
     bool zfill = false; // out-of-bounds zero fill
+    int srcParamIdx = -1; // source tensor kernel arg index
   };
   llvm::SmallVector<DescInfo> descInfos;
   DenseMap<Value, unsigned> descValueToIndex;
@@ -470,10 +471,19 @@ private:
 
       bool hasZfill = op.getZfill();
 
+      int srcParamIdx = -1;
+      {
+        Value srcVal = op.getSource();
+        while (auto tileOp = srcVal.getDefiningOp<coir::TensorTileOp>())
+          srcVal = tileOp.getSource();
+        if (auto arg = mlir::dyn_cast<mlir::BlockArgument>(srcVal))
+          srcParamIdx = (int)arg.getArgNumber();
+      }
+
       unsigned idx = descInfos.size();
       descInfos.push_back({idx, srcType, dstType, op.getKind(),
                            isTMA, isLoad, op.getOut(), swizBytes, storeArgIdx,
-                           hasZfill});
+                           hasZfill, srcParamIdx});
       descValueToIndex[op.getOut()] = idx;
     });
   }
@@ -648,8 +658,18 @@ private:
   struct LaunchDims {
     llvm::SmallVector<int64_t, 3> grid = {1};
     llvm::SmallVector<int64_t, 3> block = {1};
+    llvm::SmallVector<std::string, 3> gridExprs;
 
     std::string gridStr() const {
+      if (!gridExprs.empty()) {
+        if (gridExprs.size() == 1) return gridExprs[0];
+        std::string s = "dim3(";
+        for (unsigned i = 0; i < gridExprs.size(); ++i) {
+          if (i > 0) s += ", ";
+          s += gridExprs[i];
+        }
+        return s + ")";
+      }
       if (grid.size() == 1) return std::to_string(grid[0]);
       std::string s = "dim3(";
       for (unsigned i = 0; i < grid.size(); ++i) {
@@ -688,7 +708,160 @@ private:
     return async;
   }
 
-  LaunchDims getLaunchDims(KernelOp kernel) {
+  struct DimArgMeta {
+    int64_t paramIdx;
+    int64_t dimIdx;
+    std::string name;
+  };
+
+  std::string reconstructCdivExpr(KernelOp kernel, unsigned boundIdx,
+                                   llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+    // For dynamic grid bounds, reconstruct cdiv(dim, tileSize) expression.
+    // The block-level parallel tiles the grid over the function's dynamic dims.
+    // Match bound index to dim args and find tile size from TMA tile types.
+
+    // Strategy: find divsi ops (may be absent with --zero-cost). If present use
+    // them. Otherwise, infer tile size from TMA tile shapes and match dim args
+    // sequentially to grid dimensions.
+    auto &entryBlock = kernel.getBody().front();
+    llvm::SmallVector<mlir::arith::DivSIOp> divOps;
+    for (auto &op : entryBlock) {
+      if (auto divOp = dyn_cast<mlir::arith::DivSIOp>(&op))
+        divOps.push_back(divOp);
+    }
+
+    if (boundIdx < divOps.size()) {
+      auto divOp = divOps[boundIdx];
+      int64_t divisor = 1;
+      if (auto divConst = divOp.getRhs().getDefiningOp<arith::ConstantOp>())
+        if (auto intAttr = dyn_cast<IntegerAttr>(divConst.getValue()))
+          divisor = intAttr.getInt();
+
+      Value numVal = divOp.getLhs();
+      if (auto addOp = numVal.getDefiningOp<arith::AddIOp>())
+        numVal = addOp.getLhs();
+
+      if (auto blockArg = dyn_cast<mlir::BlockArgument>(numVal)) {
+        unsigned argIdx = blockArg.getArgNumber();
+        auto fnType = kernel.getFunctionType();
+        unsigned numTensorArgs = 0;
+        for (unsigned i = 0; i < fnType.getNumInputs(); ++i) {
+          if (isa<coir::TensorType>(fnType.getInput(i)))
+            numTensorArgs++;
+          else
+            break;
+        }
+        for (auto &da : dimArgMeta) {
+          unsigned kernelArgPos = numTensorArgs + (&da - dimArgMeta.data());
+          if (kernelArgPos == argIdx) {
+            std::string expr = "(((int)p" + std::to_string(da.paramIdx) +
+                               ".shape()[" + std::to_string(da.dimIdx) +
+                               "] + " + std::to_string(divisor - 1) + ") / " +
+                               std::to_string(divisor) + ")";
+            return expr;
+          }
+        }
+      }
+    }
+
+    // Fallback: Walk block-parallel body to find tensor.tile ops that use
+    // the block iteration variables. Each tile tells us which source tensor
+    // dim and what tile size is used for that grid dimension.
+    ParallelOp blockPar = nullptr;
+    kernel.getBody().walk([&](ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::BLOCK)
+        blockPar = par;
+    });
+
+    if (blockPar) {
+      auto &blockBody = blockPar.getBody().front();
+      auto blockArgs = blockBody.getArguments();
+      if (boundIdx < blockArgs.size()) {
+        Value blockArg = blockArgs[boundIdx];
+        // Find first tensor.tile that uses this block arg
+        for (auto user : blockArg.getUsers()) {
+          if (auto tileOp = dyn_cast<coir::TensorTileOp>(user)) {
+            Value src = tileOp.getSource();
+            // Trace source to kernel block argument
+            while (auto parentTile =
+                       src.getDefiningOp<coir::TensorTileOp>())
+              src = parentTile.getSource();
+            if (auto kernelArg = dyn_cast<mlir::BlockArgument>(src)) {
+              unsigned argNum = kernelArg.getArgNumber();
+              // Find tile size: the result type dim that differs from src
+              auto srcTy =
+                  dyn_cast<coir::TensorType>(tileOp.getSource().getType());
+              auto resTy =
+                  dyn_cast<coir::TensorType>(tileOp.getResult().getType());
+              if (srcTy && resTy) {
+                auto srcSh = srcTy.getShape();
+                auto resSh = resTy.getShape();
+                // Find which dim index in tileOp's indices corresponds to our
+                // bound. Use the tile size from result type at the tiled dim.
+                auto indices = tileOp.getIndices();
+                for (unsigned ii = 0; ii < indices.size(); ++ii) {
+                  if (indices[ii] == blockArg) {
+                    int64_t tileSize = (ii < resSh.size()) ? resSh[ii] : 64;
+                    // Match argNum to a dim arg (paramIdx/dimIdx)
+                    for (auto &da : dimArgMeta) {
+                      if (da.paramIdx == (int64_t)argNum &&
+                          da.dimIdx == (int64_t)ii) {
+                        return "(((int)p" + std::to_string(da.paramIdx) +
+                               ".shape()[" + std::to_string(da.dimIdx) +
+                               "] + " + std::to_string(tileSize - 1) +
+                               ") / " + std::to_string(tileSize) + ")";
+                      }
+                    }
+                    // If not found by exact match, use the dim arg that refers
+                    // to this param at any dim of matching index
+                    for (auto &da : dimArgMeta) {
+                      if (da.paramIdx == (int64_t)argNum) {
+                        return "(((int)p" + std::to_string(da.paramIdx) +
+                               ".shape()[" + std::to_string(da.dimIdx) +
+                               "] + " + std::to_string(tileSize - 1) +
+                               ") / " + std::to_string(tileSize) + ")";
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // Final fallback: Use TMA load descriptor info. Each TMA load's tile size
+    // along its primary dimension gives us the divisor for that grid dim.
+    // Grid dim i maps to the i-th TMA load descriptor's primary tile size.
+    unsigned loadDescIdx = 0;
+    for (unsigned di = 0; di < descInfos.size(); ++di) {
+      if (!descInfos[di].isTMA || !descInfos[di].isLoad) continue;
+      if (loadDescIdx == boundIdx) {
+        int paramIdx = descInfos[di].srcParamIdx;
+        auto tileType = descInfos[di].dstType;
+        if (paramIdx >= 0 && tileType) {
+          int64_t tileSize = tileType.getShape()[0];
+          // Find the dim arg matching this param's dim 0
+          for (auto &da : dimArgMeta) {
+            if (da.paramIdx == paramIdx && da.dimIdx == 0) {
+              return "(((int)p" + std::to_string(da.paramIdx) +
+                     ".shape()[" + std::to_string(da.dimIdx) +
+                     "] + " + std::to_string(tileSize - 1) + ") / " +
+                     std::to_string(tileSize) + ")";
+            }
+          }
+        }
+      }
+      loadDescIdx++;
+    }
+
+    return "1";
+  }
+
+  LaunchDims getLaunchDims(KernelOp kernel,
+                           llvm::ArrayRef<DimArgMeta> dimArgMeta = {}) {
     LaunchDims dims;
     int64_t groupWarps = 0;
     bool hasThreadLevel = false;
@@ -717,6 +890,21 @@ private:
     } else if (groupWarps > 0) {
       dims.block = {groupWarps * 32};
     }
+
+    // Handle dynamic grid dims (INT64_MIN sentinel)
+    constexpr int64_t DYN = std::numeric_limits<int64_t>::min();
+    bool hasDynGrid = false;
+    for (auto b : dims.grid)
+      if (b == DYN) { hasDynGrid = true; break; }
+    if (hasDynGrid && !dimArgMeta.empty()) {
+      for (unsigned i = 0; i < dims.grid.size(); ++i) {
+        if (dims.grid[i] == DYN)
+          dims.gridExprs.push_back(reconstructCdivExpr(kernel, i, dimArgMeta));
+        else
+          dims.gridExprs.push_back(std::to_string(dims.grid[i]));
+      }
+    }
+
     return dims;
   }
 
@@ -743,7 +931,8 @@ private:
                               coir::TensorType globalType,
                               coir::TensorType tileType,
                               int64_t swizzleBytes = 0,
-                              bool zfill = false) {
+                              bool zfill = false,
+                              int srcParamIdx = -1) {
     auto shape = globalType.getShape();
     auto elemTy = globalType.getElementType();
     unsigned elemBytes = elemTy.getIntOrFloatBitWidth() / 8;
@@ -754,21 +943,47 @@ private:
 
     std::string prefix = "__choreo_tma_" + std::to_string(descIdx);
 
+    // Helper to emit a dim value (static or dynamic)
+    constexpr int64_t DYN = mlir::ShapedType::kDynamic;
+    auto dimExpr = [&](unsigned dimIdx) -> std::string {
+      if (shape[dimIdx] != DYN)
+        return std::to_string(shape[dimIdx]);
+      if (srcParamIdx >= 0)
+        return "(uint64_t)p" + std::to_string(srcParamIdx) +
+               ".shape()[" + std::to_string(dimIdx) + "]";
+      return "1";
+    };
+
     // Shape (innermost-first for cuTensorMapEncodeTiled)
     os() << "  uint64_t " << prefix << "_shape[] = {";
     for (int i = (int)rank - 1; i >= 0; --i) {
       if (i < (int)rank - 1) os() << ", ";
-      os() << shape[i];
+      os() << dimExpr(i);
     }
     os() << "};\n";
 
     // Strides (byte strides, skip innermost -- it's implicit)
     os() << "  uint64_t " << prefix << "_strides[] = {";
-    int64_t stride = elemBytes;
-    for (int i = (int)rank - 1; i >= 1; --i) {
-      if (i < (int)rank - 1) os() << ", ";
-      stride *= shape[i];
-      os() << stride;
+    bool allStatic = true;
+    for (unsigned i = 0; i < rank; ++i)
+      if (shape[i] == DYN) { allStatic = false; break; }
+
+    if (allStatic) {
+      int64_t stride = elemBytes;
+      for (int i = (int)rank - 1; i >= 1; --i) {
+        if (i < (int)rank - 1) os() << ", ";
+        stride *= shape[i];
+        os() << stride;
+      }
+    } else {
+      // Dynamic strides: stride[d] = elemBytes * product(shape[d+1..rank-1])
+      for (int i = (int)rank - 2; i >= 0; --i) {
+        if (i < (int)rank - 2) os() << ", ";
+        os() << "(uint64_t)(" << elemBytes;
+        for (int j = (int)rank - 1; j > i; --j)
+          os() << " * " << dimExpr(j);
+        os() << ")";
+      }
     }
     os() << "};\n";
 
@@ -847,12 +1062,6 @@ private:
       if (d.isTMA) count++;
     return count;
   }
-
-  struct DimArgMeta {
-    int64_t paramIdx;
-    int64_t dimIdx;
-    std::string name;
-  };
 
   struct DimCheckMeta {
     std::string name;
@@ -978,14 +1187,18 @@ private:
                                               : descInfos[i].dstType;
         auto tileType = descInfos[i].isLoad ? descInfos[i].dstType
                                             : descInfos[i].srcType;
+        int paramForShape = descInfos[i].isLoad
+            ? descInfos[i].srcParamIdx
+            : descInfos[i].storeArgIdx;
         std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
         emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType,
                                descInfos[i].swizzleBytes,
-                               descInfos[i].zfill);
+                               descInfos[i].zfill,
+                               paramForShape);
         tmaIdx++;
       }
 
-      auto dims = getLaunchDims(kernel);
+      auto dims = getLaunchDims(kernel, dimArgMeta);
       emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
       emitDimChecks(kernel);
       auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
@@ -1195,14 +1408,18 @@ private:
                                             : descInfos[i].dstType;
       auto tileType = descInfos[i].isLoad ? descInfos[i].dstType
                                           : descInfos[i].srcType;
+      int paramForShape = descInfos[i].isLoad
+          ? descInfos[i].srcParamIdx
+          : descInfos[i].storeArgIdx;
       std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
       emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType,
                              descInfos[i].swizzleBytes,
-                             descInfos[i].zfill);
+                             descInfos[i].zfill,
+                             paramForShape);
       tmaIdx++;
     }
 
-    auto dims = getLaunchDims(kernel);
+    auto dims = getLaunchDims(kernel, dimArgMeta);
     emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
     emitDimChecks(kernel);
     auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
@@ -1857,7 +2074,8 @@ private:
       os() << ", " << layoutName << ");\n";
       bool useStmatrix = (ms == 1);
       if (useStmatrix) {
-        bool isF32Acc = fragTy.getElementType().isF32();
+        // WGMMA accumulators are always f32 registers regardless of frag type
+        bool isF32Acc = true;
         bool isF16Dest = dstTy.getElementType().isF16();
         bool isBF16Dest = dstTy.getElementType().isBF16();
         std::string fn;
@@ -2442,18 +2660,21 @@ private:
       }
 
       std::string ptrName = getName(globalVal);
+      auto localShape = localTy.getShape();
       std::string offExpr;
       if (offsets.size() == 1) {
         int64_t tileElems = 1;
-        for (auto d : localTy.getShape()) tileElems *= d;
+        for (auto d : localShape) tileElems *= d;
         offExpr = getName(offsets[0]);
         if (tileElems > 1)
           offExpr += " * " + std::to_string(tileElems);
       } else {
         for (unsigned i = 0; i < offsets.size(); ++i) {
           std::string term = getName(offsets[i]);
-          if (globalStrides[i] != 1)
-            term += " * " + std::to_string(globalStrides[i]);
+          int64_t stride = (i < localShape.size() ? localShape[i] : 1)
+                         * globalStrides[i];
+          if (stride != 1)
+            term += " * " + std::to_string(stride);
           if (i == 0) offExpr = term;
           else offExpr += " + " + term;
         }
@@ -2465,26 +2686,93 @@ private:
          << emitElementType(globalTy.getElementType()) << "*)"
          << ptrName << " + " << offExpr << ";\n";
 
+      auto copyShapeAttr = op.getCopyShape();
+      llvm::ArrayRef<int64_t> tileShape = localTy.getShape();
+      llvm::SmallVector<int64_t, 2> ceilShape;
+      if (needPred && copyShapeAttr) {
+        auto cs = *copyShapeAttr;
+        ceilShape = {cs[0], cs[1]};
+        tileShape = ceilShape;
+      }
+
       if (desc.isLoad) {
-        srcTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
-                                          localTy.getShape(), suffix + "_s");
-        dstTensor = emitCuteTensor(localVal, suffix + "_d");
+        // Source tensor (global): use global strides to preserve actual memory layout
+        {
+          std::string shapeName = "__shape" + suffix + "_s";
+          std::string strideName = "__stride" + suffix + "_s";
+          std::string layoutName = "__layout" + suffix + "_s";
+          std::string tensorName = "__tensor" + suffix + "_s";
+          emitCuteMakeShape(shapeName, {tileShape.begin(), tileShape.end()},
+                            /*kernel=*/nullptr);
+          // Use global tensor strides (not row-major from tileShape)
+          emitCuteMakeStride(strideName, globalStrides);
+          os() << getIndent() << "auto " << layoutName
+             << " = cute::make_layout(" << shapeName << ", " << strideName
+             << ");\n";
+          std::string elemTy = emitElementType(globalTy.getElementType());
+          os() << getIndent() << "auto " << tensorName
+             << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTy
+             << ">((" << elemTy << "*)" << slicedPtr << "), " << layoutName
+             << ");\n";
+          srcTensor = tensorName;
+        }
+        // Dest tensor (shared): uses tile shape with row-major strides
+        dstTensor = emitCuteTensorFromPtr(
+            getName(localVal), localTy, tileShape, suffix + "_d");
       } else {
-        srcTensor = emitCuteTensor(localVal, suffix + "_s");
-        dstTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
-                                          localTy.getShape(), suffix + "_d");
+        // Source tensor (shared): uses tile shape with row-major strides
+        srcTensor = emitCuteTensorFromPtr(
+            getName(localVal), localTy, tileShape, suffix + "_s");
+        // Dest tensor (global): use global strides
+        {
+          std::string shapeName = "__shape" + suffix + "_d";
+          std::string strideName = "__stride" + suffix + "_d";
+          std::string layoutName = "__layout" + suffix + "_d";
+          std::string tensorName = "__tensor" + suffix + "_d";
+          emitCuteMakeShape(shapeName, {tileShape.begin(), tileShape.end()},
+                            /*kernel=*/nullptr);
+          emitCuteMakeStride(strideName, globalStrides);
+          os() << getIndent() << "auto " << layoutName
+             << " = cute::make_layout(" << shapeName << ", " << strideName
+             << ");\n";
+          std::string elemTy = emitElementType(globalTy.getElementType());
+          os() << getIndent() << "auto " << tensorName
+             << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTy
+             << ">((" << elemTy << "*)" << slicedPtr << "), " << layoutName
+             << ");\n";
+          dstTensor = tensorName;
+        }
       }
     } else {
-      srcTensor = emitCuteTensor(srcVal, suffix + "_s");
-      dstTensor = emitCuteTensor(dstVal, suffix + "_d");
+      // When predication is active, use ceiled tile shape for tensors
+      auto copyShapeAttr = op.getCopyShape();
+      if (needPred && copyShapeAttr) {
+        auto cs = *copyShapeAttr;
+        llvm::SmallVector<int64_t, 2> ceilShape = {cs[0], cs[1]};
+        auto srcTy = cast<coir::TensorType>(srcVal.getType());
+        auto dstTy = cast<coir::TensorType>(dstVal.getType());
+        srcTensor = emitCuteTensorFromPtr(
+            getName(srcVal), srcTy, ceilShape, suffix + "_s");
+        dstTensor = emitCuteTensorFromPtr(
+            getName(dstVal), dstTy, ceilShape, suffix + "_d");
+      } else {
+        srcTensor = emitCuteTensor(srcVal, suffix + "_s");
+        dstTensor = emitCuteTensor(dstVal, suffix + "_d");
+      }
     }
+
+    // For predicated G2S cp.async, enable ZFill (hardware fills zeros for
+    // masked elements instead of issuing memory reads)
+    bool zfill = needPred && (atom.find("CP_ASYNC") != std::string::npos)
+                          && desc.isLoad;
 
     // Emit the choreo::tiled_copy call
     os() << getIndent() << "choreo::tiled_copy<" << atom << ", "
        << thrRows << ", " << thrCols << ", "
        << valRows << ", " << valCols << ", "
        << (swizzle ? "true" : "false") << ", "
-       << (needPred ? "true" : "false") << ", false>("
+       << (needPred ? "true" : "false") << ", "
+       << (zfill ? "true" : "false") << ">("
        << srcTensor << ", " << dstTensor << ", ";
 
     if (needPred) {

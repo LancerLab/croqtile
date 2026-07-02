@@ -39,6 +39,8 @@ struct TiledCopyConfig {
   bool needPred = false;
   int64_t predDim0 = 0;
   int64_t predDim1 = 0;
+  int64_t copyShapeM = 0;
+  int64_t copyShapeN = 0;
   bool swizzle = false;
 };
 
@@ -189,6 +191,10 @@ searchTiledConfig(int64_t boxM, int64_t boxN, int64_t threadsCount,
 
       int64_t maxVm = std::max(
           int64_t{1}, static_cast<int64_t>(128 / elemBits) / valN);
+      // CP_ASYNC atoms only vectorize along the contiguous (column) dimension;
+      // multi-row ValRows breaks the per-thread layout vectorization check.
+      if (cpAsync)
+        maxVm = 1;
       int64_t vm = maxVm;
       while (vm > 1 && effBoxM % (thrM * vm) != 0)
         vm /= 2;
@@ -234,6 +240,8 @@ searchTiledConfig(int64_t boxM, int64_t boxN, int64_t threadsCount,
     if (bestPred) {
       cfg.predDim0 = boxM;
       cfg.predDim1 = boxN;
+      cfg.copyShapeM = bestThrM * bestValM;
+      cfg.copyShapeN = bestThrN * bestValN;
     }
     cfg.swizzle = false;
     return cfg;
@@ -313,6 +321,8 @@ struct PlanDMACopyPass
       if (cfg->needPred) {
         invoke.setPredictionAttr(
             DenseI64ArrayAttr::get(ctx, {cfg->predDim0, cfg->predDim1}));
+        invoke.setCopyShapeAttr(
+            DenseI64ArrayAttr::get(ctx, {cfg->copyShapeM, cfg->copyShapeN}));
       }
       invoke.setSwizzleAttr(BoolAttr::get(ctx, cfg->swizzle));
     });
