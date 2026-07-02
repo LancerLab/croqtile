@@ -1,0 +1,13 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void cast_test(f32 [64] a, s32 [64] b) {
+  parallel p by 64 : thread {
+    mutable f32 fv = a.at(p);
+    mutable s32 iv = __to<s32>(fv);
+    mutable f32 back = __to<f32>(iv);
+    b.at(p) = iv;
+    a.at(p) = back;
+  }
+}
+// CHECK: int iv = static_cast<int>(fv)
+// CHECK: float back = static_cast<float>(iv)

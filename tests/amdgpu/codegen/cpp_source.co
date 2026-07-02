@@ -1,0 +1,13 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__cpp__ {
+  int helper_func(int x) { return x * 2; }
+}
+
+__co__ void cpp_test(s32 [64] a) {
+  parallel p by 64 : thread {
+    a.at(p) = a.at(p) + 1;
+  }
+}
+// CHECK: int helper_func(int x) { return x * 2; }
+// CHECK: __global__

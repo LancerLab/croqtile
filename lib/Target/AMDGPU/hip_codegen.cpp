@@ -413,12 +413,12 @@ bool HIPCodeGen::Visit(AST::NamedTypeDecl& n) {
 
 bool HIPCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
-  if (Level() == ParallelLevel::NONE) {
-    code_segments.push_back(n.code + "\n");
+  if (n.kind == AST::CppSourceCode::Inline) {
+    Stream() << n.GetCode();
+  } else if (Level() == ParallelLevel::NONE) {
+    code_segments.push_back(n.GetCode());
   } else {
-    auto& os = Stream();
-    auto& indent = Indent();
-    os << indent << n.code << "\n";
+    Stream() << Indent() << n.code << "\n";
   }
   return true;
 }
@@ -784,6 +784,10 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     if (!first) ds << ", ";
     if (auto sty = dyn_cast<SpannedType>(item.type)) {
       ds << HIPNameBaseType(sty->ElementType()) << "* "
+         << UnScopedName(item.name);
+      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
+    } else if (auto scalar = dyn_cast<ScalarType>(item.type)) {
+      ds << HIPNameBaseType(scalar->GetBaseType()) << " "
          << UnScopedName(item.name);
       ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
     } else if (CanYieldAnInteger(item.type)) {
@@ -1267,9 +1271,9 @@ bool HIPCodeGen::Visit(AST::Assignment& n) {
 
   if (isa<FutureType>(nty)) { return true; }
 
-  if (CanYieldAnInteger(nty)) {
-    os << indent << "int " << name << " = " << ExprSTR(n.value, IsHost())
-       << ";\n";
+  if (auto scalar = dyn_cast<ScalarType>(nty)) {
+    os << indent << HIPNameBaseType(scalar->GetBaseType()) << " " << name
+       << " = " << ExprSTR(n.value, IsHost()) << ";\n";
     if (IsHost())
       ssm.MapHostSymbol(scoped_name, name);
     else
@@ -1277,9 +1281,9 @@ bool HIPCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
-  if (auto scalar = dyn_cast<ScalarType>(nty)) {
-    os << indent << HIPNameBaseType(scalar->GetBaseType()) << " " << name
-       << " = " << ExprSTR(n.value, IsHost()) << ";\n";
+  if (CanYieldAnInteger(nty)) {
+    os << indent << "int " << name << " = " << ExprSTR(n.value, IsHost())
+       << ";\n";
     if (IsHost())
       ssm.MapHostSymbol(scoped_name, name);
     else
@@ -1375,14 +1379,15 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
     }
   }
 
-  if (CanYieldAnInteger(nty)) {
+  if (auto scalar = dyn_cast<ScalarType>(nty)) {
     auto& os = Stream();
     auto& indent = Indent();
+    auto tname = HIPNameBaseType(scalar->GetBaseType());
     if (n.init_expr) {
-      os << indent << "int " << sym << " = " << ExprSTR(n.init_expr, IsHost())
-         << ";\n";
+      os << indent << tname << " " << sym << " = "
+         << ExprSTR(n.init_expr, IsHost()) << ";\n";
     } else {
-      os << indent << "int " << sym << " = 0;\n";
+      os << indent << tname << " " << sym << " = 0;\n";
     }
     if (IsHost())
       ssm.MapHostSymbol(sname, sym);
@@ -1391,15 +1396,14 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
     return true;
   }
 
-  if (auto scalar = dyn_cast<ScalarType>(nty)) {
+  if (CanYieldAnInteger(nty)) {
     auto& os = Stream();
     auto& indent = Indent();
     if (n.init_expr) {
-      os << indent << HIPNameBaseType(scalar->GetBaseType()) << " " << sym
-         << " = " << ExprSTR(n.init_expr, IsHost()) << ";\n";
+      os << indent << "int " << sym << " = " << ExprSTR(n.init_expr, IsHost())
+         << ";\n";
     } else {
-      os << indent << HIPNameBaseType(scalar->GetBaseType()) << " " << sym
-         << " = 0;\n";
+      os << indent << "int " << sym << " = 0;\n";
     }
     if (IsHost())
       ssm.MapHostSymbol(sname, sym);
@@ -1776,6 +1780,13 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     if (!is_host && ssm.HasDeviceName(sname2)) return ssm.DeviceName(sname2);
     return id->name;
   }
+  if (auto ce = dyn_cast<AST::CastExpr>(n)) {
+    if (ce->IsForeignCast())
+      return "((" + ce->ForeignType() + ")" + ExprSTR(ce->GetR(), is_host) +
+             ")";
+    return std::string("static_cast<") + HIPNameBaseType(ce->ToType()) + ">(" +
+           ExprSTR(ce->GetR(), is_host) + ")";
+  }
   if (auto expr = dyn_cast<AST::Expr>(n)) {
     auto op = expr->GetOp();
     if (expr->IsUnary() && op == Op::Cast) {
@@ -1920,13 +1931,6 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
       r += ExprSTR(v, is_host);
     }
     return r + "}";
-  }
-  if (auto ce = dyn_cast<AST::CastExpr>(n)) {
-    if (ce->IsForeignCast())
-      return "((" + ce->ForeignType() + ")" + ExprSTR(ce->GetR(), is_host) +
-             ")";
-    return std::string("static_cast<") + HIPNameBaseType(ce->ToType()) + ">(" +
-           ExprSTR(ce->GetR(), is_host) + ")";
   }
   if (auto call = dyn_cast<AST::Call>(n)) return CallSTR(*call);
   if (auto mv = dyn_cast<AST::MultiValues>(n)) {
