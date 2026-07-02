@@ -1,0 +1,28 @@
+// Mock-vs-Real comparison: variable scoping and mutable updates.
+
+__co__ void test() {
+  s32 x = 10;
+  mutable s32 y = 20;
+
+  // Inner scope should not affect outer
+  foreach i in 3 {
+    mutable s32 tmp = x + i;
+    y = y + tmp;
+  }
+  println(x);
+  println(y);
+
+  // Accumulator pattern
+  s32[5] data;
+  foreach i in 5
+    data.at(i) = (i + 1) * (i + 1);
+
+  mutable s32 total = 0;
+  mutable s32 count = 0;
+  foreach i in 5 {
+    total = total + data.at(i);
+    count = count + 1;
+  }
+  println(total);
+  println(count);
+}

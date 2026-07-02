@@ -1,0 +1,20 @@
+// Mock-vs-Real comparison: 1D stencil with boundary handling.
+
+__co__ void test() {
+  s32[6] input;
+  s32[6] output;
+
+  foreach i in 6
+    input.at(i) = i * 10;
+
+  // Boundaries stay, interior gets 3-point average
+  output.at(0) = input.at(0);
+  output.at(5) = input.at(5);
+  foreach i in 4 {
+    s32 idx = i + 1;
+    output.at(idx) = (input.at(idx - 1) + input.at(idx) + input.at(idx + 1)) / 3;
+  }
+
+  foreach i in 6
+    println(output.at(i));
+}
