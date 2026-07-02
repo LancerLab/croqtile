@@ -154,10 +154,20 @@ static void collectDefChain(Value root, Region *boundary,
   }
 }
 
+/// Check that every operand of `op` dominates `op` in its new position.
+static bool operandsDominate(Operation *op, DominanceInfo &domInfo) {
+  for (Value operand : op->getOperands()) {
+    if (!domInfo.dominates(operand, op))
+      return false;
+  }
+  return true;
+}
+
 /// Move (or clone) ops to destBlock before destPoint, in topological order.
 /// Ops that have users outside the move set are cloned instead of moved,
 /// so that existing references remain valid.
-static void moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
+/// Returns false and rolls back if the move would break SSA dominance.
+static bool moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
                                      Block *destBlock,
                                      Block::iterator destPoint) {
   DenseSet<Operation *> opSet(ops.begin(), ops.end());
@@ -173,12 +183,23 @@ static void moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
   };
 
   for (auto *op : ops) visit(op);
+
+  struct OrigPos {
+    Operation *op;
+    Block *block;
+    Block::iterator point;
+  };
+  SmallVector<OrigPos> origPositions;
+  SmallVector<Operation *> clonedOps;
+
   for (auto *op : sorted) {
+    origPositions.push_back({op, op->getBlock(), op->getIterator()});
     bool hasExternalUsers = llvm::any_of(
         op->getUsers(), [&](Operation *u) { return !opSet.count(u); });
     if (hasExternalUsers) {
       OpBuilder b(destBlock, destPoint);
       auto *clone = b.clone(*op);
+      clonedOps.push_back(clone);
       for (auto &use : llvm::make_early_inc_range(op->getUses()))
         if (opSet.count(use.getOwner()))
           use.set(clone->getResult(0));
@@ -186,6 +207,24 @@ static void moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
       op->moveBefore(destBlock, destPoint);
     }
   }
+
+  auto *topOp = destBlock->getParentOp();
+  if (topOp) {
+    DominanceInfo domInfo(topOp);
+    for (auto *op : sorted) {
+      if (!operandsDominate(op, domInfo)) {
+        for (auto it = origPositions.rbegin(); it != origPositions.rend();
+             ++it) {
+          if (it->op->getBlock() != it->block ||
+              &*it->op->getIterator() != &*it->point)
+            it->op->moveBefore(it->block, it->point);
+        }
+        for (auto *cl : clonedOps) cl->erase();
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 struct HoistAssertionsPass
@@ -236,21 +275,22 @@ struct HoistAssertionsPass
                                   : "USE") << "\n");
 
       if (target.site == AssertSite::ENTRY) {
-        assertOp.setSiteAttr(
-            AssertSiteAttr::get(assertOp.getContext(), AssertSite::ENTRY));
         auto &entryBlock = kernel.getBody().front();
         SmallVector<Operation *> chain;
         collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain);
         chain.push_back(assertOp);
-        moveOpsBeforeInTopoOrder(chain, &entryBlock, entryBlock.begin());
+        if (moveOpsBeforeInTopoOrder(chain, &entryBlock,
+                                     entryBlock.begin()))
+          assertOp.setSiteAttr(
+              AssertSiteAttr::get(assertOp.getContext(), AssertSite::ENTRY));
       } else if (target.site == AssertSite::HOIST && target.insertBefore) {
-        assertOp.setSiteAttr(
-            AssertSiteAttr::get(assertOp.getContext(), AssertSite::HOIST));
         SmallVector<Operation *> chain;
         collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain);
         chain.push_back(assertOp);
-        moveOpsBeforeInTopoOrder(chain, target.destBlock,
-                                 target.insertBefore->getIterator());
+        if (moveOpsBeforeInTopoOrder(chain, target.destBlock,
+                                     target.insertBefore->getIterator()))
+          assertOp.setSiteAttr(
+              AssertSiteAttr::get(assertOp.getContext(), AssertSite::HOIST));
       }
     }
   }
