@@ -11,6 +11,7 @@ __co__ s32 [32] scale(s32 [32] x) {
 
 // CHECK: #define __CHOREO_TARGET_CPU__ 1
 // CHECK: #include "choreo.h"
+// CHECK-NOT: choreo_cc.h
 // CHECK: #include <cstring>
 // CHECK: void __scale_impl__
 // CHECK: choreo::spanned_data

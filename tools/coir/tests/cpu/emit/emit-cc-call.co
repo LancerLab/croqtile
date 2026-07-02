@@ -1,0 +1,15 @@
+// RUN: cocc -t cc -es %s -o - | FileCheck %s
+//
+// Verify coir.call emits function call with correct pointer casts on CC.
+
+__co__ s32 [4] test_call(s32 [4] input) {
+  s32 [4] output;
+  parallel p by 2 : block {
+    parallel t by 2 : thread {
+      call my_kernel(input, output);
+    }
+  }
+  return output;
+}
+
+// CHECK: my_kernel(

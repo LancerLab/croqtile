@@ -11,4 +11,4 @@ __co__ void add(s32 [32] x) {
 // CHECK: __COCC_CC_SOURCE__
 // CHECK: #define __CHOREO_TARGET_CPU__ 1
 // CHECK: __COCC_CC_SOURCE__
-// CHECK: g++ -std=c++17 -O2 -pthread
+// CHECK: g++ -std=c++17 -O2 -pthread -fopenmp-simd

@@ -1,0 +1,32 @@
+// RUN: cocc -t cc -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// 2D element-wise operations with void kernel.
+
+__co__ void ele_add_2d(s32 [8, 32] a, s32 [8, 32] b, s32 [8, 32] c) {
+  parallel bid by 8
+    parallel tid by 32
+      c.at(bid, tid) = a.at(bid, tid) + b.at(bid, tid);
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(8, 32);
+  auto b = choreo::make_spandata<choreo::s32>(8, 32);
+  auto c = choreo::make_spandata<choreo::s32>(8, 32);
+  for (size_t i = 0; i < 8; ++i)
+    for (size_t j = 0; j < 32; ++j) {
+      a[i][j] = i * 32 + j;
+      b[i][j] = (i + 1) * (j + 1);
+    }
+
+  ele_add_2d(a.view(), b.view(), c.view());
+
+  bool pass = true;
+  for (size_t i = 0; i < 8; ++i)
+    for (size_t j = 0; j < 32; ++j)
+      if (a[i][j] + b[i][j] != c[i][j]) pass = false;
+
+  if (pass) std::cout << "PASS" << std::endl;
+  else std::cout << "FAIL" << std::endl;
+}
+
+// CHECK: PASS

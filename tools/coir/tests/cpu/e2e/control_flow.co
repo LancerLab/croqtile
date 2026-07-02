@@ -1,0 +1,32 @@
+// RUN: cocc -t cc -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Control flow: foreach loop with accumulation.
+
+__co__ s32 [64] accumulate(s32 [4, 64] input) {
+  s32[64] output;
+  parallel tid by 64 {
+    output.at(tid) = 0;
+    foreach k in 4
+      output.at(tid) = output.at(tid) + input.at(k, tid);
+  }
+  return output;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s32>(4, 64);
+  for (size_t k = 0; k < 4; ++k)
+    for (size_t i = 0; i < 64; ++i)
+      input[k][i] = (int)(k + 1);
+
+  auto res = accumulate(input.view());
+
+  bool pass = true;
+  for (size_t i = 0; i < 64; ++i) {
+    int expected = 1 + 2 + 3 + 4;
+    if (res[i] != expected) pass = false;
+  }
+  if (pass) std::cout << "PASS" << std::endl;
+  else std::cout << "FAIL" << std::endl;
+}
+
+// CHECK: PASS

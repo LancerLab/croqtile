@@ -1,0 +1,28 @@
+// RUN: cocc -t cc -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+//
+// Simple element-wise add via CoIR CC backend.
+
+__co__ s32 [64] vec_add(s32 [64] a, s32 [64] b) {
+  s32[a.span] output;
+  parallel tid by 64
+    output.at(tid) = a.at(tid) + b.at(tid);
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(64);
+  auto b = choreo::make_spandata<choreo::s32>(64);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = vec_add(a.view(), b.view());
+
+  bool pass = true;
+  for (size_t i = 0; i < 64; ++i)
+    if (a[i] + b[i] != res[i]) pass = false;
+
+  if (pass) std::cout << "PASS" << std::endl;
+  else std::cout << "FAIL" << std::endl;
+}
+
+// CHECK: PASS

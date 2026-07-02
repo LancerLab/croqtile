@@ -1,0 +1,13 @@
+// RUN: cocc -t cc -es %s | FileCheck %s
+//
+// Verify foreach emits #pragma omp simd on CPU target.
+
+__co__ void fill_const(s32 [64] x) {
+  foreach i in 64
+    x.at(i) = 42;
+}
+
+// CHECK: #pragma omp simd
+// CHECK-NEXT: for (int
+// CHECK-NOT: blockIdx
+// CHECK-NOT: threadIdx
