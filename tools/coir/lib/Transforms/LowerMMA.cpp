@@ -76,38 +76,50 @@ static int64_t inferKFromLHS(MMAExecOp op) {
 // Determine if an MxNxK config maps to CTMMA (inline PTX mma.sync) rather than
 // WMMA. CTMMA configs are m16n8kX and m8n8kX families.
 static bool isCTMMAConfig(int64_t M, int64_t N, int64_t K) {
-  if (M == 16 && N == 8 && (K == 8 || K == 16 || K == 32))
+  if (M == 16 && N == 8 && (K == 4 || K == 8 || K == 16 || K == 32 || K == 64))
     return true;
   if (M == 8 && N == 8 && (K == 4 || K == 16 || K == 32 || K == 128))
     return true;
   return false;
 }
 
-// Compute register count for accumulator (D) fragment.
-static int64_t getRegNumD(int64_t M, int64_t N) {
-  if (M == 16 && N == 8) return 4;
-  if (M == 8 && N == 8) return 2;
-  return 4;
+// Compute register counts matching CuTe atom DRegisters/ARegisters/BRegisters.
+// SM70 8x8x4 uses 4-wide quad groups (8 regs per thread for f32 accum).
+// SM80+ m16n8/m8n8 shapes use standard M*N/32 for D/C.
+
+static int64_t getRegNumD(int64_t M, int64_t N, int64_t K,
+                          mlir::Type accumType) {
+  if (M == 8 && N == 8 && K == 4) {
+    if (accumType.isF32()) return 8;
+    return 4; // f16 accum: uint32_t[4]
+  }
+  int64_t base = M * N / 32;
+  // f16/bf16 accumulators pack 2 values per uint32_t register
+  if (accumType.isF16() || accumType.isBF16())
+    return base / 2;
+  return base;
 }
 
-// Compute register count for A operand fragment.
 static int64_t getRegNumA(int64_t M, int64_t N, int64_t K) {
+  if (M == 8 && N == 8 && K == 4) return 2;
+  if (M == 16 && N == 8 && K == 4) return 2;
   if (M == 16 && N == 8 && K == 8) return 2;
   if (M == 16 && N == 8 && K == 16) return 4;
   if (M == 16 && N == 8 && K == 32) return 8;
-  if (M == 8 && N == 8 && K == 4) return 1;
-  if (M == 8 && N == 8 && K == 16) return 2;
-  return 2;
+  if (M == 8 && N == 8 && K == 16) return 1;
+  if (M == 8 && N == 8 && K == 32) return 2;
+  return M * K / 64;
 }
 
-// Compute register count for B operand fragment.
 static int64_t getRegNumB(int64_t M, int64_t N, int64_t K) {
+  if (M == 8 && N == 8 && K == 4) return 2;
+  if (M == 16 && N == 8 && K == 4) return 1;
   if (M == 16 && N == 8 && K == 8) return 1;
   if (M == 16 && N == 8 && K == 16) return 2;
   if (M == 16 && N == 8 && K == 32) return 4;
-  if (M == 8 && N == 8 && K == 4) return 1;
   if (M == 8 && N == 8 && K == 16) return 1;
-  return 1;
+  if (M == 8 && N == 8 && K == 32) return 2;
+  return N * K / 64;
 }
 
 // Map MLIR types to the CuTe type letter for the FMA atom name.
@@ -132,8 +144,10 @@ static std::string buildFMAAtomName(int64_t M, int64_t N, int64_t K,
                                     mlir::Type bType) {
   std::string prefix = getArchPrefix(M, N, K);
   std::string d_str = typeToFMALetter(accumType);
-  std::string a_str = typeToFMALetter(aType);
-  std::string b_str = typeToFMALetter(bType);
+  // f32 operands with K=4 or K=8 (and M=16, N=8) are TF32 MMA atoms
+  bool isTF32 = aType.isF32() && M == 16 && N == 8 && (K == 4 || K == 8);
+  std::string a_str = isTF32 ? "TF32" : typeToFMALetter(aType);
+  std::string b_str = isTF32 ? "TF32" : typeToFMALetter(bType);
   std::string c_str = d_str;
 
   return "cute::" + prefix + "_" + std::to_string(M) + "x" +
@@ -187,7 +201,7 @@ struct LowerMMAExec : public OpRewritePattern<MMAExecOp> {
         op.setKDimAttr(rewriter.getI64IntegerAttr(K));
         op.setRegNumAAttr(rewriter.getI64IntegerAttr(getRegNumA(M, N, K)));
         op.setRegNumBAttr(rewriter.getI64IntegerAttr(getRegNumB(M, N, K)));
-        op.setRegNumDAttr(rewriter.getI64IntegerAttr(getRegNumD(M, N)));
+        op.setRegNumDAttr(rewriter.getI64IntegerAttr(getRegNumD(M, N, K, accumType)));
         // Also store the FMA CuTe atom for emission.
         op->setAttr("fma_atom", rewriter.getStringAttr(fmaAtom));
       }
