@@ -622,6 +622,37 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
   auto tensorTy = cast<TensorType>(op.getResult().getType());
   std::string name = getName(op.getResult());
 
+  // Memory reuse: buffer is aliased into an SPM at a fixed offset.
+  if (op.getReuseOffsetAttr()) {
+    if (lastSpmName.empty()) {
+      if (auto spmSizeAttr = op->getAttrOfType<mlir::IntegerAttr>("spm_size")) {
+        int64_t spmBytes = spmSizeAttr.getInt();
+        std::string qualifier = getAllocQualifier(tensorTy);
+        lastSpmName = "__spm_" + std::to_string(nextId++);
+        os() << getIndent() << qualifier << "alignas(16) unsigned char "
+             << lastSpmName << "[" << spmBytes << "];\n";
+      }
+    }
+    int64_t offset = op.getReuseOffset().value_or(0);
+    std::string eType = emitElementType(tensorTy.getElementType());
+    os() << getIndent() << eType << "* " << name << " = (" << eType
+         << "*)((unsigned char*)" << lastSpmName << " + " << offset << ");\n";
+    return;
+  }
+
+  // SPM backing array (set by spm attr from a kept alloc).
+  if (op->hasAttr("spm")) {
+    int64_t totalBytes = 1;
+    for (auto d : tensorTy.getShape()) totalBytes *= d;
+    int64_t elemBits = tensorTy.getElementType().getIntOrFloatBitWidth();
+    totalBytes *= (elemBits / 8);
+    std::string qualifier = getAllocQualifier(tensorTy);
+    os() << getIndent() << qualifier << "alignas(16) unsigned char "
+         << name << "[" << totalBytes << "];\n";
+    lastSpmName = name;
+    return;
+  }
+
   // Dynamic shared memory: emit extern __shared__ with pointer arithmetic.
   if (tensorTy.hasDynamicShape() &&
       tensorTy.getMemorySpace() == 1 /*shared*/) {

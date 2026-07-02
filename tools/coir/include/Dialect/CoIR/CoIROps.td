@@ -251,7 +251,9 @@ def TensorAllocOp : CoIR_Op<"tensor.alloc", [NoMemoryEffect]> {
       %2 = coir.tensor.alloc init -5 : i32 : !coir.tensor<32x4xi32, local>
   }];
   let arguments = (ins Variadic<Index>:$dynamicDims,
-                       OptionalAttr<TypedAttrInterface>:$init);
+                       OptionalAttr<TypedAttrInterface>:$init,
+                       OptionalAttr<StrAttr>:$reuse_spm,
+                       OptionalAttr<I64Attr>:$reuse_offset);
   let results = (outs CoIR_TensorTypeC:$result);
 
   let hasCustomAssemblyFormat = 1;
